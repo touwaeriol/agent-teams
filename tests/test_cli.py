@@ -10,7 +10,7 @@ import httpx2 as httpx
 import pytest
 from anthropic import AuthenticationError
 
-from agent_teams import Agent, Leader, ScriptedLLM, Sequential, cli
+from agent_teams import Agent, Leader, LocalNode, ScriptedLLM, Sequential, cli
 from agent_teams.errors import describe_error
 from agent_teams.llm import call, say
 from agent_teams.runnable import Runnable
@@ -166,3 +166,24 @@ def test_auth_errors_explain_how_to_sign_in() -> None:
     response = httpx.Response(401, request=request)
     error = AuthenticationError("invalid x-api-key", response=response, body=None)
     assert "ant auth login" in describe_error(error)
+
+
+def test_nodes_command_reports_each_node(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    good, bad = LocalNode("good", str(tmp_path)), LocalNode("bad", str(tmp_path / "missing"))
+    monkeypatch.setattr(cli, "load_nodes", lambda _path: [good, bad])
+
+    assert cli.main(["nodes", "team.yaml"]) == 1
+
+    out = capsys.readouterr().out.splitlines()
+    assert out[1].startswith("bad: FAILED")
+    assert out[0].startswith("good: ")
+
+
+def test_nodes_command_without_nodes(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli, "load_nodes", lambda _path: [])
+    assert cli.main(["nodes", "team.yaml"]) == 0
+    assert capsys.readouterr().out.strip() == "no nodes defined"

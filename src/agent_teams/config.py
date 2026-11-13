@@ -10,18 +10,22 @@ Example::
         - {name: researcher, instructions: "Collect facts."}
         - {name: writer, instructions: "Write the article."}
 
-Leader shorthand: list the nodes and pick one agent as the leader; it gets a
-non-blocking task board over all the other nodes::
+Leader shorthand: list the employees and pick one agent as the leader; it gets
+a non-blocking task board over all the other employees. ``nodes`` are machines
+that ``claude_code`` employees run on (over SSH, or the server itself)::
 
-    leader: lead
     nodes:
+      - {name: build-1, host: 10.0.0.11, user: dev, workdir: /srv/app}
+      - {name: here, local: true, workdir: /srv/app}
+    leader: lead
+    employees:
       - {name: lead, instructions: "Plan the work and delegate it."}
       - {name: researcher, description: "Collects facts."}
-      - {name: writer, description: "Writes drafts."}
+      - {name: backend, type: claude_code, node: build-1, description: "Backend engineer."}
 
-Node ``type`` is one of ``agent`` (default), ``leader``, ``sequential``,
-``parallel``, ``round_robin`` and ``supervisor``. Tools are referenced as
-``"package.module:attribute"`` (a :class:`Tool` or a plain function).
+Member ``type`` is one of ``agent`` (default), ``claude_code``, ``leader``,
+``sequential``, ``parallel``, ``round_robin`` and ``supervisor``. Tools are
+referenced as ``"package.module:attribute"`` (a :class:`Tool` or a function).
 """
 
 from __future__ import annotations
@@ -44,10 +48,12 @@ from pydantic import (
 )
 
 from .agent import Agent
+from .claude_code import ClaudeCodeWorker
 from .errors import ConfigError
 from .leader import LEADER_INSTRUCTIONS, Leader
 from .llm.anthropic import AnthropicLLM
 from .llm.base import LLM
+from .nodes import LocalNode, Node, SSHNode
 from .runnable import Runnable
 from .teams import SUPERVISOR_INSTRUCTIONS, Parallel, RoundRobin, Sequential, supervisor
 from .tools import Tool, tool
@@ -62,10 +68,21 @@ def anthropic_factory(options: Mapping[str, Any]) -> LLM:
 class Builder:
     """Turns specs into runnables; shares one LLM instance per distinct config."""
 
-    def __init__(self, llm_defaults: Mapping[str, Any], llm_factory: LLMFactory) -> None:
+    def __init__(
+        self,
+        llm_defaults: Mapping[str, Any],
+        llm_factory: LLMFactory,
+        nodes: Mapping[str, Node] | None = None,
+    ) -> None:
         self._defaults = dict(llm_defaults)
         self._factory = llm_factory
         self._llms: dict[str, LLM] = {}
+        self._nodes = dict(nodes or {})
+
+    def node(self, name: str) -> Node:
+        if name not in self._nodes:
+            raise ConfigError(f"unknown node '{name}'; defined nodes: {list(self._nodes)}")
+        return self._nodes[name]
 
     def llm(self, overrides: Mapping[str, Any] | None) -> LLM:
         options = {**self._defaults, **(overrides or {})}
@@ -85,7 +102,7 @@ class Builder:
         return [load_tool(ref) for ref in refs]
 
 
-class _Node(BaseModel):
+class _Member(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
@@ -95,14 +112,14 @@ class _Node(BaseModel):
         raise NotImplementedError
 
 
-class _LLMNode(_Node):
+class _LLMMember(_Member):
     instructions: str = ""
     tools: list[str] = Field(default_factory=list)
     llm: dict[str, Any] | None = None
     max_steps: int = Field(20, ge=1)
 
 
-class AgentSpec(_LLMNode):
+class AgentSpec(_LLMMember):
     type: Literal["agent"] = "agent"
 
     def build(self, builder: Builder) -> Runnable:
@@ -116,10 +133,31 @@ class AgentSpec(_LLMNode):
         )
 
 
-class SupervisorSpec(_LLMNode):
+class ClaudeCodeSpec(_Member):
+    type: Literal["claude_code"]
+    node: str
+    instructions: str = ""
+    workdir: str = ""
+    model: str = ""
+    permission_mode: Literal[
+        "acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "manual", "plan"
+    ] = "acceptEdits"
+    allowed_tools: list[str] = Field(default_factory=list)
+    disallowed_tools: list[str] = Field(default_factory=list)
+    max_turns: int | None = Field(None, ge=1)
+    claude_command: str = "claude"
+    extra_args: list[str] = Field(default_factory=list)
+
+    def build(self, builder: Builder) -> Runnable:
+        return ClaudeCodeWorker(
+            **self.model_dump(exclude={"type", "node"}), node=builder.node(self.node)
+        )
+
+
+class SupervisorSpec(_LLMMember):
     type: Literal["supervisor"]
     instructions: str = SUPERVISOR_INSTRUCTIONS
-    members: list[NodeSpec] = Field(min_length=1)
+    members: list[MemberSpec] = Field(min_length=1)
 
     def build(self, builder: Builder) -> Runnable:
         return supervisor(
@@ -133,10 +171,10 @@ class SupervisorSpec(_LLMNode):
         )
 
 
-class LeaderSpec(_LLMNode):
+class LeaderSpec(_LLMMember):
     type: Literal["leader"]
     instructions: str = LEADER_INSTRUCTIONS
-    members: list[NodeSpec] = Field(min_length=1)
+    members: list[MemberSpec] = Field(min_length=1)
     max_turns: int = Field(50, ge=1)
 
     def build(self, builder: Builder) -> Runnable:
@@ -152,89 +190,138 @@ class LeaderSpec(_LLMNode):
         )
 
 
-class _TeamNode(_Node):
-    members: list[NodeSpec] = Field(min_length=1)
+class _TeamMember(_Member):
+    members: list[MemberSpec] = Field(min_length=1)
 
     def team_fields(self, builder: Builder) -> dict[str, Any]:
         members = [m.build(builder) for m in self.members]
         return {"name": self.name, "description": self.description, "members": members}
 
 
-class SequentialSpec(_TeamNode):
+class SequentialSpec(_TeamMember):
     type: Literal["sequential"]
 
     def build(self, builder: Builder) -> Runnable:
         return Sequential(**self.team_fields(builder))
 
 
-class ParallelSpec(_TeamNode):
+class ParallelSpec(_TeamMember):
     type: Literal["parallel"]
-    aggregator: NodeSpec | None = None
+    aggregator: MemberSpec | None = None
 
     def build(self, builder: Builder) -> Runnable:
         aggregator = self.aggregator.build(builder) if self.aggregator else None
         return Parallel(**self.team_fields(builder), aggregator=aggregator)
 
 
-class RoundRobinSpec(_TeamNode):
+class RoundRobinSpec(_TeamMember):
     type: Literal["round_robin"]
     rounds: int = Field(2, ge=1)
-    finalizer: NodeSpec | None = None
+    finalizer: MemberSpec | None = None
 
     def build(self, builder: Builder) -> Runnable:
         finalizer = self.finalizer.build(builder) if self.finalizer else None
         return RoundRobin(**self.team_fields(builder), rounds=self.rounds, finalizer=finalizer)
 
 
-def _node_type(value: Any) -> str:
+def _member_type(value: Any) -> str:
     if isinstance(value, Mapping):
         return str(value.get("type", "agent"))
     return str(getattr(value, "type", "agent"))
 
 
-NodeSpec = Annotated[
+MemberSpec = Annotated[
     Annotated[AgentSpec, Tag("agent")]
     | Annotated[SequentialSpec, Tag("sequential")]
     | Annotated[ParallelSpec, Tag("parallel")]
     | Annotated[RoundRobinSpec, Tag("round_robin")]
     | Annotated[SupervisorSpec, Tag("supervisor")]
-    | Annotated[LeaderSpec, Tag("leader")],
-    Discriminator(_node_type),
+    | Annotated[LeaderSpec, Tag("leader")]
+    | Annotated[ClaudeCodeSpec, Tag("claude_code")],
+    Discriminator(_member_type),
 ]
+
+
+class NodeConfig(BaseModel):
+    """A machine: reached over SSH, or ``local: true`` for the server itself."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    local: bool = False
+    host: str = ""
+    user: str = ""
+    port: int | None = None
+    identity_file: str = ""
+    workdir: str = ""
+    ssh_options: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _reachable(self) -> NodeConfig:
+        if self.local == bool(self.host):
+            raise ValueError(f"node '{self.name}' needs either 'host' or 'local: true'")
+        return self
+
+    def build(self) -> Node:
+        if self.local:
+            return LocalNode(self.name, self.workdir)
+        return SSHNode(
+            self.name,
+            self.host,
+            self.user,
+            self.port,
+            self.identity_file,
+            self.workdir,
+            tuple(self.ssh_options),
+        )
 
 
 class TeamFile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     llm: dict[str, Any] = Field(default_factory=dict)
-    team: NodeSpec
+    nodes: list[NodeConfig] = Field(default_factory=list)
+    team: MemberSpec
+
+    @model_validator(mode="after")
+    def _unique_nodes(self) -> TeamFile:
+        names = [n.name for n in self.nodes]
+        if len(names) != len(set(names)):
+            raise ValueError(f"node names must be unique: {names}")
+        return self
+
+    def build_nodes(self) -> dict[str, Node]:
+        return {n.name: n.build() for n in self.nodes}
 
     @model_validator(mode="before")
     @classmethod
     def _expand_leader(cls, data: Any) -> Any:
         if not isinstance(data, Mapping) or "leader" not in data:
             return data
-        rest = {k: v for k, v in data.items() if k not in ("leader", "nodes")}
+        rest = {k: v for k, v in data.items() if k not in ("leader", "employees")}
         if "team" in rest:
-            raise ValueError("use either 'team' or 'leader' + 'nodes', not both")
-        return {**rest, "team": _promote_leader(str(data["leader"]), list(data.get("nodes") or []))}
+            raise ValueError("use either 'team' or 'leader' + 'employees', not both")
+        employees = list(data.get("employees") or [])
+        return {**rest, "team": _promote_leader(str(data["leader"]), employees)}
 
 
-def _promote_leader(leader: str, nodes: list[Any]) -> dict[str, Any]:
-    """Turn the chosen agent node into a leader over every other node."""
-    chosen = next((n for n in nodes if isinstance(n, Mapping) and n.get("name") == leader), None)
+def _promote_leader(leader: str, employees: list[Any]) -> dict[str, Any]:
+    """Turn the chosen agent into a leader over every other employee."""
+    chosen = next(
+        (e for e in employees if isinstance(e, Mapping) and e.get("name") == leader), None
+    )
     if chosen is None:
-        raise ValueError(f"leader '{leader}' is not one of the nodes")
+        raise ValueError(f"leader '{leader}' is not one of the employees")
     if chosen.get("type", "agent") != "agent":
-        raise ValueError(f"leader '{leader}' must be an agent node")
-    members = [n for n in nodes if n is not chosen]
+        raise ValueError(f"leader '{leader}' must be an agent")
+    members = [e for e in employees if e is not chosen]
     return {**chosen, "type": "leader", "members": members}
 
 
 for _model in (
     LeaderSpec,
     SupervisorSpec,
-    _TeamNode,
+    _TeamMember,
     SequentialSpec,
     ParallelSpec,
     RoundRobinSpec,
@@ -243,21 +330,34 @@ for _model in (
     _model.model_rebuild()
 
 
-def build_team(data: Mapping[str, Any], llm_factory: LLMFactory = anthropic_factory) -> Runnable:
-    """Build a runnable from an already-parsed definition."""
+def parse_team(data: Mapping[str, Any]) -> TeamFile:
     try:
-        spec = TeamFile.model_validate(data)
+        return TeamFile.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(str(exc)) from exc
-    return spec.team.build(Builder(spec.llm, llm_factory))
+
+
+def build_team(data: Mapping[str, Any], llm_factory: LLMFactory = anthropic_factory) -> Runnable:
+    """Build a runnable from an already-parsed definition."""
+    spec = parse_team(data)
+    return spec.team.build(Builder(spec.llm, llm_factory, spec.build_nodes()))
+
+
+def read_team_file(path: str | Path) -> Mapping[str, Any]:
+    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, Mapping):
+        raise ConfigError(f"{path}: expected a mapping at the top level")
+    return data
 
 
 def load_team(path: str | Path, llm_factory: LLMFactory = anthropic_factory) -> Runnable:
     """Build a runnable from a YAML or JSON file."""
-    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(data, Mapping):
-        raise ConfigError(f"{path}: expected a mapping at the top level")
-    return build_team(data, llm_factory)
+    return build_team(read_team_file(path), llm_factory)
+
+
+def load_nodes(path: str | Path) -> list[Node]:
+    """The machines defined in a team file."""
+    return list(parse_team(read_team_file(path)).build_nodes().values())
 
 
 def load_tool(ref: str) -> Tool:

@@ -1,6 +1,7 @@
 """Composable multi-agent teams built on the Claude API."""
 
 from .agent import Agent, Session
+from .claude_code import ClaudeCodeWorker
 from .config import build_team, load_team
 from .context import RunContext
 from .conversation import Conversation
@@ -16,10 +17,12 @@ from .hooks import (
     TaskStarted,
     ToolFinished,
     ToolStarted,
+    WorkerProgress,
     trace,
 )
 from .leader import Leader
 from .llm import LLM, AnthropicLLM, ScriptedLLM
+from .nodes import LocalNode, Node, SSHNode
 from .runnable import Runnable
 from .tasks import TaskBoard
 from .teams import Parallel, RoundRobin, Sequential, Team, supervisor
@@ -31,6 +34,7 @@ __all__ = [
     "Agent",
     "AgentTeamsError",
     "AnthropicLLM",
+    "ClaudeCodeWorker",
     "ConfigError",
     "Conversation",
     "Event",
@@ -38,7 +42,9 @@ __all__ = [
     "LLMError",
     "LLMReplied",
     "Leader",
+    "LocalNode",
     "MaxStepsExceeded",
+    "Node",
     "Parallel",
     "Reply",
     "Result",
@@ -47,6 +53,7 @@ __all__ = [
     "RunFinished",
     "RunStarted",
     "Runnable",
+    "SSHNode",
     "ScriptedLLM",
     "Sequential",
     "Session",
@@ -63,6 +70,7 @@ __all__ = [
     "ToolSpec",
     "ToolStarted",
     "Toolkit",
+    "WorkerProgress",
     "as_tool",
     "build_team",
     "load_team",

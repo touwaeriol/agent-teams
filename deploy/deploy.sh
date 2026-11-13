@@ -34,7 +34,16 @@ if [ ${#missing[@]} -gt 0 ]; then
   exit 1
 fi
 
-docker compose up -d --build
+# SSH identity used to reach the nodes (claude_code employees).
+if [ ! -f ssh/id_ed25519 ]; then
+  mkdir -p ssh && chmod 700 ssh
+  ssh-keygen -q -t ed25519 -N "" -C "agent-teams@$(hostname)" -f ssh/id_ed25519
+fi
+
+docker compose build
+# The container runs as uid 1000; make the key readable by it without sudo.
+docker compose run --rm --no-deps --user root --entrypoint chown agent-teams -R 1000:1000 /home/app/.ssh
+docker compose up -d
 
 port="$(env_value PORT)"
 for _ in $(seq 1 30); do
@@ -43,6 +52,11 @@ for _ in $(seq 1 30); do
     echo
     echo "部署完成：http://${host:-<服务器IP>}:$port"
     echo "访问令牌：$(env_value AGENT_TEAMS_TOKEN)"
+    echo
+    echo "节点 SSH 公钥（加到每个节点的 ~/.ssh/authorized_keys）："
+    cat ssh/id_ed25519.pub
+    echo
+    echo "检查节点：docker compose exec agent-teams agent-teams nodes /app/team.yaml"
     exit 0
   fi
   sleep 2

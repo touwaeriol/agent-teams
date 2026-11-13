@@ -1,11 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 import pytest
 
-from agent_teams import ConfigError, Leader, MaxStepsExceeded, ScriptedLLM
+from agent_teams import (
+    ClaudeCodeWorker,
+    ConfigError,
+    Leader,
+    LocalNode,
+    MaxStepsExceeded,
+    ScriptedLLM,
+)
 from agent_teams.llm import call, say
 from agent_teams.types import AssistantTurn, Reply, ToolCall, ToolTurn, Turn, UserTurn
 
@@ -102,3 +112,32 @@ async def test_run_gives_up_after_max_turns() -> None:
 def test_leader_needs_members() -> None:
     with pytest.raises(ConfigError):
         Leader("lead", ScriptedLLM([]), [])
+
+
+async def test_leader_dispatches_to_claude_code_on_two_nodes(tmp_path: Path) -> None:
+    fake = f"{sys.executable} {Path(__file__).with_name('fake_claude.py')}"
+    api_dir, web_dir = tmp_path / "api", tmp_path / "web"
+    api_dir.mkdir()
+    web_dir.mkdir()
+    backend = ClaudeCodeWorker("backend", LocalNode("node-a", str(api_dir)), claude_command=fake)
+    frontend = ClaudeCodeWorker("frontend", LocalNode("node-b", str(web_dir)), claude_command=fake)
+
+    def lead(_system: str, history: Sequence[Turn]) -> Reply:
+        last = history[-1]
+        if isinstance(last, ToolTurn):
+            return say("both started")
+        if last_user_text(history).startswith("[Task"):
+            return say("report received")
+        calls = (
+            ToolCall("a", "assign_task", {"assignee": "backend", "instruction": "add endpoint"}),
+            ToolCall("b", "assign_task", {"assignee": "frontend", "instruction": "add page"}),
+        )
+        return Reply(AssistantTurn("", calls), stop="tool_use")
+
+    result = await Leader("lead", ScriptedLLM(lead), [backend, frontend]).run("ship the feature")
+
+    assert result.output == "report received"
+    outputs = {child.name: json.loads(child.output) for child in result.children}
+    assert outputs["t1:backend"]["cwd"] == str(api_dir)
+    assert outputs["t2:frontend"]["cwd"] == str(web_dir)
+    assert outputs["t2:frontend"]["argv"][:2] == ["-p", "add page"]

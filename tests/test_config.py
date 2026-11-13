@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from agent_teams import Agent, ConfigError, Leader, Parallel, RoundRobin, ScriptedLLM, Sequential
-from agent_teams.config import build_team, load_team, load_tool
+from agent_teams.claude_code import ClaudeCodeWorker
+from agent_teams.config import build_team, load_nodes, load_team, load_tool
 from agent_teams.llm.base import LLM
+from agent_teams.nodes import LocalNode, SSHNode
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
@@ -123,7 +127,7 @@ def test_leader_shorthand_makes_a_leader_over_other_nodes() -> None:
     team = build_team(
         {
             "leader": "lead",
-            "nodes": [
+            "employees": [
                 {"name": "researcher", "description": "Collects facts."},
                 {"name": "lead", "instructions": "Run the team."},
                 {"type": "parallel", "name": "reviewers", "members": [{"name": "r1"}]},
@@ -140,7 +144,7 @@ def test_leader_shorthand_makes_a_leader_over_other_nodes() -> None:
 
 def test_leader_without_instructions_gets_default_lead_prompt() -> None:
     team = build_team(
-        {"leader": "lead", "nodes": [{"name": "lead"}, {"name": "worker"}]},
+        {"leader": "lead", "employees": [{"name": "lead"}, {"name": "worker"}]},
         llm_factory=RecordingFactory(),
     )
     assert isinstance(team, Leader)
@@ -150,17 +154,20 @@ def test_leader_without_instructions_gets_default_lead_prompt() -> None:
 @pytest.mark.parametrize(
     ("data", "fragment"),
     [
-        ({"leader": "boss", "nodes": [{"name": "a"}, {"name": "b"}]}, "not one of the nodes"),
+        (
+            {"leader": "boss", "employees": [{"name": "a"}, {"name": "b"}]},
+            "not one of the employees",
+        ),
         (
             {
                 "leader": "t",
-                "nodes": [{"type": "sequential", "name": "t", "members": [{"name": "a"}]}],
+                "employees": [{"type": "sequential", "name": "t", "members": [{"name": "a"}]}],
             },
             "must be an agent",
         ),
-        ({"leader": "a", "nodes": [{"name": "a"}]}, "members"),
+        ({"leader": "a", "employees": [{"name": "a"}]}, "members"),
         (
-            {"leader": "a", "nodes": [{"name": "a"}, {"name": "b"}], "team": {"name": "x"}},
+            {"leader": "a", "employees": [{"name": "a"}, {"name": "b"}], "team": {"name": "x"}},
             "not both",
         ),
     ],
@@ -168,3 +175,83 @@ def test_leader_without_instructions_gets_default_lead_prompt() -> None:
 def test_invalid_leader_definitions(data: dict[str, Any], fragment: str) -> None:
     with pytest.raises(ConfigError, match=fragment):
         build_team(data, llm_factory=RecordingFactory())
+
+
+FAKE_CLAUDE = f"{sys.executable} {Path(__file__).with_name('fake_claude.py')}"
+
+
+def multi_node_team(tmp_path: Path) -> dict[str, Any]:
+    return {
+        "nodes": [
+            {"name": "build-1", "host": "10.0.0.11", "user": "dev", "workdir": "/srv/app"},
+            {"name": "here", "local": True, "workdir": str(tmp_path)},
+        ],
+        "leader": "lead",
+        "employees": [
+            {"name": "lead"},
+            {
+                "name": "backend",
+                "type": "claude_code",
+                "node": "build-1",
+                "description": "Backend engineer.",
+                "allowed_tools": ["Bash(pytest *)"],
+                "permission_mode": "dontAsk",
+            },
+            {
+                "name": "frontend",
+                "type": "claude_code",
+                "node": "here",
+                "claude_command": FAKE_CLAUDE,
+            },
+        ],
+    }
+
+
+def test_claude_code_employees_run_on_their_nodes(tmp_path: Path) -> None:
+    team = build_team(multi_node_team(tmp_path), llm_factory=RecordingFactory())
+
+    assert isinstance(team, Leader)
+    backend, frontend = team.members
+    assert isinstance(backend, ClaudeCodeWorker)
+    assert isinstance(backend.node, SSHNode)
+    assert backend.node.destination == "dev@10.0.0.11"
+    assert backend.permission_mode == "dontAsk"
+    assert backend.description == "Backend engineer."
+    assert isinstance(frontend, ClaudeCodeWorker)
+    assert isinstance(frontend.node, LocalNode)
+    assert frontend.description == "Claude Code on node here"
+
+
+@pytest.mark.parametrize(
+    ("change", "fragment"),
+    [
+        ({"node": "nowhere"}, "unknown node 'nowhere'"),
+        ({"permission_mode": "yolo"}, "permission_mode"),
+    ],
+)
+def test_invalid_claude_code_employees(
+    tmp_path: Path, change: dict[str, Any], fragment: str
+) -> None:
+    data = multi_node_team(tmp_path)
+    data["employees"][1].update(change)
+    with pytest.raises(ConfigError, match=fragment):
+        build_team(data, llm_factory=RecordingFactory())
+
+
+@pytest.mark.parametrize(
+    ("nodes", "fragment"),
+    [
+        ([{"name": "x"}], "either 'host' or 'local: true'"),
+        ([{"name": "x", "host": "h", "local": True}], "either 'host' or 'local: true'"),
+        ([{"name": "x", "local": True}, {"name": "x", "local": True}], "unique"),
+    ],
+)
+def test_invalid_nodes(nodes: list[dict[str, Any]], fragment: str) -> None:
+    with pytest.raises(ConfigError, match=fragment):
+        build_team({"nodes": nodes, "team": {"name": "a"}}, llm_factory=RecordingFactory())
+
+
+def test_load_nodes(tmp_path: Path) -> None:
+    path = tmp_path / "team.yaml"
+    path.write_text(yaml.safe_dump(multi_node_team(tmp_path)), encoding="utf-8")
+    assert [n.name for n in load_nodes(path)] == ["build-1", "here"]

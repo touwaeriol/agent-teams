@@ -21,11 +21,12 @@ python examples/offline_leader.py   # non-blocking leader demo
 - `AnthropicLLM` streams via `client.beta.messages.stream` with adaptive thinking, effort, and server-side refusal fallbacks; `_echo_blocks` drops pre-fallback non-text blocks.
 - `Leader` (leader.py) is the non-blocking lead: its `TaskBoard` (tasks.py) runs members as asyncio tasks; `assign_task` returns at once, and every outcome (done/failed/cancelled, incl. cancelled-before-start) is settled in a done-callback that notifies listeners synchronously.
 - `Conversation` (conversation.py) is an inbox over one `Session`: the user and task reports `post`, a single consumer calls `reply`. `agent-teams chat` reads input and prints replies concurrently; EOF drains, `/exit` cancels.
-- Config shorthand `leader` + `nodes` (config.py `_promote_leader`) turns the chosen agent node into a `leader` node over the other nodes.
+- Config: `nodes:` are machines (`NodeConfig` -> `SSHNode`/`LocalNode` in nodes.py, agentless SSH via the system `ssh`); `leader` + `employees` (config.py `_promote_leader`) turns the chosen agent into a `leader` over the other employees.
+- `ClaudeCodeWorker` (claude_code.py) is an employee that runs `claude -p ... --output-format stream-json --verbose` on its node; progress lines become `WorkerProgress` events, the final `result` line is the output (error results win over the exit status). `agent-teams nodes` probes every node.
 - `Agent.session()` returns a `Session` (multi-turn, rolls back a failed message). `supervisor()` is the blocking alternative to `Leader`.
 - `server/` (optional `[server]` extra): `Hub` owns one `Conversation` + responder task per chat and mirrors messages/tasks/history to a `Store` (`PostgresStore`, `MemoryStore`) and events to a `Broker` (`ValkeyBroker`, `MemoryBroker`). FastAPI app in app.py: Bearer token or HttpOnly session cookie; SSE for live events. Deploy: `docker-compose.yml` (host network, uses the host's PG/Valkey) + `deploy/deploy.sh`.
 - Tools: `@tool` builds a pydantic model from the signature; `RunContext`-annotated params are injected. `as_tool` wraps any `Runnable` (used by `supervisor`). Tool failures become `is_error` results, never exceptions.
-- Config: pydantic specs in config.py, each with `build(builder)`; add a node type by adding a spec class and a `Tag` entry in `NodeSpec`.
+- Config: pydantic specs in config.py, each with `build(builder)`; add a member type by adding a spec class and a `Tag` entry in `MemberSpec`.
 
 ## Conventions
 

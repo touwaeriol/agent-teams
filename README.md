@@ -27,7 +27,7 @@ pip install -e ".[dev]"        # 只用命令行：pip install -e .；网页服�
 
 ## 和主员工对话（不阻塞）
 
-列出所有节点，用 `leader` 选一个当负责人。你只和 leader 对话，**整个过程不阻塞**：
+列出所有员工，用 `leader` 选一个当负责人。你只和 leader 对话，**整个过程不阻塞**：
 
 1. leader 把需求拆成任务派给员工（`assign_task`），派完**立刻**回复你，员工在后台干活；
 2. 员工干活期间你可以继续跟 leader 聊、追加需求、问进度；
@@ -38,7 +38,7 @@ pip install -e ".[dev]"        # 只用命令行：pip install -e .；网页服�
 # examples/company.yaml
 llm: {model: claude-opus-5-5}
 leader: lead
-nodes:
+employees:
   - {name: lead, instructions: "你是团队负责人……"}
   - {name: researcher, description: "调研员", instructions: "……"}
   - {name: writer, description: "写手", instructions: "……"}
@@ -77,6 +77,42 @@ print(conversation.status())  # 任务板
 ```
 
 一次性运行（`agent-teams run` 或 `await leader.run(task)`）也走同样的流程：等到所有任务完成、leader 给出最终汇报后才返回。
+
+## 多节点：在多台机器的 Claude Code 上派员工
+
+控制台（agent-teams 服务）通过 **SSH** 在各节点上执行 `claude -p`，节点上**不用装任何守护进程**，只需要：
+
+1. 开着 sshd，并把控制台的公钥加进 `~/.ssh/authorized_keys`（`deploy/deploy.sh` 会生成密钥并打印公钥）；
+2. 装好 Claude Code，并完成认证：设置 `ANTHROPIC_API_KEY`，或者用 `claude setup-token` 生成 `CLAUDE_CODE_OAUTH_TOKEN`（订阅账号）。注意 `-p` 模式下只要设置了 `ANTHROPIC_API_KEY`，就会优先使用它；
+3. 准备好工作目录（通常是代码仓库）。
+
+```yaml
+# examples/multi_node.yaml（节选）
+nodes:                                  # 机器
+  - {name: build-1, host: 10.0.0.11, user: dev, workdir: /srv/app}
+  - {name: build-2, host: 10.0.0.12, user: dev, port: 2222, workdir: /srv/app}
+leader: lead
+employees:                              # 员工
+  - {name: lead, instructions: "你是技术负责人……"}
+  - name: backend
+    type: claude_code                   # 在节点上运行的 Claude Code 员工
+    node: build-1
+    description: 后端工程师（build-1）
+    allowed_tools: ["Bash(git *)", "Bash(pytest *)"]
+  - {name: frontend, type: claude_code, node: build-2, description: 前端工程师（build-2）}
+```
+
+```bash
+agent-teams nodes examples/multi_node.yaml    # 逐个检查：SSH 能否连上、claude 是否可用
+agent-teams chat  examples/multi_node.yaml -v # -v 能看到每个员工在节点上调用了哪些工具
+```
+
+- 每个任务是在节点的工作目录里执行一次 `claude -p "<任务>" --output-format stream-json`。员工的工具调用会实时显示在活动日志里，最终结果作为任务报告交回 leader。
+- 权限：`permission_mode` 默认 `acceptEdits`，即可以改文件，但命令要在 `allowed_tools` 里明确允许（例如 `Bash(git *)`）。`plan` 适合只读审查。只有在隔离环境里才考虑 `bypassPermissions`。
+- 其他可选项：`model`、`max_turns`、`workdir`（覆盖节点目录）、`claude_command`（claude 不在 PATH 时写全路径）、`extra_args`。
+- 同一节点、同一目录上并行的员工可能互相覆盖改动。需要并行时，给他们不同的 `workdir`（比如不同的 git worktree）。
+- 取消任务会断开 SSH；远端的 claude 进程会在下次输出时退出，不一定立刻停止。
+- `local: true` 的节点在服务所在环境里直接执行。Docker 部署时，这个环境是容器（容器里没装 Claude Code），所以要用服务器本机当节点的话，配一个指向 `127.0.0.1` 的 SSH 节点即可。
 
 ## 网页版与部署（Docker Compose）
 
@@ -178,7 +214,7 @@ python examples/offline_leader.py   # 不阻塞的 leader
 
 `handoff` / `merge` 都是普通函数，可以直接替换以定制信息传递方式，不需要继承。
 
-YAML 中的节点 `type` 可以是 `agent`（默认）、`leader`、`sequential`、`parallel`、`round_robin`、`supervisor`。工具用 `"module:attribute"` 引用，可以是普通函数，也可以是 `Tool`。每个节点都可以用 `llm:` 覆盖全局模型配置。
+YAML 中成员的 `type` 可以是 `agent`（默认）、`claude_code`、`leader`、`sequential`、`parallel`、`round_robin`、`supervisor`。工具用 `"module:attribute"` 引用，可以是普通函数，也可以是 `Tool`。每个节点都可以用 `llm:` 覆盖全局模型配置。
 
 ## 扩展点
 
@@ -209,6 +245,8 @@ src/agent_teams/
   agent.py      Agent：工具调用循环
   teams.py      Sequential / Parallel / RoundRobin / supervisor
   leader.py     Leader：负责人 + 任务板
+  nodes.py      节点：SSHNode / LocalNode，执行命令并逐行回传输出
+  claude_code.py ClaudeCodeWorker：在节点上运行 claude -p 的员工
   tasks.py      TaskBoard：不阻塞派发、依赖、取消、完成通知
   conversation.py  Conversation：消息队列，用户和任务报告按序交给 leader
   server/       网页服务：FastAPI、PostgreSQL 存储、Valkey 推送、静态页面

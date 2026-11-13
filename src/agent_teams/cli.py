@@ -16,12 +16,13 @@ from collections.abc import Callable, Sequence
 import anthropic
 
 from .agent import Agent
-from .config import load_team
+from .config import load_nodes, load_team
 from .context import RunContext
 from .conversation import Conversation
 from .errors import AgentTeamsError, ConfigError, describe_error
 from .hooks import Hooks, trace
 from .leader import Leader
+from .nodes import Node, probe
 
 EXIT_COMMANDS = frozenset({"/exit", "/quit"})
 
@@ -31,6 +32,9 @@ Writer = Callable[[str], None]
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    # Like uvicorn: tool references ("module:attr") resolve from the current directory.
+    if "" not in sys.path and os.getcwd() not in sys.path:
+        sys.path.insert(0, os.getcwd())
     try:
         return int(args.handler(args))
     except (AgentTeamsError, anthropic.AnthropicError) as exc:
@@ -121,6 +125,10 @@ def _parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
     serve.set_defaults(handler=_serve)
 
+    nodes = commands.add_parser("nodes", help="check every node: SSH works and claude is installed")
+    nodes.add_argument("team")
+    nodes.set_defaults(handler=_nodes)
+
     check = commands.add_parser("check", help="validate a team definition")
     check.add_argument("team")
     check.set_defaults(handler=_check)
@@ -157,6 +165,28 @@ def _serve(args: argparse.Namespace) -> int:
     load_team(settings.team_file)  # fail fast on a bad definition
     uvicorn.run(create_app(settings.hub_factory(), settings.token), host=args.host, port=args.port)
     return 0
+
+
+def _nodes(args: argparse.Namespace) -> int:
+    nodes = load_nodes(args.team)
+    if not nodes:
+        print("no nodes defined")
+        return 0
+    results = asyncio.run(_probe_all(nodes))
+    for node, outcome in zip(nodes, results, strict=True):
+        print(f"{node.name}: {outcome}")
+    return 0 if all(r.startswith("ok") for r in results) else 1
+
+
+async def _probe_all(nodes: Sequence[Node]) -> list[str]:
+    return list(await asyncio.gather(*(_probe_one(n) for n in nodes)))
+
+
+async def _probe_one(node: Node) -> str:
+    try:
+        return f"ok ({await probe(node)})"
+    except (AgentTeamsError, OSError) as exc:
+        return f"FAILED {describe_error(exc)}"
 
 
 def _check(args: argparse.Namespace) -> int:

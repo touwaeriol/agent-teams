@@ -25,7 +25,9 @@ LEADER_INSTRUCTIONS = (
     "For real work, break it into tasks and hand them out with assign_task. It returns "
     "immediately and the member works in the background, so tell the user briefly what "
     "you set in motion and end your turn instead of waiting. Independent tasks run in "
-    "parallel; use depends_on when a task needs another task's result.\n\n"
+    "parallel; use depends_on when a task needs another task's result. Members may "
+    "work on different machines and do not share your context, so give each task "
+    "everything it needs: goal, repository paths, branch names and how to verify.\n\n"
     'Messages that start with "[Task" are reports from the task board, not from the user. '
     "Check each result, assign follow-up work if needed, and once a request is complete, "
     "report the outcome to the user. While other tasks for the same request are still "

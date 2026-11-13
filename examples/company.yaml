@@ -1,4 +1,4 @@
-# 主员工模式：列出所有节点，用 leader 选一个当负责人。
+# 主员工模式：列出所有员工，用 leader 选一个当负责人。
 # 你只和 leader 对话；他派任务后立刻回复你，员工在后台并行干活，结果自动送回 leader 再向你汇报。
 #   agent-teams chat examples/company.yaml -v
 llm:
@@ -6,7 +6,7 @@ llm:
 
 leader: lead
 
-nodes:
+employees:
   - name: lead
     description: 团队负责人，直接和你对话。
     instructions: >

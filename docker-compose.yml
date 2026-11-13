@@ -17,6 +17,8 @@ services:
       PORT: ${PORT:?set PORT in .env, e.g. 3001}
     volumes:
       - ./team.yaml:/app/team.yaml:ro
+      # SSH key, known_hosts and optional config for reaching the nodes (deploy.sh creates it).
+      - ./ssh:/home/app/.ssh
     healthcheck:
       test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ['PORT'] + '/healthz', timeout=3)"]
       interval: 30s

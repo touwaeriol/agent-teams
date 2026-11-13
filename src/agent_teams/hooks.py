@@ -71,6 +71,13 @@ class TaskFinished(Event):
     task: Task
 
 
+@dataclass(frozen=True)
+class WorkerProgress(Event):
+    """A progress line from an employee running elsewhere (e.g. Claude Code on a node)."""
+
+    text: str
+
+
 E = TypeVar("E", bound=Event)
 Handler = Callable[[E], Awaitable[None] | None]
 
@@ -99,6 +106,7 @@ _FORMATS: dict[type[Event], Callable[[Any], str]] = {
         f"← {e.call.name}{' [error]' if e.result.is_error else ''}: {clip(e.result.content)}"
     ),
     TaskAssigned: lambda e: f"+ {e.task.id} → {e.task.assignee}: {clip(e.task.instruction)}",
+    WorkerProgress: lambda e: f"· {e.text}",
     TaskStarted: lambda e: f"▸ {e.task.id} started by {e.task.assignee}",
     TaskFinished: lambda e: f"✓ {e.task.id} {e.task.status}: {clip(e.task.output)}",
 }
