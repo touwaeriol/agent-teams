@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 
 from .context import RunContext
 from .hooks import RunFinished, RunStarted
 from .types import Result
+
+Work = Callable[[str, RunContext], Awaitable[Result]]
 
 
 class Runnable(ABC):
@@ -20,9 +23,13 @@ class Runnable(ABC):
     description: str
 
     async def run(self, task: str, ctx: RunContext | None = None) -> Result:
+        return await self.traced(task, ctx, self._run)
+
+    async def traced(self, task: str, ctx: RunContext | None, work: Work) -> Result:
+        """Run ``work`` one level deeper in ``ctx``, wrapped in start/finish events."""
         ctx = (ctx or RunContext()).enter(self.name)
         await ctx.emit(RunStarted(ctx.path, task))
-        result = await self._run(task, ctx)
+        result = await work(task, ctx)
         await ctx.emit(RunFinished(ctx.path, result))
         return result
 

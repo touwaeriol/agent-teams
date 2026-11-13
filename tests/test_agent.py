@@ -80,3 +80,37 @@ async def test_emits_events_in_order() -> None:
         LLMReplied.__name__,
         RunFinished.__name__,
     ]
+
+
+async def test_session_remembers_earlier_messages() -> None:
+    llm = ScriptedLLM(["nice to meet you", "your name is Ann"])
+    chat = Agent("lead", llm).session()
+
+    await chat.send("I am Ann")
+    result = await chat.send("what is my name?")
+
+    assert result.output == "your name is Ann"
+    _system, history, _tools = llm.calls[1]
+    assert [type(t).__name__ for t in history] == ["UserTurn", "AssistantTurn", "UserTurn"]
+
+
+async def test_session_rolls_back_failed_messages() -> None:
+    refusal = Reply(AssistantTurn(""), stop="refusal")
+    chat = Agent("lead", ScriptedLLM(["hi", refusal, "still here"])).session()
+
+    await chat.send("hello")
+    with pytest.raises(LLMError):
+        await chat.send("bad request")
+    assert len(chat.history) == 2
+
+    assert (await chat.send("ok?")).output == "still here"
+    chat.reset()
+    assert chat.history == []
+
+
+async def test_session_emits_run_events_under_agent_path() -> None:
+    paths: list[tuple[str, ...]] = []
+    hooks = Hooks()
+    hooks.on(RunStarted, lambda e: paths.append(e.path))
+    await Agent("lead", ScriptedLLM(["a"])).session(RunContext(hooks)).send("x")
+    assert paths == [("lead",)]

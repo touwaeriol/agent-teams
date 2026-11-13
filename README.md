@@ -17,7 +17,38 @@
 pip install -e ".[dev]"
 ```
 
-需要 Python 3.10+。调用 Claude 前需要设置 `ANTHROPIC_API_KEY`（或用 `ant auth login` 登录）。
+需要 Python 3.10+。
+
+每个员工背后都是一次 Claude 模型调用，程序必须带凭据才能调用模型。二选一即可：
+
+- 设置环境变量 `ANTHROPIC_API_KEY`；
+- 或运行一次 `ant auth login`，在浏览器里登录，SDK 会自动读取登录信息，不需要复制 key。
+
+## 和主员工对话
+
+只配置一个负责人（`type: supervisor`），你只和他聊；他会记住上下文，并自己决定什么时候把活分给其他员工：
+
+```bash
+agent-teams chat examples/company.yaml        # 加 -v 可以看到他给谁派了什么活
+```
+
+```
+Talking to lead. /reset clears history, /exit quits.
+you> 帮我写一封催客户回款的邮件，语气客气但要明确
+lead: ……（必要时先交给 writer 起草、reviewer 审查，再汇报给你）
+you> 再短一点
+lead: ……
+```
+
+在 Python 里也一样：
+
+```python
+chat = lead.session()
+await chat.send("先调研一下竞品")
+await chat.send("基于刚才的调研写个方案")  # 记得上一轮的内容
+```
+
+`/reset` 清空对话，`/exit` 或 Ctrl-D 退出。某条消息出错（比如被拒答）时，这一轮会被回滚，对话可以继续。
 
 ## 快速开始
 
@@ -26,6 +57,7 @@ pip install -e ".[dev]"
 ```python
 import asyncio
 from agent_teams import Agent, AnthropicLLM, supervisor, tool
+
 
 @tool
 def word_count(text: str) -> int:
@@ -36,11 +68,21 @@ def word_count(text: str) -> int:
     """
     return len(text.split())
 
+
 llm = AnthropicLLM()  # 默认 claude-opus-5-5、自适应思考、high effort
-writer = Agent("writer", llm, description="Writes drafts.",
-               instructions="Write what you are asked to.", tools=[word_count])
-critic = Agent("critic", llm, description="Reviews drafts.",
-               instructions="Point out weaknesses in the text you receive.")
+writer = Agent(
+    "writer",
+    llm,
+    description="Writes drafts.",
+    instructions="Write what you are asked to.",
+    tools=[word_count],
+)
+critic = Agent(
+    "critic",
+    llm,
+    description="Reviews drafts.",
+    instructions="Point out weaknesses in the text you receive.",
+)
 lead = supervisor("lead", llm, [writer, critic])
 
 print(asyncio.run(lead.run("写一首关于秋天的短诗")).output)
@@ -93,8 +135,8 @@ YAML 中的节点 `type` 可以是 `agent`（默认）、`sequential`、`paralle
   ```python
   from agent_teams import Hooks, RunContext, ToolStarted, trace
 
-  hooks = trace(Hooks())                   # 内置单行追踪
-  hooks.on(ToolStarted, lambda e: ...)     # 或订阅具体事件
+  hooks = trace(Hooks())  # 内置单行追踪
+  hooks.on(ToolStarted, lambda e: ...)  # 或订阅具体事件
   await team.run("task", RunContext(hooks))
   ```
 

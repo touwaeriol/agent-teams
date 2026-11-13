@@ -29,8 +29,12 @@ class Agent(Runnable):
     def __post_init__(self) -> None:
         self.toolkit = Toolkit(self.tools)
 
-    async def _run(self, task: str, ctx: RunContext) -> Result:
-        history: list[Turn] = [UserTurn(task)]
+    def session(self, ctx: RunContext | None = None) -> Session:
+        """Start a multi-turn conversation that remembers earlier messages."""
+        return Session(self, ctx or RunContext())
+
+    async def respond(self, history: list[Turn], ctx: RunContext) -> Result:
+        """Continue ``history`` (appending to it) until the model gives a final answer."""
         for _ in range(self.max_steps):
             reply = await self._step(history, ctx)
             if not reply.tool_calls:
@@ -38,12 +42,43 @@ class Agent(Runnable):
             history.append(ToolTurn(await self.toolkit.execute(reply.tool_calls, ctx)))
         raise MaxStepsExceeded(f"{self.name} exceeded {self.max_steps} steps")
 
+    async def _run(self, task: str, ctx: RunContext) -> Result:
+        return await self.respond([UserTurn(task)], ctx)
+
     async def _step(self, history: list[Turn], ctx: RunContext) -> Reply:
         reply = await self.llm.complete(self.instructions, history, self.toolkit.specs)
         await ctx.emit(LLMReplied(ctx.path, reply))
         _ensure_usable(self.name, reply)
         history.append(reply.turn)
         return reply
+
+
+@dataclass
+class Session:
+    """A conversation with one agent (typically a team lead).
+
+    History persists between :meth:`send` calls. A failed message is rolled
+    back, so the conversation stays valid and can continue.
+    """
+
+    agent: Agent
+    ctx: RunContext = field(default_factory=RunContext)
+    history: list[Turn] = field(default_factory=list)
+
+    async def send(self, message: str) -> Result:
+        return await self.agent.traced(message, self.ctx, self._respond)
+
+    def reset(self) -> None:
+        self.history.clear()
+
+    async def _respond(self, message: str, ctx: RunContext) -> Result:
+        checkpoint = len(self.history)
+        self.history.append(UserTurn(message))
+        try:
+            return await self.agent.respond(self.history, ctx)
+        except BaseException:
+            del self.history[checkpoint:]
+            raise
 
 
 def _ensure_usable(name: str, reply: Reply) -> None:
