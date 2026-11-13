@@ -52,10 +52,14 @@ class Leader(Runnable):
         if not self.members:
             raise ConfigError(f"leader '{self.name}' has no members")
 
-    def open(self, ctx: RunContext | None = None) -> Conversation:
-        """Start a conversation with the leader; each call gets a fresh task board."""
+    def open(self, ctx: RunContext | None = None, *, first_task: int = 1) -> Conversation:
+        """Start a conversation with the leader; each call gets a fresh task board.
+
+        ``first_task`` sets the first task number, so a resumed conversation
+        does not reuse IDs from before.
+        """
         ctx = ctx or RunContext()
-        board = TaskBoard(self.members, ctx.enter(self.name))
+        board = TaskBoard(self.members, ctx.enter(self.name), first_task)
         agent = Agent(
             name=self.name,
             llm=self.llm,

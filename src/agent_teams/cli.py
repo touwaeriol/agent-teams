@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 from collections.abc import Callable, Sequence
 
@@ -18,12 +19,11 @@ from .agent import Agent
 from .config import load_team
 from .context import RunContext
 from .conversation import Conversation
-from .errors import AgentTeamsError, ConfigError
+from .errors import AgentTeamsError, ConfigError, describe_error
 from .hooks import Hooks, trace
 from .leader import Leader
 
 EXIT_COMMANDS = frozenset({"/exit", "/quit"})
-AUTH_HINT = "set ANTHROPIC_API_KEY, or run `ant auth login` once to sign in"
 
 Reader = Callable[[], str | None]
 Writer = Callable[[str], None]
@@ -36,12 +36,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (AgentTeamsError, anthropic.AnthropicError) as exc:
         print(f"error: {describe_error(exc)}", file=sys.stderr)
         return 1
-
-
-def describe_error(exc: Exception) -> str:
-    if isinstance(exc, anthropic.AuthenticationError):
-        return f"Claude rejected the credentials ({exc}); {AUTH_HINT}"
-    return str(exc)
 
 
 async def converse(conversation: Conversation, read: Reader, write: Writer) -> None:
@@ -121,6 +115,12 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("-v", "--verbose", action="store_true", help="trace every step to stderr")
     run.set_defaults(handler=_run)
 
+    serve = commands.add_parser("serve", help="run the web service (needs the [server] extra)")
+    serve.add_argument("team", nargs="?", help="path to a team definition (default: $TEAM_FILE)")
+    serve.add_argument("--host", default=os.environ.get("HOST", "0.0.0.0"))
+    serve.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
+    serve.set_defaults(handler=_serve)
+
     check = commands.add_parser("check", help="validate a team definition")
     check.add_argument("team")
     check.set_defaults(handler=_check)
@@ -144,6 +144,18 @@ def _run(args: argparse.Namespace) -> int:
     task = sys.stdin.read() if args.task == "-" else args.task
     result = asyncio.run(team.run(task, _context(args.verbose)))
     print(result.output)
+    return 0
+
+
+def _serve(args: argparse.Namespace) -> int:
+    # Imported here: the web stack is an optional extra.
+    import uvicorn  # noqa: PLC0415
+
+    from .server.app import Settings, create_app  # noqa: PLC0415
+
+    settings = Settings.from_env(args.team)
+    load_team(settings.team_file)  # fail fast on a bad definition
+    uvicorn.run(create_app(settings.hub_factory(), settings.token), host=args.host, port=args.port)
     return 0
 
 

@@ -17,7 +17,7 @@ from typing import Any
 from ._text import clip
 from .context import RunContext
 from .errors import AgentTeamsError
-from .hooks import TaskAssigned, TaskFinished
+from .hooks import TaskAssigned, TaskFinished, TaskStarted
 from .runnable import Runnable
 from .tools import Tool, tool, tool_name
 from .types import Task
@@ -32,13 +32,13 @@ class DependencyFailed(AgentTeamsError):  # noqa: N818 - reads better as a task 
 class TaskBoard:
     """Tracks tasks for one leader; members run concurrently as asyncio tasks."""
 
-    def __init__(self, members: Sequence[Runnable], ctx: RunContext) -> None:
+    def __init__(self, members: Sequence[Runnable], ctx: RunContext, first_number: int = 1) -> None:
         self._members = {tool_name(m.name): m for m in members}
         self._ctx = ctx
         self._tasks: dict[str, Task] = {}
         self._handles: dict[str, asyncio.Task[str]] = {}
         self._emitting: set[asyncio.Future[None]] = set()
-        self._ids = itertools.count(1)
+        self._ids = itertools.count(first_number)
         self.listeners: list[Listener] = []
 
     @property
@@ -99,7 +99,8 @@ class TaskBoard:
 
     async def _execute(self, task: Task) -> str:
         prompt = await self._prepare(task)
-        self._update(task.id, status="running")
+        running = self._update(task.id, status="running")
+        await self._ctx.emit(TaskStarted(self._ctx.path, running))
         return (await self._members[task.assignee].run(prompt, self._ctx)).output
 
     async def _prepare(self, task: Task) -> str:

@@ -15,7 +15,7 @@
 ## 安装
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev]"        # 只用命令行：pip install -e .；网页服务：pip install -e ".[server]"
 ```
 
 需要 Python 3.10+。
@@ -77,6 +77,30 @@ print(conversation.status())  # 任务板
 ```
 
 一次性运行（`agent-teams run` 或 `await leader.run(task)`）也走同样的流程：等到所有任务完成、leader 给出最终汇报后才返回。
+
+## 网页版与部署（Docker Compose）
+
+`agent-teams serve` 提供网页聊天界面和 HTTP API：左边是对话列表，中间和 leader 聊天，右边任务板实时显示每个任务的状态。
+
+- **PostgreSQL**：保存对话、消息、任务和 leader 的对话历史；服务重启后可以接着聊，重启前没做完的任务会标记为"已中断"。表名都带 `at_` 前缀，可以放进现有数据库。
+- **Valkey**：通过发布/订阅把回复和任务状态实时推送到浏览器（SSE）。
+- **访问令牌**：所有 API 都需要 `AGENT_TEAMS_TOKEN`。网页登录一次后换成 HttpOnly cookie，令牌不会出现在 URL 和日志里。
+
+部署到一台已经运行 PostgreSQL 和 Valkey 的服务器上：
+
+```bash
+git clone <仓库地址> agent-teams && cd agent-teams
+git checkout claude/vigilant-noether-11aqhk
+createdb agent_teams            # 或者在 .env 里指向一个已有的库
+deploy/deploy.sh                # 第一次运行会生成 .env，提示你填 ANTHROPIC_API_KEY 和 DATABASE_URL
+deploy/deploy.sh                # 填好后再运行一次：构建镜像、启动、输出访问地址和令牌
+```
+
+`deploy.sh` 会自动选 3001–3009 中第一个空闲端口、生成访问令牌，并在服务通过健康检查后打印 `http://<服务器IP>:<端口>`。容器使用 host 网络，所以通过 `127.0.0.1` 直接连本机的 PG 和 Valkey，不用改它们的监听地址。
+
+- 改团队：编辑仓库根目录的 `team.yaml`（第一次部署时从 `examples/company.yaml` 复制），然后执行 `docker compose restart`。
+- 看日志：`docker compose logs -f agent-teams`；更新代码：`git pull && deploy/deploy.sh`。
+- 服务是明文 HTTP；需要公网访问时，建议放在 Nginx/Caddy 后面加 HTTPS。
 
 ## 快速开始
 
@@ -187,6 +211,7 @@ src/agent_teams/
   leader.py     Leader：负责人 + 任务板
   tasks.py      TaskBoard：不阻塞派发、依赖、取消、完成通知
   conversation.py  Conversation：消息队列，用户和任务报告按序交给 leader
+  server/       网页服务：FastAPI、PostgreSQL 存储、Valkey 推送、静态页面
   tools.py      @tool、as_tool、Toolkit（并发执行、失败隔离）
   hooks.py      事件与 Hooks、trace
   context.py    RunContext（钩子 + 调用路径）

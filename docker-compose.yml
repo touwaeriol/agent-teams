@@ -1,0 +1,25 @@
+# Runs the web service next to the PostgreSQL and Valkey already on the host.
+# Host networking lets the container reach them on 127.0.0.1 without changing
+# their bind addresses; the service listens on $PORT directly.
+#
+#   deploy/deploy.sh        # first run: creates .env and team.yaml, picks a free 300x port
+services:
+  agent-teams:
+    build: .
+    image: agent-teams:latest
+    container_name: agent-teams
+    restart: unless-stopped
+    network_mode: host
+    env_file: .env
+    environment:
+      TEAM_FILE: /app/team.yaml
+      HOST: ${HOST:-0.0.0.0}
+      PORT: ${PORT:?set PORT in .env, e.g. 3001}
+    volumes:
+      - ./team.yaml:/app/team.yaml:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ['PORT'] + '/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

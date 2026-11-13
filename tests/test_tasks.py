@@ -4,7 +4,15 @@ import asyncio
 
 import pytest
 
-from agent_teams import Hooks, RunContext, TaskAssigned, TaskBoard, TaskFinished, Toolkit
+from agent_teams import (
+    Hooks,
+    RunContext,
+    TaskAssigned,
+    TaskBoard,
+    TaskFinished,
+    TaskStarted,
+    Toolkit,
+)
 from agent_teams.types import Task, ToolCall
 
 from .fakes import Worker
@@ -118,6 +126,7 @@ async def test_board_emits_task_events() -> None:
     seen: list[str] = []
     hooks = Hooks()
     hooks.on(TaskAssigned, lambda e: seen.append(f"assigned {e.task.id} at {e.source}"))
+    hooks.on(TaskStarted, lambda e: seen.append(f"started {e.task.id} {e.task.status}"))
     hooks.on(TaskFinished, lambda e: seen.append(f"finished {e.task.id} {e.task.status}"))
     board = board_with(Worker("writer"), hooks=hooks)
 
@@ -125,7 +134,7 @@ async def test_board_emits_task_events() -> None:
     await board.wait()
     await asyncio.sleep(0)
 
-    assert seen == ["assigned t1 at lead", "finished t1 done"]
+    assert seen == ["assigned t1 at lead", "started t1 running", "finished t1 done"]
 
 
 def test_summary_without_tasks() -> None:

@@ -62,6 +62,11 @@ class TaskAssigned(Event):
 
 
 @dataclass(frozen=True)
+class TaskStarted(Event):
+    task: Task
+
+
+@dataclass(frozen=True)
 class TaskFinished(Event):
     task: Task
 
@@ -94,17 +99,24 @@ _FORMATS: dict[type[Event], Callable[[Any], str]] = {
         f"← {e.call.name}{' [error]' if e.result.is_error else ''}: {clip(e.result.content)}"
     ),
     TaskAssigned: lambda e: f"+ {e.task.id} → {e.task.assignee}: {clip(e.task.instruction)}",
+    TaskStarted: lambda e: f"▸ {e.task.id} started by {e.task.assignee}",
     TaskFinished: lambda e: f"✓ {e.task.id} {e.task.status}: {clip(e.task.output)}",
 }
+
+
+def format_event(event: Event) -> str | None:
+    """One readable line for the events worth showing, else ``None``."""
+    formatter = _FORMATS.get(type(event))
+    return None if formatter is None else f"[{event.source}] {formatter(event)}"
 
 
 def trace(hooks: Hooks, write: Callable[[str], None] = print) -> Hooks:
     """Subscribe a one-line-per-event tracer, e.g. for the CLI's ``--verbose``."""
 
     def log(event: Event) -> None:
-        format_event = _FORMATS.get(type(event))
-        if format_event is not None:
-            write(f"[{event.source}] {format_event(event)}")
+        line = format_event(event)
+        if line is not None:
+            write(line)
 
     hooks.on(Event, log)
     return hooks

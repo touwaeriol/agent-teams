@@ -9,6 +9,7 @@ pip install -e ".[dev]"
 ruff format . && ruff check .   # lint incl. mccabe ≤ 6, nested blocks ≤ 3
 mypy                            # strict, covers src/, tests/, examples/
 pytest                          # offline; never hits the real API
+# integration tests run when TEST_DATABASE_URL / TEST_VALKEY_URL are set
 python examples/offline_demo.py
 python examples/offline_leader.py   # non-blocking leader demo
 ```
@@ -22,6 +23,7 @@ python examples/offline_leader.py   # non-blocking leader demo
 - `Conversation` (conversation.py) is an inbox over one `Session`: the user and task reports `post`, a single consumer calls `reply`. `agent-teams chat` reads input and prints replies concurrently; EOF drains, `/exit` cancels.
 - Config shorthand `leader` + `nodes` (config.py `_promote_leader`) turns the chosen agent node into a `leader` node over the other nodes.
 - `Agent.session()` returns a `Session` (multi-turn, rolls back a failed message). `supervisor()` is the blocking alternative to `Leader`.
+- `server/` (optional `[server]` extra): `Hub` owns one `Conversation` + responder task per chat and mirrors messages/tasks/history to a `Store` (`PostgresStore`, `MemoryStore`) and events to a `Broker` (`ValkeyBroker`, `MemoryBroker`). FastAPI app in app.py: Bearer token or HttpOnly session cookie; SSE for live events. Deploy: `docker-compose.yml` (host network, uses the host's PG/Valkey) + `deploy/deploy.sh`.
 - Tools: `@tool` builds a pydantic model from the signature; `RunContext`-annotated params are injected. `as_tool` wraps any `Runnable` (used by `supervisor`). Tool failures become `is_error` results, never exceptions.
 - Config: pydantic specs in config.py, each with `build(builder)`; add a node type by adding a spec class and a `Tag` entry in `NodeSpec`.
 

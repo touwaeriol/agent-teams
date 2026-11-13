@@ -11,6 +11,7 @@ import pytest
 from anthropic import AuthenticationError
 
 from agent_teams import Agent, Leader, ScriptedLLM, Sequential, cli
+from agent_teams.errors import describe_error
 from agent_teams.llm import call, say
 from agent_teams.runnable import Runnable
 from agent_teams.types import AssistantTurn, Reply
@@ -164,4 +165,4 @@ def test_auth_errors_explain_how_to_sign_in() -> None:
     request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
     response = httpx.Response(401, request=request)
     error = AuthenticationError("invalid x-api-key", response=response, body=None)
-    assert "ant auth login" in cli.describe_error(error)
+    assert "ant auth login" in describe_error(error)
