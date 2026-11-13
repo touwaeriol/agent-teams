@@ -26,7 +26,23 @@ pip install -e ".[dev]"
 
 ## 和主员工对话
 
-只配置一个负责人（`type: supervisor`），你只和他聊；他会记住上下文，并自己决定什么时候把活分给其他员工：
+列出所有节点，用 `leader` 选一个当负责人。你只和 leader 对话：他记住上下文，把需求拆成任务分给其他员工（互不依赖的任务并行完成），检查结果后向你汇报。
+
+```yaml
+# examples/company.yaml
+llm: {model: claude-opus-5-5}
+leader: lead
+nodes:
+  - {name: lead, instructions: "你是团队负责人……"}
+  - {name: researcher, description: "调研员", instructions: "……"}
+  - {name: writer, description: "写手", instructions: "……"}
+  - {name: reviewer, description: "审查员", instructions: "……"}
+```
+
+- 换 leader 只需改 `leader:` 这一行；leader 必须是普通 agent 节点。
+- 员工节点可以是任意类型，比如一个 `parallel` 评审小组，对 leader 来说就是一个员工。
+- leader 看到的员工名单来自每个节点的 `description`，写清楚他才知道该派给谁。
+- 不写 `instructions` 时，leader 使用内置的负责人提示词。
 
 ```bash
 agent-teams chat examples/company.yaml        # 加 -v 可以看到他给谁派了什么活

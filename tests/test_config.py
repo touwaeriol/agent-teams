@@ -114,3 +114,55 @@ def test_load_team_rejects_non_mapping(tmp_path: Path) -> None:
     path.write_text("- just a list\n", encoding="utf-8")
     with pytest.raises(ConfigError, match="mapping"):
         load_team(path)
+
+
+def test_leader_shorthand_makes_a_supervisor_over_other_nodes() -> None:
+    team = build_team(
+        {
+            "leader": "lead",
+            "nodes": [
+                {"name": "researcher", "description": "Collects facts."},
+                {"name": "lead", "instructions": "Run the team."},
+                {"type": "parallel", "name": "reviewers", "members": [{"name": "r1"}]},
+            ],
+        },
+        llm_factory=RecordingFactory(),
+    )
+
+    assert isinstance(team, Agent)
+    assert team.name == "lead"
+    assert team.instructions.startswith("Run the team.")
+    assert "researcher: Collects facts." in team.instructions
+    assert [s.name for s in team.toolkit.specs] == ["researcher", "reviewers"]
+
+
+def test_leader_without_instructions_gets_default_lead_prompt() -> None:
+    team = build_team(
+        {"leader": "lead", "nodes": [{"name": "lead"}, {"name": "worker"}]},
+        llm_factory=RecordingFactory(),
+    )
+    assert isinstance(team, Agent)
+    assert "break it into tasks" in team.instructions
+
+
+@pytest.mark.parametrize(
+    ("data", "fragment"),
+    [
+        ({"leader": "boss", "nodes": [{"name": "a"}, {"name": "b"}]}, "not one of the nodes"),
+        (
+            {
+                "leader": "t",
+                "nodes": [{"type": "sequential", "name": "t", "members": [{"name": "a"}]}],
+            },
+            "must be an agent",
+        ),
+        ({"leader": "a", "nodes": [{"name": "a"}]}, "members"),
+        (
+            {"leader": "a", "nodes": [{"name": "a"}, {"name": "b"}], "team": {"name": "x"}},
+            "not both",
+        ),
+    ],
+)
+def test_invalid_leader_definitions(data: dict[str, Any], fragment: str) -> None:
+    with pytest.raises(ConfigError, match=fragment):
+        build_team(data, llm_factory=RecordingFactory())

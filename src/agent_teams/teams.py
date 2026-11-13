@@ -19,9 +19,11 @@ Handoff = Callable[[str, Result], str]
 Merge = Callable[[str, Sequence[Result]], str]
 
 SUPERVISOR_INSTRUCTIONS = (
-    "You lead a team. Break the task down, delegate sub-tasks to the right members "
-    "by calling their tools with complete, self-contained instructions, check their "
-    "work, and then write the final answer yourself."
+    "You lead a team and talk directly with the user. Answer simple requests yourself. "
+    "For real work, break it into tasks and hand each one to the right member by calling "
+    "their tool with complete, self-contained instructions; call several tools in the "
+    "same turn when tasks are independent so they run in parallel. Check the results, "
+    "then report back to the user yourself. Ask the user when the request is unclear."
 )
 
 

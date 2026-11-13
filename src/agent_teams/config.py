@@ -10,6 +10,15 @@ Example::
         - {name: researcher, instructions: "Collect facts."}
         - {name: writer, instructions: "Write the article."}
 
+Leader shorthand: list the nodes and pick one agent as the leader; it becomes a
+supervisor over all the other nodes::
+
+    leader: lead
+    nodes:
+      - {name: lead, instructions: "Plan the work and delegate it."}
+      - {name: researcher, description: "Collects facts."}
+      - {name: writer, description: "Writes drafts."}
+
 Node ``type`` is one of ``agent`` (default), ``sequential``, ``parallel``,
 ``round_robin`` and ``supervisor``. Tools are referenced as
 ``"package.module:attribute"`` (a :class:`Tool` or a plain function).
@@ -24,7 +33,15 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    Tag,
+    ValidationError,
+    model_validator,
+)
 
 from .agent import Agent
 from .errors import ConfigError
@@ -170,6 +187,27 @@ class TeamFile(BaseModel):
 
     llm: dict[str, Any] = Field(default_factory=dict)
     team: NodeSpec
+
+    @model_validator(mode="before")
+    @classmethod
+    def _expand_leader(cls, data: Any) -> Any:
+        if not isinstance(data, Mapping) or "leader" not in data:
+            return data
+        rest = {k: v for k, v in data.items() if k not in ("leader", "nodes")}
+        if "team" in rest:
+            raise ValueError("use either 'team' or 'leader' + 'nodes', not both")
+        return {**rest, "team": _promote_leader(str(data["leader"]), list(data.get("nodes") or []))}
+
+
+def _promote_leader(leader: str, nodes: list[Any]) -> dict[str, Any]:
+    """Turn the chosen agent node into a supervisor over every other node."""
+    chosen = next((n for n in nodes if isinstance(n, Mapping) and n.get("name") == leader), None)
+    if chosen is None:
+        raise ValueError(f"leader '{leader}' is not one of the nodes")
+    if chosen.get("type", "agent") != "agent":
+        raise ValueError(f"leader '{leader}' must be an agent node")
+    members = [n for n in nodes if n is not chosen]
+    return {**chosen, "type": "supervisor", "members": members}
 
 
 for _model in (SupervisorSpec, _TeamNode, SequentialSpec, ParallelSpec, RoundRobinSpec, TeamFile):
