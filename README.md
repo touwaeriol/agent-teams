@@ -5,6 +5,7 @@
 ## 特性
 
 - **统一接口（组合模式）**：`Agent` 和所有团队都实现 `Runnable.run(task) -> Result`，团队可以包含团队。
+- **主员工模式**：选一个 leader 和他对话，他派任务给员工，派发不阻塞，结果自动回报。
 - **四种编排策略**：`Sequential`（流水线）、`Parallel`（并发 + 可选汇总）、`RoundRobin`（轮流讨论 + 可选裁决）、`supervisor`（主管通过工具分派给成员）。
 - **零侵入工具**：普通函数（同步或异步）即工具，参数 schema 由类型注解和 docstring 自动生成，用 pydantic 校验；需要上下文时声明一个 `RunContext` 参数即可注入。
 - **可替换模型后端**：Agent 只依赖 `LLM` 协议；内置 `AnthropicLLM`（Claude）和 `ScriptedLLM`（测试/离线演示）。
@@ -24,9 +25,14 @@ pip install -e ".[dev]"
 - 设置环境变量 `ANTHROPIC_API_KEY`；
 - 或运行一次 `ant auth login`，在浏览器里登录，SDK 会自动读取登录信息，不需要复制 key。
 
-## 和主员工对话
+## 和主员工对话（不阻塞）
 
-列出所有节点，用 `leader` 选一个当负责人。你只和 leader 对话：他记住上下文，把需求拆成任务分给其他员工（互不依赖的任务并行完成），检查结果后向你汇报。
+列出所有节点，用 `leader` 选一个当负责人。你只和 leader 对话，**整个过程不阻塞**：
+
+1. leader 把需求拆成任务派给员工（`assign_task`），派完**立刻**回复你，员工在后台干活；
+2. 员工干活期间你可以继续跟 leader 聊、追加需求、问进度；
+3. 互不依赖的任务并行执行；需要别人结果的任务用 `depends_on` 声明，前置任务完成后自动开始，并拿到前置任务的结果；
+4. 每个任务完成（或失败、被取消）后，结果自动送回 leader；他检查结果、决定是否派后续任务，全部完成后向你汇报。
 
 ```yaml
 # examples/company.yaml
@@ -39,32 +45,38 @@ nodes:
   - {name: reviewer, description: "审查员", instructions: "……"}
 ```
 
+```bash
+agent-teams chat examples/company.yaml -v     # -v 实时显示任务派发和完成
+```
+
+```
+Talking to lead. /tasks shows progress, /reset clears, /exit quits.
+you> 调研一下三家竞品，然后写一份对比方案
+lead: 已安排 researcher 调研（t1），writer 等调研完成后写方案（t2），完成后向你汇报。
+you> 顺便把预算控制在 10 万以内
+lead: 好的，已记下，会在方案里体现。
+you> /tasks
+t1 [done] researcher: 调研三家竞品……
+t2 [running] writer (after t1): 写对比方案……
+lead: 方案完成了：……
+```
+
+- `/tasks` 查看任务板，`/reset` 清空对话，`/exit` 立即退出（取消未完成的任务）；输入结束（Ctrl-D 或管道输入）时会等所有任务完成、leader 汇报完再退出。
 - 换 leader 只需改 `leader:` 这一行；leader 必须是普通 agent 节点。
 - 员工节点可以是任意类型，比如一个 `parallel` 评审小组，对 leader 来说就是一个员工。
 - leader 看到的员工名单来自每个节点的 `description`，写清楚他才知道该派给谁。
-- 不写 `instructions` 时，leader 使用内置的负责人提示词。
+- 某条消息出错（比如被拒答）时，这一轮会被回滚，对话可以继续；某个任务失败时，失败原因会报告给 leader，依赖它的任务也会标记为失败。
 
-```bash
-agent-teams chat examples/company.yaml        # 加 -v 可以看到他给谁派了什么活
-```
-
-```
-Talking to lead. /reset clears history, /exit quits.
-you> 帮我写一封催客户回款的邮件，语气客气但要明确
-lead: ……（必要时先交给 writer 起草、reviewer 审查，再汇报给你）
-you> 再短一点
-lead: ……
-```
-
-在 Python 里也一样：
+在 Python 里：
 
 ```python
-chat = lead.session()
-await chat.send("先调研一下竞品")
-await chat.send("基于刚才的调研写个方案")  # 记得上一轮的内容
+conversation = leader.open()  # leader = Leader(...) 或 load_team(...)
+conversation.post("调研竞品并写方案")  # 只入队，不等待
+reply = await conversation.reply()  # 处理下一条消息（你的消息或任务报告）
+print(conversation.status())  # 任务板
 ```
 
-`/reset` 清空对话，`/exit` 或 Ctrl-D 退出。某条消息出错（比如被拒答）时，这一轮会被回滚，对话可以继续。
+一次性运行（`agent-teams run` 或 `await leader.run(task)`）也走同样的流程：等到所有任务完成、leader 给出最终汇报后才返回。
 
 ## 快速开始
 
@@ -126,7 +138,8 @@ echo "长任务文本" | agent-teams run examples/writing_team.yaml -
 不需要 API key 的离线演示：
 
 ```bash
-python examples/offline_demo.py
+python examples/offline_demo.py     # 流水线 + 并行
+python examples/offline_leader.py   # 不阻塞的 leader
 ```
 
 ## 编排策略
@@ -136,11 +149,12 @@ python examples/offline_demo.py
 | `Sequential` | 依次执行，后一个成员拿到原始任务和前一个成员的输出 | `handoff` |
 | `Parallel` | 所有成员并发处理同一任务；有 `aggregator` 时由它汇总 | `aggregator`, `merge` |
 | `RoundRobin` | 成员按轮次发言，每次都能看到完整记录；有 `finalizer` 时由它总结 | `rounds`, `finalizer`, `merge` |
-| `supervisor()` | 返回一个 Agent，每个成员都成为它可调用的工具 | `instructions`, `tools` |
+| `Leader` | 负责人 + 不阻塞的任务板：派任务立即返回，员工后台并行，结果自动回报 | `instructions`, `max_turns` |
+| `supervisor()` | 返回一个 Agent，每个成员都是它的工具；委派是同步的（等员工做完才继续） | `instructions`, `tools` |
 
 `handoff` / `merge` 都是普通函数，可以直接替换以定制信息传递方式，不需要继承。
 
-YAML 中的节点 `type` 可以是 `agent`（默认）、`sequential`、`parallel`、`round_robin`、`supervisor`。工具用 `"module:attribute"` 引用，可以是普通函数，也可以是 `Tool`。每个节点都可以用 `llm:` 覆盖全局模型配置。
+YAML 中的节点 `type` 可以是 `agent`（默认）、`leader`、`sequential`、`parallel`、`round_robin`、`supervisor`。工具用 `"module:attribute"` 引用，可以是普通函数，也可以是 `Tool`。每个节点都可以用 `llm:` 覆盖全局模型配置。
 
 ## 扩展点
 
@@ -170,6 +184,9 @@ src/agent_teams/
   runnable.py   Runnable 基类（统一入口、事件）
   agent.py      Agent：工具调用循环
   teams.py      Sequential / Parallel / RoundRobin / supervisor
+  leader.py     Leader：负责人 + 任务板
+  tasks.py      TaskBoard：不阻塞派发、依赖、取消、完成通知
+  conversation.py  Conversation：消息队列，用户和任务报告按序交给 leader
   tools.py      @tool、as_tool、Toolkit（并发执行、失败隔离）
   hooks.py      事件与 Hooks、trace
   context.py    RunContext（钩子 + 调用路径）

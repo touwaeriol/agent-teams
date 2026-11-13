@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from .context import RunContext
+from .conversation import Conversation
 from .errors import LLMError, MaxStepsExceeded
 from .hooks import LLMReplied
 from .llm.base import LLM
@@ -32,6 +33,10 @@ class Agent(Runnable):
     def session(self, ctx: RunContext | None = None) -> Session:
         """Start a multi-turn conversation that remembers earlier messages."""
         return Session(self, ctx or RunContext())
+
+    def open(self, ctx: RunContext | None = None) -> Conversation:
+        """Start a non-blocking conversation: messages queue up and are answered in order."""
+        return Conversation(self.session(ctx))
 
     async def respond(self, history: list[Turn], ctx: RunContext) -> Result:
         """Continue ``history`` (appending to it) until the model gives a final answer."""

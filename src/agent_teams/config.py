@@ -10,8 +10,8 @@ Example::
         - {name: researcher, instructions: "Collect facts."}
         - {name: writer, instructions: "Write the article."}
 
-Leader shorthand: list the nodes and pick one agent as the leader; it becomes a
-supervisor over all the other nodes::
+Leader shorthand: list the nodes and pick one agent as the leader; it gets a
+non-blocking task board over all the other nodes::
 
     leader: lead
     nodes:
@@ -19,8 +19,8 @@ supervisor over all the other nodes::
       - {name: researcher, description: "Collects facts."}
       - {name: writer, description: "Writes drafts."}
 
-Node ``type`` is one of ``agent`` (default), ``sequential``, ``parallel``,
-``round_robin`` and ``supervisor``. Tools are referenced as
+Node ``type`` is one of ``agent`` (default), ``leader``, ``sequential``,
+``parallel``, ``round_robin`` and ``supervisor``. Tools are referenced as
 ``"package.module:attribute"`` (a :class:`Tool` or a plain function).
 """
 
@@ -45,6 +45,7 @@ from pydantic import (
 
 from .agent import Agent
 from .errors import ConfigError
+from .leader import LEADER_INSTRUCTIONS, Leader
 from .llm.anthropic import AnthropicLLM
 from .llm.base import LLM
 from .runnable import Runnable
@@ -132,6 +133,25 @@ class SupervisorSpec(_LLMNode):
         )
 
 
+class LeaderSpec(_LLMNode):
+    type: Literal["leader"]
+    instructions: str = LEADER_INSTRUCTIONS
+    members: list[NodeSpec] = Field(min_length=1)
+    max_turns: int = Field(50, ge=1)
+
+    def build(self, builder: Builder) -> Runnable:
+        return Leader(
+            name=self.name,
+            llm=builder.llm(self.llm),
+            members=[m.build(builder) for m in self.members],
+            instructions=self.instructions,
+            description=self.description,
+            tools=builder.tools(self.tools),
+            max_steps=self.max_steps,
+            max_turns=self.max_turns,
+        )
+
+
 class _TeamNode(_Node):
     members: list[NodeSpec] = Field(min_length=1)
 
@@ -177,7 +197,8 @@ NodeSpec = Annotated[
     | Annotated[SequentialSpec, Tag("sequential")]
     | Annotated[ParallelSpec, Tag("parallel")]
     | Annotated[RoundRobinSpec, Tag("round_robin")]
-    | Annotated[SupervisorSpec, Tag("supervisor")],
+    | Annotated[SupervisorSpec, Tag("supervisor")]
+    | Annotated[LeaderSpec, Tag("leader")],
     Discriminator(_node_type),
 ]
 
@@ -200,17 +221,25 @@ class TeamFile(BaseModel):
 
 
 def _promote_leader(leader: str, nodes: list[Any]) -> dict[str, Any]:
-    """Turn the chosen agent node into a supervisor over every other node."""
+    """Turn the chosen agent node into a leader over every other node."""
     chosen = next((n for n in nodes if isinstance(n, Mapping) and n.get("name") == leader), None)
     if chosen is None:
         raise ValueError(f"leader '{leader}' is not one of the nodes")
     if chosen.get("type", "agent") != "agent":
         raise ValueError(f"leader '{leader}' must be an agent node")
     members = [n for n in nodes if n is not chosen]
-    return {**chosen, "type": "supervisor", "members": members}
+    return {**chosen, "type": "leader", "members": members}
 
 
-for _model in (SupervisorSpec, _TeamNode, SequentialSpec, ParallelSpec, RoundRobinSpec, TeamFile):
+for _model in (
+    LeaderSpec,
+    SupervisorSpec,
+    _TeamNode,
+    SequentialSpec,
+    ParallelSpec,
+    RoundRobinSpec,
+    TeamFile,
+):
     _model.model_rebuild()
 
 

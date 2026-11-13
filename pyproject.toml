@@ -38,6 +38,8 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "SIM", "C90", "RET", "PL", "RUF", "N", "ASYNC", "PT"]
 ignore = ["PLR0913", "PLR2004"]
+# Chinese punctuation is expected in user-facing strings.
+allowed-confusables = ["，", "：", "（", "）", "？", "！", "；"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 6

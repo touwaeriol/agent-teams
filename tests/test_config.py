@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from agent_teams import Agent, ConfigError, Parallel, RoundRobin, ScriptedLLM, Sequential
+from agent_teams import Agent, ConfigError, Leader, Parallel, RoundRobin, ScriptedLLM, Sequential
 from agent_teams.config import build_team, load_team, load_tool
 from agent_teams.llm.base import LLM
 
@@ -46,6 +46,7 @@ def test_builds_nested_team_with_shared_llms() -> None:
                         "finalizer": {"name": "e"},
                     },
                     {"type": "supervisor", "name": "lead", "members": [{"name": "f"}]},
+                    {"type": "leader", "name": "boss", "members": [{"name": "g"}], "max_turns": 5},
                 ],
             },
         },
@@ -53,7 +54,7 @@ def test_builds_nested_team_with_shared_llms() -> None:
     )
 
     assert isinstance(team, Sequential)
-    a, fan, chat, lead = team.members
+    a, fan, chat, lead, boss = team.members
     assert isinstance(a, Agent)
     assert [s.name for s in a.toolkit.specs] == ["word_count"]
     assert isinstance(fan, Parallel)
@@ -62,6 +63,8 @@ def test_builds_nested_team_with_shared_llms() -> None:
     assert chat.rounds == 3
     assert isinstance(lead, Agent)
     assert [s.name for s in lead.toolkit.specs] == ["f"]
+    assert isinstance(boss, Leader)
+    assert boss.max_turns == 5
     assert factory.options == [{"model": "m1"}, {"model": "m1", "effort": "low"}]
 
 
@@ -116,7 +119,7 @@ def test_load_team_rejects_non_mapping(tmp_path: Path) -> None:
         load_team(path)
 
 
-def test_leader_shorthand_makes_a_supervisor_over_other_nodes() -> None:
+def test_leader_shorthand_makes_a_leader_over_other_nodes() -> None:
     team = build_team(
         {
             "leader": "lead",
@@ -129,11 +132,10 @@ def test_leader_shorthand_makes_a_supervisor_over_other_nodes() -> None:
         llm_factory=RecordingFactory(),
     )
 
-    assert isinstance(team, Agent)
+    assert isinstance(team, Leader)
     assert team.name == "lead"
-    assert team.instructions.startswith("Run the team.")
-    assert "researcher: Collects facts." in team.instructions
-    assert [s.name for s in team.toolkit.specs] == ["researcher", "reviewers"]
+    assert team.instructions == "Run the team."
+    assert [m.name for m in team.members] == ["researcher", "reviewers"]
 
 
 def test_leader_without_instructions_gets_default_lead_prompt() -> None:
@@ -141,8 +143,8 @@ def test_leader_without_instructions_gets_default_lead_prompt() -> None:
         {"leader": "lead", "nodes": [{"name": "lead"}, {"name": "worker"}]},
         llm_factory=RecordingFactory(),
     )
-    assert isinstance(team, Agent)
-    assert "break it into tasks" in team.instructions
+    assert isinstance(team, Leader)
+    assert "assign_task" in team.instructions
 
 
 @pytest.mark.parametrize(

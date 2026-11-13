@@ -13,7 +13,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from .types import Reply, Result, ToolCall, ToolResult
+from ._text import clip
+from .types import Reply, Result, Task, ToolCall, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,16 @@ class ToolFinished(Event):
     result: ToolResult
 
 
+@dataclass(frozen=True)
+class TaskAssigned(Event):
+    task: Task
+
+
+@dataclass(frozen=True)
+class TaskFinished(Event):
+    task: Task
+
+
 E = TypeVar("E", bound=Event)
 Handler = Callable[[E], Awaitable[None] | None]
 
@@ -76,12 +87,14 @@ class Hooks:
 
 
 _FORMATS: dict[type[Event], Callable[[Any], str]] = {
-    RunStarted: lambda e: f"▶ start: {_clip(e.task)}",
-    RunFinished: lambda e: f"■ done: {_clip(e.result.output)}",
-    ToolStarted: lambda e: f"→ {e.call.name}({_clip(str(dict(e.call.arguments)))})",
+    RunStarted: lambda e: f"▶ start: {clip(e.task)}",
+    RunFinished: lambda e: f"■ done: {clip(e.result.output)}",
+    ToolStarted: lambda e: f"→ {e.call.name}({clip(str(dict(e.call.arguments)))})",
     ToolFinished: lambda e: (
-        f"← {e.call.name}{' [error]' if e.result.is_error else ''}: {_clip(e.result.content)}"
+        f"← {e.call.name}{' [error]' if e.result.is_error else ''}: {clip(e.result.content)}"
     ),
+    TaskAssigned: lambda e: f"+ {e.task.id} → {e.task.assignee}: {clip(e.task.instruction)}",
+    TaskFinished: lambda e: f"✓ {e.task.id} {e.task.status}: {clip(e.task.output)}",
 }
 
 
@@ -95,11 +108,6 @@ def trace(hooks: Hooks, write: Callable[[str], None] = print) -> Hooks:
 
     hooks.on(Event, log)
     return hooks
-
-
-def _clip(text: str, limit: int = 120) -> str:
-    flat = " ".join(text.split())
-    return flat if len(flat) <= limit else f"{flat[: limit - 1]}…"
 
 
 async def _call_safely(handler: Handler[Any], event: Event) -> None:

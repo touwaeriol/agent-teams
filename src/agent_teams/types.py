@@ -90,3 +90,23 @@ class Result:
     name: str
     output: str
     children: tuple[Result, ...] = field(default=())
+
+
+TaskStatus: TypeAlias = Literal["pending", "running", "done", "failed", "cancelled"]
+FINAL_STATUSES: frozenset[TaskStatus] = frozenset({"done", "failed", "cancelled"})
+
+
+@dataclass(frozen=True)
+class Task:
+    """A unit of work the leader handed to a team member (immutable snapshot)."""
+
+    id: str
+    assignee: str
+    instruction: str
+    depends_on: tuple[str, ...] = ()
+    status: TaskStatus = "pending"
+    output: str = ""
+
+    @property
+    def finished(self) -> bool:
+        return self.status in FINAL_STATUSES
