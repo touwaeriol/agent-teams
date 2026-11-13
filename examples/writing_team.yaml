@@ -1,0 +1,24 @@
+# Pipeline: each member works on the previous member's output.
+#   agent-teams run examples/writing_team.yaml "Write a short article about tidal energy"
+llm:
+  model: claude-opus-5-5
+  effort: high
+
+team:
+  type: sequential
+  name: writing-team
+  description: Researches, drafts and edits a short article.
+  members:
+    - name: researcher
+      instructions: >
+        Collect the key facts, figures and open questions for the topic.
+        Output a concise bullet list; do not write prose.
+    - name: writer
+      instructions: >
+        Turn the research notes you receive into a clear, well-structured
+        article of about 500 words with a title.
+    - name: editor
+      llm: {effort: medium}
+      instructions: >
+        Edit the draft you receive for clarity, accuracy and flow.
+        Return only the final article.

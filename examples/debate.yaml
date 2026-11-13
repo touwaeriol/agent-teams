@@ -1,0 +1,21 @@
+# Discussion: members take turns seeing the transcript; a judge decides.
+#   agent-teams run examples/debate.yaml "Should our team adopt a monorepo?"
+llm:
+  model: claude-opus-5-5
+  effort: medium
+
+team:
+  type: round_robin
+  name: debate
+  rounds: 2
+  members:
+    - name: advocate
+      instructions: Argue for the proposal. Respond to the latest counterpoints in under 150 words.
+    - name: skeptic
+      instructions: Argue against the proposal. Respond to the latest points in under 150 words.
+  finalizer:
+    name: judge
+    llm: {effort: high}
+    instructions: >
+      Weigh the debate you receive and give a recommendation with the two or three
+      deciding reasons.

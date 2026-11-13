@@ -1,0 +1,17 @@
+# Supervisor: a lead agent delegates to members through auto-generated tools.
+# Tool references are "module:attribute"; run from the repository root with
+#   python -m agent_teams run examples/research_supervisor.yaml "Compare SQLite and DuckDB for analytics"
+llm:
+  model: claude-opus-5-5
+
+team:
+  type: supervisor
+  name: research-lead
+  members:
+    - name: analyst
+      description: Breaks a question down and analyses trade-offs.
+      instructions: Analyse the task you receive and list the trade-offs with evidence.
+    - name: summarizer
+      description: Writes tight executive summaries.
+      instructions: Summarize what you receive in at most five bullet points.
+      tools: ["examples.tools:word_count"]
