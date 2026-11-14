@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/assign_task.json",
+  "title": "AssignTaskInput",
+  "description": "Create a task under a main task. assignee is an instance name (dev-2) to assign directly, or a role name (dev) to put it in the task pool where the first free instance claims it.",
+  "x-tool": {
+    "tiers": [
+      "lead"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "assignee",
+    "instruction",
+    "main"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "assignee": {
+      "type": "string",
+      "minLength": 1
+    },
+    "instruction": {
+      "type": "string",
+      "minLength": 1
+    },
+    "main": {
+      "description": "Title of the main task (plan step) this belongs to.",
+      "type": "string",
+      "minLength": 1
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {
+        "$ref": "common.json#/$defs/TaskId"
+      }
+    },
+    "kind": {
+      "$ref": "common.json#/$defs/TaskKind"
+    }
+  },
+  "$defs": {
+    "AssignTaskResult": {
+      "title": "AssignTaskResult",
+      "type": "object",
+      "required": [
+        "task_id",
+        "status",
+        "pooled"
+      ],
+      "properties": {
+        "task_id": {
+          "$ref": "common.json#/$defs/TaskId"
+        },
+        "status": {
+          "$ref": "common.json#/$defs/TaskStatus"
+        },
+        "pooled": {
+          "description": "true when assigned to a role (task pool).",
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

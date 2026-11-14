@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/session.interrupted.json",
+  "title": "SessionInterrupted",
+  "description": "Result of session.interrupt.",
+  "x-direction": "node_to_console",
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "session_id"
+  ],
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "open_gen": {
+      "$ref": "common.json#/$defs/OpenGen"
+    },
+    "queued_msg_ids": {
+      "description": "Messages still queued in the SDK, mapped back to msg_id.",
+      "type": "array",
+      "items": {
+        "$ref": "common.json#/$defs/MsgId"
+      }
+    }
+  }
+}

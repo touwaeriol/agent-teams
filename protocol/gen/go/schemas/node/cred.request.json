@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/cred.request.json",
+  "title": "CredRequest",
+  "description": "Credential helper asks for a short-lived token. Unreliable, retried after 10 s with the same req_id; never logged.",
+  "x-direction": "node_to_console",
+  "x-key": [
+    "req_id"
+  ],
+  "x-reliable": false,
+  "type": "object",
+  "required": [
+    "req_id",
+    "host",
+    "path",
+    "purpose"
+  ],
+  "properties": {
+    "req_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "job_id": {
+      "$ref": "common.json#/$defs/JobId"
+    },
+    "open_gen": {
+      "$ref": "common.json#/$defs/OpenGen"
+    },
+    "host": {
+      "type": "string"
+    },
+    "path": {
+      "description": "owner/name.git",
+      "type": "string"
+    },
+    "purpose": {
+      "type": "string",
+      "enum": [
+        "read",
+        "push"
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "session_id"
+      ]
+    },
+    {
+      "required": [
+        "job_id"
+      ]
+    }
+  ]
+}

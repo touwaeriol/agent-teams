@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/approval.cancel.json",
+  "title": "ApprovalCancel",
+  "description": "A pending approval went away; the console marks the card cancelled.",
+  "x-direction": "node_to_console",
+  "x-key": [
+    "approval_id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "approval_id",
+    "reason"
+  ],
+  "properties": {
+    "approval_id": {
+      "$ref": "common.json#/$defs/ApprovalId"
+    },
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "interrupted",
+        "session_closed",
+        "codex_resolved",
+        "process_restarted"
+      ]
+    }
+  }
+}

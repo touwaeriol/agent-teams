@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/git.cleanup.json",
+  "title": "GitCleanup",
+  "description": "Remove worktrees (keeping unpushed work when asked) and prune.",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "job_id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "job_id",
+    "shared",
+    "paths"
+  ],
+  "properties": {
+    "job_id": {
+      "$ref": "common.json#/$defs/JobId"
+    },
+    "shared": {
+      "$ref": "common.json#/$defs/RelPath"
+    },
+    "paths": {
+      "type": "array",
+      "items": {
+        "$ref": "common.json#/$defs/RelPath"
+      }
+    },
+    "keep_unpushed": {
+      "type": "boolean",
+      "default": true
+    },
+    "remove_shared_if_empty": {
+      "type": "boolean",
+      "default": false
+    },
+    "delete_local_branches": {
+      "type": "boolean",
+      "default": true
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/finish.json",
+  "title": "FinishInput",
+  "description": "Write the thread summary (before review or when done); it is also added to the project memory.",
+  "x-tool": {
+    "tiers": [
+      "lead"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "summary"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

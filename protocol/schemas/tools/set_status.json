@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/set_status.json",
+  "title": "SetStatusInput",
+  "description": "Set your speech-bubble text in the office (one short sentence on what you are doing). Call it when you switch work; it does not change your state or position and expires after 10 minutes.",
+  "x-tool": {
+    "tiers": [
+      "coordinator",
+      "lead",
+      "member"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "text"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "kind": {
+      "$ref": "common.json#/$defs/BubbleKind"
+    }
+  }
+}

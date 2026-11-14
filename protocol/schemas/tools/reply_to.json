@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/reply_to.json",
+  "title": "ReplyToInput",
+  "description": "Answer a member's question (\"[Question q3 from dev-1 ...]\"). Answer quickly: the member is blocked until you do.",
+  "x-tool": {
+    "tiers": [
+      "lead"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "question_id",
+    "answer"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "question_id": {
+      "$ref": "common.json#/$defs/QuestionId"
+    },
+    "answer": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

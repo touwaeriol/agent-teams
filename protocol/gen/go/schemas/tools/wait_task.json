@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/wait_task.json",
+  "title": "WaitTaskInput",
+  "description": "Wait until one of your subtasks finishes and return its result. Only for roles with can_delegate.",
+  "x-tool": {
+    "tiers": [
+      "member"
+    ],
+    "blocking": [
+      "member"
+    ],
+    "requires": "can_delegate"
+  },
+  "type": "object",
+  "required": [
+    "task_id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "task_id": {
+      "$ref": "common.json#/$defs/TaskId"
+    }
+  },
+  "$defs": {
+    "WaitTaskResult": {
+      "title": "WaitTaskResult",
+      "$ref": "common.json#/$defs/TaskOutcome"
+    }
+  }
+}

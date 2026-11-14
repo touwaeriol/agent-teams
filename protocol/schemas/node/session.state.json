@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/session.state.json",
+  "title": "SessionState",
+  "description": "Session lifecycle state.",
+  "x-direction": "node_to_console",
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "session_id",
+    "state"
+  ],
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "open_gen": {
+      "$ref": "common.json#/$defs/OpenGen"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "starting",
+        "active",
+        "turn_running",
+        "parked",
+        "queued",
+        "closed",
+        "crashed"
+      ]
+    },
+    "detail": {
+      "type": "string"
+    }
+  }
+}

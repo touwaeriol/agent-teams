@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/session.close.json",
+  "title": "SessionClose",
+  "description": "Close a session.",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "session_id",
+    "open_gen"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "session_id"
+  ],
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "open_gen": {
+      "$ref": "common.json#/$defs/OpenGen"
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "thread_done",
+        "employee_removed",
+        "policy_violation",
+        "node_drain"
+      ]
+    },
+    "forget": {
+      "description": "Also delete the local session record (SDK transcript is kept 7 days).",
+      "type": "boolean",
+      "default": false
+    }
+  }
+}

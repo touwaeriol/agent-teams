@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/tool.result.json",
+  "title": "ToolResult",
+  "description": "Result of a tool.call; ok=false becomes an MCP isError result.",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "call_id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "session_id",
+    "call_id",
+    "ok",
+    "content"
+  ],
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "call_id": {
+      "$ref": "common.json#/$defs/CallId"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "content": {
+      "type": "array",
+      "items": {
+        "$ref": "common.json#/$defs/ContentBlock"
+      }
+    },
+    "structured": {
+      "description": "Optional structured result matching the tool result schema; null when the tool only returns text.",
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  }
+}

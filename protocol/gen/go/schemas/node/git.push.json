@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/git.push.json",
+  "title": "GitPush",
+  "description": "Push an employee branch with a one-job write token; refspec target must be refs/heads/thread/<thread_no>/<employee>.",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "job_id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "job_id",
+    "project_id",
+    "repo",
+    "cwd",
+    "refspec",
+    "employee",
+    "thread_no"
+  ],
+  "properties": {
+    "job_id": {
+      "$ref": "common.json#/$defs/JobId"
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repo": {
+      "$ref": "common.json#/$defs/Repo"
+    },
+    "cwd": {
+      "$ref": "common.json#/$defs/RelPath"
+    },
+    "refspec": {
+      "description": "No leading +.",
+      "type": "string",
+      "pattern": "^[^+][^:]*:refs/heads/thread/[0-9]+/[^/]+$"
+    },
+    "employee": {
+      "type": "string",
+      "minLength": 1
+    },
+    "thread_no": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "force_with_lease": {
+      "description": "Expected remote sha; only for member branches after conflict repair.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,64}$"
+    }
+  }
+}

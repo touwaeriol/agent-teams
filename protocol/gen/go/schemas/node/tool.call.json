@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/tool.call.json",
+  "title": "ToolCall",
+  "description": "An employee called a platform tool.",
+  "x-direction": "node_to_console",
+  "x-key": [
+    "session_id",
+    "call_id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "call_id",
+    "session_id",
+    "tool",
+    "args"
+  ],
+  "properties": {
+    "call_id": {
+      "$ref": "common.json#/$defs/CallId"
+    },
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "open_gen": {
+      "$ref": "common.json#/$defs/OpenGen"
+    },
+    "tool": {
+      "description": "Platform tool name without the mcp__platform__ prefix.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "args": {
+      "description": "Tool input; validated by the console against /protocol/schemas/tools/<tool>.json.",
+      "type": "object"
+    },
+    "tool_use_id": {
+      "description": "Claude tool_use_id or Codex item id, for diagnostics only.",
+      "type": "string"
+    }
+  }
+}

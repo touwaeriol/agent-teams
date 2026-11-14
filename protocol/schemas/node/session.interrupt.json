@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/session.interrupt.json",
+  "title": "SessionInterrupt",
+  "description": "Interrupt the running turn.",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "session_id"
+  ],
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "user_stop",
+        "thread_paused",
+        "superseded"
+      ]
+    }
+  }
+}

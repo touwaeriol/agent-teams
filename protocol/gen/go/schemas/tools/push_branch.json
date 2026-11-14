@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/push_branch.json",
+  "title": "PushBranchInput",
+  "description": "Push the HEAD of your worktree to your member branch (thread/<no>/<name>). You have no write token yourself; commit first, then call this.",
+  "x-tool": {
+    "tiers": [
+      "member"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {},
+  "$defs": {
+    "PushBranchResult": {
+      "title": "PushBranchResult",
+      "type": "object",
+      "required": [
+        "branch",
+        "head_sha"
+      ],
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

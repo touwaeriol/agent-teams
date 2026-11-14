@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/approval.ack.json",
+  "title": "ApprovalAck",
+  "description": "The daemon applied approval.resolve (stale = the pending request no longer existed).",
+  "x-direction": "node_to_console",
+  "x-key": [
+    "approval_id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "approval_id"
+  ],
+  "properties": {
+    "approval_id": {
+      "$ref": "common.json#/$defs/ApprovalId"
+    },
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "stale": {
+      "type": "boolean",
+      "default": false
+    }
+  }
+}

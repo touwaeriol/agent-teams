@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/enqueue_merge.json",
+  "title": "EnqueueMergeInput",
+  "description": "Put a member branch into the merge queue (merged into the thread branch on GitHub, then CI). Give either member or task_id; the platform pushes the branch first.",
+  "x-tool": {
+    "tiers": [
+      "lead"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "member": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_id": {
+      "$ref": "common.json#/$defs/TaskId"
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "member"
+      ]
+    },
+    {
+      "required": [
+        "task_id"
+      ]
+    }
+  ],
+  "$defs": {
+    "EnqueueMergeResult": {
+      "title": "EnqueueMergeResult",
+      "type": "object",
+      "required": [
+        "entry_id",
+        "position"
+      ],
+      "properties": {
+        "entry_id": {
+          "type": "string"
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

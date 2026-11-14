@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/sessions.report.json",
+  "title": "SessionsReport",
+  "description": "Sessions currently present on the node; the orchestrator reconciles against it.",
+  "x-direction": "node_to_console",
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "sessions"
+  ],
+  "properties": {
+    "sessions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SessionReportItem"
+      }
+    }
+  },
+  "$defs": {
+    "SessionReportItem": {
+      "title": "SessionReportItem",
+      "type": "object",
+      "required": [
+        "session_id",
+        "open_gen",
+        "state",
+        "kind"
+      ],
+      "properties": {
+        "session_id": {
+          "$ref": "common.json#/$defs/SessionId"
+        },
+        "open_gen": {
+          "$ref": "common.json#/$defs/OpenGen"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "parked",
+            "turn_running",
+            "closed"
+          ]
+        },
+        "kind": {
+          "$ref": "common.json#/$defs/Runtime"
+        },
+        "sdk_session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "codex_thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pending_approvals": {
+          "type": "array",
+          "items": {
+            "$ref": "common.json#/$defs/ApprovalId"
+          }
+        },
+        "pending_tool_calls": {
+          "type": "array",
+          "items": {
+            "$ref": "common.json#/$defs/CallId"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/ack.json",
+  "title": "Ack",
+  "description": "Cumulative ACK: every reliable message with seq <= N has been durably processed. Sent at least every 200 ms or every 50 messages.",
+  "x-direction": "both",
+  "x-reliable": false,
+  "type": "object",
+  "required": [
+    "seq"
+  ],
+  "properties": {
+    "seq": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

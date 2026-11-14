@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/envelope.json",
+  "title": "Envelope",
+  "description": "Every frame is one JSON object with this envelope. Receivers ignore unknown fields.",
+  "type": "object",
+  "required": [
+    "v",
+    "type",
+    "id",
+    "ts",
+    "body"
+  ],
+  "properties": {
+    "v": {
+      "description": "Envelope version.",
+      "const": 2
+    },
+    "type": {
+      "description": "Message type, e.g. session.send.",
+      "type": "string",
+      "minLength": 1
+    },
+    "id": {
+      "description": "Message id: c_ + ULID from the console, n_ + ULID from the daemon.",
+      "type": "string",
+      "pattern": "^[cn]_"
+    },
+    "seq": {
+      "description": "Only on reliable messages: monotonically increasing per sender within one node.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "ts": {
+      "$ref": "common.json#/$defs/Timestamp"
+    },
+    "trace": {
+      "description": "Optional W3C traceparent.",
+      "type": "string"
+    },
+    "body": {
+      "description": "Type-specific fields.",
+      "type": "object"
+    }
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/get_task.json",
+  "title": "GetTaskInput",
+  "description": "Show a task: instruction, status, dependencies and result.",
+  "x-tool": {
+    "tiers": [
+      "member"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "task_id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "task_id": {
+      "$ref": "common.json#/$defs/TaskId"
+    }
+  },
+  "$defs": {
+    "GetTaskResult": {
+      "title": "GetTaskResult",
+      "type": "object",
+      "required": [
+        "task_id",
+        "instruction",
+        "status"
+      ],
+      "properties": {
+        "task_id": {
+          "$ref": "common.json#/$defs/TaskId"
+        },
+        "instruction": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "common.json#/$defs/TaskStatus"
+        },
+        "assignee": {
+          "type": "string"
+        },
+        "claimed_by": {
+          "type": "string"
+        },
+        "main": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "common.json#/$defs/TaskKind"
+        },
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "$ref": "common.json#/$defs/TaskId"
+          }
+        },
+        "summary": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

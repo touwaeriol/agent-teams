@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/hello.json",
+  "title": "Hello",
+  "description": "First frame from the daemon after connecting.",
+  "x-direction": "node_to_console",
+  "x-reliable": false,
+  "type": "object",
+  "required": [
+    "protocols",
+    "daemon",
+    "epoch",
+    "last_seq",
+    "acked_cmd_seq",
+    "host",
+    "root"
+  ],
+  "properties": {
+    "protocols": {
+      "description": "Supported protocol versions, highest priority first.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "daemon": {
+      "$ref": "#/$defs/DaemonInfo"
+    },
+    "epoch": {
+      "description": "Outbox epoch; changes only when the state directory is wiped.",
+      "type": "string",
+      "minLength": 1
+    },
+    "last_seq": {
+      "description": "Highest seq sent in this epoch.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "acked_cmd_seq": {
+      "description": "Highest console command seq executed and persisted.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "host": {
+      "type": "string"
+    },
+    "root": {
+      "description": "Absolute daemon root directory.",
+      "type": "string"
+    },
+    "capacity": {
+      "$ref": "#/$defs/Capacity"
+    },
+    "runtimes": {
+      "$ref": "#/$defs/Runtimes"
+    },
+    "features": {
+      "description": "Feature names, e.g. sessions, codex_app_server, git_worktree, cred_helper, upgrade.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "isolated": {
+      "type": "boolean"
+    },
+    "isolation": {
+      "description": "Isolation level probed at startup (architecture.md 10.3).",
+      "type": "string",
+      "enum": [
+        "agent_user",
+        "sandbox",
+        "none"
+      ]
+    }
+  },
+  "$defs": {
+    "DaemonInfo": {
+      "title": "DaemonInfo",
+      "type": "object",
+      "required": [
+        "version"
+      ],
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "build": {
+          "type": "string"
+        },
+        "node": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        }
+      }
+    },
+    "Capacity": {
+      "title": "Capacity",
+      "type": "object",
+      "properties": {
+        "max_active_sessions": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cpus": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "mem_mb": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "Runtimes": {
+      "title": "Runtimes",
+      "type": "object",
+      "properties": {
+        "claude": {
+          "$ref": "#/$defs/ClaudeRuntime"
+        },
+        "codex": {
+          "$ref": "#/$defs/CodexRuntime"
+        }
+      }
+    },
+    "ClaudeRuntime": {
+      "title": "ClaudeRuntime",
+      "type": "object",
+      "properties": {
+        "sdk": {
+          "type": "string"
+        },
+        "cli": {
+          "type": "string"
+        },
+        "auth": {
+          "type": "string",
+          "enum": [
+            "subscription",
+            "api_key",
+            "none"
+          ]
+        }
+      }
+    },
+    "CodexRuntime": {
+      "title": "CodexRuntime",
+      "type": "object",
+      "properties": {
+        "cli": {
+          "type": "string"
+        },
+        "auth": {
+          "type": "string",
+          "enum": [
+            "api_key",
+            "chatgpt",
+            "none"
+          ]
+        },
+        "sandbox_ok": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

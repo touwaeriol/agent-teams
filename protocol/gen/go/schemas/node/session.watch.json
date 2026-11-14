@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/session.watch.json",
+  "title": "SessionWatch",
+  "description": "Turn stream.delta on/off while someone watches live output.",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "session_id",
+    "on"
+  ],
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "on": {
+      "type": "boolean"
+    }
+  }
+}

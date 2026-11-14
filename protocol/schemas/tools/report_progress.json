@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/report_progress.json",
+  "title": "ReportProgressInput",
+  "description": "Report progress on your task (shown in the thread activity).",
+  "x-tool": {
+    "tiers": [
+      "member"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "text"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "text": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

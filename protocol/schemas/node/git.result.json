@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/git.result.json",
+  "title": "GitResult",
+  "description": "Result of any git.* job.",
+  "x-direction": "node_to_console",
+  "x-key": [
+    "job_id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "job_id",
+    "ok"
+  ],
+  "properties": {
+    "job_id": {
+      "$ref": "common.json#/$defs/JobId"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "head_sha": {
+      "type": "string"
+    },
+    "created": {
+      "description": "git.prepare: the worktree/clone was created by this job.",
+      "type": "boolean"
+    },
+    "log_tail": {
+      "type": "string"
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "error_code": {
+      "type": "string",
+      "enum": [
+        "clone_failed",
+        "fetch_failed",
+        "not_a_repo",
+        "dirty_conflict",
+        "path_outside_root",
+        "locked_timeout",
+        "rejected_non_ff",
+        "workflow_permission",
+        "auth_failed",
+        "refspec_not_allowed"
+      ]
+    },
+    "error": {
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/GitCheckoutStatus"
+    },
+    "removed": {
+      "description": "git.cleanup.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "kept": {
+      "description": "git.cleanup.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/GitKeptPath"
+      }
+    }
+  },
+  "$defs": {
+    "GitCheckoutStatus": {
+      "title": "GitCheckoutStatus",
+      "type": "object",
+      "required": [
+        "branch",
+        "head_sha",
+        "ahead",
+        "behind",
+        "dirty_files",
+        "unpushed_commits"
+      ],
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "ahead": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "behind": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dirty_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unpushed_commits": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "GitKeptPath": {
+      "title": "GitKeptPath",
+      "type": "object",
+      "required": [
+        "path",
+        "reason"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

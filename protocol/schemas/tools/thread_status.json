@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/thread_status.json",
+  "title": "ThreadStatusInput",
+  "description": "Show one thread: plan, recent activity, the lead's latest reply and the PR.",
+  "x-tool": {
+    "tiers": [
+      "coordinator"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "no"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "no": {
+      "$ref": "common.json#/$defs/ThreadNo"
+    }
+  },
+  "$defs": {
+    "ThreadStatusResult": {
+      "title": "ThreadStatusResult",
+      "type": "object",
+      "required": [
+        "no",
+        "title",
+        "status",
+        "plan"
+      ],
+      "properties": {
+        "no": {
+          "$ref": "common.json#/$defs/ThreadNo"
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "common.json#/$defs/ThreadStatus"
+        },
+        "plan": {
+          "type": "array",
+          "items": {
+            "$ref": "common.json#/$defs/PlanStep"
+          }
+        },
+        "recent": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "lead_last_reply": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pr_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

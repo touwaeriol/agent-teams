@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/node.upgrade.json",
+  "title": "NodeUpgrade",
+  "description": "Upgrade the daemon. The download URL is fixed: <console>/node/dist/agent-teams-node-<version>.tgz; sha256 and the Ed25519 release signature are verified.",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "version",
+    "sha256",
+    "signature"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "signature": {
+      "description": "Base64 Ed25519 signature of the tgz.",
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

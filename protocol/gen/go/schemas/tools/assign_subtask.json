@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/assign_subtask.json",
+  "title": "AssignSubtaskInput",
+  "description": "Create a subtask of your current task for a teammate (instance or role name); returns the task id at once. Only for roles with can_delegate.",
+  "x-tool": {
+    "tiers": [
+      "member"
+    ],
+    "blocking": [],
+    "requires": "can_delegate"
+  },
+  "type": "object",
+  "required": [
+    "assignee",
+    "instruction"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "assignee": {
+      "type": "string",
+      "minLength": 1
+    },
+    "instruction": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "$defs": {
+    "AssignSubtaskResult": {
+      "title": "AssignSubtaskResult",
+      "type": "object",
+      "required": [
+        "task_id"
+      ],
+      "properties": {
+        "task_id": {
+          "$ref": "common.json#/$defs/TaskId"
+        }
+      }
+    }
+  }
+}

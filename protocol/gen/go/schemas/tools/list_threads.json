@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/list_threads.json",
+  "title": "ListThreadsInput",
+  "description": "List threads, one line each: number, title, status, main-task progress and how many items wait for the user.",
+  "x-tool": {
+    "tiers": [
+      "coordinator"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "$ref": "common.json#/$defs/ThreadStatus"
+    }
+  },
+  "$defs": {
+    "ListThreadsResult": {
+      "title": "ListThreadsResult",
+      "type": "object",
+      "required": [
+        "threads"
+      ],
+      "properties": {
+        "threads": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ThreadSummary"
+          }
+        }
+      }
+    },
+    "ThreadSummary": {
+      "title": "ThreadSummary",
+      "type": "object",
+      "required": [
+        "no",
+        "title",
+        "status",
+        "plan_done",
+        "plan_total",
+        "waiting"
+      ],
+      "properties": {
+        "no": {
+          "$ref": "common.json#/$defs/ThreadNo"
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "common.json#/$defs/ThreadStatus"
+        },
+        "plan_done": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "plan_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "waiting": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

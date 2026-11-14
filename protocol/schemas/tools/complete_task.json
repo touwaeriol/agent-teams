@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/complete_task.json",
+  "title": "CompleteTaskInput",
+  "description": "Finish your current task explicitly; the platform pushes your branch first. Use status failed when you cannot finish it.",
+  "x-tool": {
+    "tiers": [
+      "member"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "task_id",
+    "summary"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "task_id": {
+      "$ref": "common.json#/$defs/TaskId"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "done",
+        "failed"
+      ],
+      "default": "done"
+    },
+    "artifacts": {
+      "description": "Paths, commit SHAs or URLs produced by the task.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "CompleteTaskResult": {
+      "title": "CompleteTaskResult",
+      "type": "object",
+      "required": [
+        "task_id",
+        "status"
+      ],
+      "properties": {
+        "task_id": {
+          "$ref": "common.json#/$defs/TaskId"
+        },
+        "status": {
+          "$ref": "common.json#/$defs/TaskStatus"
+        },
+        "head_sha": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

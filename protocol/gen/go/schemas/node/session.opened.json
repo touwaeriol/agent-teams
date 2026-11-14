@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/session.opened.json",
+  "title": "SessionOpened",
+  "description": "Result of session.open.",
+  "x-direction": "node_to_console",
+  "x-key": [
+    "session_id",
+    "open_gen"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "session_id",
+    "open_gen"
+  ],
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "open_gen": {
+      "$ref": "common.json#/$defs/OpenGen"
+    },
+    "sdk_session_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "codex_thread_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "init": {
+      "$ref": "#/$defs/SessionInit"
+    },
+    "resume_failed": {
+      "description": "resume could not find the transcript/thread; the console runs the hand-over flow.",
+      "type": "boolean"
+    },
+    "error": {
+      "type": "string"
+    }
+  },
+  "if": {
+    "properties": {
+      "resume_failed": {
+        "const": true
+      }
+    },
+    "required": [
+      "resume_failed"
+    ]
+  },
+  "then": {
+    "required": [
+      "error"
+    ]
+  },
+  "else": {
+    "required": [
+      "init"
+    ]
+  },
+  "$defs": {
+    "SessionInit": {
+      "title": "SessionInit",
+      "description": "From initializationResult() (Codex: mcpServerStatus/list + sandbox config).",
+      "type": "object",
+      "required": [
+        "tools"
+      ],
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "permission_mode": {
+          "type": "string"
+        },
+        "claude_code_version": {
+          "type": "string"
+        },
+        "mcp_servers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/McpServerStatus"
+          }
+        }
+      }
+    },
+    "McpServerStatus": {
+      "title": "McpServerStatus",
+      "type": "object",
+      "required": [
+        "name",
+        "status"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

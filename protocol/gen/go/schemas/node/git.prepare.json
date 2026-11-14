@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/git.prepare.json",
+  "title": "GitPrepare",
+  "description": "Clone the shared repo and/or add the worktree (architecture.md 8.1). Idempotent.",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "job_id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "job_id",
+    "project_id",
+    "repo",
+    "mode",
+    "cwd",
+    "branch"
+  ],
+  "properties": {
+    "job_id": {
+      "$ref": "common.json#/$defs/JobId"
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repo": {
+      "$ref": "common.json#/$defs/Repo"
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "worktree",
+        "clone"
+      ]
+    },
+    "shared": {
+      "description": "Shared clone (worktree mode).",
+      "$ref": "common.json#/$defs/RelPath"
+    },
+    "cwd": {
+      "$ref": "common.json#/$defs/RelPath"
+    },
+    "branch": {
+      "type": "string",
+      "minLength": 1
+    },
+    "base": {
+      "description": "Branch to create from when branch does not exist yet.",
+      "type": "string"
+    },
+    "fetch": {
+      "type": "boolean",
+      "default": true
+    }
+  }
+}

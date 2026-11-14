@@ -1,0 +1,19 @@
+[
+{"why":"unreliable message carries seq","frame":{"v":2,"type":"stream.delta","id":"n_1","seq":5,"ts":"2026-11-14T12:00:00Z","body":{"session_id":"s_1","text":"x"}}},
+{"why":"reliable message without seq","frame":{"v":2,"type":"session.send","id":"c_1","ts":"2026-11-14T12:00:00Z","body":{"session_id":"s_1","msg_id":"m_1","text":"x"}}},
+{"why":"console message with daemon id prefix","frame":{"v":2,"type":"session.send","id":"n_1","seq":1,"ts":"2026-11-14T12:00:00Z","body":{"session_id":"s_1","msg_id":"m_1","text":"x"}}},
+{"why":"unknown type","frame":{"v":2,"type":"session.teleport","id":"c_1","seq":1,"ts":"2026-11-14T12:00:00Z","body":{}}},
+{"why":"wrong envelope version","frame":{"v":1,"type":"ack","id":"c_1","ts":"2026-11-14T12:00:00Z","body":{"seq":1}}},
+{"why":"bad timestamp","frame":{"v":2,"type":"ack","id":"c_1","ts":"yesterday","body":{"seq":1}}},
+{"why":"claude runtime without claude options","frame":{"v":2,"type":"session.open","id":"c_1","seq":1,"ts":"2026-11-14T12:00:00Z","body":{"session_id":"s_1","open_gen":1,"employee":{"name":"dev-1","tier":"member","project_id":"p"},"runtime":"claude","cwd":"projects/p","platform_tools":[]}}},
+{"why":"absolute cwd","frame":{"v":2,"type":"git.status","id":"c_1","seq":1,"ts":"2026-11-14T12:00:00Z","body":{"job_id":"g_1","cwd":"/etc"}}},
+{"why":"force push refspec","frame":{"v":2,"type":"git.push","id":"c_1","seq":1,"ts":"2026-11-14T12:00:00Z","body":{"job_id":"g_1","project_id":"p","repo":"o/r","cwd":"projects/p/t","refspec":"+HEAD:refs/heads/thread/1/dev-1","employee":"dev-1","thread_no":1}}},
+{"why":"push to the thread branch","frame":{"v":2,"type":"git.push","id":"c_1","seq":1,"ts":"2026-11-14T12:00:00Z","body":{"job_id":"g_1","project_id":"p","repo":"o/r","cwd":"projects/p/t","refspec":"HEAD:refs/heads/main","employee":"dev-1","thread_no":1}}},
+{"why":"text event without text","frame":{"v":2,"type":"session.event","id":"n_1","seq":1,"ts":"2026-11-14T12:00:00Z","body":{"session_id":"s_1","event_no":1,"kind":"text","at":"2026-11-14T12:00:00Z"}}},
+{"why":"cred.request for both session and job","frame":{"v":2,"type":"cred.request","id":"n_1","ts":"2026-11-14T12:00:00Z","body":{"req_id":"r","session_id":"s_1","job_id":"g_1","host":"github.com","path":"o/r.git","purpose":"read"}}},
+{"why":"ok cred.response without password","frame":{"v":2,"type":"cred.response","id":"c_1","ts":"2026-11-14T12:00:00Z","body":{"req_id":"r","ok":true,"username":"x"}}},
+{"why":"non-empty setting_sources","frame":{"v":2,"type":"session.open","id":"c_1","seq":1,"ts":"2026-11-14T12:00:00Z","body":{"session_id":"s_1","open_gen":1,"employee":{"name":"dev-1","tier":"member","project_id":"p"},"runtime":"claude","cwd":"projects/p","platform_tools":[],"claude":{"model":"m","tools":[],"allowed_tools":[],"permission_mode":"default","setting_sources":["project"]}}}},
+{"why":"upgrade with a non-semver version","frame":{"v":2,"type":"node.upgrade","id":"c_1","seq":1,"ts":"2026-11-14T12:00:00Z","body":{"version":"../../evil","sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","signature":"x"}}},
+{"why":"session.opened without init","frame":{"v":2,"type":"session.opened","id":"n_1","seq":1,"ts":"2026-11-14T12:00:00Z","body":{"session_id":"s_1","open_gen":1}}},
+{"why":"bad decided_by","frame":{"v":2,"type":"approval.resolve","id":"c_1","seq":1,"ts":"2026-11-14T12:00:00Z","body":{"approval_id":"ap_1","decision":"allow","decided_by":"somebody"}}}
+]

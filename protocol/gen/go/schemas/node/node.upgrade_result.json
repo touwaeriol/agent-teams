@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/node.upgrade_result.json",
+  "title": "NodeUpgradeResult",
+  "description": "Upgrade failure report (success shows up as a reconnect with the new version).",
+  "x-direction": "node_to_console",
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "ok"
+  ],
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "version": {
+      "type": "string"
+    },
+    "error": {
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/open_pr.json",
+  "title": "OpenPrInput",
+  "description": "Open the pull request from the thread branch to the base branch; the thread moves to review.",
+  "x-tool": {
+    "tiers": [
+      "lead"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "title",
+    "body"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "body": {
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "OpenPrResult": {
+      "title": "OpenPrResult",
+      "type": "object",
+      "required": [
+        "pr_number",
+        "pr_url"
+      ],
+      "properties": {
+        "pr_number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pr_url": {
+          "type": "string",
+          "format": "uri"
+        }
+      }
+    }
+  }
+}

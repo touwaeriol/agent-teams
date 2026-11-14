@@ -1,0 +1,43 @@
+{
+"valid": {
+"open_thread":[{"title":"Employee comms","brief":"Implement mail and questions.","roles":["dev","qa"]}],
+"list_threads":[{},{"status":"running"}],
+"thread_status":[{"no":12}],
+"message_thread":[{"no":12,"text":"Please prioritise the API."}],
+"ask_user":[{"question":"Which database?","options":["PostgreSQL","SQLite"]},{"question":"OK to deploy?"}],
+"remember":[{"text":"The user prefers small PRs."}],
+"set_status":[{"text":"Writing the migration"},{"text":"Need a decision","kind":"ask"}],
+"update_plan":[{"steps":[{"title":"Schema","status":"done"},{"title":"API","status":"doing"},{"title":"UI","status":"todo"}]}],
+"assign_task":[{"assignee":"dev","instruction":"Add the plan endpoint","main":"API","depends_on":["t3"],"kind":"work"},{"assignee":"dev-2","instruction":"Fix CI","main":"API"}],
+"list_tasks":[{},{"status":"pending"}],
+"cancel_task":[{"task_id":"t4","reason":"superseded"}],
+"reply_to":[{"question_id":"q3","answer":"Use at_main_tasks."}],
+"broadcast":[{"text":"Rebase on the thread branch."}],
+"send_message":[{"to":"lead","text":"Blocked on review."},{"to":"qa-1","text":"Ready to test."}],
+"enqueue_merge":[{"member":"dev-1"},{"task_id":"t7"}],
+"open_pr":[{"title":"Employee comms","body":"Closes #12"}],
+"finish":[{"summary":"Mail and questions shipped."}],
+"publish_deliverable":[{"kind":"doc","title":"Design notes","url":"https://example.com/doc"}],
+"complete_task":[{"task_id":"t8","summary":"Done, tests pass.","artifacts":["web/src/PlanList.tsx"]},{"task_id":"t9","summary":"Cannot reproduce.","status":"failed"}],
+"push_branch":[{}],
+"report_progress":[{"text":"Half way."}],
+"ask_lead":[{"question":"Which table holds plans?"}],
+"read_messages":[{}],
+"list_team":[{}],
+"get_task":[{"task_id":"t1"}],
+"request_review":[{"reviewer":"review","summary":"Please check the migration."}],
+"assign_subtask":[{"assignee":"dev-2","instruction":"Write the tests"}],
+"wait_task":[{"task_id":"t12"}]
+},
+"invalid": {
+"open_thread":[{"title":"x"}],
+"thread_status":[{"no":0}],
+"set_status":[{"text":"x","kind":"shout"}],
+"assign_task":[{"assignee":"dev","instruction":"x","main":"API","depends_on":["task-3"]}],
+"enqueue_merge":[{},{"member":"dev-1","task_id":"t7"}],
+"complete_task":[{"task_id":"t8","summary":"x","status":"maybe"}],
+"push_branch":[{"force":true}],
+"publish_deliverable":[{"kind":"doc","title":"x","url":"not a url"}],
+"reply_to":[{"question_id":"ap_1","answer":"x"}]
+}
+}

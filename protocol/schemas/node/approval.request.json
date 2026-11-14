@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/approval.request.json",
+  "title": "ApprovalRequest",
+  "description": "canUseTool / Codex requestApproval needs a decision.",
+  "x-direction": "node_to_console",
+  "x-key": [
+    "approval_id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "approval_id",
+    "session_id",
+    "source",
+    "tool_name",
+    "input",
+    "available"
+  ],
+  "properties": {
+    "approval_id": {
+      "$ref": "common.json#/$defs/ApprovalId"
+    },
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "open_gen": {
+      "$ref": "common.json#/$defs/OpenGen"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "claude_can_use_tool",
+        "codex_command",
+        "codex_file_change",
+        "codex_permissions",
+        "codex_mcp_elicitation"
+      ]
+    },
+    "tool_name": {
+      "type": "string"
+    },
+    "tool_use_id": {
+      "type": "string"
+    },
+    "input": {
+      "type": "object"
+    },
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "decision_reason": {
+      "type": "string"
+    },
+    "blocked_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "suggestions": {
+      "description": "SDK PermissionUpdate[], stored verbatim and returned on allow_always.",
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "diff": {
+      "description": "Codex fileChange diff.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "available": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "common.json#/$defs/ApprovalDecision"
+      }
+    }
+  }
+}

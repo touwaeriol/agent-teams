@@ -1,0 +1,446 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/session.open.json",
+  "title": "SessionOpen",
+  "description": "Open (or resume) a long-lived employee session on the node.",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "session_id",
+    "open_gen"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "session_id",
+    "open_gen",
+    "employee",
+    "runtime",
+    "cwd",
+    "platform_tools"
+  ],
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "open_gen": {
+      "$ref": "common.json#/$defs/OpenGen"
+    },
+    "employee": {
+      "$ref": "#/$defs/EmployeeRef"
+    },
+    "runtime": {
+      "$ref": "common.json#/$defs/Runtime"
+    },
+    "cwd": {
+      "$ref": "common.json#/$defs/RelPath"
+    },
+    "prepare": {
+      "description": "Key of the git.prepare job that must have succeeded first.",
+      "anyOf": [
+        {
+          "$ref": "common.json#/$defs/JobId"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "resume": {
+      "description": "null on first open.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ResumeRef"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "claude": {
+      "description": "Set when runtime = claude.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClaudeSessionOptions"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "codex": {
+      "description": "Set when runtime = codex.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CodexSessionOptions"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "platform_tools": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PlatformToolSpec"
+      }
+    },
+    "env": {
+      "description": "Extra non-secret environment; the daemon adds PATH/HOME/MCP_TOOL_TIMEOUT/git credential variables itself.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "git_credentials": {
+      "description": "Install the credential helper and gh wrapper.",
+      "type": "boolean"
+    },
+    "first_message": {
+      "description": "Held back until session.release.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FirstMessage"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "runtime": {
+            "const": "claude"
+          }
+        },
+        "required": [
+          "runtime"
+        ]
+      },
+      "then": {
+        "required": [
+          "claude"
+        ],
+        "properties": {
+          "claude": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "runtime": {
+            "const": "codex"
+          }
+        },
+        "required": [
+          "runtime"
+        ]
+      },
+      "then": {
+        "required": [
+          "codex"
+        ],
+        "properties": {
+          "codex": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "EmployeeRef": {
+      "title": "EmployeeRef",
+      "type": "object",
+      "required": [
+        "name",
+        "tier",
+        "project_id"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "type": "string"
+        },
+        "tier": {
+          "$ref": "common.json#/$defs/Tier"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "thread_no": {
+          "description": "null for the coordinator.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        }
+      }
+    },
+    "ResumeRef": {
+      "title": "ResumeRef",
+      "type": "object",
+      "minProperties": 1,
+      "properties": {
+        "sdk_session_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "codex_thread_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "ClaudeSessionOptions": {
+      "title": "ClaudeSessionOptions",
+      "type": "object",
+      "required": [
+        "model",
+        "tools",
+        "allowed_tools",
+        "permission_mode",
+        "setting_sources"
+      ],
+      "properties": {
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "effort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "system_append": {
+          "type": "string"
+        },
+        "tools": {
+          "description": "SDK options.tools; [] means no built-in tools.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowed_tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "disallowed_tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "permission_mode": {
+          "$ref": "common.json#/$defs/PermissionMode"
+        },
+        "allow_dangerously_skip_permissions": {
+          "description": "Required for bypassPermissions and session.set_mode to bypassPermissions.",
+          "type": "boolean"
+        },
+        "setting_sources": {
+          "description": "Always [] (architecture.md 6.1).",
+          "type": "array",
+          "maxItems": 0,
+          "items": {
+            "type": "string"
+          }
+        },
+        "max_turns": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "max_budget_usd": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "read_only": {
+          "description": "Lead and read_only roles: enables bash_policy and a sandbox without writable paths.",
+          "type": "boolean"
+        },
+        "bash_policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BashPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sandbox": {
+          "$ref": "#/$defs/SandboxPolicy"
+        },
+        "deny_non_platform_tools": {
+          "description": "Coordinator: PreToolUse hook rejects everything except mcp__platform__*.",
+          "type": "boolean"
+        },
+        "protected_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "BashPolicy": {
+      "title": "BashPolicy",
+      "description": "argv-parsed allow list for read-only sessions (not regex).",
+      "type": "object",
+      "required": [
+        "mode",
+        "allow"
+      ],
+      "properties": {
+        "mode": {
+          "const": "argv"
+        },
+        "allow": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deny_flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deny_metachar": {
+          "type": "boolean"
+        }
+      }
+    },
+    "SandboxPolicy": {
+      "title": "SandboxPolicy",
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "write_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "extra_write_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deny_read": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "CodexSessionOptions": {
+      "title": "CodexSessionOptions",
+      "type": "object",
+      "required": [
+        "model",
+        "sandbox",
+        "approval_policy"
+      ],
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "sandbox": {
+          "type": "string",
+          "enum": [
+            "read-only",
+            "workspace-write",
+            "danger-full-access"
+          ]
+        },
+        "approval_policy": {
+          "type": "string",
+          "enum": [
+            "never",
+            "on-request",
+            "on-failure",
+            "untrusted"
+          ]
+        },
+        "developer_instructions": {
+          "type": "string"
+        },
+        "config": {
+          "description": "Extra thread/start config (e.g. sandbox_workspace_write.writable_roots); mcp_servers.platform is filled in by the daemon.",
+          "type": "object"
+        }
+      }
+    },
+    "PlatformToolSpec": {
+      "title": "PlatformToolSpec",
+      "description": "One platform tool, from /protocol/schemas/tools.",
+      "type": "object",
+      "required": [
+        "name",
+        "description",
+        "input_schema",
+        "blocking"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "description": {
+          "type": "string"
+        },
+        "input_schema": {
+          "type": "object"
+        },
+        "blocking": {
+          "type": "boolean"
+        }
+      }
+    },
+    "FirstMessage": {
+      "title": "FirstMessage",
+      "type": "object",
+      "required": [
+        "msg_id",
+        "text"
+      ],
+      "properties": {
+        "msg_id": {
+          "$ref": "common.json#/$defs/MsgId"
+        },
+        "text": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

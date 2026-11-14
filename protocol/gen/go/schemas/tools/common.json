@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/common.json",
+  "title": "ToolCommon",
+  "description": "Shared definitions for platform tool inputs and results.",
+  "$defs": {
+    "TaskId": {
+      "title": "TaskId",
+      "type": "string",
+      "pattern": "^t[0-9]+$"
+    },
+    "QuestionId": {
+      "title": "QuestionId",
+      "type": "string",
+      "pattern": "^q[0-9]+$"
+    },
+    "ThreadNo": {
+      "title": "ThreadNo",
+      "description": "Thread number inside the project (#12).",
+      "type": "integer",
+      "minimum": 1
+    },
+    "ThreadStatus": {
+      "title": "ThreadStatus",
+      "type": "string",
+      "enum": [
+        "queued",
+        "running",
+        "waiting",
+        "review",
+        "done",
+        "failed",
+        "paused",
+        "archived"
+      ]
+    },
+    "TaskStatus": {
+      "title": "TaskStatus",
+      "type": "string",
+      "enum": [
+        "pending",
+        "claimed",
+        "running",
+        "review",
+        "decision",
+        "merging",
+        "done",
+        "failed",
+        "cancelled",
+        "blocked"
+      ]
+    },
+    "TaskKind": {
+      "title": "TaskKind",
+      "type": "string",
+      "enum": [
+        "work",
+        "fix",
+        "review",
+        "decision",
+        "test"
+      ]
+    },
+    "PlanStepStatus": {
+      "title": "PlanStepStatus",
+      "type": "string",
+      "enum": [
+        "todo",
+        "doing",
+        "done"
+      ]
+    },
+    "PlanStep": {
+      "title": "PlanStep",
+      "type": "object",
+      "required": [
+        "title",
+        "status"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "$ref": "#/$defs/PlanStepStatus"
+        }
+      }
+    },
+    "BubbleKind": {
+      "title": "BubbleKind",
+      "type": "string",
+      "enum": [
+        "plain",
+        "ask",
+        "error",
+        "done"
+      ]
+    },
+    "TaskSummary": {
+      "title": "TaskSummary",
+      "type": "object",
+      "required": [
+        "task_id",
+        "status",
+        "instruction"
+      ],
+      "properties": {
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        },
+        "assignee": {
+          "type": "string"
+        },
+        "claimed_by": {
+          "type": "string"
+        },
+        "main": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/TaskKind"
+        },
+        "status": {
+          "$ref": "#/$defs/TaskStatus"
+        },
+        "instruction": {
+          "type": "string"
+        }
+      }
+    },
+    "TaskOutcome": {
+      "title": "TaskOutcome",
+      "description": "Final state of a task that was waited on.",
+      "type": "object",
+      "required": [
+        "task_id",
+        "status",
+        "result"
+      ],
+      "properties": {
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        },
+        "status": {
+          "$ref": "#/$defs/TaskStatus"
+        },
+        "result": {
+          "type": "string"
+        }
+      }
+    },
+    "QuestionAnswer": {
+      "title": "QuestionAnswer",
+      "type": "object",
+      "required": [
+        "question_id"
+      ],
+      "properties": {
+        "question_id": {
+          "$ref": "#/$defs/QuestionId"
+        },
+        "answer": {
+          "description": "Present when the call blocked until answered.",
+          "type": "string"
+        }
+      }
+    },
+    "Mail": {
+      "title": "Mail",
+      "type": "object",
+      "required": [
+        "id",
+        "sender",
+        "recipient",
+        "body",
+        "created_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "sender": {
+          "type": "string"
+        },
+        "recipient": {
+          "description": "Employee name, lead or * (broadcast).",
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/ask_user.json",
+  "title": "AskUserInput",
+  "description": "Ask the user a question (a card on the web page). Members block until the user answers and get the answer back; the coordinator and leads get the question id at once and receive \"[Answer to q5] ...\" as a later message.",
+  "x-tool": {
+    "tiers": [
+      "coordinator",
+      "lead",
+      "member"
+    ],
+    "blocking": [
+      "member"
+    ]
+  },
+  "type": "object",
+  "required": [
+    "question"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "question": {
+      "type": "string",
+      "minLength": 1
+    },
+    "options": {
+      "description": "Suggested answers shown as buttons.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "AskUserResult": {
+      "title": "AskUserResult",
+      "$ref": "common.json#/$defs/QuestionAnswer"
+    }
+  }
+}

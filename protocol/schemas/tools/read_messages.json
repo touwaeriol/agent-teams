@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/read_messages.json",
+  "title": "ReadMessagesInput",
+  "description": "Return your unread messages (including broadcasts) and mark them read.",
+  "x-tool": {
+    "tiers": [
+      "member"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {},
+  "$defs": {
+    "ReadMessagesResult": {
+      "title": "ReadMessagesResult",
+      "type": "object",
+      "required": [
+        "messages"
+      ],
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "common.json#/$defs/Mail"
+          }
+        }
+      }
+    }
+  }
+}

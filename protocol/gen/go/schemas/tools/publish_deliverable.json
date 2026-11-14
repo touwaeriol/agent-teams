@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/publish_deliverable.json",
+  "title": "PublishDeliverableInput",
+  "description": "Register a deliverable link for the project (doc, design, slides, dashboard, board, data...). PRs are registered by the platform.",
+  "x-tool": {
+    "tiers": [
+      "lead",
+      "member"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "kind",
+    "title",
+    "url"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "description": "Known: pr, doc, design, slides, dashboard, board, data; anything else is shown as a link.",
+      "type": "string",
+      "minLength": 1,
+      "examples": [
+        "doc",
+        "design",
+        "slides",
+        "dashboard",
+        "board",
+        "data"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "url": {
+      "type": "string",
+      "format": "uri"
+    }
+  },
+  "$defs": {
+    "PublishDeliverableResult": {
+      "title": "PublishDeliverableResult",
+      "type": "object",
+      "required": [
+        "deliverable_id"
+      ],
+      "properties": {
+        "deliverable_id": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/update_plan.json",
+  "title": "UpdatePlanInput",
+  "description": "Replace the thread plan (main tasks). Steps are matched by title so existing main tasks keep their ids.",
+  "x-tool": {
+    "tiers": [
+      "lead"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "steps"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "steps": {
+      "type": "array",
+      "items": {
+        "$ref": "common.json#/$defs/PlanStep"
+      }
+    }
+  }
+}

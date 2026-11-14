@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/cred.response.json",
+  "title": "CredResponse",
+  "description": "Token for a cred.request, or a refusal. Unreliable; never logged.",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "req_id"
+  ],
+  "x-reliable": false,
+  "type": "object",
+  "required": [
+    "req_id",
+    "ok"
+  ],
+  "properties": {
+    "req_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "username": {
+      "type": "string"
+    },
+    "password": {
+      "type": "string"
+    },
+    "expires_at": {
+      "$ref": "common.json#/$defs/Timestamp"
+    },
+    "error": {
+      "description": "e.g. repo_not_in_project.",
+      "type": "string"
+    }
+  },
+  "if": {
+    "properties": {
+      "ok": {
+        "const": true
+      }
+    }
+  },
+  "then": {
+    "required": [
+      "username",
+      "password"
+    ]
+  },
+  "else": {
+    "required": [
+      "error"
+    ]
+  }
+}

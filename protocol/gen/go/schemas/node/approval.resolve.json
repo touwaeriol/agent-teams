@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/approval.resolve.json",
+  "title": "ApprovalResolve",
+  "description": "Decision for an approval.request.",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "approval_id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "approval_id",
+    "decision",
+    "decided_by"
+  ],
+  "properties": {
+    "approval_id": {
+      "$ref": "common.json#/$defs/ApprovalId"
+    },
+    "decision": {
+      "$ref": "common.json#/$defs/ApprovalDecision"
+    },
+    "message": {
+      "description": "Shown to the model on deny.",
+      "type": "string"
+    },
+    "updated_input": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "decided_by": {
+      "type": "string",
+      "pattern": "^(user:.+|policy:thread_auto|policy:rule:.+|policy:timeout)$"
+    }
+  }
+}

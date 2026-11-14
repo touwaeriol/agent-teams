@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/log.json",
+  "title": "Log",
+  "description": "Daemon log line, warn and above only; unreliable.",
+  "x-direction": "node_to_console",
+  "x-reliable": false,
+  "type": "object",
+  "required": [
+    "level",
+    "msg"
+  ],
+  "properties": {
+    "level": {
+      "$ref": "common.json#/$defs/LogLevel"
+    },
+    "msg": {
+      "type": "string"
+    },
+    "fields": {
+      "type": "object"
+    }
+  }
+}

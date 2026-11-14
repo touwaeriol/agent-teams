@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/cancel_task.json",
+  "title": "CancelTaskInput",
+  "description": "Cancel a task that has not finished.",
+  "x-tool": {
+    "tiers": [
+      "lead"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "task_id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "task_id": {
+      "$ref": "common.json#/$defs/TaskId"
+    },
+    "reason": {
+      "type": "string"
+    }
+  }
+}

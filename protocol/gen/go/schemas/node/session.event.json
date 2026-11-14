@@ -1,0 +1,327 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/session.event.json",
+  "title": "SessionEvent",
+  "description": "Session activity event; which fields are present depends on kind (protocol.md 4.8).",
+  "x-direction": "node_to_console",
+  "x-key": [
+    "session_id",
+    "event_no"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "session_id",
+    "event_no",
+    "kind",
+    "at"
+  ],
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "open_gen": {
+      "$ref": "common.json#/$defs/OpenGen"
+    },
+    "event_no": {
+      "description": "Monotonic per session.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "turn_id": {
+      "$ref": "common.json#/$defs/TurnId"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "turn_started",
+        "text",
+        "thinking",
+        "tool_started",
+        "tool_ended",
+        "turn_ended",
+        "compacting",
+        "rate_limited",
+        "subagent",
+        "notification",
+        "error"
+      ]
+    },
+    "at": {
+      "$ref": "common.json#/$defs/Timestamp"
+    },
+    "trigger_msg_ids": {
+      "description": "turn_started.",
+      "type": "array",
+      "items": {
+        "$ref": "common.json#/$defs/MsgId"
+      }
+    },
+    "tools": {
+      "description": "turn_started: tool list from this turn's init, re-checked by the console.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "text": {
+      "description": "text: assistant text, truncated to 8 KB.",
+      "type": "string",
+      "maxLength": 8192
+    },
+    "final": {
+      "description": "text.",
+      "type": "boolean"
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "tool": {
+      "description": "tool_started.",
+      "type": "string"
+    },
+    "category": {
+      "description": "tool_started: edit | read | shell | web | platform | other.",
+      "type": "string"
+    },
+    "subcategory": {
+      "description": "tool_started: e.g. test, commit, ci.",
+      "type": "string"
+    },
+    "tool_use_id": {
+      "description": "tool_started / tool_ended.",
+      "type": "string"
+    },
+    "summary": {
+      "description": "tool_started / tool_ended: secret-free summary (Bash command truncated to 200 chars).",
+      "type": "string"
+    },
+    "ok": {
+      "description": "tool_ended.",
+      "type": "boolean"
+    },
+    "duration_ms": {
+      "description": "tool_ended / turn_ended.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "result_subtype": {
+      "description": "turn_ended.",
+      "type": "string"
+    },
+    "is_error": {
+      "description": "turn_ended.",
+      "type": "boolean"
+    },
+    "num_turns": {
+      "description": "turn_ended.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "cost_usd": {
+      "description": "turn_ended.",
+      "type": "number",
+      "minimum": 0
+    },
+    "usage": {
+      "description": "turn_ended: token usage as reported by the runtime.",
+      "type": "object"
+    },
+    "on": {
+      "description": "compacting / subagent.",
+      "type": "boolean"
+    },
+    "retry_at": {
+      "description": "rate_limited.",
+      "$ref": "common.json#/$defs/Timestamp"
+    },
+    "detail": {
+      "description": "rate_limited.",
+      "type": "string"
+    },
+    "agent_type": {
+      "description": "subagent.",
+      "type": "string"
+    },
+    "message": {
+      "description": "notification / error.",
+      "type": "string"
+    },
+    "notification_type": {
+      "description": "notification.",
+      "type": "string"
+    },
+    "code": {
+      "description": "error.",
+      "type": "string",
+      "enum": [
+        "auth_failed",
+        "billing",
+        "crashed",
+        "spawn_failed",
+        "protocol"
+      ]
+    },
+    "fatal": {
+      "description": "error.",
+      "type": "boolean"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "turn_started"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "trigger_msg_ids",
+          "tools"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "text"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "text",
+          "final"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "tool_started"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "tool",
+          "category",
+          "tool_use_id",
+          "summary"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "tool_ended"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "tool_use_id",
+          "ok",
+          "duration_ms"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "turn_ended"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "result_subtype",
+          "is_error",
+          "num_turns",
+          "duration_ms",
+          "usage"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "compacting"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "on"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "rate_limited"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "detail"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "subagent"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "on",
+          "agent_type"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "notification"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "message",
+          "notification_type"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "error"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "code",
+          "message",
+          "fatal"
+        ]
+      }
+    }
+  ]
+}

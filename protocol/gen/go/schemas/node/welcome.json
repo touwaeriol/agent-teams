@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/welcome.json",
+  "title": "Welcome",
+  "description": "Console reply to hello: negotiated protocol and node settings.",
+  "x-direction": "console_to_node",
+  "x-reliable": false,
+  "type": "object",
+  "required": [
+    "protocol",
+    "node_id",
+    "ack_seq",
+    "server_time"
+  ],
+  "properties": {
+    "protocol": {
+      "description": "Highest version in both protocols lists.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "node_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ack_seq": {
+      "description": "Highest daemon seq the console has durably processed (same epoch; 0 when the epoch changed).",
+      "type": "integer",
+      "minimum": 0
+    },
+    "server_time": {
+      "$ref": "common.json#/$defs/Timestamp"
+    },
+    "config": {
+      "$ref": "#/$defs/WelcomeConfig"
+    },
+    "min_daemon": {
+      "description": "Older daemons get node.upgrade or close code 4426.",
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "features": {
+      "description": "Intersection of both feature lists.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "WelcomeConfig": {
+      "title": "WelcomeConfig",
+      "type": "object",
+      "properties": {
+        "park_after_s": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_active_sessions": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "log_level": {
+          "$ref": "common.json#/$defs/LogLevel"
+        }
+      }
+    }
+  }
+}

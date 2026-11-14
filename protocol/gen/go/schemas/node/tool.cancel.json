@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/tool.cancel.json",
+  "title": "ToolCancel",
+  "description": "A blocking tool call was abandoned (interrupt, close or process restart).",
+  "x-direction": "node_to_console",
+  "x-key": [
+    "session_id",
+    "call_id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "call_id",
+    "session_id"
+  ],
+  "properties": {
+    "call_id": {
+      "$ref": "common.json#/$defs/CallId"
+    },
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "interrupted",
+        "session_closed",
+        "process_restarted"
+      ]
+    }
+  }
+}

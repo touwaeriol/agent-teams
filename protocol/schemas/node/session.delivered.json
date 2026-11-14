@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/session.delivered.json",
+  "title": "SessionDelivered",
+  "description": "session.send was pushed into the session.",
+  "x-direction": "node_to_console",
+  "x-key": [
+    "msg_id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "session_id",
+    "msg_id"
+  ],
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "open_gen": {
+      "$ref": "common.json#/$defs/OpenGen"
+    },
+    "msg_id": {
+      "$ref": "common.json#/$defs/MsgId"
+    },
+    "turn_id": {
+      "$ref": "common.json#/$defs/TurnId"
+    }
+  }
+}

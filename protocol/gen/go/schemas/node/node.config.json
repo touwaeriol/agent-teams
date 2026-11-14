@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/node.config.json",
+  "title": "NodeConfig",
+  "description": "Settings changed on the node page, pushed immediately.",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "minProperties": 1,
+  "properties": {
+    "max_active_sessions": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "park_after_s": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "log_level": {
+      "$ref": "common.json#/$defs/LogLevel"
+    },
+    "isolated": {
+      "type": "boolean"
+    }
+  }
+}

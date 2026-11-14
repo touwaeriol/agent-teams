@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/session.send.json",
+  "title": "SessionSend",
+  "description": "Deliver a message to the employee.",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "msg_id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "session_id",
+    "msg_id",
+    "text"
+  ],
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "msg_id": {
+      "$ref": "common.json#/$defs/MsgId"
+    },
+    "text": {
+      "type": "string"
+    },
+    "priority": {
+      "type": "string",
+      "enum": [
+        "now",
+        "next",
+        "later"
+      ],
+      "default": "next"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "user",
+        "task",
+        "mail",
+        "answer",
+        "system"
+      ]
+    },
+    "interrupt_first": {
+      "type": "boolean",
+      "default": false
+    }
+  }
+}

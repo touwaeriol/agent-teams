@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/git.purge.json",
+  "title": "GitPurge",
+  "description": "Delete a whole project directory once no session is active.",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "job_id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "job_id",
+    "path"
+  ],
+  "properties": {
+    "job_id": {
+      "$ref": "common.json#/$defs/JobId"
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^projects/[^/]+$"
+    }
+  }
+}

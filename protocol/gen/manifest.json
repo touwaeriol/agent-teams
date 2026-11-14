@@ -1,0 +1,1212 @@
+{
+  "messages": [
+    {
+      "type": "ack",
+      "name": "Ack",
+      "direction": "both",
+      "reliable": false,
+      "key": []
+    },
+    {
+      "type": "approval.ack",
+      "name": "ApprovalAck",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": [
+        "approval_id"
+      ]
+    },
+    {
+      "type": "approval.cancel",
+      "name": "ApprovalCancel",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": [
+        "approval_id"
+      ]
+    },
+    {
+      "type": "approval.request",
+      "name": "ApprovalRequest",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": [
+        "approval_id"
+      ]
+    },
+    {
+      "type": "approval.resolve",
+      "name": "ApprovalResolve",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "approval_id"
+      ]
+    },
+    {
+      "type": "cred.request",
+      "name": "CredRequest",
+      "direction": "node_to_console",
+      "reliable": false,
+      "key": [
+        "req_id"
+      ]
+    },
+    {
+      "type": "cred.response",
+      "name": "CredResponse",
+      "direction": "console_to_node",
+      "reliable": false,
+      "key": [
+        "req_id"
+      ]
+    },
+    {
+      "type": "error",
+      "name": "ProtocolError",
+      "direction": "both",
+      "reliable": false,
+      "key": []
+    },
+    {
+      "type": "git.cleanup",
+      "name": "GitCleanup",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "job_id"
+      ]
+    },
+    {
+      "type": "git.prepare",
+      "name": "GitPrepare",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "job_id"
+      ]
+    },
+    {
+      "type": "git.purge",
+      "name": "GitPurge",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "job_id"
+      ]
+    },
+    {
+      "type": "git.push",
+      "name": "GitPush",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "job_id"
+      ]
+    },
+    {
+      "type": "git.result",
+      "name": "GitResult",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": [
+        "job_id"
+      ]
+    },
+    {
+      "type": "git.status",
+      "name": "GitStatus",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "job_id"
+      ]
+    },
+    {
+      "type": "hello",
+      "name": "Hello",
+      "direction": "node_to_console",
+      "reliable": false,
+      "key": []
+    },
+    {
+      "type": "log",
+      "name": "Log",
+      "direction": "node_to_console",
+      "reliable": false,
+      "key": []
+    },
+    {
+      "type": "node.config",
+      "name": "NodeConfig",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "id"
+      ]
+    },
+    {
+      "type": "node.drain",
+      "name": "NodeDrain",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "id"
+      ]
+    },
+    {
+      "type": "node.stats",
+      "name": "NodeStats",
+      "direction": "node_to_console",
+      "reliable": false,
+      "key": []
+    },
+    {
+      "type": "node.upgrade",
+      "name": "NodeUpgrade",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "id"
+      ]
+    },
+    {
+      "type": "node.upgrade_result",
+      "name": "NodeUpgradeResult",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": []
+    },
+    {
+      "type": "session.close",
+      "name": "SessionClose",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "session_id",
+        "open_gen"
+      ]
+    },
+    {
+      "type": "session.closed",
+      "name": "SessionClosed",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": [
+        "session_id",
+        "open_gen"
+      ]
+    },
+    {
+      "type": "session.delivered",
+      "name": "SessionDelivered",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": [
+        "msg_id"
+      ]
+    },
+    {
+      "type": "session.event",
+      "name": "SessionEvent",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": [
+        "session_id",
+        "event_no"
+      ]
+    },
+    {
+      "type": "session.interrupt",
+      "name": "SessionInterrupt",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "id"
+      ]
+    },
+    {
+      "type": "session.interrupted",
+      "name": "SessionInterrupted",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": []
+    },
+    {
+      "type": "session.open",
+      "name": "SessionOpen",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "session_id",
+        "open_gen"
+      ]
+    },
+    {
+      "type": "session.opened",
+      "name": "SessionOpened",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": [
+        "session_id",
+        "open_gen"
+      ]
+    },
+    {
+      "type": "session.release",
+      "name": "SessionRelease",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "session_id",
+        "open_gen"
+      ]
+    },
+    {
+      "type": "session.send",
+      "name": "SessionSend",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "msg_id"
+      ]
+    },
+    {
+      "type": "session.set_mode",
+      "name": "SessionSetMode",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "id"
+      ]
+    },
+    {
+      "type": "session.state",
+      "name": "SessionState",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": []
+    },
+    {
+      "type": "session.watch",
+      "name": "SessionWatch",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "id"
+      ]
+    },
+    {
+      "type": "sessions.report",
+      "name": "SessionsReport",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": []
+    },
+    {
+      "type": "stream.delta",
+      "name": "StreamDelta",
+      "direction": "node_to_console",
+      "reliable": false,
+      "key": []
+    },
+    {
+      "type": "tool.call",
+      "name": "ToolCall",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": [
+        "session_id",
+        "call_id"
+      ]
+    },
+    {
+      "type": "tool.cancel",
+      "name": "ToolCancel",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": [
+        "session_id",
+        "call_id"
+      ]
+    },
+    {
+      "type": "tool.result",
+      "name": "ToolResult",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "call_id"
+      ]
+    },
+    {
+      "type": "welcome",
+      "name": "Welcome",
+      "direction": "console_to_node",
+      "reliable": false,
+      "key": []
+    }
+  ],
+  "tools": [
+    {
+      "name": "ask_lead",
+      "input": "AskLeadInput",
+      "result": "AskLeadResult",
+      "tiers": [
+        "member"
+      ],
+      "blocking": [
+        "member"
+      ],
+      "requires": null,
+      "description": "Ask the thread lead a question and wait for the answer.",
+      "input_schema": {
+        "description": "Ask the thread lead a question and wait for the answer.",
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "question": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "ask_user",
+      "input": "AskUserInput",
+      "result": "AskUserResult",
+      "tiers": [
+        "coordinator",
+        "lead",
+        "member"
+      ],
+      "blocking": [
+        "member"
+      ],
+      "requires": null,
+      "description": "Ask the user a question (a card on the web page). Members block until the user answers and get the answer back; the coordinator and leads get the question id at once and receive \"[Answer to q5] ...\" as a later message.",
+      "input_schema": {
+        "description": "Ask the user a question (a card on the web page). Members block until the user answers and get the answer back; the coordinator and leads get the question id at once and receive \"[Answer to q5] ...\" as a later message.",
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "question": {
+            "type": "string",
+            "minLength": 1
+          },
+          "options": {
+            "description": "Suggested answers shown as buttons.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "assign_subtask",
+      "input": "AssignSubtaskInput",
+      "result": "AssignSubtaskResult",
+      "tiers": [
+        "member"
+      ],
+      "blocking": [],
+      "requires": "can_delegate",
+      "description": "Create a subtask of your current task for a teammate (instance or role name); returns the task id at once. Only for roles with can_delegate.",
+      "input_schema": {
+        "description": "Create a subtask of your current task for a teammate (instance or role name); returns the task id at once. Only for roles with can_delegate.",
+        "type": "object",
+        "required": [
+          "assignee",
+          "instruction"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "assignee": {
+            "type": "string",
+            "minLength": 1
+          },
+          "instruction": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "assign_task",
+      "input": "AssignTaskInput",
+      "result": "AssignTaskResult",
+      "tiers": [
+        "lead"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Create a task under a main task. assignee is an instance name (dev-2) to assign directly, or a role name (dev) to put it in the task pool where the first free instance claims it.",
+      "input_schema": {
+        "description": "Create a task under a main task. assignee is an instance name (dev-2) to assign directly, or a role name (dev) to put it in the task pool where the first free instance claims it.",
+        "type": "object",
+        "required": [
+          "assignee",
+          "instruction",
+          "main"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "assignee": {
+            "type": "string",
+            "minLength": 1
+          },
+          "instruction": {
+            "type": "string",
+            "minLength": 1
+          },
+          "main": {
+            "description": "Title of the main task (plan step) this belongs to.",
+            "type": "string",
+            "minLength": 1
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^t[0-9]+$"
+            }
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "work",
+              "fix",
+              "review",
+              "decision",
+              "test"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "broadcast",
+      "input": "BroadcastInput",
+      "result": null,
+      "tiers": [
+        "lead"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Send a message to every member of the thread.",
+      "input_schema": {
+        "description": "Send a message to every member of the thread.",
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "cancel_task",
+      "input": "CancelTaskInput",
+      "result": null,
+      "tiers": [
+        "lead"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Cancel a task that has not finished.",
+      "input_schema": {
+        "description": "Cancel a task that has not finished.",
+        "type": "object",
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "pattern": "^t[0-9]+$"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "complete_task",
+      "input": "CompleteTaskInput",
+      "result": "CompleteTaskResult",
+      "tiers": [
+        "member"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Finish your current task explicitly; the platform pushes your branch first. Use status failed when you cannot finish it.",
+      "input_schema": {
+        "description": "Finish your current task explicitly; the platform pushes your branch first. Use status failed when you cannot finish it.",
+        "type": "object",
+        "required": [
+          "task_id",
+          "summary"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "pattern": "^t[0-9]+$"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "done",
+              "failed"
+            ],
+            "default": "done"
+          },
+          "artifacts": {
+            "description": "Paths, commit SHAs or URLs produced by the task.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "enqueue_merge",
+      "input": "EnqueueMergeInput",
+      "result": "EnqueueMergeResult",
+      "tiers": [
+        "lead"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Put a member branch into the merge queue (merged into the thread branch on GitHub, then CI). Give either member or task_id; the platform pushes the branch first.",
+      "input_schema": {
+        "description": "Put a member branch into the merge queue (merged into the thread branch on GitHub, then CI). Give either member or task_id; the platform pushes the branch first.",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "member": {
+            "type": "string",
+            "minLength": 1
+          },
+          "task_id": {
+            "type": "string",
+            "pattern": "^t[0-9]+$"
+          }
+        }
+      }
+    },
+    {
+      "name": "finish",
+      "input": "FinishInput",
+      "result": null,
+      "tiers": [
+        "lead"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Write the thread summary (before review or when done); it is also added to the project memory.",
+      "input_schema": {
+        "description": "Write the thread summary (before review or when done); it is also added to the project memory.",
+        "type": "object",
+        "required": [
+          "summary"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "get_task",
+      "input": "GetTaskInput",
+      "result": "GetTaskResult",
+      "tiers": [
+        "member"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Show a task: instruction, status, dependencies and result.",
+      "input_schema": {
+        "description": "Show a task: instruction, status, dependencies and result.",
+        "type": "object",
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "pattern": "^t[0-9]+$"
+          }
+        }
+      }
+    },
+    {
+      "name": "list_tasks",
+      "input": "ListTasksInput",
+      "result": "ListTasksResult",
+      "tiers": [
+        "lead"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "List the thread's tasks with assignee, main task, kind and status.",
+      "input_schema": {
+        "description": "List the thread's tasks with assignee, main task, kind and status.",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "claimed",
+              "running",
+              "review",
+              "decision",
+              "merging",
+              "done",
+              "failed",
+              "cancelled",
+              "blocked"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "list_team",
+      "input": "ListTeamInput",
+      "result": "ListTeamResult",
+      "tiers": [
+        "member"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "List the thread team: name, role, type, node and current task of each member.",
+      "input_schema": {
+        "description": "List the thread team: name, role, type, node and current task of each member.",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_threads",
+      "input": "ListThreadsInput",
+      "result": "ListThreadsResult",
+      "tiers": [
+        "coordinator"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "List threads, one line each: number, title, status, main-task progress and how many items wait for the user.",
+      "input_schema": {
+        "description": "List threads, one line each: number, title, status, main-task progress and how many items wait for the user.",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "waiting",
+              "review",
+              "done",
+              "failed",
+              "paused",
+              "archived"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "message_thread",
+      "input": "MessageThreadInput",
+      "result": null,
+      "tiers": [
+        "coordinator"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Send a message to a thread's lead as the project coordinator.",
+      "input_schema": {
+        "description": "Send a message to a thread's lead as the project coordinator.",
+        "type": "object",
+        "required": [
+          "no",
+          "text"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "no": {
+            "description": "Thread number inside the project (#12).",
+            "type": "integer",
+            "minimum": 1
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "open_pr",
+      "input": "OpenPrInput",
+      "result": "OpenPrResult",
+      "tiers": [
+        "lead"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Open the pull request from the thread branch to the base branch; the thread moves to review.",
+      "input_schema": {
+        "description": "Open the pull request from the thread branch to the base branch; the thread moves to review.",
+        "type": "object",
+        "required": [
+          "title",
+          "body"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "body": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "open_thread",
+      "input": "OpenThreadInput",
+      "result": "OpenThreadResult",
+      "tiers": [
+        "coordinator"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Open a new thread (number, branch, member instances) for a piece of work; the brief becomes the lead's first message. Returns #no immediately.",
+      "input_schema": {
+        "description": "Open a new thread (number, branch, member instances) for a piece of work; the brief becomes the lead's first message. Returns #no immediately.",
+        "type": "object",
+        "required": [
+          "title",
+          "brief"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "brief": {
+            "description": "Instructions for the thread lead.",
+            "type": "string",
+            "minLength": 1
+          },
+          "roles": {
+            "description": "Role names to staff the thread with; default = all member roles of the team.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "publish_deliverable",
+      "input": "PublishDeliverableInput",
+      "result": "PublishDeliverableResult",
+      "tiers": [
+        "lead",
+        "member"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Register a deliverable link for the project (doc, design, slides, dashboard, board, data...). PRs are registered by the platform.",
+      "input_schema": {
+        "description": "Register a deliverable link for the project (doc, design, slides, dashboard, board, data...). PRs are registered by the platform.",
+        "type": "object",
+        "required": [
+          "kind",
+          "title",
+          "url"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "description": "Known: pr, doc, design, slides, dashboard, board, data; anything else is shown as a link.",
+            "type": "string",
+            "minLength": 1,
+            "examples": [
+              "doc",
+              "design",
+              "slides",
+              "dashboard",
+              "board",
+              "data"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      }
+    },
+    {
+      "name": "push_branch",
+      "input": "PushBranchInput",
+      "result": "PushBranchResult",
+      "tiers": [
+        "member"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Push the HEAD of your worktree to your member branch (thread/<no>/<name>). You have no write token yourself; commit first, then call this.",
+      "input_schema": {
+        "description": "Push the HEAD of your worktree to your member branch (thread/<no>/<name>). You have no write token yourself; commit first, then call this.",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "name": "read_messages",
+      "input": "ReadMessagesInput",
+      "result": "ReadMessagesResult",
+      "tiers": [
+        "member"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Return your unread messages (including broadcasts) and mark them read.",
+      "input_schema": {
+        "description": "Return your unread messages (including broadcasts) and mark them read.",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "name": "remember",
+      "input": "RememberInput",
+      "result": null,
+      "tiers": [
+        "coordinator"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Add a fact to the project memory (source = coordinator).",
+      "input_schema": {
+        "description": "Add a fact to the project memory (source = coordinator).",
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "reply_to",
+      "input": "ReplyToInput",
+      "result": null,
+      "tiers": [
+        "lead"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Answer a member's question (\"[Question q3 from dev-1 ...]\"). Answer quickly: the member is blocked until you do.",
+      "input_schema": {
+        "description": "Answer a member's question (\"[Question q3 from dev-1 ...]\"). Answer quickly: the member is blocked until you do.",
+        "type": "object",
+        "required": [
+          "question_id",
+          "answer"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "question_id": {
+            "type": "string",
+            "pattern": "^q[0-9]+$"
+          },
+          "answer": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "report_progress",
+      "input": "ReportProgressInput",
+      "result": null,
+      "tiers": [
+        "member"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Report progress on your task (shown in the thread activity).",
+      "input_schema": {
+        "description": "Report progress on your task (shown in the thread activity).",
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "request_review",
+      "input": "RequestReviewInput",
+      "result": "RequestReviewResult",
+      "tiers": [
+        "member"
+      ],
+      "blocking": [
+        "member"
+      ],
+      "requires": null,
+      "description": "Ask a teammate to review your work (creates a review task under your current task) and wait for the result. You cannot ask yourself.",
+      "input_schema": {
+        "description": "Ask a teammate to review your work (creates a review task under your current task) and wait for the result. You cannot ask yourself.",
+        "type": "object",
+        "required": [
+          "reviewer",
+          "summary"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "reviewer": {
+            "description": "Instance or role name.",
+            "type": "string",
+            "minLength": 1
+          },
+          "summary": {
+            "description": "What to review.",
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "send_message",
+      "input": "SendMessageInput",
+      "result": null,
+      "tiers": [
+        "lead",
+        "member"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Leave a message for a teammate (instance name) or for the lead (\"lead\"). Busy recipients get it after their current turn.",
+      "input_schema": {
+        "description": "Leave a message for a teammate (instance name) or for the lead (\"lead\"). Busy recipients get it after their current turn.",
+        "type": "object",
+        "required": [
+          "to",
+          "text"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "to": {
+            "type": "string",
+            "minLength": 1
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "set_status",
+      "input": "SetStatusInput",
+      "result": null,
+      "tiers": [
+        "coordinator",
+        "lead",
+        "member"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Set your speech-bubble text in the office (one short sentence on what you are doing). Call it when you switch work; it does not change your state or position and expires after 10 minutes.",
+      "input_schema": {
+        "description": "Set your speech-bubble text in the office (one short sentence on what you are doing). Call it when you switch work; it does not change your state or position and expires after 10 minutes.",
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "plain",
+              "ask",
+              "error",
+              "done"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "thread_status",
+      "input": "ThreadStatusInput",
+      "result": "ThreadStatusResult",
+      "tiers": [
+        "coordinator"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Show one thread: plan, recent activity, the lead's latest reply and the PR.",
+      "input_schema": {
+        "description": "Show one thread: plan, recent activity, the lead's latest reply and the PR.",
+        "type": "object",
+        "required": [
+          "no"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "no": {
+            "description": "Thread number inside the project (#12).",
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "update_plan",
+      "input": "UpdatePlanInput",
+      "result": null,
+      "tiers": [
+        "lead"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Replace the thread plan (main tasks). Steps are matched by title so existing main tasks keep their ids.",
+      "input_schema": {
+        "description": "Replace the thread plan (main tasks). Steps are matched by title so existing main tasks keep their ids.",
+        "type": "object",
+        "required": [
+          "steps"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "title",
+                "status"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "todo",
+                    "doing",
+                    "done"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "wait_task",
+      "input": "WaitTaskInput",
+      "result": "WaitTaskResult",
+      "tiers": [
+        "member"
+      ],
+      "blocking": [
+        "member"
+      ],
+      "requires": "can_delegate",
+      "description": "Wait until one of your subtasks finishes and return its result. Only for roles with can_delegate.",
+      "input_schema": {
+        "description": "Wait until one of your subtasks finishes and return its result. Only for roles with can_delegate.",
+        "type": "object",
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "pattern": "^t[0-9]+$"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/list_team.json",
+  "title": "ListTeamInput",
+  "description": "List the thread team: name, role, type, node and current task of each member.",
+  "x-tool": {
+    "tiers": [
+      "member"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {},
+  "$defs": {
+    "ListTeamResult": {
+      "title": "ListTeamResult",
+      "type": "object",
+      "required": [
+        "members"
+      ],
+      "properties": {
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TeamMember"
+          }
+        }
+      }
+    },
+    "TeamMember": {
+      "title": "TeamMember",
+      "type": "object",
+      "required": [
+        "name",
+        "role"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "claude_code",
+            "codex"
+          ]
+        },
+        "node": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

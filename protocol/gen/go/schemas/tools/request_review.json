@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/request_review.json",
+  "title": "RequestReviewInput",
+  "description": "Ask a teammate to review your work (creates a review task under your current task) and wait for the result. You cannot ask yourself.",
+  "x-tool": {
+    "tiers": [
+      "member"
+    ],
+    "blocking": [
+      "member"
+    ]
+  },
+  "type": "object",
+  "required": [
+    "reviewer",
+    "summary"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "reviewer": {
+      "description": "Instance or role name.",
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "description": "What to review.",
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "$defs": {
+    "RequestReviewResult": {
+      "title": "RequestReviewResult",
+      "$ref": "common.json#/$defs/TaskOutcome"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/error.json",
+  "title": "ProtocolError",
+  "description": "Protocol-level error about one message.",
+  "x-direction": "both",
+  "x-reliable": false,
+  "type": "object",
+  "required": [
+    "code"
+  ],
+  "properties": {
+    "ref_id": {
+      "description": "Envelope id of the offending message.",
+      "type": "string"
+    },
+    "code": {
+      "type": "string",
+      "enum": [
+        "bad_schema",
+        "unsupported",
+        "unknown_session",
+        "unknown_job",
+        "busy"
+      ]
+    },
+    "message": {
+      "type": "string"
+    }
+  }
+}

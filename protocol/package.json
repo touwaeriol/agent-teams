@@ -1,0 +1,21 @@
+{
+  "name": "@agent-teams/protocol",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "JSON Schemas for the agent-teams node protocol, platform tools and office layout, plus generated TS/Go types",
+  "scripts": {
+    "bundle": "node scripts/bundle.mjs",
+    "gen:ts": "node scripts/gen-ts.mjs",
+    "gen": "npm run bundle && npm run gen:ts",
+    "check:examples": "node scripts/check-doc-examples.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test test/"
+  },
+  "devDependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "json-schema-to-typescript": "^15.0.4",
+    "typescript": "^5.9.3"
+  }
+}

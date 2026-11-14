@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/open_thread.json",
+  "title": "OpenThreadInput",
+  "description": "Open a new thread (number, branch, member instances) for a piece of work; the brief becomes the lead's first message. Returns #no immediately.",
+  "x-tool": {
+    "tiers": [
+      "coordinator"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "title",
+    "brief"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "brief": {
+      "description": "Instructions for the thread lead.",
+      "type": "string",
+      "minLength": 1
+    },
+    "roles": {
+      "description": "Role names to staff the thread with; default = all member roles of the team.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "OpenThreadResult": {
+      "title": "OpenThreadResult",
+      "type": "object",
+      "required": [
+        "no",
+        "thread_id",
+        "branch"
+      ],
+      "properties": {
+        "no": {
+          "$ref": "common.json#/$defs/ThreadNo"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

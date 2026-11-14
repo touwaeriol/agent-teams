@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/node.drain.json",
+  "title": "NodeDrain",
+  "description": "Stop accepting new sessions and park idle ones (maintenance).",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "deadline_s"
+  ],
+  "properties": {
+    "deadline_s": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

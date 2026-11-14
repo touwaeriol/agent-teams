@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/stream.delta.json",
+  "title": "StreamDelta",
+  "description": "Unreliable token stream, only while session.watch is on; not stored.",
+  "x-direction": "node_to_console",
+  "x-reliable": false,
+  "type": "object",
+  "required": [
+    "session_id",
+    "text"
+  ],
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "turn_id": {
+      "$ref": "common.json#/$defs/TurnId"
+    },
+    "text": {
+      "type": "string"
+    }
+  }
+}

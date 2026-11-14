@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/git.status.json",
+  "title": "GitStatus",
+  "description": "Report branch/ahead/behind/dirty state of a checkout.",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "job_id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "job_id",
+    "cwd"
+  ],
+  "properties": {
+    "job_id": {
+      "$ref": "common.json#/$defs/JobId"
+    },
+    "cwd": {
+      "$ref": "common.json#/$defs/RelPath"
+    }
+  }
+}

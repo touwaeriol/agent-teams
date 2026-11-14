@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/message_thread.json",
+  "title": "MessageThreadInput",
+  "description": "Send a message to a thread's lead as the project coordinator.",
+  "x-tool": {
+    "tiers": [
+      "coordinator"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "no",
+    "text"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "no": {
+      "$ref": "common.json#/$defs/ThreadNo"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

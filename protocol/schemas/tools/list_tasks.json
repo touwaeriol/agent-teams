@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/list_tasks.json",
+  "title": "ListTasksInput",
+  "description": "List the thread's tasks with assignee, main task, kind and status.",
+  "x-tool": {
+    "tiers": [
+      "lead"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "$ref": "common.json#/$defs/TaskStatus"
+    }
+  },
+  "$defs": {
+    "ListTasksResult": {
+      "title": "ListTasksResult",
+      "type": "object",
+      "required": [
+        "tasks"
+      ],
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "items": {
+            "$ref": "common.json#/$defs/TaskSummary"
+          }
+        }
+      }
+    }
+  }
+}
