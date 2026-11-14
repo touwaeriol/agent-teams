@@ -12,7 +12,8 @@ Example::
 
 Leader shorthand: list the employees and pick one agent as the leader; it gets
 a non-blocking task board over all the other employees. ``nodes`` are machines
-that ``claude_code`` employees run on (over SSH, or the server itself)::
+that ``claude_code`` employees run on (over SSH, or this host; daemon nodes are
+registered in the web console)::
 
     nodes:
       - {name: build-1, host: 10.0.0.11, user: dev, workdir: /srv/app}
@@ -54,7 +55,6 @@ from .leader import LEADER_INSTRUCTIONS, Leader
 from .llm.anthropic import AnthropicLLM
 from .llm.base import LLM
 from .nodes import LocalNode, Node, SSHNode
-from .remote import NodeRegistry, RemoteNode
 from .runnable import Runnable
 from .teams import SUPERVISOR_INSTRUCTIONS, Parallel, RoundRobin, Sequential, supervisor
 from .tools import Tool, tool
@@ -150,6 +150,9 @@ class ClaudeCodeSpec(_Member):
     extra_args: list[str] = Field(default_factory=list)
 
     def build(self, builder: Builder) -> Runnable:
+        return self.worker(builder)
+
+    def worker(self, builder: Builder) -> ClaudeCodeWorker:
         return ClaudeCodeWorker(
             **self.model_dump(exclude={"type", "node"}), node=builder.node(self.node)
         )
@@ -177,11 +180,13 @@ class LeaderSpec(_LLMMember):
     instructions: str = LEADER_INSTRUCTIONS
     members: list[MemberSpec] = Field(min_length=1)
     max_turns: int = Field(50, ge=1)
+    brain: ClaudeCodeSpec | None = None  # Claude Code on a node instead of an LLM
 
     def build(self, builder: Builder) -> Runnable:
+        brain = self.brain.worker(builder) if self.brain else builder.llm(self.llm)
         return Leader(
             name=self.name,
-            llm=builder.llm(self.llm),
+            brain=brain,
             members=[m.build(builder) for m in self.members],
             instructions=self.instructions,
             description=self.description,
@@ -244,9 +249,11 @@ MemberSpec = Annotated[
 
 
 class NodeConfig(BaseModel):
-    """A machine. By default its daemon dials in (``agent-teams node``); with
-    ``host`` it is reached over SSH instead, with ``local: true`` it is the
-    console host itself."""
+    """A machine reached over SSH (``host``) or the local host (``local: true``).
+
+    Daemon nodes (``agent-teams node``) are registered in the web console
+    instead and handed to :func:`build_team` by the service.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -258,22 +265,17 @@ class NodeConfig(BaseModel):
     identity_file: str = ""
     workdir: str = ""
     ssh_options: list[str] = Field(default_factory=list)
-    revision: int = Field(1, ge=1)
 
     @model_validator(mode="after")
     def _one_kind(self) -> NodeConfig:
-        if self.local and self.host:
-            raise ValueError(f"node '{self.name}' cannot have both 'host' and 'local: true'")
+        if self.local == bool(self.host):
+            raise ValueError(
+                f"node '{self.name}' needs either 'host' (SSH) or 'local: true'; "
+                "daemon nodes are added in the web console"
+            )
         return self
 
-    @property
-    def is_daemon(self) -> bool:
-        return not (self.local or self.host)
-
-    def build(self, registry: NodeRegistry) -> Node:
-        if self.is_daemon:
-            registry.declare(self.name, self.revision)
-            return RemoteNode(self.name, registry, self.workdir)
+    def build(self) -> Node:
         if self.local:
             return LocalNode(self.name, self.workdir)
         return SSHNode(
@@ -301,8 +303,8 @@ class TeamFile(BaseModel):
             raise ValueError(f"node names must be unique: {names}")
         return self
 
-    def build_nodes(self, registry: NodeRegistry) -> dict[str, Node]:
-        return {n.name: n.build(registry) for n in self.nodes}
+    def build_nodes(self) -> dict[str, Node]:
+        return {n.name: n.build() for n in self.nodes}
 
     @model_validator(mode="before")
     @classmethod
@@ -323,9 +325,14 @@ def _promote_leader(leader: str, employees: list[Any]) -> dict[str, Any]:
     )
     if chosen is None:
         raise ValueError(f"leader '{leader}' is not one of the employees")
-    if chosen.get("type", "agent") != "agent":
-        raise ValueError(f"leader '{leader}' must be an agent")
     members = [e for e in employees if e is not chosen]
+    kind = chosen.get("type", "agent")
+    if kind == "claude_code":  # the leader is a Claude Code session on that node
+        brain = {k: v for k, v in chosen.items() if k != "description"}
+        common = {"name": chosen["name"], "description": chosen.get("description", "")}
+        return {**common, "type": "leader", "brain": brain, "members": members}
+    if kind != "agent":
+        raise ValueError(f"leader '{leader}' must be an agent or claude_code")
     return {**chosen, "type": "leader", "members": members}
 
 
@@ -351,38 +358,44 @@ def parse_team(data: Mapping[str, Any]) -> TeamFile:
 def build_team(
     data: Mapping[str, Any],
     llm_factory: LLMFactory = anthropic_factory,
-    registry: NodeRegistry | None = None,
+    nodes: Mapping[str, Node] | None = None,
 ) -> Runnable:
     """Build a runnable from an already-parsed definition.
 
-    Daemon nodes connect to ``registry`` (the web service owns it); without one
-    they can never come online.
+    ``nodes`` adds machines defined elsewhere (the web service passes the
+    user's daemon nodes); names in the file take precedence over nothing:
+    a clash is an error.
     """
     spec = parse_team(data)
-    nodes = spec.build_nodes(registry or NodeRegistry())
-    return spec.team.build(Builder(spec.llm, llm_factory, nodes))
+    declared = spec.build_nodes()
+    clash = set(declared) & set(nodes or {})
+    if clash:
+        raise ConfigError(f"node names defined twice: {sorted(clash)}")
+    return spec.team.build(Builder(spec.llm, llm_factory, {**declared, **(nodes or {})}))
 
 
 def read_team_file(path: str | Path) -> Mapping[str, Any]:
-    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    return parse_yaml(Path(path).read_text(encoding="utf-8"), str(path))
+
+
+def parse_yaml(text: str, source: str = "team definition") -> Mapping[str, Any]:
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"{source}: invalid YAML: {exc}") from exc
     if not isinstance(data, Mapping):
-        raise ConfigError(f"{path}: expected a mapping at the top level")
+        raise ConfigError(f"{source}: expected a mapping at the top level")
     return data
 
 
-def load_team(
-    path: str | Path,
-    llm_factory: LLMFactory = anthropic_factory,
-    registry: NodeRegistry | None = None,
-) -> Runnable:
+def load_team(path: str | Path, llm_factory: LLMFactory = anthropic_factory) -> Runnable:
     """Build a runnable from a YAML or JSON file."""
-    return build_team(read_team_file(path), llm_factory, registry)
+    return build_team(read_team_file(path), llm_factory)
 
 
-def load_nodes(path: str | Path, registry: NodeRegistry | None = None) -> list[Node]:
+def load_nodes(path: str | Path) -> list[Node]:
     """The machines defined in a team file."""
-    nodes = parse_team(read_team_file(path)).build_nodes(registry or NodeRegistry())
-    return list(nodes.values())
+    return list(parse_team(read_team_file(path)).build_nodes().values())
 
 
 def load_tool(ref: str) -> Tool:

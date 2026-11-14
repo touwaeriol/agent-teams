@@ -13,17 +13,19 @@ from pathlib import Path
 
 import pytest
 import uvicorn
+from fastapi import FastAPI
 
-from agent_teams import Agent, ClaudeCodeWorker, RunContext, ScriptedLLM
+from agent_teams import ClaudeCodeWorker, RunContext
 from agent_teams.daemon import Daemon, DaemonConfig
 from agent_teams.nodes import NodeCommandError
-from agent_teams.remote import NodeOffline, NodeRegistry, RemoteNode, node_token
+from agent_teams.remote import NodeOffline, NodeRegistry, RemoteNode
+from agent_teams.server.accounts import MemoryAccounts
 from agent_teams.server.app import create_app
 from agent_teams.server.broker import MemoryBroker
-from agent_teams.server.hub import Hub
+from agent_teams.server.platform import Services
+from agent_teams.server.security import new_token
 from agent_teams.server.store import MemoryStore
 
-SECRET = "console-secret"
 FAKE = Path(__file__).with_name("fake_claude.py")
 CLAUDE = [sys.executable, str(FAKE)]
 
@@ -35,9 +37,27 @@ def free_port() -> int:
 
 
 @dataclass
+class Enrolled:
+    """A node registered for a user, as the web console would store it."""
+
+    accounts: MemoryAccounts
+    node_id: str
+    token: str
+
+
+async def enroll() -> Enrolled:
+    accounts = MemoryAccounts()
+    user = await accounts.create_user("owner@example.com", "unused", "user")
+    token, token_hash = new_token()
+    node = await accounts.create_node(user.id, "n1", token_hash)
+    return Enrolled(accounts, node.id, token)
+
+
+@dataclass
 class Console:
     port: int
-    registry: NodeRegistry
+    enrolled: Enrolled
+    app: FastAPI
     server: uvicorn.Server
     task: asyncio.Task[None]
 
@@ -45,37 +65,40 @@ class Console:
     def url(self) -> str:
         return f"http://127.0.0.1:{self.port}"
 
+    @property
+    def registry(self) -> NodeRegistry:
+        registry: NodeRegistry = self.app.state.platform.registry
+        return registry
+
+    async def online(self, timeout: float = 10) -> None:
+        await self.registry.link(self.enrolled.node_id, timeout)
+
     async def stop(self) -> None:
         self.server.should_exit = True
         await self.task
 
 
-async def start_console(port: int) -> Console:
-    registry = NodeRegistry(SECRET)
-    registry.declare("n1")
+async def start_console(port: int, enrolled: Enrolled) -> Console:
+    async def services() -> Services:
+        url = f"http://127.0.0.1:{port}"
+        return Services(MemoryStore(), enrolled.accounts, MemoryBroker(), url)
 
-    async def factory() -> Hub:
-        return Hub(Agent("lead", ScriptedLLM([])), MemoryStore(), MemoryBroker(), registry)
-
+    app = create_app(services)
     config = uvicorn.Config(
-        create_app(factory, "api-token"),
-        host="127.0.0.1",
-        port=port,
-        log_level="warning",
-        timeout_graceful_shutdown=1,
+        app, host="127.0.0.1", port=port, log_level="warning", timeout_graceful_shutdown=1
     )
     server = uvicorn.Server(config)
     task = asyncio.create_task(server.serve())
     while not server.started:
         await asyncio.sleep(0.01)
-    return Console(port, registry, server, task)
+    return Console(port, enrolled, app, server, task)
 
 
-def daemon_config(console_url: str, tmp_path: Path, token: str | None = None) -> DaemonConfig:
+def daemon_config(console: Console, tmp_path: Path, token: str | None = None) -> DaemonConfig:
     return DaemonConfig(
-        console=console_url,
+        console=console.url,
         name="n1",
-        token=token or node_token(SECRET, "n1"),
+        token=token or console.enrolled.token,
         root=tmp_path / "root",
         state=tmp_path / "state",
         allow=frozenset({Path(sys.executable).name}),
@@ -100,21 +123,22 @@ def start_daemon(config: DaemonConfig) -> Running:
 
 @pytest.fixture
 async def console() -> AsyncIterator[Console]:
-    running = await start_console(free_port())
+    running = await start_console(free_port(), await enroll())
     yield running
     await running.stop()
 
 
 @pytest.fixture
 async def node(console: Console, tmp_path: Path) -> AsyncIterator[Running]:
-    running = start_daemon(daemon_config(console.url, tmp_path))
-    await console.registry.link("n1", 10)
+    running = start_daemon(daemon_config(console, tmp_path))
+    await console.online()
     yield running
     await running.stop()
 
 
 def remote(console: Console, connect_timeout: float = 60.0) -> RemoteNode:
-    return RemoteNode("n1", console.registry, connect_timeout=connect_timeout)
+    key = console.enrolled.node_id
+    return RemoteNode("n1", console.registry, key=key, connect_timeout=connect_timeout)
 
 
 async def collect(lines: AsyncIterator[str]) -> list[str]:
@@ -140,7 +164,7 @@ async def test_runs_on_the_daemon_inside_its_root(
     lines = await collect(remote(console).stream([*CLAUDE, "-p", "hi"], "proj/a", "k1"))
 
     assert result_of(lines)["cwd"] == str((tmp_path / "root" / "proj" / "a").resolve())
-    status = console.registry.statuses()[0]
+    status = console.registry.status(console.enrolled.node_id)
     assert status["online"] is True
     assert status["max_runs"] == 4
 
@@ -179,9 +203,10 @@ async def test_reattaches_after_the_console_restarts(
     marker = tmp_path / "starts"
     monkeypatch.setenv("FAKE_CLAUDE_MARKER", str(marker))
     port = free_port()
-    first = await start_console(port)
-    daemon = start_daemon(daemon_config(first.url, tmp_path))
-    await first.registry.link("n1", 10)
+    enrolled = await enroll()  # the accounts database outlives the console process
+    first = await start_console(port, enrolled)
+    daemon = start_daemon(daemon_config(first, tmp_path))
+    await first.online()
     command = [*CLAUDE, "-p", "tick:10"]
     seen: list[str] = []
 
@@ -194,8 +219,8 @@ async def test_reattaches_after_the_console_restarts(
         await asyncio.sleep(0.02)
     await first.stop()  # the console goes away mid-run
 
-    second = await start_console(port)
-    await second.registry.link("n1", 15)
+    second = await start_console(port, enrolled)
+    await second.online(15)
     lines = await collect(remote(second).stream(command, "w", "conv/t1/coder"))
 
     assert ticks(lines) == [f"tick {n}" for n in range(10)]  # full replay from the start
@@ -247,7 +272,7 @@ async def test_node_policy_rejects_other_commands_and_paths(
 
 
 async def test_bad_tokens_are_rejected(console: Console, tmp_path: Path) -> None:
-    impostor = start_daemon(daemon_config(console.url, tmp_path, token="wrong"))
+    impostor = start_daemon(daemon_config(console, tmp_path, token="wrong"))
     with pytest.raises(NodeOffline):
         await collect(remote(console, connect_timeout=1.0).stream([*CLAUDE, "-p", "x"], "w"))
     await impostor.stop()
@@ -258,15 +283,15 @@ async def test_finished_runs_survive_a_daemon_restart(
 ) -> None:
     marker = tmp_path / "starts"
     monkeypatch.setenv("FAKE_CLAUDE_MARKER", str(marker))
-    config = daemon_config(console.url, tmp_path)
+    config = daemon_config(console, tmp_path)
     first = start_daemon(config)
-    await console.registry.link("n1", 10)
+    await console.online()
     command = [*CLAUDE, "-p", "hi"]
     before = await collect(remote(console).stream(command, "w", "k-persist"))
     await first.stop()
 
     second = start_daemon(config)
-    await console.registry.link("n1", 10)
+    await console.online()
     after = await collect(remote(console).stream(command, "w", "k-persist"))
 
     assert after == before
@@ -277,26 +302,14 @@ async def test_finished_runs_survive_a_daemon_restart(
 async def test_runs_interrupted_by_a_daemon_restart_report_lost(
     console: Console, tmp_path: Path
 ) -> None:
-    config = daemon_config(console.url, tmp_path)
+    config = daemon_config(console, tmp_path)
     runs = config.state / "runs"
     runs.mkdir(parents=True)
     daemon = start_daemon(config)
-    await console.registry.link("n1", 10)
+    await console.online()
     log = daemon.daemon.runner._log_path("k-lost")
     log.write_text(json.dumps({"seq": 1, "line": "partial"}) + "\n", encoding="utf-8")
 
     with pytest.raises(NodeCommandError, match=r"exit 137: .*restarted"):
         await collect(remote(console).stream([*CLAUDE, "-p", "hi"], "w", "k-lost"))
     await daemon.stop()
-
-
-def test_node_tokens_are_per_node_and_revocable() -> None:
-    registry = NodeRegistry(SECRET)
-    registry.declare("a")
-    registry.declare("b", revision=2)
-    assert registry.verify("a", node_token(SECRET, "a"))
-    assert not registry.verify("a", node_token(SECRET, "b"))
-    assert not registry.verify("b", node_token(SECRET, "b", revision=1))
-    assert registry.verify("b", node_token(SECRET, "b", revision=2))
-    assert not registry.verify("unknown", node_token(SECRET, "unknown"))
-    assert not NodeRegistry("").verify("a", node_token("", "a"))

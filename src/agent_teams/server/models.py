@@ -69,3 +69,46 @@ class NewMessage(BaseModel):
 
 class Login(BaseModel):
     token: str
+
+
+UserRole = Literal["admin", "user"]
+
+
+class UserView(BaseModel):
+    id: str
+    email: str
+    role: UserRole
+    active: bool
+    max_nodes: int | None
+    created_at: datetime
+
+
+class NodeView(BaseModel):
+    id: str
+    name: str
+    created_at: datetime
+
+
+class PlatformSettings(BaseModel):
+    registration_open: bool = True
+    default_max_nodes: int = 5
+
+
+class Credentials(BaseModel):
+    email: str
+    password: str
+
+
+class NewNode(BaseModel):
+    name: str
+
+
+class TeamConfig(BaseModel):
+    config: str
+
+
+class UserUpdate(BaseModel):
+    role: UserRole | None = None
+    active: bool | None = None
+    max_nodes: int | None = None
+    clear_max_nodes: bool = False

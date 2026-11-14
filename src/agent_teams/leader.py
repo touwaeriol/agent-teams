@@ -11,13 +11,15 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from .agent import Agent
+from .claude_code import ClaudeCodeWorker
+from .claude_session import ClaudeCodeSession, ToolServer
 from .context import RunContext
-from .conversation import Conversation
+from .conversation import ChatSession, Conversation
 from .errors import ConfigError, MaxStepsExceeded
 from .llm.base import LLM
 from .runnable import Runnable
 from .tasks import TaskBoard
-from .tools import Tool, tool_name
+from .tools import Tool, Toolkit, tool_name
 from .types import Result
 
 LEADER_INSTRUCTIONS = (
@@ -39,10 +41,15 @@ LEADER_INSTRUCTIONS = (
 
 @dataclass(eq=False)
 class Leader(Runnable):
-    """A team lead with a non-blocking task board over ``members``."""
+    """A team lead with a non-blocking task board over ``members``.
+
+    ``brain`` is either an LLM (the leader is an in-process agent) or a
+    :class:`ClaudeCodeWorker` (the leader is a Claude Code session on a node,
+    reaching the board's tools over MCP through a ``tool_server``).
+    """
 
     name: str
-    llm: LLM
+    brain: LLM | ClaudeCodeWorker
     members: Sequence[Runnable]
     instructions: str = LEADER_INSTRUCTIONS
     description: str = ""
@@ -54,7 +61,13 @@ class Leader(Runnable):
         if not self.members:
             raise ConfigError(f"leader '{self.name}' has no members")
 
-    def open(self, ctx: RunContext | None = None, *, first_task: int = 1) -> Conversation:
+    def open(
+        self,
+        ctx: RunContext | None = None,
+        *,
+        first_task: int = 1,
+        tool_server: ToolServer | None = None,
+    ) -> Conversation:
         """Start a conversation with the leader; each call gets a fresh task board.
 
         ``first_task`` sets the first task number, so a resumed conversation
@@ -62,15 +75,20 @@ class Leader(Runnable):
         """
         ctx = ctx or RunContext()
         board = TaskBoard(self.members, ctx.enter(self.name), first_task)
-        agent = Agent(
-            name=self.name,
-            llm=self.llm,
-            instructions=f"{self.instructions}\n\nTeam members:\n{self._roster()}",
-            description=self.description,
-            tools=[*board.tools(), *self.tools],
-            max_steps=self.max_steps,
-        )
-        return Conversation(agent.session(ctx), board)
+        tools = [*board.tools(), *self.tools]
+        return Conversation(self._session(ctx, tools, tool_server), board)
+
+    def _session(
+        self, ctx: RunContext, tools: list[Tool], tool_server: ToolServer | None
+    ) -> ChatSession:
+        prompt = f"{self.instructions}\n\nTeam members:\n{self._roster()}"
+        if not isinstance(self.brain, ClaudeCodeWorker):
+            agent = Agent(self.name, self.brain, prompt, self.description, tools, self.max_steps)
+            return agent.session(ctx)
+        if tool_server is None:
+            raise ConfigError(f"leader '{self.name}' runs Claude Code and needs the web service")
+        endpoint = tool_server.expose(Toolkit(tools), ctx)
+        return ClaudeCodeSession(self.brain, ctx, prompt, endpoint)
 
     async def run(self, task: str, ctx: RunContext | None = None) -> Result:
         # Each conversation turn is traced by the session, so no outer trace here.

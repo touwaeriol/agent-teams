@@ -13,7 +13,6 @@ from anthropic import AuthenticationError
 from agent_teams import Agent, Leader, LocalNode, ScriptedLLM, Sequential, SSHNode, cli
 from agent_teams.errors import describe_error
 from agent_teams.llm import call, say
-from agent_teams.remote import node_token
 from agent_teams.runnable import Runnable
 from agent_teams.types import AssistantTurn, Reply
 
@@ -113,7 +112,7 @@ async def test_converse_keeps_context_and_handles_commands() -> None:
         "lead: done",
     ]
     assert console.out[2].startswith("lead: [error]")
-    assert len(conversation.session.history) == 2
+    assert len(conversation.session.snapshot()["history"]) == 2
 
 
 async def test_leader_keeps_talking_while_tasks_run_and_eof_waits_for_them() -> None:
@@ -189,30 +188,6 @@ def test_nodes_command_without_nodes(
     monkeypatch.setattr(cli, "load_nodes", lambda _path: [])
     assert cli.main(["nodes", "team.yaml"]) == 0
     assert capsys.readouterr().out.startswith("no SSH or local nodes defined")
-
-
-def test_node_token_prints_the_token_and_install_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    team = tmp_path / "team.yaml"
-    team.write_text("nodes: [{name: build-1, revision: 3}]\nteam: {name: solo}\n", encoding="utf-8")
-    monkeypatch.setenv("AGENT_TEAMS_TOKEN", "console-secret")
-
-    assert cli.main(["node-token", str(team), "build-1", "--console", "http://c:3001"]) == 0
-
-    captured = capsys.readouterr()
-    assert captured.out.strip() == node_token("console-secret", "build-1", 3)
-    assert "--console http://c:3001 --name build-1" in captured.err
-
-
-def test_node_token_needs_the_console_secret(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    team = tmp_path / "team.yaml"
-    team.write_text("nodes: [{name: build-1}]\nteam: {name: solo}\n", encoding="utf-8")
-    monkeypatch.delenv("AGENT_TEAMS_TOKEN", raising=False)
-    assert cli.main(["node-token", str(team), "build-1"]) == 1
-    assert "AGENT_TEAMS_TOKEN" in capsys.readouterr().err
 
 
 def test_node_daemon_requires_its_token(

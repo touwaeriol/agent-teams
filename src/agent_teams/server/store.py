@@ -15,15 +15,21 @@ from typing import Any, Protocol
 import asyncpg
 
 from ..types import Task
+from .accounts import SCHEMA as ACCOUNTS_SCHEMA
+from .accounts import PostgresAccounts
 from .models import ConversationView, MessageView, Role, TaskView
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS at_conversations (
     id TEXT PRIMARY KEY,
+    user_id TEXT REFERENCES at_users(id) ON DELETE CASCADE,
     title TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    history JSONB NOT NULL DEFAULT '[]'::jsonb
+    history JSONB NOT NULL DEFAULT '{}'::jsonb
 );
+ALTER TABLE at_conversations
+    ADD COLUMN IF NOT EXISTS user_id TEXT REFERENCES at_users(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS at_conversations_user ON at_conversations (user_id, created_at);
 CREATE TABLE IF NOT EXISTS at_messages (
     id BIGSERIAL PRIMARY KEY,
     conversation_id TEXT NOT NULL REFERENCES at_conversations(id) ON DELETE CASCADE,
@@ -49,16 +55,18 @@ INTERRUPTED = "Interrupted: the server restarted before this task finished."
 
 
 class Store(Protocol):
-    async def create_conversation(self, conversation_id: str, title: str) -> ConversationView: ...
-    async def conversations(self) -> list[ConversationView]: ...
-    async def exists(self, conversation_id: str) -> bool: ...
+    async def create_conversation(
+        self, conversation_id: str, title: str, user_id: str
+    ) -> ConversationView: ...
+    async def conversations(self, user_id: str) -> list[ConversationView]: ...
+    async def owner(self, conversation_id: str) -> str | None: ...
     async def add_message(self, conversation_id: str, role: Role, content: str) -> MessageView: ...
     async def messages(self, conversation_id: str) -> list[MessageView]: ...
     async def save_task(self, conversation_id: str, task: Task) -> None: ...
     async def tasks(self, conversation_id: str) -> list[TaskView]: ...
     async def unfinished_conversations(self) -> list[str]: ...
-    async def save_history(self, conversation_id: str, turns: list[dict[str, Any]]) -> None: ...
-    async def history(self, conversation_id: str) -> list[dict[str, Any]]: ...
+    async def save_history(self, conversation_id: str, state: dict[str, Any]) -> None: ...
+    async def history(self, conversation_id: str) -> dict[str, Any]: ...
     async def close(self) -> None: ...
 
 
@@ -71,21 +79,26 @@ class MemoryStore:
 
     def __init__(self) -> None:
         self._conversations: dict[str, ConversationView] = {}
+        self._owners: dict[str, str] = {}
         self._messages: defaultdict[str, list[MessageView]] = defaultdict(list)
         self._tasks: defaultdict[str, dict[str, TaskView]] = defaultdict(dict)
-        self._histories: dict[str, list[dict[str, Any]]] = {}
+        self._histories: dict[str, dict[str, Any]] = {}
         self._next_id = 1
 
-    async def create_conversation(self, conversation_id: str, title: str) -> ConversationView:
+    async def create_conversation(
+        self, conversation_id: str, title: str, user_id: str
+    ) -> ConversationView:
         view = ConversationView(id=conversation_id, title=title, created_at=_now())
         self._conversations[conversation_id] = view
+        self._owners[conversation_id] = user_id
         return view
 
-    async def conversations(self) -> list[ConversationView]:
-        return sorted(self._conversations.values(), key=lambda c: c.created_at, reverse=True)
+    async def conversations(self, user_id: str) -> list[ConversationView]:
+        mine = [c for c in self._conversations.values() if self._owners[c.id] == user_id]
+        return sorted(mine, key=lambda c: c.created_at, reverse=True)
 
-    async def exists(self, conversation_id: str) -> bool:
-        return conversation_id in self._conversations
+    async def owner(self, conversation_id: str) -> str | None:
+        return self._owners.get(conversation_id)
 
     async def add_message(self, conversation_id: str, role: Role, content: str) -> MessageView:
         message = MessageView(id=self._next_id, role=role, content=content, created_at=_now())
@@ -107,49 +120,56 @@ class MemoryStore:
             cid for cid, tasks in self._tasks.items() if any(not t.finished for t in tasks.values())
         ]
 
-    async def save_history(self, conversation_id: str, turns: list[dict[str, Any]]) -> None:
-        self._histories[conversation_id] = turns
+    async def save_history(self, conversation_id: str, state: dict[str, Any]) -> None:
+        self._histories[conversation_id] = state
 
-    async def history(self, conversation_id: str) -> list[dict[str, Any]]:
-        return list(self._histories.get(conversation_id, []))
+    async def history(self, conversation_id: str) -> dict[str, Any]:
+        return dict(self._histories.get(conversation_id, {}))
 
     async def close(self) -> None:
         return None
 
 
+async def connect_postgres(dsn: str) -> tuple[PostgresStore, PostgresAccounts]:
+    """One pool for both stores; creates or upgrades the schema."""
+    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=10)
+    async with pool.acquire() as connection:
+        await connection.execute(ACCOUNTS_SCHEMA)
+        await connection.execute(SCHEMA)
+    return PostgresStore(pool), PostgresAccounts(pool)
+
+
 class PostgresStore:
-    """asyncpg-backed store; call :meth:`connect` to create it."""
+    """asyncpg-backed store; create it with :func:`connect_postgres`."""
 
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
 
-    @classmethod
-    async def connect(cls, dsn: str) -> PostgresStore:
-        pool = await asyncpg.create_pool(dsn, min_size=1, max_size=5)
-        async with pool.acquire() as connection:
-            await connection.execute(SCHEMA)
-        return cls(pool)
-
-    async def create_conversation(self, conversation_id: str, title: str) -> ConversationView:
+    async def create_conversation(
+        self, conversation_id: str, title: str, user_id: str
+    ) -> ConversationView:
         row = await self._pool.fetchrow(
-            "INSERT INTO at_conversations (id, title) VALUES ($1, $2) "
+            "INSERT INTO at_conversations (id, title, user_id) VALUES ($1, $2, $3) "
             "RETURNING id, title, created_at",
             conversation_id,
             title,
+            user_id,
         )
         return ConversationView(**dict(row))
 
-    async def conversations(self) -> list[ConversationView]:
+    async def conversations(self, user_id: str) -> list[ConversationView]:
         rows = await self._pool.fetch(
-            "SELECT id, title, created_at FROM at_conversations ORDER BY created_at DESC"
+            "SELECT id, title, created_at FROM at_conversations WHERE user_id = $1 "
+            "ORDER BY created_at DESC",
+            user_id,
         )
         return [ConversationView(**dict(r)) for r in rows]
 
-    async def exists(self, conversation_id: str) -> bool:
-        found = await self._pool.fetchval(
-            "SELECT 1 FROM at_conversations WHERE id = $1", conversation_id
+    async def owner(self, conversation_id: str) -> str | None:
+        value = await self._pool.fetchval(
+            "SELECT user_id FROM at_conversations WHERE id = $1", conversation_id
         )
-        return found is not None
+        return str(value) if value is not None else None
 
     async def add_message(self, conversation_id: str, role: Role, content: str) -> MessageView:
         row = await self._pool.fetchrow(
@@ -199,18 +219,19 @@ class PostgresStore:
         )
         return [r["conversation_id"] for r in rows]
 
-    async def save_history(self, conversation_id: str, turns: list[dict[str, Any]]) -> None:
+    async def save_history(self, conversation_id: str, state: dict[str, Any]) -> None:
         await self._pool.execute(
             "UPDATE at_conversations SET history = $2::jsonb WHERE id = $1",
             conversation_id,
-            json.dumps(turns, ensure_ascii=False),
+            json.dumps(state, ensure_ascii=False),
         )
 
-    async def history(self, conversation_id: str) -> list[dict[str, Any]]:
+    async def history(self, conversation_id: str) -> dict[str, Any]:
         raw = await self._pool.fetchval(
             "SELECT history FROM at_conversations WHERE id = $1", conversation_id
         )
-        return list(json.loads(raw)) if raw else []
+        state = json.loads(raw) if raw else {}
+        return state if isinstance(state, dict) else {}
 
     async def close(self) -> None:
         await self._pool.close()

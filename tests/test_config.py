@@ -13,7 +13,7 @@ from agent_teams.claude_code import ClaudeCodeWorker
 from agent_teams.config import build_team, load_nodes, load_team, load_tool
 from agent_teams.llm.base import LLM
 from agent_teams.nodes import LocalNode, SSHNode
-from agent_teams.remote import NodeRegistry, RemoteNode, node_token
+from agent_teams.remote import NodeRegistry, RemoteNode
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
@@ -242,7 +242,8 @@ def test_invalid_claude_code_employees(
 @pytest.mark.parametrize(
     ("nodes", "fragment"),
     [
-        ([{"name": "x", "host": "h", "local": True}], "cannot have both"),
+        ([{"name": "x"}], "either 'host'"),
+        ([{"name": "x", "host": "h", "local": True}], "either 'host'"),
         ([{"name": "x", "local": True}, {"name": "x", "local": True}], "unique"),
     ],
 )
@@ -257,11 +258,11 @@ def test_load_nodes(tmp_path: Path) -> None:
     assert [n.name for n in load_nodes(path)] == ["build-1", "here"]
 
 
-def test_nodes_without_host_are_daemon_nodes() -> None:
-    registry = NodeRegistry("secret")
+def test_platform_nodes_are_passed_in_and_names_must_not_clash() -> None:
+    registry = NodeRegistry()
+    gpu = RemoteNode("gpu-box", registry, key="node-123")
     team = build_team(
         {
-            "nodes": [{"name": "gpu-box", "workdir": "agents", "revision": 2}],
             "leader": "lead",
             "employees": [
                 {"name": "lead"},
@@ -269,12 +270,47 @@ def test_nodes_without_host_are_daemon_nodes() -> None:
             ],
         },
         llm_factory=RecordingFactory(),
-        registry=registry,
+        nodes={"gpu-box": gpu},
     )
     assert isinstance(team, Leader)
     (coder,) = team.members
     assert isinstance(coder, ClaudeCodeWorker)
-    assert isinstance(coder.node, RemoteNode)
+    assert coder.node is gpu
     assert coder.resumable
-    assert coder.directory == "agents/coder"
-    assert registry.verify("gpu-box", node_token("secret", "gpu-box", 2))
+    assert coder.directory == "coder"
+
+    clash = {"nodes": [{"name": "gpu-box", "local": True}], "team": {"name": "a"}}
+    with pytest.raises(ConfigError, match="defined twice"):
+        build_team(clash, llm_factory=RecordingFactory(), nodes={"gpu-box": gpu})
+
+
+def test_claude_code_leader_from_the_shorthand(tmp_path: Path) -> None:
+    team = build_team(
+        {
+            "nodes": [{"name": "a", "local": True, "workdir": str(tmp_path)}],
+            "leader": "lead",
+            "employees": [
+                {
+                    "name": "lead",
+                    "type": "claude_code",
+                    "node": "a",
+                    "description": "boss",
+                    "instructions": "Keep it short.",
+                    "model": "opus",
+                },
+                {"name": "coder", "type": "claude_code", "node": "a"},
+            ],
+        },
+        llm_factory=RecordingFactory(),
+    )
+    assert isinstance(team, Leader)
+    assert isinstance(team.brain, ClaudeCodeWorker)
+    assert (team.brain.name, team.brain.model, team.brain.instructions) == (
+        "lead",
+        "opus",
+        "Keep it short.",
+    )
+    assert team.description == "boss"
+    assert [m.name for m in team.members] == ["coder"]
+    with pytest.raises(ConfigError, match="web service"):
+        team.open()

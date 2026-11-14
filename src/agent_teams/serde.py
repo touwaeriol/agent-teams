@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..types import AssistantTurn, ToolCall, ToolResult, ToolTurn, Turn, UserTurn
+from .types import AssistantTurn, ToolCall, ToolResult, ToolTurn, Turn, UserTurn
 
 
 def dump_turn(turn: Turn) -> dict[str, Any]:

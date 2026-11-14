@@ -1,107 +1,156 @@
-"""Live conversations behind the HTTP API.
+"""Live conversations behind the HTTP API, for many users.
 
-The hub owns one :class:`Conversation` per active chat and one responder task
-that answers queued messages. Everything observable is written to the store
-and published to the broker, so browsers can reconnect and the server can
-restart without losing conversations.
+Every conversation has an owner; its leader comes from that owner's team.
+The hub keeps one :class:`Conversation` and one responder task per active
+chat. Everything observable is written to the store and published to the
+broker, so browsers can reconnect and the server can restart without losing
+conversations.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 
 import anthropic
 
 from ..agent import Agent
+from ..claude_session import ToolEndpoint, ToolServer
 from ..context import RunContext
 from ..conversation import Conversation
 from ..errors import AgentTeamsError, describe_error
 from ..hooks import Event, Hooks, TaskAssigned, TaskFinished, TaskStarted, format_event
 from ..leader import Leader
 from ..remote import NodeRegistry
+from ..tools import Toolkit
 from .broker import Broker
 from .models import ConversationView, MessageView, Role, TaskView
-from .serde import dump_turn, load_turn
 from .store import INTERRUPTED, Store
+
+logger = logging.getLogger(__name__)
+
+LeadProvider = Callable[[str], Awaitable[Leader | Agent]]
 
 
 class UnknownConversation(KeyError):  # noqa: N818 - mirrors KeyError
-    """No conversation with that ID."""
+    """No conversation with that ID for this user."""
+
+
+class _ScopedTools:
+    """Hands out MCP endpoints for one conversation and revokes them together."""
+
+    def __init__(self, server: ToolServer | None) -> None:
+        self._server = server
+        self.tokens: list[str] = []
+
+    def expose(self, toolkit: Toolkit, ctx: RunContext) -> ToolEndpoint:
+        if self._server is None:
+            raise AgentTeamsError("this service has no MCP endpoint for Claude Code leaders")
+        endpoint = self._server.expose(toolkit, ctx)
+        self.tokens.append(endpoint.token)
+        return endpoint
 
 
 @dataclass
 class _Live:
+    owner: str
     conversation: Conversation
     responder: asyncio.Task[None]
+    tools: _ScopedTools = field(repr=False)
 
 
 class Hub:
     def __init__(
         self,
-        lead: Leader | Agent,
+        leads: LeadProvider,
         store: Store,
         broker: Broker,
         registry: NodeRegistry | None = None,
+        tool_server: ToolServer | None = None,
     ) -> None:
-        self.lead = lead
+        self.leads = leads
         self.store = store
         self.broker = broker
         self.registry = registry or NodeRegistry()
+        self.tool_server = tool_server
         self._live: dict[str, _Live] = {}
         self._opening = asyncio.Lock()
 
-    async def create(self, title: str = "") -> ConversationView:
-        return await self.store.create_conversation(uuid.uuid4().hex[:12], title)
+    async def create(self, user_id: str, title: str = "") -> ConversationView:
+        return await self.store.create_conversation(uuid.uuid4().hex[:12], title, user_id)
 
-    async def post(self, conversation_id: str, content: str) -> MessageView:
+    async def conversations(self, user_id: str) -> list[ConversationView]:
+        return await self.store.conversations(user_id)
+
+    async def post(self, user_id: str, conversation_id: str, content: str) -> MessageView:
         """Record the user's message and queue it for the leader; never waits for a reply."""
-        live = await self._ensure_live(conversation_id)
+        await self.check(user_id, conversation_id)
+        live = await self._ensure_live(conversation_id, user_id)
         message = await self._record(conversation_id, "user", content)
         live.conversation.post(content)
         return message
 
+    async def messages(self, user_id: str, conversation_id: str) -> list[MessageView]:
+        await self.check(user_id, conversation_id)
+        return await self.store.messages(conversation_id)
+
+    async def tasks(self, user_id: str, conversation_id: str) -> list[TaskView]:
+        await self.check(user_id, conversation_id)
+        return await self.store.tasks(conversation_id)
+
+    async def check(self, user_id: str, conversation_id: str) -> None:
+        """Raise :class:`UnknownConversation` unless ``user_id`` owns the conversation."""
+        if await self.store.owner(conversation_id) != user_id:
+            raise UnknownConversation(conversation_id)
+
     async def recover(self) -> None:
         """After a restart: resume every conversation that still has unfinished tasks."""
         for conversation_id in await self.store.unfinished_conversations():
-            await self._ensure_live(conversation_id)
-
-    async def messages(self, conversation_id: str) -> list[MessageView]:
-        await self.check(conversation_id)
-        return await self.store.messages(conversation_id)
-
-    async def tasks(self, conversation_id: str) -> list[TaskView]:
-        await self.check(conversation_id)
-        return await self.store.tasks(conversation_id)
+            owner = await self.store.owner(conversation_id)
+            if owner is None:
+                continue
+            try:
+                await self._ensure_live(conversation_id, owner)
+            except AgentTeamsError as exc:
+                logger.warning("cannot resume conversation %s: %s", conversation_id, exc)
 
     async def close(self) -> None:
-        for live in self._live.values():
-            live.responder.cancel()
-            live.conversation.close()
-        self._live.clear()
+        for conversation_id in list(self._live):
+            self._close(conversation_id)
 
-    async def check(self, conversation_id: str) -> None:
-        """Raise :class:`UnknownConversation` unless the conversation exists."""
-        if not await self.store.exists(conversation_id):
-            raise UnknownConversation(conversation_id)
+    async def close_user(self, user_id: str) -> None:
+        """End a user's live conversations (e.g. the account was disabled)."""
+        for conversation_id in [c for c, live in self._live.items() if live.owner == user_id]:
+            self._close(conversation_id)
 
-    async def _ensure_live(self, conversation_id: str) -> _Live:
+    def _close(self, conversation_id: str) -> None:
+        live = self._live.pop(conversation_id)
+        live.responder.cancel()
+        live.conversation.close()
+        for token in live.tools.tokens:
+            revoke = getattr(self.tool_server, "revoke", None)
+            if revoke is not None:
+                revoke(token)
+
+    async def _ensure_live(self, conversation_id: str, owner: str) -> _Live:
         async with self._opening:
             if conversation_id not in self._live:
-                self._live[conversation_id] = await self._resume(conversation_id)
+                self._live[conversation_id] = await self._resume(conversation_id, owner)
             return self._live[conversation_id]
 
-    async def _resume(self, conversation_id: str) -> _Live:
-        await self.check(conversation_id)
+    async def _resume(self, conversation_id: str, owner: str) -> _Live:
+        lead = await self.leads(owner)
         tasks = await self.store.tasks(conversation_id)
         ctx = RunContext(self._hooks(conversation_id), run_key=conversation_id)
-        conversation = self._open(ctx, len(tasks) + 1)
-        history = await self.store.history(conversation_id)
-        conversation.session.history.extend(load_turn(turn) for turn in history)
+        tools = _ScopedTools(self.tool_server)
+        conversation = _open(lead, ctx, len(tasks) + 1, tools)
+        conversation.session.restore(await self.store.history(conversation_id))
         await self._recover(conversation_id, conversation, [t for t in tasks if not t.finished])
         responder = asyncio.create_task(self._respond_forever(conversation_id, conversation))
-        return _Live(conversation, responder)
+        return _Live(owner, conversation, responder, tools)
 
     async def _recover(
         self, conversation_id: str, conversation: Conversation, unfinished: list[TaskView]
@@ -115,17 +164,11 @@ class Hub:
             interrupted = view.model_copy(update={"status": "failed", "output": INTERRUPTED})
             await self.store.save_task(conversation_id, interrupted.to_task())
 
-    def _open(self, ctx: RunContext, first_task: int) -> Conversation:
-        if isinstance(self.lead, Leader):
-            return self.lead.open(ctx, first_task=first_task)
-        return self.lead.open(ctx)
-
     async def _respond_forever(self, conversation_id: str, conversation: Conversation) -> None:
         while True:
             role, content = await _answer(conversation)
             await self._record(conversation_id, role, content)
-            turns = [dump_turn(turn) for turn in conversation.session.history]
-            await self.store.save_history(conversation_id, turns)
+            await self.store.save_history(conversation_id, conversation.session.snapshot())
 
     async def _record(self, conversation_id: str, role: Role, content: str) -> MessageView:
         message = await self.store.add_message(conversation_id, role, content)
@@ -150,6 +193,14 @@ class Hub:
         hooks.on(TaskFinished, on_task)
         hooks.on(Event, on_activity)
         return hooks
+
+
+def _open(
+    lead: Leader | Agent, ctx: RunContext, first_task: int, tools: ToolServer
+) -> Conversation:
+    if isinstance(lead, Leader):
+        return lead.open(ctx, first_task=first_task, tool_server=tools)
+    return lead.open(ctx)
 
 
 async def _answer(conversation: Conversation) -> tuple[Role, str]:

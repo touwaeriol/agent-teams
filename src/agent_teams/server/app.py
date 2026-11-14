@@ -1,96 +1,75 @@
-"""FastAPI app: REST for history, Server-Sent Events for live updates.
+"""The multi-user web service: ``agent-teams serve``.
 
-All ``/api`` routes require the access token: API clients send
-``Authorization: Bearer <token>``; the browser exchanges it once at
-``POST /session`` for an HttpOnly cookie, so the token never appears in URLs.
+Users register and sign in, register their own machines (node daemons dial in
+over WebSocket with a per-node token) and define their team; the leader and
+the employees run as Claude Code on those machines. The leader reaches its
+task board over MCP at ``/mcp``. Administrators manage users and settings.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
-import secrets
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager, suppress
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from importlib import resources
 from typing import Any
 
-from fastapi import (
-    APIRouter,
-    Depends,
-    FastAPI,
-    HTTPException,
-    Request,
-    Response,
-    WebSocket,
-    WebSocketDisconnect,
-    status,
-)
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from starlette.requests import Request
+from starlette.routing import Route
+from starlette.types import Receive, Scope, Send
 
-from ..agent import Agent
-from ..config import load_team
 from ..errors import ConfigError
-from ..leader import Leader
-from ..remote import NodeLink, NodeRegistry
-from .broker import Broker, Event, MemoryBroker, ValkeyBroker
-from .hub import Hub, UnknownConversation
-from .models import (
-    ConversationView,
-    Login,
-    MessageView,
-    NewConversation,
-    NewMessage,
-    TaskView,
-)
-from .store import MemoryStore, PostgresStore, Store
+from ..remote import NodeLink
+from . import admin, auth, routes
+from .accounts import AccountStore, MemoryAccounts
+from .broker import Broker, MemoryBroker, ValkeyBroker
+from .hub import UnknownConversation
+from .mcp_bridge import MCP_PATH
+from .platform import Platform, Services, platform
+from .security import hash_token
+from .store import MemoryStore, Store, connect_postgres
 
 logger = logging.getLogger(__name__)
-HEARTBEAT_SECONDS = 15.0
-SESSION_COOKIE = "agent_teams_session"
-SESSION_SECONDS = 30 * 24 * 3600
-HubFactory = Callable[[], Awaitable[Hub]]
+ServicesFactory = Callable[[], Awaitable[Services]]
 
 
 @dataclass(frozen=True)
 class Settings:
-    """Read from the environment; only the token and the team file are required."""
+    """From the environment. ``AGENT_TEAMS_PUBLIC_URL`` is how nodes and Claude
+    Code leaders reach this service (install commands and the MCP endpoint)."""
 
-    team_file: str
-    token: str
+    public_url: str
     database_url: str = ""
     valkey_url: str = ""
+    admin_emails: frozenset[str] = frozenset()
 
     @classmethod
-    def from_env(cls, team_file: str | None = None) -> Settings:
-        token = os.environ.get("AGENT_TEAMS_TOKEN", "")
-        if not token:
-            raise ConfigError("AGENT_TEAMS_TOKEN must be set to protect the API")
+    def from_env(cls) -> Settings:
+        public_url = os.environ.get("AGENT_TEAMS_PUBLIC_URL", "")
+        if not public_url:
+            raise ConfigError("set AGENT_TEAMS_PUBLIC_URL, e.g. http://203.0.113.5:3001")
+        emails = os.environ.get("AGENT_TEAMS_ADMIN_EMAILS", "")
         return cls(
-            team_file=team_file or os.environ.get("TEAM_FILE", "team.yaml"),
-            token=token,
+            public_url=public_url,
             database_url=os.environ.get("DATABASE_URL", ""),
             valkey_url=os.environ.get("VALKEY_URL", ""),
+            admin_emails=frozenset(e.strip().lower() for e in emails.split(",") if e.strip()),
         )
 
-    def hub_factory(self) -> HubFactory:
-        async def build() -> Hub:
-            registry = NodeRegistry(secret=self.token)
-            lead = load_team(self.team_file, registry=registry)
-            if not isinstance(lead, (Leader, Agent)):
-                raise ConfigError("the team file needs a leader or an agent at the top")
-            return Hub(lead, await self._store(), await self._broker(), registry)
-
-        return build
-
-    async def _store(self) -> Store:
+    async def services(self) -> Services:
+        store: Store
+        accounts: AccountStore
         if self.database_url:
-            return await PostgresStore.connect(self.database_url)
-        logger.warning("DATABASE_URL not set: conversations are kept in memory only")
-        return MemoryStore()
+            store, accounts = await connect_postgres(self.database_url)
+        else:
+            logger.warning("DATABASE_URL not set: everything is kept in memory only")
+            store, accounts = MemoryStore(), MemoryAccounts()
+        return Services(store, accounts, await self._broker(), self.public_url, self.admin_emails)
 
     async def _broker(self) -> Broker:
         if self.valkey_url:
@@ -99,155 +78,63 @@ class Settings:
         return MemoryBroker()
 
 
-def create_app(hub_factory: HubFactory, token: str) -> FastAPI:
+def create_app(services: ServicesFactory) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        hub = await hub_factory()
-        app.state.hub = hub
-        await hub.recover()
-        try:
-            yield
-        finally:
-            await hub.close()
-            await hub.store.close()
-            await hub.broker.close()
+        state = Platform.assemble(await services())
+        app.state.platform = state
+        async with state.bridge.running():
+            await state.hub.recover()
+            try:
+                yield
+            finally:
+                await state.hub.close()
+                await state.services.store.close()
+                await state.services.broker.close()
 
     app = FastAPI(title="agent-teams", lifespan=lifespan)
     app.add_exception_handler(UnknownConversation, _not_found)
-    app.include_router(_api(token))
-    app.include_router(_session(token))
+    for module in (auth, routes, admin):
+        app.include_router(module.router())
     app.add_api_websocket_route("/nodes/connect", node_socket)
-
-    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-    async def index() -> str:
-        return resources.files(__package__).joinpath("static/index.html").read_text("utf-8")
-
-    @app.get("/healthz", include_in_schema=False)
-    async def healthz() -> dict[str, bool]:
-        return {"ok": True}
-
+    app.add_api_route("/", index, methods=["GET"], include_in_schema=False)
+    app.add_api_route("/install-node.sh", install_script, methods=["GET"], include_in_schema=False)
+    app.add_api_route("/healthz", healthz, methods=["GET"], include_in_schema=False)
+    app.router.routes.append(
+        Route(MCP_PATH, endpoint=_McpEndpoint(), methods=["GET", "POST", "DELETE"])
+    )
     return app
 
 
-def _api(token: str) -> APIRouter:
-    router = APIRouter(prefix="/api", dependencies=[Depends(_authorizer(token))])
-    conversation = "/conversations/{conversation_id}"
-    router.add_api_route("/conversations", list_conversations, methods=["GET"])
-    router.add_api_route("/conversations", create_conversation, methods=["POST"], status_code=201)
-    router.add_api_route(f"{conversation}/messages", list_messages, methods=["GET"])
-    router.add_api_route(
-        f"{conversation}/messages", post_message, methods=["POST"], status_code=202
-    )
-    router.add_api_route(f"{conversation}/tasks", list_tasks, methods=["GET"])
-    router.add_api_route(f"{conversation}/events", events, methods=["GET"])
-    router.add_api_route("/nodes", list_nodes, methods=["GET"])
-    return router
+class _McpEndpoint:
+    """Forwards ``/mcp`` to the running bridge (an ASGI app built at startup)."""
 
-
-async def list_conversations(request: Request) -> list[ConversationView]:
-    return await _hub(request).store.conversations()
-
-
-async def create_conversation(request: Request, body: NewConversation) -> ConversationView:
-    return await _hub(request).create(body.title)
-
-
-async def list_messages(request: Request, conversation_id: str) -> list[MessageView]:
-    return await _hub(request).messages(conversation_id)
-
-
-async def post_message(request: Request, conversation_id: str, body: NewMessage) -> MessageView:
-    content = body.content.strip()
-    if not content:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "empty message")
-    return await _hub(request).post(conversation_id, content)
-
-
-async def list_tasks(request: Request, conversation_id: str) -> list[TaskView]:
-    return await _hub(request).tasks(conversation_id)
-
-
-async def events(request: Request, conversation_id: str) -> StreamingResponse:
-    hub = _hub(request)
-    await hub.check(conversation_id)
-    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
-    stream = sse(hub.broker.subscribe(conversation_id))
-    return StreamingResponse(stream, media_type="text/event-stream", headers=headers)
-
-
-async def sse(
-    events: AsyncGenerator[Event, None], heartbeat: float = HEARTBEAT_SECONDS
-) -> AsyncGenerator[str, None]:
-    """Format events as SSE, with comment heartbeats so proxies keep the stream open."""
-    pending = asyncio.ensure_future(anext(events))
-    try:
-        while True:
-            done, _ = await asyncio.wait({pending}, timeout=heartbeat)
-            if not done:
-                yield ": ping\n\n"
-                continue
-            yield f"data: {json.dumps(pending.result(), ensure_ascii=False)}\n\n"
-            pending = asyncio.ensure_future(anext(events))
-    finally:
-        pending.cancel()
-        with suppress(asyncio.CancelledError, StopAsyncIteration):
-            await pending
-        await events.aclose()
-
-
-def _session(token: str) -> APIRouter:
-    router = APIRouter(prefix="/session", include_in_schema=False)
-
-    @router.post("", status_code=status.HTTP_204_NO_CONTENT)
-    async def login(body: Login, response: Response) -> None:
-        _require(body.token, token)
-        response.set_cookie(
-            SESSION_COOKIE, token, max_age=SESSION_SECONDS, httponly=True, samesite="strict"
-        )
-
-    @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
-    async def logout(response: Response) -> None:
-        response.delete_cookie(SESSION_COOKIE)
-
-    return router
-
-
-def _authorizer(token: str) -> Callable[[Request], None]:
-    def authorize(request: Request) -> None:
-        header = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
-        _require(header or request.cookies.get(SESSION_COOKIE, ""), token)
-
-    return authorize
-
-
-def _require(supplied: str, expected: str) -> None:
-    if not secrets.compare_digest(supplied.encode(), expected.encode()):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or missing token")
-
-
-async def list_nodes(request: Request) -> list[dict[str, Any]]:
-    return _hub(request).registry.statuses()
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        await scope["app"].state.platform.bridge(scope, receive, send)
 
 
 async def node_socket(websocket: WebSocket) -> None:
-    """A node daemon's connection: authenticate, then route its messages to runs."""
-    registry = _hub(websocket).registry
-    name = websocket.query_params.get("name", "")
+    """A node daemon's connection: identify the node by its token, then route messages."""
+    state = platform(websocket)
     token = websocket.headers.get("authorization", "").removeprefix("Bearer ").strip()
-    if not registry.verify(name, token):
+    found = await state.accounts.node_by_token(hash_token(token)) if token else None
+    owner = await state.accounts.user(found[1]) if found else None
+    if found is None or owner is None or not owner.active:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
+    node = found[0]
     await websocket.accept()
-    link = NodeLink(name, _serialized(websocket.send_json), await websocket.receive_json())
-    registry.attach(link)
-    logger.info("node %s connected", name)
+    hello = await websocket.receive_json()
+    link = NodeLink(node.id, _serialized(websocket.send_json), hello, websocket.close)
+    state.registry.attach(link)
+    logger.info("node %s (%s) connected", node.name, node.id)
     try:
         while True:
             link.deliver(await websocket.receive_json())
     except WebSocketDisconnect:
-        logger.info("node %s disconnected", name)
+        logger.info("node %s disconnected", node.name)
     finally:
-        registry.detach(link)
+        state.registry.detach(link)
 
 
 def _serialized(send: Callable[[Any], Awaitable[None]]) -> Callable[[Any], Awaitable[None]]:
@@ -261,10 +148,21 @@ def _serialized(send: Callable[[Any], Awaitable[None]]) -> Callable[[Any], Await
     return locked
 
 
-def _hub(request: Request | WebSocket) -> Hub:
-    hub: Hub = request.app.state.hub
-    return hub
+async def index() -> HTMLResponse:
+    return HTMLResponse(_static("index.html"))
+
+
+async def install_script() -> PlainTextResponse:
+    return PlainTextResponse(_static("install-node.sh"), media_type="text/x-shellscript")
+
+
+async def healthz() -> dict[str, bool]:
+    return {"ok": True}
+
+
+def _static(name: str) -> str:
+    return resources.files(__package__).joinpath("static").joinpath(name).read_text("utf-8")
 
 
 async def _not_found(_request: Request, exc: Exception) -> JSONResponse:
-    return JSONResponse({"detail": f"unknown conversation {exc}"}, status_code=404)
+    return JSONResponse({"detail": f"没有这个对话：{exc}"}, status_code=404)

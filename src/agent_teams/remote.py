@@ -16,8 +16,6 @@ network drops and console restarts.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import hmac
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
@@ -42,20 +40,24 @@ class LinkLost(Exception):  # noqa: N818 - internal control flow
     """The connection dropped while a run was being followed."""
 
 
-def node_token(secret: str, name: str, revision: int = 1) -> str:
-    """The token a node's daemon presents; bump ``revision`` to revoke it."""
-    message = f"agent-teams-node:{name}:{revision}".encode()
-    return hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
+Hangup = Callable[[], Awaitable[None]]
 
 
 class NodeLink:
-    """One connected daemon; multiplexes many runs over its socket."""
+    """One connected daemon; multiplexes many runs over its socket.
 
-    def __init__(self, name: str, send: Send, hello: Mapping[str, Any]) -> None:
-        self.name = name
+    ``key`` identifies the node (its ID); ``hangup`` closes the connection,
+    e.g. when the node's token is revoked.
+    """
+
+    def __init__(
+        self, key: str, send: Send, hello: Mapping[str, Any], hangup: Hangup | None = None
+    ) -> None:
+        self.key = key
         self.hello = dict(hello)
         self.connected_at = time.time()
         self._send = send
+        self._hangup = hangup
         self._runs: dict[str, asyncio.Queue[Message]] = {}
 
     async def run(
@@ -71,7 +73,7 @@ class NodeLink:
                 yield message
                 if message["type"] == "exit":
                     return
-            raise LinkLost(self.name)
+            raise LinkLost(self.key)
         finally:
             if self._runs.get(run_id) is queue:
                 del self._runs[run_id]
@@ -79,6 +81,11 @@ class NodeLink:
     async def cancel(self, run_id: str) -> None:
         with suppress(Exception):
             await self._send({"type": "cancel", "run_id": run_id})
+
+    async def hang_up(self) -> None:
+        if self._hangup is not None:
+            with suppress(Exception):
+                await self._hangup()
 
     def deliver(self, message: Mapping[str, Any]) -> None:
         queue = self._runs.get(str(message.get("run_id")))
@@ -91,60 +98,50 @@ class NodeLink:
 
 
 class NodeRegistry:
-    """Which daemons are connected; verifies their tokens."""
+    """Which node daemons are connected, by node key. Authentication happens
+    before :meth:`attach` (the web service checks the node's token)."""
 
-    def __init__(self, secret: str = "") -> None:
-        self._secret = secret
-        self._revisions: dict[str, int] = {}
+    def __init__(self) -> None:
         self._links: dict[str, NodeLink] = {}
         self._online: dict[str, asyncio.Event] = {}
 
-    def declare(self, name: str, revision: int = 1) -> None:
-        self._revisions[name] = revision
-
-    def token_for(self, name: str) -> str:
-        if not self._secret or name not in self._revisions:
-            raise NodeOffline(f"node '{name}' is not a configured daemon node")
-        return node_token(self._secret, name, self._revisions[name])
-
-    def verify(self, name: str, token: str) -> bool:
-        if not self._secret or name not in self._revisions:
-            return False
-        return hmac.compare_digest(token.encode(), self.token_for(name).encode())
-
     def attach(self, link: NodeLink) -> None:
-        previous = self._links.get(link.name)
+        previous = self._links.get(link.key)
         if previous is not None:
             previous.close()
-        self._links[link.name] = link
-        self._event(link.name).set()
+        self._links[link.key] = link
+        self._event(link.key).set()
 
     def detach(self, link: NodeLink) -> None:
         link.close()
-        if self._links.get(link.name) is link:
-            del self._links[link.name]
-            self._event(link.name).clear()
+        if self._links.get(link.key) is link:
+            del self._links[link.key]
+            self._event(link.key).clear()
 
-    async def link(self, name: str, timeout: float) -> NodeLink:
+    async def disconnect(self, key: str) -> None:
+        """Drop a node's connection (its token was revoked or it was deleted)."""
+        link = self._links.get(key)
+        if link is not None:
+            self.detach(link)
+            await link.hang_up()
+
+    async def link(self, key: str, timeout: float) -> NodeLink:
         """The node's current connection, waiting up to ``timeout`` seconds for it."""
         try:
-            await asyncio.wait_for(self._event(name).wait(), timeout)
+            await asyncio.wait_for(self._event(key).wait(), timeout)
         except asyncio.TimeoutError:
-            raise NodeOffline(f"node '{name}' has not connected within {timeout:.0f}s") from None
-        return self._links[name]
+            raise NodeOffline(f"node '{key}' has not connected within {timeout:.0f}s") from None
+        return self._links[key]
 
-    def statuses(self) -> list[dict[str, Any]]:
-        return [self._status(name) for name in self._revisions]
-
-    def _status(self, name: str) -> dict[str, Any]:
-        link = self._links.get(name)
+    def status(self, key: str) -> dict[str, Any]:
+        link = self._links.get(key)
         if link is None:
-            return {"name": name, "online": False}
+            return {"online": False}
         info = {k: v for k, v in link.hello.items() if k != "type"}
-        return {**info, "name": name, "online": True, "since": link.connected_at}
+        return {**info, "online": True, "since": link.connected_at}
 
-    def _event(self, name: str) -> asyncio.Event:
-        return self._online.setdefault(name, asyncio.Event())
+    def _event(self, key: str) -> asyncio.Event:
+        return self._online.setdefault(key, asyncio.Event())
 
 
 @dataclass
@@ -154,9 +151,14 @@ class RemoteNode(Node):
     name: str
     registry: NodeRegistry = field(repr=False)
     workdir: str = ""  # relative to the daemon's --root
+    key: str = ""  # registry key (the node's ID); defaults to the name
     connect_timeout: float = 60.0
     reconnect_timeout: float = 3600.0
     resumable = True
+
+    @property
+    def registry_key(self) -> str:
+        return self.key or self.name
 
     def stream(self, command: Sequence[str], cwd: str, key: str = "") -> AsyncIterator[str]:
         return _RemoteRun(self, key or uuid.uuid4().hex, list(command), cwd).lines()
@@ -176,7 +178,7 @@ class _RemoteRun:
         timeout = self.node.connect_timeout
         try:
             while not self.finished:
-                self.link = await self.node.registry.link(self.node.name, timeout)
+                self.link = await self.node.registry.link(self.node.registry_key, timeout)
                 timeout = self.node.reconnect_timeout
                 async for line in self._attach(self.link):
                     yield line

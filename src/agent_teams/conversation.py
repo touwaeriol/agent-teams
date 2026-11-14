@@ -8,17 +8,32 @@ stays consistent while posting never waits for the agent.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from typing import Any, Protocol
 
 from .tasks import TaskBoard, task_report
 from .types import Result, Task
 
-if TYPE_CHECKING:
-    from .agent import Session
+
+class ChatSession(Protocol):
+    """A multi-turn conversation partner (an LLM agent, or Claude Code on a node)."""
+
+    @property
+    def name(self) -> str: ...
+
+    async def send(self, message: str) -> Result: ...
+
+    def reset(self) -> None: ...
+
+    def snapshot(self) -> dict[str, Any]:
+        """JSON-serializable state, so the conversation can resume after a restart."""
+        ...
+
+    def restore(self, state: Mapping[str, Any]) -> None: ...
 
 
 class Conversation:
-    def __init__(self, session: Session, board: TaskBoard | None = None) -> None:
+    def __init__(self, session: ChatSession, board: TaskBoard | None = None) -> None:
         self.session = session
         self.board = board
         self._inbox: asyncio.Queue[str] = asyncio.Queue()
@@ -30,7 +45,7 @@ class Conversation:
 
     @property
     def name(self) -> str:
-        return self.session.agent.name
+        return self.session.name
 
     @property
     def idle(self) -> bool:

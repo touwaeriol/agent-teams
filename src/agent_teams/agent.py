@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
 from .context import RunContext
 from .conversation import Conversation
@@ -11,6 +12,7 @@ from .errors import LLMError, MaxStepsExceeded
 from .hooks import LLMReplied
 from .llm.base import LLM
 from .runnable import Runnable
+from .serde import dump_turn, load_turn
 from .tools import Tool, Toolkit
 from .types import Reply, Result, ToolTurn, Turn, UserTurn
 
@@ -70,11 +72,21 @@ class Session:
     ctx: RunContext = field(default_factory=RunContext)
     history: list[Turn] = field(default_factory=list)
 
+    @property
+    def name(self) -> str:
+        return self.agent.name
+
     async def send(self, message: str) -> Result:
         return await self.agent.traced(message, self.ctx, self._respond)
 
     def reset(self) -> None:
         self.history.clear()
+
+    def snapshot(self) -> dict[str, Any]:
+        return {"kind": "agent", "history": [dump_turn(turn) for turn in self.history]}
+
+    def restore(self, state: Mapping[str, Any]) -> None:
+        self.history[:] = [load_turn(turn) for turn in state.get("history", [])]
 
     async def _respond(self, message: str, ctx: RunContext) -> Result:
         checkpoint = len(self.history)

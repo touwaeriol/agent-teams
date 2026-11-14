@@ -1,37 +1,35 @@
-# 多节点：leader 在控制台里和你对话，把任务派给分布在不同机器上的 Claude Code 员工。
-# 每台节点上运行守护进程（agent-teams node），它主动连回控制台，节点不用开放任何端口。
-#   1. 控制台上：agent-teams node-token examples/multi_node.yaml build-1   # 打印令牌和安装命令
-#   2. 节点上运行打印出来的安装命令（systemd 托管，开机自启）
-#   3. agent-teams serve examples/multi_node.yaml，网页右侧能看到节点在线
-llm:
-  model: claude-opus-5-5
-
+# 命令行版多节点（agent-teams chat/run）：节点通过 SSH 连接，leader 也是节点上的 Claude Code。
+#   agent-teams nodes examples/multi_node.yaml     # 检查每个节点能否连上、claude 是否可用
+#
+# 在平台（网页版）上：节点在"节点"页添加并安装守护进程，团队配置里不写 nodes，
+# 其余部分（leader、employees）和下面一样。
 nodes:
-  - name: build-1              # 守护进程节点（默认）：员工目录在守护进程的 --root 下
+  - name: build-1
+    host: 10.0.0.11            # 也可以写 ~/.ssh/config 里的 Host 别名
+    user: dev
+    workdir: /srv/agents       # 每个员工在 /srv/agents/<员工名> 里工作
   - name: build-2
-    workdir: team-a            # 可选：节点内的子目录，员工目录为 <root>/team-a/<员工名>
-  # - name: legacy             # 也可以用 SSH 直连（每次运行开一个 SSH 会话，不能断线续跑）
-  #   host: 10.0.0.13
-  #   user: dev
-  #   workdir: /srv/agents
+    host: 10.0.0.12
+    user: dev
+    workdir: /srv/agents
 
 leader: lead
 
 employees:
   - name: lead
-    description: 负责人，直接和你对话。
+    type: claude_code          # leader 也是 Claude Code：一个持续的会话，通过 MCP 派任务
+    node: build-1
+    description: 技术负责人，直接和你对话。
     instructions: >
-      你是技术负责人，直接和老板（用户）对话。把需求拆成任务派给合适的工程师：
-      他们在各自的机器上用 Claude Code 真正改代码、跑测试。任务要写清楚目标、涉及的路径、
-      分支名和验收方式；互不依赖的任务并行派发。收到 "[Task" 报告后检查结果，
-      必要时派审查或修复任务，全部完成后用中文汇报。
+      你是技术负责人。把需求拆成任务派给合适的工程师：他们在各自的机器上用 Claude Code
+      真正改代码、跑测试。任务要写清楚目标、涉及的路径、分支名和验收方式；互不依赖的任务
+      并行派发。收到 "[Task" 报告后检查结果，必要时派审查或修复任务，全部完成后用中文汇报。
 
   - name: backend
     type: claude_code
     node: build-1
     description: 后端工程师（build-1）：改 API 和数据库代码。
     instructions: 你负责后端代码。改完要跑相关测试，最后用几句话说明改了什么、测试结果如何。
-    permission_mode: acceptEdits
     allowed_tools: ["Bash(git *)", "Bash(pytest *)", "Bash(npm test *)"]
     max_turns: 40
 
@@ -39,12 +37,11 @@ employees:
     type: claude_code
     node: build-2
     description: 前端工程师（build-2）：改页面和交互。
-    instructions: 你负责前端代码。改完要跑构建和测试，最后说明改了什么、测试结果如何。
     allowed_tools: ["Bash(git *)", "Bash(npm *)"]
 
   - name: reviewer
     type: claude_code
-    node: build-1
-    description: 代码审查（build-1，只读）：审查改动、指出问题，不改代码。
+    node: build-2
+    description: 代码审查（只读）：审查改动、指出问题，不改代码。
     permission_mode: plan
     allowed_tools: ["Bash(git diff *)", "Bash(git log *)"]
