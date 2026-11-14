@@ -247,3 +247,20 @@ def test_static_pages(client: TestClient) -> None:
     assert "agent-teams node" in script.text
     assert client.get("/healthz").json() == {"ok": True}
     assert client.post("/mcp", json={}).status_code == 401
+
+
+def test_session_cookie_is_secure_behind_https() -> None:
+    async def services() -> Services:
+        return Services(MemoryStore(), MemoryAccounts(), MemoryBroker(), "https://agent.example")
+
+    with TestClient(create_app(services), base_url="https://agent.example") as https:
+        response = https.post(
+            "/auth/register", json={"email": "a@example.com", "password": PASSWORD}
+        )
+        assert "secure" in response.headers["set-cookie"].lower()
+        assert https.get("/api/me").status_code == 200
+
+
+def test_session_cookie_is_not_secure_over_plain_http(client: TestClient) -> None:
+    response = client.post("/auth/register", json={"email": "a@example.com", "password": PASSWORD})
+    assert "secure" not in response.headers["set-cookie"].lower()

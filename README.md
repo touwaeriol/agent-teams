@@ -62,10 +62,11 @@ deploy/deploy.sh                # 第一次运行生成 .env，提示你填 DATA
 deploy/deploy.sh                # 再运行一次：构建、启动，打印访问地址
 ```
 
-- `deploy.sh` 会自动选 3001–3009 中第一个空闲端口，并按本机 IP 生成 `AGENT_TEAMS_PUBLIC_URL`。节点安装命令和 leader 的 MCP 地址都用这个地址，放在反向代理后面时要改成对外地址。
+- `deploy.sh` 会自动选 3001–3009 中第一个空闲端口，并按本机 IP 生成 `AGENT_TEAMS_PUBLIC_URL`。节点安装命令和 leader 的 MCP 地址都用这个地址。
+- **用域名和 HTTPS**：先把域名解析到服务器，再运行 `deploy/deploy.sh --domain agent.example.com`。服务只监听 127.0.0.1，由本机的 Caddy 自动申请证书并转发（`deploy/caddy.sh` 会写入 `/etc/caddy/agent-teams.caddy`、在主 Caddyfile 里 import 它，然后重载 Caddy）。SSE 和 WebSocket 都会正常转发，登录 cookie 会带上 Secure 标记。
 - 容器使用 host 网络，所以通过 `127.0.0.1` 直接连本机的 PG 和 Valkey。
 - 查看日志：`docker compose logs -f agent-teams`；升级：`git pull && deploy/deploy.sh`。
-- 服务是明文 HTTP，对公网开放时建议在前面加一层 Nginx/Caddy 提供 HTTPS（登录 cookie 和节点令牌都经过它）。
+- 不用 `--domain` 时服务是明文 HTTP，只建议在内网或测试时这样用。
 
 不用 Docker 时：`pip install ".[server]"`，设置好上述环境变量后运行 `agent-teams serve`。
 

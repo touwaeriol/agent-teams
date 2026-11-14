@@ -81,8 +81,14 @@ async def logout(request: Request, response: Response) -> None:
 async def _start_session(request: Request, user: UserView, response: Response) -> None:
     token, token_hash = new_token()
     await platform(request).accounts.create_session(user.id, token_hash)
+    secure = platform(request).public_url.startswith("https://")  # behind TLS (e.g. Caddy)
     response.set_cookie(
-        SESSION_COOKIE, token, max_age=SESSION_SECONDS, httponly=True, samesite="strict"
+        SESSION_COOKIE,
+        token,
+        max_age=SESSION_SECONDS,
+        httponly=True,
+        samesite="strict",
+        secure=secure,
     )
 
 
