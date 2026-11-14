@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from mcp import ClientSession, types
 from mcp.client.streamable_http import streamable_http_client
 
-from agent_teams import Hooks, RunContext, TaskBoard, Toolkit, ToolStarted
+from agent_teams import Hooks, RunContext, TaskBoard, Toolkit, ToolStarted, tool
 from agent_teams.server.mcp_bridge import ToolBridge
 
 from .fakes import Worker
@@ -30,7 +30,7 @@ def free_port() -> int:
 @pytest.fixture
 async def bridge() -> AsyncIterator[ToolBridge]:
     port = free_port()
-    tools = ToolBridge(f"http://127.0.0.1:{port}")
+    tools = ToolBridge(f"http://127.0.0.1:{port}", keepalive=0.05)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -115,3 +115,24 @@ async def test_tokens_scope_and_revoke_access(bridge: ToolBridge) -> None:
         )
     assert missing.status_code == 401
     assert revoked.status_code == 401
+
+
+async def test_slow_calls_send_keepalive_progress(bridge: ToolBridge) -> None:
+    @tool
+    async def wait_for_answer() -> str:
+        """Stands in for ask_user: blocks until someone answers."""
+        await asyncio.sleep(0.4)
+        return "B"
+
+    endpoint = bridge.expose(Toolkit([wait_for_answer]), RunContext())
+    beats: list[float] = []
+
+    async def on_progress(progress: float, total: float | None, message: str | None) -> None:
+        del total, message
+        beats.append(progress)
+
+    async with mcp_session(endpoint.url, endpoint.token) as session:
+        result = await session.call_tool("wait_for_answer", {}, progress_callback=on_progress)
+
+    assert text_of(result) == "B"
+    assert len(beats) >= 2  # Claude Code drops calls that stay silent for minutes

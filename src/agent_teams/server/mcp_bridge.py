@@ -7,10 +7,12 @@ board. Tool schemas come straight from :class:`~agent_teams.tools.Toolkit`.
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 import uuid
+import warnings
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,6 +32,7 @@ from ..tools import Toolkit
 from ..types import ToolCall
 
 MCP_PATH = "/mcp"
+KEEPALIVE_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -41,8 +44,9 @@ class _Binding:
 class ToolBridge:
     """An ASGI app plus a :class:`~agent_teams.claude_session.ToolServer`."""
 
-    def __init__(self, public_url: str) -> None:
+    def __init__(self, public_url: str, keepalive: float = KEEPALIVE_SECONDS) -> None:
         self.url = public_url.rstrip("/") + MCP_PATH
+        self._keepalive = keepalive
         self._bindings: dict[str, _Binding] = {}
         server: Server[Any] = Server(
             "agent-teams", on_list_tools=self._list_tools, on_call_tool=self._call_tool
@@ -50,7 +54,11 @@ class ToolBridge:
         # Bearer tokens authenticate callers, so Host/Origin checks add nothing here.
         security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
         self._manager = StreamableHTTPSessionManager(
-            server, json_response=True, stateless=True, security_settings=security
+            # SSE responses, so a long call (waiting for an answer) can stream keepalives.
+            server,
+            json_response=False,
+            stateless=True,
+            security_settings=security,
         )
 
     def expose(self, toolkit: Toolkit, ctx: RunContext) -> ToolEndpoint:
@@ -92,9 +100,29 @@ class ToolBridge:
     ) -> types.CallToolResult:
         binding = self._binding(ctx)
         call = ToolCall(uuid.uuid4().hex, params.name, dict(params.arguments or {}))
-        (result,) = await binding.toolkit.execute([call], binding.ctx)
+        running = asyncio.ensure_future(binding.toolkit.execute([call], binding.ctx))
+        await self._keep_alive(ctx, running)
+        (result,) = running.result()
         content: list[types.ContentBlock] = [types.TextContent(type="text", text=result.content)]
         return types.CallToolResult(content=content, is_error=result.is_error)
+
+    async def _keep_alive(
+        self, ctx: ServerRequestContext[Any], running: asyncio.Future[Any]
+    ) -> None:
+        """Wait for a call, telling the client it is still alive meanwhile.
+
+        Tools like ask_user and approve wait for a person; Claude Code aborts a
+        call that sends "no response or progress" for 5 minutes, so progress
+        notifications (or, without a progress token, log messages) keep it open.
+        """
+        beats = 0
+        while True:
+            done, _ = await asyncio.wait({running}, timeout=self._keepalive)
+            if done:
+                return
+            beats += 1
+            with suppress(Exception):
+                await _beat(ctx, beats)
 
     def _binding(self, ctx: ServerRequestContext[Any]) -> _Binding:
         request = ctx.request
@@ -103,6 +131,18 @@ class ToolBridge:
         if binding is None:
             raise PermissionError("the MCP token is no longer valid")
         return binding
+
+
+async def _beat(ctx: ServerRequestContext[Any], beats: int) -> None:
+    token = (ctx.meta or {}).get("progress_token")
+    if token is not None:
+        await ctx.session.send_progress_notification(
+            token, float(beats), message="waiting", related_request_id=str(ctx.request_id)
+        )
+        return
+    with warnings.catch_warnings():  # logging is deprecated in newer MCP; still the only fallback
+        warnings.simplefilter("ignore")
+        await ctx.session.send_log_message("info", "waiting", related_request_id=ctx.request_id)
 
 
 def _token(scope: Scope) -> str:
