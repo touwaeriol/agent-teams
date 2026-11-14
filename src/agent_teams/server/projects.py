@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS at_projects (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (user_id, name)
 );
+ALTER TABLE at_projects ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE at_projects ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE at_git_connections ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'token';
 ALTER TABLE at_git_connections ADD COLUMN IF NOT EXISTS installation_id BIGINT;
 ALTER TABLE at_conversations
@@ -49,10 +51,20 @@ CREATE INDEX IF NOT EXISTS at_conversations_project ON at_conversations (project
 """
 
 _PROJECT_COLUMNS = (
-    "id, name, description, context, repo, branch, git_connection_id, created_at, updated_at"
+    "id, name, description, context, repo, branch, git_connection_id, created_at, updated_at, "
+    "pinned, archived"
 )
 _CONNECTION_COLUMNS = "id, name, provider, login, created_at, kind, installation_id"
-_PROJECT_FIELDS = ("name", "description", "context", "repo", "branch", "git_connection_id")
+_PROJECT_FIELDS = (
+    "name",
+    "description",
+    "context",
+    "repo",
+    "branch",
+    "git_connection_id",
+    "pinned",
+    "archived",
+)
 
 
 class ProjectStore(Protocol):
@@ -158,7 +170,7 @@ class MemoryProjects:
 
     async def projects(self, user_id: str) -> list[ProjectView]:
         mine = [p for p, u in self._projects.values() if u == user_id]
-        return sorted(mine, key=lambda p: p.updated_at, reverse=True)
+        return sorted(mine, key=lambda p: (p.pinned, p.updated_at), reverse=True)
 
     async def project(self, user_id: str, project_id: str) -> ProjectView | None:
         entry = self._projects.get(project_id)
@@ -299,7 +311,7 @@ class PostgresProjects:
     async def projects(self, user_id: str) -> list[ProjectView]:
         rows = await self._pool.fetch(
             f"SELECT {_PROJECT_COLUMNS} FROM at_projects WHERE user_id = $1 "
-            "ORDER BY updated_at DESC",
+            "ORDER BY pinned DESC, updated_at DESC",
             user_id,
         )
         return [ProjectView(**dict(r)) for r in rows]

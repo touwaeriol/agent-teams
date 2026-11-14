@@ -134,17 +134,26 @@ async def update_project(
     state = platform(request)
     current = await get_project(request, project_id, user)
     changes = body.model_dump(exclude_unset=True, exclude={"clear_repo"})
+    if set(changes) <= _FLAGS and not body.clear_repo:  # pin / archive: nothing to validate
+        return await _save(state, user.id, project_id, changes, current.name)
     if body.clear_repo:
         changes.update(repo=None, branch="", git_connection_id=None)
     merged = {**current.model_dump(), **changes}
     fields = await _checked(state, user.id, merged, revalidate="repo" in changes)
     updates = {k: fields[k] for k in (*changes, "branch") if k in fields}
+    return await _save(state, user.id, project_id, updates, str(fields["name"]))
+
+
+_FLAGS = frozenset({"pinned", "archived"})
+
+
+async def _save(
+    state: Platform, user_id: str, project_id: str, updates: dict[str, Any], name: str
+) -> ProjectView:
     try:
-        project = await state.projects.update_project(user.id, project_id, updates)
+        project = await state.projects.update_project(user_id, project_id, updates)
     except Conflict:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, f"已经有叫 {fields['name']} 的项目了"
-        ) from None
+        raise HTTPException(status.HTTP_409_CONFLICT, f"已经有叫 {name} 的项目了") from None
     if project is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "没有这个项目")
     return project

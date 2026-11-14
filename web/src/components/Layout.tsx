@@ -1,5 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  Archive,
+  ArchiveRestore,
   ArrowLeft,
   ChevronRight,
   FolderGit2,
@@ -7,20 +9,36 @@ import {
   LogOut,
   Menu,
   Moon,
+  MoreHorizontal,
   Palette,
   PanelLeftClose,
+  Pencil,
+  Pin,
+  PinOff,
   Plus,
   Search,
   Server,
   Settings,
   Shield,
   Sun,
+  Trash2,
   Users,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useMatch, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { errorText, Logo } from "@/components/common";
+import { errorText, Field, FormDialog, Logo } from "@/components/common";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
 import { Dot } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -32,6 +50,7 @@ import {
 import { api, type Conversation, type Project, type User } from "@/lib/api";
 import { pendingForUser } from "@/lib/comms";
 import { keys, useAllConversations, useNodes, useProjects, useQuestionsOf } from "@/lib/queries";
+import { useAction } from "@/lib/mutations";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
@@ -137,20 +156,134 @@ function ProjectSidebar() {
         </div>
       </div>
       <nav aria-label="项目" className="scroll-thin mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-        <div className="px-2.5 pb-1.5 text-xs font-medium text-muted-foreground">项目</div>
         {projects.data?.length === 0 && <p className="px-2.5 text-xs text-muted-foreground">还没有项目</p>}
         {needle && list.length === 0 && <p className="px-2.5 text-xs text-muted-foreground">没有匹配的项目或对话</p>}
-        {list.map((p) => (
-          <ProjectItem
-            key={p.id}
-            project={p}
-            conversations={byProject.get(p.id) ?? []}
-            open={p.id === currentProject || Boolean(needle)}
-            currentConversation={currentConversation}
-            needle={needle}
-          />
-        ))}
+        {GROUPS.map((group) => {
+          const items = list.filter(group.has);
+          if (items.length === 0) return null;
+          return (
+            <ProjectGroup key={group.title} title={group.title} collapsible={group.collapsible} defaultOpen={!group.collapsible || Boolean(needle)}>
+              {items.map((p) => (
+                <ProjectItem
+                  key={p.id}
+                  project={p}
+                  conversations={byProject.get(p.id) ?? []}
+                  open={p.id === currentProject || Boolean(needle)}
+                  currentConversation={currentConversation}
+                  needle={needle}
+                />
+              ))}
+            </ProjectGroup>
+          );
+        })}
       </nav>
+    </>
+  );
+}
+
+const GROUPS = [
+  { title: "已置顶", has: (p: Project) => p.pinned && !p.archived, collapsible: false },
+  { title: "项目", has: (p: Project) => !p.pinned && !p.archived, collapsible: false },
+  { title: "已归档", has: (p: Project) => p.archived, collapsible: true },
+];
+
+function ProjectGroup({ title, collapsible, defaultOpen, children }: { title: string; collapsible: boolean; defaultOpen: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen);
+  useEffect(() => setOpen(defaultOpen), [defaultOpen]);
+  return (
+    <div className="mb-3">
+      <button
+        type="button"
+        disabled={!collapsible}
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-1 px-2.5 pb-1.5 text-xs font-medium text-muted-foreground enabled:hover:text-foreground"
+      >
+        {title}
+        {collapsible && <ChevronRight className={cn("size-3 transition-transform", open && "rotate-90")} />}
+      </button>
+      {open && children}
+    </div>
+  );
+}
+
+/** Pin, rename, settings, archive and delete for one project. */
+function ProjectMenu({ project }: { project: Project }) {
+  const [renaming, setRenaming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [name, setName] = useState(project.name);
+  const navigate = useNavigate();
+  const match = useMatch("/projects/:projectId/*");
+  const refresh = [keys.projects, keys.project(project.id), keys.allConversations];
+  const patch = useAction((changes: Record<string, unknown>) => api<Project>(`/api/projects/${project.id}`, { method: "PATCH", json: changes }), {
+    invalidate: refresh,
+  });
+  const remove = useAction(() => api(`/api/projects/${project.id}`, { method: "DELETE" }), {
+    invalidate: refresh,
+    success: `已删除「${project.name}」`,
+    onSuccess: () => match?.params.projectId === project.id && navigate("/projects"),
+  });
+  const rename = useAction(() => api<Project>(`/api/projects/${project.id}`, { method: "PATCH", json: { name: name.trim() } }), {
+    invalidate: refresh,
+    onSuccess: () => setRenaming(false),
+  });
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          aria-label={`${project.name} 的更多操作`}
+          className="rounded-md p-1.5 text-muted-foreground opacity-0 hover:bg-raised hover:text-foreground focus:opacity-100 focus:outline-none data-[state=open]:bg-raised data-[state=open]:opacity-100 group-hover:opacity-100"
+        >
+          <MoreHorizontal className="size-3.5" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="min-w-[10rem]">
+          <DropdownMenuItem onSelect={() => patch.mutate({ pinned: !project.pinned })}>
+            {project.pinned ? <PinOff /> : <Pin />} {project.pinned ? "取消置顶" : "置顶"}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => {
+              setName(project.name);
+              setRenaming(true);
+            }}
+          >
+            <Pencil /> 重命名
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => navigate(`/projects/${project.id}/settings`)}>
+            <Settings /> 设置
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => patch.mutate({ archived: !project.archived, ...(project.archived ? {} : { pinned: false }) })}>
+            {project.archived ? <ArchiveRestore /> : <Archive />} {project.archived ? "取消归档" : "归档"}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setDeleting(true)} className="text-destructive focus:text-destructive">
+            <Trash2 /> 删除
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <FormDialog
+        open={renaming}
+        onOpenChange={setRenaming}
+        title="重命名项目"
+        submitLabel="保存"
+        busy={rename.isPending}
+        disabled={!name.trim() || name.trim() === project.name}
+        onSubmit={() => rename.mutate()}
+      >
+        <Field label="项目名称">
+          <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+      </FormDialog>
+      <AlertDialog open={deleting} onOpenChange={setDeleting}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除「{project.name}」？</AlertDialogTitle>
+            <AlertDialogDescription>项目下的对话和任务记录会一起删除，无法恢复。只想先收起来的话，用“归档”。</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={() => remove.mutate()}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -189,6 +322,7 @@ function ProjectItem({
           {!open && waiting.size > 0 && <WaitingDot className="ml-auto" />}
         </NavLink>
         <NewConversationButton projectId={project.id} />
+        <ProjectMenu project={project} />
       </div>
       {open && (
         <div className="ml-[22px] flex flex-col border-l pl-2">

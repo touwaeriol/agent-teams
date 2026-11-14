@@ -388,3 +388,25 @@ def test_branches_of_a_repository(client: TestClient) -> None:
     assert found.json() == ["trunk", "release"]
     assert client.get(url, params={"repo": "octo/missing"}, headers=alice).status_code == 422
     assert client.get(url, params={"repo": "not a repo"}, headers=alice).status_code == 422
+
+
+def test_projects_can_be_pinned_and_archived(client: TestClient) -> None:
+    alice = signup(client, "alice@example.com")
+    first = client.post("/api/projects", json={"name": "first"}, headers=alice).json()
+    second = client.post("/api/projects", json={"name": "second"}, headers=alice).json()
+
+    pinned = client.patch(f"/api/projects/{first['id']}", json={"pinned": True}, headers=alice)
+    assert pinned.json()["pinned"] is True
+    names = [p["name"] for p in client.get("/api/projects", headers=alice).json()]
+    assert names == ["first", "second"]  # pinned first
+
+    archived = client.patch(
+        f"/api/projects/{second['id']}", json={"archived": True}, headers=alice
+    ).json()
+    assert archived["archived"] is True
+    restored = client.patch(
+        f"/api/projects/{second['id']}", json={"archived": False}, headers=alice
+    ).json()
+    assert restored["archived"] is False
+    renamed = client.patch(f"/api/projects/{second['id']}", json={"name": "two"}, headers=alice)
+    assert renamed.json()["name"] == "two"

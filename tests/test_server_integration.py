@@ -143,9 +143,11 @@ async def test_postgres_projects_round_trip() -> None:
         )
         with pytest.raises(Conflict):
             await projects.create_project(user.id, {"name": "app"})
-        updated = await projects.update_project(user.id, project.id, {"context": "用 pnpm"})
+        updated = await projects.update_project(
+            user.id, project.id, {"context": "用 pnpm", "pinned": True}
+        )
         assert updated is not None
-        assert (updated.context, updated.repo) == ("用 pnpm", "octo/app")
+        assert (updated.context, updated.repo, updated.pinned) == ("用 pnpm", "octo/app", True)
 
         conversation_id = uuid.uuid4().hex[:12]
         await store.create_conversation(conversation_id, "t", user.id, project.id)

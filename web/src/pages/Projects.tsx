@@ -39,7 +39,7 @@ export function ProjectsPage() {
           }
         />
       )}
-      <div className="grid gap-4 lg:grid-cols-2">{projects.data?.map((p) => <ProjectCard key={p.id} project={p} />)}</div>
+      <div className="grid gap-4 lg:grid-cols-2">{projects.data?.filter((p) => !p.archived).map((p) => <ProjectCard key={p.id} project={p} />)}</div>
     </Page>
   );
 }

@@ -58,6 +58,8 @@ export interface Project {
   git_connection_id: string | null;
   created_at: string;
   updated_at: string;
+  pinned: boolean;
+  archived: boolean;
 }
 
 export interface GitConnection {

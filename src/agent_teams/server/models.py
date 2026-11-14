@@ -227,6 +227,8 @@ class ProjectView(BaseModel):
     git_connection_id: str | None
     created_at: datetime
     updated_at: datetime
+    pinned: bool = False
+    archived: bool = False
 
 
 class ProjectInput(BaseModel):
@@ -246,3 +248,5 @@ class ProjectUpdate(BaseModel):
     branch: str | None = None
     git_connection_id: str | None = None
     clear_repo: bool = False
+    pinned: bool | None = None
+    archived: bool | None = None
