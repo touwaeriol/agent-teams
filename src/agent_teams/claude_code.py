@@ -11,13 +11,14 @@ from __future__ import annotations
 import json
 import shlex
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from ._text import clip
 from .context import RunContext
 from .errors import AgentTeamsError
 from .hooks import WorkerProgress
+from .mcp_config import ToolEndpoint, mcp_args, mcp_tool_name, mcp_tool_names
 from .nodes import Node, NodeCommandError
 from .runnable import Runnable
 from .types import Result
@@ -41,6 +42,7 @@ class ClaudeCodeWorker(Runnable):
     max_turns: int | None = None
     claude_command: str = "claude"
     extra_args: Sequence[str] = field(default_factory=tuple)
+    can_delegate: bool = False  # may hand subtasks to other employees
 
     def __post_init__(self) -> None:
         self.description = self.description or f"Claude Code on node {self.node.name}"
@@ -53,6 +55,20 @@ class ClaudeCodeWorker(Runnable):
     @property
     def directory(self) -> str:
         return self.node.workdir_for(self.name, self.workdir)
+
+    def with_tools(
+        self, endpoint: ToolEndpoint, approval_tool: str | None = None
+    ) -> ClaudeCodeWorker:
+        """A copy that reaches the team tools at ``endpoint``; permission requests
+        go to ``approval_tool`` (``--permission-prompt-tool``) when given."""
+        approval = mcp_tool_name(approval_tool) if approval_tool else ""
+        allowed = [name for name in mcp_tool_names(endpoint) if name != approval]
+        prompt_tool = ["--permission-prompt-tool", approval] if approval else []
+        return replace(
+            self,
+            allowed_tools=[*self.allowed_tools, *allowed],
+            extra_args=[*self.extra_args, *mcp_args(endpoint), *prompt_tool],
+        )
 
     def command(self, task: str) -> list[str]:
         """The ``claude`` invocation for one task."""

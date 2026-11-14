@@ -2,6 +2,7 @@
 
 from .agent import Agent, Session
 from .claude_code import ClaudeCodeWorker
+from .codex import CodexWorker
 from .config import build_team, load_team
 from .context import RunContext
 from .conversation import Conversation
@@ -35,6 +36,7 @@ __all__ = [
     "AgentTeamsError",
     "AnthropicLLM",
     "ClaudeCodeWorker",
+    "CodexWorker",
     "ConfigError",
     "Conversation",
     "Event",

@@ -13,12 +13,14 @@ from dataclasses import dataclass
 from .agent import Agent
 from .claude_code import ClaudeCodeWorker
 from .claude_session import ClaudeCodeSession, ToolServer
+from .comms import Comms
 from .context import RunContext
 from .conversation import ChatSession, Conversation
 from .errors import ConfigError, MaxStepsExceeded
 from .llm.base import LLM
 from .runnable import Runnable
 from .tasks import TaskBoard
+from .team_tools import leader_tools
 from .tools import Tool, Toolkit, tool_name
 from .types import Result
 
@@ -35,7 +37,15 @@ LEADER_INSTRUCTIONS = (
     "report the outcome to the user. While other tasks for the same request are still "
     "running, keep replies to reports to one short line. Use list_tasks to check progress "
     "and cancel_task to stop work that is no longer needed. Ask the user when a request "
-    "is unclear."
+    "is unclear.\n\n"
+    'Employees can reach you while they work. "[Question q3 from dev-a · t2]" means an '
+    "employee is blocked waiting for you: answer it right away with reply_to (ask the user "
+    'first with ask_user if only they can decide). "[Message from dev-a]" is a note from an '
+    "employee; reply with send_message only if needed. Use broadcast for something every "
+    "employee should know and send_message for one employee. ask_user puts a question card "
+    'in front of the user and returns at once; the answer arrives as "[Answer to q5] ...". '
+    "Keep the plan current with update_plan whenever the work is broken down or a step "
+    "starts or finishes."
 )
 
 
@@ -67,16 +77,24 @@ class Leader(Runnable):
         *,
         first_task: int = 1,
         tool_server: ToolServer | None = None,
+        comms: Comms | None = None,
     ) -> Conversation:
         """Start a conversation with the leader; each call gets a fresh task board.
 
         ``first_task`` sets the first task number, so a resumed conversation
-        does not reuse IDs from before.
+        does not reuse IDs from before. ``comms`` carries mail, questions and
+        the plan (a fresh one if not given); with a ``tool_server``, employees
+        that support it get the team tools while they work.
         """
         ctx = ctx or RunContext()
-        board = TaskBoard(self.members, ctx.enter(self.name), first_task)
-        tools = [*board.tools(), *self.tools]
-        return Conversation(self._session(ctx, tools, tool_server), board)
+        comms = comms or Comms()
+        board = TaskBoard(
+            self.members, ctx.enter(self.name), first_task, comms=comms, tool_server=tool_server
+        )
+        tools = [*board.tools(), *leader_tools(board, comms), *self.tools]
+        conversation = Conversation(self._session(ctx, tools, tool_server), board)
+        comms.notify = conversation.post
+        return conversation
 
     def _session(
         self, ctx: RunContext, tools: list[Tool], tool_server: ToolServer | None

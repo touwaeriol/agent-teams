@@ -87,4 +87,10 @@ class Conversation:
             self.board.close()
 
     def _on_task_finished(self, task: Task) -> None:
+        if task.parent and self._has_task(task.parent):
+            return  # a subtask: the employee that created it collects the result
         self.post(task_report(task))
+
+    def _has_task(self, task_id: str) -> bool:
+        """Whether the board knows the task (a parent from before a restart may be gone)."""
+        return self.board is not None and any(t.id == task_id for t in self.board.tasks)

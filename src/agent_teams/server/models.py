@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from ..comms import Audience, Mail, Question, QuestionKind, QuestionStatus
 from ..types import FINAL_STATUSES, Task, TaskStatus
 
 Role = Literal["user", "leader", "error"]
@@ -33,6 +34,7 @@ class TaskView(BaseModel):
     depends_on: list[str]
     status: TaskStatus
     output: str
+    parent: str = ""
 
     @property
     def finished(self) -> bool:
@@ -46,6 +48,7 @@ class TaskView(BaseModel):
             tuple(self.depends_on),
             self.status,
             self.output,
+            self.parent,
         )
 
     @classmethod
@@ -57,7 +60,76 @@ class TaskView(BaseModel):
             depends_on=list(task.depends_on),
             status=task.status,
             output=task.output,
+            parent=task.parent,
         )
+
+
+def _time(stamp: float) -> datetime:
+    return datetime.fromtimestamp(stamp, timezone.utc)
+
+
+class QuestionView(BaseModel):
+    id: str
+    asker: str
+    task_id: str | None
+    audience: Audience
+    kind: QuestionKind
+    text: str
+    options: list[str]
+    detail: dict[str, Any]
+    answer: str | None
+    status: QuestionStatus
+    created_at: datetime
+    answered_at: datetime | None
+
+    @classmethod
+    def of(cls, question: Question) -> QuestionView:
+        answered = question.answered_at
+        return cls(
+            id=question.id,
+            asker=question.asker,
+            task_id=question.task_id,
+            audience=question.audience,
+            kind=question.kind,
+            text=question.text,
+            options=list(question.options),
+            detail=dict(question.detail),
+            answer=question.answer,
+            status=question.status,
+            created_at=_time(question.created_at),
+            answered_at=_time(answered) if answered is not None else None,
+        )
+
+
+class MailView(BaseModel):
+    id: int
+    sender: str
+    recipient: str
+    body: str
+    created_at: datetime
+
+    @classmethod
+    def of(cls, mail: Mail) -> MailView:
+        return cls(
+            id=mail.id,
+            sender=mail.sender,
+            recipient=mail.recipient,
+            body=mail.body,
+            created_at=_time(mail.created_at),
+        )
+
+
+class PlanStepView(BaseModel):
+    title: str
+    status: Literal["todo", "doing", "done"]
+
+
+class PlanView(BaseModel):
+    steps: list[PlanStepView]
+
+
+class NewAnswer(BaseModel):
+    answer: str
 
 
 class NewConversation(BaseModel):

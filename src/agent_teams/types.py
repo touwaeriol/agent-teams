@@ -106,6 +106,7 @@ class Task:
     depends_on: tuple[str, ...] = ()
     status: TaskStatus = "pending"
     output: str = ""
+    parent: str = ""  # the task that created this one (a subtask or a review)
 
     @property
     def finished(self) -> bool:

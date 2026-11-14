@@ -108,6 +108,47 @@ export interface Task {
   depends_on: string[];
   status: TaskStatus;
   output: string;
+  /** The task that started this one ("" for tasks the leader assigned). */
+  parent?: string;
+}
+
+export type QuestionStatus = "open" | "answered" | "cancelled";
+
+/** A worker's question (or a permission request) waiting for the lead or the user. */
+export interface Question {
+  id: string;
+  asker: string;
+  task_id: string | null;
+  audience: "lead" | "user";
+  kind: "question" | "approval";
+  text: string;
+  options: string[];
+  /** For approvals: ``{tool_name, input}``. */
+  detail: { tool_name?: string; input?: Record<string, unknown>; [key: string]: unknown };
+  answer: string | null;
+  status: QuestionStatus;
+  created_at: string;
+  answered_at: string | null;
+}
+
+/** A note between team members; ``recipient`` is a name, "lead" or "*" (everyone). */
+export interface Mail {
+  id: number;
+  sender: string;
+  recipient: string;
+  body: string;
+  created_at: string;
+}
+
+export type PlanStatus = "todo" | "doing" | "done";
+
+export interface PlanStep {
+  title: string;
+  status: PlanStatus;
+}
+
+export interface Plan {
+  steps: PlanStep[];
 }
 
 export interface NodeInfo {
@@ -140,6 +181,10 @@ export interface Employee {
   allowed_tools?: string[];
   disallowed_tools?: string[];
   max_turns?: number;
+  /** May hand sub-tasks to other employees. */
+  can_delegate?: boolean;
+  /** Codex only: read-only | workspace-write | danger-full-access. */
+  sandbox?: string;
   [key: string]: unknown;
 }
 

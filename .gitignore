@@ -10,3 +10,4 @@ build/
 .env
 node_modules/
 src/agent_teams/server/static/app/
+*.tsbuildinfo

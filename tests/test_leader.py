@@ -141,3 +141,29 @@ async def test_leader_dispatches_to_claude_code_on_two_nodes(tmp_path: Path) -> 
     assert outputs["t1:backend"]["cwd"] == str(api_dir / "backend")
     assert outputs["t2:frontend"]["cwd"] == str(web_dir / "frontend")
     assert outputs["t2:frontend"]["argv"][:2] == ["-p", "add page"]
+
+
+async def test_leader_comms_tools_and_answers_come_back() -> None:
+    llm = ScriptedLLM(
+        [
+            call("ask_user", {"question": "which region?", "options": ["eu", "us"]}),
+            say("asked"),
+            say("going with eu"),
+        ]
+    )
+    conversation = Leader("lead", llm, [Worker("writer")]).open()
+    conversation.post("deploy")
+    assert (await conversation.reply()).output == "asked"
+
+    board = conversation.board
+    assert board is not None
+    assert board.comms is not None
+    (question,) = board.comms.questions
+    assert (question.asker, question.audience, question.options) == ("lead", "user", ("eu", "us"))
+    await board.comms.answer(question.id, "eu")
+    assert (await conversation.reply()).output == "going with eu"
+
+    assert last_user_text(llm.calls[-1][1]) == "[Answer to q1] eu"
+    names = {s.name for s in llm.calls[0][2]}
+    assert {"reply_to", "broadcast", "send_message", "update_plan", "ask_user"} <= names
+    assert "reply_to" in llm.calls[0][0]

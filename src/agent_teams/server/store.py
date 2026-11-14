@@ -14,6 +14,7 @@ from typing import Any, Protocol
 
 import asyncpg
 
+from ..comms import Mail, Plan, Question
 from ..types import Task
 from .accounts import SCHEMA as ACCOUNTS_SCHEMA
 from .accounts import PostgresAccounts
@@ -51,6 +52,34 @@ CREATE TABLE IF NOT EXISTS at_tasks (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (conversation_id, id)
 );
+ALTER TABLE at_tasks ADD COLUMN IF NOT EXISTS parent TEXT NOT NULL DEFAULT '';
+ALTER TABLE at_conversations ADD COLUMN IF NOT EXISTS plan JSONB NOT NULL DEFAULT '[]'::jsonb;
+CREATE TABLE IF NOT EXISTS at_mail (
+    conversation_id TEXT NOT NULL REFERENCES at_conversations(id) ON DELETE CASCADE,
+    id BIGSERIAL,
+    sender TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    read_by JSONB NOT NULL DEFAULT '[]'::jsonb,
+    PRIMARY KEY (conversation_id, id)
+);
+CREATE TABLE IF NOT EXISTS at_questions (
+    conversation_id TEXT NOT NULL REFERENCES at_conversations(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
+    asker TEXT NOT NULL,
+    task_id TEXT,
+    audience TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    text TEXT NOT NULL,
+    options JSONB NOT NULL DEFAULT '[]'::jsonb,
+    detail JSONB NOT NULL DEFAULT '{}'::jsonb,
+    answer TEXT,
+    status TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    answered_at TIMESTAMPTZ,
+    PRIMARY KEY (conversation_id, id)
+);
 """
 
 INTERRUPTED = "Interrupted: the server restarted before this task finished."
@@ -72,11 +101,25 @@ class Store(Protocol):
     async def unfinished_conversations(self) -> list[str]: ...
     async def save_history(self, conversation_id: str, state: dict[str, Any]) -> None: ...
     async def history(self, conversation_id: str) -> dict[str, Any]: ...
+    async def save_mail(self, conversation_id: str, mail: Mail) -> None: ...
+    async def mail(self, conversation_id: str) -> list[Mail]: ...
+    async def save_question(self, conversation_id: str, question: Question) -> None: ...
+    async def questions(self, conversation_id: str) -> list[Question]: ...
+    async def save_plan(self, conversation_id: str, plan: Plan) -> None: ...
+    async def plan(self, conversation_id: str) -> Plan: ...
     async def close(self) -> None: ...
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _stamp(moment: datetime | None) -> float | None:
+    return moment.timestamp() if moment is not None else None
+
+
+def _moment(stamp: float | None) -> datetime | None:
+    return datetime.fromtimestamp(stamp, timezone.utc) if stamp is not None else None
 
 
 class MemoryStore:
@@ -88,6 +131,9 @@ class MemoryStore:
         self._messages: defaultdict[str, list[MessageView]] = defaultdict(list)
         self._tasks: defaultdict[str, dict[str, TaskView]] = defaultdict(dict)
         self._histories: dict[str, dict[str, Any]] = {}
+        self._mail: defaultdict[str, dict[int, Mail]] = defaultdict(dict)
+        self._questions: defaultdict[str, dict[str, Question]] = defaultdict(dict)
+        self._plans: dict[str, Plan] = {}
         self._next_id = 1
 
     async def create_conversation(
@@ -142,6 +188,24 @@ class MemoryStore:
 
     async def history(self, conversation_id: str) -> dict[str, Any]:
         return dict(self._histories.get(conversation_id, {}))
+
+    async def save_mail(self, conversation_id: str, mail: Mail) -> None:
+        self._mail[conversation_id][mail.id] = mail
+
+    async def mail(self, conversation_id: str) -> list[Mail]:
+        return sorted(self._mail[conversation_id].values(), key=lambda m: m.id)
+
+    async def save_question(self, conversation_id: str, question: Question) -> None:
+        self._questions[conversation_id][question.id] = question
+
+    async def questions(self, conversation_id: str) -> list[Question]:
+        return sorted(self._questions[conversation_id].values(), key=lambda q: q.created_at)
+
+    async def save_plan(self, conversation_id: str, plan: Plan) -> None:
+        self._plans[conversation_id] = [dict(step) for step in plan]
+
+    async def plan(self, conversation_id: str) -> Plan:
+        return [dict(step) for step in self._plans.get(conversation_id, [])]
 
     async def close(self) -> None:
         return None
@@ -223,8 +287,8 @@ class PostgresStore:
     async def save_task(self, conversation_id: str, task: Task) -> None:
         await self._pool.execute(
             "INSERT INTO at_tasks "
-            "(conversation_id, id, assignee, instruction, depends_on, status, output) "
-            "VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7) "
+            "(conversation_id, id, assignee, instruction, depends_on, status, output, parent) "
+            "VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8) "
             "ON CONFLICT (conversation_id, id) DO UPDATE SET "
             "status = EXCLUDED.status, output = EXCLUDED.output, updated_at = now()",
             conversation_id,
@@ -234,11 +298,12 @@ class PostgresStore:
             json.dumps(list(task.depends_on)),
             task.status,
             task.output,
+            task.parent,
         )
 
     async def tasks(self, conversation_id: str) -> list[TaskView]:
         rows = await self._pool.fetch(
-            "SELECT id, assignee, instruction, depends_on, status, output FROM at_tasks "
+            "SELECT id, assignee, instruction, depends_on, status, output, parent FROM at_tasks "
             "WHERE conversation_id = $1 ORDER BY length(id), id",
             conversation_id,
         )
@@ -264,5 +329,101 @@ class PostgresStore:
         state = json.loads(raw) if raw else {}
         return state if isinstance(state, dict) else {}
 
+    async def save_mail(self, conversation_id: str, mail: Mail) -> None:
+        await self._pool.execute(
+            "INSERT INTO at_mail "
+            "(conversation_id, id, sender, recipient, body, created_at, read_by) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb) "
+            "ON CONFLICT (conversation_id, id) DO UPDATE SET read_by = EXCLUDED.read_by",
+            conversation_id,
+            mail.id,
+            mail.sender,
+            mail.recipient,
+            mail.body,
+            _moment(mail.created_at),
+            json.dumps(list(mail.read_by), ensure_ascii=False),
+        )
+
+    async def mail(self, conversation_id: str) -> list[Mail]:
+        rows = await self._pool.fetch(
+            "SELECT id, sender, recipient, body, created_at, read_by FROM at_mail "
+            "WHERE conversation_id = $1 ORDER BY id",
+            conversation_id,
+        )
+        return [_mail(r) for r in rows]
+
+    async def save_question(self, conversation_id: str, question: Question) -> None:
+        await self._pool.execute(
+            "INSERT INTO at_questions (conversation_id, id, asker, task_id, audience, kind, "
+            "text, options, detail, answer, status, created_at, answered_at) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10, $11, $12, $13) "
+            "ON CONFLICT (conversation_id, id) DO UPDATE SET answer = EXCLUDED.answer, "
+            "status = EXCLUDED.status, answered_at = EXCLUDED.answered_at",
+            conversation_id,
+            question.id,
+            question.asker,
+            question.task_id,
+            question.audience,
+            question.kind,
+            question.text,
+            json.dumps(list(question.options), ensure_ascii=False),
+            json.dumps(dict(question.detail), ensure_ascii=False, default=str),
+            question.answer,
+            question.status,
+            _moment(question.created_at),
+            _moment(question.answered_at),
+        )
+
+    async def questions(self, conversation_id: str) -> list[Question]:
+        rows = await self._pool.fetch(
+            "SELECT id, asker, task_id, audience, kind, text, options, detail, answer, status, "
+            "created_at, answered_at FROM at_questions WHERE conversation_id = $1 "
+            "ORDER BY created_at, length(id), id",
+            conversation_id,
+        )
+        return [_question(r) for r in rows]
+
+    async def save_plan(self, conversation_id: str, plan: Plan) -> None:
+        await self._pool.execute(
+            "UPDATE at_conversations SET plan = $2::jsonb WHERE id = $1",
+            conversation_id,
+            json.dumps(plan, ensure_ascii=False),
+        )
+
+    async def plan(self, conversation_id: str) -> Plan:
+        raw = await self._pool.fetchval(
+            "SELECT plan FROM at_conversations WHERE id = $1", conversation_id
+        )
+        steps = json.loads(raw) if raw else []
+        return [dict(s) for s in steps] if isinstance(steps, list) else []
+
     async def close(self) -> None:
         await self._pool.close()
+
+
+def _mail(row: Any) -> Mail:
+    return Mail(
+        int(row["id"]),
+        row["sender"],
+        row["recipient"],
+        row["body"],
+        row["created_at"].timestamp(),
+        tuple(json.loads(row["read_by"])),
+    )
+
+
+def _question(row: Any) -> Question:
+    return Question(
+        id=row["id"],
+        asker=row["asker"],
+        task_id=row["task_id"],
+        audience=row["audience"],
+        kind=row["kind"],
+        text=row["text"],
+        options=tuple(json.loads(row["options"])),
+        answer=row["answer"],
+        status=row["status"],
+        created_at=row["created_at"].timestamp(),
+        answered_at=_stamp(row["answered_at"]),
+        detail=json.loads(row["detail"]),
+    )

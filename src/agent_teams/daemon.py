@@ -348,6 +348,7 @@ class Daemon:
     runner: Runner = field(init=False)
     connection: ClientConnection | None = field(init=False, default=None)
     _claude_version: str = field(init=False, default="")
+    _codex_version: str = field(init=False, default="")
 
     def __post_init__(self) -> None:
         policy = Policy(self.config.root, self.config.allow)
@@ -356,6 +357,7 @@ class Daemon:
     async def serve_forever(self) -> None:
         self.runner.purge_logs()
         self._claude_version = await _version("claude")
+        self._codex_version = await _version("codex")
         delay = 1.0
         try:
             while True:
@@ -404,6 +406,7 @@ class Daemon:
             "max_runs": self.config.max_runs,
             "active": self.runner.active,
             "claude": self._claude_version,
+            "codex": self._codex_version,
         }
 
     def _dispatch(self, message: Message, send: Send, followers: set[asyncio.Task[None]]) -> None:

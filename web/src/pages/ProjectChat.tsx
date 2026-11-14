@@ -1,14 +1,16 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, ChevronDown, ChevronRight, ExternalLink, GitBranch, PanelRight, Settings, TriangleAlert } from "lucide-react";
+import { ArrowRight, ArrowUp, ChevronDown, ChevronRight, ExternalLink, GitBranch, PanelRight, Settings, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { EmptyState, errorText, Loading, nodeStatus, Spinner, StatusBadge, TASK_STATUS } from "@/components/common";
+import { EmptyState, errorText, Loading, nodeStatus, PLAN_STATUS, Spinner, StatusBadge, TASK_STATUS } from "@/components/common";
 import { Markdown } from "@/components/Markdown";
+import { QuestionCard } from "@/components/QuestionCard";
 import { Dot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { api, type Conversation, type Message, type NodeInfo, type Project, type Task, type TeamDefinition } from "@/lib/api";
-import { keys, useConversations, useNodes, useProject, useTeam } from "@/lib/queries";
+import { api, type Conversation, type Mail, type Message, type NodeInfo, type Plan, type Project, type Question, type Task, type TeamDefinition } from "@/lib/api";
+import { activityFeed, chatTimeline, pendingForUser, recipientLabel, taskTree, upsertById, type ActivityLine } from "@/lib/comms";
+import { keys, useConversations, useMail, useNodes, usePlan, useProject, useQuestions, useTeam } from "@/lib/queries";
 import { clock, cn } from "@/lib/utils";
 
 const messagesKey = (id: string) => ["messages", id] as const;
@@ -97,14 +99,17 @@ function Welcome({ project }: { project: Project }) {
 function ChatBody({ conversationId }: { conversationId: string }) {
   const client = useQueryClient();
   const messages = useQuery({ queryKey: messagesKey(conversationId), queryFn: () => api<Message[]>(`/api/conversations/${conversationId}/messages`) });
+  const questions = useQuestions(conversationId);
   useLiveEvents(conversationId);
   const bottom = useRef<HTMLDivElement>(null);
   const list = messages.data ?? [];
+  const timeline = useMemo(() => chatTimeline(list, questions.data ?? []), [list, questions.data]);
+  const pending = pendingForUser(questions.data).length;
   const waiting = list.length > 0 && list[list.length - 1].role === "user";
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [list.length, waiting]);
+  }, [timeline.length, waiting, pending]);
 
   const send = async (content: string) => {
     const message = await api<Message>(`/api/conversations/${conversationId}/messages`, { method: "POST", json: { content } });
@@ -119,9 +124,16 @@ function ChatBody({ conversationId }: { conversationId: string }) {
           {list.length === 0 && !messages.isLoading && (
             <p className="py-16 text-center text-sm text-muted-foreground">发一条消息开始。负责人收到后会回复你，派出去的任务会出现在右侧。</p>
           )}
-          {list.map((m) => (
-            <MessageItem key={m.id} message={m} />
-          ))}
+          {timeline.map((item) =>
+            item.kind === "message" ? (
+              <MessageItem key={`m${item.message.id}`} message={item.message} />
+            ) : (
+              <QuestionCard key={`q${item.question.id}`} conversationId={conversationId} question={item.question} />
+            ),
+          )}
+          {pending > 0 && (
+            <p className="text-sm text-warn">有 {pending} 个问题在等你处理，员工会一直等到你回答。</p>
+          )}
           {waiting && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Spinner className="size-3.5" /> 负责人正在处理……
@@ -247,8 +259,18 @@ function LeaderStatus() {
   );
 }
 
-// Live updates: new messages, task changes and activity lines over SSE.
-const activityStore = new Map<string, string[]>();
+// Live updates over SSE: messages, tasks, activity lines, questions, mail and the plan.
+const activityStore = new Map<string, ActivityLine[]>();
+
+interface LiveEvent {
+  type: string;
+  message?: Message;
+  task?: Task;
+  text?: string;
+  question?: Question;
+  mail?: Mail;
+  plan?: Plan;
+}
 const activityListeners = new Set<() => void>();
 
 function useLiveEvents(conversationId: string) {
@@ -256,22 +278,28 @@ function useLiveEvents(conversationId: string) {
   useEffect(() => {
     const source = new EventSource(`/api/conversations/${conversationId}/events`);
     source.onmessage = (event) => {
-      const data = JSON.parse(event.data) as { type: string; message?: Message; task?: Task; text?: string };
+      const data = JSON.parse(event.data) as LiveEvent;
       if (data.type === "message" && data.message) {
         client.setQueryData<Message[]>(messagesKey(conversationId), (old = []) => mergeMessage(old, data.message!));
       } else if (data.type === "task" && data.task) {
-        client.setQueryData<Task[]>(tasksKey(conversationId), (old = []) => upsertTask(old, data.task!));
+        client.setQueryData<Task[]>(tasksKey(conversationId), (old = []) => upsertById(old, data.task!));
       } else if (data.type === "activity" && data.text) {
-        const lines = [...(activityStore.get(conversationId) ?? []), data.text].slice(-200);
+        const lines = [...(activityStore.get(conversationId) ?? []), { at: Date.now(), text: data.text }].slice(-200);
         activityStore.set(conversationId, lines);
         activityListeners.forEach((f) => f());
+      } else if (data.type === "question" && data.question) {
+        client.setQueryData<Question[]>(keys.questions(conversationId), (old = []) => upsertById(old, data.question!));
+      } else if (data.type === "mail" && data.mail) {
+        client.setQueryData<Mail[]>(keys.mail(conversationId), (old = []) => upsertById(old, data.mail!).slice(-200));
+      } else if (data.type === "plan" && data.plan) {
+        client.setQueryData<Plan>(keys.plan(conversationId), data.plan);
       }
     };
     return () => source.close();
   }, [client, conversationId]);
 }
 
-function useActivity(conversationId?: string): string[] {
+function useActivity(conversationId?: string): ActivityLine[] {
   const [, force] = useState(0);
   useEffect(() => {
     const listener = () => force((n) => n + 1);
@@ -287,14 +315,6 @@ function mergeMessage(list: Message[], message: Message): Message[] {
   return list.some((m) => m.id === message.id) ? list : [...list, message].sort((a, b) => a.id - b.id);
 }
 
-function upsertTask(list: Task[], task: Task): Task[] {
-  const index = list.findIndex((t) => t.id === task.id);
-  if (index === -1) return [...list, task];
-  const copy = [...list];
-  copy[index] = task;
-  return copy;
-}
-
 /** Everything the conversation runs on: repository, tasks, team and live activity. */
 function ContextPanel({ project, conversationId }: { project: Project; conversationId?: string }) {
   return (
@@ -302,6 +322,7 @@ function ContextPanel({ project, conversationId }: { project: Project; conversat
       <Section title="代码仓库" action={<Link to={`/projects/${project.id}/settings`} className="text-xs text-muted-foreground hover:text-foreground">管理</Link>}>
         <RepoInfo project={project} />
       </Section>
+      {conversationId && <PlanSection conversationId={conversationId} />}
       {conversationId && <TasksSection conversationId={conversationId} />}
       <TeamSection />
       {conversationId && <ActivitySection conversationId={conversationId} />}
@@ -356,8 +377,8 @@ function TasksSection({ conversationId }: { conversationId: string }) {
             <div className="h-full rounded-full bg-ok transition-all" style={{ width: `${percent}%` }} />
           </div>
           <div className="flex flex-col">
-            {list.map((t) => (
-              <TaskRow key={t.id} task={t} />
+            {taskTree(list).map(({ task, depth }) => (
+              <TaskRow key={task.id} task={task} depth={depth} />
             ))}
           </div>
         </>
@@ -366,17 +387,21 @@ function TasksSection({ conversationId }: { conversationId: string }) {
   );
 }
 
-function TaskRow({ task }: { task: Task }) {
+function TaskRow({ task, depth }: { task: Task; depth: number }) {
   const [open, setOpen] = useState(false);
   const status = TASK_STATUS[task.status];
   return (
-    <div className="-mx-2 rounded-lg hover:bg-raised/60">
+    <div
+      className={cn("-mx-2 rounded-lg hover:bg-raised/60", depth > 0 && "border-l")}
+      style={depth > 0 ? { marginLeft: `${Math.min(depth, 4) * 14 - 8}px` } : undefined}
+    >
       <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-start gap-2 px-2 py-2 text-left" aria-expanded={open}>
         {open ? <ChevronDown className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />}
         <span className="min-w-0 flex-1">
           <span className={cn("block text-[13px] leading-5", !open && "line-clamp-2")}>{task.instruction}</span>
           <span className="font-mono text-[11px] text-muted-foreground">
             {task.id} → {task.assignee}
+            {task.parent ? ` · 子任务（${task.parent}）` : ""}
           </span>
         </span>
         <StatusBadge tone={status.tone} label={status.label} spinning={task.status === "running"} className="shrink-0" />
@@ -410,6 +435,7 @@ function TeamSection() {
             <Dot tone={online.get(e.node ?? "") ? "ok" : "bad"} />
             <span className="font-mono">{e.name}</span>
             {e.name === leader && <span className="text-[11px] text-brand">负责人</span>}
+            {e.type === "codex" && <span className="text-[11px] text-info">Codex</span>}
             <span className="ml-auto text-xs text-muted-foreground">{e.node}</span>
           </li>
         ))}
@@ -420,18 +446,60 @@ function TeamSection() {
 
 function ActivitySection({ conversationId }: { conversationId: string }) {
   const lines = useActivity(conversationId);
+  const mail = useMail(conversationId);
+  const items = useMemo(() => activityFeed(lines, mail.data ?? []).slice(-80), [lines, mail.data]);
   return (
     <Section title="工作动态">
-      {lines.length === 0 ? (
-        <p className="text-sm text-muted-foreground">页面打开期间，员工的实时进展会滚动显示在这里。</p>
+      {items.length === 0 ? (
+        <p className="text-sm text-muted-foreground">页面打开期间，员工的实时进展和彼此之间的消息会显示在这里。</p>
       ) : (
         <div className="scroll-thin flex max-h-80 flex-col gap-1 overflow-y-auto">
-          {lines.slice(-80).map((line, i) => (
-            <span key={i} className="break-all font-mono text-[11px] leading-[18px] text-muted-foreground">
-              {line}
-            </span>
-          ))}
+          {items.map((item, i) =>
+            item.kind === "mail" ? (
+              <MailLine key={`m${item.mail.id}`} mail={item.mail} />
+            ) : (
+              <span key={i} className="break-all font-mono text-[11px] leading-[18px] text-muted-foreground">
+                {item.text}
+              </span>
+            ),
+          )}
         </div>
+      )}
+    </Section>
+  );
+}
+
+/** A message between members: who to whom, then the text. */
+function MailLine({ mail }: { mail: Mail }) {
+  return (
+    <div className="my-0.5 rounded-md border bg-background px-2 py-1.5 text-[12px] leading-[18px]" title={clock(mail.created_at)}>
+      <span className="flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
+        {mail.sender} <ArrowRight className="size-3" /> {recipientLabel(mail.recipient)}
+      </span>
+      <span className="block whitespace-pre-wrap break-words">{mail.body}</span>
+    </div>
+  );
+}
+
+/** The lead's plan (update_plan): steps with their state. */
+function PlanSection({ conversationId }: { conversationId: string }) {
+  const plan = usePlan(conversationId);
+  const steps = plan.data?.steps ?? [];
+  const done = steps.filter((s) => s.status === "done").length;
+  return (
+    <Section title="计划" action={steps.length ? <span className="text-xs text-muted-foreground">{done} / {steps.length}</span> : undefined}>
+      {steps.length === 0 ? (
+        <p className="text-sm text-muted-foreground">负责人定下计划后会显示在这里。</p>
+      ) : (
+        <ol className="flex flex-col gap-1.5">
+          {steps.map((step, i) => (
+            <li key={i} className="flex items-start gap-2 text-[13px] leading-5">
+              <span className="w-4 shrink-0 text-right font-mono text-[11px] leading-5 text-muted-foreground">{i + 1}</span>
+              <span className={cn("min-w-0 flex-1", step.status === "done" && "text-muted-foreground line-through")}>{step.title}</span>
+              <StatusBadge tone={PLAN_STATUS[step.status]?.tone ?? "neutral"} label={PLAN_STATUS[step.status]?.label ?? step.status} spinning={step.status === "doing"} className="shrink-0" />
+            </li>
+          ))}
+        </ol>
       )}
     </Section>
   );

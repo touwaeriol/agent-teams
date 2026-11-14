@@ -233,11 +233,13 @@ async def test_project_team_works_in_the_repository_with_context(client: TestCli
     assert node.workdir == f"projects/{project['id'][:12]}"
     assert node.repo == {"url": "https://github.com/octo/app.git", "branch": "trunk"}
     assert (await node.setup())["env"]["GH_TOKEN"] == TOKEN
+    assert (await node.setup())["env"]["MCP_TOOL_TIMEOUT"] == "86400000"
     assert "先跑 make test" in coder.instructions  # type: ignore[attr-defined]
     assert "octo/app" in lead.brain.instructions  # type: ignore[union-attr]
 
     plain = await state.workspaces.lead(me["id"])
     assert plain.members[0].node.workdir == ""  # type: ignore[attr-defined]
+    assert plain.members[0].node.env == {"MCP_TOOL_TIMEOUT": "86400000"}  # type: ignore[attr-defined]
 
 
 def test_structured_team_round_trip(client: TestClient) -> None:

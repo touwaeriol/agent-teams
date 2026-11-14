@@ -24,7 +24,7 @@ registered in the web console)::
       - {name: researcher, description: "Collects facts."}
       - {name: backend, type: claude_code, node: build-1, description: "Backend engineer."}
 
-Member ``type`` is one of ``agent`` (default), ``claude_code``, ``leader``,
+Member ``type`` is one of ``agent`` (default), ``claude_code``, ``codex``, ``leader``,
 ``sequential``, ``parallel``, ``round_robin`` and ``supervisor``. Tools are
 referenced as ``"package.module:attribute"`` (a :class:`Tool` or a function).
 """
@@ -50,6 +50,7 @@ from pydantic import (
 
 from .agent import Agent
 from .claude_code import ClaudeCodeWorker
+from .codex import CodexWorker
 from .errors import ConfigError
 from .leader import LEADER_INSTRUCTIONS, Leader
 from .llm.anthropic import AnthropicLLM
@@ -148,12 +149,32 @@ class ClaudeCodeSpec(_Member):
     max_turns: int | None = Field(None, ge=1)
     claude_command: str = "claude"
     extra_args: list[str] = Field(default_factory=list)
+    can_delegate: bool = False
 
     def build(self, builder: Builder) -> Runnable:
         return self.worker(builder)
 
     def worker(self, builder: Builder) -> ClaudeCodeWorker:
         return ClaudeCodeWorker(
+            **self.model_dump(exclude={"type", "node"}), node=builder.node(self.node)
+        )
+
+
+class CodexSpec(_Member):
+    """An OpenAI Codex CLI employee (``codex exec``) on a node."""
+
+    type: Literal["codex"]
+    node: str
+    instructions: str = ""
+    workdir: str = ""
+    model: str = ""
+    sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
+    codex_command: str = "codex"
+    extra_args: list[str] = Field(default_factory=list)
+    can_delegate: bool = False
+
+    def build(self, builder: Builder) -> Runnable:
+        return CodexWorker(
             **self.model_dump(exclude={"type", "node"}), node=builder.node(self.node)
         )
 
@@ -243,7 +264,8 @@ MemberSpec = Annotated[
     | Annotated[RoundRobinSpec, Tag("round_robin")]
     | Annotated[SupervisorSpec, Tag("supervisor")]
     | Annotated[LeaderSpec, Tag("leader")]
-    | Annotated[ClaudeCodeSpec, Tag("claude_code")],
+    | Annotated[ClaudeCodeSpec, Tag("claude_code")]
+    | Annotated[CodexSpec, Tag("codex")],
     Discriminator(_member_type),
 ]
 

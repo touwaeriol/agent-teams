@@ -10,6 +10,7 @@ import pytest
 
 from agent_teams import Hooks, RunContext, WorkerProgress
 from agent_teams.claude_code import ClaudeCodeError, ClaudeCodeWorker, describe
+from agent_teams.mcp_config import ToolEndpoint
 from agent_teams.nodes import LocalNode, NodeCommandError
 
 FAKE = f"{sys.executable} {Path(__file__).with_name('fake_claude.py')}"
@@ -95,3 +96,22 @@ async def test_cancelling_kills_the_process(tmp_path: Path) -> None:
 def test_describe_ignores_unknown_events() -> None:
     assert describe({"type": "stream_event"}) == []
     assert describe({"type": "system", "subtype": "api_retry"}) == []
+
+
+def test_with_tools_adds_the_team_server_and_the_permission_prompt_tool(tmp_path: Path) -> None:
+    base = worker(tmp_path, allowed_tools=["Read"], extra_args=["--bare"], can_delegate=True)
+    endpoint = ToolEndpoint("http://console/mcp", "tok", ("ask_lead", "approve"))
+
+    equipped = base.with_tools(endpoint, "approve")
+    plain = base.with_tools(endpoint)
+
+    assert equipped.allowed_tools == ["Read", "mcp__team__ask_lead"]
+    args = list(equipped.extra_args)
+    assert args[0] == "--bare"
+    config = json.loads(args[args.index("--mcp-config") + 1])["mcpServers"]["team"]
+    assert config["headers"] == {"Authorization": "Bearer tok"}
+    assert args[-2:] == ["--permission-prompt-tool", "mcp__team__approve"]
+    assert "--permission-prompt-tool" not in plain.extra_args
+    assert "mcp__team__approve" in plain.allowed_tools
+    assert equipped.can_delegate
+    assert base.extra_args == ["--bare"]  # the original is unchanged

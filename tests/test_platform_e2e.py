@@ -126,3 +126,88 @@ async def test_leader_delegates_over_mcp_and_gets_the_report(console: str, tmp_p
     assert (task["assignee"], task["status"]) == ("worker", "done")
     assert task["instruction"] == "tick:3"
     assert json.loads(task["output"])["cwd"] == str((tmp_path / "root" / "worker").resolve())
+
+
+async def start_node(api: httpx.AsyncClient, console: str, tmp_path: Path) -> asyncio.Task[None]:
+    """Register a user with node "box" and the fake team, and run its daemon."""
+    account = {"email": "dev@example.com", "password": "long enough"}
+    assert (await api.post("/auth/register", json=account)).status_code == 201
+    enrollment = (await api.post("/api/nodes", json={"name": "box"})).json()
+    daemon = Daemon(
+        DaemonConfig(
+            console=console,
+            name="box",
+            token=enrollment["token"],
+            root=tmp_path / "root",
+            state=tmp_path / "state",
+            allow=frozenset({Path(sys.executable).name}),
+        )
+    )
+    running = asyncio.create_task(daemon.serve_forever())
+
+    async def online() -> bool:
+        return bool((await api.get("/api/nodes")).json()[0]["online"])
+
+    await until(online)
+    assert (await api.put("/api/team", json={"config": TEAM})).status_code == 200
+    return running
+
+
+async def test_employee_tools_reach_the_user_over_mcp(console: str, tmp_path: Path) -> None:
+    async with httpx.AsyncClient(base_url=console) as api:
+        running = await start_node(api, console, tmp_path)
+        conversation = (await api.post("/api/conversations", json={"title": "tools"})).json()
+        base = f"/api/conversations/{conversation['id']}"
+
+        async def answer(reply: str) -> dict[str, Any]:
+            async def open_question() -> list[dict[str, Any]]:
+                return list((await api.get(f"{base}/questions")).json())
+
+            (question,) = await until(open_question)
+            answered = await api.post(
+                f"{base}/questions/{question['id']}/answer", json={"answer": reply}
+            )
+            assert answered.status_code == 200, answered.text
+            return dict(question)
+
+        async def task_done(task_id: str) -> dict[str, Any] | None:
+            tasks = {t["id"]: t for t in (await api.get(f"{base}/tasks")).json()}
+            task = tasks.get(task_id)
+            return (
+                task
+                if task and task["status"] != "running" and task["status"] != "pending"
+                else None
+            )
+
+        ask = (
+            'delegate:worker:team:ask_user:{"question": "which color?", "options": ["red", "blue"]}'
+        )
+        await api.post(f"{base}/messages", json={"content": ask})
+        question = await answer("blue")
+        asked = await until(lambda: task_done("t1"))
+
+        bash = {"tool_name": "Bash", "input": {"command": "make deploy"}}
+        await api.post(
+            f"{base}/messages", json={"content": f"delegate:worker:team:approve:{json.dumps(bash)}"}
+        )
+        approval = await answer("allow")
+        approved = await until(lambda: task_done("t2"))
+        everything = (await api.get(f"{base}/questions?status=all")).json()
+
+        running.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await running
+
+    assert (question["asker"], question["task_id"], question["text"]) == (
+        "worker",
+        "t1",
+        "which color?",
+    )
+    assert question["options"] == ["red", "blue"]
+    assert (asked["status"], asked["output"]) == ("done", "ask_user said: blue")
+    assert approval["kind"] == "approval"
+    assert approval["detail"] == bash
+    assert approved["status"] == "done"
+    said = approved["output"].removeprefix("approve said: ")
+    assert json.loads(said) == {"behavior": "allow", "updatedInput": {"command": "make deploy"}}
+    assert [q["status"] for q in everything] == ["answered", "answered"]

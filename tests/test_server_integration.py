@@ -16,6 +16,8 @@ from agent_teams.server.accounts import Conflict
 from agent_teams.server.broker import ValkeyBroker
 from agent_teams.server.store import connect_postgres
 
+from .test_comms_api import exercise_comms_store
+
 DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "")
 VALKEY_URL = os.environ.get("TEST_VALKEY_URL", "")
 
@@ -160,4 +162,17 @@ async def test_postgres_projects_round_trip() -> None:
         assert await store.owner(conversation_id) is None  # cascades
     finally:
         await accounts.delete_user(user.id)
+        await store.close()
+
+
+@pytest.mark.skipif(not DATABASE_URL, reason="TEST_DATABASE_URL not set")
+async def test_postgres_keeps_comms() -> None:
+    store, accounts, _projects = await connect_postgres(DATABASE_URL)
+    conversation_id = uuid.uuid4().hex[:12]
+    owner = await accounts.create_user(f"{conversation_id}@example.com", "h", "user")
+    try:
+        await store.create_conversation(conversation_id, "comms", owner.id)
+        await exercise_comms_store(store, conversation_id)
+    finally:
+        await accounts.delete_user(owner.id)
         await store.close()

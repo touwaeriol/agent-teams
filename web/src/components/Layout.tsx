@@ -30,7 +30,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { api, type Conversation, type Project, type User } from "@/lib/api";
-import { keys, useAllConversations, useNodes, useProjects } from "@/lib/queries";
+import { pendingForUser } from "@/lib/comms";
+import { keys, useAllConversations, useNodes, useProjects, useQuestionsOf } from "@/lib/queries";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
@@ -170,6 +171,7 @@ function ProjectItem({
   const [all, setAll] = useState(false);
   const shown = conversations.filter((c) => !needle || c.title.toLowerCase().includes(needle) || project.name.toLowerCase().includes(needle));
   const visible = all ? shown : shown.slice(0, 8);
+  const waiting = useWaiting(open ? visible : shown.slice(0, 3));
   return (
     <div className="mb-0.5">
       <div className="group flex items-center">
@@ -184,6 +186,7 @@ function ProjectItem({
           <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
           <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
           <span className="truncate">{project.name}</span>
+          {!open && waiting.size > 0 && <WaitingDot className="ml-auto" />}
         </NavLink>
         <NewConversationButton projectId={project.id} />
       </div>
@@ -196,11 +199,12 @@ function ProjectItem({
               to={`/projects/${project.id}/c/${c.id}`}
               aria-current={c.id === currentConversation ? "page" : undefined}
               className={cn(
-                "truncate rounded-md px-2.5 py-1.5 text-[13px] text-foreground/80 hover:bg-raised hover:text-foreground",
+                "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] text-foreground/80 hover:bg-raised hover:text-foreground",
                 c.id === currentConversation && "bg-accent font-medium text-foreground",
               )}
             >
-              {c.title || "未命名对话"}
+              <span className="min-w-0 flex-1 truncate">{c.title || "未命名对话"}</span>
+              {waiting.has(c.id) && <WaitingDot />}
             </Link>
           ))}
           {shown.length > 8 && (
@@ -211,6 +215,25 @@ function ProjectItem({
         </div>
       )}
     </div>
+  );
+}
+
+/** Conversations (of those given) with a question or approval waiting for the user. */
+function useWaiting(conversations: Conversation[]): Set<string> {
+  const results = useQuestionsOf(conversations.map((c) => c.id));
+  const waiting = new Set<string>();
+  results.forEach((r, i) => {
+    if (pendingForUser(r.data).length > 0) waiting.add(conversations[i].id);
+  });
+  return waiting;
+}
+
+function WaitingDot({ className }: { className?: string }) {
+  return (
+    <span title="有问题等你处理" className={cn("flex shrink-0 items-center", className)}>
+      <Dot tone="warn" />
+      <span className="sr-only">有问题等你处理</span>
+    </span>
   );
 }
 

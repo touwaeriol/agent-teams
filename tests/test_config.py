@@ -221,6 +221,16 @@ def test_claude_code_employees_run_on_their_nodes(tmp_path: Path) -> None:
     assert isinstance(frontend, ClaudeCodeWorker)
     assert isinstance(frontend.node, LocalNode)
     assert frontend.description == "Claude Code on node here"
+    assert not frontend.can_delegate
+
+
+def test_claude_code_employees_can_delegate(tmp_path: Path) -> None:
+    data = multi_node_team(tmp_path)
+    data["employees"][1]["can_delegate"] = True
+    team = build_team(data, llm_factory=RecordingFactory())
+
+    assert isinstance(team, Leader)
+    assert [getattr(m, "can_delegate", None) for m in team.members] == [True, False]
 
 
 @pytest.mark.parametrize(

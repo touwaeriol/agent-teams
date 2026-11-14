@@ -9,6 +9,10 @@ each start appends a line to that file (to count how often it really ran).
 Leader mode: "delegate:<assignee>:<instruction>" calls the assign_task tool of
 the MCP server given in --mcp-config (as Claude Code would) and reports the
 tool's answer; a "[Task ..." report is answered with "report: <first line>".
+
+Employee mode: "team:<tool>:<json arguments>" calls that team tool over MCP and
+finishes with "<tool> said: <answer>". Only the first line of the prompt picks
+the behaviour (employees get the team briefing appended).
 """
 
 import asyncio
@@ -23,7 +27,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 argv = sys.argv[1:]
-prompt = argv[argv.index("-p") + 1]
+prompt = argv[argv.index("-p") + 1].splitlines()[0]
 
 if marker := os.environ.get("FAKE_CLAUDE_MARKER"):
     with open(marker, "a") as handle:
@@ -84,9 +88,13 @@ if prompt.startswith("delegate:"):
     )
     session = argv[argv.index("--session-id") + 1] if "--session-id" in argv else "resumed"
     finish(f"delegated ({session}): {answer}")
+if prompt.startswith("team:"):
+    _, tool, arguments = prompt.split(":", 2)
+    answer = asyncio.run(call_mcp_tool(tool, json.loads(arguments)))
+    finish(f"{tool} said: {answer}")
 if prompt.startswith("[Task"):
     resumed = argv[argv.index("--resume") + 1] if "--resume" in argv else "no session"
-    finish(f"report ({resumed}): {prompt.splitlines()[0]}")
+    finish(f"report ({resumed}): {prompt}")
 if prompt.startswith("tick:"):
     for number in range(int(prompt.split(":", 1)[1])):
         emit(

@@ -9,27 +9,25 @@ endpoint that goes into ``--mcp-config``.
 
 from __future__ import annotations
 
-import json
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
 from .claude_code import ClaudeCodeWorker
 from .context import RunContext
+from .mcp_config import MCP_SERVER, ToolEndpoint, mcp_args, mcp_tool_names
 from .tools import Toolkit
 from .types import Result
 
-MCP_SERVER = "team"
-
-
-@dataclass(frozen=True)
-class ToolEndpoint:
-    """Where Claude Code reaches published tools (streamable HTTP MCP)."""
-
-    url: str
-    token: str
-    tools: Sequence[str]
+__all__ = [
+    "MCP_SERVER",
+    "ClaudeCodeSession",
+    "ToolEndpoint",
+    "ToolServer",
+    "mcp_args",
+    "mcp_tool_names",
+]
 
 
 class ToolServer(Protocol):
@@ -90,20 +88,3 @@ class ClaudeCodeSession:
             allowed_tools=[*self.worker.allowed_tools, *mcp_tool_names(self.endpoint)],
             extra_args=[*self.worker.extra_args, *session, *mcp_args(self.endpoint)],
         )
-
-
-def mcp_tool_names(endpoint: ToolEndpoint | None) -> list[str]:
-    tools = endpoint.tools if endpoint else ()
-    return [f"mcp__{MCP_SERVER}__{name}" for name in tools]
-
-
-def mcp_args(endpoint: ToolEndpoint | None) -> list[str]:
-    if endpoint is None:
-        return []
-    server = {
-        "type": "http",
-        "url": endpoint.url,
-        "headers": {"Authorization": f"Bearer {endpoint.token}"},
-    }
-    config = json.dumps({"mcpServers": {MCP_SERVER: server}})
-    return ["--mcp-config", config, "--strict-mcp-config"]

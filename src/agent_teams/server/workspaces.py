@@ -1,7 +1,8 @@
 """Each user's team, built from their team YAML and their registered nodes.
 
-On the platform both the leader and the employees are Claude Code sessions
-on the user's own nodes; no platform API key is involved.
+On the platform the leader is a Claude Code session and the employees are
+Claude Code or Codex processes, all on the user's own nodes; no platform
+API key is involved.
 """
 
 from __future__ import annotations
@@ -39,9 +40,14 @@ employees:
 """
 
 
+# Team tools (questions, approvals, reviews) can block for a long time; Claude
+# Code reads this to wait for an MCP tool call (milliseconds; one day).
+TOOL_ENV = {"MCP_TOOL_TIMEOUT": "86400000"}
+
+
 def _no_platform_llm(_options: Mapping[str, Any]) -> LLM:
     raise ConfigError(
-        "平台上的 leader 和员工都运行在你的节点上，请使用 type: claude_code"
+        "平台上的 leader 和员工都运行在你的节点上，请使用 type: claude_code（员工也可以是 codex）"
         "（type: agent 需要平台 API key，这里不提供）"
     )
 
@@ -93,6 +99,7 @@ class Workspaces:
                 self._registry,
                 workdir=space.workdir,
                 key=n.id,
+                env=TOOL_ENV,
                 env_source=space.env_source,
                 repo=space.repo,
             )
@@ -183,7 +190,8 @@ def _context(project: ProjectView) -> str:
             f"仓库：https://github.com/{project.repo}（基准分支 {branch}）。"
             "你的工作目录就是这个仓库的独立克隆；"
             "git 和 gh 已经配好凭证，可以直接拉取、推送和建 PR。"
-            "不要直接推送基准分支，改动放在新分支上。"
+            "基准分支存放最终版本的代码：改动放在你自己的新分支上，"
+            "完成后向基准分支提 PR，不要直接推送基准分支。"
         )
     if project.context:
         lines.append("## 项目上下文\n" + project.context)

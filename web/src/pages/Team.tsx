@@ -2,22 +2,30 @@ import { Crown, Plus, Save, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import YAML from "yaml";
-import { Callout, ConfirmAction, Disclosure, errorText, Field, Loading, nodeStatus, Page, Panel, Spinner, StatusBadge } from "@/components/common";
+import { Callout, ConfirmAction, Disclosure, errorText, Field, Loading, MEMBER_TYPES, nodeStatus, Page, Panel, Spinner, StatusBadge } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TagInput } from "@/components/ui/tag-input";
 import { Textarea } from "@/components/ui/textarea";
 import { api, type Employee, type NodeInfo, type TeamDefinition, type TeamState } from "@/lib/api";
 import { useAction } from "@/lib/mutations";
 import { keys, useNodes, useTeam } from "@/lib/queries";
+import { canLead, memberType, switchMemberType, type MemberType } from "@/lib/team";
 
 const PERMISSION_MODES = [
   { value: "acceptEdits", label: "自动接受改文件（默认）" },
   { value: "plan", label: "只读规划（不改代码）" },
   { value: "bypassPermissions", label: "跳过所有权限确认" },
-  { value: "default", label: "逐项询问" },
+  { value: "default", label: "逐项询问（在对话里弹审批卡片）" },
+];
+
+const SANDBOXES = [
+  { value: "workspace-write", label: "可写工作目录（默认）" },
+  { value: "read-only", label: "只读" },
+  { value: "danger-full-access", label: "不限制（危险）" },
 ];
 
 const PRESETS: Record<string, Omit<Employee, "name" | "node">> = {
@@ -40,7 +48,14 @@ const PRESETS: Record<string, Omit<Employee, "name" | "node">> = {
     instructions: "你负责测试。补齐用例、运行测试并如实报告失败。",
     allowed_tools: ["Bash(git *)", "Bash(npm *)", "Bash(pnpm *)", "Bash(pytest *)", "Bash(python3 *)"],
   },
+  "Codex 工程师": {
+    type: "codex",
+    description: "Codex 工程师：用 OpenAI Codex 写代码、跑测试。",
+    instructions: "你是工程师。按任务改代码并跑相关测试，最后用中文几句话说明改了什么、测试结果如何。",
+  },
 };
+
+const PRESET_NAMES: Record<string, string> = { 审查员: "reviewer", 测试: "qa", "Codex 工程师": "codex" };
 
 export function TeamPage() {
   const team = useTeam();
@@ -89,14 +104,14 @@ export function TeamPage() {
   const nodeNames = (nodes.data ?? []).map((n) => n.name);
   const add = (preset: string) => {
     const base = PRESETS[preset];
-    const name = uniqueName(preset === "审查员" ? "reviewer" : preset === "测试" ? "qa" : "dev", employees);
+    const name = uniqueName(PRESET_NAMES[preset] ?? "dev", employees);
     setEmployees([...employees, { name, node: nodeNames[0] ?? "", ...base }]);
   };
 
   return (
     <Page
       title="团队"
-      description="负责人和员工都是你节点上的 Claude Code。负责人直接和你对话、派任务；员工各自在节点上干活。所有项目共用这支团队，项目的上下文和仓库会自动交给每个人。"
+      description="负责人和员工运行在你的节点上：负责人是 Claude Code，员工可以是 Claude Code 或 Codex。负责人直接和你对话、派任务；员工各自在节点上干活。所有项目共用这支团队，项目的上下文和仓库会自动交给每个人。"
       actions={
         <Button onClick={() => save.mutate()} disabled={save.isPending}>
           {save.isPending ? <Spinner /> : <Save />} 保存团队
@@ -128,7 +143,7 @@ export function TeamPage() {
                     <SelectValue placeholder="选择负责人" />
                   </SelectTrigger>
                   <SelectContent>
-                    {employees.map((e) => (
+                    {employees.filter(canLead).map((e) => (
                       <SelectItem key={e.name} value={e.name}>
                         {e.name}
                       </SelectItem>
@@ -202,6 +217,8 @@ function EmployeeCard({
           <span className="font-mono">{employee.name || "未命名"}</span>
           {leader && <StatusBadge tone="primary" label={<><Crown className="size-3" /> 负责人</>} />}
           <StatusBadge tone={status.tone} dot label={employee.node || "未选节点"} />
+          {memberType(employee) === "codex" && <StatusBadge tone="info" label="Codex" />}
+          {employee.can_delegate && <StatusBadge tone="neutral" label="可派子任务" />}
         </span>
       }
       action={<ConfirmAction iconOnly={`删除 ${employee.name}`} title={`从团队里删除 ${employee.name}？`} description="保存团队后生效。" onConfirm={onRemove} />}
@@ -209,6 +226,20 @@ function EmployeeCard({
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="名字（英文，派任务时用）">
           <Input value={employee.name} onChange={(e) => set({ name: e.target.value.replace(/\s+/g, "-") })} className="font-mono" />
+        </Field>
+        <Field label="类型" hint={leader ? "负责人只能是 Claude Code。" : undefined}>
+          <Select value={memberType(employee)} onValueChange={(v) => onChange(switchMemberType(employee, v as MemberType))} disabled={leader}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MEMBER_TYPES.map((t) => (
+                <SelectItem key={t.value} value={t.value}>
+                  {t.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </Field>
         <Field label="运行在哪个节点">
           <Select value={employee.node ?? ""} onValueChange={(v) => set({ node: v })}>
@@ -231,6 +262,8 @@ function EmployeeCard({
       <Field label="工作要求（追加到系统提示）">
         <Textarea rows={3} value={employee.instructions ?? ""} onChange={(e) => set({ instructions: e.target.value })} />
       </Field>
+      {!leader && <DelegateSwitch employee={employee} onChange={(on) => set({ can_delegate: on || undefined })} />}
+      {memberType(employee) === "codex" ? <CodexSettings employee={employee} set={set} /> : (
       <Disclosure summary="权限与高级设置">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="权限模式">
@@ -267,7 +300,46 @@ function EmployeeCard({
             <TagInput values={employee.disallowed_tools ?? []} onChange={(v) => set({ disallowed_tools: v.length ? v : undefined })} placeholder="WebFetch，回车添加" />
           </Field>
       </Disclosure>
+      )}
     </Panel>
+  );
+}
+
+function DelegateSwitch({ employee, onChange }: { employee: Employee; onChange: (on: boolean) => void }) {
+  const id = `delegate-${employee.name}`;
+  return (
+    <div className="flex items-start justify-between gap-4 rounded-lg border px-3 py-2.5">
+      <label htmlFor={id} className="flex flex-col gap-0.5">
+        <span className="text-[13px] font-medium text-foreground/85">可以给其他员工派子任务</span>
+        <span className="text-xs leading-5 text-muted-foreground">打开后这个员工能把一部分工作拆给同事，并等待结果。</span>
+      </label>
+      <Switch id={id} checked={Boolean(employee.can_delegate)} onCheckedChange={onChange} />
+    </div>
+  );
+}
+
+/** Codex has no per-tool permissions; its sandbox decides what it may touch. */
+function CodexSettings({ employee, set }: { employee: Employee; set: (patch: Partial<Employee>) => void }) {
+  return (
+    <Disclosure summary="沙箱与高级设置">
+      <Field label="沙箱" hint="Codex 以非交互方式运行，不会弹审批卡片，能做什么由沙箱决定。">
+        <Select value={employee.sandbox ?? "workspace-write"} onValueChange={(v) => set({ sandbox: v === "workspace-write" ? undefined : v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SANDBOXES.map((m) => (
+              <SelectItem key={m.value} value={m.value}>
+                {m.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field label="模型（留空用 Codex 默认）">
+        <Input value={employee.model ?? ""} onChange={(e) => set({ model: e.target.value || undefined })} className="font-mono" />
+      </Field>
+    </Disclosure>
   );
 }
 
