@@ -27,6 +27,8 @@ async def sse(
             pending = asyncio.ensure_future(anext(events))
     finally:
         pending.cancel()
-        with suppress(asyncio.CancelledError, StopAsyncIteration):
+        # The browser went away. A cancelled Valkey read can surface as a
+        # TimeoutError instead of CancelledError; either way there is nothing to do.
+        with suppress(asyncio.CancelledError, Exception):
             await pending
         await events.aclose()

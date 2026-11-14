@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 
 import pytest
 
@@ -243,6 +243,19 @@ async def test_sse_formats_events_and_sends_heartbeats() -> None:
     await broker.publish("c1", {"type": "activity", "text": "你好"})
     assert await anext(stream) == 'data: {"type": "activity", "text": "你好"}\n\n'
     await stream.aclose()
+
+
+async def test_sse_closes_quietly_when_the_read_fails_on_cancel() -> None:
+    async def flaky() -> AsyncGenerator[dict[str, str], None]:
+        try:
+            await asyncio.sleep(3600)
+            yield {}
+        except asyncio.CancelledError:
+            raise TimeoutError("Timeout reading from valkey") from None
+
+    stream = sse(flaky(), heartbeat=0.05)
+    assert await anext(stream) == ": ping\n\n"
+    await stream.aclose()  # the browser went away
 
 
 def test_turns_round_trip_through_json() -> None:
