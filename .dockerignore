@@ -6,7 +6,5 @@
 .pytest_cache
 .ruff_cache
 .env
-team.yaml
 tests
 deploy
-ssh

@@ -8,109 +8,232 @@
   :root {
     --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #6b7385; --line: #e3e6ec;
     --accent: #3b5bdb; --accent-text: #ffffff; --user: #e7ecff; --error: #c92a2a;
-    --done: #2b8a3e; --running: #e67700; --pending: #868e96;
+    --done: #2b8a3e; --running: #e67700; --pending: #868e96; --code: #f1f3f5;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #12151b; --panel: #1b1f27; --text: #e6e8ee; --muted: #9aa2b4; --line: #2b313d;
       --accent: #5c7cfa; --accent-text: #ffffff; --user: #26304a; --error: #ff6b6b;
-      --done: #51cf66; --running: #ffa94d; --pending: #adb5bd;
+      --done: #51cf66; --running: #ffa94d; --pending: #adb5bd; --code: #11141a;
     }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 15px/1.55 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
-  .app { display: grid; grid-template-columns: 220px 1fr 300px; height: 100vh; }
-  aside, section { background: var(--panel); border-right: 1px solid var(--line);
-                   display: flex; flex-direction: column; min-height: 0; }
-  header { padding: 12px 16px; border-bottom: 1px solid var(--line); font-weight: 600;
-           display: flex; justify-content: space-between; align-items: center; gap: 8px; }
   button { background: var(--accent); color: var(--accent-text); border: 0; border-radius: 6px;
            padding: 6px 12px; font: inherit; cursor: pointer; }
-  button.link { background: none; color: var(--muted); padding: 0; }
+  button.ghost { background: none; color: var(--muted); padding: 4px 8px; }
+  button:disabled, select:disabled { opacity: .4; cursor: not-allowed; }
+  button.danger { background: none; color: var(--error); border: 1px solid var(--line); }
+  input, select, textarea { font: inherit; color: var(--text); background: var(--bg);
+           border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+  code, pre, textarea.code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+  pre { background: var(--code); border: 1px solid var(--line); border-radius: 6px; padding: 10px;
+        white-space: pre-wrap; word-break: break-all; margin: 8px 0; }
+  .hidden { display: none !important; }
+  .muted { color: var(--muted); }
+  .error-text { color: var(--error); }
+  .ok-text { color: var(--done); }
+
+  /* shell */
+  .topbar { display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: var(--panel);
+            border-bottom: 1px solid var(--line); height: 48px; }
+  .topbar strong { margin-right: 12px; }
+  .topbar nav { display: flex; gap: 4px; flex: 1; }
+  .topbar nav button { background: none; color: var(--muted); }
+  .topbar nav button.active { background: var(--user); color: var(--text); }
+  .view { height: calc(100vh - 48px); }
+  .page { max-width: 960px; margin: 0 auto; padding: 20px 16px; overflow-y: auto; height: 100%; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .card h2 { margin: 0 0 12px; font-size: 17px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 500; font-size: 13px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--pending); margin-right: 6px; }
+  .dot.on { background: var(--done); }
+
+  /* auth */
+  #auth { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 16px; }
+  #auth form { width: min(380px, 100%); display: flex; flex-direction: column; gap: 10px; }
+
+  /* chat */
+  .chat { display: grid; grid-template-columns: 220px 1fr 300px; height: 100%; }
+  .chat aside, .chat section { background: var(--panel); border-right: 1px solid var(--line);
+                               display: flex; flex-direction: column; min-height: 0; }
+  .pane-head { padding: 10px 16px; border-bottom: 1px solid var(--line); font-weight: 600;
+               display: flex; justify-content: space-between; align-items: center; gap: 8px; }
   .list { overflow-y: auto; flex: 1; }
   .conv { padding: 10px 16px; cursor: pointer; border-bottom: 1px solid var(--line);
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .conv.active { background: var(--user); }
-  main { display: flex; flex-direction: column; min-height: 0; }
+  main.chat-main { display: flex; flex-direction: column; min-height: 0; }
   #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
   .msg { max-width: 760px; padding: 10px 14px; border-radius: 10px; background: var(--panel);
          border: 1px solid var(--line); white-space: pre-wrap; word-break: break-word; }
   .msg.user { align-self: flex-end; background: var(--user); border-color: transparent; }
   .msg.error { color: var(--error); }
   .msg .who { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
-  form { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--panel); }
-  textarea { flex: 1; resize: none; height: 64px; padding: 8px 10px; border-radius: 8px; font: inherit;
-             border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  #composer { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--panel); }
+  #input { flex: 1; resize: none; height: 64px; }
   .task { padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
   .task .head { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
-  .task .status.done { color: var(--done); } .task .status.running { color: var(--running); }
-  .task .status.pending { color: var(--pending); } .task .status.failed,
-  .task .status.cancelled { color: var(--error); }
-  .task .body { color: var(--muted); margin-top: 4px; }
-  .node { padding: 8px 16px; border-bottom: 1px solid var(--line); font-size: 13px;
-          display: flex; justify-content: space-between; gap: 8px; }
-  .node .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-               background: var(--pending); margin-right: 6px; }
-  .node.online .dot { background: var(--done); }
-  .node .meta { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .status.done { color: var(--done); } .status.running { color: var(--running); }
+  .status.pending { color: var(--pending); } .status.failed, .status.cancelled { color: var(--error); }
+  .task .body { color: var(--muted); margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
   details { border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
   summary { padding: 8px 16px; cursor: pointer; }
   #activity { max-height: 220px; overflow-y: auto; padding: 0 16px 8px; white-space: pre-wrap; }
   .empty { color: var(--muted); padding: 24px 16px; }
-  #login { position: fixed; inset: 0; background: var(--bg); display: none;
-           align-items: center; justify-content: center; padding: 16px; }
-  #login form { flex-direction: column; width: min(360px, 100%); border: 1px solid var(--line); border-radius: 10px; }
-  #login input { padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line);
-                 background: var(--bg); color: var(--text); font: inherit; }
+  #team-config { width: 100%; min-height: 420px; }
+
   @media (max-width: 860px) {
-    .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
-    aside .list { max-height: 120px; }
-    #tasks-panel .list { max-height: 160px; }
+    .chat { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
+    .chat aside .list { max-height: 120px; }
+    #tasks-pane .list { max-height: 160px; }
+    .topbar { height: auto; flex-wrap: wrap; }
+    .view { height: auto; min-height: calc(100vh - 48px); }
   }
 </style>
 </head>
 <body>
-<div class="app">
-  <aside>
-    <header>对话 <button id="new">新建</button></header>
-    <div class="list" id="conversations"></div>
-  </aside>
-  <main>
-    <header><span id="title">选择或新建一个对话</span><button class="link" id="logout">退出登录</button></header>
-    <div id="messages"><div class="empty">和 leader 说说你要做什么。他派完任务会立刻回复，员工在后台干活，你可以随时继续聊。</div></div>
-    <form id="composer">
-      <textarea id="input" placeholder="输入消息，Enter 发送，Shift+Enter 换行" disabled></textarea>
-      <button id="send" disabled>发送</button>
-    </form>
-  </main>
-  <section id="tasks-panel">
-    <header>节点</header>
-    <div class="list" id="nodes" style="flex: none; max-height: 160px"><div class="empty">没有配置节点</div></div>
-    <header>任务板</header>
-    <div class="list" id="tasks"><div class="empty">暂无任务</div></div>
-    <details><summary>活动日志</summary><div id="activity"></div></details>
-  </section>
-</div>
-<div id="login">
-  <form id="login-form">
-    <strong>Agent Teams</strong>
-    <input id="token" type="password" placeholder="访问令牌（AGENT_TEAMS_TOKEN）" autocomplete="current-password">
-    <button>进入</button>
+
+<div id="auth" class="hidden">
+  <form id="auth-form" class="card">
+    <h2>Agent Teams</h2>
+    <p class="muted" style="margin:0">在你自己的服务器上组建 Claude Code 团队：一个负责人和你对话，员工并行干活。</p>
+    <input id="auth-email" type="email" placeholder="邮箱" autocomplete="username" required>
+    <input id="auth-password" type="password" placeholder="密码（至少 8 位）" autocomplete="current-password" required>
+    <div class="row">
+      <button id="login-button" type="submit">登录</button>
+      <button id="register-button" type="button" class="ghost">没有账号？注册</button>
+    </div>
+    <div id="auth-error" class="error-text"></div>
   </form>
 </div>
+
+<div id="app" class="hidden">
+  <div class="topbar">
+    <strong>Agent Teams</strong>
+    <nav>
+      <button data-view="chat">对话</button>
+      <button data-view="nodes">节点</button>
+      <button data-view="team">团队</button>
+      <button data-view="admin" class="hidden" id="admin-tab">管理</button>
+    </nav>
+    <span id="me" class="muted"></span>
+    <button class="ghost" id="logout">退出</button>
+  </div>
+
+  <div class="view" id="view-chat">
+    <div class="chat">
+      <aside>
+        <div class="pane-head">对话 <button id="new-conversation">新建</button></div>
+        <div class="list" id="conversations"></div>
+      </aside>
+      <main class="chat-main">
+        <div class="pane-head"><span id="title">选择或新建一个对话</span></div>
+        <div id="messages"><div class="empty">和你的负责人说说要做什么。他派完任务会立刻回复，员工在你的节点上干活，你可以随时继续聊。</div></div>
+        <form id="composer">
+          <textarea id="input" placeholder="输入消息，Enter 发送，Shift+Enter 换行" disabled></textarea>
+          <button id="send" disabled>发送</button>
+        </form>
+      </main>
+      <section id="tasks-pane">
+        <div class="pane-head">任务板</div>
+        <div class="list" id="tasks"><div class="empty">暂无任务</div></div>
+        <details><summary>活动日志</summary><div id="activity"></div></details>
+      </section>
+    </div>
+  </div>
+
+  <div class="view hidden" id="view-nodes">
+    <div class="page">
+      <div class="card">
+        <h2>添加节点</h2>
+        <p class="muted">节点是你自己的服务器。装好并登录 Claude Code 后，在上面运行安装命令；守护进程会主动连回控制台，服务器不用开放端口。</p>
+        <form id="node-form" class="row">
+          <input id="node-name" placeholder="节点名，例如 gpu-1" required>
+          <button>添加</button>
+          <span id="node-error" class="error-text"></span>
+        </form>
+        <div id="enrollment" class="hidden">
+          <p><strong id="enrollment-title"></strong> 在节点上执行下面的命令（令牌只显示这一次）：</p>
+          <pre id="enrollment-command"></pre>
+          <button id="copy-command" type="button">复制命令</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>我的节点</h2>
+        <table>
+          <thead><tr><th>名称</th><th>状态</th><th>主机</th><th>Claude Code</th><th>运行中</th><th></th></tr></thead>
+          <tbody id="node-rows"></tbody>
+        </table>
+        <div id="nodes-empty" class="empty hidden">还没有节点</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="view hidden" id="view-team">
+    <div class="page">
+      <div class="card">
+        <h2>团队配置</h2>
+        <p class="muted">用 <code>leader</code> 指定负责人，<code>employees</code> 列出所有成员；每个成员用 <code>node</code> 指定运行在哪个节点上（type: claude_code）。你的节点：<span id="team-nodes"></span></p>
+        <textarea id="team-config" class="code" spellcheck="false"></textarea>
+        <div class="row" style="margin-top:8px">
+          <button id="save-team">保存</button>
+          <span id="team-status"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="view hidden" id="view-admin">
+    <div class="page">
+      <div class="card">
+        <h2>平台设置</h2>
+        <form id="settings-form" class="row">
+          <label><input type="checkbox" id="registration-open"> 开放注册</label>
+          <label>默认节点上限 <input type="number" id="default-max-nodes" min="0" style="width:80px"></label>
+          <button>保存</button>
+          <span id="settings-status"></span>
+        </form>
+      </div>
+      <div class="card">
+        <h2>用户</h2>
+        <table>
+          <thead><tr><th>邮箱</th><th>角色</th><th>状态</th><th>节点</th><th>节点上限</th><th></th></tr></thead>
+          <tbody id="user-rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const $ = (id) => document.getElementById(id);
-const state = { current: null, source: null, seen: new Set(), tasks: new Map() };
+const state = { me: null, view: "chat", current: null, source: null, seen: new Set(), tasks: new Map(), nodes: [] };
 
-async function api(path, options = {}) {
-  const response = await fetch(path, { ...options, headers: { "Content-Type": "application/json" } });
-  if (response.status === 401) { showLogin(); throw new Error("unauthorized"); }
-  if (!response.ok) throw new Error(await response.text());
-  return response.json();
+class ApiError extends Error {
+  constructor(status, detail) { super(detail); this.status = status; }
 }
 
-function showLogin() { $("login").style.display = "flex"; $("token").focus(); }
+async function api(path, options = {}) {
+  const init = { ...options, headers: { "Content-Type": "application/json" } };
+  if (options.json !== undefined) init.body = JSON.stringify(options.json);
+  const response = await fetch(path, init);
+  if (response.status === 401 && !path.startsWith("/auth/")) { showAuth(); throw new ApiError(401, "请先登录"); }
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!response.ok) throw new ApiError(response.status, describe(data) || response.statusText);
+  return data;
+}
+
+function describe(data) {
+  if (!data || data.detail === undefined) return "";
+  if (typeof data.detail === "string") return data.detail;
+  return data.detail.map((item) => item.msg).join("；");
+}
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -119,7 +242,65 @@ function element(tag, className, text) {
   return node;
 }
 
-const WHO = { user: "你", leader: "leader", error: "错误" };
+function button(label, className, onclick) {
+  const node = element("button", className, label);
+  node.type = "button";
+  node.onclick = onclick;
+  return node;
+}
+
+/* ---------- auth ---------- */
+
+function showAuth() {
+  $("app").classList.add("hidden");
+  $("auth").classList.remove("hidden");
+  state.source?.close();
+}
+
+async function authenticate(path) {
+  $("auth-error").textContent = "";
+  try {
+    const json = { email: $("auth-email").value, password: $("auth-password").value };
+    state.me = await api(path, { method: "POST", json });
+    enterApp();
+  } catch (error) {
+    $("auth-error").textContent = error.message;
+  }
+}
+
+$("auth-form").onsubmit = (event) => { event.preventDefault(); authenticate("/auth/login"); };
+$("register-button").onclick = () => {
+  if ($("auth-form").reportValidity()) authenticate("/auth/register");
+};
+$("logout").onclick = async () => { await api("/auth/logout", { method: "POST" }).catch(() => {}); location.reload(); };
+
+function enterApp() {
+  $("auth").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  $("me").textContent = state.me.email + (state.me.role === "admin" ? "（管理员）" : "");
+  $("admin-tab").classList.toggle("hidden", state.me.role !== "admin");
+  show(state.view);
+}
+
+/* ---------- navigation ---------- */
+
+const LOADERS = { chat: loadConversations, nodes: loadNodes, team: loadTeam, admin: loadAdmin };
+
+function show(view) {
+  state.view = view;
+  for (const tab of document.querySelectorAll(".topbar nav button")) {
+    tab.classList.toggle("active", tab.dataset.view === view);
+  }
+  for (const name of Object.keys(LOADERS)) $(`view-${name}`).classList.toggle("hidden", name !== view);
+  LOADERS[view]().catch((error) => console.warn(error));
+}
+
+for (const tab of document.querySelectorAll(".topbar nav button")) tab.onclick = () => show(tab.dataset.view);
+
+/* ---------- chat ---------- */
+
+const WHO = { user: "你", leader: "负责人", error: "错误" };
+const STATUS = { pending: "等待中", running: "进行中", done: "已完成", failed: "失败", cancelled: "已取消" };
 
 function addMessage(message) {
   if (state.seen.has(message.id)) return;
@@ -131,8 +312,6 @@ function addMessage(message) {
   box.append(node);
   box.scrollTop = box.scrollHeight;
 }
-
-const STATUS = { pending: "等待中", running: "进行中", done: "已完成", failed: "失败", cancelled: "已取消" };
 
 function renderTasks() {
   const box = $("tasks");
@@ -156,28 +335,11 @@ function addActivity(text) {
   box.scrollTop = box.scrollHeight;
 }
 
-const HANDLERS = {
+const EVENTS = {
   message: (event) => addMessage(event.message),
   task: (event) => { state.tasks.set(event.task.id, event.task); renderTasks(); },
   activity: (event) => addActivity(event.text),
 };
-
-async function loadNodes() {
-  const nodes = await api("/api/nodes");
-  const box = $("nodes");
-  box.replaceChildren();
-  if (!nodes.length) { box.append(element("div", "empty", "没有配置节点")); return; }
-  for (const node of nodes) {
-    const row = element("div", node.online ? "node online" : "node");
-    const name = element("span");
-    name.append(element("span", "dot"), node.name);
-    const meta = node.online
-      ? `${node.active.length}/${node.max_runs} 运行中 · ${node.claude || ""}`
-      : "离线";
-    row.append(name, element("span", "meta", meta));
-    box.append(row);
-  }
-}
 
 async function loadConversations() {
   const list = await api("/api/conversations");
@@ -189,7 +351,7 @@ async function loadConversations() {
     node.onclick = () => openConversation(conversation);
     box.append(node);
   }
-  return list;
+  if (list.length && !state.current) openConversation(list[0]);
 }
 
 async function openConversation(conversation) {
@@ -203,12 +365,12 @@ async function openConversation(conversation) {
   $("input").disabled = $("send").disabled = false;
   const base = `/api/conversations/${conversation.id}`;
   state.source = new EventSource(`${base}/events`);
-  state.source.onmessage = (raw) => { const event = JSON.parse(raw.data); HANDLERS[event.type]?.(event); };
+  state.source.onmessage = (raw) => { const event = JSON.parse(raw.data); EVENTS[event.type]?.(event); };
   const [messages, tasks] = await Promise.all([api(`${base}/messages`), api(`${base}/tasks`)]);
   messages.forEach(addMessage);
   tasks.forEach((task) => state.tasks.set(task.id, task));
   renderTasks();
-  loadConversations();
+  for (const node of document.querySelectorAll(".conv")) node.classList.remove("active");
   $("input").focus();
 }
 
@@ -216,42 +378,175 @@ async function send() {
   const content = $("input").value.trim();
   if (!content || !state.current) return;
   $("input").value = "";
-  const title = $("title").textContent;
-  addMessage(await api(`/api/conversations/${state.current}/messages`, {
-    method: "POST", body: JSON.stringify({ content }),
-  }));
-  if (title === state.current) loadConversations();
+  try {
+    addMessage(await api(`/api/conversations/${state.current}/messages`, { method: "POST", json: { content } }));
+  } catch (error) {
+    addMessage({ id: `local-${Date.now()}`, role: "error", content: error.message });
+  }
 }
 
 $("composer").onsubmit = (event) => { event.preventDefault(); send(); };
 $("input").onkeydown = (event) => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); send(); }
 };
-$("new").onclick = async () => {
+$("new-conversation").onclick = async () => {
   const title = prompt("对话标题（可留空）", "") ?? "";
-  openConversation(await api("/api/conversations", { method: "POST", body: JSON.stringify({ title }) }));
-};
-$("logout").onclick = async () => { await fetch("/session", { method: "DELETE" }); location.reload(); };
-$("login-form").onsubmit = async (event) => {
-  event.preventDefault();
-  const response = await fetch("/session", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token: $("token").value.trim() }),
-  });
-  if (!response.ok) { $("token").value = ""; $("token").placeholder = "令牌不对，请重试"; return; }
-  $("login").style.display = "none";
-  start();
+  const conversation = await api("/api/conversations", { method: "POST", json: { title } });
+  await openConversation(conversation);
+  loadConversations();
 };
 
-async function start() {
-  loadNodes();
-  setInterval(() => loadNodes().catch(() => {}), 10000);
-  const list = await loadConversations();
-  if (list.length && !state.current) openConversation(list[0]);
+/* ---------- nodes ---------- */
+
+async function loadNodes() {
+  state.nodes = await api("/api/nodes");
+  const rows = $("node-rows");
+  rows.replaceChildren();
+  $("nodes-empty").classList.toggle("hidden", state.nodes.length > 0);
+  for (const node of state.nodes) rows.append(nodeRow(node));
 }
 
-start().catch(() => {});  // shows the login form on 401
+function nodeRow(node) {
+  const row = element("tr");
+  const status = element("td");
+  status.append(element("span", node.online ? "dot on" : "dot"), node.online ? "在线" : "离线");
+  const running = node.online ? `${node.active.length}/${node.max_runs}` : "";
+  const actions = element("td");
+  actions.append(
+    button("换令牌", "ghost", () => rotateToken(node)),
+    button("删除", "danger", () => deleteNode(node)),
+  );
+  row.append(element("td", "", node.name), status, element("td", "muted", node.host || ""),
+             element("td", "muted", node.claude || ""), element("td", "muted", running), actions);
+  return row;
+}
+
+function showEnrollment(title, enrollment) {
+  $("enrollment").classList.remove("hidden");
+  $("enrollment-title").textContent = title;
+  $("enrollment-command").textContent = enrollment.install;
+}
+
+$("node-form").onsubmit = async (event) => {
+  event.preventDefault();
+  $("node-error").textContent = "";
+  try {
+    const added = await api("/api/nodes", { method: "POST", json: { name: $("node-name").value } });
+    showEnrollment(`已添加节点 ${added.node.name}。`, added);
+    $("node-name").value = "";
+    loadNodes();
+  } catch (error) {
+    $("node-error").textContent = error.message;
+  }
+};
+
+$("copy-command").onclick = () => navigator.clipboard?.writeText($("enrollment-command").textContent);
+
+async function rotateToken(node) {
+  if (!confirm(`给 ${node.name} 换新令牌？旧令牌立刻失效，需要在节点上重新运行安装命令。`)) return;
+  showEnrollment(`${node.name} 的新令牌。`, await api(`/api/nodes/${node.id}/token`, { method: "POST" }));
+  loadNodes();
+}
+
+async function deleteNode(node) {
+  if (!confirm(`删除节点 ${node.name}？它会立刻断开。`)) return;
+  await api(`/api/nodes/${node.id}`, { method: "DELETE" });
+  loadNodes();
+}
+
+/* ---------- team ---------- */
+
+async function loadTeam() {
+  const [team, nodes] = await Promise.all([api("/api/team"), api("/api/nodes")]);
+  $("team-config").value = team.config;
+  $("team-nodes").textContent = nodes.length ? nodes.map((n) => n.name).join("、") : "（还没有，先去添加）";
+  setTeamStatus(team.error, team.saved ? "已保存" : "");
+}
+
+function setTeamStatus(error, ok) {
+  $("team-status").className = error ? "error-text" : "ok-text";
+  $("team-status").textContent = error || ok;
+}
+
+$("save-team").onclick = async () => {
+  try {
+    await api("/api/team", { method: "PUT", json: { config: $("team-config").value } });
+    setTeamStatus("", "已保存，新的对话会使用这个团队");
+  } catch (error) {
+    setTeamStatus(error.message, "");
+  }
+};
+
+/* ---------- admin ---------- */
+
+async function loadAdmin() {
+  const [settings, users] = await Promise.all([api("/api/admin/settings"), api("/api/admin/users")]);
+  $("registration-open").checked = settings.registration_open;
+  $("default-max-nodes").value = settings.default_max_nodes;
+  const rows = $("user-rows");
+  rows.replaceChildren();
+  for (const user of users) rows.append(userRow(user));
+}
+
+function userRow(user) {
+  const row = element("tr");
+  const self = user.id === state.me.id;
+  const role = element("select");
+  for (const [value, label] of [["user", "用户"], ["admin", "管理员"]]) {
+    const option = element("option", "", label);
+    option.value = value;
+    option.selected = user.role === value;
+    role.append(option);
+  }
+  role.disabled = self;
+  role.onchange = () => updateUser(user, { role: role.value });
+  const active = button(user.active ? "停用" : "启用", "ghost", () => updateUser(user, { active: !user.active }));
+  active.disabled = self;
+  const limit = element("input");
+  limit.type = "number";
+  limit.min = "0";
+  limit.placeholder = "默认";
+  limit.style.width = "80px";
+  limit.value = user.max_nodes ?? "";
+  limit.onchange = () => updateUser(user, limit.value === "" ? { clear_max_nodes: true } : { max_nodes: Number(limit.value) });
+  const remove = button("删除", "danger", () => deleteUser(user));
+  remove.disabled = self;
+  const cells = [element("td", "", user.email), element("td"), element("td", user.active ? "ok-text" : "error-text", user.active ? "正常" : "已停用"),
+                 element("td", "muted", String(user.nodes)), element("td"), element("td")];
+  cells[1].append(role);
+  cells[4].append(limit);
+  cells[5].append(active, remove);
+  row.append(...cells);
+  return row;
+}
+
+async function updateUser(user, changes) {
+  try {
+    await api(`/api/admin/users/${user.id}`, { method: "PATCH", json: changes });
+  } catch (error) {
+    alert(error.message);
+  }
+  loadAdmin();
+}
+
+async function deleteUser(user) {
+  if (!confirm(`删除用户 ${user.email}？他的对话、节点和团队都会被删除。`)) return;
+  await api(`/api/admin/users/${user.id}`, { method: "DELETE" });
+  loadAdmin();
+}
+
+$("settings-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const json = { registration_open: $("registration-open").checked, default_max_nodes: Number($("default-max-nodes").value) };
+  await api("/api/admin/settings", { method: "PUT", json });
+  $("settings-status").textContent = "已保存";
+  $("settings-status").className = "ok-text";
+};
+
+/* ---------- start ---------- */
+
+api("/api/me").then((me) => { state.me = me; enterApp(); }).catch(() => showAuth());
+setInterval(() => { if (state.view === "nodes" && state.me) loadNodes().catch(() => {}); }, 10000);
 </script>
 </body>
 </html>
