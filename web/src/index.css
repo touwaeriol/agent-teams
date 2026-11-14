@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Palette from the design prototype: dark office, warm orange accent. */
+@layer base {
+  :root {
+    --background: 230 23% 9%;      /* #11131b */
+    --foreground: 43 19% 90%;      /* #ebe8e1 */
+    --panel: 228 22% 13%;          /* #191c27 */
+    --card: 228 22% 13%;
+    --card-foreground: 43 19% 90%;
+    --raised: 228 22% 17%;         /* #222636 */
+    --well: 228 24% 7%;            /* #0d0f15 */
+    --popover: 228 22% 15%;
+    --popover-foreground: 43 19% 90%;
+    --primary: 27 85% 62%;         /* #f0954a */
+    --primary-foreground: 27 66% 7%;
+    --secondary: 228 22% 17%;
+    --secondary-foreground: 43 19% 90%;
+    --muted: 228 22% 17%;
+    --muted-foreground: 232 12% 68%; /* #a2a5b8 */
+    --accent: 37 27% 13%;          /* #2a2418 */
+    --accent-foreground: 29 100% 78%; /* #ffc58f */
+    --destructive: 0 100% 80%;     /* #ff9a9a */
+    --destructive-foreground: 0 40% 10%;
+    --border: 228 20% 23%;         /* #2f3447 */
+    --input: 228 20% 29%;          /* #3b4258 */
+    --ring: 27 85% 62%;
+    --ok: 142 54% 60%;             /* #5fd08a */
+    --info: 219 100% 74%;          /* #7aa8ff */
+    --warn: 43 86% 63%;            /* #f2c14e */
+    --bad: 0 100% 80%;
+    --radius: 0.75rem;
+  }
+  * { @apply border-border; }
+  html, body, #root { height: 100%; }
+  body { @apply bg-background text-foreground font-sans antialiased text-sm; }
+  ::selection { background: hsl(var(--primary) / 0.35); }
+}
+
+@layer components {
+  .scroll-thin { scrollbar-width: thin; scrollbar-color: hsl(var(--input)) transparent; }
+}

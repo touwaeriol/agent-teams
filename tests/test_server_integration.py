@@ -119,3 +119,45 @@ async def test_postgres_accounts_round_trip() -> None:
         assert await accounts.user(user.id) is None
     finally:
         await store.close()
+
+
+@pytest.mark.skipif(not DATABASE_URL, reason="TEST_DATABASE_URL not set")
+async def test_postgres_projects_round_trip() -> None:
+    store, accounts, projects = await connect_postgres(DATABASE_URL)
+    tag = uuid.uuid4().hex[:8]
+    try:
+        user = await accounts.create_user(f"{tag}@example.com", "hash", "user")
+        connection = await projects.create_connection(user.id, "gh", "octocat", "sealed")
+        assert await projects.connection_secret(user.id, connection.id) == "sealed"
+        assert await projects.connection_secret("someone-else", connection.id) is None
+        project = await projects.create_project(
+            user.id,
+            {
+                "name": "app",
+                "repo": "octo/app",
+                "branch": "main",
+                "git_connection_id": connection.id,
+            },
+        )
+        with pytest.raises(Conflict):
+            await projects.create_project(user.id, {"name": "app"})
+        updated = await projects.update_project(user.id, project.id, {"context": "用 pnpm"})
+        assert updated is not None
+        assert (updated.context, updated.repo) == ("用 pnpm", "octo/app")
+
+        conversation_id = uuid.uuid4().hex[:12]
+        await store.create_conversation(conversation_id, "t", user.id, project.id)
+        await store.create_conversation(uuid.uuid4().hex[:12], "loose", user.id)
+        scoped = await store.conversations(user.id, project.id)
+        assert [c.id for c in scoped] == [conversation_id]
+        assert await store.project_of(conversation_id) == project.id
+
+        assert await projects.delete_connection(user.id, connection.id)
+        detached = await projects.project(user.id, project.id)
+        assert detached is not None
+        assert detached.git_connection_id is None
+        assert await projects.delete_project(user.id, project.id)
+        assert await store.owner(conversation_id) is None  # cascades
+    finally:
+        await accounts.delete_user(user.id)
+        await store.close()

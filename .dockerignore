@@ -8,3 +8,5 @@
 .env
 tests
 deploy
+web/node_modules
+src/agent_teams/server/static/app

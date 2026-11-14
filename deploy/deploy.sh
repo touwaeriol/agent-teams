@@ -31,19 +31,19 @@ set_env() {
 [ -f .env ] || { cp deploy/env.example .env; chmod 600 .env; }
 
 [ -n "$(env_value PORT)" ] || set_env PORT "$(first_free_port)"
+for secret in POSTGRES_PASSWORD VALKEY_PASSWORD AGENT_TEAMS_SECRET_KEY; do
+  [ -n "$(env_value "$secret")" ] || set_env "$secret" "$(openssl rand -hex 24)"
+done
 if [ -n "$domain" ]; then
   # Behind Caddy: only listen locally, and tell nodes and leaders the HTTPS address.
-  set_env HOST 127.0.0.1
+  set_env BIND 127.0.0.1
   set_env AGENT_TEAMS_PUBLIC_URL "https://$domain"
+else
+  [ -n "$(env_value BIND)" ] || set_env BIND 0.0.0.0
 fi
 public_host="$(hostname -I 2>/dev/null | awk '{print $1}')"
 [ -n "$(env_value AGENT_TEAMS_PUBLIC_URL)" ] \
   || set_env AGENT_TEAMS_PUBLIC_URL "http://${public_host:-localhost}:$(env_value PORT)"
-
-if grep -q "USER:PASSWORD@" .env; then
-  echo "请先在 $(pwd)/.env 里填好 DATABASE_URL（本机 PostgreSQL），然后重新运行 deploy/deploy.sh" >&2
-  exit 1
-fi
 
 docker compose up -d --build
 

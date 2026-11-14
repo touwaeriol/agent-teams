@@ -37,7 +37,14 @@ home="${XDG_DATA_HOME:-$HOME/.local/share}/agent-teams"
 config="${XDG_CONFIG_HOME:-$HOME/.config}/agent-teams"
 venv="$home/venv"
 
-python3 -m venv "$venv"
+# Debian/Ubuntu without python3-venv have no ensurepip: fall back to get-pip.py.
+if [ ! -x "$venv/bin/pip" ]; then
+  if ! python3 -m venv "$venv" 2> /dev/null; then
+    rm -rf "$venv"
+    python3 -m venv --without-pip "$venv"
+    curl -fsSL https://bootstrap.pypa.io/get-pip.py | "$venv/bin/python3" - --quiet
+  fi
+fi
 "$venv/bin/pip" install --quiet --upgrade pip
 "$venv/bin/pip" install --quiet --upgrade "$source_spec"
 

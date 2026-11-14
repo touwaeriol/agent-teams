@@ -41,8 +41,9 @@
    ```
 
    保存时会校验：节点要存在，负责人必须是 `claude_code`（平台不提供 API key，所有模型调用都走你节点上自己登录的 Claude Code）。
-4. **对话**：新建对话，直接说需求。负责人通过 MCP 工具 `assign_task` 派任务，派完立刻回复你；员工在各自的目录（`<root>/<员工名>`）里干活，你可以继续聊。任务完成后报告自动送回负责人，他再向你汇报。右侧任务板实时显示每个任务的状态。
-5. **管理员**：在"管理"页管理用户（改角色、停用、删除、单独设置节点上限）和平台设置（开放注册、默认节点上限）。停用一个用户会让他立刻下线、断开他的节点并停止他的对话。
+4. **Git 连接和项目**：在"Git 连接"页粘贴一个 GitHub 访问令牌（加密保存在服务端）。新建项目时填项目上下文、选一个仓库：负责人和每个员工开工前都会读到项目上下文；每个员工在节点的 `~/.agents_team/projects/<项目>/<员工名>` 里有自己的仓库克隆（第一次运行前由守护进程克隆），git 和 gh 通过运行环境拿到令牌，不写进节点的文件。
+5. **对话**：在项目里新建对话，直接说需求。负责人通过 MCP 工具 `assign_task` 派任务，派完立刻回复你；员工在各自的目录（`<root>/<员工名>`）里干活，你可以继续聊。任务完成后报告自动送回负责人，他再向你汇报。右侧任务板实时显示每个任务的状态。
+6. **管理员**：在"管理"页管理用户（改角色、停用、删除、单独设置节点上限）和平台设置（开放注册、默认节点上限）。停用一个用户会让他立刻下线、断开他的节点并停止他的对话。
 
 **可靠性**
 - 节点断网、控制台重启或升级，员工都照常运行。守护进程会把输出写到本地日志，控制台恢复后续传或回放；"进行中"的任务会自动接回，不会重新执行。
@@ -53,18 +54,17 @@
 
 ## 部署
 
-需要 Docker，以及服务器本机已有的 PostgreSQL 和 Valkey（或 Redis）。
+只需要 Docker。PostgreSQL 和 Valkey 在同一个 compose 里一起启动，数据放在 `./data`。
 
 ```bash
 git clone <仓库地址> agent-teams && cd agent-teams
-createdb agent_teams            # 或者在 .env 里指向一个已有的库（表名都带 at_ 前缀）
-deploy/deploy.sh                # 第一次运行生成 .env，提示你填 DATABASE_URL
-deploy/deploy.sh                # 再运行一次：构建、启动，打印访问地址
+deploy/deploy.sh                # 生成 .env（数据库、Valkey 密码和加密密钥都随机生成），构建、启动，打印访问地址
 ```
 
 - `deploy.sh` 会自动选 3001–3009 中第一个空闲端口，并按本机 IP 生成 `AGENT_TEAMS_PUBLIC_URL`。节点安装命令和 leader 的 MCP 地址都用这个地址。
 - **用域名和 HTTPS**：先把域名解析到服务器，再运行 `deploy/deploy.sh --domain agent.example.com`。服务只监听 127.0.0.1，由本机的 Caddy 自动申请证书并转发（`deploy/caddy.sh` 会写入 `/etc/caddy/agent-teams.caddy`、在主 Caddyfile 里 import 它，然后重载 Caddy）。SSE 和 WebSocket 都会正常转发，登录 cookie 会带上 Secure 标记。
-- 容器使用 host 网络，所以通过 `127.0.0.1` 直接连本机的 PG 和 Valkey。
+- `.env` 里的 `AGENT_TEAMS_SECRET_KEY` 用来加密保存的 Git 访问令牌，生成后不要改。
+- 网页前端在 `web/`（React + Vite + shadcn/ui），镜像构建时自动打包进服务；本地开发：`cd web && npm ci && npm run dev`（代理到 127.0.0.1:3001）。
 - 查看日志：`docker compose logs -f agent-teams`；升级：`git pull && deploy/deploy.sh`。
 - 不用 `--domain` 时服务是明文 HTTP，只建议在内网或测试时这样用。
 

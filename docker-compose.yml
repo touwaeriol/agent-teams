@@ -1,22 +1,60 @@
-# The multi-user platform, next to the PostgreSQL and Valkey already on the host.
-# Host networking lets the container reach them on 127.0.0.1 without changing
-# their bind addresses; the service listens on $PORT directly.
+# The platform with its own PostgreSQL and Valkey. The service listens on
+# 127.0.0.1:$PORT; put Caddy (or another proxy) in front for HTTPS.
 #
-#   deploy/deploy.sh        # first run creates .env and picks a free 300x port
+#   deploy/deploy.sh [--domain agent.example.com]   # first run creates .env with random secrets
 services:
   agent-teams:
     build: .
     image: agent-teams:latest
     container_name: agent-teams
     restart: unless-stopped
-    network_mode: host
     env_file: .env
     environment:
-      HOST: ${HOST:-0.0.0.0}
+      HOST: 0.0.0.0
       PORT: ${PORT:?set PORT in .env, e.g. 3001}
+      DATABASE_URL: postgresql://agent_teams:${POSTGRES_PASSWORD}@postgres:5432/agent_teams
+      VALKEY_URL: valkey://:${VALKEY_PASSWORD}@valkey:6379/0
+    ports:
+      - "${BIND:-127.0.0.1}:${PORT}:${PORT}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ['PORT'] + '/healthz', timeout=3)"]
       interval: 30s
       timeout: 5s
       start_period: 10s
       retries: 3
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: agent-teams-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: agent_teams
+      POSTGRES_DB: agent_teams
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent_teams -d agent_teams"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  valkey:
+    image: valkey/valkey:9.1.2
+    container_name: agent-teams-valkey
+    restart: unless-stopped
+    command: ["sh", "-c", "exec valkey-server --requirepass \"$$VALKEY_PASSWORD\" --appendonly yes"]
+    environment:
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:?set VALKEY_PASSWORD in .env}
+    volumes:
+      - ./data/valkey:/data
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -a \"$$VALKEY_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
