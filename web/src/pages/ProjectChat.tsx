@@ -233,7 +233,7 @@ function LeaderStatus() {
   const lead = leaderOf(team.data?.team ?? null);
   if (!lead) {
     return (
-      <Link to="/team" className="px-1 text-xs text-muted-foreground hover:text-foreground">
+      <Link to="/settings/team" className="px-1 text-xs text-muted-foreground hover:text-foreground">
         还没配置团队 →
       </Link>
     );
@@ -397,7 +397,7 @@ function TeamSection() {
   const employees = team.data?.team?.employees ?? [];
   const leader = team.data?.team?.leader;
   return (
-    <Section title="团队" action={<Link to="/team" className="text-xs text-muted-foreground hover:text-foreground">编辑</Link>}>
+    <Section title="团队" action={<Link to="/settings/team" className="text-xs text-muted-foreground hover:text-foreground">编辑</Link>}>
       {team.data?.error && team.data.saved && (
         <p className="flex items-start gap-1.5 text-xs text-warn">
           <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />

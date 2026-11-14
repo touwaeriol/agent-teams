@@ -1,8 +1,8 @@
 import { ExternalLink, FolderGit2, GitBranch, MessageSquare, Plus, Settings } from "lucide-react";
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { EmptyState, errorText, Field, Loading, PageHeader, Panel, Spinner, SplitLayout, StatusBadge } from "@/components/common";
+import { EmptyState, errorText, Field, Loading, Page, Panel, Spinner, StatusBadge } from "@/components/common";
 import { draftPayload, emptyDraft, ProjectFields, type ProjectDraft } from "@/components/ProjectFields";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,26 +14,41 @@ import { timeAgo } from "@/lib/utils";
 
 export function ProjectsPage() {
   const projects = useProjects();
-  const [params] = useSearchParams();
   return (
-    <div className="mx-auto w-full max-w-6xl px-5 py-8 sm:px-8">
-      <SplitLayout
-        main={
-          <>
-            <PageHeader
-              title="项目"
-              description="一个项目 = 一个 GitHub 仓库 + 项目上下文 + 和负责人的对话。你只和负责人说话，它负责拆任务、派给员工，员工在节点上各自的仓库克隆里干活。"
-            />
-            {projects.isLoading && <Loading />}
-            {projects.data?.length === 0 && (
-              <EmptyState icon={<FolderGit2 />} title="还没有项目" description="在右边填好名称、上下文，选一个仓库，就能开始和负责人对话。" />
-            )}
-            {projects.data?.map((p) => <ProjectCard key={p.id} project={p} />)}
-          </>
-        }
-        side={<NewProject highlight={params.get("new") === "1"} />}
-      />
-    </div>
+    <Page
+      title="项目"
+      description="一个项目 = 一个 GitHub 仓库 + 项目上下文 + 和负责人的对话。你只和负责人说话，它负责拆任务、派给员工，员工在节点上各自的仓库克隆里干活。"
+      actions={
+        <Button asChild>
+          <Link to="/projects/new">
+            <Plus /> 新建项目
+          </Link>
+        </Button>
+      }
+    >
+      {projects.isLoading && <Loading />}
+      {projects.data?.length === 0 && (
+        <EmptyState
+          icon={<FolderGit2 />}
+          title="还没有项目"
+          description="填好名称和上下文，选一个仓库，就能开始和负责人对话。"
+          action={
+            <Button asChild>
+              <Link to="/projects/new">新建项目</Link>
+            </Button>
+          }
+        />
+      )}
+      <div className="grid gap-4 lg:grid-cols-2">{projects.data?.map((p) => <ProjectCard key={p.id} project={p} />)}</div>
+    </Page>
+  );
+}
+
+export function NewProjectPage() {
+  return (
+    <Page width="narrow" title="新建项目" description="项目上下文会交给负责人和每个员工；关联仓库后，每个员工在节点上有自己的克隆。">
+      <NewProject />
+    </Page>
   );
 }
 
@@ -88,7 +103,7 @@ function ProjectCard({ project }: { project: Project }) {
   );
 }
 
-function NewProject({ highlight }: { highlight: boolean }) {
+function NewProject() {
   const [draft, setDraft] = useState<ProjectDraft>(emptyDraft);
   const [firstMessage, setFirstMessage] = useState("");
   const navigate = useNavigate();
@@ -122,7 +137,7 @@ function NewProject({ highlight }: { highlight: boolean }) {
 
   return (
     <form onSubmit={submit}>
-      <Panel tone={highlight ? "highlight" : "default"} title={<span className="text-[17px]">新建项目</span>} icon={<Plus className="!text-brand" />}>
+      <Panel>
         <ProjectFields draft={draft} onChange={setDraft} />
         <Field label="要做什么（可选，会成为对话里的第一条消息）">
           <Textarea rows={4} placeholder="目标、范围、期限、验收方式" value={firstMessage} onChange={(e) => setFirstMessage(e.target.value)} />

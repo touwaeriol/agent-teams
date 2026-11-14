@@ -1,16 +1,19 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowLeft,
+  ChevronRight,
   FolderGit2,
   Github,
   LogOut,
   Menu,
   Moon,
+  Palette,
   PanelLeftClose,
+  Plus,
   Search,
   Server,
   Settings,
   Shield,
-  SquarePen,
   Sun,
   Users,
 } from "lucide-react";
@@ -23,28 +26,19 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { api, type Conversation, type User } from "@/lib/api";
+import { api, type Conversation, type Project, type User } from "@/lib/api";
 import { keys, useAllConversations, useNodes, useProjects } from "@/lib/queries";
 import { useTheme } from "@/lib/theme";
-import { cn, timeAgo } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
-const NAV = [
-  { to: "/projects", label: "项目", icon: FolderGit2 },
-  { to: "/team", label: "团队", icon: Users },
-  { to: "/nodes", label: "节点", icon: Server },
-  { to: "/settings/git", label: "Git 连接", icon: Github },
-];
-
-/** App shell: a narrow sidebar on the left, the page on the right. */
-export function Layout({ me }: { me: User }) {
+/** Sidebar + page; the sidebar collapses into a menu on small screens. */
+function Shell({ sidebar }: { sidebar: (close: () => void) => ReactNode }) {
   const [open, setOpen] = useState(false);
   const location = useLocation();
   useEffect(() => setOpen(false), [location.pathname]);
-
   return (
     <div className="flex h-full">
       <aside
@@ -53,7 +47,7 @@ export function Layout({ me }: { me: User }) {
           open ? "translate-x-0 shadow-xl" : "-translate-x-full",
         )}
       >
-        <Sidebar me={me} onClose={() => setOpen(false)} />
+        {sidebar(() => setOpen(false))}
       </aside>
       {open && <div className="fixed inset-0 z-30 bg-black/30 lg:hidden" onClick={() => setOpen(false)} aria-hidden />}
       <div className="flex min-w-0 flex-1 flex-col">
@@ -72,116 +66,177 @@ export function Layout({ me }: { me: User }) {
   );
 }
 
-function Sidebar({ me, onClose }: { me: User; onClose: () => void }) {
+function Brand({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="flex h-14 shrink-0 items-center justify-between px-4">
+      <Link to="/projects" className="flex items-center gap-2 font-semibold tracking-tight">
+        <Logo className="size-5" />
+        Agent Teams
+      </Link>
+      <button type="button" onClick={onClose} aria-label="收起侧栏" className="rounded-md p-1.5 text-muted-foreground hover:bg-raised lg:hidden">
+        <PanelLeftClose className="size-4" />
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- projects
+
+/** The project workspace: projects (and the current one's conversations) on the left. */
+export function ProjectLayout({ me }: { me: User }) {
+  return (
+    <Shell
+      sidebar={(close) => (
+        <>
+          <Brand onClose={close} />
+          <ProjectSidebar />
+          <AccountRow me={me} />
+        </>
+      )}
+    />
+  );
+}
+
+function ProjectSidebar() {
   const [query, setQuery] = useState("");
-  const items = me.role === "admin" ? [...NAV, { to: "/admin", label: "管理", icon: Shield }] : NAV;
+  const projects = useProjects();
+  const conversations = useAllConversations();
+  const match = useMatch("/projects/:projectId/*");
+  const currentProject = match?.params.projectId;
+  const chat = useMatch("/projects/:projectId/c/:conversationId");
+  const currentConversation = chat?.params.conversationId;
+  const byProject = useMemo(() => {
+    const map = new Map<string, Conversation[]>();
+    for (const c of conversations.data ?? []) {
+      if (!c.project_id) continue;
+      map.set(c.project_id, [...(map.get(c.project_id) ?? []), c]);
+    }
+    return map;
+  }, [conversations.data]);
+  const needle = query.trim().toLowerCase();
+  const list = (projects.data ?? []).filter(
+    (p) => !needle || p.name.toLowerCase().includes(needle) || (byProject.get(p.id) ?? []).some((c) => c.title.toLowerCase().includes(needle)),
+  );
+
   return (
     <>
-      <div className="flex h-14 items-center justify-between px-4">
-        <Link to="/projects" className="flex items-center gap-2 font-semibold tracking-tight">
-          <Logo className="size-5" />
-          Agent Teams
-        </Link>
-        <button type="button" onClick={onClose} aria-label="收起侧栏" className="rounded-md p-1.5 text-muted-foreground hover:bg-raised lg:hidden">
-          <PanelLeftClose className="size-4" />
-        </button>
-      </div>
       <div className="flex flex-col gap-1 px-3">
-        <NewConversationButton />
+        <Link to="/projects/new" className="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm font-medium hover:bg-raised">
+          <Plus className="size-4" /> 新建项目
+        </Link>
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索对话和项目"
-            aria-label="搜索对话和项目"
+            placeholder="搜索项目和对话"
+            aria-label="搜索项目和对话"
             className="h-9 w-full rounded-lg bg-transparent pl-8 pr-2 text-sm outline-none placeholder:text-muted-foreground hover:bg-raised focus:bg-panel focus:ring-1 focus:ring-input"
           />
         </div>
-        <nav aria-label="主导航" className="mt-1 flex flex-col gap-0.5">
-          {items.map((item) => (
-            <SideLink key={item.to} to={item.to} icon={<item.icon />}>
-              {item.label}
-            </SideLink>
-          ))}
-        </nav>
       </div>
-      <Recent query={query} />
-      <AccountRow me={me} />
+      <nav aria-label="项目" className="scroll-thin mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+        <div className="px-2.5 pb-1.5 text-xs font-medium text-muted-foreground">项目</div>
+        {projects.data?.length === 0 && <p className="px-2.5 text-xs text-muted-foreground">还没有项目</p>}
+        {needle && list.length === 0 && <p className="px-2.5 text-xs text-muted-foreground">没有匹配的项目或对话</p>}
+        {list.map((p) => (
+          <ProjectItem
+            key={p.id}
+            project={p}
+            conversations={byProject.get(p.id) ?? []}
+            open={p.id === currentProject || Boolean(needle)}
+            currentConversation={currentConversation}
+            needle={needle}
+          />
+        ))}
+      </nav>
     </>
   );
 }
 
-function SideLink({ to, icon, children }: { to: string; icon: ReactNode; children: ReactNode }) {
+function ProjectItem({
+  project,
+  conversations,
+  open,
+  currentConversation,
+  needle,
+}: {
+  project: Project;
+  conversations: Conversation[];
+  open: boolean;
+  currentConversation?: string;
+  needle: string;
+}) {
+  const [all, setAll] = useState(false);
+  const shown = conversations.filter((c) => !needle || c.title.toLowerCase().includes(needle) || project.name.toLowerCase().includes(needle));
+  const visible = all ? shown : shown.slice(0, 8);
   return (
-    <NavLink
-      to={to}
-      className={({ isActive }) =>
-        cn(
-          "flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm text-foreground/80 hover:bg-raised hover:text-foreground [&_svg]:size-4 [&_svg]:text-muted-foreground",
-          isActive && "bg-accent font-medium text-foreground",
-        )
-      }
-    >
-      {icon}
-      {children}
-    </NavLink>
+    <div className="mb-0.5">
+      <div className="group flex items-center">
+        <NavLink
+          to={`/projects/${project.id}`}
+          end
+          className={cn(
+            "flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-sm hover:bg-raised",
+            open && "font-medium",
+          )}
+        >
+          <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+          <FolderGit2 className="size-4 shrink-0 text-muted-foreground" />
+          <span className="truncate">{project.name}</span>
+        </NavLink>
+        <NewConversationButton projectId={project.id} />
+      </div>
+      {open && (
+        <div className="ml-[22px] flex flex-col border-l pl-2">
+          {visible.length === 0 && <span className="px-2.5 py-1.5 text-xs text-muted-foreground">还没有对话</span>}
+          {visible.map((c) => (
+            <Link
+              key={c.id}
+              to={`/projects/${project.id}/c/${c.id}`}
+              aria-current={c.id === currentConversation ? "page" : undefined}
+              className={cn(
+                "truncate rounded-md px-2.5 py-1.5 text-[13px] text-foreground/80 hover:bg-raised hover:text-foreground",
+                c.id === currentConversation && "bg-accent font-medium text-foreground",
+              )}
+            >
+              {c.title || "未命名对话"}
+            </Link>
+          ))}
+          {shown.length > 8 && (
+            <button type="button" onClick={() => setAll(!all)} className="px-2.5 py-1 text-left text-xs text-muted-foreground hover:text-foreground">
+              {all ? "收起" : `还有 ${shown.length - 8} 个对话`}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
-/** New conversation in the project being viewed; elsewhere, start a project. */
-function NewConversationButton() {
-  const match = useMatch("/projects/:projectId/*");
-  const projectId = match?.params.projectId;
+function NewConversationButton({ projectId }: { projectId: string }) {
   const navigate = useNavigate();
   const client = useQueryClient();
   const create = useMutation({
     mutationFn: () => api<Conversation>("/api/conversations", { method: "POST", json: { title: "新对话", project_id: projectId } }),
     onSuccess: (c) => {
       client.invalidateQueries({ queryKey: keys.allConversations });
-      client.invalidateQueries({ queryKey: keys.conversations(projectId!) });
+      client.invalidateQueries({ queryKey: keys.conversations(projectId) });
       navigate(`/projects/${projectId}/c/${c.id}`);
     },
     onError: (e) => toast.error(errorText(e)),
   });
-  const start = () => (projectId ? create.mutate() : navigate("/projects?new=1"));
   return (
-    <button type="button" onClick={start} disabled={create.isPending} className="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm font-medium hover:bg-raised">
-      <SquarePen className="size-4" />
-      {projectId ? "新建对话" : "新建项目"}
+    <button
+      type="button"
+      onClick={() => create.mutate()}
+      disabled={create.isPending}
+      aria-label="在这个项目里新建对话"
+      title="新建对话"
+      className="rounded-md p-1.5 text-muted-foreground opacity-0 hover:bg-raised hover:text-foreground focus:opacity-100 group-hover:opacity-100"
+    >
+      <Plus className="size-3.5" />
     </button>
-  );
-}
-
-function Recent({ query }: { query: string }) {
-  const conversations = useAllConversations();
-  const projects = useProjects();
-  const names = useMemo(() => new Map((projects.data ?? []).map((p) => [p.id, p.name])), [projects.data]);
-  const needle = query.trim().toLowerCase();
-  const list = (conversations.data ?? [])
-    .filter((c) => c.project_id && names.has(c.project_id))
-    .filter((c) => !needle || `${c.title} ${names.get(c.project_id!)}`.toLowerCase().includes(needle))
-    .slice(0, 40);
-  const match = useMatch("/projects/:projectId/c/:conversationId");
-  const current = match?.params.conversationId;
-  return (
-    <div className="scroll-thin mt-4 min-h-0 flex-1 overflow-y-auto px-3">
-      <div className="px-2.5 pb-1.5 text-xs font-medium text-muted-foreground">最近对话</div>
-      {list.length === 0 && <p className="px-2.5 text-xs text-muted-foreground">{needle ? "没有匹配的对话" : "还没有对话"}</p>}
-      {list.map((c) => (
-        <Link
-          key={c.id}
-          to={`/projects/${c.project_id}/c/${c.id}`}
-          aria-current={c.id === current ? "page" : undefined}
-          className={cn("flex flex-col rounded-lg px-2.5 py-1.5 hover:bg-raised", c.id === current && "bg-accent")}
-        >
-          <span className="truncate text-sm">{c.title || "未命名对话"}</span>
-          <span className="truncate text-[11px] text-muted-foreground">
-            {names.get(c.project_id!)} · {timeAgo(c.created_at)}
-          </span>
-        </Link>
-      ))}
-    </div>
   );
 }
 
@@ -190,15 +245,10 @@ function AccountRow({ me }: { me: User }) {
   const online = nodes.data?.filter((n) => n.online).length ?? 0;
   const total = nodes.data?.length ?? 0;
   const { theme, setTheme } = useTheme();
-  const client = useQueryClient();
-  const logout = async () => {
-    await api("/auth/logout", { method: "POST" }).catch(() => undefined);
-    client.clear();
-    window.location.href = "/login";
-  };
+  const navigate = useNavigate();
   return (
-    <div className="border-t p-3">
-      <Link to="/nodes" className="mb-2 flex items-center gap-2 rounded-lg px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground">
+    <div className="shrink-0 border-t p-3">
+      <Link to="/settings/nodes" className="mb-2 flex items-center gap-2 rounded-lg px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground">
         <Dot tone={online > 0 ? "ok" : total > 0 ? "bad" : "neutral"} />
         节点 {online}/{total} 在线
       </Link>
@@ -209,24 +259,76 @@ function AccountRow({ me }: { me: User }) {
           <span className="block text-[11px] text-muted-foreground">{me.role === "admin" ? "管理员" : "成员"}</span>
         </span>
         <DropdownMenu>
-          <DropdownMenuTrigger aria-label="设置" className="rounded-md p-1.5 text-muted-foreground hover:bg-raised hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <DropdownMenuTrigger aria-label="账户菜单" className="rounded-md p-1.5 text-muted-foreground hover:bg-raised hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <Settings className="size-4" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" side="top">
-            <DropdownMenuLabel>外观</DropdownMenuLabel>
-            <DropdownMenuItem onSelect={() => setTheme("light")}>
-              <Sun /> 亮色{theme === "light" && " ✓"}
+            <DropdownMenuItem onSelect={() => navigate("/settings")}>
+              <Settings /> 设置
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setTheme("dark")}>
-              <Moon /> 暗色{theme === "dark" && " ✓"}
+            <DropdownMenuItem onSelect={() => setTheme(theme === "dark" ? "light" : "dark")}>
+              {theme === "dark" ? <Sun /> : <Moon />} {theme === "dark" ? "切换到亮色" : "切换到暗色"}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={logout}>
+            <DropdownMenuItem onSelect={() => void logout()}>
               <LogOut /> 退出登录
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
     </div>
+  );
+}
+
+async function logout() {
+  await api("/auth/logout", { method: "POST" }).catch(() => undefined);
+  window.location.href = "/login";
+}
+
+// ---------------------------------------------------------------- settings
+
+const SETTINGS = [
+  { to: "/settings/team", label: "团队", icon: Users, hint: "负责人和员工" },
+  { to: "/settings/nodes", label: "节点", icon: Server, hint: "运行员工的机器" },
+  { to: "/settings/git", label: "Git 连接", icon: Github, hint: "授权 GitHub 仓库" },
+  { to: "/settings/appearance", label: "外观", icon: Palette, hint: "亮色 / 暗色" },
+];
+
+/** Settings: their own menu, and a way back to the projects. */
+export function SettingsLayout({ me }: { me: User }) {
+  const items = me.role === "admin" ? [...SETTINGS, { to: "/settings/admin", label: "管理", icon: Shield, hint: "用户和平台" }] : SETTINGS;
+  return (
+    <Shell
+      sidebar={(close) => (
+        <>
+          <Brand onClose={close} />
+          <div className="px-3">
+            <Link to="/projects" className="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm text-muted-foreground hover:bg-raised hover:text-foreground">
+              <ArrowLeft className="size-4" /> 返回项目
+            </Link>
+            <div className="px-2.5 pb-1.5 pt-4 text-xs font-medium text-muted-foreground">设置</div>
+            <nav aria-label="设置" className="flex flex-col gap-0.5">
+              {items.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) =>
+                    cn("flex items-center gap-2.5 rounded-lg px-2.5 py-2 hover:bg-raised", isActive && "bg-accent")
+                  }
+                >
+                  <item.icon className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="flex flex-col">
+                    <span className="text-sm">{item.label}</span>
+                    <span className="text-[11px] text-muted-foreground">{item.hint}</span>
+                  </span>
+                </NavLink>
+              ))}
+            </nav>
+          </div>
+          <div className="flex-1" />
+          <AccountRow me={me} />
+        </>
+      )}
+    />
   );
 }

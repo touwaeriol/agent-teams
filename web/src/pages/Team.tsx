@@ -110,7 +110,7 @@ export function TeamPage() {
       )}
       {nodeNames.length === 0 && (
         <Callout tone="warn">
-          还没有节点。<Link to="/nodes">先添加节点</Link>，员工才有地方运行。
+          还没有节点。<Link to="/settings/nodes">先添加节点</Link>，员工才有地方运行。
         </Callout>
       )}
       <Tabs value={tab} onValueChange={switchTab}>
