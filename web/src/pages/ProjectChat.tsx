@@ -14,12 +14,11 @@ import {
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
+import { Chip, EmptyState, errorText, Loading, nodeStatus, Panel, Spinner, StatusBadge, TASK_STATUS } from "@/components/common";
 import { Markdown } from "@/components/Markdown";
-import { EmptyState, errorText, Spinner } from "@/components/shared";
-import { Badge, Dot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { api, type Conversation, type Message, type NodeInfo, type Project, type Task, type TaskStatus, type TeamDefinition } from "@/lib/api";
+import { api, type Conversation, type Message, type NodeInfo, type Project, type Task, type TeamDefinition } from "@/lib/api";
 import { keys, useConversations, useNodes, useProject, useTeam } from "@/lib/queries";
 import { clock, cn, timeAgo } from "@/lib/utils";
 
@@ -40,7 +39,7 @@ export function ProjectChatPage() {
       </div>
     );
   }
-  if (!project.data) return <div className="p-10"><Spinner /></div>;
+  if (!project.data) return <Loading />;
 
   return (
     <div className="flex flex-wrap items-start gap-4 p-4">
@@ -50,13 +49,13 @@ export function ProjectChatPage() {
         current={current}
         onCreated={(c) => navigate(`/projects/${projectId}/c/${c.id}`)}
       />
-      <section className="flex min-h-[calc(100vh-7rem)] min-w-0 flex-[999_1_560px] flex-col rounded-xl border bg-panel">
+      <Panel padding="none" className="min-h-[calc(100vh-7rem)] min-w-0 flex-[999_1_560px]">
         {current ? (
           <ChatPanel key={current} project={project.data} conversationId={current} />
         ) : (
           <FirstConversation project={project.data} onCreated={(c) => navigate(`/projects/${projectId}/c/${c.id}`)} />
         )}
-      </section>
+      </Panel>
       <SidePanel project={project.data} conversationId={current} />
     </div>
   );
@@ -83,7 +82,7 @@ function ConversationList({
     onError: (e) => toast.error(errorText(e)),
   });
   return (
-    <nav aria-label="对话" className="flex w-full min-w-0 flex-[1_1_220px] flex-col gap-1 rounded-xl border bg-panel p-3 lg:sticky lg:top-24 lg:max-w-[260px]">
+    <Panel as="nav" label="对话" padding="none" className="w-full min-w-0 flex-[1_1_220px] gap-1 p-3 lg:sticky lg:top-24 lg:max-w-[260px]">
       <div className="flex items-center justify-between px-1 pb-2">
         <h2 className="text-[15px] font-semibold">对话</h2>
         <Button size="sm" variant="ghost" onClick={() => create.mutate()} disabled={create.isPending}>
@@ -105,7 +104,7 @@ function ConversationList({
           <span className="text-xs text-muted-foreground">{timeAgo(c.created_at)}</span>
         </Link>
       ))}
-    </nav>
+    </Panel>
   );
 }
 
@@ -132,7 +131,7 @@ function ChatHeader({ project }: { project: Project }) {
   const team = useTeam();
   const nodes = useNodes();
   const lead = leaderOf(team.data?.team ?? null);
-  const node = nodes.data?.find((n) => n.name === lead?.node);
+  const status = nodeStatus(nodes.data?.find((n) => n.name === lead?.node));
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3.5">
       <div className="flex min-w-0 flex-col gap-1">
@@ -141,7 +140,7 @@ function ChatHeader({ project }: { project: Project }) {
           {lead ? (
             <>
               你在和负责人 <span className="font-mono text-foreground">{lead.name}</span> 对话 · Claude Code · {lead.node ?? "?"} ·
-              <span className={node?.online ? "text-ok" : "text-bad"}>{node?.online ? "在线" : "离线"}</span>
+              <StatusBadge tone={status.tone} label={status.label} dot />
             </>
           ) : (
             <>
@@ -180,7 +179,7 @@ function ChatPanel({ project, conversationId }: { project: Project; conversation
     <>
       <ChatHeader project={project} />
       <div className="scroll-thin flex flex-1 flex-col gap-5 overflow-y-auto px-5 py-5">
-        {messages.isLoading && <Spinner />}
+        {messages.isLoading && <Loading />}
         {list.length === 0 && !messages.isLoading && (
           <p className="py-10 text-center text-[13px] text-muted-foreground">发一条消息开始。负责人收到后会回复你，派出去的任务会出现在右侧。</p>
         )}
@@ -330,24 +329,9 @@ function SidePanel({ project, conversationId }: { project: Project; conversation
   );
 }
 
-function SideCard({ title, icon, children, action }: { title: string; icon?: React.ReactNode; children: React.ReactNode; action?: React.ReactNode }) {
-  return (
-    <section className="flex flex-col gap-2.5 rounded-xl border bg-panel p-4">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 text-[15px] font-semibold [&_svg]:size-4 [&_svg]:text-muted-foreground">
-          {icon}
-          {title}
-        </h2>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
 function RepoCard({ project }: { project: Project }) {
   return (
-    <SideCard title="代码仓库" icon={<GitBranch />} action={<Link to={`/projects/${project.id}/settings`} className="text-[13px] text-primary hover:underline">管理</Link>}>
+    <Panel padding="sm" title="代码仓库" icon={<GitBranch />} action={<Link to={`/projects/${project.id}/settings`} className="text-[13px] text-primary hover:underline">管理</Link>}>
       {project.repo ? (
         <a
           href={`https://github.com/${project.repo}`}
@@ -369,37 +353,29 @@ function RepoCard({ project }: { project: Project }) {
           <Markdown className="text-[13px]">{project.context}</Markdown>
         </details>
       )}
-    </SideCard>
+    </Panel>
   );
 }
-
-const STATUS: Record<TaskStatus, { label: string; tone: "ok" | "info" | "warn" | "bad" | "neutral" }> = {
-  pending: { label: "排队", tone: "warn" },
-  running: { label: "进行中", tone: "info" },
-  done: { label: "完成", tone: "ok" },
-  failed: { label: "失败", tone: "bad" },
-  cancelled: { label: "已取消", tone: "neutral" },
-};
 
 function TasksCard({ conversationId }: { conversationId: string }) {
   const tasks = useQuery({ queryKey: tasksKey(conversationId), queryFn: () => api<Task[]>(`/api/conversations/${conversationId}/tasks`) });
   const list = tasks.data ?? [];
   const done = list.filter((t) => t.status === "done").length;
   return (
-    <SideCard title={list.length ? `任务 · ${done} / ${list.length}` : "任务"} icon={<Activity />}>
+    <Panel padding="sm" title={list.length ? `任务 · ${done} / ${list.length}` : "任务"} icon={<Activity />}>
       {list.length === 0 && <p className="text-[13px] text-muted-foreground">负责人派出的任务会显示在这里。</p>}
       <div className="flex flex-col gap-1.5">
         {list.map((t) => (
           <TaskRow key={t.id} task={t} />
         ))}
       </div>
-    </SideCard>
+    </Panel>
   );
 }
 
 function TaskRow({ task }: { task: Task }) {
   const [open, setOpen] = useState(false);
-  const status = STATUS[task.status];
+  const status = TASK_STATUS[task.status];
   return (
     <div className="rounded-lg bg-raised/60">
       <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-start gap-2 p-2 text-left" aria-expanded={open}>
@@ -410,10 +386,7 @@ function TaskRow({ task }: { task: Task }) {
           </span>
           <span className={cn("block text-[13px] leading-5", !open && "line-clamp-2")}>{task.instruction}</span>
         </span>
-        <Badge tone={status.tone} className="shrink-0">
-          {task.status === "running" && <Spinner className="size-2.5" />}
-          {status.label}
-        </Badge>
+        <StatusBadge tone={status.tone} label={status.label} spinning={task.status === "running"} className="shrink-0" />
       </button>
       {open && task.output && (
         <div className="scroll-thin mx-2 mb-2 max-h-72 overflow-y-auto rounded-md bg-well p-2.5">
@@ -431,28 +404,27 @@ function TeamCard() {
   const employees = team.data?.team?.employees ?? [];
   const leader = team.data?.team?.leader;
   return (
-    <SideCard title="团队" icon={<Users />} action={<Link to="/team" className="text-[13px] text-primary hover:underline">编辑</Link>}>
+    <Panel padding="sm" title="团队" icon={<Users />} action={<Link to="/team" className="text-[13px] text-primary hover:underline">编辑</Link>}>
       {team.data?.error && team.data.saved && (
         <p className="flex items-start gap-1.5 text-xs text-warn"><TriangleAlert className="mt-0.5 size-3.5 shrink-0" />{team.data.error}</p>
       )}
       <div className="flex flex-wrap gap-1.5">
         {employees.map((e) => (
-          <span key={e.name} className="flex h-8 items-center gap-1.5 rounded-md bg-raised px-2.5 font-mono text-xs" title={e.description}>
-            <Dot tone={online.get(e.node ?? "") ? "ok" : "bad"} />
+          <Chip key={e.name} tone={online.get(e.node ?? "") ? "ok" : "bad"} title={e.description}>
             {e.name}
             {e.name === leader && <span className="font-sans text-[11px] text-primary">负责人</span>}
             <span className="text-muted-foreground">@{e.node}</span>
-          </span>
+          </Chip>
         ))}
       </div>
-    </SideCard>
+    </Panel>
   );
 }
 
 function ActivityCard({ conversationId }: { conversationId: string }) {
   const lines = useActivity(conversationId);
   return (
-    <SideCard title="工作动态" icon={<Activity />}>
+    <Panel padding="sm" title="工作动态" icon={<Activity />}>
       {lines.length === 0 ? (
         <p className="text-[13px] text-muted-foreground">页面打开期间，员工的实时进展会滚动显示在这里。</p>
       ) : (
@@ -462,7 +434,7 @@ function ActivityCard({ conversationId }: { conversationId: string }) {
           ))}
         </div>
       )}
-    </SideCard>
+    </Panel>
   );
 }
 

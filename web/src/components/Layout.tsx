@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, FolderGit2, LogOut, Plus, Shield } from "lucide-react";
 import { Link, NavLink, Outlet, useMatch, useNavigate } from "react-router-dom";
-import { Logo } from "@/components/shared";
+import { Logo } from "@/components/common";
 import { Dot } from "@/components/ui/badge";
 import {
   DropdownMenu,

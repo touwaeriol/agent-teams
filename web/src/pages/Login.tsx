@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { errorText, Field, Logo } from "@/components/shared";
+import { Callout, errorText, Field, Logo, Panel } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -42,17 +42,18 @@ export function LoginPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Agent Teams</h1>
           <p className="text-[13px] text-muted-foreground">把需求交给负责人，看团队在你的机器上把活干完。</p>
         </div>
-        <form onSubmit={submit} className="flex flex-col gap-5 rounded-xl border bg-panel p-6">
+        <form onSubmit={submit}>
+          <Panel className="p-6">
           <Tabs value={mode} onValueChange={(v) => setMode(v as "login" | "register")}>
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="login">登录</TabsTrigger>
               <TabsTrigger value="register">注册</TabsTrigger>
             </TabsList>
           </Tabs>
-          <Field label="邮箱" htmlFor="email">
+          <Field label="邮箱">
             <Input id="email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
           </Field>
-          <Field label="密码" htmlFor="password" hint={mode === "register" ? "至少 8 位。第一个注册的账号自动成为管理员。" : undefined}>
+          <Field label="密码" hint={mode === "register" ? "至少 8 位。第一个注册的账号自动成为管理员。" : undefined}>
             <Input
               id="password"
               type="password"
@@ -62,10 +63,11 @@ export function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
             />
           </Field>
-          {error && <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-[13px] text-destructive">{error}</p>}
+          {error && <Callout tone="bad">{error}</Callout>}
           <Button type="submit" size="lg" disabled={busy}>
             {mode === "login" ? "登录" : "注册并登录"}
           </Button>
+          </Panel>
         </form>
       </div>
     </div>

@@ -1,8 +1,9 @@
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Layout } from "@/components/Layout";
-import { Spinner } from "@/components/shared";
+import { Loading } from "@/components/common";
 import { useMe } from "@/lib/queries";
 import { AdminPage } from "@/pages/Admin";
+import { ComponentsPage } from "@/pages/Components";
 import { GitConnectionsPage } from "@/pages/GitConnections";
 import { LoginPage } from "@/pages/Login";
 import { NodesPage } from "@/pages/Nodes";
@@ -16,11 +17,7 @@ export function App() {
   const location = useLocation();
 
   if (me.isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center text-muted-foreground">
-        <Spinner />
-      </div>
-    );
+    return <Loading className="h-full" />;
   }
   if (!me.data) {
     return (
@@ -42,6 +39,7 @@ export function App() {
         <Route path="/team" element={<TeamPage />} />
         <Route path="/nodes" element={<NodesPage />} />
         <Route path="/settings/git" element={<GitConnectionsPage />} />
+        <Route path="/ui" element={<ComponentsPage />} />
         {me.data.role === "admin" && <Route path="/admin" element={<AdminPage />} />}
         <Route path="*" element={<Navigate to="/projects" replace />} />
       </Route>

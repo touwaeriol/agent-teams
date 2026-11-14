@@ -25,8 +25,8 @@ function Badge({ className, tone, ...props }: BadgeProps) {
   return <span className={cn(badgeVariants({ tone }), className)} {...props} />;
 }
 
-function Dot({ tone = "neutral", className }: { tone?: "ok" | "info" | "warn" | "bad" | "neutral"; className?: string }) {
-  const color = { ok: "bg-ok", info: "bg-info", warn: "bg-warn", bad: "bg-bad", neutral: "bg-muted-foreground" }[tone];
+function Dot({ tone = "neutral", className }: { tone?: "ok" | "info" | "warn" | "bad" | "neutral" | "primary"; className?: string }) {
+  const color = { ok: "bg-ok", info: "bg-info", warn: "bg-warn", bad: "bg-bad", neutral: "bg-muted-foreground", primary: "bg-primary" }[tone];
   return <span aria-hidden className={cn("inline-block size-2 shrink-0 rounded-full", color, className)} />;
 }
 
