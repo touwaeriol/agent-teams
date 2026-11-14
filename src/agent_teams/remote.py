@@ -42,6 +42,7 @@ class LinkLost(Exception):  # noqa: N818 - internal control flow
 
 
 Hangup = Callable[[], Awaitable[None]]
+EnvSource = Callable[[], Awaitable[Mapping[str, str]]]
 
 
 class NodeLink:
@@ -163,6 +164,7 @@ class RemoteNode(Node):
     workdir: str = ""  # relative to the daemon's --root
     key: str = ""  # registry key (the node's ID); defaults to the name
     env: Mapping[str, str] = field(default_factory=dict)  # extra environment for every run
+    env_source: EnvSource | None = None  # more environment, fetched when each run starts
     repo: Mapping[str, str] | None = None  # {url, branch}: cloned into each employee's directory
     connect_timeout: float = 60.0
     reconnect_timeout: float = 3600.0
@@ -172,11 +174,12 @@ class RemoteNode(Node):
     def registry_key(self) -> str:
         return self.key or self.name
 
-    @property
-    def setup(self) -> dict[str, Any]:
+    async def setup(self) -> dict[str, Any]:
+        """What the daemon needs before starting a run: environment and repository."""
+        env = {**self.env, **(await self.env_source() if self.env_source else {})}
         setup: dict[str, Any] = {}
-        if self.env:
-            setup["env"] = dict(self.env)
+        if env:
+            setup["env"] = env
         if self.repo:
             setup["repo"] = dict(self.repo)
         return setup
@@ -194,9 +197,11 @@ class _RemoteRun:
     after: int = 0
     finished: bool = False
     link: NodeLink | None = None
+    setup: dict[str, Any] = field(default_factory=dict)
 
     async def lines(self) -> AsyncIterator[str]:
         timeout = self.node.connect_timeout
+        self.setup = await self.node.setup()
         try:
             while not self.finished:
                 self.link = await self.node.registry.link(self.node.registry_key, timeout)
@@ -209,7 +214,7 @@ class _RemoteRun:
 
     async def _attach(self, link: NodeLink) -> AsyncIterator[str]:
         """Follow the run on one connection; returns quietly if the link drops."""
-        messages = link.run(self.run_id, self.command, self.cwd, self.after, self.node.setup)
+        messages = link.run(self.run_id, self.command, self.cwd, self.after, self.setup)
         try:
             async for message in messages:
                 line = self._handle(message)

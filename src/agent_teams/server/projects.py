@@ -7,6 +7,7 @@ and ``MemoryProjects`` serves tests. Git tokens are stored encrypted (see
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Protocol
@@ -40,6 +41,8 @@ CREATE TABLE IF NOT EXISTS at_projects (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (user_id, name)
 );
+ALTER TABLE at_git_connections ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'token';
+ALTER TABLE at_git_connections ADD COLUMN IF NOT EXISTS installation_id BIGINT;
 ALTER TABLE at_conversations
     ADD COLUMN IF NOT EXISTS project_id TEXT REFERENCES at_projects(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS at_conversations_project ON at_conversations (project_id, created_at);
@@ -48,15 +51,23 @@ CREATE INDEX IF NOT EXISTS at_conversations_project ON at_conversations (project
 _PROJECT_COLUMNS = (
     "id, name, description, context, repo, branch, git_connection_id, created_at, updated_at"
 )
-_CONNECTION_COLUMNS = "id, name, provider, login, created_at"
+_CONNECTION_COLUMNS = "id, name, provider, login, created_at, kind, installation_id"
 _PROJECT_FIELDS = ("name", "description", "context", "repo", "branch", "git_connection_id")
 
 
 class ProjectStore(Protocol):
     async def create_connection(
-        self, user_id: str, name: str, login: str, token_secret: str
+        self,
+        user_id: str,
+        name: str,
+        login: str,
+        token_secret: str,
+        installation_id: int | None = None,
     ) -> GitConnectionView: ...
     async def connections(self, user_id: str) -> list[GitConnectionView]: ...
+    async def connection(self, user_id: str, connection_id: str) -> GitConnectionView | None: ...
+    async def setting(self, key: str) -> dict[str, Any] | None: ...
+    async def save_setting(self, key: str, value: dict[str, Any] | None) -> None: ...
     async def connection_secret(self, user_id: str, connection_id: str) -> str | None: ...
     async def delete_connection(self, user_id: str, connection_id: str) -> bool: ...
     async def create_project(self, user_id: str, fields: dict[str, Any]) -> ProjectView: ...
@@ -82,20 +93,45 @@ class MemoryProjects:
             str, tuple[GitConnectionView, str, str]
         ] = {}  # (view, user, secret)
         self._projects: dict[str, tuple[ProjectView, str]] = {}
+        self._settings: dict[str, dict[str, Any]] = {}
 
     async def create_connection(
-        self, user_id: str, name: str, login: str, token_secret: str
+        self,
+        user_id: str,
+        name: str,
+        login: str,
+        token_secret: str,
+        installation_id: int | None = None,
     ) -> GitConnectionView:
         if any(c.name == name and u == user_id for c, u, _ in self._connections.values()):
             raise Conflict(name)
         view = GitConnectionView(
-            id=_new_id(), name=name, provider="github", login=login, created_at=_now()
+            id=_new_id(),
+            name=name,
+            provider="github",
+            login=login,
+            created_at=_now(),
+            kind="app" if installation_id is not None else "token",
+            installation_id=installation_id,
         )
         self._connections[view.id] = (view, user_id, token_secret)
         return view
 
     async def connections(self, user_id: str) -> list[GitConnectionView]:
         return [c for c, u, _ in self._connections.values() if u == user_id]
+
+    async def connection(self, user_id: str, connection_id: str) -> GitConnectionView | None:
+        entry = self._connections.get(connection_id)
+        return entry[0] if entry and entry[1] == user_id else None
+
+    async def setting(self, key: str) -> dict[str, Any] | None:
+        return self._settings.get(key)
+
+    async def save_setting(self, key: str, value: dict[str, Any] | None) -> None:
+        if value is None:
+            self._settings.pop(key, None)
+        else:
+            self._settings[key] = value
 
     async def connection_secret(self, user_id: str, connection_id: str) -> str | None:
         entry = self._connections.get(connection_id)
@@ -168,17 +204,25 @@ class PostgresProjects:
         self._pool = pool
 
     async def create_connection(
-        self, user_id: str, name: str, login: str, token_secret: str
+        self,
+        user_id: str,
+        name: str,
+        login: str,
+        token_secret: str,
+        installation_id: int | None = None,
     ) -> GitConnectionView:
         try:
             row = await self._pool.fetchrow(
-                "INSERT INTO at_git_connections (id, user_id, name, login, token_secret) "
-                f"VALUES ($1, $2, $3, $4, $5) RETURNING {_CONNECTION_COLUMNS}",
+                "INSERT INTO at_git_connections "
+                "(id, user_id, name, login, token_secret, kind, installation_id) "
+                f"VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING {_CONNECTION_COLUMNS}",
                 _new_id(),
                 user_id,
                 name,
                 login,
                 token_secret,
+                "app" if installation_id is not None else "token",
+                installation_id,
             )
         except asyncpg.UniqueViolationError as exc:
             raise Conflict(name) from exc
@@ -191,6 +235,30 @@ class PostgresProjects:
             user_id,
         )
         return [GitConnectionView(**dict(r)) for r in rows]
+
+    async def connection(self, user_id: str, connection_id: str) -> GitConnectionView | None:
+        row = await self._pool.fetchrow(
+            f"SELECT {_CONNECTION_COLUMNS} FROM at_git_connections WHERE id = $1 AND user_id = $2",
+            connection_id,
+            user_id,
+        )
+        return GitConnectionView(**dict(row)) if row else None
+
+    async def setting(self, key: str) -> dict[str, Any] | None:
+        raw = await self._pool.fetchval("SELECT value FROM at_settings WHERE key = $1", key)
+        value = json.loads(raw) if raw else None
+        return value if isinstance(value, dict) else None
+
+    async def save_setting(self, key: str, value: dict[str, Any] | None) -> None:
+        if value is None:
+            await self._pool.execute("DELETE FROM at_settings WHERE key = $1", key)
+            return
+        await self._pool.execute(
+            "INSERT INTO at_settings (key, value) VALUES ($1, $2::jsonb) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+            key,
+            json.dumps(value),
+        )
 
     async def connection_secret(self, user_id: str, connection_id: str) -> str | None:
         value = await self._pool.fetchval(

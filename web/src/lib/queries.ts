@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, type Conversation, type GitConnection, type NodeInfo, type Project, type TeamState, type User } from "./api";
+import { api, type Conversation, type GitConnection, type GitHubAppStatus, type NodeInfo, type Project, type TeamState, type User } from "./api";
 
 export const keys = {
   me: ["me"] as const,
@@ -10,6 +10,7 @@ export const keys = {
   team: ["team"] as const,
   connections: ["git-connections"] as const,
   repos: (id: string) => ["git-connections", id, "repos"] as const,
+  githubApp: ["github-app"] as const,
 };
 
 export const useMe = () => useQuery({ queryKey: keys.me, queryFn: () => api<User>("/api/me"), retry: false });
@@ -26,3 +27,5 @@ export const useNodes = (refetchInterval = 10_000) =>
 export const useTeam = () => useQuery({ queryKey: keys.team, queryFn: () => api<TeamState>("/api/team") });
 export const useConnections = () =>
   useQuery({ queryKey: keys.connections, queryFn: () => api<GitConnection[]>("/api/git/connections") });
+export const useGitHubApp = () =>
+  useQuery({ queryKey: keys.githubApp, queryFn: () => api<GitHubAppStatus>("/api/git/github-app") });

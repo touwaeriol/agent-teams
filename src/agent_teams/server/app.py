@@ -33,7 +33,7 @@ from starlette.types import Receive, Scope, Send
 
 from ..errors import ConfigError
 from ..remote import NodeLink
-from . import admin, auth, project_routes, routes
+from . import admin, auth, github_app_routes, project_routes, routes
 from .accounts import AccountStore, MemoryAccounts
 from .broker import Broker, MemoryBroker, ValkeyBroker
 from .hub import UnknownConversation
@@ -117,7 +117,7 @@ def create_app(services: ServicesFactory) -> FastAPI:
 
     app = FastAPI(title="agent-teams", lifespan=lifespan)
     app.add_exception_handler(UnknownConversation, _not_found)
-    for module in (auth, routes, project_routes, admin):
+    for module in (auth, routes, project_routes, github_app_routes, admin):
         app.include_router(module.router())
     app.add_api_websocket_route("/nodes/connect", node_socket)
     app.add_api_route("/", index, methods=["GET"], include_in_schema=False)

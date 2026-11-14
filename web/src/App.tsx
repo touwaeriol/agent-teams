@@ -1,9 +1,9 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Layout } from "@/components/Layout";
 import { Loading } from "@/components/common";
 import { useMe } from "@/lib/queries";
 import { AdminPage } from "@/pages/Admin";
-import { ComponentsPage } from "@/pages/Components";
 import { GitConnectionsPage } from "@/pages/GitConnections";
 import { LoginPage } from "@/pages/Login";
 import { NodesPage } from "@/pages/Nodes";
@@ -11,6 +11,9 @@ import { ProjectChatPage } from "@/pages/ProjectChat";
 import { ProjectSettingsPage } from "@/pages/ProjectSettings";
 import { ProjectsPage } from "@/pages/Projects";
 import { TeamPage } from "@/pages/Team";
+
+// The component catalogue is a development aid: only `npm run dev` serves it.
+const ComponentsPage = import.meta.env.DEV ? lazy(() => import("@/pages/Components").then((m) => ({ default: m.ComponentsPage }))) : null;
 
 export function App() {
   const me = useMe();
@@ -39,7 +42,7 @@ export function App() {
         <Route path="/team" element={<TeamPage />} />
         <Route path="/nodes" element={<NodesPage />} />
         <Route path="/settings/git" element={<GitConnectionsPage />} />
-        <Route path="/ui" element={<ComponentsPage />} />
+        {ComponentsPage && <Route path="/ui" element={<Suspense fallback={<Loading />}><ComponentsPage /></Suspense>} />}
         {me.data.role === "admin" && <Route path="/admin" element={<AdminPage />} />}
         <Route path="*" element={<Navigate to="/projects" replace />} />
       </Route>

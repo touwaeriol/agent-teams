@@ -9,6 +9,7 @@ from fastapi import Request, WebSocket
 from ..remote import NodeRegistry
 from .accounts import AccountStore
 from .broker import Broker
+from .credentials import GitCredentials, StateSigner
 from .github import GitHub, GitHubAPI
 from .hub import Hub
 from .mcp_bridge import ToolBridge
@@ -39,14 +40,18 @@ class Platform:
     bridge: ToolBridge
     workspaces: Workspaces
     hub: Hub
+    credentials: GitCredentials
+    states: StateSigner
 
     @classmethod
     def assemble(cls, services: Services) -> Platform:
         registry = NodeRegistry()
         bridge = ToolBridge(services.public_url)
-        workspaces = Workspaces(services.accounts, registry, services.projects, services.secrets)
+        credentials = GitCredentials(services.projects, services.secrets, services.github)
+        workspaces = Workspaces(services.accounts, registry, services.projects, credentials)
         hub = Hub(workspaces.lead, services.store, services.broker, registry, bridge)
-        return cls(services, registry, bridge, workspaces, hub)
+        states = StateSigner(services.secrets)
+        return cls(services, registry, bridge, workspaces, hub, credentials, states)
 
     @property
     def accounts(self) -> AccountStore:

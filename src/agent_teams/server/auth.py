@@ -87,7 +87,7 @@ async def _start_session(request: Request, user: UserView, response: Response) -
         token,
         max_age=SESSION_SECONDS,
         httponly=True,
-        samesite="strict",
+        samesite="lax",  # sent on the redirect back from GitHub (OAuth / App install)
         secure=secure,
     )
 

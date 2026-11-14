@@ -120,14 +120,23 @@ class UserUpdate(BaseModel):
 GitProvider = Literal["github"]
 
 
+GitConnectionKind = Literal["token", "app"]
+
+
 class GitConnectionView(BaseModel):
-    """A saved Git credential; the token itself never leaves the server."""
+    """A saved Git credential; the token itself never leaves the server.
+
+    ``token``: an access token the user pasted. ``app``: an installation of
+    the platform's GitHub App; short-lived tokens are minted per run.
+    """
 
     id: str
     name: str
     provider: GitProvider
     login: str
     created_at: datetime
+    kind: GitConnectionKind = "token"
+    installation_id: int | None = None
 
 
 class NewGitConnection(BaseModel):

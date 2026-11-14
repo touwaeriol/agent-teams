@@ -7,7 +7,7 @@ on the user's own nodes; no platform API key is involved.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from ..claude_code import ClaudeCodeWorker
@@ -15,11 +15,11 @@ from ..config import build_team, parse_yaml
 from ..errors import ConfigError
 from ..leader import Leader
 from ..llm.base import LLM
-from ..remote import NodeRegistry, RemoteNode
+from ..remote import EnvSource, NodeRegistry, RemoteNode
 from .accounts import AccountStore
+from .credentials import GitCredentials
 from .models import NodeView, ProjectView
 from .projects import ProjectStore
-from .secrets import SecretBox
 
 DEFAULT_TEAM = """\
 # 你的团队：leader 和员工都是你节点上的 Claude Code。
@@ -52,12 +52,12 @@ class Workspaces:
         accounts: AccountStore,
         registry: NodeRegistry,
         projects: ProjectStore | None = None,
-        secrets: SecretBox | None = None,
+        credentials: GitCredentials | None = None,
     ) -> None:
         self._accounts = accounts
         self._registry = registry
         self._projects = projects
-        self._secrets = secrets or SecretBox("")
+        self._credentials = credentials
         self._cache: dict[tuple[str, str], tuple[str, Leader]] = {}
 
     async def lead(self, user_id: str, project_id: str | None = None) -> Leader:
@@ -93,7 +93,7 @@ class Workspaces:
                 self._registry,
                 workdir=space.workdir,
                 key=n.id,
-                env=space.env,
+                env_source=space.env_source,
                 repo=space.repo,
             )
             for n in nodes
@@ -114,14 +114,19 @@ class Workspaces:
     async def _workspace(self, user_id: str, project: ProjectView | None) -> ProjectWorkspace:
         if project is None:
             return ProjectWorkspace()
-        token = await self._token(user_id, project.git_connection_id)
-        return ProjectWorkspace.of(project, token)
+        return ProjectWorkspace.of(project, self._env_source(user_id, project.git_connection_id))
 
-    async def _token(self, user_id: str, connection_id: str | None) -> str:
-        if connection_id is None or self._projects is None:
-            return ""
-        secret = await self._projects.connection_secret(user_id, connection_id)
-        return self._secrets.open(secret) if secret else ""
+    def _env_source(self, user_id: str, connection_id: str | None) -> EnvSource | None:
+        """Fetches the Git environment at the start of every run, so short-lived
+        (GitHub App) tokens are always fresh."""
+        credentials = self._credentials
+        if connection_id is None or credentials is None:
+            return None
+
+        async def env() -> Mapping[str, str]:
+            return git_env(await credentials.token(user_id, connection_id))
+
+        return env
 
 
 def _project_key(project: ProjectView | None) -> str:
@@ -139,16 +144,16 @@ class ProjectWorkspace:
     """
 
     workdir: str = ""
-    env: Mapping[str, str] = field(default_factory=dict)
+    env_source: EnvSource | None = None
     repo: Mapping[str, str] | None = None
     context: str = ""
 
     @classmethod
-    def of(cls, project: ProjectView, token: str) -> ProjectWorkspace:
+    def of(cls, project: ProjectView, env_source: EnvSource | None) -> ProjectWorkspace:
         repo = None
         if project.repo:
             repo = {"url": f"https://github.com/{project.repo}.git", "branch": project.branch}
-        return cls(f"projects/{project.id[:12]}", git_env(token), repo, _context(project))
+        return cls(f"projects/{project.id[:12]}", env_source, repo, _context(project))
 
     def brief(self, data: Mapping[str, Any]) -> Mapping[str, Any]:
         """The team definition with the project context added to every employee."""

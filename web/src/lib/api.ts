@@ -66,6 +66,14 @@ export interface GitConnection {
   provider: "github";
   login: string;
   created_at: string;
+  kind: "token" | "app";
+  installation_id: number | null;
+}
+
+export interface GitHubAppStatus {
+  configured: boolean;
+  app?: { slug: string; name: string; owner: string; html_url: string };
+  install_url?: string;
 }
 
 export interface Repo {

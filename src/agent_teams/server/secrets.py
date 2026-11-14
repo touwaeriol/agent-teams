@@ -14,7 +14,12 @@ class SecretBox:
     """Symmetric encryption keyed by ``AGENT_TEAMS_SECRET_KEY`` (any string)."""
 
     def __init__(self, secret: str) -> None:
+        self._secret = secret
         self._fernet = Fernet(_key(secret)) if secret else None
+
+    def derive(self, label: str) -> bytes:
+        """A separate key for another purpose (e.g. signing), from the same secret."""
+        return hashlib.sha256(f"{label}:{self._secret}".encode()).digest()
 
     @property
     def ready(self) -> bool:

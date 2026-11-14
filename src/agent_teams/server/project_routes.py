@@ -79,8 +79,11 @@ async def list_repos(
     request: Request, connection_id: str, user: UserView = User
 ) -> list[dict[str, Any]]:
     state = platform(request)
+    connection = await state.projects.connection(user.id, connection_id)
     token = await _token(state, user.id, connection_id)
-    repos: list[dict[str, Any]] = await _github(state.services.github.repos(token))
+    github = state.services.github
+    listing = github.installation_repos if connection and connection.kind == "app" else github.repos
+    repos: list[dict[str, Any]] = await _github(listing(token))
     return repos
 
 
@@ -164,13 +167,13 @@ async def _checked(
 
 
 async def _token(state: Platform, user_id: str, connection_id: str) -> str:
-    secret = await state.projects.connection_secret(user_id, connection_id)
-    if secret is None:
+    if await state.projects.connection(user_id, connection_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "没有这个 Git 连接")
     try:
-        return state.services.secrets.open(secret)
+        token: str = await _github(state.credentials.token(user_id, connection_id))
     except ConfigError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return token
 
 
 async def _github(call: Any) -> Any:
