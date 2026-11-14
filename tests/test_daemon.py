@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import socket
+import subprocess
 import sys
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -313,3 +314,56 @@ async def test_runs_interrupted_by_a_daemon_restart_report_lost(
     with pytest.raises(NodeCommandError, match=r"exit 137: .*restarted"):
         await collect(remote(console).stream([*CLAUDE, "-p", "hi"], "w", "k-lost"))
     await daemon.stop()
+
+
+def make_repo(tmp_path: Path) -> Path:
+    """A local repository with one commit on ``main``, cloneable by path."""
+    source = tmp_path / "source"
+    source.mkdir()
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=source, check=True, capture_output=True)
+
+    git("init", "-b", "main")
+    (source / "README.md").write_text("hello\n")
+    git("add", ".")
+    git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-m", "init")
+    return source
+
+
+async def test_clones_the_project_repository_and_passes_the_environment(
+    console: Console, node: Running, tmp_path: Path
+) -> None:
+    source = make_repo(tmp_path)
+    project = RemoteNode(
+        "n1",
+        console.registry,
+        workdir="projects/p1",
+        key=console.enrolled.node_id,
+        env={"GH_TOKEN": "secret-token"},
+        repo={"url": str(source), "branch": "main"},
+    )
+    worker = ClaudeCodeWorker("dev", project, claude_command=" ".join(CLAUDE))
+
+    first = json.loads((await worker.run("work", RunContext(run_key="c1/t1"))).output)
+    again = json.loads((await worker.run("more", RunContext(run_key="c1/t2"))).output)
+
+    directory = tmp_path / "root" / "projects" / "p1" / "dev"
+    assert first["cwd"] == again["cwd"] == str(directory.resolve())
+    assert (directory / "README.md").read_text() == "hello\n"
+    assert first["gh_token"] == "secret-token"
+
+
+async def test_refuses_to_clone_into_a_directory_with_other_files(
+    console: Console, node: Running, tmp_path: Path
+) -> None:
+    source = make_repo(tmp_path)
+    busy = tmp_path / "root" / "busy"
+    busy.mkdir(parents=True)
+    (busy / "notes.txt").write_text("mine")
+    project = RemoteNode(
+        "n1", console.registry, key=console.enrolled.node_id, repo={"url": str(source)}
+    )
+
+    with pytest.raises(NodeCommandError, match="not empty"):
+        await collect(project.stream([*CLAUDE, "-p", "hi"], "busy", "k-busy"))

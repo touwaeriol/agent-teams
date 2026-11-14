@@ -15,22 +15,32 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from importlib import resources
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    Response,
+)
+from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
 from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 
 from ..errors import ConfigError
 from ..remote import NodeLink
-from . import admin, auth, routes
+from . import admin, auth, project_routes, routes
 from .accounts import AccountStore, MemoryAccounts
 from .broker import Broker, MemoryBroker, ValkeyBroker
 from .hub import UnknownConversation
 from .mcp_bridge import MCP_PATH
 from .platform import Platform, Services, platform
+from .projects import MemoryProjects, ProjectStore
+from .secrets import SecretBox
 from .security import hash_token
 from .store import MemoryStore, Store, connect_postgres
 
@@ -47,6 +57,7 @@ class Settings:
     database_url: str = ""
     valkey_url: str = ""
     admin_emails: frozenset[str] = frozenset()
+    secret_key: str = ""
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -59,17 +70,29 @@ class Settings:
             database_url=os.environ.get("DATABASE_URL", ""),
             valkey_url=os.environ.get("VALKEY_URL", ""),
             admin_emails=frozenset(e.strip().lower() for e in emails.split(",") if e.strip()),
+            secret_key=os.environ.get("AGENT_TEAMS_SECRET_KEY", ""),
         )
 
     async def services(self) -> Services:
         store: Store
         accounts: AccountStore
+        projects: ProjectStore
         if self.database_url:
-            store, accounts = await connect_postgres(self.database_url)
+            store, accounts, projects = await connect_postgres(self.database_url)
         else:
             logger.warning("DATABASE_URL not set: everything is kept in memory only")
-            store, accounts = MemoryStore(), MemoryAccounts()
-        return Services(store, accounts, await self._broker(), self.public_url, self.admin_emails)
+            store, accounts, projects = MemoryStore(), MemoryAccounts(), MemoryProjects()
+        if not self.secret_key:
+            logger.warning("AGENT_TEAMS_SECRET_KEY not set: Git connections cannot be saved")
+        return Services(
+            store,
+            accounts,
+            await self._broker(),
+            self.public_url,
+            self.admin_emails,
+            projects=projects,
+            secrets=SecretBox(self.secret_key),
+        )
 
     async def _broker(self) -> Broker:
         if self.valkey_url:
@@ -94,7 +117,7 @@ def create_app(services: ServicesFactory) -> FastAPI:
 
     app = FastAPI(title="agent-teams", lifespan=lifespan)
     app.add_exception_handler(UnknownConversation, _not_found)
-    for module in (auth, routes, admin):
+    for module in (auth, routes, project_routes, admin):
         app.include_router(module.router())
     app.add_api_websocket_route("/nodes/connect", node_socket)
     app.add_api_route("/", index, methods=["GET"], include_in_schema=False)
@@ -103,7 +126,33 @@ def create_app(services: ServicesFactory) -> FastAPI:
     app.router.routes.append(
         Route(MCP_PATH, endpoint=_McpEndpoint(), methods=["GET", "POST", "DELETE"])
     )
+    _mount_web_app(app)
     return app
+
+
+def _web_dir() -> Path:
+    return Path(str(resources.files(__package__).joinpath("static").joinpath("app")))
+
+
+def _mount_web_app(app: FastAPI) -> None:
+    """The built web app (``web/`` → ``static/app``): its assets, and index.html for
+    every other browser route so client-side routing works on reload."""
+    assets = _web_dir() / "assets"
+    if assets.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets), name="assets")
+    app.add_api_route("/{path:path}", spa, methods=["GET"], include_in_schema=False)
+
+
+async def spa(path: str) -> Response:
+    if path.split("/", 1)[0] in _RESERVED:
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    candidate = _web_dir() / path
+    if path and candidate.is_file() and _web_dir() in candidate.resolve().parents:
+        return FileResponse(candidate)
+    return await index()
+
+
+_RESERVED = frozenset({"api", "auth", "nodes", "mcp", "assets"})
 
 
 class _McpEndpoint:
@@ -149,6 +198,9 @@ def _serialized(send: Callable[[Any], Awaitable[None]]) -> Callable[[Any], Await
 
 
 async def index() -> HTMLResponse:
+    built = _web_dir() / "index.html"
+    if built.is_file():
+        return HTMLResponse(built.read_text("utf-8"), headers={"Cache-Control": "no-cache"})
     return HTMLResponse(_static("index.html"))
 
 

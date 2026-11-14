@@ -163,11 +163,13 @@ def test_team_definition_is_validated_against_the_users_nodes(client: TestClient
     add_node(client, alice, "box")
     saved = client.put("/api/team", json={"config": TEAM}, headers=alice)
     assert saved.status_code == 200, saved.text
-    assert client.get("/api/team", headers=alice).json() == {
+    team = client.get("/api/team", headers=alice).json()
+    assert {k: team[k] for k in ("config", "saved", "error")} == {
         "config": TEAM,
         "saved": True,
         "error": "",
     }
+    assert team["team"]["leader"] == "lead"
 
     agent_leader = TEAM.replace("{name: lead, type: claude_code, node: box}", "{name: lead}")
     rejected = client.put("/api/team", json={"config": agent_leader}, headers=alice)

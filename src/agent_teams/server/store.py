@@ -18,6 +18,8 @@ from ..types import Task
 from .accounts import SCHEMA as ACCOUNTS_SCHEMA
 from .accounts import PostgresAccounts
 from .models import ConversationView, MessageView, Role, TaskView
+from .projects import SCHEMA as PROJECTS_SCHEMA
+from .projects import PostgresProjects
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS at_conversations (
@@ -56,10 +58,13 @@ INTERRUPTED = "Interrupted: the server restarted before this task finished."
 
 class Store(Protocol):
     async def create_conversation(
-        self, conversation_id: str, title: str, user_id: str
+        self, conversation_id: str, title: str, user_id: str, project_id: str | None = None
     ) -> ConversationView: ...
-    async def conversations(self, user_id: str) -> list[ConversationView]: ...
+    async def conversations(
+        self, user_id: str, project_id: str | None = None
+    ) -> list[ConversationView]: ...
     async def owner(self, conversation_id: str) -> str | None: ...
+    async def project_of(self, conversation_id: str) -> str | None: ...
     async def add_message(self, conversation_id: str, role: Role, content: str) -> MessageView: ...
     async def messages(self, conversation_id: str) -> list[MessageView]: ...
     async def save_task(self, conversation_id: str, task: Task) -> None: ...
@@ -86,19 +91,31 @@ class MemoryStore:
         self._next_id = 1
 
     async def create_conversation(
-        self, conversation_id: str, title: str, user_id: str
+        self, conversation_id: str, title: str, user_id: str, project_id: str | None = None
     ) -> ConversationView:
-        view = ConversationView(id=conversation_id, title=title, created_at=_now())
+        view = ConversationView(
+            id=conversation_id, title=title, created_at=_now(), project_id=project_id
+        )
         self._conversations[conversation_id] = view
         self._owners[conversation_id] = user_id
         return view
 
-    async def conversations(self, user_id: str) -> list[ConversationView]:
-        mine = [c for c in self._conversations.values() if self._owners[c.id] == user_id]
+    async def conversations(
+        self, user_id: str, project_id: str | None = None
+    ) -> list[ConversationView]:
+        mine = [
+            c
+            for c in self._conversations.values()
+            if self._owners[c.id] == user_id and (project_id is None or c.project_id == project_id)
+        ]
         return sorted(mine, key=lambda c: c.created_at, reverse=True)
 
     async def owner(self, conversation_id: str) -> str | None:
         return self._owners.get(conversation_id)
+
+    async def project_of(self, conversation_id: str) -> str | None:
+        view = self._conversations.get(conversation_id)
+        return view.project_id if view else None
 
     async def add_message(self, conversation_id: str, role: Role, content: str) -> MessageView:
         message = MessageView(id=self._next_id, role=role, content=content, created_at=_now())
@@ -130,13 +147,16 @@ class MemoryStore:
         return None
 
 
-async def connect_postgres(dsn: str) -> tuple[PostgresStore, PostgresAccounts]:
-    """One pool for both stores; creates or upgrades the schema."""
+async def connect_postgres(
+    dsn: str,
+) -> tuple[PostgresStore, PostgresAccounts, PostgresProjects]:
+    """One pool for all stores; creates or upgrades the schema."""
     pool = await asyncpg.create_pool(dsn, min_size=1, max_size=10)
     async with pool.acquire() as connection:
         await connection.execute(ACCOUNTS_SCHEMA)
         await connection.execute(SCHEMA)
-    return PostgresStore(pool), PostgresAccounts(pool)
+        await connection.execute(PROJECTS_SCHEMA)
+    return PostgresStore(pool), PostgresAccounts(pool), PostgresProjects(pool)
 
 
 class PostgresStore:
@@ -146,24 +166,35 @@ class PostgresStore:
         self._pool = pool
 
     async def create_conversation(
-        self, conversation_id: str, title: str, user_id: str
+        self, conversation_id: str, title: str, user_id: str, project_id: str | None = None
     ) -> ConversationView:
         row = await self._pool.fetchrow(
-            "INSERT INTO at_conversations (id, title, user_id) VALUES ($1, $2, $3) "
-            "RETURNING id, title, created_at",
+            "INSERT INTO at_conversations (id, title, user_id, project_id) "
+            "VALUES ($1, $2, $3, $4) RETURNING id, title, created_at, project_id",
             conversation_id,
             title,
             user_id,
+            project_id,
         )
         return ConversationView(**dict(row))
 
-    async def conversations(self, user_id: str) -> list[ConversationView]:
+    async def conversations(
+        self, user_id: str, project_id: str | None = None
+    ) -> list[ConversationView]:
         rows = await self._pool.fetch(
-            "SELECT id, title, created_at FROM at_conversations WHERE user_id = $1 "
+            "SELECT id, title, created_at, project_id FROM at_conversations "
+            "WHERE user_id = $1 AND ($2::text IS NULL OR project_id = $2) "
             "ORDER BY created_at DESC",
             user_id,
+            project_id,
         )
         return [ConversationView(**dict(r)) for r in rows]
+
+    async def project_of(self, conversation_id: str) -> str | None:
+        value = await self._pool.fetchval(
+            "SELECT project_id FROM at_conversations WHERE id = $1", conversation_id
+        )
+        return str(value) if value is not None else None
 
     async def owner(self, conversation_id: str) -> str | None:
         value = await self._pool.fetchval(

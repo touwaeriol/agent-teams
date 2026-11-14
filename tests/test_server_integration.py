@@ -22,7 +22,7 @@ VALKEY_URL = os.environ.get("TEST_VALKEY_URL", "")
 
 @pytest.mark.skipif(not DATABASE_URL, reason="TEST_DATABASE_URL not set")
 async def test_postgres_store_round_trip() -> None:
-    store, accounts = await connect_postgres(DATABASE_URL)
+    store, accounts, _projects = await connect_postgres(DATABASE_URL)
     conversation_id = uuid.uuid4().hex[:12]
     try:
         owner = await accounts.create_user(f"{conversation_id}@example.com", "h", "user")
@@ -78,7 +78,7 @@ async def test_valkey_broker_fans_out() -> None:
 
 @pytest.mark.skipif(not DATABASE_URL, reason="TEST_DATABASE_URL not set")
 async def test_postgres_accounts_round_trip() -> None:
-    store, accounts = await connect_postgres(DATABASE_URL)
+    store, accounts, _projects = await connect_postgres(DATABASE_URL)
     tag = uuid.uuid4().hex[:8]
     try:
         user = await accounts.create_user(f"{tag}@example.com", "hash", "user")

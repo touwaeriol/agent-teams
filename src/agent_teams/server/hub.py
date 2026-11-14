@@ -32,7 +32,7 @@ from .store import INTERRUPTED, Store
 
 logger = logging.getLogger(__name__)
 
-LeadProvider = Callable[[str], Awaitable[Leader | Agent]]
+LeadProvider = Callable[[str, str | None], Awaitable[Leader | Agent]]
 
 
 class UnknownConversation(KeyError):  # noqa: N818 - mirrors KeyError
@@ -79,11 +79,17 @@ class Hub:
         self._live: dict[str, _Live] = {}
         self._opening = asyncio.Lock()
 
-    async def create(self, user_id: str, title: str = "") -> ConversationView:
-        return await self.store.create_conversation(uuid.uuid4().hex[:12], title, user_id)
+    async def create(
+        self, user_id: str, title: str = "", project_id: str | None = None
+    ) -> ConversationView:
+        return await self.store.create_conversation(
+            uuid.uuid4().hex[:12], title, user_id, project_id
+        )
 
-    async def conversations(self, user_id: str) -> list[ConversationView]:
-        return await self.store.conversations(user_id)
+    async def conversations(
+        self, user_id: str, project_id: str | None = None
+    ) -> list[ConversationView]:
+        return await self.store.conversations(user_id, project_id)
 
     async def post(self, user_id: str, conversation_id: str, content: str) -> MessageView:
         """Record the user's message and queue it for the leader; never waits for a reply."""
@@ -142,7 +148,7 @@ class Hub:
             return self._live[conversation_id]
 
     async def _resume(self, conversation_id: str, owner: str) -> _Live:
-        lead = await self.leads(owner)
+        lead = await self.leads(owner, await self.store.project_of(conversation_id))
         tasks = await self.store.tasks(conversation_id)
         ctx = RunContext(self._hooks(conversation_id), run_key=conversation_id)
         tools = _ScopedTools(self.tool_server)

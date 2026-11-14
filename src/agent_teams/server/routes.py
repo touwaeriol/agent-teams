@@ -6,9 +6,11 @@ import re
 import shlex
 from typing import Any
 
+import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
+from ..config import parse_yaml
 from ..errors import ConfigError
 from .accounts import Conflict
 from .auth import current_user
@@ -56,14 +58,19 @@ async def me(user: UserView = User) -> UserView:
     return user
 
 
-async def list_conversations(request: Request, user: UserView = User) -> list[ConversationView]:
-    return await platform(request).hub.conversations(user.id)
+async def list_conversations(
+    request: Request, user: UserView = User, project_id: str | None = None
+) -> list[ConversationView]:
+    return await platform(request).hub.conversations(user.id, project_id)
 
 
 async def create_conversation(
     request: Request, body: NewConversation, user: UserView = User
 ) -> ConversationView:
-    return await platform(request).hub.create(user.id, body.title)
+    state = platform(request)
+    if body.project_id and await state.projects.project(user.id, body.project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "没有这个项目")
+    return await state.hub.create(user.id, body.title, body.project_id or None)
 
 
 async def list_messages(
@@ -141,16 +148,30 @@ async def get_team(request: Request, user: UserView = User) -> dict[str, Any]:
     state = platform(request)
     config = await state.accounts.team(user.id)
     error = await _problem(state, user, config) if config else "还没有保存团队配置"
-    return {"config": config or DEFAULT_TEAM, "saved": config is not None, "error": error}
+    text = config or DEFAULT_TEAM
+    return {"config": text, "team": _structured(text), "saved": config is not None, "error": error}
 
 
 async def save_team(request: Request, body: TeamConfig, user: UserView = User) -> dict[str, Any]:
     state = platform(request)
-    problem = await _problem(state, user, body.config)
+    config = _yaml(body.team) if body.team is not None else body.config
+    problem = await _problem(state, user, config)
     if problem:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, problem)
-    await state.accounts.save_team(user.id, body.config)
-    return {"config": body.config, "saved": True, "error": ""}
+    await state.accounts.save_team(user.id, config)
+    return {"config": config, "team": _structured(config), "saved": True, "error": ""}
+
+
+def _structured(config: str) -> dict[str, Any] | None:
+    """The team definition as data for the form editor, or None if it cannot be parsed."""
+    try:
+        return dict(parse_yaml(config, "团队配置"))
+    except ConfigError:
+        return None
+
+
+def _yaml(team: dict[str, Any]) -> str:
+    return yaml.safe_dump(team, allow_unicode=True, sort_keys=False, width=1000)
 
 
 async def _problem(state: Platform, user: UserView, config: str) -> str:

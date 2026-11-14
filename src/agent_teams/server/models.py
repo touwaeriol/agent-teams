@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -16,6 +16,7 @@ class ConversationView(BaseModel):
     id: str
     title: str
     created_at: datetime
+    project_id: str | None = None
 
 
 class MessageView(BaseModel):
@@ -61,6 +62,7 @@ class TaskView(BaseModel):
 
 class NewConversation(BaseModel):
     title: str = ""
+    project_id: str | None = None
 
 
 class NewMessage(BaseModel):
@@ -104,7 +106,8 @@ class NewNode(BaseModel):
 
 
 class TeamConfig(BaseModel):
-    config: str
+    config: str = ""
+    team: dict[str, Any] | None = None  # structured form; wins over ``config``
 
 
 class UserUpdate(BaseModel):
@@ -112,3 +115,53 @@ class UserUpdate(BaseModel):
     active: bool | None = None
     max_nodes: int | None = None
     clear_max_nodes: bool = False
+
+
+GitProvider = Literal["github"]
+
+
+class GitConnectionView(BaseModel):
+    """A saved Git credential; the token itself never leaves the server."""
+
+    id: str
+    name: str
+    provider: GitProvider
+    login: str
+    created_at: datetime
+
+
+class NewGitConnection(BaseModel):
+    name: str = ""
+    provider: GitProvider = "github"
+    token: str
+
+
+class ProjectView(BaseModel):
+    id: str
+    name: str
+    description: str
+    context: str
+    repo: str | None  # owner/repo
+    branch: str
+    git_connection_id: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProjectInput(BaseModel):
+    name: str
+    description: str = ""
+    context: str = ""
+    repo: str | None = None  # GitHub URL, git@ URL or owner/repo
+    branch: str = ""
+    git_connection_id: str | None = None
+
+
+class ProjectUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    context: str | None = None
+    repo: str | None = None
+    branch: str | None = None
+    git_connection_id: str | None = None
+    clear_repo: bool = False

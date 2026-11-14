@@ -114,6 +114,8 @@ emit(
         "is_error": False,
         "num_turns": 2,
         "total_cost_usd": 0.0123,
-        "result": json.dumps({"cwd": os.getcwd(), "argv": argv}),
+        "result": json.dumps(
+            {"cwd": os.getcwd(), "argv": argv, "gh_token": os.environ.get("GH_TOKEN", "")}
+        ),
     }
 )

@@ -45,7 +45,7 @@ def poem_llm() -> ScriptedLLM:
 
 
 def make_hub(leader: Leader, store: MemoryStore | None = None) -> Hub:
-    async def leads(_user_id: str) -> Leader:
+    async def leads(_user_id: str, _project_id: str | None) -> Leader:
         return leader
 
     return Hub(leads, store or MemoryStore(), MemoryBroker())
@@ -112,7 +112,7 @@ async def test_each_user_gets_their_own_leader() -> None:
         BOB: Leader("bob-lead", ScriptedLLM(["from bob's team"]), [Worker("w")]),
     }
 
-    async def leads(user_id: str) -> Leader:
+    async def leads(user_id: str, _project_id: str | None) -> Leader:
         return teams[user_id]
 
     hub = Hub(leads, MemoryStore(), MemoryBroker())

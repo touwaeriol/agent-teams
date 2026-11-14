@@ -5,7 +5,8 @@ nodes behind NAT work). JSON messages:
 
 * node -> console: ``hello`` {node info}, ``output`` {run_id, seq, line},
   ``exit`` {run_id, code, stderr}
-* console -> node: ``start`` {run_id, command, cwd, after}, ``cancel`` {run_id}
+* console -> node: ``start`` {run_id, command, cwd, after, env?, repo?},
+  ``cancel`` {run_id}
 
 ``start`` is idempotent per ``run_id``: if the daemon already has that run
 (still running, finished, or only in its on-disk log) it replays the output
@@ -61,13 +62,22 @@ class NodeLink:
         self._runs: dict[str, asyncio.Queue[Message]] = {}
 
     async def run(
-        self, run_id: str, command: Sequence[str], cwd: str, after: int
+        self,
+        run_id: str,
+        command: Sequence[str],
+        cwd: str,
+        after: int,
+        setup: Mapping[str, Any] | None = None,
     ) -> AsyncIterator[Message]:
-        """Start or re-attach to ``run_id``; yield its messages until ``exit``."""
+        """Start or re-attach to ``run_id``; yield its messages until ``exit``.
+
+        ``setup`` may carry ``env`` (extra environment for the process) and
+        ``repo`` ({url, branch}: clone it into ``cwd`` first if not there yet).
+        """
         queue: asyncio.Queue[Message] = asyncio.Queue()
         self._runs[run_id] = queue
         try:
-            start = {"command": list(command), "cwd": cwd, "after": after}
+            start = {"command": list(command), "cwd": cwd, "after": after, **(setup or {})}
             await self._send({"type": "start", "run_id": run_id, **start})
             while (message := await queue.get()) is not _LOST:
                 yield message
@@ -152,6 +162,8 @@ class RemoteNode(Node):
     registry: NodeRegistry = field(repr=False)
     workdir: str = ""  # relative to the daemon's --root
     key: str = ""  # registry key (the node's ID); defaults to the name
+    env: Mapping[str, str] = field(default_factory=dict)  # extra environment for every run
+    repo: Mapping[str, str] | None = None  # {url, branch}: cloned into each employee's directory
     connect_timeout: float = 60.0
     reconnect_timeout: float = 3600.0
     resumable = True
@@ -159,6 +171,15 @@ class RemoteNode(Node):
     @property
     def registry_key(self) -> str:
         return self.key or self.name
+
+    @property
+    def setup(self) -> dict[str, Any]:
+        setup: dict[str, Any] = {}
+        if self.env:
+            setup["env"] = dict(self.env)
+        if self.repo:
+            setup["repo"] = dict(self.repo)
+        return setup
 
     def stream(self, command: Sequence[str], cwd: str, key: str = "") -> AsyncIterator[str]:
         return _RemoteRun(self, key or uuid.uuid4().hex, list(command), cwd).lines()
@@ -188,7 +209,7 @@ class _RemoteRun:
 
     async def _attach(self, link: NodeLink) -> AsyncIterator[str]:
         """Follow the run on one connection; returns quietly if the link drops."""
-        messages = link.run(self.run_id, self.command, self.cwd, self.after)
+        messages = link.run(self.run_id, self.command, self.cwd, self.after, self.node.setup)
         try:
             async for message in messages:
                 line = self._handle(message)

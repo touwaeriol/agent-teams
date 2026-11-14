@@ -37,6 +37,7 @@ MEMORY_RETENTION_SECONDS = 3600.0
 LOG_RETENTION_SECONDS = 7 * 24 * 3600.0
 MAX_BACKOFF_SECONDS = 30.0
 REJECTED, NOT_FOUND, LOST, STOPPED, CANCELLED = 126, 127, 137, 143, 130
+CHECKOUT_FAILED = 128
 
 Send = Callable[[Message], Awaitable[None]]
 
@@ -163,13 +164,16 @@ class Runner:
     def active(self) -> list[str]:
         return [run.id for run in self._runs.values() if run.exit is None]
 
-    def ensure(self, run_id: str, command: list[str], cwd: str) -> Run:
+    def ensure(self, run_id: str, command: list[str], cwd: str, setup: Setup | None = None) -> Run:
         """The run with this ID: existing (memory or log) or newly started."""
         self._forget_old()
         if run_id in self._runs:
             return self._runs[run_id]
         path = self._log_path(run_id)
-        run = Run.load(run_id, path) if path.exists() else self._start(run_id, path, command, cwd)
+        if path.exists():
+            run = Run.load(run_id, path)
+        else:
+            run = self._start(run_id, path, command, cwd, setup or Setup())
         self._runs[run_id] = run
         return run
 
@@ -194,26 +198,30 @@ class Runner:
             if path.stat().st_mtime < cutoff:
                 path.unlink(missing_ok=True)
 
-    def _start(self, run_id: str, path: Path, command: list[str], cwd: str) -> Run:
+    def _start(self, run_id: str, path: Path, command: list[str], cwd: str, setup: Setup) -> Run:
         run = Run(run_id, path)
         try:
             directory = self.policy.check(command, cwd)
         except PermissionError as exc:
             run.finish(REJECTED, f"rejected by node policy: {exc}")
             return run
-        task = asyncio.create_task(self._execute(run, command, directory))
+        task = asyncio.create_task(self._execute(run, command, directory, setup))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return run
 
-    async def _execute(self, run: Run, command: list[str], directory: Path) -> None:
+    async def _execute(self, run: Run, command: list[str], directory: Path, setup: Setup) -> None:
         async with self._slots:
             if run.cancelled:
                 run.finish(CANCELLED, "cancelled before it started")
                 return
             await asyncio.to_thread(directory.mkdir, parents=True, exist_ok=True)
+            problem = await _checkout(run, directory, setup)
+            if problem:
+                run.finish(CHECKOUT_FAILED, problem)
+                return
             try:
-                run.process = await _spawn(command, directory)
+                run.process = await _spawn(command, directory, setup.env)
             except OSError as exc:
                 run.finish(NOT_FOUND, f"cannot start {command[0]}: {exc}")
                 return
@@ -230,10 +238,77 @@ class Runner:
         return self.state / "runs" / f"{digest}.jsonl"
 
 
-async def _spawn(command: list[str], directory: Path) -> asyncio.subprocess.Process:
+@dataclass(frozen=True)
+class Setup:
+    """Per-run preparation sent with ``start``: extra environment and a repository."""
+
+    env: Mapping[str, str] = field(default_factory=dict)
+    repo: Mapping[str, str] | None = None
+
+    @classmethod
+    def of(cls, message: Mapping[str, Any]) -> Setup:
+        env = message.get("env")
+        repo = message.get("repo")
+        return cls(
+            {str(k): str(v) for k, v in env.items()} if isinstance(env, dict) else {},
+            {str(k): str(v) for k, v in repo.items()} if isinstance(repo, dict) else None,
+        )
+
+
+async def _checkout(run: Run, directory: Path, setup: Setup) -> str:
+    """Clone the run's repository into ``directory`` unless it is already there.
+
+    Returns a problem description, or an empty string when ready.
+    """
+    repo = setup.repo
+    if not repo or not repo.get("url"):
+        return ""
+    state = await asyncio.to_thread(_directory_state, directory)
+    if state == "repo":
+        return ""
+    if state == "other":
+        return f"cannot clone {repo['url']}: {directory} is not empty and not a git repository"
+    branch = ["--branch", repo["branch"]] if repo.get("branch") else []
+    command = ["git", "clone", *branch, "--", repo["url"], "."]
+    code, stderr = await _run_quietly(command, directory, setup.env)
+    if code != 0:
+        return f"git clone {repo['url']} failed ({code}): {stderr[-STDERR_TAIL:]}"
+    run.append(f"cloned {repo['url']} into {directory}")
+    return ""
+
+
+def _directory_state(directory: Path) -> str:
+    """``repo`` (has .git), ``empty`` or ``other``."""
+    if (directory / ".git").exists():
+        return "repo"
+    return "other" if any(directory.iterdir()) else "empty"
+
+
+async def _run_quietly(
+    command: list[str], directory: Path, env: Mapping[str, str]
+) -> tuple[int, str]:
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            cwd=directory,
+            env={**os.environ, **env},
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except OSError as exc:
+        return NOT_FOUND, f"cannot start {command[0]}: {exc}"
+    _, stderr = await process.communicate()
+    return int(process.returncode or 0), stderr.decode("utf-8", errors="replace")
+
+
+async def _spawn(
+    command: list[str], directory: Path, env: Mapping[str, str] | None = None
+) -> asyncio.subprocess.Process:
     return await asyncio.create_subprocess_exec(
         *command,
         cwd=directory,
+        env={**os.environ, **env} if env else None,
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -338,7 +413,10 @@ class Daemon:
         if message.get("type") != "start":
             return
         run = self.runner.ensure(
-            str(message["run_id"]), list(message["command"]), str(message["cwd"])
+            str(message["run_id"]),
+            list(message["command"]),
+            str(message["cwd"]),
+            Setup.of(message),
         )
         task = asyncio.create_task(run.follow(int(message.get("after", 0)), send))
         followers.add(task)
