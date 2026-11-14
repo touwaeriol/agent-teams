@@ -281,6 +281,10 @@ def test_app_jwt_is_rs256_signed_for_the_app() -> None:
     assert decoded == {"iat": 940, "exp": 1480, "iss": "42"}
 
 
+def alice_id(client: TestClient, headers: dict[str, str]) -> str:
+    return str(client.get("/api/me", headers=headers).json()["id"])
+
+
 def _query(url: str) -> dict[str, str]:
     return {k: v[0] for k, v in parse_qs(urlsplit(url).query).items()}
 
@@ -301,17 +305,17 @@ def test_github_app_one_click_flow(client: TestClient) -> None:
     assert manifest["default_permissions"]["contents"] == "write"
     state = _query(form["action"])["state"]
 
+    service: Platform = client.app.state.platform  # type: ignore[attr-defined]
+    alice_state = service.states.sign("github-app-create", alice_id(client, alice))
     stolen = client.get(
         "/api/git/github-app/created",
-        params={"code": "manifest-code", "state": state},
-        headers=alice,
+        params={"code": "manifest-code", "state": alice_state},
         follow_redirects=False,
     )
-    assert stolen.status_code == 403  # not an admin
-    done = client.get(
+    assert "error=" in stolen.headers["location"]  # alice is not an admin
+    done = client.get(  # no session cookie on the way back: the signed state is enough
         "/api/git/github-app/created",
         params={"code": "manifest-code", "state": state},
-        headers=admin,
         follow_redirects=False,
     )
     assert done.headers["location"] == "/admin?github_app=agent-teams-x"
@@ -324,10 +328,15 @@ def test_github_app_one_click_flow(client: TestClient) -> None:
     )
     install_state = _query(go.headers["location"])["state"]
 
+    unsigned = client.get(
+        "/api/git/github-app/installed",
+        params={"installation_id": 7, "code": "good"},
+        follow_redirects=False,
+    )
+    assert "error=" in unsigned.headers["location"]  # neither state nor session
     foreign = client.get(
         "/api/git/github-app/installed",
         params={"installation_id": 7, "code": "bad", "state": install_state},
-        headers=alice,
         follow_redirects=False,
     )
     assert "error=" in foreign.headers["location"]

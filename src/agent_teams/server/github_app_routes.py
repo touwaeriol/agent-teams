@@ -99,12 +99,15 @@ def _manifest(url: str) -> dict[str, Any]:
     }
 
 
-async def created(
-    request: Request, code: str = "", state: str = "", admin: UserView = Admin
-) -> RedirectResponse:
-    """GitHub created the App and sent us back a one-time code for its secrets."""
+async def created(request: Request, code: str = "", state: str = "") -> RedirectResponse:
+    """GitHub created the App and sent us back a one-time code for its secrets.
+
+    The signed ``state`` names the administrator who started it, so this also
+    works when the browser does not send the session cookie on the way back.
+    """
     service = platform(request)
-    if service.states.verify(CREATE, state) != admin.id:
+    admin = await _signed_user(service, CREATE, state)
+    if admin is None or admin.role != "admin":
         return _back("/admin", error="创建请求已过期或不是你发起的，请重新创建")
     try:
         app = await service.credentials.save_app(
@@ -135,11 +138,16 @@ async def installed(
     code: str = "",
     state: str = "",
     setup_action: str = "",
-    user: UserView = User,
 ) -> RedirectResponse:
-    """Back from GitHub after installing (or changing) the App."""
+    """Back from GitHub after installing (or changing) the App.
+
+    The user comes from the signed ``state`` (set when they clicked connect),
+    else from the session cookie; the OAuth ``code`` then proves the GitHub
+    account behind the browser can see this installation.
+    """
     service = platform(request)
-    if state and service.states.verify(INSTALL, state) != user.id:
+    user = await _signed_user(service, INSTALL, state) if state else await _cookie_user(request)
+    if user is None:
         return _back("/settings/git", error="授权请求已过期或不是你发起的，请重新连接")
     existing = [
         c
@@ -181,6 +189,19 @@ async def _save(service: Platform, user_id: str, account: str, installation_id: 
         name = f"{name} · {installation_id}"
         await service.projects.create_connection(user_id, name, account, "", installation_id)
     return name
+
+
+async def _signed_user(service: Platform, purpose: str, state: str) -> UserView | None:
+    user_id = service.states.verify(purpose, state)
+    user = await service.accounts.user(user_id) if user_id else None
+    return user if user is not None and user.active else None
+
+
+async def _cookie_user(request: Request) -> UserView | None:
+    try:
+        return await current_user(request)
+    except HTTPException:
+        return None
 
 
 async def _app(service: Platform) -> GitHubApp | None:
