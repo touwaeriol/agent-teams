@@ -41,7 +41,7 @@
    ```
 
    保存时会校验：节点要存在，负责人必须是 `claude_code`（平台不提供 API key，所有模型调用都走你节点上自己登录的 Claude Code）。
-4. **Git 连接和项目**：每个用户在"Git 连接"页点"连接 GitHub"，在 GitHub 上选自己的账号或组织、勾选仓库，授权后自动回来，每次运行现取 1 小时的令牌；也可以粘贴访问令牌（加密保存在服务端）。新建项目时填项目上下文、选一个仓库：负责人和每个员工开工前都会读到项目上下文；每个员工在节点的 `~/.agents_team/projects/<项目>/<员工名>` 里有自己的仓库克隆（第一次运行前由守护进程克隆），git 和 gh 通过运行环境拿到令牌，不写进节点的文件。
+4. **Git 连接和项目**：每个用户在"Git 连接"页点"连接 GitHub"，在 GitHub 上选自己的账号或组织、勾选仓库，授权后自动回来，每次运行现取 1 小时的令牌。新建项目时填项目上下文、选一个仓库：负责人和每个员工开工前都会读到项目上下文；每个员工在节点的 `~/.agents_team/projects/<项目>/<员工名>` 里有自己的仓库克隆（第一次运行前由守护进程克隆），git 和 gh 通过运行环境拿到令牌，不写进节点的文件。
 5. **对话**：在项目里新建对话，直接说需求。负责人通过 MCP 工具 `assign_task` 派任务，派完立刻回复你；员工在各自的目录（`<root>/<员工名>`）里干活，你可以继续聊。任务完成后报告自动送回负责人，他再向你汇报。右侧任务板实时显示每个任务的状态。
 6. **管理员**：在"管理"页管理用户（改角色、停用、删除、单独设置节点上限）和平台设置（开放注册、默认节点上限）。停用一个用户会让他立刻下线、断开他的节点并停止他的对话。
 
@@ -64,7 +64,7 @@ deploy/deploy.sh                # 生成 .env（数据库、Valkey 密码和加�
 - `deploy.sh` 会自动选 3001–3009 中第一个空闲端口，并按本机 IP 生成 `AGENT_TEAMS_PUBLIC_URL`。节点安装命令和 leader 的 MCP 地址都用这个地址。
 - **用域名和 HTTPS**：先把域名解析到服务器，再运行 `deploy/deploy.sh --domain agent.example.com`。服务只监听 127.0.0.1，由本机的 Caddy 自动申请证书并转发（`deploy/caddy.sh` 会写入 `/etc/caddy/agent-teams.caddy`、在主 Caddyfile 里 import 它，然后重载 Caddy）。SSE 和 WebSocket 都会正常转发，登录 cookie 会带上 Secure 标记。
 - `.env` 里的 `AGENT_TEAMS_SECRET_KEY` 用来加密保存的 Git 凭证，生成后不要改。
-- "连接 GitHub"按钮背后需要一个 GitHub App：部署后用管理员账号打开 `/setup/github`，点"一键创建 GitHub App"（GitHub 的 manifest 流程，只做一次）。没有它时，用户仍可用访问令牌。
+- "连接 GitHub"按钮背后需要一个 GitHub App：部署后用管理员账号打开 `/setup/github`，点"一键创建 GitHub App"（GitHub 的 manifest 流程，只做一次）。
 - 网页前端在 `web/`（React + Vite + shadcn/ui），镜像构建时自动打包进服务；本地开发：`cd web && npm ci && npm run dev`（代理到 127.0.0.1:3001）。
 - 查看日志：`docker compose logs -f agent-teams`；升级：`git pull && deploy/deploy.sh`。
 - 不用 `--domain` 时服务是明文 HTTP，只建议在内网或测试时这样用。

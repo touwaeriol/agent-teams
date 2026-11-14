@@ -1,30 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, Github, KeyRound, Lock, Zap } from "lucide-react";
+import { ExternalLink, Github, Lock, Zap } from "lucide-react";
 import { useState } from "react";
-import { ConfirmAction, EmptyState, errorText, Field, FormDialog, KeyValueList, Loading, Page, Panel, PickList, StatusBadge, type Tone } from "@/components/common";
+import { ConfirmAction, EmptyState, errorText, KeyValueList, Loading, Page, Panel, PickList, StatusBadge } from "@/components/common";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { api, type GitConnection, type Repo } from "@/lib/api";
 import { useAction } from "@/lib/mutations";
 import { useFlash } from "@/lib/flash";
 import { keys, useConnections, useGitHubApp } from "@/lib/queries";
 import { timeAgo } from "@/lib/utils";
 
-const TOKEN_URL =
-  "https://github.com/settings/personal-access-tokens/new?name=agent-teams&description=Agent%20Teams&contents=write&pull_requests=write&metadata=read";
-
-const METHODS: { title: string; status: string; tone: Tone; text: string }[] = [
-  { title: "连接 GitHub", status: "推荐", tone: "ok", text: "点一下跳到 GitHub，选你的账号或组织、勾选仓库，授权后自动回来。不用建令牌；每次运行现取 1 小时有效的令牌。" },
-  { title: "GitHub 访问令牌", status: "可用", tone: "neutral", text: "粘贴一个 fine-grained personal access token，适合想精确控制权限的情况。" },
-  { title: "GitLab · 其他平台 · SSH", status: "以后", tone: "neutral", text: "暂不支持。" },
-];
-
 export function GitConnectionsPage() {
   const connections = useConnections();
   const app = useGitHubApp();
   const client = useQueryClient();
-  const [adding, setAdding] = useState(false);
   useFlash({ connected: (name) => `已连接：${name}` }, () => client.invalidateQueries({ queryKey: keys.connections }));
   const ready = app.data?.configured;
   const connect = ready ? (
@@ -37,36 +26,21 @@ export function GitConnectionsPage() {
   return (
     <Page
       title="Git 连接"
-      description="连接你自己的 GitHub 账号或组织，授权一次，你的所有项目和节点共用。凭证只在服务端保存，不写进节点的文件；员工运行时 git 和 gh 通过环境变量拿到令牌，可以拉取、推送分支和建 PR。第一版只支持 GitHub。"
-      actions={
-        <>
-          {connect}
-          <Button variant="outline" onClick={() => setAdding(true)}>
-            <KeyRound /> 使用访问令牌
-          </Button>
-        </>
-      }
+      description="点“连接 GitHub”跳到 GitHub，选你的账号或组织、勾选仓库，授权后自动回来。你的所有项目和节点共用这个授权；员工每次开工现取 1 小时有效的令牌，只能访问你勾选的仓库，不写进节点的文件。"
+      actions={connect}
     >
       {connections.isLoading && <Loading />}
       {connections.data?.length === 0 && (
         <EmptyState
           icon={<Github />}
           title="还没有 Git 连接"
-          description={ready ? "点“连接 GitHub”，在 GitHub 上选好仓库授权，回来就能在新建项目时选择仓库。" : "添加一个 GitHub 访问令牌后，新建项目时就能直接选择仓库。"}
-          action={connect ?? <Button onClick={() => setAdding(true)}>使用访问令牌</Button>}
+          description={ready ? "点“连接 GitHub”，在 GitHub 上选好仓库授权，回来就能在新建项目时选择仓库。" : "GitHub 授权还没开通，请联系管理员。"}
+          action={connect}
         />
       )}
       <div className="grid gap-4 lg:grid-cols-2">
         {connections.data?.map((c) => <ConnectionCard key={c.id} connection={c} />)}
       </div>
-      <div className="grid gap-3 sm:grid-cols-3">
-        {METHODS.map((m) => (
-          <Panel key={m.title} padding="sm" title={m.title} action={<StatusBadge tone={m.tone} label={m.status} />}>
-            <p className="text-xs leading-5 text-muted-foreground">{m.text}</p>
-          </Panel>
-        ))}
-      </div>
-      <AddConnectionDialog open={adding} onOpenChange={setAdding} />
     </Page>
   );
 }
@@ -139,46 +113,5 @@ function ConnectionCard({ connection }: { connection: GitConnection }) {
         />
       )}
     </Panel>
-  );
-}
-
-function AddConnectionDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
-  const [token, setToken] = useState("");
-  const [name, setName] = useState("");
-  const add = useAction(() => api<GitConnection>("/api/git/connections", { method: "POST", json: { token: token.trim(), name: name.trim() } }), {
-    invalidate: [keys.connections],
-    success: (c) => `已连接 GitHub 账号 ${c.login}`,
-    onSuccess: () => {
-      onOpenChange(false);
-      setToken("");
-      setName("");
-    },
-  });
-  return (
-    <FormDialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title="添加 GitHub 访问令牌"
-      description={
-        <>
-          在 GitHub 上{" "}
-          <a href={TOKEN_URL} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-            新建一个 fine-grained token
-          </a>
-          ，选择要给团队用的仓库，Repository permissions 里把 Contents 和 Pull requests 设为 Read and write。也可以用经典令牌（repo 权限）。
-        </>
-      }
-      submitLabel="验证并保存"
-      busy={add.isPending}
-      disabled={!token.trim()}
-      onSubmit={() => add.mutate()}
-    >
-      <Field label="访问令牌">
-        <Input autoFocus type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder="github_pat_…" className="font-mono" />
-      </Field>
-      <Field label="名称（可选）" hint="留空时用 GitHub 账号名。">
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：公司组织" />
-      </Field>
-    </FormDialog>
   );
 }
