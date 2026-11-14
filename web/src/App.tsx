@@ -7,6 +7,7 @@ import { AdminPage } from "@/pages/Admin";
 import { GitConnectionsPage } from "@/pages/GitConnections";
 import { LoginPage } from "@/pages/Login";
 import { NodesPage } from "@/pages/Nodes";
+import { SetupGitHubPage } from "@/pages/SetupGitHub";
 import { ProjectChatPage } from "@/pages/ProjectChat";
 import { ProjectSettingsPage } from "@/pages/ProjectSettings";
 import { ProjectsPage } from "@/pages/Projects";
@@ -44,6 +45,7 @@ export function App() {
         <Route path="/settings/git" element={<GitConnectionsPage />} />
         {ComponentsPage && <Route path="/ui" element={<Suspense fallback={<Loading />}><ComponentsPage /></Suspense>} />}
         {me.data.role === "admin" && <Route path="/admin" element={<AdminPage />} />}
+        {me.data.role === "admin" && <Route path="/setup/github" element={<SetupGitHubPage />} />}
         <Route path="*" element={<Navigate to="/projects" replace />} />
       </Route>
     </Routes>

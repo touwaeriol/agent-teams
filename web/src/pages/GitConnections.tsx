@@ -2,34 +2,31 @@ import { useQuery } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Github, KeyRound, Lock, Zap } from "lucide-react";
 import { useState } from "react";
-import { GitHubAppPanel } from "@/components/GitHubAppPanel";
-import { Callout, ConfirmAction, EmptyState, errorText, Field, FormDialog, KeyValueList, Loading, Page, Panel, PickList, StatusBadge, type Tone } from "@/components/common";
+import { ConfirmAction, EmptyState, errorText, Field, FormDialog, KeyValueList, Loading, Page, Panel, PickList, StatusBadge, type Tone } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, type GitConnection, type Repo } from "@/lib/api";
 import { useAction } from "@/lib/mutations";
 import { useFlash } from "@/lib/flash";
-import { keys, useConnections, useGitHubApp, useMe } from "@/lib/queries";
+import { keys, useConnections, useGitHubApp } from "@/lib/queries";
 import { timeAgo } from "@/lib/utils";
 
 const TOKEN_URL =
   "https://github.com/settings/personal-access-tokens/new?name=agent-teams&description=Agent%20Teams&contents=write&pull_requests=write&metadata=read";
 
 const METHODS: { title: string; status: string; tone: Tone; text: string }[] = [
-  { title: "连接 GitHub（GitHub App）", status: "推荐", tone: "ok", text: "点一下跳到 GitHub，选账号或组织、勾选仓库，授权后自动回来。不用建令牌；每次运行现取 1 小时有效的令牌。" },
-  { title: "GitHub 访问令牌", status: "可用", tone: "neutral", text: "粘贴一个 fine-grained personal access token。适合还没创建平台 App，或只想给某几个仓库的情况。" },
+  { title: "连接 GitHub", status: "推荐", tone: "ok", text: "点一下跳到 GitHub，选你的账号或组织、勾选仓库，授权后自动回来。不用建令牌；每次运行现取 1 小时有效的令牌。" },
+  { title: "GitHub 访问令牌", status: "可用", tone: "neutral", text: "粘贴一个 fine-grained personal access token，适合想精确控制权限的情况。" },
   { title: "GitLab · 其他平台 · SSH", status: "以后", tone: "neutral", text: "暂不支持。" },
 ];
 
 export function GitConnectionsPage() {
   const connections = useConnections();
   const app = useGitHubApp();
-  const me = useMe();
   const client = useQueryClient();
   const [adding, setAdding] = useState(false);
   useFlash({ connected: (name) => `已连接：${name}` }, () => client.invalidateQueries({ queryKey: keys.connections }));
   const ready = app.data?.configured;
-  const isAdmin = me.data?.role === "admin";
   const connect = ready ? (
     <Button asChild>
       <a href={app.data!.install_url}>
@@ -40,7 +37,7 @@ export function GitConnectionsPage() {
   return (
     <Page
       title="Git 连接"
-      description="授权一次，所有项目和节点共用。凭证只在服务端保存，不写进节点的文件；员工运行时 git 和 gh 通过环境变量拿到令牌，可以拉取、推送分支和建 PR。第一版只支持 GitHub。"
+      description="连接你自己的 GitHub 账号或组织，授权一次，你的所有项目和节点共用。凭证只在服务端保存，不写进节点的文件；员工运行时 git 和 gh 通过环境变量拿到令牌，可以拉取、推送分支和建 PR。第一版只支持 GitHub。"
       actions={
         <>
           {connect}
@@ -50,7 +47,6 @@ export function GitConnectionsPage() {
         </>
       }
     >
-      {app.data && !ready && (isAdmin ? <GitHubAppPanel status={app.data} /> : <Callout tone="warn">一键连接还没开通：需要管理员在这一页创建平台的 GitHub App。在那之前可以先用访问令牌。</Callout>)}
       {connections.isLoading && <Loading />}
       {connections.data?.length === 0 && (
         <EmptyState
@@ -70,7 +66,6 @@ export function GitConnectionsPage() {
           </Panel>
         ))}
       </div>
-      {app.data && ready && isAdmin && <GitHubAppPanel status={app.data} />}
       <AddConnectionDialog open={adding} onOpenChange={setAdding} />
     </Page>
   );
@@ -94,7 +89,7 @@ function ConnectionCard({ connection }: { connection: GitConnection }) {
       icon={<Github />}
       action={<StatusBadge tone="ok" label="正常" />}
       description={
-        connection.kind === "app" ? "GitHub App 安装 · 每次运行现取 1 小时令牌，只含授权的仓库" : "访问令牌 · 加密保存，经运行环境下发给员工，不落盘"
+        connection.kind === "app" ? "一键连接 · 每次运行现取 1 小时令牌，只含你授权的仓库" : "访问令牌 · 加密保存，经运行环境下发给员工，不落盘"
       }
     >
       <KeyValueList
@@ -118,7 +113,7 @@ function ConnectionCard({ connection }: { connection: GitConnection }) {
           title={`删除连接「${connection.name}」？`}
           description={
             connection.kind === "app"
-              ? "只删除平台里的记录；GitHub 上的安装还在，可以在 GitHub 设置里卸载。用它的项目会失去仓库凭证。"
+              ? "只删除这里的连接；要彻底收回授权，在 GitHub 的 Settings → Applications 里卸载。用它的项目会失去仓库凭证。"
               : "用它的项目会失去仓库凭证，员工将无法再拉取或推送私有仓库，直到你在项目设置里换一个连接。"
           }
           onConfirm={() => remove.mutate()}
