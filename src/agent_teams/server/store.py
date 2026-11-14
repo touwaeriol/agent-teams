@@ -56,9 +56,9 @@ class Store(Protocol):
     async def messages(self, conversation_id: str) -> list[MessageView]: ...
     async def save_task(self, conversation_id: str, task: Task) -> None: ...
     async def tasks(self, conversation_id: str) -> list[TaskView]: ...
+    async def unfinished_conversations(self) -> list[str]: ...
     async def save_history(self, conversation_id: str, turns: list[dict[str, Any]]) -> None: ...
     async def history(self, conversation_id: str) -> list[dict[str, Any]]: ...
-    async def interrupt_unfinished(self, conversation_id: str) -> None: ...
     async def close(self) -> None: ...
 
 
@@ -102,17 +102,16 @@ class MemoryStore:
     async def tasks(self, conversation_id: str) -> list[TaskView]:
         return list(self._tasks[conversation_id].values())
 
+    async def unfinished_conversations(self) -> list[str]:
+        return [
+            cid for cid, tasks in self._tasks.items() if any(not t.finished for t in tasks.values())
+        ]
+
     async def save_history(self, conversation_id: str, turns: list[dict[str, Any]]) -> None:
         self._histories[conversation_id] = turns
 
     async def history(self, conversation_id: str) -> list[dict[str, Any]]:
         return list(self._histories.get(conversation_id, []))
-
-    async def interrupt_unfinished(self, conversation_id: str) -> None:
-        tasks = self._tasks[conversation_id]
-        for task_id, view in tasks.items():
-            if view.status in ("pending", "running"):
-                tasks[task_id] = view.model_copy(update={"status": "failed", "output": INTERRUPTED})
 
     async def close(self) -> None:
         return None
@@ -194,6 +193,12 @@ class PostgresStore:
         )
         return [TaskView(**{**dict(r), "depends_on": json.loads(r["depends_on"])}) for r in rows]
 
+    async def unfinished_conversations(self) -> list[str]:
+        rows = await self._pool.fetch(
+            "SELECT DISTINCT conversation_id FROM at_tasks WHERE status IN ('pending', 'running')"
+        )
+        return [r["conversation_id"] for r in rows]
+
     async def save_history(self, conversation_id: str, turns: list[dict[str, Any]]) -> None:
         await self._pool.execute(
             "UPDATE at_conversations SET history = $2::jsonb WHERE id = $1",
@@ -206,14 +211,6 @@ class PostgresStore:
             "SELECT history FROM at_conversations WHERE id = $1", conversation_id
         )
         return list(json.loads(raw)) if raw else []
-
-    async def interrupt_unfinished(self, conversation_id: str) -> None:
-        await self._pool.execute(
-            "UPDATE at_tasks SET status = 'failed', output = $2, updated_at = now() "
-            "WHERE conversation_id = $1 AND status IN ('pending', 'running')",
-            conversation_id,
-            INTERRUPTED,
-        )
 
     async def close(self) -> None:
         await self._pool.close()

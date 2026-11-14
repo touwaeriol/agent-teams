@@ -13,7 +13,7 @@ import pytest
 
 from agent_teams import Task
 from agent_teams.server.broker import ValkeyBroker
-from agent_teams.server.store import INTERRUPTED, PostgresStore
+from agent_teams.server.store import PostgresStore
 
 DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "")
 VALKEY_URL = os.environ.get("TEST_VALKEY_URL", "")
@@ -44,9 +44,10 @@ async def test_postgres_store_round_trip() -> None:
         assert (tasks[0].status, tasks[0].output) == ("done", "ok")
         assert tasks[2].depends_on == ["t1"]
 
-        await store.interrupt_unfinished(conversation_id)
-        tasks = await store.tasks(conversation_id)
-        assert (tasks[1].status, tasks[1].output) == ("failed", INTERRUPTED)
+        assert tasks[1].status == "running"
+        assert conversation_id in await store.unfinished_conversations()
+        assert not tasks[1].finished
+        assert tasks[0].finished
 
         turns = [{"kind": "user", "text": "你好"}]
         await store.save_history(conversation_id, turns)

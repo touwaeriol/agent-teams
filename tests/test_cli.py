@@ -10,9 +10,10 @@ import httpx2 as httpx
 import pytest
 from anthropic import AuthenticationError
 
-from agent_teams import Agent, Leader, LocalNode, ScriptedLLM, Sequential, cli
+from agent_teams import Agent, Leader, LocalNode, ScriptedLLM, Sequential, SSHNode, cli
 from agent_teams.errors import describe_error
 from agent_teams.llm import call, say
+from agent_teams.remote import node_token
 from agent_teams.runnable import Runnable
 from agent_teams.types import AssistantTurn, Reply
 
@@ -171,7 +172,8 @@ def test_auth_errors_explain_how_to_sign_in() -> None:
 def test_nodes_command_reports_each_node(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    good, bad = LocalNode("good", str(tmp_path)), LocalNode("bad", str(tmp_path / "missing"))
+    good = LocalNode("good", str(tmp_path))
+    bad = SSHNode("bad", "127.0.0.1", port=1, options=["-o", "ConnectTimeout=3"])
     monkeypatch.setattr(cli, "load_nodes", lambda _path: [good, bad])
 
     assert cli.main(["nodes", "team.yaml"]) == 1
@@ -186,4 +188,36 @@ def test_nodes_command_without_nodes(
 ) -> None:
     monkeypatch.setattr(cli, "load_nodes", lambda _path: [])
     assert cli.main(["nodes", "team.yaml"]) == 0
-    assert capsys.readouterr().out.strip() == "no nodes defined"
+    assert capsys.readouterr().out.startswith("no SSH or local nodes defined")
+
+
+def test_node_token_prints_the_token_and_install_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    team = tmp_path / "team.yaml"
+    team.write_text("nodes: [{name: build-1, revision: 3}]\nteam: {name: solo}\n", encoding="utf-8")
+    monkeypatch.setenv("AGENT_TEAMS_TOKEN", "console-secret")
+
+    assert cli.main(["node-token", str(team), "build-1", "--console", "http://c:3001"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out.strip() == node_token("console-secret", "build-1", 3)
+    assert "--console http://c:3001 --name build-1" in captured.err
+
+
+def test_node_token_needs_the_console_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    team = tmp_path / "team.yaml"
+    team.write_text("nodes: [{name: build-1}]\nteam: {name: solo}\n", encoding="utf-8")
+    monkeypatch.delenv("AGENT_TEAMS_TOKEN", raising=False)
+    assert cli.main(["node-token", str(team), "build-1"]) == 1
+    assert "AGENT_TEAMS_TOKEN" in capsys.readouterr().err
+
+
+def test_node_daemon_requires_its_token(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("AGENT_TEAMS_NODE_TOKEN", raising=False)
+    assert cli.main(["node", "--console", "http://c:3001", "--name", "n1"]) == 1
+    assert "AGENT_TEAMS_NODE_TOKEN" in capsys.readouterr().err

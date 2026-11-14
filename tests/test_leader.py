@@ -138,6 +138,6 @@ async def test_leader_dispatches_to_claude_code_on_two_nodes(tmp_path: Path) -> 
 
     assert result.output == "report received"
     outputs = {child.name: json.loads(child.output) for child in result.children}
-    assert outputs["t1:backend"]["cwd"] == str(api_dir)
-    assert outputs["t2:frontend"]["cwd"] == str(web_dir)
+    assert outputs["t1:backend"]["cwd"] == str(api_dir / "backend")
+    assert outputs["t2:frontend"]["cwd"] == str(web_dir / "frontend")
     assert outputs["t2:frontend"]["argv"][:2] == ["-p", "add page"]

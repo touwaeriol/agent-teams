@@ -20,10 +20,11 @@ from ..conversation import Conversation
 from ..errors import AgentTeamsError, describe_error
 from ..hooks import Event, Hooks, TaskAssigned, TaskFinished, TaskStarted, format_event
 from ..leader import Leader
+from ..remote import NodeRegistry
 from .broker import Broker
 from .models import ConversationView, MessageView, Role, TaskView
 from .serde import dump_turn, load_turn
-from .store import Store
+from .store import INTERRUPTED, Store
 
 
 class UnknownConversation(KeyError):  # noqa: N818 - mirrors KeyError
@@ -37,10 +38,17 @@ class _Live:
 
 
 class Hub:
-    def __init__(self, lead: Leader | Agent, store: Store, broker: Broker) -> None:
+    def __init__(
+        self,
+        lead: Leader | Agent,
+        store: Store,
+        broker: Broker,
+        registry: NodeRegistry | None = None,
+    ) -> None:
         self.lead = lead
         self.store = store
         self.broker = broker
+        self.registry = registry or NodeRegistry()
         self._live: dict[str, _Live] = {}
         self._opening = asyncio.Lock()
 
@@ -53,6 +61,11 @@ class Hub:
         message = await self._record(conversation_id, "user", content)
         live.conversation.post(content)
         return message
+
+    async def recover(self) -> None:
+        """After a restart: resume every conversation that still has unfinished tasks."""
+        for conversation_id in await self.store.unfinished_conversations():
+            await self._ensure_live(conversation_id)
 
     async def messages(self, conversation_id: str) -> list[MessageView]:
         await self.check(conversation_id)
@@ -81,13 +94,26 @@ class Hub:
 
     async def _resume(self, conversation_id: str) -> _Live:
         await self.check(conversation_id)
-        await self.store.interrupt_unfinished(conversation_id)
-        first_task = len(await self.store.tasks(conversation_id)) + 1
-        conversation = self._open(RunContext(self._hooks(conversation_id)), first_task)
+        tasks = await self.store.tasks(conversation_id)
+        ctx = RunContext(self._hooks(conversation_id), run_key=conversation_id)
+        conversation = self._open(ctx, len(tasks) + 1)
         history = await self.store.history(conversation_id)
         conversation.session.history.extend(load_turn(turn) for turn in history)
+        await self._recover(conversation_id, conversation, [t for t in tasks if not t.finished])
         responder = asyncio.create_task(self._respond_forever(conversation_id, conversation))
         return _Live(conversation, responder)
+
+    async def _recover(
+        self, conversation_id: str, conversation: Conversation, unfinished: list[TaskView]
+    ) -> None:
+        """Re-attach running tasks on daemon nodes; mark everything else interrupted."""
+        board = conversation.board
+        for view in unfinished:
+            if board is not None and view.status == "running" and board.is_resumable(view.assignee):
+                await board.adopt(view.to_task())
+                continue
+            interrupted = view.model_copy(update={"status": "failed", "output": INTERRUPTED})
+            await self.store.save_task(conversation_id, interrupted.to_task())
 
     def _open(self, ctx: RunContext, first_task: int) -> Conversation:
         if isinstance(self.lead, Leader):

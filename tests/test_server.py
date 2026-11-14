@@ -6,9 +6,11 @@ from collections.abc import Awaitable, Callable
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from agent_teams import Leader, ScriptedLLM, Task
 from agent_teams.llm import call, say
+from agent_teams.remote import NodeRegistry
 from agent_teams.server.app import create_app, sse
 from agent_teams.server.broker import MemoryBroker
 from agent_teams.server.hub import Hub, UnknownConversation
@@ -235,3 +237,86 @@ def test_api_unknown_conversation_is_404(client: TestClient) -> None:
             client.post(f"{base}/messages", json={"content": "x"}, headers=AUTH).status_code == 404
         )
         assert client.get(f"{base}/events", headers=AUTH).status_code == 404
+
+
+class ResumableWorker(Worker):
+    resumable = True
+
+
+async def test_restart_reattaches_running_tasks_on_resumable_employees() -> None:
+    store = MemoryStore()
+    await store.create_conversation("c1", "")
+    await store.save_task("c1", Task("t1", "coder", "build it", status="running"))
+    await store.save_task("c1", Task("t2", "writer", "draft it", status="running"))
+    await store.save_task("c1", Task("t3", "coder", "later", ("t1",), status="pending"))
+    coder = ResumableWorker("coder")
+    llm = ScriptedLLM([say("noted"), say("coder finished")])
+    hub = Hub(Leader("lead", llm, [coder, Worker("writer")]), store, MemoryBroker())
+
+    await hub.post("c1", "status?")
+
+    async def settled() -> bool:
+        return len(await leader_messages(hub, "c1")) == 2
+
+    await eventually(settled)
+    tasks = {t.id: t for t in await store.tasks("c1")}
+    assert (tasks["t1"].status, tasks["t1"].output) == ("done", "coder finished")
+    assert coder.tasks == ["build it"]  # re-run under the same ID -> same run key
+    assert (tasks["t2"].status, tasks["t2"].output) == ("failed", INTERRUPTED)
+    assert (tasks["t3"].status, tasks["t3"].output) == ("failed", INTERRUPTED)
+    _system, history, _tools = llm.calls[-1]
+    assert any("[Task t1 · coder · done]" in str(turn) for turn in history)
+    await hub.close()
+
+
+def test_api_lists_nodes() -> None:
+    registry = NodeRegistry("s")
+    registry.declare("build-1")
+
+    async def factory() -> Hub:
+        return Hub(
+            Leader("lead", ScriptedLLM([]), [Worker("w")]), MemoryStore(), MemoryBroker(), registry
+        )
+
+    with TestClient(create_app(factory, "secret")) as client:
+        nodes = client.get("/api/nodes", headers=AUTH).json()
+        assert nodes == [{"name": "build-1", "online": False}]
+        assert client.get("/api/nodes").status_code == 401
+
+
+def test_node_socket_rejects_bad_tokens() -> None:
+    registry = NodeRegistry("s")
+    registry.declare("build-1")
+
+    async def factory() -> Hub:
+        return Hub(
+            Leader("lead", ScriptedLLM([]), [Worker("w")]), MemoryStore(), MemoryBroker(), registry
+        )
+
+    with TestClient(create_app(factory, "secret")) as client:
+        headers = {"Authorization": "Bearer wrong"}
+        with (
+            pytest.raises(WebSocketDisconnect),
+            client.websocket_connect("/nodes/connect?name=build-1", headers=headers),
+        ):
+            pass
+
+
+async def test_recover_resumes_unfinished_conversations_without_a_message() -> None:
+    store = MemoryStore()
+    await store.create_conversation("c1", "")
+    await store.save_task("c1", Task("t1", "coder", "build it", status="running"))
+    await store.create_conversation("c2", "")
+    await store.save_task("c2", Task("t1", "coder", "old", status="done", output="ok"))
+    coder = ResumableWorker("coder")
+    hub = Hub(Leader("lead", ScriptedLLM([say("coder finished")]), [coder]), store, MemoryBroker())
+
+    await hub.recover()
+
+    async def done() -> bool:
+        return (await store.tasks("c1"))[0].status == "done"
+
+    await eventually(done)
+    assert await store.unfinished_conversations() == []
+    assert coder.tasks == ["build it"]
+    await hub.close()

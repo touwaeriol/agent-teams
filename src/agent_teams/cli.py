@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import sys
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
 import anthropic
 
@@ -23,6 +25,7 @@ from .errors import AgentTeamsError, ConfigError, describe_error
 from .hooks import Hooks, trace
 from .leader import Leader
 from .nodes import Node, probe
+from .remote import NodeRegistry
 
 EXIT_COMMANDS = frozenset({"/exit", "/quit"})
 
@@ -125,7 +128,54 @@ def _parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
     serve.set_defaults(handler=_serve)
 
-    nodes = commands.add_parser("nodes", help="check every node: SSH works and claude is installed")
+    daemon = commands.add_parser("node", help="run the node daemon on a worker machine")
+    daemon.add_argument(
+        "--console",
+        default=os.environ.get("AGENT_TEAMS_CONSOLE"),
+        required=not os.environ.get("AGENT_TEAMS_CONSOLE"),
+        help="console URL, e.g. http://console:3001",
+    )
+    daemon.add_argument(
+        "--name",
+        default=os.environ.get("AGENT_TEAMS_NODE"),
+        required=not os.environ.get("AGENT_TEAMS_NODE"),
+        help="this node's name in the team file",
+    )
+    daemon.add_argument(
+        "--root",
+        default=os.environ.get("AGENT_TEAMS_ROOT", os.path.expanduser("~/agent-teams")),
+        help="employees work only inside this directory",
+    )
+    daemon.add_argument(
+        "--allow",
+        action="append",
+        help="executable employees may run (repeatable; default: claude, codex)",
+    )
+    daemon.add_argument(
+        "--max-runs", type=int, default=int(os.environ.get("AGENT_TEAMS_MAX_RUNS", "4"))
+    )
+    daemon.add_argument(
+        "--state",
+        default=os.environ.get(
+            "AGENT_TEAMS_STATE", os.path.expanduser("~/.local/state/agent-teams")
+        ),
+    )
+    daemon.set_defaults(handler=_daemon)
+
+    token = commands.add_parser(
+        "node-token", help="print a daemon node's token and install command"
+    )
+    token.add_argument("team")
+    token.add_argument("name")
+    token.add_argument(
+        "--console",
+        default=os.environ.get("AGENT_TEAMS_PUBLIC_URL", "http://<console-host>:<port>"),
+    )
+    token.set_defaults(handler=_node_token)
+
+    nodes = commands.add_parser(
+        "nodes", help="check SSH/local nodes: reachable and claude installed"
+    )
     nodes.add_argument("team")
     nodes.set_defaults(handler=_nodes)
 
@@ -167,10 +217,53 @@ def _serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _daemon(args: argparse.Namespace) -> int:
+    from .daemon import DaemonConfig, run_daemon  # noqa: PLC0415 - optional [node] extra
+
+    token = os.environ.get("AGENT_TEAMS_NODE_TOKEN", "")
+    if not token:
+        raise ConfigError(
+            "set AGENT_TEAMS_NODE_TOKEN (see `agent-teams node-token` on the console)"
+        )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    config = DaemonConfig(
+        console=args.console,
+        name=args.name,
+        token=token,
+        root=Path(args.root),
+        state=Path(args.state),
+        allow=frozenset(args.allow or ("claude", "codex")),
+        max_runs=args.max_runs,
+    )
+    run_daemon(config)
+    return 0
+
+
+def _node_token(args: argparse.Namespace) -> int:
+    secret = os.environ.get("AGENT_TEAMS_TOKEN", "")
+    if not secret:
+        raise ConfigError("set AGENT_TEAMS_TOKEN to the console's token")
+    registry = NodeRegistry(secret)
+    load_nodes(args.team, registry)
+    token = registry.token_for(args.name)
+    print(token)
+    print(INSTALL_HINT.format(console=args.console, name=args.name, token=token), file=sys.stderr)
+    return 0
+
+
+INSTALL_HINT = """
+Install on the node (needs Python 3.10+, git and systemd --user):
+  curl -fsSL <repo>/deploy/install-node.sh \\
+    | AGENT_TEAMS_NODE_TOKEN={token} bash -s -- --console {console} --name {name}
+or from the console over SSH, once:
+  ssh user@node "AGENT_TEAMS_NODE_TOKEN={token} bash -s -- --console {console} --name {name}" \\
+    < deploy/install-node.sh"""
+
+
 def _nodes(args: argparse.Namespace) -> int:
-    nodes = load_nodes(args.team)
+    nodes = [n for n in load_nodes(args.team) if not n.resumable]
     if not nodes:
-        print("no nodes defined")
+        print("no SSH or local nodes defined (daemon nodes: see GET /api/nodes on the console)")
         return 0
     results = asyncio.run(_probe_all(nodes))
     for node, outcome in zip(nodes, results, strict=True):

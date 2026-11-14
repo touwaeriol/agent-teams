@@ -54,6 +54,7 @@ from .leader import LEADER_INSTRUCTIONS, Leader
 from .llm.anthropic import AnthropicLLM
 from .llm.base import LLM
 from .nodes import LocalNode, Node, SSHNode
+from .remote import NodeRegistry, RemoteNode
 from .runnable import Runnable
 from .teams import SUPERVISOR_INSTRUCTIONS, Parallel, RoundRobin, Sequential, supervisor
 from .tools import Tool, tool
@@ -243,7 +244,9 @@ MemberSpec = Annotated[
 
 
 class NodeConfig(BaseModel):
-    """A machine: reached over SSH, or ``local: true`` for the server itself."""
+    """A machine. By default its daemon dials in (``agent-teams node``); with
+    ``host`` it is reached over SSH instead, with ``local: true`` it is the
+    console host itself."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -255,14 +258,22 @@ class NodeConfig(BaseModel):
     identity_file: str = ""
     workdir: str = ""
     ssh_options: list[str] = Field(default_factory=list)
+    revision: int = Field(1, ge=1)
 
     @model_validator(mode="after")
-    def _reachable(self) -> NodeConfig:
-        if self.local == bool(self.host):
-            raise ValueError(f"node '{self.name}' needs either 'host' or 'local: true'")
+    def _one_kind(self) -> NodeConfig:
+        if self.local and self.host:
+            raise ValueError(f"node '{self.name}' cannot have both 'host' and 'local: true'")
         return self
 
-    def build(self) -> Node:
+    @property
+    def is_daemon(self) -> bool:
+        return not (self.local or self.host)
+
+    def build(self, registry: NodeRegistry) -> Node:
+        if self.is_daemon:
+            registry.declare(self.name, self.revision)
+            return RemoteNode(self.name, registry, self.workdir)
         if self.local:
             return LocalNode(self.name, self.workdir)
         return SSHNode(
@@ -290,8 +301,8 @@ class TeamFile(BaseModel):
             raise ValueError(f"node names must be unique: {names}")
         return self
 
-    def build_nodes(self) -> dict[str, Node]:
-        return {n.name: n.build() for n in self.nodes}
+    def build_nodes(self, registry: NodeRegistry) -> dict[str, Node]:
+        return {n.name: n.build(registry) for n in self.nodes}
 
     @model_validator(mode="before")
     @classmethod
@@ -337,10 +348,19 @@ def parse_team(data: Mapping[str, Any]) -> TeamFile:
         raise ConfigError(str(exc)) from exc
 
 
-def build_team(data: Mapping[str, Any], llm_factory: LLMFactory = anthropic_factory) -> Runnable:
-    """Build a runnable from an already-parsed definition."""
+def build_team(
+    data: Mapping[str, Any],
+    llm_factory: LLMFactory = anthropic_factory,
+    registry: NodeRegistry | None = None,
+) -> Runnable:
+    """Build a runnable from an already-parsed definition.
+
+    Daemon nodes connect to ``registry`` (the web service owns it); without one
+    they can never come online.
+    """
     spec = parse_team(data)
-    return spec.team.build(Builder(spec.llm, llm_factory, spec.build_nodes()))
+    nodes = spec.build_nodes(registry or NodeRegistry())
+    return spec.team.build(Builder(spec.llm, llm_factory, nodes))
 
 
 def read_team_file(path: str | Path) -> Mapping[str, Any]:
@@ -350,14 +370,19 @@ def read_team_file(path: str | Path) -> Mapping[str, Any]:
     return data
 
 
-def load_team(path: str | Path, llm_factory: LLMFactory = anthropic_factory) -> Runnable:
+def load_team(
+    path: str | Path,
+    llm_factory: LLMFactory = anthropic_factory,
+    registry: NodeRegistry | None = None,
+) -> Runnable:
     """Build a runnable from a YAML or JSON file."""
-    return build_team(read_team_file(path), llm_factory)
+    return build_team(read_team_file(path), llm_factory, registry)
 
 
-def load_nodes(path: str | Path) -> list[Node]:
+def load_nodes(path: str | Path, registry: NodeRegistry | None = None) -> list[Node]:
     """The machines defined in a team file."""
-    return list(parse_team(read_team_file(path)).build_nodes().values())
+    nodes = parse_team(read_team_file(path)).build_nodes(registry or NodeRegistry())
+    return list(nodes.values())
 
 
 def load_tool(ref: str) -> Tool:

@@ -13,6 +13,7 @@ from agent_teams.claude_code import ClaudeCodeWorker
 from agent_teams.config import build_team, load_nodes, load_team, load_tool
 from agent_teams.llm.base import LLM
 from agent_teams.nodes import LocalNode, SSHNode
+from agent_teams.remote import NodeRegistry, RemoteNode, node_token
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
@@ -241,8 +242,7 @@ def test_invalid_claude_code_employees(
 @pytest.mark.parametrize(
     ("nodes", "fragment"),
     [
-        ([{"name": "x"}], "either 'host' or 'local: true'"),
-        ([{"name": "x", "host": "h", "local": True}], "either 'host' or 'local: true'"),
+        ([{"name": "x", "host": "h", "local": True}], "cannot have both"),
         ([{"name": "x", "local": True}, {"name": "x", "local": True}], "unique"),
     ],
 )
@@ -255,3 +255,26 @@ def test_load_nodes(tmp_path: Path) -> None:
     path = tmp_path / "team.yaml"
     path.write_text(yaml.safe_dump(multi_node_team(tmp_path)), encoding="utf-8")
     assert [n.name for n in load_nodes(path)] == ["build-1", "here"]
+
+
+def test_nodes_without_host_are_daemon_nodes() -> None:
+    registry = NodeRegistry("secret")
+    team = build_team(
+        {
+            "nodes": [{"name": "gpu-box", "workdir": "agents", "revision": 2}],
+            "leader": "lead",
+            "employees": [
+                {"name": "lead"},
+                {"name": "coder", "type": "claude_code", "node": "gpu-box"},
+            ],
+        },
+        llm_factory=RecordingFactory(),
+        registry=registry,
+    )
+    assert isinstance(team, Leader)
+    (coder,) = team.members
+    assert isinstance(coder, ClaudeCodeWorker)
+    assert isinstance(coder.node, RemoteNode)
+    assert coder.resumable
+    assert coder.directory == "agents/coder"
+    assert registry.verify("gpu-box", node_token("secret", "gpu-box", 2))

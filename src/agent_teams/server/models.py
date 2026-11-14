@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from ..types import Task, TaskStatus
+from ..types import FINAL_STATUSES, Task, TaskStatus
 
 Role = Literal["user", "leader", "error"]
 
@@ -32,6 +32,20 @@ class TaskView(BaseModel):
     depends_on: list[str]
     status: TaskStatus
     output: str
+
+    @property
+    def finished(self) -> bool:
+        return self.status in FINAL_STATUSES
+
+    def to_task(self) -> Task:
+        return Task(
+            self.id,
+            self.assignee,
+            self.instruction,
+            tuple(self.depends_on),
+            self.status,
+            self.output,
+        )
 
     @classmethod
     def of(cls, task: Task) -> TaskView:

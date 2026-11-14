@@ -57,9 +57,9 @@ async def test_runs_claude_and_returns_the_result(tmp_path: Path) -> None:
     result = await worker(tmp_path).run("add a test", RunContext(hooks, ("lead",)))
 
     payload = json.loads(result.output)
-    assert payload["cwd"] == str(tmp_path)
+    assert payload["cwd"] == str(tmp_path / "coder")  # each employee has its own directory
     assert payload["argv"][:2] == ["-p", "add a test"]
-    assert progress[0] == f"lead/coder session s-1 in {tmp_path}"
+    assert progress[0] == f"lead/coder session s-1 in {tmp_path / 'coder'}"
     assert 'lead/coder Bash {"command": "ls"}' in progress
     assert "lead/coder not json noise" in progress
     assert progress[-1] == "lead/coder finished: success in 2 turns, $0.0123"

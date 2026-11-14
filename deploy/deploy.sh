@@ -24,6 +24,8 @@ set_env() {
 [ -f .env ] || { cp deploy/env.example .env; chmod 600 .env; }
 
 [ -n "$(env_value PORT)" ] || set_env PORT "$(first_free_port)"
+public_host="$(hostname -I 2>/dev/null | awk '{print $1}')"
+[ -n "$(env_value AGENT_TEAMS_PUBLIC_URL)" ] || set_env AGENT_TEAMS_PUBLIC_URL "http://${public_host:-localhost}:$(env_value PORT)"
 [ -n "$(env_value AGENT_TEAMS_TOKEN)" ] || set_env AGENT_TEAMS_TOKEN "$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 
 missing=()
@@ -48,15 +50,16 @@ docker compose up -d
 port="$(env_value PORT)"
 for _ in $(seq 1 30); do
   if curl -fsS "http://127.0.0.1:$port/healthz" > /dev/null 2>&1; then
-    host="$(hostname -I 2>/dev/null | awk '{print $1}')"
     echo
-    echo "部署完成：http://${host:-<服务器IP>}:$port"
+    echo "部署完成：$(env_value AGENT_TEAMS_PUBLIC_URL)"
     echo "访问令牌：$(env_value AGENT_TEAMS_TOKEN)"
     echo
-    echo "节点 SSH 公钥（加到每个节点的 ~/.ssh/authorized_keys）："
-    cat ssh/id_ed25519.pub
+    echo "添加守护进程节点（team.yaml 的 nodes 里先写上 - name: <节点名>）："
+    echo "  docker compose exec agent-teams agent-teams node-token /app/team.yaml <节点名>"
+    echo "  它会打印令牌和在节点上执行的安装命令；节点在线状态见网页右侧"
     echo
-    echo "检查节点：docker compose exec agent-teams agent-teams nodes /app/team.yaml"
+    echo "SSH 节点和通过 SSH 安装守护进程用的公钥（加到节点的 ~/.ssh/authorized_keys）："
+    cat ssh/id_ed25519.pub
     exit 0
   fi
   sleep 2

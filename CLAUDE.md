@@ -8,7 +8,7 @@ Composable multi-agent teams on the Claude API (Python 3.10+, `src/` layout).
 pip install -e ".[dev]"
 ruff format . && ruff check .   # lint incl. mccabe ≤ 6, nested blocks ≤ 3
 mypy                            # strict, covers src/, tests/, examples/
-pytest                          # offline; never hits the real API
+pytest                          # offline; never hits the real API (daemon tests use a local uvicorn + fake claude)
 # integration tests run when TEST_DATABASE_URL / TEST_VALKEY_URL are set
 python examples/offline_demo.py
 python examples/offline_leader.py   # non-blocking leader demo
@@ -21,7 +21,8 @@ python examples/offline_leader.py   # non-blocking leader demo
 - `AnthropicLLM` streams via `client.beta.messages.stream` with adaptive thinking, effort, and server-side refusal fallbacks; `_echo_blocks` drops pre-fallback non-text blocks.
 - `Leader` (leader.py) is the non-blocking lead: its `TaskBoard` (tasks.py) runs members as asyncio tasks; `assign_task` returns at once, and every outcome (done/failed/cancelled, incl. cancelled-before-start) is settled in a done-callback that notifies listeners synchronously.
 - `Conversation` (conversation.py) is an inbox over one `Session`: the user and task reports `post`, a single consumer calls `reply`. `agent-teams chat` reads input and prints replies concurrently; EOF drains, `/exit` cancels.
-- Config: `nodes:` are machines (`NodeConfig` -> `SSHNode`/`LocalNode` in nodes.py, agentless SSH via the system `ssh`); `leader` + `employees` (config.py `_promote_leader`) turns the chosen agent into a `leader` over the other employees.
+- Config: `nodes:` are machines. Default kind is a daemon node (`RemoteNode`, remote.py): the node runs `agent-teams node` (daemon.py, `[node]` extra) which dials `/nodes/connect` with a per-node HMAC token (`node_token`, revocable via `revision`). `host:` gives an `SSHNode`, `local: true` a `LocalNode` (nodes.py). `leader` + `employees` (config.py `_promote_leader`) turns the chosen agent into a `leader` over the other employees.
+- Daemon protocol: `start` is idempotent per run_id (= `RunContext.run_key` + employee); the daemon replays output after `after` from memory or its run log, so runs survive reconnects, console restarts (Hub re-adopts running tasks on resumable members) and daemon restarts (unfinished runs report exit 137). Policy: only `--allow` executables inside `--root`; cancel kills the process group.
 - `ClaudeCodeWorker` (claude_code.py) is an employee that runs `claude -p ... --output-format stream-json --verbose` on its node; progress lines become `WorkerProgress` events, the final `result` line is the output (error results win over the exit status). `agent-teams nodes` probes every node.
 - `Agent.session()` returns a `Session` (multi-turn, rolls back a failed message). `supervisor()` is the blocking alternative to `Leader`.
 - `server/` (optional `[server]` extra): `Hub` owns one `Conversation` + responder task per chat and mirrors messages/tasks/history to a `Store` (`PostgresStore`, `MemoryStore`) and events to a `Broker` (`ValkeyBroker`, `MemoryBroker`). FastAPI app in app.py: Bearer token or HttpOnly session cookie; SSE for live events. Deploy: `docker-compose.yml` (host network, uses the host's PG/Valkey) + `deploy/deploy.sh`.

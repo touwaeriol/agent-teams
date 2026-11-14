@@ -45,6 +45,15 @@ class ClaudeCodeWorker(Runnable):
     def __post_init__(self) -> None:
         self.description = self.description or f"Claude Code on node {self.node.name}"
 
+    @property
+    def resumable(self) -> bool:
+        """Whether an interrupted task can re-attach to its run (daemon nodes)."""
+        return self.node.resumable
+
+    @property
+    def directory(self) -> str:
+        return self.node.workdir_for(self.name, self.workdir)
+
     def command(self, task: str) -> list[str]:
         """The ``claude`` invocation for one task."""
         options = {
@@ -78,7 +87,8 @@ class ClaudeCodeWorker(Runnable):
 
     async def _follow(self, task: str, ctx: RunContext, results: list[Mapping[str, Any]]) -> None:
         """Stream the run, reporting progress and collecting ``result`` events."""
-        async for line in self.node.stream(self.command(task), self.workdir):
+        key = f"{ctx.run_key}/{self.name}" if ctx.run_key else ""
+        async for line in self.node.stream(self.command(task), self.directory, key):
             event = _parse(line)
             if event.get("type") == "result":
                 results.append(event)

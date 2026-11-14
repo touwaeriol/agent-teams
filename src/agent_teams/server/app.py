@@ -16,14 +16,26 @@ from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from importlib import resources
+from typing import Any
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from ..agent import Agent
 from ..config import load_team
 from ..errors import ConfigError
 from ..leader import Leader
+from ..remote import NodeLink, NodeRegistry
 from .broker import Broker, Event, MemoryBroker, ValkeyBroker
 from .hub import Hub, UnknownConversation
 from .models import (
@@ -66,10 +78,11 @@ class Settings:
 
     def hub_factory(self) -> HubFactory:
         async def build() -> Hub:
-            lead = load_team(self.team_file)
+            registry = NodeRegistry(secret=self.token)
+            lead = load_team(self.team_file, registry=registry)
             if not isinstance(lead, (Leader, Agent)):
                 raise ConfigError("the team file needs a leader or an agent at the top")
-            return Hub(lead, await self._store(), await self._broker())
+            return Hub(lead, await self._store(), await self._broker(), registry)
 
         return build
 
@@ -91,6 +104,7 @@ def create_app(hub_factory: HubFactory, token: str) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         hub = await hub_factory()
         app.state.hub = hub
+        await hub.recover()
         try:
             yield
         finally:
@@ -102,6 +116,7 @@ def create_app(hub_factory: HubFactory, token: str) -> FastAPI:
     app.add_exception_handler(UnknownConversation, _not_found)
     app.include_router(_api(token))
     app.include_router(_session(token))
+    app.add_api_websocket_route("/nodes/connect", node_socket)
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def index() -> str:
@@ -125,6 +140,7 @@ def _api(token: str) -> APIRouter:
     )
     router.add_api_route(f"{conversation}/tasks", list_tasks, methods=["GET"])
     router.add_api_route(f"{conversation}/events", events, methods=["GET"])
+    router.add_api_route("/nodes", list_nodes, methods=["GET"])
     return router
 
 
@@ -209,7 +225,43 @@ def _require(supplied: str, expected: str) -> None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or missing token")
 
 
-def _hub(request: Request) -> Hub:
+async def list_nodes(request: Request) -> list[dict[str, Any]]:
+    return _hub(request).registry.statuses()
+
+
+async def node_socket(websocket: WebSocket) -> None:
+    """A node daemon's connection: authenticate, then route its messages to runs."""
+    registry = _hub(websocket).registry
+    name = websocket.query_params.get("name", "")
+    token = websocket.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if not registry.verify(name, token):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    await websocket.accept()
+    link = NodeLink(name, _serialized(websocket.send_json), await websocket.receive_json())
+    registry.attach(link)
+    logger.info("node %s connected", name)
+    try:
+        while True:
+            link.deliver(await websocket.receive_json())
+    except WebSocketDisconnect:
+        logger.info("node %s disconnected", name)
+    finally:
+        registry.detach(link)
+
+
+def _serialized(send: Callable[[Any], Awaitable[None]]) -> Callable[[Any], Awaitable[None]]:
+    """Runs share one socket; keep their sends from interleaving."""
+    lock = asyncio.Lock()
+
+    async def locked(message: Any) -> None:
+        async with lock:
+            await send(message)
+
+    return locked
+
+
+def _hub(request: Request | WebSocket) -> Hub:
     hub: Hub = request.app.state.hub
     return hub
 

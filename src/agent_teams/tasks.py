@@ -54,11 +54,29 @@ class TaskBoard:
         task = Task(f"t{next(self._ids)}", assignee, instruction, tuple(depends_on))
         self._validate(task)
         self._tasks[task.id] = task
+        self._launch(task)
+        await self._ctx.emit(TaskAssigned(self._ctx.path, task))
+        return task
+
+    def _launch(self, task: Task) -> None:
         handle = asyncio.create_task(self._execute(task))
         handle.add_done_callback(functools.partial(self._settle, task.id))
         self._handles[task.id] = handle
-        await self._ctx.emit(TaskAssigned(self._ctx.path, task))
+
+    async def adopt(self, task: Task) -> Task:
+        """Run a task from before a restart again under its original ID.
+
+        On resumable members (daemon nodes) the same run key re-attaches to the
+        run that kept going, instead of starting the work over.
+        """
+        task = replace(task, depends_on=(), status="pending", output="")
+        self._validate(task)
+        self._tasks[task.id] = task
+        self._launch(task)
         return task
+
+    def is_resumable(self, assignee: str) -> bool:
+        return bool(getattr(self._members.get(assignee), "resumable", False))
 
     def cancel(self, task_id: str) -> Task:
         task = self.get(task_id)
@@ -101,7 +119,8 @@ class TaskBoard:
         prompt = await self._prepare(task)
         running = self._update(task.id, status="running")
         await self._ctx.emit(TaskStarted(self._ctx.path, running))
-        return (await self._members[task.assignee].run(prompt, self._ctx)).output
+        ctx = self._ctx.keyed(task.id)
+        return (await self._members[task.assignee].run(prompt, ctx)).output
 
     async def _prepare(self, task: Task) -> str:
         prerequisites = [self._handles[d] for d in task.depends_on]

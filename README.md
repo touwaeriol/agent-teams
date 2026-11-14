@@ -15,7 +15,7 @@
 ## 安装
 
 ```bash
-pip install -e ".[dev]"        # 只用命令行：pip install -e .；网页服务：pip install -e ".[server]"
+pip install -e ".[dev]"        # 只用命令行：pip install -e .；网页服务：".[server]"；节点守护进程：".[node]"
 ```
 
 需要 Python 3.10+。
@@ -80,39 +80,48 @@ print(conversation.status())  # 任务板
 
 ## 多节点：在多台机器的 Claude Code 上派员工
 
-控制台（agent-teams 服务）通过 **SSH** 在各节点上执行 `claude -p`，节点上**不用装任何守护进程**，只需要：
+每台工作机器（节点）上运行一个**守护进程**（`agent-teams node`）。它主动连回控制台，保持一条 WebSocket 长连接，按 leader 的安排在本机启动员工（`claude -p`，也可以是 `codex`），并把输出实时传回控制台。
 
-1. 开着 sshd，并把控制台的公钥加进 `~/.ssh/authorized_keys`（`deploy/deploy.sh` 会生成密钥并打印公钥）；
-2. 装好 Claude Code，并完成认证：设置 `ANTHROPIC_API_KEY`，或者用 `claude setup-token` 生成 `CLAUDE_CODE_OAUTH_TOKEN`（订阅账号）。注意 `-p` 模式下只要设置了 `ANTHROPIC_API_KEY`，就会优先使用它；
-3. 准备好工作目录（通常是代码仓库）。
-
-```yaml
-# examples/multi_node.yaml（节选）
-nodes:                                  # 机器
-  - {name: build-1, host: 10.0.0.11, user: dev, workdir: /srv/app}
-  - {name: build-2, host: 10.0.0.12, user: dev, port: 2222, workdir: /srv/app}
-leader: lead
-employees:                              # 员工
-  - {name: lead, instructions: "你是技术负责人……"}
-  - name: backend
-    type: claude_code                   # 在节点上运行的 Claude Code 员工
-    node: build-1
-    description: 后端工程师（build-1）
-    allowed_tools: ["Bash(git *)", "Bash(pytest *)"]
-  - {name: frontend, type: claude_code, node: build-2, description: 前端工程师（build-2）}
+```
+节点 build-1：agent-teams node ──WebSocket（节点主动连出）──▶ 控制台（agent-teams serve）◀── 浏览器
+节点 build-2：agent-teams node ──────────────────────────────┘
 ```
 
-```bash
-agent-teams nodes examples/multi_node.yaml    # 逐个检查：SSH 能否连上、claude 是否可用
-agent-teams chat  examples/multi_node.yaml -v # -v 能看到每个员工在节点上调用了哪些工具
-```
+- **节点不用开放端口**：只要节点能访问控制台就行，内网或 NAT 后面的机器也能用。
+- **断线、控制台重启都不丢活**：员工在节点上照常运行，守护进程把输出同时写到本地日志。控制台重连后，从断点继续接收，或者从头回放。控制台重启后，原来"进行中"的任务会自动接回，不会重新执行一遍。
+- **节点权限很窄**：控制台只能让节点在 `--root` 目录下启动白名单里的程序（默认 `claude`、`codex`），其他命令和目录一律拒绝。每个节点有自己的令牌，在 `team.yaml` 里把该节点的 `revision` 加 1，就能单独吊销它的令牌。
+- **每个员工有自己的目录**：默认是 `<root>/<员工名>`，也可以用员工或节点的 `workdir` 指定。
+- **取消即停止**：取消任务时，守护进程会结束这个员工的整个进程组。
+- Claude Code / Codex 的安装和登录由各节点的用户自己完成；守护进程以安装它的那个用户身份运行，直接使用这个用户的登录状态。
 
-- 每个任务是在节点的工作目录里执行一次 `claude -p "<任务>" --output-format stream-json`。员工的工具调用会实时显示在活动日志里，最终结果作为任务报告交回 leader。
-- 权限：`permission_mode` 默认 `acceptEdits`，即可以改文件，但命令要在 `allowed_tools` 里明确允许（例如 `Bash(git *)`）。`plan` 适合只读审查。只有在隔离环境里才考虑 `bypassPermissions`。
-- 其他可选项：`model`、`max_turns`、`workdir`（覆盖节点目录）、`claude_command`（claude 不在 PATH 时写全路径）、`extra_args`。
-- 同一节点、同一目录上并行的员工可能互相覆盖改动。需要并行时，给他们不同的 `workdir`（比如不同的 git worktree）。
-- 取消任务会断开 SSH；远端的 claude 进程会在下次输出时退出，不一定立刻停止。
-- `local: true` 的节点在服务所在环境里直接执行。Docker 部署时，这个环境是容器（容器里没装 Claude Code），所以要用服务器本机当节点的话，配一个指向 `127.0.0.1` 的 SSH 节点即可。
+**添加一个节点**
+
+1. 在 `team.yaml` 里声明节点，并给员工指定节点：
+
+   ```yaml
+   nodes:
+     - name: build-1                 # 没写 host 就是守护进程节点
+   leader: lead
+   employees:
+     - {name: lead, instructions: "你是技术负责人……"}
+     - {name: backend, type: claude_code, node: build-1, description: 后端工程师（build-1）}
+   ```
+
+2. 在控制台上生成令牌和安装命令（Docker 部署时在命令前加 `docker compose exec agent-teams`）：
+
+   ```bash
+   agent-teams node-token team.yaml build-1
+   ```
+
+3. 在节点上执行打印出来的安装命令。也可以在控制台上通过 SSH 执行一次：`ssh user@node "AGENT_TEAMS_NODE_TOKEN=… bash -s -- --console … --name build-1" < deploy/install-node.sh`。安装脚本会建虚拟环境、写配置（令牌文件权限 600）、注册 systemd 用户服务（开机自启、崩溃自动重启），并记下 `claude`/`codex` 所在的路径。
+
+4. 网页右侧的"节点"面板会显示 build-1 在线，以及正在运行几个员工。
+
+在节点上查看状态：`systemctl --user status agent-teams-node`；查看日志：`journalctl --user -u agent-teams-node -f`。升级：重新运行一次安装命令。
+
+**员工的可选项**：`permission_mode`（默认 `acceptEdits`，即可以改文件，命令要在 `allowed_tools` 里允许，例如 `Bash(git *)`；`plan` 用于只读审查）、`allowed_tools`、`model`、`max_turns`、`workdir`、`claude_command`、`extra_args`。
+
+**也支持不装守护进程**：节点写 `host:` 就改用 SSH 直连，每次运行开一个 SSH 会话（适合控制台能直连、任务不长的场景，但断线或控制台重启后无法续跑）；写 `local: true` 就在控制台本机运行。
 
 ## 网页版与部署（Docker Compose）
 
@@ -245,7 +254,9 @@ src/agent_teams/
   agent.py      Agent：工具调用循环
   teams.py      Sequential / Parallel / RoundRobin / supervisor
   leader.py     Leader：负责人 + 任务板
-  nodes.py      节点：SSHNode / LocalNode，执行命令并逐行回传输出
+  nodes.py      节点接口：SSHNode / LocalNode，执行命令并逐行回传输出
+  remote.py     守护进程节点（控制台侧）：RemoteNode、连接注册表、节点令牌
+  daemon.py     节点守护进程：agent-teams node
   claude_code.py ClaudeCodeWorker：在节点上运行 claude -p 的员工
   tasks.py      TaskBoard：不阻塞派发、依赖、取消、完成通知
   conversation.py  Conversation：消息队列，用户和任务报告按序交给 leader

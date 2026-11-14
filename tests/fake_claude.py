@@ -2,7 +2,9 @@
 
 The prompt (after -p) selects the behaviour: "fail" -> error result,
 "crash" -> non-zero exit without a result, "slow:<pidfile>" -> sleep after
-writing its pid, anything else -> success. The final result echoes argv.
+writing its pid, "tick:<n>" -> n progress lines 0.15s apart, anything else ->
+success. The final result echoes argv and cwd. If FAKE_CLAUDE_MARKER is set,
+each start appends a line to that file (to count how often it really ran).
 """
 
 import json
@@ -13,6 +15,10 @@ from typing import Any
 
 argv = sys.argv[1:]
 prompt = argv[argv.index("-p") + 1]
+
+if marker := os.environ.get("FAKE_CLAUDE_MARKER"):
+    with open(marker, "a") as handle:
+        handle.write(f"{os.getpid()}\n")
 
 
 def emit(event: dict[str, Any]) -> None:
@@ -41,6 +47,15 @@ if prompt.startswith("slow:"):
     with open(prompt.split(":", 1)[1], "w") as handle:
         handle.write(str(os.getpid()))
     time.sleep(30)
+if prompt.startswith("tick:"):
+    for number in range(int(prompt.split(":", 1)[1])):
+        emit(
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": f"tick {number}"}]},
+            }
+        )
+        time.sleep(0.15)
 if prompt == "fail":
     emit(
         {
