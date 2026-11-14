@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { Lock, Search, Check } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Lock } from "lucide-react";
 import { Link } from "react-router-dom";
-import { errorText, Field, FieldGroup, Loading, PickList } from "@/components/common";
+import { errorText, Field, FieldGroup, Loading } from "@/components/common";
+import { Combobox, type ComboOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -92,41 +92,53 @@ function RepoFields({ draft, set }: { draft: ProjectDraft; set: (patch: Partial<
 }
 
 function RepoPicker({ connectionId, draft, set }: { connectionId: string; draft: ProjectDraft; set: (patch: Partial<ProjectDraft>) => void }) {
-  const [filter, setFilter] = useState("");
   const repos = useQuery({ queryKey: keys.repos(connectionId), queryFn: () => api<Repo[]>(`/api/git/connections/${connectionId}/repos`) });
-  const shown = useMemo(() => {
-    const needle = filter.trim().toLowerCase();
-    return (repos.data ?? []).filter((r) => !needle || r.full_name.toLowerCase().includes(needle)).slice(0, 50);
-  }, [repos.data, filter]);
-
+  const repo = draft.repo.trim();
+  const branches = useQuery({
+    queryKey: ["branches", connectionId, repo],
+    queryFn: () => api<string[]>(`/api/git/connections/${connectionId}/branches?repo=${encodeURIComponent(repo)}`),
+    enabled: Boolean(repo),
+    retry: false,
+  });
+  const defaultBranch = repos.data?.find((r) => r.full_name === repo)?.default_branch;
+  const repoOptions: ComboOption[] = (repos.data ?? []).map((r) => ({
+    value: r.full_name,
+    label: <span className="font-mono text-[13px]">{r.full_name}</span>,
+    hint: r.private ? <Lock className="size-3.5" aria-label="私有" /> : undefined,
+    keywords: r.description,
+  }));
+  const branchOptions: ComboOption[] = (branches.data ?? []).map((b) => ({
+    value: b,
+    label: <span className="font-mono text-[13px]">{b}</span>,
+    hint: b === defaultBranch ? "默认分支" : undefined,
+  }));
   return (
-    <div className="flex flex-col gap-3">
-      <Field label="仓库" hint="从列表里选，或直接粘贴 GitHub 链接 / owner/repo。">
-        <Input placeholder="https://github.com/owner/repo" value={draft.repo} onChange={(e) => set({ repo: e.target.value, branch: "" })} />
+    <div className="grid gap-3 sm:grid-cols-[3fr_2fr]">
+      <Field label="仓库" hint={repos.error ? errorText(repos.error) : "输入搜索，或直接粘贴仓库链接 / owner/repo。"}>
+        <Combobox
+          value={draft.repo}
+          onChange={(v) => set({ repo: v, branch: repos.data?.find((r) => r.full_name === v)?.default_branch ?? "" })}
+          options={repoOptions}
+          loading={repos.isLoading}
+          placeholder="搜索仓库"
+          empty="没有匹配的仓库"
+          allowCustom
+        />
       </Field>
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input className="pl-9" placeholder="在可访问的仓库里搜索" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="搜索仓库" />
-      </div>
-      <PickList
-        items={shown}
-        itemKey={(r) => r.full_name}
-        selected={draft.repo}
-        loading={repos.isLoading}
-        error={repos.error ? errorText(repos.error) : undefined}
-        empty="没有匹配的仓库"
-        onPick={(r) => set({ repo: r.full_name, branch: r.default_branch })}
-        render={(r, picked) => (
-          <>
-            <span className="min-w-0 flex-1 truncate font-mono text-[13px]">{r.full_name}</span>
-            {r.private && <Lock className="size-3.5 text-muted-foreground" aria-label="私有" />}
-            <span className="text-[11px] text-muted-foreground">{r.default_branch}</span>
-            {picked && <Check className="size-4" />}
-          </>
-        )}
-      />
-      <Field label="基准分支" hint="留空用仓库的默认分支。员工从这里切出自己的分支，不会直接推它。">
-        <Input placeholder="main" value={draft.branch} onChange={(e) => set({ branch: e.target.value })} />
+      <Field
+        label="基准分支"
+        hint={branches.error ? errorText(branches.error) : "存放最终代码的分支，员工的成果最终合并到这里。"}
+      >
+        <Combobox
+          value={draft.branch}
+          onChange={(v) => set({ branch: v })}
+          options={branchOptions}
+          loading={branches.isLoading && Boolean(repo)}
+          disabled={!repo}
+          placeholder={repo ? "选择分支" : "先选仓库"}
+          empty="没有匹配的分支"
+          allowCustom
+        />
       </Field>
     </div>
   );

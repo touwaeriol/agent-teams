@@ -34,6 +34,9 @@ def router() -> APIRouter:
         status_code=204,
     )
     routes.add_api_route("/git/connections/{connection_id}/repos", list_repos, methods=["GET"])
+    routes.add_api_route(
+        "/git/connections/{connection_id}/branches", list_branches, methods=["GET"]
+    )
     routes.add_api_route("/projects", list_projects, methods=["GET"])
     routes.add_api_route("/projects", create_project, methods=["POST"], status_code=201)
     routes.add_api_route("/projects/{project_id}", get_project, methods=["GET"])
@@ -85,6 +88,20 @@ async def list_repos(
     listing = github.installation_repos if connection and connection.kind == "app" else github.repos
     repos: list[dict[str, Any]] = await _github(listing(token))
     return repos
+
+
+async def list_branches(
+    request: Request, connection_id: str, repo: str, user: UserView = User
+) -> list[str]:
+    """Branches of ``repo`` (URL or owner/repo) as the connection sees them."""
+    state = platform(request)
+    try:
+        slug = parse_repo(repo)
+    except GitHubError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    token = await _token(state, user.id, connection_id)
+    names: list[str] = await _github(state.services.github.branches(token, slug))
+    return names
 
 
 async def list_projects(request: Request, user: UserView = User) -> list[ProjectView]:

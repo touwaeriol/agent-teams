@@ -50,6 +50,12 @@ class FakeGitHub:
             raise GitHubError("找不到这个仓库，或者令牌没有它的访问权限")
         return {"full_name": "octo/app", "private": True, "default_branch": "trunk"}
 
+    async def branches(self, token: str, slug: str) -> list[str]:
+        self._check(token)
+        if slug != "octo/app":
+            raise GitHubError("找不到这个仓库，或者令牌没有它的访问权限")
+        return ["trunk", "release"]
+
     async def installation_repos(self, token: str) -> list[dict[str, Any]]:
         assert token.startswith("ghs_")
         return [{"full_name": "octo/app", "private": True, "default_branch": "trunk"}]
@@ -370,3 +376,13 @@ def test_github_app_one_click_flow(client: TestClient) -> None:
         headers=alice,
     )
     assert project.status_code == 201, project.text
+
+
+def test_branches_of_a_repository(client: TestClient) -> None:
+    alice = signup(client, "alice@example.com")
+    connection = connect_github(client, alice)
+    url = f"/api/git/connections/{connection['id']}/branches"
+    found = client.get(url, params={"repo": "https://github.com/octo/app"}, headers=alice)
+    assert found.json() == ["trunk", "release"]
+    assert client.get(url, params={"repo": "octo/missing"}, headers=alice).status_code == 422
+    assert client.get(url, params={"repo": "not a repo"}, headers=alice).status_code == 422
