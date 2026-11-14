@@ -144,7 +144,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     daemon.add_argument(
         "--root",
-        default=os.environ.get("AGENT_TEAMS_ROOT", os.path.expanduser("~/agent-teams")),
+        default=os.environ.get("AGENT_TEAMS_ROOT", os.path.expanduser("~/.agents_team")),
         help="employees work only inside this directory",
     )
     daemon.add_argument(

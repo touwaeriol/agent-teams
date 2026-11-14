@@ -3,13 +3,13 @@
 # service, running as the current user (whose Claude Code / Codex login it uses).
 #
 #   AGENT_TEAMS_NODE_TOKEN=<token> bash install-node.sh \
-#     --console http://console:3001 --name build-1 [--root ~/agent-teams] [--max-runs 4]
+#     --console http://console:3001 --name build-1 [--root ~/.agents_team] [--max-runs 4]
 #
 # Get the token on the console: agent-teams node-token team.yaml build-1
 # Re-running upgrades the daemon and rewrites its settings.
 set -euo pipefail
 
-console="" name="" root="$HOME/agent-teams" max_runs=4
+console="" name="" root="$HOME/.agents_team" max_runs=4
 source_spec="agent-teams[node] @ git+https://github.com/touwaeriol/agent-teams.git@claude/vigilant-noether-11aqhk"
 
 usage() {
