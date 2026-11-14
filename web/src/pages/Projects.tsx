@@ -16,7 +16,7 @@ export function ProjectsPage() {
   const projects = useProjects();
   const [params] = useSearchParams();
   return (
-    <div className="container py-6">
+    <div className="mx-auto w-full max-w-6xl px-5 py-8 sm:px-8">
       <SplitLayout
         main={
           <>
@@ -109,7 +109,7 @@ function NewProject({ highlight }: { highlight: boolean }) {
       return { project, conversation };
     },
     {
-      invalidate: [keys.projects],
+      invalidate: [keys.projects, keys.allConversations],
       success: ({ project }) => `已创建项目「${project.name}」`,
       onSuccess: ({ project, conversation }) => navigate(`/projects/${project.id}/c/${conversation.id}`),
     },
@@ -122,7 +122,7 @@ function NewProject({ highlight }: { highlight: boolean }) {
 
   return (
     <form onSubmit={submit}>
-      <Panel tone={highlight ? "highlight" : "default"} title={<span className="text-[17px]">新建项目</span>} icon={<Plus className="!text-primary" />}>
+      <Panel tone={highlight ? "highlight" : "default"} title={<span className="text-[17px]">新建项目</span>} icon={<Plus className="!text-brand" />}>
         <ProjectFields draft={draft} onChange={setDraft} />
         <Field label="要做什么（可选，会成为对话里的第一条消息）">
           <Textarea rows={4} placeholder="目标、范围、期限、验收方式" value={firstMessage} onChange={(e) => setFirstMessage(e.target.value)} />

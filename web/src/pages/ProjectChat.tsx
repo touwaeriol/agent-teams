@@ -1,164 +1,100 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Activity,
-  ChevronDown,
-  ChevronRight,
-  ExternalLink,
-  GitBranch,
-  MessageSquarePlus,
-  SendHorizontal,
-  Settings,
-  TriangleAlert,
-  Users,
-} from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowUp, ChevronDown, ChevronRight, ExternalLink, GitBranch, PanelRight, Settings, TriangleAlert } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Chip, EmptyState, errorText, Loading, nodeStatus, Panel, Spinner, StatusBadge, TASK_STATUS } from "@/components/common";
+import { EmptyState, errorText, Loading, nodeStatus, Spinner, StatusBadge, TASK_STATUS } from "@/components/common";
 import { Markdown } from "@/components/Markdown";
+import { Dot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { api, type Conversation, type Message, type NodeInfo, type Project, type Task, type TeamDefinition } from "@/lib/api";
 import { keys, useConversations, useNodes, useProject, useTeam } from "@/lib/queries";
-import { clock, cn, timeAgo } from "@/lib/utils";
+import { clock, cn } from "@/lib/utils";
 
 const messagesKey = (id: string) => ["messages", id] as const;
 const tasksKey = (id: string) => ["tasks", id] as const;
 
+/** A project's conversation: centered reading column, floating composer, context on the right. */
 export function ProjectChatPage() {
   const { projectId = "", conversationId } = useParams();
   const project = useProject(projectId);
   const conversations = useConversations(projectId);
-  const navigate = useNavigate();
+  const [context, setContext] = useState(true);
   const current = conversationId ?? conversations.data?.[0]?.id;
 
   if (project.error) {
     return (
-      <div className="container py-10">
+      <div className="mx-auto max-w-3xl p-8">
         <EmptyState title="找不到这个项目" description={errorText(project.error)} action={<Button asChild><Link to="/projects">回到项目列表</Link></Button>} />
       </div>
     );
   }
-  if (!project.data) return <Loading />;
+  if (!project.data || conversations.isLoading) return <Loading />;
 
   return (
-    <div className="flex flex-wrap items-start gap-4 p-4">
-      <ConversationList
-        project={project.data}
-        conversations={conversations.data ?? []}
-        current={current}
-        onCreated={(c) => navigate(`/projects/${projectId}/c/${c.id}`)}
-      />
-      <Panel padding="none" className="min-h-[calc(100vh-7rem)] min-w-0 flex-[999_1_560px]">
-        {current ? (
-          <ChatPanel key={current} project={project.data} conversationId={current} />
-        ) : (
-          <FirstConversation project={project.data} onCreated={(c) => navigate(`/projects/${projectId}/c/${c.id}`)} />
-        )}
-      </Panel>
-      <SidePanel project={project.data} conversationId={current} />
+    <div className="flex h-full min-h-0">
+      <section className="flex min-w-0 flex-1 flex-col">
+        <ChatHeader project={project.data} conversation={conversations.data?.find((c) => c.id === current)} onToggleContext={() => setContext(!context)} />
+        {current ? <ChatBody key={current} conversationId={current} /> : <Welcome project={project.data} />}
+      </section>
+      {context && <ContextPanel project={project.data} conversationId={current} />}
     </div>
   );
 }
 
-function ConversationList({
-  project,
-  conversations,
-  current,
-  onCreated,
-}: {
-  project: Project;
-  conversations: Conversation[];
-  current?: string;
-  onCreated: (c: Conversation) => void;
-}) {
-  const client = useQueryClient();
-  const create = useMutation({
-    mutationFn: () => api<Conversation>("/api/conversations", { method: "POST", json: { title: `对话 ${conversations.length + 1}`, project_id: project.id } }),
-    onSuccess: (c) => {
-      client.invalidateQueries({ queryKey: keys.conversations(project.id) });
-      onCreated(c);
-    },
-    onError: (e) => toast.error(errorText(e)),
-  });
+function ChatHeader({ project, conversation, onToggleContext }: { project: Project; conversation?: Conversation; onToggleContext: () => void }) {
   return (
-    <Panel as="nav" label="对话" padding="none" className="w-full min-w-0 flex-[1_1_220px] gap-1 p-3 lg:sticky lg:top-24 lg:max-w-[260px]">
-      <div className="flex items-center justify-between px-1 pb-2">
-        <h2 className="text-[15px] font-semibold">对话</h2>
-        <Button size="sm" variant="ghost" onClick={() => create.mutate()} disabled={create.isPending}>
-          <MessageSquarePlus /> 新对话
+    <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b px-5">
+      <div className="flex min-w-0 items-center gap-2 text-sm">
+        <Link to={`/projects/${project.id}`} className="max-w-[50%] shrink-0 truncate font-semibold hover:underline">
+          {project.name}
+        </Link>
+        {conversation && (
+          <>
+            <span className="text-muted-foreground">/</span>
+            <span className="truncate text-muted-foreground">{conversation.title || "未命名对话"}</span>
+          </>
+        )}
+      </div>
+      <div className="flex items-center gap-1">
+        <Button asChild variant="ghost" size="icon" aria-label="项目设置">
+          <Link to={`/projects/${project.id}/settings`}>
+            <Settings />
+          </Link>
+        </Button>
+        <Button variant="ghost" size="icon" onClick={onToggleContext} aria-label="显示或隐藏上下文面板">
+          <PanelRight />
         </Button>
       </div>
-      {conversations.length === 0 && <p className="px-1 text-xs text-muted-foreground">还没有对话</p>}
-      {conversations.map((c) => (
-        <Link
-          key={c.id}
-          to={`/projects/${project.id}/c/${c.id}`}
-          aria-current={c.id === current ? "page" : undefined}
-          className={cn(
-            "flex flex-col gap-0.5 rounded-lg border border-transparent px-2.5 py-2 hover:bg-raised",
-            c.id === current && "border-primary/70 bg-accent hover:bg-accent",
-          )}
-        >
-          <span className="truncate font-medium">{c.title || "未命名对话"}</span>
-          <span className="text-xs text-muted-foreground">{timeAgo(c.created_at)}</span>
-        </Link>
-      ))}
-    </Panel>
-  );
-}
-
-function FirstConversation({ project, onCreated }: { project: Project; onCreated: (c: Conversation) => void }) {
-  const client = useQueryClient();
-  const start = async (content: string) => {
-    const c = await api<Conversation>("/api/conversations", { method: "POST", json: { title: content.slice(0, 40), project_id: project.id } });
-    await api(`/api/conversations/${c.id}/messages`, { method: "POST", json: { content } });
-    client.invalidateQueries({ queryKey: keys.conversations(project.id) });
-    onCreated(c);
-  };
-  return (
-    <>
-      <ChatHeader project={project} />
-      <div className="flex flex-1 items-center justify-center p-8">
-        <EmptyState title="和负责人开始第一次对话" description="说清楚要做什么：目标、范围、怎么验收。负责人会拆任务、派给员工，并在这里汇报。" />
-      </div>
-      <Composer onSend={start} />
-    </>
-  );
-}
-
-function ChatHeader({ project }: { project: Project }) {
-  const team = useTeam();
-  const nodes = useNodes();
-  const lead = leaderOf(team.data?.team ?? null);
-  const status = nodeStatus(nodes.data?.find((n) => n.name === lead?.node));
-  return (
-    <header className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3.5">
-      <div className="flex min-w-0 flex-col gap-1">
-        <h1 className="truncate text-lg font-semibold">{project.name}</h1>
-        <span className="flex flex-wrap items-center gap-x-1.5 text-[13px] text-muted-foreground">
-          {lead ? (
-            <>
-              你在和负责人 <span className="font-mono text-foreground">{lead.name}</span> 对话 · Claude Code · {lead.node ?? "?"} ·
-              <StatusBadge tone={status.tone} label={status.label} dot />
-            </>
-          ) : (
-            <>
-              还没配置团队，<Link to="/team" className="text-primary hover:underline">先去配置</Link>
-            </>
-          )}
-        </span>
-      </div>
-      <Button asChild variant="outline" size="sm">
-        <Link to={`/projects/${project.id}/settings`}>
-          <Settings /> 项目设置
-        </Link>
-      </Button>
     </header>
   );
 }
 
-function ChatPanel({ project, conversationId }: { project: Project; conversationId: string }) {
+/** No conversation yet: a calm start screen with the composer in the middle. */
+function Welcome({ project }: { project: Project }) {
+  const client = useQueryClient();
+  const navigate = useNavigate();
+  const start = async (content: string) => {
+    const c = await api<Conversation>("/api/conversations", { method: "POST", json: { title: content.slice(0, 40), project_id: project.id } });
+    await api(`/api/conversations/${c.id}/messages`, { method: "POST", json: { content } });
+    client.invalidateQueries({ queryKey: keys.conversations(project.id) });
+    client.invalidateQueries({ queryKey: keys.allConversations });
+    navigate(`/projects/${project.id}/c/${c.id}`);
+  };
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-6 px-5 pb-16">
+      <div className="text-center">
+        <h1 className="text-2xl font-semibold tracking-tight">今天要做点什么？</h1>
+        <p className="mt-2 text-sm text-muted-foreground">把需求说给负责人：目标、范围、怎么验收。它会拆任务、派给员工，并在这里汇报。</p>
+      </div>
+      <div className="w-full max-w-3xl">
+        <Composer onSend={start} />
+      </div>
+    </div>
+  );
+}
+
+function ChatBody({ conversationId }: { conversationId: string }) {
   const client = useQueryClient();
   const messages = useQuery({ queryKey: messagesKey(conversationId), queryFn: () => api<Message[]>(`/api/conversations/${conversationId}/messages`) });
   useLiveEvents(conversationId);
@@ -168,7 +104,7 @@ function ChatPanel({ project, conversationId }: { project: Project; conversation
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [list.length]);
+  }, [list.length, waiting]);
 
   const send = async (content: string) => {
     const message = await api<Message>(`/api/conversations/${conversationId}/messages`, { method: "POST", json: { content } });
@@ -177,60 +113,72 @@ function ChatPanel({ project, conversationId }: { project: Project; conversation
 
   return (
     <>
-      <ChatHeader project={project} />
-      <div className="scroll-thin flex flex-1 flex-col gap-5 overflow-y-auto px-5 py-5">
-        {messages.isLoading && <Loading />}
-        {list.length === 0 && !messages.isLoading && (
-          <p className="py-10 text-center text-[13px] text-muted-foreground">发一条消息开始。负责人收到后会回复你，派出去的任务会出现在右侧。</p>
-        )}
-        {list.map((m) => (
-          <MessageBubble key={m.id} message={m} />
-        ))}
-        {waiting && (
-          <div className="flex items-center gap-2 pl-11 text-[13px] text-muted-foreground">
-            <Spinner className="size-3" /> 负责人正在处理……
-          </div>
-        )}
-        <div ref={bottom} />
+      <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 py-8">
+          {messages.isLoading && <Loading />}
+          {list.length === 0 && !messages.isLoading && (
+            <p className="py-16 text-center text-sm text-muted-foreground">发一条消息开始。负责人收到后会回复你，派出去的任务会出现在右侧。</p>
+          )}
+          {list.map((m) => (
+            <MessageItem key={m.id} message={m} />
+          ))}
+          {waiting && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner className="size-3.5" /> 负责人正在处理……
+            </div>
+          )}
+          <div ref={bottom} />
+        </div>
       </div>
-      <Composer onSend={send} />
+      <div className="shrink-0 px-5 pb-5">
+        <div className="mx-auto w-full max-w-3xl">
+          <Composer onSend={send} />
+        </div>
+      </div>
     </>
   );
 }
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageItem({ message }: { message: Message }) {
   if (message.role === "user") {
     return (
-      <div className="flex max-w-[78%] flex-col items-end gap-1 self-end">
-        <span className="text-xs text-muted-foreground">你 · {clock(message.created_at)}</span>
-        <div className="whitespace-pre-wrap rounded-[12px_12px_4px_12px] border border-[#5a4226] bg-accent px-3.5 py-2.5 leading-6">{message.content}</div>
+      <div className="flex justify-end">
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-raised px-4 py-2.5 leading-7" title={clock(message.created_at)}>
+          {message.content}
+        </div>
       </div>
     );
   }
-  const error = message.role === "error";
-  return (
-    <div className="flex max-w-[86%] gap-2.5 self-start">
-      <span
-        className={cn(
-          "flex size-8 shrink-0 items-center justify-center rounded-lg border-[3px] text-[13px] font-bold text-background",
-          error ? "border-bad bg-bad/80" : "border-ok bg-[#f5b27a]",
-        )}
-      >
-        {error ? "!" : "L"}
-      </span>
-      <div className="flex min-w-0 flex-col gap-1">
-        <span className="text-xs text-muted-foreground">{error ? "出错了" : "负责人"} · {clock(message.created_at)}</span>
-        <div className={cn("rounded-[4px_12px_12px_12px] px-3.5 py-2.5", error ? "border border-bad/40 bg-bad/10 text-bad" : "bg-raised")}>
-          {error ? <span className="whitespace-pre-wrap">{message.content}</span> : <Markdown>{message.content}</Markdown>}
-        </div>
+  if (message.role === "error") {
+    return (
+      <div className="flex items-start gap-2 rounded-xl border border-bad/30 bg-bad/5 px-4 py-3 text-sm text-bad">
+        <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+        <span className="whitespace-pre-wrap">{message.content}</span>
       </div>
-    </div>
+    );
+  }
+  return (
+    <article className="flex flex-col gap-1.5">
+      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span className="size-2 rounded-full bg-brand" aria-hidden />
+        负责人 · {clock(message.created_at)}
+      </span>
+      <Markdown className="text-[15px] leading-7">{message.content}</Markdown>
+    </article>
   );
 }
 
+/** Rounded, floating input: text on top, who is listening and send below. */
 function Composer({ onSend }: { onSend: (content: string) => Promise<void> }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const area = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = area.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
+  }, [text]);
   const submit = async () => {
     const content = text.trim();
     if (!content || busy) return;
@@ -252,21 +200,50 @@ function Composer({ onSend }: { onSend: (content: string) => Promise<void> }) {
   };
   return (
     <form
-      className="flex flex-col gap-2 border-t px-5 py-4"
       onSubmit={(e) => {
         e.preventDefault();
         void submit();
       }}
+      className="rounded-2xl border bg-panel shadow-[0_2px_12px_-4px_rgb(0_0_0/0.08)] focus-within:border-input"
     >
       <label htmlFor="chatbox" className="sr-only">给负责人发消息</label>
-      <Textarea id="chatbox" rows={3} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} placeholder="提需求、改计划、问进度……都发给负责人" className="resize-y" />
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs text-muted-foreground">Enter 发送，Shift + Enter 换行</span>
-        <Button type="submit" disabled={busy || !text.trim()}>
-          {busy ? <Spinner /> : <SendHorizontal />} 发送
+      <textarea
+        id="chatbox"
+        ref={area}
+        rows={2}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={onKey}
+        placeholder="提需求、改计划、问进度……"
+        className="block w-full resize-none bg-transparent px-4 pt-3.5 text-[15px] leading-6 outline-none placeholder:text-muted-foreground"
+      />
+      <div className="flex items-center justify-between gap-2 px-3 pb-3 pt-1">
+        <LeaderStatus />
+        <Button type="submit" size="icon" disabled={busy || !text.trim()} aria-label="发送" className="size-8 rounded-lg">
+          {busy ? <Spinner className="size-3.5" /> : <ArrowUp />}
         </Button>
       </div>
     </form>
+  );
+}
+
+function LeaderStatus() {
+  const team = useTeam();
+  const nodes = useNodes();
+  const lead = leaderOf(team.data?.team ?? null);
+  if (!lead) {
+    return (
+      <Link to="/team" className="px-1 text-xs text-muted-foreground hover:text-foreground">
+        还没配置团队 →
+      </Link>
+    );
+  }
+  const status = nodeStatus(nodes.data?.find((n) => n.name === lead.node));
+  return (
+    <span className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground">
+      <Dot tone={status.tone} />
+      负责人 <span className="font-mono text-foreground/80">{lead.name}</span> · {lead.node} · {status.label}
+    </span>
   );
 }
 
@@ -318,58 +295,74 @@ function upsertTask(list: Task[], task: Task): Task[] {
   return copy;
 }
 
-function SidePanel({ project, conversationId }: { project: Project; conversationId?: string }) {
+/** Everything the conversation runs on: repository, tasks, team and live activity. */
+function ContextPanel({ project, conversationId }: { project: Project; conversationId?: string }) {
   return (
-    <aside className="flex w-full min-w-0 flex-[1_1_300px] flex-col gap-3 lg:sticky lg:top-24 lg:max-w-[360px]">
-      <RepoCard project={project} />
-      {conversationId && <TasksCard conversationId={conversationId} />}
-      <TeamCard />
-      {conversationId && <ActivityCard conversationId={conversationId} />}
+    <aside className="scroll-thin hidden w-[320px] shrink-0 overflow-y-auto border-l bg-panel xl:block">
+      <Section title="代码仓库" action={<Link to={`/projects/${project.id}/settings`} className="text-xs text-muted-foreground hover:text-foreground">管理</Link>}>
+        <RepoInfo project={project} />
+      </Section>
+      {conversationId && <TasksSection conversationId={conversationId} />}
+      <TeamSection />
+      {conversationId && <ActivitySection conversationId={conversationId} />}
     </aside>
   );
 }
 
-function RepoCard({ project }: { project: Project }) {
+function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
-    <Panel padding="sm" title="代码仓库" icon={<GitBranch />} action={<Link to={`/projects/${project.id}/settings`} className="text-[13px] text-primary hover:underline">管理</Link>}>
-      {project.repo ? (
-        <a
-          href={`https://github.com/${project.repo}`}
-          target="_blank"
-          rel="noreferrer"
-          className="flex flex-col gap-0.5 rounded-lg bg-raised p-2.5 hover:text-accent-foreground"
-        >
-          <span className="flex items-center gap-1.5 font-mono text-[13px]">
-            {project.repo} <ExternalLink className="size-3" />
-          </span>
-          <span className="text-xs text-muted-foreground">GitHub · 基准分支 {project.branch || "默认"} · 每个员工独立克隆</span>
-        </a>
-      ) : (
-        <p className="text-[13px] text-muted-foreground">没有关联仓库，员工在空目录里工作。</p>
-      )}
-      {project.context && (
-        <details className="group rounded-lg bg-raised/60 p-2.5 text-[13px]">
-          <summary className="cursor-pointer list-none text-muted-foreground group-open:mb-2">项目上下文 ▸</summary>
-          <Markdown className="text-[13px]">{project.context}</Markdown>
-        </details>
-      )}
-    </Panel>
+    <section className="flex flex-col gap-2.5 border-b px-5 py-4 last:border-0">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</h2>
+        {action}
+      </div>
+      {children}
+    </section>
   );
 }
 
-function TasksCard({ conversationId }: { conversationId: string }) {
+function RepoInfo({ project }: { project: Project }) {
+  if (!project.repo) return <p className="text-sm text-muted-foreground">没有关联仓库，员工在空目录里工作。</p>;
+  return (
+    <>
+      <a href={`https://github.com/${project.repo}`} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 font-mono text-[13px] hover:underline">
+        {project.repo} <ExternalLink className="size-3 text-muted-foreground" />
+      </a>
+      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <GitBranch className="size-3.5" /> 基准分支 {project.branch || "默认"} · 每个员工独立克隆
+      </span>
+      {project.context && (
+        <details className="group text-sm">
+          <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">项目上下文</summary>
+          <Markdown className="mt-2 text-[13px]">{project.context}</Markdown>
+        </details>
+      )}
+    </>
+  );
+}
+
+function TasksSection({ conversationId }: { conversationId: string }) {
   const tasks = useQuery({ queryKey: tasksKey(conversationId), queryFn: () => api<Task[]>(`/api/conversations/${conversationId}/tasks`) });
   const list = tasks.data ?? [];
   const done = list.filter((t) => t.status === "done").length;
+  const percent = list.length ? Math.round((done / list.length) * 100) : 0;
   return (
-    <Panel padding="sm" title={list.length ? `任务 · ${done} / ${list.length}` : "任务"} icon={<Activity />}>
-      {list.length === 0 && <p className="text-[13px] text-muted-foreground">负责人派出的任务会显示在这里。</p>}
-      <div className="flex flex-col gap-1.5">
-        {list.map((t) => (
-          <TaskRow key={t.id} task={t} />
-        ))}
-      </div>
-    </Panel>
+    <Section title="任务进度" action={list.length ? <span className="text-xs text-muted-foreground">{done} / {list.length}</span> : undefined}>
+      {list.length === 0 ? (
+        <p className="text-sm text-muted-foreground">负责人派出的任务会显示在这里。</p>
+      ) : (
+        <>
+          <div className="h-1.5 overflow-hidden rounded-full bg-raised" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
+            <div className="h-full rounded-full bg-ok transition-all" style={{ width: `${percent}%` }} />
+          </div>
+          <div className="flex flex-col">
+            {list.map((t) => (
+              <TaskRow key={t.id} task={t} />
+            ))}
+          </div>
+        </>
+      )}
+    </Section>
   );
 }
 
@@ -377,19 +370,19 @@ function TaskRow({ task }: { task: Task }) {
   const [open, setOpen] = useState(false);
   const status = TASK_STATUS[task.status];
   return (
-    <div className="rounded-lg bg-raised/60">
-      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-start gap-2 p-2 text-left" aria-expanded={open}>
-        {open ? <ChevronDown className="mt-0.5 size-3.5 shrink-0" /> : <ChevronRight className="mt-0.5 size-3.5 shrink-0" />}
+    <div className="-mx-2 rounded-lg hover:bg-raised/60">
+      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-start gap-2 px-2 py-2 text-left" aria-expanded={open}>
+        {open ? <ChevronDown className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />}
         <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className="font-mono">{task.id}</span> → <span className="font-mono text-foreground">{task.assignee}</span>
-          </span>
           <span className={cn("block text-[13px] leading-5", !open && "line-clamp-2")}>{task.instruction}</span>
+          <span className="font-mono text-[11px] text-muted-foreground">
+            {task.id} → {task.assignee}
+          </span>
         </span>
         <StatusBadge tone={status.tone} label={status.label} spinning={task.status === "running"} className="shrink-0" />
       </button>
       {open && task.output && (
-        <div className="scroll-thin mx-2 mb-2 max-h-72 overflow-y-auto rounded-md bg-well p-2.5">
+        <div className="scroll-thin mx-2 mb-2 max-h-72 overflow-y-auto rounded-md border bg-background p-2.5">
           <Markdown className="text-[12px]">{task.output}</Markdown>
         </div>
       )}
@@ -397,44 +390,50 @@ function TaskRow({ task }: { task: Task }) {
   );
 }
 
-function TeamCard() {
+function TeamSection() {
   const team = useTeam();
   const nodes = useNodes();
   const online = useMemo(() => new Map((nodes.data ?? []).map((n: NodeInfo) => [n.name, n.online])), [nodes.data]);
   const employees = team.data?.team?.employees ?? [];
   const leader = team.data?.team?.leader;
   return (
-    <Panel padding="sm" title="团队" icon={<Users />} action={<Link to="/team" className="text-[13px] text-primary hover:underline">编辑</Link>}>
+    <Section title="团队" action={<Link to="/team" className="text-xs text-muted-foreground hover:text-foreground">编辑</Link>}>
       {team.data?.error && team.data.saved && (
-        <p className="flex items-start gap-1.5 text-xs text-warn"><TriangleAlert className="mt-0.5 size-3.5 shrink-0" />{team.data.error}</p>
+        <p className="flex items-start gap-1.5 text-xs text-warn">
+          <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+          {team.data.error}
+        </p>
       )}
-      <div className="flex flex-wrap gap-1.5">
+      <ul className="flex flex-col gap-1.5">
         {employees.map((e) => (
-          <Chip key={e.name} tone={online.get(e.node ?? "") ? "ok" : "bad"} title={e.description}>
-            {e.name}
-            {e.name === leader && <span className="font-sans text-[11px] text-primary">负责人</span>}
-            <span className="text-muted-foreground">@{e.node}</span>
-          </Chip>
+          <li key={e.name} className="flex items-center gap-2 text-[13px]" title={e.description}>
+            <Dot tone={online.get(e.node ?? "") ? "ok" : "bad"} />
+            <span className="font-mono">{e.name}</span>
+            {e.name === leader && <span className="text-[11px] text-brand">负责人</span>}
+            <span className="ml-auto text-xs text-muted-foreground">{e.node}</span>
+          </li>
         ))}
-      </div>
-    </Panel>
+      </ul>
+    </Section>
   );
 }
 
-function ActivityCard({ conversationId }: { conversationId: string }) {
+function ActivitySection({ conversationId }: { conversationId: string }) {
   const lines = useActivity(conversationId);
   return (
-    <Panel padding="sm" title="工作动态" icon={<Activity />}>
+    <Section title="工作动态">
       {lines.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">页面打开期间，员工的实时进展会滚动显示在这里。</p>
+        <p className="text-sm text-muted-foreground">页面打开期间，员工的实时进展会滚动显示在这里。</p>
       ) : (
-        <div className="scroll-thin flex max-h-80 flex-col gap-1 overflow-y-auto border-l-2 border-border pl-3">
+        <div className="scroll-thin flex max-h-80 flex-col gap-1 overflow-y-auto">
           {lines.slice(-80).map((line, i) => (
-            <span key={i} className="break-all font-mono text-[11px] leading-[18px] text-muted-foreground">{line}</span>
+            <span key={i} className="break-all font-mono text-[11px] leading-[18px] text-muted-foreground">
+              {line}
+            </span>
           ))}
         </div>
       )}
-    </Panel>
+    </Section>
   );
 }
 

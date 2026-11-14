@@ -109,7 +109,7 @@ function NodeCard({ node, onToken }: { node: NodeInfo; onToken: (data: Enrollmen
           rows={[node]}
           rowKey={(n) => n.id}
           columns={[
-            { header: "运行时", cell: () => <span className="rounded border border-[#e07a5f] px-2 py-0.5">Claude Code</span> },
+            { header: "运行时", cell: () => <span className="rounded border border-brand/50 px-2 py-0.5">Claude Code</span> },
             { header: "版本", cell: (n) => <span className="font-mono">{n.claude}</span> },
             { header: "工作目录", cell: (n) => <span className="font-mono text-muted-foreground">{n.root}</span> },
             { header: "允许执行", cell: (n) => <span className="font-mono text-muted-foreground">{n.allow?.join(", ")}</span> },

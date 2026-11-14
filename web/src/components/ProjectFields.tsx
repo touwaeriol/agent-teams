@@ -59,7 +59,7 @@ function RepoFields({ draft, set }: { draft: ProjectDraft; set: (patch: Partial<
       {list.length === 0 ? (
         <p className="text-[13px] leading-5 text-muted-foreground">
           还没有 Git 连接。
-          <Link to="/settings/git" className="text-primary hover:underline">
+          <Link to="/settings/git" className="text-brand hover:underline">
             先去连接 GitHub
           </Link>
           ，就能在这里选择仓库；也可以先不关联仓库。

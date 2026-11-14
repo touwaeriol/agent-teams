@@ -4,19 +4,27 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { Toaster } from "sonner";
 import { App } from "./App";
+import { ThemeProvider, useTheme } from "./lib/theme";
 import "./index.css";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 5_000, refetchOnWindowFocus: false } },
 });
 
+function Toasts() {
+  const { theme } = useTheme();
+  return <Toaster theme={theme} position="top-center" richColors closeButton />;
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-      <Toaster theme="dark" position="top-center" richColors closeButton />
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+        <Toasts />
+      </QueryClientProvider>
+    </ThemeProvider>
   </React.StrictMode>,
 );

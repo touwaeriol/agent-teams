@@ -25,7 +25,7 @@ export function PageHeader({ title, description, actions }: { title: ReactNode; 
   );
 }
 
-const WIDTH = { full: "", narrow: "max-w-3xl" };
+const WIDTH = { full: "max-w-6xl", narrow: "max-w-3xl" };
 
 /** Every page: centered container, header, then its content in a column. */
 export function Page({
@@ -44,7 +44,7 @@ export function Page({
   children: ReactNode;
 }) {
   return (
-    <div className={cn("container flex flex-col gap-5 py-6", WIDTH[width])}>
+    <div className={cn("mx-auto flex w-full flex-col gap-5 px-5 py-8 sm:px-8", WIDTH[width])}>
       {before}
       {title && <PageHeader title={title} description={description} actions={actions} />}
       {children}
@@ -64,7 +64,7 @@ export function SplitLayout({ main, side, sideWidth = "400px", className }: { ma
   );
 }
 
-const PANEL_TONE = { default: "", highlight: "border-primary/60", danger: "border-destructive/30" };
+const PANEL_TONE = { default: "", highlight: "border-brand/60", danger: "border-destructive/30" };
 
 /**
  * The surface every block sits on. With ``title`` it gets a header row

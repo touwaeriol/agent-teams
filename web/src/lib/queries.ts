@@ -6,6 +6,7 @@ export const keys = {
   projects: ["projects"] as const,
   project: (id: string) => ["projects", id] as const,
   conversations: (projectId: string) => ["conversations", projectId] as const,
+  allConversations: ["conversations"] as const,
   nodes: ["nodes"] as const,
   team: ["team"] as const,
   connections: ["git-connections"] as const,
@@ -29,3 +30,5 @@ export const useConnections = () =>
   useQuery({ queryKey: keys.connections, queryFn: () => api<GitConnection[]>("/api/git/connections") });
 export const useGitHubApp = () =>
   useQuery({ queryKey: keys.githubApp, queryFn: () => api<GitHubAppStatus>("/api/git/github-app") });
+export const useAllConversations = () =>
+  useQuery({ queryKey: keys.allConversations, queryFn: () => api<Conversation[]>("/api/conversations") });

@@ -12,7 +12,7 @@ const badgeVariants = cva(
         info: "border-info/50 text-info",
         warn: "border-warn/50 text-warn",
         bad: "border-bad/50 text-bad",
-        primary: "border-primary/50 text-primary",
+        primary: "border-brand/50 text-brand",
       },
     },
     defaultVariants: { tone: "neutral" },
@@ -26,7 +26,7 @@ function Badge({ className, tone, ...props }: BadgeProps) {
 }
 
 function Dot({ tone = "neutral", className }: { tone?: "ok" | "info" | "warn" | "bad" | "neutral" | "primary"; className?: string }) {
-  const color = { ok: "bg-ok", info: "bg-info", warn: "bg-warn", bad: "bg-bad", neutral: "bg-muted-foreground", primary: "bg-primary" }[tone];
+  const color = { ok: "bg-ok", info: "bg-info", warn: "bg-warn", bad: "bg-bad", neutral: "bg-muted-foreground", primary: "bg-brand" }[tone];
   return <span aria-hidden className={cn("inline-block size-2 shrink-0 rounded-full", color, className)} />;
 }
 

@@ -23,6 +23,8 @@ export default {
         panel: token("panel"),
         raised: token("raised"),
         well: token("well"),
+        sidebar: token("sidebar"),
+        brand: token("brand"),
         primary: { DEFAULT: token("primary"), foreground: token("primary-foreground") },
         secondary: { DEFAULT: token("secondary"), foreground: token("secondary-foreground") },
         destructive: { DEFAULT: token("destructive"), foreground: token("destructive-foreground") },
