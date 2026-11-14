@@ -108,14 +108,14 @@ async def created(request: Request, code: str = "", state: str = "") -> Redirect
     service = platform(request)
     admin = await _signed_user(service, CREATE, state)
     if admin is None or admin.role != "admin":
-        return _back("/admin", error="创建请求已过期或不是你发起的，请重新创建")
+        return _back("/settings/git", error="创建请求已过期或不是你发起的，请重新创建")
     try:
         app = await service.credentials.save_app(
             await service.services.github.convert_manifest(code)
         )
     except (GitHubError, KeyError) as exc:
-        return _back("/admin", error=f"保存 GitHub App 失败：{exc}")
-    return _back("/admin", github_app=app.slug)
+        return _back("/settings/git", error=f"保存 GitHub App 失败：{exc}")
+    return _back("/settings/git", github_app=app.slug)
 
 
 async def forget(request: Request, _admin: UserView = Admin) -> None:

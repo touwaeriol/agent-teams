@@ -318,7 +318,7 @@ def test_github_app_one_click_flow(client: TestClient) -> None:
         params={"code": "manifest-code", "state": state},
         follow_redirects=False,
     )
-    assert done.headers["location"] == "/admin?github_app=agent-teams-x"
+    assert done.headers["location"] == "/settings/git?github_app=agent-teams-x"
     status = client.get("/api/git/github-app", headers=alice).json()
     assert status["app"]["slug"] == "agent-teams-x"
 

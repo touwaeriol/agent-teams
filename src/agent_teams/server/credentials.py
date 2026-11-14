@@ -72,7 +72,7 @@ class GitCredentials:
             return cached.value
         app = await self.app()
         if app is None:
-            raise ConfigError("平台的 GitHub App 还没有创建（管理员在“管理”页创建）")
+            raise ConfigError("平台的 GitHub App 还没有创建（管理员在“Git 连接”页创建）")
         fresh = await self._github.installation_token(app.app_id, app.pem, installation_id)
         self._tokens[installation_id] = fresh
         return fresh.value

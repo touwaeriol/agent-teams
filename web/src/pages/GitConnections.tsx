@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Github, KeyRound, Lock, Zap } from "lucide-react";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { GitHubAppPanel } from "@/components/GitHubAppPanel";
 import { Callout, ConfirmAction, EmptyState, errorText, Field, FormDialog, KeyValueList, Loading, Page, Panel, PickList, StatusBadge, type Tone } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,6 +29,7 @@ export function GitConnectionsPage() {
   const [adding, setAdding] = useState(false);
   useFlash({ connected: (name) => `已连接：${name}` }, () => client.invalidateQueries({ queryKey: keys.connections }));
   const ready = app.data?.configured;
+  const isAdmin = me.data?.role === "admin";
   const connect = ready ? (
     <Button asChild>
       <a href={app.data!.install_url}>
@@ -49,12 +50,7 @@ export function GitConnectionsPage() {
         </>
       }
     >
-      {app.data && !ready && (
-        <Callout tone="warn">
-          一键连接需要平台的 GitHub App，还没有创建。
-          {me.data?.role === "admin" ? <> 去 <Link to="/admin">管理页</Link> 点一下就能创建。</> : " 请管理员在管理页创建；在那之前可以先用访问令牌。"}
-        </Callout>
-      )}
+      {app.data && !ready && (isAdmin ? <GitHubAppPanel status={app.data} /> : <Callout tone="warn">一键连接还没开通：需要管理员在这一页创建平台的 GitHub App。在那之前可以先用访问令牌。</Callout>)}
       {connections.isLoading && <Loading />}
       {connections.data?.length === 0 && (
         <EmptyState
@@ -74,6 +70,7 @@ export function GitConnectionsPage() {
           </Panel>
         ))}
       </div>
+      {app.data && ready && isAdmin && <GitHubAppPanel status={app.data} />}
       <AddConnectionDialog open={adding} onOpenChange={setAdding} />
     </Page>
   );
