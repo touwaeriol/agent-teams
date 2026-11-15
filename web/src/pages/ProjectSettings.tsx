@@ -8,7 +8,7 @@ import { useAction } from "@/api/mutations";
 import { keys, useMemory, useProject } from "@/api/queries";
 import type { MemoryView, ProjectUpdate, ProjectView } from "@/api/views";
 import { Card, CardTitle, ChoiceCards } from "@/components/app/bits";
-import { RepoFields, repoPayload, type RepoDraft } from "@/components/app/repo";
+import { RepoList, reposPayload, type RepoRef } from "@/components/app/repo";
 import { ConfirmAction, EmptyState, errorText, Field, Loading } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -85,20 +85,21 @@ function ReadOnly({ label, value, mono }: { label: string; value: string; mono?:
   );
 }
 
+function repoRefs(project: ProjectView): RepoRef[] {
+  return (project.repos ?? []).map((r) => ({ repo: r.repo, git_connection_id: r.git_connection_id ?? null }));
+}
+
 function RepoSection({ project }: { project: ProjectView }) {
-  const initial: RepoDraft = { git_connection_id: project.git_connection_id ?? "", repo: project.repo ?? "", branch: project.branch };
+  const initial = repoRefs(project);
   const [draft, setDraft] = useState(initial);
-  useEffect(() => setDraft({ git_connection_id: project.git_connection_id ?? "", repo: project.repo ?? "", branch: project.branch }), [project.git_connection_id, project.repo, project.branch]);
+  const saved = JSON.stringify(initial);
+  useEffect(() => setDraft(JSON.parse(saved) as RepoRef[]), [saved]);
   const update = useUpdate(project.id, "仓库设置已保存");
-  const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
-  const save = () => {
-    const p = repoPayload(draft);
-    update.mutate(p.repo ? p : { clear_repo: true, git_connection_id: null });
-  };
+  const dirty = JSON.stringify(draft) !== saved;
   return (
     <Card className="gap-3.5">
-      <CardTitle action={dirty && <Button size="sm" onClick={save} disabled={update.isPending}>保存</Button>}>代码仓库</CardTitle>
-      <RepoFields draft={draft} onChange={setDraft} layout="settings" currentProject={project.id} />
+      <CardTitle action={dirty && <Button size="sm" onClick={() => update.mutate({ repos: reposPayload(draft) })} disabled={update.isPending}>保存</Button>}>代码仓库</CardTitle>
+      <RepoList value={draft} onChange={setDraft} currentProject={project.id} />
     </Card>
   );
 }
@@ -122,7 +123,7 @@ function BasicsSection({ project }: { project: ProjectView }) {
           <Input value={description} onChange={(e) => setDescription(e.target.value)} />
         </Field>
       </div>
-      <Field label="项目上下文" hint="统筹、组长和每个成员开工前都会读到。">
+      <Field label="项目上下文" hint="统筹、组长和每个成员开工前都会读到；各仓库的基准分支、分支约定写在这里。">
         <Textarea rows={4} value={context} onChange={(e) => setContext(e.target.value)} />
       </Field>
     </Card>

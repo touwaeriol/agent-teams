@@ -589,7 +589,7 @@
     },
     "GitPush": {
       "title": "GitPush",
-      "description": "Push an employee branch with a one-job write token; refspec target must be refs/heads/thread/<thread_no>/<employee>.",
+      "description": "Push an employee branch of one repository with a one-job write token; refspec target must be refs/heads/thread/<thread_no>/<employee>.",
       "type": "object",
       "required": [
         "job_id",
@@ -631,6 +631,14 @@
           "description": "Expected remote sha; only for member branches after conflict repair.",
           "type": "string",
           "pattern": "^[0-9a-f]{7,64}$"
+        },
+        "unchanged_against": {
+          "description": "Branches (thread branch, base) whose commits are not the employee's work: when HEAD has no commit outside them the push is skipped and the result says unchanged.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
@@ -706,6 +714,10 @@
         },
         "created": {
           "description": "git.prepare: the worktree/clone was created by this job.",
+          "type": "boolean"
+        },
+        "unchanged": {
+          "description": "git.push: nothing to push (no commits outside unchanged_against); head_sha is the checkout's HEAD.",
           "type": "boolean"
         },
         "log_tail": {
@@ -1728,6 +1740,13 @@
             }
           ]
         },
+        "prepare_jobs": {
+          "description": "Every git.prepare job (one per repository) that must have succeeded first; prepare is the first of them.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/JobId"
+          }
+        },
         "resume": {
           "description": "null on first open.",
           "anyOf": [
@@ -2464,6 +2483,18 @@
         },
         "kind": {
           "$ref": "#/$defs/TaskKind"
+        },
+        "repo": {
+          "description": "Repository the task is about (owner/name); named in the task text. With base, records the thread's base branch in it.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "base": {
+          "description": "Base branch the thread uses in repo (only before the thread branch exists there; read the project context for stated bases).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
         }
       }
     },
@@ -2707,6 +2738,13 @@
         },
         "head_sha": {
           "type": "string"
+        },
+        "pushed": {
+          "description": "Repositories pushed for this task.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PushedRepo"
+          }
         }
       }
     },
@@ -2758,12 +2796,35 @@
         "position": {
           "type": "integer",
           "minimum": 0
+        },
+        "entries": {
+          "description": "One entry per repository.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MergeEntryRef"
+          }
+        }
+      }
+    },
+    "MergeEntryRef": {
+      "title": "MergeEntryRef",
+      "type": "object",
+      "required": [
+        "entry_id",
+        "repo"
+      ],
+      "properties": {
+        "entry_id": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
         }
       }
     },
     "EnqueueMergeInput": {
       "title": "EnqueueMergeInput",
-      "description": "Put a member branch into the merge queue (merged into the thread branch on GitHub, then CI). Give either member or task_id; the platform pushes the branch first.",
+      "description": "Put a member branch into the merge queue, one entry per repository the task pushed (merged into the thread branch on GitHub, then CI). Give either member or task_id.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -2773,6 +2834,18 @@
         },
         "task_id": {
           "$ref": "#/$defs/TaskId"
+        },
+        "repo": {
+          "description": "Merge only this repository of the task (default: every repository the task pushed).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "base": {
+          "description": "Base branch the thread uses in repo (only before the thread branch exists there; read the project context for stated bases).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
         }
       }
     },
@@ -3022,17 +3095,50 @@
       "properties": {
         "pr_number": {
           "type": "integer",
+          "minimum": 1,
+          "description": "First pull request of the thread."
+        },
+        "pr_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "prs": {
+          "description": "Every pull request of the thread, one per repository.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RepoPr"
+          }
+        }
+      }
+    },
+    "RepoPr": {
+      "title": "RepoPr",
+      "type": "object",
+      "required": [
+        "repo",
+        "pr_number",
+        "pr_url"
+      ],
+      "properties": {
+        "repo": {
+          "type": "string"
+        },
+        "pr_number": {
+          "type": "integer",
           "minimum": 1
         },
         "pr_url": {
           "type": "string",
           "format": "uri"
+        },
+        "base": {
+          "type": "string"
         }
       }
     },
     "OpenPrInput": {
       "title": "OpenPrInput",
-      "description": "Open the pull request from the thread branch to the base branch; the thread moves to review.",
+      "description": "Open one pull request per repository the thread changed (thread branch to that repository's base branch); the thread moves to review.",
       "type": "object",
       "required": [
         "title",
@@ -3047,6 +3153,18 @@
         },
         "body": {
           "type": "string"
+        },
+        "repo": {
+          "description": "Open only this repository's pull request (default: every changed repository without one).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "base": {
+          "description": "PR base branch for repo (or for the only repository to open); default the thread's base there.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
         }
       }
     },
@@ -3067,6 +3185,28 @@
         },
         "branch": {
           "type": "string"
+        }
+      }
+    },
+    "RepoFocus": {
+      "title": "RepoFocus",
+      "type": "object",
+      "required": [
+        "repo"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "repo": {
+          "description": "Repository of the project (owner/name).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "base": {
+          "description": "Base branch for this repository; default its default branch.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
         }
       }
     },
@@ -3095,6 +3235,14 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "repos": {
+          "description": "Repositories of the project the thread should work in, with an optional explicit base branch each (when the project context states one).",
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/RepoFocus"
           }
         }
       }
@@ -3216,13 +3364,36 @@
           "type": "string"
         },
         "head_sha": {
+          "type": "string",
+          "description": "Head of the first pushed repository (\"\" when nothing was pushed)."
+        },
+        "pushed": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PushedRepo"
+          }
+        }
+      }
+    },
+    "PushedRepo": {
+      "title": "PushedRepo",
+      "type": "object",
+      "required": [
+        "repo",
+        "head_sha"
+      ],
+      "properties": {
+        "repo": {
+          "type": "string"
+        },
+        "head_sha": {
           "type": "string"
         }
       }
     },
     "PushBranchInput": {
       "title": "PushBranchInput",
-      "description": "Push the HEAD of your worktree to your member branch (thread/<no>/<name>). You have no write token yourself; commit first, then call this.",
+      "description": "Push the HEAD of each of your repository checkouts that has new commits to your member branch (thread/<no>/<name>). You have no write token yourself; commit first, then call this.",
       "type": "object",
       "additionalProperties": false,
       "properties": {}

@@ -121,8 +121,8 @@ type ProjectRef struct {
 
 // ProjectsByRepo maps lowercase owner/repo to the user's projects using it.
 func (s *Store) ProjectsByRepo(ctx context.Context, userID string) (map[string][]ProjectRef, error) {
-	rows, err := s.db.Query(ctx, `SELECT lower(repo), id, name FROM at_projects
-		WHERE user_id = $1 AND repo IS NOT NULL ORDER BY created_at`, userID)
+	rows, err := s.db.Query(ctx, `SELECT lower(r.repo), p.id, p.name FROM at_project_repos r
+		JOIN at_projects p ON p.id = r.project_id WHERE p.user_id = $1 ORDER BY p.created_at`, userID)
 	if err != nil {
 		return nil, err
 	}

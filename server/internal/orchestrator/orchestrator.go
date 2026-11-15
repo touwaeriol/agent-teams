@@ -96,15 +96,11 @@ func (o *Orchestrator) Touch(tx *core.Tx, employeeID, cause string) { o.touch(tx
 
 // HasRepo reports whether a project works in a GitHub repository.
 func (o *Orchestrator) HasRepo(ctx context.Context, projectID string) bool {
-	if o.gh == nil {
-		return false
-	}
 	p, err := o.project(ctx, o.core.Pool, projectID)
 	if err != nil {
 		return false
 	}
-	_, err = o.gh.RepoOf(ctx, p)
-	return err == nil
+	return len(o.Repos(ctx, p)) > 0
 }
 
 // ConversationOf is the conversation an employee's messages and cards belong to.

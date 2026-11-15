@@ -3,11 +3,13 @@ package delivery
 import (
 	"context"
 	"fmt"
+	pathpkg "path"
 	"strings"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -43,15 +45,39 @@ func (e *Engine) queueCleanup(ctx context.Context, t core.Thread) error {
 		}
 	}
 	rows.Close()
-	shared := fmt.Sprintf("projects/%s/repo", t.ProjectID)
+	p, err := e.orch.Project(ctx, t.ProjectID)
+	if err != nil {
+		return err
+	}
 	return e.core.InTx(ctx, func(tx *core.Tx) error {
-		for _, p := range places {
-			if err := e.cleanupNode(ctx, tx, t, p.node, shared, p.paths); err != nil {
-				return err
+		for _, pl := range places {
+			for shared, paths := range byShared(p, pl.paths) {
+				if err := e.cleanupNode(ctx, tx, t, pl.node, shared, paths); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
 	})
+}
+
+// byShared groups checkout paths by the shared clone they belong to: a path ending in a
+// repository's directory (owner__name) hangs off that repository's clone, anything else off the
+// legacy single clone.
+func byShared(p store.Project, paths []string) map[string][]string {
+	dirs := map[string]string{}
+	for _, r := range p.Repos {
+		dirs[ghops.Dir(r.Repo)] = orchestrator.SharedDir(p.ID, r.Repo)
+	}
+	out := map[string][]string{}
+	for _, path := range paths {
+		shared, ok := dirs[pathpkg.Base(path)]
+		if !ok {
+			shared = orchestrator.LegacySharedDir(p.ID)
+		}
+		out[shared] = append(out[shared], path)
+	}
+	return out
 }
 
 func (e *Engine) cleanupNode(ctx context.Context, tx *core.Tx, t core.Thread, nodeID, shared string, paths []string) error {
@@ -66,8 +92,9 @@ func (e *Engine) cleanupNode(ctx context.Context, tx *core.Tx, t core.Thread, no
 	return err
 }
 
+// deleteMemberBranches deletes the members' branches in every repository of the project.
 func (e *Engine) deleteMemberBranches(ctx context.Context, t core.Thread) {
-	_, repo, err := e.repoOf(ctx, t.ProjectID)
+	_, repos, err := e.reposOf(ctx, t.ProjectID)
 	if err != nil {
 		return
 	}
@@ -75,12 +102,14 @@ func (e *Engine) deleteMemberBranches(ctx context.Context, t core.Thread) {
 	if err != nil {
 		return
 	}
-	for _, m := range emps {
-		if m.Tier != "member" {
-			continue
-		}
-		if err := e.gh.DeleteRef(ctx, repo, orchestrator.MemberBranch(t.No, m.Name)); err != nil {
-			e.log.Warn("delete member branch", "thread_id", t.ID, "member", m.Name, "err", err)
+	for _, repo := range repos {
+		for _, m := range emps {
+			if m.Tier != "member" {
+				continue
+			}
+			if err := e.gh.DeleteRef(ctx, repo, orchestrator.MemberBranch(t.No, m.Name)); err != nil {
+				e.log.Warn("delete member branch", "thread_id", t.ID, "repo", repo.Slug, "member", m.Name, "err", err)
+			}
 		}
 	}
 }

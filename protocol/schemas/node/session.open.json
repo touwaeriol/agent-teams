@@ -45,6 +45,13 @@
         }
       ]
     },
+    "prepare_jobs": {
+      "description": "Every git.prepare job (one per repository) that must have succeeded first; prepare is the first of them.",
+      "type": "array",
+      "items": {
+        "$ref": "common.json#/$defs/JobId"
+      }
+    },
     "resume": {
       "description": "null on first open.",
       "anyOf": [

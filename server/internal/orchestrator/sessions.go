@@ -161,7 +161,7 @@ func (o *Orchestrator) openSession(ctx context.Context, tx *core.Tx, e core.Empl
 	if err != nil {
 		return sess, err
 	}
-	if err := o.placeEmployee(ctx, tx, e, node.ID, paths); err != nil {
+	if err := o.placeEmployee(ctx, tx, e, node.ID, o.checkoutPaths(ctx, tx, paths, env)); err != nil {
 		return sess, err
 	}
 	return sess, o.queueOpen(ctx, tx, env, node, sess, first, resume)
@@ -172,7 +172,32 @@ type sessionEnv struct {
 	emp     core.Employee
 	project store.Project
 	thread  *core.Thread
-	repo    *ghops.Repo
+	repos   []ghops.Repo
+}
+
+// slugs lists the repositories checked out for the employee (none for the coordinator).
+func (env sessionEnv) slugs() []string {
+	if env.emp.Tier == "coordinator" || env.thread == nil {
+		return nil
+	}
+	out := make([]string, len(env.repos))
+	for i, r := range env.repos {
+		out[i] = r.Slug
+	}
+	return out
+}
+
+// checkoutPaths are the per-repository checkouts of an employee (cleanup removes them).
+func (o *Orchestrator) checkoutPaths(ctx context.Context, q core.DB, p Paths, env sessionEnv) []string {
+	slugs := env.slugs()
+	if len(slugs) == 0 {
+		return []string{p.Cwd}
+	}
+	out := make([]string, len(slugs))
+	for i, slug := range slugs {
+		out[i] = o.CheckoutCwd(ctx, q, env.emp, *env.thread, slug, len(slugs))
+	}
+	return out
 }
 
 func (o *Orchestrator) loadEnv(ctx context.Context, tx *core.Tx, e core.Employee) (sessionEnv, error) {
@@ -188,25 +213,21 @@ func (o *Orchestrator) loadEnv(ctx context.Context, tx *core.Tx, e core.Employee
 		}
 		env.thread = &t
 	}
-	if o.gh != nil {
-		if repo, err := o.gh.RepoOf(ctx, env.project); err == nil {
-			env.repo = &repo
-		}
-	}
+	env.repos = o.Repos(ctx, env.project)
 	return env, nil
 }
 
-func (o *Orchestrator) placeEmployee(ctx context.Context, tx *core.Tx, e core.Employee, nodeID string, p Paths) error {
+func (o *Orchestrator) placeEmployee(ctx context.Context, tx *core.Tx, e core.Employee, nodeID string, paths []string) error {
 	if err := core.SetEmployeeNode(ctx, tx, e.ID, &nodeID); err != nil {
 		return err
 	}
 	if e.ThreadID == nil {
 		return nil
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO at_thread_nodes (thread_id, node_id, paths) VALUES ($1, $2, ARRAY[$3])
+	_, err := tx.Exec(ctx, `INSERT INTO at_thread_nodes (thread_id, node_id, paths) VALUES ($1, $2, $3::text[])
 		ON CONFLICT (thread_id, node_id) DO UPDATE SET cleaned_at = NULL,
-		paths = CASE WHEN $3 = ANY(at_thread_nodes.paths) THEN at_thread_nodes.paths ELSE at_thread_nodes.paths || $3 END`,
-		*e.ThreadID, nodeID, p.Cwd)
+		paths = ARRAY(SELECT DISTINCT unnest(at_thread_nodes.paths || EXCLUDED.paths) ORDER BY 1)`,
+		*e.ThreadID, nodeID, paths)
 	return err
 }
 
@@ -226,8 +247,8 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 		return err
 	}
 	open, err := buildOpen(sessionInput{emp: env.emp, thread: env.thread, project: env.project, node: node, sess: sess,
-		prepare: prepare, first: first, resume: resume, system: system, rules: rules, hasRepo: env.repo != nil,
-		protRefs: protectedRefs(env)})
+		prepare: prepare, first: first, resume: resume, system: system, rules: rules, hasRepo: len(env.repos) > 0,
+		repos: env.slugs(), protRefs: o.protectedRefs(ctx, tx, env)})
 	if err != nil {
 		return err
 	}
@@ -240,38 +261,62 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 	return err
 }
 
-func protectedRefs(env sessionEnv) []string {
+// protectedRefs are the thread branch and the thread's base branch in every repository.
+func (o *Orchestrator) protectedRefs(ctx context.Context, q core.DB, env sessionEnv) []string {
 	refs := []string{}
-	if env.thread != nil {
-		refs = append(refs, env.thread.Branch)
+	if env.thread == nil {
+		return refs
 	}
-	if env.project.Branch != "" {
-		refs = append(refs, env.project.Branch)
+	refs = append(refs, env.thread.Branch)
+	for _, r := range env.repos {
+		if base := o.BaseFor(ctx, q, *env.thread, r); !slices.Contains(refs, base) {
+			refs = append(refs, base)
+		}
 	}
 	return refs
 }
 
-// queuePrepare queues git.prepare for an employee's worktree; "" when it needs none.
-func (o *Orchestrator) queuePrepare(ctx context.Context, tx *core.Tx, env sessionEnv, nodeID string, fetchOnly bool) (string, error) {
-	if env.emp.Tier == "coordinator" || env.thread == nil || env.repo == nil {
-		return "", nil
+// queuePrepare queues one git.prepare per repository for an employee's checkouts; nil when it needs none.
+func (o *Orchestrator) queuePrepare(ctx context.Context, tx *core.Tx, env sessionEnv, nodeID string, fetchOnly bool) ([]string, error) {
+	if env.emp.Tier == "coordinator" || env.thread == nil {
+		return nil, nil
 	}
+	jobs := make([]string, 0, len(env.repos))
+	for _, r := range env.repos {
+		job, err := o.prepareRepo(ctx, tx, env, nodeID, r, fetchOnly)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, nil
+}
+
+// prepareRepo queues git.prepare of one repository: the employee's branch, started from the
+// thread branch when it exists in that repository, else from the thread's base there.
+func (o *Orchestrator) prepareRepo(ctx context.Context, tx *core.Tx, env sessionEnv, nodeID string, r ghops.Repo, fetchOnly bool) (string, error) {
 	p := PathsOf(env.emp, env.thread)
-	base := p.Base
-	if env.emp.Tier == "lead" {
-		base = env.thread.BaseBranch
-	}
+	base := o.startPoint(ctx, tx, *env.thread, r)
 	mode := protocol.GitPrepareMode(orDefault(env.project.WorkMode, "worktree"))
 	job := core.NewID("g")
-	body := protocol.GitPrepare{JobID: protocol.JobID(job), ProjectID: env.project.ID, Repo: protocol.Repo(env.repo.Slug),
-		Mode: mode, Cwd: protocol.RelPath(p.Cwd), Branch: p.Branch, Base: &base, Fetch: true}
+	cwd := o.CheckoutCwd(ctx, tx, env.emp, *env.thread, r.Slug, len(env.repos))
+	body := protocol.GitPrepare{JobID: protocol.JobID(job), ProjectID: env.project.ID, Repo: protocol.Repo(r.Slug),
+		Mode: mode, Cwd: protocol.RelPath(cwd), Branch: p.Branch, Base: &base, Fetch: true}
 	if mode == "worktree" {
-		shared := protocol.RelPath(p.Shared)
+		shared := protocol.RelPath(sharedFor(env.project.ID, r.Slug, cwd == p.Cwd))
 		body.Shared = &shared
 	}
 	_, err := o.gw.Enqueue(ctx, tx, nodeID, nodegw.Command{Type: protocol.TypeGitPrepare, Body: body,
-		Meta: map[string]any{"purpose": "prepare", "employee_id": env.emp.ID, "fetch_only": fetchOnly}})
+		Meta: map[string]any{"purpose": "prepare", "employee_id": env.emp.ID, "fetch_only": fetchOnly, "repo": r.Slug}})
 	return job, err
+}
+
+// sharedFor is the shared clone a worktree hangs off: the legacy single clone for legacy checkouts.
+func sharedFor(projectID, slug string, legacy bool) string {
+	if legacy {
+		return LegacySharedDir(projectID)
+	}
+	return SharedDir(projectID, slug)
 }
 
 // RefreshWorktree queues a fetch for a read-only session's worktree before review messages (§10.2).

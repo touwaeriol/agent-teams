@@ -875,11 +875,18 @@
           "app_has_checks_permission": {
             "type": "boolean"
           },
+          "branch": {
+            "description": "The repository's default branch the workflows were read from",
+            "type": "string"
+          },
           "covers_mq_branches": {
             "type": "boolean"
           },
           "covers_thread_branches": {
             "type": "boolean"
+          },
+          "repo": {
+            "type": "string"
           },
           "ruleset": {
             "$ref": "#/components/schemas/Ruleset"
@@ -895,6 +902,8 @@
           }
         },
         "required": [
+          "repo",
+          "branch",
           "workflows",
           "covers_thread_branches",
           "covers_mq_branches",
@@ -1630,6 +1639,9 @@
           "id": {
             "type": "string"
           },
+          "repo": {
+            "type": "string"
+          },
           "status": {
             "type": "string"
           },
@@ -1653,6 +1665,7 @@
           "thread_no",
           "task_id",
           "employee",
+          "repo",
           "head_branch",
           "status",
           "attempts",
@@ -2495,10 +2508,6 @@
           "auto_approve": {
             "type": "boolean"
           },
-          "branch": {
-            "maxLength": 255,
-            "type": "string"
-          },
           "context": {
             "maxLength": 50000,
             "type": "string"
@@ -2515,20 +2524,17 @@
             "maxLength": 50000,
             "type": "string"
           },
-          "git_connection_id": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "name": {
             "maxLength": 200,
             "type": "string"
           },
-          "repo": {
-            "description": "GitHub URL, git@ URL or owner/repo",
+          "repos": {
+            "items": {
+              "$ref": "#/components/schemas/RepoRef"
+            },
+            "maxItems": 20,
             "type": [
-              "string",
+              "array",
               "null"
             ]
           },
@@ -2573,13 +2579,6 @@
           "auto_approve": {
             "type": "boolean"
           },
-          "branch": {
-            "maxLength": 255,
-            "type": "string"
-          },
-          "clear_repo": {
-            "type": "boolean"
-          },
           "context": {
             "maxLength": 50000,
             "type": "string"
@@ -2590,12 +2589,6 @@
           "description": {
             "maxLength": 2000,
             "type": "string"
-          },
-          "git_connection_id": {
-            "type": [
-              "string",
-              "null"
-            ]
           },
           "name": {
             "maxLength": 200,
@@ -2608,11 +2601,13 @@
           "pinned": {
             "type": "boolean"
           },
-          "repo": {
-            "type": [
-              "string",
-              "null"
-            ]
+          "repos": {
+            "description": "Replaces the bound repositories (order kept); [] unbinds all",
+            "items": {
+              "$ref": "#/components/schemas/RepoRef"
+            },
+            "maxItems": 20,
+            "type": "array"
           },
           "require_acceptance": {
             "type": "boolean"
@@ -2636,9 +2631,6 @@
           "auto_approve": {
             "type": "boolean"
           },
-          "branch": {
-            "type": "string"
-          },
           "context": {
             "type": "string"
           },
@@ -2652,12 +2644,6 @@
           "description": {
             "type": "string"
           },
-          "git_connection_id": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "id": {
             "type": "string"
           },
@@ -2670,9 +2656,13 @@
           "pinned": {
             "type": "boolean"
           },
-          "repo": {
+          "repos": {
+            "description": "Bound repositories in project order; base branches belong in context",
+            "items": {
+              "$ref": "#/components/schemas/RepoRef"
+            },
             "type": [
-              "string",
+              "array",
               "null"
             ]
           },
@@ -2704,9 +2694,7 @@
           "name",
           "description",
           "context",
-          "repo",
-          "branch",
-          "git_connection_id",
+          "repos",
           "pinned",
           "archived",
           "work_mode",
@@ -2966,6 +2954,27 @@
           "html_url",
           "pushed_at",
           "used_by_projects"
+        ],
+        "type": "object"
+      },
+      "RepoRef": {
+        "additionalProperties": false,
+        "properties": {
+          "git_connection_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "repo": {
+            "description": "GitHub URL, git@ URL or owner/repo",
+            "maxLength": 300,
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo",
+          "git_connection_id"
         ],
         "type": "object"
       },
@@ -3692,6 +3701,7 @@
             "type": "boolean"
           },
           "base_branch": {
+            "description": "Deprecated: bases are per repository (repos)",
             "type": "string"
           },
           "branch": {
@@ -3792,6 +3802,16 @@
               "null"
             ]
           },
+          "repos": {
+            "description": "Repositories the thread set a base for, branched or opened a PR in",
+            "items": {
+              "$ref": "#/components/schemas/ThreadRepoView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "status": {
             "enum": [
               "queued",
@@ -3827,6 +3847,7 @@
           "pause_reason",
           "branch",
           "base_branch",
+          "repos",
           "pr_number",
           "pr_url",
           "pr_state",
@@ -3843,6 +3864,45 @@
         ],
         "type": "object"
       },
+      "ThreadRepoView": {
+        "additionalProperties": false,
+        "properties": {
+          "base_branch": {
+            "type": "string"
+          },
+          "branch_created": {
+            "type": "boolean"
+          },
+          "pr_number": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "pr_state": {
+            "type": "string"
+          },
+          "pr_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "repo": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo",
+          "base_branch",
+          "branch_created",
+          "pr_number",
+          "pr_url",
+          "pr_state"
+        ],
+        "type": "object"
+      },
       "ThreadView": {
         "additionalProperties": false,
         "properties": {
@@ -3850,6 +3910,7 @@
             "type": "boolean"
           },
           "base_branch": {
+            "description": "Deprecated: bases are per repository (repos)",
             "type": "string"
           },
           "branch": {
@@ -3932,6 +3993,16 @@
               "null"
             ]
           },
+          "repos": {
+            "description": "Repositories the thread set a base for, branched or opened a PR in",
+            "items": {
+              "$ref": "#/components/schemas/ThreadRepoView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "status": {
             "enum": [
               "queued",
@@ -3967,6 +4038,7 @@
           "pause_reason",
           "branch",
           "base_branch",
+          "repos",
           "pr_number",
           "pr_url",
           "pr_state",
@@ -6842,6 +6914,17 @@
               "maxLength": 64,
               "type": "string"
             }
+          },
+          {
+            "description": "owner/name of one of the project's repositories; default the first",
+            "explode": false,
+            "in": "query",
+            "name": "repo",
+            "schema": {
+              "description": "owner/name of one of the project's repositories; default the first",
+              "maxLength": 300,
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -6882,6 +6965,17 @@
             "required": true,
             "schema": {
               "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "owner/name of one of the project's repositories; default the first",
+            "explode": false,
+            "in": "query",
+            "name": "repo",
+            "schema": {
+              "description": "owner/name of one of the project's repositories; default the first",
+              "maxLength": 300,
               "type": "string"
             }
           }

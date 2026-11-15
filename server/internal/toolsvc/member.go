@@ -3,6 +3,7 @@ package toolsvc
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
@@ -76,6 +77,9 @@ func (s *Service) complete(ctx context.Context, tx *core.Tx, task core.Task, out
 	if out.HeadSHA != "" {
 		res.HeadSHA = &out.HeadSHA
 	}
+	if out.Pushed != nil {
+		res.Pushed = pushedList(out.Pushed)
+	}
 	return okJSON(fmt.Sprintf("任务 %s 已提交（%s）", task.ID, task.Status), res), nil
 }
 
@@ -95,22 +99,109 @@ func (s *Service) pushBranch(ctx context.Context, tx *core.Tx, c *call) (Result,
 	return Result{Wait: true}, nil
 }
 
-// pushDone continues complete_task / push_branch when the push job reported back.
+// pushDone continues complete_task / push_branch once every repository's push job of the call
+// reported back (jobs of one call share a push group; the tool call row serializes them).
 func (s *Service) pushDone(ctx context.Context, tx *core.Tx, meta map[string]any, r *protocol.GitResult) error {
 	sessionID, callID := str(meta["session_id"]), str(meta["call_id"])
 	if sessionID == "" || callID == "" {
 		return nil
 	}
-	if !r.Ok {
-		return s.Complete(ctx, tx, sessionID, callID, failText("%s", delivery.PushError(r)))
+	outcomes, done, err := s.pushOutcomes(ctx, tx, meta, r)
+	if err != nil || !done {
+		return err
 	}
-	sha := ""
-	if r.HeadSHA != nil {
-		sha = *r.HeadSHA
+	if f, ok := firstFailure(outcomes); ok {
+		return s.Complete(ctx, tx, sessionID, callID, failText("%s", pushFailText(f, len(outcomes))))
 	}
 	if str(meta["then"]) == "complete" {
-		return s.completeAfterPush(ctx, tx, meta, sha)
+		return s.completeAfterPush(ctx, tx, meta, outcomes)
 	}
+	return s.pushBranchDone(ctx, tx, meta, outcomes)
+}
+
+// pushOutcomes returns the call's push results once all are in (done=false while some are missing).
+func (s *Service) pushOutcomes(ctx context.Context, tx *core.Tx, meta map[string]any, r *protocol.GitResult) ([]delivery.PushOutcome, bool, error) {
+	group := str(meta["push_group"])
+	if group == "" { // a push queued before multi-repository support: one job, no repository name
+		return []delivery.PushOutcome{single(r)}, true, nil
+	}
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM at_tool_calls WHERE session_id = $1 AND call_id = $2 FOR UPDATE`,
+		str(meta["session_id"]), str(meta["call_id"])); err != nil {
+		return nil, false, err
+	}
+	outcomes, err := delivery.PushGroup(ctx, tx, str(meta["node_id"]), group)
+	if err != nil {
+		return nil, false, err
+	}
+	for _, o := range outcomes {
+		if !o.Done {
+			return outcomes, false, nil
+		}
+	}
+	return outcomes, true, nil
+}
+
+func single(r *protocol.GitResult) delivery.PushOutcome {
+	o := delivery.PushOutcome{Done: true, OK: r.Ok, Result: *r}
+	if r.HeadSHA != nil {
+		o.SHA = *r.HeadSHA
+	}
+	return o
+}
+
+func firstFailure(outcomes []delivery.PushOutcome) (delivery.PushOutcome, bool) {
+	for _, o := range outcomes {
+		if !o.OK {
+			return o, true
+		}
+	}
+	return delivery.PushOutcome{}, false
+}
+
+func pushFailText(o delivery.PushOutcome, n int) string {
+	text := delivery.PushError(&o.Result)
+	if n > 1 && o.Repo != "" {
+		text = "仓库 " + o.Repo + "：" + text
+	}
+	return text
+}
+
+// pushedRepos are the repositories that had commits to deliver (repo → sha) and the first sha.
+// A legacy single push without a repository name gives a nil map.
+func pushedRepos(outcomes []delivery.PushOutcome) (map[string]string, string) {
+	first := ""
+	var out map[string]string
+	for _, o := range outcomes {
+		if o.Unchanged || o.SHA == "" {
+			continue
+		}
+		if first == "" {
+			first = o.SHA
+		}
+		if o.Repo != "" {
+			if out == nil {
+				out = map[string]string{}
+			}
+			out[o.Repo] = o.SHA
+		}
+	}
+	if out == nil && len(outcomes) > 0 && outcomes[0].Repo != "" {
+		out = map[string]string{}
+	}
+	return out, first
+}
+
+func pushedList(pushed map[string]string) []protocol.PushedRepo {
+	out := make([]protocol.PushedRepo, 0, len(pushed))
+	for repo, sha := range pushed {
+		out = append(out, protocol.PushedRepo{Repo: repo, HeadSHA: sha})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Repo < out[j].Repo })
+	return out
+}
+
+func (s *Service) pushBranchDone(ctx context.Context, tx *core.Tx, meta map[string]any, outcomes []delivery.PushOutcome) error {
+	sessionID, callID := str(meta["session_id"]), str(meta["call_id"])
 	sc, err := core.SessionContextOf(ctx, tx, sessionID)
 	if err != nil {
 		return ignoreMissing(err)
@@ -120,10 +211,27 @@ func (s *Service) pushDone(ctx context.Context, tx *core.Tx, meta map[string]any
 		return ignoreMissing(err)
 	}
 	branch := orchestrator.MemberBranch(t.No, sc.Employee.Name)
-	return s.Complete(ctx, tx, sessionID, callID, okJSON("已推送到 "+branch, protocol.PushBranchResult{Branch: branch, HeadSHA: sha}))
+	pushed, sha := pushedRepos(outcomes)
+	res := protocol.PushBranchResult{Branch: branch, HeadSHA: sha, Pushed: pushedList(pushed)}
+	if sha == "" {
+		return s.Complete(ctx, tx, sessionID, callID, okJSON("没有新的提交需要推送", res))
+	}
+	return s.Complete(ctx, tx, sessionID, callID, okJSON("已推送到 "+branch+pushedText(pushed), res))
 }
 
-func (s *Service) completeAfterPush(ctx context.Context, tx *core.Tx, meta map[string]any, sha string) error {
+func pushedText(pushed map[string]string) string {
+	if len(pushed) == 0 {
+		return ""
+	}
+	repos := make([]string, 0, len(pushed))
+	for r := range pushed {
+		repos = append(repos, r)
+	}
+	sort.Strings(repos)
+	return "（" + strings.Join(repos, "、") + "）"
+}
+
+func (s *Service) completeAfterPush(ctx context.Context, tx *core.Tx, meta map[string]any, outcomes []delivery.PushOutcome) error {
 	sessionID, callID := str(meta["session_id"]), str(meta["call_id"])
 	task, err := core.LockTask(ctx, tx, str(meta["thread_id"]), str(meta["task_id"]))
 	if err != nil {
@@ -132,10 +240,11 @@ func (s *Service) completeAfterPush(ctx context.Context, tx *core.Tx, meta map[s
 	if !workable[task.Status] {
 		return s.Complete(ctx, tx, sessionID, callID, failText("任务 %s 已经是 %s", task.ID, task.Status))
 	}
+	pushed, sha := pushedRepos(outcomes)
 	var res Result
 	err = tx.Savepoint(ctx, func(sub *core.Tx) error {
 		var cerr error
-		res, cerr = s.complete(ctx, sub, task, scheduler.Outcome{OK: true, Summary: str(meta["summary"]), HeadSHA: sha})
+		res, cerr = s.complete(ctx, sub, task, scheduler.Outcome{OK: true, Summary: str(meta["summary"]), HeadSHA: sha, Pushed: pushed})
 		return cerr
 	})
 	if err != nil {

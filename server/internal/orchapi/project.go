@@ -83,6 +83,12 @@ type overviewOutput struct{ Body Overview }
 
 type ciDetectOutput struct{ Body delivery.Detection }
 
+// ciRepoInput names the repository of a CI request ("" = the project's first repository).
+type ciRepoInput struct {
+	PID  string `path:"pid" maxLength:"64"`
+	Repo string `query:"repo" maxLength:"300" doc:"owner/name of one of the project's repositories; default the first"`
+}
+
 type setupPROutput struct {
 	Body struct {
 		PRURL string `json:"pr_url"`
@@ -252,8 +258,8 @@ func (a *API) projectView(ctx context.Context, p store.Project) (httpapi.Project
 	var hd httpapi.Delivery
 	raw, _ := json.Marshal(d)
 	_ = json.Unmarshal(raw, &hd)
-	return httpapi.ProjectView{ID: p.ID, Name: p.Name, Description: p.Description, Context: p.Context, Repo: p.Repo,
-		Branch: p.Branch, GitConnectionID: p.GitConnectionID, Pinned: p.Pinned, Archived: p.Archived, WorkMode: p.WorkMode,
+	return httpapi.ProjectView{ID: p.ID, Name: p.Name, Description: p.Description, Context: p.Context,
+		Repos: httpapi.RepoRefs(p.Repos), Pinned: p.Pinned, Archived: p.Archived, WorkMode: p.WorkMode,
 		AutoApprove: p.AutoApprove, RequireAcceptance: p.RequireAcceptance, Delivery: hd, OfficeLayout: p.OfficeLayout,
 		Waiting: p.Waiting, ThreadsActive: p.ThreadsActive, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}, nil
 }
@@ -303,24 +309,24 @@ func (a *API) nodeBriefs(ctx context.Context, userID string) ([]NodeBrief, error
 	return out, nil
 }
 
-func (a *API) ciDetect(ctx context.Context, in *pidInput) (*ciDetectOutput, error) {
+func (a *API) ciDetect(ctx context.Context, in *ciRepoInput) (*ciDetectOutput, error) {
 	_, p, err := a.project(ctx, in.PID)
 	if err != nil {
 		return nil, err
 	}
-	d, err := a.e.Delivery.DetectCI(ctx, p.ID)
+	d, err := a.e.Delivery.DetectCI(ctx, p.ID, in.Repo)
 	if err != nil {
 		return nil, fail(err, "没有这个项目")
 	}
 	return &ciDetectOutput{Body: d}, nil
 }
 
-func (a *API) ciSetupPR(ctx context.Context, in *pidInput) (*setupPROutput, error) {
+func (a *API) ciSetupPR(ctx context.Context, in *ciRepoInput) (*setupPROutput, error) {
 	_, p, err := a.project(ctx, in.PID)
 	if err != nil {
 		return nil, err
 	}
-	url, err := a.e.Delivery.SetupCIPR(ctx, p.ID)
+	url, err := a.e.Delivery.SetupCIPR(ctx, p.ID, in.Repo)
 	if err != nil {
 		return nil, fail(err, "没有这个项目")
 	}

@@ -38,6 +38,18 @@
     },
     "kind": {
       "$ref": "common.json#/$defs/TaskKind"
+    },
+    "repo": {
+      "description": "Repository the task is about (owner/name); named in the task text. With base, records the thread's base branch in it.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "base": {
+      "description": "Base branch the thread uses in repo (only before the thread branch exists there; read the project context for stated bases).",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
     }
   },
   "$defs": {

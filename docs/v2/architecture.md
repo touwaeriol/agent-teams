@@ -297,25 +297,29 @@ queued ──开工──► running ◄──► waiting（有等你处理的�
 
 ### 8.1 目录和分支
 
+项目可以绑定多个仓库（`at_project_repos`，有顺序）。项目不存基准分支：用户把“仓库 X 的基准分支：develop”这类约定写在项目上下文里，它会注入每个员工的提示词；统筹和组长读到后在工具参数里显式传 `base`，没写的仓库用默认分支（GitHub `default_branch`）。
+
 ```
-<root>/projects/<pid>/repo                    共享克隆（普通克隆，主工作区停在基准分支，没人在里面干活，只用来 fetch 和挂 worktree）
-<root>/projects/<pid>/coordinator             空目录
-<root>/projects/<pid>/threads/<no>/lead       worktree，分支 thread/<no>-<slug>（只读用）
-<root>/projects/<pid>/threads/<no>/<name>     worktree，分支 thread/<no>/<name>，基于讨论串分支
+<root>/projects/<pid>/repos/<owner>__<repo>                    每个仓库一份共享克隆（只用来 fetch 和挂 worktree）
+<root>/projects/<pid>/coordinator                              空目录（统筹不检出任何仓库）
+<root>/projects/<pid>/threads/<no>/lead/<owner>__<repo>        每个仓库一个 worktree，分支 thread/<no>-<slug>（只读用）
+<root>/projects/<pid>/threads/<no>/<name>/<owner>__<repo>      每个仓库一个 worktree，分支 thread/<no>/<name>
 ```
 
-- `git.prepare {mode: worktree|clone, shared, cwd, branch, base}`：没有共享克隆就 clone；`git -C shared fetch origin --prune`；目标不是 worktree 就 `git -C shared worktree add -B <branch> <cwd> origin/<base or branch>`。clone 模式沿用 v1。
-- 每台节点上每个项目一份共享克隆；同一节点上的 fetch / worktree 操作按项目加文件锁（`shared/.git/agent-teams.lock`），避免并发 `worktree add` 打架。
-- **员工手里没有写令牌**（§10.4）：成员自己 `git commit`，但推送由平台做。成员调用 `push_branch()`（`complete_task` 和 `enqueue_merge` 前平台也会自动调用）→ 控制台发 `git.push {job_id, cwd, refspec: "HEAD:refs/heads/thread/<no>/<name>"}` 作业 → 守护进程用**只为这一个作业**申请的令牌（只给本仓库、`contents: write`）执行 `git push --no-verify origin <固定 refspec>`，令牌不进任何员工进程的环境。refspec 由控制台按员工身份生成，守护进程只接受 `refs/heads/thread/<no>/<employee>` 形式，所以无论 Bash、Codex、脚本还是 git 别名，员工都推不了讨论串分支和基准分支。讨论串分支只由控制台（合并队列，App 令牌）改动。
+- 会话的 cwd 是员工目录（`threads/<no>/<name>`），里面每个仓库一个子目录；提示词的“## 仓库”一节列出每个仓库的目录和本讨论串在该仓库的基准分支。多仓库之前开始的讨论串，worktree 直接在员工目录里（共享克隆在 `projects/<pid>/repo`）：项目仍只有一个仓库时继续沿用这个旧位置。
+- **讨论串分支按仓库懒创建**：开串时不建分支；某个仓库第一次有条目进合并队列时，平台才在该仓库从“本讨论串在该仓库的基准分支”建 `thread/<no>-<slug>`（`at_thread_repos.branch_created`）。基准分支 = 组长/统筹显式给的（`open_thread(repos=[{repo, base}])`、`assign_task(repo, base)`、`enqueue_merge(repo, base)`，记在 `at_thread_repos.base_branch`，分支建好后就固定），否则该仓库的默认分支。成员 worktree 从讨论串分支（已存在时）或该基准分支切出。
+- `git.prepare {mode: worktree|clone, repo, shared, cwd, branch, base}`：每个仓库一个作业，`session.open.prepare_jobs` 列出全部（`prepare` 为第一个，兼容旧守护进程），守护进程等它们全部成功再开会话。没有共享克隆就 clone；`git -C shared fetch origin --prune`；目标不是 worktree 就 `git -C shared worktree add -B <branch> <cwd> origin/<branch 已存在时> | origin/<base>`。clone 模式沿用 v1（每个仓库一份克隆）。
+- 每台节点上每个仓库一份共享克隆；同一节点上的 fetch / worktree 操作按共享克隆加文件锁（`.<dir>.agent-teams.lock`），避免并发 `worktree add` 打架。
+- **员工手里没有写令牌**（§10.4）：成员自己 `git commit`，但推送由平台做。成员调用 `push_branch()`（`complete_task` 前平台也会自动调用）→ 控制台给每个仓库发一个 `git.push {job_id, repo, cwd, refspec: "HEAD:refs/heads/thread/<no>/<name>", unchanged_against: [讨论串分支, 基准分支]}` 作业（同一次调用的作业共享 `meta.push_group`，全部回报后工具才返回）；HEAD 在这些分支之外没有提交的仓库，守护进程不推送，回 `unchanged: true`。推送过的仓库记在任务的 `at_tasks.pushed`（repo → sha） → 守护进程用**只为这一个作业**申请的令牌（只给本仓库、`contents: write`）执行 `git push --no-verify origin <固定 refspec>`，令牌不进任何员工进程的环境。refspec 由控制台按员工身份生成，守护进程只接受 `refs/heads/thread/<no>/<employee>` 形式，所以无论 Bash、Codex、脚本还是 git 别名，员工都推不了讨论串分支和基准分支。讨论串分支只由控制台（合并队列，App 令牌）改动。
 - **令牌只在守护进程自己的镜像里用**：共享克隆的 `.git` 员工可写（提交要落在那里），其中的 `remote.origin.url`、`url.*.insteadOf`、`http.proxy`、`core.fsmonitor`、过滤器等配置都不可信。所以守护进程为每个仓库在 `state/mirrors/<owner>__<repo>.git`（0700，员工不可读写）维护一个裸镜像：带令牌的 fetch 和 push 只在镜像里做（推送时先把 worktree 的 HEAD 取进镜像，再从镜像推固定 refspec 到固定 URL），共享克隆只从镜像本地 fetch，环境里没有令牌；守护进程在共享克隆和 worktree 里跑的所有 git 命令都用 `-c` 覆盖 `core.fsmonitor`、`core.hooksPath` 并清空已配置的过滤器驱动，环境里剔除 `AGENT_TEAMS_*`。
 - **纵深防护**：守护进程把共享克隆及其所有 worktree 的 `core.hooksPath` 设为平台目录（员工不可写，§10.3）里的 `pre-push` 钩子，拒绝推送 `protected_refs` 和任何非本员工分支，并提示“请用 push_branch 工具”（钩子可被 `--no-verify` 绕过，但员工本来就没有写令牌，这一层只是给出清楚的报错）。`ci/detect` 同时建议用户在仓库建一个规则集：保护基准分支和 `thread/*`（GitHub 规则集的 `*` 不跨 `/`，因此不覆盖 `thread/<no>/<name>` 成员分支），限制更新与强推，绕过者只设平台 App。
 - **workflow 文件**：写令牌不带 `workflows` 权限，GitHub 会拒绝任何改了 `.github/workflows/**` 的推送，所以员工写的 workflow 不可能在 `mq/**`、`thread/**` 的 push 上带着仓库 Actions secrets 运行。需要改 CI 的任务，平台在推送被拒时告诉员工“workflow 变更请写进交付说明，由用户合并”；项目设置里的“允许员工修改 workflow”开关（默认关，打开要二次确认并审计）会让推送作业的令牌带上 `workflows: write`。
 
 ### 8.2 合并队列（成员分支 → 讨论串分支，全部在 GitHub 上做，不占节点）
 
-每个讨论串一条队列（`at_merge_queue`），一次处理一个条目：
+每个讨论串一条队列（`at_merge_queue`），每个仓库一次处理一个条目（不同仓库的队头并行）：
 
-1. 条目进入（组长 `enqueue_merge`，或审查/决策关卡通过后自动进入）。任务状态 `merging`。
+1. 条目进入（组长 `enqueue_merge`，或审查/决策关卡通过后自动进入）：任务推送过的每个仓库一个条目（`at_merge_queue.repo`；`enqueue_merge(repo)` 只合并其中一个）。没有任何改动的任务直接 `done`。任务状态 `merging`；任务在所有仓库都合并后才 `done`。该仓库还没有讨论串分支时先按 §8.1 创建。
 2. 建试合并分支：`mq/<no>/<entry_id>` = 讨论串分支当前 head（`POST /git/refs`），然后 `POST /repos/{o}/{r}/merges {base: mq/…, head: thread/<no>/<name>}`。
    - 409 冲突 → 条目 `conflict`，给该成员生成修复任务“把 thread/<no>-<slug> rebase/merge 进你的分支并解决冲突”（`kind: fix`，直接点名该成员），任务回到 `running`。
 3. 等 CI（§8.3）在试合并分支 head 上的结果。
@@ -333,10 +337,12 @@ queued ──开工──► running ◄──► waiting（有等你处理的�
 
 ### 8.4 PR 与验收
 
-- 组长 `open_pr(title, body)` 或用户在 Thread 页点“开 PR”（`POST /api/threads/{tid}/open-pr`，标题和正文缺省时平台用讨论串标题 + 主任务清单 + 各小任务总结生成）：前提是该讨论串没有 `merging` 中的条目、所有主任务 done（否则返回错误说明还差什么；用户可带 `force: true` 跳过“主任务全部 done”这一条）。平台建 PR（head 讨论串分支 → base 项目基准分支），写 `at_threads.pr_*` 和一条 `pr` 类交付物，讨论串 → `review`，给统筹发 `[Thread #12 · … · review] <结论>`。
+- 组长 `open_pr(title, body)` 或用户在 Thread 页点“开 PR”（`POST /api/threads/{tid}/open-pr`，标题和正文缺省时平台用讨论串标题 + 主任务清单 + 各小任务总结生成）：前提是该讨论串没有 `merging` 中的条目、所有主任务 done（否则返回错误说明还差什么；用户可带 `force: true` 跳过“主任务全部 done”这一条）。平台给每个已有讨论串分支、还没有 PR 的仓库各建一个 PR（head 讨论串分支 → base 本讨论串在该仓库的基准分支；`open_pr(repo, base)` 可只开一个、改 PR 的 base；GitHub 回“No commits between”的仓库跳过），写 `at_thread_repos.pr_*`（第一个 PR 同时写进 `at_threads.pr_*`，兼容旧客户端）和每个 PR 一条 `pr` 类交付物（`detail.repo`），讨论串 → `review`，给统筹发 `[Thread #12 · … · review] <结论>`。
+- 验收、自动合并和 CI 判断都针对讨论串**全部**未合并的 PR：全部通过才合并（逐个合并），任何一个失败就按失败处理；PR 全部合并后讨论串才 `done`。webhook 的 `pull_request closed` 按 PR 链接找到 `at_thread_repos` 行。
 - **`require_acceptance` 开**（默认，设置页“讨论串完成后需要我验收”）：用户 `POST /api/threads/{id}/accept` → 平台等 PR head 上的必需 check 通过后合并 PR（`PUT /pulls/{n}/merge`，方法按 `delivery.merge_method` squash|merge|rebase，默认 squash），→ `done`。`reject {reason}` → 原因作为消息发给组长，→ `running`。
 - **`require_acceptance` 关**（按设计稿：“PR 通过检查后自动合并进基准分支”）：讨论串进入 `review` 后，delivery 引擎轮询 PR head 的 check（与 §8.3 同一套规则：`required`、`appear_timeout_s`、`on_missing`），全部通过且 PR 可合并时用 `merge_method` 自动合并，→ `done` 并通知统筹；check 失败 → 给组长发 `[Thread #12 · CI 失败]`（附失败 check），讨论串回 `running`；合并冲突（基准分支前进）→ 给组长发修复指令，回 `running`。此时 accept 接口只是“立即合并（不等自动流程）”，reject 仍可用（在自动合并前拦下）。
-- `done/archived` 后：所有会话 `session.close`，对涉及的节点发 `git.cleanup`（有未推送提交的 worktree 保留并回报），远端删除 `thread/<no>/*` 成员分支（讨论串分支随 PR 合并删除）。
+- `done/archived` 后：所有会话 `session.close`，对涉及的节点按共享克隆各发一个 `git.cleanup`（有未推送提交的 worktree 保留并回报），远端在每个仓库删除 `thread/<no>/*` 成员分支（讨论串分支随 PR 合并删除）。
+- **凭证按仓库**：推送/准备作业的 `cred.request` 只能拿到作业自己那个仓库（`body.repo`）的令牌，用该仓库绑定的 Git 连接铸造；员工会话可以读项目的任何一个仓库。CI 检测（`GET /api/projects/{pid}/ci/detect?repo=`）按仓库，读该仓库默认分支上的 workflow。
 
 ## 9. 审批端到端
 

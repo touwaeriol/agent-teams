@@ -29,6 +29,7 @@ type ThreadRequest struct {
 	Brief     string
 	Roles     []RoleCount // nil = template counts; Count 0 = template count
 	OnlyRoles []string    // open_thread(roles): member roles to include (nil = all)
+	Repos     []RepoFocus // open_thread(repos): repositories to work in, with optional explicit bases
 	OpenedBy  string      // coordinator | user
 }
 
@@ -58,14 +59,27 @@ func (o *Orchestrator) OpenThreadTx(ctx context.Context, tx *core.Tx, req Thread
 		return core.Thread{}, err
 	}
 	t, err := core.CreateThread(ctx, tx, core.NewThread{ProjectID: p.ID, UserID: p.UserID, Title: req.Title,
-		Brief: req.Brief, BaseBranch: p.Branch, AutoApprove: p.AutoApprove, OpenedBy: req.OpenedBy, Roles: roles})
+		Brief: req.Brief, AutoApprove: p.AutoApprove, OpenedBy: req.OpenedBy, Roles: roles})
 	if err != nil {
+		return t, err
+	}
+	if t, err = o.focusThread(ctx, tx, p, t, req.Repos); err != nil {
 		return t, err
 	}
 	if _, err := core.InstantiateThread(ctx, tx, t, o.hairFor); err != nil {
 		return t, err
 	}
 	return t, tx.EmitThread(ctx, t.ID)
+}
+
+// focusThread records open_thread's repositories and explicit bases and names them in the brief.
+func (o *Orchestrator) focusThread(ctx context.Context, tx *core.Tx, p store.Project, t core.Thread, focus []RepoFocus) (core.Thread, error) {
+	line, err := applyFocus(ctx, tx, p, t.ID, focus)
+	if err != nil || line == "" {
+		return t, err
+	}
+	t.Brief = strings.TrimSpace(t.Brief + "\n\n" + line)
+	return t, core.UpdateThread(ctx, tx, t.ID, map[string]any{"brief": t.Brief})
 }
 
 // threadRoles snapshots the user's lead and member templates with the requested counts.
@@ -194,9 +208,13 @@ func (o *Orchestrator) StartQueued(ctx context.Context, userID string) {
 	}
 }
 
-// start creates the thread branch on GitHub, marks the thread running and briefs the lead.
+// start marks the thread running and briefs the lead. Thread branches are created later, per
+// repository, when the thread first delivers something there.
 func (o *Orchestrator) start(ctx context.Context, t core.Thread) error {
-	note := o.ensureThreadBranch(ctx, t)
+	p, err := o.project(ctx, o.core.Pool, t.ProjectID)
+	if err != nil {
+		return err
+	}
 	return o.core.InTx(ctx, func(tx *core.Tx) error {
 		cur, err := core.LockThread(ctx, tx, t.ID)
 		if err != nil || cur.Status != "queued" {
@@ -209,34 +227,15 @@ func (o *Orchestrator) start(ctx context.Context, t core.Thread) error {
 		if err != nil {
 			return err
 		}
-		_, err = o.Deliver(ctx, tx, lead, Delivery{Text: briefText(cur, note), Kind: "user", Priority: "next"})
+		_, err = o.Deliver(ctx, tx, lead, Delivery{Text: briefText(cur, p), Kind: "user", Priority: "next"})
 		return err
 	})
 }
 
-func (o *Orchestrator) ensureThreadBranch(ctx context.Context, t core.Thread) string {
-	if o.gh == nil {
-		return ""
-	}
-	p, err := o.project(ctx, o.core.Pool, t.ProjectID)
-	if err != nil {
-		return ""
-	}
-	repo, err := o.gh.RepoOf(ctx, p)
-	if err != nil {
-		return ""
-	}
-	if _, err := o.gh.EnsureBranch(ctx, repo, t.Branch, t.BaseBranch); err != nil {
-		o.log.Warn("create thread branch", "thread_id", t.ID, "err", err)
-		return fmt.Sprintf("（平台没能在 GitHub 上创建讨论串分支 %s：%v）", t.Branch, err)
-	}
-	return ""
-}
-
-func briefText(t core.Thread, note string) string {
-	text := fmt.Sprintf("[Thread #%d · %s]\n%s\n\n讨论串分支：%s（基于 %s）", t.No, t.Title, t.Brief, t.Branch, orDefault(t.BaseBranch, "默认分支"))
-	if note != "" {
-		text += "\n" + note
+func briefText(t core.Thread, p store.Project) string {
+	text := fmt.Sprintf("[Thread #%d · %s]\n%s\n\n讨论串分支：%s", t.No, t.Title, t.Brief, t.Branch)
+	if p.HasRepos() {
+		text += fmt.Sprintf("（只在有改动的仓库里创建，默认从各仓库的默认分支切出）\n项目仓库：%s", strings.Join(repoNames(p), "、"))
 	}
 	return text
 }

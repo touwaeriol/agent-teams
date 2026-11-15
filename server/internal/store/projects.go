@@ -13,9 +13,7 @@ type Project struct {
 	Name              string
 	Description       string
 	Context           string
-	Repo              *string
-	Branch            string
-	GitConnectionID   *string
+	Repos             []ProjectRepo
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	Pinned            bool
@@ -32,16 +30,22 @@ type Project struct {
 // NewProject is what POST /api/projects stores.
 type NewProject struct {
 	Name, Description, Context string
-	Repo                       *string
-	Branch                     string
-	GitConnectionID            *string
+	Repos                      []ProjectRepo
 	WorkMode                   string
 	AutoApprove                bool
 	RequireAcceptance          bool
 	Delivery                   json.RawMessage
 }
 
-const projectCols = `p.id, p.user_id, p.name, p.description, p.context, p.repo, p.branch, p.git_connection_id,
+// ProjectRepo is one repository bound to a project (at_project_repos), in project order.
+type ProjectRepo struct {
+	Repo            string  `json:"repo"`
+	GitConnectionID *string `json:"git_connection_id"`
+}
+
+const projectCols = `p.id, p.user_id, p.name, p.description, p.context,
+	COALESCE((SELECT json_agg(json_build_object('repo', r.repo, 'git_connection_id', r.git_connection_id)
+	  ORDER BY r.position, r.created_at) FROM at_project_repos r WHERE r.project_id = p.id), '[]'::json),
 	p.created_at, p.updated_at, p.pinned, p.archived, p.work_mode, p.auto_approve, p.require_acceptance,
 	p.delivery, p.office_layout,
 	(SELECT count(*) FROM at_questions q WHERE q.project_id = p.id AND q.status = 'open' AND q.audience = 'user')
@@ -50,11 +54,17 @@ const projectCols = `p.id, p.user_id, p.name, p.description, p.context, p.repo, 
 
 func scanProject(row interface{ Scan(...any) error }) (Project, error) {
 	var p Project
-	err := row.Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.Context, &p.Repo, &p.Branch,
-		&p.GitConnectionID, &p.CreatedAt, &p.UpdatedAt, &p.Pinned, &p.Archived, &p.WorkMode,
+	var repos []byte
+	err := row.Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.Context, &repos, &p.CreatedAt, &p.UpdatedAt, &p.Pinned, &p.Archived, &p.WorkMode,
 		&p.AutoApprove, &p.RequireAcceptance, &p.Delivery, &p.OfficeLayout, &p.Waiting, &p.ThreadsActive)
+	if err == nil {
+		err = json.Unmarshal(repos, &p.Repos)
+	}
 	return p, mapErr(err)
 }
+
+// HasRepos reports whether the project works in at least one repository.
+func (p Project) HasRepos() bool { return len(p.Repos) > 0 }
 
 // ListProjects returns the user's projects, pinned first then most recent; q filters name/description.
 func (s *Store) ListProjects(ctx context.Context, userID, q string) ([]Project, error) {
@@ -87,16 +97,47 @@ func (s *Store) CreateProject(ctx context.Context, userID string, n NewProject) 
 	if len(delivery) == 0 {
 		delivery = json.RawMessage(`{}`)
 	}
-	var id string
-	err := s.db.QueryRow(ctx, `INSERT INTO at_projects (id, user_id, name, description, context, repo, branch,
-		git_connection_id, work_mode, auto_approve, require_acceptance, delivery)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
-		NewHexID(), userID, n.Name, n.Description, n.Context, n.Repo, n.Branch, n.GitConnectionID,
-		n.WorkMode, n.AutoApprove, n.RequireAcceptance, delivery).Scan(&id)
+	id := NewHexID()
+	err := s.Tx(ctx, func(tx *Store) error {
+		_, err := tx.db.Exec(ctx, `INSERT INTO at_projects (id, user_id, name, description, context,
+			work_mode, auto_approve, require_acceptance, delivery) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+			id, userID, n.Name, n.Description, n.Context, n.WorkMode, n.AutoApprove, n.RequireAcceptance, delivery)
+		if err != nil {
+			return err
+		}
+		return tx.writeRepos(ctx, id, n.Repos)
+	})
 	if err != nil {
 		return Project{}, mapErr(err)
 	}
 	return s.ProjectOf(ctx, userID, id)
+}
+
+// SetProjectRepos replaces a project's repositories (order = position).
+func (s *Store) SetProjectRepos(ctx context.Context, userID, id string, repos []ProjectRepo) (Project, error) {
+	err := s.Tx(ctx, func(tx *Store) error {
+		if err := affected(tx.db.Exec(ctx, `UPDATE at_projects SET updated_at = now() WHERE id = $1 AND user_id = $2`, id, userID)); err != nil {
+			return err
+		}
+		if _, err := tx.db.Exec(ctx, `DELETE FROM at_project_repos WHERE project_id = $1`, id); err != nil {
+			return err
+		}
+		return tx.writeRepos(ctx, id, repos)
+	})
+	if err != nil {
+		return Project{}, mapErr(err)
+	}
+	return s.ProjectOf(ctx, userID, id)
+}
+
+func (s *Store) writeRepos(ctx context.Context, projectID string, repos []ProjectRepo) error {
+	for i, r := range repos {
+		if _, err := s.db.Exec(ctx, `INSERT INTO at_project_repos (project_id, repo, git_connection_id, position)
+			VALUES ($1, $2, $3, $4)`, projectID, r.Repo, r.GitConnectionID, i); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // UpdateProject applies changes and bumps updated_at.

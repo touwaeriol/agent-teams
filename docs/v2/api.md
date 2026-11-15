@@ -51,7 +51,9 @@
 
 ```ts
 UserView        = {id, email, display_name, role: "admin"|"user", active, max_nodes: number|null, platform_version: 1|2, created_at}
-ProjectView     = {id, name, description, context, repo: string|null, branch, git_connection_id: string|null,
+ProjectView     = {id, name, description, context, repos: RepoRef[],   // 绑定的仓库（有顺序）；基准分支等约定写在 context 里
+RepoRef         = {repo: "owner/name", git_connection_id: string|null}
+                   /* ProjectView 其余字段： */
                    pinned, archived, work_mode: "worktree"|"clone", auto_approve,
                    require_acceptance,      // true：用户验收后平台合并；false：PR 的必需 check 通过后平台按 merge_method 自动合并（architecture.md §8.4）
                    delivery: DeliverySettings, office_layout: string, waiting: number, threads_active: number,
@@ -60,7 +62,8 @@ DeliverySettings = {gates: {review, decision, merge_queue}, ci: {mode, required,
                    merge_method: "squash"|"merge"|"rebase", approval_timeout_s: number|null,
                    notify_on_ask: boolean,          // “成员提问时通知我”：员工 ask_user / 审批卡片出现时发浏览器通知 + 用户事件流 notice（默认 true）
                    allow_workflow_edits: boolean}   // “允许员工修改 workflow”，默认 false（architecture.md §8.1）
-ThreadView      = {id, project_id, no, title, brief, status, queue_position: number|null, pause_reason: string, branch, base_branch, pr_number, pr_url, pr_state, summary,
+ThreadView      = {id, project_id, no, title, brief, status, queue_position: number|null, pause_reason: string, branch, base_branch /*旧字段*/, pr_number, pr_url, pr_state, summary,
+                   repos: ThreadRepoView[],   // 每个仓库：{repo, base_branch, branch_created, pr_number, pr_url, pr_state}；pr_number/pr_url = 第一个 PR，pr_state = 汇总
                    auto_approve, opened_by, members: EmployeeBrief[], main_tasks: MainTaskView[],
                    counts: {waiting, questions_open, approvals_open, tasks_total, tasks_done, main_total, main_done},
                    lead_last: {text, at} | null, cost_usd_est: number|null, created_at, updated_at}
@@ -81,7 +84,7 @@ Look            = {color, outfit: string, accessory: string, hair: string|null}
                   // （内置 tee|hoodie|suit|coat、none|glasses|headset|cap 必有），服务端保存时按布局校验，422 带 fields
 DeliverableView = {id, project_id, thread_no, kind: string, title, url, detail, published_by, created_at, updated_at}
                   // kind 已知集合：pr | doc | design | slides | dashboard | board | data；其他字符串按“链接”卡片显示
-MergeEntryView  = {id, thread_no, task_id, employee, head_branch, status, attempts, error, created_at, updated_at}
+MergeEntryView  = {id, thread_no, task_id, employee, repo, head_branch, status, attempts, error, created_at, updated_at}   // 每个仓库一个条目
 CheckView       = {name, status, conclusion, url, summary}
 NodeView        = {id, name, online, since, last_seen_at, version, protocol, isolation: "agent_user"|"sandbox"|"none", runtimes: {...}, capacity: {...},
                    active_sessions, parked_sessions, queued, isolated, labels, max_active_sessions, park_after_s, created_at}
@@ -147,7 +150,7 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | GET | `/api/threads/{tid}/activity?before=` | → 分页 activity（来自 `at_events`，v1 不落库） |
 | GET | `/api/threads/{tid}/merge-queue` | → `MergeEntryView[]` |
 | GET | `/api/threads/{tid}/checks` | → 最近一次合并的 `CheckView[]` |
-| POST | `/api/threads/{tid}/open-pr` | `{title?, body?, force?: bool}` → `ThreadView`（Thread 页“开 PR”按钮；前提同组长 `open_pr`：无 `merging` 条目、主任务全部 done（`force` 可跳过这一条）；标题/正文缺省时平台由讨论串标题、主任务和小任务总结生成；409 `pr_exists`、409 `merge_in_progress`） |
+| POST | `/api/threads/{tid}/open-pr` | `{title?, body?, force?: bool}` → `ThreadView`（Thread 页“开 PR”按钮；每个已有讨论串分支、还没有 PR 的仓库各开一个，base 为本讨论串在该仓库的基准分支，409 `nothing_to_pr` = 还没有合并进任何仓库的改动；前提同组长 `open_pr`：无 `merging` 条目、主任务全部 done（`force` 可跳过这一条）；标题/正文缺省时平台由讨论串标题、主任务和小任务总结生成；409 `pr_exists`、409 `merge_in_progress`） |
 | POST | `/api/threads/{tid}/accept` | → `ThreadView`。`require_acceptance` 开：等 PR 必需 check 通过后按 `merge_method` 合并 → done。关：PR 本来就会在 check 通过后自动合并，accept = “不等了，现在合并”（check 未通过时 409 `checks_pending`） |
 | POST | `/api/threads/{tid}/reject` | `{reason}` → `ThreadView`（原因发给组长，回到 running；`require_acceptance` 关时也可用，在自动合并前拦下） |
 | GET | `/api/threads/{tid}/usage` | → `{cost_usd_est, tokens: {...}, by_employee: [...]}` |
@@ -182,13 +185,13 @@ PR 类交付物的 `detail.state` 由平台轮询 / webhook 更新。设计类�
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/projects` | `{name, description?, context?, repo?, branch?, git_connection_id?, work_mode?, auto_approve?, require_acceptance?, delivery?, first_message?}` → 201 `ProjectView`。`first_message` 有值时投递给统筹（v1 是新建对话再发消息） |
-| PATCH | `/api/projects/{pid}` | v1 字段（`name, description, context, repo, branch, git_connection_id, pinned, archived, clear_repo`）+ `work_mode, auto_approve, require_acceptance, delivery, office_layout`（`delivery.notify_on_ask` = “成员提问时通知我”；`auto_approve` 要求节点隔离级别满足 `architecture.md` §10.3，否则 409 `isolation_required`） |
+| POST | `/api/projects` | `{name, description?, context?, repos?: RepoRef[], work_mode?, auto_approve?, require_acceptance?, delivery?, first_message?}` → 201 `ProjectView`。`first_message` 有值时投递给统筹（v1 是新建对话再发消息） |
+| PATCH | `/api/projects/{pid}` | `name, description, context, pinned, archived`，`repos?: RepoRef[]`（整体替换并保持顺序，`[]` 解绑全部；每个仓库要有能访问它的连接，重复 422）+ `work_mode, auto_approve, require_acceptance, delivery, office_layout`（`delivery.notify_on_ask` = “成员提问时通知我”；`auto_approve` 要求节点隔离级别满足 `architecture.md` §10.3，否则 409 `isolation_required`） |
 | GET | `/api/projects/{pid}/memory` | → `MemoryView[]`（`{id, text, source, pinned, created_at}`） |
 | POST | `/api/projects/{pid}/memory` | `{text}` → 201（source = user） |
 | PATCH / DELETE | `/api/projects/{pid}/memory/{id}` | `{text?, pinned?}` / 删除 |
-| GET | `/api/projects/{pid}/ci/detect` | → `{workflows: [{path, triggers}], covers_thread_branches: bool, covers_mq_branches: bool, app_has_checks_permission: bool, ruleset: {present: bool, recommended: {...}}}`（设置页 CI 部分的检测结果；`ruleset.recommended` 是建议的 GitHub 规则集：保护基准分支和 `thread/*`，绕过者为平台 App，见 `architecture.md` §8.1） |
-| POST | `/api/projects/{pid}/ci/setup-pr` | → `{pr_url}`：平台开一个 PR，给 workflows 加上 `thread/**`、`mq/**` 的 push 触发 |
+| GET | `/api/projects/{pid}/ci/detect?repo=` | 一个仓库（缺省第一个）在其默认分支上的检测 → `{repo, branch, workflows: [{path, triggers}], covers_thread_branches: bool, covers_mq_branches: bool, app_has_checks_permission: bool, ruleset: {present: bool, recommended: {...}}}`（设置页 CI 部分的检测结果；`ruleset.recommended` 是建议的 GitHub 规则集：保护基准分支和 `thread/*`，绕过者为平台 App，见 `architecture.md` §8.1） |
+| POST | `/api/projects/{pid}/ci/setup-pr?repo=` | → `{pr_url}`：平台在该仓库（缺省第一个）开一个 PR，给 workflows 加上 `thread/**`、`mq/**` 的 push 触发 |
 | GET | `/api/git/connections/{id}/repos?q=&cursor=` | 仓库下拉 → 分页 `RepoItem`（带 `used_by_projects`；v2 支持分页和搜索，v1 只取前 100） |
 | GET | `/api/git/connections/{id}/branches?repo=&q=` | 分支下拉 |
 

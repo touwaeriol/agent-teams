@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -19,40 +20,100 @@ const maxFastForwardRetries = 3
 // mergeable task states: the member finished (review/decision) or the lead takes it as it is.
 var mergeable = map[string]bool{"review": true, "decision": true, "running": true, "blocked": true, "claimed": true}
 
-// Enqueue puts a member's task into the thread's merge queue (enqueue_merge).
-func (e *Engine) Enqueue(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task) (core.MergeEntry, int, error) {
-	if !mergeable[task.Status] || task.ClaimedBy == "" {
-		return core.MergeEntry{}, 0, ErrTaskNotReady
-	}
-	branch := orDefault(task.Branch, orchestrator.MemberBranch(t.No, task.ClaimedBy))
-	entry, err := core.InsertMerge(ctx, tx, t.ID, &task.ID, task.ClaimedBy, branch)
-	if err != nil {
-		return entry, 0, err
-	}
-	if !e.orch.HasRepo(ctx, t.ProjectID) {
-		return e.mergedWithoutRepo(ctx, tx, t, task, entry)
-	}
-	if _, err := e.sched.SetStatus(ctx, tx, task, "merging"); err != nil {
-		return entry, 0, err
-	}
-	if err := tx.EmitMerge(ctx, t, entry); err != nil {
-		return entry, 0, err
-	}
-	pos, err := core.QueuePosition(ctx, tx, entry)
-	tx.AfterCommit(func(ctx context.Context) { e.Kick(ctx) })
-	return entry, pos, err
+// MergeRequest narrows enqueue_merge: Repo merges only that repository, Base records the base
+// branch the thread uses there (before its thread branch exists).
+type MergeRequest struct {
+	Repo string
+	Base string
 }
 
-// mergedWithoutRepo: projects without a repository have nothing to merge.
-func (e *Engine) mergedWithoutRepo(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task, entry core.MergeEntry) (core.MergeEntry, int, error) {
-	entry, err := core.UpdateMerge(ctx, tx, entry.ID, map[string]any{"status": "merged"})
+// Enqueue puts a member's task into the thread's merge queue (enqueue_merge): one entry per
+// repository the task pushed. It returns the entries and the queue position of the first.
+func (e *Engine) Enqueue(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task, req MergeRequest) ([]core.MergeEntry, int, error) {
+	if !mergeable[task.Status] || task.ClaimedBy == "" {
+		return nil, 0, ErrTaskNotReady
+	}
+	repos, err := e.mergeRepos(ctx, tx, t, task, req)
 	if err != nil {
-		return entry, 0, err
+		return nil, 0, err
+	}
+	branch := orDefault(task.Branch, orchestrator.MemberBranch(t.No, task.ClaimedBy))
+	if len(repos) == 0 {
+		return e.mergedWithoutRepo(ctx, tx, t, task, branch)
+	}
+	entries := make([]core.MergeEntry, 0, len(repos))
+	for _, repo := range repos {
+		entry, err := core.InsertMerge(ctx, tx, t.ID, &task.ID, task.ClaimedBy, repo, branch)
+		if err != nil {
+			return nil, 0, err
+		}
+		if err := tx.EmitMerge(ctx, t, entry); err != nil {
+			return nil, 0, err
+		}
+		entries = append(entries, entry)
+	}
+	if _, err := e.sched.SetStatus(ctx, tx, task, "merging"); err != nil {
+		return nil, 0, err
+	}
+	pos, err := core.QueuePosition(ctx, tx, entries[0])
+	tx.AfterCommit(func(ctx context.Context) { e.Kick(ctx) })
+	return entries, pos, err
+}
+
+// mergeRepos are the repositories to merge for a task: those it pushed (optionally one of them).
+// Tasks completed before multi-repository support recorded only a head sha: their single
+// repository is the project's only one.
+func (e *Engine) mergeRepos(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task, req MergeRequest) ([]string, error) {
+	if !e.orch.HasRepo(ctx, t.ProjectID) {
+		return nil, nil
+	}
+	pushed := pushedRepos(task)
+	if len(pushed) == 0 && task.HeadSHA != "" {
+		pushed = e.legacyRepo(ctx, t.ProjectID)
+	}
+	if req.Repo == "" {
+		return pushed, nil
+	}
+	slug, err := e.orch.SetBase(ctx, tx, t, req.Repo, req.Base)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.ContainsFunc(pushed, func(r string) bool { return strings.EqualFold(r, slug) }) {
+		return nil, fmt.Errorf("%w：任务 %s 没有在 %s 里推送改动", ErrNotPushed, task.ID, slug)
+	}
+	return []string{slug}, nil
+}
+
+func pushedRepos(task core.Task) []string {
+	out := make([]string, 0, len(task.Pushed))
+	for r := range task.Pushed {
+		out = append(out, r)
+	}
+	slices.Sort(out)
+	return out
+}
+
+func (e *Engine) legacyRepo(ctx context.Context, projectID string) []string {
+	p, err := e.orch.Project(ctx, projectID)
+	if err != nil || len(p.Repos) != 1 {
+		return nil
+	}
+	return []string{p.Repos[0].Repo}
+}
+
+// mergedWithoutRepo: projects without a repository (or a task without commits) have nothing to merge.
+func (e *Engine) mergedWithoutRepo(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task, branch string) ([]core.MergeEntry, int, error) {
+	entry, err := core.InsertMerge(ctx, tx, t.ID, &task.ID, task.ClaimedBy, "", branch)
+	if err != nil {
+		return nil, 0, err
+	}
+	if entry, err = core.UpdateMerge(ctx, tx, entry.ID, map[string]any{"status": "merged"}); err != nil {
+		return nil, 0, err
 	}
 	if _, err := e.sched.Finish(ctx, tx, task, "done"); err != nil {
-		return entry, 0, err
+		return nil, 0, err
 	}
-	return entry, 0, tx.EmitMerge(ctx, t, entry)
+	return []core.MergeEntry{entry}, 0, tx.EmitMerge(ctx, t, entry)
 }
 
 func orDefault(v, d string) string {
@@ -77,7 +138,7 @@ func (e *Engine) Tick(ctx context.Context) {
 	e.prTick(ctx)
 }
 
-// step advances the thread's first active entry by one state.
+// step advances the first active entry of each repository of the thread by one state.
 func (e *Engine) step(ctx context.Context, threadID string) error {
 	queue, err := core.MergeQueue(ctx, e.core.Pool, threadID, true)
 	if err != nil || len(queue) == 0 {
@@ -87,13 +148,36 @@ func (e *Engine) step(ctx context.Context, threadID string) error {
 	if err != nil {
 		return err
 	}
-	_, repo, err := e.repoOf(ctx, t.ProjectID)
-	if err != nil {
-		return e.fail(ctx, t, queue[0], "项目没有可用的 GitHub 仓库", err)
+	var errs []error
+	for _, entry := range headsByRepo(queue) {
+		errs = append(errs, e.stepEntry(ctx, t, entry))
 	}
-	entry := queue[0]
+	return errors.Join(errs...)
+}
+
+// headsByRepo picks the first entry of every repository (queue order).
+func headsByRepo(queue []core.MergeEntry) []core.MergeEntry {
+	seen := map[string]bool{}
+	var heads []core.MergeEntry
+	for _, m := range queue {
+		if !seen[m.Repo] {
+			seen[m.Repo] = true
+			heads = append(heads, m)
+		}
+	}
+	return heads
+}
+
+func (e *Engine) stepEntry(ctx context.Context, t core.Thread, entry core.MergeEntry) error {
+	repo, err := e.repoIn(ctx, t.ProjectID, entry.Repo)
+	if err != nil {
+		return e.fail(ctx, t, entry, "项目没有可用的 GitHub 仓库 "+entry.Repo, err)
+	}
 	if entry.Status == "ci_running" {
 		return e.checkEntry(ctx, t, repo, entry)
+	}
+	if err := e.orch.EnsureThreadBranch(ctx, t, repo); err != nil {
+		return e.fail(ctx, t, entry, "创建讨论串分支失败", err)
 	}
 	return e.startEntry(ctx, t, repo, entry)
 }
@@ -265,7 +349,8 @@ func (e *Engine) merged(ctx context.Context, t core.Thread, repo ghops.Repo, ent
 		if err != nil {
 			return err
 		}
-		return e.sched.NotifyLead(ctx, tx, t, fmt.Sprintf("[Merge · %s · %s · merged] %s 已合并进 %s", task.ID, entry.Employee, entry.HeadBranch, t.Branch))
+		return e.sched.NotifyLead(ctx, tx, t, fmt.Sprintf("[Merge · %s · %s · merged] %s 已合并进 %s 的 %s", task.ID, entry.Employee,
+			entry.HeadBranch, entry.Repo, t.Branch))
 	})
 }
 
@@ -277,6 +362,9 @@ func (e *Engine) finishTasks(ctx context.Context, tx *core.Tx, entry core.MergeE
 	if err != nil {
 		return task, ignoreMissing(err)
 	}
+	if open, err := core.TaskMergesOpen(ctx, tx, entry.ThreadID, task.ID, entry.Repo); err != nil || open > 0 {
+		return task, err // other repositories of the task are still on their way
+	}
 	if task, err = e.sched.Finish(ctx, tx, task, "done"); err != nil {
 		return task, err
 	}
@@ -287,13 +375,17 @@ func (e *Engine) finishTasks(ctx context.Context, tx *core.Tx, entry core.MergeE
 	if err != nil || parent.Finished() {
 		return task, ignoreMissing(err)
 	}
+	if open, err := core.TaskMergesOpen(ctx, tx, entry.ThreadID, parent.ID, entry.Repo); err != nil || open > 0 {
+		return task, err
+	}
 	_, err = e.sched.Finish(ctx, tx, parent, "done")
 	return task, err
 }
 
 // conflict marks the entry and gives the member a fix task (§8.2 step 2).
 func (e *Engine) conflict(ctx context.Context, t core.Thread, entry core.MergeEntry) error {
-	text := fmt.Sprintf("把讨论串分支 %s 合并（或 rebase）进你的分支 %s 并解决冲突，提交后调用 complete_task。", t.Branch, entry.HeadBranch)
+	text := fmt.Sprintf("仓库 %s：把讨论串分支 %s 合并（或 rebase）进你的分支 %s 并解决冲突，提交后调用 complete_task。",
+		entry.Repo, t.Branch, entry.HeadBranch)
 	return e.problem(ctx, t, entry, "conflict", "合并冲突", text)
 }
 
@@ -301,7 +393,7 @@ func (e *Engine) conflict(ctx context.Context, t core.Thread, entry core.MergeEn
 func (e *Engine) ciFailed(ctx context.Context, t core.Thread, repo ghops.Repo, entry core.MergeEntry, failed []core.CheckView, reason string) error {
 	_ = e.gh.DeleteRef(ctx, repo, entry.TrialBranch)
 	var b strings.Builder
-	b.WriteString("合并进讨论串分支前 CI 没有通过，请修复后提交并调用 complete_task。\n")
+	fmt.Fprintf(&b, "仓库 %s：合并进讨论串分支前 CI 没有通过，请修复后提交并调用 complete_task。\n", entry.Repo)
 	if reason != "" {
 		b.WriteString(reason + "\n")
 	}
@@ -324,7 +416,8 @@ func (e *Engine) problem(ctx context.Context, t core.Thread, entry core.MergeEnt
 		if err != nil {
 			return err
 		}
-		return e.sched.NotifyLead(ctx, tx, t, fmt.Sprintf("[Merge · %s · %s] %s 的合并没有完成，已派修复任务 %s。", label, entry.Employee, entry.HeadBranch, fix))
+		return e.sched.NotifyLead(ctx, tx, t, fmt.Sprintf("[Merge · %s · %s] %s 在 %s 的合并没有完成，已派修复任务 %s。", label,
+			entry.Employee, entry.HeadBranch, entry.Repo, fix))
 	})
 }
 
@@ -363,7 +456,7 @@ func (e *Engine) fail(ctx context.Context, t core.Thread, entry core.MergeEntry,
 		if err := tx.EmitMerge(ctx, t, entry); err != nil {
 			return err
 		}
-		return e.sched.NotifyLead(ctx, tx, t, fmt.Sprintf("[Merge · %s] %s", entry.Employee, reason))
+		return e.sched.NotifyLead(ctx, tx, t, fmt.Sprintf("[Merge · %s · %s] %s", entry.Employee, entry.Repo, reason))
 	})
 }
 

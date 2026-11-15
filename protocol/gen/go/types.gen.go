@@ -527,6 +527,10 @@ type AssignTaskInput struct {
 	// Assignee corresponds to the JSON schema field "assignee".
 	Assignee string `json:"assignee"`
 
+	// Base branch the thread uses in repo (only before the thread branch exists
+	// there; read the project context for stated bases).
+	Base *string `json:"base,omitempty,omitzero"`
+
 	// DependsOn corresponds to the JSON schema field "depends_on".
 	DependsOn []TaskID `json:"depends_on,omitempty,omitzero"`
 
@@ -538,6 +542,10 @@ type AssignTaskInput struct {
 
 	// Title of the main task (plan step) this belongs to.
 	Main string `json:"main"`
+
+	// Repository the task is about (owner/name); named in the task text. With base,
+	// records the thread's base branch in it.
+	Repo *string `json:"repo,omitempty,omitzero"`
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -563,11 +571,23 @@ func (j *AssignTaskInput) UnmarshalJSON(value []byte) error {
 	if utf8.RuneCountInString(string(plain.Assignee)) < 1 {
 		return fmt.Errorf("field %s length: must be >= %d", "assignee", 1)
 	}
+	if plain.Base != nil && utf8.RuneCountInString(string(*plain.Base)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "base", 1)
+	}
+	if plain.Base != nil && utf8.RuneCountInString(string(*plain.Base)) > 255 {
+		return fmt.Errorf("field %s length: must be <= %d", "base", 255)
+	}
 	if utf8.RuneCountInString(string(plain.Instruction)) < 1 {
 		return fmt.Errorf("field %s length: must be >= %d", "instruction", 1)
 	}
 	if utf8.RuneCountInString(string(plain.Main)) < 1 {
 		return fmt.Errorf("field %s length: must be >= %d", "main", 1)
+	}
+	if plain.Repo != nil && utf8.RuneCountInString(string(*plain.Repo)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "repo", 1)
+	}
+	if plain.Repo != nil && utf8.RuneCountInString(string(*plain.Repo)) > 300 {
+		return fmt.Errorf("field %s length: must be <= %d", "repo", 300)
 	}
 	*j = AssignTaskInput(plain)
 	return nil
@@ -1170,6 +1190,9 @@ type CompleteTaskResult struct {
 	// HeadSHA corresponds to the JSON schema field "head_sha".
 	HeadSHA *string `json:"head_sha,omitempty,omitzero"`
 
+	// Repositories pushed for this task.
+	Pushed []PushedRepo `json:"pushed,omitempty,omitzero"`
+
 	// Status corresponds to the JSON schema field "status".
 	Status TaskStatus `json:"status"`
 
@@ -1471,12 +1494,20 @@ func (j *EmployeeRef) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// Put a member branch into the merge queue (merged into the thread branch on
-// GitHub, then CI). Give either member or task_id; the platform pushes the branch
-// first.
+// Put a member branch into the merge queue, one entry per repository the task
+// pushed (merged into the thread branch on GitHub, then CI). Give either member or
+// task_id.
 type EnqueueMergeInput struct {
+	// Base branch the thread uses in repo (only before the thread branch exists
+	// there; read the project context for stated bases).
+	Base *string `json:"base,omitempty,omitzero"`
+
 	// Member corresponds to the JSON schema field "member".
 	Member *string `json:"member,omitempty,omitzero"`
+
+	// Merge only this repository of the task (default: every repository the task
+	// pushed).
+	Repo *string `json:"repo,omitempty,omitzero"`
 
 	// TaskID corresponds to the JSON schema field "task_id".
 	TaskID *TaskID `json:"task_id,omitempty,omitzero"`
@@ -1489,14 +1520,29 @@ func (j *EnqueueMergeInput) UnmarshalJSON(value []byte) error {
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
 	}
+	if plain.Base != nil && utf8.RuneCountInString(string(*plain.Base)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "base", 1)
+	}
+	if plain.Base != nil && utf8.RuneCountInString(string(*plain.Base)) > 255 {
+		return fmt.Errorf("field %s length: must be <= %d", "base", 255)
+	}
 	if plain.Member != nil && utf8.RuneCountInString(string(*plain.Member)) < 1 {
 		return fmt.Errorf("field %s length: must be >= %d", "member", 1)
+	}
+	if plain.Repo != nil && utf8.RuneCountInString(string(*plain.Repo)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "repo", 1)
+	}
+	if plain.Repo != nil && utf8.RuneCountInString(string(*plain.Repo)) > 300 {
+		return fmt.Errorf("field %s length: must be <= %d", "repo", 300)
 	}
 	*j = EnqueueMergeInput(plain)
 	return nil
 }
 
 type EnqueueMergeResult struct {
+	// One entry per repository.
+	Entries []MergeEntryRef `json:"entries,omitempty,omitzero"`
+
 	// EntryID corresponds to the JSON schema field "entry_id".
 	EntryID string `json:"entry_id"`
 
@@ -2094,8 +2140,8 @@ func (j *GitPurge) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// Push an employee branch with a one-job write token; refspec target must be
-// refs/heads/thread/<thread_no>/<employee>.
+// Push an employee branch of one repository with a one-job write token; refspec
+// target must be refs/heads/thread/<thread_no>/<employee>.
 type GitPush struct {
 	// Cwd corresponds to the JSON schema field "cwd".
 	Cwd RelPath `json:"cwd"`
@@ -2120,6 +2166,11 @@ type GitPush struct {
 
 	// ThreadNo corresponds to the JSON schema field "thread_no".
 	ThreadNo int `json:"thread_no"`
+
+	// Branches (thread branch, base) whose commits are not the employee's work: when
+	// HEAD has no commit outside them the push is skipped and the result says
+	// unchanged.
+	UnchangedAgainst []string `json:"unchanged_against,omitempty,omitzero"`
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -2209,6 +2260,10 @@ type GitResult struct {
 
 	// Truncated corresponds to the JSON schema field "truncated".
 	Truncated *bool `json:"truncated,omitempty,omitzero"`
+
+	// git.push: nothing to push (no commits outside unchanged_against); head_sha is
+	// the checkout's HEAD.
+	Unchanged *bool `json:"unchanged,omitempty,omitzero"`
 }
 
 type GitResultErrorCode string
@@ -2673,6 +2728,35 @@ func (j *McpServerStatus) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+type MergeEntryRef struct {
+	// EntryID corresponds to the JSON schema field "entry_id".
+	EntryID string `json:"entry_id"`
+
+	// Repo corresponds to the JSON schema field "repo".
+	Repo string `json:"repo"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *MergeEntryRef) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["entry_id"]; raw != nil && !ok {
+		return fmt.Errorf("field entry_id in MergeEntryRef: required")
+	}
+	if _, ok := raw["repo"]; raw != nil && !ok {
+		return fmt.Errorf("field repo in MergeEntryRef: required")
+	}
+	type Plain MergeEntryRef
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = MergeEntryRef(plain)
+	return nil
+}
+
 // Send a message to a thread's lead as the project coordinator.
 type MessageThreadInput struct {
 	// No corresponds to the JSON schema field "no".
@@ -2948,11 +3032,19 @@ func (j *OpenGen) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// Open the pull request from the thread branch to the base branch; the thread
-// moves to review.
+// Open one pull request per repository the thread changed (thread branch to that
+// repository's base branch); the thread moves to review.
 type OpenPRInput struct {
+	// PR base branch for repo (or for the only repository to open); default the
+	// thread's base there.
+	Base *string `json:"base,omitempty,omitzero"`
+
 	// Body corresponds to the JSON schema field "body".
 	Body string `json:"body"`
+
+	// Open only this repository's pull request (default: every changed repository
+	// without one).
+	Repo *string `json:"repo,omitempty,omitzero"`
 
 	// Title corresponds to the JSON schema field "title".
 	Title string `json:"title"`
@@ -2975,6 +3067,18 @@ func (j *OpenPRInput) UnmarshalJSON(value []byte) error {
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
 	}
+	if plain.Base != nil && utf8.RuneCountInString(string(*plain.Base)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "base", 1)
+	}
+	if plain.Base != nil && utf8.RuneCountInString(string(*plain.Base)) > 255 {
+		return fmt.Errorf("field %s length: must be <= %d", "base", 255)
+	}
+	if plain.Repo != nil && utf8.RuneCountInString(string(*plain.Repo)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "repo", 1)
+	}
+	if plain.Repo != nil && utf8.RuneCountInString(string(*plain.Repo)) > 300 {
+		return fmt.Errorf("field %s length: must be <= %d", "repo", 300)
+	}
 	if utf8.RuneCountInString(string(plain.Title)) < 1 {
 		return fmt.Errorf("field %s length: must be >= %d", "title", 1)
 	}
@@ -2986,11 +3090,14 @@ func (j *OpenPRInput) UnmarshalJSON(value []byte) error {
 }
 
 type OpenPRResult struct {
-	// PRNumber corresponds to the JSON schema field "pr_number".
+	// First pull request of the thread.
 	PRNumber int `json:"pr_number"`
 
 	// PRURL corresponds to the JSON schema field "pr_url".
 	PRURL string `json:"pr_url"`
+
+	// Every pull request of the thread, one per repository.
+	Prs []RepoPR `json:"prs,omitempty,omitzero"`
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -3023,6 +3130,10 @@ type OpenThreadInput struct {
 	// Instructions for the thread lead.
 	Brief string `json:"brief"`
 
+	// Repositories of the project the thread should work in, with an optional
+	// explicit base branch each (when the project context states one).
+	Repos []RepoFocus `json:"repos,omitempty,omitzero"`
+
 	// Role names to staff the thread with; default = all member roles of the team.
 	Roles []string `json:"roles,omitempty,omitzero"`
 
@@ -3049,6 +3160,9 @@ func (j *OpenThreadInput) UnmarshalJSON(value []byte) error {
 	}
 	if utf8.RuneCountInString(string(plain.Brief)) < 1 {
 		return fmt.Errorf("field %s length: must be >= %d", "brief", 1)
+	}
+	if len(plain.Repos) > 20 {
+		return fmt.Errorf("field %s length: must be <= %d", "repos", 20)
 	}
 	if utf8.RuneCountInString(string(plain.Title)) < 1 {
 		return fmt.Errorf("field %s length: must be >= %d", "title", 1)
@@ -3475,16 +3589,20 @@ func (j *PublishFileResult) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// Push the HEAD of your worktree to your member branch (thread/<no>/<name>). You
-// have no write token yourself; commit first, then call this.
+// Push the HEAD of each of your repository checkouts that has new commits to your
+// member branch (thread/<no>/<name>). You have no write token yourself; commit
+// first, then call this.
 type PushBranchInput map[string]interface{}
 
 type PushBranchResult struct {
 	// Branch corresponds to the JSON schema field "branch".
 	Branch string `json:"branch"`
 
-	// HeadSHA corresponds to the JSON schema field "head_sha".
+	// Head of the first pushed repository ("" when nothing was pushed).
 	HeadSHA string `json:"head_sha"`
+
+	// Pushed corresponds to the JSON schema field "pushed".
+	Pushed []PushedRepo `json:"pushed,omitempty,omitzero"`
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -3505,6 +3623,35 @@ func (j *PushBranchResult) UnmarshalJSON(value []byte) error {
 		return err
 	}
 	*j = PushBranchResult(plain)
+	return nil
+}
+
+type PushedRepo struct {
+	// HeadSHA corresponds to the JSON schema field "head_sha".
+	HeadSHA string `json:"head_sha"`
+
+	// Repo corresponds to the JSON schema field "repo".
+	Repo string `json:"repo"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *PushedRepo) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["head_sha"]; raw != nil && !ok {
+		return fmt.Errorf("field head_sha in PushedRepo: required")
+	}
+	if _, ok := raw["repo"]; raw != nil && !ok {
+		return fmt.Errorf("field repo in PushedRepo: required")
+	}
+	type Plain PushedRepo
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = PushedRepo(plain)
 	return nil
 }
 
@@ -3659,6 +3806,85 @@ func (j *ReplyToInput) UnmarshalJSON(value []byte) error {
 
 // GitHub repository as owner/name.
 type Repo string
+
+type RepoFocus struct {
+	// Base branch for this repository; default its default branch.
+	Base *string `json:"base,omitempty,omitzero"`
+
+	// Repository of the project (owner/name).
+	Repo string `json:"repo"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *RepoFocus) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["repo"]; raw != nil && !ok {
+		return fmt.Errorf("field repo in RepoFocus: required")
+	}
+	type Plain RepoFocus
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.Base != nil && utf8.RuneCountInString(string(*plain.Base)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "base", 1)
+	}
+	if plain.Base != nil && utf8.RuneCountInString(string(*plain.Base)) > 255 {
+		return fmt.Errorf("field %s length: must be <= %d", "base", 255)
+	}
+	if utf8.RuneCountInString(string(plain.Repo)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "repo", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Repo)) > 300 {
+		return fmt.Errorf("field %s length: must be <= %d", "repo", 300)
+	}
+	*j = RepoFocus(plain)
+	return nil
+}
+
+type RepoPR struct {
+	// Base corresponds to the JSON schema field "base".
+	Base *string `json:"base,omitempty,omitzero"`
+
+	// PRNumber corresponds to the JSON schema field "pr_number".
+	PRNumber int `json:"pr_number"`
+
+	// PRURL corresponds to the JSON schema field "pr_url".
+	PRURL string `json:"pr_url"`
+
+	// Repo corresponds to the JSON schema field "repo".
+	Repo string `json:"repo"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *RepoPR) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["pr_number"]; raw != nil && !ok {
+		return fmt.Errorf("field pr_number in RepoPR: required")
+	}
+	if _, ok := raw["pr_url"]; raw != nil && !ok {
+		return fmt.Errorf("field pr_url in RepoPR: required")
+	}
+	if _, ok := raw["repo"]; raw != nil && !ok {
+		return fmt.Errorf("field repo in RepoPR: required")
+	}
+	type Plain RepoPR
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if 1 > plain.PRNumber {
+		return fmt.Errorf("field %s: must be >= %v", "pr_number", 1)
+	}
+	*j = RepoPR(plain)
+	return nil
+}
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (j *Repo) UnmarshalJSON(value []byte) error {
@@ -4440,6 +4666,10 @@ type SessionOpen struct {
 
 	// Key of the git.prepare job that must have succeeded first.
 	Prepare *JobID `json:"prepare,omitempty,omitzero"`
+
+	// Every git.prepare job (one per repository) that must have succeeded first;
+	// prepare is the first of them.
+	PrepareJobs []JobID `json:"prepare_jobs,omitempty,omitzero"`
 
 	// null on first open.
 	Resume *ResumeRef `json:"resume,omitempty,omitzero"`

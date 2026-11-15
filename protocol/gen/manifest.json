@@ -500,6 +500,18 @@
               "decision",
               "test"
             ]
+          },
+          "repo": {
+            "description": "Repository the task is about (owner/name); named in the task text. With base, records the thread's base branch in it.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "base": {
+            "description": "Base branch the thread uses in repo (only before the thread branch exists there; read the project context for stated bases).",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
           }
         }
       }
@@ -611,9 +623,9 @@
       ],
       "blocking": [],
       "requires": null,
-      "description": "Put a member branch into the merge queue (merged into the thread branch on GitHub, then CI). Give either member or task_id; the platform pushes the branch first.",
+      "description": "Put a member branch into the merge queue, one entry per repository the task pushed (merged into the thread branch on GitHub, then CI). Give either member or task_id.",
       "input_schema": {
-        "description": "Put a member branch into the merge queue (merged into the thread branch on GitHub, then CI). Give either member or task_id; the platform pushes the branch first.",
+        "description": "Put a member branch into the merge queue, one entry per repository the task pushed (merged into the thread branch on GitHub, then CI). Give either member or task_id.",
         "type": "object",
         "additionalProperties": false,
         "properties": {
@@ -624,6 +636,18 @@
           "task_id": {
             "type": "string",
             "pattern": "^t[0-9]+$"
+          },
+          "repo": {
+            "description": "Merge only this repository of the task (default: every repository the task pushed).",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "base": {
+            "description": "Base branch the thread uses in repo (only before the thread branch exists there; read the project context for stated bases).",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
           }
         }
       }
@@ -799,9 +823,9 @@
       ],
       "blocking": [],
       "requires": null,
-      "description": "Open the pull request from the thread branch to the base branch; the thread moves to review.",
+      "description": "Open one pull request per repository the thread changed (thread branch to that repository's base branch); the thread moves to review.",
       "input_schema": {
-        "description": "Open the pull request from the thread branch to the base branch; the thread moves to review.",
+        "description": "Open one pull request per repository the thread changed (thread branch to that repository's base branch); the thread moves to review.",
         "type": "object",
         "required": [
           "title",
@@ -816,6 +840,18 @@
           },
           "body": {
             "type": "string"
+          },
+          "repo": {
+            "description": "Open only this repository's pull request (default: every changed repository without one).",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "base": {
+            "description": "PR base branch for repo (or for the only repository to open); default the thread's base there.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
           }
         }
       }
@@ -854,6 +890,32 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          },
+          "repos": {
+            "description": "Repositories of the project the thread should work in, with an optional explicit base branch each (when the project context states one).",
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "required": [
+                "repo"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "repo": {
+                  "description": "Repository of the project (owner/name).",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 300
+                },
+                "base": {
+                  "description": "Base branch for this repository; default its default branch.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255
+                }
+              }
             }
           }
         }
@@ -966,9 +1028,9 @@
       ],
       "blocking": [],
       "requires": null,
-      "description": "Push the HEAD of your worktree to your member branch (thread/<no>/<name>). You have no write token yourself; commit first, then call this.",
+      "description": "Push the HEAD of each of your repository checkouts that has new commits to your member branch (thread/<no>/<name>). You have no write token yourself; commit first, then call this.",
       "input_schema": {
-        "description": "Push the HEAD of your worktree to your member branch (thread/<no>/<name>). You have no write token yourself; commit first, then call this.",
+        "description": "Push the HEAD of each of your repository checkouts that has new commits to your member branch (thread/<no>/<name>). You have no write token yourself; commit first, then call this.",
         "type": "object",
         "additionalProperties": false,
         "properties": {}

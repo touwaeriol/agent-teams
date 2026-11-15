@@ -27,6 +27,10 @@
       "description": "git.prepare: the worktree/clone was created by this job.",
       "type": "boolean"
     },
+    "unchanged": {
+      "description": "git.push: nothing to push (no commits outside unchanged_against); head_sha is the checkout's HEAD.",
+      "type": "boolean"
+    },
     "log_tail": {
       "type": "string"
     },

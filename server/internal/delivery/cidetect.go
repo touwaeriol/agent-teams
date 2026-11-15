@@ -27,8 +27,10 @@ type Ruleset struct {
 	Recommended map[string]any `json:"recommended"`
 }
 
-// Detection is GET /api/projects/{pid}/ci/detect.
+// Detection is GET /api/projects/{pid}/ci/detect (one repository of the project).
 type Detection struct {
+	Repo                   string     `json:"repo"`
+	Branch                 string     `json:"branch" doc:"The repository's default branch the workflows were read from"`
 	Workflows              []Workflow `json:"workflows"`
 	CoversThreadBranches   bool       `json:"covers_thread_branches"`
 	CoversMQBranches       bool       `json:"covers_mq_branches"`
@@ -39,17 +41,34 @@ type Detection struct {
 // ErrNoWorkflow means there is no workflow with a push trigger to extend.
 var ErrNoWorkflow = errors.New("仓库里没有带 push 触发的 workflow，无法自动加触发条件")
 
-// DetectCI inspects the base branch's workflows (§8.3) and the repository rulesets (§8.1).
-func (e *Engine) DetectCI(ctx context.Context, projectID string) (Detection, error) {
-	p, repo, err := e.repoOf(ctx, projectID)
+// ciRepo picks the repository a CI request is about ("" = the project's first one) and its default branch.
+func (e *Engine) ciRepo(ctx context.Context, projectID, slug string) (ghops.Repo, string, error) {
+	_, repos, err := e.reposOf(ctx, projectID)
+	if err != nil {
+		return ghops.Repo{}, "", err
+	}
+	repo := repos[0]
+	if slug != "" {
+		var ok bool
+		if repo, ok = ghops.Find(repos, slug); !ok {
+			return repo, "", fmt.Errorf("%w：%s", ErrNoRepo, slug)
+		}
+	}
+	base, err := e.gh.DefaultBranch(ctx, repo)
+	return repo, base, err
+}
+
+// DetectCI inspects a repository's workflows on its default branch (§8.3) and its rulesets (§8.1).
+func (e *Engine) DetectCI(ctx context.Context, projectID, slug string) (Detection, error) {
+	repo, base, err := e.ciRepo(ctx, projectID, slug)
 	if err != nil {
 		return Detection{}, err
 	}
-	files, err := e.gh.Workflows(ctx, repo, p.Branch)
+	files, err := e.gh.Workflows(ctx, repo, base)
 	if err != nil {
 		return Detection{}, err
 	}
-	d := Detection{Workflows: []Workflow{}, AppHasChecksPermission: repo.HasChecks()}
+	d := Detection{Repo: repo.Slug, Branch: base, Workflows: []Workflow{}, AppHasChecksPermission: repo.HasChecks()}
 	for _, path := range sortedKeys(files) {
 		w := parseWorkflow(path, files[path])
 		d.Workflows = append(d.Workflows, w)
@@ -60,7 +79,7 @@ func (e *Engine) DetectCI(ctx context.Context, projectID string) (Detection, err
 	if err != nil {
 		return d, err
 	}
-	d.Ruleset = Ruleset{Present: present, Recommended: recommendedRuleset(p.Branch)}
+	d.Ruleset = Ruleset{Present: present, Recommended: recommendedRuleset(base)}
 	return d, nil
 }
 
@@ -161,13 +180,13 @@ func recommendedRuleset(base string) map[string]any {
 		"bypass_actors": []map[string]any{{"actor_type": "Integration", "bypass_mode": "always"}}}
 }
 
-// SetupCIPR opens a PR adding thread/** and mq/** to the push branch filters of the workflows.
-func (e *Engine) SetupCIPR(ctx context.Context, projectID string) (string, error) {
-	p, repo, err := e.repoOf(ctx, projectID)
+// SetupCIPR opens a PR adding thread/** and mq/** to the push branch filters of a repository's workflows.
+func (e *Engine) SetupCIPR(ctx context.Context, projectID, slug string) (string, error) {
+	repo, base, err := e.ciRepo(ctx, projectID, slug)
 	if err != nil {
 		return "", err
 	}
-	files, err := e.gh.Workflows(ctx, repo, p.Branch)
+	files, err := e.gh.Workflows(ctx, repo, base)
 	if err != nil {
 		return "", err
 	}
@@ -180,7 +199,7 @@ func (e *Engine) SetupCIPR(ctx context.Context, projectID string) (string, error
 	if len(changed) == 0 {
 		return "", ErrNoWorkflow
 	}
-	return e.openCIPR(ctx, repo, p.Branch, changed)
+	return e.openCIPR(ctx, repo, base, changed)
 }
 
 func (e *Engine) openCIPR(ctx context.Context, repo ghops.Repo, base string, files map[string]string) (string, error) {

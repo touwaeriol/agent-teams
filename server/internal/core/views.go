@@ -73,29 +73,30 @@ type LeadLast struct {
 
 // ThreadView is a thread with its plan, members and counters.
 type ThreadView struct {
-	ID            string          `json:"id"`
-	ProjectID     string          `json:"project_id"`
-	No            int             `json:"no"`
-	Title         string          `json:"title"`
-	Brief         string          `json:"brief"`
-	Status        string          `json:"status" enum:"queued,running,waiting,review,done,failed,paused,archived"`
-	QueuePosition *int            `json:"queue_position"`
-	PauseReason   string          `json:"pause_reason"`
-	Branch        string          `json:"branch"`
-	BaseBranch    string          `json:"base_branch"`
-	PRNumber      *int            `json:"pr_number"`
-	PRURL         *string         `json:"pr_url"`
-	PRState       string          `json:"pr_state"`
-	Summary       string          `json:"summary"`
-	AutoApprove   bool            `json:"auto_approve"`
-	OpenedBy      string          `json:"opened_by"`
-	Members       []EmployeeBrief `json:"members"`
-	MainTasks     []MainTaskView  `json:"main_tasks"`
-	Counts        ThreadCounts    `json:"counts"`
-	LeadLast      *LeadLast       `json:"lead_last"`
-	CostUSDEst    *float64        `json:"cost_usd_est"`
-	CreatedAt     time.Time       `json:"created_at"`
-	UpdatedAt     time.Time       `json:"updated_at"`
+	ID            string           `json:"id"`
+	ProjectID     string           `json:"project_id"`
+	No            int              `json:"no"`
+	Title         string           `json:"title"`
+	Brief         string           `json:"brief"`
+	Status        string           `json:"status" enum:"queued,running,waiting,review,done,failed,paused,archived"`
+	QueuePosition *int             `json:"queue_position"`
+	PauseReason   string           `json:"pause_reason"`
+	Branch        string           `json:"branch"`
+	BaseBranch    string           `json:"base_branch" doc:"Deprecated: bases are per repository (repos)"`
+	Repos         []ThreadRepoView `json:"repos" doc:"Repositories the thread set a base for, branched or opened a PR in"`
+	PRNumber      *int             `json:"pr_number"`
+	PRURL         *string          `json:"pr_url"`
+	PRState       string           `json:"pr_state"`
+	Summary       string           `json:"summary"`
+	AutoApprove   bool             `json:"auto_approve"`
+	OpenedBy      string           `json:"opened_by"`
+	Members       []EmployeeBrief  `json:"members"`
+	MainTasks     []MainTaskView   `json:"main_tasks"`
+	Counts        ThreadCounts     `json:"counts"`
+	LeadLast      *LeadLast        `json:"lead_last"`
+	CostUSDEst    *float64         `json:"cost_usd_est"`
+	CreatedAt     time.Time        `json:"created_at"`
+	UpdatedAt     time.Time        `json:"updated_at"`
 }
 
 // TaskView is a small task.
@@ -207,6 +208,7 @@ type MergeEntryView struct {
 	ThreadNo   int       `json:"thread_no"`
 	TaskID     *string   `json:"task_id"`
 	Employee   string    `json:"employee"`
+	Repo       string    `json:"repo"`
 	HeadBranch string    `json:"head_branch"`
 	Status     string    `json:"status"`
 	Attempts   int       `json:"attempts"`
@@ -217,7 +219,7 @@ type MergeEntryView struct {
 
 // MergeViewOf renders a merge entry.
 func MergeViewOf(m MergeEntry, threadNo int) MergeEntryView {
-	return MergeEntryView{ID: m.ID, ThreadNo: threadNo, TaskID: m.TaskID, Employee: m.Employee, HeadBranch: m.HeadBranch,
+	return MergeEntryView{ID: m.ID, ThreadNo: threadNo, TaskID: m.TaskID, Employee: m.Employee, Repo: m.Repo, HeadBranch: m.HeadBranch,
 		Status: m.Status, Attempts: m.Attempts, Error: m.Error, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}
 }
 

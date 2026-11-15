@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/tools/push_branch.json",
   "title": "PushBranchInput",
-  "description": "Push the HEAD of your worktree to your member branch (thread/<no>/<name>). You have no write token yourself; commit first, then call this.",
+  "description": "Push the HEAD of each of your repository checkouts that has new commits to your member branch (thread/<no>/<name>). You have no write token yourself; commit first, then call this.",
   "x-tool": {
     "tiers": [
       "member"
@@ -22,6 +22,29 @@
       ],
       "properties": {
         "branch": {
+          "type": "string"
+        },
+        "head_sha": {
+          "type": "string",
+          "description": "Head of the first pushed repository (\"\" when nothing was pushed)."
+        },
+        "pushed": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PushedRepo"
+          }
+        }
+      }
+    },
+    "PushedRepo": {
+      "title": "PushedRepo",
+      "type": "object",
+      "required": [
+        "repo",
+        "head_sha"
+      ],
+      "properties": {
+        "repo": {
           "type": "string"
         },
         "head_sha": {

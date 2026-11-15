@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   approvalCommand, checkLook, deliverableKind, groupThreads, mainProgress, markTone, memberDoing, memberTone, mergeLook, openForUser, poolColumns,
-  projectTint, prLook, questionLine, taskLook, taskTitle, threadKind, threadLine, visibleMainTasks, INK,
+  projectTint, prLook, questionLine, taskLook, taskTitle, threadBases, threadKind, threadLine, threadPRs, visibleMainTasks, INK,
 } from "@/lib/present";
 import { question, task, thread } from "./fixtures";
 
@@ -107,6 +107,17 @@ describe("looks", () => {
     expect(checkLook({ status: "in_progress", conclusion: null }).label).toBe("运行中");
     expect(prLook({ pr_number: null, pr_state: null, status: "running" }).label).toContain("全部主要任务");
     expect(prLook({ pr_number: 3, pr_state: "merged", status: "done" }).label).toBe("PR #3 已合并");
+    const repos = [
+      { repo: "o/web", base_branch: "dev", branch_created: true, pr_number: 7, pr_url: "https://github.com/o/web/pull/7", pr_state: "open" },
+      { repo: "o/api", base_branch: "main", branch_created: true, pr_number: 8, pr_url: "https://github.com/o/api/pull/8", pr_state: "open" },
+      { repo: "o/docs", base_branch: "", branch_created: false, pr_number: null, pr_url: null, pr_state: "" },
+    ];
+    expect(prLook({ pr_number: 7, pr_state: "open", status: "review", repos }).label).toBe("2 个 PR 等验收");
+    expect(threadPRs({ pr_number: 7, pr_url: null, pr_state: "open", repos }).map((p) => `${p.repo}#${p.number}→${p.base}`)).toEqual(["o/web#7→dev", "o/api#8→main"]);
+    expect(threadPRs({ pr_number: 5, pr_url: "u", pr_state: "open", base_branch: "main" })).toEqual([{ repo: "", number: 5, url: "u", base: "main", state: "open" }]);
+    expect(threadBases({ base_branch: "", repos })).toBe("o/web → dev、o/api → main");
+    expect(threadBases({ base_branch: "main" })).toBe("main");
+    expect(threadLine(thread(1, { status: "done", pr_number: 7, repos }))).toBe("2 个 PR 已合并");
     expect(deliverableKind("slides").label).toBe("幻灯片");
     expect(deliverableKind("figma").label).toBe("链接");
     expect(projectTint("agent team")).toEqual(projectTint("agent team"));

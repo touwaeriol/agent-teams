@@ -2,6 +2,7 @@ package toolsvc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -19,7 +20,10 @@ func (s *Service) openThread(ctx context.Context, tx *core.Tx, c *call) (Result,
 	}
 	owner := c.sc.OwnerID
 	t, err := s.orch.OpenThreadTx(ctx, tx, orchestrator.ThreadRequest{UserID: owner, ProjectID: c.emp().ProjectID,
-		Title: strings.TrimSpace(in.Title), Brief: in.Brief, OnlyRoles: in.Roles, OpenedBy: "coordinator"})
+		Title: strings.TrimSpace(in.Title), Brief: in.Brief, OnlyRoles: in.Roles, Repos: focusOf(in.Repos), OpenedBy: "coordinator"})
+	if errors.Is(err, orchestrator.ErrUnknownRepo) {
+		return Result{}, refuse("%s", err.Error())
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -29,6 +33,14 @@ func (s *Service) openThread(ctx context.Context, tx *core.Tx, c *call) (Result,
 	tx.AfterCommit(func(ctx context.Context) { go s.orch.StartQueued(context.WithoutCancel(ctx), owner) })
 	out := protocol.OpenThreadResult{No: protocol.ThreadNo(t.No), ThreadID: t.ID, Branch: t.Branch}
 	return okJSON(fmt.Sprintf("已开讨论串 #%d（%s），分支 %s", t.No, t.Title, t.Branch), out), nil
+}
+
+func focusOf(in []protocol.RepoFocus) []orchestrator.RepoFocus {
+	out := make([]orchestrator.RepoFocus, len(in))
+	for i, r := range in {
+		out[i] = orchestrator.RepoFocus{Repo: r.Repo, Base: deref(r.Base)}
+	}
+	return out
 }
 
 // noteOpened puts a clickable "opened #n" line in the coordinator conversation (meta.opens_thread).

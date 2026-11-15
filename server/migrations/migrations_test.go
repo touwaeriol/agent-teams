@@ -163,7 +163,62 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 60 {
+	if migrations.Latest() != 70 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
+
+// TestProjectReposMigration: 00070 moves each project's repository into at_project_repos, writes a
+// non-default base branch into the context, and gives existing threads and queue entries their repository.
+func TestProjectReposMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 50); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(reposSeed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := migrations.Up(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	var repos, conn, ctxDev, ctxMain string
+	if err := db.QueryRow(`SELECT string_agg(r.repo || '@' || r.position, ',' ORDER BY r.project_id), max(r.git_connection_id)
+		FROM at_project_repos r`).Scan(&repos, &conn); err != nil {
+		t.Fatal(err)
+	}
+	if repos != "o/api@0,o/web@0" || conn != "g1" {
+		t.Fatalf("project repos %s conn %s", repos, conn)
+	}
+	_ = db.QueryRow(`SELECT context FROM at_projects WHERE id = 'p1'`).Scan(&ctxDev)
+	_ = db.QueryRow(`SELECT context FROM at_projects WHERE id = 'p2'`).Scan(&ctxMain)
+	if ctxDev != "约定\n\n仓库 o/api 的基准分支：develop" || ctxMain != "" {
+		t.Fatalf("contexts %q %q", ctxDev, ctxMain)
+	}
+	var threadRepo, base, queueRepo string
+	var created bool
+	if err := db.QueryRow(`SELECT repo, base_branch, branch_created FROM at_thread_repos WHERE thread_id = 'th1'`).Scan(&threadRepo, &base, &created); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.QueryRow(`SELECT repo FROM at_merge_queue WHERE id = 'mq1'`).Scan(&queueRepo)
+	if threadRepo != "o/api" || base != "develop" || !created || queueRepo != "o/api" {
+		t.Fatalf("thread repo %s %s %v queue %s", threadRepo, base, created, queueRepo)
+	}
+}
+
+const reposSeed = `
+INSERT INTO at_users (id, email, password_hash, role) VALUES ('u1', 'a@example.com', 'x', 'admin');
+INSERT INTO at_git_connections (id, user_id, name, login, token_secret) VALUES ('g1', 'u1', 'gh', 'me', 's');
+INSERT INTO at_projects (id, user_id, name, context, repo, branch, git_connection_id)
+  VALUES ('p1', 'u1', 'A', '约定', 'https://github.com/o/api.git', 'develop', 'g1'),
+         ('p2', 'u1', 'B', '', 'o/web', 'main', 'g1'),
+         ('p3', 'u1', 'C', '', NULL, '', NULL);
+INSERT INTO at_conversations (id, user_id, title, project_id, kind) VALUES ('th1', 'u1', 't', 'p1', 'thread');
+INSERT INTO at_threads (id, project_id, user_id, no, title, branch, base_branch, started_at)
+  VALUES ('th1', 'p1', 'u1', 1, 't', 'thread/1-t', 'develop', now());
+INSERT INTO at_merge_queue (id, thread_id, employee, head_branch) VALUES ('mq1', 'th1', 'dev-1', 'thread/1/dev-1');
+`

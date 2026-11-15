@@ -84,7 +84,7 @@ export function groupThreads(threads: ThreadView[]): ThreadGroup[] {
 export function threadLine(t: ThreadView, open?: QuestionView): string {
   if (open) return questionLine(open);
   if (t.status === "review" && t.pr_number) return `PR #${t.pr_number} 等你验收`;
-  if (t.status === "done" && t.pr_number) return `PR #${t.pr_number} 已合并到 ${t.base_branch}`;
+  if (t.status === "done" && t.pr_number) return mergedLine(t);
   if (t.status === "queued") return t.queue_position ? `排队中，前面还有 ${t.queue_position} 个` : "排队等节点";
   if (t.status === "paused") return t.pause_reason ? `已暂停：${t.pause_reason}` : "已暂停";
   return t.lead_last?.text || t.summary || t.brief;
@@ -269,12 +269,42 @@ export function checkLook(c: { status: string; conclusion: string | null }): Loo
   return { tone: INK.bad, label: c.conclusion ?? "失败" };
 }
 
-/** The final PR row of the delivery tab. */
-export function prLook(t: Pick<ThreadView, "pr_number" | "pr_state" | "status">): Look {
-  if (!t.pr_number) return { tone: INK.gray, label: "全部主要任务完成后开" };
-  if (t.pr_state === "merged" || t.status === "done") return { tone: INK.done, label: `PR #${t.pr_number} 已合并` };
-  if (t.pr_state === "closed") return { tone: INK.bad, label: `PR #${t.pr_number} 已关闭` };
-  return { tone: INK.review, label: `PR #${t.pr_number} 等验收` };
+/** The final PR row of the delivery tab (several PRs: one per changed repository). */
+export function prLook(t: Pick<ThreadView, "pr_number" | "pr_state" | "status" | "repos"> & { pr_url?: string | null }): Look {
+  if (!t.pr_number) return { tone: INK.gray, label: "全部主要任务完成后开（每个有改动的仓库一个）" };
+  const n = threadPRs({ ...t, pr_url: t.pr_url ?? null }).length;
+  const what = n > 1 ? `${n} 个 PR` : `PR #${t.pr_number}`;
+  if (t.pr_state === "merged" || t.status === "done") return { tone: INK.done, label: `${what} 已合并` };
+  if (t.pr_state === "closed") return { tone: INK.bad, label: `${what} 有已关闭的` };
+  return { tone: INK.review, label: `${what} 等验收` };
+}
+
+export interface ThreadPR {
+  repo: string;
+  number: number;
+  url: string | null;
+  base: string;
+  state: string;
+}
+
+/** A thread's pull requests, one per repository; threads from before that carry only pr_number/pr_url. */
+export function threadPRs(t: Pick<ThreadView, "pr_number" | "pr_url" | "pr_state" | "repos"> & { base_branch?: string }): ThreadPR[] {
+  const prs = (t.repos ?? []).filter((r) => r.pr_number).map((r) => ({ repo: r.repo, number: r.pr_number as number, url: r.pr_url, base: r.base_branch, state: r.pr_state }));
+  if (prs.length > 0 || !t.pr_number) return prs;
+  return [{ repo: "", number: t.pr_number, url: t.pr_url, base: t.base_branch ?? "", state: t.pr_state ?? "" }];
+}
+
+/** Where the thread's work lands: "o/web → dev、o/r → main", else the legacy single base, else "". */
+export function threadBases(t: Pick<ThreadView, "base_branch" | "repos">): string {
+  const bases = (t.repos ?? []).filter((r) => r.base_branch).map((r) => `${r.repo} → ${r.base_branch}`);
+  return bases.length > 0 ? bases.join("、") : t.base_branch;
+}
+
+function mergedLine(t: ThreadView): string {
+  const prs = threadPRs(t);
+  if (prs.length > 1) return `${prs.length} 个 PR 已合并`;
+  const base = prs[0]?.base || t.base_branch;
+  return base ? `PR #${t.pr_number} 已合并到 ${base}` : `PR #${t.pr_number} 已合并`;
 }
 
 /** First line of a task instruction, as its title. */

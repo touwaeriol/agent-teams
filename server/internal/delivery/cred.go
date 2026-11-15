@@ -26,17 +26,19 @@ func (e *Engine) Credential(ctx context.Context, node store.Node, r *protocol.Cr
 }
 
 func (e *Engine) credential(ctx context.Context, node store.Node, r *protocol.CredRequest) protocol.CredResponse {
-	projectID, scope, err := e.credScope(ctx, node, r)
+	cs, err := e.credScope(ctx, node, r)
 	if err != nil {
 		return refuse(err.Error())
 	}
-	_, repo, err := e.repoOf(ctx, projectID)
+	_, repos, err := e.reposOf(ctx, cs.projectID)
 	if err != nil {
 		return refuse("no_repo")
 	}
-	if !samePath(repo.Slug, r.Path) || r.Host != "github.com" {
+	repo, ok := ghops.Find(repos, r.Path)
+	if !ok || !samePath(repo.Slug, r.Path) || r.Host != "github.com" || (cs.repo != "" && !samePath(cs.repo, r.Path)) {
 		return refuse("repo_not_in_project")
 	}
+	scope := cs.scope
 	tok, err := e.gh.Token(ctx, repo, scope)
 	if errors.Is(err, ghops.ErrPATNarrow) && r.JobID != nil {
 		tok, err = e.gh.Token(ctx, repo, ghops.ScopeFull) // platform jobs may use the PAT (§10.4)
@@ -61,15 +63,24 @@ func samePath(slug, path string) bool {
 	return strings.EqualFold(p, slug)
 }
 
-// credScope decides the project and permission set for the caller.
-func (e *Engine) credScope(ctx context.Context, node store.Node, r *protocol.CredRequest) (string, ghops.Scope, error) {
+// callerScope is the project, permission set and (for git jobs) the one repository a caller may get a token for.
+type callerScope struct {
+	projectID string
+	scope     ghops.Scope
+	repo      string // "" = any repository of the project
+}
+
+// credScope decides the project and permission set for the caller. A session may read every
+// repository of its project; a git job only the repository it works on (with that repository's connection).
+func (e *Engine) credScope(ctx context.Context, node store.Node, r *protocol.CredRequest) (callerScope, error) {
 	if r.SessionID != nil {
-		return e.sessionScope(ctx, string(*r.SessionID), r.Purpose)
+		pid, scope, err := e.sessionScope(ctx, string(*r.SessionID), r.Purpose)
+		return callerScope{projectID: pid, scope: scope}, err
 	}
 	if r.JobID != nil {
 		return e.jobScope(ctx, node, string(*r.JobID))
 	}
-	return "", 0, errors.New("no_caller")
+	return callerScope{}, errors.New("no_caller")
 }
 
 func (e *Engine) sessionScope(ctx context.Context, sessionID string, purpose protocol.CredRequestPurpose) (string, ghops.Scope, error) {
@@ -86,19 +97,21 @@ func (e *Engine) sessionScope(ctx context.Context, sessionID string, purpose pro
 	return sc.Employee.ProjectID, ghops.ScopeRead, nil
 }
 
-func (e *Engine) jobScope(ctx context.Context, node store.Node, jobID string) (string, ghops.Scope, error) {
-	var typ, projectID string
-	err := e.core.Pool.QueryRow(ctx, `SELECT type, COALESCE(body->>'project_id', '') FROM at_node_commands
-		WHERE node_id = $1 AND type LIKE 'git.%' AND body->>'job_id' = $2`, node.ID, jobID).Scan(&typ, &projectID)
-	if err != nil || projectID == "" {
-		return "", 0, errors.New("unknown_job")
+func (e *Engine) jobScope(ctx context.Context, node store.Node, jobID string) (callerScope, error) {
+	var typ string
+	cs := callerScope{}
+	err := e.core.Pool.QueryRow(ctx, `SELECT type, COALESCE(body->>'project_id', ''), COALESCE(body->>'repo', '') FROM at_node_commands
+		WHERE node_id = $1 AND type LIKE 'git.%' AND body->>'job_id' = $2`, node.ID, jobID).Scan(&typ, &cs.projectID, &cs.repo)
+	if err != nil || cs.projectID == "" {
+		return cs, errors.New("unknown_job")
 	}
+	cs.scope = ghops.ScopeRead
 	if typ != protocol.TypeGitPush {
-		return projectID, ghops.ScopeRead, nil
+		return cs, nil
 	}
-	d, err := core.DeliveryOf(ctx, e.core.Pool, projectID)
-	if err == nil && d.AllowWorkflowEdits {
-		return projectID, ghops.ScopePushFlows, nil
+	cs.scope = ghops.ScopePush
+	if d, err := core.DeliveryOf(ctx, e.core.Pool, cs.projectID); err == nil && d.AllowWorkflowEdits {
+		cs.scope = ghops.ScopePushFlows
 	}
-	return projectID, ghops.ScopePush, nil
+	return cs, nil
 }

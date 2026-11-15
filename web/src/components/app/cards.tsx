@@ -7,7 +7,7 @@ import { useAction } from "@/api/mutations";
 import { keys } from "@/api/queries";
 import type { QuestionView, ThreadView } from "@/api/views";
 import { Spinner } from "@/components/common";
-import { approvalCommand } from "@/lib/present";
+import { approvalCommand, threadBases, threadPRs } from "@/lib/present";
 import { cn } from "@/lib/utils";
 import { safeHref } from "@/lib/safeurl";
 
@@ -184,12 +184,13 @@ export function ReviewCard({ thread, variant = "soft", files }: { thread: Thread
   const invalidate = [keys.threads(thread.project_id), keys.thread(thread.id), keys.waiting(thread.project_id)];
   const accept = useAction(() => threadActions.accept(thread.id), { invalidate, success: "已验收，平台会在检查通过后合并" });
   const reject = useAction((reason: string) => threadActions.reject(thread.id, reason), { invalidate, success: "修改意见已发给组长" });
+  const prs = threadPRs(thread);
   const head = (
     <span>
-      {thread.pr_number ? `PR #${thread.pr_number}` : "讨论串"} 等你验收 · <span className="text-[#B4530B]">等你处理</span>
+      {prs.length > 1 ? `${prs.length} 个 PR` : thread.pr_number ? `PR #${thread.pr_number}` : "讨论串"} 等你验收 · <span className="text-[#B4530B]">等你处理</span>
     </span>
   );
-  const code = `${thread.branch} → ${thread.base_branch}${files ? ` · 改了 ${files} 个文件` : ""}`;
+  const code = `${thread.branch} → ${threadBases(thread) || "基准分支"}${files ? ` · 改了 ${files} 个文件` : ""}`;
   return (
     <Frame variant={variant} head={head} code={code} label="等你验收">
       {thread.summary && <p className="text-xs leading-5 text-[#4A4843]">{thread.summary}</p>}
@@ -203,11 +204,12 @@ export function ReviewCard({ thread, variant = "soft", files }: { thread: Thread
           <CardButton kind="outline" variant={variant} onClick={() => setRejecting(true)}>
             提修改意见
           </CardButton>
-          {thread.pr_url && variant !== "mobile" && (
-            <a href={safeHref(thread.pr_url)} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center px-1 text-[13px] text-muted-foreground hover:text-foreground">
-              在 GitHub 上看 ↗
-            </a>
-          )}
+          {variant !== "mobile" &&
+            prs.map((pr) => (
+              <a key={pr.url ?? pr.number} href={safeHref(pr.url)} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center px-1 text-[13px] text-muted-foreground hover:text-foreground">
+                {prs.length > 1 ? `${pr.repo} #${pr.number} ↗` : "在 GitHub 上看 ↗"}
+              </a>
+            ))}
         </Actions>
       )}
     </Frame>

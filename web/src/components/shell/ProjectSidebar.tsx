@@ -15,10 +15,10 @@ import { cn } from "@/lib/utils";
 import { Dot, Initial } from "../app/bits";
 import { summarizeNodes } from "./nodes";
 
-export function matchesProject(p: Pick<ProjectView, "name" | "description" | "repo">, q: string): boolean {
+export function matchesProject(p: Pick<ProjectView, "name" | "description" | "repos">, q: string): boolean {
   const needle = q.trim().toLowerCase();
   if (!needle) return true;
-  return [p.name, p.description, p.repo ?? ""].some((s) => s.toLowerCase().includes(needle));
+  return [p.name, p.description, ...(p.repos ?? []).map((r) => r.repo)].some((s) => s.toLowerCase().includes(needle));
 }
 
 export function ProjectSidebar({ me, onNavigate }: { me: UserView; onNavigate?: () => void }) {

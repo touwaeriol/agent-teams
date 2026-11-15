@@ -130,6 +130,7 @@ type Task struct {
 	Summary        string
 	Branch         string
 	HeadSHA        string
+	Pushed         map[string]string // repo → head sha of the member branch pushed for this task
 	Nudges         int
 	CreatedBy      string
 	CreatedAt      time.Time
@@ -139,16 +140,19 @@ type Task struct {
 }
 
 const taskCols = `conversation_id, id, thread_id, main_task_id, assignee, role, claimed_by, kind, instruction,
-	depends_on, status, output, parent, priority, attempt, summary, branch, head_sha, nudges, created_by, created_at,
+	depends_on, status, output, parent, priority, attempt, summary, branch, head_sha, pushed, nudges, created_by, created_at,
 	updated_at, claimed_at, finished_at`
 
 func scanTask(r Scanner) (Task, error) {
 	var t Task
 	err := r.Scan(&t.ConversationID, &t.ID, &t.ThreadID, &t.MainTaskID, &t.Assignee, &t.Role, &t.ClaimedBy, &t.Kind,
 		&t.Instruction, &t.DependsOn, &t.Status, &t.Output, &t.Parent, &t.Priority, &t.Attempt, &t.Summary,
-		&t.Branch, &t.HeadSHA, &t.Nudges, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt, &t.ClaimedAt, &t.FinishedAt)
+		&t.Branch, &t.HeadSHA, &t.Pushed, &t.Nudges, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt, &t.ClaimedAt, &t.FinishedAt)
 	if t.DependsOn == nil {
 		t.DependsOn = []string{}
+	}
+	if t.Pushed == nil {
+		t.Pushed = map[string]string{}
 	}
 	return t, MapErr(err)
 }
@@ -295,6 +299,7 @@ type MergeEntry struct {
 	ThreadID    string
 	TaskID      *string
 	Employee    string
+	Repo        string
 	HeadBranch  string
 	HeadSHA     string
 	TrialBranch string
@@ -307,12 +312,12 @@ type MergeEntry struct {
 	UpdatedAt   time.Time
 }
 
-const mergeCols = `id, thread_id, task_id, employee, head_branch, head_sha, trial_branch, trial_sha, status, attempts,
+const mergeCols = `id, thread_id, task_id, employee, repo, head_branch, head_sha, trial_branch, trial_sha, status, attempts,
 	error, position, created_at, updated_at`
 
 func scanMerge(r Scanner) (MergeEntry, error) {
 	var m MergeEntry
-	err := r.Scan(&m.ID, &m.ThreadID, &m.TaskID, &m.Employee, &m.HeadBranch, &m.HeadSHA, &m.TrialBranch, &m.TrialSHA,
+	err := r.Scan(&m.ID, &m.ThreadID, &m.TaskID, &m.Employee, &m.Repo, &m.HeadBranch, &m.HeadSHA, &m.TrialBranch, &m.TrialSHA,
 		&m.Status, &m.Attempts, &m.Error, &m.Position, &m.CreatedAt, &m.UpdatedAt)
 	return m, MapErr(err)
 }

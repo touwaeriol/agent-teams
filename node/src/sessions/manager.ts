@@ -104,9 +104,11 @@ export class SessionManager implements SessionHost {
     } catch (err) {
       return (err as Error).message;
     }
-    if (!spec.prepare) return null;
-    const res = await this.d.waitForJob(spec.prepare, this.d.prepareTimeoutMs ?? 600_000).catch((err: Error) => ({ ok: false, error: err.message }) as GitResult);
-    return res.ok ? null : `prepare ${spec.prepare} failed: ${res.error ?? res.error_code ?? "unknown"}`;
+    for (const job of prepareJobs(spec)) {
+      const res = await this.d.waitForJob(job, this.d.prepareTimeoutMs ?? 600_000).catch((err: Error) => ({ ok: false, error: err.message }) as GitResult);
+      if (!res.ok) return `prepare ${job} failed: ${res.error ?? res.error_code ?? "unknown"}`;
+    }
+    return null;
   }
 
   private async startNew(spec: SessionOpen): Promise<Reply[]> {
@@ -399,4 +401,10 @@ function reportItem(s: Session, approvals: ApprovalBroker, tools: ToolBroker): S
     sdk_session_id: s.spec.resume?.sdk_session_id ?? null, codex_thread_id: s.spec.resume?.codex_thread_id ?? null,
     pending_approvals: approvals.pendingFor(s.id), pending_tool_calls: tools.pendingFor(s.id),
   };
+}
+
+/** The git.prepare jobs a session waits for: one per repository (prepare_jobs), else the single prepare. */
+export function prepareJobs(spec: Pick<SessionOpen, "prepare" | "prepare_jobs">): string[] {
+  if (spec.prepare_jobs?.length) return [...spec.prepare_jobs];
+  return spec.prepare ? [spec.prepare] : [];
 }

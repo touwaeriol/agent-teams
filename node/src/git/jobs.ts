@@ -199,12 +199,31 @@ export class GitJobs {
     const copy = await run("git", ["-C", mirror, "fetch", "--no-tags", "--no-write-fetch-head", cwd, `+HEAD:${local}`], { env: gitEnv(), timeoutMs: 15 * 60_000 });
     if (copy.code !== 0) throw new JobError("not_a_repo", "cannot read the worktree's commits", copy.stderr);
     const sha = (await run("git", ["-C", mirror, "rev-parse", "--verify", `${local}^{commit}`], { env: gitEnv() })).stdout.trim();
+    if (b.unchanged_against?.length && (await this.nothingNew(b, mirror, local))) return { head_sha: sha, unchanged: true };
     const env = await this.credEnv(b.job_id, b.repo, "push");
     const lease = b.force_with_lease ? [`--force-with-lease=${target}:${b.force_with_lease}`] : [];
     const r = await run("git", ["-C", mirror, "push", "--no-verify", "--porcelain", ...lease, this.url(b.repo), `${sha}:${target}`], { env, timeoutMs: 15 * 60_000 });
     if (r.code !== 0) throw new JobError(pushErrorCode(r), "git push failed", r.stderr + r.stdout);
     await this.git(cwd, ["update-ref", `refs/remotes/origin/thread/${b.thread_no}/${b.employee}`, sha]);
     return { head_sha: sha, log_tail: tail(r.stdout + r.stderr) };
+  }
+
+  /**
+   * True when the checkout has no commit outside the given branches (thread branch, base): the
+   * employee did not change this repository. The mirror is refreshed first so the branches are current;
+   * branches that do not exist are ignored, and with none left the work counts as new.
+   */
+  private async nothingNew(b: GitPush, mirror: string, local: string): Promise<boolean> {
+    await this.syncMirror(b.job_id, b.repo);
+    const refs: string[] = [];
+    for (const branch of b.unchanged_against ?? []) {
+      const ref = `refs/heads/${branch}`;
+      const ok = await run("git", ["-C", mirror, "rev-parse", "--verify", "--quiet", `${ref}^{commit}`], { env: gitEnv() });
+      if (ok.code === 0) refs.push(ref);
+    }
+    if (refs.length === 0) return false;
+    const r = await run("git", ["-C", mirror, "rev-list", "--count", local, "--not", ...refs], { env: gitEnv() });
+    return r.code === 0 && Number(r.stdout.trim()) === 0;
   }
 
   private async doCleanup(b: GitCleanup): Promise<Partial<GitResult>> {

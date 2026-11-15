@@ -410,7 +410,7 @@ export interface GitPurge {
   path: string;
 }
 /**
- * Push an employee branch with a one-job write token; refspec target must be refs/heads/thread/<thread_no>/<employee>.
+ * Push an employee branch of one repository with a one-job write token; refspec target must be refs/heads/thread/<thread_no>/<employee>.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "GitPush".
@@ -430,6 +430,10 @@ export interface GitPush {
    * Expected remote sha; only for member branches after conflict repair.
    */
   force_with_lease?: string;
+  /**
+   * Branches (thread branch, base) whose commits are not the employee's work: when HEAD has no commit outside them the push is skipped and the result says unchanged.
+   */
+  unchanged_against?: string[];
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -465,6 +469,10 @@ export interface GitResult {
    * git.prepare: the worktree/clone was created by this job.
    */
   created?: boolean;
+  /**
+   * git.push: nothing to push (no commits outside unchanged_against); head_sha is the checkout's HEAD.
+   */
+  unchanged?: boolean;
   log_tail?: string;
   truncated?: boolean;
   error_code?:
@@ -1010,6 +1018,10 @@ export interface SessionOpen {
    */
   prepare?: JobId | null;
   /**
+   * Every git.prepare job (one per repository) that must have succeeded first; prepare is the first of them.
+   */
+  prepare_jobs?: JobId[];
+  /**
    * null on first open.
    */
   resume?: ResumeRef | null;
@@ -1396,6 +1408,14 @@ export interface AssignTaskInput {
   main: string;
   depends_on?: TaskId[];
   kind?: TaskKind;
+  /**
+   * Repository the task is about (owner/name); named in the task text. With base, records the thread's base branch in it.
+   */
+  repo?: string;
+  /**
+   * Base branch the thread uses in repo (only before the thread branch exists there; read the project context for stated bases).
+   */
+  base?: string;
 }
 /**
  * Send a message to every member of the thread.
@@ -1481,6 +1501,18 @@ export interface CompleteTaskResult {
   task_id: TaskId;
   status: TaskStatus;
   head_sha?: string;
+  /**
+   * Repositories pushed for this task.
+   */
+  pushed?: PushedRepo[];
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "PushedRepo".
+ */
+export interface PushedRepo {
+  repo: string;
+  head_sha: string;
 }
 /**
  * Finish your current task explicitly; the platform pushes your branch first. Use status failed when you cannot finish it.
@@ -1504,9 +1536,21 @@ export interface CompleteTaskInput {
 export interface EnqueueMergeResult {
   entry_id: string;
   position: number;
+  /**
+   * One entry per repository.
+   */
+  entries?: MergeEntryRef[];
 }
 /**
- * Put a member branch into the merge queue (merged into the thread branch on GitHub, then CI). Give either member or task_id; the platform pushes the branch first.
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "MergeEntryRef".
+ */
+export interface MergeEntryRef {
+  entry_id: string;
+  repo: string;
+}
+/**
+ * Put a member branch into the merge queue, one entry per repository the task pushed (merged into the thread branch on GitHub, then CI). Give either member or task_id.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "EnqueueMergeInput".
@@ -1514,6 +1558,14 @@ export interface EnqueueMergeResult {
 export interface EnqueueMergeInput {
   member?: string;
   task_id?: TaskId;
+  /**
+   * Merge only this repository of the task (default: every repository the task pushed).
+   */
+  repo?: string;
+  /**
+   * Base branch the thread uses in repo (only before the thread branch exists there; read the project context for stated bases).
+   */
+  base?: string;
 }
 /**
  * Write the thread summary (before review or when done); it is also added to the project memory.
@@ -1634,11 +1686,28 @@ export interface MessageThreadInput {
  * via the `definition` "OpenPrResult".
  */
 export interface OpenPrResult {
+  /**
+   * First pull request of the thread.
+   */
   pr_number: number;
   pr_url: string;
+  /**
+   * Every pull request of the thread, one per repository.
+   */
+  prs?: RepoPr[];
 }
 /**
- * Open the pull request from the thread branch to the base branch; the thread moves to review.
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "RepoPr".
+ */
+export interface RepoPr {
+  repo: string;
+  pr_number: number;
+  pr_url: string;
+  base?: string;
+}
+/**
+ * Open one pull request per repository the thread changed (thread branch to that repository's base branch); the thread moves to review.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "OpenPrInput".
@@ -1646,6 +1715,14 @@ export interface OpenPrResult {
 export interface OpenPrInput {
   title: string;
   body: string;
+  /**
+   * Open only this repository's pull request (default: every changed repository without one).
+   */
+  repo?: string;
+  /**
+   * PR base branch for repo (or for the only repository to open); default the thread's base there.
+   */
+  base?: string;
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -1655,6 +1732,20 @@ export interface OpenThreadResult {
   no: ThreadNo;
   thread_id: string;
   branch: string;
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "RepoFocus".
+ */
+export interface RepoFocus {
+  /**
+   * Repository of the project (owner/name).
+   */
+  repo: string;
+  /**
+   * Base branch for this repository; default its default branch.
+   */
+  base?: string;
 }
 /**
  * Open a new thread (number, branch, member instances) for a piece of work; the brief becomes the lead's first message. Returns #no immediately.
@@ -1672,6 +1763,209 @@ export interface OpenThreadInput {
    * Role names to staff the thread with; default = all member roles of the team.
    */
   roles?: string[];
+  /**
+   * Repositories of the project the thread should work in, with an optional explicit base branch each (when the project context states one).
+   *
+   * @maxItems 20
+   */
+  repos?:
+    | []
+    | [RepoFocus]
+    | [RepoFocus, RepoFocus]
+    | [RepoFocus, RepoFocus, RepoFocus]
+    | [RepoFocus, RepoFocus, RepoFocus, RepoFocus]
+    | [RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus]
+    | [RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus]
+    | [RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus]
+    | [RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus]
+    | [RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ];
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -1729,10 +2023,14 @@ export interface PublishFileInput {
  */
 export interface PushBranchResult {
   branch: string;
+  /**
+   * Head of the first pushed repository ("" when nothing was pushed).
+   */
   head_sha: string;
+  pushed?: PushedRepo[];
 }
 /**
- * Push the HEAD of your worktree to your member branch (thread/<no>/<name>). You have no write token yourself; commit first, then call this.
+ * Push the HEAD of each of your repository checkouts that has new commits to your member branch (thread/<no>/<name>). You have no write token yourself; commit first, then call this.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "PushBranchInput".

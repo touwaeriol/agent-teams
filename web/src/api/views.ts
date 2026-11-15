@@ -93,10 +93,13 @@ export interface ThreadView {
   queue_position: number | null;
   pause_reason: string;
   branch: string;
+  /** Deprecated: bases are per repository (repos). */
   base_branch: string;
   pr_number: number | null;
   pr_url: string | null;
   pr_state: string | null;
+  /** Repositories the thread set a base for, branched or opened a PR in. */
+  repos?: ThreadRepoView[];
   summary: string;
   auto_approve: boolean;
   opened_by: string;
@@ -107,6 +110,16 @@ export interface ThreadView {
   cost_usd_est: number | null;
   created_at: string;
   updated_at: string;
+}
+
+/** One repository of a thread: its base, whether the thread branch exists there, its PR. */
+export interface ThreadRepoView {
+  repo: string;
+  base_branch: string;
+  branch_created: boolean;
+  pr_number: number | null;
+  pr_url: string | null;
+  pr_state: string;
 }
 
 export interface TaskView {
@@ -252,6 +265,7 @@ export interface MergeEntryView {
   thread_no: number;
   task_id: string;
   employee: string;
+  repo?: string;
   head_branch: string;
   status: string;
   attempts: number;

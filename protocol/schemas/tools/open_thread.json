@@ -32,6 +32,14 @@
       "items": {
         "type": "string"
       }
+    },
+    "repos": {
+      "description": "Repositories of the project the thread should work in, with an optional explicit base branch each (when the project context states one).",
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/RepoFocus"
+      }
     }
   },
   "$defs": {
@@ -52,6 +60,28 @@
         },
         "branch": {
           "type": "string"
+        }
+      }
+    },
+    "RepoFocus": {
+      "title": "RepoFocus",
+      "type": "object",
+      "required": [
+        "repo"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "repo": {
+          "description": "Repository of the project (owner/name).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "base": {
+          "description": "Base branch for this repository; default its default branch.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
         }
       }
     }

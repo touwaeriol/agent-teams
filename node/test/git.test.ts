@@ -15,12 +15,12 @@ afterEach(async () => {
 
 const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } }).trim();
 
-/** remotes/acme/app.git with main and the thread branch thread/12-comms. */
-function makeRemote(dir: string): string {
-  const bare = join(dir, "remotes", "acme", "app.git");
+/** remotes/acme/<name>.git with main and the thread branch thread/12-comms. */
+function makeRemote(dir: string, name = "app"): string {
+  const bare = join(dir, "remotes", "acme", `${name}.git`);
   mkdirSync(bare, { recursive: true });
   execFileSync("git", ["init", "--bare", "-b", "main", bare]);
-  const seed = join(dir, "seed");
+  const seed = join(dir, `seed-${name}`);
   execFileSync("git", ["clone", bare, seed], { stdio: "ignore" });
   writeFileSync(join(seed, "README.md"), "hello\n");
   git(seed, "add", ".");
@@ -107,6 +107,42 @@ describe("git jobs", () => {
     const opened = await h.console.waitType("session.opened");
     expect(opened.body.session_id).toBe("s_G1");
     expect(readFileSync(join(h.opts.root, "projects/p1/threads/12/dev-3/README.md"), "utf8")).toBe("hello\n");
+  });
+
+  it("checks out each repository under the employee directory and skips pushing an unchanged one", async () => {
+    h = await startHarness();
+    makeRemote(h.dir, "app");
+    const web = makeRemote(h.dir, "web");
+    const repoPrepare = (job: string, repo: string, base: string) => ({
+      job_id: job, project_id: "p1", repo, mode: "worktree", shared: `projects/p1/repos/${repo.replace("/", "__")}`,
+      cwd: `projects/p1/threads/12/dev-4/${repo.replace("/", "__")}`, branch: "thread/12/dev-4", base, fetch: true,
+    });
+    h.console.command("session.open", claudeOpen("s_M1", 1, { cwd: "projects/p1/threads/12/dev-4", prepare: "g_40", prepare_jobs: ["g_40", "g_41"] }));
+    h.console.command("git.prepare", repoPrepare("g_40", "acme/app", "main"));
+    await h.console.waitType("git.result", (b) => b.job_id === "g_40");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(h.console.ofType("session.opened")).toEqual([]);
+    h.console.command("git.prepare", repoPrepare("g_41", "acme/web", "thread/12-comms"));
+    expect((await h.console.waitType("session.opened")).body.session_id).toBe("s_M1");
+    const appDir = join(h.opts.root, "projects/p1/threads/12/dev-4/acme__app");
+    const webDir = join(h.opts.root, "projects/p1/threads/12/dev-4/acme__web");
+    expect(git(appDir, "rev-parse", "--abbrev-ref", "HEAD")).toBe("thread/12/dev-4");
+    expect(readFileSync(join(webDir, "README.md"), "utf8")).toBe("hello\n");
+
+    writeFileSync(join(webDir, "page.txt"), "work\n");
+    git(webDir, "add", ".");
+    git(webDir, "commit", "-m", "page");
+    const push = (job: string, repo: string, base: string) => ({ job_id: job, project_id: "p1", repo, cwd: `projects/p1/threads/12/dev-4/${repo.replace("/", "__")}`,
+      refspec: "HEAD:refs/heads/thread/12/dev-4", employee: "dev-4", thread_no: 12, unchanged_against: ["thread/12-comms", base] });
+    h.console.command("git.push", push("g_42", "acme/app", "main"));
+    const app = await h.console.waitType("git.result", (b) => b.job_id === "g_42");
+    expect(app.body).toMatchObject({ ok: true, unchanged: true, head_sha: git(appDir, "rev-parse", "HEAD") });
+    expect(() => execFileSync("git", ["--git-dir", join(h.dir, "remotes/acme/app.git"), "rev-parse", "--verify", "thread/12/dev-4"], { stdio: "ignore" })).toThrow();
+    h.console.command("git.push", push("g_43", "acme/web", "main"));
+    const pushed = await h.console.waitType("git.result", (b) => b.job_id === "g_43");
+    expect(pushed.body.ok).toBe(true);
+    expect(pushed.body.unchanged).toBeUndefined();
+    expect(execFileSync("git", ["--git-dir", web, "rev-parse", "thread/12/dev-4"], { encoding: "utf8" }).trim()).toBe(pushed.body.head_sha);
   });
 
   it("refuses paths outside the root and purges a project directory", async () => {

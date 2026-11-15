@@ -3,6 +3,8 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
@@ -13,11 +15,16 @@ type Outcome struct {
 	OK      bool
 	Summary string
 	HeadSHA string
+	Pushed  map[string]string // repo → pushed head sha (nil: leave the task's record alone)
 }
 
 // Complete applies complete_task (after the platform pushed the branch) and returns the task.
 func (s *Scheduler) Complete(ctx context.Context, tx *core.Tx, task core.Task, out Outcome) (core.Task, error) {
-	task, err := core.UpdateTask(ctx, tx, task, map[string]any{"summary": out.Summary, "head_sha": out.HeadSHA, "nudges": 0})
+	set := map[string]any{"summary": out.Summary, "head_sha": out.HeadSHA, "nudges": 0}
+	if out.Pushed != nil {
+		set["pushed"] = out.Pushed
+	}
+	task, err := core.UpdateTask(ctx, tx, task, set)
 	if err != nil {
 		return task, err
 	}
@@ -65,7 +72,7 @@ func (s *Scheduler) afterWork(ctx context.Context, tx *core.Tx, th core.Thread, 
 	if role := gateRole(ctx, tx, th.ID, "review"); d.Gates.Review && role != "" {
 		return s.openGate(ctx, tx, th, task, "review", role)
 	}
-	return s.notifyLead(ctx, tx, th, fmt.Sprintf("[Task %s · %s · done] %s\n分支：%s", task.ID, task.ClaimedBy, task.Summary, task.Branch))
+	return s.notifyLead(ctx, tx, th, fmt.Sprintf("[Task %s · %s · done] %s\n分支：%s%s", task.ID, task.ClaimedBy, task.Summary, task.Branch, pushedNote(task)))
 }
 
 // gateRole is the role of the thread's member responsible for a gate ("" when none).
@@ -299,4 +306,17 @@ func (s *Scheduler) NotifyLead(ctx context.Context, tx *core.Tx, th core.Thread,
 // its result goes back to that member, not to the lead or the merge queue.
 func isSubtask(t core.Task) bool {
 	return t.Parent != "" && t.CreatedBy != "" && t.CreatedBy != "lead" && t.CreatedBy != "platform"
+}
+
+// pushedNote names the repositories a task pushed ("" when it pushed none).
+func pushedNote(t core.Task) string {
+	if len(t.Pushed) == 0 {
+		return ""
+	}
+	repos := make([]string, 0, len(t.Pushed))
+	for r := range t.Pushed {
+		repos = append(repos, r)
+	}
+	sort.Strings(repos)
+	return "（改动的仓库：" + strings.Join(repos, "、") + "）"
 }

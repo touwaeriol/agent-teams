@@ -1047,16 +1047,13 @@ export interface components {
         };
         ProjectInput: {
             auto_approve?: boolean;
-            branch?: string;
             context?: string;
             delivery?: components["schemas"]["DeliveryPatch"];
             description?: string;
             /** @description Delivered to the project coordinator */
             first_message?: string;
-            git_connection_id?: string | null;
             name: string;
-            /** @description GitHub URL, git@ URL or owner/repo */
-            repo?: string | null;
+            repos?: components["schemas"]["RepoRef"][] | null;
             require_acceptance?: boolean;
             /** @enum {string} */
             work_mode?: "worktree" | "clone";
@@ -1068,17 +1065,15 @@ export interface components {
         ProjectUpdate: {
             archived?: boolean;
             auto_approve?: boolean;
-            branch?: string;
-            clear_repo?: boolean;
             context?: string;
             delivery?: components["schemas"]["DeliveryPatch"];
             description?: string;
-            git_connection_id?: string | null;
             name?: string;
             /** @description '' = global default */
             office_layout?: string;
             pinned?: boolean;
-            repo?: string | null;
+            /** @description Replaces the bound repositories (order kept); [] unbinds all */
+            repos?: components["schemas"]["RepoRef"][];
             require_acceptance?: boolean;
             /** @enum {string} */
             work_mode?: "worktree" | "clone";
@@ -1086,18 +1081,17 @@ export interface components {
         ProjectView: {
             archived: boolean;
             auto_approve: boolean;
-            branch: string;
             context: string;
             /** Format: date-time */
             created_at: string;
             delivery: components["schemas"]["Delivery"];
             description: string;
-            git_connection_id: string | null;
             id: string;
             name: string;
             office_layout: string;
             pinned: boolean;
-            repo: string | null;
+            /** @description Bound repositories in project order; base branches belong in context */
+            repos: components["schemas"]["RepoRef"][] | null;
             require_acceptance: boolean;
             /** Format: int64 */
             threads_active: number;
@@ -1129,6 +1123,11 @@ export interface components {
             private: boolean;
             pushed_at: string | null;
             used_by_projects: components["schemas"]["ProjectRef"][] | null;
+        };
+        RepoRef: {
+            git_connection_id: string | null;
+            /** @description GitHub URL, git@ URL or owner/repo */
+            repo: string;
         };
         ReposOutputBody: {
             items: components["schemas"]["RepoItem"][] | null;
@@ -3104,7 +3103,10 @@ export interface operations {
     };
     readyz: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description owner/name of one of the project's repositories; default the first */
+                repo?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;

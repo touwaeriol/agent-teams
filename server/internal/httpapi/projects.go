@@ -10,7 +10,6 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/touwaeriol/agent-teams/server/internal/github"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -20,9 +19,7 @@ type ProjectView struct {
 	Name              string    `json:"name"`
 	Description       string    `json:"description"`
 	Context           string    `json:"context"`
-	Repo              *string   `json:"repo"`
-	Branch            string    `json:"branch"`
-	GitConnectionID   *string   `json:"git_connection_id"`
+	Repos             []RepoRef `json:"repos" doc:"Bound repositories in project order; base branches belong in context"`
 	Pinned            bool      `json:"pinned"`
 	Archived          bool      `json:"archived"`
 	WorkMode          string    `json:"work_mode" enum:"worktree,clone"`
@@ -37,8 +34,8 @@ type ProjectView struct {
 }
 
 func (s *Server) projectView(p store.Project, defaults Delivery) ProjectView {
-	return ProjectView{ID: p.ID, Name: p.Name, Description: p.Description, Context: p.Context, Repo: p.Repo,
-		Branch: p.Branch, GitConnectionID: p.GitConnectionID, Pinned: p.Pinned, Archived: p.Archived,
+	return ProjectView{ID: p.ID, Name: p.Name, Description: p.Description, Context: p.Context, Repos: RepoRefs(p.Repos),
+		Pinned: p.Pinned, Archived: p.Archived,
 		WorkMode: p.WorkMode, AutoApprove: p.AutoApprove, RequireAcceptance: p.RequireAcceptance,
 		Delivery: overlay(defaults, p.Delivery), OfficeLayout: p.OfficeLayout, Waiting: p.Waiting,
 		ThreadsActive: p.ThreadsActive, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
@@ -49,9 +46,7 @@ type ProjectInput struct {
 	Name              string         `json:"name" maxLength:"200"`
 	Description       string         `json:"description,omitempty" maxLength:"2000"`
 	Context           string         `json:"context,omitempty" maxLength:"50000"`
-	Repo              *string        `json:"repo,omitempty" nullable:"true" doc:"GitHub URL, git@ URL or owner/repo"`
-	Branch            string         `json:"branch,omitempty" maxLength:"255"`
-	GitConnectionID   *string        `json:"git_connection_id,omitempty" nullable:"true"`
+	Repos             []RepoRef      `json:"repos,omitempty" maxItems:"20"`
 	WorkMode          string         `json:"work_mode,omitempty" enum:"worktree,clone"`
 	AutoApprove       bool           `json:"auto_approve,omitempty"`
 	RequireAcceptance *bool          `json:"require_acceptance,omitempty"`
@@ -64,10 +59,7 @@ type ProjectUpdate struct {
 	Name              *string        `json:"name,omitempty" maxLength:"200"`
 	Description       *string        `json:"description,omitempty" maxLength:"2000"`
 	Context           *string        `json:"context,omitempty" maxLength:"50000"`
-	Repo              *string        `json:"repo,omitempty" nullable:"true"`
-	Branch            *string        `json:"branch,omitempty" maxLength:"255"`
-	GitConnectionID   *string        `json:"git_connection_id,omitempty" nullable:"true"`
-	ClearRepo         bool           `json:"clear_repo,omitempty"`
+	Repos             *[]RepoRef     `json:"repos,omitempty" maxItems:"20" doc:"Replaces the bound repositories (order kept); [] unbinds all"`
 	Pinned            *bool          `json:"pinned,omitempty"`
 	Archived          *bool          `json:"archived,omitempty"`
 	WorkMode          *string        `json:"work_mode,omitempty" enum:"worktree,clone"`
@@ -138,47 +130,6 @@ func (s *Server) getProject(ctx context.Context, in *projectIDInput) (*projectOu
 	return &projectOutput{Body: s.projectView(row, s.deliveryDefault(ctx))}, nil
 }
 
-// repoFields is the normalized repository part of a project.
-type repoFields struct {
-	Repo            *string
-	Branch          string
-	GitConnectionID *string
-}
-
-// checkRepo normalizes a repository the chosen connection can reach (v1 _checked).
-func (s *Server) checkRepo(ctx context.Context, userID string, f repoFields, revalidate bool) (repoFields, error) {
-	repo := strings.TrimSpace(deref(f.Repo))
-	if repo == "" {
-		return repoFields{}, nil
-	}
-	if deref(f.GitConnectionID) == "" {
-		return f, invalid([]FieldError{{"git_connection_id", "关联仓库需要先选择一个 Git 连接"}}, "关联仓库需要先选择一个 Git 连接")
-	}
-	slug, err := github.ParseRepo(repo)
-	if err != nil {
-		return f, githubErr(err)
-	}
-	token, _, err := s.connectionToken(ctx, userID, *f.GitConnectionID)
-	if err != nil {
-		return f, err
-	}
-	branch := strings.TrimSpace(f.Branch)
-	if !revalidate && branch != "" {
-		return repoFields{Repo: &slug, Branch: branch, GitConnectionID: f.GitConnectionID}, nil
-	}
-	found, err := s.gh.Repo(ctx, token, slug)
-	if err != nil {
-		return f, githubErr(err)
-	}
-	if found.FullName != "" {
-		slug = found.FullName
-	}
-	if branch == "" {
-		branch = found.DefaultBranch
-	}
-	return repoFields{Repo: &slug, Branch: branch, GitConnectionID: f.GitConnectionID}, nil
-}
-
 func (s *Server) createProject(ctx context.Context, in *createProjectInput) (*projectOutput, error) {
 	p, err := requireUser(ctx)
 	if err != nil {
@@ -189,14 +140,14 @@ func (s *Server) createProject(ctx context.Context, in *createProjectInput) (*pr
 	if name == "" {
 		return nil, invalid([]FieldError{{"name", "请填写项目名称"}}, "请填写项目名称")
 	}
-	repo, err := s.checkRepo(ctx, p.User.ID, repoFields{b.Repo, b.Branch, b.GitConnectionID}, true)
+	repos, err := s.checkRepos(ctx, p.User.ID, b.Repos, nil)
 	if err != nil {
 		return nil, err
 	}
 	if err := s.checkAutoApprove(ctx, p.User.ID, b.AutoApprove); err != nil {
 		return nil, err
 	}
-	row, err := s.store.CreateProject(ctx, p.User.ID, newProject(b, name, repo, s.deliveryDefault(ctx)))
+	row, err := s.store.CreateProject(ctx, p.User.ID, newProject(b, name, repos, s.deliveryDefault(ctx)))
 	if errors.Is(err, store.ErrConflict) {
 		return nil, fail(http.StatusConflict, "project_exists", "已经有叫 "+name+" 的项目了")
 	}
@@ -210,7 +161,7 @@ func (s *Server) createProject(ctx context.Context, in *createProjectInput) (*pr
 	return &projectOutput{Body: s.projectView(row, s.deliveryDefault(ctx))}, nil
 }
 
-func newProject(b ProjectInput, name string, repo repoFields, defaults Delivery) store.NewProject {
+func newProject(b ProjectInput, name string, repos []store.ProjectRepo, defaults Delivery) store.NewProject {
 	raw, _ := json.Marshal(applyPatch(defaults, b.Delivery))
 	requireAcceptance := true
 	if b.RequireAcceptance != nil {
@@ -220,8 +171,8 @@ func newProject(b ProjectInput, name string, repo repoFields, defaults Delivery)
 	if workMode == "" {
 		workMode = "worktree"
 	}
-	return store.NewProject{Name: name, Description: b.Description, Context: b.Context, Repo: repo.Repo,
-		Branch: repo.Branch, GitConnectionID: repo.GitConnectionID, WorkMode: workMode, AutoApprove: b.AutoApprove,
+	return store.NewProject{Name: name, Description: b.Description, Context: b.Context, Repos: repos,
+		WorkMode: workMode, AutoApprove: b.AutoApprove,
 		RequireAcceptance: requireAcceptance, Delivery: raw}
 }
 
@@ -238,7 +189,14 @@ func (s *Server) updateProject(ctx context.Context, in *updateProjectInput) (*pr
 	if err != nil {
 		return nil, err
 	}
+	repos, err := s.patchRepos(ctx, p.User.ID, current, in.Body.Repos)
+	if err != nil {
+		return nil, err
+	}
 	row, err := s.store.UpdateProject(ctx, p.User.ID, in.PID, changes)
+	if err == nil && repos != nil {
+		row, err = s.store.SetProjectRepos(ctx, p.User.ID, in.PID, repos)
+	}
 	if errors.Is(err, store.ErrConflict) {
 		return nil, fail(http.StatusConflict, "project_exists", "已经有叫 "+deref(in.Body.Name)+" 的项目了")
 	}
@@ -266,39 +224,11 @@ func (s *Server) projectChanges(ctx context.Context, userID string, cur store.Pr
 	add(b.Archived != nil, "archived", deref(b.Archived))
 	add(b.WorkMode != nil, "work_mode", deref(b.WorkMode))
 	add(b.RequireAcceptance != nil, "require_acceptance", deref(b.RequireAcceptance))
-	repoCh, err := s.repoChanges(ctx, userID, cur, b)
-	if err != nil {
-		return nil, err
-	}
 	settingCh, err := s.settingChanges(ctx, userID, cur, b)
 	if err != nil {
 		return nil, err
 	}
-	return append(append(ch, repoCh...), settingCh...), nil
-}
-
-func (s *Server) repoChanges(ctx context.Context, userID string, cur store.Project, b ProjectUpdate) ([]store.Change, error) {
-	if b.ClearRepo {
-		return []store.Change{{Col: "repo", Val: nil}, {Col: "branch", Val: ""}, {Col: "git_connection_id", Val: nil}}, nil
-	}
-	if b.Repo == nil && b.Branch == nil && b.GitConnectionID == nil {
-		return nil, nil
-	}
-	merged := repoFields{Repo: cur.Repo, Branch: cur.Branch, GitConnectionID: cur.GitConnectionID}
-	if b.Repo != nil {
-		merged.Repo = b.Repo
-	}
-	if b.Branch != nil {
-		merged.Branch = *b.Branch
-	}
-	if b.GitConnectionID != nil {
-		merged.GitConnectionID = b.GitConnectionID
-	}
-	f, err := s.checkRepo(ctx, userID, merged, b.Repo != nil)
-	if err != nil {
-		return nil, err
-	}
-	return []store.Change{{Col: "repo", Val: f.Repo}, {Col: "branch", Val: f.Branch}, {Col: "git_connection_id", Val: f.GitConnectionID}}, nil
+	return append(ch, settingCh...), nil
 }
 
 func (s *Server) settingChanges(ctx context.Context, userID string, cur store.Project, b ProjectUpdate) ([]store.Change, error) {

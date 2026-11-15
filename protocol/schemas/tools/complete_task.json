@@ -56,6 +56,13 @@
         },
         "head_sha": {
           "type": "string"
+        },
+        "pushed": {
+          "description": "Repositories pushed for this task.",
+          "type": "array",
+          "items": {
+            "$ref": "push_branch.json#/$defs/PushedRepo"
+          }
         }
       }
     }

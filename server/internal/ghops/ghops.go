@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
@@ -30,7 +32,7 @@ const (
 	ScopePushFlows              // push jobs when workflow edits are allowed
 )
 
-// ErrNoRepo means the project has no GitHub repository or connection.
+// ErrNoRepo means the project has no GitHub repository with a connection.
 var ErrNoRepo = errors.New("项目没有关联 GitHub 仓库")
 
 // ErrPATNarrow means a PAT cannot be narrowed for employee sessions.
@@ -47,28 +49,95 @@ type GitHub struct {
 	Store  *store.Store
 }
 
-// Repo is a project's repository and how to reach it.
+// Repo is one of a project's repositories and how to reach it.
 type Repo struct {
 	Slug    string // owner/name
-	Base    string // project base branch
 	conn    store.GitConnection
 	project store.Project
 }
 
-// RepoOf resolves a project's repository and connection; ErrNoRepo when unset.
-func (g *GitHub) RepoOf(ctx context.Context, p store.Project) (Repo, error) {
-	if p.Repo == nil || *p.Repo == "" || p.GitConnectionID == nil {
-		return Repo{}, ErrNoRepo
+// ReposOf resolves a project's repositories (project order) with their connections;
+// ErrNoRepo when none is usable. A repository whose connection was removed is skipped.
+func (g *GitHub) ReposOf(ctx context.Context, p store.Project) ([]Repo, error) {
+	out := make([]Repo, 0, len(p.Repos))
+	for _, pr := range p.Repos {
+		if pr.GitConnectionID == nil || pr.Repo == "" {
+			continue
+		}
+		r, err := g.repo(ctx, p, pr)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
 	}
-	slug, err := github.ParseRepo(*p.Repo)
+	if len(out) == 0 {
+		return nil, ErrNoRepo
+	}
+	return out, nil
+}
+
+func (g *GitHub) repo(ctx context.Context, p store.Project, pr store.ProjectRepo) (Repo, error) {
+	slug, err := github.ParseRepo(pr.Repo)
 	if err != nil {
 		return Repo{}, err
 	}
-	conn, err := g.Store.Connection(ctx, p.UserID, *p.GitConnectionID)
+	conn, err := g.Store.Connection(ctx, p.UserID, *pr.GitConnectionID)
 	if err != nil {
-		return Repo{}, fmt.Errorf("git connection: %w", err)
+		return Repo{}, fmt.Errorf("git connection of %s: %w", slug, err)
 	}
-	return Repo{Slug: slug, Base: p.Branch, conn: conn, project: p}, nil
+	return Repo{Slug: slug, conn: conn, project: p}, nil
+}
+
+// Find picks the repository named slug from a list (case-insensitive, ".git" and URLs allowed).
+func Find(repos []Repo, slug string) (Repo, bool) {
+	want := strings.TrimSuffix(strings.Trim(strings.TrimSpace(slug), "/"), ".git")
+	if parsed, err := github.ParseRepo(want); err == nil {
+		want = parsed
+	}
+	for _, r := range repos {
+		if strings.EqualFold(r.Slug, want) {
+			return r, true
+		}
+	}
+	return Repo{}, false
+}
+
+// Dir is the directory name of a repository's checkout inside an employee's directory (owner__name).
+func Dir(slug string) string { return strings.Replace(slug, "/", "__", 1) }
+
+// defaultBranches caches each repository's default branch for a while.
+var defaultBranches = struct {
+	sync.Mutex
+	items map[string]cachedBranch
+}{items: map[string]cachedBranch{}}
+
+type cachedBranch struct {
+	name string
+	at   time.Time
+}
+
+// DefaultBranch returns the repository's default branch (cached 10 minutes).
+func (g *GitHub) DefaultBranch(ctx context.Context, r Repo) (string, error) {
+	key := strings.ToLower(r.Slug)
+	defaultBranches.Lock()
+	c, ok := defaultBranches.items[key]
+	defaultBranches.Unlock()
+	if ok && time.Since(c.at) < 10*time.Minute {
+		return c.name, nil
+	}
+	var out struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	if _, err := g.call(ctx, r, http.MethodGet, "", nil, &out); err != nil {
+		return "", err
+	}
+	if out.DefaultBranch == "" {
+		out.DefaultBranch = "main"
+	}
+	defaultBranches.Lock()
+	defaultBranches.items[key] = cachedBranch{name: out.DefaultBranch, at: time.Now()}
+	defaultBranches.Unlock()
+	return out.DefaultBranch, nil
 }
 
 // HasChecks reports whether the connection can read check runs.

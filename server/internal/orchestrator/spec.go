@@ -10,6 +10,7 @@ import (
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -24,29 +25,43 @@ var (
 	readOnlyDenyFlags = []string{"--output", "-o", "--ext-diff", "--textconv", "-c", "--exec-path", "--git-dir", "--work-tree"}
 )
 
-// Paths are an employee's directories and branches on the node (relative to the node root).
+// Paths are an employee's directory and branch on the node (relative to the node root).
+// The directory holds one checkout per project repository, named owner__name (RepoCwd).
 type Paths struct {
-	Shared string
 	Cwd    string
 	Branch string
-	Base   string
 }
 
 // PathsOf computes where an employee works (architecture.md §8.1).
 func PathsOf(e core.Employee, t *core.Thread) Paths {
 	root := path.Join("projects", e.ProjectID)
-	p := Paths{Shared: path.Join(root, "repo")}
 	switch {
 	case e.Tier == "coordinator" || t == nil:
-		p.Cwd = path.Join(root, "coordinator")
+		return Paths{Cwd: path.Join(root, "coordinator")}
 	case e.Tier == "lead":
-		p.Cwd = path.Join(root, "threads", fmt.Sprint(t.No), "lead")
-		p.Branch, p.Base = t.Branch, t.Branch
-	default:
-		p.Cwd = path.Join(root, "threads", fmt.Sprint(t.No), e.Name)
-		p.Branch, p.Base = MemberBranch(t.No, e.Name), t.Branch
+		return Paths{Cwd: path.Join(root, "threads", fmt.Sprint(t.No), "lead"), Branch: t.Branch}
 	}
-	return p
+	return Paths{Cwd: path.Join(root, "threads", fmt.Sprint(t.No), e.Name), Branch: MemberBranch(t.No, e.Name)}
+}
+
+// RepoCwd is the employee's checkout of one repository.
+func (p Paths) RepoCwd(slug string) string { return path.Join(p.Cwd, ghops.Dir(slug)) }
+
+// SharedDir is the node's shared clone of a repository that worktrees hang off (worktree mode).
+func SharedDir(projectID, slug string) string {
+	return path.Join("projects", projectID, "repos", ghops.Dir(slug))
+}
+
+// LegacySharedDir is the single shared clone of projects from before multi-repository support.
+func LegacySharedDir(projectID string) string { return path.Join("projects", projectID, "repo") }
+
+// sharedGitDirs are the .git directories of the shared clones a sandboxed member writes commits into.
+func sharedGitDirs(projectID string, repos []string) []string {
+	out := make([]string, 0, len(repos))
+	for _, slug := range repos {
+		out = append(out, path.Join(SharedDir(projectID, slug), ".git"))
+	}
+	return out
 }
 
 // MemberBranch is a member's branch thread/<no>/<name>.
@@ -71,12 +86,13 @@ type sessionInput struct {
 	project  store.Project
 	node     store.Node
 	sess     core.AgentSession
-	prepare  string
+	prepare  []string
 	first    *protocol.FirstMessage
 	resume   *protocol.ResumeRef
 	system   string
 	rules    []string
 	hasRepo  bool
+	repos    []string // repository slugs checked out under the employee's directory
 	protRefs []string
 }
 
@@ -95,10 +111,7 @@ func buildOpen(in sessionInput) (protocol.SessionOpen, error) {
 		Employee: employeeRef(in.emp, in.thread), Runtime: protocol.Runtime(in.emp.Runtime), Cwd: protocol.RelPath(in.sess.Cwd),
 		PlatformTools: tools, Env: protocol.SessionOpenEnv{"LANG": "C.UTF-8"}, GitCredentials: &gitCreds,
 		FirstMessage: in.first, Resume: in.resume}
-	if in.prepare != "" {
-		job := protocol.JobID(in.prepare)
-		open.Prepare = &job
-	}
+	setPrepare(&open, in.prepare)
 	if in.emp.Runtime == "codex" {
 		c := codexOptions(in)
 		open.Codex = &c
@@ -107,6 +120,19 @@ func buildOpen(in sessionInput) (protocol.SessionOpen, error) {
 	c := claudeOptions(in)
 	open.Claude = &c
 	return open, nil
+}
+
+// setPrepare names the git.prepare jobs session.open waits for (first one in prepare for older daemons).
+func setPrepare(open *protocol.SessionOpen, jobs []string) {
+	if len(jobs) == 0 {
+		return
+	}
+	first := protocol.JobID(jobs[0])
+	open.Prepare = &first
+	open.PrepareJobs = make([]protocol.JobID, len(jobs))
+	for i, j := range jobs {
+		open.PrepareJobs[i] = protocol.JobID(j)
+	}
 }
 
 func employeeRef(e core.Employee, t *core.Thread) protocol.EmployeeRef {
@@ -184,7 +210,7 @@ func memberClaude(c *protocol.ClaudeSessionOptions, in sessionInput) {
 	}
 	if in.node.Isolation == "sandbox" {
 		c.Sandbox = &protocol.SandboxPolicy{Enabled: true, WritePaths: []string{"."},
-			ExtraWritePaths: []string{path.Join(PathsOf(e, in.thread).Shared, ".git")}}
+			ExtraWritePaths: sharedGitDirs(e.ProjectID, in.repos)}
 	}
 }
 
@@ -199,7 +225,7 @@ func codexOptions(in sessionInput) protocol.CodexSessionOptions {
 	default:
 		c.Sandbox, c.ApprovalPolicy = "workspace-write", "on-request"
 		cfg, _ := json.Marshal(map[string]any{"sandbox_workspace_write": map[string]any{
-			"writable_roots": []string{path.Join(PathsOf(e, in.thread).Shared, ".git")}, "network_access": true}})
+			"writable_roots": sharedGitDirs(e.ProjectID, in.repos), "network_access": true}})
 		raw := json.RawMessage(cfg)
 		c.Config = &raw
 	}

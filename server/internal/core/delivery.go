@@ -33,10 +33,10 @@ func DeliverableByID(ctx context.Context, q DB, userID, id string) (Deliverable,
 		JOIN at_projects p ON p.id = d.project_id WHERE d.id = $1 AND p.user_id = $2`, id, userID))
 }
 
-// PRDeliverable finds the pr deliverable of a thread.
-func PRDeliverable(ctx context.Context, q DB, threadID string) (Deliverable, error) {
+// PRDeliverableByURL finds the pr deliverable of a thread for one pull request.
+func PRDeliverableByURL(ctx context.Context, q DB, threadID, url string) (Deliverable, error) {
 	return scanDeliverable(q.QueryRow(ctx, `SELECT `+deliverableCols+` FROM at_deliverables d
-		WHERE d.thread_id = $1 AND d.kind = 'pr' ORDER BY d.created_at DESC LIMIT 1`, threadID))
+		WHERE d.thread_id = $1 AND d.kind = 'pr' AND d.url = $2 ORDER BY d.created_at DESC LIMIT 1`, threadID, url))
 }
 
 // DeliverableFilter narrows Deliverables.
@@ -110,10 +110,21 @@ func ThreadsWithActiveMerges(ctx context.Context, q DB) ([]string, error) {
 	})
 }
 
-// InsertMerge enqueues an entry.
-func InsertMerge(ctx context.Context, tx *Tx, threadID string, taskID *string, employee, headBranch string) (MergeEntry, error) {
-	return scanMerge(tx.QueryRow(ctx, `INSERT INTO at_merge_queue (id, thread_id, task_id, employee, head_branch)
-		VALUES ($1,$2,$3,$4,$5) RETURNING `+mergeCols, NewID("mq"), threadID, taskID, employee, headBranch))
+// InsertMerge enqueues an entry for one repository.
+func InsertMerge(ctx context.Context, tx *Tx, threadID string, taskID *string, employee, repo, headBranch string) (MergeEntry, error) {
+	return scanMerge(tx.QueryRow(ctx, `INSERT INTO at_merge_queue (id, thread_id, task_id, employee, repo, head_branch)
+		VALUES ($1,$2,$3,$4,$5,$6) RETURNING `+mergeCols, NewID("mq"), threadID, taskID, employee, repo, headBranch))
+}
+
+// TaskMergesOpen counts the other repositories (not exceptRepo) the task was queued for and that
+// have no merged entry of the task yet (cancelled entries do not count).
+func TaskMergesOpen(ctx context.Context, q DB, threadID, taskID, exceptRepo string) (int, error) {
+	var n int
+	err := q.QueryRow(ctx, `SELECT count(DISTINCT q.repo) FROM at_merge_queue q WHERE q.thread_id = $1 AND q.task_id = $2
+		AND q.repo <> $3 AND q.status <> 'cancelled' AND NOT EXISTS (SELECT 1 FROM at_merge_queue m
+		WHERE m.thread_id = q.thread_id AND m.task_id = q.task_id AND m.repo = q.repo AND m.status = 'merged')`,
+		threadID, taskID, exceptRepo).Scan(&n)
+	return n, err
 }
 
 // UpdateMerge applies column changes and returns the entry.

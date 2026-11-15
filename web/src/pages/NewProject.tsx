@@ -1,12 +1,12 @@
 // NewProject board: name, context, repository, work mode, the per-thread team
 // from the role templates, and an optional first message for the coordinator.
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { projects } from "@/api/actions";
 import { useAction } from "@/api/mutations";
-import { keys, useConnections, useRoles } from "@/api/queries";
+import { keys, useRoles } from "@/api/queries";
 import { Card, CardTitle, ChoiceCards, WORK_MODES } from "@/components/app/bits";
-import { RepoFields, repoPayload, type RepoDraft } from "@/components/app/repo";
+import { RepoList, reposPayload, type RepoRef } from "@/components/app/repo";
 import { teamChips } from "@/components/app/roles";
 import { Field, Spinner } from "@/components/common";
 import { Button } from "@/components/ui/button";
@@ -16,19 +16,14 @@ import { NavButton } from "@/components/shell/Shell";
 
 export function NewProjectPage() {
   const navigate = useNavigate();
-  const connections = useConnections();
   const roles = useRoles();
   const [name, setName] = useState("");
   const [context, setContext] = useState("");
-  const [repo, setRepo] = useState<RepoDraft>({ git_connection_id: "", repo: "", branch: "" });
+  const [repos, setRepos] = useState<RepoRef[]>([]);
   const [mode, setMode] = useState<"worktree" | "clone">("worktree");
   const [first, setFirst] = useState("");
-  const firstConnection = connections.data?.[0]?.id;
-  useEffect(() => {
-    if (firstConnection) setRepo((r) => (r.git_connection_id ? r : { ...r, git_connection_id: firstConnection }));
-  }, [firstConnection]);
   const create = useAction(
-    () => projects.create({ name: name.trim(), context, work_mode: mode, first_message: first.trim() || undefined, ...repoPayload(repo) }),
+    () => projects.create({ name: name.trim(), context, work_mode: mode, first_message: first.trim() || undefined, repos: reposPayload(repos) }),
     { invalidate: [keys.projects], success: (p) => `已创建项目「${p.name}」`, onSuccess: (p) => navigate(`/projects/${p.id}`) },
   );
   const submit = (e: FormEvent) => {
@@ -50,13 +45,13 @@ export function NewProjectPage() {
           <Field label="项目名称">
             <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：agent team" />
           </Field>
-          <Field label="项目上下文" hint="统筹、组长和每个成员开工前都会读到；项目记忆会在讨论串结束后自动补充。">
-            <Textarea rows={4} value={context} onChange={(e) => setContext(e.target.value)} placeholder="技术栈、约定、怎么跑测试、不能动的地方……" />
+          <Field label="项目上下文" hint="统筹、组长和每个成员开工前都会读到；各仓库的基准分支也写在这里。项目记忆会在讨论串结束后自动补充。">
+            <Textarea rows={4} value={context} onChange={(e) => setContext(e.target.value)} placeholder="技术栈、约定、怎么跑测试、不能动的地方、仓库 org/web 的基准分支：develop……" />
           </Field>
         </Card>
         <Card className="gap-4">
           <CardTitle>代码仓库</CardTitle>
-          <RepoFields draft={repo} onChange={setRepo} />
+          <RepoList value={repos} onChange={setRepos} />
         </Card>
         <Card className="gap-3.5">
           <CardTitle>工作方式</CardTitle>

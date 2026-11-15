@@ -77,7 +77,7 @@ function MainHeader({ project, coordinator, threads }: { project: ProjectView; c
         <NavButton />
         <span className="flex min-w-0 flex-col md:flex-row md:items-center md:gap-2.5">
           <span className="truncate font-semibold">{project.name}</span>
-          <span className="truncate font-mono text-xs text-muted-foreground max-md:hidden">{project.repo ? `${project.repo} · ${project.branch}` : "未关联仓库"}</span>
+          <span className="truncate font-mono text-xs text-muted-foreground max-md:hidden">{project.repos?.length ? project.repos.map((r) => r.repo).join(" · ") : "未关联仓库"}</span>
           <span className="text-[11px] text-muted-foreground md:hidden">项目统筹 · 只分派，不改代码</span>
         </span>
       </div>

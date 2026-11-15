@@ -51,8 +51,7 @@ export function OverviewPage() {
             <div className="flex flex-col gap-1.5">
               <h1 className="text-2xl font-semibold tracking-tight">{p.name}</h1>
               <span className="flex flex-wrap gap-2 text-[13px] text-muted-foreground">
-                <span className="font-mono text-foreground">{p.repo ?? "未关联仓库"}</span>
-                {p.repo && <span>基准分支 {p.branch}</span>}
+                <span className="font-mono text-foreground">{p.repos?.length ? p.repos.map((r) => r.repo).join("、") : "未关联仓库"}</span>
                 <span>工作方式 {p.work_mode === "worktree" ? "worktree" : "独立克隆"}</span>
                 {roles.data?.roles && <span>团队模板：{teamSummary(roles.data.roles)}</span>}
               </span>

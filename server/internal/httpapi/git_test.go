@@ -20,7 +20,7 @@ func TestRepoAndBranchListing(t *testing.T) {
 	c, _ := h.signUp("a@example.com")
 	var conn GitConnectionView
 	c.must(201, "POST", "/api/git/connections", map[string]string{"token": "ghp_good"}, &conn)
-	c.must(201, "POST", "/api/projects", map[string]any{"name": "R", "repo": "o/r", "git_connection_id": conn.ID}, nil)
+	c.must(201, "POST", "/api/projects", map[string]any{"name": "R", "repos": []map[string]any{{"repo": "o/r", "git_connection_id": conn.ID}}}, nil)
 	var page repoPage
 	c.must(200, "GET", "/api/git/connections/"+conn.ID+"/repos?limit=2", nil, &page)
 	if len(page.Items) != 2 || page.NextCursor == nil || page.Items[0].FullName != "o/r" {

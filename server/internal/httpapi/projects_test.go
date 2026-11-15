@@ -13,7 +13,7 @@ func TestProjectsCRUD(t *testing.T) {
 	other, _ := h.signUp("b@example.com")
 	var p ProjectView
 	c.must(201, "POST", "/api/projects", map[string]any{"name": " Alpha ", "description": "first"}, &p)
-	if p.Name != "Alpha" || p.WorkMode != "worktree" || !p.RequireAcceptance || p.Repo != nil {
+	if p.Name != "Alpha" || p.WorkMode != "worktree" || !p.RequireAcceptance || len(p.Repos) != 0 {
 		t.Fatalf("created %+v", p)
 	}
 	if !p.Delivery.Gates.Review || p.Delivery.MergeMethod != "squash" || p.Delivery.CI.TimeoutS != 3600 || !p.Delivery.NotifyOnAsk {
@@ -70,24 +70,34 @@ func TestProjectWithRepoAndConnection(t *testing.T) {
 	if conn.Login != "octo" || conn.Name != "GitHub · octo" || conn.Kind != "token" {
 		t.Fatalf("connection %+v", conn)
 	}
-	if r := c.do("POST", "/api/projects", map[string]any{"name": "R", "repo": "o/r"}); r.Status != 422 {
+	if r := c.do("POST", "/api/projects", map[string]any{"name": "R", "repos": []map[string]any{{"repo": "o/r"}}}); r.Status != 422 {
 		t.Fatalf("repo without connection = %d", r.Status)
 	}
 	var p ProjectView
-	c.must(201, "POST", "/api/projects", map[string]any{"name": "R", "repo": "https://github.com/o/r.git", "git_connection_id": conn.ID}, &p)
-	if *p.Repo != "o/r" || p.Branch != "main" {
-		t.Fatalf("repo %v branch %s", p.Repo, p.Branch)
+	c.must(201, "POST", "/api/projects", map[string]any{"name": "R", "repos": []map[string]any{
+		{"repo": "https://github.com/o/r.git", "git_connection_id": conn.ID}}}, &p)
+	if len(p.Repos) != 1 || p.Repos[0].Repo != "o/r" || *p.Repos[0].GitConnectionID != conn.ID {
+		t.Fatalf("repos %+v", p.Repos)
 	}
-	if r := c.do("PATCH", "/api/projects/"+p.ID, map[string]any{"repo": "o/missing"}); r.Status != 422 {
+	if r := c.do("PATCH", "/api/projects/"+p.ID, map[string]any{"repos": []map[string]any{{"repo": "o/missing", "git_connection_id": conn.ID}}}); r.Status != 422 {
 		t.Fatalf("missing repo = %d %s", r.Status, r.Body)
 	}
-	c.must(200, "PATCH", "/api/projects/"+p.ID, map[string]any{"branch": "dev"}, &p)
-	if p.Branch != "dev" || *p.Repo != "o/r" {
-		t.Fatalf("branch change %+v", p)
+	if r := c.do("PATCH", "/api/projects/"+p.ID, map[string]any{"repos": []map[string]any{
+		{"repo": "o/r", "git_connection_id": conn.ID}, {"repo": "O/R", "git_connection_id": conn.ID}}}); r.Status != 422 {
+		t.Fatalf("duplicate repo = %d %s", r.Status, r.Body)
 	}
-	c.must(200, "PATCH", "/api/projects/"+p.ID, map[string]any{"clear_repo": true}, &p)
-	if p.Repo != nil || p.GitConnectionID != nil || p.Branch != "" {
-		t.Fatalf("clear repo %+v", p)
+	c.must(200, "PATCH", "/api/projects/"+p.ID, map[string]any{"name": "R2", "repos": []map[string]any{
+		{"repo": "o/web", "git_connection_id": conn.ID}, {"repo": "o/r", "git_connection_id": conn.ID}}}, &p)
+	if p.Name != "R2" || len(p.Repos) != 2 || p.Repos[0].Repo != "o/web" || p.Repos[1].Repo != "o/r" {
+		t.Fatalf("reordered repos %+v", p)
+	}
+	c.must(200, "PATCH", "/api/projects/"+p.ID, map[string]any{"description": "kept"}, &p)
+	if len(p.Repos) != 2 {
+		t.Fatalf("PATCH without repos changed them: %+v", p.Repos)
+	}
+	c.must(200, "PATCH", "/api/projects/"+p.ID, map[string]any{"repos": []map[string]any{}}, &p)
+	if len(p.Repos) != 0 {
+		t.Fatalf("unbind all %+v", p.Repos)
 	}
 }
 

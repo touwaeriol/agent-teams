@@ -137,6 +137,7 @@
   "runtime": "claude",                             // claude | codex
   "cwd": "projects/7a1c…/threads/12/dev-2",       // 相对 root
   "prepare": "g_01JD…",                            // 可选：依赖的 git.prepare 命令键，守护进程先确保它已成功
+  "prepare_jobs": ["g_01JD…", "g_01JE…"],           // 可选：每个仓库一个 git.prepare，全部成功才开会话（prepare = 第一个，给旧守护进程）
   "resume": {"sdk_session_id": "8d2f…"},           // 或 {"codex_thread_id": "…"}；首次打开为 null
   "claude": {                                      // runtime=claude 时
     "model": "claude-opus-5-5", "effort": null,
@@ -169,7 +170,7 @@
 
 守护进程行为：
 
-1. 校验 `cwd` 在 root 内；`prepare` 指定的 git 操作未成功则等待（最多 10 分钟）或失败。
+1. 校验 `cwd` 在 root 内；`prepare_jobs`（没有时 `prepare`）指定的 git 操作逐个等待成功（每个最多 10 分钟），任何一个失败就打开失败。
 2. Claude：构造 `options`（`env` 逐项构造、`permissionMode` 显式、`settingSources: []`、`allowedTools`（含控制台由“总是允许”规则展开的项）、`settings`（沙箱与拒绝规则）、`canUseTool`、`hooks`、`mcpServers.platform = createSdkMcpServer(...)`、`includeHookEvents: true`、`resume`），用一个异步队列作为 `prompt` 调 `query()`，随即 `await q.initializationResult()` 拿工具列表和 MCP 状态（不等第一个回合的 `system/init`）。Codex：确保本机 app-server 在跑，`thread/start` 或 `thread/resume`（带新的 `mcp_servers.platform` 配置），工具列表取自 `mcpServerStatus/list` + 沙箱配置。
 3. 回 `session.opened`。`first_message` 先扣住，收到 `session.release {session_id, open_gen}` 才推送。
 4. `skills`（只有 Claude 会话会收到）：写成本地插件 `<root>/agent-skills/<project>/<thread_no>/<employee>/`（每次打开重建，不在 worktree 里），`options.plugins = [{type:'local', path, skipMcpDiscovery:true}]`、`options.skills = ['agent-teams-skills:<name>', …]`；`Skill` 工具由控制台放进 `tools`/`allowed_tools`。
@@ -322,9 +323,11 @@
 
 ```json
 {"job_id": "g_…", "project_id": "…", "repo": "owner/name", "mode": "worktree|clone",
- "shared": "projects/7a1c…/repo", "cwd": "projects/7a1c…/threads/12/dev-2",
+ "shared": "projects/7a1c…/repos/owner__name", "cwd": "projects/7a1c…/threads/12/dev-2/owner__name",
  "branch": "thread/12/dev-2", "base": "thread/12-employee-comms", "fetch": true}
 ```
+
+一个作业只管一个仓库：项目有几个仓库，员工开会话前就有几个 `git.prepare`（每个仓库一个共享克隆、员工目录下每个仓库一个 worktree）。`base` 是讨论串分支（已在该仓库创建时）或本讨论串在该仓库的基准分支。
 
 步骤见 `architecture.md` §8.1。结果 `git.result {job_id, ok, head_sha, created: bool, log_tail, error_code?}`，`error_code`：`clone_failed|fetch_failed|not_a_repo|dirty_conflict|path_outside_root|locked_timeout`。
 
@@ -335,9 +338,12 @@
 ### 7.3 `git.push`（键：`job_id`）
 
 ```json
-{"job_id": "g_…", "project_id": "…", "repo": "owner/name", "cwd": "projects/7a1c…/threads/12/dev-2",
- "refspec": "HEAD:refs/heads/thread/12/dev-2", "employee": "dev-2", "thread_no": 12}
+{"job_id": "g_…", "project_id": "…", "repo": "owner/name", "cwd": "projects/7a1c…/threads/12/dev-2/owner__name",
+ "refspec": "HEAD:refs/heads/thread/12/dev-2", "employee": "dev-2", "thread_no": 12,
+ "unchanged_against": ["thread/12-employee-comms", "main"]}
 ```
+
+每个仓库一个作业。带 `unchanged_against` 时守护进程先同步镜像，HEAD 在这些分支（不存在的忽略）之外没有提交就不推送，回 `git.result {job_id, ok: true, unchanged: true, head_sha}`：员工没改这个仓库。
 
 员工的推送只走这个作业（architecture.md §8.1）。守护进程校验 `refspec` 的目标必须是 `refs/heads/thread/<thread_no>/<employee>`、不带 `+`（不强推，除非 body 里 `force_with_lease: "<sha>"`，只用于冲突修复后的成员分支）；用 `cred.request {job_id, purpose:"push"}` 取只对这一次作业有效的写令牌，经 `GIT_ASKPASS` 只传给这一个 `git push --no-verify` 子进程。结果 `git.result {job_id, ok, head_sha, error_code?}`，`error_code`：`rejected_non_ff|workflow_permission|auth_failed|refspec_not_allowed`。
 
@@ -360,7 +366,7 @@
 
 `{"req_id", "session_id"|"job_id", "open_gen"?, "host": "github.com", "path": "owner/name.git", "purpose": "read|push"}`
 
-控制台先做 §2.3 的归属校验，再按调用方决定令牌范围（architecture.md §10.4）：员工会话只给本项目仓库的只读令牌（`purpose: push` 来自会话一律拒绝）；`git.prepare`/`git.status` 作业给只读令牌；`git.push` 作业给 `contents: write`（项目允许时加 `workflows: write`）且仓库必须是该作业所属项目的仓库；统筹会话一律拒绝。
+控制台先做 §2.3 的归属校验，再按调用方决定令牌范围（architecture.md §10.4）：员工会话只给本项目仓库的只读令牌（`purpose: push` 来自会话一律拒绝）；`git.prepare`/`git.status` 作业给只读令牌；`git.push` 作业给 `contents: write`（项目允许时加 `workflows: write`）；作业的令牌只发给作业自己的仓库（`body.repo`），用该仓库绑定的 Git 连接铸造；统筹会话一律拒绝。
 
 ### `cred.response`（控制台 → 守护进程，不可靠）
 

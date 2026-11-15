@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/tools/open_pr.json",
   "title": "OpenPrInput",
-  "description": "Open the pull request from the thread branch to the base branch; the thread moves to review.",
+  "description": "Open one pull request per repository the thread changed (thread branch to that repository's base branch); the thread moves to review.",
   "x-tool": {
     "tiers": [
       "lead"
@@ -23,6 +23,18 @@
     },
     "body": {
       "type": "string"
+    },
+    "repo": {
+      "description": "Open only this repository's pull request (default: every changed repository without one).",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "base": {
+      "description": "PR base branch for repo (or for the only repository to open); default the thread's base there.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
     }
   },
   "$defs": {
@@ -36,11 +48,44 @@
       "properties": {
         "pr_number": {
           "type": "integer",
+          "minimum": 1,
+          "description": "First pull request of the thread."
+        },
+        "pr_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "prs": {
+          "description": "Every pull request of the thread, one per repository.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RepoPr"
+          }
+        }
+      }
+    },
+    "RepoPr": {
+      "title": "RepoPr",
+      "type": "object",
+      "required": [
+        "repo",
+        "pr_number",
+        "pr_url"
+      ],
+      "properties": {
+        "repo": {
+          "type": "string"
+        },
+        "pr_number": {
+          "type": "integer",
           "minimum": 1
         },
         "pr_url": {
           "type": "string",
           "format": "uri"
+        },
+        "base": {
+          "type": "string"
         }
       }
     }

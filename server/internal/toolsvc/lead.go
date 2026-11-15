@@ -2,6 +2,7 @@ package toolsvc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/delivery"
+	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/scheduler"
 )
 
@@ -53,7 +55,11 @@ func (s *Service) assignTask(ctx context.Context, tx *core.Tx, c *call) (Result,
 	if in.Kind != nil {
 		kind = string(*in.Kind)
 	}
-	task, pooled, err := s.sched.Assign(ctx, tx, scheduler.Assignment{Thread: t, Assignee: in.Assignee, Instruction: in.Instruction,
+	instruction, err := s.repoInstruction(ctx, tx, t, in.Instruction, deref(in.Repo), deref(in.Base))
+	if err != nil {
+		return Result{}, err
+	}
+	task, pooled, err := s.sched.Assign(ctx, tx, scheduler.Assignment{Thread: t, Assignee: in.Assignee, Instruction: instruction,
 		Main: in.Main, DependsOn: deps, Kind: kind, CreatedBy: "lead"})
 	if err != nil {
 		return Result{}, err
@@ -64,6 +70,26 @@ func (s *Service) assignTask(ctx context.Context, tx *core.Tx, c *call) (Result,
 		where = "指派给 " + in.Assignee
 	}
 	return okJSON(fmt.Sprintf("任务 %s 已创建，%s", task.ID, where), out), nil
+}
+
+// repoInstruction records an explicit base for the task's repository and names the repository
+// (and base) in front of the instruction.
+func (s *Service) repoInstruction(ctx context.Context, tx *core.Tx, t core.Thread, text, repo, base string) (string, error) {
+	if repo == "" {
+		if base != "" {
+			return "", refuse("写 base 时请同时写 repo")
+		}
+		return text, nil
+	}
+	slug, err := s.orch.SetBase(ctx, tx, t, repo, base)
+	if err != nil {
+		return "", refuse("%s", err.Error())
+	}
+	prefix := fmt.Sprintf("[仓库 %s] ", slug)
+	if base != "" {
+		prefix = fmt.Sprintf("[仓库 %s · 基准分支 %s] ", slug, base)
+	}
+	return prefix + text, nil
 }
 
 // listTasks lists the thread's tasks.
@@ -172,12 +198,49 @@ func (s *Service) enqueueMerge(ctx context.Context, tx *core.Tx, c *call) (Resul
 	if err != nil {
 		return Result{}, err
 	}
-	entry, pos, err := s.deliv.Enqueue(ctx, tx, t, task)
-	if err != nil {
-		return Result{}, err
+	if in.Base != nil && in.Repo == nil {
+		return Result{}, refuse("写 base 时请同时写 repo")
 	}
-	out := protocol.EnqueueMergeResult{EntryID: entry.ID, Position: pos}
-	return okJSON(fmt.Sprintf("%s 的分支已进合并队列（第 %d 位）", task.ClaimedBy, pos), out), nil
+	entries, pos, err := s.deliv.Enqueue(ctx, tx, t, task, delivery.MergeRequest{Repo: deref(in.Repo), Base: deref(in.Base)})
+	if err != nil {
+		return Result{}, refuseMerge(err)
+	}
+	out := protocol.EnqueueMergeResult{EntryID: entries[0].ID, Position: pos, Entries: entryRefs(entries)}
+	if pos == 0 {
+		return okJSON(fmt.Sprintf("%s 的任务 %s 没有需要合并的提交，已记为完成", task.ClaimedBy, task.ID), out), nil
+	}
+	return okJSON(fmt.Sprintf("%s 的分支已进合并队列（第 %d 位%s）", task.ClaimedBy, pos, reposOf(entries)), out), nil
+}
+
+func entryRefs(entries []core.MergeEntry) []protocol.MergeEntryRef {
+	out := make([]protocol.MergeEntryRef, len(entries))
+	for i, e := range entries {
+		out[i] = protocol.MergeEntryRef{EntryID: e.ID, Repo: e.Repo}
+	}
+	return out
+}
+
+func reposOf(entries []core.MergeEntry) string {
+	var repos []string
+	for _, e := range entries {
+		if e.Repo != "" {
+			repos = append(repos, e.Repo)
+		}
+	}
+	if len(repos) == 0 {
+		return ""
+	}
+	return "，仓库 " + strings.Join(repos, "、")
+}
+
+// refuseMerge turns the merge request's own mistakes (unknown repository, nothing pushed there,
+// fixed base) into tool refusals the lead can act on.
+func refuseMerge(err error) error {
+	if errors.Is(err, orchestrator.ErrUnknownRepo) || errors.Is(err, core.ErrBaseFixed) || errors.Is(err, delivery.ErrTaskNotReady) ||
+		errors.Is(err, delivery.ErrNotPushed) {
+		return refuse("%s", err.Error())
+	}
+	return err
 }
 
 func (s *Service) mergeTask(ctx context.Context, tx *core.Tx, t core.Thread, in protocol.EnqueueMergeInput) (core.Task, error) {
@@ -211,14 +274,39 @@ func (s *Service) openPR(ctx context.Context, tx *core.Tx, c *call) (Result, err
 		return Result{}, err
 	}
 	by := c.emp().Name
+	req := delivery.PRRequest{Title: in.Title, Body: in.Body, By: by, Repo: deref(in.Repo), Base: deref(in.Base)}
 	return Result{Later: func(ctx context.Context) Result {
-		th, err := s.deliv.OpenPR(ctx, t.ID, delivery.PRRequest{Title: in.Title, Body: in.Body, By: by})
+		th, err := s.deliv.OpenPR(ctx, t.ID, req)
 		if err != nil {
 			return failure(err)
 		}
-		out := protocol.OpenPRResult{PRNumber: deref0(th.PRNumber), PRURL: deref(th.PRURL)}
-		return okJSON("PR 已开："+out.PRURL, out)
+		repos, err := core.ThreadRepos(ctx, s.core.Pool, th.ID)
+		if err != nil {
+			return failure(err)
+		}
+		out := protocol.OpenPRResult{PRNumber: deref0(th.PRNumber), PRURL: deref(th.PRURL), Prs: repoPRs(repos)}
+		return okJSON("PR 已开："+prLinks(out.Prs), out)
 	}}, nil
+}
+
+func repoPRs(rows []core.ThreadRepo) []protocol.RepoPR {
+	out := []protocol.RepoPR{}
+	for _, r := range rows {
+		if r.PRNumber == nil {
+			continue
+		}
+		base := r.BaseBranch
+		out = append(out, protocol.RepoPR{Repo: r.Repo, PRNumber: *r.PRNumber, PRURL: deref(r.PRURL), Base: &base})
+	}
+	return out
+}
+
+func prLinks(prs []protocol.RepoPR) string {
+	links := make([]string, len(prs))
+	for i, p := range prs {
+		links[i] = p.PRURL
+	}
+	return strings.Join(links, " ")
 }
 
 func deref0(p *int) int {

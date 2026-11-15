@@ -48,7 +48,8 @@ func push(t *testing.T, w *world, gh *fakeGitHub, n *nodetest.Node, branch, sha 
 	}
 	var p protocol.GitPush
 	_ = f.Decode(&p)
-	if p.Refspec != "HEAD:refs/heads/"+branch || p.Repo != "o/r" {
+	if p.Refspec != "HEAD:refs/heads/"+branch || p.Repo != "o/r" || !strings.HasSuffix(string(p.Cwd), "/o__r") ||
+		len(p.UnchangedAgainst) != 2 || p.UnchangedAgainst[1] != "main" {
 		t.Fatalf("push %+v", p)
 	}
 	gh.setRef(branch, sha)
@@ -86,7 +87,7 @@ func TestDeliveryEndToEnd(t *testing.T) {
 	var conn struct{ ID string }
 	b.must(201, "POST", "/api/git/connections", map[string]string{"name": "gh", "token": "ghp_good"}, &conn)
 	var project struct{ ID string }
-	b.must(201, "POST", "/api/projects", map[string]any{"name": "web", "repo": "o/r", "branch": "main", "git_connection_id": conn.ID}, &project)
+	b.must(201, "POST", "/api/projects", map[string]any{"name": "web", "repos": []map[string]any{{"repo": "o/r", "git_connection_id": conn.ID}}}, &project)
 	n := w.connect(node.Token, nodetest.Options{})
 	events := b.stream("/api/projects/"+project.ID+"/events?topics=merge,thread,task,deliverable,ci", "")
 
@@ -95,9 +96,10 @@ func TestDeliveryEndToEnd(t *testing.T) {
 	if thread.Branch != "thread/1-login" {
 		t.Fatalf("branch %s", thread.Branch)
 	}
-	eventually(t, "thread branch on GitHub", func() bool { _, ok := gh.ref("thread/1-login"); return ok })
-
 	lead, leadOpen := expectOpen(t, w, n, "lead-1")
+	if _, ok := gh.ref("thread/1-login"); ok {
+		t.Fatal("the thread branch is created lazily, when something is merged into it")
+	}
 	if leadOpen.Prepare == nil || !*leadOpen.GitCredentials {
 		t.Fatalf("lead session needs its worktree prepared: %+v", leadOpen)
 	}
@@ -178,9 +180,7 @@ func assertCredentials(t *testing.T, w *world, n *nodetest.Node, dev *fakeAgent,
 // and completes the original task too.
 func conflictAndFix(t *testing.T, w *world, gh *fakeGitHub, n *nodetest.Node, lead, dev *fakeAgent, events *sse) {
 	t.Helper()
-	gh.mu.Lock()
-	gh.conflicts["thread/1/dev-1"] = true
-	gh.mu.Unlock()
+	gh.setConflict("o/r", "thread/1/dev-1", true)
 	lead.mustCall("assign_task", map[string]any{"assignee": "dev-1", "instruction": "加记住我", "main": "页面"})
 	dev.expectSend("[Task t2")
 	completeWithPush(t, w, gh, n, dev, "t2", "sha-dev-2")
@@ -191,9 +191,7 @@ func conflictAndFix(t *testing.T, w *world, gh *fakeGitHub, n *nodetest.Node, le
 	dev.expectSend("[Task t3")
 	lead.expectSend("合并冲突")
 
-	gh.mu.Lock()
-	delete(gh.conflicts, "thread/1/dev-1")
-	gh.mu.Unlock()
+	gh.setConflict("o/r", "thread/1/dev-1", false)
 	completeWithPush(t, w, gh, n, dev, "t3", "sha-dev-3")
 	lead.expectSend("[Task t3 · dev-1 · done]")
 	lead.mustCall("enqueue_merge", map[string]any{"task_id": "t3"})

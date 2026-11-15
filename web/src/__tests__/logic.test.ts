@@ -5,7 +5,7 @@ import { appendMessage, applyProjectEvent, applyUserEvent, layoutTickKey, status
 import { flattenMessages, keys, type MessagePages } from "@/api/queries";
 import { backoff, streamUrl } from "@/api/sse";
 import type { OfficeSnapshot, QuestionView, TaskView, ThreadView } from "@/api/views";
-import { normalizeRepo, repoPayload } from "@/components/app/repo";
+import { addRepo, moveRepo, normalizeRepo, removeRepo, reposPayload } from "@/components/app/repo";
 import { teamChips } from "@/components/app/roles";
 import { summarizeNodes } from "@/components/shell/nodes";
 import { matchesProject } from "@/components/shell/ProjectSidebar";
@@ -189,17 +189,24 @@ describe("page helpers", () => {
   it("repos", () => {
     expect(normalizeRepo("https://github.com/a/b.git")).toBe("a/b");
     expect(normalizeRepo(" a/b ")).toBe("a/b");
-    expect(repoPayload({ git_connection_id: "", repo: "a/b", branch: "x" })).toEqual({ repo: null, branch: "", git_connection_id: null });
-    expect(repoPayload({ git_connection_id: "g", repo: "a/b", branch: "main" })).toEqual({ repo: "a/b", branch: "main", git_connection_id: "g" });
+    expect(reposPayload([{ git_connection_id: null, repo: "a/b" }, { git_connection_id: "g", repo: "https://github.com/a/c.git" }])).toEqual([{ repo: "a/c", git_connection_id: "g" }]);
+    const one = addRepo([], { repo: "https://github.com/o/api.git", git_connection_id: "g" });
+    expect(one).toEqual([{ repo: "o/api", git_connection_id: "g" }]);
+    expect(addRepo(one, { repo: "O/API", git_connection_id: "g" })).toBe(one);
+    expect(addRepo(one, { repo: "o/web", git_connection_id: null })).toBe(one);
+    const two = addRepo(one, { repo: "o/web", git_connection_id: "g" });
+    expect(moveRepo(two, 1, -1).map((r) => r.repo)).toEqual(["o/web", "o/api"]);
+    expect(moveRepo(two, 1, 1)).toBe(two);
+    expect(removeRepo(two, 0).map((r) => r.repo)).toEqual(["o/web"]);
     const r = (full_name: string, used: boolean, pushed: string) => ({ full_name, used_by_projects: used ? [{ id: "p", name: "p" }] : [], pushed_at: pushed, private: false, default_branch: "", description: "", html_url: "" });
     expect(sortRepos([r("a", false, "2026-02-01"), r("b", true, "2025-01-01"), r("c", false, "2026-03-01")]).map((x) => x.full_name)).toEqual(["b", "c", "a"]);
   });
   it("projects", () => {
-    const p = (id: string, extra: object) => ({ id, name: id, description: "", repo: null, pinned: false, archived: false, updated_at: "2026-01-01T00:00:00Z", ...extra }) as never;
+    const p = (id: string, extra: object) => ({ id, name: id, description: "", repos: [], pinned: false, archived: false, updated_at: "2026-01-01T00:00:00Z", ...extra }) as never;
     expect(recentProject([p("a", { updated_at: "2026-02-01T00:00:00Z" }), p("b", { pinned: true }), p("c", { archived: true })])!).toMatchObject({ id: "b" });
     expect(recentProject([p("c", { archived: true })])).toMatchObject({ id: "c" });
-    expect(matchesProject({ name: "Agent", description: "", repo: "x/sup2api" }, "SUP")).toBe(true);
-    expect(matchesProject({ name: "Agent", description: "", repo: null }, "zz")).toBe(false);
+    expect(matchesProject({ name: "Agent", description: "", repos: [{ repo: "x/web", git_connection_id: "g" }, { repo: "x/sup2api", git_connection_id: "g" }] }, "SUP")).toBe(true);
+    expect(matchesProject({ name: "Agent", description: "", repos: [] }, "zz")).toBe(false);
   });
   it("overview filters", () => {
     const list = [thread(1), thread(2, { status: "review" }), thread(3, { status: "done" }), thread(4, { status: "archived" })];

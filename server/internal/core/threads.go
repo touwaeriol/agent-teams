@@ -183,6 +183,9 @@ func (s *Store) ThreadViewOf(ctx context.Context, q DB, t Thread) (ThreadView, e
 	if v.Counts, err = ThreadCountsOf(ctx, q, t); err != nil {
 		return v, err
 	}
+	if v.Repos, err = ThreadRepoViews(ctx, q, t.ID); err != nil {
+		return v, err
+	}
 	if v.LeadLast, err = leadLast(ctx, q, t.ID); err != nil {
 		return v, err
 	}

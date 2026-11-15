@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/node/git.push.json",
   "title": "GitPush",
-  "description": "Push an employee branch with a one-job write token; refspec target must be refs/heads/thread/<thread_no>/<employee>.",
+  "description": "Push an employee branch of one repository with a one-job write token; refspec target must be refs/heads/thread/<thread_no>/<employee>.",
   "x-direction": "console_to_node",
   "x-key": [
     "job_id"
@@ -49,6 +49,14 @@
       "description": "Expected remote sha; only for member branches after conflict repair.",
       "type": "string",
       "pattern": "^[0-9a-f]{7,64}$"
+    },
+    "unchanged_against": {
+      "description": "Branches (thread branch, base) whose commits are not the employee's work: when HEAD has no commit outside them the push is skipped and the result says unchanged.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     }
   }
 }

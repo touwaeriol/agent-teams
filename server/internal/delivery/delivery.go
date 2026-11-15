@@ -8,9 +8,11 @@ package delivery
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/url"
 	"strings"
 	"time"
@@ -30,11 +32,14 @@ import (
 var (
 	ErrNoRepo          = ghops.ErrNoRepo
 	ErrPRExists        = errors.New("这个讨论串已经开过 PR 了")
+	ErrNothingToPR     = errors.New("讨论串还没有把改动合并进任何仓库的讨论串分支")
+	ErrBaseNeedsRepo   = errors.New("项目有多个仓库要开 PR，指定 base 时请同时写 repo")
 	ErrMergeInProgress = errors.New("合并队列里还有正在合并的条目，等它们处理完再开 PR")
 	ErrPlanOpen        = errors.New("还有主任务没有完成")
 	ErrNoPR            = errors.New("这个讨论串还没有 PR")
 	ErrChecksPending   = errors.New("PR 的检查还没有全部通过")
 	ErrTaskNotReady    = errors.New("任务还不能进合并队列（需要成员先 complete_task）")
+	ErrNotPushed       = errors.New("这个仓库没有可合并的改动")
 	ErrBadURL          = errors.New("交付物链接必须是 http:// 或 https:// 开头的网址")
 )
 
@@ -66,33 +71,116 @@ func New(cs *core.Store, orch *orchestrator.Orchestrator, sched *scheduler.Sched
 		PushDone:     func(context.Context, *core.Tx, map[string]any, *protocol.GitResult) error { return nil }}
 }
 
-// repoOf resolves a project's repository.
-func (e *Engine) repoOf(ctx context.Context, projectID string) (store.Project, ghops.Repo, error) {
+// reposOf resolves a project's repositories.
+func (e *Engine) reposOf(ctx context.Context, projectID string) (store.Project, []ghops.Repo, error) {
 	p, err := e.orch.Project(ctx, projectID)
 	if err != nil {
-		return p, ghops.Repo{}, err
+		return p, nil, err
 	}
-	repo, err := e.gh.RepoOf(ctx, p)
-	return p, repo, err
+	repos, err := e.gh.ReposOf(ctx, p)
+	return p, repos, err
 }
 
-// Push queues git.push of a member's worktree to thread/<no>/<name> (§8.1); meta says what to do with the result.
+// repoIn resolves one repository of a project by name.
+func (e *Engine) repoIn(ctx context.Context, projectID, slug string) (ghops.Repo, error) {
+	_, repos, err := e.reposOf(ctx, projectID)
+	if err != nil {
+		return ghops.Repo{}, err
+	}
+	if r, ok := ghops.Find(repos, slug); ok {
+		return r, nil
+	}
+	return ghops.Repo{}, fmt.Errorf("%w：%s", orchestrator.ErrUnknownRepo, slug)
+}
+
+// Push queues one git.push per project repository: the member's checkout of that repository to
+// thread/<no>/<name> (§8.1). The daemon skips a repository without commits beyond the thread
+// branch and the base (unchanged). meta says what to do with the results; it returns the push group.
 func (e *Engine) Push(ctx context.Context, tx *core.Tx, emp core.Employee, t core.Thread, meta map[string]any) (string, error) {
-	p, repo, err := e.repoOf(ctx, emp.ProjectID)
+	p, repos, err := e.reposOf(ctx, emp.ProjectID)
 	if err != nil {
 		return "", err
 	}
 	if emp.NodeID == nil {
 		return "", orchestrator.ErrNoNode
 	}
-	job := core.NewID("g")
+	group := core.NewID("pg")
+	for _, r := range repos {
+		if err := e.pushRepo(ctx, tx, p, emp, t, r, len(repos), withGroup(meta, emp, group, r.Slug)); err != nil {
+			return "", err
+		}
+	}
+	return group, nil
+}
+
+func withGroup(meta map[string]any, emp core.Employee, group, repo string) map[string]any {
+	m := maps.Clone(meta)
+	m["purpose"], m["employee_id"], m["push_group"], m["repo"], m["node_id"] = "push", emp.ID, group, repo, *emp.NodeID
+	return m
+}
+
+func (e *Engine) pushRepo(ctx context.Context, tx *core.Tx, p store.Project, emp core.Employee, t core.Thread, r ghops.Repo,
+	nRepos int, meta map[string]any) error {
 	paths := orchestrator.PathsOf(emp, &t)
-	body := protocol.GitPush{JobID: protocol.JobID(job), ProjectID: p.ID, Repo: protocol.Repo(repo.Slug),
-		Cwd: protocol.RelPath(paths.Cwd), Refspec: "HEAD:refs/heads/" + paths.Branch, Employee: emp.Name, ThreadNo: t.No}
-	meta["purpose"] = "push"
-	meta["employee_id"] = emp.ID
-	_, err = e.gw.Enqueue(ctx, tx, *emp.NodeID, nodegw.Command{Type: protocol.TypeGitPush, Body: body, Meta: meta})
-	return job, err
+	cwd := e.orch.CheckoutCwd(ctx, tx, emp, t, r.Slug, nRepos)
+	body := protocol.GitPush{JobID: protocol.JobID(core.NewID("g")), ProjectID: p.ID, Repo: protocol.Repo(r.Slug),
+		Cwd: protocol.RelPath(cwd), Refspec: "HEAD:refs/heads/" + paths.Branch, Employee: emp.Name, ThreadNo: t.No,
+		UnchangedAgainst: e.unchangedRefs(ctx, tx, t, r)}
+	_, err := e.gw.Enqueue(ctx, tx, *emp.NodeID, nodegw.Command{Type: protocol.TypeGitPush, Body: body, Meta: meta})
+	return err
+}
+
+// unchangedRefs are the branches whose commits do not count as the member's work in a repository.
+func (e *Engine) unchangedRefs(ctx context.Context, q core.DB, t core.Thread, r ghops.Repo) []string {
+	refs := []string{t.Branch}
+	if base := e.orch.BaseFor(ctx, q, t, r); base != t.Branch {
+		refs = append(refs, base)
+	}
+	return refs
+}
+
+// PushOutcome is one repository's result in a push group.
+type PushOutcome struct {
+	Repo      string
+	Done      bool // the job reported back
+	OK        bool
+	Unchanged bool // no commits to deliver in this repository
+	SHA       string
+	Result    protocol.GitResult
+}
+
+// PushGroup reads the results of a push group so far (one per repository, in repository order).
+func PushGroup(ctx context.Context, q core.DB, nodeID, group string) ([]PushOutcome, error) {
+	rows, err := q.Query(ctx, `SELECT meta->>'repo', status, result FROM at_node_commands
+		WHERE node_id = $1 AND type = $2 AND meta->>'push_group' = $3 ORDER BY seq`, nodeID, protocol.TypeGitPush, group)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PushOutcome
+	for rows.Next() {
+		var o PushOutcome
+		var status string
+		var raw []byte
+		if err := rows.Scan(&o.Repo, &status, &raw); err != nil {
+			return nil, err
+		}
+		out = append(out, outcomeOf(o, status, raw))
+	}
+	return out, rows.Err()
+}
+
+func outcomeOf(o PushOutcome, status string, raw []byte) PushOutcome {
+	o.Done = status == "done" || status == "failed"
+	if !o.Done || json.Unmarshal(raw, &o.Result) != nil {
+		return o
+	}
+	o.OK = o.Result.Ok
+	o.Unchanged = o.Result.Unchanged != nil && *o.Result.Unchanged
+	if o.Result.HeadSHA != nil {
+		o.SHA = *o.Result.HeadSHA
+	}
+	return o
 }
 
 // JobResult records git.result and continues what the job was for.
@@ -167,6 +255,8 @@ func PushError(r *protocol.GitResult) string {
 		return "推送被拒绝：远端分支有你本地没有的提交，请先 git pull --rebase 再完成。"
 	case "refspec_not_allowed":
 		return "推送被拒绝：只能推送到你自己的成员分支。"
+	case "not_a_repo":
+		return "推送失败：工作目录里没有这个仓库的检出（" + tail(r) + "）"
 	}
 	return "推送失败（" + code(r) + "）：" + tail(r)
 }

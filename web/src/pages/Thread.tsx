@@ -29,7 +29,9 @@ import {
   RUNTIME_LABEL,
   taskLook,
   taskTitle,
+  threadBases,
   threadLook,
+  threadPRs,
   TIER_LABEL,
   visibleMainTasks,
 } from "@/lib/present";
@@ -93,7 +95,7 @@ function ThreadHeader({ thread, project, view, setView }: { thread: ThreadView; 
             <StatusPill tone={look.tone} label={look.label} />
           </span>
           <span className="flex flex-wrap gap-2">
-            <Tag mono>{thread.branch ? `${thread.branch} ← ${thread.base_branch}` : `基准 ${thread.base_branch}`}</Tag>
+            <Tag mono>{threadBases(thread) ? `${thread.branch} ← ${threadBases(thread)}` : thread.branch}</Tag>
             <Tag>{project.work_mode === "worktree" ? "worktree：每个成员一个" : "独立克隆：每个成员一份"}</Tag>
             {lead && <Tag>组长 {lead.name}{lead.node ? ` · ${lead.node.name}` : ""}</Tag>}
             <Tag>开始于 {clock(thread.created_at)}，{thread.opened_by === "user" ? "你创建" : "统筹创建"}</Tag>
@@ -106,11 +108,13 @@ function ThreadHeader({ thread, project, view, setView }: { thread: ThreadView; 
               {paused ? "继续" : "暂停"}
             </Button>
             {thread.pr_url ? (
-              <Button asChild>
-                <a href={safeHref(thread.pr_url)} target="_blank" rel="noreferrer">
-                  查看 PR #{thread.pr_number}
-                </a>
-              </Button>
+              threadPRs(thread).map((pr) => (
+                <Button asChild key={pr.url ?? pr.number}>
+                  <a href={safeHref(pr.url)} target="_blank" rel="noreferrer">
+                    查看 {pr.repo ? `${pr.repo} ` : ""}PR #{pr.number}
+                  </a>
+                </Button>
+              ))
             ) : allDone ? (
               <Button onClick={() => openPr.mutate(false)} disabled={openPr.isPending}>
                 开 PR
@@ -295,15 +299,21 @@ function DeliveryView({ thread }: { thread: ThreadView }) {
     <div className="flex flex-col gap-3 rounded-xl border bg-panel p-[18px]">
       <h2 className="text-[15px] font-semibold">交付</h2>
       <p className="text-[13px] leading-[22px] text-[#4A4843]">
-        成员在自己的分支上完成小任务，组长审查后合并进 <code className="font-mono">{thread.branch || "讨论串分支"}</code>。全部主要任务完成后，组长开一个指向基准分支 {thread.base_branch} 的 PR，讨论串进入“待验收”；PR 合并或你点“验收通过”后才算完成。
+        成员在自己的分支上完成小任务，组长审查后合并进各仓库的 <code className="font-mono">{thread.branch || "讨论串分支"}</code>（只在有改动的仓库里创建）。全部主要任务完成后，组长给每个有改动的仓库开一个指向它基准分支的 PR，讨论串进入“待验收”；PR 全部合并或你点“验收通过”后才算完成。
       </p>
       {(queue.data ?? []).map((e) => {
         const look = mergeLook(e.status);
         return (
-          <DeliveryRow key={e.id} branch={`${e.head_branch} → ${thread.branch}`} what={`${e.employee} · ${e.task_id}${e.error ? ` · ${e.error}` : ""}`} look={look} />
+          <DeliveryRow key={e.id} branch={`${e.repo ? `${e.repo} · ` : ""}${e.head_branch} → ${thread.branch}`} what={`${e.employee} · ${e.task_id}${e.error ? ` · ${e.error}` : ""}`} look={look} />
         );
       })}
-      <DeliveryRow branch={`${thread.branch || "讨论串分支"} → ${thread.base_branch}`} what="讨论串 PR" look={pr} href={safeHref(thread.pr_url)} />
+      {threadPRs(thread).length > 0 ? (
+        threadPRs(thread).map((p) => (
+          <DeliveryRow key={p.url ?? p.number} branch={`${p.repo ? `${p.repo} · ` : ""}${thread.branch} → ${p.base}`} what={`PR #${p.number}`} look={pr} href={safeHref(p.url)} />
+        ))
+      ) : (
+        <DeliveryRow branch={`${thread.branch || "讨论串分支"} → 基准分支`} what="讨论串 PR" look={pr} />
+      )}
       {(checks.data ?? []).length > 0 && (
         <div className="flex flex-col gap-1.5 pt-1">
           <span className="text-xs text-muted-foreground">CI 检查</span>
@@ -399,7 +409,7 @@ function MobileThread({ thread }: { thread: ThreadView }) {
               #{thread.no} {thread.title}
             </span>
             <span className="truncate text-[11px] text-muted-foreground">
-              组长 {lead?.name ?? "—"} · {thread.branch || thread.base_branch}
+              组长 {lead?.name ?? "—"} · {thread.branch}
             </span>
           </span>
           <StatusPill tone={look.tone} label={look.label} />

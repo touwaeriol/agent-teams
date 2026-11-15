@@ -180,6 +180,7 @@ CREATE UNIQUE INDEX at_roles_one_lead  ON at_roles (user_id, COALESCE(project_id
 
 ```sql
 -- v1 at_projects: id, user_id, name, description, context, repo, branch, git_connection_id, created_at, updated_at, pinned, archived
+-- 00070 起 repo / branch / git_connection_id 不再读写（留作回滚）：仓库在 at_project_repos，基准分支写在 context 里
 ALTER TABLE at_projects
   ADD COLUMN IF NOT EXISTS work_mode TEXT NOT NULL DEFAULT 'worktree',      -- worktree | clone
   ADD COLUMN IF NOT EXISTS auto_approve BOOLEAN NOT NULL DEFAULT FALSE,     -- 新讨论串默认“全部放行”
@@ -194,6 +195,17 @@ ALTER TABLE at_projects
     --  "allow_workflow_edits":false}    -- 推送作业令牌是否带 workflows: write
     -- require_acceptance=false 时 PR 的必需 check 通过后按 merge_method 自动合并（architecture.md §8.4）
   ADD COLUMN IF NOT EXISTS office_layout TEXT NOT NULL DEFAULT '';          -- '' = 全局默认；否则布局 id
+
+CREATE TABLE at_project_repos (     -- 项目绑定的仓库（00070），position 即界面上的顺序
+  project_id        TEXT NOT NULL REFERENCES at_projects(id) ON DELETE CASCADE,
+  repo              TEXT NOT NULL,                 -- owner/name（GitHub 返回的 full_name）
+  git_connection_id TEXT REFERENCES at_git_connections(id) ON DELETE SET NULL,  -- 连接被删的仓库不再使用
+  position          INT  NOT NULL DEFAULT 0,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (project_id, repo)
+);
+-- 迁移：每个项目原来的 repo/git_connection_id 成为第一行；branch 不是 main/master 时在 context 末尾追加
+-- “仓库 <repo> 的基准分支：<branch>”，信息不丢。
 
 -- v1 at_conversations: id, user_id, title, created_at, history JSONB, plan JSONB, project_id
 ALTER TABLE at_conversations   -- kind 在 00002（P1）加，v1 防护补丁按它过滤；其余在 00010
@@ -212,10 +224,10 @@ CREATE TABLE at_threads (
   status         TEXT NOT NULL DEFAULT 'queued',  -- queued | running | waiting | review | done | failed | paused | archived
   pause_reason   TEXT NOT NULL DEFAULT '',        -- '' | user | rolled_back_to_v1 | …
   branch         TEXT NOT NULL DEFAULT '',        -- thread/<no>-<slug>
-  base_branch    TEXT NOT NULL DEFAULT '',        -- 开串时的项目基准分支（之后项目改分支不影响）
+  base_branch    TEXT NOT NULL DEFAULT '',        -- 00070 起不再写：基准分支按仓库记在 at_thread_repos
   pr_number      INT,
   pr_url         TEXT,
-  pr_state       TEXT NOT NULL DEFAULT '',        -- '' | open | merged | closed
+  pr_state       TEXT NOT NULL DEFAULT '',        -- '' | open | accepting | merged | closed：全部 PR 的汇总状态；pr_number/pr_url = 第一个 PR
   summary        TEXT NOT NULL DEFAULT '',
   auto_approve   BOOLEAN NOT NULL DEFAULT FALSE,
   opened_by      TEXT NOT NULL DEFAULT 'coordinator', -- coordinator | user
@@ -229,10 +241,24 @@ CREATE TABLE at_threads (
 );
 CREATE INDEX at_threads_project ON at_threads (project_id, status, updated_at DESC);
 
+CREATE TABLE at_thread_repos (       -- 讨论串在每个仓库的状态（00070）；行在设基准分支、建讨论串分支时出现
+  thread_id      TEXT NOT NULL REFERENCES at_threads(id) ON DELETE CASCADE,
+  repo           TEXT NOT NULL,
+  base_branch    TEXT NOT NULL DEFAULT '',        -- 组长/统筹给的基准分支，或建讨论串分支时用的默认分支；分支建好后固定
+  branch_created BOOLEAN NOT NULL DEFAULT FALSE,  -- 讨论串分支已在该仓库创建（第一次有条目合并进来时懒创建）
+  pr_number      INT,
+  pr_url         TEXT,
+  pr_state       TEXT NOT NULL DEFAULT '',        -- '' | open | accepting | merged | closed
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (thread_id, repo)
+);
+CREATE INDEX at_thread_repos_pr ON at_thread_repos (pr_url) WHERE pr_url IS NOT NULL;  -- webhook 找 PR
+
 CREATE TABLE at_thread_nodes (       -- 讨论串在哪些节点上有工作目录（清理用）
   thread_id TEXT NOT NULL REFERENCES at_threads(id) ON DELETE CASCADE,
   node_id   TEXT NOT NULL REFERENCES at_nodes(id) ON DELETE CASCADE,
-  paths     TEXT[] NOT NULL DEFAULT '{}',
+  paths     TEXT[] NOT NULL DEFAULT '{}',          -- 每个仓库的 worktree（threads/<no>/<name>/<owner>__<repo>），按共享克隆分组清理
   cleaned_at TIMESTAMPTZ,
   PRIMARY KEY (thread_id, node_id)
 );
@@ -260,7 +286,8 @@ ALTER TABLE at_tasks
   ADD COLUMN IF NOT EXISTS attempt INT NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS summary TEXT NOT NULL DEFAULT '',          -- complete_task 的总结（output 保留给 v1 语义）
   ADD COLUMN IF NOT EXISTS branch TEXT NOT NULL DEFAULT '',
-  ADD COLUMN IF NOT EXISTS head_sha TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS head_sha TEXT NOT NULL DEFAULT '',          -- 第一个推送的仓库的 head
+  ADD COLUMN IF NOT EXISTS pushed JSONB NOT NULL DEFAULT '{}',          -- 00070：{"owner/repo": sha}，complete_task 推送了哪些仓库（合并队列按它入队）
   ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
@@ -393,6 +420,7 @@ CREATE TABLE at_merge_queue (
   thread_id   TEXT NOT NULL REFERENCES at_threads(id) ON DELETE CASCADE,
   task_id     TEXT,                                -- 关联小任务（同 conversation 下的 t<n>）
   employee    TEXT NOT NULL,
+  repo        TEXT NOT NULL DEFAULT '',            -- 00070：条目属于哪个仓库（任务改了几个仓库就几个条目；'' = 无仓库项目）
   head_branch TEXT NOT NULL,                       -- thread/12/dev-1
   head_sha    TEXT NOT NULL DEFAULT '',
   trial_branch TEXT NOT NULL DEFAULT '',           -- mq/12/<id>
@@ -588,5 +616,7 @@ CREATE TABLE at_office_layouts (                    -- 可选：数据库里的�
 6. `00030_office.sql`（P5）：`at_office_layouts`、`at_projects.office_layout`。
    `00050_node_job_index.sql`：`at_node_commands` 的作业索引。`00060_design_skills.sql`：`at_roles.skills`、`at_skills`、`at_deliverable_files`、`at_upload_chunks`、`at_deliverable_comments`（architecture.md §6.5）。
 7. `00100_drop_v1.sql`（P6 后）：删 `at_teams`、`at_conversations.history`；`at_tasks.output` 并入 `summary`；去掉不再需要的默认值。
+
+`00070_project_repos.sql`：`at_project_repos`、`at_thread_repos`、`at_merge_queue.repo`、`at_tasks.pushed`；把每个项目的 repo/branch/git_connection_id 迁进去（基准分支写进 context），给已有讨论串和队列条目补上仓库（architecture.md §8.1）。
 
 每个迁移在 CI 里：对“生产结构快照”执行 → 启动 Python v1 跑冒烟测试（注册、建项目、发消息、节点连接）→ 种入 v2 用户的讨论串、`pending`/`running`/`claimed` 任务、open 提问与留言 → 重启 Python v1 → 断言这些行未变、v1 对话列表不含它们 → 通过才算合规。
