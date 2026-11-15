@@ -27,6 +27,57 @@
         ],
         "type": "object"
       },
+      "Activity": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "employee": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "employee",
+          "text",
+          "at"
+        ],
+        "type": "object"
+      },
+      "ActivityPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Activity"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
       "AdminSettings": {
         "additionalProperties": false,
         "properties": {
@@ -141,6 +192,26 @@
           "platform_version",
           "must_change_password",
           "created_at"
+        ],
+        "type": "object"
+      },
+      "AnswerInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "answer": {
+            "description": "Approvals: allow | allow_always | deny",
+            "maxLength": 20000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why an approval was denied (sent to the employee)",
+            "maxLength": 2000,
+            "type": "string"
+          }
+        },
+        "required": [
+          "answer"
         ],
         "type": "object"
       },
@@ -272,6 +343,31 @@
         ],
         "type": "object"
       },
+      "Board": {
+        "additionalProperties": false,
+        "properties": {
+          "by_thread": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            "description": "By thread number",
+            "type": "object"
+          },
+          "claimable": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "claimable",
+          "by_thread"
+        ],
+        "type": "object"
+      },
       "CIPatch": {
         "additionalProperties": false,
         "properties": {
@@ -357,6 +453,55 @@
         ],
         "type": "object"
       },
+      "CheckView": {
+        "additionalProperties": false,
+        "properties": {
+          "conclusion": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "conclusion",
+          "url",
+          "summary"
+        ],
+        "type": "object"
+      },
+      "CoordinatorView": {
+        "additionalProperties": false,
+        "properties": {
+          "conversation_id": {
+            "type": "string"
+          },
+          "employee": {
+            "$ref": "#/components/schemas/EmployeeBrief"
+          },
+          "session_state": {
+            "description": "'' until the first message opens a session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "employee",
+          "session_state"
+        ],
+        "type": "object"
+      },
       "Credentials": {
         "additionalProperties": false,
         "properties": {
@@ -372,6 +517,103 @@
         "required": [
           "email",
           "password"
+        ],
+        "type": "object"
+      },
+      "DayCost": {
+        "additionalProperties": false,
+        "properties": {
+          "cost_usd": {
+            "format": "double",
+            "type": "number"
+          },
+          "day": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "day",
+          "cost_usd"
+        ],
+        "type": "object"
+      },
+      "DeliverablePage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DeliverableView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "DeliverableView": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "detail": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "published_by": {
+            "type": "string"
+          },
+          "thread_no": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "thread_no",
+          "kind",
+          "title",
+          "url",
+          "detail",
+          "published_by",
+          "created_at",
+          "updated_at"
         ],
         "type": "object"
       },
@@ -447,6 +689,40 @@
         },
         "type": "object"
       },
+      "Detection": {
+        "additionalProperties": false,
+        "properties": {
+          "app_has_checks_permission": {
+            "type": "boolean"
+          },
+          "covers_mq_branches": {
+            "type": "boolean"
+          },
+          "covers_thread_branches": {
+            "type": "boolean"
+          },
+          "ruleset": {
+            "$ref": "#/components/schemas/Ruleset"
+          },
+          "workflows": {
+            "items": {
+              "$ref": "#/components/schemas/Workflow"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "workflows",
+          "covers_thread_branches",
+          "covers_mq_branches",
+          "app_has_checks_permission",
+          "ruleset"
+        ],
+        "type": "object"
+      },
       "DrainInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -459,6 +735,202 @@
         },
         "required": [
           "deadline_s"
+        ],
+        "type": "object"
+      },
+      "EmployeeBrief": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "look": {
+            "$ref": "#/components/schemas/Look"
+          },
+          "name": {
+            "type": "string"
+          },
+          "node": {
+            "$ref": "#/components/schemas/NodeRef"
+          },
+          "role": {
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/EmployeeStatusView"
+          },
+          "thread_no": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tier": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "tier",
+          "role",
+          "title",
+          "runtime",
+          "thread_no",
+          "node",
+          "look",
+          "status"
+        ],
+        "type": "object"
+      },
+      "EmployeeCard": {
+        "additionalProperties": false,
+        "properties": {
+          "current_task": {
+            "$ref": "#/components/schemas/TaskView"
+          },
+          "id": {
+            "type": "string"
+          },
+          "look": {
+            "$ref": "#/components/schemas/Look"
+          },
+          "name": {
+            "type": "string"
+          },
+          "node": {
+            "$ref": "#/components/schemas/NodeRef"
+          },
+          "recent_activity": {
+            "items": {
+              "$ref": "#/components/schemas/Activity"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "role": {
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "session": {
+            "$ref": "#/components/schemas/SessionBrief"
+          },
+          "status": {
+            "$ref": "#/components/schemas/EmployeeStatusView"
+          },
+          "thread_no": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tier": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "current_task",
+          "recent_activity",
+          "session",
+          "id",
+          "name",
+          "tier",
+          "role",
+          "title",
+          "runtime",
+          "thread_no",
+          "node",
+          "look",
+          "status"
+        ],
+        "type": "object"
+      },
+      "EmployeeStatusView": {
+        "additionalProperties": false,
+        "properties": {
+          "bubble": {
+            "type": "string"
+          },
+          "bubble_kind": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "seq": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "substate": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "task_kind": {
+            "type": "string"
+          },
+          "tier": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "substate",
+          "bubble",
+          "bubble_kind",
+          "task_id",
+          "task_kind",
+          "tier",
+          "role",
+          "since",
+          "seq"
+        ],
+        "type": "object"
+      },
+      "EmployeeUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "cost_usd_est": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "employee": {
+            "type": "string"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/UsageTokens"
+          }
+        },
+        "required": [
+          "employee",
+          "cost_usd_est",
+          "tokens"
         ],
         "type": "object"
       },
@@ -611,6 +1083,109 @@
         ],
         "type": "object"
       },
+      "LeadLast": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "at"
+        ],
+        "type": "object"
+      },
+      "LegacyConversation": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "created_at",
+          "project_id",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "LegacyPlanOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "steps": {
+            "description": "v1 plan steps [{title, status}]"
+          }
+        },
+        "required": [
+          "steps"
+        ],
+        "type": "object"
+      },
+      "LegacyTask": {
+        "additionalProperties": false,
+        "properties": {
+          "assignee": {
+            "type": "string"
+          },
+          "depends_on": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "instruction": {
+            "type": "string"
+          },
+          "output": {
+            "type": "string"
+          },
+          "parent": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "assignee",
+          "instruction",
+          "depends_on",
+          "status",
+          "output",
+          "parent"
+        ],
+        "type": "object"
+      },
       "Look": {
         "additionalProperties": false,
         "properties": {
@@ -635,6 +1210,105 @@
           "outfit",
           "accessory",
           "hair"
+        ],
+        "type": "object"
+      },
+      "MailPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MailView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "MailView": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "recipient": {
+            "type": "string"
+          },
+          "sender": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sender",
+          "recipient",
+          "body",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "MainTaskView": {
+        "additionalProperties": false,
+        "properties": {
+          "auto_done": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "pos": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "todo",
+              "doing",
+              "done"
+            ],
+            "type": "string"
+          },
+          "tasks_done": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tasks_total": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "pos",
+          "title",
+          "status",
+          "auto_done",
+          "tasks_total",
+          "tasks_done"
         ],
         "type": "object"
       },
@@ -663,6 +1337,20 @@
         "required": [
           "action",
           "manifest"
+        ],
+        "type": "object"
+      },
+      "MemberMessageInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "maxLength": 100000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
         ],
         "type": "object"
       },
@@ -723,6 +1411,126 @@
         },
         "type": "object"
       },
+      "MergeEntryView": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "employee": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "head_branch": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "thread_no": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "thread_no",
+          "task_id",
+          "employee",
+          "head_branch",
+          "status",
+          "attempts",
+          "error",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "MessagePage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MessageView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "next_cursor": {
+            "description": "Pass as ?before= for older messages",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "MessageView": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "meta": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "author",
+          "kind",
+          "content",
+          "meta",
+          "created_at"
+        ],
+        "type": "object"
+      },
       "NewConnectionInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -743,6 +1551,36 @@
         },
         "required": [
           "token"
+        ],
+        "type": "object"
+      },
+      "NewDeliverableInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          },
+          "thread_no": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "title": {
+            "maxLength": 300,
+            "minLength": 1,
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 2000,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "title",
+          "url"
         ],
         "type": "object"
       },
@@ -778,6 +1616,78 @@
           "node",
           "token",
           "install"
+        ],
+        "type": "object"
+      },
+      "NewThreadInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "brief": {
+            "maxLength": 50000,
+            "type": "string"
+          },
+          "roles": {
+            "description": "Override member counts for this thread",
+            "items": {
+              "$ref": "#/components/schemas/RoleCount"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "NodeBrief": {
+        "additionalProperties": false,
+        "properties": {
+          "active_sessions": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "isolation": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "online": {
+            "type": "boolean"
+          },
+          "parked_sessions": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "queued": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "slots": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "online",
+          "isolation",
+          "active_sessions",
+          "parked_sessions",
+          "queued",
+          "slots"
         ],
         "type": "object"
       },
@@ -868,6 +1778,26 @@
             "type": "integer"
           }
         },
+        "type": "object"
+      },
+      "NodeRef": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "online": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "online"
+        ],
         "type": "object"
       },
       "NodeRelease": {
@@ -1044,6 +1974,163 @@
         ],
         "type": "object"
       },
+      "OfficeSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "board": {
+            "$ref": "#/components/schemas/Board"
+          },
+          "ci": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/CheckView"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "description": "By thread number",
+            "type": "object"
+          },
+          "employees": {
+            "items": {
+              "$ref": "#/components/schemas/EmployeeBrief"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "last_event_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "layout_id": {
+            "type": "string"
+          },
+          "layout_version": {
+            "type": "string"
+          },
+          "merge_queue": {
+            "items": {
+              "$ref": "#/components/schemas/MergeEntryView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/NodeBrief"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "threads": {
+            "items": {
+              "$ref": "#/components/schemas/ThreadView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "layout_id",
+          "layout_version",
+          "threads",
+          "employees",
+          "board",
+          "nodes",
+          "merge_queue",
+          "ci",
+          "last_event_id"
+        ],
+        "type": "object"
+      },
+      "OpenPRInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "maxLength": 60000,
+            "type": "string"
+          },
+          "force": {
+            "description": "Open even if some plan steps are not done",
+            "type": "boolean"
+          },
+          "title": {
+            "maxLength": 256,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Overview": {
+        "additionalProperties": false,
+        "properties": {
+          "memory": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryItem"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/NodeBrief"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "project": {
+            "$ref": "#/components/schemas/ProjectView"
+          },
+          "recent_deliverables": {
+            "items": {
+              "$ref": "#/components/schemas/DeliverableView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "threads": {
+            "items": {
+              "$ref": "#/components/schemas/ThreadView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "usage_7d": {
+            "$ref": "#/components/schemas/Usage7d"
+          },
+          "waiting": {
+            "$ref": "#/components/schemas/Waiting"
+          }
+        },
+        "required": [
+          "project",
+          "threads",
+          "waiting",
+          "recent_deliverables",
+          "memory",
+          "usage_7d",
+          "nodes"
+        ],
+        "type": "object"
+      },
       "PasswordInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -1059,6 +2146,75 @@
         "required": [
           "current",
           "new"
+        ],
+        "type": "object"
+      },
+      "PatchDeliverableInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "maxLength": 300,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PatchMainInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "todo",
+              "doing",
+              "done"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "PatchThreadInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "auto_approve": {
+            "description": "Allow everything in this thread (needs sandbox isolation)",
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "paused",
+              "running",
+              "archived"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PostMessageInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "maxLength": 100000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "interrupt": {
+            "description": "Interrupt the current turn first",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "content"
         ],
         "type": "object"
       },
@@ -1322,6 +2478,108 @@
         ],
         "type": "object"
       },
+      "QuestionView": {
+        "additionalProperties": false,
+        "properties": {
+          "answer": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "answered_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "asker": {
+            "type": "string"
+          },
+          "audience": {
+            "enum": [
+              "lead",
+              "user"
+            ],
+            "type": "string"
+          },
+          "blocking": {
+            "type": "boolean"
+          },
+          "conversation_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "decided_by": {
+            "type": "string"
+          },
+          "detail": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "question",
+              "approval"
+            ],
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "thread_no": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "conversation_id",
+          "thread_no",
+          "asker",
+          "task_id",
+          "audience",
+          "kind",
+          "text",
+          "options",
+          "detail",
+          "blocking",
+          "answer",
+          "status",
+          "decided_by",
+          "created_at",
+          "answered_at"
+        ],
+        "type": "object"
+      },
       "RandomLookInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -1348,6 +2606,66 @@
         "required": [
           "ok",
           "checks"
+        ],
+        "type": "object"
+      },
+      "RejectInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 20000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
+      "Replay": {
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/ReplayEvent"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/OfficeSnapshot"
+          }
+        },
+        "required": [
+          "snapshot",
+          "events"
+        ],
+        "type": "object"
+      },
+      "ReplayEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "data": {},
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "type",
+          "data"
         ],
         "type": "object"
       },
@@ -1418,6 +2736,26 @@
         "required": [
           "items",
           "next_cursor"
+        ],
+        "type": "object"
+      },
+      "RequestDeliverableInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "brief": {
+            "maxLength": 20000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "brief"
         ],
         "type": "object"
       },
@@ -1560,6 +2898,25 @@
         ],
         "type": "object"
       },
+      "RoleCount": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "format": "int64",
+            "maximum": 8,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "count"
+        ],
+        "type": "object"
+      },
       "RolesBody": {
         "additionalProperties": false,
         "properties": {
@@ -1617,6 +2974,111 @@
         ],
         "type": "object"
       },
+      "Ruleset": {
+        "additionalProperties": false,
+        "properties": {
+          "present": {
+            "type": "boolean"
+          },
+          "recommended": {
+            "additionalProperties": {},
+            "type": "object"
+          }
+        },
+        "required": [
+          "present",
+          "recommended"
+        ],
+        "type": "object"
+      },
+      "SearchMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "conversation_id": {
+            "type": "string"
+          },
+          "message": {
+            "$ref": "#/components/schemas/MessageView"
+          },
+          "thread_no": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "conversation_id",
+          "thread_no",
+          "message"
+        ],
+        "type": "object"
+      },
+      "SearchResult": {
+        "additionalProperties": false,
+        "properties": {
+          "deliverables": {
+            "items": {
+              "$ref": "#/components/schemas/DeliverableView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/SearchMessage"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "threads": {
+            "items": {
+              "$ref": "#/components/schemas/ThreadView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "threads",
+          "messages",
+          "tasks",
+          "deliverables"
+        ],
+        "type": "object"
+      },
+      "SessionBrief": {
+        "additionalProperties": false,
+        "properties": {
+          "node": {
+            "$ref": "#/components/schemas/NodeRef"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "node"
+        ],
+        "type": "object"
+      },
       "SessionView": {
         "additionalProperties": false,
         "properties": {
@@ -1653,6 +3115,18 @@
           "created_at",
           "last_seen_at",
           "expires_at"
+        ],
+        "type": "object"
+      },
+      "SetupPROutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "pr_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "pr_url"
         ],
         "type": "object"
       },
@@ -1694,6 +3168,111 @@
           "version",
           "updated_at",
           "valid"
+        ],
+        "type": "object"
+      },
+      "TaskView": {
+        "additionalProperties": false,
+        "properties": {
+          "assignee": {
+            "type": "string"
+          },
+          "attempt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "claimed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "claimed_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "depends_on": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "finished_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "head_sha": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "instruction": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "main_task_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parent": {
+            "type": "string"
+          },
+          "priority": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "role": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "thread_no": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "thread_no",
+          "main_task_id",
+          "assignee",
+          "role",
+          "claimed_by",
+          "kind",
+          "instruction",
+          "status",
+          "depends_on",
+          "parent",
+          "priority",
+          "attempt",
+          "summary",
+          "branch",
+          "head_sha",
+          "created_at",
+          "claimed_at",
+          "finished_at"
         ],
         "type": "object"
       },
@@ -1747,6 +3326,428 @@
         },
         "required": [
           "temp_password"
+        ],
+        "type": "object"
+      },
+      "ThreadCounts": {
+        "additionalProperties": false,
+        "properties": {
+          "approvals_open": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "main_done": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "main_total": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "questions_open": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tasks_done": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tasks_total": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "waiting": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "waiting",
+          "questions_open",
+          "approvals_open",
+          "tasks_total",
+          "tasks_done",
+          "main_total",
+          "main_done"
+        ],
+        "type": "object"
+      },
+      "ThreadDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "auto_approve": {
+            "type": "boolean"
+          },
+          "base_branch": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "brief": {
+            "type": "string"
+          },
+          "cost_usd_est": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "counts": {
+            "$ref": "#/components/schemas/ThreadCounts"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "lead_last": {
+            "$ref": "#/components/schemas/LeadLast"
+          },
+          "main_tasks": {
+            "items": {
+              "$ref": "#/components/schemas/MainTaskView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/EmployeeBrief"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/MessageView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "no": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "opened_by": {
+            "type": "string"
+          },
+          "pause_reason": {
+            "type": "string"
+          },
+          "pr_number": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "pr_state": {
+            "type": "string"
+          },
+          "pr_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "queue_position": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "waiting",
+              "review",
+              "done",
+              "failed",
+              "paused",
+              "archived"
+            ],
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "no",
+          "title",
+          "brief",
+          "status",
+          "queue_position",
+          "pause_reason",
+          "branch",
+          "base_branch",
+          "pr_number",
+          "pr_url",
+          "pr_state",
+          "summary",
+          "auto_approve",
+          "opened_by",
+          "members",
+          "main_tasks",
+          "counts",
+          "lead_last",
+          "cost_usd_est",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ThreadView": {
+        "additionalProperties": false,
+        "properties": {
+          "auto_approve": {
+            "type": "boolean"
+          },
+          "base_branch": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "brief": {
+            "type": "string"
+          },
+          "cost_usd_est": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "counts": {
+            "$ref": "#/components/schemas/ThreadCounts"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "lead_last": {
+            "$ref": "#/components/schemas/LeadLast"
+          },
+          "main_tasks": {
+            "items": {
+              "$ref": "#/components/schemas/MainTaskView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/EmployeeBrief"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "no": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "opened_by": {
+            "type": "string"
+          },
+          "pause_reason": {
+            "type": "string"
+          },
+          "pr_number": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "pr_state": {
+            "type": "string"
+          },
+          "pr_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "queue_position": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "waiting",
+              "review",
+              "done",
+              "failed",
+              "paused",
+              "archived"
+            ],
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "no",
+          "title",
+          "brief",
+          "status",
+          "queue_position",
+          "pause_reason",
+          "branch",
+          "base_branch",
+          "pr_number",
+          "pr_url",
+          "pr_state",
+          "summary",
+          "auto_approve",
+          "opened_by",
+          "members",
+          "main_tasks",
+          "counts",
+          "lead_last",
+          "cost_usd_est",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "Usage": {
+        "additionalProperties": false,
+        "properties": {
+          "by_employee": {
+            "items": {
+              "$ref": "#/components/schemas/EmployeeUsage"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "cost_usd_est": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/UsageTokens"
+          }
+        },
+        "required": [
+          "cost_usd_est",
+          "tokens",
+          "by_employee"
+        ],
+        "type": "object"
+      },
+      "Usage7d": {
+        "additionalProperties": false,
+        "properties": {
+          "by_day": {
+            "items": {
+              "$ref": "#/components/schemas/DayCost"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "cost_usd_est": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "cost_usd_est",
+          "by_day"
+        ],
+        "type": "object"
+      },
+      "UsageTokens": {
+        "additionalProperties": false,
+        "properties": {
+          "cache_read": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "cache_write": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "input": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "output": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "input",
+          "output",
+          "cache_read",
+          "cache_write"
         ],
         "type": "object"
       },
@@ -1840,6 +3841,34 @@
         ],
         "type": "object"
       },
+      "Waiting": {
+        "additionalProperties": false,
+        "properties": {
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "reviews": {
+            "items": {
+              "$ref": "#/components/schemas/ThreadView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "questions",
+          "reviews"
+        ],
+        "type": "object"
+      },
       "Warning": {
         "additionalProperties": false,
         "properties": {
@@ -1853,6 +3882,38 @@
         "required": [
           "role",
           "message"
+        ],
+        "type": "object"
+      },
+      "Workflow": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "push_branches": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "triggers": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "triggers",
+          "push_branches"
         ],
         "type": "object"
       },
@@ -2377,6 +4438,728 @@
         },
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/api/conversations": {
+      "get": {
+        "operationId": "list-conversations",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "project_id",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "default": "chat",
+              "enum": [
+                "chat",
+                "coordinator",
+                "thread",
+                ""
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LegacyConversation"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "v1 conversations (read only); kind defaults to chat",
+        "tags": [
+          "legacy"
+        ]
+      },
+      "post": {
+        "operationId": "create-conversation",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "v1 endpoint: always 409 legacy_read_only",
+        "tags": [
+          "legacy"
+        ]
+      }
+    },
+    "/api/conversations/{cid}/events": {
+      "get": {
+        "operationId": "conversation-events",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "text/event-stream"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "v1 conversation stream: one snapshot of a finished conversation, then idle",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/api/conversations/{cid}/interrupt": {
+      "post": {
+        "operationId": "interrupt-conversation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/api/conversations/{cid}/mail": {
+      "get": {
+        "operationId": "conversation-mail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MailView"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "legacy"
+        ]
+      }
+    },
+    "/api/conversations/{cid}/messages": {
+      "get": {
+        "operationId": "list-messages",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Message id cursor",
+            "explode": false,
+            "in": "query",
+            "name": "before",
+            "schema": {
+              "description": "Message id cursor",
+              "type": "string"
+            }
+          },
+          {
+            "description": "0 = all (v1 behaviour)",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "description": "0 = all (v1 behaviour)",
+              "format": "int64",
+              "maximum": 1000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "conversations"
+        ]
+      },
+      "post": {
+        "operationId": "post-message",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostMessageInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageView"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Send a message to the conversation's employee (coordinator or thread lead)",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/api/conversations/{cid}/plan": {
+      "get": {
+        "operationId": "conversation-plan",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacyPlanOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "legacy"
+        ]
+      }
+    },
+    "/api/conversations/{cid}/questions": {
+      "get": {
+        "operationId": "list-questions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "default": "all",
+              "enum": [
+                "open",
+                "all",
+                "answered",
+                "cancelled",
+                ""
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/QuestionView"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/api/conversations/{cid}/questions/{qid}/answer": {
+      "post": {
+        "operationId": "answer-question",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "qid",
+            "required": true,
+            "schema": {
+              "maxLength": 16,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuestionView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Answer a question, or decide an approval card (allow / allow_always / deny)",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/api/conversations/{cid}/tasks": {
+      "get": {
+        "operationId": "conversation-tasks",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LegacyTask"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "legacy"
+        ]
+      }
+    },
+    "/api/deliverables/{id}": {
+      "delete": {
+        "operationId": "delete-deliverable",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "deliverables"
+        ]
+      },
+      "patch": {
+        "operationId": "update-deliverable",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchDeliverableInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliverableView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "deliverables"
+        ]
+      }
+    },
+    "/api/employees/{id}": {
+      "get": {
+        "operationId": "get-employee",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmployeeCard"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "office"
+        ]
+      }
+    },
+    "/api/events": {
+      "get": {
+        "operationId": "user-events",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Last-Event-ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "last_event_id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "text/event-stream"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "User event stream (project, node, notice)",
+        "tags": [
+          "events"
         ]
       }
     },
@@ -3591,6 +6374,405 @@
         ]
       }
     },
+    "/api/projects/{pid}/ci/detect": {
+      "get": {
+        "operationId": "ci-detect",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Detection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Workflows, branch coverage, checks permission, ruleset advice",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/projects/{pid}/ci/setup-pr": {
+      "post": {
+        "operationId": "ci-setup-pr",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupPROutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Open a PR adding thread/** and mq/** push triggers",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/projects/{pid}/coordinator": {
+      "get": {
+        "operationId": "get-coordinator",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoordinatorView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "The project coordinator and its conversation (created on first use, no session yet)",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/api/projects/{pid}/deliverables": {
+      "get": {
+        "operationId": "list-deliverables",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "maxLength": 32,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "thread",
+            "schema": {
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliverablePage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "deliverables"
+        ]
+      },
+      "post": {
+        "operationId": "add-deliverable",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewDeliverableInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliverableView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "deliverables"
+        ]
+      }
+    },
+    "/api/projects/{pid}/deliverables/request": {
+      "post": {
+        "operationId": "request-deliverable",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestDeliverableInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageView"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Ask the coordinator to make one (sends 做一个\u003ckind\u003e：\u003cbrief\u003e)",
+        "tags": [
+          "deliverables"
+        ]
+      }
+    },
+    "/api/projects/{pid}/events": {
+      "get": {
+        "operationId": "project-events",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma separated event names (default: all)",
+            "explode": false,
+            "in": "query",
+            "name": "topics",
+            "schema": {
+              "description": "Comma separated event names (default: all)",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only this thread number",
+            "explode": false,
+            "in": "query",
+            "name": "thread",
+            "schema": {
+              "description": "Only this thread number",
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Resume after this seq",
+            "in": "header",
+            "name": "Last-Event-ID",
+            "schema": {
+              "description": "Resume after this seq",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Same as Last-Event-ID for clients that cannot set headers",
+            "explode": false,
+            "in": "query",
+            "name": "last_event_id",
+            "schema": {
+              "description": "Same as Last-Event-ID for clients that cannot set headers",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "text/event-stream"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Project event stream (SSE); id = project seq, Last-Event-ID replays from PostgreSQL",
+        "tags": [
+          "events"
+        ]
+      }
+    },
     "/api/projects/{pid}/memory": {
       "get": {
         "operationId": "list-memory",
@@ -3788,6 +6970,382 @@
         ]
       }
     },
+    "/api/projects/{pid}/office": {
+      "get": {
+        "operationId": "project-office",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfficeSnapshot"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "First paint of the office; continue with the event stream from last_event_id",
+        "tags": [
+          "office"
+        ]
+      }
+    },
+    "/api/projects/{pid}/office/replay": {
+      "get": {
+        "operationId": "project-office-replay",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "thread",
+            "schema": {
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Replay"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "office"
+        ]
+      }
+    },
+    "/api/projects/{pid}/overview": {
+      "get": {
+        "operationId": "project-overview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Overview"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/projects/{pid}/search": {
+      "get": {
+        "operationId": "project-search",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/projects/{pid}/threads": {
+      "get": {
+        "operationId": "list-threads",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma separated statuses",
+            "explode": false,
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "description": "Comma separated statuses",
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "group",
+            "schema": {
+              "enum": [
+                "waiting",
+                "active",
+                "done",
+                ""
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ThreadView"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "threads"
+        ]
+      },
+      "post": {
+        "operationId": "create-thread",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewThreadInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Open a thread directly (skipping the coordinator)",
+        "tags": [
+          "threads"
+        ]
+      }
+    },
+    "/api/projects/{pid}/waiting": {
+      "get": {
+        "operationId": "project-waiting",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Waiting"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Open questions and cards, threads in review",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
     "/api/roles": {
       "get": {
         "operationId": "get-roles",
@@ -3966,6 +7524,48 @@
         ]
       }
     },
+    "/api/sessions/{sid}/stream": {
+      "get": {
+        "operationId": "session-stream",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "text/event-stream"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Live output of one session (not stored)",
+        "tags": [
+          "events"
+        ]
+      }
+    },
     "/api/team": {
       "get": {
         "operationId": "get-team",
@@ -4033,6 +7633,936 @@
         "summary": "v1 compatible; same as PUT /api/roles/yaml",
         "tags": [
           "team"
+        ]
+      }
+    },
+    "/api/threads/{tid}": {
+      "get": {
+        "operationId": "get-thread",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "messages,questions",
+            "explode": false,
+            "in": "query",
+            "name": "include",
+            "schema": {
+              "description": "messages,questions",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadDetail"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "threads"
+        ]
+      },
+      "patch": {
+        "operationId": "update-thread",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchThreadInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "threads"
+        ]
+      }
+    },
+    "/api/threads/{tid}/accept": {
+      "post": {
+        "operationId": "accept-thread",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "threads"
+        ]
+      }
+    },
+    "/api/threads/{tid}/activity": {
+      "get": {
+        "operationId": "list-activity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "before",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "threads"
+        ]
+      }
+    },
+    "/api/threads/{tid}/checks": {
+      "get": {
+        "operationId": "list-checks",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CheckView"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "threads"
+        ]
+      }
+    },
+    "/api/threads/{tid}/mail": {
+      "get": {
+        "operationId": "list-mail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "before",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "threads"
+        ]
+      }
+    },
+    "/api/threads/{tid}/main-tasks": {
+      "get": {
+        "operationId": "list-main-tasks",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MainTaskView"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "threads"
+        ]
+      }
+    },
+    "/api/threads/{tid}/main-tasks/{mid}": {
+      "patch": {
+        "operationId": "update-main-task",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "mid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchMainInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MainTaskView"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "threads"
+        ]
+      }
+    },
+    "/api/threads/{tid}/members": {
+      "get": {
+        "operationId": "list-members",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EmployeeBrief"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "threads"
+        ]
+      }
+    },
+    "/api/threads/{tid}/members/{name}/interrupt": {
+      "post": {
+        "operationId": "interrupt-member",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "threads"
+        ]
+      }
+    },
+    "/api/threads/{tid}/members/{name}/message": {
+      "post": {
+        "operationId": "message-member",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberMessageInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageView"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "threads"
+        ]
+      }
+    },
+    "/api/threads/{tid}/merge-queue": {
+      "get": {
+        "operationId": "list-merge-queue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MergeEntryView"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "threads"
+        ]
+      }
+    },
+    "/api/threads/{tid}/open-pr": {
+      "post": {
+        "operationId": "open-pr",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenPRInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "threads"
+        ]
+      }
+    },
+    "/api/threads/{tid}/reject": {
+      "post": {
+        "operationId": "reject-thread",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "threads"
+        ]
+      }
+    },
+    "/api/threads/{tid}/tasks": {
+      "get": {
+        "operationId": "list-tasks",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma separated statuses",
+            "explode": false,
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "description": "Comma separated statuses",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Plan step id",
+            "explode": false,
+            "in": "query",
+            "name": "main",
+            "schema": {
+              "description": "Plan step id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TaskView"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Task pool board",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/threads/{tid}/tasks/{task}/cancel": {
+      "post": {
+        "operationId": "cancel-task",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "task",
+            "required": true,
+            "schema": {
+              "maxLength": 16,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/threads/{tid}/tasks/{task}/retry": {
+      "post": {
+        "operationId": "retry-task",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "task",
+            "required": true,
+            "schema": {
+              "maxLength": 16,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Put a failed, blocked or cancelled task back into the pool",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/threads/{tid}/usage": {
+      "get": {
+        "operationId": "thread-usage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Usage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "threads"
         ]
       }
     },

@@ -1,0 +1,387 @@
+package delivery
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/ghops"
+	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
+	"github.com/touwaeriol/agent-teams/server/internal/scheduler"
+)
+
+// maxFastForwardRetries rebuilds a trial branch when the thread head moved meanwhile (§8.2 step 4).
+const maxFastForwardRetries = 3
+
+// mergeable task states: the member finished (review/decision) or the lead takes it as it is.
+var mergeable = map[string]bool{"review": true, "decision": true, "running": true, "blocked": true, "claimed": true}
+
+// Enqueue puts a member's task into the thread's merge queue (enqueue_merge).
+func (e *Engine) Enqueue(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task) (core.MergeEntry, int, error) {
+	if !mergeable[task.Status] || task.ClaimedBy == "" {
+		return core.MergeEntry{}, 0, ErrTaskNotReady
+	}
+	branch := orDefault(task.Branch, orchestrator.MemberBranch(t.No, task.ClaimedBy))
+	entry, err := core.InsertMerge(ctx, tx, t.ID, &task.ID, task.ClaimedBy, branch)
+	if err != nil {
+		return entry, 0, err
+	}
+	if !e.orch.HasRepo(ctx, t.ProjectID) {
+		return e.mergedWithoutRepo(ctx, tx, t, task, entry)
+	}
+	if _, err := e.sched.SetStatus(ctx, tx, task, "merging"); err != nil {
+		return entry, 0, err
+	}
+	if err := tx.EmitMerge(ctx, t, entry); err != nil {
+		return entry, 0, err
+	}
+	pos, err := core.QueuePosition(ctx, tx, entry)
+	tx.AfterCommit(func(ctx context.Context) { e.Kick(ctx) })
+	return entry, pos, err
+}
+
+// mergedWithoutRepo: projects without a repository have nothing to merge.
+func (e *Engine) mergedWithoutRepo(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task, entry core.MergeEntry) (core.MergeEntry, int, error) {
+	entry, err := core.UpdateMerge(ctx, tx, entry.ID, map[string]any{"status": "merged"})
+	if err != nil {
+		return entry, 0, err
+	}
+	if _, err := e.sched.Finish(ctx, tx, task, "done"); err != nil {
+		return entry, 0, err
+	}
+	return entry, 0, tx.EmitMerge(ctx, t, entry)
+}
+
+func orDefault(v, d string) string {
+	if v == "" {
+		return d
+	}
+	return v
+}
+
+// Tick processes the head entry of every thread's queue, then pull requests waiting to merge.
+func (e *Engine) Tick(ctx context.Context) {
+	threads, err := core.ThreadsWithActiveMerges(ctx, e.core.Pool)
+	if err != nil {
+		e.log.Warn("merge queue", "err", err)
+		return
+	}
+	for _, id := range threads {
+		if err := e.step(ctx, id); err != nil {
+			e.log.Warn("merge queue step", "thread_id", id, "err", err)
+		}
+	}
+	e.prTick(ctx)
+}
+
+// step advances the thread's first active entry by one state.
+func (e *Engine) step(ctx context.Context, threadID string) error {
+	queue, err := core.MergeQueue(ctx, e.core.Pool, threadID, true)
+	if err != nil || len(queue) == 0 {
+		return err
+	}
+	t, err := core.ThreadByID(ctx, e.core.Pool, threadID)
+	if err != nil {
+		return err
+	}
+	_, repo, err := e.repoOf(ctx, t.ProjectID)
+	if err != nil {
+		return e.fail(ctx, t, queue[0], "项目没有可用的 GitHub 仓库", err)
+	}
+	entry := queue[0]
+	if entry.Status == "ci_running" {
+		return e.checkEntry(ctx, t, repo, entry)
+	}
+	return e.startEntry(ctx, t, repo, entry)
+}
+
+// startEntry builds mq/<no>/<id> from the thread head and merges the member branch into it.
+func (e *Engine) startEntry(ctx context.Context, t core.Thread, repo ghops.Repo, entry core.MergeEntry) error {
+	d, err := core.DeliveryOf(ctx, e.core.Pool, t.ProjectID)
+	if err != nil {
+		return err
+	}
+	if !d.Gates.MergeQueue {
+		return e.directMerge(ctx, t, repo, entry)
+	}
+	head, err := e.gh.RefSHA(ctx, repo, t.Branch)
+	if err != nil {
+		return e.fail(ctx, t, entry, "读取讨论串分支失败", err)
+	}
+	trial := fmt.Sprintf("mq/%d/%s", t.No, entry.ID)
+	_ = e.gh.DeleteRef(ctx, repo, trial)
+	if err := e.gh.CreateRef(ctx, repo, trial, head); err != nil {
+		return e.fail(ctx, t, entry, "创建试合并分支失败", err)
+	}
+	res, err := e.gh.Merge(ctx, repo, trial, entry.HeadBranch, fmt.Sprintf("Merge %s into thread #%d (queue %s)", entry.HeadBranch, t.No, entry.ID))
+	if err != nil || res.Conflict {
+		_ = e.gh.DeleteRef(ctx, repo, trial)
+		return e.mergeProblem(ctx, t, entry, res, err)
+	}
+	return e.toCI(ctx, t, entry, trial, orDefault(res.SHA, head))
+}
+
+func (e *Engine) mergeProblem(ctx context.Context, t core.Thread, entry core.MergeEntry, res ghops.MergeResult, err error) error {
+	if res.Conflict {
+		return e.conflict(ctx, t, entry)
+	}
+	return e.fail(ctx, t, entry, "试合并失败", err)
+}
+
+// directMerge merges the member branch into the thread branch without a trial (merge_queue gate off).
+func (e *Engine) directMerge(ctx context.Context, t core.Thread, repo ghops.Repo, entry core.MergeEntry) error {
+	res, err := e.gh.Merge(ctx, repo, t.Branch, entry.HeadBranch, fmt.Sprintf("Merge %s into thread #%d", entry.HeadBranch, t.No))
+	if err != nil || res.Conflict {
+		return e.mergeProblem(ctx, t, entry, res, err)
+	}
+	return e.merged(ctx, t, repo, entry, res.SHA)
+}
+
+func (e *Engine) toCI(ctx context.Context, t core.Thread, entry core.MergeEntry, trial, sha string) error {
+	return e.core.InTx(ctx, func(tx *core.Tx) error {
+		entry, err := core.UpdateMerge(ctx, tx, entry.ID, map[string]any{"status": "ci_running", "trial_branch": trial,
+			"trial_sha": sha, "attempts": entry.Attempts + 1, "error": ""})
+		if err != nil {
+			return err
+		}
+		return tx.EmitMerge(ctx, t, entry)
+	})
+}
+
+// checkEntry polls CI on the trial head and acts on the verdict.
+func (e *Engine) checkEntry(ctx context.Context, t core.Thread, repo ghops.Repo, entry core.MergeEntry) error {
+	verdict, failed, err := e.ciVerdict(ctx, t, repo, entry.TrialSHA, &entry.ID, entry.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	switch verdict {
+	case CIPass:
+		return e.fastForward(ctx, t, repo, entry)
+	case CIFail:
+		return e.ciFailed(ctx, t, repo, entry, failed, "")
+	case CIMissing:
+		return e.ciFailed(ctx, t, repo, entry, nil, "等待超时，仓库上没有出现任何 CI 检查（项目设置 on_missing=block）")
+	}
+	return nil
+}
+
+// ciVerdict reads the checks of sha, records them and evaluates the project's CI rules.
+// Without checks:read the gate degrades to off and the thread is told once.
+func (e *Engine) ciVerdict(ctx context.Context, t core.Thread, repo ghops.Repo, sha string, queueID *string, since time.Time) (Verdict, []core.CheckView, error) {
+	d, err := core.DeliveryOf(ctx, e.core.Pool, t.ProjectID)
+	if err != nil {
+		return CIPending, nil, err
+	}
+	rules := RulesOf(d)
+	if rules.Mode == "off" {
+		return CIPass, nil, nil
+	}
+	checks, err := e.gh.CheckRuns(ctx, repo, sha)
+	if errors.Is(err, ghops.ErrNoChecks) {
+		return CIPass, nil, e.degraded(ctx, t)
+	}
+	if err != nil {
+		return CIPending, nil, err
+	}
+	if err := e.recordChecks(ctx, t, queueID, sha, checks); err != nil {
+		return CIPending, nil, err
+	}
+	v, failed := Evaluate(checks, rules, e.now().Sub(since))
+	return v, failed, nil
+}
+
+func (e *Engine) recordChecks(ctx context.Context, t core.Thread, queueID *string, sha string, checks []core.CheckView) error {
+	if len(checks) == 0 {
+		return nil
+	}
+	return e.core.InTx(ctx, func(tx *core.Tx) error {
+		if err := core.SaveChecks(ctx, tx, t.ProjectID, &t.ID, queueID, sha, checks); err != nil {
+			return err
+		}
+		_, err := tx.Emit(ctx, t.ProjectID, &t.ID, core.EvCI, "", map[string]any{"thread_no": t.No, "sha": sha, "checks": checks})
+		return err
+	})
+}
+
+// degradedNote is posted once per thread when CI cannot be read.
+const degradedNote = "CI 关卡已降级为 off：平台的 GitHub App 没有 checks:read 权限（请管理员在 GitHub 上给 App 加权限并批准），合并不等待检查。"
+
+func (e *Engine) degraded(ctx context.Context, t core.Thread) error {
+	var n int
+	if err := e.core.Pool.QueryRow(ctx, `SELECT count(*) FROM at_messages WHERE conversation_id = $1 AND meta->>'notice' = 'ci_degraded'`,
+		t.ID).Scan(&n); err != nil || n > 0 {
+		return err
+	}
+	return e.core.InTx(ctx, func(tx *core.Tx) error {
+		m, err := core.InsertMessage(ctx, tx, core.NewMessage{ConversationID: t.ID, Role: "system", Author: "platform", Kind: "note",
+			Content: degradedNote, Meta: map[string]any{"notice": "ci_degraded", "thread_no": t.No}})
+		if err != nil {
+			return err
+		}
+		return tx.EmitMessage(ctx, t.ProjectID, &t.ID, m)
+	})
+}
+
+// fastForward moves the thread branch to the green trial head (422 = thread moved: rebuild).
+func (e *Engine) fastForward(ctx context.Context, t core.Thread, repo ghops.Repo, entry core.MergeEntry) error {
+	err := e.gh.UpdateRef(ctx, repo, t.Branch, entry.TrialSHA, false)
+	if ghops.Status(err) == 422 && entry.Attempts < maxFastForwardRetries {
+		_ = e.gh.DeleteRef(ctx, repo, entry.TrialBranch)
+		return e.requeue(ctx, t, entry)
+	}
+	if err != nil {
+		return e.fail(ctx, t, entry, "快进讨论串分支失败", err)
+	}
+	return e.merged(ctx, t, repo, entry, entry.TrialSHA)
+}
+
+func (e *Engine) requeue(ctx context.Context, t core.Thread, entry core.MergeEntry) error {
+	return e.core.InTx(ctx, func(tx *core.Tx) error {
+		entry, err := core.UpdateMerge(ctx, tx, entry.ID, map[string]any{"status": "queued", "trial_branch": "", "trial_sha": ""})
+		if err != nil {
+			return err
+		}
+		return tx.EmitMerge(ctx, t, entry)
+	})
+}
+
+// merged finishes an entry: trial branch gone, task done (and the original task of a fix), lead told.
+func (e *Engine) merged(ctx context.Context, t core.Thread, repo ghops.Repo, entry core.MergeEntry, sha string) error {
+	if entry.TrialBranch != "" {
+		_ = e.gh.DeleteRef(ctx, repo, entry.TrialBranch)
+	}
+	return e.core.InTx(ctx, func(tx *core.Tx) error {
+		entry, err := core.UpdateMerge(ctx, tx, entry.ID, map[string]any{"status": "merged", "head_sha": sha})
+		if err != nil {
+			return err
+		}
+		if err := tx.EmitMerge(ctx, t, entry); err != nil {
+			return err
+		}
+		task, err := e.finishTasks(ctx, tx, entry)
+		if err != nil {
+			return err
+		}
+		return e.sched.NotifyLead(ctx, tx, t, fmt.Sprintf("[Merge · %s · %s · merged] %s 已合并进 %s", task.ID, entry.Employee, entry.HeadBranch, t.Branch))
+	})
+}
+
+func (e *Engine) finishTasks(ctx context.Context, tx *core.Tx, entry core.MergeEntry) (core.Task, error) {
+	if entry.TaskID == nil {
+		return core.Task{}, nil
+	}
+	task, err := core.LockTask(ctx, tx, entry.ThreadID, *entry.TaskID)
+	if err != nil {
+		return task, ignoreMissing(err)
+	}
+	if task, err = e.sched.Finish(ctx, tx, task, "done"); err != nil {
+		return task, err
+	}
+	if task.Kind != "fix" || task.Parent == "" {
+		return task, nil
+	}
+	parent, err := core.LockTask(ctx, tx, entry.ThreadID, task.Parent)
+	if err != nil || parent.Finished() {
+		return task, ignoreMissing(err)
+	}
+	_, err = e.sched.Finish(ctx, tx, parent, "done")
+	return task, err
+}
+
+// conflict marks the entry and gives the member a fix task (§8.2 step 2).
+func (e *Engine) conflict(ctx context.Context, t core.Thread, entry core.MergeEntry) error {
+	text := fmt.Sprintf("把讨论串分支 %s 合并（或 rebase）进你的分支 %s 并解决冲突，提交后调用 complete_task。", t.Branch, entry.HeadBranch)
+	return e.problem(ctx, t, entry, "conflict", "合并冲突", text)
+}
+
+// ciFailed marks the entry and creates a fix task with the failed checks (§8.2 step 5).
+func (e *Engine) ciFailed(ctx context.Context, t core.Thread, repo ghops.Repo, entry core.MergeEntry, failed []core.CheckView, reason string) error {
+	_ = e.gh.DeleteRef(ctx, repo, entry.TrialBranch)
+	var b strings.Builder
+	b.WriteString("合并进讨论串分支前 CI 没有通过，请修复后提交并调用 complete_task。\n")
+	if reason != "" {
+		b.WriteString(reason + "\n")
+	}
+	for _, c := range failed {
+		fmt.Fprintf(&b, "- %s：%s %s\n  %s\n", c.Name, orDefault(c.Conclusion, c.Status), c.URL, clip(c.Summary, 400))
+	}
+	return e.problem(ctx, t, entry, "ci_failed", "CI 失败", b.String())
+}
+
+func (e *Engine) problem(ctx context.Context, t core.Thread, entry core.MergeEntry, status, label, instruction string) error {
+	return e.core.InTx(ctx, func(tx *core.Tx) error {
+		entry, err := core.UpdateMerge(ctx, tx, entry.ID, map[string]any{"status": status, "error": label})
+		if err != nil {
+			return err
+		}
+		if err := tx.EmitMerge(ctx, t, entry); err != nil {
+			return err
+		}
+		fix, err := e.fixTask(ctx, tx, t, entry, instruction)
+		if err != nil {
+			return err
+		}
+		return e.sched.NotifyLead(ctx, tx, t, fmt.Sprintf("[Merge · %s · %s] %s 的合并没有完成，已派修复任务 %s。", label, entry.Employee, entry.HeadBranch, fix))
+	})
+}
+
+// fixTask blocks the original task and assigns a fix task to the same member.
+func (e *Engine) fixTask(ctx context.Context, tx *core.Tx, t core.Thread, entry core.MergeEntry, instruction string) (string, error) {
+	var mainID, parent string
+	if entry.TaskID != nil {
+		task, err := core.LockTask(ctx, tx, t.ID, *entry.TaskID)
+		if err != nil {
+			return "", err
+		}
+		if _, err := e.sched.SetStatus(ctx, tx, task, "blocked"); err != nil {
+			return "", err
+		}
+		parent = task.ID
+		if task.MainTaskID != nil {
+			mainID = *task.MainTaskID
+		}
+	}
+	fix, _, err := e.sched.Assign(ctx, tx, scheduler.Assignment{Thread: t, Assignee: entry.Employee, Instruction: instruction,
+		Main: mainID, Kind: "fix", Parent: parent, CreatedBy: "platform", Priority: 50})
+	return fix.ID, err
+}
+
+// fail marks an entry failed for a non-merge reason (GitHub unavailable, no repo) and tells the lead.
+func (e *Engine) fail(ctx context.Context, t core.Thread, entry core.MergeEntry, label string, cause error) error {
+	if ghops.Status(cause) == 503 || ghops.Status(cause) >= 500 {
+		return cause // GitHub unavailable: retry on the next tick
+	}
+	reason := label + "：" + cause.Error()
+	return e.core.InTx(ctx, func(tx *core.Tx) error {
+		entry, err := core.UpdateMerge(ctx, tx, entry.ID, map[string]any{"status": "cancelled", "error": clip(reason, 500)})
+		if err != nil {
+			return err
+		}
+		if err := tx.EmitMerge(ctx, t, entry); err != nil {
+			return err
+		}
+		return e.sched.NotifyLead(ctx, tx, t, fmt.Sprintf("[Merge · %s] %s", entry.Employee, reason))
+	})
+}
+
+// Run is the merge/PR loop (advisory-lock leader), woken by hints and every PollInterval.
+func (e *Engine) Run(ctx context.Context) {
+	hints, cancel := e.hub.Subscribe(mergeChannel)
+	defer cancel()
+	scheduler.RunAsLeader(ctx, e.core.Pool, "agent-teams:merge", 5*time.Second, func(ctx context.Context) {
+		t := time.NewTicker(e.PollInterval)
+		defer t.Stop()
+		for {
+			e.Tick(ctx)
+			select {
+			case <-ctx.Done():
+				return
+			case <-hints:
+			case <-t.C:
+			}
+		}
+	})
+}

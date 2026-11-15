@@ -5,6 +5,7 @@ go 1.26.0
 replace github.com/touwaeriol/agent-teams/protocol => ../protocol/gen/go
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/danielgtaylor/huma/v2 v2.40.0
 	github.com/fernet/fernet-go v0.0.0-20240119011108-303da6aec611
 	github.com/fsnotify/fsnotify v1.10.1

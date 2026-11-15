@@ -1,0 +1,74 @@
+package engine
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+
+	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/platform"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
+)
+
+// Hooks implements platform.Hooks for the REST layer.
+type Hooks struct{ e *Engine }
+
+var _ platform.Hooks = (*Hooks)(nil)
+
+// ProjectCreated delivers first_message to the (new) coordinator.
+func (h *Hooks) ProjectCreated(ctx context.Context, p store.Project, firstMessage string) error {
+	if strings.TrimSpace(firstMessage) == "" {
+		return nil
+	}
+	_, conv, err := h.e.Orch.EnsureCoordinator(ctx, p.UserID, p.ID)
+	if err != nil {
+		return err
+	}
+	_, err = h.e.Orch.PostUserMessage(ctx, p.UserID, conv, firstMessage, false, nil)
+	return err
+}
+
+// ProjectDeleting closes the project's sessions and purges its directories on the nodes.
+func (h *Hooks) ProjectDeleting(ctx context.Context, _ string, projectID string) error {
+	return h.e.Core.InTx(ctx, func(tx *core.Tx) error {
+		live, err := core.ProjectLiveSessions(ctx, tx, projectID)
+		if err != nil {
+			return err
+		}
+		for _, s := range live {
+			if err := h.e.Orch.CloseSession(ctx, tx, s, "employee_removed"); err != nil {
+				return err
+			}
+		}
+		return h.e.Delivery.Purge(ctx, tx, projectID)
+	})
+}
+
+// UserCutOff closes every session of the user and cancels the questions they wait on.
+func (h *Hooks) UserCutOff(ctx context.Context, userID string) error {
+	return h.e.Core.InTx(ctx, func(tx *core.Tx) error {
+		live, err := core.UserLiveSessions(ctx, tx, userID)
+		if err != nil {
+			return err
+		}
+		for _, s := range live {
+			if err := h.e.Orch.CloseSession(ctx, tx, s, "employee_removed"); err != nil {
+				return err
+			}
+		}
+		_, err = tx.Exec(ctx, `UPDATE at_questions q SET status = 'cancelled', decided_by = 'system:user_cutoff', answered_at = now()
+			FROM at_projects p WHERE p.id = q.project_id AND p.user_id = $1 AND q.status = 'open'`, userID)
+		return err
+	})
+}
+
+// NodeDeleting moves the node's employees off it (fresh sessions with a handoff on the next message).
+func (h *Hooks) NodeDeleting(ctx context.Context, _ string, nodeID string) error {
+	h.e.Gateway.Disconnect(ctx, nodeID, "node deleted")
+	return h.e.Core.InTx(ctx, func(tx *core.Tx) error { return h.e.Orch.NodeRemoved(ctx, tx, nodeID) })
+}
+
+// GitHubEvent forwards verified webhooks to delivery.
+func (h *Hooks) GitHubEvent(ctx context.Context, event string, payload json.RawMessage) error {
+	return h.e.Delivery.GitHubEvent(ctx, event, payload)
+}

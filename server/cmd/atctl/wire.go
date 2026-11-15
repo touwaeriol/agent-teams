@@ -1,22 +1,42 @@
 package main
 
 import (
+	"context"
+
+	"github.com/touwaeriol/agent-teams/server/internal/auth"
 	"github.com/touwaeriol/agent-teams/server/internal/config"
+	"github.com/touwaeriol/agent-teams/server/internal/engine"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
+	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
+	"github.com/touwaeriol/agent-teams/server/internal/orchapi"
 )
 
 // wire is the one place where the orchestration engines plug into the HTTP
-// server: set d.Nodes (node gateway registry), d.Events (SSE publisher),
-// d.Hooks, and append d.Extensions that mount /nodes/connect, thread APIs and
-// SSE streams. serve calls it with live dependencies; openapi calls it with
-// d.Store == nil, so wiring must only build objects and register routes,
-// never touch the database or the network.
-func wire(d httpapi.Deps) httpapi.Deps {
-	return d
+// server: it sets d.Nodes (node gateway registry), d.Events (SSE publisher),
+// d.Hooks, and appends the extension that mounts /nodes/connect, the thread
+// APIs and SSE streams. serve calls it with live dependencies and runs the
+// returned start function; openapi calls it with d.Store == nil, so wiring
+// then only registers routes and never touches the database or the network.
+func wire(d httpapi.Deps) (httpapi.Deps, func(context.Context), error) {
+	if d.Store == nil {
+		d.Extensions = append(d.Extensions, orchapi.New(nil, nil).Register)
+		return d, func(context.Context) {}, nil
+	}
+	e, err := engine.New(engine.Deps{Store: d.Store, KV: d.KV, GitHub: d.GitHub, Tokens: d.Tokens,
+		Box: auth.NewSecretBox(d.Config.SecretKeys...), Office: d.Office, Log: d.Log, Gateway: nodegw.Config{Validate: true}})
+	if err != nil {
+		return d, nil, err
+	}
+	d.Nodes, d.Events, d.Hooks = e.Gateway, e.Events, e.Hooks()
+	d.Extensions = append(d.Extensions, orchapi.New(e, d.Office).Register)
+	return d, e.Start, nil
 }
 
 // openAPIDocument builds the server exactly as serve does, without I/O, and renders the document.
 func openAPIDocument() ([]byte, error) {
-	srv := httpapi.New(wire(httpapi.Deps{Config: config.Config{PublicURL: "http://localhost:3001"}}))
-	return srv.OpenAPI()
+	d, _, err := wire(httpapi.Deps{Config: config.Config{PublicURL: "http://localhost:3001"}})
+	if err != nil {
+		return nil, err
+	}
+	return httpapi.New(d).OpenAPI()
 }

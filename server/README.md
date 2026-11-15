@@ -5,10 +5,10 @@ Spec: `docs/v2/architecture.md` (§3.1, §4, §5.1, §10, §12, §14), `docs/v2/
 One-shot cut-over (architecture.md §14 note): there is no Python proxy, no `/internal/*`
 endpoints and no protocol-1 support. v2 reads the v1 data in place.
 
-This package is the foundation: accounts, admin, projects, Git connections and the GitHub
-App, nodes, role templates, office layouts, the node installer and the web app. Orchestration
-(node gateway, orchestrator, scheduler, tools, approvals, status/events/SSE, delivery) plugs
-in through the extension points below.
+The foundation (accounts, admin, projects, Git connections and the GitHub App, nodes, role
+templates, office layouts, the node installer and the web app) and the orchestration engines
+(node gateway, orchestrator, scheduler, tools, approvals, status/events/SSE, delivery) that
+plug into it through the extension points below; see "Orchestration" at the end.
 
 ## Layout
 
@@ -29,6 +29,25 @@ internal/roles/       role templates: validation, defaults, YAML view, v1 at_tea
 internal/platform/    extension interfaces (NodeRegistry, Events, Hooks) + no-op defaults
 internal/httpapi/     chi + huma v2 routes, session/CSRF middleware, install-node.sh, SPA
 internal/testdb/      fresh database per test from TEST_DATABASE_URL
+  orchestration (wired in cmd/atctl/wire.go through internal/engine):
+internal/core/        orchestration data layer: rows, views (api.md §2), Tx with the project
+                      event seq (at_events ∪ at_status_events), after-commit hints, savepoints
+internal/fanout/      realtime hints: local subscribers + Valkey PSUBSCRIBE relay
+internal/nodegw/      WS /nodes/connect: auth, hello/welcome, outbox (at_node_commands) with
+                      seq/ack/replay/expiry/superseded, inbound dedup + ack, ownership checks
+  nodetest/           fake daemon (protocol 2 over a real WebSocket) for tests
+internal/status/      employee state machine (§11.3), debounce, at_employee_status
+internal/orchestrator/ coordinator, threads (limit/queue/pause), sessions (open/release/
+                      resume/handoff/reconcile), session.open per tier (§6.1), prompts + memory
+internal/scheduler/   task pool: claim by role (SKIP LOCKED), gates, retries, nudges, plan ticks
+internal/approvals/   policy order (deny list → skip → thread auto → rules → card), answers
+internal/toolsvc/     all 28 platform tools, idempotent tool.call, blocking calls
+internal/delivery/    push jobs, merge queue (trial branches, CI, fast-forward), PR, accept,
+                      cleanup, deliverables, cred.request, CI detection / setup PR
+internal/ghops/       project-scoped GitHub REST (narrowed App tokens or PAT)
+internal/events/      SSE: project/user streams with Last-Event-ID replay, session live output
+internal/orchapi/     REST + SSE routes of api.md §1, §3.2–3.5, §3.11, §3.13
+internal/engine/      composition, node message router, platform.Hooks; end-to-end tests
 ```
 
 ## Commands
@@ -163,3 +182,50 @@ are created by the migrations here; their queries belong to the orchestration pa
 - `node_release` in admin settings is omitted (not `null`) when unset; PATCH bodies clear nullable
   numbers with `clear_*` flags as in v1 (`clear_max_nodes`, `clear_max_active_sessions`, …).
 - Role `sort` is the position in the list on `PUT /api/roles`.
+
+## Orchestration
+
+`cmd/atctl/wire.go` builds `engine.New(...)` and sets `Deps.Nodes` (the gateway), `Deps.Events`
+(the event hub), `Deps.Hooks` and the `orchapi` extension; `serve` runs `engine.Start` (Valkey
+relay, scheduler loop, merge/PR loop, approval timeout sweep — the two loops run only in the
+replica holding their PostgreSQL advisory lock).
+
+Flow of a request (all state in PostgreSQL, node commands through the outbox):
+
+```
+POST /api/conversations/{coordinator}/messages
+  → orchestrator.Deliver: message + session.open(first_message) on the least loaded node
+  ← session.opened → tool check (§10.2) → session.release
+  ← tool.call open_thread → thread (queued) + employees from the role snapshot → running
+  → lead: git.prepare + session.open(brief)            ← tool.call update_plan / assign_task
+  → scheduler claims t1 for an idle dev → session.open/send([Task t1 …]) ← session.delivered → running
+  ← approval.request → approvals policy → card (SSE question) → POST …/answer → approval.resolve
+  ← tool.call complete_task → git.push job ← git.result → task review → lead "[Task t1 · dev-1 · done]"
+  ← tool.call enqueue_merge → merge queue: mq/<no>/<id> trial merge → CI → fast-forward → done
+  ← tool.call open_pr → PR + deliverable → review → accept → merge → done → cleanup
+```
+
+Tests: `go test ./internal/engine` runs the control plane against PostgreSQL/Valkey with the
+fake daemon (`nodegw/nodetest`) and a fake GitHub: `TestThreadEndToEnd` (user message →
+coordinator `open_thread` → lead plan/assign → member claims, approval card answered through
+the API, `complete_task` → events on SSE), `TestDeliveryEndToEnd` (push jobs, merge queue,
+conflict → fix task, PR, acceptance, cleanup, credentials), gateway rules (4401/4426/4409,
+outbox replay, epoch change, inbound dedup, ownership), blocking questions, reconcile after a
+daemon restart, SSE replay, nudges, thread limit and pause, and the REST surface.
+
+Deviations and limits of the orchestration side:
+
+- `decided_by` for the built-in policies is `policy:rule:builtin-deny-list` and
+  `policy:rule:builtin-skip-permissions`: the protocol schema only allows
+  `user:… | policy:thread_auto | policy:rule:… | policy:timeout`.
+- Task flow with a repository: `complete_task` → `review` (a reviewer role with `gate: review`
+  gets a review task; else the lead is told) → `enqueue_merge` → `merging` → `done`. Without a
+  repository `complete_task` finishes the task. Merge conflicts and red CI create a `fix` task for
+  the member and block the original task; merging the fix finishes both.
+- Extra migration `00040_orchestration.sql`: `at_node_commands.env_id/meta`, `at_tasks.nudges/
+  created_by`, `at_user_events` (user stream replay), two indexes.
+- Session live output (`stream.delta`) is relayed only inside the replica holding the node link.
+- Users without role templates get `roles.Defaults` (a v1 `at_teams` team is converted only by
+  `GET /api/roles`, as before).
+- `/metrics`, OTel, Codex-specific approval decisions beyond allow/deny/allow_always and the
+  geometric office checks are not implemented.

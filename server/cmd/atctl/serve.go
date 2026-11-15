@@ -49,8 +49,13 @@ func serve(ctx context.Context, _ []string) error {
 	gh := github.NewClient()
 	box := auth.NewSecretBox(cfg.SecretKeys...)
 	tokens := github.NewTokens(gh, github.NewApps(db, box), cache, box)
-	srv := httpapi.New(wire(httpapi.Deps{Config: cfg, Store: db, KV: cache, GitHub: gh, Tokens: tokens, Office: layouts,
-		Log: log, Version: migrations.Latest}))
+	deps, start, err := wire(httpapi.Deps{Config: cfg, Store: db, KV: cache, GitHub: gh, Tokens: tokens, Office: layouts,
+		Log: log, Version: migrations.Latest})
+	if err != nil {
+		return err
+	}
+	srv := httpapi.New(deps)
+	start(ctx)
 	go maintain(ctx, db, log)
 	return listen(ctx, cfg, srv.Handler(), log)
 }
