@@ -7,9 +7,8 @@ import { git } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import { keys, useConnections, useGitHubApp, useMe, useRepos } from "@/api/queries";
 import type { GitConnectionView, RepoItem } from "@/api/views";
-import { Callout, ConfirmAction, EmptyState, Field, FormDialog, Loading } from "@/components/common";
+import { Callout, ConfirmAction, EmptyState, Loading } from "@/components/common";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { NavButton } from "@/components/shell/Shell";
 import { useFlash } from "@/lib/flash";
 
@@ -32,7 +31,6 @@ export function GitHubPage() {
   const me = useMe();
   const app = useGitHubApp();
   const connections = useConnections();
-  const [pasting, setPasting] = useState(false);
   useFlash({ connected: (name) => `已连接：${name}` }, () => qc.invalidateQueries({ queryKey: keys.connections }));
   const installUrl = app.data?.configured ? app.data.install_url : undefined;
   return (
@@ -47,9 +45,6 @@ export function GitHubPage() {
             </div>
           </div>
           <span className="flex gap-2">
-            <Button variant="ghost" onClick={() => setPasting(true)}>
-              粘贴令牌
-            </Button>
             {installUrl && (
               <Button asChild className="h-10">
                 <a href={installUrl}>
@@ -62,7 +57,7 @@ export function GitHubPage() {
         </header>
         {app.data && !app.data.configured && (
           <Callout tone="warn">
-            平台的 GitHub App 还没创建，“连接 GitHub”暂时不可用。{me.data?.role === "admin" ? <Link to="/setup/github">去创建</Link> : "请联系管理员；也可以先粘贴一个访问令牌。"}
+            平台的 GitHub App 还没创建，“连接 GitHub”暂时不可用。{me.data?.role === "admin" ? <Link to="/setup/github">去创建</Link> : "请联系管理员。"}
           </Callout>
         )}
         {connections.isLoading && <Loading />}
@@ -71,7 +66,6 @@ export function GitHubPage() {
           <ConnectionCard key={c.id} connection={c} />
         ))}
       </div>
-      <PasteToken open={pasting} onOpenChange={setPasting} />
     </main>
   );
 }
@@ -84,7 +78,7 @@ function ConnectionCard({ connection }: { connection: GitConnectionView }) {
   const items = sortRepos(repos.data?.items ?? []);
   const shown = all ? items : items.slice(0, 4);
   const more = repos.data?.next_cursor ? "+" : "";
-  const kind = connection.kind === "app" ? (connection.installation_settings_url?.includes("/organizations/") ? "组织" : "个人账号") : "访问令牌";
+  const kind = connection.kind === "app" ? (connection.installation_settings_url?.includes("/organizations/") ? "组织" : "个人账号") : "个人账号";
   const date = new Date(connection.created_at).toLocaleDateString("zh-CN", { month: "long", day: "numeric" });
   return (
     <article className="flex flex-col gap-3 rounded-[14px] border bg-panel px-5 py-[18px]">
@@ -143,29 +137,5 @@ function ConnectionCard({ connection }: { connection: GitConnectionView }) {
         {repos.data && items.length === 0 && <span className="px-3 py-2.5 text-[13px] text-muted-foreground">这个连接看不到任何仓库。</span>}
       </div>
     </article>
-  );
-}
-
-function PasteToken({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
-  const [token, setToken] = useState("");
-  const [name, setName] = useState("");
-  const add = useAction(() => git.addToken({ token: token.trim(), name: name.trim() || undefined, provider: "github" }), {
-    invalidate: [keys.connections],
-    success: (c) => `已连接：${c.login}`,
-    onSuccess: () => {
-      setToken("");
-      setName("");
-      onOpenChange(false);
-    },
-  });
-  return (
-    <FormDialog open={open} onOpenChange={onOpenChange} title="粘贴访问令牌" description="GitHub 个人访问令牌（fine-grained 或 classic，需要仓库读写权限）。加密保存，只在运行时下发给员工。" submitLabel="连接" busy={add.isPending} disabled={!token.trim()} onSubmit={() => add.mutate()}>
-      <Field label="令牌">
-        <Input type="password" value={token} onChange={(e) => setToken(e.target.value)} autoFocus className="font-mono" placeholder="github_pat_…" />
-      </Field>
-      <Field label="名称（可选）">
-        <Input value={name} onChange={(e) => setName(e.target.value)} />
-      </Field>
-    </FormDialog>
   );
 }

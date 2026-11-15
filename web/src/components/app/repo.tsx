@@ -53,7 +53,7 @@ export function reposPayload(list: RepoRef[]): RepoRef[] {
 }
 
 function connectionLabel(c: GitConnectionView): string {
-  return c.kind === "app" ? `${c.login}（GitHub App）` : `${c.name || c.login}（令牌）`;
+  return `GitHub · ${c.login || c.name}`;
 }
 
 export function RepoList({ value, onChange, currentProject }: { value: RepoRef[]; onChange: (list: RepoRef[]) => void; currentProject?: string }) {
