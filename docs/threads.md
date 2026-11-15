@@ -20,14 +20,14 @@ coordinator: {node: rc-erio, model: "", instructions: ""}          # 可选，�
 lead:        {node: rc-erio, model: "", instructions: "", type: claude_code}
 members:
   - {role: dev, title: 开发, count: 2, nodes: [rc-erio, cvp], type: claude_code,
-     description: "...", instructions: "...", skip_permissions: false, can_delegate: false,
+     description: "...", instructions: "...", permission_mode: auto, can_delegate: false,
      allowed_tools: [], model: ""}
-  - {role: qa, title: 测试, count: 1, nodes: [cvp], type: codex, sandbox: workspace-write, skip_permissions: false}
+  - {role: qa, title: 测试, count: 1, nodes: [cvp], type: codex, sandbox: workspace-write, permission_mode: ask}
 ```
 
 - 旧格式（`leader` + `employees`）仍能读：自动转成 lead = leader 那个员工，其余每人一个 `count: 1` 的岗位（role = 原名字）。保存时写新格式。
 - 实例化：讨论串开工时，每个岗位按 `count` 生成 `<role>-<n>`，节点在 `nodes` 里轮流分配。
-- `skip_permissions: true`：Claude Code 用 `--permission-mode bypassPermissions` 且不挂 `--permission-prompt-tool`；Codex 用 `--sandbox danger-full-access`。
+- `permission_mode`：`auto`（默认，Claude Code 的判断模型自动放行或拦下，拿不准的走审批；Codex `on-request`）、`ask`（每次都问；Codex `untrusted`）、`bypass`（Claude Code `bypassPermissions`，Codex `danger-full-access`，只在隔离节点生效，否则按 `auto`）。旧的 `skip_permissions: true` 读作 `bypass`。详见 v2/architecture.md §9.1。
 
 ## 数据
 

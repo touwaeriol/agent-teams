@@ -9,12 +9,12 @@ import { useAction } from "@/api/mutations";
 import { keys, useActivity, useDeliverables, useQuestions, useTasks } from "@/api/queries";
 import type { ActivityView, DeliverableView, EmployeeBrief, QuestionView, TaskView, ThreadView } from "@/api/views";
 import { Loading } from "@/components/common";
-import { activityLine, cardsByAsker, elapsed, isWorking, stateLabel, taskProgress, threadActive, waitingReason } from "@/lib/live";
+import { activityLine, askingLabel, cardsByAsker, elapsed, isWorking, taskProgress, threadActive, waitingReason } from "@/lib/live";
 import { deliverableHref } from "@/lib/library";
-import { deliverableKind, leadOf, mainProgress, memberTone, openForUser, RUNTIME_LABEL, taskLook, taskTitle, threadLook, TIER_LABEL } from "@/lib/present";
+import { approvalCommand, approvalHistory, approvalVerdict, deliverableKind, leadOf, mainProgress, memberTone, openForUser, RUNTIME_LABEL, taskLook, taskTitle, threadLook, TIER_LABEL } from "@/lib/present";
 import { clock, cn, timeAgo } from "@/lib/utils";
 import { useAttachments } from "./attachments";
-import { Bar, CheckMark, Composer, Dot, LiveDot, StatusPill } from "./bits";
+import { Bar, CheckMark, Composer, LiveDot, StateMark, StatusPill } from "./bits";
 import { ReviewCard, WaitingCard } from "./cards";
 import { DeliverableThumb } from "./DeliverableThumb";
 import { ThreadMenu } from "./ThreadMenu";
@@ -77,7 +77,7 @@ export function ThreadDetail({ pid, thread, tab, onTab, onBack, fullHref }: Deta
         ))}
       </nav>
       <div className="scroll-thin flex flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
-        {tab === "progress" && (questions.isLoading ? <Loading className="py-6" /> : <ProgressTab thread={thread} open={open} />)}
+        {tab === "progress" && (questions.isLoading ? <Loading className="py-6" /> : <ProgressTab thread={thread} open={open} all={questions.data} />)}
         {tab === "tasks" && <TasksTab thread={thread} />}
         {tab === "deliverables" && <DeliverablesTab pid={pid} items={mine} loading={deliverables.isLoading} />}
         {tab === "members" && <MembersTab thread={thread} open={open} />}
@@ -107,7 +107,7 @@ function DetailHeader({ thread, onBack, fullHref }: { thread: ThreadView; onBack
             #{thread.no} {thread.title}
           </span>
         </nav>
-        <StatusPill tone={look.tone} label={look.label} className="shrink-0" />
+        <StatusPill tone={look.tone} label={look.label} spin={look.spin} className="shrink-0" />
         <Link to={fullHref} aria-label="全屏打开讨论串" className="flex size-8 shrink-0 items-center justify-center rounded-lg text-[#4A4843] hover:bg-background">
           <Maximize2 className="size-[15px]" strokeWidth={1.8} />
         </Link>
@@ -124,7 +124,7 @@ function DetailHeader({ thread, onBack, fullHref }: { thread: ThreadView; onBack
 }
 
 /** 进度: why it waits, each employee's live line (cards inline), the activity feed, the lead's latest. */
-function ProgressTab({ thread, open }: { thread: ThreadView; open: QuestionView[] }) {
+function ProgressTab({ thread, open, all }: { thread: ThreadView; open: QuestionView[]; all?: QuestionView[] }) {
   const reason = waitingReason(thread, open);
   const byAsker = cardsByAsker(open);
   const names = new Set(thread.members.map((m) => m.name));
@@ -148,6 +148,7 @@ function ProgressTab({ thread, open }: { thread: ThreadView; open: QuestionView[
         ))}
       </section>
       <ActivityFeed thread={thread} />
+      <ApprovalHistory questions={all} />
       <section className="flex flex-col gap-1.5">
         <span className="text-xs text-muted-foreground">组长最近说</span>
         <p className="text-[13px] leading-[22px]">{thread.lead_last?.text || "还没有汇报。"}</p>
@@ -164,10 +165,10 @@ function MemberLive({ thread, member, card, cards, leadName }: { thread: ThreadV
   return (
     <div className={cn("flex flex-col gap-2 rounded-lg px-2.5 py-2", asking ? "bg-[#FFF9F4]" : "bg-background")}>
       <span className="flex min-w-0 items-center gap-2 text-[13px]">
-        <LiveDot color={tone} on={working || asking} />
+        <LiveDot color={tone} on={working} />
         <span className="font-mono">{member.name}</span>
         <span className="text-xs" style={{ color: tone }}>
-          {asking ? "等你审批" : stateLabel(member)}
+          {askingLabel(member, asking)}
         </span>
         {member.status?.since && (working || asking) && <span className="ml-auto whitespace-nowrap text-[11px] text-muted-foreground">{elapsed(member.status.since, now)}</span>}
       </span>
@@ -176,6 +177,29 @@ function MemberLive({ thread, member, card, cards, leadName }: { thread: ThreadV
         <WaitingCard key={q.id} cid={thread.id} pid={thread.project_id} question={q} variant="soft" leadName={leadName} />
       ))}
     </div>
+  );
+}
+
+/** 审批记录: permission requests the lead is judging or someone settled, with who decided. */
+export function ApprovalHistory({ questions }: { questions?: QuestionView[] }) {
+  const items = approvalHistory(questions);
+  if (items.length === 0) return null;
+  return (
+    <section className="flex flex-col gap-1.5" aria-label="审批记录">
+      <span className="text-xs text-muted-foreground">审批记录</span>
+      <ol className="flex flex-col gap-1">
+        {items.map((q) => (
+          <li key={q.id} className="flex gap-2 text-xs leading-[19px] text-[#4A4843]">
+            <span className="shrink-0 font-mono text-[11px] text-muted-foreground" title={timeAgo(q.answered_at ?? q.created_at)}>
+              {clock(q.answered_at ?? q.created_at)}
+            </span>
+            <span className="min-w-0 [overflow-wrap:anywhere]">
+              <span className="font-mono text-foreground">{q.asker}</span> {approvalCommand(q)} <span className="text-muted-foreground">— {approvalVerdict(q)}</span>
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 
@@ -268,7 +292,7 @@ function TaskRows({ tasks, all }: { tasks: TaskView[]; all: TaskView[] }) {
         const look = taskLook(t, all);
         return (
           <span key={t.id} className="flex min-h-[26px] items-center gap-2 text-[13px]">
-            <Dot color={look.tone} size={6} />
+            <StateMark look={look} size={6} />
             <span className={cn("min-w-0 flex-1 truncate", t.status === "done" && "text-[#8A877F] line-through")} title={t.instruction}>
               {taskTitle(t)}
             </span>
@@ -337,7 +361,7 @@ function MemberRow({ thread, member, asking, now }: { thread: ThreadView; member
   return (
     <div className="flex flex-col gap-1 rounded-lg border px-3 py-2.5">
       <span className="flex items-center gap-2 text-[13px]">
-        <LiveDot color={asking ? "#B4530B" : memberTone(member)} on={working || asking} />
+        <LiveDot color={asking ? "#B4530B" : memberTone(member)} on={working} />
         <span className="font-mono font-medium">{member.name}</span>
         <span className="rounded bg-[#EFEDE8] px-1.5 py-px text-[11px] text-[#4A4843]">{member.tier === "lead" ? TIER_LABEL.lead : member.title || member.role}</span>
         {working && (
@@ -350,7 +374,7 @@ function MemberRow({ thread, member, asking, now }: { thread: ThreadView; member
         {RUNTIME_LABEL[member.runtime] ?? member.runtime} · {member.node ? `${member.node.name}${member.node.online ? "" : "（离线）"}` : "未分配节点"}
       </span>
       <span className="text-xs text-[#4A4843]">
-        {asking ? "等你审批" : stateLabel(member)}
+        {askingLabel(member, asking)}
         {member.status?.since ? ` · ${elapsed(member.status.since, now)}` : ""}
         {member.status?.task_id ? ` · 任务 ${member.status.task_id}` : ""}
       </span>

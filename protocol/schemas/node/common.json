@@ -123,14 +123,15 @@
     },
     "PermissionMode": {
       "title": "PermissionMode",
-      "description": "Claude permission mode; always explicit.",
+      "description": "Claude permission mode; always explicit. auto is sent only to daemons that list the permission_auto feature.",
       "type": "string",
       "enum": [
         "default",
         "acceptEdits",
         "bypassPermissions",
         "dontAsk",
-        "plan"
+        "plan",
+        "auto"
       ]
     },
     "LogLevel": {

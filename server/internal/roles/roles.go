@@ -29,6 +29,7 @@ var (
 	keyPattern   = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
 	colorPattern = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
 	gates        = []string{"", "review", "decision"}
+	permModes    = []string{store.PermAuto, store.PermBypass, store.PermAsk}
 	sandboxes    = []string{"", "read-only", "workspace-write", "danger-full-access"}
 )
 
@@ -71,6 +72,9 @@ func normalizeOne(r *store.Role, looks office.Looks) {
 	}
 	if r.Count == 0 {
 		r.Count = 1
+	}
+	if r.PermissionMode == "" || r.Tier != Member {
+		r.PermissionMode = store.PermAuto
 	}
 	if r.ReadOnly == nil {
 		ro := r.Gate == "review" || r.Gate == "decision"
@@ -155,8 +159,8 @@ func validateOne(path string, r *store.Role, c Context) []Problem {
 		{"gate", !slices.Contains(gates, r.Gate), "gate 只能是空、review 或 decision"},
 		{"sandbox", !slices.Contains(sandboxes, r.Sandbox), "sandbox 只能是 read-only、workspace-write 或 danger-full-access"},
 		{"max_turns", r.MaxTurns != nil && *r.MaxTurns < 1, "max_turns 至少为 1"},
-		{"skip_permissions", r.SkipPermissions && r.Tier != Member, "跳过权限确认只对成员岗位生效"},
-		{"read_only", ro && r.SkipPermissions, "只读岗位不能跳过权限确认"},
+		{"permission_mode", !slices.Contains(permModes, r.PermissionMode), "权限模式只能是 auto、bypass 或 ask"},
+		{"read_only", ro && r.PermissionMode == store.PermBypass, "只读岗位不能跳过权限确认"},
 		{"look.color", !colorPattern.MatchString(r.Look.Color), "颜色格式是 #RRGGBB"},
 		{"look.outfit", !slices.Contains(c.Looks.Outfits, r.Look.Outfit), "当前办公室布局里没有这种服装：" + r.Look.Outfit},
 		{"look.accessory", !slices.Contains(c.Looks.Accessories, r.Look.Accessory), "当前办公室布局里没有这种配饰：" + r.Look.Accessory},
@@ -211,16 +215,13 @@ func nodeProblems(path string, r *store.Role, nodes map[string]store.Node) []Pro
 			return []Problem{{path + ".node_ids", "候选节点不存在或不属于你：" + id}}
 		}
 	}
-	if r.SkipPermissions && !candidatesQualify(r.NodeIDs, nodes) {
-		return []Problem{{path + ".node_ids", "跳过权限确认的岗位只能派到 agent_user 隔离级别或标记为 isolated 的节点"}}
-	}
 	if r.Runtime == Codex && !candidatesQualify(r.NodeIDs, nodes) {
 		return []Problem{{path + ".node_ids", "Codex 岗位不能派到 sandbox 或 none 隔离级别的节点（需要 agent_user 或 isolated）"}}
 	}
 	return nil
 }
 
-// Isolated reports whether a node may run skip-permissions and Codex employees (architecture.md §10.3).
+// Isolated reports whether a node may run bypass-mode and Codex employees (architecture.md §10.3).
 func Isolated(n store.Node) bool { return n.Isolated || n.Isolation == "agent_user" }
 
 // candidatesQualify: an explicit list must all qualify; an empty list (any node) needs at least one.
@@ -240,6 +241,9 @@ func candidatesQualify(ids []string, nodes map[string]store.Node) bool {
 	}
 	return true
 }
+
+// BypassFallback explains why a bypass role runs in auto mode (no isolated candidate node).
+const BypassFallback = "跳过权限确认只在隔离节点（agent_user 级别或标记为 isolated）上生效；派到不隔离的节点时会改用自动判断"
 
 // Warnings lists problems with saved roles that appeared later (deleted nodes, isolation).
 func Warnings(roles []store.Role, nodes map[string]store.Node) []Warning {
@@ -261,8 +265,8 @@ func roleWarnings(r store.Role, nodes map[string]store.Node) []Warning {
 	if len(live) < len(r.NodeIDs) {
 		out = append(out, Warning{r.Role, "候选节点已删除"})
 	}
-	if r.SkipPermissions && !candidatesQualify(live, nodes) {
-		out = append(out, Warning{r.Role, "跳过权限确认的岗位没有 isolated 节点"})
+	if r.PermissionMode == store.PermBypass && !candidatesQualify(live, nodes) {
+		out = append(out, Warning{r.Role, BypassFallback})
 	}
 	if r.Runtime == Codex && !candidatesQualify(live, nodes) {
 		out = append(out, Warning{r.Role, "Codex 岗位没有 agent_user 或 isolated 节点"})

@@ -3,6 +3,8 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/touwaeriol/agent-teams/server/internal/core"
 )
 
 // Gates are the optional delivery checkpoints.
@@ -29,6 +31,8 @@ type Delivery struct {
 	ApprovalTimeoutS   *int       `json:"approval_timeout_s" nullable:"true"`
 	NotifyOnAsk        bool       `json:"notify_on_ask"`
 	AllowWorkflowEdits bool       `json:"allow_workflow_edits"`
+	ApprovalRouting    string     `json:"approval_routing" enum:"lead_first,user" doc:"lead_first: the thread lead decides permission requests and asks the user when unsure; user: every request asks the user"`
+	LeadReviewTimeoutS int        `json:"lead_review_timeout_s" minimum:"10" maximum:"3600" doc:"Seconds the lead has before a request goes to the user"`
 }
 
 // GatesPatch, CIPatch and DeliveryPatch change only the fields they carry.
@@ -55,12 +59,14 @@ type DeliveryPatch struct {
 	ApprovalTimeoutS   *int        `json:"approval_timeout_s,omitempty" minimum:"0"`
 	NotifyOnAsk        *bool       `json:"notify_on_ask,omitempty"`
 	AllowWorkflowEdits *bool       `json:"allow_workflow_edits,omitempty"`
+	ApprovalRouting    *string     `json:"approval_routing,omitempty" enum:"lead_first,user"`
+	LeadReviewTimeoutS *int        `json:"lead_review_timeout_s,omitempty" minimum:"10" maximum:"3600"`
 }
 
 func builtinDelivery() Delivery {
 	return Delivery{Gates: Gates{Review: true, MergeQueue: true},
 		CI:          CISettings{Mode: "checks", Required: []string{}, AppearTimeoutS: 300, TimeoutS: 3600, OnMissing: "pass"},
-		MergeMethod: "squash", NotifyOnAsk: true}
+		MergeMethod: "squash", NotifyOnAsk: true, ApprovalRouting: core.RouteLeadFirst, LeadReviewTimeoutS: core.DefaultLeadReviewSecs}
 }
 
 // deliveryDefault is the admin default (at_settings.delivery_default) over the built-in one.

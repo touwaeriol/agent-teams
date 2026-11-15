@@ -896,6 +896,14 @@
           "allow_workflow_edits": {
             "type": "boolean"
           },
+          "approval_routing": {
+            "description": "lead_first: the thread lead decides permission requests and asks the user when unsure; user: every request asks the user",
+            "enum": [
+              "lead_first",
+              "user"
+            ],
+            "type": "string"
+          },
           "approval_timeout_s": {
             "format": "int64",
             "type": [
@@ -908,6 +916,13 @@
           },
           "gates": {
             "$ref": "#/components/schemas/Gates"
+          },
+          "lead_review_timeout_s": {
+            "description": "Seconds the lead has before a request goes to the user",
+            "format": "int64",
+            "maximum": 3600,
+            "minimum": 10,
+            "type": "integer"
           },
           "merge_method": {
             "enum": [
@@ -927,7 +942,9 @@
           "merge_method",
           "approval_timeout_s",
           "notify_on_ask",
-          "allow_workflow_edits"
+          "allow_workflow_edits",
+          "approval_routing",
+          "lead_review_timeout_s"
         ],
         "type": "object"
       },
@@ -936,6 +953,13 @@
         "properties": {
           "allow_workflow_edits": {
             "type": "boolean"
+          },
+          "approval_routing": {
+            "enum": [
+              "lead_first",
+              "user"
+            ],
+            "type": "string"
           },
           "approval_timeout_s": {
             "format": "int64",
@@ -947,6 +971,12 @@
           },
           "gates": {
             "$ref": "#/components/schemas/GatesPatch"
+          },
+          "lead_review_timeout_s": {
+            "format": "int64",
+            "maximum": 3600,
+            "minimum": 10,
+            "type": "integer"
           },
           "merge_method": {
             "enum": [
@@ -3412,6 +3442,15 @@
               "null"
             ]
           },
+          "permission_mode": {
+            "description": "auto: Claude's classifier decides, unclear calls ask; bypass: no checks (isolated nodes only, else auto); ask: every non-read tool asks",
+            "enum": [
+              "auto",
+              "bypass",
+              "ask"
+            ],
+            "type": "string"
+          },
           "plugins": {
             "description": "Plugins the role's sessions load: name (latest version) or name@N (pinned)",
             "items": {
@@ -3452,9 +3491,6 @@
               "null"
             ]
           },
-          "skip_permissions": {
-            "type": "boolean"
-          },
           "sort": {
             "description": "Display order; PUT uses the position in the list",
             "format": "int64",
@@ -3493,7 +3529,6 @@
           "instructions",
           "model",
           "effort",
-          "skip_permissions",
           "can_delegate",
           "allowed_tools",
           "disallowed_tools",

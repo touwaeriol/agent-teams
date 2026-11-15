@@ -98,7 +98,7 @@ func (n *Node) hello(ctx context.Context, o Options) error {
 	}
 	body := protocol.Hello{Protocols: protocols, Daemon: protocol.DaemonInfo{Version: "2.0.0"}, Epoch: orDefault(o.Epoch, "e1"),
 		LastSeq: o.LastSeq, AckedCmdSeq: o.AckedCmdSeq, Host: "fake", Root: "/tmp/fake", Isolation: &iso,
-		Capacity: &protocol.Capacity{MaxActiveSessions: &maxActive}, Features: []string{"sessions", "git_worktree", "cred_helper"}}
+		Capacity: &protocol.Capacity{MaxActiveSessions: &maxActive}, Features: []string{"sessions", "git_worktree", "cred_helper", "permission_auto"}}
 	env, err := protocol.NewEnvelope(protocol.TypeHello, "n_"+ulid.Make().String(), 0, body)
 	if err != nil {
 		return err

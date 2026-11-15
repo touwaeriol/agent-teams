@@ -9,15 +9,16 @@ import { conversations, threads as threadActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import { keys, useChecks, useMergeQueue, useProject, useQuestions, useTasks, useThreadByNo } from "@/api/queries";
 import type { MainTaskView, ProjectView, TaskView, ThreadView } from "@/api/views";
-import { Bar, CheckMark, Composer, Dot, StatusPill, Tag } from "@/components/app/bits";
+import { Bar, CheckMark, Composer, LiveDot, StateMark, StatusPill, Tag } from "@/components/app/bits";
 import { Chat } from "@/components/app/Chat";
 import { Checklist, MemberLines, ThreadCards } from "@/components/app/thread";
 import { ConfirmAction, EmptyState, Loading } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { useIsMobile, useMedia } from "@/lib/media";
 import { useAttachments } from "@/components/app/attachments";
-import { ActivityFeed, detailTabOf } from "@/components/app/ThreadDetail";
+import { ActivityFeed, ApprovalHistory, detailTabOf } from "@/components/app/ThreadDetail";
 import { ThreadMenu } from "@/components/app/ThreadMenu";
+import { isWorking } from "@/lib/live";
 import { MainPage } from "./Main";
 import {
   checkLook,
@@ -109,7 +110,7 @@ function ThreadHeader({ thread, project, view, setView }: { thread: ThreadView; 
           <span className="flex flex-wrap items-center gap-2.5">
             <span className="font-mono text-muted-foreground">#{thread.no}</span>
             <h1 className="text-[22px] font-semibold">{thread.title}</h1>
-            <StatusPill tone={look.tone} label={look.label} />
+            <StatusPill tone={look.tone} label={look.label} spin={look.spin} />
           </span>
           <span className="flex flex-wrap gap-2">
             <Tag mono>{threadBases(thread) ? `${thread.branch} ← ${threadBases(thread)}` : thread.branch}</Tag>
@@ -233,7 +234,7 @@ function MainTaskRow({ thread, main, tasks, all }: { thread: ThreadView; main: M
             const look = taskLook(t, all);
             return (
               <span key={t.id} className="flex min-h-[26px] items-center gap-2 text-[13px]">
-                <Dot color={look.tone} size={6} />
+                <StateMark look={look} size={6} />
                 <span className={cn("min-w-0 flex-1 truncate", t.status === "done" && "text-[#8A877F] line-through")}>{taskTitle(t)}</span>
                 <span className="font-mono text-[11px] text-[#8A877F]">{t.claimed_by || "待领取"}</span>
                 <span className="min-w-10 text-right text-[11px]" style={{ color: look.tone }}>
@@ -340,7 +341,7 @@ function DeliveryView({ thread }: { thread: ThreadView }) {
             const look = checkLook(c);
             return (
               <a key={c.name} href={safeHref(c.url)} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-[13px]">
-                <Dot color={look.tone} />
+                <StateMark look={look} />
                 <span className="font-mono">{c.name}</span>
                 <span style={{ color: look.tone }}>{look.label}</span>
                 <span className="truncate text-muted-foreground">{c.summary}</span>
@@ -385,7 +386,7 @@ function ThreadAside({ thread }: { thread: ThreadView }) {
         {thread.members.map((m) => (
           <div key={m.id} className="flex flex-col gap-0.5 rounded-lg bg-background px-2.5 py-2">
             <span className="flex items-center gap-2 text-[13px]">
-              <Dot color={memberTone(m)} size={8} />
+              <LiveDot color={memberTone(m)} on={isWorking(m)} size={8} />
               <span className="font-mono">{m.name}</span>
               <span className="rounded bg-[#EFEDE8] px-1.5 py-px text-[11px] text-[#4A4843]">
                 {m.tier === "lead" ? TIER_LABEL.lead : m.title || m.role}
@@ -399,6 +400,7 @@ function ThreadAside({ thread }: { thread: ThreadView }) {
       </section>
       <section className="flex flex-col gap-2 rounded-xl border bg-panel px-4 py-3.5">
         <ActivityFeed thread={thread} />
+        <ApprovalHistory questions={questions.data} />
       </section>
       <Composer
         variant="inline"
@@ -440,7 +442,7 @@ function MobileThread({ thread }: { thread: ThreadView }) {
               组长 {lead?.name ?? "—"} · {thread.branch}
             </span>
           </span>
-          <StatusPill tone={look.tone} label={look.label} />
+          <StatusPill tone={look.tone} label={look.label} spin={look.spin} />
           <ThreadMenu thread={thread} onDeleted={() => navigate(`/projects/${thread.project_id}`)} />
         </div>
         <span className="flex items-center gap-2.5 px-1">
@@ -458,6 +460,7 @@ function MobileThread({ thread }: { thread: ThreadView }) {
         </section>
         <section className="px-1">
           <ActivityFeed thread={thread} />
+          <ApprovalHistory questions={questions.data} />
         </section>
         {thread.lead_last && (
           <section className="flex flex-col gap-1 px-1">

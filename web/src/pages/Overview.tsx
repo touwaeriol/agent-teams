@@ -126,7 +126,7 @@ function ThreadCard({ pid, thread }: { pid: string; thread: ThreadView }) {
           <span className="font-mono text-xs text-muted-foreground">#{thread.no}</span>
           <span className="truncate font-semibold">{thread.title}</span>
         </span>
-        <StatusPill tone={look.tone} label={look.label} />
+        <StatusPill tone={look.tone} label={look.label} spin={look.spin} />
       </span>
       <span className="text-[13px] leading-[21px] text-[#4A4843]">{thread.summary || thread.lead_last?.text || thread.brief}</span>
       <span className="flex items-center gap-2.5">

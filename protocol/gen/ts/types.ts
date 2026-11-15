@@ -93,12 +93,12 @@ export type Runtime = "claude" | "codex";
  */
 export type Tier = "coordinator" | "lead" | "member";
 /**
- * Claude permission mode; always explicit.
+ * Claude permission mode; always explicit. auto is sent only to daemons that list the permission_auto feature.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "PermissionMode".
  */
-export type PermissionMode = "default" | "acceptEdits" | "bypassPermissions" | "dontAsk" | "plan";
+export type PermissionMode = "default" | "acceptEdits" | "bypassPermissions" | "dontAsk" | "plan" | "auto";
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "LogLevel".
@@ -1372,7 +1372,7 @@ export interface SessionSend {
  */
 export interface SessionSetMode {
   session_id: SessionId;
-  permission_mode?: "default" | "acceptEdits" | "bypassPermissions";
+  permission_mode?: "default" | "acceptEdits" | "bypassPermissions" | "auto";
   model?: string | null;
 }
 /**
@@ -2350,6 +2350,20 @@ export interface RequestReviewInput {
    * What to review.
    */
   summary: string;
+}
+/**
+ * Decide a member's permission request ("[Permission request q5 from dev-1 ...]"). allow lets the member run it once, deny refuses it (the reason goes to the member), ask_user hands it to the user. Choose ask_user when unsure, or when it touches secrets, production, money, other people or anything irreversible. Decide quickly: the member waits.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "ReviewPermissionInput".
+ */
+export interface ReviewPermissionInput {
+  request_id: QuestionId;
+  decision: "allow" | "deny" | "ask_user";
+  /**
+   * One sentence; shown to the user in the thread's activity and on the card.
+   */
+  reason: string;
 }
 /**
  * Leave a message for a teammate (instance name) or for the lead ("lead"). Busy recipients get it after their current turn.

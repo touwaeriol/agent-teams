@@ -83,6 +83,7 @@ func New(d Deps) (*Engine, error) {
 	e.Orch.Kick = e.Sched.Kick
 	e.Orch.ThreadEnded = e.Delivery.ThreadEnded
 	e.Orch.Rules = e.Approvals.Rules
+	e.Tools.Reviews = e.Approvals
 	gw.SetHandler(&router{e: e})
 	return e, nil
 }
@@ -92,7 +93,7 @@ func (e *Engine) Start(ctx context.Context) {
 	go e.Fan.Run(ctx)
 	go e.Sched.Run(ctx)
 	go e.Delivery.Run(ctx)
-	go e.Approvals.RunSweeper(ctx, time.Minute)
+	go e.Approvals.RunSweeper(ctx, 15*time.Second)
 	go e.Timers.Run(ctx)
 }
 

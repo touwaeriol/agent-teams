@@ -51,13 +51,13 @@ func TestValidateRules(t *testing.T) {
 	roles = append(roles,
 		store.Role{Tier: Member, Role: "Bad Key", Count: 9},
 		store.Role{Tier: Member, Role: "qa", Runtime: Codex, NodeIDs: []string{"n1"}},
-		store.Role{Tier: Member, Role: "ops", SkipPermissions: true, NodeIDs: []string{"n1", "n2"}},
-		store.Role{Tier: Member, Role: "rev", Gate: "review", SkipPermissions: true, NodeIDs: []string{"n2"}},
+		store.Role{Tier: Member, Role: "ops", PermissionMode: "always", NodeIDs: []string{"n1", "n2"}},
+		store.Role{Tier: Member, Role: "rev", Gate: "review", PermissionMode: store.PermBypass, NodeIDs: []string{"n2"}},
 		store.Role{Tier: Member, Role: "x", ReadOnly: &ro, NodeIDs: []string{"ghost"}, Look: store.Look{Outfit: "kimono"}},
 	)
 	Normalize(roles, looks)
 	got := problemPaths(Validate(roles, Context{Nodes: nodes(), Looks: looks}))
-	for _, want := range []string{"roles[3].role", "roles[3].count", "roles[4].node_ids", "roles[5].node_ids",
+	for _, want := range []string{"roles[3].role", "roles[3].count", "roles[4].node_ids", "roles[5].permission_mode",
 		"roles[6].read_only", "roles[7].node_ids", "roles[7].look.outfit"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %s in %s", want, got)
@@ -77,17 +77,28 @@ func TestTierCountsAndCoordinatorRuntime(t *testing.T) {
 	}
 }
 
-func TestSkipPermissionsOnIsolatedNodesPasses(t *testing.T) {
-	roles := append(Defaults(looks), store.Role{Tier: Member, Role: "ops", SkipPermissions: true, NodeIDs: []string{"n2", "n3"}},
+// TestBypassSavesAnywhereButWarns: bypass on a plain node is allowed (it falls back to auto there)
+// and shows a warning; on isolated nodes it is silent. Non-members are always auto.
+func TestBypassSavesAnywhereButWarns(t *testing.T) {
+	roles := append(Defaults(looks), store.Role{Tier: Member, Role: "ops", PermissionMode: store.PermBypass, NodeIDs: []string{"n2", "n3"}},
+		store.Role{Tier: Member, Role: "plain", PermissionMode: store.PermBypass, NodeIDs: []string{"n1"}},
 		store.Role{Tier: Member, Role: "cx", Runtime: Codex})
+	roles[1].PermissionMode = store.PermBypass
 	Normalize(roles, looks)
 	if p := Validate(roles, Context{Nodes: nodes(), Looks: looks}); len(p) != 0 {
 		t.Fatalf("unexpected %v", p)
 	}
+	if roles[1].PermissionMode != store.PermAuto || roles[0].PermissionMode != store.PermAuto || roles[5].PermissionMode != store.PermAuto {
+		t.Fatalf("modes %q %q %q", roles[0].PermissionMode, roles[1].PermissionMode, roles[5].PermissionMode)
+	}
+	w := Warnings(roles, nodes())
+	if len(w) != 1 || w[0].Role != "plain" || w[0].Message != BypassFallback {
+		t.Fatalf("warnings %v", w)
+	}
 }
 
 func TestWarnings(t *testing.T) {
-	roles := []store.Role{{Role: "ops", SkipPermissions: true, NodeIDs: []string{"gone", "n1"}}}
+	roles := []store.Role{{Role: "ops", PermissionMode: store.PermBypass, NodeIDs: []string{"gone", "n1"}}}
 	w := Warnings(roles, nodes())
 	if len(w) != 2 {
 		t.Fatalf("warnings %v", w)
@@ -128,10 +139,10 @@ func TestConvertV1Team(t *testing.T) {
 	if lead.Tier != Lead || lead.Role != "lead" {
 		t.Fatalf("lead %+v", lead)
 	}
-	if eng.Role != "engineer-1" || !eng.SkipPermissions || eng.AllowedTools[0] != "Bash(git *)" {
+	if eng.Role != "engineer-1" || eng.PermissionMode != store.PermBypass || eng.AllowedTools[0] != "Bash(git *)" {
 		t.Fatalf("engineer %+v", eng)
 	}
-	if qa.Runtime != Codex || !qa.SkipPermissions || len(qa.NodeIDs) != 0 {
+	if qa.Runtime != Codex || qa.PermissionMode != store.PermBypass || len(qa.NodeIDs) != 0 {
 		t.Fatalf("qa %+v", qa)
 	}
 	report := strings.Join(p.Report, "\n")

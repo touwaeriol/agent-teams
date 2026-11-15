@@ -11,13 +11,17 @@ export interface ToolPolicy {
   bash: BashPolicy | null;
   /** Absolute roots the file tools may read in read-only sessions. */
   readRoots: string[];
+  /** Absolute roots auto-mode sessions write into without asking (worktree + shared .git dirs). */
+  writeRoots: string[];
   /** Absolute paths no tool may touch (daemon config, state, runtime logins). */
   secretPaths: string[];
 }
 
 export type Decision = { deny: string } | null;
 
-const FILE_TOOLS: Record<string, string> = { Read: "file_path", Edit: "file_path", Write: "file_path", NotebookEdit: "notebook_path", Glob: "path", Grep: "path" };
+const WRITE_TOOLS = new Set(["Edit", "Write", "NotebookEdit", "MultiEdit"]);
+
+const FILE_TOOLS: Record<string, string> = { Read: "file_path", Edit: "file_path", Write: "file_path", MultiEdit: "file_path", NotebookEdit: "notebook_path", Glob: "path", Grep: "path" };
 const READ_TOOLS = new Set(["Read", "Glob", "Grep", "LS"]);
 /** Tools that walk a directory tree: their root must not contain a secret path. */
 const SEARCH_TOOLS = new Set(["Glob", "Grep"]);
@@ -58,6 +62,17 @@ function readOnlyDecision(policy: ToolPolicy, tool: string, input: Record<string
   const path = filePathOf(tool, input, cwd) ?? cwd;
   if (READ_TOOLS.has(tool) && !policy.readRoots.some((r) => isInside(r, path))) return { deny: "Read-only sessions can only read inside their worktree." };
   return null;
+}
+
+/**
+ * Auto mode: the classifier approves what the instructions ask for, writes outside the worktree
+ * included (verified with SDK 0.3.325), so those writes go through canUseTool (approval flow).
+ */
+export function autoAsk(policy: ToolPolicy, tool: string, input: Record<string, unknown>, cwd: string): string | null {
+  if (!WRITE_TOOLS.has(tool)) return null;
+  const path = filePathOf(tool, input, cwd);
+  if (!path || policy.writeRoots.some((r) => isInside(r, path))) return null;
+  return "Writing outside the worktree needs approval.";
 }
 
 function filePathOf(tool: string, input: Record<string, unknown>, cwd: string): string | null {

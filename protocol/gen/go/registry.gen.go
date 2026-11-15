@@ -118,6 +118,7 @@ const (
 	ToolReplyTo            = "reply_to"
 	ToolReportProgress     = "report_progress"
 	ToolRequestReview      = "request_review"
+	ToolReviewPermission   = "review_permission"
 	ToolSendMessage        = "send_message"
 	ToolSetStatus          = "set_status"
 	ToolThreadStatus       = "thread_status"
@@ -222,6 +223,10 @@ var Tools = map[string]ToolMeta{
 	ToolRequestReview: {
 		Tiers: []Tier{TierMember}, Blocking: []Tier{TierMember}, Requires: "",
 		NewInput: func() any { return new(RequestReviewInput) }, NewResult: func() any { return new(RequestReviewResult) },
+	},
+	ToolReviewPermission: {
+		Tiers: []Tier{TierLead}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(ReviewPermissionInput) }, NewResult: nil,
 	},
 	ToolSendMessage: {
 		Tiers: []Tier{TierLead, TierMember}, Blocking: nil, Requires: "",

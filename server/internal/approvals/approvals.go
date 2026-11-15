@@ -1,8 +1,9 @@
 // Package approvals turns the daemon's approval requests (canUseTool, Codex
 // requestApproval) into decisions (architecture.md §9): the fixed deny list,
-// role skip_permissions, the thread's "allow everything", remembered rules
-// (exact tool + input hash only — Claude's own matcher handles rule strings),
-// else a card in at_questions that survives disconnects. Answers become
+// bypass roles, the thread's "allow everything", remembered rules (exact tool +
+// input hash only — Claude's own matcher handles rule strings), the read-only
+// allow list, else a card in at_questions that survives disconnects: first for
+// the thread lead (review.go), then for the user. Answers become
 // approval.resolve commands in the node outbox.
 package approvals
 
@@ -35,7 +36,7 @@ var (
 // policy:rule:… | policy:timeout), so the built-in policies are named as rules.
 const (
 	DecidedDenyList = "policy:rule:builtin-deny-list"
-	DecidedRoleSkip = "policy:rule:builtin-skip-permissions"
+	DecidedRoleSkip = "policy:rule:builtin-skip-permissions" // bypass role (kept name for existing records)
 )
 
 // Engine decides approvals.
@@ -147,7 +148,7 @@ func (e *Engine) decide(ctx context.Context, tx *core.Tx, sc core.SessionContext
 	if err != nil {
 		return err
 	}
-	if orchestrator.SkipPermissions(sc.Employee, node) {
+	if orchestrator.Bypass(sc.Employee, node) {
 		e.log.Warn("approval from a skip-permissions session", "employee", sc.Employee.Name)
 		return e.resolve(ctx, tx, q, "allow", DecidedRoleSkip, "")
 	}
@@ -167,11 +168,11 @@ func (e *Engine) decide(ctx context.Context, tx *core.Tx, sc core.SessionContext
 	if readOnlyRole(sc.Employee) && ReadOnlyCommand(m.ToolName, m.Input) {
 		return e.resolve(ctx, tx, q, "allow", DecidedReadOnly, "")
 	}
-	return e.showCard(ctx, tx, sc, q)
+	return e.route(ctx, tx, sc, q)
 }
 
 // sessionNode loads the isolation of the node a session runs on (zero Node when unknown).
-// skip_permissions and "allow everything" only apply on nodes isolated enough for them
+// bypass and "allow everything" only apply on nodes isolated enough for them
 // (§10.3), whatever the role or thread says: a skip role placed on a plain node opens in
 // default mode, and its approvals must not be waved through here either.
 func sessionNode(ctx context.Context, q core.DB, s core.AgentSession) (store.Node, error) {
@@ -179,8 +180,8 @@ func sessionNode(ctx context.Context, q core.DB, s core.AgentSession) (store.Nod
 	if s.NodeID == nil {
 		return n, nil
 	}
-	err := core.MapErr(q.QueryRow(ctx, `SELECT id, isolated, isolation FROM at_nodes WHERE id = $1`, *s.NodeID).
-		Scan(&n.ID, &n.Isolated, &n.Isolation))
+	err := core.MapErr(q.QueryRow(ctx, `SELECT id, isolated, isolation, last_hello FROM at_nodes WHERE id = $1`, *s.NodeID).
+		Scan(&n.ID, &n.Isolated, &n.Isolation, &n.LastHello))
 	if errors.Is(err, core.ErrNotFound) {
 		return store.Node{}, nil
 	}
@@ -286,7 +287,7 @@ func (e *Engine) sendResolve(ctx context.Context, tx *core.Tx, q core.Question, 
 		return ignoreMissing(err)
 	}
 	body := protocol.ApprovalResolve{ApprovalID: protocol.ApprovalID(deref(q.ApprovalID)),
-		Decision: protocol.ApprovalDecision(decision), DecidedBy: decidedBy}
+		Decision: protocol.ApprovalDecision(decision), DecidedBy: wireDecidedBy(decidedBy)}
 	if message != "" {
 		body.Message = &message
 	}
@@ -351,6 +352,9 @@ func (e *Engine) answerTx(ctx context.Context, tx *core.Tx, user store.User, q c
 	if err := e.resolve(ctx, tx, q, answer, by, message); err != nil {
 		return err
 	}
+	if err := userActivity(ctx, tx, q, answer, reason); err != nil {
+		return err
+	}
 	if answer != "allow_always" {
 		return nil
 	}
@@ -359,6 +363,20 @@ func (e *Engine) answerTx(ctx context.Context, tx *core.Tx, user store.User, q c
 		return err
 	}
 	return e.applyRule(ctx, tx, q, ruleID)
+}
+
+var answerVerbs = map[string]string{"allow": "放行了", "allow_always": "总是允许", "deny": "拒绝了"}
+
+// userActivity logs the user's decision in the thread's activity feed.
+func userActivity(ctx context.Context, tx *core.Tx, q core.Question, answer, reason string) error {
+	if q.ThreadID == nil {
+		return nil
+	}
+	line := fmt.Sprintf("%s %s 的请求 %s", answerVerbs[answer], q.Asker, Summary(q))
+	if reason != "" {
+		line += "（" + reason + "）"
+	}
+	return tx.EmitActivity(ctx, deref(q.ProjectID), q.ThreadID, "你", line)
 }
 
 // remember stores an "always allow" rule (sdk_update kept verbatim, destination → session).
@@ -548,20 +566,29 @@ func (e *Engine) setModes(ctx context.Context, tx *core.Tx, t core.Thread, on bo
 	if err != nil {
 		return err
 	}
-	mode := "default"
-	if on {
-		mode = "acceptEdits"
-	}
 	for _, s := range sessions {
 		emp, err := core.EmployeeByID(ctx, tx, s.EmployeeID)
-		if err != nil || emp.Tier != "member" || readOnly(emp) || emp.Spec.SkipPermissions {
+		if err != nil || emp.Tier != "member" || readOnly(emp) {
 			continue
 		}
-		if err := e.orch.SetMode(ctx, tx, s, mode); err != nil {
+		node, err := sessionNode(ctx, tx, s)
+		if err != nil {
+			return err
+		}
+		if err := e.orch.SetMode(ctx, tx, s, threadMode(emp, node, on)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// threadMode is a member's mode with "allow everything" on (acceptEdits) or off (its own).
+func threadMode(emp core.Employee, node store.Node, on bool) string {
+	mode := orchestrator.ClaudeMode(emp, node)
+	if on && mode != "bypassPermissions" {
+		return "acceptEdits"
+	}
+	return mode
 }
 
 func readOnly(e core.Employee) bool { return e.Spec.ReadOnly != nil && *e.Spec.ReadOnly }
@@ -588,12 +615,14 @@ func inputOf(q core.Question) json.RawMessage {
 	return raw
 }
 
-// SweepTimeouts denies cards older than the project's approval_timeout_s (§9 超时).
+// SweepTimeouts denies user cards shown longer than the project's approval_timeout_s (§9 超时;
+// a card the lead handed over counts from then).
 func (e *Engine) SweepTimeouts(ctx context.Context) {
 	rows, err := e.core.Pool.Query(ctx, `SELECT q.conversation_id, q.id, (p.delivery->>'approval_timeout_s')::int
 		FROM at_questions q JOIN at_projects p ON p.id = q.project_id
-		WHERE q.kind = 'approval' AND q.status = 'open' AND (p.delivery->>'approval_timeout_s') IS NOT NULL
-		AND q.created_at < now() - make_interval(secs => (p.delivery->>'approval_timeout_s')::int)`)
+		WHERE q.kind = 'approval' AND q.status = 'open' AND q.audience = 'user' AND (p.delivery->>'approval_timeout_s') IS NOT NULL
+		AND COALESCE((q.detail->>'escalated_at')::timestamptz, q.created_at)
+			< now() - make_interval(secs => (p.delivery->>'approval_timeout_s')::int)`)
 	if err != nil {
 		e.log.Warn("approval timeout sweep", "err", err)
 		return
@@ -634,6 +663,7 @@ func (e *Engine) RunSweeper(ctx context.Context, every time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			e.SweepLeadReviews(ctx)
 			e.SweepTimeouts(ctx)
 		}
 	}

@@ -337,14 +337,15 @@
     },
     "PermissionMode": {
       "title": "PermissionMode",
-      "description": "Claude permission mode; always explicit.",
+      "description": "Claude permission mode; always explicit. auto is sent only to daemons that list the permission_auto feature.",
       "type": "string",
       "enum": [
         "default",
         "acceptEdits",
         "bypassPermissions",
         "dontAsk",
-        "plan"
+        "plan",
+        "auto"
       ]
     },
     "LogLevel": {
@@ -2160,7 +2161,8 @@
           "enum": [
             "default",
             "acceptEdits",
-            "bypassPermissions"
+            "bypassPermissions",
+            "auto"
           ]
         },
         "model": {
@@ -3671,6 +3673,36 @@
           "description": "What to review.",
           "type": "string",
           "minLength": 1
+        }
+      }
+    },
+    "ReviewPermissionInput": {
+      "title": "ReviewPermissionInput",
+      "description": "Decide a member's permission request (\"[Permission request q5 from dev-1 ...]\"). allow lets the member run it once, deny refuses it (the reason goes to the member), ask_user hands it to the user. Choose ask_user when unsure, or when it touches secrets, production, money, other people or anything irreversible. Decide quickly: the member waits.",
+      "type": "object",
+      "required": [
+        "request_id",
+        "decision",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/QuestionId"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "deny",
+            "ask_user"
+          ]
+        },
+        "reason": {
+          "description": "One sentence; shown to the user in the thread's activity and on the card.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
         }
       }
     },

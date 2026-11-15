@@ -1168,6 +1168,47 @@
       }
     },
     {
+      "name": "review_permission",
+      "input": "ReviewPermissionInput",
+      "result": null,
+      "tiers": [
+        "lead"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Decide a member's permission request (\"[Permission request q5 from dev-1 ...]\"). allow lets the member run it once, deny refuses it (the reason goes to the member), ask_user hands it to the user. Choose ask_user when unsure, or when it touches secrets, production, money, other people or anything irreversible. Decide quickly: the member waits.",
+      "input_schema": {
+        "description": "Decide a member's permission request (\"[Permission request q5 from dev-1 ...]\"). allow lets the member run it once, deny refuses it (the reason goes to the member), ask_user hands it to the user. Choose ask_user when unsure, or when it touches secrets, production, money, other people or anything irreversible. Decide quickly: the member waits.",
+        "type": "object",
+        "required": [
+          "request_id",
+          "decision",
+          "reason"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "pattern": "^q[0-9]+$"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "deny",
+              "ask_user"
+            ]
+          },
+          "reason": {
+            "description": "One sentence; shown to the user in the thread's activity and on the card.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      }
+    },
+    {
       "name": "send_message",
       "input": "SendMessageInput",
       "result": null,

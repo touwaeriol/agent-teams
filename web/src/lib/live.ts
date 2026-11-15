@@ -30,6 +30,12 @@ export function stateLabel(m: Pick<EmployeeBrief, "status">): string {
   return VERB[s] ?? s;
 }
 
+/** The state label next to someone's open cards: a raised hand with no card for the user waits on the lead. */
+export function askingLabel(m: Pick<EmployeeBrief, "status">, asksUser: boolean): string {
+  if (asksUser) return "等你审批";
+  return m.status?.state === "raising_hand" ? "等组长回复" : stateLabel(m);
+}
+
 /** The employee's latest activity: the bubble (tool + command, or set_status text), else the state. */
 export function activityLine(m: Pick<EmployeeBrief, "status">, open?: QuestionView): string {
   if (open && m.status?.state === "raising_hand") return `请求执行 ${approvalCommand(open)}`;

@@ -59,7 +59,7 @@ export interface DaemonOptions {
   onExit?: (code: number) => void;
 }
 
-const FEATURES = ["sessions", "codex_app_server", "git_worktree", "cred_helper", "upgrade"];
+const FEATURES = ["sessions", "codex_app_server", "git_worktree", "cred_helper", "upgrade", "permission_auto"];
 
 /** Wires the link, command handlers, sessions, tools, git and credentials together. */
 export class Daemon {
@@ -263,6 +263,7 @@ export class Daemon {
       readOnly: c?.read_only === true,
       bash: c?.bash_policy ?? null,
       readRoots: [absCwd, ...extra, ...readable],
+      writeRoots: [absCwd, ...extra],
       secretPaths: this.secretPaths(),
     };
   }

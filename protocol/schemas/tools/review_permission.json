@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/review_permission.json",
+  "title": "ReviewPermissionInput",
+  "description": "Decide a member's permission request (\"[Permission request q5 from dev-1 ...]\"). allow lets the member run it once, deny refuses it (the reason goes to the member), ask_user hands it to the user. Choose ask_user when unsure, or when it touches secrets, production, money, other people or anything irreversible. Decide quickly: the member waits.",
+  "x-tool": {
+    "tiers": [
+      "lead"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "request_id",
+    "decision",
+    "reason"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "request_id": {
+      "$ref": "common.json#/$defs/QuestionId"
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "allow",
+        "deny",
+        "ask_user"
+      ]
+    },
+    "reason": {
+      "description": "One sentence; shown to the user in the thread's activity and on the card.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    }
+  }
+}

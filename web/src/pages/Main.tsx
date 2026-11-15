@@ -7,7 +7,7 @@ import { conversations } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import { keys, useCoordinator, useMe, useProject, useQuestions, useThreads, useWaiting } from "@/api/queries";
 import type { CoordinatorView, ProjectView, QuestionView, ThreadView } from "@/api/views";
-import { Composer, Dot } from "@/components/app/bits";
+import { Composer, Dot, StateMark } from "@/components/app/bits";
 import { useAttachments } from "@/components/app/attachments";
 import { WaitingCard } from "@/components/app/cards";
 import { Chat } from "@/components/app/Chat";
@@ -21,7 +21,7 @@ import { ProjectSwitcher } from "@/components/shell/ProjectSwitcher";
 import { NavButton } from "@/components/shell/Shell";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { sectionOf } from "@/lib/projectSettings";
-import { markTone, openForUser } from "@/lib/present";
+import { markTone, openForUser, threadLook } from "@/lib/present";
 import { ProjectSettingsDialog } from "./ProjectSettings";
 
 export function useProjectId(): string {
@@ -183,7 +183,7 @@ function ThreadChips({ pid, threads }: { pid: string; threads: ThreadView[] }) {
     <div className="scroll-thin flex gap-2 overflow-x-auto border-b border-[#EFEDE8] px-3 py-2.5 lg:hidden">
       {live.map((t) => (
         <Link key={t.id} to={`/projects/${pid}/threads/${t.no}`} className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border bg-panel px-3 text-xs">
-          <Dot color={markTone(t)} />#{t.no} {t.title}
+          <StateMark look={{ tone: markTone(t), spin: threadLook(t).spin }} />#{t.no} {t.title}
         </Link>
       ))}
     </div>

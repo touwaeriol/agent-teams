@@ -263,12 +263,12 @@ func TestThreadLimitAndPause(t *testing.T) {
 	}
 }
 
-// TestSkipRoleNeedsIsolatedNode: a skip_permissions role on a sandbox-level node opens in
-// default mode, so its approvals must still become cards; on an isolated node they pass.
+// TestSkipRoleNeedsIsolatedNode: a bypass role on a sandbox-level node opens in auto
+// mode, so its approvals must still become cards; on an isolated node they pass.
 func TestSkipRoleNeedsIsolatedNode(t *testing.T) {
 	tm := startTeam(t)
 	pool, ctx := tm.w.e.Core.Pool, tm.w.ctx
-	if _, err := pool.Exec(ctx, `UPDATE at_employees SET spec = jsonb_set(spec, '{skip_permissions}', 'true')
+	if _, err := pool.Exec(ctx, `UPDATE at_employees SET spec = jsonb_set(spec, '{permission_mode}', '"bypass"')
 		WHERE project_id = $1 AND name = 'dev-1'`, tm.projectID); err != nil {
 		t.Fatal(err)
 	}
@@ -318,4 +318,138 @@ func TestReadOnlyRoleAutoAllowsReads(t *testing.T) {
 		tm.b.must(200, "GET", "/api/conversations/"+tm.thread.ID+"/questions?status=open", nil, &cards)
 		return len(cards) == 1 && cards[0].Kind == "approval"
 	})
+}
+
+// askApproval sends a Bash approval request from the agent.
+func askApproval(a *fakeAgent, id, cmd string) {
+	gen := protocol.OpenGen(a.gen)
+	input, _ := json.Marshal(map[string]string{"command": cmd})
+	a.send(protocol.TypeApprovalRequest, protocol.ApprovalRequest{ApprovalID: protocol.ApprovalID(id), SessionID: protocol.SessionID(a.session),
+		OpenGen: &gen, Source: "claude_can_use_tool", ToolName: "Bash", Input: input,
+		Available: []protocol.ApprovalDecision{"allow", "allow_always", "deny"}})
+}
+
+// leadRequest waits for the lead's "[Permission request qN …]" and returns qN.
+func leadRequest(t *testing.T, lead *fakeAgent, needle string) string {
+	t.Helper()
+	send := lead.expectSend(needle)
+	if !strings.HasPrefix(send.Text, "[Permission request ") || !strings.Contains(send.Text, "review_permission") {
+		t.Fatalf("lead message %q", send.Text)
+	}
+	return strings.Fields(send.Text)[2]
+}
+
+func (tm *team) userCards(t *testing.T) []core.QuestionView {
+	t.Helper()
+	var cards []core.QuestionView
+	tm.b.must(200, "GET", "/api/projects/"+tm.projectID+"/waiting", nil, &struct {
+		Questions *[]core.QuestionView `json:"questions"`
+	}{&cards})
+	return cards
+}
+
+func (tm *team) card(t *testing.T, qid string) core.QuestionView {
+	t.Helper()
+	var cards []core.QuestionView
+	tm.b.must(200, "GET", "/api/conversations/"+tm.thread.ID+"/questions?status=all", nil, &cards)
+	for _, c := range cards {
+		if c.ID == qid {
+			return c
+		}
+	}
+	t.Fatalf("no card %s in %+v", qid, cards)
+	return core.QuestionView{}
+}
+
+func (tm *team) activity(t *testing.T) string {
+	t.Helper()
+	_, raw := tm.b.do("GET", "/api/threads/"+tm.thread.ID+"/activity?limit=50", nil)
+	return string(raw)
+}
+
+// TestLeadReviewsPermissions: a member's request goes to the lead first (not to the user);
+// the lead allows, denies with a reason, or hands it to the user, who decides; every
+// decision names who made it on the card and in the activity feed.
+func TestLeadReviewsPermissions(t *testing.T) {
+	tm := startTeam(t)
+	askApproval(tm.dev, "ap_allow", "npm test")
+	q1 := leadRequest(t, tm.lead, "npm test")
+	if cards := tm.userCards(t); len(cards) != 0 {
+		t.Fatalf("the user must not see a card the lead is reviewing: %+v", cards)
+	}
+	tm.lead.mustCall("review_permission", map[string]string{"request_id": q1, "decision": "allow", "reason": "任务要跑测试"})
+	if r := waitResolve(t, tm.w, tm.dev, "ap_allow"); r.Decision != "allow" || r.DecidedBy != "policy:rule:lead-review" {
+		t.Fatalf("lead allow: %+v", r)
+	}
+	if c := tm.card(t, q1); c.DecidedBy != approvals.DecidedLeadPrefix+"lead-1" || c.Detail["review"] == nil {
+		t.Fatalf("card %+v", c)
+	}
+
+	askApproval(tm.dev, "ap_deny", "rm -rf /srv/data")
+	q2 := leadRequest(t, tm.lead, "rm -rf /srv/data")
+	tm.lead.mustCall("review_permission", map[string]string{"request_id": q2, "decision": "deny", "reason": "不能删数据目录"})
+	if r := waitResolve(t, tm.w, tm.dev, "ap_deny"); r.Decision != "deny" || r.Message == nil || !strings.Contains(*r.Message, "不能删数据目录") {
+		t.Fatalf("lead deny: %+v", r)
+	}
+
+	askApproval(tm.dev, "ap_ask", "terraform apply")
+	q3 := leadRequest(t, tm.lead, "terraform apply")
+	tm.lead.mustCall("review_permission", map[string]string{"request_id": q3, "decision": "ask_user", "reason": "会改线上资源"})
+	cards := tm.userCards(t)
+	if len(cards) != 1 || cards[0].ID != q3 || cards[0].Audience != "user" {
+		t.Fatalf("handed to the user: %+v", cards)
+	}
+	tm.b.must(200, "POST", "/api/conversations/"+tm.thread.ID+"/questions/"+q3+"/answer", map[string]string{"answer": "deny", "reason": "先别动"}, nil)
+	if r := waitResolve(t, tm.w, tm.dev, "ap_ask"); r.Decision != "deny" || !strings.HasPrefix(r.DecidedBy, "user:") {
+		t.Fatalf("user deny: %+v", r)
+	}
+	if res := tm.lead.call("review_permission", map[string]string{"request_id": q3, "decision": "allow", "reason": "x"}); res.Ok {
+		t.Fatal("a decided request cannot be reviewed again")
+	}
+	feed := tm.activity(t)
+	for _, want := range []string{"放行了 dev-1 的请求 Bash npm test（任务要跑测试）", "拒绝了 dev-1 的请求", "拿不准，转给你决定", "拒绝了 dev-1 的请求 Bash terraform apply（先别动）"} {
+		if !strings.Contains(feed, want) {
+			t.Errorf("activity lacks %q: %s", want, feed)
+		}
+	}
+}
+
+// TestLeadReviewTimeout: a request the lead leaves alone past lead_review_timeout_s goes to
+// the user, and the user-facing timeout counts from then.
+func TestLeadReviewTimeout(t *testing.T) {
+	tm := startTeam(t)
+	tm.b.must(200, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"delivery": map[string]any{"lead_review_timeout_s": 30, "approval_timeout_s": 60}}, nil)
+	askApproval(tm.dev, "ap_slow", "make deploy")
+	qid := leadRequest(t, tm.lead, "make deploy")
+	pool, ctx := tm.w.e.Core.Pool, tm.w.ctx
+	tm.w.e.Approvals.SweepLeadReviews(ctx)
+	if len(tm.userCards(t)) != 0 {
+		t.Fatal("escalated before the timeout")
+	}
+	if _, err := pool.Exec(ctx, `UPDATE at_questions SET created_at = now() - interval '45 seconds' WHERE approval_id = 'ap_slow'`); err != nil {
+		t.Fatal(err)
+	}
+	tm.w.e.Approvals.SweepLeadReviews(ctx)
+	tm.w.e.Approvals.SweepTimeouts(ctx)
+	cards := tm.userCards(t)
+	if len(cards) != 1 || cards[0].ID != qid {
+		t.Fatalf("timed-out request should ask the user (and not be denied yet): %+v", cards)
+	}
+	if res := tm.lead.call("review_permission", map[string]string{"request_id": qid, "decision": "allow", "reason": "x"}); res.Ok {
+		t.Fatal("the lead is too late")
+	}
+	if !strings.Contains(tm.activity(t), "没有及时判断") {
+		t.Fatal("timeout not in the activity feed")
+	}
+}
+
+// TestApprovalRoutingAskUser: with 全部问我 every request is the user's card at once, and
+// the lead's own requests always go to the user.
+func TestApprovalRoutingAskUser(t *testing.T) {
+	tm := startTeam(t)
+	askApproval(tm.lead, "ap_lead", "make lint")
+	eventually(t, "lead request asks the user", func() bool { return len(tm.userCards(t)) == 1 })
+	tm.b.must(200, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"delivery": map[string]any{"approval_routing": "user"}}, nil)
+	askApproval(tm.dev, "ap_user", "npm publish")
+	eventually(t, "member request asks the user", func() bool { return len(tm.userCards(t)) == 2 })
 }

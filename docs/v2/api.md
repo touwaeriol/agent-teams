@@ -64,7 +64,9 @@ RepoRef         = {repo: "owner/name", git_connection_id: string|null}
 DeliverySettings = {gates: {review, decision, merge_queue}, ci: {mode, required, appear_timeout_s, timeout_s, on_missing},
                    merge_method: "squash"|"merge"|"rebase", approval_timeout_s: number|null,
                    notify_on_ask: boolean,          // “成员提问时通知我”：员工 ask_user / 审批卡片出现时发浏览器通知 + 用户事件流 notice（默认 true）
-                   allow_workflow_edits: boolean}   // “允许员工修改 workflow”，默认 false（architecture.md §8.1）
+                   allow_workflow_edits: boolean,   // “允许员工修改 workflow”，默认 false（architecture.md §8.1）
+                   approval_routing: "lead_first"|"user",  // 审批方式：组长先判断，拿不准再问我（默认）/ 全部问我（architecture.md §9.2）
+                   lead_review_timeout_s: number}   // 组长判断时限，10–3600，默认 120；到期转给用户
 ThreadView      = {id, project_id, no, title, brief, status, queue_position: number|null, pause_reason: string, branch, base_branch /*旧字段*/, pr_number, pr_url, pr_state, summary,
                    repos: ThreadRepoView[],   // 每个仓库：{repo, base_branch, branch_created, pr_number, pr_url, pr_state}；pr_number/pr_url = 第一个 PR，pr_state = 汇总
                    auto_approve, opened_by, members: EmployeeBrief[], main_tasks: MainTaskView[],
@@ -92,7 +94,8 @@ CheckView       = {name, status, conclusion, url, summary}
 NodeView        = {id, name, online, since, last_seen_at, version, protocol, isolation: "agent_user"|"sandbox"|"none", runtimes: {...}, capacity: {...},
                    active_sessions, parked_sessions, queued, isolated, labels, max_active_sessions, park_after_s, created_at}
 RoleView        = {id, tier, role, title, runtime, count, node_ids, description, instructions, model, effort,
-                   skip_permissions, can_delegate, read_only, allowed_tools, disallowed_tools, sandbox, max_turns, gate, task_kinds, look, sort}
+                   permission_mode: "auto"|"bypass"|"ask",  // 省略 = auto；非成员岗位总是 auto（architecture.md §9.1）
+                   can_delegate, read_only, allowed_tools, disallowed_tools, sandbox, max_turns, gate, task_kinds, look, sort}
                   // read_only：只读岗位（组长同款策略，Codex = sandbox read-only）；gate 为 review|decision 时默认 true。
                   // Team 页规则行显示“只读：git diff/log/show、gh pr view，不改代码”
 GitConnectionView = {id, name, kind: "token"|"app", login, installation_id, created_at, permissions, needs_permission_approval,
@@ -220,7 +223,7 @@ PR 类交付物的 `detail.state` 由平台轮询 / webhook 更新。设计类�
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/roles` | → `{roles: RoleView[], warnings: [{role, message}]}`（例如“跳过权限确认的岗位没有 isolated 节点”“候选节点已删除”） |
-| PUT | `/api/roles` | `{roles: RoleView[]}` 整体保存（按 `id` 匹配，缺失的删除）→ 同 GET。校验：恰好一个 coordinator（Claude）和一个 lead；`role` 键唯一且符合 `^[a-z][a-z0-9-]{0,23}$`；`count` 1–8；节点属于本人；`look.outfit`/`look.accessory` 是当前全局布局里存在的键；`skip_permissions` 时候选节点须为 `agent_user` 或 `isolated`，Codex 岗位的候选节点不能是 `sandbox`/`none` 级别（`architecture.md` §10.3）；`read_only` 省略时按 `gate` 取默认值；`skills` 每项须是内置或自己上传的技能，最多 16 个，统筹不能有技能；`plugins` 每项是 `name` 或 `name@N`，须是自己的或内置的插件（钉住的版本须存在），最多 8 个、不重复，统筹不能有插件 |
+| PUT | `/api/roles` | `{roles: RoleView[]}` 整体保存（按 `id` 匹配，缺失的删除）→ 同 GET。校验：恰好一个 coordinator（Claude）和一个 lead；`role` 键唯一且符合 `^[a-z][a-z0-9-]{0,23}$`；`count` 1–8；节点属于本人；`look.outfit`/`look.accessory` 是当前全局布局里存在的键；`permission_mode` 是 `auto`/`bypass`/`ask`，只读岗位不能 `bypass`；`bypass` 的候选节点不隔离时照常保存，`warnings` 说明这些节点上会改用自动判断；Codex 岗位的候选节点不能是 `sandbox`/`none` 级别（`architecture.md` §10.3）；`read_only` 省略时按 `gate` 取默认值；`skills` 每项须是内置或自己上传的技能，最多 16 个，统筹不能有技能；`plugins` 每项是 `name` 或 `name@N`，须是自己的或内置的插件（钉住的版本须存在），最多 8 个、不重复，统筹不能有插件 |
 | GET | `/api/roles/presets` | → `{roles: RoleView[]}`：Team 页“从预设添加”的现成岗位（“设计师” = `design` + `docs` 技能） |
 | GET | `/api/skills` | → `{skills: [{id, name, description, builtin, size}]}`：随平台发布的技能（`id` 为空）+ 管理员发布的内置技能（`builtin`，有 `id`；自己有同名技能时不列出）+ 自己上传的 |
 | POST | `/api/skills` | `{zip?: base64, files?: [{path, content}]}` → 201 `Skill`（`SKILL.md` front matter 给出 name/description；只收文本，≤ 64 个文件、≤ 512 KB） |

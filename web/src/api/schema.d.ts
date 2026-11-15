@@ -1967,20 +1967,34 @@ export interface components {
         };
         Delivery: {
             allow_workflow_edits: boolean;
+            /**
+             * @description lead_first: the thread lead decides permission requests and asks the user when unsure; user: every request asks the user
+             * @enum {string}
+             */
+            approval_routing: "lead_first" | "user";
             /** Format: int64 */
             approval_timeout_s: number | null;
             ci: components["schemas"]["CISettings"];
             gates: components["schemas"]["Gates"];
+            /**
+             * Format: int64
+             * @description Seconds the lead has before a request goes to the user
+             */
+            lead_review_timeout_s: number;
             /** @enum {string} */
             merge_method: "squash" | "merge" | "rebase";
             notify_on_ask: boolean;
         };
         DeliveryPatch: {
             allow_workflow_edits?: boolean;
+            /** @enum {string} */
+            approval_routing?: "lead_first" | "user";
             /** Format: int64 */
             approval_timeout_s?: number;
             ci?: components["schemas"]["CIPatch"];
             gates?: components["schemas"]["GatesPatch"];
+            /** Format: int64 */
+            lead_review_timeout_s?: number;
             /** @enum {string} */
             merge_method?: "squash" | "merge" | "rebase";
             notify_on_ask?: boolean;
@@ -2616,6 +2630,11 @@ export interface components {
             max_turns: number | null;
             model: string;
             node_ids: string[] | null;
+            /**
+             * @description auto: Claude's classifier decides, unclear calls ask; bypass: no checks (isolated nodes only, else auto); ask: every non-read tool asks
+             * @enum {string}
+             */
+            permission_mode?: "auto" | "bypass" | "ask";
             /** @description Plugins the role's sessions load: name (latest version) or name@N (pinned) */
             plugins: string[] | null;
             /** @description Omitted: defaults to true for gate review/decision */
@@ -2626,7 +2645,6 @@ export interface components {
             sandbox: string;
             /** @description Skill names (built-in or uploaded) the role's sessions load */
             skills: string[] | null;
-            skip_permissions: boolean;
             /**
              * Format: int64
              * @description Display order; PUT uses the position in the list

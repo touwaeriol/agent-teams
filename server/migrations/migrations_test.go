@@ -164,7 +164,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 95 {
+	if migrations.Latest() != 96 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -222,4 +222,53 @@ INSERT INTO at_conversations (id, user_id, title, project_id, kind) VALUES ('th1
 INSERT INTO at_threads (id, project_id, user_id, no, title, branch, base_branch, started_at)
   VALUES ('th1', 'p1', 'u1', 1, 't', 'thread/1-t', 'develop', now());
 INSERT INTO at_merge_queue (id, thread_id, employee, head_branch) VALUES ('mq1', 'th1', 'dev-1', 'thread/1/dev-1');
+`
+
+// TestPermissionModesMigration: 00096 turns skip_permissions into permission_mode (true →
+// bypass, else auto) on roles and on the role copies in at_employees.spec, and back on Down.
+func TestPermissionModesMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 95); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(modesSeed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 96); err != nil {
+		t.Fatal(err)
+	}
+	var modes, specs string
+	_ = db.QueryRow(`SELECT string_agg(role || '=' || permission_mode, ',' ORDER BY role) FROM at_roles`).Scan(&modes)
+	_ = db.QueryRow(`SELECT string_agg(name || '=' || (spec->>'permission_mode') || ':' || (spec ? 'skip_permissions')::text, ',' ORDER BY name)
+		FROM at_employees`).Scan(&specs)
+	if modes != "dev=auto,lead=auto,ops=bypass" || specs != "dev-1=auto:false,ops-1=bypass:false" {
+		t.Fatalf("roles %s employees %s", modes, specs)
+	}
+	if _, err := db.Exec(`UPDATE at_roles SET read_only = true WHERE role = 'ops'`); err == nil {
+		t.Fatal("a read-only role cannot bypass")
+	}
+	if _, err := p.DownTo(ctx, 95); err != nil {
+		t.Fatal(err)
+	}
+	var skip bool
+	_ = db.QueryRow(`SELECT skip_permissions FROM at_roles WHERE role = 'ops'`).Scan(&skip)
+	if !skip {
+		t.Fatal("down lost skip_permissions")
+	}
+}
+
+const modesSeed = `
+INSERT INTO at_users (id, email, password_hash, role) VALUES ('u1', 'a@example.com', 'x', 'admin');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
+INSERT INTO at_roles (id, user_id, tier, role) VALUES ('r1', 'u1', 'lead', 'lead');
+INSERT INTO at_roles (id, user_id, tier, role) VALUES ('r2', 'u1', 'member', 'dev');
+INSERT INTO at_roles (id, user_id, tier, role, skip_permissions) VALUES ('r3', 'u1', 'member', 'ops', true);
+INSERT INTO at_employees (id, project_id, name, tier, role, runtime, spec)
+  VALUES ('e1', 'p1', 'dev-1', 'member', 'dev', 'claude', '{"role":"dev","skip_permissions":false}'),
+         ('e2', 'p1', 'ops-1', 'member', 'ops', 'claude', '{"role":"ops","skip_permissions":true}');
 `

@@ -73,6 +73,13 @@ type Service struct {
 	validator *protocol.Validator
 	log       *slog.Logger
 	handlers  map[string]handler
+	// Reviews settles permission requests the lead decides (review_permission).
+	Reviews Reviewer
+}
+
+// Reviewer is the approvals engine as review_permission needs it.
+type Reviewer interface {
+	LeadReview(ctx context.Context, tx *core.Tx, lead core.Employee, threadID, requestID, decision, reason string) (string, error)
 }
 
 // New builds the service and hooks its continuations into the scheduler and delivery engines.
@@ -100,7 +107,7 @@ func (s *Service) table() map[string]handler {
 		protocol.ToolCompleteTask: s.completeTask, protocol.ToolPushBranch: s.pushBranch, protocol.ToolReportProgress: s.reportProgress,
 		protocol.ToolAskLead: s.askLead, protocol.ToolReadMessages: s.readMessages, protocol.ToolListTeam: s.listTeam,
 		protocol.ToolGetTask: s.getTask, protocol.ToolRequestReview: s.requestReview, protocol.ToolAssignSubtask: s.assignSubtask,
-		protocol.ToolWaitTask: s.waitTask, protocol.ToolPublishFile: s.publishFile,
+		protocol.ToolWaitTask: s.waitTask, protocol.ToolPublishFile: s.publishFile, protocol.ToolReviewPermission: s.reviewPermission,
 	}
 }
 

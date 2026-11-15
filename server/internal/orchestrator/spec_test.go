@@ -48,9 +48,9 @@ func TestBuildOpenPerTier(t *testing.T) {
 		!contains(l.AllowedTools, "Read") || lead.Cwd != "projects/p1/threads/3/lead" || l.PermissionMode != "dontAsk" {
 		t.Fatalf("lead %+v", l)
 	}
-	dev, _ := buildOpen(open(t, emp("member", "dev", store.Role{SkipPermissions: true, CanDelegate: true}), store.Node{Isolation: "sandbox"}))
+	dev, _ := buildOpen(open(t, emp("member", "dev", store.Role{PermissionMode: store.PermBypass, CanDelegate: true}), autoNode("sandbox")))
 	d := dev.Claude
-	if d.PermissionMode != "default" || !contains(d.AllowedTools, "Bash(pnpm add:*)") || dev.Cwd != "projects/p1/threads/3/dev-1" ||
+	if d.PermissionMode != "auto" || d.AllowDangerouslySkipPermissions != nil || !contains(d.AllowedTools, "Bash(pnpm add:*)") || dev.Cwd != "projects/p1/threads/3/dev-1" ||
 		d.Sandbox == nil || len(d.Sandbox.ExtraWritePaths) != 2 || d.Sandbox.ExtraWritePaths[1] != "projects/p1/repos/o__web/.git" {
 		t.Fatalf("dev on a sandbox node must not bypass permissions: %+v", d)
 	}
@@ -61,9 +61,41 @@ func TestBuildOpenPerTier(t *testing.T) {
 	if !contains(names, "assign_subtask") || !contains(names, "complete_task") || contains(names, "open_thread") {
 		t.Fatalf("member tools %v", names)
 	}
-	isolated, _ := buildOpen(open(t, emp("member", "dev", store.Role{SkipPermissions: true}), store.Node{Isolation: "agent_user"}))
+	isolated, _ := buildOpen(open(t, emp("member", "dev", store.Role{PermissionMode: store.PermBypass}), store.Node{Isolation: "agent_user"}))
 	if isolated.Claude.PermissionMode != "bypassPermissions" || !*isolated.Claude.AllowDangerouslySkipPermissions {
 		t.Fatalf("skip permissions on agent_user node: %+v", isolated.Claude)
+	}
+}
+
+func autoNode(isolation string) store.Node {
+	return store.Node{Isolation: isolation, LastHello: []byte(`{"features":["sessions","permission_auto"]}`)}
+}
+
+// TestClaudeModes: auto by default (default on daemons without auto support), ask is
+// default, bypass only on isolated nodes; read-only members stay dontAsk whatever the mode.
+func TestClaudeModes(t *testing.T) {
+	ro := true
+	cases := []struct {
+		spec store.Role
+		node store.Node
+		want string
+	}{
+		{store.Role{PermissionMode: store.PermAuto}, autoNode("sandbox"), "auto"},
+		{store.Role{PermissionMode: store.PermAuto}, store.Node{Isolation: "sandbox"}, "default"},
+		{store.Role{PermissionMode: store.PermAsk}, autoNode("agent_user"), "default"},
+		{store.Role{PermissionMode: store.PermBypass}, autoNode("none"), "auto"},
+		{store.Role{PermissionMode: store.PermBypass}, store.Node{Isolation: "none", Isolated: true}, "bypassPermissions"},
+		{store.Role{PermissionMode: store.PermAuto, ReadOnly: &ro}, autoNode("agent_user"), "dontAsk"},
+	}
+	for i, c := range cases {
+		o, _ := buildOpen(open(t, emp("member", "dev", c.spec), c.node))
+		if string(o.Claude.PermissionMode) != c.want {
+			t.Errorf("case %d: mode %q, want %q", i, o.Claude.PermissionMode, c.want)
+		}
+	}
+	lead, _ := buildOpen(open(t, emp("lead", "lead", store.Role{PermissionMode: store.PermBypass}), store.Node{Isolated: true}))
+	if lead.Claude.PermissionMode != "dontAsk" {
+		t.Fatalf("lead %q", lead.Claude.PermissionMode)
 	}
 }
 
@@ -74,6 +106,17 @@ func TestCodexOptions(t *testing.T) {
 	if o.Codex == nil || o.Codex.Sandbox != "workspace-write" || o.Codex.ApprovalPolicy != "on-request" ||
 		!strings.Contains(string(*o.Codex.Config), "projects/p1/repos/o__web/.git") {
 		t.Fatalf("codex member %+v", o.Codex)
+	}
+	e.Spec.PermissionMode = store.PermAsk
+	if o, _ = buildOpen(open(t, e, store.Node{Isolation: "agent_user"})); o.Codex.ApprovalPolicy != "untrusted" {
+		t.Fatalf("ask codex %+v", o.Codex)
+	}
+	e.Spec.PermissionMode = store.PermBypass
+	if o, _ = buildOpen(open(t, e, store.Node{Isolation: "sandbox"})); o.Codex.Sandbox != "workspace-write" || o.Codex.ApprovalPolicy != "on-request" {
+		t.Fatalf("bypass codex off an isolated node %+v", o.Codex)
+	}
+	if o, _ = buildOpen(open(t, e, store.Node{Isolation: "agent_user"})); o.Codex.Sandbox != "danger-full-access" || o.Codex.ApprovalPolicy != "never" {
+		t.Fatalf("bypass codex %+v", o.Codex)
 	}
 	ro := true
 	e.Spec.ReadOnly = &ro

@@ -10,7 +10,7 @@ export const me = {
 const delivery = {
   gates: { review: true, decision: true, merge_queue: true },
   ci: { mode: "checks", required: [], appear_timeout_s: 300, timeout_s: 3600, on_missing: "pass" },
-  merge_method: "squash", approval_timeout_s: null, notify_on_ask: true, allow_workflow_edits: false,
+  merge_method: "squash", approval_timeout_s: null, notify_on_ask: true, allow_workflow_edits: false, approval_routing: "lead_first", lead_review_timeout_s: 120,
 };
 
 const project = (id, name, extra = {}) => ({
@@ -120,7 +120,10 @@ const q = (id, thread_no, asker, kind, text, extra = {}) => ({
 });
 
 export const questions = {
-  t12: [q("q1", 12, "dev-2", "approval", "允许执行命令？", { detail: { tool_name: "Bash", input: { command: "pnpm add -D @tanstack/react-virtual" } }, task_id: "t6" })],
+  t12: [
+    q("q0", 12, "dev-1", "approval", "允许执行命令？", { detail: { tool_name: "Bash", input: { command: "pnpm test" }, reviewer: "lead-12", review: { by: "lead:lead-12", decision: "allow", reason: "任务要跑测试" } }, status: "answered", answer: "allow", decided_by: "lead:lead-12", answered_at: ago(4) }),
+    q("q1", 12, "dev-2", "approval", "允许执行命令？", { detail: { tool_name: "Bash", input: { command: "pnpm add -D @tanstack/react-virtual" }, reviewer: "lead-12", review: { by: "lead:lead-12", decision: "ask_user", reason: "要加新依赖，你来定" } }, task_id: "t6" }),
+  ],
   t13: [q("q2", 13, "lead-13", "question", "节点上还没装 codex，先用 CODEX_API_KEY 还是你去登录？", { options: ["用 CODEX_API_KEY", "我去登录"] })],
   c0: [],
 };
@@ -244,7 +247,7 @@ export const nodeSessions = {
 };
 
 const role = (id, tier, roleKey, title, runtime, count, node_ids, description, lk, extra = {}) => ({
-  id, tier, role: roleKey, title, runtime, count, node_ids, description, instructions: "", model: "", effort: "", skip_permissions: false,
+  id, tier, role: roleKey, title, runtime, count, node_ids, description, instructions: "", model: "", effort: "", permission_mode: "auto",
   can_delegate: false, read_only: null, allowed_tools: [], disallowed_tools: [], sandbox: "", max_turns: null, gate: "", task_kinds: [], skills: [], plugins: [], look: lk, sort: 0, ...extra,
 });
 
@@ -252,7 +255,7 @@ export const roles = [
   role("r0", "coordinator", "coordinator", "项目统筹", "claude", 1, ["n1"], "和你对话，判断要做什么，开讨论串、跟进状态、向你汇报。", look("#7A4FD1", "hoodie", "headset", "#3B2A20"), { model: "opus" }),
   role("r1", "lead", "lead", "组长", "claude", 1, ["n1", "n2"], "列主要任务、拆小任务、审查成员提交并合并，完成后向统筹交总结。", look("#C8622A", "suit", "none", "#3B2A20"), { model: "opus" }),
   role("r2", "member", "dev", "开发", "claude", 2, ["n1", "n2"], "从任务池领开发类小任务，在自己的 worktree 里改代码、跑测试、提交。", look("#4C7BD0", "tee", "none", "#8A5A36"), { model: "sonnet", sort: 1, task_kinds: ["dev"], skills: ["docs"], plugins: ["release-notes@2", "pr-review"] }),
-  role("r3", "member", "qa", "测试", "codex", 1, ["n2"], "领测试类小任务：补用例、跑全量测试、复现问题并报告。", look("#3F8F6B", "coat", "glasses", "#6B4A2E"), { sort: 2, skip_permissions: true, sandbox: "workspace-write", task_kinds: ["test"], plugins: ["playwright-kit"] }),
+  role("r3", "member", "qa", "测试", "codex", 1, ["n2"], "领测试类小任务：补用例、跑全量测试、复现问题并报告。", look("#3F8F6B", "coat", "glasses", "#6B4A2E"), { sort: 2, permission_mode: "bypass", sandbox: "workspace-write", task_kinds: ["test"], plugins: ["playwright-kit"] }),
   role("r4", "member", "review", "审查", "claude", 1, ["n1"], "审查合并前的改动，指出问题，不改代码。", look("#4A4843", "suit", "glasses", "#1F1E1C"), { sort: 3, gate: "review", model: "opus" }),
 ];
 

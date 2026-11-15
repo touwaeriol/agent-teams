@@ -7,7 +7,7 @@ import { useAction } from "@/api/mutations";
 import { keys } from "@/api/queries";
 import type { QuestionView, ThreadView } from "@/api/views";
 import { Spinner } from "@/components/common";
-import { approvalCommand, threadBases, threadPRs } from "@/lib/present";
+import { approvalCommand, reviewNote, threadBases, threadPRs } from "@/lib/present";
 import { cn } from "@/lib/utils";
 import { safeHref } from "@/lib/safeurl";
 
@@ -110,6 +110,7 @@ export function ApprovalCard({ cid, pid, question, variant = "soft" }: { cid: st
   );
   return (
     <Frame variant={variant} head={head} code={approvalCommand(question)} label={`${question.asker} 请求权限`}>
+      {reviewNote(question) && <p className="text-xs leading-5 text-[#B4530B]">{reviewNote(question)}</p>}
       {question.detail.description && <p className="text-xs leading-5 text-muted-foreground">{question.detail.description}</p>}
       {denying ? (
         <ReasonBox

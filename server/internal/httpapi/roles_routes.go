@@ -215,7 +215,7 @@ func (s *Server) replaceRoles(ctx context.Context, userID string, list []store.R
 	if err := s.store.Tx(ctx, func(tx *store.Store) error { return tx.ReplaceRoles(ctx, userID, list) }); err != nil {
 		return err
 	}
-	s.auditSkipPermissions(ctx, userID, known, list)
+	s.auditBypass(ctx, userID, known, list)
 	return nil
 }
 
@@ -227,9 +227,10 @@ func rolesInvalid(problems []roles.Problem) error {
 	return invalid(fields, problems[0].Message)
 }
 
-func (s *Server) auditSkipPermissions(ctx context.Context, userID string, before map[string]store.Role, after []store.Role) {
+// auditBypass records every role switched to bypass (skip_permissions_on, the action name of v2.0).
+func (s *Server) auditBypass(ctx context.Context, userID string, before map[string]store.Role, after []store.Role) {
 	for _, r := range after {
-		if r.SkipPermissions && !before[r.ID].SkipPermissions {
+		if r.PermissionMode == store.PermBypass && before[r.ID].PermissionMode != store.PermBypass {
 			s.audit(ctx, userID, "skip_permissions_on", "role", r.ID, map[string]string{"role": r.Role})
 		}
 	}

@@ -21,7 +21,8 @@
       "enum": [
         "default",
         "acceptEdits",
-        "bypassPermissions"
+        "bypassPermissions",
+        "auto"
       ]
     },
     "model": {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  approvalCommand, checkLook, deliverableKind, groupThreads, mainProgress, markTone, memberDoing, memberTone, mergeLook, openForUser, poolColumns,
+  approvalCommand, approvalHistory, approvalVerdict, deciderLabel, reviewNote, checkLook, deliverableKind, groupThreads, mainProgress, markTone, memberDoing, memberTone, mergeLook, openForUser, poolColumns,
   projectTint, onePRLook, prLook, questionLine, taskLook, taskTitle, threadBases, threadKind, threadLine, threadPRs, visibleMainTasks, INK,
 } from "@/lib/present";
 import { question, task, thread } from "./fixtures";
@@ -125,5 +125,34 @@ describe("looks", () => {
     expect(deliverableKind("slides").label).toBe("幻灯片");
     expect(deliverableKind("figma").label).toBe("链接");
     expect(projectTint("agent team")).toEqual(projectTint("agent team"));
+  });
+});
+
+describe("approval decisions", () => {
+  const bash = { tool_name: "Bash", input: { command: "npm test" }, reviewer: "lead-1" };
+  it("names who decided", () => {
+    expect(deciderLabel("lead:lead-1")).toBe("组长 lead-1");
+    expect(deciderLabel("user:u_1")).toBe("你");
+    expect(deciderLabel("policy:thread_auto")).toBe("全部放行");
+    expect(deciderLabel("policy:rule:pr_1")).toBe("总是允许的规则");
+    expect(deciderLabel("policy:rule:builtin-read-only")).toBe("只读命令白名单");
+    const byLead = question("q1", { kind: "approval", status: "answered", answer: "deny", decided_by: "lead:lead-1",
+      detail: { ...bash, review: { by: "lead:lead-1", decision: "deny", reason: "不能删数据" } } });
+    expect(approvalVerdict(byLead)).toBe("组长 lead-1 拒绝 · 不能删数据");
+    expect(approvalVerdict(question("q2", { kind: "approval", status: "answered", answer: "allow_always", decided_by: "user:u1", detail: bash }))).toBe("你 总是允许");
+    expect(approvalVerdict(question("q3", { kind: "approval", audience: "lead", detail: bash }))).toBe("等组长 lead-1 判断");
+  });
+  it("explains why a card reached the user and keeps the history newest first", () => {
+    const asked = question("q4", { kind: "approval", detail: { ...bash, review: { by: "lead:lead-1", decision: "ask_user", reason: "会改线上" } } });
+    expect(reviewNote(asked)).toBe("组长 lead-1 拿不准：会改线上");
+    expect(reviewNote(question("q5", { kind: "approval", detail: { ...bash, review: { by: "policy:lead_timeout", decision: "ask_user", reason: "" } } }))).toContain("没有及时判断");
+    expect(reviewNote(question("q6", { kind: "approval", detail: bash }))).toBeNull();
+    const list = [
+      question("a", { kind: "approval", status: "answered", answered_at: "2026-11-14T10:01:00Z" }),
+      question("b", { kind: "approval", status: "answered", answered_at: "2026-11-14T10:05:00Z" }),
+      question("c", { kind: "approval" }),
+      question("d", { kind: "question", status: "answered" }),
+    ];
+    expect(approvalHistory(list).map((q) => q.id)).toEqual(["b", "a"]);
   });
 });

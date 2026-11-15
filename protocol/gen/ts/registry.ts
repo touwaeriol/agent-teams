@@ -126,6 +126,7 @@ export interface ToolInputs {
   reply_to: T.ReplyToInput;
   report_progress: T.ReportProgressInput;
   request_review: T.RequestReviewInput;
+  review_permission: T.ReviewPermissionInput;
   send_message: T.SendMessageInput;
   set_status: T.SetStatusInput;
   thread_status: T.ThreadStatusInput;
@@ -159,6 +160,7 @@ export interface ToolResults {
   reply_to: unknown;
   report_progress: unknown;
   request_review: T.RequestReviewResult;
+  review_permission: unknown;
   send_message: unknown;
   set_status: unknown;
   thread_status: T.ThreadStatusResult;
@@ -344,6 +346,13 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     requires: null,
     description: "Ask a teammate to review your work (creates a review task under your current task) and wait for the result. You cannot ask yourself.",
     input_schema: {"description":"Ask a teammate to review your work (creates a review task under your current task) and wait for the result. You cannot ask yourself.","type":"object","required":["reviewer","summary"],"additionalProperties":false,"properties":{"reviewer":{"description":"Instance or role name.","type":"string","minLength":1},"summary":{"description":"What to review.","type":"string","minLength":1}}},
+  },
+  review_permission: {
+    tiers: ["lead"],
+    blocking: [],
+    requires: null,
+    description: "Decide a member's permission request (\"[Permission request q5 from dev-1 ...]\"). allow lets the member run it once, deny refuses it (the reason goes to the member), ask_user hands it to the user. Choose ask_user when unsure, or when it touches secrets, production, money, other people or anything irreversible. Decide quickly: the member waits.",
+    input_schema: {"description":"Decide a member's permission request (\"[Permission request q5 from dev-1 ...]\"). allow lets the member run it once, deny refuses it (the reason goes to the member), ask_user hands it to the user. Choose ask_user when unsure, or when it touches secrets, production, money, other people or anything irreversible. Decide quickly: the member waits.","type":"object","required":["request_id","decision","reason"],"additionalProperties":false,"properties":{"request_id":{"type":"string","pattern":"^q[0-9]+$"},"decision":{"type":"string","enum":["allow","deny","ask_user"]},"reason":{"description":"One sentence; shown to the user in the thread's activity and on the card.","type":"string","minLength":1,"maxLength":500}}},
   },
   send_message: {
     tiers: ["lead","member"],

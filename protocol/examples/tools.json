@@ -12,6 +12,7 @@
 "list_tasks":[{},{"status":"pending"}],
 "cancel_task":[{"task_id":"t4","reason":"superseded"}],
 "reply_to":[{"question_id":"q3","answer":"Use at_main_tasks."}],
+"review_permission":[{"request_id":"q5","decision":"allow","reason":"npm install is part of the task."},{"request_id":"q6","decision":"ask_user","reason":"It deletes the staging database."}],
 "broadcast":[{"text":"Rebase on the thread branch."}],
 "send_message":[{"to":"lead","text":"Blocked on review."},{"to":"qa-1","text":"Ready to test."}],
 "enqueue_merge":[{"member":"dev-1"},{"task_id":"t7"}],
@@ -39,6 +40,7 @@
 "complete_task":[{"task_id":"t8","summary":"x","status":"maybe"}],
 "push_branch":[{"force":true}],
 "publish_file":[{"path":"a.html","kind":"design"},{"path":"a.html","kind":"design","title":"x","deliverable_id":"42"},{"path":"a.html","kind":"design","title":"x","url":"https://x"}],"publish_deliverable":[{"kind":"doc","title":"x","url":"not a url"}],
-"reply_to":[{"question_id":"ap_1","answer":"x"}]
+"reply_to":[{"question_id":"ap_1","answer":"x"}],
+"review_permission":[{"request_id":"q5","decision":"allow_always","reason":"x"},{"request_id":"q5","decision":"allow"}]
 }
 }

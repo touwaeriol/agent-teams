@@ -24,7 +24,8 @@ type yamlRole struct {
 	Instructions    string    `yaml:"instructions,omitempty"`
 	Model           string    `yaml:"model,omitempty"`
 	Effort          string    `yaml:"effort,omitempty"`
-	SkipPermissions bool      `yaml:"skip_permissions,omitempty"`
+	PermissionMode  string    `yaml:"permission_mode,omitempty"`
+	SkipPermissions bool      `yaml:"skip_permissions,omitempty"` // legacy: true reads as permission_mode: bypass
 	CanDelegate     bool      `yaml:"can_delegate,omitempty"`
 	ReadOnly        *bool     `yaml:"read_only,omitempty"`
 	AllowedTools    []string  `yaml:"allowed_tools,omitempty"`
@@ -121,10 +122,18 @@ func fromNew(text string, nodeIDs map[string]string) (Parsed, error) {
 
 func (p *Parsed) add(r store.Role) { p.Roles = append(p.Roles, r) }
 
+// yamlMode reads permission_mode, or the legacy skip_permissions flag.
+func yamlMode(y yamlRole) string {
+	if y.PermissionMode == "" && y.SkipPermissions {
+		return store.PermBypass
+	}
+	return y.PermissionMode
+}
+
 func fromYAMLRole(y yamlRole, tier, key string, nodeIDs map[string]string, report *[]string) store.Role {
 	r := store.Role{Tier: tier, Role: first(y.Role, key), Title: y.Title, Runtime: runtimeOf(y.Type), Count: y.Count,
 		Description: y.Description, Instructions: y.Instructions, Model: y.Model, Effort: y.Effort,
-		SkipPermissions: y.SkipPermissions, CanDelegate: y.CanDelegate, ReadOnly: y.ReadOnly,
+		PermissionMode: yamlMode(y), CanDelegate: y.CanDelegate, ReadOnly: y.ReadOnly,
 		AllowedTools: y.AllowedTools, DisallowedTools: y.DisallowedTools, Sandbox: y.Sandbox, MaxTurns: y.MaxTurns,
 		Gate: y.Gate, TaskKinds: y.TaskKinds, Skills: y.Skills, Plugins: y.Plugins}
 	r.NodeIDs = resolveNodes(append(nonEmpty(y.Node), y.Nodes...), nodeIDs, r.Role, report)
@@ -174,8 +183,8 @@ func fromV1(text string, nodeIDs map[string]string) (Parsed, error) {
 	lead := v1Role(*leader, Lead, "lead", nodeIDs, &p.Report)
 	coord := lead
 	coord.Tier, coord.Role, coord.Title, coord.Runtime = Coordinator, "coordinator", "项目统筹", Claude
-	coord.SkipPermissions, coord.CanDelegate, coord.Sandbox = false, false, ""
-	lead.SkipPermissions, lead.Title = false, first(lead.Title, "组长")
+	coord.PermissionMode, coord.CanDelegate, coord.Sandbox = store.PermAuto, false, ""
+	lead.PermissionMode, lead.Title = store.PermAuto, first(lead.Title, "组长")
 	p.add(coord)
 	p.add(lead)
 	taken := map[string]bool{"coordinator": true, "lead": true}
@@ -200,9 +209,12 @@ func findEmployee(team v1Team, name string) *v1Employee {
 }
 
 func v1Role(e v1Employee, tier, key string, nodeIDs map[string]string, report *[]string) store.Role {
-	skip := e.PermissionMode == "bypassPermissions" || e.Sandbox == "danger-full-access"
+	mode := store.PermAuto
+	if (e.PermissionMode == "bypassPermissions" || e.Sandbox == "danger-full-access") && tier == Member {
+		mode = store.PermBypass
+	}
 	r := store.Role{Tier: tier, Role: key, Title: e.Name, Runtime: runtimeOf(e.Type), Count: 1,
-		Description: e.Description, Instructions: e.Instructions, Model: e.Model, SkipPermissions: skip && tier == Member,
+		Description: e.Description, Instructions: e.Instructions, Model: e.Model, PermissionMode: mode,
 		CanDelegate: e.CanDelegate, AllowedTools: e.AllowedTools, DisallowedTools: e.DisallowedTools,
 		MaxTurns: e.MaxTurns}
 	if r.Runtime == Codex {
@@ -282,9 +294,17 @@ func ToYAML(roles []store.Role, nodeNames map[string]string) (string, error) {
 	return buf.String(), enc.Close()
 }
 
+// yamlModeOf leaves the default (auto) out of the YAML.
+func yamlModeOf(r store.Role) string {
+	if r.PermissionMode == store.PermAuto {
+		return ""
+	}
+	return r.PermissionMode
+}
+
 func toYAMLRole(r store.Role, nodeNames map[string]string) yamlRole {
 	y := yamlRole{Role: r.Role, Title: r.Title, Type: "claude_code", Count: r.Count, Description: r.Description,
-		Instructions: r.Instructions, Model: r.Model, Effort: r.Effort, SkipPermissions: r.SkipPermissions,
+		Instructions: r.Instructions, Model: r.Model, Effort: r.Effort, PermissionMode: yamlModeOf(r),
 		CanDelegate: r.CanDelegate, AllowedTools: r.AllowedTools, DisallowedTools: r.DisallowedTools,
 		Sandbox: r.Sandbox, MaxTurns: r.MaxTurns, Gate: r.Gate, TaskKinds: r.TaskKinds, Skills: r.Skills, Plugins: r.Plugins,
 		Look: &yamlLook{Color: r.Look.Color, Outfit: r.Look.Outfit, Accessory: r.Look.Accessory, Hair: r.Look.Hair}}

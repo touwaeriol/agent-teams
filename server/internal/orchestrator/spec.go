@@ -74,9 +74,35 @@ func readOnly(e core.Employee) bool {
 	return e.Tier == "lead" || (e.Spec.ReadOnly != nil && *e.Spec.ReadOnly)
 }
 
-// SkipPermissions reports whether the member may run in bypass mode on this node (§10.3).
-func SkipPermissions(e core.Employee, n store.Node) bool {
-	return e.Tier == "member" && e.Spec.SkipPermissions && !readOnly(e) && (n.Isolated || n.Isolation == "agent_user")
+// FeatureAutoMode is the hello feature of daemons that accept permission_mode "auto".
+const FeatureAutoMode = "permission_auto"
+
+// Bypass reports whether the member may run in bypass mode on this node (§10.3): only
+// bypass roles, never read-only ones, and only on isolated nodes.
+func Bypass(e core.Employee, n store.Node) bool {
+	return e.Tier == "member" && e.Spec.PermissionMode == store.PermBypass && !readOnly(e) && (n.Isolated || n.Isolation == "agent_user")
+}
+
+// ClaudeMode is the Claude permission mode a writing member opens in: bypassPermissions
+// (Bypass), default for ask roles and for daemons without auto support, else auto (also
+// the fallback of a bypass role on a node that is not isolated).
+func ClaudeMode(e core.Employee, n store.Node) string {
+	switch {
+	case Bypass(e, n):
+		return "bypassPermissions"
+	case e.Spec.PermissionMode == store.PermAsk || !NodeHas(n, FeatureAutoMode):
+		return "default"
+	}
+	return "auto"
+}
+
+// NodeHas reports whether the node's last hello listed a feature.
+func NodeHas(n store.Node, feature string) bool {
+	var hello struct {
+		Features []string `json:"features"`
+	}
+	_ = json.Unmarshal(n.LastHello, &hello)
+	return slices.Contains(hello.Features, feature)
 }
 
 // sessionInput is everything buildOpen needs.
@@ -220,11 +246,10 @@ func memberClaude(c *protocol.ClaudeSessionOptions, in sessionInput) {
 	c.Tools = slices.Clone(memberTools)
 	c.AllowedTools = mergeLists(c.AllowedTools, e.Spec.AllowedTools, in.rules)
 	c.DisallowedTools = mergeLists(e.Spec.DisallowedTools)
-	c.PermissionMode = "default"
+	c.PermissionMode = protocol.PermissionMode(ClaudeMode(e, in.node))
 	c.ProtectedRefs = in.protRefs
-	if SkipPermissions(e, in.node) {
+	if c.PermissionMode == "bypassPermissions" {
 		t := true
-		c.PermissionMode = "bypassPermissions"
 		c.AllowDangerouslySkipPermissions = &t
 	}
 	if in.node.Isolation == "sandbox" {
@@ -239,16 +264,25 @@ func codexOptions(in sessionInput) protocol.CodexSessionOptions {
 	c := protocol.CodexSessionOptions{Model: firstNonEmpty(e.Spec.Model, DefaultModel), DeveloperInstructions: &dev, Sandbox: "read-only", ApprovalPolicy: "never"}
 	switch {
 	case readOnly(e):
-	case SkipPermissions(e, in.node):
+	case Bypass(e, in.node):
 		c.Sandbox = "danger-full-access"
 	default:
-		c.Sandbox, c.ApprovalPolicy = "workspace-write", "on-request"
+		c.Sandbox, c.ApprovalPolicy = "workspace-write", protocol.CodexSessionOptionsApprovalPolicy(codexApprovals(e))
 		cfg, _ := json.Marshal(map[string]any{"sandbox_workspace_write": map[string]any{
 			"writable_roots": sharedGitDirs(e.ProjectID, in.repos), "network_access": true}})
 		raw := json.RawMessage(cfg)
 		c.Config = &raw
 	}
 	return c
+}
+
+// codexApprovals maps the role's mode for Codex: auto (and bypass off isolated nodes) lets
+// Codex decide what to ask (on-request); ask asks for everything but trusted reads (untrusted).
+func codexApprovals(e core.Employee) string {
+	if e.Spec.PermissionMode == store.PermAsk {
+		return "untrusted"
+	}
+	return "on-request"
 }
 
 func mergeLists(lists ...[]string) []string {

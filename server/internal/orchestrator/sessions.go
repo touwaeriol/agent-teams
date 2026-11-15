@@ -260,9 +260,21 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 	if err := o.addPlugins(ctx, tx, env.project.UserID, env.emp, &open); err != nil {
 		return err
 	}
+	if err := recordMode(ctx, tx, sess.ID, open); err != nil {
+		return err
+	}
 	_, err = o.gw.Enqueue(ctx, tx, node.ID, nodegw.Command{Type: protocol.TypeSessionOpen, Body: open,
 		SessionID: sess.ID, OpenGen: sess.OpenGen})
 	o.touch(tx, env.emp.ID, "session.open")
+	return err
+}
+
+// recordMode keeps the Claude mode the session opens in, so SetMode knows what it runs in.
+func recordMode(ctx context.Context, tx *core.Tx, sessionID string, open protocol.SessionOpen) error {
+	if open.Claude == nil {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `UPDATE at_agent_sessions SET permission_mode = $2 WHERE id = $1`, sessionID, string(open.Claude.PermissionMode))
 	return err
 }
 

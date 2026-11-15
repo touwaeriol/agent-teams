@@ -3304,6 +3304,7 @@ func (j *OpenThreadResult) UnmarshalJSON(value []byte) error {
 type PermissionMode string
 
 const PermissionModeAcceptEdits PermissionMode = "acceptEdits"
+const PermissionModeAuto PermissionMode = "auto"
 const PermissionModeBypassPermissions PermissionMode = "bypassPermissions"
 const PermissionModeDefault PermissionMode = "default"
 const PermissionModeDontAsk PermissionMode = "dontAsk"
@@ -3315,6 +3316,7 @@ var enumValues_PermissionMode = []interface{}{
 	"bypassPermissions",
 	"dontAsk",
 	"plan",
+	"auto",
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -4323,6 +4325,84 @@ func (j *ResumeRef) UnmarshalJSON(value []byte) error {
 		return fmt.Errorf("field %s length: must be >= %d", "sdk_session_id", 1)
 	}
 	*j = ResumeRef(plain)
+	return nil
+}
+
+// Decide a member's permission request ("[Permission request q5 from dev-1 ...]").
+// allow lets the member run it once, deny refuses it (the reason goes to the
+// member), ask_user hands it to the user. Choose ask_user when unsure, or when it
+// touches secrets, production, money, other people or anything irreversible.
+// Decide quickly: the member waits.
+type ReviewPermissionInput struct {
+	// Decision corresponds to the JSON schema field "decision".
+	Decision ReviewPermissionInputDecision `json:"decision"`
+
+	// One sentence; shown to the user in the thread's activity and on the card.
+	Reason string `json:"reason"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID QuestionID `json:"request_id"`
+}
+
+type ReviewPermissionInputDecision string
+
+const ReviewPermissionInputDecisionAllow ReviewPermissionInputDecision = "allow"
+const ReviewPermissionInputDecisionAskUser ReviewPermissionInputDecision = "ask_user"
+const ReviewPermissionInputDecisionDeny ReviewPermissionInputDecision = "deny"
+
+var enumValues_ReviewPermissionInputDecision = []interface{}{
+	"allow",
+	"deny",
+	"ask_user",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ReviewPermissionInputDecision) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_ReviewPermissionInputDecision {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_ReviewPermissionInputDecision, v)
+	}
+	*j = ReviewPermissionInputDecision(v)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ReviewPermissionInput) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["decision"]; raw != nil && !ok {
+		return fmt.Errorf("field decision in ReviewPermissionInput: required")
+	}
+	if _, ok := raw["reason"]; raw != nil && !ok {
+		return fmt.Errorf("field reason in ReviewPermissionInput: required")
+	}
+	if _, ok := raw["request_id"]; raw != nil && !ok {
+		return fmt.Errorf("field request_id in ReviewPermissionInput: required")
+	}
+	type Plain ReviewPermissionInput
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Reason)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "reason", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Reason)) > 500 {
+		return fmt.Errorf("field %s length: must be <= %d", "reason", 500)
+	}
+	*j = ReviewPermissionInput(plain)
 	return nil
 }
 
@@ -5342,6 +5422,7 @@ type SessionSetMode struct {
 type SessionSetModePermissionMode string
 
 const SessionSetModePermissionModeAcceptEdits SessionSetModePermissionMode = "acceptEdits"
+const SessionSetModePermissionModeAuto SessionSetModePermissionMode = "auto"
 const SessionSetModePermissionModeBypassPermissions SessionSetModePermissionMode = "bypassPermissions"
 const SessionSetModePermissionModeDefault SessionSetModePermissionMode = "default"
 
@@ -5349,6 +5430,7 @@ var enumValues_SessionSetModePermissionMode = []interface{}{
 	"default",
 	"acceptEdits",
 	"bypassPermissions",
+	"auto",
 }
 
 // UnmarshalJSON implements json.Unmarshaler.

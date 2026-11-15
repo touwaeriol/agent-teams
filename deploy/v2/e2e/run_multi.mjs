@@ -10,7 +10,7 @@
 //   node deploy/v2/e2e/run_multi.mjs <scratch-dir> [--model haiku]
 import { createWriteStream, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { answerApprovals, gitIsAncestor, gitShow, installDaemon, login, nodeOnline, record, roleBody, sql, startDaemon } from "./harness.mjs";
+import { answerApprovals, ASK_ME, gitIsAncestor, gitShow, installDaemon, login, nodeOnline, record, roleBody, sql, startDaemon } from "./harness.mjs";
 import { SSE, check, readEnv, sleep, waitFor } from "./lib.mjs";
 
 const dir = process.argv[2];
@@ -49,7 +49,7 @@ async function setup(c) {
   state.nodeId = node.node.id;
   state.nodeToken = node.token;
   const conn = await c.post("/api/git/connections", { name: "local-multi", token: "ghp_e2eToken" });
-  const project = await c.post("/api/projects", { name: "web + api", context: CONTEXT, require_acceptance: true,
+  const project = await c.post("/api/projects", { name: "web + api", context: CONTEXT, delivery: ASK_ME, require_acceptance: true,
     delivery: { ci: { mode: "off" } },
     repos: [{ repo: WEB, git_connection_id: conn.id }, { repo: API, git_connection_id: conn.id }] });
   check(project.repos?.map((r) => r.repo).join(",") === `${WEB},${API}`, `project binds ${WEB} and ${API} in order`, project.repos);

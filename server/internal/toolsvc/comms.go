@@ -8,6 +8,7 @@ import (
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 
+	"github.com/touwaeriol/agent-teams/server/internal/approvals"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
@@ -134,6 +135,23 @@ func (s *Service) replyTo(ctx context.Context, tx *core.Tx, c *call) (Result, er
 		return Result{}, refuse("问题 %s 不是待你回答的问题", q.ID)
 	}
 	return okText("已回答 " + q.ID), s.answer(ctx, tx, q, in.Answer, "employee:"+c.emp().Name)
+}
+
+// reviewPermission is the lead deciding a member's permission request (approvals.LeadReview).
+func (s *Service) reviewPermission(ctx context.Context, tx *core.Tx, c *call) (Result, error) {
+	t, err := requireThread(c)
+	if err != nil {
+		return Result{}, err
+	}
+	var in protocol.ReviewPermissionInput
+	if err := c.decode(&in); err != nil {
+		return Result{}, err
+	}
+	text, err := s.Reviews.LeadReview(ctx, tx, c.emp(), t.ID, string(in.RequestID), string(in.Decision), in.Reason)
+	if errors.Is(err, approvals.ErrNotReview) || errors.Is(err, approvals.ErrReviewTaken) || errors.Is(err, approvals.ErrBadDecision) {
+		return Result{}, refuse("%s：%s", in.RequestID, err.Error())
+	}
+	return okText(text), err
 }
 
 // AnswerQuestion is the user answering a question card (REST).

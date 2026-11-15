@@ -5,7 +5,7 @@ import { AsyncQueue } from "../../util/async.js";
 import { approvalId, msgUuid } from "../../util/ids.js";
 import { newId } from "../../util/ids.js";
 import { platformSdkServer, PLATFORM_PREFIX } from "../../toolhost/sdk-server.js";
-import { decideTool } from "../policy.js";
+import { autoAsk, decideTool } from "../policy.js";
 import { ResumeFailed, type Driver, type DriverContext, type EventFields, type OutgoingMessage, type StartResult } from "../types.js";
 import { buildClaudeOptions } from "./options.js";
 import type { MaterializedPlugin } from "../plugins.js";
@@ -228,6 +228,8 @@ export class ClaudeDriver implements Driver {
     const input = (i.tool_input ?? {}) as Record<string, unknown>;
     const verdict = decideTool(this.ctx.policy, i.tool_name, input, this.ctx.absCwd);
     if (verdict) return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: verdict.deny } };
+    const ask = this.claude.permission_mode === "auto" ? autoAsk(this.ctx.policy, i.tool_name, input, this.ctx.absCwd) : null;
+    if (ask) return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "ask", permissionDecisionReason: ask } };
     if (i.tool_name.startsWith(PLATFORM_PREFIX)) this.correlator.remember(i.tool_name.slice(PLATFORM_PREFIX.length), input, i.tool_use_id);
     this.toolStarts.set(i.tool_use_id, Date.now());
     this.emit({ kind: "tool_started", tool: i.tool_name, tool_use_id: i.tool_use_id, ...describeTool(i.tool_name, input) });

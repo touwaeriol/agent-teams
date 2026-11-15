@@ -21,7 +21,7 @@ import type { OfficeLayout } from "@/office";
 import { SkillLibrary } from "@/components/app/SkillLibrary";
 import { PluginLibrary } from "@/components/app/PluginLibrary";
 import { missingRefs, pinPlugin, refFor, resolvedVersion, runtimeNote, splitLibrary, togglePlugin, type PluginRef } from "@/lib/plugins";
-import { canHaveSkills, countText, fromPreset, kindText, LEVEL, newRole, previewTags, roleName, roleProblems, ruleText, skipHint, sortRoles, toggleSkill } from "@/lib/roles";
+import { canHaveSkills, countText, fromPreset, isReadOnly, kindText, LEVEL, newRole, PERMISSION_MODES, permissionHint, permissionMode, previewTags, roleName, roleProblems, ruleText, sortRoles, toggleSkill, type PermissionMode } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 
 export function TeamPage() {
@@ -100,7 +100,9 @@ export function TeamPage() {
 function RoleCard({ role, layout, onChange, onRemove }: { role: RoleView; layout: OfficeLayout; onChange: (p: Partial<RoleView>) => void; onRemove: () => void }) {
   const level = LEVEL[role.tier];
   const [editing, setEditing] = useState(false);
-  const skip = role.skip_permissions;
+  const nodes = useNodes();
+  const mode = permissionMode(role);
+  const skip = mode === "bypass";
   return (
     <article className={cn("flex flex-col gap-3.5 rounded-[14px] border bg-panel p-[18px]", skip && "border-[#EBC3C3]")}>
       <div className="flex items-start justify-between gap-2.5">
@@ -154,17 +156,38 @@ function RoleCard({ role, layout, onChange, onRemove }: { role: RoleView; layout
       <LookEditor role={role} layout={layout} onChange={(look) => onChange({ look })} />
       {canHaveSkills(role) && <SkillPicker value={role.skills ?? []} onChange={(skills) => onChange({ skills })} />}
       {canHaveSkills(role) && <PluginPicker role={role} onChange={(plugins) => onChange({ plugins })} />}
-      {role.tier === "member" && (
-        <label className="flex cursor-pointer items-center justify-between gap-3 border-t border-[#F1EFEA] pt-2.5">
-          <span className="flex flex-col gap-0.5">
-            <span className={cn("font-medium", skip && "text-destructive")}>跳过权限确认</span>
-            <span className="text-xs text-muted-foreground">{skipHint(role)}</span>
-          </span>
-          <Switch checked={skip} onCheckedChange={(v) => onChange({ skip_permissions: v })} aria-label="跳过权限确认" className="data-[state=checked]:bg-destructive" />
-        </label>
-      )}
+      {role.tier === "member" && !isReadOnly(role) && <PermissionField role={role} nodes={nodes.data ?? []} onChange={onChange} />}
       <RoleDialog open={editing} onOpenChange={setEditing} role={role} onSave={(p) => (onChange(p), setEditing(false))} />
     </article>
+  );
+}
+
+/** 权限: auto (default) / ask / bypass, with what it does and, for bypass on plain nodes, the fallback. */
+function PermissionField({ role, nodes, onChange }: { role: RoleView; nodes: NodeView[]; onChange: (p: Partial<RoleView>) => void }) {
+  const mode = permissionMode(role);
+  const hint = permissionHint(role, nodes);
+  const id = `perm-${role.id || role.role}`;
+  return (
+    <div className="flex flex-col gap-1.5 border-t border-[#F1EFEA] pt-2.5">
+      <span className="flex items-center justify-between gap-3">
+        <label htmlFor={id} className={cn("font-medium", mode === "bypass" && "text-destructive")}>
+          权限
+        </label>
+        <Select value={mode} onValueChange={(v) => onChange({ permission_mode: v as PermissionMode })}>
+          <SelectTrigger id={id} className="h-8 w-[168px] text-[13px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PERMISSION_MODES.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                {m.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </span>
+      <span className={cn("text-xs leading-[18px]", hint.warn ? "text-[#B4530B]" : "text-muted-foreground")}>{hint.text}</span>
+    </div>
   );
 }
 

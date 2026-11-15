@@ -12,20 +12,42 @@ export function Dot({ color, size = 7, className }: { color: string; size?: numb
   return <span aria-hidden className={cn("inline-block shrink-0 rounded-full", className)} style={{ width: size, height: size, background: color }} />;
 }
 
-/** A dot that pulses while someone is working (static otherwise). */
-export function LiveDot({ color, on, size = 8, className }: { color: string; on: boolean; size?: number; className?: string }) {
+/** The in-progress mark: a ring with a rotating arc (`.at-spin`; a gentle pulse with reduced motion). */
+export function Spin({ color, size = 8, className, label }: { color: string; size?: number; className?: string; label?: string }) {
+  const px = Math.max(size, 8);
   return (
-    <span aria-hidden className={cn("relative inline-flex shrink-0", className)} style={{ width: size, height: size }}>
-      {on && <span className="absolute inline-flex size-full animate-ping rounded-full opacity-60" style={{ background: color }} />}
-      <span className="relative inline-flex size-full rounded-full" style={{ background: color }} />
-    </span>
+    <svg
+      width={px}
+      height={px}
+      viewBox="0 0 16 16"
+      role={label ? "img" : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
+      data-spin=""
+      className={cn("at-spin shrink-0", className)}
+    >
+      <circle cx="8" cy="8" r="6" fill="none" stroke={color} strokeOpacity="0.22" strokeWidth="2.6" />
+      <path d="M8 2a6 6 0 0 1 6 6" fill="none" stroke={color} strokeWidth="2.6" strokeLinecap="round" />
+    </svg>
   );
 }
 
-/** Outlined status pill (进行中 / 等你 / 待验收 …). */
-export function StatusPill({ tone, label, className }: { tone: string; label: ReactNode; className?: string }) {
+/** Someone working: a spinner; otherwise a static dot. */
+export function LiveDot({ color, on, size = 8, className }: { color: string; on: boolean; size?: number; className?: string }) {
+  if (on) return <Spin color={color} size={size + 2} className={className} />;
+  return <Dot color={color} size={size} className={className} />;
+}
+
+/** A state's mark in lists: spinner while in progress, static dot otherwise. */
+export function StateMark({ look, size = 7 }: { look: { tone: string; spin?: boolean }; size?: number }) {
+  return look.spin ? <Spin color={look.tone} size={size + 3} /> : <Dot color={look.tone} size={size} />;
+}
+
+/** Outlined status pill (进行中 / 等你 / 待验收 …); in-progress pills lead with a spinner. */
+export function StatusPill({ tone, label, className, spin }: { tone: string; label: ReactNode; className?: string; spin?: boolean }) {
   return (
-    <span className={cn("whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs", className)} style={{ borderColor: tone, color: tone }}>
+    <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs", className)} style={{ borderColor: tone, color: tone }}>
+      {spin && <Spin color={tone} size={10} />}
       {label}
     </span>
   );
@@ -51,7 +73,7 @@ export function CheckMark({ status, size = 15 }: { status: MainTaskStatus; size?
     );
   if (status === "doing")
     return (
-      <svg width={size} height={size} viewBox="0 0 16 16" aria-label="进行中" className="shrink-0">
+      <svg width={size} height={size} viewBox="0 0 16 16" role="img" aria-label="进行中" data-spin="" className="at-spin shrink-0">
         <circle cx="8" cy="8" r="6.5" fill="none" stroke="#E7E5E0" strokeWidth="1.6" />
         <path d="M8 1.5a6.5 6.5 0 0 1 6.5 6.5" fill="none" stroke="#4A4843" strokeWidth="1.6" strokeLinecap="round" />
       </svg>

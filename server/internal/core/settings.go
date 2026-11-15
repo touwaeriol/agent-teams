@@ -23,7 +23,17 @@ type Delivery struct {
 	ApprovalTimeoutS   *int   `json:"approval_timeout_s"`
 	NotifyOnAsk        bool   `json:"notify_on_ask"`
 	AllowWorkflowEdits bool   `json:"allow_workflow_edits"`
+	// ApprovalRouting: lead_first (the thread lead decides, unsure → user) or user (every card asks the user).
+	ApprovalRouting    string `json:"approval_routing"`
+	LeadReviewTimeoutS int    `json:"lead_review_timeout_s"`
 }
+
+// Approval routings and the lead's default time to decide.
+const (
+	RouteLeadFirst        = "lead_first"
+	RouteUser             = "user"
+	DefaultLeadReviewSecs = 120
+)
 
 // builtinDelivery mirrors the REST layer's defaults (httpapi.builtinDelivery).
 func builtinDelivery() Delivery {
@@ -31,6 +41,7 @@ func builtinDelivery() Delivery {
 	d.Gates.Review, d.Gates.MergeQueue = true, true
 	d.CI.Mode, d.CI.Required, d.CI.AppearTimeoutS, d.CI.TimeoutS, d.CI.OnMissing = "checks", []string{}, 300, 3600, "pass"
 	d.MergeMethod, d.NotifyOnAsk = "squash", true
+	d.ApprovalRouting, d.LeadReviewTimeoutS = RouteLeadFirst, DefaultLeadReviewSecs
 	return d
 }
 

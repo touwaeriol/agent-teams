@@ -21,6 +21,13 @@ describe("Claude options", () => {
     expect(buildClaudeOptions({ ...base, resume: true, claude: claude() }).resume).toBe("u1");
   });
 
+  it("passes the role's permission mode through: auto, default (ask) and bypass", () => {
+    expect(buildClaudeOptions({ ...base, claude: claude({ permission_mode: "auto" }) })).toMatchObject({ permissionMode: "auto", allowDangerouslySkipPermissions: false });
+    expect(buildClaudeOptions({ ...base, claude: claude({ permission_mode: "default" }) }).permissionMode).toBe("default");
+    const bypass = buildClaudeOptions({ ...base, claude: claude({ permission_mode: "bypassPermissions", allow_dangerously_skip_permissions: true }) });
+    expect(bypass).toMatchObject({ permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true });
+  });
+
   it("builds sandbox settings with no writable paths for read-only sessions", () => {
     const s = buildSettings(claude({ read_only: true, sandbox: { enabled: true, write_paths: ["."], extra_write_paths: ["projects/p/repo/.git"] } }), "/r", "/r/p/lead", ["/s"]);
     expect(s).toMatchObject({ disableClaudeAiConnectors: true, sandbox: { enabled: true, allowUnsandboxedCommands: false, filesystem: { allowWrite: [], denyRead: ["/s"] } } });

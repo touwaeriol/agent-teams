@@ -163,6 +163,8 @@ func TestThreadEndToEnd(t *testing.T) {
 	b.must(200, "GET", "/api/roles", nil, nil)
 	var project struct{ ID string }
 	b.must(201, "POST", "/api/projects", map[string]any{"name": "demo", "context": "a demo project"}, &project)
+	// approvalFlow drives the user's card; lead review has its own tests (questions_test.go).
+	b.must(200, "PATCH", "/api/projects/"+project.ID, map[string]any{"delivery": map[string]any{"approval_routing": "user"}}, nil)
 	n := w.connect(node.Token, nodetest.Options{})
 	if n.Welcome.NodeID != node.Node.ID || n.Welcome.Protocol != 2 {
 		t.Fatalf("welcome %+v", n.Welcome)

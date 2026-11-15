@@ -586,6 +586,17 @@ function UsageTable({ title, rows }: { title: string; rows: UsageRow[] }) {
 
 // ── 高级 ────────────────────────────────────────────────────────────────
 
+const APPROVAL_ROUTING_DESC: Record<string, string> = {
+  lead_first: "成员的权限请求先交给讨论串的组长：放行、拒绝，或拿不准时转给你。组长自己的请求总是问你。",
+  user: "成员的每个权限请求都直接出卡片问你。",
+};
+
+export const LEAD_TIMEOUTS = [60, 120, 300, 600];
+
+export function leadTimeoutLabel(seconds: number): string {
+  return seconds % 60 === 0 ? `${seconds / 60} 分钟` : `${seconds} 秒`;
+}
+
 function AdvancedSection({ project }: { project: ProjectView }) {
   const update = useUpdate(project.id);
   const d = project.delivery;
@@ -594,6 +605,33 @@ function AdvancedSection({ project }: { project: ProjectView }) {
       <Heading>高级</Heading>
       <span className="pb-1 text-[13px] text-muted-foreground">审批与交付</span>
       <SwitchRow title="新讨论串默认“全部放行”" desc="打开后，讨论串里所有成员的操作都不再询问。适合你在旁边盯着的时候。" checked={project.auto_approve} onChange={(v) => update.mutate({ auto_approve: v })} />
+      <Row title="审批方式" desc={APPROVAL_ROUTING_DESC[d.approval_routing]}>
+        <Select value={d.approval_routing} onValueChange={(v) => update.mutate({ delivery: { approval_routing: v as "lead_first" | "user" } })}>
+          <SelectTrigger aria-label="审批方式" className="h-9 w-[236px] border-0 bg-raised">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="lead_first">组长先判断，拿不准再问我</SelectItem>
+            <SelectItem value="user">全部问我</SelectItem>
+          </SelectContent>
+        </Select>
+      </Row>
+      {d.approval_routing === "lead_first" && (
+        <Row title="组长判断时限" desc="组长在这段时间内没有判断，请求就转给你。">
+          <Select value={String(d.lead_review_timeout_s)} onValueChange={(v) => update.mutate({ delivery: { lead_review_timeout_s: Number(v) } })}>
+            <SelectTrigger aria-label="组长判断时限" className="h-9 w-36 border-0 bg-raised">
+              <SelectValue>{leadTimeoutLabel(d.lead_review_timeout_s)}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {LEAD_TIMEOUTS.map((s) => (
+                <SelectItem key={s} value={String(s)}>
+                  {leadTimeoutLabel(s)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Row>
+      )}
       <SwitchRow title="成员提问时通知我" desc="员工用“问你”提问、或请求权限时，侧栏和项目首页都会提醒。" checked={d.notify_on_ask} onChange={(v) => update.mutate({ delivery: { notify_on_ask: v } })} />
       <SwitchRow title="讨论串完成后需要我验收" desc="关闭后 PR 一通过检查就自动合并到基准分支。" checked={project.require_acceptance} onChange={(v) => update.mutate({ require_acceptance: v })} />
       <SwitchRow title="允许员工修改 workflow" desc="允许成员改 .github/workflows 下的文件（默认不允许）。" checked={d.allow_workflow_edits} onChange={(v) => update.mutate({ delivery: { allow_workflow_edits: v } })} />

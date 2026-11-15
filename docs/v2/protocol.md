@@ -86,7 +86,7 @@
     "claude": {"sdk": "0.3.325", "cli": "2.1.325", "auth": "subscription|api_key|none"},
     "codex":  {"cli": "0.169.0", "auth": "api_key|chatgpt|none", "sandbox_ok": true}
   },
-  "features": ["sessions", "codex_app_server", "git_worktree", "cred_helper", "legacy_runs", "upgrade"],
+  "features": ["sessions", "codex_app_server", "git_worktree", "cred_helper", "legacy_runs", "upgrade", "permission_auto"],
   "isolated": false,
   "isolation": "agent_user|sandbox|none"     // architecture.md §10.3，守护进程启动时探测
 }
@@ -209,7 +209,7 @@
 
 ### 4.5 `session.set_mode`（键：`id`）
 
-`{"session_id": "s_…", "permission_mode": "default|acceptEdits|bypassPermissions", "model": null}` → Claude `q.setPermissionMode()` / `q.setModel()`；Codex 在下一次 `turn/start` 带 `approvalPolicy`。`bypassPermissions` 只有会话以 `allowDangerouslySkipPermissions` 打开时才允许（守护进程否则回错误）。
+`{"session_id": "s_…", "permission_mode": "default|acceptEdits|bypassPermissions|auto", "model": null}` → Claude `q.setPermissionMode()` / `q.setModel()`；Codex 在下一次 `turn/start` 带 `approvalPolicy`。`bypassPermissions` 只有会话以 `allowDangerouslySkipPermissions` 打开时才允许（守护进程否则回错误）。`auto`（会话打开时的 `permission_mode` 也一样）只发给 hello `features` 含 `permission_auto` 的守护进程；`auto` 会话里写到工作目录外的文件工具调用由 PreToolUse 钩子改成 `ask`，一定走 `approval.request`。
 
 ### 4.6 `session.close`（键：`session_id + open_gen`）
 

@@ -17,13 +17,20 @@ export async function login(base) {
   return c;
 }
 
-/** roleBody fills a role template with the defaults the e2e runs use. */
+/**
+ * roleBody fills a role template with the defaults the e2e runs use. Members ask for every
+ * write (permission_mode "ask") so the runs see real approval cards; with the default "auto"
+ * the classifier would approve the small edits these runs make.
+ */
 export function roleBody(r, i, model) {
-  return { id: "", runtime: "claude", node_ids: [], description: r.title, model, effort: "", skip_permissions: false,
+  return { id: "", runtime: "claude", node_ids: [], description: r.title, model, effort: "", permission_mode: "ask",
     can_delegate: false, allowed_tools: [], disallowed_tools: [], sandbox: "", max_turns: null, gate: "", task_kinds: [], skills: [], plugins: [],
     look: { color: ["#7A4FD1", "#C8622A", "#4C7BD0", "#2E9E6B"][i % 4], outfit: ["hoodie", "suit", "tee", "hoodie"][i % 4], accessory: "none", hair: null },
     sort: i, ...r };
 }
+
+/** The runs answer approval cards themselves, so they go straight to the user (not the lead first). */
+export const ASK_ME = { approval_routing: "user" };
 
 export function installDaemon(base, nodeDir) {
   const pkg = join(nodeDir, "pkg");

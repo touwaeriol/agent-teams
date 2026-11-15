@@ -151,7 +151,7 @@ CREATE TABLE at_roles (
   instructions     TEXT NOT NULL DEFAULT '',
   model            TEXT NOT NULL DEFAULT '',            -- 空 = 平台默认 claude-opus-5-5
   effort           TEXT NOT NULL DEFAULT '',
-  skip_permissions BOOLEAN NOT NULL DEFAULT FALSE,      -- 只对 member 生效
+  permission_mode  TEXT NOT NULL DEFAULT 'auto',        -- auto | bypass | ask（00096 取代 skip_permissions）；只对 member 生效
   can_delegate     BOOLEAN NOT NULL DEFAULT FALSE,
   read_only        BOOLEAN NOT NULL DEFAULT FALSE,      -- 只读岗位：组长同款策略（disallowed Edit/Write/NotebookEdit + argv Bash 白名单 + 沙箱无可写路径 + init 核对；
                                                         -- Codex = sandbox read-only）。API 保存时 gate IN ('review','decision') 且未显式给值 → true
@@ -170,7 +170,7 @@ CREATE TABLE at_roles (
   CHECK (tier IN ('coordinator','lead','member')),
   CHECK (runtime IN ('claude','codex')),
   CHECK (NOT (tier = 'coordinator' AND runtime <> 'claude')),
-  CHECK (NOT (read_only AND skip_permissions))
+  CHECK (NOT (read_only AND permission_mode = 'bypass'))
 );
 CREATE UNIQUE INDEX at_roles_key ON at_roles (user_id, COALESCE(project_id, ''), role);
 CREATE UNIQUE INDEX at_roles_one_coord ON at_roles (user_id, COALESCE(project_id, '')) WHERE tier = 'coordinator';
@@ -195,7 +195,9 @@ ALTER TABLE at_projects
     --  "ci":{"mode":"checks","required":[],"appear_timeout_s":300,"timeout_s":3600,"on_missing":"pass"},
     --  "merge_method":"squash","approval_timeout_s":null,
     --  "notify_on_ask":true,            -- “成员提问时通知我”
-    --  "allow_workflow_edits":false}    -- 推送作业令牌是否带 workflows: write
+    --  "allow_workflow_edits":false,    -- 推送作业令牌是否带 workflows: write
+    --  "approval_routing":"lead_first", -- 审批方式：lead_first | user（architecture.md §9.2）
+    --  "lead_review_timeout_s":120}     -- 组长判断时限
     -- require_acceptance=false 时 PR 的必需 check 通过后按 merge_method 自动合并（architecture.md §8.4）
   ADD COLUMN IF NOT EXISTS office_layout TEXT NOT NULL DEFAULT '';          -- '' = 全局默认；否则布局 id
 
@@ -368,7 +370,7 @@ CREATE TABLE at_agent_sessions (
   branch          TEXT NOT NULL DEFAULT '',
   state           TEXT NOT NULL DEFAULT 'opening', -- opening | active | turn_running | parked | queued | crashed | closed
   open_gen        INT NOT NULL DEFAULT 0,
-  permission_mode TEXT NOT NULL DEFAULT 'default',
+  permission_mode TEXT NOT NULL DEFAULT 'default', -- 会话打开时的 Claude 模式（auto / default / bypassPermissions / dontAsk），set_mode 后更新
   init            JSONB NOT NULL DEFAULT '{}',     -- 最近一次 session.opened.init（工具核对）
   last_event_no   BIGINT NOT NULL DEFAULT 0,
   opened_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -698,7 +700,7 @@ CREATE TABLE at_attachments (   -- 用户附在消息上的图片
 | `at_nodes` | 原表 + 新列 | P1/P2 | `token_hash` 不变 → 旧令牌继续有效；`max_runs`（hello 里）→ `max_active_sessions` 初值 |
 | `at_git_connections` | 原表 + 新列 | P1 | PAT 密文 Fernet 不变；App 连接只用 `installation_id` |
 | `at_projects` | 原表 + 新列 | P3 | 默认值即旧行为（worktree、需验收）；`clear_repo` 等语义不变 |
-| `at_teams` | 转换为 `at_roles`，原表只读保留 | 用户切到 v2 时（Go 迁移函数 `ConvertTeam(user)`） | 新格式（`coordinator/lead/members`）直接映射；旧格式 `leader + employees`：leader → `lead` 岗位（同时复制为 `coordinator`，节点相同），每个 employee → `count:1` 的 member 岗位（`role` = 原名）；`node` 名 → `node_ids`；`permission_mode: bypassPermissions` → `skip_permissions: true`；`sandbox: danger-full-access` → `skip_permissions: true`；`allowed_tools`/`disallowed_tools`/`model`/`max_turns`/`can_delegate`/`instructions`/`description` 原样；`claude_command`/`extra_args`/`workdir` 丢弃（v2 不支持，转换报告里列出）。P6 后删表 |
+| `at_teams` | 转换为 `at_roles`，原表只读保留 | 用户切到 v2 时（Go 迁移函数 `ConvertTeam(user)`） | 新格式（`coordinator/lead/members`）直接映射；旧格式 `leader + employees`：leader → `lead` 岗位（同时复制为 `coordinator`，节点相同），每个 employee → `count:1` 的 member 岗位（`role` = 原名）；`node` 名 → `node_ids`；`permission_mode: bypassPermissions` → `permission_mode: bypass`；`sandbox: danger-full-access` → `permission_mode: bypass`；`allowed_tools`/`disallowed_tools`/`model`/`max_turns`/`can_delegate`/`instructions`/`description` 原样；`claude_command`/`extra_args`/`workdir` 丢弃（v2 不支持，转换报告里列出）。P6 后删表 |
 | `at_conversations` | 原表 + `kind`（P1）+ `updated_at`（P3） | P1/P3 | v1 数据全部 `kind='chat'`，v2 里“旧对话（只读）”；`history`（Claude session id）不再使用；`plan` JSONB 仅用于旧对话展示（v2 用 `at_main_tasks`） |
 | `at_messages` | 原表 + 新列 | P3 | 旧数据 `author=''`：role leader → 显示为“负责人” |
 | `at_tasks` | 原表 + 新列 | P3 | 旧数据 `thread_id IS NULL`；v1 状态值是 v2 的子集，**v2 行对 v1 不可见只靠 v1 防护补丁**（§0） |

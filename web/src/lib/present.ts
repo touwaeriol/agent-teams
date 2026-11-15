@@ -21,6 +21,8 @@ export const INK = {
 export interface Look {
   tone: string;
   label: string;
+  /** In progress: drawn as a rotating spinner instead of a static dot. */
+  spin?: boolean;
 }
 
 export type ThreadKind = "wait" | "doing" | "queued" | "review" | "paused" | "done" | "failed" | "archived";
@@ -40,7 +42,7 @@ export function threadKind(t: Pick<ThreadView, "status" | "counts">): ThreadKind
 
 export const THREAD_LOOK: Record<ThreadKind, Look> = {
   wait: { tone: INK.wait, label: "等你" },
-  doing: { tone: INK.doing, label: "进行中" },
+  doing: { tone: INK.doing, label: "进行中", spin: true },
   queued: { tone: INK.gray, label: "排队中" },
   review: { tone: INK.review, label: "待验收" },
   paused: { tone: INK.gray, label: "已暂停" },
@@ -102,6 +104,51 @@ export function questionLine(q: QuestionView): string {
   return `${q.asker.startsWith("lead") ? "组长" : q.asker}问：${q.text}`;
 }
 
+const DECIDERS: [string, string][] = [
+  ["user:", "你"],
+  ["policy:thread_auto", "全部放行"],
+  ["policy:rule:builtin-deny-list", "平台禁止名单"],
+  ["policy:rule:builtin-read-only", "只读命令白名单"],
+  ["policy:rule:builtin-skip-permissions", "跳过权限确认"],
+  ["policy:rule:", "总是允许的规则"],
+  ["policy:timeout", "等待超时"],
+  ["cancelled", "已取消"],
+];
+
+/** Who settled an approval, in words: 你 / 组长 lead-1 / 全部放行 / 总是允许的规则 … */
+export function deciderLabel(decidedBy: string | null): string {
+  if (!decidedBy) return "";
+  if (decidedBy.startsWith("lead:")) return `组长 ${decidedBy.slice(5)}`;
+  return DECIDERS.find(([prefix]) => decidedBy.startsWith(prefix))?.[1] ?? decidedBy;
+}
+
+const VERDICT: Record<string, string> = { allow: "放行", allow_always: "总是允许", deny: "拒绝" };
+
+/** One line of the approval history: "组长 lead-1 放行 · 任务要跑测试". */
+export function approvalVerdict(q: Pick<QuestionView, "status" | "audience" | "answer" | "decided_by" | "detail">): string {
+  if (q.status === "cancelled") return "已取消";
+  if (q.status === "open") return q.audience === "lead" ? `等组长 ${q.detail.reviewer ?? ""} 判断`.trim() : "等你处理";
+  const who = deciderLabel(q.decided_by);
+  const reason = q.decided_by?.startsWith("lead:") ? q.detail.review?.reason : "";
+  return `${who} ${VERDICT[q.answer ?? ""] ?? q.answer ?? ""}${reason ? ` · ${reason}` : ""}`;
+}
+
+/** Why a card reached the user although the lead reviews first (null: it came straight to the user). */
+export function reviewNote(q: Pick<QuestionView, "detail">): string | null {
+  const r = q.detail.review;
+  if (!r || r.decision !== "ask_user") return null;
+  if (r.by.startsWith("lead:")) return `组长 ${r.by.slice(5)} 拿不准：${r.reason}`;
+  return `组长 ${q.detail.reviewer ?? ""} 没有及时判断，转给你`;
+}
+
+/** Decided and waiting approvals of a thread, newest first (the card history). */
+export function approvalHistory(list: QuestionView[] | undefined, limit = 6): QuestionView[] {
+  return (list ?? [])
+    .filter((q) => q.kind === "approval" && !(q.status === "open" && q.audience === "user"))
+    .sort((a, b) => Date.parse(b.answered_at ?? b.created_at) - Date.parse(a.answered_at ?? a.created_at))
+    .slice(0, limit);
+}
+
 /** The command or call an approval card shows in its code block. */
 export function approvalCommand(q: Pick<QuestionView, "detail" | "text">): string {
   const input = q.detail.input ?? {};
@@ -147,12 +194,12 @@ export function visibleMainTasks(list: MainTaskView[], keep: number, expanded: b
 
 const TASK_LOOK: Record<TaskStatus, Look> = {
   pending: { tone: INK.gray, label: "待领取" },
-  claimed: { tone: INK.doing, label: "已领取" },
-  running: { tone: INK.doing, label: "进行中" },
+  claimed: { tone: INK.doing, label: "已领取", spin: true },
+  running: { tone: INK.doing, label: "进行中", spin: true },
   blocked: { tone: INK.wait, label: "等依赖" },
   review: { tone: INK.review, label: "待审查" },
   decision: { tone: INK.decision, label: "待决策" },
-  merging: { tone: INK.merge, label: "合并中" },
+  merging: { tone: INK.merge, label: "合并中", spin: true },
   done: { tone: INK.done, label: "完成" },
   failed: { tone: INK.bad, label: "失败" },
   cancelled: { tone: INK.gray, label: "已取消" },
@@ -258,7 +305,7 @@ export function projectTint(name: string): [string, string] {
 
 const MERGE_LOOK: Record<string, Look> = {
   queued: { tone: INK.gray, label: "排队" },
-  merging: { tone: INK.merge, label: "合并中" },
+  merging: { tone: INK.merge, label: "合并中", spin: true },
   ci_running: { tone: INK.doing, label: "跑 CI" },
   conflict: { tone: INK.wait, label: "有冲突" },
   ci_failed: { tone: INK.bad, label: "CI 失败" },
@@ -271,7 +318,8 @@ export function mergeLook(status: string): Look {
 }
 
 export function checkLook(c: { status: string; conclusion: string | null }): Look {
-  if (c.status !== "completed") return { tone: INK.doing, label: c.status === "queued" ? "排队" : "运行中" };
+  if (c.status === "queued") return { tone: INK.doing, label: "排队" };
+  if (c.status !== "completed") return { tone: INK.doing, label: "运行中", spin: true };
   if (c.conclusion === "success" || c.conclusion === "neutral" || c.conclusion === "skipped") return { tone: INK.done, label: "通过" };
   return { tone: INK.bad, label: c.conclusion ?? "失败" };
 }

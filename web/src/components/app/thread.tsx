@@ -5,16 +5,17 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import type { MainTaskView, QuestionView, ThreadView } from "@/api/views";
 import { isWorking, liveLine, threadActive } from "@/lib/live";
-import { groupThreads, leadOf, mainCount, markTone, memberDoing, memberTone, threadLine } from "@/lib/present";
+import { groupThreads, leadOf, mainCount, markTone, memberDoing, memberTone, threadLine, threadLook } from "@/lib/present";
 import { cn } from "@/lib/utils";
-import { CheckMark, LiveDot } from "./bits";
+import { CheckMark, LiveDot, Spin } from "./bits";
 import { ThreadMenu } from "./ThreadMenu";
 import { ReviewCard, WaitingCard, type CardVariant } from "./cards";
 
-/** The round mark before a thread in lists: outlined in the state colour, filled with ✓ when done. */
+/** The round mark before a thread in lists: a spinner while in progress, outlined in the state colour otherwise, filled with ✓ when done. */
 export function ThreadMark({ thread }: { thread: ThreadView }) {
   const tone = markTone(thread);
   const done = thread.status === "done";
+  if (threadLook(thread).spin) return <Spin color={tone} size={16} className="mt-0.5" label="进行中" />;
   return (
     <span
       aria-hidden

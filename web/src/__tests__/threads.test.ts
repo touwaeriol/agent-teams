@@ -6,7 +6,7 @@ import type { EmployeeBrief, ThreadView } from "@/api/views";
 import { detailTabOf } from "@/components/app/ThreadDetail";
 import { menuItems } from "@/components/app/ThreadMenu";
 import { IMAGE_MAX_BYTES, IMAGE_MAX_COUNT, imageProblem, pickImages } from "@/lib/images";
-import { activityLine, cardsByAsker, elapsed, featured, isWorking, liveLine, stateLabel, taskProgress, waitingReason } from "@/lib/live";
+import { activityLine, askingLabel, cardsByAsker, elapsed, featured, isWorking, liveLine, stateLabel, taskProgress, waitingReason } from "@/lib/live";
 import { clampWidth, dragWidth, loadWidth, PANEL_DEFAULT, PANEL_MAX, PANEL_MIN, panelKey, saveWidth } from "@/lib/panelWidth";
 import { groupThreads } from "@/lib/present";
 import { threadPath } from "@/pages/Main";
@@ -25,6 +25,9 @@ describe("live progress", () => {
     expect(isWorking(running)).toBe(true);
     expect(isWorking(member("dev-2", "idle"))).toBe(false);
     expect(stateLabel(running)).toBe("在跑");
+    expect(askingLabel(member("dev-4", "raising_hand"), false)).toBe("等组长回复");
+    expect(askingLabel(member("dev-4", "raising_hand"), true)).toBe("等你审批");
+    expect(askingLabel(running, false)).toBe("在跑");
     expect(activityLine(running)).toBe("Bash npm test");
     const asking = member("dev-3", "raising_hand");
     const card = question("q1", { asker: "dev-3", kind: "approval", detail: { input: { command: "rm -rf build" } } });

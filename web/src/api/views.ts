@@ -161,6 +161,9 @@ export interface QuestionDetail {
   description?: string;
   diff?: string;
   source?: string;
+  /** Lead review (approval_routing lead_first): the lead asked, its verdict and reason. */
+  reviewer?: string;
+  review?: { by: string; decision: "allow" | "deny" | "ask_user"; reason: string };
 }
 
 export interface QuestionView {
