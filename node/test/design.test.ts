@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, existsSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
@@ -43,6 +44,9 @@ describe("skills", () => {
     expect(() => materializeSkills(root, { employee, skills: [skill("evil", { "../../x.md": "x" })] })).toThrow();
     expect(() => materializeSkills(root, { employee, skills: [skill("evil", { ".claude-plugin/hooks.json": "x" })] })).toThrow();
     expect(() => materializeSkills(root, { employee, skills: [skill("../evil", { "SKILL.md": "x" })] })).toThrow();
+    // An odd employee name never climbs out of (or wipes) its own directory.
+    const m = materializeSkills(root, { employee: { ...employee, name: ".." }, skills: [skill("ok", { "SKILL.md": "x" })] })!;
+    expect(m.pluginDir).toBe(join(root, "p1", "3", "_.."));
   });
 
   it("passes the plugin and the qualified skill names to the SDK", () => {
@@ -97,6 +101,15 @@ describe("publish_file upload", () => {
     for (const p of ["../x.md", join(outside, "x.md"), "link.md", "run.sh", "noindex", "missing.md", ".", ""]) {
       await expect(prepareUpload(dir, p), p).rejects.toBeInstanceOf(UploadError);
     }
+  });
+
+  it("refuses a FIFO or socket instead of blocking on it, alone or inside a site", async () => {
+    const dir = workdir();
+    execFileSync("mkfifo", [join(dir, "pipe.html")]);
+    await expect(prepareUpload(dir, "pipe.html")).rejects.toThrow(/regular file/);
+    execFileSync("mkfifo", [join(dir, "design", "pipe.css")]);
+    const up = await prepareUpload(dir, "design");
+    expect(up.upload.files.map((f) => f.path)).not.toContain("pipe.css");
   });
 
   it("enforces the size limit and chunks large files", async () => {

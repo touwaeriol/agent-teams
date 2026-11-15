@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -85,6 +86,27 @@ func TestFromZipStripsFolderAndJunk(t *testing.T) {
 	}
 	if _, err := FromZip([]byte("not a zip")); !IsProblem(err) {
 		t.Fatalf("want problem, got %v", err)
+	}
+}
+
+// A small zip that inflates to many files or many bytes is refused while reading, before
+// the whole archive is held in memory.
+func TestFromZipStopsBombs(t *testing.T) {
+	many := map[string]string{"SKILL.md": okSkill}
+	for i := 0; i < MaxFiles+5; i++ {
+		many[fmt.Sprintf("ref/%03d.md", i)] = "x"
+	}
+	if _, err := FromZip(zipOf(t, many)); !IsProblem(err) || !strings.Contains(err.Error(), "最多") {
+		t.Fatalf("too many files: %v", err)
+	}
+	big := strings.Repeat("a", MaxFileBytes-1)
+	heavy := map[string]string{"SKILL.md": okSkill, "a.md": big, "b.md": big, "c.md": big}
+	data := zipOf(t, heavy)
+	if len(data) > 64<<10 {
+		t.Fatalf("test zip should compress well, is %d bytes", len(data))
+	}
+	if _, err := FromZip(data); !IsProblem(err) || !strings.Contains(err.Error(), "合计") {
+		t.Fatalf("too many bytes: %v", err)
 	}
 }
 

@@ -32,8 +32,14 @@ export function materializeSkills(skillsRoot: string, spec: Pick<SessionOpen, "e
 }
 
 function employeeDir(skillsRoot: string, e: SessionOpen["employee"]): string {
-  const parts = [e.project_id, e.thread_no ? String(e.thread_no) : "project", e.name].map((p) => p.replace(/[^A-Za-z0-9_.-]/g, "_"));
+  const parts = [e.project_id, e.thread_no ? String(e.thread_no) : "project", e.name].map(safeSegment);
   return resolveInRoot(skillsRoot, join(...parts));
+}
+
+/** One directory name: unsafe characters become _, and "." / ".." never navigate. */
+function safeSegment(p: string): string {
+  const s = p.replace(/[^A-Za-z0-9_.-]/g, "_");
+  return /^\.*$/.test(s) ? `_${s}` : s;
 }
 
 function writeSkill(pluginDir: string, skill: SkillBundle): void {

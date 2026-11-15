@@ -14,8 +14,13 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// ErrBadChunk is a chunk whose data is not base64 of at most ChunkBytes.
+// ErrBadChunk is a chunk whose data is not base64 of at most ChunkBytes, or that would
+// leave the session more unclaimed data than MaxPending.
 var ErrBadChunk = errors.New("bad file.chunk data")
+
+// MaxPending is how much unclaimed chunk data one session may leave in the database
+// (two full uploads), so a daemon cannot fill it with chunks no tool.call ever claims.
+const MaxPending = 2 * MaxBytes
 
 // SaveChunk stores one file.chunk (idempotent by upload_id + index) and drops chunks
 // of uploads that were never claimed by a tool.call within a day.
@@ -26,6 +31,14 @@ func SaveChunk(ctx context.Context, q store.DB, m *protocol.FileChunk) error {
 	}
 	if _, err := q.Exec(ctx, `DELETE FROM at_upload_chunks WHERE created_at < now() - interval '1 day'`); err != nil {
 		return err
+	}
+	var pending int
+	if err := q.QueryRow(ctx, `SELECT COALESCE(sum(length(data)), 0) FROM at_upload_chunks WHERE session_id = $1`,
+		m.SessionID).Scan(&pending); err != nil {
+		return err
+	}
+	if pending+len(data) > MaxPending {
+		return ErrBadChunk
 	}
 	_, err = q.Exec(ctx, `INSERT INTO at_upload_chunks (upload_id, idx, session_id, data) VALUES ($1,$2,$3,$4)
 		ON CONFLICT (upload_id, idx) DO NOTHING`, m.UploadID, m.Index, m.SessionID, data)

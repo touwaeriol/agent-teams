@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { lstat, readdir, readFile, realpath } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { ToolUpload, UploadFile } from "../protocol.js";
 import { newId } from "../util/ids.js";
@@ -47,10 +48,10 @@ export function contentType(path: string): string | undefined {
 export async function prepareUpload(cwd: string, rawPath: unknown): Promise<PreparedUpload> {
   const abs = await resolveInside(cwd, rawPath);
   const st = await lstat(abs);
+  if (!st.isDirectory() && !st.isFile()) throw new UploadError(`${String(rawPath)}: not a regular file`);
   const picked = st.isDirectory() ? await walkSite(abs) : [checkFile({ path: basename(abs), abs })];
   checkSize((await Promise.all(picked.map((p) => lstat(p.abs)))).reduce((n, s) => n + s.size, 0));
-  const bodies = await Promise.all(picked.map((p) => readFile(p.abs)));
-  checkSize(bodies.reduce((n, b) => n + b.length, 0));
+  const bodies = await readAll(picked);
   const files: UploadFile[] = picked.map((p, i) => ({ path: p.path, size: bodies[i]!.length, sha256: sha256(bodies[i]!), content_type: contentType(p.path)! }));
   const chunks = chunk(Buffer.concat(bodies)).map((c) => c.toString("base64"));
   return { upload: { upload_id: newId("up_"), chunks: chunks.length, files: files as ToolUpload["files"] }, chunks };
@@ -65,6 +66,45 @@ async function resolveInside(cwd: string, rawPath: unknown): Promise<string> {
   });
   if (!isInside(root, real) || real === root) throw new UploadError("publish_file only publishes files inside your working directory");
   return real;
+}
+
+/** Reads the picked files in order within MAX_BYTES in total (files may change after lstat). */
+async function readAll(picked: Picked[]): Promise<Buffer[]> {
+  const bodies: Buffer[] = [];
+  let total = 0;
+  for (const p of picked) {
+    const body = await readRegular(p, MAX_BYTES - total);
+    total += body.length;
+    bodies.push(body);
+  }
+  return bodies;
+}
+
+/**
+ * Reads one file without following a symlink swapped in after the path check and without
+ * blocking on a FIFO (O_NOFOLLOW | O_NONBLOCK, then fstat must say regular file), and stops
+ * once more than `budget` bytes arrive.
+ */
+async function readRegular(p: Picked, budget: number): Promise<Buffer> {
+  const fh = await open(p.abs, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch(() => {
+    throw new UploadError(`${p.path}: cannot open (symlinks are not published)`);
+  });
+  try {
+    if (!(await fh.stat()).isFile()) throw new UploadError(`${p.path}: not a regular file`);
+    const parts: Buffer[] = [];
+    let got = 0;
+    for (;;) {
+      const buf = Buffer.alloc(Math.min(CHUNK_BYTES, budget - got + 1));
+      const { bytesRead } = await fh.read(buf, 0, buf.length, null);
+      if (bytesRead === 0) break;
+      parts.push(buf.subarray(0, bytesRead));
+      got += bytesRead;
+      if (got > budget) checkSize(MAX_BYTES - budget + got);
+    }
+    return Buffer.concat(parts);
+  } finally {
+    await fh.close();
+  }
 }
 
 function checkSize(total: number): void {

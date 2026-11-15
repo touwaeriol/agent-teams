@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -14,6 +15,7 @@ import (
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 
+	"github.com/touwaeriol/agent-teams/server/internal/artifacts"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw/nodetest"
 	"github.com/touwaeriol/agent-teams/server/internal/orchapi"
@@ -176,6 +178,22 @@ func TestDesignerSkillsAndPublishFile(t *testing.T) {
 
 // TestPublishFileRefusals: bad checksums, missing chunks, unsupported types, a directory
 // without index.html and foreign deliverable ids are explained, not stored.
+// Chunks no tool.call claims may not pile up: past MaxPending a session's chunks are dropped,
+// and its next publish fails as incomplete instead of filling the database.
+func TestUnclaimedChunksAreCapped(t *testing.T) {
+	tm, _ := startDesignTeam(t)
+	gen := protocol.OpenGen(tm.dev.gen)
+	piece := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte("a"), artifacts.ChunkBytes))
+	for i := 0; i < artifacts.MaxPending/artifacts.ChunkBytes; i++ {
+		tm.dev.send(protocol.TypeFileChunk, protocol.FileChunk{SessionID: protocol.SessionID(tm.dev.session), OpenGen: &gen,
+			UploadID: protocol.UploadID(fmt.Sprintf("up_%026d", 100+i/5)), Index: i % 5, Data: piece})
+	}
+	res := tm.dev.publish(map[string]any{"path": "a.md", "kind": "doc", "title": "x"}, 1<<20, upFile{"a.md", "# hi"})
+	if res.Ok || !strings.Contains(text(res), "不完整") {
+		t.Fatalf("publish over the pending cap: %+v", res)
+	}
+}
+
 func TestPublishFileRefusals(t *testing.T) {
 	tm, _ := startDesignTeam(t)
 	cases := []struct {

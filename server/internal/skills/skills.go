@@ -226,13 +226,21 @@ func FromZip(data []byte) ([]File, error) {
 		return nil, problem("不是有效的 zip 文件")
 	}
 	var files []File
+	total := 0
 	for _, zf := range zr.File {
 		if skipEntry(zf.Name) || zf.FileInfo().IsDir() {
 			continue
 		}
+		if len(files) >= MaxFiles {
+			return nil, problem("技能最多 %d 个文件", MaxFiles)
+		}
 		f, err := readEntry(zf)
 		if err != nil {
 			return nil, err
+		}
+		// Count what was really decompressed (headers can lie) so a zip bomb stops early.
+		if total += len(f.Content); total > MaxBytes {
+			return nil, problem("技能文件合计不能超过 %d KB", MaxBytes>>10)
 		}
 		files = append(files, f)
 	}
