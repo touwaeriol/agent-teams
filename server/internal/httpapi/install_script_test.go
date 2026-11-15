@@ -116,7 +116,7 @@ func TestInstallScriptFreshInstall(t *testing.T) {
 		t.Fatalf("current -> %q", link)
 	}
 	unit := e.read(".config/systemd/user/agent-teams-node.service")
-	if !strings.Contains(unit, "/current/dist/node.mjs") || strings.Contains(unit, "2.0.3") || !strings.Contains(unit, e.bin+"/node ") {
+	if !strings.Contains(unit, "/current/dist/node.mjs run\n") || strings.Contains(unit, "2.0.3") || !strings.Contains(unit, e.bin+"/node ") {
 		t.Fatalf("unit:\n%s", unit)
 	}
 	calls, _ := os.ReadFile(e.log)
@@ -134,7 +134,7 @@ func TestInstallScriptRootEntryLayout(t *testing.T) {
 		t.Fatalf("install: %v\n%s", err, out)
 	}
 	unit := e.read(".config/systemd/user/agent-teams-node.service")
-	if !strings.Contains(unit, "/current/node.mjs") {
+	if !strings.Contains(unit, "/current/node.mjs run\n") {
 		t.Fatalf("unit:\n%s", unit)
 	}
 }

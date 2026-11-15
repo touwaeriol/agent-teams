@@ -154,6 +154,7 @@ export class Link extends EventEmitter<LinkEvents> {
     if (w.protocol !== 2) return void this.ws?.close(CLOSE.upgrade, "protocol 2 required");
     this.ready = true;
     this.attempt = 0;
+    this.opts.log.info({ node_id: w.node_id }, "connected to the console");
     this.opts.outbox.ack(w.ack_seq);
     for (const f of this.opts.outbox.unacked()) this.write(f);
     this.emit("welcome", w);

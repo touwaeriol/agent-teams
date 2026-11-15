@@ -156,7 +156,7 @@ After=network-online.target
 
 [Service]
 EnvironmentFile=$env_file
-ExecStart=$node_bin $entry
+ExecStart=$node_bin $entry run
 Restart=always
 RestartSec=5
 KillMode=mixed
