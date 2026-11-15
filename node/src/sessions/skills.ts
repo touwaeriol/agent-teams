@@ -31,7 +31,8 @@ export function materializeSkills(skillsRoot: string, spec: Pick<SessionOpen, "e
   return { pluginDir, names: skills.map((s) => `${SKILLS_PLUGIN}:${s.name}`) };
 }
 
-function employeeDir(skillsRoot: string, e: SessionOpen["employee"]): string {
+/** <root>/<project>/<thread no or "project">/<employee>, every segment made safe. */
+export function employeeDir(skillsRoot: string, e: SessionOpen["employee"]): string {
   const parts = [e.project_id, e.thread_no ? String(e.thread_no) : "project", e.name].map(safeSegment);
   return resolveInRoot(skillsRoot, join(...parts));
 }

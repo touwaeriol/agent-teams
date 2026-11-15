@@ -1,6 +1,7 @@
 import { isAbsolute, resolve } from "node:path";
 import type { CanUseTool, HookCallbackMatcher, HookEvent, McpSdkServerConfigWithInstance, Options, PermissionMode, SettingSource } from "@anthropic-ai/claude-agent-sdk";
 import type { ClaudeSessionOptions, SandboxPolicy } from "../../protocol.js";
+import { sdkMcpServers, type MaterializedPlugin } from "../plugins.js";
 
 export interface OptionInputs {
   claude: ClaudeSessionOptions;
@@ -16,6 +17,8 @@ export interface OptionInputs {
   stderr?: (data: string) => void;
   /** The role's skills, written as a local plugin (sessions/skills.ts). */
   skills?: { pluginDir: string; names: string[] } | null;
+  /** The role's plugins at their exact versions (sessions/plugins.ts). */
+  plugins?: MaterializedPlugin[];
 }
 
 const WRITE_TOOLS = ["Edit", "Write", "NotebookEdit"];
@@ -34,7 +37,7 @@ export function buildClaudeOptions(i: OptionInputs): Options {
     allowDangerouslySkipPermissions: c.allow_dangerously_skip_permissions === true,
     settingSources: [] as SettingSource[],
     strictMcpConfig: true,
-    mcpServers: { platform: i.server },
+    mcpServers: { ...(sdkMcpServers(i.plugins ?? []) as Options["mcpServers"]), platform: i.server },
     includeHookEvents: true,
     ...(i.resume ? { resume: i.sessionId } : { sessionId: i.sessionId }),
     ...(c.max_turns ? { maxTurns: c.max_turns } : {}),
@@ -45,19 +48,27 @@ export function buildClaudeOptions(i: OptionInputs): Options {
     canUseTool: i.canUseTool,
     hooks: i.hooks,
     ...(i.stderr ? { stderr: i.stderr } : {}),
-    ...skillOptions(i.skills),
+    ...pluginOptions(i.skills, i.plugins ?? []),
   };
 }
 
 /**
- * Skills load from a local plugin (SDK 0.3.325: options.plugins + options.skills; verified by
- * scripts/smoke-skills.ts). settingSources stays [] so nothing is read from the worktree, and
- * skills lists exactly this role's skills so bundled ones are not offered. The Skill tool
- * itself comes from session.open (tools/allowed_tools).
+ * Skills and plugins load as local plugins (SDK 0.3.325; verified by scripts/smoke-skills.ts
+ * and scripts/smoke-plugins.ts). settingSources stays [] so nothing is read from the worktree.
+ * - skills lists exactly the role's skills plus each plugin's skills and commands (plugin
+ *   commands are invoked through the Skill tool and are refused unless listed), so bundled
+ *   and user-level skills are not offered.
+ * - Plugins load with skipMcpDiscovery: strictMcpConfig (kept on) would ignore a plugin's
+ *   .mcp.json anyway, so the daemon passes the plugin's MCP servers itself in mcpServers
+ *   (plugin_<plugin>_<server>); their tools are not pre-approved and go through canUseTool.
+ * - Plugin agents run through the Agent tool and hooks fire from the plugin's hooks.json.
+ * The Skill / Agent tools themselves come from session.open (tools/allowed_tools).
  */
-function skillOptions(skills: OptionInputs["skills"]): Partial<Options> {
-  if (!skills || skills.names.length === 0) return {};
-  return { plugins: [{ type: "local", path: skills.pluginDir, skipMcpDiscovery: true }], skills: skills.names };
+function pluginOptions(skills: OptionInputs["skills"], plugins: MaterializedPlugin[]): Partial<Options> {
+  const dirs = [...(skills && skills.names.length ? [skills.pluginDir] : []), ...plugins.map((p) => p.dir)];
+  if (dirs.length === 0) return {};
+  const names = [...(skills?.names ?? []), ...plugins.flatMap((p) => p.skills)];
+  return { plugins: dirs.map((path) => ({ type: "local" as const, path, skipMcpDiscovery: true })), skills: names };
 }
 
 function disallowed(c: ClaudeSessionOptions): string[] {

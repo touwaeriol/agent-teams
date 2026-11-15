@@ -37,19 +37,20 @@ type Role struct {
 	TaskKinds       []string `json:"task_kinds"`
 	Look            Look     `json:"look"`
 	Skills          []string `json:"skills" doc:"Skill names (built-in or uploaded) the role's sessions load"`
+	Plugins         []string `json:"plugins" doc:"Plugins the role's sessions load: name (latest version) or name@N (pinned)"`
 	Sort            int      `json:"sort" doc:"Display order; PUT uses the position in the list"`
 }
 
 const roleCols = `id, tier, role, title, runtime, count, node_ids, description, instructions, model, effort,
 	skip_permissions, can_delegate, read_only, allowed_tools, disallowed_tools, sandbox, max_turns, gate,
-	task_kinds, look, sort, skills`
+	task_kinds, look, sort, skills, plugins`
 
 func scanRole(row interface{ Scan(...any) error }) (Role, error) {
 	var r Role
 	var ro bool
 	err := row.Scan(&r.ID, &r.Tier, &r.Role, &r.Title, &r.Runtime, &r.Count, &r.NodeIDs, &r.Description,
 		&r.Instructions, &r.Model, &r.Effort, &r.SkipPermissions, &r.CanDelegate, &ro, &r.AllowedTools,
-		&r.DisallowedTools, &r.Sandbox, &r.MaxTurns, &r.Gate, &r.TaskKinds, &r.Look, &r.Sort, &r.Skills)
+		&r.DisallowedTools, &r.Sandbox, &r.MaxTurns, &r.Gate, &r.TaskKinds, &r.Look, &r.Sort, &r.Skills, &r.Plugins)
 	r.ReadOnly = &ro
 	return r, mapErr(err)
 }
@@ -102,19 +103,19 @@ func (s *Store) saveRole(ctx context.Context, userID string, r *Role) error {
 	ro := r.ReadOnly != nil && *r.ReadOnly
 	args := []any{r.Tier, r.Role, r.Title, r.Runtime, r.Count, nonNil(r.NodeIDs), r.Description, r.Instructions,
 		r.Model, r.Effort, r.SkipPermissions, r.CanDelegate, ro, nonNil(r.AllowedTools), nonNil(r.DisallowedTools),
-		r.Sandbox, r.MaxTurns, r.Gate, nonNil(r.TaskKinds), r.Look, r.Sort, nonNil(r.Skills)}
+		r.Sandbox, r.MaxTurns, r.Gate, nonNil(r.TaskKinds), r.Look, r.Sort, nonNil(r.Skills), nonNil(r.Plugins)}
 	if r.ID != "" {
 		return affected(s.db.Exec(ctx, `UPDATE at_roles SET tier=$3, role=$4, title=$5, runtime=$6, count=$7, node_ids=$8,
 			description=$9, instructions=$10, model=$11, effort=$12, skip_permissions=$13, can_delegate=$14, read_only=$15,
 			allowed_tools=$16, disallowed_tools=$17, sandbox=$18, max_turns=$19, gate=$20, task_kinds=$21, look=$22,
-			sort=$23, skills=$24, updated_at=now() WHERE id = $1 AND user_id = $2 AND project_id IS NULL`,
+			sort=$23, skills=$24, plugins=$25, updated_at=now() WHERE id = $1 AND user_id = $2 AND project_id IS NULL`,
 			append([]any{r.ID, userID}, args...)...))
 	}
 	r.ID = NewID("ro")
 	_, err := s.db.Exec(ctx, `INSERT INTO at_roles (id, user_id, tier, role, title, runtime, count, node_ids, description,
 		instructions, model, effort, skip_permissions, can_delegate, read_only, allowed_tools, disallowed_tools, sandbox,
-		max_turns, gate, task_kinds, look, sort, skills)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`,
+		max_turns, gate, task_kinds, look, sort, skills, plugins)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`,
 		append([]any{r.ID, userID}, args...)...)
 	return mapErr(err)
 }

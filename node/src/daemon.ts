@@ -18,6 +18,7 @@ import { ClaudeDriver, type QueryFn } from "./sessions/claude/driver.js";
 import { CodexDriver } from "./sessions/codex/driver.js";
 import { CodexHub } from "./sessions/codex/hub.js";
 import { materializeSkills } from "./sessions/skills.js";
+import { codexMcpServers, materializePlugins } from "./sessions/plugins.js";
 import { buildEnv, CODEX_PASS_ENV, gitIdentity } from "./sessions/env.js";
 import { SessionManager } from "./sessions/manager.js";
 import type { ToolPolicy } from "./sessions/policy.js";
@@ -77,6 +78,8 @@ export class Daemon {
   private readonly employeeHome: string;
   /** Per-employee skill plugins (sessions/skills.ts), outside every worktree. */
   private readonly skillsRoot: string;
+  /** Per-employee plugin copies at exact versions (sessions/plugins.ts), outside every worktree. */
+  private readonly pluginsRoot: string;
   private readonly isolation: Isolation;
   private claudeRuntime: ClaudeRuntime = { sdk: CLAUDE_SDK_VERSION, auth: "none" };
   private codexRuntime: CodexRuntime = { cli: CODEX_CLI_VERSION, auth: "none", sandbox_ok: false };
@@ -87,6 +90,7 @@ export class Daemon {
     this.employeeHome = join(o.root, "agent-home");
     mkdirSync(this.employeeHome, { recursive: true, mode: 0o700 });
     this.skillsRoot = join(o.root, "agent-skills");
+    this.pluginsRoot = join(o.root, "agent-plugins");
     this.isolation = o.isolation ?? probeIsolation();
     this.outbox = new Outbox(o.stateDir);
     this.inbox = new Inbox(o.stateDir);
@@ -240,21 +244,23 @@ export class Daemon {
 
   private createDriver(spec: SessionOpen, absCwd: string, sink: Session): { driver: Driver; ctx: DriverContext } {
     const skills = spec.runtime === "claude" ? materializeSkills(this.skillsRoot, spec) : null;
-    const ctx: DriverContext = { spec, absCwd, env: this.sessionEnv(spec), policy: this.policy(spec, absCwd, skills?.pluginDir), sink, log: this.o.log.child({ session: spec.session_id }) };
+    const plugins = materializePlugins(this.pluginsRoot, spec);
+    const readable = [...(skills ? [skills.pluginDir] : []), ...plugins.map((p) => p.dir)];
+    const ctx: DriverContext = { spec, absCwd, env: this.sessionEnv(spec), policy: this.policy(spec, absCwd, readable), sink, log: this.o.log.child({ session: spec.session_id }) };
     const driver = spec.runtime === "codex"
-      ? new CodexDriver(ctx, { hub: this.hub, toolhost: this.toolhost })
-      : new ClaudeDriver(ctx, { root: this.o.root, claudeConfigDir: this.o.claudeConfigDir, secretPaths: this.secretPaths(), skills, ...(this.o.queryFn ? { queryFn: this.o.queryFn } : {}) });
+      ? new CodexDriver(ctx, { hub: this.hub, toolhost: this.toolhost, pluginServers: codexMcpServers(plugins) })
+      : new ClaudeDriver(ctx, { root: this.o.root, claudeConfigDir: this.o.claudeConfigDir, secretPaths: this.secretPaths(), skills, plugins, ...(this.o.queryFn ? { queryFn: this.o.queryFn } : {}) });
     return { driver, ctx };
   }
 
-  private policy(spec: SessionOpen, absCwd: string, skillsDir?: string): ToolPolicy {
+  private policy(spec: SessionOpen, absCwd: string, readable: string[]): ToolPolicy {
     const c = spec.claude;
     const extra = (c?.sandbox?.extra_write_paths ?? []).map((p) => absPath(p, this.o.root, absCwd)).filter(Boolean);
     return {
       denyNonPlatform: c?.deny_non_platform_tools === true || spec.employee.tier === "coordinator",
       readOnly: c?.read_only === true,
       bash: c?.bash_policy ?? null,
-      readRoots: [absCwd, ...extra, ...(skillsDir ? [skillsDir] : [])],
+      readRoots: [absCwd, ...extra, ...readable],
       secretPaths: this.secretPaths(),
     };
   }

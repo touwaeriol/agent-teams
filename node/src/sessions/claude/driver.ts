@@ -8,6 +8,7 @@ import { platformSdkServer, PLATFORM_PREFIX } from "../../toolhost/sdk-server.js
 import { decideTool } from "../policy.js";
 import { ResumeFailed, type Driver, type DriverContext, type EventFields, type OutgoingMessage, type StartResult } from "../types.js";
 import { buildClaudeOptions } from "./options.js";
+import type { MaterializedPlugin } from "../plugins.js";
 import { describeTool, mapClaudeMessage } from "./mapper.js";
 import { toPermissionResult } from "./permissions.js";
 import { ToolUseCorrelator } from "./correlate.js";
@@ -22,6 +23,8 @@ export interface ClaudeDriverDeps {
   queryFn?: QueryFn;
   /** The role's skills as a local plugin (written by the daemon before the driver starts). */
   skills?: { pluginDir: string; names: string[] } | null;
+  /** The role's plugins, written by the daemon before the driver starts. */
+  plugins?: MaterializedPlugin[];
   /** Wait this long after a result for folded-in messages before declaring the turn idle. */
   foldGraceMs?: number;
 }
@@ -72,7 +75,7 @@ export class ClaudeDriver implements Driver {
     return buildClaudeOptions({
       claude: this.claude, root: this.deps.root, cwd: this.ctx.absCwd, env: this.ctx.env, sessionId: this.sdkSessionId, resume, server,
       canUseTool: (tool, input, opts) => this.canUseTool(tool, input, opts),
-      hooks: this.hooks(), secretPaths: this.deps.secretPaths, skills: this.deps.skills ?? null,
+      hooks: this.hooks(), secretPaths: this.deps.secretPaths, skills: this.deps.skills ?? null, plugins: this.deps.plugins ?? [],
       stderr: (d) => this.ctx.log.debug({ stderr: d.slice(0, 2000) }, "claude stderr"),
     });
   }

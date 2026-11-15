@@ -1002,6 +1002,70 @@ export interface SkillFile {
   content: string;
 }
 /**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "PluginBundle".
+ */
+export interface PluginBundle {
+  name: string;
+  /**
+   * Library version number (1, 2, …); the directory is <name>@<version>.
+   */
+  version: number;
+  /**
+   * Every file of the package, .claude-plugin/plugin.json included.
+   *
+   * @minItems 1
+   * @maxItems 256
+   */
+  files: [PluginFile, ...PluginFile[]];
+  /**
+   * Qualified names (<plugin>:<skill or command>) to add to options.skills.
+   */
+  skills?: string[];
+  /**
+   * Qualified subagent names (<plugin>:<agent>), informational.
+   */
+  agents?: string[];
+  /**
+   * The plugin's MCP servers by name; ${CLAUDE_PLUGIN_ROOT} is replaced by the plugin directory.
+   */
+  mcp_servers?: {
+    [k: string]: PluginMcpServer;
+  };
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "PluginFile".
+ */
+export interface PluginFile {
+  /**
+   * Relative path inside the plugin directory; '.' and '..' segments are refused.
+   */
+  path: string;
+  content: string;
+  /**
+   * utf8 (default) or base64 for binary files.
+   */
+  encoding?: "utf8" | "base64";
+  executable?: boolean;
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "PluginMcpServer".
+ */
+export interface PluginMcpServer {
+  type: "stdio" | "http" | "sse";
+  command?: string;
+  args?: string[];
+  env?: {
+    [k: string]: string;
+  };
+  url?: string;
+  headers?: {
+    [k: string]: string;
+  };
+}
+/**
  * Open (or resume) a long-lived employee session on the node.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -1054,6 +1118,146 @@ export interface SessionOpen {
    * @maxItems 32
    */
   skills?: SkillBundle[];
+  /**
+   * Plugins ticked on the employee's role, each at an exact version (architecture.md §6.5). The daemon writes each into a per-employee directory outside the worktree. Claude: loaded with options.plugins (skipMcpDiscovery), skills lists the plugin's skills and commands, and mcp_servers join options.mcpServers as plugin_<plugin>_<server>. Codex: only mcp_servers are used (the skill text is already in developer_instructions).
+   *
+   * @maxItems 16
+   */
+  plugins?:
+    | []
+    | [PluginBundle]
+    | [PluginBundle, PluginBundle]
+    | [PluginBundle, PluginBundle, PluginBundle]
+    | [PluginBundle, PluginBundle, PluginBundle, PluginBundle]
+    | [PluginBundle, PluginBundle, PluginBundle, PluginBundle, PluginBundle]
+    | [PluginBundle, PluginBundle, PluginBundle, PluginBundle, PluginBundle, PluginBundle]
+    | [PluginBundle, PluginBundle, PluginBundle, PluginBundle, PluginBundle, PluginBundle, PluginBundle]
+    | [
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle
+      ]
+    | [
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle
+      ]
+    | [
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle
+      ]
+    | [
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle
+      ]
+    | [
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle
+      ]
+    | [
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle
+      ]
+    | [
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle
+      ]
+    | [
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle
+      ]
+    | [
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle,
+        PluginBundle
+      ];
 }
 /**
  * From initializationResult() (Codex: mcpServerStatus/list + sandbox config).

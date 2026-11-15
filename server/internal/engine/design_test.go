@@ -25,6 +25,12 @@ import (
 // startDesignTeam is startTeam with the designer preset (design + docs skills) as the only member role.
 func startDesignTeam(t *testing.T) (*team, protocol.SessionOpen) {
 	t.Helper()
+	return startDesignTeamWith(t, nil)
+}
+
+// startDesignTeamWith lets prep change the designer role (and upload what it needs) before saving.
+func startDesignTeamWith(t *testing.T, prep func(tm *team, designer *store.Role)) (*team, protocol.SessionOpen) {
+	t.Helper()
 	w := newWorld(t, nil)
 	tm := &team{w: w, b: w.signUp("design@example.com")}
 	var node nodeCreated
@@ -34,6 +40,9 @@ func startDesignTeam(t *testing.T) (*team, protocol.SessionOpen) {
 	tm.b.must(200, "GET", "/api/roles", nil, &roles)
 	var presets struct{ Roles []store.Role }
 	tm.b.must(200, "GET", "/api/roles/presets", nil, &presets)
+	if prep != nil {
+		prep(tm, &presets.Roles[0])
+	}
 	tm.b.must(200, "PUT", "/api/roles", map[string]any{"roles": []store.Role{roles.Roles[0], roles.Roles[1], presets.Roles[0]}}, nil)
 	var project struct{ ID string }
 	tm.b.must(201, "POST", "/api/projects", map[string]any{"name": "p"}, &project)

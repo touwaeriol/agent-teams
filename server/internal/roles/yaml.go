@@ -34,6 +34,7 @@ type yamlRole struct {
 	Gate            string    `yaml:"gate,omitempty"`
 	TaskKinds       []string  `yaml:"task_kinds,omitempty"`
 	Skills          []string  `yaml:"skills,omitempty"`
+	Plugins         []string  `yaml:"plugins,omitempty"`
 	Look            *yamlLook `yaml:"look,omitempty"`
 }
 
@@ -125,7 +126,7 @@ func fromYAMLRole(y yamlRole, tier, key string, nodeIDs map[string]string, repor
 		Description: y.Description, Instructions: y.Instructions, Model: y.Model, Effort: y.Effort,
 		SkipPermissions: y.SkipPermissions, CanDelegate: y.CanDelegate, ReadOnly: y.ReadOnly,
 		AllowedTools: y.AllowedTools, DisallowedTools: y.DisallowedTools, Sandbox: y.Sandbox, MaxTurns: y.MaxTurns,
-		Gate: y.Gate, TaskKinds: y.TaskKinds, Skills: y.Skills}
+		Gate: y.Gate, TaskKinds: y.TaskKinds, Skills: y.Skills, Plugins: y.Plugins}
 	r.NodeIDs = resolveNodes(append(nonEmpty(y.Node), y.Nodes...), nodeIDs, r.Role, report)
 	if y.Look != nil {
 		r.Look = store.Look{Color: y.Look.Color, Outfit: y.Look.Outfit, Accessory: y.Look.Accessory, Hair: y.Look.Hair}
@@ -285,7 +286,7 @@ func toYAMLRole(r store.Role, nodeNames map[string]string) yamlRole {
 	y := yamlRole{Role: r.Role, Title: r.Title, Type: "claude_code", Count: r.Count, Description: r.Description,
 		Instructions: r.Instructions, Model: r.Model, Effort: r.Effort, SkipPermissions: r.SkipPermissions,
 		CanDelegate: r.CanDelegate, AllowedTools: r.AllowedTools, DisallowedTools: r.DisallowedTools,
-		Sandbox: r.Sandbox, MaxTurns: r.MaxTurns, Gate: r.Gate, TaskKinds: r.TaskKinds, Skills: r.Skills,
+		Sandbox: r.Sandbox, MaxTurns: r.MaxTurns, Gate: r.Gate, TaskKinds: r.TaskKinds, Skills: r.Skills, Plugins: r.Plugins,
 		Look: &yamlLook{Color: r.Look.Color, Outfit: r.Look.Outfit, Accessory: r.Look.Accessory, Hair: r.Look.Hair}}
 	if r.Runtime == Codex {
 		y.Type = "codex"

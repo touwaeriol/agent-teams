@@ -3354,6 +3354,215 @@ func (j *PlatformToolSpec) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+type PluginBundle struct {
+	// Qualified subagent names (<plugin>:<agent>), informational.
+	Agents []string `json:"agents,omitempty,omitzero"`
+
+	// Every file of the package, .claude-plugin/plugin.json included.
+	Files []PluginFile `json:"files"`
+
+	// The plugin's MCP servers by name; ${CLAUDE_PLUGIN_ROOT} is replaced by the
+	// plugin directory.
+	McpServers PluginBundleMcpServers `json:"mcp_servers,omitempty,omitzero"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// Qualified names (<plugin>:<skill or command>) to add to options.skills.
+	Skills []string `json:"skills,omitempty,omitzero"`
+
+	// Library version number (1, 2, …); the directory is <name>@<version>.
+	Version int `json:"version"`
+}
+
+// The plugin's MCP servers by name; ${CLAUDE_PLUGIN_ROOT} is replaced by the
+// plugin directory.
+type PluginBundleMcpServers map[string]PluginMcpServer
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *PluginBundle) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["files"]; raw != nil && !ok {
+		return fmt.Errorf("field files in PluginBundle: required")
+	}
+	if _, ok := raw["name"]; raw != nil && !ok {
+		return fmt.Errorf("field name in PluginBundle: required")
+	}
+	if _, ok := raw["version"]; raw != nil && !ok {
+		return fmt.Errorf("field version in PluginBundle: required")
+	}
+	type Plain PluginBundle
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.Files != nil && len(plain.Files) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "files", 1)
+	}
+	if len(plain.Files) > 256 {
+		return fmt.Errorf("field %s length: must be <= %d", "files", 256)
+	}
+	if matched, _ := regexp.MatchString(`^[a-z0-9][a-z0-9-]{0,63}$`, string(plain.Name)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "Name", `^[a-z0-9][a-z0-9-]{0,63}$`)
+	}
+	if 1 > plain.Version {
+		return fmt.Errorf("field %s: must be >= %v", "version", 1)
+	}
+	*j = PluginBundle(plain)
+	return nil
+}
+
+type PluginFile struct {
+	// Content corresponds to the JSON schema field "content".
+	Content string `json:"content"`
+
+	// utf8 (default) or base64 for binary files.
+	Encoding *PluginFileEncoding `json:"encoding,omitempty,omitzero"`
+
+	// Executable corresponds to the JSON schema field "executable".
+	Executable *bool `json:"executable,omitempty,omitzero"`
+
+	// Relative path inside the plugin directory; '.' and '..' segments are refused.
+	Path string `json:"path"`
+}
+
+type PluginFileEncoding string
+
+const PluginFileEncodingBase64 PluginFileEncoding = "base64"
+const PluginFileEncodingUtf8 PluginFileEncoding = "utf8"
+
+var enumValues_PluginFileEncoding = []interface{}{
+	"utf8",
+	"base64",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *PluginFileEncoding) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_PluginFileEncoding {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_PluginFileEncoding, v)
+	}
+	*j = PluginFileEncoding(v)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *PluginFile) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["content"]; raw != nil && !ok {
+		return fmt.Errorf("field content in PluginFile: required")
+	}
+	if _, ok := raw["path"]; raw != nil && !ok {
+		return fmt.Errorf("field path in PluginFile: required")
+	}
+	type Plain PluginFile
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if matched, _ := regexp.MatchString(`^[A-Za-z0-9_.@+-]+(/[A-Za-z0-9_.@+-]+)*$`, string(plain.Path)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "Path", `^[A-Za-z0-9_.@+-]+(/[A-Za-z0-9_.@+-]+)*$`)
+	}
+	if utf8.RuneCountInString(string(plain.Path)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "path", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Path)) > 300 {
+		return fmt.Errorf("field %s length: must be <= %d", "path", 300)
+	}
+	*j = PluginFile(plain)
+	return nil
+}
+
+type PluginMcpServer struct {
+	// Args corresponds to the JSON schema field "args".
+	Args []string `json:"args,omitempty,omitzero"`
+
+	// Command corresponds to the JSON schema field "command".
+	Command *string `json:"command,omitempty,omitzero"`
+
+	// Env corresponds to the JSON schema field "env".
+	Env PluginMcpServerEnv `json:"env,omitempty,omitzero"`
+
+	// Headers corresponds to the JSON schema field "headers".
+	Headers PluginMcpServerHeaders `json:"headers,omitempty,omitzero"`
+
+	// Type corresponds to the JSON schema field "type".
+	Type PluginMcpServerType `json:"type"`
+
+	// URL corresponds to the JSON schema field "url".
+	URL *string `json:"url,omitempty,omitzero"`
+}
+
+type PluginMcpServerEnv map[string]string
+
+type PluginMcpServerHeaders map[string]string
+
+type PluginMcpServerType string
+
+const PluginMcpServerTypeHttp PluginMcpServerType = "http"
+const PluginMcpServerTypeSse PluginMcpServerType = "sse"
+const PluginMcpServerTypeStdio PluginMcpServerType = "stdio"
+
+var enumValues_PluginMcpServerType = []interface{}{
+	"stdio",
+	"http",
+	"sse",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *PluginMcpServerType) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_PluginMcpServerType {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_PluginMcpServerType, v)
+	}
+	*j = PluginMcpServerType(v)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *PluginMcpServer) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["type"]; raw != nil && !ok {
+		return fmt.Errorf("field type in PluginMcpServer: required")
+	}
+	type Plain PluginMcpServer
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = PluginMcpServer(plain)
+	return nil
+}
+
 // Protocol-level error about one message.
 type ProtocolError struct {
 	// Code corresponds to the JSON schema field "code".
@@ -4664,6 +4873,14 @@ type SessionOpen struct {
 	// PlatformTools corresponds to the JSON schema field "platform_tools".
 	PlatformTools []PlatformToolSpec `json:"platform_tools"`
 
+	// Plugins ticked on the employee's role, each at an exact version
+	// (architecture.md §6.5). The daemon writes each into a per-employee directory
+	// outside the worktree. Claude: loaded with options.plugins (skipMcpDiscovery),
+	// skills lists the plugin's skills and commands, and mcp_servers join
+	// options.mcpServers as plugin_<plugin>_<server>. Codex: only mcp_servers are
+	// used (the skill text is already in developer_instructions).
+	Plugins []PluginBundle `json:"plugins,omitempty,omitzero"`
+
 	// Key of the git.prepare job that must have succeeded first.
 	Prepare *JobID `json:"prepare,omitempty,omitzero"`
 
@@ -4718,6 +4935,9 @@ func (j *SessionOpen) UnmarshalJSON(value []byte) error {
 	var plain Plain
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
+	}
+	if len(plain.Plugins) > 16 {
+		return fmt.Errorf("field %s length: must be <= %d", "plugins", 16)
 	}
 	if len(plain.Skills) > 32 {
 		return fmt.Errorf("field %s length: must be <= %d", "skills", 32)

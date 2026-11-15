@@ -9,6 +9,8 @@ import { errorNotification, itemCompleted, itemStarted, turnCompleted } from "./
 export interface CodexDriverDeps {
   hub: CodexHub;
   toolhost: LoopbackToolHost;
+  /** Plugin MCP servers in Codex config form (sessions/plugins.ts codexMcpServers). */
+  pluginServers?: Record<string, Record<string, unknown>>;
 }
 
 type Approval = Pick<ApprovalRequest, "source" | "tool_name" | "input"> & Partial<ApprovalRequest>;
@@ -65,7 +67,7 @@ export class CodexDriver implements Driver, ThreadListener {
   private threadParams(url: string): Record<string, unknown> {
     const config = {
       ...(this.codex.config ?? {}),
-      mcp_servers: { platform: { url, default_tools_approval_mode: "approve", tool_timeout_sec: 86400 } },
+      mcp_servers: { ...(this.deps.pluginServers ?? {}), platform: { url, default_tools_approval_mode: "approve", tool_timeout_sec: 86400 } },
       shell_environment_policy: { inherit: "core", set: this.ctx.env },
     };
     return {

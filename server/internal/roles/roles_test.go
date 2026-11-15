@@ -219,3 +219,30 @@ func TestDesignerPreset(t *testing.T) {
 		t.Fatalf("yaml round trip %+v %v", parsed.Roles, err)
 	}
 }
+
+func TestPluginsValidation(t *testing.T) {
+	roles := Defaults(looks)
+	roles[0].Plugins = []string{"tinyplug"}
+	roles[2].Plugins = []string{"tinyplug@3", "tinyplug@3"}
+	Normalize(roles, looks)
+	if len(roles[2].Plugins) != 1 {
+		t.Fatalf("plugins not deduplicated: %v", roles[2].Plugins)
+	}
+	choices := map[string]map[int]bool{"tinyplug": {1: true, 2: true}}
+	got := problemPaths(Validate(roles, Context{Nodes: nodes(), Looks: looks, Plugins: choices}))
+	if got != "roles[0].plugins roles[2].plugins" {
+		t.Fatalf("problems %q", got)
+	}
+	roles[0].Plugins, roles[2].Plugins = nil, []string{"tinyplug@2"}
+	if p := Validate(roles, Context{Nodes: nodes(), Looks: looks, Plugins: choices}); len(p) != 0 {
+		t.Fatalf("valid plugins refused: %v", p)
+	}
+	text, err := ToYAML(roles, nil)
+	if err != nil || !strings.Contains(text, "tinyplug@2") {
+		t.Fatalf("yaml %v %s", err, text)
+	}
+	parsed, err := FromYAML(text, nil)
+	if err != nil || strings.Join(parsed.Roles[2].Plugins, ",") != "tinyplug@2" {
+		t.Fatalf("yaml round trip %+v %v", parsed.Roles, err)
+	}
+}

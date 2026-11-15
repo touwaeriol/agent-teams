@@ -43,7 +43,8 @@ type File struct {
 	Content string `json:"content"`
 }
 
-// Skill is a library entry. ID is empty for built-in skills.
+// Skill is a library entry. ID is empty for the built-ins shipped with the server; admin-created
+// built-ins (at_skills.user_id NULL) have an ID and Builtin set.
 type Skill struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -141,7 +142,7 @@ func Parse(files []File) (Skill, error) {
 	if i < 0 {
 		return Skill{}, problem("技能必须在根目录有 %s", EntryFile)
 	}
-	meta := frontMatter(files[i].Content)
+	meta := FrontMatter(files[i].Content)
 	name, desc := meta["name"], meta["description"]
 	if !namePattern.MatchString(name) {
 		return Skill{}, problem("SKILL.md 的 front matter 需要 name（小写字母、数字和 -，最多 64 个字符），现在是 %q", name)
@@ -188,8 +189,8 @@ func checkFile(f File) error {
 	return nil
 }
 
-// frontMatter reads simple "key: value" lines between the leading --- fences.
-func frontMatter(text string) map[string]string {
+// FrontMatter reads simple "key: value" lines between the leading --- fences.
+func FrontMatter(text string) map[string]string {
 	out := map[string]string{}
 	text = strings.TrimPrefix(text, "\ufeff")
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")

@@ -34,6 +34,19 @@ async function startCodex() {
 }
 
 describe("codex sessions over app-server", () => {
+  it("adds the plugins' MCP servers to the thread config, pointing into the written plugin", async () => {
+    const calls = await startCodex();
+    const plugins = [{ name: "tinyplug", version: 4, files: [{ path: ".claude-plugin/plugin.json", content: '{"name":"tinyplug"}' }, { path: "s.mjs", content: "//" }],
+      mcp_servers: { calc: { type: "stdio", command: "node", args: ["${CLAUDE_PLUGIN_ROOT}/s.mjs"] } } }];
+    h!.console.command("session.open", { ...codexOpen("s_P1"), plugins });
+    await h!.console.waitType("session.opened");
+    const servers = calls().find((c) => c.method === "thread/start")!.params.config.mcp_servers;
+    const dir = join(h!.opts.root, "agent-plugins", "p1", "3", "dev-1", "tinyplug@4");
+    expect(servers.plugin_tinyplug_calc).toEqual({ command: "node", args: [join(dir, "s.mjs")] });
+    expect(readFileSync(join(dir, "s.mjs"), "utf8")).toBe("//");
+    expect(servers.platform.url).toMatch(/^http:/);
+  });
+
   it("starts a thread with the loopback platform MCP config and runs a turn", async () => {
     const calls = await startCodex();
     h!.console.command("session.open", codexOpen("s_X1"));

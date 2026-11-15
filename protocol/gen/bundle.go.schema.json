@@ -1728,6 +1728,128 @@
         }
       }
     },
+    "PluginBundle": {
+      "title": "PluginBundle",
+      "type": "object",
+      "required": [
+        "name",
+        "version",
+        "files"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "version": {
+          "description": "Library version number (1, 2, …); the directory is <name>@<version>.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "files": {
+          "description": "Every file of the package, .claude-plugin/plugin.json included.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/PluginFile"
+          }
+        },
+        "skills": {
+          "description": "Qualified names (<plugin>:<skill or command>) to add to options.skills.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "agents": {
+          "description": "Qualified subagent names (<plugin>:<agent>), informational.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "mcp_servers": {
+          "description": "The plugin's MCP servers by name; ${CLAUDE_PLUGIN_ROOT} is replaced by the plugin directory.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/PluginMcpServer"
+          }
+        }
+      }
+    },
+    "PluginFile": {
+      "title": "PluginFile",
+      "type": "object",
+      "required": [
+        "path",
+        "content"
+      ],
+      "properties": {
+        "path": {
+          "description": "Relative path inside the plugin directory; '.' and '..' segments are refused.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "^[A-Za-z0-9_.@+-]+(/[A-Za-z0-9_.@+-]+)*$"
+        },
+        "content": {
+          "type": "string"
+        },
+        "encoding": {
+          "description": "utf8 (default) or base64 for binary files.",
+          "type": "string",
+          "enum": [
+            "utf8",
+            "base64"
+          ]
+        },
+        "executable": {
+          "type": "boolean"
+        }
+      }
+    },
+    "PluginMcpServer": {
+      "title": "PluginMcpServer",
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "stdio",
+            "http",
+            "sse"
+          ]
+        },
+        "command": {
+          "type": "string"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "url": {
+          "type": "string"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "SessionOpen": {
       "title": "SessionOpen",
       "description": "Open (or resume) a long-lived employee session on the node.",
@@ -1806,6 +1928,14 @@
           "maxItems": 32,
           "items": {
             "$ref": "#/$defs/SkillBundle"
+          }
+        },
+        "plugins": {
+          "description": "Plugins ticked on the employee's role, each at an exact version (architecture.md §6.5). The daemon writes each into a per-employee directory outside the worktree. Claude: loaded with options.plugins (skipMcpDiscovery), skills lists the plugin's skills and commands, and mcp_servers join options.mcpServers as plugin_<plugin>_<server>. Codex: only mcp_servers are used (the skill text is already in developer_instructions).",
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/PluginBundle"
           }
         }
       }

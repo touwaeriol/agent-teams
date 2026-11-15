@@ -255,6 +255,9 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 	if err := o.addSkills(ctx, tx, env.project.UserID, env.emp, &open); err != nil {
 		return err
 	}
+	if err := o.addPlugins(ctx, tx, env.project.UserID, env.emp, &open); err != nil {
+		return err
+	}
 	_, err = o.gw.Enqueue(ctx, tx, node.ID, nodegw.Command{Type: protocol.TypeSessionOpen, Body: open,
 		SessionID: sess.ID, OpenGen: sess.OpenGen})
 	o.touch(tx, env.emp.ID, "session.open")

@@ -11,6 +11,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/touwaeriol/agent-teams/server/internal/office"
+	"github.com/touwaeriol/agent-teams/server/internal/plugins"
 	"github.com/touwaeriol/agent-teams/server/internal/roles"
 	"github.com/touwaeriol/agent-teams/server/internal/skills"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -80,6 +81,7 @@ func (s *Server) registerRoles(api huma.API) {
 	huma.Register(api, huma.Operation{OperationID: "role-presets", Method: "GET", Path: "/api/roles/presets", Tags: tags,
 		Summary: "Ready-made member roles (designer …) the Team page offers"}, s.rolePresets)
 	s.registerSkills(api)
+	s.registerPlugins(api)
 	huma.Register(api, huma.Operation{OperationID: "get-team", Method: "GET", Path: "/api/team", Tags: tags, Summary: "v1 compatible YAML view"}, s.getTeam)
 	huma.Register(api, huma.Operation{OperationID: "save-team", Method: "PUT", Path: "/api/team", Tags: tags, Summary: "v1 compatible; same as PUT /api/roles/yaml"}, s.saveTeam)
 }
@@ -203,7 +205,11 @@ func (s *Server) replaceRoles(ctx context.Context, userID string, list []store.R
 	if err != nil {
 		return err
 	}
-	if problems := roles.Validate(list, roles.Context{Nodes: byID, Looks: looks, Skills: skillNames}); len(problems) > 0 {
+	pluginChoices, err := plugins.Choices(ctx, s.store.Pool, userID)
+	if err != nil {
+		return err
+	}
+	if problems := roles.Validate(list, roles.Context{Nodes: byID, Looks: looks, Skills: skillNames, Plugins: pluginChoices}); len(problems) > 0 {
 		return rolesInvalid(problems)
 	}
 	if err := s.store.Tx(ctx, func(tx *store.Store) error { return tx.ReplaceRoles(ctx, userID, list) }); err != nil {

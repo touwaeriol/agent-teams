@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/touwaeriol/agent-teams/server/internal/office"
+	"github.com/touwaeriol/agent-teams/server/internal/plugins"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -49,6 +50,8 @@ type Context struct {
 	Looks office.Looks          // the current global layout's looks
 	// Skills are the skill names the user may give roles (built-in + uploaded); nil skips the check.
 	Skills map[string]bool
+	// Plugins maps the plugin names the user may tick to their versions; nil skips the check.
+	Plugins map[string]map[int]bool
 }
 
 // Normalize fills defaults in place: fixed counts, read_only from gate, look from the layout.
@@ -76,6 +79,7 @@ func normalizeOne(r *store.Role, looks office.Looks) {
 	r.Look = fillLook(r.Look, defaultLook(looks, r.Role, r.Tier))
 	r.NodeIDs = dedupe(r.NodeIDs)
 	r.Skills = dedupe(r.Skills)
+	r.Plugins = dedupe(r.Plugins)
 }
 
 func defaultLook(looks office.Looks, role, tier string) office.LookDefault {
@@ -164,6 +168,7 @@ func validateOne(path string, r *store.Role, c Context) []Problem {
 		}
 	}
 	out = append(out, skillProblems(path, r, c.Skills)...)
+	out = append(out, pluginProblems(path, r, c.Plugins)...)
 	return append(out, nodeProblems(path, r, c.Nodes)...)
 }
 
@@ -183,6 +188,19 @@ func skillProblems(path string, r *store.Role, known map[string]bool) []Problem 
 		if known != nil && !known[name] {
 			return []Problem{{path + ".skills", "没有这个技能：" + name}}
 		}
+	}
+	return nil
+}
+
+func pluginProblems(path string, r *store.Role, choices map[string]map[int]bool) []Problem {
+	if len(r.Plugins) == 0 {
+		return nil
+	}
+	if r.Tier == Coordinator {
+		return []Problem{{path + ".plugins", "统筹只能用平台工具，不能加载插件"}}
+	}
+	if msg := plugins.CheckRefs(r.Plugins, choices); msg != "" {
+		return []Problem{{path + ".plugins", msg}}
 	}
 	return nil
 }

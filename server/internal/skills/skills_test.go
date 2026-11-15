@@ -168,3 +168,61 @@ func TestLibrary(t *testing.T) {
 		t.Fatalf("role skills after delete %v", left)
 	}
 }
+
+// TestAdminBuiltins: an admin-created skill (user_id NULL) is visible to every user, user
+// uploads cannot take its name, a user's own older skill shadows it, and deleting it takes
+// it off every role that used it.
+func TestAdminBuiltins(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, testdb.Migrated(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if _, err := pool.Exec(ctx, `INSERT INTO at_users (id, email, password_hash, role) VALUES ('u1','a@x','h','user'), ('u2','b@x','h','user')`); err != nil {
+		t.Fatal(err)
+	}
+	brand := "---\nname: brand\ndescription: Brand rules\n---\n# Brand\n"
+	mine, err := Create(ctx, pool, "u2", []File{{Path: "SKILL.md", Content: strings.Replace(brand, "# Brand", "# Mine", 1)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := Create(ctx, pool, "", []File{{Path: "SKILL.md", Content: brand}})
+	if err != nil || !b.Builtin {
+		t.Fatalf("admin built-in %+v %v", b, err)
+	}
+	if _, err := Create(ctx, pool, "", []File{{Path: "SKILL.md", Content: "---\nname: docs\ndescription: d\n---\n"}}); !IsProblem(err) {
+		t.Fatalf("shipped name must be refused for admins too: %v", err)
+	}
+	if _, err := Create(ctx, pool, "u1", []File{{Path: "SKILL.md", Content: brand}}); !IsProblem(err) {
+		t.Fatalf("user upload with a built-in name: %v", err)
+	}
+	list, _ := List(ctx, pool, "u1")
+	if len(list) != 3 || list[2].Name != "brand" || !list[2].Builtin || list[2].ID == "" {
+		t.Fatalf("u1 list %+v", list)
+	}
+	list2, _ := List(ctx, pool, "u2")
+	if len(list2) != 3 || list2[2].ID != mine.ID || list2[2].Builtin {
+		t.Fatalf("u2's own skill must shadow the built-in: %+v", list2)
+	}
+	got, _ := Bundles(ctx, pool, "u2", []string{"brand"})
+	if len(got) != 1 || !strings.Contains(got[0].Files[0].Content, "# Mine") {
+		t.Fatalf("u2 bundle %+v", got)
+	}
+	if err := Delete(ctx, pool, "u1", b.ID); err != ErrNotFound {
+		t.Fatalf("a user cannot delete a built-in: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO at_roles (id, user_id, tier, role, skills) VALUES
+		('ro1','u1','member','dev','{brand,docs}'), ('ro2','u2','member','dev','{brand}')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := Delete(ctx, pool, "", b.ID); err != nil {
+		t.Fatal(err)
+	}
+	var r1, r2 []string
+	_ = pool.QueryRow(ctx, `SELECT skills FROM at_roles WHERE id = 'ro1'`).Scan(&r1)
+	_ = pool.QueryRow(ctx, `SELECT skills FROM at_roles WHERE id = 'ro2'`).Scan(&r2)
+	if len(r1) != 1 || r1[0] != "docs" || len(r2) != 1 {
+		t.Fatalf("roles after built-in delete: %v %v", r1, r2)
+	}
+}
