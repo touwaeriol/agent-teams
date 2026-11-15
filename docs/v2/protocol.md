@@ -364,7 +364,7 @@
 
 `git.purge {job_id, path: "projects/<pid>"}`：在确认无活跃会话后删除整个项目目录（v1 删除项目会把检出留在节点上，v2 修正）。
 
-删除讨论串用同一条命令删讨论串目录：`git.purge {job_id, path: "projects/<pid>/threads/<no>"}`，前面先发 `session.close` 和 `git.cleanup {keep_unpushed: false}`（未推送的改动一并删除）。路径只接受这两种形式，其他一律 `path_outside_root`。
+删除讨论串用同一条命令删讨论串目录：`git.purge {job_id, path: "projects/<pid>/threads/<no>"}`，前面先发 `session.close`，再发 `git.cleanup {keep_unpushed: false}`（未推送的改动一并删除）。git 命令不排在会话队列里，所以守护进程收到 `git.purge` 时若目录下还有正在停止的会话，最多等 60 秒，仍未停止才回 `dirty_conflict`。路径只接受这两种形式，其他一律 `path_outside_root`。
 
 ## 8. 凭证
 

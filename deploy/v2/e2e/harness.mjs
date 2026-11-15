@@ -20,7 +20,7 @@ export async function login(base) {
 /** roleBody fills a role template with the defaults the e2e runs use. */
 export function roleBody(r, i, model) {
   return { id: "", runtime: "claude", node_ids: [], description: r.title, model, effort: "", skip_permissions: false,
-    can_delegate: false, allowed_tools: [], disallowed_tools: [], sandbox: "", max_turns: null, gate: "", task_kinds: [], skills: [],
+    can_delegate: false, allowed_tools: [], disallowed_tools: [], sandbox: "", max_turns: null, gate: "", task_kinds: [], skills: [], plugins: [],
     look: { color: ["#7A4FD1", "#C8622A", "#4C7BD0", "#2E9E6B"][i % 4], outfit: ["hoodie", "suit", "tee", "hoodie"][i % 4], accessory: "none", hair: null },
     sort: i, ...r };
 }

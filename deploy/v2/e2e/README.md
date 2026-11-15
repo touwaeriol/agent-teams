@@ -12,6 +12,7 @@ deploy/v2/e2e/up.sh "$S" /path/to/v1-schema.sql     # writes deploy/v2/.env.e2e 
 node deploy/v2/e2e/v1_check.mjs "$S/v1.json"        # v1 login, session, node token, sealed token, team, conversations
 node deploy/v2/e2e/run.mjs "$S"                     # coordinator → thread → lead → dev → approval → push → merge queue
 node deploy/v2/e2e/run_multi.mjs "$S"               # two repos (base of one only in the context) + designer publish_file
+node deploy/v2/e2e/run_lifecycle.mjs "$S"           # image to the coordinator, live status, archive / unarchive / delete (haiku)
 # screenshots (Playwright image, NODE_PATH with the playwright package):
 node deploy/v2/e2e/screenshots.cjs http://127.0.0.1:<PORT> <out> <project-id> 1
 node deploy/v2/e2e/screenshots_multi.cjs http://127.0.0.1:<PORT> <out> <project-id> 1 <deliverable-id>   # ids in $S/multi-state.json
@@ -29,6 +30,7 @@ node --test deploy/v2/e2e/localgh.test.mjs          # the emulator's own tests
 | `run_multi.mjs` | project on `local/web` + `local/api` (`develop` stated only in the project context), CI off, the "设计师" preset; one request touching both repositories plus a design: checks per-repository bases, lazy thread branches, files only in their own repository, one PR per repository (web → main, api → develop), acceptance merging both, and the published page served from a signed URL with a CSP sandbox (tampered signature → 403). Roles use `--model haiku` by default; about 15 minutes |
 | `screenshots_multi.cjs` | New Project with two repositories, Team skills, Deliverables, the viewer, the thread and its delivery tab |
 | `run.mjs` | the real-Claude run; the daemon runs with XDG dirs under the scratch dir and never reads `~/.config/agent-teams/node.env`. Roles use `--model sonnet` by default to keep it cheap. `E2E_DAEMON=node/dist/node.mjs` runs a local build instead of the served tarball |
+| `run_lifecycle.mjs` | a solid red PNG sent to the coordinator (the model must name the colour), a thread whose status events and live member states are checked while an approval card waits, then archive (sessions closed), unarchive, archive and delete (404, rows gone, thread directory purged on the node). It pauses at `approval` and `archived` until `<scratch>/go-<name>` exists, for screenshots; about 5 minutes |
 | `screenshots.cjs` | Main + thread panel, Thread, Office, Team, Nodes at deviceScaleFactor 2 |
 
 With no CI on the test repository the merge queue waits `appear_timeout_s` (300 s) and then
