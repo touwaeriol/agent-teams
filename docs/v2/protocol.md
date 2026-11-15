@@ -164,6 +164,7 @@
   "env": {"LANG": "C.UTF-8"},                      // 额外的非秘密环境；守护进程自己加 PATH/HOME/MCP_TOOL_TIMEOUT/git 凭证变量
   "git_credentials": true,                         // 是否装 credential helper 与 gh 包装
   "skills": [{"name": "design", "files": [{"path": "SKILL.md", "content": "…"}]}],  // 可选：岗位的技能（architecture.md §6.5）
+  "plugins": [{"name": "tinyplug", "version": 2, "files": [{"path": ".claude-plugin/plugin.json", "content": "…"}], "skills": ["tinyplug:greet"], "mcp_servers": {}}],  // 可选：岗位的插件，确切版本（architecture.md §6.5）
   "first_message": {"msg_id": "m_…", "text": "…"}  // 可选：工具核对通过、收到 session.release 后才发送
 }
 ```
@@ -174,6 +175,7 @@
 2. Claude：构造 `options`（`env` 逐项构造、`permissionMode` 显式、`settingSources: []`、`allowedTools`（含控制台由“总是允许”规则展开的项）、`settings`（沙箱与拒绝规则）、`canUseTool`、`hooks`、`mcpServers.platform = createSdkMcpServer(...)`、`includeHookEvents: true`、`resume`），用一个异步队列作为 `prompt` 调 `query()`，随即 `await q.initializationResult()` 拿工具列表和 MCP 状态（不等第一个回合的 `system/init`）。Codex：确保本机 app-server 在跑，`thread/start` 或 `thread/resume`（带新的 `mcp_servers.platform` 配置），工具列表取自 `mcpServerStatus/list` + 沙箱配置。
 3. 回 `session.opened`。`first_message` 先扣住，收到 `session.release {session_id, open_gen}` 才推送。
 4. `skills`（只有 Claude 会话会收到）：写成本地插件 `<root>/agent-skills/<project>/<thread_no>/<employee>/`（每次打开重建，不在 worktree 里），`options.plugins = [{type:'local', path, skipMcpDiscovery:true}]`、`options.skills = ['agent-teams-skills:<name>', …]`；`Skill` 工具由控制台放进 `tools`/`allowed_tools`。
+4a. `plugins`：每个写到 `<root>/agent-plugins/<project>/<thread_no>/<employee>/<name>@<version>/`（每次打开整目录重建，不在 worktree 里；统筹忽略）。Claude：`options.plugins` 追加一个 local 插件项（skipMcpDiscovery 为 true），`options.skills` 追加 bundle 的 `skills`，`mcp_servers` 里的 `${CLAUDE_PLUGIN_ROOT}` 换成插件目录后以 `plugin_<plugin>_<server>` 放进 `options.mcpServers`（`strictMcpConfig` 不变）。Codex：只把 `mcp_servers` 的 stdio/http 服务器并进 thread 配置的 `mcp_servers`。
 5. `resume` 失败（转录不存在、thread 找不到）：不自动开新会话，回 `session.opened {resume_failed: true, error}`，由控制台走交接流程（architecture.md §6.2）。
 
 ### 4.2 `session.opened`（守护进程 → 控制台，可靠，键：`session_id + open_gen`）

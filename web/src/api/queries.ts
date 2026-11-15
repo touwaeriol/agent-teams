@@ -35,6 +35,8 @@ export const keys = {
   rolesYaml: ["roles", "yaml"] as const,
   rolePresets: ["roles", "presets"] as const,
   skills: ["skills"] as const,
+  plugins: ["plugins"] as const,
+  adminPlugins: ["admin", "plugins"] as const,
   deliverableFiles: (id: string, version = 0) => ["deliverable", id, "files", version] as const,
   deliverableComments: (id: string) => ["deliverable", id, "comments"] as const,
   connections: ["git"] as const,
@@ -199,6 +201,10 @@ export const useRolesYaml = (enabled: boolean) =>
 export const useRolePresets = () => useQuery({ queryKey: keys.rolePresets, queryFn: () => unwrap(client.GET("/api/roles/presets")), staleTime: 300_000 });
 
 export const useSkills = () => useQuery({ queryKey: keys.skills, queryFn: () => unwrap(client.GET("/api/skills")) });
+
+export const usePlugins = () => useQuery({ queryKey: keys.plugins, queryFn: () => unwrap(client.GET("/api/plugins")) });
+
+export const useAdminPlugins = () => useQuery({ queryKey: keys.adminPlugins, queryFn: () => unwrap(client.GET("/api/admin/plugins")) });
 
 /** Signed URLs expire after two hours: refetch well before that. */
 export const useDeliverableFiles = (id: string, version = 0, enabled = true) =>

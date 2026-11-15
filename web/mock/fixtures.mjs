@@ -207,14 +207,14 @@ export const nodeSessions = {
 
 const role = (id, tier, roleKey, title, runtime, count, node_ids, description, lk, extra = {}) => ({
   id, tier, role: roleKey, title, runtime, count, node_ids, description, instructions: "", model: "", effort: "", skip_permissions: false,
-  can_delegate: false, read_only: null, allowed_tools: [], disallowed_tools: [], sandbox: "", max_turns: null, gate: "", task_kinds: [], look: lk, sort: 0, ...extra,
+  can_delegate: false, read_only: null, allowed_tools: [], disallowed_tools: [], sandbox: "", max_turns: null, gate: "", task_kinds: [], skills: [], plugins: [], look: lk, sort: 0, ...extra,
 });
 
 export const roles = [
   role("r0", "coordinator", "coordinator", "项目统筹", "claude", 1, ["n1"], "和你对话，判断要做什么，开讨论串、跟进状态、向你汇报。", look("#7A4FD1", "hoodie", "headset", "#3B2A20"), { model: "opus" }),
   role("r1", "lead", "lead", "组长", "claude", 1, ["n1", "n2"], "列主要任务、拆小任务、审查成员提交并合并，完成后向统筹交总结。", look("#C8622A", "suit", "none", "#3B2A20"), { model: "opus" }),
-  role("r2", "member", "dev", "开发", "claude", 2, ["n1", "n2"], "从任务池领开发类小任务，在自己的 worktree 里改代码、跑测试、提交。", look("#4C7BD0", "tee", "none", "#8A5A36"), { model: "sonnet", sort: 1, task_kinds: ["dev"] }),
-  role("r3", "member", "qa", "测试", "codex", 1, ["n2"], "领测试类小任务：补用例、跑全量测试、复现问题并报告。", look("#3F8F6B", "coat", "glasses", "#6B4A2E"), { sort: 2, skip_permissions: true, sandbox: "workspace-write", task_kinds: ["test"] }),
+  role("r2", "member", "dev", "开发", "claude", 2, ["n1", "n2"], "从任务池领开发类小任务，在自己的 worktree 里改代码、跑测试、提交。", look("#4C7BD0", "tee", "none", "#8A5A36"), { model: "sonnet", sort: 1, task_kinds: ["dev"], skills: ["docs"], plugins: ["release-notes@2", "pr-review"] }),
+  role("r3", "member", "qa", "测试", "codex", 1, ["n2"], "领测试类小任务：补用例、跑全量测试、复现问题并报告。", look("#3F8F6B", "coat", "glasses", "#6B4A2E"), { sort: 2, skip_permissions: true, sandbox: "workspace-write", task_kinds: ["test"], plugins: ["playwright-kit"] }),
   role("r4", "member", "review", "审查", "claude", 1, ["n1"], "审查合并前的改动，指出问题，不改代码。", look("#4A4843", "suit", "glasses", "#1F1E1C"), { sort: 3, gate: "review", model: "opus" }),
 ];
 
@@ -238,3 +238,38 @@ export const adminUsers = [
 ];
 
 export const adminSettings = { registration_open: true, default_max_nodes: 5, max_running_threads: 4, delivery_default: delivery, office_default: "default" };
+
+export const skills = [
+  { id: "", name: "design", description: "单文件 HTML 原型、界面稿和 SVG 示意图，做完用 publish_file 发布。", builtin: true, size: 4200 },
+  { id: "", name: "docs", description: "设计文档和说明文档的写法：结构、术语、图示。", builtin: true, size: 3100 },
+  { id: "sk_brand", name: "brand-voice", description: "公司对外文案的语气和用词规范。", builtin: true, size: 2400 },
+  { id: "sk_1", name: "pitch", description: "路演材料的结构和讲法。", builtin: false, size: 1800 },
+];
+
+const contents = (skills, commands, agents, hooks, mcp) => ({ skills, commands, agents, hooks, mcp_servers: mcp });
+const pversion = (version, manifest_version, description, c, min, size = 18_400) => ({ version, manifest_version, description, size, sha256: "0".repeat(64), contents: c, created_at: ago(min) });
+export const plugins = [
+  { id: "pl_1", name: "release-notes", builtin: false, enabled: true, latest: 3, versions: [
+    pversion(3, "1.2.0", "从合并的 PR 生成发布说明和变更日志。", contents(["changelog"], ["release-notes"], ["notes-writer"], false, []), 90),
+    pversion(2, "1.1.0", "从合并的 PR 生成发布说明。", contents(["changelog"], ["release-notes"], [], false, []), 60 * 24 * 2),
+    pversion(1, "1.0.0", "", contents(["changelog"], [], [], false, []), 60 * 24 * 6),
+  ] },
+  { id: "pl_2", name: "sql-helper", builtin: false, enabled: false, latest: 1, versions: [
+    pversion(1, "0.3.0", "只读查询测试库，给出执行计划。", contents([], ["explain"], [], false, ["pg"]), 60 * 24 * 3, 6_200),
+  ] },
+  { id: "pl_3", name: "pr-review", builtin: true, enabled: true, latest: 2, versions: [
+    pversion(2, "2.0.1", "按公司规范审查改动：安全、测试覆盖、命名。", contents(["review-checklist"], ["review"], ["security-reviewer", "test-reviewer"], true, []), 60 * 5),
+    pversion(1, "2.0.0", "", contents(["review-checklist"], ["review"], ["security-reviewer"], true, []), 60 * 24 * 9),
+  ] },
+  { id: "pl_4", name: "playwright-kit", builtin: true, enabled: true, latest: 1, versions: [
+    pversion(1, "1.56.0", "浏览器端到端测试：录制、断言和截图。", contents(["e2e"], ["screenshot"], [], false, ["playwright"]), 60 * 24, 42_000),
+  ] },
+];
+
+export const adminPlugins = [
+  plugins[2],
+  plugins[3],
+  { id: "pl_5", name: "legacy-deploy", builtin: true, enabled: false, latest: 4, versions: [
+    pversion(4, "0.9.4", "旧的部署脚本封装，已被 CI 取代。", contents([], ["deploy"], [], true, []), 60 * 24 * 30, 9_800),
+  ] },
+];

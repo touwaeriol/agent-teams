@@ -88,12 +88,13 @@ export function newRole(list: RoleView[], color: string): RoleView {
     gate: "",
     task_kinds: [],
     skills: [],
+    plugins: [],
     look: { color, outfit: "tee", accessory: "none", hair: null },
     sort: list.length,
   };
 }
 
-/** The coordinator only has platform tools, so it cannot load skills (the server refuses too). */
+/** The coordinator only has platform tools, so it cannot load skills or plugins (the server refuses too). */
 export function canHaveSkills(r: Pick<RoleView, "tier">): boolean {
   return r.tier !== "coordinator";
 }
@@ -108,7 +109,7 @@ export function fromPreset(list: RoleView[], preset: RoleView): RoleView {
   const taken = new Set(list.map((r) => r.role));
   let role = preset.role;
   for (let n = 2; taken.has(role); n++) role = `${preset.role}-${n}`;
-  return { ...preset, id: "", role, sort: list.length, skills: [...(preset.skills ?? [])] };
+  return { ...preset, id: "", role, sort: list.length, skills: [...(preset.skills ?? [])], plugins: [...(preset.plugins ?? [])] };
 }
 
 /** Local validation mirroring PUT /api/roles (the server is the authority). */
@@ -123,5 +124,6 @@ export function roleProblems(list: RoleView[]): string[] {
   });
   list.filter((r) => r.tier === "member" && (r.count < 1 || r.count > 8)).forEach((r) => problems.push(`${roleName(r)} 的数量要在 1–8 之间`));
   list.filter((r) => !canHaveSkills(r) && (r.skills ?? []).length > 0).forEach((r) => problems.push(`${roleName(r)} 不能加载技能`));
+  list.filter((r) => !canHaveSkills(r) && (r.plugins ?? []).length > 0).forEach((r) => problems.push(`${roleName(r)} 不能加载插件`));
   return problems;
 }

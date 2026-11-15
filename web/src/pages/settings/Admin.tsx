@@ -8,6 +8,7 @@ import { useAction } from "@/api/mutations";
 import { keys, useAdminSettings, useAdminUsers, useAudit, useMe } from "@/api/queries";
 import type { AdminSettings, AdminUserView } from "@/api/views";
 import { Card, CardTitle } from "@/components/app/bits";
+import { BuiltinLibrary } from "@/components/app/PluginLibrary";
 import { ConfirmAction, CopyBlock, InfoDialog, Loading } from "@/components/common";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
@@ -24,6 +25,7 @@ export function AdminPage() {
         </div>
         <SettingsRow />
         <UsersTable />
+        <BuiltinLibrary />
         <Card className="flex-row flex-wrap items-center justify-between gap-3">
           <span className="flex flex-col gap-0.5">
             <span className="font-semibold">GitHub App</span>

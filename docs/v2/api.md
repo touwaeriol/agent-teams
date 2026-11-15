@@ -200,11 +200,15 @@ PR 类交付物的 `detail.state` 由平台轮询 / webhook 更新。设计类�
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/roles` | → `{roles: RoleView[], warnings: [{role, message}]}`（例如“跳过权限确认的岗位没有 isolated 节点”“候选节点已删除”） |
-| PUT | `/api/roles` | `{roles: RoleView[]}` 整体保存（按 `id` 匹配，缺失的删除）→ 同 GET。校验：恰好一个 coordinator（Claude）和一个 lead；`role` 键唯一且符合 `^[a-z][a-z0-9-]{0,23}$`；`count` 1–8；节点属于本人；`look.outfit`/`look.accessory` 是当前全局布局里存在的键；`skip_permissions` 时候选节点须为 `agent_user` 或 `isolated`，Codex 岗位的候选节点不能是 `sandbox`/`none` 级别（`architecture.md` §10.3）；`read_only` 省略时按 `gate` 取默认值；`skills` 每项须是内置或自己上传的技能，最多 16 个，统筹不能有技能 |
+| PUT | `/api/roles` | `{roles: RoleView[]}` 整体保存（按 `id` 匹配，缺失的删除）→ 同 GET。校验：恰好一个 coordinator（Claude）和一个 lead；`role` 键唯一且符合 `^[a-z][a-z0-9-]{0,23}$`；`count` 1–8；节点属于本人；`look.outfit`/`look.accessory` 是当前全局布局里存在的键；`skip_permissions` 时候选节点须为 `agent_user` 或 `isolated`，Codex 岗位的候选节点不能是 `sandbox`/`none` 级别（`architecture.md` §10.3）；`read_only` 省略时按 `gate` 取默认值；`skills` 每项须是内置或自己上传的技能，最多 16 个，统筹不能有技能；`plugins` 每项是 `name` 或 `name@N`，须是自己的或内置的插件（钉住的版本须存在），最多 8 个、不重复，统筹不能有插件 |
 | GET | `/api/roles/presets` | → `{roles: RoleView[]}`：Team 页“从预设添加”的现成岗位（“设计师” = `design` + `docs` 技能） |
-| GET | `/api/skills` | → `{skills: [{id, name, description, builtin, size}]}`：内置技能（`id` 为空）+ 自己上传的 |
+| GET | `/api/skills` | → `{skills: [{id, name, description, builtin, size}]}`：随平台发布的技能（`id` 为空）+ 管理员发布的内置技能（`builtin`，有 `id`；自己有同名技能时不列出）+ 自己上传的 |
 | POST | `/api/skills` | `{zip?: base64, files?: [{path, content}]}` → 201 `Skill`（`SKILL.md` front matter 给出 name/description；只收文本，≤ 64 个文件、≤ 512 KB） |
-| DELETE | `/api/skills/{id}` | 删除上传的技能，并从岗位的 `skills` 里去掉 |
+| DELETE | `/api/skills/{id}` | 删除自己上传的技能，并从岗位的 `skills` 里去掉 |
+| GET | `/api/plugins` | → `{plugins: Plugin[]}`：自己的插件（含停用的）+ 已启用的内置插件（自己有同名插件时不列出）。`Plugin = {id, name, builtin, enabled, latest, versions: [{version, manifest_version, description, size, sha256, contents: {skills, commands, agents, hooks, mcp_servers: [名字]}, created_at}]}`（新版本在前） |
+| POST | `/api/plugins` | `{zip: base64}` → 201 `Plugin`：新插件，或同名插件的新版本。校验见 architecture.md §6.5（≤ 2 MB zip、≤ 200 个文件、单个 ≤ 512 KB、合计 ≤ 1 MB、无符号链接和越界路径、合法清单）；不能与内置插件同名 → 422 |
+| PATCH | `/api/plugins/{id}` | `{enabled}` → `Plugin`；停用的插件留在岗位上但不加载 |
+| DELETE | `/api/plugins/{id}` | 删除自己的插件（所有版本），并从岗位的 `plugins` 里去掉 |
 | POST | `/api/roles/look/random` | `{role}` → `Look`（“随机一个”，从布局的调色板和服装里选） |
 | GET | `/api/roles/yaml` / PUT `/api/roles/yaml` | YAML 视图（与 v1 的 YAML 标签页对应；格式为 threads.md 的新格式，旧格式自动转换） |
 | GET | `/api/team` / PUT `/api/team` | v1 兼容路径（v1 用户在迁移期使用；v2 用户调用时 GET 返回由 `at_roles` 生成的 YAML，PUT 转发到 `/api/roles/yaml`） |
@@ -255,6 +259,12 @@ PR 类交付物的 `detail.state` 由平台轮询 / webhook 更新。设计类�
 | POST | `/api/admin/github-app/manifest` | v1；manifest 增加 `checks: read, statuses: read`，webhook active |
 | DELETE | `/api/admin/github-app` | v1；同时让 Python 清掉安装令牌缓存（迁移期，`architecture.md` §14.5） |
 | GET | `/api/admin/audit?user=&action=&cursor=` | 新；审计日志 |
+| GET | `/api/admin/plugins` | → `{plugins: Plugin[]}`：所有内置插件（含停用的） |
+| POST | `/api/admin/plugins` | `{zip}` → 201 `Plugin`：内置插件或它的新版本，所有用户都能勾选 |
+| PATCH | `/api/admin/plugins/{id}` | `{enabled}`；停用后用户看不到，已勾选的岗位不再加载 |
+| DELETE | `/api/admin/plugins/{id}` | 删除内置插件，并从所有（没有同名自有插件的）用户的岗位上去掉 |
+| POST | `/api/admin/skills` | 同 `POST /api/skills` → 201：管理员发布的内置技能，所有用户都能勾选；不能与随平台发布的技能重名 |
+| DELETE | `/api/admin/skills/{id}` | 删除管理员发布的内置技能，并从所有（没有同名自有技能的）用户的岗位上去掉 |
 | GET | `/api/admin/office/layouts` | 新；→ `[{id, source: "file"|"db", version, updated_at, valid, errors?}]` |
 | PUT | `/api/admin/office/layouts/{id}` | 新；`{doc}` → 校验（Schema + 语义检查）后存 `at_office_layouts` 并广播 `layout` 事件；422 带 `fields` |
 | DELETE | `/api/admin/office/layouts/{id}` | 新；删除数据库布局（文件布局只能改文件） |

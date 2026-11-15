@@ -5,8 +5,8 @@ import { Check, ChevronDown, MoreHorizontal } from "lucide-react";
 import { useEffect, useState } from "react";
 import { roles as roleActions } from "@/api/actions";
 import { errorText, useAction } from "@/api/mutations";
-import { keys, useNodes, useRolePresets, useRoles, useRolesYaml, useSkills } from "@/api/queries";
-import type { Look, NodeView, RoleView } from "@/api/views";
+import { keys, useNodes, usePlugins, useRolePresets, useRoles, useRolesYaml, useSkills } from "@/api/queries";
+import type { Look, NodeView, PluginView, RoleView } from "@/api/views";
 import { Avatar, useOfficeLayout } from "@/components/app/Avatar";
 import { Callout, Field, FormDialog, Loading, Spinner } from "@/components/common";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { NavButton } from "@/components/shell/Shell";
 import type { OfficeLayout } from "@/office";
 import { SkillLibrary } from "@/components/app/SkillLibrary";
+import { PluginLibrary } from "@/components/app/PluginLibrary";
+import { missingRefs, pinPlugin, refFor, resolvedVersion, runtimeNote, splitLibrary, togglePlugin, type PluginRef } from "@/lib/plugins";
 import { canHaveSkills, countText, fromPreset, kindText, LEVEL, newRole, previewTags, roleName, roleProblems, ruleText, skipHint, sortRoles, toggleSkill } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 
@@ -89,6 +91,7 @@ export function TeamPage() {
           </div>
         )}
         {!yaml && <SkillLibrary />}
+        {!yaml && <PluginLibrary />}
       </div>
     </main>
   );
@@ -150,6 +153,7 @@ function RoleCard({ role, layout, onChange, onRemove }: { role: RoleView; layout
       <span className="rounded-lg bg-background px-2.5 py-2 text-xs leading-[19px] text-[#4A4843]">{ruleText(role)}</span>
       <LookEditor role={role} layout={layout} onChange={(look) => onChange({ look })} />
       {canHaveSkills(role) && <SkillPicker value={role.skills ?? []} onChange={(skills) => onChange({ skills })} />}
+      {canHaveSkills(role) && <PluginPicker role={role} onChange={(plugins) => onChange({ plugins })} />}
       {role.tier === "member" && (
         <label className="flex cursor-pointer items-center justify-between gap-3 border-t border-[#F1EFEA] pt-2.5">
           <span className="flex flex-col gap-0.5">
@@ -209,6 +213,62 @@ function SkillPicker({ value, onChange }: { value: string[]; onChange: (skills: 
       ))}
       {all.length === 0 && <span className="text-xs text-muted-foreground">技能库是空的</span>}
     </div>
+  );
+}
+
+/** Plugins this role loads: tick a plugin (latest version), then optionally pin a version. */
+function PluginPicker({ role, onChange }: { role: RoleView; onChange: (plugins: string[]) => void }) {
+  const plugins = usePlugins();
+  const all = plugins.data?.plugins ?? [];
+  const { mine, builtin } = splitLibrary(all);
+  const value = role.plugins ?? [];
+  const note = value.length > 0 ? runtimeNote(role) : "";
+  return (
+    <div className="flex flex-col gap-1.5 border-t border-[#F1EFEA] pt-2.5 text-[13px]" aria-label={`${roleName(role)} 的插件`}>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="mr-1 text-xs text-muted-foreground">插件</span>
+        {[...mine, ...builtin].map((p) => (
+          <PluginChip key={p.id} plugin={p} entry={refFor(value, p.name)} onToggle={() => onChange(togglePlugin(value, p.name))} onPin={(v) => onChange(pinPlugin(value, p.name, v))} />
+        ))}
+        {missingRefs(value, all).map((r) => (
+          <Chip key={r.name} on onClick={() => onChange(togglePlugin(value, r.name))}>
+            {r.name}（已删除）
+          </Chip>
+        ))}
+        {all.length === 0 && <span className="text-xs text-muted-foreground">插件库是空的</span>}
+      </div>
+      {note && <span className="text-xs leading-[18px] text-muted-foreground">{note}</span>}
+    </div>
+  );
+}
+
+function PluginChip({ plugin, entry, onToggle, onPin }: { plugin: PluginView; entry?: PluginRef; onToggle: () => void; onPin: (version: number) => void }) {
+  const on = Boolean(entry);
+  const gone = entry && resolvedVersion(plugin, entry) === undefined;
+  const label = `${plugin.name}${plugin.builtin ? " · 内置" : ""}${plugin.enabled ? "" : " · 已停用"}`;
+  return (
+    <span className="inline-flex items-center gap-1" title={plugin.versions?.[0]?.description || undefined}>
+      <Chip on={on} onClick={onToggle}>
+        {on && <Check className="mr-0.5 inline size-3" />}
+        {label}
+      </Chip>
+      {entry && (
+        <Select value={String(entry.version)} onValueChange={(v) => onPin(Number(v))}>
+          <SelectTrigger className={cn("h-7 w-auto gap-1 px-2 text-xs", gone && "border-destructive text-destructive")} aria-label={`${plugin.name} 的版本`}>
+            <SelectValue>{entry.version ? `v${entry.version}${gone ? "（已清理）" : ""}` : `最新 v${plugin.latest}`}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="0">最新（v{plugin.latest}）</SelectItem>
+            {(plugin.versions ?? []).map((v) => (
+              <SelectItem key={v.version} value={String(v.version)}>
+                v{v.version}
+                {v.manifest_version ? ` · ${v.manifest_version}` : ""}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+    </span>
   );
 }
 

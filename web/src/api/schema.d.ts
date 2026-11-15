@@ -86,6 +86,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every built-in plugin, disabled ones included */
+        get: operations["admin-list-plugins"];
+        put?: never;
+        /** Upload a built-in plugin or a new version of one */
+        post: operations["admin-upload-plugin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/plugins/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a built-in plugin and remove it from every role */
+        delete: operations["admin-delete-plugin"];
+        options?: never;
+        head?: never;
+        /** Enable or disable a built-in plugin */
+        patch: operations["admin-update-plugin"];
+        trace?: never;
+    };
     "/api/admin/settings": {
         parameters: {
             query?: never;
@@ -97,6 +133,40 @@ export interface paths {
         put: operations["admin-save-settings"];
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload a built-in skill every user may tick */
+        post: operations["admin-create-skill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/skills/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete an admin-created built-in skill and remove it from every role */
+        delete: operations["admin-delete-skill"];
         options?: never;
         head?: never;
         patch?: never;
@@ -695,6 +765,42 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The user's plugins and the enabled built-in plugins */
+        get: operations["list-plugins"];
+        put?: never;
+        /** Upload a plugin zip (a new plugin, or a new version of one with the same name) */
+        post: operations["upload-plugin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugins/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete one of the user's plugins (all versions) and remove it from the roles */
+        delete: operations["delete-plugin"];
+        options?: never;
+        head?: never;
+        /** Enable or disable one of the user's plugins */
+        patch: operations["update-plugin"];
         trace?: never;
     };
     "/api/projects": {
@@ -1955,6 +2061,10 @@ export interface components {
             /** @description Shown once */
             token: string;
         };
+        NewPluginInputBody: {
+            /** @description Base64 of a zip of the plugin folder (.claude-plugin/plugin.json at the root or in one top folder); the same name again uploads a new version */
+            zip: string;
+        };
         NewSkillInputBody: {
             /** @description The skill's text files (a picked folder); used when zip is empty */
             files?: components["schemas"]["File"][] | null;
@@ -2105,6 +2215,23 @@ export interface components {
             /** @enum {string} */
             status?: "paused" | "running" | "archived";
             title?: string;
+        };
+        Plugin: {
+            /** @description Platform built-in (created by an admin, every user may tick it) */
+            builtin: boolean;
+            enabled: boolean;
+            id: string;
+            /** Format: int64 */
+            latest: number;
+            name: string;
+            versions: components["schemas"]["Version"][] | null;
+        };
+        PluginPatchInputBody: {
+            /** @description Disabled plugins stay on roles but are not loaded */
+            enabled: boolean;
+        };
+        PluginsBody: {
+            plugins: components["schemas"]["Plugin"][] | null;
         };
         PostMessageInputBody: {
             content: string;
@@ -2266,6 +2393,8 @@ export interface components {
             max_turns: number | null;
             model: string;
             node_ids: string[] | null;
+            /** @description Plugins the role's sessions load: name (latest version) or name@N (pinned) */
+            plugins: string[] | null;
             /** @description Omitted: defaults to true for gate review/decision */
             read_only?: boolean | null;
             role: string;
@@ -2355,6 +2484,13 @@ export interface components {
             updated_at: string | null;
             valid: boolean;
             version: string;
+        };
+        Summary: {
+            agents: string[] | null;
+            commands: string[] | null;
+            hooks: boolean;
+            mcp_servers: string[] | null;
+            skills: string[] | null;
         };
         TaskView: {
             assignee: string;
@@ -2546,6 +2682,19 @@ export interface components {
             platform_version: number;
             /** @enum {string} */
             role: "admin" | "user";
+        };
+        Version: {
+            contents: components["schemas"]["Summary"];
+            /** Format: date-time */
+            created_at: string;
+            description: string;
+            /** @description plugin.json version, as written */
+            manifest_version: string;
+            sha256: string;
+            /** Format: int64 */
+            size: number;
+            /** Format: int64 */
+            version: number;
         };
         Waiting: {
             questions: components["schemas"]["QuestionView"][] | null;
@@ -2762,6 +2911,132 @@ export interface operations {
             };
         };
     };
+    "admin-list-plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "admin-upload-plugin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewPluginInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Plugin"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "admin-delete-plugin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "admin-update-plugin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginPatchInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Plugin"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     "admin-get-settings": {
         parameters: {
             query?: never;
@@ -2812,6 +3087,68 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["AdminSettings"];
                 };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "admin-create-skill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewSkillInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Skill"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "admin-delete-skill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error */
             default: {
@@ -4217,6 +4554,132 @@ export interface operations {
                 };
                 content: {
                     "application/json": string;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "upload-plugin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewPluginInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Plugin"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "delete-plugin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "update-plugin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginPatchInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Plugin"];
                 };
             };
             /** @description Error */

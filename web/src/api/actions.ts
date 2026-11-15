@@ -89,6 +89,13 @@ export const skills = {
   remove: (id: string) => unwrap(client.DELETE("/api/skills/{id}", { params: { path: { id } } })),
 };
 
+export const plugins = {
+  /** zip: base64 of a plugin zip; the same name again becomes a new version. */
+  upload: (zip: string) => unwrap(client.POST("/api/plugins", { body: { zip } })),
+  setEnabled: (id: string, enabled: boolean) => unwrap(client.PATCH("/api/plugins/{id}", { params: { path: { id } }, body: { enabled } })),
+  remove: (id: string) => unwrap(client.DELETE("/api/plugins/{id}", { params: { path: { id } } })),
+};
+
 export const git = {
   addToken: (body: S["NewConnectionInputBody"]) => unwrap(client.POST("/api/git/connections", { body })),
   remove: (id: string) => unwrap(client.DELETE("/api/git/connections/{id}", { params: { path: { id } } })),
@@ -102,4 +109,9 @@ export const admin = {
   removeUser: (id: string) => unwrap(client.DELETE("/api/admin/users/{id}", { params: { path: { id } } })),
   resetPassword: (id: string) => unwrap(client.POST("/api/admin/users/{id}/password-reset", { params: { path: { id } } })),
   saveSettings: (body: S["AdminSettings"]) => unwrap(client.PUT("/api/admin/settings", { body })),
+  uploadPlugin: (zip: string) => unwrap(client.POST("/api/admin/plugins", { body: { zip } })),
+  setPluginEnabled: (id: string, enabled: boolean) => unwrap(client.PATCH("/api/admin/plugins/{id}", { params: { path: { id } }, body: { enabled } })),
+  removePlugin: (id: string) => unwrap(client.DELETE("/api/admin/plugins/{id}", { params: { path: { id } } })),
+  createSkill: (body: S["NewSkillInputBody"]) => unwrap(client.POST("/api/admin/skills", { body })),
+  removeSkill: (id: string) => unwrap(client.DELETE("/api/admin/skills/{id}", { params: { path: { id } } })),
 };

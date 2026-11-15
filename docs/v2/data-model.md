@@ -161,6 +161,7 @@ CREATE TABLE at_roles (
   task_kinds       TEXT[] NOT NULL DEFAULT '{}',        -- 偏好领取的任务类别（dev、test、fix…），空 = 按岗位名匹配
   look             JSONB NOT NULL DEFAULT '{}',         -- {"color":"#4C7BD0","outfit":"tee","accessory":"none","hair":null}；outfit/accessory 为字符串
   skills           TEXT[] NOT NULL DEFAULT '{}',        -- 技能名（内置 design/docs 或 at_skills.name），统筹必须为空（00060）
+  plugins          TEXT[] NOT NULL DEFAULT '{}',        -- 插件：name（最新版本）或 name@N（钉住版本），最多 8 个，统筹必须为空（00080）
   sort             INT NOT NULL DEFAULT 0,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -466,16 +467,45 @@ CREATE INDEX at_deliverables_project ON at_deliverables (project_id, kind, creat
 CREATE INDEX at_deliverables_title_trgm ON at_deliverables USING gin (title gin_trgm_ops);   -- 交付物搜索 ?q=
 -- 托管交付物（publish_file）：url = ''，detail = {by, author, hosted: true, version, entry, content_type, render, files, size}
 
-CREATE TABLE at_skills (                           -- 用户上传的技能（00060）；内置技能随控制台发布，不在表里
+CREATE TABLE at_skills (                           -- 上传的技能（00060）；随控制台发布的 design/docs 不在表里
   id          TEXT PRIMARY KEY,                    -- sk_…
-  user_id     TEXT NOT NULL REFERENCES at_users(id) ON DELETE CASCADE,
-  name        TEXT NOT NULL,                       -- SKILL.md 的 name，不能与内置技能重名
+  user_id     TEXT REFERENCES at_users(id) ON DELETE CASCADE, -- 本人的技能；NULL = 管理员发布的内置技能（00080）
+  name        TEXT NOT NULL,                       -- SKILL.md 的 name，不能与随平台发布的技能重名
   description TEXT NOT NULL DEFAULT '',
   files       JSONB NOT NULL,                      -- [{"path":"SKILL.md","content":"…"}]，只收文本
   size        INT  NOT NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (user_id, name)
 );
+CREATE UNIQUE INDEX at_skills_builtin_name ON at_skills (name) WHERE user_id IS NULL;
+
+CREATE TABLE at_plugins (                          -- 插件库（00080，architecture.md §6.5）
+  id          TEXT PRIMARY KEY,                    -- pl_…
+  user_id     TEXT REFERENCES at_users(id) ON DELETE CASCADE, -- 本人的插件；NULL = 平台内置
+  name        TEXT NOT NULL,                       -- plugin.json 的 name；agent-teams-skills 保留
+  enabled     BOOLEAN NOT NULL DEFAULT TRUE,       -- 停用：岗位勾选保留，会话不加载；停用的内置插件用户看不到
+  latest      INT NOT NULL DEFAULT 0,              -- 最新版本号
+  created_by  TEXT NOT NULL DEFAULT '',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX at_plugins_user_name ON at_plugins (user_id, name) WHERE user_id IS NOT NULL;
+CREATE UNIQUE INDEX at_plugins_builtin_name ON at_plugins (name) WHERE user_id IS NULL;
+
+CREATE TABLE at_plugin_versions (                  -- 每次上传一个版本；保留最近 20 个，岗位钉住的不清理
+  plugin_id        TEXT NOT NULL REFERENCES at_plugins(id) ON DELETE CASCADE,
+  version          INT  NOT NULL,
+  manifest_version TEXT NOT NULL DEFAULT '',       -- plugin.json 的 version 原样
+  description      TEXT NOT NULL DEFAULT '',
+  files            JSONB NOT NULL,                 -- [{"path","content","encoding":"base64"?,"executable":true?}]
+  contents         JSONB NOT NULL,                 -- {"skills":[],"commands":[],"agents":[],"hooks":bool,"mcp_servers":{name:{type,command,args,env,url,headers}}}
+  size             INT  NOT NULL,                  -- 解压后字节数（≤ 1 MB）
+  sha256           TEXT NOT NULL,
+  created_by       TEXT NOT NULL DEFAULT '',
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (plugin_id, version)
+);
+-- 可见性：用户看到自己的插件 + 已启用且自己没有同名插件的内置插件；会话按项目所有者解析
 
 CREATE TABLE at_deliverable_files (                -- publish_file 发布的文件，按版本保存（00060）
   deliverable_id TEXT NOT NULL REFERENCES at_deliverables(id) ON DELETE CASCADE,
@@ -616,6 +646,8 @@ CREATE TABLE at_office_layouts (                    -- 可选：数据库里的�
 6. `00030_office.sql`（P5）：`at_office_layouts`、`at_projects.office_layout`。
    `00050_node_job_index.sql`：`at_node_commands` 的作业索引。`00060_design_skills.sql`：`at_roles.skills`、`at_skills`、`at_deliverable_files`、`at_upload_chunks`、`at_deliverable_comments`（architecture.md §6.5）。
 7. `00100_drop_v1.sql`（P6 后）：删 `at_teams`、`at_conversations.history`；`at_tasks.output` 并入 `summary`；去掉不再需要的默认值。
+
+`00080_plugins.sql`：`at_roles.plugins`、`at_plugins`、`at_plugin_versions`，`at_skills.user_id` 可为空（管理员内置技能）及其唯一索引（architecture.md §6.5）。
 
 `00070_project_repos.sql`：`at_project_repos`、`at_thread_repos`、`at_merge_queue.repo`、`at_tasks.pushed`；把每个项目的 repo/branch/git_connection_id 迁进去（基准分支写进 context），给已有讨论串和队列条目补上仓库（architecture.md §8.1）。
 
