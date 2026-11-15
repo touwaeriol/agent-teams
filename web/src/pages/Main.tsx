@@ -2,17 +2,20 @@
 // list (→ thread detail) on the right. Phones get thread chips instead of the panel.
 import { Clock, Home, Library, MoreHorizontal, PanelRight, Settings, Square, Users } from "lucide-react";
 import { useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { conversations } from "@/api/actions";
 import { useAction } from "@/api/mutations";
-import { keys, useCoordinator, useProject, useQuestions, useThreads, useWaiting } from "@/api/queries";
+import { keys, useCoordinator, useMe, useProject, useQuestions, useThreads, useWaiting } from "@/api/queries";
 import type { CoordinatorView, ProjectView, QuestionView, ThreadView } from "@/api/views";
 import { Composer, Dot } from "@/components/app/bits";
+import { useAttachments } from "@/components/app/attachments";
 import { WaitingCard } from "@/components/app/cards";
 import { Chat } from "@/components/app/Chat";
+import { ResizeHandle, usePanelWidth } from "@/components/app/ResizeHandle";
+import { ThreadDetail, type DetailTab } from "@/components/app/ThreadDetail";
 import { LibraryBrowser } from "@/components/app/Library";
 import { SchedulesDialog } from "@/components/app/Schedules";
-import { ThreadList, ThreadPanel } from "@/components/app/thread";
+import { ThreadList } from "@/components/app/thread";
 import { EmptyState, errorText, IconButton, IconLink, Loading } from "@/components/common";
 import { ProjectSwitcher } from "@/components/shell/ProjectSwitcher";
 import { NavButton } from "@/components/shell/Shell";
@@ -39,21 +42,26 @@ export function sidePanelOf(value: string | null): SidePanel {
   return value === "library" || value === "none" ? value : "threads";
 }
 
-export function MainPage({ settings = false }: { settings?: boolean }) {
+/** Where a thread opens: /projects/:pid/threads/:no, plus the tab unless it is the default. */
+export function threadPath(pid: string, no: number, tab?: DetailTab): string {
+  return `/projects/${pid}/threads/${no}${tab && tab !== "progress" ? `/${tab}` : ""}`;
+}
+
+export function MainPage({ settings = false, openNo = null, tab = "progress" }: { settings?: boolean; openNo?: number | null; tab?: DetailTab }) {
   const pid = useProjectId();
   const { section } = useParams();
   const project = useProject(pid);
   const coordinator = useCoordinator(pid);
   const threads = useThreads(pid);
+  const me = useMe();
+  const [width, setWidth] = usePanelWidth(me.data?.id ?? "anon");
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
-  const openNo = Number(params.get("thread")) || null;
   const panel = sidePanelOf(params.get("panel"));
   const setPanel = (p: SidePanel) => setParams(p === "threads" ? {} : { panel: p });
-  const openThread = (no: number) => {
-    if (window.matchMedia("(min-width: 1024px)").matches) setParams({ thread: String(no) });
-    else navigate(`/projects/${pid}/threads/${no}`);
-  };
+  const openThread = (no: number) => navigate(threadPath(pid, no));
+  const legacyNo = Number(params.get("thread"));
+  if (legacyNo) return <Navigate to={threadPath(pid, legacyNo)} replace />;
   if (project.error) return <EmptyState title="找不到这个项目" description={errorText(project.error)} />;
   if (!project.data) return <Loading className="h-full" />;
   const list = threads.data ?? [];
@@ -67,11 +75,24 @@ export function MainPage({ settings = false }: { settings?: boolean }) {
             <CoordinatorChat pid={pid} coordinator={coordinator.data} threads={list} onOpenThread={openThread} />
           </div>
         </div>
-        <CoordinatorComposer coordinator={coordinator.data} />
+        <CoordinatorComposer pid={pid} coordinator={coordinator.data} />
       </main>
+      {panel === "threads" && <ResizeHandle width={width} onChange={setWidth} label="调整讨论串宽度" />}
       {panel === "threads" && (
-        <aside aria-label="讨论串" className="hidden h-full w-[min(440px,32vw)] min-w-[340px] shrink-0 flex-col border-l bg-panel lg:flex">
-          {openNo ? <PanelDetail pid={pid} no={openNo} threads={list} onBack={() => setParams({})} /> : <PanelList pid={pid} threads={list} loading={threads.isLoading} onOpen={openThread} />}
+        <aside aria-label="讨论串" style={{ width }} className="hidden h-full shrink-0 flex-col border-l bg-panel lg:flex">
+          {openNo ? (
+            <PanelDetail
+              pid={pid}
+              no={openNo}
+              tab={tab}
+              threads={list}
+              loading={threads.isLoading}
+              onTab={(t) => navigate(threadPath(pid, openNo, t), { replace: true })}
+              onBack={() => navigate(`/projects/${pid}`)}
+            />
+          ) : (
+            <PanelList pid={pid} threads={list} loading={threads.isLoading} onOpen={openThread} />
+          )}
         </aside>
       )}
       {panel === "library" && (
@@ -190,9 +211,10 @@ function CoordinatorChat({ pid, coordinator, threads, onOpenThread }: { pid: str
   return <Chat cid={cid} threads={threads} onOpenThread={onOpenThread} empty={empty} after={after} speakerColor="#C8622A" />;
 }
 
-function CoordinatorComposer({ coordinator }: { coordinator?: CoordinatorView }) {
+function CoordinatorComposer({ pid, coordinator }: { pid: string; coordinator?: CoordinatorView }) {
   const cid = coordinator?.conversation_id ?? "";
-  const send = useAction((text: string) => conversations.send(cid, text), { invalidate: [keys.messages(cid)] });
+  const attachments = useAttachments(pid);
+  const send = useAction((v: { text: string; images: string[] }) => conversations.send(cid, v.text, false, v.images), { invalidate: [keys.messages(cid)] });
   const stop = useAction(() => conversations.interrupt(cid), { success: "已让统筹停下" });
   const busy = coordinator?.employee.status && !["idle", "offline"].includes(coordinator.employee.status.state);
   const name = coordinator?.employee.name ?? "leader";
@@ -206,11 +228,12 @@ function CoordinatorComposer({ coordinator }: { coordinator?: CoordinatorView })
       <Composer
         className="mx-auto max-w-[700px]"
         label={`给 ${name} 发消息`}
-        placeholder={`说需求或问进度，${name} 会开讨论串去做`}
+        placeholder={`说需求或问进度，${name} 会开讨论串去做；可以粘贴或拖入图片`}
         hint={`${name} 只分派、不改代码`}
         extra={stopButton}
         busy={send.isPending}
-        onSend={(t) => send.mutateAsync(t)}
+        attachments={attachments}
+        onSend={(text, images) => send.mutateAsync({ text, images })}
         id="boss"
       />
     </div>
@@ -223,18 +246,42 @@ function PanelList({ pid, threads, loading, onOpen }: { pid: string; threads: Th
   return (
     <>
       <div className="flex h-14 shrink-0 items-center justify-between border-b border-[#EFEDE8] px-5">
-        <span className="font-semibold">讨论串</span>
+        <nav aria-label="位置" className="font-semibold">
+          讨论串
+        </nav>
         <span className="text-xs text-muted-foreground">共 {visible.length} 个</span>
       </div>
       <div className="scroll-thin flex-1 overflow-y-auto px-5 pb-6 pt-3.5">
-        {loading ? <Loading /> : <ThreadList threads={visible} onOpen={onOpen} waitingByThread={waitingIndex(waiting.data?.questions)} />}
+        {loading ? <Loading /> : <ThreadList threads={threads} onOpen={onOpen} waitingByThread={waitingIndex(waiting.data?.questions)} menus />}
       </div>
     </>
   );
 }
 
-function PanelDetail({ pid, no, threads, onBack }: { pid: string; no: number; threads: ThreadView[]; onBack: () => void }) {
+interface PanelDetailProps {
+  pid: string;
+  no: number;
+  tab: DetailTab;
+  threads: ThreadView[];
+  loading: boolean;
+  onTab: (tab: DetailTab) => void;
+  onBack: () => void;
+}
+
+function PanelDetail({ pid, no, tab, threads, loading, onTab, onBack }: PanelDetailProps) {
   const thread = threads.find((t) => t.no === no);
-  if (!thread) return <Loading className="py-16" />;
-  return <ThreadPanel key={thread.id} thread={thread} onBack={onBack} fullHref={`/projects/${pid}/threads/${no}`} />;
+  if (loading) return <Loading className="py-16" />;
+  if (!thread)
+    return (
+      <EmptyState
+        title={`找不到讨论串 #${no}`}
+        description="它可能已被删除。"
+        action={
+          <button type="button" onClick={onBack} className="text-[13px] underline-offset-2 hover:underline">
+            回到讨论串列表
+          </button>
+        }
+      />
+    );
+  return <ThreadDetail key={thread.id} pid={pid} thread={thread} tab={tab} onTab={onTab} onBack={onBack} fullHref={`/projects/${pid}/threads/${no}/full`} />;
 }

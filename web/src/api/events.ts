@@ -96,11 +96,24 @@ function onMessage(qc: QueryClient, _pid: string, d: { conversation_id: string; 
   qc.setQueryData<MessagePages>(keys.messages(d.conversation_id), (data) => appendMessage(data, d.message));
 }
 
-function onThread(qc: QueryClient, pid: string, d: { thread: ThreadView }) {
+/** A deleted thread leaves every list; its own queries are dropped. */
+export function onThreadDeleted(qc: QueryClient, pid: string, d: { id: string; no: number }) {
+  qc.setQueryData<ThreadView[]>(keys.threads(pid), (list) => list?.filter((t) => t.id !== d.id));
+  qc.setQueryData<OfficeSnapshot>(keys.office(pid), (s) => (s ? { ...s, threads: s.threads.filter((t) => t.id !== d.id) } : s));
+  qc.removeQueries({ queryKey: keys.thread(d.id) });
+  qc.invalidateQueries({ queryKey: keys.waiting(pid) });
+  qc.invalidateQueries({ queryKey: keys.overview(pid) });
+  qc.invalidateQueries({ queryKey: keys.allDeliverables(pid) });
+}
+
+function onThread(qc: QueryClient, pid: string, d: { thread?: ThreadView; deleted?: { id: string; no: number } }) {
+  if (d.deleted) return onThreadDeleted(qc, pid, d.deleted);
+  if (!d.thread) return;
+  const thread = d.thread;
   const sortByNo = (list: ThreadView[]) => list.slice().sort((a, b) => b.no - a.no);
-  qc.setQueryData<ThreadView[]>(keys.threads(pid), (list) => (list ? sortByNo(upsert(list, d.thread)) : list));
-  qc.setQueryData<ThreadDetail>(keys.thread(d.thread.id), (t) => (t ? { ...t, ...d.thread } : t));
-  qc.setQueryData<OfficeSnapshot>(keys.office(pid), (s) => (s ? { ...s, threads: upsert(s.threads, d.thread) } : s));
+  qc.setQueryData<ThreadView[]>(keys.threads(pid), (list) => (list ? sortByNo(upsert(list, thread)) : list));
+  qc.setQueryData<ThreadDetail>(keys.thread(thread.id), (t) => (t ? { ...t, ...thread } : t));
+  qc.setQueryData<OfficeSnapshot>(keys.office(pid), (s) => (s ? { ...s, threads: upsert(s.threads, thread) } : s));
   qc.invalidateQueries({ queryKey: keys.waiting(pid) });
   qc.invalidateQueries({ queryKey: keys.overview(pid) });
 }

@@ -24,13 +24,13 @@
 | `event:` | `data` | 发生于 |
 | --- | --- | --- |
 | `message` | `{conversation_id, thread_no?, message: MessageView}` | 用户、统筹、组长、平台说话 |
-| `thread` | `{thread: ThreadView}` | 讨论串新建 / 状态 / PR / 计数变化 |
+| `thread` | `{thread: ThreadView}`，删除时 `{deleted: {id, no}}` | 讨论串新建 / 状态 / PR / 计数变化 / 删除 |
 | `main_task` | `{thread_no, main_tasks: MainTaskView[]}` | 计划变化、自动打勾 |
 | `task` | `{thread_no, task: TaskView}` | 小任务新建、领取、状态变化 |
 | `question` | `{thread_no?, question: QuestionView}` | 提问 / 审批新建、答复、取消 |
 | `mail` | `{thread_no, mail: MailView}` | 员工间留言 |
 | `activity` | `{thread_no?, employee, text, at}` | 员工活动摘要（工具开始/结束、进度；**落库**，可回看） |
-| `status` | `{employee: EmployeeRef, status: EmployeeStatusView}` | 员工状态变化（办公室；来自 `at_status_events`，与其他事件同一序号） |
+| `status` | `{employee: EmployeeRef, status: EmployeeStatusView}` | 员工状态变化（办公室、讨论串“进度”页；来自 `at_status_events`，**不在 `at_events` 里**，与其他事件同一序号） |
 | `deliverable` | `{deliverable: DeliverableView}` | 交付物登记 / 更新 |
 | `merge` | `{thread_no, entry: MergeEntryView}` | 合并队列变化 |
 | `ci` | `{thread_no, sha, checks: CheckView[]}` | CI 结果变化 |
@@ -124,15 +124,17 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | DELETE | `/api/projects/{pid}` | → 204；关闭全部会话，向用过的节点发 `git.purge` |
 | GET | `/api/projects/{pid}/coordinator` | → `{conversation_id, employee: EmployeeBrief, session_state}`；不存在则创建统筹（员工 + 对话），**不立即开会话**（第一条消息时才开） |
 | GET | `/api/conversations/{cid}/messages?before=&limit=` | → `{items: MessageView[], next_cursor}`（v1 路径；v2 增加分页参数，不带参数时返回全部以兼容 v1） |
-| POST | `/api/conversations/{cid}/messages` | `{content, interrupt?: bool}` → 202 `MessageView`。投递到对应员工会话（统筹或组长）。`interrupt: true` = “插话并打断当前操作” |
+| POST | `/api/conversations/{cid}/messages` | `{content, interrupt?: bool, attachments?: string[]}` → 202 `MessageView`。投递到对应员工会话（统筹或组长）。`interrupt: true` = “插话并打断当前操作”。`attachments` = 本项目已上传图片的 id（最多 8 张，按顺序），有图片时 `content` 可以为空；消息的 `meta.attachments` 记下 `{id, name, content_type, size}`，员工收到的是图片内容块（Claude）或本地图片（Codex），见 `protocol.md` §4.3 |
+| POST | `/api/projects/{pid}/attachments` | `{name, data}`（base64）→ 201 `{id, name, content_type, size, sha256, created_at, url}`。只收 PNG、JPEG、GIF、WebP（按文件头判断，不信扩展名），每张最多 5 MB（Claude 单张图片上限），否则 422。输入框粘贴、拖入或选择图片时立即上传，发送时带上 id |
+| GET | `/api/attachments/{id}` | 图片本身（只给项目所有者；`X-Content-Type-Options: nosniff`、`Content-Security-Policy: default-src 'none'; sandbox`）。聊天记录里的缩略图用它 |
 | POST | `/api/conversations/{cid}/interrupt` | → 202。中止该对话员工的当前回合（停止按钮） |
-| GET | `/api/projects/{pid}/threads?status=&group=waiting\|active\|done` | → `ThreadView[]`（右侧讨论串列表：等你处理 / 进行中 / 已完成） |
+| GET | `/api/projects/{pid}/threads?status=&group=waiting\|active\|done` | → `ThreadView[]`（右侧讨论串列表：等你处理 / 进行中 / 已完成，归档的折叠在底部“已归档 N”里） |
 | GET | `/api/projects/{pid}/waiting` | → `{questions: QuestionView[], reviews: ThreadView[]}`（跨讨论串的“等你处理”） |
 | POST | `/api/conversations/{cid}/questions/{qid}/answer` | `{answer}`；审批用 `allow`、`deny`、`allow_always`，可附 `reason`（拒绝理由，发给员工）→ `QuestionView`（v1 路径，语义扩展） |
 | GET | `/api/conversations/{cid}/questions?status=open\|all` | → `QuestionView[]`（v1 路径） |
 | GET | `/api/projects/{pid}/search?q=` | 搜索消息、讨论串标题、任务、交付物（PG `tsvector` + `pg_trgm`，中文用 trigram）→ `{threads, messages, tasks, deliverables}` |
 
-讨论串详情面板（右侧展开）用 3.3 的 `GET /api/threads/{tid}`。
+讨论串详情面板（右侧展开）用 3.3 的接口。面板顶部是面包屑“讨论串 > #12 标题”（点“讨论串”回列表），下面四个页签：**进度**（为什么在等、每个员工此刻在做什么——工具和命令来自 `status` 事件的 bubble，等审批的员工下面直接是放行 / 拒绝卡片——以及实时“动态”，默认只显示最后几条，可展开）、**任务**、**交付物**（本讨论串的设计稿、文档、文件卡片，点开进查看器）、**成员**。面板宽度可拖动（340–760 px，且不超过窗口 60%），按用户记在浏览器 localStorage，双击拖动条恢复默认。中间统筹对话里讨论串卡片下面显示一行实时状态（谁在跑什么 / 等你审批几条）。
 
 ### 3.3 Thread（讨论串详情：两级任务与任务池）与 MobileThread
 
@@ -141,6 +143,9 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | POST | `/api/projects/{pid}/threads` | `{title, brief, roles?: [{role, count}]}` → 201 `ThreadView`（用户直接开串，跳过统筹；`roles` 可临时调整本串岗位数量） |
 | GET | `/api/threads/{tid}` | → `ThreadView` |
 | PATCH | `/api/threads/{tid}` | `{title?, status?: "paused"|"running"|"archived", auto_approve?}` → `ThreadView`。`auto_approve` = “本讨论串内全部放行”（打开时一并放行当前所有待审批，并审计） |
+| POST | `/api/threads/{tid}/archive` | → `ThreadView`。归档：讨论串结束（会话关闭、节点上的检出按 `git.cleanup keep_unpushed` 清理），从主列表移到“已归档”，记下归档前的状态（`at_threads.archived_from`）。已结束的讨论串（done / failed）常用它在“解决后归档” |
+| POST | `/api/threads/{tid}/unarchive` | → `ThreadView`。done / failed 归档的回到原状态；进行中归档的回到 `paused`（`pause_reason = "user"`），点“继续”接着做。没归档 → 409 `not_archived` |
+| DELETE | `/api/threads/{tid}` | → 204。关闭全部会话，向用过的节点发 `git.cleanup`（`keep_unpushed: false`，未推送的改动也删）和 `git.purge projects/<pid>/threads/<no>`，删除成员分支；讨论串、员工、任务、对话、审批记录一并删除（级联），交付物留在资料库（`thread_no` 变成 null）。SSE 发 `thread {deleted}`。网页上先弹确认框 |
 | GET | `/api/threads/{tid}/main-tasks` | → `MainTaskView[]` |
 | PATCH | `/api/threads/{tid}/main-tasks/{mid}` | `{status}`（用户手动打勾/取消） |
 | GET | `/api/threads/{tid}/tasks?status=&main=` | → `TaskView[]`（任务池看板：可领 / 进行中 / 待审查 / 待决策 / 合并中 / 完成） |
@@ -150,7 +155,7 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | POST | `/api/threads/{tid}/members/{name}/interrupt` | 打断某个成员的当前回合 |
 | POST | `/api/threads/{tid}/members/{name}/message` | `{content}` → 直接给成员发话（以“用户”身份，进该成员会话，同时记到讨论串对话里） |
 | GET | `/api/threads/{tid}/mail?before=` | → 分页 `MailView` |
-| GET | `/api/threads/{tid}/activity?before=` | → 分页 activity（来自 `at_events`，v1 不落库） |
+| GET | `/api/threads/{tid}/activity?before=` | → 分页 activity（来自 `at_events`，v1 不落库）。“进度”页的动态列表先拉这里，之后由 SSE `activity` 追加 |
 | GET | `/api/threads/{tid}/merge-queue` | → `MergeEntryView[]` |
 | GET | `/api/threads/{tid}/checks` | → 最近一次合并的 `CheckView[]` |
 | POST | `/api/threads/{tid}/open-pr` | `{title?, body?, force?: bool}` → `ThreadView`（Thread 页“开 PR”按钮；每个已有讨论串分支、还没有 PR 的仓库各开一个，base 为本讨论串在该仓库的基准分支，409 `nothing_to_pr` = 还没有合并进任何仓库的改动；前提同组长 `open_pr`：无 `merging` 条目、主任务全部 done（`force` 可跳过这一条）；标题/正文缺省时平台由讨论串标题、主任务和小任务总结生成；409 `pr_exists`、409 `merge_in_progress`） |
@@ -324,7 +329,8 @@ v2 用户在项目侧栏的“旧对话”分组和 `/projects/:pid/legacy/:cid`
 | `/projects/new` | NewProject |
 | `/projects/:pid` | Main（统筹对话 + 讨论串面板；`?panel=library` 右侧换成资料库，`?panel=none` 收起右侧）。顶栏：项目图标和名字（切换项目）、资料库、讨论串面板开关、办公室、“…”菜单（项目首页 / 定时任务 / 设置） |
 | `/projects/:pid/overview` | Overview |
-| `/projects/:pid/threads/:no` | Thread（全屏） / MobileThread |
+| `/projects/:pid/threads/:no` · `/projects/:pid/threads/:no/:tab` | 宽屏（≥1024 px）：Main，右侧面板打开这个讨论串，`tab` = `progress`（默认，可省）· `tasks` · `deliverables` · `members`；窄屏：Thread / MobileThread。旧链接 `/projects/:pid?thread=N` 跳到这里 |
+| `/projects/:pid/threads/:no/full` | Thread（全屏，主要任务 / 任务池 / 和组长的对话 / 交付） |
 | `/projects/:pid/deliverables` | Deliverables |
 | `/projects/:pid/office` | Office |
 | `/projects/:pid/settings` · `/projects/:pid/settings/:section` | ProjectSettings：Main 上打开的设置对话框，分区 `general`（通用）· `memory`（记忆）· `environment`（环境）· `usage`（使用情况）· `advanced`（高级），关闭回到 `/projects/:pid` |

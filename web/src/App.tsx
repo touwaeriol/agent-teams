@@ -11,7 +11,7 @@ import { MainPage } from "@/pages/Main";
 import { NewProjectPage } from "@/pages/NewProject";
 import { OverviewPage } from "@/pages/Overview";
 import { ProjectsIndex } from "@/pages/Projects";
-import { ThreadPage } from "@/pages/Thread";
+import { ThreadPage, ThreadRoute } from "@/pages/Thread";
 
 /** Pages that pull in the office renderer (ajv, canvas) or are rarely opened load on demand. */
 function lazyPage(load: () => Promise<{ default: ComponentType }>) {
@@ -60,7 +60,9 @@ export function App() {
         <Route path="/projects/new" element={<NewProjectPage />} />
         <Route path="/projects/:pid" element={<MainPage />} />
         <Route path="/projects/:pid/overview" element={<OverviewPage />} />
-        <Route path="/projects/:pid/threads/:no" element={<ThreadPage />} />
+        <Route path="/projects/:pid/threads/:no" element={<ThreadRoute />} />
+        <Route path="/projects/:pid/threads/:no/full" element={<ThreadPage />} />
+        <Route path="/projects/:pid/threads/:no/:tab" element={<ThreadRoute />} />
         <Route path="/projects/:pid/deliverables" element={<DeliverablesPage />} />
         <Route path="/projects/:pid/settings" element={<MainPage settings />} />
         <Route path="/projects/:pid/settings/:section" element={<MainPage settings />} />

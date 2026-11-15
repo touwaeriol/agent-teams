@@ -16,6 +16,7 @@ func TestDecidePriority(t *testing.T) {
 		{"claiming", Facts{Claiming: true, ToolCat: "read"}, Decision{State: "claiming"}},
 		{"typing", Facts{ToolCat: "edit", Turn: true}, Decision{State: "typing"}},
 		{"reading", Facts{ToolCat: "read"}, Decision{State: "reading"}},
+		{"web fetch reads", Facts{ToolCat: "web", Turn: true}, Decision{State: "reading"}},
 		{"running test", Facts{ToolCat: "shell", ToolSub: "test"}, Decision{State: "running", Substate: "test"}},
 		{"thinking", Facts{Turn: true, Waiting: true}, Decision{State: "thinking"}},
 		{"waiting", Facts{Waiting: true}, Decision{State: "waiting"}},

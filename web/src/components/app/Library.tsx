@@ -197,7 +197,7 @@ function ItemLink({ pid, item, className, children }: { pid: string; item: Deliv
   );
 }
 
-const FILE_ICONS: Record<FileIconKind, LucideIcon> = { image: Image, code: FileCode2, text: FileText, table: Sheet, pr: GitPullRequest, design: Palette, link: Link2 };
+export const FILE_ICONS: Record<FileIconKind, LucideIcon> = { image: Image, code: FileCode2, text: FileText, table: Sheet, pr: GitPullRequest, design: Palette, link: Link2 };
 
 function KindGlyph({ item }: { item: DeliverableView }) {
   const Icon = FILE_ICONS[fileIcon(item)];

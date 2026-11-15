@@ -247,6 +247,7 @@ CREATE TABLE at_threads (
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   started_at     TIMESTAMPTZ,
   finished_at    TIMESTAMPTZ,
+  archived_from  TEXT NOT NULL DEFAULT '',        -- 00095：归档前的状态（取消归档时 done/failed 回原状态，其余回 paused）
   UNIQUE (project_id, no)
 );
 CREATE INDEX at_threads_project ON at_threads (project_id, status, updated_at DESC);
@@ -666,6 +667,25 @@ CREATE INDEX at_schedules_due ON at_schedules (next_run_at) WHERE enabled;
 --   停机错过的只补一次，不会重复触发。
 ```
 
+### 2.11 讨论串生命周期与消息图片（00095）
+
+```sql
+ALTER TABLE at_threads ADD COLUMN archived_from TEXT NOT NULL DEFAULT '';
+CREATE TABLE at_attachments (   -- 用户附在消息上的图片
+  id           TEXT PRIMARY KEY,                -- img_…
+  project_id   TEXT NOT NULL REFERENCES at_projects(id) ON DELETE CASCADE,
+  user_id      TEXT NOT NULL REFERENCES at_users(id) ON DELETE CASCADE,
+  name         TEXT NOT NULL,
+  content_type TEXT NOT NULL,                   -- 按文件头判断：image/png | image/jpeg | image/gif | image/webp
+  size         INT  NOT NULL,                   -- ≤ 5 MB
+  sha256       TEXT NOT NULL,
+  data         BYTEA NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+消息只在 `at_messages.meta.attachments` 里记 `{id, name, content_type, size}`；图片跟着项目删除。删除讨论串 = 删它的 `at_conversations` 行，`at_threads`、员工、会话、任务、提问、消息、合并队列等级联删除；`at_deliverables.thread_id` 置空（交付物留在资料库）；`at_events` / `at_status_events` 没有外键，历史事件保留。
+
 资料库“添加”的文件（`POST /api/projects/{pid}/library`）就是一条 `at_deliverables`（`published_by = 'user'`）加一条 `at_deliverable_files` 第 1 版，与 `publish_file` 同样的类型和 5 MB 限制、同样的签名 URL 沙箱访问。项目用量（`GET /api/projects/{pid}/usage`）直接汇总 `at_usage`，不另建表。
 
 ## 3. 从 v1 表的映射
@@ -696,6 +716,8 @@ CREATE INDEX at_schedules_due ON at_schedules (next_run_at) WHERE enabled;
 6. `00030_office.sql`（P5）：`at_office_layouts`、`at_projects.office_layout`。
    `00050_node_job_index.sql`：`at_node_commands` 的作业索引。`00060_design_skills.sql`：`at_roles.skills`、`at_skills`、`at_deliverable_files`、`at_upload_chunks`、`at_deliverable_comments`（architecture.md §6.5）。
 7. `00100_drop_v1.sql`（P6 后）：删 `at_teams`、`at_conversations.history`；`at_tasks.output` 并入 `summary`；去掉不再需要的默认值。
+
+`00095_thread_lifecycle_images.sql`：`at_threads.archived_from`、`at_attachments`（§2.11）。
 
 `00080_plugins.sql`：`at_roles.plugins`、`at_plugins`、`at_plugin_versions`，`at_skills.user_id` 可为空（管理员内置技能）及其唯一索引（architecture.md §6.5）。
 

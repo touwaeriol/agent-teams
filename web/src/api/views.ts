@@ -116,6 +116,10 @@ export interface ThreadView {
   cost_usd_est: number | null;
   created_at: string;
   updated_at: string;
+  /** When the thread first ran (null while queued). */
+  started_at?: string | null;
+  /** When it reached done, failed or archived. */
+  finished_at?: string | null;
 }
 
 /** One repository of a thread: its base, whether the thread branch exists there, its PR. */
@@ -183,9 +187,19 @@ export interface MessageView {
   author: string;
   kind: "chat" | "note" | "interrupt";
   content: string;
-  meta: { thread_no?: number; task_id?: string; opens_thread?: number; request_kind?: string };
+  meta: { thread_no?: number; task_id?: string; opens_thread?: number; request_kind?: string; attachments?: AttachmentRef[] };
   created_at: string;
 }
+
+/** An image attached to a message (meta.attachments); served at /api/attachments/{id}. */
+export interface AttachmentRef {
+  id: string;
+  name: string;
+  content_type: string;
+  size: number;
+}
+
+export type AttachmentView = S["AttachmentView"];
 
 export interface MailView {
   id: string;

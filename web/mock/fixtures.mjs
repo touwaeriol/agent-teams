@@ -67,14 +67,14 @@ const thread = (no, title, status, extra) => ({
 
 export const threads = [
   thread(13, "Codex 员工接入", "running", {
-    branch: "thread/13-codex", updated_at: ago(8), members: members13,
+    branch: "thread/13-codex", updated_at: ago(8), started_at: ago(66), members: members13,
     summary: "组长问：节点上还没装 codex，先用 CODEX_API_KEY 还是你去登录？",
     main_tasks: [step("m131", 1, "CodexWorker 与事件解析", "done", 2, 2), step("m132", 2, "节点安装与登录", "doing", 1, 3), step("m133", 3, "联调", "todo", 0, 1)],
     counts: counts({ waiting: 1, questions_open: 1, tasks_total: 6, tasks_done: 3, main_total: 3, main_done: 1 }),
     lead_last: { text: "代码部分已完成并通过测试，剩下要在节点上装好 codex 才能联调。", at: ago(9) },
   }),
   thread(12, "员工通信与审批", "running", {
-    branch: "thread/12-employee-comms", updated_at: ago(0.5), created_at: ago(70), members: members12,
+    branch: "thread/12-employee-comms", updated_at: ago(0.5), created_at: ago(70), started_at: ago(68), members: members12,
     summary: "后端已完成待审查，网页卡片进行中；dev-2 有一条命令等你批准。",
     main_tasks: [
       step("m121", 1, "实现约定：工具、事件、数据表和接口", "done", 1, 1),
@@ -107,6 +107,11 @@ export const threads = [
     main_tasks: [1, 2, 3, 4].map((i) => step(`m9${i}`, i, `步骤 ${i}`, "done", 1, 1)),
     counts: counts({ tasks_total: 4, tasks_done: 4, main_total: 4, main_done: 4 }),
   }),
+  thread(8, "旧版 YAML 团队配置迁移", "archived", {
+    branch: "thread/8-yaml", updated_at: ago(60 * 26), summary: "迁移脚本已合并，旧配置自动转换。",
+    counts: counts({ tasks_total: 3, tasks_done: 3, main_total: 2, main_done: 2 }),
+  }),
+  thread(7, "节点安装脚本", "archived", { branch: "thread/7-install", updated_at: ago(60 * 40), summary: "一行命令安装节点。" }),
 ];
 
 const q = (id, thread_no, asker, kind, text, extra = {}) => ({
@@ -196,6 +201,7 @@ export const deliverables = [
   hosted("d8", "design", "e2e-main.png", 60 * 31, 381_800, "user"),
   hosted("d9", "doc", "架构说明.md", 60 * 33, 24_100, "designer-1"),
   hosted("d10", "design", "落地页 v2", 60 * 34, 208_600, "designer-1", "index.html"),
+  hosted("d11", "design", "审批卡片-亮色.png", 9, 48_200, "dev-2"),
 ];
 
 function hosted(id, kind, title, min, size, by, entry = title) {

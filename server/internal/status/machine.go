@@ -13,7 +13,7 @@ type Facts struct {
 	RaisedHand  bool
 	Queued      bool
 	Claiming    bool
-	ToolCat     string // edit | read | shell | platform | "" (no tool running)
+	ToolCat     string // edit | read | web | shell | platform | other | "" (no tool running)
 	ToolSub     string // shell: test | git_commit | git_push | ci | install
 	Turn        bool
 	Waiting     bool
@@ -55,7 +55,7 @@ func toolState(f Facts) (Decision, bool) {
 	switch f.ToolCat {
 	case "edit":
 		return Decision{State: "typing"}, true
-	case "read":
+	case "read", "web":
 		return Decision{State: "reading"}, true
 	case "shell":
 		return Decision{State: "running", Substate: f.ToolSub}, true

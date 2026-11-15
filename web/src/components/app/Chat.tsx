@@ -7,9 +7,11 @@ import type { ThreadView } from "@/api/views";
 import { Loading } from "@/components/common";
 import { Markdown } from "@/components/Markdown";
 import { chatBlocks, type ChatBlock } from "@/lib/chat";
+import { featured, isWorking, liveLine } from "@/lib/live";
 import { markTone } from "@/lib/present";
 import { clock, cn } from "@/lib/utils";
-import { Dot } from "./bits";
+import { MessageImages } from "./attachments";
+import { Dot, LiveDot } from "./bits";
 
 export interface ChatProps {
   cid: string | undefined;
@@ -51,7 +53,12 @@ export function Chat({ cid, threads = [], onOpenThread, speakerColor = "#C8622A"
 function Block({ block, threads, onOpenThread, speakerColor, compact }: { block: ChatBlock; threads: ThreadView[]; onOpenThread?: (no: number) => void; speakerColor: string; compact?: boolean }) {
   const m = block.message;
   if (block.kind === "user")
-    return <div className={cn("max-w-[85%] self-end whitespace-pre-wrap rounded-2xl bg-raised px-4 py-2.5", compact ? "leading-6" : "leading-[26px]")}>{m.content}</div>;
+    return (
+      <div className="flex max-w-[85%] flex-col gap-2 self-end">
+        <MessageImages items={m.meta?.attachments} />
+        {m.content && <div className={cn("self-end whitespace-pre-wrap rounded-2xl bg-raised px-4 py-2.5", compact ? "leading-6" : "leading-[26px]")}>{m.content}</div>}
+      </div>
+    );
   if (block.kind === "line")
     return <p className={cn("text-center text-xs", m.role === "error" ? "text-destructive" : "text-muted-foreground")}>{m.content}</p>;
   return (
@@ -69,17 +76,29 @@ function Block({ block, threads, onOpenThread, speakerColor, compact }: { block:
   );
 }
 
+/** A thread the speaker opened, with its live status underneath while it runs. */
 export function ThreadChip({ thread, no, onOpen }: { thread?: ThreadView; no: number; onOpen?: (no: number) => void }) {
   const tone = thread ? markTone(thread) : "#8A877F";
+  const line = thread ? liveLine(thread) : "";
+  const asks = (thread?.counts.waiting ?? 0) > 0;
+  const working = Boolean(thread && featured(thread) && isWorking(featured(thread)!));
   return (
     <button
       type="button"
       onClick={() => onOpen?.(no)}
-      className="flex h-8 items-center gap-2 self-start rounded-lg border bg-panel px-3 text-[13px] hover:border-input"
+      className="flex min-h-8 max-w-full flex-col items-start gap-0.5 self-start rounded-lg border bg-panel px-3 py-1.5 text-left text-[13px] hover:border-input"
     >
-      <Dot color={tone} />
-      讨论串 #{no} {thread?.title ?? ""}
-      <ChevronRight className="size-3 text-[#8A877F]" strokeWidth={2} />
+      <span className="flex items-center gap-2">
+        <Dot color={tone} />
+        讨论串 #{no} {thread?.title ?? ""}
+        <ChevronRight className="size-3 text-[#8A877F]" strokeWidth={2} />
+      </span>
+      {line && (
+        <span className={cn("flex min-w-0 max-w-full items-center gap-1.5 pl-[15px] text-xs", asks ? "text-[#B4530B]" : "text-muted-foreground")}>
+          {working && !asks && <LiveDot color="#2F6FDB" on size={6} />}
+          <span className="truncate">{line}</span>
+        </span>
+      )}
     </button>
   );
 }

@@ -35,6 +35,8 @@ export const projects = {
   addDeliverable: (pid: string, body: { kind: string; title: string; url: string; thread_no?: number }) =>
     unwrap(client.POST("/api/projects/{pid}/deliverables", { params: { path: { pid } }, body, ...idem() })),
   upload: (pid: string, body: S["UploadBody"]) => unwrap(client.POST("/api/projects/{pid}/library", { params: { path: { pid } }, body })),
+  /** An image for a message: name + base64 data (PNG, JPEG, GIF or WebP, at most 5 MB). */
+  attach: (pid: string, body: S["AttachmentBody"]) => unwrap(client.POST("/api/projects/{pid}/attachments", { params: { path: { pid } }, body })),
   openThread: (pid: string, body: { title: string; brief: string }) =>
     unwrap(client.POST("/api/projects/{pid}/threads", { params: { path: { pid } }, body, ...idem() })),
 };
@@ -54,8 +56,14 @@ export const schedules = {
 };
 
 export const conversations = {
-  send: (cid: string, content: string, interrupt = false) =>
-    unwrap(client.POST("/api/conversations/{cid}/messages", { params: { path: { cid } }, body: { content, interrupt }, ...idem() })),
+  send: (cid: string, content: string, interrupt = false, attachments: string[] = []) =>
+    unwrap(
+      client.POST("/api/conversations/{cid}/messages", {
+        params: { path: { cid } },
+        body: { content, interrupt, ...(attachments.length ? { attachments } : {}) },
+        ...idem(),
+      }),
+    ),
   interrupt: (cid: string) => unwrap(client.POST("/api/conversations/{cid}/interrupt", { params: { path: { cid } } })),
   answer: (cid: string, qid: string, answer: string, reason?: string) =>
     unwrap(client.POST("/api/conversations/{cid}/questions/{qid}/answer", { params: { path: { cid, qid } }, body: { answer, reason }, ...idem() })),
@@ -64,6 +72,9 @@ export const conversations = {
 export const threads = {
   update: (tid: string, body: { title?: string; status?: "paused" | "running" | "archived"; auto_approve?: boolean }) =>
     unwrap(client.PATCH("/api/threads/{tid}", { params: { path: { tid } }, body })),
+  archive: (tid: string) => unwrap(client.POST("/api/threads/{tid}/archive", { params: { path: { tid } } })),
+  unarchive: (tid: string) => unwrap(client.POST("/api/threads/{tid}/unarchive", { params: { path: { tid } } })),
+  remove: (tid: string) => unwrap(client.DELETE("/api/threads/{tid}", { params: { path: { tid } } })),
   setMainTask: (tid: string, mid: string, status: MainTaskStatus) =>
     unwrap(client.PATCH("/api/threads/{tid}/main-tasks/{mid}", { params: { path: { tid, mid } }, body: { status } })),
   cancelTask: (tid: string, task: string) => unwrap(client.POST("/api/threads/{tid}/tasks/{task}/cancel", { params: { path: { tid, task } } })),

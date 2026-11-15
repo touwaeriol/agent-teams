@@ -1,15 +1,14 @@
 // Thread pieces shared by the Main page's right panel, the Thread page and
-// the phone view: the grouped list, the compact checklist, cards, members.
-import { ArrowLeft, Maximize2 } from "lucide-react";
-import { Link } from "react-router-dom";
-import { conversations } from "@/api/actions";
-import { useAction } from "@/api/mutations";
-import { keys, useQuestions } from "@/api/queries";
+// the phone view: the grouped list (row menus, archived section), the compact checklist,
+// cards, members.
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { useState } from "react";
 import type { MainTaskView, QuestionView, ThreadView } from "@/api/views";
-import { Loading } from "@/components/common";
-import { groupThreads, markTone, leadOf, mainCount, memberDoing, memberTone, openForUser, threadLine, threadLook } from "@/lib/present";
+import { isWorking, liveLine, threadActive } from "@/lib/live";
+import { groupThreads, leadOf, mainCount, markTone, memberDoing, memberTone, threadLine } from "@/lib/present";
 import { cn } from "@/lib/utils";
-import { CheckMark, Composer, Dot, StatusPill } from "./bits";
+import { CheckMark, LiveDot } from "./bits";
+import { ThreadMenu } from "./ThreadMenu";
 import { ReviewCard, WaitingCard, type CardVariant } from "./cards";
 
 /** The round mark before a thread in lists: outlined in the state colour, filled with ✓ when done. */
@@ -27,28 +26,63 @@ export function ThreadMark({ thread }: { thread: ThreadView }) {
   );
 }
 
-export function ThreadList({ threads, onOpen, waitingByThread }: { threads: ThreadView[]; onOpen: (no: number) => void; waitingByThread?: Map<number, QuestionView> }) {
+/** The right panel's list: 等你处理 / 进行中 / 已完成, then a collapsed 已归档 section. Rows have a ⋯ menu. */
+export function ThreadList({ threads, onOpen, waitingByThread, menus = false }: { threads: ThreadView[]; onOpen: (no: number) => void; waitingByThread?: Map<number, QuestionView>; menus?: boolean }) {
   const groups = groupThreads(threads);
-  if (groups.length === 0) return <p className="text-[13px] leading-6 text-muted-foreground">还没有讨论串。和项目统筹说需求，它会开讨论串去做。</p>;
+  const archived = threads.filter((t) => t.status === "archived").sort((a, b) => b.no - a.no);
+  if (groups.length === 0 && archived.length === 0) return <p className="text-[13px] leading-6 text-muted-foreground">还没有讨论串。和项目统筹说需求，它会开讨论串去做。</p>;
   return (
     <div className="flex flex-col gap-5">
       {groups.map((g) => (
         <section key={g.id} className="flex flex-col gap-0.5">
           <span className="pb-1.5 text-xs text-muted-foreground">{g.title}</span>
           {g.items.map((t) => (
-            <button key={`${g.id}-${t.id}`} type="button" onClick={() => onOpen(t.no)} className="-mx-2 flex gap-2.5 rounded-lg p-2 text-left hover:bg-background">
-              <ThreadMark thread={t} />
-              <span className="flex min-w-0 flex-col gap-[3px]">
-                <span className="text-sm font-medium">
-                  #{t.no} {t.title}
-                </span>
-                <span className="line-clamp-2 text-xs leading-[18px] text-muted-foreground">{threadLine(t, waitingByThread?.get(t.no))}</span>
-              </span>
-            </button>
+            <ThreadRow key={`${g.id}-${t.id}`} thread={t} onOpen={onOpen} line={threadRowLine(t, waitingByThread?.get(t.no))} live={!waitingByThread?.get(t.no) && t.counts.waiting === 0} menu={menus} />
           ))}
         </section>
       ))}
+      {archived.length > 0 && <ArchivedSection threads={archived} onOpen={onOpen} menus={menus} />}
     </div>
+  );
+}
+
+/** A live thread's line prefers what is happening right now; others keep the summary line. */
+function threadRowLine(t: ThreadView, open?: QuestionView): string {
+  if (open) return threadLine(t, open);
+  return liveLine(t) || threadLine(t, open);
+}
+
+function ThreadRow({ thread, onOpen, line, menu, live = false }: { thread: ThreadView; onOpen: (no: number) => void; line: string; menu: boolean; live?: boolean }) {
+  const working = live && threadActive(thread) && thread.members.some(isWorking);
+  return (
+    <div className="group -mx-2 flex items-start gap-1 rounded-lg hover:bg-background">
+      <button type="button" onClick={() => onOpen(thread.no)} className="flex min-w-0 flex-1 gap-2.5 p-2 text-left">
+        <ThreadMark thread={thread} />
+        <span className="flex min-w-0 flex-col gap-[3px]">
+          <span className="text-sm font-medium">
+            #{thread.no} {thread.title}
+          </span>
+          <span className="flex items-start gap-1.5 text-xs leading-[18px] text-muted-foreground">
+            {working && <LiveDot color="#2F6FDB" on size={6} className="mt-[6px]" />}
+            <span className="line-clamp-2">{line}</span>
+          </span>
+        </span>
+      </button>
+      {menu && <ThreadMenu thread={thread} className="mt-1.5 shrink-0 opacity-0 focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100 max-lg:opacity-100" />}
+    </div>
+  );
+}
+
+function ArchivedSection({ threads, onOpen, menus }: { threads: ThreadView[]; onOpen: (no: number) => void; menus: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="flex flex-col gap-0.5">
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex items-center gap-1 self-start pb-1.5 text-xs text-muted-foreground hover:text-foreground">
+        {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+        已归档 {threads.length}
+      </button>
+      {open && threads.map((t) => <ThreadRow key={t.id} thread={t} onOpen={onOpen} line={t.summary || t.brief} menu={menus} />)}
+    </section>
   );
 }
 
@@ -90,56 +124,11 @@ export function MemberLines({ thread }: { thread: ThreadView }) {
       {members.length === 0 && <span className="text-[13px] text-muted-foreground">还没有成员</span>}
       {members.map((m) => (
         <span key={m.id} className="flex items-center gap-2 text-[13px]">
-          <Dot color={memberTone(m)} />
+          <LiveDot color={memberTone(m)} on={isWorking(m)} size={7} />
           <span className="font-mono">{m.name}</span>
           <span className="min-w-0 flex-1 truncate text-muted-foreground">{memberDoing(m)}</span>
         </span>
       ))}
     </section>
-  );
-}
-
-/** Right-panel detail of one thread (Main board, “← 所有讨论串”). */
-export function ThreadPanel({ thread, onBack, fullHref }: { thread: ThreadView; onBack: () => void; fullHref: string }) {
-  const questions = useQuestions(thread.id);
-  const open = openForUser(questions.data);
-  const look = threadLook(thread);
-  const lead = leadOf(thread);
-  const send = useAction((text: string) => conversations.send(thread.id, text), { invalidate: [keys.messages(thread.id)], success: "已发给组长" });
-  return (
-    <>
-      <div className="flex flex-col gap-2 border-b border-[#EFEDE8] px-3.5 pb-3 pt-2.5">
-        <span className="flex items-center justify-between">
-          <button type="button" onClick={onBack} className="flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] text-[#4A4843] hover:bg-background">
-            <ArrowLeft className="size-3.5" strokeWidth={2} />
-            所有讨论串
-          </button>
-          <Link to={fullHref} aria-label="全屏打开讨论串" className="flex size-8 items-center justify-center rounded-lg text-[#4A4843] hover:bg-background">
-            <Maximize2 className="size-[15px]" strokeWidth={1.8} />
-          </Link>
-        </span>
-        <span className="flex items-center justify-between gap-2.5 px-1.5">
-          <span className="text-base font-semibold">
-            #{thread.no} {thread.title}
-          </span>
-          <StatusPill tone={look.tone} label={look.label} />
-        </span>
-        <span className="px-1.5 font-mono text-xs text-muted-foreground">
-          {thread.branch || "分支待创建"} · 组长 {lead?.name ?? "—"}
-        </span>
-      </div>
-      <div className="scroll-thin flex flex-1 flex-col gap-4 overflow-y-auto px-5 py-3.5">
-        <div className="rounded-xl border border-[#E2DFD8] px-3 py-2">
-          <Checklist tasks={thread.main_tasks} />
-        </div>
-        {questions.isLoading ? <Loading className="py-2" /> : <ThreadCards thread={thread} questions={open} variant="soft" />}
-        <MemberLines thread={thread} />
-        <section className="flex flex-col gap-1.5">
-          <span className="text-xs text-muted-foreground">组长最近说</span>
-          <p className="text-[13px] leading-[22px]">{thread.lead_last?.text || "还没有汇报。"}</p>
-        </section>
-      </div>
-      <Composer variant="inline" label="和组长说话" placeholder="直接和组长说话" className="mx-4 mb-4" busy={send.isPending} onSend={(t) => send.mutateAsync(t)} id={`lead-${thread.id}`} />
-    </>
   );
 }

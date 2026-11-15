@@ -4,17 +4,21 @@
 import { safeHref } from "@/lib/safeurl";
 import { ArrowLeft, ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { conversations, threads as threadActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
-import { keys, useActivity, useChecks, useMergeQueue, useProject, useQuestions, useTasks, useThreadByNo } from "@/api/queries";
+import { keys, useChecks, useMergeQueue, useProject, useQuestions, useTasks, useThreadByNo } from "@/api/queries";
 import type { MainTaskView, ProjectView, TaskView, ThreadView } from "@/api/views";
 import { Bar, CheckMark, Composer, Dot, StatusPill, Tag } from "@/components/app/bits";
 import { Chat } from "@/components/app/Chat";
-import { Checklist, ThreadCards } from "@/components/app/thread";
+import { Checklist, MemberLines, ThreadCards } from "@/components/app/thread";
 import { ConfirmAction, EmptyState, Loading } from "@/components/common";
 import { Button } from "@/components/ui/button";
-import { useIsMobile } from "@/lib/media";
+import { useIsMobile, useMedia } from "@/lib/media";
+import { useAttachments } from "@/components/app/attachments";
+import { ActivityFeed, detailTabOf } from "@/components/app/ThreadDetail";
+import { ThreadMenu } from "@/components/app/ThreadMenu";
+import { MainPage } from "./Main";
 import {
   checkLook,
   leadOf,
@@ -36,7 +40,7 @@ import {
   TIER_LABEL,
   visibleMainTasks,
 } from "@/lib/present";
-import { clock, cn, timeAgo } from "@/lib/utils";
+import { clock, cn } from "@/lib/utils";
 
 type View = "main" | "pool" | "chat" | "delivery";
 const VIEWS: [View, string][] = [
@@ -45,6 +49,17 @@ const VIEWS: [View, string][] = [
   ["chat", "和组长的对话"],
   ["delivery", "交付"],
 ];
+
+/**
+ * /projects/:pid/threads/:no(/:tab): on wide screens the main board with this thread open in
+ * the right panel; narrower screens get the thread board (phones: the mobile board).
+ */
+export function ThreadRoute() {
+  const { no = "", tab } = useParams();
+  const wide = useMedia("(min-width: 1024px)");
+  if (wide) return <MainPage openNo={Number(no) || null} tab={detailTabOf(tab)} />;
+  return <ThreadPage />;
+}
 
 export function ThreadPage() {
   const { pid = "", no = "" } = useParams();
@@ -75,6 +90,7 @@ function DesktopThread({ thread, project }: { thread: ThreadView; project: Proje
 }
 
 function ThreadHeader({ thread, project, view, setView }: { thread: ThreadView; project: ProjectView; view: View; setView: (v: View) => void }) {
+  const navigate = useNavigate();
   const look = threadLook(thread);
   const lead = leadOf(thread);
   const invalidate = [keys.threads(project.id), keys.thread(thread.id)];
@@ -87,7 +103,7 @@ function ThreadHeader({ thread, project, view, setView }: { thread: ThreadView; 
     <header className="flex flex-col gap-3 border-b bg-panel px-7 pt-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1.5">
-          <Link to={`/projects/${project.id}?thread=${thread.no}`} className="text-xs text-muted-foreground hover:text-foreground">
+          <Link to={`/projects/${project.id}/threads/${thread.no}`} className="text-xs text-muted-foreground hover:text-foreground">
             {project.name} / 讨论串
           </Link>
           <span className="flex flex-wrap items-center gap-2.5">
@@ -125,8 +141,10 @@ function ThreadHeader({ thread, project, view, setView }: { thread: ThreadView; 
                 开 PR
               </ConfirmAction>
             )}
+            <ThreadMenu thread={thread} onDeleted={() => navigate(`/projects/${project.id}`)} />
           </div>
         )}
+        {finished && <ThreadMenu thread={thread} onDeleted={() => navigate(`/projects/${project.id}`)} />}
       </div>
       <nav aria-label="视图" className="flex gap-1">
         {VIEWS.map(([id, label]) => (
@@ -353,10 +371,12 @@ function DeliveryRow({ branch, what, look, href }: { branch: string; what: strin
 
 function ThreadAside({ thread }: { thread: ThreadView }) {
   const questions = useQuestions(thread.id);
-  const activity = useActivity(thread.id);
   const lead = leadOf(thread);
-  const send = useAction((text: string) => conversations.send(thread.id, text), { invalidate: [keys.messages(thread.id)], success: "已发给组长" });
-  const feed = [...(activity.data?.items ?? [])].reverse().slice(0, 8);
+  const attachments = useAttachments(thread.project_id);
+  const send = useAction((v: { text: string; images: string[] }) => conversations.send(thread.id, v.text, false, v.images), {
+    invalidate: [keys.messages(thread.id)],
+    success: "已发给组长",
+  });
   return (
     <aside className="flex min-w-0 max-w-[380px] flex-[1_1_300px] flex-col gap-3.5">
       <ThreadCards thread={thread} questions={openForUser(questions.data)} variant="plain" />
@@ -378,26 +398,33 @@ function ThreadAside({ thread }: { thread: ThreadView }) {
         ))}
       </section>
       <section className="flex flex-col gap-2 rounded-xl border bg-panel px-4 py-3.5">
-        <h2 className="text-sm font-semibold">动态</h2>
-        {feed.length === 0 && <span className="text-xs text-muted-foreground">还没有动态</span>}
-        {feed.map((e, i) => (
-          <span key={`${e.at}-${i}`} className="text-xs leading-[19px] text-[#4A4843] [overflow-wrap:anywhere]" title={timeAgo(e.at)}>
-            <span className="font-mono text-foreground">{e.employee}</span> {e.text}
-          </span>
-        ))}
+        <ActivityFeed thread={thread} />
       </section>
-      <Composer variant="inline" label="和组长说话" placeholder={`和组长 ${lead?.name ?? ""} 说话`} busy={send.isPending} onSend={(t) => send.mutateAsync(t)} id="to-lead" />
+      <Composer
+        variant="inline"
+        label="和组长说话"
+        placeholder={`和组长 ${lead?.name ?? ""} 说话，可粘贴图片`}
+        busy={send.isPending}
+        attachments={attachments}
+        onSend={(text, images) => send.mutateAsync({ text, images })}
+        id="to-lead"
+      />
     </aside>
   );
 }
 
 /** MobileThread board: cards first, then the checklist, composer at the bottom. */
 function MobileThread({ thread }: { thread: ThreadView }) {
+  const navigate = useNavigate();
   const questions = useQuestions(thread.id);
   const look = threadLook(thread);
   const lead = leadOf(thread);
   const progress = mainProgress(thread);
-  const send = useAction((text: string) => conversations.send(thread.id, text), { invalidate: [keys.messages(thread.id)], success: "已发给组长" });
+  const attachments = useAttachments(thread.project_id);
+  const send = useAction((v: { text: string; images: string[] }) => conversations.send(thread.id, v.text, false, v.images), {
+    invalidate: [keys.messages(thread.id)],
+    success: "已发给组长",
+  });
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-col gap-2 border-b bg-panel px-3 pb-3 pt-2">
@@ -414,6 +441,7 @@ function MobileThread({ thread }: { thread: ThreadView }) {
             </span>
           </span>
           <StatusPill tone={look.tone} label={look.label} />
+          <ThreadMenu thread={thread} onDeleted={() => navigate(`/projects/${thread.project_id}`)} />
         </div>
         <span className="flex items-center gap-2.5 px-1">
           <Bar pct={progress.pct} tone={look.tone} />
@@ -425,6 +453,12 @@ function MobileThread({ thread }: { thread: ThreadView }) {
         <div className="rounded-xl border border-[#E2DFD8] bg-panel px-3 py-2">
           <Checklist tasks={thread.main_tasks} size="md" />
         </div>
+        <section className="px-1">
+          <MemberLines thread={thread} />
+        </section>
+        <section className="px-1">
+          <ActivityFeed thread={thread} />
+        </section>
         {thread.lead_last && (
           <section className="flex flex-col gap-1 px-1">
             <span className="text-xs text-muted-foreground">组长最近说</span>
@@ -432,7 +466,16 @@ function MobileThread({ thread }: { thread: ThreadView }) {
           </section>
         )}
       </div>
-      <Composer variant="inline" label="和组长说话" placeholder="和组长说话" className="mx-3 mb-3 rounded-2xl" busy={send.isPending} onSend={(t) => send.mutateAsync(t)} id="m-lead" />
+      <Composer
+        variant="inline"
+        label="和组长说话"
+        placeholder="和组长说话"
+        className="mx-3 mb-3 rounded-2xl"
+        busy={send.isPending}
+        attachments={attachments}
+        onSend={(text, images) => send.mutateAsync({ text, images })}
+        id="m-lead"
+      />
     </div>
   );
 }

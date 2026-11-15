@@ -77,6 +77,24 @@ setInterval(() => {
   emit("status", { employee: { id, thread_no: threadNo }, status: full, seq: seq + 1, at: now() });
 }, 2500);
 
+// Live activity for thread #12, so the progress tab and chat chips have something to stream.
+const LINES = [
+  ["dev-2", "Bash pnpm vitest run src/components/cards.test.tsx"],
+  ["qa-1", "Bash go test ./internal/approvals/..."],
+  ["dev-2", "Edit web/src/components/app/cards.tsx"],
+  ["lead-12", "Read server/internal/approvals/approvals.go"],
+  ["qa-1", "PG 往返测试 12/14 通过"],
+];
+let line = 0;
+setInterval(() => {
+  const [employee, text] = LINES[line++ % LINES.length];
+  const a = { thread_no: 12, employee, text, at: now() };
+  (state.activity.t12 ??= []).push(a);
+  emit("activity", a);
+}, 4000);
+
+const attachments = new Map();
+
 function officeSnapshot() {
   const roster = [{ ...state.coordinator, thread_no: null }, ...state.threads.filter((t) => ["running", "waiting", "review", "queued"].includes(t.status)).flatMap((t) => t.members.map((m) => ({ ...m, thread_no: t.no })))];
   return {
@@ -109,11 +127,14 @@ const storageBytes = () => state.deliverables.reduce((n, d) => n + (d.detail.siz
 
 async function sendMessage(res, cid, req) {
   const b = await body(req);
-  const m = { id: String(Date.now()), role: "user", author: "liu", kind: b.interrupt ? "interrupt" : "chat", content: b.content, meta: {}, created_at: now() };
+  const images = (b.attachments ?? []).map((id) => attachments.get(id)?.ref).filter(Boolean);
+  const meta = images.length ? { attachments: images } : {};
+  const m = { id: String(Date.now()), role: "user", author: "liu", kind: b.interrupt ? "interrupt" : "chat", content: b.content ?? "", meta, created_at: now() };
   (state.messages[cid] ??= []).push(m);
   emit("message", { conversation_id: cid, message: m });
   setTimeout(() => {
-    const reply = { id: String(Date.now() + 1), role: "leader", author: cid === "c0" ? "leader" : threadById(cid)?.members[0]?.name ?? "lead", kind: "chat", content: `收到：「${b.content}」。我来安排。`, meta: {}, created_at: now() };
+    const said = images.length ? `${images.length} 张图片${b.content ? `和「${b.content}」` : ""}` : `「${b.content}」`;
+    const reply = { id: String(Date.now() + 1), role: "leader", author: cid === "c0" ? "leader" : threadById(cid)?.members[0]?.name ?? "lead", kind: "chat", content: `收到 ${said}。我来安排。`, meta: {}, created_at: now() };
     state.messages[cid].push(reply);
     emit("message", { conversation_id: cid, message: reply });
   }, 1200);
@@ -252,6 +273,43 @@ const routes = [
   ["POST", /^\/api\/conversations\/([^/]+)\/questions\/([^/]+)\/answer$/, (req, res, [cid, qid]) => answer(res, cid, qid, req)],
   ["GET", /^\/api\/conversations\/([^/]+)\/tasks$/, (req, res) => json(res, 200, [{ id: "t1", assignee: "engineer", instruction: "实现置顶", status: "done" }])],
   ["GET", /^\/api\/threads\/([^/]+)$/, (req, res, [tid]) => json(res, 200, threadById(tid))],
+  ["POST", /^\/api\/threads\/([^/]+)\/(archive|unarchive)$/, (req, res, [tid, op]) => {
+    const t = threadById(tid);
+    if (op === "archive") Object.assign(t, { archived_from: t.status, status: "archived" });
+    else Object.assign(t, { status: ["done", "failed"].includes(t.archived_from) ? t.archived_from : "paused" });
+    emit("thread", { thread: t });
+    json(res, 200, t);
+  }],
+  ["DELETE", /^\/api\/threads\/([^/]+)$/, (req, res, [tid]) => {
+    const t = threadById(tid);
+    state.threads = state.threads.filter((x) => x.id !== tid);
+    state.deliverables.forEach((d) => d.thread_no === t.no && (d.thread_no = null));
+    emit("thread", { deleted: { id: t.id, no: t.no } });
+    json(res, 204);
+  }],
+  ["POST", /^\/api\/projects\/([^/]+)\/attachments$/, async (req, res) => {
+    const b = await body(req);
+    const data = Buffer.from(b.data ?? "", "base64");
+    const type = data[0] === 0x89 ? "image/png" : data[0] === 0xff ? "image/jpeg" : data.subarray(0, 3).toString() === "GIF" ? "image/gif" : data.subarray(8, 12).toString() === "WEBP" ? "image/webp" : "";
+    if (!type) return fail(res, 422, "只支持 PNG、JPG、GIF、WebP 图片", "validation");
+    const id = `img_${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    const ref = { id, name: b.name, content_type: type, size: data.length };
+    attachments.set(id, { ref, data });
+    json(res, 201, { ...ref, sha256: "", created_at: now(), url: `/api/attachments/${id}` });
+  }],
+  ["GET", /^\/api\/attachments\/([^/]+)$/, (req, res, [id]) => {
+    const a = attachments.get(id);
+    if (!a) return fail(res, 404, "没有这张图片");
+    res.writeHead(200, { "Content-Type": a.ref.content_type });
+    res.end(a.data);
+  }],
+  ["GET", /^\/api\/deliverables\/([^/]+)\/files$/, (req, res, [id]) => {
+    const d = state.deliverables.find((x) => x.id === id);
+    if (!d?.detail.hosted) return fail(res, 404, "没有文件");
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"><rect width="320" height="240" fill="#F4EFE8"/><rect x="24" y="28" width="272" height="64" rx="12" fill="#FFF9F4" stroke="#F0C9A8"/><rect x="40" y="48" width="120" height="10" rx="5" fill="#C8622A"/><rect x="40" y="66" width="200" height="8" rx="4" fill="#E2DFD8"/><rect x="24" y="108" width="80" height="28" rx="8" fill="#1F1E1C"/><rect x="112" y="108" width="80" height="28" rx="8" fill="#fff" stroke="#E2DFD8"/></svg>`;
+    const url = `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+    json(res, 200, { deliverable_id: id, version: 1, versions: [{ version: 1, created_at: d.created_at, by: d.published_by, files: 1, size: d.detail.size }], entry: d.detail.entry, render: d.detail.render ?? "image", files: [], base_url: "", entry_url: url, expires_at: ago(-120) });
+  }],
   ["PATCH", /^\/api\/threads\/([^/]+)$/, async (req, res, [tid]) => {
     const t = threadById(tid);
     const b = await body(req);

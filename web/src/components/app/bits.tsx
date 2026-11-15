@@ -2,12 +2,24 @@
 // composers). Colours come from lib/present.ts so states look the same everywhere.
 import { ArrowUp } from "lucide-react";
 import { useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { toast } from "sonner";
+import { AttachButton, attachmentHandlers, AttachmentStrip, type Attachments } from "./attachments";
 import { Spinner } from "@/components/common";
 import { cn } from "@/lib/utils";
 import type { MainTaskStatus } from "@/api/views";
 
 export function Dot({ color, size = 7, className }: { color: string; size?: number; className?: string }) {
   return <span aria-hidden className={cn("inline-block shrink-0 rounded-full", className)} style={{ width: size, height: size, background: color }} />;
+}
+
+/** A dot that pulses while someone is working (static otherwise). */
+export function LiveDot({ color, on, size = 8, className }: { color: string; on: boolean; size?: number; className?: string }) {
+  return (
+    <span aria-hidden className={cn("relative inline-flex shrink-0", className)} style={{ width: size, height: size }}>
+      {on && <span className="absolute inline-flex size-full animate-ping rounded-full opacity-60" style={{ background: color }} />}
+      <span className="relative inline-flex size-full rounded-full" style={{ background: color }} />
+    </span>
+  );
 }
 
 /** Outlined status pill (进行中 / 等你 / 待验收 …). */
@@ -78,8 +90,10 @@ export function SendButton({ label, busy, disabled, size = 32 }: { label: string
 interface ComposerProps {
   label: string;
   placeholder: string;
-  onSend: (text: string) => Promise<unknown> | void;
+  onSend: (text: string, images: string[]) => Promise<unknown> | void;
   busy?: boolean;
+  /** Image input (paste, drop, picker); omit for text-only boxes. */
+  attachments?: Attachments;
   hint?: ReactNode;
   extra?: ReactNode;
   variant?: "large" | "inline";
@@ -88,19 +102,27 @@ interface ComposerProps {
 }
 
 /** Message box. `large`: the coordinator chat (textarea + hint row); `inline`: one-line box for the lead. Enter sends, Shift+Enter breaks. */
-export function Composer({ label, placeholder, onSend, busy, hint, extra, variant = "large", className, id }: ComposerProps) {
+export function Composer({ label, placeholder, onSend, busy, hint, extra, variant = "large", className, id, attachments }: ComposerProps) {
   const [text, setText] = useState("");
+  const [dragging, setDragging] = useState(false);
+  const imageCount = attachments?.items.filter((x) => x.id).length ?? 0;
+  const empty = !text.trim() && imageCount === 0;
   const send = async (e?: FormEvent) => {
     e?.preventDefault();
     const value = text.trim();
-    if (!value || busy) return;
+    if (empty || busy) return;
+    const images = attachments ? attachments.ids() : [];
+    if (images === null) return void toast.info("图片还在上传，稍等一下");
     setText("");
     try {
-      await onSend(value);
+      await onSend(value, images);
+      attachments?.clear();
     } catch {
       setText(value);
     }
   };
+  const drop = attachmentHandlers(attachments, setDragging);
+  const ring = dragging ? "ring-2 ring-[#2F6FDB]/40 border-[#2F6FDB]" : "";
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
@@ -110,23 +132,28 @@ export function Composer({ label, placeholder, onSend, busy, hint, extra, varian
   const inputId = id ?? `composer-${label}`;
   if (variant === "inline")
     return (
-      <form onSubmit={send} className={cn("flex items-center gap-2 rounded-xl border border-[#E2DFD8] bg-panel py-1.5 pl-3 pr-1.5", className)}>
-        <label htmlFor={inputId} className="sr-only">
-          {label}
-        </label>
-        <input
-          id={inputId}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKey}
-          placeholder={placeholder}
-          className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground/80"
-        />
-        <SendButton label={label} busy={busy} disabled={!text.trim()} size={30} />
+      <form onSubmit={send} {...drop} className={cn("flex flex-col gap-2 rounded-xl border border-[#E2DFD8] bg-panel py-1.5 pl-3 pr-1.5", ring, className)}>
+        {attachments && <AttachmentStrip a={attachments} className="pt-1" />}
+        <span className="flex items-center gap-2">
+          <label htmlFor={inputId} className="sr-only">
+            {label}
+          </label>
+          <input
+            id={inputId}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={onKey}
+            placeholder={placeholder}
+            className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground/80"
+          />
+          {attachments && <AttachButton a={attachments} size={30} />}
+          <SendButton label={label} busy={busy || attachments?.uploading} disabled={empty} size={30} />
+        </span>
       </form>
     );
   return (
-    <form onSubmit={send} className={cn("rounded-2xl border border-[#E2DFD8] bg-panel shadow-[0_2px_12px_-4px_rgba(0,0,0,0.08)]", className)}>
+    <form onSubmit={send} {...drop} className={cn("rounded-2xl border border-[#E2DFD8] bg-panel shadow-[0_2px_12px_-4px_rgba(0,0,0,0.08)]", ring, className)}>
+      {attachments && <AttachmentStrip a={attachments} className="px-4 pt-3" />}
       <label htmlFor={inputId} className="sr-only">
         {label}
       </label>
@@ -142,8 +169,9 @@ export function Composer({ label, placeholder, onSend, busy, hint, extra, varian
       <div className="flex items-center justify-between gap-2 px-3 pb-3 pt-1.5">
         <span className="text-xs text-muted-foreground">{hint}</span>
         <span className="flex items-center gap-2">
+          {attachments && <AttachButton a={attachments} />}
           {extra}
-          <SendButton label="发送" busy={busy} disabled={!text.trim()} />
+          <SendButton label="发送" busy={busy || attachments?.uploading} disabled={empty} />
         </span>
       </div>
     </form>
