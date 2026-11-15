@@ -29,7 +29,67 @@ func (e *Engine) ThreadEnded(ctx context.Context, threadID string) {
 }
 
 func (e *Engine) queueCleanup(ctx context.Context, t core.Thread) error {
-	rows, err := e.core.Pool.Query(ctx, `SELECT node_id, paths FROM at_thread_nodes WHERE thread_id = $1 AND cleaned_at IS NULL`, t.ID)
+	return e.core.InTx(ctx, func(tx *core.Tx) error { return e.queueCleanupTx(ctx, tx, t, true) })
+}
+
+// PurgeThread queues the removal of every checkout of a deleted thread, unpushed work
+// included, and deletes the members' branches after the transaction commits.
+func (e *Engine) PurgeThread(ctx context.Context, tx *core.Tx, t core.Thread) error {
+	if err := e.queueCleanupTx(ctx, tx, t, false); err != nil {
+		return err
+	}
+	if err := e.purgeThreadDirs(ctx, tx, t); err != nil {
+		return err
+	}
+	emps, err := core.ThreadEmployees(ctx, tx, t.ID)
+	if err != nil {
+		return err
+	}
+	tx.AfterCommit(func(ctx context.Context) { e.deleteBranches(context.WithoutCancel(ctx), t, emps) })
+	return nil
+}
+
+// purgeThreadDirs removes projects/<pid>/threads/<no> (lead notes, leftovers) on every node the thread used.
+func (e *Engine) purgeThreadDirs(ctx context.Context, tx *core.Tx, t core.Thread) error {
+	rows, err := tx.Query(ctx, `SELECT node_id FROM at_thread_nodes WHERE thread_id = $1
+		UNION SELECT node_id FROM at_employees WHERE thread_id = $1 AND node_id IS NOT NULL`, t.ID)
+	if err != nil {
+		return err
+	}
+	nodes, err := pgxCollectStrings(rows)
+	if err != nil {
+		return err
+	}
+	dir := fmt.Sprintf("projects/%s/threads/%d", t.ProjectID, t.No)
+	for _, id := range nodes {
+		body := protocol.GitPurge{JobID: protocol.JobID(core.NewID("g")), Path: dir}
+		if _, err := e.gw.Enqueue(ctx, tx, id, nodegw.Command{Type: protocol.TypeGitPurge, Body: body}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func pgxCollectStrings(rows interface {
+	Next() bool
+	Scan(...any) error
+	Close()
+	Err() error
+}) ([]string, error) {
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+func (e *Engine) queueCleanupTx(ctx context.Context, tx *core.Tx, t core.Thread, keepUnpushed bool) error {
+	rows, err := tx.Query(ctx, `SELECT node_id, paths FROM at_thread_nodes WHERE thread_id = $1 AND cleaned_at IS NULL`, t.ID)
 	if err != nil {
 		return err
 	}
@@ -45,20 +105,21 @@ func (e *Engine) queueCleanup(ctx context.Context, t core.Thread) error {
 		}
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
 	p, err := e.orch.Project(ctx, t.ProjectID)
 	if err != nil {
 		return err
 	}
-	return e.core.InTx(ctx, func(tx *core.Tx) error {
-		for _, pl := range places {
-			for shared, paths := range byShared(p, pl.paths) {
-				if err := e.cleanupNode(ctx, tx, t, pl.node, shared, paths); err != nil {
-					return err
-				}
+	for _, pl := range places {
+		for shared, paths := range byShared(p, pl.paths) {
+			if err := e.cleanupNode(ctx, tx, t, pl.node, shared, paths, keepUnpushed); err != nil {
+				return err
 			}
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // byShared groups checkout paths by the shared clone they belong to: a path ending in a
@@ -80,13 +141,13 @@ func byShared(p store.Project, paths []string) map[string][]string {
 	return out
 }
 
-func (e *Engine) cleanupNode(ctx context.Context, tx *core.Tx, t core.Thread, nodeID, shared string, paths []string) error {
+func (e *Engine) cleanupNode(ctx context.Context, tx *core.Tx, t core.Thread, nodeID, shared string, paths []string, keepUnpushed bool) error {
 	rel := make([]protocol.RelPath, len(paths))
 	for i, p := range paths {
 		rel[i] = protocol.RelPath(p)
 	}
 	body := protocol.GitCleanup{JobID: protocol.JobID(core.NewID("g")), Shared: protocol.RelPath(shared), Paths: rel,
-		KeepUnpushed: true, DeleteLocalBranches: true}
+		KeepUnpushed: keepUnpushed, DeleteLocalBranches: true}
 	_, err := e.gw.Enqueue(ctx, tx, nodeID, nodegw.Command{Type: protocol.TypeGitCleanup, Body: body,
 		Meta: map[string]any{"purpose": "cleanup", "thread_id": t.ID}})
 	return err
@@ -102,6 +163,18 @@ func (e *Engine) deleteMemberBranches(ctx context.Context, t core.Thread) {
 	if err != nil {
 		return
 	}
+	e.deleteBranchesIn(ctx, t, emps, repos)
+}
+
+// deleteBranches deletes the members' branches of a thread whose rows may already be gone.
+func (e *Engine) deleteBranches(ctx context.Context, t core.Thread, emps []core.Employee) {
+	_, repos, err := e.reposOf(ctx, t.ProjectID)
+	if err == nil {
+		e.deleteBranchesIn(ctx, t, emps, repos)
+	}
+}
+
+func (e *Engine) deleteBranchesIn(ctx context.Context, t core.Thread, emps []core.Employee, repos []ghops.Repo) {
 	for _, repo := range repos {
 		for _, m := range emps {
 			if m.Tier != "member" {

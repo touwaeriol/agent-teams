@@ -1,6 +1,7 @@
 import type { ApprovalCancel, ApprovalRequest, ApprovalResolve, SessionEvent, SessionInit, SessionOpen } from "../protocol.js";
 import type { McpToolResult } from "../toolhost/broker.js";
 import type { Logger } from "../util/log.js";
+import type { LoadedImage } from "./images.js";
 import type { ToolPolicy } from "./policy.js";
 
 export type EventFields = Omit<SessionEvent, "session_id" | "event_no" | "at" | "open_gen">;
@@ -37,6 +38,8 @@ export interface OutgoingMessage {
   msg_id: string;
   text: string;
   priority: "now" | "next" | "later";
+  /** Images the user attached, already downloaded. */
+  images?: LoadedImage[];
 }
 
 /** A runtime (Claude Agent SDK query or Codex thread) behind one logical session. */

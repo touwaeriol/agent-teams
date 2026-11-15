@@ -25,13 +25,15 @@ const DefaultModel = "claude-opus-5-5"
 
 // Errors the REST layer maps to status codes.
 var (
-	ErrNoNode       = errors.New("没有可用的节点：请先在“节点”页添加并启动一个节点")
-	ErrLegacy       = errors.New("旧对话只读")
-	ErrNotActive    = errors.New("讨论串不在进行中")
-	ErrNoEmployee   = errors.New("没有这个员工")
-	ErrBadState     = errors.New("当前状态不允许这个操作")
-	ErrNotFound     = core.ErrNotFound
-	ErrRoleNotFound = errors.New("团队里没有这个岗位")
+	ErrNoNode        = errors.New("没有可用的节点：请先在“节点”页添加并启动一个节点")
+	ErrLegacy        = errors.New("旧对话只读")
+	ErrNotActive     = errors.New("讨论串不在进行中")
+	ErrNotArchived   = errors.New("讨论串没有归档")
+	ErrTooManyImages = errors.New("一条消息最多 8 张图片")
+	ErrNoEmployee    = errors.New("没有这个员工")
+	ErrBadState      = errors.New("当前状态不允许这个操作")
+	ErrNotFound      = core.ErrNotFound
+	ErrRoleNotFound  = errors.New("团队里没有这个岗位")
 )
 
 // Orchestrator is the session and thread engine.

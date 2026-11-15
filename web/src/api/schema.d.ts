@@ -220,6 +220,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/attachments/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The image bytes of an attachment */
+        get: operations["get-attachment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/conversations": {
         parameters: {
             query?: never;
@@ -837,6 +854,23 @@ export interface paths {
         patch: operations["update-project"];
         trace?: never;
     };
+    "/api/projects/{pid}/attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload an image to attach to a message (PNG, JPEG, GIF or WebP, at most 5 MB) */
+        post: operations["upload-attachment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{pid}/ci/detect": {
         parameters: {
             query?: never;
@@ -1299,7 +1333,8 @@ export interface paths {
         get: operations["get-thread"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete a thread: sessions closed, checkouts purged on the nodes, its records removed; deliverables stay in the library */
+        delete: operations["delete-thread"];
         options?: never;
         head?: never;
         patch: operations["update-thread"];
@@ -1331,6 +1366,23 @@ export interface paths {
         get: operations["list-activity"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{tid}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive a thread: it ends (sessions closed, checkouts cleaned) and leaves the main list */
+        post: operations["archive-thread"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1547,6 +1599,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/threads/{tid}/unarchive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Put an archived thread back: finished threads stay finished, others come back paused */
+        post: operations["unarchive-thread"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/threads/{tid}/usage": {
         parameters: {
             query?: never;
@@ -1744,6 +1813,24 @@ export interface components {
             size: number;
             /** Format: int64 */
             version: number;
+        };
+        AttachmentBody: {
+            /** @description Base64 of a PNG, JPEG, GIF or WebP image, at most 5 MB */
+            data: string;
+            /** @description File name, shown under the thumbnail */
+            name: string;
+        };
+        AttachmentView: {
+            /** @enum {string} */
+            content_type: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+            /** Format: date-time */
+            created_at: string;
+            id: string;
+            name: string;
+            sha256: string;
+            /** Format: int64 */
+            size: number;
+            url: string;
         };
         AuditEntry: {
             action: string;
@@ -2328,6 +2415,9 @@ export interface components {
             plugins: components["schemas"]["Plugin"][] | null;
         };
         PostMessageInputBody: {
+            /** @description Image ids from POST /api/projects/{pid}/attachments, in order */
+            attachments?: string[] | null;
+            /** @description Required unless attachments are given */
             content: string;
             /** @description Interrupt the current turn first */
             interrupt?: boolean;
@@ -2726,6 +2816,11 @@ export interface components {
             counts: components["schemas"]["ThreadCounts"];
             /** Format: date-time */
             created_at: string;
+            /**
+             * Format: date-time
+             * @description When it reached done, failed or archived
+             */
+            finished_at: string | null;
             id: string;
             lead_last: components["schemas"]["LeadLast"];
             main_tasks: components["schemas"]["MainTaskView"][] | null;
@@ -2745,6 +2840,11 @@ export interface components {
             queue_position: number | null;
             /** @description Repositories the thread set a base for, branched or opened a PR in */
             repos: components["schemas"]["ThreadRepoView"][] | null;
+            /**
+             * Format: date-time
+             * @description When the thread first ran (null while queued)
+             */
+            started_at: string | null;
             /** @enum {string} */
             status: "queued" | "running" | "waiting" | "review" | "done" | "failed" | "paused" | "archived";
             summary: string;
@@ -2780,6 +2880,11 @@ export interface components {
             counts: components["schemas"]["ThreadCounts"];
             /** Format: date-time */
             created_at: string;
+            /**
+             * Format: date-time
+             * @description When it reached done, failed or archived
+             */
+            finished_at: string | null;
             id: string;
             lead_last: components["schemas"]["LeadLast"];
             main_tasks: components["schemas"]["MainTaskView"][] | null;
@@ -2797,6 +2902,11 @@ export interface components {
             queue_position: number | null;
             /** @description Repositories the thread set a base for, branched or opened a PR in */
             repos: components["schemas"]["ThreadRepoView"][] | null;
+            /**
+             * Format: date-time
+             * @description When the thread first ran (null while queued)
+             */
+            started_at: string | null;
             /** @enum {string} */
             status: "queued" | "running" | "waiting" | "review" | "done" | "failed" | "paused" | "archived";
             summary: string;
@@ -3449,6 +3559,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TempPasswordOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "get-attachment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The image */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    "Content-Security-Policy"?: string;
+                    "Content-Type"?: string;
+                    "X-Content-Type-Options"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/gif": unknown;
+                    "image/jpeg": unknown;
+                    "image/png": unknown;
+                    "image/webp": unknown;
                 };
             };
             /** @description Error */
@@ -5029,6 +5177,41 @@ export interface operations {
             };
         };
     };
+    "upload-attachment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttachmentBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     "ci-detect": {
         parameters: {
             query?: {
@@ -6273,6 +6456,35 @@ export interface operations {
             };
         };
     };
+    "delete-thread": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     "update-thread": {
         parameters: {
             query?: never;
@@ -6360,6 +6572,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActivityPage"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "archive-thread": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThreadView"];
                 };
             };
             /** @description Error */
@@ -6790,6 +7033,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "unarchive-thread": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThreadView"];
                 };
             };
             /** @description Error */

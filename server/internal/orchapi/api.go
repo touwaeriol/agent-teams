@@ -59,6 +59,7 @@ func (a *API) Register(api huma.API, r chi.Router) {
 	a.registerLegacy(api)
 	a.registerSchedules(api)
 	a.registerLibrary(api)
+	a.registerAttachments(api, r)
 }
 
 func op(id, method, path, tag string, extra ...func(*huma.Operation)) huma.Operation {
@@ -85,6 +86,10 @@ var errorMap = []struct {
 	{store.ErrNotFound, 404, "not_found"},
 	{orchestrator.ErrLegacy, 409, "legacy_read_only"},
 	{orchestrator.ErrNotActive, 409, "thread_not_active"},
+	{orchestrator.ErrNotArchived, 409, "not_archived"},
+	{orchestrator.ErrTooManyImages, 422, "validation"},
+	{core.ErrNotImage, 422, "validation"},
+	{core.ErrTooLarge, 422, "validation"},
 	{orchestrator.ErrNoNode, 409, "no_node"},
 	{orchestrator.ErrNoEmployee, 404, "employee_not_found"},
 	{orchestrator.ErrRoleNotFound, 422, "unknown_role"},

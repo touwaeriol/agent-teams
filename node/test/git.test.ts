@@ -150,6 +150,11 @@ describe("git jobs", () => {
     h.console.command("git.status", { job_id: "g_30", cwd: "../../etc" });
     expect((await h.console.waitType("git.result", (b) => b.job_id === "g_30")).body).toMatchObject({ ok: false, error_code: "path_outside_root" });
     mkdirSync(join(h.opts.root, "projects/p9/repo"), { recursive: true });
+    mkdirSync(join(h.opts.root, "projects/p9/threads/3/lead"), { recursive: true });
+    h.console.command("git.purge", { job_id: "g_32", path: "projects/p9/threads/3" });
+    expect((await h.console.waitType("git.result", (b) => b.job_id === "g_32")).body.ok).toBe(true);
+    expect(existsSync(join(h.opts.root, "projects/p9/threads/3"))).toBe(false);
+    expect(existsSync(join(h.opts.root, "projects/p9/repo"))).toBe(true);
     h.console.command("git.purge", { job_id: "g_31", path: "projects/p9" });
     expect((await h.console.waitType("git.result", (b) => b.job_id === "g_31")).body.ok).toBe(true);
     expect(existsSync(join(h.opts.root, "projects/p9"))).toBe(false);

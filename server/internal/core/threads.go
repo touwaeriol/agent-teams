@@ -172,7 +172,7 @@ func (s *Store) ThreadViewOf(ctx context.Context, q DB, t Thread) (ThreadView, e
 	v := ThreadView{ID: t.ID, ProjectID: t.ProjectID, No: t.No, Title: t.Title, Brief: t.Brief, Status: t.Status,
 		PauseReason: t.PauseReason, Branch: t.Branch, BaseBranch: t.BaseBranch, PRNumber: t.PRNumber, PRURL: t.PRURL,
 		PRState: t.PRState, Summary: t.Summary, AutoApprove: t.AutoApprove, OpenedBy: t.OpenedBy,
-		CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt}
+		CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt, StartedAt: t.StartedAt, FinishedAt: t.FinishedAt}
 	var err error
 	if v.Members, err = s.EmployeeBriefs(ctx, q, t.ProjectID, &t.ID); err != nil {
 		return v, err

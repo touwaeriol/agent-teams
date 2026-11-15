@@ -25,6 +25,8 @@ export class FakeConsole {
   welcomeAckSeq: number | null = null;
   welcomeConfig: Record<string, unknown> = { park_after_s: 900, max_active_sessions: 4 };
   token = "test-token";
+  /** Images served at GET /nodes/attachments/{id} (node token required). */
+  readonly images = new Map<string, Buffer>();
   private seq = 0;
   private ws: WebSocket | null = null;
   private http: Server | null = null;
@@ -33,7 +35,7 @@ export class FakeConsole {
   private waiters: Array<() => void> = [];
 
   async start(): Promise<string> {
-    this.http = createServer();
+    this.http = createServer((req, res) => this.serveImage(req.url ?? "", req.headers.authorization, res));
     this.wss = new WebSocketServer({ noServer: true });
     this.http.on("upgrade", (req, socket, head) => {
       if (req.url !== "/nodes/connect" || req.headers.authorization !== `Bearer ${this.token}`) return socket.destroy();
@@ -41,6 +43,14 @@ export class FakeConsole {
     });
     await new Promise<void>((r) => this.http!.listen(0, "127.0.0.1", r));
     return `ws://127.0.0.1:${(this.http.address() as AddressInfo).port}/nodes/connect`;
+  }
+
+  private serveImage(url: string, auth: string | undefined, res: import("node:http").ServerResponse): void {
+    const id = /^\/nodes\/attachments\/([^/?]+)$/.exec(url)?.[1];
+    const data = id ? this.images.get(decodeURIComponent(id)) : undefined;
+    if (auth !== `Bearer ${this.token}`) return void res.writeHead(401).end();
+    if (!data) return void res.writeHead(404).end();
+    res.writeHead(200, { "Content-Type": "image/png" }).end(data);
   }
 
   async stop(): Promise<void> {

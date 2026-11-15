@@ -1750,6 +1750,9 @@ func (j *FinishInput) UnmarshalJSON(value []byte) error {
 }
 
 type FirstMessage struct {
+	// Images to deliver with the text (at most 8).
+	Images []ImageRef `json:"images,omitempty,omitzero"`
+
 	// MsgID corresponds to the JSON schema field "msg_id".
 	MsgID MsgID `json:"msg_id"`
 
@@ -1773,6 +1776,9 @@ func (j *FirstMessage) UnmarshalJSON(value []byte) error {
 	var plain Plain
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
+	}
+	if len(plain.Images) > 8 {
+		return fmt.Errorf("field %s length: must be <= %d", "images", 8)
 	}
 	*j = FirstMessage(plain)
 	return nil
@@ -2107,7 +2113,8 @@ func (j *GitPrepare) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// Delete a whole project directory once no session is active.
+// Delete a whole project directory, or one thread's directory
+// (projects/<pid>/threads/<no>, thread deleted), once no session is active there.
 type GitPurge struct {
 	// JobID corresponds to the JSON schema field "job_id".
 	JobID JobID `json:"job_id"`
@@ -2133,8 +2140,8 @@ func (j *GitPurge) UnmarshalJSON(value []byte) error {
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
 	}
-	if matched, _ := regexp.MatchString(`^projects/[^/]+$`, string(plain.Path)); !matched {
-		return fmt.Errorf("field %s pattern match: must match %s", "Path", `^projects/[^/]+$`)
+	if matched, _ := regexp.MatchString(`^projects/[^/]+(/threads/[0-9]+)?$`, string(plain.Path)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "Path", `^projects/[^/]+(/threads/[0-9]+)?$`)
 	}
 	*j = GitPurge(plain)
 	return nil
@@ -2480,6 +2487,91 @@ func (j *Hello) UnmarshalJSON(value []byte) error {
 		return fmt.Errorf("field %s length: must be >= %d", "protocols", 1)
 	}
 	*j = Hello(plain)
+	return nil
+}
+
+// An image the user attached to a message (at_attachments). The daemon downloads
+// it with GET <console>/nodes/attachments/<id> and its node token, then hands it
+// to the runtime: Claude gets an image content block, Codex a localImage input
+// item.
+type ImageRef struct {
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// MediaType corresponds to the JSON schema field "media_type".
+	MediaType ImageRefMediaType `json:"media_type"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name *string `json:"name,omitempty,omitzero"`
+
+	// Size corresponds to the JSON schema field "size".
+	Size *int `json:"size,omitempty,omitzero"`
+}
+
+type ImageRefMediaType string
+
+const ImageRefMediaTypeImageGif ImageRefMediaType = "image/gif"
+const ImageRefMediaTypeImageJpeg ImageRefMediaType = "image/jpeg"
+const ImageRefMediaTypeImagePng ImageRefMediaType = "image/png"
+const ImageRefMediaTypeImageWebp ImageRefMediaType = "image/webp"
+
+var enumValues_ImageRefMediaType = []interface{}{
+	"image/png",
+	"image/jpeg",
+	"image/gif",
+	"image/webp",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ImageRefMediaType) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_ImageRefMediaType {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_ImageRefMediaType, v)
+	}
+	*j = ImageRefMediaType(v)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ImageRef) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["id"]; raw != nil && !ok {
+		return fmt.Errorf("field id in ImageRef: required")
+	}
+	if _, ok := raw["media_type"]; raw != nil && !ok {
+		return fmt.Errorf("field media_type in ImageRef: required")
+	}
+	type Plain ImageRef
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if matched, _ := regexp.MatchString(`^img_`, string(plain.ID)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "ID", `^img_`)
+	}
+	if plain.Name != nil && utf8.RuneCountInString(string(*plain.Name)) > 300 {
+		return fmt.Errorf("field %s length: must be <= %d", "name", 300)
+	}
+	if plain.Size != nil && 5242880 < *plain.Size {
+		return fmt.Errorf("field %s: must be <= %v", "size", 5242880)
+	}
+	if plain.Size != nil && 1 > *plain.Size {
+		return fmt.Errorf("field %s: must be >= %v", "size", 1)
+	}
+	*j = ImageRef(plain)
 	return nil
 }
 
@@ -5112,6 +5204,9 @@ func (j *SessionReportItem) UnmarshalJSON(value []byte) error {
 
 // Deliver a message to the employee.
 type SessionSend struct {
+	// Images to deliver with the text (at most 8).
+	Images []ImageRef `json:"images,omitempty,omitzero"`
+
 	// InterruptFirst corresponds to the JSON schema field "interrupt_first".
 	InterruptFirst bool `json:"interrupt_first,omitempty,omitzero"`
 
@@ -5218,6 +5313,9 @@ func (j *SessionSend) UnmarshalJSON(value []byte) error {
 	var plain Plain
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
+	}
+	if len(plain.Images) > 8 {
+		return fmt.Errorf("field %s length: must be <= %d", "images", 8)
 	}
 	if v, ok := raw["interrupt_first"]; !ok || v == nil {
 		plain.InterruptFirst = false

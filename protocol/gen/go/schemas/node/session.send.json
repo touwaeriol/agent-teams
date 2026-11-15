@@ -46,6 +46,14 @@
     "interrupt_first": {
       "type": "boolean",
       "default": false
+    },
+    "images": {
+      "description": "Images to deliver with the text (at most 8).",
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "$ref": "common.json#/$defs/ImageRef"
+      }
     }
   }
 }

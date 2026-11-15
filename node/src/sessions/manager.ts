@@ -8,6 +8,7 @@ import { deferred, sleep, type Deferred } from "../util/async.js";
 import { readJsonFile, writeFileAtomic } from "../util/jsonl.js";
 import type { Logger } from "../util/log.js";
 import { isInside, resolveInRoot } from "../util/paths.js";
+import { loadImages, removeImages, type ImageFetcher, type LoadedImage } from "./images.js";
 import { Session, type SendFn, type SessionHost, type SessionRecord } from "./session.js";
 import { ResumeFailed, type Driver, type DriverContext } from "./types.js";
 
@@ -26,6 +27,8 @@ export interface ManagerDeps {
   waitForJob: (jobId: string, timeoutMs: number) => Promise<GitResult>;
   /** Builds env/policy and the runtime driver for a session. */
   createDriver: (spec: SessionOpen, absCwd: string, sink: Session) => { driver: Driver; ctx: DriverContext };
+  /** Downloads an attached image from the console (session.send images). */
+  fetchImage?: ImageFetcher;
   /** Called when a session stops for good (unregister cred secrets, loopback routes). */
   onSessionGone?: (sessionId: string) => void;
   log: Logger;
@@ -148,7 +151,7 @@ export class SessionManager implements SessionHost {
     s.released = true;
     this.persist(s);
     const first = s.spec.first_message;
-    const queue = [...(first ? [{ session_id: s.id, msg_id: first.msg_id, text: first.text, kind: "system" as const }] : []), ...s.held.splice(0)];
+    const queue = [...(first ? [{ session_id: s.id, msg_id: first.msg_id, text: first.text, kind: "system" as const, ...(first.images ? { images: first.images } : {}) }] : []), ...s.held.splice(0)];
     void this.deliverQueued(s, queue);
     return [];
   }
@@ -176,8 +179,25 @@ export class SessionManager implements SessionHost {
     if (await this.alreadyDelivered(s, body.msg_id)) return [delivered(s, body.msg_id)];
     await this.ensureRunning(s);
     if (body.interrupt_first) await s.driver!.interrupt();
-    const r = await s.driver!.push({ msg_id: body.msg_id, text: body.text, priority: body.priority ?? "next" });
+    const { text, images } = await this.withImages(s, body);
+    const r = await s.driver!.push({ msg_id: body.msg_id, text, priority: body.priority ?? "next", ...(images.length ? { images } : {}) });
     return [delivered(s, body.msg_id, r.turn_id)];
+  }
+
+  /** Downloads the message's images; one that cannot be fetched becomes a note in the text. */
+  private async withImages(s: Session, body: SessionSend): Promise<{ text: string; images: LoadedImage[] }> {
+    if (!body.images?.length) return { text: body.text, images: [] };
+    if (!this.d.fetchImage) return { text: `${body.text}\n\n[附带的 ${body.images.length} 张图片无法在这个节点上读取]`, images: [] };
+    try {
+      return { text: body.text, images: await loadImages(body.images, this.d.fetchImage, this.imageDir(s.id)) };
+    } catch (err) {
+      this.d.log.warn({ session: s.id, err: (err as Error).message }, "image download failed");
+      return { text: `${body.text}\n\n[附带的图片下载失败：${(err as Error).message}]`, images: [] };
+    }
+  }
+
+  private imageDir(sessionId: string): string {
+    return join(this.d.stateDir, "attachments", sessionId);
   }
 
   private async alreadyDelivered(s: Session, msgId: string): Promise<boolean> {
@@ -215,6 +235,7 @@ export class SessionManager implements SessionHost {
     this.sessions.delete(s.id);
     if (body.forget) rmSync(this.recordPath(s.id), { force: true });
     else this.persist(s);
+    removeImages(this.imageDir(s.id));
     this.d.onSessionGone?.(s.id);
     return [reply];
   }

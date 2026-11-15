@@ -325,6 +325,72 @@
         ],
         "type": "object"
       },
+      "AttachmentBody": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "description": "Base64 of a PNG, JPEG, GIF or WebP image, at most 5 MB",
+            "maxLength": 6990508,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "description": "File name, shown under the thumbnail",
+            "maxLength": 300,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "data"
+        ],
+        "type": "object"
+      },
+      "AttachmentView": {
+        "additionalProperties": false,
+        "properties": {
+          "content_type": {
+            "enum": [
+              "image/png",
+              "image/jpeg",
+              "image/gif",
+              "image/webp"
+            ],
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "id",
+          "name",
+          "content_type",
+          "size",
+          "sha256",
+          "created_at"
+        ],
+        "type": "object"
+      },
       "AuditEntry": {
         "additionalProperties": false,
         "properties": {
@@ -2566,9 +2632,20 @@
       "PostMessageInputBody": {
         "additionalProperties": false,
         "properties": {
+          "attachments": {
+            "description": "Image ids from POST /api/projects/{pid}/attachments, in order",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "content": {
+            "description": "Required unless attachments are given",
             "maxLength": 100000,
-            "minLength": 1,
             "type": "string"
           },
           "interrupt": {
@@ -4128,6 +4205,14 @@
             "format": "date-time",
             "type": "string"
           },
+          "finished_at": {
+            "description": "When it reached done, failed or archived",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "id": {
             "type": "string"
           },
@@ -4216,6 +4301,14 @@
               "null"
             ]
           },
+          "started_at": {
+            "description": "When the thread first ran (null while queued)",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "status": {
             "enum": [
               "queued",
@@ -4264,7 +4357,9 @@
           "lead_last",
           "cost_usd_est",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "started_at",
+          "finished_at"
         ],
         "type": "object"
       },
@@ -4366,6 +4461,14 @@
             "format": "date-time",
             "type": "string"
           },
+          "finished_at": {
+            "description": "When it reached done, failed or archived",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "id": {
             "type": "string"
           },
@@ -4436,6 +4539,14 @@
               "null"
             ]
           },
+          "started_at": {
+            "description": "When the thread first ran (null while queued)",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "status": {
             "enum": [
               "queued",
@@ -4484,7 +4595,9 @@
           "lead_last",
           "cost_usd_est",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "started_at",
+          "finished_at"
         ],
         "type": "object"
       },
@@ -5554,6 +5667,69 @@
         },
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/api/attachments/{id}": {
+      "get": {
+        "operationId": "get-attachment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/gif": {},
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {}
+            },
+            "description": "The image",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Security-Policy": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Type": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "The image bytes of an attachment",
+        "tags": [
+          "conversations"
         ]
       }
     },
@@ -7788,6 +7964,58 @@
         ]
       }
     },
+    "/api/projects/{pid}/attachments": {
+      "post": {
+        "operationId": "upload-attachment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachmentBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Upload an image to attach to a message (PNG, JPEG, GIF or WebP, at most 5 MB)",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
     "/api/projects/{pid}/ci/detect": {
       "get": {
         "operationId": "ci-detect",
@@ -9530,6 +9758,39 @@
       }
     },
     "/api/threads/{tid}": {
+      "delete": {
+        "operationId": "delete-thread",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete a thread: sessions closed, checkouts purged on the nodes, its records removed; deliverables stay in the library",
+        "tags": [
+          "threads"
+        ]
+      },
       "get": {
         "operationId": "get-thread",
         "parameters": [
@@ -9725,6 +9986,48 @@
             "description": "Error"
           }
         },
+        "tags": [
+          "threads"
+        ]
+      }
+    },
+    "/api/threads/{tid}/archive": {
+      "post": {
+        "operationId": "archive-thread",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Archive a thread: it ends (sessions closed, checkouts cleaned) and leaves the main list",
         "tags": [
           "threads"
         ]
@@ -10415,6 +10718,48 @@
         "summary": "Put a failed, blocked or cancelled task back into the pool",
         "tags": [
           "tasks"
+        ]
+      }
+    },
+    "/api/threads/{tid}/unarchive": {
+      "post": {
+        "operationId": "unarchive-thread",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Put an archived thread back: finished threads stay finished, others come back paused",
+        "tags": [
+          "threads"
         ]
       }
     },

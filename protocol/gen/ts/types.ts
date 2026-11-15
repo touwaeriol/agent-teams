@@ -288,6 +288,18 @@ export interface ApprovalResolve {
   decided_by: string;
 }
 /**
+ * An image the user attached to a message (at_attachments). The daemon downloads it with GET <console>/nodes/attachments/<id> and its node token, then hands it to the runtime: Claude gets an image content block, Codex a localImage input item.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "ImageRef".
+ */
+export interface ImageRef {
+  id: string;
+  media_type: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+  name?: string;
+  size?: number;
+}
+/**
  * MCP tool result content block.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -400,7 +412,7 @@ export interface GitPrepare {
   fetch?: boolean;
 }
 /**
- * Delete a whole project directory once no session is active.
+ * Delete a whole project directory, or one thread's directory (projects/<pid>/threads/<no>, thread deleted), once no session is active there.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "GitPurge".
@@ -975,6 +987,21 @@ export interface PlatformToolSpec {
 export interface FirstMessage {
   msg_id: MsgId;
   text: string;
+  /**
+   * Images to deliver with the text (at most 8).
+   *
+   * @maxItems 8
+   */
+  images?:
+    | []
+    | [ImageRef]
+    | [ImageRef, ImageRef]
+    | [ImageRef, ImageRef, ImageRef]
+    | [ImageRef, ImageRef, ImageRef, ImageRef]
+    | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef]
+    | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef]
+    | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef]
+    | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef];
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -1321,6 +1348,21 @@ export interface SessionSend {
   priority?: "now" | "next" | "later";
   kind?: "user" | "task" | "mail" | "answer" | "system";
   interrupt_first?: boolean;
+  /**
+   * Images to deliver with the text (at most 8).
+   *
+   * @maxItems 8
+   */
+  images?:
+    | []
+    | [ImageRef]
+    | [ImageRef, ImageRef]
+    | [ImageRef, ImageRef, ImageRef]
+    | [ImageRef, ImageRef, ImageRef, ImageRef]
+    | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef]
+    | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef]
+    | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef]
+    | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef];
 }
 /**
  * Change permission mode and/or model of a session.

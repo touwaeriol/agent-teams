@@ -292,3 +292,30 @@ func TestSkipRoleNeedsIsolatedNode(t *testing.T) {
 		t.Fatalf("isolated skip: %+v", r)
 	}
 }
+
+// TestReadOnlyRoleAutoAllowsReads: a read_only member's read-only shell commands pass
+// without a card; anything that writes still asks the user.
+func TestReadOnlyRoleAutoAllowsReads(t *testing.T) {
+	tm := startTeam(t)
+	pool, ctx := tm.w.e.Core.Pool, tm.w.ctx
+	if _, err := pool.Exec(ctx, `UPDATE at_employees SET spec = jsonb_set(spec, '{read_only}', 'true')
+		WHERE project_id = $1 AND name = 'dev-1'`, tm.projectID); err != nil {
+		t.Fatal(err)
+	}
+	gen := protocol.OpenGen(tm.dev.gen)
+	ask := func(id, cmd string) {
+		input, _ := json.Marshal(map[string]string{"command": cmd})
+		tm.dev.send(protocol.TypeApprovalRequest, protocol.ApprovalRequest{ApprovalID: protocol.ApprovalID(id), SessionID: protocol.SessionID(tm.dev.session),
+			OpenGen: &gen, Source: "claude_can_use_tool", ToolName: "Bash", Input: input, Available: []protocol.ApprovalDecision{"allow", "deny"}})
+	}
+	ask("ap_read", "git log --oneline -5")
+	if r := waitResolve(t, tm.w, tm.dev, "ap_read"); r.Decision != "allow" || r.DecidedBy != approvals.DecidedReadOnly {
+		t.Fatalf("read-only command: %+v", r)
+	}
+	ask("ap_write", "rm -rf build")
+	eventually(t, "write still asks", func() bool {
+		var cards []core.QuestionView
+		tm.b.must(200, "GET", "/api/conversations/"+tm.thread.ID+"/questions?status=open", nil, &cards)
+		return len(cards) == 1 && cards[0].Kind == "approval"
+	})
+}

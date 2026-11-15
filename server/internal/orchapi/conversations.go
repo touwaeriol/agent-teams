@@ -9,6 +9,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
+	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -47,8 +48,9 @@ type postMessageInput struct {
 	CID            string `path:"cid" maxLength:"64"`
 	IdempotencyKey string `header:"Idempotency-Key" maxLength:"128"`
 	Body           struct {
-		Content   string `json:"content" minLength:"1" maxLength:"100000"`
-		Interrupt bool   `json:"interrupt,omitempty" doc:"Interrupt the current turn first"`
+		Content     string   `json:"content" maxLength:"100000" doc:"Required unless attachments are given"`
+		Interrupt   bool     `json:"interrupt,omitempty" doc:"Interrupt the current turn first"`
+		Attachments []string `json:"attachments,omitempty" maxItems:"8" doc:"Image ids from POST /api/projects/{pid}/attachments, in order"`
 	}
 }
 
@@ -139,8 +141,13 @@ func (a *API) postMessage(ctx context.Context, in *postMessageInput) (*messageOu
 	if err := a.limitMessages(ctx, u.ID); err != nil {
 		return nil, err
 	}
+	content := strings.TrimSpace(in.Body.Content)
+	if content == "" && len(in.Body.Attachments) == 0 {
+		return nil, httpapi.Invalid("content", "消息不能为空")
+	}
 	v, err := idempotent(ctx, a, u.ID, "message:"+c.ID, in.IdempotencyKey, func() (core.MessageView, error) {
-		m, err := a.e.Orch.PostUserMessage(ctx, u.ID, c.ID, strings.TrimSpace(in.Body.Content), in.Body.Interrupt, nil)
+		m, err := a.e.Orch.PostUserMessageWith(ctx, orchestrator.UserMessage{UserID: u.ID, ConvID: c.ID, Content: content,
+			Interrupt: in.Body.Interrupt, Images: in.Body.Attachments})
 		return core.MessageViewOf(m), err
 	})
 	if err != nil {

@@ -164,6 +164,9 @@ func (e *Engine) decide(ctx context.Context, tx *core.Tx, sc core.SessionContext
 	if ruleID != "" {
 		return e.resolve(ctx, tx, q, "allow", "policy:rule:"+ruleID, "")
 	}
+	if readOnlyRole(sc.Employee) && ReadOnlyCommand(m.ToolName, m.Input) {
+		return e.resolve(ctx, tx, q, "allow", DecidedReadOnly, "")
+	}
 	return e.showCard(ctx, tx, sc, q)
 }
 

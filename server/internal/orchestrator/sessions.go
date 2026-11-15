@@ -19,6 +19,8 @@ type Delivery struct {
 	Kind      string // user | task | mail | answer | system
 	Priority  string // now | next | later
 	Interrupt bool
+	// Images the user attached (delivered as image content blocks).
+	Images []core.AttachmentRef
 	// Record is the conversation message to store with the msg_id; nil stores a note
 	// in the employee's conversation addressed to it (meta.to).
 	Record *core.NewMessage
@@ -38,12 +40,12 @@ func (o *Orchestrator) Deliver(ctx context.Context, tx *core.Tx, e core.Employee
 		if err != nil {
 			return m, err
 		}
-		_, err = o.openSession(ctx, tx, e, &protocol.FirstMessage{MsgID: protocol.MsgID(msgID), Text: text}, nil)
+		_, err = o.openSession(ctx, tx, e, &protocol.FirstMessage{MsgID: protocol.MsgID(msgID), Text: text, Images: imageRefs(d.Images)}, nil)
 		return m, err
 	case err != nil:
 		return m, err
 	case sess.State == "crashed":
-		return m, o.reopen(ctx, tx, e, sess, &protocol.FirstMessage{MsgID: protocol.MsgID(msgID), Text: d.Text})
+		return m, o.reopen(ctx, tx, e, sess, &protocol.FirstMessage{MsgID: protocol.MsgID(msgID), Text: d.Text, Images: imageRefs(d.Images)})
 	}
 	return m, o.send(ctx, tx, sess, msgID, d)
 }
@@ -131,7 +133,7 @@ func (o *Orchestrator) send(ctx context.Context, tx *core.Tx, s core.AgentSessio
 	}
 	kind := protocol.SessionSendKind(orDefault(d.Kind, "system"))
 	body := protocol.SessionSend{SessionID: protocol.SessionID(s.ID), MsgID: protocol.MsgID(msgID), Text: d.Text,
-		Priority: protocol.SessionSendPriority(prio), Kind: &kind, InterruptFirst: d.Interrupt}
+		Priority: protocol.SessionSendPriority(prio), Kind: &kind, InterruptFirst: d.Interrupt, Images: imageRefs(d.Images)}
 	_, err := o.gw.Enqueue(ctx, tx, *s.NodeID, nodegw.Command{Type: protocol.TypeSessionSend, Body: body,
 		SessionID: s.ID, OpenGen: s.OpenGen})
 	return err
@@ -436,16 +438,30 @@ func (o *Orchestrator) handoff(ctx context.Context, tx *core.Tx, e core.Employee
 	}
 	text := summary
 	msgID := core.NewID("m")
+	var images []protocol.ImageRef
 	if pending != nil {
 		text += "\n\n---\n" + pending.Text
-		msgID = string(pending.MsgID)
+		msgID, images = string(pending.MsgID), pending.Images
 	}
 	if err := core.SetEmployeeNode(ctx, tx, e.ID, nil); err != nil {
 		return err
 	}
 	e.NodeID = nil
-	_, err = o.openSession(ctx, tx, e, &protocol.FirstMessage{MsgID: protocol.MsgID(msgID), Text: text}, nil)
+	_, err = o.openSession(ctx, tx, e, &protocol.FirstMessage{MsgID: protocol.MsgID(msgID), Text: text, Images: images}, nil)
 	return err
+}
+
+// imageRefs turns message attachments into session.send images.
+func imageRefs(list []core.AttachmentRef) []protocol.ImageRef {
+	if len(list) == 0 {
+		return nil
+	}
+	out := make([]protocol.ImageRef, len(list))
+	for i, a := range list {
+		name, size := a.Name, a.Size
+		out[i] = protocol.ImageRef{ID: a.ID, MediaType: protocol.ImageRefMediaType(a.ContentType), Name: &name, Size: &size}
+	}
+	return out
 }
 
 // closeSession marks the session closed and tells its node.

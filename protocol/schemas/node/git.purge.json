@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/node/git.purge.json",
   "title": "GitPurge",
-  "description": "Delete a whole project directory once no session is active.",
+  "description": "Delete a whole project directory, or one thread's directory (projects/<pid>/threads/<no>, thread deleted), once no session is active there.",
   "x-direction": "console_to_node",
   "x-key": [
     "job_id"
@@ -19,7 +19,7 @@
     },
     "path": {
       "type": "string",
-      "pattern": "^projects/[^/]+$"
+      "pattern": "^projects/[^/]+(/threads/[0-9]+)?$"
     }
   }
 }

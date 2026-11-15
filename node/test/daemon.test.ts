@@ -60,6 +60,18 @@ describe("daemon with a fake console", () => {
     await h.console.waitType("approval.ack", (b) => b.stale === true);
   });
 
+  it("downloads attached images and hands them to Claude as image blocks", async () => {
+    h = await startHarness();
+    h.console.images.set("img_1", Buffer.from("\x89PNG\r\n\x1a\nfake", "binary"));
+    await openAndRelease("s_IMG");
+    h.console.command("session.send", { session_id: "s_IMG", msg_id: "m_i1", text: "看这张图", kind: "user", images: [{ id: "img_1", media_type: "image/png", name: "a.png", size: 12 }] });
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_i1");
+    expect(h.log.prompts).toContain("[image image/png 12B] 看这张图");
+    h.console.command("session.send", { session_id: "s_IMG", msg_id: "m_i2", text: "还有这张", kind: "user", images: [{ id: "img_missing", media_type: "image/png" }] });
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_i2");
+    expect(h.log.prompts.find((p) => p.startsWith("还有这张"))).toContain("附带的图片下载失败");
+  });
+
   it("forwards platform tool calls as tool.call and returns tool.result", async () => {
     h = await startHarness();
     await openAndRelease("s_C");

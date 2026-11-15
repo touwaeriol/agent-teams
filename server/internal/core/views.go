@@ -97,6 +97,8 @@ type ThreadView struct {
 	CostUSDEst    *float64         `json:"cost_usd_est"`
 	CreatedAt     time.Time        `json:"created_at"`
 	UpdatedAt     time.Time        `json:"updated_at"`
+	StartedAt     *time.Time       `json:"started_at" doc:"When the thread first ran (null while queued)"`
+	FinishedAt    *time.Time       `json:"finished_at" doc:"When it reached done, failed or archived"`
 }
 
 // TaskView is a small task.

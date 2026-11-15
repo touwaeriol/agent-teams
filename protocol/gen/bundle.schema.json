@@ -236,6 +236,39 @@
       "type": "string",
       "pattern": "^m_"
     },
+    "ImageRef": {
+      "title": "ImageRef",
+      "description": "An image the user attached to a message (at_attachments). The daemon downloads it with GET <console>/nodes/attachments/<id> and its node token, then hands it to the runtime: Claude gets an image content block, Codex a localImage input item.",
+      "type": "object",
+      "required": [
+        "id",
+        "media_type"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^img_"
+        },
+        "media_type": {
+          "type": "string",
+          "enum": [
+            "image/png",
+            "image/jpeg",
+            "image/gif",
+            "image/webp"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5242880
+        }
+      }
+    },
     "JobId": {
       "title": "JobId",
       "description": "Git job id: g_ + ULID.",
@@ -571,7 +604,7 @@
     },
     "GitPurge": {
       "title": "GitPurge",
-      "description": "Delete a whole project directory once no session is active.",
+      "description": "Delete a whole project directory, or one thread's directory (projects/<pid>/threads/<no>, thread deleted), once no session is active there.",
       "type": "object",
       "required": [
         "job_id",
@@ -583,7 +616,7 @@
         },
         "path": {
           "type": "string",
-          "pattern": "^projects/[^/]+$"
+          "pattern": "^projects/[^/]+(/threads/[0-9]+)?$"
         }
       }
     },
@@ -1655,6 +1688,14 @@
         },
         "text": {
           "type": "string"
+        },
+        "images": {
+          "description": "Images to deliver with the text (at most 8).",
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/ImageRef"
+          }
         }
       }
     },
@@ -2092,6 +2133,14 @@
         "interrupt_first": {
           "type": "boolean",
           "default": false
+        },
+        "images": {
+          "description": "Images to deliver with the text (at most 8).",
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/ImageRef"
+          }
         }
       }
     },

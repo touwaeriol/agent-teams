@@ -63,7 +63,7 @@ export class GitJobs {
 
   purge(b: GitPurge, busy: (abs: string) => boolean): Promise<GitResult> {
     return this.job(b.job_id, async () => {
-      if (!/^projects\/[^/]+$/.test(b.path)) throw new PathOutsideRoot(b.path);
+      if (!/^projects\/[^/]+(\/threads\/[0-9]+)?$/.test(b.path)) throw new PathOutsideRoot(b.path);
       const abs = resolveInRoot(this.o.root, b.path);
       if (busy(abs)) throw new JobError("dirty_conflict", "a session is still active in this project");
       rmSync(abs, { recursive: true, force: true });

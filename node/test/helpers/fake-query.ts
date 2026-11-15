@@ -91,7 +91,7 @@ class FakeQuery {
   private async loop(): Promise<void> {
     for await (const msg of this.prompt) {
       if (this.done) return;
-      const text = String(msg.message.content);
+      const text = promptText(msg.message.content);
       this.log.prompts.push(text);
       if (text === "crash") {
         this.crashed = true;
@@ -148,4 +148,12 @@ class FakeQuery {
     }
     return null;
   }
+}
+
+/** The prompt as text; image blocks become "[image <type> <bytes>B]". */
+function promptText(content: unknown): string {
+  if (typeof content === "string") return content;
+  return (content as Array<{ type: string; text?: string; source?: { media_type: string; data: string } }>)
+    .map((b) => (b.type === "image" ? `[image ${b.source!.media_type} ${Buffer.from(b.source!.data, "base64").length}B]` : b.text ?? ""))
+    .join(" ");
 }

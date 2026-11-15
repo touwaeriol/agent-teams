@@ -114,6 +114,11 @@ func (g *Gateway) ServeWS(w http.ResponseWriter, r *http.Request) {
 	g.run(ctx, conn, node)
 }
 
+// Authenticate identifies a daemon by its Bearer node token (plain HTTP routes for daemons).
+func (g *Gateway) Authenticate(r *http.Request) (store.Node, error) {
+	return g.authenticate(r.Context(), r)
+}
+
 func (g *Gateway) authenticate(ctx context.Context, r *http.Request) (store.Node, error) {
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || strings.TrimSpace(token) == "" {

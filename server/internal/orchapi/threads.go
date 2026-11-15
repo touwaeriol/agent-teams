@@ -158,6 +158,12 @@ func (a *API) registerThreads(api huma.API) {
 	huma.Register(api, op("list-threads", "GET", "/api/projects/{pid}/threads", t), a.listThreads)
 	huma.Register(api, op("get-thread", "GET", "/api/threads/{tid}", t), a.getThread)
 	huma.Register(api, op("update-thread", "PATCH", "/api/threads/{tid}", t), a.updateThread)
+	huma.Register(api, op("archive-thread", "POST", "/api/threads/{tid}/archive", t,
+		summary("Archive a thread: it ends (sessions closed, checkouts cleaned) and leaves the main list")), a.archiveThread)
+	huma.Register(api, op("unarchive-thread", "POST", "/api/threads/{tid}/unarchive", t,
+		summary("Put an archived thread back: finished threads stay finished, others come back paused")), a.unarchiveThread)
+	huma.Register(api, op("delete-thread", "DELETE", "/api/threads/{tid}", t, status(204),
+		summary("Delete a thread: sessions closed, checkouts purged on the nodes, its records removed; deliverables stay in the library")), a.deleteThread)
 	huma.Register(api, op("list-main-tasks", "GET", "/api/threads/{tid}/main-tasks", t), a.listMain)
 	huma.Register(api, op("update-main-task", "PATCH", "/api/threads/{tid}/main-tasks/{mid}", t), a.updateMain)
 	huma.Register(api, op("list-members", "GET", "/api/threads/{tid}/members", t), a.listMembers)
@@ -310,6 +316,57 @@ func (a *API) changeStatus(ctx context.Context, tx *core.Tx, t core.Thread, next
 		return a.e.Orch.Archive(ctx, tx, t)
 	}
 	return httpapi.Fail(http.StatusConflict, "bad_state", "讨论串现在是 "+t.Status+"，不能改成 "+next)
+}
+
+func (a *API) archiveThread(ctx context.Context, in *tidInput) (*threadOutput, error) {
+	return a.lifecycle(ctx, in.TID, "thread_archive", a.e.Orch.Archive)
+}
+
+func (a *API) unarchiveThread(ctx context.Context, in *tidInput) (*threadOutput, error) {
+	return a.lifecycle(ctx, in.TID, "thread_unarchive", a.e.Orch.Unarchive)
+}
+
+// lifecycle runs one status change under the thread lock, audits it and returns the thread.
+func (a *API) lifecycle(ctx context.Context, tid, action string, change func(context.Context, *core.Tx, core.Thread) error) (*threadOutput, error) {
+	u, t, err := a.thread(ctx, tid)
+	if err != nil {
+		return nil, err
+	}
+	err = a.e.Core.InTx(ctx, func(tx *core.Tx) error {
+		cur, err := core.LockThread(ctx, tx, t.ID)
+		if err != nil {
+			return err
+		}
+		auditTx(ctx, tx, u.ID, action, t.ID, map[string]any{"from": cur.Status})
+		return change(ctx, tx, cur)
+	})
+	if err != nil {
+		return nil, fail(err, "没有这个讨论串")
+	}
+	if t, err = core.ThreadByID(ctx, a.e.Core.Pool, t.ID); err != nil {
+		return nil, err
+	}
+	v, err := a.threadView(ctx, t)
+	return &threadOutput{Body: v}, err
+}
+
+func (a *API) deleteThread(ctx context.Context, in *tidInput) (*struct{}, error) {
+	u, t, err := a.thread(ctx, in.TID)
+	if err != nil {
+		return nil, err
+	}
+	err = a.e.Core.InTx(ctx, func(tx *core.Tx) error {
+		cur, err := core.LockThread(ctx, tx, t.ID)
+		if err != nil {
+			return err
+		}
+		if err := a.e.Delivery.PurgeThread(ctx, tx, cur); err != nil {
+			return err
+		}
+		auditTx(ctx, tx, u.ID, "thread_delete", t.ID, map[string]any{"no": cur.No, "title": cur.Title, "status": cur.Status})
+		return a.e.Orch.DeleteThread(ctx, tx, cur)
+	})
+	return nil, fail(err, "没有这个讨论串")
 }
 
 func auditTx(ctx context.Context, tx *core.Tx, userID, action, target string, detail map[string]any) {

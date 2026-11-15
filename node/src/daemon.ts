@@ -29,6 +29,7 @@ import { ToolBroker } from "./toolhost/broker.js";
 import { applyUpgrade } from "./upgrade.js";
 import type { Logger } from "./util/log.js";
 import { absPath } from "./sessions/claude/options.js";
+import { consoleImageFetcher } from "./sessions/images.js";
 import { DAEMON_VERSION, PROTOCOLS, CLAUDE_SDK_VERSION, CODEX_CLI_VERSION } from "./version.js";
 
 export interface DaemonOptions {
@@ -109,6 +110,7 @@ export class Daemon {
       waitForJob: (id, ms) => this.git.waitFor(id, ms),
       createDriver: (spec, cwd, sink) => this.createDriver(spec, cwd, sink),
       onSessionGone: (id) => this.forgetSession(id),
+      fetchImage: consoleImageFetcher(o.url, o.token),
       ...(o.crashDelaysMs ? { crashDelaysMs: o.crashDelaysMs } : {}),
     });
     this.dispatcher = new Dispatcher(this.link, this.inbox, this.handlers(), o.log);

@@ -12,6 +12,7 @@ import type { MaterializedPlugin } from "../plugins.js";
 import { describeTool, mapClaudeMessage } from "./mapper.js";
 import { toPermissionResult } from "./permissions.js";
 import { ToolUseCorrelator } from "./correlate.js";
+import { claudeContent } from "../images.js";
 import { findTranscript, transcriptUserUuids } from "./transcript.js";
 
 export type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => Query;
@@ -104,7 +105,7 @@ export class ClaudeDriver implements Driver {
     this.uuidToMsg.set(uuid, msg.msg_id);
     this.waitingUuids.set(uuid, msg.msg_id);
     this.setRunning(true);
-    this.prompt.push({ type: "user", message: { role: "user", content: msg.text }, parent_tool_use_id: null, uuid: uuid as SDKUserMessage["uuid"], priority: msg.priority });
+    this.prompt.push({ type: "user", message: { role: "user", content: claudeContent(msg.text, msg.images) }, parent_tool_use_id: null, uuid: uuid as SDKUserMessage["uuid"], priority: msg.priority });
     return this.turnId ? { turn_id: this.turnId } : {};
   }
 
