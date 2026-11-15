@@ -131,6 +131,9 @@ func (s *Service) replyTo(ctx context.Context, tx *core.Tx, c *call) (Result, er
 	if err != nil {
 		return Result{}, refuse("没有问题 %s", in.QuestionID)
 	}
+	if q.Kind == "approval" {
+		return Result{}, refuse("%s 是权限请求，用 review_permission 判断", q.ID)
+	}
 	if q.Status != "open" || q.Audience != "lead" {
 		return Result{}, refuse("问题 %s 不是待你回答的问题", q.ID)
 	}

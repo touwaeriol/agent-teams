@@ -141,6 +141,11 @@ export function reviewNote(q: Pick<QuestionView, "detail">): string | null {
   return `组长 ${q.detail.reviewer ?? ""} 没有及时判断，转给你`;
 }
 
+/** The status in the head of a user's approval card: handed over by the lead, or plain. */
+export function approvalCardStatus(q: Pick<QuestionView, "detail">): string {
+  return reviewNote(q) ? "组长转给你" : "等你处理";
+}
+
 /** Decided and waiting approvals of a thread, newest first (the card history). */
 export function approvalHistory(list: QuestionView[] | undefined, limit = 6): QuestionView[] {
   return (list ?? [])

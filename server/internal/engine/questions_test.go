@@ -453,3 +453,33 @@ func TestApprovalRoutingAskUser(t *testing.T) {
 	askApproval(tm.dev, "ap_user", "npm publish")
 	eventually(t, "member request asks the user", func() bool { return len(tm.userCards(t)) == 2 })
 }
+
+// TestLeadReviewGuards: only the addressed lead decides a request through review_permission:
+// a member cannot (not its tier), reply_to cannot close a permission request, a card naming
+// another reviewer is refused, and the thread does not wait on the user meanwhile.
+func TestLeadReviewGuards(t *testing.T) {
+	tm := startTeam(t)
+	askApproval(tm.dev, "ap_guard", "git push --force")
+	qid := leadRequest(t, tm.lead, "git push --force")
+	var th core.ThreadView
+	tm.b.must(200, "GET", "/api/threads/"+tm.thread.ID, nil, &th)
+	if th.Counts.ApprovalsOpen != 0 || th.Counts.Waiting != 0 {
+		t.Fatalf("a request with the lead is not the user's: %+v", th.Counts)
+	}
+	if res := tm.dev.call("review_permission", map[string]string{"request_id": qid, "decision": "allow", "reason": "mine"}); res.Ok {
+		t.Fatal("a member approved its own request")
+	}
+	if res := tm.lead.call("reply_to", map[string]string{"question_id": qid, "answer": "allow"}); res.Ok {
+		t.Fatal("reply_to closed a permission request")
+	}
+	pool, ctx := tm.w.e.Core.Pool, tm.w.ctx
+	if _, err := pool.Exec(ctx, `UPDATE at_questions SET detail = detail || '{"reviewer_id":"emp_other"}' WHERE approval_id = 'ap_guard'`); err != nil {
+		t.Fatal(err)
+	}
+	if res := tm.lead.call("review_permission", map[string]string{"request_id": qid, "decision": "allow", "reason": "x"}); res.Ok {
+		t.Fatal("a card addressed to another reviewer was decided")
+	}
+	if c := tm.card(t, qid); c.Status != "open" {
+		t.Fatalf("card closed by a refused call: %+v", c)
+	}
+}

@@ -7,7 +7,7 @@ import { useAction } from "@/api/mutations";
 import { keys } from "@/api/queries";
 import type { QuestionView, ThreadView } from "@/api/views";
 import { Spinner } from "@/components/common";
-import { approvalCommand, reviewNote, threadBases, threadPRs } from "@/lib/present";
+import { approvalCardStatus, approvalCommand, reviewNote, threadBases, threadPRs } from "@/lib/present";
 import { cn } from "@/lib/utils";
 import { safeHref } from "@/lib/safeurl";
 
@@ -105,7 +105,7 @@ export function ApprovalCard({ cid, pid, question, variant = "soft" }: { cid: st
       <span>
         <span className="font-mono">{question.asker}</span> 请求权限{question.detail.tool_name ? <span className="text-muted-foreground"> · {question.detail.tool_name}</span> : null}
       </span>
-      {variant !== "mobile" && <span className="shrink-0 text-xs text-[#B4530B]">等你处理</span>}
+      {variant !== "mobile" && <span className="shrink-0 text-xs text-[#B4530B]">{approvalCardStatus(question)}</span>}
     </>
   );
   return (

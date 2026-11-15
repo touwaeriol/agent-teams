@@ -384,7 +384,7 @@ Claude 子进程                守护进程                      控制台     
 
 | 模式 | Claude | Codex |
 | --- | --- | --- |
-| `auto`（默认） | `permissionMode: 'auto'`（SDK 0.3.325）：判断模型自动放行或拦下每个调用，拿不准时才调 `canUseTool`。守护进程的 PreToolUse 钩子再把**写到工作目录外**的 Edit/Write/MultiEdit/NotebookEdit 改成 `ask`，强制走 `canUseTool`（实测判断模型会放行按指令写 `~/.bashrc.d/…` 这类文件）；固定拒绝名单仍由钩子先拦。只发给 hello `features` 里有 `permission_auto` 的守护进程，旧守护进程上按 `default` 开 | `workspace-write` 沙箱 + `approval_policy: on-request`（Codex 自己决定何时申请） |
+| `auto`（默认） | `permissionMode: 'auto'`（SDK 0.3.325）：判断模型自动放行或拦下每个调用，拿不准时才调 `canUseTool`。守护进程的 PreToolUse 钩子再把**写到工作目录外**的 Edit/Write/MultiEdit/NotebookEdit 改成 `ask`，强制走 `canUseTool`（目标路径先解析符号链接，工作目录里指向外面的链接不算工作目录内；实测判断模型会放行按指令写 `~/.bashrc.d/…` 这类文件）；固定拒绝名单仍由钩子先拦。只发给 hello `features` 里有 `permission_auto` 的守护进程，旧守护进程上按 `default` 开 | `workspace-write` 沙箱 + `approval_policy: on-request`（Codex 自己决定何时申请） |
 | `ask` | `default`：除读文件外每个调用都走 `canUseTool` | `workspace-write` + `untrusted`（只有它信任的只读命令免申请） |
 | `bypass` | 节点为 `agent_user` 级别或标记 `isolated` 时 `bypassPermissions` + `allowDangerouslySkipPermissions`；否则按 `auto` 开，岗位页面说明原因 | 隔离节点上 `danger-full-access` + `never`；否则同 `auto` |
 
@@ -396,6 +396,7 @@ Claude 子进程                守护进程                      控制台     
 
 - 策略 ⓪–④ 都没定下来的卡片，在 `lead_first` 下 `audience = 'lead'`，组长收到一条消息 `[Permission request q5 from dev-1 · t3]`，内容只有用户卡片上显示的东西（工具名、标题、说明、原因、命令或参数，参数截断到 2000 字），再无其他会话信息。用户的“等你处理”列表、讨论串的 `waiting` 状态都不算这些卡片。
 - 组长调用 `review_permission(request_id, decision, reason)`：`allow` / `deny` 直接 `approval.resolve`（`deny` 的理由发给成员）；`ask_user` 把卡片转给用户（`audience = 'user'`，卡片上写“组长 lead-1 拿不准：理由”）。
+- 谁能判断：卡片记下组长的员工 id（`detail.reviewer_id`），`review_permission` 只接受这个组长在本讨论串里调用（请求 id 按讨论串查找，成员没有这个工具，提出请求的人不能判断自己的请求）；`reply_to` 不能关闭权限请求。组长的判断、用户的回答和超时转交都先锁住卡片再检查 `status = 'open'` 和 `audience`，同一张卡片只会被定一次。
 - 直接给用户的情况：项目设置 `user`；请求来自组长自己（或没有讨论串的会话）；组长在 `lead_review_timeout_s`（默认 120 秒，可选 1/2/5/10 分钟）内没有判断（控制台每 15 秒扫一次）。
 - 用户的选择（放行 / 总是允许 / 拒绝并写理由）照旧回到请求者；“全部放行”同样放行正在等组长的卡片。
 - 记录：`at_questions.decided_by` 写 `lead:<名字>` / `user:<id>` / `policy:…`，组长的判断和理由另存 `detail.review = {by, decision, reason}`。每次判断都写一行讨论串动态（“lead-1 放行了 dev-1 的请求 Bash npm test（理由）”“你 拒绝了 …”“平台 组长 lead-1 没有及时判断 …”），讨论串的“审批记录”列出最近的判断和判断人。发给守护进程的 `approval.resolve.decided_by` 对组长的判断写 `policy:rule:lead-review`（协议的取值范围不变，旧守护进程也能接收）。

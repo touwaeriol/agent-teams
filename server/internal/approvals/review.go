@@ -66,7 +66,7 @@ func reviewerOf(ctx context.Context, tx *core.Tx, emp core.Employee) (core.Emplo
 
 // toLead addresses the card to the lead and sends it the request.
 func (e *Engine) toLead(ctx context.Context, tx *core.Tx, sc core.SessionContext, lead core.Employee, q core.Question) error {
-	q, err := setAudience(ctx, tx, q, "lead", map[string]any{"reviewer": lead.Name})
+	q, err := setAudience(ctx, tx, q, "lead", map[string]any{"reviewer": lead.Name, "reviewer_id": lead.ID})
 	if err != nil {
 		return err
 	}
@@ -141,7 +141,7 @@ func setAudience(ctx context.Context, tx *core.Tx, q core.Question, audience str
 // to the user. The returned text is the tool result.
 func (e *Engine) LeadReview(ctx context.Context, tx *core.Tx, lead core.Employee, threadID, requestID, decision, reason string) (string, error) {
 	q, err := core.LockQuestion(ctx, tx, threadID, requestID)
-	if err != nil || q.Kind != "approval" || q.Detail["reviewer"] != lead.Name {
+	if err != nil || !reviewerIs(q, lead, threadID) {
 		return "", ErrNotReview
 	}
 	if q.Status != "open" || q.Audience != "lead" {
@@ -155,6 +155,13 @@ func (e *Engine) LeadReview(ctx context.Context, tx *core.Tx, lead core.Employee
 		return "已转给用户决定 " + q.ID, e.escalate(ctx, tx, q, review, lead.Name, "拿不准，转给你决定："+Summary(q)+"（"+reason+"）")
 	}
 	return "", ErrBadDecision
+}
+
+// reviewerIs: only the lead the card was addressed to (by employee id, in its own thread)
+// may review it, never the asker.
+func reviewerIs(q core.Question, lead core.Employee, threadID string) bool {
+	return q.Kind == "approval" && lead.Tier == "lead" && lead.ThreadID != nil && *lead.ThreadID == threadID &&
+		q.Detail["reviewer_id"] == lead.ID && q.Asker != lead.Name
 }
 
 func (e *Engine) leadDecides(ctx context.Context, tx *core.Tx, lead core.Employee, q core.Question, decision string, review map[string]any) (string, error) {

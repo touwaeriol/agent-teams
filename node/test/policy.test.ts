@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { autoAsk, bashDecision, decideTool, splitArgv, type ToolPolicy } from "../src/sessions/policy.js";
 
@@ -57,6 +60,21 @@ describe("auto-mode writes", () => {
     expect(autoAsk(base, "NotebookEdit", { notebook_path: "/tmp/n.ipynb" }, "/w/dev")).not.toBeNull();
     expect(autoAsk(base, "Read", { file_path: "/etc/hosts" }, "/w/dev")).toBeNull();
     expect(autoAsk(base, "Bash", { command: "touch /tmp/x" }, "/w/dev")).toBeNull();
+  });
+
+  it("follows symlinks in the worktree before deciding", () => {
+    const dir = mkdtempSync(join(tmpdir(), "autoask-"));
+    try {
+      const wt = join(dir, "wt");
+      mkdirSync(join(dir, "home"), { recursive: true });
+      mkdirSync(wt);
+      symlinkSync(join(dir, "home"), join(wt, "h"));
+      const p = { ...base, writeRoots: [wt] };
+      expect(autoAsk(p, "Write", { file_path: "h/.bashrc" }, wt)).toContain("outside the worktree");
+      expect(autoAsk(p, "Write", { file_path: "src/new/a.ts" }, wt)).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

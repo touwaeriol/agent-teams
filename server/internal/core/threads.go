@@ -141,7 +141,7 @@ func ThreadCountsOf(ctx context.Context, q DB, t Thread) (ThreadCounts, error) {
 	var c ThreadCounts
 	err := q.QueryRow(ctx, `SELECT
 		(SELECT count(*) FROM at_questions WHERE thread_id = $1 AND status = 'open' AND audience = 'user' AND kind = 'question'),
-		(SELECT count(*) FROM at_questions WHERE thread_id = $1 AND status = 'open' AND kind = 'approval'),
+		(SELECT count(*) FROM at_questions WHERE thread_id = $1 AND status = 'open' AND audience = 'user' AND kind = 'approval'),
 		(SELECT count(*) FROM at_tasks WHERE thread_id = $1 AND status <> 'cancelled'),
 		(SELECT count(*) FROM at_tasks WHERE thread_id = $1 AND status = 'done'),
 		(SELECT count(*) FROM at_main_tasks WHERE thread_id = $1),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  approvalCommand, approvalHistory, approvalVerdict, deciderLabel, reviewNote, checkLook, deliverableKind, groupThreads, mainProgress, markTone, memberDoing, memberTone, mergeLook, openForUser, poolColumns,
+  approvalCardStatus, approvalCommand, approvalHistory, approvalVerdict, deciderLabel, reviewNote, checkLook, deliverableKind, groupThreads, mainProgress, markTone, memberDoing, memberTone, mergeLook, openForUser, poolColumns,
   projectTint, onePRLook, prLook, questionLine, taskLook, taskTitle, threadBases, threadKind, threadLine, threadPRs, visibleMainTasks, INK,
 } from "@/lib/present";
 import { question, task, thread } from "./fixtures";
@@ -147,6 +147,8 @@ describe("approval decisions", () => {
     expect(reviewNote(asked)).toBe("组长 lead-1 拿不准：会改线上");
     expect(reviewNote(question("q5", { kind: "approval", detail: { ...bash, review: { by: "policy:lead_timeout", decision: "ask_user", reason: "" } } }))).toContain("没有及时判断");
     expect(reviewNote(question("q6", { kind: "approval", detail: bash }))).toBeNull();
+    expect(approvalCardStatus(asked)).toBe("组长转给你");
+    expect(approvalCardStatus(question("q6", { kind: "approval", detail: bash }))).toBe("等你处理");
     const list = [
       question("a", { kind: "approval", status: "answered", answered_at: "2026-11-14T10:01:00Z" }),
       question("b", { kind: "approval", status: "answered", answered_at: "2026-11-14T10:05:00Z" }),

@@ -1,4 +1,5 @@
-import { isAbsolute, resolve } from "node:path";
+import { realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { BashPolicy } from "../protocol.js";
 import { isInside } from "../util/paths.js";
 
@@ -71,8 +72,20 @@ function readOnlyDecision(policy: ToolPolicy, tool: string, input: Record<string
 export function autoAsk(policy: ToolPolicy, tool: string, input: Record<string, unknown>, cwd: string): string | null {
   if (!WRITE_TOOLS.has(tool)) return null;
   const path = filePathOf(tool, input, cwd);
-  if (!path || policy.writeRoots.some((r) => isInside(r, path))) return null;
+  if (!path) return null;
+  const real = realTarget(path);
+  if (policy.writeRoots.some((r) => isInside(realTarget(r), real))) return null;
   return "Writing outside the worktree needs approval.";
+}
+
+/** The path with symlinks resolved on its existing part, so a link in the worktree cannot point a write outside. */
+export function realTarget(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    const parent = dirname(path);
+    return parent === path ? path : join(realTarget(parent), basename(path));
+  }
 }
 
 function filePathOf(tool: string, input: Record<string, unknown>, cwd: string): string | null {
