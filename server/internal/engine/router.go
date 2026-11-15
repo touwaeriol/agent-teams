@@ -103,11 +103,20 @@ func (r *router) nodeChanged(ctx context.Context, node store.Node, online bool) 
 
 // sessionState records the state; crashed/parked/closed sessions lose their pending cards (§3, §5.3).
 func (r *router) sessionState(ctx context.Context, m *protocol.SessionState) error {
+	st := string(m.State)
+	if st == "parked" {
+		// A session parks with pending requests only when the daemon shuts down: its cards
+		// are detached before the state change resumes the interrupted turn.
+		if err := r.e.Core.InTx(ctx, func(tx *core.Tx) error {
+			return r.e.Approvals.SessionRestarted(ctx, tx, string(m.SessionID), nil)
+		}); err != nil {
+			return err
+		}
+	}
 	if err := r.e.Orch.HandleState(ctx, m); err != nil {
 		return err
 	}
-	st := string(m.State)
-	if st != "crashed" && st != "parked" && st != "closed" {
+	if st != "crashed" && st != "closed" {
 		return nil
 	}
 	return r.e.Core.InTx(ctx, func(tx *core.Tx) error {
@@ -143,17 +152,15 @@ func (r *router) delivered(ctx context.Context, m *protocol.SessionDelivered) er
 	})
 }
 
-// report reconciles sessions, cards and calls with sessions.report: a session the daemon
-// no longer has (or that lacks a card/call) loses those cards and calls (protocol.md §3).
+// report reconciles sessions, cards and calls with sessions.report: cards the daemon no
+// longer has are detached (the resumed employee re-issues them), its lost calls are
+// cancelled, then sessions are reconciled and interrupted turns resumed (protocol.md §3).
 func (r *router) report(ctx context.Context, node store.Node, m *protocol.SessionsReport) error {
-	if err := r.e.Orch.Reconcile(ctx, node, m); err != nil {
-		return err
-	}
 	items := map[string]protocol.SessionReportItem{}
 	for _, it := range m.Sessions {
 		items[string(it.SessionID)] = it
 	}
-	return r.e.Core.InTx(ctx, func(tx *core.Tx) error {
+	err := r.e.Core.InTx(ctx, func(tx *core.Tx) error {
 		live, err := core.NodeLiveSessions(ctx, tx, node.ID)
 		if err != nil {
 			return err
@@ -165,6 +172,10 @@ func (r *router) report(ctx context.Context, node store.Node, m *protocol.Sessio
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	return r.e.Orch.Reconcile(ctx, node, m)
 }
 
 func (r *router) reconcileItem(ctx context.Context, tx *core.Tx, sessionID string, it protocol.SessionReportItem) error {
@@ -176,7 +187,7 @@ func (r *router) reconcileItem(ctx context.Context, tx *core.Tx, sessionID strin
 	for i, c := range it.PendingToolCalls {
 		calls[i] = string(c)
 	}
-	if err := r.e.Approvals.SessionGone(ctx, tx, sessionID, approvals); err != nil {
+	if err := r.e.Approvals.SessionRestarted(ctx, tx, sessionID, approvals); err != nil {
 		return err
 	}
 	return r.e.Tools.Reconcile(ctx, tx, sessionID, calls)
@@ -267,6 +278,9 @@ func (r *router) toolStarted(ctx context.Context, tx *core.Tx, sc core.SessionCo
 // An employee waiting for its usage limit to reset is not nudged: its thread is paused.
 func (r *router) turnEnded(ctx context.Context, tx *core.Tx, sc core.SessionContext, ev *protocol.SessionEvent) error {
 	if err := recordUsage(ctx, tx, sc, ev); err != nil {
+		return err
+	}
+	if err := r.e.Approvals.ExpireDetached(ctx, tx, sc.Employee); err != nil {
 		return err
 	}
 	waiting, err := timers.Waiting(ctx, tx, sc.Employee.ID)

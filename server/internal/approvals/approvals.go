@@ -75,6 +75,9 @@ func (e *Engine) Request(ctx context.Context, m *protocol.ApprovalRequest) error
 		if err != nil {
 			return err
 		}
+		if ok, err := e.reattach(ctx, tx, sc, m); ok || err != nil {
+			return err
+		}
 		q, err := e.insertCard(ctx, tx, sc, m)
 		if err != nil {
 			return err
@@ -99,7 +102,7 @@ func (e *Engine) insertCard(ctx context.Context, tx *core.Tx, sc core.SessionCon
 	var input any
 	_ = json.Unmarshal(m.Input, &input)
 	detail := map[string]any{"tool_name": m.ToolName, "input": input, "source": string(m.Source),
-		"input_hash": InputHash(m.ToolName, m.Input), "suggestions": m.Suggestions}
+		"input_hash": InputHash(m.ToolName, m.Input), "match_hash": MatchHash(m.ToolName, m.Input), "suggestions": m.Suggestions}
 	addOpt(detail, "title", m.Title)
 	addOpt(detail, "description", m.Description)
 	addOpt(detail, "decision_reason", m.DecisionReason)
@@ -491,12 +494,17 @@ func (e *Engine) Rules(ctx context.Context, q core.DB, projectID string, threadI
 	return out, rows.Err()
 }
 
-// Cancel marks a card cancelled (approval.cancel from the daemon).
+// Cancel marks a card cancelled (approval.cancel from the daemon); a request lost with the
+// process (process_restarted) only detaches its card, the resumed employee re-issues it.
 func (e *Engine) Cancel(ctx context.Context, m *protocol.ApprovalCancel) error {
 	return e.core.InTx(ctx, func(tx *core.Tx) error {
 		q, err := core.QuestionByApproval(ctx, tx, string(m.ApprovalID))
 		if err != nil {
 			return ignoreMissing(err)
+		}
+		if m.Reason == protocol.ApprovalCancelReasonProcessRestarted {
+			_, err := e.detach(ctx, tx, q)
+			return err
 		}
 		return e.cancelCard(ctx, tx, q, "cancelled:"+string(m.Reason))
 	})
@@ -519,7 +527,7 @@ func (e *Engine) cancelCard(ctx context.Context, tx *core.Tx, q core.Question, b
 	return e.refreshThread(ctx, tx, closed)
 }
 
-// SessionGone cancels the session's open cards that are not in keep (sessions.report, crash, park).
+// SessionGone cancels the session's open cards that are not in keep (crash, close).
 func (e *Engine) SessionGone(ctx context.Context, tx *core.Tx, sessionID string, keep []string) error {
 	open, err := core.OpenApprovals(ctx, tx, sessionID)
 	if err != nil {

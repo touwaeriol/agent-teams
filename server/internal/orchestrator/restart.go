@@ -1,0 +1,178 @@
+package orchestrator
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
+)
+
+// A daemon restart (or a session process restart) cuts the turns that were running: the
+// employee was working, waiting for an approval card (its own, or one at the lead) or for a
+// blocking tool such as ask_user. Nothing on the node continues such a turn, so the console
+// resumes it with a system note (the session reopens by its SDK session id).
+
+// cutTurnNote starts the note; the open requests are appended.
+const cutTurnNote = "（平台）节点守护进程重启（或会话进程中断），打断了你上一个回合。请从中断的地方继续未完成的工作。"
+
+// cutTurn reports whether a state change means the running turn was cut off: a running
+// session only parks when the daemon shuts down and only restarts when its process died.
+func cutTurn(prev, next string) bool {
+	return prev == "turn_running" && (next == "parked" || next == "opening")
+}
+
+// ResumeCutTurn resumes the employee of a session whose pending requests a restart lost.
+func (o *Orchestrator) ResumeCutTurn(ctx context.Context, tx *core.Tx, s core.AgentSession) error {
+	return o.resumeCutTurn(ctx, tx, s)
+}
+
+// resumeCutTurn sends the employee of s the restart note, once per interruption (the shutdown's
+// parked state, the report and the lost cards may all notice the same restart).
+func (o *Orchestrator) resumeCutTurn(ctx context.Context, tx *core.Tx, s core.AgentSession) error {
+	e, err := core.EmployeeByID(ctx, tx, s.EmployeeID)
+	if err != nil {
+		return ignoreMissing(err)
+	}
+	conv, err := o.conversationOf(ctx, tx, e)
+	if err != nil {
+		return err
+	}
+	var pending int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM at_messages WHERE conversation_id = $1
+		AND (delivered_at IS NULL OR created_at > now() - interval '2 minutes')
+		AND meta->>'to' = $2 AND (meta->>'resume_cut')::boolean`, conv, e.Name).Scan(&pending); err != nil {
+		return err
+	}
+	if pending > 0 {
+		return nil
+	}
+	text, err := cutTurnText(ctx, tx, e)
+	if err != nil {
+		return err
+	}
+	rec := &core.NewMessage{ConversationID: conv, Role: "system", Author: "platform", Kind: "note", Content: text,
+		Meta: map[string]any{"to": e.Name, "resume_cut": true}}
+	_, err = o.Deliver(ctx, tx, e, Delivery{Text: text, Kind: "system", Priority: "next", Record: rec})
+	return err
+}
+
+// cutTurnText explains what the interruption did to the employee's open requests.
+func cutTurnText(ctx context.Context, q core.DB, e core.Employee) (string, error) {
+	cards, err := openRequests(ctx, q, e, `kind = 'approval' AND detail ? 'detached_at' AND status IN ('open','answered')`)
+	if err != nil {
+		return "", err
+	}
+	asked, err := openRequests(ctx, q, e, `kind <> 'approval' AND blocking AND status = 'open'`)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	b.WriteString(cutTurnNote)
+	if len(cards) > 0 {
+		fmt.Fprintf(&b, "\n\n你之前等待的权限审批在中断时被取消了：%s。请原样重新发起同一个操作（同样的工具和参数），"+
+			"平台会把它接回原来的审批卡片继续等待；卡片如果已经有了答复，会立即生效。", strings.Join(cards, "；"))
+	} else {
+		b.WriteString("之前等待的审批已失效，需要的话重新申请。")
+	}
+	if len(asked) > 0 {
+		fmt.Fprintf(&b, "\n\n你之前提出的问题仍在等待回答：%s。回答会以消息送达，不要重复提问。", strings.Join(asked, "；"))
+	}
+	return b.String(), nil
+}
+
+// openRequests lists the employee's questions matching where as "q3 Bash make test".
+func openRequests(ctx context.Context, q core.DB, e core.Employee, where string) ([]string, error) {
+	rows, err := q.Query(ctx, `SELECT id, kind, text, detail FROM at_questions WHERE project_id = $1
+		AND COALESCE(thread_id, '') = COALESCE($2, '') AND asker = $3 AND `+where+` ORDER BY created_at`,
+		e.ProjectID, e.ThreadID, e.Name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id, kind, text string
+		var detail map[string]any
+		if err := rows.Scan(&id, &kind, &text, &detail); err != nil {
+			return nil, err
+		}
+		out = append(out, id+" "+requestLine(kind, text, detail))
+	}
+	return out, rows.Err()
+}
+
+func requestLine(kind, text string, detail map[string]any) string {
+	if kind != "approval" {
+		return clipRunes(text, 80)
+	}
+	input, _ := detail["input"].(map[string]any)
+	for _, key := range []string{"command", "cmd", "file_path", "path"} {
+		if v, ok := input[key].(string); ok && v != "" {
+			return fmt.Sprintf("%v %s", detail["tool_name"], clipHead(v, 160))
+		}
+	}
+	return fmt.Sprint(detail["tool_name"])
+}
+
+// clipHead keeps the end of a long command or path (the file name matters most).
+func clipHead(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return "…" + string(r[len(r)-n:])
+}
+
+func clipRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
+// stalledNote wakes a lead whose running thread has nobody working after a restart.
+const stalledNote = "（平台）节点守护进程重启后检查：这个线程仍是运行中，但现在没有成员在工作，也没有待处理的卡片或消息。" +
+	"请确认进度：还有工作就继续推进（分派、催促成员），已经完成就收尾。"
+
+// wakeStalledThreads: after a reconnect (sessions.report), a running thread of the node whose
+// employees are all idle, with no open card or question and no message on its way, would sit
+// in "running" forever; its lead gets a note, unless that note is already the thread's
+// latest message (nothing happened since).
+func (o *Orchestrator) wakeStalledThreads(ctx context.Context, tx *core.Tx, node store.Node) error {
+	rows, err := tx.Query(ctx, `SELECT DISTINCT t.id FROM at_threads t JOIN at_employees e ON e.thread_id = t.id
+		JOIN at_agent_sessions a ON a.employee_id = e.id AND a.state <> 'closed'
+		WHERE a.node_id = $1 AND t.status = 'running'
+		AND NOT EXISTS (SELECT 1 FROM at_agent_sessions a2 JOIN at_employees e2 ON e2.id = a2.employee_id
+			WHERE e2.thread_id = t.id AND a2.state IN ('turn_running','opening','queued'))
+		AND NOT EXISTS (SELECT 1 FROM at_questions q WHERE q.thread_id = t.id AND q.status = 'open')
+		AND NOT EXISTS (SELECT 1 FROM at_messages m WHERE m.conversation_id = t.id AND m.delivered_at IS NULL
+			AND m.meta ? 'msg_id' AND m.created_at > now() - interval '1 day')
+		AND COALESCE((SELECT (m.meta->>'stalled')::boolean FROM at_messages m WHERE m.conversation_id = t.id
+			ORDER BY m.id DESC LIMIT 1), false) = false`, node.ID)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	for _, id := range ids {
+		lead, err := core.Lead(ctx, tx, id)
+		if err != nil {
+			continue
+		}
+		rec := &core.NewMessage{ConversationID: id, Role: "system", Author: "platform", Kind: "note", Content: stalledNote,
+			Meta: map[string]any{"to": lead.Name, "stalled": true}}
+		if _, err := o.Deliver(ctx, tx, lead, Delivery{Text: stalledNote, Kind: "system", Priority: "later", Record: rec}); err != nil {
+			return err
+		}
+	}
+	return nil
+}

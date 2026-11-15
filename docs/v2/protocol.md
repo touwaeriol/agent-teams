@@ -286,7 +286,7 @@
 
 ### 5.3 `approval.cancel`（守护进程 → 控制台，可靠，键：`approval_id`）
 
-`{"approval_id", "reason": "interrupted|session_closed|codex_resolved|process_restarted"}`：Claude `signal` 中止、Codex `serverRequest/resolved`，或守护进程/app-server 重启后发现对应的 Promise / JSON-RPC 请求已不存在（守护进程启动时扫描发件箱里未 ACK 的 `approval.request`，对这些发 cancel 而不是重放）。控制台把卡片标为 cancelled。
+`{"approval_id", "reason": "interrupted|session_closed|codex_resolved|process_restarted"}`：Claude `signal` 中止、Codex `serverRequest/resolved`，或守护进程/app-server 重启后发现对应的 Promise / JSON-RPC 请求已不存在（守护进程启动时扫描发件箱里未 ACK 的 `approval.request`，对这些发 cancel 而不是重放）。控制台把卡片标为 cancelled；`process_restarted` 例外：卡片保留（分离），等恢复后的员工重新发起同一请求时接回（architecture.md §9）。
 
 ## 6. 平台工具调用
 

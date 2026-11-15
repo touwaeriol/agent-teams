@@ -111,7 +111,8 @@ func TestBlockingQuestions(t *testing.T) {
 }
 
 // TestReconcileReopensMissingSessions: after a daemon restart the report lacks the sessions;
-// the console reopens them with resume and cancels the cards the daemon no longer has.
+// the console reopens them with resume, keeps the cards the daemon no longer has open
+// (detached, for the re-issued requests) and resumes the dev.
 func TestReconcileReopensMissingSessions(t *testing.T) {
 	tm := startTeam(t)
 	gen := protocol.OpenGen(tm.dev.gen)
@@ -135,8 +136,10 @@ func TestReconcileReopensMissingSessions(t *testing.T) {
 	if open.OpenGen != 2 || open.Resume == nil || open.Resume.SDKSessionID == nil || *open.Resume.SDKSessionID != "sdk-"+tm.dev.session {
 		t.Fatalf("reopen %+v", open)
 	}
+	tm.dev.gen = 2
+	tm.dev.expectSend("守护进程重启")
 	var q core.QuestionView
-	eventually(t, "lost card cancelled", func() bool {
+	eventually(t, "lost card detached", func() bool {
 		var cards []core.QuestionView
 		tm.b.must(200, "GET", "/api/conversations/"+tm.thread.ID+"/questions?status=all", nil, &cards)
 		for _, c := range cards {
@@ -144,7 +147,7 @@ func TestReconcileReopensMissingSessions(t *testing.T) {
 				q = c
 			}
 		}
-		return q.Status == "cancelled"
+		return q.Status == "open" && q.Detail["detached_at"] != nil
 	})
 }
 
