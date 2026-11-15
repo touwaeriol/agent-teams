@@ -147,15 +147,12 @@ func (e *Engine) decide(ctx context.Context, tx *core.Tx, sc core.SessionContext
 		e.log.Warn("approval hit the fixed deny list", "employee", sc.Employee.Name, "tool", m.ToolName, "reason", reason)
 		return e.resolve(ctx, tx, q, "deny", DecidedDenyList, "平台禁止这个操作："+reason)
 	}
-	node, err := sessionNode(ctx, tx, sc.Session)
-	if err != nil {
-		return err
-	}
-	if orchestrator.Bypass(sc.Employee, node) {
-		e.log.Warn("approval from a skip-permissions session", "employee", sc.Employee.Name)
+	if orchestrator.Bypass(sc.Employee) {
+		// bypass sessions do not ask (the daemon allows in canUseTool); an old daemon might.
+		e.log.Warn("approval from a bypass session", "employee", sc.Employee.Name)
 		return e.resolve(ctx, tx, q, "allow", DecidedRoleSkip, "")
 	}
-	if auto, err := threadAuto(ctx, tx, sc.Employee); err != nil || (auto && autoIsolated(node)) {
+	if auto, err := threadAuto(ctx, tx, sc.Employee); err != nil || auto {
 		if err != nil {
 			return err
 		}
@@ -172,27 +169,6 @@ func (e *Engine) decide(ctx context.Context, tx *core.Tx, sc core.SessionContext
 		return e.resolve(ctx, tx, q, "allow", DecidedReadOnly, "")
 	}
 	return e.route(ctx, tx, sc, q)
-}
-
-// sessionNode loads the isolation of the node a session runs on (zero Node when unknown).
-// bypass and "allow everything" only apply on nodes isolated enough for them
-// (§10.3), whatever the role or thread says: a skip role placed on a plain node opens in
-// default mode, and its approvals must not be waved through here either.
-func sessionNode(ctx context.Context, q core.DB, s core.AgentSession) (store.Node, error) {
-	var n store.Node
-	if s.NodeID == nil {
-		return n, nil
-	}
-	err := core.MapErr(q.QueryRow(ctx, `SELECT id, isolated, isolation, last_hello FROM at_nodes WHERE id = $1`, *s.NodeID).
-		Scan(&n.ID, &n.Isolated, &n.Isolation, &n.LastHello))
-	if errors.Is(err, core.ErrNotFound) {
-		return store.Node{}, nil
-	}
-	return n, err
-}
-
-func autoIsolated(n store.Node) bool {
-	return n.Isolated || n.Isolation == "sandbox" || n.Isolation == "agent_user"
 }
 
 func threadAuto(ctx context.Context, q core.DB, emp core.Employee) (bool, error) {
@@ -579,11 +555,7 @@ func (e *Engine) setModes(ctx context.Context, tx *core.Tx, t core.Thread, on bo
 		if err != nil || emp.Tier != "member" || readOnly(emp) {
 			continue
 		}
-		node, err := sessionNode(ctx, tx, s)
-		if err != nil {
-			return err
-		}
-		if err := e.orch.SetMode(ctx, tx, s, threadMode(emp, node, on)); err != nil {
+		if err := e.orch.SetMode(ctx, tx, s, threadMode(emp, on)); err != nil {
 			return err
 		}
 	}
@@ -591,8 +563,8 @@ func (e *Engine) setModes(ctx context.Context, tx *core.Tx, t core.Thread, on bo
 }
 
 // threadMode is a member's mode with "allow everything" on (acceptEdits) or off (its own).
-func threadMode(emp core.Employee, node store.Node, on bool) string {
-	mode := orchestrator.ClaudeMode(emp, node)
+func threadMode(emp core.Employee, on bool) string {
+	mode := orchestrator.ClaudeMode(emp)
 	if on && mode != "bypassPermissions" {
 		return "acceptEdits"
 	}

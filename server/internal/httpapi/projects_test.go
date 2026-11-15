@@ -101,19 +101,13 @@ func TestProjectWithRepoAndConnection(t *testing.T) {
 	}
 }
 
-func TestAutoApproveNeedsIsolation(t *testing.T) {
+// TestAutoApproveAnyNode: "全部放行" no longer needs an isolated node.
+func TestAutoApproveAnyNode(t *testing.T) {
 	h := newHarness(t)
 	c, _ := h.signUp("a@example.com")
 	var p ProjectView
 	c.must(201, "POST", "/api/projects", map[string]any{"name": "A"}, &p)
-	if r := c.do("PATCH", "/api/projects/"+p.ID, map[string]any{"auto_approve": true}); r.Status != 409 || r.apiError(t).Code != "isolation_required" {
-		t.Fatalf("no nodes = %d %s", r.Status, r.Body)
-	}
-	var created struct {
-		Node NodeView `json:"node"`
-	}
-	c.must(201, "POST", "/api/nodes", map[string]string{"name": "box"}, &created)
-	c.must(200, "PATCH", "/api/nodes/"+created.Node.ID, map[string]any{"isolated": true}, nil)
+	c.must(201, "POST", "/api/nodes", map[string]string{"name": "box"}, nil)
 	c.must(200, "PATCH", "/api/projects/"+p.ID, map[string]any{"auto_approve": true}, &p)
 	if !p.AutoApprove {
 		t.Fatal("auto_approve not saved")

@@ -58,7 +58,7 @@ func TestValidateRules(t *testing.T) {
 	Normalize(roles, looks)
 	got := problemPaths(Validate(roles, Context{Nodes: nodes(), Looks: looks}))
 	for _, want := range []string{"roles[3].role", "roles[3].count", "roles[4].node_ids", "roles[5].permission_mode",
-		"roles[6].read_only", "roles[7].node_ids", "roles[7].look.outfit"} {
+		"roles[7].node_ids", "roles[7].look.outfit"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %s in %s", want, got)
 		}
@@ -77,30 +77,37 @@ func TestTierCountsAndCoordinatorRuntime(t *testing.T) {
 	}
 }
 
-// TestBypassSavesAnywhereButWarns: bypass on a plain node is allowed (it falls back to auto there)
-// and shows a warning; on isolated nodes it is silent. Non-members are always auto.
-func TestBypassSavesAnywhereButWarns(t *testing.T) {
-	roles := append(Defaults(looks), store.Role{Tier: Member, Role: "ops", PermissionMode: store.PermBypass, NodeIDs: []string{"n2", "n3"}},
-		store.Role{Tier: Member, Role: "plain", PermissionMode: store.PermBypass, NodeIDs: []string{"n1"}},
-		store.Role{Tier: Member, Role: "cx", Runtime: Codex})
-	roles[1].PermissionMode = store.PermBypass
+// TestBypassIsDefault: members default to bypass and keep it on any node without a warning,
+// legacy auto reads as bypass, ask stays, read-only roles may carry bypass, non-members are bypass.
+func TestBypassIsDefault(t *testing.T) {
+	ro := true
+	roles := append(Defaults(looks), store.Role{Tier: Member, Role: "ops", PermissionMode: store.PermAsk, NodeIDs: []string{"n1"}},
+		store.Role{Tier: Member, Role: "old", PermissionMode: store.PermLegacyAuto, NodeIDs: []string{"n1"}},
+		store.Role{Tier: Member, Role: "rev", ReadOnly: &ro, PermissionMode: store.PermBypass},
+		store.Role{Tier: Lead, Role: "lead2", PermissionMode: store.PermAsk})
 	Normalize(roles, looks)
-	if p := Validate(roles, Context{Nodes: nodes(), Looks: looks}); len(p) != 0 {
+	if p := Validate(roles[:6], Context{Nodes: nodes(), Looks: looks}); len(p) != 0 {
 		t.Fatalf("unexpected %v", p)
 	}
-	if roles[1].PermissionMode != store.PermAuto || roles[0].PermissionMode != store.PermAuto || roles[5].PermissionMode != store.PermAuto {
-		t.Fatalf("modes %q %q %q", roles[0].PermissionMode, roles[1].PermissionMode, roles[5].PermissionMode)
+	var got []string
+	for _, r := range roles {
+		got = append(got, r.PermissionMode)
 	}
-	w := Warnings(roles, nodes())
-	if len(w) != 1 || w[0].Role != "plain" || w[0].Message != BypassFallback {
+	if strings.Join(got, ",") != "bypass,bypass,bypass,ask,bypass,bypass,bypass" {
+		t.Fatalf("modes %v", got)
+	}
+	if w := Warnings(roles, nodes()); len(w) != 0 {
 		t.Fatalf("warnings %v", w)
+	}
+	if p := Validate([]store.Role{{Tier: Member, Role: "x", PermissionMode: store.PermLegacyAuto}}, Context{Nodes: nodes(), Looks: looks}); !strings.Contains(problemPaths(p), "permission_mode") {
+		t.Fatalf("auto accepted without normalize: %v", p)
 	}
 }
 
 func TestWarnings(t *testing.T) {
 	roles := []store.Role{{Role: "ops", PermissionMode: store.PermBypass, NodeIDs: []string{"gone", "n1"}}}
 	w := Warnings(roles, nodes())
-	if len(w) != 2 {
+	if len(w) != 1 || w[0].Message != "候选节点已删除" {
 		t.Fatalf("warnings %v", w)
 	}
 }
@@ -153,7 +160,7 @@ func TestConvertV1Team(t *testing.T) {
 
 func TestYAMLRoundTrip(t *testing.T) {
 	roles := append(Defaults(looks), store.Role{Tier: Member, Role: "qa", Title: "测试", Runtime: Codex,
-		Sandbox: "workspace-write", NodeIDs: []string{"n2"}, Count: 1})
+		Sandbox: "workspace-write", NodeIDs: []string{"n2"}, Count: 1, PermissionMode: store.PermAsk})
 	Normalize(roles, looks)
 	text, err := ToYAML(roles, map[string]string{"n2": "cvp"})
 	if err != nil {
@@ -167,7 +174,8 @@ func TestYAMLRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	Normalize(back.Roles, looks)
-	if len(back.Roles) != 4 || back.Roles[3].Runtime != Codex || back.Roles[3].NodeIDs[0] != "n2" || back.Roles[2].Count != 2 {
+	if len(back.Roles) != 4 || back.Roles[3].Runtime != Codex || back.Roles[3].NodeIDs[0] != "n2" || back.Roles[2].Count != 2 ||
+		back.Roles[3].PermissionMode != store.PermAsk || back.Roles[2].PermissionMode != store.PermBypass || strings.Contains(text, "bypass") {
 		t.Fatalf("round trip %+v", back.Roles)
 	}
 	if _, err := FromYAML("members:\n  - {role: dev, colour: red}\n", nil); err == nil {

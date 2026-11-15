@@ -2631,10 +2631,10 @@ export interface components {
             model: string;
             node_ids: string[] | null;
             /**
-             * @description auto: Claude's classifier decides, unclear calls ask; bypass: no checks (isolated nodes only, else auto); ask: every non-read tool asks
+             * @description bypass (default): members run without permission prompts on any node; ask: every non-read tool asks (lead or user, per the project's approval routing). Ignored for the coordinator, the lead and read-only roles
              * @enum {string}
              */
-            permission_mode?: "auto" | "bypass" | "ask";
+            permission_mode?: "bypass" | "ask";
             /** @description Plugins the role's sessions load: name (latest version) or name@N (pinned) */
             plugins: string[] | null;
             /** @description Omitted: defaults to true for gate review/decision */

@@ -123,7 +123,7 @@
     },
     "PermissionMode": {
       "title": "PermissionMode",
-      "description": "Claude permission mode; always explicit. auto is sent only to daemons that list the permission_auto feature.",
+      "description": "Claude permission mode; always explicit. The console opens writing members in bypassPermissions (with allow_dangerously_skip_permissions) or default (ask roles), and the coordinator, lead and read-only roles in dontAsk. auto is kept for old consoles only.",
       "type": "string",
       "enum": [
         "default",

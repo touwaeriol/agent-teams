@@ -262,11 +262,6 @@ func (a *API) updateThread(ctx context.Context, in *patchThreadInput) (*threadOu
 	if err != nil {
 		return nil, err
 	}
-	if in.Body.AutoApprove != nil && *in.Body.AutoApprove {
-		if err := a.checkIsolation(ctx, t); err != nil {
-			return nil, err
-		}
-	}
 	err = a.e.Core.InTx(ctx, func(tx *core.Tx) error { return a.patchThread(ctx, tx, u.ID, t, in) })
 	if err != nil {
 		return nil, fail(err, "没有这个讨论串")
@@ -369,28 +364,6 @@ func (a *API) deleteThread(ctx context.Context, in *tidInput) (*struct{}, error)
 func auditTx(ctx context.Context, tx *core.Tx, userID, action, target string, detail map[string]any) {
 	_, _ = tx.Exec(ctx, `INSERT INTO at_audit_log (user_id, actor, action, target_type, target_id, detail)
 		VALUES ($1, $2, $3, 'thread', $4, $5)`, userID, "user:"+userID, action, target, detail)
-}
-
-// checkIsolation enforces §10.3: "allow everything" needs every employee's node at sandbox level or better.
-func (a *API) checkIsolation(ctx context.Context, t core.Thread) error {
-	var weak []string
-	rows, err := a.e.Core.Pool.Query(ctx, `SELECT DISTINCT n.name FROM at_employees e JOIN at_nodes n ON n.id = e.node_id
-		WHERE e.thread_id = $1 AND NOT n.isolated AND n.isolation NOT IN ('sandbox','agent_user')`, t.ID)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var name string
-		if rows.Scan(&name) == nil {
-			weak = append(weak, name)
-		}
-	}
-	if len(weak) > 0 {
-		return httpapi.Fail(http.StatusConflict, "isolation_required",
-			"节点 "+strings.Join(weak, "、")+" 的隔离级别不够（需要 sandbox 或 agent_user），不能打开“本讨论串内全部放行”")
-	}
-	return rows.Err()
 }
 
 func (a *API) listMain(ctx context.Context, in *tidInput) (*mainTasksOutput, error) {

@@ -13,7 +13,8 @@ node deploy/v2/e2e/v1_check.mjs "$S/v1.json"        # v1 login, session, node to
 node deploy/v2/e2e/run.mjs "$S"                     # coordinator → thread → lead → dev → approval → push → merge queue
 node deploy/v2/e2e/run_multi.mjs "$S"               # two repos (base of one only in the context) + designer publish_file
 node deploy/v2/e2e/run_lifecycle.mjs "$S"           # image to the coordinator, live status, archive / unarchive / delete (haiku)
-node deploy/v2/e2e/run_permissions.mjs "$S"         # auto mode, lead review, a request the lead hands to the user (haiku)
+node deploy/v2/e2e/run_bypass.mjs "$S"              # default bypass: Bash and writes with no approval card, ask_user still reaches the user (haiku)
+node deploy/v2/e2e/run_permissions.mjs "$S"         # an ask role: lead review, a request the lead hands to the user (haiku)
 node deploy/v2/e2e/run_restart.mjs "$S"             # daemon restart while a card waits: resume, same card reattached (haiku)
 # screenshots (Playwright image, NODE_PATH with the playwright package):
 node deploy/v2/e2e/screenshots.cjs http://127.0.0.1:<PORT> <out> <project-id> 1
@@ -33,7 +34,8 @@ node --test deploy/v2/e2e/localgh.test.mjs          # the emulator's own tests
 | `screenshots_multi.cjs` | New Project with two repositories, Team skills, Deliverables, the viewer, the thread and its delivery tab |
 | `run.mjs` | the real-Claude run; the daemon runs with XDG dirs under the scratch dir and never reads `~/.config/agent-teams/node.env`. Roles use `--model sonnet` by default to keep it cheap. `E2E_DAEMON=node/dist/node.mjs` runs a local build instead of the served tarball |
 | `run_lifecycle.mjs` | a solid red PNG sent to the coordinator (the model must name the colour), a thread whose status events and live member states are checked while an approval card waits, then archive (sessions closed), unarchive, archive and delete (404, rows gone, thread directory purged on the node). It pauses at `approval` and `archived` until `<scratch>/go-<name>` exists, for screenshots; about 5 minutes |
-| `run_permissions.mjs` | the dev in `auto` mode runs `ls -la` and writes inside its worktree with no approval request; a write outside the worktree goes to the lead, which allows it (the card never reaches the user); a second one the lead hands over (`ask_user`) becomes the user's card, answered through the API, and the dev completes its task. Pauses at `running` and `escalated` until `<scratch>/go-<name>` exists; about 3 minutes |
+| `run_bypass.mjs` | the dev in the default `bypass` mode on a plain (not isolated) node runs Bash, writes in its worktree and outside it with zero approval rows in `at_questions` and no `approval.request` from the daemon; its `ask_user` question reaches the user, is answered through the API, and the dev writes the answer down and completes its task; about 3 minutes |
+| `run_permissions.mjs` | the dev is an `ask` role; its first write goes to the lead, which allows it (the card never reaches the user); a second one the lead hands over (`ask_user`) becomes the user's card, answered through the API, and the dev completes its task. Pauses at `running` and `escalated` until `<scratch>/go-<name>` exists; about 3 minutes |
 | `run_restart.mjs` | the dev's write outside its worktree raises the user's card; the daemon gets SIGTERM and is started again while the card is open; the dev receives the restart note, re-issues the write, the same card is attached to the new request (never cancelled, no second card), the API answers it and the dev completes its task; about 3 minutes |
 | `screenshots.cjs` | Main + thread panel, Thread, Office, Team, Nodes at deviceScaleFactor 2 |
 

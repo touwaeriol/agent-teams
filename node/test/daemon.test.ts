@@ -60,6 +60,20 @@ describe("daemon with a fake console", () => {
     await h.console.waitType("approval.ack", (b) => b.stale === true);
   });
 
+  it("allows in place without an approval.request in bypassPermissions sessions", async () => {
+    h = await startHarness();
+    const open = claudeOpen("s_BP");
+    Object.assign(open.claude as Record<string, unknown>, { permission_mode: "bypassPermissions", allow_dangerously_skip_permissions: true });
+    h.console.command("session.open", open);
+    await h.console.waitType("session.opened");
+    h.console.command("session.release", { session_id: "s_BP", open_gen: 1 });
+    h.console.command("session.send", { session_id: "s_BP", msg_id: "m_bp", text: "run rm -rf build", priority: "next", kind: "user" });
+    const text = await h.console.waitType("session.event", (b) => b.kind === "text" && b.final === true);
+    expect(text.body.text).toBe("allowed []");
+    expect(h.log.options.at(-1)).toMatchObject({ permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true });
+    expect(h.console.ofType("approval.request")).toEqual([]);
+  });
+
   it("downloads attached images and hands them to Claude as image blocks", async () => {
     h = await startHarness();
     h.console.images.set("img_1", Buffer.from("\x89PNG\r\n\x1a\nfake", "binary"));

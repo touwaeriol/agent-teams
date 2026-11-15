@@ -227,10 +227,11 @@ func rolesInvalid(problems []roles.Problem) error {
 	return invalid(fields, problems[0].Message)
 }
 
-// auditBypass records every role switched to bypass (skip_permissions_on, the action name of v2.0).
+// auditBypass records every saved role switched from ask to bypass (skip_permissions_on, the
+// action name of v2.0). bypass is the default, so new roles are not recorded.
 func (s *Server) auditBypass(ctx context.Context, userID string, before map[string]store.Role, after []store.Role) {
 	for _, r := range after {
-		if r.PermissionMode == store.PermBypass && before[r.ID].PermissionMode != store.PermBypass {
+		if r.PermissionMode == store.PermBypass && before[r.ID].PermissionMode == store.PermAsk {
 			s.audit(ctx, userID, "skip_permissions_on", "role", r.ID, map[string]string{"role": r.Role})
 		}
 	}

@@ -221,7 +221,7 @@ function NodeSettings({ node, open, onOpenChange }: { node: NodeView; open: bool
       <label className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-[13px]">
         <span className="flex flex-col gap-0.5">
           <span className="font-medium">这台机器是隔离的</span>
-          <span className="text-xs text-muted-foreground">只有隔离的节点能跑“跳过权限确认”的岗位。</span>
+          <span className="text-xs text-muted-foreground">整台机器只给员工用、没有其他秘密时打开；Codex 岗位只派到隔离的节点。</span>
         </span>
         <Switch checked={isolated} onCheckedChange={setIsolated} />
       </label>

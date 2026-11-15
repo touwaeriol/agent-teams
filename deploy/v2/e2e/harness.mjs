@@ -19,8 +19,8 @@ export async function login(base) {
 
 /**
  * roleBody fills a role template with the defaults the e2e runs use. Members ask for every
- * write (permission_mode "ask") so the runs see real approval cards; with the default "auto"
- * the classifier would approve the small edits these runs make.
+ * write (permission_mode "ask") so the runs see real approval cards; with the default "bypass"
+ * nothing would ask.
  */
 export function roleBody(r, i, model) {
   return { id: "", runtime: "claude", node_ids: [], description: r.title, model, effort: "", permission_mode: "ask",

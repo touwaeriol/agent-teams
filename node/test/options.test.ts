@@ -21,11 +21,11 @@ describe("Claude options", () => {
     expect(buildClaudeOptions({ ...base, resume: true, claude: claude() }).resume).toBe("u1");
   });
 
-  it("passes the role's permission mode through: auto, default (ask) and bypass", () => {
-    expect(buildClaudeOptions({ ...base, claude: claude({ permission_mode: "auto" }) })).toMatchObject({ permissionMode: "auto", allowDangerouslySkipPermissions: false });
-    expect(buildClaudeOptions({ ...base, claude: claude({ permission_mode: "default" }) }).permissionMode).toBe("default");
+  it("passes the role's permission mode through: default (ask) and bypass, which always gets the SDK's skip flag", () => {
+    expect(buildClaudeOptions({ ...base, claude: claude({ permission_mode: "default" }) })).toMatchObject({ permissionMode: "default", allowDangerouslySkipPermissions: false });
     const bypass = buildClaudeOptions({ ...base, claude: claude({ permission_mode: "bypassPermissions", allow_dangerously_skip_permissions: true }) });
     expect(bypass).toMatchObject({ permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true });
+    expect(buildClaudeOptions({ ...base, claude: claude({ permission_mode: "bypassPermissions" }) }).allowDangerouslySkipPermissions).toBe(true);
   });
 
   it("builds sandbox settings with no writable paths for read-only sessions", () => {

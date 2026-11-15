@@ -33,6 +33,7 @@ func startTeam(t *testing.T) *team {
 	tm.b.must(201, "POST", "/api/nodes", map[string]string{"name": "fake"}, &node)
 	tm.token = node.Token
 	tm.b.must(200, "GET", "/api/roles", nil, nil)
+	askMembers(t, w)
 	var project struct{ ID string }
 	tm.b.must(201, "POST", "/api/projects", map[string]any{"name": "p"}, &project)
 	tm.projectID = project.ID
@@ -266,9 +267,18 @@ func TestThreadLimitAndPause(t *testing.T) {
 	}
 }
 
-// TestSkipRoleNeedsIsolatedNode: a bypass role on a sandbox-level node opens in auto
-// mode, so its approvals must still become cards; on an isolated node they pass.
-func TestSkipRoleNeedsIsolatedNode(t *testing.T) {
+// askMembers makes the default member roles ask (逐条问), so these tests see approval cards;
+// the default bypass never raises one.
+func askMembers(t *testing.T, w *world) {
+	t.Helper()
+	if _, err := w.e.Core.Pool.Exec(w.ctx, `UPDATE at_roles SET permission_mode = 'ask' WHERE tier = 'member'`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestBypassRoleApprovalsPass: a bypass member never asks (the daemon allows in canUseTool);
+// an approval.request from an old daemon is allowed on any node, without a card.
+func TestBypassRoleApprovalsPass(t *testing.T) {
 	tm := startTeam(t)
 	pool, ctx := tm.w.e.Core.Pool, tm.w.ctx
 	if _, err := pool.Exec(ctx, `UPDATE at_employees SET spec = jsonb_set(spec, '{permission_mode}', '"bypass"')
@@ -276,23 +286,16 @@ func TestSkipRoleNeedsIsolatedNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	gen := protocol.OpenGen(tm.dev.gen)
-	ask := func(id string) {
-		tm.dev.send(protocol.TypeApprovalRequest, protocol.ApprovalRequest{ApprovalID: protocol.ApprovalID(id), SessionID: protocol.SessionID(tm.dev.session),
-			OpenGen: &gen, Source: "claude_can_use_tool", ToolName: "Bash", Input: json.RawMessage(`{"command":"make ` + id + `"}`),
-			Available: []protocol.ApprovalDecision{"allow", "deny"}})
+	tm.dev.send(protocol.TypeApprovalRequest, protocol.ApprovalRequest{ApprovalID: "ap_plain", SessionID: protocol.SessionID(tm.dev.session),
+		OpenGen: &gen, Source: "claude_can_use_tool", ToolName: "Bash", Input: json.RawMessage(`{"command":"make it"}`),
+		Available: []protocol.ApprovalDecision{"allow", "deny"}})
+	if r := waitResolve(t, tm.w, tm.dev, "ap_plain"); r.Decision != "allow" || r.DecidedBy != approvals.DecidedRoleSkip {
+		t.Fatalf("bypass on a plain node: %+v", r)
 	}
-	ask("ap_plain")
-	eventually(t, "card shown", func() bool {
-		var cards []core.QuestionView
-		tm.b.must(200, "GET", "/api/conversations/"+tm.thread.ID+"/questions?status=open", nil, &cards)
-		return len(cards) == 1 && cards[0].Kind == "approval"
-	})
-	if _, err := pool.Exec(ctx, `UPDATE at_nodes SET isolated = true WHERE user_id = (SELECT user_id FROM at_projects WHERE id = $1)`, tm.projectID); err != nil {
-		t.Fatal(err)
-	}
-	ask("ap_isolated")
-	if r := waitResolve(t, tm.w, tm.dev, "ap_isolated"); r.Decision != "allow" || r.DecidedBy != approvals.DecidedRoleSkip {
-		t.Fatalf("isolated skip: %+v", r)
+	var cards []core.QuestionView
+	tm.b.must(200, "GET", "/api/conversations/"+tm.thread.ID+"/questions?status=open", nil, &cards)
+	if len(cards) != 0 {
+		t.Fatalf("open cards %+v", cards)
 	}
 }
 

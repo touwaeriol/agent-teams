@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { autoAsk, bashDecision, decideTool, splitArgv, type ToolPolicy } from "../src/sessions/policy.js";
+import { bashDecision, decideTool, splitArgv, type ToolPolicy } from "../src/sessions/policy.js";
 
 const BASH = {
   mode: "argv" as const,
@@ -11,7 +11,7 @@ const BASH = {
   deny_metachar: true,
 };
 
-const base: ToolPolicy = { denyNonPlatform: false, readOnly: false, bash: null, readRoots: ["/w/lead", "/w/repo/.git"], writeRoots: ["/w/dev", "/w/repo/.git"], secretPaths: ["/home/u/.config/agent-teams", "/home/u/.claude/.credentials.json"] };
+const base: ToolPolicy = { denyNonPlatform: false, readOnly: false, bash: null, readRoots: ["/w/lead", "/w/repo/.git"], secretPaths: ["/home/u/.config/agent-teams", "/home/u/.claude/.credentials.json"] };
 
 describe("tool policy", () => {
   it("lets the coordinator use only platform tools", () => {
@@ -51,27 +51,25 @@ describe("tool policy", () => {
   });
 });
 
-describe("auto-mode writes", () => {
-  it("asks for file writes outside the worktree and leaves the rest to the classifier", () => {
-    expect(autoAsk(base, "Write", { file_path: "src/a.ts" }, "/w/dev")).toBeNull();
-    expect(autoAsk(base, "Edit", { file_path: "/w/repo/.git/info/exclude" }, "/w/dev")).toBeNull();
-    expect(autoAsk(base, "Write", { file_path: "/home/u/.bashrc" }, "/w/dev")).toContain("outside the worktree");
-    expect(autoAsk(base, "MultiEdit", { file_path: "../other/a.ts" }, "/w/dev")).not.toBeNull();
-    expect(autoAsk(base, "NotebookEdit", { notebook_path: "/tmp/n.ipynb" }, "/w/dev")).not.toBeNull();
-    expect(autoAsk(base, "Read", { file_path: "/etc/hosts" }, "/w/dev")).toBeNull();
-    expect(autoAsk(base, "Bash", { command: "touch /tmp/x" }, "/w/dev")).toBeNull();
+describe("writing sessions (bypass)", () => {
+  it("never asks: writes anywhere outside the secret paths pass the hook, secrets are denied", () => {
+    expect(decideTool(base, "Write", { file_path: "src/a.ts" }, "/w/dev")).toBeNull();
+    expect(decideTool(base, "Write", { file_path: "/home/u/.bashrc" }, "/w/dev")).toBeNull();
+    expect(decideTool(base, "Bash", { command: "touch /tmp/x" }, "/w/dev")).toBeNull();
+    expect(decideTool(base, "Write", { file_path: "/home/u/.config/agent-teams/node.json" }, "/w/dev")?.deny).toContain("node secrets");
   });
 
-  it("follows symlinks in the worktree before deciding", () => {
-    const dir = mkdtempSync(join(tmpdir(), "autoask-"));
+  it("follows symlinks in the worktree to the secret paths", () => {
+    const dir = mkdtempSync(join(tmpdir(), "secret-"));
     try {
       const wt = join(dir, "wt");
-      mkdirSync(join(dir, "home"), { recursive: true });
+      const secret = join(dir, "cfg");
+      mkdirSync(secret, { recursive: true });
       mkdirSync(wt);
-      symlinkSync(join(dir, "home"), join(wt, "h"));
-      const p = { ...base, writeRoots: [wt] };
-      expect(autoAsk(p, "Write", { file_path: "h/.bashrc" }, wt)).toContain("outside the worktree");
-      expect(autoAsk(p, "Write", { file_path: "src/new/a.ts" }, wt)).toBeNull();
+      symlinkSync(secret, join(wt, "h"));
+      const p = { ...base, secretPaths: [secret] };
+      expect(decideTool(p, "Write", { file_path: "h/node.json" }, wt)?.deny).toContain("node secrets");
+      expect(decideTool(p, "Write", { file_path: "src/new/a.ts" }, wt)).toBeNull();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

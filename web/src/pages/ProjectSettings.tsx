@@ -6,7 +6,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { projects } from "@/api/actions";
 import { useAction } from "@/api/mutations";
-import { keys, useMemory, useNodes, useProjectUsage } from "@/api/queries";
+import { keys, useMemory, useNodes, useProjectUsage, useRoles } from "@/api/queries";
 import type { MemoryView, ProjectUpdate, ProjectView } from "@/api/views";
 import { ChoiceCards, Dot } from "@/components/app/bits";
 import { ProjectIcon } from "@/components/app/ProjectIcon";
@@ -21,6 +21,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { colorIcon, ICON_COLORS, ICON_EMOJIS } from "@/lib/projectIcon";
 import { EFFORTS, fillDays, formatTokens, formatUSD, goalLimit, GOAL_MAX, modelOptions, SETTINGS_SECTIONS, type SettingsSection } from "@/lib/projectSettings";
+import { usesAsk } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 
 const MODES = [
@@ -597,15 +598,14 @@ export function leadTimeoutLabel(seconds: number): string {
   return seconds % 60 === 0 ? `${seconds / 60} 分钟` : `${seconds} 秒`;
 }
 
-function AdvancedSection({ project }: { project: ProjectView }) {
+/** Only shown when some role asks (逐条问): bypass roles never raise approval cards. */
+function ApprovalRows({ project }: { project: ProjectView }) {
   const update = useUpdate(project.id);
   const d = project.delivery;
   return (
-    <div className="flex flex-col">
-      <Heading>高级</Heading>
-      <span className="pb-1 text-[13px] text-muted-foreground">审批与交付</span>
-      <SwitchRow title="新讨论串默认“全部放行”" desc="打开后，讨论串里所有成员的操作都不再询问。适合你在旁边盯着的时候。" checked={project.auto_approve} onChange={(v) => update.mutate({ auto_approve: v })} />
-      <Row title="审批方式" desc={APPROVAL_ROUTING_DESC[d.approval_routing]}>
+    <>
+      <SwitchRow title="新讨论串默认“全部放行”" desc="只影响设成“逐条问”的成员：打开后它们的操作也不再询问。" checked={project.auto_approve} onChange={(v) => update.mutate({ auto_approve: v })} />
+      <Row title="审批方式" desc={`只影响设成“逐条问”的成员。${APPROVAL_ROUTING_DESC[d.approval_routing]}`}>
         <Select value={d.approval_routing} onValueChange={(v) => update.mutate({ delivery: { approval_routing: v as "lead_first" | "user" } })}>
           <SelectTrigger aria-label="审批方式" className="h-9 w-[236px] border-0 bg-raised">
             <SelectValue />
@@ -632,7 +632,22 @@ function AdvancedSection({ project }: { project: ProjectView }) {
           </Select>
         </Row>
       )}
-      <SwitchRow title="成员提问时通知我" desc="员工用“问你”提问、或请求权限时，侧栏和项目首页都会提醒。" checked={d.notify_on_ask} onChange={(v) => update.mutate({ delivery: { notify_on_ask: v } })} />
+    </>
+  );
+}
+
+function AdvancedSection({ project }: { project: ProjectView }) {
+  const update = useUpdate(project.id);
+  const roles = useRoles();
+  const d = project.delivery;
+  const ask = usesAsk(roles.data?.roles ?? []);
+  return (
+    <div className="flex flex-col">
+      <Heading>高级</Heading>
+      <span className="pb-1 text-[13px] text-muted-foreground">审批与交付</span>
+      {!ask && <span className="pb-2 text-xs leading-[18px] text-muted-foreground">成员都是“直接执行”，不会弹权限确认。有岗位改成“逐条问”时，这里才有审批方式可设。</span>}
+      {ask && <ApprovalRows project={project} />}
+      <SwitchRow title="成员提问时通知我" desc="员工用“问你”提问时，侧栏和项目首页都会提醒。" checked={d.notify_on_ask} onChange={(v) => update.mutate({ delivery: { notify_on_ask: v } })} />
       <SwitchRow title="讨论串完成后需要我验收" desc="关闭后 PR 一通过检查就自动合并到基准分支。" checked={project.require_acceptance} onChange={(v) => update.mutate({ require_acceptance: v })} />
       <SwitchRow title="允许员工修改 workflow" desc="允许成员改 .github/workflows 下的文件（默认不允许）。" checked={d.allow_workflow_edits} onChange={(v) => update.mutate({ delivery: { allow_workflow_edits: v } })} />
       <Row title="合并方式" desc="讨论串 PR 合并到基准分支时用。">

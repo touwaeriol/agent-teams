@@ -161,6 +161,7 @@ func TestThreadEndToEnd(t *testing.T) {
 	var node nodeCreated
 	b.must(201, "POST", "/api/nodes", map[string]string{"name": "fake"}, &node)
 	b.must(200, "GET", "/api/roles", nil, nil)
+	askMembers(t, w)
 	var project struct{ ID string }
 	b.must(201, "POST", "/api/projects", map[string]any{"name": "demo", "context": "a demo project"}, &project)
 	// approvalFlow drives the user's card; lead review has its own tests (questions_test.go).

@@ -12,15 +12,11 @@ export interface ToolPolicy {
   bash: BashPolicy | null;
   /** Absolute roots the file tools may read in read-only sessions. */
   readRoots: string[];
-  /** Absolute roots auto-mode sessions write into without asking (worktree + shared .git dirs). */
-  writeRoots: string[];
   /** Absolute paths no tool may touch (daemon config, state, runtime logins). */
   secretPaths: string[];
 }
 
 export type Decision = { deny: string } | null;
-
-const WRITE_TOOLS = new Set(["Edit", "Write", "NotebookEdit", "MultiEdit"]);
 
 const FILE_TOOLS: Record<string, string> = { Read: "file_path", Edit: "file_path", Write: "file_path", MultiEdit: "file_path", NotebookEdit: "notebook_path", Glob: "path", Grep: "path" };
 const READ_TOOLS = new Set(["Read", "Glob", "Grep", "LS"]);
@@ -38,7 +34,10 @@ const DANGEROUS_SHELL = [
 
 export const PLATFORM_TOOL_PREFIX = "mcp__platform__";
 
-/** PreToolUse decision: a deny reason, or null to let the normal permission flow continue. */
+/**
+ * PreToolUse decision: a deny reason, or null to let the normal permission flow continue.
+ * Denials go back to the model as the tool result; they never become approval cards.
+ */
 export function decideTool(policy: ToolPolicy, tool: string, input: Record<string, unknown>, cwd: string): Decision {
   if (tool.startsWith(PLATFORM_TOOL_PREFIX)) return null;
   if (policy.denyNonPlatform) return { deny: "This session may only use platform tools." };
@@ -47,7 +46,8 @@ export function decideTool(policy: ToolPolicy, tool: string, input: Record<strin
 
 function secretDecision(policy: ToolPolicy, tool: string, input: Record<string, unknown>, cwd: string): Decision {
   const path = filePathOf(tool, input, cwd);
-  if (path && policy.secretPaths.some((s) => isInside(s, path))) return { deny: "That path holds node secrets and is off limits." };
+  const real = path ? realTarget(path) : null;
+  if (path && policy.secretPaths.some((s) => isInside(s, path) || isInside(s, real!))) return { deny: "That path holds node secrets and is off limits." };
   if (SEARCH_TOOLS.has(tool) && policy.secretPaths.some((s) => isInside(path ?? cwd, s))) return { deny: "Searching a directory that contains node secrets is not allowed; search a narrower path." };
   if (tool !== "Bash") return null;
   const command = String(input.command ?? "");
@@ -63,19 +63,6 @@ function readOnlyDecision(policy: ToolPolicy, tool: string, input: Record<string
   const path = filePathOf(tool, input, cwd) ?? cwd;
   if (READ_TOOLS.has(tool) && !policy.readRoots.some((r) => isInside(r, path))) return { deny: "Read-only sessions can only read inside their worktree." };
   return null;
-}
-
-/**
- * Auto mode: the classifier approves what the instructions ask for, writes outside the worktree
- * included (verified with SDK 0.3.325), so those writes go through canUseTool (approval flow).
- */
-export function autoAsk(policy: ToolPolicy, tool: string, input: Record<string, unknown>, cwd: string): string | null {
-  if (!WRITE_TOOLS.has(tool)) return null;
-  const path = filePathOf(tool, input, cwd);
-  if (!path) return null;
-  const real = realTarget(path);
-  if (policy.writeRoots.some((r) => isInside(realTarget(r), real))) return null;
-  return "Writing outside the worktree needs approval.";
 }
 
 /** The path with symlinks resolved on its existing part, so a link in the worktree cannot point a write outside. */

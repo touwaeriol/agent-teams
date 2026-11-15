@@ -14,10 +14,12 @@ type Look struct {
 }
 
 // Permission modes of a role (at_roles.permission_mode).
+// bypass (the default) runs without permission prompts on any node; ask asks for every
+// non-read tool. "auto" existed before 00097 and is read as bypass.
 const (
-	PermAuto   = "auto"
-	PermBypass = "bypass"
-	PermAsk    = "ask"
+	PermBypass     = "bypass"
+	PermAsk        = "ask"
+	PermLegacyAuto = "auto"
 )
 
 // Role is a role template (at_roles, user level). JSON tags are the RoleView of api.md.
@@ -33,7 +35,7 @@ type Role struct {
 	Instructions    string   `json:"instructions"`
 	Model           string   `json:"model"`
 	Effort          string   `json:"effort"`
-	PermissionMode  string   `json:"permission_mode,omitempty" enum:"auto,bypass,ask" doc:"auto: Claude's classifier decides, unclear calls ask; bypass: no checks (isolated nodes only, else auto); ask: every non-read tool asks"`
+	PermissionMode  string   `json:"permission_mode,omitempty" enum:"bypass,ask" doc:"bypass (default): members run without permission prompts on any node; ask: every non-read tool asks (lead or user, per the project's approval routing). Ignored for the coordinator, the lead and read-only roles"`
 	CanDelegate     bool     `json:"can_delegate"`
 	ReadOnly        *bool    `json:"read_only,omitempty" nullable:"true" doc:"Omitted: defaults to true for gate review/decision"`
 	AllowedTools    []string `json:"allowed_tools"`

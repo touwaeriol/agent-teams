@@ -124,7 +124,7 @@ func (p *Parsed) add(r store.Role) { p.Roles = append(p.Roles, r) }
 
 // yamlMode reads permission_mode, or the legacy skip_permissions flag.
 func yamlMode(y yamlRole) string {
-	if y.PermissionMode == "" && y.SkipPermissions {
+	if y.PermissionMode == "" || y.PermissionMode == store.PermLegacyAuto || y.SkipPermissions {
 		return store.PermBypass
 	}
 	return y.PermissionMode
@@ -183,8 +183,8 @@ func fromV1(text string, nodeIDs map[string]string) (Parsed, error) {
 	lead := v1Role(*leader, Lead, "lead", nodeIDs, &p.Report)
 	coord := lead
 	coord.Tier, coord.Role, coord.Title, coord.Runtime = Coordinator, "coordinator", "项目统筹", Claude
-	coord.PermissionMode, coord.CanDelegate, coord.Sandbox = store.PermAuto, false, ""
-	lead.PermissionMode, lead.Title = store.PermAuto, first(lead.Title, "组长")
+	coord.PermissionMode, coord.CanDelegate, coord.Sandbox = store.PermBypass, false, ""
+	lead.PermissionMode, lead.Title = store.PermBypass, first(lead.Title, "组长")
 	p.add(coord)
 	p.add(lead)
 	taken := map[string]bool{"coordinator": true, "lead": true}
@@ -209,12 +209,8 @@ func findEmployee(team v1Team, name string) *v1Employee {
 }
 
 func v1Role(e v1Employee, tier, key string, nodeIDs map[string]string, report *[]string) store.Role {
-	mode := store.PermAuto
-	if (e.PermissionMode == "bypassPermissions" || e.Sandbox == "danger-full-access") && tier == Member {
-		mode = store.PermBypass
-	}
 	r := store.Role{Tier: tier, Role: key, Title: e.Name, Runtime: runtimeOf(e.Type), Count: 1,
-		Description: e.Description, Instructions: e.Instructions, Model: e.Model, PermissionMode: mode,
+		Description: e.Description, Instructions: e.Instructions, Model: e.Model, PermissionMode: store.PermBypass,
 		CanDelegate: e.CanDelegate, AllowedTools: e.AllowedTools, DisallowedTools: e.DisallowedTools,
 		MaxTurns: e.MaxTurns}
 	if r.Runtime == Codex {
@@ -294,9 +290,9 @@ func ToYAML(roles []store.Role, nodeNames map[string]string) (string, error) {
 	return buf.String(), enc.Close()
 }
 
-// yamlModeOf leaves the default (auto) out of the YAML.
+// yamlModeOf leaves the default (bypass) out of the YAML.
 func yamlModeOf(r store.Role) string {
-	if r.PermissionMode == store.PermAuto {
+	if r.PermissionMode == store.PermBypass {
 		return ""
 	}
 	return r.PermissionMode

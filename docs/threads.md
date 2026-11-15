@@ -20,14 +20,14 @@ coordinator: {node: rc-erio, model: "", instructions: ""}          # 可选，�
 lead:        {node: rc-erio, model: "", instructions: "", type: claude_code}
 members:
   - {role: dev, title: 开发, count: 2, nodes: [rc-erio, cvp], type: claude_code,
-     description: "...", instructions: "...", permission_mode: auto, can_delegate: false,
+     description: "...", instructions: "...", permission_mode: bypass, can_delegate: false,
      allowed_tools: [], model: ""}
   - {role: qa, title: 测试, count: 1, nodes: [cvp], type: codex, sandbox: workspace-write, permission_mode: ask}
 ```
 
 - 旧格式（`leader` + `employees`）仍能读：自动转成 lead = leader 那个员工，其余每人一个 `count: 1` 的岗位（role = 原名字）。保存时写新格式。
 - 实例化：讨论串开工时，每个岗位按 `count` 生成 `<role>-<n>`，节点在 `nodes` 里轮流分配。
-- `permission_mode`：`auto`（默认，Claude Code 的判断模型自动放行或拦下，拿不准的走审批；Codex `on-request`）、`ask`（每次都问；Codex `untrusted`）、`bypass`（Claude Code `bypassPermissions`，Codex `danger-full-access`，只在隔离节点生效，否则按 `auto`）。旧的 `skip_permissions: true` 读作 `bypass`。详见 v2/architecture.md §9.1。
+- `permission_mode`：`bypass`（默认，“直接执行”：Claude Code `bypassPermissions`，Codex `danger-full-access`，任何节点都生效，讨论串里不弹权限确认）、`ask`（“逐条问”：每次都问，按项目的审批方式先给组长或你；Codex `untrusted`）。旧的 `auto` 和 `skip_permissions: true` 都读作 `bypass`。详见 v2/architecture.md §9.1。
 
 ## 数据
 
@@ -96,7 +96,7 @@ members:
 
 - 项目工作区（`Main`）：左侧 `Sidebar` 只放 新建项目 / 搜索 / 交付物 和项目列表（已置顶、项目、已归档；项目旁的数字是等你处理数），不展开讨论串；中间是和项目 leader（项目统筹）的对话，leader 开出的讨论串在消息里显示为可点的一行；右侧默认是讨论串列表（等你处理 / 进行中 / 已完成分组），点一个在右侧展开详情（主要任务清单、等你处理卡片、成员、组长最近说、和组长说话、全屏打开），左上角“← 所有讨论串”返回列表。
 - 项目首页（`Overview`）、讨论串详情（`Thread`：主要任务紧凑清单 / 任务池看板 / 和组长的对话 / 交付，右侧审批、成员、动态、和组长说话；“本讨论串内全部放行”开关）、交付物一览（`Deliverables`）、新建项目（`NewProject`，含工作方式）、项目设置（`ProjectSettings`）。
-- 设置（`SettingsNav`）：团队岗位（`Team`，三级 + 跳过权限确认）、节点（`Nodes`）、GitHub 连接（`GitHub`）、外观、管理（`Admin`）。登录（`Login`）。手机：侧栏收起，讨论串面板变成独立页。
+- 设置（`SettingsNav`）：团队岗位（`Team`，三级 + 权限：直接执行 / 逐条问）、节点（`Nodes`）、GitHub 连接（`GitHub`）、外观、管理（`Admin`）。登录（`Login`）。手机：侧栏收起，讨论串面板变成独立页。
 - 主要任务清单的样式：完成 = 灰色实心勾 + 划线；进行中 = 转圈；未开始 = 虚线圈；超过 5 项折叠“显示另外 N 项”。
 - 设计稿查看器（`DesignViewer`）本期不做：交付物里的设计类先显示为链接卡片。
 
@@ -113,7 +113,7 @@ members:
 ## 决定：守护进程改用 TypeScript + Claude Agent SDK（用户 2026-11-15）
 
 - 节点守护进程用 TypeScript 重写（Node 22+），用 `@anthropic-ai/claude-agent-sdk` 托管员工：每个组长 / 成员一个**常驻会话**（流式输入），随时可以把派活、转达的消息、用户插话推进去；可中断当前操作。
-- 权限审批改用 SDK 的 `canUseTool` 回调：回调里向控制台发审批请求、等用户在网页上点（替代 `--permission-prompt-tool`）；“跳过权限确认”的岗位直接 `bypassPermissions`。
+- 权限审批改用 SDK 的 `canUseTool` 回调：回调里向控制台发审批请求、等用户在网页上点（替代 `--permission-prompt-tool`）；“直接执行”的岗位（默认）直接 `bypassPermissions`，只有“逐条问”的岗位走审批。
 - hooks 在 SDK 里接：工具开始 / 结束、会话停止、通知，用来驱动员工状态和办公室动画。
 - 与控制台的 WebSocket 协议保持现有语义（hello / start / output / exit / cancel，按 run_id 幂等），新增 `session.*` 消息（open / send / interrupt / close）承载常驻会话。
 - 先实测：SDK 能否直接使用节点上 Claude Code 已登录的订阅账号（不用 API key）。不能的话退回 `claude -p --input-format stream-json` 常驻进程，审批继续走 MCP 权限提示工具。

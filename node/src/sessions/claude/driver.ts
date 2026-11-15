@@ -5,7 +5,7 @@ import { AsyncQueue } from "../../util/async.js";
 import { approvalId, msgUuid } from "../../util/ids.js";
 import { newId } from "../../util/ids.js";
 import { platformSdkServer, PLATFORM_PREFIX } from "../../toolhost/sdk-server.js";
-import { autoAsk, decideTool } from "../policy.js";
+import { decideTool } from "../policy.js";
 import { ResumeFailed, type Driver, type DriverContext, type EventFields, type OutgoingMessage, type StartResult } from "../types.js";
 import { buildClaudeOptions } from "./options.js";
 import type { MaterializedPlugin } from "../plugins.js";
@@ -192,7 +192,13 @@ export class ClaudeDriver implements Driver {
     this.ctx.sink.event(this.turnId ? { turn_id: this.turnId, ...ev } : ev);
   }
 
+  /**
+   * The SDK's permission callback. bypassPermissions sessions never raise an approval card:
+   * whatever still reaches here (the CLI's own safety checks, e.g. writes under .git or
+   * .claude) is allowed in place. The fixed deny list already ran in the PreToolUse hook.
+   */
   private async canUseTool(tool: string, input: Record<string, unknown>, opts: { signal: AbortSignal; suggestions?: PermissionUpdate[]; toolUseID: string; title?: string; description?: string; decisionReason?: string; blockedPath?: string }) {
+    if (this.claude.permission_mode === "bypassPermissions") return { behavior: "allow" as const, updatedInput: input };
     const id = approvalId(this.ctx.spec.session_id, opts.toolUseID);
     const onAbort = () => this.ctx.sink.cancelApproval(id, "interrupted");
     opts.signal.addEventListener("abort", onAbort, { once: true });
@@ -228,8 +234,6 @@ export class ClaudeDriver implements Driver {
     const input = (i.tool_input ?? {}) as Record<string, unknown>;
     const verdict = decideTool(this.ctx.policy, i.tool_name, input, this.ctx.absCwd);
     if (verdict) return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: verdict.deny } };
-    const ask = this.claude.permission_mode === "auto" ? autoAsk(this.ctx.policy, i.tool_name, input, this.ctx.absCwd) : null;
-    if (ask) return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "ask", permissionDecisionReason: ask } };
     if (i.tool_name.startsWith(PLATFORM_PREFIX)) this.correlator.remember(i.tool_name.slice(PLATFORM_PREFIX.length), input, i.tool_use_id);
     this.toolStarts.set(i.tool_use_id, Date.now());
     this.emit({ kind: "tool_started", tool: i.tool_name, tool_use_id: i.tool_use_id, ...describeTool(i.tool_name, input) });

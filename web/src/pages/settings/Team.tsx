@@ -100,11 +100,8 @@ export function TeamPage() {
 function RoleCard({ role, layout, onChange, onRemove }: { role: RoleView; layout: OfficeLayout; onChange: (p: Partial<RoleView>) => void; onRemove: () => void }) {
   const level = LEVEL[role.tier];
   const [editing, setEditing] = useState(false);
-  const nodes = useNodes();
-  const mode = permissionMode(role);
-  const skip = mode === "bypass";
   return (
-    <article className={cn("flex flex-col gap-3.5 rounded-[14px] border bg-panel p-[18px]", skip && "border-[#EBC3C3]")}>
+    <article className="flex flex-col gap-3.5 rounded-[14px] border bg-panel p-[18px]">
       <div className="flex items-start justify-between gap-2.5">
         <div className="flex flex-col gap-1">
           <span className="flex items-center gap-2">
@@ -156,21 +153,20 @@ function RoleCard({ role, layout, onChange, onRemove }: { role: RoleView; layout
       <LookEditor role={role} layout={layout} onChange={(look) => onChange({ look })} />
       {canHaveSkills(role) && <SkillPicker value={role.skills ?? []} onChange={(skills) => onChange({ skills })} />}
       {canHaveSkills(role) && <PluginPicker role={role} onChange={(plugins) => onChange({ plugins })} />}
-      {role.tier === "member" && !isReadOnly(role) && <PermissionField role={role} nodes={nodes.data ?? []} onChange={onChange} />}
+      {role.tier === "member" && !isReadOnly(role) && <PermissionField role={role} onChange={onChange} />}
       <RoleDialog open={editing} onOpenChange={setEditing} role={role} onSave={(p) => (onChange(p), setEditing(false))} />
     </article>
   );
 }
 
-/** 权限: auto (default) / ask / bypass, with what it does and, for bypass on plain nodes, the fallback. */
-function PermissionField({ role, nodes, onChange }: { role: RoleView; nodes: NodeView[]; onChange: (p: Partial<RoleView>) => void }) {
+/** 权限: 直接执行 (bypass, default) / 逐条问 (ask), with one line on what it does. */
+function PermissionField({ role, onChange }: { role: RoleView; onChange: (p: Partial<RoleView>) => void }) {
   const mode = permissionMode(role);
-  const hint = permissionHint(role, nodes);
   const id = `perm-${role.id || role.role}`;
   return (
     <div className="flex flex-col gap-1.5 border-t border-[#F1EFEA] pt-2.5">
       <span className="flex items-center justify-between gap-3">
-        <label htmlFor={id} className={cn("font-medium", mode === "bypass" && "text-destructive")}>
+        <label htmlFor={id} className="font-medium">
           权限
         </label>
         <Select value={mode} onValueChange={(v) => onChange({ permission_mode: v as PermissionMode })}>
@@ -186,7 +182,7 @@ function PermissionField({ role, nodes, onChange }: { role: RoleView; nodes: Nod
           </SelectContent>
         </Select>
       </span>
-      <span className={cn("text-xs leading-[18px]", hint.warn ? "text-[#B4530B]" : "text-muted-foreground")}>{hint.text}</span>
+      <span className="text-xs leading-[18px] text-muted-foreground">{permissionHint(role)}</span>
     </div>
   );
 }

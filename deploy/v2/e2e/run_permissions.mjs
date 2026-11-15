@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 // Short real-Claude run for permission modes and lead review (deploy/v2/e2e/up.sh first):
-//   1. a member in auto mode runs a harmless command (ls -la) and writes inside its worktree: no card
-//   2. a write outside the worktree goes to the thread lead first, which allows it (the user never
-//      sees that card)
+// The dev is an ask role (逐条问), the only mode that still raises approval cards; the default
+// bypass is covered by run_bypass.mjs.
+//   1. the first write goes to the thread lead first, which allows it (the user never sees that card)
+//   2. (removed: auto mode no longer exists)
 //   3. a second one the lead hands over (ask_user) becomes the user's card, answered through the
 //      API, and the member finishes its task
 // Pauses wait for <scratch>/go-<name> ("running", "escalated"), at most 15 min, for screenshots.
 //   node deploy/v2/e2e/run_permissions.mjs <scratch-dir> [--model haiku]
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { installDaemon, login, nodeOnline, roleBody, sql, startDaemon } from "./harness.mjs";
 import { check, readEnv, waitFor } from "./lib.mjs";
@@ -31,23 +31,21 @@ const ROLES = [
     instructions: "Keep replies to one sentence. For any request, call open_thread with the user's message copied verbatim as the brief; never do the work yourself." },
   { tier: "lead", role: "lead", title: "组长", count: 1, can_delegate: true,
     instructions: `Keep it minimal: call update_plan with one main task, then assign_task exactly one task to role dev whose instruction is the brief copied verbatim. When the dev reports the task done, report in one sentence. ${LEAD_RULE}` },
-  { tier: "member", role: "dev", title: "开发", count: 1, permission_mode: "auto",
+  { tier: "member", role: "dev", title: "开发", count: 1, permission_mode: "ask",
     instructions: "Follow the numbered steps exactly, one tool call per step, using the Write tool for every file (never Bash for writing). Then call complete_task with a one-line summary. No other files, no tests, no exploration." },
 ];
 
 const brief = () => [
   "Do these steps in order:",
-  "1. Run the Bash command: ls -la",
-  "2. Write hello.txt at the repository root containing exactly the first line that ls printed.",
-  `3. Write the file ${join(outside, "approved.txt")} containing exactly: approved by the lead`,
-  `4. Write the file ${join(outside, "needs-user.txt")} containing exactly: approved by the user`,
-  "5. Call complete_task.",
+  `1. Write the file ${join(outside, "approved.txt")} containing exactly: approved by the lead`,
+  `2. Write the file ${join(outside, "needs-user.txt")} containing exactly: approved by the user`,
+  "3. Call complete_task.",
 ].join("\n");
 
 async function setup(c) {
   if (state.projectId) return;
-  const roles = await c.put("/api/roles", { roles: ROLES.map((r, i) => ({ ...roleBody(r, i, model), permission_mode: r.permission_mode ?? "auto" })) });
-  check(roles.roles.find((r) => r.role === "dev")?.permission_mode === "auto", `roles saved, dev in auto mode (model ${model})`, roles.warnings);
+  const roles = await c.put("/api/roles", { roles: ROLES.map((r, i) => ({ ...roleBody(r, i, model), permission_mode: r.permission_mode ?? "ask" })) });
+  check(roles.roles.find((r) => r.role === "dev")?.permission_mode === "ask", `roles saved, dev in ask mode (model ${model})`, roles.warnings);
   const node = await c.post("/api/nodes", { name: `rc-e2e-perm-${Date.now() % 100000}` });
   state.nodeId = node.node.id;
   state.nodeToken = node.token;
@@ -98,16 +96,6 @@ async function openThread(c, coord) {
   return t;
 }
 
-async function harmless(t) {
-  const hello = await waitFor("hello.txt in the dev's worktree", async () => {
-    const found = execFileSync("find", [join(nodeDir, "root", "projects", state.projectId, "threads", String(t.no)), "-name", "hello.txt"]).toString().trim().split("\n")[0];
-    return found && readFileSync(found, "utf8");
-  }, { timeoutMs: 600_000, everyMs: 3000 });
-  check(/^total \d+/.test(hello.trim()), `the dev ran ls -la and wrote its first line to hello.txt ("${hello.trim()}")`);
-  const before = approvals(t.id).filter((a) => a.tool === "Bash" || a.path.endsWith("hello.txt"));
-  check(before.length === 0, "auto mode: ls -la and the write inside the worktree raised no approval request at all");
-}
-
 async function leadDecides(t) {
   const a = await waitFor("the lead decides the first outside write", async () =>
     approvals(t.id).find((x) => x.path.endsWith("approved.txt") && x.status === "answered"), { timeoutMs: 600_000, everyMs: 2000 });
@@ -149,8 +137,7 @@ async function main() {
     const coord = await c.get(`/api/projects/${state.projectId}/coordinator`);
     const t = await openThread(c, coord);
     const mode = sql(`SELECT s.permission_mode FROM at_agent_sessions s JOIN at_employees e ON e.id = s.employee_id WHERE e.thread_id = '${t.id}' AND e.tier = 'member' LIMIT 1`);
-    check(mode === "auto", `the dev's session opened in permission mode ${mode}`);
-    await harmless(t);
+    check(mode === "default", `the dev's session opened in permission mode ${mode}`);
     await leadDecides(t);
     await userDecides(c, t);
   } finally {

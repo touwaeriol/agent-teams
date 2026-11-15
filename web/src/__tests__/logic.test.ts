@@ -11,7 +11,7 @@ import { summarizeNodes } from "@/components/shell/nodes";
 import { matchesProject } from "@/components/shell/ProjectSidebar";
 import { chatBlocks } from "@/lib/chat";
 import { boardSummary, pickChecks, replayEvents, toOfficeEvents, toWidgetData } from "@/lib/office";
-import { countText, isReadOnly, newRole, nextRoleKey, permissionHint, previewTags, roleProblems, ruleText } from "@/lib/roles";
+import { countText, isReadOnly, newRole, nextRoleKey, permissionHint, permissionMode, previewTags, roleProblems, ruleText, usesAsk } from "@/lib/roles";
 import { boardItems } from "@/pages/Office";
 import { filterThreads, teamSummary } from "@/pages/Overview";
 import { recentProject } from "@/pages/Projects";
@@ -171,16 +171,15 @@ describe("roles", () => {
     expect(ruleText({ ...base, runtime: "codex" })).toContain("workspace-write");
     expect(ruleText({ ...base, gate: "decision" })).toContain("只读");
   });
-  it("permission modes: auto by default, bypass explains the fallback on plain nodes", () => {
-    expect(base.permission_mode).toBe("auto");
-    const nodes = [{ id: "n1", isolated: false, isolation: "sandbox" as const }, { id: "n2", isolated: false, isolation: "agent_user" as const }];
-    expect(permissionHint({ ...base, permission_mode: "auto" }, nodes)).toEqual({ text: expect.stringContaining("判断模型"), warn: false });
-    expect(permissionHint({ ...base, permission_mode: "ask", runtime: "codex" }, nodes).text).toContain("untrusted");
-    expect(permissionHint({ ...base, permission_mode: "bypass", node_ids: ["n2"] }, nodes)).toEqual({ text: expect.stringContaining("bypassPermissions"), warn: false });
-    const plain = permissionHint({ ...base, permission_mode: "bypass", node_ids: [] }, nodes);
-    expect(plain.warn).toBe(true);
-    expect(plain.text).toContain("改用自动判断");
-    expect(permissionHint({ ...base, permission_mode: "bypass", node_ids: ["n1"] }, nodes).text).toContain("选的节点里有不隔离的");
+  it("permission modes: bypass by default (old auto reads as bypass), ask only matters for writing members", () => {
+    expect(base.permission_mode).toBe("bypass");
+    expect(permissionMode({ permission_mode: "auto" as never })).toBe("bypass");
+    expect(permissionMode({ permission_mode: "ask" })).toBe("ask");
+    expect(permissionHint({ ...base, permission_mode: "bypass" })).toBe("员工直接执行，不弹权限确认。");
+    expect(permissionHint({ ...base, permission_mode: "ask", runtime: "codex" })).toContain("untrusted");
+    expect(usesAsk([base, { ...base, tier: "lead" as const, permission_mode: "ask" }])).toBe(false);
+    expect(usesAsk([{ ...base, permission_mode: "ask", gate: "review" }])).toBe(false);
+    expect(usesAsk([base, { ...base, permission_mode: "ask" }])).toBe(true);
   });
   it("validation mirrors PUT /api/roles", () => {
     const ok = [{ ...base, tier: "coordinator" as const, role: "coordinator" }, { ...base, tier: "lead" as const, role: "lead" }, { ...base, role: "dev" }];

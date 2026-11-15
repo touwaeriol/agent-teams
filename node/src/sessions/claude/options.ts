@@ -34,7 +34,7 @@ export function buildClaudeOptions(i: OptionInputs): Options {
     allowedTools: c.allowed_tools,
     disallowedTools: disallowed(c),
     permissionMode: c.permission_mode as PermissionMode,
-    allowDangerouslySkipPermissions: c.allow_dangerously_skip_permissions === true,
+    allowDangerouslySkipPermissions: c.allow_dangerously_skip_permissions === true || c.permission_mode === "bypassPermissions",
     settingSources: [] as SettingSource[],
     strictMcpConfig: true,
     mcpServers: { ...(sdkMcpServers(i.plugins ?? []) as Options["mcpServers"]), platform: i.server },

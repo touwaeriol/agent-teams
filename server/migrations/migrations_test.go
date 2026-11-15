@@ -164,7 +164,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 96 {
+	if migrations.Latest() != 97 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -271,4 +271,63 @@ INSERT INTO at_roles (id, user_id, tier, role, skip_permissions) VALUES ('r3', '
 INSERT INTO at_employees (id, project_id, name, tier, role, runtime, spec)
   VALUES ('e1', 'p1', 'dev-1', 'member', 'dev', 'claude', '{"role":"dev","skip_permissions":false}'),
          ('e2', 'p1', 'ops-1', 'member', 'ops', 'claude', '{"role":"ops","skip_permissions":true}');
+`
+
+// TestBypassDefaultMigration: 00097 drops auto (auto roles and employee copies become bypass,
+// ask stays), lets read-only roles carry bypass, and maps bypass back to auto on Down.
+func TestBypassDefaultMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 96); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(bypassSeed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 97); err != nil {
+		t.Fatal(err)
+	}
+	var modes, specs string
+	_ = db.QueryRow(`SELECT string_agg(role || '=' || permission_mode, ',' ORDER BY role) FROM at_roles`).Scan(&modes)
+	_ = db.QueryRow(`SELECT string_agg(name || '=' || (spec->>'permission_mode'), ',' ORDER BY name) FROM at_employees`).Scan(&specs)
+	if modes != "dev=bypass,lead=bypass,ops=bypass,qa=ask" || specs != "dev-1=bypass,ops-1=bypass,qa-1=ask,rev-1=bypass" {
+		t.Fatalf("roles %s employees %s", modes, specs)
+	}
+	if _, err := db.Exec(`UPDATE at_roles SET read_only = true WHERE role = 'ops'`); err != nil {
+		t.Fatalf("a read-only role may carry bypass now: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE at_roles SET permission_mode = 'auto' WHERE role = 'dev'`); err == nil {
+		t.Fatal("auto is no longer a mode")
+	}
+	var def string
+	_ = db.QueryRow(`INSERT INTO at_roles (id, user_id, tier, role) VALUES ('r9', 'u1', 'member', 'new') RETURNING permission_mode`).Scan(&def)
+	if def != "bypass" {
+		t.Fatalf("default %q", def)
+	}
+	if _, err := p.DownTo(ctx, 96); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.QueryRow(`SELECT string_agg(role || '=' || permission_mode, ',' ORDER BY role) FROM at_roles`).Scan(&modes)
+	_ = db.QueryRow(`SELECT string_agg(name || '=' || (spec->>'permission_mode'), ',' ORDER BY name) FROM at_employees`).Scan(&specs)
+	if modes != "dev=auto,lead=auto,new=auto,ops=auto,qa=ask" || specs != "dev-1=auto,ops-1=auto,qa-1=ask,rev-1=auto" {
+		t.Fatalf("down: roles %s employees %s", modes, specs)
+	}
+}
+
+const bypassSeed = `
+INSERT INTO at_users (id, email, password_hash, role) VALUES ('u1', 'a@example.com', 'x', 'admin');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
+INSERT INTO at_roles (id, user_id, tier, role) VALUES ('r1', 'u1', 'lead', 'lead');
+INSERT INTO at_roles (id, user_id, tier, role) VALUES ('r2', 'u1', 'member', 'dev');
+INSERT INTO at_roles (id, user_id, tier, role, permission_mode) VALUES ('r3', 'u1', 'member', 'ops', 'bypass');
+INSERT INTO at_roles (id, user_id, tier, role, permission_mode) VALUES ('r4', 'u1', 'member', 'qa', 'ask');
+INSERT INTO at_employees (id, project_id, name, tier, role, runtime, spec)
+  VALUES ('e1', 'p1', 'dev-1', 'member', 'dev', 'claude', '{"role":"dev","permission_mode":"auto"}'),
+         ('e2', 'p1', 'ops-1', 'member', 'ops', 'claude', '{"role":"ops","permission_mode":"bypass"}'),
+         ('e3', 'p1', 'qa-1', 'member', 'qa', 'claude', '{"role":"qa","permission_mode":"ask"}'),
+         ('e4', 'p1', 'rev-1', 'member', 'rev', 'claude', '{"role":"rev"}');
 `

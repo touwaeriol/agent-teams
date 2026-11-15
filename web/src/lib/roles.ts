@@ -1,5 +1,5 @@
 // Role template helpers for the Team page (pure, unit-tested).
-import type { NodeView, RoleView } from "@/api/views";
+import type { RoleView } from "@/api/views";
 
 export const LEVEL: Record<RoleView["tier"], { label: string; bg: string; fg: string }> = {
   coordinator: { label: "项目级", bg: "#F4E3D7", fg: "#8A3D14" },
@@ -34,51 +34,41 @@ export function ruleText(r: Pick<RoleView, "tier" | "runtime" | "sandbox" | "rea
   if (r.tier === "coordinator") return "只能用：开讨论串、看讨论串、给讨论串发话、问你。没有仓库、不能读写文件或执行命令（平台强制）。";
   if (r.tier === "lead") return "可以只读查看代码来拆任务，不能修改文件；合并成员分支、开 PR 由平台代为执行。";
   if (isReadOnly(r)) return "只读：git diff / log / show、gh pr view，不改代码。";
-  if (r.runtime === "codex") return `沙箱：${r.sandbox || "workspace-write"}；需要更多权限时把权限改成跳过确认。`;
+  if (r.runtime === "codex") return `沙箱：${r.sandbox || "workspace-write"}；权限设成“直接执行”时沙箱完全放开。`;
   return "可以给其他成员发消息、问组长、问你；不能直接推送基准分支。";
 }
 
-export type PermissionMode = "auto" | "bypass" | "ask";
+export type PermissionMode = "bypass" | "ask";
 
 export const PERMISSION_MODES: { id: PermissionMode; label: string }[] = [
-  { id: "auto", label: "自动判断（推荐）" },
-  { id: "ask", label: "每次都问" },
-  { id: "bypass", label: "跳过权限确认" },
+  { id: "bypass", label: "直接执行（默认）" },
+  { id: "ask", label: "逐条问" },
 ];
 
+/** The role's mode; anything but ask (including the old auto) is bypass. */
 export function permissionMode(r: Pick<RoleView, "permission_mode">): PermissionMode {
-  return (r.permission_mode as PermissionMode | undefined) ?? "auto";
+  return r.permission_mode === "ask" ? "ask" : "bypass";
 }
 
 const MODE_HINT: Record<"claude" | "codex", Record<PermissionMode, string>> = {
   claude: {
-    auto: "Claude Code 的判断模型自动放行或拦下操作；拿不准的、写到工作目录外的，按项目的审批方式先问组长或你。",
+    bypass: "员工直接执行，不弹权限确认。",
     ask: "除了读文件，每个操作都先问（组长或你，看项目的审批方式）。",
-    bypass: "所有操作都不再询问（bypassPermissions），只在隔离节点上生效。",
   },
   codex: {
-    auto: "Codex 在工作区沙箱里自己决定什么时候申请（on-request），申请按项目的审批方式处理。",
+    bypass: "员工直接执行，不弹权限确认（沙箱完全放开）。",
     ask: "除了它信任的只读命令，每个命令都先申请（untrusted）。",
-    bypass: "沙箱完全放开（danger-full-access），只在隔离节点上生效。",
   },
 };
 
-/** Isolated enough for bypass (architecture.md §10.3): agent_user level or marked isolated. */
-export function nodeIsolated(n: Pick<NodeView, "isolated" | "isolation">): boolean {
-  return n.isolated || n.isolation === "agent_user";
+/** One line on what the role's permission mode does. */
+export function permissionHint(r: Pick<RoleView, "permission_mode" | "runtime">): string {
+  return MODE_HINT[r.runtime][permissionMode(r)];
 }
 
-/** What the role's permission mode does; for bypass, whether the chosen nodes allow it. */
-export function permissionHint(r: Pick<RoleView, "permission_mode" | "runtime" | "node_ids">, nodes: Pick<NodeView, "id" | "isolated" | "isolation">[]): { text: string; warn: boolean } {
-  const mode = permissionMode(r);
-  const text = MODE_HINT[r.runtime][mode];
-  if (mode !== "bypass") return { text, warn: false };
-  const ids = r.node_ids ?? [];
-  const chosen = ids.length ? nodes.filter((n) => ids.includes(n.id)) : nodes;
-  const plain = chosen.filter((n) => !nodeIsolated(n)).length;
-  if (chosen.length > 0 && plain === 0) return { text, warn: false };
-  const where = ids.length ? "选的节点里有不隔离的" : "可用节点里有不隔离的";
-  return { text: `${where}（agent_user 级别或标记为 isolated 才算隔离）：派到这些节点时不会跳过确认，改用自动判断。`, warn: true };
+/** Whether any writing member role asks for permission (only then approval routing matters). */
+export function usesAsk(list: Pick<RoleView, "tier" | "permission_mode" | "read_only" | "gate">[]): boolean {
+  return list.some((r) => r.tier === "member" && !isReadOnly(r) && permissionMode(r) === "ask");
 }
 
 export function kindText(r: Pick<RoleView, "runtime" | "model">): string {
@@ -116,7 +106,7 @@ export function newRole(list: RoleView[], color: string): RoleView {
     instructions: "",
     model: "",
     effort: "",
-    permission_mode: "auto",
+    permission_mode: "bypass",
     can_delegate: false,
     read_only: null,
     allowed_tools: [],

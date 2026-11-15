@@ -7,7 +7,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { conversations, threads as threadActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
-import { keys, useChecks, useMergeQueue, useProject, useQuestions, useTasks, useThreadByNo } from "@/api/queries";
+import { keys, useChecks, useMergeQueue, useProject, useQuestions, useRoles, useTasks, useThreadByNo } from "@/api/queries";
 import type { MainTaskView, ProjectView, TaskView, ThreadView } from "@/api/views";
 import { Bar, CheckMark, Composer, LiveDot, StateMark, StatusPill, Tag } from "@/components/app/bits";
 import { Chat } from "@/components/app/Chat";
@@ -19,6 +19,7 @@ import { useAttachments } from "@/components/app/attachments";
 import { ActivityFeed, ApprovalHistory, detailTabOf } from "@/components/app/ThreadDetail";
 import { ThreadMenu } from "@/components/app/ThreadMenu";
 import { isWorking } from "@/lib/live";
+import { usesAsk } from "@/lib/roles";
 import { MainPage } from "./Main";
 import {
   checkLook,
@@ -96,6 +97,7 @@ function ThreadHeader({ thread, project, view, setView }: { thread: ThreadView; 
   const lead = leadOf(thread);
   const invalidate = [keys.threads(project.id), keys.thread(thread.id)];
   const update = useAction((body: { status?: "paused" | "running"; auto_approve?: boolean }) => threadActions.update(thread.id, body), { invalidate });
+  const askRoles = usesAsk(useRoles().data?.roles ?? []);
   const openPr = useAction((force: boolean) => threadActions.openPr(thread.id, force), { invalidate, success: "PR 已开，讨论串进入待验收" });
   const allDone = thread.main_tasks.length > 0 && thread.main_tasks.every((m) => m.status === "done");
   const paused = thread.status === "paused";
@@ -121,7 +123,7 @@ function ThreadHeader({ thread, project, view, setView }: { thread: ThreadView; 
         </div>
         {!finished && (
           <div className="flex flex-wrap items-center gap-2">
-            <AutoApproveToggle thread={thread} onChange={(v) => update.mutate({ auto_approve: v })} />
+            {(thread.auto_approve || askRoles) && <AutoApproveToggle thread={thread} onChange={(v) => update.mutate({ auto_approve: v })} />}
             <Button variant="outline" onClick={() => update.mutate({ status: paused ? "running" : "paused" })} disabled={update.isPending}>
               {paused ? "继续" : "暂停"}
             </Button>
@@ -181,7 +183,7 @@ function AutoApproveToggle({ thread, onChange }: { thread: ThreadView; onChange:
         open={confirming}
         onOpenChange={setConfirming}
         title="本讨论串内全部放行？"
-        description="打开后这个讨论串里所有成员的操作都不再询问，当前等你处理的审批也会一并放行（会记入审计）。"
+        description="只影响设成“逐条问”的成员：打开后它们的操作也不再询问，当前等你处理的审批会一并放行（会记入审计）。"
         confirmLabel="全部放行"
         onConfirm={() => onChange(true)}
       />

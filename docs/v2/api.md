@@ -94,7 +94,7 @@ CheckView       = {name, status, conclusion, url, summary}
 NodeView        = {id, name, online, since, last_seen_at, version, protocol, isolation: "agent_user"|"sandbox"|"none", runtimes: {...}, capacity: {...},
                    active_sessions, parked_sessions, queued, isolated, labels, max_active_sessions, park_after_s, created_at}
 RoleView        = {id, tier, role, title, runtime, count, node_ids, description, instructions, model, effort,
-                   permission_mode: "auto"|"bypass"|"ask",  // 省略 = auto；非成员岗位总是 auto（architecture.md §9.1）
+                   permission_mode: "bypass"|"ask",  // 省略 = bypass（直接执行，任何节点）；旧值 auto 读作 bypass；非成员岗位总是 bypass（architecture.md §9.1）
                    can_delegate, read_only, allowed_tools, disallowed_tools, sandbox, max_turns, gate, task_kinds, look, sort}
                   // read_only：只读岗位（组长同款策略，Codex = sandbox read-only）；gate 为 review|decision 时默认 true。
                   // Team 页规则行显示“只读：git diff/log/show、gh pr view，不改代码”
@@ -145,7 +145,7 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | --- | --- | --- |
 | POST | `/api/projects/{pid}/threads` | `{title, brief, roles?: [{role, count}]}` → 201 `ThreadView`（用户直接开串，跳过统筹；`roles` 可临时调整本串岗位数量） |
 | GET | `/api/threads/{tid}` | → `ThreadView` |
-| PATCH | `/api/threads/{tid}` | `{title?, status?: "paused"|"running"|"archived", auto_approve?}` → `ThreadView`。`auto_approve` = “本讨论串内全部放行”（打开时一并放行当前所有待审批，并审计） |
+| PATCH | `/api/threads/{tid}` | `{title?, status?: "paused"|"running"|"archived", auto_approve?}` → `ThreadView`。`auto_approve` = “本讨论串内全部放行”（只影响 `ask` 岗位，任何节点都能开；打开时一并放行当前所有待审批，并审计） |
 | POST | `/api/threads/{tid}/archive` | → `ThreadView`。归档：讨论串结束（会话关闭、节点上的检出按 `git.cleanup keep_unpushed` 清理），从主列表移到“已归档”，记下归档前的状态（`at_threads.archived_from`）。已结束的讨论串（done / failed）常用它在“解决后归档” |
 | POST | `/api/threads/{tid}/unarchive` | → `ThreadView`。done / failed 归档的回到原状态；进行中归档的回到 `paused`（`pause_reason = "user"`），点“继续”接着做。没归档 → 409 `not_archived` |
 | DELETE | `/api/threads/{tid}` | → 204。关闭全部会话，向用过的节点发 `git.cleanup`（`keep_unpushed: false`，未推送的改动也删）和 `git.purge projects/<pid>/threads/<no>`，删除成员分支；讨论串、员工、任务、对话、审批记录一并删除（级联），交付物留在资料库（`thread_no` 变成 null）。SSE 发 `thread {deleted}`。网页上先弹确认框 |
@@ -202,7 +202,7 @@ PR 类交付物的 `detail.state` 由平台轮询 / webhook 更新。设计类�
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | POST | `/api/projects` | `{name, description?, context?, repos?: RepoRef[], work_mode?, auto_approve?, require_acceptance?, delivery?, first_message?}` → 201 `ProjectView`。`first_message` 有值时投递给统筹（v1 是新建对话再发消息） |
-| PATCH | `/api/projects/{pid}` | `name, description, context, pinned, archived`，`repos?: RepoRef[]`（整体替换并保持顺序，`[]` 解绑全部；每个仓库要有能访问它的连接，重复 422）+ `work_mode, auto_approve, require_acceptance, delivery, office_layout`（`delivery.notify_on_ask` = “成员提问时通知我”；`auto_approve` 要求节点隔离级别满足 `architecture.md` §10.3，否则 409 `isolation_required`）+ `icon`（`''`、一个表情或 `color:#RRGGBB`，其他 422）、`coordinator_model`、`thread_model`（模型 id，`''` = 跟随岗位）、`thread_effort`（`'' \| low \| medium \| high \| xhigh \| max`，即 SDK 0.3.325 的 `effort`）、`auto_resume`。模型覆盖在开会话时生效：统筹用 `coordinator_model`，组长和成员用 `thread_model` 与 `thread_effort`（Codex 岗位不受影响） |
+| PATCH | `/api/projects/{pid}` | `name, description, context, pinned, archived`，`repos?: RepoRef[]`（整体替换并保持顺序，`[]` 解绑全部；每个仓库要有能访问它的连接，重复 422）+ `work_mode, auto_approve, require_acceptance, delivery, office_layout`（`delivery.notify_on_ask` = “成员提问时通知我”；`auto_approve` 只影响 `ask` 岗位，任何节点都能开）+ `icon`（`''`、一个表情或 `color:#RRGGBB`，其他 422）、`coordinator_model`、`thread_model`（模型 id，`''` = 跟随岗位）、`thread_effort`（`'' \| low \| medium \| high \| xhigh \| max`，即 SDK 0.3.325 的 `effort`）、`auto_resume`。模型覆盖在开会话时生效：统筹用 `coordinator_model`，组长和成员用 `thread_model` 与 `thread_effort`（Codex 岗位不受影响） |
 | GET | `/api/projects/{pid}/usage?days=7` | 项目用量（`at_usage`，每个回合结束时 SDK 报告的 token 和费用）→ `{days, cost_usd_est, tokens: {input, output, cache_read, cache_write}, turns, by_day: [{day, cost_usd, tokens}], by_thread: [{thread_no: number\|null, title, cost_usd, tokens}], by_employee: [{employee, thread_no, cost_usd, tokens}]}`；`thread_no = null` 是项目统筹；`days` 1–90，缺省 7；按天按 UTC 日期分组 |
 | GET | `/api/projects/{pid}/schedules` | 定时任务 → `ScheduleView[]` = `{id, project_id, name, cron, timezone, message, enabled, next_run_at, last_run_at, last_error, created_at, updated_at}` |
 | POST | `/api/projects/{pid}/schedules` | `{name, cron, timezone?, message, enabled?}` → 201。`cron` 五段（分 时 日 月 周，支持 `*`、数字、`a-b`、`/n`、逗号；周 0 和 7 都是周日；日和周都限定时任一满足即可），`timezone` 是 IANA 名（缺省 UTC，网页传浏览器时区）；表达式或时区不对 422（`fields[0].path` 指出字段）；每个项目最多 20 个 |
@@ -222,8 +222,8 @@ PR 类交付物的 `detail.state` 由平台轮询 / webhook 更新。设计类�
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/roles` | → `{roles: RoleView[], warnings: [{role, message}]}`（例如“跳过权限确认的岗位没有 isolated 节点”“候选节点已删除”） |
-| PUT | `/api/roles` | `{roles: RoleView[]}` 整体保存（按 `id` 匹配，缺失的删除）→ 同 GET。校验：恰好一个 coordinator（Claude）和一个 lead；`role` 键唯一且符合 `^[a-z][a-z0-9-]{0,23}$`；`count` 1–8；节点属于本人；`look.outfit`/`look.accessory` 是当前全局布局里存在的键；`permission_mode` 是 `auto`/`bypass`/`ask`，只读岗位不能 `bypass`；`bypass` 的候选节点不隔离时照常保存，`warnings` 说明这些节点上会改用自动判断；Codex 岗位的候选节点不能是 `sandbox`/`none` 级别（`architecture.md` §10.3）；`read_only` 省略时按 `gate` 取默认值；`skills` 每项须是内置或自己上传的技能，最多 16 个，统筹不能有技能；`plugins` 每项是 `name` 或 `name@N`，须是自己的或内置的插件（钉住的版本须存在），最多 8 个、不重复，统筹不能有插件 |
+| GET | `/api/roles` | → `{roles: RoleView[], warnings: [{role, message}]}`（例如“候选节点已删除”“Codex 岗位没有 agent_user 或 isolated 节点”） |
+| PUT | `/api/roles` | `{roles: RoleView[]}` 整体保存（按 `id` 匹配，缺失的删除）→ 同 GET。校验：恰好一个 coordinator（Claude）和一个 lead；`role` 键唯一且符合 `^[a-z][a-z0-9-]{0,23}$`；`count` 1–8；节点属于本人；`look.outfit`/`look.accessory` 是当前全局布局里存在的键；`permission_mode` 是 `bypass`/`ask`（`auto` 和空值按 `bypass` 保存），任何节点都生效，只读岗位的模式不生效；Codex 岗位的候选节点不能是 `sandbox`/`none` 级别（`architecture.md` §10.3）；`read_only` 省略时按 `gate` 取默认值；`skills` 每项须是内置或自己上传的技能，最多 16 个，统筹不能有技能；`plugins` 每项是 `name` 或 `name@N`，须是自己的或内置的插件（钉住的版本须存在），最多 8 个、不重复，统筹不能有插件 |
 | GET | `/api/roles/presets` | → `{roles: RoleView[]}`：Team 页“从预设添加”的现成岗位（“设计师” = `design` + `docs` 技能） |
 | GET | `/api/skills` | → `{skills: [{id, name, description, builtin, size}]}`：随平台发布的技能（`id` 为空）+ 管理员发布的内置技能（`builtin`，有 `id`；自己有同名技能时不列出）+ 自己上传的 |
 | POST | `/api/skills` | `{zip?: base64, files?: [{path, content}]}` → 201 `Skill`（`SKILL.md` front matter 给出 name/description；只收文本，≤ 64 个文件、≤ 512 KB） |

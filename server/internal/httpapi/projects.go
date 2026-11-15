@@ -160,9 +160,6 @@ func (s *Server) createProject(ctx context.Context, in *createProjectInput) (*pr
 	if err != nil {
 		return nil, err
 	}
-	if err := s.checkAutoApprove(ctx, p.User.ID, b.AutoApprove); err != nil {
-		return nil, err
-	}
 	row, err := s.store.CreateProject(ctx, p.User.ID, newProject(b, name, repos, s.deliveryDefault(ctx)))
 	if errors.Is(err, store.ErrConflict) {
 		return nil, fail(http.StatusConflict, "project_exists", "已经有叫 "+name+" 的项目了")
@@ -256,9 +253,6 @@ func (s *Server) projectChanges(ctx context.Context, userID string, cur store.Pr
 func (s *Server) settingChanges(ctx context.Context, userID string, cur store.Project, b ProjectUpdate) ([]store.Change, error) {
 	var ch []store.Change
 	if b.AutoApprove != nil {
-		if err := s.checkAutoApprove(ctx, userID, *b.AutoApprove && !cur.AutoApprove); err != nil {
-			return nil, err
-		}
 		ch = append(ch, store.Change{Col: "auto_approve", Val: *b.AutoApprove})
 		if *b.AutoApprove != cur.AutoApprove {
 			s.audit(ctx, userID, "auto_approve_toggle", "project", cur.ID, map[string]bool{"on": *b.AutoApprove})
@@ -276,57 +270,6 @@ func (s *Server) settingChanges(ctx context.Context, userID string, cur store.Pr
 		ch = append(ch, store.Change{Col: "office_layout", Val: *b.OfficeLayout})
 	}
 	return ch, nil
-}
-
-// checkAutoApprove: "全部放行" needs every candidate node at least sandbox-isolated (architecture.md §10.3).
-func (s *Server) checkAutoApprove(ctx context.Context, userID string, turningOn bool) error {
-	if !turningOn {
-		return nil
-	}
-	nodes, err := s.candidateNodes(ctx, userID)
-	if err != nil {
-		return err
-	}
-	ok := len(nodes) > 0
-	for _, n := range nodes {
-		ok = ok && (n.Isolated || n.Isolation == "agent_user" || n.Isolation == "sandbox")
-	}
-	if !ok {
-		return fail(http.StatusConflict, "isolation_required",
-			"“全部放行”要求员工所在节点的隔离级别至少是 sandbox（或标记为 isolated）")
-	}
-	return nil
-}
-
-// candidateNodes are the nodes the user's roles may run on (all nodes when a role names none).
-func (s *Server) candidateNodes(ctx context.Context, userID string) ([]store.Node, error) {
-	nodes, err := s.store.ListNodes(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	roles, err := s.store.Roles(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	wanted := map[string]bool{}
-	for _, r := range roles {
-		if len(r.NodeIDs) == 0 {
-			return nodes, nil
-		}
-		for _, id := range r.NodeIDs {
-			wanted[id] = true
-		}
-	}
-	if len(wanted) == 0 {
-		return nodes, nil
-	}
-	var out []store.Node
-	for _, n := range nodes {
-		if wanted[n.ID] {
-			out = append(out, n)
-		}
-	}
-	return out, nil
 }
 
 func (s *Server) deleteProject(ctx context.Context, in *projectIDInput) (*struct{}, error) {

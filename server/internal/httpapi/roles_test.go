@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/touwaeriol/agent-teams/server/internal/roles"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -91,28 +90,35 @@ func TestSaveRolesValidationAndYAML(t *testing.T) {
 	}
 }
 
-// TestBypassOnPlainNodeWarns: a bypass role may be saved for a plain node (it runs in auto
-// there) and the page gets the explanation as a warning; switching it on is audited once.
-func TestBypassOnPlainNodeWarns(t *testing.T) {
+// TestBypassDefaultNoWarnings: roles default to bypass and save on a plain node without
+// warnings; switching a saved role from ask back to bypass is audited once.
+func TestBypassDefaultNoWarnings(t *testing.T) {
 	h := newHarness(t)
 	c, _ := h.signUp("a@example.com")
 	var n createdNode
 	c.must(201, "POST", "/api/nodes", map[string]string{"name": "box"}, &n)
 	var body RolesBody
 	c.must(200, "GET", "/api/roles", nil, &body)
-	if body.Roles[2].PermissionMode != store.PermAuto {
+	if body.Roles[2].PermissionMode != store.PermBypass {
 		t.Fatalf("default mode %q", body.Roles[2].PermissionMode)
 	}
-	body.Roles[2].PermissionMode = store.PermBypass
 	body.Roles[2].NodeIDs = []string{n.Node.ID}
 	c.must(200, "PUT", "/api/roles", map[string]any{"roles": body.Roles}, &body)
-	if len(body.Warnings) != 1 || body.Warnings[0].Message != roles.BypassFallback {
+	if len(body.Warnings) != 0 {
 		t.Fatalf("warnings %+v", body.Warnings)
 	}
-	c.must(200, "PATCH", "/api/nodes/"+n.Node.ID, map[string]any{"isolated": true}, nil)
+	body.Roles[2].PermissionMode = store.PermAsk
 	c.must(200, "PUT", "/api/roles", map[string]any{"roles": body.Roles}, &body)
-	if len(body.Warnings) != 0 {
-		t.Fatalf("warnings on isolated %+v", body.Warnings)
+	body.Roles[2].PermissionMode = store.PermBypass
+	c.must(200, "PUT", "/api/roles", map[string]any{"roles": body.Roles}, &body)
+	body.Roles[2].PermissionMode = ""
+	c.must(200, "PUT", "/api/roles", map[string]any{"roles": body.Roles}, &body)
+	if body.Roles[2].PermissionMode != store.PermBypass || len(body.Warnings) != 0 {
+		t.Fatalf("empty mode %q %+v", body.Roles[2].PermissionMode, body.Warnings)
+	}
+	body.Roles[2].PermissionMode = "auto"
+	if r := c.do("PUT", "/api/roles", map[string]any{"roles": body.Roles}); r.Status != 422 {
+		t.Fatalf("auto accepted: %d", r.Status)
 	}
 	var count int
 	_ = h.db.Pool.QueryRow(context.Background(), `SELECT count(*) FROM at_audit_log WHERE action = 'skip_permissions_on'`).Scan(&count)

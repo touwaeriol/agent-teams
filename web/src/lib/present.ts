@@ -109,7 +109,7 @@ const DECIDERS: [string, string][] = [
   ["policy:thread_auto", "全部放行"],
   ["policy:rule:builtin-deny-list", "平台禁止名单"],
   ["policy:rule:builtin-read-only", "只读命令白名单"],
-  ["policy:rule:builtin-skip-permissions", "跳过权限确认"],
+  ["policy:rule:builtin-skip-permissions", "直接执行"],
   ["policy:rule:", "总是允许的规则"],
   ["policy:timeout", "等待超时"],
   ["cancelled", "已取消"],

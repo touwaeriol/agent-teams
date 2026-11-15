@@ -93,7 +93,7 @@ export type Runtime = "claude" | "codex";
  */
 export type Tier = "coordinator" | "lead" | "member";
 /**
- * Claude permission mode; always explicit. auto is sent only to daemons that list the permission_auto feature.
+ * Claude permission mode; always explicit. The console opens writing members in bypassPermissions (with allow_dangerously_skip_permissions) or default (ask roles), and the coordinator, lead and read-only roles in dontAsk. auto is kept for old consoles only.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "PermissionMode".
