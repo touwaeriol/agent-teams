@@ -82,6 +82,8 @@ func TestParseRejects(t *testing.T) {
 		"binary as text":     append(tiny(), File{Path: "bin/x", Content: "\xff\xfe"}),
 		"empty plugin":       {{Path: ManifestPath, Content: manifestJSON}, {Path: "README.md", Content: "x"}},
 		"duplicate":          append(tiny(), File{Path: "commands/shout.md", Content: "x"}),
+		"file is a folder":   append(tiny(), File{Path: "mcp", Content: "x"}),
+		"deep file folder":   append(tiny(), File{Path: "mcp/server.mjs/x/y", Content: "x"}),
 	}
 	for name, files := range cases {
 		if _, err := Parse(files); !IsProblem(err) {
@@ -364,6 +366,12 @@ func TestBuiltinPlugins(t *testing.T) {
 	}
 	if all, _ := ListBuiltin(ctx, pool); len(all) != 1 || all[0].Enabled {
 		t.Fatalf("admin list %+v", all)
+	}
+	if b, _ := Bundles(ctx, pool, "u1", []string{"brand"}, 1<<20); len(b) != 0 {
+		t.Fatal("disabled built-ins are not loaded")
+	}
+	if c, _ := Choices(ctx, pool, "u1"); !c["brand"][1] {
+		t.Fatalf("a disabled built-in stays tickable so roles that use it still save: %v", c)
 	}
 	if _, err := SetEnabled(ctx, pool, Builtins, b.ID, true); err != nil {
 		t.Fatal(err)

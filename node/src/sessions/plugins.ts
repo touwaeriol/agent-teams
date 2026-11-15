@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { PluginBundle, PluginFile, PluginMcpServer, SessionOpen } from "../protocol.js";
 import { isInside, resolveInRoot } from "../util/paths.js";
+import { isMarkdown, stripToolGrants } from "./frontmatter.js";
 import { employeeDir } from "./skills.js";
 
 const SAFE_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -47,8 +48,14 @@ function writePluginFile(dir: string, f: PluginFile): void {
   const abs = resolveInRoot(dir, f.path);
   if (!isInside(dir, abs)) throw new Error(`bad plugin file ${f.path}`);
   mkdirSync(dirname(abs), { recursive: true });
-  writeFileSync(abs, f.encoding === "base64" ? Buffer.from(f.content, "base64") : f.content);
+  writeFileSync(abs, fileBytes(f));
   chmodSync(abs, f.executable ? 0o755 : 0o644);
+}
+
+/** File content as written: base64 decoded; Markdown (even if sent as binary) as text without tool grants. */
+function fileBytes(f: PluginFile): Buffer | string {
+  const raw = f.encoding === "base64" ? Buffer.from(f.content, "base64") : f.content;
+  return isMarkdown(f.path) ? stripToolGrants(raw.toString()) : raw;
 }
 
 function pluginServers(p: PluginBundle, dir: string): Record<string, PluginMcpServer> {

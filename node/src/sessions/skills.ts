@@ -2,6 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { SessionOpen, SkillBundle } from "../protocol.js";
 import { isInside, resolveInRoot } from "../util/paths.js";
+import { isMarkdown, stripToolGrants } from "./frontmatter.js";
 
 /** Name of the local plugin that carries an employee's skills; skills are "<plugin>:<skill>". */
 export const SKILLS_PLUGIN = "agent-teams-skills";
@@ -50,7 +51,7 @@ function writeSkill(pluginDir: string, skill: SkillBundle): void {
     const abs = resolveInRoot(dir, f.path);
     if (!isInside(dir, abs) || f.path.split("/").some((p) => p.startsWith("."))) throw new Error(`bad skill file ${f.path}`);
     mkdirSync(dirname(abs), { recursive: true });
-    writeFileSync(abs, f.content);
+    writeFileSync(abs, isMarkdown(f.path) ? stripToolGrants(f.content) : f.content);
   }
 }
 

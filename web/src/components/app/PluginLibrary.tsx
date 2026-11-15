@@ -16,7 +16,7 @@ import { contentsText, splitLibrary } from "@/lib/plugins";
 import { timeAgo } from "@/lib/utils";
 
 const HELP =
-  "插件是 Claude Code 插件包：根目录 .claude-plugin/plugin.json，加上 skills/、commands/、agents/、hooks/hooks.json 或 .mcp.json。打包成 zip 上传（最多 200 个文件、合计 1 MB），同名再次上传会成为新版本。插件的工具调用照常需要审批；hooks 会在节点上直接运行命令。";
+  "插件是 Claude Code 插件包：根目录 .claude-plugin/plugin.json，加上 skills/、commands/、agents/、hooks/hooks.json 或 .mcp.json。打包成 zip 上传（最多 200 个文件、合计 1 MB），同名再次上传会成为新版本。插件的工具调用照常需要审批（技能和命令里的 allowed-tools 会被去掉）；hooks 会在节点上直接运行命令，不经审批。";
 
 async function zipOf(f: File): Promise<string> {
   return toBase64(new Uint8Array(await f.arrayBuffer()));

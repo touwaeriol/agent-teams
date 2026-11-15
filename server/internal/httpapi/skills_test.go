@@ -143,6 +143,19 @@ func TestPluginsAPI(t *testing.T) {
 			t.Fatalf("%s = %d", bad, r.Status)
 		}
 	}
+	// An admin disabling a built-in must not block saving roles that tick it.
+	next[2].Plugins = []string{"tinyplug@1", "brand"}
+	admin.must(200, "PATCH", "/api/admin/plugins/"+b.ID, map[string]any{"enabled": false}, &b)
+	c.must(200, "PUT", "/api/roles", map[string]any{"roles": next}, &body)
+	admin.must(200, "PATCH", "/api/admin/plugins/"+b.ID, map[string]any{"enabled": true}, &b)
+	// Another user's plugin is never tickable.
+	var ob RolesBody
+	other.must(200, "GET", "/api/roles", nil, &ob)
+	onext := append([]store.Role{}, ob.Roles...)
+	onext[2].Plugins = []string{"tinyplug"}
+	if r := other.do("PUT", "/api/roles", map[string]any{"roles": onext}); r.Status != 422 {
+		t.Fatalf("another user's plugin on a role = %d", r.Status)
+	}
 	next[0].Plugins = []string{"brand"}
 	next[2].Plugins = nil
 	if r := c.do("PUT", "/api/roles", map[string]any{"roles": next}); r.Status != 422 {

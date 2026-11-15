@@ -21,10 +21,15 @@ const MaxPerRole = 8
 const visible = `(p.user_id = $1 OR (p.user_id IS NULL AND p.enabled
 	AND NOT EXISTS (SELECT 1 FROM at_plugins o WHERE o.user_id = $1 AND o.name = p.name)))`
 
+// tickable is visible plus disabled built-ins: a role that already ticks a built-in an admin
+// later disabled must still save (the plugin just is not loaded), like a disabled own plugin.
+const tickable = `(p.user_id = $1 OR (p.user_id IS NULL
+	AND NOT EXISTS (SELECT 1 FROM at_plugins o WHERE o.user_id = $1 AND o.name = p.name)))`
+
 // Choices maps each plugin name a user's roles may tick to its stored versions.
 func Choices(ctx context.Context, db store.DB, userID string) (map[string]map[int]bool, error) {
 	rows, err := db.Query(ctx, `SELECT p.name, v.version FROM at_plugins p
-		JOIN at_plugin_versions v ON v.plugin_id = p.id WHERE `+visible, userID)
+		JOIN at_plugin_versions v ON v.plugin_id = p.id WHERE `+tickable, userID)
 	if err != nil {
 		return nil, err
 	}

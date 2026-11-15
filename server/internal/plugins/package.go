@@ -134,7 +134,23 @@ func checkFiles(files []File) (int, error) {
 			return 0, problem("插件文件合计不能超过 %d KB", MaxBytes>>10)
 		}
 	}
+	if p := dirConflict(seen); p != "" {
+		return 0, problem("%s 既是文件又是目录", p)
+	}
 	return total, nil
+}
+
+// dirConflict returns a path that is both a file and a parent folder of another file ("a" and
+// "a/b"); such a package cannot be written to disk, so the daemon would fail every session open.
+func dirConflict(paths map[string]bool) string {
+	for p := range paths {
+		for i := 0; i < len(p); i++ {
+			if p[i] == '/' && paths[p[:i]] {
+				return p[:i]
+			}
+		}
+	}
+	return ""
 }
 
 // checkFile validates one file and returns its decoded size.
