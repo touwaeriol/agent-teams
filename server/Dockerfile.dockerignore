@@ -1,0 +1,12 @@
+# Build context is the repository root; send only what the image needs.
+**
+!protocol/**
+!web/**
+!node/**
+!server/**
+!office/**
+**/node_modules
+**/.git
+web/dist
+node/dist
+server/**/testdata

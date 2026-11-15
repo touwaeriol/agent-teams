@@ -1,0 +1,14 @@
+{
+  "secret": "v1-test-secret-key",
+  "plaintext": "ghp_exampleToken123",
+  "ciphertext": "gAAAAABq-PC2W10m5-8-q81wzX6Nfa9MQ9gUuncKF8Haw67NzxRa8r_FFNHeiFj6B2kkqpMxNOdu9C7y93OjOmV9t30_5QwQIdTr7_8tQBIFKruPCV2vcVQ=",
+  "pem_ciphertext": "gAAAAABq-PC2uZMZSsCEvSuklBPmk0y0UufVUWsGaXXMl_oX0lhCrApOusfcme6PUFNou7TYDZYaUMo4AFGyH3K3sT5NOVqyPoI9ZwAr4lSq1R0mAYktnizBKnRu33A7xsWWE_BD1av-CgmlimYeBtTzY44kll5rxMw0RP_f_WUgK3TU0f0LRiI=",
+  "password": "correct horse battery",
+  "password_hash": "scrypt$16384$8$1$PxUEquqEbArdkCvV9hG8TA$VMWl4PC4Nq4DTX5a7C4Pa1GLyuvATGtrCtibICk7EfgH8kbk-O41sEOTFU0Qob-1C24pivfi8yZLPi0Qjl0HTw",
+  "token": "tok-123",
+  "token_hash": "c8963414bf6c4c869eeac5f8a057c3dc574d422f1b108397b66f67bab3d2f981",
+  "state_purpose": "github-app-install",
+  "state_user": "u1234",
+  "state_issued": 1700000000,
+  "state": "u1234.1700000000.e71db357fd90bb7c5c09fee0d81e6cac"
+}
