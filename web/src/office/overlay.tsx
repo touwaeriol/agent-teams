@@ -161,10 +161,16 @@ function clickTarget(onClick: (() => void) | undefined, label: string, rect: [nu
   );
 }
 
+/** Pending tasks on the board: the focused thread's, or the whole project's. */
+export function claimableCount(board: OfficeWidgetData["board"], focus: number | null): number {
+  if (focus !== null) return board?.by_thread?.[String(focus)]?.pending ?? 0;
+  return board?.claimable ?? 0;
+}
+
 function TaskBoardText({ widget: w, scene, data, focus, onAction }: { widget: Widget } & OverlayProps) {
   const l = scene.layout;
   const sprite = w.sprite ? l.sprites[w.sprite] : undefined;
-  const claimable = focus !== null ? data.board?.by_thread?.[String(focus)] ?? 0 : data.board?.claimable ?? 0;
+  const claimable = claimableCount(data.board, focus);
   const text = fillTemplate(w.text?.value ?? "{claimable}", { claimable });
   const [tx, ty] = w.text?.at ?? [0, 0];
   return (

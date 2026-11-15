@@ -150,6 +150,238 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** v1 conversations (read only); kind defaults to chat */
+        get: operations["list-conversations"];
+        put?: never;
+        /** v1 endpoint: always 409 legacy_read_only */
+        post: operations["create-conversation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{cid}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** v1 conversation stream: one snapshot of a finished conversation, then idle */
+        get: operations["conversation-events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{cid}/interrupt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["interrupt-conversation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{cid}/mail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["conversation-mail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{cid}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list-messages"];
+        put?: never;
+        /** Send a message to the conversation's employee (coordinator or thread lead) */
+        post: operations["post-message"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{cid}/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["conversation-plan"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{cid}/questions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list-questions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{cid}/questions/{qid}/answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Answer a question, or decide an approval card (allow / allow_always / deny) */
+        post: operations["answer-question"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{cid}/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["conversation-tasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/deliverables/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["delete-deliverable"];
+        options?: never;
+        head?: never;
+        patch: operations["update-deliverable"];
+        trace?: never;
+    };
+    "/api/deliverables/{id}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list-deliverable-comments"];
+        put?: never;
+        /** Comment on a deliverable; delivered to the employee who published it (or the thread lead) */
+        post: operations["add-deliverable-comment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/deliverables/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Files of one version (default: latest) with a short-lived signed URL, and the version list */
+        get: operations["deliverable-files"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/employees/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get-employee"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** User event stream (project, node, notice) */
+        get: operations["user-events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/git/connections": {
         parameters: {
             query?: never;
@@ -499,6 +731,107 @@ export interface paths {
         patch: operations["update-project"];
         trace?: never;
     };
+    "/api/projects/{pid}/ci/detect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Workflows, branch coverage, checks permission, ruleset advice */
+        get: operations["ci-detect"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/ci/setup-pr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Open a PR adding thread/** and mq/** push triggers */
+        post: operations["ci-setup-pr"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/coordinator": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The project coordinator and its conversation (created on first use, no session yet) */
+        get: operations["get-coordinator"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/deliverables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list-deliverables"];
+        put?: never;
+        post: operations["add-deliverable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/deliverables/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask the coordinator to make one (sends 做一个<kind>：<brief>) */
+        post: operations["request-deliverable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Project event stream (SSE); id = project seq, Last-Event-ID replays from PostgreSQL */
+        get: operations["project-events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{pid}/memory": {
         parameters: {
             query?: never;
@@ -529,6 +862,105 @@ export interface paths {
         options?: never;
         head?: never;
         patch: operations["update-memory"];
+        trace?: never;
+    };
+    "/api/projects/{pid}/office": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** First paint of the office; continue with the event stream from last_event_id */
+        get: operations["project-office"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/office/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["project-office-replay"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["project-overview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["project-search"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/threads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list-threads"];
+        put?: never;
+        /** Open a thread directly (skipping the coordinator) */
+        post: operations["create-thread"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/waiting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Open questions and cards, threads in review */
+        get: operations["project-waiting"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/roles": {
@@ -598,6 +1030,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{sid}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Live output of one session (not stored) */
+        get: operations["session-stream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/skills": {
         parameters: {
             query?: never;
@@ -644,6 +1093,280 @@ export interface paths {
         get: operations["get-team"];
         /** v1 compatible; same as PUT /api/roles/yaml */
         put: operations["save-team"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{tid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get-thread"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["update-thread"];
+        trace?: never;
+    };
+    "/api/threads/{tid}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["accept-thread"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{tid}/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list-activity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{tid}/checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list-checks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{tid}/mail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list-mail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{tid}/main-tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list-main-tasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{tid}/main-tasks/{mid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["update-main-task"];
+        trace?: never;
+    };
+    "/api/threads/{tid}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list-members"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{tid}/members/{name}/interrupt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["interrupt-member"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{tid}/members/{name}/message": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["message-member"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{tid}/merge-queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list-merge-queue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{tid}/open-pr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["open-pr"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{tid}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reject-thread"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{tid}/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Task pool board */
+        get: operations["list-tasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{tid}/tasks/{task}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancel-task"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{tid}/tasks/{task}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Put a failed, blocked or cancelled task back into the pool */
+        post: operations["retry-task"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{tid}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["thread-usage"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -747,6 +1470,18 @@ export interface components {
             detail: string;
             fields?: components["schemas"]["FieldError"][] | null;
         };
+        Activity: {
+            /** Format: date-time */
+            at: string;
+            employee: string;
+            /** Format: int64 */
+            id: number;
+            text: string;
+        };
+        ActivityPage: {
+            items: components["schemas"]["Activity"][] | null;
+            next_cursor: string | null;
+        };
         AdminSettings: {
             /** Format: int64 */
             default_max_nodes: number;
@@ -782,6 +1517,12 @@ export interface components {
             /** Format: int64 */
             running_tasks: number;
         };
+        AnswerInputBody: {
+            /** @description Approvals: allow | allow_always | deny */
+            answer: string;
+            /** @description Why an approval was denied (sent to the employee) */
+            reason?: string;
+        };
         AppPublic: {
             html_url: string;
             name: string;
@@ -796,6 +1537,24 @@ export interface components {
             app?: components["schemas"]["AppPublic"];
             configured: boolean;
             install_url?: string;
+        };
+        ArtifactFile: {
+            content_type: string;
+            path: string;
+            sha256: string;
+            /** Format: int64 */
+            size: number;
+        };
+        ArtifactVersion: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int64 */
+            files: number;
+            published_by: string;
+            /** Format: int64 */
+            size: number;
+            /** Format: int64 */
+            version: number;
         };
         AuditEntry: {
             action: string;
@@ -813,6 +1572,16 @@ export interface components {
         AuditOutputBody: {
             items: components["schemas"]["AuditEntry"][] | null;
             next_cursor: string | null;
+        };
+        Board: {
+            /** @description By thread number */
+            by_thread: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
+            /** Format: int64 */
+            claimable: number;
         };
         CIPatch: {
             /** Format: int64 */
@@ -836,9 +1605,78 @@ export interface components {
             /** Format: int64 */
             timeout_s: number;
         };
+        CheckView: {
+            conclusion: string;
+            name: string;
+            status: string;
+            summary: string;
+            url: string;
+        };
+        CommentView: {
+            /** Format: date-time */
+            created_at: string;
+            id: string;
+            /** @description Employee the comment was delivered to; empty when nobody could receive it */
+            sent_to: string;
+            text: string;
+            /** Format: int64 */
+            version: number | null;
+        };
+        CommentsOutputBody: {
+            items: components["schemas"]["CommentView"][] | null;
+        };
+        CoordinatorView: {
+            conversation_id: string;
+            employee: components["schemas"]["EmployeeBrief"];
+            /** @description '' until the first message opens a session */
+            session_state: string;
+        };
         Credentials: {
             email: string;
             password: string;
+        };
+        DayCost: {
+            /** Format: double */
+            cost_usd: number;
+            day: string;
+        };
+        DeliverableFiles: {
+            /** @description Signed directory URL; append a file path */
+            base_url: string;
+            deliverable_id: string;
+            entry: string;
+            entry_url: string;
+            /** Format: date-time */
+            expires_at: string;
+            files: components["schemas"]["ArtifactFile"][] | null;
+            /** @description Files have their own origin (AGENT_TEAMS_ARTIFACT_ORIGIN) */
+            isolated: boolean;
+            /** @enum {string} */
+            render: "html" | "markdown" | "image" | "pdf" | "text";
+            /** Format: int64 */
+            version: number;
+            versions: components["schemas"]["ArtifactVersion"][] | null;
+        };
+        DeliverablePage: {
+            items: components["schemas"]["DeliverableView"][] | null;
+            next_cursor: string | null;
+        };
+        DeliverableView: {
+            /** Format: date-time */
+            created_at: string;
+            detail: {
+                [key: string]: unknown;
+            };
+            id: string;
+            kind: string;
+            project_id: string;
+            published_by: string;
+            /** Format: int64 */
+            thread_no: number | null;
+            title: string;
+            /** Format: date-time */
+            updated_at: string;
+            url: string;
         };
         Delivery: {
             allow_workflow_edits: boolean;
@@ -860,9 +1698,68 @@ export interface components {
             merge_method?: "squash" | "merge" | "rebase";
             notify_on_ask?: boolean;
         };
+        Detection: {
+            app_has_checks_permission: boolean;
+            /** @description The repository's default branch the workflows were read from */
+            branch: string;
+            covers_mq_branches: boolean;
+            covers_thread_branches: boolean;
+            repo: string;
+            ruleset: components["schemas"]["Ruleset"];
+            workflows: components["schemas"]["Workflow"][] | null;
+        };
         DrainInputBody: {
             /** Format: int64 */
             deadline_s: number;
+        };
+        EmployeeBrief: {
+            id: string;
+            look: components["schemas"]["Look"];
+            name: string;
+            node: components["schemas"]["NodeRef"];
+            role: string;
+            runtime: string;
+            status: components["schemas"]["EmployeeStatusView"];
+            /** Format: int64 */
+            thread_no: number | null;
+            tier: string;
+            title: string;
+        };
+        EmployeeCard: {
+            current_task: components["schemas"]["TaskView"];
+            id: string;
+            look: components["schemas"]["Look"];
+            name: string;
+            node: components["schemas"]["NodeRef"];
+            recent_activity: components["schemas"]["Activity"][] | null;
+            role: string;
+            runtime: string;
+            session: components["schemas"]["SessionBrief"];
+            status: components["schemas"]["EmployeeStatusView"];
+            /** Format: int64 */
+            thread_no: number | null;
+            tier: string;
+            title: string;
+        };
+        EmployeeStatusView: {
+            bubble: string;
+            bubble_kind: string;
+            role: string;
+            /** Format: int64 */
+            seq: number;
+            /** Format: date-time */
+            since: string;
+            state: string;
+            substate: string;
+            task_id: string;
+            task_kind: string;
+            tier: string;
+        };
+        EmployeeUsage: {
+            /** Format: double */
+            cost_usd_est: number | null;
+            employee: string;
+            tokens: components["schemas"]["UsageTokens"];
         };
         Enrollment: {
             /** @description Shell command for the node */
@@ -910,11 +1807,63 @@ export interface components {
             ok: boolean;
             version: string;
         };
+        LeadLast: {
+            /** Format: date-time */
+            at: string;
+            text: string;
+        };
+        LegacyConversation: {
+            /** Format: date-time */
+            created_at: string;
+            id: string;
+            kind: string;
+            project_id: string | null;
+            title: string;
+        };
+        LegacyPlanOutputBody: {
+            /** @description v1 plan steps [{title, status}] */
+            steps: unknown;
+        };
+        LegacyTask: {
+            assignee: string;
+            depends_on: string[] | null;
+            id: string;
+            instruction: string;
+            output: string;
+            parent: string;
+            status: string;
+        };
         Look: {
             accessory: string;
             color: string;
             hair: string | null;
             outfit: string;
+        };
+        MailPage: {
+            items: components["schemas"]["MailView"][] | null;
+            next_cursor: string | null;
+        };
+        MailView: {
+            body: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int64 */
+            id: number;
+            recipient: string;
+            sender: string;
+        };
+        MainTaskView: {
+            auto_done: boolean;
+            id: string;
+            /** Format: int64 */
+            pos: number;
+            /** @enum {string} */
+            status: "todo" | "doing" | "done";
+            /** Format: int64 */
+            tasks_done: number;
+            /** Format: int64 */
+            tasks_total: number;
+            title: string;
         };
         ManifestInputBody: {
             organization?: string;
@@ -924,6 +1873,9 @@ export interface components {
             action: string;
             /** @description JSON manifest for the form's manifest field */
             manifest: string;
+        };
+        MemberMessageInputBody: {
+            content: string;
         };
         MemoryAddInputBody: {
             text: string;
@@ -940,11 +1892,58 @@ export interface components {
             pinned?: boolean;
             text?: string;
         };
+        MergeEntryView: {
+            /** Format: int64 */
+            attempts: number;
+            /** Format: date-time */
+            created_at: string;
+            employee: string;
+            error: string;
+            head_branch: string;
+            id: string;
+            repo: string;
+            status: string;
+            task_id: string | null;
+            /** Format: int64 */
+            thread_no: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        MessagePage: {
+            items: components["schemas"]["MessageView"][] | null;
+            /** @description Pass as ?before= for older messages */
+            next_cursor: string | null;
+        };
+        MessageView: {
+            author: string;
+            content: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int64 */
+            id: number;
+            kind: string;
+            meta: {
+                [key: string]: unknown;
+            };
+            role: string;
+        };
+        NewCommentInputBody: {
+            text: string;
+            /** Format: int64 */
+            version?: number;
+        };
         NewConnectionInputBody: {
             name?: string;
             /** @enum {string} */
             provider?: "github";
             token: string;
+        };
+        NewDeliverableInputBody: {
+            kind: string;
+            /** Format: int64 */
+            thread_no?: number;
+            title: string;
+            url: string;
         };
         NewNodeInputBody: {
             name: string;
@@ -961,6 +1960,26 @@ export interface components {
             files?: components["schemas"]["File"][] | null;
             /** @description Base64 of a zip of the skill folder (SKILL.md at the root or in one top folder) */
             zip?: string;
+        };
+        NewThreadInputBody: {
+            brief?: string;
+            /** @description Override member counts for this thread */
+            roles?: components["schemas"]["RoleCount"][] | null;
+            title: string;
+        };
+        NodeBrief: {
+            /** Format: int64 */
+            active_sessions: number;
+            id: string;
+            isolation: string;
+            name: string;
+            online: boolean;
+            /** Format: int64 */
+            parked_sessions: number;
+            /** Format: int64 */
+            queued: number;
+            /** Format: int64 */
+            slots: number;
         };
         NodeLog: {
             /** Format: date-time */
@@ -984,6 +2003,11 @@ export interface components {
             max_active_sessions?: number;
             /** Format: int64 */
             park_after_s?: number;
+        };
+        NodeRef: {
+            id: string;
+            name: string;
+            online: boolean;
         };
         NodeRelease: {
             sha256: string;
@@ -1034,9 +2058,58 @@ export interface components {
             since: string | null;
             version: string;
         };
+        OfficeSnapshot: {
+            board: components["schemas"]["Board"];
+            /** @description By thread number */
+            ci: {
+                [key: string]: components["schemas"]["CheckView"][] | null;
+            };
+            employees: components["schemas"]["EmployeeBrief"][] | null;
+            /** Format: int64 */
+            last_event_id: number;
+            layout_id: string;
+            layout_version: string;
+            merge_queue: components["schemas"]["MergeEntryView"][] | null;
+            nodes: components["schemas"]["NodeBrief"][] | null;
+            threads: components["schemas"]["ThreadView"][] | null;
+        };
+        OpenPRInputBody: {
+            body?: string;
+            /** @description Open even if some plan steps are not done */
+            force?: boolean;
+            title?: string;
+        };
+        Overview: {
+            memory: components["schemas"]["MemoryItem"][] | null;
+            nodes: components["schemas"]["NodeBrief"][] | null;
+            project: components["schemas"]["ProjectView"];
+            recent_deliverables: components["schemas"]["DeliverableView"][] | null;
+            threads: components["schemas"]["ThreadView"][] | null;
+            usage_7d: components["schemas"]["Usage7d"];
+            waiting: components["schemas"]["Waiting"];
+        };
         PasswordInputBody: {
             current: string;
             new: string;
+        };
+        PatchDeliverableInputBody: {
+            title?: string;
+        };
+        PatchMainInputBody: {
+            /** @enum {string} */
+            status: "todo" | "doing" | "done";
+        };
+        PatchThreadInputBody: {
+            /** @description Allow everything in this thread (needs sandbox isolation) */
+            auto_approve?: boolean;
+            /** @enum {string} */
+            status?: "paused" | "running" | "archived";
+            title?: string;
+        };
+        PostMessageInputBody: {
+            content: string;
+            /** @description Interrupt the current turn first */
+            interrupt?: boolean;
         };
         PresetsOutputBody: {
             roles: components["schemas"]["Role"][] | null;
@@ -1106,6 +2179,31 @@ export interface components {
             /** @description Layout document (office-layout.schema.json) */
             doc: unknown;
         };
+        QuestionView: {
+            answer: string | null;
+            /** Format: date-time */
+            answered_at: string | null;
+            asker: string;
+            /** @enum {string} */
+            audience: "lead" | "user";
+            blocking: boolean;
+            conversation_id: string;
+            /** Format: date-time */
+            created_at: string;
+            decided_by: string;
+            detail: {
+                [key: string]: unknown;
+            };
+            id: string;
+            /** @enum {string} */
+            kind: "question" | "approval";
+            options: string[] | null;
+            status: string;
+            task_id: string | null;
+            text: string;
+            /** Format: int64 */
+            thread_no: number | null;
+        };
         RandomLookInputBody: {
             role?: string;
         };
@@ -1114,6 +2212,21 @@ export interface components {
                 [key: string]: string;
             };
             ok: boolean;
+        };
+        RejectInputBody: {
+            reason: string;
+        };
+        Replay: {
+            events: components["schemas"]["ReplayEvent"][] | null;
+            snapshot: components["schemas"]["OfficeSnapshot"];
+        };
+        ReplayEvent: {
+            /** Format: date-time */
+            at: string;
+            data: unknown;
+            /** Format: int64 */
+            id: number;
+            type: string;
         };
         RepoItem: {
             default_branch: string;
@@ -1132,6 +2245,10 @@ export interface components {
         ReposOutputBody: {
             items: components["schemas"]["RepoItem"][] | null;
             next_cursor: string | null;
+        };
+        RequestDeliverableInputBody: {
+            brief: string;
+            kind: string;
         };
         Role: {
             allowed_tools: string[] | null;
@@ -1168,6 +2285,11 @@ export interface components {
             tier: "coordinator" | "lead" | "member";
             title: string;
         };
+        RoleCount: {
+            /** Format: int64 */
+            count: number;
+            role: string;
+        };
         RolesBody: {
             /** @description Conversion notes (dropped v1 settings, unknown nodes) */
             report?: string[] | null;
@@ -1176,6 +2298,28 @@ export interface components {
         };
         RolesInputBody: {
             roles: components["schemas"]["Role"][] | null;
+        };
+        Ruleset: {
+            present: boolean;
+            recommended: {
+                [key: string]: unknown;
+            };
+        };
+        SearchMessage: {
+            conversation_id: string;
+            message: components["schemas"]["MessageView"];
+            /** Format: int64 */
+            thread_no: number | null;
+        };
+        SearchResult: {
+            deliverables: components["schemas"]["DeliverableView"][] | null;
+            messages: components["schemas"]["SearchMessage"][] | null;
+            tasks: components["schemas"]["TaskView"][] | null;
+            threads: components["schemas"]["ThreadView"][] | null;
+        };
+        SessionBrief: {
+            node: components["schemas"]["NodeRef"];
+            state: string;
         };
         SessionView: {
             /** Format: date-time */
@@ -1188,6 +2332,9 @@ export interface components {
             /** Format: date-time */
             last_seen_at: string | null;
             user_agent: string;
+        };
+        SetupPROutputBody: {
+            pr_url: string;
         };
         Skill: {
             builtin: boolean;
@@ -1209,6 +2356,33 @@ export interface components {
             valid: boolean;
             version: string;
         };
+        TaskView: {
+            assignee: string;
+            /** Format: int64 */
+            attempt: number;
+            branch: string;
+            /** Format: date-time */
+            claimed_at: string | null;
+            claimed_by: string;
+            /** Format: date-time */
+            created_at: string;
+            depends_on: string[] | null;
+            /** Format: date-time */
+            finished_at: string | null;
+            head_sha: string;
+            id: string;
+            instruction: string;
+            kind: string;
+            main_task_id: string | null;
+            parent: string;
+            /** Format: int64 */
+            priority: number;
+            role: string;
+            status: string;
+            summary: string;
+            /** Format: int64 */
+            thread_no: number;
+        };
         TeamInputBody: {
             config?: string;
             /** @description Structured form; wins over config */
@@ -1227,6 +2401,124 @@ export interface components {
         TempPasswordOutputBody: {
             /** @description Shown once; the user must change it after signing in */
             temp_password: string;
+        };
+        ThreadCounts: {
+            /** Format: int64 */
+            approvals_open: number;
+            /** Format: int64 */
+            main_done: number;
+            /** Format: int64 */
+            main_total: number;
+            /** Format: int64 */
+            questions_open: number;
+            /** Format: int64 */
+            tasks_done: number;
+            /** Format: int64 */
+            tasks_total: number;
+            /** Format: int64 */
+            waiting: number;
+        };
+        ThreadDetail: {
+            auto_approve: boolean;
+            /** @description Deprecated: bases are per repository (repos) */
+            base_branch: string;
+            branch: string;
+            brief: string;
+            /** Format: double */
+            cost_usd_est: number | null;
+            counts: components["schemas"]["ThreadCounts"];
+            /** Format: date-time */
+            created_at: string;
+            id: string;
+            lead_last: components["schemas"]["LeadLast"];
+            main_tasks: components["schemas"]["MainTaskView"][] | null;
+            members: components["schemas"]["EmployeeBrief"][] | null;
+            messages?: components["schemas"]["MessageView"][] | null;
+            /** Format: int64 */
+            no: number;
+            opened_by: string;
+            pause_reason: string;
+            /** Format: int64 */
+            pr_number: number | null;
+            pr_state: string;
+            pr_url: string | null;
+            project_id: string;
+            questions?: components["schemas"]["QuestionView"][] | null;
+            /** Format: int64 */
+            queue_position: number | null;
+            /** @description Repositories the thread set a base for, branched or opened a PR in */
+            repos: components["schemas"]["ThreadRepoView"][] | null;
+            /** @enum {string} */
+            status: "queued" | "running" | "waiting" | "review" | "done" | "failed" | "paused" | "archived";
+            summary: string;
+            title: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ThreadRepoView: {
+            base_branch: string;
+            branch_created: boolean;
+            /** Format: int64 */
+            pr_number: number | null;
+            pr_state: string;
+            pr_url: string | null;
+            repo: string;
+        };
+        ThreadView: {
+            auto_approve: boolean;
+            /** @description Deprecated: bases are per repository (repos) */
+            base_branch: string;
+            branch: string;
+            brief: string;
+            /** Format: double */
+            cost_usd_est: number | null;
+            counts: components["schemas"]["ThreadCounts"];
+            /** Format: date-time */
+            created_at: string;
+            id: string;
+            lead_last: components["schemas"]["LeadLast"];
+            main_tasks: components["schemas"]["MainTaskView"][] | null;
+            members: components["schemas"]["EmployeeBrief"][] | null;
+            /** Format: int64 */
+            no: number;
+            opened_by: string;
+            pause_reason: string;
+            /** Format: int64 */
+            pr_number: number | null;
+            pr_state: string;
+            pr_url: string | null;
+            project_id: string;
+            /** Format: int64 */
+            queue_position: number | null;
+            /** @description Repositories the thread set a base for, branched or opened a PR in */
+            repos: components["schemas"]["ThreadRepoView"][] | null;
+            /** @enum {string} */
+            status: "queued" | "running" | "waiting" | "review" | "done" | "failed" | "paused" | "archived";
+            summary: string;
+            title: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        Usage: {
+            by_employee: components["schemas"]["EmployeeUsage"][] | null;
+            /** Format: double */
+            cost_usd_est: number | null;
+            tokens: components["schemas"]["UsageTokens"];
+        };
+        Usage7d: {
+            by_day: components["schemas"]["DayCost"][] | null;
+            /** Format: double */
+            cost_usd_est: number;
+        };
+        UsageTokens: {
+            /** Format: int64 */
+            cache_read: number;
+            /** Format: int64 */
+            cache_write: number;
+            /** Format: int64 */
+            input: number;
+            /** Format: int64 */
+            output: number;
         };
         UserPatchInputBody: {
             active?: boolean;
@@ -1255,9 +2547,18 @@ export interface components {
             /** @enum {string} */
             role: "admin" | "user";
         };
+        Waiting: {
+            questions: components["schemas"]["QuestionView"][] | null;
+            reviews: components["schemas"]["ThreadView"][] | null;
+        };
         Warning: {
             message: string;
             role: string;
+        };
+        Workflow: {
+            path: string;
+            push_branches: string[] | null;
+            triggers: string[] | null;
         };
         YamlInputBody: {
             yaml: string;
@@ -1634,6 +2935,589 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TempPasswordOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-conversations": {
+        parameters: {
+            query?: {
+                project_id?: string;
+                kind?: "chat" | "coordinator" | "thread" | "";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacyConversation"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "create-conversation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "conversation-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description text/event-stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "interrupt-conversation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "conversation-mail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailView"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-messages": {
+        parameters: {
+            query?: {
+                /** @description Message id cursor */
+                before?: string;
+                /** @description 0 = all (v1 behaviour) */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessagePage"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "post-message": {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PostMessageInputBody"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "conversation-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacyPlanOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-questions": {
+        parameters: {
+            query?: {
+                status?: "open" | "all" | "answered" | "cancelled" | "";
+            };
+            header?: never;
+            path: {
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionView"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "answer-question": {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                cid: string;
+                qid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnswerInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "conversation-tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacyTask"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "delete-deliverable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "update-deliverable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchDeliverableInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliverableView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-deliverable-comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentsOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "add-deliverable-comment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewCommentInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "deliverable-files": {
+        parameters: {
+            query?: {
+                version?: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliverableFiles"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "get-employee": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmployeeCard"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "user-events": {
+        parameters: {
+            query?: {
+                last_event_id?: string;
+            };
+            header?: {
+                "Last-Event-ID"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description text/event-stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
                 };
             };
             /** @description Error */
@@ -2505,6 +4389,253 @@ export interface operations {
             };
         };
     };
+    "ci-detect": {
+        parameters: {
+            query?: {
+                /** @description owner/name of one of the project's repositories; default the first */
+                repo?: string;
+            };
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Detection"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "ci-setup-pr": {
+        parameters: {
+            query?: {
+                /** @description owner/name of one of the project's repositories; default the first */
+                repo?: string;
+            };
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupPROutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "get-coordinator": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoordinatorView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-deliverables": {
+        parameters: {
+            query?: {
+                kind?: string;
+                thread?: number;
+                q?: string;
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliverablePage"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "add-deliverable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewDeliverableInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliverableView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "request-deliverable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestDeliverableInputBody"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "project-events": {
+        parameters: {
+            query?: {
+                /** @description Comma separated event names (default: all) */
+                topics?: string;
+                /** @description Only this thread number */
+                thread?: number;
+                /** @description Same as Last-Event-ID for clients that cannot set headers */
+                last_event_id?: string;
+            };
+            header?: {
+                /** @description Resume after this seq */
+                "Last-Event-ID"?: string;
+            };
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description text/event-stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     "list-memory": {
         parameters: {
             query?: never;
@@ -2624,6 +4755,239 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemoryItem"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "project-office": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OfficeSnapshot"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "project-office-replay": {
+        parameters: {
+            query: {
+                from: string;
+                to: string;
+                thread?: number;
+            };
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Replay"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "project-overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Overview"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "project-search": {
+        parameters: {
+            query?: {
+                q?: string;
+            };
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResult"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-threads": {
+        parameters: {
+            query?: {
+                /** @description Comma separated statuses */
+                status?: string;
+                group?: "waiting" | "active" | "done" | "";
+            };
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThreadView"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "create-thread": {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewThreadInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThreadView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "project-waiting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Waiting"];
                 };
             };
             /** @description Error */
@@ -2823,6 +5187,37 @@ export interface operations {
             };
         };
     };
+    "session-stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description text/event-stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     "list-skills": {
         parameters: {
             query?: never;
@@ -2976,6 +5371,601 @@ export interface operations {
             };
         };
     };
+    "get-thread": {
+        parameters: {
+            query?: {
+                /** @description messages,questions */
+                include?: string;
+            };
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThreadDetail"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "update-thread": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchThreadInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThreadView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "accept-thread": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThreadView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-activity": {
+        parameters: {
+            query?: {
+                before?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityPage"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckView"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-mail": {
+        parameters: {
+            query?: {
+                before?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailPage"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-main-tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MainTaskView"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "update-main-task": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+                mid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchMainInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MainTaskView"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmployeeBrief"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "interrupt-member": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "message-member": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemberMessageInputBody"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-merge-queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MergeEntryView"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "open-pr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenPRInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThreadView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "reject-thread": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RejectInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThreadView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-tasks": {
+        parameters: {
+            query?: {
+                /** @description Comma separated statuses */
+                status?: string;
+                /** @description Plan step id */
+                main?: string;
+            };
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskView"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "cancel-task": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+                task: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "retry-task": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+                task: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "thread-usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Usage"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     login: {
         parameters: {
             query?: never;
@@ -3103,10 +6093,7 @@ export interface operations {
     };
     readyz: {
         parameters: {
-            query?: {
-                /** @description owner/name of one of the project's repositories; default the first */
-                repo?: string;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;

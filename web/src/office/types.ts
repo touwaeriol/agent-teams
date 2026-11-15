@@ -377,7 +377,7 @@ export interface OfficeCheck {
 }
 
 export interface OfficeWidgetData {
-  board?: { claimable: number; by_thread?: Record<string, number> };
+  board?: { claimable: number; by_thread?: Record<string, Record<string, number>> };
   nodes?: OfficeNode[];
   mergeQueue?: OfficeMergeEntry[];
   ci?: OfficeCheck[];

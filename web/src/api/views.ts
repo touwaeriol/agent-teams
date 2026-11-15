@@ -329,7 +329,7 @@ export interface OfficeSnapshot {
   layout_version: string;
   threads: ThreadView[];
   employees: OfficeEmployeeView[];
-  board: { claimable: number; by_thread?: Record<string, number> };
+  board: { claimable: number; by_thread?: Record<string, Record<string, number>> };
   nodes: NodeBrief[];
   merge_queue: MergeEntryView[];
   ci: Record<string, CheckView[]>;

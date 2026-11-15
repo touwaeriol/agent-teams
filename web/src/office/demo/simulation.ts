@@ -86,7 +86,7 @@ export function recordedHistory(end: number, loops: number): DemoEvent[] {
 export const DEMO_TITLES: Record<string, string> = { t8: "计划与子任务展示", t5: "审批工具", t9: "卡片布局 A / B" };
 
 export const DEMO_DATA: OfficeWidgetData = {
-  board: { claimable: 3, by_thread: { "12": 1, "13": 2 } },
+  board: { claimable: 3, by_thread: { "12": { pending: 1 }, "13": { pending: 2 } } },
   nodes: [
     { id: "n1", name: "rc-erio", online: true, capacity: 4, active: 3 },
     { id: "n2", name: "cvp", online: true, capacity: 4, active: 3, queued: 1 },
