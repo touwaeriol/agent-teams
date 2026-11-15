@@ -143,6 +143,7 @@ function AddRepo({ connections, value, onChange, currentProject }: { connections
       )}
       <Field label={value.length ? "再加一个仓库" : "添加仓库"} hint={repos.error ? errorText(repos.error) : `来自你连接的 GitHub（${owner}），输入即可搜索，也能粘贴链接；选中就加入列表。`} className={connections.length > 1 ? undefined : "sm:col-span-2"}>
         <Combobox
+          key={value.length} // a fresh, empty picker after each added repository
           value=""
           onChange={(v) => onChange(addRepo(value, { repo: v, git_connection_id: connectionId }))}
           options={options}

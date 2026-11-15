@@ -25,6 +25,7 @@ import {
   mergeLook,
   openForUser,
   poolColumns,
+  onePRLook,
   prLook,
   RUNTIME_LABEL,
   taskLook,
@@ -309,7 +310,7 @@ function DeliveryView({ thread }: { thread: ThreadView }) {
       })}
       {threadPRs(thread).length > 0 ? (
         threadPRs(thread).map((p) => (
-          <DeliveryRow key={p.url ?? p.number} branch={`${p.repo ? `${p.repo} · ` : ""}${thread.branch} → ${p.base}`} what={`PR #${p.number}`} look={pr} href={safeHref(p.url)} />
+          <DeliveryRow key={p.url ?? p.number} branch={`${p.repo ? `${p.repo} · ` : ""}${thread.branch} → ${p.base}`} what={`PR #${p.number}`} look={p.repo ? onePRLook(p) : pr} href={safeHref(p.url)} />
         ))
       ) : (
         <DeliveryRow branch={`${thread.branch || "讨论串分支"} → 基准分支`} what="讨论串 PR" look={pr} />

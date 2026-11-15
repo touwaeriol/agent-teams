@@ -279,6 +279,14 @@ export function prLook(t: Pick<ThreadView, "pr_number" | "pr_state" | "status" |
   return { tone: INK.review, label: `${what} 等验收` };
 }
 
+/** One repository's PR row: its own state, not the thread's summary. */
+export function onePRLook(p: Pick<ThreadPR, "state">): Look {
+  if (p.state === "merged") return { tone: INK.done, label: "已合并" };
+  if (p.state === "closed") return { tone: INK.bad, label: "已关闭" };
+  if (p.state === "accepting") return { tone: INK.doing, label: "合并中" };
+  return { tone: INK.review, label: "等验收" };
+}
+
 export interface ThreadPR {
   repo: string;
   number: number;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   approvalCommand, checkLook, deliverableKind, groupThreads, mainProgress, markTone, memberDoing, memberTone, mergeLook, openForUser, poolColumns,
-  projectTint, prLook, questionLine, taskLook, taskTitle, threadBases, threadKind, threadLine, threadPRs, visibleMainTasks, INK,
+  projectTint, onePRLook, prLook, questionLine, taskLook, taskTitle, threadBases, threadKind, threadLine, threadPRs, visibleMainTasks, INK,
 } from "@/lib/present";
 import { question, task, thread } from "./fixtures";
 
@@ -117,6 +117,10 @@ describe("looks", () => {
     expect(threadPRs({ pr_number: 5, pr_url: "u", pr_state: "open", base_branch: "main" })).toEqual([{ repo: "", number: 5, url: "u", base: "main", state: "open" }]);
     expect(threadBases({ base_branch: "", repos })).toBe("o/web → dev、o/api → main");
     expect(threadBases({ base_branch: "main" })).toBe("main");
+    expect(onePRLook({ state: "merged" }).label).toBe("已合并");
+    expect(onePRLook({ state: "accepting" }).label).toBe("合并中");
+    expect(onePRLook({ state: "open" }).label).toBe("等验收");
+    expect(onePRLook({ state: "closed" }).tone).toBe(INK.bad);
     expect(threadLine(thread(1, { status: "done", pr_number: 7, repos }))).toBe("2 个 PR 已合并");
     expect(deliverableKind("slides").label).toBe("幻灯片");
     expect(deliverableKind("figma").label).toBe("链接");
