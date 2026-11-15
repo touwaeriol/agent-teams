@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"time"
 
@@ -34,6 +35,7 @@ var (
 	ErrNoPR            = errors.New("这个讨论串还没有 PR")
 	ErrChecksPending   = errors.New("PR 的检查还没有全部通过")
 	ErrTaskNotReady    = errors.New("任务还不能进合并队列（需要成员先 complete_task）")
+	ErrBadURL          = errors.New("交付物链接必须是 http:// 或 https:// 开头的网址")
 )
 
 // mergeChannel relays merge queue hints between replicas.
@@ -192,12 +194,25 @@ func clip(s string, n int) string {
 // Publish registers a deliverable (publish_deliverable, REST).
 func (e *Engine) Publish(ctx context.Context, tx *core.Tx, projectID string, threadID *string, kind, title, url, by string,
 	detail map[string]any) (core.Deliverable, error) {
+	if !WebURL(url) {
+		return core.Deliverable{}, ErrBadURL
+	}
 	d, err := core.InsertDeliverable(ctx, tx, core.NewDeliverable{ProjectID: projectID, ThreadID: threadID,
 		Kind: strings.TrimSpace(kind), Title: strings.TrimSpace(title), URL: strings.TrimSpace(url), Detail: detail, PublishedBy: by})
 	if err != nil {
 		return d, err
 	}
 	return d, tx.EmitDeliverable(ctx, d)
+}
+
+// WebURL reports whether a deliverable link is an absolute http(s) URL; anything else
+// (javascript:, data:, relative paths) would run or navigate inside the web app when clicked.
+func WebURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
+		return false
+	}
+	return u.Scheme == "https" || u.Scheme == "http"
 }
 
 // Kick asks the merge loop to look at the queues now.

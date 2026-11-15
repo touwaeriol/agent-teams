@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -117,11 +119,15 @@ func officeRegistry(t *testing.T, ctx context.Context, db *store.Store, log *slo
 type browser struct {
 	w    *world
 	http *http.Client
+	ip   string // client address reported through X-Forwarded-For (tests share one Valkey rate limiter)
 }
+
+var browserSeq atomic.Int64
 
 func (w *world) signUp(email string) *browser {
 	jar, _ := cookiejar.New(nil)
-	b := &browser{w: w, http: &http.Client{Jar: jar, Timeout: 20 * time.Second}}
+	n := browserSeq.Add(1)
+	b := &browser{w: w, http: &http.Client{Jar: jar, Timeout: 20 * time.Second}, ip: fmt.Sprintf("10.77.%d.%d", n/250, n%250+1)}
 	b.must(201, "POST", "/auth/register", httpapi.Credentials{Email: email, Password: "password123"}, nil)
 	return b
 }
@@ -145,6 +151,7 @@ func (b *browser) do(method, path string, body any) (int, []byte) {
 	}
 	req, _ := http.NewRequest(method, b.w.srv.URL+path, r)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-For", b.ip)
 	if method != "GET" {
 		req.Header.Set(httpapi.CSRFHeader, b.csrf())
 	}

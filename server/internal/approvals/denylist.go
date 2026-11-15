@@ -14,7 +14,7 @@ var (
 		".local/state/agent-teams", "agent-teams/cred.sock", "agent-teams/node.sock"}
 	procEnviron  = regexp.MustCompile(`/proc/[^/\s]+/environ`)
 	pipeToShell  = regexp.MustCompile(`\b(curl|wget)\b[^|;&]*\|\s*(sudo\s+)?(ba|z|da)?sh\b`)
-	gitConfigBad = regexp.MustCompile(`\bgit\b.*\bconfig\b.*\b(core\.hookspath|credential\.)`)
+	gitConfigBad = regexp.MustCompile(`\bgit\b.*\bconfig\b.*\b(core\.(hookspath|fsmonitor|sshcommand)|credential\.|filter\.)`)
 )
 
 // DenyListed returns why a tool call is always refused ("" = not listed).

@@ -136,7 +136,7 @@ func (a *API) addDeliverable(ctx context.Context, in *newDeliverableInput) (*del
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return nil, fail(err, "没有这个项目")
 	}
 	v, err := core.DeliverableViewOf(ctx, a.e.Core.Pool, d)
 	return &deliverableOutput{Body: v}, err

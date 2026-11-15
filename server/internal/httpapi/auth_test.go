@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -104,6 +105,28 @@ func TestRegistrationClosedAndRateLimit(t *testing.T) {
 	}
 	if last.Status != 429 || last.Header.Get("Retry-After") == "" {
 		t.Fatalf("rate limit = %d %v", last.Status, last.Header)
+	}
+}
+
+// TestLoginLimitIgnoresSpoofedHeaders: a client-chosen True-Client-IP / X-Real-IP does not
+// open a fresh per-IP bucket, and rotating proxy-reported IPs still hits the per-account limit.
+func TestLoginLimitIgnoresSpoofedHeaders(t *testing.T) {
+	h := newHarness(t)
+	c := h.client()
+	var last response
+	for i := 0; i < 12; i++ {
+		ip := fmt.Sprintf("203.0.113.%d", i)
+		last = c.do("POST", "/auth/login", Credentials{fmt.Sprintf("n%d@example.com", i), "password123"},
+			"X-Forwarded-For", "192.0.2.77", "True-Client-IP", ip, "X-Real-IP", ip)
+	}
+	if last.Status != 429 {
+		t.Fatalf("spoofed headers bypassed the IP limit: %d", last.Status)
+	}
+	for i := 0; i < 31; i++ {
+		last = c.do("POST", "/auth/login", Credentials{"victim@example.com", "password123"}, "X-Forwarded-For", fmt.Sprintf("198.51.100.%d", i))
+	}
+	if last.Status != 429 {
+		t.Fatalf("per-account limit = %d", last.Status)
 	}
 }
 

@@ -29,7 +29,12 @@ export function run(cmd: string, args: string[], opts: RunOptions = {}): Promise
   });
 }
 
-/** Non-interactive git environment: no prompts, no system/global config surprises for hooks. */
-export function gitEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  return { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", ...extra };
+/**
+ * Non-interactive git environment. AGENT_TEAMS_* (the node token when it came from the
+ * environment) never reaches git or anything git starts.
+ */
+export function gitEnv(extra: Record<string, string> = {}, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(base)) if (!k.startsWith("AGENT_TEAMS_") && !k.startsWith("GIT_CONFIG")) env[k] = v;
+  return { ...env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", ...extra };
 }

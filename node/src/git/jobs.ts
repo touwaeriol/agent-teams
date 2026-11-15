@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { GitCleanup, GitKeptPath, GitPrepare, GitPurge, GitPush, GitResult, GitStatus } from "../protocol.js";
 import { deferred, withTimeout, type Deferred } from "../util/async.js";
@@ -8,6 +8,7 @@ import { redact } from "../util/redact.js";
 import { gitEnv, run, type RunResult } from "./exec.js";
 import { LockTimeout, withLock } from "./lock.js";
 import type { PlatformFiles } from "./platform.js";
+import { untrustedRepoArgs } from "./safe.js";
 
 export type JobCredential = (jobId: string, repo: string, purpose: "read" | "push") => Promise<{ username: string; password: string } | null>;
 type ErrorCode = NonNullable<GitResult["error_code"]>;
@@ -17,6 +18,12 @@ export interface GitJobsOptions {
   platform: PlatformFiles;
   /** Remote base, https://github.com in production; file:///… in tests. */
   gitBaseUrl: string;
+  /**
+   * Daemon-only directory for bare mirrors (one per repository). Every git command that
+   * carries a token runs in a mirror, whose config employees cannot touch; the shared
+   * clones and worktrees (employee-writable .git) only ever fetch from the mirror.
+   */
+  mirrorDir: string;
   credential: JobCredential;
   log: Logger;
   /** git.result already recorded by an earlier process (done.jsonl), for prepare waits. */
@@ -103,7 +110,7 @@ export class GitJobs {
 
   private async worktreeLocked(b: GitPrepare, shared: string, cwd: string): Promise<Partial<GitResult>> {
     const cloned = await this.ensureClone(b.job_id, b.repo, shared);
-    if (!cloned || b.fetch !== false) await this.fetch(b.job_id, b.repo, shared);
+    if (!cloned && b.fetch !== false) await this.fetch(b.job_id, b.repo, shared);
     await this.git(shared, ["config", "core.hooksPath", this.o.platform.hooksDir]);
     if (isGitDir(cwd)) return { created: false, head_sha: await this.head(cwd) };
     if (existsSync(cwd) && readdirSync(cwd).length > 0) throw new JobError("dirty_conflict", `${b.cwd} exists and is not a worktree`);
@@ -135,30 +142,69 @@ export class GitJobs {
     return `origin/${base}`;
   }
 
+  /** Clones from the mirror (no token), then points origin at the real remote for employees' own fetches. */
   private async ensureClone(jobId: string, repo: string, dir: string): Promise<boolean> {
     if (isGitDir(dir)) return false;
     if (existsSync(dir) && readdirSync(dir).length > 0) throw new JobError("not_a_repo", `${dir} exists and is not a git repository`);
-    const env = await this.credEnv(jobId, repo, "read");
-    const r = await run("git", ["clone", "--", this.url(repo), dir], { env, timeoutMs: 30 * 60_000 });
+    const mirror = await this.syncMirror(jobId, repo);
+    const r = await run("git", ["clone", "--no-checkout", "--", mirror, dir], { env: gitEnv(), timeoutMs: 30 * 60_000 });
     if (r.code !== 0) throw new JobError("clone_failed", "git clone failed", r.stderr);
+    await this.git(dir, ["remote", "set-url", "origin", this.url(repo)]);
+    await this.fromMirror(dir, mirror);
     return true;
   }
 
   private async fetch(jobId: string, repo: string, dir: string): Promise<void> {
-    const env = await this.credEnv(jobId, repo, "read");
-    const r = await run("git", ["-C", dir, "fetch", "origin", "--prune"], { env, timeoutMs: 30 * 60_000 });
+    await this.fromMirror(dir, await this.syncMirror(jobId, repo));
+  }
+
+  /** Updates the shared clone's origin/* from the mirror; nothing secret is in this git's environment. */
+  private async fromMirror(dir: string, mirror: string): Promise<void> {
+    const r = await this.git(dir, ["fetch", "--prune", "--no-tags", mirror, "+refs/heads/*:refs/remotes/origin/*"], 30 * 60_000);
     if (r.code !== 0) throw new JobError("fetch_failed", "git fetch failed", r.stderr);
   }
 
+  /** Fetches the remote into the daemon-owned bare mirror (the only place a read token is used). */
+  private async syncMirror(jobId: string, repo: string): Promise<string> {
+    const mirror = this.mirrorOf(repo);
+    if (!existsSync(join(mirror, "HEAD"))) {
+      mkdirSync(this.o.mirrorDir, { recursive: true, mode: 0o700 });
+      const init = await run("git", ["init", "--bare", "--quiet", mirror], { env: gitEnv() });
+      if (init.code !== 0) throw new JobError("clone_failed", "cannot create the mirror", init.stderr);
+    }
+    const env = await this.credEnv(jobId, repo, "read");
+    const r = await run("git", ["-C", mirror, "fetch", "--prune", "--no-tags", this.url(repo), "+refs/heads/*:refs/heads/*"], { env, timeoutMs: 30 * 60_000 });
+    if (r.code !== 0) throw new JobError("fetch_failed", "git fetch failed", r.stderr);
+    return mirror;
+  }
+
+  private mirrorOf(repo: string): string {
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || repo.split("/").some((p) => p === "." || p === "..")) {
+      throw new JobError("not_a_repo", `bad repository name ${repo}`);
+    }
+    return join(this.o.mirrorDir, `${repo.replace("/", "__")}.git`);
+  }
+
+  /**
+   * Copies the worktree's HEAD into the mirror, then pushes that commit from the mirror, so the
+   * write token never meets the employee-writable config (remote URL, url.*.insteadOf, http.proxy…).
+   */
   private async doPush(b: GitPush): Promise<Partial<GitResult>> {
     const cwd = this.repoDir(b.cwd);
     const target = `refs/heads/thread/${b.thread_no}/${b.employee}`;
     if (b.refspec !== `HEAD:${target}` || b.employee.includes("..") || b.employee.includes("/")) throw new JobError("refspec_not_allowed", `refspec must be HEAD:${target}`);
+    const mirror = this.mirrorOf(b.repo);
+    if (!existsSync(join(mirror, "HEAD"))) await this.syncMirror(b.job_id, b.repo);
+    const local = `refs/at-push/${b.thread_no}/${b.employee}`;
+    const copy = await run("git", ["-C", mirror, "fetch", "--no-tags", "--no-write-fetch-head", cwd, `+HEAD:${local}`], { env: gitEnv(), timeoutMs: 15 * 60_000 });
+    if (copy.code !== 0) throw new JobError("not_a_repo", "cannot read the worktree's commits", copy.stderr);
+    const sha = (await run("git", ["-C", mirror, "rev-parse", "--verify", `${local}^{commit}`], { env: gitEnv() })).stdout.trim();
     const env = await this.credEnv(b.job_id, b.repo, "push");
     const lease = b.force_with_lease ? [`--force-with-lease=${target}:${b.force_with_lease}`] : [];
-    const r = await run("git", ["-C", cwd, "push", "--no-verify", "--porcelain", ...lease, "origin", b.refspec], { env, timeoutMs: 15 * 60_000 });
+    const r = await run("git", ["-C", mirror, "push", "--no-verify", "--porcelain", ...lease, this.url(b.repo), `${sha}:${target}`], { env, timeoutMs: 15 * 60_000 });
     if (r.code !== 0) throw new JobError(pushErrorCode(r), "git push failed", r.stderr + r.stdout);
-    return { head_sha: await this.head(cwd), log_tail: tail(r.stdout + r.stderr) };
+    await this.git(cwd, ["update-ref", `refs/remotes/origin/thread/${b.thread_no}/${b.employee}`, sha]);
+    return { head_sha: sha, log_tail: tail(r.stdout + r.stderr) };
   }
 
   private async doCleanup(b: GitCleanup): Promise<Partial<GitResult>> {
@@ -214,8 +260,10 @@ export class GitJobs {
     return (await this.git(cwd, ["rev-parse", "HEAD"])).stdout.trim();
   }
 
-  private git(cwd: string, args: string[]): Promise<RunResult> {
-    return run("git", ["-C", cwd, ...args], { env: gitEnv(), timeoutMs: 10 * 60_000 });
+  /** git inside a shared clone or worktree: untrusted config is neutralised, no token in the env. */
+  private async git(cwd: string, args: string[], timeoutMs = 10 * 60_000): Promise<RunResult> {
+    const safe = await untrustedRepoArgs(cwd, this.o.platform.hooksDir);
+    return run("git", [...safe, "-C", cwd, ...args], { env: gitEnv(), timeoutMs });
   }
 
   private url(repo: string): string {

@@ -143,11 +143,15 @@ func (e *Engine) decide(ctx context.Context, tx *core.Tx, sc core.SessionContext
 		e.log.Warn("approval hit the fixed deny list", "employee", sc.Employee.Name, "tool", m.ToolName, "reason", reason)
 		return e.resolve(ctx, tx, q, "deny", DecidedDenyList, "平台禁止这个操作："+reason)
 	}
-	if sc.Employee.Spec.SkipPermissions {
+	node, err := sessionNode(ctx, tx, sc.Session)
+	if err != nil {
+		return err
+	}
+	if orchestrator.SkipPermissions(sc.Employee, node) {
 		e.log.Warn("approval from a skip-permissions session", "employee", sc.Employee.Name)
 		return e.resolve(ctx, tx, q, "allow", DecidedRoleSkip, "")
 	}
-	if auto, err := threadAuto(ctx, tx, sc.Employee); err != nil || auto {
+	if auto, err := threadAuto(ctx, tx, sc.Employee); err != nil || (auto && autoIsolated(node)) {
 		if err != nil {
 			return err
 		}
@@ -161,6 +165,27 @@ func (e *Engine) decide(ctx context.Context, tx *core.Tx, sc core.SessionContext
 		return e.resolve(ctx, tx, q, "allow", "policy:rule:"+ruleID, "")
 	}
 	return e.showCard(ctx, tx, sc, q)
+}
+
+// sessionNode loads the isolation of the node a session runs on (zero Node when unknown).
+// skip_permissions and "allow everything" only apply on nodes isolated enough for them
+// (§10.3), whatever the role or thread says: a skip role placed on a plain node opens in
+// default mode, and its approvals must not be waved through here either.
+func sessionNode(ctx context.Context, q core.DB, s core.AgentSession) (store.Node, error) {
+	var n store.Node
+	if s.NodeID == nil {
+		return n, nil
+	}
+	err := core.MapErr(q.QueryRow(ctx, `SELECT id, isolated, isolation FROM at_nodes WHERE id = $1`, *s.NodeID).
+		Scan(&n.ID, &n.Isolated, &n.Isolation))
+	if errors.Is(err, core.ErrNotFound) {
+		return store.Node{}, nil
+	}
+	return n, err
+}
+
+func autoIsolated(n store.Node) bool {
+	return n.Isolated || n.Isolation == "sandbox" || n.Isolation == "agent_user"
 }
 
 func threadAuto(ctx context.Context, q core.DB, emp core.Employee) (bool, error) {

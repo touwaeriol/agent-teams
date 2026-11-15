@@ -9,6 +9,7 @@ import type { QuestionView, ThreadView } from "@/api/views";
 import { Spinner } from "@/components/common";
 import { approvalCommand } from "@/lib/present";
 import { cn } from "@/lib/utils";
+import { safeHref } from "@/lib/safeurl";
 
 export type CardVariant = "soft" | "plain" | "mobile";
 
@@ -203,7 +204,7 @@ export function ReviewCard({ thread, variant = "soft", files }: { thread: Thread
             提修改意见
           </CardButton>
           {thread.pr_url && variant !== "mobile" && (
-            <a href={thread.pr_url} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center px-1 text-[13px] text-muted-foreground hover:text-foreground">
+            <a href={safeHref(thread.pr_url)} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center px-1 text-[13px] text-muted-foreground hover:text-foreground">
               在 GitHub 上看 ↗
             </a>
           )}

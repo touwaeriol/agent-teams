@@ -19,6 +19,8 @@ export type Decision = { deny: string } | null;
 
 const FILE_TOOLS: Record<string, string> = { Read: "file_path", Edit: "file_path", Write: "file_path", NotebookEdit: "notebook_path", Glob: "path", Grep: "path" };
 const READ_TOOLS = new Set(["Read", "Glob", "Grep", "LS"]);
+/** Tools that walk a directory tree: their root must not contain a secret path. */
+const SEARCH_TOOLS = new Set(["Glob", "Grep"]);
 const DEFAULT_DENY_FLAGS = ["--output", "-o", "--ext-diff", "--textconv", "-c", "--exec-path", "--git-dir", "--work-tree"];
 const LIST_FLAGS = new Set(["--list", "-l", "-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose", "--no-color", "--color"]);
 const LIST_FLAGS_WITH_ARG = new Set(["--contains", "--merged", "--no-merged", "--points-at"]);
@@ -26,7 +28,7 @@ const METACHARS = /[;&|<>$`(){}\n\r\\]/;
 const DANGEROUS_SHELL = [
   { re: /\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(ba|z|da|k)?sh\b/, why: "piping a download into a shell is not allowed" },
   { re: /\/proc\/[^\s/]+\/environ/, why: "reading another process's environment is not allowed" },
-  { re: /\bgit\b.*\bconfig\b.*\b(core\.hookspath|credential\.)/i, why: "changing git hooks or credential settings is not allowed" },
+  { re: /\bgit\b.*\bconfig\b.*\b(core\.(hookspath|fsmonitor|sshcommand)|credential\.|filter\.)/i, why: "changing git hooks, fsmonitor, filters or credential settings is not allowed" },
 ];
 
 export const PLATFORM_TOOL_PREFIX = "mcp__platform__";
@@ -41,6 +43,7 @@ export function decideTool(policy: ToolPolicy, tool: string, input: Record<strin
 function secretDecision(policy: ToolPolicy, tool: string, input: Record<string, unknown>, cwd: string): Decision {
   const path = filePathOf(tool, input, cwd);
   if (path && policy.secretPaths.some((s) => isInside(s, path))) return { deny: "That path holds node secrets and is off limits." };
+  if (SEARCH_TOOLS.has(tool) && policy.secretPaths.some((s) => isInside(path ?? cwd, s))) return { deny: "Searching a directory that contains node secrets is not allowed; search a narrower path." };
   if (tool !== "Bash") return null;
   const command = String(input.command ?? "");
   if (policy.secretPaths.some((s) => command.includes(s))) return { deny: "That command touches node secrets and is not allowed." };
@@ -71,9 +74,19 @@ export function bashDecision(policy: BashPolicy | null, command: string): Decisi
   const argv = splitArgv(command);
   if (!argv) return { deny: "Could not parse the command." };
   const denyFlags = policy.deny_flags ?? DEFAULT_DENY_FLAGS;
-  const bad = argv.find((a) => denyFlags.some((f) => a === f || a.startsWith(`${f}=`)));
+  const bad = argv.find((a) => denyFlags.some((f) => deniedFlag(a, f)));
   if (bad) return { deny: `The flag ${bad} is not allowed in read-only sessions.` };
   return policy.allow.some((rule) => matchesRule(rule, argv)) ? null : { deny: `Read-only sessions may only run: ${policy.allow.join(", ")}.` };
+}
+
+/** Exact options git also accepts as unambiguous abbreviations (`--outp=x` is `--output=x`). */
+const EXACT_OPTIONS = new Set(["--text"]);
+
+function deniedFlag(arg: string, flag: string): boolean {
+  if (arg === flag || arg.startsWith(`${flag}=`)) return true;
+  if (!flag.startsWith("--") || !arg.startsWith("--")) return false;
+  const name = arg.split("=", 1)[0]!;
+  return name.length >= 4 && flag.startsWith(name) && !EXACT_OPTIONS.has(name);
 }
 
 function matchesRule(rule: string, argv: string[]): boolean {

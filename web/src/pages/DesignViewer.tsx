@@ -12,6 +12,7 @@ import { Composer } from "@/components/app/bits";
 import { EmptyState, Loading } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { clock, timeAgo } from "@/lib/utils";
+import { embeddableUrl, safeHref } from "@/lib/safeurl";
 
 interface Note {
   text: string;
@@ -52,7 +53,7 @@ function Viewer({ pid, item, thread }: { pid: string; item: DeliverableView; thr
         </span>
         <span className="flex flex-wrap items-center gap-1.5">
           <Button asChild variant="outline" size="sm">
-            <a href={item.url} target="_blank" rel="noreferrer">
+            <a href={safeHref(item.url)} target="_blank" rel="noreferrer">
               打开原稿 <ExternalLink />
             </a>
           </Button>
@@ -63,7 +64,7 @@ function Viewer({ pid, item, thread }: { pid: string; item: DeliverableView; thr
       </header>
       <div className="flex flex-1 flex-wrap">
         <section aria-label="画布" className="flex min-w-0 flex-[999_1_640px] p-6 sm:px-12 sm:py-10">
-          <iframe title={item.title} src={item.url} sandbox="allow-scripts allow-same-origin allow-popups" className="min-h-[560px] w-full flex-1 rounded-md bg-white shadow-[0_1px_3px_rgba(0,0,0,0.12)]" />
+          <iframe title={item.title} src={embeddableUrl(item.url, window.location.origin)} sandbox="allow-scripts allow-same-origin allow-popups" className="min-h-[560px] w-full flex-1 rounded-md bg-white shadow-[0_1px_3px_rgba(0,0,0,0.12)]" />
         </section>
         <aside aria-label="批注" className="flex min-w-0 max-w-[360px] flex-[1_1_300px] flex-col gap-3.5 border-l bg-panel px-[18px] py-4">
           <span className="flex items-center justify-between">

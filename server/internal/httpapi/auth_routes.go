@@ -149,7 +149,12 @@ func (s *Server) login(ctx context.Context, in *credentialsInput) (*userWithCook
 	if err := s.rateLimit(ctx, "auth:"+requestOf(ctx).IP, 10, time.Minute); err != nil {
 		return nil, err
 	}
-	user, hash, err := s.store.UserCredentials(ctx, auth.NormalizeEmail(in.Body.Email))
+	email := auth.NormalizeEmail(in.Body.Email)
+	// Per account too, so many addresses cannot share the guessing of one password.
+	if err := s.rateLimit(ctx, "auth-account:"+email, 30, 15*time.Minute); err != nil {
+		return nil, err
+	}
+	user, hash, err := s.store.UserCredentials(ctx, email)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return nil, err
 	}

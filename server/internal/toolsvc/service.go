@@ -221,7 +221,7 @@ func refuse(format string, a ...any) error { return userError{fmt.Sprintf(format
 // knownErrors are engine errors that are explanations for the model, not faults.
 var knownErrors = []error{core.ErrNotFound, scheduler.ErrUnknownAssignee, scheduler.ErrUnknownMain, scheduler.ErrUnknownDep,
 	scheduler.ErrTaskState, delivery.ErrPRExists, delivery.ErrMergeInProgress, delivery.ErrPlanOpen, delivery.ErrNoRepo,
-	delivery.ErrTaskNotReady, orchestrator.ErrNoNode, orchestrator.ErrRoleNotFound, orchestrator.ErrNoEmployee}
+	delivery.ErrTaskNotReady, delivery.ErrBadURL, orchestrator.ErrNoNode, orchestrator.ErrRoleNotFound, orchestrator.ErrNoEmployee}
 
 func (s *Service) ignoreUserErrors(err error) error {
 	var ue userError

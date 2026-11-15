@@ -59,8 +59,8 @@ func readOnly(e core.Employee) bool {
 	return e.Tier == "lead" || (e.Spec.ReadOnly != nil && *e.Spec.ReadOnly)
 }
 
-// skipPermissions reports whether the member may run in bypass mode on this node.
-func skipPermissions(e core.Employee, n store.Node) bool {
+// SkipPermissions reports whether the member may run in bypass mode on this node (§10.3).
+func SkipPermissions(e core.Employee, n store.Node) bool {
 	return e.Tier == "member" && e.Spec.SkipPermissions && !readOnly(e) && (n.Isolated || n.Isolation == "agent_user")
 }
 
@@ -177,7 +177,7 @@ func memberClaude(c *protocol.ClaudeSessionOptions, in sessionInput) {
 	c.DisallowedTools = mergeLists(e.Spec.DisallowedTools)
 	c.PermissionMode = "default"
 	c.ProtectedRefs = in.protRefs
-	if skipPermissions(e, in.node) {
+	if SkipPermissions(e, in.node) {
 		t := true
 		c.PermissionMode = "bypassPermissions"
 		c.AllowDangerouslySkipPermissions = &t
@@ -194,7 +194,7 @@ func codexOptions(in sessionInput) protocol.CodexSessionOptions {
 	c := protocol.CodexSessionOptions{Model: model(e), DeveloperInstructions: &dev, Sandbox: "read-only", ApprovalPolicy: "never"}
 	switch {
 	case readOnly(e):
-	case skipPermissions(e, in.node):
+	case SkipPermissions(e, in.node):
 		c.Sandbox = "danger-full-access"
 	default:
 		c.Sandbox, c.ApprovalPolicy = "workspace-write", "on-request"

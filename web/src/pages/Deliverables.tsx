@@ -15,6 +15,7 @@ import { NavButton } from "@/components/shell/Shell";
 import { deliverableKind } from "@/lib/present";
 import { cn, timeAgo } from "@/lib/utils";
 import { useProjectId } from "./Main";
+import { safeHref } from "@/lib/safeurl";
 
 const TABS: [string, string][] = [
   ["", "全部"],
@@ -30,7 +31,7 @@ const MAKE = ["design", "doc", "slides", "dashboard", "board"];
 /** Where a card goes: designs open in the viewer, everything else at its URL. */
 export function deliverableHref(pid: string, d: Pick<DeliverableView, "id" | "kind" | "url">): { to?: string; href?: string } {
   if (d.kind === "design") return { to: `/projects/${pid}/deliverables/${d.id}` };
-  return { href: d.url };
+  return { href: safeHref(d.url) };
 }
 
 export function DeliverablesPage() {

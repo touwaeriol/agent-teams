@@ -95,7 +95,7 @@ export class Daemon {
     this.toolhost = new LoopbackToolHost(o.log);
     this.platform = installPlatformFiles(o.platformDir, o.nodeCmd);
     this.hub = new CodexHub({ env: this.codexServerEnv(), log: o.log, clientVersion: DAEMON_VERSION, ...(o.codexCommand ? { command: o.codexCommand } : {}) });
-    this.git = new GitJobs({ root: o.root, platform: this.platform, gitBaseUrl: o.gitBaseUrl, log: o.log, credential: (job, repo, purpose) => this.jobCredential(job, repo, purpose), lookup: (id) => this.recordedResult(id) });
+    this.git = new GitJobs({ root: o.root, platform: this.platform, gitBaseUrl: o.gitBaseUrl, mirrorDir: join(o.stateDir, "mirrors"), log: o.log, credential: (job, repo, purpose) => this.jobCredential(job, repo, purpose), lookup: (id) => this.recordedResult(id) });
     this.sessions = new SessionManager({
       root: o.root, stateDir: o.stateDir, send, approvals: this.approvals, tools: this.tools, log: o.log, maxActive: o.maxActive,
       waitForJob: (id, ms) => this.git.waitFor(id, ms),

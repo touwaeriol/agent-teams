@@ -215,6 +215,7 @@ describe("page helpers", () => {
     expect(memorySource({ source: "thread:12" })).toBe("#12 总结");
     expect(memorySource({ source: "user" })).toBe("你填写");
     expect(deliverableHref("p", { id: "d", kind: "design", url: "u" })).toEqual({ to: "/projects/p/deliverables/d" });
-    expect(deliverableHref("p", { id: "d", kind: "pr", url: "u" })).toEqual({ href: "u" });
+    expect(deliverableHref("p", { id: "d", kind: "pr", url: "https://github.com/o/r/pull/1" })).toEqual({ href: "https://github.com/o/r/pull/1" });
+    expect(deliverableHref("p", { id: "d", kind: "doc", url: "javascript:alert(1)" })).toEqual({ href: undefined });
   });
 });

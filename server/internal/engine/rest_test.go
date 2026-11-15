@@ -96,6 +96,7 @@ func deliverables(t *testing.T, tm *team) {
 	tm.dev.mustCall("publish_deliverable", map[string]string{"kind": "doc", "title": "设计文档", "url": "https://docs/x"})
 	var d core.DeliverableView
 	b.must(201, "POST", "/api/projects/"+pid+"/deliverables", map[string]any{"kind": "design", "title": "首页稿", "url": "https://f/x", "thread_no": 1}, &d)
+	b.must(422, "POST", "/api/projects/"+pid+"/deliverables", map[string]any{"kind": "doc", "title": "x", "url": "javascript:alert(1)"}, nil)
 	if d.ThreadNo == nil || *d.ThreadNo != 1 {
 		t.Fatalf("deliverable %+v", d)
 	}

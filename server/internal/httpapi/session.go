@@ -182,6 +182,33 @@ func (s *Server) startSession(ctx context.Context, userID string) ([]http.Cookie
 	return []http.Cookie{*s.sessionCookie(token), *s.csrfCookie(secret)}, nil
 }
 
+// realIP replaces RemoteAddr with the client address a reverse proxy (Caddy) reports, but only
+// when the request comes from a loopback or private address, and only from the last
+// X-Forwarded-For entry (the one the nearest proxy appended). X-Real-IP / True-Client-IP are
+// ignored: Caddy passes them through from the client, so trusting them would let anyone pick
+// an address and dodge the login rate limit.
+func realIP(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ip := forwardedFor(r); ip != "" {
+			r.RemoteAddr = net.JoinHostPort(ip, "0")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func forwardedFor(r *http.Request) string {
+	peer := net.ParseIP(clientIP(r))
+	if peer == nil || !(peer.IsLoopback() || peer.IsPrivate()) {
+		return ""
+	}
+	parts := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
+	last := strings.TrimSpace(parts[len(parts)-1])
+	if net.ParseIP(last) == nil {
+		return ""
+	}
+	return last
+}
+
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

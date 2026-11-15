@@ -9,6 +9,7 @@ import (
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 
+	"github.com/touwaeriol/agent-teams/server/internal/approvals"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw/nodetest"
 )
@@ -231,5 +232,35 @@ func TestThreadLimitAndPause(t *testing.T) {
 	tm.b.must(200, "GET", "/api/threads/"+tm.thread.ID, nil, &got)
 	if got.Status != "queued" {
 		t.Fatalf("resumed thread should queue behind the limit: %s", got.Status)
+	}
+}
+
+// TestSkipRoleNeedsIsolatedNode: a skip_permissions role on a sandbox-level node opens in
+// default mode, so its approvals must still become cards; on an isolated node they pass.
+func TestSkipRoleNeedsIsolatedNode(t *testing.T) {
+	tm := startTeam(t)
+	pool, ctx := tm.w.e.Core.Pool, tm.w.ctx
+	if _, err := pool.Exec(ctx, `UPDATE at_employees SET spec = jsonb_set(spec, '{skip_permissions}', 'true')
+		WHERE project_id = $1 AND name = 'dev-1'`, tm.projectID); err != nil {
+		t.Fatal(err)
+	}
+	gen := protocol.OpenGen(tm.dev.gen)
+	ask := func(id string) {
+		tm.dev.send(protocol.TypeApprovalRequest, protocol.ApprovalRequest{ApprovalID: protocol.ApprovalID(id), SessionID: protocol.SessionID(tm.dev.session),
+			OpenGen: &gen, Source: "claude_can_use_tool", ToolName: "Bash", Input: json.RawMessage(`{"command":"make ` + id + `"}`),
+			Available: []protocol.ApprovalDecision{"allow", "deny"}})
+	}
+	ask("ap_plain")
+	eventually(t, "card shown", func() bool {
+		var cards []core.QuestionView
+		tm.b.must(200, "GET", "/api/conversations/"+tm.thread.ID+"/questions?status=open", nil, &cards)
+		return len(cards) == 1 && cards[0].Kind == "approval"
+	})
+	if _, err := pool.Exec(ctx, `UPDATE at_nodes SET isolated = true WHERE user_id = (SELECT user_id FROM at_projects WHERE id = $1)`, tm.projectID); err != nil {
+		t.Fatal(err)
+	}
+	ask("ap_isolated")
+	if r := waitResolve(t, tm.w, tm.dev, "ap_isolated"); r.Decision != "allow" || r.DecidedBy != approvals.DecidedRoleSkip {
+		t.Fatalf("isolated skip: %+v", r)
 	}
 }

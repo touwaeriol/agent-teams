@@ -79,7 +79,7 @@ func New(d Deps) *Server {
 		s.tokens = github.NewTokens(d.GitHub, s.apps, d.KV, box)
 	}
 	s.router = chi.NewRouter()
-	s.router.Use(middleware.RealIP, middleware.RequestID, s.logRequests, middleware.Recoverer)
+	s.router.Use(realIP, middleware.RequestID, s.logRequests, middleware.Recoverer)
 	s.router.Group(func(r chi.Router) {
 		r.Use(s.session)
 		s.api = humachi.New(r, apiConfig())

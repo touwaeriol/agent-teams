@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startHarness, type Harness, claudeOpen } from "./helpers/daemon.js";
+import { driverOf, disableFilters } from "../src/git/safe.js";
+import { gitEnv } from "../src/git/exec.js";
 
 let h: Harness;
 afterEach(async () => {
@@ -115,5 +117,56 @@ describe("git jobs", () => {
     h.console.command("git.purge", { job_id: "g_31", path: "projects/p9" });
     expect((await h.console.waitType("git.result", (b) => b.job_id === "g_31")).body.ok).toBe(true);
     expect(existsSync(join(h.opts.root, "projects/p9"))).toBe(false);
+  });
+
+  it("ignores hostile repo config an employee planted in the shared clone", async () => {
+    h = await startHarness();
+    const bare = makeRemote(h.dir);
+    h.console.command("git.prepare", prepare("g_40", "dev-4"));
+    expect((await h.console.waitType("git.result", (b) => b.job_id === "g_40")).body.ok).toBe(true);
+    const wt = join(h.opts.root, "projects/p1/threads/12/dev-4");
+    const marker = join(h.dir, "pwned");
+    const script = join(h.dir, "evil.sh");
+    writeFileSync(script, `#!/bin/sh\necho "$@" >> ${marker}\ncat\n`, { mode: 0o755 });
+    const decoy = join(h.dir, "decoy.git");
+    execFileSync("git", ["init", "--bare", "-q", decoy]);
+    writeFileSync(join(wt, ".gitattributes"), "* filter=evil\n");
+    writeFileSync(join(wt, "f.txt"), "x\n");
+    git(wt, "add", ".");
+    git(wt, "commit", "-m", "work");
+    git(wt, "config", "core.fsmonitor", script);
+    git(wt, "config", "filter.evil.clean", script);
+    git(wt, "config", "remote.origin.url", decoy);
+    git(wt, "config", "remote.origin.pushurl", decoy);
+    git(wt, "config", `url.${decoy}.insteadOf`, `file://${join(h.dir, "remotes")}`);
+    writeFileSync(join(wt, "f.txt"), "changed\n");
+
+    h.console.command("git.status", { job_id: "g_41", cwd: "projects/p1/threads/12/dev-4" });
+    expect((await h.console.waitType("git.result", (b) => b.job_id === "g_41")).body.ok).toBe(true);
+    h.console.command("git.push", { job_id: "g_42", project_id: "p1", repo: "acme/app", cwd: "projects/p1/threads/12/dev-4", refspec: "HEAD:refs/heads/thread/12/dev-4", employee: "dev-4", thread_no: 12 });
+    const pushed = await h.console.waitType("git.result", (b) => b.job_id === "g_42");
+    expect(pushed.body).toMatchObject({ ok: true });
+    h.console.command("git.prepare", prepare("g_43", "dev-5"));
+    expect((await h.console.waitType("git.result", (b) => b.job_id === "g_43")).body.ok).toBe(true);
+
+    expect(existsSync(marker) ? readFileSync(marker, "utf8") : "").toBe("");
+    expect(execFileSync("git", ["--git-dir", bare, "rev-parse", "thread/12/dev-4"], { encoding: "utf8" }).trim()).toBe(pushed.body.head_sha);
+    expect(execFileSync("git", ["--git-dir", decoy, "for-each-ref"], { encoding: "utf8" }).trim()).toBe("");
+  });
+});
+
+describe("git hardening helpers", () => {
+  it("finds filter driver names and disables them", () => {
+    expect(driverOf("filter.lfs.clean\ngit-lfs clean -- %f")).toBe("lfs");
+    expect(driverOf("filter.a.b.process\nx")).toBe("a.b");
+    expect(driverOf("core.fsmonitor\nx")).toBeNull();
+    expect(disableFilters(["lfs"])).toContain("filter.lfs.process=");
+  });
+
+  it("keeps AGENT_TEAMS_* and inherited GIT_CONFIG_* out of git's environment", () => {
+    const env = gitEnv({}, { PATH: "/bin", AGENT_TEAMS_NODE_TOKEN: "secret", GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.fsmonitor" });
+    expect(env.AGENT_TEAMS_NODE_TOKEN).toBeUndefined();
+    expect(env.GIT_CONFIG_COUNT).toBeUndefined();
+    expect(env.PATH).toBe("/bin");
   });
 });

@@ -1,6 +1,7 @@
 // Thread board (full page): header with controls, tabs 主要任务 / 任务池 /
 // 和组长的对话 / 交付, and an aside with cards, members and activity.
 // Below md it renders the MobileThread board instead.
+import { safeHref } from "@/lib/safeurl";
 import { ArrowLeft, ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -106,7 +107,7 @@ function ThreadHeader({ thread, project, view, setView }: { thread: ThreadView; 
             </Button>
             {thread.pr_url ? (
               <Button asChild>
-                <a href={thread.pr_url} target="_blank" rel="noreferrer">
+                <a href={safeHref(thread.pr_url)} target="_blank" rel="noreferrer">
                   查看 PR #{thread.pr_number}
                 </a>
               </Button>
@@ -302,14 +303,14 @@ function DeliveryView({ thread }: { thread: ThreadView }) {
           <DeliveryRow key={e.id} branch={`${e.head_branch} → ${thread.branch}`} what={`${e.employee} · ${e.task_id}${e.error ? ` · ${e.error}` : ""}`} look={look} />
         );
       })}
-      <DeliveryRow branch={`${thread.branch || "讨论串分支"} → ${thread.base_branch}`} what="讨论串 PR" look={pr} href={thread.pr_url ?? undefined} />
+      <DeliveryRow branch={`${thread.branch || "讨论串分支"} → ${thread.base_branch}`} what="讨论串 PR" look={pr} href={safeHref(thread.pr_url)} />
       {(checks.data ?? []).length > 0 && (
         <div className="flex flex-col gap-1.5 pt-1">
           <span className="text-xs text-muted-foreground">CI 检查</span>
           {(checks.data ?? []).map((c) => {
             const look = checkLook(c);
             return (
-              <a key={c.name} href={c.url || undefined} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-[13px]">
+              <a key={c.name} href={safeHref(c.url)} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-[13px]">
                 <Dot color={look.tone} />
                 <span className="font-mono">{c.name}</span>
                 <span style={{ color: look.tone }}>{look.label}</span>

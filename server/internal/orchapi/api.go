@@ -87,6 +87,7 @@ var errorMap = []struct {
 	{delivery.ErrNoPR, 409, "no_pr"},
 	{delivery.ErrChecksPending, 409, "checks_pending"},
 	{delivery.ErrNoWorkflow, 409, "no_workflow"},
+	{delivery.ErrBadURL, 422, "validation"},
 	{ghops.ErrNoRepo, 409, "no_repo"},
 	{approvals.ErrAnswered, 409, "already_answered"},
 	{approvals.ErrBadAnswer, 422, "validation"},
