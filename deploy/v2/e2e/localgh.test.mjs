@@ -45,6 +45,7 @@ before(async () => {
   commitFile(work, "feat-a", "a.txt", "a\n");
   commitFile(work, "feat-b", "README.md", "conflict\n");
   commitFile(work, "feat-c", "README.md", "other\n");
+  execFileSync("git", ["clone", "-q", "--bare", bare, join(root, "o", "s.git")]);
   proc = spawn(process.execPath, [join(here, "localgh.mjs"), "--root", root, "--port", String(port)],
     { env: { ...process.env, LOCALGH_TOKENS: "good" }, stdio: "ignore" });
   for (let i = 0; i < 50; i++) {
@@ -89,9 +90,21 @@ test("merges: merge commit, 204 when already merged, 409 on conflict", async () 
 test("pull requests: create, read, merge", async () => {
   const pr = await call("POST", "/pulls", { head: "feat-a", base: "main", title: "A" });
   assert.equal(pr.status, 201);
-  assert.equal((await call("GET", `/pulls/${pr.json.number}`)).json.merged, false);
+  const got = (await call("GET", `/pulls/${pr.json.number}`)).json;
+  assert.equal(got.merged, false);
+  assert.equal(got.number, pr.json.number); // a number, not the string from the URL
   assert.equal((await call("PUT", `/pulls/${pr.json.number}/merge`, { merge_method: "merge" })).status, 200);
   assert.equal((await call("GET", `/pulls/${pr.json.number}`)).json.merged, true);
   assert.equal((await call("GET", "/contents/a.txt?ref=main")).status, 200);
   assert.equal((await call("GET", "/contents/missing?ref=main")).status, 404);
+});
+
+test("pull requests are numbered per repository and need an existing base", async () => {
+  const other = `http://127.0.0.1:${port}/repos/o/s`;
+  const res = await fetch(`${other}/pulls`, { method: "POST", headers: { Authorization: "Bearer good" },
+    body: JSON.stringify({ head: "feat-a", base: "main", title: "S" }) });
+  assert.equal(res.status, 201);
+  assert.equal((await res.json()).number, 1);
+  assert.equal((await call("GET", "/pulls/1")).json.title, "A");
+  assert.equal((await call("POST", "/pulls", { head: "feat-a", base: "nope", title: "X" })).status, 422);
 });

@@ -11,18 +11,23 @@ docker build -f server/Dockerfile -t agent-teams-server:e2e .
 deploy/v2/e2e/up.sh "$S" /path/to/v1-schema.sql     # writes deploy/v2/.env.e2e (git-ignored), seeds v1 rows
 node deploy/v2/e2e/v1_check.mjs "$S/v1.json"        # v1 login, session, node token, sealed token, team, conversations
 node deploy/v2/e2e/run.mjs "$S"                     # coordinator → thread → lead → dev → approval → push → merge queue
+node deploy/v2/e2e/run_multi.mjs "$S"               # two repos (base of one only in the context) + designer publish_file
 # screenshots (Playwright image, NODE_PATH with the playwright package):
 node deploy/v2/e2e/screenshots.cjs http://127.0.0.1:<PORT> <out> <project-id> 1
+node deploy/v2/e2e/screenshots_multi.cjs http://127.0.0.1:<PORT> <out> <project-id> 1 <deliverable-id>   # ids in $S/multi-state.json
 ENV_FILE=deploy/v2/.env.e2e deploy/v2/compose.sh -f deploy/v2/docker-compose.e2e.yml down
 node --test deploy/v2/e2e/localgh.test.mjs          # the emulator's own tests
 ```
 
 | File | What |
 | --- | --- |
-| `up.sh` | env file with random secrets and a free port 3470–3499, bare repos `local/hello` and `local/v1repo`, v1 schema load, `v1_seed.py`, then `up --wait` |
+| `up.sh` | env file with random secrets and a free port 3470–3499, bare repos `local/hello`, `local/v1repo`, `local/web` and `local/api` (with a `develop` branch), v1 schema load, `v1_seed.py`, then `up --wait` |
 | `v1_seed.py` | creates a user, session, node, team YAML, sealed PAT connection, project and conversation through `agent_teams.server` (the v1 code) |
 | `v1_check.mjs` | proves v2 accepts all of it (the PAT is checked by localgh, which accepts only that token) |
-| `localgh.mjs` | refs, merges (`git merge-tree`), pull requests, contents, empty check runs; `LOCALGH_TOKENS` restricts tokens |
+| `localgh.mjs` | refs, merges (`git merge-tree`), pull requests (numbered per repository, base must exist), contents, empty check runs; `LOCALGH_TOKENS` restricts tokens |
+| `harness.mjs` | login, daemon install/start, approval answering, git and SQL helpers shared by the runs |
+| `run_multi.mjs` | project on `local/web` + `local/api` (`develop` stated only in the project context), CI off, the "设计师" preset; one request touching both repositories plus a design: checks per-repository bases, lazy thread branches, files only in their own repository, one PR per repository (web → main, api → develop), acceptance merging both, and the published page served from a signed URL with a CSP sandbox (tampered signature → 403). Roles use `--model haiku` by default; about 15 minutes |
+| `screenshots_multi.cjs` | New Project with two repositories, Team skills, Deliverables, the viewer, the thread and its delivery tab |
 | `run.mjs` | the real-Claude run; the daemon runs with XDG dirs under the scratch dir and never reads `~/.config/agent-teams/node.env`. Roles use `--model sonnet` by default to keep it cheap. `E2E_DAEMON=node/dist/node.mjs` runs a local build instead of the served tarball |
 | `screenshots.cjs` | Main + thread panel, Thread, Office, Team, Nodes at deviceScaleFactor 2 |
 

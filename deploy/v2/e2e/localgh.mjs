@@ -7,7 +7,7 @@
 // Repositories live at <root>/<owner>/<name>.git, the same layout the node daemon clones from
 // with --git-base-url file://<root>. Point the control plane at it with GITHUB_API_URL.
 // Merges use `git merge-tree --write-tree` (git >= 2.38); pull requests are kept in
-// <root>/.localgh-pulls.json. Check runs are always empty (no CI).
+// <root>/.localgh-pulls.json, numbered per repository. Check runs are always empty (no CI).
 // LOCALGH_TOKENS=a,b makes it accept only those bearer tokens (401 otherwise) and log which
 // one each request used, so a test can prove the control plane decrypted a sealed token.
 import { execFile } from "node:child_process";
@@ -136,12 +136,17 @@ const pullsFile = () => join(root, ".localgh-pulls.json");
 const loadPulls = () => (existsSync(pullsFile()) ? JSON.parse(readFileSync(pullsFile(), "utf8")) : {});
 const savePulls = (p) => writeFileSync(pullsFile(), JSON.stringify(p, null, 2));
 
+// Pull requests are numbered per repository, like GitHub: keys are "<owner>/<name>#<number>".
+const pullKey = (slug, number) => `${slug}#${number}`;
+
 async function createPull(repo, slug, body) {
   const pulls = loadPulls();
-  const number = Object.keys(pulls).length + 1;
-  pulls[number] = { slug, head: body.head, base: body.base, title: body.title, body: body.body ?? "", state: "open", merged: false };
+  if (!(await tryGit(repo, ["rev-parse", "--verify", "--quiet", `refs/heads/${body.base}`]))) throw new HttpError(422, `base ${body.base} does not exist`);
+  const number = Object.values(pulls).filter((p) => p.slug === slug).length + 1;
+  const pr = { slug, number, head: body.head, base: body.base, title: body.title, body: body.body ?? "", state: "open", merged: false };
+  pulls[pullKey(slug, number)] = pr;
   savePulls(pulls);
-  return [201, await pullView(repo, number, pulls[number])];
+  return [201, await pullView(repo, number, pr)];
 }
 
 async function pullView(repo, number, pr) {
@@ -150,15 +155,15 @@ async function pullView(repo, number, pr) {
     title: pr.title, additions: 0, deletions: 0, head: { sha: sha ?? pr.head_sha ?? "", ref: pr.head }, base: { ref: pr.base } };
 }
 
-async function getPull(repo, number) {
-  const pr = loadPulls()[number];
+async function getPull(repo, slug, number) {
+  const pr = loadPulls()[pullKey(slug, number)];
   if (!pr) throw new HttpError(404, "Not Found");
-  return [200, await pullView(repo, number, pr)];
+  return [200, await pullView(repo, pr.number, pr)];
 }
 
-async function mergePull(repo, number) {
+async function mergePull(repo, slug, number) {
   const pulls = loadPulls();
-  const pr = pulls[number];
+  const pr = pulls[pullKey(slug, number)];
   if (!pr) throw new HttpError(404, "Not Found");
   if (pr.merged) throw new HttpError(405, "Pull Request is not mergeable");
   const [, out] = await mergeCommit(repo, pr.base, pr.head, `${pr.title} (#${number})`);
@@ -184,8 +189,8 @@ const routes = [
   ["GET", /^\/repos\/([^/]+)\/([^/]+)\/contents\/(.+)$/, (m, _b, u) => contents(repoPath(m[1], m[2]), m[3], u.searchParams.get("ref"))],
   ["GET", /^\/repos\/([^/]+)\/([^/]+)\/rulesets$/, () => [200, []]],
   ["POST", /^\/repos\/([^/]+)\/([^/]+)\/pulls$/, (m, b) => createPull(repoPath(m[1], m[2]), `${m[1]}/${m[2]}`, b)],
-  ["GET", /^\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)$/, (m) => getPull(repoPath(m[1], m[2]), m[3])],
-  ["PUT", /^\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)\/merge$/, (m) => mergePull(repoPath(m[1], m[2]), m[3])],
+  ["GET", /^\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)$/, (m) => getPull(repoPath(m[1], m[2]), `${m[1]}/${m[2]}`, m[3])],
+  ["PUT", /^\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)\/merge$/, (m) => mergePull(repoPath(m[1], m[2]), `${m[1]}/${m[2]}`, m[3])],
 ];
 
 async function readBody(req) {

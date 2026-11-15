@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Local v2 stack on a v1 database: generates deploy/v2/.env.e2e (random secrets, free port),
-# bare repositories for localgh, loads the production v1 schema, seeds it with the real v1
+# bare repositories for localgh (local/hello, local/v1repo, and local/web + local/api with a develop
+# branch for run_multi.mjs), loads the production v1 schema, seeds it with the real v1
 # Python code, then runs migrate + control-plane + localgh.
 #   deploy/v2/e2e/up.sh <scratch-dir> <v1-schema.sql>
 set -euo pipefail
@@ -46,6 +47,20 @@ bare_repo() {
   rm -rf "$work"
 }
 
+# develop_branch adds a develop branch one commit ahead of main (run_multi.mjs states it as the
+# repository's base branch only in the project context).
+develop_branch() {
+  local bare="$dir/gitroot/$1.git" work="$dir/seed-develop"
+  git --git-dir "$bare" rev-parse --verify --quiet refs/heads/develop > /dev/null && return
+  git clone -q "$bare" "$work"
+  git -C "$work" checkout -q -b develop
+  printf 'Work for the next release happens on develop.\n' > "$work/DEVELOP.md"
+  git -C "$work" add DEVELOP.md
+  git -C "$work" -c user.name=e2e -c user.email=e2e@localhost commit -q -m "Start develop"
+  git -C "$work" push -q origin develop
+  rm -rf "$work"
+}
+
 env_value() { grep -E "^$1=" "$env_file" | cut -d= -f2-; }
 
 load_v1() {
@@ -63,6 +78,9 @@ write_env
 mkdir -p "$dir/data" "$dir/gitroot"
 bare_repo local/hello hello
 bare_repo local/v1repo v1repo
+bare_repo local/web web
+bare_repo local/api api
+develop_branch local/api
 compose up -d --wait postgres valkey
 load_v1
 compose up -d --wait control-plane localgh
