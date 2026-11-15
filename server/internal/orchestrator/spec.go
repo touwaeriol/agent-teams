@@ -145,20 +145,39 @@ func employeeRef(e core.Employee, t *core.Thread) protocol.EmployeeRef {
 	return ref
 }
 
-func model(e core.Employee) string {
-	if e.Spec.Model != "" {
-		return e.Spec.Model
+// model is the project override for the employee's tier, else the role's model, else the default.
+func model(e core.Employee, p store.Project) string {
+	override := p.ThreadModel
+	if e.Tier == "coordinator" {
+		override = p.CoordinatorModel
 	}
-	return DefaultModel
+	return firstNonEmpty(override, e.Spec.Model, DefaultModel)
+}
+
+// effort is the project's thread effort for leads and members, else the role's.
+func effort(e core.Employee, p store.Project) string {
+	if e.Tier == "coordinator" {
+		return e.Spec.Effort
+	}
+	return firstNonEmpty(p.ThreadEffort, e.Spec.Effort)
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func claudeOptions(in sessionInput) protocol.ClaudeSessionOptions {
 	e := in.emp
 	system := in.system
-	c := protocol.ClaudeSessionOptions{Model: model(e), SystemAppend: &system, SettingSources: []string{},
+	c := protocol.ClaudeSessionOptions{Model: model(e, in.project), SystemAppend: &system, SettingSources: []string{},
 		AllowedTools: []string{"mcp__platform__*"}}
-	if e.Spec.Effort != "" {
-		c.Effort = &e.Spec.Effort
+	if eff := effort(e, in.project); eff != "" {
+		c.Effort = &eff
 	}
 	if e.Spec.MaxTurns != nil {
 		c.MaxTurns = e.Spec.MaxTurns
@@ -217,7 +236,7 @@ func memberClaude(c *protocol.ClaudeSessionOptions, in sessionInput) {
 func codexOptions(in sessionInput) protocol.CodexSessionOptions {
 	e := in.emp
 	dev := in.system
-	c := protocol.CodexSessionOptions{Model: model(e), DeveloperInstructions: &dev, Sandbox: "read-only", ApprovalPolicy: "never"}
+	c := protocol.CodexSessionOptions{Model: firstNonEmpty(e.Spec.Model, DefaultModel), DeveloperInstructions: &dev, Sandbox: "read-only", ApprovalPolicy: "never"}
 	switch {
 	case readOnly(e):
 	case SkipPermissions(e, in.node):

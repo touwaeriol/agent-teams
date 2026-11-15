@@ -57,6 +57,8 @@ func (a *API) Register(api huma.API, r chi.Router) {
 	a.registerStreams(api)
 	a.registerOffice(api)
 	a.registerLegacy(api)
+	a.registerSchedules(api)
+	a.registerLibrary(api)
 }
 
 func op(id, method, path, tag string, extra ...func(*huma.Operation)) huma.Operation {

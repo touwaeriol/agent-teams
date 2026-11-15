@@ -355,6 +355,22 @@ func (o *Orchestrator) EnsureCoordinator(ctx context.Context, userID, projectID 
 	return emp, conv, err
 }
 
+// PostToCoordinator delivers a message to the project coordinator as if the user sent it
+// (scheduled tasks); meta marks where it came from.
+func (o *Orchestrator) PostToCoordinator(ctx context.Context, userID, projectID, content string, meta map[string]any) (core.Message, error) {
+	var m core.Message
+	err := o.core.InTx(ctx, func(tx *core.Tx) error {
+		emp, conv, err := o.ensureCoordinatorTx(ctx, tx, userID, projectID)
+		if err != nil {
+			return err
+		}
+		rec := &core.NewMessage{ConversationID: conv, Role: "user", Author: "user", Kind: "chat", Content: content, Meta: meta}
+		m, err = o.Deliver(ctx, tx, emp, Delivery{Text: content, Kind: "user", Priority: "next", Record: rec})
+		return err
+	})
+	return m, err
+}
+
 func (o *Orchestrator) ensureCoordinatorTx(ctx context.Context, tx *core.Tx, userID, projectID string) (core.Employee, string, error) {
 	conv, err := core.EnsureCoordinatorConversation(ctx, tx, userID, projectID)
 	if err != nil {

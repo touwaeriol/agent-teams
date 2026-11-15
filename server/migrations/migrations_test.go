@@ -37,7 +37,8 @@ func TestUpOnEmptyDatabase(t *testing.T) {
 	if err != nil || len(again) != 0 {
 		t.Fatalf("second up: %v %v", again, err)
 	}
-	assertTables(t, db, "at_users", "at_roles", "at_threads", "at_events_"+monthSuffix(t, db), "at_office_layouts", "at_audit_log")
+	assertTables(t, db, "at_users", "at_roles", "at_threads", "at_events_"+monthSuffix(t, db), "at_office_layouts", "at_audit_log",
+		"at_schedules", "at_rate_limit_waits")
 }
 
 // v1Seed is a little production-like data written with the v1 schema.
@@ -163,7 +164,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 80 {
+	if migrations.Latest() != 90 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }

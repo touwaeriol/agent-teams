@@ -186,7 +186,7 @@ function MemoryBox({ pid, overview }: { pid: string; overview: OverviewView }) {
       ) : (
         <span className="text-[13px] text-muted-foreground">还没有记忆。</span>
       )}
-      <Link to={`/projects/${pid}/settings#memory`} className="text-[13px] underline-offset-2 hover:underline">
+      <Link to={`/projects/${pid}/settings/memory`} className="text-[13px] underline-offset-2 hover:underline">
         查看和编辑
       </Link>
     </section>

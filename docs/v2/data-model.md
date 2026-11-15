@@ -34,6 +34,8 @@ at_users ─┬─ at_sessions
                           ├─ at_project_memory
                           ├─ at_permission_rules
                           └─ at_office_layouts（项目覆盖布局，可选）
+                          ├─ at_rate_limit_waits（碰到使用限额的员工，§2.10）
+                          └─ at_schedules（定时任务，§2.10）
 at_settings（全局键值）  at_audit_log  goose_db_version
 ```
 
@@ -196,6 +198,13 @@ ALTER TABLE at_projects
     --  "allow_workflow_edits":false}    -- 推送作业令牌是否带 workflows: write
     -- require_acceptance=false 时 PR 的必需 check 通过后按 merge_method 自动合并（architecture.md §8.4）
   ADD COLUMN IF NOT EXISTS office_layout TEXT NOT NULL DEFAULT '';          -- '' = 全局默认；否则布局 id
+
+ALTER TABLE at_projects                                                     -- 00090
+  ADD COLUMN IF NOT EXISTS icon TEXT NOT NULL DEFAULT '',                   -- '' = 首字母配稳定底色；表情；或 color:#RRGGBB
+  ADD COLUMN IF NOT EXISTS coordinator_model TEXT NOT NULL DEFAULT '',      -- '' = 统筹岗位的 model
+  ADD COLUMN IF NOT EXISTS thread_model TEXT NOT NULL DEFAULT '',           -- '' = 组长/成员各自岗位的 model
+  ADD COLUMN IF NOT EXISTS thread_effort TEXT NOT NULL DEFAULT '',          -- '' = 岗位的 effort；low | medium | high | xhigh | max
+  ADD COLUMN IF NOT EXISTS auto_resume BOOLEAN NOT NULL DEFAULT FALSE;      -- 使用限额重置后自动继续讨论串（§2.10）
 
 CREATE TABLE at_project_repos (     -- 项目绑定的仓库（00070），position 即界面上的顺序
   project_id        TEXT NOT NULL REFERENCES at_projects(id) ON DELETE CASCADE,
@@ -618,6 +627,47 @@ CREATE TABLE at_office_layouts (                    -- 可选：数据库里的�
 );
 ```
 
+### 2.10 定时任务与使用限额（00090）
+
+```sql
+CREATE TABLE at_rate_limit_waits (   -- 员工碰到 Claude 使用限额，等到 reset_at
+  employee_id TEXT PRIMARY KEY REFERENCES at_employees(id) ON DELETE CASCADE,
+  project_id  TEXT NOT NULL REFERENCES at_projects(id) ON DELETE CASCADE,
+  thread_id   TEXT REFERENCES at_threads(id) ON DELETE CASCADE,   -- NULL = 统筹
+  reset_at    TIMESTAMPTZ NOT NULL,                               -- rate_limited.retry_at；再次碰到取较晚的
+  detail      TEXT NOT NULL DEFAULT '',                           -- five_hour / seven_day …
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX at_rate_limit_waits_reset ON at_rate_limit_waits (reset_at);
+-- 写入：session.event rate_limited 且 retry_at 至少在 2 分钟后（更短的是 SDK 自己的 API 重试）；
+--   同一事务里讨论串 running/waiting/queued → paused（pause_reason = 'rate_limit'，打断各成员回合）。
+-- 有行期间该员工 turn_ended 不催办（§7.3 的提醒）。
+-- 到期：timers 循环（advisory lock agent-teams:timers，FOR UPDATE SKIP LOCKED）删行；项目 auto_resume
+--   时恢复 pause_reason = 'rate_limit' 的讨论串，并给员工发系统消息“使用限额已重置，请继续”。
+
+CREATE TABLE at_schedules (          -- 定时发给项目统筹的消息
+  id          TEXT PRIMARY KEY,                    -- sc_…
+  project_id  TEXT NOT NULL REFERENCES at_projects(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  cron        TEXT NOT NULL,                       -- 五段：分 时 日 月 周
+  timezone    TEXT NOT NULL DEFAULT 'UTC',         -- IANA 时区（二进制内嵌 tzdata）
+  message     TEXT NOT NULL,
+  enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+  next_run_at TIMESTAMPTZ,                         -- 停用时 NULL
+  last_run_at TIMESTAMPTZ,
+  last_error  TEXT NOT NULL DEFAULT '',            -- 最近一次投递失败的原因
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX at_schedules_project ON at_schedules (project_id, created_at);
+CREATE INDEX at_schedules_due ON at_schedules (next_run_at) WHERE enabled;
+-- 触发：认领 enabled AND next_run_at <= now() 的一行（FOR UPDATE SKIP LOCKED），同一事务写 last_run_at、
+--   从现在算出下一次 next_run_at，提交后把 “【定时任务：name】\nmessage” 作为用户消息投给统筹；
+--   停机错过的只补一次，不会重复触发。
+```
+
+资料库“添加”的文件（`POST /api/projects/{pid}/library`）就是一条 `at_deliverables`（`published_by = 'user'`）加一条 `at_deliverable_files` 第 1 版，与 `publish_file` 同样的类型和 5 MB 限制、同样的签名 URL 沙箱访问。项目用量（`GET /api/projects/{pid}/usage`）直接汇总 `at_usage`，不另建表。
+
 ## 3. 从 v1 表的映射
 
 | v1 表 | v2 处理 | 时机 | 说明 |
@@ -648,6 +698,8 @@ CREATE TABLE at_office_layouts (                    -- 可选：数据库里的�
 7. `00100_drop_v1.sql`（P6 后）：删 `at_teams`、`at_conversations.history`；`at_tasks.output` 并入 `summary`；去掉不再需要的默认值。
 
 `00080_plugins.sql`：`at_roles.plugins`、`at_plugins`、`at_plugin_versions`，`at_skills.user_id` 可为空（管理员内置技能）及其唯一索引（architecture.md §6.5）。
+
+`00090_project_chrome.sql`：`at_projects.icon / coordinator_model / thread_model / thread_effort / auto_resume`、`at_rate_limit_waits`、`at_schedules`（§2.10）。
 
 `00070_project_repos.sql`：`at_project_repos`、`at_thread_repos`、`at_merge_queue.repo`、`at_tasks.pushed`；把每个项目的 repo/branch/git_connection_id 迁进去（基准分支写进 context），给已有讨论串和队列条目补上仓库（architecture.md §8.1）。
 

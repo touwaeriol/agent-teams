@@ -57,6 +57,9 @@ RepoRef         = {repo: "owner/name", git_connection_id: string|null}
                    pinned, archived, work_mode: "worktree"|"clone", auto_approve,
                    require_acceptance,      // true：用户验收后平台合并；false：PR 的必需 check 通过后平台按 merge_method 自动合并（architecture.md §8.4）
                    delivery: DeliverySettings, office_layout: string, waiting: number, threads_active: number,
+                   icon: string,            // '' = 名字首字母配稳定底色；一个表情；或 "color:#RRGGBB" = 首字母配该颜色
+                   coordinator_model: string, thread_model: string, thread_effort: string,  // 项目级覆盖，'' = 跟随岗位模板（下次开会话生效）
+                   auto_resume: boolean,    // 使用限额重置后自动继续讨论串（data-model.md §2.10）
                    created_at, updated_at}
 DeliverySettings = {gates: {review, decision, merge_queue}, ci: {mode, required, appear_timeout_s, timeout_s, on_missing},
                    merge_method: "squash"|"merge"|"rebase", approval_timeout_s: number|null,
@@ -155,6 +158,8 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | POST | `/api/threads/{tid}/reject` | `{reason}` → `ThreadView`（原因发给组长，回到 running；`require_acceptance` 关时也可用，在自动合并前拦下） |
 | GET | `/api/threads/{tid}/usage` | → `{cost_usd_est, tokens: {...}, by_employee: [...]}` |
 
+讨论串里的员工碰到 Claude **使用限额**（`session.event` 的 `rate_limited` 带 `retry_at`，且离现在至少 2 分钟；几秒的 API 重试不算）时，平台记下等待（`at_rate_limit_waits`），把讨论串暂停成 `status = "paused"`、`pause_reason = "rate_limit"`，等待期间该员工回合结束不再催（不发“任务还没完成”的提醒）。到 `retry_at` 后：项目开了 `auto_resume` 就恢复讨论串，并给碰到限额的员工发一条系统消息让它从中断处继续；没开则只清掉等待，讨论串保持暂停，由用户手动继续。统筹碰到限额同理（没有讨论串可暂停，到点只发消息）。
+
 和组长的对话就是该讨论串的 `conversation_id`（= `tid`），复用 3.2 的消息接口。
 
 ### 3.4 Overview（项目首页：讨论串一览）
@@ -168,16 +173,19 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/projects/{pid}/deliverables?kind=&thread=&q=&cursor=` | → 分页 `DeliverableView`；`q` 搜索标题和 `detail.summary`（`pg_trgm`） |
+| GET | `/api/projects/{pid}/deliverables?kind=&thread=&q=&cursor=` | → `{items: DeliverableView[], next_cursor, storage_bytes}`；`q` 搜索标题和 `detail.summary`（`pg_trgm`）；`storage_bytes` = 项目托管文件（每个版本都算）占用的字节数，资料库底部“已使用” |
 | POST | `/api/projects/{pid}/deliverables` | `{kind, title, url, thread_no?}` → 201（用户手动登记链接） |
 | POST | `/api/projects/{pid}/deliverables/request` | `{kind, brief}` → 202 `MessageView`（“新做一个”磁贴） |
 | PATCH / DELETE | `/api/deliverables/{id}` | 改标题 / 删除 |
+| POST | `/api/projects/{pid}/library` | 资料库“添加”：`{name, data: base64, title?}` → 201 `DeliverableView`。单个文件，类型与大小限制同 `publish_file`（扩展名白名单，≤ 5 MB，422 `validation`），存成托管交付物第 1 版：`published_by = "user"`，`detail = {by: "user", hosted: true, version: 1, entry, content_type, render, files: 1, size}`，`kind` 按渲染方式（html/图片 → design，Markdown/PDF/文本 → doc，json/csv → data），之后和员工发布的文件一样经签名 URL 沙箱访问 |
 | GET | `/api/deliverables/{id}/files?version=` | 托管交付物（`detail.hosted`）的一版（默认最新）→ `{deliverable_id, version, versions: [{version, files, size, published_by, created_at}], entry, render: html\|markdown\|image\|pdf\|text, files: [{path, content_type, size, sha256}], base_url, entry_url, expires_at, isolated}`；`base_url` 是 2 小时有效的签名目录 URL（`architecture.md` §6.5），`isolated` = 配置了 `AGENT_TEAMS_ARTIFACT_ORIGIN` |
 | GET | `/api/deliverables/{id}/comments` | → `{items: [{id, version, text, sent_to, created_at}]}` |
 | POST | `/api/deliverables/{id}/comments` | `{text, version?}` → 201：保存并作为消息投递给发布者（不在了给组长），`sent_to` 是收到它的员工 |
 | GET | `/files/<token>/<path>` | 签名 URL 下的文件（不需要 cookie；CSP sandbox、nosniff，见 `architecture.md` §6.5） |
 
 **“新做一个”磁贴**（设计、文档、幻灯片、看板 dashboard、白板 board）：不是新流程，而是给统筹发一条模板消息。`POST …/deliverables/request` 等价于 `POST /api/conversations/<统筹对话>/messages`，正文 = `做一个<kind 的中文名>：<brief>`（例如“做一个幻灯片：给投资人的 v2 进展介绍”），`meta.request_kind = <kind>`；统筹照常决定是否开讨论串，产出由员工 `publish_deliverable(kind, …)` 登记。前端在弹出框里收 `brief`，提交后跳到 Main 页的统筹对话。
+
+网页里“资料库”就是这个列表：主界面右侧的面板（`/projects/:pid?panel=library`）和全屏页 `/projects/:pid/deliverables`，表格列 名称 / 所有者（`published_by`，`user` 显示为“你”）/ 修改日期 / 大小（`detail.size`）/ 类型（托管文件按扩展名，其余按 kind），可按类型筛选、搜索、切换网格。
 
 PR 类交付物的 `detail.state` 由平台轮询 / webhook 更新。设计类和托管交付物（员工用 `publish_file` 发布）在查看器 DesignViewer（`/projects/:pid/deliverables/:id`）里打开：HTML 在 sandbox iframe 里，Markdown 安全渲染，图片内联，可切换版本，批注发回给员工。
 
@@ -186,7 +194,14 @@ PR 类交付物的 `detail.state` 由平台轮询 / webhook 更新。设计类�
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | POST | `/api/projects` | `{name, description?, context?, repos?: RepoRef[], work_mode?, auto_approve?, require_acceptance?, delivery?, first_message?}` → 201 `ProjectView`。`first_message` 有值时投递给统筹（v1 是新建对话再发消息） |
-| PATCH | `/api/projects/{pid}` | `name, description, context, pinned, archived`，`repos?: RepoRef[]`（整体替换并保持顺序，`[]` 解绑全部；每个仓库要有能访问它的连接，重复 422）+ `work_mode, auto_approve, require_acceptance, delivery, office_layout`（`delivery.notify_on_ask` = “成员提问时通知我”；`auto_approve` 要求节点隔离级别满足 `architecture.md` §10.3，否则 409 `isolation_required`） |
+| PATCH | `/api/projects/{pid}` | `name, description, context, pinned, archived`，`repos?: RepoRef[]`（整体替换并保持顺序，`[]` 解绑全部；每个仓库要有能访问它的连接，重复 422）+ `work_mode, auto_approve, require_acceptance, delivery, office_layout`（`delivery.notify_on_ask` = “成员提问时通知我”；`auto_approve` 要求节点隔离级别满足 `architecture.md` §10.3，否则 409 `isolation_required`）+ `icon`（`''`、一个表情或 `color:#RRGGBB`，其他 422）、`coordinator_model`、`thread_model`（模型 id，`''` = 跟随岗位）、`thread_effort`（`'' \| low \| medium \| high \| xhigh \| max`，即 SDK 0.3.325 的 `effort`）、`auto_resume`。模型覆盖在开会话时生效：统筹用 `coordinator_model`，组长和成员用 `thread_model` 与 `thread_effort`（Codex 岗位不受影响） |
+| GET | `/api/projects/{pid}/usage?days=7` | 项目用量（`at_usage`，每个回合结束时 SDK 报告的 token 和费用）→ `{days, cost_usd_est, tokens: {input, output, cache_read, cache_write}, turns, by_day: [{day, cost_usd, tokens}], by_thread: [{thread_no: number\|null, title, cost_usd, tokens}], by_employee: [{employee, thread_no, cost_usd, tokens}]}`；`thread_no = null` 是项目统筹；`days` 1–90，缺省 7；按天按 UTC 日期分组 |
+| GET | `/api/projects/{pid}/schedules` | 定时任务 → `ScheduleView[]` = `{id, project_id, name, cron, timezone, message, enabled, next_run_at, last_run_at, last_error, created_at, updated_at}` |
+| POST | `/api/projects/{pid}/schedules` | `{name, cron, timezone?, message, enabled?}` → 201。`cron` 五段（分 时 日 月 周，支持 `*`、数字、`a-b`、`/n`、逗号；周 0 和 7 都是周日；日和周都限定时任一满足即可），`timezone` 是 IANA 名（缺省 UTC，网页传浏览器时区）；表达式或时区不对 422（`fields[0].path` 指出字段）；每个项目最多 20 个 |
+| PATCH / DELETE | `/api/schedules/{id}` | 同上字段的部分更新（保存后从现在重新算 `next_run_at`；停用时为 null）/ 删除 |
+| POST | `/api/schedules/{id}/run` | → 202：现在发一次（不改 `next_run_at`） |
+
+定时任务到点时，平台把 `【定时任务：<name>】\n<message>` 作为用户消息发给项目统筹（`meta = {schedule_id, schedule_name}`），统筹照常决定怎么做。调度在控制台进程里：一个进程持有 advisory lock `agent-teams:timers` 每 20 秒检查一次，到期的行 `FOR UPDATE SKIP LOCKED` 认领并在同一事务里推进 `next_run_at`，然后再投递，所以多副本、重启都不会重复触发；停机期间错过的多次只补发一次。投递失败时写入 `last_error`。
 | GET | `/api/projects/{pid}/memory` | → `MemoryView[]`（`{id, text, source, pinned, created_at}`） |
 | POST | `/api/projects/{pid}/memory` | `{text}` → 201（source = user） |
 | PATCH / DELETE | `/api/projects/{pid}/memory/{id}` | `{text?, pinned?}` / 删除 |
@@ -307,11 +322,11 @@ v2 用户在项目侧栏的“旧对话”分组和 `/projects/:pid/legacy/:cid`
 | `/login` | Login |
 | `/projects` → 最近项目 | — |
 | `/projects/new` | NewProject |
-| `/projects/:pid` | Main（统筹对话 + 讨论串面板） |
+| `/projects/:pid` | Main（统筹对话 + 讨论串面板；`?panel=library` 右侧换成资料库，`?panel=none` 收起右侧）。顶栏：项目图标和名字（切换项目）、资料库、讨论串面板开关、办公室、“…”菜单（项目首页 / 定时任务 / 设置） |
 | `/projects/:pid/overview` | Overview |
 | `/projects/:pid/threads/:no` | Thread（全屏） / MobileThread |
 | `/projects/:pid/deliverables` | Deliverables |
 | `/projects/:pid/office` | Office |
-| `/projects/:pid/settings` | ProjectSettings |
+| `/projects/:pid/settings` · `/projects/:pid/settings/:section` | ProjectSettings：Main 上打开的设置对话框，分区 `general`（通用）· `memory`（记忆）· `environment`（环境）· `usage`（使用情况）· `advanced`（高级），关闭回到 `/projects/:pid` |
 | `/projects/:pid/legacy/:cid` | 旧对话（只读） |
 | `/settings/team` · `/settings/nodes` · `/settings/git` · `/settings/appearance` · `/settings/admin` · `/setup/github` | Team · Nodes · GitHub · 外观 · Admin · GitHub App 创建 |

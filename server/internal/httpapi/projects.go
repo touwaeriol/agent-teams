@@ -27,6 +27,11 @@ type ProjectView struct {
 	RequireAcceptance bool      `json:"require_acceptance"`
 	Delivery          Delivery  `json:"delivery"`
 	OfficeLayout      string    `json:"office_layout"`
+	Icon              string    `json:"icon" doc:"'' = initial on the default color; an emoji; or color:#RRGGBB"`
+	CoordinatorModel  string    `json:"coordinator_model" doc:"'' = the coordinator role's model"`
+	ThreadModel       string    `json:"thread_model" doc:"'' = each lead/member role's model"`
+	ThreadEffort      string    `json:"thread_effort" doc:"'' = each role's effort; low | medium | high | xhigh | max"`
+	AutoResume        bool      `json:"auto_resume" doc:"Continue threads paused by a usage limit once it resets"`
 	Waiting           int       `json:"waiting"`
 	ThreadsActive     int       `json:"threads_active"`
 	CreatedAt         time.Time `json:"created_at"`
@@ -34,10 +39,16 @@ type ProjectView struct {
 }
 
 func (s *Server) projectView(p store.Project, defaults Delivery) ProjectView {
+	return ProjectViewOf(p, overlay(defaults, p.Delivery))
+}
+
+// ProjectViewOf renders a project with its effective delivery settings.
+func ProjectViewOf(p store.Project, d Delivery) ProjectView {
 	return ProjectView{ID: p.ID, Name: p.Name, Description: p.Description, Context: p.Context, Repos: RepoRefs(p.Repos),
 		Pinned: p.Pinned, Archived: p.Archived,
 		WorkMode: p.WorkMode, AutoApprove: p.AutoApprove, RequireAcceptance: p.RequireAcceptance,
-		Delivery: overlay(defaults, p.Delivery), OfficeLayout: p.OfficeLayout, Waiting: p.Waiting,
+		Delivery: d, OfficeLayout: p.OfficeLayout, Icon: p.Icon, CoordinatorModel: p.CoordinatorModel,
+		ThreadModel: p.ThreadModel, ThreadEffort: p.ThreadEffort, AutoResume: p.AutoResume, Waiting: p.Waiting,
 		ThreadsActive: p.ThreadsActive, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
 }
 
@@ -67,6 +78,11 @@ type ProjectUpdate struct {
 	RequireAcceptance *bool          `json:"require_acceptance,omitempty"`
 	Delivery          *DeliveryPatch `json:"delivery,omitempty"`
 	OfficeLayout      *string        `json:"office_layout,omitempty" doc:"'' = global default"`
+	Icon              *string        `json:"icon,omitempty" maxLength:"32" doc:"'' = initial; an emoji; or color:#RRGGBB"`
+	CoordinatorModel  *string        `json:"coordinator_model,omitempty" maxLength:"100" doc:"'' = the role's model"`
+	ThreadModel       *string        `json:"thread_model,omitempty" maxLength:"100" doc:"'' = each role's model"`
+	ThreadEffort      *string        `json:"thread_effort,omitempty" maxLength:"16" doc:"'' | low | medium | high | xhigh | max"`
+	AutoResume        *bool          `json:"auto_resume,omitempty"`
 }
 
 type projectsInput struct {
@@ -224,6 +240,12 @@ func (s *Server) projectChanges(ctx context.Context, userID string, cur store.Pr
 	add(b.Archived != nil, "archived", deref(b.Archived))
 	add(b.WorkMode != nil, "work_mode", deref(b.WorkMode))
 	add(b.RequireAcceptance != nil, "require_acceptance", deref(b.RequireAcceptance))
+	add(b.AutoResume != nil, "auto_resume", deref(b.AutoResume))
+	chromeCh, err := chromeChanges(b)
+	if err != nil {
+		return nil, err
+	}
+	ch = append(ch, chromeCh...)
 	settingCh, err := s.settingChanges(ctx, userID, cur, b)
 	if err != nil {
 		return nil, err

@@ -16,6 +16,8 @@ export const keys = {
   deliverables: (pid: string, kind = "", q = "") => ["p", pid, "deliverables", kind, q] as const,
   allDeliverables: (pid: string) => ["p", pid, "deliverables"] as const,
   memory: (pid: string) => ["p", pid, "memory"] as const,
+  schedules: (pid: string) => ["p", pid, "schedules"] as const,
+  usage: (pid: string, days: number) => ["p", pid, "usage", days] as const,
   office: (pid: string) => ["p", pid, "office"] as const,
   search: (pid: string, q: string) => ["p", pid, "search", q] as const,
   legacy: (pid: string) => ["p", pid, "legacy"] as const,
@@ -159,6 +161,12 @@ export const useDeliverables = (pid: string, kind: string, q: string) =>
     queryFn: () =>
       unwrap(client.GET("/api/projects/{pid}/deliverables", { params: { path: { pid }, query: { kind: kind || undefined, q: q || undefined } } })),
   });
+
+export const useSchedules = (pid: string, enabled = true) =>
+  useQuery({ queryKey: keys.schedules(pid), queryFn: () => unwrap(client.GET("/api/projects/{pid}/schedules", path({ pid }))), enabled });
+
+export const useProjectUsage = (pid: string, days: number) =>
+  useQuery({ queryKey: keys.usage(pid, days), queryFn: () => unwrap(client.GET("/api/projects/{pid}/usage", { params: { path: { pid }, query: { days } } })) });
 
 export const useMemory = (pid: string) =>
   useQuery({ queryKey: keys.memory(pid), queryFn: () => list(client.GET("/api/projects/{pid}/memory", path({ pid }))) });

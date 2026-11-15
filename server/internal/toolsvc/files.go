@@ -62,7 +62,7 @@ func (s *Service) publishFile(ctx context.Context, tx *core.Tx, c *call) (Result
 func (s *Service) fileDeliverable(ctx context.Context, tx *core.Tx, c *call, in protocol.PublishFileInput, entry string,
 	files []artifacts.ArtifactFile) (core.Deliverable, int, error) {
 	if in.DeliverableID == nil {
-		detail := fileDetail(c.emp().Name, 1, entry, files, nil)
+		detail := artifacts.Detail(c.emp().Name, 1, entry, files, nil)
 		d, err := core.InsertDeliverable(ctx, tx, core.NewDeliverable{ProjectID: c.emp().ProjectID, ThreadID: c.emp().ThreadID,
 			Kind: strings.TrimSpace(in.Kind), Title: strings.TrimSpace(in.Title), Detail: detail, PublishedBy: c.emp().Name})
 		return d, 1, err
@@ -79,27 +79,8 @@ func (s *Service) fileDeliverable(ctx context.Context, tx *core.Tx, c *call, in 
 		return d, 0, err
 	}
 	title := strings.TrimSpace(in.Title)
-	d, err = core.UpdateDeliverable(ctx, tx, d.ID, &title, fileDetail(c.emp().Name, version, entry, files, d.Detail))
+	d, err = core.UpdateDeliverable(ctx, tx, d.ID, &title, artifacts.Detail(c.emp().Name, version, entry, files, d.Detail))
 	return d, version, err
-}
-
-// fileDetail is at_deliverables.detail of a hosted deliverable; earlier keys (summary…) are kept.
-func fileDetail(by string, version int, entry string, files []artifacts.ArtifactFile, prev map[string]any) map[string]any {
-	out := map[string]any{}
-	for k, v := range prev {
-		out[k] = v
-	}
-	size := 0
-	ct := ""
-	for _, f := range files {
-		size += f.Size
-		if f.Path == entry {
-			ct = f.ContentType
-		}
-	}
-	out["by"], out["author"], out["hosted"], out["version"] = by, by, true, version
-	out["entry"], out["content_type"], out["render"], out["files"], out["size"] = entry, ct, artifacts.Render(ct), len(files), size
-	return out
 }
 
 func pathsOf(files []artifacts.ArtifactFile) []string {

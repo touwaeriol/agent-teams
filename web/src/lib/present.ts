@@ -86,8 +86,15 @@ export function threadLine(t: ThreadView, open?: QuestionView): string {
   if (t.status === "review" && t.pr_number) return `PR #${t.pr_number} 等你验收`;
   if (t.status === "done" && t.pr_number) return mergedLine(t);
   if (t.status === "queued") return t.queue_position ? `排队中，前面还有 ${t.queue_position} 个` : "排队等节点";
-  if (t.status === "paused") return t.pause_reason ? `已暂停：${t.pause_reason}` : "已暂停";
+  if (t.status === "paused") return pauseLine(t.pause_reason);
   return t.lead_last?.text || t.summary || t.brief;
+}
+
+const PAUSE_REASONS: Record<string, string> = { user: "已暂停", rate_limit: "Claude 使用限额用完，已暂停" };
+
+export function pauseLine(reason: string): string {
+  if (!reason) return "已暂停";
+  return PAUSE_REASONS[reason] ?? `已暂停：${reason}`;
 }
 
 export function questionLine(q: QuestionView): string {

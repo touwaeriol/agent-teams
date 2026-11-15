@@ -64,3 +64,22 @@ func Render(contentType string) string {
 	}
 	return "text"
 }
+
+// Detail is at_deliverables.detail of a hosted deliverable; earlier keys (summary…) are kept.
+func Detail(by string, version int, entry string, files []ArtifactFile, prev map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, v := range prev {
+		out[k] = v
+	}
+	size := 0
+	ct := ""
+	for _, f := range files {
+		size += f.Size
+		if f.Path == entry {
+			ct = f.ContentType
+		}
+	}
+	out["by"], out["author"], out["hosted"], out["version"] = by, by, true, version
+	out["entry"], out["content_type"], out["render"], out["files"], out["size"] = entry, ct, Render(ct), len(files), size
+	return out
+}

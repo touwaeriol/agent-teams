@@ -25,6 +25,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/scheduler"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
+	"github.com/touwaeriol/agent-teams/server/internal/timers"
 	"github.com/touwaeriol/agent-teams/server/internal/toolsvc"
 )
 
@@ -54,6 +55,7 @@ type Engine struct {
 	Approvals *approvals.Engine
 	Delivery  *delivery.Engine
 	Tools     *toolsvc.Service
+	Timers    *timers.Runner
 	GH        *ghops.GitHub
 	log       *slog.Logger
 }
@@ -77,6 +79,7 @@ func New(d Deps) (*Engine, error) {
 	if e.Tools, err = toolsvc.New(cs, d.Store, e.Orch, e.Sched, e.Delivery, e.Status, gw, d.Log); err != nil {
 		return nil, err
 	}
+	e.Timers = timers.New(cs, e.Orch, d.Log)
 	e.Orch.Kick = e.Sched.Kick
 	e.Orch.ThreadEnded = e.Delivery.ThreadEnded
 	e.Orch.Rules = e.Approvals.Rules
@@ -90,6 +93,7 @@ func (e *Engine) Start(ctx context.Context) {
 	go e.Sched.Run(ctx)
 	go e.Delivery.Run(ctx)
 	go e.Approvals.RunSweeper(ctx, time.Minute)
+	go e.Timers.Run(ctx)
 }
 
 // Hooks returns the platform.Hooks implementation.

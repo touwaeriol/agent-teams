@@ -41,3 +41,6 @@ func Fail(status int, code, detail string) error { return fail(status, code, det
 
 // StoreError maps store.ErrNotFound/ErrConflict to 404/409 with the given 404 message.
 func StoreError(err error, notFound string) error { return storeErr(err, notFound) }
+
+// Invalid is a 422 validation error on one field.
+func Invalid(field, message string) error { return invalid([]FieldError{{field, message}}, message) }

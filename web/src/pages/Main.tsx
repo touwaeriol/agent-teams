@@ -1,6 +1,7 @@
 // Main board: chat with the project coordinator in the middle, the thread
 // list (→ thread detail) on the right. Phones get thread chips instead of the panel.
-import { Home, Settings, Square, Users } from "lucide-react";
+import { Clock, Home, Library, MoreHorizontal, PanelRight, Settings, Square, Users } from "lucide-react";
+import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { conversations } from "@/api/actions";
 import { useAction } from "@/api/mutations";
@@ -9,10 +10,16 @@ import type { CoordinatorView, ProjectView, QuestionView, ThreadView } from "@/a
 import { Composer, Dot } from "@/components/app/bits";
 import { WaitingCard } from "@/components/app/cards";
 import { Chat } from "@/components/app/Chat";
+import { LibraryBrowser } from "@/components/app/Library";
+import { SchedulesDialog } from "@/components/app/Schedules";
 import { ThreadList, ThreadPanel } from "@/components/app/thread";
-import { EmptyState, errorText, Loading } from "@/components/common";
+import { EmptyState, errorText, IconButton, IconLink, Loading } from "@/components/common";
+import { ProjectSwitcher } from "@/components/shell/ProjectSwitcher";
 import { NavButton } from "@/components/shell/Shell";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { sectionOf } from "@/lib/projectSettings";
 import { markTone, openForUser } from "@/lib/present";
+import { ProjectSettingsDialog } from "./ProjectSettings";
 
 export function useProjectId(): string {
   return useParams().pid ?? "";
@@ -25,14 +32,24 @@ export function waitingIndex(questions: QuestionView[] | undefined): Map<number,
   return map;
 }
 
-export function MainPage() {
+/** What the right-hand side shows: the thread panel (default), the library, or nothing. */
+export type SidePanel = "threads" | "library" | "none";
+
+export function sidePanelOf(value: string | null): SidePanel {
+  return value === "library" || value === "none" ? value : "threads";
+}
+
+export function MainPage({ settings = false }: { settings?: boolean }) {
   const pid = useProjectId();
+  const { section } = useParams();
   const project = useProject(pid);
   const coordinator = useCoordinator(pid);
   const threads = useThreads(pid);
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const openNo = Number(params.get("thread")) || null;
+  const panel = sidePanelOf(params.get("panel"));
+  const setPanel = (p: SidePanel) => setParams(p === "threads" ? {} : { panel: p });
   const openThread = (no: number) => {
     if (window.matchMedia("(min-width: 1024px)").matches) setParams({ thread: String(no) });
     else navigate(`/projects/${pid}/threads/${no}`);
@@ -43,18 +60,33 @@ export function MainPage() {
   return (
     <div className="flex h-full min-h-0 flex-1">
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <MainHeader project={project.data} coordinator={coordinator.data} threads={list} />
+        <MainHeader project={project.data} coordinator={coordinator.data} threads={list} panel={panel} onPanel={setPanel} />
         <ThreadChips pid={pid} threads={list} />
         <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto flex max-w-[700px] flex-col px-4 pb-6 pt-4 sm:px-6 sm:pt-8">
+          <div className="mx-auto flex max-w-[720px] flex-col px-4 pb-6 pt-4 sm:px-6 sm:pt-8">
             <CoordinatorChat pid={pid} coordinator={coordinator.data} threads={list} onOpenThread={openThread} />
           </div>
         </div>
         <CoordinatorComposer coordinator={coordinator.data} />
       </main>
-      <aside aria-label="讨论串" className="hidden h-full w-[min(440px,32vw)] min-w-[340px] shrink-0 flex-col border-l bg-panel lg:flex">
-        {openNo ? <PanelDetail pid={pid} no={openNo} threads={list} onBack={() => setParams({})} /> : <PanelList pid={pid} threads={list} loading={threads.isLoading} onOpen={openThread} />}
-      </aside>
+      {panel === "threads" && (
+        <aside aria-label="讨论串" className="hidden h-full w-[min(440px,32vw)] min-w-[340px] shrink-0 flex-col border-l bg-panel lg:flex">
+          {openNo ? <PanelDetail pid={pid} no={openNo} threads={list} onBack={() => setParams({})} /> : <PanelList pid={pid} threads={list} loading={threads.isLoading} onOpen={openThread} />}
+        </aside>
+      )}
+      {panel === "library" && (
+        <aside aria-label="资料库" className="fixed inset-0 z-30 flex flex-col bg-panel lg:static lg:z-auto lg:h-full lg:w-[min(720px,48vw)] lg:min-w-[420px] lg:shrink-0 lg:border-l">
+          <LibraryBrowser pid={pid} variant="panel" onClose={() => setPanel("threads")} />
+        </aside>
+      )}
+      {settings && (
+        <ProjectSettingsDialog
+          project={project.data}
+          section={sectionOf(section)}
+          onSection={(s) => navigate(`/projects/${pid}/settings/${s}`, { replace: true })}
+          onClose={() => navigate(`/projects/${pid}`)}
+        />
+      )}
     </div>
   );
 }
@@ -66,41 +98,58 @@ function coordinatorState(c: CoordinatorView | undefined): { tone: string; text:
   return { tone: "#2E7D4F", text: `${name} 在线` };
 }
 
-function MainHeader({ project, coordinator, threads }: { project: ProjectView; coordinator?: CoordinatorView; threads: ThreadView[] }) {
+function MainHeader({ project, coordinator, threads, panel, onPanel }: { project: ProjectView; coordinator?: CoordinatorView; threads: ThreadView[]; panel: SidePanel; onPanel: (p: SidePanel) => void }) {
+  const navigate = useNavigate();
+  const [schedules, setSchedules] = useState(false);
   const state = coordinatorState(coordinator);
   const waiting = threads.reduce((n, t) => n + t.counts.waiting + (t.status === "review" ? 1 : 0), 0);
   const firstWaiting = threads.find((t) => t.counts.waiting > 0 || t.status === "review");
-  const icon = "flex size-9 items-center justify-center rounded-lg text-[#4A4843] hover:bg-raised";
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b bg-background px-2 sm:px-6 max-md:bg-panel">
-      <div className="flex min-w-0 items-center gap-2.5">
+    <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b bg-background px-2 sm:px-4 max-md:bg-panel">
+      <div className="flex min-w-0 items-center gap-1">
         <NavButton />
-        <span className="flex min-w-0 flex-col md:flex-row md:items-center md:gap-2.5">
-          <span className="truncate font-semibold">{project.name}</span>
-          <span className="truncate font-mono text-xs text-muted-foreground max-md:hidden">{project.repos?.length ? project.repos.map((r) => r.repo).join(" · ") : "未关联仓库"}</span>
-          <span className="text-[11px] text-muted-foreground md:hidden">项目统筹 · 只分派，不改代码</span>
-        </span>
-      </div>
-      <span className="flex items-center gap-1.5">
-        <span className="mr-1.5 hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex">
+        <ProjectSwitcher project={project} />
+        <span className="ml-1 hidden items-center gap-1.5 truncate text-xs text-muted-foreground xl:flex" title={project.repos?.map((r) => r.repo).join(" · ")}>
           <Dot color={state.tone} />
           {state.text}
         </span>
+      </div>
+      <span className="flex items-center gap-0.5">
         {waiting > 0 && firstWaiting && (
           <Link to={`/projects/${project.id}/threads/${firstWaiting.no}`} className="mr-1.5 flex h-8 items-center rounded-full bg-[#FFF4EC] px-2.5 text-xs text-[#B4530B] lg:hidden">
             等你 {waiting}
           </Link>
         )}
-        <Link to={`/projects/${project.id}/overview`} aria-label="项目首页" className={`${icon} max-sm:hidden`}>
-          <Home className="size-4" strokeWidth={1.8} />
-        </Link>
-        <Link to={`/projects/${project.id}/office`} aria-label="办公室" className={`${icon} max-sm:hidden`}>
-          <Users className="size-4" strokeWidth={1.8} />
-        </Link>
-        <Link to={`/projects/${project.id}/settings`} aria-label="项目设置" className={icon}>
-          <Settings className="size-4" strokeWidth={1.8} />
-        </Link>
+        <IconButton label="资料库" active={panel === "library"} onClick={() => onPanel(panel === "library" ? "threads" : "library")}>
+          <Library strokeWidth={1.8} />
+        </IconButton>
+        <IconButton label={panel === "threads" ? "收起讨论串" : "显示讨论串"} active={panel === "threads"} onClick={() => onPanel(panel === "threads" ? "none" : "threads")} className="max-lg:hidden">
+          <PanelRight strokeWidth={1.8} />
+        </IconButton>
+        <IconLink label="办公室" to={`/projects/${project.id}/office`} className="max-sm:hidden">
+          <Users strokeWidth={1.8} />
+        </IconLink>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <IconButton label="更多">
+              <MoreHorizontal strokeWidth={1.8} />
+            </IconButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuItem onSelect={() => navigate(`/projects/${project.id}/overview`)}>
+              <Home /> 项目首页
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setSchedules(true)}>
+              <Clock /> 定时任务
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => navigate(`/projects/${project.id}/settings`)}>
+              <Settings /> 设置
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </span>
+      <SchedulesDialog pid={project.id} open={schedules} onOpenChange={setSchedules} />
     </header>
   );
 }

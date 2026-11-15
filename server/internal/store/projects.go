@@ -23,6 +23,11 @@ type Project struct {
 	RequireAcceptance bool
 	Delivery          json.RawMessage
 	OfficeLayout      string
+	Icon              string
+	CoordinatorModel  string
+	ThreadModel       string
+	ThreadEffort      string
+	AutoResume        bool
 	Waiting           int
 	ThreadsActive     int
 }
@@ -47,7 +52,7 @@ const projectCols = `p.id, p.user_id, p.name, p.description, p.context,
 	COALESCE((SELECT json_agg(json_build_object('repo', r.repo, 'git_connection_id', r.git_connection_id)
 	  ORDER BY r.position, r.created_at) FROM at_project_repos r WHERE r.project_id = p.id), '[]'::json),
 	p.created_at, p.updated_at, p.pinned, p.archived, p.work_mode, p.auto_approve, p.require_acceptance,
-	p.delivery, p.office_layout,
+	p.delivery, p.office_layout, p.icon, p.coordinator_model, p.thread_model, p.thread_effort, p.auto_resume,
 	(SELECT count(*) FROM at_questions q WHERE q.project_id = p.id AND q.status = 'open' AND q.audience = 'user')
 	  + (SELECT count(*) FROM at_threads t WHERE t.project_id = p.id AND t.status = 'review'),
 	(SELECT count(*) FROM at_threads t WHERE t.project_id = p.id AND t.status IN ('queued','running','waiting','review'))`
@@ -56,7 +61,8 @@ func scanProject(row interface{ Scan(...any) error }) (Project, error) {
 	var p Project
 	var repos []byte
 	err := row.Scan(&p.ID, &p.UserID, &p.Name, &p.Description, &p.Context, &repos, &p.CreatedAt, &p.UpdatedAt, &p.Pinned, &p.Archived, &p.WorkMode,
-		&p.AutoApprove, &p.RequireAcceptance, &p.Delivery, &p.OfficeLayout, &p.Waiting, &p.ThreadsActive)
+		&p.AutoApprove, &p.RequireAcceptance, &p.Delivery, &p.OfficeLayout,
+		&p.Icon, &p.CoordinatorModel, &p.ThreadModel, &p.ThreadEffort, &p.AutoResume, &p.Waiting, &p.ThreadsActive)
 	if err == nil {
 		err = json.Unmarshal(repos, &p.Repos)
 	}

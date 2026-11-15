@@ -646,6 +646,27 @@
         ],
         "type": "object"
       },
+      "DayUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "cost_usd": {
+            "format": "double",
+            "type": "number"
+          },
+          "day": {
+            "type": "string"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/UsageTokens"
+          }
+        },
+        "required": [
+          "day",
+          "cost_usd",
+          "tokens"
+        ],
+        "type": "object"
+      },
       "DeliverableFiles": {
         "additionalProperties": false,
         "properties": {
@@ -734,11 +755,17 @@
               "string",
               "null"
             ]
+          },
+          "storage_bytes": {
+            "description": "Bytes the project's hosted files take (every version)",
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
           "items",
-          "next_cursor"
+          "next_cursor",
+          "storage_bytes"
         ],
         "type": "object"
       },
@@ -2588,6 +2615,35 @@
         ],
         "type": "object"
       },
+      "ProjectEmployeeUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "cost_usd": {
+            "format": "double",
+            "type": "number"
+          },
+          "employee": {
+            "type": "string"
+          },
+          "thread_no": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/UsageTokens"
+          }
+        },
+        "required": [
+          "employee",
+          "thread_no",
+          "cost_usd",
+          "tokens"
+        ],
+        "type": "object"
+      },
       "ProjectInput": {
         "additionalProperties": false,
         "properties": {
@@ -2665,8 +2721,16 @@
           "auto_approve": {
             "type": "boolean"
           },
+          "auto_resume": {
+            "type": "boolean"
+          },
           "context": {
             "maxLength": 50000,
+            "type": "string"
+          },
+          "coordinator_model": {
+            "description": "'' = the role's model",
+            "maxLength": 100,
             "type": "string"
           },
           "delivery": {
@@ -2674,6 +2738,11 @@
           },
           "description": {
             "maxLength": 2000,
+            "type": "string"
+          },
+          "icon": {
+            "description": "'' = initial; an emoji; or color:#RRGGBB",
+            "maxLength": 32,
             "type": "string"
           },
           "name": {
@@ -2698,6 +2767,16 @@
           "require_acceptance": {
             "type": "boolean"
           },
+          "thread_effort": {
+            "description": "'' | low | medium | high | xhigh | max",
+            "maxLength": 16,
+            "type": "string"
+          },
+          "thread_model": {
+            "description": "'' = each role's model",
+            "maxLength": 100,
+            "type": "string"
+          },
           "work_mode": {
             "enum": [
               "worktree",
@@ -2706,6 +2785,63 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "ProjectUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "by_day": {
+            "items": {
+              "$ref": "#/components/schemas/DayUsage"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "by_employee": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectEmployeeUsage"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "by_thread": {
+            "items": {
+              "$ref": "#/components/schemas/ThreadUsage"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "cost_usd_est": {
+            "format": "double",
+            "type": "number"
+          },
+          "days": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/UsageTokens"
+          },
+          "turns": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "days",
+          "cost_usd_est",
+          "tokens",
+          "turns",
+          "by_day",
+          "by_thread",
+          "by_employee"
+        ],
         "type": "object"
       },
       "ProjectView": {
@@ -2717,7 +2853,15 @@
           "auto_approve": {
             "type": "boolean"
           },
+          "auto_resume": {
+            "description": "Continue threads paused by a usage limit once it resets",
+            "type": "boolean"
+          },
           "context": {
+            "type": "string"
+          },
+          "coordinator_model": {
+            "description": "'' = the coordinator role's model",
             "type": "string"
           },
           "created_at": {
@@ -2728,6 +2872,10 @@
             "$ref": "#/components/schemas/Delivery"
           },
           "description": {
+            "type": "string"
+          },
+          "icon": {
+            "description": "'' = initial on the default color; an emoji; or color:#RRGGBB",
             "type": "string"
           },
           "id": {
@@ -2754,6 +2902,14 @@
           },
           "require_acceptance": {
             "type": "boolean"
+          },
+          "thread_effort": {
+            "description": "'' = each role's effort; low | medium | high | xhigh | max",
+            "type": "string"
+          },
+          "thread_model": {
+            "description": "'' = each lead/member role's model",
+            "type": "string"
           },
           "threads_active": {
             "format": "int64",
@@ -2788,6 +2944,11 @@
           "require_acceptance",
           "delivery",
           "office_layout",
+          "icon",
+          "coordinator_model",
+          "thread_model",
+          "thread_effort",
+          "auto_resume",
           "waiting",
           "threads_active",
           "created_at",
@@ -3361,6 +3522,100 @@
           "present",
           "recommended"
         ],
+        "type": "object"
+      },
+      "Schedule": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "cron": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "last_run_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "next_run_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "cron",
+          "timezone",
+          "message",
+          "enabled",
+          "next_run_at",
+          "last_run_at",
+          "last_error",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ScheduleBody": {
+        "additionalProperties": false,
+        "properties": {
+          "cron": {
+            "description": "minute hour day-of-month month day-of-week",
+            "maxLength": 100,
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "message": {
+            "description": "Sent to the project coordinator when it fires",
+            "maxLength": 20000,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "type": "string"
+          },
+          "timezone": {
+            "description": "IANA zone the cron is read in (default UTC)",
+            "maxLength": 64,
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "SearchMessage": {
@@ -4052,6 +4307,35 @@
         ],
         "type": "object"
       },
+      "ThreadUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "cost_usd": {
+            "format": "double",
+            "type": "number"
+          },
+          "thread_no": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/UsageTokens"
+          }
+        },
+        "required": [
+          "thread_no",
+          "title",
+          "cost_usd",
+          "tokens"
+        ],
+        "type": "object"
+      },
       "ThreadView": {
         "additionalProperties": false,
         "properties": {
@@ -4201,6 +4485,33 @@
           "cost_usd_est",
           "created_at",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "UploadBody": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "description": "Base64 of the file, at most 5 MB",
+            "maxLength": 6990508,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "description": "File name; its extension decides the type (same list as publish_file)",
+            "maxLength": 300,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "description": "Shown name; default the file name",
+            "maxLength": 300,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "data"
         ],
         "type": "object"
       },
@@ -7898,6 +8209,58 @@
         ]
       }
     },
+    "/api/projects/{pid}/library": {
+      "post": {
+        "operationId": "upload-library-file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliverableView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Add a file to the project library (stored and served like publish_file)",
+        "tags": [
+          "deliverables"
+        ]
+      }
+    },
     "/api/projects/{pid}/memory": {
       "get": {
         "operationId": "list-memory",
@@ -8249,6 +8612,102 @@
         ]
       }
     },
+    "/api/projects/{pid}/schedules": {
+      "get": {
+        "operationId": "list-schedules",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Schedule"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "schedules"
+        ]
+      },
+      "post": {
+        "operationId": "create-schedule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedule"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
     "/api/projects/{pid}/search": {
       "get": {
         "operationId": "project-search",
@@ -8426,6 +8885,61 @@
         "summary": "Open a thread directly (skipping the coordinator)",
         "tags": [
           "threads"
+        ]
+      }
+    },
+    "/api/projects/{pid}/usage": {
+      "get": {
+        "operationId": "project-usage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Window in days (default 7)",
+            "explode": false,
+            "in": "query",
+            "name": "days",
+            "schema": {
+              "description": "Window in days (default 7)",
+              "format": "int64",
+              "maximum": 90,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectUsage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Tokens and estimated cost of the project's sessions, per day, thread and employee",
+        "tags": [
+          "projects"
         ]
       }
     },
@@ -8677,6 +9191,124 @@
         },
         "tags": [
           "team"
+        ]
+      }
+    },
+    "/api/schedules/{id}": {
+      "delete": {
+        "operationId": "delete-schedule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "schedules"
+        ]
+      },
+      "patch": {
+        "operationId": "update-schedule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedule"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/api/schedules/{id}/run": {
+      "post": {
+        "operationId": "run-schedule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Send the schedule's message to the coordinator now",
+        "tags": [
+          "schedules"
         ]
       }
     },

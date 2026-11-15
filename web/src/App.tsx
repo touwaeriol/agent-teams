@@ -10,7 +10,6 @@ import { ChangePasswordPage, LoginPage } from "@/pages/Login";
 import { MainPage } from "@/pages/Main";
 import { NewProjectPage } from "@/pages/NewProject";
 import { OverviewPage } from "@/pages/Overview";
-import { ProjectSettingsPage } from "@/pages/ProjectSettings";
 import { ProjectsIndex } from "@/pages/Projects";
 import { ThreadPage } from "@/pages/Thread";
 
@@ -63,7 +62,8 @@ export function App() {
         <Route path="/projects/:pid/overview" element={<OverviewPage />} />
         <Route path="/projects/:pid/threads/:no" element={<ThreadPage />} />
         <Route path="/projects/:pid/deliverables" element={<DeliverablesPage />} />
-        <Route path="/projects/:pid/settings" element={<ProjectSettingsPage />} />
+        <Route path="/projects/:pid/settings" element={<MainPage settings />} />
+        <Route path="/projects/:pid/settings/:section" element={<MainPage settings />} />
         <Route path="/projects/:pid/legacy/:cid" element={<LegacyPage />} />
       </Route>
       <Route element={<SettingsShell me={me.data} />}>

@@ -35,6 +35,9 @@ export type AdminSettings = S["AdminSettings"];
 export type AuditEntry = S["AuditEntry"];
 export type SessionView = S["SessionView"];
 export type APIErrorBody = S["APIError"];
+export type ScheduleView = S["Schedule"];
+export type ScheduleBody = S["ScheduleBody"];
+export type ProjectUsage = S["ProjectUsage"];
 
 export type ThreadStatus = "queued" | "running" | "waiting" | "review" | "done" | "failed" | "paused" | "archived";
 export type MainTaskStatus = "todo" | "doing" | "done";

@@ -12,7 +12,7 @@ import * as F from "./fixtures.mjs";
 const PORT = Number(process.env.MOCK_PORT ?? 3001);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const layoutPath = path.resolve(here, "../../office/default.json");
-const { ago: _ago, ...data } = F;
+const { ago, ...data } = F;
 const state = structuredClone(data);
 let seq = 100;
 const streams = new Set();
@@ -105,6 +105,8 @@ function page(items) {
   return { items, next_cursor: null };
 }
 
+const storageBytes = () => state.deliverables.reduce((n, d) => n + (d.detail.size ?? 0), 0);
+
 async function sendMessage(res, cid, req) {
   const b = await body(req);
   const m = { id: String(Date.now()), role: "user", author: "liu", kind: b.interrupt ? "interrupt" : "chat", content: b.content, meta: {}, created_at: now() };
@@ -178,7 +180,35 @@ const routes = [
   ["GET", /^\/api\/projects\/([^/]+)\/deliverables$/, (req, res, _m, url) => {
     const kind = url.searchParams.get("kind");
     const q = url.searchParams.get("q") ?? "";
-    json(res, 200, page(state.deliverables.filter((d) => (!kind || d.kind === kind) && d.title.includes(q))));
+    json(res, 200, { ...page(state.deliverables.filter((d) => (!kind || d.kind === kind) && d.title.includes(q))), storage_bytes: storageBytes() });
+  }],
+  ["POST", /^\/api\/projects\/([^/]+)\/library$/, async (req, res, [pid]) => {
+    const b = await body(req);
+    const size = Math.floor((b.data?.length ?? 0) * 0.75);
+    const name = String(b.name).split(/[\\/]/).pop();
+    const d = { id: `d${Date.now()}`, project_id: pid, thread_no: null, kind: /\.(png|jpe?g|gif|webp|svg|html?)$/i.test(name) ? "design" : "doc", title: b.title || name, url: "", detail: { hosted: true, entry: name, size, version: 1, files: 1, by: "user" }, published_by: "user", created_at: now(), updated_at: now() };
+    state.deliverables.unshift(d);
+    json(res, 201, d);
+  }],
+  ["GET", /^\/api\/projects\/([^/]+)\/usage$/, (req, res, _m, url) => json(res, 200, { ...state.usage, days: Number(url.searchParams.get("days") ?? 7) })],
+  ["GET", /^\/api\/projects\/([^/]+)\/schedules$/, (req, res) => json(res, 200, state.schedules)],
+  ["POST", /^\/api\/projects\/([^/]+)\/schedules$/, async (req, res, [pid]) => {
+    const b = await body(req);
+    const s = { id: `sc${Date.now()}`, project_id: pid, enabled: true, last_run_at: null, last_error: "", next_run_at: ago(-60), created_at: now(), updated_at: now(), ...b };
+    state.schedules.push(s);
+    json(res, 201, s);
+  }],
+  ["PATCH", /^\/api\/schedules\/([^/]+)$/, async (req, res, [id]) => {
+    const s = state.schedules.find((x) => x.id === id);
+    Object.assign(s, await body(req), { updated_at: now() });
+    s.next_run_at = s.enabled ? ago(-60) : null;
+    json(res, 200, s);
+  }],
+  ["DELETE", /^\/api\/schedules\/([^/]+)$/, (req, res, [id]) => ((state.schedules = state.schedules.filter((s) => s.id !== id)), json(res, 204))],
+  ["POST", /^\/api\/schedules\/([^/]+)\/run$/, (req, res, [id]) => {
+    const s = state.schedules.find((x) => x.id === id);
+    s.last_run_at = now();
+    json(res, 202);
   }],
   ["POST", /^\/api\/projects\/([^/]+)\/deliverables\/request$/, async (req, res) => {
     const b = await body(req);

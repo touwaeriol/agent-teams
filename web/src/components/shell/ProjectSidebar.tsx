@@ -1,5 +1,5 @@
 // The project sidebar of the design (Sidebar board): projects only, plus
-// 新建项目 / 搜索 / 交付物, archived projects folded, nodes and the user at the bottom.
+// 新建项目 / 搜索 / 资料库, archived projects folded, nodes and the user at the bottom.
 import { Archive, ChevronRight, LayoutGrid, MoreHorizontal, Pencil, Pin, PinOff, Plus, Search, Settings, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
@@ -10,9 +10,9 @@ import type { ProjectView, UserView } from "@/api/views";
 import { ConfirmAction, Field, FormDialog, Logo } from "@/components/common";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { projectTint } from "@/lib/present";
 import { cn } from "@/lib/utils";
 import { Dot, Initial } from "../app/bits";
+import { ProjectIcon } from "../app/ProjectIcon";
 import { summarizeNodes } from "./nodes";
 
 export function matchesProject(p: Pick<ProjectView, "name" | "description" | "repos">, q: string): boolean {
@@ -51,7 +51,7 @@ export function ProjectSidebar({ me, onNavigate }: { me: UserView; onNavigate?: 
         </label>
         {current && (
           <SideLink to={`/projects/${current.id}/deliverables`} icon={<LayoutGrid />} onClick={onNavigate}>
-            交付物
+            资料库
           </SideLink>
         )}
       </div>
@@ -100,11 +100,10 @@ function SideLink({ to, icon, children, onClick, strong }: { to: string; icon: R
 }
 
 function ProjectRow({ project, current, onNavigate }: { project: ProjectView; current: boolean; onNavigate?: () => void }) {
-  const [bg, fg] = projectTint(project.name);
   return (
     <div className={cn("group relative flex h-9 items-center rounded-lg", current ? "bg-accent font-semibold" : "hover:bg-accent/60")}>
       <Link to={`/projects/${project.id}`} onClick={onNavigate} aria-current={current ? "page" : undefined} className="flex h-full min-w-0 flex-1 items-center gap-2.5 px-2.5">
-        <Initial name={project.name} bg={bg} fg={fg} />
+        <ProjectIcon project={project} size={22} />
         <span className="min-w-0 flex-1 truncate">{project.name}</span>
         {project.waiting > 0 && (
           <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#C2570C] px-[5px] text-[11px] font-semibold text-white group-hover:hidden">{project.waiting}</span>

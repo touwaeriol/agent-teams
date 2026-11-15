@@ -938,6 +938,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{pid}/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a file to the project library (stored and served like publish_file) */
+        post: operations["upload-library-file"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{pid}/memory": {
         parameters: {
             query?: never;
@@ -1019,6 +1036,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{pid}/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list-schedules"];
+        put?: never;
+        post: operations["create-schedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{pid}/search": {
         parameters: {
             query?: never;
@@ -1046,6 +1079,23 @@ export interface paths {
         put?: never;
         /** Open a thread directly (skipping the coordinator) */
         post: operations["create-thread"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Tokens and estimated cost of the project's sessions, per day, thread and employee */
+        get: operations["project-usage"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1130,6 +1180,39 @@ export interface paths {
         get: operations["get-roles-yaml"];
         put: operations["save-roles-yaml"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/schedules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["delete-schedule"];
+        options?: never;
+        head?: never;
+        patch: operations["update-schedule"];
+        trace?: never;
+    };
+    "/api/schedules/{id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send the schedule's message to the coordinator now */
+        post: operations["run-schedule"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1746,6 +1829,12 @@ export interface components {
             cost_usd: number;
             day: string;
         };
+        DayUsage: {
+            /** Format: double */
+            cost_usd: number;
+            day: string;
+            tokens: components["schemas"]["UsageTokens"];
+        };
         DeliverableFiles: {
             /** @description Signed directory URL; append a file path */
             base_url: string;
@@ -1766,6 +1855,11 @@ export interface components {
         DeliverablePage: {
             items: components["schemas"]["DeliverableView"][] | null;
             next_cursor: string | null;
+            /**
+             * Format: int64
+             * @description Bytes the project's hosted files take (every version)
+             */
+            storage_bytes: number;
         };
         DeliverableView: {
             /** Format: date-time */
@@ -2245,6 +2339,14 @@ export interface components {
             message: string;
             path: string;
         };
+        ProjectEmployeeUsage: {
+            /** Format: double */
+            cost_usd: number;
+            employee: string;
+            /** Format: int64 */
+            thread_no: number | null;
+            tokens: components["schemas"]["UsageTokens"];
+        };
         ProjectInput: {
             auto_approve?: boolean;
             context?: string;
@@ -2265,9 +2367,14 @@ export interface components {
         ProjectUpdate: {
             archived?: boolean;
             auto_approve?: boolean;
+            auto_resume?: boolean;
             context?: string;
+            /** @description '' = the role's model */
+            coordinator_model?: string;
             delivery?: components["schemas"]["DeliveryPatch"];
             description?: string;
+            /** @description '' = initial; an emoji; or color:#RRGGBB */
+            icon?: string;
             name?: string;
             /** @description '' = global default */
             office_layout?: string;
@@ -2275,17 +2382,39 @@ export interface components {
             /** @description Replaces the bound repositories (order kept); [] unbinds all */
             repos?: components["schemas"]["RepoRef"][];
             require_acceptance?: boolean;
+            /** @description '' | low | medium | high | xhigh | max */
+            thread_effort?: string;
+            /** @description '' = each role's model */
+            thread_model?: string;
             /** @enum {string} */
             work_mode?: "worktree" | "clone";
+        };
+        ProjectUsage: {
+            by_day: components["schemas"]["DayUsage"][] | null;
+            by_employee: components["schemas"]["ProjectEmployeeUsage"][] | null;
+            by_thread: components["schemas"]["ThreadUsage"][] | null;
+            /** Format: double */
+            cost_usd_est: number;
+            /** Format: int64 */
+            days: number;
+            tokens: components["schemas"]["UsageTokens"];
+            /** Format: int64 */
+            turns: number;
         };
         ProjectView: {
             archived: boolean;
             auto_approve: boolean;
+            /** @description Continue threads paused by a usage limit once it resets */
+            auto_resume: boolean;
             context: string;
+            /** @description '' = the coordinator role's model */
+            coordinator_model: string;
             /** Format: date-time */
             created_at: string;
             delivery: components["schemas"]["Delivery"];
             description: string;
+            /** @description '' = initial on the default color; an emoji; or color:#RRGGBB */
+            icon: string;
             id: string;
             name: string;
             office_layout: string;
@@ -2293,6 +2422,10 @@ export interface components {
             /** @description Bound repositories in project order; base branches belong in context */
             repos: components["schemas"]["RepoRef"][] | null;
             require_acceptance: boolean;
+            /** @description '' = each role's effort; low | medium | high | xhigh | max */
+            thread_effort: string;
+            /** @description '' = each lead/member role's model */
+            thread_model: string;
             /** Format: int64 */
             threads_active: number;
             /** Format: date-time */
@@ -2433,6 +2566,34 @@ export interface components {
             recommended: {
                 [key: string]: unknown;
             };
+        };
+        Schedule: {
+            /** Format: date-time */
+            created_at: string;
+            cron: string;
+            enabled: boolean;
+            id: string;
+            last_error: string;
+            /** Format: date-time */
+            last_run_at: string | null;
+            message: string;
+            name: string;
+            /** Format: date-time */
+            next_run_at: string | null;
+            project_id: string;
+            timezone: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ScheduleBody: {
+            /** @description minute hour day-of-month month day-of-week */
+            cron?: string;
+            enabled?: boolean;
+            /** @description Sent to the project coordinator when it fires */
+            message?: string;
+            name?: string;
+            /** @description IANA zone the cron is read in (default UTC) */
+            timezone?: string;
         };
         SearchMessage: {
             conversation_id: string;
@@ -2600,6 +2761,14 @@ export interface components {
             pr_url: string | null;
             repo: string;
         };
+        ThreadUsage: {
+            /** Format: double */
+            cost_usd: number;
+            /** Format: int64 */
+            thread_no: number | null;
+            title: string;
+            tokens: components["schemas"]["UsageTokens"];
+        };
         ThreadView: {
             auto_approve: boolean;
             /** @description Deprecated: bases are per repository (repos) */
@@ -2634,6 +2803,14 @@ export interface components {
             title: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        UploadBody: {
+            /** @description Base64 of the file, at most 5 MB */
+            data: string;
+            /** @description File name; its extension decides the type (same list as publish_file) */
+            name: string;
+            /** @description Shown name; default the file name */
+            title?: string;
         };
         Usage: {
             by_employee: components["schemas"]["EmployeeUsage"][] | null;
@@ -5099,6 +5276,41 @@ export interface operations {
             };
         };
     };
+    "upload-library-file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliverableView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     "list-memory": {
         parameters: {
             query?: never;
@@ -5328,6 +5540,72 @@ export interface operations {
             };
         };
     };
+    "list-schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Schedule"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "create-schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Schedule"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     "project-search": {
         parameters: {
             query?: {
@@ -5420,6 +5698,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ThreadView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "project-usage": {
+        parameters: {
+            query?: {
+                /** @description Window in days (default 7) */
+                days?: number;
+            };
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectUsage"];
                 };
             };
             /** @description Error */
@@ -5638,6 +5950,99 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["RolesBody"];
                 };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "delete-schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "update-schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Schedule"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "run-schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error */
             default: {

@@ -139,3 +139,30 @@ func TestMatchRepo(t *testing.T) {
 		t.Fatal("focus text")
 	}
 }
+
+// TestProjectModelOverrides: the project's coordinator model applies to the coordinator only;
+// its thread model and effort override leads' and members' roles; ” keeps the role's.
+func TestProjectModelOverrides(t *testing.T) {
+	p := store.Project{CoordinatorModel: "claude-coord-x", ThreadModel: "claude-thread-y", ThreadEffort: "high"}
+	in := open(t, emp("coordinator", "coordinator", store.Role{Model: "role-model", Effort: "low"}), store.Node{})
+	in.project = p
+	c := claudeOptions(in)
+	if c.Model != "claude-coord-x" || c.Effort == nil || *c.Effort != "low" {
+		t.Fatalf("coordinator %q %v", c.Model, c.Effort)
+	}
+	in = open(t, emp("member", "dev", store.Role{Model: "role-model", Effort: "low"}), store.Node{})
+	in.project = p
+	d := claudeOptions(in)
+	if d.Model != "claude-thread-y" || d.Effort == nil || *d.Effort != "high" {
+		t.Fatalf("member %q %v", d.Model, d.Effort)
+	}
+	in.project = store.Project{}
+	d = claudeOptions(in)
+	if d.Model != "role-model" || *d.Effort != "low" {
+		t.Fatalf("role defaults %q %v", d.Model, *d.Effort)
+	}
+	in = open(t, emp("lead", "lead", store.Role{}), store.Node{})
+	if l := claudeOptions(in); l.Model != DefaultModel || l.Effort != nil {
+		t.Fatalf("lead default %q %v", l.Model, l.Effort)
+	}
+}

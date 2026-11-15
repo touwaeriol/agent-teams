@@ -16,16 +16,18 @@ const delivery = {
 const project = (id, name, extra = {}) => ({
   id, name, description: "", context: "", repo: null, branch: "main", git_connection_id: null, pinned: false, archived: false,
   work_mode: "worktree", auto_approve: false, require_acceptance: true, delivery, office_layout: "default", waiting: 0,
+  icon: "", coordinator_model: "", thread_model: "", thread_effort: "", auto_resume: false,
   threads_active: 0, created_at: ago(60 * 24 * 3), updated_at: ago(30), ...extra,
 });
 
 export const projects = [
   project("p1", "agent team", {
+    icon: "color:#2E7D4F", auto_resume: true, coordinator_model: "claude-opus-5-5", thread_effort: "medium",
     pinned: true, waiting: 3, threads_active: 2, repo: "touwaeriol/agent-teams", git_connection_id: "g1", updated_at: ago(1),
     description: "多员工协作平台",
     context: "后端 FastAPI + asyncpg，前端 React + Vite（pnpm）。改完跑 ruff、mypy、pytest 和 vite build。提交信息用中文。",
   }),
-  project("p2", "sup2api", { repo: "touwaeriol/sup2api", branch: "develop", git_connection_id: "g1", updated_at: ago(40) }),
+  project("p2", "sup2api", { icon: "🚀", repo: "touwaeriol/sup2api", branch: "develop", git_connection_id: "g1", updated_at: ago(40) }),
   project("p3", "new-api", { waiting: 1, repo: "touwaeriol/new-api", git_connection_id: "g1", updated_at: ago(90) }),
   project("p4", "sakura-2api", { updated_at: ago(300) }),
   project("p5", "旧官网", { archived: true }),
@@ -190,7 +192,37 @@ export const deliverables = [
   deliverable("d4", "design", "新建项目下拉框", 10, 120, "仓库与基准分支"),
   deliverable("d5", "data", "审批耗时统计", 12, 60 * 20, "平均等待 4 分钟"),
   deliverable("d6", "pr", "PR #36 GitHub 一键连接", 9, 60 * 22, "thread/9-github-app → main"),
+  hosted("d7", "design", "06-nodes.png", 60 * 30, 9_400, "user"),
+  hosted("d8", "design", "e2e-main.png", 60 * 31, 381_800, "user"),
+  hosted("d9", "doc", "架构说明.md", 60 * 33, 24_100, "designer-1"),
+  hosted("d10", "design", "落地页 v2", 60 * 34, 208_600, "designer-1", "index.html"),
 ];
+
+function hosted(id, kind, title, min, size, by, entry = title) {
+  return { id, project_id: "p1", thread_no: by === "user" ? null : 12, kind, title, url: "", detail: { hosted: true, entry, size, version: 1, files: 1, by, render: entry.endsWith(".md") ? "markdown" : entry.endsWith(".html") ? "html" : "image" }, published_by: by, created_at: ago(min), updated_at: ago(min) };
+}
+
+export const schedules = [
+  { id: "sc1", project_id: "p1", name: "每日进展", cron: "0 9 * * *", timezone: "Asia/Shanghai", message: "汇总昨天各讨论串的进展，有卡住的告诉我。", enabled: true, next_run_at: ago(-600), last_run_at: ago(840), last_error: "", created_at: ago(60 * 24 * 3), updated_at: ago(840) },
+  { id: "sc2", project_id: "p1", name: "周一清理", cron: "0 10 * * 1", timezone: "Asia/Shanghai", message: "列出超过一周没动的讨论串，建议归档哪些。", enabled: false, next_run_at: null, last_run_at: null, last_error: "", created_at: ago(60 * 24 * 2), updated_at: ago(60) },
+];
+
+const tok = (input, output) => ({ input, output, cache_read: input * 3, cache_write: Math.round(input / 4) });
+export const usage = {
+  days: 7, cost_usd_est: 18.42, turns: 214, tokens: tok(1_240_000, 182_000),
+  by_day: [6, 5, 4, 3, 2, 1, 0].map((d, i) => ({ day: new Date(Date.now() - d * 86_400_000).toISOString().slice(0, 10), cost_usd: [1.2, 2.8, 0, 3.4, 4.1, 2.2, 4.72][i], tokens: tok(100_000, 15_000) })),
+  by_thread: [
+    { thread_no: 12, title: "审批卡片与员工通信", cost_usd: 9.8, tokens: tok(640_000, 96_000) },
+    { thread_no: 13, title: "Codex 运行时", cost_usd: 5.1, tokens: tok(380_000, 52_000) },
+    { thread_no: null, title: "", cost_usd: 3.52, tokens: tok(220_000, 34_000) },
+  ],
+  by_employee: [
+    { employee: "dev-2", thread_no: 12, cost_usd: 5.2, tokens: tok(330_000, 51_000) },
+    { employee: "lead-12", thread_no: 12, cost_usd: 3.1, tokens: tok(210_000, 30_000) },
+    { employee: "coordinator", thread_no: null, cost_usd: 3.52, tokens: tok(220_000, 34_000) },
+    { employee: "dev-1", thread_no: 13, cost_usd: 2.9, tokens: tok(190_000, 26_000) },
+  ],
+};
 
 export const nodes = [
   { id: "n1", name: "rc-erio", online: true, since: ago(120), last_seen_at: ago(0), version: "2.0.3", protocol: 2, isolation: "agent_user", runtimes: { claude: { sdk: "0.3.325", cli: "2.1.322", auth: "subscription" }, codex: {} }, capacity: { max_active_sessions: 4 }, active_sessions: 2, parked_sessions: 1, queued: 0, isolated: true, labels: [], max_active_sessions: 4, park_after_s: null, created_at: ago(9000) },

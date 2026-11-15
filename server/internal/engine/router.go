@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
+	"github.com/touwaeriol/agent-teams/server/internal/timers"
 )
 
 // router dispatches daemon messages to the engines (nodegw.Handler).
@@ -217,7 +219,7 @@ func (r *router) applyEvent(ctx context.Context, tx *core.Tx, sc core.SessionCon
 	case "text":
 		return nil, r.text(ctx, tx, sc, ev)
 	case "rate_limited":
-		return nil, tx.EmitActivity(ctx, sc.Employee.ProjectID, sc.Employee.ThreadID, sc.Employee.Name, "限速中："+val(ev.Detail))
+		return nil, r.rateLimited(ctx, tx, sc, ev)
 	case "error":
 		return []status.Observation{{Kind: status.Touch, Cause: "error"}}, r.sessionError(ctx, tx, sc, ev)
 	}
@@ -262,11 +264,29 @@ func (r *router) toolStarted(ctx context.Context, tx *core.Tx, sc core.SessionCo
 }
 
 // turnEnded records usage and nudges a member whose task is still running.
+// An employee waiting for its usage limit to reset is not nudged: its thread is paused.
 func (r *router) turnEnded(ctx context.Context, tx *core.Tx, sc core.SessionContext, ev *protocol.SessionEvent) error {
 	if err := recordUsage(ctx, tx, sc, ev); err != nil {
 		return err
 	}
+	waiting, err := timers.Waiting(ctx, tx, sc.Employee.ID)
+	if err != nil || waiting {
+		return err
+	}
 	return r.e.Sched.TurnEnded(ctx, tx, sc.Employee)
+}
+
+// rateLimited logs the limit as activity; a usage limit (reset minutes or hours away)
+// also pauses the employee's thread until then (data-model.md §2.10).
+func (r *router) rateLimited(ctx context.Context, tx *core.Tx, sc core.SessionContext, ev *protocol.SessionEvent) error {
+	e := sc.Employee
+	if err := tx.EmitActivity(ctx, e.ProjectID, e.ThreadID, e.Name, "限速中："+val(ev.Detail)); err != nil {
+		return err
+	}
+	if !timers.IsUsageLimit(ev.RetryAt, time.Now()) {
+		return nil
+	}
+	return timers.RecordLimit(ctx, tx, r.e.Orch, e, *ev.RetryAt, val(ev.Detail))
 }
 
 func recordUsage(ctx context.Context, tx *core.Tx, sc core.SessionContext, ev *protocol.SessionEvent) error {

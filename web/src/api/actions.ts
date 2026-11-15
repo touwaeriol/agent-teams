@@ -34,6 +34,7 @@ export const projects = {
     unwrap(client.POST("/api/projects/{pid}/deliverables/request", { params: { path: { pid } }, body: { kind, brief }, ...idem() })),
   addDeliverable: (pid: string, body: { kind: string; title: string; url: string; thread_no?: number }) =>
     unwrap(client.POST("/api/projects/{pid}/deliverables", { params: { path: { pid } }, body, ...idem() })),
+  upload: (pid: string, body: S["UploadBody"]) => unwrap(client.POST("/api/projects/{pid}/library", { params: { path: { pid } }, body })),
   openThread: (pid: string, body: { title: string; brief: string }) =>
     unwrap(client.POST("/api/projects/{pid}/threads", { params: { path: { pid } }, body, ...idem() })),
 };
@@ -43,6 +44,13 @@ export const deliverables = {
   remove: (id: string) => unwrap(client.DELETE("/api/deliverables/{id}", { params: { path: { id } } })),
   comment: (id: string, text: string, version?: number) =>
     unwrap(client.POST("/api/deliverables/{id}/comments", { params: { path: { id } }, body: { text, version } })),
+};
+
+export const schedules = {
+  create: (pid: string, body: S["ScheduleBody"]) => unwrap(client.POST("/api/projects/{pid}/schedules", { params: { path: { pid } }, body })),
+  update: (id: string, body: S["ScheduleBody"]) => unwrap(client.PATCH("/api/schedules/{id}", { params: { path: { id } }, body })),
+  remove: (id: string) => unwrap(client.DELETE("/api/schedules/{id}", { params: { path: { id } } })),
+  run: (id: string) => unwrap(client.POST("/api/schedules/{id}/run", { params: { path: { id } } })),
 };
 
 export const conversations = {

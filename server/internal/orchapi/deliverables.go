@@ -23,8 +23,9 @@ type deliverablesInput struct {
 
 // DeliverablePage is a page of deliverables (newest first).
 type DeliverablePage struct {
-	Items      []core.DeliverableView `json:"items"`
-	NextCursor *string                `json:"next_cursor"`
+	Items        []core.DeliverableView `json:"items"`
+	NextCursor   *string                `json:"next_cursor"`
+	StorageBytes int64                  `json:"storage_bytes" doc:"Bytes the project's hosted files take (every version)"`
 }
 
 type deliverablePageOutput struct{ Body DeliverablePage }
@@ -108,6 +109,9 @@ func (a *API) listDeliverables(ctx context.Context, in *deliverablesInput) (*del
 		return nil, err
 	}
 	page := DeliverablePage{Items: items}
+	if page.StorageBytes, err = a.storageBytes(ctx, p.ID); err != nil {
+		return nil, err
+	}
 	if len(items) == f.Limit {
 		last := items[len(items)-1].ID
 		page.NextCursor = &last

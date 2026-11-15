@@ -258,10 +258,7 @@ func (a *API) projectView(ctx context.Context, p store.Project) (httpapi.Project
 	var hd httpapi.Delivery
 	raw, _ := json.Marshal(d)
 	_ = json.Unmarshal(raw, &hd)
-	return httpapi.ProjectView{ID: p.ID, Name: p.Name, Description: p.Description, Context: p.Context,
-		Repos: httpapi.RepoRefs(p.Repos), Pinned: p.Pinned, Archived: p.Archived, WorkMode: p.WorkMode,
-		AutoApprove: p.AutoApprove, RequireAcceptance: p.RequireAcceptance, Delivery: hd, OfficeLayout: p.OfficeLayout,
-		Waiting: p.Waiting, ThreadsActive: p.ThreadsActive, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}, nil
+	return httpapi.ProjectViewOf(p, hd), nil
 }
 
 func (a *API) recentMemory(ctx context.Context, pid string) ([]store.MemoryItem, error) {
