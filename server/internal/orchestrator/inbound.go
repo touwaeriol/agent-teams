@@ -200,8 +200,14 @@ func (o *Orchestrator) reconcileOne(ctx context.Context, tx *core.Tx, s core.Age
 	it, ok := reported[s.ID]
 	if ok && int(it.OpenGen) == s.OpenGen && it.State != "closed" {
 		state := string(it.State)
-		if state == "turn_running" || state == "parked" || state == "active" {
-			return core.SetSessionState(ctx, tx, s.ID, state)
+		if state != "turn_running" && state != "parked" && state != "active" {
+			return nil
+		}
+		if err := core.SetSessionState(ctx, tx, s.ID, state); err != nil {
+			return err
+		}
+		if s.State == "turn_running" && state == "parked" {
+			return o.resumeCutTurn(ctx, tx, s)
 		}
 		return nil
 	}
@@ -213,6 +219,20 @@ func (o *Orchestrator) reconcileOne(ctx context.Context, tx *core.Tx, s core.Age
 		return err
 	}
 	return o.reopen(ctx, tx, e, s, nil)
+}
+
+// cutTurnNote wakes an employee whose turn a daemon restart cut off.
+const cutTurnNote = "（平台）节点守护进程重启，打断了你上一个回合。请从中断的地方继续未完成的工作；之前等待的审批已失效，需要的话重新申请。"
+
+// resumeCutTurn: the console saw a turn running, the restarted daemon only knows the session
+// as parked, so nothing would ever continue it; a system note resumes the session.
+func (o *Orchestrator) resumeCutTurn(ctx context.Context, tx *core.Tx, s core.AgentSession) error {
+	e, err := core.EmployeeByID(ctx, tx, s.EmployeeID)
+	if err != nil {
+		return err
+	}
+	_, err = o.Deliver(ctx, tx, e, Delivery{Text: cutTurnNote, Kind: "system", Priority: "next"})
+	return err
 }
 
 func hasPendingOpen(ctx context.Context, tx *core.Tx, s core.AgentSession) bool {

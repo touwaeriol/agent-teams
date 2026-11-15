@@ -209,7 +209,7 @@ Codex 对应：组长和 `read_only` 岗位 `sandbox: read-only, approvalPolicy:
 - **逻辑会话**（`at_agent_sessions` 一行）：属于某个员工实例，记录 SDK `session_id` 或 Codex `thread.id`、节点、cwd、分支、状态。员工存在多久它就存在多久（统筹跟项目一样久，组长和成员跟讨论串一样久）。
 - **进程**：Claude 会话对应一个 `query()` 子进程（约 250 MB）。空闲超过 `park_after`（默认 15 分钟，无运行中的回合、无待审批）就 `close()` 掉进程，会话标为 `parked`；下一条消息到来时用 `resume: <session_id>` 重开。这样一台节点可以挂几十个逻辑会话，同时活跃的进程受 `max_active_sessions`（默认 4，节点 hello 上报，可在节点页调）限制。
 - Codex：一个 `codex app-server` 托管该节点所有 Codex 会话（同一 `CODEX_HOME`）；空闲 thread 不占额外进程，app-server 重启后 `thread/resume {excludeTurns:true}`。
-- 守护进程重启：从 `state/sessions/*.json` 知道本机有哪些逻辑会话，但**不主动恢复**；等控制台在重连后按需重新 `session.open {resume}`（控制台是唯一的真相）。
+- 守护进程重启：从 `state/sessions/*.json` 知道本机有哪些逻辑会话，但**不主动恢复**；等控制台在重连后按需重新 `session.open {resume}`（控制台是唯一的真相）。控制台记录为 `turn_running`、重启后的报告却是 `parked` 的会话，说明回合被重启打断了：控制台给它发一条系统消息（“守护进程重启打断了你上一个回合，请继续”），会话随之 resume 接着干，不会卡在进行中的任务上。
 - **会话钉在节点上**：Claude 转录（员工 HOME 下的 `.claude/projects`）和 Codex rollout（`$CODEX_HOME/sessions`）只存在于跑过它的节点，所以 `resume` 只发给 `at_agent_sessions.node_id` 那台节点。必须换节点时（节点被删、离线超过 `rehome_after`（默认 30 分钟）且员工有待办任务、节点 drain），orchestrator 关闭旧逻辑会话，在新节点开一个**全新**会话（`resume: null`），第一条消息是平台生成的交接摘要：员工身份、当前任务与说明、主任务计划、该员工最近 20 条消息/留言、未完成的提问、分支名与最近提交（`git.status`）。`resume` 失败（守护进程回 `session.opened {resume_failed: true}`，例如转录被清理）时自动走同一个交接流程，不需要人处理。不做转录同步（SDK `sessionStore` 以后可作为改进）。
 
 ### 6.3 平台工具：守护进程本地 MCP + WS 转发

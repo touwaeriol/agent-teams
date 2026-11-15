@@ -148,6 +148,34 @@ func TestReconcileReopensMissingSessions(t *testing.T) {
 	})
 }
 
+// TestRestartMidTurnResumes: the console saw the dev's turn running; after a daemon restart the
+// report only knows the session as parked, so the console sends a note that resumes it.
+func TestRestartMidTurnResumes(t *testing.T) {
+	tm := startTeam(t)
+	gen := protocol.OpenGen(tm.dev.gen)
+	tm.dev.send(protocol.TypeSessionState, protocol.SessionState{SessionID: protocol.SessionID(tm.dev.session), OpenGen: &gen, State: "turn_running"})
+	eventually(t, "dev turn running", func() bool {
+		s, err := core.SessionByID(tm.w.ctx, tm.w.e.Core.Pool, tm.dev.session)
+		return err == nil && s.State == "turn_running"
+	})
+	tm.n.Close()
+	n2 := tm.w.connect(tm.token, nodetest.Options{Epoch: "e-restarted"})
+	tm.dev.node, tm.lead.node = n2, n2
+	items := []protocol.SessionReportItem{
+		{SessionID: protocol.SessionID(tm.dev.session), OpenGen: gen, State: "parked", Kind: "claude"},
+		{SessionID: protocol.SessionID(tm.lead.session), OpenGen: protocol.OpenGen(tm.lead.gen), State: "parked", Kind: "claude"},
+	}
+	if _, err := n2.Send(tm.w.ctx, protocol.TypeSessionsReport, protocol.SessionsReport{Sessions: items}); err != nil {
+		t.Fatal(err)
+	}
+	tm.dev.expectSend("守护进程重启")
+	ctx, cancel := context.WithTimeout(tm.w.ctx, 2*time.Second)
+	defer cancel()
+	if f, err := n2.Wait(ctx, protocol.TypeSessionSend, tm.lead.mine); err == nil {
+		t.Fatalf("idle lead must not be woken: %s", f.Body)
+	}
+}
+
 // TestReplayFromLastEventID: a reconnecting stream gets what it missed, filtered by topic,
 // with skip frames keeping its position.
 func TestReplayFromLastEventID(t *testing.T) {
