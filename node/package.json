@@ -1,0 +1,41 @@
+{
+  "name": "@agent-teams/node",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "agent-teams v2 node daemon: hosts Claude / Codex employee sessions and talks to the console over WebSocket",
+  "bin": {
+    "agent-teams-node": "dist/node.mjs"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "pack": "npm run build && node scripts/pack.mjs",
+    "gen:codex": "node scripts/gen-codex-protocol.mjs",
+    "smoke:claude": "tsx scripts/smoke-claude.ts",
+    "smoke:codex": "tsx scripts/smoke-codex.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.325",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@openai/codex": "0.169.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "pino": "9.14.0",
+    "ulid": "3.0.2",
+    "ws": "8.23.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/ws": "8.18.2",
+    "esbuild": "0.25.12",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  }
+}

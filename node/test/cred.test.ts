@@ -1,0 +1,73 @@
+import { generateKeyPairSync, sign, createHash } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { CredBroker } from "../src/cred/broker.js";
+import { CredServer } from "../src/cred/server.js";
+import { gitCredentialEnv, gitCredentialMain, githubPath, parseCredentialInput } from "../src/cred/helper.js";
+import { verifyRelease } from "../src/upgrade.js";
+import { silentLogger } from "../src/util/log.js";
+
+let dir: string;
+beforeEach(() => (dir = mkdtempSync(join(tmpdir(), "at-cred-"))));
+afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+describe("credentials", () => {
+  it("serves read tokens to the git credential helper of a registered session only", async () => {
+    const sent: Array<Record<string, any>> = [];
+    let broker: CredBroker;
+    broker = new CredBroker((type, body) => {
+      sent.push({ type, ...body });
+      const b = body as { req_id: string; path: string };
+      setTimeout(() => broker.resolve({ req_id: b.req_id, ok: true, username: "x-access-token", password: "ghs_test123", expires_at: new Date(Date.now() + 3600_000).toISOString() }), 5);
+    });
+    const server = new CredServer(join(dir, "run", "cred.sock"), broker, silentLogger);
+    await server.start();
+    try {
+      const secret = server.register("s_1", 3);
+      const out = await gitCredentialMain({ socket: server.socketPath, session: "s_1", secret }, "get", "protocol=https\nhost=github.com\npath=acme/app.git\n\n");
+      expect(out.out).toBe("username=x-access-token\npassword=ghs_test123\n");
+      expect(sent).toEqual([expect.objectContaining({ type: "cred.request", session_id: "s_1", open_gen: 3, host: "github.com", path: "acme/app.git", purpose: "read" })]);
+      await gitCredentialMain({ socket: server.socketPath, session: "s_1", secret }, "get", "protocol=https\nhost=github.com\npath=acme/app.git\n");
+      expect(sent.length).toBe(1);
+      expect((await gitCredentialMain({ socket: server.socketPath, session: "s_1", secret: "wrong" }, "get", "protocol=https\nhost=github.com\n")).out).toBe("quit=1\n");
+      expect((await gitCredentialMain({ socket: server.socketPath, session: "s_1", secret }, "store", "")).out).toBe("");
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("retries an unanswered cred.request with the same req_id and then gives up", async () => {
+    const sent: Array<{ req_id: string }> = [];
+    const broker = new CredBroker((_t, body) => sent.push(body as { req_id: string }), 20);
+    await expect(broker.get({ job_id: "g_1" }, "github.com", "a/b.git", "push")).rejects.toThrow(/did not answer/);
+    expect(sent.length).toBe(3);
+    expect(new Set(sent.map((s) => s.req_id)).size).toBe(1);
+  });
+
+  it("builds git config env for the helper without writing tokens anywhere", () => {
+    const env = gitCredentialEnv(["/usr/bin/node", "/opt/at/node.mjs"], "/run/at/cred.sock", "s_1", "sec");
+    expect(env.GIT_CONFIG_VALUE_0).toBe("");
+    expect(env.GIT_CONFIG_VALUE_1).toBe("!/usr/bin/node /opt/at/node.mjs git-credential --socket /run/at/cred.sock --session s_1 --secret sec");
+    expect(env.GIT_TERMINAL_PROMPT).toBe("0");
+    expect(parseCredentialInput("protocol=https\nhost=github.com\n")).toEqual({ protocol: "https", host: "github.com" });
+    expect(githubPath("https://github.com/acme/app.git")).toBe("acme/app.git");
+    expect(githubPath("git@github.com:acme/app")).toBe("acme/app.git");
+    expect(githubPath("https://gitlab.com/a/b")).toBeNull();
+  });
+});
+
+describe("upgrade verification", () => {
+  it("accepts only tarballs with the right sha256 and Ed25519 signature", () => {
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+    const pem = publicKey.export({ type: "spki", format: "pem" }).toString();
+    const tgz = Buffer.from("release bytes");
+    const msg = { version: "2.0.1", sha256: createHash("sha256").update(tgz).digest("hex"), signature: sign(null, tgz, privateKey).toString("base64") };
+    expect(() => verifyRelease(tgz, msg, pem)).not.toThrow();
+    expect(() => verifyRelease(Buffer.from("tampered"), msg, pem)).toThrow(/sha256/);
+    expect(() => verifyRelease(tgz, { ...msg, signature: sign(null, Buffer.from("x"), privateKey).toString("base64") }, pem)).toThrow(/signature/);
+    const der = publicKey.export({ type: "spki", format: "der" }).toString("base64");
+    expect(() => verifyRelease(tgz, msg, der)).not.toThrow();
+  });
+});
