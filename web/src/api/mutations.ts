@@ -1,6 +1,9 @@
 import { useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { errorText } from "@/components/common";
+
+export function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 /**
  * A mutation with the platform's defaults: errors become a toast, listed

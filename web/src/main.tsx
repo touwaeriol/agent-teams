@@ -3,12 +3,28 @@ import React, { lazy, Suspense } from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { Toaster } from "sonner";
+import { ApiError } from "./api/client";
 import { App } from "./App";
 import { ThemeProvider, useTheme } from "./lib/theme";
 import "./index.css";
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { staleTime: 5_000, refetchOnWindowFocus: false } },
+  defaultOptions: {
+    queries: {
+      staleTime: 5_000,
+      refetchOnWindowFocus: false,
+      // 4xx answers are final; retry only network errors and 5xx.
+      retry: (count, error) => count < 2 && !(error instanceof ApiError && error.status < 500),
+    },
+  },
+});
+
+// A 401 anywhere means the session ended: drop the user so the app shows the login page.
+queryClient.getQueryCache().subscribe((event) => {
+  const error = event.query.state.error;
+  if (event.type === "updated" && error instanceof ApiError && error.status === 401 && event.query.queryKey[0] !== "me") {
+    queryClient.setQueryData(["me"], null);
+  }
 });
 
 // Dev-only office renderer demo (no backend, no login): /dev/office under `npm run dev`.

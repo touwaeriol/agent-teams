@@ -25,6 +25,8 @@ export function ConfirmAction({
   variant = "destructive",
   size,
   iconOnly,
+  open,
+  onOpenChange,
   children,
 }: {
   title: ReactNode;
@@ -34,11 +36,15 @@ export function ConfirmAction({
   variant?: ButtonProps["variant"];
   size?: ButtonProps["size"];
   iconOnly?: string; // aria-label: render a bare trash icon button
+  /** Controlled mode without a trigger (opened from a menu item). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   children?: ReactNode;
 }) {
+  const controlled = open !== undefined;
   return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      {!controlled && <AlertDialogTrigger asChild>
         {iconOnly ? (
           <Button variant="ghost" size="icon" aria-label={iconOnly}>
             <Trash2 />
@@ -52,7 +58,7 @@ export function ConfirmAction({
             )}
           </Button>
         )}
-      </AlertDialogTrigger>
+      </AlertDialogTrigger>}
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
