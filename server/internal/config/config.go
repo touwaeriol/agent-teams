@@ -25,6 +25,8 @@ type Config struct {
 	AdminEmails  map[string]bool
 	LogLevel     slog.Level
 	WebhookToken string // GITHUB_WEBHOOK_SECRET, optional override of the App's own secret
+	GitHubAPI    string // GITHUB_API_URL: REST base; GitHub Enterprise, or a local emulator in tests
+	GitHubWeb    string // GITHUB_WEB_URL: web base for OAuth and App pages
 }
 
 // Getenv looks a variable up; os.Getenv in production, a map in tests.
@@ -45,6 +47,8 @@ func Load(getenv Getenv) (Config, error) {
 		AdminEmails:  emails(getenv("AGENT_TEAMS_ADMIN_EMAILS")),
 		LogLevel:     level(getenv("LOG_LEVEL")),
 		WebhookToken: getenv("GITHUB_WEBHOOK_SECRET"),
+		GitHubAPI:    strings.TrimRight(getenv("GITHUB_API_URL"), "/"),
+		GitHubWeb:    strings.TrimRight(getenv("GITHUB_WEB_URL"), "/"),
 	}
 	return cfg, cfg.check()
 }

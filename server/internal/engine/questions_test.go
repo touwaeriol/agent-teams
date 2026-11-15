@@ -77,6 +77,14 @@ func TestBlockingQuestions(t *testing.T) {
 	if len(cards) != 1 || !cards[0].Blocking || cards[0].Asker != "dev-1" {
 		t.Fatalf("waiting %+v", cards)
 	}
+	var coord struct {
+		ConversationID string `json:"conversation_id"`
+	}
+	tm.b.must(200, "GET", "/api/projects/"+tm.projectID+"/coordinator", nil, &coord)
+	eventually(t, "coordinator told the thread waits on the user", func() bool {
+		_, msgs := tm.b.do("GET", "/api/conversations/"+coord.ConversationID+"/messages", nil)
+		return strings.Contains(string(msgs), "· waiting]")
+	})
 	tm.b.must(200, "POST", "/api/conversations/"+tm.thread.ID+"/questions/"+cards[0].ID+"/answer", map[string]string{"answer": "B"}, nil)
 	if res := tm.dev.result(ask); !res.Ok || text(res) != "B" {
 		t.Fatalf("ask_user result %+v", res)

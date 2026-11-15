@@ -221,6 +221,11 @@ func TestThreadEndToEnd(t *testing.T) {
 	events.wait(t, "activity", "改 Login.tsx")
 
 	approvalFlow(t, w, b, dev, opened.ThreadID, events)
+	// Approval cards alone are not reported to the coordinator (it would spend a turn on each).
+	_, coordMsgs := b.do("GET", "/api/conversations/"+coord.ConversationID+"/messages", nil)
+	if strings.Contains(string(coordMsgs), "· waiting]") {
+		t.Fatalf("coordinator got an approval-only waiting report: %s", coordMsgs)
+	}
 
 	res = dev.mustCall("complete_task", map[string]any{"task_id": "t1", "summary": "表单写好了"})
 	if !strings.Contains(string(*res.Structured), `"status":"done"`) {

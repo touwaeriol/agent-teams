@@ -15,6 +15,9 @@ describe("config", () => {
       const c = loadConfig(["--root", "/srv/other"], env);
       expect(c).toMatchObject({ wsUrl: "wss://console.example/nodes/connect", token: "tok-env", root: "/srv/other", maxActive: 6, configDir: join(home, ".config/agent-teams") });
       expect(loadConfig(["--token=tok-flag", "--max-sessions", "2"], env)).toMatchObject({ token: "tok-flag", maxActive: 2 });
+      // install-node.sh v2 writes AGENT_TEAMS_MAX_SESSIONS; it wins over the v1 key.
+      writeFileSync(join(home, ".config/agent-teams/node.env"), "AGENT_TEAMS_CONSOLE=https://c\nAGENT_TEAMS_NODE_TOKEN=t\nAGENT_TEAMS_MAX_RUNS=6\nAGENT_TEAMS_MAX_SESSIONS=3\n");
+      expect(loadConfig([], { HOME: home })).toMatchObject({ maxActive: 3 });
       expect(() => loadConfig([], { HOME: join(home, "nowhere") })).toThrow(/AGENT_TEAMS_CONSOLE/);
       expect(() => loadConfig(["--bogus", "1"], env)).toThrow(/unknown option/);
     } finally {

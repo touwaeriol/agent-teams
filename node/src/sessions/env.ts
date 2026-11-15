@@ -39,3 +39,12 @@ export function pickPassEnv(base: NodeJS.ProcessEnv, passList: string[]): Record
   }
   return out;
 }
+
+/**
+ * gitIdentity names an employee's commits (employee HOMEs have no ~/.gitconfig, so a plain
+ * `git commit` would fail with "Author identity unknown"). spec.env can override it.
+ */
+export function gitIdentity(employee: string): Record<string, string> {
+  const email = `${employee.replace(/[^A-Za-z0-9._-]/g, "-")}@agent-teams.local`;
+  return { GIT_AUTHOR_NAME: employee, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_NAME: employee, GIT_COMMITTER_EMAIL: email };
+}

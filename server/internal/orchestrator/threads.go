@@ -244,6 +244,21 @@ func briefText(t core.Thread, note string) string {
 // notifyStatuses are the transitions reported to the coordinator (threads.md).
 var notifyStatuses = map[string]bool{"waiting": true, "review": true, "done": true, "failed": true}
 
+// shouldNotify reports whether a transition goes to the coordinator. A thread that waits only
+// on approval cards (it flips running ↔ waiting on every tool approval) is not reported: the
+// user sees the cards directly, the coordinator cannot decide them, and each report would cost
+// the coordinator a turn.
+func (o *Orchestrator) shouldNotify(ctx context.Context, tx *core.Tx, t core.Thread, next string) bool {
+	if !notifyStatuses[next] {
+		return false
+	}
+	if next != "waiting" {
+		return true
+	}
+	c, err := core.ThreadCountsOf(ctx, tx, t)
+	return err != nil || c.QuestionsOpen > 0
+}
+
 // setStatus changes a thread's status, emits it, reports upward and frees slots.
 func (o *Orchestrator) setStatus(ctx context.Context, tx *core.Tx, t core.Thread, next, reason string) error {
 	if t.Status == next {
@@ -258,7 +273,7 @@ func (o *Orchestrator) setStatus(ctx context.Context, tx *core.Tx, t core.Thread
 	if err := o.afterStatus(ctx, tx, t, next); err != nil {
 		return err
 	}
-	if !notifyStatuses[next] {
+	if !o.shouldNotify(ctx, tx, t, next) {
 		return nil
 	}
 	// Reporting upward must never block the status change itself (e.g. no node for the coordinator).

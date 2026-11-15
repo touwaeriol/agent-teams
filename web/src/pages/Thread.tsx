@@ -369,7 +369,7 @@ function ThreadAside({ thread }: { thread: ThreadView }) {
         <h2 className="text-sm font-semibold">动态</h2>
         {feed.length === 0 && <span className="text-xs text-muted-foreground">还没有动态</span>}
         {feed.map((e, i) => (
-          <span key={`${e.at}-${i}`} className="text-xs leading-[19px] text-[#4A4843]" title={timeAgo(e.at)}>
+          <span key={`${e.at}-${i}`} className="text-xs leading-[19px] text-[#4A4843] [overflow-wrap:anywhere]" title={timeAgo(e.at)}>
             <span className="font-mono text-foreground">{e.employee}</span> {e.text}
           </span>
         ))}

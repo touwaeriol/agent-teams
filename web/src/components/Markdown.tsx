@@ -1,6 +1,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
+import { fenceCjkUrls } from "@/lib/autolink";
 
 export function Markdown({ children, className }: { children: string; className?: string }) {
   return (
@@ -15,7 +16,7 @@ export function Markdown({ children, className }: { children: string; className?
         className,
       )}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{fenceCjkUrls(children)}</ReactMarkdown>
     </div>
   );
 }

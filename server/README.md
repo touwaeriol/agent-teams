@@ -75,6 +75,7 @@ atctl admin reseal                   # re-encrypt sealed PATs and App secrets wi
 | `NODE_DIST_DIR` (/srv/node-dist) | daemon tarballs served at `/node/dist/` |
 | `AGENT_TEAMS_ADMIN_EMAILS` | these emails register as admin (first user always does) |
 | `GITHUB_WEBHOOK_SECRET` | optional override of the App's webhook secret |
+| `GITHUB_API_URL` / `GITHUB_WEB_URL` | optional REST / web base (GitHub Enterprise, or `deploy/v2/e2e/localgh.mjs` in local end-to-end tests) |
 | `LOG_LEVEL` | debug, info (default), warn, error |
 
 ## Tests

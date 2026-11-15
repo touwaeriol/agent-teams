@@ -148,6 +148,8 @@ describe("office mapping", () => {
   it("widget data and board summary", () => {
     const snap = { board: { claimable: 3 }, nodes: [{ id: "n", name: "rc", online: true }], merge_queue: [], ci: {} } as unknown as OfficeSnapshot;
     expect(toWidgetData(snap, null).nodes![0]).toMatchObject({ capacity: 0, active: 0 });
+    const live = { ...snap, nodes: [{ id: "n", name: "rc", online: true, active_sessions: 3, parked_sessions: 1, queued: 0, slots: 4 }] } as unknown as OfficeSnapshot;
+    expect(toWidgetData(live, null).nodes![0]).toMatchObject({ capacity: 4, active: 3, parked: 1 });
     const threads = [thread(12, { counts: { ...thread(1).counts, tasks_done: 1, tasks_total: 4 } }), thread(13, { status: "done" })];
     expect(boardSummary(threads, null)).toEqual({ title: "全项目 · 1 个讨论串", count: "小任务 1 / 4", pct: "25%" });
     expect(boardSummary(threads, 12).title).toBe("#12 T12");

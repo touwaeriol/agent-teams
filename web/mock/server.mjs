@@ -85,7 +85,7 @@ function officeSnapshot() {
     threads: state.threads.filter((t) => t.status !== "done"),
     employees: roster,
     board: { claimable: 3, by_thread: { 12: 2, 13: 1 } },
-    nodes: state.nodes.map((n) => ({ id: n.id, name: n.name, online: n.online, capacity: n.max_active_sessions, active: n.active_sessions, parked: n.parked_sessions, queued: n.queued })),
+    nodes: state.nodes.map((n) => ({ id: n.id, name: n.name, online: n.online, isolation: n.isolation, slots: n.max_active_sessions, active_sessions: n.active_sessions, parked_sessions: n.parked_sessions, queued: n.queued })),
     merge_queue: state.mergeQueue.t12,
     ci: { 12: state.checks.t12 },
     last_event_id: seq,

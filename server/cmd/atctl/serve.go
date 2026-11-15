@@ -46,7 +46,7 @@ func serve(ctx context.Context, _ []string) error {
 	if err != nil {
 		return err
 	}
-	gh := github.NewClient()
+	gh := githubClient(cfg)
 	box := auth.NewSecretBox(cfg.SecretKeys...)
 	tokens := github.NewTokens(gh, github.NewApps(db, box), cache, box)
 	deps, start, err := wire(httpapi.Deps{Config: cfg, Store: db, KV: cache, GitHub: gh, Tokens: tokens, Office: layouts,
@@ -58,6 +58,18 @@ func serve(ctx context.Context, _ []string) error {
 	start(ctx)
 	go maintain(ctx, db, log)
 	return listen(ctx, cfg, srv.Handler(), log)
+}
+
+// githubClient is the GitHub REST client, pointed at GITHUB_API_URL / GITHUB_WEB_URL when set.
+func githubClient(cfg config.Config) *github.Client {
+	gh := github.NewClient()
+	if cfg.GitHubAPI != "" {
+		gh.BaseURL = cfg.GitHubAPI
+	}
+	if cfg.GitHubWeb != "" {
+		gh.WebURL = cfg.GitHubWeb
+	}
+	return gh
 }
 
 func checkMigrated(ctx context.Context, db *store.Store) error {

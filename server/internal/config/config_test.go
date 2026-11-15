@@ -45,3 +45,14 @@ func TestSecretKeysListWins(t *testing.T) {
 		t.Fatalf("keys %v", keys)
 	}
 }
+
+func TestLoadGitHubBaseURLs(t *testing.T) {
+	cfg, err := Load(env(map[string]string{"DATABASE_URL": "postgres://x", "PUBLIC_URL": "http://a",
+		"GITHUB_API_URL": "http://localgh:8787/", "GITHUB_WEB_URL": "http://localgh:8787"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GitHubAPI != "http://localgh:8787" || cfg.GitHubWeb != "http://localgh:8787" {
+		t.Fatalf("github urls %q %q", cfg.GitHubAPI, cfg.GitHubWeb)
+	}
+}

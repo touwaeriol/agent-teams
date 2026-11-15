@@ -1,10 +1,26 @@
-import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
-import { dirname } from "node:path";
-import { timingSafeEqual } from "node:crypto";
+import { dirname, join } from "node:path";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { tmpdir } from "node:os";
 import { randomSecret } from "../util/ids.js";
 import type { Logger } from "../util/log.js";
 import type { CredBroker } from "./broker.js";
+
+/** Unix socket paths must fit sun_path (108 bytes on Linux, 104 on macOS). */
+const MAX_SOCKET_PATH = 100;
+
+/**
+ * credSocketPath is <runtimeDir>/cred.sock, or a short per-runtime-dir path under the
+ * system temp directory when that would not fit in sun_path (deep XDG_RUNTIME_DIR).
+ */
+export function credSocketPath(runtimeDir: string, tmp = tmpdir()): string {
+  const direct = join(runtimeDir, "cred.sock");
+  if (Buffer.byteLength(direct) <= MAX_SOCKET_PATH) return direct;
+  const tag = createHash("sha256").update(runtimeDir).digest("hex").slice(0, 12);
+  const uid = process.getuid?.() ?? 0;
+  return join(tmp, `agent-teams-${uid}-${tag}`, "cred.sock");
+}
 
 export interface CredSocketRequest {
   session: string;
@@ -31,11 +47,20 @@ export class CredServer {
   constructor(readonly socketPath: string, private readonly broker: CredBroker, private readonly log: Logger) {}
 
   async start(): Promise<void> {
-    mkdirSync(dirname(this.socketPath), { recursive: true, mode: 0o700 });
-    chmodSync(dirname(this.socketPath), 0o700);
+    const dir = dirname(this.socketPath);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const uid = process.getuid?.();
+    if (uid !== undefined && statSync(dir).uid !== uid) throw new Error(`${dir} belongs to another user`);
+    chmodSync(dir, 0o700);
     if (existsSync(this.socketPath)) rmSync(this.socketPath);
     const server = createServer((sock) => this.onConnection(sock));
-    await new Promise<void>((resolve) => server.listen(this.socketPath, resolve));
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(this.socketPath, () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
     chmodSync(this.socketPath, 0o600);
     this.server = server;
   }

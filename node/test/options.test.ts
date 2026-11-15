@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildClaudeOptions, buildSettings } from "../src/sessions/claude/options.js";
 import { sessionScoped, toPermissionResult } from "../src/sessions/claude/permissions.js";
-import { buildEnv } from "../src/sessions/env.js";
+import { buildEnv, gitIdentity } from "../src/sessions/env.js";
 import { mapClaudeMessage, describeTool } from "../src/sessions/claude/mapper.js";
 import type { ClaudeSessionOptions } from "../src/protocol.js";
 
@@ -65,5 +65,16 @@ describe("Claude message mapping", () => {
     expect(describeTool("Bash", { command: "GH_TOKEN=ghs_abcdefghijklmnop pytest -q tests" })).toEqual({ category: "shell", subcategory: "test", summary: "GH_TOKEN=*** pytest -q tests" });
     expect(describeTool("mcp__platform__complete_task", { task_id: "t1" })).toMatchObject({ category: "platform", summary: "complete_task" });
     expect(describeTool("Read", { file_path: "/a/b.ts" })).toMatchObject({ category: "read", summary: "/a/b.ts" });
+  });
+});
+
+describe("gitIdentity", () => {
+  it("names commits after the employee and lets spec.env override it", () => {
+    const id = gitIdentity("dev-1");
+    expect(id).toEqual({ GIT_AUTHOR_NAME: "dev-1", GIT_AUTHOR_EMAIL: "dev-1@agent-teams.local", GIT_COMMITTER_NAME: "dev-1", GIT_COMMITTER_EMAIL: "dev-1@agent-teams.local" });
+    expect(gitIdentity("前端 1").GIT_AUTHOR_EMAIL).toBe("---1@agent-teams.local");
+    const env = buildEnv({ base: {}, passList: [], home: "/h", extra: { ...id, GIT_AUTHOR_NAME: "custom" } });
+    expect(env.GIT_AUTHOR_NAME).toBe("custom");
+    expect(env.GIT_COMMITTER_NAME).toBe("dev-1");
   });
 });

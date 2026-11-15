@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CredBroker } from "../src/cred/broker.js";
-import { CredServer } from "../src/cred/server.js";
+import { CredServer, credSocketPath } from "../src/cred/server.js";
 import { gitCredentialEnv, gitCredentialMain, githubPath, parseCredentialInput } from "../src/cred/helper.js";
 import { verifyRelease } from "../src/upgrade.js";
 import { silentLogger } from "../src/util/log.js";
@@ -12,6 +12,20 @@ import { silentLogger } from "../src/util/log.js";
 let dir: string;
 beforeEach(() => (dir = mkdtempSync(join(tmpdir(), "at-cred-"))));
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+describe("credSocketPath", () => {
+  it("keeps <runtimeDir>/cred.sock when it fits and falls back to a short temp path otherwise", async () => {
+    expect(credSocketPath("/run/user/1000/agent-teams")).toBe("/run/user/1000/agent-teams/cred.sock");
+    const deep = join(dir, "x".repeat(120), "agent-teams");
+    const short = credSocketPath(deep, dir);
+    expect(Buffer.byteLength(short)).toBeLessThanOrEqual(100);
+    expect(short).toBe(credSocketPath(deep, dir));
+    expect(credSocketPath(deep + "2", dir)).not.toBe(short);
+    const server = new CredServer(short, new CredBroker(() => {}), silentLogger);
+    await server.start();
+    await server.stop();
+  });
+});
 
 describe("credentials", () => {
   it("serves read tokens to the git credential helper of a registered session only", async () => {

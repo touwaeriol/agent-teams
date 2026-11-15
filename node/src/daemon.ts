@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { ApprovalBroker } from "./approvals.js";
 import { CredBroker } from "./cred/broker.js";
 import { gitCredentialEnv } from "./cred/helper.js";
-import { CredServer } from "./cred/server.js";
+import { CredServer, credSocketPath } from "./cred/server.js";
 import { GitJobs } from "./git/jobs.js";
 import { installPlatformFiles, type PlatformFiles } from "./git/platform.js";
 import { probeIsolation, type Isolation } from "./isolation.js";
@@ -17,7 +17,7 @@ import { probeClaude, probeCodex } from "./runtimes.js";
 import { ClaudeDriver, type QueryFn } from "./sessions/claude/driver.js";
 import { CodexDriver } from "./sessions/codex/driver.js";
 import { CodexHub } from "./sessions/codex/hub.js";
-import { buildEnv, CODEX_PASS_ENV } from "./sessions/env.js";
+import { buildEnv, CODEX_PASS_ENV, gitIdentity } from "./sessions/env.js";
 import { SessionManager } from "./sessions/manager.js";
 import type { ToolPolicy } from "./sessions/policy.js";
 import type { Session } from "./sessions/session.js";
@@ -91,7 +91,7 @@ export class Daemon {
     this.approvals = new ApprovalBroker(send);
     this.tools = new ToolBroker(send);
     this.creds = new CredBroker(send);
-    this.credServer = new CredServer(join(o.runtimeDir, "cred.sock"), this.creds, o.log);
+    this.credServer = new CredServer(credSocketPath(o.runtimeDir), this.creds, o.log);
     this.toolhost = new LoopbackToolHost(o.log);
     this.platform = installPlatformFiles(o.platformDir, o.nodeCmd);
     this.hub = new CodexHub({ env: this.codexServerEnv(), log: o.log, clientVersion: DAEMON_VERSION, ...(o.codexCommand ? { command: o.codexCommand } : {}) });
@@ -262,7 +262,7 @@ export class Daemon {
     const cred = this.credEnv(spec);
     const fixed = spec.runtime === "claude" ? this.claudeFixed() : {};
     return buildEnv({
-      base: process.env, home: this.employeeHome, extra: spec.env ?? {},
+      base: process.env, home: this.employeeHome, extra: { ...gitIdentity(spec.employee.name), ...(spec.env ?? {}) },
       passList: spec.runtime === "codex" ? [...this.o.passEnv, ...CODEX_PASS_ENV] : this.o.passEnv,
       fixed: { ...fixed, ...cred }, pathPrefix: cred.AT_CRED_SOCK ? [this.platform.binDir] : [],
     });

@@ -231,14 +231,16 @@ export interface WaitingView {
   reviews: ThreadView[];
 }
 
+/** orchapi.NodeBrief (office snapshot, overview). */
 export interface NodeBrief {
   id: string;
   name: string;
   online: boolean;
-  capacity?: number;
-  active?: number;
-  parked?: number;
-  queued?: number;
+  isolation?: string;
+  active_sessions: number;
+  parked_sessions: number;
+  queued: number;
+  slots: number;
 }
 
 export interface OverviewView {

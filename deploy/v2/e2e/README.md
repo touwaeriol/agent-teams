@@ -1,0 +1,30 @@
+# Local end-to-end test of v2 (rc)
+
+Runs the whole system on this machine: compose stack (PostgreSQL 17, Valkey, `atctl migrate`,
+control plane) on a database that starts as the **production v1 schema with rows written by the
+v1 Python code**, a GitHub REST emulator over local bare repositories, and the real node daemon
+(installed from the tarball the control plane serves) with real Claude employees.
+
+```bash
+S=/tmp/claude-1000/<session>/scratchpad/e2e        # any scratch dir, never the repository
+docker build -f server/Dockerfile -t agent-teams-server:e2e .
+deploy/v2/e2e/up.sh "$S" /path/to/v1-schema.sql     # writes deploy/v2/.env.e2e (git-ignored), seeds v1 rows
+node deploy/v2/e2e/v1_check.mjs "$S/v1.json"        # v1 login, session, node token, sealed token, team, conversations
+node deploy/v2/e2e/run.mjs "$S"                     # coordinator → thread → lead → dev → approval → push → merge queue
+# screenshots (Playwright image, NODE_PATH with the playwright package):
+node deploy/v2/e2e/screenshots.cjs http://127.0.0.1:<PORT> <out> <project-id> 1
+ENV_FILE=deploy/v2/.env.e2e deploy/v2/compose.sh -f deploy/v2/docker-compose.e2e.yml down
+node --test deploy/v2/e2e/localgh.test.mjs          # the emulator's own tests
+```
+
+| File | What |
+| --- | --- |
+| `up.sh` | env file with random secrets and a free port 3470–3499, bare repos `local/hello` and `local/v1repo`, v1 schema load, `v1_seed.py`, then `up --wait` |
+| `v1_seed.py` | creates a user, session, node, team YAML, sealed PAT connection, project and conversation through `agent_teams.server` (the v1 code) |
+| `v1_check.mjs` | proves v2 accepts all of it (the PAT is checked by localgh, which accepts only that token) |
+| `localgh.mjs` | refs, merges (`git merge-tree`), pull requests, contents, empty check runs; `LOCALGH_TOKENS` restricts tokens |
+| `run.mjs` | the real-Claude run; the daemon runs with XDG dirs under the scratch dir and never reads `~/.config/agent-teams/node.env`. Roles use `--model sonnet` by default to keep it cheap. `E2E_DAEMON=node/dist/node.mjs` runs a local build instead of the served tarball |
+| `screenshots.cjs` | Main + thread panel, Thread, Office, Team, Nodes at deviceScaleFactor 2 |
+
+With no CI on the test repository the merge queue waits `appear_timeout_s` (300 s) and then
+passes (`on_missing: pass`), so a full run takes about 7 minutes.

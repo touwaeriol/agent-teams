@@ -39,7 +39,7 @@ export function replayEvents(rows: ReplayEvent[]): OfficeStatusEvent[] {
 }
 
 function toNode(n: NodeBrief) {
-  return { id: n.id, name: n.name, online: n.online, capacity: n.capacity ?? 0, active: n.active ?? 0, parked: n.parked, queued: n.queued };
+  return { id: n.id, name: n.name, online: n.online, capacity: n.slots ?? 0, active: n.active_sessions ?? 0, parked: n.parked_sessions, queued: n.queued };
 }
 
 /** CI lights: the focused thread's checks, else the latest thread that has any. */
