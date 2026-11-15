@@ -201,3 +201,22 @@ func TestRenderRejectsUnsafeRelease(t *testing.T) {
 		t.Fatal("unsafe version rendered")
 	}
 }
+
+func TestInstallScriptReinstallsWhenPackageChanges(t *testing.T) {
+	e := newInstallEnv(t)
+	script := renderInstallScript("https://console.test", platform.NodeRelease{Version: "2.0.3", SHA256: e.sha})
+	if out, err := e.run(script, []string{"AGENT_TEAMS_NODE_TOKEN=tok-1"}, "--name", "rc-erio"); err != nil {
+		t.Fatalf("install failed: %v\n%s", err, out)
+	}
+	count := func() int {
+		calls, _ := os.ReadFile(e.log)
+		return strings.Count(string(calls), "curl https://console.test/node/dist/")
+	}
+	if out, err := e.run(script, nil, "--name", "rc-erio"); err != nil || count() != 1 {
+		t.Fatalf("same package was downloaded again (%d): %v\n%s", count(), err, out)
+	}
+	_ = os.WriteFile(filepath.Join(e.home, ".local/share/agent-teams/node-2.0.3/.installed"), []byte("old-sha\n"), 0o644)
+	if out, err := e.run(script, nil, "--name", "rc-erio"); err != nil || count() != 2 {
+		t.Fatalf("rebuilt package with the same version was not reinstalled (%d): %v\n%s", count(), err, out)
+	}
+}

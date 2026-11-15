@@ -95,7 +95,7 @@ fi
 command -v npm > /dev/null || { echo "没有找到 npm（随 Node.js 一起安装）" >&2; exit 1; }
 
 target="$data/node-$release_version"
-if [ ! -f "$target/.installed" ]; then
+if [ "$(cat "$target/.installed" 2> /dev/null)" != "$release_sha256" ]; then
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
   tgz="$tmp/agent-teams-node-$release_version.tgz"
@@ -110,7 +110,7 @@ if [ ! -f "$target/.installed" ]; then
   else
     (cd "$target" && npm install --omit=dev --no-audit --no-fund --loglevel=error)
   fi
-  touch "$target/.installed"
+  echo "$release_sha256" > "$target/.installed"
 fi
 ln -sfn "node-$release_version" "$data/current.tmp" && mv -Tf "$data/current.tmp" "$data/current"
 
