@@ -232,8 +232,8 @@ Codex 会话 ──(http://127.0.0.1:<port>/mcp/<sid>/<每次 ─┘            
 平台工具清单（在 v1 / threads.md 基础上）：
 
 - **coordinator**：`open_thread(title, brief, roles?)`、`list_threads(status?)`、`thread_status(no)`、`message_thread(no, text)`、`ask_user(question, options?)`（不阻塞）、`remember(text)`、`set_status(text, kind?)`。
-- **lead**：`update_plan(steps)`（主任务）、`assign_task(assignee, instruction, main, depends_on?, kind?)`（assignee 可以是岗位名 → 进任务池）、`list_tasks`、`cancel_task`、`reply_to(question_id, answer)`、`broadcast`、`send_message`、`ask_user`（不阻塞）、`enqueue_merge(member | task_id)`（进合并队列，取代 v1 设计里的 `merge_member` 直接合并）、`open_pr(title, body)`、`finish(summary)`、`publish_deliverable(kind, title, url)`、`set_status`。`finish(summary)` 除了写 `at_threads.summary`，还插入一条 `at_project_memory {source: '#<no>', text: summary}` 并发 `memory` 事件（threads.md 的约定）。
-- **member**：`complete_task(task_id, summary, artifacts?)`（**显式完成**，见 §7.3；调用前平台先替它推送分支，见 §8.1）、`push_branch()`（把当前 worktree 的 HEAD 推到自己的成员分支，见 §8.1）、`report_progress`、`ask_lead`（阻塞）、`ask_user`（阻塞）、`send_message`、`read_messages`、`list_team`、`get_task`、`request_review`（阻塞）、`publish_deliverable`、`set_status`；`can_delegate` 时加 `assign_subtask`、`wait_task`。
+- **lead**：`update_plan(steps)`（主任务）、`assign_task(assignee, instruction, main, depends_on?, kind?)`（assignee 可以是岗位名 → 进任务池）、`list_tasks`、`cancel_task`、`reply_to(question_id, answer)`、`broadcast`、`send_message`、`ask_user`（不阻塞）、`enqueue_merge(member | task_id)`（进合并队列，取代 v1 设计里的 `merge_member` 直接合并）、`open_pr(title, body)`、`finish(summary)`、`publish_deliverable(kind, title, url)`、`publish_file(path, kind, title, deliverable_id?)`（§6.5）、`set_status`。`finish(summary)` 除了写 `at_threads.summary`，还插入一条 `at_project_memory {source: '#<no>', text: summary}` 并发 `memory` 事件（threads.md 的约定）。
+- **member**：`complete_task(task_id, summary, artifacts?)`（**显式完成**，见 §7.3；调用前平台先替它推送分支，见 §8.1）、`push_branch()`（把当前 worktree 的 HEAD 推到自己的成员分支，见 §8.1）、`report_progress`、`ask_lead`（阻塞）、`ask_user`（阻塞）、`send_message`、`read_messages`、`list_team`、`get_task`、`request_review`（阻塞）、`publish_deliverable`、`publish_file`（§6.5）、`set_status`；`can_delegate` 时加 `assign_subtask`、`wait_task`。
 - 审批不再是 MCP 工具（v1 的 `approve`），改走 canUseTool / Codex requestApproval（§8）。
 
 ### 6.4 消息怎么推给员工
@@ -243,6 +243,18 @@ Codex 会话 ──(http://127.0.0.1:<port>/mcp/<sid>/<每次 ─┘            
 - Claude：守护进程维护一个异步队列作为 `query()` 的 `prompt`；`priority` 原样带上（`now` 会打断当前回合，只用于用户点“插话并打断”和中止类指令）。
 - Codex：空闲时 `turn/start`；回合进行中用 `turn/steer {expectedTurnId}`；`later` 由守护进程排队到 `turn/completed` 后再发。
 - 消息在控制台有 `msg_id`（落库于 `at_messages`），守护进程按 `msg_id` 去重，投递后回 `session.delivered`。Claude 的 `SDKUserMessage.uuid` 就用 `msg_id`，守护进程重启后（本机去重表可能缺最后几条）在 resume 时扫描转录里已有的 user 消息 uuid，已投递的不再推（协议 §2.2）。
+
+### 6.5 技能与设计交付（skills + `publish_file`）
+
+模型本身就能设计：用普通工具写单文件 HTML 原型、Markdown 文档、SVG。平台只提供两样东西，再把结果记下来、展示出来：
+
+- **技能（skills）**：内置技能随控制台发布（`server/internal/skills/builtin/<name>/SKILL.md`：`design` = HTML 原型与设计稿，`docs` = Markdown 文档与规格说明），用户还可以上传自己的技能（`at_skills`，zip 或文件夹，只收 UTF-8 文本，单个技能 ≤ 64 个文件、≤ 512 KB，`SKILL.md` 的 front matter 必须有 `name` 和 `description`，不能和内置技能重名）。岗位模板的 `at_roles.skills` 勾选技能（统筹不能有技能）；Team 页的预设“设计师”（`roles.Presets`）默认带 `design` + `docs`。
+  - 打开会话时控制台把技能内容放进 `session.open.skills`（每岗位最多 16 个、合计 ≤ 2 MiB），并给 Claude 会话的 `tools`/`allowed_tools` 加上 `Skill`。
+  - Claude：守护进程把技能写成一个本地插件 `<root>/agent-skills/<project>/<thread_no>/<employee>/`（`.claude-plugin/plugin.json` + `skills/<name>/…`，每次打开重建），**不在任何 worktree 里**，所以不会被提交；SDK 选项 `plugins: [{type:'local', path, skipMcpDiscovery:true}]` + `skills: ['agent-teams-skills:<name>', …]`（只列本岗位的技能，SDK 自带的技能不出现）。`settingSources` 仍是 `[]`。已在 SDK 0.3.325 上实测（`node/scripts/smoke-skills.ts`：模型列出的技能恰好是岗位的两个，并用 Skill 工具读到了内容）。只读岗位的文件工具可以读这个目录。
+  - Codex 没有技能加载，控制台把每个技能的 `SKILL.md`（及其余文件）追加到 `developer_instructions`。
+- **`publish_file(path, kind, title, deliverable_id?)`**（组长、成员）：守护进程在本机读文件——路径解析符号链接后必须在员工 cwd 内；一个文件，或带 `index.html` 的目录（小网站：跳过隐藏文件、`node_modules`、符号链接，最多 64 个文件）；合计 ≤ 5 MB；扩展名限于 html、md、svg、png、jpg、gif、webp、pdf、json、csv、txt（网站里还可以有 css、js、字体）。内容按 1 MiB 切成 `file.chunk` 帧（可靠、按序）先发，再发带 `upload {upload_id, chunks, files[{path,size,sha256}]}` 的 `tool.call`（protocol.md §6.3）。控制台拼回、逐个校验大小和 sha256、按扩展名定 Content-Type（不信守护进程给的），存进 `at_deliverable_files`；不带 `deliverable_id` 时新建交付物（`detail.hosted = true`、`version`、`entry`、`render`），带了就成为该交付物的下一版。
+- **托管与展示**：文件只通过短时签名 URL 访问（`/files/<deliverable>.<version>.<expires>.<hmac>/<path>`，2 小时，HMAC 密钥由 `AGENT_TEAMS_SECRET_KEY` 派生），不需要也不读会话 cookie。配置了 `AGENT_TEAMS_ARTIFACT_ORIGIN`（必须是与 `AGENT_TEAMS_PUBLIC_URL` 不同的主机，最好是另一个注册域）时 URL 指向那个源，主站上的 `/files/` 返回 404；未配置时由控制台的 `/files/` 提供。响应总是带 `Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads`（**没有独立源时不含 `allow-same-origin`**，页面跑在不透明源里，拿不到 cookie，也不能以控制台身份调接口）、只放行设计技能列出的 CDN 的 `default-src`/`script-src`、`frame-ancestors` 限定为网页本身、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`。网页的交付物查看器：HTML 放在 `sandbox` iframe 里（同样只有独立源时才加 `allow-same-origin`），Markdown 用 react-markdown 渲染（不渲染原始 HTML，相对链接只解析到同一版本目录里），图片内联，其他类型列出文件；可以切换版本。
+- **批注**：`POST /api/deliverables/{id}/comments` 存进 `at_deliverable_comments`，并作为消息投递给发布它的员工（不在了就给讨论串组长），消息里带上 `deliverable_id`，员工改稿后用同一个 id 发布新版本。
 
 ## 7. 讨论串、调度与任务池
 
@@ -495,7 +507,7 @@ SSE event: status → 网页办公室
 
 ### 12.2 环境变量
 
-沿用 `AGENT_TEAMS_PUBLIC_URL`、`DATABASE_URL`、`VALKEY_URL`、`AGENT_TEAMS_SECRET_KEY`（新增可选 `AGENT_TEAMS_SECRET_KEYS`）、`AGENT_TEAMS_ADMIN_EMAILS`、`PORT`；新增 `LEGACY_URL=http://legacy:${PORT}`、`LEGACY_INTERNAL_SECRET`（迁移期）、`OFFICE_LAYOUT_DIR`、`METRICS_ADDR=:9090`、`OTEL_EXPORTER_OTLP_ENDPOINT`（可选）、`GITHUB_WEBHOOK_SECRET`（可选）。v2 不再支持“没有 DATABASE_URL 就用内存”：没有 PG 直接拒绝启动（测试用 testcontainers）。
+沿用 `AGENT_TEAMS_PUBLIC_URL`、`DATABASE_URL`、`VALKEY_URL`、`AGENT_TEAMS_SECRET_KEY`（新增可选 `AGENT_TEAMS_SECRET_KEYS`）、`AGENT_TEAMS_ADMIN_EMAILS`、`PORT`；新增 `LEGACY_URL=http://legacy:${PORT}`、`LEGACY_INTERNAL_SECRET`（迁移期）、`OFFICE_LAYOUT_DIR`、`METRICS_ADDR=:9090`、`OTEL_EXPORTER_OTLP_ENDPOINT`（可选）、`GITHUB_WEBHOOK_SECRET`（可选）、`AGENT_TEAMS_ARTIFACT_ORIGIN`（可选，发布文件的独立源，见 §6.5）。v2 不再支持“没有 DATABASE_URL 就用内存”：没有 PG 直接拒绝启动（测试用 testcontainers）。
 
 ## 13. 可观测性
 

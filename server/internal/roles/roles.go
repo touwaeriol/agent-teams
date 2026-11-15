@@ -47,6 +47,8 @@ type Warning struct {
 type Context struct {
 	Nodes map[string]store.Node // the user's nodes by id
 	Looks office.Looks          // the current global layout's looks
+	// Skills are the skill names the user may give roles (built-in + uploaded); nil skips the check.
+	Skills map[string]bool
 }
 
 // Normalize fills defaults in place: fixed counts, read_only from gate, look from the layout.
@@ -73,6 +75,7 @@ func normalizeOne(r *store.Role, looks office.Looks) {
 	}
 	r.Look = fillLook(r.Look, defaultLook(looks, r.Role, r.Tier))
 	r.NodeIDs = dedupe(r.NodeIDs)
+	r.Skills = dedupe(r.Skills)
 }
 
 func defaultLook(looks office.Looks, role, tier string) office.LookDefault {
@@ -160,7 +163,28 @@ func validateOne(path string, r *store.Role, c Context) []Problem {
 			out = append(out, Problem{path + "." + ch.field, ch.msg})
 		}
 	}
+	out = append(out, skillProblems(path, r, c.Skills)...)
 	return append(out, nodeProblems(path, r, c.Nodes)...)
+}
+
+// MaxSkills is how many skills one role may load.
+const MaxSkills = 16
+
+func skillProblems(path string, r *store.Role, known map[string]bool) []Problem {
+	switch {
+	case len(r.Skills) == 0:
+		return nil
+	case r.Tier == Coordinator:
+		return []Problem{{path + ".skills", "统筹只能用平台工具，不能加载技能"}}
+	case len(r.Skills) > MaxSkills:
+		return []Problem{{path + ".skills", fmt.Sprintf("一个岗位最多 %d 个技能", MaxSkills)}}
+	}
+	for _, name := range r.Skills {
+		if known != nil && !known[name] {
+			return []Problem{{path + ".skills", "没有这个技能：" + name}}
+		}
+	}
+	return nil
 }
 
 func nodeProblems(path string, r *store.Role, nodes map[string]store.Node) []Problem {
@@ -240,6 +264,21 @@ func Defaults(looks office.Looks) []store.Role {
 	}
 	Normalize(roles, looks)
 	return roles
+}
+
+// Presets are ready-made member roles the Team page offers ("从预设添加"); the designer
+// gets the built-in design and docs skills.
+func Presets(looks office.Looks) []store.Role {
+	presets := []store.Role{
+		{Tier: Member, Role: "designer", Title: "设计师", Runtime: Claude, Count: 1,
+			Description: "做 HTML 原型、界面稿、示意图和设计文档，发布成交付物",
+			Instructions: "你是设计师。按 design 技能做单文件 HTML 原型或 SVG 示意图，按 docs 技能写设计文档；" +
+				"做完用 publish_file 发布，收到批注后改稿并用同一个 deliverable_id 发布新版本。不要改产品代码，除非任务明确要求。",
+			TaskKinds: []string{"design", "doc"}, Skills: []string{"design", "docs"},
+			Look: store.Look{Accessory: "glasses"}},
+	}
+	Normalize(presets, looks)
+	return presets
 }
 
 // RandomLook picks a look from the layout's palette, outfits and accessories.

@@ -41,6 +41,8 @@ export const projects = {
 export const deliverables = {
   rename: (id: string, title: string) => unwrap(client.PATCH("/api/deliverables/{id}", { params: { path: { id } }, body: { title } })),
   remove: (id: string) => unwrap(client.DELETE("/api/deliverables/{id}", { params: { path: { id } } })),
+  comment: (id: string, text: string, version?: number) =>
+    unwrap(client.POST("/api/deliverables/{id}/comments", { params: { path: { id } }, body: { text, version } })),
 };
 
 export const conversations = {
@@ -79,6 +81,12 @@ export const roles = {
   save: (list: S["Role"][]) => unwrap(client.PUT("/api/roles", { body: { roles: list } })),
   saveYaml: (yaml: string) => unwrap(client.PUT("/api/roles/yaml", { body: { yaml } })),
   randomLook: (role: string) => unwrap(client.POST("/api/roles/look/random", { body: { role } })),
+};
+
+export const skills = {
+  /** zip: base64 of a zip file; files: a picked folder's text files. */
+  create: (body: S["NewSkillInputBody"]) => unwrap(client.POST("/api/skills", { body })),
+  remove: (id: string) => unwrap(client.DELETE("/api/skills/{id}", { params: { path: { id } } })),
 };
 
 export const git = {

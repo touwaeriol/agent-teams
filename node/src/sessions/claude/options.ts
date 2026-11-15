@@ -14,6 +14,8 @@ export interface OptionInputs {
   hooks: Partial<Record<HookEvent, HookCallbackMatcher[]>>;
   secretPaths: string[];
   stderr?: (data: string) => void;
+  /** The role's skills, written as a local plugin (sessions/skills.ts). */
+  skills?: { pluginDir: string; names: string[] } | null;
 }
 
 const WRITE_TOOLS = ["Edit", "Write", "NotebookEdit"];
@@ -43,7 +45,19 @@ export function buildClaudeOptions(i: OptionInputs): Options {
     canUseTool: i.canUseTool,
     hooks: i.hooks,
     ...(i.stderr ? { stderr: i.stderr } : {}),
+    ...skillOptions(i.skills),
   };
+}
+
+/**
+ * Skills load from a local plugin (SDK 0.3.325: options.plugins + options.skills; verified by
+ * scripts/smoke-skills.ts). settingSources stays [] so nothing is read from the worktree, and
+ * skills lists exactly this role's skills so bundled ones are not offered. The Skill tool
+ * itself comes from session.open (tools/allowed_tools).
+ */
+function skillOptions(skills: OptionInputs["skills"]): Partial<Options> {
+  if (!skills || skills.names.length === 0) return {};
+  return { plugins: [{ type: "local", path: skills.pluginDir, skipMcpDiscovery: true }], skills: skills.names };
 }
 
 function disallowed(c: ClaudeSessionOptions): string[] {

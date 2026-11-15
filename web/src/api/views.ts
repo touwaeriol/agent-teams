@@ -22,6 +22,8 @@ export type NewNodeResult = S["NewNodeOutputBody"];
 export type RoleView = S["Role"];
 export type RolesBody = S["RolesBody"];
 export type Look = S["Look"];
+export type SkillView = S["Skill"];
+export type SkillFile = S["File"];
 export type GitConnectionView = S["GitConnectionView"];
 export type RepoItem = S["RepoItem"];
 export type GitHubAppStatus = S["AppStatusOutputBody"];
@@ -188,10 +190,61 @@ export interface DeliverableView {
   kind: string;
   title: string;
   url: string;
-  detail: { summary?: string; state?: string; version?: number; author?: string; [key: string]: unknown };
+  detail: {
+    summary?: string;
+    state?: string;
+    version?: number;
+    author?: string;
+    /** Files published with publish_file and hosted by the console (GET /api/deliverables/{id}/files). */
+    hosted?: boolean;
+    entry?: string;
+    render?: DeliverableRender;
+    files?: number;
+    [key: string]: unknown;
+  };
   published_by: string;
   created_at: string;
   updated_at: string;
+}
+
+export type DeliverableRender = "html" | "markdown" | "image" | "pdf" | "text";
+
+export interface DeliverableFile {
+  path: string;
+  content_type: string;
+  size: number;
+  sha256: string;
+}
+
+export interface DeliverableVersion {
+  version: number;
+  files: number;
+  size: number;
+  published_by: string;
+  created_at: string;
+}
+
+/** One version of a hosted deliverable with a short-lived signed URL. */
+export interface DeliverableFiles {
+  deliverable_id: string;
+  version: number;
+  versions: DeliverableVersion[];
+  entry: string;
+  render: DeliverableRender;
+  files: DeliverableFile[];
+  base_url: string;
+  entry_url: string;
+  expires_at: string;
+  /** Files are served from their own origin (AGENT_TEAMS_ARTIFACT_ORIGIN). */
+  isolated: boolean;
+}
+
+export interface DeliverableComment {
+  id: string;
+  version: number | null;
+  text: string;
+  sent_to: string;
+  created_at: string;
 }
 
 export interface MergeEntryView {

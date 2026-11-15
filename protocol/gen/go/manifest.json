@@ -69,6 +69,16 @@
       "key": []
     },
     {
+      "type": "file.chunk",
+      "name": "FileChunk",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": [
+        "upload_id",
+        "index"
+      ]
+    },
+    {
       "type": "git.cleanup",
       "name": "GitCleanup",
       "direction": "console_to_node",
@@ -890,6 +900,59 @@
           "url": {
             "type": "string",
             "format": "uri"
+          }
+        }
+      }
+    },
+    {
+      "name": "publish_file",
+      "input": "PublishFileInput",
+      "result": "PublishFileResult",
+      "tiers": [
+        "lead",
+        "member"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Publish a file you made (HTML prototype, Markdown doc, SVG, image, PDF, JSON, CSV) as a project deliverable. The platform uploads it from your working directory and hosts it; people view it on the Deliverables page and their comments come back to you as messages. A directory with index.html is published as a small site. Pass deliverable_id to publish a new version of an earlier deliverable.",
+      "input_schema": {
+        "description": "Publish a file you made (HTML prototype, Markdown doc, SVG, image, PDF, JSON, CSV) as a project deliverable. The platform uploads it from your working directory and hosts it; people view it on the Deliverables page and their comments come back to you as messages. A directory with index.html is published as a small site. Pass deliverable_id to publish a new version of an earlier deliverable.",
+        "type": "object",
+        "required": [
+          "path",
+          "kind",
+          "title"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "description": "File (or directory with index.html) inside your working directory, relative to it.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "kind": {
+            "description": "design for prototypes and visual designs, doc for documents and specs; also slides, dashboard, board, data.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32,
+            "examples": [
+              "design",
+              "doc",
+              "slides",
+              "dashboard",
+              "data"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "deliverable_id": {
+            "description": "An earlier deliverable of this project published with publish_file; the file becomes its next version.",
+            "type": "string",
+            "pattern": "^dl_[A-Za-z0-9]+$"
           }
         }
       }

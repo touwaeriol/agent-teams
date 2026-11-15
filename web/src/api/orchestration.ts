@@ -7,6 +7,8 @@ import type {
   ActivityView,
   CheckView,
   CoordinatorView,
+  DeliverableComment,
+  DeliverableFiles,
   DeliverableView,
   EmployeeBrief,
   EmployeeCard,
@@ -62,6 +64,11 @@ export interface OrchestrationPaths {
   "/api/deliverables/{id}": {
     patch: Op<Ok<DeliverableView>, { id: string }, never, { title: string }>;
     delete: Op<Empty, { id: string }>;
+  };
+  "/api/deliverables/{id}/files": { get: Op<Ok<DeliverableFiles>, { id: string }, { version?: number }> };
+  "/api/deliverables/{id}/comments": {
+    get: Op<Ok<{ items: DeliverableComment[] }>, { id: string }>;
+    post: Op<Ok<DeliverableComment, 201>, { id: string }, never, { text: string; version?: number }>;
   };
   "/api/projects/{pid}/office": { get: Op<Ok<OfficeSnapshot>, Pid> };
   "/api/projects/{pid}/office/replay": { get: Op<Ok<OfficeReplay>, Pid, { from: string; to: string; thread?: number }> };

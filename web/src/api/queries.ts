@@ -33,6 +33,10 @@ export const keys = {
   nodeSessions: (id: string) => ["nodes", id, "sessions"] as const,
   roles: ["roles"] as const,
   rolesYaml: ["roles", "yaml"] as const,
+  rolePresets: ["roles", "presets"] as const,
+  skills: ["skills"] as const,
+  deliverableFiles: (id: string, version = 0) => ["deliverable", id, "files", version] as const,
+  deliverableComments: (id: string) => ["deliverable", id, "comments"] as const,
   connections: ["git"] as const,
   repos: (id: string, q = "") => ["git", id, "repos", q] as const,
   branches: (id: string, repo: string) => ["git", id, "branches", repo] as const,
@@ -191,6 +195,23 @@ export const useRoles = () => useQuery({ queryKey: keys.roles, queryFn: () => un
 
 export const useRolesYaml = (enabled: boolean) =>
   useQuery({ queryKey: keys.rolesYaml, queryFn: () => unwrap(client.GET("/api/roles/yaml")), enabled });
+
+export const useRolePresets = () => useQuery({ queryKey: keys.rolePresets, queryFn: () => unwrap(client.GET("/api/roles/presets")), staleTime: 300_000 });
+
+export const useSkills = () => useQuery({ queryKey: keys.skills, queryFn: () => unwrap(client.GET("/api/skills")) });
+
+/** Signed URLs expire after two hours: refetch well before that. */
+export const useDeliverableFiles = (id: string, version = 0, enabled = true) =>
+  useQuery({
+    queryKey: keys.deliverableFiles(id, version),
+    queryFn: () => unwrap(client.GET("/api/deliverables/{id}/files", { params: { path: { id }, query: { version: version || undefined } } })),
+    enabled: enabled && Boolean(id),
+    staleTime: 30 * 60_000,
+    refetchInterval: 60 * 60_000,
+  });
+
+export const useDeliverableComments = (id: string) =>
+  useQuery({ queryKey: keys.deliverableComments(id), queryFn: () => unwrap(client.GET("/api/deliverables/{id}/comments", path({ id }))) });
 
 export const useConnections = () => useQuery({ queryKey: keys.connections, queryFn: () => list(client.GET("/api/git/connections")) });
 

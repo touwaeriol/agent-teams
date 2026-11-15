@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -27,6 +28,9 @@ type Config struct {
 	WebhookToken string // GITHUB_WEBHOOK_SECRET, optional override of the App's own secret
 	GitHubAPI    string // GITHUB_API_URL: REST base; GitHub Enterprise, or a local emulator in tests
 	GitHubWeb    string // GITHUB_WEB_URL: web base for OAuth and App pages
+	// ArtifactOrigin (AGENT_TEAMS_ARTIFACT_ORIGIN) is a separate origin, e.g. https://files.example.net,
+	// that serves published deliverable files; empty = /files/ on the console with a CSP sandbox.
+	ArtifactOrigin string
 }
 
 // Getenv looks a variable up; os.Getenv in production, a map in tests.
@@ -35,20 +39,21 @@ type Getenv func(string) string
 // Load reads the configuration. DATABASE_URL is required: v2 has no in-memory mode.
 func Load(getenv Getenv) (Config, error) {
 	cfg := Config{
-		DatabaseURL:  getenv("DATABASE_URL"),
-		ValkeyURL:    getenv("VALKEY_URL"),
-		SecretKeys:   secretKeys(getenv),
-		PublicURL:    strings.TrimRight(first(getenv("AGENT_TEAMS_PUBLIC_URL"), getenv("PUBLIC_URL")), "/"),
-		Bind:         first(getenv("BIND"), "0.0.0.0"),
-		Port:         first(getenv("PORT"), "3001"),
-		OfficeDir:    first(getenv("OFFICE_DIR"), getenv("OFFICE_LAYOUT_DIR")),
-		WebDir:       getenv("WEB_DIR"),
-		NodeDistDir:  first(getenv("NODE_DIST_DIR"), "/srv/node-dist"),
-		AdminEmails:  emails(getenv("AGENT_TEAMS_ADMIN_EMAILS")),
-		LogLevel:     level(getenv("LOG_LEVEL")),
-		WebhookToken: getenv("GITHUB_WEBHOOK_SECRET"),
-		GitHubAPI:    strings.TrimRight(getenv("GITHUB_API_URL"), "/"),
-		GitHubWeb:    strings.TrimRight(getenv("GITHUB_WEB_URL"), "/"),
+		DatabaseURL:    getenv("DATABASE_URL"),
+		ValkeyURL:      getenv("VALKEY_URL"),
+		SecretKeys:     secretKeys(getenv),
+		PublicURL:      strings.TrimRight(first(getenv("AGENT_TEAMS_PUBLIC_URL"), getenv("PUBLIC_URL")), "/"),
+		Bind:           first(getenv("BIND"), "0.0.0.0"),
+		Port:           first(getenv("PORT"), "3001"),
+		OfficeDir:      first(getenv("OFFICE_DIR"), getenv("OFFICE_LAYOUT_DIR")),
+		WebDir:         getenv("WEB_DIR"),
+		NodeDistDir:    first(getenv("NODE_DIST_DIR"), "/srv/node-dist"),
+		AdminEmails:    emails(getenv("AGENT_TEAMS_ADMIN_EMAILS")),
+		LogLevel:       level(getenv("LOG_LEVEL")),
+		WebhookToken:   getenv("GITHUB_WEBHOOK_SECRET"),
+		GitHubAPI:      strings.TrimRight(getenv("GITHUB_API_URL"), "/"),
+		GitHubWeb:      strings.TrimRight(getenv("GITHUB_WEB_URL"), "/"),
+		ArtifactOrigin: strings.TrimRight(getenv("AGENT_TEAMS_ARTIFACT_ORIGIN"), "/"),
 	}
 	return cfg, cfg.check()
 }
@@ -59,6 +64,22 @@ func (c Config) check() error {
 	}
 	if c.PublicURL == "" {
 		return errors.New("set AGENT_TEAMS_PUBLIC_URL (or PUBLIC_URL), e.g. https://agent.example.com")
+	}
+	return c.checkArtifactOrigin()
+}
+
+// checkArtifactOrigin: a bare http(s) origin on another host than the web app, otherwise
+// published pages would run on the app's origin and could use the session.
+func (c Config) checkArtifactOrigin() error {
+	if c.ArtifactOrigin == "" {
+		return nil
+	}
+	a, err := url.Parse(c.ArtifactOrigin)
+	if err != nil || (a.Scheme != "https" && a.Scheme != "http") || a.Host == "" || (a.Path != "" && a.Path != "/") {
+		return errors.New("AGENT_TEAMS_ARTIFACT_ORIGIN must be an origin like https://files.example.net")
+	}
+	if p, err := url.Parse(c.PublicURL); err == nil && strings.EqualFold(p.Hostname(), a.Hostname()) {
+		return errors.New("AGENT_TEAMS_ARTIFACT_ORIGIN must use a different host than the public URL")
 	}
 	return nil
 }

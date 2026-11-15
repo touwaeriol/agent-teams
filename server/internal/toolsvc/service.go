@@ -52,6 +52,7 @@ type call struct {
 	callID string
 	tool   string
 	args   json.RawMessage
+	upload *protocol.ToolUpload // publish_file: files the daemon sent as file.chunk
 }
 
 func (c *call) emp() core.Employee { return c.sc.Employee }
@@ -99,7 +100,7 @@ func (s *Service) table() map[string]handler {
 		protocol.ToolCompleteTask: s.completeTask, protocol.ToolPushBranch: s.pushBranch, protocol.ToolReportProgress: s.reportProgress,
 		protocol.ToolAskLead: s.askLead, protocol.ToolReadMessages: s.readMessages, protocol.ToolListTeam: s.listTeam,
 		protocol.ToolGetTask: s.getTask, protocol.ToolRequestReview: s.requestReview, protocol.ToolAssignSubtask: s.assignSubtask,
-		protocol.ToolWaitTask: s.waitTask,
+		protocol.ToolWaitTask: s.waitTask, protocol.ToolPublishFile: s.publishFile,
 	}
 }
 
@@ -186,7 +187,7 @@ func (s *Service) prepare(ctx context.Context, tx *core.Tx, m *protocol.ToolCall
 	if err := s.validator.ValidateToolInput(m.Tool, m.Args); err != nil {
 		return nil, failText("参数不正确：%v", err)
 	}
-	c := &call{sc: sc, callID: string(m.CallID), tool: m.Tool, args: m.Args}
+	c := &call{sc: sc, callID: string(m.CallID), tool: m.Tool, args: m.Args, upload: m.Upload}
 	if sc.Employee.ThreadID != nil {
 		t, err := core.ThreadByID(ctx, tx, *sc.Employee.ThreadID)
 		if err != nil {

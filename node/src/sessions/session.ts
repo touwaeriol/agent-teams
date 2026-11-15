@@ -105,7 +105,7 @@ export class Session implements SessionSink {
 
   callTool(tool: string, args: Record<string, unknown>, toolUseId?: string) {
     this.lastActivity = Date.now();
-    return this.host.tools.call({ sessionId: this.id, openGen: this.gen, tool, args, ...(toolUseId ? { toolUseId } : {}) });
+    return this.host.tools.call({ sessionId: this.id, openGen: this.gen, tool, args, cwd: this.absCwd, ...(toolUseId ? { toolUseId } : {}) });
   }
 
   exited(err: Error): void {

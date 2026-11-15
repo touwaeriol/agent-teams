@@ -22,7 +22,7 @@ const EXPECTED_TYPES = {
   node_to_console: [
     "hello", "sessions.report", "session.opened", "session.delivered", "session.interrupted", "session.closed",
     "session.event", "session.state", "stream.delta", "approval.request", "approval.ack", "approval.cancel",
-    "tool.call", "tool.cancel", "git.result", "cred.request", "node.stats", "node.upgrade_result", "log",
+    "tool.call", "tool.cancel", "file.chunk", "git.result", "cred.request", "node.stats", "node.upgrade_result", "log",
   ],
   both: ["ack", "error"],
 };
@@ -32,11 +32,11 @@ const EXPECTED_TOOLS = {
   coordinator: ["open_thread", "list_threads", "thread_status", "message_thread", "ask_user", "remember", "set_status"],
   lead: [
     "update_plan", "assign_task", "list_tasks", "cancel_task", "reply_to", "broadcast", "send_message", "ask_user",
-    "enqueue_merge", "open_pr", "finish", "publish_deliverable", "set_status",
+    "enqueue_merge", "open_pr", "finish", "publish_deliverable", "publish_file", "set_status",
   ],
   member: [
     "complete_task", "push_branch", "report_progress", "ask_lead", "ask_user", "send_message", "read_messages",
-    "list_team", "get_task", "request_review", "publish_deliverable", "set_status", "assign_subtask", "wait_task",
+    "list_team", "get_task", "request_review", "publish_deliverable", "publish_file", "set_status", "assign_subtask", "wait_task",
   ],
 };
 const BLOCKING = { member: ["ask_lead", "ask_user", "request_review", "wait_task"], lead: [], coordinator: [] };

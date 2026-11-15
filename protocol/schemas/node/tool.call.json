@@ -38,6 +38,71 @@
     "tool_use_id": {
       "description": "Claude tool_use_id or Codex item id, for diagnostics only.",
       "type": "string"
+    },
+    "upload": {
+      "description": "Files the daemon read for publish_file; their bytes arrived before as file.chunk frames.",
+      "$ref": "#/$defs/ToolUpload"
+    }
+  },
+  "$defs": {
+    "ToolUpload": {
+      "title": "ToolUpload",
+      "type": "object",
+      "required": [
+        "upload_id",
+        "chunks",
+        "files"
+      ],
+      "properties": {
+        "upload_id": {
+          "$ref": "common.json#/$defs/UploadId"
+        },
+        "chunks": {
+          "description": "Number of file.chunk frames (0 when every file is empty).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/UploadFile"
+          }
+        }
+      }
+    },
+    "UploadFile": {
+      "title": "UploadFile",
+      "type": "object",
+      "required": [
+        "path",
+        "size",
+        "sha256",
+        "content_type"
+      ],
+      "properties": {
+        "path": {
+          "description": "Path inside the published deliverable (index.html for a site's entry, or the file name).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "content_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      }
     }
   }
 }

@@ -5,7 +5,7 @@ import { Check, ChevronDown, MoreHorizontal } from "lucide-react";
 import { useEffect, useState } from "react";
 import { roles as roleActions } from "@/api/actions";
 import { errorText, useAction } from "@/api/mutations";
-import { keys, useNodes, useRoles, useRolesYaml } from "@/api/queries";
+import { keys, useNodes, useRolePresets, useRoles, useRolesYaml, useSkills } from "@/api/queries";
 import type { Look, NodeView, RoleView } from "@/api/views";
 import { Avatar, useOfficeLayout } from "@/components/app/Avatar";
 import { Callout, Field, FormDialog, Loading, Spinner } from "@/components/common";
@@ -18,7 +18,8 @@ import { TagInput } from "@/components/ui/tag-input";
 import { Textarea } from "@/components/ui/textarea";
 import { NavButton } from "@/components/shell/Shell";
 import type { OfficeLayout } from "@/office";
-import { countText, kindText, LEVEL, newRole, previewTags, roleName, roleProblems, ruleText, skipHint, sortRoles } from "@/lib/roles";
+import { SkillLibrary } from "@/components/app/SkillLibrary";
+import { canHaveSkills, countText, fromPreset, kindText, LEVEL, newRole, previewTags, roleName, roleProblems, ruleText, skipHint, sortRoles, toggleSkill } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 
 export function TeamPage() {
@@ -52,6 +53,7 @@ export function TeamPage() {
             </Button>
             {!yaml && (
               <>
+                <PresetMenu onPick={(p) => setDraft([...draft, fromPreset(draft, p)])} />
                 <Button variant="outline" className="h-[38px]" onClick={add}>
                   添加岗位
                 </Button>
@@ -86,6 +88,7 @@ export function TeamPage() {
             ))}
           </div>
         )}
+        {!yaml && <SkillLibrary />}
       </div>
     </main>
   );
@@ -146,6 +149,7 @@ function RoleCard({ role, layout, onChange, onRemove }: { role: RoleView; layout
       </div>
       <span className="rounded-lg bg-background px-2.5 py-2 text-xs leading-[19px] text-[#4A4843]">{ruleText(role)}</span>
       <LookEditor role={role} layout={layout} onChange={(look) => onChange({ look })} />
+      {canHaveSkills(role) && <SkillPicker value={role.skills ?? []} onChange={(skills) => onChange({ skills })} />}
       {role.tier === "member" && (
         <label className="flex cursor-pointer items-center justify-between gap-3 border-t border-[#F1EFEA] pt-2.5">
           <span className="flex flex-col gap-0.5">
@@ -157,6 +161,54 @@ function RoleCard({ role, layout, onChange, onRemove }: { role: RoleView; layout
       )}
       <RoleDialog open={editing} onOpenChange={setEditing} role={role} onSave={(p) => (onChange(p), setEditing(false))} />
     </article>
+  );
+}
+
+function PresetMenu({ onPick }: { onPick: (r: RoleView) => void }) {
+  const presets = useRolePresets();
+  const list = presets.data?.roles ?? [];
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" className="h-[38px]" disabled={list.length === 0}>
+          从预设添加 <ChevronDown />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="max-w-[320px]">
+        {list.map((p) => (
+          <DropdownMenuItem key={p.role} onSelect={() => onPick(p)} className="flex flex-col items-start gap-0.5">
+            <span className="font-medium">{roleName(p)}</span>
+            <span className="text-xs text-muted-foreground">{p.description}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Skills this role loads (built-in design/docs and uploaded ones). */
+function SkillPicker({ value, onChange }: { value: string[]; onChange: (skills: string[]) => void }) {
+  const skills = useSkills();
+  const all = skills.data?.skills ?? [];
+  const missing = value.filter((name) => !all.some((s) => s.name === name));
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 border-t border-[#F1EFEA] pt-2.5 text-[13px]">
+      <span className="mr-1 text-xs text-muted-foreground">技能</span>
+      {all.map((s) => (
+        <span key={s.name} title={s.description}>
+          <Chip on={value.includes(s.name)} onClick={() => onChange(toggleSkill(value, s.name))}>
+            {value.includes(s.name) && <Check className="mr-0.5 inline size-3" />}
+            {s.name}
+          </Chip>
+        </span>
+      ))}
+      {missing.map((name) => (
+        <Chip key={name} on onClick={() => onChange(toggleSkill(value, name))}>
+          {name}（已删除）
+        </Chip>
+      ))}
+      {all.length === 0 && <span className="text-xs text-muted-foreground">技能库是空的</span>}
+    </div>
   );
 }
 

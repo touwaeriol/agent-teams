@@ -17,7 +17,8 @@
     "pack": "npm run build && node scripts/pack.mjs",
     "gen:codex": "node scripts/gen-codex-protocol.mjs",
     "smoke:claude": "tsx scripts/smoke-claude.ts",
-    "smoke:codex": "tsx scripts/smoke-codex.ts"
+    "smoke:codex": "tsx scripts/smoke-codex.ts",
+    "smoke:skills": "tsx scripts/smoke-skills.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.325",

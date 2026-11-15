@@ -162,6 +162,7 @@
   "platform_tools": [ {"name": "complete_task", "description": "…", "input_schema": {…}, "blocking": false}, … ],
   "env": {"LANG": "C.UTF-8"},                      // 额外的非秘密环境；守护进程自己加 PATH/HOME/MCP_TOOL_TIMEOUT/git 凭证变量
   "git_credentials": true,                         // 是否装 credential helper 与 gh 包装
+  "skills": [{"name": "design", "files": [{"path": "SKILL.md", "content": "…"}]}],  // 可选：岗位的技能（architecture.md §6.5）
   "first_message": {"msg_id": "m_…", "text": "…"}  // 可选：工具核对通过、收到 session.release 后才发送
 }
 ```
@@ -171,7 +172,8 @@
 1. 校验 `cwd` 在 root 内；`prepare` 指定的 git 操作未成功则等待（最多 10 分钟）或失败。
 2. Claude：构造 `options`（`env` 逐项构造、`permissionMode` 显式、`settingSources: []`、`allowedTools`（含控制台由“总是允许”规则展开的项）、`settings`（沙箱与拒绝规则）、`canUseTool`、`hooks`、`mcpServers.platform = createSdkMcpServer(...)`、`includeHookEvents: true`、`resume`），用一个异步队列作为 `prompt` 调 `query()`，随即 `await q.initializationResult()` 拿工具列表和 MCP 状态（不等第一个回合的 `system/init`）。Codex：确保本机 app-server 在跑，`thread/start` 或 `thread/resume`（带新的 `mcp_servers.platform` 配置），工具列表取自 `mcpServerStatus/list` + 沙箱配置。
 3. 回 `session.opened`。`first_message` 先扣住，收到 `session.release {session_id, open_gen}` 才推送。
-4. `resume` 失败（转录不存在、thread 找不到）：不自动开新会话，回 `session.opened {resume_failed: true, error}`，由控制台走交接流程（architecture.md §6.2）。
+4. `skills`（只有 Claude 会话会收到）：写成本地插件 `<root>/agent-skills/<project>/<thread_no>/<employee>/`（每次打开重建，不在 worktree 里），`options.plugins = [{type:'local', path, skipMcpDiscovery:true}]`、`options.skills = ['agent-teams-skills:<name>', …]`；`Skill` 工具由控制台放进 `tools`/`allowed_tools`。
+5. `resume` 失败（转录不存在、thread 找不到）：不自动开新会话，回 `session.opened {resume_failed: true, error}`，由控制台走交接流程（architecture.md §6.2）。
 
 ### 4.2 `session.opened`（守护进程 → 控制台，可靠，键：`session_id + open_gen`）
 
@@ -301,6 +303,16 @@
 
 - 阻塞型工具：控制台在答复前不发 `tool.result`；守护进程不对其计时（Claude 侧 `MCP_TOOL_TIMEOUT=86400000`，Codex `tool_timeout_sec=86400`）。若会话被中断/关闭，守护进程发 `tool.cancel {call_id}`（可靠），控制台取消对应提问（status `cancelled`）。
 - 重连后守护进程重发未收到结果、且处理器 Promise 仍在的 `tool.call`（同键）；控制台对已完成的直接回 `tool.result`。处理器已随进程消失的调用不重发，改发 `tool.cancel {call_id, reason:"process_restarted"}`（§3 对账规则）。
+
+### 6.3 `file.chunk`（守护进程 → 控制台，可靠，键：`upload_id + index`）
+
+```json
+{"session_id": "s_…", "open_gen": 3, "upload_id": "up_01JD3V0000000000000000", "index": 0, "data": "PGh0bWw+PC9odG1sPg=="}
+```
+
+`publish_file` 的文件内容：守护进程读完文件（必须在会话 cwd 内，合计 ≤ 5 MB），把所有文件按 `upload.files` 的顺序拼起来，切成每段 ≤ 1 MiB 的 base64，先按序发 `file.chunk`，再发带 `upload` 的 `tool.call {call_id, session_id, tool, args, upload}`，其中 `upload = {upload_id, chunks, files: [{path, size, sha256, content_type}]}`（`path` 是交付物里的路径：单个文件就是文件名，网站目录则相对目录，入口为 `index.html`）。
+
+可靠消息按序处理，所以控制台处理 `tool.call` 时分段都已到齐；分段数不对、大小或 sha256 不符、扩展名不允许都作为工具失败返回。分段只属于发它的会话；一天没被认领的分段会被清掉。路径不合法等本机就能判断的错误不发到控制台，守护进程直接回 `isError`。
 
 ## 7. Git 作业
 

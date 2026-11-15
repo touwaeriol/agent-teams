@@ -565,6 +565,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/roles/presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ready-made member roles (designer …) the Team page offers */
+        get: operations["role-presets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/roles/yaml": {
         parameters: {
             query?: never;
@@ -576,6 +593,41 @@ export interface paths {
         put: operations["save-roles-yaml"];
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Built-in and uploaded skills */
+        get: operations["list-skills"];
+        put?: never;
+        /** Upload a skill (zip or text files; SKILL.md front matter gives name and description) */
+        post: operations["create-skill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/skills/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete an uploaded skill and remove it from the roles */
+        delete: operations["delete-skill"];
         options?: never;
         head?: never;
         patch?: never;
@@ -822,6 +874,10 @@ export interface components {
             message: string;
             path: string;
         };
+        File: {
+            content: string;
+            path: string;
+        };
         Gates: {
             decision: boolean;
             merge_queue: boolean;
@@ -900,6 +956,12 @@ export interface components {
             /** @description Shown once */
             token: string;
         };
+        NewSkillInputBody: {
+            /** @description The skill's text files (a picked folder); used when zip is empty */
+            files?: components["schemas"]["File"][] | null;
+            /** @description Base64 of a zip of the skill folder (SKILL.md at the root or in one top folder) */
+            zip?: string;
+        };
         NodeLog: {
             /** Format: date-time */
             created_at: string;
@@ -975,6 +1037,9 @@ export interface components {
         PasswordInputBody: {
             current: string;
             new: string;
+        };
+        PresetsOutputBody: {
+            roles: components["schemas"]["Role"][] | null;
         };
         Problem: {
             message: string;
@@ -1091,6 +1156,8 @@ export interface components {
             /** @enum {string} */
             runtime: "claude" | "codex";
             sandbox: string;
+            /** @description Skill names (built-in or uploaded) the role's sessions load */
+            skills: string[] | null;
             skip_permissions: boolean;
             /**
              * Format: int64
@@ -1122,6 +1189,17 @@ export interface components {
             /** Format: date-time */
             last_seen_at: string | null;
             user_agent: string;
+        };
+        Skill: {
+            builtin: boolean;
+            description: string;
+            id: string;
+            name: string;
+            /** Format: int64 */
+            size: number;
+        };
+        SkillsBody: {
+            skills: components["schemas"]["Skill"][] | null;
         };
         Status: {
             errors?: components["schemas"]["Problem"][] | null;
@@ -2655,6 +2733,35 @@ export interface operations {
             };
         };
     };
+    "role-presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresetsOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     "get-roles-yaml": {
         parameters: {
             query?: never;
@@ -2705,6 +2812,97 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["RolesBody"];
                 };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "create-skill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewSkillInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Skill"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "delete-skill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error */
             default: {

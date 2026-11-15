@@ -17,6 +17,7 @@
 "enqueue_merge":[{"member":"dev-1"},{"task_id":"t7"}],
 "open_pr":[{"title":"Employee comms","body":"Closes #12"}],
 "finish":[{"summary":"Mail and questions shipped."}],
+"publish_file":[{"path":"design/index.html","kind":"design","title":"Login page"},{"path":"docs/spec.md","kind":"doc","title":"Spec","deliverable_id":"dl_01JD3V"}],
 "publish_deliverable":[{"kind":"doc","title":"Design notes","url":"https://example.com/doc"}],
 "complete_task":[{"task_id":"t8","summary":"Done, tests pass.","artifacts":["web/src/PlanList.tsx"]},{"task_id":"t9","summary":"Cannot reproduce.","status":"failed"}],
 "push_branch":[{}],
@@ -37,7 +38,7 @@
 "enqueue_merge":[{},{"member":"dev-1","task_id":"t7"}],
 "complete_task":[{"task_id":"t8","summary":"x","status":"maybe"}],
 "push_branch":[{"force":true}],
-"publish_deliverable":[{"kind":"doc","title":"x","url":"not a url"}],
+"publish_file":[{"path":"a.html","kind":"design"},{"path":"a.html","kind":"design","title":"x","deliverable_id":"42"},{"path":"a.html","kind":"design","title":"x","url":"https://x"}],"publish_deliverable":[{"kind":"doc","title":"x","url":"not a url"}],
 "reply_to":[{"question_id":"ap_1","answer":"x"}]
 }
 }

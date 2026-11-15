@@ -12,6 +12,7 @@ const (
 	TypeCredRequest        = "cred.request"
 	TypeCredResponse       = "cred.response"
 	TypeError              = "error"
+	TypeFileChunk          = "file.chunk"
 	TypeGitCleanup         = "git.cleanup"
 	TypeGitPrepare         = "git.prepare"
 	TypeGitPurge           = "git.purge"
@@ -56,6 +57,7 @@ var Messages = map[string]MessageMeta{
 	TypeCredRequest:        {Direction: NodeToConsole, Reliable: false, Key: []string{"req_id"}, New: func() any { return new(CredRequest) }},
 	TypeCredResponse:       {Direction: ConsoleToNode, Reliable: false, Key: []string{"req_id"}, New: func() any { return new(CredResponse) }},
 	TypeError:              {Direction: Both, Reliable: false, Key: nil, New: func() any { return new(ProtocolError) }},
+	TypeFileChunk:          {Direction: NodeToConsole, Reliable: true, Key: []string{"upload_id", "index"}, New: func() any { return new(FileChunk) }},
 	TypeGitCleanup:         {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitCleanup) }},
 	TypeGitPrepare:         {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitPrepare) }},
 	TypeGitPurge:           {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitPurge) }},
@@ -109,6 +111,7 @@ const (
 	ToolOpenPr             = "open_pr"
 	ToolOpenThread         = "open_thread"
 	ToolPublishDeliverable = "publish_deliverable"
+	ToolPublishFile        = "publish_file"
 	ToolPushBranch         = "push_branch"
 	ToolReadMessages       = "read_messages"
 	ToolRemember           = "remember"
@@ -191,6 +194,10 @@ var Tools = map[string]ToolMeta{
 	ToolPublishDeliverable: {
 		Tiers: []Tier{TierLead, TierMember}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(PublishDeliverableInput) }, NewResult: func() any { return new(PublishDeliverableResult) },
+	},
+	ToolPublishFile: {
+		Tiers: []Tier{TierLead, TierMember}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(PublishFileInput) }, NewResult: func() any { return new(PublishFileResult) },
 	},
 	ToolPushBranch: {
 		Tiers: []Tier{TierMember}, Blocking: nil, Requires: "",

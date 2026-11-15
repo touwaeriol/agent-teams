@@ -169,10 +169,14 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | POST | `/api/projects/{pid}/deliverables` | `{kind, title, url, thread_no?}` → 201（用户手动登记链接） |
 | POST | `/api/projects/{pid}/deliverables/request` | `{kind, brief}` → 202 `MessageView`（“新做一个”磁贴） |
 | PATCH / DELETE | `/api/deliverables/{id}` | 改标题 / 删除 |
+| GET | `/api/deliverables/{id}/files?version=` | 托管交付物（`detail.hosted`）的一版（默认最新）→ `{deliverable_id, version, versions: [{version, files, size, published_by, created_at}], entry, render: html\|markdown\|image\|pdf\|text, files: [{path, content_type, size, sha256}], base_url, entry_url, expires_at, isolated}`；`base_url` 是 2 小时有效的签名目录 URL（`architecture.md` §6.5），`isolated` = 配置了 `AGENT_TEAMS_ARTIFACT_ORIGIN` |
+| GET | `/api/deliverables/{id}/comments` | → `{items: [{id, version, text, sent_to, created_at}]}` |
+| POST | `/api/deliverables/{id}/comments` | `{text, version?}` → 201：保存并作为消息投递给发布者（不在了给组长），`sent_to` 是收到它的员工 |
+| GET | `/files/<token>/<path>` | 签名 URL 下的文件（不需要 cookie；CSP sandbox、nosniff，见 `architecture.md` §6.5） |
 
 **“新做一个”磁贴**（设计、文档、幻灯片、看板 dashboard、白板 board）：不是新流程，而是给统筹发一条模板消息。`POST …/deliverables/request` 等价于 `POST /api/conversations/<统筹对话>/messages`，正文 = `做一个<kind 的中文名>：<brief>`（例如“做一个幻灯片：给投资人的 v2 进展介绍”），`meta.request_kind = <kind>`；统筹照常决定是否开讨论串，产出由员工 `publish_deliverable(kind, …)` 登记。前端在弹出框里收 `brief`，提交后跳到 Main 页的统筹对话。
 
-PR 类交付物的 `detail.state` 由平台轮询 / webhook 更新。设计类先显示为链接卡片（设计稿查看器 DesignViewer 本期不做）。
+PR 类交付物的 `detail.state` 由平台轮询 / webhook 更新。设计类和托管交付物（员工用 `publish_file` 发布）在查看器 DesignViewer（`/projects/:pid/deliverables/:id`）里打开：HTML 在 sandbox iframe 里，Markdown 安全渲染，图片内联，可切换版本，批注发回给员工。
 
 ### 3.6 NewProject 与 ProjectSettings
 
@@ -193,7 +197,11 @@ PR 类交付物的 `detail.state` 由平台轮询 / webhook 更新。设计类�
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/roles` | → `{roles: RoleView[], warnings: [{role, message}]}`（例如“跳过权限确认的岗位没有 isolated 节点”“候选节点已删除”） |
-| PUT | `/api/roles` | `{roles: RoleView[]}` 整体保存（按 `id` 匹配，缺失的删除）→ 同 GET。校验：恰好一个 coordinator（Claude）和一个 lead；`role` 键唯一且符合 `^[a-z][a-z0-9-]{0,23}$`；`count` 1–8；节点属于本人；`look.outfit`/`look.accessory` 是当前全局布局里存在的键；`skip_permissions` 时候选节点须为 `agent_user` 或 `isolated`，Codex 岗位的候选节点不能是 `sandbox`/`none` 级别（`architecture.md` §10.3）；`read_only` 省略时按 `gate` 取默认值 |
+| PUT | `/api/roles` | `{roles: RoleView[]}` 整体保存（按 `id` 匹配，缺失的删除）→ 同 GET。校验：恰好一个 coordinator（Claude）和一个 lead；`role` 键唯一且符合 `^[a-z][a-z0-9-]{0,23}$`；`count` 1–8；节点属于本人；`look.outfit`/`look.accessory` 是当前全局布局里存在的键；`skip_permissions` 时候选节点须为 `agent_user` 或 `isolated`，Codex 岗位的候选节点不能是 `sandbox`/`none` 级别（`architecture.md` §10.3）；`read_only` 省略时按 `gate` 取默认值；`skills` 每项须是内置或自己上传的技能，最多 16 个，统筹不能有技能 |
+| GET | `/api/roles/presets` | → `{roles: RoleView[]}`：Team 页“从预设添加”的现成岗位（“设计师” = `design` + `docs` 技能） |
+| GET | `/api/skills` | → `{skills: [{id, name, description, builtin, size}]}`：内置技能（`id` 为空）+ 自己上传的 |
+| POST | `/api/skills` | `{zip?: base64, files?: [{path, content}]}` → 201 `Skill`（`SKILL.md` front matter 给出 name/description；只收文本，≤ 64 个文件、≤ 512 KB） |
+| DELETE | `/api/skills/{id}` | 删除上传的技能，并从岗位的 `skills` 里去掉 |
 | POST | `/api/roles/look/random` | `{role}` → `Look`（“随机一个”，从布局的调色板和服装里选） |
 | GET | `/api/roles/yaml` / PUT `/api/roles/yaml` | YAML 视图（与 v1 的 YAML 标签页对应；格式为 threads.md 的新格式，旧格式自动转换） |
 | GET | `/api/team` / PUT `/api/team` | v1 兼容路径（v1 用户在迁移期使用；v2 用户调用时 GET 返回由 `at_roles` 生成的 YAML，PUT 转发到 `/api/roles/yaml`） |

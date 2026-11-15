@@ -12,6 +12,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/office"
 	"github.com/touwaeriol/agent-teams/server/internal/roles"
+	"github.com/touwaeriol/agent-teams/server/internal/skills"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -76,6 +77,9 @@ func (s *Server) registerRoles(api huma.API) {
 	huma.Register(api, huma.Operation{OperationID: "random-look", Method: "POST", Path: "/api/roles/look/random", Tags: tags}, s.randomLook)
 	huma.Register(api, huma.Operation{OperationID: "get-roles-yaml", Method: "GET", Path: "/api/roles/yaml", Tags: tags}, s.getRolesYAML)
 	huma.Register(api, huma.Operation{OperationID: "save-roles-yaml", Method: "PUT", Path: "/api/roles/yaml", Tags: tags}, s.saveRolesYAML)
+	huma.Register(api, huma.Operation{OperationID: "role-presets", Method: "GET", Path: "/api/roles/presets", Tags: tags,
+		Summary: "Ready-made member roles (designer …) the Team page offers"}, s.rolePresets)
+	s.registerSkills(api)
 	huma.Register(api, huma.Operation{OperationID: "get-team", Method: "GET", Path: "/api/team", Tags: tags, Summary: "v1 compatible YAML view"}, s.getTeam)
 	huma.Register(api, huma.Operation{OperationID: "save-team", Method: "PUT", Path: "/api/team", Tags: tags, Summary: "v1 compatible; same as PUT /api/roles/yaml"}, s.saveTeam)
 }
@@ -195,7 +199,11 @@ func (s *Server) replaceRoles(ctx context.Context, userID string, list []store.R
 	}
 	looks := s.currentLooks(ctx)
 	roles.Normalize(list, looks)
-	if problems := roles.Validate(list, roles.Context{Nodes: byID, Looks: looks}); len(problems) > 0 {
+	skillNames, err := skills.Names(ctx, s.store.Pool, userID)
+	if err != nil {
+		return err
+	}
+	if problems := roles.Validate(list, roles.Context{Nodes: byID, Looks: looks, Skills: skillNames}); len(problems) > 0 {
 		return rolesInvalid(problems)
 	}
 	if err := s.store.Tx(ctx, func(tx *store.Store) error { return tx.ReplaceRoles(ctx, userID, list) }); err != nil {
@@ -219,6 +227,21 @@ func (s *Server) auditSkipPermissions(ctx context.Context, userID string, before
 			s.audit(ctx, userID, "skip_permissions_on", "role", r.ID, map[string]string{"role": r.Role})
 		}
 	}
+}
+
+type presetsOutput struct {
+	Body struct {
+		Roles []store.Role `json:"roles"`
+	}
+}
+
+func (s *Server) rolePresets(ctx context.Context, _ *struct{}) (*presetsOutput, error) {
+	if _, err := requireUser(ctx); err != nil {
+		return nil, err
+	}
+	out := &presetsOutput{}
+	out.Body.Roles = roles.Presets(s.currentLooks(ctx))
+	return out, nil
 }
 
 func (s *Server) randomLook(ctx context.Context, _ *randomLookInput) (*lookOutput, error) {

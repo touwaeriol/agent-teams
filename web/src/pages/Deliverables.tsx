@@ -16,6 +16,7 @@ import { deliverableKind } from "@/lib/present";
 import { cn, timeAgo } from "@/lib/utils";
 import { useProjectId } from "./Main";
 import { safeHref } from "@/lib/safeurl";
+import { isHosted, renderLabel } from "@/lib/artifacts";
 
 const TABS: [string, string][] = [
   ["", "全部"],
@@ -28,9 +29,9 @@ const TABS: [string, string][] = [
 
 const MAKE = ["design", "doc", "slides", "dashboard", "board"];
 
-/** Where a card goes: designs open in the viewer, everything else at its URL. */
-export function deliverableHref(pid: string, d: Pick<DeliverableView, "id" | "kind" | "url">): { to?: string; href?: string } {
-  if (d.kind === "design") return { to: `/projects/${pid}/deliverables/${d.id}` };
+/** Where a card goes: designs and hosted files open in the viewer, everything else at its URL. */
+export function deliverableHref(pid: string, d: Pick<DeliverableView, "id" | "kind" | "url"> & Partial<Pick<DeliverableView, "detail">>): { to?: string; href?: string } {
+  if (d.kind === "design" || (d.detail && isHosted({ detail: d.detail }))) return { to: `/projects/${pid}/deliverables/${d.id}` };
   return { href: safeHref(d.url) };
 }
 
@@ -122,6 +123,7 @@ function DeliverableCard({ pid, item }: { pid: string; item: DeliverableView }) 
           <span>
             {look.label}
             {item.thread_no ? ` · #${item.thread_no}` : ""}
+            {isHosted(item) ? ` · ${renderLabel(item.detail.render)}${item.detail.version ? ` · v${item.detail.version}` : ""}` : ""}
           </span>
           <span>{timeAgo(item.updated_at)}</span>
         </span>

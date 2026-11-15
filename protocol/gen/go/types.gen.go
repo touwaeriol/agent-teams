@@ -1618,6 +1618,63 @@ func (j *Envelope) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+// One piece of a file upload (publish_file). Chunks are sent before the tool.call
+// that references their upload_id; the console keeps them until that call
+// assembles them.
+type FileChunk struct {
+	// Base64 of at most 1 MiB.
+	Data string `json:"data"`
+
+	// 0-based position of this chunk in the upload (all files concatenated in
+	// tool.call upload.files order).
+	Index int `json:"index"`
+
+	// OpenGen corresponds to the JSON schema field "open_gen".
+	OpenGen *OpenGen `json:"open_gen,omitempty,omitzero"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID SessionID `json:"session_id"`
+
+	// UploadID corresponds to the JSON schema field "upload_id".
+	UploadID UploadID `json:"upload_id"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *FileChunk) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["data"]; raw != nil && !ok {
+		return fmt.Errorf("field data in FileChunk: required")
+	}
+	if _, ok := raw["index"]; raw != nil && !ok {
+		return fmt.Errorf("field index in FileChunk: required")
+	}
+	if _, ok := raw["session_id"]; raw != nil && !ok {
+		return fmt.Errorf("field session_id in FileChunk: required")
+	}
+	if _, ok := raw["upload_id"]; raw != nil && !ok {
+		return fmt.Errorf("field upload_id in FileChunk: required")
+	}
+	type Plain FileChunk
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Data)) > 1398104 {
+		return fmt.Errorf("field %s length: must be <= %d", "data", 1398104)
+	}
+	if 63 < plain.Index {
+		return fmt.Errorf("field %s: must be <= %v", "index", 63)
+	}
+	if 0 > plain.Index {
+		return fmt.Errorf("field %s: must be >= %v", "index", 0)
+	}
+	*j = FileChunk(plain)
+	return nil
+}
+
 // Write the thread summary (before review or when done); it is also added to the
 // project memory.
 type FinishInput struct {
@@ -3316,6 +3373,108 @@ func (j *PublishDeliverableResult) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+// Publish a file you made (HTML prototype, Markdown doc, SVG, image, PDF, JSON,
+// CSV) as a project deliverable. The platform uploads it from your working
+// directory and hosts it; people view it on the Deliverables page and their
+// comments come back to you as messages. A directory with index.html is published
+// as a small site. Pass deliverable_id to publish a new version of an earlier
+// deliverable.
+type PublishFileInput struct {
+	// An earlier deliverable of this project published with publish_file; the file
+	// becomes its next version.
+	DeliverableID *string `json:"deliverable_id,omitempty,omitzero"`
+
+	// design for prototypes and visual designs, doc for documents and specs; also
+	// slides, dashboard, board, data.
+	Kind string `json:"kind"`
+
+	// File (or directory with index.html) inside your working directory, relative to
+	// it.
+	Path string `json:"path"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *PublishFileInput) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["kind"]; raw != nil && !ok {
+		return fmt.Errorf("field kind in PublishFileInput: required")
+	}
+	if _, ok := raw["path"]; raw != nil && !ok {
+		return fmt.Errorf("field path in PublishFileInput: required")
+	}
+	if _, ok := raw["title"]; raw != nil && !ok {
+		return fmt.Errorf("field title in PublishFileInput: required")
+	}
+	type Plain PublishFileInput
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.DeliverableID != nil {
+		if matched, _ := regexp.MatchString(`^dl_[A-Za-z0-9]+$`, string(*plain.DeliverableID)); !matched {
+			return fmt.Errorf("field %s pattern match: must match %s", "DeliverableID", `^dl_[A-Za-z0-9]+$`)
+		}
+	}
+	if utf8.RuneCountInString(string(plain.Kind)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "kind", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Kind)) > 32 {
+		return fmt.Errorf("field %s length: must be <= %d", "kind", 32)
+	}
+	if utf8.RuneCountInString(string(plain.Path)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "path", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Path)) > 500 {
+		return fmt.Errorf("field %s length: must be <= %d", "path", 500)
+	}
+	if utf8.RuneCountInString(string(plain.Title)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "title", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Title)) > 300 {
+		return fmt.Errorf("field %s length: must be <= %d", "title", 300)
+	}
+	*j = PublishFileInput(plain)
+	return nil
+}
+
+type PublishFileResult struct {
+	// DeliverableID corresponds to the JSON schema field "deliverable_id".
+	DeliverableID string `json:"deliverable_id"`
+
+	// Version corresponds to the JSON schema field "version".
+	Version int `json:"version"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *PublishFileResult) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["deliverable_id"]; raw != nil && !ok {
+		return fmt.Errorf("field deliverable_id in PublishFileResult: required")
+	}
+	if _, ok := raw["version"]; raw != nil && !ok {
+		return fmt.Errorf("field version in PublishFileResult: required")
+	}
+	type Plain PublishFileResult
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if 1 > plain.Version {
+		return fmt.Errorf("field %s: must be >= %v", "version", 1)
+	}
+	*j = PublishFileResult(plain)
+	return nil
+}
+
 // Push the HEAD of your worktree to your member branch (thread/<no>/<name>). You
 // have no write token yourself; commit first, then call this.
 type PushBranchInput map[string]interface{}
@@ -4290,6 +4449,11 @@ type SessionOpen struct {
 
 	// SessionID corresponds to the JSON schema field "session_id".
 	SessionID SessionID `json:"session_id"`
+
+	// Skills of the employee's role. Claude: the daemon writes them as a local plugin
+	// outside the worktree and loads it (options.plugins + options.skills). Codex
+	// gets them in developer_instructions instead.
+	Skills []SkillBundle `json:"skills,omitempty,omitzero"`
 }
 
 // Extra non-secret environment; the daemon adds PATH/HOME/MCP_TOOL_TIMEOUT/git
@@ -4324,6 +4488,9 @@ func (j *SessionOpen) UnmarshalJSON(value []byte) error {
 	var plain Plain
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
+	}
+	if len(plain.Skills) > 32 {
+		return fmt.Errorf("field %s length: must be <= %d", "skills", 32)
 	}
 	*j = SessionOpen(plain)
 	return nil
@@ -4836,6 +5003,82 @@ func (j *SetStatusInput) UnmarshalJSON(value []byte) error {
 		return fmt.Errorf("field %s length: must be <= %d", "text", 120)
 	}
 	*j = SetStatusInput(plain)
+	return nil
+}
+
+type SkillBundle struct {
+	// Text files of the skill; SKILL.md is required.
+	Files []SkillFile `json:"files"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SkillBundle) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["files"]; raw != nil && !ok {
+		return fmt.Errorf("field files in SkillBundle: required")
+	}
+	if _, ok := raw["name"]; raw != nil && !ok {
+		return fmt.Errorf("field name in SkillBundle: required")
+	}
+	type Plain SkillBundle
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.Files != nil && len(plain.Files) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "files", 1)
+	}
+	if len(plain.Files) > 64 {
+		return fmt.Errorf("field %s length: must be <= %d", "files", 64)
+	}
+	if matched, _ := regexp.MatchString(`^[a-z0-9][a-z0-9-]{0,63}$`, string(plain.Name)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "Name", `^[a-z0-9][a-z0-9-]{0,63}$`)
+	}
+	*j = SkillBundle(plain)
+	return nil
+}
+
+type SkillFile struct {
+	// Content corresponds to the JSON schema field "content".
+	Content string `json:"content"`
+
+	// Relative path inside the skill directory.
+	Path string `json:"path"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SkillFile) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["content"]; raw != nil && !ok {
+		return fmt.Errorf("field content in SkillFile: required")
+	}
+	if _, ok := raw["path"]; raw != nil && !ok {
+		return fmt.Errorf("field path in SkillFile: required")
+	}
+	type Plain SkillFile
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if matched, _ := regexp.MatchString(`^[A-Za-z0-9_][A-Za-z0-9._-]*(/[A-Za-z0-9_][A-Za-z0-9._-]*)*$`, string(plain.Path)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "Path", `^[A-Za-z0-9_][A-Za-z0-9._-]*(/[A-Za-z0-9_][A-Za-z0-9._-]*)*$`)
+	}
+	if utf8.RuneCountInString(string(plain.Path)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "path", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Path)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "path", 200)
+	}
+	*j = SkillFile(plain)
 	return nil
 }
 
@@ -5376,6 +5619,10 @@ type ToolCall struct {
 
 	// Claude tool_use_id or Codex item id, for diagnostics only.
 	ToolUseID *string `json:"tool_use_id,omitempty,omitzero"`
+
+	// Files the daemon read for publish_file; their bytes arrived before as
+	// file.chunk frames.
+	Upload *ToolUpload `json:"upload,omitempty,omitzero"`
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -5519,6 +5766,53 @@ func (j *ToolResult) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+type ToolUpload struct {
+	// Number of file.chunk frames (0 when every file is empty).
+	Chunks int `json:"chunks"`
+
+	// Files corresponds to the JSON schema field "files".
+	Files []UploadFile `json:"files"`
+
+	// UploadID corresponds to the JSON schema field "upload_id".
+	UploadID UploadID `json:"upload_id"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ToolUpload) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["chunks"]; raw != nil && !ok {
+		return fmt.Errorf("field chunks in ToolUpload: required")
+	}
+	if _, ok := raw["files"]; raw != nil && !ok {
+		return fmt.Errorf("field files in ToolUpload: required")
+	}
+	if _, ok := raw["upload_id"]; raw != nil && !ok {
+		return fmt.Errorf("field upload_id in ToolUpload: required")
+	}
+	type Plain ToolUpload
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if 64 < plain.Chunks {
+		return fmt.Errorf("field %s: must be <= %v", "chunks", 64)
+	}
+	if 0 > plain.Chunks {
+		return fmt.Errorf("field %s: must be >= %v", "chunks", 0)
+	}
+	if plain.Files != nil && len(plain.Files) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "files", 1)
+	}
+	if len(plain.Files) > 64 {
+		return fmt.Errorf("field %s length: must be <= %d", "files", 64)
+	}
+	*j = ToolUpload(plain)
+	return nil
+}
+
 // Turn id inside a session.
 type TurnID string
 
@@ -5558,6 +5852,83 @@ func (j *UpdatePlanInput) UnmarshalJSON(value []byte) error {
 		return err
 	}
 	*j = UpdatePlanInput(plain)
+	return nil
+}
+
+type UploadFile struct {
+	// ContentType corresponds to the JSON schema field "content_type".
+	ContentType string `json:"content_type"`
+
+	// Path inside the published deliverable (index.html for a site's entry, or the
+	// file name).
+	Path string `json:"path"`
+
+	// SHA256 corresponds to the JSON schema field "sha256".
+	SHA256 string `json:"sha256"`
+
+	// Size corresponds to the JSON schema field "size".
+	Size int `json:"size"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *UploadFile) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["content_type"]; raw != nil && !ok {
+		return fmt.Errorf("field content_type in UploadFile: required")
+	}
+	if _, ok := raw["path"]; raw != nil && !ok {
+		return fmt.Errorf("field path in UploadFile: required")
+	}
+	if _, ok := raw["sha256"]; raw != nil && !ok {
+		return fmt.Errorf("field sha256 in UploadFile: required")
+	}
+	if _, ok := raw["size"]; raw != nil && !ok {
+		return fmt.Errorf("field size in UploadFile: required")
+	}
+	type Plain UploadFile
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.ContentType)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "content_type", 1)
+	}
+	if utf8.RuneCountInString(string(plain.ContentType)) > 100 {
+		return fmt.Errorf("field %s length: must be <= %d", "content_type", 100)
+	}
+	if utf8.RuneCountInString(string(plain.Path)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "path", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Path)) > 300 {
+		return fmt.Errorf("field %s length: must be <= %d", "path", 300)
+	}
+	if matched, _ := regexp.MatchString(`^[0-9a-f]{64}$`, string(plain.SHA256)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "SHA256", `^[0-9a-f]{64}$`)
+	}
+	if 0 > plain.Size {
+		return fmt.Errorf("field %s: must be >= %v", "size", 0)
+	}
+	*j = UploadFile(plain)
+	return nil
+}
+
+// File upload id (up_ + ULID), generated by the daemon.
+type UploadID string
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *UploadID) UnmarshalJSON(value []byte) error {
+	type Plain UploadID
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if matched, _ := regexp.MatchString(`^up_[0-9A-Za-z]{10,40}$`, string(plain)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "", `^up_[0-9A-Za-z]{10,40}$`)
+	}
+	*j = UploadID(plain)
 	return nil
 }
 

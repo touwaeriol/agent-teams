@@ -20,6 +20,8 @@ export interface ClaudeDriverDeps {
   claudeConfigDir: string;
   secretPaths: string[];
   queryFn?: QueryFn;
+  /** The role's skills as a local plugin (written by the daemon before the driver starts). */
+  skills?: { pluginDir: string; names: string[] } | null;
   /** Wait this long after a result for folded-in messages before declaring the turn idle. */
   foldGraceMs?: number;
 }
@@ -70,7 +72,7 @@ export class ClaudeDriver implements Driver {
     return buildClaudeOptions({
       claude: this.claude, root: this.deps.root, cwd: this.ctx.absCwd, env: this.ctx.env, sessionId: this.sdkSessionId, resume, server,
       canUseTool: (tool, input, opts) => this.canUseTool(tool, input, opts),
-      hooks: this.hooks(), secretPaths: this.deps.secretPaths,
+      hooks: this.hooks(), secretPaths: this.deps.secretPaths, skills: this.deps.skills ?? null,
       stderr: (d) => this.ctx.log.debug({ stderr: d.slice(0, 2000) }, "claude stderr"),
     });
   }

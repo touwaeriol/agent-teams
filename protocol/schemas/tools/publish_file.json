@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/publish_file.json",
+  "title": "PublishFileInput",
+  "description": "Publish a file you made (HTML prototype, Markdown doc, SVG, image, PDF, JSON, CSV) as a project deliverable. The platform uploads it from your working directory and hosts it; people view it on the Deliverables page and their comments come back to you as messages. A directory with index.html is published as a small site. Pass deliverable_id to publish a new version of an earlier deliverable.",
+  "x-tool": {
+    "tiers": [
+      "lead",
+      "member"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "path",
+    "kind",
+    "title"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "description": "File (or directory with index.html) inside your working directory, relative to it.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "kind": {
+      "description": "design for prototypes and visual designs, doc for documents and specs; also slides, dashboard, board, data.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32,
+      "examples": [
+        "design",
+        "doc",
+        "slides",
+        "dashboard",
+        "data"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "deliverable_id": {
+      "description": "An earlier deliverable of this project published with publish_file; the file becomes its next version.",
+      "type": "string",
+      "pattern": "^dl_[A-Za-z0-9]+$"
+    }
+  },
+  "$defs": {
+    "PublishFileResult": {
+      "title": "PublishFileResult",
+      "type": "object",
+      "required": [
+        "deliverable_id",
+        "version"
+      ],
+      "properties": {
+        "deliverable_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

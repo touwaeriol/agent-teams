@@ -41,6 +41,8 @@ func (r *router) Handle(ctx context.Context, node store.Node, typ string, body a
 		return e.Tools.HandleCall(ctx, m)
 	case *protocol.ToolCancel:
 		return e.Tools.HandleCancel(ctx, m)
+	case *protocol.FileChunk:
+		return e.Tools.HandleChunk(ctx, m)
 	case *protocol.GitResult:
 		return e.Delivery.JobResult(ctx, node, m)
 	case *protocol.CredRequest:

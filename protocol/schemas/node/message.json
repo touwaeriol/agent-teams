@@ -175,6 +175,25 @@
     {
       "properties": {
         "type": {
+          "const": "file.chunk"
+        },
+        "body": {
+          "$ref": "file.chunk.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^n_"
+        }
+      },
+      "required": [
+        "type",
+        "body",
+        "seq"
+      ]
+    },
+    {
+      "properties": {
+        "type": {
           "const": "git.cleanup"
         },
         "body": {

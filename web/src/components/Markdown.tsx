@@ -3,7 +3,8 @@ import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { fenceCjkUrls } from "@/lib/autolink";
 
-export function Markdown({ children, className }: { children: string; className?: string }) {
+/** urlTransform rewrites link and image URLs (default: react-markdown's safe transform). */
+export function Markdown({ children, className, urlTransform }: { children: string; className?: string; urlTransform?: (url: string) => string }) {
   return (
     <div
       className={cn(
@@ -16,7 +17,7 @@ export function Markdown({ children, className }: { children: string; className?
         className,
       )}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{fenceCjkUrls(children)}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} {...(urlTransform ? { urlTransform } : {})}>{fenceCjkUrls(children)}</ReactMarkdown>
     </div>
   );
 }

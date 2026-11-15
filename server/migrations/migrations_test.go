@@ -163,7 +163,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 50 {
+	if migrations.Latest() != 60 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }

@@ -1,6 +1,7 @@
 import type { ContentBlock, ToolCancel, ToolResult } from "../protocol.js";
 import { deferred, type Deferred } from "../util/async.js";
 import { newId } from "../util/ids.js";
+import { prepareUpload, type PreparedUpload } from "./upload.js";
 
 export type SendFn = (type: string, body: object) => void;
 
@@ -10,7 +11,12 @@ export interface ToolCallRequest {
   tool: string;
   args: Record<string, unknown>;
   toolUseId?: string;
+  /** Absolute working directory of the session (publish_file reads files from it). */
+  cwd?: string;
 }
+
+/** Tools whose files the daemon uploads (file.chunk frames) before forwarding the call. */
+export const UPLOAD_TOOLS = new Set(["publish_file"]);
 
 export interface McpToolResult {
   [k: string]: unknown;
@@ -35,9 +41,18 @@ export class ToolBroker {
   constructor(private readonly send: SendFn) {}
 
   async call(req: ToolCallRequest): Promise<McpToolResult> {
+    let upload: PreparedUpload | undefined;
+    if (UPLOAD_TOOLS.has(req.tool)) {
+      try {
+        upload = await prepareUpload(req.cwd ?? "", req.args.path);
+      } catch (err) {
+        return { content: [{ type: "text", text: `publish_file: ${(err as Error).message}` }], isError: true };
+      }
+    }
     const callId = newId("tc_");
     const wait = deferred<ToolResult>();
     this.pending.set(callId, { sessionId: req.sessionId, wait });
+    if (upload) this.sendChunks(req, upload);
     this.send("tool.call", {
       call_id: callId,
       session_id: req.sessionId,
@@ -45,8 +60,22 @@ export class ToolBroker {
       tool: req.tool,
       args: req.args,
       ...(req.toolUseId ? { tool_use_id: req.toolUseId } : {}),
+      ...(upload ? { upload: upload.upload } : {}),
     });
     return toMcp(await wait.promise);
+  }
+
+  /** file.chunk frames go out (reliable, in order) before the tool.call that claims them. */
+  private sendChunks(req: ToolCallRequest, up: PreparedUpload): void {
+    up.chunks.forEach((data, index) =>
+      this.send("file.chunk", {
+        session_id: req.sessionId,
+        ...(req.openGen !== undefined ? { open_gen: req.openGen } : {}),
+        upload_id: up.upload.upload_id,
+        index,
+        data,
+      }),
+    );
   }
 
   /** Handles tool.result; false when no call is waiting (stale). */

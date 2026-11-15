@@ -11,6 +11,7 @@ export interface MessageBodies {
   "cred.request": T.CredRequest;
   "cred.response": T.CredResponse;
   "error": T.ProtocolError;
+  "file.chunk": T.FileChunk;
   "git.cleanup": T.GitCleanup;
   "git.prepare": T.GitPrepare;
   "git.purge": T.GitPurge;
@@ -64,6 +65,7 @@ export const MESSAGE_META: { readonly [K in MessageType]: MessageMeta } = {
   "cred.request": { direction: "node_to_console", reliable: false, key: ["req_id"] },
   "cred.response": { direction: "console_to_node", reliable: false, key: ["req_id"] },
   "error": { direction: "both", reliable: false, key: [] },
+  "file.chunk": { direction: "node_to_console", reliable: true, key: ["upload_id","index"] },
   "git.cleanup": { direction: "console_to_node", reliable: true, key: ["job_id"] },
   "git.prepare": { direction: "console_to_node", reliable: true, key: ["job_id"] },
   "git.purge": { direction: "console_to_node", reliable: true, key: ["job_id"] },
@@ -117,6 +119,7 @@ export interface ToolInputs {
   open_pr: T.OpenPrInput;
   open_thread: T.OpenThreadInput;
   publish_deliverable: T.PublishDeliverableInput;
+  publish_file: T.PublishFileInput;
   push_branch: T.PushBranchInput;
   read_messages: T.ReadMessagesInput;
   remember: T.RememberInput;
@@ -149,6 +152,7 @@ export interface ToolResults {
   open_pr: T.OpenPrResult;
   open_thread: T.OpenThreadResult;
   publish_deliverable: T.PublishDeliverableResult;
+  publish_file: T.PublishFileResult;
   push_branch: T.PushBranchResult;
   read_messages: T.ReadMessagesResult;
   remember: unknown;
@@ -291,6 +295,13 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     requires: null,
     description: "Register a deliverable link for the project (doc, design, slides, dashboard, board, data...). PRs are registered by the platform.",
     input_schema: {"description":"Register a deliverable link for the project (doc, design, slides, dashboard, board, data...). PRs are registered by the platform.","type":"object","required":["kind","title","url"],"additionalProperties":false,"properties":{"kind":{"description":"Known: pr, doc, design, slides, dashboard, board, data; anything else is shown as a link.","type":"string","minLength":1,"examples":["doc","design","slides","dashboard","board","data"]},"title":{"type":"string","minLength":1},"url":{"type":"string","format":"uri"}}},
+  },
+  publish_file: {
+    tiers: ["lead","member"],
+    blocking: [],
+    requires: null,
+    description: "Publish a file you made (HTML prototype, Markdown doc, SVG, image, PDF, JSON, CSV) as a project deliverable. The platform uploads it from your working directory and hosts it; people view it on the Deliverables page and their comments come back to you as messages. A directory with index.html is published as a small site. Pass deliverable_id to publish a new version of an earlier deliverable.",
+    input_schema: {"description":"Publish a file you made (HTML prototype, Markdown doc, SVG, image, PDF, JSON, CSV) as a project deliverable. The platform uploads it from your working directory and hosts it; people view it on the Deliverables page and their comments come back to you as messages. A directory with index.html is published as a small site. Pass deliverable_id to publish a new version of an earlier deliverable.","type":"object","required":["path","kind","title"],"additionalProperties":false,"properties":{"path":{"description":"File (or directory with index.html) inside your working directory, relative to it.","type":"string","minLength":1,"maxLength":500},"kind":{"description":"design for prototypes and visual designs, doc for documents and specs; also slides, dashboard, board, data.","type":"string","minLength":1,"maxLength":32,"examples":["design","doc","slides","dashboard","data"]},"title":{"type":"string","minLength":1,"maxLength":300},"deliverable_id":{"description":"An earlier deliverable of this project published with publish_file; the file becomes its next version.","type":"string","pattern":"^dl_[A-Za-z0-9]+$"}}},
   },
   push_branch: {
     tiers: ["member"],

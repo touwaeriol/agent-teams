@@ -160,6 +160,7 @@ CREATE TABLE at_roles (
   gate             TEXT NOT NULL DEFAULT '',            -- '' | review | decision：此岗位负责的交付关卡
   task_kinds       TEXT[] NOT NULL DEFAULT '{}',        -- 偏好领取的任务类别（dev、test、fix…），空 = 按岗位名匹配
   look             JSONB NOT NULL DEFAULT '{}',         -- {"color":"#4C7BD0","outfit":"tee","accessory":"none","hair":null}；outfit/accessory 为字符串
+  skills           TEXT[] NOT NULL DEFAULT '{}',        -- 技能名（内置 design/docs 或 at_skills.name），统筹必须为空（00060）
   sort             INT NOT NULL DEFAULT 0,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -435,6 +436,50 @@ CREATE TABLE at_deliverables (
 );
 CREATE INDEX at_deliverables_project ON at_deliverables (project_id, kind, created_at DESC);
 CREATE INDEX at_deliverables_title_trgm ON at_deliverables USING gin (title gin_trgm_ops);   -- 交付物搜索 ?q=
+-- 托管交付物（publish_file）：url = ''，detail = {by, author, hosted: true, version, entry, content_type, render, files, size}
+
+CREATE TABLE at_skills (                           -- 用户上传的技能（00060）；内置技能随控制台发布，不在表里
+  id          TEXT PRIMARY KEY,                    -- sk_…
+  user_id     TEXT NOT NULL REFERENCES at_users(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,                       -- SKILL.md 的 name，不能与内置技能重名
+  description TEXT NOT NULL DEFAULT '',
+  files       JSONB NOT NULL,                      -- [{"path":"SKILL.md","content":"…"}]，只收文本
+  size        INT  NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, name)
+);
+
+CREATE TABLE at_deliverable_files (                -- publish_file 发布的文件，按版本保存（00060）
+  deliverable_id TEXT NOT NULL REFERENCES at_deliverables(id) ON DELETE CASCADE,
+  version        INT  NOT NULL,                    -- 1, 2, …；at_deliverables.detail.version 是最新一版
+  path           TEXT NOT NULL,                    -- index.html、spec.md、assets/logo.svg …
+  content_type   TEXT NOT NULL,                    -- 由扩展名决定
+  size           INT  NOT NULL,
+  sha256         TEXT NOT NULL,
+  data           BYTEA NOT NULL,
+  published_by   TEXT NOT NULL DEFAULT '',
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (deliverable_id, version, path)
+);
+
+CREATE TABLE at_upload_chunks (                    -- file.chunk 暂存，tool.call 认领后删除；一天没认领的清掉
+  upload_id  TEXT NOT NULL,
+  idx        INT  NOT NULL,
+  session_id TEXT NOT NULL REFERENCES at_agent_sessions(id) ON DELETE CASCADE,
+  data       BYTEA NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (upload_id, idx)
+);
+
+CREATE TABLE at_deliverable_comments (             -- 交付物批注，投递给发布者或组长
+  id             TEXT PRIMARY KEY,                 -- dc_…
+  deliverable_id TEXT NOT NULL REFERENCES at_deliverables(id) ON DELETE CASCADE,
+  version        INT,
+  author         TEXT NOT NULL,                    -- 用户 id
+  text           TEXT NOT NULL,
+  sent_to        TEXT NOT NULL DEFAULT '',         -- 收到它的员工；空 = 没有可投递的人
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 CREATE TABLE at_project_memory (                   -- 替代 threads.md 设计里的 at_projects.memory JSONB
   id          TEXT PRIMARY KEY,                    -- me_…
@@ -541,6 +586,7 @@ CREATE TABLE at_office_layouts (                    -- 可选：数据库里的�
 4. `00010_threads.sql`（P3，**v1 防护补丁上线之前禁止执行**：`atctl migrate` 检查 `at_settings.platform.legacy_guard >= 1`，由补丁后的 Python 启动时写入，不满足则拒绝）：项目/对话/消息/任务/提问的新列，`at_roles`、`at_threads`、`at_main_tasks`、`at_employees`、`at_agent_sessions`、`at_tool_calls`、`at_usage`、`at_permission_rules`、`at_events`（含首批分区）、`at_status_events`、`at_employee_status`。
 5. `00020_delivery.sql`（P4）：`at_merge_queue`、`at_ci_runs`、`at_deliverables`、`at_project_memory`、`at_thread_nodes`。
 6. `00030_office.sql`（P5）：`at_office_layouts`、`at_projects.office_layout`。
+   `00050_node_job_index.sql`：`at_node_commands` 的作业索引。`00060_design_skills.sql`：`at_roles.skills`、`at_skills`、`at_deliverable_files`、`at_upload_chunks`、`at_deliverable_comments`（architecture.md §6.5）。
 7. `00100_drop_v1.sql`（P6 后）：删 `at_teams`、`at_conversations.history`；`at_tasks.output` 并入 `summary`；去掉不再需要的默认值。
 
 每个迁移在 CI 里：对“生产结构快照”执行 → 启动 Python v1 跑冒烟测试（注册、建项目、发消息、节点连接）→ 种入 v2 用户的讨论串、`pending`/`running`/`claimed` 任务、open 提问与留言 → 重启 Python v1 → 断言这些行未变、v1 对话列表不含它们 → 通过才算合规。

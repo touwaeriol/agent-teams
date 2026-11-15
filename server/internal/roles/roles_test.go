@@ -180,3 +180,42 @@ func TestRandomLook(t *testing.T) {
 		t.Fatalf("look %+v", l)
 	}
 }
+
+func TestSkillsValidation(t *testing.T) {
+	roles := Defaults(looks)
+	roles[0].Skills = []string{"design"}
+	roles[2].Skills = []string{"design", "design", "ghost"}
+	Normalize(roles, looks)
+	if len(roles[2].Skills) != 2 {
+		t.Fatalf("skills not deduplicated: %v", roles[2].Skills)
+	}
+	known := map[string]bool{"design": true, "docs": true}
+	got := problemPaths(Validate(roles, Context{Nodes: nodes(), Looks: looks, Skills: known}))
+	if got != "roles[0].skills roles[2].skills" {
+		t.Fatalf("problems %q", got)
+	}
+	roles[0].Skills, roles[2].Skills = nil, []string{"docs"}
+	if p := Validate(roles, Context{Nodes: nodes(), Looks: looks, Skills: known}); len(p) != 0 {
+		t.Fatalf("valid skills refused: %v", p)
+	}
+}
+
+func TestDesignerPreset(t *testing.T) {
+	p := Presets(looks)
+	if len(p) == 0 || p[0].Role != "designer" || p[0].Title != "设计师" || strings.Join(p[0].Skills, ",") != "design,docs" {
+		t.Fatalf("presets %+v", p)
+	}
+	roles := append(Defaults(looks), p[0])
+	known := map[string]bool{"design": true, "docs": true}
+	if probs := Validate(roles, Context{Nodes: nodes(), Looks: looks, Skills: known}); len(probs) != 0 {
+		t.Fatalf("designer preset invalid: %v", probs)
+	}
+	text, err := ToYAML(roles, nil)
+	if err != nil || !strings.Contains(text, "skills:") {
+		t.Fatalf("yaml %v %s", err, text)
+	}
+	parsed, err := FromYAML(text, nil)
+	if err != nil || strings.Join(parsed.Roles[3].Skills, ",") != "design,docs" {
+		t.Fatalf("yaml round trip %+v %v", parsed.Roles, err)
+	}
+}

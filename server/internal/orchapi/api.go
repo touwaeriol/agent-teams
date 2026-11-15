@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/touwaeriol/agent-teams/server/internal/approvals"
+	"github.com/touwaeriol/agent-teams/server/internal/artifacts"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/delivery"
 	"github.com/touwaeriol/agent-teams/server/internal/engine"
@@ -32,6 +33,10 @@ import (
 type API struct {
 	e      *engine.Engine
 	office *office.Registry
+	// published files (files.go)
+	files          *artifacts.Server
+	artifactOrigin string
+	publicURL      string
 }
 
 // New returns the API for an engine.
@@ -48,6 +53,7 @@ func (a *API) Register(api huma.API, r chi.Router) {
 	a.registerTasks(api)
 	a.registerProjectViews(api)
 	a.registerDeliverables(api)
+	a.registerFiles(api, r)
 	a.registerStreams(api)
 	a.registerOffice(api)
 	a.registerLegacy(api)
