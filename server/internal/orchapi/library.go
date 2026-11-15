@@ -9,6 +9,7 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -93,12 +94,35 @@ func LibraryKind(contentType string) string {
 	return "doc"
 }
 
+// uploadName is the file name of an upload without any folder part.
+func uploadName(raw string) string {
+	return strings.TrimSpace(path.Base(strings.ReplaceAll(raw, "\\", "/")))
+}
+
+// storedName turns a file name into one artifacts.ValidPath accepts: characters outside
+// [A-Za-z0-9._ -] (Chinese names, for example) become "_", the extension stays.
+func storedName(name string) string {
+	out := []rune{}
+	for _, r := range name {
+		ok := r < 128 && (r == '.' || r == '_' || r == ' ' || r == '-' || unicode.IsLetter(r) || unicode.IsDigit(r))
+		if !ok {
+			r = '_'
+		}
+		out = append(out, r)
+	}
+	s := string(out)
+	if s == "" || s[0] == '.' || s[0] == ' ' || s[0] == '-' {
+		s = "file" + s
+	}
+	return s
+}
+
 // libraryFile checks an upload and turns it into the stored file.
 func libraryFile(b UploadBody) (artifacts.ArtifactFile, error) {
-	name := strings.TrimSpace(path.Base(strings.ReplaceAll(b.Name, "\\", "/")))
+	name := storedName(uploadName(b.Name))
 	if !artifacts.ValidPath(name) {
 		return artifacts.ArtifactFile{}, httpapi.Invalid("name",
-			"不支持的文件："+name+"（支持 html、md、svg、png、jpg、gif、webp、pdf、json、csv、txt）")
+			"不支持的文件："+uploadName(b.Name)+"（支持 html、md、svg、png、jpg、gif、webp、pdf、json、csv、txt）")
 	}
 	data, err := base64.StdEncoding.DecodeString(b.Data)
 	if err != nil || len(data) == 0 {
@@ -123,7 +147,7 @@ func (a *API) uploadLibraryFile(ctx context.Context, in *uploadInput) (*delivera
 	}
 	title := strings.TrimSpace(in.Body.Title)
 	if title == "" {
-		title = f.Path
+		title = uploadName(in.Body.Name)
 	}
 	files := []artifacts.ArtifactFile{f}
 	var d core.Deliverable

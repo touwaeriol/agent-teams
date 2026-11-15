@@ -75,7 +75,7 @@ export function MainPage({ settings = false }: { settings?: boolean }) {
         </aside>
       )}
       {panel === "library" && (
-        <aside aria-label="资料库" className="fixed inset-0 z-30 flex flex-col bg-panel lg:static lg:z-auto lg:h-full lg:w-[min(720px,48vw)] lg:min-w-[420px] lg:shrink-0 lg:border-l">
+        <aside aria-label="资料库" className="fixed inset-0 z-30 flex flex-col bg-panel lg:static lg:z-auto lg:h-full lg:w-[min(820px,56vw)] lg:min-w-[420px] lg:shrink-0 lg:border-l">
           <LibraryBrowser pid={pid} variant="panel" onClose={() => setPanel("threads")} />
         </aside>
       )}
@@ -109,12 +109,12 @@ function MainHeader({ project, coordinator, threads, panel, onPanel }: { project
       <div className="flex min-w-0 items-center gap-1">
         <NavButton />
         <ProjectSwitcher project={project} />
-        <span className="ml-1 hidden items-center gap-1.5 truncate text-xs text-muted-foreground xl:flex" title={project.repos?.map((r) => r.repo).join(" · ")}>
+        <span className={`ml-1 hidden items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground ${panel === "library" ? "" : "xl:flex"}`} title={project.repos?.map((r) => r.repo).join(" · ")}>
           <Dot color={state.tone} />
           {state.text}
         </span>
       </div>
-      <span className="flex items-center gap-0.5">
+      <span className="flex shrink-0 items-center gap-0.5">
         {waiting > 0 && firstWaiting && (
           <Link to={`/projects/${project.id}/threads/${firstWaiting.no}`} className="mr-1.5 flex h-8 items-center rounded-full bg-[#FFF4EC] px-2.5 text-xs text-[#B4530B] lg:hidden">
             等你 {waiting}
@@ -135,7 +135,7 @@ function MainHeader({ project, coordinator, threads, panel, onPanel }: { project
               <MoreHorizontal strokeWidth={1.8} />
             </IconButton>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuContent align="end" className="w-44" onCloseAutoFocus={(e) => e.preventDefault()}>
             <DropdownMenuItem onSelect={() => navigate(`/projects/${project.id}/overview`)}>
               <Home /> 项目首页
             </DropdownMenuItem>

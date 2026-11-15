@@ -84,7 +84,7 @@ function ScheduleRow({ pid, item, onEdit }: { pid: string; item: ScheduleView; o
         <IconButton label="删除" onClick={() => remove.mutate()}>
           <Trash2 strokeWidth={1.8} />
         </IconButton>
-        <Switch checked={item.enabled} onCheckedChange={(v) => toggle.mutate(v)} aria-label={`启用 ${item.name}`} className="ml-1.5" />
+        <Switch checked={item.enabled} onCheckedChange={(v) => toggle.mutate(v)} aria-label={`启用 ${item.name}`} className="ml-1.5 data-[state=checked]:bg-[#1F6FD1]" />
       </span>
     </div>
   );

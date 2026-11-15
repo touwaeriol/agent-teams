@@ -108,3 +108,28 @@ export function deliverableHref(pid: string, d: Pick<DeliverableView, "id" | "ki
   if (d.kind === "design" || (d.detail && isHosted({ detail: d.detail }))) return { to: `/projects/${pid}/deliverables/${d.id}` };
   return { href: safeHref(d.url) };
 }
+
+export type FileIconKind = "image" | "code" | "text" | "table" | "pr" | "design" | "link";
+
+const ICON_BY_EXT: Record<string, FileIconKind> = {
+  png: "image", jpg: "image", jpeg: "image", gif: "image", webp: "image", svg: "image",
+  html: "code", htm: "code", json: "table", csv: "table",
+  md: "text", markdown: "text", txt: "text", pdf: "text",
+};
+const ICON_BY_KIND: Record<string, FileIconKind> = { pr: "pr", design: "design", doc: "text", data: "table", dashboard: "table", slides: "design", board: "design" };
+
+/** Which outline icon a library row shows: by the hosted file's extension, else by kind. */
+export function fileIcon(d: Pick<DeliverableView, "kind" | "detail">): FileIconKind {
+  const entry = d.detail.hosted ? d.detail.entry : undefined;
+  const byExt = entry ? ICON_BY_EXT[extensionOf(String(entry))] : undefined;
+  return byExt ?? ICON_BY_KIND[d.kind] ?? "link";
+}
+
+/** Table columns that fit a library this wide (px); 名称 and 类型 always show. */
+export function libraryColumns(width: number): Set<SortKey> {
+  const cols = new Set<SortKey>(["name", "type"]);
+  if (width >= 420) cols.add("size");
+  if (width >= 540) cols.add("owner");
+  if (width >= 660) cols.add("modified");
+  return cols;
+}

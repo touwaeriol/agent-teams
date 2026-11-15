@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DeliverableView } from "@/api/views";
-import { formatBytes, formatDateTime, nextSort, ownerLabel, sortLibrary, typeLabel, uploadProblem } from "@/lib/library";
+import { fileIcon, formatBytes, formatDateTime, libraryColumns, nextSort, ownerLabel, sortLibrary, typeLabel, uploadProblem } from "@/lib/library";
 import { colorIcon, iconLook } from "@/lib/projectIcon";
 import { fillDays, formatTokens, formatUSD, goalLimit, modelLabel, modelOptions, sectionOf } from "@/lib/projectSettings";
 import { describeCron, looksLikeCron, presetOf } from "@/lib/schedules";
@@ -111,5 +111,22 @@ describe("side panel", () => {
     expect(sidePanelOf("library")).toBe("library");
     expect(sidePanelOf("none")).toBe("none");
     expect(sidePanelOf("bogus")).toBe("threads");
+  });
+});
+
+describe("library rows", () => {
+  it("picks an outline icon by file extension, else by kind", () => {
+    expect(fileIcon(item("a", { kind: "design", detail: { hosted: true, entry: "06-nodes.png" } }))).toBe("image");
+    expect(fileIcon(item("b", { kind: "design", detail: { hosted: true, entry: "index.html" } }))).toBe("code");
+    expect(fileIcon(item("c", { kind: "data", detail: { hosted: true, entry: "t.csv" } }))).toBe("table");
+    expect(fileIcon(item("d", { kind: "pr" }))).toBe("pr");
+    expect(fileIcon(item("e", { kind: "doc" }))).toBe("text");
+    expect(fileIcon(item("f", { kind: "other" }))).toBe("link");
+  });
+  it("drops columns as the library narrows", () => {
+    expect([...libraryColumns(900)].sort()).toEqual(["modified", "name", "owner", "size", "type"]);
+    expect(libraryColumns(600).has("modified")).toBe(false);
+    expect(libraryColumns(500).has("owner")).toBe(false);
+    expect([...libraryColumns(300)].sort()).toEqual(["name", "type"]);
   });
 });

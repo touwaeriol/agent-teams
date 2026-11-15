@@ -210,3 +210,32 @@ func TestSchedulesFireOnce(t *testing.T) {
 	}
 	tm.b.must(204, "DELETE", "/api/schedules/"+s.ID, nil, nil)
 }
+
+// TestUsageLimitWaitsForEveryone: two employees of a thread hit limits that reset at
+// different times; the thread resumes only after the later reset, and both are told.
+func TestUsageLimitWaitsForEveryone(t *testing.T) {
+	tm := startTeam(t)
+	tm.b.must(200, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"auto_resume": true}, nil)
+	rateLimited(tm.lead, time.Hour)
+	rateLimited(tm.dev, 2*time.Hour)
+	countWaits := func() int {
+		var n int
+		_ = tm.w.e.Core.Pool.QueryRow(tm.w.ctx, `SELECT count(*) FROM at_rate_limit_waits`).Scan(&n)
+		return n
+	}
+	eventually(t, "both waiting", func() bool { return countWaits() == 2 })
+	if _, err := tm.w.e.Core.Pool.Exec(tm.w.ctx, `UPDATE at_rate_limit_waits SET reset_at = now() - interval '1 second'
+		WHERE employee_id = (SELECT id FROM at_employees WHERE name = 'lead-1')`); err != nil {
+		t.Fatal(err)
+	}
+	tm.w.e.Timers.Tick(tm.w.ctx)
+	if st, _ := threadStatus(tm); st != "paused" || countWaits() != 2 {
+		t.Fatalf("resumed before the later reset: %s, %d waits", st, countWaits())
+	}
+	expireWaits(t, tm)
+	tm.lead.expectSend("使用限额已重置")
+	tm.dev.expectSend("使用限额已重置")
+	if st, _ := threadStatus(tm); st != "running" || countWaits() != 0 {
+		t.Fatalf("after both resets: %s, %d waits", st, countWaits())
+	}
+}

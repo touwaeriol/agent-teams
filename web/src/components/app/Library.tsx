@@ -1,8 +1,8 @@
 // 资料库: the project's deliverables and published files as a table (or tiles),
 // filtered by type, searchable, with "+ 添加" to upload a file the team can read.
 // Used as the right-hand panel of the main board and on the full Deliverables page.
-import { ChevronDown, ChevronUp, FileText, Grid2x2, List, Maximize2, MoreHorizontal, Plus, Search, X } from "lucide-react";
-import { useRef, useState, type ReactNode } from "react";
+import { ChevronDown, ChevronUp, FileCode2, FileText, GitPullRequest, Grid2x2, Image, Link2, List, Maximize2, MoreHorizontal, Palette, Plus, Search, Sheet, X, type LucideIcon } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { deliverables as deliverableActions, projects as projectActions } from "@/api/actions";
@@ -13,8 +13,7 @@ import { Field, FormDialog, IconButton, IconLink, Loading } from "@/components/c
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { deliverableHref, fileBase64, formatBytes, formatDateTime, LIBRARY_ACCEPT, nextSort, ownerLabel, sizeOf, sortLibrary, typeLabel, uploadProblem, type SortKey } from "@/lib/library";
-import { deliverableKind } from "@/lib/present";
+import { deliverableHref, fileBase64, formatBytes, fileIcon, formatDateTime, libraryColumns, LIBRARY_ACCEPT, nextSort, ownerLabel, sizeOf, sortLibrary, typeLabel, uploadProblem, type FileIconKind, type SortKey } from "@/lib/library";
 import { cn } from "@/lib/utils";
 import { Initial } from "./bits";
 
@@ -105,7 +104,7 @@ export function LibraryBrowser({ pid, variant, onClose, extra }: { pid: string; 
       <div className={cn("scroll-thin min-h-0 flex-1 overflow-y-auto", variant === "panel" ? "px-4 pb-3 pt-2" : "pt-3")}>
         {list.isLoading && <Loading />}
         {list.data && items.length === 0 && <Empty filtered={Boolean(q || kind)} />}
-        {items.length > 0 && view === "list" && <LibraryTable pid={pid} items={items} sort={sort} onSort={(k) => setSort(nextSort(sort, k))} compact={variant === "panel"} />}
+        {items.length > 0 && view === "list" && <LibraryTable pid={pid} items={items} sort={sort} onSort={(k) => setSort(nextSort(sort, k))}/>}
         {items.length > 0 && view === "grid" && <LibraryGrid pid={pid} items={items} />}
       </div>
       <div className={cn("flex shrink-0 items-center border-t py-2.5 text-xs text-muted-foreground", variant === "panel" ? "px-4" : "")}>
@@ -198,13 +197,25 @@ function ItemLink({ pid, item, className, children }: { pid: string; item: Deliv
   );
 }
 
-function KindGlyph({ kind, size = 22 }: { kind: string; size?: number }) {
-  const look = deliverableKind(kind);
-  return (
-    <span aria-hidden className="flex shrink-0 items-center justify-center rounded-md text-[11px] font-bold" style={{ width: size, height: size, background: look.bg, color: look.fg }}>
-      {kind === "doc" ? <FileText className="size-3.5" /> : look.glyph}
-    </span>
-  );
+const FILE_ICONS: Record<FileIconKind, LucideIcon> = { image: Image, code: FileCode2, text: FileText, table: Sheet, pr: GitPullRequest, design: Palette, link: Link2 };
+
+function KindGlyph({ item }: { item: DeliverableView }) {
+  const Icon = FILE_ICONS[fileIcon(item)];
+  return <Icon aria-hidden className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} />;
+}
+
+/** Width of an element, kept up to date (0 before the first layout). */
+function useWidth<T extends HTMLElement>(): [RefObject<T>, number] {
+  const ref = useRef<T>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) => setWidth(e.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, width];
 }
 
 function Owner({ by }: { by: string }) {
@@ -219,19 +230,34 @@ function Owner({ by }: { by: string }) {
 
 const COLUMNS: { key: SortKey; label: string; className: string }[] = [
   { key: "name", label: "名称", className: "min-w-0 flex-1" },
-  { key: "owner", label: "所有者", className: "w-28 max-md:hidden" },
-  { key: "modified", label: "修改日期", className: "w-40 max-lg:hidden" },
-  { key: "size", label: "大小", className: "w-20 max-sm:hidden" },
+  { key: "owner", label: "所有者", className: "w-32" },
+  { key: "modified", label: "修改日期", className: "w-40" },
+  { key: "size", label: "大小", className: "w-20" },
   { key: "type", label: "类型", className: "w-16" },
 ];
 
-function LibraryTable({ pid, items, sort, onSort, compact }: { pid: string; items: DeliverableView[]; sort: { key: SortKey; dir: "asc" | "desc" }; onSort: (k: SortKey) => void; compact: boolean }) {
-  const cols = compact ? COLUMNS.map((c) => (c.key === "modified" ? { ...c, className: "w-36 max-2xl:hidden" } : c.key === "owner" ? { ...c, className: "w-24 max-xl:hidden" } : c)) : COLUMNS;
+function LibraryTable({ pid, items, sort, onSort }: { pid: string; items: DeliverableView[]; sort: { key: SortKey; dir: "asc" | "desc" }; onSort: (k: SortKey) => void }) {
+  const [ref, width] = useWidth<HTMLDivElement>();
+  const shown = libraryColumns(width || 1200);
+  const cols = COLUMNS.filter((c) => shown.has(c.key));
+  const cell: Record<SortKey, (d: DeliverableView) => ReactNode> = {
+    name: (d) => (
+      <ItemLink pid={pid} item={d} className="flex min-w-0 items-center gap-3 text-foreground">
+        <KindGlyph item={d} />
+        <span className="truncate">{d.title}</span>
+        {d.thread_no && <span className="shrink-0 text-xs text-muted-foreground">#{d.thread_no}</span>}
+      </ItemLink>
+    ),
+    owner: (d) => <Owner by={d.published_by} />,
+    modified: (d) => <span className="tabular-nums">{formatDateTime(d.updated_at)}</span>,
+    size: (d) => <span className="tabular-nums">{formatBytes(sizeOf(d))}</span>,
+    type: (d) => typeLabel(d),
+  };
   return (
-    <div role="table" aria-label="资料库" className="text-[13px]">
-      <div role="row" className="sticky top-0 z-[1] flex h-9 items-center gap-3 rounded-lg bg-raised/70 px-3 text-xs text-muted-foreground backdrop-blur">
+    <div ref={ref} role="table" aria-label="资料库" className="text-[13px]">
+      <div role="row" className="sticky top-0 z-[1] flex h-9 items-center gap-3 rounded-lg bg-raised px-3 text-xs text-foreground/80">
         {cols.map((c) => (
-          <button key={c.key} type="button" role="columnheader" aria-sort={sort.key === c.key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"} onClick={() => onSort(c.key)} className={cn("flex items-center gap-1 text-left font-medium hover:text-foreground", c.className)}>
+          <button key={c.key} type="button" role="columnheader" aria-sort={sort.key === c.key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"} onClick={() => onSort(c.key)} className={cn("flex items-center gap-1 text-left font-medium hover:text-foreground", c.key === "name" && "pl-[30px]", c.className)}>
             {c.label}
             {sort.key === c.key && (sort.dir === "asc" ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />)}
           </button>
@@ -239,18 +265,12 @@ function LibraryTable({ pid, items, sort, onSort, compact }: { pid: string; item
         <span className="w-7" />
       </div>
       {items.map((d) => (
-        <div key={d.id} role="row" className="group flex h-10 items-center gap-3 rounded-lg px-3 hover:bg-raised/60">
-          <ItemLink pid={pid} item={d} className={cn("flex items-center gap-2.5", cols[0].className)}>
-            <KindGlyph kind={d.kind} />
-            <span className="truncate">{d.title}</span>
-            {d.thread_no && <span className="shrink-0 text-xs text-muted-foreground">#{d.thread_no}</span>}
-          </ItemLink>
-          <span className={cn("text-muted-foreground", cols[1].className)}>
-            <Owner by={d.published_by} />
-          </span>
-          <span className={cn("tabular-nums text-muted-foreground", cols[2].className)}>{formatDateTime(d.updated_at)}</span>
-          <span className={cn("tabular-nums text-muted-foreground", cols[3].className)}>{formatBytes(sizeOf(d))}</span>
-          <span className={cn("text-muted-foreground", cols[4].className)}>{typeLabel(d)}</span>
+        <div key={d.id} role="row" className="group flex h-[38px] items-center gap-3 rounded-lg px-3 hover:bg-raised/60">
+          {cols.map((c) => (
+            <span key={c.key} role="cell" className={cn("truncate text-muted-foreground", c.className)}>
+              {cell[c.key](d)}
+            </span>
+          ))}
           <ItemMenu item={d} pid={pid} />
         </div>
       ))}
@@ -262,12 +282,13 @@ function LibraryGrid({ pid, items }: { pid: string; items: DeliverableView[] }) 
   return (
     <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
       {items.map((d) => {
-        const look = deliverableKind(d.kind);
+        const Icon = FILE_ICONS[fileIcon(d)];
         return (
           <div key={d.id} className="group relative">
             <ItemLink pid={pid} item={d} className="flex flex-col overflow-hidden rounded-xl border bg-panel hover:border-input">
-              <span className="flex h-24 items-center justify-center text-[22px] font-bold" style={{ background: look.bg, color: look.fg }}>
-                {typeLabel(d)}
+              <span className="flex h-24 flex-col items-center justify-center gap-1.5 bg-raised text-muted-foreground">
+                <Icon className="size-7" strokeWidth={1.4} />
+                <span className="text-[11px] font-medium tracking-wide">{typeLabel(d)}</span>
               </span>
               <span className="flex flex-col gap-0.5 px-3 py-2">
                 <span className="truncate pr-5 text-[13px] font-medium">{d.title}</span>

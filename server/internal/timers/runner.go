@@ -58,10 +58,14 @@ func (r *Runner) Tick(ctx context.Context) {
 	}
 }
 
+// resumeWaits ends the waits whose limit has reset. A thread resumes only once every
+// waiting employee in it is past its reset, so nobody works into a limit still in force.
 func (r *Runner) resumeWaits(ctx context.Context) error {
 	return r.core.InTx(ctx, func(tx *core.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT w.employee_id, w.thread_id, p.auto_resume FROM at_rate_limit_waits w
-			JOIN at_projects p ON p.id = w.project_id WHERE w.reset_at <= $1 ORDER BY w.reset_at LIMIT 50
+			JOIN at_projects p ON p.id = w.project_id WHERE w.reset_at <= $1
+			AND NOT EXISTS (SELECT 1 FROM at_rate_limit_waits o WHERE o.thread_id = w.thread_id AND o.reset_at > $1)
+			ORDER BY w.reset_at LIMIT 50
 			FOR UPDATE OF w SKIP LOCKED`, r.Now())
 		if err != nil {
 			return err
