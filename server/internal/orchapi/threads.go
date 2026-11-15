@@ -360,11 +360,8 @@ func (a *API) deleteThread(ctx context.Context, in *tidInput) (*struct{}, error)
 		if err != nil {
 			return err
 		}
-		if err := a.e.Delivery.PurgeThread(ctx, tx, cur); err != nil {
-			return err
-		}
 		auditTx(ctx, tx, u.ID, "thread_delete", t.ID, map[string]any{"no": cur.No, "title": cur.Title, "status": cur.Status})
-		return a.e.Orch.DeleteThread(ctx, tx, cur)
+		return a.e.Orch.DeleteThread(ctx, tx, cur, func() error { return a.e.Delivery.PurgeThread(ctx, tx, cur) })
 	})
 	return nil, fail(err, "没有这个讨论串")
 }

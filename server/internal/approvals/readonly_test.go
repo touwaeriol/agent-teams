@@ -19,6 +19,8 @@ func TestReadOnlyCommandAllows(t *testing.T) {
 		"grep -rn 'func.*Handle' server", `grep -n "TODO" a.go`, "rg -n useState web/src", "find . -name '*.go' -type f",
 		"sed -n 1,80p main.go", "sed -n '10,$p' a.go", "git log --oneline -20", "git status --short", "git diff HEAD~1 -- a.go",
 		"git show abc123", "git branch -a", "git branch", "pwd", "find src -maxdepth 2",
+		"ls *.go", "cat src/*.ts", "wc -l web/src/*.tsx", "grep -n foo *.md", "git log --oneline -- 'src/*.go'",
+		"rg -g '*.go' foo", "git diff --stat", "git log --output-indicator-new=+",
 	} {
 		if !ReadOnlyCommand("Bash", bash(cmd)) {
 			t.Errorf("should allow %q", cmd)
@@ -34,6 +36,15 @@ func TestReadOnlyCommandRefusesWrites(t *testing.T) {
 		"git checkout main", "git commit -m x", "git push", "git -C /tmp log", "git diff --output=x", "git log -ox",
 		"git diff --ext-diff", "cat /etc/passwd", "cat ../secret", "cat a/../../b", "ls ~", "tail -f log", "tail -fn 5 log",
 		"npm test", "python3 x.py", "", "cat 'unterminated", "ls #x", "cat a\nrm b",
+		// globs: a file named like a flag must not reach a command whose flags write or run
+		"find . *", "sed -n 1p *", "rg foo *", "git diff *", "tail -n 5 *.log",
+		// globs that match . and ..
+		"cat .*/secret", "ls .?", "cat '.'*", "cat .?/.?/etc/passwd", "cat a/.*", "ls [.][.]", "cat [/]etc/passwd",
+		// values attached to short flags, abbreviated long flags, bundled short flags
+		"grep -f/etc/passwd x", "grep -f~/.ssh/id_rsa x", "git diff --outp=x", "git show --ext", "git log --textc",
+		"rg -nz foo", "rg --hostname-bin=./x foo", "rg --pre=./x foo", "git log -po",
+		"find . -execdir sh ;", "find . -okdir rm {} +", "find . -fprintf out x", "find . -fls out",
+		"git branch --list x", "git -c core.pager=sh log", "git --no-pager log", "FOO=1 ls", "ls\tsrc;id",
 	} {
 		if ReadOnlyCommand("Bash", bash(cmd)) {
 			t.Errorf("must not allow %q", cmd)

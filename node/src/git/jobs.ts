@@ -28,6 +28,8 @@ export interface GitJobsOptions {
   log: Logger;
   /** git.result already recorded by an earlier process (done.jsonl), for prepare waits. */
   lookup?: (jobId: string) => GitResult | undefined;
+  /** How long git.purge waits for sessions still stopping there (a deleted thread's close frames arrive with it). */
+  purgeWaitMs?: number;
 }
 
 class JobError extends Error {
@@ -65,7 +67,9 @@ export class GitJobs {
     return this.job(b.job_id, async () => {
       if (!/^projects\/[^/]+(\/threads\/[0-9]+)?$/.test(b.path)) throw new PathOutsideRoot(b.path);
       const abs = resolveInRoot(this.o.root, b.path);
-      if (busy(abs)) throw new JobError("dirty_conflict", "a session is still active in this project");
+      if (!(await waitIdle(() => busy(abs), this.o.purgeWaitMs ?? 60_000))) {
+        throw new JobError("dirty_conflict", "a session is still active in this project");
+      }
       rmSync(abs, { recursive: true, force: true });
       return {};
     });
@@ -321,4 +325,13 @@ function failure(jobId: string, err: unknown): GitResult {
 
 function tail(text: string): string {
   return redact(text.length > LOG_TAIL ? text.slice(-LOG_TAIL) : text);
+}
+
+/** Polls until busy() turns false; false when it is still busy after timeoutMs. */
+export async function waitIdle(busy: () => boolean, timeoutMs: number, stepMs = 200): Promise<boolean> {
+  for (let waited = 0; busy(); waited += stepMs) {
+    if (waited >= timeoutMs) return false;
+    await new Promise((r) => setTimeout(r, stepMs));
+  }
+  return true;
 }

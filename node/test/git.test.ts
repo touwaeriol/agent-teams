@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startHarness, type Harness, claudeOpen } from "./helpers/daemon.js";
 import { driverOf, disableFilters } from "../src/git/safe.js";
 import { gitEnv } from "../src/git/exec.js";
+import { waitIdle } from "../src/git/jobs.js";
 
 let h: Harness;
 afterEach(async () => {
@@ -209,5 +210,15 @@ describe("git hardening helpers", () => {
     expect(env.AGENT_TEAMS_NODE_TOKEN).toBeUndefined();
     expect(env.GIT_CONFIG_COUNT).toBeUndefined();
     expect(env.PATH).toBe("/bin");
+  });
+});
+
+describe("waitIdle", () => {
+  it("waits for a session that is still stopping, and gives up after the timeout", async () => {
+    let busy = true;
+    setTimeout(() => (busy = false), 30);
+    expect(await waitIdle(() => busy, 1000, 10)).toBe(true);
+    expect(await waitIdle(() => true, 30, 10)).toBe(false);
+    expect(await waitIdle(() => false, 0)).toBe(true);
   });
 });

@@ -224,6 +224,20 @@ func (o *Orchestrator) Archive(ctx context.Context, tx *core.Tx, t core.Thread) 
 	return o.setStatus(ctx, tx, t, "archived", "")
 }
 
+// deleteThreadImages removes the images attached to a thread's messages, unless a message
+// elsewhere in the project still shows them.
+func deleteThreadImages(ctx context.Context, tx *core.Tx, t core.Thread) error {
+	_, err := tx.Exec(ctx, `WITH refs AS (
+		SELECT m.conversation_id, r->>'id' AS id FROM at_messages m
+		JOIN at_conversations c ON c.id = m.conversation_id AND c.project_id = $2,
+		LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(m.meta->'attachments') = 'array'
+			THEN m.meta->'attachments' ELSE '[]'::jsonb END) r)
+		DELETE FROM at_attachments WHERE project_id = $2
+		AND id IN (SELECT id FROM refs WHERE conversation_id = $1)
+		AND id NOT IN (SELECT id FROM refs WHERE conversation_id <> $1 AND id IS NOT NULL)`, t.ID, t.ProjectID)
+	return err
+}
+
 // UnarchiveStatus is where an archived thread goes back to: a finished thread stays finished,
 // one archived while it was still going comes back paused (its sessions were closed).
 func UnarchiveStatus(archivedFrom string) string {
@@ -256,12 +270,19 @@ func (o *Orchestrator) Unarchive(ctx context.Context, tx *core.Tx, t core.Thread
 
 // DeleteThread removes a thread for good: its sessions are closed, then the thread and
 // everything hanging off it (employees, tasks, cards, messages) is deleted. Deliverables stay
-// in the project library without the thread link. The caller queues the worktree purge first.
-func (o *Orchestrator) DeleteThread(ctx context.Context, tx *core.Tx, t core.Thread) error {
+// in the project library without the thread link. purge queues the worktree removal: it runs
+// after the session closes are queued (so they reach the nodes first) and before the rows go.
+func (o *Orchestrator) DeleteThread(ctx context.Context, tx *core.Tx, t core.Thread, purge func() error) error {
 	if err := o.closeThreadSessions(ctx, tx, t.ID, "thread_done"); err != nil {
 		return err
 	}
+	if err := purge(); err != nil {
+		return err
+	}
 	if _, err := tx.Emit(ctx, t.ProjectID, nil, core.EvThread, "", map[string]any{"deleted": map[string]any{"id": t.ID, "no": t.No}}); err != nil {
+		return err
+	}
+	if err := deleteThreadImages(ctx, tx, t); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM at_conversations WHERE id = $1`, t.ID); err != nil {

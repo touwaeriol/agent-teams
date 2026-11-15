@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildClaudeOptions } from "../src/sessions/claude/options.js";
 import { materializeSkills, SKILLS_PLUGIN } from "../src/sessions/skills.js";
 import { ToolBroker } from "../src/toolhost/broker.js";
@@ -127,8 +127,7 @@ describe("publish_file upload", () => {
     const sent: { type: string; body: Record<string, unknown> }[] = [];
     const broker = new ToolBroker((type, body) => sent.push({ type, body: body as Record<string, unknown> }));
     const pending = broker.call({ sessionId: "s_1", openGen: 2, tool: "publish_file", args: { path: "design", kind: "design", title: "T" }, cwd: dir });
-    await new Promise((r) => setTimeout(r, 50));
-    expect(sent.map((s) => s.type)).toEqual(["file.chunk", "tool.call"]);
+    await vi.waitFor(() => expect(sent.map((s) => s.type)).toEqual(["file.chunk", "tool.call"]), { timeout: 5000 });
     for (const s of sent) expect(validateBody(s.type, s.body), s.type).toBeNull();
     const call = sent[1]!.body as { call_id: string; upload: { upload_id: string; files: unknown[] } };
     expect(call.upload.upload_id).toBe(sent[0]!.body.upload_id);
