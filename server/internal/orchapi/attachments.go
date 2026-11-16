@@ -54,9 +54,11 @@ func (a *API) registerAttachments(api huma.API, r gin.IRoutes) {
 			o.Responses = map[string]*huma.Response{"200": {Description: "The image", Content: map[string]*huma.MediaType{
 				"image/png": {}, "image/jpeg": {}, "image/gif": {}, "image/webp": {}}}}
 		}), a.attachmentFile)
-	if a.e != nil {
-		r.GET("/nodes/attachments/:id", a.nodeAttachment)
+	if a.e == nil {
+		r.GET("/nodes/attachments/:id", offline)
+		return
 	}
+	r.GET("/nodes/attachments/:id", a.nodeAttachment)
 }
 
 func (a *API) uploadAttachment(ctx context.Context, in *attachmentInput) (*attachmentOutput, error) {

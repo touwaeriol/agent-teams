@@ -5,7 +5,7 @@ WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY web/ ./
-RUN npx tsc -b && npx vite build --outDir /web/dist --emptyOutDir
+RUN npx vue-tsc -b && npx vite build --outDir /web/dist --emptyOutDir
 
 FROM python:3.13-slim
 

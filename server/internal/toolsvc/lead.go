@@ -206,7 +206,8 @@ func (s *Service) enqueueMerge(ctx context.Context, tx *core.Tx, c *call) (Resul
 	}
 	out := protocol.EnqueueMergeResult{EntryID: entries[0].ID, Position: pos, Entries: entryRefs(entries)}
 	if pos == 0 {
-		return okJSON(fmt.Sprintf("%s 的任务 %s 没有需要合并的提交，已记为完成", task.ClaimedBy, task.ID), out), nil
+		return okJSON(fmt.Sprintf("%s 的任务 %s 没有需要合并的提交，已记为完成（条目已是 merged，不会再有合并通知，不用等它，直接继续，例如 open_pr）",
+			task.ClaimedBy, task.ID), out), nil
 	}
 	return okJSON(fmt.Sprintf("%s 的分支已进合并队列（第 %d 位%s）", task.ClaimedBy, pos, reposOf(entries)), out), nil
 }

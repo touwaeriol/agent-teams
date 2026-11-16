@@ -65,7 +65,7 @@ deploy/deploy.sh                # 生成 .env（数据库、Valkey 密码和加�
 - **用域名和 HTTPS**：先把域名解析到服务器，再运行 `deploy/deploy.sh --domain agent.example.com`。服务只监听 127.0.0.1，由本机的 Caddy 自动申请证书并转发（`deploy/caddy.sh` 会写入 `/etc/caddy/agent-teams.caddy`、在主 Caddyfile 里 import 它，然后重载 Caddy）。SSE 和 WebSocket 都会正常转发，登录 cookie 会带上 Secure 标记。
 - `.env` 里的 `AGENT_TEAMS_SECRET_KEY` 用来加密保存的 Git 凭证，生成后不要改。
 - "连接 GitHub"按钮背后需要一个 GitHub App：部署后用管理员账号打开 `/setup/github`，点"一键创建 GitHub App"（GitHub 的 manifest 流程，只做一次）。
-- 网页前端在 `web/`（React + Vite + shadcn/ui），镜像构建时自动打包进服务；本地开发：`cd web && npm ci && npm run dev`（代理到 127.0.0.1:3001）。
+- 网页前端在 `web/`（Vue 3 + Vite + Element Plus），镜像构建时自动打包进服务；本地开发：`cd web && npm ci && npm run dev`（代理到 127.0.0.1:3001），`npm run dev:mock` 用内置 mock 接口。
 - 查看日志：`docker compose logs -f agent-teams`；升级：`git pull && deploy/deploy.sh`。
 - 不用 `--domain` 时服务是明文 HTTP，只建议在内网或测试时这样用。
 

@@ -37,6 +37,8 @@ func (a *API) registerFiles(api huma.API, r gin.IRoutes) {
 	huma.Register(api, op("add-deliverable-comment", "POST", "/api/deliverables/{id}/comments", t, status(201),
 		summary("Comment on a deliverable; delivered to the employee who published it (or the thread lead)")), a.addComment)
 	if a.e == nil {
+		r.GET(artifacts.Prefix+"*path", offline)
+		r.HEAD(artifacts.Prefix+"*path", offline)
 		return
 	}
 	a.files = artifacts.NewServer(a.e.Core.Pool, artifacts.NewSigner(a.fileKeys()), a.artifactOrigin, originOf(a.publicURL), slog.Default())

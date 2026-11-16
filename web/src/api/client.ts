@@ -63,7 +63,8 @@ export function toApiError(status: number, body: unknown, statusText = ""): ApiE
   return new ApiError(status, typeof body === "string" && body ? body : statusText || `请求失败（${status}）`);
 }
 
-export const client = createClient<Paths>({ baseUrl: "", credentials: "same-origin" });
+// fetch is looked up per request (not captured at import) so tests can stub it.
+export const client = createClient<Paths>({ baseUrl: "", credentials: "same-origin", fetch: (input: Request) => globalThis.fetch(input) });
 client.use(csrf);
 
 interface FetchResult<T> {

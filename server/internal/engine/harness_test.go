@@ -45,6 +45,7 @@ type world struct {
 	srv *httptest.Server
 	e   *engine.Engine
 	db  *store.Store
+	h   *httpapi.Server
 }
 
 func newWorld(t *testing.T, gh *httptest.Server) *world {
@@ -88,7 +89,7 @@ func newWorld(t *testing.T, gh *httptest.Server) *world {
 		srv.Close()
 	})
 	e.Start(ctx)
-	return &world{t: t, ctx: ctx, srv: srv, e: e, db: db}
+	return &world{t: t, ctx: ctx, srv: srv, e: e, db: db, h: h}
 }
 
 func testKV(t *testing.T) kv.KV {
@@ -144,6 +145,12 @@ func (b *browser) csrf() string {
 
 func (b *browser) do(method, path string, body any) (int, []byte) {
 	b.w.t.Helper()
+	return b.send(method, path, body, method != "GET")
+}
+
+// send is do with the X-CSRF-Token header chosen by the caller.
+func (b *browser) send(method, path string, body any, withCSRF bool) (int, []byte) {
+	b.w.t.Helper()
 	var r io.Reader
 	if body != nil {
 		raw, _ := json.Marshal(body)
@@ -152,7 +159,7 @@ func (b *browser) do(method, path string, body any) (int, []byte) {
 	req, _ := http.NewRequest(method, b.w.srv.URL+path, r)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Forwarded-For", b.ip)
-	if method != "GET" {
+	if withCSRF {
 		req.Header.Set(httpapi.CSRFHeader, b.csrf())
 	}
 	resp, err := b.http.Do(req)

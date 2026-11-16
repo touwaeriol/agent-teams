@@ -19,7 +19,8 @@ migrations/           goose SQL migrations (embedded), runner, v1 schema test fi
 internal/config/      env → Config, slog JSON logger
 internal/auth/        scrypt (v1 format), sha256 tokens, Fernet SecretBox (v1 compatible,
                       key rotation), signed OAuth state (v1 compatible)
-internal/store/       pgx v5 queries (plain SQL, every user query scoped by user_id)
+internal/store/       GORM models of the goose tables, pool (GORM on pgx), transactions, raw-SQL
+                      helpers; every user query scoped by user_id
 internal/kv/          Valkey (valkey-go) wrapper + in-memory twin, fixed-window rate limiter
 internal/github/      REST client, App JWT, App credentials (at_settings.github_app),
                       installation token cache (memory + sealed in Valkey, keyed by repos+permissions)
@@ -146,15 +147,23 @@ share the OpenAPI document (regenerate `web/src/api/openapi.json` afterwards).
 ## Authorization (Casbin)
 
 `internal/httpapi/authz/model.conf` + `policy.csv` are embedded in the binary. The gin
-middleware enforces (role, gin route template, method) after the session middleware:
-roles are `anonymous` < `user` < `admin`; `anonymous` holds the `public` and `node-token`
-sets (node-token routes check the daemon's token in the handler). A denied anonymous
-caller gets 401 `unauthorized`, a signed-in one 403 (`admin_required` under `/api/admin/`).
-A new route needs a policy line, or `TestPolicyCoversEveryRoute` fails.
+middleware enforces (subject, gin route template, method) after the session middleware, with
+**one explicit policy line per route and method** (exact match, no prefixes): a route without
+a line is denied to everyone. Subjects: `anonymous` (no session), `node` (no session but a
+Bearer token: a daemon; the handler still verifies it is a node token), `user`, `admin`
+(admin < user < anonymous inherit; node inherits anonymous plus the `node-token` set). A denied
+caller without a session gets 401 `unauthorized`, a signed-in one 403 (`admin_required` under
+`/api/admin/`, else `forbidden`). `cmd/atctl/authz_test.go` builds the server exactly as `serve`
+wires it and fails when a route has no line, a line names no route, or any of the four
+subjects gets other than its group's access (public, node, user, admin).
 
 Ownership is not a Casbin decision: handlers load rows scoped to the caller's user id
 (`store.ProjectOf(userID, …)`, `core.ThreadOfUser`, `ownDeliverable`, `ownSchedule`, …) and
 answer 404 for anyone else's. Policies are code, not data, so there is no `casbin_rule` table.
+`engine/isolation_test.go` sweeps every route that names a row with a second user (404 or a
+refused body, nothing changed, lists and node attachment fetches do not leak) and checks that
+every write refuses a cookie session without `X-CSRF-Token`; `httpapi/artifacthost_test.go`
+checks that the file origin serves nothing but `/files/`.
 
 | Interface / helper | Used by the REST layer for | Default |
 | --- | --- | --- |
@@ -185,7 +194,10 @@ are created by the migrations here; their queries belong to the orchestration pa
 - `go.mod` says `go 1.26.0`: the current huma, goose, x/crypto releases require it (spec: 1.25).
 - GitHub: a small hand-written REST client (`internal/github`) instead of go-github +
   ghinstallation; same behaviour as v1 `github.py`, plus pagination and narrowed tokens.
-- Plain pgx queries instead of sqlc.
+- GORM (on the pgx pool) instead of sqlc; goose SQL migrations stay the only schema source
+  (no AutoMigrate). The few statements GORM's builder cannot express (UNION event streams,
+  CTE upserts, `UPDATE … RETURNING`, `DISTINCT ON`) are hand-written SQL through `Raw`/`Exec`.
+- Web app: Vue 3 + Element Plus (`/web`), replacing the React app with the same screens and API.
 - Office validation: JSON Schema + size, furniture count and required built-in looks.
   The geometric checks of office-layout.md §6.3 (references, nav connectivity, walls) are
   not implemented in Go yet.

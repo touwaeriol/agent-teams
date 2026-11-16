@@ -8,11 +8,18 @@ const { chromium } = require("playwright");
 
 const [base, out, pid, no, did] = process.argv.slice(2);
 
-async function newContext(browser, w, h) {
-  const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 2 });
+// One sign-in shared by every shot: /auth/login is rate limited per account.
+let storage;
+async function signIn(browser) {
+  const ctx = await browser.newContext();
   const login = await ctx.request.post(`${base}/auth/login`, { data: { email: "e2e@example.com", password: "e2e-password-123456" } });
   if (!login.ok()) throw new Error(`login ${login.status()}`);
-  return ctx;
+  storage = await ctx.storageState();
+  await ctx.close();
+}
+
+async function newContext(browser, w, h) {
+  return browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 2, storageState: storage });
 }
 
 async function open(browser, path, { w = 1440, h = 1000, wait = 2500 } = {}) {
@@ -27,15 +34,16 @@ async function open(browser, path, { w = 1440, h = 1000, wait = 2500 } = {}) {
 }
 
 async function shot({ ctx, page, errors }, name) {
-  await page.screenshot({ path: `${out}/v21-${name}.png` });
+  await page.screenshot({ path: `${out}/${process.env.SHOT_PREFIX ?? "v21"}-${name}.png` });
   console.log("ok", name, errors.join(" | "));
   await ctx.close();
 }
 
 async function pickRepo(page, slug) {
-  const input = page.getByPlaceholder("搜索仓库");
+  // The picker is an Element Plus filterable select labelled by its field ("添加仓库" / "再加一个仓库").
+  const input = page.getByLabel(/^(添加仓库|再加一个仓库)$/);
   await input.click();
-  await input.fill(slug);
+  await page.keyboard.type(slug);
   await page.waitForTimeout(800);
   await page.getByRole("option", { name: new RegExp(slug) }).first().click();
   await page.waitForTimeout(500);
@@ -61,15 +69,13 @@ async function team(browser) {
 
 (async () => {
   const browser = await chromium.launch();
+  await signIn(browser);
   await newProject(browser);
   await team(browser);
   await shot(await open(browser, `/projects/${pid}/deliverables`), "deliverables");
   await shot(await open(browser, `/projects/${pid}/deliverables/${did}`, { wait: 4000 }), "design-viewer");
   await shot(await open(browser, `/projects/${pid}/threads/${no}`, { h: 1100 }), "thread");
-  const t = await open(browser, `/projects/${pid}/threads/${no}`, { h: 1100 });
-  await t.page.getByText("交付", { exact: true }).first().click();
-  await t.page.waitForTimeout(1500);
-  await shot(t, "thread-prs");
+  await shot(await open(browser, `/projects/${pid}/threads/${no}/deliverables`, { h: 1100 }), "thread-prs");
   await browser.close();
 })().catch((e) => {
   console.error(e);

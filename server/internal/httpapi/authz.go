@@ -25,9 +25,18 @@ var authzPolicy string
 
 // Subjects of a request.
 const (
-	roleAnonymous = "anonymous"
-	roleUser      = "user"
-	roleAdmin     = "admin"
+	SubjectAnonymous = "anonymous"
+	SubjectNode      = "node"
+	SubjectUser      = "user"
+	SubjectAdmin     = "admin"
+)
+
+// Short names inside the package.
+const (
+	roleAnonymous = SubjectAnonymous
+	roleNode      = SubjectNode
+	roleUser      = SubjectUser
+	roleAdmin     = SubjectAdmin
 )
 
 // authorizer enforces the embedded policy.
@@ -94,9 +103,12 @@ func (a *authorizer) allowed(role, route, method string) (bool, error) {
 	return a.e.Enforce(role, route, method)
 }
 
-// roleOf is the Casbin subject of a caller (nil = not signed in).
-func roleOf(p *principal) string {
+// roleOf is the Casbin subject of a caller (nil = not signed in). A request without a
+// session that carries a Bearer token is a daemon (its handler checks the node token).
+func roleOf(p *principal, r *http.Request) string {
 	switch {
+	case p == nil && bearerToken(r) != "":
+		return roleNode
 	case p == nil:
 		return roleAnonymous
 	case p.User.Role == roleAdmin:
@@ -105,11 +117,11 @@ func roleOf(p *principal) string {
 	return roleUser
 }
 
-// authorize is the gin middleware: 401 for anonymous callers of a protected route,
-// 403 for signed-in callers without the role.
+// authorize is the gin middleware: 401 for callers without a session on a protected route
+// (anonymous, or a daemon off its routes), 403 for signed-in callers without the role.
 func (s *Server) authorize(c *gin.Context) {
 	p := principalOf(c.Request.Context())
-	ok, err := s.authz.allowed(roleOf(p), c.FullPath(), c.Request.Method)
+	ok, err := s.authz.allowed(roleOf(p, c.Request), c.FullPath(), c.Request.Method)
 	if err != nil {
 		s.log.Error("authorization failed", "err", err, "route", c.FullPath())
 		abortWith(c, fail(http.StatusInternalServerError, "internal", "服务器出错了"))

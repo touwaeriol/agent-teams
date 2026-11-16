@@ -16,19 +16,19 @@
 
 ## 1. 一句话
 
-Go 写的控制台（REST + SSE + 节点 WebSocket + 调度器）存全部状态在 PostgreSQL，用 Valkey 做实时扇出和锁；每台节点跑一个 TypeScript 守护进程，用 Claude Agent SDK 托管 Claude Code 员工的**常驻会话**，用 `codex app-server` 托管 Codex 员工；员工的平台工具（派活、提问、set_status…）由守护进程在本机提供 MCP，调用经节点 WebSocket 转到控制台执行；React 网页按设计稿重做，办公室由一个 JSON 布局文件驱动渲染。
+Go 写的控制台（REST + SSE + 节点 WebSocket + 调度器）存全部状态在 PostgreSQL，用 Valkey 做实时扇出和锁；每台节点跑一个 TypeScript 守护进程，用 Claude Agent SDK 托管 Claude Code 员工的**常驻会话**，用 `codex app-server` 托管 Codex 员工；员工的平台工具（派活、提问、set_status…）由守护进程在本机提供 MCP，调用经节点 WebSocket 转到控制台执行；Vue 网页（Element Plus）按设计稿重做，办公室由一个 JSON 布局文件驱动渲染。
 
 ## 2. 总体结构
 
 ```
-                         浏览器（React + Tailwind + Radix/shadcn）
+                         浏览器（Vue 3 + Element Plus + Tailwind）
                          │  REST (JSON)   │  SSE /api/.../events (Last-Event-ID 可续)
                          ▼                ▼
 ┌──────────────────────── Caddy（TLS，flush_interval -1） ────────────────────────┐
 └──────────────────────────────────────┬──────────────────────────────────────────┘
                                        ▼
 ┌──────────────────────────── control plane（Go，单二进制 `atctl`） ──────────────┐
-│ httpapi (chi + huma, OpenAPI 3.1)   sse hub          nodegw (WS /nodes/connect)  │
+│ httpapi (Gin + huma + Casbin)       sse hub          nodegw (WS /nodes/connect)  │
 │ auth / projects / git / admin       ▲  ▲             │  链路注册、命令发件箱、ACK   │
 │ threads / tasks / approvals         │  │             │  事件收件 → 各引擎           │
 │ ┌─────────── 领域引擎（同进程 goroutine，状态全在 PG） ─────────────┐           │
@@ -84,10 +84,10 @@ Go 写的控制台（REST + SSE + 节点 WebSocket + 调度器）存全部状态
 - 托管会话（Claude / Codex）、本地 git 操作、平台工具转发、GitHub 凭证按需获取、协议 1 兼容执行。
 - **不做业务决策**：派给谁、是否放行、任务池，全在控制台。守护进程只执行明确的命令，以及在本机强制“这个会话能用哪些工具”（防线之一，见 §10）。
 
-### 3.3 网页（React，`/web`）
+### 3.3 网页（Vue，`/web`）
 
-- 沿用现有技术栈（React 18 + Vite 7 + Tailwind 3 + Radix/shadcn 风格组件 + react-query 5 + react-router 6），页面按设计稿重做。组件仍然只用 `components/common` + `components/ui`。
-- 接口类型由控制台导出的 OpenAPI 3.1 生成（`openapi-typescript` + `openapi-fetch`），不再手写 `lib/api.ts` 的类型。
+- Vue 3 + Vite 7 + TypeScript + Element Plus + Pinia + vue-router 4 + vue-query 5，Tailwind 3 负责布局（设计令牌与之前的 React 版一致，页面外观和行为不变）。页面只用 `components/common`（平台积木）+ Element Plus（在 `styles/element.css` 里按令牌改了皮肤）。
+- 接口类型由控制台导出的 OpenAPI 3.1 生成（`openapi-typescript` + `openapi-fetch`），不再手写 `lib/api.ts` 的类型；服务端数据走 vue-query，SSE 事件直接写进 query 缓存。
 - 办公室页：Canvas 2D 画场景和人物，DOM 叠加层画气泡、名牌、门牌和可点区域；布局来自 JSON（`office-layout.md`）。
 
 ### 3.4 共享协议（`/protocol`）
@@ -102,21 +102,21 @@ Go 写的控制台（REST + SSE + 节点 WebSocket + 调度器）存全部状态
 ```
 /server                 Go module  github.com/<org>/agent-teams/server
   cmd/atctl/            main：serve | migrate | healthcheck | openapi | admin（重置密码等运维命令）
-  internal/httpapi/     路由、huma 操作、中间件（会话、CSRF、限流、审计）
+  internal/httpapi/     Gin 路由、huma 操作（humagin）、中间件（会话、CSRF、限流、审计）
+  internal/httpapi/authz/ Casbin 模型与策略（model.conf、policy.csv，嵌入二进制）
   internal/sse/         SSE hub（Valkey 订阅 + PG 回放）
   internal/nodegw/      节点 WebSocket、链路注册、命令发件箱
   internal/orchestrator/ internal/scheduler/ internal/toolsvc/ internal/approvals/
   internal/status/      internal/delivery/  internal/github/   internal/office/
   internal/auth/        scrypt、会话、Fernet（兼容 v1 的 SecretBox）
-  internal/store/       sqlc 生成的查询 + 事务封装
+  internal/store/       GORM 模型（对应 goose 建的表）、连接池、事务封装、少量手写 SQL
   internal/legacy/      迁移期反向代理到 Python
   migrations/           goose SQL 迁移（嵌入二进制）
-  queries/              sqlc 的 .sql
 /node                   TS 守护进程（npm 包 @agent-teams/node）
   src/link/  src/sessions/claude/  src/sessions/codex/  src/toolhost/
   src/git/   src/cred/   src/legacy/   src/journal/   src/cli.ts
   src/codex-protocol/   由 `codex app-server generate-ts` 生成，提交入库，锁定 CLI 版本
-/web                    React 应用（构建产物由控制台静态服务）
+/web                    Vue 应用（构建产物由控制台静态服务）
   src/office/           布局加载、场景编译、渲染器、寻路、回放
 /protocol
   schemas/node/*.json   节点协议消息
@@ -137,11 +137,12 @@ Go 写的控制台（REST + SSE + 节点 WebSocket + 调度器）存全部状态
 | 用途 | 选择 | 理由 |
 | --- | --- | --- |
 | 语言 | Go 1.25（`go.mod` 写 `go 1.25`，`toolchain` 锁补丁） | 标准库 `net/http` 路由模式、`log/slog`、`iter` 都够用 |
-| 路由 | `github.com/go-chi/chi/v5` v5.2 | 纯 `net/http`，中间件生态成熟，和 huma 适配 |
-| API 层 | `github.com/danielgtaylor/huma/v2` v2.3x（chi 适配器） | 由 Go 结构体生成 OpenAPI 3.1 和校验，网页类型自动生成；原生支持 SSE 操作 |
-| PG 驱动 | `github.com/jackc/pgx/v5` v5.7（`pgxpool`） | 最快、支持 `LISTEN/NOTIFY`、`COPY`、类型齐全 |
-| SQL | `sqlc` v1.29（pgx/v5 引擎） | 手写 SQL，生成类型安全代码；不用 ORM |
-| 迁移 | `github.com/pressly/goose/v3` v3.26，SQL 迁移嵌入二进制 | 支持 Go 迁移（数据转换，例如团队 YAML → 岗位模板），有 `goose_db_version` 表；`atctl migrate up` 在启动前单独跑 |
+| 路由 | `github.com/gin-gonic/gin` v1.12 | 中间件生态成熟；huma 有 Gin 适配器（`humagin`）；节点 WebSocket、SSE、静态文件都挂在同一个引擎上 |
+| API 层 | `github.com/danielgtaylor/huma/v2` v2.40（Gin 适配器） | 由 Go 结构体生成 OpenAPI 3.1 和校验，网页类型自动生成；原生支持 SSE 操作 |
+| 授权 | `github.com/casbin/casbin/v2` v2.135 | 路由级 RBAC：（角色, Gin 路由模板, 方法），角色 anonymous < user < admin；模型和策略嵌入二进制，不建 `casbin_rule` 表。数据归属（只能看自己的项目、讨论串…）仍由按调用者过滤的查询保证，别人的数据一律 404 |
+| ORM | `gorm.io/gorm` v1.31 + `gorm.io/driver/postgres` v1.6（底层 `pgx/v5` 连接池） | 模型对应 goose 建的表（`TableName` + 列标签），行锁用 `clause.Locking`；UNION 事件流、CTE upsert、`UPDATE … RETURNING` 等约 70 条语句仍是手写 SQL（`Raw`/`Exec`，`$n` 占位符）。**不用 AutoMigrate** |
+| PG 驱动 | `github.com/jackc/pgx/v5` v5.13（`pgxpool`，GORM 的连接池；advisory lock 用独占连接） | 最快、支持 `LISTEN/NOTIFY`、`COPY`、类型齐全 |
+| 迁移 | `github.com/pressly/goose/v3` v3.30，SQL 迁移嵌入二进制，**表结构的唯一来源** | 支持 Go 迁移（数据转换，例如团队 YAML → 岗位模板），有 `goose_db_version` 表；`atctl migrate up` 在启动前单独跑；测试检查每个 GORM 模型字段都对得上迁移建的表 |
 | Valkey | `github.com/valkey-io/valkey-go` v1.0 | Valkey 官方客户端，自动 pipeline、RESP3、客户端缓存；pub/sub 和锁都用它 |
 | WebSocket | `github.com/coder/websocket` v1.8 | 上下文友好、并发写安全、支持压缩；`gorilla/websocket` 维护不稳定 |
 | JSON Schema 校验 | `github.com/santhosh-tekuri/jsonschema/v6` | draft 2020-12 完整实现；校验节点消息（开发 / 测试环境全量，生产抽样）和办公室布局（每次加载） |
@@ -171,9 +172,9 @@ Go 写的控制台（REST + SSE + 节点 WebSocket + 调度器）存全部状态
 
 | 用途 | 选择 | 理由 |
 | --- | --- | --- |
-| 框架 | React 18.3 + Vite 7 + TypeScript 5.9（保持） | 现有代码和组件可复用；React 19 升级不在关键路径上 |
-| UI | Tailwind 3.4 + Radix + shadcn 风格组件（保持） | 设计稿就是按这套画的 |
-| 数据 | react-query 5 + `openapi-fetch` + `openapi-typescript` 7 | 类型来自 OpenAPI，SSE 事件直接写进 query 缓存 |
+| 框架 | Vue 3.5 + Vite 7 + TypeScript 5.9（`vue-tsc` 类型检查），vue-router 4，Pinia 3 | 单文件组件、`<script setup>`；路由路径与之前的 React 版完全一致 |
+| UI | Element Plus 2.14（按组件自动引入）+ Tailwind 3.4 | Element Plus 做基础控件，按设计令牌改皮肤；Tailwind 类名和设计稿一致 |
+| 数据 | `@tanstack/vue-query` 5 + `openapi-fetch` + `openapi-typescript` 7 | 类型来自 OpenAPI，SSE 事件直接写进 query 缓存 |
 | 办公室渲染 | Canvas 2D（`imageSmoothingEnabled=false`）+ DOM 叠加层，**不引入 PixiJS** | 几十个人物、几百件家具 Canvas 2D 足够；中文气泡用 DOM 渲染更清晰、可点、可读屏；零依赖，布局热更新只需重编译场景 |
 | 布局编辑 | 先用 JSON 文本编辑（CodeMirror 6 + JSON Schema 补全），可视化编辑器后续再说 | 用户要求“只改 JSON 就能重画” |
 

@@ -160,6 +160,17 @@ func (s *Server) register(api huma.API, r gin.IRoutes) {
 // Handler is the root http.Handler.
 func (s *Server) Handler() http.Handler { return s.router }
 
+// Routes lists every registered route (method + gin route template).
+func (s *Server) Routes() gin.RoutesInfo { return s.router.Routes() }
+
+// Allows reports whether the route policy lets subject (Subject*) call method on a route template.
+func (s *Server) Allows(subject, method, route string) (bool, error) {
+	return s.authz.allowed(subject, route, method)
+}
+
+// Policy returns the (subject, route, method) permission lines of the embedded policy.
+func (s *Server) Policy() ([][]string, error) { return s.authz.e.GetPolicy() }
+
 // API exposes the huma API (OpenAPI generation, extensions).
 func (s *Server) API() huma.API { return s.api }
 

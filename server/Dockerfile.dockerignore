@@ -8,5 +8,6 @@
 **/node_modules
 **/.git
 web/dist
+web/tsconfig.tsbuildinfo
 node/dist
 server/**/testdata

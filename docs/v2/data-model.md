@@ -1,6 +1,6 @@
 # v2 数据模型（PostgreSQL 17）
 
-迁移工具：goose（`/server/migrations`，SQL 迁移 + 少量 Go 迁移），版本表 `goose_db_version`。查询用 sqlc。
+迁移工具：goose（`/server/migrations`，SQL 迁移 + 少量 Go 迁移），版本表 `goose_db_version`；表结构只由迁移定义。查询用 GORM（`internal/store` 的模型对应这些表，不用 AutoMigrate），少数 UNION / CTE / `RETURNING` 语句手写 SQL。
 
 ## 0. 约定
 

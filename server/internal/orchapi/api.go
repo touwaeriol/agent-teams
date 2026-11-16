@@ -44,10 +44,7 @@ func New(e *engine.Engine, reg *office.Registry) *API { return &API{e: e, office
 
 // Register mounts every route (httpapi Deps.Extensions).
 func (a *API) Register(api huma.API, r gin.IRoutes) {
-	if a.e != nil {
-		r.GET("/nodes/connect", gin.WrapF(a.e.Gateway.ServeWS))
-		r.GET("/nodes/v2/connect", gin.WrapF(a.e.Gateway.ServeWS))
-	}
+	a.registerNodeLinks(r)
 	a.registerConversations(api)
 	a.registerThreads(api)
 	a.registerTasks(api)
@@ -60,6 +57,22 @@ func (a *API) Register(api huma.API, r gin.IRoutes) {
 	a.registerSchedules(api)
 	a.registerLibrary(api)
 	a.registerAttachments(api, r)
+}
+
+// registerNodeLinks mounts the daemon WebSocket (and its v2 alias). Without an engine
+// (OpenAPI generation) the routes still exist, so the route table is the same in every mode.
+func (a *API) registerNodeLinks(r gin.IRoutes) {
+	h := offline
+	if a.e != nil {
+		h = gin.WrapF(a.e.Gateway.ServeWS)
+	}
+	r.GET("/nodes/connect", h)
+	r.GET("/nodes/v2/connect", h)
+}
+
+// offline answers raw routes registered without an engine.
+func offline(c *gin.Context) {
+	c.String(http.StatusServiceUnavailable, "engine not running")
 }
 
 func op(id, method, path, tag string, extra ...func(*huma.Operation)) huma.Operation {

@@ -180,8 +180,8 @@ looks.ts      形象解析与像素图合成（ImageBitmap 缓存），Team 页�
 nav.ts        A* 与路径插值
 director.ts   状态 → 规则匹配 → 目标位置/动画/屏幕色/气泡；序列播放；锚点占位分配
 render.ts     Canvas 2D：静态层（地板、墙、家具）离屏绘制一次；动态层每帧画桌面屏幕、灯、人物
-overlay.tsx   React DOM 叠加层：房间名、门牌、名牌、气泡、计时器、可点区域（人物、门牌、任务板、机柜）
-OfficePage.tsx 数据：GET /api/projects/{pid}/office 首屏快照 + 项目 SSE（topics=status,thread,task,merge,ci,node,layout）
+overlay.tsx   DOM 叠加层（Vue JSX）：房间名、门牌、名牌、气泡、计时器、可点区域（人物、门牌、任务板、机柜）
+Office.tsx    渲染组件（Vue JSX）；数据在 pages/Office.vue：GET /api/projects/{pid}/office 首屏快照 + 项目 SSE（topics=status,thread,task,merge,ci,node,layout）
 replay.ts     回放：GET …/office/replay 的快照 + 事件，按时间轴驱动 director（1× / 4× / 16×、拖动进度条）
 ```
 

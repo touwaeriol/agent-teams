@@ -1,24 +1,16 @@
-import { QueryClient } from "@tanstack/react-query";
+// Ported from web/src/__tests__/logic.test.ts (client, events, chat parts): the same API and
+// cache logic must behave identically on vue-query.
+import { QueryClient } from "@tanstack/vue-query";
 import { describe, expect, it } from "vitest";
 import { isWrite, readCookie, toApiError } from "@/api/client";
 import { appendMessage, applyProjectEvent, applyUserEvent, layoutTickKey, statusLogKey, upsert, type StatusFrame } from "@/api/events";
 import { flattenMessages, keys, type MessagePages } from "@/api/queries";
 import { backoff, streamUrl } from "@/api/sse";
 import type { OfficeSnapshot, QuestionView, TaskView, ThreadView } from "@/api/views";
-import { addRepo, moveRepo, normalizeRepo, removeRepo, reposPayload } from "@/components/app/repo";
-import { teamChips } from "@/components/app/roles";
 import { summarizeNodes } from "@/components/shell/nodes";
-import { matchesProject } from "@/components/shell/ProjectSidebar";
+import { matchesProject } from "@/components/shell/projects";
 import { chatBlocks, interleave, threadTalk } from "@/lib/chat";
-import { boardSummary, pickChecks, replayEvents, toOfficeEvents, toWidgetData } from "@/lib/office";
-import { countText, isReadOnly, newRole, nextRoleKey, permissionHint, permissionMode, previewTags, roleProblems, ruleText, usesAsk } from "@/lib/roles";
-import { boardItems } from "@/pages/Office";
-import { filterThreads, teamSummary } from "@/pages/Overview";
-import { recentProject } from "@/pages/Projects";
-import { memorySource } from "@/pages/ProjectSettings";
-import { runtimeLine } from "@/pages/settings/Nodes";
-import { sortRepos } from "@/pages/settings/GitHub";
-import { deliverableHref } from "@/pages/Deliverables";
+import { recentProject } from "@/pages/projects";
 import { message, question, task, thread } from "./fixtures";
 
 describe("client", () => {
@@ -146,84 +138,7 @@ describe("chat blocks", () => {
   });
 });
 
-describe("office mapping", () => {
-  it("filters status frames after the snapshot and sorts by seq", () => {
-    const frames: StatusFrame[] = [3, 1, 2].map((seq) => ({ seq, at: "", employee: seq === 3 ? "e3" : { id: `e${seq}` }, status: { state: "idle" } }));
-    expect(toOfficeEvents(frames, 1).map((e) => [e.seq, e.employee])).toEqual([[2, "e2"], [3, "e3"]]);
-  });
-  it("replay rows keep only status", () => {
-    expect(replayEvents([{ id: 1, at: "", type: "status", data: { employee: { id: "a" }, status: { state: "idle" } } }, { id: 2, at: "", type: "task", data: {} }])).toHaveLength(1);
-  });
-  it("checks follow the focus, else the latest thread with checks", () => {
-    const ci = { "11": [{ name: "a", status: "", conclusion: null, url: "", summary: "" }], "12": [] };
-    expect(pickChecks(ci, null).map((c) => c.name)).toEqual(["a"]);
-    expect(pickChecks(ci, 12)).toEqual([]);
-  });
-  it("widget data and board summary", () => {
-    const snap = { board: { claimable: 3 }, nodes: [{ id: "n", name: "rc", online: true }], merge_queue: [], ci: {} } as unknown as OfficeSnapshot;
-    expect(toWidgetData(snap, null).nodes![0]).toMatchObject({ capacity: 0, active: 0 });
-    const live = { ...snap, nodes: [{ id: "n", name: "rc", online: true, active_sessions: 3, parked_sessions: 1, queued: 0, slots: 4 }] } as unknown as OfficeSnapshot;
-    expect(toWidgetData(live, null).nodes![0]).toMatchObject({ capacity: 4, active: 3, parked: 1 });
-    const threads = [thread(12, { counts: { ...thread(1).counts, tasks_done: 1, tasks_total: 4 } }), thread(13, { status: "done" })];
-    expect(boardSummary(threads, null)).toEqual({ title: "全项目 · 1 个讨论串", count: "小任务 1 / 4", pct: "25%" });
-    expect(boardSummary(threads, 12).title).toBe("#12 T12");
-    const items = boardItems([thread(11, { status: "review" })], [question("q", { kind: "approval" })], 2, null);
-    expect(items.map((i) => i.state)).toEqual(["可领", "等你", "待验收"]);
-  });
-});
-
-describe("roles", () => {
-  const base = newRole([], "#000");
-  it("keys and defaults", () => {
-    expect(nextRoleKey([{ role: "role-1" }])).toBe("role-2");
-    expect(isReadOnly({ read_only: null, gate: "review" })).toBe(true);
-    expect(isReadOnly({ read_only: false, gate: "review" })).toBe(false);
-    expect(previewTags({ tier: "lead", role: "lead" })).toEqual(["lead-1", "lead-2"]);
-    expect(countText({ tier: "member", count: 2, gate: "" })).toBe("每个讨论串 2 个");
-  });
-  it("rule and skip texts", () => {
-    expect(ruleText({ ...base, runtime: "codex" })).toContain("workspace-write");
-    expect(ruleText({ ...base, gate: "decision" })).toContain("只读");
-  });
-  it("permission modes: bypass by default (old auto reads as bypass), ask only matters for writing members", () => {
-    expect(base.permission_mode).toBe("bypass");
-    expect(permissionMode({ permission_mode: "auto" as never })).toBe("bypass");
-    expect(permissionMode({ permission_mode: "ask" })).toBe("ask");
-    expect(permissionHint({ ...base, permission_mode: "bypass" })).toBe("员工直接执行，不弹权限确认。");
-    expect(permissionHint({ ...base, permission_mode: "ask", runtime: "codex" })).toContain("untrusted");
-    expect(usesAsk([base, { ...base, tier: "lead" as const, permission_mode: "ask" }])).toBe(false);
-    expect(usesAsk([{ ...base, permission_mode: "ask", gate: "review" }])).toBe(false);
-    expect(usesAsk([base, { ...base, permission_mode: "ask" }])).toBe(true);
-  });
-  it("validation mirrors PUT /api/roles", () => {
-    const ok = [{ ...base, tier: "coordinator" as const, role: "coordinator" }, { ...base, tier: "lead" as const, role: "lead" }, { ...base, role: "dev" }];
-    expect(roleProblems(ok)).toEqual([]);
-    expect(roleProblems([...ok, { ...base, role: "dev" }, { ...base, role: "Bad", count: 9 }]).length).toBe(3);
-    expect(roleProblems([ok[2]])).toContain("需要恰好一个组长");
-  });
-  it("team chips and summary", () => {
-    const list = [{ ...base, tier: "lead" as const, title: "组长" }, { ...base, title: "开发", count: 2 }, { ...base, tier: "coordinator" as const }];
-    expect(teamChips(list).map((c) => c.name)).toEqual(["组长", "开发"]);
-    expect(teamSummary(list)).toBe("组长 + 2 开发");
-  });
-});
-
-describe("page helpers", () => {
-  it("repos", () => {
-    expect(normalizeRepo("https://github.com/a/b.git")).toBe("a/b");
-    expect(normalizeRepo(" a/b ")).toBe("a/b");
-    expect(reposPayload([{ git_connection_id: null, repo: "a/b" }, { git_connection_id: "g", repo: "https://github.com/a/c.git" }])).toEqual([{ repo: "a/c", git_connection_id: "g" }]);
-    const one = addRepo([], { repo: "https://github.com/o/api.git", git_connection_id: "g" });
-    expect(one).toEqual([{ repo: "o/api", git_connection_id: "g" }]);
-    expect(addRepo(one, { repo: "O/API", git_connection_id: "g" })).toBe(one);
-    expect(addRepo(one, { repo: "o/web", git_connection_id: null })).toBe(one);
-    const two = addRepo(one, { repo: "o/web", git_connection_id: "g" });
-    expect(moveRepo(two, 1, -1).map((r) => r.repo)).toEqual(["o/web", "o/api"]);
-    expect(moveRepo(two, 1, 1)).toBe(two);
-    expect(removeRepo(two, 0).map((r) => r.repo)).toEqual(["o/web"]);
-    const r = (full_name: string, used: boolean, pushed: string) => ({ full_name, used_by_projects: used ? [{ id: "p", name: "p" }] : [], pushed_at: pushed, private: false, default_branch: "", description: "", html_url: "" });
-    expect(sortRepos([r("a", false, "2026-02-01"), r("b", true, "2025-01-01"), r("c", false, "2026-03-01")]).map((x) => x.full_name)).toEqual(["b", "c", "a"]);
-  });
+describe("shell", () => {
   it("projects", () => {
     const p = (id: string, extra: object) => ({ id, name: id, description: "", repos: [], pinned: false, archived: false, updated_at: "2026-01-01T00:00:00Z", ...extra }) as never;
     expect(recentProject([p("a", { updated_at: "2026-02-01T00:00:00Z" }), p("b", { pinned: true }), p("c", { archived: true })])!).toMatchObject({ id: "b" });
@@ -231,21 +146,8 @@ describe("page helpers", () => {
     expect(matchesProject({ name: "Agent", description: "", repos: [{ repo: "x/web", git_connection_id: "g" }, { repo: "x/sup2api", git_connection_id: "g" }] }, "SUP")).toBe(true);
     expect(matchesProject({ name: "Agent", description: "", repos: [] }, "zz")).toBe(false);
   });
-  it("overview filters", () => {
-    const list = [thread(1), thread(2, { status: "review" }), thread(3, { status: "done" }), thread(4, { status: "archived" })];
-    expect(filterThreads(list, "all")).toHaveLength(3);
-    expect(filterThreads(list, "review").map((t) => t.no)).toEqual([2]);
-  });
-  it("nodes, memory, deliverables", () => {
-    expect(runtimeLine("codex", undefined).ver).toBe("未安装");
-    expect(runtimeLine("claude", { cli: "2.1", auth: "none" }).login).toBe("未登录");
-    expect(runtimeLine("claude", { cli: "2.1", auth: "subscription" }).ok).toBe(true);
+  it("nodes", () => {
     const n = (online: boolean, active: number, max: number | null, cap?: number) => ({ online, active_sessions: active, max_active_sessions: max, capacity: { max_active_sessions: cap }, queued: 1 }) as never;
     expect(summarizeNodes([n(true, 2, 4), n(true, 1, null, 3), n(false, 0, 4)])).toEqual({ total: 3, online: 2, active: 3, slots: 7, queued: 2 });
-    expect(memorySource({ source: "thread:12" })).toBe("#12 总结");
-    expect(memorySource({ source: "user" })).toBe("你填写");
-    expect(deliverableHref("p", { id: "d", kind: "design", url: "u" })).toEqual({ to: "/projects/p/deliverables/d" });
-    expect(deliverableHref("p", { id: "d", kind: "pr", url: "https://github.com/o/r/pull/1" })).toEqual({ href: "https://github.com/o/r/pull/1" });
-    expect(deliverableHref("p", { id: "d", kind: "doc", url: "javascript:alert(1)" })).toEqual({ href: undefined });
   });
 });

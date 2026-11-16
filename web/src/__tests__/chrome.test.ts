@@ -1,3 +1,4 @@
+// Ported from web/src/__tests__/chrome.test.ts (sidePanelOf now lives in pages/main/logic.ts).
 import { describe, expect, it } from "vitest";
 import type { DeliverableView } from "@/api/views";
 import { fileIcon, formatBytes, formatDateTime, libraryColumns, nextSort, ownerLabel, sortLibrary, typeLabel, uploadProblem } from "@/lib/library";
@@ -106,7 +107,7 @@ describe("pause lines", () => {
 
 describe("side panel", () => {
   it("reads the panel parameter", async () => {
-    const { sidePanelOf } = await import("@/pages/Main");
+    const { sidePanelOf } = await import("@/pages/main/logic");
     expect(sidePanelOf(null)).toBe("threads");
     expect(sidePanelOf("library")).toBe("library");
     expect(sidePanelOf("none")).toBe("none");

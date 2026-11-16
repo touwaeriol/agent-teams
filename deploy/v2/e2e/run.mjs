@@ -122,7 +122,10 @@ async function verify(c, sse, coord, done, answered) {
   check(!existsSync(join(coordDir, "hello.txt")) && gitShow("main", "hello.txt") === null, "coordinator did not touch code (no hello.txt outside the dev worktree, main unchanged)");
   const coordTools = JSON.parse(sql(`SELECT s.init->'tools' FROM at_agent_sessions s JOIN at_employees e ON e.id = s.employee_id
     WHERE e.project_id = '${state.projectId}' AND e.tier = 'coordinator' AND s.state <> 'closed'`) || "[]");
-  check(coordTools.length > 0 && coordTools.every((n) => n.startsWith("mcp__platform__")), `coordinator session has only platform tools (${coordTools.join(", ")})`);
+  // TodoWrite (checklist card) and AskUserQuestion (platform question card) are chat tools every tier has (architecture.md §6.6).
+  const chatTools = new Set(["TodoWrite", "AskUserQuestion"]);
+  check(coordTools.length > 0 && coordTools.every((n) => n.startsWith("mcp__platform__") || chatTools.has(n)),
+    `coordinator session has only platform and chat tools (${coordTools.join(", ")})`);
   const calls = sql(`SELECT t.tool FROM at_tool_calls t JOIN at_agent_sessions s ON s.id = t.session_id JOIN at_employees e ON e.id = s.employee_id
     WHERE e.project_id = '${state.projectId}' AND e.tier = 'coordinator' ORDER BY t.created_at`).split("\n").filter(Boolean);
   check(calls.includes("open_thread"), `coordinator called ${calls.join(", ")}`);

@@ -4,6 +4,7 @@
  * <…> (a CommonMark autolink, which ends at ">") so the link stops at the last ASCII char.
  * URLs inside `code`, fenced blocks and [text](url) links are left alone.
  */
+// eslint-disable-next-line no-control-regex, no-useless-escape -- same pattern as web/src/lib/autolink.ts
 const BARE_URL = /(^|[^<(\[`/\w])(https?:\/\/[!-~]+?)(?=[^\x00-\x7F])/g;
 
 export function fenceCjkUrls(markdown: string): string {

@@ -1,20 +1,17 @@
-import { useEffect, useState } from "react";
+import { onBeforeUnmount, ref, type Ref } from "vue";
 
 function matches(query: string): boolean {
   return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(query).matches;
 }
 
 /** Live media query. */
-export function useMedia(query: string): boolean {
-  const [on, setOn] = useState(() => matches(query));
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return;
-    const mq = window.matchMedia(query);
-    const update = () => setOn(mq.matches);
-    update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
-  }, [query]);
+export function useMedia(query: string): Ref<boolean> {
+  const on = ref(matches(query));
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return on;
+  const mq = window.matchMedia(query);
+  const update = () => (on.value = mq.matches);
+  mq.addEventListener("change", update);
+  onBeforeUnmount(() => mq.removeEventListener("change", update));
   return on;
 }
 

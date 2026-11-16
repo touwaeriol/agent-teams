@@ -1,7 +1,7 @@
 // Per-viewer conveniences kept in localStorage: unsent drafts and the chat scroll position,
 // per conversation. Storage can be missing or throw (private windows, blocked site data);
 // every access is guarded and the page works without it.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { computed, ref, toValue, watch, type MaybeRefOrGetter, type Ref } from "vue";
 
 export function readLocal(key: string): string | null {
   try {
@@ -20,24 +20,29 @@ export function writeLocal(key: string, value: string | null): void {
   }
 }
 
-/** A text field's value that survives reloads under key (no key: plain state). */
-export function useDraft(key: string | undefined): [string, (v: string) => void] {
-  const [text, setText] = useState(() => (key ? (readLocal(key) ?? "") : ""));
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    setText(key ? (readLocal(key) ?? "") : "");
-  }, [key]);
-  const set = useCallback(
-    (v: string) => {
-      setText(v);
-      if (!key) return;
-      if (timer.current) clearTimeout(timer.current);
-      if (v === "") writeLocal(key, null);
-      else timer.current = setTimeout(() => writeLocal(key, v), 250);
+/** A text field's value that survives reloads under key (no key: plain state). Follows a reactive key. */
+export function useDraft(key: MaybeRefOrGetter<string | undefined>): Ref<string> {
+  const text = ref("");
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  watch(
+    () => toValue(key),
+    (k) => {
+      if (timer) clearTimeout(timer);
+      text.value = k ? (readLocal(k) ?? "") : "";
     },
-    [key],
+    { immediate: true },
   );
-  return [text, set];
+  return computed({
+    get: () => text.value,
+    set: (v: string) => {
+      text.value = v;
+      const k = toValue(key);
+      if (!k) return;
+      if (timer) clearTimeout(timer);
+      if (v === "") writeLocal(k, null);
+      else timer = setTimeout(() => writeLocal(k, v), 250);
+    },
+  });
 }
 
 /** Where a chat was scrolled to: the offset from the bottom (0 = following the newest message). */

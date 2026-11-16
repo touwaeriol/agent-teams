@@ -6,17 +6,26 @@ const { chromium } = require("playwright");
 
 const [base, out, pid, no] = process.argv.slice(2);
 const SHOTS = [
-  ["main", `/projects/${pid}?thread=${no}`, { h: 900 }],
+  ["main", `/projects/${pid}`, { h: 900 }],
   ["thread", `/projects/${pid}/threads/${no}`, { h: 1000 }],
+  ["thread-full", `/projects/${pid}/threads/${no}/full`, { h: 1000 }],
   ["office", `/projects/${pid}/office`, { w: 1600, h: 1000, wait: 5000 }],
   ["team", "/settings/team", { h: 1180 }],
   ["nodes", "/settings/nodes", { h: 900 }],
 ];
 
-async function shoot(browser, [name, path, o]) {
-  const ctx = await browser.newContext({ viewport: { width: o.w ?? 1440, height: o.h }, deviceScaleFactor: 2 });
+// One sign-in shared by every shot: /auth/login is rate limited per account.
+let storage;
+async function signIn(browser) {
+  const ctx = await browser.newContext();
   const login = await ctx.request.post(`${base}/auth/login`, { data: { email: "e2e@example.com", password: "e2e-password-123456" } });
   if (!login.ok()) throw new Error(`login ${login.status()}`);
+  storage = await ctx.storageState();
+  await ctx.close();
+}
+
+async function shoot(browser, [name, path, o]) {
+  const ctx = await browser.newContext({ viewport: { width: o.w ?? 1440, height: o.h }, deviceScaleFactor: 2, storageState: storage });
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
@@ -30,6 +39,7 @@ async function shoot(browser, [name, path, o]) {
 
 (async () => {
   const browser = await chromium.launch();
+  await signIn(browser);
   for (const shot of SHOTS) await shoot(browser, shot);
   await browser.close();
 })().catch((e) => {

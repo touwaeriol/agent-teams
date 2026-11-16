@@ -1,14 +1,15 @@
 # agent-teams v2 control plane image. Build from the repository root:
 #   docker build -f server/Dockerfile -t agent-teams-server .
-# Stages: web app (Vite) → node daemon release tarball → atctl (Go) → runtime.
+# Stages: web app (Vue + Vite) → node daemon release tarball → atctl (Go) → runtime.
 
 FROM node:22-bookworm-slim AS web
 WORKDIR /src/web
-COPY protocol/ /src/protocol/
+# The /dev/office demo imports the default layout.
+COPY office/default.json /src/office/default.json
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY web/ ./
-RUN npx tsc -b && npx vite build --outDir /out/web --emptyOutDir
+RUN npx vue-tsc -b && npx vite build --outDir /out/web --emptyOutDir
 
 # The daemon tarball served at /node/dist/agent-teams-node-<version>.tgz (architecture.md §14.3).
 FROM node:22-bookworm-slim AS node

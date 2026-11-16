@@ -2,65 +2,47 @@ package httpapi
 
 import (
 	"net/http"
-	"strings"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/touwaeriol/agent-teams/server/internal/config"
 )
 
-// publicRoutes may be called without signing in ("METHOD route").
-var publicRoutes = map[string]bool{
-	"GET /healthz": true, "GET /readyz": true, "POST /auth/login": true, "POST /auth/register": true,
-	"POST /auth/logout": true, "GET /install-node.sh": true, "GET /node/dist/:file": true, "GET /office/*path": true,
-	"GET /api/git/github-app/install": true, "GET /api/git/github-app/created": true,
-	"GET /api/git/github-app/installed": true, "POST /api/git/github-app/webhook": true,
-}
-
-// wantRoles is who may call a route: public, admin-only or signed-in users.
-func wantRoles(method, route string) map[string]bool {
-	switch {
-	case publicRoutes[method+" "+route] || strings.HasPrefix(route, "/api/openapi") || route == "/api/docs":
-		return map[string]bool{roleAnonymous: true, roleUser: true, roleAdmin: true}
-	case strings.HasPrefix(route, "/api/admin/"):
-		return map[string]bool{roleAdmin: true}
-	}
-	return map[string]bool{roleUser: true, roleAdmin: true}
-}
-
-// TestPolicyCoversEveryRoute: each registered route is reachable by exactly the roles of its group.
-func TestPolicyCoversEveryRoute(t *testing.T) {
+// TestPolicyCoversFoundationRoutes: every route of the foundation has its own policy line
+// (cmd/atctl/authz_test.go checks the full table with the engines wired, and each subject).
+func TestPolicyCoversFoundationRoutes(t *testing.T) {
 	s := New(Deps{Config: config.Config{PublicURL: "http://localhost:3001"}})
-	routes := s.router.Routes()
+	lines, err := s.Policy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	explicit := map[string]bool{}
+	for _, l := range lines {
+		explicit[l[2]+" "+l[1]] = true
+	}
+	routes := s.Routes()
 	if len(routes) < 60 {
 		t.Fatalf("only %d routes registered", len(routes))
 	}
 	for _, r := range routes {
-		checkRoute(t, s.authz, r.Method, r.Path, wantRoles(r.Method, r.Path))
+		if !explicit[r.Method+" "+r.Path] {
+			t.Errorf("%s %s has no policy line", r.Method, r.Path)
+		}
 	}
 }
 
-// TestPolicyRawRoutes covers routes only mounted with a running engine.
-func TestPolicyRawRoutes(t *testing.T) {
+// TestPolicyIsExact: no prefixes or patterns, a route template matches only itself.
+func TestPolicyIsExact(t *testing.T) {
 	a := mustAuthorizer()
-	everyone := map[string]bool{roleAnonymous: true, roleUser: true, roleAdmin: true}
-	for _, route := range []string{"/nodes/connect", "/nodes/v2/connect", "/nodes/attachments/:id", "/files/*path"} {
-		checkRoute(t, a, "GET", route, everyone)
+	for _, c := range [][3]string{{roleUser, "/api/projects/:pid/x", "GET"}, {roleUser, "/api/projects", "PUT"},
+		{roleAdmin, "/api/admin/other", "GET"}, {roleUser, "/unknown", "GET"}, {roleNode, "/api/projects", "GET"},
+		{roleAnonymous, "/nodes/connect", "GET"}, {roleUser, "/nodes/connect", "GET"}, {roleNode, "/files/*path", "POST"}} {
+		if ok, err := a.allowed(c[0], c[1], c[2]); err != nil || ok {
+			t.Errorf("%s %s as %s allowed=%v err=%v", c[2], c[1], c[0], ok, err)
+		}
 	}
-	checkRoute(t, a, "HEAD", "/files/*path", everyone)
-	checkRoute(t, a, "POST", "/files/*path", map[string]bool{})
-	checkRoute(t, a, "GET", "/unknown", map[string]bool{})
-}
-
-func checkRoute(t *testing.T, a *authorizer, method, route string, want map[string]bool) {
-	t.Helper()
-	for _, role := range []string{roleAnonymous, roleUser, roleAdmin} {
-		ok, err := a.allowed(role, route, method)
-		if err != nil {
-			t.Fatalf("%s %s as %s: %v", method, route, role, err)
-		}
-		if ok != want[role] {
-			t.Errorf("%s %s as %s: allowed=%v, want %v", method, route, role, ok, want[role])
-		}
+	if ok, _ := a.allowed(roleNode, "/nodes/connect", "GET"); !ok {
+		t.Error("node denied its WebSocket")
 	}
 }
 
@@ -74,12 +56,19 @@ func TestLoadPolicyRejectsBadLines(t *testing.T) {
 }
 
 func TestRoleOf(t *testing.T) {
-	cases := map[string]*principal{roleAnonymous: nil, roleUser: {}, roleAdmin: {}}
-	cases[roleAdmin].User.Role = "admin"
-	cases[roleUser].User.Role = "user"
-	for want, p := range cases {
-		if got := roleOf(p); got != want {
-			t.Errorf("roleOf = %s, want %s", got, want)
+	plain := httptest.NewRequest("GET", "/", nil)
+	bearer := httptest.NewRequest("GET", "/", nil)
+	bearer.Header.Set("Authorization", "Bearer node-token")
+	user, admin := &principal{}, &principal{}
+	user.User.Role, admin.User.Role = "user", "admin"
+	cases := []struct {
+		p    *principal
+		r    *http.Request
+		want string
+	}{{nil, plain, roleAnonymous}, {nil, bearer, roleNode}, {user, plain, roleUser}, {user, bearer, roleUser}, {admin, plain, roleAdmin}}
+	for _, c := range cases {
+		if got := roleOf(c.p, c.r); got != c.want {
+			t.Errorf("roleOf = %s, want %s", got, c.want)
 		}
 	}
 }
@@ -98,6 +87,13 @@ func TestAuthorizeResponses(t *testing.T) {
 	if r.Status != http.StatusForbidden || r.apiError(t).Code != "admin_required" {
 		t.Fatalf("user on admin route = %d %s", r.Status, string(r.Body))
 	}
+	r = anon.do("GET", "/api/projects", nil, "Authorization", "Bearer not-a-session")
+	if r.Status != http.StatusUnauthorized || r.apiError(t).Code != "unauthorized" {
+		t.Fatalf("node token on a user route = %d %s", r.Status, string(r.Body))
+	}
+	if r := anon.do("GET", "/healthz", nil, "Authorization", "Bearer not-a-session"); r.Status != http.StatusOK {
+		t.Fatalf("healthz with a node token = %d", r.Status)
+	}
 	if r := anon.do("GET", "/healthz", nil); r.Status != http.StatusOK {
 		t.Fatalf("healthz = %d", r.Status)
 	}
@@ -106,7 +102,7 @@ func TestAuthorizeResponses(t *testing.T) {
 	}
 }
 
-// TestRouterEdges keeps the chi-era routing: 405 on a wrong method, no trailing-slash redirect.
+// TestRouterEdges keeps the routing of the chi era: 405 on a wrong method, no trailing-slash redirect.
 func TestRouterEdges(t *testing.T) {
 	h := newHarness(t)
 	c := h.client()

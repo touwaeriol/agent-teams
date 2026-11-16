@@ -1,6 +1,6 @@
-// SSE frames (api.md §1) written straight into the react-query cache, so every
+// SSE frames (api.md §1) written straight into the vue-query cache, so every
 // page that shows a thread, message, task or question updates in place.
-import type { QueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/vue-query";
 import { keys, type MessagePages } from "./queries";
 import type {
   ActivityView,

@@ -1,6 +1,6 @@
 // Replay (office-layout.md §5): a list of status events on a time axis drives
-// the same director as live data. Pure helpers + a small clock hook.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// the same director as live data. Pure helpers + a small clock composable.
+import { computed, onScopeDispose, ref, toValue, watch, type ComputedRef, type MaybeRefOrGetter, type Ref } from "vue";
 import { toMs } from "./rules";
 import type { EmployeeStatus, OfficeEmployee, OfficeStatusEvent } from "./types";
 
@@ -80,15 +80,15 @@ export function stepClock(time: number, dtMs: number, speed: number, end: number
 }
 
 export interface ReplayState {
-  time: number;
-  start: number;
-  end: number;
-  playing: boolean;
-  speed: number;
-  /** Events at or before `time` — pass to <Office events>. */
-  events: OfficeStatusEvent[];
-  /** Changes on every scrub — pass to <Office seekKey> so people teleport. */
-  seekKey: number;
+  time: Ref<number>;
+  start: ComputedRef<number>;
+  end: ComputedRef<number>;
+  playing: Ref<boolean>;
+  speed: Ref<number>;
+  /** Events at or before `time` — pass to <Office :events>. */
+  events: ComputedRef<OfficeStatusEvent[]>;
+  /** Changes on every scrub — pass to <Office :seek-key> so people teleport. */
+  seekKey: Ref<number>;
   play(): void;
   pause(): void;
   seek(t: number): void;
@@ -96,39 +96,41 @@ export interface ReplayState {
 }
 
 /** Drives a replay of `events` between `from` and `to` (epoch ms). */
-export function useReplay(events: OfficeStatusEvent[], from?: number, to?: number): ReplayState {
-  const sorted = useMemo(() => [...events].sort((a, b) => eventTime(a) - eventTime(b) || a.seq - b.seq), [events]);
-  const { start, end } = useMemo(() => timelineOf(sorted, from, to), [sorted, from, to]);
-  const [time, setTime] = useState(start);
-  const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState<number>(1);
-  const [seekKey, setSeekKey] = useState(0);
-  const timeRef = useRef(time);
-  timeRef.current = time;
+export function useReplay(events: MaybeRefOrGetter<OfficeStatusEvent[]>, from?: MaybeRefOrGetter<number | undefined>, to?: MaybeRefOrGetter<number | undefined>): ReplayState {
+  const sorted = computed(() => [...toValue(events)].sort((a, b) => eventTime(a) - eventTime(b) || a.seq - b.seq));
+  const line = computed(() => timelineOf(sorted.value, toValue(from), toValue(to)));
+  const start = computed(() => line.value.start);
+  const end = computed(() => line.value.end);
+  const time = ref(start.value);
+  const playing = ref(false);
+  const speed = ref(1);
+  const seekKey = ref(0);
+  let raf = 0;
 
-  useEffect(() => {
-    if (!playing) return;
+  const stop = () => cancelAnimationFrame(raf);
+  watch([playing, speed, end], ([on]) => {
+    stop();
+    if (!on) return;
     let last = performance.now();
-    let raf = requestAnimationFrame(function frame(now) {
-      const r = stepClock(timeRef.current, now - last, speed, end);
+    const frame = (now: number) => {
+      const r = stepClock(time.value, now - last, speed.value, end.value);
       last = now;
-      setTime(r.time);
-      if (r.done) return setPlaying(false);
+      time.value = r.time;
+      if (r.done) return void (playing.value = false);
       raf = requestAnimationFrame(frame);
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [playing, speed, end]);
+    };
+    raf = requestAnimationFrame(frame);
+  });
+  onScopeDispose(stop);
 
-  const seek = useCallback((t: number) => {
-    setTime(Math.max(start, Math.min(end, t)));
-    setSeekKey((k) => k + 1);
-  }, [start, end]);
-  const play = useCallback(() => {
-    if (timeRef.current >= end) seek(start);
-    setPlaying(true);
-  }, [end, start, seek]);
-  const pause = useCallback(() => setPlaying(false), []);
-  const count = countUntil(sorted, time);
-  const visible = useMemo(() => sorted.slice(0, count), [sorted, count]);
-  return { time, start, end, playing, speed, events: visible, seekKey, play, pause, seek, setSpeed };
+  const seek = (t: number) => {
+    time.value = Math.max(start.value, Math.min(end.value, t));
+    seekKey.value += 1;
+  };
+  const play = () => {
+    if (time.value >= end.value) seek(start.value);
+    playing.value = true;
+  };
+  const visible = computed(() => sorted.value.slice(0, countUntil(sorted.value, time.value)));
+  return { time, start, end, playing, speed, events: visible, seekKey, play, pause: () => (playing.value = false), seek, setSpeed: (s) => (speed.value = s) };
 }

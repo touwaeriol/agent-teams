@@ -6,7 +6,7 @@ const token = (name: string) => `hsl(var(--${name}) / <alpha-value>)`;
 
 export default {
   darkMode: ["class"],
-  content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  content: ["./index.html", "./src/**/*.{ts,tsx,vue}"],
   theme: {
     container: { center: true, padding: "1.25rem", screens: { "2xl": "1360px" } },
     extend: {

@@ -1,51 +1,174 @@
+# Route authorization (Casbin RBAC): one explicit line per route and method, matched exactly
+# against (subject, gin route template, method). A route with no line here is denied to
+# everyone, and httpapi/authz_test.go plus cmd/atctl/authz_test.go fail until it gets one.
+#
+# Subjects: anonymous (no session), node (no session, a Bearer token: the daemon; the handler
+# still checks that it is a valid node token), user, admin. Ownership of rows is not decided
+# here: user routes load projects, threads, deliverables, schedules, nodes… scoped to the
+# caller's id and answer 404 for anyone else's.
+
 # Role hierarchy
 g, admin, user
 g, user, anonymous
+g, node, anonymous
 g, anonymous, public
-g, anonymous, node-token
+g, node, node-token
 
-# Public: health, API description, sign-in, installer, release files, office
-# layouts and assets, published files (signed URLs), GitHub App callbacks and
-# webhook (signed state / HMAC checked by the handlers).
-p, public, /healthz, ^GET$
-p, public, /readyz, ^GET$
-p, public, /api/openapi*, ^GET$
-p, public, /api/docs, ^GET$
-p, public, /auth/login, ^POST$
-p, public, /auth/register, ^POST$
-p, public, /auth/logout, ^POST$
-p, public, /install-node.sh, ^GET$
-p, public, /node/dist/:file, ^GET$
-p, public, /office/*, ^GET$
-p, public, /files/*, ^(GET|HEAD)$
-p, public, /api/git/github-app/install, ^GET$
-p, public, /api/git/github-app/created, ^GET$
-p, public, /api/git/github-app/installed, ^GET$
-p, public, /api/git/github-app/webhook, ^POST$
+# Public: health, API description, sign-in, installer, release files, office layouts
+# and assets, published files (signed URLs, file origin), GitHub App callbacks and webhook
+# (signed state / HMAC checked by the handlers).
+p, public, /api/docs, GET
+p, public, /api/git/github-app/created, GET
+p, public, /api/git/github-app/install, GET
+p, public, /api/git/github-app/installed, GET
+p, public, /api/git/github-app/webhook, POST
+p, public, /api/openapi-3.0.json, GET
+p, public, /api/openapi-3.0.yaml, GET
+p, public, /api/openapi.json, GET
+p, public, /api/openapi.yaml, GET
+p, public, /auth/login, POST
+p, public, /auth/logout, POST
+p, public, /auth/register, POST
+p, public, /files/*path, GET
+p, public, /files/*path, HEAD
+p, public, /healthz, GET
+p, public, /install-node.sh, GET
+p, public, /node/dist/:file, GET
+p, public, /office/*path, GET
+p, public, /readyz, GET
 
-# Node token: the daemon WebSocket and its attachment fetches.
-p, node-token, /nodes/connect, ^GET$
-p, node-token, /nodes/v2/connect, ^GET$
-p, node-token, /nodes/attachments/:id, ^GET$
+# Daemons (node token): the node WebSocket and attachment fetches.
+p, node-token, /nodes/attachments/:id, GET
+p, node-token, /nodes/connect, GET
+p, node-token, /nodes/v2/connect, GET
 
-# Signed-in users: their own account, projects, threads and libraries.
-p, user, /api/me*, ^(GET|POST|DELETE)$
-p, user, /api/attachments/*, ^GET$
-p, user, /api/conversations*, ^(GET|POST|PUT|PATCH|DELETE)$
-p, user, /api/deliverables*, ^(GET|POST|PUT|PATCH|DELETE)$
-p, user, /api/employees/*, ^GET$
-p, user, /api/events, ^GET$
-p, user, /api/git/*, ^(GET|POST|PUT|PATCH|DELETE)$
-p, user, /api/nodes*, ^(GET|POST|PUT|PATCH|DELETE)$
-p, user, /api/office/*, ^GET$
-p, user, /api/plugins*, ^(GET|POST|PUT|PATCH|DELETE)$
-p, user, /api/projects*, ^(GET|POST|PUT|PATCH|DELETE)$
-p, user, /api/roles*, ^(GET|POST|PUT|PATCH|DELETE)$
-p, user, /api/schedules/*, ^(GET|POST|PUT|PATCH|DELETE)$
-p, user, /api/sessions/*, ^GET$
-p, user, /api/skills*, ^(GET|POST|PUT|PATCH|DELETE)$
-p, user, /api/team, ^(GET|PUT)$
-p, user, /api/threads/*, ^(GET|POST|PUT|PATCH|DELETE)$
+# Signed-in users: their own account, projects, threads, libraries and nodes.
+p, user, /api/attachments/:id, GET
+p, user, /api/conversations, GET
+p, user, /api/conversations, POST
+p, user, /api/conversations/:cid/events, GET
+p, user, /api/conversations/:cid/interrupt, POST
+p, user, /api/conversations/:cid/mail, GET
+p, user, /api/conversations/:cid/messages, GET
+p, user, /api/conversations/:cid/messages, POST
+p, user, /api/conversations/:cid/plan, GET
+p, user, /api/conversations/:cid/questions, GET
+p, user, /api/conversations/:cid/questions/:qid/answer, POST
+p, user, /api/conversations/:cid/tasks, GET
+p, user, /api/deliverables/:id, DELETE
+p, user, /api/deliverables/:id, PATCH
+p, user, /api/deliverables/:id/comments, GET
+p, user, /api/deliverables/:id/comments, POST
+p, user, /api/deliverables/:id/files, GET
+p, user, /api/employees/:id, GET
+p, user, /api/events, GET
+p, user, /api/git/connections, GET
+p, user, /api/git/connections, POST
+p, user, /api/git/connections/:id, DELETE
+p, user, /api/git/connections/:id/branches, GET
+p, user, /api/git/connections/:id/refresh, POST
+p, user, /api/git/connections/:id/repos, GET
+p, user, /api/git/github-app, GET
+p, user, /api/me, GET
+p, user, /api/me/password, POST
+p, user, /api/me/sessions, GET
+p, user, /api/me/sessions/:id, DELETE
+p, user, /api/nodes, GET
+p, user, /api/nodes, POST
+p, user, /api/nodes/:id, DELETE
+p, user, /api/nodes/:id, PATCH
+p, user, /api/nodes/:id/drain, POST
+p, user, /api/nodes/:id/logs, GET
+p, user, /api/nodes/:id/sessions, GET
+p, user, /api/nodes/:id/token, POST
+p, user, /api/nodes/:id/upgrade, POST
+p, user, /api/office/layout, GET
+p, user, /api/office/layouts/:id, GET
+p, user, /api/plugins, GET
+p, user, /api/plugins, POST
+p, user, /api/plugins/:id, DELETE
+p, user, /api/plugins/:id, PATCH
+p, user, /api/projects, GET
+p, user, /api/projects, POST
+p, user, /api/projects/:pid, DELETE
+p, user, /api/projects/:pid, GET
+p, user, /api/projects/:pid, PATCH
+p, user, /api/projects/:pid/attachments, POST
+p, user, /api/projects/:pid/ci/detect, GET
+p, user, /api/projects/:pid/ci/setup-pr, POST
+p, user, /api/projects/:pid/coordinator, GET
+p, user, /api/projects/:pid/deliverables, GET
+p, user, /api/projects/:pid/deliverables, POST
+p, user, /api/projects/:pid/deliverables/request, POST
+p, user, /api/projects/:pid/events, GET
+p, user, /api/projects/:pid/library, POST
+p, user, /api/projects/:pid/memory, GET
+p, user, /api/projects/:pid/memory, POST
+p, user, /api/projects/:pid/memory/:id, DELETE
+p, user, /api/projects/:pid/memory/:id, PATCH
+p, user, /api/projects/:pid/office, GET
+p, user, /api/projects/:pid/office/replay, GET
+p, user, /api/projects/:pid/overview, GET
+p, user, /api/projects/:pid/schedules, GET
+p, user, /api/projects/:pid/schedules, POST
+p, user, /api/projects/:pid/search, GET
+p, user, /api/projects/:pid/threads, GET
+p, user, /api/projects/:pid/threads, POST
+p, user, /api/projects/:pid/usage, GET
+p, user, /api/projects/:pid/waiting, GET
+p, user, /api/roles, GET
+p, user, /api/roles, PUT
+p, user, /api/roles/look/random, POST
+p, user, /api/roles/presets, GET
+p, user, /api/roles/yaml, GET
+p, user, /api/roles/yaml, PUT
+p, user, /api/schedules/:id, DELETE
+p, user, /api/schedules/:id, PATCH
+p, user, /api/schedules/:id/run, POST
+p, user, /api/sessions/:sid/stream, GET
+p, user, /api/skills, GET
+p, user, /api/skills, POST
+p, user, /api/skills/:id, DELETE
+p, user, /api/team, GET
+p, user, /api/team, PUT
+p, user, /api/threads/:tid, DELETE
+p, user, /api/threads/:tid, GET
+p, user, /api/threads/:tid, PATCH
+p, user, /api/threads/:tid/accept, POST
+p, user, /api/threads/:tid/activity, GET
+p, user, /api/threads/:tid/archive, POST
+p, user, /api/threads/:tid/checks, GET
+p, user, /api/threads/:tid/mail, GET
+p, user, /api/threads/:tid/main-tasks, GET
+p, user, /api/threads/:tid/main-tasks/:mid, PATCH
+p, user, /api/threads/:tid/members, GET
+p, user, /api/threads/:tid/members/:name/interrupt, POST
+p, user, /api/threads/:tid/members/:name/message, POST
+p, user, /api/threads/:tid/merge-queue, GET
+p, user, /api/threads/:tid/open-pr, POST
+p, user, /api/threads/:tid/reject, POST
+p, user, /api/threads/:tid/tasks, GET
+p, user, /api/threads/:tid/tasks/:task/cancel, POST
+p, user, /api/threads/:tid/tasks/:task/retry, POST
+p, user, /api/threads/:tid/unarchive, POST
+p, user, /api/threads/:tid/usage, GET
 
 # Administrators: the admin console.
-p, admin, /api/admin/*, ^(GET|POST|PUT|PATCH|DELETE)$
+p, admin, /api/admin/audit, GET
+p, admin, /api/admin/github-app, DELETE
+p, admin, /api/admin/github-app/manifest, POST
+p, admin, /api/admin/office/layouts, GET
+p, admin, /api/admin/office/layouts/:id, DELETE
+p, admin, /api/admin/office/layouts/:id, PUT
+p, admin, /api/admin/plugins, GET
+p, admin, /api/admin/plugins, POST
+p, admin, /api/admin/plugins/:id, DELETE
+p, admin, /api/admin/plugins/:id, PATCH
+p, admin, /api/admin/settings, GET
+p, admin, /api/admin/settings, PUT
+p, admin, /api/admin/skills, POST
+p, admin, /api/admin/skills/:id, DELETE
+p, admin, /api/admin/users, GET
+p, admin, /api/admin/users/:id, DELETE
+p, admin, /api/admin/users/:id, PATCH
+p, admin, /api/admin/users/:id/password-reset, POST
