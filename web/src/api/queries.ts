@@ -100,11 +100,11 @@ export const useMembers = (tid: string | undefined) =>
     enabled: Boolean(tid),
   });
 
-export const useActivity = (tid: string | undefined) =>
+export const useActivity = (tid: string | undefined, enabled = true) =>
   useQuery({
     queryKey: keys.activity(tid ?? ""),
     queryFn: () => unwrap(client.GET("/api/threads/{tid}/activity", { params: { path: { tid: tid! }, query: { limit: 50 } } })),
-    enabled: Boolean(tid),
+    enabled: Boolean(tid) && enabled,
   });
 
 export const useMail = (tid: string | undefined) =>

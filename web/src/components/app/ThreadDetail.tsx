@@ -1,3 +1,4 @@
+import { Markdown } from "@/components/Markdown";
 // Right-panel detail of one thread: breadcrumb "讨论串 > #12 标题", a live summary line and
 // four tabs — 进度 (cards, who is doing what, live activity), 任务, 交付物 and 成员 — with
 // the lead's message box (images allowed) at the bottom. Deep link: /projects/:pid/threads/:no/:tab.
@@ -151,7 +152,7 @@ function ProgressTab({ thread, open, all }: { thread: ThreadView; open: Question
       <ApprovalHistory questions={all} />
       <section className="flex flex-col gap-1.5">
         <span className="text-xs text-muted-foreground">组长最近说</span>
-        <p className="text-[13px] leading-[22px]">{thread.lead_last?.text || "还没有汇报。"}</p>
+        {thread.lead_last?.text ? <Markdown className="text-[13px] leading-[22px]">{thread.lead_last.text}</Markdown> : <p className="text-[13px] text-muted-foreground">还没有汇报。</p>}
       </section>
     </>
   );
@@ -172,7 +173,7 @@ function MemberLive({ thread, member, card, cards, leadName }: { thread: ThreadV
         </span>
         {member.status?.since && (working || asking) && <span className="ml-auto whitespace-nowrap text-[11px] text-muted-foreground">{elapsed(member.status.since, now)}</span>}
       </span>
-      {(member.status?.bubble || asking) && <span className="pl-4 text-xs leading-[18px] text-[#4A4843] [overflow-wrap:anywhere]">{activityLine(member, card)}</span>}
+      {(asking || (member.status?.bubble && readShowTools())) && <span className="pl-4 text-xs leading-[18px] text-[#4A4843] [overflow-wrap:anywhere]">{activityLine(member, card)}</span>}
       {cards.map((q) => (
         <WaitingCard key={q.id} cid={thread.id} pid={thread.project_id} question={q} variant="soft" leadName={leadName} />
       ))}
@@ -206,41 +207,70 @@ export function ApprovalHistory({ questions }: { questions?: QuestionView[] }) {
 const FEED_COLLAPSED = 4;
 
 /** Thread activity, newest last; SSE appends lines as they happen. Collapsed to the last few. */
+const TOOLS_KEY = "agent-teams:show-tool-calls";
+
+function readShowTools(): boolean {
+  try {
+    return localStorage.getItem(TOOLS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeShowTools(on: boolean) {
+  try {
+    localStorage.setItem(TOOLS_KEY, on ? "1" : "0");
+  } catch {
+    /* storage unavailable: keep the choice for this page only */
+  }
+}
+
+/** Tool calls of the thread: hidden by default, one click (remembered) to show them. */
 export function ActivityFeed({ thread }: { thread: ThreadView }) {
-  const activity = useActivity(thread.id);
+  const [show, setShow] = useState(readShowTools);
+  const activity = useActivity(thread.id, show);
   const [expanded, setExpanded] = useState(false);
   const all: ActivityView[] = [...(activity.data?.items ?? [])].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   const shown = expanded ? all : all.slice(-FEED_COLLAPSED);
   const live = threadActive(thread);
+  const toggle = () => {
+    writeShowTools(!show);
+    setShow(!show);
+  };
   return (
-    <section className="flex flex-col gap-1.5" aria-label="动态">
+    <section className="flex flex-col gap-1.5" aria-label="工具调用">
       <span className="flex items-center gap-2 text-xs text-muted-foreground">
-        动态
-        {live && (
+        <button type="button" onClick={toggle} className="flex items-center gap-1 hover:text-foreground" aria-expanded={show}>
+          <span className={cn("inline-block transition-transform", show && "rotate-90")}>›</span>
+          工具调用{show ? "" : "（已隐藏）"}
+        </button>
+        {show && live && (
           <span className="flex items-center gap-1 text-[#2F6FDB]">
             <LiveDot color="#2F6FDB" on size={6} /> 实时
           </span>
         )}
-        {all.length > FEED_COLLAPSED && (
+        {show && all.length > FEED_COLLAPSED && (
           <button type="button" onClick={() => setExpanded(!expanded)} className="ml-auto hover:text-foreground">
             {expanded ? "收起" : `展开全部 ${all.length} 条`}
           </button>
         )}
       </span>
-      {activity.isLoading && <Loading className="py-2" />}
-      {!activity.isLoading && all.length === 0 && <span className="text-xs text-muted-foreground">还没有动态</span>}
-      <ol className={cn("flex flex-col gap-1", expanded && "max-h-80 overflow-y-auto")}>
-        {shown.map((e, i) => (
-          <li key={`${e.at}-${i}`} className="flex gap-2 text-xs leading-[19px] text-[#4A4843]">
-            <span className="shrink-0 font-mono text-[11px] text-muted-foreground" title={timeAgo(e.at)}>
-              {clock(e.at)}
-            </span>
-            <span className="min-w-0 [overflow-wrap:anywhere]">
-              <span className="font-mono text-foreground">{e.employee}</span> {e.text}
-            </span>
-          </li>
-        ))}
-      </ol>
+      {show && activity.isLoading && <Loading className="py-2" />}
+      {show && !activity.isLoading && all.length === 0 && <span className="text-xs text-muted-foreground">还没有工具调用</span>}
+      {show && (
+        <ol className={cn("flex flex-col gap-1", expanded && "max-h-80 overflow-y-auto")}>
+          {shown.map((e, i) => (
+            <li key={`${e.at}-${i}`} className="flex gap-2 text-xs leading-[19px] text-[#4A4843]">
+              <span className="shrink-0 font-mono text-[11px] text-muted-foreground" title={timeAgo(e.at)}>
+                {clock(e.at)}
+              </span>
+              <span className="min-w-0 [overflow-wrap:anywhere]">
+                <span className="font-mono text-foreground">{e.employee}</span> {e.text}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
     </section>
   );
 }

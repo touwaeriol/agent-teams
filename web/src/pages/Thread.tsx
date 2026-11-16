@@ -1,3 +1,4 @@
+import { Markdown } from "@/components/Markdown";
 // Thread board (full page): header with controls, tabs 主要任务 / 任务池 /
 // 和组长的对话 / 交付, and an aside with cards, members and activity.
 // Below md it renders the MobileThread board instead.
@@ -467,7 +468,7 @@ function MobileThread({ thread }: { thread: ThreadView }) {
         {thread.lead_last && (
           <section className="flex flex-col gap-1 px-1">
             <span className="text-xs text-muted-foreground">组长最近说</span>
-            <p className="text-[13px] leading-[22px]">{thread.lead_last.text}</p>
+            <Markdown className="text-[13px] leading-[22px]">{thread.lead_last.text}</Markdown>
           </section>
         )}
       </div>
