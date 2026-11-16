@@ -129,13 +129,24 @@ export class SessionManager implements SessionHost {
   }
 
   private openError(session: Session, err: Error): Reply[] {
+    if (err instanceof ResumeFailed) return this.resumeFailed(session, err);
     this.sessions.delete(session.id);
     rmSync(this.recordPath(session.id), { force: true });
-    if (err instanceof ResumeFailed) {
-      session.setState("closed", "resume failed");
-      return [{ type: "session.opened", body: { session_id: session.id, open_gen: session.gen, resume_failed: true, error: err.message.slice(0, 1000) } }];
-    }
     return this.openFailed(session, err.message);
+  }
+
+  /**
+   * The runtime cannot resume the session (transcript missing: another node, a wiped ~/.claude,
+   * or a corrupt file). The session is dropped here and the console hands off to a fresh one
+   * seeded with a recap, including the messages that were on their way (protocol.md §4.2).
+   */
+  private resumeFailed(session: Session, err: Error): Reply[] {
+    this.d.log.warn({ session: session.id, err: err.message }, "resume failed");
+    this.sessions.delete(session.id);
+    rmSync(this.recordPath(session.id), { force: true });
+    session.cancelPending("process_restarted", "process_restarted");
+    session.state = "closed"; // no session.state: the console would close the row before it sees resume_failed
+    return [{ type: "session.opened", body: { session_id: session.id, open_gen: session.gen, resume_failed: true, error: err.message.slice(0, 1000) } }];
   }
 
   /** session.opened can only carry success or resume_failed, so other failures are a fatal error event + crashed. */
@@ -177,7 +188,12 @@ export class SessionManager implements SessionHost {
       return [];
     }
     if (await this.alreadyDelivered(s, body.msg_id)) return [delivered(s, body.msg_id)];
-    await this.ensureRunning(s);
+    try {
+      await this.ensureRunning(s);
+    } catch (err) {
+      if (err instanceof ResumeFailed) return this.resumeFailed(s, err);
+      throw err;
+    }
     if (body.interrupt_first) await s.driver!.interrupt();
     const { text, images } = await this.withImages(s, body);
     const r = await s.driver!.push({ msg_id: body.msg_id, text, priority: body.priority ?? "next", ...(images.length ? { images } : {}) });
@@ -368,7 +384,12 @@ export class SessionManager implements SessionHost {
       await sleep(delays[s.crashes++]!);
       if (this.sessions.get(s.id) !== s || s.driver) return;
       s.setState("starting", "restarting after crash");
-      if (await this.run(s).then(() => true, () => false)) return;
+      const failure = await this.run(s).then(() => null, (e: Error) => e);
+      if (!failure) return;
+      if (failure instanceof ResumeFailed) {
+        for (const r of this.resumeFailed(s, failure)) this.send(r.type, r.body);
+        return;
+      }
     }
     if (this.sessions.get(s.id) !== s) return;
     s.setState("crashed", err.message.slice(0, 200));

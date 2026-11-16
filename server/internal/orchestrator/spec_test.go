@@ -38,7 +38,7 @@ func TestBuildOpenPerTier(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := coord.Claude
-	if len(c.Tools) != 0 || c.PermissionMode != "dontAsk" || !*c.DenyNonPlatformTools || *coord.GitCredentials ||
+	if strings.Join(c.Tools, ",") != "TodoWrite,AskUserQuestion" || c.PermissionMode != "dontAsk" || !*c.DenyNonPlatformTools || *coord.GitCredentials ||
 		coord.Cwd != "projects/p1/coordinator" || len(c.SettingSources) != 0 || c.Model != DefaultModel {
 		t.Fatalf("coordinator %+v %+v", coord, c)
 	}
@@ -64,6 +64,16 @@ func TestBuildOpenPerTier(t *testing.T) {
 	plain, _ := buildOpen(open(t, emp("member", "dev", store.Role{}), store.Node{Isolation: "none"}))
 	if plain.Claude.PermissionMode != "bypassPermissions" || !*plain.Claude.AllowDangerouslySkipPermissions {
 		t.Fatalf("bypass on a plain node: %+v", plain.Claude)
+	}
+	if strings.Join(d.Tools, ",") != "Read,Glob,Grep,Edit,Write,Bash,TodoWrite,AskUserQuestion,EnterPlanMode,ExitPlanMode" ||
+		strings.Join(l.Tools, ",") != "Read,Glob,Grep,Bash,TodoWrite,AskUserQuestion" || !contains(l.AllowedTools, "AskUserQuestion") {
+		t.Fatalf("chat tools: member %v, lead %v / %v", d.Tools, l.Tools, l.AllowedTools)
+	}
+	if ok, bad := ToolsAllowed(emp("coordinator", "coordinator", store.Role{}), []string{"mcp__platform__ask_user", "TodoWrite", "AskUserQuestion"}); !ok {
+		t.Fatalf("coordinator chat tools refused: %s", bad)
+	}
+	if ok, _ := ToolsAllowed(emp("coordinator", "coordinator", store.Role{}), []string{"Bash"}); ok {
+		t.Fatal("coordinator Bash must be refused")
 	}
 }
 

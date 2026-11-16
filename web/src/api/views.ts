@@ -164,6 +164,43 @@ export interface QuestionDetail {
   /** Lead review (approval_routing lead_first): the lead asked, its verdict and reason. */
   reviewer?: string;
   review?: { by: string; decision: "allow" | "deny" | "ask_user"; reason: string };
+  /** Structured questions (ask_user questions[], or Claude's AskUserQuestion: via). */
+  questions?: AskItem[];
+  /** The user's choices, one per structured question (after answering). */
+  answers?: AskAnswer[];
+  via?: string;
+}
+
+export interface AskOption {
+  label: string;
+  description?: string;
+  recommended?: boolean;
+}
+
+export interface AskItem {
+  question: string;
+  header: string;
+  multi_select?: boolean;
+  options: AskOption[];
+}
+
+export interface AskAnswer {
+  question: string;
+  header?: string;
+  selected: string[];
+  other?: string;
+}
+
+/** What the answer endpoint takes for one structured question. */
+export interface AskChoice {
+  selected: string[];
+  other?: string;
+}
+
+export interface TodoItem {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+  active_form?: string;
 }
 
 export interface QuestionView {
@@ -188,9 +225,20 @@ export interface MessageView {
   id: string;
   role: "user" | "leader" | "employee" | "system" | "error";
   author: string;
-  kind: "chat" | "note" | "interrupt";
+  /** chat / note / interrupt, or a chat card: todos, plan, artifact, resumed. */
+  kind: "chat" | "note" | "interrupt" | "todos" | "plan" | "artifact" | "resumed";
   content: string;
-  meta: { thread_no?: number; task_id?: string; opens_thread?: number; request_kind?: string; attachments?: AttachmentRef[] };
+  meta: {
+    thread_no?: number;
+    task_id?: string;
+    opens_thread?: number;
+    request_kind?: string;
+    attachments?: AttachmentRef[];
+    /** Chat cards: who the card is about. */
+    employee?: string;
+    todos?: TodoItem[];
+    deliverable?: { id: string; kind: string; title: string; url: string; hosted?: boolean; entry?: string; render?: string; version?: number };
+  };
   created_at: string;
 }
 

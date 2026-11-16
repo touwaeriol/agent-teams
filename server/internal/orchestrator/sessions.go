@@ -2,8 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 
@@ -36,11 +38,11 @@ func (o *Orchestrator) Deliver(ctx context.Context, tx *core.Tx, e core.Employee
 	sess, err := core.LiveSession(ctx, tx, e.ID)
 	switch {
 	case errors.Is(err, core.ErrNotFound):
-		text, err := o.withHandoff(ctx, tx, e, d.Text)
+		text, resume, err := o.continuation(ctx, tx, e, d.Text)
 		if err != nil {
 			return m, err
 		}
-		_, err = o.openSession(ctx, tx, e, &protocol.FirstMessage{MsgID: protocol.MsgID(msgID), Text: text, Images: imageRefs(d.Images)}, nil)
+		_, err = o.openSession(ctx, tx, e, &protocol.FirstMessage{MsgID: protocol.MsgID(msgID), Text: text, Images: imageRefs(d.Images)}, resume)
 		return m, err
 	case err != nil:
 		return m, err
@@ -50,17 +52,32 @@ func (o *Orchestrator) Deliver(ctx context.Context, tx *core.Tx, e core.Employee
 	return m, o.send(ctx, tx, sess, msgID, d)
 }
 
-// withHandoff prefixes the handoff summary when the previous session was lost with its node.
-func (o *Orchestrator) withHandoff(ctx context.Context, tx *core.Tx, e core.Employee, text string) (string, error) {
+// resumableClose are close reasons after which the employee's next session picks up the old
+// conversation by its SDK session id (thread finished and reopened, user cut off and back).
+// A policy violation starts clean; a removed node cannot resume and gets the recap instead.
+var resumableClose = []string{"thread_done", "employee_removed", "node_closed"}
+
+// continuation decides how a new session for e starts: resuming the previous session's
+// conversation, with the recap prefixed when that session was lost with its node, or fresh.
+func (o *Orchestrator) continuation(ctx context.Context, tx *core.Tx, e core.Employee, text string) (string, *protocol.ResumeRef, error) {
 	last, err := core.LatestSession(ctx, tx, e.ID)
-	if errors.Is(err, core.ErrNotFound) || (err == nil && last.CloseReason != "node_removed") {
-		return text, nil
+	if errors.Is(err, core.ErrNotFound) {
+		return text, nil, nil
 	}
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	summary, err := o.handoffSummary(ctx, tx, e)
-	return summary + "\n\n---\n" + text, err
+	if last.CloseReason == "node_removed" {
+		summary, err := o.handoffSummary(ctx, tx, e)
+		if err != nil {
+			return "", nil, err
+		}
+		return summary + "\n\n---\n" + text, nil, o.resumedNote(ctx, tx, e)
+	}
+	if slices.Contains(resumableClose, last.CloseReason) {
+		return text, resumeRef(last), nil
+	}
+	return text, nil, nil
 }
 
 // NodeRemoved closes the sessions of a node that is being deleted; the next message to
@@ -439,7 +456,10 @@ func deref(p *string) string {
 	return *p
 }
 
-// handoff closes a session and opens a fresh one whose first message is the handoff summary (§6.2).
+// handoff closes a session and opens a fresh one whose first message is the recap (§6.2):
+// the node lost the transcript (resume_failed) or the session had to move. Messages that were
+// on their way to the old session (its first message and undelivered sends) follow the recap
+// in the same first message, and the chat gets a quiet "会话已恢复" note.
 func (o *Orchestrator) handoff(ctx context.Context, tx *core.Tx, e core.Employee, s core.AgentSession, pending *protocol.FirstMessage) error {
 	if err := o.closeSession(ctx, tx, s, "employee_removed"); err != nil {
 		return err
@@ -448,19 +468,90 @@ func (o *Orchestrator) handoff(ctx context.Context, tx *core.Tx, e core.Employee
 	if err != nil {
 		return err
 	}
-	text := summary
-	msgID := core.NewID("m")
-	var images []protocol.ImageRef
-	if pending != nil {
-		text += "\n\n---\n" + pending.Text
-		msgID, images = string(pending.MsgID), pending.Images
+	queued, err := o.inFlight(ctx, tx, s, pending)
+	if err != nil {
+		return err
+	}
+	first := protocol.FirstMessage{MsgID: protocol.MsgID(core.NewID("m")), Text: summary}
+	if len(queued) > 0 {
+		first.MsgID = queued[0].MsgID
+		var texts []string
+		for _, q := range queued {
+			texts = append(texts, q.Text)
+			first.Images = append(first.Images, q.Images...)
+		}
+		first.Text += "\n\n---\n" + strings.Join(texts, "\n\n---\n")
+		if len(first.Images) > 8 {
+			first.Images = first.Images[:8]
+		}
+		if err := markForwarded(ctx, tx, queued[1:]); err != nil {
+			return err
+		}
 	}
 	if err := core.SetEmployeeNode(ctx, tx, e.ID, nil); err != nil {
 		return err
 	}
 	e.NodeID = nil
-	_, err = o.openSession(ctx, tx, e, &protocol.FirstMessage{MsgID: protocol.MsgID(msgID), Text: text, Images: images}, nil)
-	return err
+	if _, err := o.openSession(ctx, tx, e, &first, nil); err != nil {
+		return err
+	}
+	return o.resumedNote(ctx, tx, e)
+}
+
+// inFlight lists the messages the old session never got: the pending first message (or the
+// first message of its last session.open) and its undelivered session.send commands, in order.
+func (o *Orchestrator) inFlight(ctx context.Context, tx *core.Tx, s core.AgentSession, pending *protocol.FirstMessage) ([]protocol.FirstMessage, error) {
+	rows, err := tx.Query(ctx, `SELECT CASE WHEN c.type = 'session.open' THEN c.body->'first_message' ELSE c.body END
+		FROM at_node_commands c
+		WHERE c.session_id = $1 AND (c.type = 'session.send' OR (c.type = 'session.open' AND c.body ? 'first_message'
+			AND c.body->'first_message' <> 'null'::jsonb))
+		AND EXISTS (SELECT 1 FROM at_messages m WHERE m.meta->>'msg_id' =
+			COALESCE(c.body->'first_message'->>'msg_id', c.body->>'msg_id') AND m.delivered_at IS NULL)
+		ORDER BY c.created_at, c.seq`, s.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []protocol.FirstMessage
+	seen := map[protocol.MsgID]bool{}
+	if pending != nil {
+		out, seen[pending.MsgID] = append(out, *pending), true
+	}
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var m protocol.FirstMessage
+		if json.Unmarshal(raw, &m) != nil || m.MsgID == "" || seen[m.MsgID] {
+			continue
+		}
+		seen[m.MsgID] = true
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// markForwarded stamps messages folded into a recap as delivered (the recap carries them).
+func markForwarded(ctx context.Context, tx *core.Tx, msgs []protocol.FirstMessage) error {
+	for _, m := range msgs {
+		if _, _, err := core.MarkDelivered(ctx, tx, string(m.MsgID)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// resumedNote tells the user, quietly, that the coordinator's or lead's session was rebuilt.
+func (o *Orchestrator) resumedNote(ctx context.Context, tx *core.Tx, e core.Employee) error {
+	if e.Tier == "member" {
+		return nil
+	}
+	conv, err := o.conversationOf(ctx, tx, e)
+	if err != nil {
+		return err
+	}
+	return o.recordCard(ctx, tx, e, conv, CardResumed, "会话已恢复", map[string]any{"employee": e.Name})
 }
 
 // imageRefs turns message attachments into session.send images.

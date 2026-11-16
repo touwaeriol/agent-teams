@@ -380,6 +380,10 @@ type AskLeadResult struct {
 	// Present when the call blocked until answered.
 	Answer *string `json:"answer,omitempty,omitzero"`
 
+	// Structured questions: the user's choice per question, in order (present when
+	// the call blocked until answered).
+	Answers []QuestionAnswerItem `json:"answers,omitempty,omitzero"`
+
 	// QuestionID corresponds to the JSON schema field "question_id".
 	QuestionID QuestionID `json:"question_id"`
 }
@@ -402,33 +406,160 @@ func (j *AskLeadResult) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// Ask the user a question (a card on the web page). Members block until the user
-// answers and get the answer back; the coordinator and leads get the question id
-// at once and receive "[Answer to q5] ..." as a later message.
-type AskUserInput struct {
-	// Suggested answers shown as buttons.
-	Options []string `json:"options,omitempty,omitzero"`
+type AskOption struct {
+	// What choosing it means (trade-offs, consequences).
+	Description *string `json:"description,omitempty,omitzero"`
 
-	// Question corresponds to the JSON schema field "question".
-	Question string `json:"question"`
+	// The choice, 1-5 words.
+	Label string `json:"label"`
+
+	// Ignored (accepted for AskUserQuestion compatibility).
+	Preview *string `json:"preview,omitempty,omitzero"`
+
+	// Mark the option you recommend (at most one per question).
+	Recommended *bool `json:"recommended,omitempty,omitzero"`
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
-func (j *AskUserInput) UnmarshalJSON(value []byte) error {
+func (j *AskOption) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
 		return err
 	}
-	if _, ok := raw["question"]; raw != nil && !ok {
-		return fmt.Errorf("field question in AskUserInput: required")
+	if _, ok := raw["label"]; raw != nil && !ok {
+		return fmt.Errorf("field label in AskOption: required")
 	}
+	type Plain AskOption
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Label)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "label", 1)
+	}
+	*j = AskOption(plain)
+	return nil
+}
+
+type AskQuestion struct {
+	// Very short label shown as a chip (max 12 characters).
+	Header string `json:"header"`
+
+	// Let the user pick several options.
+	MultiSelect *bool `json:"multi_select,omitempty,omitzero"`
+
+	// 2-4 distinct choices; an "other" free-text answer is always offered, do not add
+	// one.
+	Options []AskOption `json:"options"`
+
+	// The complete question, ending with a question mark.
+	Question string `json:"question"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *AskQuestion) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["header"]; raw != nil && !ok {
+		return fmt.Errorf("field header in AskQuestion: required")
+	}
+	if _, ok := raw["options"]; raw != nil && !ok {
+		return fmt.Errorf("field options in AskQuestion: required")
+	}
+	if _, ok := raw["question"]; raw != nil && !ok {
+		return fmt.Errorf("field question in AskQuestion: required")
+	}
+	type Plain AskQuestion
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Header)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "header", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Header)) > 40 {
+		return fmt.Errorf("field %s length: must be <= %d", "header", 40)
+	}
+	if plain.Options != nil && len(plain.Options) < 2 {
+		return fmt.Errorf("field %s length: must be >= %d", "options", 2)
+	}
+	if len(plain.Options) > 4 {
+		return fmt.Errorf("field %s length: must be <= %d", "options", 4)
+	}
+	if utf8.RuneCountInString(string(plain.Question)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "question", 1)
+	}
+	*j = AskQuestion(plain)
+	return nil
+}
+
+// Ask the user a question (a card on the web page). Either a plain question
+// (question + optional options) or up to 4 structured questions (questions: each
+// with a short header, 2-4 options with a description, one may be recommended,
+// multi_select for several answers; the user can always type their own answer
+// instead). Members block until the user answers and get the answer back; the
+// coordinator and leads get the question id at once and receive "[Answer to q5]
+// ..." as a later message. Give question or questions.
+type AskUserInput struct {
+	// Suggested answers shown as buttons (with question).
+	Options []string `json:"options,omitempty,omitzero"`
+
+	// A plain question (use questions for choices with descriptions).
+	Question *string `json:"question,omitempty,omitzero"`
+
+	// Structured questions shown as one card, like Claude Code's AskUserQuestion.
+	Questions []AskQuestion `json:"questions,omitempty,omitzero"`
+
+	// Set by the platform when Claude's built-in AskUserQuestion is routed here (the
+	// call then blocks for every tier). Do not set it yourself.
+	Via *AskUserInputVia `json:"via,omitempty,omitzero"`
+}
+
+type AskUserInputVia string
+
+const AskUserInputViaAskUserQuestion AskUserInputVia = "AskUserQuestion"
+
+var enumValues_AskUserInputVia = []interface{}{
+	"AskUserQuestion",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *AskUserInputVia) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_AskUserInputVia {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_AskUserInputVia, v)
+	}
+	*j = AskUserInputVia(v)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *AskUserInput) UnmarshalJSON(value []byte) error {
 	type Plain AskUserInput
 	var plain Plain
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
 	}
-	if utf8.RuneCountInString(string(plain.Question)) < 1 {
+	if plain.Question != nil && utf8.RuneCountInString(string(*plain.Question)) < 1 {
 		return fmt.Errorf("field %s length: must be >= %d", "question", 1)
+	}
+	if plain.Questions != nil && len(plain.Questions) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "questions", 1)
+	}
+	if len(plain.Questions) > 4 {
+		return fmt.Errorf("field %s length: must be <= %d", "questions", 4)
 	}
 	*j = AskUserInput(plain)
 	return nil
@@ -437,6 +568,10 @@ func (j *AskUserInput) UnmarshalJSON(value []byte) error {
 type AskUserResult struct {
 	// Present when the call blocked until answered.
 	Answer *string `json:"answer,omitempty,omitzero"`
+
+	// Structured questions: the user's choice per question, in order (present when
+	// the call blocked until answered).
+	Answers []QuestionAnswerItem `json:"answers,omitempty,omitzero"`
 
 	// QuestionID corresponds to the JSON schema field "question_id".
 	QuestionID QuestionID `json:"question_id"`
@@ -3962,8 +4097,47 @@ type QuestionAnswer struct {
 	// Present when the call blocked until answered.
 	Answer *string `json:"answer,omitempty,omitzero"`
 
+	// Structured questions: the user's choice per question, in order (present when
+	// the call blocked until answered).
+	Answers []QuestionAnswerItem `json:"answers,omitempty,omitzero"`
+
 	// QuestionID corresponds to the JSON schema field "question_id".
 	QuestionID QuestionID `json:"question_id"`
+}
+
+type QuestionAnswerItem struct {
+	// Header corresponds to the JSON schema field "header".
+	Header *string `json:"header,omitempty,omitzero"`
+
+	// The user's own answer typed into 其他.
+	Other *string `json:"other,omitempty,omitzero"`
+
+	// Question corresponds to the JSON schema field "question".
+	Question string `json:"question"`
+
+	// Labels of the chosen options.
+	Selected []string `json:"selected"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *QuestionAnswerItem) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["question"]; raw != nil && !ok {
+		return fmt.Errorf("field question in QuestionAnswerItem: required")
+	}
+	if _, ok := raw["selected"]; raw != nil && !ok {
+		return fmt.Errorf("field selected in QuestionAnswerItem: required")
+	}
+	type Plain QuestionAnswerItem
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = QuestionAnswerItem(plain)
+	return nil
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -4706,6 +4880,9 @@ type SessionEvent struct {
 	// OpenGen corresponds to the JSON schema field "open_gen".
 	OpenGen *OpenGen `json:"open_gen,omitempty,omitzero"`
 
+	// plan: the Markdown plan of an ExitPlanMode call, truncated to 32 KB.
+	Plan *string `json:"plan,omitempty,omitzero"`
+
 	// turn_ended.
 	ResultSubtype *string `json:"result_subtype,omitempty,omitzero"`
 
@@ -4724,6 +4901,9 @@ type SessionEvent struct {
 
 	// text: assistant text, truncated to 8 KB.
 	Text *string `json:"text,omitempty,omitzero"`
+
+	// todos: the employee's whole checklist after a TodoWrite (latest state).
+	Todos []TodoItem `json:"todos,omitempty,omitzero"`
 
 	// tool_started.
 	Tool *string `json:"tool,omitempty,omitzero"`
@@ -4788,10 +4968,12 @@ type SessionEventKind string
 const SessionEventKindCompacting SessionEventKind = "compacting"
 const SessionEventKindError SessionEventKind = "error"
 const SessionEventKindNotification SessionEventKind = "notification"
+const SessionEventKindPlan SessionEventKind = "plan"
 const SessionEventKindRateLimited SessionEventKind = "rate_limited"
 const SessionEventKindSubagent SessionEventKind = "subagent"
 const SessionEventKindText SessionEventKind = "text"
 const SessionEventKindThinking SessionEventKind = "thinking"
+const SessionEventKindTodos SessionEventKind = "todos"
 const SessionEventKindToolEnded SessionEventKind = "tool_ended"
 const SessionEventKindToolStarted SessionEventKind = "tool_started"
 const SessionEventKindTurnEnded SessionEventKind = "turn_ended"
@@ -4809,6 +4991,8 @@ var enumValues_SessionEventKind = []interface{}{
 	"subagent",
 	"notification",
 	"error",
+	"todos",
+	"plan",
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -4866,8 +5050,14 @@ func (j *SessionEvent) UnmarshalJSON(value []byte) error {
 	if plain.NumTurns != nil && 0 > *plain.NumTurns {
 		return fmt.Errorf("field %s: must be >= %v", "num_turns", 0)
 	}
+	if plain.Plan != nil && utf8.RuneCountInString(string(*plain.Plan)) > 32768 {
+		return fmt.Errorf("field %s length: must be <= %d", "plan", 32768)
+	}
 	if plain.Text != nil && utf8.RuneCountInString(string(*plain.Text)) > 8192 {
 		return fmt.Errorf("field %s length: must be <= %d", "text", 8192)
+	}
+	if len(plain.Todos) > 100 {
+		return fmt.Errorf("field %s length: must be <= %d", "todos", 100)
 	}
 	*j = SessionEvent(plain)
 	return nil
@@ -6226,6 +6416,76 @@ func (j *Tier) UnmarshalJSON(value []byte) error {
 		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_Tier, v)
 	}
 	*j = Tier(v)
+	return nil
+}
+
+type TodoItem struct {
+	// ActiveForm corresponds to the JSON schema field "active_form".
+	ActiveForm *string `json:"active_form,omitempty,omitzero"`
+
+	// Content corresponds to the JSON schema field "content".
+	Content string `json:"content"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status TodoItemStatus `json:"status"`
+}
+
+type TodoItemStatus string
+
+const TodoItemStatusCompleted TodoItemStatus = "completed"
+const TodoItemStatusInProgress TodoItemStatus = "in_progress"
+const TodoItemStatusPending TodoItemStatus = "pending"
+
+var enumValues_TodoItemStatus = []interface{}{
+	"pending",
+	"in_progress",
+	"completed",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *TodoItemStatus) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_TodoItemStatus {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_TodoItemStatus, v)
+	}
+	*j = TodoItemStatus(v)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *TodoItem) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["content"]; raw != nil && !ok {
+		return fmt.Errorf("field content in TodoItem: required")
+	}
+	if _, ok := raw["status"]; raw != nil && !ok {
+		return fmt.Errorf("field status in TodoItem: required")
+	}
+	type Plain TodoItem
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.ActiveForm != nil && utf8.RuneCountInString(string(*plain.ActiveForm)) > 2000 {
+		return fmt.Errorf("field %s length: must be <= %d", "active_form", 2000)
+	}
+	if utf8.RuneCountInString(string(plain.Content)) > 2000 {
+		return fmt.Errorf("field %s length: must be <= %d", "content", 2000)
+	}
+	*j = TodoItem(plain)
 	return nil
 }
 

@@ -61,10 +61,13 @@ export function upsert<T extends { id: string }>(list: T[] | undefined, item: T)
   return next;
 }
 
-/** Appends a message to the newest page unless it is already there. */
+/** Appends a message to the newest page; one already there is replaced in place (a chat card that was updated). */
 export function appendMessage(data: MessagePages | undefined, message: MessageView): MessagePages | undefined {
   if (!data || data.pages.length === 0) return data;
-  if (data.pages.some((p) => p.items.some((m) => m.id === message.id))) return data;
+  const old = data.pages.flatMap((p) => p.items).find((m) => m.id === message.id);
+  if (old && old.content === message.content && JSON.stringify(old.meta) === JSON.stringify(message.meta)) return data;
+  if (old)
+    return { ...data, pages: data.pages.map((p) => ({ ...p, items: p.items.map((m) => (m.id === message.id ? message : m)) })) };
   const [first, ...rest] = data.pages;
   return { ...data, pages: [{ ...first, items: [...first.items, message] }, ...rest] };
 }

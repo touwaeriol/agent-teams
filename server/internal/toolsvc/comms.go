@@ -23,7 +23,8 @@ var (
 )
 
 // ask creates a question card. Blocking questions keep the call waiting until answered.
-func (s *Service) ask(ctx context.Context, tx *core.Tx, c *call, audience, text string, options []string, blocking bool) (core.Question, error) {
+func (s *Service) ask(ctx context.Context, tx *core.Tx, c *call, audience string, spec askSpec) (core.Question, error) {
+	text, options, blocking := spec.text, spec.options, spec.blocking
 	e := c.emp()
 	conv, err := s.orch.ConversationOf(ctx, tx, e)
 	if err != nil {
@@ -31,7 +32,7 @@ func (s *Service) ask(ctx context.Context, tx *core.Tx, c *call, audience, text 
 	}
 	sid := c.sc.Session.ID
 	n := core.NewQuestion{ConversationID: conv, ProjectID: e.ProjectID, ThreadID: e.ThreadID, Asker: e.Name, Audience: audience,
-		Kind: "question", Text: text, Options: options, SessionID: &sid, Blocking: blocking}
+		Kind: "question", Text: text, Options: options, Detail: spec.detail, SessionID: &sid, Blocking: blocking}
 	if blocking {
 		n.CallID = &c.callID
 	}
@@ -57,8 +58,12 @@ func (s *Service) askUser(ctx context.Context, tx *core.Tx, c *call) (Result, er
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
-	blocking := protocol.Tools[protocol.ToolAskUser].BlocksFor(protocol.Tier(c.emp().Tier))
-	q, err := s.ask(ctx, tx, c, "user", in.Question, in.Options, blocking)
+	spec, err := askSpecOf(in, protocol.Tools[protocol.ToolAskUser].BlocksFor(protocol.Tier(c.emp().Tier)))
+	if err != nil {
+		return Result{}, err
+	}
+	blocking := spec.blocking
+	q, err := s.ask(ctx, tx, c, "user", spec)
 	if err != nil {
 		return Result{}, err
 	}
@@ -96,7 +101,7 @@ func (s *Service) askLead(ctx context.Context, tx *core.Tx, c *call) (Result, er
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
-	q, err := s.ask(ctx, tx, c, "lead", in.Question, nil, true)
+	q, err := s.ask(ctx, tx, c, "lead", askSpec{text: in.Question, detail: map[string]any{}, blocking: true})
 	if err != nil {
 		return Result{}, err
 	}
@@ -157,8 +162,9 @@ func (s *Service) reviewPermission(ctx context.Context, tx *core.Tx, c *call) (R
 	return okText(text), err
 }
 
-// AnswerQuestion is the user answering a question card (REST).
-func (s *Service) AnswerQuestion(ctx context.Context, user store.User, convID, qid, answer string) (core.Question, error) {
+// AnswerQuestion is the user answering a question card (REST): a text answer, or one choice
+// per structured question (detail.questions).
+func (s *Service) AnswerQuestion(ctx context.Context, user store.User, convID, qid, answer string, choices []AnswerChoice) (core.Question, error) {
 	var out core.Question
 	err := s.core.InTx(ctx, func(tx *core.Tx) error {
 		q, err := core.LockQuestion(ctx, tx, convID, qid)
@@ -173,13 +179,33 @@ func (s *Service) AnswerQuestion(ctx context.Context, user store.User, convID, q
 		case q.Audience != "user":
 			return ErrNotForUser
 		}
-		if err := s.answer(ctx, tx, q, answer, "user:"+user.ID); err != nil {
+		text, err := s.recordChoices(ctx, tx, q, answer, choices)
+		if err != nil {
+			return err
+		}
+		if err := s.answer(ctx, tx, q, text, "user:"+user.ID); err != nil {
 			return err
 		}
 		out, err = core.QuestionByID(ctx, tx, convID, qid)
 		return err
 	})
 	return out, err
+}
+
+// recordChoices stores a structured card's answers in detail.answers and returns the answer text.
+func (s *Service) recordChoices(ctx context.Context, tx *core.Tx, q core.Question, answer string, choices []AnswerChoice) (string, error) {
+	qs := structuredQuestions(q)
+	if qs == nil {
+		if strings.TrimSpace(answer) == "" {
+			return "", ErrBadAnswer
+		}
+		return answer, nil
+	}
+	text, items, err := structuredAnswer(qs, choices, answer)
+	if err != nil {
+		return "", err
+	}
+	return text, core.MergeQuestionDetail(ctx, tx, q, map[string]any{"answers": items})
 }
 
 // answer closes the question and gets the answer to the asker: the waiting call's result
@@ -218,7 +244,7 @@ func (s *Service) answerCall(ctx context.Context, tx *core.Tx, q core.Question, 
 	if err != nil || st != "waiting" {
 		return false, ignoreMissing(err)
 	}
-	res := okJSON(answer, protocol.AskUserResult{QuestionID: protocol.QuestionID(q.ID), Answer: &answer})
+	res := okJSON(answer, protocol.AskUserResult{QuestionID: protocol.QuestionID(q.ID), Answer: &answer, Answers: storedAnswers(q)})
 	return true, s.Complete(ctx, tx, *q.SessionID, *q.CallID, res)
 }
 
@@ -369,6 +395,9 @@ func (s *Service) publish(ctx context.Context, tx *core.Tx, c *call) (Result, er
 	d, err := s.deliv.Publish(ctx, tx, c.emp().ProjectID, c.emp().ThreadID, in.Kind, in.Title, in.URL, c.emp().Name,
 		map[string]any{"by": c.emp().Name})
 	if err != nil {
+		return Result{}, err
+	}
+	if err := s.orch.RecordArtifact(ctx, tx, c.emp(), d, 0); err != nil {
 		return Result{}, err
 	}
 	return okJSON("已登记交付物 "+d.ID, protocol.PublishDeliverableResult{DeliverableID: d.ID}), nil

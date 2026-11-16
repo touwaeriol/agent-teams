@@ -151,7 +151,10 @@ async function answer(res, cid, qid, req) {
   const list = state.questions[cid] ?? [];
   const q = list.find((x) => x.id === qid);
   if (!q) return fail(res, 404, "找不到这个提问", "question_not_found");
-  Object.assign(q, { status: "answered", answer: b.answer, answered_at: now(), decided_by: "liu" });
+  const items = q.detail?.questions ?? [];
+  const answers = Array.isArray(b.answers) ? items.map((it, i) => ({ question: it.question, header: it.header, selected: b.answers[i]?.selected ?? [], ...(b.answers[i]?.other ? { other: b.answers[i].other } : {}) })) : null;
+  const text = answers ? answers.map((a) => [...a.selected, ...(a.other ? [a.other] : [])].join("、")).join("\n") : b.answer;
+  Object.assign(q, { status: "answered", answer: text, answered_at: now(), decided_by: "liu", ...(answers ? { detail: { ...q.detail, answers } } : {}) });
   const t = threadById(cid);
   if (t) {
     t.counts.waiting = Math.max(0, t.counts.waiting - 1);

@@ -3,6 +3,9 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { BashPolicy } from "../protocol.js";
 import { isInside } from "../util/paths.js";
 
+/** Claude's own tools that only talk to the user (shown in the chat); they touch no files. */
+export const CHAT_TOOLS = new Set(["TodoWrite", "AskUserQuestion"]);
+
 /** Local tool restrictions for one session (architecture.md §10.2, §10.3). */
 export interface ToolPolicy {
   /** Coordinator: only mcp__platform__* tools. */
@@ -39,7 +42,7 @@ export const PLATFORM_TOOL_PREFIX = "mcp__platform__";
  * Denials go back to the model as the tool result; they never become approval cards.
  */
 export function decideTool(policy: ToolPolicy, tool: string, input: Record<string, unknown>, cwd: string): Decision {
-  if (tool.startsWith(PLATFORM_TOOL_PREFIX)) return null;
+  if (tool.startsWith(PLATFORM_TOOL_PREFIX) || CHAT_TOOLS.has(tool)) return null;
   if (policy.denyNonPlatform) return { deny: "This session may only use platform tools." };
   return secretDecision(policy, tool, input, cwd) ?? readOnlyDecision(policy, tool, input, cwd);
 }

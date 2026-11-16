@@ -54,6 +54,9 @@ func (s *Service) publishFile(ctx context.Context, tx *core.Tx, c *call) (Result
 	if err := tx.EmitDeliverable(ctx, d); err != nil {
 		return Result{}, err
 	}
+	if err := s.orch.RecordArtifact(ctx, tx, c.emp(), d, version); err != nil {
+		return Result{}, err
+	}
 	text := fmt.Sprintf("已发布交付物 %s 第 %d 版（%d 个文件）。改稿后用 deliverable_id=%s 再发布，会成为新版本。", d.ID, version, len(files), d.ID)
 	return okJSON(text, protocol.PublishFileResult{DeliverableID: d.ID, Version: version}), nil
 }

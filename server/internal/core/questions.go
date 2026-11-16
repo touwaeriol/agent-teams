@@ -105,6 +105,17 @@ func InsertQuestion(ctx context.Context, tx *Tx, n NewQuestion) (Question, error
 	return QuestionByID(ctx, tx, n.ConversationID, id)
 }
 
+// MergeQuestionDetail adds keys to an open question's detail.
+func MergeQuestionDetail(ctx context.Context, tx *Tx, q Question, patch map[string]any) error {
+	b, err := json.Marshal(patch)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE at_questions SET detail = detail || $3::jsonb WHERE conversation_id = $1 AND id = $2`,
+		q.ConversationID, q.ID, b)
+	return err
+}
+
 // CloseQuestion sets answer/status/decided_by on an open question; ErrConflict when it is not open.
 func CloseQuestion(ctx context.Context, tx *Tx, q Question, status string, answer *string, decidedBy string) (Question, error) {
 	tag, err := tx.Exec(ctx, `UPDATE at_questions SET status = $3, answer = $4, decided_by = $5, answered_at = now()

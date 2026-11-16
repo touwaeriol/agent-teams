@@ -210,7 +210,10 @@ Codex 对应：组长和 `read_only` 岗位 `sandbox: read-only, approvalPolicy:
 - **进程**：Claude 会话对应一个 `query()` 子进程（约 250 MB）。空闲超过 `park_after`（默认 15 分钟，无运行中的回合、无待审批）就 `close()` 掉进程，会话标为 `parked`；下一条消息到来时用 `resume: <session_id>` 重开。这样一台节点可以挂几十个逻辑会话，同时活跃的进程受 `max_active_sessions`（默认 4，节点 hello 上报，可在节点页调）限制。
 - Codex：一个 `codex app-server` 托管该节点所有 Codex 会话（同一 `CODEX_HOME`）；空闲 thread 不占额外进程，app-server 重启后 `thread/resume {excludeTurns:true}`。
 - 守护进程重启：从 `state/sessions/*.json` 知道本机有哪些逻辑会话，但**不主动恢复**；等控制台在重连后按需重新 `session.open {resume}`（控制台是唯一的真相）。控制台记录为 `turn_running`、之后却变成 `parked`（关机时停放的 `session.state`，或重启后的报告）或重新 `starting`（会话进程崩溃后自动重启）的会话，说明回合被打断了；丢了待审批请求的会话同样如此。控制台给这个员工（成员或组长）发一条系统消息（“守护进程重启打断了你上一个回合，请继续”，并列出失效的审批请求和仍在等待回答的提问），会话随之按 SDK session id resume 接着干，不会卡在进行中的任务上；同一次中断只发一次。重连对账后，若某个运行中的讨论串没有任何员工在工作、没有未处理的卡片或提问、也没有在途消息，组长收到一条提醒（这条提醒已是最新消息时不重复）。
-- **会话钉在节点上**：Claude 转录（员工 HOME 下的 `.claude/projects`）和 Codex rollout（`$CODEX_HOME/sessions`）只存在于跑过它的节点，所以 `resume` 只发给 `at_agent_sessions.node_id` 那台节点。必须换节点时（节点被删、离线超过 `rehome_after`（默认 30 分钟）且员工有待办任务、节点 drain），orchestrator 关闭旧逻辑会话，在新节点开一个**全新**会话（`resume: null`），第一条消息是平台生成的交接摘要：员工身份、当前任务与说明、主任务计划、该员工最近 20 条消息/留言、未完成的提问、分支名与最近提交（`git.status`）。`resume` 失败（守护进程回 `session.opened {resume_failed: true}`，例如转录被清理）时自动走同一个交接流程，不需要人处理。不做转录同步（SDK `sessionStore` 以后可作为改进）。
+- **会话钉在节点上**：Claude 转录（员工 HOME 下的 `.claude/projects`）和 Codex rollout（`$CODEX_HOME/sessions`）只存在于跑过它的节点，所以 `resume` 只发给 `at_agent_sessions.node_id` 那台节点。必须换节点时（节点被删、离线超过 `rehome_after`（默认 30 分钟）且员工有待办任务、节点 drain），orchestrator 关闭旧逻辑会话，在新节点开一个**全新**会话（`resume: null`），第一条消息是平台生成的**会话恢复摘要**（`handoffSummary`）：员工身份、主任务计划、（组长）全部任务及状态、（成员）当前任务和分支、还没回答的提问、项目记忆（置顶优先，最多 10 条）、这个员工对话里最近 20 条已送达的消息和它自己的回复（用户 / 你 / 平台，统筹按自己的对话取，不再是空的）。不做转录同步（SDK `sessionStore` 以后可作为改进）。
+- **resume 失败**（守护进程回 `session.opened {resume_failed: true, error}`：转录被删、`~/.claude` 被清、换了节点、文件损坏）时自动走同一个交接流程，不需要人处理。守护进程在三处识别：`session.open {resume}`、停放的会话被下一条消息唤醒（unpark）、崩溃后的自动重启；它只回 `session.opened {resume_failed}`、删掉本机记录，**不先发 `session.state closed`**（否则控制台会先把行关掉，看不到 resume_failed）。控制台关闭旧逻辑会话、开新会话，第一条消息 = 恢复摘要 + `---` + 旧会话**没送到的消息**（它最后一次 `session.open` 的 `first_message` 和未确认送达的 `session.send`，按发出顺序，用第一条的 `msg_id`，其余标为已送达），所以触发恢复的那条用户消息不会丢；统筹和组长的对话里插一条 `kind = resumed` 的系统消息，网页显示成一行淡色的“会话已恢复”。
+- **员工的会话关掉后再开**：讨论串结束（`thread_done`）后又被重新打开、用户被停用后恢复（`employee_removed`）、节点报告关闭（`node_closed`）的员工，下一条消息开的新逻辑会话带 `resume: {sdk_session_id: 上一个会话的}`，接着原来的对话；转录不在了就是上面的 resume 失败流程。策略违规（`policy_violation`）关掉的会话不续接。
+- 各种中断的结果：空闲停放 → 下一条消息按 SDK session id resume；守护进程 SIGTERM（停放全部会话）或 SIGKILL / 节点重启（本机记录按 `parked` 读回，首条投递前查转录去重）→ 重连对账后按需 resume，被打断的回合收到“守护进程重启”系统消息；会话进程崩溃 → 自动 resume 最多 3 次，转录丢了直接走 resume 失败；控制台重启 → 状态全在 PostgreSQL，阻塞调用照常等待；转录丢失 → 恢复摘要。`deploy/v2/e2e/run_resume.mjs` 用真实 Claude 逐个验证（每次中断后问统筹之前说过的暗号）。
 
 ### 6.3 平台工具：守护进程本地 MCP + WS 转发
 
@@ -231,10 +234,11 @@ Codex 会话 ──(http://127.0.0.1:<port>/mcp/<sid>/<每次 ─┘            
 
 平台工具清单（在 v1 / threads.md 基础上）：
 
-- **coordinator**：`open_thread(title, brief, roles?)`、`list_threads(status?)`、`thread_status(no)`、`message_thread(no, text)`、`ask_user(question, options?)`（不阻塞）、`remember(text)`、`set_status(text, kind?)`。
+- **coordinator**：`open_thread(title, brief, roles?)`、`list_threads(status?)`、`thread_status(no)`、`message_thread(no, text)`、`ask_user(question, options? | questions[])`（不阻塞；结构化提问见 §6.6）、`remember(text)`、`set_status(text, kind?)`。
 - **lead**：`update_plan(steps)`（主任务）、`assign_task(assignee, instruction, main, depends_on?, kind?)`（assignee 可以是岗位名 → 进任务池）、`list_tasks`、`cancel_task`、`reply_to(question_id, answer)`、`review_permission(request_id, decision: allow|deny|ask_user, reason)`（成员的权限请求，§9.2）、`broadcast`、`send_message`、`ask_user`（不阻塞）、`enqueue_merge(member | task_id)`（进合并队列，取代 v1 设计里的 `merge_member` 直接合并）、`open_pr(title, body)`、`finish(summary)`、`publish_deliverable(kind, title, url)`、`publish_file(path, kind, title, deliverable_id?)`（§6.5）、`set_status`。`finish(summary)` 除了写 `at_threads.summary`，还插入一条 `at_project_memory {source: '#<no>', text: summary}` 并发 `memory` 事件（threads.md 的约定）。
 - **member**：`complete_task(task_id, summary, artifacts?)`（**显式完成**，见 §7.3；调用前平台先替它推送分支，见 §8.1）、`push_branch()`（把当前 worktree 的 HEAD 推到自己的成员分支，见 §8.1）、`report_progress`、`ask_lead`（阻塞）、`ask_user`（阻塞）、`send_message`、`read_messages`、`list_team`、`get_task`、`request_review`（阻塞）、`publish_deliverable`、`publish_file`（§6.5）、`set_status`；`can_delegate` 时加 `assign_subtask`、`wait_task`。
 - 审批不再是 MCP 工具（v1 的 `approve`），改走 canUseTool / Codex requestApproval（§8）。
+- Claude 自带工具：每一层都有 `TodoWrite`、`AskUserQuestion`（统筹的 `deny_non_platform_tools` 对这两个放行，`ToolsAllowed` 也放行），组长的 `allowedTools` 带上它们（`dontAsk`）；写代码的成员另有 `EnterPlanMode`、`ExitPlanMode`。用法见 §6.6。
 
 ### 6.4 消息怎么推给员工
 
@@ -263,6 +267,20 @@ Codex 会话 ──(http://127.0.0.1:<port>/mcp/<sid>/<每次 ─┘            
 - **`publish_file(path, kind, title, deliverable_id?)`**（组长、成员）：守护进程在本机读文件——路径解析符号链接后必须在员工 cwd 内；一个文件，或带 `index.html` 的目录（小网站：跳过隐藏文件、`node_modules`、符号链接，最多 64 个文件）；只读普通文件（以 `O_NOFOLLOW | O_NONBLOCK` 打开后再 fstat，校验后换成的符号链接、FIFO、设备都拒绝），边读边计数，合计 ≤ 5 MB；扩展名限于 html、md、svg、png、jpg、gif、webp、pdf、json、csv、txt（网站里还可以有 css、js、字体）。内容按 1 MiB 切成 `file.chunk` 帧（可靠、按序）先发，再发带 `upload {upload_id, chunks, files[{path,size,sha256}]}` 的 `tool.call`（protocol.md §6.3）。控制台拼回、逐个校验大小和 sha256、按扩展名定 Content-Type（不信守护进程给的），存进 `at_deliverable_files`；不带 `deliverable_id` 时新建交付物（`detail.hosted = true`、`version`、`entry`、`render`），带了就成为该交付物的下一版。
 - **托管与展示**：文件只通过短时签名 URL 访问（`/files/<deliverable>.<version>.<expires>.<hmac>/<path>`，2 小时，HMAC 密钥由 `AGENT_TEAMS_SECRET_KEY` 派生），不需要也不读会话 cookie。配置了 `AGENT_TEAMS_ARTIFACT_ORIGIN`（必须是与 `AGENT_TEAMS_PUBLIC_URL` 不同的主机，最好是另一个注册域）时 URL 指向那个源，主站上的 `/files/` 返回 404，那个源上除 `/files/` 以外的路径（网页、登录、API）也一律 404，页面在自己的源里找不到任何控制台功能；未配置时由控制台的 `/files/` 提供。响应总是带 `Content-Security-Policy: sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads`（**没有独立源时不含 `allow-same-origin`**，页面跑在不透明源里，拿不到 cookie，也不能以控制台身份调接口）、只放行设计技能列出的 CDN 的 `default-src`/`script-src`、`frame-ancestors` 限定为网页本身、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`。网页的交付物查看器：HTML 放在 `sandbox` iframe 里（同样只有独立源时才加 `allow-same-origin`），Markdown 用 react-markdown 渲染（不渲染原始 HTML，相对链接只解析到同一版本目录里），图片内联，其他类型列出文件；可以切换版本。
 - **批注**：`POST /api/deliverables/{id}/comments` 存进 `at_deliverable_comments`，并作为消息投递给发布它的员工（不在了就给讨论串组长），消息里带上 `deliverable_id`，员工改稿后用同一个 id 发布新版本。
+
+### 6.6 对话里能看到的工具（问题卡片、待办、计划、交付物）
+
+线程面板和统筹对话是纯聊天，工具调用默认不显示；只有下面这些画成卡片，插在发生的位置：
+
+- **提问卡片**：`ask_user` 除了 `question` + `options`，还收 `questions`（1–4 个，每个 `{question, header, options: [{label, description?, recommended?}] (2–4 个), multi_select?}`，和 Claude Code 的 AskUserQuestion 一样）。控制台把它们存进 `at_questions.detail.questions`，`text` 是各问题连起来，只有一个问题时 `options` 是选项标签（老页面照样能答）。网页卡片：问题在上，选项一行一个（字母徽标 A/B/C、标签、“推荐”标签、说明），最后一行是“其他（自己写）”；单个单选问题点一下就提交，否则选完点“提交”。回答走 `POST …/answer {answers: [{selected[], other?}]}`（按问题顺序；单选最多一项，选项必须是卡片上的，至少选一项或写其他，否则 422），控制台把每题的选择存进 `detail.answers`，`answer` 是可读文本（多题时 `header：选择`）；阻塞调用的结果是 `{question_id, answer, answers[]}`，不阻塞的照旧收到 `[Answer to qN] 文本`。纯文字回答结构化卡片时，算作每题的“其他”。答过的卡片留在对话里，收起成问题 + 选中的那几行（带对勾）；审批卡片只在待处理时显示。
+- **Claude 的 AskUserQuestion**：SDK 0.3.325 实测，`bypassPermissions` 下 canUseTool 依然会收到它（`requiresUserInteraction`），而守护进程原来直接放行，结果是 “The user did not answer the questions.”。现在守护进程给它单独挂一个 PreToolUse 钩子（`matcher: AskUserQuestion`，超时 7 天）：把输入转成 `ask_user {questions, via: "AskUserQuestion"}`（`via` 让所有层级都阻塞），等平台卡片的答案，再以 `permissionDecision: "allow"` + `updatedInput.answers = {问题: "标签, 标签"}` 交回 CLI，CLI 生成的工具结果就是用户的答案（bypass、dontAsk、default 三种模式实测都这样）。调用失败时钩子拒绝这次调用，理由带上原因。
+- **待办清单**：PreToolUse 看到 `TodoWrite` 时发 `session.event {kind: todos, todos[]}`。控制台只保留统筹和组长的（成员的太吵）：对话里每人一张 `kind = todos` 的消息卡，最新一张没全部完成就原地更新（`UPDATE at_messages`，同 id 的 `message` 事件，网页按 id 替换），全部完成后再来的清单开新卡。网页画成清单：完成的划掉，进行中的用转圈和 `activeForm`。
+- **计划**：`ExitPlanMode` 的计划在 SDK 0.3.325 里不在工具输入里，而是 CLI 写在配置目录 `plans/` 下的文件；守护进程在 PostToolUse 取 `tool_response.plan`，没有就读 `tool_response.filePath`（必须在 Claude 配置目录里），发 `session.event {kind: plan, plan}`，控制台存成 `kind = plan` 的消息卡（Markdown，长的折叠）。`ask` 岗位的 `ExitPlanMode` 走审批，卡片显示成“计划等你批准”（批准计划 / 提修改意见）。
+- **交付物**：`publish_file`、`publish_deliverable` 成功后在发布者的对话里加一张 `kind = artifact` 的消息卡（`meta.deliverable = {id, kind, title, url, hosted, entry, render, version}`），网页显示类型图标、标题、版本；托管文件打开查看器 `/projects/:pid/deliverables/:id`，链接类直接打开链接。
+- **PR**：讨论串进入 `review` 时对话底部是原来的验收卡片（验收通过并合并 / 提修改意见 / 在 GitHub 上看）。
+- **会话已恢复**：§6.2 的 `kind = resumed` 消息。
+
+这些消息都是 `role = system`、`author = 员工名`、`meta.employee`；恢复摘要只取 `chat/note/interrupt` 类消息，卡片不会混进去。
 
 ## 7. 讨论串、调度与任务池
 

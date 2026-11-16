@@ -1775,9 +1775,17 @@ export interface components {
             /** Format: int64 */
             running_tasks: number;
         };
+        AnswerChoice: {
+            /** @description Free text typed into 其他 */
+            other?: string;
+            /** @description Labels of the chosen options */
+            selected?: string[] | null;
+        };
         AnswerInputBody: {
-            /** @description Approvals: allow | allow_always | deny */
-            answer: string;
+            /** @description Approvals: allow | allow_always | deny; questions: the text answer */
+            answer?: string;
+            /** @description Structured questions (detail.questions): one choice per question, in order */
+            answers?: components["schemas"]["AnswerChoice"][] | null;
             /** @description Why an approval was denied (sent to the employee) */
             reason?: string;
         };

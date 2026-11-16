@@ -426,35 +426,96 @@ func (o *Orchestrator) coordinatorRole(ctx context.Context, userID string) (stor
 // handoffSummary is the first message of a fresh session that replaces a lost one (§6.2).
 func (o *Orchestrator) handoffSummary(ctx context.Context, tx *core.Tx, e core.Employee) (string, error) {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[交接] 你接替之前的会话继续担任 %s（%s）。之前的对话记录在另一台节点上，下面是平台整理的现状：\n", e.Name, e.Role)
+	fmt.Fprintf(&b, "[会话恢复] 你之前的会话记录无法恢复（换了节点，或节点上的会话记录丢失），平台开了新会话让你继续担任 %s（%s）。"+
+		"下面是平台整理的现状和最近的对话，请接着之前的工作继续，不要从头再来，也不要向用户重复已经说过的话：\n", e.Name, e.Role)
 	if e.ThreadID != nil {
 		if err := o.threadDigest(ctx, tx, &b, e); err != nil {
 			return "", err
 		}
 	}
-	rows, err := tx.Query(ctx, `SELECT content FROM (SELECT id, content FROM at_messages
-		WHERE conversation_id = $1 AND (meta->>'to' = $2 OR role IN ('user','leader')) ORDER BY id DESC LIMIT 20) x ORDER BY id`,
-		convOf(e), e.Name)
+	if err := openQuestionsDigest(ctx, tx, &b, e); err != nil {
+		return "", err
+	}
+	if err := memoryDigest(ctx, tx, &b, e.ProjectID); err != nil {
+		return "", err
+	}
+	conv, err := o.conversationOf(ctx, tx, e)
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
-	b.WriteString("\n最近的消息：\n")
-	for rows.Next() {
-		var c string
-		if err := rows.Scan(&c); err != nil {
-			return "", err
-		}
-		fmt.Fprintf(&b, "- %s\n", clip(c, 300))
+	if err := recentDigest(ctx, tx, &b, e, conv); err != nil {
+		return "", err
 	}
-	return b.String(), rows.Err()
+	return b.String(), nil
 }
 
-func convOf(e core.Employee) string {
-	if e.ThreadID != nil {
-		return *e.ThreadID
+// recapMessages is how many recent messages the recap quotes.
+const recapMessages = 20
+
+// recentDigest quotes the employee's recent conversation (delivered messages and its replies).
+func recentDigest(ctx context.Context, tx *core.Tx, b *strings.Builder, e core.Employee, conv string) error {
+	rows, err := tx.Query(ctx, `SELECT role, author, content FROM (SELECT id, role, author, content FROM at_messages
+		WHERE conversation_id = $1 AND kind IN ('chat','note','interrupt')
+		AND ((role = 'leader' AND author = $2) OR (delivered_at IS NOT NULL AND (role = 'user' OR meta->>'to' = $2)))
+		ORDER BY id DESC LIMIT $3) x ORDER BY id`, conv, e.Name, recapMessages)
+	if err != nil {
+		return err
 	}
-	return ""
+	defer rows.Close()
+	var lines []string
+	for rows.Next() {
+		var role, author, content string
+		if err := rows.Scan(&role, &author, &content); err != nil {
+			return err
+		}
+		lines = append(lines, fmt.Sprintf("- %s：%s", speaker(role, author, e.Name), clip(content, 600)))
+	}
+	if len(lines) > 0 {
+		b.WriteString("\n最近的对话（旧→新）：\n" + strings.Join(lines, "\n") + "\n")
+	}
+	return rows.Err()
+}
+
+func speaker(role, author, self string) string {
+	switch {
+	case role == "user":
+		return "用户"
+	case role == "leader" && author == self:
+		return "你"
+	}
+	return "平台"
+}
+
+// openQuestionsDigest lists the employee's questions still waiting for an answer.
+func openQuestionsDigest(ctx context.Context, tx *core.Tx, b *strings.Builder, e core.Employee) error {
+	asked, err := openRequests(ctx, tx, e, `kind <> 'approval' AND status = 'open'`)
+	if err != nil || len(asked) == 0 {
+		return err
+	}
+	b.WriteString("你提出、还没有回答的问题（回答会以消息送达，不要重复提问）：" + strings.Join(asked, "；") + "\n")
+	return nil
+}
+
+// memoryDigest adds the project's memory (pinned first, then the newest).
+func memoryDigest(ctx context.Context, tx *core.Tx, b *strings.Builder, projectID string) error {
+	rows, err := tx.Query(ctx, `SELECT text FROM at_project_memory WHERE project_id = $1
+		ORDER BY pinned DESC, created_at DESC LIMIT 10`, projectID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var lines []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return err
+		}
+		lines = append(lines, "- "+clip(t, 300))
+	}
+	if len(lines) > 0 {
+		b.WriteString("项目记忆：\n" + strings.Join(lines, "\n") + "\n")
+	}
+	return rows.Err()
 }
 
 func (o *Orchestrator) threadDigest(ctx context.Context, tx *core.Tx, b *strings.Builder, e core.Employee) error {
@@ -466,6 +527,11 @@ func (o *Orchestrator) threadDigest(ctx context.Context, tx *core.Tx, b *strings
 	for _, m := range plan {
 		fmt.Fprintf(b, "- [%s] %s\n", m.Status, m.Title)
 	}
+	if e.Tier == "lead" {
+		if err := tasksDigest(ctx, tx, b, *e.ThreadID); err != nil {
+			return err
+		}
+	}
 	if task, err := core.CurrentTask(ctx, tx, *e.ThreadID, e.Name); err == nil {
 		fmt.Fprintf(b, "你当前的任务 %s：%s\n", task.ID, task.Instruction)
 	}
@@ -473,6 +539,28 @@ func (o *Orchestrator) threadDigest(ctx context.Context, tx *core.Tx, b *strings
 		fmt.Fprintf(b, "你的分支：%s\n", MemberBranch(t.No, e.Name))
 	}
 	return nil
+}
+
+// tasksDigest lists the thread's tasks for the lead's recap.
+func tasksDigest(ctx context.Context, tx *core.Tx, b *strings.Builder, threadID string) error {
+	rows, err := tx.Query(ctx, `SELECT id, COALESCE(NULLIF(claimed_by, ''), assignee), status, instruction FROM at_tasks
+		WHERE thread_id = $1 ORDER BY created_at, id`, threadID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var lines []string
+	for rows.Next() {
+		var id, who, st, instr string
+		if err := rows.Scan(&id, &who, &st, &instr); err != nil {
+			return err
+		}
+		lines = append(lines, fmt.Sprintf("- %s %s [%s] %s", id, who, st, clip(instr, 200)))
+	}
+	if len(lines) > 0 {
+		b.WriteString("任务：\n" + strings.Join(lines, "\n") + "\n")
+	}
+	return rows.Err()
 }
 
 func clip(s string, n int) string {

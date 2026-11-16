@@ -125,7 +125,15 @@ export const questions = {
     q("q1", 12, "dev-2", "approval", "允许执行命令？", { detail: { tool_name: "Bash", input: { command: "pnpm add -D @tanstack/react-virtual" }, reviewer: "lead-12", review: { by: "lead:lead-12", decision: "ask_user", reason: "要加新依赖，你来定" } }, task_id: "t6" }),
   ],
   t13: [q("q2", 13, "lead-13", "question", "节点上还没装 codex，先用 CODEX_API_KEY 还是你去登录？", { options: ["用 CODEX_API_KEY", "我去登录"] })],
-  c0: [],
+  c0: [
+    q("q8", null, "leader", "question", "会话也直接切成 Valkey 令牌、删掉 JWT 吗？", {
+      blocking: false, created_at: ago(3), options: ["也直接切", "先保留 JWT"],
+      detail: { questions: [{ question: "会话也直接切成 Valkey 令牌、删掉 JWT 吗？", header: "会话", options: [
+        { label: "也直接切", description: "去掉 JWT 和 refresh、开关、双读；上线后所有人要重新登录一次，三张旧会话表在迁移里删掉。", recommended: true },
+        { label: "先保留 JWT", description: "新登录走 Valkey 令牌，旧的 JWT 等过期；多维护一个版本的双读。" },
+      ] }] },
+    }),
+  ],
 };
 
 const msg = (id, role, author, content, min, meta = {}) => ({ id, role, author, kind: "chat", content, meta, created_at: ago(min) });
@@ -137,12 +145,22 @@ export const messages = {
     msg("3", "system", "platform", "已开讨论串 #13", 74, { opens_thread: 13 }),
     msg("4", "user", "liu", "项目菜单那个做完了吗？", 6),
     msg("5", "leader", "leader", "#11「项目菜单」做完了：置顶、重命名、归档、删除都好了，测试通过。PR #41 在右侧“等你处理”里，点开就能验收。", 5),
+    { ...msg("6", "system", "leader", "会话已恢复", 4, { employee: "leader" }), kind: "resumed" },
+    msg("7", "leader", "leader", "现在开始改，改完照样走审查和设备验证。下面这个要你定一下：", 3.5),
   ],
   t12: [
     msg("a1", "user", "liu", "审批卡片要能在网页上直接点，员工之间也要能互相发消息。", 70),
     msg("a2", "leader", "lead-12", "收到。拆成 4 个主要任务、13 个小任务：\n\n1. **后端通信**：信箱、提问、计划（dev-1）\n2. **审批走 permission-prompt-tool**（dev-1）\n3. **网页卡片**：提问 / 审批卡片、侧栏小圆点（dev-2）\n4. **联调测试**：PG 往返、超时不中断（qa-1）\n\n实现约定写在 `docs/agent-comms.md`，有结论我会在这里汇报。", 62),
     msg("a3", "employee", "dev-1 → 组长", "审批工具的返回格式按 permission-prompt-tool 要求做好了，请审查。", 24),
     msg("a4", "user", "liu", "卡片的按钮太挤了，照这个改，红框那块不要", 20, { attachments: [{ id: "img_seed", name: "截图.png", content_type: "image/svg+xml", size: 0 }] }),
+    { ...msg("a45", "system", "lead-12", "[x] 后端通信\n[~] 网页卡片\n[ ] 联调测试", 19, { employee: "lead-12", todos: [
+      { content: "后端通信：信箱、提问、计划", status: "completed", active_form: "做后端通信" },
+      { content: "审批走 permission-prompt-tool", status: "completed", active_form: "改审批" },
+      { content: "网页卡片：提问 / 审批卡片", status: "in_progress", active_form: "正在做网页卡片（dev-2）" },
+      { content: "联调测试：PG 往返、超时不中断", status: "pending", active_form: "联调测试" },
+    ] }), kind: "todos" },
+    { ...msg("a46", "system", "dev-2", "## 卡片改版计划\n\n1. 按钮改成一行三个，去掉红框里的说明\n2. 提问卡片用字母标出选项，推荐项加标签\n3. 回答后收起，只留选中的那一项\n\n> 不动审批的接口，只改 `cards.tsx`。", 15, { employee: "dev-2" }), kind: "plan" },
+    { ...msg("a47", "system", "dev-2", "dev-2 发布了交付物：审批卡片样式", 12, { employee: "dev-2", deliverable: { id: "d1", kind: "design", title: "审批卡片样式", url: "", hosted: true, entry: "index.html", version: 3 } }), kind: "artifact" },
     msg("a5", "leader", "lead-12", "已改，按钮换成一行三个，红框那块去掉了。目前进度：\n\n| 主要任务 | 状态 |\n| --- | --- |\n| 后端通信 | 已合并 |\n| 审批走 permission-prompt-tool | 审查中 |\n| 网页卡片 | 进行中 |\n\n- `pnpm test` 全部通过\n- dev-2 想加一个依赖做长列表虚拟滚动，我拿不准，**需要你定一下**（下面的卡片）。", 8),
   ],
   t13: [], t11: [], t10: [], t9: [],

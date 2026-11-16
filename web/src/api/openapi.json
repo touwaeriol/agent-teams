@@ -195,14 +195,45 @@
         ],
         "type": "object"
       },
+      "AnswerChoice": {
+        "additionalProperties": false,
+        "properties": {
+          "other": {
+            "description": "Free text typed into 其他",
+            "maxLength": 4000,
+            "type": "string"
+          },
+          "selected": {
+            "description": "Labels of the chosen options",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "AnswerInputBody": {
         "additionalProperties": false,
         "properties": {
           "answer": {
-            "description": "Approvals: allow | allow_always | deny",
+            "description": "Approvals: allow | allow_always | deny; questions: the text answer",
             "maxLength": 20000,
-            "minLength": 1,
             "type": "string"
+          },
+          "answers": {
+            "description": "Structured questions (detail.questions): one choice per question, in order",
+            "items": {
+              "$ref": "#/components/schemas/AnswerChoice"
+            },
+            "maxItems": 4,
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "reason": {
             "description": "Why an approval was denied (sent to the employee)",
@@ -210,9 +241,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "answer"
-        ],
         "type": "object"
       },
       "AppPublic": {

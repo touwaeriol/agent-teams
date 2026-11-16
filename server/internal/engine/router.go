@@ -233,6 +233,10 @@ func (r *router) applyEvent(ctx context.Context, tx *core.Tx, sc core.SessionCon
 		return nil, r.rateLimited(ctx, tx, sc, ev)
 	case "error":
 		return []status.Observation{{Kind: status.Touch, Cause: "error"}}, r.sessionError(ctx, tx, sc, ev)
+	case "todos":
+		return []status.Observation{{Kind: status.Touch, Cause: cause}}, r.e.Orch.RecordTodos(ctx, tx, sc.Employee, ev.Todos)
+	case "plan":
+		return []status.Observation{{Kind: status.Touch, Cause: cause}}, r.e.Orch.RecordPlan(ctx, tx, sc.Employee, val(ev.Plan))
 	}
 	return []status.Observation{{Kind: status.Touch, Cause: cause}}, nil
 }

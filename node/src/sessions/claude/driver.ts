@@ -14,6 +14,10 @@ import { toPermissionResult } from "./permissions.js";
 import { ToolUseCorrelator } from "./correlate.js";
 import { claudeContent } from "../images.js";
 import { findTranscript, transcriptUserUuids } from "./transcript.js";
+import { ASK_TOOL, askHookOutput, askUserArgs, planEvent, todosEvent } from "./special.js";
+
+/** How long an AskUserQuestion may wait for the user (seconds; the hook's timeout). */
+const ASK_TIMEOUT_S = 7 * 24 * 3600;
 
 export type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => Query;
 
@@ -220,8 +224,8 @@ export class ClaudeDriver implements Driver {
   private hooks(): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
     const on = (fn: (input: HookInput) => HookJSONOutput | void) => [{ hooks: [async (input: HookInput) => fn(input) ?? {}] }];
     return {
-      PreToolUse: on((i) => this.preToolUse(i)),
-      PostToolUse: on((i) => this.toolEnded(i, true)),
+      PreToolUse: [...on((i) => this.preToolUse(i)), { matcher: ASK_TOOL, timeout: ASK_TIMEOUT_S, hooks: [async (i: HookInput) => this.askUser(i)] }],
+      PostToolUse: on((i) => this.postToolUse(i)),
       PostToolUseFailure: on((i) => this.toolEnded(i, false)),
       Notification: on((i) => this.notification(i)),
       SubagentStart: on((i) => this.subagent(i, true)),
@@ -237,6 +241,30 @@ export class ClaudeDriver implements Driver {
     if (i.tool_name.startsWith(PLATFORM_PREFIX)) this.correlator.remember(i.tool_name.slice(PLATFORM_PREFIX.length), input, i.tool_use_id);
     this.toolStarts.set(i.tool_use_id, Date.now());
     this.emit({ kind: "tool_started", tool: i.tool_name, tool_use_id: i.tool_use_id, ...describeTool(i.tool_name, input) });
+    if (i.tool_name === "TodoWrite") this.emitIf(todosEvent(input));
+  }
+
+  /** Claude's AskUserQuestion goes to the platform's question card; the answers come back as the tool's input. */
+  private async askUser(i: HookInput): Promise<HookJSONOutput> {
+    if (i.hook_event_name !== "PreToolUse" || i.tool_name !== ASK_TOOL) return {};
+    const input = (i.tool_input ?? {}) as Record<string, unknown>;
+    try {
+      const res = await this.ctx.sink.callTool("ask_user", askUserArgs(input), i.tool_use_id);
+      return askHookOutput(input, res);
+    } catch (err) {
+      return askHookOutput(input, { content: [{ type: "text", text: (err as Error).message }], isError: true });
+    }
+  }
+
+  private postToolUse(i: HookInput): void {
+    if (i.hook_event_name === "PostToolUse" && i.tool_name === "ExitPlanMode") {
+      this.emitIf(planEvent((i.tool_input ?? {}) as Record<string, unknown>, i.tool_response, this.deps.claudeConfigDir));
+    }
+    this.toolEnded(i, true);
+  }
+
+  private emitIf(ev: EventFields | null): void {
+    if (ev) this.emit(ev);
   }
 
   private toolEnded(i: HookInput, ok: boolean): void {

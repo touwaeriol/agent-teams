@@ -163,6 +163,13 @@
         "answer": {
           "description": "Present when the call blocked until answered.",
           "type": "string"
+        },
+        "answers": {
+          "description": "Structured questions: the user's choice per question, in order (present when the call blocked until answered).",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QuestionAnswerItem"
+          }
         }
       }
     },
@@ -193,6 +200,96 @@
         "created_at": {
           "type": "string",
           "format": "date-time"
+        }
+      }
+    },
+    "AskQuestion": {
+      "title": "AskQuestion",
+      "type": "object",
+      "required": [
+        "question",
+        "header",
+        "options"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "question": {
+          "description": "The complete question, ending with a question mark.",
+          "type": "string",
+          "minLength": 1
+        },
+        "header": {
+          "description": "Very short label shown as a chip (max 12 characters).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "options": {
+          "description": "2-4 distinct choices; an \"other\" free-text answer is always offered, do not add one.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/AskOption"
+          }
+        },
+        "multi_select": {
+          "description": "Let the user pick several options.",
+          "type": "boolean"
+        }
+      }
+    },
+    "AskOption": {
+      "title": "AskOption",
+      "type": "object",
+      "required": [
+        "label"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "description": "The choice, 1-5 words.",
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "description": "What choosing it means (trade-offs, consequences).",
+          "type": "string"
+        },
+        "recommended": {
+          "description": "Mark the option you recommend (at most one per question).",
+          "type": "boolean"
+        },
+        "preview": {
+          "description": "Ignored (accepted for AskUserQuestion compatibility).",
+          "type": "string"
+        }
+      }
+    },
+    "QuestionAnswerItem": {
+      "title": "QuestionAnswerItem",
+      "type": "object",
+      "required": [
+        "question",
+        "selected"
+      ],
+      "properties": {
+        "question": {
+          "type": "string"
+        },
+        "header": {
+          "type": "string"
+        },
+        "selected": {
+          "description": "Labels of the chosen options.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "other": {
+          "description": "The user's own answer typed into 其他.",
+          "type": "string"
         }
       }
     }

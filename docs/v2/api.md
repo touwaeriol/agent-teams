@@ -76,10 +76,16 @@ MainTaskView    = {id, pos, title, status: "todo"|"doing"|"done", auto_done, tas
 TaskView        = {id, thread_no, main_task_id, assignee, role, claimed_by, kind, instruction, status, depends_on: string[],
                    parent, priority, attempt, summary, branch, head_sha, created_at, claimed_at, finished_at}
 QuestionView    = {id, thread_no, asker, task_id, audience: "lead"|"user", kind: "question"|"approval", text, options: string[],
-                   detail: {tool_name?, input?, title?, description?, diff?, source?}, blocking, answer, status, decided_by,
+                   detail: {tool_name?, input?, title?, description?, diff?, source?,
+                            questions?: [{question, header, multi_select?, options: [{label, description?, recommended?}]}],  // 结构化提问
+                            answers?: [{question, header?, selected: string[], other?}], via?: "AskUserQuestion"},
+                   blocking, answer, status, decided_by,
                    created_at, answered_at}
-MessageView     = {id, role: "user"|"leader"|"employee"|"system"|"error", author, kind: "chat"|"note"|"interrupt",
-                   content, meta: {thread_no?, task_id?, opens_thread?: number}, created_at}
+MessageView     = {id, role: "user"|"leader"|"employee"|"system"|"error", author,
+                   kind: "chat"|"note"|"interrupt"|"todos"|"plan"|"artifact"|"resumed",   // 后四种是对话卡片（architecture.md §6.6）
+                   content, meta: {thread_no?, task_id?, opens_thread?: number, employee?, todos?: [{content, status, active_form?}],
+                   deliverable?: {id, kind, title, url, hosted, entry, render, version}}, created_at}
+                   // todos 卡片原地更新：同一 id 的 message 事件再来一次，网页按 id 替换
 MailView        = {id, sender, recipient, body, created_at}
 EmployeeBrief   = {id, name, tier, role, title, runtime, node: {id, name, online} | null, look: Look,
                    status: EmployeeStatusView | null}
@@ -133,7 +139,7 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | POST | `/api/conversations/{cid}/interrupt` | → 202。中止该对话员工的当前回合（停止按钮） |
 | GET | `/api/projects/{pid}/threads?status=&group=waiting\|active\|done` | → `ThreadView[]`（右侧讨论串列表：等你处理 / 进行中 / 已完成，归档的折叠在底部“已归档 N”里） |
 | GET | `/api/projects/{pid}/waiting` | → `{questions: QuestionView[], reviews: ThreadView[]}`（跨讨论串的“等你处理”） |
-| POST | `/api/conversations/{cid}/questions/{qid}/answer` | `{answer}`；审批用 `allow`、`deny`、`allow_always`，可附 `reason`（拒绝理由，发给员工）→ `QuestionView`（v1 路径，语义扩展） |
+| POST | `/api/conversations/{cid}/questions/{qid}/answer` | `{answer?, answers?, reason?}`；审批用 `answer` = `allow`、`deny`、`allow_always`，可附 `reason`（拒绝理由，发给员工）；提问用 `answer`（文字）或 `answers: [{selected: string[], other?}]`（结构化提问，按问题顺序，对不上卡片 → 422 `validation`）→ `QuestionView`（v1 路径，语义扩展） |
 | GET | `/api/conversations/{cid}/questions?status=open\|all` | → `QuestionView[]`（v1 路径） |
 | GET | `/api/projects/{pid}/search?q=` | 搜索消息、讨论串标题、任务、交付物（PG `tsvector` + `pg_trgm`，中文用 trigram）→ `{threads, messages, tasks, deliverables}` |
 

@@ -310,6 +310,15 @@ export interface ContentBlock {
   text: string;
 }
 /**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "TodoItem".
+ */
+export interface TodoItem {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+  active_form?: string;
+}
+/**
  * Credential helper asks for a short-lived token. Unreliable, retried after 10 s with the same req_id; never logged.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -744,7 +753,9 @@ export interface SessionEvent {
     | "rate_limited"
     | "subagent"
     | "notification"
-    | "error";
+    | "error"
+    | "todos"
+    | "plan";
   at: Timestamp;
   /**
    * turn_started.
@@ -842,6 +853,16 @@ export interface SessionEvent {
    * error.
    */
   fatal?: boolean;
+  /**
+   * todos: the employee's whole checklist after a TodoWrite (latest state).
+   *
+   * @maxItems 100
+   */
+  todos?: TodoItem[];
+  /**
+   * plan: the Markdown plan of an ExitPlanMode call, truncated to 32 KB.
+   */
+  plan?: string;
 }
 /**
  * Interrupt the running turn.
@@ -1576,6 +1597,26 @@ export interface AskLeadResult {
    * Present when the call blocked until answered.
    */
   answer?: string;
+  /**
+   * Structured questions: the user's choice per question, in order (present when the call blocked until answered).
+   */
+  answers?: QuestionAnswerItem[];
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "QuestionAnswerItem".
+ */
+export interface QuestionAnswerItem {
+  question: string;
+  header?: string;
+  /**
+   * Labels of the chosen options.
+   */
+  selected: string[];
+  /**
+   * The user's own answer typed into 其他.
+   */
+  other?: string;
 }
 /**
  * Ask the thread lead a question and wait for the answer.
@@ -1596,19 +1637,89 @@ export interface AskUserResult {
    * Present when the call blocked until answered.
    */
   answer?: string;
+  /**
+   * Structured questions: the user's choice per question, in order (present when the call blocked until answered).
+   */
+  answers?: QuestionAnswerItem[];
 }
 /**
- * Ask the user a question (a card on the web page). Members block until the user answers and get the answer back; the coordinator and leads get the question id at once and receive "[Answer to q5] ..." as a later message.
+ * Ask the user a question (a card on the web page). Either a plain question (question + optional options) or up to 4 structured questions (questions: each with a short header, 2-4 options with a description, one may be recommended, multi_select for several answers; the user can always type their own answer instead). Members block until the user answers and get the answer back; the coordinator and leads get the question id at once and receive "[Answer to q5] ..." as a later message. Give question or questions.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "AskUserInput".
  */
 export interface AskUserInput {
-  question: string;
   /**
-   * Suggested answers shown as buttons.
+   * A plain question (use questions for choices with descriptions).
+   */
+  question?: string;
+  /**
+   * Suggested answers shown as buttons (with question).
    */
   options?: string[];
+  /**
+   * Structured questions shown as one card, like Claude Code's AskUserQuestion.
+   *
+   * @minItems 1
+   * @maxItems 4
+   */
+  questions?:
+    | [AskQuestion]
+    | [AskQuestion, AskQuestion]
+    | [AskQuestion, AskQuestion, AskQuestion]
+    | [AskQuestion, AskQuestion, AskQuestion, AskQuestion];
+  /**
+   * Set by the platform when Claude's built-in AskUserQuestion is routed here (the call then blocks for every tier). Do not set it yourself.
+   */
+  via?: "AskUserQuestion";
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "AskQuestion".
+ */
+export interface AskQuestion {
+  /**
+   * The complete question, ending with a question mark.
+   */
+  question: string;
+  /**
+   * Very short label shown as a chip (max 12 characters).
+   */
+  header: string;
+  /**
+   * 2-4 distinct choices; an "other" free-text answer is always offered, do not add one.
+   *
+   * @minItems 2
+   * @maxItems 4
+   */
+  options:
+    [AskOption, AskOption] | [AskOption, AskOption, AskOption] | [AskOption, AskOption, AskOption, AskOption];
+  /**
+   * Let the user pick several options.
+   */
+  multi_select?: boolean;
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "AskOption".
+ */
+export interface AskOption {
+  /**
+   * The choice, 1-5 words.
+   */
+  label: string;
+  /**
+   * What choosing it means (trade-offs, consequences).
+   */
+  description?: string;
+  /**
+   * Mark the option you recommend (at most one per question).
+   */
+  recommended?: boolean;
+  /**
+   * Ignored (accepted for AskUserQuestion compatibility).
+   */
+  preview?: string;
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -1724,6 +1835,10 @@ export interface QuestionAnswer {
    * Present when the call blocked until answered.
    */
   answer?: string;
+  /**
+   * Structured questions: the user's choice per question, in order (present when the call blocked until answered).
+   */
+  answers?: QuestionAnswerItem[];
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema

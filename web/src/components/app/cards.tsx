@@ -1,4 +1,4 @@
-// Cards that wait for the user: permission requests, questions and PR
+// Cards that wait for the user: permission requests, plan approvals, questions (AskCard) and PR
 // acceptance. Three looks: `soft` (thread panel), `plain` (Thread page aside),
 // `mobile` (44 px buttons in a grid).
 import { useState, type ReactNode } from "react";
@@ -10,6 +10,8 @@ import { Spinner } from "@/components/common";
 import { approvalCardStatus, approvalCommand, reviewNote, threadBases, threadPRs } from "@/lib/present";
 import { cn } from "@/lib/utils";
 import { safeHref } from "@/lib/safeurl";
+import { Markdown } from "@/components/Markdown";
+import { AskCard } from "./chatcards";
 
 export type CardVariant = "soft" | "plain" | "mobile";
 
@@ -137,36 +139,28 @@ export function ApprovalCard({ cid, pid, question, variant = "soft" }: { cid: st
   );
 }
 
-/** A question for the user: one button per option, or a typed answer. */
-export function QuestionCard({ cid, pid, question, variant = "soft", leadName }: { cid: string; pid: string; question: QuestionView; variant?: CardVariant; leadName?: string }) {
+/** A plan an ask-role employee wants approved (ExitPlanMode): the plan as Markdown, 批准计划 / 提修改意见. */
+export function PlanApprovalCard({ cid, pid, question, variant = "soft" }: { cid: string; pid: string; question: QuestionView; variant?: CardVariant }) {
   const answer = useAnswer(cid, question, pid);
-  const [typing, setTyping] = useState(question.options.length === 0);
+  const [rejecting, setRejecting] = useState(false);
+  const plan = typeof question.detail.input?.plan === "string" ? question.detail.input.plan : "";
   const head = (
-    <>
-      <span>
-        {askerTitle(question, leadName)} · <span className="text-[#B4530B]">等你处理</span>
-      </span>
-    </>
+    <span>
+      <span className="font-mono">{question.asker}</span> 的计划等你批准 · <span className="text-[#B4530B]">等你处理</span>
+    </span>
   );
   return (
-    <Frame variant={variant} head={head} code={question.text} label={askerTitle(question, leadName)}>
-      {typing ? (
-        <ReasonBox
-          placeholder="写下你的回答"
-          confirm="回答"
-          busy={answer.isPending}
-          onCancel={() => setTyping(question.options.length === 0 ? true : false)}
-          onSubmit={(text) => text && answer.mutate({ answer: text })}
-        />
+    <Frame variant={variant} head={head} label={`${question.asker} 的计划`}>
+      {plan ? <Markdown className="rounded-lg border border-[#F3E2D3] bg-white px-3 py-2 text-[13px] leading-6">{plan}</Markdown> : <p className="text-xs text-muted-foreground">计划内容见上面的计划卡片。</p>}
+      {rejecting ? (
+        <ReasonBox placeholder="哪里要改？会发给员工" confirm="发回修改" busy={answer.isPending} onCancel={() => setRejecting(false)} onSubmit={(reason) => answer.mutate({ answer: "deny", reason: reason || undefined })} />
       ) : (
-        <Actions variant={variant} count={Math.min(3, question.options.length + 1)}>
-          {question.options.map((o, i) => (
-            <CardButton key={o} kind={i === 0 ? "primary" : "outline"} variant={variant} busy={answer.isPending && answer.variables?.answer === o} onClick={() => answer.mutate({ answer: o })}>
-              {o}
-            </CardButton>
-          ))}
-          <CardButton kind="outline" variant={variant} onClick={() => setTyping(true)}>
-            其他回答
+        <Actions variant={variant} count={2}>
+          <CardButton kind="primary" variant={variant} busy={answer.isPending} onClick={() => answer.mutate({ answer: "allow" })}>
+            批准计划
+          </CardButton>
+          <CardButton kind="outline" variant={variant} onClick={() => setRejecting(true)}>
+            提修改意见
           </CardButton>
         </Actions>
       )}
@@ -174,9 +168,18 @@ export function QuestionCard({ cid, pid, question, variant = "soft", leadName }:
   );
 }
 
-/** Either card, by kind. */
+/** The card for a waiting question: a plan approval, a permission request, or a question (AskCard). */
 export function WaitingCard(props: { cid: string; pid: string; question: QuestionView; variant?: CardVariant; leadName?: string }) {
-  return props.question.kind === "approval" ? <ApprovalCard {...props} /> : <QuestionCard {...props} />;
+  const q = props.question;
+  if (q.kind === "approval" && q.detail.tool_name === "ExitPlanMode") return <PlanApprovalCard {...props} />;
+  if (q.kind === "approval") return <ApprovalCard {...props} />;
+  return <AskCard cid={props.cid} pid={props.pid} question={q} who={askerName(q, props.leadName)} />;
+}
+
+/** Who asks, when it is not the person the chat is with (the lead in a thread, the coordinator). */
+function askerName(q: QuestionView, leadName?: string): string | undefined {
+  if (q.asker === leadName || q.asker.startsWith("lead") || q.asker === "coordinator" || !q.thread_no) return undefined;
+  return q.asker;
 }
 
 /** PR acceptance: 验收通过并合并 / 提修改意见 (reason goes to the lead). */

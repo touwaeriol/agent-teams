@@ -1,3 +1,5 @@
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { claudeOpen, startHarness, type Harness } from "./helpers/daemon.js";
 
@@ -225,5 +227,71 @@ describe("daemon with a fake console", () => {
     expect(report.body.sessions[0]).toMatchObject({ session_id: "s_J", state: "parked", pending_approvals: [] });
     const replayed = h.console.frames.filter((f) => f.type === "approval.request" && f.body.approval_id === req.body.approval_id);
     expect(replayed.length).toBe(1);
+  });
+
+  it("routes Claude's AskUserQuestion to a blocking ask_user and hands the answers back as the tool input", async () => {
+    h = await startHarness();
+    await openAndRelease("s_Q");
+    const ask = { questions: [{ question: "Switch sessions too?", header: "Sessions", multiSelect: false, options: [{ label: "Switch", description: "Drop JWT" }, { label: "Keep", description: "Keep JWT" }] }] };
+    h.console.command("session.send", { session_id: "s_Q", msg_id: "m_q", text: `builtin AskUserQuestion ${JSON.stringify(ask)}` });
+    const call = await h.console.waitType("tool.call", (b) => b.tool === "ask_user");
+    expect(call.body.args).toEqual({ via: "AskUserQuestion", questions: [{ question: "Switch sessions too?", header: "Sessions", options: [{ label: "Switch", description: "Drop JWT" }, { label: "Keep", description: "Keep JWT" }] }] });
+    expect(String(call.body.tool_use_id)).toMatch(/^toolu_AskUserQuestion_/);
+    h.console.command("tool.result", { session_id: "s_Q", call_id: call.body.call_id, ok: true, content: [{ type: "text", text: "Switch" }],
+      structured: { question_id: "q4", answer: "Switch", answers: [{ question: "Switch sessions too?", header: "Sessions", selected: ["Switch"], other: "after the release" }] } });
+    const text = await h.console.waitType("session.event", (b) => b.kind === "text" && b.final === true);
+    expect(text.body.text).toBe('AskUserQuestion ran with {"Switch sessions too?":"Switch, after the release"}');
+  });
+
+  it("refuses AskUserQuestion with the reason when the platform call fails", async () => {
+    h = await startHarness();
+    await openAndRelease("s_Q2");
+    h.console.command("session.send", { session_id: "s_Q2", msg_id: "m_q2", text: 'builtin AskUserQuestion {"questions":[{"question":"A?","header":"A","options":[{"label":"x"},{"label":"y"}]}]}' });
+    const call = await h.console.waitType("tool.call", (b) => b.tool === "ask_user");
+    h.console.command("tool.result", { session_id: "s_Q2", call_id: call.body.call_id, ok: false, content: [{ type: "text", text: "thread archived" }] });
+    const text = await h.console.waitType("session.event", (b) => b.kind === "text" && b.final === true);
+    expect(text.body.text).toBe("denied: The user did not answer on the platform: thread archived");
+  });
+
+  it("reports TodoWrite as a todos event and ExitPlanMode as a plan event", async () => {
+    h = await startHarness();
+    await openAndRelease("s_T");
+    const todos = { todos: [{ content: "Write tests", status: "completed", activeForm: "Writing tests" }, { content: "Fix bug", status: "in_progress", activeForm: "Fixing bug" }, { content: "Ship", status: "pending", activeForm: "Shipping" }] };
+    h.console.command("session.send", { session_id: "s_T", msg_id: "m_t", text: `builtin TodoWrite ${JSON.stringify(todos)}` });
+    const ev = await h.console.waitType("session.event", (b) => b.kind === "todos");
+    expect(ev.body.todos).toEqual([{ content: "Write tests", status: "completed", active_form: "Writing tests" }, { content: "Fix bug", status: "in_progress", active_form: "Fixing bug" }, { content: "Ship", status: "pending", active_form: "Shipping" }]);
+    const plans = join(h.opts.claudeConfigDir, "plans");
+    mkdirSync(plans, { recursive: true });
+    writeFileSync(join(plans, "p.md"), "# Plan\n\n1. Do it");
+    h.console.command("session.send", { session_id: "s_T", msg_id: "m_p", text: `builtin ExitPlanMode ${JSON.stringify({ planFile: join(plans, "p.md") })}` });
+    const plan = await h.console.waitType("session.event", (b) => b.kind === "plan");
+    expect(plan.body.plan).toBe("# Plan\n\n1. Do it");
+  });
+
+  it("answers resume_failed when a parked session's transcript is gone, without a closed state first", async () => {
+    h = await startHarness();
+    await openAndRelease("s_R");
+    h.console.command("session.send", { session_id: "s_R", msg_id: "m_r1", text: "remember the word heron" });
+    await h.console.waitType("session.event", (b) => b.kind === "turn_ended");
+    await (h.daemon.sessions as unknown as { park(s: unknown): Promise<void>; sessions: Map<string, unknown> }).park((h.daemon.sessions as unknown as { sessions: Map<string, unknown> }).sessions.get("s_R"));
+    await h.console.waitType("session.state", (b) => b.session_id === "s_R" && b.state === "parked");
+    rmSync(join(h.opts.claudeConfigDir, "projects"), { recursive: true, force: true });
+    h.console.command("session.send", { session_id: "s_R", msg_id: "m_r2", text: "what was the word?" });
+    const opened = await h.console.waitType("session.opened", (b) => b.session_id === "s_R" && b.resume_failed === true);
+    expect(opened.body.error).toMatch(/not found/);
+    expect(h.console.ofType("session.state").some((f) => f.body.session_id === "s_R" && f.body.state === "closed")).toBe(false);
+    expect(h.daemon.sessions.report().sessions.map((x) => x.session_id)).not.toContain("s_R");
+  });
+
+  it("answers resume_failed when a crashed session cannot be resumed", async () => {
+    h = await startHarness({ crashDelaysMs: [10, 10, 10] });
+    await openAndRelease("s_X");
+    h.console.command("session.send", { session_id: "s_X", msg_id: "m_x1", text: "hi" });
+    await h.console.waitType("session.event", (b) => b.kind === "turn_ended");
+    rmSync(join(h.opts.claudeConfigDir, "projects"), { recursive: true, force: true });
+    h.console.command("session.send", { session_id: "s_X", msg_id: "m_x2", text: "crash" });
+    const opened = await h.console.waitType("session.opened", (b) => b.session_id === "s_X" && b.resume_failed === true);
+    expect(opened.body.open_gen).toBe(1);
+    expect(h.log.options.length).toBe(1);
   });
 });

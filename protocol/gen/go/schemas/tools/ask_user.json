@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/tools/ask_user.json",
   "title": "AskUserInput",
-  "description": "Ask the user a question (a card on the web page). Members block until the user answers and get the answer back; the coordinator and leads get the question id at once and receive \"[Answer to q5] ...\" as a later message.",
+  "description": "Ask the user a question (a card on the web page). Either a plain question (question + optional options) or up to 4 structured questions (questions: each with a short header, 2-4 options with a description, one may be recommended, multi_select for several answers; the user can always type their own answer instead). Members block until the user answers and get the answer back; the coordinator and leads get the question id at once and receive \"[Answer to q5] ...\" as a later message. Give question or questions.",
   "x-tool": {
     "tiers": [
       "coordinator",
@@ -14,21 +14,35 @@
     ]
   },
   "type": "object",
-  "required": [
-    "question"
-  ],
   "additionalProperties": false,
   "properties": {
     "question": {
+      "description": "A plain question (use questions for choices with descriptions).",
       "type": "string",
       "minLength": 1
     },
     "options": {
-      "description": "Suggested answers shown as buttons.",
+      "description": "Suggested answers shown as buttons (with question).",
       "type": "array",
       "items": {
         "type": "string"
       }
+    },
+    "questions": {
+      "description": "Structured questions shown as one card, like Claude Code's AskUserQuestion.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "items": {
+        "$ref": "common.json#/$defs/AskQuestion"
+      }
+    },
+    "via": {
+      "description": "Set by the platform when Claude's built-in AskUserQuestion is routed here (the call then blocks for every tier). Do not set it yourself.",
+      "type": "string",
+      "enum": [
+        "AskUserQuestion"
+      ]
     }
   },
   "$defs": {

@@ -258,7 +258,7 @@ func TestThreadEndToEnd(t *testing.T) {
 func assertCoordinatorSpec(t *testing.T, open protocol.SessionOpen) {
 	t.Helper()
 	c := open.Claude
-	if c == nil || len(c.Tools) != 0 || c.PermissionMode != "dontAsk" || c.DenyNonPlatformTools == nil || !*c.DenyNonPlatformTools {
+	if c == nil || strings.Join(c.Tools, ",") != "TodoWrite,AskUserQuestion" || c.PermissionMode != "dontAsk" || c.DenyNonPlatformTools == nil || !*c.DenyNonPlatformTools {
 		t.Fatalf("coordinator options %+v", c)
 	}
 	if open.GitCredentials != nil && *open.GitCredentials {

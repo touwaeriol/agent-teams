@@ -44,7 +44,9 @@
         "rate_limited",
         "subagent",
         "notification",
-        "error"
+        "error",
+        "todos",
+        "plan"
       ]
     },
     "at": {
@@ -165,6 +167,19 @@
     "fatal": {
       "description": "error.",
       "type": "boolean"
+    },
+    "todos": {
+      "description": "todos: the employee's whole checklist after a TodoWrite (latest state).",
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "common.json#/$defs/TodoItem"
+      }
+    },
+    "plan": {
+      "description": "plan: the Markdown plan of an ExitPlanMode call, truncated to 32 KB.",
+      "type": "string",
+      "maxLength": 32768
     }
   },
   "allOf": [
@@ -320,6 +335,34 @@
           "code",
           "message",
           "fatal"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "todos"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "todos"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "plan"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "plan"
         ]
       }
     }

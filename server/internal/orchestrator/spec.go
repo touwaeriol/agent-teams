@@ -16,8 +16,13 @@ import (
 
 // Built-in tool sets (architecture.md §6.1).
 var (
-	leadTools         = []string{"Read", "Glob", "Grep", "Bash"}
-	memberTools       = []string{"Read", "Glob", "Grep", "Edit", "Write", "Bash"}
+	leadTools   = []string{"Read", "Glob", "Grep", "Bash"}
+	memberTools = []string{"Read", "Glob", "Grep", "Edit", "Write", "Bash"}
+	// chatTools talk to the user through the chat (§6.6): TodoWrite is the live checklist,
+	// AskUserQuestion becomes the platform question card. Every tier has them.
+	chatTools = []string{"TodoWrite", "AskUserQuestion"}
+	// planTools let a writing member plan first; the plan shows as a card (approval for ask roles).
+	planTools         = []string{"EnterPlanMode", "ExitPlanMode"}
 	writeTools        = []string{"Edit", "Write", "NotebookEdit", "MultiEdit"}
 	coordinatorDeny   = []string{"Bash", "Edit", "Write", "MultiEdit", "NotebookEdit", "Read", "Glob", "Grep", "WebFetch", "WebSearch", "Task"}
 	readOnlyBashAllow = []string{"git log", "git diff", "git show", "git status", "git rev-parse", "git ls-files", "git blame",
@@ -205,7 +210,7 @@ func claudeOptions(in sessionInput) protocol.ClaudeSessionOptions {
 
 func coordinatorClaude(c *protocol.ClaudeSessionOptions) {
 	t := true
-	c.Tools = []string{}
+	c.Tools = slices.Clone(chatTools)
 	c.DisallowedTools = coordinatorDeny
 	c.PermissionMode = "dontAsk"
 	c.DenyNonPlatformTools = &t
@@ -213,7 +218,7 @@ func coordinatorClaude(c *protocol.ClaudeSessionOptions) {
 
 func readOnlyClaude(c *protocol.ClaudeSessionOptions, in sessionInput) {
 	t := true
-	c.Tools = slices.Clone(leadTools)
+	c.Tools = mergeLists(leadTools, chatTools)
 	c.DisallowedTools = mergeLists(writeTools, in.emp.Spec.DisallowedTools)
 	c.PermissionMode = "dontAsk"
 	c.ReadOnly = &t
@@ -222,12 +227,12 @@ func readOnlyClaude(c *protocol.ClaudeSessionOptions, in sessionInput) {
 	c.ProtectedRefs = in.protRefs
 	// dontAsk denies whatever is not pre-approved: the read tools are allowed here,
 	// Bash is narrowed further by bash_policy in the daemon's PreToolUse hook.
-	c.AllowedTools = mergeLists(c.AllowedTools, leadTools, in.emp.Spec.AllowedTools, in.rules)
+	c.AllowedTools = mergeLists(c.AllowedTools, leadTools, chatTools, in.emp.Spec.AllowedTools, in.rules)
 }
 
 func memberClaude(c *protocol.ClaudeSessionOptions, in sessionInput) {
 	e := in.emp
-	c.Tools = slices.Clone(memberTools)
+	c.Tools = mergeLists(memberTools, chatTools, planTools)
 	c.AllowedTools = mergeLists(c.AllowedTools, e.Spec.AllowedTools, in.rules)
 	c.DisallowedTools = mergeLists(e.Spec.DisallowedTools)
 	c.PermissionMode = protocol.PermissionMode(ClaudeMode(e))
@@ -275,7 +280,7 @@ func mergeLists(lists ...[]string) []string {
 // ToolsAllowed checks the init tool list of a session against its role (§10.2 third line of defence).
 func ToolsAllowed(e core.Employee, tools []string) (bool, string) {
 	for _, t := range tools {
-		if e.Tier == "coordinator" && !strings.HasPrefix(t, "mcp__platform__") {
+		if e.Tier == "coordinator" && !strings.HasPrefix(t, "mcp__platform__") && !slices.Contains(chatTools, t) {
 			return false, t
 		}
 		if readOnly(e) && slices.Contains(writeTools, t) {

@@ -21,7 +21,8 @@ import { ProjectSwitcher } from "@/components/shell/ProjectSwitcher";
 import { NavButton } from "@/components/shell/Shell";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { sectionOf } from "@/lib/projectSettings";
-import { markTone, openForUser, threadLook } from "@/lib/present";
+import { chatQuestions } from "@/lib/ask";
+import { markTone, threadLook } from "@/lib/present";
 import { ProjectSettingsDialog } from "./ProjectSettings";
 
 export function useProjectId(): string {
@@ -194,22 +195,17 @@ function ThreadChips({ pid, threads }: { pid: string; threads: ThreadView[] }) {
 function CoordinatorChat({ pid, coordinator, threads, onOpenThread }: { pid: string; coordinator?: CoordinatorView; threads: ThreadView[]; onOpenThread: (no: number) => void }) {
   const cid = coordinator?.conversation_id;
   const questions = useQuestions(cid);
-  const open = openForUser(questions.data);
+  const inserts = cid
+    ? chatQuestions(questions.data).map((q) => ({ key: q.id, at: q.created_at, node: <WaitingCard cid={cid} pid={pid} question={q} variant="soft" /> }))
+    : [];
   const empty = (
     <div className="flex flex-col items-center gap-2 py-16 text-center">
       <p className="text-[15px] font-medium">和项目统筹说说要做什么</p>
       <p className="max-w-md text-[13px] leading-6 text-muted-foreground">统筹只分派、不改代码：它会判断要做什么，开讨论串让组长带成员在仓库里完成，有结论回到这里告诉你。</p>
     </div>
   );
-  const after = cid && open.length > 0 && (
-    <div className="flex flex-col gap-3">
-      {open.map((q) => (
-        <WaitingCard key={q.id} cid={cid} pid={pid} question={q} variant="soft" />
-      ))}
-    </div>
-  );
   if (!coordinator) return <Loading className="py-16" />;
-  return <Chat cid={cid} threads={threads} onOpenThread={onOpenThread} empty={empty} after={after} speakerColor="#C8622A" />;
+  return <Chat cid={cid} pid={pid} threads={threads} onOpenThread={onOpenThread} empty={empty} inserts={inserts} speakerColor="#C8622A" />;
 }
 
 function CoordinatorComposer({ pid, coordinator }: { pid: string; coordinator?: CoordinatorView }) {
@@ -236,6 +232,7 @@ function CoordinatorComposer({ pid, coordinator }: { pid: string; coordinator?: 
         attachments={attachments}
         onSend={(text, images) => send.mutateAsync({ text, images })}
         id="boss"
+        draftKey={cid ? `draft:${cid}` : undefined}
       />
     </div>
   );

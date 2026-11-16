@@ -11,6 +11,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
+	"github.com/touwaeriol/agent-teams/server/internal/toolsvc"
 )
 
 type pidInput struct {
@@ -68,8 +69,9 @@ type answerInput struct {
 	QID            string `path:"qid" maxLength:"16"`
 	IdempotencyKey string `header:"Idempotency-Key" maxLength:"128"`
 	Body           struct {
-		Answer string `json:"answer" minLength:"1" maxLength:"20000" doc:"Approvals: allow | allow_always | deny"`
-		Reason string `json:"reason,omitempty" maxLength:"2000" doc:"Why an approval was denied (sent to the employee)"`
+		Answer  string                 `json:"answer,omitempty" maxLength:"20000" doc:"Approvals: allow | allow_always | deny; questions: the text answer"`
+		Answers []toolsvc.AnswerChoice `json:"answers,omitempty" maxItems:"4" doc:"Structured questions (detail.questions): one choice per question, in order"`
+		Reason  string                 `json:"reason,omitempty" maxLength:"2000" doc:"Why an approval was denied (sent to the employee)"`
 	}
 }
 
@@ -217,7 +219,7 @@ func (a *API) answerCard(ctx context.Context, u store.User, convID string, in *a
 	if q.Kind == "approval" {
 		q, err = a.e.Approvals.Answer(ctx, u, convID, in.QID, strings.TrimSpace(in.Body.Answer), in.Body.Reason)
 	} else {
-		q, err = a.e.Tools.AnswerQuestion(ctx, u, convID, in.QID, strings.TrimSpace(in.Body.Answer))
+		q, err = a.e.Tools.AnswerQuestion(ctx, u, convID, in.QID, strings.TrimSpace(in.Body.Answer), in.Body.Answers)
 	}
 	if err != nil {
 		return core.QuestionView{}, err

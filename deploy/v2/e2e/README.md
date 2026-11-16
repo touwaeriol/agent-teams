@@ -16,6 +16,7 @@ node deploy/v2/e2e/run_lifecycle.mjs "$S"           # image to the coordinator, 
 node deploy/v2/e2e/run_bypass.mjs "$S"              # default bypass: Bash and writes with no approval card, ask_user still reaches the user (haiku)
 node deploy/v2/e2e/run_permissions.mjs "$S"         # an ask role: lead review, a request the lead hands to the user (haiku)
 node deploy/v2/e2e/run_restart.mjs "$S"             # daemon restart while a card waits: resume, same card reattached (haiku)
+node deploy/v2/e2e/run_resume.mjs "$S"              # code word survives park, SIGTERM, SIGKILL, console restart, lost transcript; question cards (haiku)
 # screenshots (Playwright image, NODE_PATH with the playwright package):
 node deploy/v2/e2e/screenshots.cjs http://127.0.0.1:<PORT> <out> <project-id> 1
 node deploy/v2/e2e/screenshots_multi.cjs http://127.0.0.1:<PORT> <out> <project-id> 1 <deliverable-id>   # ids in $S/multi-state.json
@@ -37,6 +38,7 @@ node --test deploy/v2/e2e/localgh.test.mjs          # the emulator's own tests
 | `run_bypass.mjs` | the dev in the default `bypass` mode on a plain (not isolated) node runs Bash, writes in its worktree and outside it with zero approval rows in `at_questions` and no `approval.request` from the daemon; its `ask_user` question reaches the user, is answered through the API, and the dev writes the answer down and completes its task; about 3 minutes |
 | `run_permissions.mjs` | the dev is an `ask` role; its first write goes to the lead, which allows it (the card never reaches the user); a second one the lead hands over (`ask_user`) becomes the user's card, answered through the API, and the dev completes its task. Pauses at `running` and `escalated` until `<scratch>/go-<name>` exists; about 3 minutes |
 | `run_restart.mjs` | the dev's write outside its worktree raises the user's card; the daemon gets SIGTERM and is started again while the card is open; the dev receives the restart note, re-issues the write, the same card is attached to the new request (never cancelled, no second card), the API answers it and the dev completes its task; about 3 minutes |
+| `run_resume.mjs` | the coordinator is told a code word, then its session is parked (`park_after_s`), the daemon is stopped with SIGTERM and with SIGKILL and started again, the control plane restarts, and the session transcript is deleted on the node (resume fails → a fresh session seeded with the recap, a `resumed` note in the chat); after each one it must answer the code word. Then Claude's own AskUserQuestion becomes a blocking platform card (`detail.via`) and a structured `ask_user` card, both answered through the API with per-question choices, and the coordinator repeats the choice. `--only park,sigterm,…` runs a subset; about 10 minutes |
 | `screenshots.cjs` | Main + thread panel, Thread, Office, Team, Nodes at deviceScaleFactor 2 |
 
 With no CI on the test repository the merge queue waits `appear_timeout_s` (300 s) and then

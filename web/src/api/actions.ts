@@ -2,7 +2,7 @@
 // Pages wrap them with `useAction` (mutations.ts) for toasts and cache refresh.
 import { client, unwrap } from "./client";
 import type { components } from "./schema";
-import type { MainTaskStatus } from "./views";
+import type { AskChoice, MainTaskStatus } from "./views";
 
 type S = components["schemas"];
 
@@ -65,8 +65,8 @@ export const conversations = {
       }),
     ),
   interrupt: (cid: string) => unwrap(client.POST("/api/conversations/{cid}/interrupt", { params: { path: { cid } } })),
-  answer: (cid: string, qid: string, answer: string, reason?: string) =>
-    unwrap(client.POST("/api/conversations/{cid}/questions/{qid}/answer", { params: { path: { cid, qid } }, body: { answer, reason }, ...idem() })),
+  answer: (cid: string, qid: string, answer: string, reason?: string, answers?: AskChoice[]) =>
+    unwrap(client.POST("/api/conversations/{cid}/questions/{qid}/answer", { params: { path: { cid, qid } }, body: { answer, reason, ...(answers ? { answers } : {}) }, ...idem() })),
 };
 
 export const threads = {

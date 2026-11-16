@@ -4,7 +4,7 @@
 "list_threads":[{},{"status":"running"}],
 "thread_status":[{"no":12}],
 "message_thread":[{"no":12,"text":"Please prioritise the API."}],
-"ask_user":[{"question":"Which database?","options":["PostgreSQL","SQLite"]},{"question":"OK to deploy?"}],
+"ask_user":[{"question":"Which database?","options":["PostgreSQL","SQLite"]},{"question":"OK to deploy?"},{"questions":[{"question":"Switch sessions to Valkey tokens too?","header":"Sessions","options":[{"label":"Switch too","description":"Drop JWT and refresh; everyone signs in again.","recommended":true},{"label":"Keep JWT","description":"Only new logins use Valkey."}]},{"question":"Which checks should run?","header":"Checks","multi_select":true,"options":[{"label":"Unit"},{"label":"E2E"},{"label":"Lint"}]}]},{"questions":[{"question":"Ship now?","header":"Release","options":[{"label":"Yes"},{"label":"No"}]}],"via":"AskUserQuestion"}],
 "remember":[{"text":"The user prefers small PRs."}],
 "set_status":[{"text":"Writing the migration"},{"text":"Need a decision","kind":"ask"}],
 "update_plan":[{"steps":[{"title":"Schema","status":"done"},{"title":"API","status":"doing"},{"title":"UI","status":"todo"}]}],

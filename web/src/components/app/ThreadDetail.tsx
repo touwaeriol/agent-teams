@@ -1,7 +1,8 @@
 // One thread, chat only (like Claude Code's thread panel): a one-line header
 // "讨论串 > ● #12 标题" with ✓ (archive), ⋯ (任务 / 交付物 / 成员 / 全屏 / 暂停 / 归档 / 删除),
-// expand and close; then the conversation between you and the lead — question and
-// acceptance cards waiting for you sit where they were asked — and the message box.
+// expand and close; then the conversation between you and the lead — question cards
+// (answered ones collapsed to your choice), the lead's checklist, plans, published files
+// and the acceptance card sit where they happened — and the message box.
 // 任务 / 交付物 / 成员 open in a dialog over the chat (ThreadViews.tsx).
 import { ChevronRight, Maximize2, Minimize2, X } from "lucide-react";
 import type { ReactNode } from "react";
@@ -12,7 +13,8 @@ import type { ThreadView } from "@/api/views";
 import { IconButton, IconLink } from "@/components/common";
 import { threadTalk } from "@/lib/chat";
 import { isWorking, threadActive } from "@/lib/live";
-import { leadOf, openForUser, threadLook } from "@/lib/present";
+import { chatQuestions } from "@/lib/ask";
+import { leadOf, threadLook } from "@/lib/present";
 import { cn } from "@/lib/utils";
 import { useAttachments } from "./attachments";
 import { Composer, Dot, Spin } from "./bits";
@@ -105,7 +107,7 @@ function DetailHeader({ thread, onBack, onClose, onView, expand, fullHref }: Hea
 function ThreadChat({ pid, thread, compact }: { pid: string; thread: ThreadView; compact: boolean }) {
   const questions = useQuestions(thread.id);
   const lead = leadOf(thread)?.name;
-  const inserts = openForUser(questions.data).map((q) => ({
+  const inserts = chatQuestions(questions.data).map((q) => ({
     key: q.id,
     at: q.created_at,
     node: <WaitingCard cid={thread.id} pid={pid} question={q} variant="soft" leadName={lead} />,
@@ -117,7 +119,7 @@ function ThreadChat({ pid, thread, compact }: { pid: string; thread: ThreadView;
     </>
   );
   const empty = <p className="py-10 text-center text-[13px] leading-6 text-muted-foreground">还没有对话。组长汇报会出现在这里，你也可以直接给组长发消息。</p>;
-  return <Chat cid={thread.id} filter={threadTalk} inserts={inserts} after={after} empty={empty} compact={compact} speakerColor="#2F6FDB" />;
+  return <Chat cid={thread.id} pid={pid} filter={threadTalk} inserts={inserts} after={after} empty={empty} compact={compact} speakerColor="#2F6FDB" />;
 }
 
 /** One quiet line at the bottom while the thread is going. */
@@ -160,6 +162,7 @@ function LeadComposer({ pid, thread, className }: { pid: string; thread: ThreadV
         attachments={attachments}
         onSend={(text, images) => send.mutateAsync({ text, images })}
         id={`lead-${thread.id}`}
+        draftKey={`draft:${thread.id}`}
       />
     );
   return <div className={cn("shrink-0", className)}>{body}</div>;

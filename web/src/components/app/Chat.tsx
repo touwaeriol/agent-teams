@@ -1,18 +1,21 @@
 // The conversation column: messages (newest at the bottom, older pages on
-// demand), chips for threads the speaker opened, cards inserted where they
-// were asked, and auto-scroll. Used by the coordinator chat and the thread panel.
+// demand), chips for threads the speaker opened, chat cards (todos, plan,
+// artifact, 会话已恢复), question cards inserted where they were asked, and
+// scrolling that follows new messages and comes back to where you were. Used by the coordinator chat and the thread panel.
 import { ChevronRight } from "lucide-react";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { flattenMessages, useMessages } from "@/api/queries";
 import type { MessageView, ThreadView } from "@/api/views";
 import { Loading } from "@/components/common";
 import { Markdown } from "@/components/Markdown";
 import { chatBlocks, interleave, type ChatBlock } from "@/lib/chat";
 import { featured, isWorking, liveLine } from "@/lib/live";
+import { readScroll, restoredTop, scrollMarkOf, scrollParent, writeScroll } from "@/lib/persist";
 import { markTone } from "@/lib/present";
 import { clock, cn } from "@/lib/utils";
 import { MessageImages } from "./attachments";
 import { Dot, LiveDot } from "./bits";
+import { ArtifactCard, PlanCard, ResumedNote, TodoCard } from "./chatcards";
 
 export interface ChatProps {
   cid: string | undefined;
@@ -26,17 +29,17 @@ export interface ChatProps {
   filter?: (m: MessageView) => boolean;
   /** Cards drawn between the messages at the time they happened. */
   inserts?: { key: string; at: string; node: ReactNode }[];
+  /** Project id, for links from cards (deliverables). */
+  pid?: string;
 }
 
-export function Chat({ cid, threads = [], onOpenThread, speakerColor = "#C8622A", empty, after, compact, filter, inserts = [] }: ChatProps) {
+export function Chat({ cid, threads = [], onOpenThread, speakerColor = "#C8622A", empty, after, compact, filter, inserts = [], pid = "" }: ChatProps) {
   const query = useMessages(cid);
   const all = flattenMessages(query.data);
   const messages = filter ? all.filter(filter) : all;
   const end = useRef<HTMLDivElement>(null);
   const count = messages.length + inserts.length;
-  useEffect(() => {
-    end.current?.scrollIntoView({ block: "end" });
-  }, [count]);
+  useChatScroll(cid, end, count, !query.isLoading);
   if (query.isLoading) return <Loading className="py-16" />;
   const blocks = chatBlocks(messages);
   const items = interleave(blocks, inserts);
@@ -50,7 +53,7 @@ export function Chat({ cid, threads = [], onOpenThread, speakerColor = "#C8622A"
       {items.length === 0 && empty}
       {items.map((it) =>
         it.kind === "block" ? (
-          <Block key={it.block.message.id} block={it.block} threads={threads} onOpenThread={onOpenThread} speakerColor={speakerColor} compact={compact} />
+          <Block key={it.block.message.id} block={it.block} threads={threads} onOpenThread={onOpenThread} speakerColor={speakerColor} compact={compact} pid={pid} />
         ) : (
           <div key={it.key}>{it.node}</div>
         ),
@@ -61,8 +64,45 @@ export function Chat({ cid, threads = [], onOpenThread, speakerColor = "#C8622A"
   );
 }
 
-function Block({ block, threads, onOpenThread, speakerColor, compact }: { block: ChatBlock; threads: ThreadView[]; onOpenThread?: (no: number) => void; speakerColor: string; compact?: boolean }) {
+/**
+ * Scroll: reopening a conversation goes back to where it was read (kept per conversation in
+ * localStorage); new messages scroll into view only while the reader follows the bottom.
+ */
+function useChatScroll(cid: string | undefined, end: RefObject<HTMLDivElement>, count: number, ready: boolean) {
+  const restored = useRef<string | null>(null);
+  const following = useRef(true);
+  useLayoutEffect(() => {
+    const box = scrollParent(end.current);
+    if (!cid || !ready || !box || restored.current === cid) return;
+    restored.current = cid;
+    const mark = readScroll(cid);
+    following.current = !mark;
+    box.scrollTop = restoredTop(mark, box);
+  }, [cid, ready, count, end]);
+  useEffect(() => {
+    if (restored.current === cid && following.current) end.current?.scrollIntoView({ block: "end" });
+  }, [count, cid, end]);
+  useEffect(() => {
+    const box = scrollParent(end.current);
+    if (!cid || !box) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onScroll = () => {
+      const mark = scrollMarkOf(box);
+      following.current = mark.fromBottom === 0;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => writeScroll(cid, mark), 200);
+    };
+    box.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      box.removeEventListener("scroll", onScroll);
+      if (timer) clearTimeout(timer);
+    };
+  }, [cid, ready, end]);
+}
+
+function Block({ block, threads, onOpenThread, speakerColor, compact, pid }: { block: ChatBlock; threads: ThreadView[]; onOpenThread?: (no: number) => void; speakerColor: string; compact?: boolean; pid: string }) {
   const m = block.message;
+  if (block.kind === "card") return <ChatCard message={m} pid={pid} />;
   if (block.kind === "user")
     return (
       <div className="flex max-w-[85%] flex-col gap-2 self-end">
@@ -85,6 +125,20 @@ function Block({ block, threads, onOpenThread, speakerColor, compact }: { block:
       ))}
     </article>
   );
+}
+
+function ChatCard({ message, pid }: { message: MessageView; pid: string }) {
+  switch (message.kind) {
+    case "todos":
+      return <TodoCard message={message} />;
+    case "plan":
+      return <PlanCard message={message} />;
+    case "artifact":
+      return <ArtifactCard message={message} pid={pid} />;
+    case "resumed":
+      return <ResumedNote message={message} />;
+  }
+  return null;
 }
 
 /** A thread the speaker opened, with its live status underneath while it runs. */

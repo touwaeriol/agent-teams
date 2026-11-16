@@ -5,6 +5,7 @@ import { useState, type FormEvent, type KeyboardEvent, type ReactNode } from "re
 import { toast } from "sonner";
 import { AttachButton, attachmentHandlers, AttachmentStrip, type Attachments } from "./attachments";
 import { Spinner } from "@/components/common";
+import { useDraft } from "@/lib/persist";
 import { cn } from "@/lib/utils";
 import type { MainTaskStatus } from "@/api/views";
 
@@ -121,11 +122,13 @@ interface ComposerProps {
   variant?: "large" | "inline";
   className?: string;
   id?: string;
+  /** Keeps the unsent text across reloads (localStorage), e.g. draft:<conversation>. */
+  draftKey?: string;
 }
 
 /** Message box. `large`: the coordinator chat (textarea + hint row); `inline`: one-line box for the lead. Enter sends, Shift+Enter breaks. */
-export function Composer({ label, placeholder, onSend, busy, hint, extra, variant = "large", className, id, attachments }: ComposerProps) {
-  const [text, setText] = useState("");
+export function Composer({ label, placeholder, onSend, busy, hint, extra, variant = "large", className, id, attachments, draftKey }: ComposerProps) {
+  const [text, setText] = useDraft(draftKey);
   const [dragging, setDragging] = useState(false);
   const imageCount = attachments?.items.filter((x) => x.id).length ?? 0;
   const empty = !text.trim() && imageCount === 0;

@@ -181,3 +181,19 @@ func ThreadActivity(ctx context.Context, q DB, threadID string, before int64, li
 		return a, err
 	})
 }
+
+// LatestCard is the newest chat card of a kind an employee left in a conversation.
+func LatestCard(ctx context.Context, q DB, conversationID, kind, author string) (Message, error) {
+	return scanMessage(q.QueryRow(ctx, `SELECT `+messageCols+` FROM at_messages WHERE conversation_id = $1 AND kind = $2
+		AND author = $3 ORDER BY id DESC LIMIT 1`, conversationID, kind, author))
+}
+
+// UpdateCard rewrites a chat card in place (content and meta; its time and position stay).
+func UpdateCard(ctx context.Context, tx *Tx, id int64, content string, meta map[string]any) (Message, error) {
+	b, err := json.Marshal(meta)
+	if err != nil {
+		return Message{}, err
+	}
+	return scanMessage(tx.QueryRow(ctx, `UPDATE at_messages SET content = $2, meta = $3 WHERE id = $1 RETURNING `+messageCols,
+		id, content, b))
+}

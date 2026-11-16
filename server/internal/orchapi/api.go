@@ -110,6 +110,7 @@ var errorMap = []struct {
 	{approvals.ErrBadAnswer, 422, "validation"},
 	{toolsvc.ErrAnswered, 409, "already_answered"},
 	{toolsvc.ErrNotForUser, 409, "not_for_user"},
+	{toolsvc.ErrBadAnswer, 422, "validation"},
 	{scheduler.ErrTaskState, 409, "task_state"},
 }
 

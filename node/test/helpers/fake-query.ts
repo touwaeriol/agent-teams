@@ -118,6 +118,8 @@ class FakeQuery {
     if (use) return this.useTool(use[1]!, JSON.parse(use[2]!));
     const run = /^run (.*)$/s.exec(text);
     if (run) return this.runBash(run[1]!);
+    const builtin = /^builtin (\w+) (.*)$/s.exec(text);
+    if (builtin) return this.builtin(builtin[1]!, JSON.parse(builtin[2]!));
     return `echo: ${text}`;
   }
 
@@ -137,6 +139,25 @@ class FakeQuery {
     const r = await this.options.canUseTool!("Bash", { command }, { signal: ctrl.signal, toolUseID: id, suggestions: [{ type: "addRules", rules: [{ toolName: "Bash", ruleContent: command }], behavior: "allow", destination: "localSettings" }], requestId: "r1" } as never);
     const res = r as { behavior: string; updatedPermissions?: unknown[]; message?: string };
     return res.behavior === "allow" ? `allowed ${JSON.stringify(res.updatedPermissions ?? [])}` : `refused: ${res.message}`;
+  }
+
+  /** A built-in tool (AskUserQuestion, TodoWrite, ExitPlanMode): PreToolUse hooks (by matcher), then PostToolUse. */
+  private async builtin(tool: string, input: Record<string, unknown>): Promise<string> {
+    const id = `toolu_${tool}_${Math.random().toString(36).slice(2, 8)}`;
+    let effective = input;
+    for (const m of this.options.hooks?.PreToolUse ?? []) {
+      if (m.matcher && m.matcher !== tool) continue;
+      for (const h of m.hooks) {
+        const out = (await h({ hook_event_name: "PreToolUse", tool_name: tool, tool_input: input, tool_use_id: id, session_id: this.sid, transcript_path: "", cwd: this.options.cwd! } as never, id, { signal: new AbortController().signal })) as { hookSpecificOutput?: { permissionDecision?: string; permissionDecisionReason?: string; updatedInput?: Record<string, unknown> } };
+        if (out.hookSpecificOutput?.permissionDecision === "deny") return `denied: ${out.hookSpecificOutput.permissionDecisionReason}`;
+        if (out.hookSpecificOutput?.updatedInput) effective = out.hookSpecificOutput.updatedInput;
+      }
+    }
+    const response = tool === "ExitPlanMode" ? { plan: null, filePath: String(input.planFile ?? "") } : {};
+    for (const m of this.options.hooks?.PostToolUse ?? []) {
+      for (const h of m.hooks) await h({ hook_event_name: "PostToolUse", tool_name: tool, tool_input: input, tool_response: response, tool_use_id: id, session_id: this.sid, transcript_path: "", cwd: this.options.cwd! } as never, id, { signal: new AbortController().signal });
+    }
+    return `${tool} ran with ${JSON.stringify(effective.answers ?? effective)}`;
   }
 
   private async preToolUse(tool: string, input: Record<string, unknown>, id: string): Promise<string | null> {

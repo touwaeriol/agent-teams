@@ -169,6 +169,32 @@
         "allow_always",
         "deny"
       ]
+    },
+    "TodoItem": {
+      "title": "TodoItem",
+      "type": "object",
+      "required": [
+        "content",
+        "status"
+      ],
+      "properties": {
+        "content": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "in_progress",
+            "completed"
+          ]
+        },
+        "active_form": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      }
     }
   }
 }
