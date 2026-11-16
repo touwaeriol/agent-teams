@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Main board: chat with the project coordinator in the middle, the thread list (→ thread
-// detail) in the resizable right panel. Phones get thread chips instead.
+// detail) in the resizable right panel. Phones get thread chips and the project overview
+// (?sheet=threads|library|schedules).
 // /projects/:pid/settings[/:section] opens the project settings dialog over the board.
 import { computed, ref, watchEffect } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -19,9 +20,10 @@ import LibraryBrowser from "@/components/app/deliverables/LibraryBrowser.vue";
 import type { ThreadViewId } from "@/components/app/threadMenu";
 import PanelDetail from "./main/PanelDetail.vue";
 import PanelList from "./main/PanelList.vue";
+import MobileOverview from "./main/MobileOverview.vue";
 import ThreadChips from "./main/ThreadChips.vue";
 import { PANEL_DEFAULT, PANEL_MAX, clampWidth } from "@/lib/panelWidth";
-import { sidePanelOf, threadPath, type SidePanel as Panel } from "./main/logic";
+import { overviewTabOf, sidePanelOf, threadPath, type OverviewTab, type SidePanel as Panel } from "./main/logic";
 import { useReminderAlerts } from "@/lib/reminders";
 
 const props = withDefaults(defineProps<{ openNo?: number | null; view?: ThreadViewId | null }>(), { openNo: null, view: null });
@@ -35,6 +37,8 @@ const me = useMe();
 const list = computed(() => threads.data.value ?? []);
 const panel = computed(() => sidePanelOf(route.query.panel));
 const schedules = ref(false);
+const sheet = computed(() => overviewTabOf(route.query.sheet));
+const setSheet = (t: OverviewTab | null) => void router.replace({ query: t ? { sheet: t } : {} });
 const settings = computed(() => /^\/projects\/[^/]+\/settings(\/|$)/.test(route.path));
 const section = computed(() => sectionOf(typeof route.params.section === "string" ? route.params.section : undefined));
 const setSection = (s: SettingsSection) => void router.replace(`/projects/${pid.value}/settings/${s}`);
@@ -57,7 +61,7 @@ watchEffect(() => {
   <Loading v-else-if="!project.data.value" class="h-full" />
   <div v-else class="flex h-full min-h-0 flex-1">
     <main class="flex min-h-0 min-w-0 flex-1 flex-col">
-      <MainHeader :project="project.data.value" :coordinator="coordinator.data.value" :threads="list" :panel="panel" @panel="setPanel" @schedules="schedules = true" />
+      <MainHeader :project="project.data.value" :coordinator="coordinator.data.value" :threads="list" :panel="panel" @panel="setPanel" @schedules="schedules = true" @overview="setSheet('threads')" />
       <ThreadChips :pid="pid" :threads="list" />
       <div class="flex-1 overflow-y-auto">
         <div class="mx-auto flex max-w-[720px] flex-col px-4 pb-6 pt-4 sm:px-6 sm:pt-8">
@@ -97,6 +101,17 @@ watchEffect(() => {
     >
       <LibraryBrowser :pid="pid" variant="panel" @close="setPanel('threads')" />
     </aside>
+    <MobileOverview
+      v-if="sheet"
+      :pid="pid"
+      :tab="sheet"
+      :threads="list"
+      :loading="threads.isLoading.value"
+      :user-id="me.data.value?.id ?? 'anon'"
+      @tab="setSheet"
+      @open="openThread"
+      @close="setSheet(null)"
+    />
     <SchedulesDialog v-model:open="schedules" :pid="pid" />
     <ProjectSettingsDialog v-if="settings" :project="project.data.value" :section="section" @section="setSection" @close="router.push(`/projects/${pid}`)" />
   </div>

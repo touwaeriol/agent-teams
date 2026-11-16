@@ -37,3 +37,17 @@ export function coordinatorBusy(c: CoordinatorView | undefined): boolean {
   const s = c?.employee.status;
   return Boolean(s && !["idle", "offline"].includes(s.state));
 }
+
+/** The phone overview's tabs (?sheet=…): 讨论串 / 资料库 / 定时任务. */
+export type OverviewTab = "threads" | "library" | "schedules";
+
+export const OVERVIEW_TABS: { id: OverviewTab; label: string }[] = [
+  { id: "threads", label: "讨论串" },
+  { id: "library", label: "资料库" },
+  { id: "schedules", label: "定时任务" },
+];
+
+/** The open overview tab, or null when the overview is closed. */
+export function overviewTabOf(value: unknown): OverviewTab | null {
+  return OVERVIEW_TABS.find((t) => t.id === value)?.id ?? null;
+}

@@ -9,9 +9,13 @@
 /* In-progress marks rotate; with reduced motion they breathe gently instead. */
 @keyframes at-spin { to { transform: rotate(360deg); } }
 @keyframes at-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+/* Waiting on the user: a soft halo that swells and fades around the orange dot. */
+@keyframes at-halo { 0% { box-shadow: 0 0 0 0 rgb(194 87 12 / 0.35); } 70%, 100% { box-shadow: 0 0 0 5px rgb(194 87 12 / 0); } }
 @layer components {
   .at-spin { animation: at-spin 0.9s linear infinite; transform-origin: 50% 50%; }
+  .at-halo { animation: at-halo 2s ease-out infinite; }
   @media (prefers-reduced-motion: reduce) {
     .at-spin { animation: at-breathe 2.4s ease-in-out infinite; }
+    .at-halo { animation: none; box-shadow: 0 0 0 3px rgb(194 87 12 / 0.15); }
   }
 }

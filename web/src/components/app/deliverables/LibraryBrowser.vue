@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // 资料库: the project's deliverables and published files as a table (or tiles), filtered by
 // type, searchable, with "+ 添加" to upload a file the team can read. Used as the right-hand
-// panel of the main board and on the full Deliverables page.
+// panel of the main board, on the full Deliverables page and as the phone overview's 资料库 tab
+// (`sheet`: no header of its own, the search box follows `search`).
 import { Maximize2, Search, X } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import { useDeliverables } from "@/api/queries";
@@ -16,16 +17,18 @@ import LibraryTable from "./LibraryTable.vue";
 import TypeFilter from "./TypeFilter.vue";
 import ViewToggle from "./ViewToggle.vue";
 
-const props = defineProps<{ pid: string; variant: "panel" | "page" }>();
+const props = defineProps<{ pid: string; variant: "panel" | "page" | "sheet"; search?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 const kind = ref("");
 const q = ref("");
-const searching = ref(props.variant === "page");
+const ownSearch = ref(props.variant === "page");
+const searching = computed({ get: () => (props.variant === "sheet" ? Boolean(props.search) : ownSearch.value), set: (v) => (ownSearch.value = v) });
 const view = ref<LibraryView>(storedView());
 const sort = ref<{ key: SortKey; dir: "asc" | "desc" }>({ key: "modified", dir: "desc" });
 const list = useDeliverables(() => props.pid, kind, q);
 const items = computed(() => sortLibrary(list.data.value?.items ?? [], sort.value.key, sort.value.dir));
-const panel = computed(() => props.variant === "panel");
+/** Panel and sheet are padded; only the panel has its own header. */
+const panel = computed(() => props.variant !== "page");
 const pick = (v: LibraryView) => {
   view.value = v;
   saveView(v);
@@ -36,7 +39,7 @@ const vFocus = { mounted: (el: HTMLInputElement) => panel.value && el.focus() };
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col">
-    <div v-if="panel" class="flex h-14 shrink-0 items-center gap-1 border-b px-4">
+    <div v-if="variant === 'panel'" class="flex h-14 shrink-0 items-center gap-1 border-b px-4">
       <span class="flex-1 font-semibold">资料库</span>
       <IconButton label="搜索" :active="searching" @click="searching = !searching"><Search :stroke-width="1.8" /></IconButton>
       <IconButton label="全屏打开" :to="`/projects/${pid}/deliverables`"><Maximize2 :stroke-width="1.8" /></IconButton>

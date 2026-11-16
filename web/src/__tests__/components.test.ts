@@ -207,11 +207,29 @@ describe("ThreadList", () => {
     await w.setProps({ filter: { q: "没有", groups: [], withDeliverable: false } });
     expect(w.text()).toContain("没有符合条件的讨论串");
   });
-  it("shows the newest deliverable under its row and the last activity", () => {
+  it("rich rows (进行中) tag the plan and the deliverables; compact rows (空闲) are one line with the last activity", () => {
     const d = { id: "d1", project_id: "p1", thread_no: 1, kind: "doc", title: "说明", url: "https://x.dev/a", detail: {}, published_by: "dev", created_at: "", updated_at: "" };
-    const w = mountWith(ThreadList, { threads: [thread(1, { ...idle, latest_deliverable: d, last_activity_at: new Date(Date.now() - 51 * 60_000).toISOString() })] });
-    expect(w.get("[data-row] a[href='https://x.dev/a']").text()).toContain("说明");
-    expect(w.get("[data-row] time").text()).toBe("51分钟");
+    const working = { members: [{ id: "e", name: "lead", tier: "lead", node: { id: "n1", name: "rc", online: true }, status: { state: "typing" } }] } as unknown as Partial<ThreadView>;
+    const w = mountWith(ThreadList, {
+      threads: [
+        thread(2, { ...working, latest_deliverable: d, counts: { ...thread(2).counts, deliverables: 3, main_total: 7, main_done: 2 } }),
+        thread(1, { ...idle, latest_deliverable: d, last_activity_at: new Date(Date.now() - 51 * 60_000).toISOString() }),
+      ],
+    });
+    const rich = w.get("[data-group=active] [data-row]");
+    expect(rich.attributes("data-compact")).toBeUndefined();
+    expect(rich.get("[data-mark]").attributes("data-mark")).toBe("working");
+    expect(rich.get("[data-node]").attributes("data-node")).toBe("online");
+    expect(rich.get("[data-tags]").text()).toContain("2/7");
+    expect(rich.get("[data-deliverables]").text()).toBe("3 个交付物");
+    expect(rich.get("[data-deliverables]").attributes("href")).toBe("/projects/p1/threads/2/deliverables");
+    expect(rich.find("a[href='https://x.dev/a']").exists()).toBe(false);
+    const compact = w.get("[data-group=idle] [data-row]");
+    expect(compact.attributes("data-compact")).toBe("");
+    expect(compact.find("[data-tags]").exists()).toBe(false);
+    expect(compact.find("[data-node]").exists()).toBe(false);
+    expect(compact.findAll("button span.truncate").map((s) => s.text())).toEqual(["#1 T1"]);
+    expect(compact.get("time").text()).toBe("51分钟");
   });
   it("says what to do when there are none", () => {
     expect(mountWith(ThreadList, { threads: [] }).text()).toContain("还没有讨论串");

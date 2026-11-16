@@ -3056,6 +3056,11 @@ export interface components {
         ThreadCounts: {
             /** Format: int64 */
             approvals_open: number;
+            /**
+             * Format: int64
+             * @description Deliverables the thread published
+             */
+            deliverables: number;
             /** Format: int64 */
             main_done: number;
             /** Format: int64 */

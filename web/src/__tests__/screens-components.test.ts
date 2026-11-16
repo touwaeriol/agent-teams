@@ -11,6 +11,7 @@ import ThreadDetail from "@/components/app/thread/ThreadDetail.vue";
 import AutoApproveToggle from "@/components/app/threadviews/AutoApproveToggle.vue";
 import ThreadViewDialog from "@/components/app/threadviews/ThreadViewDialog.vue";
 import { useText } from "@/pages/design/viewer";
+import MobileOverview from "@/pages/main/MobileOverview.vue";
 import PanelList from "@/pages/main/PanelList.vue";
 import { foldedKey } from "@/lib/threadList";
 import { thread } from "./fixtures";
@@ -44,7 +45,7 @@ afterEach(() => {
 });
 
 describe("ThreadDetail", () => {
-  it("shows the breadcrumb, goes back, and keeps the message box of a done thread with the reopen hint", async () => {
+  it("shows the capsule header, goes back, and keeps the message box of a done thread with the reopen hint", async () => {
     stubApi({ "/messages": { items: [], next_cursor: null }, "/questions": [] });
     const w = mountWith(ThreadDetail, { pid: "p1", thread: thread(12, { title: "员工通信", status: "done" }), view: null });
     await flushPromises();
@@ -54,8 +55,33 @@ describe("ThreadDetail", () => {
     const box = document.body.querySelector<HTMLTextAreaElement>("textarea[placeholder^='回复组长']");
     expect(box).not.toBeNull();
     expect(box!.disabled).toBe(false);
-    await w.get("nav[aria-label=位置] button").trigger("click");
+    expect(w.get("[data-capsule=title] [data-mark]").attributes("data-mark")).toBe("done");
+    await w.get("button[aria-label=返回讨论串列表]").trigger("click");
     expect(w.emitted("back")).toHaveLength(1);
+  });
+  it("header capsules: running spinner with the plan 2/7, node status, the ⋯ menu; waiting shows the orange mark; ✕ only when closable", async () => {
+    stubApi({ "/messages": { items: [], next_cursor: null }, "/questions": [] });
+    const step = (i: number, status: "todo" | "doing" | "done") => ({ id: `m${i}`, pos: i, title: `s${i}`, status, auto_done: false, tasks_total: 0, tasks_done: 0 });
+    const plan = [step(1, "done"), step(2, "done"), step(3, "doing"), step(4, "todo"), step(5, "todo"), step(6, "todo"), step(7, "todo")];
+    const lead = { id: "e1", name: "lead", tier: "lead", node: { id: "n1", name: "rc-erio", online: true }, status: { state: "typing" } };
+    const dev = { id: "e2", name: "dev", tier: "member", node: { id: "n2", name: "cvp", online: false }, status: { state: "idle" } };
+    const running = thread(12, { main_tasks: plan, members: [lead, dev] as never });
+    const w = mountWith(ThreadDetail, { pid: "p1", thread: running, view: null });
+    await flushPromises();
+    const title = w.get("[data-capsule=title]");
+    expect(title.get("[data-mark]").attributes("data-mark")).toBe("working");
+    expect(title.find("[data-spin]").exists()).toBe(true);
+    expect(title.get("[data-progress]").text()).toBe("2/7");
+    const actions = w.get("[data-capsule=actions]");
+    expect(actions.get("[data-node]").attributes("data-node")).toBe("partial");
+    expect(actions.get("[data-node]").attributes("aria-label")).toBe("节点：rc-erio 在线 · cvp 离线");
+    expect(actions.find("button[aria-label^='讨论串 #12']").exists()).toBe(true);
+    expect(w.find("button[aria-label=关闭]").exists()).toBe(true);
+    await w.setProps({ thread: thread(12, { status: "review", members: [] }), closable: false });
+    expect(w.get("[data-capsule=title] [data-mark]").attributes("data-mark")).toBe("wait");
+    expect(w.find("[data-capsule=title] [data-progress]").exists()).toBe(false);
+    expect(w.get("[data-node]").attributes("data-node")).toBe("none");
+    expect(w.find("button[aria-label=关闭]").exists()).toBe(false);
   });
   it("tells an archived thread's composer how to go on and unarchives in one click", async () => {
     const fetch = stubApi({ "/messages": { items: [], next_cursor: null }, "/questions": [] });
@@ -173,6 +199,46 @@ describe("PanelList", () => {
     await w.findAll("button").find((b) => b.text() === "查看全部")!.trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.query.panel).toBe("library");
+  });
+  it("in the phone overview (sheet) it has no header of its own and 查看全部 switches tabs", async () => {
+    stubApi({ "/deliverables": { items: [item("d1", "落地页", null)], storage_bytes: 0 }, "/waiting": { questions: [], reviews: [] } });
+    const w = mount(PanelList, { props: { pid: "p1", threads, loading: false, userId: "u1", sheet: true }, global: { plugins: plugins() }, attachTo: document.body });
+    await flushPromises();
+    expect(w.find("header").exists()).toBe(false);
+    await w.findAll("button").find((b) => b.text() === "查看全部")!.trigger("click");
+    expect(w.emitted("library")).toHaveLength(1);
+  });
+});
+
+describe("MobileOverview", () => {
+  it("segmented 讨论串 / 资料库 / 定时任务 with search on the right", async () => {
+    stubApi({ "/deliverables": { items: [], storage_bytes: 0 }, "/waiting": { questions: [], reviews: [] }, "/schedules": [] });
+    const threads = [thread(1, { title: "部署", status: "done" }), thread(2, { title: "接口", status: "review" })];
+    const w = mountWith(MobileOverview, { pid: "p1", tab: "threads", threads, loading: false, userId: "u1" });
+    await flushPromises();
+    const tabs = w.findAll("[role=tab]");
+    expect(tabs.map((t) => t.text())).toEqual(["讨论串", "资料库", "定时任务"]);
+    expect(tabs[0].attributes("aria-selected")).toBe("true");
+    expect(w.findAll("section[data-group]").map((s) => s.attributes("data-group"))).toEqual(["waiting", "done"]);
+    expect(w.find("[data-group=done] [data-row][data-compact]").exists()).toBe(true);
+    await w.get("header button[aria-label=搜索讨论串]").trigger("click");
+    await w.get("input[aria-label=搜索讨论串]").setValue("部署");
+    expect(w.text()).toContain("#1 部署");
+    expect(w.text()).not.toContain("#2 接口");
+    await tabs[2].trigger("click");
+    expect(w.emitted("tab")).toEqual([["schedules"]]);
+    await w.setProps({ tab: "schedules" });
+    await flushPromises();
+    expect(w.text()).toContain("还没有定时任务");
+    expect(w.find("header button[aria-label^=搜索]").exists()).toBe(false);
+    await w.setProps({ tab: "library" });
+    await flushPromises();
+    expect(w.text()).toContain("资料库还是空的");
+    expect(w.find("input[placeholder=搜索资料库]").exists()).toBe(false);
+    await w.get("header button[aria-label=搜索资料库]").trigger("click");
+    expect(w.find("input[placeholder=搜索资料库]").exists()).toBe(true);
+    await w.get("header button[aria-label=关闭]").trigger("click");
+    expect(w.emitted("close")).toHaveLength(1);
   });
 });
 

@@ -63,6 +63,7 @@ type ThreadCounts struct {
 	TasksDone     int `json:"tasks_done"`
 	MainTotal     int `json:"main_total"`
 	MainDone      int `json:"main_done"`
+	Deliverables  int `json:"deliverables" doc:"Deliverables the thread published"`
 }
 
 // LeadLast is the lead's latest reply.

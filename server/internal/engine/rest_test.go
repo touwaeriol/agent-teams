@@ -103,7 +103,8 @@ func deliverables(t *testing.T, tm *team) {
 	b.must(200, "GET", "/api/projects/"+pid+"/threads", nil, &list)
 	if len(list) != 1 || list[0].LatestDeliverable == nil || list[0].LatestDeliverable.ID != d.ID ||
 		list[0].LatestDeliverable.ThreadNo == nil || *list[0].LatestDeliverable.ThreadNo != 1 ||
-		list[0].LastActivityAt.Before(d.UpdatedAt) || list[0].LastActivityAt.Before(list[0].UpdatedAt) {
+		list[0].LastActivityAt.Before(d.UpdatedAt) || list[0].LastActivityAt.Before(list[0].UpdatedAt) ||
+		list[0].Counts.Deliverables != 2 {
 		t.Fatalf("thread latest deliverable / activity %+v", list)
 	}
 	var page struct{ Items []core.DeliverableView }

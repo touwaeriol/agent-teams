@@ -26,6 +26,8 @@ const wide = useMedia("(min-width: 1024px)");
 const view = ref<ThreadViewId | null>(detailViewOf(route.params.tab));
 watch(() => route.params.tab, (tab) => (view.value = detailViewOf(tab)));
 const home = () => void router.push(`/projects/${pid.value}`);
+/** ‹ goes to the thread list: the panel on wide screens, the phone overview's 讨论串 tab otherwise. */
+const toList = () => void router.push(wide.value ? `/projects/${pid.value}` : `/projects/${pid.value}?sheet=threads`);
 const threads = useThreads(pid);
 const waiting = useWaiting(pid);
 const me = useMe();
@@ -49,6 +51,6 @@ const expand = computed(() => (wide.value && thread.value ? { to: threadPath(pid
     </template>
   </EmptyState>
   <div v-else class="flex h-full min-h-0 flex-col bg-panel">
-    <ThreadDetail :key="thread.id" :pid="pid" :thread="thread" :view="view" :expand="expand" :nav="nav" layout="page" @view="(v) => (view = v)" @back="home" @close="home" />
+    <ThreadDetail :key="thread.id" :pid="pid" :thread="thread" :view="view" :expand="expand" :nav="nav" layout="page" :closable="wide" @view="(v) => (view = v)" @back="toList" @close="home" />
   </div>
 </template>

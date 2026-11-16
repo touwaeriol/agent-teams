@@ -143,8 +143,9 @@ func ThreadCountsOf(ctx context.Context, q DB, t Thread) (ThreadCounts, error) {
 		(SELECT count(*) FROM at_tasks WHERE thread_id = $1 AND status <> 'cancelled'),
 		(SELECT count(*) FROM at_tasks WHERE thread_id = $1 AND status = 'done'),
 		(SELECT count(*) FROM at_main_tasks WHERE thread_id = $1),
-		(SELECT count(*) FROM at_main_tasks WHERE thread_id = $1 AND status = 'done')`, t.ID).
-		Scan(&c.QuestionsOpen, &c.ApprovalsOpen, &c.TasksTotal, &c.TasksDone, &c.MainTotal, &c.MainDone)
+		(SELECT count(*) FROM at_main_tasks WHERE thread_id = $1 AND status = 'done'),
+		(SELECT count(*) FROM at_deliverables WHERE thread_id = $1)`, t.ID).
+		Scan(&c.QuestionsOpen, &c.ApprovalsOpen, &c.TasksTotal, &c.TasksDone, &c.MainTotal, &c.MainDone, &c.Deliverables)
 	c.Waiting = c.QuestionsOpen + c.ApprovalsOpen
 	if t.Status == "review" {
 		c.Waiting++

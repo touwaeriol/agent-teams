@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // The project header: ☰ (phones), project switcher, coordinator state, 等你 N, then the icons
-// 资料库 / 讨论串 panel / 办公室 and the ⋯ menu (项目首页, 定时任务, 设置).
-import { Clock, Home, Library, MoreHorizontal, PanelRight, Settings, Users } from "lucide-vue-next";
+// 资料库 / 讨论串 panel / 办公室 and the ⋯ menu (项目首页, 定时任务, 设置). Phones get 项目概览
+// (讨论串 / 资料库 / 定时任务) instead of the panel toggle.
+import { Clock, Home, LayoutList, Library, MoreHorizontal, PanelRight, Settings, Users } from "lucide-vue-next";
 import { computed } from "vue";
 import { RouterLink, useRouter } from "vue-router";
 import type { CoordinatorView, ProjectView, ThreadView } from "@/api/views";
@@ -13,7 +14,7 @@ import ProjectSwitcher from "@/components/shell/ProjectSwitcher.vue";
 import { coordinatorState, waitingSummary, type SidePanel } from "./logic";
 
 const props = defineProps<{ project: ProjectView; coordinator?: CoordinatorView; threads: ThreadView[]; panel: SidePanel }>();
-const emit = defineEmits<{ panel: [panel: SidePanel]; schedules: [] }>();
+const emit = defineEmits<{ panel: [panel: SidePanel]; schedules: []; overview: [] }>();
 const router = useRouter();
 const state = computed(() => coordinatorState(props.coordinator));
 const waiting = computed(() => waitingSummary(props.threads));
@@ -44,6 +45,7 @@ const COMMANDS: Record<string, () => void> = {
       >
         等你 {{ waiting.count }}
       </RouterLink>
+      <IconButton label="项目概览" class="lg:hidden" @click="emit('overview')"><LayoutList :stroke-width="1.8" /></IconButton>
       <IconButton label="资料库" :active="panel === 'library'" @click="emit('panel', panel === 'library' ? 'threads' : 'library')">
         <Library :stroke-width="1.8" />
       </IconButton>

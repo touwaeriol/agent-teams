@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /**
  * The round mark before a thread in lists. Without `mark`: a spinner while in progress, outlined
- * in the state colour otherwise, filled with ✓ when done. With `mark` (the panel list): orange dot
- * waiting, spinner working, dashed ring idle, grey ✓ done, red ✕ failed.
+ * in the state colour otherwise, filled with ✓ when done. With `mark` (the panel list, the thread
+ * header): orange dot with a soft pulsing halo waiting, blue spinner working, dashed grey ring
+ * idle, grey ✓ done, red ✕ failed.
  */
 import { Check, X } from "lucide-vue-next";
 import { computed } from "vue";
@@ -21,7 +22,7 @@ const LABEL: Record<RowMark, string> = { wait: "等你处理", working: "进行�
   <template v-if="mark">
     <span class="mt-0.5 flex size-4 shrink-0 items-center justify-center" role="img" :aria-label="LABEL[mark]" :data-mark="mark">
       <Spin v-if="mark === 'working' || mark === 'queued'" :color="mark === 'working' ? INK.doing : INK.gray" :size="14" />
-      <span v-else-if="mark === 'wait'" class="size-2.5 rounded-full" :style="{ background: INK.wait, boxShadow: `0 0 0 3px ${INK.wait}26` }" />
+      <span v-else-if="mark === 'wait'" class="at-halo size-2.5 rounded-full" :style="{ background: INK.wait }" />
       <span v-else-if="mark === 'idle'" class="size-[13px] rounded-full border-[1.5px] border-dashed" :style="{ borderColor: INK.faint }" />
       <span v-else-if="mark === 'done'" class="flex size-[14px] items-center justify-center rounded-full" :style="{ background: INK.gray }"><Check class="size-2.5 text-white" :stroke-width="3.5" /></span>
       <span v-else-if="mark === 'failed'" class="flex size-[14px] items-center justify-center rounded-full" :style="{ background: INK.bad }"><X class="size-2.5 text-white" :stroke-width="3.5" /></span>

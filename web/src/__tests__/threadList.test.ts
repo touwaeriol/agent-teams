@@ -1,7 +1,24 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DeliverableView, EmployeeBrief } from "@/api/views";
-import { filterThreads, foldedKey, groupThreads, lastActivity, listGroupOf, loadFolded, NO_FILTER, rowLine, rowMark, saveFolded, shortAgo } from "@/lib/threadList";
+import {
+  deliverableCount,
+  filterThreads,
+  foldedKey,
+  groupThreads,
+  isCompactGroup,
+  lastActivity,
+  listGroupOf,
+  loadFolded,
+  mainProgress,
+  NO_FILTER,
+  rowLine,
+  rowMark,
+  saveFolded,
+  shortAgo,
+  threadMark,
+  threadNodes,
+} from "@/lib/threadList";
 import { question, thread } from "./fixtures";
 
 const counts = (c: Partial<ReturnType<typeof thread>["counts"]>) => ({ ...thread(1).counts, ...c });
@@ -123,5 +140,56 @@ describe("folded sections", () => {
     expect(() => saveFolded("u1", { done: true })).not.toThrow();
     get.mockRestore();
     set.mockRestore();
+  });
+});
+
+describe("list layout (Claude app style)", () => {
+  it("orders 等你处理 → 进行中 → 空闲 → 已完成 → 已归档 whatever the input order", () => {
+    const ids = groupThreads([
+      thread(1, { status: "archived" }),
+      thread(2, { status: "done" }),
+      thread(3, { members: [member("idle")] }),
+      thread(4, { members: [member("typing")] }),
+      thread(5, { status: "review" }),
+    ]).map((g) => g.id);
+    expect(ids).toEqual(["waiting", "active", "idle", "done", "archived"]);
+  });
+  it("空闲, 已完成 and 已归档 rows are compact; 等你处理 and 进行中 stay rich", () => {
+    expect((["waiting", "active", "idle", "done", "archived"] as const).map(isCompactGroup)).toEqual([false, false, true, true, true]);
+  });
+  it("the header mark follows the list: spinner working, orange waiting, dashed idle, ✓ done, ✕ failed", () => {
+    expect(threadMark(thread(1, { members: [member("typing")] }))).toBe("working");
+    expect(threadMark(thread(1, { status: "review" }))).toBe("wait");
+    expect(threadMark(thread(1, { members: [member("idle")] }))).toBe("idle");
+    expect(threadMark(thread(1, { status: "done" }))).toBe("done");
+    expect(threadMark(thread(1, { status: "failed" }))).toBe("failed");
+    expect(threadMark(thread(1, { members: [member("typing")] }), new Map([[1, question("q", { thread_no: 1 })]]))).toBe("wait");
+  });
+});
+
+describe("mainProgress", () => {
+  const step = (status: "todo" | "doing" | "done") => ({ id: status + Math.random(), pos: 1, title: "s", status, auto_done: false, tasks_total: 0, tasks_done: 0 });
+  it("counts done main tasks from the plan, else the counters; none without a plan", () => {
+    expect(mainProgress(thread(1, { main_tasks: [step("done"), step("done"), step("doing"), step("todo"), step("todo"), step("todo"), step("todo")] }))).toEqual({ done: 2, total: 7, label: "2/7" });
+    expect(mainProgress(thread(1, { counts: counts({ main_total: 4, main_done: 1 }) }))?.label).toBe("1/4");
+    expect(mainProgress(thread(1))).toBeNull();
+  });
+});
+
+describe("deliverableCount", () => {
+  it("uses the server's count, falling back to the newest deliverable", () => {
+    expect(deliverableCount(thread(1, { counts: counts({ deliverables: 3 }) }))).toBe(3);
+    expect(deliverableCount(thread(1, { latest_deliverable: deliverable("d") }))).toBe(1);
+    expect(deliverableCount(thread(1))).toBe(0);
+  });
+});
+
+describe("threadNodes", () => {
+  const on = (id: string, online: boolean) => ({ ...member("idle"), id: `e-${id}-${online}`, node: { id, name: id, online } }) as EmployeeBrief;
+  it("dedupes the members' nodes and says whether they are online", () => {
+    expect(threadNodes(thread(1, { members: [on("rc", true), on("rc", true), on("cvp", true)] }))).toMatchObject({ state: "online", label: "rc 在线 · cvp 在线" });
+    expect(threadNodes(thread(1, { members: [on("rc", true), on("cvp", false)] })).state).toBe("partial");
+    expect(threadNodes(thread(1, { members: [on("cvp", false)] })).state).toBe("offline");
+    expect(threadNodes(thread(1, { members: [member("idle")] }))).toMatchObject({ state: "none", label: "还没有分配节点" });
   });
 });

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 // The right panel before a thread is opened: "讨论串" with search, filter, expand and close;
-// the project's newest deliverables; then the thread list in status groups (folds per user).
+// the project's newest deliverables; then the thread list in status groups (folds per user):
+// 交付物 → 等你处理 → 进行中 → 空闲 → 已完成 → 已归档. With `sheet` (the phone overview) the
+// header is the caller's: only the search box (opened from there) and the list show.
 import { Filter, Maximize2, Minimize2, Search, X } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
@@ -14,8 +16,8 @@ import { filterActive, LIST_GROUPS, loadFolded, saveFolded, type Folded } from "
 import { listFilterOf, listView } from "@/lib/threadListView";
 import { waitingIndex } from "./logic";
 
-const props = defineProps<{ pid: string; threads: ThreadView[]; loading: boolean; userId: string; expanded?: boolean }>();
-const emit = defineEmits<{ open: [no: number]; expand: [] }>();
+const props = defineProps<{ pid: string; threads: ThreadView[]; loading: boolean; userId: string; expanded?: boolean; sheet?: boolean }>();
+const emit = defineEmits<{ open: [no: number]; expand: []; library: [] }>();
 const router = useRouter();
 const waiting = useWaiting(() => props.pid);
 const index = computed(() => waitingIndex(waiting.data.value?.questions));
@@ -40,12 +42,12 @@ function clearFilter() {
   view.value.groups = [];
   view.value.withDeliverable = false;
 }
-const library = () => void router.replace({ query: { panel: "library" } });
+const library = () => (props.sheet ? emit("library") : void router.replace({ query: { panel: "library" } }));
 const close = () => void router.push(`/projects/${props.pid}?panel=none`);
 </script>
 
 <template>
-  <header class="flex h-14 shrink-0 items-center gap-0.5 border-b border-[#EFEDE8] pl-5 pr-2.5">
+  <header v-if="!sheet" class="flex h-14 shrink-0 items-center gap-0.5 border-b border-[#EFEDE8] pl-5 pr-2.5">
     <nav aria-label="位置" class="flex-1 font-semibold">讨论串</nav>
     <IconButton label="搜索讨论串" :active="view.searching" @click="toggleSearch"><Search :stroke-width="1.8" /></IconButton>
     <el-popover trigger="click" placement="bottom-end" :width="220" :show-arrow="false" popper-class="!p-3">

@@ -4524,6 +4524,11 @@
             "format": "int64",
             "type": "integer"
           },
+          "deliverables": {
+            "description": "Deliverables the thread published",
+            "format": "int64",
+            "type": "integer"
+          },
           "main_done": {
             "format": "int64",
             "type": "integer"
@@ -4556,7 +4561,8 @@
           "tasks_total",
           "tasks_done",
           "main_total",
-          "main_done"
+          "main_done",
+          "deliverables"
         ],
         "type": "object"
       },

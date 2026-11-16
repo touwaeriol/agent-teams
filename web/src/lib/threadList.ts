@@ -42,6 +42,40 @@ export function rowMark(t: ThreadView, group: ListGroupId): RowMark {
   return group;
 }
 
+/** 空闲, 已完成 and 已归档 rows are one compact line; 等你处理 and 进行中 keep the two-line row. */
+export const isCompactGroup = (g: ListGroupId) => g === "idle" || g === "done" || g === "archived";
+
+/** The status mark of a thread on its own (the open thread's header). */
+export const threadMark = (t: ThreadView, waiting?: Map<number, QuestionView>): RowMark => rowMark(t, listGroupOf(t, waiting));
+
+/** Main tasks done / total ("2/7"), from the plan when the thread carries it; null without a plan. */
+export function mainProgress(t: Pick<ThreadView, "main_tasks" | "counts">): { done: number; total: number; label: string } | null {
+  const total = t.main_tasks.length || t.counts.main_total;
+  if (!total) return null;
+  const done = t.main_tasks.length ? t.main_tasks.filter((m) => m.status === "done").length : t.counts.main_done;
+  return { done, total, label: `${done}/${total}` };
+}
+
+/** How many deliverables the thread published (older servers: 1 when it has a newest one). */
+export const deliverableCount = (t: Pick<ThreadView, "counts" | "latest_deliverable">): number =>
+  t.counts.deliverables ?? (t.latest_deliverable ? 1 : 0);
+
+export type NodeState = "online" | "partial" | "offline" | "none";
+
+/**
+ * The nodes the thread's employees run on: all online, some offline, all offline, or none
+ * assigned; `label` is the tooltip ("rc-erio 在线 · cvp 离线").
+ */
+export function threadNodes(t: Pick<ThreadView, "members">): { state: NodeState; nodes: { id: string; name: string; online: boolean }[]; label: string } {
+  const by = new Map<string, { id: string; name: string; online: boolean }>();
+  for (const m of t.members) if (m.node && !by.has(m.node.id)) by.set(m.node.id, m.node);
+  const nodes = [...by.values()];
+  if (nodes.length === 0) return { state: "none", nodes, label: "还没有分配节点" };
+  const up = nodes.filter((n) => n.online).length;
+  const state: NodeState = up === nodes.length ? "online" : up === 0 ? "offline" : "partial";
+  return { state, nodes, label: nodes.map((n) => `${n.name} ${n.online ? "在线" : "离线"}`).join(" · ") };
+}
+
 /** When anything last happened in the thread (servers before last_activity_at: its last update or lead reply). */
 export function lastActivity(t: ThreadView): string {
   if (t.last_activity_at) return t.last_activity_at;

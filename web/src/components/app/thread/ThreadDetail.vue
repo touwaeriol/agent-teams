@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// One thread, chat only (like Claude Code's thread panel): the breadcrumb header, the
+// One thread, chat only (like Claude Code's thread panel): the capsule header, the
 // conversation between you and the lead — question cards (answered ones collapsed to your
 // choice), the lead's checklist, plans, published files and the acceptance card sit where they
 // happened — and the message box. 任务 / 交付物 / 成员 open in a dialog over the chat.
@@ -30,8 +30,10 @@ const props = withDefaults(
     layout?: "panel" | "page";
     /** 上一个 / 下一个讨论串 in the list the user came from. */
     nav?: ThreadNav;
+    /** Show ✕ (off on phones, where ‹ already goes back to the list). */
+    closable?: boolean;
   }>(),
-  { layout: "panel", expand: undefined, fullHref: undefined, nav: undefined },
+  { layout: "panel", expand: undefined, fullHref: undefined, nav: undefined, closable: true },
 );
 const emit = defineEmits<{ view: [view: ThreadViewId | null]; back: []; close: [] }>();
 
@@ -45,7 +47,7 @@ watch(
 </script>
 
 <template>
-  <DetailHeader :thread="thread" :expand="expand" :full-href="fullHref" :nav="nav" @back="emit('back')" @close="emit('close')" @view="(v) => emit('view', v)" />
+  <DetailHeader :thread="thread" :expand="expand" :full-href="fullHref" :nav="nav" :closable="closable" @back="emit('back')" @close="emit('close')" @view="(v) => emit('view', v)" />
   <div class="scroll-thin flex-1 overflow-y-auto">
     <div :class="cn('flex flex-col px-5 pb-6 pt-5', layout === 'page' && 'mx-auto w-full max-w-[760px] sm:px-6 sm:pt-8')">
       <ThreadChat :pid="pid" :thread="thread" :compact="layout !== 'page'" />

@@ -26,11 +26,12 @@ const fail = (res, status, detail, code = "") => json(res, status, { detail, cod
 const cookies = (req) => Object.fromEntries((req.headers.cookie ?? "").split(";").map((c) => c.trim().split("=")).filter((p) => p[0]));
 const now = () => new Date().toISOString();
 const threadById = (tid) => state.threads.find((t) => t.id === tid);
-/** What the server adds to a thread in lists: its newest deliverable and when anything last happened. */
+/** What the server adds to a thread in lists: its deliverable count, newest deliverable and when anything last happened. */
 const threadOut = (t) => {
-  const latest = state.deliverables.filter((d) => d.thread_no === t.no).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0] ?? null;
+  const own = state.deliverables.filter((d) => d.thread_no === t.no);
+  const latest = [...own].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0] ?? null;
   const times = [t.updated_at, t.lead_last?.at, latest?.updated_at].filter(Boolean).map((x) => Date.parse(x));
-  return { ...t, latest_deliverable: latest, last_activity_at: new Date(Math.max(...times)).toISOString() };
+  return { ...t, counts: { ...t.counts, deliverables: own.length }, latest_deliverable: latest, last_activity_at: new Date(Math.max(...times)).toISOString() };
 };
 const threadByNo = (no) => state.threads.find((t) => t.no === Number(no));
 

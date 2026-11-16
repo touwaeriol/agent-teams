@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // The right panel's list: collapsible status chips (等你处理 / 进行中 / 空闲 / 已完成 / 已归档)
-// with counts; folding is the caller's (remembered per user). Rows have a ⋯ menu.
+// with counts; folding is the caller's (remembered per user). Rows have a ⋯ menu. 等你处理 and
+// 进行中 rows are rich (progress line, node, tags); 空闲 / 已完成 / 已归档 are compact single lines.
 import { ChevronDown } from "lucide-vue-next";
 import { computed, onBeforeUnmount, ref } from "vue";
 import type { QuestionView, ThreadView } from "@/api/views";
-import { filterThreads, groupThreads, NO_FILTER, rowLine, rowMark, type Folded, type ListFilter, type ListGroupId } from "@/lib/threadList";
+import { filterThreads, groupThreads, isCompactGroup, NO_FILTER, rowLine, rowMark, type Folded, type ListFilter, type ListGroupId } from "@/lib/threadList";
 import ThreadRow from "./ThreadRow.vue";
 
 const props = withDefaults(
@@ -25,7 +26,7 @@ onBeforeUnmount(() => clearInterval(tick));
   <p v-if="threads.length === 0" class="text-[13px] leading-6 text-muted-foreground">还没有讨论串。和项目统筹说需求，它会开讨论串去做。</p>
   <p v-else-if="groups.length === 0" class="text-[13px] leading-6 text-muted-foreground">没有符合条件的讨论串。</p>
   <div v-else class="flex flex-col gap-4">
-    <section v-for="g in groups" :key="g.id" class="flex flex-col gap-0.5" :data-group="g.id">
+    <section v-for="g in groups" :key="g.id" :class="['flex flex-col', isCompactGroup(g.id) ? 'gap-0' : 'gap-0.5']" :data-group="g.id">
       <button
         type="button"
         :aria-expanded="!isFolded(g.id)"
@@ -44,6 +45,7 @@ onBeforeUnmount(() => clearInterval(tick));
           :line="rowLine(t, waitingByThread?.get(t.no))"
           :now="now"
           :menu="menus"
+          :compact="isCompactGroup(g.id)"
           @open="(no) => emit('open', no)"
         />
       </template>

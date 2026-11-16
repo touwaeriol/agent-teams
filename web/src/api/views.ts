@@ -89,6 +89,8 @@ export interface ThreadCounts {
   tasks_done: number;
   main_total: number;
   main_done: number;
+  /** Deliverables the thread published (older servers leave it out). */
+  deliverables?: number;
 }
 
 export interface ThreadView {
