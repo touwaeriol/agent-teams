@@ -1,0 +1,73 @@
+/* Tokens of the v2 design canvas; same values as web/src/index.css. Loaded before Element Plus. */
+@tailwind base;
+
+/* Light by default: white ground, low saturation, hairline borders. Dark is opt-in. */
+@layer base {
+  :root {
+    /* Tokens follow the v2 design canvas (Agent Teams 界面设计 v2). */
+    --background: 60 17% 97.6%;      /* #FAFAF8 page */
+    --foreground: 40 5% 11.6%;       /* #1F1E1C ink */
+    --panel: 0 0% 100%;
+    --card: 0 0% 100%;
+    --card-foreground: 40 5% 11.6%;
+    --raised: 43 20% 93.1%;          /* #F1EFEA user bubble, chips */
+    --well: 0 0% 100%;
+    --sidebar: 45 15% 94.9%;         /* #F4F3F0 */
+    --popover: 0 0% 100%;
+    --popover-foreground: 40 5% 11.6%;
+    --primary: 40 5% 11.6%;          /* primary actions are ink */
+    --primary-foreground: 0 0% 100%;
+    --brand: 21 65% 47.5%;           /* #C8622A */
+    --secondary: 45 15% 94.9%;
+    --secondary-foreground: 40 5% 11.6%;
+    --muted: 45 15% 94.9%;
+    --muted-foreground: 40 4% 40.2%; /* #6B6862 */
+    --accent: 42 19% 89.4%;          /* #E9E6DF selected nav item */
+    --accent-foreground: 40 5% 11.6%;
+    --destructive: 4 76% 40%;        /* #B42318 */
+    --destructive-foreground: 0 0% 100%;
+    --border: 43 13% 89.2%;          /* #E7E5E0 */
+    --input: 42 13% 84.3%;           /* #DCD9D2 */
+    --ring: 44 4% 52%;
+    --ok: 145 46% 33.5%;
+    --info: 218 70% 52.2%;
+    --warn: 25 88% 40.4%;
+    --bad: 4 76% 40%;
+    --radius: 0.75rem;
+  }
+  .dark {
+    --background: 230 23% 9%;
+    --foreground: 43 19% 90%;
+    --panel: 228 22% 12%;
+    --card: 228 22% 12%;
+    --card-foreground: 43 19% 90%;
+    --raised: 228 22% 17%;
+    --well: 228 24% 8%;
+    --sidebar: 230 23% 7.5%;
+    --popover: 228 22% 15%;
+    --popover-foreground: 43 19% 90%;
+    --primary: 43 19% 90%;
+    --primary-foreground: 230 23% 9%;
+    --brand: 27 85% 62%;
+    --secondary: 228 22% 17%;
+    --secondary-foreground: 43 19% 90%;
+    --muted: 228 22% 17%;
+    --muted-foreground: 232 12% 66%;
+    --accent: 228 22% 19%;
+    --accent-foreground: 43 19% 94%;
+    --destructive: 0 100% 76%;
+    --destructive-foreground: 0 40% 10%;
+    --border: 228 20% 21%;
+    --input: 228 20% 28%;
+    --ring: 232 12% 66%;
+    --ok: 142 54% 60%;
+    --info: 219 100% 74%;
+    --warn: 43 86% 63%;
+    --bad: 0 100% 78%;
+  }
+  * { @apply border-border; }
+  html, body, #app { height: 100%; }
+  body { @apply bg-background text-foreground font-sans antialiased text-sm; }
+  ::selection { background: hsl(var(--brand) / 0.25); }
+}
+

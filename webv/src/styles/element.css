@@ -1,0 +1,274 @@
+/*
+ * Element Plus themed with the design tokens of base.css, so its components look like the
+ * shadcn primitives of the React app (web/src/components/ui). Loaded after Element Plus' own
+ * CSS (and its dark css-vars, which key off the same `html.dark` class as our tokens).
+ *
+ * Mapping: primary = ink (--primary), danger = --destructive, success = --ok, warning = --warn,
+ * info = muted grey; surfaces panel / popover / background; radius lg = 12px; base font 14px.
+ */
+:root,
+html.dark {
+  --at-mix-base: hsl(var(--panel));
+  --el-font-family: Inter, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --el-font-size-base: 14px;
+  --el-font-size-small: 13px;
+  --el-font-size-extra-small: 12px;
+  --el-border-radius-base: var(--radius);
+  --el-border-radius-small: calc(var(--radius) - 2px);
+  --el-border-radius-round: 9999px;
+  --el-component-size: 36px;
+  --el-component-size-small: 32px;
+  --el-component-size-large: 42px;
+
+  --el-color-white: #ffffff;
+  --el-color-primary: hsl(var(--primary));
+  --el-color-primary-light-3: color-mix(in srgb, hsl(var(--primary)) 70%, var(--at-mix-base));
+  --el-color-primary-light-5: color-mix(in srgb, hsl(var(--primary)) 50%, var(--at-mix-base));
+  --el-color-primary-light-7: color-mix(in srgb, hsl(var(--primary)) 30%, var(--at-mix-base));
+  --el-color-primary-light-8: color-mix(in srgb, hsl(var(--primary)) 20%, var(--at-mix-base));
+  --el-color-primary-light-9: color-mix(in srgb, hsl(var(--primary)) 8%, var(--at-mix-base));
+  --el-color-primary-dark-2: color-mix(in srgb, hsl(var(--primary)) 90%, var(--at-mix-base));
+
+  --el-color-danger: hsl(var(--destructive));
+  --el-color-danger-light-3: color-mix(in srgb, hsl(var(--destructive)) 70%, var(--at-mix-base));
+  --el-color-danger-light-5: color-mix(in srgb, hsl(var(--destructive)) 50%, var(--at-mix-base));
+  --el-color-danger-light-7: color-mix(in srgb, hsl(var(--destructive)) 30%, var(--at-mix-base));
+  --el-color-danger-light-8: color-mix(in srgb, hsl(var(--destructive)) 20%, var(--at-mix-base));
+  --el-color-danger-light-9: color-mix(in srgb, hsl(var(--destructive)) 6%, var(--at-mix-base));
+  --el-color-danger-dark-2: color-mix(in srgb, hsl(var(--destructive)) 85%, black);
+  --el-color-error: var(--el-color-danger);
+  --el-color-error-light-3: var(--el-color-danger-light-3);
+  --el-color-error-light-5: var(--el-color-danger-light-5);
+  --el-color-error-light-7: var(--el-color-danger-light-7);
+  --el-color-error-light-8: var(--el-color-danger-light-8);
+  --el-color-error-light-9: var(--el-color-danger-light-9);
+
+  --el-color-success: hsl(var(--ok));
+  --el-color-success-light-3: color-mix(in srgb, hsl(var(--ok)) 70%, var(--at-mix-base));
+  --el-color-success-light-5: color-mix(in srgb, hsl(var(--ok)) 50%, var(--at-mix-base));
+  --el-color-success-light-7: color-mix(in srgb, hsl(var(--ok)) 30%, var(--at-mix-base));
+  --el-color-success-light-8: color-mix(in srgb, hsl(var(--ok)) 20%, var(--at-mix-base));
+  --el-color-success-light-9: color-mix(in srgb, hsl(var(--ok)) 8%, var(--at-mix-base));
+  --el-color-success-dark-2: color-mix(in srgb, hsl(var(--ok)) 85%, black);
+
+  --el-color-warning: hsl(var(--warn));
+  --el-color-warning-light-3: color-mix(in srgb, hsl(var(--warn)) 70%, var(--at-mix-base));
+  --el-color-warning-light-5: color-mix(in srgb, hsl(var(--warn)) 50%, var(--at-mix-base));
+  --el-color-warning-light-7: color-mix(in srgb, hsl(var(--warn)) 30%, var(--at-mix-base));
+  --el-color-warning-light-8: color-mix(in srgb, hsl(var(--warn)) 20%, var(--at-mix-base));
+  --el-color-warning-light-9: color-mix(in srgb, hsl(var(--warn)) 8%, var(--at-mix-base));
+  --el-color-warning-dark-2: color-mix(in srgb, hsl(var(--warn)) 85%, black);
+
+  --el-color-info: hsl(var(--muted-foreground));
+  --el-color-info-light-3: color-mix(in srgb, hsl(var(--muted-foreground)) 70%, var(--at-mix-base));
+  --el-color-info-light-5: color-mix(in srgb, hsl(var(--muted-foreground)) 50%, var(--at-mix-base));
+  --el-color-info-light-7: color-mix(in srgb, hsl(var(--muted-foreground)) 30%, var(--at-mix-base));
+  --el-color-info-light-8: color-mix(in srgb, hsl(var(--muted-foreground)) 20%, var(--at-mix-base));
+  --el-color-info-light-9: color-mix(in srgb, hsl(var(--muted-foreground)) 8%, var(--at-mix-base));
+  --el-color-info-dark-2: color-mix(in srgb, hsl(var(--muted-foreground)) 85%, black);
+
+  --el-bg-color: hsl(var(--panel));
+  --el-bg-color-page: hsl(var(--background));
+  --el-bg-color-overlay: hsl(var(--popover));
+  --el-text-color-primary: hsl(var(--foreground));
+  --el-text-color-regular: hsl(var(--foreground));
+  --el-text-color-secondary: hsl(var(--muted-foreground));
+  --el-text-color-placeholder: hsl(var(--muted-foreground) / 0.7);
+  --el-text-color-disabled: hsl(var(--muted-foreground) / 0.6);
+  --el-border-color: hsl(var(--input));
+  --el-border-color-light: hsl(var(--border));
+  --el-border-color-lighter: hsl(var(--border));
+  --el-border-color-extra-light: hsl(var(--border) / 0.6);
+  --el-border-color-dark: hsl(var(--muted-foreground) / 0.4);
+  --el-border-color-darker: hsl(var(--muted-foreground) / 0.6);
+  --el-border-color-hover: hsl(var(--muted-foreground) / 0.4);
+  --el-fill-color: hsl(var(--raised));
+  --el-fill-color-light: hsl(var(--raised));
+  --el-fill-color-lighter: hsl(var(--sidebar));
+  --el-fill-color-extra-light: hsl(var(--sidebar));
+  --el-fill-color-dark: hsl(var(--accent));
+  --el-fill-color-darker: hsl(var(--input));
+  --el-fill-color-blank: hsl(var(--well));
+  --el-mask-color: hsl(var(--panel) / 0.8);
+  --el-overlay-color-lighter: rgb(0 0 0 / 0.6);
+  --el-box-shadow-light: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  --el-box-shadow: var(--el-box-shadow-light);
+  --el-disabled-bg-color: hsl(var(--raised) / 0.6);
+  --el-disabled-text-color: hsl(var(--muted-foreground) / 0.6);
+  --el-disabled-border-color: hsl(var(--border));
+}
+
+html.dark {
+  /* EP's dark sheet sets these on html.dark itself; ours must win, so repeat the selector. */
+  color-scheme: dark;
+}
+
+/* Buttons: the shadcn variants. default = outline, primary = ink, danger = outlined red, text = ghost. */
+.el-button {
+  --el-button-font-weight: 500;
+  --el-button-text-color: hsl(var(--foreground));
+  --el-button-bg-color: hsl(var(--panel));
+  --el-button-border-color: hsl(var(--input));
+  --el-button-hover-text-color: hsl(var(--foreground));
+  --el-button-hover-bg-color: hsl(var(--raised) / 0.6);
+  --el-button-hover-border-color: hsl(var(--muted-foreground) / 0.4);
+  --el-button-active-text-color: hsl(var(--foreground));
+  --el-button-active-bg-color: hsl(var(--raised));
+  --el-button-active-border-color: hsl(var(--muted-foreground) / 0.5);
+  height: 36px;
+  padding: 0 14px;
+  gap: 8px;
+}
+.el-button + .el-button { margin-left: 8px; }
+.el-button--small { height: 32px; padding: 0 12px; font-size: 13px; border-radius: var(--radius); }
+.el-button--large { height: 42px; padding: 0 20px; }
+.el-button.is-circle { width: 36px; padding: 0; }
+.el-button svg { width: 16px; height: 16px; flex-shrink: 0; }
+.el-button--primary {
+  --el-button-font-weight: 600;
+  --el-button-text-color: hsl(var(--primary-foreground));
+  --el-button-bg-color: hsl(var(--primary));
+  --el-button-border-color: hsl(var(--primary));
+  --el-button-hover-text-color: hsl(var(--primary-foreground));
+  --el-button-hover-bg-color: hsl(var(--primary) / 0.9);
+  --el-button-hover-border-color: transparent;
+  --el-button-active-bg-color: hsl(var(--primary) / 0.85);
+  --el-button-active-border-color: transparent;
+  --el-button-disabled-text-color: hsl(var(--primary-foreground));
+  --el-button-disabled-bg-color: hsl(var(--primary));
+  --el-button-disabled-border-color: transparent;
+}
+.el-button--danger {
+  --el-button-text-color: hsl(var(--destructive));
+  --el-button-bg-color: hsl(var(--panel));
+  --el-button-border-color: #ebc3c3;
+  --el-button-hover-text-color: hsl(var(--destructive));
+  --el-button-hover-bg-color: hsl(var(--destructive) / 0.05);
+  --el-button-hover-border-color: #ebc3c3;
+  --el-button-active-text-color: hsl(var(--destructive));
+  --el-button-active-bg-color: hsl(var(--destructive) / 0.1);
+  --el-button-active-border-color: #ebc3c3;
+}
+.el-button.is-text {
+  --el-button-text-color: hsl(var(--muted-foreground));
+  --el-fill-color-light: hsl(var(--raised));
+  --el-fill-color: hsl(var(--raised));
+  color: hsl(var(--muted-foreground));
+}
+.el-button.is-text:not(.is-disabled):hover { color: hsl(var(--foreground)); }
+.el-button.is-disabled { opacity: 0.5; }
+
+/* Inputs: 40px, well background, 2px ring on focus (the shadcn Input). */
+.el-input {
+  --el-input-height: 40px;
+  --el-input-bg-color: hsl(var(--well));
+  --el-input-border-color: hsl(var(--input));
+  --el-input-hover-border-color: hsl(var(--input));
+  --el-input-focus-border-color: hsl(var(--input));
+  --el-input-border-radius: var(--radius);
+}
+.el-input__wrapper.is-focus,
+.el-textarea__inner:focus { box-shadow: 0 0 0 1px hsl(var(--input)) inset, 0 0 0 2px hsl(var(--ring) / 0.6) !important; }
+.el-textarea__inner { background: hsl(var(--well)); border-radius: var(--radius); padding: 8px 12px; }
+.el-select { --el-select-input-focus-border-color: hsl(var(--input)); }
+.el-select__wrapper { min-height: 40px; background: hsl(var(--well)); border-radius: var(--radius); }
+
+/* Popovers and menus: rounded-lg, hairline border, shadow-xl, items 8px radius with raised hover. */
+.el-popper.is-light,
+.el-dropdown__popper.el-popper {
+  border-color: hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  box-shadow: var(--el-box-shadow-light);
+}
+.el-dropdown-menu { padding: 4px; border-radius: var(--radius); background: hsl(var(--popover)); }
+.el-dropdown-menu__item {
+  gap: 8px;
+  padding: 8px;
+  border-radius: calc(var(--radius) - 4px);
+  font-size: 14px;
+  line-height: 20px;
+  color: hsl(var(--popover-foreground));
+}
+.el-dropdown-menu__item svg { width: 16px; height: 16px; }
+.el-dropdown-menu__item:not(.is-disabled):hover,
+.el-dropdown-menu__item:not(.is-disabled):focus { background: hsl(var(--raised)); color: hsl(var(--popover-foreground)); }
+/* Separator above a `divided` item: a full-width hairline with 4px around it (DropdownMenuSeparator). */
+.el-dropdown-menu__item--divided { position: relative; margin-top: 9px; border-top: 0; }
+.el-dropdown-menu__item--divided::before {
+  content: "";
+  display: block;
+  position: absolute;
+  top: -5px;
+  left: -4px;
+  right: -4px;
+  height: 1px;
+  margin: 0;
+  background: hsl(var(--border));
+}
+.el-dropdown-menu__item.is-destructive,
+.el-dropdown-menu__item.is-destructive:hover { color: hsl(var(--destructive)); }
+
+/* Tooltips (effect="dark"): ink chip, like TooltipContent. */
+.el-popper.is-dark {
+  background: hsl(var(--foreground));
+  color: hsl(var(--background));
+  border-color: hsl(var(--foreground));
+  border-radius: calc(var(--radius) - 2px);
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+/* Dialogs: rounded-xl, p-6, overlay black/60 with a light blur. */
+.el-overlay { background: rgb(0 0 0 / 0.6); backdrop-filter: blur(2px); }
+.el-dialog {
+  --el-dialog-padding-primary: 24px;
+  --el-dialog-border-radius: var(--radius);
+  --el-dialog-bg-color: hsl(var(--panel));
+  max-width: calc(100% - 2rem);
+  border: 1px solid hsl(var(--border));
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+}
+.el-dialog__title { font-size: 18px; font-weight: 600; color: hsl(var(--foreground)); }
+.el-dialog__headerbtn { top: 12px; right: 12px; width: 32px; height: 32px; }
+.el-dialog__footer { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* Switch: 44 × 24, ink when on. */
+.el-switch {
+  --el-switch-on-color: hsl(var(--primary));
+  --el-switch-off-color: #d6d3cc;
+  --el-switch-border-color: transparent;
+}
+
+/* Toasts (ElMessage): popover card with a hairline border, like sonner's rich colours. */
+.el-message {
+  --el-message-bg-color: hsl(var(--popover));
+  --el-message-border-color: hsl(var(--border));
+  --el-message-text-color: hsl(var(--popover-foreground));
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.1);
+  padding: 12px 16px;
+  font-size: 13px;
+}
+.el-message--success { --el-message-bg-color: hsl(143 85% 96%); --el-message-border-color: hsl(145 92% 87%); --el-message-text-color: hsl(140 100% 27%); }
+.el-message--error { --el-message-bg-color: hsl(359 100% 97%); --el-message-border-color: hsl(359 100% 94%); --el-message-text-color: hsl(360 100% 45%); }
+.el-message--info { --el-message-bg-color: hsl(208 100% 97%); --el-message-border-color: hsl(221 91% 93%); --el-message-text-color: hsl(210 92% 45%); }
+.el-message--warning { --el-message-bg-color: hsl(49 100% 97%); --el-message-border-color: hsl(49 91% 84%); --el-message-text-color: hsl(31 92% 45%); }
+html.dark .el-message--success { --el-message-bg-color: hsl(150 100% 6%); --el-message-border-color: hsl(147 100% 12%); --el-message-text-color: hsl(150 86% 65%); }
+html.dark .el-message--error { --el-message-bg-color: hsl(358 76% 10%); --el-message-border-color: hsl(357 89% 16%); --el-message-text-color: hsl(358 100% 81%); }
+html.dark .el-message--info { --el-message-bg-color: hsl(215 100% 6%); --el-message-border-color: hsl(223 43% 17%); --el-message-text-color: hsl(216 87% 65%); }
+html.dark .el-message--warning { --el-message-bg-color: hsl(64 100% 6%); --el-message-border-color: hsl(60 100% 12%); --el-message-text-color: hsl(46 87% 65%); }
+
+/* Tabs as a segmented control (TabsList): bordered pill row, active tab raised. */
+.el-tabs--segmented > .el-tabs__header { margin: 0 0 16px; }
+.el-tabs--segmented .el-tabs__nav-wrap::after,
+.el-tabs--segmented .el-tabs__active-bar { display: none; }
+.el-tabs--segmented .el-tabs__nav { gap: 4px; padding: 4px; border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--panel)); }
+.el-tabs--segmented .el-tabs__item { height: 30px; padding: 0 12px !important; border-radius: calc(var(--radius) - 4px); color: hsl(var(--muted-foreground)); }
+.el-tabs--segmented .el-tabs__item.is-active { background: hsl(var(--raised)); color: hsl(var(--foreground)); font-weight: 600; }
+
+/* A dialog with nothing in its body (ConfirmAction) has header + footer only, 16px apart. */
+.el-dialog__body:empty { display: none; }
+.el-dialog__header { padding-bottom: 16px; }
+.el-dialog__footer { padding-top: 0; }

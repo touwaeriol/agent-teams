@@ -1,0 +1,33 @@
+// The platform's shared building blocks (see README.md). Pages compose these and Element Plus
+// primitives instead of styling raw elements.
+export { default as Callout } from "./Callout.vue";
+export { default as Chip } from "./Chip.vue";
+export { default as ConfirmAction } from "./ConfirmAction.vue";
+export { default as CopyBlock } from "./CopyBlock.vue";
+export { default as DangerZone } from "./DangerZone.vue";
+export { default as DataTable } from "./DataTable.vue";
+export { default as Disclosure } from "./Disclosure.vue";
+export { default as DropdownMenu } from "./DropdownMenu.vue";
+export { default as EmptyState } from "./EmptyState.vue";
+export { default as Field } from "./Field.vue";
+export { default as FieldGroup } from "./FieldGroup.vue";
+export { default as FormDialog } from "./FormDialog.vue";
+export { default as IconButton } from "./IconButton.vue";
+export { default as IconMenu } from "./IconMenu.vue";
+export { default as InfoDialog } from "./InfoDialog.vue";
+export { default as KeyValueList } from "./KeyValueList.vue";
+export { default as Loading } from "./Loading.vue";
+export { default as Logo } from "./Logo.vue";
+export { default as Page } from "./Page.vue";
+export { default as PageHeader } from "./PageHeader.vue";
+export { default as Panel } from "./Panel.vue";
+export { default as PickList } from "./PickList.vue";
+export { default as SplitLayout } from "./SplitLayout.vue";
+export { default as Spinner } from "./Spinner.vue";
+export { default as StatCard } from "./StatCard.vue";
+export { default as StatGrid } from "./StatGrid.vue";
+export { default as StatusBadge } from "./StatusBadge.vue";
+export { default as ToneDot } from "./ToneDot.vue";
+export type { Column } from "./DataTable.vue";
+export type { Tone } from "./tone";
+export { errorText } from "@/api/mutations";

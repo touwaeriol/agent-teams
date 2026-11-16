@@ -1,0 +1,17 @@
+/* Tailwind components + utilities: loaded last so utility classes win over Element Plus defaults. */
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .scroll-thin { scrollbar-width: thin; scrollbar-color: hsl(var(--input)) transparent; }
+}
+
+/* In-progress marks rotate; with reduced motion they breathe gently instead. */
+@keyframes at-spin { to { transform: rotate(360deg); } }
+@keyframes at-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@layer components {
+  .at-spin { animation: at-spin 0.9s linear infinite; transform-origin: 50% 50%; }
+  @media (prefers-reduced-motion: reduce) {
+    .at-spin { animation: at-breathe 2.4s ease-in-out infinite; }
+  }
+}
