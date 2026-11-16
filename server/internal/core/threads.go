@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -184,6 +185,9 @@ func (s *Store) ThreadViewOf(ctx context.Context, q DB, t Thread) (ThreadView, e
 	if v.CostUSDEst, err = threadCost(ctx, q, t.ID); err != nil {
 		return v, err
 	}
+	if err = threadActivity(ctx, q, t, &v); err != nil {
+		return v, err
+	}
 	v.QueuePosition, err = queuePosition(ctx, q, t)
 	return v, err
 }
@@ -195,6 +199,31 @@ func leadLast(ctx context.Context, q DB, threadID string) (*LeadLast, error) {
 		return nil, nil
 	}
 	return &l, err
+}
+
+// threadActivity fills the thread's newest deliverable and when anything last happened in it.
+func threadActivity(ctx context.Context, q DB, t Thread, v *ThreadView) error {
+	v.LastActivityAt = t.UpdatedAt
+	ds, err := Deliverables(ctx, q, t.ProjectID, DeliverableFilter{ThreadID: t.ID, Limit: 1})
+	if err != nil {
+		return err
+	}
+	if len(ds) == 1 {
+		d, no := ds[0], t.No
+		v.LatestDeliverable = &DeliverableView{ID: d.ID, ProjectID: d.ProjectID, ThreadNo: &no, Kind: d.Kind, Title: d.Title,
+			URL: d.URL, Detail: d.Detail, PublishedBy: d.PublishedBy, CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt}
+		if d.UpdatedAt.After(v.LastActivityAt) {
+			v.LastActivityAt = d.UpdatedAt
+		}
+	}
+	var last *time.Time
+	if err := q.Gorm(ctx).Table("at_messages").Select("max(created_at)").Where("conversation_id = ?", t.ID).Row().Scan(&last); err != nil {
+		return err
+	}
+	if last != nil && last.After(v.LastActivityAt) {
+		v.LastActivityAt = *last
+	}
+	return nil
 }
 
 func threadCost(ctx context.Context, q DB, threadID string) (*float64, error) {

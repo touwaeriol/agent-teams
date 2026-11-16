@@ -71,7 +71,9 @@ ThreadView      = {id, project_id, no, title, brief, status, queue_position: num
                    repos: ThreadRepoView[],   // 每个仓库：{repo, base_branch, branch_created, pr_number, pr_url, pr_state}；pr_number/pr_url = 第一个 PR，pr_state = 汇总
                    auto_approve, opened_by, members: EmployeeBrief[], main_tasks: MainTaskView[],
                    counts: {waiting, questions_open, approvals_open, tasks_total, tasks_done, main_total, main_done},
-                   lead_last: {text, at} | null, cost_usd_est: number|null, created_at, updated_at}
+                   lead_last: {text, at} | null, cost_usd_est: number|null, created_at, updated_at,
+                   last_activity_at,                          // 状态变化、讨论串里的消息、它发布的交付物中最新的时间
+                   latest_deliverable: DeliverableView | null} // 讨论串发布的最新一个交付物
 MainTaskView    = {id, pos, title, status: "todo"|"doing"|"done", auto_done, tasks_total, tasks_done}
 TaskView        = {id, thread_no, main_task_id, assignee, role, claimed_by, kind, instruction, status, depends_on: string[],
                    parent, priority, attempt, summary, branch, head_sha, created_at, claimed_at, finished_at}

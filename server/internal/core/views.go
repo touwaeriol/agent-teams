@@ -99,6 +99,9 @@ type ThreadView struct {
 	UpdatedAt     time.Time        `json:"updated_at"`
 	StartedAt     *time.Time       `json:"started_at" doc:"When the thread first ran (null while queued)"`
 	FinishedAt    *time.Time       `json:"finished_at" doc:"When it reached done, failed or archived"`
+	// LastActivityAt is the latest of a state change, a message in the thread and a deliverable it published.
+	LastActivityAt    time.Time        `json:"last_activity_at" doc:"Latest state change, message or deliverable of the thread"`
+	LatestDeliverable *DeliverableView `json:"latest_deliverable" doc:"The newest deliverable the thread published (null: none)"`
 }
 
 // TaskView is a small task.

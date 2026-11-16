@@ -11,6 +11,8 @@ import ThreadDetail from "@/components/app/thread/ThreadDetail.vue";
 import AutoApproveToggle from "@/components/app/threadviews/AutoApproveToggle.vue";
 import ThreadViewDialog from "@/components/app/threadviews/ThreadViewDialog.vue";
 import { useText } from "@/pages/design/viewer";
+import PanelList from "@/pages/main/PanelList.vue";
+import { foldedKey } from "@/lib/threadList";
 import { thread } from "./fixtures";
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -128,6 +130,45 @@ describe("LibraryBrowser", () => {
     const w = mountWith(LibraryBrowser, { pid: "p1", variant: "page" });
     await flushPromises();
     expect(w.text()).toContain("资料库还是空的");
+  });
+});
+
+describe("PanelList", () => {
+  const item = (id: string, title: string, no: number | null) => ({ id, project_id: "p1", thread_no: no, kind: "doc", title, url: "https://x.dev/" + id, detail: {}, published_by: "dev-1", created_at: "2026-11-14T10:00:00Z", updated_at: "2026-11-14T10:00:00Z" });
+  const threads = [thread(1, { title: "部署", status: "done" }), thread(2, { title: "接口", status: "done", latest_deliverable: item("d2", "接口文档", 2) })];
+  it("shows the project's deliverables, remembers folds per user, searches, and opens the library", async () => {
+    stubApi({ "/deliverables": { items: [item("d1", "落地页", null), item("d2", "接口文档", 2)], storage_bytes: 0 }, "/waiting": { questions: [], reviews: [] } });
+    const w = mount(PanelList, { props: { pid: "p1", threads, loading: false, userId: "u1" }, global: { plugins: plugins() }, attachTo: document.body });
+    await flushPromises();
+    const strip = w.get("section[aria-label=交付物]");
+    expect(strip.text()).toContain("落地页");
+    expect(strip.text()).toContain("查看全部");
+    await w.get("[data-group=done] > button").trigger("click");
+    expect(JSON.parse(window.localStorage.getItem(foldedKey("u1"))!)).toEqual({ done: true });
+    expect(w.text()).not.toContain("#1 部署");
+    await strip.get("button[aria-expanded]").trigger("click");
+    expect(JSON.parse(window.localStorage.getItem(foldedKey("u1"))!)).toEqual({ done: true, deliverables: true });
+    expect(w.text()).not.toContain("查看全部");
+
+    const again = mount(PanelList, { props: { pid: "p1", threads, loading: false, userId: "u1" }, global: { plugins: plugins() }, attachTo: document.body });
+    await flushPromises();
+    expect(again.get("[data-group=done] > button").attributes("aria-expanded")).toBe("false");
+    again.unmount();
+
+    await w.get("button[aria-label=搜索讨论串]").trigger("click");
+    await w.get("input[aria-label=搜索讨论串]").setValue("部署");
+    expect(w.text()).toContain("#1 部署");
+    expect(w.text()).not.toContain("#2 接口");
+    expect(w.find("section[aria-label=交付物]").exists()).toBe(false);
+  });
+  it("查看全部 opens the library panel", async () => {
+    stubApi({ "/deliverables": { items: [item("d1", "落地页", null)], storage_bytes: 0 }, "/waiting": { questions: [], reviews: [] } });
+    const [vq, router] = plugins() as unknown as [never, ReturnType<typeof createRouter>];
+    const w = mount(PanelList, { props: { pid: "p1", threads, loading: false, userId: "u1" }, global: { plugins: [vq, router] as never[] }, attachTo: document.body });
+    await flushPromises();
+    await w.findAll("button").find((b) => b.text() === "查看全部")!.trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.query.panel).toBe("library");
   });
 });
 

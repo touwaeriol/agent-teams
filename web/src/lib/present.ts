@@ -61,27 +61,6 @@ export function markTone(t: Pick<ThreadView, "status" | "counts">): string {
   return THREAD_LOOK[kind].tone;
 }
 
-export interface ThreadGroup {
-  id: "waiting" | "active" | "done";
-  title: string;
-  items: ThreadView[];
-}
-
-const byRecent = (a: ThreadView, b: ThreadView) => Date.parse(b.updated_at) - Date.parse(a.updated_at);
-
-/** Right-panel groups: 等你处理 / 进行中 / 已完成. A running thread with an open card is in both of the first two. */
-export function groupThreads(threads: ThreadView[]): ThreadGroup[] {
-  const live = threads.filter((t) => t.status !== "archived");
-  const waiting = live.filter((t) => t.status === "review" || (t.counts.waiting > 0 && t.status !== "done"));
-  const active = live.filter((t) => ["running", "queued", "paused", "waiting"].includes(t.status));
-  const done = live.filter((t) => t.status === "done" || t.status === "failed");
-  return [
-    { id: "waiting" as const, title: `等你处理 · ${waiting.length}`, items: waiting.sort(byRecent) },
-    { id: "active" as const, title: `进行中 · ${active.length}`, items: active.sort(byRecent) },
-    { id: "done" as const, title: `已完成 · ${done.length}`, items: done.sort(byRecent) },
-  ].filter((g) => g.items.length > 0);
-}
-
 /** One line under a thread title: what is waiting, else the PR, else what the lead said last. */
 export function threadLine(t: ThreadView, open?: QuestionView): string {
   if (open) return questionLine(open);

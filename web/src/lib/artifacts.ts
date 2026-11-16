@@ -6,6 +6,11 @@ export function isHosted(d: Pick<DeliverableView, "detail">): boolean {
   return d.detail?.hosted === true;
 }
 
+/** A hosted page or image: lists show a picture of it rather than its type icon. */
+export function hasPicture(d: Pick<DeliverableView, "detail">): boolean {
+  return isHosted(d) && (d.detail.render === "html" || d.detail.render === "image");
+}
+
 /**
  * iframe sandbox for a published page. Without a separate file origin the page must never get
  * allow-same-origin: it would run as the console and could use the session (the server's CSP

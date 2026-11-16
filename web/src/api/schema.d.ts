@@ -2747,6 +2747,13 @@ export interface components {
              */
             finished_at: string | null;
             id: string;
+            /**
+             * Format: date-time
+             * @description Latest state change, message or deliverable of the thread
+             */
+            last_activity_at: string;
+            /** @description The newest deliverable the thread published (null: none) */
+            latest_deliverable: components["schemas"]["DeliverableView"];
             lead_last: components["schemas"]["LeadLast"];
             main_tasks: components["schemas"]["MainTaskView"][] | null;
             members: components["schemas"]["EmployeeBrief"][] | null;
@@ -2811,6 +2818,13 @@ export interface components {
              */
             finished_at: string | null;
             id: string;
+            /**
+             * Format: date-time
+             * @description Latest state change, message or deliverable of the thread
+             */
+            last_activity_at: string;
+            /** @description The newest deliverable the thread published (null: none) */
+            latest_deliverable: components["schemas"]["DeliverableView"];
             lead_last: components["schemas"]["LeadLast"];
             main_tasks: components["schemas"]["MainTaskView"][] | null;
             members: components["schemas"]["EmployeeBrief"][] | null;

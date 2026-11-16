@@ -16,6 +16,7 @@ import IconMenu from "@/components/common/IconMenu.vue";
 import ConfirmAction from "@/components/common/ConfirmAction.vue";
 import Markdown from "@/components/Markdown.vue";
 import { useDraft } from "@/lib/persist";
+import type { ThreadView } from "@/api/views";
 import { question, thread } from "./fixtures";
 
 function plugins() {
@@ -175,17 +176,40 @@ describe("AskCard", () => {
 });
 
 describe("ThreadList", () => {
-  it("groups threads and folds archived ones", async () => {
+  const idle = { members: [{ id: "e", name: "lead", tier: "lead", status: { state: "idle" } }] } as unknown as Partial<ThreadView>;
+  it("groups threads into chips with counts; archived starts folded and folding is reported", async () => {
     const w = mountWith(ThreadList, {
-      threads: [thread(1), thread(2, { status: "done" }), thread(3, { status: "archived", summary: "旧的" })],
+      threads: [thread(1, idle), thread(2, { status: "done" }), thread(4, { status: "failed" }), thread(3, { status: "archived", summary: "旧的" })],
     });
+    const chips = w.findAll("section[data-group] > button").map((b) => b.text());
+    expect(chips).toEqual(["空闲 · 1", "已完成 · 2", "已归档 · 1"]);
+    expect(w.find("[data-group=idle] [data-mark=idle]").exists()).toBe(true);
+    expect(w.find("[data-group=done] [data-mark=failed]").exists()).toBe(true);
     expect(w.text()).toContain("#1 T1");
-    expect(w.text()).toContain("#2 T2");
     expect(w.text()).not.toContain("#3 T3");
-    await w.get("button[aria-expanded=false]").trigger("click");
+    await w.get("[data-group=archived] > button").trigger("click");
+    expect(w.emitted("fold")).toEqual([["archived", false]]);
+    await w.setProps({ folded: { archived: false, done: true } });
     expect(w.text()).toContain("#3 T3");
+    expect(w.text()).not.toContain("#2 T2");
+    expect(w.get("[data-group=done] > button").attributes("aria-expanded")).toBe("false");
     await w.findAll("button").find((b) => b.text().includes("#1 T1"))!.trigger("click");
     expect(w.emitted("open")).toEqual([[1]]);
+  });
+  it("searching opens folded groups and says when nothing matches", async () => {
+    const w = mountWith(ThreadList, { threads: [thread(1, { status: "done", title: "部署" }), thread(2, { status: "done" })], folded: { done: true } });
+    expect(w.text()).not.toContain("#1 部署");
+    await w.setProps({ filter: { q: "部署", groups: [], withDeliverable: false } });
+    expect(w.text()).toContain("#1 部署");
+    expect(w.text()).not.toContain("#2 T2");
+    await w.setProps({ filter: { q: "没有", groups: [], withDeliverable: false } });
+    expect(w.text()).toContain("没有符合条件的讨论串");
+  });
+  it("shows the newest deliverable under its row and the last activity", () => {
+    const d = { id: "d1", project_id: "p1", thread_no: 1, kind: "doc", title: "说明", url: "https://x.dev/a", detail: {}, published_by: "dev", created_at: "", updated_at: "" };
+    const w = mountWith(ThreadList, { threads: [thread(1, { ...idle, latest_deliverable: d, last_activity_at: new Date(Date.now() - 51 * 60_000).toISOString() })] });
+    expect(w.get("[data-row] a[href='https://x.dev/a']").text()).toContain("说明");
+    expect(w.get("[data-row] time").text()).toBe("51分钟");
   });
   it("says what to do when there are none", () => {
     expect(mountWith(ThreadList, { threads: [] }).text()).toContain("还没有讨论串");

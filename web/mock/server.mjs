@@ -25,6 +25,12 @@ const fail = (res, status, detail, code = "") => json(res, status, { detail, cod
 const cookies = (req) => Object.fromEntries((req.headers.cookie ?? "").split(";").map((c) => c.trim().split("=")).filter((p) => p[0]));
 const now = () => new Date().toISOString();
 const threadById = (tid) => state.threads.find((t) => t.id === tid);
+/** What the server adds to a thread in lists: its newest deliverable and when anything last happened. */
+const threadOut = (t) => {
+  const latest = state.deliverables.filter((d) => d.thread_no === t.no).sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0] ?? null;
+  const times = [t.updated_at, t.lead_last?.at, latest?.updated_at].filter(Boolean).map((x) => Date.parse(x));
+  return { ...t, latest_deliverable: latest, last_activity_at: new Date(Math.max(...times)).toISOString() };
+};
 const threadByNo = (no) => state.threads.find((t) => t.no === Number(no));
 
 function body(req) {
@@ -158,7 +164,7 @@ async function answer(res, cid, qid, req) {
   const t = threadById(cid);
   if (t) {
     t.counts.waiting = Math.max(0, t.counts.waiting - 1);
-    emit("thread", { thread: t });
+    emit("thread", { thread: threadOut(t) });
   }
   emit("question", { thread_no: q.thread_no, question: q });
   json(res, 200, q);
@@ -200,7 +206,7 @@ const routes = [
   }],
   ["GET", /^\/api\/projects\/([^/]+)\/events$/, (req, res, [pid]) => openStream(req, res, pid)],
   ["GET", /^\/api\/projects\/([^/]+)\/coordinator$/, (req, res) => json(res, 200, { conversation_id: "c0", employee: state.coordinator, session_state: "active" })],
-  ["GET", /^\/api\/projects\/([^/]+)\/threads$/, (req, res, [pid]) => json(res, 200, pid === "p1" ? state.threads : [])],
+  ["GET", /^\/api\/projects\/([^/]+)\/threads$/, (req, res, [pid]) => json(res, 200, pid === "p1" ? state.threads.map(threadOut) : [])],
   ["GET", /^\/api\/projects\/([^/]+)\/waiting$/, (req, res, [pid]) => json(res, 200, pid === "p1" ? waiting() : { questions: [], reviews: [] })],
   ["GET", /^\/api\/projects\/([^/]+)\/overview$/, (req, res, [pid]) => {
     const p = state.projects.find((x) => x.id === pid);
@@ -209,7 +215,7 @@ const routes = [
   ["GET", /^\/api\/projects\/([^/]+)\/deliverables$/, (req, res, _m, url) => {
     const kind = url.searchParams.get("kind");
     const q = url.searchParams.get("q") ?? "";
-    json(res, 200, { ...page(state.deliverables.filter((d) => (!kind || d.kind === kind) && d.title.includes(q))), storage_bytes: storageBytes() });
+    json(res, 200, { ...page(state.deliverables.filter((d) => (!kind || d.kind === kind) && d.title.includes(q)).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))), storage_bytes: storageBytes() });
   }],
   ["POST", /^\/api\/projects\/([^/]+)\/library$/, async (req, res, [pid]) => {
     const b = await body(req);
@@ -283,7 +289,7 @@ const routes = [
     const t = threadById(tid);
     if (op === "archive") Object.assign(t, { archived_from: t.status, status: "archived" });
     else Object.assign(t, { status: ["done", "failed"].includes(t.archived_from) ? t.archived_from : "paused" });
-    emit("thread", { thread: t });
+    emit("thread", { thread: threadOut(t) });
     json(res, 200, t);
   }],
   ["DELETE", /^\/api\/threads\/([^/]+)$/, (req, res, [tid]) => {
@@ -313,14 +319,15 @@ const routes = [
     const d = state.deliverables.find((x) => x.id === id);
     if (!d?.detail.hosted) return fail(res, 404, "没有文件");
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"><rect width="320" height="240" fill="#F4EFE8"/><rect x="24" y="28" width="272" height="64" rx="12" fill="#FFF9F4" stroke="#F0C9A8"/><rect x="40" y="48" width="120" height="10" rx="5" fill="#C8622A"/><rect x="40" y="66" width="200" height="8" rx="4" fill="#E2DFD8"/><rect x="24" y="108" width="80" height="28" rx="8" fill="#1F1E1C"/><rect x="112" y="108" width="80" height="28" rx="8" fill="#fff" stroke="#E2DFD8"/></svg>`;
-    const url = `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+    const html = `<!doctype html><meta charset="utf-8"><body style="margin:0;font-family:system-ui;background:#FBF8F4"><div style="padding:56px 64px"><div style="width:120px;height:18px;border-radius:9px;background:#C8622A"></div><h1 style="font-size:64px;margin:40px 0 16px;color:#1F1E1C">让 AI 团队替你交付</h1><p style="font-size:26px;color:#6B6862;margin:0 0 36px">在你自己的机器上运行 Claude Code 员工</p><div style="display:flex;gap:20px"><span style="padding:18px 34px;border-radius:14px;background:#1F1E1C;color:#fff;font-size:24px">开始使用</span><span style="padding:18px 34px;border-radius:14px;border:2px solid #E2DFD8;font-size:24px">看演示</span></div><div style="display:flex;gap:24px;margin-top:64px">${[1, 2, 3].map(() => '<div style="flex:1;height:220px;border-radius:20px;background:#fff;border:2px solid #EFEDE8"></div>').join("")}</div></div></body>`;
+    const url = d.detail.render === "html" ? `data:text/html;base64,${Buffer.from(html).toString("base64")}` : `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
     json(res, 200, { deliverable_id: id, version: 1, versions: [{ version: 1, created_at: d.created_at, by: d.published_by, files: 1, size: d.detail.size }], entry: d.detail.entry, render: d.detail.render ?? "image", files: [], base_url: "", entry_url: url, expires_at: ago(-120) });
   }],
   ["PATCH", /^\/api\/threads\/([^/]+)$/, async (req, res, [tid]) => {
     const t = threadById(tid);
     const b = await body(req);
     Object.assign(t, b.status ? { status: b.status } : {}, b.auto_approve !== undefined ? { auto_approve: b.auto_approve } : {}, b.title ? { title: b.title } : {});
-    emit("thread", { thread: t });
+    emit("thread", { thread: threadOut(t) });
     json(res, 200, t);
   }],
   ["PATCH", /^\/api\/threads\/([^/]+)\/main-tasks\/([^/]+)$/, async (req, res, [tid, mid]) => {
@@ -351,7 +358,7 @@ const routes = [
     if (op === "accept") Object.assign(t, { status: "done", pr_state: "merged" });
     if (op === "reject") t.status = "running";
     if (op === "open-pr") Object.assign(t, { status: "review", pr_number: 42, pr_url: "https://github.com/touwaeriol/agent-teams/pull/42" });
-    emit("thread", { thread: t });
+    emit("thread", { thread: threadOut(t) });
     json(res, 200, t);
   }],
   ["GET", /^\/api\/nodes$/, (req, res) => json(res, 200, state.nodes)],

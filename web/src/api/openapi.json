@@ -4158,6 +4158,15 @@
           "id": {
             "type": "string"
           },
+          "last_activity_at": {
+            "description": "Latest state change, message or deliverable of the thread",
+            "format": "date-time",
+            "type": "string"
+          },
+          "latest_deliverable": {
+            "$ref": "#/components/schemas/DeliverableView",
+            "description": "The newest deliverable the thread published (null: none)"
+          },
           "lead_last": {
             "$ref": "#/components/schemas/LeadLast"
           },
@@ -4301,7 +4310,9 @@
           "created_at",
           "updated_at",
           "started_at",
-          "finished_at"
+          "finished_at",
+          "last_activity_at",
+          "latest_deliverable"
         ],
         "type": "object"
       },
@@ -4413,6 +4424,15 @@
           },
           "id": {
             "type": "string"
+          },
+          "last_activity_at": {
+            "description": "Latest state change, message or deliverable of the thread",
+            "format": "date-time",
+            "type": "string"
+          },
+          "latest_deliverable": {
+            "$ref": "#/components/schemas/DeliverableView",
+            "description": "The newest deliverable the thread published (null: none)"
           },
           "lead_last": {
             "$ref": "#/components/schemas/LeadLast"
@@ -4539,7 +4559,9 @@
           "created_at",
           "updated_at",
           "started_at",
-          "finished_at"
+          "finished_at",
+          "last_activity_at",
+          "latest_deliverable"
         ],
         "type": "object"
       },

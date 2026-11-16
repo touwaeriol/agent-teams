@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  approvalCardStatus, approvalCommand, reviewNote, checkLook, deliverableKind, groupThreads, mainProgress, markTone, memberDoing, memberTone, mergeLook, openForUser,
+  approvalCardStatus, approvalCommand, reviewNote, checkLook, deliverableKind, mainProgress, markTone, memberDoing, memberTone, mergeLook, openForUser,
   projectTint, onePRLook, prLook, questionLine, taskLook, taskTitle, threadBases, threadKind, threadLine, threadPRs, INK,
 } from "@/lib/present";
 import { question, task, thread } from "./fixtures";
@@ -21,24 +21,6 @@ describe("threadKind / markTone", () => {
     expect(threadKind(thread(1, { status: "paused" }))).toBe("paused");
     expect(threadKind(thread(1, { status: "queued" }))).toBe("queued");
     expect(markTone(thread(1, { status: "done" }))).toBe(INK.gray);
-  });
-});
-
-describe("groupThreads", () => {
-  it("puts a running thread with a waiting card in both waiting and active, hides archived and empty groups", () => {
-    const groups = groupThreads([
-      thread(12, { counts: counts({ waiting: 1 }) }),
-      thread(11, { status: "review" }),
-      thread(9, { status: "archived" }),
-    ]);
-    expect(groups.map((g) => g.id)).toEqual(["waiting", "active"]);
-    expect(groups[0].items.map((t) => t.no).sort()).toEqual([11, 12]);
-    expect(groups[0].title).toBe("等你处理 · 2");
-    expect(groups[1].items.map((t) => t.no)).toEqual([12]);
-  });
-  it("sorts by most recent update", () => {
-    const [g] = groupThreads([thread(1, { status: "done", updated_at: "2026-01-01T00:00:00Z" }), thread(2, { status: "done", updated_at: "2026-02-01T00:00:00Z" })]);
-    expect(g.items.map((t) => t.no)).toEqual([2, 1]);
   });
 });
 

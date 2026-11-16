@@ -6,7 +6,7 @@ import { saveView, storedView, typeName } from "@/components/app/deliverables/br
 import { closedNote, detailViewOf, reopenHint, typingLine } from "@/components/app/thread/detail";
 import { openPrMode, prLines, queueLines } from "@/components/app/threadviews/delivery";
 import { memberStatusLine } from "@/components/app/threadviews/members";
-import { fileUrl, formatBytes, frameSandbox, isHosted, markdownUrl, renderLabel } from "@/lib/artifacts";
+import { fileUrl, formatBytes, frameSandbox, hasPicture, isHosted, markdownUrl, renderLabel } from "@/lib/artifacts";
 import { deliverableHref } from "@/lib/library";
 import { approvalText, pickedVersion, versionLabel, viewerSubtitle } from "@/pages/design/viewer";
 import { threadPath } from "@/pages/main/logic";
@@ -116,6 +116,10 @@ describe("library and viewer", () => {
     expect(frameSandbox(true)).toContain("allow-same-origin");
     const hosted = { id: "d", kind: "doc", url: "", detail: { hosted: true } };
     expect(isHosted(hosted)).toBe(true);
+    expect(hasPicture(hosted)).toBe(false);
+    expect(hasPicture({ detail: { hosted: true, render: "html" } })).toBe(true);
+    expect(hasPicture({ detail: { hosted: true, render: "image" } })).toBe(true);
+    expect(hasPicture({ detail: { render: "image" } })).toBe(false);
     expect(deliverableHref("p", hosted)).toEqual({ to: "/projects/p/deliverables/d" });
     expect(deliverableHref("p", { id: "d", kind: "doc", url: "https://x.test/a", detail: {} })).toEqual({ href: "https://x.test/a" });
   });

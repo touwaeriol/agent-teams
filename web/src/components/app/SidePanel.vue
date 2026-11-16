@@ -10,5 +10,5 @@ const [width, setWidth] = usePanelWidth(() => props.userId);
 
 <template>
   <ResizeHandle :width="width" :label="handleLabel" @change="setWidth" />
-  <aside :aria-label="label" :style="{ width: `${width}px` }" class="hidden h-full shrink-0 flex-col border-l bg-panel lg:flex"><slot /></aside>
+  <aside :aria-label="label" :style="{ width: `${width}px` }" class="hidden h-full shrink-0 flex-col border-l bg-panel lg:flex"><slot :width="width" :set-width="setWidth" /></aside>
 </template>

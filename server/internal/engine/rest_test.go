@@ -99,6 +99,13 @@ func deliverables(t *testing.T, tm *team) {
 	if d.ThreadNo == nil || *d.ThreadNo != 1 {
 		t.Fatalf("deliverable %+v", d)
 	}
+	var list []core.ThreadView
+	b.must(200, "GET", "/api/projects/"+pid+"/threads", nil, &list)
+	if len(list) != 1 || list[0].LatestDeliverable == nil || list[0].LatestDeliverable.ID != d.ID ||
+		list[0].LatestDeliverable.ThreadNo == nil || *list[0].LatestDeliverable.ThreadNo != 1 ||
+		list[0].LastActivityAt.Before(d.UpdatedAt) || list[0].LastActivityAt.Before(list[0].UpdatedAt) {
+		t.Fatalf("thread latest deliverable / activity %+v", list)
+	}
 	var page struct{ Items []core.DeliverableView }
 	b.must(200, "GET", "/api/projects/"+pid+"/deliverables?q="+url.QueryEscape("文档"), nil, &page)
 	if len(page.Items) != 1 || page.Items[0].PublishedBy != "dev-1" {

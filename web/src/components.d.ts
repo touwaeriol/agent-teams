@@ -13,6 +13,8 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     ElButton: typeof import('element-plus/es/components/button/index.mjs')['ElButton']
+    ElCheckbox: typeof import('element-plus/es/components/checkbox/index.mjs')['ElCheckbox']
+    ElCheckboxGroup: typeof import('element-plus/es/components/checkbox/index.mjs')['ElCheckboxGroup']
     ElConfigProvider: typeof import('element-plus/es/components/config-provider/index.mjs')['ElConfigProvider']
     ElDialog: typeof import('element-plus/es/components/dialog/index.mjs')['ElDialog']
     ElDropdown: typeof import('element-plus/es/components/dropdown/index.mjs')['ElDropdown']
@@ -21,6 +23,7 @@ declare module 'vue' {
     ElInput: typeof import('element-plus/es/components/input/index.mjs')['ElInput']
     ElInputTag: typeof import('element-plus/es/components/input-tag/index.mjs')['ElInputTag']
     ElOption: typeof import('element-plus/es/components/select/index.mjs')['ElOption']
+    ElPopover: typeof import('element-plus/es/components/popover/index.mjs')['ElPopover']
     ElSelect: typeof import('element-plus/es/components/select/index.mjs')['ElSelect']
     ElSwitch: typeof import('element-plus/es/components/switch/index.mjs')['ElSwitch']
     ElTooltip: typeof import('element-plus/es/components/tooltip/index.mjs')['ElTooltip']
@@ -32,6 +35,8 @@ declare module 'vue' {
 // For TSX support
 declare global {
   const ElButton: typeof import('element-plus/es/components/button/index.mjs')['ElButton']
+  const ElCheckbox: typeof import('element-plus/es/components/checkbox/index.mjs')['ElCheckbox']
+  const ElCheckboxGroup: typeof import('element-plus/es/components/checkbox/index.mjs')['ElCheckboxGroup']
   const ElConfigProvider: typeof import('element-plus/es/components/config-provider/index.mjs')['ElConfigProvider']
   const ElDialog: typeof import('element-plus/es/components/dialog/index.mjs')['ElDialog']
   const ElDropdown: typeof import('element-plus/es/components/dropdown/index.mjs')['ElDropdown']
@@ -40,6 +45,7 @@ declare global {
   const ElInput: typeof import('element-plus/es/components/input/index.mjs')['ElInput']
   const ElInputTag: typeof import('element-plus/es/components/input-tag/index.mjs')['ElInputTag']
   const ElOption: typeof import('element-plus/es/components/select/index.mjs')['ElOption']
+  const ElPopover: typeof import('element-plus/es/components/popover/index.mjs')['ElPopover']
   const ElSelect: typeof import('element-plus/es/components/select/index.mjs')['ElSelect']
   const ElSwitch: typeof import('element-plus/es/components/switch/index.mjs')['ElSwitch']
   const ElTooltip: typeof import('element-plus/es/components/tooltip/index.mjs')['ElTooltip']

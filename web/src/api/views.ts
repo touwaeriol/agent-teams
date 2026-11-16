@@ -120,6 +120,10 @@ export interface ThreadView {
   started_at?: string | null;
   /** When it reached done, failed or archived. */
   finished_at?: string | null;
+  /** Latest state change, message or deliverable of the thread. */
+  last_activity_at?: string;
+  /** The newest deliverable the thread published. */
+  latest_deliverable?: DeliverableView | null;
 }
 
 /** One repository of a thread: its base, whether the thread branch exists there, its PR. */

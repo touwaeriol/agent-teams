@@ -20,6 +20,7 @@ import type { ThreadViewId } from "@/components/app/threadMenu";
 import PanelDetail from "./main/PanelDetail.vue";
 import PanelList from "./main/PanelList.vue";
 import ThreadChips from "./main/ThreadChips.vue";
+import { PANEL_DEFAULT, PANEL_MAX, clampWidth } from "@/lib/panelWidth";
 import { sidePanelOf, threadPath, type SidePanel as Panel } from "./main/logic";
 
 const props = withDefaults(defineProps<{ openNo?: number | null; view?: ThreadViewId | null }>(), { openNo: null, view: null });
@@ -37,6 +38,8 @@ const settings = computed(() => /^\/projects\/[^/]+\/settings(\/|$)/.test(route.
 const section = computed(() => sectionOf(typeof route.params.section === "string" ? route.params.section : undefined));
 const setSection = (s: SettingsSection) => void router.replace(`/projects/${pid.value}/settings/${s}`);
 const setPanel = (p: Panel) => void router.replace({ query: p === "threads" ? {} : { panel: p } });
+/** The panel is at its widest for this window (the list's expand button then shrinks it back). */
+const isWide = (w: number) => w >= clampWidth(PANEL_MAX, window.innerWidth) && w > PANEL_DEFAULT;
 const openThread = (no: number) => void router.push(threadPath(pid.value, no));
 const setView = (v: ThreadViewId | null) => props.openNo && void router.replace(threadPath(pid.value, props.openNo, v));
 
@@ -61,7 +64,7 @@ watchEffect(() => {
       </div>
       <CoordinatorComposer :pid="pid" :coordinator="coordinator.data.value" />
     </main>
-    <SidePanel v-if="panel === 'threads'" :user-id="me.data.value?.id ?? 'anon'" label="讨论串" handle-label="调整讨论串宽度">
+    <SidePanel v-if="panel === 'threads'" v-slot="{ width, setWidth }" :user-id="me.data.value?.id ?? 'anon'" label="讨论串" handle-label="调整讨论串宽度">
       <PanelDetail
         v-if="props.openNo"
         :pid="pid"
@@ -73,7 +76,16 @@ watchEffect(() => {
         @back="router.push(`/projects/${pid}`)"
         @close="router.push(`/projects/${pid}?panel=none`)"
       />
-      <PanelList v-else :pid="pid" :threads="list" :loading="threads.isLoading.value" @open="openThread" />
+      <PanelList
+        v-else
+        :pid="pid"
+        :threads="list"
+        :loading="threads.isLoading.value"
+        :user-id="me.data.value?.id ?? 'anon'"
+        :expanded="isWide(width)"
+        @open="openThread"
+        @expand="setWidth(isWide(width) ? PANEL_DEFAULT : PANEL_MAX)"
+      />
     </SidePanel>
     <aside
       v-if="panel === 'library'"

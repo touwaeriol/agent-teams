@@ -66,6 +66,20 @@ const thread = (no, title, status, extra) => ({
 });
 
 export const threads = [
+  thread(15, "部署 agent.prophey.ai 并重做前端", "running", {
+    branch: "thread/15-deploy", updated_at: ago(51), started_at: ago(300),
+    members: [emp("e15l", "lead-15", "lead", "lead", "组长", "claude", RC, look("#C8622A", "suit", "none"), st("idle", "")), emp("e15d", "dev-1", "member", "dev", "开发", "claude", RC, look("#4C7BD0", "tee", "none"), st("idle", ""))],
+    summary: "已上线 agent.prophey.ai，测试全部通过。",
+    lead_last: { text: "Thread reopen shipped to agent.prophey.ai; tests pass\n剩下的等你确认。", at: ago(51) },
+    counts: counts({ tasks_total: 5, tasks_done: 5, main_total: 2, main_done: 2 }),
+  }),
+  thread(14, "落地页 v2 改版", "running", {
+    branch: "thread/14-landing", updated_at: ago(2), started_at: ago(90),
+    members: [emp("e14l", "lead-14", "lead", "lead", "组长", "claude", RC, look("#C8622A", "suit", "none"), st("idle", "")), emp("e14d", "designer-1", "member", "designer", "设计", "claude", CVP, look("#A2346B", "tee", "none"), st("typing", "调整首屏排版"))],
+    summary: "首屏和定价区完成，正在调整移动端。",
+    lead_last: { text: "首屏和定价区已发布第 2 版，designer-1 在调移动端排版。", at: ago(2) },
+    counts: counts({ tasks_total: 4, tasks_done: 2, main_total: 2, main_done: 1 }),
+  }),
   thread(13, "Codex 员工接入", "running", {
     branch: "thread/13-codex", updated_at: ago(8), started_at: ago(66), members: members13,
     summary: "组长问：节点上还没装 codex，先用 CODEX_API_KEY 还是你去登录？",
@@ -106,6 +120,10 @@ export const threads = [
     summary: "GitHub App 安装授权，令牌每次运行现取。",
     main_tasks: [1, 2, 3, 4].map((i) => step(`m9${i}`, i, `步骤 ${i}`, "done", 1, 1)),
     counts: counts({ tasks_total: 4, tasks_done: 4, main_total: 4, main_done: 4 }),
+  }),
+  thread(6, "CI 缓存提速", "failed", {
+    branch: "thread/6-ci-cache", updated_at: ago(60 * 24 * 2), summary: "缓存键冲突，两次重试都失败。",
+    counts: counts({ tasks_total: 2, tasks_done: 1, main_total: 1, main_done: 0 }),
   }),
   thread(8, "旧版 YAML 团队配置迁移", "archived", {
     branch: "thread/8-yaml", updated_at: ago(60 * 26), summary: "迁移脚本已合并，旧配置自动转换。",
@@ -223,12 +241,12 @@ export const deliverables = [
   hosted("d7", "design", "06-nodes.png", 60 * 30, 9_400, "user"),
   hosted("d8", "design", "e2e-main.png", 60 * 31, 381_800, "user"),
   hosted("d9", "doc", "架构说明.md", 60 * 33, 24_100, "designer-1"),
-  hosted("d10", "design", "落地页 v2", 60 * 34, 208_600, "designer-1", "index.html"),
-  hosted("d11", "design", "审批卡片-亮色.png", 9, 48_200, "dev-2"),
+  hosted("d10", "design", "落地页 v2", 3, 208_600, "designer-1", "index.html", 14),
+  hosted("d11", "design", "部署后的控制台截图.png", 52, 48_200, "dev-1", "console.png", 15),
 ];
 
-function hosted(id, kind, title, min, size, by, entry = title) {
-  return { id, project_id: "p1", thread_no: by === "user" ? null : 12, kind, title, url: "", detail: { hosted: true, entry, size, version: 1, files: 1, by, render: entry.endsWith(".md") ? "markdown" : entry.endsWith(".html") ? "html" : "image" }, published_by: by, created_at: ago(min), updated_at: ago(min) };
+function hosted(id, kind, title, min, size, by, entry = title, thread_no = by === "user" ? null : 12) {
+  return { id, project_id: "p1", thread_no, kind, title, url: "", detail: { hosted: true, entry, size, version: 1, files: 1, by, render: entry.endsWith(".md") ? "markdown" : entry.endsWith(".html") ? "html" : "image" }, published_by: by, created_at: ago(min), updated_at: ago(min) };
 }
 
 export const schedules = [
