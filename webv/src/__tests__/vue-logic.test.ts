@@ -95,10 +95,11 @@ describe("markdown", () => {
     expect(a.properties?.href).toBe("https://x.dev/pull/1");
     expect(text(a)).toBe("https://x.dev/pull/1");
   });
-  it("drops unsafe URLs and raw HTML, keeps GFM tables", () => {
+  it("drops unsafe URLs, shows raw HTML as text, keeps GFM tables", () => {
     const tree = markdownTree('[x](javascript:alert(1)) <b onclick="y">raw</b>\n\n| a | b |\n|---|---|\n| 1 | 2 |') as El;
     expect(find(tree, "a")[0].properties?.href).toBe("");
     expect(find(tree, "b")).toHaveLength(0);
+    expect(text(tree)).toContain('<b onclick="y">raw</b>');
     expect(find(tree, "table")).toHaveLength(1);
   });
   it("url transform matches react-markdown's default", () => {

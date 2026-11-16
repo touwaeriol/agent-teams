@@ -108,15 +108,19 @@ delete, search, archived fold, nodes footer, project switcher, settings nav, pho
 header (switcher, coordinator state, 资料库 / 讨论串 / 办公室 icons, ⋯ menu), coordinator chat and
 composer (paste / drop / pick images, drafts, stop), thread list panel with row menus, resizable right
 panel, waiting cards (approval, plan approval, question, PR acceptance), chat cards (todos, plan,
-artifact, resumed), Markdown, login and forced password change, 外观 settings, office renderer + demo.
+artifact, resumed), Markdown, login and forced password change, 外观 settings, office renderer + demo,
+thread panel and full page (`components/app/thread/`: breadcrumb header, ✓, ⋯ with 任务 / 交付物 / 成员,
+expand / collapse, lead chat with question cards, review card and typing line, lead composer), the
+任务 / 交付物 / 成员 dialog (`components/app/threadviews/`), `ThreadRoute` (panel on ≥ lg, page below),
+project home (`pages/Overview.vue` + `overview/`), 资料库 panel and page (`components/app/deliverables/`,
+`pages/Deliverables.vue`), deliverable viewer with versions and comments (`pages/DesignViewer.vue` +
+`design/`), office page with live / replay / scope / employee card (`pages/Office.vue` + `office/`).
 
 Still to port (React source in brackets):
 
-- Pages: NewProject, Overview, Thread full page + MobileThread (`pages/Thread.tsx`), Deliverables,
-  DesignViewer, ProjectSettings dialog (route `/projects/:pid/settings[/:section]` currently shows Main
-  without it), Office page, Legacy, settings Team / Nodes / GitHub / Admin / SetupGitHub.
-- App components: ThreadDetail + ThreadViews (Main's right panel shows `PanelPending` for an open
-  thread), LibraryBrowser (`PanelPending` in the library panel), SchedulesDialog (⋯ → 定时任务 shows an
-  info dialog), PluginLibrary, SkillLibrary, repo fields, DeliverableThumb, Avatar.
-- Tests that need those modules: `web/src/__tests__/{chatcards,marks,threads,design}` and the
-  page parts of `logic.test.ts`.
+- Pages: NewProject, ProjectSettings dialog (route `/projects/:pid/settings[/:section]` currently shows Main
+  without it), Legacy, settings Team / Nodes / GitHub / Admin / SetupGitHub.
+- App components: SchedulesDialog (⋯ → 定时任务 shows an info dialog), PluginLibrary, SkillLibrary,
+  repo fields, Avatar.
+- Tests that need those modules: `web/src/__tests__/{chatcards,marks}` and the settings parts of
+  `logic.test.ts` (thread, overview, office, library and viewer logic is in `__tests__/screens*.test.ts`).

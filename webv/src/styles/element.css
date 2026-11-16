@@ -120,6 +120,8 @@ html.dark {
   gap: 8px;
 }
 .el-button + .el-button { margin-left: 8px; }
+/* Icon + label 8px apart (React Button gap-2): the label lives in an inner span. */
+.el-button > span { display: inline-flex; align-items: center; gap: 8px; }
 .el-button--small { height: 32px; padding: 0 12px; font-size: 13px; border-radius: var(--radius); }
 .el-button--large { height: 42px; padding: 0 20px; }
 .el-button.is-circle { width: 36px; padding: 0; }

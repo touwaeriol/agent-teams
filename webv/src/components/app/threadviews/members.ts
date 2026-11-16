@@ -1,0 +1,6 @@
+import type { EmployeeBrief } from "@/api/views";
+
+/** "正在编辑 · 2 分钟 · 任务 t5": what a member is doing, for how long, on which task. */
+export function memberStatusLine(label: string, status: EmployeeBrief["status"], since: (iso: string) => string): string {
+  return `${label}${status?.since ? ` · ${since(status.since)}` : ""}${status?.task_id ? ` · 任务 ${status.task_id}` : ""}`;
+}

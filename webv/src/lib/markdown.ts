@@ -1,8 +1,8 @@
 // Markdown → Vue vnodes with the same pipeline react-markdown uses (remark-parse + remark-gfm →
 // remark-rehype → hast → JSX runtime), so web and webv render identical HTML: raw HTML is
-// dropped, URLs go through the same safe transform, and bare URLs followed by CJK text are
+// shown as text (react-markdown without skipHtml), URLs go through the same safe transform, and bare URLs followed by CJK text are
 // fenced first (autolink.ts).
-import type { Element, Root } from "hast";
+import type { Element, Root, RootContent } from "hast";
 import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import { urlAttributes } from "html-url-attributes";
 import remarkGfm from "remark-gfm";
@@ -27,7 +27,13 @@ export function defaultUrlTransform(value: string): string {
   return relative || SAFE_PROTOCOL.test(value.slice(0, colon)) ? value : "";
 }
 
-const processor = unified().use(remarkParse).use(remarkGfm).use(remarkRehype);
+const processor = unified().use(remarkParse).use(remarkGfm).use(remarkRehype, { allowDangerousHtml: true });
+
+/** react-markdown: raw HTML nodes become plain text (never markup). */
+function rawAsText(node: Root | Element): void {
+  node.children = node.children.map((child) => (child.type === "raw" ? ({ type: "text", value: child.value } as RootContent) : child)) as typeof node.children;
+  for (const child of node.children) if (child.type === "element") rawAsText(child);
+}
 
 function transformUrls(node: Root | Element, transform: UrlTransform): void {
   for (const child of node.children) {
@@ -44,6 +50,7 @@ function transformUrls(node: Root | Element, transform: UrlTransform): void {
 /** The hast tree of a Markdown text (exported for tests). */
 export function markdownTree(text: string, transform: UrlTransform = defaultUrlTransform): Root {
   const tree = processor.runSync(processor.parse(fenceCjkUrls(text))) as Root;
+  rawAsText(tree);
   transformUrls(tree, transform);
   return tree;
 }
