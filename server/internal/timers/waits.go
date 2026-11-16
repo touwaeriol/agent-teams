@@ -10,7 +10,6 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
-	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // MinWait separates a usage limit (resets in hours) from the SDK's own short API retries:
@@ -77,7 +76,7 @@ type dueWait struct {
 // resumeDue handles one wait whose limit has reset: the row goes away; with auto_resume the
 // thread it paused runs again and the employee gets a note that resumes its work.
 func resumeDue(ctx context.Context, tx *core.Tx, orch *orchestrator.Orchestrator, w dueWait) error {
-	if _, err := store.Exec(ctx, tx, `DELETE FROM at_rate_limit_waits WHERE employee_id = $1`, w.EmployeeID); err != nil {
+	if err := tx.Gorm(ctx).Exec(`DELETE FROM at_rate_limit_waits WHERE employee_id = ?`, w.EmployeeID).Error; err != nil {
 		return err
 	}
 	if !w.AutoResume {

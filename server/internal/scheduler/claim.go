@@ -9,7 +9,6 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
-	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 func (s *Scheduler) claimOne(ctx context.Context, threadID string) (bool, error) {
@@ -143,9 +142,9 @@ func mainTitle(ctx context.Context, q core.DB, task core.Task) string {
 	if task.MainTaskID == nil {
 		return ""
 	}
-	var title string
-	_ = store.QueryRow(ctx, q, `SELECT title FROM at_main_tasks WHERE id = $1`, *task.MainTaskID).Scan(&title)
-	return title
+	var m core.MainTask
+	_ = q.Gorm(ctx).Select("title").Where("id = ?", *task.MainTaskID).Take(&m).Error
+	return m.Title
 }
 
 func depResults(ctx context.Context, tx *core.Tx, b *strings.Builder, task core.Task) error {

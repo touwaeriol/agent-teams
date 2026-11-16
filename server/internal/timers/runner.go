@@ -119,7 +119,9 @@ func claimDue(ctx context.Context, tx *core.Tx, now time.Time) (Schedule, string
 
 // Fire posts a schedule's message now (the "立即运行" button); next_run_at stays.
 func (r *Runner) Fire(ctx context.Context, s Schedule, owner string) error {
-	if _, err := store.Exec(ctx, r.core.Pool, `UPDATE at_schedules SET last_run_at = $2, last_error = '' WHERE id = $1`, s.ID, r.Now()); err != nil {
+	err := r.core.Pool.Gorm(ctx).Table("at_schedules").Where("id = ?", s.ID).
+		Updates(map[string]any{"last_run_at": r.Now(), "last_error": ""}).Error
+	if err != nil {
 		return err
 	}
 	return r.post(ctx, s, owner)
@@ -138,7 +140,7 @@ func (r *Runner) post(ctx context.Context, s Schedule, owner string) error {
 	if len(msg) > 500 {
 		msg = msg[:500]
 	}
-	_, uerr := store.Exec(ctx, r.core.Pool, `UPDATE at_schedules SET last_error = $2 WHERE id = $1`, s.ID, msg)
+	uerr := r.core.Pool.Gorm(ctx).Table("at_schedules").Where("id = ?", s.ID).Update("last_error", msg).Error
 	if uerr != nil {
 		return uerr
 	}
