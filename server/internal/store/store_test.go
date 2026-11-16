@@ -28,7 +28,7 @@ func openPool(t *testing.T) *store.Pool {
 // models are every GORM model that maps a table the goose migrations create.
 var models = []any{
 	&store.User{}, &store.Project{}, &store.Role{}, &store.OfficeLayoutRow{}, &store.GitConnection{},
-	&store.MemoryItem{}, &store.Node{}, &store.NodeLog{}, &store.Session{}, &store.AuditEntry{},
+	&store.MemoryFile{}, &store.Node{}, &store.NodeLog{}, &store.Session{}, &store.AuditEntry{},
 	&core.Thread{}, &core.Employee{}, &core.AgentSession{}, &core.Task{}, &core.MainTask{}, &core.Question{},
 	&core.Message{}, &core.Mail{}, &core.Deliverable{}, &core.MergeEntry{}, &timers.Schedule{},
 }

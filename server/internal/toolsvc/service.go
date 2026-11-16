@@ -109,6 +109,8 @@ func (s *Service) table() map[string]handler {
 		protocol.ToolAskLead: s.askLead, protocol.ToolReadMessages: s.readMessages, protocol.ToolListTeam: s.listTeam,
 		protocol.ToolGetTask: s.getTask, protocol.ToolRequestReview: s.requestReview, protocol.ToolAssignSubtask: s.assignSubtask,
 		protocol.ToolWaitTask: s.waitTask, protocol.ToolPublishFile: s.publishFile, protocol.ToolReviewPermission: s.reviewPermission,
+		protocol.ToolMemoryList: s.memoryList, protocol.ToolMemoryRead: s.memoryRead, protocol.ToolMemoryWrite: s.memoryWrite,
+		protocol.ToolMemoryDelete: s.memoryDelete,
 	}
 }
 

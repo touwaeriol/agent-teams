@@ -100,9 +100,9 @@ p, user, /api/projects/:pid/deliverables/request, POST
 p, user, /api/projects/:pid/events, GET
 p, user, /api/projects/:pid/library, POST
 p, user, /api/projects/:pid/memory, GET
-p, user, /api/projects/:pid/memory, POST
-p, user, /api/projects/:pid/memory/:id, DELETE
-p, user, /api/projects/:pid/memory/:id, PATCH
+p, user, /api/projects/:pid/memory/:name, GET
+p, user, /api/projects/:pid/memory/:name, PUT
+p, user, /api/projects/:pid/memory/:name, DELETE
 p, user, /api/projects/:pid/office, GET
 p, user, /api/projects/:pid/office/replay, GET
 p, user, /api/projects/:pid/overview, GET

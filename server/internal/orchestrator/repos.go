@@ -154,7 +154,7 @@ func (o *Orchestrator) reposSection(ctx context.Context, q core.DB, e core.Emplo
 		for _, r := range p.Repos {
 			fmt.Fprintf(&b, "- %s\n", r.Repo)
 		}
-		b.WriteString("项目背景里写了某个仓库的基准分支时，open_thread 的 repos 参数要带上 {repo, base}。")
+		b.WriteString("项目指令里写了某个仓库的基准分支时，open_thread 的 repos 参数要带上 {repo, base}。")
 		return b.String()
 	}
 	paths := PathsOf(e, t)

@@ -12,15 +12,13 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// memoryLimit caps the project memory injected into prompts (architecture.md Q4: 8 KB).
-const memoryLimit = 8 << 10
-
 const coordinatorGuide = `你是这个项目的项目统筹（coordinator）。你不能读写文件、不能执行命令，只能使用平台工具：
-- open_thread(title, brief, repos?)：把一件具体的工作交给一个新的讨论串（组长 + 成员）去做，brief 写清目标、约束和验收标准；项目绑定了多个仓库时用 repos=[{repo, base?}] 指出要动的仓库，项目背景里写了基准分支的仓库要把 base 一并带上；
+- open_thread(title, brief, repos?)：把一件具体的工作交给一个新的讨论串（组长 + 成员）去做，brief 写清目标、约束和验收标准；项目绑定了多个仓库时用 repos=[{repo, base?}] 指出要动的仓库，项目指令里写了基准分支的仓库要把 base 一并带上；
 - list_threads / thread_status(no)：查看讨论串的进展；message_thread(no, text)：给某个讨论串的组长发话；
 - ask_user：向用户提问（不阻塞，答案会作为消息回到这里）。要用户在几个方案里选时用 questions=[{question, header, options:[{label, description, recommended?}], multi_select?}]（1–4 个问题，每个 2–4 个选项，最多推荐一个；用户总能写“其他”），简单问题用 question(+options)；
 - TodoWrite：事情多时列一个待办清单，用户在对话里能看到进度；
-- remember(text)：把需要长期记住的项目事实写进项目记忆；set_status(text)：用一句中文说明你在做什么。
+- memory_list / memory_read / memory_write / memory_delete：维护项目记忆（见“## 项目记忆”）；remember(text) 是往 MEMORY.md 追加一行要点的快捷方式；
+- set_status(text)：用一句中文说明你在做什么。
 讨论串状态变化会以 “[Thread #12 · 标题 · 状态] …” 的消息通知你；只在用户需要知道时才对用户说话，回复简洁。`
 
 const leadGuide = `你是讨论串 #%d「%s」的组长（lead）。你只能读代码（Read/Glob/Grep、只读 git 命令），不能改文件。
@@ -36,7 +34,7 @@ const leadGuide = `你是讨论串 #%d「%s」的组长（lead）。你只能读
 6. 以“（平台）”开头的消息是平台发给你的检查，不是用户说的话，用户在对话里看不到；按它的要求做事，不要对它回复“收到”或重复说明。
    用户说过会自己关闭讨论串（例如“我手动关闭线程”），就停下：不要再推进，也不要回复平台的检查，用户会在页面上把它标记为完成。
 项目可能绑定多个仓库：你的工作目录下每个仓库一个子目录（见“## 仓库”）。讨论串分支只在真正有改动的仓库里创建，默认从仓库的默认分支切出。
-项目背景或用户要求里写了某个仓库的基准分支时，第一次给这个仓库派任务就在 assign_task 里写上 repo 和 base（之后 enqueue_merge / open_pr 也可以带 repo、base）；没写的仓库不用传 base。`
+项目指令或用户要求里写了某个仓库的基准分支时，第一次给这个仓库派任务就在 assign_task 里写上 repo 和 base（之后 enqueue_merge / open_pr 也可以带 repo、base）；没写的仓库不用传 base。`
 
 const memberGuide = `你是讨论串 #%d 的成员 %s（岗位：%s）。你在自己的工作目录里工作，每个仓库一个子目录，分支都是 %s；改了哪个仓库就在哪个子目录里 git commit。
 - 收到任务后专心完成；做完必须调用 complete_task(task_id, summary)（平台会先替你推送每个有新提交的仓库）；做不完用 status=failed 说明原因。
@@ -108,15 +106,13 @@ func (o *Orchestrator) systemAppend(ctx context.Context, q core.DB, e core.Emplo
 		parts = append(parts, repos)
 	}
 	if p.Context != "" {
-		parts = append(parts, "## 项目背景（基准分支、约定等以这里为准）\n"+p.Context)
+		parts = append(parts, "## 项目指令（用户编写，基准分支、约定等以这里为准，必须遵守）\n"+p.Context)
 	}
-	mem, err := o.memory(ctx, p.ID)
+	mem, err := store.MemoryPrompt(ctx, q, p.ID)
 	if err != nil {
 		return "", err
 	}
-	if mem != "" {
-		parts = append(parts, "## 项目记忆\n"+mem)
-	}
+	parts = append(parts, memorySection(e, mem))
 	if t != nil {
 		roster, err := o.roster(ctx, q, t.ID)
 		if err != nil {
@@ -137,24 +133,27 @@ func guide(e core.Employee, t *core.Thread) string {
 	return fmt.Sprintf(memberGuide, t.No, e.Name, e.Role, MemberBranch(t.No, e.Name))
 }
 
-// memory renders pinned items and the latest ones, capped at memoryLimit.
-func (o *Orchestrator) memory(ctx context.Context, projectID string) (string, error) {
-	items, err := o.store.ListMemory(ctx, projectID)
-	if err != nil {
-		return "", err
+const memoryGuide = `这是项目跨会话的自动记忆。MEMORY.md 是索引，每个会话开始时都会读到（内容在下面）；细节在各个主题文件里，需要时用 memory_read(name) 读全文，memory_list 列出全部文件。
+- 值得记：用户的偏好和要求、做过的决定和理由、项目约定（怎么构建、测试、发布，分支和目录约定）、踩过的坑和解决办法、外部系统在哪、怎么用。
+- 不要记：当前任务的进度和临时状态、看代码就知道的东西、密钥密码等秘密。`
+
+const memoryWriteGuide = `
+- 用 memory_write(name, description, content) 新建或改写主题文件（如 testing.md，description 写一句话），平台在 MEMORY.md 里维护它的索引行；改之前先 memory_read，保留别人写的内容。MEMORY.md 只放简短要点和索引，细节放主题文件。
+- 发现记忆过时或写错了就改正，没用了用 memory_delete 删掉。用户说“记住……”时马上写进记忆。`
+
+const memoryReadOnlyGuide = `
+- 你只能读记忆。发现值得长期记住的事，写进 complete_task 的总结里，由组长整理进记忆。`
+
+// memorySection is the auto-memory guide plus MEMORY.md (and files it does not link).
+func memorySection(e core.Employee, mem string) string {
+	how := memoryGuide + memoryWriteGuide
+	if e.Tier == "member" {
+		how = memoryGuide + memoryReadOnlyGuide
 	}
-	var b strings.Builder
-	for i, m := range items {
-		if i >= 50 && !m.Pinned {
-			break
-		}
-		line := fmt.Sprintf("- [%s] %s\n", m.Source, m.Text)
-		if b.Len()+len(line) > memoryLimit {
-			break
-		}
-		b.WriteString(line)
+	if mem == "" {
+		mem = "（还没有记忆）"
 	}
-	return strings.TrimSpace(b.String()), nil
+	return "## 项目记忆\n" + how + "\n\n" + mem
 }
 
 func (o *Orchestrator) roster(ctx context.Context, q core.DB, threadID string) (string, error) {

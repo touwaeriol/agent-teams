@@ -9,7 +9,6 @@ import (
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
-	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // openThread opens a thread for the brief (coordinator).
@@ -170,31 +169,4 @@ func (s *Service) messageThread(ctx context.Context, tx *core.Tx, c *call) (Resu
 		return Result{}, err
 	}
 	return okText(fmt.Sprintf("已转给 #%d 的组长", t.No)), nil
-}
-
-// remember writes project memory (source = coordinator).
-func (s *Service) remember(ctx context.Context, tx *core.Tx, c *call) (Result, error) {
-	var in protocol.RememberInput
-	if err := c.decode(&in); err != nil {
-		return Result{}, err
-	}
-	return okText("已记住"), s.addMemory(ctx, tx, c.emp().ProjectID, strings.TrimSpace(in.Text), "coordinator")
-}
-
-func (s *Service) addMemory(ctx context.Context, tx *core.Tx, projectID, text, source string) error {
-	var item struct {
-		ID        string `json:"id"`
-		Text      string `json:"text"`
-		Source    string `json:"source"`
-		Pinned    bool   `json:"pinned"`
-		CreatedAt any    `json:"created_at"`
-	}
-	err := store.QueryRow(ctx, tx, `INSERT INTO at_project_memory (id, project_id, text, source) VALUES ($1, $2, $3, $4)
-		RETURNING id, text, source, pinned, created_at`, core.NewID("me"), projectID, text, source).
-		Scan(&item.ID, &item.Text, &item.Source, &item.Pinned, &item.CreatedAt)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Emit(ctx, projectID, nil, core.EvMemory, source, map[string]any{"item": item, "op": "add"})
-	return err
 }

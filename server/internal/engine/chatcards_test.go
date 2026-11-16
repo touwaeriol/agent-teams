@@ -195,17 +195,20 @@ func TestCoordinatorRecapAndResume(t *testing.T) {
 	c, open := expectOpen(t, tm.w, tm.n, "coordinator")
 	c.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: protocol.SessionID(c.session), MsgID: open.FirstMessage.MsgID})
 	c.event("text", func(ev *protocol.SessionEvent) { s, f := "好的，记下 kestrel-7", true; ev.Text, ev.Final = &s, &f })
-	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `INSERT INTO at_project_memory (id, project_id, text, source) VALUES ('mem_t', $1, '部署走滚动发布', 'test')`, tm.projectID); err != nil {
+	if err := store.AppendMemoryNote(tm.w.ctx, tm.w.e.Core.Pool, tm.projectID, "部署走滚动发布", "test"); err != nil {
 		t.Fatal(err)
 	}
 	failed := true
 	reason := "transcript not found"
 	c.send(protocol.TypeSessionOpened, protocol.SessionOpened{SessionID: protocol.SessionID(c.session), OpenGen: protocol.OpenGen(c.gen), ResumeFailed: &failed, Error: &reason})
 	_, open = expectOpen(t, tm.w, tm.n, "coordinator")
-	for _, want := range []string{"用户：代号 kestrel-7", "你：好的，记下 kestrel-7", "项目记忆", "部署走滚动发布"} {
+	for _, want := range []string{"用户：代号 kestrel-7", "你：好的，记下 kestrel-7"} {
 		if !strings.Contains(open.FirstMessage.Text, want) {
 			t.Fatalf("coordinator recap misses %q:\n%s", want, open.FirstMessage.Text)
 		}
+	}
+	if sys := *open.Claude.SystemAppend; !strings.Contains(sys, "### MEMORY.md") || !strings.Contains(sys, "- 部署走滚动发布") {
+		t.Fatalf("reopened coordinator prompt lacks the refreshed MEMORY.md:\n%s", sys)
 	}
 
 	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `UPDATE at_agent_sessions SET state = 'closed', close_reason = 'thread_done' WHERE id = $1`, tm.lead.session); err != nil {

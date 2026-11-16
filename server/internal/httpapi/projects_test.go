@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
@@ -114,34 +115,61 @@ func TestAutoApproveAnyNode(t *testing.T) {
 	}
 }
 
+// TestMemory: memory files are the owner's only; a topic file keeps its line in MEMORY.md,
+// deleting it drops the line; MEMORY.md cannot be deleted; bad names and missing descriptions are 422.
 func TestMemory(t *testing.T) {
 	h := newHarness(t)
 	c, _ := h.signUp("a@example.com")
 	other, _ := h.signUp("b@example.com")
 	var p ProjectView
 	c.must(201, "POST", "/api/projects", map[string]any{"name": "A"}, &p)
-	var item struct {
-		ID     string `json:"id"`
-		Source string `json:"source"`
-		Pinned bool   `json:"pinned"`
+	base := "/api/projects/" + p.ID + "/memory"
+	var f struct {
+		Name      string `json:"name"`
+		Content   string `json:"content"`
+		UpdatedBy string `json:"updated_by"`
 	}
-	c.must(201, "POST", "/api/projects/"+p.ID+"/memory", map[string]string{"text": "use pnpm"}, &item)
-	if item.Source != "user" {
-		t.Fatalf("source %s", item.Source)
+	c.must(200, "PUT", base+"/testing", map[string]string{"description": "怎么跑测试", "content": "make test"}, &f)
+	if f.Name != "testing.md" || f.Content != "make test" {
+		t.Fatalf("file %+v", f)
 	}
-	c.must(200, "PATCH", "/api/projects/"+p.ID+"/memory/"+item.ID, map[string]any{"pinned": true}, &item)
-	if !item.Pinned {
-		t.Fatal("not pinned")
+	c.must(200, "GET", base+"/MEMORY.md", nil, &f)
+	if !strings.Contains(f.Content, "- [testing.md](testing.md) — 怎么跑测试") {
+		t.Fatalf("index %q", f.Content)
 	}
-	if r := other.do("GET", "/api/projects/"+p.ID+"/memory", nil); r.Status != 404 {
-		t.Fatalf("other user = %d", r.Status)
+	c.must(200, "PUT", base+"/MEMORY.md", map[string]string{"content": f.Content + "- 用 pnpm\n"}, &f)
+	for _, path := range []string{base, base + "/MEMORY.md"} {
+		if r := other.do("GET", path, nil); r.Status != 404 {
+			t.Fatalf("other user %s = %d", path, r.Status)
+		}
 	}
-	var items []map[string]any
-	c.must(200, "GET", "/api/projects/"+p.ID+"/memory", nil, &items)
-	if len(items) != 1 {
-		t.Fatalf("items %v", items)
+	if r := other.do("PUT", base+"/x.md", map[string]string{"description": "x", "content": "x"}); r.Status != 404 {
+		t.Fatalf("other user put = %d", r.Status)
 	}
-	c.must(204, "DELETE", "/api/projects/"+p.ID+"/memory/"+item.ID, nil, nil)
+	var list []struct {
+		Name string
+		Size int
+	}
+	c.must(200, "GET", base, nil, &list)
+	if len(list) != 2 || list[0].Name != "MEMORY.md" || list[1].Name != "testing.md" || list[1].Size != 9 {
+		t.Fatalf("list %+v", list)
+	}
+	for _, bad := range []struct{ name, desc string }{{"bad$name", "d"}, {"notes", ""}} {
+		if r := c.do("PUT", base+"/"+bad.name, map[string]string{"description": bad.desc, "content": "x"}); r.Status != 422 {
+			t.Fatalf("put %s = %d", bad.name, r.Status)
+		}
+	}
+	if r := c.do("DELETE", base+"/MEMORY.md", nil); r.Status != 422 {
+		t.Fatalf("delete MEMORY.md = %d", r.Status)
+	}
+	c.must(204, "DELETE", base+"/testing.md", nil, nil)
+	c.must(200, "GET", base+"/MEMORY.md", nil, &f)
+	if strings.Contains(f.Content, "testing.md") || !strings.Contains(f.Content, "- 用 pnpm") || f.UpdatedBy != "user" {
+		t.Fatalf("index after delete %+v", f)
+	}
+	if r := c.do("GET", base+"/testing.md", nil); r.Status != 404 {
+		t.Fatalf("deleted file = %d", r.Status)
+	}
 	if !h.events.has("project:" + p.ID + ":memory") {
 		t.Fatal("memory event missing")
 	}

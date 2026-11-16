@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/memory_delete.json",
+  "title": "MemoryDeleteInput",
+  "description": "Delete a project memory topic file and its line in MEMORY.md (MEMORY.md itself cannot be deleted).",
+  "x-tool": {
+    "tiers": [
+      "coordinator",
+      "lead"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "name"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    }
+  }
+}

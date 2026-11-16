@@ -210,7 +210,7 @@ const routes = [
   ["GET", /^\/api\/projects\/([^/]+)\/waiting$/, (req, res, [pid]) => json(res, 200, pid === "p1" ? waiting() : { questions: [], reviews: [] })],
   ["GET", /^\/api\/projects\/([^/]+)\/overview$/, (req, res, [pid]) => {
     const p = state.projects.find((x) => x.id === pid);
-    json(res, 200, { project: p, threads: pid === "p1" ? state.threads : [], waiting: pid === "p1" ? waiting() : { questions: [], reviews: [] }, recent_deliverables: state.deliverables.slice(0, 3), memory: state.memory.slice(0, 3), usage_7d: { cost_usd_est: 12.4, by_day: [] }, nodes: [] });
+    json(res, 200, { project: p, threads: pid === "p1" ? state.threads : [], waiting: pid === "p1" ? waiting() : { questions: [], reviews: [] }, recent_deliverables: state.deliverables.slice(0, 3), memory: memoryList().slice(0, 6), usage_7d: { cost_usd_est: 12.4, by_day: [] }, nodes: [] });
   }],
   ["GET", /^\/api\/projects\/([^/]+)\/deliverables$/, (req, res, _m, url) => {
     const kind = url.searchParams.get("kind");
@@ -252,20 +252,21 @@ const routes = [
     state.messages.c0.push(m);
     json(res, 202, m);
   }],
-  ["GET", /^\/api\/projects\/([^/]+)\/memory$/, (req, res) => json(res, 200, state.memory)],
-  ["POST", /^\/api\/projects\/([^/]+)\/memory$/, async (req, res) => {
+  ["GET", /^\/api\/projects\/([^/]+)\/memory$/, (req, res) => json(res, 200, memoryList())],
+  ["GET", /^\/api\/projects\/([^/]+)\/memory\/([^/]+)$/, (req, res, [, , name]) => {
+    const f = state.memory.find((x) => x.name === decodeURIComponent(name));
+    return f ? json(res, 200, f) : json(res, 404, { title: "没有这个记忆文件" });
+  }],
+  ["PUT", /^\/api\/projects\/([^/]+)\/memory\/([^/]+)$/, async (req, res, [, , raw]) => {
     const b = await body(req);
-    const m = { id: `mem${Date.now()}`, text: b.text, source: "user", pinned: false, created_at: now() };
-    state.memory.push(m);
-    json(res, 201, m);
+    const name = decodeURIComponent(raw);
+    const f = state.memory.find((x) => x.name === name) ?? { name, created_at: now() };
+    Object.assign(f, { description: name === "MEMORY.md" ? "" : b.description ?? "", content: b.content ?? "", updated_by: "user", updated_at: now() });
+    if (!state.memory.includes(f)) state.memory.push(f);
+    json(res, 200, f);
   }],
-  ["PATCH", /^\/api\/projects\/([^/]+)\/memory\/([^/]+)$/, async (req, res, [, id]) => {
-    const m = state.memory.find((x) => x.id === id);
-    Object.assign(m, await body(req));
-    json(res, 200, m);
-  }],
-  ["DELETE", /^\/api\/projects\/([^/]+)\/memory\/([^/]+)$/, (req, res, [, id]) => {
-    state.memory = state.memory.filter((x) => x.id !== id);
+  ["DELETE", /^\/api\/projects\/([^/]+)\/memory\/([^/]+)$/, (req, res, [, , name]) => {
+    state.memory = state.memory.filter((x) => x.name !== decodeURIComponent(name));
     json(res, 204);
   }],
   ["GET", /^\/api\/projects\/([^/]+)\/office$/, (req, res) => json(res, 200, officeSnapshot())],
@@ -430,3 +431,9 @@ createServer(async (req, res) => {
   }
   fail(res, 404, `mock: no route for ${req.method} ${url.pathname}`, "not_found");
 }).listen(PORT, () => console.log(`mock API on http://127.0.0.1:${PORT}`));
+
+/** Memory files without content, MEMORY.md first (GET /memory, the overview box). */
+function memoryList() {
+  const brief = ({ name, description, content, updated_by, updated_at }) => ({ name, description, size: content.length, updated_by, updated_at });
+  return [...state.memory].sort((a, b) => (a.name === "MEMORY.md" ? -1 : b.name === "MEMORY.md" ? 1 : a.name.localeCompare(b.name))).map(brief);
+}

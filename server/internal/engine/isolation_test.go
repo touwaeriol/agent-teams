@@ -32,9 +32,9 @@ func ownResources(t *testing.T, tm *team) owned {
 	var s timers.Schedule
 	b.must(201, "POST", "/api/projects/"+pid+"/schedules", map[string]any{"name": "早报", "cron": "0 9 * * *", "message": "hi"}, &s)
 	o.schedule = s.ID
-	var m struct{ ID string }
-	b.must(201, "POST", "/api/projects/"+pid+"/memory", map[string]string{"text": "use pnpm"}, &m)
-	o.memory = m.ID
+	var m struct{ Name string }
+	b.must(200, "PUT", "/api/projects/"+pid+"/memory/dev-1", map[string]string{"description": "约定", "content": "use pnpm"}, &m)
+	o.memory = m.Name
 	var att struct{ ID string }
 	b.must(201, "POST", "/api/projects/"+pid+"/attachments", map[string]string{"name": "a.png", "data": base64.StdEncoding.EncodeToString(onePixelPNG)}, &att)
 	o.attachment = att.ID
@@ -59,7 +59,7 @@ func ownResources(t *testing.T, tm *team) owned {
 // idFor is the owner's id for an ":id" parameter, chosen by the route's collection.
 func (o owned) idFor(route string) string {
 	for prefix, id := range map[string]string{"/api/deliverables/": o.deliverable, "/api/schedules/": o.schedule,
-		"/api/projects/:pid/memory/": o.memory, "/api/attachments/": o.attachment, "/api/nodes/": o.node,
+		"/api/attachments/": o.attachment, "/api/nodes/": o.node,
 		"/nodes/attachments/": o.attachment} {
 		if strings.HasPrefix(route, prefix) {
 			return id
@@ -166,13 +166,13 @@ func ownerStillHas(t *testing.T, tm *team, o owned) {
 		"/api/deliverables/" + o.deliverable + "/comments", "/api/conversations/" + o.coordinator + "/messages"} {
 		b.must(200, "GET", path, nil, nil)
 	}
-	var mem []struct{ ID string }
+	var mem []struct{ Name string }
 	b.must(200, "GET", "/api/projects/"+o.project+"/memory", nil, &mem)
 	var sch []timers.Schedule
 	b.must(200, "GET", "/api/projects/"+o.project+"/schedules", nil, &sch)
 	var nodes []struct{ ID string }
 	b.must(200, "GET", "/api/nodes", nil, &nodes)
-	if len(mem) != 1 || len(sch) != 1 || len(nodes) != 1 {
+	if len(mem) != 2 || len(sch) != 1 || len(nodes) != 1 { // MEMORY.md + dev-1.md
 		t.Fatalf("owner lost rows: memory %d schedules %d nodes %d", len(mem), len(sch), len(nodes))
 	}
 	var waiting struct {

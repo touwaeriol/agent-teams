@@ -26,10 +26,10 @@ export const projects = {
   create: (body: S["ProjectInput"]) => unwrap(client.POST("/api/projects", { body, ...idem() })),
   update: (pid: string, body: S["ProjectUpdate"]) => unwrap(client.PATCH("/api/projects/{pid}", { params: { path: { pid } }, body })),
   remove: (pid: string) => unwrap(client.DELETE("/api/projects/{pid}", { params: { path: { pid } } })),
-  addMemory: (pid: string, text: string) => unwrap(client.POST("/api/projects/{pid}/memory", { params: { path: { pid } }, body: { text } })),
-  updateMemory: (pid: string, id: string, body: S["MemoryPatchInputBody"]) =>
-    unwrap(client.PATCH("/api/projects/{pid}/memory/{id}", { params: { path: { pid, id } }, body })),
-  removeMemory: (pid: string, id: string) => unwrap(client.DELETE("/api/projects/{pid}/memory/{id}", { params: { path: { pid, id } } })),
+  /** Create or replace a memory file (MEMORY.md or a topic file; topic files need a description). */
+  putMemory: (pid: string, name: string, body: S["MemoryPutInputBody"]) =>
+    unwrap(client.PUT("/api/projects/{pid}/memory/{name}", { params: { path: { pid, name } }, body })),
+  removeMemory: (pid: string, name: string) => unwrap(client.DELETE("/api/projects/{pid}/memory/{name}", { params: { path: { pid, name } } })),
   requestDeliverable: (pid: string, kind: string, brief: string) =>
     unwrap(client.POST("/api/projects/{pid}/deliverables/request", { params: { path: { pid } }, body: { kind, brief }, ...idem() })),
   addDeliverable: (pid: string, body: { kind: string; title: string; url: string; thread_no?: number }) =>

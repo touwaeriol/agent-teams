@@ -34,7 +34,7 @@
 | `deliverable` | `{deliverable: DeliverableView}` | 交付物登记 / 更新 |
 | `merge` | `{thread_no, entry: MergeEntryView}` | 合并队列变化 |
 | `ci` | `{thread_no, sha, checks: CheckView[]}` | CI 结果变化 |
-| `memory` | `{item: MemoryView, op: "add"|"delete"}` | 项目记忆 |
+| `memory` | `{op: "write"|"delete", name}` | 记忆文件变了（网页重新拉列表和打开的文件） |
 | `node` | `{node: NodeBrief}` | 该项目用到的节点上下线、槽位变化 |
 | `layout` | `{layout_id, version}` | 办公室布局更新（前端重新拉布局并重画） |
 | `reset` | `{}` | 补发窗口不够，前端需整体重新拉取 |
@@ -51,7 +51,7 @@
 
 ```ts
 UserView        = {id, email, display_name, role: "admin"|"user", active, max_nodes: number|null, must_change_password, created_at}
-ProjectView     = {id, name, description, context, repos: RepoRef[],   // 绑定的仓库（有顺序）；基准分支等约定写在 context 里
+ProjectView     = {id, name, description, context, repos: RepoRef[],   // context = 项目指令（≤16,000 字，每个会话都读）；绑定的仓库有顺序；基准分支等约定写在 context 里
 RepoRef         = {repo: "owner/name", git_connection_id: string|null}
                    /* ProjectView 其余字段： */
                    pinned, archived, work_mode: "worktree"|"clone", auto_approve,
@@ -185,7 +185,7 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/projects/{pid}` | → `ProjectView` |
-| GET | `/api/projects/{pid}/overview` | → `{project: ProjectView, threads: ThreadView[], waiting: {questions, reviews}, recent_deliverables: DeliverableView[], memory: MemoryView[] (最近 5 条), usage_7d: {cost_usd_est, by_day: [...]}, nodes: NodeBrief[]}`（一个请求出首屏） |
+| GET | `/api/projects/{pid}/overview` | → `{project: ProjectView, threads: ThreadView[], waiting: {questions, reviews}, recent_deliverables: DeliverableView[], memory: MemoryBrief[] (MEMORY.md 在前，最多 6 个), usage_7d: {cost_usd_est, by_day: [...]}, nodes: NodeBrief[]}`（一个请求出首屏） |
 
 ### 3.5 Deliverables（交付物一览）
 
@@ -220,9 +220,10 @@ PR 类交付物的 `detail.state` 由平台轮询 / webhook 更新。设计类�
 | POST | `/api/schedules/{id}/run` | → 202：现在发一次（不改 `next_run_at`） |
 
 定时任务到点时，平台把 `【定时任务：<name>】\n<message>` 作为用户消息发给项目统筹（`meta = {schedule_id, schedule_name}`），统筹照常决定怎么做。调度在控制台进程里：一个进程持有 advisory lock `agent-teams:timers` 每 20 秒检查一次，到期的行 `FOR UPDATE SKIP LOCKED` 认领并在同一事务里推进 `next_run_at`，然后再投递，所以多副本、重启都不会重复触发；停机期间错过的多次只补发一次。投递失败时写入 `last_error`。
-| GET | `/api/projects/{pid}/memory` | → `MemoryView[]`（`{id, text, source, pinned, created_at}`） |
-| POST | `/api/projects/{pid}/memory` | `{text}` → 201（source = user） |
-| PATCH / DELETE | `/api/projects/{pid}/memory/{id}` | `{text?, pinned?}` / 删除 |
+| GET | `/api/projects/{pid}/memory` | → `MemoryBrief[]`（`{name, description, size, updated_by, updated_at}`，MEMORY.md 在前，不含内容） |
+| GET | `/api/projects/{pid}/memory/{name}` | → `MemoryFile`（`{name, description, content, updated_by, created_at, updated_at}`）；没有 404 |
+| PUT | `/api/projects/{pid}/memory/{name}` | `{description?, content}` → `MemoryFile`（新建或替换，`updated_by = user`；名字不带 `.md` 会补上；主题文件必须有描述，平台同步 MEMORY.md 的索引行；名字不合法、太长、超过 200 个文件 422） |
+| DELETE | `/api/projects/{pid}/memory/{name}` | 204，同时去掉 MEMORY.md 里的索引行；MEMORY.md 本身 422 |
 | GET | `/api/projects/{pid}/ci/detect?repo=` | 一个仓库（缺省第一个）在其默认分支上的检测 → `{repo, branch, workflows: [{path, triggers}], covers_thread_branches: bool, covers_mq_branches: bool, app_has_checks_permission: bool, ruleset: {present: bool, recommended: {...}}}`（设置页 CI 部分的检测结果；`ruleset.recommended` 是建议的 GitHub 规则集：保护基准分支和 `thread/*`，绕过者为平台 App，见 `architecture.md` §8.1） |
 | POST | `/api/projects/{pid}/ci/setup-pr?repo=` | → `{pr_url}`：平台在该仓库（缺省第一个）开一个 PR，给 workflows 加上 `thread/**`、`mq/**` 的 push 触发 |
 | GET | `/api/git/connections/{id}/repos?q=&cursor=` | 仓库下拉 → 分页 `RepoItem`（带 `used_by_projects`；v2 支持分页和搜索，v1 只取前 100） |
@@ -331,5 +332,5 @@ v1 的旧对话只读页和它的接口（`GET /api/conversations`、`…/{cid}/
 | `/projects/:pid/threads/:no/full` | Thread（全屏，主要任务 / 任务池 / 和组长的对话 / 交付） |
 | `/projects/:pid/deliverables` | Deliverables |
 | `/projects/:pid/office` | Office |
-| `/projects/:pid/settings` · `/projects/:pid/settings/:section` | ProjectSettings：Main 上打开的设置对话框，分区 `general`（通用）· `memory`（记忆）· `environment`（环境）· `usage`（使用情况）· `advanced`（高级），关闭回到 `/projects/:pid` |
+| `/projects/:pid/settings` · `/projects/:pid/settings/:section` | ProjectSettings：Main 上打开的设置对话框，分区 `general`（通用：名称图标、简介、模型、自动继续、归档删除）· `memory`（记忆：项目指令 = `context`，自动记忆 = MEMORY.md 和记忆文件）· `environment`（环境：每个讨论串都包含的仓库，工作树开关 = `work_mode`：开启 `worktree` / 关闭 `clone` 独立克隆；没有云环境或远程环境，节点在 设置 → 节点）· `usage`（使用情况）· `advanced`（高级：审批与交付、合并方式、分支命名与清理说明），关闭回到 `/projects/:pid` |
 | `/settings/team` · `/settings/nodes` · `/settings/git` · `/settings/appearance` · `/settings/admin` · `/setup/github` | Team · Nodes · GitHub · 外观 · Admin · GitHub App 创建 |

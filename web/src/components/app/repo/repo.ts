@@ -7,7 +7,7 @@ export interface RepoRef {
   git_connection_id: string | null;
 }
 
-export const REPOS_HINT = "基准分支、分支约定等写在项目上下文里（例如“仓库 org/web 的基准分支：develop”），统筹和组长会按它开分支和 PR；没写的仓库用默认分支。";
+export const REPOS_HINT = "基准分支、分支约定等写在项目指令里（例如“仓库 org/web 的基准分支：develop”），统筹和组长会按它开分支和 PR；没写的仓库用默认分支。";
 
 /** owner/repo from a pasted GitHub URL or the text as typed. */
 export function normalizeRepo(text: string): string {

@@ -115,6 +115,10 @@ export interface ToolInputs {
   list_tasks: T.ListTasksInput;
   list_team: T.ListTeamInput;
   list_threads: T.ListThreadsInput;
+  memory_delete: T.MemoryDeleteInput;
+  memory_list: T.MemoryListInput;
+  memory_read: T.MemoryReadInput;
+  memory_write: T.MemoryWriteInput;
   message_thread: T.MessageThreadInput;
   open_pr: T.OpenPrInput;
   open_thread: T.OpenThreadInput;
@@ -149,6 +153,10 @@ export interface ToolResults {
   list_tasks: T.ListTasksResult;
   list_team: T.ListTeamResult;
   list_threads: T.ListThreadsResult;
+  memory_delete: unknown;
+  memory_list: T.MemoryListResult;
+  memory_read: T.MemoryReadResult;
+  memory_write: T.MemoryWriteResult;
   message_thread: unknown;
   open_pr: T.OpenPrResult;
   open_thread: T.OpenThreadResult;
@@ -270,6 +278,34 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     description: "List threads, one line each: number, title, status, main-task progress and how many items wait for the user.",
     input_schema: {"description":"List threads, one line each: number, title, status, main-task progress and how many items wait for the user.","type":"object","additionalProperties":false,"properties":{"status":{"type":"string","enum":["queued","running","waiting","review","done","failed","paused","archived"]}}},
   },
+  memory_delete: {
+    tiers: ["coordinator","lead"],
+    blocking: [],
+    requires: null,
+    description: "Delete a project memory topic file and its line in MEMORY.md (MEMORY.md itself cannot be deleted).",
+    input_schema: {"description":"Delete a project memory topic file and its line in MEMORY.md (MEMORY.md itself cannot be deleted).","type":"object","required":["name"],"additionalProperties":false,"properties":{"name":{"type":"string","minLength":1,"maxLength":100}}},
+  },
+  memory_list: {
+    tiers: ["coordinator","lead","member"],
+    blocking: [],
+    requires: null,
+    description: "List the project's memory files (MEMORY.md and topic files) with their descriptions.",
+    input_schema: {"description":"List the project's memory files (MEMORY.md and topic files) with their descriptions.","type":"object","additionalProperties":false,"properties":{}},
+  },
+  memory_read: {
+    tiers: ["coordinator","lead","member"],
+    blocking: [],
+    requires: null,
+    description: "Read one project memory file in full (MEMORY.md or a topic file listed in it).",
+    input_schema: {"description":"Read one project memory file in full (MEMORY.md or a topic file listed in it).","type":"object","required":["name"],"additionalProperties":false,"properties":{"name":{"type":"string","minLength":1,"maxLength":100}}},
+  },
+  memory_write: {
+    tiers: ["coordinator","lead"],
+    blocking: [],
+    requires: null,
+    description: "Create or replace a project memory file. A topic file (e.g. testing.md) needs a one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md rewrites the index itself.",
+    input_schema: {"description":"Create or replace a project memory file. A topic file (e.g. testing.md) needs a one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md rewrites the index itself.","type":"object","required":["name","content"],"additionalProperties":false,"properties":{"name":{"type":"string","minLength":1,"maxLength":100},"description":{"type":"string","maxLength":300},"content":{"type":"string","maxLength":32000}}},
+  },
   message_thread: {
     tiers: ["coordinator"],
     blocking: [],
@@ -323,8 +359,8 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     tiers: ["coordinator"],
     blocking: [],
     requires: null,
-    description: "Add a fact to the project memory (source = coordinator).",
-    input_schema: {"description":"Add a fact to the project memory (source = coordinator).","type":"object","required":["text"],"additionalProperties":false,"properties":{"text":{"type":"string","minLength":1}}},
+    description: "Append a one-line note to the project memory index MEMORY.md (shortcut for small facts).",
+    input_schema: {"description":"Append a one-line note to the project memory index MEMORY.md (shortcut for small facts).","type":"object","required":["text"],"additionalProperties":false,"properties":{"text":{"type":"string","minLength":1}}},
   },
   reply_to: {
     tiers: ["lead"],

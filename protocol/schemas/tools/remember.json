@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/tools/remember.json",
   "title": "RememberInput",
-  "description": "Add a fact to the project memory (source = coordinator).",
+  "description": "Append a one-line note to the project memory index MEMORY.md (shortcut for small facts).",
   "x-tool": {
     "tiers": [
       "coordinator"

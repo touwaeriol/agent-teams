@@ -82,9 +82,11 @@ describe("events → cache", () => {
     expect(qc.getQueryData<TaskView[]>(keys.tasks("t12"))![0].status).toBe("done");
     applyProjectEvent(qc, "p1", "main_task", { thread_no: 12, main_tasks: [{ id: "m", pos: 1, title: "x", status: "doing", auto_done: false, tasks_total: 1, tasks_done: 0 }] });
     expect(qc.getQueryData<ThreadView[]>(keys.threads("p1"))![0].main_tasks).toHaveLength(1);
-    qc.setQueryData(keys.memory("p1"), [{ id: "m1", text: "a", source: "user", pinned: false, created_at: "" }]);
-    applyProjectEvent(qc, "p1", "memory", { op: "delete", item: { id: "m1" } });
-    expect(qc.getQueryData(keys.memory("p1"))).toEqual([]);
+    qc.setQueryData(keys.memory("p1"), [{ name: "MEMORY.md", description: "", size: 1, updated_by: "user", updated_at: "" }]);
+    qc.setQueryData(keys.memoryFile("p1", "MEMORY.md"), { name: "MEMORY.md", content: "x" });
+    applyProjectEvent(qc, "p1", "memory", { op: "write", name: "MEMORY.md" });
+    expect(qc.getQueryState(keys.memory("p1"))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(keys.memoryFile("p1", "MEMORY.md"))?.isInvalidated).toBe(true);
     qc.setQueryData<Partial<OfficeSnapshot>>(keys.office("p1"), { threads: [], merge_queue: [], ci: {} });
     applyProjectEvent(qc, "p1", "ci", { thread_no: 12, checks: [{ name: "verify" }] });
     applyProjectEvent(qc, "p1", "merge", { thread_no: 12, entry: { id: "mq" } });

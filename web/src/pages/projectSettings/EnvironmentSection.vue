@@ -1,13 +1,10 @@
 <script setup lang="ts">
-// 环境: repositories, work mode, branch naming, cleanup, and the nodes employees run on.
+// 环境: the repositories every thread includes and whether employees work in git worktrees.
+// Employees always run on your own nodes (设置 → 节点); there are no cloud or remote environments.
 import type { ProjectView } from "@/api/views";
-import ChoiceCards from "@/components/app/ChoiceCards.vue";
-import Divider from "./Divider.vue";
+import { WORKTREE_CHOICES, worktreeChoice, type WorkMode } from "@/lib/projectSettings";
 import Heading from "./Heading.vue";
-import { MODES } from "./logic";
-import NodesList from "./NodesList.vue";
 import RepoSection from "./RepoSection.vue";
-import Row from "./Row.vue";
 import { useUpdate } from "./useUpdate";
 
 const props = defineProps<{ project: ProjectView }>();
@@ -15,18 +12,20 @@ const update = useUpdate(() => props.project.id);
 </script>
 
 <template>
-  <div class="flex flex-col gap-2">
+  <div class="flex flex-col gap-3">
+    <Heading>环境</Heading>
     <RepoSection :project="project" />
-    <Divider />
-    <Heading>工作方式</Heading>
-    <ChoiceCards :model-value="project.work_mode" label="工作方式" :options="MODES" @update:model-value="(v) => update.mutate({ work_mode: v })" />
-    <Row title="讨论串分支命名" desc="每个仓库各开一条讨论串分支">
-      <span class="font-mono text-[13px] text-muted-foreground">thread/{编号}-{标题}</span>
-    </Row>
-    <Row title="讨论串结束后" desc="有未推送改动时保留并提醒">
-      <span class="text-[13px] text-muted-foreground">清理 worktree</span>
-    </Row>
-    <Divider />
-    <NodesList />
+    <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pt-5">
+      <span class="font-medium">工作树</span>
+      <el-select
+        :model-value="project.work_mode"
+        aria-label="工作树"
+        class="at-select-36 at-raised !w-60"
+        @update:model-value="(v: WorkMode) => update.mutate({ work_mode: v })"
+      >
+        <el-option v-for="c in WORKTREE_CHOICES" :key="c.value" :value="c.value" :label="c.label" />
+      </el-select>
+    </div>
+    <p class="text-[13px] leading-5 text-muted-foreground">{{ worktreeChoice(project.work_mode).desc }} 已有检出的员工在下次准备工作目录时按新方式；最好在没有进行中的讨论串时修改。</p>
   </div>
 </template>

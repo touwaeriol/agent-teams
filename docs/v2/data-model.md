@@ -29,7 +29,7 @@ at_users ─┬─ at_sessions
                           ├─ at_employee_status / at_status_events（办公室）
                           ├─ at_events（项目事件流）
                           ├─ at_deliverables
-                          ├─ at_project_memory
+                          ├─ at_memory_files（MEMORY.md + 主题记忆文件）
                           ├─ at_permission_rules
                           └─ at_office_layouts（项目覆盖布局，可选）
                           ├─ at_rate_limit_waits（碰到使用限额的员工，§2.10）
@@ -195,7 +195,7 @@ CREATE UNIQUE INDEX at_roles_one_lead  ON at_roles (user_id, COALESCE(project_id
 ### 2.5 项目、对话、讨论串
 
 ```sql
--- v1 at_projects: id, user_id, name, description, context, repo, branch, git_connection_id, created_at, updated_at, pinned, archived
+-- v1 at_projects: id, user_id, name, description, context（= 项目指令，§6.7）, repo, branch, git_connection_id, created_at, updated_at, pinned, archived
 -- 00070 起 repo / branch / git_connection_id 不再读写（留作回滚）：仓库在 at_project_repos，基准分支写在 context 里
 ALTER TABLE at_projects
   ADD COLUMN IF NOT EXISTS work_mode TEXT NOT NULL DEFAULT 'worktree',      -- worktree | clone
@@ -565,15 +565,18 @@ CREATE TABLE at_deliverable_comments (             -- 交付物批注，投递�
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE at_project_memory (                   -- 替代 threads.md 设计里的 at_projects.memory JSONB
-  id          TEXT PRIMARY KEY,                    -- me_…
+-- 00140 起项目记忆是文件（architecture.md §6.7），替代 00020 的 at_project_memory（一行一条笔记）。
+-- 项目指令（用户写的，类似 CLAUDE.md）就是 at_projects.context，不在这张表里。
+CREATE TABLE at_memory_files (
   project_id  TEXT NOT NULL REFERENCES at_projects(id) ON DELETE CASCADE,
-  text        TEXT NOT NULL,
-  source      TEXT NOT NULL,                       -- user | coordinator | #<no>
-  pinned      BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  name        TEXT NOT NULL,                       -- MEMORY.md（索引）| testing.md | thread-summaries.md …
+  description TEXT NOT NULL DEFAULT '',            -- 一句话，MEMORY.md 的索引行用它；MEMORY.md 自己为空
+  content     TEXT NOT NULL DEFAULT '',            -- Markdown，最多 32,000 字（应用层检查）
+  updated_by  TEXT NOT NULL DEFAULT '',            -- user | platform | coordinator | lead-1 · #3
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (project_id, name)
 );
-CREATE INDEX at_project_memory_project ON at_project_memory (project_id, created_at DESC);
 ```
 
 ### 2.9 事件与办公室
@@ -744,5 +747,7 @@ CREATE TABLE at_attachments (   -- 用户附在消息上的图片
 `00090_project_chrome.sql`：`at_projects.icon / coordinator_model / thread_model / thread_effort / auto_resume`、`at_rate_limit_waits`、`at_schedules`（§2.10）。
 
 `00070_project_repos.sql`：`at_project_repos`、`at_thread_repos`、`at_merge_queue.repo`、`at_tasks.pushed`；把每个项目的 repo/branch/git_connection_id 迁进去（基准分支写进 context），给已有讨论串和队列条目补上仓库（architecture.md §8.1）。
+
+`00140_memory_files.sql`：`at_memory_files`；`at_project_memory` 的用户 / 统筹笔记合成 MEMORY.md（置顶在前），讨论串总结（来源 `#<no>`、`thread:<no>`）合成 `thread-summaries.md` 并在 MEMORY.md 里链接；删除 `at_project_memory`。Down 重建旧表，每个文件还原成一条笔记（MEMORY.md 置顶）。
 
 每个迁移的测试（`server/migrations/migrations_test.go`）：空库全量 up；在生产 v1 结构快照（`testdata/v1_schema.sql`）上 up，基线不改结构、账号/项目/节点/Git 连接保留、只有有意删除的 v1 元素消失；有数据搬迁的迁移各有一个先 `UpTo` 前一版、种数据、再 up（必要时 down）的测试。

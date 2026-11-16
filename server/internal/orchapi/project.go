@@ -74,7 +74,7 @@ type Overview struct {
 	Threads            []core.ThreadView      `json:"threads"`
 	Waiting            Waiting                `json:"waiting"`
 	RecentDeliverables []core.DeliverableView `json:"recent_deliverables"`
-	Memory             []store.MemoryItem     `json:"memory"`
+	Memory             []store.MemoryBrief    `json:"memory" doc:"Memory files, MEMORY.md first (at most 6)"`
 	Usage7d            Usage7d                `json:"usage_7d"`
 	Nodes              []NodeBrief            `json:"nodes"`
 }
@@ -210,7 +210,7 @@ func (a *API) overview(ctx context.Context, in *pidInput) (*overviewOutput, erro
 	if err != nil {
 		return nil, err
 	}
-	ov := Overview{Memory: []store.MemoryItem{}}
+	ov := Overview{Memory: []store.MemoryBrief{}}
 	if ov.Project, err = a.projectView(ctx, p); err != nil {
 		return nil, err
 	}
@@ -249,12 +249,12 @@ func (a *API) projectView(ctx context.Context, p store.Project) (httpapi.Project
 	return httpapi.ProjectViewOf(p, hd), nil
 }
 
-func (a *API) recentMemory(ctx context.Context, pid string) ([]store.MemoryItem, error) {
-	items, err := a.e.Store.ListMemory(ctx, pid)
-	if len(items) > 5 {
-		items = items[:5]
+func (a *API) recentMemory(ctx context.Context, pid string) ([]store.MemoryBrief, error) {
+	files, err := store.ListMemoryFiles(ctx, a.e.Core.Pool, pid)
+	if len(files) > 6 {
+		files = files[:6]
 	}
-	return items, err
+	return files, err
 }
 
 func (a *API) usage7d(ctx context.Context, pid string) (Usage7d, error) {

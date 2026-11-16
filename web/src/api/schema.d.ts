@@ -913,29 +913,31 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Memory files, MEMORY.md first (no content) */
         get: operations["list-memory"];
         put?: never;
-        post: operations["add-memory"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/projects/{pid}/memory/{id}": {
+    "/api/projects/{pid}/memory/{name}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        put?: never;
+        get: operations["get-memory-file"];
+        /** Create or replace a memory file; topic files keep their line in MEMORY.md */
+        put: operations["put-memory-file"];
         post?: never;
-        delete: operations["delete-memory"];
+        delete: operations["delete-memory-file"];
         options?: never;
         head?: never;
-        patch: operations["update-memory"];
+        patch?: never;
         trace?: never;
     };
     "/api/projects/{pid}/office": {
@@ -2100,20 +2102,32 @@ export interface components {
         MemberMessageInputBody: {
             content: string;
         };
-        MemoryAddInputBody: {
-            text: string;
+        MemoryBrief: {
+            description: string;
+            name: string;
+            /**
+             * Format: int64
+             * @description Characters of content
+             */
+            size: number;
+            /** Format: date-time */
+            updated_at: string;
+            updated_by: string;
         };
-        MemoryItem: {
+        MemoryFile: {
+            content: string;
             /** Format: date-time */
             created_at: string;
-            id: string;
-            pinned: boolean;
-            source: string;
-            text: string;
+            description: string;
+            name: string;
+            /** Format: date-time */
+            updated_at: string;
+            updated_by: string;
         };
-        MemoryPatchInputBody: {
-            pinned?: boolean;
-            text?: string;
+        MemoryPutInputBody: {
+            content: string;
+            /** @description One line listed in MEMORY.md; required except for MEMORY.md */
+            description?: string;
         };
         MergeEntryView: {
             /** Format: int64 */
@@ -2307,7 +2321,8 @@ export interface components {
             title?: string;
         };
         Overview: {
-            memory: components["schemas"]["MemoryItem"][] | null;
+            /** @description Memory files, MEMORY.md first (at most 6) */
+            memory: components["schemas"]["MemoryBrief"][] | null;
             nodes: components["schemas"]["NodeBrief"][] | null;
             project: components["schemas"]["ProjectView"];
             recent_deliverables: components["schemas"]["DeliverableView"][] | null;
@@ -2375,6 +2390,7 @@ export interface components {
         };
         ProjectInput: {
             auto_approve?: boolean;
+            /** @description 项目指令 */
             context?: string;
             delivery?: components["schemas"]["DeliveryPatch"];
             description?: string;
@@ -2394,6 +2410,7 @@ export interface components {
             archived?: boolean;
             auto_approve?: boolean;
             auto_resume?: boolean;
+            /** @description 项目指令 */
             context?: string;
             /** @description '' = the role's model */
             coordinator_model?: string;
@@ -2432,6 +2449,7 @@ export interface components {
             auto_approve: boolean;
             /** @description Continue threads paused by a usage limit once it resets */
             auto_resume: boolean;
+            /** @description 项目指令: the owner's instructions (like CLAUDE.md), read by every session */
             context: string;
             /** @description '' = the coordinator role's model */
             coordinator_model: string;
@@ -2445,7 +2463,7 @@ export interface components {
             name: string;
             office_layout: string;
             pinned: boolean;
-            /** @description Bound repositories in project order; base branches belong in context */
+            /** @description Bound repositories in project order; base branches belong in context (the project instructions) */
             repos: components["schemas"]["RepoRef"][] | null;
             require_acceptance: boolean;
             /** @description '' = each role's effort; low | medium | high | xhigh | max */
@@ -5265,7 +5283,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MemoryItem"][] | null;
+                    "application/json": components["schemas"]["MemoryBrief"][] | null;
                 };
             };
             /** @description Error */
@@ -5279,28 +5297,62 @@ export interface operations {
             };
         };
     };
-    "add-memory": {
+    "get-memory-file": {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 pid: string;
+                /** @description File name, e.g. MEMORY.md or testing.md */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryFile"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "put-memory-file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+                name: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["MemoryAddInputBody"];
+                "application/json": components["schemas"]["MemoryPutInputBody"];
             };
         };
         responses: {
-            /** @description Created */
-            201: {
+            /** @description OK */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MemoryItem"];
+                    "application/json": components["schemas"]["MemoryFile"];
                 };
             };
             /** @description Error */
@@ -5314,13 +5366,14 @@ export interface operations {
             };
         };
     };
-    "delete-memory": {
+    "delete-memory-file": {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 pid: string;
-                id: string;
+                /** @description File name, e.g. MEMORY.md or testing.md */
+                name: string;
             };
             cookie?: never;
         };
@@ -5332,42 +5385,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    "update-memory": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                pid: string;
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MemoryPatchInputBody"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemoryItem"];
-                };
             };
             /** @description Error */
             default: {

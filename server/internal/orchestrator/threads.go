@@ -542,9 +542,6 @@ func (o *Orchestrator) handoffSummary(ctx context.Context, tx *core.Tx, e core.E
 	if err := openQuestionsDigest(ctx, tx, &b, e); err != nil {
 		return "", err
 	}
-	if err := memoryDigest(ctx, tx, &b, e.ProjectID); err != nil {
-		return "", err
-	}
 	conv, err := o.conversationOf(ctx, tx, e)
 	if err != nil {
 		return "", err
@@ -599,24 +596,6 @@ func openQuestionsDigest(ctx context.Context, tx *core.Tx, b *strings.Builder, e
 		return err
 	}
 	b.WriteString("你提出、还没有回答的问题（回答会以消息送达，不要重复提问）：" + strings.Join(asked, "；") + "\n")
-	return nil
-}
-
-// memoryDigest adds the project's memory (pinned first, then the newest).
-func memoryDigest(ctx context.Context, tx *core.Tx, b *strings.Builder, projectID string) error {
-	var texts []string
-	err := tx.Gorm(ctx).Table("at_project_memory").Where("project_id = ?", projectID).
-		Order("pinned DESC, created_at DESC").Limit(10).Pluck("text", &texts).Error
-	if err != nil {
-		return err
-	}
-	lines := make([]string, 0, len(texts))
-	for _, t := range texts {
-		lines = append(lines, "- "+clip(t, 300))
-	}
-	if len(lines) > 0 {
-		b.WriteString("项目记忆：\n" + strings.Join(lines, "\n") + "\n")
-	}
 	return nil
 }
 

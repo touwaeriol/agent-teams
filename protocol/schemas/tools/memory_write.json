@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/memory_write.json",
+  "title": "MemoryWriteInput",
+  "description": "Create or replace a project memory file. A topic file (e.g. testing.md) needs a one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md rewrites the index itself.",
+  "x-tool": {
+    "tiers": [
+      "coordinator",
+      "lead"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "name",
+    "content"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 300
+    },
+    "content": {
+      "type": "string",
+      "maxLength": 32000
+    }
+  },
+  "$defs": {
+    "MemoryWriteResult": {
+      "title": "MemoryWriteResult",
+      "type": "object",
+      "required": [
+        "name",
+        "created"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "created": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

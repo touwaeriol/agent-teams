@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { DeliverableView } from "@/api/views";
 import { fileIcon, formatBytes, formatDateTime, libraryColumns, nextSort, ownerLabel, sortLibrary, typeLabel, uploadProblem } from "@/lib/library";
 import { colorIcon, iconLook } from "@/lib/projectIcon";
-import { fillDays, formatTokens, formatUSD, goalLimit, modelLabel, modelOptions, sectionOf } from "@/lib/projectSettings";
+import { fillDays, formatTokens, formatUSD, INSTRUCTIONS_MAX, modelLabel, modelOptions, sectionOf, worktreeChoice } from "@/lib/projectSettings";
 import { describeCron, looksLikeCron, presetOf } from "@/lib/schedules";
 
 function item(id: string, patch: Partial<DeliverableView> = {}): DeliverableView {
@@ -60,8 +60,9 @@ describe("project settings", () => {
   it("picks sections and limits", () => {
     expect(sectionOf("usage")).toBe("usage");
     expect(sectionOf("nope")).toBe("general");
-    expect(goalLimit("short")).toBe(8000);
-    expect(goalLimit("x".repeat(9000))).toBe(9000);
+    expect(INSTRUCTIONS_MAX).toBe(16000);
+    expect(worktreeChoice("clone").label).toBe("关闭，直接在检出目录工作");
+    expect(worktreeChoice("").label).toBe("开启，使用工作树");
   });
   it("offers models", () => {
     expect(modelLabel("")).toBe("跟随岗位设置");

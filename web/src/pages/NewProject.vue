@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 新建项目: name, context, repositories, work mode, the per-thread team from the role templates,
+// 新建项目: name, 项目指令 (context), repositories, work mode, the per-thread team from the role templates,
 // and an optional first message for the coordinator.
 import { computed, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
@@ -15,6 +15,7 @@ import { teamChips } from "@/components/app/roles";
 import { WORK_MODES } from "@/components/app/workModes";
 import Field from "@/components/common/Field.vue";
 import Spinner from "@/components/common/Spinner.vue";
+import { INSTRUCTIONS_MAX } from "@/lib/projectSettings";
 import NavButton from "@/components/shell/NavButton.vue";
 
 const router = useRouter();
@@ -46,8 +47,8 @@ const chips = computed(() => teamChips(roles.data.value?.roles ?? []));
         <Field v-slot="{ id }" label="项目名称">
           <el-input :id="id" v-model="name" required placeholder="例如：agent team" />
         </Field>
-        <Field v-slot="{ id }" label="项目上下文" hint="统筹、组长和每个成员开工前都会读到；各仓库的基准分支也写在这里。项目记忆会在讨论串结束后自动补充。">
-          <el-input :id="id" v-model="context" type="textarea" :rows="4" placeholder="技术栈、约定、怎么跑测试、不能动的地方、仓库 org/web 的基准分支：develop……" />
+        <Field v-slot="{ id }" label="项目指令" hint="类似 CLAUDE.md：统筹、组长和每个成员的每个新会话都会读取并遵循；各仓库的基准分支也写在这里。之后在 设置 → 记忆 里修改。">
+          <el-input :id="id" v-model="context" type="textarea" :rows="4" :maxlength="INSTRUCTIONS_MAX" placeholder="技术栈、约定、怎么跑测试、不能动的地方、仓库 org/web 的基准分支：develop……" />
         </Field>
       </Card>
       <Card class="gap-4">

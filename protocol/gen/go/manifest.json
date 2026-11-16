@@ -853,6 +853,116 @@
       }
     },
     {
+      "name": "memory_delete",
+      "input": "MemoryDeleteInput",
+      "result": null,
+      "tiers": [
+        "coordinator",
+        "lead"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Delete a project memory topic file and its line in MEMORY.md (MEMORY.md itself cannot be deleted).",
+      "input_schema": {
+        "description": "Delete a project memory topic file and its line in MEMORY.md (MEMORY.md itself cannot be deleted).",
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        }
+      }
+    },
+    {
+      "name": "memory_list",
+      "input": "MemoryListInput",
+      "result": "MemoryListResult",
+      "tiers": [
+        "coordinator",
+        "lead",
+        "member"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "List the project's memory files (MEMORY.md and topic files) with their descriptions.",
+      "input_schema": {
+        "description": "List the project's memory files (MEMORY.md and topic files) with their descriptions.",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "name": "memory_read",
+      "input": "MemoryReadInput",
+      "result": "MemoryReadResult",
+      "tiers": [
+        "coordinator",
+        "lead",
+        "member"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Read one project memory file in full (MEMORY.md or a topic file listed in it).",
+      "input_schema": {
+        "description": "Read one project memory file in full (MEMORY.md or a topic file listed in it).",
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        }
+      }
+    },
+    {
+      "name": "memory_write",
+      "input": "MemoryWriteInput",
+      "result": "MemoryWriteResult",
+      "tiers": [
+        "coordinator",
+        "lead"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Create or replace a project memory file. A topic file (e.g. testing.md) needs a one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md rewrites the index itself.",
+      "input_schema": {
+        "description": "Create or replace a project memory file. A topic file (e.g. testing.md) needs a one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md rewrites the index itself.",
+        "type": "object",
+        "required": [
+          "name",
+          "content"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 32000
+          }
+        }
+      }
+    },
+    {
       "name": "message_thread",
       "input": "MessageThreadInput",
       "result": null,
@@ -1131,9 +1241,9 @@
       ],
       "blocking": [],
       "requires": null,
-      "description": "Add a fact to the project memory (source = coordinator).",
+      "description": "Append a one-line note to the project memory index MEMORY.md (shortcut for small facts).",
       "input_schema": {
-        "description": "Add a fact to the project memory (source = coordinator).",
+        "description": "Append a one-line note to the project memory index MEMORY.md (shortcut for small facts).",
         "type": "object",
         "required": [
           "text"

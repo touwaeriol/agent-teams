@@ -1,4 +1,4 @@
-// 项目设置 dialog: sections, the goal field's limit, model and effort choices, usage numbers.
+// 项目设置 dialog: sections, the instructions limit, worktree choice, model and effort choices, usage numbers.
 
 export const SETTINGS_SECTIONS = [
   { id: "general", label: "通用" },
@@ -14,11 +14,19 @@ export function sectionOf(value: string | undefined): SettingsSection {
   return SETTINGS_SECTIONS.find((s) => s.id === value)?.id ?? "general";
 }
 
-/** The goal (project context) box counts to 8,000; a longer text written before stays editable. */
-export const GOAL_MAX = 8000;
+/** 项目指令 (the project's `context`) counts to 16,000 characters, like the API. */
+export const INSTRUCTIONS_MAX = 16000;
 
-export function goalLimit(saved: string): number {
-  return Math.max(GOAL_MAX, saved.length);
+/** 环境 → 工作树: the two work modes the daemon implements (git worktree, or a full clone each). */
+export const WORKTREE_CHOICES = [
+  { value: "worktree" as const, label: "开启，使用工作树", desc: "每个节点克隆一份仓库，讨论串和每个成员各开一个 worktree：省磁盘、开工快，并行互不干扰。" },
+  { value: "clone" as const, label: "关闭，直接在检出目录工作", desc: "不用 worktree：每个员工一份完整克隆，直接在自己的检出目录里工作。最稳，但占磁盘。" },
+];
+
+export type WorkMode = (typeof WORKTREE_CHOICES)[number]["value"];
+
+export function worktreeChoice(mode: string) {
+  return WORKTREE_CHOICES.find((c) => c.value === mode) ?? WORKTREE_CHOICES[0];
 }
 
 export const DEFAULT_MODEL = "claude-opus-5-5";

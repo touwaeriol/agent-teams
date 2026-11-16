@@ -1630,61 +1630,87 @@
         ],
         "type": "object"
       },
-      "MemoryAddInputBody": {
+      "MemoryBrief": {
         "additionalProperties": false,
         "properties": {
-          "text": {
-            "maxLength": 8000,
-            "minLength": 1,
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "description": "Characters of content",
+            "format": "int64",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updated_by": {
             "type": "string"
           }
         },
         "required": [
-          "text"
+          "name",
+          "description",
+          "size",
+          "updated_by",
+          "updated_at"
         ],
         "type": "object"
       },
-      "MemoryItem": {
+      "MemoryFile": {
         "additionalProperties": false,
         "properties": {
+          "content": {
+            "type": "string"
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
           },
-          "id": {
+          "description": {
             "type": "string"
           },
-          "pinned": {
-            "type": "boolean"
-          },
-          "source": {
+          "name": {
             "type": "string"
           },
-          "text": {
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updated_by": {
             "type": "string"
           }
         },
         "required": [
-          "id",
-          "text",
-          "source",
-          "pinned",
-          "created_at"
+          "name",
+          "description",
+          "content",
+          "updated_by",
+          "created_at",
+          "updated_at"
         ],
         "type": "object"
       },
-      "MemoryPatchInputBody": {
+      "MemoryPutInputBody": {
         "additionalProperties": false,
         "properties": {
-          "pinned": {
-            "type": "boolean"
+          "content": {
+            "maxLength": 32000,
+            "type": "string"
           },
-          "text": {
-            "maxLength": 8000,
-            "minLength": 1,
+          "description": {
+            "description": "One line listed in MEMORY.md; required except for MEMORY.md",
+            "maxLength": 300,
             "type": "string"
           }
         },
+        "required": [
+          "content"
+        ],
         "type": "object"
       },
       "MergeEntryView": {
@@ -2411,8 +2437,9 @@
         "additionalProperties": false,
         "properties": {
           "memory": {
+            "description": "Memory files, MEMORY.md first (at most 6)",
             "items": {
-              "$ref": "#/components/schemas/MemoryItem"
+              "$ref": "#/components/schemas/MemoryBrief"
             },
             "type": [
               "array",
@@ -2706,7 +2733,8 @@
             "type": "boolean"
           },
           "context": {
-            "maxLength": 50000,
+            "description": "项目指令",
+            "maxLength": 16000,
             "type": "string"
           },
           "delivery": {
@@ -2780,7 +2808,8 @@
             "type": "boolean"
           },
           "context": {
-            "maxLength": 50000,
+            "description": "项目指令",
+            "maxLength": 16000,
             "type": "string"
           },
           "coordinator_model": {
@@ -2913,6 +2942,7 @@
             "type": "boolean"
           },
           "context": {
+            "description": "项目指令: the owner's instructions (like CLAUDE.md), read by every session",
             "type": "string"
           },
           "coordinator_model": {
@@ -2946,7 +2976,7 @@
             "type": "boolean"
           },
           "repos": {
-            "description": "Bound repositories in project order; base branches belong in context",
+            "description": "Bound repositories in project order; base branches belong in context (the project instructions)",
             "items": {
               "$ref": "#/components/schemas/RepoRef"
             },
@@ -8206,7 +8236,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/MemoryItem"
+                    "$ref": "#/components/schemas/MemoryBrief"
                   },
                   "type": [
                     "array",
@@ -8228,63 +8258,15 @@
             "description": "Error"
           }
         },
-        "tags": [
-          "projects"
-        ]
-      },
-      "post": {
-        "operationId": "add-memory",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pid",
-            "required": true,
-            "schema": {
-              "maxLength": 64,
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MemoryAddInputBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MemoryItem"
-                }
-              }
-            },
-            "description": "Created"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/APIError"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
+        "summary": "Memory files, MEMORY.md first (no content)",
         "tags": [
           "projects"
         ]
       }
     },
-    "/api/projects/{pid}/memory/{id}": {
+    "/api/projects/{pid}/memory/{name}": {
       "delete": {
-        "operationId": "delete-memory",
+        "operationId": "delete-memory-file",
         "parameters": [
           {
             "in": "path",
@@ -8296,11 +8278,13 @@
             }
           },
           {
+            "description": "File name, e.g. MEMORY.md or testing.md",
             "in": "path",
-            "name": "id",
+            "name": "name",
             "required": true,
             "schema": {
-              "maxLength": 64,
+              "description": "File name, e.g. MEMORY.md or testing.md",
+              "maxLength": 100,
               "type": "string"
             }
           }
@@ -8324,8 +8308,8 @@
           "projects"
         ]
       },
-      "patch": {
-        "operationId": "update-memory",
+      "get": {
+        "operationId": "get-memory-file",
         "parameters": [
           {
             "in": "path",
@@ -8337,31 +8321,23 @@
             }
           },
           {
+            "description": "File name, e.g. MEMORY.md or testing.md",
             "in": "path",
-            "name": "id",
+            "name": "name",
             "required": true,
             "schema": {
-              "maxLength": 64,
+              "description": "File name, e.g. MEMORY.md or testing.md",
+              "maxLength": 100,
               "type": "string"
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MemoryPatchInputBody"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MemoryItem"
+                  "$ref": "#/components/schemas/MemoryFile"
                 }
               }
             },
@@ -8378,6 +8354,65 @@
             "description": "Error"
           }
         },
+        "tags": [
+          "projects"
+        ]
+      },
+      "put": {
+        "operationId": "put-memory-file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryPutInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryFile"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Create or replace a memory file; topic files keep their line in MEMORY.md",
         "tags": [
           "projects"
         ]

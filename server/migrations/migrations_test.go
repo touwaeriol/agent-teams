@@ -195,7 +195,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 130 {
+	if migrations.Latest() != 140 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -492,4 +492,71 @@ INSERT INTO at_messages (conversation_id, role, content) VALUES ('co1', 'user', 
 INSERT INTO at_tasks (conversation_id, id, thread_id, assignee, instruction, depends_on, status, output, summary)
   VALUES ('th1', 't1', 'th1', 'dev', 'do', '[]', 'done', 'old result', ''),
          ('th1', 't2', 'th1', 'dev', 'do', '[]', 'done', 'ignored', 'kept');
+`
+
+// TestMemoryFilesMigration: 00140 turns at_project_memory into memory files: notes become
+// MEMORY.md bullets (pinned first), thread summaries become thread-summaries.md sections linked
+// from MEMORY.md; Down puts every file back as one note.
+func TestMemoryFilesMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 130); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(memorySeed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := migrations.Up(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{}
+	rows, err := db.Query(`SELECT project_id || '/' || name, content FROM at_memory_files`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var k, v string
+		_ = rows.Scan(&k, &v)
+		files[k] = v
+	}
+	rows.Close()
+	want := map[string]string{
+		"p1/MEMORY.md":           "# 项目记忆\n\n- 置顶 的一条\n- 用 pnpm\n- [thread-summaries.md](thread-summaries.md) — 已结束讨论串的总结（最近 30 个）",
+		"p1/thread-summaries.md": "## #1 登录\n第一个总结\n\n## #2\n第二个总结",
+		"p2/MEMORY.md":           "# 项目记忆\n\n- 只有一条",
+	}
+	if len(files) != len(want) {
+		t.Fatalf("files %q", files)
+	}
+	for k, v := range want {
+		if files[k] != v {
+			t.Errorf("%s = %q, want %q", k, files[k], v)
+		}
+	}
+	assertNoTable(t, db, "at_project_memory")
+	if _, err := p.DownTo(ctx, 130); err != nil {
+		t.Fatal(err)
+	}
+	var n, pinned int
+	_ = db.QueryRow(`SELECT count(*), count(*) FILTER (WHERE pinned) FROM at_project_memory`).Scan(&n, &pinned)
+	if n != 3 || pinned != 2 {
+		t.Fatalf("down notes %d pinned %d", n, pinned)
+	}
+}
+
+const memorySeed = `
+INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A'), ('p2', 'u1', 'B'), ('p3', 'u1', 'C');
+INSERT INTO at_conversations (id, user_id, title, project_id, kind) VALUES ('th1', 'u1', 't', 'p1', 'thread');
+INSERT INTO at_threads (id, project_id, user_id, no, title, branch, base_branch) VALUES ('th1', 'p1', 'u1', 1, '登录', 'thread/1-x', 'main');
+INSERT INTO at_project_memory (id, project_id, text, source, pinned, created_at) VALUES
+  ('m1', 'p1', '用 pnpm', 'user', false, now() - interval '5 minutes'),
+  ('m2', 'p1', '第一个总结', '#1', false, now() - interval '4 minutes'),
+  ('m3', 'p1', E'置顶\n 的一条', 'coordinator', true, now() - interval '3 minutes'),
+  ('m4', 'p1', '第二个总结', 'thread:2', false, now() - interval '2 minutes'),
+  ('m5', 'p2', '只有一条', 'coordinator', false, now());
 `

@@ -9,7 +9,7 @@ import { parseSetting } from "@/pages/settings/admin/admin";
 import { connectionKind, usedText } from "@/pages/settings/github/github";
 import { nodeMeta, nodeStats, runtimeLine, settingsPatch, slotPct } from "@/pages/settings/nodes/nodes";
 import { isDirty, nodePickerText, ordered, patchAt, removeAt, toggleId, versionText } from "@/pages/settings/team/team";
-import { employeeRows, fromChoice, inlineCommit, leadTimeoutLabel, memorySource, repoRefs, threadRows, toChoice } from "@/pages/projectSettings/logic";
+import { employeeRows, fromChoice, inlineCommit, leadTimeoutLabel, memoryFileName, memoryWriter, repoRefs, splitMemory, threadRows, toChoice } from "@/pages/projectSettings/logic";
 import { newRole } from "@/lib/roles";
 
 const repo = (full_name: string, used: { id: string; name: string }[] = [], extra: object = {}) =>
@@ -129,10 +129,14 @@ describe("GitHub and admin", () => {
 });
 
 describe("project settings", () => {
-  it("memory source, lead timeouts, model choices", () => {
-    expect(memorySource({ source: "thread:12" })).toBe("#12 总结");
-    expect(memorySource({ source: "coordinator" })).toBe("统筹整理");
-    expect(memorySource({ source: "other" })).toBe("other");
+  it("memory files, lead timeouts, model choices", () => {
+    const f = (name: string) => ({ name, description: "", size: 0, updated_by: "user", updated_at: "" });
+    expect(splitMemory([f("MEMORY.md"), f("a.md")])).toEqual({ index: f("MEMORY.md"), files: [f("a.md")] });
+    expect(splitMemory(null)).toEqual({ index: undefined, files: [] });
+    expect(memoryWriter("user")).toBe("你");
+    expect(memoryWriter("lead-1 · #3")).toBe("lead-1 · #3");
+    expect(memoryFileName(" testing ")).toBe("testing.md");
+    expect(memoryFileName("a.MD")).toBe("a.MD");
     expect(leadTimeoutLabel(120)).toBe("2 分钟");
     expect(leadTimeoutLabel(90)).toBe("90 秒");
     expect(fromChoice(toChoice(""))).toBe("");

@@ -18,8 +18,8 @@ type ProjectView struct {
 	ID                string    `json:"id"`
 	Name              string    `json:"name"`
 	Description       string    `json:"description"`
-	Context           string    `json:"context"`
-	Repos             []RepoRef `json:"repos" doc:"Bound repositories in project order; base branches belong in context"`
+	Context           string    `json:"context" doc:"项目指令: the owner's instructions (like CLAUDE.md), read by every session"`
+	Repos             []RepoRef `json:"repos" doc:"Bound repositories in project order; base branches belong in context (the project instructions)"`
 	Pinned            bool      `json:"pinned"`
 	Archived          bool      `json:"archived"`
 	WorkMode          string    `json:"work_mode" enum:"worktree,clone"`
@@ -56,7 +56,7 @@ func ProjectViewOf(p store.Project, d Delivery) ProjectView {
 type ProjectInput struct {
 	Name              string         `json:"name" maxLength:"200"`
 	Description       string         `json:"description,omitempty" maxLength:"2000"`
-	Context           string         `json:"context,omitempty" maxLength:"50000"`
+	Context           string         `json:"context,omitempty" maxLength:"16000" doc:"项目指令"`
 	Repos             []RepoRef      `json:"repos,omitempty" maxItems:"20"`
 	WorkMode          string         `json:"work_mode,omitempty" enum:"worktree,clone"`
 	AutoApprove       bool           `json:"auto_approve,omitempty"`
@@ -69,7 +69,7 @@ type ProjectInput struct {
 type ProjectUpdate struct {
 	Name              *string        `json:"name,omitempty" maxLength:"200"`
 	Description       *string        `json:"description,omitempty" maxLength:"2000"`
-	Context           *string        `json:"context,omitempty" maxLength:"50000"`
+	Context           *string        `json:"context,omitempty" maxLength:"16000" doc:"项目指令"`
 	Repos             *[]RepoRef     `json:"repos,omitempty" maxItems:"20" doc:"Replaces the bound repositories (order kept); [] unbinds all"`
 	Pinned            *bool          `json:"pinned,omitempty"`
 	Archived          *bool          `json:"archived,omitempty"`

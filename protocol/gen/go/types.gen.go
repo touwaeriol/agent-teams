@@ -2957,6 +2957,267 @@ func (j *McpServerStatus) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+// Delete a project memory topic file and its line in MEMORY.md (MEMORY.md itself
+// cannot be deleted).
+type MemoryDeleteInput struct {
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *MemoryDeleteInput) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["name"]; raw != nil && !ok {
+		return fmt.Errorf("field name in MemoryDeleteInput: required")
+	}
+	type Plain MemoryDeleteInput
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Name)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "name", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Name)) > 100 {
+		return fmt.Errorf("field %s length: must be <= %d", "name", 100)
+	}
+	*j = MemoryDeleteInput(plain)
+	return nil
+}
+
+type MemoryFileBrief struct {
+	// Description corresponds to the JSON schema field "description".
+	Description string `json:"description"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// Size corresponds to the JSON schema field "size".
+	Size int `json:"size"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt string `json:"updated_at"`
+
+	// UpdatedBy corresponds to the JSON schema field "updated_by".
+	UpdatedBy string `json:"updated_by"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *MemoryFileBrief) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["description"]; raw != nil && !ok {
+		return fmt.Errorf("field description in MemoryFileBrief: required")
+	}
+	if _, ok := raw["name"]; raw != nil && !ok {
+		return fmt.Errorf("field name in MemoryFileBrief: required")
+	}
+	if _, ok := raw["size"]; raw != nil && !ok {
+		return fmt.Errorf("field size in MemoryFileBrief: required")
+	}
+	if _, ok := raw["updated_at"]; raw != nil && !ok {
+		return fmt.Errorf("field updated_at in MemoryFileBrief: required")
+	}
+	if _, ok := raw["updated_by"]; raw != nil && !ok {
+		return fmt.Errorf("field updated_by in MemoryFileBrief: required")
+	}
+	type Plain MemoryFileBrief
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if 0 > plain.Size {
+		return fmt.Errorf("field %s: must be >= %v", "size", 0)
+	}
+	*j = MemoryFileBrief(plain)
+	return nil
+}
+
+// List the project's memory files (MEMORY.md and topic files) with their
+// descriptions.
+type MemoryListInput map[string]interface{}
+
+type MemoryListResult struct {
+	// Files corresponds to the JSON schema field "files".
+	Files []MemoryFileBrief `json:"files"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *MemoryListResult) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["files"]; raw != nil && !ok {
+		return fmt.Errorf("field files in MemoryListResult: required")
+	}
+	type Plain MemoryListResult
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = MemoryListResult(plain)
+	return nil
+}
+
+// Read one project memory file in full (MEMORY.md or a topic file listed in it).
+type MemoryReadInput struct {
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *MemoryReadInput) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["name"]; raw != nil && !ok {
+		return fmt.Errorf("field name in MemoryReadInput: required")
+	}
+	type Plain MemoryReadInput
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Name)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "name", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Name)) > 100 {
+		return fmt.Errorf("field %s length: must be <= %d", "name", 100)
+	}
+	*j = MemoryReadInput(plain)
+	return nil
+}
+
+type MemoryReadResult struct {
+	// Content corresponds to the JSON schema field "content".
+	Content string `json:"content"`
+
+	// Description corresponds to the JSON schema field "description".
+	Description string `json:"description"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt string `json:"updated_at"`
+
+	// UpdatedBy corresponds to the JSON schema field "updated_by".
+	UpdatedBy string `json:"updated_by"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *MemoryReadResult) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["content"]; raw != nil && !ok {
+		return fmt.Errorf("field content in MemoryReadResult: required")
+	}
+	if _, ok := raw["description"]; raw != nil && !ok {
+		return fmt.Errorf("field description in MemoryReadResult: required")
+	}
+	if _, ok := raw["name"]; raw != nil && !ok {
+		return fmt.Errorf("field name in MemoryReadResult: required")
+	}
+	if _, ok := raw["updated_at"]; raw != nil && !ok {
+		return fmt.Errorf("field updated_at in MemoryReadResult: required")
+	}
+	if _, ok := raw["updated_by"]; raw != nil && !ok {
+		return fmt.Errorf("field updated_by in MemoryReadResult: required")
+	}
+	type Plain MemoryReadResult
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = MemoryReadResult(plain)
+	return nil
+}
+
+// Create or replace a project memory file. A topic file (e.g. testing.md) needs a
+// one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md
+// rewrites the index itself.
+type MemoryWriteInput struct {
+	// Content corresponds to the JSON schema field "content".
+	Content string `json:"content"`
+
+	// Description corresponds to the JSON schema field "description".
+	Description *string `json:"description,omitempty,omitzero"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *MemoryWriteInput) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["content"]; raw != nil && !ok {
+		return fmt.Errorf("field content in MemoryWriteInput: required")
+	}
+	if _, ok := raw["name"]; raw != nil && !ok {
+		return fmt.Errorf("field name in MemoryWriteInput: required")
+	}
+	type Plain MemoryWriteInput
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Content)) > 32000 {
+		return fmt.Errorf("field %s length: must be <= %d", "content", 32000)
+	}
+	if plain.Description != nil && utf8.RuneCountInString(string(*plain.Description)) > 300 {
+		return fmt.Errorf("field %s length: must be <= %d", "description", 300)
+	}
+	if utf8.RuneCountInString(string(plain.Name)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "name", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Name)) > 100 {
+		return fmt.Errorf("field %s length: must be <= %d", "name", 100)
+	}
+	*j = MemoryWriteInput(plain)
+	return nil
+}
+
+type MemoryWriteResult struct {
+	// Created corresponds to the JSON schema field "created".
+	Created bool `json:"created"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *MemoryWriteResult) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["created"]; raw != nil && !ok {
+		return fmt.Errorf("field created in MemoryWriteResult: required")
+	}
+	if _, ok := raw["name"]; raw != nil && !ok {
+		return fmt.Errorf("field name in MemoryWriteResult: required")
+	}
+	type Plain MemoryWriteResult
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = MemoryWriteResult(plain)
+	return nil
+}
+
 type MergeEntryRef struct {
 	// EntryID corresponds to the JSON schema field "entry_id".
 	EntryID string `json:"entry_id"`
@@ -4223,7 +4484,8 @@ func (j *RelPath) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// Add a fact to the project memory (source = coordinator).
+// Append a one-line note to the project memory index MEMORY.md (shortcut for small
+// facts).
 type RememberInput struct {
 	// Text corresponds to the JSON schema field "text".
 	Text string `json:"text"`

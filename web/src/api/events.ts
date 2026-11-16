@@ -10,7 +10,6 @@ import type {
   EmployeeStatusView,
   MailView,
   MainTaskView,
-  MemoryView,
   MergeEntryView,
   MessageView,
   OfficeSnapshot,
@@ -178,11 +177,10 @@ function onCi(qc: QueryClient, pid: string, d: { thread_no: number; checks: Chec
   qc.setQueryData<OfficeSnapshot>(keys.office(pid), (s) => (s ? { ...s, ci: { ...s.ci, [d.thread_no]: d.checks } } : s));
 }
 
-function onMemory(qc: QueryClient, pid: string, d: { item: MemoryView; op: "add" | "delete" }) {
-  qc.setQueryData<MemoryView[]>(keys.memory(pid), (list) => {
-    if (!list) return list;
-    return d.op === "delete" ? list.filter((m) => m.id !== d.item.id) : upsert(list, d.item);
-  });
+/** A memory file was written or deleted: refetch the list, the open files and the overview box. */
+function onMemory(qc: QueryClient, pid: string, _d: { op: "write" | "delete"; name: string }) {
+  qc.invalidateQueries({ queryKey: keys.memory(pid) });
+  qc.invalidateQueries({ queryKey: keys.overview(pid) });
 }
 
 function onDeliverable(qc: QueryClient, pid: string, _d: { deliverable: DeliverableView }) {

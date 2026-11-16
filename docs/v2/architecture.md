@@ -195,7 +195,7 @@ Codex 对应：组长和 `read_only` 岗位 `sandbox: read-only, approvalPolicy:
 
 - `settingSources: []`（**所有层级**，不读节点用户的 `~/.claude`，也不读仓库的 `.claude/settings.json`、`.mcp.json`：那里面可以有钩子（任意 shell 命令，不经权限检查）、`permissions.allow`、`env` 和 MCP 服务器，而成员能在自己的 worktree 里改这些文件，下一次 park→resume 就会被读入，等于自己给自己放权，也会破坏组长的只读保证）。仓库的 `CLAUDE.md` 由控制台经 GitHub API 从**基准分支**读取（不是从 worktree 读），拼进 `systemPrompt.append`；讨论串开工时读一次，基准分支变化后下一次开会话时刷新。若以后要重新考虑 `'project'`，必须同时通过 `settings` 传 `disableAllHooks: true` 并拒绝项目 MCP 服务器。
 - `permissionMode` **总是显式设置**：写代码的成员 `bypassPermissions`（同时 `allowDangerouslySkipPermissions: true`，守护进程看到 `bypassPermissions` 也会自己补上）或 `default`（`ask` 岗位）；统筹、组长、只读岗位 `dontAsk`。
-- `systemPrompt: {type:'preset', preset:'claude_code', append: <平台说明 + 角色说明 + 项目 CLAUDE.md + 项目上下文 + 项目记忆摘要 + 名单>}`。
+- `systemPrompt: {type:'preset', preset:'claude_code', append: <平台说明 + 角色说明 + 项目 CLAUDE.md + 仓库 + 项目指令 + 项目记忆（使用说明 + MEMORY.md，§6.7）+ 名单>}`。每次开会话（包括 resume、换节点）都重新生成，所以用户改的项目指令和员工新写的记忆在下一个会话生效。
 - `env` 由守护进程**逐项构造**（SDK 的 `env` 是替换不是合并）：`PATH`、`HOME`（见 §10.3，指向员工专用的 HOME）、`LANG`、`MCP_TOOL_TIMEOUT=86400000`、`CLAUDE_AGENT_SDK_CLIENT_APP=agent-teams-node/<ver>`、git 凭证相关变量，再加 `node.env` 里 `AGENT_TEAMS_PASS_ENV` 列出的认证与网络变量（默认允许名单：`ANTHROPIC_API_KEY`、`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`CLAUDE_CODE_USE_BEDROCK`、`CLAUDE_CODE_USE_VERTEX`、`AWS_*`、`CLOUD_ML_REGION`、`ANTHROPIC_VERTEX_PROJECT_ID`、`GOOGLE_APPLICATION_CREDENTIALS`、`HTTPS_PROXY`、`HTTP_PROXY`、`NO_PROXY`、`NODE_EXTRA_CA_CERTS`、`SSL_CERT_FILE`；Codex 另加 `OPENAI_API_KEY`、`OPENAI_BASE_URL`），节点 hello 报告 `auth: api_key` 时据此生效。`AGENT_TEAMS_NODE_TOKEN` 和 `AGENT_TEAMS_*` 前缀**永远剔除**，名单里写了也不带。
 - `includeHookEvents: true`；Bash 沙箱按 §10.3 开启。
 - `canUseTool` 返回 `updatedPermissions` 前，守护进程把每一条 `PermissionUpdate.destination` **改写为 `'session'`**（SDK 建议里的 `localSettings`/`projectSettings` 会往 worktree 写 `.claude/settings.local.json`）。
@@ -206,7 +206,7 @@ Codex 对应：组长和 `read_only` 岗位 `sandbox: read-only, approvalPolicy:
 - **进程**：Claude 会话对应一个 `query()` 子进程（约 250 MB）。空闲超过 `park_after`（默认 15 分钟，无运行中的回合、无待审批）就 `close()` 掉进程，会话标为 `parked`；下一条消息到来时用 `resume: <session_id>` 重开。这样一台节点可以挂几十个逻辑会话，同时活跃的进程受 `max_active_sessions`（默认 4，节点 hello 上报，可在节点页调）限制。
 - Codex：一个 `codex app-server` 托管该节点所有 Codex 会话（同一 `CODEX_HOME`）；空闲 thread 不占额外进程，app-server 重启后 `thread/resume {excludeTurns:true}`。
 - 守护进程重启：从 `state/sessions/*.json` 知道本机有哪些逻辑会话，但**不主动恢复**；等控制台在重连后按需重新 `session.open {resume}`（控制台是唯一的真相）。控制台记录为 `turn_running`、之后却变成 `parked`（关机时停放的 `session.state`，或重启后的报告）或重新 `starting`（会话进程崩溃后自动重启）的会话，说明回合被打断了；丢了待审批请求的会话同样如此。控制台给这个员工（成员或组长）发一条系统消息（“守护进程重启打断了你上一个回合，请继续”，并列出失效的审批请求和仍在等待回答的提问），会话随之按 SDK session id resume 接着干，不会卡在进行中的任务上；同一次中断只发一次。重连对账后，若某个运行中的讨论串没有任何员工在工作、没有未处理的卡片或提问、也没有在途消息，组长收到一条提醒（这条提醒已是最新消息时不重复）。
-- **会话钉在节点上**：Claude 转录（员工 HOME 下的 `.claude/projects`）和 Codex rollout（`$CODEX_HOME/sessions`）只存在于跑过它的节点，所以 `resume` 只发给 `at_agent_sessions.node_id` 那台节点。必须换节点时（节点被删、离线超过 `rehome_after`（默认 30 分钟）且员工有待办任务、节点 drain），orchestrator 关闭旧逻辑会话，在新节点开一个**全新**会话（`resume: null`），第一条消息是平台生成的**会话恢复摘要**（`handoffSummary`）：员工身份、主任务计划、（组长）全部任务及状态、（成员）当前任务和分支、还没回答的提问、项目记忆（置顶优先，最多 10 条）、这个员工对话里最近 20 条已送达的消息和它自己的回复（用户 / 你 / 平台，统筹按自己的对话取，不再是空的）。不做转录同步（SDK `sessionStore` 以后可作为改进）。
+- **会话钉在节点上**：Claude 转录（员工 HOME 下的 `.claude/projects`）和 Codex rollout（`$CODEX_HOME/sessions`）只存在于跑过它的节点，所以 `resume` 只发给 `at_agent_sessions.node_id` 那台节点。必须换节点时（节点被删、离线超过 `rehome_after`（默认 30 分钟）且员工有待办任务、节点 drain），orchestrator 关闭旧逻辑会话，在新节点开一个**全新**会话（`resume: null`），第一条消息是平台生成的**会话恢复摘要**（`handoffSummary`）：员工身份、主任务计划、（组长）全部任务及状态、（成员）当前任务和分支、还没回答的提问、这个员工对话里最近 20 条已送达的消息和它自己的回复（用户 / 你 / 平台，统筹按自己的对话取，不再是空的）。不做转录同步（SDK `sessionStore` 以后可作为改进）。
 - **resume 失败**（守护进程回 `session.opened {resume_failed: true, error}`：转录被删、`~/.claude` 被清、换了节点、文件损坏）时自动走同一个交接流程，不需要人处理。守护进程在三处识别：`session.open {resume}`、停放的会话被下一条消息唤醒（unpark）、崩溃后的自动重启；它只回 `session.opened {resume_failed}`、删掉本机记录，**不先发 `session.state closed`**（否则控制台会先把行关掉，看不到 resume_failed）。控制台关闭旧逻辑会话、开新会话，第一条消息 = 恢复摘要 + `---` + 旧会话**没送到的消息**（它最后一次 `session.open` 的 `first_message` 和未确认送达的 `session.send`，按发出顺序，用第一条的 `msg_id`，其余标为已送达），所以触发恢复的那条用户消息不会丢；统筹和组长的对话里插一条 `kind = resumed` 的系统消息，网页显示成一行淡色的“会话已恢复”。
 - **员工的会话关掉后再开**：讨论串结束（`thread_done`）后又被重新打开、用户被停用后恢复（`employee_removed`）、节点报告关闭（`node_closed`）的员工，下一条消息开的新逻辑会话带 `resume: {sdk_session_id: 上一个会话的}`，接着原来的对话；转录不在了就是上面的 resume 失败流程。策略违规（`policy_violation`）关掉的会话不续接。
 - 各种中断的结果：空闲停放 → 下一条消息按 SDK session id resume；守护进程 SIGTERM（停放全部会话）或 SIGKILL / 节点重启（本机记录按 `parked` 读回，首条投递前查转录去重）→ 重连对账后按需 resume，被打断的回合收到“守护进程重启”系统消息；会话进程崩溃 → 自动 resume 最多 3 次，转录丢了直接走 resume 失败；控制台重启 → 状态全在 PostgreSQL，阻塞调用照常等待；转录丢失 → 恢复摘要。`deploy/e2e/run_resume.mjs` 用真实 Claude 逐个验证（每次中断后问统筹之前说过的暗号）。
@@ -230,8 +230,8 @@ Codex 会话 ──(http://127.0.0.1:<port>/mcp/<sid>/<每次 ─┘            
 
 平台工具清单（在 v1 / threads.md 基础上）：
 
-- **coordinator**：`open_thread(title, brief, roles?)`、`list_threads(status?)`、`thread_status(no)`、`message_thread(no, text)`、`ask_user(question, options? | questions[])`（不阻塞；结构化提问见 §6.6）、`remember(text)`、`set_status(text, kind?)`。
-- **lead**：`update_plan(steps)`（主任务）、`assign_task(assignee, instruction, main, depends_on?, kind?)`（assignee 可以是岗位名 → 进任务池）、`list_tasks`、`cancel_task`、`reply_to(question_id, answer)`、`review_permission(request_id, decision: allow|deny|ask_user, reason)`（成员的权限请求，§9.2）、`broadcast`、`send_message`、`ask_user`（不阻塞）、`enqueue_merge(member | task_id)`（进合并队列，取代 v1 设计里的 `merge_member` 直接合并）、`open_pr(title, body)`、`finish(summary)`、`publish_deliverable(kind, title, url)`、`publish_file(path, kind, title, deliverable_id?)`（§6.5）、`set_status`。`finish(summary)` 除了写 `at_threads.summary`，还插入一条 `at_project_memory {source: '#<no>', text: summary}` 并发 `memory` 事件（threads.md 的约定）。讨论串没有任何仓库改动（没有讨论串分支、没有 PR、合并队列为空）时，`finish` 在主任务和小任务都结束后直接把讨论串置为 done（只读的调研、答疑不需要开 PR，require_acceptance 只对有 PR 的讨论串生效）；有改动但还没开 PR 时提示先 `open_pr`。讨论串 done / failed / archived 时平台关闭其所有员工的会话（包括 parked 的），取消它们进行中的工具调用、讨论串的待处理卡片和用量等待；取消归档不会启动任何会话。发给 parked 或已关闭会话的员工的消息会唤醒它（parked 由节点恢复进程，closed 按 SDK 会话 id resume），员工状态显示为 thinking · waking。
+- **coordinator**：`open_thread(title, brief, roles?)`、`list_threads(status?)`、`thread_status(no)`、`message_thread(no, text)`、`ask_user(question, options? | questions[])`（不阻塞；结构化提问见 §6.6）、`remember(text)`（往 MEMORY.md 追加一行）、`set_status(text, kind?)`、`memory_list` / `memory_read(name)` / `memory_write(name, description?, content)` / `memory_delete(name)`（§6.7）。
+- **lead**：`update_plan(steps)`（主任务）、`assign_task(assignee, instruction, main, depends_on?, kind?)`（assignee 可以是岗位名 → 进任务池）、`list_tasks`、`cancel_task`、`reply_to(question_id, answer)`、`review_permission(request_id, decision: allow|deny|ask_user, reason)`（成员的权限请求，§9.2）、`broadcast`、`send_message`、`ask_user`（不阻塞）、`enqueue_merge(member | task_id)`（进合并队列，取代 v1 设计里的 `merge_member` 直接合并）、`open_pr(title, body)`、`finish(summary)`、`publish_deliverable(kind, title, url)`、`publish_file(path, kind, title, deliverable_id?)`（§6.5）、`set_status`、四个 `memory_*` 工具（§6.7）。成员只有 `memory_list` / `memory_read`。`finish(summary)` 除了写 `at_threads.summary`，还把总结作为一节 `## #<no> 标题` 追加到记忆文件 `thread-summaries.md`（只留最近 30 节，MEMORY.md 自动链接它）并发 `memory` 事件。讨论串没有任何仓库改动（没有讨论串分支、没有 PR、合并队列为空）时，`finish` 在主任务和小任务都结束后直接把讨论串置为 done（只读的调研、答疑不需要开 PR，require_acceptance 只对有 PR 的讨论串生效）；有改动但还没开 PR 时提示先 `open_pr`。讨论串 done / failed / archived 时平台关闭其所有员工的会话（包括 parked 的），取消它们进行中的工具调用、讨论串的待处理卡片和用量等待；取消归档不会启动任何会话。发给 parked 或已关闭会话的员工的消息会唤醒它（parked 由节点恢复进程，closed 按 SDK 会话 id resume），员工状态显示为 thinking · waking。
 - **member**：`complete_task(task_id, summary, artifacts?)`（**显式完成**，见 §7.3；调用前平台先替它推送分支，见 §8.1）、`push_branch()`（把当前 worktree 的 HEAD 推到自己的成员分支，见 §8.1）、`report_progress`、`ask_lead`（阻塞）、`ask_user`（阻塞）、`send_message`、`read_messages`、`list_team`、`get_task`、`request_review`（阻塞）、`publish_deliverable`、`publish_file`（§6.5）、`set_status`；`can_delegate` 时加 `assign_subtask`、`wait_task`。
 - 审批不再是 MCP 工具（v1 的 `approve`），改走 canUseTool / Codex requestApproval（§8）。
 - Claude 自带工具：每一层都有 `TodoWrite`、`AskUserQuestion`（统筹的 `deny_non_platform_tools` 对这两个放行，`ToolsAllowed` 也放行），组长的 `allowedTools` 带上它们（`dontAsk`）；写代码的成员另有 `EnterPlanMode`、`ExitPlanMode`。用法见 §6.6。
@@ -278,6 +278,18 @@ Codex 会话 ──(http://127.0.0.1:<port>/mcp/<sid>/<每次 ─┘            
 
 这些消息都是 `role = system`、`author = 员工名`、`meta.employee`；恢复摘要只取 `chat/note/interrupt` 类消息，卡片不会混进去。
 
+### 6.7 项目指令与自动记忆
+
+仿照 Claude Code 的 CLAUDE.md 和 auto memory，项目有两种跨会话的上下文，都在 项目设置 → 记忆 里看和改：
+
+- **项目指令**：用户写的指令和规则（最多 16,000 字），存在 `at_projects.context`（API 字段名仍是 `context`，原来的“项目上下文 / 您想做些什么”就是它，数据不用迁移；通用分区不再显示它）。每个会话的 `systemPrompt.append` 都带 `## 项目指令（用户编写…必须遵守）`；各仓库的基准分支也写在这里（§8.1）。
+- **自动记忆**：员工自己记的笔记，按文件存在 `at_memory_files (project_id, name, description, content, updated_by, …)`。`MEMORY.md` 是索引：每个会话开始时注入（前 200 行、最多 12 KB，超出的部分提示用 `memory_read("MEMORY.md")` 读全文并精简），MEMORY.md 没链接到的文件另列 `其他记忆文件：name — description`。主题文件（`testing.md` 之类，名字可以是中文，`.md` 自动补上，最多 200 个，每个最多 32,000 字）按需用 `memory_read` 读。
+  - 工具：`memory_list`、`memory_read(name)`（统筹、组长、成员）；`memory_write(name, description?, content)`、`memory_delete(name)`（统筹、组长）。写主题文件必须带一句描述，平台在 MEMORY.md 里维护它的 `- [name](name) — description` 一行（改写时替换、删除时去掉）；`name = MEMORY.md` 直接改写索引本身，MEMORY.md 不能删。`remember(text)` 是往 MEMORY.md 末尾追加 `- text` 的快捷方式。`updated_by` 记写入者（`coordinator`、`lead-1 · #3`、`user`、`platform`）。被拒的写入（名字、长度、数量、缺描述）以 `isError` 结果回给模型。
+  - 提示词里的使用说明：记用户偏好、决定和理由、项目约定（构建、测试、发布、分支）、踩过的坑、外部系统；不记任务进度、临时状态、看代码就知道的事和秘密；改之前先读，过时的改正或删除。成员被告知只读，值得记的写进 `complete_task` 总结由组长整理。
+  - 组长 `finish(summary)` 的总结进 `thread-summaries.md`（§6.3）。
+  - 网页：MEMORY.md 一行（作用范围、更新时间），记忆文件列表；点开是 Markdown 查看，可编辑、删除、新建（`PUT/DELETE /api/projects/{pid}/memory/{name}`），保存后新开的会话读到。项目首页的“项目记忆”框列出 MEMORY.md 和前几个文件。
+  - 迁移 `00140_memory_files.sql`：`at_project_memory` 的用户 / 统筹笔记变成 MEMORY.md 的要点（置顶在前），`#<no>` / `thread:<no>` 来源的讨论串总结变成 `thread-summaries.md` 的各节；旧表删除（Down 把每个文件还原成一条笔记，MEMORY.md 置顶）。
+
 ## 7. 讨论串、调度与任务池
 
 ### 7.1 讨论串生命周期
@@ -319,7 +331,7 @@ queued ──开工──► running ◄──► waiting（有等你处理的�
 
 ### 8.1 目录和分支
 
-项目可以绑定多个仓库（`at_project_repos`，有顺序）。项目不存基准分支：用户把“仓库 X 的基准分支：develop”这类约定写在项目上下文里，它会注入每个员工的提示词；统筹和组长读到后在工具参数里显式传 `base`，没写的仓库用默认分支（GitHub `default_branch`）。
+项目可以绑定多个仓库（`at_project_repos`，有顺序）。项目不存基准分支：用户把“仓库 X 的基准分支：develop”这类约定写在项目指令里（§6.7），它会注入每个员工的提示词；统筹和组长读到后在工具参数里显式传 `base`，没写的仓库用默认分支（GitHub `default_branch`）。
 
 ```
 <root>/projects/<pid>/repos/<owner>__<repo>                    每个仓库一份共享克隆（只用来 fetch 和挂 worktree）
@@ -679,6 +691,6 @@ Go 接管的、在 Python 内存里有副作用的接口，**先写库，再同�
 | Q1 | 每个讨论串的成员是否允许跨项目共享节点额度上限？ | — | 先按节点 `max_active_sessions` 全局限制，不分项目 |
 | Q2 | 审查岗是独立会话还是组长兼任？ | — | 默认岗位模板里可选 `review` 岗；没有审查岗时审查关卡由组长执行（组长只读，正好） |
 | Q3 | 统筹和组长默认模型、成员默认模型 | 成本 | 默认都用 `claude-opus-5-5`（与 v1 约定一致），岗位模板可改 |
-| Q4 | 项目记忆的上限和摘要方式 | 提示长度 | 来源：用户手写、统筹 `remember`、组长 `finish(summary)`（`source='#<no>'`）。先全文附加置顶的和最近 50 条，超过 8 KB 时由统筹定期 `remember` 汇总（P4 再定） |
+| Q4 | 项目记忆的上限和摘要方式 | 提示长度 | 已定（§6.7）：记忆按文件存，只注入 MEMORY.md（200 行 / 12 KB），细节按需 `memory_read`；超出时提示员工精简 MEMORY.md |
 | Q5 | 办公室布局是全站一个还是每项目可覆盖 | — | 两者都支持：文件提供默认，项目设置可选择/覆盖（`office-layout.md` §7） |
 | Q6 | v1 的库功能（`chat`、`run`、SSH/本地节点、`Agent`/`Sequential` 等） | 范围 | v2 不带；保留在 v1 Python 包里，P6 后从仓库删除 |

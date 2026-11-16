@@ -107,6 +107,10 @@ const (
 	ToolListTasks          = "list_tasks"
 	ToolListTeam           = "list_team"
 	ToolListThreads        = "list_threads"
+	ToolMemoryDelete       = "memory_delete"
+	ToolMemoryList         = "memory_list"
+	ToolMemoryRead         = "memory_read"
+	ToolMemoryWrite        = "memory_write"
 	ToolMessageThread      = "message_thread"
 	ToolOpenPr             = "open_pr"
 	ToolOpenThread         = "open_thread"
@@ -179,6 +183,22 @@ var Tools = map[string]ToolMeta{
 	ToolListThreads: {
 		Tiers: []Tier{TierCoordinator}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(ListThreadsInput) }, NewResult: func() any { return new(ListThreadsResult) },
+	},
+	ToolMemoryDelete: {
+		Tiers: []Tier{TierCoordinator, TierLead}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(MemoryDeleteInput) }, NewResult: nil,
+	},
+	ToolMemoryList: {
+		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(MemoryListInput) }, NewResult: func() any { return new(MemoryListResult) },
+	},
+	ToolMemoryRead: {
+		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(MemoryReadInput) }, NewResult: func() any { return new(MemoryReadResult) },
+	},
+	ToolMemoryWrite: {
+		Tiers: []Tier{TierCoordinator, TierLead}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(MemoryWriteInput) }, NewResult: func() any { return new(MemoryWriteResult) },
 	},
 	ToolMessageThread: {
 		Tiers: []Tier{TierCoordinator}, Blocking: nil, Requires: "",

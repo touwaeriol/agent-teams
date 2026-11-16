@@ -2,45 +2,44 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-type memoryListOutput struct{ Body []store.MemoryItem }
+// Project auto memory (architecture.md §6.7): MEMORY.md and topic files, readable and editable
+// by the project owner; employees use the memory_* tools.
 
-type memoryOutput struct{ Body store.MemoryItem }
+type memoryListOutput struct{ Body []store.MemoryBrief }
 
-type memoryAddInput struct {
+type memoryFileOutput struct{ Body store.MemoryFile }
+
+type memoryNameInput struct {
 	PID  string `path:"pid" maxLength:"64"`
-	Body struct {
-		Text string `json:"text" minLength:"1" maxLength:"8000"`
-	}
+	Name string `path:"name" maxLength:"100" doc:"File name, e.g. MEMORY.md or testing.md"`
 }
 
-type memoryPatchInput struct {
+type memoryPutInput struct {
 	PID  string `path:"pid" maxLength:"64"`
-	ID   string `path:"id" maxLength:"64"`
+	Name string `path:"name" maxLength:"100"`
 	Body struct {
-		Text   *string `json:"text,omitempty" minLength:"1" maxLength:"8000"`
-		Pinned *bool   `json:"pinned,omitempty"`
+		Description string `json:"description,omitempty" maxLength:"300" doc:"One line listed in MEMORY.md; required except for MEMORY.md"`
+		Content     string `json:"content" maxLength:"32000"`
 	}
-}
-
-type memoryIDInput struct {
-	PID string `path:"pid" maxLength:"64"`
-	ID  string `path:"id" maxLength:"64"`
 }
 
 func (s *Server) registerMemory(api huma.API) {
 	tags := []string{"projects"}
-	huma.Register(api, huma.Operation{OperationID: "list-memory", Method: "GET", Path: "/api/projects/{pid}/memory", Tags: tags}, s.listMemory)
-	huma.Register(api, huma.Operation{OperationID: "add-memory", Method: "POST", Path: "/api/projects/{pid}/memory", Tags: tags, DefaultStatus: 201}, s.addMemory)
-	huma.Register(api, huma.Operation{OperationID: "update-memory", Method: "PATCH", Path: "/api/projects/{pid}/memory/{id}", Tags: tags}, s.updateMemory)
-	huma.Register(api, huma.Operation{OperationID: "delete-memory", Method: "DELETE", Path: "/api/projects/{pid}/memory/{id}", Tags: tags, DefaultStatus: 204}, s.deleteMemory)
+	huma.Register(api, huma.Operation{OperationID: "list-memory", Method: "GET", Path: "/api/projects/{pid}/memory", Tags: tags,
+		Summary: "Memory files, MEMORY.md first (no content)"}, s.listMemory)
+	huma.Register(api, huma.Operation{OperationID: "get-memory-file", Method: "GET", Path: "/api/projects/{pid}/memory/{name}", Tags: tags}, s.getMemoryFile)
+	huma.Register(api, huma.Operation{OperationID: "put-memory-file", Method: "PUT", Path: "/api/projects/{pid}/memory/{name}", Tags: tags,
+		Summary: "Create or replace a memory file; topic files keep their line in MEMORY.md"}, s.putMemoryFile)
+	huma.Register(api, huma.Operation{OperationID: "delete-memory-file", Method: "DELETE", Path: "/api/projects/{pid}/memory/{name}", Tags: tags,
+		DefaultStatus: 204}, s.deleteMemoryFile)
 }
 
 // ownProject checks the project belongs to the caller.
@@ -59,52 +58,50 @@ func (s *Server) listMemory(ctx context.Context, in *projectIDInput) (*memoryLis
 	if _, err := s.ownProject(ctx, in.PID); err != nil {
 		return nil, err
 	}
-	items, err := s.store.ListMemory(ctx, in.PID)
-	return &memoryListOutput{Body: items}, err
+	files, err := store.ListMemoryFiles(ctx, s.store.Pool, in.PID)
+	return &memoryListOutput{Body: files}, err
 }
 
-func (s *Server) addMemory(ctx context.Context, in *memoryAddInput) (*memoryOutput, error) {
+func (s *Server) getMemoryFile(ctx context.Context, in *memoryNameInput) (*memoryFileOutput, error) {
 	if _, err := s.ownProject(ctx, in.PID); err != nil {
 		return nil, err
 	}
-	text := strings.TrimSpace(in.Body.Text)
-	if text == "" {
-		return nil, fail(http.StatusUnprocessableEntity, "validation", "记忆内容不能为空")
-	}
-	item, err := s.store.AddMemory(ctx, in.PID, text, "user")
+	f, err := store.GetMemoryFile(ctx, s.store.Pool, in.PID, in.Name)
 	if err != nil {
-		return nil, err
+		return nil, memoryErr(err)
 	}
-	s.events.Project(ctx, in.PID, "memory", map[string]any{"item": item, "op": "add"})
-	return &memoryOutput{Body: item}, nil
+	return &memoryFileOutput{Body: f}, nil
 }
 
-func (s *Server) updateMemory(ctx context.Context, in *memoryPatchInput) (*memoryOutput, error) {
+func (s *Server) putMemoryFile(ctx context.Context, in *memoryPutInput) (*memoryFileOutput, error) {
 	if _, err := s.ownProject(ctx, in.PID); err != nil {
 		return nil, err
 	}
-	var ch []store.Change
-	if in.Body.Text != nil {
-		ch = append(ch, store.Change{Col: "text", Val: strings.TrimSpace(*in.Body.Text)})
-	}
-	if in.Body.Pinned != nil {
-		ch = append(ch, store.Change{Col: "pinned", Val: *in.Body.Pinned})
-	}
-	item, err := s.store.UpdateMemory(ctx, in.PID, in.ID, ch)
+	f, _, err := store.WriteMemoryFile(ctx, s.store.Pool, in.PID, store.MemoryWrite{Name: in.Name,
+		Description: in.Body.Description, Content: in.Body.Content, By: "user"})
 	if err != nil {
-		return nil, storeErr(err, "没有这条记忆")
+		return nil, memoryErr(err)
 	}
-	s.events.Project(ctx, in.PID, "memory", map[string]any{"item": item, "op": "update"})
-	return &memoryOutput{Body: item}, nil
+	s.events.Project(ctx, in.PID, "memory", map[string]any{"op": "write", "name": f.Name})
+	return &memoryFileOutput{Body: f}, nil
 }
 
-func (s *Server) deleteMemory(ctx context.Context, in *memoryIDInput) (*struct{}, error) {
+func (s *Server) deleteMemoryFile(ctx context.Context, in *memoryNameInput) (*struct{}, error) {
 	if _, err := s.ownProject(ctx, in.PID); err != nil {
 		return nil, err
 	}
-	if err := s.store.DeleteMemory(ctx, in.PID, in.ID); err != nil {
-		return nil, storeErr(err, "没有这条记忆")
+	if err := store.DeleteMemoryFile(ctx, s.store.Pool, in.PID, in.Name, "user"); err != nil {
+		return nil, memoryErr(err)
 	}
-	s.events.Project(ctx, in.PID, "memory", map[string]any{"item": map[string]string{"id": in.ID}, "op": "delete"})
+	s.events.Project(ctx, in.PID, "memory", map[string]any{"op": "delete", "name": in.Name})
 	return nil, nil
+}
+
+// memoryErr maps a rejected write to 422 and a missing file to 404.
+func memoryErr(err error) error {
+	var me *store.MemoryError
+	if errors.As(err, &me) {
+		return fail(http.StatusUnprocessableEntity, "validation", me.Msg)
+	}
+	return storeErr(err, "没有这个记忆文件")
 }

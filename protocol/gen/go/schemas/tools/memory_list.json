@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/memory_list.json",
+  "title": "MemoryListInput",
+  "description": "List the project's memory files (MEMORY.md and topic files) with their descriptions.",
+  "x-tool": {
+    "tiers": [
+      "coordinator",
+      "lead",
+      "member"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {},
+  "$defs": {
+    "MemoryListResult": {
+      "title": "MemoryListResult",
+      "type": "object",
+      "required": [
+        "files"
+      ],
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MemoryFileBrief"
+          }
+        }
+      }
+    },
+    "MemoryFileBrief": {
+      "title": "MemoryFileBrief",
+      "type": "object",
+      "required": [
+        "name",
+        "description",
+        "size",
+        "updated_by",
+        "updated_at"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "updated_by": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

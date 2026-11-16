@@ -14,7 +14,8 @@ export type ProjectView = S["ProjectView"];
 export type ProjectInput = S["ProjectInput"];
 export type ProjectUpdate = S["ProjectUpdate"];
 export type DeliverySettings = S["Delivery"];
-export type MemoryView = S["MemoryItem"];
+export type MemoryBrief = S["MemoryBrief"];
+export type MemoryFileView = S["MemoryFile"];
 export type NodeView = S["NodeView"];
 export type NodeSession = S["NodeSession"];
 export type Enrollment = S["Enrollment"];
@@ -392,7 +393,7 @@ export interface OverviewView {
   threads: ThreadView[];
   waiting: WaitingView;
   recent_deliverables: DeliverableView[];
-  memory: MemoryView[];
+  memory: MemoryBrief[];
   usage_7d: { cost_usd_est: number | null; by_day: { day: string; cost_usd_est: number }[] };
   nodes: NodeBrief[];
 }

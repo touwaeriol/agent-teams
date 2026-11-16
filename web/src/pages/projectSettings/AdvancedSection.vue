@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// 高级: approvals (only when some role asks), ask notifications, acceptance, workflow edits, merge method.
+// 高级: approvals (only when some role asks), ask notifications, acceptance, workflow edits, merge method,
+// and how thread branches are named and cleaned up (fixed by the platform, shown for reference).
 import { computed } from "vue";
 import { useRoles } from "@/api/queries";
 import type { ProjectView } from "@/api/views";
@@ -49,6 +50,13 @@ const MERGE = [
       >
         <el-option v-for="m in MERGE" :key="m.value" :value="m.value" :label="m.label" />
       </el-select>
+    </Row>
+    <span class="pb-1 pt-4 text-[13px] text-muted-foreground">分支</span>
+    <Row title="讨论串分支命名" desc="每个有改动的仓库各开一条讨论串分支，成员分支挂在它下面。">
+      <span class="font-mono text-[13px] text-muted-foreground">thread/{编号}-{标题}</span>
+    </Row>
+    <Row title="讨论串结束后" desc="有未推送改动时保留并提醒。">
+      <span class="text-[13px] text-muted-foreground">清理工作目录</span>
     </Row>
   </div>
 </template>

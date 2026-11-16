@@ -29,14 +29,17 @@ const EXPECTED_TYPES = {
 
 // Platform tool sets per tier (architecture.md 6.3).
 const EXPECTED_TOOLS = {
-  coordinator: ["open_thread", "list_threads", "thread_status", "message_thread", "ask_user", "remember", "set_status"],
+  coordinator: ["open_thread", "list_threads", "thread_status", "message_thread", "ask_user", "remember", "set_status",
+    "memory_list", "memory_read", "memory_write", "memory_delete"],
   lead: [
     "update_plan", "assign_task", "list_tasks", "cancel_task", "reply_to", "review_permission", "broadcast", "send_message", "ask_user",
     "enqueue_merge", "open_pr", "finish", "publish_deliverable", "publish_file", "set_status",
+    "memory_list", "memory_read", "memory_write", "memory_delete",
   ],
   member: [
     "complete_task", "push_branch", "report_progress", "ask_lead", "ask_user", "send_message", "read_messages",
     "list_team", "get_task", "request_review", "publish_deliverable", "publish_file", "set_status", "assign_subtask", "wait_task",
+    "memory_list", "memory_read",
   ],
 };
 const BLOCKING = { member: ["ask_lead", "ask_user", "request_review", "wait_task"], lead: [], coordinator: [] };

@@ -2033,6 +2033,79 @@ export interface ListThreadsInput {
   status?: ThreadStatus;
 }
 /**
+ * Delete a project memory topic file and its line in MEMORY.md (MEMORY.md itself cannot be deleted).
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "MemoryDeleteInput".
+ */
+export interface MemoryDeleteInput {
+  name: string;
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "MemoryListResult".
+ */
+export interface MemoryListResult {
+  files: MemoryFileBrief[];
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "MemoryFileBrief".
+ */
+export interface MemoryFileBrief {
+  name: string;
+  description: string;
+  size: number;
+  updated_by: string;
+  updated_at: string;
+}
+/**
+ * List the project's memory files (MEMORY.md and topic files) with their descriptions.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "MemoryListInput".
+ */
+export interface MemoryListInput {}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "MemoryReadResult".
+ */
+export interface MemoryReadResult {
+  name: string;
+  description: string;
+  content: string;
+  updated_by: string;
+  updated_at: string;
+}
+/**
+ * Read one project memory file in full (MEMORY.md or a topic file listed in it).
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "MemoryReadInput".
+ */
+export interface MemoryReadInput {
+  name: string;
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "MemoryWriteResult".
+ */
+export interface MemoryWriteResult {
+  name: string;
+  created: boolean;
+}
+/**
+ * Create or replace a project memory file. A topic file (e.g. testing.md) needs a one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md rewrites the index itself.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "MemoryWriteInput".
+ */
+export interface MemoryWriteInput {
+  name: string;
+  description?: string;
+  content: string;
+}
+/**
  * Send a message to a thread's lead as the project coordinator.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -2412,7 +2485,7 @@ export interface ReadMessagesResult {
  */
 export interface ReadMessagesInput {}
 /**
- * Add a fact to the project memory (source = coordinator).
+ * Append a one-line note to the project memory index MEMORY.md (shortcut for small facts).
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "RememberInput".

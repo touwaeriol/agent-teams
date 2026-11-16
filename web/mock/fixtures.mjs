@@ -220,11 +220,13 @@ export const mergeQueue = {
 
 export const checks = { t12: [{ name: "verify", status: "completed", conclusion: "success", url: "", summary: "" }, { name: "integration", status: "in_progress", conclusion: null, url: "", summary: "" }] };
 
+const memoryFile = (name, description, content, updated_by, min) => ({ name, description, content, updated_by, created_at: ago(min + 600), updated_at: ago(min) });
+
 export const memory = [
-  { id: "mem1", text: "后端 FastAPI + asyncpg，前端 React + Vite（pnpm），测试在 at-dev 容器里跑。", source: "user", pinned: true, created_at: ago(3000) },
-  { id: "mem2", text: "员工工具走 /mcp；审批用 permission-prompt-tool，等待期间每 30 秒发心跳。", source: "thread:12", pinned: false, created_at: ago(2000) },
-  { id: "mem3", text: "改完前端要跑 tsc 和 vite build，构建产物不提交。", source: "thread:10", pinned: false, created_at: ago(1000) },
-  { id: "mem4", text: "GitHub 用 App 安装授权，令牌每次运行现取，不落盘。", source: "thread:9", pinned: false, created_at: ago(500) },
+  memoryFile("MEMORY.md", "", "# 项目记忆\n- 用户喜欢小 PR，提交信息用中文。\n- 部署走滚动发布，不停渠道。\n- [testing.md](testing.md) — 怎么跑测试、常见失败\n- [github.md](github.md) — GitHub App 授权与令牌\n- [thread-summaries.md](thread-summaries.md) — 已结束讨论串的总结（最近 30 个）\n", "coordinator", 600),
+  memoryFile("github.md", "GitHub App 授权与令牌", "# GitHub\n- 用 App 安装授权，令牌每次运行现取，不落盘。\n", "lead-1 · #9", 500),
+  memoryFile("testing.md", "怎么跑测试、常见失败", "# 测试\n- 后端测试在 at-dev 容器里跑。\n- 改完前端要跑 tsc 和 vite build，构建产物不提交。\n", "lead-1 · #10", 1000),
+  memoryFile("thread-summaries.md", "已结束讨论串的总结（最近 30 个）", "## #12 审批卡片\n员工工具走 /mcp；审批用 permission-prompt-tool，等待期间每 30 秒发心跳。\n", "platform", 2000),
 ];
 
 const deliverable = (id, kind, title, thread_no, min, summary, extra = {}) => ({

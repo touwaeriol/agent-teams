@@ -1,18 +1,26 @@
-// 项目设置 dialog helpers (pure): memory sources, approval wording, lead timeouts, usage rows.
-import type { MemoryView, ProjectView, ProjectUsage } from "@/api/views";
+// 项目设置 dialog helpers (pure): memory files, approval wording, lead timeouts, usage rows.
+import type { MemoryBrief, ProjectView, ProjectUsage } from "@/api/views";
 import type { RepoRef } from "@/components/app/repo/repo";
 
-export const MODES = [
-  { id: "worktree" as const, title: "worktree（推荐）", desc: "每个节点一份主仓库，讨论串和成员各开 worktree。" },
-  { id: "clone" as const, title: "独立克隆", desc: "每个成员一份完整克隆，最稳但占磁盘。" },
-];
+export const MEMORY_INDEX = "MEMORY.md";
 
-const MEMORY_SOURCE: Record<string, string> = { user: "你填写", coordinator: "统筹整理", lead: "组长总结" };
+/** MEMORY.md (when it exists) and the topic files, as the 记忆 section shows them. */
+export function splitMemory(list: MemoryBrief[] | null | undefined): { index?: MemoryBrief; files: MemoryBrief[] } {
+  const all = list ?? [];
+  return { index: all.find((f) => f.name === MEMORY_INDEX), files: all.filter((f) => f.name !== MEMORY_INDEX) };
+}
 
-export function memorySource(m: Pick<MemoryView, "source">): string {
-  const thread = m.source.match(/^thread:(\d+)$/);
-  if (thread) return `#${thread[1]} 总结`;
-  return MEMORY_SOURCE[m.source] ?? m.source;
+const WRITERS: Record<string, string> = { user: "你", platform: "平台", coordinator: "统筹" };
+
+/** Who last wrote a memory file: 你 / 平台 / 统筹 / lead-1 · #3. */
+export function memoryWriter(by: string): string {
+  return WRITERS[by] ?? by;
+}
+
+/** A new file's name as the server stores it: trimmed, ".md" added. */
+export function memoryFileName(name: string): string {
+  const n = name.trim();
+  return !n || n.toLowerCase().endsWith(".md") ? n : `${n}.md`;
 }
 
 export const APPROVAL_ROUTING_DESC: Record<string, string> = {

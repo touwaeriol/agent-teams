@@ -1,10 +1,9 @@
 <script setup lang="ts">
-// 通用: name and icon, intro, goal (context), models, auto-resume, archive, delete.
+// 通用: name and icon, intro, models, auto-resume, archive, delete (项目指令 lives in 记忆).
 import { Archive, ArchiveRestore } from "lucide-vue-next";
 import type { ProjectView } from "@/api/views";
 import DeleteRow from "./DeleteRow.vue";
 import Divider from "./Divider.vue";
-import GoalField from "./GoalField.vue";
 import Heading from "./Heading.vue";
 import InlineText from "./InlineText.vue";
 import ModelFields from "./ModelFields.vue";
@@ -25,7 +24,6 @@ const update = useUpdate(() => props.project.id);
     <Row title="一句话简介">
       <InlineText :value="project.description" placeholder="在项目列表里显示" label="一句话简介" @save="(description: string) => update.mutate({ description })" />
     </Row>
-    <GoalField :project="project" />
     <ModelFields :project="project" />
     <Divider />
     <SwitchRow

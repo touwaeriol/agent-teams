@@ -13,7 +13,9 @@ import ScheduleForm from "@/components/app/schedules/ScheduleForm.vue";
 import TagInput from "@/components/common/TagInput.vue";
 import { newRole } from "@/lib/roles";
 import NumberSetting from "@/pages/settings/admin/NumberSetting.vue";
+import EnvironmentSection from "@/pages/projectSettings/EnvironmentSection.vue";
 import GeneralSection from "@/pages/projectSettings/GeneralSection.vue";
+import MemorySection from "@/pages/projectSettings/MemorySection.vue";
 import Team from "@/pages/settings/Team.vue";
 
 type Route = [method: string, path: RegExp, body: unknown];
@@ -157,5 +159,95 @@ describe("Project settings · 通用", () => {
     await flushPromises();
     const bodies = await Promise.all(calls(spy, "PATCH", /\/api\/projects\/p1$/).map((r) => r.json()));
     expect(bodies).toEqual([{ auto_resume: true }, { description: "新简介" }]);
+  });
+});
+
+const settingsProject = {
+  id: "p1", name: "Agent", icon: "", description: "", context: "旧指令", auto_resume: false, archived: false, coordinator_model: "", thread_model: "", thread_effort: "",
+  work_mode: "worktree", repos: [{ repo: "o/api", git_connection_id: "g1" }],
+  delivery: { approval_routing: "lead_first", lead_review_timeout_s: 120, notify_on_ask: true, allow_workflow_edits: false, merge_method: "squash" },
+};
+const brief = (name: string, description = "", by = "user") => ({ name, description, size: 3, updated_by: by, updated_at: new Date(Date.now() - 2 * 3600_000).toISOString() });
+
+describe("Project settings · 记忆", () => {
+  it("saves 项目指令 with its button and lists MEMORY.md and the memory files", async () => {
+    const spy = api([
+      ["GET", /\/memory$/, [brief("MEMORY.md"), brief("testing.md", "怎么跑测试", "lead-1 · #2")]],
+      ["PATCH", /\/api\/projects\/p1$/, settingsProject],
+    ]);
+    const w = mountWith(MemorySection, { project: settingsProject });
+    await flushPromises();
+    expect(w.text()).toContain("3 / 16,000");
+    await w.get("#project-instructions").setValue("回答都以【测】开头");
+    await w.findAll("button").find((b) => b.text() === "保存")!.trigger("click");
+    await flushPromises();
+    expect(await calls(spy, "PATCH", /\/api\/projects\/p1$/)[0].json()).toEqual({ context: "回答都以【测】开头" });
+    const index = w.get("[aria-label='打开 MEMORY.md']");
+    expect(index.text()).toContain("Agent 项目");
+    expect(index.text()).toContain("更新于 2 小时前");
+    expect(w.get("[aria-label='打开 testing.md']").text()).toContain("怎么跑测试");
+    expect(w.text()).not.toContain("暂无其他文件");
+  });
+
+  it("opens a file, edits it and saves through PUT; deletes a topic file", async () => {
+    const file = { name: "testing.md", description: "怎么跑测试", content: "# 测试\nmake test", updated_by: "lead-1 · #2", updated_at: new Date().toISOString(), created_at: "" };
+    const spy = api([
+      ["GET", /\/memory$/, [brief("MEMORY.md"), brief("testing.md", "怎么跑测试")]],
+      ["GET", /\/memory\/testing\.md$/, file],
+      ["PUT", /\/memory\/testing\.md$/, file],
+      ["DELETE", /\/memory\/testing\.md$/, {}],
+    ]);
+    const w = mountWith(MemorySection, { project: settingsProject });
+    await flushPromises();
+    await w.get("[aria-label='打开 testing.md']").trigger("click");
+    await flushPromises();
+    expect(document.body.textContent).toContain("make test");
+    const edit = [...document.body.querySelectorAll("button")].find((b) => b.textContent?.includes("编辑"))!;
+    edit.click();
+    await flushPromises();
+    const area = document.body.querySelector<HTMLTextAreaElement>(".el-dialog textarea")!;
+    area.value = "用 docker 跑 make test";
+    area.dispatchEvent(new Event("input"));
+    await flushPromises();
+    [...document.body.querySelectorAll<HTMLButtonElement>(".el-dialog button")].find((b) => b.textContent?.trim() === "保存")!.click();
+    await flushPromises();
+    expect(await calls(spy, "PUT", /\/memory\/testing\.md$/)[0].json()).toEqual({ description: "怎么跑测试", content: "用 docker 跑 make test" });
+    await w.get("[aria-label='打开 testing.md']").trigger("click");
+    await flushPromises();
+    [...document.body.querySelectorAll<HTMLButtonElement>(".el-dialog button")].find((b) => b.textContent?.includes("删除"))!.click();
+    await flushPromises();
+    [...document.body.querySelectorAll<HTMLButtonElement>("button")].filter((b) => b.textContent?.trim() === "删除").at(-1)!.click();
+    await flushPromises();
+    expect(calls(spy, "DELETE", /\/memory\/testing\.md$/)).toHaveLength(1);
+  });
+
+  it("shows 暂无其他文件 when only MEMORY.md exists", async () => {
+    api([["GET", /\/memory$/, []]]);
+    const w = mountWith(MemorySection, { project: settingsProject });
+    await flushPromises();
+    expect(w.text()).toContain("暂无其他文件。");
+    expect(w.text()).toContain("还没有内容");
+  });
+});
+
+describe("Project settings · 环境", () => {
+  it("lists the repositories every thread includes and maps the worktree choice to work_mode", async () => {
+    const spy = api([["GET", /\/api\/git\/connections$/, [connection]], ["GET", /\/repos$/, { items: [], next_cursor: null }], ["PATCH", /\/api\/projects\/p1$/, settingsProject]]);
+    const w = mountWith(EnvironmentSection, { project: settingsProject });
+    await flushPromises();
+    expect(w.text()).toContain("每个讨论串中都包含的仓库");
+    expect(w.text()).not.toMatch(/云环境|管理节点|分支命名/);
+    expect(w.findAll("li").map((li) => li.text())).toEqual(["1o/apiGitHub · touwaeriol"]);
+    await w.findAll("button").find((b) => b.text().includes("添加"))!.trigger("click");
+    expect(w.text()).toContain("再加一个仓库");
+    await w.get("[aria-label='移除 o/api']").trigger("click");
+    await w.findAll("button").find((b) => b.text() === "保存")!.trigger("click");
+    await flushPromises();
+    expect(await calls(spy, "PATCH", /\/api\/projects\/p1$/)[0].json()).toEqual({ repos: [] });
+    expect(w.text()).toContain("每个节点克隆一份仓库");
+    const select = w.findAllComponents({ name: "ElSelect" }).find((c) => c.attributes("aria-label") === "工作树" || c.props("ariaLabel") === "工作树")!;
+    select.vm.$emit("update:modelValue", "clone");
+    await flushPromises();
+    expect(await calls(spy, "PATCH", /\/api\/projects\/p1$/)[1].json()).toEqual({ work_mode: "clone" });
   });
 });

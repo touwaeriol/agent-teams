@@ -316,7 +316,7 @@ func deref0(p *int) int {
 	return *p
 }
 
-// finish writes the thread summary and adds it to project memory (source #<no>).
+// finish writes the thread summary and files it under thread-summaries.md in project memory.
 func (s *Service) finish(ctx context.Context, tx *core.Tx, c *call) (Result, error) {
 	t, err := requireThread(c)
 	if err != nil {
@@ -334,7 +334,7 @@ func (s *Service) finish(ctx context.Context, tx *core.Tx, c *call) (Result, err
 	if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"summary": summary}); err != nil {
 		return Result{}, err
 	}
-	if err := s.addMemory(ctx, tx, t.ProjectID, summary, fmt.Sprintf("#%d", t.No)); err != nil {
+	if err := s.rememberSummary(ctx, tx, t, summary); err != nil {
 		return Result{}, err
 	}
 	if err := tx.EmitThread(ctx, t.ID); err != nil {
