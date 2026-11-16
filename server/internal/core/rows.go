@@ -31,6 +31,9 @@ type Thread struct {
 	UpdatedAt     time.Time
 	StartedAt     *time.Time
 	FinishedAt    *time.Time
+	PinnedAt      *time.Time
+	RemindAt      *time.Time
+	RemindedAt    *time.Time
 }
 
 // TableName maps Thread to at_threads.
@@ -38,7 +41,7 @@ func (Thread) TableName() string { return "at_threads" }
 
 const threadCols = `id, project_id, user_id, no, title, brief, status, pause_reason, branch, base_branch, pr_number,
 	pr_url, pr_state, summary, auto_approve, opened_by, roles_snapshot, waiting_count, created_at, updated_at,
-	started_at, finished_at`
+	started_at, finished_at, pinned_at, remind_at, reminded_at`
 
 // Active reports whether the thread's sessions should be live.
 func (t Thread) Active() bool {

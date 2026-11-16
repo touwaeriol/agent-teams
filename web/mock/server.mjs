@@ -14,6 +14,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const layoutPath = path.resolve(here, "../../office/default.json");
 const { ago, ...data } = F;
 const state = structuredClone(data);
+state.feedback ??= [];
 let seq = 100;
 const streams = new Set();
 
@@ -328,8 +329,36 @@ const routes = [
     const t = threadById(tid);
     const b = await body(req);
     Object.assign(t, b.status ? { status: b.status } : {}, b.auto_approve !== undefined ? { auto_approve: b.auto_approve } : {}, b.title ? { title: b.title } : {});
+    if (b.pinned !== undefined) t.pinned_at = b.pinned ? now() : null;
     emit("thread", { thread: threadOut(t) });
     json(res, 200, t);
+  }],
+  ["PUT", /^\/api\/threads\/([^/]+)\/reminder$/, async (req, res, [tid]) => {
+    const t = threadById(tid);
+    Object.assign(t, { remind_at: (await body(req)).at, reminded_at: null });
+    emit("thread", { thread: threadOut(t) });
+    json(res, 200, threadOut(t));
+  }],
+  ["DELETE", /^\/api\/threads\/([^/]+)\/reminder$/, (req, res, [tid]) => {
+    const t = threadById(tid);
+    Object.assign(t, { remind_at: null, reminded_at: null });
+    emit("thread", { thread: threadOut(t) });
+    json(res, 200, threadOut(t));
+  }],
+  ["POST", /^\/api\/threads\/([^/]+)\/feedback$/, async (req, res, [tid]) => {
+    const t = threadById(tid);
+    const b = await body(req);
+    const f = { id: `fb_${Date.now()}`, user_id: "u1", user_email: "admin@prophey.ai", project_id: t.project_id, thread_id: t.id, thread_no: t.no,
+      thread_title: t.title, text: b.text, content: b.include_content ? `#${t.no} ${t.title}\n\n[对话内容]` : "", handled_at: null, handled_by: "", created_at: now() };
+    state.feedback.unshift(f);
+    json(res, 201, f);
+  }],
+  ["GET", /^\/api\/admin\/feedback$/, (req, res) => json(res, 200, state.feedback)],
+  ["PATCH", /^\/api\/admin\/feedback\/([^/]+)$/, async (req, res, [id]) => {
+    const f = state.feedback.find((x) => x.id === id);
+    const b = await body(req);
+    Object.assign(f, b.handled ? { handled_at: now(), handled_by: "admin@prophey.ai" } : { handled_at: null, handled_by: "" });
+    json(res, 200, f);
   }],
   ["PATCH", /^\/api\/threads\/([^/]+)\/main-tasks\/([^/]+)$/, async (req, res, [tid, mid]) => {
     const t = threadById(tid);

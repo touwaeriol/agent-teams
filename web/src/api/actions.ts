@@ -70,8 +70,12 @@ export const conversations = {
 };
 
 export const threads = {
-  update: (tid: string, body: { title?: string; status?: "paused" | "running" | "archived"; auto_approve?: boolean }) =>
+  update: (tid: string, body: { title?: string; status?: "paused" | "running" | "archived"; auto_approve?: boolean; pinned?: boolean }) =>
     unwrap(client.PATCH("/api/threads/{tid}", { params: { path: { tid } }, body })),
+  remind: (tid: string, at: Date) => unwrap(client.PUT("/api/threads/{tid}/reminder", { params: { path: { tid } }, body: { at: at.toISOString() } })),
+  clearReminder: (tid: string) => unwrap(client.DELETE("/api/threads/{tid}/reminder", { params: { path: { tid } } })),
+  feedback: (tid: string, text: string, includeContent: boolean) =>
+    unwrap(client.POST("/api/threads/{tid}/feedback", { params: { path: { tid } }, body: { text, include_content: includeContent } })),
   archive: (tid: string) => unwrap(client.POST("/api/threads/{tid}/archive", { params: { path: { tid } } })),
   unarchive: (tid: string) => unwrap(client.POST("/api/threads/{tid}/unarchive", { params: { path: { tid } } })),
   reopen: (tid: string) => unwrap(client.POST("/api/threads/{tid}/reopen", { params: { path: { tid } } })),
@@ -136,4 +140,8 @@ export const admin = {
   removePlugin: (id: string) => unwrap(client.DELETE("/api/admin/plugins/{id}", { params: { path: { id } } })),
   createSkill: (body: S["NewSkillInputBody"]) => unwrap(client.POST("/api/admin/skills", { body })),
   removeSkill: (id: string) => unwrap(client.DELETE("/api/admin/skills/{id}", { params: { path: { id } } })),
+};
+
+export const feedback = {
+  setHandled: (id: string, handled: boolean) => unwrap(client.PATCH("/api/admin/feedback/{id}", { params: { path: { id } }, body: { handled } })),
 };

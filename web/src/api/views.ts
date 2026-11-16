@@ -18,6 +18,7 @@ export type MemoryBrief = S["MemoryBrief"];
 export type MemoryFileView = S["MemoryFile"];
 export type NodeView = S["NodeView"];
 export type NodeSession = S["NodeSession"];
+export type FeedbackView = S["FeedbackView"];
 export type Enrollment = S["Enrollment"];
 export type NewNodeResult = S["NewNodeOutputBody"];
 export type RoleView = S["Role"];
@@ -125,6 +126,12 @@ export interface ThreadView {
   last_activity_at?: string;
   /** The newest deliverable the thread published. */
   latest_deliverable?: DeliverableView | null;
+  /** When the user pinned it (null: not pinned); pinned threads sort first in their group. */
+  pinned_at?: string | null;
+  /** When the reminder the user set will fire (null: none pending). */
+  remind_at?: string | null;
+  /** When a reminder fired; the thread waits on the user (等你处理) until it is cleared. */
+  reminded_at?: string | null;
 }
 
 /** One repository of a thread: its base, whether the thread branch exists there, its PR. */

@@ -134,6 +134,7 @@ p, user, /api/threads/:tid/activity, GET
 p, user, /api/threads/:tid/archive, POST
 p, user, /api/threads/:tid/checks, GET
 p, user, /api/threads/:tid/complete, POST
+p, user, /api/threads/:tid/feedback, POST
 p, user, /api/threads/:tid/reopen, POST
 p, user, /api/threads/:tid/mail, GET
 p, user, /api/threads/:tid/main-tasks, GET
@@ -144,6 +145,8 @@ p, user, /api/threads/:tid/members/:name/message, POST
 p, user, /api/threads/:tid/merge-queue, GET
 p, user, /api/threads/:tid/open-pr, POST
 p, user, /api/threads/:tid/reject, POST
+p, user, /api/threads/:tid/reminder, DELETE
+p, user, /api/threads/:tid/reminder, PUT
 p, user, /api/threads/:tid/tasks, GET
 p, user, /api/threads/:tid/tasks/:task/cancel, POST
 p, user, /api/threads/:tid/tasks/:task/retry, POST
@@ -152,6 +155,8 @@ p, user, /api/threads/:tid/usage, GET
 
 # Administrators: the admin console.
 p, admin, /api/admin/audit, GET
+p, admin, /api/admin/feedback, GET
+p, admin, /api/admin/feedback/:id, PATCH
 p, admin, /api/admin/github-app, DELETE
 p, admin, /api/admin/github-app/manifest, POST
 p, admin, /api/admin/office/layouts, GET

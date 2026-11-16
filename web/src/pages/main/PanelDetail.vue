@@ -1,16 +1,27 @@
 <script setup lang="ts">
 /** The right panel with one thread open (or a note when it is gone). */
 import { computed } from "vue";
+import { useWaiting } from "@/api/queries";
 import type { ThreadView } from "@/api/views";
 import ThreadDetail from "@/components/app/thread/ThreadDetail.vue";
 import type { ThreadViewId } from "@/components/app/threadMenu";
 import EmptyState from "@/components/common/EmptyState.vue";
 import Loading from "@/components/common/Loading.vue";
+import { threadNav } from "@/components/app/thread/detail";
+import { listOrder, loadFolded } from "@/lib/threadList";
+import { listFilterOf, listView } from "@/lib/threadListView";
+import { threadPath, waitingIndex } from "./logic";
 
-const props = defineProps<{ pid: string; no: number; view: ThreadViewId | null; threads: ThreadView[]; loading: boolean }>();
+const props = defineProps<{ pid: string; no: number; view: ThreadViewId | null; threads: ThreadView[]; loading: boolean; userId: string }>();
 const emit = defineEmits<{ view: [view: ThreadViewId | null]; back: []; close: [] }>();
 const thread = computed(() => props.threads.find((t) => t.no === props.no));
 const full = computed(() => `/projects/${props.pid}/threads/${props.no}/full`);
+const waiting = useWaiting(() => props.pid);
+/** 上一个 / 下一个讨论串: the list as the panel shows it (groups, search, filters, folds). */
+const nav = computed(() => {
+  const order = listOrder(props.threads, props.no, listFilterOf(listView(props.pid)), waitingIndex(waiting.data.value?.questions), loadFolded(props.userId));
+  return threadNav(order, props.no, (n) => threadPath(props.pid, n));
+});
 </script>
 
 <template>
@@ -27,6 +38,7 @@ const full = computed(() => `/projects/${props.pid}/threads/${props.no}/full`);
     :thread="thread"
     :view="view"
     :full-href="full"
+    :nav="nav"
     :expand="{ to: full, label: '全屏打开' }"
     @view="(v) => emit('view', v)"
     @back="emit('back')"

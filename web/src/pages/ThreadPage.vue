@@ -4,14 +4,17 @@
 // /projects/:pid/threads/:no; wide screens open the panel there and this page at /full.
 import { computed, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
-import { useProject, useThreadByNo } from "@/api/queries";
+import { useMe, useProject, useThreadByNo, useThreads, useWaiting } from "@/api/queries";
 import ThreadDetail from "@/components/app/thread/ThreadDetail.vue";
-import { detailViewOf } from "@/components/app/thread/detail";
+import { detailViewOf, threadNav } from "@/components/app/thread/detail";
 import type { ThreadViewId } from "@/components/app/threadMenu";
 import EmptyState from "@/components/common/EmptyState.vue";
 import Loading from "@/components/common/Loading.vue";
 import { useMedia } from "@/lib/media";
-import { threadPath } from "./main/logic";
+import { useReminderAlerts } from "@/lib/reminders";
+import { listOrder, loadFolded } from "@/lib/threadList";
+import { listFilterOf, listView } from "@/lib/threadListView";
+import { threadPath, waitingIndex } from "./main/logic";
 
 const route = useRoute();
 const router = useRouter();
@@ -23,6 +26,16 @@ const wide = useMedia("(min-width: 1024px)");
 const view = ref<ThreadViewId | null>(detailViewOf(route.params.tab));
 watch(() => route.params.tab, (tab) => (view.value = detailViewOf(tab)));
 const home = () => void router.push(`/projects/${pid.value}`);
+const threads = useThreads(pid);
+const waiting = useWaiting(pid);
+const me = useMe();
+const full = computed(() => route.path.endsWith("/full"));
+/** 上一个 / 下一个讨论串 in the panel list's order, staying on this page (full or not). */
+const nav = computed(() => {
+  const order = listOrder(threads.data.value ?? [], no.value, listFilterOf(listView(pid.value)), waitingIndex(waiting.data.value?.questions), loadFolded(me.data.value?.id ?? "anon"));
+  return threadNav(order, no.value, (n) => `${threadPath(pid.value, n)}${full.value ? "/full" : ""}`);
+});
+useReminderAlerts(() => threads.data.value ?? [], (n) => void router.push(threadPath(pid.value, n)));
 const expand = computed(() => (wide.value && thread.value ? { to: threadPath(pid.value, thread.value.no), label: "退出全屏", collapse: true } : undefined));
 </script>
 
@@ -36,6 +49,6 @@ const expand = computed(() => (wide.value && thread.value ? { to: threadPath(pid
     </template>
   </EmptyState>
   <div v-else class="flex h-full min-h-0 flex-col bg-panel">
-    <ThreadDetail :key="thread.id" :pid="pid" :thread="thread" :view="view" :expand="expand" layout="page" @view="(v) => (view = v)" @back="home" @close="home" />
+    <ThreadDetail :key="thread.id" :pid="pid" :thread="thread" :view="view" :expand="expand" :nav="nav" layout="page" @view="(v) => (view = v)" @back="home" @close="home" />
   </div>
 </template>

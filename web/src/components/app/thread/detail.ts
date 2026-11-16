@@ -2,6 +2,7 @@
 import type { ThreadView } from "@/api/views";
 import { isWaking, isWorking, threadActive } from "@/lib/live";
 import { leadOf } from "@/lib/present";
+import { neighbours } from "@/lib/threadList";
 import { THREAD_VIEWS, type ThreadViewId } from "../threadMenu";
 
 /** The view a URL segment names (/threads/:no/:tab), or none (just the chat). */
@@ -37,4 +38,16 @@ export interface ExpandLink {
   to: string;
   label: string;
   collapse?: boolean;
+}
+
+/** Where 上一个 / 下一个讨论串 go (null at either end of the list). */
+export interface ThreadNav {
+  prev: string | null;
+  next: string | null;
+}
+
+/** The neighbours of `no` in `order`, as routes made by `path`. */
+export function threadNav(order: number[], no: number, path: (no: number) => string): ThreadNav {
+  const n = neighbours(order, no);
+  return { prev: n.prev === null ? null : path(n.prev), next: n.next === null ? null : path(n.next) };
 }

@@ -346,3 +346,16 @@ html.dark .el-message--warning { --el-message-bg-color: hsl(64 100% 6%); --el-me
 .at-dialog-flush { padding: 0; }
 .at-dialog-flush .el-dialog__header { padding: 0; }
 .at-dialog-flush .el-dialog__body { display: flex; flex: 1; min-height: 0; padding: 0; }
+
+/* Menu extras: a grey shortcut or time at the right end of an item, and a submenu row. */
+.at-kbd {
+  margin-left: auto;
+  padding-left: 16px;
+  font-family: inherit;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+}
+.at-submenu { list-style: none; }
+.at-submenu > .el-dropdown { display: block; width: 100%; }
+.at-submenu .el-dropdown-menu__item { cursor: pointer; outline: none; }

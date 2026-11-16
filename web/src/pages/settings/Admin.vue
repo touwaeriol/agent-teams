@@ -1,10 +1,11 @@
 <script setup lang="ts">
-// 管理: platform switches, the user table, built-in plugins and skills, the GitHub App, audit log.
+// 管理: platform switches, the user table, user feedback, built-in plugins and skills, the GitHub App, audit log.
 import { RouterLink } from "vue-router";
 import Card from "@/components/app/Card.vue";
 import BuiltinLibrary from "@/components/app/library/BuiltinLibrary.vue";
 import NavButton from "@/components/shell/NavButton.vue";
 import AuditLog from "./admin/AuditLog.vue";
+import FeedbackList from "./admin/FeedbackList.vue";
 import PlatformSettings from "./admin/PlatformSettings.vue";
 import UsersTable from "./admin/UsersTable.vue";
 </script>
@@ -18,6 +19,7 @@ import UsersTable from "./admin/UsersTable.vue";
       </div>
       <PlatformSettings />
       <UsersTable />
+      <FeedbackList />
       <BuiltinLibrary />
       <Card class="flex-row flex-wrap items-center justify-between gap-3">
         <span class="flex flex-col gap-0.5">

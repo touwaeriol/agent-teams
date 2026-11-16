@@ -52,6 +52,7 @@ export const keys = {
   adminUsers: ["admin", "users"] as const,
   adminSettings: ["admin", "settings"] as const,
   audit: ["admin", "audit"] as const,
+  feedback: ["admin", "feedback"] as const,
   sessions: ["me", "sessions"] as const,
 };
 
@@ -257,5 +258,7 @@ export const useAdminSettings = () => useQuery({ queryKey: keys.adminSettings, q
 
 export const useAudit = () =>
   useQuery({ queryKey: keys.audit, queryFn: () => unwrap(client.GET("/api/admin/audit", { params: { query: { limit: 50 } } })) });
+
+export const useFeedback = () => useQuery({ queryKey: keys.feedback, queryFn: () => list(client.GET("/api/admin/feedback")) });
 
 export const useSessions = () => useQuery({ queryKey: keys.sessions, queryFn: () => list(client.GET("/api/me/sessions")) });

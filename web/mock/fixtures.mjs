@@ -81,6 +81,7 @@ export const threads = [
     counts: counts({ tasks_total: 4, tasks_done: 2, main_total: 2, main_done: 1 }),
   }),
   thread(13, "Codex 员工接入", "running", {
+    pinned_at: ago(30),
     branch: "thread/13-codex", updated_at: ago(8), started_at: ago(66), members: members13,
     summary: "组长问：节点上还没装 codex，先用 CODEX_API_KEY 还是你去登录？",
     main_tasks: [step("m131", 1, "CodexWorker 与事件解析", "done", 2, 2), step("m132", 2, "节点安装与登录", "doing", 1, 3), step("m133", 3, "联调", "todo", 0, 1)],
@@ -108,6 +109,7 @@ export const threads = [
     counts: counts({ tasks_total: 6, tasks_done: 6, main_total: 3, main_done: 3 }), lead_last: { text: "全部完成，PR 已开。", at: ago(20) },
   }),
   thread(10, "新建项目的仓库和分支下拉框", "done", {
+    remind_at: ago(-60 * 18),
     branch: "thread/10-repo-combobox", updated_at: ago(60), pr_number: 39, pr_state: "merged",
     members: [emp("e10l", "lead-10", "lead", "lead", "组长", "claude", RC, look("#C8622A", "suit", "none"), st("idle", "")), emp("e10d", "dev-2", "member", "dev", "开发", "claude", CVP, look("#4C7BD0", "tee", "none"), st("idle", "已完成"))],
     summary: "仓库、基准分支改为可搜索下拉，已合并到 main。",

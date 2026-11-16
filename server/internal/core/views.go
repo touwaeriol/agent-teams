@@ -99,6 +99,9 @@ type ThreadView struct {
 	UpdatedAt     time.Time        `json:"updated_at"`
 	StartedAt     *time.Time       `json:"started_at" doc:"When the thread first ran (null while queued)"`
 	FinishedAt    *time.Time       `json:"finished_at" doc:"When it reached done, failed or archived"`
+	PinnedAt      *time.Time       `json:"pinned_at" doc:"When the user pinned it (null: not pinned); pinned threads sort first"`
+	RemindAt      *time.Time       `json:"remind_at" doc:"When the reminder the user set will fire (null: none pending)"`
+	RemindedAt    *time.Time       `json:"reminded_at" doc:"When a reminder fired; the thread waits on the user until it is cleared"`
 	// LastActivityAt is the latest of a state change, a message in the thread and a deliverable it published.
 	LastActivityAt    time.Time        `json:"last_activity_at" doc:"Latest state change, message or deliverable of the thread"`
 	LatestDeliverable *DeliverableView `json:"latest_deliverable" doc:"The newest deliverable the thread published (null: none)"`

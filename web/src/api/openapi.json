@@ -1298,6 +1298,99 @@
         ],
         "type": "object"
       },
+      "FeedbackInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "include_content": {
+            "description": "Attach the thread's conversation (latest 100 messages)",
+            "type": "boolean"
+          },
+          "text": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "FeedbackPatchInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "handled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "handled"
+        ],
+        "type": "object"
+      },
+      "FeedbackView": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "description": "The thread's conversation when the user included it",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "handled_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "handled_by": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "thread_id": {
+            "type": "string"
+          },
+          "thread_no": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "thread_title": {
+            "type": "string"
+          },
+          "user_email": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "user_email",
+          "project_id",
+          "thread_id",
+          "thread_no",
+          "thread_title",
+          "text",
+          "content",
+          "handled_at",
+          "handled_by",
+          "created_at"
+        ],
+        "type": "object"
+      },
       "FieldError": {
         "additionalProperties": false,
         "properties": {
@@ -2547,6 +2640,10 @@
             "description": "Allow everything in this thread (needs sandbox isolation)",
             "type": "boolean"
           },
+          "pinned": {
+            "description": "Pin the thread to the top of its group, or unpin it",
+            "type": "boolean"
+          },
           "status": {
             "enum": [
               "paused",
@@ -3195,6 +3292,20 @@
         },
         "required": [
           "reason"
+        ],
+        "type": "object"
+      },
+      "ReminderInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "description": "When to remind (in the future, within a year)",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at"
         ],
         "type": "object"
       },
@@ -4237,6 +4348,14 @@
           "pause_reason": {
             "type": "string"
           },
+          "pinned_at": {
+            "description": "When the user pinned it (null: not pinned); pinned threads sort first",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "pr_number": {
             "format": "int64",
             "type": [
@@ -4269,6 +4388,22 @@
             "format": "int64",
             "type": [
               "integer",
+              "null"
+            ]
+          },
+          "remind_at": {
+            "description": "When the reminder the user set will fire (null: none pending)",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reminded_at": {
+            "description": "When a reminder fired; the thread waits on the user until it is cleared",
+            "format": "date-time",
+            "type": [
+              "string",
               "null"
             ]
           },
@@ -4341,6 +4476,9 @@
           "updated_at",
           "started_at",
           "finished_at",
+          "pinned_at",
+          "remind_at",
+          "reminded_at",
           "last_activity_at",
           "latest_deliverable"
         ],
@@ -4495,6 +4633,14 @@
           "pause_reason": {
             "type": "string"
           },
+          "pinned_at": {
+            "description": "When the user pinned it (null: not pinned); pinned threads sort first",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "pr_number": {
             "format": "int64",
             "type": [
@@ -4518,6 +4664,22 @@
             "format": "int64",
             "type": [
               "integer",
+              "null"
+            ]
+          },
+          "remind_at": {
+            "description": "When the reminder the user set will fire (null: none pending)",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reminded_at": {
+            "description": "When a reminder fired; the thread waits on the user until it is cleared",
+            "format": "date-time",
+            "type": [
+              "string",
               "null"
             ]
           },
@@ -4590,6 +4752,9 @@
           "updated_at",
           "started_at",
           "finished_at",
+          "pinned_at",
+          "remind_at",
+          "reminded_at",
           "last_activity_at",
           "latest_deliverable"
         ],
@@ -5011,6 +5176,111 @@
             "description": "Error"
           }
         },
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/feedback": {
+      "get": {
+        "operationId": "admin-list-feedback",
+        "parameters": [
+          {
+            "description": "open (default: all)",
+            "explode": false,
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "description": "open (default: all)",
+              "enum": [
+                "open",
+                "handled",
+                ""
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FeedbackView"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/feedback/{id}": {
+      "patch": {
+        "operationId": "admin-update-feedback",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackPatchInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Mark feedback handled (or open again)",
         "tags": [
           "admin"
         ]
@@ -9793,6 +10063,58 @@
         ]
       }
     },
+    "/api/threads/{tid}/feedback": {
+      "post": {
+        "operationId": "send-thread-feedback",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Send feedback about a thread to the administrators",
+        "tags": [
+          "threads"
+        ]
+      }
+    },
     "/api/threads/{tid}/mail": {
       "get": {
         "operationId": "list-mail",
@@ -10260,6 +10582,98 @@
             "description": "Error"
           }
         },
+        "tags": [
+          "threads"
+        ]
+      }
+    },
+    "/api/threads/{tid}/reminder": {
+      "delete": {
+        "operationId": "clear-thread-reminder",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Cancel a pending reminder or clear one that fired",
+        "tags": [
+          "threads"
+        ]
+      },
+      "put": {
+        "operationId": "set-thread-reminder",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReminderInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Remind me about a thread: at that time it moves under 等你处理 (fires once); replaces any reminder",
         "tags": [
           "threads"
         ]

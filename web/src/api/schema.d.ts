@@ -20,6 +20,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["admin-list-feedback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/feedback/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Mark feedback handled (or open again) */
+        patch: operations["admin-update-feedback"];
+        trace?: never;
+    };
     "/api/admin/github-app": {
         parameters: {
             query?: never;
@@ -1323,6 +1356,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/threads/{tid}/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send feedback about a thread to the administrators */
+        post: operations["send-thread-feedback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/threads/{tid}/mail": {
         parameters: {
             query?: never;
@@ -1462,6 +1512,24 @@ export interface paths {
         put?: never;
         post: operations["reject-thread"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{tid}/reminder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Remind me about a thread: at that time it moves under 等你处理 (fires once); replaces any reminder */
+        put: operations["set-thread-reminder"];
+        post?: never;
+        /** Cancel a pending reminder or clear one that fired */
+        delete: operations["clear-thread-reminder"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2013,6 +2081,32 @@ export interface components {
             /** @description Shown once */
             token: string;
         };
+        FeedbackInputBody: {
+            /** @description Attach the thread's conversation (latest 100 messages) */
+            include_content?: boolean;
+            text: string;
+        };
+        FeedbackPatchInputBody: {
+            handled: boolean;
+        };
+        FeedbackView: {
+            /** @description The thread's conversation when the user included it */
+            content: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            handled_at: string | null;
+            handled_by: string;
+            id: string;
+            project_id: string;
+            text: string;
+            thread_id: string;
+            /** Format: int64 */
+            thread_no: number;
+            thread_title: string;
+            user_email: string;
+            user_id: string;
+        };
         FieldError: {
             message: string;
             path: string;
@@ -2344,6 +2438,8 @@ export interface components {
         PatchThreadInputBody: {
             /** @description Allow everything in this thread (needs sandbox isolation) */
             auto_approve?: boolean;
+            /** @description Pin the thread to the top of its group, or unpin it */
+            pinned?: boolean;
             /** @enum {string} */
             status?: "paused" | "running" | "archived";
             title?: string;
@@ -2519,6 +2615,13 @@ export interface components {
         };
         RejectInputBody: {
             reason: string;
+        };
+        ReminderInputBody: {
+            /**
+             * Format: date-time
+             * @description When to remind (in the future, within a year)
+             */
+            at: string;
         };
         Replay: {
             events: components["schemas"]["ReplayEvent"][] | null;
@@ -2780,6 +2883,11 @@ export interface components {
             no: number;
             opened_by: string;
             pause_reason: string;
+            /**
+             * Format: date-time
+             * @description When the user pinned it (null: not pinned); pinned threads sort first
+             */
+            pinned_at: string | null;
             /** Format: int64 */
             pr_number: number | null;
             pr_state: string;
@@ -2788,6 +2896,16 @@ export interface components {
             questions?: components["schemas"]["QuestionView"][] | null;
             /** Format: int64 */
             queue_position: number | null;
+            /**
+             * Format: date-time
+             * @description When the reminder the user set will fire (null: none pending)
+             */
+            remind_at: string | null;
+            /**
+             * Format: date-time
+             * @description When a reminder fired; the thread waits on the user until it is cleared
+             */
+            reminded_at: string | null;
             /** @description Repositories the thread set a base for, branched or opened a PR in */
             repos: components["schemas"]["ThreadRepoView"][] | null;
             /**
@@ -2850,6 +2968,11 @@ export interface components {
             no: number;
             opened_by: string;
             pause_reason: string;
+            /**
+             * Format: date-time
+             * @description When the user pinned it (null: not pinned); pinned threads sort first
+             */
+            pinned_at: string | null;
             /** Format: int64 */
             pr_number: number | null;
             pr_state: string;
@@ -2857,6 +2980,16 @@ export interface components {
             project_id: string;
             /** Format: int64 */
             queue_position: number | null;
+            /**
+             * Format: date-time
+             * @description When the reminder the user set will fire (null: none pending)
+             */
+            remind_at: string | null;
+            /**
+             * Format: date-time
+             * @description When a reminder fired; the thread waits on the user until it is cleared
+             */
+            reminded_at: string | null;
             /** @description Repositories the thread set a base for, branched or opened a PR in */
             repos: components["schemas"]["ThreadRepoView"][] | null;
             /**
@@ -2987,6 +3120,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "admin-list-feedback": {
+        parameters: {
+            query?: {
+                /** @description open (default: all) */
+                status?: "open" | "handled" | "";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackView"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "admin-update-feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackPatchInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackView"];
                 };
             };
             /** @description Error */
@@ -6391,6 +6591,41 @@ export interface operations {
             };
         };
     };
+    "send-thread-feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     "list-mail": {
         parameters: {
             query?: {
@@ -6669,6 +6904,72 @@ export interface operations {
                 "application/json": components["schemas"]["RejectInputBody"];
             };
         };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThreadView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "set-thread-reminder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReminderInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThreadView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "clear-thread-reminder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description OK */
             200: {

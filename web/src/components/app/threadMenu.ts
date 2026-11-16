@@ -23,14 +23,18 @@ export function completeNotice(no: number) {
   };
 }
 
-/** What the menu offers for a thread in this status. */
-export function menuItems(t: Pick<ThreadView, "status">): {
+/** What the menu offers for a thread in this status. 解决 is `complete` (标记为完成). */
+export function menuItems(t: Pick<ThreadView, "status"> & Partial<Pick<ThreadView, "pinned_at" | "remind_at" | "reminded_at">>): {
   complete: boolean;
   reopen: boolean;
   pause: boolean;
   resume: boolean;
   archive: boolean;
   unarchive: boolean;
+  pin: boolean;
+  unpin: boolean;
+  remind: boolean;
+  clearReminder: boolean;
 } {
   return {
     complete: ["running", "waiting", "queued", "paused"].includes(t.status),
@@ -39,6 +43,16 @@ export function menuItems(t: Pick<ThreadView, "status">): {
     resume: t.status === "paused",
     archive: t.status !== "archived",
     unarchive: t.status === "archived",
+    pin: !t.pinned_at,
+    unpin: Boolean(t.pinned_at),
+    remind: t.status !== "archived",
+    clearReminder: Boolean(t.remind_at || t.reminded_at),
   };
 }
 
+/** The thread's link to share (the panel route; narrow screens get the thread page there). */
+export const threadLink = (t: Pick<ThreadView, "project_id" | "no">, origin: string = window.location.origin) =>
+  `${origin}/projects/${t.project_id}/threads/${t.no}`;
+
+/** The full-page route of a thread (在新窗口中打开 / 全屏打开). */
+export const threadFullPath = (t: Pick<ThreadView, "project_id" | "no">) => `/projects/${t.project_id}/threads/${t.no}/full`;

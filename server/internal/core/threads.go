@@ -34,13 +34,14 @@ func LockThread(ctx context.Context, tx *Tx, id string) (Thread, error) {
 	return take[Thread](threads(ctx, tx).Clauses(ForUpdate).Where("id = ?", id))
 }
 
-// Threads lists a project's threads; statuses filters ("" = all).
+// Threads lists a project's threads, pinned ones first (newest pin first), then newest
+// first; statuses filters ("" = all).
 func Threads(ctx context.Context, q DB, projectID string, statuses []string) ([]Thread, error) {
 	g := threads(ctx, q).Where("project_id = ?", projectID)
 	if len(statuses) > 0 {
 		g = g.Where("status IN ?", statuses)
 	}
-	return find[Thread](g.Order("no DESC"))
+	return find[Thread](g.Order("pinned_at DESC NULLS LAST, no DESC"))
 }
 
 // QueuedThreads lists a user's queued threads in creation order.
@@ -165,7 +166,8 @@ func (s *Store) ThreadViewOf(ctx context.Context, q DB, t Thread) (ThreadView, e
 	v := ThreadView{ID: t.ID, ProjectID: t.ProjectID, No: t.No, Title: t.Title, Brief: t.Brief, Status: t.Status,
 		PauseReason: t.PauseReason, Branch: t.Branch, BaseBranch: t.BaseBranch, PRNumber: t.PRNumber, PRURL: t.PRURL,
 		PRState: t.PRState, Summary: t.Summary, AutoApprove: t.AutoApprove, OpenedBy: t.OpenedBy,
-		CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt, StartedAt: t.StartedAt, FinishedAt: t.FinishedAt}
+		CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt, StartedAt: t.StartedAt, FinishedAt: t.FinishedAt,
+		PinnedAt: t.PinnedAt, RemindAt: t.RemindAt, RemindedAt: t.RemindedAt}
 	var err error
 	if v.Members, err = s.EmployeeBriefs(ctx, q, t.ProjectID, &t.ID); err != nil {
 		return v, err
@@ -287,4 +289,40 @@ func RefreshWaiting(ctx context.Context, tx *Tx, threadID string) (string, error
 		return "running", nil
 	}
 	return "", nil
+}
+
+// SetThreadPinned pins (pinned_at = now) or unpins a thread.
+func SetThreadPinned(ctx context.Context, tx *Tx, threadID string, pinned bool) error {
+	var at any
+	if pinned {
+		at = gorm.Expr("now()")
+	}
+	return tx.Gorm(ctx).Table("at_threads").Where("id = ?", threadID).Update("pinned_at", at).Error
+}
+
+// SetThreadReminder sets when the thread's reminder fires (nil cancels it); either way a fired
+// reminder is cleared.
+func SetThreadReminder(ctx context.Context, tx *Tx, threadID string, at *time.Time) error {
+	return tx.Gorm(ctx).Table("at_threads").Where("id = ?", threadID).
+		Updates(map[string]any{"remind_at": at, "reminded_at": nil}).Error
+}
+
+// FireDueReminders moves every reminder due at now to reminded_at in one statement, so each
+// fires exactly once however many runners race, and returns the threads it fired.
+func FireDueReminders(ctx context.Context, tx *Tx, now time.Time) ([]string, error) {
+	var ids []string
+	rows, err := tx.Gorm(ctx).Raw(`UPDATE at_threads SET reminded_at = remind_at, remind_at = NULL
+		WHERE remind_at IS NOT NULL AND remind_at <= ? RETURNING id`, now).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

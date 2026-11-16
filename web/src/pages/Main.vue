@@ -22,6 +22,7 @@ import PanelList from "./main/PanelList.vue";
 import ThreadChips from "./main/ThreadChips.vue";
 import { PANEL_DEFAULT, PANEL_MAX, clampWidth } from "@/lib/panelWidth";
 import { sidePanelOf, threadPath, type SidePanel as Panel } from "./main/logic";
+import { useReminderAlerts } from "@/lib/reminders";
 
 const props = withDefaults(defineProps<{ openNo?: number | null; view?: ThreadViewId | null }>(), { openNo: null, view: null });
 const route = useRoute();
@@ -41,6 +42,7 @@ const setPanel = (p: Panel) => void router.replace({ query: p === "threads" ? {}
 /** The panel is at its widest for this window (the list's expand button then shrinks it back). */
 const isWide = (w: number) => w >= clampWidth(PANEL_MAX, window.innerWidth) && w > PANEL_DEFAULT;
 const openThread = (no: number) => void router.push(threadPath(pid.value, no));
+useReminderAlerts(() => list.value, openThread);
 const setView = (v: ThreadViewId | null) => props.openNo && void router.replace(threadPath(pid.value, props.openNo, v));
 
 // Old links (?thread=N) open the thread route.
@@ -72,6 +74,7 @@ watchEffect(() => {
         :view="props.view"
         :threads="list"
         :loading="threads.isLoading.value"
+        :user-id="me.data.value?.id ?? 'anon'"
         @view="setView"
         @back="router.push(`/projects/${pid}`)"
         @close="router.push(`/projects/${pid}?panel=none`)"

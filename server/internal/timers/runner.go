@@ -45,10 +45,13 @@ func (r *Runner) loop(ctx context.Context) {
 	}
 }
 
-// Tick does one round: usage-limit resumes first, then due schedules.
+// Tick does one round: usage-limit resumes first, then thread reminders, then due schedules.
 func (r *Runner) Tick(ctx context.Context) {
 	if err := r.resumeWaits(ctx); err != nil && ctx.Err() == nil {
 		r.log.Warn("resume after usage limit", "err", err)
+	}
+	if err := r.FireReminders(ctx); err != nil && ctx.Err() == nil {
+		r.log.Warn("thread reminders", "err", err)
 	}
 	for ctx.Err() == nil {
 		fired, err := r.FireOne(ctx)
@@ -80,6 +83,24 @@ func (r *Runner) resumeWaits(ctx context.Context) error {
 		}
 		for _, w := range due {
 			if err := resumeDue(ctx, tx, r.orch, w); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// FireReminders fires every thread reminder that is due: remind_at moves to reminded_at in one
+// statement (so a reminder fires once), and each thread's new view goes out to the browsers,
+// which list it under 等你处理 and notify the user.
+func (r *Runner) FireReminders(ctx context.Context) error {
+	return r.core.InTx(ctx, func(tx *core.Tx) error {
+		ids, err := core.FireDueReminders(ctx, tx, r.Now())
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if err := tx.EmitThread(ctx, id); err != nil {
 				return err
 			}
 		}

@@ -195,7 +195,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 140 {
+	if migrations.Latest() != 160 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -560,3 +560,41 @@ INSERT INTO at_project_memory (id, project_id, text, source, pinned, created_at)
   ('m4', 'p1', '第二个总结', 'thread:2', false, now() - interval '2 minutes'),
   ('m5', 'p2', '只有一条', 'coordinator', false, now());
 `
+
+// TestThreadMenuMigration: 00160 adds pinned_at / remind_at / reminded_at to existing threads
+// (null) and the at_feedback table; Down removes them again.
+func TestThreadMenuMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 140); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
+INSERT INTO at_conversations (id, user_id, title, project_id, kind) VALUES ('th1', 'u1', 't', 'p1', 'thread');
+INSERT INTO at_threads (id, project_id, user_id, no, title, branch, base_branch) VALUES ('th1', 'p1', 'u1', 1, 'x', 'thread/1-x', 'main');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := migrations.Up(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	var unset int
+	if err := db.QueryRow(`SELECT count(*) FROM at_threads WHERE pinned_at IS NULL AND remind_at IS NULL AND reminded_at IS NULL`).Scan(&unset); err != nil || unset != 1 {
+		t.Fatalf("thread columns: %d %v", unset, err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_feedback (id, user_id, text) VALUES ('f1', 'u1', '好用')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.DownTo(ctx, 140); err != nil {
+		t.Fatal(err)
+	}
+	assertNoTable(t, db, "at_feedback")
+	if _, err := db.Exec(`SELECT pinned_at FROM at_threads`); err == nil {
+		t.Fatal("pinned_at survived down")
+	}
+}

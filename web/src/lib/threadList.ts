@@ -17,12 +17,14 @@ export const LIST_GROUPS: { id: ListGroupId; label: string }[] = [
 ];
 
 /**
- * Where a thread goes: 等你处理 (an open card or acceptance waits on the user), 进行中
+ * Where a thread goes: 等你处理 (an open card or acceptance waits on the user, or a reminder
+ * the user set has fired; archived threads stay archived), 进行中
  * (someone is working, or it waits for a node), 空闲 (running or paused, nobody working and
  * nothing waiting), 已完成 (done or failed), 已归档.
  */
 export function listGroupOf(t: ThreadView, waiting?: Map<number, QuestionView>): ListGroupId {
   if (t.status === "archived") return "archived";
+  if (t.reminded_at) return "waiting";
   if (t.status === "done" || t.status === "failed") return "done";
   if (t.status === "review" || t.status === "waiting" || t.counts.waiting > 0 || waiting?.has(t.no)) return "waiting";
   if (t.status === "queued") return "active";
@@ -47,7 +49,10 @@ export function lastActivity(t: ThreadView): string {
   return lead && Date.parse(lead) > Date.parse(t.updated_at) ? lead : t.updated_at;
 }
 
-const byActivity = (a: ThreadView, b: ThreadView) => Date.parse(lastActivity(b)) - Date.parse(lastActivity(a)) || b.no - a.no;
+const pinTime = (t: ThreadView) => (t.pinned_at ? Date.parse(t.pinned_at) : 0);
+/** Pinned first (newest pin first), then newest activity first. */
+const byPinThenActivity = (a: ThreadView, b: ThreadView) =>
+  pinTime(b) - pinTime(a) || Date.parse(lastActivity(b)) - Date.parse(lastActivity(a)) || b.no - a.no;
 
 export interface ListGroup {
   id: ListGroupId;
@@ -55,14 +60,14 @@ export interface ListGroup {
   items: ThreadView[];
 }
 
-/** Every thread in exactly one group, newest activity first; empty groups are left out. */
+/** Every thread in exactly one group, pinned ones first, then newest activity first; empty groups are left out. */
 export function groupThreads(threads: ThreadView[], waiting?: Map<number, QuestionView>): ListGroup[] {
   const by = new Map<ListGroupId, ThreadView[]>();
   for (const t of threads) {
     const g = listGroupOf(t, waiting);
     by.set(g, [...(by.get(g) ?? []), t]);
   }
-  return LIST_GROUPS.filter((g) => by.has(g.id)).map((g) => ({ ...g, items: by.get(g.id)!.sort(byActivity) }));
+  return LIST_GROUPS.filter((g) => by.has(g.id)).map((g) => ({ ...g, items: by.get(g.id)!.sort(byPinThenActivity) }));
 }
 
 const firstLine = (s: string) => s.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
@@ -135,4 +140,59 @@ export function loadFolded(userId: string): Folded {
 export function saveFolded(userId: string, folded: Folded): void {
   const diff = Object.fromEntries(Object.entries(folded).filter(([k, v]) => v !== Boolean(DEFAULT_FOLDED[k])));
   writeLocal(foldedKey(userId), Object.keys(diff).length ? JSON.stringify(diff) : null);
+}
+
+/**
+ * The thread numbers in the order the panel list shows them: groups in order, filters applied,
+ * folded groups skipped. A thread the list hides (folded or filtered out) still gets neighbours:
+ * the order is then taken without folds, and failing that without filters.
+ */
+export function listOrder(threads: ThreadView[], no: number, f: ListFilter, waiting?: Map<number, QuestionView>, folded: Folded = {}): number[] {
+  const order = (list: ThreadView[], skip: Folded) =>
+    groupThreads(list, waiting).flatMap((g) => (skip[g.id] && !f.q.trim() ? [] : g.items.map((t) => t.no)));
+  const shown = filterThreads(threads, f, waiting);
+  for (const candidate of [order(shown, folded), order(shown, {}), order(threads, {})]) if (candidate.includes(no)) return candidate;
+  return [];
+}
+
+/** The threads before and after `no` in `order` (null at either end: no wrapping). */
+export function neighbours(order: number[], no: number): { prev: number | null; next: number | null } {
+  const i = order.indexOf(no);
+  if (i < 0) return { prev: null, next: null };
+  return { prev: i > 0 ? order[i - 1] : null, next: i < order.length - 1 ? order[i + 1] : null };
+}
+
+const pad = (n: number) => String(n).padStart(2, "0");
+const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
+/** "今天 18:00" / "明天 09:00" / "周一 09:00" (within a week) / "11月20日 09:00", local time. */
+export function reminderLabel(iso: string, now: number = Date.now()): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  const days = Math.round((dayStart(at) - dayStart(new Date(now))) / 86_400_000);
+  if (days === 0) return `今天 ${time}`;
+  if (days === 1) return `明天 ${time}`;
+  if (days > 1 && days < 7) return `${WEEKDAYS[at.getDay()]} ${time}`;
+  return `${at.getMonth() + 1}月${at.getDate()}日 ${time}`;
+}
+
+export type ReminderPreset = "hour" | "later" | "tomorrow" | "monday";
+
+/**
+ * The 添加提醒 choices at `now` (local time): 1 小时后; 今天晚些时候 (18:00, or three hours on
+ * once it is past 15:00); 明天上午 9 点; 下周一 9 点 (the coming Monday, a week on when today is Monday).
+ */
+export function reminderPresets(now: Date = new Date()): { id: ReminderPreset; label: string; at: Date }[] {
+  const at = (days: number, hour: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + days, hour, 0, 0, 0);
+  const evening = at(0, 18);
+  const later = evening.getTime() - now.getTime() >= 3 * 3_600_000 ? evening : new Date(now.getTime() + 3 * 3_600_000);
+  const toMonday = ((8 - now.getDay()) % 7) || 7;
+  return [
+    { id: "hour", label: "1 小时后", at: new Date(now.getTime() + 3_600_000) },
+    { id: "later", label: "今天晚些时候", at: later },
+    { id: "tomorrow", label: "明天上午 9 点", at: at(1, 9) },
+    { id: "monday", label: "下周一 9 点", at: at(toMonday, 9) },
+  ];
 }

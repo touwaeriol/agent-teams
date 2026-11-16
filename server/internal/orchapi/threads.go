@@ -58,6 +58,7 @@ type patchThreadInput struct {
 		Title       *string `json:"title,omitempty" minLength:"1" maxLength:"200"`
 		Status      *string `json:"status,omitempty" enum:"paused,running,archived"`
 		AutoApprove *bool   `json:"auto_approve,omitempty" doc:"Allow everything in this thread (needs sandbox isolation)"`
+		Pinned      *bool   `json:"pinned,omitempty" doc:"Pin the thread to the top of its group, or unpin it"`
 	}
 }
 
@@ -189,6 +190,7 @@ func (a *API) registerThreads(api huma.API) {
 	huma.Register(api, op("accept-thread", "POST", "/api/threads/{tid}/accept", t), a.accept)
 	huma.Register(api, op("reject-thread", "POST", "/api/threads/{tid}/reject", t), a.reject)
 	huma.Register(api, op("thread-usage", "GET", "/api/threads/{tid}/usage", t), a.usage)
+	a.registerThreadMenu(api)
 }
 
 func (a *API) createThread(ctx context.Context, in *newThreadInput) (*threadOutput, error) {
@@ -289,6 +291,14 @@ func (a *API) updateThread(ctx context.Context, in *patchThreadInput) (*threadOu
 func (a *API) patchThread(ctx context.Context, tx *core.Tx, userID string, t core.Thread, in *patchThreadInput) error {
 	if in.Body.Title != nil {
 		if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"title": strings.TrimSpace(*in.Body.Title)}); err != nil {
+			return err
+		}
+		if err := tx.EmitThread(ctx, t.ID); err != nil {
+			return err
+		}
+	}
+	if in.Body.Pinned != nil && *in.Body.Pinned != (t.PinnedAt != nil) {
+		if err := core.SetThreadPinned(ctx, tx, t.ID, *in.Body.Pinned); err != nil {
 			return err
 		}
 		if err := tx.EmitThread(ctx, t.ID); err != nil {

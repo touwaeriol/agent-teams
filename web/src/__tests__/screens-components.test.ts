@@ -14,6 +14,7 @@ import { useText } from "@/pages/design/viewer";
 import PanelList from "@/pages/main/PanelList.vue";
 import { foldedKey } from "@/lib/threadList";
 import { thread } from "./fixtures";
+import { resetListViews } from "@/lib/threadListView";
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 
@@ -33,7 +34,10 @@ function plugins() {
 
 const mountWith = (c: Component, props: Record<string, unknown> = {}) => mount(c, { props, global: { plugins: plugins() }, attachTo: document.body });
 
-beforeEach(() => window.localStorage.clear());
+beforeEach(() => {
+  window.localStorage.clear();
+  resetListViews();
+});
 afterEach(() => {
   vi.restoreAllMocks();
   document.body.innerHTML = "";
