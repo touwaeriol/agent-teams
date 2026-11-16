@@ -140,6 +140,8 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | GET | `/api/conversations/{cid}/commands` | → `{employee, tier, runtime, from: session\|role, commands: [{name, description, argument_hint, source: skill\|plugin}]}`：输入框 “/” 弹出列表里的技能部分。优先用员工最近一次会话 `session.opened.init.commands` 报上来的（岗位技能去掉 `agent-teams-skills:` 前缀），还没有会话时按岗位配置的技能和插件列；统筹没有技能，Codex 员工为空。平台命令（/model、/effort、/status、/context、/skills、/usage、/memory、/config）由前端自己执行，不经过员工 |
 | GET | `/api/conversations/{cid}/context` | → `{employee, runtime, instructions_chars, memory_index_chars, memory_files, messages, message_chars, session: {state, model, turns, total, last_turn, cost_usd} \| null}`：/context 面板。token 数来自 `at_usage`（每个回合的 SDK result usage），只算最近一个会话 |
 | GET | `/api/projects/{pid}/references?q=&kind=` | → `{items: [{kind, label, detail, repo?, path?, no?, id?, name?}], files_note}`：输入框 “@” 弹出列表。文件来自各仓库默认分支的 git trees API（每仓库缓存 5 分钟，最多 20000 个路径），模糊匹配取前 30 个；讨论串、交付物、记忆文件各取前 8 个。读不到仓库时 `files_note` 说明原因，其余照常返回 |
+| GET | `/api/voice/config` | 任何登录用户 → `{enabled, provider?, languages: [{code, name, zh}]}`。管理员没开语音输入、没存 Key 或控制台解不开 Key 时 `enabled: false`，输入框不显示麦克风。不含 Key 和接口地址 |
+| POST | `/api/voice/session` | `{language?: ISO-639-1 \| "auto"}` → `{provider, transport: "webrtc", connect_url, client_secret, expires_at, model, language, client_commits}`：控制台用平台的 OpenAI Key 调 `POST /v1/realtime/client_secrets` 签一个 120 秒的转写会话临时密钥（`ek_…`），浏览器拿它直接和 OpenAI 建 WebRTC（声音不经过平台）。每人每分钟 20 次（429 + `Retry-After`）；语言不在列表里 → 422；没开 → 404 `voice_disabled`；OpenAI 拒绝 Key → 502 `voice_key_rejected`。审计 `voice_session`（只记模型、语言、会话 id）。详见 `voice.md` |
 | GET | `/api/attachments/{id}` | 附件本身（文本文件为 `text/plain; charset=utf-8`）（只给项目所有者；`X-Content-Type-Options: nosniff`、`Content-Security-Policy: default-src 'none'; sandbox`）。聊天记录里的缩略图用它 |
 | POST | `/api/conversations/{cid}/interrupt` | → 202。中止该对话员工的当前回合（停止按钮） |
 | GET | `/api/projects/{pid}/threads?status=&group=waiting\|active\|done` | → `ThreadView[]`（右侧讨论串列表：等你处理 / 进行中 / 已完成，归档的折叠在底部“已归档 N”里） |
@@ -301,6 +303,8 @@ PR 类交付物的 `detail.state` 由平台轮询 / webhook 更新。设计类�
 | DELETE | `/api/admin/plugins/{id}` | 删除内置插件，并从所有（没有同名自有插件的）用户的岗位上去掉 |
 | POST | `/api/admin/skills` | 同 `POST /api/skills` → 201：管理员发布的内置技能，所有用户都能勾选；不能与随平台发布的技能重名 |
 | DELETE | `/api/admin/skills/{id}` | 删除管理员发布的内置技能，并从所有（没有同名自有技能的）用户的岗位上去掉 |
+| GET / PUT | `/api/admin/voice` | 语音输入设置 `{enabled, model, base_url, noise_reduction, delay, api_key?, clear_key?}`；返回 `{…, key_set, key_last4, usable, default_model}`，从不返回 Key。`api_key` 只写：用 SecretBox 密封存 `at_settings.voice`，留空保留原 Key；没有 Key 不能启用（422）；已存 Key 时改 `base_url` 必须同时重填 Key（422），保存的 Key 只发往保存时的地址。审计 `voice_settings_change`（不含 Key） |
+| POST | `/api/admin/voice/test` | `{api_key?, model?, base_url?}` → `{ok, model, expires_at}`：用填的或已存的 Key 签一个 10 秒的临时密钥试试（用已存 Key 时 `base_url` 必须与保存的一致）；每个管理员每分钟 10 次；审计 `voice_test` |
 | GET | `/api/admin/office/layouts` | 新；→ `[{id, source: "file"|"db", version, updated_at, valid, errors?}]` |
 | PUT | `/api/admin/office/layouts/{id}` | 新；`{doc}` → 校验（Schema + 语义检查）后存 `at_office_layouts` 并广播 `layout` 事件；422 带 `fields` |
 | DELETE | `/api/admin/office/layouts/{id}` | 新；删除数据库布局（文件布局只能改文件） |

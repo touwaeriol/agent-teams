@@ -145,6 +145,9 @@ func (s *Server) adminSaveVoice(ctx context.Context, in *voiceAdminSaveInput) (*
 	if err != nil {
 		return nil, err
 	}
+	if v.SealedKey != "" && strings.TrimSpace(b.APIKey) == "" && !b.ClearKey && !voice.SameAPI(v.BaseURL, b.BaseURL) {
+		return nil, voiceKeyMoved()
+	}
 	keyChanged, err := s.applyVoiceKey(&v, b)
 	if err != nil {
 		return nil, err
@@ -198,6 +201,9 @@ func (s *Server) adminTestVoice(ctx context.Context, in *voiceTestInput) (*voice
 	}
 	key := strings.TrimSpace(in.Body.APIKey)
 	if key == "" {
+		if !voice.SameAPI(v.BaseURL, in.Body.BaseURL) {
+			return nil, voiceKeyMoved()
+		}
 		if key, err = s.voiceKey(v); err != nil {
 			return nil, err
 		}
@@ -214,6 +220,13 @@ func (s *Server) adminTestVoice(ctx context.Context, in *voiceTestInput) (*voice
 	out := &voiceTestOutput{}
 	out.Body.OK, out.Body.Model, out.Body.ExpiresAt = true, v.Model, secret.ExpiresAt
 	return out, nil
+}
+
+// voiceKeyMoved refuses to send the saved key to a different base URL than it was saved for: a new
+// address needs the key typed again, so the stored key can't be redirected to another host.
+func voiceKeyMoved() error {
+	msg := "改了服务地址，要重新填写 API Key（已保存的 Key 只发往保存时的地址）"
+	return invalid([]FieldError{{"api_key", msg}}, msg)
 }
 
 func (s *Server) voiceKey(v voice.Settings) (string, error) {

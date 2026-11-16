@@ -17,7 +17,7 @@ const run: Record<string, () => void> = {
 </script>
 
 <template>
-  <DropdownMenu placement="bottom-start" popper-class="w-48" @command="(c: string) => run[c]?.()">
+  <DropdownMenu placement="top-start" popper-class="w-48" @command="(c: string) => run[c]?.()">
     <button
       type="button"
       aria-label="添加"

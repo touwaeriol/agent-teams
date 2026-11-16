@@ -84,12 +84,14 @@ function onKey(e: KeyboardEvent) {
 </script>
 
 <template>
-  <form v-if="variant === 'inline'" :class="cn('relative flex flex-col gap-2 rounded-xl border border-[#E2DFD8] bg-panel py-1.5 pl-3 pr-1.5', ring, props.class)" v-on="drop" @submit.prevent="send">
+  <form v-if="variant === 'inline'" :class="cn('relative flex flex-col gap-2 rounded-xl border border-[#E2DFD8] bg-panel py-1.5 pr-1.5', assist.enabled.value || attachments ? 'pl-1.5' : 'pl-3', ring, props.class)" v-on="drop" @submit.prevent="send">
     <AssistPopup v-if="assist.enabled.value" :assist="assist" />
     <CommandPanel v-if="assist.panel.value && props.assist" :assist="assist" :panel="assist.panel.value" v-bind="props.assist" class="!mx-0 !mt-1.5 mr-1.5" />
-    <AttachmentStrip v-if="attachments" :a="attachments" class="pt-1" />
-    <RefChips :assist="assist" class="pt-1" />
+    <AttachmentStrip v-if="attachments" :a="attachments" class="pl-1.5 pt-1" />
+    <RefChips :assist="assist" class="pl-1.5 pt-1" />
     <span class="flex items-center gap-2">
+      <PlusMenu v-if="assist.enabled.value" :assist="assist" :a="attachments" :size="30" />
+      <AttachButton v-else-if="attachments" :a="attachments" :size="30" />
       <label :for="inputId" class="sr-only">{{ label }}</label>
       <span class="relative flex min-w-0 flex-1">
         <input
@@ -105,8 +107,6 @@ function onKey(e: KeyboardEvent) {
         />
         <VoiceOverlay v-if="voice.parts.value" :parts="voice.parts.value" :scroll-top="0" :scroll-left="scroll.left" class="flex items-center whitespace-pre text-[13px]" />
       </span>
-      <PlusMenu v-if="assist.enabled.value" :assist="assist" :a="attachments" :size="30" />
-      <AttachButton v-else-if="attachments" :a="attachments" :size="30" />
       <VoiceButton v-if="voice.enabled.value" :v="voice" :size="30" />
       <SendButton :label="label" :busy="uploading" :disabled="empty" :size="30" />
     </span>

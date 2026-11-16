@@ -70,7 +70,7 @@ watch(() => [form.api_key, form.model, form.base_url], () => (result.value = nul
       <Field v-slot="{ id }" label="模型" :hint="`默认 ${v.default_model}（OpenAI 的实时语音转写模型）`">
         <el-input :id="id" v-model="form.model" :placeholder="v.default_model" />
       </Field>
-      <Field v-slot="{ id }" label="接口地址（可选）" hint="留空用 https://api.openai.com/v1；浏览器也会连这个地址。">
+      <Field v-slot="{ id }" label="接口地址（可选）" hint="留空用 https://api.openai.com/v1；浏览器也会连这个地址。改地址时要重新填写 API Key。">
         <el-input :id="id" v-model="form.base_url" placeholder="https://api.openai.com/v1" />
       </Field>
       <Field v-slot="{ id }" label="降噪">

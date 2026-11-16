@@ -35,8 +35,10 @@ type cachedTree struct {
 }
 
 // Tree lists the files (blobs) of a repository at ref with the git trees API, cached for a while.
+// The cache is per git connection (so per user): a listing fetched with one user's credentials is
+// never served to another user who names the same repository.
 func (g *GitHub) Tree(ctx context.Context, r Repo, ref string) (Tree, error) {
-	key := strings.ToLower(r.Slug) + "@" + ref
+	key := treeKey(r, ref)
 	trees.Lock()
 	c, ok := trees.items[key]
 	trees.Unlock()
@@ -68,6 +70,10 @@ func (g *GitHub) Tree(ctx context.Context, r Repo, ref string) (Tree, error) {
 	trees.items[key] = cachedTree{tree: t, at: time.Now()}
 	trees.Unlock()
 	return t, nil
+}
+
+func treeKey(r Repo, ref string) string {
+	return r.conn.ID + "|" + strings.ToLower(r.Slug) + "@" + ref
 }
 
 // TextFile reads a text file at ref: ok is false when it does not exist, is not UTF-8 text,

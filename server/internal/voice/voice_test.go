@@ -125,3 +125,12 @@ func TestHelpers(t *testing.T) {
 		t.Fatal("defaults")
 	}
 }
+
+func TestRedactAndSameAPI(t *testing.T) {
+	if got := redact("bad key sk-live-abcd9876 given", "sk-live-abcd9876"); got != "bad key *** given" {
+		t.Fatalf("redact = %q", got)
+	}
+	if !SameAPI("", "https://api.openai.com/v1/") || SameAPI("", "https://proxy.example/v1") {
+		t.Fatal("SameAPI")
+	}
+}

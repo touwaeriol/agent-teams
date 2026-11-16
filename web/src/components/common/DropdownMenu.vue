@@ -4,7 +4,7 @@
 // with `bare`). Emits the chosen command and open/close.
 import { ref } from "vue";
 
-withDefaults(defineProps<{ placement?: "bottom-end" | "bottom-start"; popperClass?: string; bare?: boolean }>(), {
+withDefaults(defineProps<{ placement?: "bottom-end" | "bottom-start" | "top-start" | "top-end"; popperClass?: string; bare?: boolean }>(), {
   placement: "bottom-start",
   popperClass: "",
 });

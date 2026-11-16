@@ -81,6 +81,11 @@ func (s Settings) API() string {
 	return strings.TrimRight(s.BaseURL, "/")
 }
 
+// SameAPI reports whether two base URL settings reach the same API root ("" = DefaultBaseURL).
+func SameAPI(a, b string) bool {
+	return Settings{BaseURL: strings.TrimSpace(a)}.API() == Settings{BaseURL: strings.TrimSpace(b)}.API()
+}
+
 // ConnectURL is where the browser posts its WebRTC SDP offer with the client secret.
 func (s Settings) ConnectURL() string { return s.API() + "/realtime/calls" }
 
@@ -210,7 +215,9 @@ func Mint(ctx context.Context, hc *http.Client, s Settings, apiKey string, r Req
 	defer res.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if res.StatusCode/100 != 2 {
-		return Secret{}, apiError(res.StatusCode, body)
+		e := apiError(res.StatusCode, body)
+		e.Message = redact(e.Message, apiKey)
+		return Secret{}, e
 	}
 	var out struct {
 		Value     string `json:"value"`
@@ -238,6 +245,14 @@ func apiError(status int, body []byte) *Error {
 		msg = msg[:300]
 	}
 	return &Error{Status: status, Code: e.Error.Code, Message: msg}
+}
+
+// redact removes the API key from an upstream error message before it is logged or shown.
+func redact(msg, key string) string {
+	if len(key) < 8 {
+		return msg
+	}
+	return strings.ReplaceAll(msg, key, "***")
 }
 
 // Last4 is what the admin page shows of a key.

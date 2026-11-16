@@ -92,6 +92,17 @@ func TestVoiceAdminConfig(t *testing.T) {
 	if !v.KeySet || v.Delay != "low" {
 		t.Fatalf("kept %+v", v)
 	}
+	// The saved key is only ever sent to the address it was saved for: moving the base URL (or
+	// testing against another one) needs the key typed again.
+	for _, r := range []response{
+		admin.do("PUT", "/api/admin/voice", map[string]any{"enabled": true, "base_url": "https://attacker.example/v1"}),
+		admin.do("PUT", "/api/admin/voice", map[string]any{"enabled": true}),
+		admin.do("POST", "/api/admin/voice/test", map[string]any{"base_url": "https://attacker.example/v1"}),
+	} {
+		if r.Status != 422 {
+			t.Fatalf("saved key sent elsewhere = %d %s", r.Status, r.Body)
+		}
+	}
 	var test struct {
 		OK bool `json:"ok"`
 	}

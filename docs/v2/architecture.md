@@ -85,6 +85,7 @@ Go 写的控制台（REST + SSE + 节点 WebSocket + 调度器）存全部状态
 
 - Vue 3 + Vite 7 + TypeScript + Element Plus + Pinia + vue-router 4 + vue-query 5，Tailwind 3 负责布局（设计令牌与之前的 React 版一致，页面外观和行为不变）。页面只用 `components/common`（平台积木）+ Element Plus（在 `styles/element.css` 里按令牌改了皮肤）。
 - 接口类型由控制台导出的 OpenAPI 3.1 生成（`openapi-typescript` + `openapi-fetch`），不再手写 `lib/api.ts` 的类型；服务端数据走 vue-query，SSE 事件直接写进 query 缓存。
+- 输入框（统筹对话和组长对话共用 `Composer.vue`）：左下角一个“+”菜单（添加文件或照片、斜杠命令、引用），右下角麦克风（管理员开了语音输入才有）和发送。“/” 弹出平台命令（前端自己执行）和员工会话报上来的技能；“@” 引用仓库文件、讨论串、交付物和记忆文件，由控制台按本项目解析后接在投递给员工的文字后面（`api.md` §3.2）。语音输入：控制台用密封保存的 OpenAI Key 签 120 秒的临时密钥，浏览器直接与 OpenAI 建 WebRTC 实时转写：声音不经过控制台，平台 Key 不离开控制台（`voice.md`）。
 - 办公室页：Canvas 2D 画场景和人物，DOM 叠加层画气泡、名牌、门牌和可点区域；布局来自 JSON（`office-layout.md`）。
 
 ### 3.4 共享协议（`/protocol`）
@@ -494,6 +495,7 @@ v1 在每次运行开始把 `GH_TOKEN` 放进环境。v2 会话是常驻的，�
 ### 10.5 秘密与密钥
 
 - `AGENT_TEAMS_SECRET_KEY` 沿用；Go 实现与 v1 相同的派生（`derive(label) = sha256("label:secret")`），OAuth state 签名格式完全一致，迁移期两边签发的 state 互认。
+- 平台级第三方密钥（语音输入的 OpenAI Key）同样用 SecretBox 密封存在 `at_settings`，接口只回末四位；只在控制台向 OpenAI 签临时密钥时解开，不下发给浏览器或节点，日志和审计里不出现；改接口地址必须重填 Key。
 - 新增密钥轮换：`AGENT_TEAMS_SECRET_KEYS=new,old`（第一个加密，全部可解密）+ `atctl admin reseal` 重新加密全部密封值（v1 问题 14）。
 
 ## 11. 状态监控、事件落库与回放

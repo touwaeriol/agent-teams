@@ -33,12 +33,14 @@ Checked against developers.openai.com on 2026-11-16:
 | Route | Who | What |
 | --- | --- | --- |
 | `GET /api/admin/voice` | admin | settings without the key (`key_set`, `key_last4`, `usable`) |
-| `PUT /api/admin/voice` | admin | save; `api_key` is write-only (sealed with the SecretBox), empty keeps it, `clear_key` removes it; enabling needs a key |
-| `POST /api/admin/voice/test` | admin | mints a 10 s client secret with the typed or saved key (10/min) |
+| `PUT /api/admin/voice` | admin | save; `api_key` is write-only (sealed with the SecretBox), empty keeps it, `clear_key` removes it; enabling needs a key; changing `base_url` while a key is saved needs the key typed again (422) |
+| `POST /api/admin/voice/test` | admin | mints a 10 s client secret with the typed or saved key (10/min); with the saved key `base_url` must equal the saved one |
 | `GET /api/voice/config` | user | `{enabled, provider, languages}`; disabled/unusable → `enabled: false`, no mic anywhere |
 | `POST /api/voice/session` | user | `{language}` (`auto` or a listed code) → `{client_secret, expires_at, connect_url, transport: "webrtc", model, client_commits}`; 20/min per user |
 
-Settings live in `at_settings["voice"]`. Audit actions: `voice_settings_change`, `voice_test`,
+Settings live in `at_settings["voice"]`. The saved key is only ever sent to the base URL it was
+saved with, so a changed address can't redirect it to another host; an upstream error message is
+stripped of the key before it is logged or returned. Audit actions: `voice_settings_change`, `voice_test`,
 `voice_session` (never the key or the secret). OpenAI errors map to 502 `voice_key_rejected` /
 `voice_upstream` / `voice_unreachable`, 503 `voice_busy`.
 
