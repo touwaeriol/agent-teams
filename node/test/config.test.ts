@@ -6,18 +6,18 @@ import { loadConfig, parseEnvFile, toWsUrl } from "../src/config.js";
 import { backoffDelay } from "../src/link/client.js";
 
 describe("config", () => {
-  it("reads node.env like v1 and lets env and flags override it", () => {
+  it("reads node.env and lets env and flags override it", () => {
     const home = mkdtempSync(join(tmpdir(), "at-cfg-"));
     try {
       mkdirSync(join(home, ".config/agent-teams"), { recursive: true });
-      writeFileSync(join(home, ".config/agent-teams/node.env"), "AGENT_TEAMS_CONSOLE=https://console.example\nAGENT_TEAMS_NODE=n1\nAGENT_TEAMS_NODE_TOKEN=tok-file\nAGENT_TEAMS_ROOT=/srv/at\nAGENT_TEAMS_MAX_RUNS=6\nPATH=/x\n");
+      writeFileSync(join(home, ".config/agent-teams/node.env"), "AGENT_TEAMS_CONSOLE=https://console.example\nAGENT_TEAMS_NODE=n1\nAGENT_TEAMS_NODE_TOKEN=tok-file\nAGENT_TEAMS_ROOT=/srv/at\nAGENT_TEAMS_MAX_SESSIONS=6\nPATH=/x\n");
       const env = { HOME: home, AGENT_TEAMS_NODE_TOKEN: "tok-env" } as NodeJS.ProcessEnv;
       const c = loadConfig(["--root", "/srv/other"], env);
       expect(c).toMatchObject({ wsUrl: "wss://console.example/nodes/connect", token: "tok-env", root: "/srv/other", maxActive: 6, configDir: join(home, ".config/agent-teams") });
       expect(loadConfig(["--token=tok-flag", "--max-sessions", "2"], env)).toMatchObject({ token: "tok-flag", maxActive: 2 });
-      // install-node.sh v2 writes AGENT_TEAMS_MAX_SESSIONS; it wins over the v1 key.
-      writeFileSync(join(home, ".config/agent-teams/node.env"), "AGENT_TEAMS_CONSOLE=https://c\nAGENT_TEAMS_NODE_TOKEN=t\nAGENT_TEAMS_MAX_RUNS=6\nAGENT_TEAMS_MAX_SESSIONS=3\n");
-      expect(loadConfig([], { HOME: home })).toMatchObject({ maxActive: 3 });
+      // The retired v1 key is ignored: the default applies.
+      writeFileSync(join(home, ".config/agent-teams/node.env"), "AGENT_TEAMS_CONSOLE=https://c\nAGENT_TEAMS_NODE_TOKEN=t\nAGENT_TEAMS_MAX_RUNS=6\n");
+      expect(loadConfig([], { HOME: home })).toMatchObject({ maxActive: 4 });
       expect(() => loadConfig([], { HOME: join(home, "nowhere") })).toThrow(/AGENT_TEAMS_CONSOLE/);
       expect(() => loadConfig(["--bogus", "1"], env)).toThrow(/unknown option/);
     } finally {

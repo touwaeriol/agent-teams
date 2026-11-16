@@ -8,31 +8,24 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-func TestRolesSeededFromV1Team(t *testing.T) {
+// TestRolesSeededWithDefaults: the first read creates the default team once; the retired
+// /api/team endpoints are gone.
+func TestRolesSeededWithDefaults(t *testing.T) {
 	h := newHarness(t)
-	c, u := h.signUp("a@example.com")
-	var n createdNode
-	c.must(201, "POST", "/api/nodes", map[string]string{"name": "rc-erio"}, &n)
-	team := "leader: lead\nemployees:\n  - {name: lead, type: claude_code, node: rc-erio, instructions: 带队}\n  - {name: engineer, type: claude_code, node: rc-erio, workdir: /x}\n"
-	if _, err := store.Exec(context.Background(), h.db.Pool, `INSERT INTO at_teams (user_id, config) VALUES ($1, $2)`, u.ID, team); err != nil {
-		t.Fatal(err)
-	}
+	c, _ := h.signUp("a@example.com")
 	var body RolesBody
 	c.must(200, "GET", "/api/roles", nil, &body)
-	if len(body.Roles) != 3 || body.Roles[0].Tier != "coordinator" || body.Roles[2].Role != "engineer" {
-		t.Fatalf("roles %+v", body.Roles)
+	if len(body.Roles) != 3 || body.Roles[0].Tier != "coordinator" || body.Roles[0].Look.Outfit == "" || len(body.Report) != 0 {
+		t.Fatalf("defaults %+v", body)
 	}
-	if body.Roles[1].NodeIDs[0] != n.Node.ID || body.Roles[0].Instructions != "带队" || body.Roles[0].Look.Outfit != "hoodie" {
-		t.Fatalf("converted %+v", body.Roles[:2])
-	}
-	if len(body.Report) == 0 || !strings.Contains(body.Report[0], "workdir") {
-		t.Fatalf("report %v", body.Report)
-	}
-	// Second read does not convert again.
+	first := body.Roles[2].ID
 	body = RolesBody{}
 	c.must(200, "GET", "/api/roles", nil, &body)
-	if len(body.Report) != 0 || len(body.Roles) != 3 {
-		t.Fatalf("second read %+v", body)
+	if len(body.Roles) != 3 || body.Roles[2].ID != first {
+		t.Fatalf("second read %+v", body.Roles)
+	}
+	if r := c.do("GET", "/api/team", nil); r.Status != 404 {
+		t.Fatalf("GET /api/team = %d", r.Status)
 	}
 }
 
@@ -77,11 +70,6 @@ func TestSaveRolesValidationAndYAML(t *testing.T) {
 	}
 	if r := c.do("PUT", "/api/roles/yaml", map[string]string{"yaml": "members: [}"}); r.Status != 422 {
 		t.Fatalf("bad yaml = %d", r.Status)
-	}
-	var team TeamV1
-	c.must(200, "GET", "/api/team", nil, &team)
-	if !team.Saved || team.Team["coordinator"] == nil {
-		t.Fatalf("team %+v", team)
 	}
 	var look store.Look
 	c.must(200, "POST", "/api/roles/look/random", map[string]string{"role": "dev"}, &look)

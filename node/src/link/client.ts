@@ -5,7 +5,7 @@ import type { Logger } from "../util/log.js";
 import { ProtocolValidator, isMessageType, isReliable, type Frame, type Hello, type Welcome } from "../protocol.js";
 import type { Outbox } from "./outbox.js";
 
-export const CLOSE = { normal: 1000, policyV1: 1008, unauthorized: 4401, replaced: 4409, upgrade: 4426, tooFast: 4429 } as const;
+export const CLOSE = { normal: 1000, unauthorized: 4401, replaced: 4409, upgrade: 4426, tooFast: 4429 } as const;
 
 export interface LinkOptions {
   url: string;
@@ -180,7 +180,6 @@ export class Link extends EventEmitter<LinkEvents> {
   private handleCloseCode(code: number): void {
     switch (code) {
       case CLOSE.unauthorized:
-      case CLOSE.policyV1:
         this.opts.log.error("node token rejected (4401); retrying every 10 minutes");
         return this.scheduleReconnect(600_000);
       case CLOSE.replaced:

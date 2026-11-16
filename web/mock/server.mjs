@@ -273,13 +273,11 @@ const routes = [
     if (!e) return fail(res, 404, "找不到员工");
     json(res, 200, { ...e, current_task: state.tasks.t12.find((t) => t.claimed_by === e.name && t.status === "running") ?? null, recent_activity: state.activity.t12.slice(0, 3), session: { state: "active", node: e.node?.name ?? null } });
   }],
-  ["GET", /^\/api\/conversations$/, (req, res) => json(res, 200, [{ id: "legacy1", title: "v1：给项目加置顶", created_at: F.ago(60 * 24 * 6), project_id: "p1" }])],
-  ["GET", /^\/api\/conversations\/([^/]+)\/messages$/, (req, res, [cid]) => json(res, 200, page(state.messages[cid] ?? (cid === "legacy1" ? [{ id: "l1", role: "user", author: "liu", kind: "chat", content: "给项目加个置顶功能", meta: {}, created_at: F.ago(8000) }, { id: "l2", role: "leader", author: "leader", kind: "chat", content: "好的，已经交给工程师。", meta: {}, created_at: F.ago(7990) }] : [])))],
+  ["GET", /^\/api\/conversations\/([^/]+)\/messages$/, (req, res, [cid]) => json(res, 200, page(state.messages[cid] ?? []))],
   ["POST", /^\/api\/conversations\/([^/]+)\/messages$/, (req, res, [cid]) => sendMessage(res, cid, req)],
   ["POST", /^\/api\/conversations\/([^/]+)\/interrupt$/, (req, res) => json(res, 202)],
   ["GET", /^\/api\/conversations\/([^/]+)\/questions$/, (req, res, [cid]) => json(res, 200, state.questions[cid] ?? [])],
   ["POST", /^\/api\/conversations\/([^/]+)\/questions\/([^/]+)\/answer$/, (req, res, [cid, qid]) => answer(res, cid, qid, req)],
-  ["GET", /^\/api\/conversations\/([^/]+)\/tasks$/, (req, res) => json(res, 200, [{ id: "t1", assignee: "engineer", instruction: "实现置顶", status: "done" }])],
   ["GET", /^\/api\/threads\/([^/]+)$/, (req, res, [tid]) => json(res, 200, threadById(tid))],
   ["POST", /^\/api\/threads\/([^/]+)\/(archive|unarchive)$/, (req, res, [tid, op]) => {
     const t = threadById(tid);

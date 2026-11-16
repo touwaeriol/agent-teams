@@ -32,7 +32,7 @@ Every WebSocket text frame is one JSON object:
 - `x-direction` (`console_to_node`, `node_to_console` or `both`) and `x-key` (the idempotency key fields; `id` means the envelope id) are metadata. Validators ignore them, and the generated registries expose them.
 - Receivers ignore unknown fields, so message bodies do not set `additionalProperties: false`. Tool inputs do set it.
 
-Not included, because the cut-over is one-shot (architecture.md §14): protocol 1 frames, the legacy `run.*` messages and the v1 `approve` tool.
+Not included, because the cut-over is one-shot (architecture.md §14): protocol 1 frames, the old `run.*` messages and the v1 `approve` tool (v1 is retired).
 
 ## Using the generated code
 

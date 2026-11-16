@@ -139,17 +139,17 @@ func TestInstallScriptRootEntryLayout(t *testing.T) {
 	}
 }
 
-func TestInstallScriptUpgradesV1NodeEnv(t *testing.T) {
+func TestInstallScriptKeepsNodeEnv(t *testing.T) {
 	e := newInstallEnv(t)
 	_ = os.MkdirAll(filepath.Join(e.home, ".config/agent-teams"), 0o700)
-	v1 := "AGENT_TEAMS_CONSOLE=https://old.console\nAGENT_TEAMS_NODE=cvp\nAGENT_TEAMS_NODE_TOKEN=v1-token\nAGENT_TEAMS_ROOT=" + e.home + "/agents\nAGENT_TEAMS_MAX_RUNS=6\nPATH=/x\n"
-	_ = os.WriteFile(filepath.Join(e.home, ".config/agent-teams/node.env"), []byte(v1), 0o600)
+	old := "AGENT_TEAMS_CONSOLE=https://old.console\nAGENT_TEAMS_NODE=cvp\nAGENT_TEAMS_NODE_TOKEN=old-token\nAGENT_TEAMS_ROOT=" + e.home + "/agents\nAGENT_TEAMS_MAX_SESSIONS=6\nPATH=/x\n"
+	_ = os.WriteFile(filepath.Join(e.home, ".config/agent-teams/node.env"), []byte(old), 0o600)
 	script := renderInstallScript("https://console.test", platform.NodeRelease{Version: "2.1.0", SHA256: e.sha})
 	if out, err := e.run(script, nil); err != nil {
 		t.Fatalf("upgrade failed: %v\n%s", err, out)
 	}
 	envFile := e.read(".config/agent-teams/node.env")
-	for _, want := range []string{"AGENT_TEAMS_NODE_TOKEN=v1-token", "AGENT_TEAMS_CONSOLE=https://old.console",
+	for _, want := range []string{"AGENT_TEAMS_NODE_TOKEN=old-token", "AGENT_TEAMS_CONSOLE=https://old.console",
 		"AGENT_TEAMS_NODE=cvp", "AGENT_TEAMS_ROOT=" + e.home + "/agents", "AGENT_TEAMS_MAX_SESSIONS=6"} {
 		if !strings.Contains(envFile, want) {
 			t.Errorf("node.env missing %s:\n%s", want, envFile)

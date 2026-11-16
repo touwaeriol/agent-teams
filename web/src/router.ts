@@ -18,7 +18,6 @@ export const projectRoutes: RouteRecordRaw[] = [
   { path: "/projects/:pid/deliverables", component: () => import("@/pages/Deliverables.vue") },
   { path: "/projects/:pid/settings", component: () => import("@/pages/Main.vue") },
   { path: "/projects/:pid/settings/:section", component: () => import("@/pages/Main.vue") },
-  { path: "/projects/:pid/legacy/:cid", component: () => import("@/pages/Legacy.vue") },
 ];
 
 export const settingsRoutes: RouteRecordRaw[] = [

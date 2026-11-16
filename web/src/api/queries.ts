@@ -24,7 +24,6 @@ export const keys = {
   usage: (pid: string, days: number) => ["p", pid, "usage", days] as const,
   office: (pid: string) => ["p", pid, "office"] as const,
   search: (pid: string, q: string) => ["p", pid, "search", q] as const,
-  legacy: (pid: string) => ["p", pid, "legacy"] as const,
   messages: (cid: string) => ["c", cid, "messages"] as const,
   questions: (cid: string) => ["c", cid, "questions"] as const,
   thread: (tid: string) => ["t", tid] as const,
@@ -193,13 +192,6 @@ export const useSearch = (pid: Arg, q: Arg) =>
     () => keys.search(val(pid), val(q)),
     () => unwrap(client.GET("/api/projects/{pid}/search", { params: { path: { pid: val(pid) }, query: { q: val(q) } } })),
     { enabled: () => val(q).trim().length > 0 },
-  );
-
-export const useLegacyConversations = (pid: Arg) =>
-  useKeyed(
-    () => keys.legacy(val(pid)),
-    () => unwrap(client.GET("/api/conversations", { params: { query: { project_id: val(pid), kind: "chat" } } })),
-    { retry: false },
   );
 
 export const useNodes = (refetchInterval = 15_000) =>

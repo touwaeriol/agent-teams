@@ -15,7 +15,7 @@ func TestAdminUsers(t *testing.T) {
 	userClient.must(201, "POST", "/api/nodes", map[string]string{"name": "n1"}, &n)
 	var users []AdminUserView
 	admin.must(200, "GET", "/api/admin/users", nil, &users)
-	if len(users) != 2 || users[1].Nodes != 1 || users[1].PlatformVersion != 1 {
+	if len(users) != 2 || users[1].Nodes != 1 {
 		t.Fatalf("users %+v", users)
 	}
 	if r := admin.do("PATCH", "/api/admin/users/"+me.ID, map[string]any{"active": false}); r.Status != 400 {

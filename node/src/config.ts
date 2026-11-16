@@ -28,7 +28,6 @@ const FLAGS: Record<string, string> = {
   "--token": "AGENT_TEAMS_NODE_TOKEN",
   "--root": "AGENT_TEAMS_ROOT",
   "--state": "AGENT_TEAMS_STATE",
-  "--max-runs": "AGENT_TEAMS_MAX_RUNS",
   "--max-sessions": "AGENT_TEAMS_MAX_SESSIONS",
   "--env-file": "AGENT_TEAMS_ENV_FILE",
   "--log-level": "AGENT_TEAMS_LOG_LEVEL",
@@ -76,7 +75,7 @@ export function toWsUrl(consoleUrl: string): string {
   return u.toString();
 }
 
-/** CLI flags > process env > ~/.config/agent-teams/node.env (same keys as v1). */
+/** CLI flags > process env > ~/.config/agent-teams/node.env. */
 export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env): NodeConfig {
   const flags = parseFlags(argv);
   const home = env.HOME ?? homedir();
@@ -95,7 +94,7 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
     stateDir: resolve(get("AGENT_TEAMS_STATE") ?? join(env.XDG_STATE_HOME ?? join(home, ".local", "state"), "agent-teams")),
     configDir, platformDir: join(dataDir, "platform"), installDir: join(dataDir, "node"),
     runtimeDir: join(env.XDG_RUNTIME_DIR ?? join(dataDir, "run"), "agent-teams"),
-    maxActive: positiveInt(get("AGENT_TEAMS_MAX_SESSIONS") ?? get("AGENT_TEAMS_MAX_RUNS"), 4),
+    maxActive: positiveInt(get("AGENT_TEAMS_MAX_SESSIONS"), 4),
     passEnv: passList(get("AGENT_TEAMS_PASS_ENV")),
     gitBaseUrl: get("AGENT_TEAMS_GIT_BASE_URL") ?? "https://github.com",
     claudeConfigDir: resolve(env.CLAUDE_CONFIG_DIR ?? join(home, ".claude")),

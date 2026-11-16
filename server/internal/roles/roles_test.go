@@ -112,49 +112,10 @@ func TestWarnings(t *testing.T) {
 	}
 }
 
-const v1TeamYAML = `
-leader: lead
-employees:
-  - name: lead
-    type: claude_code
-    node: rc-erio
-    instructions: 你是技术负责人。
-  - name: Engineer_1
-    type: claude_code
-    node: rc-erio
-    permission_mode: bypassPermissions
-    allowed_tools: ["Bash(git *)"]
-    workdir: /tmp/x
-  - name: qa
-    type: codex
-    node: missing
-    sandbox: danger-full-access
-`
-
-func TestConvertV1Team(t *testing.T) {
-	p, err := FromYAML(v1TeamYAML, map[string]string{"rc-erio": "n1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(p.Roles) != 4 {
-		t.Fatalf("roles %+v", p.Roles)
-	}
-	coord, lead, eng, qa := p.Roles[0], p.Roles[1], p.Roles[2], p.Roles[3]
-	if coord.Tier != Coordinator || coord.Instructions != "你是技术负责人。" || coord.NodeIDs[0] != "n1" {
-		t.Fatalf("coordinator %+v", coord)
-	}
-	if lead.Tier != Lead || lead.Role != "lead" {
-		t.Fatalf("lead %+v", lead)
-	}
-	if eng.Role != "engineer-1" || eng.PermissionMode != store.PermBypass || eng.AllowedTools[0] != "Bash(git *)" {
-		t.Fatalf("engineer %+v", eng)
-	}
-	if qa.Runtime != Codex || qa.PermissionMode != store.PermBypass || len(qa.NodeIDs) != 0 {
-		t.Fatalf("qa %+v", qa)
-	}
-	report := strings.Join(p.Report, "\n")
-	if !strings.Contains(report, "workdir") || !strings.Contains(report, "missing") {
-		t.Fatalf("report %q", report)
+// TestOldFormatRejected: the retired platform's leader/employees YAML is no longer read.
+func TestOldFormatRejected(t *testing.T) {
+	if _, err := FromYAML("leader: lead\nemployees:\n  - name: lead\n", nil); err == nil || !strings.Contains(err.Error(), "不再支持") {
+		t.Fatalf("old format: %v", err)
 	}
 }
 
@@ -180,16 +141,6 @@ func TestYAMLRoundTrip(t *testing.T) {
 	}
 	if _, err := FromYAML("members:\n  - {role: dev, colour: red}\n", nil); err == nil {
 		t.Fatal("unknown field accepted")
-	}
-}
-
-func TestUniqueKey(t *testing.T) {
-	taken := map[string]bool{"lead": true}
-	if k := uniqueKey("Lead", taken); k != "lead-2" {
-		t.Fatalf("key %q", k)
-	}
-	if k := uniqueKey("工程师", taken); !keyPattern.MatchString(k) {
-		t.Fatalf("key %q", k)
 	}
 }
 

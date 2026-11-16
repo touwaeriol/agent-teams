@@ -19,7 +19,6 @@ type Conversation struct {
 	ProjectID *string
 	Kind      string
 	Title     string
-	Plan      json.RawMessage
 	CreatedAt time.Time
 }
 
@@ -28,21 +27,12 @@ func (Conversation) TableName() string { return "at_conversations" }
 
 func conversations(ctx context.Context, q DB) *gorm.DB {
 	return q.Gorm(ctx).Model(&Conversation{}).
-		Select("id, COALESCE(user_id, '') AS user_id, project_id, kind, title, plan, created_at")
+		Select("id, COALESCE(user_id, '') AS user_id, project_id, kind, title, created_at")
 }
 
 // ConversationOfUser loads one of the user's conversations.
 func ConversationOfUser(ctx context.Context, q DB, userID, id string) (Conversation, error) {
 	return take[Conversation](conversations(ctx, q).Where("id = ? AND user_id = ?", id, userID))
-}
-
-// LegacyConversations lists the user's v1 chat conversations (optionally of one project).
-func LegacyConversations(ctx context.Context, q DB, userID, projectID, kind string) ([]Conversation, error) {
-	g := conversations(ctx, q).Where("user_id = ? AND kind = ?", userID, kind)
-	if projectID != "" {
-		g = g.Where("project_id = ?", projectID)
-	}
-	return find[Conversation](g.Order("created_at DESC"))
 }
 
 // coordinatorConversation finds the project's coordinator conversation id.

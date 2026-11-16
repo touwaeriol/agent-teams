@@ -18,8 +18,8 @@ npm run build                      # dist/node.mjs (SDK, codex, MCP SDK external
 node dist/node.mjs run --console https://console.example --token … --root ~/.agents_team --state ~/.local/state/agent-teams
 ```
 
-Defaults come from `~/.config/agent-teams/node.env` (written by `install-node.sh`, same keys as
-v1): `AGENT_TEAMS_CONSOLE`, `AGENT_TEAMS_NODE_TOKEN`, `AGENT_TEAMS_ROOT`, `AGENT_TEAMS_MAX_RUNS`
+Defaults come from `~/.config/agent-teams/node.env` (written by `install-node.sh`):
+`AGENT_TEAMS_CONSOLE`, `AGENT_TEAMS_NODE_TOKEN`, `AGENT_TEAMS_ROOT`, `AGENT_TEAMS_MAX_SESSIONS`
 (→ `max_active_sessions`), optional `AGENT_TEAMS_STATE`, `AGENT_TEAMS_PASS_ENV`. Flags beat the
 process environment, which beats `node.env`. Exit code 75 after a successful `node.upgrade`
 (systemd restarts into the new `current` symlink).

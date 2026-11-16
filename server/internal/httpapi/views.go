@@ -14,7 +14,6 @@ type UserView struct {
 	Role               string    `json:"role" enum:"admin,user"`
 	Active             bool      `json:"active"`
 	MaxNodes           *int      `json:"max_nodes"`
-	PlatformVersion    int       `json:"platform_version"`
 	MustChangePassword bool      `json:"must_change_password"`
 	CreatedAt          time.Time `json:"created_at"`
 }
@@ -22,7 +21,7 @@ type UserView struct {
 // userView shows an account with its role (from the Casbin enforcer: Server.role).
 func userView(u store.User, role string) UserView {
 	return UserView{ID: u.ID, Email: u.Email, DisplayName: u.DisplayName, Role: role, Active: u.Active,
-		MaxNodes: u.MaxNodes, PlatformVersion: u.PlatformVersion, MustChangePassword: u.MustChangePassword,
+		MaxNodes: u.MaxNodes, MustChangePassword: u.MustChangePassword,
 		CreatedAt: u.CreatedAt}
 }
 

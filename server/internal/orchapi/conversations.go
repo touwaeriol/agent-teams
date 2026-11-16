@@ -2,7 +2,6 @@ package orchapi
 
 import (
 	"context"
-	"net/http"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -137,9 +136,6 @@ func (a *API) postMessage(ctx context.Context, in *postMessageInput) (*messageOu
 	if err != nil {
 		return nil, err
 	}
-	if c.Kind == "chat" {
-		return nil, httpapi.Fail(http.StatusConflict, "legacy_read_only", "旧对话只读")
-	}
 	if err := a.limitMessages(ctx, u.ID); err != nil {
 		return nil, err
 	}
@@ -162,9 +158,6 @@ func (a *API) interrupt(ctx context.Context, in *cidInput) (*struct{}, error) {
 	u, c, err := a.conversation(ctx, in.CID)
 	if err != nil {
 		return nil, err
-	}
-	if c.Kind == "chat" {
-		return nil, httpapi.Fail(http.StatusConflict, "legacy_read_only", "旧对话只读")
 	}
 	return nil, fail(a.e.Orch.InterruptConversation(ctx, u.ID, c.ID), "没有这个对话")
 }
@@ -198,9 +191,6 @@ func (a *API) answer(ctx context.Context, in *answerInput) (*questionOutput, err
 	u, c, err := a.conversation(ctx, in.CID)
 	if err != nil {
 		return nil, err
-	}
-	if c.Kind == "chat" {
-		return nil, httpapi.Fail(http.StatusConflict, "legacy_read_only", "旧对话只读")
 	}
 	v, err := idempotent(ctx, a, u.ID, "answer:"+c.ID+":"+in.QID, in.IdempotencyKey, func() (core.QuestionView, error) {
 		return a.answerCard(ctx, u, c.ID, in)

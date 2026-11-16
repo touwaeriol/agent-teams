@@ -40,11 +40,10 @@ Go 写的控制台（REST + SSE + 节点 WebSocket + 调度器）存全部状态
 │ │ delivery      分支 / 合并队列 / CI(Checks) / PR / 验收             │           │
 │ │ github        App 令牌、REST 客户端、webhook（可选）、轮询          │           │
 │ └────────────────────────────────────────────────────────────────────┘           │
-│ legacy proxy（迁移期）：未迁移的用户和路径反向代理到 Python v1                    │
 └───────┬──────────────────────────────┬───────────────────────────────┬───────────┘
-        ▼                              ▼                               ▼
-   PostgreSQL 17                  Valkey 9                       Python v1（迁移期，内网）
-   全部业务数据、事件流、           pub/sub 扇出、分布式锁、          旧会话/旧节点协议 1
+        ▼                              ▼
+   PostgreSQL 17                  Valkey 9
+   全部业务数据、事件流、           pub/sub 扇出、分布式锁、
    发件箱、审计                     限流计数、在线状态
         ▲
         │ WS（协议 v2，TLS，节点令牌）
@@ -58,7 +57,6 @@ Go 写的控制台（REST + SSE + 节点 WebSocket + 调度器）存全部状态
 │             两者把 tools/call 变成 WS `tool.call` 交给控制台                            │
 │ git         clone / fetch / worktree add / cleanup / status（只做本地操作）           │
 │ cred        git credential helper + gh 包装：按需向控制台要短期 GitHub 令牌，不落盘   │
-│ legacy      协议 1 兼容：start/output/exit/cancel（迁移期让 Python 也能用新守护进程） │
 └────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -75,13 +73,12 @@ Go 写的控制台（REST + SSE + 节点 WebSocket + 调度器）存全部状态
   - `status`：员工状态机，事件落库、推送、回放。
   - `delivery`：讨论串分支、合并队列、CI、PR、验收、清理。
   - `github`：App JWT / 安装令牌缓存（进程内 + Valkey 共享），REST 客户端（分页、ETag、限速），Checks 轮询。
-  - `legacy`：迁移期的反向代理（§14.1）和对 Python 内部接口的调用（§14.5：切断用户、断开节点、清令牌缓存、读 v1 节点实时状态）。
 - **单实例起步，可横向扩展**：v2.0 先跑 1 个副本。所有状态在 PG；节点链路只挂在一个副本上，副本间用 Valkey 频道 `node:<id>:cmd` 转发命令（§11.4），以后加副本不改协议。调度器、合并队列这类“全局只能一个在跑”的循环用 PG advisory lock 选主。
 
 ### 3.2 节点守护进程（TypeScript，`/node`）
 
 - 一台机器一个进程，systemd 用户服务，`Restart=always`。
-- 托管会话（Claude / Codex）、本地 git 操作、平台工具转发、GitHub 凭证按需获取、协议 1 兼容执行。
+- 托管会话（Claude / Codex）、本地 git 操作、平台工具转发、GitHub 凭证按需获取。
 - **不做业务决策**：派给谁、是否放行、任务池，全在控制台。守护进程只执行明确的命令，以及在本机强制“这个会话能用哪些工具”（防线之一，见 §10）。
 
 ### 3.3 网页（Vue，`/web`）
@@ -97,7 +94,7 @@ Go 写的控制台（REST + SSE + 节点 WebSocket + 调度器）存全部状态
 
 ## 4. 仓库布局
 
-一个仓库（monorepo），Python v1 在迁移期保留在原位置，退役后删除。
+一个仓库（monorepo）。Python v1 已于 2026-11-15 退役并从仓库删除。
 
 ```
 /server                 Go module  github.com/<org>/agent-teams/server
@@ -110,11 +107,10 @@ Go 写的控制台（REST + SSE + 节点 WebSocket + 调度器）存全部状态
   internal/status/      internal/delivery/  internal/github/   internal/office/
   internal/auth/        scrypt、会话、Fernet（兼容 v1 的 SecretBox）
   internal/store/       GORM 模型（对应 goose 建的表）、连接池、事务封装、少量手写 SQL
-  internal/legacy/      迁移期反向代理到 Python
   migrations/           goose SQL 迁移（嵌入二进制）
 /node                   TS 守护进程（npm 包 @agent-teams/node）
   src/link/  src/sessions/claude/  src/sessions/codex/  src/toolhost/
-  src/git/   src/cred/   src/legacy/   src/journal/   src/cli.ts
+  src/git/   src/cred/   src/journal/   src/cli.ts
   src/codex-protocol/   由 `codex app-server generate-ts` 生成，提交入库，锁定 CLI 版本
 /web                    Vue 应用（构建产物由控制台静态服务）
   src/office/           布局加载、场景编译、渲染器、寻路、回放
@@ -124,8 +120,7 @@ Go 写的控制台（REST + SSE + 节点 WebSocket + 调度器）存全部状态
   schemas/office/office-layout.schema.json（= docs/v2/office-layout.schema.json）
   gen/go/  gen/ts/      生成物
 /office                 默认办公室布局 JSON 与像素素材（部署时挂进控制台容器）
-/deploy                 compose、Caddy 片段、deploy.sh、install-node.sh 模板
-/src, /tests, pyproject.toml   v1（迁移期保留，P6 后删除）
+/deploy                 compose（docker-compose.yml + compose.sh）、env.example、e2e/（本机端到端测试）
 ```
 
 ## 5. 技术选型（带版本和理由）
@@ -214,7 +209,7 @@ Codex 对应：组长和 `read_only` 岗位 `sandbox: read-only, approvalPolicy:
 - **会话钉在节点上**：Claude 转录（员工 HOME 下的 `.claude/projects`）和 Codex rollout（`$CODEX_HOME/sessions`）只存在于跑过它的节点，所以 `resume` 只发给 `at_agent_sessions.node_id` 那台节点。必须换节点时（节点被删、离线超过 `rehome_after`（默认 30 分钟）且员工有待办任务、节点 drain），orchestrator 关闭旧逻辑会话，在新节点开一个**全新**会话（`resume: null`），第一条消息是平台生成的**会话恢复摘要**（`handoffSummary`）：员工身份、主任务计划、（组长）全部任务及状态、（成员）当前任务和分支、还没回答的提问、项目记忆（置顶优先，最多 10 条）、这个员工对话里最近 20 条已送达的消息和它自己的回复（用户 / 你 / 平台，统筹按自己的对话取，不再是空的）。不做转录同步（SDK `sessionStore` 以后可作为改进）。
 - **resume 失败**（守护进程回 `session.opened {resume_failed: true, error}`：转录被删、`~/.claude` 被清、换了节点、文件损坏）时自动走同一个交接流程，不需要人处理。守护进程在三处识别：`session.open {resume}`、停放的会话被下一条消息唤醒（unpark）、崩溃后的自动重启；它只回 `session.opened {resume_failed}`、删掉本机记录，**不先发 `session.state closed`**（否则控制台会先把行关掉，看不到 resume_failed）。控制台关闭旧逻辑会话、开新会话，第一条消息 = 恢复摘要 + `---` + 旧会话**没送到的消息**（它最后一次 `session.open` 的 `first_message` 和未确认送达的 `session.send`，按发出顺序，用第一条的 `msg_id`，其余标为已送达），所以触发恢复的那条用户消息不会丢；统筹和组长的对话里插一条 `kind = resumed` 的系统消息，网页显示成一行淡色的“会话已恢复”。
 - **员工的会话关掉后再开**：讨论串结束（`thread_done`）后又被重新打开、用户被停用后恢复（`employee_removed`）、节点报告关闭（`node_closed`）的员工，下一条消息开的新逻辑会话带 `resume: {sdk_session_id: 上一个会话的}`，接着原来的对话；转录不在了就是上面的 resume 失败流程。策略违规（`policy_violation`）关掉的会话不续接。
-- 各种中断的结果：空闲停放 → 下一条消息按 SDK session id resume；守护进程 SIGTERM（停放全部会话）或 SIGKILL / 节点重启（本机记录按 `parked` 读回，首条投递前查转录去重）→ 重连对账后按需 resume，被打断的回合收到“守护进程重启”系统消息；会话进程崩溃 → 自动 resume 最多 3 次，转录丢了直接走 resume 失败；控制台重启 → 状态全在 PostgreSQL，阻塞调用照常等待；转录丢失 → 恢复摘要。`deploy/v2/e2e/run_resume.mjs` 用真实 Claude 逐个验证（每次中断后问统筹之前说过的暗号）。
+- 各种中断的结果：空闲停放 → 下一条消息按 SDK session id resume；守护进程 SIGTERM（停放全部会话）或 SIGKILL / 节点重启（本机记录按 `parked` 读回，首条投递前查转录去重）→ 重连对账后按需 resume，被打断的回合收到“守护进程重启”系统消息；会话进程崩溃 → 自动 resume 最多 3 次，转录丢了直接走 resume 失败；控制台重启 → 状态全在 PostgreSQL，阻塞调用照常等待；转录丢失 → 恢复摘要。`deploy/e2e/run_resume.mjs` 用真实 Claude 逐个验证（每次中断后问统筹之前说过的暗号）。
 
 ### 6.3 平台工具：守护进程本地 MCP + WS 转发
 
@@ -557,18 +552,17 @@ SSE event: status → 网页办公室
 | --- | --- | --- |
 | `control-plane` | `agent-teams-server:<ver>`（多阶段：`node:22-alpine` 构建 web → `golang:1.25` 构建 → `gcr.io/distroless/static:nonroot`） | `atctl serve`，端口绑定 `${BIND:-127.0.0.1}:${PORT}:${PORT}`，容器内也监听 `PORT`（与 v1 的 `agent-teams` 服务同一写法，对 Caddy）和内网 `:9090`（metrics）；启动前 `atctl migrate up`（单独的一次性服务 `migrate`，`depends_on: service_completed_successfully`）。distroless 里没有 shell 和 curl，健康检查用二进制自带的子命令：`healthcheck: {test: ["CMD", "/atctl", "healthcheck"], interval: 10s, timeout: 3s, retries: 6, start_period: 20s}`（`atctl healthcheck` 请求 `http://127.0.0.1:$PORT/healthz`，非 200 退出 1） |
 | `migrate` | 同上镜像，`command: ["migrate","up"]` | 迁移只在这里跑，主服务不跑 DDL |
-| `legacy` | 现有 `agent-teams:latest`（Python） | 迁移期保留，**不再对外暴露端口**，只在 compose 网络里给 control-plane 反代；P6 后删除 |
 | `postgres` | `postgres:17-alpine` | 不变 |
 | `valkey` | `valkey/valkey:9.1.2` | 不变 |
 
 - 办公室布局：`./office:/srv/office:ro` 挂进 control-plane，`OFFICE_LAYOUT_DIR=/srv/office`，fsnotify 监听。
 - 守护进程发布包：镜像内 `/srv/node-dist/agent-teams-node-<ver>.tgz`，由 `/node/dist/` 提供；`install-node.sh` 从控制台下载（不再从 GitHub 分支 pip 安装）。
-- Caddy：沿用 `deploy/caddy.sh` 的写法 `reverse_proxy 127.0.0.1:PORT { flush_interval -1 }`。WebSocket（`/nodes/*`）Caddy 自动支持。v2 不需要额外路由规则：迁移期的分流在 control-plane 里做，不在 Caddy 里做（这样能按**用户**分流，规则见 §14.1）。
-- `deploy/deploy.sh` v2：**保留 v1 的全部行为**（在 3001–3009 里挑空闲端口写进 `.env` 的 `PORT`，首次生成 `POSTGRES_PASSWORD`、`VALKEY_PASSWORD`、`AGENT_TEAMS_SECRET_KEY` 并且以后不再改，`--domain` 时设 `BIND=127.0.0.1` 和 https 的 `AGENT_TEAMS_PUBLIC_URL` 并调用 `deploy/caddy.sh`，`docker compose up -d --build`，轮询 `/healthz` 最多 60 s，打印“第一个注册的账号自动成为管理员”，失败时打印 control-plane 最近 50 行日志），新增：先 `docker compose run --rm migrate`（失败即停止，不启动新版本），迁移期在 `.env` 里写 `LEGACY_URL=http://legacy:${PORT}`（legacy 容器内仍按 `PORT` 监听，只是不再映射到宿主机）与 `LEGACY_INTERNAL_SECRET`（随机生成，见 §14.5）。
+- Caddy：`reverse_proxy 127.0.0.1:PORT { flush_interval -1 }`。WebSocket（`/nodes/*`）Caddy 自动支持，不需要额外路由规则。
+- 部署与升级：`deploy/compose.sh`（项目目录 = 仓库根，env 文件默认 `<repo>/.env`，样例 `deploy/env.example`）。升级时先 `migrate` 再起 `control-plane`（compose 依赖已保证），步骤见仓库 README。
 
 ### 12.2 环境变量
 
-沿用 `AGENT_TEAMS_PUBLIC_URL`、`DATABASE_URL`、`VALKEY_URL`、`AGENT_TEAMS_SECRET_KEY`（新增可选 `AGENT_TEAMS_SECRET_KEYS`）、`AGENT_TEAMS_ADMIN_EMAILS`、`PORT`；新增 `LEGACY_URL=http://legacy:${PORT}`、`LEGACY_INTERNAL_SECRET`（迁移期）、`OFFICE_LAYOUT_DIR`、`METRICS_ADDR=:9090`、`OTEL_EXPORTER_OTLP_ENDPOINT`（可选）、`GITHUB_WEBHOOK_SECRET`（可选）、`AGENT_TEAMS_ARTIFACT_ORIGIN`（可选，发布文件的独立源，见 §6.5）。v2 不再支持“没有 DATABASE_URL 就用内存”：没有 PG 直接拒绝启动（测试用 testcontainers）。
+沿用 `AGENT_TEAMS_PUBLIC_URL`、`DATABASE_URL`、`VALKEY_URL`、`AGENT_TEAMS_SECRET_KEY`（新增可选 `AGENT_TEAMS_SECRET_KEYS`）、`AGENT_TEAMS_ADMIN_EMAILS`、`PORT`；新增 `OFFICE_LAYOUT_DIR`、`METRICS_ADDR=:9090`、`OTEL_EXPORTER_OTLP_ENDPOINT`（可选）、`GITHUB_WEBHOOK_SECRET`（可选）、`AGENT_TEAMS_ARTIFACT_ORIGIN`（可选，发布文件的独立源，见 §6.5）。v2 不再支持“没有 DATABASE_URL 就用内存”：没有 PG 直接拒绝启动（测试用 testcontainers）。
 
 ## 13. 可观测性
 
@@ -578,7 +572,9 @@ SSE event: status → 网页办公室
 - **追踪**（可选）：OTel，HTTP → 引擎 → 节点命令用 `trace_id` 贯通（协议信封里带 `trace`）。
 - **健康**：`/healthz`（进程活着）、`/readyz`（PG、Valkey 可用、迁移版本匹配）。
 
-## 14. 分阶段交付与迁移（不停机）
+## 14. 分阶段交付与迁移（不停机）——历史
+
+> **已完成，仅作历史。** v2 于 2026-11-15 一次性切换上线，Python v1 已退役，代码已从仓库删除；迁移 `00120_drop_v1` 删掉了 v1 独有的表、列和旧对话（data-model.md §3.1）。下面的内容描述当时的迁移设计，其中提到的代理、防护补丁、协议 1 兼容、旧对话只读页都不存在。
 
 > **决定（2026-11-14）：改为一次性切换。** 生产库目前只有 1 个用户、2 个节点、1 个项目，按用户逐个灰度、Go 反向代理 Python、Python 防护补丁和内部接口（§14.1 第 1、2、4、7、8 条，§14.5，§14.6 中与代理有关的步骤）的成本远大于收益，全部不做。做法：v2 在仓库里独立开发并在 rc 上用 docker compose 端到端测通 → 生产库副本上跑 `atctl migrate up`（原表原地扩展，见 data-model.md）并验证 → 生产停 Python、跑迁移、起 Go（同端口，Caddy 不改）→ 节点换 TS 守护进程（令牌不变）。保留 Python 镜像 `agent-teams:rollback-<sha>` 和迁移前的库状态用于回滚；v1 的旧对话在 v2 里只读呈现。下文保留原设计作参考，与本决定冲突处以本决定为准。
 

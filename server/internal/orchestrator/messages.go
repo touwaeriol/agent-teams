@@ -23,7 +23,7 @@ func (o *Orchestrator) targetOf(ctx context.Context, tx *core.Tx, c core.Convers
 	case "thread":
 		return core.Lead(ctx, tx, c.ID)
 	}
-	return core.Employee{}, ErrLegacy
+	return core.Employee{}, core.ErrNotFound
 }
 
 // PostUserMessage stores the user's message and delivers it to the conversation's employee.

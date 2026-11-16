@@ -13,7 +13,7 @@ usage:
   agent-teams-node version
 
 Defaults come from ~/.config/agent-teams/node.env (AGENT_TEAMS_CONSOLE, AGENT_TEAMS_NODE_TOKEN,
-AGENT_TEAMS_ROOT, AGENT_TEAMS_MAX_RUNS, AGENT_TEAMS_PASS_ENV). Internal helpers: git-credential, gh.
+AGENT_TEAMS_ROOT, AGENT_TEAMS_MAX_SESSIONS, AGENT_TEAMS_PASS_ENV). Internal helpers: git-credential, gh.
 `;
 
 async function main(argv: string[]): Promise<number> {

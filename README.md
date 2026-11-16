@@ -1,136 +1,103 @@
 # agent-teams
 
-在你自己的服务器上组建 Claude Code 团队：你只和一个负责人（leader）对话，他把需求拆成任务，派给分布在各台机器上的员工并行完成，结果自动回到他手里，再由他向你汇报。
+在你自己的机器上组建 Claude Code / Codex 团队：你只和项目统筹对话，它开讨论串；每个讨论串有一个组长拆任务、审查、合并，成员按岗位从任务池领小任务，在各自的节点上并行干活，结果以分支和 PR 交付。
 
-它既是一个**多用户 SaaS 平台**（网页注册、各自管理自己的服务器和团队、管理员后台），也是一个**可组合的多智能体 Python 库**（流水线、并行、讨论、主管、不阻塞的 leader）。
+多用户平台：网页注册，各自管理自己的节点、GitHub 连接、项目和团队，管理员后台。所有模型调用都走节点上用户自己登录的 Claude Code / Codex，平台不持有 API key。
 
 ## 平台怎么用
 
 ```
-你的浏览器 ──▶ 控制台（agent-teams serve）◀──WebSocket── 节点 A：agent-teams node ─ claude（leader、员工）
-                     │  PostgreSQL / Valkey               节点 B：agent-teams node ─ claude（员工）
-                     └─ /mcp：leader 通过 MCP 调用任务板
+浏览器 ──▶ 控制台（Go，atctl serve）◀──WebSocket（协议 2）── 节点 A：agent-teams-node ─ Claude / Codex 员工
+              │  PostgreSQL 17 / Valkey 9                       节点 B：agent-teams-node ─ …
+              └─ GitHub App / 访问令牌：分支、合并队列、CI、PR
 ```
 
 1. **注册登录**：开放注册（管理员可以关闭）。第一个注册的账号，以及 `AGENT_TEAMS_ADMIN_EMAILS` 里的邮箱，自动成为管理员。
-2. **添加节点**：节点是你自己的服务器，先装好并登录 Claude Code（`claude` 命令可用）。在"节点"页添加后会显示一条安装命令（令牌只显示一次），在节点上执行即可：
+2. **添加节点**：节点是你自己的机器，先装好 Node.js ≥ 22 并登录 Claude Code（Codex 可选）。在“设置 → 节点”添加后会显示一条安装命令（令牌只显示一次），在节点上以要运行员工的用户执行：
 
    ```bash
-   curl -fsSL http://控制台/install-node.sh | AGENT_TEAMS_NODE_TOKEN=… bash -s -- --console http://控制台 --name gpu-1
+   curl -fsSL https://控制台/install-node.sh | AGENT_TEAMS_NODE_TOKEN=… bash -s -- --console https://控制台 --name gpu-1
    ```
 
-   守护进程以 systemd 用户服务运行，主动连回控制台，节点不用开放端口；网页上能看到它是否在线、正在运行几个员工。令牌可以随时更换或删除，旧连接会立刻断开。
-3. **配置团队**：在"团队"页写 YAML，用 `leader` 选出负责人，每个成员用 `node` 指定在哪个节点上运行：
+   守护进程以 systemd 用户服务运行，主动连回控制台，节点不用开放端口。重新执行同一条命令就是原地升级（沿用 `~/.config/agent-teams/node.env` 里的令牌），`--rollback` 切回上一版。
+3. **连接 GitHub**：在“设置 → GitHub”点“连接 GitHub”，在 GitHub 上选账号或组织、勾选仓库，授权后自动回来；每次需要时现取 1 小时的安装令牌，只放进运行环境，不写进节点的文件。
+4. **团队（岗位模板）**：在“设置 → 团队”配置统筹、组长和成员岗位（运行时 Claude / Codex、候选节点、模型、权限模式、技能与插件、办公室形象），也可以直接编辑 YAML：
 
    ```yaml
-   leader: lead
-   employees:
-     - name: lead                     # 负责人：节点 gpu-1 上一个持续的 Claude Code 会话
-       type: claude_code
-       node: gpu-1
-       instructions: 你是技术负责人。把需求拆成任务派给工程师，检查结果后用中文汇报。
-     - name: backend
-       type: claude_code
-       node: gpu-1
-       description: 后端工程师：改 API、跑测试
-       allowed_tools: ["Bash(git *)", "Bash(pytest *)"]
-     - name: frontend
-       type: claude_code
-       node: gpu-2
-       description: 前端工程师
+   coordinator:
+     title: 项目统筹
+   lead:
+     title: 组长
+   members:
+     - role: dev
+       title: 工程师
+       count: 2
+       nodes: [gpu-1]
+     - role: review
+       title: 审查
+       gate: review
    ```
 
-   保存时会校验：节点要存在，负责人必须是 `claude_code`（平台不提供 API key，所有模型调用都走你节点上自己登录的 Claude Code）。
-4. **Git 连接和项目**：每个用户在"Git 连接"页点"连接 GitHub"，在 GitHub 上选自己的账号或组织、勾选仓库，授权后自动回来，每次运行现取 1 小时的令牌。新建项目时填项目上下文、选一个仓库：负责人和每个员工开工前都会读到项目上下文；每个员工在节点的 `~/.agents_team/projects/<项目>/<员工名>` 里有自己的仓库克隆（第一次运行前由守护进程克隆），git 和 gh 通过运行环境拿到令牌，不写进节点的文件。
-5. **对话**：在项目里新建对话，直接说需求。负责人通过 MCP 工具 `assign_task` 派任务，派完立刻回复你；员工在各自的目录（`<root>/<员工名>`）里干活，你可以继续聊。任务完成后报告自动送回负责人，他再向你汇报。右侧任务板实时显示每个任务的状态。
-6. **管理员**：在"管理"页管理用户（改角色、停用、删除、单独设置节点上限）和平台设置（开放注册、默认节点上限）。停用一个用户会让他立刻下线、断开他的节点并停止他的对话。
+5. **项目**：新建项目时选一个或多个仓库、写项目说明（基准分支等约定写在说明里），所有员工开工前都会读到。
+6. **对话与讨论串**：在项目里和统筹说需求；统筹开讨论串，组长写主要任务、把小任务派进任务池，成员按岗位领取，在 worktree 里干活并推送自己的分支；组长审查、合并队列跑 CI，最后每个仓库开一个 PR，由你验收。员工需要你决定时会发提问卡片。讨论串可以归档、恢复、删除，办公室页实时显示每个员工在做什么。
+7. **管理员**：“设置 → 管理”管理用户（角色、停用、删除、节点上限、同时运行的讨论串上限）和平台设置；命令行 `atctl admin reset-password|set-role|reseal`。
 
-**可靠性**
-- 节点断网、控制台重启或升级，员工都照常运行。守护进程会把输出写到本地日志，控制台恢复后续传或回放；"进行中"的任务会自动接回，不会重新执行。
-- 负责人是一个持续的 Claude Code 会话：第一轮用 `--session-id` 建立，之后每轮用 `--resume` 接着聊，对话历史由节点上的 Claude Code 自己保存。
-- 节点权限很窄：控制台只能让节点在 `--root` 目录下启动 `claude`/`codex`，其他命令和目录一律拒绝。取消任务时，守护进程会结束这个员工的整个进程组。
+**可靠性**：所有状态在 PostgreSQL；控制台重启、节点断线、守护进程重启后，会话按 SDK session id 恢复，恢复不了就用对话回顾重建。节点命令有发件箱、序号和确认，重连后补发。
 
-**数据隔离**：每个用户只能看到自己的对话、节点和团队。一个对话的 MCP 令牌只能操作这个对话的任务板；节点令牌在数据库里只存哈希。
+**数据隔离**：每个用户只看到自己的项目、节点、连接和团队；节点令牌和会话令牌在库里只存哈希，Git 令牌用 `AGENT_TEAMS_SECRET_KEY` 加密保存。
 
 ## 部署
 
-只需要 Docker。PostgreSQL 和 Valkey 在同一个 compose 里一起启动，数据放在 `./data`。
+只需要 Docker。`deploy/docker-compose.yml` 包含 `postgres`、`valkey`、一次性的 `migrate`（`atctl migrate up`）和 `control-plane`；一律通过 `deploy/compose.sh` 运行（compose 项目目录 = 仓库根，`./data`、`./office` 相对它解析）。
 
 ```bash
 git clone <仓库地址> agent-teams && cd agent-teams
-deploy/deploy.sh                # 生成 .env（数据库、Valkey 密码和加密密钥都随机生成），构建、启动，打印访问地址
+cp deploy/env.example .env && chmod 600 .env    # 填 PORT、AGENT_TEAMS_PUBLIC_URL，三个密钥用 openssl rand -hex 24 生成
+deploy/compose.sh build
+deploy/compose.sh up -d --wait                  # postgres、valkey → migrate → control-plane
+curl -fsS http://127.0.0.1:$PORT/healthz
 ```
 
-- `deploy.sh` 会自动选 3001–3009 中第一个空闲端口，并按本机 IP 生成 `AGENT_TEAMS_PUBLIC_URL`。节点安装命令和 leader 的 MCP 地址都用这个地址。
-- **用域名和 HTTPS**：先把域名解析到服务器，再运行 `deploy/deploy.sh --domain agent.example.com`。服务只监听 127.0.0.1，由本机的 Caddy 自动申请证书并转发（`deploy/caddy.sh` 会写入 `/etc/caddy/agent-teams.caddy`、在主 Caddyfile 里 import 它，然后重载 Caddy）。SSE 和 WebSocket 都会正常转发，登录 cookie 会带上 Secure 标记。
-- `.env` 里的 `AGENT_TEAMS_SECRET_KEY` 用来加密保存的 Git 凭证，生成后不要改。
-- "连接 GitHub"按钮背后需要一个 GitHub App：部署后用管理员账号打开 `/setup/github`，点"一键创建 GitHub App"（GitHub 的 manifest 流程，只做一次）。
-- 网页前端在 `web/`（Vue 3 + Vite + Element Plus），镜像构建时自动打包进服务；本地开发：`cd web && npm ci && npm run dev`（代理到 127.0.0.1:3001），`npm run dev:mock` 用内置 mock 接口。
-- 查看日志：`docker compose logs -f agent-teams`；升级：`git pull && deploy/deploy.sh`。
-- 不用 `--domain` 时服务是明文 HTTP，只建议在内网或测试时这样用。
+- `POSTGRES_PASSWORD`、`VALKEY_PASSWORD`、`AGENT_TEAMS_SECRET_KEY` 生成后不要改：数据目录用前两个初始化，第三个解开所有加密保存的 Git 令牌和 GitHub App 密钥（轮换用 `AGENT_TEAMS_SECRET_KEYS=new,old` + `atctl admin reseal`）。
+- 服务默认只监听 `127.0.0.1:$PORT`，由宿主机的 Caddy 提供 HTTPS：`agent.example.com { reverse_proxy 127.0.0.1:3001 { flush_interval -1 } }`（SSE 不能缓冲；WebSocket 自动转发）。
+- “连接 GitHub”需要一个 GitHub App：部署后用管理员账号打开 `/setup/github`，一键创建（GitHub 的 manifest 流程，只做一次）。
+- 镜像里带网页和节点守护进程的发布包（`/node/dist/`），办公室布局从 `./office` 挂载并热加载。
 
-不用 Docker 时：`pip install ".[server]"`，设置好上述环境变量后运行 `agent-teams serve`。
-
-## 作为 Python 库使用
+**升级**（生产把源码放在 `./src`，`.env` 里设 `BUILD_CONTEXT=./src`、`OFFICE_HOST_DIR=./src/office`、`AGENT_TEAMS_IMAGE=agent-teams-server:<sha>`）：
 
 ```bash
-pip install -e ".[dev]"     # 只用库和命令行：pip install -e .；网页服务：".[server]"；节点守护进程：".[node]"
+docker build -f src/server/Dockerfile -t agent-teams-server:<sha> src   # 新源码
+# 改 .env 里的 AGENT_TEAMS_IMAGE，然后：
+docker compose run --rm migrate && docker compose up -d --wait control-plane
 ```
 
-```python
-import asyncio
-from agent_teams import Agent, AnthropicLLM, Leader
+数据库迁移在 `server/migrations`（goose）；带数据删除的迁移（如 `00120_drop_v1`）不能回退，升级前留好数据库备份。
 
-llm = AnthropicLLM()  # 默认 claude-opus-5-5、自适应思考、high effort；需要 ANTHROPIC_API_KEY
-writer = Agent("writer", llm, description="写手", instructions="写出要求的内容。")
-critic = Agent("critic", llm, description="审查", instructions="指出文字里的问题。")
-lead = Leader("lead", llm, [writer, critic])  # 不阻塞：派任务立即返回，员工并行
-
-print(asyncio.run(lead.run("写一首关于秋天的短诗")).output)
-```
-
-命令行（YAML 定义团队，节点用 SSH 或本机）：
-
-```bash
-agent-teams check examples/multi_node.yaml
-agent-teams chat  examples/company.yaml -v        # 和负责人对话，-v 显示派活过程
-agent-teams run   examples/writing_team.yaml "Write about tidal energy"
-python examples/offline_leader.py                 # 不需要 API key 的演示
-```
-
-| 编排 | 行为 |
-|---|---|
-| `Leader` | 负责人 + 不阻塞的任务板：派任务立即返回，员工后台并行，结果自动回报。`brain` 可以是 LLM，也可以是节点上的 Claude Code |
-| `Sequential` | 流水线：依次执行，后一个成员拿到前一个的输出 |
-| `Parallel` | 所有成员并发处理同一任务，可选 `aggregator` 汇总 |
-| `RoundRobin` | 成员轮流发言，可选 `finalizer` 总结 |
-| `supervisor()` | 每个成员是主管的工具，委派是同步的 |
-
-成员类型：`agent`（LLM，需要 API key）、`claude_code`（节点上的 Claude Code）。所有团队都实现 `Runnable.run(task)`，可以任意嵌套。工具就是普通函数（`@tool`，schema 由类型注解生成）。`Hooks` 可以观察运行过程中的每个事件。
-
-## 项目结构
+## 仓库结构
 
 ```
-src/agent_teams/
-  agent.py, leader.py, teams.py   Agent、不阻塞的 Leader、其他编排策略
-  tasks.py, conversation.py       任务板（依赖、取消、完成通知）、消息队列
-  claude_code.py                  ClaudeCodeWorker：在节点上执行 claude -p 的员工
-  claude_session.py               ClaudeCodeSession：节点上持续的 Claude Code 会话（leader）
-  nodes.py, remote.py, daemon.py  节点：SSH/本机、守护进程节点（控制台侧）、守护进程
-  tools.py, hooks.py, config.py   工具、事件、YAML 配置
-  llm/                            LLM 协议、AnthropicLLM、ScriptedLLM
-  server/                         平台：app/auth/routes/admin、accounts/store（PG）、
-                                  hub、workspaces、mcp_bridge、broker（Valkey）、static
+server/      Go 控制台 atctl：Gin + huma（OpenAPI）+ Casbin + GORM，goose 迁移，节点网关，编排引擎
+node/        TypeScript 节点守护进程（Claude Agent SDK、codex app-server、平台 MCP 工具、本地 git）
+web/         Vue 3 + Element Plus 网页
+protocol/    JSON Schema（节点协议、平台工具、办公室布局）和生成的 Go / TS 类型
+office/      默认办公室布局与像素素材
+deploy/      compose、env.example、e2e/（本机端到端测试）
+docs/v2/     设计文档：architecture、data-model、api、protocol、office-layout
+docs/        threads.md、agent-comms.md（v1 时期的设计约定，作历史保留）
 ```
 
 ## 开发
 
 ```bash
-ruff format . && ruff check .   # 圈复杂度 ≤ 6、嵌套 ≤ 3
-mypy                            # strict
-pytest                          # 不调用真实 API；平台端到端测试用本地 uvicorn + 假 claude
-TEST_DATABASE_URL=postgresql://… TEST_VALKEY_URL=valkey://… pytest   # 加上 PG/Valkey 集成测试
+server/scripts/test.sh                          # Go：gofmt、vet、测试（docker 里，临时 PG 17 + Valkey 9）
+cd node && npm ci && npm test && npm run typecheck
+cd web && npm ci && npm test && npm run typecheck && npm run lint && npm run build
+cd web && npm run dev:mock                      # 带 mock 接口的前端开发
+cd protocol && npm ci && npm test && npm run typecheck
+make gen-protocol                               # 改了 protocol/schemas 之后重新生成
 ```
+
+真实 Claude 的端到端测试见 `deploy/e2e/README.md`。
 
 ## 许可证
 

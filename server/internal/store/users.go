@@ -7,7 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// User is a row of at_users (v1 columns + v2 extensions). Its role (admin | user) is not a
+// User is a row of at_users . Its role (admin | user) is not a
 // column: it is a Casbin grouping rule in casbin_rule, read through the enforcer (httpapi).
 type User struct {
 	ID                 string
@@ -15,7 +15,6 @@ type User struct {
 	Active             bool
 	MaxNodes           *int
 	CreatedAt          time.Time
-	PlatformVersion    int
 	DisplayName        string
 	MaxRunningThreads  *int
 	MustChangePassword bool
@@ -32,7 +31,7 @@ type UserSummary struct {
 	RunningTasks int `gorm:"->"`
 }
 
-const userCols = `u.id, u.email, u.active, u.max_nodes, u.created_at, u.platform_version,
+const userCols = `u.id, u.email, u.active, u.max_nodes, u.created_at,
 	u.display_name, u.max_running_threads, u.must_change_password, u.last_login_at`
 
 func (s *Store) users(ctx context.Context) *gorm.DB {

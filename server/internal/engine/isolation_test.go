@@ -186,7 +186,7 @@ func ownerStillHas(t *testing.T, tm *team, o owned) {
 
 func listsDoNotLeak(t *testing.T, intruder *browser, o owned) {
 	t.Helper()
-	for _, path := range []string{"/api/projects", "/api/nodes", "/api/conversations"} {
+	for _, path := range []string{"/api/projects", "/api/nodes"} {
 		code, raw := intruder.do("GET", path, nil)
 		if code != 200 {
 			t.Fatalf("intruder %s = %d", path, code)

@@ -4,7 +4,7 @@ export const ago = (min) => new Date(now - min * 60_000).toISOString();
 
 export const me = {
   id: "u1", email: "liu@example.com", display_name: "liu", role: "admin", active: true, max_nodes: null,
-  must_change_password: false, platform_version: 2, created_at: ago(60 * 24 * 4),
+  must_change_password: false, created_at: ago(60 * 24 * 4),
 };
 
 const delivery = {
@@ -294,8 +294,8 @@ export const repos = [
 
 export const adminUsers = [
   { ...me, email: "admin@prophey.ai", nodes: 2, running_tasks: 0, last_login_at: ago(5), max_running_threads: null },
-  { id: "u2", email: "dev@example.com", display_name: "", role: "user", active: true, max_nodes: null, must_change_password: false, platform_version: 2, created_at: ago(60 * 24), nodes: 1, running_tasks: 0, last_login_at: ago(600), max_running_threads: null },
-  { id: "u3", email: "old@example.com", display_name: "", role: "user", active: false, max_nodes: null, must_change_password: false, platform_version: 2, created_at: ago(60 * 24 * 5), nodes: 0, running_tasks: 0, last_login_at: null, max_running_threads: null },
+  { id: "u2", email: "dev@example.com", display_name: "", role: "user", active: true, max_nodes: null, must_change_password: false, created_at: ago(60 * 24), nodes: 1, running_tasks: 0, last_login_at: ago(600), max_running_threads: null },
+  { id: "u3", email: "old@example.com", display_name: "", role: "user", active: false, max_nodes: null, must_change_password: false, created_at: ago(60 * 24 * 5), nodes: 0, running_tasks: 0, last_login_at: null, max_running_threads: null },
 ];
 
 export const adminSettings = { registration_open: true, default_max_nodes: 5, max_running_threads: 4, delivery_default: delivery, office_default: "default" };

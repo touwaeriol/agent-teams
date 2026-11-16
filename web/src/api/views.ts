@@ -436,18 +436,3 @@ export interface SearchResult {
   tasks: TaskView[];
   deliverables: DeliverableView[];
 }
-
-export interface LegacyConversation {
-  id: string;
-  title: string;
-  created_at: string;
-  project_id: string | null;
-}
-
-export interface LegacyTask {
-  id: string;
-  assignee: string;
-  instruction: string;
-  status: string;
-  output?: string;
-}

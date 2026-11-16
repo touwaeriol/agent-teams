@@ -4,9 +4,7 @@
 
 ## 0. 约定
 
-- **P6 之后（v1 已退役）**：允许删 v1 列。第一个这样做的是 `00110_casbin_rule`（`at_users.role` → `casbin_rule`，§2.1）。
-- **迁移期规则（P6 之前）**：Python v1 与 Go v2 共用这个库，Python 每次启动会跑自己的 `CREATE … IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`。因此 v2 迁移**只新增表、只给 v1 表加带默认值的列、只加 v1 写入不会违反的索引和约束**；不改列类型、不改 v1 列的默认值、不删任何东西。所有标“P6 后”的清理在 Python 退役后的迁移里做。
-- **v1 不得读到 v2 的行**：v2 的讨论串任务、提问、留言写在 v1 的 `at_tasks`/`at_questions`/`at_mail` 里，状态值也有重叠（`pending`、`running`）。v1 的 `Hub.recover()` 会按 `status IN ('pending','running')` 恢复对话并接管。因此 **v1 防护补丁**（`architecture.md` §14.1 第 4 条：v1 的所有对话、任务、提问、留言查询只看 `at_conversations.kind = 'chat'` 且所有者 `platform_version = 1`）必须在 `00010_threads` 之前部署到生产。`at_conversations.kind` 和 `at_users.platform_version` 因此提前到 P1 的 `00002` 加（Python 补丁的启动 DDL 也幂等地加同样两列）。每个迁移的 CI 冒烟测试都包含“种入 v2 行 → 重启 v1 → 断言不变”。
+- **v1 已退役（2026-11-15），表结构只为 v2 服务**：可以改列、删列。v1 遗留的清理已经做完：`00110_casbin_rule`（`at_users.role` → `casbin_rule`，§2.1）和 `00120_drop_v1`（§3.1）。下文 §2 里标“v1:”的注释只说明列的来历，其中 v1 独有的列已删除。迁移期（v1、v2 共用这个库）的“只加不改”规则和 v1 防护补丁见 `architecture.md` §14（历史）。
 - 表名前缀保持 `at_`。
 - 新表主键：`TEXT`，值为带类型前缀的 ULID（`th_…`、`em_…`、`s_…`），便于日志里一眼认出、按时间有序。v1 的表保持原来的 id 规则（`uuid4().hex`、对话取前 12 位、`t<n>`、`q<n>`）。
 - 时间一律 `TIMESTAMPTZ NOT NULL DEFAULT now()`。
@@ -20,8 +18,7 @@ at_users ─┬─ at_sessions
           ├─ at_nodes ─────────── at_node_commands, at_node_logs
           ├─ at_git_connections
           ├─ at_roles（岗位模板；替代 at_teams）
-          ├─ at_teams（v1 YAML，只读保留）
-          └─ at_projects ─┬─ at_conversations（kind: coordinator | thread | chat）─┬─ at_messages
+          └─ at_projects ─┬─ at_conversations（kind: coordinator | thread）   ─┬─ at_messages
                           │                                                        ├─ at_tasks（小任务）
                           │                                                        ├─ at_questions（提问 + 审批）
                           │                                                        └─ at_mail
@@ -47,7 +44,7 @@ at_settings（全局键值）  at_audit_log  casbin_rule（用户 → 角色） 
 ```sql
 -- v1: id, email, password_hash, role, active, max_nodes, created_at（role 已由 00110 删掉，见下方 casbin_rule）
 ALTER TABLE at_users
-  ADD COLUMN IF NOT EXISTS platform_version SMALLINT NOT NULL DEFAULT 1,   -- 1 = 走 Python，2 = 走 Go v2（迁移期分流；v1 防护补丁也读它）
+  ADD COLUMN IF NOT EXISTS platform_version SMALLINT NOT NULL DEFAULT 1,   -- 迁移期 v1/v2 分流；00120 已删除
   ADD COLUMN IF NOT EXISTS max_running_threads INT,                         -- NULL = 用 at_settings.platform.max_running_threads
   ADD COLUMN IF NOT EXISTS event_seq BIGINT NOT NULL DEFAULT 0,             -- 用户事件流序号（/api/events 的 Last-Event-ID）
   ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT '',
@@ -237,7 +234,7 @@ CREATE TABLE at_project_repos (     -- 项目绑定的仓库（00070），positi
 
 -- v1 at_conversations: id, user_id, title, created_at, history JSONB, plan JSONB, project_id
 ALTER TABLE at_conversations   -- kind 在 00002（P1）加，v1 防护补丁按它过滤；其余在 00010
-  ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'chat',               -- coordinator | thread | chat（v1 旧数据；v1 只看 chat）
+  ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'chat',               -- coordinator | thread（00120 删了 chat 行和默认值，加了 CHECK）
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 CREATE UNIQUE INDEX IF NOT EXISTS at_conversations_one_coord
   ON at_conversations (project_id) WHERE kind = 'coordinator';
@@ -706,20 +703,22 @@ CREATE TABLE at_attachments (   -- 用户附在消息上的图片
 
 资料库“添加”的文件（`POST /api/projects/{pid}/library`）就是一条 `at_deliverables`（`published_by = 'user'`）加一条 `at_deliverable_files` 第 1 版，与 `publish_file` 同样的类型和 5 MB 限制、同样的签名 URL 沙箱访问。项目用量（`GET /api/projects/{pid}/usage`）直接汇总 `at_usage`，不另建表。
 
-## 3. 从 v1 表的映射
+## 3. 从 v1 表的映射（历史）
+
+切换时 v1 的表原地扩展成 v2 的表；下表是当时的处理。`00120_drop_v1` 之后，v1 独有的表和列、v1 的旧对话都已删除。
 
 | v1 表 | v2 处理 | 时机 | 说明 |
 | --- | --- | --- | --- |
-| `at_users` | 原表 + 新列；`role` 搬到 `casbin_rule` 后删除（00110） | P1 / P6 后 | Go 用 `golang.org/x/crypto/scrypt` 校验 `scrypt$N$r$p$salt$digest`（urlsafe base64 无填充），新密码同格式写入，v1 也能校验 |
+| `at_users` | 原表 + 新列；`role` 搬到 `casbin_rule` 后删除（00110），`platform_version` 删除（00120） | P1 / P6 后 | Go 用 `golang.org/x/crypto/scrypt` 校验 `scrypt$N$r$p$salt$digest`（urlsafe base64 无填充），新密码同格式写入，v1 也能校验 |
 | `at_sessions` | 原表 + 新列 | P1 | cookie 名 `agent_teams_session` 不变，`sha256(token)` 查找不变 → 切换无需重新登录 |
 | `at_settings` | 原表 | P1 | `platform`、`github_app` 键格式不变；`github_app.client_secret`/`pem` 用 Go 的 Fernet 解封（key = `urlsafe_b64(sha256(AGENT_TEAMS_SECRET_KEY))`） |
 | `at_nodes` | 原表 + 新列 | P1/P2 | `token_hash` 不变 → 旧令牌继续有效；`max_runs`（hello 里）→ `max_active_sessions` 初值 |
 | `at_git_connections` | 原表 + 新列 | P1 | PAT 密文 Fernet 不变；App 连接只用 `installation_id` |
-| `at_projects` | 原表 + 新列 | P3 | 默认值即旧行为（worktree、需验收）；`clear_repo` 等语义不变 |
-| `at_teams` | 转换为 `at_roles`，原表只读保留 | 用户切到 v2 时（Go 迁移函数 `ConvertTeam(user)`） | 新格式（`coordinator/lead/members`）直接映射；旧格式 `leader + employees`：leader → `lead` 岗位（同时复制为 `coordinator`，节点相同），每个 employee → `count:1` 的 member 岗位（`role` = 原名）；`node` 名 → `node_ids`；所有 member 岗位 `permission_mode: bypass`（默认）；`allowed_tools`/`disallowed_tools`/`model`/`max_turns`/`can_delegate`/`instructions`/`description` 原样；`claude_command`/`extra_args`/`workdir` 丢弃（v2 不支持，转换报告里列出）。P6 后删表 |
-| `at_conversations` | 原表 + `kind`（P1）+ `updated_at`（P3） | P1/P3 | v1 数据全部 `kind='chat'`，v2 里“旧对话（只读）”；`history`（Claude session id）不再使用；`plan` JSONB 仅用于旧对话展示（v2 用 `at_main_tasks`） |
+| `at_projects` | 原表 + 新列 | P3 | 默认值即旧行为（worktree、需验收）；`repo`/`branch`/`git_connection_id` 由 00070 搬进 `at_project_repos`，00120 删除 |
+| `at_teams` | 已删除（00120） | — | 岗位模板只在 `at_roles`；第一次读模板时建默认团队，不再从 v1 YAML 转换 |
+| `at_conversations` | 原表 + `kind`（P1）+ `updated_at`（P3） | P1/P3 | v1 的对话（`kind='chat'`）连同消息、任务、提问、留言在 00120 删除；`history`、`plan` 列也删掉；`kind` 只能是 `coordinator`/`thread`，没有默认值 |
 | `at_messages` | 原表 + 新列 | P3 | 旧数据 `author=''`：role leader → 显示为“负责人” |
-| `at_tasks` | 原表 + 新列 | P3 | 旧数据 `thread_id IS NULL`；v1 状态值是 v2 的子集，**v2 行对 v1 不可见只靠 v1 防护补丁**（§0） |
+| `at_tasks` | 原表 + 新列 | P3 | `output`（v1 结果文本）在 00120 并入空的 `summary` 后删除 |
 | `at_questions` | 原表 + 新列 | P3 | 旧 approval 的 `detail{tool_name,input}` 与 v2 相同；切换时该用户 open 的阻塞型提问标 `cancelled` |
 | `at_mail` | 原表不变 | — | |
 | （无） | `at_threads`、`at_main_tasks`、`at_employees`、`at_agent_sessions`、`at_tool_calls`、`at_usage`、`at_permission_rules`、`at_merge_queue`、`at_ci_runs`、`at_deliverables`、`at_project_memory`、`at_events`、`at_status_events`、`at_employee_status`、`at_office_layouts`、`at_node_commands`、`at_node_logs`、`at_audit_log`、`at_thread_nodes` | P3–P5 | 新增 |
@@ -733,7 +732,7 @@ CREATE TABLE at_attachments (   -- 用户附在消息上的图片
 5. `00020_delivery.sql`（P4）：`at_merge_queue`、`at_ci_runs`、`at_deliverables`、`at_project_memory`、`at_thread_nodes`。
 6. `00030_office.sql`（P5）：`at_office_layouts`、`at_projects.office_layout`。
    `00050_node_job_index.sql`：`at_node_commands` 的作业索引。`00060_design_skills.sql`：`at_roles.skills`、`at_skills`、`at_deliverable_files`、`at_upload_chunks`、`at_deliverable_comments`（architecture.md §6.5）。
-7. `00100_drop_v1.sql`（P6 后）：删 `at_teams`、`at_conversations.history`；`at_tasks.output` 并入 `summary`；去掉不再需要的默认值。
+7. `00120_drop_v1.sql`（v1 退役后）：删 v1 的旧对话（`kind` 不是 `coordinator`/`thread` 的 `at_conversations` 行，消息、任务、提问、留言随外键级联删除）；`at_conversations` 删 `history`、`plan`，`kind` 去掉默认值 `'chat'` 并加 `CHECK (kind IN ('coordinator','thread'))`；删 `at_teams`；`at_tasks.output` 并入空的 `summary` 后删除；删 `at_users.platform_version`；删 `at_projects.repo`/`branch`/`git_connection_id`。Down 是空操作（数据回不来，要用备份）。
 
 `00110_casbin_rule.sql`（P6 后）：建 `casbin_rule`，每个用户按 `at_users.role` 写一行 `g, <id>, admin|user`，再删 `at_users.role`；Down 加回该列并按规则回填（§2.1）。
 
@@ -745,4 +744,4 @@ CREATE TABLE at_attachments (   -- 用户附在消息上的图片
 
 `00070_project_repos.sql`：`at_project_repos`、`at_thread_repos`、`at_merge_queue.repo`、`at_tasks.pushed`；把每个项目的 repo/branch/git_connection_id 迁进去（基准分支写进 context），给已有讨论串和队列条目补上仓库（architecture.md §8.1）。
 
-每个迁移在 CI 里：对“生产结构快照”执行 → 启动 Python v1 跑冒烟测试（注册、建项目、发消息、节点连接）→ 种入 v2 用户的讨论串、`pending`/`running`/`claimed` 任务、open 提问与留言 → 重启 Python v1 → 断言这些行未变、v1 对话列表不含它们 → 通过才算合规。
+每个迁移的测试（`server/migrations/migrations_test.go`）：空库全量 up；在生产 v1 结构快照（`testdata/v1_schema.sql`）上 up，基线不改结构、账号/项目/节点/Git 连接保留、只有有意删除的 v1 元素消失；有数据搬迁的迁移各有一个先 `UpTo` 前一版、种数据、再 up（必要时 down）的测试。

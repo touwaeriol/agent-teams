@@ -25,7 +25,7 @@ const sessionCols = `s.token_hash, s.user_id, s.expires_at, s.created_at, s.last
 
 // sessionUserCols selects the user columns with a u_ prefix (embedded below).
 const sessionUserCols = `u.id AS u_id, u.email AS u_email, u.active AS u_active,
-	u.max_nodes AS u_max_nodes, u.created_at AS u_created_at, u.platform_version AS u_platform_version,
+	u.max_nodes AS u_max_nodes, u.created_at AS u_created_at,
 	u.display_name AS u_display_name, u.max_running_threads AS u_max_running_threads,
 	u.must_change_password AS u_must_change_password, u.last_login_at AS u_last_login_at`
 

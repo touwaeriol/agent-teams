@@ -162,10 +162,6 @@
             "format": "int64",
             "type": "integer"
           },
-          "platform_version": {
-            "format": "int64",
-            "type": "integer"
-          },
           "role": {
             "enum": [
               "admin",
@@ -189,7 +185,6 @@
           "role",
           "active",
           "max_nodes",
-          "platform_version",
           "must_change_password",
           "created_at"
         ],
@@ -1453,92 +1448,6 @@
         "required": [
           "text",
           "at"
-        ],
-        "type": "object"
-      },
-      "LegacyConversation": {
-        "additionalProperties": false,
-        "properties": {
-          "created_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "project_id": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "title": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "title",
-          "created_at",
-          "project_id",
-          "kind"
-        ],
-        "type": "object"
-      },
-      "LegacyPlanOutputBody": {
-        "additionalProperties": false,
-        "properties": {
-          "steps": {
-            "description": "v1 plan steps [{title, status}]"
-          }
-        },
-        "required": [
-          "steps"
-        ],
-        "type": "object"
-      },
-      "LegacyTask": {
-        "additionalProperties": false,
-        "properties": {
-          "assignee": {
-            "type": "string"
-          },
-          "depends_on": {
-            "items": {
-              "type": "string"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          },
-          "id": {
-            "type": "string"
-          },
-          "instruction": {
-            "type": "string"
-          },
-          "output": {
-            "type": "string"
-          },
-          "parent": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "assignee",
-          "instruction",
-          "depends_on",
-          "status",
-          "output",
-          "parent"
         ],
         "type": "object"
       },
@@ -4141,46 +4050,6 @@
         ],
         "type": "object"
       },
-      "TeamInputBody": {
-        "additionalProperties": false,
-        "properties": {
-          "config": {
-            "maxLength": 200000,
-            "type": "string"
-          },
-          "team": {
-            "additionalProperties": {},
-            "description": "Structured form; wins over config",
-            "type": "object"
-          }
-        },
-        "type": "object"
-      },
-      "TeamV1": {
-        "additionalProperties": false,
-        "properties": {
-          "config": {
-            "type": "string"
-          },
-          "error": {
-            "type": "string"
-          },
-          "saved": {
-            "type": "boolean"
-          },
-          "team": {
-            "additionalProperties": {},
-            "type": "object"
-          }
-        },
-        "required": [
-          "config",
-          "team",
-          "saved",
-          "error"
-        ],
-        "type": "object"
-      },
       "TempPasswordOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -4836,10 +4705,6 @@
           "must_change_password": {
             "type": "boolean"
           },
-          "platform_version": {
-            "format": "int64",
-            "type": "integer"
-          },
           "role": {
             "enum": [
               "admin",
@@ -4855,7 +4720,6 @@
           "role",
           "active",
           "max_nodes",
-          "platform_version",
           "must_change_password",
           "created_at"
         ],
@@ -5795,133 +5659,6 @@
         ]
       }
     },
-    "/api/conversations": {
-      "get": {
-        "operationId": "list-conversations",
-        "parameters": [
-          {
-            "explode": false,
-            "in": "query",
-            "name": "project_id",
-            "schema": {
-              "maxLength": 64,
-              "type": "string"
-            }
-          },
-          {
-            "explode": false,
-            "in": "query",
-            "name": "kind",
-            "schema": {
-              "default": "chat",
-              "enum": [
-                "chat",
-                "coordinator",
-                "thread",
-                ""
-              ],
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/LegacyConversation"
-                  },
-                  "type": [
-                    "array",
-                    "null"
-                  ]
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/APIError"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "v1 conversations (read only); kind defaults to chat",
-        "tags": [
-          "legacy"
-        ]
-      },
-      "post": {
-        "operationId": "create-conversation",
-        "responses": {
-          "204": {
-            "description": "No Content"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/APIError"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "v1 endpoint: always 409 legacy_read_only",
-        "tags": [
-          "legacy"
-        ]
-      }
-    },
-    "/api/conversations/{cid}/events": {
-      "get": {
-        "operationId": "conversation-events",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "cid",
-            "required": true,
-            "schema": {
-              "maxLength": 64,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "text/event-stream": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "text/event-stream"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/APIError"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "v1 conversation stream: one snapshot of a finished conversation, then idle",
-        "tags": [
-          "events"
-        ]
-      }
-    },
     "/api/conversations/{cid}/interrupt": {
       "post": {
         "operationId": "interrupt-conversation",
@@ -5953,53 +5690,6 @@
         },
         "tags": [
           "conversations"
-        ]
-      }
-    },
-    "/api/conversations/{cid}/mail": {
-      "get": {
-        "operationId": "conversation-mail",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "cid",
-            "required": true,
-            "schema": {
-              "maxLength": 64,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/MailView"
-                  },
-                  "type": [
-                    "array",
-                    "null"
-                  ]
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/APIError"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "tags": [
-          "legacy"
         ]
       }
     },
@@ -6122,47 +5812,6 @@
         "summary": "Send a message to the conversation's employee (coordinator or thread lead)",
         "tags": [
           "conversations"
-        ]
-      }
-    },
-    "/api/conversations/{cid}/plan": {
-      "get": {
-        "operationId": "conversation-plan",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "cid",
-            "required": true,
-            "schema": {
-              "maxLength": 64,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LegacyPlanOutputBody"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/APIError"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "tags": [
-          "legacy"
         ]
       }
     },
@@ -6295,53 +5944,6 @@
         "summary": "Answer a question, or decide an approval card (allow / allow_always / deny)",
         "tags": [
           "conversations"
-        ]
-      }
-    },
-    "/api/conversations/{cid}/tasks": {
-      "get": {
-        "operationId": "conversation-tasks",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "cid",
-            "required": true,
-            "schema": {
-              "maxLength": 64,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/LegacyTask"
-                  },
-                  "type": [
-                    "array",
-                    "null"
-                  ]
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/APIError"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "tags": [
-          "legacy"
         ]
       }
     },
@@ -9300,7 +8902,7 @@
             "description": "Error"
           }
         },
-        "summary": "Role templates (converted from the v1 team on first use)",
+        "summary": "Role templates (the defaults on first use)",
         "tags": [
           "team"
         ]
@@ -9744,76 +9346,6 @@
           }
         },
         "summary": "Delete an uploaded skill and remove it from the roles",
-        "tags": [
-          "team"
-        ]
-      }
-    },
-    "/api/team": {
-      "get": {
-        "operationId": "get-team",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TeamV1"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/APIError"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "v1 compatible YAML view",
-        "tags": [
-          "team"
-        ]
-      },
-      "put": {
-        "operationId": "save-team",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TeamInputBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TeamV1"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/APIError"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "v1 compatible; same as PUT /api/roles/yaml",
         "tags": [
           "team"
         ]

@@ -82,7 +82,7 @@ func TestUpOnProductionV1Schema(t *testing.T) {
 	if _, err := migrations.Up(ctx, db); err != nil {
 		t.Fatalf("migrate up on v1 schema: %v", err)
 	}
-	assertV1DataIntact(t, db)
+	assertV1AccountsKept(t, db)
 	assertV1ColumnsKept(t, db, before)
 	var rule string
 	if err := db.QueryRow(`SELECT ptype || ',' || v0 || ',' || v1 FROM casbin_rule`).Scan(&rule); err != nil || rule != "g,u1,admin" {
@@ -90,29 +90,43 @@ func TestUpOnProductionV1Schema(t *testing.T) {
 	}
 }
 
-// droppedV1Columns are the v1 columns a later migration removed on purpose (v1 is retired):
-// at_users.role became a Casbin grouping rule in casbin_rule (00110).
-var droppedV1Columns = []string{"at_users.role "}
+// droppedV1 are the v1 schema elements later migrations removed on purpose (v1 is retired):
+// at_users.role became a Casbin grouping rule (00110); 00120 dropped the v1-only table and
+// columns (at_teams, conversation history/plan, task output, the project's single repository).
+var droppedV1 = []string{"at_users.role ", "at_teams.", "constraint at_teams_", "index CREATE UNIQUE INDEX at_teams_pkey",
+	"at_conversations.history ", "at_conversations.plan ", "at_conversations.kind ", "at_tasks.output ",
+	"at_projects.repo ", "at_projects.branch ", "at_projects.git_connection_id ", "constraint at_projects_git_connection_id_fkey"}
 
-func assertV1DataIntact(t *testing.T, db *sql.DB) {
+// assertV1AccountsKept: accounts, sessions, nodes, Git connections, projects and settings
+// survive; the v1 chat conversation and everything hanging off it are gone (00120).
+func assertV1AccountsKept(t *testing.T, db *sql.DB) {
 	t.Helper()
-	var email, kind string
-	var pv int
+	var email string
 	var pinned, requireAcceptance bool
-	row := db.QueryRow(`SELECT u.email, u.platform_version, p.pinned, p.require_acceptance, c.kind
-		FROM at_users u JOIN at_projects p ON p.user_id = u.id JOIN at_conversations c ON c.project_id = p.id`)
-	if err := row.Scan(&email, &pv, &pinned, &requireAcceptance, &kind); err != nil {
+	row := db.QueryRow(`SELECT u.email, p.pinned, p.require_acceptance FROM at_users u JOIN at_projects p ON p.user_id = u.id`)
+	if err := row.Scan(&email, &pinned, &requireAcceptance); err != nil {
 		t.Fatal(err)
 	}
-	if email != "a@example.com" || pv != 1 || !pinned || !requireAcceptance || kind != "chat" {
-		t.Fatalf("data changed: %s %d %v %v %s", email, pv, pinned, requireAcceptance, kind)
+	if email != "a@example.com" || !pinned || !requireAcceptance {
+		t.Fatalf("data changed: %s %v %v", email, pinned, requireAcceptance)
 	}
-	var tasks, sessions int
-	_ = db.QueryRow(`SELECT count(*) FROM at_tasks WHERE thread_id IS NULL AND kind = 'work'`).Scan(&tasks)
+	var sessions, nodes, conns, settings, repos int
 	_ = db.QueryRow(`SELECT count(*) FROM at_sessions WHERE csrf_secret = ''`).Scan(&sessions)
-	if tasks != 1 || sessions != 1 {
-		t.Fatalf("tasks %d sessions %d", tasks, sessions)
+	_ = db.QueryRow(`SELECT count(*) FROM at_nodes`).Scan(&nodes)
+	_ = db.QueryRow(`SELECT count(*) FROM at_git_connections WHERE installation_id = 42`).Scan(&conns)
+	_ = db.QueryRow(`SELECT count(*) FROM at_settings`).Scan(&settings)
+	_ = db.QueryRow(`SELECT count(*) FROM at_project_repos WHERE repo = 'o/r' AND git_connection_id = 'g1'`).Scan(&repos)
+	if sessions != 1 || nodes != 1 || conns != 1 || settings != 1 || repos != 1 {
+		t.Fatalf("sessions %d nodes %d conns %d settings %d repos %d", sessions, nodes, conns, settings, repos)
 	}
+	var convs, msgs, tasks int
+	_ = db.QueryRow(`SELECT count(*) FROM at_conversations`).Scan(&convs)
+	_ = db.QueryRow(`SELECT count(*) FROM at_messages`).Scan(&msgs)
+	_ = db.QueryRow(`SELECT count(*) FROM at_tasks`).Scan(&tasks)
+	if convs != 0 || msgs != 0 || tasks != 0 {
+		t.Fatalf("v1 chat left: conversations %d messages %d tasks %d", convs, msgs, tasks)
+	}
+	assertNoTable(t, db, "at_teams")
 }
 
 // snapshot lists every column of the public schema with its type, default and nullability,
@@ -154,7 +168,7 @@ func assertV1ColumnsKept(t *testing.T, db *sql.DB, before string) {
 }
 
 func dropped(line string) bool {
-	for _, c := range droppedV1Columns {
+	for _, c := range droppedV1 {
 		if strings.HasPrefix(line, c) {
 			return true
 		}
@@ -181,7 +195,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 110 {
+	if migrations.Latest() != 120 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -402,3 +416,80 @@ func assertNoTable(t *testing.T, db *sql.DB, name string) {
 		t.Errorf("table %s still there (%v)", name, err)
 	}
 }
+
+// TestDropV1Migration: 00120 deletes v1 chat conversations with their messages, tasks, mail
+// and questions, keeps coordinator and thread conversations, folds at_tasks.output into an
+// empty summary and drops the v1-only table and columns. Down is a no-op.
+func TestDropV1Migration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 110); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(dropV1Seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 120); err != nil {
+		t.Fatal(err)
+	}
+	var convs, chatRows string
+	_ = db.QueryRow(`SELECT string_agg(id || '=' || kind, ',' ORDER BY id) FROM at_conversations`).Scan(&convs)
+	_ = db.QueryRow(`SELECT (SELECT count(*) FROM at_messages WHERE conversation_id = 'old1') || ',' ||
+		(SELECT count(*) FROM at_tasks WHERE conversation_id = 'old1') || ',' ||
+		(SELECT count(*) FROM at_mail WHERE conversation_id = 'old1') || ',' ||
+		(SELECT count(*) FROM at_questions WHERE conversation_id = 'old1')`).Scan(&chatRows)
+	if convs != "co1=coordinator,th1=thread" || chatRows != "0,0,0,0" {
+		t.Fatalf("conversations %s chat rows %s", convs, chatRows)
+	}
+	var summaries string
+	_ = db.QueryRow(`SELECT string_agg(id || '=' || summary, ',' ORDER BY id) FROM at_tasks`).Scan(&summaries)
+	if summaries != "t1=old result,t2=kept" {
+		t.Fatalf("summaries %s", summaries)
+	}
+	var msgs int
+	_ = db.QueryRow(`SELECT count(*) FROM at_messages`).Scan(&msgs)
+	if msgs != 2 {
+		t.Fatalf("messages %d", msgs)
+	}
+	for _, col := range []string{"at_conversations.history", "at_conversations.plan", "at_tasks.output", "at_users.platform_version",
+		"at_projects.repo", "at_projects.branch", "at_projects.git_connection_id"} {
+		var found bool
+		parts := strings.SplitN(col, ".", 2)
+		_ = db.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2)`,
+			parts[0], parts[1]).Scan(&found)
+		if found {
+			t.Errorf("%s still there", col)
+		}
+	}
+	assertNoTable(t, db, "at_teams")
+	if _, err := db.Exec(`INSERT INTO at_conversations (id, user_id, title, project_id) VALUES ('x1', 'u1', 'x', 'p1')`); err == nil {
+		t.Fatal("conversation without a kind accepted")
+	}
+	if _, err := db.Exec(`INSERT INTO at_conversations (id, user_id, title, project_id, kind) VALUES ('x2', 'u1', 'x', 'p1', 'chat')`); err == nil {
+		t.Fatal("chat conversation accepted")
+	}
+	if _, err := p.DownTo(ctx, 110); err != nil {
+		t.Fatalf("down is a no-op: %v", err)
+	}
+}
+
+const dropV1Seed = `
+INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_teams (user_id, config) VALUES ('u1', 'leader: lead');
+INSERT INTO at_projects (id, user_id, name, repo, branch) VALUES ('p1', 'u1', 'A', 'o/r', 'main');
+INSERT INTO at_conversations (id, user_id, title, project_id, history, plan) VALUES ('old1', 'u1', 'old chat', 'p1', '{"lead": "s"}', '[{"title": "x"}]');
+INSERT INTO at_messages (conversation_id, role, content) VALUES ('old1', 'user', 'hi'), ('old1', 'leader', 'hello');
+INSERT INTO at_tasks (conversation_id, id, assignee, instruction, depends_on, status, output) VALUES ('old1', 't1', 'dev', 'do', '[]', 'done', 'ok');
+INSERT INTO at_mail (conversation_id, sender, recipient, body) VALUES ('old1', 'a', 'b', 'note');
+INSERT INTO at_questions (conversation_id, id, asker, audience, kind, text, status) VALUES ('old1', 'q1', 'dev', 'user', 'ask', '?', 'open');
+INSERT INTO at_conversations (id, user_id, title, project_id, kind) VALUES ('co1', 'u1', '项目统筹', 'p1', 'coordinator'), ('th1', 'u1', 't', 'p1', 'thread');
+INSERT INTO at_threads (id, project_id, user_id, no, title, branch, base_branch) VALUES ('th1', 'p1', 'u1', 1, 't', 'thread/1-t', 'main');
+INSERT INTO at_messages (conversation_id, role, content) VALUES ('co1', 'user', 'hi'), ('th1', 'user', 'go');
+INSERT INTO at_tasks (conversation_id, id, thread_id, assignee, instruction, depends_on, status, output, summary)
+  VALUES ('th1', 't1', 'th1', 'dev', 'do', '[]', 'done', 'old result', ''),
+         ('th1', 't2', 'th1', 'dev', 'do', '[]', 'done', 'ignored', 'kept');
+`

@@ -82,7 +82,7 @@ func InsertTask(ctx context.Context, tx *Tx, n NewTask) (Task, error) {
 	err = tx.Gorm(ctx).Table("at_tasks").Create(map[string]any{"conversation_id": n.Thread.ID, "id": id,
 		"thread_id": n.Thread.ID, "main_task_id": n.MainTaskID, "assignee": n.Assignee, "role": n.Role,
 		"claimed_by": n.ClaimedBy, "kind": n.Kind, "instruction": n.Instruction, "depends_on": deps, "status": n.Status,
-		"output": "", "parent": n.Parent, "priority": n.Priority, "created_by": n.CreatedBy}).Error
+		"parent": n.Parent, "priority": n.Priority, "created_by": n.CreatedBy}).Error
 	if err != nil {
 		return Task{}, err
 	}

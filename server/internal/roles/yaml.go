@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"regexp"
-	"strings"
 
 	"go.yaml.in/yaml/v3"
 
@@ -52,38 +50,13 @@ type yamlTeam struct {
 	Members     []yamlRole `yaml:"members"`
 }
 
-// v1Team is the old platform format: leader + employees.
-type v1Team struct {
-	Leader    string       `yaml:"leader"`
-	Employees []v1Employee `yaml:"employees"`
-}
-
-type v1Employee struct {
-	Name            string   `yaml:"name"`
-	Type            string   `yaml:"type"`
-	Node            string   `yaml:"node"`
-	Description     string   `yaml:"description"`
-	Instructions    string   `yaml:"instructions"`
-	Model           string   `yaml:"model"`
-	PermissionMode  string   `yaml:"permission_mode"`
-	Sandbox         string   `yaml:"sandbox"`
-	AllowedTools    []string `yaml:"allowed_tools"`
-	DisallowedTools []string `yaml:"disallowed_tools"`
-	MaxTurns        *int     `yaml:"max_turns"`
-	CanDelegate     bool     `yaml:"can_delegate"`
-	ClaudeCommand   string   `yaml:"claude_command"`
-	CodexCommand    string   `yaml:"codex_command"`
-	ExtraArgs       []string `yaml:"extra_args"`
-	Workdir         string   `yaml:"workdir"`
-}
-
 // Parsed is the result of reading YAML: roles plus a conversion report.
 type Parsed struct {
 	Roles  []store.Role
 	Report []string // dropped settings, unknown nodes
 }
 
-// FromYAML reads either format. nodeIDs maps node names to ids.
+// FromYAML reads the coordinator/lead/members format. nodeIDs maps node names to ids.
 func FromYAML(text string, nodeIDs map[string]string) (Parsed, error) {
 	var probe map[string]any
 	if err := yaml.Unmarshal([]byte(text), &probe); err != nil {
@@ -93,7 +66,7 @@ func FromYAML(text string, nodeIDs map[string]string) (Parsed, error) {
 		return Parsed{}, errors.New("团队配置是空的")
 	}
 	if _, old := probe["employees"]; old {
-		return fromV1(text, nodeIDs)
+		return Parsed{}, errors.New("旧平台的 leader/employees 格式已不再支持，请改用 coordinator/lead/members")
 	}
 	return fromNew(text, nodeIDs)
 }
@@ -167,102 +140,6 @@ func nonEmpty(s string) []string {
 		return nil
 	}
 	return []string{s}
-}
-
-// fromV1 converts leader + employees (data-model.md §3, at_teams row).
-func fromV1(text string, nodeIDs map[string]string) (Parsed, error) {
-	var team v1Team
-	if err := yaml.Unmarshal([]byte(text), &team); err != nil {
-		return Parsed{}, fmt.Errorf("YAML 格式错误：%w", err)
-	}
-	var p Parsed
-	leader := findEmployee(team, team.Leader)
-	if leader == nil {
-		return Parsed{}, fmt.Errorf("leader %q 不在 employees 里", team.Leader)
-	}
-	lead := v1Role(*leader, Lead, "lead", nodeIDs, &p.Report)
-	coord := lead
-	coord.Tier, coord.Role, coord.Title, coord.Runtime = Coordinator, "coordinator", "项目统筹", Claude
-	coord.PermissionMode, coord.CanDelegate, coord.Sandbox = store.PermBypass, false, ""
-	lead.PermissionMode, lead.Title = store.PermBypass, first(lead.Title, "组长")
-	p.add(coord)
-	p.add(lead)
-	taken := map[string]bool{"coordinator": true, "lead": true}
-	for _, e := range team.Employees {
-		if e.Name == team.Leader {
-			continue
-		}
-		r := v1Role(e, Member, uniqueKey(e.Name, taken), nodeIDs, &p.Report)
-		r.Sort = len(p.Roles) - 1
-		p.add(r)
-	}
-	return p, nil
-}
-
-func findEmployee(team v1Team, name string) *v1Employee {
-	for i := range team.Employees {
-		if team.Employees[i].Name == name {
-			return &team.Employees[i]
-		}
-	}
-	return nil
-}
-
-func v1Role(e v1Employee, tier, key string, nodeIDs map[string]string, report *[]string) store.Role {
-	r := store.Role{Tier: tier, Role: key, Title: e.Name, Runtime: runtimeOf(e.Type), Count: 1,
-		Description: e.Description, Instructions: e.Instructions, Model: e.Model, PermissionMode: store.PermBypass,
-		CanDelegate: e.CanDelegate, AllowedTools: e.AllowedTools, DisallowedTools: e.DisallowedTools,
-		MaxTurns: e.MaxTurns}
-	if r.Runtime == Codex {
-		r.Sandbox = e.Sandbox
-	}
-	r.NodeIDs = resolveNodes(nonEmpty(e.Node), nodeIDs, key, report)
-	dropped := droppedFields(e)
-	if len(dropped) > 0 {
-		*report = append(*report, fmt.Sprintf("%s：v2 不支持 %s，已丢弃", e.Name, strings.Join(dropped, "、")))
-	}
-	return r
-}
-
-func droppedFields(e v1Employee) []string {
-	var out []string
-	if e.ClaudeCommand != "" && e.ClaudeCommand != "claude" {
-		out = append(out, "claude_command")
-	}
-	if e.CodexCommand != "" && e.CodexCommand != "codex" {
-		out = append(out, "codex_command")
-	}
-	if len(e.ExtraArgs) > 0 {
-		out = append(out, "extra_args")
-	}
-	if e.Workdir != "" {
-		out = append(out, "workdir")
-	}
-	return out
-}
-
-var notKey = regexp.MustCompile(`[^a-z0-9-]+`)
-
-// uniqueKey turns a v1 employee name into a role key matching ^[a-z][a-z0-9-]{0,23}$.
-func uniqueKey(name string, taken map[string]bool) string {
-	key := strings.Trim(notKey.ReplaceAllString(strings.ToLower(name), "-"), "-")
-	if key == "" || key[0] < 'a' || key[0] > 'z' {
-		key = "r-" + key
-	}
-	key = strings.TrimRight(truncate(key, 24), "-")
-	base := truncate(key, 21)
-	for i := 2; taken[key]; i++ {
-		key = fmt.Sprintf("%s-%d", base, i)
-	}
-	taken[key] = true
-	return key
-}
-
-func truncate(s string, n int) string {
-	if len(s) > n {
-		return s[:n]
-	}
-	return s
 }
 
 // ToYAML renders roles in the threads.md format. nodeNames maps ids to names.

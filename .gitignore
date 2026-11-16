@@ -1,13 +1,4 @@
-__pycache__/
-*.py[cod]
-.venv/
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
 dist/
-build/
-*.egg-info/
 .env
 node_modules/
-src/agent_teams/server/static/app/
 *.tsbuildinfo

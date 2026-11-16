@@ -2,8 +2,8 @@
 
 Go module `github.com/touwaeriol/agent-teams/server`, one binary `atctl`.
 Spec: `docs/v2/architecture.md` (§3.1, §4, §5.1, §10, §12, §14), `docs/v2/data-model.md`, `docs/v2/api.md`.
-One-shot cut-over (architecture.md §14 note): there is no Python proxy, no `/internal/*`
-endpoints and no protocol-1 support. v2 reads the v1 data in place.
+The Python v1 platform is retired: v2 took over its database in place (one-shot cut-over,
+architecture.md §14) and `00120_drop_v1` removed what only v1 used. Protocol 2 only.
 
 The foundation (accounts, admin, projects, Git connections and the GitHub App, nodes, role
 templates, office layouts, the node installer and the web app) and the orchestration engines
@@ -15,7 +15,7 @@ plug into it through the extension points below; see "Orchestration" at the end.
 ```
 cmd/atctl/            serve | migrate | healthcheck | openapi | admin
   wire.go             THE place where orchestration plugs into the HTTP server
-migrations/           goose SQL migrations (embedded), runner, v1 schema test fixture
+migrations/           goose SQL migrations (embedded), runner, production v1 schema test fixture
 internal/config/      env → Config, slog JSON logger
 internal/auth/        scrypt (v1 format), sha256 tokens, Fernet SecretBox (v1 compatible,
                       key rotation), signed OAuth state (v1 compatible)
@@ -26,7 +26,7 @@ internal/github/      REST client, App JWT, App credentials (at_settings.github_
                       installation token cache (memory + sealed in Valkey, keyed by repos+permissions)
 internal/office/      layout registry: OFFICE_DIR files (fsnotify, 300 ms debounce) +
                       at_office_layouts, extends merge, schema + structural validation
-internal/roles/       role templates: validation, defaults, YAML view, v1 at_teams conversion
+internal/roles/       role templates: validation, defaults, YAML view
 internal/platform/    extension interfaces (NodeRegistry, Events, Hooks) + no-op defaults
 internal/httpapi/     Gin + huma v2 (humagin) routes, session/CSRF + Casbin middleware, install-node.sh, SPA
 internal/testdb/      fresh database per test from TEST_DATABASE_URL
@@ -76,7 +76,7 @@ atctl admin reseal                   # re-encrypt sealed PATs and App secrets wi
 | `NODE_DIST_DIR` (/srv/node-dist) | daemon tarballs served at `/node/dist/` |
 | `AGENT_TEAMS_ADMIN_EMAILS` | these emails register as admin (first user always does) |
 | `GITHUB_WEBHOOK_SECRET` | optional override of the App's webhook secret |
-| `GITHUB_API_URL` / `GITHUB_WEB_URL` | optional REST / web base (GitHub Enterprise, or `deploy/v2/e2e/localgh.mjs` in local end-to-end tests) |
+| `GITHUB_API_URL` / `GITHUB_WEB_URL` | optional REST / web base (GitHub Enterprise, or `deploy/e2e/localgh.mjs` in local end-to-end tests) |
 | `LOG_LEVEL` | debug, info (default), warn, error |
 
 ## Tests
@@ -93,14 +93,16 @@ still run. Notable tests:
 
 - `migrations`: up on an empty DB; up on the production v1 schema (`testdata/v1_schema.sql`,
   pg_dump -s) with v1 rows; the baseline changes nothing (column/index/constraint snapshot
-  identical) and every v1 column survives the later migrations.
+  identical), accounts/projects/nodes/Git connections survive, and only the v1 elements dropped on
+  purpose (00110, 00120) disappear. One test per data-moving migration (00070, 00096, 00097,
+  00110, 00120).
 - `internal/auth`: `testdata/v1_vectors.json` was produced by the real v1 Python modules
   (`secrets.py`, `security.py`, `credentials.py`): Fernet ciphertexts, a scrypt hash, a token
   hash and a signed state all verify in Go; Go ciphertexts decrypt in Python.
 - `internal/httpapi`: end-to-end over HTTP against PostgreSQL with a fake GitHub (accounts,
   CSRF, v1 sessions, projects, memory, PAT + App flow + webhook, nodes, roles, office, admin,
   static, install script). `install_script_test.go` runs `install-node.sh` in a fake HOME with
-  stub `node`/`npm`/`curl`/`systemctl` (fresh install, v1 node.env upgrade, rollback, refusals).
+  stub `node`/`npm`/`curl`/`systemctl` (fresh install, upgrade keeping node.env, rollback, refusals).
 - `cmd/atctl`: `web/src/api/openapi.json` must equal `atctl openapi` (regenerate with
   `UPDATE_OPENAPI=1`).
 
@@ -218,7 +220,8 @@ are created by the migrations here; their queries belong to the orchestration pa
 ## Deviations from the spec
 
 - No Python proxy, no `/internal/*`, no `platform_version` routing, no `legacy_guard` check in
-  migrations (one-shot cut-over). `platform_version` is still a column and in `UserView`.
+  migrations (one-shot cut-over); `00120_drop_v1` dropped `platform_version`, `at_teams`, the v1
+  conversations and the other v1-only columns.
 - `go.mod` says `go 1.26.0`: the current huma, goose, x/crypto releases require it (spec: 1.25).
 - GitHub: a small hand-written REST client (`internal/github`) instead of go-github +
   ghinstallation; same behaviour as v1 `github.py`, plus pagination and narrowed tokens.
@@ -279,7 +282,6 @@ Deviations and limits of the orchestration side:
 - Extra migration `00040_orchestration.sql`: `at_node_commands.env_id/meta`, `at_tasks.nudges/
   created_by`, `at_user_events` (user stream replay), two indexes.
 - Session live output (`stream.delta`) is relayed only inside the replica holding the node link.
-- Users without role templates get `roles.Defaults` (a v1 `at_teams` team is converted only by
-  `GET /api/roles`, as before).
+- Users without role templates get `roles.Defaults` on the first `GET /api/roles`.
 - `/metrics`, OTel, Codex-specific approval decisions beyond allow/deny/allow_always and the
   geometric office checks are not implemented.

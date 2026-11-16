@@ -41,9 +41,9 @@ runtime image serves `/srv/web`. The `/dev/office` demo imports `office/default.
 | `src/components/shell` | `ProjectShell` / `SettingsShell` (sidebar on desktop, drawer on phones, live streams), `ProjectSidebar`, `ProjectSwitcher`, `SettingsNav`, `NavButton` |
 | `src/components/Markdown.vue` · `lib/markdown.ts` | Markdown with react-markdown's exact pipeline (remark-gfm → hast → vnodes), the same CJK URL fencing and safe URL transform |
 | `src/lib` | pure helpers (`present`, `live`, `chat`, `ask`, `library`, `roles`…) plus the Vue versions of `persist` (`useDraft`), `theme`, `media`, `flash`, and `toast` |
-| `src/pages` | every page: `Main` (+ `main/`), `Overview`, `ThreadRoute` / `ThreadPage`, `Deliverables`, `DesignViewer`, `Office`, `NewProject`, `Legacy`, `projectSettings/`, `settings/*`, `Login`, `ChangePassword` |
+| `src/pages` | every page: `Main` (+ `main/`), `Overview`, `ThreadRoute` / `ThreadPage`, `Deliverables`, `DesignViewer`, `Office`, `NewProject`, `projectSettings/`, `settings/*`, `Login`, `ChangePassword` |
 | `src/office` | the office renderer (see its README) |
-| `mock/` | the dev mock API; not part of the build (also used by `deploy/v2/e2e` screenshots) |
+| `mock/` | the dev mock API; not part of the build (also used by `deploy/e2e` screenshots) |
 
 ## Conventions
 
@@ -90,5 +90,5 @@ runtime image serves `/srv/web`. The `/dev/office` demo imports `office/default.
 ## Porting status
 
 Complete: every screen of the React app is ported (checked side by side against the mock in light and
-dark, desktop and phone), including the read-only v1 conversation page (`pages/Legacy.vue`). The React
+dark, desktop and phone). The React
 tests are ported too (`__tests__/cards.test.ts` holds the former chat card and mark tests).

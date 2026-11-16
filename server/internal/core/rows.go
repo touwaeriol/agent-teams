@@ -96,7 +96,7 @@ func (AgentSession) TableName() string { return "at_agent_sessions" }
 const sessionCols = `id, employee_id, node_id, runtime, sdk_session_id, codex_thread_id, cwd, branch, state, open_gen,
 	permission_mode, init, last_event_no, opened_at, last_active_at, closed_at, close_reason`
 
-// Task is a row of at_tasks (v1 table, v2 columns).
+// Task is a row of at_tasks.
 type Task struct {
 	ConversationID string
 	ID             string
@@ -109,7 +109,6 @@ type Task struct {
 	Instruction    string
 	DependsOn      []string `gorm:"serializer:jsonb"`
 	Status         string
-	Output         string
 	Parent         string
 	Priority       int
 	Attempt        int
@@ -129,7 +128,7 @@ type Task struct {
 func (Task) TableName() string { return "at_tasks" }
 
 const taskCols = `conversation_id, id, thread_id, main_task_id, assignee, role, claimed_by, kind, instruction,
-	depends_on, status, output, parent, priority, attempt, summary, branch, head_sha, pushed, nudges, created_by, created_at,
+	depends_on, status, parent, priority, attempt, summary, branch, head_sha, pushed, nudges, created_by, created_at,
 	updated_at, claimed_at, finished_at`
 
 // Finished reports whether the task reached a final state.

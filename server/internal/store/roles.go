@@ -117,16 +117,6 @@ func (s *Store) saveRole(ctx context.Context, userID string, r *Role) error {
 	return mapErr(s.g(ctx).Table("at_roles").Create(cols).Error)
 }
 
-// Team returns the user's v1 YAML team (at_teams), if any.
-func (s *Store) Team(ctx context.Context, userID string) (string, bool, error) {
-	var row struct{ Config string }
-	err := mapErr(s.g(ctx).Table("at_teams").Select("config").Where("user_id = ?", userID).Take(&row).Error)
-	if err == ErrNotFound {
-		return "", false, nil
-	}
-	return row.Config, err == nil, err
-}
-
 // OfficeLayoutRow is a database layout (at_office_layouts).
 type OfficeLayoutRow struct {
 	ID        string

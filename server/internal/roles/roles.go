@@ -1,6 +1,5 @@
 // Package roles holds the role templates (at_roles): validation for
-// PUT /api/roles, defaults, the YAML view (threads.md format) and the
-// conversion of v1 at_teams YAML (both v1 formats) into templates.
+// PUT /api/roles, defaults and the YAML view (threads.md format).
 package roles
 
 import (
@@ -266,7 +265,7 @@ func roleWarnings(r store.Role, nodes map[string]store.Node) []Warning {
 	return out
 }
 
-// Defaults is the starting team for a user with no templates and no v1 team.
+// Defaults is the starting team for a user with no templates.
 func Defaults(looks office.Looks) []store.Role {
 	roles := []store.Role{
 		{Tier: Coordinator, Role: "coordinator", Title: "项目统筹", Runtime: Claude,

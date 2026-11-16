@@ -26,7 +26,6 @@ const DefaultModel = "claude-opus-5-5"
 // Errors the REST layer maps to status codes.
 var (
 	ErrNoNode        = errors.New("没有可用的节点：请先在“节点”页添加并启动一个节点")
-	ErrLegacy        = errors.New("旧对话只读")
 	ErrNotActive     = errors.New("讨论串不在进行中")
 	ErrNotArchived   = errors.New("讨论串没有归档")
 	ErrArchived      = errors.New("讨论串已归档，取消归档后再继续")

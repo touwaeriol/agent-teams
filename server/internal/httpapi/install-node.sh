@@ -7,8 +7,8 @@
 #     bash -s -- --console __CONSOLE__ --name build-1 [--root ~/.agents_team] [--max-sessions 4]
 #
 # Re-running upgrades in place. An existing ~/.config/agent-teams/node.env
-# (also one written by the v1 Python daemon) supplies the token, console, name,
-# root and max runs, so upgrading needs no new token. --rollback switches back
+# supplies the token, console, name, root and max sessions, so upgrading needs
+# no new token. --rollback switches back
 # to the previous version.
 set -euo pipefail
 
@@ -26,7 +26,7 @@ while [ $# -gt 0 ]; do
     --console) console="$2"; shift 2 ;;
     --name) name="$2"; shift 2 ;;
     --root) root="$2"; shift 2 ;;
-    --max-sessions|--max-runs) max_sessions="$2"; shift 2 ;;
+    --max-sessions) max_sessions="$2"; shift 2 ;;
     --rollback) rollback=1; shift ;;
     *) usage ;;
   esac
@@ -51,7 +51,6 @@ name="${name:-$(existing AGENT_TEAMS_NODE)}"
 root="${root:-$(existing AGENT_TEAMS_ROOT)}"
 root="${root:-$HOME/.agents_team}"
 max_sessions="${max_sessions:-$(existing AGENT_TEAMS_MAX_SESSIONS)}"
-max_sessions="${max_sessions:-$(existing AGENT_TEAMS_MAX_RUNS)}"
 max_sessions="${max_sessions:-4}"
 
 restart_service() {

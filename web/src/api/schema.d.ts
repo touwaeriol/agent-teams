@@ -237,41 +237,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/conversations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** v1 conversations (read only); kind defaults to chat */
-        get: operations["list-conversations"];
-        put?: never;
-        /** v1 endpoint: always 409 legacy_read_only */
-        post: operations["create-conversation"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/conversations/{cid}/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** v1 conversation stream: one snapshot of a finished conversation, then idle */
-        get: operations["conversation-events"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/conversations/{cid}/interrupt": {
         parameters: {
             query?: never;
@@ -282,22 +247,6 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["interrupt-conversation"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/conversations/{cid}/mail": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["conversation-mail"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -315,22 +264,6 @@ export interface paths {
         put?: never;
         /** Send a message to the conversation's employee (coordinator or thread lead) */
         post: operations["post-message"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/conversations/{cid}/plan": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["conversation-plan"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -364,22 +297,6 @@ export interface paths {
         put?: never;
         /** Answer a question, or decide an approval card (allow / allow_always / deny) */
         post: operations["answer-question"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/conversations/{cid}/tasks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["conversation-tasks"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1160,7 +1077,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Role templates (converted from the v1 team on first use) */
+        /** Role templates (the defaults on first use) */
         get: operations["get-roles"];
         /** Save the whole set (matched by id; missing ones are deleted) */
         put: operations["save-roles"];
@@ -1300,24 +1217,6 @@ export interface paths {
         post?: never;
         /** Delete an uploaded skill and remove it from the roles */
         delete: operations["delete-skill"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/team": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** v1 compatible YAML view */
-        get: operations["get-team"];
-        /** v1 compatible; same as PUT /api/roles/yaml */
-        put: operations["save-team"];
-        post?: never;
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1768,8 +1667,6 @@ export interface components {
             must_change_password: boolean;
             /** Format: int64 */
             nodes: number;
-            /** Format: int64 */
-            platform_version: number;
             /** @enum {string} */
             role: "admin" | "user";
             /** Format: int64 */
@@ -2120,27 +2017,6 @@ export interface components {
             /** Format: date-time */
             at: string;
             text: string;
-        };
-        LegacyConversation: {
-            /** Format: date-time */
-            created_at: string;
-            id: string;
-            kind: string;
-            project_id: string | null;
-            title: string;
-        };
-        LegacyPlanOutputBody: {
-            /** @description v1 plan steps [{title, status}] */
-            steps: unknown;
-        };
-        LegacyTask: {
-            assignee: string;
-            depends_on: string[] | null;
-            id: string;
-            instruction: string;
-            output: string;
-            parent: string;
-            status: string;
         };
         Look: {
             accessory: string;
@@ -2796,21 +2672,6 @@ export interface components {
             /** Format: int64 */
             thread_no: number;
         };
-        TeamInputBody: {
-            config?: string;
-            /** @description Structured form; wins over config */
-            team?: {
-                [key: string]: unknown;
-            };
-        };
-        TeamV1: {
-            config: string;
-            error: string;
-            saved: boolean;
-            team: {
-                [key: string]: unknown;
-            };
-        };
         TempPasswordOutputBody: {
             /** @description Shown once; the user must change it after signing in */
             temp_password: string;
@@ -2991,8 +2852,6 @@ export interface components {
             /** Format: int64 */
             max_nodes: number | null;
             must_change_password: boolean;
-            /** Format: int64 */
-            platform_version: number;
             /** @enum {string} */
             role: "admin" | "user";
         };
@@ -3636,96 +3495,6 @@ export interface operations {
             };
         };
     };
-    "list-conversations": {
-        parameters: {
-            query?: {
-                project_id?: string;
-                kind?: "chat" | "coordinator" | "thread" | "";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LegacyConversation"][] | null;
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    "create-conversation": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description No Content */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    "conversation-events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                cid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description text/event-stream */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/event-stream": string;
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
     "interrupt-conversation": {
         parameters: {
             query?: never;
@@ -3743,37 +3512,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    "conversation-mail": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                cid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MailView"][] | null;
-                };
             };
             /** @description Error */
             default: {
@@ -3859,37 +3597,6 @@ export interface operations {
             };
         };
     };
-    "conversation-plan": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                cid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LegacyPlanOutputBody"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
     "list-questions": {
         parameters: {
             query?: {
@@ -3948,37 +3655,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuestionView"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    "conversation-tasks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                cid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LegacyTask"][] | null;
                 };
             };
             /** @description Error */
@@ -6374,68 +6050,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    "get-team": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TeamV1"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    "save-team": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TeamInputBody"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TeamV1"];
-                };
             };
             /** @description Error */
             default: {

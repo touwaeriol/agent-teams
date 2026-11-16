@@ -4,9 +4,9 @@
 
 ## 0. 通用约定
 
-- **前缀**：`/api`。v1 已有、语义不变的路径保持原样（迁移期 v1 网页和 v2 网页都能用）；新功能用新路径。GitHub 回调路径 `/api/git/github-app/created|installed|install` 必须与 v1 完全一致。
+- **前缀**：`/api`。沿用 v1 时期的路径（语义不变的保持原样）；GitHub 回调路径 `/api/git/github-app/created|installed|install` 必须保持不变（GitHub 的 App 设置指向它们）。
 - **认证**：cookie `agent_teams_session`（HttpOnly、SameSite=Lax、https 时 Secure）或 `Authorization: Bearer <session token>`。失败 401 `{"detail":"请先登录"}`。
-- **CSRF**：头 `X-CSRF-Token`，值等于 cookie `agent_teams_csrf`（登录时下发，非 HttpOnly）；v2 网页的所有非 GET/HEAD 请求都带。**迁移期（P1–P5）**：cookie 认证的写请求没带该头时，按同源检查放行（`Sec-Fetch-Site: same-origin`，或 `Origin` 等于 `AGENT_TEAMS_PUBLIC_URL` 的 origin），因为 v1 网页不发这个头；v2 新增的写接口和 `platform_version = 2` 用户的会话始终要求该头。**P6 起**所有 cookie 认证的写请求都要求该头。Bearer 认证的请求免 CSRF。见 `architecture.md` §10.1。
+- **CSRF**：头 `X-CSRF-Token`，值等于 cookie `agent_teams_csrf`（登录时下发，非 HttpOnly）；所有 cookie 认证的非 GET/HEAD 请求都要求该头。Bearer 认证的请求免 CSRF。见 `architecture.md` §10.1。
 - **错误**：保持 v1 形状 `{"detail": "<中文消息>"}`，另加 `code`（机器可读，如 `thread_not_found`、`node_quota`）和可选 `fields`（校验错误 `[{path, message}]`，替代 v1 前端里拍平 pydantic 数组的逻辑）。状态码：400 参数、401、403、404（别人的资源也返回 404）、409 冲突/状态不允许、422 校验、429 限流、503 依赖不可用。
 - **分页**：列表默认 50 条，游标分页 `?cursor=<opaque>&limit=`，响应 `{items: [...], next_cursor: string|null}`。v1 兼容路径仍返回裸数组。
 - **时间**：ISO 8601 UTC 字符串；界面按浏览器时区显示。
@@ -50,7 +50,7 @@
 ## 2. 视图对象
 
 ```ts
-UserView        = {id, email, display_name, role: "admin"|"user", active, max_nodes: number|null, platform_version: 1|2, created_at}
+UserView        = {id, email, display_name, role: "admin"|"user", active, max_nodes: number|null, must_change_password, created_at}
 ProjectView     = {id, name, description, context, repos: RepoRef[],   // 绑定的仓库（有顺序）；基准分支等约定写在 context 里
 RepoRef         = {repo: "owner/name", git_connection_id: string|null}
                    /* ProjectView 其余字段： */
@@ -240,7 +240,6 @@ PR 类交付物的 `detail.state` 由平台轮询 / webhook 更新。设计类�
 | DELETE | `/api/plugins/{id}` | 删除自己的插件（所有版本），并从岗位的 `plugins` 里去掉 |
 | POST | `/api/roles/look/random` | `{role}` → `Look`（“随机一个”，从布局的调色板和服装里选） |
 | GET | `/api/roles/yaml` / PUT `/api/roles/yaml` | YAML 视图（与 v1 的 YAML 标签页对应；格式为 threads.md 的新格式，旧格式自动转换） |
-| GET | `/api/team` / PUT `/api/team` | v1 兼容路径（v1 用户在迁移期使用；v2 用户调用时 GET 返回由 `at_roles` 生成的 YAML，PUT 转发到 `/api/roles/yaml`） |
 
 形象预览由前端用布局 JSON 里的 `sprites`/`looks` 本地渲染（与办公室同一套渲染代码），不需要接口。
 
@@ -248,13 +247,13 @@ PR 类交付物的 `detail.state` 由平台轮询 / webhook 更新。设计类�
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/nodes` | → `NodeView[]`（v1 路径；v2 字段是 v1 的超集。迁移期协议 1 的链路，`online`/`since`/`active` 从 Python 内部接口合并而来） |
+| GET | `/api/nodes` | → `NodeView[]` |
 | POST | `/api/nodes` | `{name}` → 201 `{node, token, install}`（规则同 v1：名字正则、配额、409；`install` 指向 v2 `install-node.sh`） |
 | PATCH | `/api/nodes/{id}` | `{max_active_sessions?, park_after_s?, isolated?, labels?}` → `NodeView`（即时下发 `node.config`） |
 | POST | `/api/nodes/{id}/token` | → `{token, install}`；轮换并立即断开 |
 | POST | `/api/nodes/{id}/upgrade` | → 202；发 `node.upgrade`（版本取 `at_settings.node_release`） |
 | POST | `/api/nodes/{id}/drain` | `{deadline_s}` → 202 |
-| DELETE | `/api/nodes/{id}` | → 204；断开链路（协议 1 链路经 Python 内部接口断开，§14.5）；该节点上的员工改派：在新节点开新会话并附交接摘要（`architecture.md` §6.2） |
+| DELETE | `/api/nodes/{id}` | → 204；断开链路；该节点上的员工改派：在新节点开新会话并附交接摘要（`architecture.md` §6.2） |
 | GET | `/api/nodes/{id}/sessions` | → `[{session_id, employee, project, thread_no, state, last_active_at}]` |
 | GET | `/api/nodes/{id}/logs?level=&before=` | → 节点回传的 warn/error 日志 |
 | GET | `/install-node.sh` | 公开；v2 安装/升级脚本 |
@@ -280,13 +279,13 @@ PR 类交付物的 `detail.state` 由平台轮询 / webhook 更新。设计类�
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/admin/users` | v1；加 `platform_version`、`running_tasks`（v1 中进行中的任务数，切换前检查） |
-| PATCH | `/api/admin/users/{id}` | v1 字段 + `platform_version: 1|2`（迁移期切换；切到 2 时执行团队转换，有 running 任务时 409，`force: true` 可强制；切回 1 时按 `architecture.md` §14.4 暂停该用户的 v2 讨论串；任何切换都关闭该用户的节点链路让其重新协商）+ `max_running_threads: number|null`（覆盖全局默认）。停用用户时同步调用 Python 的切断接口（§14.5） |
-| DELETE | `/api/admin/users/{id}` | v1；删除前调用 Python 的切断接口 |
+| GET | `/api/admin/users` | 加 `nodes`、`running_tasks`（进行中的任务数） |
+| PATCH | `/api/admin/users/{id}` | `active`、`max_nodes`、`role`、`display_name` + `max_running_threads: number|null`（覆盖全局默认） |
+| DELETE | `/api/admin/users/{id}` | 删除用户（关闭其节点链路） |
 | POST | `/api/admin/users/{id}/password-reset` | 新；→ `{temp_password}`（一次性显示，用户登录后必须修改） |
 | GET / PUT | `/api/admin/settings` | v1 的 `{registration_open, default_max_nodes}` + `max_running_threads`（“每人最多同时运行的讨论串”，默认 3）、`delivery_default`、`office_default`、`node_release` |
 | POST | `/api/admin/github-app/manifest` | v1；manifest 增加 `checks: read, statuses: read`，webhook active |
-| DELETE | `/api/admin/github-app` | v1；同时让 Python 清掉安装令牌缓存（迁移期，`architecture.md` §14.5） |
+| DELETE | `/api/admin/github-app` | 删除平台 App 配置并清掉安装令牌缓存 |
 | GET | `/api/admin/audit?user=&action=&cursor=` | 新；审计日志 |
 | GET | `/api/admin/plugins` | → `{plugins: Plugin[]}`：所有内置插件（含停用的） |
 | POST | `/api/admin/plugins` | `{zip}` → 201 `Plugin`：内置插件或它的新版本，所有用户都能勾选 |
@@ -311,23 +310,9 @@ PR 类交付物的 `detail.state` 由平台轮询 / webhook 更新。设计类�
 
 不单独设接口：手机版用同一套接口，讨论串面板变成独立页（`/projects/:pid/threads/:no`）。为减少请求，`GET /api/threads/{tid}?include=messages,questions` 可一次带回最近 30 条消息和 open 卡片。
 
-### 3.13 旧对话（v1 conversations，只读）
+### 3.13 旧对话（已删除）
 
-v2 用户在项目侧栏的“旧对话”分组和 `/projects/:pid/legacy/:cid` 页查看自己在 v1 里的对话。迁移期这些接口由 Go 直接从 v1 表读取（不再代理给 Python，因为 v2 用户的请求不进 Python），P6 后保留：
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/api/conversations?project_id=&kind=chat` | → v1 形状的对话列表（`kind` 缺省为 `chat`；v2 用户只能拿到 `kind='chat'` 的行，统筹和讨论串对话不出现在这里） |
-| GET | `/api/conversations/{cid}/messages` | 同 3.2（只读） |
-| GET | `/api/conversations/{cid}/events` | v1 的对话 SSE：对旧对话只发一次当前状态后保持空闲（旧对话不会再有新事件） |
-| GET | `/api/conversations/{cid}/tasks` | v1 形状的任务列表（`TaskView` 的 `status` 为字符串，不限枚举） |
-| GET | `/api/conversations/{cid}/mail` | v1 形状的留言 |
-| GET | `/api/conversations/{cid}/plan` | v1 的 `plan` JSONB |
-| GET | `/api/conversations/{cid}/questions?status=` | 同 3.2（只读；v1 遗留的 open 提问在切换时已标 `cancelled`） |
-
-- v2 用户对 `kind='chat'` 对话的任何写请求（`POST …/messages`、`…/answer`、`…/interrupt` 等）以及 `POST /api/conversations`（新建 v1 对话）→ **409** `{"code":"legacy_read_only","detail":"旧对话只读"}`。
-- 重命名和删除旧对话：v1 本来就不支持，v2 **明确不提供**（旧对话随项目删除而删除；P6 后如有需要再加）。
-- v1 用户（`platform_version = 1`）的 `/api/conversations*` 照旧代理给 Python。
+v1 的旧对话只读页和它的接口（`GET /api/conversations`、`…/{cid}/tasks|mail|plan|events`、`POST /api/conversations`）已随迁移 `00120_drop_v1` 删除，v1 的对话数据也一并删除；`/api/conversations/{cid}/…` 下只剩统筹和讨论串对话用的消息、提问、插话接口（§3.2）。
 
 ## 4. 网页路由（v2）
 
@@ -343,5 +328,4 @@ v2 用户在项目侧栏的“旧对话”分组和 `/projects/:pid/legacy/:cid`
 | `/projects/:pid/deliverables` | Deliverables |
 | `/projects/:pid/office` | Office |
 | `/projects/:pid/settings` · `/projects/:pid/settings/:section` | ProjectSettings：Main 上打开的设置对话框，分区 `general`（通用）· `memory`（记忆）· `environment`（环境）· `usage`（使用情况）· `advanced`（高级），关闭回到 `/projects/:pid` |
-| `/projects/:pid/legacy/:cid` | 旧对话（只读） |
 | `/settings/team` · `/settings/nodes` · `/settings/git` · `/settings/appearance` · `/settings/admin` · `/setup/github` | Team · Nodes · GitHub · 外观 · Admin · GitHub App 创建 |

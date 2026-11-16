@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Project home: the project's threads as cards with filters, and on the side what waits for
-// you, project memory and old (v1) conversations.
+// you and project memory.
 import { computed, ref } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import { errorText } from "@/api/mutations";
@@ -8,7 +8,6 @@ import { useOverview, useRoles } from "@/api/queries";
 import EmptyState from "@/components/common/EmptyState.vue";
 import Loading from "@/components/common/Loading.vue";
 import NavButton from "@/components/shell/NavButton.vue";
-import LegacyBox from "./overview/LegacyBox.vue";
 import { teamSummary, type Filter } from "./overview/logic";
 import MemoryBox from "./overview/MemoryBox.vue";
 import ThreadCards from "./overview/ThreadCards.vue";
@@ -56,7 +55,6 @@ const links = computed(() => [
         <aside class="flex min-w-0 flex-[1_1_300px] flex-col gap-3.5">
           <WaitingBox :pid="pid" :overview="o" />
           <MemoryBox :pid="pid" :overview="o" />
-          <LegacyBox :pid="pid" />
         </aside>
       </div>
     </div>

@@ -1,35 +1,40 @@
 # CLAUDE.md
 
-Composable multi-agent teams on the Claude API (Python 3.10+, `src/` layout).
+agent-teams: a multi-user platform that runs teams of Claude Code / Codex employees on the users' own machines. Production (agent.prophey.ai) runs v2; the Python v1 platform is retired and deleted (history in `docs/threads.md`, `docs/agent-comms.md`, `docs/v2/architecture.md` §14).
 
 ## Commands
 
 ```bash
-pip install -e ".[dev]"
-ruff format . && ruff check .   # lint incl. mccabe ≤ 6, nested blocks ≤ 3
-mypy                            # strict, covers src/, tests/, examples/
-pytest                          # offline; never hits the real API (daemon tests use a local uvicorn + fake claude)
-# integration tests run when TEST_DATABASE_URL / TEST_VALKEY_URL are set
-python examples/offline_demo.py
-python examples/offline_leader.py   # non-blocking leader demo
+server/scripts/test.sh                       # Go: gofmt check, go vet, go test against throwaway PG 17 + Valkey 9 (all in docker)
+server/scripts/test.sh -run TestRoles        # extra go test args
+cd node && npm test && npm run typecheck     # daemon: vitest + tsc
+cd web && npm test && npm run typecheck && npm run lint && npm run build
+cd protocol && npm test && npm run check:examples && npm run typecheck
+make gen-protocol                            # schemas → message.json, bundle, TS types, Go types (Go in docker)
+docker run --rm -e GOFLAGS=-mod=mod -v "$PWD:/src" -v agent-teams-gomod:/go/pkg/mod -w /src/server golang:1.26 \
+  go run ./cmd/atctl openapi > web/src/api/openapi.json   # after any API change (TestOpenAPIUpToDate)
+cd web && npm run gen:api                    # openapi.json → src/api/schema.d.ts
+docker build -f server/Dockerfile -t agent-teams-server .   # image: web + daemon tarball + atctl
+deploy/compose.sh up -d                      # postgres, valkey → migrate → control-plane (env: <repo>/.env)
 ```
+
+Real-Claude end-to-end runs: `deploy/e2e/README.md` (`up.sh <scratch>` then `run*.mjs`; check `df -h` first, tear down afterwards). There is no Go toolchain on the host: Go always runs in docker.
 
 ## Architecture
 
-- `Runnable` (runnable.py) is the single interface: `run(task, ctx) -> Result`. `Agent` and every `Team` implement `_run`; `run` adds context and `RunStarted`/`RunFinished` events.
-- `Agent` only depends on the `LLM` protocol (llm/base.py). History is provider-neutral (`UserTurn`/`AssistantTurn`/`ToolTurn`); `AssistantTurn.raw` carries native blocks that must be replayed unchanged (thinking blocks).
-- `Leader` (leader.py) is the non-blocking lead; `brain` is an LLM (in-process `Agent`) or a `ClaudeCodeWorker` (a `ClaudeCodeSession`, claude_session.py: `--session-id` then `--resume` per turn, board tools over MCP via a `ToolServer`). Its `TaskBoard` (tasks.py) runs members as asyncio tasks; `assign_task` returns at once; outcomes are settled in a done-callback.
-- `Conversation` (conversation.py) is an inbox over one `ChatSession` (protocol: name/send/reset/snapshot/restore). The user and task reports `post`; a single consumer calls `reply`.
-- Nodes: `SSHNode`/`LocalNode` (nodes.py, from YAML `nodes:`) and `RemoteNode` (remote.py): a daemon (`agent-teams node`, daemon.py) dials `/nodes/connect` with its token. `start` is idempotent per run_id (`RunContext.run_key` + employee), so runs survive reconnects and console/daemon restarts. Daemon policy: only `--allow` executables inside `--root`.
-- `ClaudeCodeWorker` (claude_code.py) runs `claude -p ... --output-format stream-json --verbose` in `<node workdir>/<employee>`; progress lines become `WorkerProgress` events.
-- `server/` (`[server]` extra) is the multi-user platform: `auth.py` (open registration, hashed session tokens, roles), `routes.py` (conversations, nodes with one-time tokens, team YAML), `admin.py`, `accounts.py` + `store.py` (memory and PostgreSQL), `projects.py` + `project_routes.py` (projects = GitHub repo + context; Git connections: pasted tokens sealed by `secrets.py`, or installations of the platform GitHub App (`github_app_routes.py`: manifest creation by an admin, install + OAuth check by users; `credentials.py` mints and caches installation tokens; `github.py` talks to GitHub). Session cookie is SameSite=Lax so the GitHub redirects carry it), `workspaces.py` (each user's `Leader` from their YAML + their `RemoteNode`s, per project: workdir `projects/<id>`, repo cloned by the daemon, token fetched per run (`RemoteNode.env_source`) and only in the run env, context appended to every employee's instructions; platform teams must be `claude_code`), `hub.py` (conversations scoped by owner, recovery after restart), `mcp_bridge.py` (`/mcp`, per-conversation bearer tokens), `broker.py` (Valkey pub/sub → SSE). Deploy: `docker-compose.yml` (service + PostgreSQL + Valkey) + `deploy/deploy.sh`; nodes install via `/install-node.sh`.
-- v2 (production) is `/server` (Go: Gin + huma + Casbin route authorization + GORM over pgx; goose SQL migrations are the schema; coder/websocket for nodes; tests via `server/scripts/test.sh`), `/node` (TS daemon), `/protocol`, and `/web`. `web/` is the browser app: Vue 3 + Vite + TypeScript + Element Plus + vue-query + Pinia + vue-router, Tailwind with the shared design tokens (light by default, `.dark` opt-in via `lib/theme.ts`; shells in `components/shell`: `ProjectShell` and `SettingsShell`). Pages compose `src/components/common` (platform building blocks: `Page`, `Panel`, `Field`, `FormDialog`, `ConfirmAction`, `DataTable`…) and Element Plus (themed in `styles/element.css`); API writes go through `useAction` (api/mutations.ts). `cd web && npm test && npm run typecheck && npm run lint && npm run build`; `server/Dockerfile` builds it into the image.
-- Tools: `@tool` builds a pydantic model from the signature; `RunContext`-annotated params are injected. Tool failures become `is_error` results, never exceptions.
-- Config: pydantic specs in config.py, each with `build(builder)`; add a member type by adding a spec class and a `Tag` entry in `MemberSpec`.
+- `/server` (Go, one binary `atctl`: serve | migrate | healthcheck | openapi | admin): Gin + huma (humagin, OpenAPI 3.1) for REST/SSE, Casbin route authorization (`internal/httpapi/authz/policy.csv` lists every route explicitly; `casbin_rule` holds only the user→role `g` rows), GORM over pgx (`internal/store`, `internal/core`), goose SQL migrations in `server/migrations` are the only schema source (no AutoMigrate), coder/websocket node gateway (`internal/nodegw`), Valkey for fan-out, locks and rate limits. Engines in `internal/`: orchestrator (who has a session where, resume), scheduler (task pool by role), toolsvc (platform MCP tools for coordinator / lead / members), approvals, status (employee state machine), delivery (branches, merge queue, CI, PRs, acceptance), github (App + PAT tokens). They are wired into the HTTP server in `cmd/atctl/wire.go`.
+- Domain: a project (one or more GitHub repos + context) has a coordinator conversation; the coordinator opens threads; each thread has a lead and members created from the user's role templates (`at_roles`, YAML view `coordinator/lead/members`); main tasks → small tasks in a pool claimed by role; one branch per thread and per repository, PRs, merge queue; deliverables (published files, signed URLs); an office view driven by JSON layouts (`/office`, `docs/v2/office-layout.md`).
+- `/node` (TypeScript daemon, Node ≥ 22, Claude Agent SDK + `codex app-server`): long-lived employee sessions, canUseTool approvals, platform MCP tools forwarded as `tool.call`, local git (clone / worktree / cleanup), short-lived GitHub credentials on demand. Dials `/nodes/connect` with its token; protocol 2 only. Installed by `/install-node.sh` (tarball served by the control plane).
+- `/protocol`: JSON Schemas are the single source for node messages, tool args and the office layout; Go and TS types are generated (`make gen-protocol`).
+- `/web`: Vue 3 + Vite + TypeScript + Element Plus + vue-query + Pinia + vue-router, Tailwind with the shared design tokens (light by default, `.dark` opt-in via `lib/theme.ts`; shells in `components/shell`: `ProjectShell` and `SettingsShell`). Pages compose `src/components/common` (`Page`, `Panel`, `Field`, `FormDialog`, `ConfirmAction`, `DataTable`…) and Element Plus (themed in `styles/element.css`); API types come from `src/api/openapi.json`, writes go through `useAction` (api/mutations.ts). `server/Dockerfile` builds it into the image.
+- `/deploy`: production compose (`docker-compose.yml` via `compose.sh`, project dir = repo root), `env.example`, `e2e/` (local stack + GitHub emulator `localgh.mjs` + real-Claude runs).
+- Design docs: `docs/v2/architecture.md`, `data-model.md`, `api.md`, `protocol.md`, `office-layout.md`.
 
 ## Conventions
 
-- Keep functions small and flat: early returns, dict dispatch / `match`, no deep nesting.
-- Extend through composition (handoff/merge callables, hooks, `options`) rather than subclassing core classes.
-- Tests use `ScriptedLLM` or fakes; add a test for every behavior change.
+- Keep functions small and flat: early returns, dispatch tables, no deep nesting.
+- Schema changes are new goose migrations (`000N0_name.sql`, next free number, with a Down when it can be reversed) plus a test in `server/migrations/migrations_test.go`; `TestLatest` pins the highest version.
+- A new route needs its line in `policy.csv` (`TestEveryRouteHasExplicitPolicy`) and a regenerated `web/src/api/openapi.json` + `schema.d.ts` (`TestOpenAPIUpToDate`).
+- Every user query is scoped by user id; tool failures go back to the model as `isError` results, never as exceptions.
+- Add a test for every behavior change (Go tests run against real PostgreSQL/Valkey; node and web use vitest with fakes).
 - Default model is `claude-opus-5-5`; don't hardcode other model IDs.

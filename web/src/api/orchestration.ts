@@ -12,8 +12,6 @@ import type {
   DeliverableView,
   EmployeeBrief,
   EmployeeCard,
-  LegacyConversation,
-  LegacyTask,
   MailView,
   MainTaskStatus,
   MainTaskView,
@@ -104,6 +102,4 @@ export interface OrchestrationPaths {
   "/api/threads/{tid}/accept": { post: Op<Ok<ThreadView>, Tid> };
   "/api/threads/{tid}/reject": { post: Op<Ok<ThreadView>, Tid, never, { reason: string }> };
 
-  "/api/conversations": { get: Op<Ok<LegacyConversation[]>, never, { project_id?: string; kind?: string }> };
-  "/api/conversations/{cid}/tasks": { get: Op<Ok<LegacyTask[]>, Cid> };
 }

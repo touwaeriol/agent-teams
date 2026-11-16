@@ -47,17 +47,11 @@ p, node-token, /nodes/v2/connect, GET
 
 # Signed-in users: their own account, projects, threads, libraries and nodes.
 p, user, /api/attachments/:id, GET
-p, user, /api/conversations, GET
-p, user, /api/conversations, POST
-p, user, /api/conversations/:cid/events, GET
 p, user, /api/conversations/:cid/interrupt, POST
-p, user, /api/conversations/:cid/mail, GET
 p, user, /api/conversations/:cid/messages, GET
 p, user, /api/conversations/:cid/messages, POST
-p, user, /api/conversations/:cid/plan, GET
 p, user, /api/conversations/:cid/questions, GET
 p, user, /api/conversations/:cid/questions/:qid/answer, POST
-p, user, /api/conversations/:cid/tasks, GET
 p, user, /api/deliverables/:id, DELETE
 p, user, /api/deliverables/:id, PATCH
 p, user, /api/deliverables/:id/comments, GET
@@ -132,8 +126,6 @@ p, user, /api/sessions/:sid/stream, GET
 p, user, /api/skills, GET
 p, user, /api/skills, POST
 p, user, /api/skills/:id, DELETE
-p, user, /api/team, GET
-p, user, /api/team, PUT
 p, user, /api/threads/:tid, DELETE
 p, user, /api/threads/:tid, GET
 p, user, /api/threads/:tid, PATCH

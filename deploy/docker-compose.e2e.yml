@@ -1,0 +1,21 @@
+# Local end-to-end overlay: a GitHub REST emulator (e2e/localgh.mjs) over bare repositories in
+# ${E2E_GIT_ROOT}, mounted at the same absolute path so the host node daemon can clone them with
+# --git-base-url file://${E2E_GIT_ROOT}. Never use this overlay in production.
+services:
+  localgh:
+    image: node:22
+    user: "${E2E_UID:-1000}:${E2E_GID:-1000}"
+    command: ["node", "/localgh/localgh.mjs", "--root", "${E2E_GIT_ROOT:?set E2E_GIT_ROOT}", "--port", "8787"]
+    environment:
+      HOME: /tmp
+      LOCALGH_TOKENS: ${E2E_GH_TOKENS:-}
+    volumes:
+      - ./deploy/e2e:/localgh:ro
+      - ${E2E_GIT_ROOT}:${E2E_GIT_ROOT}
+
+  control-plane:
+    environment:
+      GITHUB_API_URL: http://localgh:8787
+    depends_on:
+      localgh:
+        condition: service_started

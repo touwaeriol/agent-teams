@@ -1,11 +1,11 @@
 # 控制台 ↔ 节点守护进程协议 v2
 
-适用：Go 控制台（`/server/internal/nodegw`）与 TS 守护进程（`/node/src/link`）。消息 Schema 的唯一来源是 `/protocol/schemas/node/*.json`，本文是其说明。v1（协议 1）的语义见 `architecture.md` §14 与 v1 代码 `remote.py` / `daemon.py`；v2 守护进程同时实现协议 1 以便迁移。
+适用：Go 控制台（`/server/internal/nodegw`）与 TS 守护进程（`/node/src/link`）。消息 Schema 的唯一来源是 `/protocol/schemas/node/*.json`，本文是其说明。只有协议 2：v1 的协议 1 和 Python 守护进程已随 v1 退役，控制台对不支持协议 2 的 hello 以 4426 关闭。
 
 ## 1. 连接
 
-- URL：`wss://<console>/nodes/connect`（与 v1 同一路径，由 Go 前门接入并按 hello 协商，见 §11）；`/nodes/v2/connect` 是只接受协议 2 的别名，P6 之后守护进程默认用它。
-- 认证：`Authorization: Bearer <node token>`。控制台 `sha256(token)` 查 `at_nodes.token_hash`，所有者必须存在且 `active`，否则以 **4401** 关闭（v1 用 1008，v2 守护进程两者都视为“令牌无效，停止重连并在日志里提示”）。
+- URL：`wss://<console>/nodes/connect`；`/nodes/v2/connect` 是同一入口的别名（两者都只接受协议 2）。
+- 认证：`Authorization: Bearer <node token>`。控制台 `sha256(token)` 查 `at_nodes.token_hash`，所有者必须存在且 `active`，否则以 **4401** 关闭（守护进程视为“令牌无效”，每 10 分钟重试一次并在日志里提示）。
 - 帧：WebSocket 文本帧，一帧一个 JSON 对象（UTF-8）。单帧上限 4 MiB；更大的内容（例如很长的命令输出）由发送方截断并标 `truncated: true`。启用 permessage-deflate。
 - 心跳：双方每 20 s 发 WebSocket ping；45 s 收不到任何帧则断开重连。
 - 重连：指数退避 1 s → 30 s，带 ±20% 抖动。
@@ -403,21 +403,11 @@
 | 4409 | 被同节点的新链路替换 | 若本进程才是新的则忽略；否则退出（防双开） |
 | 4426 | 需要升级 | 按 `welcome.min_daemon` 提示；若支持 `upgrade` 等待 `node.upgrade` |
 | 4429 | 握手过于频繁 | 退避到 60 s |
-| 1008 | v1 控制台的“令牌无效” | 同 4401 |
+| 1008 | 第一帧不是合法的 hello | 重连 |
 
-## 11. 协议 1 兼容（迁移期）
+## 11. 协议 1（已移除）
 
-- 守护进程连 `/nodes/connect`，发出 hello 后：收到 `welcome` → 协议 2；5 s 内没收到 `welcome`、或直接收到 v1 的 `start`（Python 控制台忽略 hello 里不认识的字段，不回 welcome）→ 切入协议 1 模式。Go 前门的分流：Go 读 `hello.protocols`，节点属于 v1 用户 → 透明代理给 Python（hello 原样转发，Python 只看它认识的字段）；属于 v2 用户 → 回 `welcome {protocol:2}`。
-- 为了让 Python 看到合规的 hello，v2 守护进程的 hello 帧**在顶层**同时带 v1 字段（v1 帧是扁平的 `{type:"hello", protocol:1, …}`，Python 不会去 `body` 里找）：
-
-  ```json
-  {"type": "hello", "protocol": 1, "allow": ["claude", "codex"], "max_runs": 4, "active": [], "claude": "2.1.325", "codex": "0.169.0",
-   "v": 2, "id": "n_…", "body": {"protocols": [2, 1], "daemon": {…}, "epoch": "…", …}}
-  ```
-
-  `type`、`protocol`、`allow`、`max_runs`、`active`、`claude`、`codex` 在顶层，与信封的 `v`、`id`、`body` 并列；v2 字段只在 `body` 里。Go 读 `body.protocols`，没有 `body` 的就是旧 Python 守护进程。
-- 管理员改变某用户的 `platform_version` 时，控制台关闭该用户所有节点链路（代理到 Python 的和 v2 的都关，关闭码 4426），守护进程立即重连并按新归属重新协商。
-- 协议 1 模式下守护进程实现 v1 全部语义：`start {run_id, command[], cwd, after, env, repo}` 按 run_id 幂等、`state/runs/<sha256(run_id)[:32]>.jsonl` 日志重放、`output {run_id, seq, line}`、`exit {run_id, code, stderr}`、`cancel`（SIGTERM 进程组，5 s 后 SIGKILL）、退出码 126/127/128/130/137/143、`--allow` 白名单、`max_runs` 信号量、1 h 内存保留、7 天日志清理、空目录时 `git clone`。用 v1 的测试用例（fake claude）做兼容测试。
+v1 的协议 1（扁平的 `start`/`output`/`exit`/`cancel` 帧）和迁移期的兼容设计已随 v1 一起删除，节点只说协议 2。
 
 ## 12. 时序示例
 

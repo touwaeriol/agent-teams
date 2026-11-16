@@ -53,7 +53,6 @@ func (a *API) Register(api huma.API, r gin.IRoutes) {
 	a.registerFiles(api, r)
 	a.registerStreams(api)
 	a.registerOffice(api)
-	a.registerLegacy(api)
 	a.registerSchedules(api)
 	a.registerLibrary(api)
 	a.registerAttachments(api, r)
@@ -97,7 +96,6 @@ var errorMap = []struct {
 }{
 	{core.ErrNotFound, 404, "not_found"},
 	{store.ErrNotFound, 404, "not_found"},
-	{orchestrator.ErrLegacy, 409, "legacy_read_only"},
 	{orchestrator.ErrNotActive, 409, "thread_not_active"},
 	{orchestrator.ErrArchived, 409, "thread_archived"},
 	{orchestrator.ErrNotArchived, 409, "not_archived"},

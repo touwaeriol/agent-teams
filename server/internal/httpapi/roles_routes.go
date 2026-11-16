@@ -5,10 +5,8 @@ import (
 	"errors"
 	"math/rand/v2"
 	"net/http"
-	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
-	"go.yaml.in/yaml/v3"
 
 	"github.com/touwaeriol/agent-teams/server/internal/office"
 	"github.com/touwaeriol/agent-teams/server/internal/plugins"
@@ -52,27 +50,10 @@ type yamlInput struct {
 	}
 }
 
-// TeamV1 is the v1 /api/team shape.
-type TeamV1 struct {
-	Config string         `json:"config"`
-	Team   map[string]any `json:"team"`
-	Saved  bool           `json:"saved"`
-	Error  string         `json:"error"`
-}
-
-type teamOutput struct{ Body TeamV1 }
-
-type teamInput struct {
-	Body struct {
-		Config string         `json:"config,omitempty" maxLength:"200000"`
-		Team   map[string]any `json:"team,omitempty" doc:"Structured form; wins over config"`
-	}
-}
-
 func (s *Server) registerRoles(api huma.API) {
 	tags := []string{"team"}
 	huma.Register(api, huma.Operation{OperationID: "get-roles", Method: "GET", Path: "/api/roles", Tags: tags,
-		Summary: "Role templates (converted from the v1 team on first use)"}, s.getRoles)
+		Summary: "Role templates (the defaults on first use)"}, s.getRoles)
 	huma.Register(api, huma.Operation{OperationID: "save-roles", Method: "PUT", Path: "/api/roles", Tags: tags,
 		Summary: "Save the whole set (matched by id; missing ones are deleted)"}, s.saveRoles)
 	huma.Register(api, huma.Operation{OperationID: "random-look", Method: "POST", Path: "/api/roles/look/random", Tags: tags}, s.randomLook)
@@ -82,8 +63,6 @@ func (s *Server) registerRoles(api huma.API) {
 		Summary: "Ready-made member roles (designer …) the Team page offers"}, s.rolePresets)
 	s.registerSkills(api)
 	s.registerPlugins(api)
-	huma.Register(api, huma.Operation{OperationID: "get-team", Method: "GET", Path: "/api/team", Tags: tags, Summary: "v1 compatible YAML view"}, s.getTeam)
-	huma.Register(api, huma.Operation{OperationID: "save-team", Method: "PUT", Path: "/api/team", Tags: tags, Summary: "v1 compatible; same as PUT /api/roles/yaml"}, s.saveTeam)
 }
 
 func (s *Server) currentLooks(ctx context.Context) office.Looks {
@@ -111,40 +90,18 @@ func (s *Server) nodeMaps(ctx context.Context, userID string) (map[string]store.
 	return byID, byName, nil
 }
 
-// ensureRoles returns the user's templates, creating them from at_teams (or defaults) on first use.
-func (s *Server) ensureRoles(ctx context.Context, userID string) ([]store.Role, []string, error) {
+// ensureRoles returns the user's templates, creating the defaults on first use.
+func (s *Server) ensureRoles(ctx context.Context, userID string) ([]store.Role, error) {
 	existing, err := s.store.Roles(ctx, userID)
 	if err != nil || len(existing) > 0 {
-		return existing, nil, err
+		return existing, err
 	}
-	seed, report, err := s.seedRoles(ctx, userID)
-	if err != nil {
-		return nil, nil, err
-	}
+	seed := roles.Defaults(s.currentLooks(ctx))
 	err = s.store.Tx(ctx, func(tx *store.Store) error { return tx.ReplaceRoles(ctx, userID, seed) })
 	if err != nil && !errors.Is(err, store.ErrConflict) {
-		return nil, nil, err
+		return nil, err
 	}
-	saved, err := s.store.Roles(ctx, userID)
-	return saved, report, err
-}
-
-func (s *Server) seedRoles(ctx context.Context, userID string) ([]store.Role, []string, error) {
-	looks := s.currentLooks(ctx)
-	config, found, err := s.store.Team(ctx, userID)
-	if err != nil || !found {
-		return roles.Defaults(looks), nil, err
-	}
-	_, byName, err := s.nodeMaps(ctx, userID)
-	if err != nil {
-		return nil, nil, err
-	}
-	parsed, err := roles.FromYAML(config, byName)
-	if err != nil || len(parsed.Roles) == 0 {
-		return roles.Defaults(looks), []string{"旧团队配置无法转换，已使用默认岗位"}, nil
-	}
-	roles.Normalize(parsed.Roles, looks)
-	return parsed.Roles, parsed.Report, nil
+	return s.store.Roles(ctx, userID)
 }
 
 func (s *Server) rolesBody(ctx context.Context, userID string, list []store.Role, report []string) (RolesBody, error) {
@@ -160,11 +117,11 @@ func (s *Server) getRoles(ctx context.Context, _ *struct{}) (*rolesOutput, error
 	if err != nil {
 		return nil, err
 	}
-	list, report, err := s.ensureRoles(ctx, p.User.ID)
+	list, err := s.ensureRoles(ctx, p.User.ID)
 	if err != nil {
 		return nil, err
 	}
-	body, err := s.rolesBody(ctx, p.User.ID, list, report)
+	body, err := s.rolesBody(ctx, p.User.ID, list, nil)
 	return &rolesOutput{Body: body}, err
 }
 
@@ -260,7 +217,7 @@ func (s *Server) randomLook(ctx context.Context, _ *randomLookInput) (*lookOutpu
 }
 
 func (s *Server) rolesYAML(ctx context.Context, userID string) (string, error) {
-	list, _, err := s.ensureRoles(ctx, userID)
+	list, err := s.ensureRoles(ctx, userID)
 	if err != nil {
 		return "", err
 	}
@@ -328,46 +285,4 @@ func (s *Server) saveRolesYAML(ctx context.Context, in *yamlInput) (*rolesOutput
 		out.Body.Report = report
 	}
 	return out, err
-}
-
-func (s *Server) getTeam(ctx context.Context, _ *struct{}) (*teamOutput, error) {
-	p, err := requireUser(ctx)
-	if err != nil {
-		return nil, err
-	}
-	text, err := s.rolesYAML(ctx, p.User.ID)
-	if err != nil {
-		return nil, err
-	}
-	return &teamOutput{Body: TeamV1{Config: text, Team: structured(text), Saved: true}}, nil
-}
-
-func (s *Server) saveTeam(ctx context.Context, in *teamInput) (*teamOutput, error) {
-	p, err := requireUser(ctx)
-	if err != nil {
-		return nil, err
-	}
-	text := in.Body.Config
-	if in.Body.Team != nil {
-		raw, err := yaml.Marshal(in.Body.Team)
-		if err != nil {
-			return nil, fail(http.StatusUnprocessableEntity, "validation", err.Error())
-		}
-		text = string(raw)
-	}
-	if strings.TrimSpace(text) == "" {
-		return nil, fail(http.StatusUnprocessableEntity, "validation", "团队配置是空的")
-	}
-	if _, err := s.saveYAML(ctx, p.User.ID, text); err != nil {
-		return nil, err
-	}
-	return s.getTeam(ctx, nil)
-}
-
-func structured(text string) map[string]any {
-	var out map[string]any
-	if yaml.Unmarshal([]byte(text), &out) != nil {
-		return nil
-	}
-	return out
 }
