@@ -94,6 +94,11 @@ setInterval(() => {
 }, 4000);
 
 const attachments = new Map();
+// The screenshot the user pasted into thread #12 (fixtures: messages.t12).
+attachments.set("img_seed", {
+  ref: { id: "img_seed", name: "截图.png", content_type: "image/svg+xml", size: 0 },
+  data: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="240" height="180"><rect width="240" height="180" fill="#F7F6F3"/><rect x="16" y="16" width="208" height="56" rx="10" fill="#FFF9F4" stroke="#F0C9A8"/><rect x="30" y="32" width="96" height="9" rx="4" fill="#C8622A"/><rect x="30" y="48" width="160" height="7" rx="3" fill="#E2DFD8"/><rect x="16" y="86" width="64" height="24" rx="7" fill="#1F1E1C"/><rect x="88" y="86" width="64" height="24" rx="7" fill="#fff" stroke="#E2DFD8"/><rect x="16" y="124" width="208" height="40" rx="8" fill="none" stroke="#D93025" stroke-width="2"/></svg>`),
+});
 
 function officeSnapshot() {
   const roster = [{ ...state.coordinator, thread_no: null }, ...state.threads.filter((t) => ["running", "waiting", "review", "queued"].includes(t.status)).flatMap((t) => t.members.map((m) => ({ ...m, thread_no: t.no })))];

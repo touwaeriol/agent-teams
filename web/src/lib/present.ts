@@ -1,6 +1,6 @@
 // How domain states look on screen (colours and words of the design canvas),
 // plus the small derivations pages share. Pure functions, unit-tested.
-import type { EmployeeBrief, MainTaskView, QuestionView, TaskStatus, TaskView, ThreadView } from "@/api/views";
+import type { EmployeeBrief, QuestionView, TaskStatus, TaskView, ThreadView } from "@/api/views";
 
 export const INK = {
   text: "#1F1E1C",
@@ -104,35 +104,6 @@ export function questionLine(q: QuestionView): string {
   return `${q.asker.startsWith("lead") ? "组长" : q.asker}问：${q.text}`;
 }
 
-const DECIDERS: [string, string][] = [
-  ["user:", "你"],
-  ["policy:thread_auto", "全部放行"],
-  ["policy:rule:builtin-deny-list", "平台禁止名单"],
-  ["policy:rule:builtin-read-only", "只读命令白名单"],
-  ["policy:rule:builtin-skip-permissions", "直接执行"],
-  ["policy:rule:", "总是允许的规则"],
-  ["policy:timeout", "等待超时"],
-  ["cancelled", "已取消"],
-];
-
-/** Who settled an approval, in words: 你 / 组长 lead-1 / 全部放行 / 总是允许的规则 … */
-export function deciderLabel(decidedBy: string | null): string {
-  if (!decidedBy) return "";
-  if (decidedBy.startsWith("lead:")) return `组长 ${decidedBy.slice(5)}`;
-  return DECIDERS.find(([prefix]) => decidedBy.startsWith(prefix))?.[1] ?? decidedBy;
-}
-
-const VERDICT: Record<string, string> = { allow: "放行", allow_always: "总是允许", deny: "拒绝" };
-
-/** One line of the approval history: "组长 lead-1 放行 · 任务要跑测试". */
-export function approvalVerdict(q: Pick<QuestionView, "status" | "audience" | "answer" | "decided_by" | "detail">): string {
-  if (q.status === "cancelled") return "已取消";
-  if (q.status === "open") return q.audience === "lead" ? `等组长 ${q.detail.reviewer ?? ""} 判断`.trim() : "等你处理";
-  const who = deciderLabel(q.decided_by);
-  const reason = q.decided_by?.startsWith("lead:") ? q.detail.review?.reason : "";
-  return `${who} ${VERDICT[q.answer ?? ""] ?? q.answer ?? ""}${reason ? ` · ${reason}` : ""}`;
-}
-
 /** Why a card reached the user although the lead reviews first (null: it came straight to the user). */
 export function reviewNote(q: Pick<QuestionView, "detail">): string | null {
   const r = q.detail.review;
@@ -144,14 +115,6 @@ export function reviewNote(q: Pick<QuestionView, "detail">): string | null {
 /** The status in the head of a user's approval card: handed over by the lead, or plain. */
 export function approvalCardStatus(q: Pick<QuestionView, "detail">): string {
   return reviewNote(q) ? "组长转给你" : "等你处理";
-}
-
-/** Decided and waiting approvals of a thread, newest first (the card history). */
-export function approvalHistory(list: QuestionView[] | undefined, limit = 6): QuestionView[] {
-  return (list ?? [])
-    .filter((q) => q.kind === "approval" && !(q.status === "open" && q.audience === "user"))
-    .sort((a, b) => Date.parse(b.answered_at ?? b.created_at) - Date.parse(a.answered_at ?? a.created_at))
-    .slice(0, limit);
 }
 
 /** The command or call an approval card shows in its code block. */
@@ -186,17 +149,6 @@ export function teamText(t: Pick<ThreadView, "members">): string {
   return t.members.filter((m) => m.tier === "member").map((m) => m.name).join("、") || "—";
 }
 
-export function mainCount(m: MainTaskView): string {
-  return m.tasks_total ? `${m.tasks_done} / ${m.tasks_total}` : "";
-}
-
-/** The main tasks to show collapsed: all done ones beyond the first `keep` rows hide behind “显示另外 N 项”. */
-export function visibleMainTasks(list: MainTaskView[], keep: number, expanded: boolean): { rows: MainTaskView[]; hidden: number } {
-  const sorted = list.slice().sort((a, b) => a.pos - b.pos);
-  if (expanded || sorted.length <= keep) return { rows: sorted, hidden: 0 };
-  return { rows: sorted.slice(0, keep), hidden: sorted.length - keep };
-}
-
 const TASK_LOOK: Record<TaskStatus, Look> = {
   pending: { tone: INK.gray, label: "待领取" },
   claimed: { tone: INK.doing, label: "已领取", spin: true },
@@ -214,28 +166,6 @@ const TASK_LOOK: Record<TaskStatus, Look> = {
 export function taskLook(task: Pick<TaskView, "status" | "depends_on">, all: Pick<TaskView, "id" | "status">[] = []): Look {
   if (task.status === "pending" && task.depends_on.some((d) => all.find((t) => t.id === d)?.status !== "done")) return TASK_LOOK.blocked;
   return TASK_LOOK[task.status] ?? { tone: INK.gray, label: task.status };
-}
-
-export interface PoolColumn {
-  id: string;
-  title: string;
-  tasks: TaskView[];
-}
-
-const POOL: { id: string; title: string; statuses: TaskStatus[]; always: boolean }[] = [
-  { id: "open", title: "待领取", statuses: ["pending", "blocked"], always: true },
-  { id: "doing", title: "进行中", statuses: ["claimed", "running", "failed"], always: true },
-  { id: "review", title: "待审查", statuses: ["review"], always: true },
-  { id: "decision", title: "待决策", statuses: ["decision"], always: false },
-  { id: "merging", title: "合并中", statuses: ["merging"], always: false },
-  { id: "done", title: "完成", statuses: ["done"], always: true },
-];
-
-/** Task pool board columns (可领 / 进行中 / 待审查 / 待决策 / 合并中 / 完成); empty optional columns are left out. */
-export function poolColumns(tasks: TaskView[]): PoolColumn[] {
-  return POOL.map((c) => ({ id: c.id, title: c.title, tasks: tasks.filter((t) => c.statuses.includes(t.status)), always: c.always }))
-    .filter((c) => c.always || c.tasks.length > 0)
-    .map(({ id, title, tasks: list }) => ({ id, title, tasks: list }));
 }
 
 const STATE_TEXT: Record<string, string> = {

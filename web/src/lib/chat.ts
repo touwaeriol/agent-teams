@@ -26,3 +26,27 @@ export function chatBlocks(messages: MessageView[]): ChatBlock[] {
   }
   return blocks;
 }
+
+/** What a thread's chat shows: the user and the lead talking, plus errors; task briefs and platform notes stay out. */
+export function threadTalk(m: MessageView): boolean {
+  return m.role === "user" || m.role === "leader" || m.role === "error";
+}
+
+export type ChatItem<N = unknown> = { kind: "block"; block: ChatBlock } | { kind: "insert"; key: string; node: N };
+
+/** Blocks and inserts in time order; an insert goes before the first message newer than it, ties stay after the message. */
+export function interleave<N>(blocks: ChatBlock[], inserts: { key: string; at: string; node: N }[]): ChatItem<N>[] {
+  const rest = inserts.slice().sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  const out: ChatItem<N>[] = [];
+  let i = 0;
+  for (const b of blocks) {
+    const t = Date.parse(b.message.created_at);
+    while (i < rest.length && Date.parse(rest[i].at) < t) {
+      out.push({ kind: "insert", key: rest[i].key, node: rest[i].node });
+      i += 1;
+    }
+    out.push({ kind: "block", block: b });
+  }
+  for (; i < rest.length; i += 1) out.push({ kind: "insert", key: rest[i].key, node: rest[i].node });
+  return out;
+}

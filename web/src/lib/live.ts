@@ -1,7 +1,6 @@
 // Live progress of a thread, pure and unit-tested: what each employee is doing right now,
-// why a thread waits, how far its tasks are, and how long it has been running.
-import type { EmployeeBrief, QuestionView, TaskView, ThreadView } from "@/api/views";
-import { approvalCommand, memberDoing } from "./present";
+// how far its tasks are, and how long it has been running.
+import type { EmployeeBrief, TaskView, ThreadView } from "@/api/views";
 
 /** States in which an employee is actively working (spinner / pulse). */
 const WORKING = new Set(["typing", "reading", "running", "thinking", "claiming", "walking_to_board", "returning"]);
@@ -34,31 +33,6 @@ export function stateLabel(m: Pick<EmployeeBrief, "status">): string {
 export function askingLabel(m: Pick<EmployeeBrief, "status">, asksUser: boolean): string {
   if (asksUser) return "等你审批";
   return m.status?.state === "raising_hand" ? "等组长回复" : stateLabel(m);
-}
-
-/** The employee's latest activity: the bubble (tool + command, or set_status text), else the state. */
-export function activityLine(m: Pick<EmployeeBrief, "status">, open?: QuestionView): string {
-  if (open && m.status?.state === "raising_hand") return `请求执行 ${approvalCommand(open)}`;
-  return memberDoing(m);
-}
-
-/** Open cards of a thread keyed by asker (oldest first wins). */
-export function cardsByAsker(questions: QuestionView[]): Map<string, QuestionView> {
-  const map = new Map<string, QuestionView>();
-  for (const q of questions) if (!map.has(q.asker)) map.set(q.asker, q);
-  return map;
-}
-
-/** Why a thread is not moving, in one line ("" when it is). */
-export function waitingReason(t: Pick<ThreadView, "status" | "pr_number" | "pause_reason">, open: QuestionView[]): string {
-  const approvals = open.filter((q) => q.kind === "approval").length;
-  const questions = open.length - approvals;
-  if (approvals && questions) return `等你处理 ${approvals} 个审批和 ${questions} 个问题`;
-  if (approvals) return `等你审批 ${approvals} 条命令，员工停在这一步`;
-  if (questions) return `等你回答 ${questions} 个问题`;
-  if (t.status === "review") return t.pr_number ? `PR #${t.pr_number} 等你验收` : "等你验收";
-  if (t.status === "waiting") return "在等成员交付或审查";
-  return "";
 }
 
 export interface TaskProgress {

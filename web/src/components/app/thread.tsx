@@ -1,15 +1,11 @@
-// Thread pieces shared by the Main page's right panel, the Thread page and
-// the phone view: the grouped list (row menus, archived section), the compact checklist,
-// cards, members.
+// The right panel's thread list: grouped rows with live lines, row menus and the archived section.
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
-import type { MainTaskView, QuestionView, ThreadView } from "@/api/views";
+import type { QuestionView, ThreadView } from "@/api/views";
 import { isWorking, liveLine, threadActive } from "@/lib/live";
-import { groupThreads, leadOf, mainCount, markTone, memberDoing, memberTone, threadLine, threadLook } from "@/lib/present";
-import { cn } from "@/lib/utils";
-import { CheckMark, LiveDot, Spin } from "./bits";
+import { groupThreads, markTone, threadLine, threadLook } from "@/lib/present";
+import { LiveDot, Spin } from "./bits";
 import { ThreadMenu } from "./ThreadMenu";
-import { ReviewCard, WaitingCard, type CardVariant } from "./cards";
 
 /** The round mark before a thread in lists: a spinner while in progress, outlined in the state colour otherwise, filled with ✓ when done. */
 export function ThreadMark({ thread }: { thread: ThreadView }) {
@@ -83,53 +79,6 @@ function ArchivedSection({ threads, onOpen, menus }: { threads: ThreadView[]; on
         已归档 {threads.length}
       </button>
       {open && threads.map((t) => <ThreadRow key={t.id} thread={t} onOpen={onOpen} line={t.summary || t.brief} menu={menus} />)}
-    </section>
-  );
-}
-
-/** Main tasks as a compact checklist (one row each). */
-export function Checklist({ tasks, size = "sm" }: { tasks: MainTaskView[]; size?: "sm" | "md" }) {
-  const sorted = tasks.slice().sort((a, b) => a.pos - b.pos);
-  if (sorted.length === 0) return <p className="py-1 text-[13px] text-muted-foreground">组长还在列主要任务…</p>;
-  return (
-    <div className="flex flex-col">
-      {sorted.map((m) => (
-        <span key={m.id} className={cn("flex items-center gap-2.5", size === "sm" ? "min-h-7 text-[13px]" : "min-h-[34px] text-sm")}>
-          <CheckMark status={m.status} size={size === "sm" ? 15 : 16} />
-          <span className={cn("min-w-0 flex-1", m.status === "done" && "text-[#8A877F] line-through")}>{m.title}</span>
-          {size === "md" && <span className="text-xs text-[#8A877F]">{mainCount(m)}</span>}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-/** Open cards of a thread: questions/approvals for the user, then PR acceptance. */
-export function ThreadCards({ thread, questions, variant }: { thread: ThreadView; questions: QuestionView[]; variant: CardVariant }) {
-  const lead = leadOf(thread)?.name;
-  return (
-    <>
-      {questions.map((q) => (
-        <WaitingCard key={q.id} cid={thread.id} pid={thread.project_id} question={q} variant={variant} leadName={lead} />
-      ))}
-      {thread.status === "review" && <ReviewCard thread={thread} variant={variant} />}
-    </>
-  );
-}
-
-export function MemberLines({ thread }: { thread: ThreadView }) {
-  const members = thread.members.filter((m) => m.tier !== "lead");
-  return (
-    <section className="flex flex-col gap-1.5">
-      <span className="text-xs text-muted-foreground">成员</span>
-      {members.length === 0 && <span className="text-[13px] text-muted-foreground">还没有成员</span>}
-      {members.map((m) => (
-        <span key={m.id} className="flex items-center gap-2 text-[13px]">
-          <LiveDot color={memberTone(m)} on={isWorking(m)} size={7} />
-          <span className="font-mono">{m.name}</span>
-          <span className="min-w-0 flex-1 truncate text-muted-foreground">{memberDoing(m)}</span>
-        </span>
-      ))}
     </section>
   );
 }

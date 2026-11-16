@@ -12,7 +12,7 @@ import { useAttachments } from "@/components/app/attachments";
 import { WaitingCard } from "@/components/app/cards";
 import { Chat } from "@/components/app/Chat";
 import { ResizeHandle, usePanelWidth } from "@/components/app/ResizeHandle";
-import { ThreadDetail, type DetailTab } from "@/components/app/ThreadDetail";
+import { ThreadDetail, type ThreadViewId } from "@/components/app/ThreadDetail";
 import { LibraryBrowser } from "@/components/app/Library";
 import { SchedulesDialog } from "@/components/app/Schedules";
 import { ThreadList } from "@/components/app/thread";
@@ -42,12 +42,12 @@ export function sidePanelOf(value: string | null): SidePanel {
   return value === "library" || value === "none" ? value : "threads";
 }
 
-/** Where a thread opens: /projects/:pid/threads/:no, plus the tab unless it is the default. */
-export function threadPath(pid: string, no: number, tab?: DetailTab): string {
-  return `/projects/${pid}/threads/${no}${tab && tab !== "progress" ? `/${tab}` : ""}`;
+/** Where a thread opens: /projects/:pid/threads/:no, plus /tasks, /deliverables or /members when that view is open over the chat. */
+export function threadPath(pid: string, no: number, view?: ThreadViewId | null): string {
+  return `/projects/${pid}/threads/${no}${view ? `/${view}` : ""}`;
 }
 
-export function MainPage({ settings = false, openNo = null, tab = "progress" }: { settings?: boolean; openNo?: number | null; tab?: DetailTab }) {
+export function MainPage({ settings = false, openNo = null, view = null }: { settings?: boolean; openNo?: number | null; view?: ThreadViewId | null }) {
   const pid = useProjectId();
   const { section } = useParams();
   const project = useProject(pid);
@@ -84,11 +84,12 @@ export function MainPage({ settings = false, openNo = null, tab = "progress" }: 
             <PanelDetail
               pid={pid}
               no={openNo}
-              tab={tab}
+              view={view}
               threads={list}
               loading={threads.isLoading}
-              onTab={(t) => navigate(threadPath(pid, openNo, t), { replace: true })}
+              onView={(v) => navigate(threadPath(pid, openNo, v), { replace: true })}
               onBack={() => navigate(`/projects/${pid}`)}
+              onClose={() => navigate(`/projects/${pid}?panel=none`)}
             />
           ) : (
             <PanelList pid={pid} threads={list} loading={threads.isLoading} onOpen={openThread} />
@@ -261,14 +262,15 @@ function PanelList({ pid, threads, loading, onOpen }: { pid: string; threads: Th
 interface PanelDetailProps {
   pid: string;
   no: number;
-  tab: DetailTab;
+  view: ThreadViewId | null;
   threads: ThreadView[];
   loading: boolean;
-  onTab: (tab: DetailTab) => void;
+  onView: (view: ThreadViewId | null) => void;
   onBack: () => void;
+  onClose: () => void;
 }
 
-function PanelDetail({ pid, no, tab, threads, loading, onTab, onBack }: PanelDetailProps) {
+function PanelDetail({ pid, no, view, threads, loading, onView, onBack, onClose }: PanelDetailProps) {
   const thread = threads.find((t) => t.no === no);
   if (loading) return <Loading className="py-16" />;
   if (!thread)
@@ -283,5 +285,18 @@ function PanelDetail({ pid, no, tab, threads, loading, onTab, onBack }: PanelDet
         }
       />
     );
-  return <ThreadDetail key={thread.id} pid={pid} thread={thread} tab={tab} onTab={onTab} onBack={onBack} fullHref={`/projects/${pid}/threads/${no}/full`} />;
+  const full = `/projects/${pid}/threads/${no}/full`;
+  return (
+    <ThreadDetail
+      key={thread.id}
+      pid={pid}
+      thread={thread}
+      view={view}
+      onView={onView}
+      onBack={onBack}
+      onClose={onClose}
+      fullHref={full}
+      expand={{ to: full, label: "全屏打开" }}
+    />
+  );
 }

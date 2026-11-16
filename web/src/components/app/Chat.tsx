@@ -1,12 +1,13 @@
 // The conversation column: messages (newest at the bottom, older pages on
-// demand), chips for threads the speaker opened, and auto-scroll.
+// demand), chips for threads the speaker opened, cards inserted where they
+// were asked, and auto-scroll. Used by the coordinator chat and the thread panel.
 import { ChevronRight } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { flattenMessages, useMessages } from "@/api/queries";
-import type { ThreadView } from "@/api/views";
+import type { MessageView, ThreadView } from "@/api/views";
 import { Loading } from "@/components/common";
 import { Markdown } from "@/components/Markdown";
-import { chatBlocks, type ChatBlock } from "@/lib/chat";
+import { chatBlocks, interleave, type ChatBlock } from "@/lib/chat";
 import { featured, isWorking, liveLine } from "@/lib/live";
 import { markTone } from "@/lib/present";
 import { clock, cn } from "@/lib/utils";
@@ -21,18 +22,24 @@ export interface ChatProps {
   empty?: ReactNode;
   after?: ReactNode;
   compact?: boolean;
+  /** Messages to show (default: all). */
+  filter?: (m: MessageView) => boolean;
+  /** Cards drawn between the messages at the time they happened. */
+  inserts?: { key: string; at: string; node: ReactNode }[];
 }
 
-export function Chat({ cid, threads = [], onOpenThread, speakerColor = "#C8622A", empty, after, compact }: ChatProps) {
+export function Chat({ cid, threads = [], onOpenThread, speakerColor = "#C8622A", empty, after, compact, filter, inserts = [] }: ChatProps) {
   const query = useMessages(cid);
-  const messages = flattenMessages(query.data);
+  const all = flattenMessages(query.data);
+  const messages = filter ? all.filter(filter) : all;
   const end = useRef<HTMLDivElement>(null);
-  const count = messages.length;
+  const count = messages.length + inserts.length;
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
   }, [count]);
   if (query.isLoading) return <Loading className="py-16" />;
   const blocks = chatBlocks(messages);
+  const items = interleave(blocks, inserts);
   return (
     <div className={cn("flex flex-col", compact ? "gap-[18px]" : "gap-7")}>
       {query.hasNextPage && (
@@ -40,10 +47,14 @@ export function Chat({ cid, threads = [], onOpenThread, speakerColor = "#C8622A"
           {query.isFetchingNextPage ? "加载中…" : "更早的消息"}
         </button>
       )}
-      {blocks.length === 0 && empty}
-      {blocks.map((b) => (
-        <Block key={b.message.id} block={b} threads={threads} onOpenThread={onOpenThread} speakerColor={speakerColor} compact={compact} />
-      ))}
+      {items.length === 0 && empty}
+      {items.map((it) =>
+        it.kind === "block" ? (
+          <Block key={it.block.message.id} block={it.block} threads={threads} onOpenThread={onOpenThread} speakerColor={speakerColor} compact={compact} />
+        ) : (
+          <div key={it.key}>{it.node}</div>
+        ),
+      )}
       {after}
       <div ref={end} />
     </div>

@@ -9,7 +9,7 @@ import { addRepo, moveRepo, normalizeRepo, removeRepo, reposPayload } from "@/co
 import { teamChips } from "@/components/app/roles";
 import { summarizeNodes } from "@/components/shell/nodes";
 import { matchesProject } from "@/components/shell/ProjectSidebar";
-import { chatBlocks } from "@/lib/chat";
+import { chatBlocks, interleave, threadTalk } from "@/lib/chat";
 import { boardSummary, pickChecks, replayEvents, toOfficeEvents, toWidgetData } from "@/lib/office";
 import { countText, isReadOnly, newRole, nextRoleKey, permissionHint, permissionMode, previewTags, roleProblems, ruleText, usesAsk } from "@/lib/roles";
 import { boardItems } from "@/pages/Office";
@@ -129,6 +129,20 @@ describe("chat blocks", () => {
     ]);
     expect(blocks.map((b) => b.kind)).toEqual(["user", "speaker", "line"]);
     expect(blocks[1].kind === "speaker" && blocks[1].opens).toEqual([12, 13]);
+  });
+  it("thread chat keeps only you, the lead and errors", () => {
+    const roles = ["user", "leader", "employee", "system", "error"] as const;
+    expect(roles.filter((role) => threadTalk(message("x", { role })))).toEqual(["user", "leader", "error"]);
+  });
+  it("puts cards between the messages at the time they were asked", () => {
+    const at = (min: number) => new Date(Date.UTC(2026, 10, 15, 10, min)).toISOString();
+    const blocks = chatBlocks([message("1", { role: "user", created_at: at(1) }), message("2", { created_at: at(5) })]);
+    const order = interleave(blocks, [
+      { key: "late", at: at(9), node: null },
+      { key: "mid", at: at(3), node: null },
+      { key: "tie", at: at(5), node: null },
+    ]).map((it) => (it.kind === "block" ? it.block.message.id : it.key));
+    expect(order).toEqual(["1", "mid", "2", "tie", "late"]);
   });
 });
 

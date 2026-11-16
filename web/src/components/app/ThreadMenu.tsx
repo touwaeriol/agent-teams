@@ -1,6 +1,7 @@
-// The ⋯ menu of a thread (list rows and the detail header): pause / resume, archive,
-// unarchive and delete. Archiving a thread that is still going and deleting always ask first.
-import { Archive, ArchiveRestore, Maximize2, MoreHorizontal, Pause, Play, Trash2 } from "lucide-react";
+// The ⋯ menu of a thread (list rows and the detail header): the 任务 / 交付物 / 成员 views,
+// full screen, pause / resume, archive, unarchive and delete, plus the header's ✓ (archive)
+// button. Archiving a thread that is still going and deleting always ask first.
+import { Archive, ArchiveRestore, CircleCheck, ListChecks, Maximize2, MoreHorizontal, Package, Pause, Play, Trash2, Users } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { threads as threadActions } from "@/api/actions";
@@ -14,6 +15,41 @@ import { cn } from "@/lib/utils";
 
 type Confirm = "archive" | "delete" | null;
 
+/** Views of a thread that open over the chat from the ⋯ menu. */
+export type ThreadViewId = "tasks" | "deliverables" | "members";
+
+export const THREAD_VIEWS: [ThreadViewId, string][] = [
+  ["tasks", "任务"],
+  ["deliverables", "交付物"],
+  ["members", "成员"],
+];
+
+const VIEW_ICON = { tasks: ListChecks, deliverables: Package, members: Users } as const;
+
+function archiveNotice(no: number) {
+  return {
+    title: `归档还在进行的 #${no}？`,
+    description: "归档会结束这个讨论串：员工的会话关掉，节点上的工作目录清理（有未推送改动的会保留）。之后可以取消归档，它会回到“已暂停”，点继续接着做。",
+  };
+}
+
+/** The header's ✓: archive the thread (asks first while it is still going); hidden once archived. */
+export function ResolveButton({ thread }: { thread: ThreadView }) {
+  const [confirming, setConfirming] = useState(false);
+  const invalidate = [keys.threads(thread.project_id), keys.thread(thread.id), keys.waiting(thread.project_id)];
+  const archive = useAction(() => threadActions.archive(thread.id), { invalidate, success: `#${thread.no} 已归档` });
+  if (thread.status === "archived") return null;
+  const notice = archiveNotice(thread.no);
+  return (
+    <>
+      <IconButton label="归档讨论串" onClick={() => (threadActive(thread) ? setConfirming(true) : archive.mutate())} disabled={archive.isPending}>
+        <CircleCheck strokeWidth={1.8} />
+      </IconButton>
+      <ConfirmAction open={confirming} onOpenChange={setConfirming} title={notice.title} description={notice.description} confirmLabel="归档" variant="default" onConfirm={() => archive.mutate()} />
+    </>
+  );
+}
+
 /** What the menu offers for a thread in this status. */
 export function menuItems(t: Pick<ThreadView, "status">): { pause: boolean; resume: boolean; archive: boolean; unarchive: boolean } {
   return {
@@ -24,7 +60,16 @@ export function menuItems(t: Pick<ThreadView, "status">): { pause: boolean; resu
   };
 }
 
-export function ThreadMenu({ thread, fullHref, onDeleted, className }: { thread: ThreadView; fullHref?: string; onDeleted?: () => void; className?: string }) {
+interface MenuProps {
+  thread: ThreadView;
+  fullHref?: string;
+  onDeleted?: () => void;
+  /** Adds 任务 / 交付物 / 成员 at the top (the detail header). */
+  onView?: (view: ThreadViewId) => void;
+  className?: string;
+}
+
+export function ThreadMenu({ thread, fullHref, onDeleted, onView, className }: MenuProps) {
   const navigate = useNavigate();
   const [confirm, setConfirm] = useState<Confirm>(null);
   const invalidate = [keys.threads(thread.project_id), keys.thread(thread.id), keys.waiting(thread.project_id)];
@@ -43,6 +88,16 @@ export function ThreadMenu({ thread, fullHref, onDeleted, className }: { thread:
           </IconButton>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-44" onCloseAutoFocus={(e) => e.preventDefault()}>
+          {onView &&
+            THREAD_VIEWS.map(([id, label]) => {
+              const Icon = VIEW_ICON[id];
+              return (
+                <DropdownMenuItem key={id} onSelect={() => onView(id)}>
+                  <Icon /> {label}
+                </DropdownMenuItem>
+              );
+            })}
+          {onView && <DropdownMenuSeparator />}
           {fullHref && (
             <DropdownMenuItem onSelect={() => navigate(fullHref)}>
               <Maximize2 /> 全屏打开
@@ -77,8 +132,7 @@ export function ThreadMenu({ thread, fullHref, onDeleted, className }: { thread:
       <ConfirmAction
         open={confirm === "archive"}
         onOpenChange={(o) => setConfirm(o ? "archive" : null)}
-        title={`归档还在进行的 #${thread.no}？`}
-        description="归档会结束这个讨论串：员工的会话关掉，节点上的工作目录清理（有未推送改动的会保留）。之后可以取消归档，它会回到“已暂停”，点继续接着做。"
+        {...archiveNotice(thread.no)}
         confirmLabel="归档"
         variant="default"
         onConfirm={() => archive.mutate()}

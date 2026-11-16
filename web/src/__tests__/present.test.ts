@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  approvalCardStatus, approvalCommand, approvalHistory, approvalVerdict, deciderLabel, reviewNote, checkLook, deliverableKind, groupThreads, mainProgress, markTone, memberDoing, memberTone, mergeLook, openForUser, poolColumns,
-  projectTint, onePRLook, prLook, questionLine, taskLook, taskTitle, threadBases, threadKind, threadLine, threadPRs, visibleMainTasks, INK,
+  approvalCardStatus, approvalCommand, reviewNote, checkLook, deliverableKind, groupThreads, mainProgress, markTone, memberDoing, memberTone, mergeLook, openForUser,
+  projectTint, onePRLook, prLook, questionLine, taskLook, taskTitle, threadBases, threadKind, threadLine, threadPRs, INK,
 } from "@/lib/present";
 import { question, task, thread } from "./fixtures";
 
@@ -67,11 +67,6 @@ describe("progress and lists", () => {
     const t = thread(1, { main_tasks: [{ id: "a", pos: 1, title: "", status: "done", auto_done: true, tasks_total: 0, tasks_done: 0 }] });
     expect(mainProgress(t).text).toBe("1 / 1");
   });
-  it("visibleMainTasks collapses beyond keep", () => {
-    const list = [3, 1, 2].map((pos) => ({ id: String(pos), pos, title: "", status: "todo" as const, auto_done: false, tasks_total: 0, tasks_done: 0 }));
-    expect(visibleMainTasks(list, 2, false)).toEqual({ rows: [list[1], list[2]], hidden: 1 });
-    expect(visibleMainTasks(list, 2, true).hidden).toBe(0);
-  });
   it("openForUser keeps open user questions, oldest first", () => {
     const list = [question("b", { created_at: "2026-01-02T00:00:00Z" }), question("a", { created_at: "2026-01-01T00:00:00Z" }), question("c", { audience: "lead" }), question("d", { status: "answered" })];
     expect(openForUser(list).map((q) => q.id)).toEqual(["a", "b"]);
@@ -83,11 +78,6 @@ describe("tasks", () => {
     const all = [task("t1", { status: "running" }), task("t2", { depends_on: ["t1"] })];
     expect(taskLook(all[1], all).label).toBe("等依赖");
     expect(taskLook(task("t3"), all).label).toBe("待领取");
-  });
-  it("poolColumns drops empty optional columns and hides cancelled", () => {
-    const cols = poolColumns([task("a"), task("b", { status: "decision" }), task("c", { status: "cancelled" }), task("d", { status: "failed" })]);
-    expect(cols.map((c) => c.title)).toEqual(["待领取", "进行中", "待审查", "待决策", "完成"]);
-    expect(cols[1].tasks.map((t) => t.id)).toEqual(["d"]);
   });
   it("taskTitle takes the first line", () => expect(taskTitle(task("x"))).toBe("do x"));
 });
@@ -130,31 +120,12 @@ describe("looks", () => {
 
 describe("approval decisions", () => {
   const bash = { tool_name: "Bash", input: { command: "npm test" }, reviewer: "lead-1" };
-  it("names who decided", () => {
-    expect(deciderLabel("lead:lead-1")).toBe("组长 lead-1");
-    expect(deciderLabel("user:u_1")).toBe("你");
-    expect(deciderLabel("policy:thread_auto")).toBe("全部放行");
-    expect(deciderLabel("policy:rule:pr_1")).toBe("总是允许的规则");
-    expect(deciderLabel("policy:rule:builtin-read-only")).toBe("只读命令白名单");
-    const byLead = question("q1", { kind: "approval", status: "answered", answer: "deny", decided_by: "lead:lead-1",
-      detail: { ...bash, review: { by: "lead:lead-1", decision: "deny", reason: "不能删数据" } } });
-    expect(approvalVerdict(byLead)).toBe("组长 lead-1 拒绝 · 不能删数据");
-    expect(approvalVerdict(question("q2", { kind: "approval", status: "answered", answer: "allow_always", decided_by: "user:u1", detail: bash }))).toBe("你 总是允许");
-    expect(approvalVerdict(question("q3", { kind: "approval", audience: "lead", detail: bash }))).toBe("等组长 lead-1 判断");
-  });
-  it("explains why a card reached the user and keeps the history newest first", () => {
+  it("explains why a card reached the user", () => {
     const asked = question("q4", { kind: "approval", detail: { ...bash, review: { by: "lead:lead-1", decision: "ask_user", reason: "会改线上" } } });
     expect(reviewNote(asked)).toBe("组长 lead-1 拿不准：会改线上");
     expect(reviewNote(question("q5", { kind: "approval", detail: { ...bash, review: { by: "policy:lead_timeout", decision: "ask_user", reason: "" } } }))).toContain("没有及时判断");
     expect(reviewNote(question("q6", { kind: "approval", detail: bash }))).toBeNull();
     expect(approvalCardStatus(asked)).toBe("组长转给你");
     expect(approvalCardStatus(question("q6", { kind: "approval", detail: bash }))).toBe("等你处理");
-    const list = [
-      question("a", { kind: "approval", status: "answered", answered_at: "2026-11-14T10:01:00Z" }),
-      question("b", { kind: "approval", status: "answered", answered_at: "2026-11-14T10:05:00Z" }),
-      question("c", { kind: "approval" }),
-      question("d", { kind: "question", status: "answered" }),
-    ];
-    expect(approvalHistory(list).map((q) => q.id)).toEqual(["b", "a"]);
   });
 });

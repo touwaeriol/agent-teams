@@ -3,14 +3,14 @@ import { describe, expect, it } from "vitest";
 import { applyProjectEvent } from "@/api/events";
 import { keys } from "@/api/queries";
 import type { EmployeeBrief, ThreadView } from "@/api/views";
-import { detailTabOf } from "@/components/app/ThreadDetail";
+import { detailViewOf, typingLine } from "@/components/app/ThreadDetail";
 import { menuItems } from "@/components/app/ThreadMenu";
 import { IMAGE_MAX_BYTES, IMAGE_MAX_COUNT, imageProblem, pickImages } from "@/lib/images";
-import { activityLine, askingLabel, cardsByAsker, elapsed, featured, isWorking, liveLine, stateLabel, taskProgress, waitingReason } from "@/lib/live";
+import { askingLabel, elapsed, featured, isWorking, liveLine, stateLabel, taskProgress } from "@/lib/live";
 import { clampWidth, dragWidth, loadWidth, PANEL_DEFAULT, PANEL_MAX, PANEL_MIN, panelKey, saveWidth } from "@/lib/panelWidth";
 import { groupThreads } from "@/lib/present";
 import { threadPath } from "@/pages/Main";
-import { question, task, thread } from "./fixtures";
+import { task, thread } from "./fixtures";
 
 function member(name: string, state: string | null, patch: Partial<EmployeeBrief> = {}): EmployeeBrief {
   return {
@@ -28,20 +28,6 @@ describe("live progress", () => {
     expect(askingLabel(member("dev-4", "raising_hand"), false)).toBe("等组长回复");
     expect(askingLabel(member("dev-4", "raising_hand"), true)).toBe("等你审批");
     expect(askingLabel(running, false)).toBe("在跑");
-    expect(activityLine(running)).toBe("Bash npm test");
-    const asking = member("dev-3", "raising_hand");
-    const card = question("q1", { asker: "dev-3", kind: "approval", detail: { input: { command: "rm -rf build" } } });
-    expect(activityLine(asking, card)).toBe("请求执行 rm -rf build");
-  });
-
-  it("explains why a thread waits", () => {
-    const t = thread(1);
-    const approval = question("q1", { kind: "approval" });
-    expect(waitingReason(t, [approval, question("q2", { kind: "approval" })])).toBe("等你审批 2 条命令，员工停在这一步");
-    expect(waitingReason(t, [approval, question("q3")])).toBe("等你处理 1 个审批和 1 个问题");
-    expect(waitingReason(thread(2, { status: "review", pr_number: 7 }), [])).toBe("PR #7 等你验收");
-    expect(waitingReason(t, [])).toBe("");
-    expect(cardsByAsker([question("a", { asker: "x" }), question("b", { asker: "x" })]).get("x")?.id).toBe("a");
   });
 
   it("counts task progress without cancelled tasks", () => {
@@ -96,13 +82,23 @@ describe("thread lifecycle in the UI", () => {
     expect(qc.getQueryData<ThreadView[]>(keys.threads("p1"))?.map((t) => t.no)).toEqual([3, 1]);
   });
 
-  it("deep links threads and tabs", () => {
+  it("deep links threads and the views over the chat", () => {
     expect(threadPath("p1", 12)).toBe("/projects/p1/threads/12");
-    expect(threadPath("p1", 12, "progress")).toBe("/projects/p1/threads/12");
+    expect(threadPath("p1", 12, null)).toBe("/projects/p1/threads/12");
     expect(threadPath("p1", 12, "deliverables")).toBe("/projects/p1/threads/12/deliverables");
-    expect(detailTabOf("members")).toBe("members");
-    expect(detailTabOf("full")).toBe("progress");
-    expect(detailTabOf(undefined)).toBe("progress");
+    expect(detailViewOf("members")).toBe("members");
+    expect(detailViewOf("progress")).toBeNull();
+    expect(detailViewOf("full")).toBeNull();
+    expect(detailViewOf(undefined)).toBeNull();
+  });
+
+  it("shows one quiet line while the thread is going", () => {
+    const t = (status: ThreadView["status"], lead: string | null) => ({ status, members: [member("lead-1", lead)] });
+    expect(typingLine(t("running", "typing"))).toEqual({ text: "组长正在回复…", spin: true });
+    expect(typingLine(t("running", "idle"))).toEqual({ text: "讨论串进行中", spin: true });
+    expect(typingLine(t("paused", "idle"))).toEqual({ text: "讨论串已暂停", spin: false });
+    expect(typingLine(t("waiting", "idle"))).toBeNull();
+    expect(typingLine(t("done", null))).toBeNull();
   });
 });
 
