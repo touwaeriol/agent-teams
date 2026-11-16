@@ -17,7 +17,7 @@ import { ConfirmAction, EmptyState, Loading } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { useIsMobile, useMedia } from "@/lib/media";
 import { useAttachments } from "@/components/app/attachments";
-import { ActivityFeed, ApprovalHistory, detailTabOf } from "@/components/app/ThreadDetail";
+import { ApprovalHistory, detailTabOf } from "@/components/app/ThreadDetail";
 import { ThreadMenu } from "@/components/app/ThreadMenu";
 import { isWorking } from "@/lib/live";
 import { usesAsk } from "@/lib/roles";
@@ -402,7 +402,6 @@ function ThreadAside({ thread }: { thread: ThreadView }) {
         ))}
       </section>
       <section className="flex flex-col gap-2 rounded-xl border bg-panel px-4 py-3.5">
-        <ActivityFeed thread={thread} />
         <ApprovalHistory questions={questions.data} />
       </section>
       <Composer
@@ -462,7 +461,6 @@ function MobileThread({ thread }: { thread: ThreadView }) {
           <MemberLines thread={thread} />
         </section>
         <section className="px-1">
-          <ActivityFeed thread={thread} />
           <ApprovalHistory questions={questions.data} />
         </section>
         {thread.lead_last && (
