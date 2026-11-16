@@ -239,8 +239,8 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     tiers: ["lead"],
     blocking: [],
     requires: null,
-    description: "Write the thread summary (before review or when done); it is also added to the project memory.",
-    input_schema: {"description":"Write the thread summary (before review or when done); it is also added to the project memory.","type":"object","required":["summary"],"additionalProperties":false,"properties":{"summary":{"type":"string","minLength":1}}},
+    description: "Write the thread summary; it is also added to the project memory. With code changes, call it after open_pr: the thread ends when the PR merges. A thread that changed no repository (research, review, Q&A) needs no PR: finish ends it right away (done).",
+    input_schema: {"description":"Write the thread summary; it is also added to the project memory. With code changes, call it after open_pr: the thread ends when the PR merges. A thread that changed no repository (research, review, Q&A) needs no PR: finish ends it right away (done).","type":"object","required":["summary"],"additionalProperties":false,"properties":{"summary":{"type":"string","minLength":1}}},
   },
   get_task: {
     tiers: ["member"],
@@ -281,8 +281,8 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     tiers: ["lead"],
     blocking: [],
     requires: null,
-    description: "Open one pull request per repository the thread changed (thread branch to that repository's base branch); the thread moves to review.",
-    input_schema: {"description":"Open one pull request per repository the thread changed (thread branch to that repository's base branch); the thread moves to review.","type":"object","required":["title","body"],"additionalProperties":false,"properties":{"title":{"type":"string","minLength":1,"maxLength":256},"body":{"type":"string"},"repo":{"description":"Open only this repository's pull request (default: every changed repository without one).","type":"string","minLength":1,"maxLength":300},"base":{"description":"PR base branch for repo (or for the only repository to open); default the thread's base there.","type":"string","minLength":1,"maxLength":255}}},
+    description: "Open one pull request per repository the thread changed (thread branch to that repository's base branch); the thread moves to review. Only for code changes: a thread that changed nothing ends with finish alone.",
+    input_schema: {"description":"Open one pull request per repository the thread changed (thread branch to that repository's base branch); the thread moves to review. Only for code changes: a thread that changed nothing ends with finish alone.","type":"object","required":["title","body"],"additionalProperties":false,"properties":{"title":{"type":"string","minLength":1,"maxLength":256},"body":{"type":"string"},"repo":{"description":"Open only this repository's pull request (default: every changed repository without one).","type":"string","minLength":1,"maxLength":300},"base":{"description":"PR base branch for repo (or for the only repository to open); default the thread's base there.","type":"string","minLength":1,"maxLength":255}}},
   },
   open_thread: {
     tiers: ["coordinator"],

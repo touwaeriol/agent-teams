@@ -29,6 +29,7 @@ var (
 	ErrLegacy        = errors.New("旧对话只读")
 	ErrNotActive     = errors.New("讨论串不在进行中")
 	ErrNotArchived   = errors.New("讨论串没有归档")
+	ErrArchived      = errors.New("讨论串已归档，取消归档后再继续")
 	ErrTooManyImages = errors.New("一条消息最多 8 张图片")
 	ErrNoEmployee    = errors.New("没有这个员工")
 	ErrBadState      = errors.New("当前状态不允许这个操作")

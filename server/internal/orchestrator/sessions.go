@@ -11,6 +11,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
+	"github.com/touwaeriol/agent-teams/server/internal/status"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -34,6 +35,10 @@ func (o *Orchestrator) Deliver(ctx context.Context, tx *core.Tx, e core.Employee
 	if err != nil {
 		return m, err
 	}
+	if ended, err := o.threadEnded(ctx, tx, e); err != nil || ended {
+		return m, err // a finished or archived thread's employees are not woken: the message is only kept
+	}
+	o.wake(tx, e.ID)
 	sess, err := core.LiveSession(ctx, tx, e.ID)
 	switch {
 	case errors.Is(err, core.ErrNotFound):
@@ -49,6 +54,30 @@ func (o *Orchestrator) Deliver(ctx context.Context, tx *core.Tx, e core.Employee
 		return m, o.reopen(ctx, tx, e, sess, &protocol.FirstMessage{MsgID: protocol.MsgID(msgID), Text: d.Text, Images: imageRefs(d.Images)})
 	}
 	return m, o.send(ctx, tx, sess, msgID, d)
+}
+
+// threadEnded reports whether the employee works in a thread that is done, failed or archived.
+func (o *Orchestrator) threadEnded(ctx context.Context, tx *core.Tx, e core.Employee) (bool, error) {
+	if e.ThreadID == nil {
+		return false, nil
+	}
+	t, err := core.ThreadByID(ctx, tx, *e.ThreadID)
+	if err != nil {
+		return false, ignoreMissing(err)
+	}
+	return threadOver(t.Status), nil
+}
+
+func threadOver(status string) bool {
+	return status == "done" || status == "failed" || status == "archived"
+}
+
+// wake shows the employee as busy (waking) from the moment a message is on its way: a parked
+// or closed session takes a while to come back before its turn starts.
+func (o *Orchestrator) wake(tx *core.Tx, employeeID string) {
+	tx.AfterCommit(func(ctx context.Context) {
+		o.status.Observe(ctx, employeeID, status.Observation{Kind: status.Woken, Cause: "message"})
+	})
 }
 
 // resumableClose are close reasons after which the employee's next session picks up the old

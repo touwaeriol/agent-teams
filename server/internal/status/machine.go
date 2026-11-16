@@ -16,6 +16,7 @@ type Facts struct {
 	ToolCat     string // edit | read | web | shell | platform | other | "" (no tool running)
 	ToolSub     string // shell: test | git_commit | git_push | ci | install
 	Turn        bool
+	Waking      bool // a message is on its way, or the session is (re)opening
 	Waiting     bool
 }
 
@@ -45,6 +46,8 @@ func Decide(f Facts) Decision {
 	switch {
 	case f.Turn:
 		return Decision{State: "thinking"}
+	case f.Waking:
+		return Decision{State: "thinking", Substate: "waking"}
 	case f.Waiting:
 		return Decision{State: "waiting"}
 	}

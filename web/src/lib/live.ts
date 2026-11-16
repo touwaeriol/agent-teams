@@ -9,6 +9,11 @@ export function isWorking(m: Pick<EmployeeBrief, "status">): boolean {
   return WORKING.has(m.status?.state ?? "idle");
 }
 
+/** A message is on its way to a parked or closed session, which is coming back up. */
+export function isWaking(m: Pick<EmployeeBrief, "status">): boolean {
+  return m.status?.state === "thinking" && m.status.substate === "waking";
+}
+
 const VERB: Record<string, string> = {
   typing: "在写",
   reading: "在看",
@@ -25,6 +30,7 @@ const VERB: Record<string, string> = {
 
 /** Short state label shown before the activity line. */
 export function stateLabel(m: Pick<EmployeeBrief, "status">): string {
+  if (isWaking(m)) return "唤醒中";
   const s = m.status?.state ?? "idle";
   return VERB[s] ?? s;
 }

@@ -31,17 +31,16 @@ func (h *Hooks) ProjectCreated(ctx context.Context, p store.Project, firstMessag
 // ProjectDeleting closes the project's sessions and purges its directories on the nodes.
 func (h *Hooks) ProjectDeleting(ctx context.Context, _ string, projectID string) error {
 	return h.e.Core.InTx(ctx, func(tx *core.Tx) error {
-		live, err := core.ProjectLiveSessions(ctx, tx, projectID)
-		if err != nil {
+		if err := h.e.Orch.ProjectDeleting(ctx, tx, projectID); err != nil {
 			return err
-		}
-		for _, s := range live {
-			if err := h.e.Orch.CloseSession(ctx, tx, s, "employee_removed"); err != nil {
-				return err
-			}
 		}
 		return h.e.Delivery.Purge(ctx, tx, projectID)
 	})
+}
+
+// ProjectArchived pauses the project's going threads and closes every session it has.
+func (h *Hooks) ProjectArchived(ctx context.Context, _ string, projectID string) error {
+	return h.e.Core.InTx(ctx, func(tx *core.Tx) error { return h.e.Orch.ProjectArchived(ctx, tx, projectID) })
 }
 
 // UserCutOff closes every session of the user and cancels the questions they wait on.

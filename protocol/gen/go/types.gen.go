@@ -1856,8 +1856,10 @@ func (j *FileChunk) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// Write the thread summary (before review or when done); it is also added to the
-// project memory.
+// Write the thread summary; it is also added to the project memory. With code
+// changes, call it after open_pr: the thread ends when the PR merges. A thread
+// that changed no repository (research, review, Q&A) needs no PR: finish ends it
+// right away (done).
 type FinishInput struct {
 	// Summary corresponds to the JSON schema field "summary".
 	Summary string `json:"summary"`
@@ -3260,7 +3262,8 @@ func (j *OpenGen) UnmarshalJSON(value []byte) error {
 }
 
 // Open one pull request per repository the thread changed (thread branch to that
-// repository's base branch); the thread moves to review.
+// repository's base branch); the thread moves to review. Only for code changes: a
+// thread that changed nothing ends with finish alone.
 type OpenPRInput struct {
 	// PR base branch for repo (or for the only repository to open); default the
 	// thread's base there.

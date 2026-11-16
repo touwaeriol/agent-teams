@@ -216,6 +216,11 @@ func (s *Server) updateProject(ctx context.Context, in *updateProjectInput) (*pr
 	if err != nil {
 		return nil, storeErr(err, "没有这个项目")
 	}
+	if row.Archived && !current.Archived {
+		if err := s.hooks.ProjectArchived(ctx, p.User.ID, row.ID); err != nil {
+			return nil, err
+		}
+	}
 	s.events.User(ctx, p.User.ID, "project", map[string]any{"project_id": row.ID, "op": "update"})
 	return &projectOutput{Body: s.projectView(row, s.deliveryDefault(ctx))}, nil
 }

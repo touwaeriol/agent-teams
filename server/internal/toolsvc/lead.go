@@ -326,6 +326,10 @@ func (s *Service) finish(ctx context.Context, tx *core.Tx, c *call) (Result, err
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
+	end, err := finishMode(ctx, tx, t)
+	if err != nil {
+		return Result{}, err
+	}
 	summary := strings.TrimSpace(in.Summary)
 	if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"summary": summary}); err != nil {
 		return Result{}, err
@@ -333,5 +337,97 @@ func (s *Service) finish(ctx context.Context, tx *core.Tx, c *call) (Result, err
 	if err := s.addMemory(ctx, tx, t.ProjectID, summary, fmt.Sprintf("#%d", t.No)); err != nil {
 		return Result{}, err
 	}
-	return okText("总结已记录"), tx.EmitThread(ctx, t.ID)
+	if err := tx.EmitThread(ctx, t.ID); err != nil {
+		return Result{}, err
+	}
+	switch end {
+	case finishNow:
+		// After the commit, so the tool result goes out before the sessions are closed.
+		tx.AfterCommit(func(ctx context.Context) { s.endWithoutPR(context.WithoutCancel(ctx), t.ID) })
+		return okText("总结已记录。这个讨论串没有代码改动，不需要开 PR：讨论串现在结束（done），成员和你的会话随即关闭，不用再做别的。"), nil
+	case finishNeedsPR:
+		return okText("总结已记录。讨论串有代码改动还没有开 PR：请调用 open_pr(title, body)，PR 合并后讨论串结束。"), nil
+	}
+	return okText("总结已记录，PR 合并后讨论串结束。"), nil
+}
+
+// What finish does besides recording the summary.
+const (
+	finishWithPR  = iota // a PR is open: the thread ends when it merges
+	finishNeedsPR        // changes are on a thread branch without a PR yet
+	finishNow            // nothing was changed in any repository: the thread is done now
+)
+
+// finishMode decides how finish ends the thread. A thread without repository changes (no
+// thread branch, no PR, nothing in the merge queue) ends right away; its plan and tasks must be
+// finished first, which is refused with what is still open.
+func finishMode(ctx context.Context, tx *core.Tx, t core.Thread) (int, error) {
+	repos, err := core.ThreadRepos(ctx, tx, t.ID)
+	if err != nil {
+		return 0, err
+	}
+	for _, r := range repos {
+		if r.PRNumber != nil {
+			return finishWithPR, nil
+		}
+	}
+	for _, r := range repos {
+		if r.BranchCreated {
+			return finishNeedsPR, nil
+		}
+	}
+	if t.Status != "running" && t.Status != "waiting" {
+		return 0, refuse("讨论串现在是 %s，不能结束", t.Status)
+	}
+	if queued, err := core.MergeQueue(ctx, tx, t.ID, true); err != nil || len(queued) > 0 {
+		if err != nil {
+			return 0, err
+		}
+		return 0, refuse("合并队列里还有分支在合并，等合并完再开 PR（open_pr）")
+	}
+	return finishNow, openWork(ctx, tx, t)
+}
+
+// openWork refuses finishing a thread whose main tasks or small tasks are still going.
+func openWork(ctx context.Context, tx *core.Tx, t core.Thread) error {
+	plan, err := core.MainTasks(ctx, tx, t.ID)
+	if err != nil {
+		return err
+	}
+	var open []string
+	for _, m := range plan {
+		if m.Status != "done" {
+			open = append(open, m.Title)
+		}
+	}
+	tasks, err := core.ThreadTasks(ctx, tx, t.ID, core.TaskFilter{})
+	if err != nil {
+		return err
+	}
+	for _, task := range tasks {
+		if !task.Finished() {
+			open = append(open, fmt.Sprintf("%s（%s）", task.ID, task.Status))
+		}
+	}
+	if len(open) > 0 {
+		return refuse("还有没完成的工作：%s。先完成（或用 update_plan / cancel_task 收尾）再调用 finish", strings.Join(open, "、"))
+	}
+	return nil
+}
+
+// endWithoutPR moves a thread that changed nothing to done (sessions close, coordinator told).
+func (s *Service) endWithoutPR(ctx context.Context, threadID string) {
+	err := s.core.InTx(ctx, func(tx *core.Tx) error {
+		t, err := core.LockThread(ctx, tx, threadID)
+		if err != nil || (t.Status != "running" && t.Status != "waiting") {
+			return ignoreMissing(err)
+		}
+		if mode, err := finishMode(ctx, tx, t); err != nil || mode != finishNow {
+			return err
+		}
+		return s.orch.SetStatus(ctx, tx, t, "done", "")
+	})
+	if err != nil {
+		s.log.Warn("finish without PR", "thread_id", threadID, "err", err)
+	}
 }

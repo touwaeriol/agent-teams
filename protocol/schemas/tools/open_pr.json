@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/tools/open_pr.json",
   "title": "OpenPrInput",
-  "description": "Open one pull request per repository the thread changed (thread branch to that repository's base branch); the thread moves to review.",
+  "description": "Open one pull request per repository the thread changed (thread branch to that repository's base branch); the thread moves to review. Only for code changes: a thread that changed nothing ends with finish alone.",
   "x-tool": {
     "tiers": [
       "lead"

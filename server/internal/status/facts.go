@@ -2,19 +2,22 @@ package status
 
 import (
 	"context"
+	"time"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 )
 
 // facts loads the persisted facts and merges the in-memory activity.
 func (e *Engine) facts(ctx context.Context, tx *core.Tx, emp core.Employee, a activity) (Facts, core.Task, error) {
-	f := Facts{Claiming: a.claimTask != "", ToolCat: a.toolCat, ToolSub: a.toolSub, Turn: a.turn}
+	f := Facts{Claiming: a.claimTask != "", ToolCat: a.toolCat, ToolSub: a.toolSub, Turn: a.turn,
+		Waking: time.Now().Before(a.wakeUntil)}
 	sess, err := core.LiveSession(ctx, tx, emp.ID)
 	switch {
 	case err == nil:
 		f.Broken = sess.State == "crashed"
 		f.Queued = sess.State == "queued"
 		f.Turn = f.Turn || sess.State == "turn_running"
+		f.Waking = f.Waking || sess.State == "opening"
 		f.NodeOffline = sess.NodeID != nil && !e.online(*sess.NodeID)
 	case err != core.ErrNotFound:
 		return f, core.Task{}, err

@@ -47,6 +47,18 @@ describe("ThreadDetail", () => {
     await w.get("nav[aria-label=位置] button").trigger("click");
     expect(w.emitted("back")).toHaveLength(1);
   });
+  it("tells an archived thread's composer how to go on and unarchives in one click", async () => {
+    const fetch = stubApi({ "/messages": { items: [], next_cursor: null }, "/questions": [] });
+    const w = mountWith(ThreadDetail, { pid: "p1", thread: thread(12, { id: "th_12", status: "archived" }), view: null });
+    await flushPromises();
+    expect(w.get("[data-testid=closed-note]").text()).toContain("讨论串已归档，取消归档后再继续");
+    expect(document.body.querySelector("textarea[placeholder^='回复组长']")).toBeNull();
+    const button = w.findAll("[data-testid=closed-note] button").find((b) => b.text() === "取消归档");
+    await button!.trigger("click");
+    await flushPromises();
+    const urls = fetch.mock.calls.map(([input]) => (input instanceof Request ? `${input.method} ${input.url}` : String(input)));
+    expect(urls.some((u) => u.startsWith("POST") && u.includes("/api/threads/th_12/unarchive"))).toBe(true);
+  });
   it("offers the lead's message box while running", async () => {
     stubApi({ "/messages": { items: [], next_cursor: null }, "/questions": [] });
     mountWith(ThreadDetail, { pid: "p1", thread: thread(12), view: null });

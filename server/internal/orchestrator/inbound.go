@@ -174,6 +174,9 @@ func (o *Orchestrator) Reconcile(ctx context.Context, node store.Node, r *protoc
 				return err
 			}
 		}
+		if err := o.closeEnded(ctx, tx, node.ID); err != nil {
+			return err
+		}
 		return o.wakeStalledThreads(ctx, tx, node)
 	})
 }
@@ -198,9 +201,30 @@ func (o *Orchestrator) closeStale(ctx context.Context, tx *core.Tx, node store.N
 	return nil
 }
 
+// closeEnded closes the node's sessions that still belong to finished or archived threads
+// (left parked by a daemon restart, or from before archive closed them): they are not
+// resumed, their node slots are freed and the employees stay idle until unarchived.
+func (o *Orchestrator) closeEnded(ctx context.Context, tx *core.Tx, nodeID string) error {
+	var stale []core.AgentSession
+	err := tx.Gorm(ctx).Table("at_agent_sessions a").Select("a.*").Joins("JOIN at_employees e ON e.id = a.employee_id").
+		Joins("JOIN at_threads t ON t.id = e.thread_id").
+		Where("a.node_id = ? AND a.state <> 'closed' AND t.status IN ('done','failed','archived')", nodeID).Find(&stale).Error
+	if err != nil {
+		return err
+	}
+	return o.closeAll(ctx, tx, stale, "thread_done")
+}
+
 // reconcileOne brings one session in line with the report; a turn that the daemon's
-// restart cut off is resumed.
+// restart cut off is resumed. Sessions of finished threads are left to closeEnded.
 func (o *Orchestrator) reconcileOne(ctx context.Context, tx *core.Tx, s core.AgentSession, reported map[string]protocol.SessionReportItem) error {
+	e, err := core.EmployeeByID(ctx, tx, s.EmployeeID)
+	if err != nil {
+		return err
+	}
+	if ended, err := o.threadEnded(ctx, tx, e); err != nil || ended {
+		return err
+	}
 	it, ok := reported[s.ID]
 	if ok && int(it.OpenGen) == s.OpenGen && it.State != "closed" {
 		state := string(it.State)
@@ -217,10 +241,6 @@ func (o *Orchestrator) reconcileOne(ctx context.Context, tx *core.Tx, s core.Age
 	}
 	if s.State == "opening" && hasPendingOpen(ctx, tx, s) {
 		return nil // the replayed session.open is on its way
-	}
-	e, err := core.EmployeeByID(ctx, tx, s.EmployeeID)
-	if err != nil {
-		return err
 	}
 	if err := o.reopen(ctx, tx, e, s, nil); err != nil {
 		return err

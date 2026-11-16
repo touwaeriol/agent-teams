@@ -1929,7 +1929,7 @@ export interface EnqueueMergeInput {
   base?: string;
 }
 /**
- * Write the thread summary (before review or when done); it is also added to the project memory.
+ * Write the thread summary; it is also added to the project memory. With code changes, call it after open_pr: the thread ends when the PR merges. A thread that changed no repository (research, review, Q&A) needs no PR: finish ends it right away (done).
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "FinishInput".
@@ -2068,7 +2068,7 @@ export interface RepoPr {
   base?: string;
 }
 /**
- * Open one pull request per repository the thread changed (thread branch to that repository's base branch); the thread moves to review.
+ * Open one pull request per repository the thread changed (thread branch to that repository's base branch); the thread moves to review. Only for code changes: a thread that changed nothing ends with finish alone.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "OpenPrInput".

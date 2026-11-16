@@ -196,6 +196,7 @@ export function memberTone(m: Pick<EmployeeBrief, "status" | "node">): string {
 export function memberDoing(m: Pick<EmployeeBrief, "status">): string {
   const s = m.status;
   if (!s) return "空闲";
+  if (s.state === "thinking" && s.substate === "waking") return s.bubble || "唤醒中";
   return s.bubble || STATE_TEXT[s.state] || s.state;
 }
 

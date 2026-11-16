@@ -20,6 +20,9 @@ func TestDecidePriority(t *testing.T) {
 		{"running test", Facts{ToolCat: "shell", ToolSub: "test"}, Decision{State: "running", Substate: "test"}},
 		{"thinking", Facts{Turn: true, Waiting: true}, Decision{State: "thinking"}},
 		{"waiting", Facts{Waiting: true}, Decision{State: "waiting"}},
+		{"waking over waiting", Facts{Waking: true, Waiting: true}, Decision{State: "thinking", Substate: "waking"}},
+		{"turn beats waking", Facts{Waking: true, Turn: true}, Decision{State: "thinking"}},
+		{"offline beats waking", Facts{Waking: true, NodeOffline: true}, Decision{State: "offline"}},
 		{"platform tool = thinking", Facts{ToolCat: "platform", Turn: true}, Decision{State: "thinking"}},
 	}
 	for _, c := range cases {

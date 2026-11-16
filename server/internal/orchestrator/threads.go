@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"gorm.io/gorm"
+
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/office"
 	"github.com/touwaeriol/agent-teams/server/internal/roles"
@@ -269,6 +271,11 @@ func (o *Orchestrator) setStatus(ctx context.Context, tx *core.Tx, t core.Thread
 	if err := tx.EmitThread(ctx, t.ID); err != nil {
 		return err
 	}
+	if t.Status == "archived" {
+		// Unarchive only puts the thread back in the list: no session starts, no cleanup
+		// runs again and the coordinator is not told about a status it already heard of.
+		return nil
+	}
 	if err := o.afterStatus(ctx, tx, t, next); err != nil {
 		return err
 	}
@@ -294,7 +301,7 @@ func (o *Orchestrator) afterStatus(ctx context.Context, tx *core.Tx, t core.Thre
 	}
 	switch next {
 	case "done", "failed", "archived":
-		if err := o.closeThreadSessions(ctx, tx, t.ID, "thread_done"); err != nil {
+		if err := o.EndThreadWork(ctx, tx, t.ID); err != nil {
 			return err
 		}
 		tx.AfterCommit(func(ctx context.Context) { o.ThreadEnded(ctx, t.ID) })
@@ -304,17 +311,102 @@ func (o *Orchestrator) afterStatus(ctx context.Context, tx *core.Tx, t core.Thre
 	return nil
 }
 
-func (o *Orchestrator) closeThreadSessions(ctx context.Context, tx *core.Tx, threadID, reason string) error {
+// EndThreadWork stops everything a finished (done, failed, archived) or deleted thread still
+// has going: every session of its employees is closed on its node (parked ones too, which
+// frees their slots), the tool calls they were in are cancelled, the thread's open cards and
+// questions are cancelled and its usage-limit waits are dropped.
+func (o *Orchestrator) EndThreadWork(ctx context.Context, tx *core.Tx, threadID string) error {
 	sessions, err := core.ThreadLiveSessions(ctx, tx, threadID)
 	if err != nil {
 		return err
 	}
+	if err := o.closeAll(ctx, tx, sessions, "thread_done"); err != nil {
+		return err
+	}
+	if err := o.cancelOpenCards(ctx, tx, tx.Gorm(ctx).Where("thread_id = ?", threadID), "system:thread_ended"); err != nil {
+		return err
+	}
+	return tx.Gorm(ctx).Exec(`DELETE FROM at_rate_limit_waits WHERE thread_id = ?`, threadID).Error
+}
+
+// closeAll closes sessions and cancels the tool calls they were waiting on.
+func (o *Orchestrator) closeAll(ctx context.Context, tx *core.Tx, sessions []core.AgentSession, reason string) error {
+	ids := make([]string, 0, len(sessions))
 	for _, s := range sessions {
 		if err := o.closeSession(ctx, tx, s, reason); err != nil {
 			return err
 		}
+		ids = append(ids, s.ID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return tx.Gorm(ctx).Table("at_tool_calls").Where("session_id IN ? AND status IN ('running','waiting')", ids).
+		Updates(map[string]any{"status": "cancelled", "finished_at": gorm.Expr("now()")}).Error
+}
+
+// cancelOpenCards cancels the open questions and approval cards that scope selects.
+func (o *Orchestrator) cancelOpenCards(ctx context.Context, tx *core.Tx, scope *gorm.DB, decidedBy string) error {
+	var open []core.Question
+	if err := scope.Model(&core.Question{}).Where("status = 'open'").Find(&open).Error; err != nil {
+		return err
+	}
+	for _, q := range open {
+		closed, err := core.CloseQuestion(ctx, tx, q, "cancelled", nil, decidedBy)
+		if errors.Is(err, core.ErrConflict) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if err := tx.EmitQuestion(ctx, closed); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// ProjectArchived stops a project's work: its going threads are paused, every session of
+// the project (coordinator included) is closed, their cards cancelled and usage-limit waits
+// dropped. Nothing starts again on unarchive; the next message wakes whoever it is for.
+func (o *Orchestrator) ProjectArchived(ctx context.Context, tx *core.Tx, projectID string) error {
+	var going []core.Thread
+	if err := tx.Gorm(ctx).Clauses(core.ForUpdate).Where("project_id = ? AND status IN ('running','waiting','queued')", projectID).
+		Find(&going).Error; err != nil {
+		return err
+	}
+	for _, t := range going {
+		if err := o.Pause(ctx, tx, t, "project_archived"); err != nil {
+			return err
+		}
+	}
+	return o.closeProjectSessions(ctx, tx, projectID, "employee_removed")
+}
+
+// closeProjectSessions closes every session of a project and cancels what they waited on.
+func (o *Orchestrator) closeProjectSessions(ctx context.Context, tx *core.Tx, projectID, reason string) error {
+	live, err := core.ProjectLiveSessions(ctx, tx, projectID)
+	if err != nil {
+		return err
+	}
+	if err := o.closeAll(ctx, tx, live, reason); err != nil {
+		return err
+	}
+	ids := make([]string, len(live))
+	for i, s := range live {
+		ids[i] = s.ID
+	}
+	if len(ids) > 0 {
+		if err := o.cancelOpenCards(ctx, tx, tx.Gorm(ctx).Where("session_id IN ?", ids), "system:project_archived"); err != nil {
+			return err
+		}
+	}
+	return tx.Gorm(ctx).Exec(`DELETE FROM at_rate_limit_waits WHERE project_id = ?`, projectID).Error
+}
+
+// ProjectDeleting closes a project's sessions before its rows go.
+func (o *Orchestrator) ProjectDeleting(ctx context.Context, tx *core.Tx, projectID string) error {
+	return o.closeProjectSessions(ctx, tx, projectID, "employee_removed")
 }
 
 // notifyCoordinator posts "[Thread #12 · title · review] <lead's latest>" to the coordinator.

@@ -111,7 +111,15 @@ func (o *Orchestrator) checkThreadOpen(ctx context.Context, tx *core.Tx, c core.
 	if err != nil {
 		return err
 	}
-	if t.Status == "done" || t.Status == "archived" || t.Status == "failed" {
+	return threadAccepts(t)
+}
+
+// threadAccepts refuses messages to a thread that is over: archived ones say how to go on.
+func threadAccepts(t core.Thread) error {
+	switch {
+	case t.Status == "archived":
+		return ErrArchived
+	case threadOver(t.Status):
 		return ErrNotActive
 	}
 	return nil
@@ -136,6 +144,13 @@ func (o *Orchestrator) InterruptConversation(ctx context.Context, userID, convID
 func (o *Orchestrator) MessageMember(ctx context.Context, t core.Thread, name, content string) (core.Message, error) {
 	var m core.Message
 	err := o.core.InTx(ctx, func(tx *core.Tx) error {
+		cur, err := core.ThreadByID(ctx, tx, t.ID)
+		if err != nil {
+			return err
+		}
+		if err := threadAccepts(cur); err != nil {
+			return err
+		}
 		emp, err := core.EmployeeByName(ctx, tx, t.ProjectID, &t.ID, name)
 		if errors.Is(err, core.ErrNotFound) {
 			return ErrNoEmployee
@@ -275,7 +290,7 @@ func (o *Orchestrator) Unarchive(ctx context.Context, tx *core.Tx, t core.Thread
 // in the project library without the thread link. purge queues the worktree removal: it runs
 // after the session closes are queued (so they reach the nodes first) and before the rows go.
 func (o *Orchestrator) DeleteThread(ctx context.Context, tx *core.Tx, t core.Thread, purge func() error) error {
-	if err := o.closeThreadSessions(ctx, tx, t.ID, "thread_done"); err != nil {
+	if err := o.EndThreadWork(ctx, tx, t.ID); err != nil {
 		return err
 	}
 	if err := purge(); err != nil {

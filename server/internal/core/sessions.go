@@ -97,14 +97,15 @@ func unackedCommands(ctx context.Context, tx *Tx, sessionID string) *gorm.DB {
 	return tx.Gorm(ctx).Table("at_node_commands").Where("session_id = ? AND status IN ('pending','sent')", sessionID)
 }
 
-// CloseSession marks a session closed; its unacked commands are superseded.
+// CloseSession marks a session closed; its unacked commands are superseded, except tool
+// results queued before the close (the call that ended the thread still gets its answer).
 func CloseSession(ctx context.Context, tx *Tx, id, reason string) error {
 	err := openSession(ctx, tx, id).Updates(map[string]any{"state": "closed", "closed_at": gorm.Expr("now()"),
 		"close_reason": reason}).Error
 	if err != nil {
 		return err
 	}
-	return unackedCommands(ctx, tx, id).Where("type <> 'session.close'").Update("status", "superseded").Error
+	return unackedCommands(ctx, tx, id).Where("type NOT IN ('session.close','tool.result')").Update("status", "superseded").Error
 }
 
 // SupersedeOldGen marks unacked commands of older open generations superseded.

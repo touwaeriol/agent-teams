@@ -24,7 +24,11 @@ const (
 	ToolEnded
 	SetStatus
 	Claimed
+	Woken // a message is on its way to the employee (its session may be parked or closed)
 )
+
+// WakeTTL is how long a woken employee shows as busy without its turn starting.
+const WakeTTL = 3 * time.Minute
 
 // Observation is one fact about an employee.
 type Observation struct {
@@ -51,6 +55,7 @@ type activity struct {
 	claimTask   string
 	claimKind   string
 	cause       string
+	wakeUntil   time.Time
 }
 
 // Engine derives and records employee states.
@@ -92,12 +97,15 @@ func (e *Engine) apply(employeeID string, o Observation) bool {
 	a.cause = o.Cause
 	switch o.Kind {
 	case TurnStarted:
-		a.turn = true
+		a.turn, a.wakeUntil = true, time.Time{}
 	case TurnEnded:
-		a.turn, a.toolCat, a.toolSub, a.summary = false, "", "", ""
+		a.turn, a.toolCat, a.toolSub, a.summary, a.wakeUntil = false, "", "", "", time.Time{}
 	case ToolStarted:
-		a.turn = true
+		a.turn, a.wakeUntil = true, time.Time{}
 		a.toolCat, a.toolSub, a.summary = o.Category, o.Sub, o.Summary
+	case Woken:
+		a.wakeUntil = time.Now().Add(WakeTTL)
+		time.AfterFunc(WakeTTL+time.Second, func() { e.flush(context.Background(), employeeID) })
 	case ToolEnded:
 		a.toolCat, a.toolSub = "", ""
 	case SetStatus:

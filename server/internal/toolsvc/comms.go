@@ -295,11 +295,12 @@ func (s *Service) mail(ctx context.Context, tx *core.Tx, t core.Thread, from, to
 	return tx.EmitMail(ctx, t, m)
 }
 
-// pushMail sends mail to a recipient that has a session (the lead always gets it);
-// members without a session read it in their next task brief or with read_messages.
+// pushMail sends mail to a recipient that has had a session (the lead always gets it): a
+// parked or closed session wakes up for it. Members that never started read it in their
+// first task brief or with read_messages.
 func (s *Service) pushMail(ctx context.Context, tx *core.Tx, to core.Employee, text string) error {
 	if to.Tier != "lead" {
-		if _, err := core.LiveSession(ctx, tx, to.ID); err != nil {
+		if _, err := core.LatestSession(ctx, tx, to.ID); err != nil {
 			return ignoreMissing(err)
 		}
 	}

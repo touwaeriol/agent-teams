@@ -1,6 +1,6 @@
 // Pure helpers of the thread panel / page (web/src/components/app/ThreadDetail.tsx).
 import type { ThreadView } from "@/api/views";
-import { isWorking, threadActive } from "@/lib/live";
+import { isWaking, isWorking, threadActive } from "@/lib/live";
 import { leadOf } from "@/lib/present";
 import { THREAD_VIEWS, type ThreadViewId } from "../threadMenu";
 
@@ -15,6 +15,7 @@ export function typingLine(thread: Pick<ThreadView, "status" | "members">): { te
   if (thread.status === "paused") return { text: "讨论串已暂停", spin: false };
   if (thread.status === "queued") return { text: "排队中，等节点空出来", spin: true };
   const lead = leadOf(thread);
+  if (lead && isWaking(lead)) return { text: "正在唤醒组长…", spin: true };
   if (lead && isWorking(lead)) return { text: "组长正在回复…", spin: true };
   if (thread.status === "running") return { text: "讨论串进行中", spin: true };
   return null;
@@ -22,6 +23,13 @@ export function typingLine(thread: Pick<ThreadView, "status" | "members">): { te
 
 /** Finished threads take no more messages. */
 export const threadClosed = (t: Pick<ThreadView, "status">): boolean => ["done", "failed", "archived"].includes(t.status);
+
+/** What the message box says once the thread is closed; archived threads offer 取消归档. */
+export function closedNote(t: Pick<ThreadView, "status">): { text: string; unarchive: boolean } | null {
+  if (!threadClosed(t)) return null;
+  if (t.status === "archived") return { text: "讨论串已归档，取消归档后再继续", unarchive: true };
+  return { text: "讨论串已结束，不能再给组长发消息", unarchive: false };
+}
 
 /** Expand / collapse button of the detail header. */
 export interface ExpandLink {

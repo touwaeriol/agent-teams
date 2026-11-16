@@ -1,7 +1,7 @@
 <script setup lang="ts">
-/** The message box to the thread's lead; a closed note once the thread has finished. */
+/** The message box to the thread's lead; a closed note once the thread has finished (archived: with 取消归档). */
 import { computed } from "vue";
-import { conversations } from "@/api/actions";
+import { conversations, threads as threadActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import { keys } from "@/api/queries";
 import type { ThreadView } from "@/api/views";
@@ -9,22 +9,28 @@ import { leadOf } from "@/lib/present";
 import { cn } from "@/lib/utils";
 import { useAttachments } from "../attachments";
 import Composer from "../Composer.vue";
-import { threadClosed } from "./detail";
+import { closedNote } from "./detail";
 
 const props = defineProps<{ pid: string; thread: ThreadView; class?: string }>();
 const attachments = useAttachments(() => props.pid);
 const lead = computed(() => leadOf(props.thread));
+const note = computed(() => closedNote(props.thread));
 const send = useAction((v: { text: string; images: string[] }) => conversations.send(props.thread.id, v.text, false, v.images), {
   invalidate: () => [keys.messages(props.thread.id)],
+});
+const unarchive = useAction(() => threadActions.unarchive(props.thread.id), {
+  invalidate: () => [keys.threads(props.thread.project_id), keys.thread(props.thread.id), keys.waiting(props.thread.project_id)],
+  success: `#${props.thread.no} 已取消归档`,
 });
 const onSend = (text: string, images: string[]) => send.mutateAsync({ text, images });
 </script>
 
 <template>
   <div :class="cn('shrink-0', props.class)">
-    <p v-if="threadClosed(thread)" class="rounded-xl bg-background px-3 py-2.5 text-center text-xs text-muted-foreground">
-      讨论串已{{ thread.status === "archived" ? "归档" : "结束" }}，不能再给组长发消息
-    </p>
+    <div v-if="note" class="flex items-center justify-center gap-3 rounded-xl bg-background px-3 py-2.5 text-xs text-muted-foreground" data-testid="closed-note">
+      <span>{{ note.text }}</span>
+      <el-button v-if="note.unarchive" size="small" :loading="unarchive.isPending.value" @click="unarchive.mutate()">取消归档</el-button>
+    </div>
     <Composer
       v-else
       :id="`lead-${thread.id}`"

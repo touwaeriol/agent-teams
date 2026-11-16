@@ -92,29 +92,35 @@ func (r *Runner) resumeWaits(ctx context.Context) error {
 func (r *Runner) FireOne(ctx context.Context) (bool, error) {
 	var s Schedule
 	var owner string
+	var archived bool
 	err := r.core.InTx(ctx, func(tx *core.Tx) error {
 		var err error
-		s, owner, err = claimDue(ctx, tx, r.Now())
+		s, owner, archived, err = claimDue(ctx, tx, r.Now())
 		return err
 	})
 	if err != nil || s.ID == "" {
 		return false, ignoreMissing(err)
 	}
+	if archived {
+		return true, nil // an archived project's schedules move on without waking its coordinator
+	}
 	return true, r.post(ctx, s, owner)
 }
 
-func claimDue(ctx context.Context, tx *core.Tx, now time.Time) (Schedule, string, error) {
+func claimDue(ctx context.Context, tx *core.Tx, now time.Time) (Schedule, string, bool, error) {
 	s, err := takeSchedule(schedules(ctx, tx).Clauses(core.SkipLocked).Where("enabled AND next_run_at <= ?", now).
 		Order("next_run_at"))
 	if err != nil {
-		return Schedule{}, "", err
+		return Schedule{}, "", false, err
 	}
 	var owner string
+	var archived bool
 	if err := store.QueryRow(ctx, tx, `UPDATE at_schedules s SET last_run_at = $2, next_run_at = $3, last_error = '', updated_at = now()
-		FROM at_projects p WHERE s.id = $1 AND p.id = s.project_id RETURNING p.user_id`, s.ID, now, NextRun(s, now)).Scan(&owner); err != nil {
-		return Schedule{}, "", err
+		FROM at_projects p WHERE s.id = $1 AND p.id = s.project_id RETURNING p.user_id, p.archived`, s.ID, now, NextRun(s, now)).
+		Scan(&owner, &archived); err != nil {
+		return Schedule{}, "", false, err
 	}
-	return s, owner, nil
+	return s, owner, archived, nil
 }
 
 // Fire posts a schedule's message now (the "立即运行" button); next_run_at stays.

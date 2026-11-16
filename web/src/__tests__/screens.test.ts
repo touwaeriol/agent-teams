@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import type { EmployeeBrief, OfficeSnapshot, ThreadView } from "@/api/views";
 import { saveView, storedView, typeName } from "@/components/app/deliverables/browser";
-import { detailViewOf, threadClosed, typingLine } from "@/components/app/thread/detail";
+import { closedNote, detailViewOf, threadClosed, typingLine } from "@/components/app/thread/detail";
 import { openPrMode, prLines, queueLines } from "@/components/app/threadviews/delivery";
 import { memberStatusLine } from "@/components/app/threadviews/members";
 import { fileUrl, formatBytes, frameSandbox, isHosted, markdownUrl, renderLabel } from "@/lib/artifacts";
@@ -12,6 +12,8 @@ import { approvalText, pickedVersion, versionLabel, viewerSubtitle } from "@/pag
 import { threadPath } from "@/pages/main/logic";
 import { actionTarget, boardItems, hhmmss, lastHour, liveThreads, recentEvents, scopes, whoColor } from "@/pages/office/logic";
 import { cardLook, filterThreads, prText, reviewText, teamSummary, waitingFrom, waitingText } from "@/pages/overview/logic";
+import { isWorking, stateLabel } from "@/lib/live";
+import { memberDoing } from "@/lib/present";
 import { question, thread } from "./fixtures";
 
 function member(name: string, state: string | null, patch: Partial<EmployeeBrief> = {}): EmployeeBrief {
@@ -42,6 +44,17 @@ describe("thread panel", () => {
     expect(threadClosed({ status: "done" })).toBe(true);
     expect(threadClosed({ status: "archived" })).toBe(true);
     expect(threadClosed({ status: "review" })).toBe(false);
+    expect(closedNote({ status: "archived" })).toEqual({ text: "讨论串已归档，取消归档后再继续", unarchive: true });
+    expect(closedNote({ status: "done" })?.unarchive).toBe(false);
+    expect(closedNote({ status: "running" })).toBeNull();
+  });
+  it("shows a lead whose parked session is waking as busy", () => {
+    const waking = member("lead-1", "thinking");
+    waking.status = { ...waking.status!, substate: "waking" };
+    expect(typingLine({ status: "running", members: [waking] })).toEqual({ text: "正在唤醒组长…", spin: true });
+    expect(stateLabel(waking)).toBe("唤醒中");
+    expect(isWorking(waking)).toBe(true);
+    expect(memberDoing(waking)).toBe("唤醒中");
   });
 });
 
