@@ -5,6 +5,8 @@ import (
 	"errors"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -16,7 +18,7 @@ type ArtifactFile struct {
 	Path        string `json:"path"`
 	ContentType string `json:"content_type"`
 	Size        int    `json:"size"`
-	SHA256      string `json:"sha256"`
+	SHA256      string `json:"sha256" gorm:"column:sha256"`
 	Data        []byte `json:"-"`
 }
 
@@ -29,75 +31,65 @@ type ArtifactVersion struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// fileRow is a row of at_deliverable_files.
+type fileRow struct {
+	DeliverableID string
+	Version       int
+	ArtifactFile  `gorm:"embedded"`
+	PublishedBy   string
+}
+
+func (fileRow) TableName() string { return "at_deliverable_files" }
+
+func files(ctx context.Context, q store.DB, deliverableID string) *gorm.DB {
+	return q.Gorm(ctx).Model(&fileRow{}).Where("deliverable_id = ?", deliverableID)
+}
+
 // NextVersion is 1 + the highest stored version (1 for a new deliverable).
 func NextVersion(ctx context.Context, q store.DB, deliverableID string) (int, error) {
 	var v int
-	err := store.QueryRow(ctx, q, `SELECT COALESCE(MAX(version), 0) + 1 FROM at_deliverable_files WHERE deliverable_id = $1`,
-		deliverableID).Scan(&v)
+	err := files(ctx, q, deliverableID).Select("COALESCE(MAX(version), 0) + 1").Row().Scan(&v)
 	return v, err
 }
 
-// Save stores the files of one version.
-func Save(ctx context.Context, q store.DB, deliverableID string, version int, by string, files []ArtifactFile) error {
-	for _, f := range files {
-		if _, err := store.Exec(ctx, q, `INSERT INTO at_deliverable_files (deliverable_id, version, path, content_type, size, sha256, data,
-			published_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, deliverableID, version, f.Path, f.ContentType, f.Size, f.SHA256,
-			f.Data, by); err != nil {
-			return err
-		}
+// Save stores the files of one version (one INSERT).
+func Save(ctx context.Context, q store.DB, deliverableID string, version int, by string, list []ArtifactFile) error {
+	if len(list) == 0 {
+		return nil
 	}
-	return nil
+	rows := make([]fileRow, len(list))
+	for i, f := range list {
+		rows[i] = fileRow{DeliverableID: deliverableID, Version: version, ArtifactFile: f, PublishedBy: by}
+	}
+	return q.Gorm(ctx).Create(&rows).Error
 }
 
 // Versions lists a deliverable's versions, newest first.
 func Versions(ctx context.Context, q store.DB, deliverableID string) ([]ArtifactVersion, error) {
-	rows, err := store.Query(ctx, q, `SELECT version, count(*), sum(size), min(published_by), min(created_at) FROM at_deliverable_files
-		WHERE deliverable_id = $1 GROUP BY version ORDER BY version DESC`, deliverableID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	out := []ArtifactVersion{}
-	for rows.Next() {
-		var v ArtifactVersion
-		if err := rows.Scan(&v.Version, &v.Files, &v.Size, &v.PublishedBy, &v.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, v)
-	}
-	return out, rows.Err()
+	err := files(ctx, q, deliverableID).
+		Select("version, count(*) AS files, sum(size) AS size, min(published_by) AS published_by, min(created_at) AS created_at").
+		Group("version").Order("version DESC").Find(&out).Error
+	return out, err
 }
 
 // Files lists one version's files (without data).
 func Files(ctx context.Context, q store.DB, deliverableID string, version int) ([]ArtifactFile, error) {
-	rows, err := store.Query(ctx, q, `SELECT path, content_type, size, sha256 FROM at_deliverable_files
-		WHERE deliverable_id = $1 AND version = $2 ORDER BY path`, deliverableID, version)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	out := []ArtifactFile{}
-	for rows.Next() {
-		var f ArtifactFile
-		if err := rows.Scan(&f.Path, &f.ContentType, &f.Size, &f.SHA256); err != nil {
-			return nil, err
-		}
-		out = append(out, f)
-	}
-	if len(out) == 0 && rows.Err() == nil {
+	err := files(ctx, q, deliverableID).Select("path, content_type, size, sha256").Where("version = ?", version).
+		Order("path").Find(&out).Error
+	if err == nil && len(out) == 0 {
 		return nil, ErrNotFound
 	}
-	return out, rows.Err()
+	return out, err
 }
 
 // Load reads one file with its data.
 func Load(ctx context.Context, q store.DB, deliverableID string, version int, path string) (ArtifactFile, error) {
-	f := ArtifactFile{Path: path}
-	err := store.QueryRow(ctx, q, `SELECT content_type, size, sha256, data FROM at_deliverable_files
-		WHERE deliverable_id = $1 AND version = $2 AND path = $3`, deliverableID, version, path).
-		Scan(&f.ContentType, &f.Size, &f.SHA256, &f.Data)
+	var f ArtifactFile
+	err := files(ctx, q, deliverableID).Where("version = ? AND path = ?", version, path).Take(&f).Error
 	if store.IsNoRows(err) {
-		return f, ErrNotFound
+		return ArtifactFile{Path: path}, ErrNotFound
 	}
 	return f, err
 }

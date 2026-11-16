@@ -74,9 +74,9 @@ func (o *Orchestrator) Status() *status.Engine { return o.status }
 
 // project loads a project by id (no owner scope: engines act for the owner).
 func (o *Orchestrator) project(ctx context.Context, q core.DB, id string) (store.Project, error) {
-	var userID string
-	if err := store.QueryRow(ctx, q, `SELECT user_id FROM at_projects WHERE id = $1`, id).Scan(&userID); err != nil {
-		return store.Project{}, core.MapErr(err)
+	userID, err := core.ProjectOwner(ctx, q, id)
+	if err != nil {
+		return store.Project{}, err
 	}
 	return o.store.ProjectOf(ctx, userID, id)
 }

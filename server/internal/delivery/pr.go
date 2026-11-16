@@ -8,7 +8,6 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
-	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // PRRequest opens a thread's pull requests (open_pr tool, "开 PR" button).
@@ -267,8 +266,8 @@ func (e *Engine) Accept(ctx context.Context, userID, threadID string) (core.Thre
 }
 
 func audit(ctx context.Context, cs *core.Store, userID, action, target string) {
-	_, _ = store.Exec(ctx, cs.Pool, `INSERT INTO at_audit_log (user_id, actor, action, target_type, target_id) VALUES ($1, $2, $3, 'thread', $4)`,
-		userID, "user:"+userID, action, target)
+	_ = cs.Pool.Gorm(ctx).Table("at_audit_log").Create(map[string]any{"user_id": userID, "actor": "user:" + userID,
+		"action": action, "target_type": "thread", "target_id": target}).Error
 }
 
 func (e *Engine) setPRState(ctx context.Context, t core.Thread, state string) error {
@@ -443,21 +442,14 @@ func (e *Engine) markPRDeliverable(ctx context.Context, tx *core.Tx, threadID, u
 
 // prTick merges PRs whose checks passed (auto-merge, or accepted) and reports failures to the lead.
 func (e *Engine) prTick(ctx context.Context) {
-	rows, err := store.Query(ctx, e.core.Pool, `SELECT t.id FROM at_threads t JOIN at_projects p ON p.id = t.project_id
-		WHERE t.status = 'review' AND t.pr_number IS NOT NULL
-		AND (t.pr_state = 'accepting' OR (t.pr_state = 'open' AND NOT p.require_acceptance))`)
+	var ids []string
+	err := e.core.Pool.Gorm(ctx).Table("at_threads t").Joins("JOIN at_projects p ON p.id = t.project_id").
+		Where(`t.status = 'review' AND t.pr_number IS NOT NULL
+			AND (t.pr_state = 'accepting' OR (t.pr_state = 'open' AND NOT p.require_acceptance))`).Pluck("t.id", &ids).Error
 	if err != nil {
 		e.log.Warn("pr tick", "err", err)
 		return
 	}
-	var ids []string
-	for rows.Next() {
-		var id string
-		if rows.Scan(&id) == nil {
-			ids = append(ids, id)
-		}
-	}
-	rows.Close()
 	for _, id := range ids {
 		if err := e.prStep(ctx, id); err != nil {
 			e.log.Warn("pr step", "thread_id", id, "err", err)

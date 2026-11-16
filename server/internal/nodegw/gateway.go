@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"gorm.io/gorm"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
@@ -216,7 +217,7 @@ func (g *Gateway) detach(ctx context.Context, l *link) {
 		delete(g.links, l.node.ID)
 	}
 	g.mu.Unlock()
-	_, _ = store.Exec(ctx, g.core.Pool, `UPDATE at_nodes SET last_seen_at = now() WHERE id = $1`, l.node.ID)
+	_ = nodeRow(ctx, g.core.Pool, l.node.ID).Update("last_seen_at", gorm.Expr("now()")).Error
 	if current && g.handler != nil {
 		g.handler.NodeOffline(ctx, l.node)
 	}
@@ -237,22 +238,29 @@ func (g *Gateway) recordHello(ctx context.Context, nodeID string, hello *protoco
 	}
 	var ackSeq int64
 	err := g.core.InTx(ctx, func(tx *core.Tx) error {
-		var epoch string
-		if err := store.QueryRow(ctx, tx, `SELECT epoch, ack_seq FROM at_nodes WHERE id = $1 FOR UPDATE`, nodeID).Scan(&epoch, &ackSeq); err != nil {
+		var cur struct {
+			Epoch  string
+			AckSeq int64
+		}
+		if err := nodeRow(ctx, tx, nodeID).Select("epoch, ack_seq").Clauses(core.ForUpdate).Take(&cur).Error; err != nil {
 			return err
 		}
-		if epoch != hello.Epoch {
+		ackSeq = cur.AckSeq
+		if cur.Epoch != hello.Epoch {
 			ackSeq = 0
-			if _, err := store.Exec(ctx, tx, `UPDATE at_node_commands SET status = 'expired'
-				WHERE node_id = $1 AND status IN ('pending','sent')`, nodeID); err != nil {
+			if err := commands(ctx, tx, nodeID).Where(unacked).Update("status", "expired").Error; err != nil {
 				return err
 			}
 		}
-		_, err := store.Exec(ctx, tx, `UPDATE at_nodes SET epoch = $2, ack_seq = $3, last_hello = $4, isolation = $5,
-			last_seen_at = now() WHERE id = $1`, nodeID, hello.Epoch, ackSeq, stored, isolation)
-		return err
+		return nodeRow(ctx, tx, nodeID).Updates(map[string]any{"epoch": hello.Epoch, "ack_seq": ackSeq,
+			"last_hello": stored, "isolation": isolation, "last_seen_at": gorm.Expr("now()")}).Error
 	})
 	return ackSeq, err
+}
+
+// nodeRow selects one at_nodes row for a read or write.
+func nodeRow(ctx context.Context, q core.DB, nodeID string) *gorm.DB {
+	return q.Gorm(ctx).Table("at_nodes").Where("id = ?", nodeID)
 }
 
 // helloSummary is the part of hello kept in at_nodes.last_hello (NodeView while offline).

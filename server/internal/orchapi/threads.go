@@ -363,8 +363,8 @@ func (a *API) deleteThread(ctx context.Context, in *tidInput) (*struct{}, error)
 }
 
 func auditTx(ctx context.Context, tx *core.Tx, userID, action, target string, detail map[string]any) {
-	_, _ = store.Exec(ctx, tx, `INSERT INTO at_audit_log (user_id, actor, action, target_type, target_id, detail)
-		VALUES ($1, $2, $3, 'thread', $4, $5)`, userID, "user:"+userID, action, target, detail)
+	_ = tx.Gorm(ctx).Table("at_audit_log").Create(map[string]any{"user_id": userID, "actor": "user:" + userID,
+		"action": action, "target_type": "thread", "target_id": target, "detail": store.Param(detail)}).Error
 }
 
 func (a *API) listMain(ctx context.Context, in *tidInput) (*mainTasksOutput, error) {

@@ -188,31 +188,19 @@ func (a *API) searchMessages(ctx context.Context, pid, q string) ([]SearchMessag
 }
 
 func (a *API) searchTasks(ctx context.Context, pid, q string) ([]core.TaskView, error) {
-	rows, err := store.Query(ctx, a.e.Core.Pool, `SELECT t.conversation_id, t.id, th.no FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
-		WHERE th.project_id = $1 AND (t.instruction ILIKE '%' || $2 || '%' OR t.summary ILIKE '%' || $2 || '%')
-		ORDER BY t.created_at DESC LIMIT 30`, pid, q)
+	var rows []struct {
+		core.Task `gorm:"embedded"`
+		No        int
+	}
+	err := a.e.Core.Pool.Gorm(ctx).Table("at_tasks t").Select("t.*, th.no").Joins("JOIN at_threads th ON th.id = t.thread_id").
+		Where("th.project_id = ? AND (t.instruction ILIKE '%' || ? || '%' OR t.summary ILIKE '%' || ? || '%')", pid, q, q).
+		Order("t.created_at DESC").Limit(30).Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
-	type key struct {
-		conv, id string
-		no       int
-	}
-	var keys []key
-	for rows.Next() {
-		var k key
-		if rows.Scan(&k.conv, &k.id, &k.no) == nil {
-			keys = append(keys, k)
-		}
-	}
-	rows.Close()
-	out := []core.TaskView{}
-	for _, k := range keys {
-		t, err := core.TaskByID(ctx, a.e.Core.Pool, k.conv, k.id)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, core.TaskViewOf(t, k.no))
+	out := make([]core.TaskView, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, core.TaskViewOf(r.Task, r.No))
 	}
 	return out, nil
 }

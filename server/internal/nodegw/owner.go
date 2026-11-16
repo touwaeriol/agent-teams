@@ -67,12 +67,16 @@ func (g *Gateway) check(ctx context.Context, node store.Node, typ string, r refs
 }
 
 func (g *Gateway) checkSession(ctx context.Context, node store.Node, typ, sessionID string, gen *int) (verdict, string, error) {
-	var nodeID *string
-	var state, owner string
-	var openGen int
-	err := core.MapErr(store.QueryRow(ctx, g.core.Pool, `SELECT a.node_id, a.state, a.open_gen, p.user_id FROM at_agent_sessions a
-		JOIN at_employees e ON e.id = a.employee_id JOIN at_projects p ON p.id = e.project_id WHERE a.id = $1`,
-		sessionID).Scan(&nodeID, &state, &openGen, &owner))
+	var s struct {
+		NodeID  *string
+		State   string
+		OpenGen int
+		UserID  string
+	}
+	err := core.MapErr(g.core.Pool.Gorm(ctx).Table("at_agent_sessions a").Select("a.node_id, a.state, a.open_gen, p.user_id").
+		Joins("JOIN at_employees e ON e.id = a.employee_id").Joins("JOIN at_projects p ON p.id = e.project_id").
+		Where("a.id = ?", sessionID).Take(&s).Error)
+	nodeID, state, openGen, owner := s.NodeID, s.State, s.OpenGen, s.UserID
 	if err == core.ErrNotFound {
 		return rejected, "unknown_session", nil
 	}
@@ -95,9 +99,8 @@ func (g *Gateway) checkSession(ctx context.Context, node store.Node, typ, sessio
 }
 
 func (g *Gateway) checkJob(ctx context.Context, node store.Node, jobID string) (verdict, string, error) {
-	var n int
-	err := store.QueryRow(ctx, g.core.Pool, `SELECT count(*) FROM at_node_commands WHERE node_id = $1 AND type LIKE 'git.%'
-		AND body->>'job_id' = $2`, node.ID, jobID).Scan(&n)
+	var n int64
+	err := commands(ctx, g.core.Pool, node.ID).Where("type LIKE 'git.%' AND body->>'job_id' = ?", jobID).Count(&n).Error
 	if err != nil {
 		return rejected, "", err
 	}

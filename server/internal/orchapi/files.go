@@ -174,22 +174,14 @@ func (a *API) listComments(ctx context.Context, in *deliverableIDInput) (*commen
 	if err != nil {
 		return nil, err
 	}
-	rows, err := store.Query(ctx, a.e.Core.Pool, `SELECT id, version, text, sent_to, created_at FROM at_deliverable_comments
-		WHERE deliverable_id = $1 ORDER BY created_at, id`, d.ID)
+	out := &commentsOutput{}
+	out.Body.Items = []CommentView{}
+	err = a.e.Core.Pool.Gorm(ctx).Table("at_deliverable_comments").Select("id, version, text, sent_to, created_at").
+		Where("deliverable_id = ?", d.ID).Order("created_at, id").Find(&out.Body.Items).Error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := &commentsOutput{}
-	out.Body.Items = []CommentView{}
-	for rows.Next() {
-		var c CommentView
-		if err := rows.Scan(&c.ID, &c.Version, &c.Text, &c.SentTo, &c.CreatedAt); err != nil {
-			return nil, err
-		}
-		out.Body.Items = append(out.Body.Items, c)
-	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (a *API) addComment(ctx context.Context, in *newCommentInput) (*commentOutput, error) {

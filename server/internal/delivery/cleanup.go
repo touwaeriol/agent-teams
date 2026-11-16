@@ -6,6 +6,8 @@ import (
 	pathpkg "path"
 	"strings"
 
+	"gorm.io/gorm"
+
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
@@ -50,12 +52,8 @@ func (e *Engine) PurgeThread(ctx context.Context, tx *core.Tx, t core.Thread) er
 
 // purgeThreadDirs removes projects/<pid>/threads/<no> (lead notes, leftovers) on every node the thread used.
 func (e *Engine) purgeThreadDirs(ctx context.Context, tx *core.Tx, t core.Thread) error {
-	rows, err := store.Query(ctx, tx, `SELECT node_id FROM at_thread_nodes WHERE thread_id = $1
+	nodes, err := store.Strings(ctx, tx, `SELECT node_id FROM at_thread_nodes WHERE thread_id = $1
 		UNION SELECT node_id FROM at_employees WHERE thread_id = $1 AND node_id IS NOT NULL`, t.ID)
-	if err != nil {
-		return err
-	}
-	nodes, err := pgxCollectStrings(rows)
 	if err != nil {
 		return err
 	}
@@ -69,42 +67,14 @@ func (e *Engine) purgeThreadDirs(ctx context.Context, tx *core.Tx, t core.Thread
 	return nil
 }
 
-func pgxCollectStrings(rows interface {
-	Next() bool
-	Scan(...any) error
-	Close()
-	Err() error
-}) ([]string, error) {
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var s string
-		if err := rows.Scan(&s); err != nil {
-			return nil, err
-		}
-		out = append(out, s)
-	}
-	return out, rows.Err()
-}
-
 func (e *Engine) queueCleanupTx(ctx context.Context, tx *core.Tx, t core.Thread, keepUnpushed bool) error {
-	rows, err := store.Query(ctx, tx, `SELECT node_id, paths FROM at_thread_nodes WHERE thread_id = $1 AND cleaned_at IS NULL`, t.ID)
+	var places []struct {
+		NodeID string
+		Paths  []string `gorm:"serializer:pgtext"`
+	}
+	err := tx.Gorm(ctx).Table("at_thread_nodes").Select("node_id, paths").Where("thread_id = ? AND cleaned_at IS NULL", t.ID).
+		Find(&places).Error
 	if err != nil {
-		return err
-	}
-	type place struct {
-		node  string
-		paths []string
-	}
-	var places []place
-	for rows.Next() {
-		var p place
-		if rows.Scan(&p.node, &p.paths) == nil {
-			places = append(places, p)
-		}
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
 		return err
 	}
 	p, err := e.orch.Project(ctx, t.ProjectID)
@@ -112,8 +82,8 @@ func (e *Engine) queueCleanupTx(ctx context.Context, tx *core.Tx, t core.Thread,
 		return err
 	}
 	for _, pl := range places {
-		for shared, paths := range byShared(p, pl.paths) {
-			if err := e.cleanupNode(ctx, tx, t, pl.node, shared, paths, keepUnpushed); err != nil {
+		for shared, paths := range byShared(p, pl.Paths) {
+			if err := e.cleanupNode(ctx, tx, t, pl.NodeID, shared, paths, keepUnpushed); err != nil {
 				return err
 			}
 		}
@@ -192,8 +162,8 @@ func (e *Engine) cleaned(ctx context.Context, tx *core.Tx, node store.Node, meta
 	if threadID == "" {
 		return nil
 	}
-	if _, err := store.Exec(ctx, tx, `UPDATE at_thread_nodes SET cleaned_at = now() WHERE thread_id = $1 AND node_id = $2`,
-		threadID, node.ID); err != nil {
+	if err := tx.Gorm(ctx).Table("at_thread_nodes").Where("thread_id = ? AND node_id = ?", threadID, node.ID).
+		Update("cleaned_at", gorm.Expr("now()")).Error; err != nil {
 		return err
 	}
 	if len(r.Kept) == 0 {
@@ -213,19 +183,12 @@ func (e *Engine) cleaned(ctx context.Context, tx *core.Tx, node store.Node, meta
 
 // Purge removes a project's directory on every node it used (project deletion).
 func (e *Engine) Purge(ctx context.Context, tx *core.Tx, projectID string) error {
-	rows, err := store.Query(ctx, tx, `SELECT DISTINCT n.node_id FROM at_thread_nodes n JOIN at_threads t ON t.id = n.thread_id
-		WHERE t.project_id = $1 UNION SELECT DISTINCT node_id FROM at_employees WHERE project_id = $1 AND node_id IS NOT NULL`, projectID)
+	nodes, err := store.Strings(ctx, tx, `SELECT DISTINCT n.node_id FROM at_thread_nodes n JOIN at_threads t ON t.id = n.thread_id
+		WHERE t.project_id = $1 UNION SELECT DISTINCT node_id FROM at_employees WHERE project_id = $1 AND node_id IS NOT NULL`,
+		projectID)
 	if err != nil {
 		return err
 	}
-	var nodes []string
-	for rows.Next() {
-		var id string
-		if rows.Scan(&id) == nil {
-			nodes = append(nodes, id)
-		}
-	}
-	rows.Close()
 	for _, id := range nodes {
 		body := protocol.GitPurge{JobID: protocol.JobID(core.NewID("g")), Path: "projects/" + projectID}
 		if _, err := e.gw.Enqueue(ctx, tx, id, nodegw.Command{Type: protocol.TypeGitPurge, Body: body}); err != nil {

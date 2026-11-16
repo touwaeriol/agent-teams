@@ -9,9 +9,10 @@ import (
 	"fmt"
 	"time"
 
+	"gorm.io/gorm"
+
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
-	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // A daemon restart (or a session process restart) kills the Promise behind every pending
@@ -45,9 +46,8 @@ func (e *Engine) detach(ctx context.Context, tx *core.Tx, q core.Question) (bool
 	if _, ok := q.Detail[detachedKey]; ok {
 		return false, nil
 	}
-	raw, _ := json.Marshal(map[string]any{detachedKey: time.Now().UTC().Format(time.RFC3339Nano)})
-	if _, err := store.Exec(ctx, tx, `UPDATE at_questions SET detail = detail || $3::jsonb WHERE conversation_id = $1 AND id = $2`,
-		q.ConversationID, q.ID, raw); err != nil {
+	stamp := map[string]any{detachedKey: time.Now().UTC().Format(time.RFC3339Nano)}
+	if err := core.MergeQuestionDetail(ctx, tx, q, stamp); err != nil {
 		return false, err
 	}
 	q, err := core.QuestionByID(ctx, tx, q.ConversationID, q.ID)
@@ -90,13 +90,11 @@ func (e *Engine) SessionRestarted(ctx context.Context, tx *core.Tx, sessionID st
 // request. ok=false: there is none, the request gets a card of its own.
 func (e *Engine) reattach(ctx context.Context, tx *core.Tx, sc core.SessionContext, m *protocol.ApprovalRequest) (bool, error) {
 	emp := sc.Employee
-	var conv, id string
-	err := core.MapErr(store.QueryRow(ctx, tx, `SELECT conversation_id, id FROM at_questions WHERE kind = 'approval'
-		AND status IN ('open','answered') AND jsonb_exists(detail, 'detached_at') AND project_id = $1
-		AND COALESCE(thread_id, '') = COALESCE($2, '') AND asker = $3 AND detail->>'tool_name' = $4
-		AND (detail->>'match_hash' = $5 OR detail->>'input_hash' = $6)
-		ORDER BY created_at LIMIT 1 FOR UPDATE`, emp.ProjectID, emp.ThreadID, emp.Name, m.ToolName,
-		MatchHash(m.ToolName, m.Input), InputHash(m.ToolName, m.Input)).Scan(&conv, &id))
+	var card core.Question
+	err := core.MapErr(detachedCards(ctx, tx, emp).Select("conversation_id, id").Clauses(core.ForUpdate).
+		Where("detail->>'tool_name' = ? AND (detail->>'match_hash' = ? OR detail->>'input_hash' = ?)", m.ToolName,
+			MatchHash(m.ToolName, m.Input), InputHash(m.ToolName, m.Input)).Order("created_at").Take(&card).Error)
+	conv, id := card.ConversationID, card.ID
 	if errors.Is(err, core.ErrNotFound) {
 		return false, nil
 	}
@@ -108,9 +106,10 @@ func (e *Engine) reattach(ctx context.Context, tx *core.Tx, sc core.SessionConte
 	raw, _ := json.Marshal(map[string]any{"input": input, "input_hash": InputHash(m.ToolName, m.Input),
 		"match_hash": MatchHash(m.ToolName, m.Input), "suggestions": m.Suggestions,
 		"reattached_at": time.Now().UTC().Format(time.RFC3339Nano)})
-	if _, err := store.Exec(ctx, tx, `UPDATE at_questions SET approval_id = $3, session_id = $4,
-		detail = (detail - 'detached_at') || $5::jsonb WHERE conversation_id = $1 AND id = $2`,
-		conv, id, string(m.ApprovalID), sc.Session.ID, raw); err != nil {
+	err = tx.Gorm(ctx).Table("at_questions").Where("conversation_id = ? AND id = ?", conv, id).Updates(map[string]any{
+		"approval_id": string(m.ApprovalID), "session_id": sc.Session.ID,
+		"detail": gorm.Expr("(detail - 'detached_at') || ?::jsonb", raw)}).Error
+	if err != nil {
 		return false, err
 	}
 	q, err := core.QuestionByID(ctx, tx, conv, id)
@@ -144,27 +143,18 @@ func decidedMessage(answer, decidedBy string) string {
 // ExpireDetached runs when the employee's turn ends: requests it did not re-issue are gone
 // for good, so their cards are cancelled (answered ones just lose the mark).
 func (e *Engine) ExpireDetached(ctx context.Context, tx *core.Tx, emp core.Employee) error {
-	rows, err := store.Query(ctx, tx, `SELECT conversation_id, id FROM at_questions WHERE kind = 'approval'
-		AND status IN ('open','answered') AND jsonb_exists(detail, 'detached_at') AND project_id = $1
-		AND COALESCE(thread_id, '') = COALESCE($2, '') AND asker = $3`, emp.ProjectID, emp.ThreadID, emp.Name)
-	if err != nil {
+	var keys []core.Question
+	if err := detachedCards(ctx, tx, emp).Select("conversation_id, id").Find(&keys).Error; err != nil {
 		return err
 	}
-	var keys [][2]string
-	for rows.Next() {
-		var k [2]string
-		if err := rows.Scan(&k[0], &k[1]); err == nil {
-			keys = append(keys, k)
-		}
-	}
-	rows.Close()
 	for _, k := range keys {
-		q, err := core.LockQuestion(ctx, tx, k[0], k[1])
+		q, err := core.LockQuestion(ctx, tx, k.ConversationID, k.ID)
 		if err != nil {
 			return ignoreMissing(err)
 		}
-		if _, err := store.Exec(ctx, tx, `UPDATE at_questions SET detail = detail - 'detached_at' WHERE conversation_id = $1 AND id = $2`,
-			q.ConversationID, q.ID); err != nil {
+		err = tx.Gorm(ctx).Table("at_questions").Where("conversation_id = ? AND id = ?", q.ConversationID, q.ID).
+			Update("detail", gorm.Expr("detail - 'detached_at'")).Error
+		if err != nil {
 			return err
 		}
 		if q.Status != "open" {
@@ -179,25 +169,24 @@ func (e *Engine) ExpireDetached(ctx context.Context, tx *core.Tx, emp core.Emplo
 
 // DetachedSummary lists the employee's detached cards for the resume note ("Bash make test").
 func DetachedSummary(ctx context.Context, q core.DB, emp core.Employee) ([]string, error) {
-	rows, err := store.Query(ctx, q, `SELECT id, status, detail FROM at_questions WHERE kind = 'approval'
-		AND status IN ('open','answered') AND jsonb_exists(detail, 'detached_at') AND project_id = $1
-		AND COALESCE(thread_id, '') = COALESCE($2, '') AND asker = $3 ORDER BY created_at`, emp.ProjectID, emp.ThreadID, emp.Name)
-	if err != nil {
+	var cards []core.Question
+	if err := detachedCards(ctx, q, emp).Select("id, status, detail").Order("created_at").Find(&cards).Error; err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []string
-	for rows.Next() {
-		var id, status string
-		var detail map[string]any
-		if err := rows.Scan(&id, &status, &detail); err != nil {
-			return nil, err
-		}
-		line := fmt.Sprintf("%s：%s", id, Summary(core.Question{Detail: detail}))
-		if status == "answered" {
+	for _, c := range cards {
+		line := fmt.Sprintf("%s：%s", c.ID, Summary(core.Question{Detail: c.Detail}))
+		if c.Status == "answered" {
 			line += "（已有答复，重新发起后立即生效）"
 		}
 		out = append(out, line)
 	}
-	return out, rows.Err()
+	return out, nil
+}
+
+// detachedCards selects the employee's approval cards whose request was lost with the process.
+func detachedCards(ctx context.Context, q core.DB, emp core.Employee) *gorm.DB {
+	return q.Gorm(ctx).Model(&core.Question{}).Where(`kind = 'approval' AND status IN ('open','answered')
+		AND jsonb_exists(detail, 'detached_at') AND project_id = ? AND COALESCE(thread_id, '') = COALESCE(?, '')
+		AND asker = ?`, emp.ProjectID, emp.ThreadID, emp.Name)
 }

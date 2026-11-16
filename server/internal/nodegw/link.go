@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"gorm.io/gorm"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
@@ -186,8 +187,9 @@ func (l *link) handleReliable(ctx context.Context, env *protocol.Envelope, body 
 
 // advance persists the daemon seq as handled and acknowledges it.
 func (l *link) advance(ctx context.Context, seq int64) error {
-	if _, err := store.Exec(ctx, l.g.core.Pool, `UPDATE at_nodes SET ack_seq = GREATEST(ack_seq, $2), last_seen_at = now()
-		WHERE id = $1`, l.node.ID, seq); err != nil {
+	err := nodeRow(ctx, l.g.core.Pool, l.node.ID).Updates(map[string]any{"ack_seq": gorm.Expr("GREATEST(ack_seq, ?)", seq),
+		"last_seen_at": gorm.Expr("now()")}).Error
+	if err != nil {
 		return err
 	}
 	l.ackSeq = seq
@@ -279,7 +281,6 @@ func (g *Gateway) storeLog(ctx context.Context, nodeID string, b *protocol.Log) 
 	if b.Fields != nil {
 		fields = *b.Fields
 	}
-	_, err := store.Exec(ctx, g.core.Pool, `INSERT INTO at_node_logs (node_id, level, msg, fields) VALUES ($1, $2, $3, $4)`,
-		nodeID, string(b.Level), truncate(b.Msg, 4000), fields)
-	return err
+	return g.core.Pool.Gorm(ctx).Table("at_node_logs").Create(map[string]any{"node_id": nodeID, "level": string(b.Level),
+		"msg": truncate(b.Msg, 4000), "fields": fields}).Error
 }

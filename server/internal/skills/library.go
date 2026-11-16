@@ -69,8 +69,8 @@ func Create(ctx context.Context, db store.DB, userID string, files []File) (Skil
 	}
 	raw, _ := json.Marshal(s.Files)
 	s.ID, s.Builtin = store.NewID("sk"), userID == ""
-	_, err = store.Exec(ctx, db, `INSERT INTO at_skills (id, user_id, name, description, files, size) VALUES ($1,$2,$3,$4,$5,$6)`,
-		s.ID, ownerArg(userID), s.Name, s.Description, raw, s.Size)
+	err = db.Gorm(ctx).Table("at_skills").Create(map[string]any{"id": s.ID, "user_id": ownerArg(userID), "name": s.Name,
+		"description": s.Description, "files": raw, "size": s.Size}).Error
 	if store.IsUnique(err) {
 		return Skill{}, problem("已经有一个叫 %s 的技能，先删除它再上传", s.Name)
 	}
@@ -86,9 +86,9 @@ func checkName(ctx context.Context, db store.DB, userID, name string) error {
 	if userID == "" {
 		return nil
 	}
-	var taken bool
-	err := store.QueryRow(ctx, db, `SELECT EXISTS (SELECT 1 FROM at_skills WHERE user_id IS NULL AND name = $1)`, name).Scan(&taken)
-	if err == nil && taken {
+	var n int64
+	err := db.Gorm(ctx).Table("at_skills").Where("user_id IS NULL AND name = ?", name).Count(&n).Error
+	if err == nil && n > 0 {
 		return problem("%s 是内置技能的名字，请在 SKILL.md 里换一个 name", name)
 	}
 	return err
@@ -144,18 +144,21 @@ func load(ctx context.Context, db store.DB, userID, name string) (Skill, error) 
 	if s, ok := builtin(name); ok {
 		return s, nil
 	}
-	s := Skill{Name: name}
-	var raw []byte
-	err := store.QueryRow(ctx, db, `SELECT id, description, files, user_id IS NULL FROM at_skills
-		WHERE name = $2 AND (user_id = $1 OR user_id IS NULL) ORDER BY user_id IS NULL LIMIT 1`, userID, name).
-		Scan(&s.ID, &s.Description, &raw, &s.Builtin)
+	var row struct {
+		ID, Description string
+		Files           []byte
+		Builtin         bool
+	}
+	err := db.Gorm(ctx).Table("at_skills").Select("id, description, files, user_id IS NULL AS builtin").
+		Where("name = ? AND (user_id = ? OR user_id IS NULL)", name, userID).Order("user_id IS NULL").Take(&row).Error
+	s := Skill{Name: name, ID: row.ID, Description: row.Description, Builtin: row.Builtin}
 	if store.IsNoRows(err) {
 		return s, ErrNotFound
 	}
 	if err != nil {
 		return s, err
 	}
-	return s, json.Unmarshal(raw, &s.Files)
+	return s, json.Unmarshal(row.Files, &s.Files)
 }
 
 func bundle(s Skill) protocol.SkillBundle {

@@ -39,10 +39,11 @@ func (o *Orchestrator) resumeCutTurn(ctx context.Context, tx *core.Tx, s core.Ag
 	if err != nil {
 		return err
 	}
-	var pending int
-	if err := store.QueryRow(ctx, tx, `SELECT count(*) FROM at_messages WHERE conversation_id = $1
+	var pending int64
+	err = tx.Gorm(ctx).Table("at_messages").Where(`conversation_id = ?
 		AND (delivered_at IS NULL OR created_at > now() - interval '2 minutes')
-		AND meta->>'to' = $2 AND (meta->>'resume_cut')::boolean`, conv, e.Name).Scan(&pending); err != nil {
+		AND meta->>'to' = ? AND (meta->>'resume_cut')::boolean`, conv, e.Name).Count(&pending).Error
+	if err != nil {
 		return err
 	}
 	if pending > 0 {
@@ -84,23 +85,18 @@ func cutTurnText(ctx context.Context, q core.DB, e core.Employee) (string, error
 
 // openRequests lists the employee's questions matching where as "q3 Bash make test".
 func openRequests(ctx context.Context, q core.DB, e core.Employee, where string) ([]string, error) {
-	rows, err := store.Query(ctx, q, `SELECT id, kind, text, detail FROM at_questions WHERE project_id = $1
-		AND COALESCE(thread_id, '') = COALESCE($2, '') AND asker = $3 AND `+where+` ORDER BY created_at`,
-		e.ProjectID, e.ThreadID, e.Name)
+	var qs []core.Question
+	err := q.Gorm(ctx).Select("id, kind, text, detail").
+		Where("project_id = ? AND COALESCE(thread_id, '') = COALESCE(?, '') AND asker = ?", e.ProjectID, e.ThreadID, e.Name).
+		Where(where).Order("created_at").Find(&qs).Error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var id, kind, text string
-		var detail map[string]any
-		if err := rows.Scan(&id, &kind, &text, &detail); err != nil {
-			return nil, err
-		}
-		out = append(out, id+" "+requestLine(kind, text, detail))
+	out := make([]string, 0, len(qs))
+	for _, x := range qs {
+		out = append(out, x.ID+" "+requestLine(x.Kind, x.Text, x.Detail))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func requestLine(kind, text string, detail map[string]any) string {

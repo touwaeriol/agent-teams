@@ -237,10 +237,9 @@ func (s *Service) answerCall(ctx context.Context, tx *core.Tx, q core.Question, 
 	if q.CallID == nil || q.SessionID == nil {
 		return false, nil
 	}
-	var st string
-	err := core.MapErr(store.QueryRow(ctx, tx, `SELECT status FROM at_tool_calls WHERE session_id = $1 AND call_id = $2`,
-		*q.SessionID, *q.CallID).Scan(&st))
-	if err != nil || st != "waiting" {
+	var call struct{ Status string }
+	err := core.MapErr(toolCall(ctx, tx, *q.SessionID, *q.CallID).Select("status").Take(&call).Error)
+	if err != nil || call.Status != "waiting" {
 		return false, ignoreMissing(err)
 	}
 	res := okJSON(answer, protocol.AskUserResult{QuestionID: protocol.QuestionID(q.ID), Answer: &answer, Answers: storedAnswers(q)})

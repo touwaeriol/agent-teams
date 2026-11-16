@@ -9,6 +9,9 @@ import (
 	"errors"
 	"fmt"
 
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -28,53 +31,52 @@ func SaveChunk(ctx context.Context, q store.DB, m *protocol.FileChunk) error {
 	if err != nil || len(data) > ChunkBytes {
 		return ErrBadChunk
 	}
-	if _, err := store.Exec(ctx, q, `DELETE FROM at_upload_chunks WHERE created_at < now() - interval '1 day'`); err != nil {
+	if err := chunks(ctx, q).Where("created_at < now() - interval '1 day'").Delete(&uploadChunk{}).Error; err != nil {
 		return err
 	}
 	var pending int
-	if err := store.QueryRow(ctx, q, `SELECT COALESCE(sum(length(data)), 0) FROM at_upload_chunks WHERE session_id = $1`,
-		m.SessionID).Scan(&pending); err != nil {
+	if err := chunks(ctx, q).Select("COALESCE(sum(length(data)), 0)").Where("session_id = ?", m.SessionID).
+		Row().Scan(&pending); err != nil {
 		return err
 	}
 	if pending+len(data) > MaxPending {
 		return ErrBadChunk
 	}
-	_, err = store.Exec(ctx, q, `INSERT INTO at_upload_chunks (upload_id, idx, session_id, data) VALUES ($1,$2,$3,$4)
-		ON CONFLICT (upload_id, idx) DO NOTHING`, m.UploadID, m.Index, m.SessionID, data)
-	return err
+	return chunks(ctx, q).Clauses(clause.OnConflict{DoNothing: true}).Create(&uploadChunk{UploadID: string(m.UploadID),
+		Idx: m.Index, SessionID: string(m.SessionID), Data: data}).Error
 }
+
+// uploadChunk is a row of at_upload_chunks.
+type uploadChunk struct {
+	UploadID  string
+	Idx       int
+	SessionID string
+	Data      []byte
+}
+
+func (uploadChunk) TableName() string { return "at_upload_chunks" }
+
+func chunks(ctx context.Context, q store.DB) *gorm.DB { return q.Gorm(ctx).Model(&uploadChunk{}) }
 
 // LoadUpload reads an upload's chunks (of this session only) and splits them into files.
 func LoadUpload(ctx context.Context, q store.DB, sessionID string, up *protocol.ToolUpload) ([]ArtifactFile, error) {
-	rows, err := store.Query(ctx, q, `SELECT data FROM at_upload_chunks WHERE upload_id = $1 AND session_id = $2 ORDER BY idx`,
-		up.UploadID, sessionID)
+	var parts [][]byte
+	err := chunks(ctx, q).Where("upload_id = ? AND session_id = ?", up.UploadID, sessionID).Order("idx").
+		Pluck("data", &parts).Error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var all bytes.Buffer
-	n := 0
-	for rows.Next() {
-		var part []byte
-		if err := rows.Scan(&part); err != nil {
-			return nil, err
-		}
-		all.Write(part)
-		n++
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
+	all := bytes.Join(parts, nil)
+	n := len(parts)
 	if n != up.Chunks {
 		return nil, fmt.Errorf("文件内容不完整：收到 %d/%d 段", n, up.Chunks)
 	}
-	return Split(all.Bytes(), up.Files)
+	return Split(all, up.Files)
 }
 
 // DeleteUpload removes an upload's chunks once its files are stored.
 func DeleteUpload(ctx context.Context, q store.DB, uploadID string) error {
-	_, err := store.Exec(ctx, q, `DELETE FROM at_upload_chunks WHERE upload_id = $1`, uploadID)
-	return err
+	return chunks(ctx, q).Where("upload_id = ?", uploadID).Delete(&uploadChunk{}).Error
 }
 
 // Split cuts the concatenated bytes into the declared files and checks every limit:

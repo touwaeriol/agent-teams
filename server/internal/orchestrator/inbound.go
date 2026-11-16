@@ -232,9 +232,9 @@ func (o *Orchestrator) reconcileOne(ctx context.Context, tx *core.Tx, s core.Age
 }
 
 func hasPendingOpen(ctx context.Context, tx *core.Tx, s core.AgentSession) bool {
-	var n int
-	_ = store.QueryRow(ctx, tx, `SELECT count(*) FROM at_node_commands WHERE session_id = $1 AND open_gen = $2
-		AND type = 'session.open' AND status IN ('pending','sent')`, s.ID, s.OpenGen).Scan(&n)
+	var n int64
+	_ = tx.Gorm(ctx).Table("at_node_commands").Where(`session_id = ? AND open_gen = ? AND type = 'session.open'
+		AND status IN ('pending','sent')`, s.ID, s.OpenGen).Count(&n).Error
 	return n > 0
 }
 

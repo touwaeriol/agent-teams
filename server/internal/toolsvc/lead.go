@@ -11,7 +11,6 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/delivery"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/scheduler"
-	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // updatePlan replaces the plan (step ids kept by title).
@@ -140,9 +139,9 @@ func mainTitle(ctx context.Context, q core.DB, t core.Task) string {
 	if t.MainTaskID == nil {
 		return ""
 	}
-	var title string
-	_ = store.QueryRow(ctx, q, `SELECT title FROM at_main_tasks WHERE id = $1`, *t.MainTaskID).Scan(&title)
-	return title
+	var m core.MainTask
+	_ = q.Gorm(ctx).Select("title").Where("id = ?", *t.MainTaskID).Take(&m).Error
+	return m.Title
 }
 
 func orDash(s string) string {
@@ -254,13 +253,13 @@ func (s *Service) mergeTask(ctx context.Context, tx *core.Tx, t core.Thread, in 
 	if in.Member == nil {
 		return core.Task{}, refuse("请给出 task_id 或 member")
 	}
-	var id string
-	err := store.QueryRow(ctx, tx, `SELECT id FROM at_tasks WHERE thread_id = $1 AND claimed_by = $2
-		AND status IN ('review','decision','running','blocked') ORDER BY updated_at DESC LIMIT 1`, t.ID, *in.Member).Scan(&id)
+	var task core.Task
+	err := tx.Gorm(ctx).Select("id").Where("thread_id = ? AND claimed_by = ? AND status IN ('review','decision','running','blocked')",
+		t.ID, *in.Member).Order("updated_at DESC").Take(&task).Error
 	if err != nil {
 		return core.Task{}, refuse("%s 没有可以合并的任务", *in.Member)
 	}
-	return core.LockTask(ctx, tx, t.ID, id)
+	return core.LockTask(ctx, tx, t.ID, task.ID)
 }
 
 // openPR opens the pull request after the commit (GitHub call).

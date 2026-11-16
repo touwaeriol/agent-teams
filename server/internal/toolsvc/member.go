@@ -125,8 +125,9 @@ func (s *Service) pushOutcomes(ctx context.Context, tx *core.Tx, meta map[string
 	if group == "" { // a push queued before multi-repository support: one job, no repository name
 		return []delivery.PushOutcome{single(r)}, true, nil
 	}
-	if _, err := store.Exec(ctx, tx, `SELECT 1 FROM at_tool_calls WHERE session_id = $1 AND call_id = $2 FOR UPDATE`,
-		str(meta["session_id"]), str(meta["call_id"])); err != nil {
+	var locked []struct{ CallID string }
+	if err := toolCall(ctx, tx, str(meta["session_id"]), str(meta["call_id"])).Select("call_id").Clauses(core.ForUpdate).
+		Find(&locked).Error; err != nil {
 		return nil, false, err
 	}
 	outcomes, err := delivery.PushGroup(ctx, tx, str(meta["node_id"]), group)
@@ -293,9 +294,9 @@ func (s *Service) member(ctx context.Context, tx *core.Tx, t core.Thread, e core
 		m.Status = &idle
 	}
 	if e.NodeID != nil {
-		var name string
-		if store.QueryRow(ctx, tx, `SELECT name FROM at_nodes WHERE id = $1`, *e.NodeID).Scan(&name) == nil {
-			m.Node = &name
+		var n store.Node
+		if tx.Gorm(ctx).Select("name").Where("id = ?", *e.NodeID).Take(&n).Error == nil {
+			m.Node = &n.Name
 		}
 	}
 	return m
@@ -422,22 +423,15 @@ func outcomeOf(task core.Task, tool string) Result {
 
 // taskFinished answers wait_task / request_review calls waiting on a task (scheduler hook).
 func (s *Service) taskFinished(ctx context.Context, tx *core.Tx, task core.Task) error {
-	rows, err := store.Query(ctx, tx, `SELECT session_id, call_id, tool FROM at_tool_calls WHERE status = 'waiting'
-		AND result->>'waiting_task' = $1 AND result->>'thread_id' = $2`, task.ID, task.ConversationID)
+	var ws []struct{ SessionID, CallID, Tool string }
+	err := tx.Gorm(ctx).Table("at_tool_calls").Select("session_id, call_id, tool").
+		Where("status = 'waiting' AND result->>'waiting_task' = ? AND result->>'thread_id' = ?", task.ID, task.ConversationID).
+		Find(&ws).Error
 	if err != nil {
 		return err
 	}
-	type waiter struct{ session, call, tool string }
-	var ws []waiter
-	for rows.Next() {
-		var w waiter
-		if rows.Scan(&w.session, &w.call, &w.tool) == nil {
-			ws = append(ws, w)
-		}
-	}
-	rows.Close()
 	for _, w := range ws {
-		if err := s.Complete(ctx, tx, w.session, w.call, outcomeOf(task, w.tool)); err != nil {
+		if err := s.Complete(ctx, tx, w.SessionID, w.CallID, outcomeOf(task, w.Tool)); err != nil {
 			return err
 		}
 	}

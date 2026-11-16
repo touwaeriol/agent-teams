@@ -17,6 +17,8 @@ import (
 	"log/slog"
 	"time"
 
+	"gorm.io/gorm"
+
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
@@ -179,14 +181,20 @@ func threadAuto(ctx context.Context, q core.DB, emp core.Employee) (bool, error)
 }
 
 func matchRule(ctx context.Context, q core.DB, emp core.Employee, tool, hash string) (string, error) {
-	var id string
-	err := core.MapErr(store.QueryRow(ctx, q, `SELECT id FROM at_permission_rules WHERE project_id = $1
-		AND (thread_id IS NULL OR thread_id = $2) AND (employee = '' OR employee = $3) AND tool_name = $4 AND input_hash = $5
-		ORDER BY created_at LIMIT 1`, emp.ProjectID, emp.ThreadID, emp.Name, tool, hash).Scan(&id))
+	var rule struct{ ID string }
+	err := core.MapErr(rulesFor(ctx, q, emp.ProjectID, emp.ThreadID, emp.Name).Select("id").
+		Where("tool_name = ? AND input_hash = ?", tool, hash).Order("created_at").Take(&rule).Error)
 	if errors.Is(err, core.ErrNotFound) {
 		return "", nil
 	}
-	return id, err
+	return rule.ID, err
+}
+
+// rulesFor selects the permission rules that apply to an employee.
+func rulesFor(ctx context.Context, q core.DB, projectID string, threadID *string, employee string) *gorm.DB {
+	return q.Gorm(ctx).Table("at_permission_rules").Where(
+		"project_id = ? AND (thread_id IS NULL OR thread_id = ?) AND (employee = '' OR employee = ?)",
+		projectID, threadID, employee)
 }
 
 // showCard leaves the card open: SSE question event, raised hand, thread waiting, user notice.
@@ -315,9 +323,10 @@ func checkAnswer(q core.Question, answer string) error {
 
 func (e *Engine) answerTx(ctx context.Context, tx *core.Tx, user store.User, q core.Question, answer, reason string) error {
 	by := "user:" + user.ID
-	if _, err := store.Exec(ctx, tx, `INSERT INTO at_audit_log (user_id, actor, action, target_type, target_id, detail)
-		VALUES ($1, $2, 'approval_answer', 'approval', $3, jsonb_build_object('answer', $4::text, 'tool', $5::text))`,
-		user.ID, by, deref(q.ApprovalID), answer, fmt.Sprint(q.Detail["tool_name"])); err != nil {
+	detail, _ := json.Marshal(map[string]string{"answer": answer, "tool": fmt.Sprint(q.Detail["tool_name"])})
+	err := tx.Gorm(ctx).Table("at_audit_log").Create(map[string]any{"user_id": user.ID, "actor": by,
+		"action": "approval_answer", "target_type": "approval", "target_id": deref(q.ApprovalID), "detail": detail}).Error
+	if err != nil {
 		return err
 	}
 	message := ""
@@ -364,31 +373,25 @@ func (e *Engine) remember(ctx context.Context, tx *core.Tx, q core.Question, by 
 	updates := sessionScoped(q.Detail["suggestions"])
 	raw, _ := json.Marshal(updates)
 	id := core.NewID("pr")
-	_, err := store.Exec(ctx, tx, `INSERT INTO at_permission_rules (id, project_id, thread_id, employee, tool_name, rule, sdk_update,
-		input_hash, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, id, deref(q.ProjectID), q.ThreadID, q.Asker, tool,
-		ruleText(updates), raw, hash, by)
+	err := tx.Gorm(ctx).Table("at_permission_rules").Create(map[string]any{"id": id, "project_id": deref(q.ProjectID),
+		"thread_id": q.ThreadID, "employee": q.Asker, "tool_name": tool, "rule": ruleText(updates), "sdk_update": raw,
+		"input_hash": hash, "created_by": by}).Error
 	return id, err
 }
 
 // applyRule auto-allows the asker's other open cards with the same tool and input.
 func (e *Engine) applyRule(ctx context.Context, tx *core.Tx, q core.Question, ruleID string) error {
-	rows, err := store.Query(ctx, tx, `SELECT conversation_id, id FROM at_questions WHERE kind = 'approval' AND status = 'open'
-		AND project_id = $1 AND asker = $2 AND COALESCE(thread_id, '') = COALESCE($3, '')
-		AND detail->>'tool_name' = $4 AND detail->>'input_hash' = $5`,
-		deref(q.ProjectID), q.Asker, q.ThreadID, fmt.Sprint(q.Detail["tool_name"]), q.Detail["input_hash"])
+	var keys []core.Question
+	err := tx.Gorm(ctx).Model(&core.Question{}).Select("conversation_id, id").Where(`kind = 'approval' AND status = 'open'
+		AND project_id = ? AND asker = ? AND COALESCE(thread_id, '') = COALESCE(?, '')
+		AND detail->>'tool_name' = ? AND detail->>'input_hash' = ?`,
+		deref(q.ProjectID), q.Asker, q.ThreadID, fmt.Sprint(q.Detail["tool_name"]), fmt.Sprint(q.Detail["input_hash"])).
+		Find(&keys).Error
 	if err != nil {
 		return err
 	}
-	keys := [][2]string{}
-	for rows.Next() {
-		var k [2]string
-		if err := rows.Scan(&k[0], &k[1]); err == nil {
-			keys = append(keys, k)
-		}
-	}
-	rows.Close()
 	for _, k := range keys {
-		other, err := core.LockQuestion(ctx, tx, k[0], k[1])
+		other, err := core.LockQuestion(ctx, tx, k.ConversationID, k.ID)
 		if err != nil || other.Status != "open" {
 			continue
 		}
@@ -451,22 +454,21 @@ func ruleString(r any) string {
 
 // Rules returns the allowed_tools expansions of the rules that apply to an employee.
 func (e *Engine) Rules(ctx context.Context, q core.DB, projectID string, threadID *string, employee string) ([]string, error) {
-	rows, err := store.Query(ctx, q, `SELECT sdk_update FROM at_permission_rules WHERE project_id = $1
-		AND (thread_id IS NULL OR thread_id = $2) AND (employee = '' OR employee = $3) AND sdk_update IS NOT NULL`,
-		projectID, threadID, employee)
+	var rows []struct{ SdkUpdate []byte }
+	err := rulesFor(ctx, q, projectID, threadID, employee).Select("sdk_update").Where("sdk_update IS NOT NULL").
+		Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []string
-	for rows.Next() {
+	for _, r := range rows {
 		var updates []map[string]any
-		if err := rows.Scan(&updates); err != nil {
+		if err := json.Unmarshal(r.SdkUpdate, &updates); err != nil {
 			return nil, err
 		}
 		out = append(out, ExpandRules(updates)...)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // Cancel marks a card cancelled (approval.cancel from the daemon); a request lost with the
@@ -597,26 +599,19 @@ func inputOf(q core.Question) json.RawMessage {
 // SweepTimeouts denies user cards shown longer than the project's approval_timeout_s (§9 超时;
 // a card the lead handed over counts from then).
 func (e *Engine) SweepTimeouts(ctx context.Context) {
-	rows, err := store.Query(ctx, e.core.Pool, `SELECT q.conversation_id, q.id, (p.delivery->>'approval_timeout_s')::int
-		FROM at_questions q JOIN at_projects p ON p.id = q.project_id
-		WHERE q.kind = 'approval' AND q.status = 'open' AND q.audience = 'user' AND (p.delivery->>'approval_timeout_s') IS NOT NULL
-		AND COALESCE((q.detail->>'escalated_at')::timestamptz, q.created_at)
-			< now() - make_interval(secs => (p.delivery->>'approval_timeout_s')::int)`)
+	var keys []core.Question
+	err := e.core.Pool.Gorm(ctx).Table("at_questions q").Select("q.conversation_id, q.id").
+		Joins("JOIN at_projects p ON p.id = q.project_id").
+		Where(`q.kind = 'approval' AND q.status = 'open' AND q.audience = 'user'
+			AND (p.delivery->>'approval_timeout_s') IS NOT NULL
+			AND COALESCE((q.detail->>'escalated_at')::timestamptz, q.created_at)
+			< now() - make_interval(secs => (p.delivery->>'approval_timeout_s')::int)`).Find(&keys).Error
 	if err != nil {
 		e.log.Warn("approval timeout sweep", "err", err)
 		return
 	}
-	var keys [][2]string
-	for rows.Next() {
-		var k [2]string
-		var secs int
-		if rows.Scan(&k[0], &k[1], &secs) == nil {
-			keys = append(keys, k)
-		}
-	}
-	rows.Close()
 	for _, k := range keys {
-		e.timeout(ctx, k[0], k[1])
+		e.timeout(ctx, k.ConversationID, k.ID)
 	}
 }
 

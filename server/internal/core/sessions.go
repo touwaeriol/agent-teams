@@ -136,10 +136,14 @@ func SessionContextOf(ctx context.Context, q DB, sessionID string) (SessionConte
 	if sc.Employee, err = EmployeeByID(ctx, q, sc.Session.EmployeeID); err != nil {
 		return sc, err
 	}
-	var owner struct{ UserID string }
-	err = q.Gorm(ctx).Table("at_projects").Select("user_id").Where("id = ?", sc.Employee.ProjectID).Take(&owner).Error
-	sc.OwnerID = owner.UserID
-	return sc, MapErr(err)
+	sc.OwnerID, err = ProjectOwner(ctx, q, sc.Employee.ProjectID)
+	return sc, err
+}
+
+// ProjectOwner returns the id of the user who owns a project.
+func ProjectOwner(ctx context.Context, q DB, projectID string) (string, error) {
+	p, err := take[struct{ UserID string }](q.Gorm(ctx).Table("at_projects").Select("user_id").Where("id = ?", projectID))
+	return p.UserID, err
 }
 
 // liveSessionsJoined selects live sessions through their employee (alias e).

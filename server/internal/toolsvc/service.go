@@ -15,6 +15,8 @@ import (
 	"log/slog"
 	"slices"
 
+	"gorm.io/gorm"
+
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/delivery"
@@ -143,8 +145,9 @@ func (s *Service) start(ctx context.Context, tx *core.Tx, m *protocol.ToolCall) 
 	if err != nil || dup {
 		return Result{}, false, err
 	}
-	if _, err := store.Exec(ctx, tx, `INSERT INTO at_tool_calls (session_id, call_id, tool_use_id, tool, args) VALUES ($1,$2,$3,$4,$5)`,
-		m.SessionID, m.CallID, m.ToolUseID, m.Tool, []byte(m.Args)); err != nil {
+	err = tx.Gorm(ctx).Table("at_tool_calls").Create(map[string]any{"session_id": m.SessionID, "call_id": m.CallID,
+		"tool_use_id": m.ToolUseID, "tool": m.Tool, "args": []byte(m.Args)}).Error
+	if err != nil {
 		return Result{}, false, err
 	}
 	c, res := s.prepare(ctx, tx, m)
@@ -164,10 +167,12 @@ func (s *Service) start(ctx context.Context, tx *core.Tx, m *protocol.ToolCall) 
 
 // duplicate re-sends the stored result of a finished call; running/waiting calls are left alone.
 func (s *Service) duplicate(ctx context.Context, tx *core.Tx, m *protocol.ToolCall) (bool, error) {
-	var st string
-	var result []byte
-	err := core.MapErr(store.QueryRow(ctx, tx, `SELECT status, result FROM at_tool_calls WHERE session_id = $1 AND call_id = $2`,
-		m.SessionID, m.CallID).Scan(&st, &result))
+	var row struct {
+		Status string
+		Result []byte
+	}
+	err := core.MapErr(toolCall(ctx, tx, string(m.SessionID), string(m.CallID)).Select("status, result").Take(&row).Error)
+	st, result := row.Status, row.Result
 	if errors.Is(err, core.ErrNotFound) {
 		return false, nil
 	}
@@ -251,13 +256,23 @@ func failure(err error) Result {
 	return failText("%s", err.Error())
 }
 
+// toolCall selects one at_tool_calls row.
+func toolCall(ctx context.Context, q core.DB, sessionID, callID string) *gorm.DB {
+	return q.Gorm(ctx).Table("at_tool_calls").Where("session_id = ? AND call_id = ?", sessionID, callID)
+}
+
+// liveCall selects calls that have not finished.
+const liveCall = "status IN ('running','waiting')"
+
+func cancelled() map[string]any {
+	return map[string]any{"status": "cancelled", "finished_at": gorm.Expr("now()")}
+}
+
 // settle stores a finished result (or marks the call waiting) and answers the daemon.
 func (s *Service) settle(ctx context.Context, tx *core.Tx, sessionID, callID string, res Result) error {
 	if res.Wait || res.Later != nil {
 		meta, _ := json.Marshal(nonNil(res.WaitMeta))
-		_, err := store.Exec(ctx, tx, `UPDATE at_tool_calls SET status = 'waiting', result = $3 WHERE session_id = $1 AND call_id = $2`,
-			sessionID, callID, meta)
-		return err
+		return toolCall(ctx, tx, sessionID, callID).Updates(map[string]any{"status": "waiting", "result": meta}).Error
 	}
 	return s.Complete(ctx, tx, sessionID, callID, res)
 }
@@ -283,10 +298,10 @@ func (s *Service) Complete(ctx context.Context, tx *core.Tx, sessionID, callID s
 	if !res.OK {
 		st = "failed"
 	}
-	tag, err := store.Exec(ctx, tx, `UPDATE at_tool_calls SET status = $3, result = $4, finished_at = now()
-		WHERE session_id = $1 AND call_id = $2 AND status IN ('running','waiting')`, sessionID, callID, st, raw)
-	if err != nil || tag.RowsAffected() == 0 {
-		return err
+	res2 := toolCall(ctx, tx, sessionID, callID).Where(liveCall).Updates(map[string]any{"status": st, "result": raw,
+		"finished_at": gorm.Expr("now()")})
+	if res2.Error != nil || res2.RowsAffected == 0 {
+		return res2.Error
 	}
 	return s.sendResult(ctx, tx, sessionID, callID, res)
 }
@@ -323,10 +338,9 @@ func ignoreMissing(err error) error {
 // handler died with the process; otherwise it is cancelled too (protocol.md §6.2).
 func (s *Service) HandleCancel(ctx context.Context, m *protocol.ToolCancel) error {
 	return s.core.InTx(ctx, func(tx *core.Tx) error {
-		tag, err := store.Exec(ctx, tx, `UPDATE at_tool_calls SET status = 'cancelled', finished_at = now()
-			WHERE session_id = $1 AND call_id = $2 AND status IN ('running','waiting')`, m.SessionID, m.CallID)
-		if err != nil || tag.RowsAffected() == 0 {
-			return err
+		res := toolCall(ctx, tx, string(m.SessionID), string(m.CallID)).Where(liveCall).Updates(cancelled())
+		if res.Error != nil || res.RowsAffected == 0 {
+			return res.Error
 		}
 		if m.Reason != nil && *m.Reason == "process_restarted" {
 			return nil
@@ -353,16 +367,8 @@ func (s *Service) cancelQuestionOf(ctx context.Context, tx *core.Tx, sessionID, 
 // Reconcile cancels the session's pending calls the daemon no longer has (sessions.report);
 // their blocking questions stay open and are answered by session.send later.
 func (s *Service) Reconcile(ctx context.Context, tx *core.Tx, sessionID string, pending []string) error {
-	_, err := store.Exec(ctx, tx, `UPDATE at_tool_calls SET status = 'cancelled', finished_at = now()
-		WHERE session_id = $1 AND status IN ('running','waiting') AND NOT (call_id = ANY($2))`, sessionID, nonNilList(pending))
-	return err
-}
-
-func nonNilList(v []string) []string {
-	if v == nil {
-		return []string{}
-	}
-	return v
+	return tx.Gorm(ctx).Table("at_tool_calls").Where("session_id = ? AND NOT (call_id = ANY(?))", sessionID,
+		store.TextArray(pending)).Where(liveCall).Updates(cancelled()).Error
 }
 
 // refreshThread recomputes running ↔ waiting after a question opened or closed.

@@ -253,10 +253,11 @@ func (o *Orchestrator) Unarchive(ctx context.Context, tx *core.Tx, t core.Thread
 	if t.Status != "archived" {
 		return ErrNotArchived
 	}
-	var from string
-	if err := store.QueryRow(ctx, tx, `SELECT archived_from FROM at_threads WHERE id = $1`, t.ID).Scan(&from); err != nil {
+	var row struct{ ArchivedFrom string }
+	if err := tx.Gorm(ctx).Table("at_threads").Select("archived_from").Where("id = ?", t.ID).Take(&row).Error; err != nil {
 		return core.MapErr(err)
 	}
+	from := row.ArchivedFrom
 	next := UnarchiveStatus(from)
 	set := map[string]any{"archived_from": ""}
 	if next == "paused" {
@@ -286,7 +287,7 @@ func (o *Orchestrator) DeleteThread(ctx context.Context, tx *core.Tx, t core.Thr
 	if err := deleteThreadImages(ctx, tx, t); err != nil {
 		return err
 	}
-	if _, err := store.Exec(ctx, tx, `DELETE FROM at_conversations WHERE id = $1`, t.ID); err != nil {
+	if err := tx.Gorm(ctx).Where("id = ?", t.ID).Delete(&core.Conversation{}).Error; err != nil {
 		return err
 	}
 	if t.Status == "running" || t.Status == "waiting" {

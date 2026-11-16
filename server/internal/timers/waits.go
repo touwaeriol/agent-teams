@@ -5,6 +5,9 @@ import (
 	"errors"
 	"time"
 
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -27,9 +30,15 @@ func IsUsageLimit(resetAt *time.Time, now time.Time) bool {
 
 // RecordLimit remembers that the employee hit a usage limit and pauses its thread.
 func RecordLimit(ctx context.Context, tx *core.Tx, orch *orchestrator.Orchestrator, e core.Employee, resetAt time.Time, detail string) error {
-	if _, err := store.Exec(ctx, tx, `INSERT INTO at_rate_limit_waits (employee_id, project_id, thread_id, reset_at, detail)
-		VALUES ($1,$2,$3,$4,$5) ON CONFLICT (employee_id) DO UPDATE SET reset_at = GREATEST(at_rate_limit_waits.reset_at, EXCLUDED.reset_at),
-		detail = EXCLUDED.detail`, e.ID, e.ProjectID, e.ThreadID, resetAt, detail); err != nil {
+	err := tx.Gorm(ctx).Table("at_rate_limit_waits").Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "employee_id"}},
+		DoUpdates: clause.Set{
+			{Column: clause.Column{Name: "reset_at"}, Value: gorm.Expr("GREATEST(at_rate_limit_waits.reset_at, EXCLUDED.reset_at)")},
+			{Column: clause.Column{Name: "detail"}, Value: gorm.Expr("EXCLUDED.detail")},
+		},
+	}).Create(map[string]any{"employee_id": e.ID, "project_id": e.ProjectID, "thread_id": e.ThreadID, "reset_at": resetAt,
+		"detail": detail}).Error
+	if err != nil {
 		return err
 	}
 	if e.ThreadID == nil {
@@ -47,15 +56,15 @@ func RecordLimit(ctx context.Context, tx *core.Tx, orch *orchestrator.Orchestrat
 
 // Waiting reports whether the employee is waiting for a usage limit to reset (no nudges then).
 func Waiting(ctx context.Context, q core.DB, employeeID string) (bool, error) {
-	var n int
-	err := store.QueryRow(ctx, q, `SELECT count(*) FROM at_rate_limit_waits WHERE employee_id = $1`, employeeID).Scan(&n)
+	var n int64
+	err := q.Gorm(ctx).Table("at_rate_limit_waits").Where("employee_id = ?", employeeID).Count(&n).Error
 	return n > 0, err
 }
 
 // LimitResetAt is the latest reset time among a thread's waiting employees (nil = none).
 func LimitResetAt(ctx context.Context, q core.DB, threadID string) (*time.Time, error) {
 	var at *time.Time
-	err := store.QueryRow(ctx, q, `SELECT max(reset_at) FROM at_rate_limit_waits WHERE thread_id = $1`, threadID).Scan(&at)
+	err := q.Gorm(ctx).Table("at_rate_limit_waits").Select("max(reset_at)").Where("thread_id = ?", threadID).Row().Scan(&at)
 	return at, err
 }
 

@@ -331,9 +331,10 @@ func (o *Orchestrator) notifyCoordinator(ctx context.Context, tx *core.Tx, t cor
 }
 
 func (o *Orchestrator) leadLine(ctx context.Context, q core.DB, threadID string) string {
-	var text string
-	_ = store.QueryRow(ctx, q, `SELECT content FROM at_messages WHERE conversation_id = $1 AND role = 'leader' ORDER BY id DESC LIMIT 1`,
-		threadID).Scan(&text)
+	var m core.Message
+	_ = q.Gorm(ctx).Select("content").Where("conversation_id = ? AND role = 'leader'", threadID).Order("id DESC").
+		Take(&m).Error
+	text := m.Content
 	line := strings.SplitN(strings.TrimSpace(text), "\n", 2)[0]
 	r := []rune(line)
 	if len(r) > 200 {
@@ -384,7 +385,8 @@ func (o *Orchestrator) ensureCoordinatorTx(ctx context.Context, tx *core.Tx, use
 	if err != nil {
 		return emp, conv, err
 	}
-	if _, err := store.Exec(ctx, tx, `SELECT 1 FROM at_projects WHERE id = $1 FOR UPDATE`, projectID); err != nil {
+	var locked []store.Project
+	if err := tx.Gorm(ctx).Select("id").Clauses(core.ForUpdate).Where("id = ?", projectID).Find(&locked).Error; err != nil {
 		return emp, conv, err
 	}
 	if emp, err = core.Coordinator(ctx, tx, projectID); err == nil {
@@ -498,24 +500,20 @@ func openQuestionsDigest(ctx context.Context, tx *core.Tx, b *strings.Builder, e
 
 // memoryDigest adds the project's memory (pinned first, then the newest).
 func memoryDigest(ctx context.Context, tx *core.Tx, b *strings.Builder, projectID string) error {
-	rows, err := store.Query(ctx, tx, `SELECT text FROM at_project_memory WHERE project_id = $1
-		ORDER BY pinned DESC, created_at DESC LIMIT 10`, projectID)
+	var texts []string
+	err := tx.Gorm(ctx).Table("at_project_memory").Where("project_id = ?", projectID).
+		Order("pinned DESC, created_at DESC").Limit(10).Pluck("text", &texts).Error
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	var lines []string
-	for rows.Next() {
-		var t string
-		if err := rows.Scan(&t); err != nil {
-			return err
-		}
+	lines := make([]string, 0, len(texts))
+	for _, t := range texts {
 		lines = append(lines, "- "+clip(t, 300))
 	}
 	if len(lines) > 0 {
 		b.WriteString("项目记忆：\n" + strings.Join(lines, "\n") + "\n")
 	}
-	return rows.Err()
+	return nil
 }
 
 func (o *Orchestrator) threadDigest(ctx context.Context, tx *core.Tx, b *strings.Builder, e core.Employee) error {
@@ -543,24 +541,21 @@ func (o *Orchestrator) threadDigest(ctx context.Context, tx *core.Tx, b *strings
 
 // tasksDigest lists the thread's tasks for the lead's recap.
 func tasksDigest(ctx context.Context, tx *core.Tx, b *strings.Builder, threadID string) error {
-	rows, err := store.Query(ctx, tx, `SELECT id, COALESCE(NULLIF(claimed_by, ''), assignee), status, instruction FROM at_tasks
-		WHERE thread_id = $1 ORDER BY created_at, id`, threadID)
+	var tasks []struct{ ID, Who, Status, Instruction string }
+	err := tx.Gorm(ctx).Table("at_tasks").
+		Select("id, COALESCE(NULLIF(claimed_by, ''), assignee) AS who, status, instruction").
+		Where("thread_id = ?", threadID).Order("created_at, id").Find(&tasks).Error
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	var lines []string
-	for rows.Next() {
-		var id, who, st, instr string
-		if err := rows.Scan(&id, &who, &st, &instr); err != nil {
-			return err
-		}
-		lines = append(lines, fmt.Sprintf("- %s %s [%s] %s", id, who, st, clip(instr, 200)))
+	lines := make([]string, 0, len(tasks))
+	for _, t := range tasks {
+		lines = append(lines, fmt.Sprintf("- %s %s [%s] %s", t.ID, t.Who, t.Status, clip(t.Instruction, 200)))
 	}
 	if len(lines) > 0 {
 		b.WriteString("任务：\n" + strings.Join(lines, "\n") + "\n")
 	}
-	return rows.Err()
+	return nil
 }
 
 func clip(s string, n int) string {

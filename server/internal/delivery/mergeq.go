@@ -12,7 +12,6 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/scheduler"
-	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // maxFastForwardRetries rebuilds a trial branch when the thread head moved meanwhile (§8.2 step 4).
@@ -295,9 +294,10 @@ func (e *Engine) recordChecks(ctx context.Context, t core.Thread, queueID *strin
 const degradedNote = "CI 关卡已降级为 off：平台的 GitHub App 没有 checks:read 权限（请管理员在 GitHub 上给 App 加权限并批准），合并不等待检查。"
 
 func (e *Engine) degraded(ctx context.Context, t core.Thread) error {
-	var n int
-	if err := store.QueryRow(ctx, e.core.Pool, `SELECT count(*) FROM at_messages WHERE conversation_id = $1 AND meta->>'notice' = 'ci_degraded'`,
-		t.ID).Scan(&n); err != nil || n > 0 {
+	var n int64
+	err := e.core.Pool.Gorm(ctx).Model(&core.Message{}).Where("conversation_id = ? AND meta->>'notice' = 'ci_degraded'", t.ID).
+		Count(&n).Error
+	if err != nil || n > 0 {
 		return err
 	}
 	return e.core.InTx(ctx, func(tx *core.Tx) error {

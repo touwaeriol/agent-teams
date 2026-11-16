@@ -7,6 +7,8 @@ import (
 	"sort"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -43,7 +45,7 @@ type Plugin struct {
 	Builtin  bool      `json:"builtin" doc:"Platform built-in (created by an admin, every user may tick it)"`
 	Enabled  bool      `json:"enabled"`
 	Latest   int       `json:"latest"`
-	Versions []Version `json:"versions"`
+	Versions []Version `json:"versions" gorm:"-"`
 }
 
 // Owner scopes library writes: a user's own plugins, or the platform built-ins (UserID "").
@@ -78,7 +80,7 @@ func nonNil(v []string) []string {
 
 // List returns the user's plugins, then the enabled built-ins whose name the user does not use.
 func List(ctx context.Context, db store.DB, userID string) ([]Plugin, error) {
-	return query(ctx, db, `SELECT id, name, user_id IS NULL, enabled, latest FROM at_plugins p
+	return query(ctx, db, `SELECT id, name, user_id IS NULL AS builtin, enabled, latest FROM at_plugins p
 		WHERE user_id = $1 OR (user_id IS NULL AND enabled
 			AND NOT EXISTS (SELECT 1 FROM at_plugins o WHERE o.user_id = $1 AND o.name = p.name))
 		ORDER BY user_id IS NULL, name`, userID)
@@ -86,57 +88,66 @@ func List(ctx context.Context, db store.DB, userID string) ([]Plugin, error) {
 
 // ListBuiltin returns every platform built-in, disabled ones included (admin page).
 func ListBuiltin(ctx context.Context, db store.DB) ([]Plugin, error) {
-	return query(ctx, db, `SELECT id, name, TRUE, enabled, latest FROM at_plugins WHERE user_id IS NULL ORDER BY name`)
+	return query(ctx, db, `SELECT id, name, TRUE AS builtin, enabled, latest FROM at_plugins WHERE user_id IS NULL ORDER BY name`)
 }
 
+// query loads plugins with a hand-written filter, then all their versions in one more query.
 func query(ctx context.Context, db store.DB, sql string, args ...any) ([]Plugin, error) {
-	rows, err := store.Query(ctx, db, sql, args...)
+	out := []Plugin{}
+	if err := store.Raw(ctx, db, sql, args...).Scan(&out).Error; err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(out))
+	for i, p := range out {
+		ids[i] = p.ID
+	}
+	byPlugin, err := versions(ctx, db, ids)
 	if err != nil {
 		return nil, err
 	}
-	out := []Plugin{}
-	for rows.Next() {
-		var p Plugin
-		if err := rows.Scan(&p.ID, &p.Name, &p.Builtin, &p.Enabled, &p.Latest); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
 	for i := range out {
-		if out[i].Versions, err = versions(ctx, db, out[i].ID); err != nil {
-			return nil, err
+		out[i].Versions = byPlugin[out[i].ID]
+		if out[i].Versions == nil {
+			out[i].Versions = []Version{}
 		}
 	}
 	return out, nil
 }
 
-func versions(ctx context.Context, db store.DB, id string) ([]Version, error) {
-	rows, err := store.Query(ctx, db, `SELECT version, manifest_version, description, size, sha256, contents, created_at
-		FROM at_plugin_versions WHERE plugin_id = $1 ORDER BY version DESC`, id)
+// versionRow is a row of at_plugin_versions (files left out).
+type versionRow struct {
+	PluginID        string
+	Version         int
+	ManifestVersion string
+	Description     string
+	Size            int
+	SHA256          string `gorm:"column:sha256"`
+	Contents        []byte
+	CreatedAt       time.Time
+}
+
+// versions returns the versions of the given plugins, newest first, by plugin id.
+func versions(ctx context.Context, db store.DB, ids []string) (map[string][]Version, error) {
+	out := map[string][]Version{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var rows []versionRow
+	err := db.Gorm(ctx).Table("at_plugin_versions").
+		Select("plugin_id, version, manifest_version, description, size, sha256, contents, created_at").
+		Where("plugin_id IN ?", ids).Order("plugin_id, version DESC").Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []Version{}
-	for rows.Next() {
-		var v Version
-		var raw []byte
-		if err := rows.Scan(&v.Version, &v.ManifestVersion, &v.Description, &v.Size, &v.SHA256, &raw, &v.CreatedAt); err != nil {
-			return nil, err
-		}
+	for _, r := range rows {
 		var c Contents
-		if err := json.Unmarshal(raw, &c); err != nil {
+		if err := json.Unmarshal(r.Contents, &c); err != nil {
 			return nil, err
 		}
-		v.Contents = Summarize(c)
-		out = append(out, v)
+		out[r.PluginID] = append(out[r.PluginID], Version{Version: r.Version, ManifestVersion: r.ManifestVersion,
+			Description: r.Description, Size: r.Size, SHA256: r.SHA256, Contents: Summarize(c), CreatedAt: r.CreatedAt})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // Upload validates a package and stores it as the next version of its name for the owner.
@@ -163,9 +174,9 @@ func checkName(ctx context.Context, db store.DB, owner Owner, name string) error
 	if owner.UserID == "" {
 		return nil
 	}
-	var taken bool
-	err := store.QueryRow(ctx, db, `SELECT EXISTS (SELECT 1 FROM at_plugins WHERE user_id IS NULL AND name = $1)`, name).Scan(&taken)
-	if err == nil && taken {
+	var n int64
+	err := db.Gorm(ctx).Table("at_plugins").Where("user_id IS NULL AND name = ?", name).Count(&n).Error
+	if err == nil && n > 0 {
 		return problem("%s 是内置插件的名字，请在 plugin.json 里换一个 name", name)
 	}
 	return err
@@ -203,7 +214,7 @@ func prune(ctx context.Context, db store.DB, owner Owner, id, name string, lates
 
 // Get returns one of the owner's plugins.
 func Get(ctx context.Context, db store.DB, owner Owner, id string) (Plugin, error) {
-	list, err := query(ctx, db, `SELECT id, name, user_id IS NULL, enabled, latest FROM at_plugins
+	list, err := query(ctx, db, `SELECT id, name, user_id IS NULL AS builtin, enabled, latest FROM at_plugins
 		WHERE id = $1 AND user_id IS NOT DISTINCT FROM $2`, id, owner.arg())
 	if err != nil {
 		return Plugin{}, err
@@ -216,12 +227,12 @@ func Get(ctx context.Context, db store.DB, owner Owner, id string) (Plugin, erro
 
 // SetEnabled turns one of the owner's plugins on or off; sessions skip disabled plugins.
 func SetEnabled(ctx context.Context, db store.DB, owner Owner, id string, on bool) (Plugin, error) {
-	tag, err := store.Exec(ctx, db, `UPDATE at_plugins SET enabled = $3, updated_at = now()
-		WHERE id = $1 AND user_id IS NOT DISTINCT FROM $2`, id, owner.arg(), on)
-	if err != nil {
-		return Plugin{}, err
+	res := db.Gorm(ctx).Table("at_plugins").Where("id = ? AND user_id IS NOT DISTINCT FROM ?", id, owner.arg()).
+		Updates(map[string]any{"enabled": on, "updated_at": gorm.Expr("now()")})
+	if res.Error != nil {
+		return Plugin{}, res.Error
 	}
-	if tag.RowsAffected() == 0 {
+	if res.RowsAffected == 0 {
 		return Plugin{}, ErrNotFound
 	}
 	return Get(ctx, db, owner, id)

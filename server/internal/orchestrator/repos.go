@@ -178,8 +178,7 @@ func (o *Orchestrator) CheckoutCwd(ctx context.Context, q core.DB, e core.Employ
 
 // legacyCheckout reports whether cwd itself was recorded as a checkout of the thread.
 func legacyCheckout(ctx context.Context, q core.DB, threadID, cwd string) bool {
-	var found bool
-	err := store.QueryRow(ctx, q, `SELECT EXISTS (SELECT 1 FROM at_thread_nodes WHERE thread_id = $1 AND $2 = ANY(paths))`,
-		threadID, cwd).Scan(&found)
-	return err == nil && found
+	var n int64
+	err := q.Gorm(ctx).Table("at_thread_nodes").Where("thread_id = ? AND ? = ANY(paths)", threadID, cwd).Limit(1).Count(&n).Error
+	return err == nil && n > 0
 }

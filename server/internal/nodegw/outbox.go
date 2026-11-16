@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
+
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -92,7 +94,7 @@ func (g *Gateway) Enqueue(ctx context.Context, tx *core.Tx, nodeID string, cmd C
 	}
 	if found {
 		// The earlier command expired or was superseded but the engine wants it sent again.
-		if _, err := store.Exec(ctx, tx, `DELETE FROM at_node_commands WHERE node_id = $1 AND idem_key = $2`, nodeID, key); err != nil {
+		if err := commandByKey(ctx, tx, nodeID, key).Delete(&nodeCommand{}).Error; err != nil {
 			return Queued{}, err
 		}
 	}
@@ -101,10 +103,9 @@ func (g *Gateway) Enqueue(ctx context.Context, tx *core.Tx, nodeID string, cmd C
 		return Queued{}, core.MapErr(err)
 	}
 	meta, _ := json.Marshal(nonNil(cmd.Meta))
-	_, err = store.Exec(ctx, tx, `INSERT INTO at_node_commands (node_id, seq, type, idem_key, body, session_id, open_gen,
-		expires_at, env_id, meta) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-		nodeID, seq, cmd.Type, key, body, nullable(cmd.SessionID), nullableInt(cmd.OpenGen),
-		time.Now().Add(expiry(cmd.Type)), envID, meta)
+	err = tx.Gorm(ctx).Create(&nodeCommand{NodeID: nodeID, Seq: seq, Type: cmd.Type, IdemKey: key, Body: body,
+		SessionID: nullable(cmd.SessionID), OpenGen: nullableInt(cmd.OpenGen), ExpiresAt: time.Now().Add(expiry(cmd.Type)),
+		EnvID: envID, Meta: meta}).Error
 	if err != nil {
 		return Queued{}, err
 	}
@@ -117,13 +118,12 @@ func retired(status string) bool {
 }
 
 func existing(ctx context.Context, tx *core.Tx, nodeID, key string) (Queued, bool, error) {
-	var q Queued
-	err := core.MapErr(store.QueryRow(ctx, tx, `SELECT seq, env_id, status FROM at_node_commands WHERE node_id = $1 AND idem_key = $2`,
-		nodeID, key).Scan(&q.Seq, &q.EnvID, &q.Status))
+	var c nodeCommand
+	err := core.MapErr(commandByKey(ctx, tx, nodeID, key).Select("seq, env_id, status").Take(&c).Error)
 	if err == core.ErrNotFound {
-		return q, false, nil
+		return Queued{}, false, nil
 	}
-	return q, err == nil, err
+	return Queued{Seq: c.Seq, EnvID: c.EnvID, Status: c.Status}, err == nil, err
 }
 
 func nonNil(m map[string]any) map[string]any {
@@ -147,17 +147,38 @@ func nullableInt(n int) *int {
 	return &n
 }
 
-type pending struct {
-	seq   int64
-	typ   string
-	envID string
-	body  json.RawMessage
+// nodeCommand is a row of at_node_commands (the reliable outbox).
+type nodeCommand struct {
+	NodeID    string
+	Seq       int64
+	Type      string
+	IdemKey   string
+	EnvID     string
+	Status    string `gorm:"default:pending"`
+	Body      json.RawMessage
+	SessionID *string
+	OpenGen   *int
+	ExpiresAt time.Time
+	Meta      json.RawMessage
 }
+
+func (nodeCommand) TableName() string { return "at_node_commands" }
+
+func commands(ctx context.Context, q core.DB, nodeID string) *gorm.DB {
+	return q.Gorm(ctx).Model(&nodeCommand{}).Where("node_id = ?", nodeID)
+}
+
+func commandByKey(ctx context.Context, q core.DB, nodeID, key string) *gorm.DB {
+	return commands(ctx, q, nodeID).Where("idem_key = ?", key)
+}
+
+// unacked selects a node's commands still waiting for an ack.
+const unacked = "status IN ('pending','sent')"
 
 // flush sends the link's pending commands in seq order.
 func (g *Gateway) flush(ctx context.Context, l *link) error {
-	if _, err := store.Exec(ctx, g.core.Pool, `UPDATE at_node_commands SET status = 'expired'
-		WHERE node_id = $1 AND status IN ('pending','sent') AND expires_at <= now()`, l.node.ID); err != nil {
+	if err := commands(ctx, g.core.Pool, l.node.ID).Where(unacked).Where("expires_at <= now()").
+		Update("status", "expired").Error; err != nil {
 		return err
 	}
 	for {
@@ -177,39 +198,27 @@ func (l *link) lastSent() int64 {
 	return l.sentSeq
 }
 
-func (g *Gateway) pendingAfter(ctx context.Context, nodeID string, after int64) ([]pending, error) {
-	rows, err := store.Query(ctx, g.core.Pool, `SELECT seq, type, env_id, body FROM at_node_commands
-		WHERE node_id = $1 AND seq > $2 AND status IN ('pending','sent') AND expires_at > now() ORDER BY seq LIMIT 200`,
-		nodeID, after)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []pending
-	for rows.Next() {
-		var p pending
-		if err := rows.Scan(&p.seq, &p.typ, &p.envID, &p.body); err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
+func (g *Gateway) pendingAfter(ctx context.Context, nodeID string, after int64) ([]nodeCommand, error) {
+	var out []nodeCommand
+	err := commands(ctx, g.core.Pool, nodeID).Select("seq, type, env_id, body").
+		Where("seq > ? AND expires_at > now()", after).Where(unacked).Order("seq").Limit(200).Find(&out).Error
+	return out, err
 }
 
-func (g *Gateway) sendBatch(ctx context.Context, l *link, batch []pending) error {
+func (g *Gateway) sendBatch(ctx context.Context, l *link, batch []nodeCommand) error {
 	for _, p := range batch {
-		seq := int(p.seq)
+		seq := int(p.Seq)
 		ts := time.Now().UTC()
-		env := &protocol.Envelope{V: 2, Type: p.typ, ID: p.envID, Seq: &seq, Ts: ts, Body: p.body}
+		env := &protocol.Envelope{V: 2, Type: p.Type, ID: p.EnvID, Seq: &seq, Ts: ts, Body: p.Body}
 		if err := l.write(ctx, env); err != nil {
 			return err
 		}
-		if _, err := store.Exec(ctx, g.core.Pool, `UPDATE at_node_commands SET status = 'sent'
-			WHERE node_id = $1 AND seq = $2 AND status = 'pending'`, l.node.ID, p.seq); err != nil {
+		if err := commands(ctx, g.core.Pool, l.node.ID).Where("seq = ? AND status = 'pending'", p.Seq).
+			Update("status", "sent").Error; err != nil {
 			return err
 		}
 		l.mu.Lock()
-		l.sentSeq = p.seq
+		l.sentSeq = p.Seq
 		l.mu.Unlock()
 	}
 	return nil
@@ -220,9 +229,8 @@ func (g *Gateway) markAckedUpTo(ctx context.Context, nodeID string, upTo int64) 
 	if upTo <= 0 {
 		return nil
 	}
-	_, err := store.Exec(ctx, g.core.Pool, `UPDATE at_node_commands SET status = 'acked', acked_at = now()
-		WHERE node_id = $1 AND seq <= $2 AND status IN ('pending','sent')`, nodeID, upTo)
-	return err
+	return commands(ctx, g.core.Pool, nodeID).Where("seq <= ?", upTo).Where(unacked).
+		Updates(map[string]any{"status": "acked", "acked_at": gorm.Expr("now()")}).Error
 }
 
 // SendNow writes an unreliable message (cred.response) on the node's live link.
@@ -236,9 +244,12 @@ func (g *Gateway) SendNow(ctx context.Context, nodeID, typ string, body any) err
 
 // CommandMeta returns the meta and result of the command with an idempotency key.
 func (g *Gateway) CommandMeta(ctx context.Context, q core.DB, nodeID, key string) (map[string]any, error) {
+	var c nodeCommand
+	if err := commandByKey(ctx, q, nodeID, key).Select("meta").Take(&c).Error; err != nil {
+		return nil, core.MapErr(err)
+	}
 	var meta map[string]any
-	err := store.QueryRow(ctx, q, `SELECT meta FROM at_node_commands WHERE node_id = $1 AND idem_key = $2`, nodeID, key).Scan(&meta)
-	return meta, core.MapErr(err)
+	return meta, json.Unmarshal(c.Meta, &meta)
 }
 
 // FinishCommand records the result of a command (git.result for a job) and marks it done.
@@ -248,7 +259,6 @@ func FinishCommand(ctx context.Context, tx *core.Tx, nodeID, key string, ok bool
 	if !ok {
 		status = "failed"
 	}
-	_, err := store.Exec(ctx, tx, `UPDATE at_node_commands SET status = $3, result = $4, acked_at = COALESCE(acked_at, now())
-		WHERE node_id = $1 AND idem_key = $2`, nodeID, key, status, raw)
-	return err
+	return commandByKey(ctx, tx, nodeID, key).Updates(map[string]any{"status": status, "result": raw,
+		"acked_at": gorm.Expr("COALESCE(acked_at, now())")}).Error
 }

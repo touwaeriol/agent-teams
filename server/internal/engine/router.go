@@ -83,18 +83,12 @@ func (r *router) nodeChanged(ctx context.Context, node store.Node, online bool) 
 	r.e.Orch.NodeChanged(ctx, node.ID)
 	brief := map[string]any{"node": map[string]any{"id": node.ID, "name": node.Name, "online": online}}
 	r.e.Events.User(ctx, node.UserID, core.EvNode, brief)
-	rows, err := store.Query(ctx, r.e.Core.Pool, `SELECT DISTINCT project_id FROM at_employees WHERE node_id = $1`, node.ID)
+	var projects []string
+	err := r.e.Core.Pool.Gorm(ctx).Model(&core.Employee{}).Where("node_id = ?", node.ID).Distinct().
+		Pluck("project_id", &projects).Error
 	if err != nil {
 		return
 	}
-	var projects []string
-	for rows.Next() {
-		var id string
-		if rows.Scan(&id) == nil {
-			projects = append(projects, id)
-		}
-	}
-	rows.Close()
 	for _, id := range projects {
 		r.e.Events.Project(ctx, id, core.EvNode, brief)
 	}

@@ -8,9 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
-	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // Lead review (architecture.md §9 ⑤): a card no policy settled goes first to the thread's
@@ -131,8 +132,9 @@ func clip(s string, n int) string {
 // setAudience readdresses an open card and merges detail keys into it.
 func setAudience(ctx context.Context, tx *core.Tx, q core.Question, audience string, detail map[string]any) (core.Question, error) {
 	raw, _ := json.Marshal(detail)
-	if _, err := store.Exec(ctx, tx, `UPDATE at_questions SET audience = $3, detail = detail || $4::jsonb
-		WHERE conversation_id = $1 AND id = $2`, q.ConversationID, q.ID, audience, raw); err != nil {
+	err := tx.Gorm(ctx).Table("at_questions").Where("conversation_id = ? AND id = ?", q.ConversationID, q.ID).
+		Updates(map[string]any{"audience": audience, "detail": gorm.Expr("detail || ?::jsonb", raw)}).Error
+	if err != nil {
 		return q, err
 	}
 	return core.QuestionByID(ctx, tx, q.ConversationID, q.ID)
@@ -200,22 +202,24 @@ func (e *Engine) escalate(ctx context.Context, tx *core.Tx, q core.Question, rev
 
 // SweepLeadReviews hands cards the lead left unanswered past lead_review_timeout_s to the user.
 func (e *Engine) SweepLeadReviews(ctx context.Context) {
-	rows, err := store.Query(ctx, e.core.Pool, `SELECT conversation_id, id, project_id, extract(epoch FROM now() - created_at)::int
-		FROM at_questions WHERE kind = 'approval' AND status = 'open' AND audience = 'lead'`)
+	var cards []struct {
+		ConversationID, ID, ProjectID string
+		Age                           int
+	}
+	err := e.core.Pool.Gorm(ctx).Table("at_questions").
+		Select("conversation_id, id, project_id, extract(epoch FROM now() - created_at)::int AS age").
+		Where("kind = 'approval' AND status = 'open' AND audience = 'lead'").Find(&cards).Error
 	if err != nil {
 		e.log.Warn("lead review sweep", "err", err)
 		return
 	}
-	type due struct{ conv, id, project string }
+	type due struct{ conv, id string }
 	var list []due
-	for rows.Next() {
-		var d due
-		var age int
-		if rows.Scan(&d.conv, &d.id, &d.project, &age) == nil && age >= e.leadTimeout(ctx, d.project) {
-			list = append(list, d)
+	for _, c := range cards {
+		if c.Age >= e.leadTimeout(ctx, c.ProjectID) {
+			list = append(list, due{c.ConversationID, c.ID})
 		}
 	}
-	rows.Close()
 	for _, d := range list {
 		e.leadTimedOut(ctx, d.conv, d.id)
 	}

@@ -91,8 +91,7 @@ func (o *Orchestrator) NodeRemoved(ctx context.Context, tx *core.Tx, nodeID stri
 			return err
 		}
 	}
-	_, err = store.Exec(ctx, tx, `UPDATE at_employees SET node_id = NULL WHERE node_id = $1`, nodeID)
-	return err
+	return tx.Gorm(ctx).Table("at_employees").Where("node_id = ?", nodeID).Update("node_id", nil).Error
 }
 
 func (o *Orchestrator) recordDelivery(ctx context.Context, tx *core.Tx, e core.Employee, d Delivery, msgID string) (core.Message, error) {
@@ -134,9 +133,7 @@ func (o *Orchestrator) conversationOf(ctx context.Context, tx *core.Tx, e core.E
 }
 
 func ownerOf(ctx context.Context, q core.DB, projectID string) (string, error) {
-	var uid string
-	err := store.QueryRow(ctx, q, `SELECT user_id FROM at_projects WHERE id = $1`, projectID).Scan(&uid)
-	return uid, core.MapErr(err)
+	return core.ProjectOwner(ctx, q, projectID)
 }
 
 func (o *Orchestrator) send(ctx context.Context, tx *core.Tx, s core.AgentSession, msgID string, d Delivery) error {
@@ -290,8 +287,12 @@ func recordMode(ctx context.Context, tx *core.Tx, sessionID string, open protoco
 	if open.Claude == nil {
 		return nil
 	}
-	_, err := store.Exec(ctx, tx, `UPDATE at_agent_sessions SET permission_mode = $2 WHERE id = $1`, sessionID, string(open.Claude.PermissionMode))
-	return err
+	return setPermissionMode(ctx, tx, sessionID, string(open.Claude.PermissionMode))
+}
+
+// setPermissionMode records the permission mode a session runs in.
+func setPermissionMode(ctx context.Context, tx *core.Tx, sessionID, mode string) error {
+	return tx.Gorm(ctx).Table("at_agent_sessions").Where("id = ?", sessionID).Update("permission_mode", mode).Error
 }
 
 // protectedRefs are the thread branch and the thread's base branch in every repository.
@@ -608,7 +609,7 @@ func (o *Orchestrator) SetMode(ctx context.Context, tx *core.Tx, s core.AgentSes
 		return nil
 	}
 	m := protocol.SessionSetModePermissionMode(mode)
-	if _, err := store.Exec(ctx, tx, `UPDATE at_agent_sessions SET permission_mode = $2 WHERE id = $1`, s.ID, mode); err != nil {
+	if err := setPermissionMode(ctx, tx, s.ID, mode); err != nil {
 		return err
 	}
 	_, err := o.gw.Enqueue(ctx, tx, *s.NodeID, nodegw.Command{Type: protocol.TypeSessionSetMode,
