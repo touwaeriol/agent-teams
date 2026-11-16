@@ -8,6 +8,7 @@ import AuditLog from "./admin/AuditLog.vue";
 import FeedbackList from "./admin/FeedbackList.vue";
 import PlatformSettings from "./admin/PlatformSettings.vue";
 import UsersTable from "./admin/UsersTable.vue";
+import VoiceSettings from "./admin/VoiceSettings.vue";
 </script>
 
 <template>
@@ -28,6 +29,7 @@ import UsersTable from "./admin/UsersTable.vue";
         </span>
         <RouterLink to="/setup/github" class="text-[13px] underline-offset-2 hover:underline">查看或创建</RouterLink>
       </Card>
+      <VoiceSettings />
       <AuditLog />
     </div>
   </main>

@@ -1538,6 +1538,28 @@
         ],
         "type": "object"
       },
+      "Language": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "name": {
+            "description": "The language's own name",
+            "type": "string"
+          },
+          "zh": {
+            "description": "Chinese name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "zh"
+        ],
+        "type": "object"
+      },
       "LeadLast": {
         "additionalProperties": false,
         "properties": {
@@ -4993,6 +5015,247 @@
         ],
         "type": "object"
       },
+      "VoiceAdmin": {
+        "additionalProperties": false,
+        "properties": {
+          "base_url": {
+            "description": "Empty = https://api.openai.com/v1",
+            "type": "string"
+          },
+          "default_model": {
+            "type": "string"
+          },
+          "delay": {
+            "description": "gpt-realtime-whisper only; empty = OpenAI's default",
+            "enum": [
+              "",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh"
+            ],
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "key_last4": {
+            "type": "string"
+          },
+          "key_set": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "noise_reduction": {
+            "enum": [
+              "near_field",
+              "far_field",
+              "off"
+            ],
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "openai"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "usable": {
+            "description": "Enabled, a key is saved and the server can unseal it",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "provider",
+          "model",
+          "base_url",
+          "noise_reduction",
+          "delay",
+          "key_set",
+          "key_last4",
+          "usable",
+          "default_model",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "VoiceAdminInput": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key": {
+            "description": "New key; omit to keep the saved one",
+            "maxLength": 500,
+            "type": "string"
+          },
+          "base_url": {
+            "maxLength": 300,
+            "type": "string"
+          },
+          "clear_key": {
+            "type": "boolean"
+          },
+          "delay": {
+            "enum": [
+              "",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh"
+            ],
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "model": {
+            "maxLength": 100,
+            "type": "string"
+          },
+          "noise_reduction": {
+            "enum": [
+              "near_field",
+              "far_field",
+              "off"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "VoiceConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "languages": {
+            "items": {
+              "$ref": "#/components/schemas/Language"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "provider": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "languages"
+        ],
+        "type": "object"
+      },
+      "VoiceSession": {
+        "additionalProperties": false,
+        "properties": {
+          "client_commits": {
+            "description": "No server VAD: send input_audio_buffer.commit at the end of each utterance",
+            "type": "boolean"
+          },
+          "client_secret": {
+            "type": "string"
+          },
+          "connect_url": {
+            "type": "string"
+          },
+          "expires_at": {
+            "description": "Unix seconds",
+            "format": "int64",
+            "type": "integer"
+          },
+          "language": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "transport": {
+            "enum": [
+              "webrtc"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "transport",
+          "connect_url",
+          "client_secret",
+          "expires_at",
+          "model",
+          "language",
+          "client_commits"
+        ],
+        "type": "object"
+      },
+      "VoiceSessionInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "language": {
+            "description": "ISO-639-1 code or auto",
+            "maxLength": 10,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "VoiceTestInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key": {
+            "description": "Test this key instead of the saved one",
+            "maxLength": 500,
+            "type": "string"
+          },
+          "base_url": {
+            "maxLength": 300,
+            "type": "string"
+          },
+          "model": {
+            "maxLength": 100,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "VoiceTestOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "model",
+          "expires_at"
+        ],
+        "type": "object"
+      },
       "Waiting": {
         "additionalProperties": false,
         "properties": {
@@ -5908,6 +6171,114 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TempPasswordOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/voice": {
+      "get": {
+        "operationId": "admin-get-voice",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceAdmin"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "admin"
+        ]
+      },
+      "put": {
+        "operationId": "admin-save-voice",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceAdminInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceAdmin"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/voice/test": {
+      "post": {
+        "operationId": "admin-test-voice",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceTestInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceTestOutputBody"
                 }
               }
             },
@@ -10970,6 +11341,76 @@
         },
         "tags": [
           "threads"
+        ]
+      }
+    },
+    "/api/voice/config": {
+      "get": {
+        "operationId": "voice-config",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceConfig"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "voice"
+        ]
+      }
+    },
+    "/api/voice/session": {
+      "post": {
+        "operationId": "voice-session",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceSessionInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceSession"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "voice"
         ]
       }
     },

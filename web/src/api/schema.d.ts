@@ -253,6 +253,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/voice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["admin-get-voice"];
+        put: operations["admin-save-voice"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/voice/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["admin-test-voice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/attachments/{id}": {
         parameters: {
             query?: never;
@@ -1635,6 +1667,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/voice/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["voice-config"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/voice/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["voice-session"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/login": {
         parameters: {
             query?: never;
@@ -2146,6 +2210,13 @@ export interface components {
         HealthOutputBody: {
             ok: boolean;
             version: string;
+        };
+        Language: {
+            code: string;
+            /** @description The language's own name */
+            name: string;
+            /** @description Chinese name */
+            zh: string;
         };
         LeadLast: {
             /** Format: date-time */
@@ -3071,6 +3142,77 @@ export interface components {
             /** Format: int64 */
             version: number;
         };
+        VoiceAdmin: {
+            /** @description Empty = https://api.openai.com/v1 */
+            base_url: string;
+            default_model: string;
+            /**
+             * @description gpt-realtime-whisper only; empty = OpenAI's default
+             * @enum {string}
+             */
+            delay: "" | "minimal" | "low" | "medium" | "high" | "xhigh";
+            enabled: boolean;
+            key_last4: string;
+            key_set: boolean;
+            model: string;
+            /** @enum {string} */
+            noise_reduction: "near_field" | "far_field" | "off";
+            /** @enum {string} */
+            provider: "openai";
+            /** Format: date-time */
+            updated_at: string;
+            /** @description Enabled, a key is saved and the server can unseal it */
+            usable: boolean;
+        };
+        VoiceAdminInput: {
+            /** @description New key; omit to keep the saved one */
+            api_key?: string;
+            base_url?: string;
+            clear_key?: boolean;
+            /** @enum {string} */
+            delay?: "" | "minimal" | "low" | "medium" | "high" | "xhigh";
+            enabled: boolean;
+            model?: string;
+            /** @enum {string} */
+            noise_reduction?: "near_field" | "far_field" | "off";
+        };
+        VoiceConfig: {
+            enabled: boolean;
+            languages: components["schemas"]["Language"][] | null;
+            provider?: string;
+        };
+        VoiceSession: {
+            /** @description No server VAD: send input_audio_buffer.commit at the end of each utterance */
+            client_commits: boolean;
+            client_secret: string;
+            connect_url: string;
+            /**
+             * Format: int64
+             * @description Unix seconds
+             */
+            expires_at: number;
+            language: string;
+            model: string;
+            provider: string;
+            /** @enum {string} */
+            transport: "webrtc";
+        };
+        VoiceSessionInputBody: {
+            /** @description ISO-639-1 code or auto */
+            language?: string;
+        };
+        VoiceTestInputBody: {
+            /** @description Test this key instead of the saved one */
+            api_key?: string;
+            base_url?: string;
+            model?: string;
+        };
+        VoiceTestOutputBody: {
+            /** Format: int64 */
+            expires_at: number;
+            model: string;
+            ok: boolean;
+        };
         Waiting: {
             questions: components["schemas"]["QuestionView"][] | null;
             reviews: components["schemas"]["ThreadView"][] | null;
@@ -3714,6 +3856,101 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TempPasswordOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "admin-get-voice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceAdmin"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "admin-save-voice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VoiceAdminInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceAdmin"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "admin-test-voice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VoiceTestInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceTestOutputBody"];
                 };
             };
             /** @description Error */
@@ -7171,6 +7408,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Usage"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "voice-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceConfig"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "voice-session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VoiceSessionInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VoiceSession"];
                 };
             };
             /** @description Error */

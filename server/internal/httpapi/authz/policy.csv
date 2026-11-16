@@ -152,6 +152,8 @@ p, user, /api/threads/:tid/tasks/:task/cancel, POST
 p, user, /api/threads/:tid/tasks/:task/retry, POST
 p, user, /api/threads/:tid/unarchive, POST
 p, user, /api/threads/:tid/usage, GET
+p, user, /api/voice/config, GET
+p, user, /api/voice/session, POST
 
 # Administrators: the admin console.
 p, admin, /api/admin/audit, GET
@@ -174,3 +176,6 @@ p, admin, /api/admin/users, GET
 p, admin, /api/admin/users/:id, DELETE
 p, admin, /api/admin/users/:id, PATCH
 p, admin, /api/admin/users/:id/password-reset, POST
+p, admin, /api/admin/voice, GET
+p, admin, /api/admin/voice, PUT
+p, admin, /api/admin/voice/test, POST
