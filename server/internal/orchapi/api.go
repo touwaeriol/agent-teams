@@ -13,7 +13,7 @@ import (
 	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 
 	"github.com/touwaeriol/agent-teams/server/internal/approvals"
 	"github.com/touwaeriol/agent-teams/server/internal/artifacts"
@@ -43,10 +43,10 @@ type API struct {
 func New(e *engine.Engine, reg *office.Registry) *API { return &API{e: e, office: reg} }
 
 // Register mounts every route (httpapi Deps.Extensions).
-func (a *API) Register(api huma.API, r chi.Router) {
+func (a *API) Register(api huma.API, r gin.IRoutes) {
 	if a.e != nil {
-		r.Get("/nodes/connect", a.e.Gateway.ServeWS)
-		r.Get("/nodes/v2/connect", a.e.Gateway.ServeWS)
+		r.GET("/nodes/connect", gin.WrapF(a.e.Gateway.ServeWS))
+		r.GET("/nodes/v2/connect", gin.WrapF(a.e.Gateway.ServeWS))
 	}
 	a.registerConversations(api)
 	a.registerThreads(api)

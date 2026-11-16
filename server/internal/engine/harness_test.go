@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
 	"github.com/touwaeriol/agent-teams/server/internal/config"
@@ -79,7 +79,7 @@ func newWorld(t *testing.T, gh *httptest.Server) *world {
 	cfg := config.Config{PublicURL: "http://console.test", SecretKeys: []string{secret}, WebDir: t.TempDir(),
 		NodeDistDir: t.TempDir(), OfficeDir: t.TempDir()}
 	h := httpapi.New(httpapi.Deps{Config: cfg, Store: db, KV: cache, GitHub: client, Tokens: tokens, Office: reg, Log: log,
-		Nodes: e.Gateway, Events: e.Events, Hooks: e.Hooks(), Extensions: []func(api huma.API, r chi.Router){orchapi.New(e, reg).Register}})
+		Nodes: e.Gateway, Events: e.Events, Hooks: e.Hooks(), Extensions: []func(api huma.API, r gin.IRoutes){orchapi.New(e, reg).Register}})
 	srv := httptest.NewServer(h.Handler())
 	t.Cleanup(func() {
 		cancel()

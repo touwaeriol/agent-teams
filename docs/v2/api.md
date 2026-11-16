@@ -1,6 +1,6 @@
 # v2 网页接口（REST + SSE）
 
-由 Go 控制台（chi + huma）提供，OpenAPI 3.1 文档在 `GET /api/openapi.json`（网页类型由它生成）。本文按设计稿画板分组；表结构见 `data-model.md`。
+由 Go 控制台（Gin + huma，Casbin 做路由授权）提供，OpenAPI 3.1 文档在 `GET /api/openapi.json`（网页类型由它生成）。本文按设计稿画板分组；表结构见 `data-model.md`。
 
 ## 0. 通用约定
 

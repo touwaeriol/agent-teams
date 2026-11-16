@@ -4,11 +4,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestArtifactHostOnly(t *testing.T) {
-	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
-	h := artifactHostOnly("https://files.example.net")(ok)
+	h := hostOnlyEngine("https://files.example.net")
 	cases := []struct {
 		host, path string
 		want       int
@@ -32,8 +33,16 @@ func TestArtifactHostOnly(t *testing.T) {
 	}
 	r := httptest.NewRequest("GET", "/api/me", nil)
 	w := httptest.NewRecorder()
-	artifactHostOnly("")(ok).ServeHTTP(w, r)
+	hostOnlyEngine("").ServeHTTP(w, r)
 	if w.Code != http.StatusTeapot {
 		t.Fatalf("no artifact origin must not filter: %d", w.Code)
 	}
+}
+
+// hostOnlyEngine answers 418 on every path that gets past artifactHostOnly.
+func hostOnlyEngine(origin string) http.Handler {
+	e := newEngine()
+	e.Use(artifactHostOnly(origin))
+	e.NoRoute(func(c *gin.Context) { c.Status(http.StatusTeapot) })
+	return e
 }

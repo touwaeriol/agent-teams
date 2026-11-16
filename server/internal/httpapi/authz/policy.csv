@@ -1,0 +1,51 @@
+# Role hierarchy
+g, admin, user
+g, user, anonymous
+g, anonymous, public
+g, anonymous, node-token
+
+# Public: health, API description, sign-in, installer, release files, office
+# layouts and assets, published files (signed URLs), GitHub App callbacks and
+# webhook (signed state / HMAC checked by the handlers).
+p, public, /healthz, ^GET$
+p, public, /readyz, ^GET$
+p, public, /api/openapi*, ^GET$
+p, public, /api/docs, ^GET$
+p, public, /auth/login, ^POST$
+p, public, /auth/register, ^POST$
+p, public, /auth/logout, ^POST$
+p, public, /install-node.sh, ^GET$
+p, public, /node/dist/:file, ^GET$
+p, public, /office/*, ^GET$
+p, public, /files/*, ^(GET|HEAD)$
+p, public, /api/git/github-app/install, ^GET$
+p, public, /api/git/github-app/created, ^GET$
+p, public, /api/git/github-app/installed, ^GET$
+p, public, /api/git/github-app/webhook, ^POST$
+
+# Node token: the daemon WebSocket and its attachment fetches.
+p, node-token, /nodes/connect, ^GET$
+p, node-token, /nodes/v2/connect, ^GET$
+p, node-token, /nodes/attachments/:id, ^GET$
+
+# Signed-in users: their own account, projects, threads and libraries.
+p, user, /api/me*, ^(GET|POST|DELETE)$
+p, user, /api/attachments/*, ^GET$
+p, user, /api/conversations*, ^(GET|POST|PUT|PATCH|DELETE)$
+p, user, /api/deliverables*, ^(GET|POST|PUT|PATCH|DELETE)$
+p, user, /api/employees/*, ^GET$
+p, user, /api/events, ^GET$
+p, user, /api/git/*, ^(GET|POST|PUT|PATCH|DELETE)$
+p, user, /api/nodes*, ^(GET|POST|PUT|PATCH|DELETE)$
+p, user, /api/office/*, ^GET$
+p, user, /api/plugins*, ^(GET|POST|PUT|PATCH|DELETE)$
+p, user, /api/projects*, ^(GET|POST|PUT|PATCH|DELETE)$
+p, user, /api/roles*, ^(GET|POST|PUT|PATCH|DELETE)$
+p, user, /api/schedules/*, ^(GET|POST|PUT|PATCH|DELETE)$
+p, user, /api/sessions/*, ^GET$
+p, user, /api/skills*, ^(GET|POST|PUT|PATCH|DELETE)$
+p, user, /api/team, ^(GET|PUT)$
+p, user, /api/threads/*, ^(GET|POST|PUT|PATCH|DELETE)$
+
+# Administrators: the admin console.
+p, admin, /api/admin/*, ^(GET|POST|PUT|PATCH|DELETE)$

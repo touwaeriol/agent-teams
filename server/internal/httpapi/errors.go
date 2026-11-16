@@ -1,4 +1,4 @@
-// Package httpapi is the REST surface of the control plane (chi + huma v2):
+// Package httpapi is the REST surface of the control plane (Gin + huma v2, Casbin route authorization):
 // accounts, admin, projects, Git connections and the GitHub App flow, nodes,
 // role templates, office layouts, the node installer and the web app.
 package httpapi

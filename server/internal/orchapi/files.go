@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 
 	"github.com/touwaeriol/agent-teams/server/internal/artifacts"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
@@ -28,7 +28,7 @@ func (a *API) WithOrigins(artifactOrigin, publicURL string) *API {
 	return a
 }
 
-func (a *API) registerFiles(api huma.API, r chi.Router) {
+func (a *API) registerFiles(api huma.API, r gin.IRoutes) {
 	t := "deliverables"
 	huma.Register(api, op("deliverable-files", "GET", "/api/deliverables/{id}/files", t,
 		summary("Files of one version (default: latest) with a short-lived signed URL, and the version list")), a.deliverableFiles)
@@ -39,8 +39,8 @@ func (a *API) registerFiles(api huma.API, r chi.Router) {
 		return
 	}
 	a.files = artifacts.NewServer(a.e.Core.Pool, artifacts.NewSigner(a.fileKeys()), a.artifactOrigin, originOf(a.publicURL), slog.Default())
-	r.Get(artifacts.Prefix+"*", a.files.ServeHTTP)
-	r.Head(artifacts.Prefix+"*", a.files.ServeHTTP)
+	r.GET(artifacts.Prefix+"*path", gin.WrapH(a.files))
+	r.HEAD(artifacts.Prefix+"*path", gin.WrapH(a.files))
 }
 
 // fileKeys derive from the platform secret; without one a random per-process key is used.

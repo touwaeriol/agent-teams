@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 
 	"github.com/touwaeriol/agent-teams/server/internal/platform"
 )
@@ -33,11 +33,19 @@ var (
 // reservedPrefixes never fall back to the web app.
 var reservedPrefixes = []string{"api", "auth", "nodes", "node", "mcp", "office", "install-node.sh", "healthz", "readyz"}
 
-func (s *Server) mountPublic(r chi.Router) {
-	r.Get("/install-node.sh", s.installNode)
-	r.Get("/node/dist/{file}", s.nodeDist)
-	r.Get("/office/*", s.serveOfficeFile)
-	r.NotFound(s.static)
+// mountPublic adds the routes that need no session, and the web app for everything else.
+func (s *Server) mountPublic(e *gin.Engine) {
+	r := e.Group("", s.authorize)
+	r.GET("/install-node.sh", gin.WrapF(s.installNode))
+	r.GET("/node/dist/:file", s.nodeDist)
+	r.GET("/office/*path", s.serveOfficeFile)
+	e.NoRoute(s.fallback)
+}
+
+// fallback serves the web app; gin presets 404 for unmatched paths, the files decide.
+func (s *Server) fallback(c *gin.Context) {
+	c.Status(http.StatusOK)
+	s.static(c.Writer, c.Request)
 }
 
 // installNode renders install-node.sh with the console URL and the current daemon release.
@@ -109,8 +117,8 @@ func fileSHA256(path string) (string, error) {
 }
 
 // nodeDist serves daemon release files (tgz, .sha256, .sig).
-func (s *Server) nodeDist(w http.ResponseWriter, r *http.Request) {
-	name := chi.URLParam(r, "file")
+func (s *Server) nodeDist(c *gin.Context) {
+	w, r, name := c.Writer, c.Request, c.Param("file")
 	path := filepath.Join(s.cfg.NodeDistDir, name)
 	info, err := os.Stat(path)
 	if !distFile.MatchString(name) || err != nil || info.IsDir() {

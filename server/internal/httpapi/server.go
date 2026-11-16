@@ -4,12 +4,10 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/danielgtaylor/huma/v2/adapters/humachi"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	"github.com/danielgtaylor/huma/v2/adapters/humagin"
+	"github.com/gin-gonic/gin"
 
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
 	"github.com/touwaeriol/agent-teams/server/internal/config"
@@ -38,7 +36,8 @@ type Deps struct {
 	Version func() (expected int64) // goose version this binary ships (readyz)
 	// Extensions register more operations/routes (node gateway, threads, SSE…)
 	// before the web app fallback is mounted.
-	Extensions []func(api huma.API, r chi.Router)
+	// Raw routes go on r, which runs the session and authorization middleware.
+	Extensions []func(api huma.API, r gin.IRoutes)
 }
 
 // Server holds the HTTP handlers.
@@ -59,8 +58,9 @@ type Server struct {
 	log     *slog.Logger
 	expect  func() int64
 	repos   *repoCache
+	authz   *authorizer
 
-	router chi.Router
+	router *gin.Engine
 	api    huma.API
 }
 
@@ -70,7 +70,7 @@ func New(d Deps) *Server {
 	box := auth.NewSecretBox(d.Config.SecretKeys...)
 	s := &Server{cfg: d.Config, store: d.Store, kv: d.KV, limiter: kv.NewLimiter(d.KV), box: box,
 		states: auth.NewStateSigner(box), gh: d.GitHub, office: d.Office, nodes: d.Nodes, events: d.Events,
-		hooks: d.Hooks, log: d.Log, expect: d.Version, repos: newRepoCache()}
+		hooks: d.Hooks, log: d.Log, expect: d.Version, repos: newRepoCache(), authz: mustAuthorizer()}
 	if d.Store != nil {
 		s.apps = github.NewApps(d.Store, box)
 		s.tokens = d.Tokens
@@ -78,21 +78,31 @@ func New(d Deps) *Server {
 	if s.tokens == nil && s.apps != nil {
 		s.tokens = github.NewTokens(d.GitHub, s.apps, d.KV, box)
 	}
-	s.router = chi.NewRouter()
-	s.router.Use(realIP, middleware.RequestID, s.logRequests, middleware.Recoverer, artifactHostOnly(d.Config.ArtifactOrigin))
-	s.router.Group(func(r chi.Router) {
-		r.Use(s.session)
-		s.api = humachi.New(r, apiConfig())
-		s.register(s.api, r)
-		for _, ext := range d.Extensions {
-			ext(s.api, r)
-		}
-	})
+	s.router = newEngine()
+	s.router.Use(realIP, requestID, s.logRequests, s.recoverer, artifactHostOnly(d.Config.ArtifactOrigin))
+	routes := s.router.Group("", s.session, s.authorize)
+	s.api = humagin.NewWithGroup(s.router, routes, apiConfig())
+	s.register(s.api, routes)
+	for _, ext := range d.Extensions {
+		ext(s.api, routes)
+	}
 	s.mountPublic(s.router)
 	if s.office != nil {
 		s.office.OnChange = s.layoutChanged
 	}
 	return s
+}
+
+// newEngine is a bare gin engine that routes like the previous chi router: no trailing-slash
+// redirects or path fixing, 405 for a known path with another method.
+func newEngine() *gin.Engine {
+	gin.SetMode(gin.ReleaseMode)
+	e := gin.New()
+	e.RedirectTrailingSlash = false
+	e.RedirectFixedPath = false
+	e.HandleMethodNotAllowed = true
+	e.NoMethod(methodNotAllowed)
+	return e
 }
 
 func withDefaults(d Deps) Deps {
@@ -134,7 +144,7 @@ func apiConfig() huma.Config {
 	return cfg
 }
 
-func (s *Server) register(api huma.API, r chi.Router) {
+func (s *Server) register(api huma.API, r gin.IRoutes) {
 	s.registerAuth(api)
 	s.registerAdmin(api)
 	s.registerProjects(api)
@@ -143,7 +153,7 @@ func (s *Server) register(api huma.API, r chi.Router) {
 	s.registerGitHubApp(api, r)
 	s.registerNodes(api)
 	s.registerRoles(api)
-	s.registerOffice(api, r)
+	s.registerOffice(api)
 	s.registerHealth(api)
 }
 
@@ -155,19 +165,6 @@ func (s *Server) API() huma.API { return s.api }
 
 // OpenAPI returns the OpenAPI 3.1 document as JSON.
 func (s *Server) OpenAPI() ([]byte, error) { return json.MarshalIndent(s.api.OpenAPI(), "", "  ") }
-
-func (s *Server) logRequests(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
-		start := time.Now()
-		next.ServeHTTP(ww, r)
-		if r.URL.Path == "/healthz" {
-			return
-		}
-		s.log.Info("http", "request_id", middleware.GetReqID(r.Context()), "method", r.Method, "path", r.URL.Path,
-			"status", ww.Status(), "ms", time.Since(start).Milliseconds(), "ip", clientIP(r))
-	})
-}
 
 func writeError(w http.ResponseWriter, err error) {
 	e, ok := err.(*APIError)

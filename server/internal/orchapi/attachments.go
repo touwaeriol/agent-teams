@@ -7,7 +7,7 @@ import (
 	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
@@ -44,7 +44,7 @@ type attachmentFileOutput struct {
 	Body         []byte
 }
 
-func (a *API) registerAttachments(api huma.API, r chi.Router) {
+func (a *API) registerAttachments(api huma.API, r gin.IRoutes) {
 	t := "conversations"
 	huma.Register(api, op("upload-attachment", "POST", "/api/projects/{pid}/attachments", t, status(201),
 		summary("Upload an image to attach to a message (PNG, JPEG, GIF or WebP, at most 5 MB)"),
@@ -55,7 +55,7 @@ func (a *API) registerAttachments(api huma.API, r chi.Router) {
 				"image/png": {}, "image/jpeg": {}, "image/gif": {}, "image/webp": {}}}}
 		}), a.attachmentFile)
 	if a.e != nil {
-		r.Get("/nodes/attachments/{id}", a.nodeAttachment)
+		r.GET("/nodes/attachments/:id", a.nodeAttachment)
 	}
 }
 
@@ -92,13 +92,14 @@ func (a *API) attachmentFile(ctx context.Context, in *attachmentFileInput) (*att
 }
 
 // nodeAttachment is GET /nodes/attachments/{id}: a daemon fetches an image of its owner's projects.
-func (a *API) nodeAttachment(w http.ResponseWriter, r *http.Request) {
+func (a *API) nodeAttachment(c *gin.Context) {
+	w, r := c.Writer, c.Request
 	node, err := a.e.Gateway.Authenticate(r)
 	if err != nil {
 		http.Error(w, "token rejected", http.StatusUnauthorized)
 		return
 	}
-	att, data, err := core.AttachmentData(r.Context(), a.e.Core.Pool, node.UserID, chi.URLParam(r, "id"))
+	att, data, err := core.AttachmentData(r.Context(), a.e.Core.Pool, node.UserID, c.Param("id"))
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return

@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 
 	"github.com/touwaeriol/agent-teams/server/internal/office"
 )
@@ -49,7 +49,7 @@ type layoutIDInput struct {
 	ID string `path:"id" maxLength:"64"`
 }
 
-func (s *Server) registerOffice(api huma.API, r chi.Router) {
+func (s *Server) registerOffice(api huma.API) {
 	huma.Register(api, huma.Operation{OperationID: "get-office-layout", Method: "GET", Path: "/api/office/layouts/{id}",
 		Tags: []string{"office"}, Summary: "A layout's JSON (ETag = content hash)"}, s.getLayout)
 	huma.Register(api, huma.Operation{OperationID: "get-current-office-layout", Method: "GET", Path: "/api/office/layout",
@@ -169,8 +169,8 @@ func (s *Server) layoutChanged(id, version string) {
 }
 
 // serveOfficeFile serves /office/<id>.json (resolved layout) and /office/assets/* (OFFICE_DIR).
-func (s *Server) serveOfficeFile(w http.ResponseWriter, r *http.Request) {
-	name := chi.URLParam(r, "*")
+func (s *Server) serveOfficeFile(c *gin.Context) {
+	w, r, name := c.Writer, c.Request, strings.TrimPrefix(c.Param("path"), "/")
 	if strings.HasPrefix(name, "assets/") {
 		s.serveOfficeAsset(w, r, strings.TrimPrefix(name, "assets/"))
 		return

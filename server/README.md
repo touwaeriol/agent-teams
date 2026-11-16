@@ -27,7 +27,7 @@ internal/office/      layout registry: OFFICE_DIR files (fsnotify, 300 ms deboun
                       at_office_layouts, extends merge, schema + structural validation
 internal/roles/       role templates: validation, defaults, YAML view, v1 at_teams conversion
 internal/platform/    extension interfaces (NodeRegistry, Events, Hooks) + no-op defaults
-internal/httpapi/     chi + huma v2 routes, session/CSRF middleware, install-node.sh, SPA
+internal/httpapi/     Gin + huma v2 (humagin) routes, session/CSRF + Casbin middleware, install-node.sh, SPA
 internal/testdb/      fresh database per test from TEST_DATABASE_URL
   orchestration (wired in cmd/atctl/wire.go through internal/engine):
 internal/core/        orchestration data layer: rows, views (api.md §2), Tx with the project
@@ -131,8 +131,8 @@ func wire(d httpapi.Deps) httpapi.Deps {
     d.Nodes = gateway            // platform.NodeRegistry
     d.Events = publisher         // platform.Events
     d.Hooks = engines            // platform.Hooks
-    d.Extensions = append(d.Extensions, func(api huma.API, r chi.Router) {
-        r.Get("/nodes/connect", gateway.ServeWS)       // also /nodes/v2/connect
+    d.Extensions = append(d.Extensions, func(api huma.API, r gin.IRoutes) {
+        r.GET("/nodes/connect", gin.WrapF(gateway.ServeWS)) // also /nodes/v2/connect
         huma.Register(api, huma.Operation{...}, threads.Create)
     })
     return d
@@ -142,6 +142,19 @@ func wire(d httpapi.Deps) httpapi.Deps {
 `openapi` calls `wire` with `d.Store == nil`: wiring may build objects and register routes
 but must not do I/O. Routes added in `Extensions` run behind the session/CSRF middleware and
 share the OpenAPI document (regenerate `web/src/api/openapi.json` afterwards).
+
+## Authorization (Casbin)
+
+`internal/httpapi/authz/model.conf` + `policy.csv` are embedded in the binary. The gin
+middleware enforces (role, gin route template, method) after the session middleware:
+roles are `anonymous` < `user` < `admin`; `anonymous` holds the `public` and `node-token`
+sets (node-token routes check the daemon's token in the handler). A denied anonymous
+caller gets 401 `unauthorized`, a signed-in one 403 (`admin_required` under `/api/admin/`).
+A new route needs a policy line, or `TestPolicyCoversEveryRoute` fails.
+
+Ownership is not a Casbin decision: handlers load rows scoped to the caller's user id
+(`store.ProjectOf(userID, …)`, `core.ThreadOfUser`, `ownDeliverable`, `ownSchedule`, …) and
+answer 404 for anyone else's. Policies are code, not data, so there is no `casbin_rule` table.
 
 | Interface / helper | Used by the REST layer for | Default |
 | --- | --- | --- |

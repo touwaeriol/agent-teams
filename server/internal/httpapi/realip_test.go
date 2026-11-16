@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestRealIP(t *testing.T) {
@@ -26,7 +28,10 @@ func TestRealIP(t *testing.T) {
 			r.Header.Set(k, v)
 		}
 		var got string
-		realIP(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got = clientIP(r) })).ServeHTTP(httptest.NewRecorder(), r)
+		e := newEngine()
+		e.Use(realIP)
+		e.GET("/", func(c *gin.Context) { got = clientIP(c.Request) })
+		e.ServeHTTP(httptest.NewRecorder(), r)
 		if got != c.want {
 			t.Errorf("%s: got %s want %s", c.name, got, c.want)
 		}

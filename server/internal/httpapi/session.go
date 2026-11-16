@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -53,24 +55,24 @@ func sessionToken(r *http.Request) (string, bool) {
 }
 
 // session resolves the caller, keeps the session fresh and enforces CSRF.
-func (s *Server) session(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := withRequest(r.Context(), r)
-		p, token, err := s.authenticate(ctx, r)
-		if err != nil {
-			s.log.Error("session lookup failed", "err", err)
-			writeError(w, fail(http.StatusServiceUnavailable, "unavailable", "数据库暂时不可用"))
+func (s *Server) session(c *gin.Context) {
+	r := c.Request
+	ctx := withRequest(r.Context(), r)
+	p, token, err := s.authenticate(ctx, r)
+	if err != nil {
+		s.log.Error("session lookup failed", "err", err)
+		abortWith(c, fail(http.StatusServiceUnavailable, "unavailable", "数据库暂时不可用"))
+		return
+	}
+	if p != nil {
+		if blocked := s.guard(ctx, c.Writer, r, p, token); blocked != nil {
+			abortWith(c, blocked)
 			return
 		}
-		if p != nil {
-			if blocked := s.guard(ctx, w, r, p, token); blocked != nil {
-				writeError(w, blocked)
-				return
-			}
-			ctx = withPrincipal(ctx, p)
-		}
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+		ctx = withPrincipal(ctx, p)
+	}
+	c.Request = r.WithContext(ctx)
+	c.Next()
 }
 
 func (s *Server) authenticate(ctx context.Context, r *http.Request) (*principal, string, error) {
@@ -180,20 +182,6 @@ func (s *Server) startSession(ctx context.Context, userID string) ([]http.Cookie
 		return nil, err
 	}
 	return []http.Cookie{*s.sessionCookie(token), *s.csrfCookie(secret)}, nil
-}
-
-// realIP replaces RemoteAddr with the client address a reverse proxy (Caddy) reports, but only
-// when the request comes from a loopback or private address, and only from the last
-// X-Forwarded-For entry (the one the nearest proxy appended). X-Real-IP / True-Client-IP are
-// ignored: Caddy passes them through from the client, so trusting them would let anyone pick
-// an address and dodge the login rate limit.
-func realIP(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if ip := forwardedFor(r); ip != "" {
-			r.RemoteAddr = net.JoinHostPort(ip, "0")
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func forwardedFor(r *http.Request) string {

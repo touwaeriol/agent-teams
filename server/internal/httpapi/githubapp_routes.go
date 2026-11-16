@@ -15,7 +15,7 @@ import (
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
 	"github.com/touwaeriol/agent-teams/server/internal/github"
@@ -62,16 +62,16 @@ type manifestOutput struct {
 	}
 }
 
-func (s *Server) registerGitHubApp(api huma.API, r chi.Router) {
+func (s *Server) registerGitHubApp(api huma.API, r gin.IRoutes) {
 	huma.Register(api, huma.Operation{OperationID: "github-app-status", Method: "GET", Path: appBase, Tags: []string{"git"}}, s.appStatus)
 	huma.Register(api, huma.Operation{OperationID: "admin-github-app-manifest", Method: "POST", Path: "/api/admin/github-app/manifest",
 		Tags: []string{"admin"}, Summary: "Form data to create the platform GitHub App from a manifest"}, s.appManifest)
 	huma.Register(api, huma.Operation{OperationID: "admin-github-app-delete", Method: "DELETE", Path: "/api/admin/github-app",
 		Tags: []string{"admin"}, DefaultStatus: 204}, s.appForget)
-	r.Get(appBase+"/install", s.appInstall)
-	r.Get(appBase+"/created", s.appCreated)
-	r.Get(appBase+"/installed", s.appInstalled)
-	r.Post(appBase+"/webhook", s.appWebhook)
+	r.GET(appBase+"/install", gin.WrapF(s.appInstall))
+	r.GET(appBase+"/created", gin.WrapF(s.appCreated))
+	r.GET(appBase+"/installed", gin.WrapF(s.appInstalled))
+	r.POST(appBase+"/webhook", gin.WrapF(s.appWebhook))
 }
 
 func (s *Server) loadApp(ctx context.Context) *github.App {
