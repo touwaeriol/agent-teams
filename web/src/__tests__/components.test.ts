@@ -10,6 +10,9 @@ import { useAttachments } from "@/components/app/attachments";
 import AskCard from "@/components/app/chatcards/AskCard.vue";
 import Composer from "@/components/app/Composer.vue";
 import ThreadList from "@/components/app/ThreadList.vue";
+import ThreadMenu from "@/components/app/ThreadMenu.vue";
+import { menuItems } from "@/components/app/threadMenu";
+import IconMenu from "@/components/common/IconMenu.vue";
 import ConfirmAction from "@/components/common/ConfirmAction.vue";
 import Markdown from "@/components/Markdown.vue";
 import { useDraft } from "@/lib/persist";
@@ -105,6 +108,28 @@ describe("ConfirmAction", () => {
     confirm.click();
     await nextTick();
     expect(w.emitted("confirm")).toHaveLength(1);
+  });
+});
+
+describe("ThreadMenu 标记为完成", () => {
+  it("offers it for a thread still going, not for a finished one or one in review", () => {
+    expect(["running", "waiting", "queued", "paused"].every((status) => menuItems({ status } as never).complete)).toBe(true);
+    expect(["review", "done", "failed", "archived"].some((status) => menuItems({ status } as never).complete)).toBe(false);
+  });
+  it("asks first, then closes the thread through the API", async () => {
+    document.cookie = "agent_teams_csrf=tok";
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({}), { status: 200, headers: { "Content-Type": "application/json" } }));
+    const w = mountWith(ThreadMenu, { thread: thread(2, { id: "th_2", status: "running" }) });
+    w.findComponent(IconMenu).vm.$emit("command", "complete");
+    await nextTick();
+    expect(document.body.textContent).toContain("把 #2 标记为完成？");
+    expect(fetch).not.toHaveBeenCalled();
+    const confirm = [...document.body.querySelectorAll("button")].filter((b) => b.textContent?.trim() === "标记为完成").at(-1)!;
+    confirm.click();
+    await flushPromises();
+    const req = fetch.mock.calls[0][0] as Request;
+    expect(req.method).toBe("POST");
+    expect(req.url).toContain("/api/threads/th_2/complete");
   });
 });
 

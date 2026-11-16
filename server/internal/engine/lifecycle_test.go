@@ -160,3 +160,65 @@ func mustJSON(v any) []byte {
 	raw, _ := json.Marshal(v)
 	return raw
 }
+
+// TestCompleteThread: the user marks a running thread done from the page. It is refused while
+// a PR waits for accept or reject; otherwise the thread is done with the summary kept, every
+// session closes, the coordinator is told and the change is streamed.
+func TestCompleteThread(t *testing.T) {
+	tm := startTeam(t)
+	pool, ctx := tm.w.e.Core.Pool, tm.w.ctx
+	events := tm.b.stream("/api/projects/"+tm.projectID+"/events", "0")
+	tid := tm.thread.ID
+
+	for _, q := range []string{
+		`UPDATE at_threads SET status = 'review' WHERE id = $1`,
+		`INSERT INTO at_thread_repos (thread_id, repo, branch_created, pr_number, pr_url, pr_state) VALUES ($1, 'o/r', true, 7, 'https://github.com/o/r/pull/7', 'open')`,
+	} {
+		if _, err := store.Exec(ctx, pool, q, tid); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, body := tm.b.do("POST", "/api/threads/"+tid+"/complete", map[string]any{})
+	if code != http.StatusConflict || !strings.Contains(string(body), "pr_awaiting") {
+		t.Fatalf("complete with a PR in review = %d %s", code, body)
+	}
+	if _, err := store.Exec(ctx, pool, `UPDATE at_threads SET status = 'running' WHERE id = $1`, tid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Exec(ctx, pool, `DELETE FROM at_thread_repos WHERE thread_id = $1`, tid); err != nil {
+		t.Fatal(err)
+	}
+	other := tm.w.signUp("stranger-complete@example.com")
+	if code, _ := other.do("POST", "/api/threads/"+tid+"/complete", nil); code != 404 {
+		t.Fatalf("another user's complete = %d", code)
+	}
+
+	var got core.ThreadView
+	tm.b.must(200, "POST", "/api/threads/"+tid+"/complete", map[string]any{"summary": "调研结论已交付"}, &got)
+	if got.Status != "done" || got.Summary != "调研结论已交付" {
+		t.Fatalf("complete: %s %q", got.Status, got.Summary)
+	}
+	wctx, cancel := tm.w.waitCtx()
+	defer cancel()
+	for _, s := range []string{tm.dev.session, tm.lead.session} {
+		if _, err := tm.n.Wait(wctx, protocol.TypeSessionClose, func(f nodetest.Frame) bool { return strings.Contains(string(f.Body), s) }); err != nil {
+			t.Fatalf("session %s not closed: %v", s, err)
+		}
+	}
+	events.wait(t, "thread", `"status":"done"`)
+	eventually(t, "coordinator told", func() bool {
+		var n int
+		err := store.QueryRow(ctx, pool, `SELECT count(*) FROM at_messages m JOIN at_conversations c ON c.id = m.conversation_id
+			WHERE c.kind = 'coordinator' AND c.project_id = $1 AND m.content LIKE '%标记为完成%调研结论已交付%'`, tm.projectID).Scan(&n)
+		return err == nil && n == 1
+	})
+	// Again: already done, nothing changes.
+	tm.b.must(200, "POST", "/api/threads/"+tid+"/complete", nil, &got)
+	if got.Status != "done" {
+		t.Fatalf("second complete: %s", got.Status)
+	}
+	code, _ = tm.b.do("POST", "/api/conversations/"+tid+"/messages", map[string]any{"content": "还在吗"})
+	if code != http.StatusConflict {
+		t.Fatalf("message to a completed thread = %d", code)
+	}
+}

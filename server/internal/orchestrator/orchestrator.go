@@ -34,6 +34,8 @@ var (
 	ErrBadState      = errors.New("当前状态不允许这个操作")
 	ErrNotFound      = core.ErrNotFound
 	ErrRoleNotFound  = errors.New("团队里没有这个岗位")
+	ErrPRAwaiting    = errors.New("讨论串还有等待合并的 PR：请先接受（合并）或拒绝，不能直接标记为完成")
+	ErrMerging       = errors.New("合并队列里还有正在合并的条目，等它们处理完再标记为完成")
 )
 
 // Orchestrator is the session and thread engine.

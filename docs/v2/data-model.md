@@ -263,6 +263,7 @@ CREATE TABLE at_threads (
   started_at     TIMESTAMPTZ,
   finished_at    TIMESTAMPTZ,
   archived_from  TEXT NOT NULL DEFAULT '',        -- 00095：归档前的状态（取消归档时 done/failed 回原状态，其余回 paused）
+  stalled_note_at TIMESTAMPTZ,                    -- 00130：上次给组长发“守护进程重启后无人工作”检查的时间；同一次停滞只发一次（之后有用户消息/回答、任务/计划/合并/CI/PR 变化或恢复运行才再发，且 10 分钟内不重发）
   UNIQUE (project_id, no)
 );
 CREATE INDEX at_threads_project ON at_threads (project_id, status, updated_at DESC);

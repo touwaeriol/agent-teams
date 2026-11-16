@@ -106,6 +106,8 @@ var errorMap = []struct {
 	{orchestrator.ErrNoEmployee, 404, "employee_not_found"},
 	{orchestrator.ErrRoleNotFound, 422, "unknown_role"},
 	{orchestrator.ErrBadState, 409, "bad_state"},
+	{orchestrator.ErrPRAwaiting, 409, "pr_awaiting"},
+	{orchestrator.ErrMerging, 409, "merge_in_progress"},
 	{delivery.ErrPRExists, 409, "pr_exists"},
 	{delivery.ErrNothingToPR, 409, "nothing_to_pr"},
 	{delivery.ErrBaseNeedsRepo, 422, "validation"},

@@ -74,6 +74,8 @@ export const threads = {
     unwrap(client.PATCH("/api/threads/{tid}", { params: { path: { tid } }, body })),
   archive: (tid: string) => unwrap(client.POST("/api/threads/{tid}/archive", { params: { path: { tid } } })),
   unarchive: (tid: string) => unwrap(client.POST("/api/threads/{tid}/unarchive", { params: { path: { tid } } })),
+  complete: (tid: string, summary?: string) =>
+    unwrap(client.POST("/api/threads/{tid}/complete", { params: { path: { tid } }, body: summary ? { summary } : {} })),
   remove: (tid: string) => unwrap(client.DELETE("/api/threads/{tid}", { params: { path: { tid } } })),
   setMainTask: (tid: string, mid: string, status: MainTaskStatus) =>
     unwrap(client.PATCH("/api/threads/{tid}/main-tasks/{mid}", { params: { path: { tid, mid } }, body: { status } })),

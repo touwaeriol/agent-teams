@@ -1304,6 +1304,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/threads/{tid}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark a thread done (the user closes it): sessions closed, coordinator told; refused while a PR waits for accept or reject */
+        post: operations["complete-thread"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/threads/{tid}/mail": {
         parameters: {
             query?: never;
@@ -1805,6 +1822,10 @@ export interface components {
         };
         CommentsOutputBody: {
             items: components["schemas"]["CommentView"][] | null;
+        };
+        CompleteInputBody: {
+            /** @description Optional summary kept on the thread */
+            summary?: string;
         };
         CoordinatorView: {
             conversation_id: string;
@@ -6274,6 +6295,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CheckView"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "complete-thread": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CompleteInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThreadView"];
                 };
             };
             /** @description Error */

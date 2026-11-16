@@ -16,9 +16,17 @@ export function archiveNotice(no: number) {
   };
 }
 
-/** What the menu offers for a thread in this status. */
-export function menuItems(t: Pick<ThreadView, "status">): { pause: boolean; resume: boolean; archive: boolean; unarchive: boolean } {
+export function completeNotice(no: number) {
   return {
+    title: `把 #${no} 标记为完成？`,
+    description: "讨论串会结束（已完成）：员工的会话关掉，没回答的卡片取消，协调员会收到通知。适合组长已经做完、但没有自己收尾的讨论串。有等待合并的 PR 时请先接受或拒绝。",
+  };
+}
+
+/** What the menu offers for a thread in this status. */
+export function menuItems(t: Pick<ThreadView, "status">): { complete: boolean; pause: boolean; resume: boolean; archive: boolean; unarchive: boolean } {
+  return {
+    complete: ["running", "waiting", "queued", "paused"].includes(t.status),
     pause: ["running", "waiting", "queued"].includes(t.status),
     resume: t.status === "paused",
     archive: t.status !== "archived",

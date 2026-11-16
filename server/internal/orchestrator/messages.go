@@ -240,6 +240,45 @@ func (o *Orchestrator) Archive(ctx context.Context, tx *core.Tx, t core.Thread) 
 	return o.setStatus(ctx, tx, t, "archived", "")
 }
 
+// Complete is the user closing a thread as done from the page (a finished thread its lead did
+// not end, e.g. "I'll close it myself"): the optional summary is kept, the status goes to done,
+// which closes every session and cancels open cards (same path as finish), and the coordinator
+// is told. A thread whose PR waits for the user's decision (review) or is being merged is
+// refused: the user accepts or rejects it. After a reject the PR is back with the lead, and
+// the user may still close the thread (the PR stays open on the host).
+func (o *Orchestrator) Complete(ctx context.Context, tx *core.Tx, t core.Thread, summary string) error {
+	switch t.Status {
+	case "done":
+		return nil
+	case "failed", "archived":
+		return ErrNotActive
+	}
+	repos, err := core.ThreadRepos(ctx, tx, t.ID)
+	if err != nil {
+		return err
+	}
+	for _, r := range repos {
+		awaiting := r.PRState == "accepting" || (t.Status == "review" && r.PRState != "merged" && r.PRState != "closed")
+		if r.PRNumber != nil && awaiting {
+			return ErrPRAwaiting
+		}
+	}
+	if queued, err := core.MergeQueue(ctx, tx, t.ID, true); err != nil || len(queued) > 0 {
+		if err != nil {
+			return err
+		}
+		return ErrMerging
+	}
+	line := "用户在页面上把讨论串标记为完成。"
+	if summary = strings.TrimSpace(summary); summary != "" {
+		if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"summary": summary}); err != nil {
+			return err
+		}
+		line += "总结：" + clipRunes(strings.SplitN(summary, "\n", 2)[0], 200)
+	}
+	return o.setStatusLine(ctx, tx, t, "done", "", line)
+}
+
 // deleteThreadImages removes the images attached to a thread's messages, unless a message
 // elsewhere in the project still shows them.
 func deleteThreadImages(ctx context.Context, tx *core.Tx, t core.Thread) error {

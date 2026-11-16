@@ -3,7 +3,9 @@ package engine_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,11 +26,15 @@ func (tm *team) turnRunning(t *testing.T, a *fakeAgent) {
 	})
 }
 
+// restarts numbers the epochs of restarted daemons: each restart is a new process (a
+// reconnect with the same epoch is only a dropped link, whose frames dedupe by seq).
+var restarts atomic.Int64
+
 // restart drops the node link and connects the "restarted" daemon.
 func (tm *team) restart(t *testing.T) *nodetest.Node {
 	t.Helper()
 	tm.n.Close()
-	n2 := tm.w.connect(tm.token, nodetest.Options{Epoch: "e-restarted"})
+	n2 := tm.w.connect(tm.token, nodetest.Options{Epoch: fmt.Sprintf("e-restarted-%d", restarts.Add(1))})
 	tm.dev.node, tm.lead.node, tm.n = n2, n2, n2
 	return n2
 }
@@ -214,31 +220,70 @@ func TestRestartLeadMidTurn(t *testing.T) {
 }
 
 // TestStalledThreadWakesLead: after a reconnect, a running thread with every employee idle,
-// no open card and nothing on its way gets one note to its lead (not again while nothing
-// happened).
+// no open card and nothing on its way gets one note to its lead. The note is sent once per
+// stall: the lead's reply does not re-arm it, nor do reconnect bursts or time alone; a user
+// message to the thread (after the debounce) does.
 func TestStalledThreadWakesLead(t *testing.T) {
 	tm := startTeam(t)
 	pool, ctx := tm.w.e.Core.Pool, tm.w.ctx
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := store.Exec(ctx, pool, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, q := range []string{
 		`UPDATE at_messages SET delivered_at = now() WHERE delivered_at IS NULL`,
 		`UPDATE at_agent_sessions SET state = 'active' WHERE state <> 'closed'`,
 		`UPDATE at_threads SET status = 'running' WHERE id = '` + tm.thread.ID + `'`,
 	} {
-		if _, err := store.Exec(ctx, pool, q); err != nil {
-			t.Fatal(err)
-		}
+		exec(q)
 	}
 	tm.restart(t)
 	tm.report(t)
 	tm.lead.expectSend("没有成员在工作")
-	if _, err := store.Exec(ctx, pool, `UPDATE at_messages SET delivered_at = now() WHERE delivered_at IS NULL`); err != nil {
-		t.Fatal(err)
+	settle := func() {
+		t.Helper()
+		exec(`UPDATE at_messages SET delivered_at = now() WHERE delivered_at IS NULL`)
+		exec(`UPDATE at_agent_sessions SET state = 'active' WHERE state <> 'closed'`)
 	}
-	tm.restart(t)
-	tm.report(t)
-	wctx, cancel := context.WithTimeout(ctx, time.Second)
-	defer cancel()
-	if f, err := tm.n.Wait(wctx, protocol.TypeSessionSend, tm.lead.mine); err == nil {
-		t.Fatalf("lead nudged twice: %s", f.Body)
+	// The lead answers the note (its reply becomes the thread's latest message).
+	exec(`INSERT INTO at_messages (conversation_id, role, author, content, delivered_at) VALUES ($1, 'leader', 'lead', '请在页面上关掉它', now())`, tm.thread.ID)
+	reconnect := func() {
+		t.Helper()
+		settle()
+		tm.restart(t)
+		tm.report(t)
 	}
+	quiet := func(why string) {
+		t.Helper()
+		wctx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		if f, err := tm.n.Wait(wctx, protocol.TypeSessionSend, tm.lead.mine); err == nil {
+			t.Fatalf("lead nudged again (%s): %s", why, f.Body)
+		}
+	}
+	for i := 0; i < 3; i++ { // a burst of reconnects
+		reconnect()
+	}
+	quiet("reconnect burst")
+	// Long after, still nothing happened: no new note. (The setup's task events go, so that
+	// the note can be moved an hour back without them counting as news.)
+	exec(`DELETE FROM at_events WHERE thread_id = $1`, tm.thread.ID)
+	exec(`UPDATE at_threads SET stalled_note_at = now() - interval '1 hour' WHERE id = $1`, tm.thread.ID)
+	reconnect()
+	quiet("nothing happened")
+	var notes int
+	if err := store.QueryRow(ctx, pool, `SELECT count(*) FROM at_messages WHERE conversation_id = $1 AND (meta->>'stalled')::boolean`, tm.thread.ID).Scan(&notes); err != nil || notes != 1 {
+		t.Fatalf("stalled notes = %d (%v)", notes, err)
+	}
+
+	// The user writes to the thread: the next stall gets a note again.
+	exec(`INSERT INTO at_messages (conversation_id, role, author, content, delivered_at) VALUES ($1, 'user', 'user', '还有一点', now())`, tm.thread.ID)
+	reconnect()
+	tm.lead.expectSend("没有成员在工作")
+	// Within the debounce, even a new user message does not send another.
+	exec(`INSERT INTO at_messages (conversation_id, role, author, content, delivered_at) VALUES ($1, 'user', 'user', '再补充', now())`, tm.thread.ID)
+	reconnect()
+	quiet("debounce")
 }

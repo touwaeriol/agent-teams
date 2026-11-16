@@ -153,6 +153,7 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | GET | `/api/threads/{tid}` | → `ThreadView` |
 | PATCH | `/api/threads/{tid}` | `{title?, status?: "paused"|"running"|"archived", auto_approve?}` → `ThreadView`。`auto_approve` = “本讨论串内全部放行”（只影响 `ask` 岗位，任何节点都能开；打开时一并放行当前所有待审批，并审计） |
 | POST | `/api/threads/{tid}/archive` | → `ThreadView`。归档：讨论串结束（会话关闭、节点上的检出按 `git.cleanup keep_unpushed` 清理），从主列表移到“已归档”，记下归档前的状态（`at_threads.archived_from`）。已结束的讨论串（done / failed）常用它在“解决后归档” |
+| POST | `/api/threads/{tid}/complete` | body `{summary?}` → `ThreadView`。用户把讨论串标记为完成（组长做完了但没自己收尾）：状态改成 `done`（和 finish 同一条路径：会话关闭、未答卡片取消、检出清理），协调员收到 `[Thread #n · 标题 · done] 用户在页面上把讨论串标记为完成。`。已是 done → 原样返回；failed / archived → 409 `thread_not_active`；PR 等待接受/拒绝（review）或正在合并 → 409 `pr_awaiting`；合并队列还有条目 → 409 `merge_in_progress` |
 | POST | `/api/threads/{tid}/unarchive` | → `ThreadView`。done / failed 归档的回到原状态；进行中归档的回到 `paused`（`pause_reason = "user"`），点“继续”接着做。没归档 → 409 `not_archived` |
 | DELETE | `/api/threads/{tid}` | → 204。关闭全部会话，向用过的节点发 `git.cleanup`（`keep_unpushed: false`，未推送的改动也删）和 `git.purge projects/<pid>/threads/<no>`，删除成员分支；讨论串、员工、任务、对话、审批记录一并删除（级联），交付物留在资料库（`thread_no` 变成 null）。SSE 发 `thread {deleted}`。网页上先弹确认框 |
 | GET | `/api/threads/{tid}/main-tasks` | → `MainTaskView[]` |

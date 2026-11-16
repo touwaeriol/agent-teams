@@ -679,6 +679,17 @@
         ],
         "type": "object"
       },
+      "CompleteInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "summary": {
+            "description": "Optional summary kept on the thread",
+            "maxLength": 20000,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "CoordinatorView": {
         "additionalProperties": false,
         "properties": {
@@ -9669,6 +9680,57 @@
             "description": "Error"
           }
         },
+        "tags": [
+          "threads"
+        ]
+      }
+    },
+    "/api/threads/{tid}/complete": {
+      "post": {
+        "operationId": "complete-thread",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteInputBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Mark a thread done (the user closes it): sessions closed, coordinator told; refused while a PR waits for accept or reject",
         "tags": [
           "threads"
         ]

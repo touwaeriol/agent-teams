@@ -20,12 +20,14 @@ const props = withDefaults(
     compact?: boolean;
     /** Messages to show (default: all). */
     filter?: (m: MessageView) => boolean;
+    /** Messages to show, chosen from the whole list in order (applied after filter). */
+    select?: (messages: MessageView[]) => MessageView[];
     /** Items drawn between the messages at the time they happened (rendered by the `insert` slot). */
     inserts?: I[];
     /** Project id, for links from cards (deliverables). */
     pid?: string;
   }>(),
-  { threads: () => [], speakerColor: "#C8622A", inserts: () => [], pid: "", filter: undefined },
+  { threads: () => [], speakerColor: "#C8622A", inserts: () => [], pid: "", filter: undefined, select: undefined },
 );
 const emit = defineEmits<{ openThread: [no: number] }>();
 defineSlots<{ insert(p: { item: I }): unknown; empty(): unknown; after(): unknown }>();
@@ -33,7 +35,8 @@ defineSlots<{ insert(p: { item: I }): unknown; empty(): unknown; after(): unknow
 const query = useMessages(() => props.cid);
 const messages = computed(() => {
   const all = flattenMessages(query.data.value);
-  return props.filter ? all.filter(props.filter) : all;
+  const shown = props.filter ? all.filter(props.filter) : all;
+  return props.select ? props.select(shown) : shown;
 });
 const items = computed(() => interleave(chatBlocks(messages.value), props.inserts.map((i) => ({ key: i.key, at: i.at, node: i }))));
 const end = ref<HTMLElement | null>(null);

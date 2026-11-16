@@ -4,7 +4,7 @@ import { computed } from "vue";
 import { useQuestions } from "@/api/queries";
 import type { QuestionView, ThreadView } from "@/api/views";
 import { chatQuestions } from "@/lib/ask";
-import { threadTalk } from "@/lib/chat";
+import { threadChat } from "@/lib/chat";
 import { leadOf } from "@/lib/present";
 import Chat from "../Chat.vue";
 import ReviewCard from "../cards/ReviewCard.vue";
@@ -18,7 +18,7 @@ const inserts = computed(() => chatQuestions(questions.data.value).map((q: Quest
 </script>
 
 <template>
-  <Chat :cid="thread.id" :pid="pid" :filter="threadTalk" :inserts="inserts" :compact="compact" speaker-color="#2F6FDB">
+  <Chat :cid="thread.id" :pid="pid" :select="threadChat" :inserts="inserts" :compact="compact" speaker-color="#2F6FDB">
     <template #insert="{ item }"><WaitingCard :cid="thread.id" :pid="pid" :question="item.question" variant="soft" :lead-name="lead" /></template>
     <template #empty>
       <p class="py-10 text-center text-[13px] leading-6 text-muted-foreground">还没有对话。组长汇报会出现在这里，你也可以直接给组长发消息。</p>

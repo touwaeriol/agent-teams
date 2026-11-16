@@ -121,6 +121,13 @@ type openPRInput struct {
 	}
 }
 
+type completeInput struct {
+	TID  string `path:"tid" maxLength:"64"`
+	Body *struct {
+		Summary string `json:"summary,omitempty" maxLength:"20000" doc:"Optional summary kept on the thread"`
+	} `required:"false"`
+}
+
 type rejectInput struct {
 	TID  string `path:"tid" maxLength:"64"`
 	Body struct {
@@ -161,6 +168,8 @@ func (a *API) registerThreads(api huma.API) {
 	huma.Register(api, op("update-thread", "PATCH", "/api/threads/{tid}", t), a.updateThread)
 	huma.Register(api, op("archive-thread", "POST", "/api/threads/{tid}/archive", t,
 		summary("Archive a thread: it ends (sessions closed, checkouts cleaned) and leaves the main list")), a.archiveThread)
+	huma.Register(api, op("complete-thread", "POST", "/api/threads/{tid}/complete", t,
+		summary("Mark a thread done (the user closes it): sessions closed, coordinator told; refused while a PR waits for accept or reject")), a.completeThread)
 	huma.Register(api, op("unarchive-thread", "POST", "/api/threads/{tid}/unarchive", t,
 		summary("Put an archived thread back: finished threads stay finished, others come back paused")), a.unarchiveThread)
 	huma.Register(api, op("delete-thread", "DELETE", "/api/threads/{tid}", t, status(204),
@@ -316,6 +325,16 @@ func (a *API) changeStatus(ctx context.Context, tx *core.Tx, t core.Thread, next
 
 func (a *API) archiveThread(ctx context.Context, in *tidInput) (*threadOutput, error) {
 	return a.lifecycle(ctx, in.TID, "thread_archive", a.e.Orch.Archive)
+}
+
+func (a *API) completeThread(ctx context.Context, in *completeInput) (*threadOutput, error) {
+	summary := ""
+	if in.Body != nil {
+		summary = in.Body.Summary
+	}
+	return a.lifecycle(ctx, in.TID, "thread_complete", func(ctx context.Context, tx *core.Tx, t core.Thread) error {
+		return a.e.Orch.Complete(ctx, tx, t, summary)
+	})
 }
 
 func (a *API) unarchiveThread(ctx context.Context, in *tidInput) (*threadOutput, error) {

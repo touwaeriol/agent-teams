@@ -9,7 +9,7 @@ import { backoff, streamUrl } from "@/api/sse";
 import type { OfficeSnapshot, QuestionView, TaskView, ThreadView } from "@/api/views";
 import { summarizeNodes } from "@/components/shell/nodes";
 import { matchesProject } from "@/components/shell/projects";
-import { chatBlocks, interleave, threadTalk } from "@/lib/chat";
+import { chatBlocks, interleave, threadChat, threadTalk } from "@/lib/chat";
 import { recentProject } from "@/pages/projects";
 import { message, question, task, thread } from "./fixtures";
 
@@ -125,6 +125,22 @@ describe("chat blocks", () => {
   it("thread chat keeps only you, the lead and errors", () => {
     const roles = ["user", "leader", "employee", "system", "error"] as const;
     expect(roles.filter((role) => threadTalk(message("x", { role })))).toEqual(["user", "leader", "error"]);
+  });
+  it("thread chat hides platform checks and the lead's short reply to them", () => {
+    const check = (id: string) => message(id, { role: "system", kind: "note", content: "（平台）节点守护进程重启后检查", meta: { stalled: true } });
+    const shown = threadChat([
+      message("1", { role: "user", content: "我手动关闭线程" }),
+      message("2", { content: "好的" }),
+      check("3"),
+      message("4", { content: "请在页面上关掉它" }),
+      message("5", { content: "后面的汇报照常显示" }),
+      check("6"),
+      message("7", { role: "user", content: "还在吗" }),
+      message("8", { content: "在" }),
+      check("9"),
+      message("10", { content: "全部完成。".repeat(60) }),
+    ]).map((m) => m.id);
+    expect(shown).toEqual(["1", "2", "5", "7", "8", "10"]);
   });
   it("puts cards between the messages at the time they were asked", () => {
     const at = (min: number) => new Date(Date.UTC(2026, 10, 15, 10, min)).toISOString();

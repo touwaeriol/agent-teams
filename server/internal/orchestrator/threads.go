@@ -262,6 +262,11 @@ func (o *Orchestrator) shouldNotify(ctx context.Context, tx *core.Tx, t core.Thr
 
 // setStatus changes a thread's status, emits it, reports upward and frees slots.
 func (o *Orchestrator) setStatus(ctx context.Context, tx *core.Tx, t core.Thread, next, reason string) error {
+	return o.setStatusLine(ctx, tx, t, next, reason, "")
+}
+
+// setStatusLine is setStatus with the line the coordinator is told ("" = the lead's latest message).
+func (o *Orchestrator) setStatusLine(ctx context.Context, tx *core.Tx, t core.Thread, next, reason, line string) error {
 	if t.Status == next {
 		return nil
 	}
@@ -283,7 +288,7 @@ func (o *Orchestrator) setStatus(ctx context.Context, tx *core.Tx, t core.Thread
 		return nil
 	}
 	// Reporting upward must never block the status change itself (e.g. no node for the coordinator).
-	if err := tx.Savepoint(ctx, func(sub *core.Tx) error { return o.notifyCoordinator(ctx, sub, t, next) }); err != nil {
+	if err := tx.Savepoint(ctx, func(sub *core.Tx) error { return o.notifyCoordinator(ctx, sub, t, next, line) }); err != nil {
 		o.log.Warn("notify coordinator", "thread_id", t.ID, "status", next, "err", err)
 	}
 	return nil
@@ -306,6 +311,10 @@ func (o *Orchestrator) afterStatus(ctx context.Context, tx *core.Tx, t core.Thre
 		}
 		tx.AfterCommit(func(ctx context.Context) { o.ThreadEnded(ctx, t.ID) })
 	case "running":
+		// A resumed (or answered) thread starts a new stall episode: re-arm the stalled note.
+		if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"stalled_note_at": nil}); err != nil {
+			return err
+		}
 		tx.AfterCommit(func(ctx context.Context) { o.Kick(ctx, t.ID) })
 	}
 	return nil
@@ -410,12 +419,15 @@ func (o *Orchestrator) ProjectDeleting(ctx context.Context, tx *core.Tx, project
 }
 
 // notifyCoordinator posts "[Thread #12 · title · review] <lead's latest>" to the coordinator.
-func (o *Orchestrator) notifyCoordinator(ctx context.Context, tx *core.Tx, t core.Thread, next string) error {
+func (o *Orchestrator) notifyCoordinator(ctx context.Context, tx *core.Tx, t core.Thread, next, line string) error {
 	coord, conv, err := o.ensureCoordinatorTx(ctx, tx, t.UserID, t.ProjectID)
 	if err != nil {
 		return err
 	}
-	text := fmt.Sprintf("[Thread #%d · %s · %s] %s", t.No, t.Title, next, o.leadLine(ctx, tx, t.ID))
+	if line == "" {
+		line = o.leadLine(ctx, tx, t.ID)
+	}
+	text := fmt.Sprintf("[Thread #%d · %s · %s] %s", t.No, t.Title, next, line)
 	rec := &core.NewMessage{ConversationID: conv, Role: "system", Author: "platform", Kind: "note", Content: text,
 		Meta: map[string]any{"thread_no": t.No}}
 	_, err = o.Deliver(ctx, tx, coord, Delivery{Text: text, Kind: "system", Priority: "later", Record: rec})

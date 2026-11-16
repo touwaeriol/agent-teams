@@ -233,6 +233,8 @@ export interface MessageView {
     task_id?: string;
     opens_thread?: number;
     request_kind?: string;
+    /** A platform note to a thread's lead: the thread looked stalled after a node daemon restart. */
+    stalled?: boolean;
     attachments?: AttachmentRef[];
     /** Chat cards: who the card is about. */
     employee?: string;

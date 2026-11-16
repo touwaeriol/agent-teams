@@ -129,14 +129,22 @@ func clipRunes(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
-// stalledNote wakes a lead whose running thread has nobody working after a restart.
+// stalledNote wakes a lead whose running thread has nobody working after a restart. It is a
+// platform → lead note (the chat hides it), sent once per stall.
 const stalledNote = "（平台）节点守护进程重启后检查：这个线程仍是运行中，但现在没有成员在工作，也没有待处理的卡片或消息。" +
-	"请确认进度：还有工作就继续推进（分派、催促成员），已经完成就收尾。"
+	"请确认进度：所有工作都已完成，就调用 finish(summary) 收尾（没有代码改动时不需要 PR，线程直接结束）；" +
+	"在等用户决定或回复，就用 ask_user 问一次，然后等待；还有工作就继续推进（分派、催促成员）。" +
+	"用户说过会自己关闭这个线程的话，什么都不用做，也不要回复这条检查。这条检查同一次停滞只发一次。"
+
+// stalledDebounce: never two stalled notes within this time (reconnect bursts).
+const stalledDebounce = "10 minutes"
 
 // wakeStalledThreads: after a reconnect (sessions.report), a running thread of the node whose
 // employees are all idle, with no open card or question and no message on its way, would sit
-// in "running" forever; its lead gets a note, unless that note is already the thread's
-// latest message (nothing happened since).
+// in "running" forever; its lead gets a note, once per stall: at_threads.stalled_note_at
+// remembers the last one, and another goes out only after something meaningful happened in the
+// thread since (a user message or answer, a task, plan, merge or CI change, a PR update; a
+// resume clears the mark) and never within stalledDebounce of the last one.
 func (o *Orchestrator) wakeStalledThreads(ctx context.Context, tx *core.Tx, node store.Node) error {
 	rows, err := store.Query(ctx, tx, `SELECT DISTINCT t.id FROM at_threads t JOIN at_employees e ON e.thread_id = t.id
 		JOIN at_agent_sessions a ON a.employee_id = e.id AND a.state <> 'closed'
@@ -146,8 +154,7 @@ func (o *Orchestrator) wakeStalledThreads(ctx context.Context, tx *core.Tx, node
 		AND NOT EXISTS (SELECT 1 FROM at_questions q WHERE q.thread_id = t.id AND q.status = 'open')
 		AND NOT EXISTS (SELECT 1 FROM at_messages m WHERE m.conversation_id = t.id AND m.delivered_at IS NULL
 			AND jsonb_exists(m.meta, 'msg_id') AND m.created_at > now() - interval '1 day')
-		AND COALESCE((SELECT (m.meta->>'stalled')::boolean FROM at_messages m WHERE m.conversation_id = t.id
-			ORDER BY m.id DESC LIMIT 1), false) = false`, node.ID)
+		AND `+stalledArmed, node.ID)
 	if err != nil {
 		return err
 	}
@@ -164,6 +171,14 @@ func (o *Orchestrator) wakeStalledThreads(ctx context.Context, tx *core.Tx, node
 		if err != nil {
 			continue
 		}
+		// Claim the note under the row lock: concurrent reconnects send it once.
+		res := tx.Gorm(ctx).Exec(`UPDATE at_threads t SET stalled_note_at = now() WHERE t.id = ? AND `+stalledArmed, id)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			continue
+		}
 		rec := &core.NewMessage{ConversationID: id, Role: "system", Author: "platform", Kind: "note", Content: stalledNote,
 			Meta: map[string]any{"to": lead.Name, "stalled": true}}
 		if _, err := o.Deliver(ctx, tx, lead, Delivery{Text: stalledNote, Kind: "system", Priority: "later", Record: rec}); err != nil {
@@ -172,3 +187,12 @@ func (o *Orchestrator) wakeStalledThreads(ctx context.Context, tx *core.Tx, node
 	}
 	return nil
 }
+
+// stalledArmed (on thread t) holds when the thread may get a stalled note: none was sent yet in
+// this stall, or the last one is older than stalledDebounce and something happened since.
+const stalledArmed = `(t.stalled_note_at IS NULL OR (t.stalled_note_at < now() - interval '` + stalledDebounce + `' AND (
+	EXISTS (SELECT 1 FROM at_messages m WHERE m.conversation_id = t.id AND m.role = 'user' AND m.created_at > t.stalled_note_at)
+	OR EXISTS (SELECT 1 FROM at_questions q WHERE q.thread_id = t.id AND q.answered_at > t.stalled_note_at)
+	OR EXISTS (SELECT 1 FROM at_events ev WHERE ev.thread_id = t.id AND ev.created_at > t.stalled_note_at
+		AND ev.type IN ('task','main_task','merge','ci'))
+	OR EXISTS (SELECT 1 FROM at_thread_repos r WHERE r.thread_id = t.id AND r.updated_at > t.stalled_note_at))))`
