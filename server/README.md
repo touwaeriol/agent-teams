@@ -150,8 +150,9 @@ share the OpenAPI document (regenerate `web/src/api/openapi.json` afterwards).
 middleware enforces (subject, gin route template, method) after the session middleware, with
 **one explicit policy line per route and method** (exact match, no prefixes): a route without
 a line is denied to everyone. Subjects: `anonymous` (no session), `node` (no session but a
-Bearer token: a daemon; the handler still verifies it is a node token), `user`, `admin`
-(admin < user < anonymous inherit; node inherits anonymous plus the `node-token` set). A denied
+Bearer token: a daemon; the handler still verifies it is a node token), or the signed-in
+user's **id**, which reaches `user` or `admin` through its grouping rule (admin < user <
+anonymous inherit; node inherits anonymous plus the `node-token` set). A denied
 caller without a session gets 401 `unauthorized`, a signed-in one 403 (`admin_required` under
 `/api/admin/`, else `forbidden`). `cmd/atctl/authz_test.go` builds the server exactly as `serve`
 wires it and fails when a route has no line, a line names no route, or any of the four
@@ -159,7 +160,34 @@ subjects gets other than its group's access (public, node, user, admin).
 
 Ownership is not a Casbin decision: handlers load rows scoped to the caller's user id
 (`store.ProjectOf(userID, …)`, `core.ThreadOfUser`, `ownDeliverable`, `ownSchedule`, …) and
-answer 404 for anyone else's. Policies are code, not data, so there is no `casbin_rule` table.
+answer 404 for anyone else's.
+
+### Roles live in `casbin_rule`
+
+The route lines and the role hierarchy are code (policy.csv); which role a user holds is data,
+and it lives **only** in Casbin's own table `casbin_rule` (standard adapter layout: `id`,
+`ptype`, `v0`…`v5`, unique index on all seven), one row per user: `g, <user id>, admin|user`.
+There is no `at_users.role` (migration `00110` copied it into `casbin_rule` once and dropped
+it), no trigger and no second copy.
+
+- `authzAdapter` (`internal/httpapi/authz_adapter.go`) is a small custom Casbin adapter:
+  `LoadPolicy` = embedded policy.csv + the `g` rows of `casbin_rule` read through the store's
+  GORM handle; auto-save writes only `g` rows (a `p` write is refused). The table comes from the
+  goose migration and is never auto-migrated (that is why `gorm-adapter` is not used: it would
+  also need the embedded lines merged in and drags every SQL driver along).
+- Every change goes through the enforcer API in the same request: registration
+  (`AddGroupingPolicy`: first user and `AGENT_TEAMS_ADMIN_EMAILS` → admin, else user; if that
+  fails the new account row is removed again), `PATCH /api/admin/users/{id}` with `role`
+  (`UpdateGroupingPolicy`), `DELETE /api/admin/users/{id}` (`RemoveFilteredGroupingPolicy`,
+  before the account row is deleted), and `atctl admin set-role EMAIL admin|user`. The cache
+  of decisions is cleared after each change, so the user's next request already sees it.
+- `UserView.role` and `requireAdmin` read the role from the enforcer (`principal.Role` is
+  resolved with the session). A user id with no rule is shown as `user` but denied every
+  user route (fail closed).
+- Several console replicas: each applies its own changes at once and reloads the policy every
+  10 s (`Server.RunAuthz`, started by `serve`), so a change made on another replica — or by
+  `atctl admin set-role` — takes effect everywhere within 10 s. A periodic reload was chosen
+  over a Valkey watcher because it also heals missed messages and needs no subscription.
 `engine/isolation_test.go` sweeps every route that names a row with a second user (404 or a
 refused body, nothing changed, lists and node attachment fetches do not leak) and checks that
 every write refuses a cookie session without `X-CSRF-Token`; `httpapi/artifacthost_test.go`

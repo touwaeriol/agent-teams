@@ -18,6 +18,7 @@ commands:
   healthcheck                   exit 0 when http://127.0.0.1:$PORT/healthz answers 200
   openapi                       print the OpenAPI 3.1 document (JSON)
   admin reset-password EMAIL [PASSWORD]   set a password (random temporary one if omitted)
+  admin set-role EMAIL admin|user         change a user's role (Casbin grouping rule)
   admin reseal                  re-encrypt sealed secrets with the first AGENT_TEAMS_SECRET_KEYS key
 `
 

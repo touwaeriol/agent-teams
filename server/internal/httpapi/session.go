@@ -87,7 +87,7 @@ func (s *Server) authenticate(ctx context.Context, r *http.Request) (*principal,
 	if err != nil {
 		return nil, "", err
 	}
-	return &principal{User: user, Session: sess, Bearer: bearer}, token, nil
+	return &principal{User: user, Role: s.authz.role(user.ID), Session: sess, Bearer: bearer}, token, nil
 }
 
 func (s *Server) guard(ctx context.Context, w http.ResponseWriter, r *http.Request, p *principal, token string) error {

@@ -87,7 +87,7 @@ func (s *Server) adminUsers(ctx context.Context, _ *struct{}) (*adminUsersOutput
 	}
 	out := make([]AdminUserView, len(rows))
 	for i, u := range rows {
-		out[i] = adminUserView(u)
+		out[i] = adminUserView(u, s.authz.role(u.ID))
 	}
 	return &adminUsersOutput{Body: out}, nil
 }
@@ -106,12 +106,15 @@ func (s *Server) adminUpdateUser(ctx context.Context, in *userPatchInput) (*user
 		return nil, storeErr(err, "没有这个用户")
 	}
 	if b.Role != nil {
+		if err := s.authz.setRole(in.ID, *b.Role); err != nil {
+			return nil, err
+		}
 		s.audit(ctx, admin.User.ID, "role_change", "user", in.ID, map[string]string{"role": *b.Role})
 	}
 	if !user.Active {
 		s.cutOff(ctx, in.ID)
 	}
-	return &userOutput{Body: userView(user)}, nil
+	return &userOutput{Body: userView(user, s.authz.role(user.ID))}, nil
 }
 
 func userChanges(in *userPatchInput) []store.Change {
@@ -122,7 +125,6 @@ func userChanges(in *userPatchInput) []store.Change {
 			ch = append(ch, store.Change{Col: col, Val: val})
 		}
 	}
-	add(b.Role != nil, "role", deref(b.Role))
 	add(b.Active != nil, "active", deref(b.Active))
 	add(b.MaxNodes != nil && !b.ClearMaxNodes, "max_nodes", b.MaxNodes)
 	add(b.ClearMaxNodes, "max_nodes", nil)
@@ -169,6 +171,11 @@ func (s *Server) adminDeleteUser(ctx context.Context, in *userIDInput) (*struct{
 		return nil, storeErr(err, "没有这个用户")
 	}
 	s.cutOff(ctx, in.ID)
+	// Grouping rules first: if deleting the row then fails, a retry finishes the job and no
+	// rule outlives its user.
+	if err := s.authz.forget(in.ID); err != nil {
+		return nil, err
+	}
 	if err := s.store.DeleteUser(ctx, in.ID); err != nil {
 		return nil, storeErr(err, "没有这个用户")
 	}

@@ -33,7 +33,7 @@ func TestPolicyCoversFoundationRoutes(t *testing.T) {
 
 // TestPolicyIsExact: no prefixes or patterns, a route template matches only itself.
 func TestPolicyIsExact(t *testing.T) {
-	a := mustAuthorizer()
+	a := mustAuthorizer(nil)
 	for _, c := range [][3]string{{roleUser, "/api/projects/:pid/x", "GET"}, {roleUser, "/api/projects", "PUT"},
 		{roleAdmin, "/api/admin/other", "GET"}, {roleUser, "/unknown", "GET"}, {roleNode, "/api/projects", "GET"},
 		{roleAnonymous, "/nodes/connect", "GET"}, {roleUser, "/nodes/connect", "GET"}, {roleNode, "/files/*path", "POST"}} {
@@ -46,29 +46,43 @@ func TestPolicyIsExact(t *testing.T) {
 	}
 }
 
-func TestLoadPolicyRejectsBadLines(t *testing.T) {
-	a := mustAuthorizer()
+func TestParsePolicyRejectsBadLines(t *testing.T) {
 	for _, bad := range []string{"p, user, /x", "x, a, b", "g, a"} {
-		if err := loadPolicy(a.e, bad); err == nil {
+		if _, err := parsePolicy(bad); err == nil {
 			t.Errorf("%q accepted", bad)
 		}
 	}
 }
 
-func TestRoleOf(t *testing.T) {
+// TestRouteRulesAreReadOnly: the embedded route policy cannot be changed at run time, and
+// without a database there is nowhere to keep role assignments.
+func TestRouteRulesAreReadOnly(t *testing.T) {
+	a := mustAuthorizer(nil)
+	if ok, err := a.e.AddPolicy("user", "/api/admin/settings", "PUT"); err == nil || ok {
+		t.Fatalf("p rule written: %v %v", ok, err)
+	}
+	if err := a.setRole("u1", roleAdmin); err == nil {
+		t.Fatal("role assigned without a database")
+	}
+	if ok, _ := a.allowed("u1", "/api/admin/settings", "PUT"); ok {
+		t.Fatal("failed assignment still grants admin")
+	}
+}
+
+func TestSubjectOf(t *testing.T) {
 	plain := httptest.NewRequest("GET", "/", nil)
 	bearer := httptest.NewRequest("GET", "/", nil)
 	bearer.Header.Set("Authorization", "Bearer node-token")
-	user, admin := &principal{}, &principal{}
-	user.User.Role, admin.User.Role = "user", "admin"
+	user := &principal{Role: roleAdmin}
+	user.User.ID = "u1"
 	cases := []struct {
 		p    *principal
 		r    *http.Request
 		want string
-	}{{nil, plain, roleAnonymous}, {nil, bearer, roleNode}, {user, plain, roleUser}, {user, bearer, roleUser}, {admin, plain, roleAdmin}}
+	}{{nil, plain, roleAnonymous}, {nil, bearer, roleNode}, {user, plain, "u1"}, {user, bearer, "u1"}}
 	for _, c := range cases {
-		if got := roleOf(c.p, c.r); got != c.want {
-			t.Errorf("roleOf = %s, want %s", got, c.want)
+		if got := subjectOf(c.p, c.r); got != c.want {
+			t.Errorf("subjectOf = %s, want %s", got, c.want)
 		}
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
 	"github.com/touwaeriol/agent-teams/server/internal/config"
 	"github.com/touwaeriol/agent-teams/server/internal/github"
+	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 	"github.com/touwaeriol/agent-teams/server/migrations"
 )
@@ -87,7 +88,7 @@ func openapi(_ context.Context, _ []string) error {
 
 func admin(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: atctl admin reset-password EMAIL [PASSWORD] | atctl admin reseal")
+		return errors.New("usage: atctl admin reset-password EMAIL [PASSWORD] | atctl admin set-role EMAIL admin|user | atctl admin reseal")
 	}
 	db, err := store.Open(ctx, os.Getenv("DATABASE_URL"))
 	if err != nil {
@@ -97,6 +98,8 @@ func admin(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "reset-password":
 		return resetPassword(ctx, db, args[1:])
+	case "set-role":
+		return setRole(ctx, db, args[1:])
 	case "reseal":
 		return reseal(ctx, db)
 	}
@@ -133,6 +136,22 @@ func resetPassword(ctx context.Context, db *store.Store, args []string) error {
 	} else {
 		fmt.Printf("password for %s updated\n", user.Email)
 	}
+	return nil
+}
+
+// setRole assigns admin or user through the Casbin enforcer (the grouping rule in casbin_rule).
+func setRole(ctx context.Context, db *store.Store, args []string) error {
+	if len(args) != 2 {
+		return errors.New("usage: atctl admin set-role EMAIL admin|user")
+	}
+	user, _, err := db.UserCredentials(ctx, auth.NormalizeEmail(args[0]))
+	if err != nil {
+		return fmt.Errorf("user %s: %w", args[0], err)
+	}
+	if err := httpapi.SetUserRole(db, user.ID, args[1]); err != nil {
+		return err
+	}
+	fmt.Printf("%s is now %s (running consoles apply it within seconds)\n", user.Email, args[1])
 	return nil
 }
 

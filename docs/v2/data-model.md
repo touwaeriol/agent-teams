@@ -4,6 +4,7 @@
 
 ## 0. 约定
 
+- **P6 之后（v1 已退役）**：允许删 v1 列。第一个这样做的是 `00110_casbin_rule`（`at_users.role` → `casbin_rule`，§2.1）。
 - **迁移期规则（P6 之前）**：Python v1 与 Go v2 共用这个库，Python 每次启动会跑自己的 `CREATE … IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`。因此 v2 迁移**只新增表、只给 v1 表加带默认值的列、只加 v1 写入不会违反的索引和约束**；不改列类型、不改 v1 列的默认值、不删任何东西。所有标“P6 后”的清理在 Python 退役后的迁移里做。
 - **v1 不得读到 v2 的行**：v2 的讨论串任务、提问、留言写在 v1 的 `at_tasks`/`at_questions`/`at_mail` 里，状态值也有重叠（`pending`、`running`）。v1 的 `Hub.recover()` 会按 `status IN ('pending','running')` 恢复对话并接管。因此 **v1 防护补丁**（`architecture.md` §14.1 第 4 条：v1 的所有对话、任务、提问、留言查询只看 `at_conversations.kind = 'chat'` 且所有者 `platform_version = 1`）必须在 `00010_threads` 之前部署到生产。`at_conversations.kind` 和 `at_users.platform_version` 因此提前到 P1 的 `00002` 加（Python 补丁的启动 DDL 也幂等地加同样两列）。每个迁移的 CI 冒烟测试都包含“种入 v2 行 → 重启 v1 → 断言不变”。
 - 表名前缀保持 `at_`。
@@ -36,7 +37,7 @@ at_users ─┬─ at_sessions
                           └─ at_office_layouts（项目覆盖布局，可选）
                           ├─ at_rate_limit_waits（碰到使用限额的员工，§2.10）
                           └─ at_schedules（定时任务，§2.10）
-at_settings（全局键值）  at_audit_log  goose_db_version
+at_settings（全局键值）  at_audit_log  casbin_rule（用户 → 角色）  goose_db_version
 ```
 
 ## 2. 表结构
@@ -44,7 +45,7 @@ at_settings（全局键值）  at_audit_log  goose_db_version
 ### 2.1 账号与设置（v1 表，原地扩展）
 
 ```sql
--- v1: id, email, password_hash, role, active, max_nodes, created_at
+-- v1: id, email, password_hash, role, active, max_nodes, created_at（role 已由 00110 删掉，见下方 casbin_rule）
 ALTER TABLE at_users
   ADD COLUMN IF NOT EXISTS platform_version SMALLINT NOT NULL DEFAULT 1,   -- 1 = 走 Python，2 = 走 Go v2（迁移期分流；v1 防护补丁也读它）
   ADD COLUMN IF NOT EXISTS max_running_threads INT,                         -- NULL = 用 at_settings.platform.max_running_threads
@@ -60,6 +61,20 @@ ALTER TABLE at_sessions
   ADD COLUMN IF NOT EXISTS user_agent TEXT NOT NULL DEFAULT '',
   ADD COLUMN IF NOT EXISTS csrf_secret TEXT NOT NULL DEFAULT '';         -- 空 = 首次请求时生成
 CREATE INDEX IF NOT EXISTS at_sessions_expires ON at_sessions (expires_at);   -- 每日清理用
+
+-- 00110：用户的角色（admin | user）只存在 Casbin 自己的表里，每个用户一行 g 规则：
+-- (ptype 'g', v0 = 用户 id, v1 = 'admin' | 'user')。迁移时把 at_users.role 一次性搬进来
+-- （不是 admin 的一律 user）后删掉该列；没有触发器、没有第二份数据、没有同步代码。
+-- 只经 Casbin enforcer 读写（server/README.md “Roles live in casbin_rule”）：注册、管理员改角色、
+-- 删用户（先删规则再删账号）、atctl admin set-role。路由策略（p 行）和角色继承仍嵌在
+-- authz/policy.csv 里，不进库。没有外键：规则由删除用户的接口一并清掉。
+CREATE TABLE casbin_rule (
+  id    BIGSERIAL PRIMARY KEY,
+  ptype VARCHAR(100) NOT NULL DEFAULT '',
+  v0    VARCHAR(100) NOT NULL DEFAULT '', v1 VARCHAR(100) NOT NULL DEFAULT '', v2 VARCHAR(100) NOT NULL DEFAULT '',
+  v3    VARCHAR(100) NOT NULL DEFAULT '', v4 VARCHAR(100) NOT NULL DEFAULT '', v5 VARCHAR(100) NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX idx_casbin_rule ON casbin_rule (ptype, v0, v1, v2, v3, v4, v5);
 
 -- v1: key PK, value JSONB。键：platform、github_app。platform 增加字段 max_running_threads（默认 3）。v2 新增键：
 --   office_default   {"layout": "default"}           默认布局文件名
@@ -695,7 +710,7 @@ CREATE TABLE at_attachments (   -- 用户附在消息上的图片
 
 | v1 表 | v2 处理 | 时机 | 说明 |
 | --- | --- | --- | --- |
-| `at_users` | 原表 + 新列 | P1 | Go 用 `golang.org/x/crypto/scrypt` 校验 `scrypt$N$r$p$salt$digest`（urlsafe base64 无填充），新密码同格式写入，v1 也能校验 |
+| `at_users` | 原表 + 新列；`role` 搬到 `casbin_rule` 后删除（00110） | P1 / P6 后 | Go 用 `golang.org/x/crypto/scrypt` 校验 `scrypt$N$r$p$salt$digest`（urlsafe base64 无填充），新密码同格式写入，v1 也能校验 |
 | `at_sessions` | 原表 + 新列 | P1 | cookie 名 `agent_teams_session` 不变，`sha256(token)` 查找不变 → 切换无需重新登录 |
 | `at_settings` | 原表 | P1 | `platform`、`github_app` 键格式不变；`github_app.client_secret`/`pem` 用 Go 的 Fernet 解封（key = `urlsafe_b64(sha256(AGENT_TEAMS_SECRET_KEY))`） |
 | `at_nodes` | 原表 + 新列 | P1/P2 | `token_hash` 不变 → 旧令牌继续有效；`max_runs`（hello 里）→ `max_active_sessions` 初值 |
@@ -719,6 +734,8 @@ CREATE TABLE at_attachments (   -- 用户附在消息上的图片
 6. `00030_office.sql`（P5）：`at_office_layouts`、`at_projects.office_layout`。
    `00050_node_job_index.sql`：`at_node_commands` 的作业索引。`00060_design_skills.sql`：`at_roles.skills`、`at_skills`、`at_deliverable_files`、`at_upload_chunks`、`at_deliverable_comments`（architecture.md §6.5）。
 7. `00100_drop_v1.sql`（P6 后）：删 `at_teams`、`at_conversations.history`；`at_tasks.output` 并入 `summary`；去掉不再需要的默认值。
+
+`00110_casbin_rule.sql`（P6 后）：建 `casbin_rule`，每个用户按 `at_users.role` 写一行 `g, <id>, admin|user`，再删 `at_users.role`；Down 加回该列并按规则回填（§2.1）。
 
 `00095_thread_lifecycle_images.sql`：`at_threads.archived_from`、`at_attachments`（§2.11）。
 

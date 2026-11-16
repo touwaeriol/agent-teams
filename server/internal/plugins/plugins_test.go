@@ -275,8 +275,8 @@ func newPool(t *testing.T) *store.Pool {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := store.Exec(ctx, pool, `INSERT INTO at_users (id, email, password_hash, role) VALUES
-		('u1','a@x','h','user'), ('u2','b@x','h','user'), ('ad','c@x','h','admin')`); err != nil {
+	if _, err := store.Exec(ctx, pool, `INSERT INTO at_users (id, email, password_hash) VALUES
+		('u1','a@x','h'), ('u2','b@x','h'), ('ad','c@x','h')`); err != nil {
 		t.Fatal(err)
 	}
 	return pool

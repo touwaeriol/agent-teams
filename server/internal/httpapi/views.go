@@ -19,8 +19,9 @@ type UserView struct {
 	CreatedAt          time.Time `json:"created_at"`
 }
 
-func userView(u store.User) UserView {
-	return UserView{ID: u.ID, Email: u.Email, DisplayName: u.DisplayName, Role: u.Role, Active: u.Active,
+// userView shows an account with its role (from the Casbin enforcer: Server.role).
+func userView(u store.User, role string) UserView {
+	return UserView{ID: u.ID, Email: u.Email, DisplayName: u.DisplayName, Role: role, Active: u.Active,
 		MaxNodes: u.MaxNodes, PlatformVersion: u.PlatformVersion, MustChangePassword: u.MustChangePassword,
 		CreatedAt: u.CreatedAt}
 }
@@ -34,7 +35,7 @@ type AdminUserView struct {
 	LastLoginAt       *time.Time `json:"last_login_at"`
 }
 
-func adminUserView(u store.UserSummary) AdminUserView {
-	return AdminUserView{UserView: userView(u.User), Nodes: u.Nodes, RunningTasks: u.RunningTasks,
+func adminUserView(u store.UserSummary, role string) AdminUserView {
+	return AdminUserView{UserView: userView(u.User, role), Nodes: u.Nodes, RunningTasks: u.RunningTasks,
 		MaxRunningThreads: u.MaxRunningThreads, LastLoginAt: u.LastLoginAt}
 }

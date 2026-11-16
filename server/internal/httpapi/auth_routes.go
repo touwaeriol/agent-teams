@@ -107,11 +107,18 @@ func (s *Server) registerUser(ctx context.Context, in *credentialsInput) (*userW
 	if err != nil {
 		return nil, err
 	}
-	user, err := s.store.CreateUser(ctx, email, hash, role)
+	user, err := s.store.CreateUser(ctx, email, hash)
 	if errors.Is(err, store.ErrConflict) {
 		return nil, fail(http.StatusConflict, "email_taken", "这个邮箱已经注册过了")
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := s.authz.setRole(user.ID, role); err != nil {
+		// No account without a role: take the row back so the address can register again.
+		if derr := s.store.DeleteUser(ctx, user.ID); derr != nil {
+			s.log.Error("registration: remove account without role", "user_id", user.ID, "err", derr)
+		}
 		return nil, err
 	}
 	return s.signedIn(ctx, user, "register")
@@ -130,9 +137,9 @@ func (s *Server) newUserRole(ctx context.Context, email string) (string, error) 
 		return "", fail(http.StatusForbidden, "registration_closed", "注册已关闭，请联系管理员")
 	}
 	if count == 0 || s.cfg.AdminEmails[email] {
-		return "admin", nil
+		return roleAdmin, nil
 	}
-	return "user", nil
+	return roleUser, nil
 }
 
 func (s *Server) signedIn(ctx context.Context, user store.User, action string) (*userWithCookies, error) {
@@ -142,7 +149,7 @@ func (s *Server) signedIn(ctx context.Context, user store.User, action string) (
 	}
 	_ = s.store.TouchLogin(ctx, user.ID)
 	s.audit(ctx, user.ID, action, "user", user.ID, nil)
-	return &userWithCookies{SetCookie: cookies, Body: userView(user)}, nil
+	return &userWithCookies{SetCookie: cookies, Body: userView(user, s.authz.role(user.ID))}, nil
 }
 
 func (s *Server) login(ctx context.Context, in *credentialsInput) (*userWithCookies, error) {
@@ -181,7 +188,7 @@ func (s *Server) me(ctx context.Context, _ *struct{}) (*userOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &userOutput{Body: userView(p.User)}, nil
+	return &userOutput{Body: userView(p.User, p.Role)}, nil
 }
 
 func (s *Server) changePassword(ctx context.Context, in *passwordInput) (*struct{}, error) {

@@ -127,7 +127,7 @@ func TestLibrary(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	if _, err := store.Exec(ctx, pool, `INSERT INTO at_users (id, email, password_hash, role) VALUES ('u1','a@x','h','user'), ('u2','b@x','h','user')`); err != nil {
+	if _, err := store.Exec(ctx, pool, `INSERT INTO at_users (id, email, password_hash) VALUES ('u1','a@x','h'), ('u2','b@x','h')`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Create(ctx, pool, "u1", []File{{Path: "SKILL.md", Content: "---\nname: design\ndescription: d\n---\n"}}); !IsProblem(err) {
@@ -178,7 +178,7 @@ func TestAdminBuiltins(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	if _, err := store.Exec(ctx, pool, `INSERT INTO at_users (id, email, password_hash, role) VALUES ('u1','a@x','h','user'), ('u2','b@x','h','user')`); err != nil {
+	if _, err := store.Exec(ctx, pool, `INSERT INTO at_users (id, email, password_hash) VALUES ('u1','a@x','h'), ('u2','b@x','h')`); err != nil {
 		t.Fatal(err)
 	}
 	brand := "---\nname: brand\ndescription: Brand rules\n---\n# Brand\n"

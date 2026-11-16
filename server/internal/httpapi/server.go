@@ -1,9 +1,12 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humagin"
@@ -70,7 +73,7 @@ func New(d Deps) *Server {
 	box := auth.NewSecretBox(d.Config.SecretKeys...)
 	s := &Server{cfg: d.Config, store: d.Store, kv: d.KV, limiter: kv.NewLimiter(d.KV), box: box,
 		states: auth.NewStateSigner(box), gh: d.GitHub, office: d.Office, nodes: d.Nodes, events: d.Events,
-		hooks: d.Hooks, log: d.Log, expect: d.Version, repos: newRepoCache(), authz: mustAuthorizer()}
+		hooks: d.Hooks, log: d.Log, expect: d.Version, repos: newRepoCache(), authz: mustAuthorizer(d.Store)}
 	if d.Store != nil {
 		s.apps = github.NewApps(d.Store, box)
 		s.tokens = d.Tokens
@@ -166,6 +169,36 @@ func (s *Server) Routes() gin.RoutesInfo { return s.router.Routes() }
 // Allows reports whether the route policy lets subject (Subject*) call method on a route template.
 func (s *Server) Allows(subject, method, route string) (bool, error) {
 	return s.authz.allowed(subject, route, method)
+}
+
+// RunAuthz re-reads the users' roles from casbin_rule every authzReloadEvery until ctx ends,
+// so role changes made on another console replica reach this one.
+func (s *Server) RunAuthz(ctx context.Context) {
+	t := time.NewTicker(authzReloadEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if err := s.authz.reload(); err != nil {
+				s.log.Warn("authz reload failed", "err", err)
+			}
+		}
+	}
+}
+
+// SetUserRole assigns admin or user through the Casbin enforcer (atctl admin set-role); running
+// consoles pick it up within authzReloadEvery.
+func SetUserRole(db *store.Store, userID, role string) error {
+	if role != roleAdmin && role != roleUser {
+		return fmt.Errorf("role must be %s or %s", roleAdmin, roleUser)
+	}
+	a, err := newAuthorizer(db)
+	if err != nil {
+		return err
+	}
+	return a.setRole(userID, role)
 }
 
 // Policy returns the (subject, route, method) permission lines of the embedded policy.

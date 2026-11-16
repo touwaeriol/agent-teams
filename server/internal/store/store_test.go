@@ -109,11 +109,11 @@ func TestStoreRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	u, err := s.CreateUser(ctx, "a@example.com", "h", "admin")
+	u, err := s.CreateUser(ctx, "a@example.com", "h")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateUser(ctx, "a@example.com", "h", "user"); !errors.Is(err, store.ErrConflict) {
+	if _, err := s.CreateUser(ctx, "a@example.com", "h"); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("want conflict, got %v", err)
 	}
 	ro := true

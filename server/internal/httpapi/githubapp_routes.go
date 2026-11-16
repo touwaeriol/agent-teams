@@ -201,7 +201,7 @@ func (s *Server) appCreated(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	q := r.URL.Query()
 	admin := s.signedUser(ctx, auth.PurposeCreate, q.Get("state"))
-	if admin == nil || admin.Role != "admin" {
+	if admin == nil || s.authz.role(admin.ID) != roleAdmin {
 		back(w, r, "/setup/github", map[string]string{"error": "创建请求已过期或不是你发起的，请重新创建"})
 		return
 	}

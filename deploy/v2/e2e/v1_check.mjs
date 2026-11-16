@@ -17,6 +17,21 @@ async function checkLogin() {
   check(r.status === 200 && c.cookies.agent_teams_session, "v1 scrypt password accepted by /auth/login", r.json);
   const me = await c.get("/api/me");
   check(me.email === v1.email && me.id === v1.user_id, "login session belongs to the v1 user", me);
+  // at_users.role moved into casbin_rule (migration 00110): the v1 admin is still admin.
+  check(me.role === "admin", "v1 admin is admin after the role moved to casbin_rule", me);
+  const users = await c.get("/api/admin/users");
+  check(Array.isArray(users) && users.length >= 2, "v1 admin reaches the admin users page", users);
+}
+
+async function checkMember() {
+  if (!v1.member_email) return; // v1.json seeded before the member user existed
+  const c = new Client(base);
+  const r = await c.raw("POST", "/auth/login", { email: v1.member_email, password: v1.password });
+  check(r.status === 200, "v1 member logs in", r.json);
+  const me = await c.get("/api/me");
+  check(me.id === v1.member_id && me.role === "user", "v1 member is a user after the role moved to casbin_rule", me);
+  const admin = await c.raw("GET", "/api/admin/users");
+  check(admin.status === 403, "v1 member is refused the admin pages", admin.status);
 }
 
 async function checkSession() {
@@ -79,6 +94,7 @@ async function checkNodeToken(c) {
 }
 
 await checkLogin();
+await checkMember();
 const c = await checkSession();
 await checkSecret(c);
 await checkLegacy(c);

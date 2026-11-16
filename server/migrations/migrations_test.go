@@ -84,7 +84,15 @@ func TestUpOnProductionV1Schema(t *testing.T) {
 	}
 	assertV1DataIntact(t, db)
 	assertV1ColumnsKept(t, db, before)
+	var rule string
+	if err := db.QueryRow(`SELECT ptype || ',' || v0 || ',' || v1 FROM casbin_rule`).Scan(&rule); err != nil || rule != "g,u1,admin" {
+		t.Fatalf("v1 admin's grouping rule %q (%v)", rule, err)
+	}
 }
+
+// droppedV1Columns are the v1 columns a later migration removed on purpose (v1 is retired):
+// at_users.role became a Casbin grouping rule in casbin_rule (00110).
+var droppedV1Columns = []string{"at_users.role "}
 
 func assertV1DataIntact(t *testing.T, db *sql.DB) {
 	t.Helper()
@@ -139,10 +147,19 @@ func assertV1ColumnsKept(t *testing.T, db *sql.DB, before string) {
 	t.Helper()
 	after := snapshot(t, db)
 	for _, line := range strings.Split(before, "\n") {
-		if !strings.Contains(after, line) {
+		if !strings.Contains(after, line) && !dropped(line) {
 			t.Errorf("v1 schema element changed or removed: %s", line)
 		}
 	}
+}
+
+func dropped(line string) bool {
+	for _, c := range droppedV1Columns {
+		if strings.HasPrefix(line, c) {
+			return true
+		}
+	}
+	return false
 }
 
 func assertTables(t *testing.T, db *sql.DB, names ...string) {
@@ -164,7 +181,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 97 {
+	if migrations.Latest() != 110 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -331,3 +348,57 @@ INSERT INTO at_employees (id, project_id, name, tier, role, runtime, spec)
          ('e3', 'p1', 'qa-1', 'member', 'qa', 'claude', '{"role":"qa","permission_mode":"ask"}'),
          ('e4', 'p1', 'rev-1', 'member', 'rev', 'claude', '{"role":"rev"}');
 `
+
+// TestCasbinRuleMigration: 00110 turns at_users.role into one grouping row per user in
+// casbin_rule and drops the column; Down restores the column from the rows.
+func TestCasbinRuleMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 97); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_users (id, email, password_hash, role) VALUES
+		('u1', 'a@example.com', 'x', 'admin'), ('u2', 'b@example.com', 'x', 'user'), ('u3', 'c@example.com', 'x', 'odd')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 110); err != nil {
+		t.Fatal(err)
+	}
+	var rules string
+	_ = db.QueryRow(`SELECT string_agg(ptype || ',' || v0 || ',' || v1 || ',' || v2 || v3 || v4 || v5, ';' ORDER BY v0) FROM casbin_rule`).Scan(&rules)
+	if rules != "g,u1,admin,;g,u2,user,;g,u3,user," {
+		t.Fatalf("rules %s", rules)
+	}
+	var hasRole bool
+	_ = db.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'at_users' AND column_name = 'role')`).Scan(&hasRole)
+	if hasRole {
+		t.Fatal("at_users.role still there")
+	}
+	if _, err := db.Exec(`INSERT INTO casbin_rule (ptype, v0, v1) VALUES ('g', 'u1', 'admin')`); err == nil {
+		t.Fatal("duplicate rule accepted")
+	}
+	if _, err := db.Exec(`UPDATE casbin_rule SET v1 = 'admin' WHERE v0 = 'u3'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.DownTo(ctx, 97); err != nil {
+		t.Fatal(err)
+	}
+	var roles string
+	_ = db.QueryRow(`SELECT string_agg(id || '=' || role, ',' ORDER BY id) FROM at_users`).Scan(&roles)
+	if roles != "u1=admin,u2=user,u3=admin" {
+		t.Fatalf("down: roles %s", roles)
+	}
+	assertNoTable(t, db, "casbin_rule")
+}
+
+func assertNoTable(t *testing.T, db *sql.DB, name string) {
+	t.Helper()
+	var found bool
+	if err := db.QueryRow(`SELECT to_regclass('public.' || $1) IS NOT NULL`, name).Scan(&found); err != nil || found {
+		t.Errorf("table %s still there (%v)", name, err)
+	}
+}

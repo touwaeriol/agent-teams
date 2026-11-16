@@ -56,6 +56,7 @@ func serve(ctx context.Context, _ []string) error {
 	}
 	srv := httpapi.New(deps)
 	start(ctx)
+	go srv.RunAuthz(ctx)
 	go maintain(ctx, db, log)
 	return listen(ctx, cfg, srv.Handler(), log)
 }

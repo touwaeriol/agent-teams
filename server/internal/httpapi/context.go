@@ -10,6 +10,7 @@ import (
 // principal is the signed-in caller of a request.
 type principal struct {
 	User    store.User
+	Role    string // admin | user, from the Casbin enforcer when the session is resolved
 	Session store.Session
 	Bearer  bool // authenticated with Authorization: Bearer (exempt from CSRF)
 }
@@ -61,7 +62,7 @@ func requireAdmin(ctx context.Context) (*principal, error) {
 	if err != nil {
 		return nil, err
 	}
-	if p.User.Role != "admin" {
+	if p.Role != roleAdmin {
 		return nil, fail(http.StatusForbidden, "admin_required", "需要管理员权限")
 	}
 	return p, nil

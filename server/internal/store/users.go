@@ -7,11 +7,11 @@ import (
 	"gorm.io/gorm"
 )
 
-// User is a row of at_users (v1 columns + v2 extensions).
+// User is a row of at_users (v1 columns + v2 extensions). Its role (admin | user) is not a
+// column: it is a Casbin grouping rule in casbin_rule, read through the enforcer (httpapi).
 type User struct {
 	ID                 string
 	Email              string
-	Role               string
 	Active             bool
 	MaxNodes           *int
 	CreatedAt          time.Time
@@ -32,7 +32,7 @@ type UserSummary struct {
 	RunningTasks int `gorm:"->"`
 }
 
-const userCols = `u.id, u.email, u.role, u.active, u.max_nodes, u.created_at, u.platform_version,
+const userCols = `u.id, u.email, u.active, u.max_nodes, u.created_at, u.platform_version,
 	u.display_name, u.max_running_threads, u.must_change_password, u.last_login_at`
 
 func (s *Store) users(ctx context.Context) *gorm.DB {
@@ -46,11 +46,12 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	return int(n), err
 }
 
-// CreateUser inserts an account; ErrConflict if the email is taken.
-func (s *Store) CreateUser(ctx context.Context, email, passwordHash, role string) (User, error) {
+// CreateUser inserts an account; ErrConflict if the email is taken. The caller assigns its
+// role through the Casbin enforcer.
+func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (User, error) {
 	id := NewHexID()
 	err := s.g(ctx).Table("at_users").Create(map[string]any{"id": id, "email": email, "password_hash": passwordHash,
-		"role": role, "password_changed_at": gorm.Expr("now()")}).Error
+		"password_changed_at": gorm.Expr("now()")}).Error
 	if err != nil {
 		return User{}, mapErr(err)
 	}
@@ -91,7 +92,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]UserSummary, error) {
 	return out, err
 }
 
-// UpdateUser applies column changes (role, active, max_nodes, max_running_threads, display_name).
+// UpdateUser applies column changes (active, max_nodes, max_running_threads, display_name).
 func (s *Store) UpdateUser(ctx context.Context, id string, changes []Change) (User, error) {
 	if len(changes) > 0 {
 		if err := Changed(s.g(ctx).Table("at_users").Where("id = ?", id).Updates(changeMap(changes))); err != nil {

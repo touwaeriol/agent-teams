@@ -23,6 +23,7 @@ from agent_teams.server.security import hash_password, new_token
 from agent_teams.server.store import PostgresStore
 
 EMAIL = "v1-user@example.com"
+MEMBER_EMAIL = "v1-member@example.com"
 PASSWORD = "v1-password-Correct-Horse"
 GIT_TOKEN = "ghp_v1SealedToken0123456789abcdef"
 TEAM_YAML = """name: v1-team
@@ -42,6 +43,7 @@ employees:
 async def seed(pool: asyncpg.Pool, box: SecretBox) -> dict[str, str]:
     accounts, projects, store = PostgresAccounts(pool), PostgresProjects(pool), PostgresStore(pool)
     user = await accounts.create_user(EMAIL, hash_password(PASSWORD), "admin")
+    member = await accounts.create_user(MEMBER_EMAIL, hash_password(PASSWORD), "user")
     session_token, session_hash = new_token()
     await accounts.create_session(user.id, session_hash)
     node_token, node_hash = new_token()
@@ -60,6 +62,8 @@ async def seed(pool: asyncpg.Pool, box: SecretBox) -> dict[str, str]:
         "email": EMAIL,
         "password": PASSWORD,
         "user_id": user.id,
+        "member_email": MEMBER_EMAIL,
+        "member_id": member.id,
         "session_token": session_token,
         "node_id": node.id,
         "node_token": node_token,

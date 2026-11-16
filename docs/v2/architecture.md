@@ -139,7 +139,7 @@ Go 写的控制台（REST + SSE + 节点 WebSocket + 调度器）存全部状态
 | 语言 | Go 1.25（`go.mod` 写 `go 1.25`，`toolchain` 锁补丁） | 标准库 `net/http` 路由模式、`log/slog`、`iter` 都够用 |
 | 路由 | `github.com/gin-gonic/gin` v1.12 | 中间件生态成熟；huma 有 Gin 适配器（`humagin`）；节点 WebSocket、SSE、静态文件都挂在同一个引擎上 |
 | API 层 | `github.com/danielgtaylor/huma/v2` v2.40（Gin 适配器） | 由 Go 结构体生成 OpenAPI 3.1 和校验，网页类型自动生成；原生支持 SSE 操作 |
-| 授权 | `github.com/casbin/casbin/v2` v2.135 | 路由级 RBAC：（角色, Gin 路由模板, 方法），角色 anonymous < user < admin；模型和策略嵌入二进制，不建 `casbin_rule` 表。数据归属（只能看自己的项目、讨论串…）仍由按调用者过滤的查询保证，别人的数据一律 404 |
+| 授权 | `github.com/casbin/casbin/v2` v2.135 | 路由级 RBAC：（角色, Gin 路由模板, 方法），角色 anonymous < user < admin；模型和路由策略嵌入二进制；用户 → 角色（每人一行 `g, <用户 id>, admin|user`）只存在 `casbin_rule` 表里（00110 从 `at_users.role` 一次性迁入并删列），经 enforcer 读写，多副本每 10 s 重载。数据归属（只能看自己的项目、讨论串…）仍由按调用者过滤的查询保证，别人的数据一律 404 |
 | ORM | `gorm.io/gorm` v1.31 + `gorm.io/driver/postgres` v1.6（底层 `pgx/v5` 连接池） | 模型对应 goose 建的表（`TableName` + 列标签），行锁用 `clause.Locking`；UNION 事件流、CTE upsert、`UPDATE … RETURNING` 等约 70 条语句仍是手写 SQL（`Raw`/`Exec`，`$n` 占位符）。**不用 AutoMigrate** |
 | PG 驱动 | `github.com/jackc/pgx/v5` v5.13（`pgxpool`，GORM 的连接池；advisory lock 用独占连接） | 最快、支持 `LISTEN/NOTIFY`、`COPY`、类型齐全 |
 | 迁移 | `github.com/pressly/goose/v3` v3.30，SQL 迁移嵌入二进制，**表结构的唯一来源** | 支持 Go 迁移（数据转换，例如团队 YAML → 岗位模板），有 `goose_db_version` 表；`atctl migrate up` 在启动前单独跑；测试检查每个 GORM 模型字段都对得上迁移建的表 |

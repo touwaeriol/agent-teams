@@ -3,7 +3,10 @@
 # everyone, and httpapi/authz_test.go plus cmd/atctl/authz_test.go fail until it gets one.
 #
 # Subjects: anonymous (no session), node (no session, a Bearer token: the daemon; the handler
-# still checks that it is a valid node token), user, admin. Ownership of rows is not decided
+# still checks that it is a valid node token), or the signed-in user's id, which holds user or
+# admin through its grouping rule in the casbin_rule table (written only through the enforcer:
+# registration, the admin users page, atctl admin set-role). This file is code: the route lines
+# and the role hierarchy below never live in the database. Ownership of rows is not decided
 # here: user routes load projects, threads, deliverables, schedules, nodes… scoped to the
 # caller's id and answer 404 for anyone else's.
 
