@@ -140,6 +140,8 @@ html.dark {
   --el-button-disabled-bg-color: hsl(var(--primary));
   --el-button-disabled-border-color: transparent;
 }
+/* EP's dark sheet greys out disabled primary text; keep the ink-on-light look (opacity does the fading). */
+html.dark .el-button--primary { --el-button-disabled-text-color: hsl(var(--primary-foreground)); }
 .el-button--danger {
   --el-button-text-color: hsl(var(--destructive));
   --el-button-bg-color: hsl(var(--panel));
@@ -274,3 +276,73 @@ html.dark .el-message--warning { --el-message-bg-color: hsl(64 100% 6%); --el-me
 .el-dialog__body:empty { display: none; }
 .el-dialog__header { padding-bottom: 16px; }
 .el-dialog__footer { padding-top: 0; }
+
+/* Switch geometry (Radix Switch): 44 × 24 track, 20px thumb. `.at-switch-blue` is the settings blue. */
+.el-switch { height: 24px; }
+.el-switch__core { min-width: 44px; height: 24px; border-radius: 12px; border-width: 2px; }
+.el-switch__core .el-switch__action { width: 20px; height: 20px; left: 0; box-shadow: 0 1px 2px rgb(0 0 0 / 0.05); }
+.el-switch.is-checked .el-switch__core .el-switch__action { left: calc(100% - 20px); }
+.at-switch-blue { --el-switch-on-color: #1f6fd1; }
+
+/* Select triggers (SelectTrigger): 40px by default; compact heights for cards and settings rows. */
+.el-select__wrapper { padding: 4px 12px; box-shadow: 0 0 0 1px hsl(var(--input)) inset; }
+.el-select__wrapper.is-focused { box-shadow: 0 0 0 1px hsl(var(--input)) inset, 0 0 0 2px hsl(var(--ring) / 0.6); }
+.el-select__wrapper.is-disabled { background: hsl(var(--well)); box-shadow: 0 0 0 1px hsl(var(--input)) inset; opacity: 0.5; }
+.el-select__wrapper.is-disabled .el-select__selected-item { color: hsl(var(--foreground)); }
+.el-select__caret { color: hsl(var(--foreground) / 0.6); font-size: 16px; }
+.at-select-36 .el-select__wrapper { min-height: 36px; }
+.at-text-13 .el-select__wrapper { font-size: 13px; }
+.at-select-32 .el-select__wrapper { min-height: 32px; font-size: 13px; }
+.at-select-28 .el-select__wrapper { min-height: 28px; padding: 0 8px; gap: 4px; font-size: 12px; line-height: 20px; }
+.at-select-fit { width: auto; }
+.at-select-fit .el-select__wrapper { width: max-content; }
+.at-select-fit .el-select__selection { flex: none; }
+.at-select-bad .el-select__wrapper { box-shadow: 0 0 0 1px hsl(var(--destructive)) inset; color: hsl(var(--destructive)); }
+/* "border-0 bg-raised" controls in the project settings dialog. */
+.at-raised .el-select__wrapper,
+.at-raised .el-select__wrapper.is-focused { background: hsl(var(--raised)); box-shadow: none; }
+.at-raised .el-textarea__inner { background: hsl(var(--raised)); box-shadow: none; resize: vertical; padding: 8px 12px; }
+.el-select-dropdown__item { display: flex; align-items: center; height: auto; min-height: 36px; margin: 0 4px; padding: 8px 8px 8px 32px; border-radius: calc(var(--radius) - 4px); font-size: 14px; line-height: 20px; color: hsl(var(--popover-foreground)); }
+.el-select-dropdown__item.is-hovering { background: hsl(var(--raised)); }
+.el-select-dropdown__item.is-selected { color: hsl(var(--popover-foreground)); font-weight: 400; }
+.el-select-dropdown__item.is-selected::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  width: 16px;
+  height: 16px;
+  background: hsl(var(--primary));
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.el-select-dropdown__list { padding: 4px 0; }
+
+/* Text boxes line up with the shadcn Input / Textarea: 12px text inset past a 1px border, 24px lines. */
+.el-input__wrapper { padding: 1px 13px; }
+.el-textarea__inner { line-height: 24px; padding: 9px 13px; }
+
+/* Monospace inputs (cron, node names, role keys, YAML). */
+.at-mono .el-input__inner,
+.at-mono .el-textarea__inner { font-family: "JetBrains Mono", ui-monospace, monospace; }
+.at-yaml .el-textarea__inner { font-size: 12px; line-height: 20px; }
+.at-input-white .el-textarea__inner { background: #fff; }
+.dark .at-input-white .el-textarea__inner { background: hsl(var(--well)); }
+
+/* TagInput: well background, raised monospace chips. */
+.at-tag-input.el-input-tag { min-height: 40px; padding: 6px 8px; background: hsl(var(--well)); box-shadow: 0 0 0 1px hsl(var(--input)) inset; }
+.at-tag-input.el-input-tag.is-focused { box-shadow: 0 0 0 1px hsl(var(--input)) inset, 0 0 0 2px hsl(var(--ring) / 0.6); }
+.at-tag-input .el-tag { height: 22px; padding: 0 8px; border: 0; border-radius: calc(var(--radius) - 4px); background: hsl(var(--raised)); color: hsl(var(--foreground)); font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; }
+.at-tag-input .el-tag .el-tag__close { color: hsl(var(--muted-foreground)); }
+
+/* Combobox: the trigger is a text box (no caret rotation), rows show a hint on the right. */
+.at-combobox .el-select__wrapper { min-height: 40px; }
+.at-combobox .el-select__caret { transform: none; width: 16px; height: 16px; color: hsl(var(--muted-foreground)); }
+.at-combobox--mono .el-select__input,
+.at-combobox--mono .el-select__placeholder { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 13px; }
+.at-combobox-popper .el-select-dropdown__item { padding-left: 10px; }
+.at-combobox-popper .el-select-dropdown__item > span { width: 100%; }
+.at-combobox-popper .el-select-dropdown__item.is-selected::before { display: none; }
+
+/* A dialog laid out by its content (project settings): no padding, header with its own border. */
+.at-dialog-flush { padding: 0; }
+.at-dialog-flush .el-dialog__header { padding: 0; }
+.at-dialog-flush .el-dialog__body { display: flex; flex: 1; min-height: 0; padding: 0; }

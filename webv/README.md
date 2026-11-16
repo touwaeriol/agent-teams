@@ -114,13 +114,19 @@ expand / collapse, lead chat with question cards, review card and typing line, l
 任务 / 交付物 / 成员 dialog (`components/app/threadviews/`), `ThreadRoute` (panel on ≥ lg, page below),
 project home (`pages/Overview.vue` + `overview/`), 资料库 panel and page (`components/app/deliverables/`,
 `pages/Deliverables.vue`), deliverable viewer with versions and comments (`pages/DesignViewer.vue` +
-`design/`), office page with live / replay / scope / employee card (`pages/Office.vue` + `office/`).
+`design/`), office page with live / replay / scope / employee card (`pages/Office.vue` + `office/`),
+新建项目 (`pages/NewProject.vue`) with the repo list and searchable picker (`components/app/repo/`),
+项目设置 dialog with 通用 / 记忆 / 环境 / 使用情况 / 高级 (`pages/projectSettings/`, opened by Main on
+`/projects/:pid/settings[/:section]`), 定时任务 dialog (`components/app/schedules/`), settings 团队岗位
+(`pages/settings/Team.vue` + `team/`: role cards, look editor with `components/app/avatar/`, skill /
+plugin / node pickers, permission mode, details dialog, YAML, presets), skill and plugin libraries with
+uploads (`components/app/library/`), 节点, GitHub 连接, 管理 (users, platform settings, built-in plugins and
+skills, audit) and GitHub App setup (`pages/settings/*`). Shared additions: `Combobox` (typeable
+el-select) and `TagInput` (el-input-tag) in `components/common`; switch / select / tag / textarea
+geometry in `styles/element.css`.
 
 Still to port (React source in brackets):
 
-- Pages: NewProject, ProjectSettings dialog (route `/projects/:pid/settings[/:section]` currently shows Main
-  without it), Legacy, settings Team / Nodes / GitHub / Admin / SetupGitHub.
-- App components: SchedulesDialog (⋯ → 定时任务 shows an info dialog), PluginLibrary, SkillLibrary,
-  repo fields, Avatar.
-- Tests that need those modules: `web/src/__tests__/{chatcards,marks}` and the settings parts of
-  `logic.test.ts` (thread, overview, office, library and viewer logic is in `__tests__/screens*.test.ts`).
+- Pages: Legacy.
+- Tests that need those modules: `web/src/__tests__/{chatcards,marks}` (thread, overview, office, library
+  and viewer logic is in `__tests__/screens*.test.ts`; settings logic and screens in `__tests__/settings*.test.ts`).

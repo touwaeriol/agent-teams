@@ -7,7 +7,7 @@ const open = defineModel<boolean>("open", { required: true });
 </script>
 
 <template>
-  <el-dialog align-center v-model="open" :class="cn('at-dialog w-full max-w-lg', $props.class)" width="32rem" append-to-body>
+  <el-dialog align-center v-model="open" :class="cn('at-dialog w-[calc(100%-2rem)] max-w-lg', $props.class)" width="32rem" append-to-body>
     <template #header>
       <div class="flex flex-col gap-1.5 pr-6">
         <h2 class="text-lg font-semibold">{{ title }}</h2>

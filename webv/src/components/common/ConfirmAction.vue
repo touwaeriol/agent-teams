@@ -37,7 +37,7 @@ function confirm() {
       <slot><Trash2 /> {{ confirmLabel }}</slot>
     </el-button>
   </template>
-  <el-dialog align-center v-model="shown" class="at-dialog w-full max-w-lg" width="32rem" :show-close="false" append-to-body role="alertdialog">
+  <el-dialog align-center v-model="shown" class="at-dialog w-[calc(100%-2rem)] max-w-lg" width="32rem" :show-close="false" append-to-body role="alertdialog">
     <template #header>
       <div class="flex flex-col gap-2">
         <h2 class="text-lg font-semibold">{{ title }}</h2>

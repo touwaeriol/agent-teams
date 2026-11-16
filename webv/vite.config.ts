@@ -10,10 +10,14 @@ import { defineConfig } from "vitest/config";
  * Per-component paths, not "element-plus/es": that index keeps the full installer (every
  * component, ~900 kB) alive. The directory is the longest kebab prefix that exists.
  */
+/** Components exported from another component's directory (<el-option> lives in select/). */
+const HOMES: Record<string, string> = { ElOption: "select", ElOptionGroup: "select" };
+
 const elementPlus: ComponentResolver = {
   type: "component",
   resolve(name) {
     if (!/^El[A-Z]/.test(name)) return undefined;
+    if (HOMES[name]) return { name, from: `element-plus/es/components/${HOMES[name]}/index.mjs` };
     const words = name.slice(2).split(/(?=[A-Z])/).map((w) => w.toLowerCase());
     for (let n = words.length; n > 0; n--) {
       const from = `element-plus/es/components/${words.slice(0, n).join("-")}/index.mjs`;

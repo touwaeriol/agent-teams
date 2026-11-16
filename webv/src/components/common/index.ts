@@ -2,6 +2,7 @@
 // primitives instead of styling raw elements.
 export { default as Callout } from "./Callout.vue";
 export { default as Chip } from "./Chip.vue";
+export { default as Combobox } from "./Combobox.vue";
 export { default as ConfirmAction } from "./ConfirmAction.vue";
 export { default as CopyBlock } from "./CopyBlock.vue";
 export { default as DangerZone } from "./DangerZone.vue";
@@ -27,6 +28,7 @@ export { default as Spinner } from "./Spinner.vue";
 export { default as StatCard } from "./StatCard.vue";
 export { default as StatGrid } from "./StatGrid.vue";
 export { default as StatusBadge } from "./StatusBadge.vue";
+export { default as TagInput } from "./TagInput.vue";
 export { default as ToneDot } from "./ToneDot.vue";
 export type { Column } from "./DataTable.vue";
 export type { Tone } from "./tone";

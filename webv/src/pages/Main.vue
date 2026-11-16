@@ -1,15 +1,17 @@
 <script setup lang="ts">
 // Main board: chat with the project coordinator in the middle, the thread list (→ thread
 // detail) in the resizable right panel. Phones get thread chips instead.
-// Not ported yet: SchedulesDialog, ProjectSettingsDialog — see README.md "Porting status".
+// /projects/:pid/settings[/:section] opens the project settings dialog over the board.
 import { computed, ref, watchEffect } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useCoordinator, useMe, useProject, useThreads } from "@/api/queries";
 import SidePanel from "@/components/app/SidePanel.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
-import InfoDialog from "@/components/common/InfoDialog.vue";
+import SchedulesDialog from "@/components/app/schedules/SchedulesDialog.vue";
 import Loading from "@/components/common/Loading.vue";
 import { errorText } from "@/api/mutations";
+import { sectionOf, type SettingsSection } from "@/lib/projectSettings";
+import ProjectSettingsDialog from "./projectSettings/ProjectSettingsDialog.vue";
 import CoordinatorChat from "./main/CoordinatorChat.vue";
 import CoordinatorComposer from "./main/CoordinatorComposer.vue";
 import MainHeader from "./main/MainHeader.vue";
@@ -31,6 +33,9 @@ const me = useMe();
 const list = computed(() => threads.data.value ?? []);
 const panel = computed(() => sidePanelOf(route.query.panel));
 const schedules = ref(false);
+const settings = computed(() => /^\/projects\/[^/]+\/settings(\/|$)/.test(route.path));
+const section = computed(() => sectionOf(typeof route.params.section === "string" ? route.params.section : undefined));
+const setSection = (s: SettingsSection) => void router.replace(`/projects/${pid.value}/settings/${s}`);
 const setPanel = (p: Panel) => void router.replace({ query: p === "threads" ? {} : { panel: p } });
 const openThread = (no: number) => void router.push(threadPath(pid.value, no));
 const setView = (v: ThreadViewId | null) => props.openNo && void router.replace(threadPath(pid.value, props.openNo, v));
@@ -77,6 +82,7 @@ watchEffect(() => {
     >
       <LibraryBrowser :pid="pid" variant="panel" @close="setPanel('threads')" />
     </aside>
-    <InfoDialog v-model:open="schedules" title="定时任务" description="定时任务对话框还在迁移，React 版见 web/src/components/app/Schedules.tsx。" />
+    <SchedulesDialog v-model:open="schedules" :pid="pid" />
+    <ProjectSettingsDialog v-if="settings" :project="project.data.value" :section="section" @section="setSection" @close="router.push(`/projects/${pid}`)" />
   </div>
 </template>

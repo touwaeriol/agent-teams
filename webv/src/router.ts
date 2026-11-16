@@ -12,7 +12,7 @@ const pending = (port: string): Partial<RouteRecordRaw> => ({ component: () => i
 export const projectRoutes: RouteRecordRaw[] = [
   { path: "", redirect: "/projects" },
   { path: "/projects", component: () => import("@/pages/ProjectsIndex.vue") },
-  { path: "/projects/new", ...pending("web/src/pages/NewProject.tsx") } as RouteRecordRaw,
+  { path: "/projects/new", component: () => import("@/pages/NewProject.vue") },
   { path: "/projects/:pid", component: () => import("@/pages/Main.vue") },
   { path: "/projects/:pid/overview", component: () => import("@/pages/Overview.vue") },
   { path: "/projects/:pid/threads/:no", component: () => import("@/pages/ThreadRoute.vue") },
@@ -26,12 +26,12 @@ export const projectRoutes: RouteRecordRaw[] = [
 
 export const settingsRoutes: RouteRecordRaw[] = [
   { path: "/settings", redirect: "/settings/team" },
-  { path: "/settings/team", ...pending("web/src/pages/settings/Team.tsx") } as RouteRecordRaw,
-  { path: "/settings/nodes", ...pending("web/src/pages/settings/Nodes.tsx") } as RouteRecordRaw,
-  { path: "/settings/git", ...pending("web/src/pages/settings/GitHub.tsx") } as RouteRecordRaw,
+  { path: "/settings/team", component: () => import("@/pages/settings/Team.vue") },
+  { path: "/settings/nodes", component: () => import("@/pages/settings/Nodes.vue") },
+  { path: "/settings/git", component: () => import("@/pages/settings/GitHub.vue") },
   { path: "/settings/appearance", component: () => import("@/pages/settings/Appearance.vue") },
-  { path: "/settings/admin", meta: { admin: true }, ...pending("web/src/pages/settings/Admin.tsx") } as RouteRecordRaw,
-  { path: "/setup/github", meta: { admin: true }, ...pending("web/src/pages/settings/SetupGitHub.tsx") } as RouteRecordRaw,
+  { path: "/settings/admin", meta: { admin: true }, component: () => import("@/pages/settings/Admin.vue") },
+  { path: "/setup/github", meta: { admin: true }, component: () => import("@/pages/settings/SetupGitHub.vue") },
 ];
 
 export const routes: RouteRecordRaw[] = [
