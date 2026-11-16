@@ -21,14 +21,15 @@ export function typingLine(thread: Pick<ThreadView, "status" | "members">): { te
   return null;
 }
 
-/** Finished threads take no more messages. */
-export const threadClosed = (t: Pick<ThreadView, "status">): boolean => ["done", "failed", "archived"].includes(t.status);
-
-/** What the message box says once the thread is closed; archived threads offer 取消归档. */
+/** What replaces the message box: only archived threads refuse messages (with 取消归档). */
 export function closedNote(t: Pick<ThreadView, "status">): { text: string; unarchive: boolean } | null {
-  if (!threadClosed(t)) return null;
-  if (t.status === "archived") return { text: "讨论串已归档，取消归档后再继续", unarchive: true };
-  return { text: "讨论串已结束，不能再给组长发消息", unarchive: false };
+  if (t.status !== "archived") return null;
+  return { text: "讨论串已归档，取消归档后再继续", unarchive: true };
+}
+
+/** The quiet hint above the message box of a done or failed thread. */
+export function reopenHint(t: Pick<ThreadView, "status">): string | null {
+  return t.status === "done" || t.status === "failed" ? "发送消息会重新打开讨论串" : null;
 }
 
 /** Expand / collapse button of the detail header. */

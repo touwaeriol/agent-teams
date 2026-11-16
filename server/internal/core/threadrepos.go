@@ -110,6 +110,12 @@ func SetThreadRepoPR(ctx context.Context, q DB, threadID, repo string, number in
 		"pr_state": "open", "updated_at": gorm.Expr("now()")}))
 }
 
+// UpdateThreadRepo applies column changes to one repository row of a thread.
+func UpdateThreadRepo(ctx context.Context, q DB, threadID, repo string, set map[string]any) error {
+	set["updated_at"] = gorm.Expr("now()")
+	return threadRepoRow(ctx, q, threadID, repo).Updates(set).Error
+}
+
 // SetThreadRepoPRState changes a repository's pull request state.
 func SetThreadRepoPRState(ctx context.Context, q DB, threadID, repo, state string) error {
 	return threadRepoRow(ctx, q, threadID, repo).Updates(map[string]any{"pr_state": state,

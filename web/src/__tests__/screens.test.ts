@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import type { EmployeeBrief, OfficeSnapshot, ThreadView } from "@/api/views";
 import { saveView, storedView, typeName } from "@/components/app/deliverables/browser";
-import { closedNote, detailViewOf, threadClosed, typingLine } from "@/components/app/thread/detail";
+import { closedNote, detailViewOf, reopenHint, typingLine } from "@/components/app/thread/detail";
 import { openPrMode, prLines, queueLines } from "@/components/app/threadviews/delivery";
 import { memberStatusLine } from "@/components/app/threadviews/members";
 import { fileUrl, formatBytes, frameSandbox, isHosted, markdownUrl, renderLabel } from "@/lib/artifacts";
@@ -40,13 +40,14 @@ describe("thread panel", () => {
     expect(typingLine(t("waiting", "idle"))).toBeNull();
     expect(typingLine(t("done", null))).toBeNull();
   });
-  it("closes the message box once the thread has finished", () => {
-    expect(threadClosed({ status: "done" })).toBe(true);
-    expect(threadClosed({ status: "archived" })).toBe(true);
-    expect(threadClosed({ status: "review" })).toBe(false);
+  it("closes the message box of an archived thread only; done and failed ones reopen with a message", () => {
     expect(closedNote({ status: "archived" })).toEqual({ text: "讨论串已归档，取消归档后再继续", unarchive: true });
-    expect(closedNote({ status: "done" })?.unarchive).toBe(false);
+    expect(closedNote({ status: "done" })).toBeNull();
     expect(closedNote({ status: "running" })).toBeNull();
+    expect(reopenHint({ status: "done" })).toBe("发送消息会重新打开讨论串");
+    expect(reopenHint({ status: "failed" })).toBe("发送消息会重新打开讨论串");
+    expect(reopenHint({ status: "archived" })).toBeNull();
+    expect(reopenHint({ status: "running" })).toBeNull();
   });
   it("shows a lead whose parked session is waking as busy", () => {
     const waking = member("lead-1", "thinking");

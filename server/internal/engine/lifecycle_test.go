@@ -217,8 +217,110 @@ func TestCompleteThread(t *testing.T) {
 	if got.Status != "done" {
 		t.Fatalf("second complete: %s", got.Status)
 	}
-	code, _ = tm.b.do("POST", "/api/conversations/"+tid+"/messages", map[string]any{"content": "还在吗"})
-	if code != http.StatusConflict {
-		t.Fatalf("message to a completed thread = %d", code)
+}
+
+// TestReopenThread: the user reopens a done thread from the menu (owner only): it is running
+// again with its old summary kept as a note, the coordinator is told, and no session starts until
+// a message: the lead then resumes its old conversation. A message to a done thread reopens it
+// on its own (to the lead or straight to a member); an archived thread still refuses both
+// until it is unarchived; a failed thread reopens too.
+func TestReopenThread(t *testing.T) {
+	tm := startTeam(t)
+	pool, ctx := tm.w.e.Core.Pool, tm.w.ctx
+	events := tm.b.stream("/api/projects/"+tm.projectID+"/events", "0")
+	tid := tm.thread.ID
+	complete := func() {
+		t.Helper()
+		var got core.ThreadView
+		tm.b.must(200, "POST", "/api/threads/"+tid+"/complete", map[string]any{"summary": "第一轮结论：用方案 B"}, &got)
+		if got.Status != "done" {
+			t.Fatalf("complete: %s", got.Status)
+		}
+	}
+	complete()
+	wctx, cancel := tm.w.waitCtx()
+	defer cancel()
+	for _, a := range []*fakeAgent{tm.dev, tm.lead} {
+		if _, err := tm.n.Wait(wctx, protocol.TypeSessionClose, a.mine); err != nil {
+			t.Fatalf("session %s not closed: %v", a.session, err)
+		}
+	}
+
+	other := tm.w.signUp("stranger-reopen@example.com")
+	if code, _ := other.do("POST", "/api/threads/"+tid+"/reopen", nil); code != 404 {
+		t.Fatalf("another user's reopen = %d", code)
+	}
+	var got core.ThreadView
+	tm.b.must(200, "POST", "/api/threads/"+tid+"/reopen", nil, &got)
+	if got.Status != "running" || got.Summary != "" || got.FinishedAt != nil {
+		t.Fatalf("reopen: %s %q %v", got.Status, got.Summary, got.FinishedAt)
+	}
+	events.wait(t, "thread", `"status":"running"`)
+	notes := ofKind(tm.threadMessages(t), "note")
+	if len(notes) == 0 || !strings.Contains(notes[len(notes)-1].Content, "第一轮结论：用方案 B") {
+		t.Fatalf("old summary not kept in a note: %+v", notes)
+	}
+	eventually(t, "coordinator told", func() bool {
+		var n int
+		err := store.QueryRow(ctx, pool, `SELECT count(*) FROM at_messages m JOIN at_conversations c ON c.id = m.conversation_id
+			WHERE c.kind = 'coordinator' AND c.project_id = $1 AND m.content LIKE '%· running] 用户重新打开了讨论串 #1%'`, tm.projectID).Scan(&n)
+		return err == nil && n == 1
+	})
+	if live, _ := core.ThreadLiveSessions(ctx, pool, tid); len(live) != 0 {
+		t.Fatalf("reopen started sessions: %+v", live)
+	}
+	tm.b.must(200, "POST", "/api/threads/"+tid+"/reopen", nil, &got) // running already: nothing changes
+
+	// A message straight to a member of a done thread reopens it and resumes the member.
+	complete()
+	tm.b.must(202, "POST", "/api/threads/"+tid+"/members/dev-1/message", map[string]string{"content": "方案 B 的细节再补一下"}, nil)
+	_, devOpen := expectOpen(t, tm.w, tm.n, "dev-1")
+	if devOpen.Resume == nil || devOpen.Resume.SDKSessionID == nil || *devOpen.Resume.SDKSessionID != "sdk-"+tm.dev.session ||
+		!strings.Contains(devOpen.FirstMessage.Text, "重新打开") {
+		t.Fatalf("member must resume its old conversation: %+v %q", devOpen.Resume, devOpen.FirstMessage.Text)
+	}
+	tm.b.must(200, "GET", "/api/threads/"+tid, nil, &got)
+	if got.Status != "running" {
+		t.Fatalf("member message did not reopen: %s", got.Status)
+	}
+
+	// A message to the lead of a done thread reopens it and wakes the lead with its old context.
+	complete()
+	tm.b.must(202, "POST", "/api/conversations/"+tid+"/messages", map[string]any{"content": "刚才说的方案是哪个？"}, nil)
+	_, leadOpen := expectOpen(t, tm.w, tm.n, "lead-1")
+	if leadOpen.Resume == nil || leadOpen.Resume.SDKSessionID == nil || *leadOpen.Resume.SDKSessionID != "sdk-"+tm.lead.session ||
+		!strings.Contains(leadOpen.FirstMessage.Text, "刚才说的方案是哪个？") {
+		t.Fatalf("lead must resume its old conversation: %+v %q", leadOpen.Resume, leadOpen.FirstMessage.Text)
+	}
+	tm.b.must(200, "GET", "/api/threads/"+tid, nil, &got)
+	if got.Status != "running" {
+		t.Fatalf("message did not reopen: %s", got.Status)
+	}
+
+	// Archived: refused until unarchived (which keeps it finished), then reopened.
+	complete()
+	tm.b.must(200, "POST", "/api/threads/"+tid+"/archive", nil, nil)
+	for _, path := range []string{"/api/threads/" + tid + "/reopen", "/api/conversations/" + tid + "/messages"} {
+		code, raw := tm.b.do("POST", path, map[string]any{"content": "继续"})
+		if code != http.StatusConflict || !strings.Contains(string(raw), "thread_archived") {
+			t.Fatalf("%s on an archived thread = %d %s", path, code, raw)
+		}
+	}
+	tm.b.must(200, "POST", "/api/threads/"+tid+"/unarchive", nil, &got)
+	if got.Status != "done" {
+		t.Fatalf("unarchive: %s", got.Status)
+	}
+	tm.b.must(200, "POST", "/api/threads/"+tid+"/reopen", nil, &got)
+	if got.Status != "running" {
+		t.Fatalf("reopen after unarchive: %s", got.Status)
+	}
+
+	// Failed threads reopen too.
+	if _, err := store.Exec(ctx, pool, `UPDATE at_threads SET status = 'failed', finished_at = now() WHERE id = $1`, tid); err != nil {
+		t.Fatal(err)
+	}
+	tm.b.must(200, "POST", "/api/threads/"+tid+"/reopen", nil, &got)
+	if got.Status != "running" {
+		t.Fatalf("reopen failed thread: %s", got.Status)
 	}
 }

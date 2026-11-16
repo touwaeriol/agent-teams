@@ -1465,6 +1465,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/threads/{tid}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reopen a done or failed thread: back to running (queued at the limit), the next message wakes the lead with its old conversation; archived threads are unarchived first */
+        post: operations["reopen-thread"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/threads/{tid}/tasks": {
         parameters: {
             query?: never;
@@ -6621,6 +6638,37 @@ export interface operations {
                 "application/json": components["schemas"]["RejectInputBody"];
             };
         };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThreadView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "reopen-thread": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description OK */
             200: {

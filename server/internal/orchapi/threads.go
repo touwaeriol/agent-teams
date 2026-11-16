@@ -170,6 +170,8 @@ func (a *API) registerThreads(api huma.API) {
 		summary("Archive a thread: it ends (sessions closed, checkouts cleaned) and leaves the main list")), a.archiveThread)
 	huma.Register(api, op("complete-thread", "POST", "/api/threads/{tid}/complete", t,
 		summary("Mark a thread done (the user closes it): sessions closed, coordinator told; refused while a PR waits for accept or reject")), a.completeThread)
+	huma.Register(api, op("reopen-thread", "POST", "/api/threads/{tid}/reopen", t,
+		summary("Reopen a done or failed thread: back to running (queued at the limit), the next message wakes the lead with its old conversation; archived threads are unarchived first")), a.reopenThread)
 	huma.Register(api, op("unarchive-thread", "POST", "/api/threads/{tid}/unarchive", t,
 		summary("Put an archived thread back: finished threads stay finished, others come back paused")), a.unarchiveThread)
 	huma.Register(api, op("delete-thread", "DELETE", "/api/threads/{tid}", t, status(204),
@@ -334,6 +336,12 @@ func (a *API) completeThread(ctx context.Context, in *completeInput) (*threadOut
 	}
 	return a.lifecycle(ctx, in.TID, "thread_complete", func(ctx context.Context, tx *core.Tx, t core.Thread) error {
 		return a.e.Orch.Complete(ctx, tx, t, summary)
+	})
+}
+
+func (a *API) reopenThread(ctx context.Context, in *tidInput) (*threadOutput, error) {
+	return a.lifecycle(ctx, in.TID, "thread_reopen", func(ctx context.Context, tx *core.Tx, t core.Thread) error {
+		return a.e.Orch.Reopen(ctx, tx, t, "user")
 	})
 }
 

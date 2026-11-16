@@ -152,9 +152,55 @@ func TestDeliveryEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, "member branch deleted", func() bool { _, ok := gh.ref("thread/1/dev-1"); return !ok })
+	reopenAfterMerge(t, w, gh, n, b, thread.ID, lead, dev, events)
 	if errs := n.Errors(); len(errs) > 0 {
 		t.Fatalf("protocol errors: %+v", errs)
 	}
+}
+
+// reopenAfterMerge: a thread whose PR merged is reopened. The merged PR becomes history (the
+// thread has no PR, the merged thread branch is deleted on the host), the lead resumes its old
+// conversation with the user's next message, new work cuts the thread branch again from the
+// base and open_pr opens a second pull request.
+func reopenAfterMerge(t *testing.T, w *world, gh *fakeGitHub, n *nodetest.Node, b *browser, tid string, lead, dev *fakeAgent, events *sse) {
+	t.Helper()
+	var got core.ThreadView
+	b.must(200, "POST", "/api/threads/"+tid+"/reopen", nil, &got)
+	if got.Status != "running" || got.PRNumber != nil || got.PRState != "" {
+		t.Fatalf("reopened %s pr=%v %q", got.Status, got.PRNumber, got.PRState)
+	}
+	if len(got.Repos) != 1 || got.Repos[0].BranchCreated || got.Repos[0].PRNumber != nil {
+		t.Fatalf("reopened repos %+v", got.Repos)
+	}
+	eventually(t, "merged thread branch deleted", func() bool { _, ok := gh.ref("thread/1-login"); return !ok })
+
+	b.must(202, "POST", "/api/conversations/"+tid+"/messages", map[string]any{"content": "再加一个忘记密码链接"}, nil)
+	lead2, open := expectOpen(t, w, n, "lead-1")
+	if open.Resume == nil || open.Resume.SDKSessionID == nil || *open.Resume.SDKSessionID != "sdk-"+lead.session ||
+		!strings.Contains(open.FirstMessage.Text, "重新打开") || !strings.Contains(open.FirstMessage.Text, "忘记密码") {
+		t.Fatalf("lead resume %+v %q", open.Resume, open.FirstMessage.Text)
+	}
+	answerPrepares(t, w, n)
+	lead2.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: protocol.SessionID(lead2.session), MsgID: open.FirstMessage.MsgID})
+	lead2.mustCall("assign_task", map[string]any{"assignee": "dev-1", "instruction": "忘记密码链接", "main": "页面"})
+	dev2, devOpen := expectOpen(t, w, n, "dev-1")
+	if devOpen.Resume == nil || devOpen.Resume.SDKSessionID == nil || *devOpen.Resume.SDKSessionID != "sdk-"+dev.session {
+		t.Fatalf("member resume %+v", devOpen.Resume)
+	}
+	answerPrepares(t, w, n)
+	dev2.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: protocol.SessionID(dev2.session), MsgID: devOpen.FirstMessage.MsgID})
+	completeWithPush(t, w, gh, n, dev2, "t4", "sha-dev-4")
+	lead2.expectSend("[Task t4 · dev-1 · done]")
+	lead2.mustCall("enqueue_merge", map[string]any{"task_id": "t4"})
+	events.wait(t, "task", `"id":"t4"`, `"status":"done"`)
+	if _, ok := gh.ref("thread/1-login"); !ok {
+		t.Fatal("thread branch not cut again")
+	}
+	res := lead2.call("open_pr", map[string]any{"title": "忘记密码", "body": "补充"})
+	if !res.Ok || !strings.Contains(string(*res.Structured), "pull/8") {
+		t.Fatalf("second open_pr %+v", res)
+	}
+	events.wait(t, "thread", `"status":"review"`, `"pr_number":8`)
 }
 
 // assertCredentials: push jobs get a write token, employee sessions with a PAT connection get none.

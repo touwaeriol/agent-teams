@@ -102,25 +102,29 @@ func withImages(meta map[string]any, images []core.AttachmentRef) map[string]any
 	return out
 }
 
-// checkThreadOpen refuses messages to threads that are finished.
+// checkThreadOpen makes a thread conversation ready for the user's message: an archived thread
+// refuses it (unarchive first), a finished one is reopened so the message wakes the lead.
 func (o *Orchestrator) checkThreadOpen(ctx context.Context, tx *core.Tx, c core.Conversation) error {
 	if c.Kind != "thread" {
 		return nil
 	}
 	t, err := core.ThreadByID(ctx, tx, c.ID)
-	if err != nil {
+	if err != nil || !threadOver(t.Status) {
 		return err
 	}
-	return threadAccepts(t)
+	if t, err = core.LockThread(ctx, tx, c.ID); err != nil {
+		return err
+	}
+	return o.reopenForMessage(ctx, tx, t)
 }
 
-// threadAccepts refuses messages to a thread that is over: archived ones say how to go on.
-func threadAccepts(t core.Thread) error {
+// reopenForMessage refuses messages to an archived thread and reopens a done or failed one.
+func (o *Orchestrator) reopenForMessage(ctx context.Context, tx *core.Tx, t core.Thread) error {
 	switch {
 	case t.Status == "archived":
 		return ErrArchived
 	case threadOver(t.Status):
-		return ErrNotActive
+		return o.Reopen(ctx, tx, t, "message")
 	}
 	return nil
 }
@@ -144,11 +148,11 @@ func (o *Orchestrator) InterruptConversation(ctx context.Context, userID, convID
 func (o *Orchestrator) MessageMember(ctx context.Context, t core.Thread, name, content string) (core.Message, error) {
 	var m core.Message
 	err := o.core.InTx(ctx, func(tx *core.Tx) error {
-		cur, err := core.ThreadByID(ctx, tx, t.ID)
+		cur, err := core.LockThread(ctx, tx, t.ID)
 		if err != nil {
 			return err
 		}
-		if err := threadAccepts(cur); err != nil {
+		if err := o.reopenForMessage(ctx, tx, cur); err != nil {
 			return err
 		}
 		emp, err := core.EmployeeByName(ctx, tx, t.ProjectID, &t.ID, name)

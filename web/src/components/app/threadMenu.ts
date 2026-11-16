@@ -24,9 +24,17 @@ export function completeNotice(no: number) {
 }
 
 /** What the menu offers for a thread in this status. */
-export function menuItems(t: Pick<ThreadView, "status">): { complete: boolean; pause: boolean; resume: boolean; archive: boolean; unarchive: boolean } {
+export function menuItems(t: Pick<ThreadView, "status">): {
+  complete: boolean;
+  reopen: boolean;
+  pause: boolean;
+  resume: boolean;
+  archive: boolean;
+  unarchive: boolean;
+} {
   return {
     complete: ["running", "waiting", "queued", "paused"].includes(t.status),
+    reopen: t.status === "done" || t.status === "failed",
     pause: ["running", "waiting", "queued"].includes(t.status),
     resume: t.status === "paused",
     archive: t.status !== "archived",

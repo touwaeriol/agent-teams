@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The ⋯ menu of a thread: (任务 / 交付物 / 成员 with `view` listeners), 全屏打开, 暂停 / 继续,
-// 标记为完成 (asks first), 归档 (asks first while it is still going) / 取消归档, 删除 (asks first).
-import { Archive, ArchiveRestore, CircleCheck, ListChecks, Maximize2, MoreHorizontal, Package, Pause, Play, Trash2, Users } from "lucide-vue-next";
+// 标记为完成 (asks first) / 重新打开 (done or failed), 归档 (asks first while it is still going) / 取消归档, 删除 (asks first).
+import { Archive, ArchiveRestore, CircleCheck, ListChecks, Maximize2, MoreHorizontal, Package, Pause, Play, RotateCcw, Trash2, Users } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { threads as threadActions } from "@/api/actions";
@@ -21,6 +21,7 @@ const invalidate = () => [keys.threads(props.thread.project_id), keys.thread(pro
 const update = useAction((status: "paused" | "running") => threadActions.update(props.thread.id, { status }), { invalidate });
 const archive = useAction(() => threadActions.archive(props.thread.id), { invalidate, success: `#${props.thread.no} 已归档` });
 const complete = useAction(() => threadActions.complete(props.thread.id), { invalidate, success: `#${props.thread.no} 已标记为完成` });
+const reopen = useAction(() => threadActions.reopen(props.thread.id), { invalidate, success: `#${props.thread.no} 已重新打开` });
 const unarchive = useAction(() => threadActions.unarchive(props.thread.id), { invalidate, success: `#${props.thread.no} 已取消归档` });
 const remove = useAction(() => threadActions.remove(props.thread.id), { invalidate, success: `#${props.thread.no} 已删除`, onSuccess: () => emit("deleted") });
 const items = computed(() => menuItems(props.thread));
@@ -31,6 +32,7 @@ const VIEW_ICON = { tasks: ListChecks, deliverables: Package, members: Users } a
 const COMMANDS: Record<string, () => void> = {
   full: () => props.fullHref && void router.push(props.fullHref),
   complete: () => (confirm.value = "complete"),
+  reopen: () => reopen.mutate(),
   pause: () => update.mutate("paused"),
   resume: () => update.mutate("running"),
   archive: () => (threadActive(props.thread) ? (confirm.value = "archive") : archive.mutate()),
@@ -53,6 +55,7 @@ const setConfirm = (kind: "complete" | "archive" | "delete", open: boolean) => (
         </template>
         <el-dropdown-item v-if="fullHref" command="full" :divided="withViews"><Maximize2 /> 全屏打开</el-dropdown-item>
         <el-dropdown-item v-if="items.complete" command="complete"><CircleCheck /> 标记为完成</el-dropdown-item>
+        <el-dropdown-item v-if="items.reopen" command="reopen"><RotateCcw /> 重新打开</el-dropdown-item>
         <el-dropdown-item v-if="items.pause" command="pause"><Pause /> 暂停</el-dropdown-item>
         <el-dropdown-item v-if="items.resume" command="resume"><Play /> 继续</el-dropdown-item>
         <el-dropdown-item v-if="items.archive" command="archive"><Archive /> 归档</el-dropdown-item>

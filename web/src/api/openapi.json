@@ -10208,6 +10208,48 @@
         ]
       }
     },
+    "/api/threads/{tid}/reopen": {
+      "post": {
+        "operationId": "reopen-thread",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Reopen a done or failed thread: back to running (queued at the limit), the next message wakes the lead with its old conversation; archived threads are unarchived first",
+        "tags": [
+          "threads"
+        ]
+      }
+    },
     "/api/threads/{tid}/tasks": {
       "get": {
         "operationId": "list-tasks",

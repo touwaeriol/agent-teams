@@ -111,6 +111,23 @@ describe("ConfirmAction", () => {
   });
 });
 
+describe("ThreadMenu 重新打开", () => {
+  it("offers it for a done or failed thread only", () => {
+    expect(["done", "failed"].every((status) => menuItems({ status } as never).reopen)).toBe(true);
+    expect(["running", "waiting", "queued", "paused", "review", "archived"].some((status) => menuItems({ status } as never).reopen)).toBe(false);
+  });
+  it("reopens the thread through the API without asking", async () => {
+    document.cookie = "agent_teams_csrf=tok";
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({}), { status: 200, headers: { "Content-Type": "application/json" } }));
+    const w = mountWith(ThreadMenu, { thread: thread(3, { id: "th_3", status: "done" }) });
+    w.findComponent(IconMenu).vm.$emit("command", "reopen");
+    await flushPromises();
+    const req = fetch.mock.calls[0][0] as Request;
+    expect(req.method).toBe("POST");
+    expect(req.url).toContain("/api/threads/th_3/reopen");
+  });
+});
+
 describe("ThreadMenu 标记为完成", () => {
   it("offers it for a thread still going, not for a finished one or one in review", () => {
     expect(["running", "waiting", "queued", "paused"].every((status) => menuItems({ status } as never).complete)).toBe(true);

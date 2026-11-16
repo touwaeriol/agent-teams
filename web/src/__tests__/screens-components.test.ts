@@ -38,12 +38,16 @@ afterEach(() => {
 });
 
 describe("ThreadDetail", () => {
-  it("shows the breadcrumb, goes back, and closes the message box once done", async () => {
+  it("shows the breadcrumb, goes back, and keeps the message box of a done thread with the reopen hint", async () => {
     stubApi({ "/messages": { items: [], next_cursor: null }, "/questions": [] });
     const w = mountWith(ThreadDetail, { pid: "p1", thread: thread(12, { title: "员工通信", status: "done" }), view: null });
     await flushPromises();
     expect(w.get("[aria-current=page]").text()).toBe("#12 员工通信");
-    expect(w.text()).toContain("讨论串已结束，不能再给组长发消息");
+    expect(w.get("[data-testid=reopen-hint]").text()).toBe("发送消息会重新打开讨论串");
+    expect(w.find("[data-testid=closed-note]").exists()).toBe(false);
+    const box = document.body.querySelector<HTMLTextAreaElement>("textarea[placeholder^='回复组长']");
+    expect(box).not.toBeNull();
+    expect(box!.disabled).toBe(false);
     await w.get("nav[aria-label=位置] button").trigger("click");
     expect(w.emitted("back")).toHaveLength(1);
   });
@@ -53,6 +57,7 @@ describe("ThreadDetail", () => {
     await flushPromises();
     expect(w.get("[data-testid=closed-note]").text()).toContain("讨论串已归档，取消归档后再继续");
     expect(document.body.querySelector("textarea[placeholder^='回复组长']")).toBeNull();
+    expect(w.find("[data-testid=reopen-hint]").exists()).toBe(false);
     const button = w.findAll("[data-testid=closed-note] button").find((b) => b.text() === "取消归档");
     await button!.trigger("click");
     await flushPromises();
@@ -61,9 +66,10 @@ describe("ThreadDetail", () => {
   });
   it("offers the lead's message box while running", async () => {
     stubApi({ "/messages": { items: [], next_cursor: null }, "/questions": [] });
-    mountWith(ThreadDetail, { pid: "p1", thread: thread(12), view: null });
+    const w = mountWith(ThreadDetail, { pid: "p1", thread: thread(12), view: null });
     await flushPromises();
     expect(document.body.querySelector("textarea[placeholder^='回复组长']")).not.toBeNull();
+    expect(w.find("[data-testid=reopen-hint]").exists()).toBe(false);
   });
 });
 

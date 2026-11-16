@@ -133,7 +133,7 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | DELETE | `/api/projects/{pid}` | → 204；关闭全部会话，向用过的节点发 `git.purge` |
 | GET | `/api/projects/{pid}/coordinator` | → `{conversation_id, employee: EmployeeBrief, session_state}`；不存在则创建统筹（员工 + 对话），**不立即开会话**（第一条消息时才开） |
 | GET | `/api/conversations/{cid}/messages?before=&limit=` | → `{items: MessageView[], next_cursor}`（v1 路径；v2 增加分页参数，不带参数时返回全部以兼容 v1） |
-| POST | `/api/conversations/{cid}/messages` | `{content, interrupt?: bool, attachments?: string[]}` → 202 `MessageView`。投递到对应员工会话（统筹或组长）。`interrupt: true` = “插话并打断当前操作”。`attachments` = 本项目已上传图片的 id（最多 8 张，按顺序），有图片时 `content` 可以为空；消息的 `meta.attachments` 记下 `{id, name, content_type, size}`，员工收到的是图片内容块（Claude）或本地图片（Codex），见 `protocol.md` §4.3 |
+| POST | `/api/conversations/{cid}/messages` | `{content, interrupt?: bool, attachments?: string[]}` → 202 `MessageView`。投递到对应员工会话（统筹或组长）。`interrupt: true` = “插话并打断当前操作”。`attachments` = 本项目已上传图片的 id（最多 8 张，按顺序），有图片时 `content` 可以为空；消息的 `meta.attachments` 记下 `{id, name, content_type, size}`，员工收到的是图片内容块（Claude）或本地图片（Codex），见 `protocol.md` §4.3。讨论串已结束（done / failed）时先自动重新打开（同 `POST /api/threads/{tid}/reopen`，备注写“用户发来新消息，讨论串重新打开。”）再投递，组长按旧会话恢复；已归档 → 409 `thread_archived`（先取消归档） |
 | POST | `/api/projects/{pid}/attachments` | `{name, data}`（base64）→ 201 `{id, name, content_type, size, sha256, created_at, url}`。只收 PNG、JPEG、GIF、WebP（按文件头判断，不信扩展名），每张最多 5 MB（Claude 单张图片上限），否则 422。输入框粘贴、拖入或选择图片时立即上传，发送时带上 id |
 | GET | `/api/attachments/{id}` | 图片本身（只给项目所有者；`X-Content-Type-Options: nosniff`、`Content-Security-Policy: default-src 'none'; sandbox`）。聊天记录里的缩略图用它 |
 | POST | `/api/conversations/{cid}/interrupt` | → 202。中止该对话员工的当前回合（停止按钮） |
@@ -154,6 +154,7 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | PATCH | `/api/threads/{tid}` | `{title?, status?: "paused"|"running"|"archived", auto_approve?}` → `ThreadView`。`auto_approve` = “本讨论串内全部放行”（只影响 `ask` 岗位，任何节点都能开；打开时一并放行当前所有待审批，并审计） |
 | POST | `/api/threads/{tid}/archive` | → `ThreadView`。归档：讨论串结束（会话关闭、节点上的检出按 `git.cleanup keep_unpushed` 清理），从主列表移到“已归档”，记下归档前的状态（`at_threads.archived_from`）。已结束的讨论串（done / failed）常用它在“解决后归档” |
 | POST | `/api/threads/{tid}/complete` | body `{summary?}` → `ThreadView`。用户把讨论串标记为完成（组长做完了但没自己收尾）：状态改成 `done`（和 finish 同一条路径：会话关闭、未答卡片取消、检出清理），协调员收到 `[Thread #n · 标题 · done] 用户在页面上把讨论串标记为完成。`。已是 done → 原样返回；failed / archived → 409 `thread_not_active`；PR 等待接受/拒绝（review）或正在合并 → 409 `pr_awaiting`；合并队列还有条目 → 409 `merge_in_progress` |
+| POST | `/api/threads/{tid}/reopen` | → `ThreadView`。重新打开 done / failed 的讨论串：状态回到 `running`（运行中的讨论串已达上限时为 `queued`），`finished_at` 清空，旧总结写进讨论串里一条 `note`（`meta.reopened = true`、`meta.previous_summary`）后清空，停滞检查重新计数，协调员收到 `[Thread #n · 标题 · running] 用户重新打开了讨论串 #n。`。不立即开会话：下一条消息唤醒组长（按 SDK 会话 id 恢复旧对话，节点丢了记录时用回顾），组长给成员发消息时成员同样恢复；恢复后的第一条消息带“[平台] 讨论串已重新打开，接着之前的对话继续。”。已合并 / 已关闭的 PR 成为历史：对应仓库行和讨论串的 `pr_number`/`pr_url`/`pr_state` 清空，`open_pr` 可以为新改动再开 PR、`finish` 重新按“有无改动”判断；PR 已合并的仓库同时忘掉讨论串分支（`branch_created = false`），提交后在 GitHub 上删除旧分支，新的工作从更新后的基准分支重新切出；已关闭未合并的 PR 保留分支和提交。还在进行中 → 原样返回；archived → 409 `thread_archived`（先 `unarchive`，done/failed 归档的会回到原状态，再重新打开） |
 | POST | `/api/threads/{tid}/unarchive` | → `ThreadView`。done / failed 归档的回到原状态；进行中归档的回到 `paused`（`pause_reason = "user"`），点“继续”接着做。没归档 → 409 `not_archived` |
 | DELETE | `/api/threads/{tid}` | → 204。关闭全部会话，向用过的节点发 `git.cleanup`（`keep_unpushed: false`，未推送的改动也删）和 `git.purge projects/<pid>/threads/<no>`，删除成员分支；讨论串、员工、任务、对话、审批记录一并删除（级联），交付物留在资料库（`thread_no` 变成 null）。SSE 发 `thread {deleted}`。网页上先弹确认框 |
 | GET | `/api/threads/{tid}/main-tasks` | → `MainTaskView[]` |
@@ -163,7 +164,7 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | POST | `/api/threads/{tid}/tasks/{task}/retry` | 失败任务重新入池 |
 | GET | `/api/threads/{tid}/members` | → `EmployeeBrief[]`（含实时状态） |
 | POST | `/api/threads/{tid}/members/{name}/interrupt` | 打断某个成员的当前回合 |
-| POST | `/api/threads/{tid}/members/{name}/message` | `{content}` → 直接给成员发话（以“用户”身份，进该成员会话，同时记到讨论串对话里） |
+| POST | `/api/threads/{tid}/members/{name}/message` | `{content}` → 直接给成员发话（以“用户”身份，进该成员会话，同时记到讨论串对话里）。讨论串已结束（done / failed）时先自动重新打开；已归档 → 409 `thread_archived` |
 | GET | `/api/threads/{tid}/mail?before=` | → 分页 `MailView` |
 | GET | `/api/threads/{tid}/activity?before=` | → 分页 activity（来自 `at_events`，v1 不落库）。“进度”页的动态列表先拉这里，之后由 SSE `activity` 追加 |
 | GET | `/api/threads/{tid}/merge-queue` | → `MergeEntryView[]` |

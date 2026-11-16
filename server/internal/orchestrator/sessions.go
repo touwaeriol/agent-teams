@@ -85,6 +85,10 @@ func (o *Orchestrator) wake(tx *core.Tx, employeeID string) {
 // A policy violation starts clean; a removed node cannot resume and gets the recap instead.
 var resumableClose = []string{"thread_done", "employee_removed", "node_closed"}
 
+// reopenedPrefix starts the first message of a session that resumes after its thread ended
+// (the user reopened it, or unarchived and resumed it): the employee goes on from where it was.
+const reopenedPrefix = "[平台] 讨论串已重新打开，接着之前的对话继续。\n\n"
+
 // continuation decides how a new session for e starts: resuming the previous session's
 // conversation, with the recap prefixed when that session was lost with its node, or fresh.
 func (o *Orchestrator) continuation(ctx context.Context, tx *core.Tx, e core.Employee, text string) (string, *protocol.ResumeRef, error) {
@@ -103,6 +107,9 @@ func (o *Orchestrator) continuation(ctx context.Context, tx *core.Tx, e core.Emp
 		return summary + "\n\n---\n" + text, nil, o.resumedNote(ctx, tx, e)
 	}
 	if slices.Contains(resumableClose, last.CloseReason) {
+		if last.CloseReason == "thread_done" && e.ThreadID != nil {
+			text = reopenedPrefix + text
+		}
 		return text, resumeRef(last), nil
 	}
 	return text, nil, nil

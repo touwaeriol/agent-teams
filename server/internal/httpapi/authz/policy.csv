@@ -134,6 +134,7 @@ p, user, /api/threads/:tid/activity, GET
 p, user, /api/threads/:tid/archive, POST
 p, user, /api/threads/:tid/checks, GET
 p, user, /api/threads/:tid/complete, POST
+p, user, /api/threads/:tid/reopen, POST
 p, user, /api/threads/:tid/mail, GET
 p, user, /api/threads/:tid/main-tasks, GET
 p, user, /api/threads/:tid/main-tasks/:mid, PATCH
