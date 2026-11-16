@@ -9,6 +9,7 @@ import { leadOf } from "@/lib/present";
 import { cn } from "@/lib/utils";
 import { useAttachments } from "../attachments";
 import Composer from "../Composer.vue";
+import type { MessageRef } from "../composer/assist";
 import { closedNote, reopenHint } from "./detail";
 
 const props = defineProps<{ pid: string; thread: ThreadView; class?: string }>();
@@ -16,7 +17,7 @@ const attachments = useAttachments(() => props.pid);
 const lead = computed(() => leadOf(props.thread));
 const note = computed(() => closedNote(props.thread));
 const hint = computed(() => reopenHint(props.thread));
-const send = useAction((v: { text: string; images: string[] }) => conversations.send(props.thread.id, v.text, false, v.images), {
+const send = useAction((v: { text: string; images: string[]; refs: MessageRef[] }) => conversations.send(props.thread.id, v.text, false, v.images, v.refs), {
   invalidate: () =>
     hint.value ? [keys.messages(props.thread.id), keys.threads(props.thread.project_id), keys.thread(props.thread.id)] : [keys.messages(props.thread.id)],
 });
@@ -24,7 +25,7 @@ const unarchive = useAction(() => threadActions.unarchive(props.thread.id), {
   invalidate: () => [keys.threads(props.thread.project_id), keys.thread(props.thread.id), keys.waiting(props.thread.project_id)],
   success: `#${props.thread.no} 已取消归档`,
 });
-const onSend = (text: string, images: string[]) => send.mutateAsync({ text, images });
+const onSend = (text: string, images: string[], refs: MessageRef[]) => send.mutateAsync({ text, images, refs });
 </script>
 
 <template>
@@ -38,11 +39,12 @@ const onSend = (text: string, images: string[]) => send.mutateAsync({ text, imag
       v-if="!note"
       :id="`lead-${thread.id}`"
       label="发给组长"
-      :placeholder="`回复组长 ${lead?.name ?? ''}，可粘贴或拖入图片`"
+      :placeholder="`回复组长 ${lead?.name ?? ''}；/ 命令和技能，@ 引用文件`"
       :busy="send.isPending.value"
       :attachments="attachments"
       :on-send="onSend"
       :draft-key="`draft:${thread.id}`"
+      :assist="{ pid, cid: thread.id, scope: 'lead' }"
     />
   </div>
 </template>

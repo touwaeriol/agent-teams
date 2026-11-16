@@ -47,6 +47,8 @@ p, node-token, /nodes/v2/connect, GET
 
 # Signed-in users: their own account, projects, threads, libraries and nodes.
 p, user, /api/attachments/:id, GET
+p, user, /api/conversations/:cid/commands, GET
+p, user, /api/conversations/:cid/context, GET
 p, user, /api/conversations/:cid/interrupt, POST
 p, user, /api/conversations/:cid/messages, GET
 p, user, /api/conversations/:cid/messages, POST
@@ -106,6 +108,7 @@ p, user, /api/projects/:pid/memory/:name, DELETE
 p, user, /api/projects/:pid/office, GET
 p, user, /api/projects/:pid/office/replay, GET
 p, user, /api/projects/:pid/overview, GET
+p, user, /api/projects/:pid/references, GET
 p, user, /api/projects/:pid/schedules, GET
 p, user, /api/projects/:pid/schedules, POST
 p, user, /api/projects/:pid/search, GET

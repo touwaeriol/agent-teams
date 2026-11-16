@@ -108,3 +108,10 @@ test("pull requests are numbered per repository and need an existing base", asyn
   assert.equal((await call("GET", "/pulls/1")).json.title, "A");
   assert.equal((await call("POST", "/pulls", { head: "feat-a", base: "nope", title: "X" })).status, 422);
 });
+
+test("trees: every file of a ref, recursively", async () => {
+  const t = await call("GET", "/git/trees/feat-a?recursive=1");
+  assert.equal(t.status, 200);
+  assert.deepEqual(t.json.tree.filter((e) => e.type === "blob").map((e) => e.path).sort(), ["README.md", "a.txt"]);
+  assert.equal((await call("GET", "/git/trees/nope?recursive=1")).status, 404);
+});

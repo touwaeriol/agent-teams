@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { claudeContent, codexImages, consoleBase, consoleImageFetcher, loadImages, MAX_IMAGE_BYTES } from "../src/sessions/images.js";
+import { claudeContent, codexFileNote, codexImages, consoleBase, consoleImageFetcher, loadImages, MAX_IMAGE_BYTES } from "../src/sessions/images.js";
 
 describe("image attachments", () => {
   it("derives the console base URL from the link URL", () => {
@@ -37,6 +37,22 @@ describe("image attachments", () => {
       expect(claudeContent("plain", [])).toBe("plain");
       expect(codexImages(imgs)).toEqual([{ type: "localImage", path: imgs[0]!.path }]);
       await expect(loadImages([{ id: "img_big", media_type: "image/png" }], async () => Buffer.alloc(MAX_IMAGE_BYTES + 1), dir)).rejects.toThrow(/5 MB/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("sends a PDF as a document block, keeps a slash command's text first, and names PDFs for Codex", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "at-pdf-"));
+    try {
+      const files = await loadImages([{ id: "img_p", media_type: "application/pdf" }, { id: "img_q", media_type: "image/png" }], async () => Buffer.from("%PDF-1.4"), dir);
+      expect(files[0]!.path.endsWith("img_p.pdf")).toBe(true);
+      const content = claudeContent("/agent-teams-skills:design 按附件做", files) as Array<{ type: string }>;
+      expect(content.map((b) => b.type)).toEqual(["text", "document", "image"]);
+      expect((claudeContent("看附件", files) as Array<{ type: string }>).map((b) => b.type)).toEqual(["document", "image", "text"]);
+      expect(codexImages(files)).toEqual([{ type: "localImage", path: files[1]!.path }]);
+      expect(codexFileNote(files)).toContain(files[0]!.path);
+      expect(codexFileNote([files[1]!])).toBe("");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

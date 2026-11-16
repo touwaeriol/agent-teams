@@ -5,7 +5,9 @@ import type { ImageRef } from "../protocol.js";
 /** What Claude accepts per image; the console enforces the same limit on upload. */
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
-const EXT: Record<ImageRef["media_type"], string> = { "image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp" };
+const EXT: Record<ImageRef["media_type"], string> = { "image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp", "application/pdf": ".pdf" };
+
+const PDF = "application/pdf";
 
 /** An attached image downloaded for one message: bytes for Claude, a file path for Codex. */
 export interface LoadedImage {
@@ -43,7 +45,7 @@ export async function loadImages(refs: ImageRef[] | undefined, fetcher: ImageFet
   const out: LoadedImage[] = [];
   for (const ref of refs) {
     const data = await fetcher(ref.id);
-    if (data.length === 0 || data.length > MAX_IMAGE_BYTES) throw new Error(`image ${ref.id} is empty or over 5 MB`);
+    if (data.length === 0 || data.length > MAX_IMAGE_BYTES) throw new Error(`attachment ${ref.id} is empty or over 5 MB`);
     const path = join(dir, `${ref.id.replace(/[^A-Za-z0-9_-]/g, "")}${EXT[ref.media_type]}`);
     writeFileSync(path, data, { mode: 0o600 });
     out.push({ id: ref.id, media_type: ref.media_type, data, path });
@@ -55,18 +57,37 @@ export function removeImages(dir: string): void {
   rmSync(dir, { recursive: true, force: true });
 }
 
-type ImageBlock = { type: "image"; source: { type: "base64"; media_type: ImageRef["media_type"]; data: string } };
+type ImageBlock = { type: "image"; source: { type: "base64"; media_type: Exclude<ImageRef["media_type"], typeof PDF>; data: string } };
+type DocumentBlock = { type: "document"; source: { type: "base64"; media_type: typeof PDF; data: string } };
 type TextBlock = { type: "text"; text: string };
+type Block = ImageBlock | DocumentBlock | TextBlock;
 
-/** The Claude user message content: the plain text, or image blocks followed by the text. */
-export function claudeContent(text: string, images: LoadedImage[] | undefined): string | Array<ImageBlock | TextBlock> {
-  if (!images?.length) return text;
-  const blocks: Array<ImageBlock | TextBlock> = images.map((i) => ({ type: "image", source: { type: "base64", media_type: i.media_type, data: i.data.toString("base64") } }));
-  if (text) blocks.push({ type: "text", text });
-  return blocks;
+function attachmentBlock(i: LoadedImage): ImageBlock | DocumentBlock {
+  const data = i.data.toString("base64");
+  if (i.media_type === PDF) return { type: "document", source: { type: "base64", media_type: PDF, data } };
+  return { type: "image", source: { type: "base64", media_type: i.media_type, data } };
 }
 
-/** Codex input items for the images (localImage reads the file itself). */
+/**
+ * The Claude user message content: the plain text, or attachment blocks (images, PDFs as
+ * document blocks) followed by the text. A slash command ("/skill args") keeps its text first,
+ * where the CLI looks for it.
+ */
+export function claudeContent(text: string, images: LoadedImage[] | undefined): string | Block[] {
+  if (!images?.length) return text;
+  const blocks: Block[] = images.map(attachmentBlock);
+  if (!text) return blocks;
+  return text.startsWith("/") ? [{ type: "text", text }, ...blocks] : [...blocks, { type: "text", text }];
+}
+
+/** Codex input items for the images (localImage reads the file itself); PDFs are left to codexFileNote. */
 export function codexImages(images: LoadedImage[] | undefined): Array<{ type: "localImage"; path: string }> {
-  return (images ?? []).map((i) => ({ type: "localImage", path: i.path }));
+  return (images ?? []).filter((i) => i.media_type !== PDF).map((i) => ({ type: "localImage", path: i.path }));
+}
+
+/** For Codex, which has no document input: where the attached PDFs were saved ("" when none). */
+export function codexFileNote(images: LoadedImage[] | undefined): string {
+  const pdfs = (images ?? []).filter((i) => i.media_type === PDF);
+  if (pdfs.length === 0) return "";
+  return `\n\n[附件 PDF 已保存在本机，可以直接读取：${pdfs.map((p) => p.path).join("、")}]`;
 }

@@ -43,7 +43,7 @@ describe("Composer", () => {
     expect(onSend).not.toHaveBeenCalled();
     await box.trigger("keydown", { key: "Enter" });
     await flushPromises();
-    expect(onSend).toHaveBeenCalledWith("hello", []);
+    expect(onSend).toHaveBeenCalledWith("hello", [], []);
     expect((box.element as HTMLTextAreaElement).value).toBe("");
   });
   it("puts the text back when sending fails", async () => {
@@ -80,21 +80,23 @@ describe("drafts", () => {
 });
 
 describe("attachments", () => {
-  it("uploads picked images, refuses others, reports ids when done", async () => {
+  it("uploads picked images and text files, refuses others, reports ids when done", async () => {
     URL.createObjectURL = vi.fn(() => "blob:x");
     URL.revokeObjectURL = vi.fn();
     let a!: ReturnType<typeof useAttachments>;
-    let finish!: (v: { id: string }) => void;
-    const uploader = vi.fn(() => new Promise<{ id: string }>((r) => (finish = r)));
+    const pending: Array<(v: { id: string }) => void> = [];
+    const finish = (v: { id: string }) => pending.forEach((r, i) => r({ id: `${v.id}-${i}` }));
+    const uploader = vi.fn(() => new Promise<{ id: string }>((r) => pending.push(r)));
     const Host = defineComponent({ setup: () => ((a = useAttachments("p1", uploader)), () => h("div")) });
     mountWith(Host);
-    a.add([new File(["x"], "a.png", { type: "image/png" }), new File(["x"], "b.txt", { type: "text/plain" })]);
-    expect(a.items.value).toHaveLength(1);
+    a.add([new File(["x"], "a.png", { type: "image/png" }), new File(["x"], "b.txt", { type: "text/plain" }), new File(["x"], "c.exe", { type: "" })]);
+    expect(a.items.value.map((x) => x.kind)).toEqual(["image", "text"]);
+    expect(a.items.value[1]!.preview).toBe("");
     expect(a.ids()).toBeNull();
     expect(a.uploading.value).toBe(true);
     finish({ id: "att1" });
     await flushPromises();
-    expect(a.ids()).toEqual(["att1"]);
+    expect(a.ids()).toEqual(["att1-0", "att1-1"]);
     expect(uploader).toHaveBeenCalledWith("p1", expect.any(File));
   });
 });

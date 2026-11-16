@@ -6,23 +6,68 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"path"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gorm.io/gorm/clause"
 )
 
-// Image input limits (api.md §3.4): what Claude accepts per image, and per message.
+// Attachment limits (api.md §3.4): what Claude accepts per image or PDF, a text file's size
+// (its text goes into the message), and attachments per message.
 const (
 	MaxAttachmentBytes  = 5 << 20
+	MaxTextBytes        = 1 << 20
 	MaxMessageImages    = 8
 	AttachmentURLPrefix = "/api/attachments/"
 )
 
-// ErrNotImage is returned for uploads that are not PNG, JPEG, GIF or WebP.
-var ErrNotImage = errors.New("只支持 PNG、JPG、GIF、WebP 图片")
+// Attachment content types besides the images.
+const (
+	PDFType  = "application/pdf"
+	TextType = "text/plain"
+)
 
-// ErrTooLarge is returned for images over MaxAttachmentBytes.
-var ErrTooLarge = errors.New("图片超过 5 MB")
+// ErrNotImage is returned for uploads that are not an image, a PDF or a text file.
+var ErrNotImage = errors.New("只支持图片（PNG、JPG、GIF、WebP）、PDF 和文本文件（md、txt、json、csv、代码等）")
+
+// ErrTooLarge is returned for images and PDFs over MaxAttachmentBytes and text files over MaxTextBytes.
+var ErrTooLarge = errors.New("文件太大：图片和 PDF 最多 5 MB，文本文件最多 1 MB")
+
+// textExts are the file name extensions accepted as text files (the bytes must also be UTF-8).
+var textExts = map[string]bool{}
+
+func init() {
+	for _, e := range strings.Fields(`md markdown txt text log json jsonl ndjson csv tsv yaml yml toml ini cfg conf xml html htm css scss
+		less js mjs cjs ts tsx jsx vue svelte go py rb rs java kt kts scala swift c h cc cpp hpp cs php sh bash zsh fish ps1 sql
+		graphql gql proto lua r dart ex exs erl hs ml clj tf hcl gradle properties rst adoc tex diff patch`) {
+		textExts[e] = true
+	}
+}
+
+// IsTextName reports whether a file name has one of the accepted text extensions
+// (or is a well-known extensionless text file such as Makefile or Dockerfile).
+func IsTextName(name string) bool {
+	base := strings.ToLower(path.Base(strings.ReplaceAll(name, "\\", "/")))
+	switch base {
+	case "makefile", "dockerfile", "readme", "license", "gemfile", "procfile":
+		return true
+	}
+	ext := strings.TrimPrefix(path.Ext(base), ".")
+	return ext != "" && textExts[ext]
+}
+
+// sniffText returns TextType for a text file: an accepted name and UTF-8 bytes without NUL.
+func sniffText(name string, data []byte) string {
+	if !IsTextName(name) || !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
+		return ""
+	}
+	return TextType
+}
+
+// IsInlineText reports whether an attachment's text is put into the message itself.
+func IsInlineText(contentType string) bool { return contentType == TextType }
 
 // Attachment is a row of at_attachments without its bytes.
 type Attachment struct {
@@ -30,7 +75,7 @@ type Attachment struct {
 	ProjectID   string    `json:"-"`
 	UserID      string    `json:"-"`
 	Name        string    `json:"name"`
-	ContentType string    `json:"content_type" enum:"image/png,image/jpeg,image/gif,image/webp"`
+	ContentType string    `json:"content_type" enum:"image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain"`
 	Size        int       `json:"size"`
 	SHA256      string    `json:"sha256" gorm:"column:sha256"`
 	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime:false;default:now()"`
@@ -76,13 +121,29 @@ func SniffImage(data []byte) string {
 	return ""
 }
 
-// NewAttachment checks an image and returns the row to store.
+// SniffAttachment returns the type of an accepted attachment ("" = refused): an image or a
+// PDF from its own bytes, else a text file by name and content.
+func SniffAttachment(name string, data []byte) string {
+	if typ := SniffImage(data); typ != "" {
+		return typ
+	}
+	if bytes.HasPrefix(data, []byte("%PDF-")) {
+		return PDFType
+	}
+	return sniffText(name, data)
+}
+
+// NewAttachment checks an image, PDF or text file and returns the row to store.
 func NewAttachment(projectID, userID, name string, data []byte) (Attachment, error) {
-	typ := SniffImage(data)
+	typ := SniffAttachment(name, data)
+	limit := MaxAttachmentBytes
+	if typ == TextType {
+		limit = MaxTextBytes
+	}
 	switch {
 	case typ == "":
 		return Attachment{}, ErrNotImage
-	case len(data) > MaxAttachmentBytes:
+	case len(data) > limit:
 		return Attachment{}, ErrTooLarge
 	}
 	sum := sha256.Sum256(data)
@@ -123,6 +184,23 @@ func ProjectAttachments(ctx context.Context, q DB, projectID string, ids []strin
 		out = append(out, a)
 	}
 	return out, nil
+}
+
+// AttachmentTexts returns the bytes of a project's text attachments among ids, by id.
+func AttachmentTexts(ctx context.Context, q DB, projectID string, ids []string) (map[string][]byte, error) {
+	out := map[string][]byte{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := find[struct {
+		ID   string
+		Data []byte
+	}](q.Gorm(ctx).Table("at_attachments").Select("id, data").
+		Where("project_id = ? AND id IN ? AND content_type = ?", projectID, ids, TextType))
+	for _, r := range rows {
+		out[r.ID] = r.Data
+	}
+	return out, err
 }
 
 // AttachmentData returns an image and its bytes if its project belongs to the user.

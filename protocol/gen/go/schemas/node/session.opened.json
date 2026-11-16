@@ -93,6 +93,35 @@
           "items": {
             "$ref": "#/$defs/McpServerStatus"
           }
+        },
+        "commands": {
+          "description": "Slash commands the session offers besides Claude Code's own (role skills, plugin skills and commands), from initializationResult().commands without the builtin ones. Absent for Codex.",
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/SlashCommand"
+          }
+        }
+      }
+    },
+    "SlashCommand": {
+      "title": "SlashCommand",
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "argument_hint": {
+          "type": "string",
+          "maxLength": 200
         }
       }
     },

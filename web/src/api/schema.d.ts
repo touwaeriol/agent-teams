@@ -292,8 +292,42 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The image bytes of an attachment */
+        /** The bytes of an attachment */
         get: operations["get-attachment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{cid}/commands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Skills and plugin commands the conversation's employee can run as /name */
+        get: operations["conversation-commands"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{cid}/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What the conversation's employee works from: instructions, memory, conversation and session token use */
+        get: operations["conversation-context"];
         put?: never;
         post?: never;
         delete?: never;
@@ -845,7 +879,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Upload an image to attach to a message (PNG, JPEG, GIF or WebP, at most 5 MB) */
+        /** Upload a file to attach to a message: an image or PDF (at most 5 MB) or a text file (at most 1 MB) */
         post: operations["upload-attachment"];
         delete?: never;
         options?: never;
@@ -1046,6 +1080,23 @@ export interface paths {
             cookie?: never;
         };
         get: operations["project-overview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Repository files, threads, deliverables and memory files to reference with @ */
+        get: operations["project-references"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1888,14 +1939,14 @@ export interface components {
             version: number;
         };
         AttachmentBody: {
-            /** @description Base64 of a PNG, JPEG, GIF or WebP image, at most 5 MB */
+            /** @description Base64 of a PNG, JPEG, GIF or WebP image or a PDF (at most 5 MB), or a UTF-8 text file (at most 1 MB) */
             data: string;
-            /** @description File name, shown under the thumbnail */
+            /** @description File name, shown under the thumbnail; a text file is recognised by its extension */
             name: string;
         };
         AttachmentView: {
             /** @enum {string} */
-            content_type: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+            content_type: "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "application/pdf" | "text/plain";
             /** Format: date-time */
             created_at: string;
             id: string;
@@ -1977,6 +2028,55 @@ export interface components {
         CompleteInputBody: {
             /** @description Optional summary kept on the thread */
             summary?: string;
+        };
+        ComposerCommand: {
+            argument_hint: string;
+            description: string;
+            /** @description Typed after the slash */
+            name: string;
+            /** @enum {string} */
+            source: "skill" | "plugin";
+        };
+        ComposerCommands: {
+            /** @description Empty for Codex employees */
+            commands: components["schemas"]["ComposerCommand"][] | null;
+            employee: string;
+            /**
+             * @description session: what the latest session reported; role: the role's configured skills and plugins
+             * @enum {string}
+             */
+            from: "session" | "role";
+            runtime: string;
+            /** @enum {string} */
+            tier: "coordinator" | "lead";
+        };
+        ComposerContext: {
+            employee: string;
+            /**
+             * Format: int64
+             * @description 项目指令 length
+             */
+            instructions_chars: number;
+            /**
+             * Format: int64
+             * @description Topic files besides MEMORY.md
+             */
+            memory_files: number;
+            /**
+             * Format: int64
+             * @description MEMORY.md length (read by every session)
+             */
+            memory_index_chars: number;
+            /** Format: int64 */
+            message_chars: number;
+            /**
+             * Format: int64
+             * @description Messages in this conversation
+             */
+            messages: number;
+            runtime: string;
+            /** @description null before the first session */
+            session: components["schemas"]["SessionUsage"];
         };
         CoordinatorView: {
             conversation_id: string;
@@ -2316,6 +2416,16 @@ export interface components {
             /** @description Pass as ?before= for older messages */
             next_cursor: string | null;
         };
+        MessageRef: {
+            id?: string;
+            /** @enum {string} */
+            kind: "file" | "thread" | "deliverable" | "memory";
+            name?: string;
+            /** Format: int64 */
+            no?: number;
+            path?: string;
+            repo?: string;
+        };
         MessageView: {
             author: string;
             content: string;
@@ -2533,12 +2643,14 @@ export interface components {
             plugins: components["schemas"]["Plugin"][] | null;
         };
         PostMessageInputBody: {
-            /** @description Image ids from POST /api/projects/{pid}/attachments, in order */
+            /** @description Attachment ids (images, PDFs, text files) from POST /api/projects/{pid}/attachments, in order */
             attachments?: string[] | null;
             /** @description Required unless attachments are given */
             content: string;
             /** @description Interrupt the current turn first */
             interrupt?: boolean;
+            /** @description @ references: resolved into a context block delivered with the message, shown as chips (meta.refs) */
+            refs?: components["schemas"]["MessageRef"][] | null;
         };
         PresetsOutputBody: {
             roles: components["schemas"]["Role"][] | null;
@@ -2683,6 +2795,31 @@ export interface components {
                 [key: string]: string;
             };
             ok: boolean;
+        };
+        RefCandidate: {
+            detail: string;
+            /** @description deliverable: its id */
+            id?: string;
+            /** @enum {string} */
+            kind: "file" | "thread" | "deliverable" | "memory";
+            /** @description What the chip shows: a path, #12 标题, a title or a file name */
+            label: string;
+            /** @description memory: file name */
+            name?: string;
+            /**
+             * Format: int64
+             * @description thread: its number
+             */
+            no?: number;
+            /** @description file: path in the repository */
+            path?: string;
+            /** @description file: owner/name */
+            repo?: string;
+        };
+        RefList: {
+            /** @description Why repository files are missing or partial ('' when listed in full) */
+            files_note: string;
+            items: components["schemas"]["RefCandidate"][] | null;
         };
         RejectInputBody: {
             reason: string;
@@ -2832,6 +2969,16 @@ export interface components {
         SessionBrief: {
             node: components["schemas"]["NodeRef"];
             state: string;
+        };
+        SessionUsage: {
+            /** Format: double */
+            cost_usd: number;
+            last_turn: components["schemas"]["TokenUsage"];
+            model: string;
+            state: string;
+            total: components["schemas"]["TokenUsage"];
+            /** Format: int64 */
+            turns: number;
         };
         SessionView: {
             /** Format: date-time */
@@ -3074,6 +3221,16 @@ export interface components {
             title: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        TokenUsage: {
+            /** Format: int64 */
+            cache_read: number;
+            /** Format: int64 */
+            cache_write: number;
+            /** Format: int64 */
+            input: number;
+            /** Format: int64 */
+            output: number;
         };
         UploadBody: {
             /** @description Base64 of the file, at most 5 MB */
@@ -3975,7 +4132,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The image */
+            /** @description The file */
             200: {
                 headers: {
                     "Cache-Control"?: string;
@@ -3985,10 +4142,74 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    "application/pdf": unknown;
                     "image/gif": unknown;
                     "image/jpeg": unknown;
                     "image/png": unknown;
                     "image/webp": unknown;
+                    "text/plain": unknown;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "conversation-commands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComposerCommands"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "conversation-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComposerContext"];
                 };
             };
             /** @description Error */
@@ -5918,6 +6139,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Overview"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "project-references": {
+        parameters: {
+            query?: {
+                q?: string;
+                /** @description Only this kind ('' = all) */
+                kind?: "file" | "thread" | "deliverable" | "memory" | "";
+            };
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefList"];
                 };
             };
             /** @description Error */

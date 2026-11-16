@@ -31,6 +31,7 @@ describe("daemon with a fake console", () => {
     h.console.command("session.open", claudeOpen("s_A", 1, { first_message: { msg_id: "m_first", text: "hello there" } }));
     const opened = await h.console.waitType("session.opened");
     expect(opened.body.init.tools).toEqual(["Read", "Bash", "mcp__platform__complete_task", "mcp__platform__ask_lead"]);
+    expect(opened.body.init.commands).toEqual([{ name: "agent-teams-skills:design", description: "Make HTML prototypes" }]);
     expect(opened.body.sdk_session_id).toMatch(/^[0-9a-f-]{36}$/);
     await new Promise((r) => setTimeout(r, 200));
     expect(h.log.prompts).toEqual([]);
@@ -45,6 +46,14 @@ describe("daemon with a fake console", () => {
     expect(opts).toMatchObject({ settingSources: [], permissionMode: "default", strictMcpConfig: true, includeHookEvents: true });
     expect(opts.env!.MCP_TOOL_TIMEOUT).toBe("86400000");
     expect(Object.keys(opts.env!).some((k) => k.startsWith("AGENT_TEAMS_"))).toBe(false);
+  });
+
+  it("runs a bare /skill as the session's own command, not the CLI built-in of that name", async () => {
+    h = await startHarness();
+    await openAndRelease("s_SL");
+    h.console.command("session.send", { session_id: "s_SL", msg_id: "m_sl", text: "/design 做个登录页", priority: "next", kind: "user" });
+    await h.console.waitType("session.event", (b) => b.kind === "text" && b.final === true);
+    expect(h.log.prompts).toContain("/agent-teams-skills:design 做个登录页");
   });
 
   it("forwards canUseTool as approval.request and applies approval.resolve", async () => {

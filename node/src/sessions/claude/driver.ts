@@ -15,6 +15,7 @@ import { ToolUseCorrelator } from "./correlate.js";
 import { claudeContent } from "../images.js";
 import { findTranscript, transcriptUserUuids } from "./transcript.js";
 import { ASK_TOOL, askHookOutput, askUserArgs, planEvent, todosEvent } from "./special.js";
+import { qualifySlash, sessionCommands } from "./commands.js";
 
 /** How long an AskUserQuestion may wait for the user (seconds; the hook's timeout). */
 const ASK_TIMEOUT_S = 7 * 24 * 3600;
@@ -45,6 +46,8 @@ export class ClaudeDriver implements Driver {
   private closing = false;
   private turnId: string | undefined;
   private lastTools: string[] | null = null;
+  /** Names of the session's own slash commands (skills, plugin commands), for qualifySlash. */
+  private commandNames: string[] = [];
   private readonly waitingUuids = new Map<string, string>();
   private readonly uuidToMsg = new Map<string, string>();
   private readonly toolStarts = new Map<string, number>();
@@ -92,9 +95,11 @@ export class ClaudeDriver implements Driver {
       const platform = mcp.find((s) => s.name === "platform");
       const tools = [...this.claude.tools, ...(platform?.tools ?? []).map((t) => PLATFORM_PREFIX + t.name)];
       this.lastTools ??= tools;
+      const commands = sessionCommands(init.commands);
+      this.commandNames = commands.map((c) => c.name);
       return {
         sdk_session_id: this.sdkSessionId,
-        init: { model: this.claude.model, tools, permission_mode: this.claude.permission_mode, ...(init.claude_code_version ? { claude_code_version: init.claude_code_version } : {}), mcp_servers: mcp.map((s) => ({ name: s.name, status: s.status })) },
+        init: { model: this.claude.model, tools, permission_mode: this.claude.permission_mode, ...(init.claude_code_version ? { claude_code_version: init.claude_code_version } : {}), mcp_servers: mcp.map((s) => ({ name: s.name, status: s.status })), commands },
       };
     } catch (err) {
       await this.close();
@@ -109,7 +114,7 @@ export class ClaudeDriver implements Driver {
     this.uuidToMsg.set(uuid, msg.msg_id);
     this.waitingUuids.set(uuid, msg.msg_id);
     this.setRunning(true);
-    this.prompt.push({ type: "user", message: { role: "user", content: claudeContent(msg.text, msg.images) }, parent_tool_use_id: null, uuid: uuid as SDKUserMessage["uuid"], priority: msg.priority });
+    this.prompt.push({ type: "user", message: { role: "user", content: claudeContent(qualifySlash(msg.text, this.commandNames), msg.images) }, parent_tool_use_id: null, uuid: uuid as SDKUserMessage["uuid"], priority: msg.priority });
     return this.turnId ? { turn_id: this.turnId } : {};
   }
 
@@ -155,6 +160,7 @@ export class ClaudeDriver implements Driver {
 
   private onMessage(msg: SDKMessage): void {
     if (msg.type === "system" && msg.subtype === "init") return this.onInit(msg.tools);
+    if (msg.type === "system" && msg.subtype === "commands_changed") this.commandNames = sessionCommands(msg.commands).map((c) => c.name);
     if (msg.type === "assistant") this.onAssistant(msg.user_message_uuids, msg.message.content);
     for (const ev of mapClaudeMessage(msg)) this.emit(ev);
     if (msg.type === "result") this.onResult();

@@ -5,7 +5,7 @@ import { ResumeFailed, type Driver, type DriverContext, type EventFields, type O
 import type { AppServer } from "./appserver.js";
 import type { CodexHub, ThreadListener } from "./hub.js";
 import { errorNotification, itemCompleted, itemStarted, turnCompleted } from "./mapper.js";
-import { codexImages } from "../images.js";
+import { codexFileNote, codexImages } from "../images.js";
 
 export interface CodexDriverDeps {
   hub: CodexHub;
@@ -254,7 +254,7 @@ function turnRef(codexTurnId: string): string {
 }
 
 function input(msg: OutgoingMessage): Array<Record<string, unknown>> {
-  return [{ type: "text", text: MARKER(msg.msg_id) + msg.text, text_elements: [] }, ...codexImages(msg.images)];
+  return [{ type: "text", text: MARKER(msg.msg_id) + msg.text + codexFileNote(msg.images), text_elements: [] }, ...codexImages(msg.images)];
 }
 
 function str(v: unknown): string | undefined {

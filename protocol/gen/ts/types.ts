@@ -288,14 +288,14 @@ export interface ApprovalResolve {
   decided_by: string;
 }
 /**
- * An image the user attached to a message (at_attachments). The daemon downloads it with GET <console>/nodes/attachments/<id> and its node token, then hands it to the runtime: Claude gets an image content block, Codex a localImage input item.
+ * An image the user attached to a message (at_attachments). The daemon downloads it with GET <console>/nodes/attachments/<id> and its node token, then hands it to the runtime: Claude gets an image content block (a document block for a PDF), Codex a localImage input item (a PDF is saved and its path named in the text).
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "ImageRef".
  */
 export interface ImageRef {
   id: string;
-  media_type: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+  media_type: "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "application/pdf";
   name?: string;
   size?: number;
 }
@@ -1319,6 +1319,12 @@ export interface SessionInit {
   permission_mode?: string;
   claude_code_version?: string;
   mcp_servers?: McpServerStatus[];
+  /**
+   * Slash commands the session offers besides Claude Code's own (role skills, plugin skills and commands), from initializationResult().commands without the builtin ones. Absent for Codex.
+   *
+   * @maxItems 200
+   */
+  commands?: SlashCommand[];
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -1327,6 +1333,15 @@ export interface SessionInit {
 export interface McpServerStatus {
   name: string;
   status: string;
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "SlashCommand".
+ */
+export interface SlashCommand {
+  name: string;
+  description?: string;
+  argument_hint?: string;
 }
 /**
  * Result of session.open.

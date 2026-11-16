@@ -132,6 +132,17 @@ async function dirListing(repo, rev, path) {
   });
 }
 
+async function tree(repo, ref) {
+  const out = await tryGit(repo, ["ls-tree", "-r", "--full-tree", ref || "main"]);
+  if (out === null) throw new HttpError(404, "Not Found");
+  const entries = out.trim().split("\n").filter(Boolean).map((l) => {
+    const [meta, path] = l.split("\t");
+    const [, type, sha] = meta.split(" ");
+    return { path, type, sha };
+  });
+  return [200, { sha: ref, tree: entries, truncated: false }];
+}
+
 const pullsFile = () => join(root, ".localgh-pulls.json");
 const loadPulls = () => (existsSync(pullsFile()) ? JSON.parse(readFileSync(pullsFile(), "utf8")) : {});
 const savePulls = (p) => writeFileSync(pullsFile(), JSON.stringify(p, null, 2));
@@ -187,6 +198,7 @@ const routes = [
   ["POST", /^\/repos\/([^/]+)\/([^/]+)\/merges$/, (m, b) => mergeCommit(repoPath(m[1], m[2]), b.base, b.head, b.commit_message)],
   ["GET", /^\/repos\/([^/]+)\/([^/]+)\/commits\/([^/]+)\/check-runs$/, () => [200, { total_count: 0, check_runs: [] }]],
   ["GET", /^\/repos\/([^/]+)\/([^/]+)\/contents\/(.+)$/, (m, _b, u) => contents(repoPath(m[1], m[2]), m[3], u.searchParams.get("ref"))],
+  ["GET", /^\/repos\/([^/]+)\/([^/]+)\/git\/trees\/(.+)$/, (m) => tree(repoPath(m[1], m[2]), decodeURIComponent(m[3]))],
   ["GET", /^\/repos\/([^/]+)\/([^/]+)\/rulesets$/, () => [200, []]],
   ["POST", /^\/repos\/([^/]+)\/([^/]+)\/pulls$/, (m, b) => createPull(repoPath(m[1], m[2]), `${m[1]}/${m[2]}`, b)],
   ["GET", /^\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)$/, (m) => getPull(repoPath(m[1], m[2]), `${m[1]}/${m[2]}`, m[3])],

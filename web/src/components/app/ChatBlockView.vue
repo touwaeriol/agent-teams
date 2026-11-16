@@ -7,6 +7,7 @@ import { clock, cn } from "@/lib/utils";
 import ChatCard from "./chatcards/ChatCard.vue";
 import Dot from "./Dot.vue";
 import MessageImages from "./MessageImages.vue";
+import MessageRefs from "./composer/MessageRefs.vue";
 import ThreadChip from "./ThreadChip.vue";
 
 defineProps<{ block: ChatBlock; threads: ThreadView[]; speakerColor: string; compact?: boolean; pid: string }>();
@@ -17,6 +18,7 @@ const emit = defineEmits<{ openThread: [no: number] }>();
   <ChatCard v-if="block.kind === 'card'" :message="block.message" :pid="pid" />
   <div v-else-if="block.kind === 'user'" class="flex max-w-[85%] flex-col gap-2 self-end">
     <MessageImages :items="block.message.meta?.attachments" />
+    <MessageRefs :refs="block.message.meta?.refs" />
     <div v-if="block.message.content" :class="cn('self-end whitespace-pre-wrap rounded-2xl bg-raised px-4 py-2.5', compact ? 'leading-6' : 'leading-[26px]')">{{ block.message.content }}</div>
   </div>
   <p v-else-if="block.kind === 'line'" :class="cn('text-center text-xs', block.message.role === 'error' ? 'text-destructive' : 'text-muted-foreground')">{{ block.message.content }}</p>

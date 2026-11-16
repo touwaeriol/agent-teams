@@ -1,6 +1,6 @@
 <script setup lang="ts">
-/** Thumbnails of the attached images, each with a remove button. */
-import { X } from "lucide-vue-next";
+/** Thumbnails of the attached images (file chips for PDFs and text files), each with a remove button. */
+import { FileText, X } from "lucide-vue-next";
 import Spinner from "@/components/common/Spinner.vue";
 import { cn } from "@/lib/utils";
 import type { Attachments } from "./attachments";
@@ -9,14 +9,21 @@ defineProps<{ a: Attachments; class?: string }>();
 </script>
 
 <template>
-  <div v-if="a.items.value.length > 0" :class="cn('flex flex-wrap gap-2', $props.class)" aria-label="附带的图片">
+  <div v-if="a.items.value.length > 0" :class="cn('flex flex-wrap gap-2', $props.class)" aria-label="附件">
     <span
       v-for="x in a.items.value"
       :key="x.key"
-      :class="cn('group relative size-14 shrink-0 overflow-hidden rounded-lg border bg-raised', x.error && 'border-destructive')"
+      :class="cn('group relative h-14 shrink-0 overflow-hidden rounded-lg border bg-raised', x.kind === 'image' ? 'w-14' : 'w-40', x.error && 'border-destructive')"
       :title="x.error ?? x.name"
     >
-      <img :src="x.preview" :alt="x.name" :class="cn('size-full object-cover', !x.id && 'opacity-60')" />
+      <img v-if="x.kind === 'image'" :src="x.preview" :alt="x.name" :class="cn('size-full object-cover', !x.id && 'opacity-60')" />
+      <span v-else :class="cn('flex size-full items-center gap-2 py-2 pl-2.5 pr-6 text-xs', !x.id && 'opacity-60')">
+        <FileText class="size-5 shrink-0 text-muted-foreground" :stroke-width="1.6" />
+        <span class="flex min-w-0 flex-col">
+          <span class="truncate font-medium">{{ x.name }}</span>
+          <span class="text-[11px] text-muted-foreground">{{ x.kind === "pdf" ? "PDF" : "文本" }}</span>
+        </span>
+      </span>
       <span v-if="!x.id && !x.error" class="absolute inset-0 flex items-center justify-center"><Spinner class="size-4" /></span>
       <span v-if="x.error" class="absolute inset-x-0 bottom-0 bg-destructive/90 px-1 text-center text-[10px] text-white">失败</span>
       <button

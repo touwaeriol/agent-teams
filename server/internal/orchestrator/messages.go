@@ -3,7 +3,9 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
@@ -36,8 +38,12 @@ type UserMessage struct {
 	UserID, ConvID, Content string
 	Interrupt               bool
 	Meta                    map[string]any
-	// Images are attachment ids of the conversation's project, in order.
+	// Images are attachment ids of the conversation's project, in order (images, PDFs and
+	// text files: a text file's content is put into the delivered text).
 	Images []string
+	// Context is appended to the delivered text only (the resolved @ references); the stored
+	// message keeps the user's own words.
+	Context string
 }
 
 // PostUserMessageWith stores the user's message (with any images) and delivers it.
@@ -67,8 +73,12 @@ func (o *Orchestrator) PostUserMessageWith(ctx context.Context, in UserMessage) 
 		if len(images) > 0 {
 			meta = withImages(meta, images)
 		}
+		text, files, err := o.inlineTexts(ctx, tx, c, content, images)
+		if err != nil {
+			return err
+		}
 		rec := &core.NewMessage{ConversationID: c.ID, Role: "user", Author: "user", Kind: kind, Content: content, Meta: meta}
-		m, err = o.Deliver(ctx, tx, emp, Delivery{Text: content, Kind: "user", Priority: prio, Interrupt: interrupt, Record: rec, Images: images})
+		m, err = o.Deliver(ctx, tx, emp, Delivery{Text: text + in.Context, Kind: "user", Priority: prio, Interrupt: interrupt, Record: rec, Images: files})
 		return err
 	})
 	return m, err
@@ -91,6 +101,50 @@ func (o *Orchestrator) messageImages(ctx context.Context, tx *core.Tx, c core.Co
 		out[i] = a.Ref()
 	}
 	return out, nil
+}
+
+// maxInlineText is how much of one attached text file goes into the message.
+const maxInlineText = 60000
+
+// inlineTexts puts the attached text files into the delivered text and returns the attachments
+// that travel as files (images, PDFs).
+func (o *Orchestrator) inlineTexts(ctx context.Context, tx *core.Tx, c core.Conversation, text string, refs []core.AttachmentRef) (string, []core.AttachmentRef, error) {
+	var ids []string
+	for _, r := range refs {
+		if core.IsInlineText(r.ContentType) {
+			ids = append(ids, r.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return text, refs, nil
+	}
+	data, err := core.AttachmentTexts(ctx, tx, deref(c.ProjectID), ids)
+	if err != nil {
+		return "", nil, err
+	}
+	var b strings.Builder
+	b.WriteString(text)
+	files := make([]core.AttachmentRef, 0, len(refs))
+	for _, r := range refs {
+		if !core.IsInlineText(r.ContentType) {
+			files = append(files, r)
+			continue
+		}
+		body, cut := clipText(string(data[r.ID]), maxInlineText)
+		fmt.Fprintf(&b, "\n\n[附件：%s%s]\n```\n%s\n```", r.Name, cut, body)
+	}
+	return b.String(), files, nil
+}
+
+// clipText keeps the first n bytes of s on a rune boundary; the note says it was cut.
+func clipText(s string, n int) (string, string) {
+	if len(s) <= n {
+		return s, ""
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n], fmt.Sprintf("，只取前 %d 字节", n)
 }
 
 func withImages(meta map[string]any, images []core.AttachmentRef) map[string]any {

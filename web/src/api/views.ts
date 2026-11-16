@@ -248,12 +248,26 @@ export interface MessageView {
     /** A platform note to a thread's lead: the thread looked stalled after a node daemon restart. */
     stalled?: boolean;
     attachments?: AttachmentRef[];
+    /** @ references the user put in the message (resolved into context for the employee). */
+    refs?: MessageRefChip[];
     /** Chat cards: who the card is about. */
     employee?: string;
     todos?: TodoItem[];
     deliverable?: { id: string; kind: string; title: string; url: string; hosted?: boolean; entry?: string; render?: string; version?: number };
   };
   created_at: string;
+}
+
+/** One @ reference of a sent message (meta.refs). */
+export interface MessageRefChip {
+  kind: "file" | "thread" | "deliverable" | "memory";
+  label: string;
+  repo?: string;
+  path?: string;
+  ref?: string;
+  no?: number;
+  id?: string;
+  name?: string;
 }
 
 /** An image attached to a message (meta.attachments); served at /api/attachments/{id}. */

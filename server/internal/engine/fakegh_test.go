@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -31,11 +32,12 @@ type fakeGitHub struct {
 	pulls     map[string]*fakePR
 	prs       int
 	n         int
+	files     map[string]string // "repo:path" → content, served by contents and git/trees at any ref
 }
 
 func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 	f := &fakeGitHub{refs: map[string]string{"o/r:main": "sha-main", "o/web:main": "sha-web-main", "o/web:dev": "sha-web-dev"},
-		conflicts: map[string]bool{}, checks: map[string][]map[string]any{}, pulls: map[string]*fakePR{}}
+		conflicts: map[string]bool{}, checks: map[string][]map[string]any{}, pulls: map[string]*fakePR{}, files: map[string]string{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /user", f.user)
 	mux.HandleFunc("GET /repos/{o}/{r}", func(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +52,8 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 	mux.HandleFunc("POST /repos/{o}/{r}/pulls", f.createPR)
 	mux.HandleFunc("GET /repos/{o}/{r}/pulls/{n}", f.getPR)
 	mux.HandleFunc("PUT /repos/{o}/{r}/pulls/{n}/merge", f.mergePR)
-	mux.HandleFunc("GET /repos/{o}/{r}/contents/{path...}", func(w http.ResponseWriter, r *http.Request) { write(w, 404, map[string]string{"message": "Not Found"}) })
+	mux.HandleFunc("GET /repos/{o}/{r}/contents/{path...}", f.contents)
+	mux.HandleFunc("GET /repos/{o}/{r}/git/trees/{ref...}", f.tree)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return f, srv
@@ -230,4 +233,34 @@ func (f *fakeGitHub) mergeLog() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.merges...)
+}
+
+// setFile puts a file into a repository of the fake GitHub (every ref sees it).
+func (f *fakeGitHub) setFile(repo, path, content string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.files[repo+":"+path] = content
+}
+
+func (f *fakeGitHub) contents(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	text, ok := f.files[repoOf(r)+":"+r.PathValue("path")]
+	f.mu.Unlock()
+	if !ok {
+		write(w, 404, map[string]string{"message": "Not Found"})
+		return
+	}
+	write(w, 200, map[string]string{"type": "file", "encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte(text))})
+}
+
+func (f *fakeGitHub) tree(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	entries := []map[string]string{}
+	for k := range f.files {
+		if path, ok := strings.CutPrefix(k, repoOf(r)+":"); ok {
+			entries = append(entries, map[string]string{"path": path, "type": "blob"})
+		}
+	}
+	write(w, 200, map[string]any{"tree": entries, "truncated": false})
 }

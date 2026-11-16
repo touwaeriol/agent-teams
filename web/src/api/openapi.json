@@ -352,13 +352,13 @@
         "additionalProperties": false,
         "properties": {
           "data": {
-            "description": "Base64 of a PNG, JPEG, GIF or WebP image, at most 5 MB",
+            "description": "Base64 of a PNG, JPEG, GIF or WebP image or a PDF (at most 5 MB), or a UTF-8 text file (at most 1 MB)",
             "maxLength": 6990508,
             "minLength": 1,
             "type": "string"
           },
           "name": {
-            "description": "File name, shown under the thumbnail",
+            "description": "File name, shown under the thumbnail; a text file is recognised by its extension",
             "maxLength": 300,
             "minLength": 1,
             "type": "string"
@@ -378,7 +378,9 @@
               "image/png",
               "image/jpeg",
               "image/gif",
-              "image/webp"
+              "image/webp",
+              "application/pdf",
+              "text/plain"
             ],
             "type": "string"
           },
@@ -688,6 +690,129 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "ComposerCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "argument_hint": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "description": "Typed after the slash",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "skill",
+              "plugin"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "argument_hint",
+          "source"
+        ],
+        "type": "object"
+      },
+      "ComposerCommands": {
+        "additionalProperties": false,
+        "properties": {
+          "commands": {
+            "description": "Empty for Codex employees",
+            "items": {
+              "$ref": "#/components/schemas/ComposerCommand"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "employee": {
+            "type": "string"
+          },
+          "from": {
+            "description": "session: what the latest session reported; role: the role's configured skills and plugins",
+            "enum": [
+              "session",
+              "role"
+            ],
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "tier": {
+            "enum": [
+              "coordinator",
+              "lead"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "employee",
+          "tier",
+          "runtime",
+          "from",
+          "commands"
+        ],
+        "type": "object"
+      },
+      "ComposerContext": {
+        "additionalProperties": false,
+        "properties": {
+          "employee": {
+            "type": "string"
+          },
+          "instructions_chars": {
+            "description": "项目指令 length",
+            "format": "int64",
+            "type": "integer"
+          },
+          "memory_files": {
+            "description": "Topic files besides MEMORY.md",
+            "format": "int64",
+            "type": "integer"
+          },
+          "memory_index_chars": {
+            "description": "MEMORY.md length (read by every session)",
+            "format": "int64",
+            "type": "integer"
+          },
+          "message_chars": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "messages": {
+            "description": "Messages in this conversation",
+            "format": "int64",
+            "type": "integer"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "session": {
+            "$ref": "#/components/schemas/SessionUsage",
+            "description": "null before the first session"
+          }
+        },
+        "required": [
+          "employee",
+          "runtime",
+          "instructions_chars",
+          "memory_index_chars",
+          "memory_files",
+          "messages",
+          "message_chars",
+          "session"
+        ],
         "type": "object"
       },
       "CoordinatorView": {
@@ -1913,6 +2038,45 @@
         ],
         "type": "object"
       },
+      "MessageRef": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "file",
+              "thread",
+              "deliverable",
+              "memory"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "no": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "maxLength": 1000,
+            "type": "string"
+          },
+          "repo": {
+            "maxLength": 300,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
       "MessageView": {
         "additionalProperties": false,
         "properties": {
@@ -2757,7 +2921,7 @@
         "additionalProperties": false,
         "properties": {
           "attachments": {
-            "description": "Image ids from POST /api/projects/{pid}/attachments, in order",
+            "description": "Attachment ids (images, PDFs, text files) from POST /api/projects/{pid}/attachments, in order",
             "items": {
               "type": "string"
             },
@@ -2775,6 +2939,17 @@
           "interrupt": {
             "description": "Interrupt the current turn first",
             "type": "boolean"
+          },
+          "refs": {
+            "description": "@ references: resolved into a context block delivered with the message, shown as chips (meta.refs)",
+            "items": {
+              "$ref": "#/components/schemas/MessageRef"
+            },
+            "maxItems": 10,
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
         "required": [
@@ -3300,6 +3475,77 @@
         "required": [
           "ok",
           "checks"
+        ],
+        "type": "object"
+      },
+      "RefCandidate": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "id": {
+            "description": "deliverable: its id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "file",
+              "thread",
+              "deliverable",
+              "memory"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "description": "What the chip shows: a path, #12 标题, a title or a file name",
+            "type": "string"
+          },
+          "name": {
+            "description": "memory: file name",
+            "type": "string"
+          },
+          "no": {
+            "description": "thread: its number",
+            "format": "int64",
+            "type": "integer"
+          },
+          "path": {
+            "description": "file: path in the repository",
+            "type": "string"
+          },
+          "repo": {
+            "description": "file: owner/name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "RefList": {
+        "additionalProperties": false,
+        "properties": {
+          "files_note": {
+            "description": "Why repository files are missing or partial ('' when listed in full)",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RefCandidate"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "files_note"
         ],
         "type": "object"
       },
@@ -3925,6 +4171,40 @@
         "required": [
           "state",
           "node"
+        ],
+        "type": "object"
+      },
+      "SessionUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "cost_usd": {
+            "format": "double",
+            "type": "number"
+          },
+          "last_turn": {
+            "$ref": "#/components/schemas/TokenUsage"
+          },
+          "model": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "total": {
+            "$ref": "#/components/schemas/TokenUsage"
+          },
+          "turns": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "state",
+          "model",
+          "turns",
+          "total",
+          "last_turn",
+          "cost_usd"
         ],
         "type": "object"
       },
@@ -4779,6 +5059,34 @@
           "reminded_at",
           "last_activity_at",
           "latest_deliverable"
+        ],
+        "type": "object"
+      },
+      "TokenUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "cache_read": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "cache_write": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "input": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "output": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "input",
+          "output",
+          "cache_read",
+          "cache_write"
         ],
         "type": "object"
       },
@@ -6317,12 +6625,14 @@
         "responses": {
           "200": {
             "content": {
+              "application/pdf": {},
               "image/gif": {},
               "image/jpeg": {},
               "image/png": {},
-              "image/webp": {}
+              "image/webp": {},
+              "text/plain": {}
             },
-            "description": "The image",
+            "description": "The file",
             "headers": {
               "Cache-Control": {
                 "schema": {
@@ -6357,7 +6667,91 @@
             "description": "Error"
           }
         },
-        "summary": "The image bytes of an attachment",
+        "summary": "The bytes of an attachment",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/api/conversations/{cid}/commands": {
+      "get": {
+        "operationId": "conversation-commands",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComposerCommands"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Skills and plugin commands the conversation's employee can run as /name",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/api/conversations/{cid}/context": {
+      "get": {
+        "operationId": "conversation-context",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComposerContext"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "What the conversation's employee works from: instructions, memory, conversation and session token use",
         "tags": [
           "conversations"
         ]
@@ -8378,7 +8772,7 @@
             "description": "Error"
           }
         },
-        "summary": "Upload an image to attach to a message (PNG, JPEG, GIF or WebP, at most 5 MB)",
+        "summary": "Upload a file to attach to a message: an image or PDF (at most 5 MB) or a text file (at most 1 MB)",
         "tags": [
           "conversations"
         ]
@@ -9208,6 +9602,74 @@
             "description": "Error"
           }
         },
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/projects/{pid}/references": {
+      "get": {
+        "operationId": "project-references",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only this kind ('' = all)",
+            "explode": false,
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "description": "Only this kind ('' = all)",
+              "enum": [
+                "file",
+                "thread",
+                "deliverable",
+                "memory",
+                ""
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Repository files, threads, deliverables and memory files to reference with @",
         "tags": [
           "projects"
         ]

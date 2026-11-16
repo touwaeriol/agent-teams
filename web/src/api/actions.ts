@@ -56,11 +56,11 @@ export const schedules = {
 };
 
 export const conversations = {
-  send: (cid: string, content: string, interrupt = false, attachments: string[] = []) =>
+  send: (cid: string, content: string, interrupt = false, attachments: string[] = [], refs: S["MessageRef"][] = []) =>
     unwrap(
       client.POST("/api/conversations/{cid}/messages", {
         params: { path: { cid } },
-        body: { content, interrupt, ...(attachments.length ? { attachments } : {}) },
+        body: { content, interrupt, ...(attachments.length ? { attachments } : {}), ...(refs.length ? { refs } : {}) },
         ...idem(),
       }),
     ),

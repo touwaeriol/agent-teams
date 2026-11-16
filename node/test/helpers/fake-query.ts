@@ -37,7 +37,10 @@ class FakeQuery {
   }
 
   async initializationResult() {
-    return { claude_code_version: "2.1.325-fake", account: {}, commands: [], agents: [], models: [] };
+    return {
+      claude_code_version: "2.1.325-fake", account: {}, agents: [], models: [],
+      commands: [{ name: "design", description: "Claude Design access", argumentHint: "", builtin: true }, { name: "agent-teams-skills:design", description: "Make HTML prototypes", argumentHint: "" }],
+    };
   }
 
   async mcpServerStatus() {

@@ -48,9 +48,10 @@ type postMessageInput struct {
 	CID            string `path:"cid" maxLength:"64"`
 	IdempotencyKey string `header:"Idempotency-Key" maxLength:"128"`
 	Body           struct {
-		Content     string   `json:"content" maxLength:"100000" doc:"Required unless attachments are given"`
-		Interrupt   bool     `json:"interrupt,omitempty" doc:"Interrupt the current turn first"`
-		Attachments []string `json:"attachments,omitempty" maxItems:"8" doc:"Image ids from POST /api/projects/{pid}/attachments, in order"`
+		Content     string       `json:"content" maxLength:"100000" doc:"Required unless attachments are given"`
+		Interrupt   bool         `json:"interrupt,omitempty" doc:"Interrupt the current turn first"`
+		Attachments []string     `json:"attachments,omitempty" maxItems:"8" doc:"Attachment ids (images, PDFs, text files) from POST /api/projects/{pid}/attachments, in order"`
+		Refs        []MessageRef `json:"refs,omitempty" maxItems:"10" doc:"@ references: resolved into a context block delivered with the message, shown as chips (meta.refs)"`
 	}
 }
 
@@ -140,12 +141,20 @@ func (a *API) postMessage(ctx context.Context, in *postMessageInput) (*messageOu
 		return nil, err
 	}
 	content := strings.TrimSpace(in.Body.Content)
-	if content == "" && len(in.Body.Attachments) == 0 {
+	if content == "" && len(in.Body.Attachments) == 0 && len(in.Body.Refs) == 0 {
 		return nil, httpapi.Invalid("content", "消息不能为空")
+	}
+	refText, chips, err := a.resolveRefs(ctx, u, c, in.Body.Refs)
+	if err != nil {
+		return nil, err
+	}
+	var meta map[string]any
+	if len(chips) > 0 {
+		meta = map[string]any{"refs": chips}
 	}
 	v, err := idempotent(ctx, a, u.ID, "message:"+c.ID, in.IdempotencyKey, func() (core.MessageView, error) {
 		m, err := a.e.Orch.PostUserMessageWith(ctx, orchestrator.UserMessage{UserID: u.ID, ConvID: c.ID, Content: content,
-			Interrupt: in.Body.Interrupt, Images: in.Body.Attachments})
+			Interrupt: in.Body.Interrupt, Images: in.Body.Attachments, Meta: meta, Context: refText})
 		return core.MessageViewOf(m), err
 	})
 	if err != nil {

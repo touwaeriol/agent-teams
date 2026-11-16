@@ -18,6 +18,7 @@ node deploy/e2e/run_restart.mjs "$S"               # daemon restart while a card
 node deploy/e2e/run_readonly.mjs "$S"              # read-only thread finishes without a PR, archive closes sessions, parked coordinator wakes on a message (haiku)
 node deploy/e2e/run_reopen.mjs "$S"                # a finished read-only thread reopens with a follow-up message; the lead resumes and answers from its earlier context (haiku)
 node deploy/e2e/run_memory.mjs "$S"                # project instruction followed; coordinator memory_write; a new thread's lead answers from memory (haiku)
+node deploy/e2e/run_slash.mjs "$S"                 # a role skill run as "/design …" in the lead chat; @file + a text attachment to the coordinator (haiku)
 node deploy/e2e/run_resume.mjs "$S"                # code word survives park, SIGTERM, SIGKILL, console restart, lost transcript; question cards (haiku)
 # screenshots (Playwright image, NODE_PATH with the playwright package):
 node deploy/e2e/screenshots.cjs http://127.0.0.1:<PORT> <out> <project-id> 1
@@ -42,6 +43,7 @@ node --test deploy/e2e/localgh.test.mjs            # the emulator's own tests
 | `run_readonly.mjs` | a research thread whose lead only reads ends with `finish` alone (done, no thread branch, no PR, summary stored, sessions closed); archiving it leaves no live session record on the node and the thread chat refuses messages with the 取消归档 hint; the coordinator's session is parked (`park_after_s`), a new message shows it busy, wakes it and gets an answer; about 4 minutes |
 | `run_reopen.mjs` | a read-only thread whose brief carries a code word finishes (done); the user then asks the lead for the code word: the message reopens the thread (running, the old summary kept in a `reopened` note, the coordinator told), the lead resumes its old SDK session (no recap) and answers with the code word; about 3 minutes |
 | `run_memory.mjs` | the project instructions say every answer starts with 【测】 and the coordinator's reply does; the coordinator is asked to `memory_write` a code word into `deploy.md` (MEMORY.md links it, `updated_by = coordinator`); a new read-only thread's lead, in a fresh session, finishes with the code word from project memory, and its summary lands in `thread-summaries.md`. `--pause` waits for `<scratch>/go-memory` (screenshots); about 4 minutes |
+| `run_slash.mjs` | a lead whose role has the design skill: `/commands` lists `design` from the session's own init, and the message `/design …` runs the skill (the reply names its section 2 heading); the coordinator gets `@README.md` of `local/hello` (`refs`) plus a `notes.md` text attachment and quotes the file's third line and the code word; the stored message keeps only the words and the chip; `/context` reports the session's tokens. `--pause` waits for `<scratch>/go-slash`; about 2 minutes |
 | `screenshots.cjs` | Main, thread panel, full thread page, Office, Team, Nodes at deviceScaleFactor 2 (signs in once: `/auth/login` is rate limited per account) |
 
 With no CI on the test repository the merge queue waits `appear_timeout_s` (300 s) and then

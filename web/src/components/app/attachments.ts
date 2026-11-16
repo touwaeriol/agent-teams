@@ -1,17 +1,19 @@
-// Image input for message boxes: paste, drop or pick images; each uploads at once to
-// /api/projects/{pid}/attachments and shows as a thumbnail with a remove button. Sending
-// passes the uploaded ids; the strip clears after a successful send.
+// File input for message boxes: paste, drop or pick images, PDFs or text files; each uploads at
+// once to /api/projects/{pid}/attachments and shows as a thumbnail (images) or a file chip with a
+// remove button. Sending passes the uploaded ids; the strip clears after a successful send.
 import { computed, onBeforeUnmount, ref, toValue, type ComputedRef, type MaybeRefOrGetter, type Ref } from "vue";
 import { projects as projectActions } from "@/api/actions";
 import { errorText } from "@/api/mutations";
-import { imageFiles, pickImages } from "@/lib/images";
+import { attachKind, imageFiles, pickImages, type AttachKind } from "@/lib/images";
 import { fileBase64 } from "@/lib/library";
 import { toast } from "@/lib/toast";
 
 export interface PendingImage {
   key: string;
   name: string;
+  /** Object URL of an image ("" for PDFs and text files). */
   preview: string;
+  kind: AttachKind;
   id?: string;
   error?: string;
 }
@@ -49,8 +51,11 @@ export function useAttachments(pid: MaybeRefOrGetter<string>, uploader: Uploader
   const add = (files: File[]) => {
     const { ok, problems } = pickImages(files, items.value.length);
     problems.forEach((p) => toast.error(p));
-    const fresh = ok.map((f) => ({ key: `img-${++counter}`, name: f.name || "图片", preview: URL.createObjectURL(f), file: f }));
-    urls.push(...fresh.map((f) => f.preview));
+    const fresh = ok.map((f) => {
+      const kind = attachKind(f) ?? "text";
+      return { key: `img-${++counter}`, name: f.name || "图片", kind, preview: kind === "image" ? URL.createObjectURL(f) : "", file: f };
+    });
+    urls.push(...fresh.map((f) => f.preview).filter(Boolean));
     items.value = [...items.value, ...fresh.map(({ file: _file, ...x }) => x)];
     fresh.forEach((f) => void send(f.key, f.file));
   };

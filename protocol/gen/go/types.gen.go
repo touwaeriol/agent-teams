@@ -2629,8 +2629,8 @@ func (j *Hello) UnmarshalJSON(value []byte) error {
 
 // An image the user attached to a message (at_attachments). The daemon downloads
 // it with GET <console>/nodes/attachments/<id> and its node token, then hands it
-// to the runtime: Claude gets an image content block, Codex a localImage input
-// item.
+// to the runtime: Claude gets an image content block (a document block for a PDF),
+// Codex a localImage input item (a PDF is saved and its path named in the text).
 type ImageRef struct {
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
@@ -2647,6 +2647,7 @@ type ImageRef struct {
 
 type ImageRefMediaType string
 
+const ImageRefMediaTypeApplicationPdf ImageRefMediaType = "application/pdf"
 const ImageRefMediaTypeImageGif ImageRefMediaType = "image/gif"
 const ImageRefMediaTypeImageJpeg ImageRefMediaType = "image/jpeg"
 const ImageRefMediaTypeImagePng ImageRefMediaType = "image/png"
@@ -2657,6 +2658,7 @@ var enumValues_ImageRefMediaType = []interface{}{
 	"image/jpeg",
 	"image/gif",
 	"image/webp",
+	"application/pdf",
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -5350,6 +5352,11 @@ type SessionInit struct {
 	// ClaudeCodeVersion corresponds to the JSON schema field "claude_code_version".
 	ClaudeCodeVersion *string `json:"claude_code_version,omitempty,omitzero"`
 
+	// Slash commands the session offers besides Claude Code's own (role skills,
+	// plugin skills and commands), from initializationResult().commands without the
+	// builtin ones. Absent for Codex.
+	Commands []SlashCommand `json:"commands,omitempty,omitzero"`
+
 	// McpServers corresponds to the JSON schema field "mcp_servers".
 	McpServers []McpServerStatus `json:"mcp_servers,omitempty,omitzero"`
 
@@ -5376,6 +5383,9 @@ func (j *SessionInit) UnmarshalJSON(value []byte) error {
 	var plain Plain
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
+	}
+	if len(plain.Commands) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "commands", 200)
 	}
 	*j = SessionInit(plain)
 	return nil
@@ -6164,6 +6174,44 @@ func (j *SkillFile) UnmarshalJSON(value []byte) error {
 		return fmt.Errorf("field %s length: must be <= %d", "path", 200)
 	}
 	*j = SkillFile(plain)
+	return nil
+}
+
+type SlashCommand struct {
+	// ArgumentHint corresponds to the JSON schema field "argument_hint".
+	ArgumentHint *string `json:"argument_hint,omitempty,omitzero"`
+
+	// Description corresponds to the JSON schema field "description".
+	Description *string `json:"description,omitempty,omitzero"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SlashCommand) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["name"]; raw != nil && !ok {
+		return fmt.Errorf("field name in SlashCommand: required")
+	}
+	type Plain SlashCommand
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.ArgumentHint != nil && utf8.RuneCountInString(string(*plain.ArgumentHint)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "argument_hint", 200)
+	}
+	if plain.Description != nil && utf8.RuneCountInString(string(*plain.Description)) > 2000 {
+		return fmt.Errorf("field %s length: must be <= %d", "description", 2000)
+	}
+	if utf8.RuneCountInString(string(plain.Name)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "name", 200)
+	}
+	*j = SlashCommand(plain)
 	return nil
 }
 

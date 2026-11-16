@@ -24,7 +24,7 @@
     },
     "ImageRef": {
       "title": "ImageRef",
-      "description": "An image the user attached to a message (at_attachments). The daemon downloads it with GET <console>/nodes/attachments/<id> and its node token, then hands it to the runtime: Claude gets an image content block, Codex a localImage input item.",
+      "description": "An image the user attached to a message (at_attachments). The daemon downloads it with GET <console>/nodes/attachments/<id> and its node token, then hands it to the runtime: Claude gets an image content block (a document block for a PDF), Codex a localImage input item (a PDF is saved and its path named in the text).",
       "type": "object",
       "required": [
         "id",
@@ -41,7 +41,8 @@
             "image/png",
             "image/jpeg",
             "image/gif",
-            "image/webp"
+            "image/webp",
+            "application/pdf"
           ]
         },
         "name": {

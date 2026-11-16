@@ -184,10 +184,11 @@
 ```json
 {"session_id": "s_…", "open_gen": 3, "sdk_session_id": "8d2f…", "codex_thread_id": null,
  "init": {"model": "claude-opus-5-5", "tools": ["Read", "…", "mcp__platform__complete_task"], "permission_mode": "default",
-          "claude_code_version": "2.1.325", "mcp_servers": [{"name": "platform", "status": "connected"}]}}
+          "claude_code_version": "2.1.325", "mcp_servers": [{"name": "platform", "status": "connected"}],
+          "commands": [{"name": "agent-teams-skills:design", "description": "(agent-teams-skills) Make HTML prototypes…"}]}}
 ```
 
-`init` 来自 `initializationResult()`（Codex 见上）。控制台用 `init.tools` 做角色工具核对（`architecture.md` §10.2）：通过 → 发 `session.release`（可靠，键 `session_id + open_gen`）；不符 → `session.close {reason:"policy_violation"}`。之后每个回合的 `system/init`（`turn_started` 事件带 `tools`）再核对一次，不符同样关闭。
+`init` 来自 `initializationResult()`（Codex 见上）。`init.commands` 是会话自己的斜杠命令（岗位技能、插件的技能和命令；`initializationResult().commands` 去掉 `builtin` 的 Claude Code 自带命令），控制台存在会话的 `init` 里，输入框的 “/” 列表用它（`api.md` §3.2）。用户消息以 `/名字` 开头时守护进程原样作为提示推给会话，CLI 当斜杠命令执行；`名字` 不带插件前缀且恰好对应会话的一个命令（如 `design` → `agent-teams-skills:design`）时先补全，免得落到 CLI 自带的同名命令（CLI 有自己的 `/design`）。带附件时文字块排在最前，CLI 才认得出命令（SDK 0.3.325 实测）。控制台用 `init.tools` 做角色工具核对（`architecture.md` §10.2）：通过 → 发 `session.release`（可靠，键 `session_id + open_gen`）；不符 → `session.close {reason:"policy_violation"}`。之后每个回合的 `system/init`（`turn_started` 事件带 `tools`）再核对一次，不符同样关闭。
 
 ### 4.3 `session.send`（控制台 → 守护进程，键：`msg_id`）
 
@@ -196,7 +197,7 @@
  "interrupt_first": false, "images": [{"id": "img_…", "media_type": "image/png", "name": "截图.png", "size": 48213}]}
 ```
 
-- `images`（可选，最多 8 张；`first_message` 也可以带）：用户附的图片。帧里只有引用（帧上限 4 MiB，图片单张可到 5 MB）；守护进程投递前用自己的节点令牌 `GET <控制台>/nodes/attachments/<id>`（`Authorization: Bearer <节点令牌>`，只能取同一用户项目的图片）下载到 `<state>/attachments/<session_id>/`，会话关闭时删掉。Claude：用户消息的 `content` 变成 `[{type:"image", source:{type:"base64", media_type, data}}…, {type:"text", text}]`（Agent SDK 0.3.325 的 `SDKUserMessage.message` 就是 Messages API 的 `MessageParam`，支持图片块）。Codex：在 `turn/start` / `turn/steer` 的 `input` 里追加 `{type:"localImage", path}`。下载失败时照样投递文字，末尾加一行说明图片没取到。
+- `images`（可选，最多 8 张；`first_message` 也可以带）：用户附的图片。帧里只有引用（帧上限 4 MiB，图片单张可到 5 MB）；守护进程投递前用自己的节点令牌 `GET <控制台>/nodes/attachments/<id>`（`Authorization: Bearer <节点令牌>`，只能取同一用户项目的图片）下载到 `<state>/attachments/<session_id>/`，会话关闭时删掉。Claude：用户消息的 `content` 变成 `[{type:"image", source:{type:"base64", media_type, data}}…, {type:"text", text}]`（Agent SDK 0.3.325 的 `SDKUserMessage.message` 就是 Messages API 的 `MessageParam`，支持图片块）。Codex：在 `turn/start` / `turn/steer` 的 `input` 里追加 `{type:"localImage", path}`。`media_type` 为 `application/pdf` 时 Claude 收到 `{type:"document", source:{type:"base64", media_type:"application/pdf", data}}`，Codex 没有文档输入，文字末尾写明 PDF 存在本机哪个路径。下载失败时照样投递文字，末尾加一行说明图片没取到。
 
 - 会话处于 `parked`：守护进程先用 `resume` 重开进程（不需要控制台再发 open），再投递。
 - 会话还没收到本 `open_gen` 的 `session.release`：消息在守护进程排队，release 后按顺序投递（park 后自动 resume 的同一 gen 不需要再 release，但 init 工具若与上次不同则当作违规上报 `session.event{kind:error, code:'protocol'}`）。
