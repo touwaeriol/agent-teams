@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
@@ -51,7 +50,7 @@ func (e *Engine) PurgeThread(ctx context.Context, tx *core.Tx, t core.Thread) er
 
 // purgeThreadDirs removes projects/<pid>/threads/<no> (lead notes, leftovers) on every node the thread used.
 func (e *Engine) purgeThreadDirs(ctx context.Context, tx *core.Tx, t core.Thread) error {
-	rows, err := tx.Query(ctx, `SELECT node_id FROM at_thread_nodes WHERE thread_id = $1
+	rows, err := store.Query(ctx, tx, `SELECT node_id FROM at_thread_nodes WHERE thread_id = $1
 		UNION SELECT node_id FROM at_employees WHERE thread_id = $1 AND node_id IS NOT NULL`, t.ID)
 	if err != nil {
 		return err
@@ -89,7 +88,7 @@ func pgxCollectStrings(rows interface {
 }
 
 func (e *Engine) queueCleanupTx(ctx context.Context, tx *core.Tx, t core.Thread, keepUnpushed bool) error {
-	rows, err := tx.Query(ctx, `SELECT node_id, paths FROM at_thread_nodes WHERE thread_id = $1 AND cleaned_at IS NULL`, t.ID)
+	rows, err := store.Query(ctx, tx, `SELECT node_id, paths FROM at_thread_nodes WHERE thread_id = $1 AND cleaned_at IS NULL`, t.ID)
 	if err != nil {
 		return err
 	}
@@ -193,7 +192,7 @@ func (e *Engine) cleaned(ctx context.Context, tx *core.Tx, node store.Node, meta
 	if threadID == "" {
 		return nil
 	}
-	if _, err := tx.Exec(ctx, `UPDATE at_thread_nodes SET cleaned_at = now() WHERE thread_id = $1 AND node_id = $2`,
+	if _, err := store.Exec(ctx, tx, `UPDATE at_thread_nodes SET cleaned_at = now() WHERE thread_id = $1 AND node_id = $2`,
 		threadID, node.ID); err != nil {
 		return err
 	}
@@ -214,7 +213,7 @@ func (e *Engine) cleaned(ctx context.Context, tx *core.Tx, node store.Node, meta
 
 // Purge removes a project's directory on every node it used (project deletion).
 func (e *Engine) Purge(ctx context.Context, tx *core.Tx, projectID string) error {
-	rows, err := tx.Query(ctx, `SELECT DISTINCT n.node_id FROM at_thread_nodes n JOIN at_threads t ON t.id = n.thread_id
+	rows, err := store.Query(ctx, tx, `SELECT DISTINCT n.node_id FROM at_thread_nodes n JOIN at_threads t ON t.id = n.thread_id
 		WHERE t.project_id = $1 UNION SELECT DISTINCT node_id FROM at_employees WHERE project_id = $1 AND node_id IS NOT NULL`, projectID)
 	if err != nil {
 		return err

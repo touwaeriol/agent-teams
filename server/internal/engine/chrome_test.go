@@ -9,9 +9,9 @@ import (
 	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw/nodetest"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 	"github.com/touwaeriol/agent-teams/server/internal/timers"
 )
 
@@ -123,7 +123,7 @@ func threadStatus(tm *team) (string, string) {
 }
 
 func expireWaits(t *testing.T, tm *team) {
-	if _, err := tm.w.e.Core.Pool.Exec(tm.w.ctx, `UPDATE at_rate_limit_waits SET reset_at = now() - interval '1 second'`); err != nil {
+	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `UPDATE at_rate_limit_waits SET reset_at = now() - interval '1 second'`); err != nil {
 		t.Fatal(err)
 	}
 	tm.w.e.Timers.Tick(tm.w.ctx)
@@ -166,7 +166,7 @@ func TestUsageLimitWithoutAutoResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n int
-	_ = tm.w.e.Core.Pool.QueryRow(tm.w.ctx, `SELECT count(*) FROM at_rate_limit_waits`).Scan(&n)
+	_ = store.QueryRow(tm.w.ctx, tm.w.e.Core.Pool, `SELECT count(*) FROM at_rate_limit_waits`).Scan(&n)
 	if st, why := threadStatus(tm); n != 0 || st != "paused" || why != timers.PauseReason {
 		t.Fatalf("waits %d thread %s/%s", n, st, why)
 	}
@@ -185,7 +185,7 @@ func TestSchedulesFireOnce(t *testing.T) {
 	if s.NextRunAt == nil || !s.NextRunAt.After(time.Now()) || !s.Enabled {
 		t.Fatalf("schedule %+v", s)
 	}
-	if _, err := tm.w.e.Core.Pool.Exec(tm.w.ctx, `UPDATE at_schedules SET next_run_at = now() - interval '1 minute' WHERE id = $1`, s.ID); err != nil {
+	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `UPDATE at_schedules SET next_run_at = now() - interval '1 minute' WHERE id = $1`, s.ID); err != nil {
 		t.Fatal(err)
 	}
 	tm.w.e.Timers.Tick(tm.w.ctx)
@@ -200,7 +200,7 @@ func TestSchedulesFireOnce(t *testing.T) {
 		t.Fatalf("after firing %+v", list)
 	}
 	var msgs int
-	_ = tm.w.e.Core.Pool.QueryRow(tm.w.ctx, `SELECT count(*) FROM at_messages WHERE meta->>'schedule_id' = $1`, s.ID).Scan(&msgs)
+	_ = store.QueryRow(tm.w.ctx, tm.w.e.Core.Pool, `SELECT count(*) FROM at_messages WHERE meta->>'schedule_id' = $1`, s.ID).Scan(&msgs)
 	if msgs != 1 {
 		t.Fatalf("schedule fired %d times", msgs)
 	}
@@ -220,11 +220,11 @@ func TestUsageLimitWaitsForEveryone(t *testing.T) {
 	rateLimited(tm.dev, 2*time.Hour)
 	countWaits := func() int {
 		var n int
-		_ = tm.w.e.Core.Pool.QueryRow(tm.w.ctx, `SELECT count(*) FROM at_rate_limit_waits`).Scan(&n)
+		_ = store.QueryRow(tm.w.ctx, tm.w.e.Core.Pool, `SELECT count(*) FROM at_rate_limit_waits`).Scan(&n)
 		return n
 	}
 	eventually(t, "both waiting", func() bool { return countWaits() == 2 })
-	if _, err := tm.w.e.Core.Pool.Exec(tm.w.ctx, `UPDATE at_rate_limit_waits SET reset_at = now() - interval '1 second'
+	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `UPDATE at_rate_limit_waits SET reset_at = now() - interval '1 second'
 		WHERE employee_id = (SELECT id FROM at_employees WHERE name = 'lead-1')`); err != nil {
 		t.Fatal(err)
 	}

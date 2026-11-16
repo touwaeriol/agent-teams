@@ -8,9 +8,9 @@ import (
 	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw/nodetest"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 func waitClosed(t *testing.T, n *nodetest.Node) {
@@ -132,7 +132,7 @@ func TestGatewayOutboxReplay(t *testing.T) {
 
 func commandStatus(t *testing.T, w *world, nodeID string, seq int) string {
 	var st string
-	if err := w.e.Core.Pool.QueryRow(w.ctx, `SELECT status FROM at_node_commands WHERE node_id = $1 AND seq = $2`, nodeID, seq).Scan(&st); err != nil {
+	if err := store.QueryRow(w.ctx, w.e.Core.Pool, `SELECT status FROM at_node_commands WHERE node_id = $1 AND seq = $2`, nodeID, seq).Scan(&st); err != nil {
 		t.Fatal(err)
 	}
 	return st
@@ -165,7 +165,7 @@ func TestGatewayInboundDedupAndOwnership(t *testing.T) {
 		return false
 	})
 	var audits int
-	_ = w.e.Core.Pool.QueryRow(ctx, `SELECT count(*) FROM at_audit_log WHERE action = 'node_message_rejected'`).Scan(&audits)
+	_ = store.QueryRow(ctx, w.e.Core.Pool, `SELECT count(*) FROM at_audit_log WHERE action = 'node_message_rejected'`).Scan(&audits)
 	if audits != 1 {
 		t.Fatalf("audits %d", audits)
 	}
@@ -173,12 +173,12 @@ func TestGatewayInboundDedupAndOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(300 * time.Millisecond)
-	_ = w.e.Core.Pool.QueryRow(ctx, `SELECT count(*) FROM at_audit_log WHERE action = 'node_message_rejected'`).Scan(&audits)
+	_ = store.QueryRow(ctx, w.e.Core.Pool, `SELECT count(*) FROM at_audit_log WHERE action = 'node_message_rejected'`).Scan(&audits)
 	if audits != 1 {
 		t.Fatalf("replayed seq was handled again (%d audits)", audits)
 	}
 	var ack int64
-	_ = w.e.Core.Pool.QueryRow(ctx, `SELECT ack_seq FROM at_nodes WHERE id = $1`, node.Node.ID).Scan(&ack)
+	_ = store.QueryRow(ctx, w.e.Core.Pool, `SELECT ack_seq FROM at_nodes WHERE id = $1`, node.Node.ID).Scan(&ack)
 	if ack != int64(seq) {
 		t.Fatalf("ack_seq %d", ack)
 	}

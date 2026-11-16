@@ -9,6 +9,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 func (s *Scheduler) claimOne(ctx context.Context, threadID string) (bool, error) {
@@ -41,31 +42,12 @@ func ignoreMissing(err error) error {
 	return err
 }
 
+// pendingTasks locks up to 50 claimable tasks of a thread, skipping rows another scheduler holds.
 func pendingTasks(ctx context.Context, tx *core.Tx, threadID string) ([]core.Task, error) {
-	rows, err := tx.Query(ctx, `SELECT conversation_id, id FROM at_tasks WHERE thread_id = $1 AND status = 'pending'
-		ORDER BY priority, created_at, substring(id from 2)::int FOR UPDATE SKIP LOCKED LIMIT 50`, threadID)
-	if err != nil {
-		return nil, err
-	}
-	var keys [][2]string
-	for rows.Next() {
-		var k [2]string
-		if err := rows.Scan(&k[0], &k[1]); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		keys = append(keys, k)
-	}
-	rows.Close()
-	out := make([]core.Task, 0, len(keys))
-	for _, k := range keys {
-		t, err := core.TaskByID(ctx, tx, k[0], k[1])
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, t)
-	}
-	return out, nil
+	out := []core.Task{}
+	err := tx.Gorm(ctx).Model(&core.Task{}).Clauses(core.SkipLocked).Where("thread_id = ? AND status = 'pending'", threadID).
+		Order("priority, created_at, substring(id from 2)::int").Limit(50).Find(&out).Error
+	return out, err
 }
 
 func (s *Scheduler) tryClaim(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task) (bool, error) {
@@ -91,15 +73,18 @@ func idleMember(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task)
 	if Named(task) {
 		name = task.Assignee
 	}
-	var id string
-	err := tx.QueryRow(ctx, `SELECT e.id FROM at_employees e WHERE e.thread_id = $1 AND e.active AND e.tier = 'member'
-		AND (($2 <> '' AND e.name = $2) OR ($2 = '' AND e.role = $3))
-		AND NOT EXISTS (SELECT 1 FROM at_tasks x WHERE x.thread_id = $1 AND x.claimed_by = e.name AND x.status IN ('claimed','running'))
-		ORDER BY e.instance_no FOR UPDATE SKIP LOCKED LIMIT 1`, t.ID, name, task.Role).Scan(&id)
-	if err != nil {
-		return core.Employee{}, core.MapErr(err)
+	g := tx.Gorm(ctx).Table("at_employees e").Select("e.*").Clauses(core.SkipLocked).
+		Where("e.thread_id = ? AND e.active AND e.tier = 'member'", t.ID).
+		Where(`NOT EXISTS (SELECT 1 FROM at_tasks x WHERE x.thread_id = e.thread_id AND x.claimed_by = e.name
+			AND x.status IN ('claimed','running'))`)
+	if name != "" {
+		g = g.Where("e.name = ?", name)
+	} else {
+		g = g.Where("e.role = ?", task.Role)
 	}
-	return core.EmployeeByID(ctx, tx, id)
+	var e core.Employee
+	err := g.Order("e.instance_no").Take(&e).Error
+	return e, core.MapErr(err)
 }
 
 // claim marks the task claimed, emits task.claimed and sends the member its brief.
@@ -159,7 +144,7 @@ func mainTitle(ctx context.Context, q core.DB, task core.Task) string {
 		return ""
 	}
 	var title string
-	_ = q.QueryRow(ctx, `SELECT title FROM at_main_tasks WHERE id = $1`, *task.MainTaskID).Scan(&title)
+	_ = store.QueryRow(ctx, q, `SELECT title FROM at_main_tasks WHERE id = $1`, *task.MainTaskID).Scan(&title)
 	return title
 }
 

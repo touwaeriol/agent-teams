@@ -9,8 +9,8 @@ import (
 	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // ErrOffline means the node has no live link (unreliable messages cannot wait).
@@ -92,16 +92,16 @@ func (g *Gateway) Enqueue(ctx context.Context, tx *core.Tx, nodeID string, cmd C
 	}
 	if found {
 		// The earlier command expired or was superseded but the engine wants it sent again.
-		if _, err := tx.Exec(ctx, `DELETE FROM at_node_commands WHERE node_id = $1 AND idem_key = $2`, nodeID, key); err != nil {
+		if _, err := store.Exec(ctx, tx, `DELETE FROM at_node_commands WHERE node_id = $1 AND idem_key = $2`, nodeID, key); err != nil {
 			return Queued{}, err
 		}
 	}
 	var seq int64
-	if err := tx.QueryRow(ctx, `UPDATE at_nodes SET cmd_seq = cmd_seq + 1 WHERE id = $1 RETURNING cmd_seq`, nodeID).Scan(&seq); err != nil {
+	if err := store.QueryRow(ctx, tx, `UPDATE at_nodes SET cmd_seq = cmd_seq + 1 WHERE id = $1 RETURNING cmd_seq`, nodeID).Scan(&seq); err != nil {
 		return Queued{}, core.MapErr(err)
 	}
 	meta, _ := json.Marshal(nonNil(cmd.Meta))
-	_, err = tx.Exec(ctx, `INSERT INTO at_node_commands (node_id, seq, type, idem_key, body, session_id, open_gen,
+	_, err = store.Exec(ctx, tx, `INSERT INTO at_node_commands (node_id, seq, type, idem_key, body, session_id, open_gen,
 		expires_at, env_id, meta) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
 		nodeID, seq, cmd.Type, key, body, nullable(cmd.SessionID), nullableInt(cmd.OpenGen),
 		time.Now().Add(expiry(cmd.Type)), envID, meta)
@@ -118,7 +118,7 @@ func retired(status string) bool {
 
 func existing(ctx context.Context, tx *core.Tx, nodeID, key string) (Queued, bool, error) {
 	var q Queued
-	err := core.MapErr(tx.QueryRow(ctx, `SELECT seq, env_id, status FROM at_node_commands WHERE node_id = $1 AND idem_key = $2`,
+	err := core.MapErr(store.QueryRow(ctx, tx, `SELECT seq, env_id, status FROM at_node_commands WHERE node_id = $1 AND idem_key = $2`,
 		nodeID, key).Scan(&q.Seq, &q.EnvID, &q.Status))
 	if err == core.ErrNotFound {
 		return q, false, nil
@@ -156,7 +156,7 @@ type pending struct {
 
 // flush sends the link's pending commands in seq order.
 func (g *Gateway) flush(ctx context.Context, l *link) error {
-	if _, err := g.core.Pool.Exec(ctx, `UPDATE at_node_commands SET status = 'expired'
+	if _, err := store.Exec(ctx, g.core.Pool, `UPDATE at_node_commands SET status = 'expired'
 		WHERE node_id = $1 AND status IN ('pending','sent') AND expires_at <= now()`, l.node.ID); err != nil {
 		return err
 	}
@@ -178,7 +178,7 @@ func (l *link) lastSent() int64 {
 }
 
 func (g *Gateway) pendingAfter(ctx context.Context, nodeID string, after int64) ([]pending, error) {
-	rows, err := g.core.Pool.Query(ctx, `SELECT seq, type, env_id, body FROM at_node_commands
+	rows, err := store.Query(ctx, g.core.Pool, `SELECT seq, type, env_id, body FROM at_node_commands
 		WHERE node_id = $1 AND seq > $2 AND status IN ('pending','sent') AND expires_at > now() ORDER BY seq LIMIT 200`,
 		nodeID, after)
 	if err != nil {
@@ -204,7 +204,7 @@ func (g *Gateway) sendBatch(ctx context.Context, l *link, batch []pending) error
 		if err := l.write(ctx, env); err != nil {
 			return err
 		}
-		if _, err := g.core.Pool.Exec(ctx, `UPDATE at_node_commands SET status = 'sent'
+		if _, err := store.Exec(ctx, g.core.Pool, `UPDATE at_node_commands SET status = 'sent'
 			WHERE node_id = $1 AND seq = $2 AND status = 'pending'`, l.node.ID, p.seq); err != nil {
 			return err
 		}
@@ -220,7 +220,7 @@ func (g *Gateway) markAckedUpTo(ctx context.Context, nodeID string, upTo int64) 
 	if upTo <= 0 {
 		return nil
 	}
-	_, err := g.core.Pool.Exec(ctx, `UPDATE at_node_commands SET status = 'acked', acked_at = now()
+	_, err := store.Exec(ctx, g.core.Pool, `UPDATE at_node_commands SET status = 'acked', acked_at = now()
 		WHERE node_id = $1 AND seq <= $2 AND status IN ('pending','sent')`, nodeID, upTo)
 	return err
 }
@@ -237,7 +237,7 @@ func (g *Gateway) SendNow(ctx context.Context, nodeID, typ string, body any) err
 // CommandMeta returns the meta and result of the command with an idempotency key.
 func (g *Gateway) CommandMeta(ctx context.Context, q core.DB, nodeID, key string) (map[string]any, error) {
 	var meta map[string]any
-	err := q.QueryRow(ctx, `SELECT meta FROM at_node_commands WHERE node_id = $1 AND idem_key = $2`, nodeID, key).Scan(&meta)
+	err := store.QueryRow(ctx, q, `SELECT meta FROM at_node_commands WHERE node_id = $1 AND idem_key = $2`, nodeID, key).Scan(&meta)
 	return meta, core.MapErr(err)
 }
 
@@ -248,7 +248,7 @@ func FinishCommand(ctx context.Context, tx *core.Tx, nodeID, key string, ok bool
 	if !ok {
 		status = "failed"
 	}
-	_, err := tx.Exec(ctx, `UPDATE at_node_commands SET status = $3, result = $4, acked_at = COALESCE(acked_at, now())
+	_, err := store.Exec(ctx, tx, `UPDATE at_node_commands SET status = $3, result = $4, acked_at = COALESCE(acked_at, now())
 		WHERE node_id = $1 AND idem_key = $2`, nodeID, key, status, raw)
 	return err
 }

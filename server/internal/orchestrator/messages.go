@@ -7,6 +7,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 func statusTouch(cause string) status.Observation {
@@ -227,7 +228,7 @@ func (o *Orchestrator) Archive(ctx context.Context, tx *core.Tx, t core.Thread) 
 // deleteThreadImages removes the images attached to a thread's messages, unless a message
 // elsewhere in the project still shows them.
 func deleteThreadImages(ctx context.Context, tx *core.Tx, t core.Thread) error {
-	_, err := tx.Exec(ctx, `WITH refs AS (
+	_, err := store.Exec(ctx, tx, `WITH refs AS (
 		SELECT m.conversation_id, r->>'id' AS id FROM at_messages m
 		JOIN at_conversations c ON c.id = m.conversation_id AND c.project_id = $2,
 		LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(m.meta->'attachments') = 'array'
@@ -253,7 +254,7 @@ func (o *Orchestrator) Unarchive(ctx context.Context, tx *core.Tx, t core.Thread
 		return ErrNotArchived
 	}
 	var from string
-	if err := tx.QueryRow(ctx, `SELECT archived_from FROM at_threads WHERE id = $1`, t.ID).Scan(&from); err != nil {
+	if err := store.QueryRow(ctx, tx, `SELECT archived_from FROM at_threads WHERE id = $1`, t.ID).Scan(&from); err != nil {
 		return core.MapErr(err)
 	}
 	next := UnarchiveStatus(from)
@@ -285,7 +286,7 @@ func (o *Orchestrator) DeleteThread(ctx context.Context, tx *core.Tx, t core.Thr
 	if err := deleteThreadImages(ctx, tx, t); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM at_conversations WHERE id = $1`, t.ID); err != nil {
+	if _, err := store.Exec(ctx, tx, `DELETE FROM at_conversations WHERE id = $1`, t.ID); err != nil {
 		return err
 	}
 	if t.Status == "running" || t.Status == "waiting" {

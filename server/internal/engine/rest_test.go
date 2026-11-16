@@ -8,8 +8,8 @@ import (
 	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // TestRESTSurface walks the read endpoints and the smaller writes of api.md §3.2–§3.5, §3.11, §3.13.
@@ -175,7 +175,7 @@ func legacy(t *testing.T, tm *team) {
 	if code, _ := b.do("POST", "/api/conversations", map[string]string{"title": "x"}); code != 409 {
 		t.Fatalf("create v1 conversation = %d", code)
 	}
-	if _, err := tm.w.e.Core.Pool.Exec(tm.w.ctx, `INSERT INTO at_conversations (id, user_id, title, project_id) SELECT 'oldchat00001', user_id, 'old', id FROM at_projects WHERE id = $1`, tm.projectID); err != nil {
+	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `INSERT INTO at_conversations (id, user_id, title, project_id) SELECT 'oldchat00001', user_id, 'old', id FROM at_projects WHERE id = $1`, tm.projectID); err != nil {
 		t.Fatal(err)
 	}
 	if code, body := b.do("POST", "/api/conversations/oldchat00001/messages", map[string]string{"content": "hi"}); code != 409 || !strings.Contains(string(body), "legacy_read_only") {

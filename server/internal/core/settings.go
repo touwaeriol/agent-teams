@@ -48,19 +48,19 @@ func builtinDelivery() Delivery {
 // DeliveryOf returns a project's delivery settings: built-in ← admin default ← project.
 func DeliveryOf(ctx context.Context, q DB, projectID string) (Delivery, error) {
 	d := builtinDelivery()
-	var admin []byte
-	err := MapErr(q.QueryRow(ctx, `SELECT value FROM at_settings WHERE key = 'delivery_default'`).Scan(&admin))
+	admin, err := take[struct{ Value []byte }](q.Gorm(ctx).Table("at_settings").Select("value").
+		Where("key = 'delivery_default'"))
 	if err != nil && err != ErrNotFound {
 		return d, err
 	}
-	if len(admin) > 0 {
-		_ = json.Unmarshal(admin, &d)
+	if len(admin.Value) > 0 {
+		_ = json.Unmarshal(admin.Value, &d)
 	}
-	var own []byte
-	if err := q.QueryRow(ctx, `SELECT delivery FROM at_projects WHERE id = $1`, projectID).Scan(&own); err != nil {
-		return d, MapErr(err)
+	own, err := take[struct{ Delivery []byte }](q.Gorm(ctx).Table("at_projects").Select("delivery").Where("id = ?", projectID))
+	if err != nil {
+		return d, err
 	}
-	_ = json.Unmarshal(own, &d)
+	_ = json.Unmarshal(own.Delivery, &d)
 	if d.CI.Required == nil {
 		d.CI.Required = []string{}
 	}

@@ -10,8 +10,8 @@ import (
 	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // A daemon restart (or a session process restart) kills the Promise behind every pending
@@ -46,7 +46,7 @@ func (e *Engine) detach(ctx context.Context, tx *core.Tx, q core.Question) (bool
 		return false, nil
 	}
 	raw, _ := json.Marshal(map[string]any{detachedKey: time.Now().UTC().Format(time.RFC3339Nano)})
-	if _, err := tx.Exec(ctx, `UPDATE at_questions SET detail = detail || $3::jsonb WHERE conversation_id = $1 AND id = $2`,
+	if _, err := store.Exec(ctx, tx, `UPDATE at_questions SET detail = detail || $3::jsonb WHERE conversation_id = $1 AND id = $2`,
 		q.ConversationID, q.ID, raw); err != nil {
 		return false, err
 	}
@@ -91,8 +91,8 @@ func (e *Engine) SessionRestarted(ctx context.Context, tx *core.Tx, sessionID st
 func (e *Engine) reattach(ctx context.Context, tx *core.Tx, sc core.SessionContext, m *protocol.ApprovalRequest) (bool, error) {
 	emp := sc.Employee
 	var conv, id string
-	err := core.MapErr(tx.QueryRow(ctx, `SELECT conversation_id, id FROM at_questions WHERE kind = 'approval'
-		AND status IN ('open','answered') AND detail ? 'detached_at' AND project_id = $1
+	err := core.MapErr(store.QueryRow(ctx, tx, `SELECT conversation_id, id FROM at_questions WHERE kind = 'approval'
+		AND status IN ('open','answered') AND jsonb_exists(detail, 'detached_at') AND project_id = $1
 		AND COALESCE(thread_id, '') = COALESCE($2, '') AND asker = $3 AND detail->>'tool_name' = $4
 		AND (detail->>'match_hash' = $5 OR detail->>'input_hash' = $6)
 		ORDER BY created_at LIMIT 1 FOR UPDATE`, emp.ProjectID, emp.ThreadID, emp.Name, m.ToolName,
@@ -108,7 +108,7 @@ func (e *Engine) reattach(ctx context.Context, tx *core.Tx, sc core.SessionConte
 	raw, _ := json.Marshal(map[string]any{"input": input, "input_hash": InputHash(m.ToolName, m.Input),
 		"match_hash": MatchHash(m.ToolName, m.Input), "suggestions": m.Suggestions,
 		"reattached_at": time.Now().UTC().Format(time.RFC3339Nano)})
-	if _, err := tx.Exec(ctx, `UPDATE at_questions SET approval_id = $3, session_id = $4,
+	if _, err := store.Exec(ctx, tx, `UPDATE at_questions SET approval_id = $3, session_id = $4,
 		detail = (detail - 'detached_at') || $5::jsonb WHERE conversation_id = $1 AND id = $2`,
 		conv, id, string(m.ApprovalID), sc.Session.ID, raw); err != nil {
 		return false, err
@@ -144,8 +144,8 @@ func decidedMessage(answer, decidedBy string) string {
 // ExpireDetached runs when the employee's turn ends: requests it did not re-issue are gone
 // for good, so their cards are cancelled (answered ones just lose the mark).
 func (e *Engine) ExpireDetached(ctx context.Context, tx *core.Tx, emp core.Employee) error {
-	rows, err := tx.Query(ctx, `SELECT conversation_id, id FROM at_questions WHERE kind = 'approval'
-		AND status IN ('open','answered') AND detail ? 'detached_at' AND project_id = $1
+	rows, err := store.Query(ctx, tx, `SELECT conversation_id, id FROM at_questions WHERE kind = 'approval'
+		AND status IN ('open','answered') AND jsonb_exists(detail, 'detached_at') AND project_id = $1
 		AND COALESCE(thread_id, '') = COALESCE($2, '') AND asker = $3`, emp.ProjectID, emp.ThreadID, emp.Name)
 	if err != nil {
 		return err
@@ -163,7 +163,7 @@ func (e *Engine) ExpireDetached(ctx context.Context, tx *core.Tx, emp core.Emplo
 		if err != nil {
 			return ignoreMissing(err)
 		}
-		if _, err := tx.Exec(ctx, `UPDATE at_questions SET detail = detail - 'detached_at' WHERE conversation_id = $1 AND id = $2`,
+		if _, err := store.Exec(ctx, tx, `UPDATE at_questions SET detail = detail - 'detached_at' WHERE conversation_id = $1 AND id = $2`,
 			q.ConversationID, q.ID); err != nil {
 			return err
 		}
@@ -179,8 +179,8 @@ func (e *Engine) ExpireDetached(ctx context.Context, tx *core.Tx, emp core.Emplo
 
 // DetachedSummary lists the employee's detached cards for the resume note ("Bash make test").
 func DetachedSummary(ctx context.Context, q core.DB, emp core.Employee) ([]string, error) {
-	rows, err := q.Query(ctx, `SELECT id, status, detail FROM at_questions WHERE kind = 'approval'
-		AND status IN ('open','answered') AND detail ? 'detached_at' AND project_id = $1
+	rows, err := store.Query(ctx, q, `SELECT id, status, detail FROM at_questions WHERE kind = 'approval'
+		AND status IN ('open','answered') AND jsonb_exists(detail, 'detached_at') AND project_id = $1
 		AND COALESCE(thread_id, '') = COALESCE($2, '') AND asker = $3 ORDER BY created_at`, emp.ProjectID, emp.ThreadID, emp.Name)
 	if err != nil {
 		return nil, err

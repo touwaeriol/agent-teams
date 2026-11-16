@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // facts loads the persisted facts and merges the in-memory activity.
@@ -46,7 +47,7 @@ func currentWork(ctx context.Context, tx *core.Tx, emp core.Employee) (core.Task
 		return core.Task{}, false, err
 	}
 	var n int
-	err = tx.QueryRow(ctx, `SELECT count(*) FROM at_tasks WHERE thread_id = $1 AND claimed_by = $2
+	err = store.QueryRow(ctx, tx, `SELECT count(*) FROM at_tasks WHERE thread_id = $1 AND claimed_by = $2
 		AND status IN ('review','decision','merging')`, *emp.ThreadID, emp.Name).Scan(&n)
 	return core.Task{}, n > 0, err
 }

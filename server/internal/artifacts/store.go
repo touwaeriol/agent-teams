@@ -5,8 +5,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -34,7 +32,7 @@ type ArtifactVersion struct {
 // NextVersion is 1 + the highest stored version (1 for a new deliverable).
 func NextVersion(ctx context.Context, q store.DB, deliverableID string) (int, error) {
 	var v int
-	err := q.QueryRow(ctx, `SELECT COALESCE(MAX(version), 0) + 1 FROM at_deliverable_files WHERE deliverable_id = $1`,
+	err := store.QueryRow(ctx, q, `SELECT COALESCE(MAX(version), 0) + 1 FROM at_deliverable_files WHERE deliverable_id = $1`,
 		deliverableID).Scan(&v)
 	return v, err
 }
@@ -42,7 +40,7 @@ func NextVersion(ctx context.Context, q store.DB, deliverableID string) (int, er
 // Save stores the files of one version.
 func Save(ctx context.Context, q store.DB, deliverableID string, version int, by string, files []ArtifactFile) error {
 	for _, f := range files {
-		if _, err := q.Exec(ctx, `INSERT INTO at_deliverable_files (deliverable_id, version, path, content_type, size, sha256, data,
+		if _, err := store.Exec(ctx, q, `INSERT INTO at_deliverable_files (deliverable_id, version, path, content_type, size, sha256, data,
 			published_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, deliverableID, version, f.Path, f.ContentType, f.Size, f.SHA256,
 			f.Data, by); err != nil {
 			return err
@@ -53,7 +51,7 @@ func Save(ctx context.Context, q store.DB, deliverableID string, version int, by
 
 // Versions lists a deliverable's versions, newest first.
 func Versions(ctx context.Context, q store.DB, deliverableID string) ([]ArtifactVersion, error) {
-	rows, err := q.Query(ctx, `SELECT version, count(*), sum(size), min(published_by), min(created_at) FROM at_deliverable_files
+	rows, err := store.Query(ctx, q, `SELECT version, count(*), sum(size), min(published_by), min(created_at) FROM at_deliverable_files
 		WHERE deliverable_id = $1 GROUP BY version ORDER BY version DESC`, deliverableID)
 	if err != nil {
 		return nil, err
@@ -72,7 +70,7 @@ func Versions(ctx context.Context, q store.DB, deliverableID string) ([]Artifact
 
 // Files lists one version's files (without data).
 func Files(ctx context.Context, q store.DB, deliverableID string, version int) ([]ArtifactFile, error) {
-	rows, err := q.Query(ctx, `SELECT path, content_type, size, sha256 FROM at_deliverable_files
+	rows, err := store.Query(ctx, q, `SELECT path, content_type, size, sha256 FROM at_deliverable_files
 		WHERE deliverable_id = $1 AND version = $2 ORDER BY path`, deliverableID, version)
 	if err != nil {
 		return nil, err
@@ -95,10 +93,10 @@ func Files(ctx context.Context, q store.DB, deliverableID string, version int) (
 // Load reads one file with its data.
 func Load(ctx context.Context, q store.DB, deliverableID string, version int, path string) (ArtifactFile, error) {
 	f := ArtifactFile{Path: path}
-	err := q.QueryRow(ctx, `SELECT content_type, size, sha256, data FROM at_deliverable_files
+	err := store.QueryRow(ctx, q, `SELECT content_type, size, sha256, data FROM at_deliverable_files
 		WHERE deliverable_id = $1 AND version = $2 AND path = $3`, deliverableID, version, path).
 		Scan(&f.ContentType, &f.Size, &f.SHA256, &f.Data)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if store.IsNoRows(err) {
 		return f, ErrNotFound
 	}
 	return f, err

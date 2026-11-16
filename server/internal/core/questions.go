@@ -3,66 +3,66 @@ package core
 import (
 	"context"
 	"encoding/json"
+
+	"gorm.io/gorm"
 )
+
+func questions(ctx context.Context, q DB) *gorm.DB { return q.Gorm(ctx).Model(&Question{}) }
 
 // QuestionByID loads a question of a conversation.
 func QuestionByID(ctx context.Context, q DB, conversationID, id string) (Question, error) {
-	return scanQuestion(q.QueryRow(ctx, `SELECT `+questionCols+` FROM at_questions WHERE conversation_id = $1 AND id = $2`,
-		conversationID, id))
+	return take[Question](questions(ctx, q).Where("conversation_id = ? AND id = ?", conversationID, id))
 }
 
 // LockQuestion loads a question FOR UPDATE.
 func LockQuestion(ctx context.Context, tx *Tx, conversationID, id string) (Question, error) {
-	return scanQuestion(tx.QueryRow(ctx, `SELECT `+questionCols+` FROM at_questions WHERE conversation_id = $1 AND id = $2
-		FOR UPDATE`, conversationID, id))
+	return take[Question](questions(ctx, tx).Clauses(ForUpdate).Where("conversation_id = ? AND id = ?", conversationID, id))
 }
 
 // QuestionByApproval finds the card of an approval request.
 func QuestionByApproval(ctx context.Context, q DB, approvalID string) (Question, error) {
-	return scanQuestion(q.QueryRow(ctx, `SELECT `+questionCols+` FROM at_questions WHERE approval_id = $1`, approvalID))
+	return take[Question](questions(ctx, q).Where("approval_id = ?", approvalID))
 }
 
 // QuestionByCall finds the blocking question created by a tool call.
 func QuestionByCall(ctx context.Context, q DB, sessionID, callID string) (Question, error) {
-	return scanQuestion(q.QueryRow(ctx, `SELECT `+questionCols+` FROM at_questions WHERE session_id = $1 AND call_id = $2`,
-		sessionID, callID))
+	return take[Question](questions(ctx, q).Where("session_id = ? AND call_id = ?", sessionID, callID))
 }
 
 // ConversationQuestions lists a conversation's questions (status "" or "all" = every status).
 func ConversationQuestions(ctx context.Context, q DB, conversationID, status string) ([]Question, error) {
-	rows, err := q.Query(ctx, `SELECT `+questionCols+` FROM at_questions WHERE conversation_id = $1
-		AND ($2 IN ('', 'all') OR status = $2) ORDER BY created_at, id`, conversationID, status)
-	return collect(rows, err, scanQuestion)
+	g := questions(ctx, q).Where("conversation_id = ?", conversationID)
+	if status != "" && status != "all" {
+		g = g.Where("status = ?", status)
+	}
+	return find[Question](g.Order("created_at, id"))
 }
 
 // OpenUserQuestions lists the project's open questions and cards addressed to the user.
 func OpenUserQuestions(ctx context.Context, q DB, projectID string) ([]Question, error) {
-	rows, err := q.Query(ctx, `SELECT `+questionCols+` FROM at_questions WHERE project_id = $1 AND status = 'open'
-		AND audience = 'user' ORDER BY created_at`, projectID)
-	return collect(rows, err, scanQuestion)
+	return find[Question](questions(ctx, q).Where("project_id = ? AND status = 'open' AND audience = 'user'", projectID).
+		Order("created_at"))
+}
+
+// openApprovals selects open approval cards.
+func openApprovals(ctx context.Context, q DB) *gorm.DB {
+	return questions(ctx, q).Where("kind = 'approval' AND status = 'open'")
 }
 
 // OpenApprovals lists the open approval cards of a session (or of all sessions when sessionID = "").
 func OpenApprovals(ctx context.Context, q DB, sessionID string) ([]Question, error) {
-	rows, err := q.Query(ctx, `SELECT `+questionCols+` FROM at_questions WHERE kind = 'approval' AND status = 'open'
-		AND session_id = $1`, sessionID)
-	return collect(rows, err, scanQuestion)
+	return find[Question](openApprovals(ctx, q).Where("session_id = ?", sessionID))
 }
 
 // ThreadOpenApprovals lists the open approval cards of a thread.
 func ThreadOpenApprovals(ctx context.Context, q DB, threadID string) ([]Question, error) {
-	rows, err := q.Query(ctx, `SELECT `+questionCols+` FROM at_questions WHERE kind = 'approval' AND status = 'open'
-		AND thread_id = $1`, threadID)
-	return collect(rows, err, scanQuestion)
+	return find[Question](openApprovals(ctx, q).Where("thread_id = ?", threadID))
 }
 
 // RaisedHands counts an employee's open approvals and blocking questions.
 func RaisedHands(ctx context.Context, q DB, projectID string, threadID *string, employee string) (int, error) {
-	var n int
-	err := q.QueryRow(ctx, `SELECT count(*) FROM at_questions WHERE project_id = $1
-		AND COALESCE(thread_id, '') = COALESCE($2, '') AND asker = $3 AND status = 'open'
-		AND (kind = 'approval' OR blocking)`, projectID, threadID, employee).Scan(&n)
-	return n, err
+	return count(questions(ctx, q).Where(`project_id = ? AND COALESCE(thread_id, '') = COALESCE(?, '') AND asker = ?
+		AND status = 'open' AND (kind = 'approval' OR blocking)`, projectID, threadID, employee))
 }
 
 // NewQuestion is what InsertQuestion stores.
@@ -94,11 +94,10 @@ func InsertQuestion(ctx context.Context, tx *Tx, n NewQuestion) (Question, error
 		n.Detail = map[string]any{}
 	}
 	detail, _ := json.Marshal(n.Detail)
-	_, err = tx.Exec(ctx, `INSERT INTO at_questions (conversation_id, id, asker, task_id, audience, kind, text, options,
-		detail, status, thread_id, project_id, session_id, approval_id, call_id, blocking)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'open',$10,$11,$12,$13,$14,$15)`,
-		n.ConversationID, id, n.Asker, n.TaskID, n.Audience, n.Kind, n.Text, opts, detail, n.ThreadID, n.ProjectID,
-		n.SessionID, n.ApprovalID, n.CallID, n.Blocking)
+	err = tx.Gorm(ctx).Table("at_questions").Create(map[string]any{"conversation_id": n.ConversationID, "id": id,
+		"asker": n.Asker, "task_id": n.TaskID, "audience": n.Audience, "kind": n.Kind, "text": n.Text, "options": opts,
+		"detail": detail, "status": "open", "thread_id": n.ThreadID, "project_id": n.ProjectID, "session_id": n.SessionID,
+		"approval_id": n.ApprovalID, "call_id": n.CallID, "blocking": n.Blocking}).Error
 	if err != nil {
 		return Question{}, err
 	}
@@ -111,19 +110,22 @@ func MergeQuestionDetail(ctx context.Context, tx *Tx, q Question, patch map[stri
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `UPDATE at_questions SET detail = detail || $3::jsonb WHERE conversation_id = $1 AND id = $2`,
-		q.ConversationID, q.ID, b)
-	return err
+	return questionRow(ctx, tx, q).Update("detail", gorm.Expr("detail || ?::jsonb", b)).Error
+}
+
+// questionRow selects one question for a write.
+func questionRow(ctx context.Context, tx *Tx, q Question) *gorm.DB {
+	return tx.Gorm(ctx).Table("at_questions").Where("conversation_id = ? AND id = ?", q.ConversationID, q.ID)
 }
 
 // CloseQuestion sets answer/status/decided_by on an open question; ErrConflict when it is not open.
 func CloseQuestion(ctx context.Context, tx *Tx, q Question, status string, answer *string, decidedBy string) (Question, error) {
-	tag, err := tx.Exec(ctx, `UPDATE at_questions SET status = $3, answer = $4, decided_by = $5, answered_at = now()
-		WHERE conversation_id = $1 AND id = $2 AND status = 'open'`, q.ConversationID, q.ID, status, answer, decidedBy)
-	if err != nil {
-		return q, err
+	res := questionRow(ctx, tx, q).Where("status = 'open'").Updates(map[string]any{"status": status, "answer": answer,
+		"decided_by": decidedBy, "answered_at": gorm.Expr("now()")})
+	if res.Error != nil {
+		return q, res.Error
 	}
-	if tag.RowsAffected() == 0 {
+	if res.RowsAffected == 0 {
 		return q, ErrConflict
 	}
 	return QuestionByID(ctx, tx, q.ConversationID, q.ID)
@@ -148,11 +150,11 @@ func threadNoOf(ctx context.Context, q DB, threadID *string) (*int, error) {
 	if threadID == nil {
 		return nil, nil
 	}
-	var no int
-	if err := q.QueryRow(ctx, `SELECT no FROM at_threads WHERE id = $1`, *threadID).Scan(&no); err != nil {
-		return nil, MapErr(err)
+	t, err := take[struct{ No int }](threads(ctx, q).Select("no").Where("id = ?", *threadID))
+	if err != nil {
+		return nil, err
 	}
-	return &no, nil
+	return &t.No, nil
 }
 
 // ThreadNoOf exposes threadNoOf.

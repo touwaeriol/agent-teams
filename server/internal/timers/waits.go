@@ -7,6 +7,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // MinWait separates a usage limit (resets in hours) from the SDK's own short API retries:
@@ -26,7 +27,7 @@ func IsUsageLimit(resetAt *time.Time, now time.Time) bool {
 
 // RecordLimit remembers that the employee hit a usage limit and pauses its thread.
 func RecordLimit(ctx context.Context, tx *core.Tx, orch *orchestrator.Orchestrator, e core.Employee, resetAt time.Time, detail string) error {
-	if _, err := tx.Exec(ctx, `INSERT INTO at_rate_limit_waits (employee_id, project_id, thread_id, reset_at, detail)
+	if _, err := store.Exec(ctx, tx, `INSERT INTO at_rate_limit_waits (employee_id, project_id, thread_id, reset_at, detail)
 		VALUES ($1,$2,$3,$4,$5) ON CONFLICT (employee_id) DO UPDATE SET reset_at = GREATEST(at_rate_limit_waits.reset_at, EXCLUDED.reset_at),
 		detail = EXCLUDED.detail`, e.ID, e.ProjectID, e.ThreadID, resetAt, detail); err != nil {
 		return err
@@ -47,37 +48,37 @@ func RecordLimit(ctx context.Context, tx *core.Tx, orch *orchestrator.Orchestrat
 // Waiting reports whether the employee is waiting for a usage limit to reset (no nudges then).
 func Waiting(ctx context.Context, q core.DB, employeeID string) (bool, error) {
 	var n int
-	err := q.QueryRow(ctx, `SELECT count(*) FROM at_rate_limit_waits WHERE employee_id = $1`, employeeID).Scan(&n)
+	err := store.QueryRow(ctx, q, `SELECT count(*) FROM at_rate_limit_waits WHERE employee_id = $1`, employeeID).Scan(&n)
 	return n > 0, err
 }
 
 // LimitResetAt is the latest reset time among a thread's waiting employees (nil = none).
 func LimitResetAt(ctx context.Context, q core.DB, threadID string) (*time.Time, error) {
 	var at *time.Time
-	err := q.QueryRow(ctx, `SELECT max(reset_at) FROM at_rate_limit_waits WHERE thread_id = $1`, threadID).Scan(&at)
+	err := store.QueryRow(ctx, q, `SELECT max(reset_at) FROM at_rate_limit_waits WHERE thread_id = $1`, threadID).Scan(&at)
 	return at, err
 }
 
 type dueWait struct {
-	employeeID string
-	threadID   *string
-	autoResume bool
+	EmployeeID string
+	ThreadID   *string
+	AutoResume bool
 }
 
 // resumeDue handles one wait whose limit has reset: the row goes away; with auto_resume the
 // thread it paused runs again and the employee gets a note that resumes its work.
 func resumeDue(ctx context.Context, tx *core.Tx, orch *orchestrator.Orchestrator, w dueWait) error {
-	if _, err := tx.Exec(ctx, `DELETE FROM at_rate_limit_waits WHERE employee_id = $1`, w.employeeID); err != nil {
+	if _, err := store.Exec(ctx, tx, `DELETE FROM at_rate_limit_waits WHERE employee_id = $1`, w.EmployeeID); err != nil {
 		return err
 	}
-	if !w.autoResume {
+	if !w.AutoResume {
 		return nil
 	}
-	active, err := resumeThread(ctx, tx, orch, w.threadID)
+	active, err := resumeThread(ctx, tx, orch, w.ThreadID)
 	if err != nil || !active {
 		return err
 	}
-	e, err := core.EmployeeByID(ctx, tx, w.employeeID)
+	e, err := core.EmployeeByID(ctx, tx, w.EmployeeID)
 	if err != nil {
 		return ignoreMissing(err)
 	}

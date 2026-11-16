@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strconv"
 	"time"
+
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // Project event types (api.md §1.1).
@@ -36,7 +38,7 @@ func UserChannel(userID string) string { return "user:" + userID }
 // until commit, so a project's events commit in seq order.
 func (tx *Tx) nextProjectSeq(ctx context.Context, projectID string) (int64, error) {
 	var seq int64
-	err := tx.QueryRow(ctx, `UPDATE at_projects SET event_seq = event_seq + 1 WHERE id = $1 RETURNING event_seq`,
+	err := store.QueryRow(ctx, tx, `UPDATE at_projects SET event_seq = event_seq + 1 WHERE id = $1 RETURNING event_seq`,
 		projectID).Scan(&seq)
 	return seq, MapErr(err)
 }
@@ -51,8 +53,8 @@ func (tx *Tx) Emit(ctx context.Context, projectID string, threadID *string, typ,
 	if err != nil {
 		return 0, err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO at_events (project_id, seq, thread_id, type, actor, payload)
-		VALUES ($1, $2, $3, $4, $5, $6)`, projectID, seq, threadID, typ, actor, raw)
+	err = tx.Gorm(ctx).Table("at_events").Create(map[string]any{"project_id": projectID, "seq": seq,
+		"thread_id": threadID, "type": typ, "actor": actor, "payload": raw}).Error
 	if err != nil {
 		return 0, err
 	}
@@ -86,14 +88,14 @@ func (tx *Tx) EmitStatus(ctx context.Context, r StatusRow) (int64, error) {
 	if r.BubbleKind == "" {
 		r.BubbleKind = "plain"
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO at_status_events (project_id, seq, thread_id, employee_id, tier, role, state,
-		substate, bubble, bubble_kind, task_id, task_kind, cause) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-		r.ProjectID, seq, r.ThreadID, r.EmployeeID, r.Tier, r.Role, r.State, r.Substate, r.Bubble, r.BubbleKind,
-		r.TaskID, r.TaskKind, r.Cause)
+	err = tx.Gorm(ctx).Table("at_status_events").Create(map[string]any{"project_id": r.ProjectID, "seq": seq,
+		"thread_id": r.ThreadID, "employee_id": r.EmployeeID, "tier": r.Tier, "role": r.Role, "state": r.State,
+		"substate": r.Substate, "bubble": r.Bubble, "bubble_kind": r.BubbleKind, "task_id": r.TaskID,
+		"task_kind": r.TaskKind, "cause": r.Cause}).Error
 	if err != nil {
 		return 0, err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO at_employee_status (employee_id, project_id, thread_id, state, substate, bubble,
+	_, err = store.Exec(ctx, tx, `INSERT INTO at_employee_status (employee_id, project_id, thread_id, state, substate, bubble,
 		bubble_kind, bubble_until, task_id, task_kind, since, seq) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now(),$11)
 		ON CONFLICT (employee_id) DO UPDATE SET state = EXCLUDED.state, substate = EXCLUDED.substate,
 		bubble = EXCLUDED.bubble, bubble_kind = EXCLUDED.bubble_kind, bubble_until = EXCLUDED.bubble_until,
@@ -116,12 +118,13 @@ func (tx *Tx) EmitUser(ctx context.Context, userID, typ string, payload any) (in
 		return 0, err
 	}
 	var seq int64
-	if err := tx.QueryRow(ctx, `UPDATE at_users SET event_seq = event_seq + 1 WHERE id = $1 RETURNING event_seq`,
+	if err := store.QueryRow(ctx, tx, `UPDATE at_users SET event_seq = event_seq + 1 WHERE id = $1 RETURNING event_seq`,
 		userID).Scan(&seq); err != nil {
 		return 0, MapErr(err)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO at_user_events (user_id, seq, type, payload) VALUES ($1, $2, $3, $4)`,
-		userID, seq, typ, raw); err != nil {
+	err = tx.Gorm(ctx).Table("at_user_events").Create(map[string]any{"user_id": userID, "seq": seq, "type": typ,
+		"payload": raw}).Error
+	if err != nil {
 		return 0, err
 	}
 	tx.hint(UserChannel(userID), strconv.FormatInt(seq, 10))
@@ -132,7 +135,7 @@ func (tx *Tx) EmitUser(ctx context.Context, userID, typ string, payload any) (in
 type Event struct {
 	Seq       int64           `json:"id"`
 	Type      string          `json:"type"`
-	ThreadNo  *int            `json:"-"`
+	ThreadNo  *int            `json:"-" gorm:"column:no"`
 	Data      json.RawMessage `json:"data"`
 	CreatedAt time.Time       `json:"at"`
 }
@@ -147,7 +150,7 @@ const statusEventData = `jsonb_build_object(
 
 // EventsAfter returns the project's events with seq > after (both tables), oldest first.
 func EventsAfter(ctx context.Context, q DB, projectID string, after int64, since time.Time, limit int) ([]Event, error) {
-	rows, err := q.Query(ctx, `SELECT seq, type, no, data, created_at FROM (
+	return rawAll[Event](ctx, q, `SELECT seq, type, no, data, created_at FROM (
 		SELECT e.seq, e.type, t.no, e.payload AS data, e.created_at FROM at_events e
 		LEFT JOIN at_threads t ON t.id = e.thread_id
 		WHERE e.project_id = $1 AND e.seq > $2 AND e.created_at >= $3
@@ -156,12 +159,11 @@ func EventsAfter(ctx context.Context, q DB, projectID string, after int64, since
 		LEFT JOIN at_employees e ON e.id = s.employee_id LEFT JOIN at_threads t ON t.id = s.thread_id
 		WHERE s.project_id = $1 AND s.seq > $2 AND s.created_at >= $3
 	) x ORDER BY seq LIMIT $4`, projectID, after, since, limit)
-	return collect(rows, err, scanEvent)
 }
 
 // EventsBetween returns the project's events in a time window (office replay).
 func EventsBetween(ctx context.Context, q DB, projectID string, from, to time.Time, limit int) ([]Event, error) {
-	rows, err := q.Query(ctx, `SELECT seq, type, no, data, created_at FROM (
+	return rawAll[Event](ctx, q, `SELECT seq, type, no, data, created_at FROM (
 		SELECT e.seq, e.type, t.no, e.payload AS data, e.created_at FROM at_events e
 		LEFT JOIN at_threads t ON t.id = e.thread_id
 		WHERE e.project_id = $1 AND e.created_at >= $2 AND e.created_at < $3
@@ -170,40 +172,34 @@ func EventsBetween(ctx context.Context, q DB, projectID string, from, to time.Ti
 		LEFT JOIN at_employees e ON e.id = s.employee_id LEFT JOIN at_threads t ON t.id = s.thread_id
 		WHERE s.project_id = $1 AND s.created_at >= $2 AND s.created_at < $3
 	) x ORDER BY seq LIMIT $4`, projectID, from, to, limit)
-	return collect(rows, err, scanEvent)
-}
-
-func scanEvent(r Scanner) (Event, error) {
-	var e Event
-	err := r.Scan(&e.Seq, &e.Type, &e.ThreadNo, &e.Data, &e.CreatedAt)
-	return e, err
 }
 
 // UserEventsAfter returns a user's events with seq > after, oldest first.
 func UserEventsAfter(ctx context.Context, q DB, userID string, after int64, since time.Time, limit int) ([]Event, error) {
-	rows, err := q.Query(ctx, `SELECT seq, type, NULL::int, payload, created_at FROM at_user_events
-		WHERE user_id = $1 AND seq > $2 AND created_at >= $3 ORDER BY seq LIMIT $4`, userID, after, since, limit)
-	return collect(rows, err, scanEvent)
+	return find[Event](q.Gorm(ctx).Table("at_user_events").Select("seq, type, NULL::int AS no, payload AS data, created_at").
+		Where("user_id = ? AND seq > ? AND created_at >= ?", userID, after, since).Order("seq").Limit(limit))
 }
 
 // ProjectSeq is the project's current event sequence.
 func ProjectSeq(ctx context.Context, q DB, projectID string) (int64, error) {
-	var seq int64
-	err := q.QueryRow(ctx, `SELECT event_seq FROM at_projects WHERE id = $1`, projectID).Scan(&seq)
-	return seq, MapErr(err)
+	return eventSeq(ctx, q, "at_projects", projectID)
 }
 
 // UserSeq is the user's current event sequence.
 func UserSeq(ctx context.Context, q DB, userID string) (int64, error) {
-	var seq int64
-	err := q.QueryRow(ctx, `SELECT event_seq FROM at_users WHERE id = $1`, userID).Scan(&seq)
-	return seq, MapErr(err)
+	return eventSeq(ctx, q, "at_users", userID)
+}
+
+// eventSeq reads the event_seq column of a project or user row.
+func eventSeq(ctx context.Context, q DB, table, id string) (int64, error) {
+	row, err := take[struct{ EventSeq int64 }](q.Gorm(ctx).Table(table).Select("event_seq").Where("id = ?", id))
+	return row.EventSeq, err
 }
 
 // OldestSeqSince is the smallest project seq still kept after since (0 = none).
 func OldestSeqSince(ctx context.Context, q DB, projectID string, since time.Time) (int64, error) {
 	var seq int64
-	err := q.QueryRow(ctx, `SELECT COALESCE(min(seq), 0) FROM (
+	err := store.QueryRow(ctx, q, `SELECT COALESCE(min(seq), 0) FROM (
 		SELECT min(seq) AS seq FROM at_events WHERE project_id = $1 AND created_at >= $2
 		UNION ALL SELECT min(seq) FROM at_status_events WHERE project_id = $1 AND created_at >= $2) x`,
 		projectID, since).Scan(&seq)

@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	protocol "github.com/touwaeriol/agent-teams/protocol"
 
+	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/platform"
 	"github.com/touwaeriol/agent-teams/server/internal/store"

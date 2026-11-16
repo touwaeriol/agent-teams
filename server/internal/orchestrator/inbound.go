@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -57,7 +56,7 @@ func (o *Orchestrator) policyViolation(ctx context.Context, tx *core.Tx, e core.
 	if err := o.closeSession(ctx, tx, s, "policy_violation"); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO at_audit_log (user_id, actor, action, target_type, target_id, detail)
+	if _, err := store.Exec(ctx, tx, `INSERT INTO at_audit_log (user_id, actor, action, target_type, target_id, detail)
 		SELECT p.user_id, 'system', 'session_policy_violation', 'session', $2, jsonb_build_object('tool', $3::text, 'employee', $4::text)
 		FROM at_projects p WHERE p.id = $1`, e.ProjectID, s.ID, tool, e.Name); err != nil {
 		return err
@@ -234,7 +233,7 @@ func (o *Orchestrator) reconcileOne(ctx context.Context, tx *core.Tx, s core.Age
 
 func hasPendingOpen(ctx context.Context, tx *core.Tx, s core.AgentSession) bool {
 	var n int
-	_ = tx.QueryRow(ctx, `SELECT count(*) FROM at_node_commands WHERE session_id = $1 AND open_gen = $2
+	_ = store.QueryRow(ctx, tx, `SELECT count(*) FROM at_node_commands WHERE session_id = $1 AND open_gen = $2
 		AND type = 'session.open' AND status IN ('pending','sent')`, s.ID, s.OpenGen).Scan(&n)
 	return n > 0
 }

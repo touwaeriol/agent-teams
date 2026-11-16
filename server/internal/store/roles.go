@@ -3,6 +3,9 @@ package store
 import (
 	"context"
 	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Look is an employee's appearance; outfit/accessory are keys of the layout's looks.
@@ -30,7 +33,7 @@ type Role struct {
 	Title           string   `json:"title"`
 	Runtime         string   `json:"runtime" enum:"claude,codex"`
 	Count           int      `json:"count"`
-	NodeIDs         []string `json:"node_ids"`
+	NodeIDs         []string `json:"node_ids" gorm:"column:node_ids;serializer:pgtext"`
 	Description     string   `json:"description"`
 	Instructions    string   `json:"instructions"`
 	Model           string   `json:"model"`
@@ -38,66 +41,50 @@ type Role struct {
 	PermissionMode  string   `json:"permission_mode,omitempty" enum:"bypass,ask" doc:"bypass (default): members run without permission prompts on any node; ask: every non-read tool asks (lead or user, per the project's approval routing). Ignored for the coordinator, the lead and read-only roles"`
 	CanDelegate     bool     `json:"can_delegate"`
 	ReadOnly        *bool    `json:"read_only,omitempty" nullable:"true" doc:"Omitted: defaults to true for gate review/decision"`
-	AllowedTools    []string `json:"allowed_tools"`
-	DisallowedTools []string `json:"disallowed_tools"`
+	AllowedTools    []string `json:"allowed_tools" gorm:"serializer:pgtext"`
+	DisallowedTools []string `json:"disallowed_tools" gorm:"serializer:pgtext"`
 	Sandbox         string   `json:"sandbox"`
 	MaxTurns        *int     `json:"max_turns" nullable:"true"`
 	Gate            string   `json:"gate"`
-	TaskKinds       []string `json:"task_kinds"`
-	Look            Look     `json:"look"`
-	Skills          []string `json:"skills" doc:"Skill names (built-in or uploaded) the role's sessions load"`
-	Plugins         []string `json:"plugins" doc:"Plugins the role's sessions load: name (latest version) or name@N (pinned)"`
+	TaskKinds       []string `json:"task_kinds" gorm:"serializer:pgtext"`
+	Look            Look     `json:"look" gorm:"serializer:jsonb"`
+	Skills          []string `json:"skills" gorm:"serializer:pgtext" doc:"Skill names (built-in or uploaded) the role's sessions load"`
+	Plugins         []string `json:"plugins" gorm:"serializer:pgtext" doc:"Plugins the role's sessions load: name (latest version) or name@N (pinned)"`
 	Sort            int      `json:"sort" doc:"Display order; PUT uses the position in the list"`
 }
 
-const roleCols = `id, tier, role, title, runtime, count, node_ids, description, instructions, model, effort,
-	permission_mode, can_delegate, read_only, allowed_tools, disallowed_tools, sandbox, max_turns, gate,
-	task_kinds, look, sort, skills, plugins`
-
-func scanRole(row interface{ Scan(...any) error }) (Role, error) {
-	var r Role
-	var ro bool
-	err := row.Scan(&r.ID, &r.Tier, &r.Role, &r.Title, &r.Runtime, &r.Count, &r.NodeIDs, &r.Description,
-		&r.Instructions, &r.Model, &r.Effort, &r.PermissionMode, &r.CanDelegate, &ro, &r.AllowedTools,
-		&r.DisallowedTools, &r.Sandbox, &r.MaxTurns, &r.Gate, &r.TaskKinds, &r.Look, &r.Sort, &r.Skills, &r.Plugins)
-	r.ReadOnly = &ro
-	return r, mapErr(err)
-}
+// TableName maps Role to at_roles.
+func (Role) TableName() string { return "at_roles" }
 
 // Roles returns the user's role templates (project_id IS NULL) in display order.
 func (s *Store) Roles(ctx context.Context, userID string) ([]Role, error) {
-	rows, err := s.db.Query(ctx, `SELECT `+roleCols+` FROM at_roles WHERE user_id = $1 AND project_id IS NULL
-		ORDER BY CASE tier WHEN 'coordinator' THEN 0 WHEN 'lead' THEN 1 ELSE 2 END, sort, created_at`, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	out := []Role{}
-	for rows.Next() {
-		r, err := scanRole(rows)
-		if err != nil {
-			return nil, err
+	err := s.g(ctx).Where("user_id = ? AND project_id IS NULL", userID).
+		Order("CASE tier WHEN 'coordinator' THEN 0 WHEN 'lead' THEN 1 ELSE 2 END, sort, created_at").Find(&out).Error
+	for i := range out {
+		if out[i].ReadOnly == nil {
+			out[i].ReadOnly = new(bool)
 		}
-		out = append(out, r)
 	}
-	return out, rows.Err()
+	return out, err
 }
 
 // ReplaceRoles saves the whole set: rows matched by id are updated (keeping
 // at_employees.role_id links), missing ones deleted, new ones inserted. Call in a Tx.
 func (s *Store) ReplaceRoles(ctx context.Context, userID string, roles []Role) error {
-	keep := make([]string, 0, len(roles))
+	keep := TextArray{}
 	for _, r := range roles {
 		if r.ID != "" {
 			keep = append(keep, r.ID)
 		}
 	}
-	if _, err := s.db.Exec(ctx, `DELETE FROM at_roles WHERE user_id = $1 AND project_id IS NULL AND NOT (id = ANY($2))`, userID, keep); err != nil {
+	templates := func() *gorm.DB { return s.g(ctx).Table("at_roles").Where("user_id = ? AND project_id IS NULL", userID) }
+	if err := s.g(ctx).Where("user_id = ? AND project_id IS NULL AND NOT (id = ANY(?))", userID, keep).Delete(&Role{}).Error; err != nil {
 		return err
 	}
 	// Park kept rows on unique placeholder keys so renames and tier swaps cannot collide mid-way.
-	if _, err := s.db.Exec(ctx, `UPDATE at_roles SET role = '~' || id, tier = 'member', runtime = 'claude', read_only = FALSE
-		WHERE user_id = $1 AND project_id IS NULL AND id = ANY($2)`, userID, keep); err != nil {
+	park := map[string]any{"role": gorm.Expr("'~' || id"), "tier": "member", "runtime": "claude", "read_only": false}
+	if err := templates().Where("id = ANY(?)", keep).Updates(park).Error; err != nil {
 		return err
 	}
 	for i := range roles {
@@ -108,83 +95,73 @@ func (s *Store) ReplaceRoles(ctx context.Context, userID string, roles []Role) e
 	return nil
 }
 
-func (s *Store) saveRole(ctx context.Context, userID string, r *Role) error {
-	ro := r.ReadOnly != nil && *r.ReadOnly
-	args := []any{r.Tier, r.Role, r.Title, r.Runtime, r.Count, nonNil(r.NodeIDs), r.Description, r.Instructions,
-		r.Model, r.Effort, r.PermissionMode, r.CanDelegate, ro, nonNil(r.AllowedTools), nonNil(r.DisallowedTools),
-		r.Sandbox, r.MaxTurns, r.Gate, nonNil(r.TaskKinds), r.Look, r.Sort, nonNil(r.Skills), nonNil(r.Plugins)}
-	if r.ID != "" {
-		return affected(s.db.Exec(ctx, `UPDATE at_roles SET tier=$3, role=$4, title=$5, runtime=$6, count=$7, node_ids=$8,
-			description=$9, instructions=$10, model=$11, effort=$12, permission_mode=$13, can_delegate=$14, read_only=$15,
-			allowed_tools=$16, disallowed_tools=$17, sandbox=$18, max_turns=$19, gate=$20, task_kinds=$21, look=$22,
-			sort=$23, skills=$24, plugins=$25, updated_at=now() WHERE id = $1 AND user_id = $2 AND project_id IS NULL`,
-			append([]any{r.ID, userID}, args...)...))
-	}
-	r.ID = NewID("ro")
-	_, err := s.db.Exec(ctx, `INSERT INTO at_roles (id, user_id, tier, role, title, runtime, count, node_ids, description,
-		instructions, model, effort, permission_mode, can_delegate, read_only, allowed_tools, disallowed_tools, sandbox,
-		max_turns, gate, task_kinds, look, sort, skills, plugins)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`,
-		append([]any{r.ID, userID}, args...)...)
-	return mapErr(err)
+func roleColumns(r *Role) map[string]any {
+	return map[string]any{"tier": r.Tier, "role": r.Role, "title": r.Title, "runtime": r.Runtime, "count": r.Count,
+		"node_ids": TextArray(r.NodeIDs), "description": r.Description, "instructions": r.Instructions,
+		"model": r.Model, "effort": r.Effort, "permission_mode": r.PermissionMode, "can_delegate": r.CanDelegate,
+		"read_only": r.ReadOnly != nil && *r.ReadOnly, "allowed_tools": TextArray(r.AllowedTools),
+		"disallowed_tools": TextArray(r.DisallowedTools), "sandbox": r.Sandbox, "max_turns": r.MaxTurns, "gate": r.Gate,
+		"task_kinds": TextArray(r.TaskKinds), "look": r.Look, "sort": r.Sort, "skills": TextArray(r.Skills),
+		"plugins": TextArray(r.Plugins)}
 }
 
-func nonNil(v []string) []string {
-	if v == nil {
-		return []string{}
+func (s *Store) saveRole(ctx context.Context, userID string, r *Role) error {
+	cols := roleColumns(r)
+	if r.ID != "" {
+		cols["updated_at"] = gorm.Expr("now()")
+		return Changed(s.g(ctx).Table("at_roles").Where("id = ? AND user_id = ? AND project_id IS NULL", r.ID, userID).
+			Updates(cols))
 	}
-	return v
+	r.ID = NewID("ro")
+	cols["id"], cols["user_id"] = r.ID, userID
+	return mapErr(s.g(ctx).Table("at_roles").Create(cols).Error)
 }
 
 // Team returns the user's v1 YAML team (at_teams), if any.
 func (s *Store) Team(ctx context.Context, userID string) (string, bool, error) {
-	var config string
-	err := mapErr(s.db.QueryRow(ctx, `SELECT config FROM at_teams WHERE user_id = $1`, userID).Scan(&config))
+	var row struct{ Config string }
+	err := mapErr(s.g(ctx).Table("at_teams").Select("config").Where("user_id = ?", userID).Take(&row).Error)
 	if err == ErrNotFound {
 		return "", false, nil
 	}
-	return config, err == nil, err
+	return row.Config, err == nil, err
 }
 
 // OfficeLayoutRow is a database layout (at_office_layouts).
 type OfficeLayoutRow struct {
 	ID        string
-	Version   int
+	Version   int `gorm:"default:1"`
 	Doc       []byte
 	UpdatedBy string
-	UpdatedAt time.Time
+	UpdatedAt time.Time `gorm:"default:now()"`
 }
+
+// TableName maps OfficeLayoutRow to at_office_layouts.
+func (OfficeLayoutRow) TableName() string { return "at_office_layouts" }
 
 // OfficeLayouts returns every global database layout.
 func (s *Store) OfficeLayouts(ctx context.Context) ([]OfficeLayoutRow, error) {
-	rows, err := s.db.Query(ctx, `SELECT id, version, doc, updated_by, updated_at FROM at_office_layouts WHERE owner_id IS NULL ORDER BY id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	out := []OfficeLayoutRow{}
-	for rows.Next() {
-		var r OfficeLayoutRow
-		if err := rows.Scan(&r.ID, &r.Version, &r.Doc, &r.UpdatedBy, &r.UpdatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
+	err := s.g(ctx).Where("owner_id IS NULL").Order("id").Find(&out).Error
+	return out, err
 }
 
 // SaveOfficeLayout upserts a global database layout and bumps its version.
 func (s *Store) SaveOfficeLayout(ctx context.Context, id string, doc []byte, by string) (OfficeLayoutRow, error) {
-	var r OfficeLayoutRow
-	err := s.db.QueryRow(ctx, `INSERT INTO at_office_layouts (id, doc, updated_by) VALUES ($1, $2, $3)
-		ON CONFLICT (id) DO UPDATE SET doc = EXCLUDED.doc, updated_by = EXCLUDED.updated_by,
-		version = at_office_layouts.version + 1, updated_at = now()
-		RETURNING id, version, doc, updated_by, updated_at`, id, doc, by).
-		Scan(&r.ID, &r.Version, &r.Doc, &r.UpdatedBy, &r.UpdatedAt)
+	r := OfficeLayoutRow{ID: id, Doc: doc, UpdatedBy: by}
+	err := s.g(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "id"}},
+		DoUpdates: clause.Set{
+			{Column: clause.Column{Name: "doc"}, Value: gorm.Expr("EXCLUDED.doc")},
+			{Column: clause.Column{Name: "updated_by"}, Value: gorm.Expr("EXCLUDED.updated_by")},
+			{Column: clause.Column{Name: "version"}, Value: gorm.Expr("at_office_layouts.version + 1")},
+			{Column: clause.Column{Name: "updated_at"}, Value: gorm.Expr("now()")},
+		},
+	}, clause.Returning{}).Create(&r).Error
 	return r, mapErr(err)
 }
 
 // DeleteOfficeLayout removes a database layout.
 func (s *Store) DeleteOfficeLayout(ctx context.Context, id string) error {
-	return affected(s.db.Exec(ctx, `DELETE FROM at_office_layouts WHERE id = $1 AND owner_id IS NULL`, id))
+	return Changed(s.g(ctx).Where("id = ? AND owner_id IS NULL", id).Delete(&OfficeLayoutRow{}))
 }

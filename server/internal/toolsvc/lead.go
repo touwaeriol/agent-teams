@@ -7,11 +7,11 @@ import (
 	"strings"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/delivery"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/scheduler"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // updatePlan replaces the plan (step ids kept by title).
@@ -141,7 +141,7 @@ func mainTitle(ctx context.Context, q core.DB, t core.Task) string {
 		return ""
 	}
 	var title string
-	_ = q.QueryRow(ctx, `SELECT title FROM at_main_tasks WHERE id = $1`, *t.MainTaskID).Scan(&title)
+	_ = store.QueryRow(ctx, q, `SELECT title FROM at_main_tasks WHERE id = $1`, *t.MainTaskID).Scan(&title)
 	return title
 }
 
@@ -255,7 +255,7 @@ func (s *Service) mergeTask(ctx context.Context, tx *core.Tx, t core.Thread, in 
 		return core.Task{}, refuse("请给出 task_id 或 member")
 	}
 	var id string
-	err := tx.QueryRow(ctx, `SELECT id FROM at_tasks WHERE thread_id = $1 AND claimed_by = $2
+	err := store.QueryRow(ctx, tx, `SELECT id FROM at_tasks WHERE thread_id = $1 AND claimed_by = $2
 		AND status IN ('review','decision','running','blocked') ORDER BY updated_at DESC LIMIT 1`, t.ID, *in.Member).Scan(&id)
 	if err != nil {
 		return core.Task{}, refuse("%s 没有可以合并的任务", *in.Member)

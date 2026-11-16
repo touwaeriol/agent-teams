@@ -56,7 +56,7 @@ func (h *Hooks) UserCutOff(ctx context.Context, userID string) error {
 				return err
 			}
 		}
-		_, err = tx.Exec(ctx, `UPDATE at_questions q SET status = 'cancelled', decided_by = 'system:user_cutoff', answered_at = now()
+		_, err = store.Exec(ctx, tx, `UPDATE at_questions q SET status = 'cancelled', decided_by = 'system:user_cutoff', answered_at = now()
 			FROM at_projects p WHERE p.id = q.project_id AND p.user_id = $1 AND q.status = 'open'`, userID)
 		return err
 	})

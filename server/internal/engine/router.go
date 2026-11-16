@@ -8,7 +8,6 @@ import (
 	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
@@ -84,7 +83,7 @@ func (r *router) nodeChanged(ctx context.Context, node store.Node, online bool) 
 	r.e.Orch.NodeChanged(ctx, node.ID)
 	brief := map[string]any{"node": map[string]any{"id": node.ID, "name": node.Name, "online": online}}
 	r.e.Events.User(ctx, node.UserID, core.EvNode, brief)
-	rows, err := r.e.Core.Pool.Query(ctx, `SELECT DISTINCT project_id FROM at_employees WHERE node_id = $1`, node.ID)
+	rows, err := store.Query(ctx, r.e.Core.Pool, `SELECT DISTINCT project_id FROM at_employees WHERE node_id = $1`, node.ID)
 	if err != nil {
 		return
 	}
@@ -316,7 +315,7 @@ func recordUsage(ctx context.Context, tx *core.Tx, sc core.SessionContext, ev *p
 	if ev.Usage != nil {
 		_ = json.Unmarshal(*ev.Usage, &usage)
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO at_usage (session_id, project_id, thread_id, turn_id, cost_usd, input_tokens,
+	_, err := store.Exec(ctx, tx, `INSERT INTO at_usage (session_id, project_id, thread_id, turn_id, cost_usd, input_tokens,
 		output_tokens, cache_read_tokens, cache_write_tokens, duration_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		ON CONFLICT (session_id, turn_id) DO NOTHING`, sc.Session.ID, sc.Employee.ProjectID, sc.Employee.ThreadID, turn,
 		ev.CostUSD, num(usage, "input_tokens"), num(usage, "output_tokens"), num(usage, "cache_read_input_tokens"),

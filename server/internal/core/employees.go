@@ -6,43 +6,43 @@ import (
 	"fmt"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
+func employees(ctx context.Context, q DB) *gorm.DB { return q.Gorm(ctx).Model(&Employee{}) }
+
 // EmployeeByID loads an employee.
 func EmployeeByID(ctx context.Context, q DB, id string) (Employee, error) {
-	return scanEmployee(q.QueryRow(ctx, `SELECT `+employeeCols+` FROM at_employees WHERE id = $1`, id))
+	return take[Employee](employees(ctx, q).Where("id = ?", id))
 }
 
 // EmployeeByName finds an employee of a thread (threadID nil = the project coordinator scope).
 func EmployeeByName(ctx context.Context, q DB, projectID string, threadID *string, name string) (Employee, error) {
-	return scanEmployee(q.QueryRow(ctx, `SELECT `+employeeCols+` FROM at_employees
-		WHERE project_id = $1 AND COALESCE(thread_id, '') = COALESCE($2, '') AND name = $3`, projectID, threadID, name))
+	return take[Employee](employees(ctx, q).Where("project_id = ? AND COALESCE(thread_id, '') = COALESCE(?, '') AND name = ?",
+		projectID, threadID, name))
 }
 
 // Coordinator returns the project's coordinator employee.
 func Coordinator(ctx context.Context, q DB, projectID string) (Employee, error) {
-	return scanEmployee(q.QueryRow(ctx, `SELECT `+employeeCols+` FROM at_employees
-		WHERE project_id = $1 AND thread_id IS NULL AND tier = 'coordinator'`, projectID))
+	return take[Employee](employees(ctx, q).Where("project_id = ? AND thread_id IS NULL AND tier = 'coordinator'", projectID))
 }
 
 // Lead returns a thread's lead.
 func Lead(ctx context.Context, q DB, threadID string) (Employee, error) {
-	return scanEmployee(q.QueryRow(ctx, `SELECT `+employeeCols+` FROM at_employees WHERE thread_id = $1 AND tier = 'lead'`, threadID))
+	return take[Employee](employees(ctx, q).Where("thread_id = ? AND tier = 'lead'", threadID))
 }
 
 // ThreadEmployees lists a thread's lead and members.
 func ThreadEmployees(ctx context.Context, q DB, threadID string) ([]Employee, error) {
-	rows, err := q.Query(ctx, `SELECT `+employeeCols+` FROM at_employees WHERE thread_id = $1 AND active
-		ORDER BY CASE tier WHEN 'lead' THEN 0 ELSE 1 END, role, instance_no`, threadID)
-	return collect(rows, err, scanEmployee)
+	return find[Employee](employees(ctx, q).Where("thread_id = ? AND active", threadID).
+		Order("CASE tier WHEN 'lead' THEN 0 ELSE 1 END, role, instance_no"))
 }
 
 // ProjectEmployees lists every active employee of a project.
 func ProjectEmployees(ctx context.Context, q DB, projectID string) ([]Employee, error) {
-	rows, err := q.Query(ctx, `SELECT `+employeeCols+` FROM at_employees WHERE project_id = $1 AND active
-		ORDER BY created_at`, projectID)
-	return collect(rows, err, scanEmployee)
+	return find[Employee](employees(ctx, q).Where("project_id = ? AND active", projectID).Order("created_at"))
 }
 
 // NewEmployee is what InsertEmployee stores.
@@ -64,10 +64,10 @@ func InsertEmployee(ctx context.Context, tx *Tx, n NewEmployee) (Employee, error
 		roleID = &n.Role.ID
 	}
 	id := NewID("em")
-	_, err := tx.Exec(ctx, `INSERT INTO at_employees (id, project_id, thread_id, name, tier, role, role_id, runtime,
-		instance_no, look, spec) VALUES ($1,$2,$3,$4,$5,$6,
-		(SELECT id FROM at_roles WHERE id = $7), $8, $9, $10, $11)`,
-		id, n.ProjectID, n.ThreadID, n.Name, n.Role.Tier, n.Role.Role, roleID, runtimeOf(n.Role), n.InstanceNo, look, spec)
+	err := tx.Gorm(ctx).Table("at_employees").Create(map[string]any{"id": id, "project_id": n.ProjectID,
+		"thread_id": n.ThreadID, "name": n.Name, "tier": n.Role.Tier, "role": n.Role.Role,
+		"role_id": gorm.Expr("(SELECT id FROM at_roles WHERE id = ?)", roleID), "runtime": runtimeOf(n.Role),
+		"instance_no": n.InstanceNo, "look": look, "spec": spec}).Error
 	if err != nil {
 		return Employee{}, err
 	}
@@ -122,12 +122,12 @@ func instanceNames(r store.Role, threadNo int) []string {
 
 // SetEmployeeNode records the node the employee's sessions run on.
 func SetEmployeeNode(ctx context.Context, tx *Tx, employeeID string, nodeID *string) error {
-	return Affected(tx.Exec(ctx, `UPDATE at_employees SET node_id = $2 WHERE id = $1`, employeeID, nodeID))
+	return Changed(tx.Gorm(ctx).Table("at_employees").Where("id = ?", employeeID).Update("node_id", nodeID))
 }
 
 // EmployeeBriefs lists employees of a project (threadID nil = all, else that thread) with status and node.
 func (s *Store) EmployeeBriefs(ctx context.Context, q DB, projectID string, threadID *string) ([]EmployeeBrief, error) {
-	rows, err := q.Query(ctx, `SELECT e.id, e.name, e.tier, e.role, COALESCE(e.spec->>'title', ''), e.runtime, t.no,
+	rows, err := store.Query(ctx, q, `SELECT e.id, e.name, e.tier, e.role, COALESCE(e.spec->>'title', ''), e.runtime, t.no,
 		n.id, n.name, e.look, st.state, st.substate, st.bubble, st.bubble_kind, st.task_id, st.task_kind, st.since, st.seq
 		FROM at_employees e LEFT JOIN at_threads t ON t.id = e.thread_id LEFT JOIN at_nodes n ON n.id = e.node_id
 		LEFT JOIN at_employee_status st ON st.employee_id = e.id
@@ -139,7 +139,7 @@ func (s *Store) EmployeeBriefs(ctx context.Context, q DB, projectID string, thre
 
 // EmployeeBriefOf renders one employee.
 func (s *Store) EmployeeBriefOf(ctx context.Context, q DB, employeeID string) (EmployeeBrief, error) {
-	row := q.QueryRow(ctx, `SELECT e.id, e.name, e.tier, e.role, COALESCE(e.spec->>'title', ''), e.runtime, t.no,
+	row := store.QueryRow(ctx, q, `SELECT e.id, e.name, e.tier, e.role, COALESCE(e.spec->>'title', ''), e.runtime, t.no,
 		n.id, n.name, e.look, st.state, st.substate, st.bubble, st.bubble_kind, st.task_id, st.task_kind, st.since, st.seq
 		FROM at_employees e LEFT JOIN at_threads t ON t.id = e.thread_id LEFT JOIN at_nodes n ON n.id = e.node_id
 		LEFT JOIN at_employee_status st ON st.employee_id = e.id WHERE e.id = $1`, employeeID)

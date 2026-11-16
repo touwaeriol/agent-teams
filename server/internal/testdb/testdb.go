@@ -10,8 +10,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/touwaeriol/agent-teams/server/migrations"
 )
 
@@ -23,17 +21,17 @@ func URL(t *testing.T) string {
 		t.Skip("TEST_DATABASE_URL not set")
 	}
 	ctx := context.Background()
-	conn, err := pgx.Connect(ctx, admin)
+	conn, err := migrations.Open(admin)
 	if err != nil {
 		t.Fatalf("connect test postgres: %v", err)
 	}
 	name := "t_" + random()
-	if _, err := conn.Exec(ctx, "CREATE DATABASE "+name); err != nil {
+	if _, err := conn.ExecContext(ctx, "CREATE DATABASE "+name); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = conn.Exec(context.Background(), "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
-		_ = conn.Close(context.Background())
+		_, _ = conn.ExecContext(context.Background(), "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
+		_ = conn.Close()
 	})
 	u, _ := url.Parse(admin)
 	u.Path = "/" + name
@@ -44,12 +42,12 @@ func URL(t *testing.T) string {
 func Exec(t *testing.T, dbURL, script string) {
 	t.Helper()
 	ctx := context.Background()
-	conn, err := pgx.Connect(ctx, dbURL)
+	conn, err := migrations.Open(dbURL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close(ctx)
-	if _, err := conn.Exec(ctx, script); err != nil {
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, script); err != nil {
 		t.Fatalf("exec script: %v", err)
 	}
 }

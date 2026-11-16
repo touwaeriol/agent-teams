@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
-	protocol "github.com/touwaeriol/agent-teams/protocol"
 
+	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/events"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"

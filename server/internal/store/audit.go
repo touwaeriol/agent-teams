@@ -20,6 +20,9 @@ type AuditEntry struct {
 	CreatedAt  time.Time       `json:"created_at"`
 }
 
+// TableName maps AuditEntry to at_audit_log.
+func (AuditEntry) TableName() string { return "at_audit_log" }
+
 // Audit records an action. ip may be "" when unknown.
 func (s *Store) Audit(ctx context.Context, e AuditEntry) error {
 	detail := e.Detail
@@ -32,9 +35,8 @@ func (s *Store) Audit(ctx context.Context, e AuditEntry) error {
 			ip = &addr
 		}
 	}
-	_, err := s.db.Exec(ctx, `INSERT INTO at_audit_log (user_id, actor, action, target_type, target_id, detail, ip)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`, e.UserID, e.Actor, e.Action, e.TargetType, e.TargetID, detail, ip)
-	return err
+	return s.g(ctx).Table("at_audit_log").Create(map[string]any{"user_id": e.UserID, "actor": e.Actor,
+		"action": e.Action, "target_type": e.TargetType, "target_id": e.TargetID, "detail": []byte(detail), "ip": ip}).Error
 }
 
 // AuditFilter narrows the admin audit listing.
@@ -47,20 +49,17 @@ type AuditFilter struct {
 
 // ListAudit pages the audit log newest first.
 func (s *Store) ListAudit(ctx context.Context, f AuditFilter) ([]AuditEntry, error) {
-	rows, err := s.db.Query(ctx, `SELECT id, user_id, actor, action, target_type, target_id, detail, host(ip), created_at
-		FROM at_audit_log WHERE ($1 = '' OR user_id = $1) AND ($2 = '' OR action = $2) AND ($3 = 0 OR id < $3)
-		ORDER BY id DESC LIMIT $4`, f.UserID, f.Action, f.Before, f.Limit)
-	if err != nil {
-		return nil, err
+	g := s.g(ctx).Select("id, user_id, actor, action, target_type, target_id, detail, host(ip) AS ip, created_at")
+	if f.UserID != "" {
+		g = g.Where("user_id = ?", f.UserID)
 	}
-	defer rows.Close()
+	if f.Action != "" {
+		g = g.Where("action = ?", f.Action)
+	}
+	if f.Before != 0 {
+		g = g.Where("id < ?", f.Before)
+	}
 	out := []AuditEntry{}
-	for rows.Next() {
-		var e AuditEntry
-		if err := rows.Scan(&e.ID, &e.UserID, &e.Actor, &e.Action, &e.TargetType, &e.TargetID, &e.Detail, &e.IP, &e.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
+	err := g.Order("id DESC").Limit(f.Limit).Find(&out).Error
+	return out, err
 }

@@ -3,7 +3,13 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // Conversation is the part of at_conversations the engines use.
@@ -17,41 +23,47 @@ type Conversation struct {
 	CreatedAt time.Time
 }
 
+// TableName maps Conversation to at_conversations.
+func (Conversation) TableName() string { return "at_conversations" }
+
+func conversations(ctx context.Context, q DB) *gorm.DB {
+	return q.Gorm(ctx).Model(&Conversation{}).
+		Select("id, COALESCE(user_id, '') AS user_id, project_id, kind, title, plan, created_at")
+}
+
 // ConversationOfUser loads one of the user's conversations.
 func ConversationOfUser(ctx context.Context, q DB, userID, id string) (Conversation, error) {
-	var c Conversation
-	err := q.QueryRow(ctx, `SELECT id, COALESCE(user_id, ''), project_id, kind, title, plan, created_at FROM at_conversations
-		WHERE id = $1 AND user_id = $2`, id, userID).Scan(&c.ID, &c.UserID, &c.ProjectID, &c.Kind, &c.Title, &c.Plan, &c.CreatedAt)
-	return c, MapErr(err)
+	return take[Conversation](conversations(ctx, q).Where("id = ? AND user_id = ?", id, userID))
 }
 
 // LegacyConversations lists the user's v1 chat conversations (optionally of one project).
 func LegacyConversations(ctx context.Context, q DB, userID, projectID, kind string) ([]Conversation, error) {
-	rows, err := q.Query(ctx, `SELECT id, COALESCE(user_id, ''), project_id, kind, title, plan, created_at FROM at_conversations
-		WHERE user_id = $1 AND kind = $2 AND ($3 = '' OR project_id = $3) ORDER BY created_at DESC`, userID, kind, projectID)
-	return collect(rows, err, func(r Scanner) (Conversation, error) {
-		var c Conversation
-		err := r.Scan(&c.ID, &c.UserID, &c.ProjectID, &c.Kind, &c.Title, &c.Plan, &c.CreatedAt)
-		return c, err
-	})
+	g := conversations(ctx, q).Where("user_id = ? AND kind = ?", userID, kind)
+	if projectID != "" {
+		g = g.Where("project_id = ?", projectID)
+	}
+	return find[Conversation](g.Order("created_at DESC"))
+}
+
+// coordinatorConversation finds the project's coordinator conversation id.
+func coordinatorConversation(ctx context.Context, q DB, projectID string) (string, error) {
+	c, err := take[struct{ ID string }](q.Gorm(ctx).Table("at_conversations").Select("id").
+		Where("project_id = ? AND kind = 'coordinator'", projectID))
+	return c.ID, err
 }
 
 // EnsureCoordinatorConversation returns the project's coordinator conversation, creating it.
 func EnsureCoordinatorConversation(ctx context.Context, tx *Tx, userID, projectID string) (string, error) {
-	var id string
-	err := MapErr(tx.QueryRow(ctx, `SELECT id FROM at_conversations WHERE project_id = $1 AND kind = 'coordinator'`,
-		projectID).Scan(&id))
+	id, err := coordinatorConversation(ctx, tx, projectID)
 	if err != ErrNotFound {
 		return id, err
 	}
-	id = NewHex(6)
-	_, err = tx.Exec(ctx, `INSERT INTO at_conversations (id, user_id, title, project_id, kind) VALUES ($1, $2, '项目统筹', $3, 'coordinator')
-		ON CONFLICT (project_id) WHERE kind = 'coordinator' DO NOTHING`, id, userID, projectID)
+	_, err = store.Exec(ctx, tx, `INSERT INTO at_conversations (id, user_id, title, project_id, kind) VALUES ($1, $2, '项目统筹', $3, 'coordinator')
+		ON CONFLICT (project_id) WHERE kind = 'coordinator' DO NOTHING`, NewHex(6), userID, projectID)
 	if err != nil {
 		return "", err
 	}
-	err = tx.QueryRow(ctx, `SELECT id FROM at_conversations WHERE project_id = $1 AND kind = 'coordinator'`, projectID).Scan(&id)
-	return id, err
+	return coordinatorConversation(ctx, tx, projectID)
 }
 
 // NewMessage is what InsertMessage stores.
@@ -72,26 +84,25 @@ func InsertMessage(ctx context.Context, tx *Tx, n NewMessage) (Message, error) {
 	if n.Meta == nil {
 		n.Meta = map[string]any{}
 	}
-	meta, _ := json.Marshal(n.Meta)
-	row := tx.QueryRow(ctx, `INSERT INTO at_messages (conversation_id, role, content, author, kind, meta)
-		VALUES ($1,$2,$3,$4,$5,$6) RETURNING `+messageCols, n.ConversationID, n.Role, n.Content, n.Author, n.Kind, meta)
-	m, err := scanMessage(row)
-	if err != nil {
+	m := Message{ConversationID: n.ConversationID, Role: n.Role, Content: n.Content, Author: n.Author, Kind: n.Kind,
+		Meta: n.Meta}
+	if err := tx.Gorm(ctx).Clauses(clause.Returning{}).Create(&m).Error; err != nil {
 		return m, err
 	}
-	_, err = tx.Exec(ctx, `UPDATE at_conversations SET updated_at = now() WHERE id = $1`, n.ConversationID)
+	err := tx.Gorm(ctx).Table("at_conversations").Where("id = ?", n.ConversationID).
+		Update("updated_at", gorm.Expr("now()")).Error
 	return m, err
 }
 
 // MessageByMsgID finds the message delivered with a session.send msg_id.
 func MessageByMsgID(ctx context.Context, q DB, msgID string) (Message, error) {
-	return scanMessage(q.QueryRow(ctx, `SELECT `+messageCols+` FROM at_messages WHERE meta->>'msg_id' = $1`, msgID))
+	return take[Message](q.Gorm(ctx).Where("meta->>'msg_id' = ?", msgID))
 }
 
 // MarkDelivered stamps delivered_at; false when it was already set or unknown.
 func MarkDelivered(ctx context.Context, tx *Tx, msgID string) (Message, bool, error) {
-	m, err := scanMessage(tx.QueryRow(ctx, `UPDATE at_messages SET delivered_at = now()
-		WHERE meta->>'msg_id' = $1 AND delivered_at IS NULL RETURNING `+messageCols, msgID))
+	m, err := rawOne[Message](ctx, tx, `UPDATE at_messages SET delivered_at = now()
+		WHERE meta->>'msg_id' = $1 AND delivered_at IS NULL RETURNING `+messageCols, msgID)
 	if err == ErrNotFound {
 		return m, false, nil
 	}
@@ -100,10 +111,13 @@ func MarkDelivered(ctx context.Context, tx *Tx, msgID string) (Message, bool, er
 
 // Messages pages a conversation's messages: newest limit before the id cursor (0 = newest), returned oldest first.
 func Messages(ctx context.Context, q DB, conversationID string, before int64, limit int) ([]Message, error) {
-	rows, err := q.Query(ctx, `SELECT `+messageCols+` FROM (SELECT `+messageCols+` FROM at_messages
-		WHERE conversation_id = $1 AND ($2 = 0 OR id < $2) ORDER BY id DESC LIMIT $3) x ORDER BY id`,
-		conversationID, before, limit)
-	return collect(rows, err, scanMessage)
+	g := q.Gorm(ctx).Where("conversation_id = ?", conversationID)
+	if before != 0 {
+		g = g.Where("id < ?", before)
+	}
+	out, err := find[Message](g.Order("id DESC").Limit(limit))
+	slices.Reverse(out)
+	return out, err
 }
 
 // EmitMessage emits a message event.
@@ -119,30 +133,30 @@ func (tx *Tx) EmitMessage(ctx context.Context, projectID string, threadID *strin
 
 // InsertMail stores an employee-to-employee message.
 func InsertMail(ctx context.Context, tx *Tx, threadID, sender, recipient, body string) (Mail, error) {
-	return scanMail(tx.QueryRow(ctx, `INSERT INTO at_mail (conversation_id, sender, recipient, body) VALUES ($1,$2,$3,$4)
-		RETURNING `+mailCols, threadID, sender, recipient, body))
+	return rawOne[Mail](ctx, tx, `INSERT INTO at_mail (conversation_id, sender, recipient, body) VALUES ($1,$2,$3,$4)
+		RETURNING `+mailCols, threadID, sender, recipient, body)
 }
 
 // UnreadMail returns mail for the employee (direct or broadcast) not yet read, and marks it read.
 func UnreadMail(ctx context.Context, tx *Tx, threadID, name string) ([]Mail, error) {
-	rows, err := tx.Query(ctx, `UPDATE at_mail SET read_by = read_by || to_jsonb($2::text)
+	return rawAll[Mail](ctx, tx, `UPDATE at_mail SET read_by = read_by || to_jsonb($2::text)
 		WHERE conversation_id = $1 AND (recipient = $2 OR (recipient = '*' AND sender <> $2))
-		AND NOT read_by ? $2 RETURNING `+mailCols, threadID, name)
-	return collect(rows, err, scanMail)
+		AND NOT jsonb_exists(read_by, $2) RETURNING `+mailCols, threadID, name)
 }
 
 // PeekUnread returns unread mail without marking it.
 func PeekUnread(ctx context.Context, q DB, threadID, name string) ([]Mail, error) {
-	rows, err := q.Query(ctx, `SELECT `+mailCols+` FROM at_mail WHERE conversation_id = $1
-		AND (recipient = $2 OR (recipient = '*' AND sender <> $2)) AND NOT read_by ? $2 ORDER BY id`, threadID, name)
-	return collect(rows, err, scanMail)
+	return find[Mail](q.Gorm(ctx).Where(`conversation_id = ? AND (recipient = ? OR (recipient = '*' AND sender <> ?))
+		AND NOT jsonb_exists(read_by, ?)`, threadID, name, name, name).Order("id"))
 }
 
 // MailPage pages a thread's mail newest first before the id cursor.
 func MailPage(ctx context.Context, q DB, threadID string, before int64, limit int) ([]Mail, error) {
-	rows, err := q.Query(ctx, `SELECT `+mailCols+` FROM at_mail WHERE conversation_id = $1 AND ($2 = 0 OR id < $2)
-		ORDER BY id DESC LIMIT $3`, threadID, before, limit)
-	return collect(rows, err, scanMail)
+	g := q.Gorm(ctx).Where("conversation_id = ?", threadID)
+	if before != 0 {
+		g = g.Where("id < ?", before)
+	}
+	return find[Mail](g.Order("id DESC").Limit(limit))
 }
 
 // EmitMail emits a mail event.
@@ -172,20 +186,18 @@ type Activity struct {
 
 // ThreadActivity pages a thread's activity newest first before the seq cursor.
 func ThreadActivity(ctx context.Context, q DB, threadID string, before int64, limit int) ([]Activity, error) {
-	rows, err := q.Query(ctx, `SELECT seq, COALESCE(payload->>'employee', actor), COALESCE(payload->>'text', ''), created_at
-		FROM at_events WHERE thread_id = $1 AND type = 'activity' AND ($2 = 0 OR seq < $2) ORDER BY seq DESC LIMIT $3`,
-		threadID, before, limit)
-	return collect(rows, err, func(r Scanner) (Activity, error) {
-		var a Activity
-		err := r.Scan(&a.ID, &a.Employee, &a.Text, &a.At)
-		return a, err
-	})
+	g := q.Gorm(ctx).Table("at_events").Select(`seq AS id, COALESCE(payload->>'employee', actor) AS employee,
+		COALESCE(payload->>'text', '') AS text, created_at AS at`).Where("thread_id = ? AND type = 'activity'", threadID)
+	if before != 0 {
+		g = g.Where("seq < ?", before)
+	}
+	return find[Activity](g.Order("seq DESC").Limit(limit))
 }
 
 // LatestCard is the newest chat card of a kind an employee left in a conversation.
 func LatestCard(ctx context.Context, q DB, conversationID, kind, author string) (Message, error) {
-	return scanMessage(q.QueryRow(ctx, `SELECT `+messageCols+` FROM at_messages WHERE conversation_id = $1 AND kind = $2
-		AND author = $3 ORDER BY id DESC LIMIT 1`, conversationID, kind, author))
+	return take[Message](q.Gorm(ctx).Where("conversation_id = ? AND kind = ? AND author = ?", conversationID, kind, author).
+		Order("id DESC"))
 }
 
 // UpdateCard rewrites a chat card in place (content and meta; its time and position stay).
@@ -194,6 +206,6 @@ func UpdateCard(ctx context.Context, tx *Tx, id int64, content string, meta map[
 	if err != nil {
 		return Message{}, err
 	}
-	return scanMessage(tx.QueryRow(ctx, `UPDATE at_messages SET content = $2, meta = $3 WHERE id = $1 RETURNING `+messageCols,
-		id, content, b))
+	return rawOne[Message](ctx, tx, `UPDATE at_messages SET content = $2, meta = $3 WHERE id = $1 RETURNING `+messageCols,
+		id, content, b)
 }

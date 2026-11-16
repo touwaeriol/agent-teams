@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 func TestRegisterLoginLogout(t *testing.T) {
@@ -69,7 +70,7 @@ func TestV1SessionKeepsWorkingAndGetsCSRF(t *testing.T) {
 	ctx := context.Background()
 	// A session row written by v1: no csrf secret, expiring in 2 days.
 	token, hash := auth.NewToken()
-	if _, err := h.db.Pool.Exec(ctx, `INSERT INTO at_sessions (token_hash, user_id, expires_at) VALUES ($1, $2, now() + interval '2 days')`, hash, u.ID); err != nil {
+	if _, err := store.Exec(ctx, h.db.Pool, `INSERT INTO at_sessions (token_hash, user_id, expires_at) VALUES ($1, $2, now() + interval '2 days')`, hash, u.ID); err != nil {
 		t.Fatal(err)
 	}
 	c := h.client()
@@ -81,7 +82,7 @@ func TestV1SessionKeepsWorkingAndGetsCSRF(t *testing.T) {
 		t.Fatalf("v1 session: %s csrf=%q", r.Body, c.cookie(CSRFCookie))
 	}
 	var expires time.Time
-	_ = h.db.Pool.QueryRow(ctx, `SELECT expires_at FROM at_sessions WHERE token_hash = $1`, hash).Scan(&expires)
+	_ = store.QueryRow(ctx, h.db.Pool, `SELECT expires_at FROM at_sessions WHERE token_hash = $1`, hash).Scan(&expires)
 	if time.Until(expires) < 29*24*time.Hour {
 		t.Fatalf("session not renewed: %v", expires)
 	}

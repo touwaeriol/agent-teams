@@ -1,11 +1,13 @@
-// Package store is the PostgreSQL access layer (pgx v5, plain SQL). Every
-// query that touches user data is scoped by user_id so another user's rows
-// read as "not found".
+// Package store is the PostgreSQL access layer (GORM over the pgx driver).
+// The goose SQL migrations own the schema; the GORM models here mirror those
+// tables and are never auto-migrated. Every query that touches user data is
+// scoped by user_id so another user's rows read as "not found".
 package store
 
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -13,8 +15,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oklog/ulid/v2"
+	"gorm.io/gorm"
 )
 
 // ErrNotFound means no row matched (including rows owned by someone else).
@@ -23,28 +25,17 @@ var ErrNotFound = errors.New("not found")
 // ErrConflict means a unique value is already taken.
 var ErrConflict = errors.New("conflict")
 
-// DB is what queries need; satisfied by *pgxpool.Pool and pgx.Tx.
-type DB interface {
-	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
-	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-}
-
-// Store wraps the connection pool.
+// Store is the account/project data layer, bound to the pool or to a transaction.
 type Store struct {
-	Pool *pgxpool.Pool
+	Pool *Pool
 	db   DB
 }
 
 // Open connects and pings.
 func Open(ctx context.Context, url string) (*Store, error) {
-	pool, err := pgxpool.New(ctx, url)
+	pool, err := OpenPool(ctx, url)
 	if err != nil {
-		return nil, fmt.Errorf("connect postgres: %w", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("ping postgres: %w", err)
+		return nil, err
 	}
 	return &Store{Pool: pool, db: pool}, nil
 }
@@ -57,10 +48,13 @@ func (s *Store) Ping(ctx context.Context) error { return s.Pool.Ping(ctx) }
 
 // Tx runs fn in a transaction with a Store bound to it.
 func (s *Store) Tx(ctx context.Context, fn func(tx *Store) error) error {
-	return pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
-		return fn(&Store{Pool: s.Pool, db: tx})
+	return s.db.Gorm(ctx).Transaction(func(g *gorm.DB) error {
+		return fn(&Store{Pool: s.Pool, db: Bound(g)})
 	})
 }
+
+// g is the handle for one call.
+func (s *Store) g(ctx context.Context) *gorm.DB { return s.db.Gorm(ctx) }
 
 // NewID returns a type-prefixed ULID for v2 tables (ro_…, me_…).
 func NewID(prefix string) string {
@@ -76,11 +70,23 @@ func NewHexID() string {
 	return hex.EncodeToString(b)
 }
 
-func mapErr(err error) error {
+// IsNoRows reports whether err means "no row" from GORM, database/sql or pgx.
+func IsNoRows(err error) bool {
+	return errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows)
+}
+
+// IsUnique reports whether err is a unique-constraint violation.
+func IsUnique(err error) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && pg.Code == "23505"
+}
+
+// MapErr turns "no row" into ErrNotFound and unique violations into ErrConflict.
+func MapErr(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, pgx.ErrNoRows) {
+	if IsNoRows(err) {
 		return ErrNotFound
 	}
 	var pg *pgconn.PgError
@@ -90,11 +96,14 @@ func mapErr(err error) error {
 	return err
 }
 
-func affected(tag pgconn.CommandTag, err error) error {
-	if err != nil {
-		return mapErr(err)
+func mapErr(err error) error { return MapErr(err) }
+
+// Changed returns ErrNotFound when a write matched no row (GORM result).
+func Changed(res *gorm.DB) error {
+	if res.Error != nil {
+		return MapErr(res.Error)
 	}
-	if tag.RowsAffected() == 0 {
+	if res.RowsAffected == 0 {
 		return ErrNotFound
 	}
 	return nil
@@ -106,27 +115,24 @@ type Change struct {
 	Val any
 }
 
-// setClause renders "a = $3, b = $4" starting at placeholder start.
-func setClause(changes []Change, start int) (string, []any) {
-	parts := make([]string, len(changes))
-	args := make([]any, len(changes))
-	for i, c := range changes {
-		parts[i] = fmt.Sprintf("%s = $%d", c.Col, start+i)
-		args[i] = c.Val
+// changeMap turns changes into a GORM Updates map (arrays keep their PostgreSQL type).
+func changeMap(changes []Change) map[string]any {
+	m := make(map[string]any, len(changes))
+	for _, c := range changes {
+		m[c.Col] = Param(c.Val)
 	}
-	return strings.Join(parts, ", "), args
+	return m
 }
 
 // MigrationVersion is goose's current version (readyz compares it with the binary's).
 func (s *Store) MigrationVersion(ctx context.Context) (int64, error) {
 	var v int64
-	err := s.db.QueryRow(ctx,
-		`SELECT COALESCE(max(version_id), 0) FROM goose_db_version WHERE is_applied`).Scan(&v)
+	err := s.g(ctx).Table("goose_db_version").Where("is_applied").
+		Select("COALESCE(max(version_id), 0)").Row().Scan(&v)
 	return v, mapErr(err)
 }
 
 // EnsurePartitions creates this month's and the next months' event partitions.
 func (s *Store) EnsurePartitions(ctx context.Context, ahead int) error {
-	_, err := s.db.Exec(ctx, `SELECT at_ensure_event_partitions($1)`, ahead)
-	return err
+	return s.g(ctx).Exec(`SELECT at_ensure_event_partitions(?)`, ahead).Error
 }

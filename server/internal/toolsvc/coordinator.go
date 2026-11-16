@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // openThread opens a thread for the brief (coordinator).
@@ -189,7 +189,7 @@ func (s *Service) addMemory(ctx context.Context, tx *core.Tx, projectID, text, s
 		Pinned    bool   `json:"pinned"`
 		CreatedAt any    `json:"created_at"`
 	}
-	err := tx.QueryRow(ctx, `INSERT INTO at_project_memory (id, project_id, text, source) VALUES ($1, $2, $3, $4)
+	err := store.QueryRow(ctx, tx, `INSERT INTO at_project_memory (id, project_id, text, source) VALUES ($1, $2, $3, $4)
 		RETURNING id, text, source, pinned, created_at`, core.NewID("me"), projectID, text, source).
 		Scan(&item.ID, &item.Text, &item.Source, &item.Pinned, &item.CreatedAt)
 	if err != nil {

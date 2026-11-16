@@ -166,7 +166,7 @@ func (a *API) searchThreads(ctx context.Context, pid, q string) ([]core.ThreadVi
 }
 
 func (a *API) searchMessages(ctx context.Context, pid, q string) ([]SearchMessage, error) {
-	rows, err := a.e.Core.Pool.Query(ctx, `SELECT m.id, m.conversation_id, m.role, m.content, m.created_at, m.author, m.kind,
+	rows, err := store.Query(ctx, a.e.Core.Pool, `SELECT m.id, m.conversation_id, m.role, m.content, m.created_at, m.author, m.kind,
 		m.delivered_at, m.meta, t.no FROM at_messages m JOIN at_conversations c ON c.id = m.conversation_id
 		LEFT JOIN at_threads t ON t.id = c.id
 		WHERE c.project_id = $1 AND c.kind IN ('coordinator','thread') AND m.content ILIKE '%' || $2 || '%'
@@ -188,7 +188,7 @@ func (a *API) searchMessages(ctx context.Context, pid, q string) ([]SearchMessag
 }
 
 func (a *API) searchTasks(ctx context.Context, pid, q string) ([]core.TaskView, error) {
-	rows, err := a.e.Core.Pool.Query(ctx, `SELECT t.conversation_id, t.id, th.no FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
+	rows, err := store.Query(ctx, a.e.Core.Pool, `SELECT t.conversation_id, t.id, th.no FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
 		WHERE th.project_id = $1 AND (t.instruction ILIKE '%' || $2 || '%' OR t.summary ILIKE '%' || $2 || '%')
 		ORDER BY t.created_at DESC LIMIT 30`, pid, q)
 	if err != nil {
@@ -270,7 +270,7 @@ func (a *API) recentMemory(ctx context.Context, pid string) ([]store.MemoryItem,
 }
 
 func (a *API) usage7d(ctx context.Context, pid string) (Usage7d, error) {
-	rows, err := a.e.Core.Pool.Query(ctx, `SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD'), COALESCE(sum(cost_usd), 0)::float8
+	rows, err := store.Query(ctx, a.e.Core.Pool, `SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD'), COALESCE(sum(cost_usd), 0)::float8
 		FROM at_usage WHERE project_id = $1 AND created_at >= $2 GROUP BY 1 ORDER BY 1`, pid, time.Now().Add(-7*24*time.Hour))
 	if err != nil {
 		return Usage7d{}, err

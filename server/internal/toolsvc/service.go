@@ -16,7 +16,6 @@ import (
 	"slices"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/delivery"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
@@ -144,7 +143,7 @@ func (s *Service) start(ctx context.Context, tx *core.Tx, m *protocol.ToolCall) 
 	if err != nil || dup {
 		return Result{}, false, err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO at_tool_calls (session_id, call_id, tool_use_id, tool, args) VALUES ($1,$2,$3,$4,$5)`,
+	if _, err := store.Exec(ctx, tx, `INSERT INTO at_tool_calls (session_id, call_id, tool_use_id, tool, args) VALUES ($1,$2,$3,$4,$5)`,
 		m.SessionID, m.CallID, m.ToolUseID, m.Tool, []byte(m.Args)); err != nil {
 		return Result{}, false, err
 	}
@@ -167,7 +166,7 @@ func (s *Service) start(ctx context.Context, tx *core.Tx, m *protocol.ToolCall) 
 func (s *Service) duplicate(ctx context.Context, tx *core.Tx, m *protocol.ToolCall) (bool, error) {
 	var st string
 	var result []byte
-	err := core.MapErr(tx.QueryRow(ctx, `SELECT status, result FROM at_tool_calls WHERE session_id = $1 AND call_id = $2`,
+	err := core.MapErr(store.QueryRow(ctx, tx, `SELECT status, result FROM at_tool_calls WHERE session_id = $1 AND call_id = $2`,
 		m.SessionID, m.CallID).Scan(&st, &result))
 	if errors.Is(err, core.ErrNotFound) {
 		return false, nil
@@ -256,7 +255,7 @@ func failure(err error) Result {
 func (s *Service) settle(ctx context.Context, tx *core.Tx, sessionID, callID string, res Result) error {
 	if res.Wait || res.Later != nil {
 		meta, _ := json.Marshal(nonNil(res.WaitMeta))
-		_, err := tx.Exec(ctx, `UPDATE at_tool_calls SET status = 'waiting', result = $3 WHERE session_id = $1 AND call_id = $2`,
+		_, err := store.Exec(ctx, tx, `UPDATE at_tool_calls SET status = 'waiting', result = $3 WHERE session_id = $1 AND call_id = $2`,
 			sessionID, callID, meta)
 		return err
 	}
@@ -284,7 +283,7 @@ func (s *Service) Complete(ctx context.Context, tx *core.Tx, sessionID, callID s
 	if !res.OK {
 		st = "failed"
 	}
-	tag, err := tx.Exec(ctx, `UPDATE at_tool_calls SET status = $3, result = $4, finished_at = now()
+	tag, err := store.Exec(ctx, tx, `UPDATE at_tool_calls SET status = $3, result = $4, finished_at = now()
 		WHERE session_id = $1 AND call_id = $2 AND status IN ('running','waiting')`, sessionID, callID, st, raw)
 	if err != nil || tag.RowsAffected() == 0 {
 		return err
@@ -324,7 +323,7 @@ func ignoreMissing(err error) error {
 // handler died with the process; otherwise it is cancelled too (protocol.md §6.2).
 func (s *Service) HandleCancel(ctx context.Context, m *protocol.ToolCancel) error {
 	return s.core.InTx(ctx, func(tx *core.Tx) error {
-		tag, err := tx.Exec(ctx, `UPDATE at_tool_calls SET status = 'cancelled', finished_at = now()
+		tag, err := store.Exec(ctx, tx, `UPDATE at_tool_calls SET status = 'cancelled', finished_at = now()
 			WHERE session_id = $1 AND call_id = $2 AND status IN ('running','waiting')`, m.SessionID, m.CallID)
 		if err != nil || tag.RowsAffected() == 0 {
 			return err
@@ -354,7 +353,7 @@ func (s *Service) cancelQuestionOf(ctx context.Context, tx *core.Tx, sessionID, 
 // Reconcile cancels the session's pending calls the daemon no longer has (sessions.report);
 // their blocking questions stay open and are answered by session.send later.
 func (s *Service) Reconcile(ctx context.Context, tx *core.Tx, sessionID string, pending []string) error {
-	_, err := tx.Exec(ctx, `UPDATE at_tool_calls SET status = 'cancelled', finished_at = now()
+	_, err := store.Exec(ctx, tx, `UPDATE at_tool_calls SET status = 'cancelled', finished_at = now()
 		WHERE session_id = $1 AND status IN ('running','waiting') AND NOT (call_id = ANY($2))`, sessionID, nonNilList(pending))
 	return err
 }

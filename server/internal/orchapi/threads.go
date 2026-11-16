@@ -11,6 +11,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/delivery"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 type tidInput struct {
@@ -362,7 +363,7 @@ func (a *API) deleteThread(ctx context.Context, in *tidInput) (*struct{}, error)
 }
 
 func auditTx(ctx context.Context, tx *core.Tx, userID, action, target string, detail map[string]any) {
-	_, _ = tx.Exec(ctx, `INSERT INTO at_audit_log (user_id, actor, action, target_type, target_id, detail)
+	_, _ = store.Exec(ctx, tx, `INSERT INTO at_audit_log (user_id, actor, action, target_type, target_id, detail)
 		VALUES ($1, $2, $3, 'thread', $4, $5)`, userID, "user:"+userID, action, target, detail)
 }
 
@@ -531,7 +532,7 @@ func (a *API) usage(ctx context.Context, in *tidInput) (*usageOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := a.e.Core.Pool.Query(ctx, `SELECT e.name, sum(u.cost_usd)::float8, COALESCE(sum(u.input_tokens),0)::bigint,
+	rows, err := store.Query(ctx, a.e.Core.Pool, `SELECT e.name, sum(u.cost_usd)::float8, COALESCE(sum(u.input_tokens),0)::bigint,
 		COALESCE(sum(u.output_tokens),0)::bigint, COALESCE(sum(u.cache_read_tokens),0)::bigint, COALESCE(sum(u.cache_write_tokens),0)::bigint
 		FROM at_usage u JOIN at_agent_sessions s ON s.id = u.session_id JOIN at_employees e ON e.id = s.employee_id
 		WHERE u.thread_id = $1 GROUP BY e.name ORDER BY e.name`, t.ID)

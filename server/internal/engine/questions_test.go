@@ -8,10 +8,10 @@ import (
 	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/approvals"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw/nodetest"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // team is a running thread with a lead and dev-1 working on t1 (project without a repository).
@@ -271,7 +271,7 @@ func TestThreadLimitAndPause(t *testing.T) {
 // the default bypass never raises one.
 func askMembers(t *testing.T, w *world) {
 	t.Helper()
-	if _, err := w.e.Core.Pool.Exec(w.ctx, `UPDATE at_roles SET permission_mode = 'ask' WHERE tier = 'member'`); err != nil {
+	if _, err := store.Exec(w.ctx, w.e.Core.Pool, `UPDATE at_roles SET permission_mode = 'ask' WHERE tier = 'member'`); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -281,7 +281,7 @@ func askMembers(t *testing.T, w *world) {
 func TestBypassRoleApprovalsPass(t *testing.T) {
 	tm := startTeam(t)
 	pool, ctx := tm.w.e.Core.Pool, tm.w.ctx
-	if _, err := pool.Exec(ctx, `UPDATE at_employees SET spec = jsonb_set(spec, '{permission_mode}', '"bypass"')
+	if _, err := store.Exec(ctx, pool, `UPDATE at_employees SET spec = jsonb_set(spec, '{permission_mode}', '"bypass"')
 		WHERE project_id = $1 AND name = 'dev-1'`, tm.projectID); err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func TestBypassRoleApprovalsPass(t *testing.T) {
 func TestReadOnlyRoleAutoAllowsReads(t *testing.T) {
 	tm := startTeam(t)
 	pool, ctx := tm.w.e.Core.Pool, tm.w.ctx
-	if _, err := pool.Exec(ctx, `UPDATE at_employees SET spec = jsonb_set(spec, '{read_only}', 'true')
+	if _, err := store.Exec(ctx, pool, `UPDATE at_employees SET spec = jsonb_set(spec, '{read_only}', 'true')
 		WHERE project_id = $1 AND name = 'dev-1'`, tm.projectID); err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +432,7 @@ func TestLeadReviewTimeout(t *testing.T) {
 	if len(tm.userCards(t)) != 0 {
 		t.Fatal("escalated before the timeout")
 	}
-	if _, err := pool.Exec(ctx, `UPDATE at_questions SET created_at = now() - interval '45 seconds' WHERE approval_id = 'ap_slow'`); err != nil {
+	if _, err := store.Exec(ctx, pool, `UPDATE at_questions SET created_at = now() - interval '45 seconds' WHERE approval_id = 'ap_slow'`); err != nil {
 		t.Fatal(err)
 	}
 	tm.w.e.Approvals.SweepLeadReviews(ctx)
@@ -479,7 +479,7 @@ func TestLeadReviewGuards(t *testing.T) {
 		t.Fatal("reply_to closed a permission request")
 	}
 	pool, ctx := tm.w.e.Core.Pool, tm.w.ctx
-	if _, err := pool.Exec(ctx, `UPDATE at_questions SET detail = detail || '{"reviewer_id":"emp_other"}' WHERE approval_id = 'ap_guard'`); err != nil {
+	if _, err := store.Exec(ctx, pool, `UPDATE at_questions SET detail = detail || '{"reviewer_id":"emp_other"}' WHERE approval_id = 'ap_guard'`); err != nil {
 		t.Fatal(err)
 	}
 	if res := tm.lead.call("review_permission", map[string]string{"request_id": qid, "decision": "allow", "reason": "x"}); res.Ok {

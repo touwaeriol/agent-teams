@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // BubbleTTL is how long a set_status bubble stays (or until the next one / task change).
@@ -200,7 +201,7 @@ func first(a, b string) string {
 // unchanged reports whether the employee's latest status already says the same.
 func unchanged(ctx context.Context, tx *core.Tx, r core.StatusRow) (bool, error) {
 	var state, sub, bubble, taskID string
-	err := core.MapErr(tx.QueryRow(ctx, `SELECT state, substate, bubble, task_id FROM at_employee_status WHERE employee_id = $1`,
+	err := core.MapErr(store.QueryRow(ctx, tx, `SELECT state, substate, bubble, task_id FROM at_employee_status WHERE employee_id = $1`,
 		r.EmployeeID).Scan(&state, &sub, &bubble, &taskID))
 	if err == core.ErrNotFound {
 		return false, nil

@@ -332,7 +332,7 @@ func (o *Orchestrator) notifyCoordinator(ctx context.Context, tx *core.Tx, t cor
 
 func (o *Orchestrator) leadLine(ctx context.Context, q core.DB, threadID string) string {
 	var text string
-	_ = q.QueryRow(ctx, `SELECT content FROM at_messages WHERE conversation_id = $1 AND role = 'leader' ORDER BY id DESC LIMIT 1`,
+	_ = store.QueryRow(ctx, q, `SELECT content FROM at_messages WHERE conversation_id = $1 AND role = 'leader' ORDER BY id DESC LIMIT 1`,
 		threadID).Scan(&text)
 	line := strings.SplitN(strings.TrimSpace(text), "\n", 2)[0]
 	r := []rune(line)
@@ -384,7 +384,7 @@ func (o *Orchestrator) ensureCoordinatorTx(ctx context.Context, tx *core.Tx, use
 	if err != nil {
 		return emp, conv, err
 	}
-	if _, err := tx.Exec(ctx, `SELECT 1 FROM at_projects WHERE id = $1 FOR UPDATE`, projectID); err != nil {
+	if _, err := store.Exec(ctx, tx, `SELECT 1 FROM at_projects WHERE id = $1 FOR UPDATE`, projectID); err != nil {
 		return emp, conv, err
 	}
 	if emp, err = core.Coordinator(ctx, tx, projectID); err == nil {
@@ -454,7 +454,7 @@ const recapMessages = 20
 
 // recentDigest quotes the employee's recent conversation (delivered messages and its replies).
 func recentDigest(ctx context.Context, tx *core.Tx, b *strings.Builder, e core.Employee, conv string) error {
-	rows, err := tx.Query(ctx, `SELECT role, author, content FROM (SELECT id, role, author, content FROM at_messages
+	rows, err := store.Query(ctx, tx, `SELECT role, author, content FROM (SELECT id, role, author, content FROM at_messages
 		WHERE conversation_id = $1 AND kind IN ('chat','note','interrupt')
 		AND ((role = 'leader' AND author = $2) OR (delivered_at IS NOT NULL AND (role = 'user' OR meta->>'to' = $2)))
 		ORDER BY id DESC LIMIT $3) x ORDER BY id`, conv, e.Name, recapMessages)
@@ -498,7 +498,7 @@ func openQuestionsDigest(ctx context.Context, tx *core.Tx, b *strings.Builder, e
 
 // memoryDigest adds the project's memory (pinned first, then the newest).
 func memoryDigest(ctx context.Context, tx *core.Tx, b *strings.Builder, projectID string) error {
-	rows, err := tx.Query(ctx, `SELECT text FROM at_project_memory WHERE project_id = $1
+	rows, err := store.Query(ctx, tx, `SELECT text FROM at_project_memory WHERE project_id = $1
 		ORDER BY pinned DESC, created_at DESC LIMIT 10`, projectID)
 	if err != nil {
 		return err
@@ -543,7 +543,7 @@ func (o *Orchestrator) threadDigest(ctx context.Context, tx *core.Tx, b *strings
 
 // tasksDigest lists the thread's tasks for the lead's recap.
 func tasksDigest(ctx context.Context, tx *core.Tx, b *strings.Builder, threadID string) error {
-	rows, err := tx.Query(ctx, `SELECT id, COALESCE(NULLIF(claimed_by, ''), assignee), status, instruction FROM at_tasks
+	rows, err := store.Query(ctx, tx, `SELECT id, COALESCE(NULLIF(claimed_by, ''), assignee), status, instruction FROM at_tasks
 		WHERE thread_id = $1 ORDER BY created_at, id`, threadID)
 	if err != nil {
 		return err

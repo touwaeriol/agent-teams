@@ -10,6 +10,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // Lead review (architecture.md §9 ⑤): a card no policy settled goes first to the thread's
@@ -130,7 +131,7 @@ func clip(s string, n int) string {
 // setAudience readdresses an open card and merges detail keys into it.
 func setAudience(ctx context.Context, tx *core.Tx, q core.Question, audience string, detail map[string]any) (core.Question, error) {
 	raw, _ := json.Marshal(detail)
-	if _, err := tx.Exec(ctx, `UPDATE at_questions SET audience = $3, detail = detail || $4::jsonb
+	if _, err := store.Exec(ctx, tx, `UPDATE at_questions SET audience = $3, detail = detail || $4::jsonb
 		WHERE conversation_id = $1 AND id = $2`, q.ConversationID, q.ID, audience, raw); err != nil {
 		return q, err
 	}
@@ -199,7 +200,7 @@ func (e *Engine) escalate(ctx context.Context, tx *core.Tx, q core.Question, rev
 
 // SweepLeadReviews hands cards the lead left unanswered past lead_review_timeout_s to the user.
 func (e *Engine) SweepLeadReviews(ctx context.Context) {
-	rows, err := e.core.Pool.Query(ctx, `SELECT conversation_id, id, project_id, extract(epoch FROM now() - created_at)::int
+	rows, err := store.Query(ctx, e.core.Pool, `SELECT conversation_id, id, project_id, extract(epoch FROM now() - created_at)::int
 		FROM at_questions WHERE kind = 'approval' AND status = 'open' AND audience = 'lead'`)
 	if err != nil {
 		e.log.Warn("lead review sweep", "err", err)

@@ -12,6 +12,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/events"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // LegacyConversation is v1's ConversationView.
@@ -93,7 +94,7 @@ func (a *API) legacyTasks(ctx context.Context, in *cidInput) (*legacyTasksOutput
 	if err != nil {
 		return nil, err
 	}
-	rows, err := a.e.Core.Pool.Query(ctx, `SELECT id, assignee, instruction, depends_on, status, output, parent FROM at_tasks
+	rows, err := store.Query(ctx, a.e.Core.Pool, `SELECT id, assignee, instruction, depends_on, status, output, parent FROM at_tasks
 		WHERE conversation_id = $1 ORDER BY CASE WHEN id ~ '^t[0-9]+$' THEN substring(id from 2)::int END, id`, c.ID)
 	if err != nil {
 		return nil, err

@@ -4,19 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+
+	"gorm.io/gorm/clause"
 )
 
 // Setting decodes at_settings[key] into dest; found is false when the key is absent.
 func (s *Store) Setting(ctx context.Context, key string, dest any) (bool, error) {
-	var raw []byte
-	err := mapErr(s.db.QueryRow(ctx, `SELECT value FROM at_settings WHERE key = $1`, key).Scan(&raw))
+	var row struct{ Value []byte }
+	err := mapErr(s.g(ctx).Table("at_settings").Select("value").Where("key = ?", key).Take(&row).Error)
 	if errors.Is(err, ErrNotFound) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return true, json.Unmarshal(raw, dest)
+	return true, json.Unmarshal(row.Value, dest)
 }
 
 // SaveSetting upserts at_settings[key].
@@ -25,13 +27,13 @@ func (s *Store) SaveSetting(ctx context.Context, key string, value any) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(ctx, `INSERT INTO at_settings (key, value) VALUES ($1, $2::jsonb)
-		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, key, string(raw))
-	return err
+	return s.g(ctx).Table("at_settings").Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "key"}},
+		DoUpdates: clause.AssignmentColumns([]string{"value"}),
+	}).Create(map[string]any{"key": key, "value": raw}).Error
 }
 
 // DeleteSetting removes at_settings[key].
 func (s *Store) DeleteSetting(ctx context.Context, key string) error {
-	_, err := s.db.Exec(ctx, `DELETE FROM at_settings WHERE key = $1`, key)
-	return err
+	return s.g(ctx).Exec(`DELETE FROM at_settings WHERE key = ?`, key).Error
 }

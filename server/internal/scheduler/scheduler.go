@@ -15,6 +15,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/fanout"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // MaxAttempts is how often a failed task returns to the pool before it fails.
@@ -111,7 +112,7 @@ func (s *Scheduler) loop(ctx context.Context) {
 
 // sweep schedules every active thread with claimable work (the 10 s safety net).
 func (s *Scheduler) sweep(ctx context.Context) {
-	rows, err := s.core.Pool.Query(ctx, `SELECT DISTINCT t.thread_id FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
+	rows, err := store.Query(ctx, s.core.Pool, `SELECT DISTINCT t.thread_id FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
 		WHERE t.status = 'pending' AND th.status IN ('running','waiting')`)
 	if err != nil {
 		s.log.Warn("scheduler sweep", "err", err)

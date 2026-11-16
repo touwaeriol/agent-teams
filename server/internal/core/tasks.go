@@ -4,17 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
+
+func tasks(ctx context.Context, q DB) *gorm.DB { return q.Gorm(ctx).Model(&Task{}) }
 
 // TaskByID loads a task of a thread conversation.
 func TaskByID(ctx context.Context, q DB, conversationID, id string) (Task, error) {
-	return scanTask(q.QueryRow(ctx, `SELECT `+taskCols+` FROM at_tasks WHERE conversation_id = $1 AND id = $2`, conversationID, id))
+	return take[Task](tasks(ctx, q).Where("conversation_id = ? AND id = ?", conversationID, id))
 }
 
 // LockTask loads a task FOR UPDATE.
 func LockTask(ctx context.Context, tx *Tx, conversationID, id string) (Task, error) {
-	return scanTask(tx.QueryRow(ctx, `SELECT `+taskCols+` FROM at_tasks WHERE conversation_id = $1 AND id = $2 FOR UPDATE`,
-		conversationID, id))
+	return take[Task](tasks(ctx, tx).Clauses(ForUpdate).Where("conversation_id = ? AND id = ?", conversationID, id))
 }
 
 // TaskFilter narrows ThreadTasks.
@@ -25,16 +31,20 @@ type TaskFilter struct {
 
 // ThreadTasks lists a thread's tasks in id order.
 func ThreadTasks(ctx context.Context, q DB, threadID string, f TaskFilter) ([]Task, error) {
-	rows, err := q.Query(ctx, `SELECT `+taskCols+` FROM at_tasks WHERE thread_id = $1
-		AND (COALESCE(cardinality($2::text[]), 0) = 0 OR status = ANY($2)) AND ($3 = '' OR main_task_id = $3)
-		ORDER BY substring(id from 2)::int`, threadID, f.Status, f.MainID)
-	return collect(rows, err, scanTask)
+	g := tasks(ctx, q).Where("thread_id = ?", threadID)
+	if len(f.Status) > 0 {
+		g = g.Where("status IN ?", f.Status)
+	}
+	if f.MainID != "" {
+		g = g.Where("main_task_id = ?", f.MainID)
+	}
+	return find[Task](g.Order("substring(id from 2)::int"))
 }
 
 // CurrentTask is the claimed/running task of an employee in a thread.
 func CurrentTask(ctx context.Context, q DB, threadID, employee string) (Task, error) {
-	return scanTask(q.QueryRow(ctx, `SELECT `+taskCols+` FROM at_tasks WHERE thread_id = $1 AND claimed_by = $2
-		AND status IN ('claimed','running') ORDER BY claimed_at DESC LIMIT 1`, threadID, employee))
+	return take[Task](tasks(ctx, q).Where("thread_id = ? AND claimed_by = ? AND status IN ('claimed','running')",
+		threadID, employee).Order("claimed_at DESC"))
 }
 
 // NewTask is what InsertTask stores.
@@ -69,11 +79,10 @@ func InsertTask(ctx context.Context, tx *Tx, n NewTask) (Task, error) {
 	if n.Status == "" {
 		n.Status = "pending"
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO at_tasks (conversation_id, id, thread_id, main_task_id, assignee, role, claimed_by,
-		kind, instruction, depends_on, status, output, parent, priority, created_by)
-		VALUES ($1,$2,$1,$3,$4,$5,$6,$7,$8,$9,$10,'',$11,$12,$13)`,
-		n.Thread.ID, id, n.MainTaskID, n.Assignee, n.Role, n.ClaimedBy, n.Kind, n.Instruction, deps, n.Status, n.Parent,
-		n.Priority, n.CreatedBy)
+	err = tx.Gorm(ctx).Table("at_tasks").Create(map[string]any{"conversation_id": n.Thread.ID, "id": id,
+		"thread_id": n.Thread.ID, "main_task_id": n.MainTaskID, "assignee": n.Assignee, "role": n.Role,
+		"claimed_by": n.ClaimedBy, "kind": n.Kind, "instruction": n.Instruction, "depends_on": deps, "status": n.Status,
+		"output": "", "parent": n.Parent, "priority": n.Priority, "created_by": n.CreatedBy}).Error
 	if err != nil {
 		return Task{}, err
 	}
@@ -87,11 +96,19 @@ func nonNilStrings(v []string) []string {
 	return v
 }
 
+// taskRow selects one task for a write.
+func taskRow(ctx context.Context, tx *Tx, t Task) *gorm.DB {
+	return tx.Gorm(ctx).Table("at_tasks").Where("conversation_id = ? AND id = ?", t.ConversationID, t.ID)
+}
+
 // SetTaskStatus updates status and stamps finished_at for final states.
 func SetTaskStatus(ctx context.Context, tx *Tx, t Task, status string) (Task, error) {
-	_, err := tx.Exec(ctx, `UPDATE at_tasks SET status = $3, updated_at = now(),
-		finished_at = CASE WHEN $3 IN ('done','failed','cancelled') THEN now() ELSE NULL END
-		WHERE conversation_id = $1 AND id = $2`, t.ConversationID, t.ID, status)
+	finished := gorm.Expr("NULL")
+	if status == "done" || status == "failed" || status == "cancelled" {
+		finished = gorm.Expr("now()")
+	}
+	err := taskRow(ctx, tx, t).Updates(map[string]any{"status": status, "updated_at": gorm.Expr("now()"),
+		"finished_at": finished}).Error
 	if err != nil {
 		return t, err
 	}
@@ -100,15 +117,7 @@ func SetTaskStatus(ctx context.Context, tx *Tx, t Task, status string) (Task, er
 
 // UpdateTask applies column changes to a task.
 func UpdateTask(ctx context.Context, tx *Tx, t Task, set map[string]any) (Task, error) {
-	cols := make([]string, 0, len(set))
-	args := []any{t.ConversationID, t.ID}
-	for col, val := range set {
-		args = append(args, val)
-		cols = append(cols, col+" = $"+itoa(len(args)))
-	}
-	_, err := tx.Exec(ctx, `UPDATE at_tasks SET `+strings.Join(cols, ", ")+`, updated_at = now()
-		WHERE conversation_id = $1 AND id = $2`, args...)
-	if err != nil {
+	if err := taskRow(ctx, tx, t).Updates(stamped(set)).Error; err != nil {
 		return t, err
 	}
 	return TaskByID(ctx, tx, t.ConversationID, t.ID)
@@ -130,7 +139,7 @@ func DepsSatisfied(ctx context.Context, q DB, t Task) (bool, error) {
 		return true, nil
 	}
 	var open int
-	err := q.QueryRow(ctx, `SELECT count(*) FROM unnest($2::text[]) d(id)
+	err := store.QueryRow(ctx, q, `SELECT count(*) FROM unnest($2::text[]) d(id)
 		LEFT JOIN at_tasks t ON t.conversation_id = $1 AND t.id = d.id WHERE t.status IS DISTINCT FROM 'done'`,
 		t.ConversationID, t.DependsOn).Scan(&open)
 	return open == 0, err
@@ -138,14 +147,14 @@ func DepsSatisfied(ctx context.Context, q DB, t Task) (bool, error) {
 
 // MainTasks lists a thread's plan.
 func MainTasks(ctx context.Context, q DB, threadID string) ([]MainTask, error) {
-	rows, err := q.Query(ctx, `SELECT `+mainTaskCols+` FROM at_main_tasks WHERE thread_id = $1 ORDER BY pos`, threadID)
-	return collect(rows, err, scanMainTask)
+	return find[MainTask](q.Gorm(ctx).Where("thread_id = ?", threadID).Order("pos"))
 }
 
 // MainTaskByTitle finds a plan step by title (exact, then case-insensitive).
 func MainTaskByTitle(ctx context.Context, q DB, threadID, title string) (MainTask, error) {
-	return scanMainTask(q.QueryRow(ctx, `SELECT `+mainTaskCols+` FROM at_main_tasks WHERE thread_id = $1
-		AND (title = $2 OR lower(title) = lower($2) OR id = $2) ORDER BY title = $2 DESC LIMIT 1`, threadID, strings.TrimSpace(title)))
+	title = strings.TrimSpace(title)
+	return take[MainTask](q.Gorm(ctx).Where("thread_id = ? AND (title = ? OR lower(title) = lower(?) OR id = ?)",
+		threadID, title, title, title).Order(clause.OrderBy{Expression: clause.Expr{SQL: "title = ? DESC", Vars: []any{title}}}))
 }
 
 // PlanStep is one step of update_plan.
@@ -172,8 +181,8 @@ func ReplacePlan(ctx context.Context, tx *Tx, threadID string, steps []PlanStep)
 		}
 		keep = append(keep, id)
 	}
-	_, err = tx.Exec(ctx, `DELETE FROM at_main_tasks WHERE thread_id = $1 AND NOT (id = ANY($2))`, threadID, keep)
-	return err
+	return tx.Gorm(ctx).Where("thread_id = ? AND NOT (id = ANY(?))", threadID, store.TextArray(keep)).
+		Delete(&MainTask{}).Error
 }
 
 func upsertStep(ctx context.Context, tx *Tx, threadID string, pos int, st PlanStep, byTitle map[string]MainTask) (string, error) {
@@ -182,25 +191,25 @@ func upsertStep(ctx context.Context, tx *Tx, threadID string, pos int, st PlanSt
 		status = "todo"
 	}
 	if m, ok := byTitle[st.Title]; ok {
-		_, err := tx.Exec(ctx, `UPDATE at_main_tasks SET pos = $2, status = $3, auto_done = auto_done AND $3 = 'done',
+		_, err := store.Exec(ctx, tx, `UPDATE at_main_tasks SET pos = $2, status = $3, auto_done = auto_done AND $3 = 'done',
 			updated_at = now() WHERE id = $1`, m.ID, pos, status)
 		return m.ID, err
 	}
 	id := NewID("mt")
-	_, err := tx.Exec(ctx, `INSERT INTO at_main_tasks (id, thread_id, pos, title, status) VALUES ($1,$2,$3,$4,$5)`,
-		id, threadID, pos, st.Title, status)
+	err := tx.Gorm(ctx).Table("at_main_tasks").Create(map[string]any{"id": id, "thread_id": threadID, "pos": pos,
+		"title": st.Title, "status": status}).Error
 	return id, err
 }
 
 // SetMainTaskStatus changes a step's status (manual or automatic).
 func SetMainTaskStatus(ctx context.Context, tx *Tx, threadID, id, status string, auto bool) error {
-	return Affected(tx.Exec(ctx, `UPDATE at_main_tasks SET status = $3, auto_done = $4, updated_at = now()
-		WHERE thread_id = $1 AND id = $2`, threadID, id, status, auto && status == "done"))
+	return Changed(tx.Gorm(ctx).Table("at_main_tasks").Where("thread_id = ? AND id = ?", threadID, id).
+		Updates(map[string]any{"status": status, "auto_done": auto && status == "done", "updated_at": gorm.Expr("now()")}))
 }
 
 // AutoCompleteMain ticks a plan step when all its tasks are done; true when it changed.
 func AutoCompleteMain(ctx context.Context, tx *Tx, threadID, mainID string) (bool, error) {
-	tag, err := tx.Exec(ctx, `UPDATE at_main_tasks m SET status = 'done', auto_done = TRUE, updated_at = now()
+	tag, err := store.Exec(ctx, tx, `UPDATE at_main_tasks m SET status = 'done', auto_done = TRUE, updated_at = now()
 		WHERE m.thread_id = $1 AND m.id = $2 AND m.status <> 'done'
 		AND EXISTS (SELECT 1 FROM at_tasks t WHERE t.thread_id = $1 AND t.main_task_id = $2 AND t.status <> 'cancelled')
 		AND NOT EXISTS (SELECT 1 FROM at_tasks t WHERE t.thread_id = $1 AND t.main_task_id = $2
@@ -211,7 +220,7 @@ func AutoCompleteMain(ctx context.Context, tx *Tx, threadID, mainID string) (boo
 	if tag.RowsAffected() > 0 {
 		return true, nil
 	}
-	tag, err = tx.Exec(ctx, `UPDATE at_main_tasks SET status = 'doing', updated_at = now()
+	tag, err = store.Exec(ctx, tx, `UPDATE at_main_tasks SET status = 'doing', updated_at = now()
 		WHERE thread_id = $1 AND id = $2 AND status = 'todo'`, threadID, mainID)
 	return tag.RowsAffected() > 0, err
 }

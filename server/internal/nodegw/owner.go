@@ -6,7 +6,6 @@ import (
 	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -71,7 +70,7 @@ func (g *Gateway) checkSession(ctx context.Context, node store.Node, typ, sessio
 	var nodeID *string
 	var state, owner string
 	var openGen int
-	err := core.MapErr(g.core.Pool.QueryRow(ctx, `SELECT a.node_id, a.state, a.open_gen, p.user_id FROM at_agent_sessions a
+	err := core.MapErr(store.QueryRow(ctx, g.core.Pool, `SELECT a.node_id, a.state, a.open_gen, p.user_id FROM at_agent_sessions a
 		JOIN at_employees e ON e.id = a.employee_id JOIN at_projects p ON p.id = e.project_id WHERE a.id = $1`,
 		sessionID).Scan(&nodeID, &state, &openGen, &owner))
 	if err == core.ErrNotFound {
@@ -97,7 +96,7 @@ func (g *Gateway) checkSession(ctx context.Context, node store.Node, typ, sessio
 
 func (g *Gateway) checkJob(ctx context.Context, node store.Node, jobID string) (verdict, string, error) {
 	var n int
-	err := g.core.Pool.QueryRow(ctx, `SELECT count(*) FROM at_node_commands WHERE node_id = $1 AND type LIKE 'git.%'
+	err := store.QueryRow(ctx, g.core.Pool, `SELECT count(*) FROM at_node_commands WHERE node_id = $1 AND type LIKE 'git.%'
 		AND body->>'job_id' = $2`, node.ID, jobID).Scan(&n)
 	if err != nil {
 		return rejected, "", err

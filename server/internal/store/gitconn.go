@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // GitConnection is a row of at_git_connections (the sealed token stays in the store).
@@ -15,19 +17,17 @@ type GitConnection struct {
 	Kind           string
 	InstallationID *int64
 	CreatedAt      time.Time
-	Permissions    map[string]string
+	Permissions    map[string]string `gorm:"serializer:jsonb"`
 	AccountType    string
 	CheckedAt      *time.Time
 }
 
-const connCols = `c.id, c.user_id, c.name, c.provider, c.login, c.kind, c.installation_id, c.created_at, c.permissions, c.account_type, c.checked_at`
+// TableName maps GitConnection to at_git_connections.
+func (GitConnection) TableName() string { return "at_git_connections" }
 
-func scanConn(row interface{ Scan(...any) error }) (GitConnection, error) {
-	var c GitConnection
-	err := row.Scan(&c.ID, &c.UserID, &c.Name, &c.Provider, &c.Login, &c.Kind, &c.InstallationID,
-		&c.CreatedAt, &c.Permissions, &c.AccountType, &c.CheckedAt)
-	return c, mapErr(err)
-}
+const connCols = `id, user_id, name, provider, login, kind, installation_id, created_at, permissions, account_type, checked_at`
+
+func (s *Store) conns(ctx context.Context) *gorm.DB { return s.g(ctx).Select(connCols) }
 
 // CreateConnection stores a PAT (sealed) or a GitHub App installation (installationID set, secret "").
 func (s *Store) CreateConnection(ctx context.Context, userID, name, login, sealed string, installationID *int64) (GitConnection, error) {
@@ -35,82 +35,74 @@ func (s *Store) CreateConnection(ctx context.Context, userID, name, login, seale
 	if installationID != nil {
 		kind = "app"
 	}
-	row := s.db.QueryRow(ctx, `INSERT INTO at_git_connections AS c (id, user_id, name, login, token_secret, kind, installation_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING `+connCols, NewHexID(), userID, name, login, sealed, kind, installationID)
-	return scanConn(row)
+	id := NewHexID()
+	err := s.g(ctx).Table("at_git_connections").Create(map[string]any{"id": id, "user_id": userID, "name": name,
+		"login": login, "token_secret": sealed, "kind": kind, "installation_id": installationID}).Error
+	if err != nil {
+		return GitConnection{}, mapErr(err)
+	}
+	return s.Connection(ctx, userID, id)
 }
 
 // Connections lists the user's connections.
 func (s *Store) Connections(ctx context.Context, userID string) ([]GitConnection, error) {
-	return s.queryConns(ctx, `SELECT `+connCols+` FROM at_git_connections c WHERE c.user_id = $1 ORDER BY c.created_at`, userID)
+	out := []GitConnection{}
+	err := s.conns(ctx).Where("user_id = ?", userID).Order("created_at").Find(&out).Error
+	return out, err
 }
 
 // ConnectionsByInstallation finds every connection of an App installation (webhooks).
 func (s *Store) ConnectionsByInstallation(ctx context.Context, installationID int64) ([]GitConnection, error) {
-	return s.queryConns(ctx, `SELECT `+connCols+` FROM at_git_connections c WHERE c.installation_id = $1`, installationID)
-}
-
-func (s *Store) queryConns(ctx context.Context, sql string, arg any) ([]GitConnection, error) {
-	rows, err := s.db.Query(ctx, sql, arg)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	out := []GitConnection{}
-	for rows.Next() {
-		c, err := scanConn(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, c)
-	}
-	return out, rows.Err()
+	err := s.conns(ctx).Where("installation_id = ?", installationID).Find(&out).Error
+	return out, err
 }
 
 // Connection loads one of the user's connections.
 func (s *Store) Connection(ctx context.Context, userID, id string) (GitConnection, error) {
-	return scanConn(s.db.QueryRow(ctx, `SELECT `+connCols+` FROM at_git_connections c WHERE c.id = $1 AND c.user_id = $2`, id, userID))
+	var c GitConnection
+	err := s.conns(ctx).Where("id = ? AND user_id = ?", id, userID).Take(&c).Error
+	return c, mapErr(err)
 }
 
 // ConnectionSecret returns the sealed PAT of one of the user's connections.
 func (s *Store) ConnectionSecret(ctx context.Context, userID, id string) (string, error) {
-	var sealed string
-	err := s.db.QueryRow(ctx, `SELECT token_secret FROM at_git_connections WHERE id = $1 AND user_id = $2`, id, userID).Scan(&sealed)
-	return sealed, mapErr(err)
+	var row struct{ TokenSecret string }
+	err := s.g(ctx).Table("at_git_connections").Select("token_secret").Where("id = ? AND user_id = ?", id, userID).
+		Take(&row).Error
+	return row.TokenSecret, mapErr(err)
 }
 
 // SetConnectionPermissions records what the installation actually grants and who owns it.
 func (s *Store) SetConnectionPermissions(ctx context.Context, id string, perms map[string]string, accountType string) error {
-	return affected(s.db.Exec(ctx, `UPDATE at_git_connections SET permissions = $2,
-		account_type = COALESCE(NULLIF($3, ''), account_type), checked_at = now() WHERE id = $1`, id, perms, accountType))
+	if perms == nil {
+		perms = map[string]string{}
+	}
+	return Changed(s.g(ctx).Table("at_git_connections").Where("id = ?", id).Updates(map[string]any{
+		"permissions":  Param(perms),
+		"account_type": gorm.Expr("COALESCE(NULLIF(?, ''), account_type)", accountType),
+		"checked_at":   gorm.Expr("now()")}))
 }
 
 // DeleteConnection removes one of the user's connections (projects keep their repo, lose the link).
 func (s *Store) DeleteConnection(ctx context.Context, userID, id string) error {
-	return affected(s.db.Exec(ctx, `DELETE FROM at_git_connections WHERE id = $1 AND user_id = $2`, id, userID))
+	return Changed(s.g(ctx).Where("id = ? AND user_id = ?", id, userID).Delete(&GitConnection{}))
 }
 
 // SealedSecrets lists every sealed PAT (atctl admin reseal).
 func (s *Store) SealedSecrets(ctx context.Context) (map[string]string, error) {
-	rows, err := s.db.Query(ctx, `SELECT id, token_secret FROM at_git_connections WHERE token_secret <> ''`)
-	if err != nil {
-		return nil, err
+	var rows []struct{ ID, TokenSecret string }
+	err := s.g(ctx).Table("at_git_connections").Select("id, token_secret").Where("token_secret <> ''").Find(&rows).Error
+	out := make(map[string]string, len(rows))
+	for _, r := range rows {
+		out[r.ID] = r.TokenSecret
 	}
-	defer rows.Close()
-	out := map[string]string{}
-	for rows.Next() {
-		var id, sealed string
-		if err := rows.Scan(&id, &sealed); err != nil {
-			return nil, err
-		}
-		out[id] = sealed
-	}
-	return out, rows.Err()
+	return out, err
 }
 
 // SetConnectionSecret replaces a sealed PAT (reseal).
 func (s *Store) SetConnectionSecret(ctx context.Context, id, sealed string) error {
-	return affected(s.db.Exec(ctx, `UPDATE at_git_connections SET token_secret = $2 WHERE id = $1`, id, sealed))
+	return Changed(s.g(ctx).Table("at_git_connections").Where("id = ?", id).Update("token_secret", sealed))
 }
 
 // ProjectRef names a project for "used by" labels.
@@ -121,20 +113,13 @@ type ProjectRef struct {
 
 // ProjectsByRepo maps lowercase owner/repo to the user's projects using it.
 func (s *Store) ProjectsByRepo(ctx context.Context, userID string) (map[string][]ProjectRef, error) {
-	rows, err := s.db.Query(ctx, `SELECT lower(r.repo), p.id, p.name FROM at_project_repos r
-		JOIN at_projects p ON p.id = r.project_id WHERE p.user_id = $1 ORDER BY p.created_at`, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+	var rows []struct{ Repo, ID, Name string }
+	err := s.g(ctx).Table("at_project_repos r").Select("lower(r.repo) AS repo, p.id, p.name").
+		Joins("JOIN at_projects p ON p.id = r.project_id").Where("p.user_id = ?", userID).Order("p.created_at").
+		Find(&rows).Error
 	out := map[string][]ProjectRef{}
-	for rows.Next() {
-		var repo string
-		var p ProjectRef
-		if err := rows.Scan(&repo, &p.ID, &p.Name); err != nil {
-			return nil, err
-		}
-		out[repo] = append(out[repo], p)
+	for _, r := range rows {
+		out[r.Repo] = append(out[r.Repo], ProjectRef{ID: r.ID, Name: r.Name})
 	}
-	return out, rows.Err()
+	return out, err
 }

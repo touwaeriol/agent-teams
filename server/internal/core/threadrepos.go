@@ -5,6 +5,9 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ErrBaseFixed means the thread branch already exists in the repository, cut from another base.
@@ -17,12 +20,15 @@ type ThreadRepo struct {
 	Repo          string
 	BaseBranch    string // explicit base (lead/coordinator) or the default branch the thread branch was cut from
 	BranchCreated bool
-	PRNumber      *int
-	PRURL         *string
-	PRState       string
+	PRNumber      *int    `gorm:"column:pr_number"`
+	PRURL         *string `gorm:"column:pr_url"`
+	PRState       string  `gorm:"column:pr_state"`
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
+
+// TableName maps ThreadRepo to at_thread_repos.
+func (ThreadRepo) TableName() string { return "at_thread_repos" }
 
 // ThreadRepoView is a repository of a thread as the API shows it.
 type ThreadRepoView struct {
@@ -32,15 +38,6 @@ type ThreadRepoView struct {
 	PRNumber      *int    `json:"pr_number"`
 	PRURL         *string `json:"pr_url"`
 	PRState       string  `json:"pr_state"`
-}
-
-const threadRepoCols = `thread_id, repo, base_branch, branch_created, pr_number, pr_url, pr_state, created_at, updated_at`
-
-func scanThreadRepo(r Scanner) (ThreadRepo, error) {
-	var t ThreadRepo
-	err := r.Scan(&t.ThreadID, &t.Repo, &t.BaseBranch, &t.BranchCreated, &t.PRNumber, &t.PRURL, &t.PRState,
-		&t.CreatedAt, &t.UpdatedAt)
-	return t, MapErr(err)
 }
 
 // View renders the row.
@@ -54,21 +51,31 @@ func (t ThreadRepo) HasOpenPR() bool {
 	return t.PRNumber != nil && t.PRState != "merged" && t.PRState != "closed"
 }
 
+func threadRepos(ctx context.Context, q DB) *gorm.DB { return q.Gorm(ctx).Model(&ThreadRepo{}) }
+
 // ThreadRepos lists a thread's repository rows (created order).
 func ThreadRepos(ctx context.Context, q DB, threadID string) ([]ThreadRepo, error) {
-	rows, err := q.Query(ctx, `SELECT `+threadRepoCols+` FROM at_thread_repos WHERE thread_id = $1 ORDER BY created_at, repo`, threadID)
-	return collect(rows, err, scanThreadRepo)
+	return find[ThreadRepo](threadRepos(ctx, q).Where("thread_id = ?", threadID).Order("created_at, repo"))
 }
 
 // ThreadRepoOf loads one repository row of a thread (ErrNotFound when the thread has not touched it).
 func ThreadRepoOf(ctx context.Context, q DB, threadID, repo string) (ThreadRepo, error) {
-	return scanThreadRepo(q.QueryRow(ctx, `SELECT `+threadRepoCols+` FROM at_thread_repos
-		WHERE thread_id = $1 AND lower(repo) = lower($2)`, threadID, repo))
+	return take[ThreadRepo](threadRepos(ctx, q).Where("thread_id = ? AND lower(repo) = lower(?)", threadID, repo))
 }
 
 // ThreadRepoByPR finds the repository row whose pull request has this URL.
 func ThreadRepoByPR(ctx context.Context, q DB, url string) (ThreadRepo, error) {
-	return scanThreadRepo(q.QueryRow(ctx, `SELECT `+threadRepoCols+` FROM at_thread_repos WHERE pr_url = $1`, url))
+	return take[ThreadRepo](threadRepos(ctx, q).Where("pr_url = ?", url))
+}
+
+// upsertThreadRepo inserts a repository row or updates the given columns of the existing one.
+func upsertThreadRepo(ctx context.Context, q DB, row map[string]any, update ...string) error {
+	set := clause.AssignmentColumns(update)
+	set = append(set, clause.Assignment{Column: clause.Column{Name: "updated_at"}, Value: gorm.Expr("now()")})
+	return q.Gorm(ctx).Table("at_thread_repos").Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "thread_id"}, {Name: "repo"}},
+		DoUpdates: set,
+	}).Create(row).Error
 }
 
 // SetThreadBase records the base branch a thread uses in a repository. Once the thread branch
@@ -82,38 +89,38 @@ func SetThreadBase(ctx context.Context, q DB, threadID, repo, base string) error
 	if err == nil && cur.BranchCreated && cur.BaseBranch != base {
 		return ErrBaseFixed
 	}
-	_, err = q.Exec(ctx, `INSERT INTO at_thread_repos (thread_id, repo, base_branch) VALUES ($1, $2, $3)
-		ON CONFLICT (thread_id, repo) DO UPDATE SET base_branch = EXCLUDED.base_branch, updated_at = now()`,
-		threadID, repo, base)
-	return err
+	return upsertThreadRepo(ctx, q, map[string]any{"thread_id": threadID, "repo": repo, "base_branch": base},
+		"base_branch")
 }
 
 // MarkThreadBranch records that the thread branch now exists in the repository, cut from base.
 func MarkThreadBranch(ctx context.Context, q DB, threadID, repo, base string) error {
-	_, err := q.Exec(ctx, `INSERT INTO at_thread_repos (thread_id, repo, base_branch, branch_created) VALUES ($1, $2, $3, TRUE)
-		ON CONFLICT (thread_id, repo) DO UPDATE SET base_branch = EXCLUDED.base_branch, branch_created = TRUE, updated_at = now()`,
-		threadID, repo, base)
-	return err
+	return upsertThreadRepo(ctx, q, map[string]any{"thread_id": threadID, "repo": repo, "base_branch": base,
+		"branch_created": true}, "base_branch", "branch_created")
+}
+
+// threadRepoRow selects one repository row of a thread for a write.
+func threadRepoRow(ctx context.Context, q DB, threadID, repo string) *gorm.DB {
+	return q.Gorm(ctx).Table("at_thread_repos").Where("thread_id = ? AND repo = ?", threadID, repo)
 }
 
 // SetThreadRepoPR records a repository's pull request (state open).
 func SetThreadRepoPR(ctx context.Context, q DB, threadID, repo string, number int, url string) error {
-	return Affected(q.Exec(ctx, `UPDATE at_thread_repos SET pr_number = $3, pr_url = $4, pr_state = 'open', updated_at = now()
-		WHERE thread_id = $1 AND repo = $2`, threadID, repo, number, url))
+	return Changed(threadRepoRow(ctx, q, threadID, repo).Updates(map[string]any{"pr_number": number, "pr_url": url,
+		"pr_state": "open", "updated_at": gorm.Expr("now()")}))
 }
 
 // SetThreadRepoPRState changes a repository's pull request state.
 func SetThreadRepoPRState(ctx context.Context, q DB, threadID, repo, state string) error {
-	_, err := q.Exec(ctx, `UPDATE at_thread_repos SET pr_state = $3, updated_at = now() WHERE thread_id = $1 AND repo = $2`,
-		threadID, repo, state)
-	return err
+	return threadRepoRow(ctx, q, threadID, repo).Updates(map[string]any{"pr_state": state,
+		"updated_at": gorm.Expr("now()")}).Error
 }
 
 // SetThreadPRStates changes the state of every pull request of the thread that is still open.
 func SetThreadPRStates(ctx context.Context, q DB, threadID, state string) error {
-	_, err := q.Exec(ctx, `UPDATE at_thread_repos SET pr_state = $2, updated_at = now()
-		WHERE thread_id = $1 AND pr_number IS NOT NULL AND pr_state NOT IN ('merged','closed')`, threadID, state)
-	return err
+	return q.Gorm(ctx).Table("at_thread_repos").
+		Where("thread_id = ? AND pr_number IS NOT NULL AND pr_state NOT IN ('merged','closed')", threadID).
+		Updates(map[string]any{"pr_state": state, "updated_at": gorm.Expr("now()")}).Error
 }
 
 // ThreadRepoViews renders a thread's repositories.

@@ -7,8 +7,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -92,7 +90,7 @@ func ListBuiltin(ctx context.Context, db store.DB) ([]Plugin, error) {
 }
 
 func query(ctx context.Context, db store.DB, sql string, args ...any) ([]Plugin, error) {
-	rows, err := db.Query(ctx, sql, args...)
+	rows, err := store.Query(ctx, db, sql, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +116,7 @@ func query(ctx context.Context, db store.DB, sql string, args ...any) ([]Plugin,
 }
 
 func versions(ctx context.Context, db store.DB, id string) ([]Version, error) {
-	rows, err := db.Query(ctx, `SELECT version, manifest_version, description, size, sha256, contents, created_at
+	rows, err := store.Query(ctx, db, `SELECT version, manifest_version, description, size, sha256, contents, created_at
 		FROM at_plugin_versions WHERE plugin_id = $1 ORDER BY version DESC`, id)
 	if err != nil {
 		return nil, err
@@ -166,7 +164,7 @@ func checkName(ctx context.Context, db store.DB, owner Owner, name string) error
 		return nil
 	}
 	var taken bool
-	err := db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM at_plugins WHERE user_id IS NULL AND name = $1)`, name).Scan(&taken)
+	err := store.QueryRow(ctx, db, `SELECT EXISTS (SELECT 1 FROM at_plugins WHERE user_id IS NULL AND name = $1)`, name).Scan(&taken)
 	if err == nil && taken {
 		return problem("%s 是内置插件的名字，请在 plugin.json 里换一个 name", name)
 	}
@@ -184,7 +182,7 @@ func insertVersion(ctx context.Context, db store.DB, owner Owner, by string, pkg
 	contents, _ := json.Marshal(pkg.Contents)
 	var id string
 	var version int
-	err := db.QueryRow(ctx, `WITH p AS (
+	err := store.QueryRow(ctx, db, `WITH p AS (
 			INSERT INTO at_plugins (id, user_id, name, latest, created_by) VALUES ($1, $2, $3, 1, $4)
 			ON CONFLICT `+conflict+` DO UPDATE SET latest = at_plugins.latest + 1, updated_at = now()
 			RETURNING id, latest)
@@ -197,9 +195,9 @@ func insertVersion(ctx context.Context, db store.DB, owner Owner, by string, pkg
 
 // prune drops versions older than the last KeepVersions that no role pins.
 func prune(ctx context.Context, db store.DB, owner Owner, id, name string, latest int) error {
-	_, err := db.Exec(ctx, `DELETE FROM at_plugin_versions v WHERE plugin_id = $1 AND version <= $2
+	_, err := store.Exec(ctx, db, `DELETE FROM at_plugin_versions v WHERE plugin_id = $1 AND version <= $2
 		AND NOT EXISTS (SELECT 1 FROM at_roles r WHERE ($3::text IS NULL OR r.user_id = $3)
-			AND $4 || '@' || v.version = ANY(r.plugins))`, id, latest-KeepVersions, owner.arg(), name)
+			AND $4 || v.version = ANY(r.plugins))`, id, latest-KeepVersions, owner.arg(), name+"@")
 	return err
 }
 
@@ -218,7 +216,7 @@ func Get(ctx context.Context, db store.DB, owner Owner, id string) (Plugin, erro
 
 // SetEnabled turns one of the owner's plugins on or off; sessions skip disabled plugins.
 func SetEnabled(ctx context.Context, db store.DB, owner Owner, id string, on bool) (Plugin, error) {
-	tag, err := db.Exec(ctx, `UPDATE at_plugins SET enabled = $3, updated_at = now()
+	tag, err := store.Exec(ctx, db, `UPDATE at_plugins SET enabled = $3, updated_at = now()
 		WHERE id = $1 AND user_id IS NOT DISTINCT FROM $2`, id, owner.arg(), on)
 	if err != nil {
 		return Plugin{}, err
@@ -233,19 +231,19 @@ func SetEnabled(ctx context.Context, db store.DB, owner Owner, id string, on boo
 // owner's roles, or for a built-in every role whose user has no own plugin of that name.
 func Delete(ctx context.Context, db store.DB, owner Owner, id string) (string, error) {
 	var name string
-	err := db.QueryRow(ctx, `DELETE FROM at_plugins WHERE id = $1 AND user_id IS NOT DISTINCT FROM $2 RETURNING name`,
+	err := store.QueryRow(ctx, db, `DELETE FROM at_plugins WHERE id = $1 AND user_id IS NOT DISTINCT FROM $2 RETURNING name`,
 		id, owner.arg()).Scan(&name)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if store.IsNoRows(err) {
 		return "", ErrNotFound
 	}
 	if err != nil {
 		return "", err
 	}
-	_, err = db.Exec(ctx, `UPDATE at_roles r SET plugins = ARRAY(SELECT x FROM unnest(r.plugins) x WHERE split_part(x, '@', 1) <> $2),
+	_, err = store.Exec(ctx, db, `UPDATE at_roles r SET plugins = ARRAY(SELECT x FROM unnest(r.plugins) x WHERE split_part(x, $3, 1) <> $2),
 			updated_at = now()
 		WHERE ($1::text IS NULL OR r.user_id = $1)
-			AND EXISTS (SELECT 1 FROM unnest(r.plugins) x WHERE split_part(x, '@', 1) = $2)
+			AND EXISTS (SELECT 1 FROM unnest(r.plugins) x WHERE split_part(x, $3, 1) = $2)
 			AND ($1::text IS NOT NULL OR NOT EXISTS (SELECT 1 FROM at_plugins o WHERE o.user_id = r.user_id AND o.name = $2))`,
-		owner.arg(), name)
+		owner.arg(), name, "@") // "@" as an argument: GORM reads @ in raw SQL as a named parameter
 	return name, err
 }

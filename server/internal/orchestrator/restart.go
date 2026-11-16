@@ -40,7 +40,7 @@ func (o *Orchestrator) resumeCutTurn(ctx context.Context, tx *core.Tx, s core.Ag
 		return err
 	}
 	var pending int
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM at_messages WHERE conversation_id = $1
+	if err := store.QueryRow(ctx, tx, `SELECT count(*) FROM at_messages WHERE conversation_id = $1
 		AND (delivered_at IS NULL OR created_at > now() - interval '2 minutes')
 		AND meta->>'to' = $2 AND (meta->>'resume_cut')::boolean`, conv, e.Name).Scan(&pending); err != nil {
 		return err
@@ -60,7 +60,7 @@ func (o *Orchestrator) resumeCutTurn(ctx context.Context, tx *core.Tx, s core.Ag
 
 // cutTurnText explains what the interruption did to the employee's open requests.
 func cutTurnText(ctx context.Context, q core.DB, e core.Employee) (string, error) {
-	cards, err := openRequests(ctx, q, e, `kind = 'approval' AND detail ? 'detached_at' AND status IN ('open','answered')`)
+	cards, err := openRequests(ctx, q, e, `kind = 'approval' AND jsonb_exists(detail, 'detached_at') AND status IN ('open','answered')`)
 	if err != nil {
 		return "", err
 	}
@@ -84,7 +84,7 @@ func cutTurnText(ctx context.Context, q core.DB, e core.Employee) (string, error
 
 // openRequests lists the employee's questions matching where as "q3 Bash make test".
 func openRequests(ctx context.Context, q core.DB, e core.Employee, where string) ([]string, error) {
-	rows, err := q.Query(ctx, `SELECT id, kind, text, detail FROM at_questions WHERE project_id = $1
+	rows, err := store.Query(ctx, q, `SELECT id, kind, text, detail FROM at_questions WHERE project_id = $1
 		AND COALESCE(thread_id, '') = COALESCE($2, '') AND asker = $3 AND `+where+` ORDER BY created_at`,
 		e.ProjectID, e.ThreadID, e.Name)
 	if err != nil {
@@ -142,14 +142,14 @@ const stalledNote = "（平台）节点守护进程重启后检查：这个线�
 // in "running" forever; its lead gets a note, unless that note is already the thread's
 // latest message (nothing happened since).
 func (o *Orchestrator) wakeStalledThreads(ctx context.Context, tx *core.Tx, node store.Node) error {
-	rows, err := tx.Query(ctx, `SELECT DISTINCT t.id FROM at_threads t JOIN at_employees e ON e.thread_id = t.id
+	rows, err := store.Query(ctx, tx, `SELECT DISTINCT t.id FROM at_threads t JOIN at_employees e ON e.thread_id = t.id
 		JOIN at_agent_sessions a ON a.employee_id = e.id AND a.state <> 'closed'
 		WHERE a.node_id = $1 AND t.status = 'running'
 		AND NOT EXISTS (SELECT 1 FROM at_agent_sessions a2 JOIN at_employees e2 ON e2.id = a2.employee_id
 			WHERE e2.thread_id = t.id AND a2.state IN ('turn_running','opening','queued'))
 		AND NOT EXISTS (SELECT 1 FROM at_questions q WHERE q.thread_id = t.id AND q.status = 'open')
 		AND NOT EXISTS (SELECT 1 FROM at_messages m WHERE m.conversation_id = t.id AND m.delivered_at IS NULL
-			AND m.meta ? 'msg_id' AND m.created_at > now() - interval '1 day')
+			AND jsonb_exists(m.meta, 'msg_id') AND m.created_at > now() - interval '1 day')
 		AND COALESCE((SELECT (m.meta->>'stalled')::boolean FROM at_messages m WHERE m.conversation_id = t.id
 			ORDER BY m.id DESC LIMIT 1), false) = false`, node.ID)
 	if err != nil {

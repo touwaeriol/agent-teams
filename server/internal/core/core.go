@@ -15,10 +15,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oklog/ulid/v2"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // ErrNotFound means no row matched.
@@ -27,12 +28,8 @@ var ErrNotFound = errors.New("not found")
 // ErrConflict means the row's state does not allow the change.
 var ErrConflict = errors.New("conflict")
 
-// DB is satisfied by *pgxpool.Pool and pgx.Tx.
-type DB interface {
-	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
-	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-}
+// DB is a GORM handle source: the Store's pool or a *Tx.
+type DB = store.DB
 
 // Publisher sends realtime hints (Valkey pub/sub plus local subscribers).
 type Publisher interface {
@@ -41,31 +38,34 @@ type Publisher interface {
 
 // Store is the orchestration data layer.
 type Store struct {
-	Pool *pgxpool.Pool
+	Pool *store.Pool
 	Pub  Publisher
 	// Online reports whether a node has a live link (views show it).
 	Online func(nodeID string) bool
 }
 
 // New returns a Store; pub may be nil (no realtime hints).
-func New(pool *pgxpool.Pool, pub Publisher) *Store {
+func New(pool *store.Pool, pub Publisher) *Store {
 	return &Store{Pool: pool, Pub: pub, Online: func(string) bool { return false }}
 }
 
 // Tx is one transaction plus what to do after it commits.
 type Tx struct {
-	pgx.Tx
+	g     *gorm.DB
 	store *Store
 	after []func(context.Context)
 	hints map[string]string
 }
 
+// Gorm returns the transaction's handle bound to ctx (Tx satisfies DB).
+func (tx *Tx) Gorm(ctx context.Context) *gorm.DB { return tx.g.WithContext(ctx) }
+
 // InTx runs fn in a transaction; after a successful commit it publishes the
 // event hints and runs AfterCommit callbacks in order.
 func (s *Store) InTx(ctx context.Context, fn func(tx *Tx) error) error {
 	var done *Tx
-	err := pgx.BeginFunc(ctx, s.Pool, func(t pgx.Tx) error {
-		tx := &Tx{Tx: t, store: s, hints: map[string]string{}}
+	err := s.Pool.Gorm(ctx).Transaction(func(g *gorm.DB) error {
+		tx := &Tx{g: g, store: s, hints: map[string]string{}}
 		if err := fn(tx); err != nil {
 			return err
 		}
@@ -113,55 +113,45 @@ func NewHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-// MapErr turns pgx.ErrNoRows into ErrNotFound.
+// MapErr turns "no row" into ErrNotFound.
 func MapErr(err error) error {
-	if errors.Is(err, pgx.ErrNoRows) {
+	if store.IsNoRows(err) {
 		return ErrNotFound
 	}
 	return err
 }
 
 // Affected returns ErrNotFound when the statement changed no row.
-func Affected(tag pgconn.CommandTag, err error) error {
+func Affected(r store.Result, err error) error {
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if r.RowsAffected() == 0 {
 		return ErrNotFound
 	}
 	return nil
 }
 
-// Scanner is one row (pgx.Row or pgx.Rows).
-type Scanner interface{ Scan(dest ...any) error }
+// Scanner is one row.
+type Scanner = store.Scanner
 
 // collect scans every row with scan.
-func collect[T any](rows pgx.Rows, err error, scan func(Scanner) (T, error)) ([]T, error) {
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []T{}
-	for rows.Next() {
-		v, err := scan(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, v)
-	}
-	return out, rows.Err()
+func collect[T any](rows *store.Rows, err error, scan func(Scanner) (T, error)) ([]T, error) {
+	return store.Collect(rows, err, scan)
 }
 
 // nextLocalID allocates t<n>/q<n> inside a conversation (v1 id rule). The
 // conversation row is locked so concurrent allocations serialise.
 func nextLocalID(ctx context.Context, tx *Tx, table, prefix, conversationID string) (string, error) {
-	if _, err := tx.Exec(ctx, `SELECT 1 FROM at_conversations WHERE id = $1 FOR UPDATE`, conversationID); err != nil {
+	var locked []struct{ ID string }
+	if err := tx.Gorm(ctx).Table("at_conversations").Select("id").Clauses(ForUpdate).Where("id = ?", conversationID).
+		Find(&locked).Error; err != nil {
 		return "", err
 	}
 	var n int
 	q := fmt.Sprintf(`SELECT COALESCE(max(substring(id from 2)::int), 0) + 1 FROM %s
 		WHERE conversation_id = $1 AND id ~ '^%s[0-9]+$'`, table, prefix)
-	if err := tx.QueryRow(ctx, q, conversationID).Scan(&n); err != nil {
+	if err := store.QueryRow(ctx, tx, q, conversationID).Scan(&n); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("%s%d", prefix, n), nil
@@ -181,21 +171,75 @@ func itoa(n int) string { return strconv.Itoa(n) }
 // Savepoint runs fn in a nested transaction: on error its writes, hints and
 // after-commit callbacks are discarded and the outer transaction continues.
 func (tx *Tx) Savepoint(ctx context.Context, fn func(tx *Tx) error) error {
-	sp, err := tx.Tx.Begin(ctx)
+	var sub *Tx
+	err := tx.g.WithContext(ctx).Transaction(func(g *gorm.DB) error {
+		sub = &Tx{g: g, store: tx.store, hints: map[string]string{}}
+		return fn(sub)
+	})
 	if err != nil {
-		return err
-	}
-	sub := &Tx{Tx: sp, store: tx.store, hints: map[string]string{}}
-	if err := fn(sub); err != nil {
-		_ = sp.Rollback(ctx)
-		return err
-	}
-	if err := sp.Commit(ctx); err != nil {
 		return err
 	}
 	for k, v := range sub.hints {
 		tx.hints[k] = v
 	}
 	tx.after = append(tx.after, sub.after...)
+	return nil
+}
+
+// take loads the one row g selects into a model (ErrNotFound when none).
+func take[T any](g *gorm.DB) (T, error) {
+	var v T
+	err := g.Take(&v).Error
+	return v, MapErr(err)
+}
+
+// find loads every row g selects into models.
+func find[T any](g *gorm.DB) ([]T, error) {
+	out := []T{}
+	err := g.Find(&out).Error
+	return out, err
+}
+
+// rawOne runs hand-written SQL ($n placeholders) and maps its one row onto a model by column name.
+func rawOne[T any](ctx context.Context, q DB, sql string, args ...any) (T, error) {
+	return take[T](store.Raw(ctx, q, sql, args...))
+}
+
+// rawAll runs hand-written SQL and maps every row onto a model by column name.
+func rawAll[T any](ctx context.Context, q DB, sql string, args ...any) ([]T, error) {
+	return find[T](store.Raw(ctx, q, sql, args...))
+}
+
+// ForUpdate locks the selected rows (SELECT … FOR UPDATE).
+var ForUpdate = clause.Locking{Strength: clause.LockingStrengthUpdate}
+
+// SkipLocked locks the selected rows and skips rows another transaction holds.
+var SkipLocked = clause.Locking{Strength: clause.LockingStrengthUpdate, Options: clause.LockingOptionsSkipLocked}
+
+// count counts the rows g selects.
+func count(g *gorm.DB) (int, error) {
+	var n int64
+	err := g.Count(&n).Error
+	return int(n), err
+}
+
+// stamped converts a column→value set for GORM Updates and bumps updated_at.
+func stamped(set map[string]any) map[string]any {
+	out := make(map[string]any, len(set)+1)
+	for col, val := range set {
+		out[col] = store.Param(val)
+	}
+	out["updated_at"] = gorm.Expr("now()")
+	return out
+}
+
+// Changed returns ErrNotFound when a GORM write matched no row.
+func Changed(res *gorm.DB) error {
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
 	return nil
 }

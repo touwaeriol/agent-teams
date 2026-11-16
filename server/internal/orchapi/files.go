@@ -18,6 +18,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // WithOrigins sets where published files are served: artifactOrigin is
@@ -173,7 +174,7 @@ func (a *API) listComments(ctx context.Context, in *deliverableIDInput) (*commen
 	if err != nil {
 		return nil, err
 	}
-	rows, err := a.e.Core.Pool.Query(ctx, `SELECT id, version, text, sent_to, created_at FROM at_deliverable_comments
+	rows, err := store.Query(ctx, a.e.Core.Pool, `SELECT id, version, text, sent_to, created_at FROM at_deliverable_comments
 		WHERE deliverable_id = $1 ORDER BY created_at, id`, d.ID)
 	if err != nil {
 		return nil, err
@@ -205,7 +206,7 @@ func (a *API) addComment(ctx context.Context, in *newCommentInput) (*commentOutp
 		if c.SentTo, err = a.deliverComment(ctx, tx, d, c); err != nil {
 			return err
 		}
-		return tx.QueryRow(ctx, `INSERT INTO at_deliverable_comments (id, deliverable_id, version, author, text, sent_to)
+		return store.QueryRow(ctx, tx, `INSERT INTO at_deliverable_comments (id, deliverable_id, version, author, text, sent_to)
 			VALUES ($1,$2,$3,$4,$5,$6) RETURNING created_at`, c.ID, d.ID, c.Version, u.ID, c.Text, c.SentTo).Scan(&c.CreatedAt)
 	})
 	return &commentOutput{Body: c}, err

@@ -14,7 +14,7 @@ func TestRolesSeededFromV1Team(t *testing.T) {
 	var n createdNode
 	c.must(201, "POST", "/api/nodes", map[string]string{"name": "rc-erio"}, &n)
 	team := "leader: lead\nemployees:\n  - {name: lead, type: claude_code, node: rc-erio, instructions: 带队}\n  - {name: engineer, type: claude_code, node: rc-erio, workdir: /x}\n"
-	if _, err := h.db.Pool.Exec(context.Background(), `INSERT INTO at_teams (user_id, config) VALUES ($1, $2)`, u.ID, team); err != nil {
+	if _, err := store.Exec(context.Background(), h.db.Pool, `INSERT INTO at_teams (user_id, config) VALUES ($1, $2)`, u.ID, team); err != nil {
 		t.Fatal(err)
 	}
 	var body RolesBody
@@ -121,7 +121,7 @@ func TestBypassDefaultNoWarnings(t *testing.T) {
 		t.Fatalf("auto accepted: %d", r.Status)
 	}
 	var count int
-	_ = h.db.Pool.QueryRow(context.Background(), `SELECT count(*) FROM at_audit_log WHERE action = 'skip_permissions_on'`).Scan(&count)
+	_ = store.QueryRow(context.Background(), h.db.Pool, `SELECT count(*) FROM at_audit_log WHERE action = 'skip_permissions_on'`).Scan(&count)
 	if count != 1 {
 		t.Fatalf("audit rows %d", count)
 	}

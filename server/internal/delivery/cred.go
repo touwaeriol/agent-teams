@@ -7,7 +7,6 @@ import (
 	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -100,7 +99,7 @@ func (e *Engine) sessionScope(ctx context.Context, sessionID string, purpose pro
 func (e *Engine) jobScope(ctx context.Context, node store.Node, jobID string) (callerScope, error) {
 	var typ string
 	cs := callerScope{}
-	err := e.core.Pool.QueryRow(ctx, `SELECT type, COALESCE(body->>'project_id', ''), COALESCE(body->>'repo', '') FROM at_node_commands
+	err := store.QueryRow(ctx, e.core.Pool, `SELECT type, COALESCE(body->>'project_id', ''), COALESCE(body->>'repo', '') FROM at_node_commands
 		WHERE node_id = $1 AND type LIKE 'git.%' AND body->>'job_id' = $2`, node.ID, jobID).Scan(&typ, &cs.projectID, &cs.repo)
 	if err != nil || cs.projectID == "" {
 		return cs, errors.New("unknown_job")

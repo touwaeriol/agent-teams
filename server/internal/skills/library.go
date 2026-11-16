@@ -8,10 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -28,7 +25,7 @@ const (
 // List returns the shipped built-in skills, the admin-created built-ins (user_id NULL) whose
 // name the user does not use, and the user's own uploads.
 func List(ctx context.Context, db store.DB, userID string) ([]Skill, error) {
-	rows, err := db.Query(ctx, `SELECT id, name, description, size, user_id IS NULL FROM at_skills s
+	rows, err := store.Query(ctx, db, `SELECT id, name, description, size, user_id IS NULL FROM at_skills s
 		WHERE user_id = $1 OR (user_id IS NULL
 			AND NOT EXISTS (SELECT 1 FROM at_skills o WHERE o.user_id = $1 AND o.name = s.name))
 		ORDER BY user_id IS NOT NULL, name`, userID)
@@ -72,10 +69,9 @@ func Create(ctx context.Context, db store.DB, userID string, files []File) (Skil
 	}
 	raw, _ := json.Marshal(s.Files)
 	s.ID, s.Builtin = store.NewID("sk"), userID == ""
-	_, err = db.Exec(ctx, `INSERT INTO at_skills (id, user_id, name, description, files, size) VALUES ($1,$2,$3,$4,$5,$6)`,
+	_, err = store.Exec(ctx, db, `INSERT INTO at_skills (id, user_id, name, description, files, size) VALUES ($1,$2,$3,$4,$5,$6)`,
 		s.ID, ownerArg(userID), s.Name, s.Description, raw, s.Size)
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+	if store.IsUnique(err) {
 		return Skill{}, problem("已经有一个叫 %s 的技能，先删除它再上传", s.Name)
 	}
 	return s, err
@@ -91,7 +87,7 @@ func checkName(ctx context.Context, db store.DB, userID, name string) error {
 		return nil
 	}
 	var taken bool
-	err := db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM at_skills WHERE user_id IS NULL AND name = $1)`, name).Scan(&taken)
+	err := store.QueryRow(ctx, db, `SELECT EXISTS (SELECT 1 FROM at_skills WHERE user_id IS NULL AND name = $1)`, name).Scan(&taken)
 	if err == nil && taken {
 		return problem("%s 是内置技能的名字，请在 SKILL.md 里换一个 name", name)
 	}
@@ -109,15 +105,15 @@ func ownerArg(userID string) any {
 // roles, or for an admin built-in (userID "") every role whose user has no own skill of that name.
 func Delete(ctx context.Context, db store.DB, userID, id string) error {
 	var name string
-	err := db.QueryRow(ctx, `DELETE FROM at_skills WHERE id = $1 AND user_id IS NOT DISTINCT FROM $2 RETURNING name`,
+	err := store.QueryRow(ctx, db, `DELETE FROM at_skills WHERE id = $1 AND user_id IS NOT DISTINCT FROM $2 RETURNING name`,
 		id, ownerArg(userID)).Scan(&name)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if store.IsNoRows(err) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return err
 	}
-	_, err = db.Exec(ctx, `UPDATE at_roles r SET skills = array_remove(r.skills, $2), updated_at = now()
+	_, err = store.Exec(ctx, db, `UPDATE at_roles r SET skills = array_remove(r.skills, $2), updated_at = now()
 		WHERE ($1::text IS NULL OR r.user_id = $1) AND $2 = ANY(r.skills)
 			AND ($1::text IS NOT NULL OR NOT EXISTS (SELECT 1 FROM at_skills o WHERE o.user_id = r.user_id AND o.name = $2))`,
 		ownerArg(userID), name)
@@ -150,10 +146,10 @@ func load(ctx context.Context, db store.DB, userID, name string) (Skill, error) 
 	}
 	s := Skill{Name: name}
 	var raw []byte
-	err := db.QueryRow(ctx, `SELECT id, description, files, user_id IS NULL FROM at_skills
+	err := store.QueryRow(ctx, db, `SELECT id, description, files, user_id IS NULL FROM at_skills
 		WHERE name = $2 AND (user_id = $1 OR user_id IS NULL) ORDER BY user_id IS NULL LIMIT 1`, userID, name).
 		Scan(&s.ID, &s.Description, &raw, &s.Builtin)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if store.IsNoRows(err) {
 		return s, ErrNotFound
 	}
 	if err != nil {

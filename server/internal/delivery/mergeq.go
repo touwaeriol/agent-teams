@@ -12,6 +12,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/scheduler"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // maxFastForwardRetries rebuilds a trial branch when the thread head moved meanwhile (§8.2 step 4).
@@ -295,7 +296,7 @@ const degradedNote = "CI 关卡已降级为 off：平台的 GitHub App 没有 ch
 
 func (e *Engine) degraded(ctx context.Context, t core.Thread) error {
 	var n int
-	if err := e.core.Pool.QueryRow(ctx, `SELECT count(*) FROM at_messages WHERE conversation_id = $1 AND meta->>'notice' = 'ci_degraded'`,
+	if err := store.QueryRow(ctx, e.core.Pool, `SELECT count(*) FROM at_messages WHERE conversation_id = $1 AND meta->>'notice' = 'ci_degraded'`,
 		t.ID).Scan(&n); err != nil || n > 0 {
 		return err
 	}

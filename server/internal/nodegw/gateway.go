@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	protocol "github.com/touwaeriol/agent-teams/protocol"
 
+	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/fanout"
@@ -216,7 +216,7 @@ func (g *Gateway) detach(ctx context.Context, l *link) {
 		delete(g.links, l.node.ID)
 	}
 	g.mu.Unlock()
-	_, _ = g.core.Pool.Exec(ctx, `UPDATE at_nodes SET last_seen_at = now() WHERE id = $1`, l.node.ID)
+	_, _ = store.Exec(ctx, g.core.Pool, `UPDATE at_nodes SET last_seen_at = now() WHERE id = $1`, l.node.ID)
 	if current && g.handler != nil {
 		g.handler.NodeOffline(ctx, l.node)
 	}
@@ -238,17 +238,17 @@ func (g *Gateway) recordHello(ctx context.Context, nodeID string, hello *protoco
 	var ackSeq int64
 	err := g.core.InTx(ctx, func(tx *core.Tx) error {
 		var epoch string
-		if err := tx.QueryRow(ctx, `SELECT epoch, ack_seq FROM at_nodes WHERE id = $1 FOR UPDATE`, nodeID).Scan(&epoch, &ackSeq); err != nil {
+		if err := store.QueryRow(ctx, tx, `SELECT epoch, ack_seq FROM at_nodes WHERE id = $1 FOR UPDATE`, nodeID).Scan(&epoch, &ackSeq); err != nil {
 			return err
 		}
 		if epoch != hello.Epoch {
 			ackSeq = 0
-			if _, err := tx.Exec(ctx, `UPDATE at_node_commands SET status = 'expired'
+			if _, err := store.Exec(ctx, tx, `UPDATE at_node_commands SET status = 'expired'
 				WHERE node_id = $1 AND status IN ('pending','sent')`, nodeID); err != nil {
 				return err
 			}
 		}
-		_, err := tx.Exec(ctx, `UPDATE at_nodes SET epoch = $2, ack_seq = $3, last_hello = $4, isolation = $5,
+		_, err := store.Exec(ctx, tx, `UPDATE at_nodes SET epoch = $2, ack_seq = $3, last_hello = $4, isolation = $5,
 			last_seen_at = now() WHERE id = $1`, nodeID, hello.Epoch, ackSeq, stored, isolation)
 		return err
 	})

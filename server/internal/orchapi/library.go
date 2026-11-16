@@ -16,6 +16,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/artifacts"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // UploadBody is POST /api/projects/{pid}/library: one file the user adds to the library.
@@ -173,7 +174,7 @@ func (a *API) uploadLibraryFile(ctx context.Context, in *uploadInput) (*delivera
 // storageBytes is what the project's hosted files take, every version counted.
 func (a *API) storageBytes(ctx context.Context, projectID string) (int64, error) {
 	var n int64
-	err := a.e.Core.Pool.QueryRow(ctx, `SELECT COALESCE(sum(f.size), 0)::bigint FROM at_deliverable_files f
+	err := store.QueryRow(ctx, a.e.Core.Pool, `SELECT COALESCE(sum(f.size), 0)::bigint FROM at_deliverable_files f
 		JOIN at_deliverables d ON d.id = f.deliverable_id WHERE d.project_id = $1`, projectID).Scan(&n)
 	return n, err
 }
@@ -206,12 +207,12 @@ func (a *API) projectUsage(ctx context.Context, in *usageQuery) (*projectUsageOu
 
 func (a *API) usageTotals(ctx context.Context, pid string, since time.Time, out *ProjectUsage) error {
 	t := &out.Tokens
-	return a.e.Core.Pool.QueryRow(ctx, `SELECT count(*), `+usageSums+` FROM at_usage u WHERE u.project_id = $1 AND u.created_at >= $2`,
+	return store.QueryRow(ctx, a.e.Core.Pool, `SELECT count(*), `+usageSums+` FROM at_usage u WHERE u.project_id = $1 AND u.created_at >= $2`,
 		pid, since).Scan(&out.Turns, &out.CostUSDEst, &t.Input, &t.Output, &t.CacheRead, &t.CacheWrite)
 }
 
 func (a *API) usageByDay(ctx context.Context, pid string, since time.Time, out *ProjectUsage) error {
-	rows, err := a.e.Core.Pool.Query(ctx, `SELECT to_char(date_trunc('day', u.created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD'), `+usageSums+`
+	rows, err := store.Query(ctx, a.e.Core.Pool, `SELECT to_char(date_trunc('day', u.created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD'), `+usageSums+`
 		FROM at_usage u WHERE u.project_id = $1 AND u.created_at >= $2 GROUP BY 1 ORDER BY 1`, pid, since)
 	if err != nil {
 		return err
@@ -228,7 +229,7 @@ func (a *API) usageByDay(ctx context.Context, pid string, since time.Time, out *
 }
 
 func (a *API) usageByThread(ctx context.Context, pid string, since time.Time, out *ProjectUsage) error {
-	rows, err := a.e.Core.Pool.Query(ctx, `SELECT t.no, COALESCE(t.title, ''), `+usageSums+`
+	rows, err := store.Query(ctx, a.e.Core.Pool, `SELECT t.no, COALESCE(t.title, ''), `+usageSums+`
 		FROM at_usage u LEFT JOIN at_threads t ON t.id = u.thread_id WHERE u.project_id = $1 AND u.created_at >= $2
 		GROUP BY t.no, t.title ORDER BY 3 DESC, t.no NULLS FIRST LIMIT 100`, pid, since)
 	if err != nil {
@@ -246,7 +247,7 @@ func (a *API) usageByThread(ctx context.Context, pid string, since time.Time, ou
 }
 
 func (a *API) usageByEmployee(ctx context.Context, pid string, since time.Time, out *ProjectUsage) error {
-	rows, err := a.e.Core.Pool.Query(ctx, `SELECT e.name, t.no, `+usageSums+`
+	rows, err := store.Query(ctx, a.e.Core.Pool, `SELECT e.name, t.no, `+usageSums+`
 		FROM at_usage u JOIN at_agent_sessions s ON s.id = u.session_id JOIN at_employees e ON e.id = s.employee_id
 		LEFT JOIN at_threads t ON t.id = e.thread_id WHERE u.project_id = $1 AND u.created_at >= $2
 		GROUP BY e.name, t.no ORDER BY 3 DESC, e.name LIMIT 200`, pid, since)

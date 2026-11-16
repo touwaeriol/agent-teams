@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // Node is a row of at_nodes.
@@ -16,91 +18,79 @@ type Node struct {
 	ParkAfterS        *int
 	Isolated          bool
 	Isolation         string
-	Labels            []string
+	Labels            []string `gorm:"serializer:jsonb"`
 	LastHello         json.RawMessage
 	LastSeenAt        *time.Time
 }
 
-const nodeCols = `n.id, n.user_id, n.name, n.created_at, n.max_active_sessions, n.park_after_s, n.isolated,
-	n.isolation, n.labels, n.last_hello, n.last_seen_at`
+// TableName maps Node to at_nodes.
+func (Node) TableName() string { return "at_nodes" }
 
-func scanNode(row interface{ Scan(...any) error }) (Node, error) {
+const nodeCols = `id, user_id, name, created_at, max_active_sessions, park_after_s, isolated, isolation, labels,
+	last_hello, last_seen_at`
+
+func (s *Store) nodes(ctx context.Context) *gorm.DB { return s.g(ctx).Model(&Node{}).Select(nodeCols) }
+
+func (s *Store) node(g *gorm.DB) (Node, error) {
 	var n Node
-	err := row.Scan(&n.ID, &n.UserID, &n.Name, &n.CreatedAt, &n.MaxActiveSessions, &n.ParkAfterS,
-		&n.Isolated, &n.Isolation, &n.Labels, &n.LastHello, &n.LastSeenAt)
+	err := g.Take(&n).Error
 	return n, mapErr(err)
-}
-
-func collectNodes(rows interface {
-	Next() bool
-	Scan(...any) error
-	Err() error
-	Close()
-}) ([]Node, error) {
-	defer rows.Close()
-	out := []Node{}
-	for rows.Next() {
-		n, err := scanNode(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, n)
-	}
-	return out, rows.Err()
 }
 
 // CreateNode registers a node; ErrConflict if the user already has that name.
 func (s *Store) CreateNode(ctx context.Context, userID, name, tokenHash string) (Node, error) {
-	row := s.db.QueryRow(ctx, `INSERT INTO at_nodes AS n (id, user_id, name, token_hash) VALUES ($1, $2, $3, $4)
-		RETURNING `+nodeCols, NewHexID(), userID, name, tokenHash)
-	return scanNode(row)
+	id := NewHexID()
+	err := s.g(ctx).Table("at_nodes").Create(map[string]any{"id": id, "user_id": userID, "name": name,
+		"token_hash": tokenHash}).Error
+	if err != nil {
+		return Node{}, mapErr(err)
+	}
+	return s.NodeOf(ctx, userID, id)
 }
 
 // ListNodes returns the user's nodes in creation order.
 func (s *Store) ListNodes(ctx context.Context, userID string) ([]Node, error) {
-	rows, err := s.db.Query(ctx, `SELECT `+nodeCols+` FROM at_nodes n WHERE n.user_id = $1 ORDER BY n.created_at`, userID)
-	if err != nil {
-		return nil, err
-	}
-	return collectNodes(rows)
+	out := []Node{}
+	err := s.nodes(ctx).Where("user_id = ?", userID).Order("created_at").Find(&out).Error
+	return out, err
 }
 
 // CountNodes counts the user's nodes (quota).
 func (s *Store) CountNodes(ctx context.Context, userID string) (int, error) {
-	var n int
-	err := s.db.QueryRow(ctx, `SELECT count(*) FROM at_nodes WHERE user_id = $1`, userID).Scan(&n)
-	return n, err
+	var n int64
+	err := s.g(ctx).Model(&Node{}).Where("user_id = ?", userID).Count(&n).Error
+	return int(n), err
 }
 
 // NodeOf loads one of the user's nodes.
 func (s *Store) NodeOf(ctx context.Context, userID, id string) (Node, error) {
-	return scanNode(s.db.QueryRow(ctx, `SELECT `+nodeCols+` FROM at_nodes n WHERE n.id = $1 AND n.user_id = $2`, id, userID))
+	return s.node(s.nodes(ctx).Where("id = ? AND user_id = ?", id, userID))
 }
 
 // NodeByToken identifies a daemon by sha256(token) (node gateway).
 func (s *Store) NodeByToken(ctx context.Context, tokenHash string) (Node, error) {
-	return scanNode(s.db.QueryRow(ctx, `SELECT `+nodeCols+` FROM at_nodes n WHERE n.token_hash = $1`, tokenHash))
+	return s.node(s.nodes(ctx).Where("token_hash = ?", tokenHash))
 }
 
 // SetNodeToken rotates the token hash.
 func (s *Store) SetNodeToken(ctx context.Context, userID, id, tokenHash string) error {
-	return affected(s.db.Exec(ctx, `UPDATE at_nodes SET token_hash = $3 WHERE id = $1 AND user_id = $2`, id, userID, tokenHash))
+	return Changed(s.g(ctx).Table("at_nodes").Where("id = ? AND user_id = ?", id, userID).Update("token_hash", tokenHash))
 }
 
 // UpdateNode applies settings changes (max_active_sessions, park_after_s, isolated, labels).
 func (s *Store) UpdateNode(ctx context.Context, userID, id string, changes []Change) (Node, error) {
-	if len(changes) == 0 {
-		return s.NodeOf(ctx, userID, id)
+	if len(changes) > 0 {
+		res := s.g(ctx).Table("at_nodes").Where("id = ? AND user_id = ?", id, userID).Updates(changeMap(changes))
+		if err := Changed(res); err != nil {
+			return Node{}, err
+		}
 	}
-	set, args := setClause(changes, 3)
-	row := s.db.QueryRow(ctx, `UPDATE at_nodes AS n SET `+set+` WHERE n.id = $1 AND n.user_id = $2 RETURNING `+nodeCols,
-		append([]any{id, userID}, args...)...)
-	return scanNode(row)
+	return s.NodeOf(ctx, userID, id)
 }
 
 // DeleteNode removes one of the user's nodes.
 func (s *Store) DeleteNode(ctx context.Context, userID, id string) error {
-	return affected(s.db.Exec(ctx, `DELETE FROM at_nodes WHERE id = $1 AND user_id = $2`, id, userID))
+	return Changed(s.g(ctx).Where("id = ? AND user_id = ?", id, userID).Delete(&Node{}))
 }
 
 // NodeSession is one live agent session on a node (Nodes page).
@@ -115,23 +105,13 @@ type NodeSession struct {
 
 // NodeSessions lists the node's sessions that are not closed.
 func (s *Store) NodeSessions(ctx context.Context, nodeID string) ([]NodeSession, error) {
-	rows, err := s.db.Query(ctx, `SELECT a.id, e.name, p.name, t.no, a.state, a.last_active_at
-		FROM at_agent_sessions a JOIN at_employees e ON e.id = a.employee_id
-		JOIN at_projects p ON p.id = e.project_id LEFT JOIN at_threads t ON t.id = e.thread_id
-		WHERE a.node_id = $1 AND a.state <> 'closed' ORDER BY a.opened_at`, nodeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	out := []NodeSession{}
-	for rows.Next() {
-		var x NodeSession
-		if err := rows.Scan(&x.SessionID, &x.Employee, &x.Project, &x.ThreadNo, &x.State, &x.LastActiveAt); err != nil {
-			return nil, err
-		}
-		out = append(out, x)
-	}
-	return out, rows.Err()
+	err := s.g(ctx).Table("at_agent_sessions a").
+		Select("a.id AS session_id, e.name AS employee, p.name AS project, t.no AS thread_no, a.state, a.last_active_at").
+		Joins("JOIN at_employees e ON e.id = a.employee_id").Joins("JOIN at_projects p ON p.id = e.project_id").
+		Joins("LEFT JOIN at_threads t ON t.id = e.thread_id").
+		Where("a.node_id = ? AND a.state <> 'closed'", nodeID).Order("a.opened_at").Find(&out).Error
+	return out, err
 }
 
 // NodeLog is one warn/error line the daemon sent back.
@@ -143,22 +123,19 @@ type NodeLog struct {
 	CreatedAt time.Time       `json:"created_at"`
 }
 
+// TableName maps NodeLog to at_node_logs.
+func (NodeLog) TableName() string { return "at_node_logs" }
+
 // NodeLogs pages the node's logs newest first; before = id cursor (0 = newest).
 func (s *Store) NodeLogs(ctx context.Context, nodeID, level string, before int64, limit int) ([]NodeLog, error) {
-	rows, err := s.db.Query(ctx, `SELECT id, level, msg, fields, created_at FROM at_node_logs
-		WHERE node_id = $1 AND ($2 = '' OR level = $2) AND ($3 = 0 OR id < $3)
-		ORDER BY id DESC LIMIT $4`, nodeID, level, before, limit)
-	if err != nil {
-		return nil, err
+	g := s.g(ctx).Where("node_id = ?", nodeID)
+	if level != "" {
+		g = g.Where("level = ?", level)
 	}
-	defer rows.Close()
+	if before != 0 {
+		g = g.Where("id < ?", before)
+	}
 	out := []NodeLog{}
-	for rows.Next() {
-		var x NodeLog
-		if err := rows.Scan(&x.ID, &x.Level, &x.Msg, &x.Fields, &x.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, x)
-	}
-	return out, rows.Err()
+	err := g.Order("id DESC").Limit(limit).Find(&out).Error
+	return out, err
 }

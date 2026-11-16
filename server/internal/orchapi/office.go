@@ -2,13 +2,13 @@ package orchapi
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
@@ -98,12 +98,11 @@ func (a *API) officeSnapshot(ctx context.Context, in *pidInput) (*officeOutput, 
 		return nil, err
 	}
 	var snap OfficeSnapshot
-	err = pgx.BeginTxFunc(ctx, a.e.Core.Pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly},
-		func(tx pgx.Tx) error {
-			var err error
-			snap, err = a.snapshot(ctx, tx, p)
-			return err
-		})
+	err = store.InTx(ctx, a.e.Core.Pool, func(tx store.DB) error {
+		var err error
+		snap, err = a.snapshot(ctx, tx, p)
+		return err
+	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	return &officeOutput{Body: snap}, err
 }
 
@@ -192,7 +191,7 @@ func (a *API) layoutOf(ctx context.Context, p store.Project) (string, string) {
 
 func board(ctx context.Context, q core.DB, projectID string) (Board, error) {
 	b := Board{ByThread: map[string]BoardCounts{}}
-	rows, err := q.Query(ctx, `SELECT th.no, t.status, count(*) FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
+	rows, err := store.Query(ctx, q, `SELECT th.no, t.status, count(*) FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
 		WHERE th.project_id = $1 AND th.status IN ('queued','running','waiting','review','paused') GROUP BY th.no, t.status`, projectID)
 	if err != nil {
 		return b, err
@@ -240,7 +239,7 @@ func (a *API) officeReplay(ctx context.Context, in *replayInput) (*replayOutput,
 
 // statusesAt replaces each employee's status with its last status before t.
 func (a *API) statusesAt(ctx context.Context, projectID string, t time.Time, emps []core.EmployeeBrief) error {
-	rows, err := a.e.Core.Pool.Query(ctx, `SELECT DISTINCT ON (employee_id) employee_id, state, substate, bubble, bubble_kind,
+	rows, err := store.Query(ctx, a.e.Core.Pool, `SELECT DISTINCT ON (employee_id) employee_id, state, substate, bubble, bubble_kind,
 		task_id, task_kind, tier, role, created_at, seq FROM at_status_events WHERE project_id = $1 AND created_at < $2
 		ORDER BY employee_id, created_at DESC`, projectID, t)
 	if err != nil {
@@ -318,7 +317,7 @@ func (a *API) card(ctx context.Context, emp core.Employee) (EmployeeCard, error)
 }
 
 func (a *API) employeeActivity(ctx context.Context, emp core.Employee) ([]core.Activity, error) {
-	rows, err := a.e.Core.Pool.Query(ctx, `SELECT seq, actor, COALESCE(payload->>'text', ''), created_at FROM at_events
+	rows, err := store.Query(ctx, a.e.Core.Pool, `SELECT seq, actor, COALESCE(payload->>'text', ''), created_at FROM at_events
 		WHERE project_id = $1 AND type = 'activity' AND actor = $2 AND COALESCE(thread_id, '') = COALESCE($3, '')
 		ORDER BY seq DESC LIMIT 10`, emp.ProjectID, emp.Name, emp.ThreadID)
 	if err != nil {

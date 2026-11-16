@@ -7,11 +7,11 @@ import (
 	"strings"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/delivery"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/scheduler"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // workable states a member may complete a task from.
@@ -125,7 +125,7 @@ func (s *Service) pushOutcomes(ctx context.Context, tx *core.Tx, meta map[string
 	if group == "" { // a push queued before multi-repository support: one job, no repository name
 		return []delivery.PushOutcome{single(r)}, true, nil
 	}
-	if _, err := tx.Exec(ctx, `SELECT 1 FROM at_tool_calls WHERE session_id = $1 AND call_id = $2 FOR UPDATE`,
+	if _, err := store.Exec(ctx, tx, `SELECT 1 FROM at_tool_calls WHERE session_id = $1 AND call_id = $2 FOR UPDATE`,
 		str(meta["session_id"]), str(meta["call_id"])); err != nil {
 		return nil, false, err
 	}
@@ -294,7 +294,7 @@ func (s *Service) member(ctx context.Context, tx *core.Tx, t core.Thread, e core
 	}
 	if e.NodeID != nil {
 		var name string
-		if tx.QueryRow(ctx, `SELECT name FROM at_nodes WHERE id = $1`, *e.NodeID).Scan(&name) == nil {
+		if store.QueryRow(ctx, tx, `SELECT name FROM at_nodes WHERE id = $1`, *e.NodeID).Scan(&name) == nil {
 			m.Node = &name
 		}
 	}
@@ -422,7 +422,7 @@ func outcomeOf(task core.Task, tool string) Result {
 
 // taskFinished answers wait_task / request_review calls waiting on a task (scheduler hook).
 func (s *Service) taskFinished(ctx context.Context, tx *core.Tx, task core.Task) error {
-	rows, err := tx.Query(ctx, `SELECT session_id, call_id, tool FROM at_tool_calls WHERE status = 'waiting'
+	rows, err := store.Query(ctx, tx, `SELECT session_id, call_id, tool FROM at_tool_calls WHERE status = 'waiting'
 		AND result->>'waiting_task' = $1 AND result->>'thread_id' = $2`, task.ID, task.ConversationID)
 	if err != nil {
 		return err

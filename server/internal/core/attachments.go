@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"time"
+
+	"gorm.io/gorm/clause"
 )
 
 // Image input limits (api.md §3.4): what Claude accepts per image, and per message.
@@ -30,9 +32,12 @@ type Attachment struct {
 	Name        string    `json:"name"`
 	ContentType string    `json:"content_type" enum:"image/png,image/jpeg,image/gif,image/webp"`
 	Size        int       `json:"size"`
-	SHA256      string    `json:"sha256"`
-	CreatedAt   time.Time `json:"created_at"`
+	SHA256      string    `json:"sha256" gorm:"column:sha256"`
+	CreatedAt   time.Time `json:"created_at" gorm:"autoCreateTime:false;default:now()"`
 }
+
+// TableName maps Attachment to at_attachments.
+func (Attachment) TableName() string { return "at_attachments" }
 
 // AttachmentRef is what a message's meta.attachments keeps of an image.
 type AttachmentRef struct {
@@ -87,28 +92,33 @@ func NewAttachment(projectID, userID, name string, data []byte) (Attachment, err
 
 // InsertAttachment stores an image.
 func InsertAttachment(ctx context.Context, q DB, a Attachment, data []byte) (Attachment, error) {
-	err := q.QueryRow(ctx, `INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, sha256, data)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING created_at`, a.ID, a.ProjectID, a.UserID, a.Name, a.ContentType, a.Size,
-		a.SHA256, data).Scan(&a.CreatedAt)
-	return a, err
-}
-
-const attachmentCols = `id, project_id, user_id, name, content_type, size, sha256, created_at`
-
-func scanAttachment(r Scanner) (Attachment, error) {
-	var a Attachment
-	err := r.Scan(&a.ID, &a.ProjectID, &a.UserID, &a.Name, &a.ContentType, &a.Size, &a.SHA256, &a.CreatedAt)
-	return a, MapErr(err)
+	row := struct {
+		Attachment
+		Data []byte
+	}{a, data}
+	err := q.Gorm(ctx).Table("at_attachments").Clauses(clause.Returning{Columns: []clause.Column{{Name: "created_at"}}}).
+		Create(&row).Error
+	return row.Attachment, err
 }
 
 // ProjectAttachments loads the given images of a project, in the order asked; unknown ids are ErrNotFound.
 func ProjectAttachments(ctx context.Context, q DB, projectID string, ids []string) ([]Attachment, error) {
+	if len(ids) == 0 {
+		return []Attachment{}, nil
+	}
+	found, err := find[Attachment](q.Gorm(ctx).Omit("data").Where("project_id = ? AND id IN ?", projectID, ids))
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]Attachment, len(found))
+	for _, a := range found {
+		byID[a.ID] = a
+	}
 	out := make([]Attachment, 0, len(ids))
 	for _, id := range ids {
-		a, err := scanAttachment(q.QueryRow(ctx, `SELECT `+attachmentCols+` FROM at_attachments WHERE id = $1 AND project_id = $2`,
-			id, projectID))
-		if err != nil {
-			return nil, err
+		a, ok := byID[id]
+		if !ok {
+			return nil, ErrNotFound
 		}
 		out = append(out, a)
 	}
@@ -117,19 +127,10 @@ func ProjectAttachments(ctx context.Context, q DB, projectID string, ids []strin
 
 // AttachmentData returns an image and its bytes if its project belongs to the user.
 func AttachmentData(ctx context.Context, q DB, userID, id string) (Attachment, []byte, error) {
-	var data []byte
-	a, err := scanAttachment(scanWith(q.QueryRow(ctx, `SELECT a.id, a.project_id, a.user_id, a.name, a.content_type, a.size,
-		a.sha256, a.created_at, a.data FROM at_attachments a JOIN at_projects p ON p.id = a.project_id
-		WHERE a.id = $1 AND p.user_id = $2`, id, userID), &data))
-	return a, data, err
+	row, err := take[struct {
+		Attachment
+		Data []byte
+	}](q.Gorm(ctx).Table("at_attachments a").Select("a.*").Joins("JOIN at_projects p ON p.id = a.project_id").
+		Where("a.id = ? AND p.user_id = ?", id, userID))
+	return row.Attachment, row.Data, err
 }
-
-// scanWith appends extra destinations to a row scan.
-type extraScan struct {
-	r     Scanner
-	extra []any
-}
-
-func scanWith(r Scanner, extra ...any) Scanner { return extraScan{r: r, extra: extra} }
-
-func (s extraScan) Scan(dest ...any) error { return s.r.Scan(append(dest, s.extra...)...) }

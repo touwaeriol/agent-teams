@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/approvals"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
@@ -239,7 +238,7 @@ func (s *Service) answerCall(ctx context.Context, tx *core.Tx, q core.Question, 
 		return false, nil
 	}
 	var st string
-	err := core.MapErr(tx.QueryRow(ctx, `SELECT status FROM at_tool_calls WHERE session_id = $1 AND call_id = $2`,
+	err := core.MapErr(store.QueryRow(ctx, tx, `SELECT status FROM at_tool_calls WHERE session_id = $1 AND call_id = $2`,
 		*q.SessionID, *q.CallID).Scan(&st))
 	if err != nil || st != "waiting" {
 		return false, ignoreMissing(err)

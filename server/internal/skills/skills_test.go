@@ -8,9 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 	"github.com/touwaeriol/agent-teams/server/internal/testdb"
 )
 
@@ -123,12 +122,12 @@ func TestInstructions(t *testing.T) {
 
 func TestLibrary(t *testing.T) {
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, testdb.Migrated(t))
+	pool, err := store.OpenPool(ctx, testdb.Migrated(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	if _, err := pool.Exec(ctx, `INSERT INTO at_users (id, email, password_hash, role) VALUES ('u1','a@x','h','user'), ('u2','b@x','h','user')`); err != nil {
+	if _, err := store.Exec(ctx, pool, `INSERT INTO at_users (id, email, password_hash, role) VALUES ('u1','a@x','h','user'), ('u2','b@x','h','user')`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Create(ctx, pool, "u1", []File{{Path: "SKILL.md", Content: "---\nname: design\ndescription: d\n---\n"}}); !IsProblem(err) {
@@ -153,7 +152,7 @@ func TestLibrary(t *testing.T) {
 	if err != nil || len(bundles) != 2 || bundles[0].Name != "design" || bundles[1].Files[0].Content != okSkill {
 		t.Fatalf("bundles %+v %v", bundles, err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO at_roles (id, user_id, tier, role, skills) VALUES ('ro1','u1','member','dev', '{pitch,docs}')`); err != nil {
+	if _, err := store.Exec(ctx, pool, `INSERT INTO at_roles (id, user_id, tier, role, skills) VALUES ('ro1','u1','member','dev', '{pitch,docs}')`); err != nil {
 		t.Fatal(err)
 	}
 	if err := Delete(ctx, pool, "u2", s.ID); err != ErrNotFound {
@@ -163,7 +162,7 @@ func TestLibrary(t *testing.T) {
 		t.Fatal(err)
 	}
 	var left []string
-	_ = pool.QueryRow(ctx, `SELECT skills FROM at_roles WHERE id = 'ro1'`).Scan(&left)
+	_ = store.QueryRow(ctx, pool, `SELECT skills FROM at_roles WHERE id = 'ro1'`).Scan(&left)
 	if len(left) != 1 || left[0] != "docs" {
 		t.Fatalf("role skills after delete %v", left)
 	}
@@ -174,12 +173,12 @@ func TestLibrary(t *testing.T) {
 // it off every role that used it.
 func TestAdminBuiltins(t *testing.T) {
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, testdb.Migrated(t))
+	pool, err := store.OpenPool(ctx, testdb.Migrated(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	if _, err := pool.Exec(ctx, `INSERT INTO at_users (id, email, password_hash, role) VALUES ('u1','a@x','h','user'), ('u2','b@x','h','user')`); err != nil {
+	if _, err := store.Exec(ctx, pool, `INSERT INTO at_users (id, email, password_hash, role) VALUES ('u1','a@x','h','user'), ('u2','b@x','h','user')`); err != nil {
 		t.Fatal(err)
 	}
 	brand := "---\nname: brand\ndescription: Brand rules\n---\n# Brand\n"
@@ -212,7 +211,7 @@ func TestAdminBuiltins(t *testing.T) {
 	if err := Delete(ctx, pool, "u1", b.ID); err != ErrNotFound {
 		t.Fatalf("a user cannot delete a built-in: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO at_roles (id, user_id, tier, role, skills) VALUES
+	if _, err := store.Exec(ctx, pool, `INSERT INTO at_roles (id, user_id, tier, role, skills) VALUES
 		('ro1','u1','member','dev','{brand,docs}'), ('ro2','u2','member','dev','{brand}')`); err != nil {
 		t.Fatal(err)
 	}
@@ -220,8 +219,8 @@ func TestAdminBuiltins(t *testing.T) {
 		t.Fatal(err)
 	}
 	var r1, r2 []string
-	_ = pool.QueryRow(ctx, `SELECT skills FROM at_roles WHERE id = 'ro1'`).Scan(&r1)
-	_ = pool.QueryRow(ctx, `SELECT skills FROM at_roles WHERE id = 'ro2'`).Scan(&r2)
+	_ = store.QueryRow(ctx, pool, `SELECT skills FROM at_roles WHERE id = 'ro1'`).Scan(&r1)
+	_ = store.QueryRow(ctx, pool, `SELECT skills FROM at_roles WHERE id = 'ro2'`).Scan(&r2)
 	if len(r1) != 1 || r1[0] != "docs" || len(r2) != 1 {
 		t.Fatalf("roles after built-in delete: %v %v", r1, r2)
 	}

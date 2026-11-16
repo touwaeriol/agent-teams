@@ -3,6 +3,10 @@ package core
 import (
 	"context"
 	"encoding/json"
+
+	"gorm.io/gorm"
+
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // NewDeliverable is what InsertDeliverable stores.
@@ -22,21 +26,21 @@ func InsertDeliverable(ctx context.Context, tx *Tx, n NewDeliverable) (Deliverab
 		n.Detail = map[string]any{}
 	}
 	detail, _ := json.Marshal(n.Detail)
-	return scanDeliverable(tx.QueryRow(ctx, `INSERT INTO at_deliverables AS d (id, project_id, thread_id, kind, title, url,
+	return rawOne[Deliverable](ctx, tx, `INSERT INTO at_deliverables AS d (id, project_id, thread_id, kind, title, url,
 		detail, published_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING `+deliverableCols,
-		NewID("dl"), n.ProjectID, n.ThreadID, n.Kind, n.Title, n.URL, detail, n.PublishedBy))
+		NewID("dl"), n.ProjectID, n.ThreadID, n.Kind, n.Title, n.URL, detail, n.PublishedBy)
 }
 
 // DeliverableByID loads a deliverable of a user.
 func DeliverableByID(ctx context.Context, q DB, userID, id string) (Deliverable, error) {
-	return scanDeliverable(q.QueryRow(ctx, `SELECT `+deliverableCols+` FROM at_deliverables d
-		JOIN at_projects p ON p.id = d.project_id WHERE d.id = $1 AND p.user_id = $2`, id, userID))
+	return take[Deliverable](deliverables(ctx, q).Joins("JOIN at_projects p ON p.id = d.project_id").
+		Where("d.id = ? AND p.user_id = ?", id, userID))
 }
 
 // PRDeliverableByURL finds the pr deliverable of a thread for one pull request.
 func PRDeliverableByURL(ctx context.Context, q DB, threadID, url string) (Deliverable, error) {
-	return scanDeliverable(q.QueryRow(ctx, `SELECT `+deliverableCols+` FROM at_deliverables d
-		WHERE d.thread_id = $1 AND d.kind = 'pr' AND d.url = $2 ORDER BY d.created_at DESC LIMIT 1`, threadID, url))
+	return take[Deliverable](deliverables(ctx, q).Where("d.thread_id = ? AND d.kind = 'pr' AND d.url = ?", threadID, url).
+		Order("d.created_at DESC"))
 }
 
 // DeliverableFilter narrows Deliverables.
@@ -50,11 +54,20 @@ type DeliverableFilter struct {
 
 // Deliverables pages a project's deliverables newest first (cursor = id of the last item).
 func Deliverables(ctx context.Context, q DB, projectID string, f DeliverableFilter) ([]Deliverable, error) {
-	rows, err := q.Query(ctx, `SELECT `+deliverableCols+` FROM at_deliverables d WHERE d.project_id = $1
-		AND ($2 = '' OR d.kind = $2) AND ($3 = '' OR d.thread_id = $3)
-		AND ($4 = '' OR d.title ILIKE '%' || $4 || '%' OR d.detail->>'summary' ILIKE '%' || $4 || '%')
-		AND ($5 = '' OR d.id < $5) ORDER BY d.id DESC LIMIT $6`, projectID, f.Kind, f.ThreadID, f.Q, f.Before, f.Limit)
-	return collect(rows, err, scanDeliverable)
+	g := deliverables(ctx, q).Where("d.project_id = ?", projectID)
+	if f.Kind != "" {
+		g = g.Where("d.kind = ?", f.Kind)
+	}
+	if f.ThreadID != "" {
+		g = g.Where("d.thread_id = ?", f.ThreadID)
+	}
+	if f.Q != "" {
+		g = g.Where("d.title ILIKE '%' || ? || '%' OR d.detail->>'summary' ILIKE '%' || ? || '%'", f.Q, f.Q)
+	}
+	if f.Before != "" {
+		g = g.Where("d.id < ?", f.Before)
+	}
+	return find[Deliverable](g.Order("d.id DESC").Limit(f.Limit))
 }
 
 // UpdateDeliverable changes title/detail.
@@ -63,13 +76,13 @@ func UpdateDeliverable(ctx context.Context, tx *Tx, id string, title *string, de
 	if detail != nil {
 		raw, _ = json.Marshal(detail)
 	}
-	return scanDeliverable(tx.QueryRow(ctx, `UPDATE at_deliverables AS d SET title = COALESCE($2, d.title),
-		detail = COALESCE($3::jsonb, d.detail), updated_at = now() WHERE d.id = $1 RETURNING `+deliverableCols, id, title, raw))
+	return rawOne[Deliverable](ctx, tx, `UPDATE at_deliverables AS d SET title = COALESCE($2, d.title),
+		detail = COALESCE($3::jsonb, d.detail), updated_at = now() WHERE d.id = $1 RETURNING `+deliverableCols, id, title, raw)
 }
 
 // DeleteDeliverable removes a deliverable.
 func DeleteDeliverable(ctx context.Context, tx *Tx, id string) error {
-	return Affected(tx.Exec(ctx, `DELETE FROM at_deliverables WHERE id = $1`, id))
+	return Changed(tx.Gorm(ctx).Where("id = ?", id).Delete(&Deliverable{}))
 }
 
 // DeliverableView renders a deliverable.
@@ -89,38 +102,45 @@ func (tx *Tx) EmitDeliverable(ctx context.Context, d Deliverable) error {
 	return err
 }
 
+// activeMerge selects queue entries still to process.
+const activeMerge = "status IN ('queued','merging','ci_running')"
+
+func deliverables(ctx context.Context, q DB) *gorm.DB {
+	return q.Gorm(ctx).Table("at_deliverables d").Select("d.*")
+}
+
 // MergeByID loads a merge queue entry.
 func MergeByID(ctx context.Context, q DB, id string) (MergeEntry, error) {
-	return scanMerge(q.QueryRow(ctx, `SELECT `+mergeCols+` FROM at_merge_queue WHERE id = $1`, id))
+	return take[MergeEntry](q.Gorm(ctx).Where("id = ?", id))
 }
 
 // MergeQueue lists a thread's queue (activeOnly = queued/merging/ci_running).
 func MergeQueue(ctx context.Context, q DB, threadID string, activeOnly bool) ([]MergeEntry, error) {
-	rows, err := q.Query(ctx, `SELECT `+mergeCols+` FROM at_merge_queue WHERE thread_id = $1
-		AND (NOT $2 OR status IN ('queued','merging','ci_running')) ORDER BY position`, threadID, activeOnly)
-	return collect(rows, err, scanMerge)
+	g := q.Gorm(ctx).Where("thread_id = ?", threadID)
+	if activeOnly {
+		g = g.Where(activeMerge)
+	}
+	return find[MergeEntry](g.Order("position"))
 }
 
 // ThreadsWithActiveMerges lists threads that have entries to process.
 func ThreadsWithActiveMerges(ctx context.Context, q DB) ([]string, error) {
-	rows, err := q.Query(ctx, `SELECT DISTINCT thread_id FROM at_merge_queue WHERE status IN ('queued','merging','ci_running')`)
-	return collect(rows, err, func(r Scanner) (string, error) {
-		var id string
-		return id, r.Scan(&id)
-	})
+	out := []string{}
+	err := q.Gorm(ctx).Model(&MergeEntry{}).Where(activeMerge).Distinct().Pluck("thread_id", &out).Error
+	return out, err
 }
 
 // InsertMerge enqueues an entry for one repository.
 func InsertMerge(ctx context.Context, tx *Tx, threadID string, taskID *string, employee, repo, headBranch string) (MergeEntry, error) {
-	return scanMerge(tx.QueryRow(ctx, `INSERT INTO at_merge_queue (id, thread_id, task_id, employee, repo, head_branch)
-		VALUES ($1,$2,$3,$4,$5,$6) RETURNING `+mergeCols, NewID("mq"), threadID, taskID, employee, repo, headBranch))
+	return rawOne[MergeEntry](ctx, tx, `INSERT INTO at_merge_queue (id, thread_id, task_id, employee, repo, head_branch)
+		VALUES ($1,$2,$3,$4,$5,$6) RETURNING `+mergeCols, NewID("mq"), threadID, taskID, employee, repo, headBranch)
 }
 
 // TaskMergesOpen counts the other repositories (not exceptRepo) the task was queued for and that
 // have no merged entry of the task yet (cancelled entries do not count).
 func TaskMergesOpen(ctx context.Context, q DB, threadID, taskID, exceptRepo string) (int, error) {
 	var n int
-	err := q.QueryRow(ctx, `SELECT count(DISTINCT q.repo) FROM at_merge_queue q WHERE q.thread_id = $1 AND q.task_id = $2
+	err := store.QueryRow(ctx, q, `SELECT count(DISTINCT q.repo) FROM at_merge_queue q WHERE q.thread_id = $1 AND q.task_id = $2
 		AND q.repo <> $3 AND q.status <> 'cancelled' AND NOT EXISTS (SELECT 1 FROM at_merge_queue m
 		WHERE m.thread_id = q.thread_id AND m.task_id = q.task_id AND m.repo = q.repo AND m.status = 'merged')`,
 		threadID, taskID, exceptRepo).Scan(&n)
@@ -129,21 +149,16 @@ func TaskMergesOpen(ctx context.Context, q DB, threadID, taskID, exceptRepo stri
 
 // UpdateMerge applies column changes and returns the entry.
 func UpdateMerge(ctx context.Context, tx *Tx, id string, set map[string]any) (MergeEntry, error) {
-	cols := ""
-	args := []any{id}
-	for col, val := range set {
-		args = append(args, val)
-		cols += col + " = $" + itoa(len(args)) + ", "
+	if err := Changed(tx.Gorm(ctx).Table("at_merge_queue").Where("id = ?", id).Updates(stamped(set))); err != nil {
+		return MergeEntry{}, err
 	}
-	return scanMerge(tx.QueryRow(ctx, `UPDATE at_merge_queue SET `+cols+`updated_at = now() WHERE id = $1 RETURNING `+mergeCols, args...))
+	return MergeByID(ctx, tx, id)
 }
 
 // QueuePosition is how many active entries are ahead of the entry (1 = next).
 func QueuePosition(ctx context.Context, q DB, m MergeEntry) (int, error) {
-	var n int
-	err := q.QueryRow(ctx, `SELECT count(*) FROM at_merge_queue WHERE thread_id = $1 AND position <= $2
-		AND status IN ('queued','merging','ci_running')`, m.ThreadID, m.Position).Scan(&n)
-	return n, err
+	return count(q.Gorm(ctx).Model(&MergeEntry{}).Where("thread_id = ? AND position <= ?", m.ThreadID, m.Position).
+		Where(activeMerge))
 }
 
 // EmitMerge emits a merge event.
@@ -156,12 +171,12 @@ func (tx *Tx) EmitMerge(ctx context.Context, t Thread, m MergeEntry) error {
 func SaveChecks(ctx context.Context, tx *Tx, projectID string, threadID, queueID *string, sha string, checks []CheckView) error {
 	for _, c := range checks {
 		if queueID == nil {
-			if _, err := tx.Exec(ctx, `DELETE FROM at_ci_runs WHERE sha = $1 AND check_name = $2 AND queue_id IS NULL`,
+			if _, err := store.Exec(ctx, tx, `DELETE FROM at_ci_runs WHERE sha = $1 AND check_name = $2 AND queue_id IS NULL`,
 				sha, c.Name); err != nil {
 				return err
 			}
 		}
-		_, err := tx.Exec(ctx, `INSERT INTO at_ci_runs (project_id, thread_id, queue_id, sha, check_name, status, conclusion, url, summary)
+		_, err := store.Exec(ctx, tx, `INSERT INTO at_ci_runs (project_id, thread_id, queue_id, sha, check_name, status, conclusion, url, summary)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 			ON CONFLICT (sha, check_name, queue_id) DO UPDATE SET status = EXCLUDED.status, conclusion = EXCLUDED.conclusion,
 			url = EXCLUDED.url, summary = EXCLUDED.summary, updated_at = now()`,
@@ -175,20 +190,16 @@ func SaveChecks(ctx context.Context, tx *Tx, projectID string, threadID, queueID
 
 // LatestChecks returns the checks of the thread's most recent sha.
 func LatestChecks(ctx context.Context, q DB, threadID string) (string, []CheckView, error) {
-	var sha string
-	err := MapErr(q.QueryRow(ctx, `SELECT sha FROM at_ci_runs WHERE thread_id = $1 ORDER BY updated_at DESC LIMIT 1`,
-		threadID).Scan(&sha))
+	latest, err := take[struct{ Sha string }](q.Gorm(ctx).Table("at_ci_runs").Select("sha").Where("thread_id = ?", threadID).
+		Order("updated_at DESC"))
 	if err == ErrNotFound {
 		return "", []CheckView{}, nil
 	}
 	if err != nil {
 		return "", nil, err
 	}
-	rows, err := q.Query(ctx, `SELECT check_name, status, conclusion, url, summary FROM at_ci_runs
-		WHERE thread_id = $1 AND sha = $2 ORDER BY check_name`, threadID, sha)
-	checks, err := collect(rows, err, func(r Scanner) (CheckView, error) {
-		var c CheckView
-		return c, r.Scan(&c.Name, &c.Status, &c.Conclusion, &c.URL, &c.Summary)
-	})
-	return sha, checks, err
+	checks, err := find[CheckView](q.Gorm(ctx).Table("at_ci_runs").
+		Select("check_name AS name, status, conclusion, url, summary").
+		Where("thread_id = ? AND sha = ?", threadID, latest.Sha).Order("check_name"))
+	return latest.Sha, checks, err
 }

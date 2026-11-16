@@ -7,9 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -28,7 +26,7 @@ const tickable = `(p.user_id = $1 OR (p.user_id IS NULL
 
 // Choices maps each plugin name a user's roles may tick to its stored versions.
 func Choices(ctx context.Context, db store.DB, userID string) (map[string]map[int]bool, error) {
-	rows, err := db.Query(ctx, `SELECT p.name, v.version FROM at_plugins p
+	rows, err := store.Query(ctx, db, `SELECT p.name, v.version FROM at_plugins p
 		JOIN at_plugin_versions v ON v.plugin_id = p.id WHERE `+tickable, userID)
 	if err != nil {
 		return nil, err
@@ -97,11 +95,11 @@ func Bundles(ctx context.Context, db store.DB, userID string, refs []string, bud
 func load(ctx context.Context, db store.DB, userID string, r Ref) (protocol.PluginBundle, int, error) {
 	var version int
 	var filesRaw, contentsRaw []byte
-	err := db.QueryRow(ctx, `SELECT v.version, v.files, v.contents FROM at_plugins p
+	err := store.QueryRow(ctx, db, `SELECT v.version, v.files, v.contents FROM at_plugins p
 		JOIN at_plugin_versions v ON v.plugin_id = p.id
 		WHERE `+visible+` AND p.enabled AND p.name = $2 AND v.version = COALESCE(NULLIF($3, 0), p.latest)
 		ORDER BY p.user_id IS NULL LIMIT 1`, userID, r.Name, r.Version).Scan(&version, &filesRaw, &contentsRaw)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if store.IsNoRows(err) {
 		return protocol.PluginBundle{}, 0, ErrNotFound
 	}
 	if err != nil {

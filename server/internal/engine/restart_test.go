@@ -8,9 +8,9 @@ import (
 	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw/nodetest"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // turnRunning reports the dev's turn as running and waits until the console saw it.
@@ -224,14 +224,14 @@ func TestStalledThreadWakesLead(t *testing.T) {
 		`UPDATE at_agent_sessions SET state = 'active' WHERE state <> 'closed'`,
 		`UPDATE at_threads SET status = 'running' WHERE id = '` + tm.thread.ID + `'`,
 	} {
-		if _, err := pool.Exec(ctx, q); err != nil {
+		if _, err := store.Exec(ctx, pool, q); err != nil {
 			t.Fatal(err)
 		}
 	}
 	tm.restart(t)
 	tm.report(t)
 	tm.lead.expectSend("没有成员在工作")
-	if _, err := pool.Exec(ctx, `UPDATE at_messages SET delivered_at = now() WHERE delivered_at IS NULL`); err != nil {
+	if _, err := store.Exec(ctx, pool, `UPDATE at_messages SET delivered_at = now() WHERE delivered_at IS NULL`); err != nil {
 		t.Fatal(err)
 	}
 	tm.restart(t)

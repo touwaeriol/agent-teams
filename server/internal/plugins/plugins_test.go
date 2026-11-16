@@ -10,9 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 	"github.com/touwaeriol/agent-teams/server/internal/testdb"
 )
 
@@ -268,15 +267,15 @@ func TestToBundleAndInstructions(t *testing.T) {
 	}
 }
 
-func newPool(t *testing.T) *pgxpool.Pool {
+func newPool(t *testing.T) *store.Pool {
 	t.Helper()
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, testdb.Migrated(t))
+	pool, err := store.OpenPool(ctx, testdb.Migrated(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, `INSERT INTO at_users (id, email, password_hash, role) VALUES
+	if _, err := store.Exec(ctx, pool, `INSERT INTO at_users (id, email, password_hash, role) VALUES
 		('u1','a@x','h','user'), ('u2','b@x','h','user'), ('ad','c@x','h','admin')`); err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +342,7 @@ func TestBuiltinPlugins(t *testing.T) {
 		t.Fatalf("a user upload must not take a built-in name: %v", err)
 	}
 	// u2 had its own "brand" before the admin published one: theirs wins for them.
-	if _, err := pool.Exec(ctx, `INSERT INTO at_plugins (id, user_id, name, latest) VALUES ('pl_own','u2','brand',1);
+	if _, err := store.Exec(ctx, pool, `INSERT INTO at_plugins (id, user_id, name, latest) VALUES ('pl_own','u2','brand',1);
 		INSERT INTO at_plugin_versions (plugin_id, version, files, contents, size, sha256)
 		VALUES ('pl_own', 1, '[{"path":"x","content":"OWN"}]', '{"skills":[]}', 3, 'h')`); err != nil {
 		t.Fatal(err)
@@ -376,7 +375,7 @@ func TestBuiltinPlugins(t *testing.T) {
 	if _, err := SetEnabled(ctx, pool, Builtins, b.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO at_roles (id, user_id, tier, role, plugins) VALUES
+	if _, err := store.Exec(ctx, pool, `INSERT INTO at_roles (id, user_id, tier, role, plugins) VALUES
 		('ro1','u1','member','dev','{brand@1,other}'), ('ro2','u2','member','dev','{brand}')`); err != nil {
 		t.Fatal(err)
 	}
@@ -384,8 +383,8 @@ func TestBuiltinPlugins(t *testing.T) {
 		t.Fatal(err)
 	}
 	var r1, r2 []string
-	_ = pool.QueryRow(ctx, `SELECT plugins FROM at_roles WHERE id = 'ro1'`).Scan(&r1)
-	_ = pool.QueryRow(ctx, `SELECT plugins FROM at_roles WHERE id = 'ro2'`).Scan(&r2)
+	_ = store.QueryRow(ctx, pool, `SELECT plugins FROM at_roles WHERE id = 'ro1'`).Scan(&r1)
+	_ = store.QueryRow(ctx, pool, `SELECT plugins FROM at_roles WHERE id = 'ro2'`).Scan(&r2)
 	if fmt.Sprint(r1) != "[other]" || fmt.Sprint(r2) != "[brand]" {
 		t.Fatalf("roles after delete: %v %v", r1, r2)
 	}
@@ -394,7 +393,7 @@ func TestBuiltinPlugins(t *testing.T) {
 func TestPruneKeepsPinned(t *testing.T) {
 	ctx := context.Background()
 	pool := newPool(t)
-	if _, err := pool.Exec(ctx, `INSERT INTO at_roles (id, user_id, tier, role, plugins) VALUES ('ro1','u1','member','dev','{mine@1}')`); err != nil {
+	if _, err := store.Exec(ctx, pool, `INSERT INTO at_roles (id, user_id, tier, role, plugins) VALUES ('ro1','u1','member','dev','{mine@1}')`); err != nil {
 		t.Fatal(err)
 	}
 	var p Plugin

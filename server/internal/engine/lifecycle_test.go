@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw/nodetest"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // TestThreadArchiveUnarchiveDelete: archiving ends a running thread and closes its sessions,
@@ -68,7 +68,7 @@ func TestThreadArchiveUnarchiveDelete(t *testing.T) {
 // TestFinishedThreadUnarchivesFinished: a done thread comes back done.
 func TestFinishedThreadUnarchivesFinished(t *testing.T) {
 	tm := startTeam(t)
-	if _, err := tm.w.e.Core.Pool.Exec(tm.w.ctx, `UPDATE at_threads SET status = 'done' WHERE id = $1`, tm.thread.ID); err != nil {
+	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `UPDATE at_threads SET status = 'done' WHERE id = $1`, tm.thread.ID); err != nil {
 		t.Fatal(err)
 	}
 	var got core.ThreadView

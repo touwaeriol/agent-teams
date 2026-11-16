@@ -15,6 +15,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/oklog/ulid/v2"
+
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 )
 

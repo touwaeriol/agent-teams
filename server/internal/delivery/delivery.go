@@ -18,7 +18,6 @@ import (
 	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/fanout"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
@@ -151,7 +150,7 @@ type PushOutcome struct {
 
 // PushGroup reads the results of a push group so far (one per repository, in repository order).
 func PushGroup(ctx context.Context, q core.DB, nodeID, group string) ([]PushOutcome, error) {
-	rows, err := q.Query(ctx, `SELECT meta->>'repo', status, result FROM at_node_commands
+	rows, err := store.Query(ctx, q, `SELECT meta->>'repo', status, result FROM at_node_commands
 		WHERE node_id = $1 AND type = $2 AND meta->>'push_group' = $3 ORDER BY seq`, nodeID, protocol.TypeGitPush, group)
 	if err != nil {
 		return nil, err
@@ -200,7 +199,7 @@ func (e *Engine) JobResult(ctx context.Context, node store.Node, r *protocol.Git
 func jobOf(ctx context.Context, q core.DB, nodeID, jobID string) (string, map[string]any, error) {
 	var typ string
 	var meta map[string]any
-	err := q.QueryRow(ctx, `SELECT type, meta FROM at_node_commands WHERE node_id = $1 AND type LIKE 'git.%'
+	err := store.QueryRow(ctx, q, `SELECT type, meta FROM at_node_commands WHERE node_id = $1 AND type LIKE 'git.%'
 		AND body->>'job_id' = $2`, nodeID, jobID).Scan(&typ, &meta)
 	return typ, meta, core.MapErr(err)
 }

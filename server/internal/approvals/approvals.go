@@ -18,7 +18,6 @@ import (
 	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
@@ -181,7 +180,7 @@ func threadAuto(ctx context.Context, q core.DB, emp core.Employee) (bool, error)
 
 func matchRule(ctx context.Context, q core.DB, emp core.Employee, tool, hash string) (string, error) {
 	var id string
-	err := core.MapErr(q.QueryRow(ctx, `SELECT id FROM at_permission_rules WHERE project_id = $1
+	err := core.MapErr(store.QueryRow(ctx, q, `SELECT id FROM at_permission_rules WHERE project_id = $1
 		AND (thread_id IS NULL OR thread_id = $2) AND (employee = '' OR employee = $3) AND tool_name = $4 AND input_hash = $5
 		ORDER BY created_at LIMIT 1`, emp.ProjectID, emp.ThreadID, emp.Name, tool, hash).Scan(&id))
 	if errors.Is(err, core.ErrNotFound) {
@@ -316,7 +315,7 @@ func checkAnswer(q core.Question, answer string) error {
 
 func (e *Engine) answerTx(ctx context.Context, tx *core.Tx, user store.User, q core.Question, answer, reason string) error {
 	by := "user:" + user.ID
-	if _, err := tx.Exec(ctx, `INSERT INTO at_audit_log (user_id, actor, action, target_type, target_id, detail)
+	if _, err := store.Exec(ctx, tx, `INSERT INTO at_audit_log (user_id, actor, action, target_type, target_id, detail)
 		VALUES ($1, $2, 'approval_answer', 'approval', $3, jsonb_build_object('answer', $4::text, 'tool', $5::text))`,
 		user.ID, by, deref(q.ApprovalID), answer, fmt.Sprint(q.Detail["tool_name"])); err != nil {
 		return err
@@ -365,7 +364,7 @@ func (e *Engine) remember(ctx context.Context, tx *core.Tx, q core.Question, by 
 	updates := sessionScoped(q.Detail["suggestions"])
 	raw, _ := json.Marshal(updates)
 	id := core.NewID("pr")
-	_, err := tx.Exec(ctx, `INSERT INTO at_permission_rules (id, project_id, thread_id, employee, tool_name, rule, sdk_update,
+	_, err := store.Exec(ctx, tx, `INSERT INTO at_permission_rules (id, project_id, thread_id, employee, tool_name, rule, sdk_update,
 		input_hash, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, id, deref(q.ProjectID), q.ThreadID, q.Asker, tool,
 		ruleText(updates), raw, hash, by)
 	return id, err
@@ -373,7 +372,7 @@ func (e *Engine) remember(ctx context.Context, tx *core.Tx, q core.Question, by 
 
 // applyRule auto-allows the asker's other open cards with the same tool and input.
 func (e *Engine) applyRule(ctx context.Context, tx *core.Tx, q core.Question, ruleID string) error {
-	rows, err := tx.Query(ctx, `SELECT conversation_id, id FROM at_questions WHERE kind = 'approval' AND status = 'open'
+	rows, err := store.Query(ctx, tx, `SELECT conversation_id, id FROM at_questions WHERE kind = 'approval' AND status = 'open'
 		AND project_id = $1 AND asker = $2 AND COALESCE(thread_id, '') = COALESCE($3, '')
 		AND detail->>'tool_name' = $4 AND detail->>'input_hash' = $5`,
 		deref(q.ProjectID), q.Asker, q.ThreadID, fmt.Sprint(q.Detail["tool_name"]), q.Detail["input_hash"])
@@ -452,7 +451,7 @@ func ruleString(r any) string {
 
 // Rules returns the allowed_tools expansions of the rules that apply to an employee.
 func (e *Engine) Rules(ctx context.Context, q core.DB, projectID string, threadID *string, employee string) ([]string, error) {
-	rows, err := q.Query(ctx, `SELECT sdk_update FROM at_permission_rules WHERE project_id = $1
+	rows, err := store.Query(ctx, q, `SELECT sdk_update FROM at_permission_rules WHERE project_id = $1
 		AND (thread_id IS NULL OR thread_id = $2) AND (employee = '' OR employee = $3) AND sdk_update IS NOT NULL`,
 		projectID, threadID, employee)
 	if err != nil {
@@ -598,7 +597,7 @@ func inputOf(q core.Question) json.RawMessage {
 // SweepTimeouts denies user cards shown longer than the project's approval_timeout_s (§9 超时;
 // a card the lead handed over counts from then).
 func (e *Engine) SweepTimeouts(ctx context.Context) {
-	rows, err := e.core.Pool.Query(ctx, `SELECT q.conversation_id, q.id, (p.delivery->>'approval_timeout_s')::int
+	rows, err := store.Query(ctx, e.core.Pool, `SELECT q.conversation_id, q.id, (p.delivery->>'approval_timeout_s')::int
 		FROM at_questions q JOIN at_projects p ON p.id = q.project_id
 		WHERE q.kind = 'approval' AND q.status = 'open' AND q.audience = 'user' AND (p.delivery->>'approval_timeout_s') IS NOT NULL
 		AND COALESCE((q.detail->>'escalated_at')::timestamptz, q.created_at)

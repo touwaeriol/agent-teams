@@ -8,7 +8,8 @@ import (
 	"time"
 	_ "time/tzdata" // schedules name IANA zones; the image may have no zoneinfo
 
-	"github.com/jackc/pgx/v5"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 )
@@ -25,9 +26,12 @@ type Schedule struct {
 	NextRunAt *time.Time `json:"next_run_at"`
 	LastRunAt *time.Time `json:"last_run_at"`
 	LastError string     `json:"last_error"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	CreatedAt time.Time  `json:"created_at" gorm:"autoCreateTime:false;default:now()"`
+	UpdatedAt time.Time  `json:"updated_at" gorm:"autoUpdateTime:false;default:now()"`
 }
+
+// TableName maps Schedule to at_schedules.
+func (Schedule) TableName() string { return "at_schedules" }
 
 // ScheduleInput is what a create or update sets (nil = keep on update).
 type ScheduleInput struct {
@@ -46,48 +50,25 @@ func (e ErrInvalid) Error() string { return e.Message }
 // MaxPerProject caps how many schedules one project may have.
 const MaxPerProject = 20
 
-const scheduleCols = `id, project_id, name, cron, timezone, message, enabled, next_run_at, last_run_at, last_error, created_at, updated_at`
+func schedules(ctx context.Context, q core.DB) *gorm.DB { return q.Gorm(ctx).Model(&Schedule{}) }
 
-func scanSchedule(r interface{ Scan(...any) error }) (Schedule, error) {
+func takeSchedule(g *gorm.DB) (Schedule, error) {
 	var s Schedule
-	err := r.Scan(&s.ID, &s.ProjectID, &s.Name, &s.Cron, &s.Timezone, &s.Message, &s.Enabled, &s.NextRunAt, &s.LastRunAt,
-		&s.LastError, &s.CreatedAt, &s.UpdatedAt)
+	err := g.Take(&s).Error
 	return s, core.MapErr(err)
-}
-
-func collectSchedules(rows pgx.Rows, err error) ([]Schedule, error) {
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []Schedule{}
-	for rows.Next() {
-		s, err := scanSchedule(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, s)
-	}
-	return out, rows.Err()
 }
 
 // Schedules lists a project's schedules, oldest first.
 func Schedules(ctx context.Context, q core.DB, projectID string) ([]Schedule, error) {
-	return collectSchedules(q.Query(ctx, `SELECT `+scheduleCols+` FROM at_schedules WHERE project_id = $1 ORDER BY created_at, id`, projectID))
+	out := []Schedule{}
+	err := schedules(ctx, q).Where("project_id = ?", projectID).Order("created_at, id").Find(&out).Error
+	return out, err
 }
 
 // ScheduleOf loads a schedule of one of the user's projects.
 func ScheduleOf(ctx context.Context, q core.DB, userID, id string) (Schedule, error) {
-	return scanSchedule(q.QueryRow(ctx, `SELECT `+prefixed("s.")+` FROM at_schedules s JOIN at_projects p ON p.id = s.project_id
-		WHERE s.id = $1 AND p.user_id = $2`, id, userID))
-}
-
-func prefixed(p string) string {
-	cols := strings.Split(scheduleCols, ", ")
-	for i, c := range cols {
-		cols[i] = p + c
-	}
-	return strings.Join(cols, ", ")
+	return takeSchedule(q.Gorm(ctx).Table("at_schedules s").Select("s.*").Joins("JOIN at_projects p ON p.id = s.project_id").
+		Where("s.id = ? AND p.user_id = ?", id, userID))
 }
 
 // Normalize trims and validates a complete schedule (after applying an update).
@@ -152,16 +133,16 @@ func CreateSchedule(ctx context.Context, q core.DB, projectID string, in Schedul
 	if err != nil {
 		return s, err
 	}
-	var n int
-	if err := q.QueryRow(ctx, `SELECT count(*) FROM at_schedules WHERE project_id = $1`, projectID).Scan(&n); err != nil {
+	var n int64
+	if err := schedules(ctx, q).Where("project_id = ?", projectID).Count(&n).Error; err != nil {
 		return s, err
 	}
 	if n >= MaxPerProject {
 		return s, ErrInvalid{"name", fmt.Sprintf("一个项目最多 %d 个定时任务", MaxPerProject)}
 	}
-	return scanSchedule(q.QueryRow(ctx, `INSERT INTO at_schedules (id, project_id, name, cron, timezone, message, enabled, next_run_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING `+scheduleCols, core.NewID("sc"), projectID, s.Name, s.Cron, s.Timezone,
-		s.Message, s.Enabled, NextRun(s, now)))
+	s.ID, s.NextRunAt = core.NewID("sc"), NextRun(s, now)
+	err = q.Gorm(ctx).Clauses(clause.Returning{}).Create(&s).Error
+	return s, err
 }
 
 // UpdateSchedule changes a schedule; the next run is recomputed from now.
@@ -170,14 +151,18 @@ func UpdateSchedule(ctx context.Context, q core.DB, cur Schedule, in ScheduleInp
 	if err != nil {
 		return s, err
 	}
-	return scanSchedule(q.QueryRow(ctx, `UPDATE at_schedules SET name = $2, cron = $3, timezone = $4, message = $5, enabled = $6,
-		next_run_at = $7, updated_at = now() WHERE id = $1 RETURNING `+scheduleCols, s.ID, s.Name, s.Cron, s.Timezone, s.Message,
-		s.Enabled, NextRun(s, now)))
+	err = core.Changed(q.Gorm(ctx).Table("at_schedules").Where("id = ?", s.ID).Updates(map[string]any{"name": s.Name,
+		"cron": s.Cron, "timezone": s.Timezone, "message": s.Message, "enabled": s.Enabled, "next_run_at": NextRun(s, now),
+		"updated_at": gorm.Expr("now()")}))
+	if err != nil {
+		return s, err
+	}
+	return takeSchedule(schedules(ctx, q).Where("id = ?", s.ID))
 }
 
 // DeleteSchedule removes a schedule.
 func DeleteSchedule(ctx context.Context, q core.DB, id string) error {
-	return core.Affected(q.Exec(ctx, `DELETE FROM at_schedules WHERE id = $1`, id))
+	return core.Changed(q.Gorm(ctx).Where("id = ?", id).Delete(&Schedule{}))
 }
 
 // IsInvalid unwraps a validation error.

@@ -10,7 +10,6 @@ import (
 	"fmt"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -29,25 +28,25 @@ func SaveChunk(ctx context.Context, q store.DB, m *protocol.FileChunk) error {
 	if err != nil || len(data) > ChunkBytes {
 		return ErrBadChunk
 	}
-	if _, err := q.Exec(ctx, `DELETE FROM at_upload_chunks WHERE created_at < now() - interval '1 day'`); err != nil {
+	if _, err := store.Exec(ctx, q, `DELETE FROM at_upload_chunks WHERE created_at < now() - interval '1 day'`); err != nil {
 		return err
 	}
 	var pending int
-	if err := q.QueryRow(ctx, `SELECT COALESCE(sum(length(data)), 0) FROM at_upload_chunks WHERE session_id = $1`,
+	if err := store.QueryRow(ctx, q, `SELECT COALESCE(sum(length(data)), 0) FROM at_upload_chunks WHERE session_id = $1`,
 		m.SessionID).Scan(&pending); err != nil {
 		return err
 	}
 	if pending+len(data) > MaxPending {
 		return ErrBadChunk
 	}
-	_, err = q.Exec(ctx, `INSERT INTO at_upload_chunks (upload_id, idx, session_id, data) VALUES ($1,$2,$3,$4)
+	_, err = store.Exec(ctx, q, `INSERT INTO at_upload_chunks (upload_id, idx, session_id, data) VALUES ($1,$2,$3,$4)
 		ON CONFLICT (upload_id, idx) DO NOTHING`, m.UploadID, m.Index, m.SessionID, data)
 	return err
 }
 
 // LoadUpload reads an upload's chunks (of this session only) and splits them into files.
 func LoadUpload(ctx context.Context, q store.DB, sessionID string, up *protocol.ToolUpload) ([]ArtifactFile, error) {
-	rows, err := q.Query(ctx, `SELECT data FROM at_upload_chunks WHERE upload_id = $1 AND session_id = $2 ORDER BY idx`,
+	rows, err := store.Query(ctx, q, `SELECT data FROM at_upload_chunks WHERE upload_id = $1 AND session_id = $2 ORDER BY idx`,
 		up.UploadID, sessionID)
 	if err != nil {
 		return nil, err
@@ -74,7 +73,7 @@ func LoadUpload(ctx context.Context, q store.DB, sessionID string, up *protocol.
 
 // DeleteUpload removes an upload's chunks once its files are stored.
 func DeleteUpload(ctx context.Context, q store.DB, uploadID string) error {
-	_, err := q.Exec(ctx, `DELETE FROM at_upload_chunks WHERE upload_id = $1`, uploadID)
+	_, err := store.Exec(ctx, q, `DELETE FROM at_upload_chunks WHERE upload_id = $1`, uploadID)
 	return err
 }
 

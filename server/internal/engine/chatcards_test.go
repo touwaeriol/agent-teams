@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw/nodetest"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // threadMessages lists the thread conversation's messages.
@@ -195,7 +195,7 @@ func TestCoordinatorRecapAndResume(t *testing.T) {
 	c, open := expectOpen(t, tm.w, tm.n, "coordinator")
 	c.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: protocol.SessionID(c.session), MsgID: open.FirstMessage.MsgID})
 	c.event("text", func(ev *protocol.SessionEvent) { s, f := "好的，记下 kestrel-7", true; ev.Text, ev.Final = &s, &f })
-	if _, err := tm.w.e.Core.Pool.Exec(tm.w.ctx, `INSERT INTO at_project_memory (id, project_id, text, source) VALUES ('mem_t', $1, '部署走滚动发布', 'test')`, tm.projectID); err != nil {
+	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `INSERT INTO at_project_memory (id, project_id, text, source) VALUES ('mem_t', $1, '部署走滚动发布', 'test')`, tm.projectID); err != nil {
 		t.Fatal(err)
 	}
 	failed := true
@@ -208,7 +208,7 @@ func TestCoordinatorRecapAndResume(t *testing.T) {
 		}
 	}
 
-	if _, err := tm.w.e.Core.Pool.Exec(tm.w.ctx, `UPDATE at_agent_sessions SET state = 'closed', close_reason = 'thread_done' WHERE id = $1`, tm.lead.session); err != nil {
+	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `UPDATE at_agent_sessions SET state = 'closed', close_reason = 'thread_done' WHERE id = $1`, tm.lead.session); err != nil {
 		t.Fatal(err)
 	}
 	tm.b.must(202, "POST", "/api/conversations/"+tm.thread.ID+"/messages", map[string]any{"content": "还在吗？"}, nil)
