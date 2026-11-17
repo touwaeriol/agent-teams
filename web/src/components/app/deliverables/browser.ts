@@ -12,7 +12,6 @@ export const LIBRARY_TYPES: [string, string][] = [
   ["design", "设计稿"],
   ["doc", "文档"],
   ["slides", "幻灯片"],
-  ["pr", "PR"],
   ["data", "数据"],
 ];
 

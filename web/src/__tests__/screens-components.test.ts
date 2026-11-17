@@ -14,6 +14,7 @@ import { useText } from "@/pages/design/viewer";
 import MobileOverview from "@/pages/main/MobileOverview.vue";
 import PanelList from "@/pages/main/PanelList.vue";
 import { foldedKey } from "@/lib/threadList";
+import { resetSeenCache } from "@/lib/deliverableStrip";
 import { thread } from "./fixtures";
 import { resetListViews } from "@/lib/threadListView";
 
@@ -164,21 +165,26 @@ describe("LibraryBrowser", () => {
 });
 
 describe("PanelList", () => {
-  const item = (id: string, title: string, no: number | null) => ({ id, project_id: "p1", thread_no: no, kind: "doc", title, url: "https://x.dev/" + id, detail: {}, published_by: "dev-1", created_at: "2026-11-14T10:00:00Z", updated_at: "2026-11-14T10:00:00Z" });
+  const item = (id: string, title: string, no: number | null, kind = "doc") => ({ id, project_id: "p1", thread_no: no, kind, title, url: "", detail: { hosted: true, entry: `${title}.pdf`, render: "pdf" as const }, published_by: "dev-1", created_at: "2026-11-14T10:00:00Z", updated_at: "2026-11-14T10:00:00Z" });
+  const link = (id: string, title: string, kind: string) => ({ ...item(id, title, null, kind), url: "https://x.dev/" + id, detail: {} });
   const threads = [thread(1, { title: "部署", status: "done" }), thread(2, { title: "接口", status: "done", latest_deliverable: item("d2", "接口文档", 2) })];
   it("shows the project's deliverables, remembers folds per user, searches, and opens the library", async () => {
-    stubApi({ "/deliverables": { items: [item("d1", "落地页", null), item("d2", "接口文档", 2)], storage_bytes: 0 }, "/waiting": { questions: [], reviews: [] } });
+    stubApi({ "/deliverables": { items: [item("d1", "落地页", null), item("d2", "接口文档", 2), link("d3", "PR #41", "pr"), link("d4", "外链文档", "doc")], storage_bytes: 0 }, "/waiting": { questions: [], reviews: [] } });
     const w = mount(PanelList, { props: { pid: "p1", threads, loading: false, userId: "u1" }, global: { plugins: plugins() }, attachTo: document.body });
     await flushPromises();
     const strip = w.get("section[aria-label=交付物]");
     expect(strip.text()).toContain("落地页");
     expect(strip.text()).toContain("查看全部");
+    // PRs and plain links stay out of the strip
+    expect(strip.text()).not.toContain("PR #41");
+    expect(strip.text()).not.toContain("外链文档");
     await w.get("[data-group=done] > button").trigger("click");
     expect(JSON.parse(window.localStorage.getItem(foldedKey("u1"))!)).toEqual({ done: true });
     expect(w.text()).not.toContain("#1 部署");
     await strip.get("button[aria-expanded]").trigger("click");
     expect(JSON.parse(window.localStorage.getItem(foldedKey("u1"))!)).toEqual({ done: true, deliverables: true });
-    expect(w.text()).not.toContain("查看全部");
+    expect(strip.text()).not.toContain("落地页");
+    expect(strip.text()).toContain("查看全部"); // on the title line, also when folded
 
     const again = mount(PanelList, { props: { pid: "p1", threads, loading: false, userId: "u1" }, global: { plugins: plugins() }, attachTo: document.body });
     await flushPromises();
@@ -190,6 +196,20 @@ describe("PanelList", () => {
     expect(w.text()).toContain("#1 部署");
     expect(w.text()).not.toContain("#2 接口");
     expect(w.find("section[aria-label=交付物]").exists()).toBe(false);
+  });
+  it("tags deliverables updated since they were last opened as 新内容; opening one clears it", async () => {
+    window.localStorage.setItem("deliverables.seen.p1", JSON.stringify({ since: "2026-11-14T09:00:00Z", seen: { d2: "2026-11-14T11:00:00Z" } }));
+    resetSeenCache();
+    stubApi({ "/deliverables": { items: [item("d1", "落地页", null), item("d2", "接口文档", 2)], storage_bytes: 0 }, "/waiting": { questions: [], reviews: [] } });
+    const w = mount(PanelList, { props: { pid: "p1", threads, loading: false, userId: "u1" }, global: { plugins: plugins() }, attachTo: document.body });
+    await flushPromises();
+    const cards = w.findAll("section[aria-label=交付物] a");
+    expect(cards.map((c) => c.text().includes("新内容"))).toEqual([true, false]);
+    await cards[0].trigger("click");
+    await flushPromises();
+    expect(w.get("section[aria-label=交付物]").text()).not.toContain("新内容");
+    expect(JSON.parse(window.localStorage.getItem("deliverables.seen.p1")!).seen.d1).toBeTruthy();
+    w.unmount();
   });
   it("查看全部 opens the library panel", async () => {
     stubApi({ "/deliverables": { items: [item("d1", "落地页", null)], storage_bytes: 0 }, "/waiting": { questions: [], reviews: [] } });
