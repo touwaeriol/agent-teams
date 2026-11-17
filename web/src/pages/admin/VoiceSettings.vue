@@ -102,7 +102,7 @@ watch(() => [form.api_key, form.model, form.base_url], () => (result.value = nul
       <el-button type="primary" :loading="save.isPending.value" @click="save.mutate(body())">保存</el-button>
       <el-button :disabled="!canTest" :loading="test.isPending.value" @click="test.mutate()">测试</el-button>
       <el-button v-if="v.key_set" text :loading="clearKey.isPending.value" @click="clearKey.mutate()">清除 API Key</el-button>
-      <span v-if="result" :class="['text-[13px]', result.ok ? 'text-[#2E7D32]' : 'text-destructive']" data-testid="voice-test-result">{{ result.text }}</span>
+      <span v-if="result" :class="['text-[13px]', result.ok ? 'text-ok' : 'text-destructive']" data-testid="voice-test-result">{{ result.text }}</span>
       <span v-else-if="v.enabled && !v.usable" class="text-[13px] text-destructive">已启用但不可用：服务器读不出 API Key，请重新填写</span>
     </div>
   </Card>

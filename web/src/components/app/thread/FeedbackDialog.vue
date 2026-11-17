@@ -20,7 +20,7 @@ const send = useAction(() => threadActions.feedback(props.thread.id, text.value.
   <FormDialog
     v-model:open="open"
     title="发送反馈"
-    :description="`关于 #${thread.no} ${thread.title}。管理员会在“管理 → 反馈”里看到。`"
+    :description="`关于 #${thread.no} ${thread.title}。管理员会在“管理后台 → 反馈”里看到。`"
     submit-label="发送"
     :busy="send.isPending.value"
     :disabled="!text.trim()"

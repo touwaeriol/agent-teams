@@ -12,7 +12,7 @@ import type { RepoRef } from "@/components/app/repo/repo";
 import ScheduleForm from "@/components/app/schedules/ScheduleForm.vue";
 import TagInput from "@/components/common/TagInput.vue";
 import { newRole } from "@/lib/roles";
-import NumberSetting from "@/pages/settings/admin/NumberSetting.vue";
+import NumberSetting from "@/pages/admin/NumberSetting.vue";
 import EnvironmentSection from "@/pages/projectSettings/EnvironmentSection.vue";
 import GeneralSection from "@/pages/projectSettings/GeneralSection.vue";
 import MemorySection from "@/pages/projectSettings/MemorySection.vue";

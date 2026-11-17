@@ -17,7 +17,7 @@ const remove = useAction((id: string) => adminActions.removeSkill(id), { invalid
 </script>
 
 <template>
-  <div class="flex flex-col gap-2 border-t border-[#F1EFEA] pt-3">
+  <div class="flex flex-col gap-2 border-t border-[#F1EFEA] pt-3 dark:border-border">
     <div class="flex flex-wrap items-center justify-between gap-2">
       <h3 class="text-[13px] font-semibold text-muted-foreground">内置技能</h3>
       <span class="flex gap-2">

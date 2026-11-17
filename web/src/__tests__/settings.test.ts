@@ -5,7 +5,7 @@ import type { RoleView } from "@/api/views";
 import { pickedSkillFiles, toBase64 } from "@/components/app/library/upload";
 import { addRepo, matchesRepo, moveRepo, normalizeRepo, removeRepo, repoOptions, reposPayload, sortRepos } from "@/components/app/repo/repo";
 import { draftValid, emptyDraft, scheduleBody } from "@/components/app/schedules/schedule";
-import { parseSetting } from "@/pages/settings/admin/admin";
+import { parseSetting } from "@/pages/admin/admin";
 import { connectionKind, usedText } from "@/pages/settings/github/github";
 import { nodeMeta, nodeStats, runtimeLine, settingsPatch, slotPct } from "@/pages/settings/nodes/nodes";
 import { isDirty, nodePickerText, ordered, patchAt, removeAt, toggleId, versionText } from "@/pages/settings/team/team";
