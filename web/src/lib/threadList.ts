@@ -181,6 +181,11 @@ export function saveFolded(userId: string, folded: Folded): void {
  * folded groups skipped. A thread the list hides (folded or filtered out) still gets neighbours:
  * the order is then taken without folds, and failing that without filters.
  */
+/** Thread numbers in the order the list shows them (folded groups skipped unless searching). */
+export function visibleOrder(threads: ThreadView[], f: ListFilter, waiting?: Map<number, QuestionView>, folded: Folded = {}): number[] {
+  return groupThreads(filterThreads(threads, f, waiting), waiting).flatMap((g) => (folded[g.id] && !f.q.trim() ? [] : g.items.map((t) => t.no)));
+}
+
 export function listOrder(threads: ThreadView[], no: number, f: ListFilter, waiting?: Map<number, QuestionView>, folded: Folded = {}): number[] {
   const order = (list: ThreadView[], skip: Folded) =>
     groupThreads(list, waiting).flatMap((g) => (skip[g.id] && !f.q.trim() ? [] : g.items.map((t) => t.no)));

@@ -359,3 +359,4 @@ html.dark .el-message--warning { --el-message-bg-color: hsl(64 100% 6%); --el-me
 .at-submenu { list-style: none; }
 .at-submenu > .el-dropdown { display: block; width: 100%; }
 .at-submenu .el-dropdown-menu__item { cursor: pointer; outline: none; }
+.el-dropdown-menu__item.is-disabled .at-kbd { opacity: 0.7; }

@@ -4,7 +4,7 @@
 // 交付物 → 等你处理 → 进行中 → 空闲 → 已完成 → 已归档. With `sheet` (the phone overview) the
 // header is the caller's: only the search box (opened from there) and the list show.
 import { Filter, Maximize2, Minimize2, Search, X } from "lucide-vue-next";
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useWaiting } from "@/api/queries";
 import type { ThreadView } from "@/api/views";
@@ -12,7 +12,8 @@ import DeliverableStrip from "@/components/app/DeliverableStrip.vue";
 import ThreadList from "@/components/app/ThreadList.vue";
 import IconButton from "@/components/common/IconButton.vue";
 import Loading from "@/components/common/Loading.vue";
-import { filterActive, LIST_GROUPS, loadFolded, saveFolded, type Folded } from "@/lib/threadList";
+import { filterActive, LIST_GROUPS, loadFolded, saveFolded, visibleOrder, type Folded } from "@/lib/threadList";
+import { threadShortcut } from "@/lib/shortcuts";
 import { listFilterOf, listView } from "@/lib/threadListView";
 import { waitingIndex } from "./logic";
 
@@ -44,6 +45,19 @@ function clearFilter() {
 }
 const library = () => (props.sheet ? emit("library") : void router.replace({ query: { panel: "library" } }));
 const close = () => void router.push(`/projects/${props.pid}?panel=none`);
+
+// Alt+↓ opens the first thread of the list, Alt+↑ the last (inside a thread they move to its neighbours).
+function onKey(e: KeyboardEvent) {
+  const which = threadShortcut(e);
+  if (which !== "prev" && which !== "next") return;
+  const order = visibleOrder(props.threads, filter.value, index.value, folded.value);
+  const no = which === "next" ? order[0] : order[order.length - 1];
+  if (no === undefined) return;
+  e.preventDefault();
+  emit("open", no);
+}
+onMounted(() => window.addEventListener("keydown", onKey, true));
+onBeforeUnmount(() => window.removeEventListener("keydown", onKey, true));
 </script>
 
 <template>

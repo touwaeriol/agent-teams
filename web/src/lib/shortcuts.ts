@@ -20,11 +20,11 @@ export function typingIn(target: EventTarget | null): boolean {
 
 export type ThreadShortcut = "prev" | "next" | "resolve";
 
-/** Alt+↑ / Alt+↓ (not while typing text) and Ctrl+Alt+Enter (⌃⌥↩, or ⌘⌥↩ on a Mac). */
+/** Alt+↑ / Alt+↓ (also while typing: Alt+arrows don't edit text) and Ctrl+Alt+Enter (⌃⌥↩, or ⌘⌥↩ on a Mac). */
 export function threadShortcut(e: KeyboardEvent): ThreadShortcut | null {
   if (e.isComposing || e.shiftKey || !e.altKey) return null;
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) return "resolve";
-  if (e.ctrlKey || e.metaKey || typingIn(e.target)) return null;
+  if (e.ctrlKey || e.metaKey) return null;
   if (e.key === "ArrowUp") return "prev";
   if (e.key === "ArrowDown") return "next";
   return null;

@@ -13,7 +13,7 @@ import { menuItems } from "@/components/app/threadMenu";
 import IconMenu from "@/components/common/IconMenu.vue";
 import { freshReminders } from "@/lib/reminders";
 import { keyLabel, threadShortcut } from "@/lib/shortcuts";
-import { groupThreads, listGroupOf, listOrder, neighbours, NO_FILTER, reminderLabel, reminderPresets } from "@/lib/threadList";
+import { groupThreads, listGroupOf, listOrder, neighbours, visibleOrder, NO_FILTER, reminderLabel, reminderPresets } from "@/lib/threadList";
 import { thread } from "./fixtures";
 
 let router: Router;
@@ -135,7 +135,7 @@ describe("ThreadMenu actions", () => {
 
 describe("ThreadMenu shortcuts", () => {
   const key = (init: KeyboardEventInit, target: EventTarget = document.body) => target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
-  it("Alt+↑ / Alt+↓ go to the neighbours, not at an end, not while typing text", async () => {
+  it("Alt+↑ / Alt+↓ go to the neighbours, not at an end, also while typing text", async () => {
     mountWith(ThreadMenu, { thread: thread(2), shortcuts: true, nav: { prev: "/projects/p1/threads/1", next: null } });
     await router.isReady();
     key({ key: "ArrowDown", altKey: true });
@@ -144,10 +144,6 @@ describe("ThreadMenu shortcuts", () => {
     const input = document.createElement("textarea");
     document.body.append(input);
     input.value = "草稿";
-    key({ key: "ArrowUp", altKey: true }, input);
-    await flushPromises();
-    expect(router.currentRoute.value.path).toBe("/");
-    input.value = "";
     key({ key: "ArrowUp", altKey: true }, input);
     await flushPromises();
     expect(router.currentRoute.value.path).toBe("/projects/p1/threads/1");
@@ -216,6 +212,8 @@ describe("list order, pins and reminders", () => {
     expect(listOrder(list, 3, NO_FILTER, undefined, { done: true })).toEqual([2, 4, 3, 1]); // the open one is folded away
     expect(listOrder(list, 1, { ...NO_FILTER, q: "T4" })).toEqual([2, 4, 3, 1]); // filtered out: whole list
     expect(threadNav([2, 4, 3], 4, (n) => `/t/${n}`)).toEqual({ prev: "/t/2", next: "/t/3" });
+    expect(visibleOrder(list, NO_FILTER)).toEqual([2, 4, 3, 1]); // Alt+↓ from the list opens 2, Alt+↑ opens 1
+    expect(visibleOrder(list, NO_FILTER, undefined, { done: true })).toEqual([2, 4]);
   });
   it("reminder labels and presets in local time", () => {
     const now = new Date(2026, 10, 16, 10, 30).getTime(); // a Monday
