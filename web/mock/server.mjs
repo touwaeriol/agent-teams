@@ -255,11 +255,11 @@ const routes = [
     json(res, 202, m);
   }],
   ["GET", /^\/api\/projects\/([^/]+)\/memory$/, (req, res) => json(res, 200, memoryList())],
-  ["GET", /^\/api\/projects\/([^/]+)\/memory\/([^/]+)$/, (req, res, [, , name]) => {
+  ["GET", /^\/api\/projects\/([^/]+)\/memory\/([^/]+)$/, (req, res, [, name]) => {
     const f = state.memory.find((x) => x.name === decodeURIComponent(name));
     return f ? json(res, 200, f) : json(res, 404, { title: "没有这个记忆文件" });
   }],
-  ["PUT", /^\/api\/projects\/([^/]+)\/memory\/([^/]+)$/, async (req, res, [, , raw]) => {
+  ["PUT", /^\/api\/projects\/([^/]+)\/memory\/([^/]+)$/, async (req, res, [, raw]) => {
     const b = await body(req);
     const name = decodeURIComponent(raw);
     const f = state.memory.find((x) => x.name === name) ?? { name, created_at: now() };
@@ -267,7 +267,7 @@ const routes = [
     if (!state.memory.includes(f)) state.memory.push(f);
     json(res, 200, f);
   }],
-  ["DELETE", /^\/api\/projects\/([^/]+)\/memory\/([^/]+)$/, (req, res, [, , name]) => {
+  ["DELETE", /^\/api\/projects\/([^/]+)\/memory\/([^/]+)$/, (req, res, [, name]) => {
     state.memory = state.memory.filter((x) => x.name !== decodeURIComponent(name));
     json(res, 204);
   }],

@@ -54,7 +54,8 @@ const close = (o: boolean) => !o && emit("close");
           {{ s.label }}
         </button>
       </nav>
-      <div class="scroll-thin min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-5 pb-8 pt-4">
+      <!-- overflow-x-hidden is only a safety net; the fix is min-w-0 above and `.at-dialog-flush .el-dialog__body > *` in element.css. -->
+      <div class="scroll-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 pb-8 pt-4">
         <MemorySection v-if="section === 'memory'" :project="project" />
         <EnvironmentSection v-else-if="section === 'environment'" :project="project" />
         <UsageSection v-else-if="section === 'usage'" :pid="project.id" />

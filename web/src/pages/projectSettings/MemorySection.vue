@@ -29,7 +29,7 @@ const ROW = "flex w-full items-center gap-3 border-b px-1 py-3 text-left text-[1
     <Divider />
     <div class="flex flex-col gap-0.5 pt-2">
       <h3 class="font-medium">自动记忆</h3>
-      <p class="break-words text-[13px] leading-5 text-muted-foreground">Claude 在此项目中工作时自行记录的笔记：做过的决定、约定、你的偏好、踩过的坑。每个新会话开始时读取 MEMORY.md，需要时再读各个记忆文件。</p>
+      <p class="text-[13px] leading-5 text-muted-foreground">Claude 在此项目中工作时自行记录的笔记：做过的决定、约定、你的偏好、踩过的坑。每个新会话开始时读取 MEMORY.md，需要时再读各个记忆文件。</p>
     </div>
     <Loading v-if="memory.isLoading.value" />
     <template v-else>
@@ -48,7 +48,7 @@ const ROW = "flex w-full items-center gap-3 border-b px-1 py-3 text-left text-[1
         <button v-for="f in split.files" :key="f.name" type="button" :class="ROW" :aria-label="`打开 ${f.name}`" @click="opened = f.name">
           <span class="w-44 shrink-0 break-all font-mono max-sm:w-32">{{ f.name }}</span>
           <span class="min-w-0 flex-1 truncate text-muted-foreground" :title="f.description">{{ f.description }}</span>
-          <span class="shrink-0 whitespace-nowrap text-muted-foreground max-sm:hidden">{{ memoryWriter(f.updated_by) }} · 更新于 {{ timeAgo(f.updated_at) }}</span>
+          <span class="max-w-[45%] shrink-0 truncate text-muted-foreground max-sm:hidden" :title="`${memoryWriter(f.updated_by)} · 更新于 ${timeAgo(f.updated_at)}`">{{ memoryWriter(f.updated_by) }} · 更新于 {{ timeAgo(f.updated_at) }}</span>
         </button>
       </div>
     </template>
