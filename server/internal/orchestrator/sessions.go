@@ -300,7 +300,7 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 	}
 	open, err := buildOpen(sessionInput{emp: env.emp, thread: env.thread, project: env.project, node: node, sess: sess,
 		prepare: prepare, first: first, resume: resume, system: system, rules: rules, hasRepo: len(env.repos) > 0,
-		repos: env.slugs(), protRefs: o.protectedRefs(ctx, tx, env), defModel: composer.DefaultModel(ctx, tx, env.emp.Runtime)})
+		repos: env.slugs(), protRefs: o.protectedRefs(ctx, tx, env), defModel: composer.DefaultModel(ctx, tx, env.project.UserID, env.emp.Runtime)})
 	if err != nil {
 		return err
 	}

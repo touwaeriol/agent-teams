@@ -195,7 +195,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 190 {
+	if migrations.Latest() != 200 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -616,7 +616,7 @@ INSERT INTO at_roles (id, user_id, tier, role) VALUES ('r1', 'u1', 'lead', 'lead
 	if _, err := db.Exec(seed); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := migrations.Up(ctx, db); err != nil {
+	if _, err := p.UpTo(ctx, 170); err != nil { // 00200 moves the platform list to the users
 		t.Fatal(err)
 	}
 	var hidden, cmds string
@@ -733,5 +733,129 @@ INSERT INTO at_deliverable_comments (id, deliverable_id, author, text) VALUES ('
 	}
 	if _, err := db.Exec(`SELECT pr_opened_at FROM at_thread_repos`); err == nil {
 		t.Fatal("pr_opened_at survived down")
+	}
+}
+
+// userModelsSeed (at 00190): u1 already has Opus 5.5 (own label) and an own model, and its
+// project, role and employee name models missing from every list; u2 has nothing. The platform
+// list is Opus 5.5 (Claude default), Sonnet, gpt-p (Codex default).
+const userModelsSeed = `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x'), ('u2', 'b@example.com', 'x');
+INSERT INTO at_models (id, user_id, runtime, model, label, sort, is_default) VALUES
+  ('mp2', NULL, 'claude', 'claude-sonnet-p', 'Sonnet', 1, FALSE),
+  ('mp3', NULL, 'codex', 'gpt-p', '', 2, TRUE),
+  ('mu1', 'u1', 'claude', 'claude-opus-5-5', 'mine', 0, FALSE),
+  ('mu2', 'u1', 'claude', 'claude-mine', '', 1, FALSE);
+INSERT INTO at_projects (id, user_id, name, coordinator_model, thread_model) VALUES ('p1', 'u1', 'A', 'claude-coord', 'claude-opus-5-5');
+INSERT INTO at_roles (id, user_id, tier, role, runtime, model) VALUES ('r1', 'u1', 'member', 'dev', 'codex', 'gpt-role');
+INSERT INTO at_employees (id, project_id, name, tier, role, runtime, model, spec) VALUES
+  ('e1', 'p1', 'lead', 'lead', 'lead', 'claude', 'claude-emp', '{"model": "claude-spec"}');`
+
+func userModels(t *testing.T, db *sql.DB, user string) string {
+	t.Helper()
+	var s string
+	if err := db.QueryRow(`SELECT string_agg(runtime || ':' || model || ':' || label || CASE WHEN is_default THEN ':*' ELSE '' END, ' ' ORDER BY sort)
+		FROM at_models WHERE user_id = $1`, user).Scan(&s); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// TestUserModelsMigration: 00200 copies the platform list to every user (after their own rows,
+// skipping models they have), adds the models their projects, roles and employees name, gives each
+// user the platform defaults, deletes the platform rows and makes user_id required with one
+// default per user and runtime. Down brings back the platform preset.
+func TestUserModelsMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 190); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(userModelsSeed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := migrations.Up(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	want1 := "claude:claude-opus-5-5:mine:* claude:claude-mine: claude:claude-sonnet-p:Sonnet codex:gpt-p::* " +
+		"claude:claude-coord: claude:claude-emp: claude:claude-spec: codex:gpt-role:"
+	if got := userModels(t, db, "u1"); got != want1 {
+		t.Fatalf("u1:\n got %s\nwant %s", got, want1)
+	}
+	want2 := "claude:claude-opus-5-5:Opus 5.5:* claude:claude-sonnet-p:Sonnet codex:gpt-p::*"
+	if got := userModels(t, db, "u2"); got != want2 {
+		t.Fatalf("u2:\n got %s\nwant %s", got, want2)
+	}
+	var platform int
+	if err := db.QueryRow(`SELECT count(*) FROM at_models WHERE user_id IS NULL`).Scan(&platform); err != nil || platform != 0 {
+		t.Fatalf("platform rows left: %d %v", platform, err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_models (id, runtime, model) VALUES ('mx', 'claude', 'x')`); err == nil {
+		t.Fatal("row without a user accepted")
+	}
+	if _, err := db.Exec(`INSERT INTO at_models (id, user_id, runtime, model, is_default) VALUES ('mx', 'u2', 'claude', 'x', TRUE)`); err == nil {
+		t.Fatal("second claude default of u2 accepted")
+	}
+	if _, err := db.Exec(`INSERT INTO at_models (id, user_id, runtime, model) VALUES ('mx', 'u2', 'claude', 'claude-sonnet-p')`); err == nil {
+		t.Fatal("duplicate model of u2 accepted")
+	}
+
+	if _, err := p.DownTo(ctx, 190); err != nil {
+		t.Fatal(err)
+	}
+	var model string
+	if err := db.QueryRow(`SELECT model FROM at_models WHERE user_id IS NULL AND is_default`).Scan(&model); err != nil || model != "claude-opus-5-5" {
+		t.Fatalf("platform preset after down: %q %v", model, err)
+	}
+	var defaults int
+	if err := db.QueryRow(`SELECT count(*) FROM at_models WHERE user_id IS NOT NULL AND is_default`).Scan(&defaults); err != nil || defaults != 0 {
+		t.Fatalf("user defaults after down: %d %v", defaults, err)
+	}
+	if _, err := p.UpTo(ctx, 200); err != nil {
+		t.Fatalf("up again: %v", err)
+	}
+}
+
+// TestUserModelsMigrationCheck: when a user did not get every platform row, 00200 fails and
+// rolls back: the platform list stays, no user row was written and the version stays at 00190.
+func TestUserModelsMigrationCheck(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 190); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(userModelsSeed); err != nil {
+		t.Fatal(err)
+	}
+	// Silently drop u2's copies, as a broken copy step would.
+	block := `CREATE FUNCTION at_test_skip_u2() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN IF NEW.user_id = 'u2' THEN RETURN NULL; END IF; RETURN NEW; END $$;
+CREATE TRIGGER at_test_skip_u2 BEFORE INSERT ON at_models FOR EACH ROW EXECUTE FUNCTION at_test_skip_u2();`
+	if _, err := db.Exec(block); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := migrations.Up(ctx, db); err == nil || !strings.Contains(err.Error(), "platform models not copied") {
+		t.Fatalf("up = %v, want the copy check to fail", err)
+	}
+	var platform, u1 int
+	if err := db.QueryRow(`SELECT count(*) FILTER (WHERE user_id IS NULL), count(*) FILTER (WHERE user_id = 'u1') FROM at_models`).Scan(&platform, &u1); err != nil ||
+		platform != 3 || u1 != 2 {
+		t.Fatalf("after the failed up: %d platform rows, %d u1 rows %v", platform, u1, err)
+	}
+	if v, err := p.GetDBVersion(ctx); err != nil || v != 190 {
+		t.Fatalf("version %d %v", v, err)
+	}
+	if _, err := db.Exec(`DROP TRIGGER at_test_skip_u2 ON at_models`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := migrations.Up(ctx, db); err != nil {
+		t.Fatal(err)
 	}
 }
