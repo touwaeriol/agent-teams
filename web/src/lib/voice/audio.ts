@@ -3,6 +3,8 @@
 export interface MicDevice {
   deviceId: string;
   label: string;
+  /** Shown before permission; selecting it asks for permission instead. */
+  placeholder?: boolean;
 }
 
 /** Why the microphone could not be opened, in words for the user. */
@@ -33,16 +35,52 @@ export function stopStream(stream: MediaStream | null | undefined): void {
   stream?.getTracks().forEach((t) => t.stop());
 }
 
-/** Audio inputs; labels are empty until the page has microphone permission. */
-export async function listMics(): Promise<{ devices: MicDevice[]; labelled: boolean }> {
+export interface MicList {
+  /** First the system default (deviceId ""), then one row per real microphone. */
+  devices: MicDevice[];
+  /** False before microphone permission: names (and ids) are hidden, rows are placeholders. */
+  labelled: boolean;
+}
+
+type DeviceLike = Pick<MediaDeviceInfo, "deviceId" | "kind" | "label" | "groupId">;
+
+const DEFAULT_PREFIX = /^(default|默认)\s*[-–—:：]\s*/i;
+
+/**
+ * Chrome lists the pseudo devices "default" ("Default - <name>") and "communications" next to the
+ * real ones, and sometimes the same microphone more than once. One 系统默认 row stands for
+ * "default" (with the real name when known), "communications" is dropped, and real microphones
+ * are deduplicated by group and name. Before permission every id and label is empty: rows are
+ * placeholders ("麦克风 N", id "placeholder:N") that can never match a saved choice.
+ */
+export function normalizeMics(all: DeviceLike[]): MicList {
+  const inputs = all.filter((d) => d.kind === "audioinput");
+  const labelled = inputs.some((d) => d.label);
+  const def = inputs.find((d) => d.deviceId === "default");
+  const defName = def?.label.replace(DEFAULT_PREFIX, "").trim() ?? "";
+  const devices: MicDevice[] = [{ deviceId: "", label: defName ? `系统默认（${defName}）` : "系统默认" }];
+  const seen = new Set<string>();
+  for (const d of inputs) {
+    if (d.deviceId === "default" || d.deviceId === "communications") continue;
+    const key = d.label ? `${d.groupId}|${d.label}` : d.deviceId;
+    if (key && seen.has(key)) continue;
+    seen.add(key);
+    const n = devices.length;
+    devices.push(d.deviceId && d.label ? { deviceId: d.deviceId, label: d.label } : { deviceId: `placeholder:${n}`, label: d.label || `麦克风 ${n}`, placeholder: true });
+  }
+  return { devices, labelled };
+}
+
+/** The one row to check: the saved microphone if it is still there, otherwise 系统默认. */
+export function selectedMic(list: MicDevice[], deviceId: string): string {
+  return deviceId && list.some((d) => d.deviceId === deviceId && !d.placeholder) ? deviceId : "";
+}
+
+/** Audio inputs as rows for the mic menu (see normalizeMics). */
+export async function listMics(): Promise<MicList> {
   const md = globalThis.navigator?.mediaDevices;
-  if (!md?.enumerateDevices) return { devices: [], labelled: false };
-  const all = await md.enumerateDevices();
-  const inputs = all.filter((d) => d.kind === "audioinput" && d.deviceId !== "default" && d.deviceId !== "communications");
-  return {
-    devices: inputs.map((d, i) => ({ deviceId: d.deviceId, label: d.label || `麦克风 ${i + 1}` })),
-    labelled: inputs.some((d) => d.label),
-  };
+  if (!md?.enumerateDevices) return { devices: [{ deviceId: "", label: "系统默认" }], labelled: false };
+  return normalizeMics(await md.enumerateDevices());
 }
 
 /** Asks for permission once (closing the stream right away) so device names show. */

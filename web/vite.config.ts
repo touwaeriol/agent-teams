@@ -56,7 +56,7 @@ export default defineConfig({
   },
   server: {
     proxy: Object.fromEntries(
-      ["/api", "/auth", "/install-node.sh"].map((p) => [p, { target: process.env.API_TARGET ?? "http://127.0.0.1:3001", changeOrigin: false }]),
+      ["/api", "/auth", "/install-node.sh"].map((p) => [p, { target: process.env.API_TARGET ?? "http://127.0.0.1:3001", changeOrigin: false, ws: true }]),
     ),
   },
   test: {

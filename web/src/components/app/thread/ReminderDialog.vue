@@ -21,7 +21,7 @@ function submit() {
 </script>
 
 <template>
-  <FormDialog v-model:open="open" :title="`提醒 #${thread.no}`" description="到时间后讨论串会回到“进行中”并排在最前，浏览器允许时还会弹出通知。" submit-label="设置提醒" :disabled="!valid" width="26rem" @submit="submit">
+  <FormDialog v-model:open="open" :title="`提醒 #${thread.no}`" description="到时间后讨论串会移到“等你处理”，浏览器允许时还会弹出通知。" submit-label="设置提醒" :disabled="!valid" width="26rem" @submit="submit">
     <el-date-picker
       v-model="at"
       type="datetime"

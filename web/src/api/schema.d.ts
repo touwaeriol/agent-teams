@@ -3542,6 +3542,11 @@ export interface components {
             noise_reduction: "near_field" | "far_field" | "off";
             /** @enum {string} */
             provider: "openai";
+            /**
+             * @description relay = audio through this server (default); webrtc = browser straight to OpenAI
+             * @enum {string}
+             */
+            transport: "relay" | "webrtc";
             /** Format: date-time */
             updated_at: string;
             /** @description Enabled, a key is saved and the server can unseal it */
@@ -3558,11 +3563,21 @@ export interface components {
             model?: string;
             /** @enum {string} */
             noise_reduction?: "near_field" | "far_field" | "off";
+            /**
+             * @description Empty = relay
+             * @enum {string}
+             */
+            transport?: "relay" | "webrtc";
         };
         VoiceConfig: {
             enabled: boolean;
             languages: components["schemas"]["Language"][] | null;
             provider?: string;
+            /**
+             * @description relay: stream to GET /api/voice/stream; webrtc: POST /api/voice/session then connect to OpenAI
+             * @enum {string}
+             */
+            transport?: "relay" | "webrtc";
         };
         VoiceSession: {
             /** @description No server VAD: send input_audio_buffer.commit at the end of each utterance */

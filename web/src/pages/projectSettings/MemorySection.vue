@@ -36,8 +36,8 @@ const ROW = "flex w-full items-center gap-3 border-b px-1 py-3 text-left text-[1
       <span class="pb-1 pt-4 text-[13px] font-medium">阅读所有讨论串</span>
       <button type="button" :class="[ROW, 'border-t']" aria-label="打开 MEMORY.md" @click="opened = MEMORY_INDEX">
         <span class="min-w-0 flex-1 font-mono underline underline-offset-4">MEMORY.md</span>
-        <span class="min-w-0 flex-1 truncate text-muted-foreground max-sm:hidden" :title="`${project.name} 项目`">{{ project.name }} 项目</span>
-        <span class="shrink-0 whitespace-nowrap text-muted-foreground">{{ split.index ? `更新于 ${timeAgo(split.index.updated_at)}` : "还没有内容" }}</span>
+        <span class="min-w-0 flex-1 truncate text-muted-foreground max-sm:hidden">{{ project.name }} 项目</span>
+        <span class="shrink-0 text-muted-foreground">{{ split.index ? `更新于 ${timeAgo(split.index.updated_at)}` : "还没有内容" }}</span>
       </button>
       <div class="flex items-center justify-between pb-1 pt-6">
         <span class="text-[13px] font-medium">记忆文件</span>
@@ -46,9 +46,9 @@ const ROW = "flex w-full items-center gap-3 border-b px-1 py-3 text-left text-[1
       <div class="border-t">
         <p v-if="split.files.length === 0" class="border-b px-1 py-3 text-[13px] text-muted-foreground">暂无其他文件。</p>
         <button v-for="f in split.files" :key="f.name" type="button" :class="ROW" :aria-label="`打开 ${f.name}`" @click="opened = f.name">
-          <span class="w-44 shrink-0 break-all font-mono max-sm:w-32">{{ f.name }}</span>
-          <span class="min-w-0 flex-1 truncate text-muted-foreground" :title="f.description">{{ f.description }}</span>
-          <span class="max-w-[45%] shrink-0 truncate text-muted-foreground max-sm:hidden" :title="`${memoryWriter(f.updated_by)} · 更新于 ${timeAgo(f.updated_at)}`">{{ memoryWriter(f.updated_by) }} · 更新于 {{ timeAgo(f.updated_at) }}</span>
+          <span class="w-44 shrink-0 truncate font-mono max-sm:w-32">{{ f.name }}</span>
+          <span class="min-w-0 flex-1 truncate text-muted-foreground">{{ f.description }}</span>
+          <span class="shrink-0 text-muted-foreground max-sm:hidden">{{ memoryWriter(f.updated_by) }} · 更新于 {{ timeAgo(f.updated_at) }}</span>
         </button>
       </div>
     </template>

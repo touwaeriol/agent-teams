@@ -1,6 +1,7 @@
-// Package voice mints short-lived OpenAI Realtime client secrets for speech-to-text in the
-// composers. The browser connects to OpenAI directly with the secret (WebRTC); audio never
-// passes through the control plane, and the platform API key never leaves it.
+// Package voice connects the composers' speech-to-text to OpenAI Realtime transcription. By
+// default the control plane relays the browser's audio over its own WebSocket (relay.go); the
+// optional direct mode mints short-lived client secrets so the browser connects to OpenAI with
+// WebRTC. The platform API key never leaves the server either way.
 //
 // Request shape (developers.openai.com, POST /v1/realtime/client_secrets, 2026-11):
 //
@@ -43,6 +44,14 @@ const (
 	NoiseOff  = "off"
 )
 
+// Transports: how the browser reaches OpenAI. Relay (the default) streams audio through the
+// control plane (GET /api/voice/stream); WebRTC connects the browser to OpenAI directly with a
+// client secret, which needs the browser to reach api.openai.com.
+const (
+	TransportRelay  = "relay"
+	TransportWebRTC = "webrtc"
+)
+
 // Delays are gpt-realtime-whisper's latency/accuracy settings ("" = OpenAI's default).
 var Delays = []string{"minimal", "low", "medium", "high", "xhigh"}
 
@@ -56,6 +65,7 @@ type Settings struct {
 	BaseURL        string    `json:"base_url,omitempty"`
 	NoiseReduction string    `json:"noise_reduction,omitempty"`
 	Delay          string    `json:"delay,omitempty"`
+	Transport      string    `json:"transport,omitempty"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
@@ -69,6 +79,9 @@ func (s Settings) WithDefaults() Settings {
 	}
 	if s.NoiseReduction == "" {
 		s.NoiseReduction = NoiseNear
+	}
+	if s.Transport == "" {
+		s.Transport = TransportRelay
 	}
 	return s
 }

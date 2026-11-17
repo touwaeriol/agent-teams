@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The right panel before a thread is opened: "讨论串" with search, filter, expand and close;
 // the project's newest deliverables; then the thread list in status groups (folds per user):
-// 交付物 → 进行中 → 已解决 → 失败 → 已暂停 → 已归档 (filter: any of those groups). With `sheet` (the phone overview) the
+// 交付物 → 等你处理 → 进行中 → 空闲 → 已完成 → 已归档. With `sheet` (the phone overview) the
 // header is the caller's: only the search box (opened from there) and the list show.
 import { Filter, Maximize2, Minimize2, Search, X } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -61,7 +61,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey, true));
 </script>
 
 <template>
-  <header v-if="!sheet" class="flex h-12 shrink-0 items-center gap-0.5 border-b border-[#EFEDE8] pl-5 pr-2.5 dark:border-border">
+  <header v-if="!sheet" class="flex h-14 shrink-0 items-center gap-0.5 border-b border-[#EFEDE8] pl-5 pr-2.5">
     <nav aria-label="位置" class="flex-1 font-semibold">讨论串</nav>
     <IconButton label="搜索讨论串" :active="view.searching" @click="toggleSearch"><Search :stroke-width="1.8" /></IconButton>
     <el-popover trigger="click" placement="bottom-end" :width="220" :show-arrow="false" popper-class="!p-3">
@@ -72,7 +72,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey, true));
         </span>
       </template>
       <div class="flex flex-col gap-2 text-[13px]" aria-label="筛选讨论串">
-        <span class="text-xs text-muted-foreground">分组</span>
+        <span class="text-xs text-muted-foreground">状态</span>
         <el-checkbox-group v-model="view.groups" class="flex flex-col">
           <el-checkbox v-for="g in LIST_GROUPS" :key="g.id" :value="g.id" :label="g.label" class="!h-7" />
         </el-checkbox-group>
@@ -88,7 +88,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey, true));
     <IconButton label="关闭" @click="close"><X :stroke-width="1.8" /></IconButton>
   </header>
   <div v-if="view.searching" class="shrink-0 border-b border-[#EFEDE8] px-4 py-2">
-    <el-input v-model="view.q" size="small" placeholder="搜索标题、编号或进展" clearable autofocus aria-label="搜索讨论串" @keydown.esc="toggleSearch">
+    <el-input v-model="view.q" size="small" placeholder="搜索标题或进展" clearable autofocus aria-label="搜索讨论串" @keydown.esc="toggleSearch">
       <template #prefix><Search class="size-3.5" /></template>
     </el-input>
   </div>

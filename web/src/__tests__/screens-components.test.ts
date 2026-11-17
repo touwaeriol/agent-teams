@@ -14,7 +14,7 @@ import { useText } from "@/pages/design/viewer";
 import MobileOverview from "@/pages/main/MobileOverview.vue";
 import PanelList from "@/pages/main/PanelList.vue";
 import { foldedKey } from "@/lib/threadList";
-import { question, thread } from "./fixtures";
+import { thread } from "./fixtures";
 import { resetListViews } from "@/lib/threadListView";
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -45,7 +45,7 @@ afterEach(() => {
 });
 
 describe("ThreadDetail", () => {
-  it("shows the breadcrumb header, goes back via 讨论串, and keeps the message box of a done thread with the reopen hint", async () => {
+  it("shows the capsule header, goes back, and keeps the message box of a done thread with the reopen hint", async () => {
     stubApi({ "/messages": { items: [], next_cursor: null }, "/questions": [] });
     const w = mountWith(ThreadDetail, { pid: "p1", thread: thread(12, { title: "员工通信", status: "done" }), view: null });
     await flushPromises();
@@ -55,12 +55,11 @@ describe("ThreadDetail", () => {
     const box = document.body.querySelector<HTMLTextAreaElement>("textarea[placeholder^='回复组长']");
     expect(box).not.toBeNull();
     expect(box!.disabled).toBe(false);
-    expect(w.get("[data-crumb=title] [data-mark]").attributes("data-mark")).toBe("done");
-    expect(w.get("button[aria-label=返回讨论串列表]").text()).toBe("讨论串");
+    expect(w.get("[data-capsule=title] [data-mark]").attributes("data-mark")).toBe("done");
     await w.get("button[aria-label=返回讨论串列表]").trigger("click");
     expect(w.emitted("back")).toHaveLength(1);
   });
-  it("header breadcrumb: running spinner with the plan 2/7, node status, the ⋯ menu; waiting shows the orange mark; ✕ only when closable", async () => {
+  it("header capsules: running spinner with the plan 2/7, node status, the ⋯ menu; waiting shows the orange mark; ✕ only when closable", async () => {
     stubApi({ "/messages": { items: [], next_cursor: null }, "/questions": [] });
     const step = (i: number, status: "todo" | "doing" | "done") => ({ id: `m${i}`, pos: i, title: `s${i}`, status, auto_done: false, tasks_total: 0, tasks_done: 0 });
     const plan = [step(1, "done"), step(2, "done"), step(3, "doing"), step(4, "todo"), step(5, "todo"), step(6, "todo"), step(7, "todo")];
@@ -69,33 +68,20 @@ describe("ThreadDetail", () => {
     const running = thread(12, { main_tasks: plan, members: [lead, dev] as never });
     const w = mountWith(ThreadDetail, { pid: "p1", thread: running, view: null });
     await flushPromises();
-    const title = w.get("[data-crumb=title]");
+    const title = w.get("[data-capsule=title]");
     expect(title.get("[data-mark]").attributes("data-mark")).toBe("working");
     expect(title.find("[data-spin]").exists()).toBe(true);
     expect(title.get("[data-progress]").text()).toBe("2/7");
-    const actions = w.get("[data-actions]");
+    const actions = w.get("[data-capsule=actions]");
     expect(actions.get("[data-node]").attributes("data-node")).toBe("partial");
     expect(actions.get("[data-node]").attributes("aria-label")).toBe("节点：rc-erio 在线 · cvp 离线");
     expect(actions.find("button[aria-label^='讨论串 #12']").exists()).toBe(true);
     expect(w.find("button[aria-label=关闭]").exists()).toBe(true);
     await w.setProps({ thread: thread(12, { status: "review", members: [] }), closable: false });
-    expect(w.get("[data-crumb=title] [data-mark]").attributes("data-mark")).toBe("wait");
-    expect(w.find("[data-crumb=title] [data-progress]").exists()).toBe(false);
+    expect(w.get("[data-capsule=title] [data-mark]").attributes("data-mark")).toBe("wait");
+    expect(w.find("[data-capsule=title] [data-progress]").exists()).toBe(false);
     expect(w.get("[data-node]").attributes("data-node")).toBe("none");
     expect(w.find("button[aria-label=关闭]").exists()).toBe(false);
-    await w.setProps({ thread: thread(12, { status: "paused", members: [] }) });
-    expect(w.get("[data-crumb=title] [data-mark]").attributes("data-mark")).toBe("paused");
-    await w.setProps({ thread: thread(12, { status: "failed", members: [] }) });
-    expect(w.get("[data-crumb=title] [data-mark]").attributes("data-mark")).toBe("failed");
-  });
-  it("header mark uses the list's waiting map: an open question alone (counts.waiting 0) shows 等你处理", async () => {
-    stubApi({ "/messages": { items: [], next_cursor: null }, "/questions": [], "/waiting": { questions: [question("q1", { thread_no: 12 })], reviews: [] } });
-    const lead = { id: "e1", name: "lead", tier: "lead", status: { state: "typing" } };
-    const w = mountWith(ThreadDetail, { pid: "p1", thread: thread(12, { members: [lead] as never }), view: null });
-    await flushPromises();
-    expect(w.get("[data-crumb=title] [data-mark]").attributes("data-mark")).toBe("wait");
-    await w.setProps({ thread: thread(13, { members: [lead] as never }) });
-    expect(w.get("[data-crumb=title] [data-mark]").attributes("data-mark")).toBe("working");
   });
   it("tells an archived thread's composer how to go on and unarchives in one click", async () => {
     const fetch = stubApi({ "/messages": { items: [], next_cursor: null }, "/questions": [] });
@@ -233,7 +219,7 @@ describe("MobileOverview", () => {
     const tabs = w.findAll("[role=tab]");
     expect(tabs.map((t) => t.text())).toEqual(["讨论串", "资料库", "定时任务"]);
     expect(tabs[0].attributes("aria-selected")).toBe("true");
-    expect(w.findAll("section[data-group]").map((s) => s.attributes("data-group"))).toEqual(["active", "done"]);
+    expect(w.findAll("section[data-group]").map((s) => s.attributes("data-group"))).toEqual(["waiting", "done"]);
     expect(w.find("[data-group=done] [data-row][data-compact]").exists()).toBe(true);
     await w.get("header button[aria-label=搜索讨论串]").trigger("click");
     await w.get("input[aria-label=搜索讨论串]").setValue("部署");

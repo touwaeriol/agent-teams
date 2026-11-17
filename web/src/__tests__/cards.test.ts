@@ -19,7 +19,7 @@ import TodoCard from "@/components/app/chatcards/TodoCard.vue";
 import LiveDot from "@/components/app/LiveDot.vue";
 import StateMark from "@/components/app/StateMark.vue";
 import StatusPill from "@/components/app/StatusPill.vue";
-import ThreadStatusIcon from "@/components/app/ThreadStatusIcon.vue";
+import ThreadMark from "@/components/app/ThreadMark.vue";
 import { answerBody, answeredRows, askItems, chatQuestions, complete, emptyChoices, letter, oneClick, toggle, typeOther } from "@/lib/ask";
 import { chatBlocks, threadTalk } from "@/lib/chat";
 import { readScroll, restoredTop, scrollMarkOf, writeScroll } from "@/lib/persist";
@@ -144,10 +144,9 @@ describe("in-progress marks spin", () => {
     expect(spins(LiveDot, { color: "#2F6FDB", on: false })).toBe(false);
   });
 
-  it("spins the thread status icon and status chip only while the thread is in progress", () => {
-    expect(spins(ThreadStatusIcon, { mark: "working" })).toBe(true);
-    expect(spins(ThreadStatusIcon, { mark: "queued" })).toBe(true);
-    for (const mark of ["wait", "idle", "done", "failed", "paused", "archived"]) expect(spins(ThreadStatusIcon, { mark })).toBe(false);
+  it("spins the thread mark and status chip only while the thread is in progress", () => {
+    expect(spins(ThreadMark, { thread: thread(1, { status: "running" }) })).toBe(true);
+    expect(spins(ThreadMark, { thread: thread(2, { status: "queued" }) })).toBe(false);
     const look = threadLook(thread(1, { status: "running" }));
     expect(spins(StatusPill, { tone: look.tone, label: look.label, spin: look.spin })).toBe(true);
     expect(threadLook(thread(3, { status: "done" })).spin).toBeFalsy();

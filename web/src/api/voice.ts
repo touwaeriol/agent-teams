@@ -22,7 +22,7 @@ export const useVoiceAdmin = () => useQuery({ queryKey: voiceKeys.admin, queryFn
 
 export const voice = {
   session: async (language: string): Promise<VoiceSessionInfo> =>
-    (await unwrap(client.POST("/api/voice/session", { body: { language } }))) as VoiceSessionInfo,
+    (await unwrap(client.POST("/api/voice/session", { body: { language }, signal: AbortSignal.timeout(10_000) }))) as VoiceSessionInfo,
   save: (body: VoiceAdminInput) => unwrap(client.PUT("/api/admin/voice", { body })),
   test: (body: { api_key?: string; model?: string; base_url?: string }) => unwrap(client.POST("/api/admin/voice/test", { body })),
 };

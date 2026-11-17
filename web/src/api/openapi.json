@@ -5787,6 +5787,14 @@
             ],
             "type": "string"
           },
+          "transport": {
+            "description": "relay = audio through this server (default); webrtc = browser straight to OpenAI",
+            "enum": [
+              "relay",
+              "webrtc"
+            ],
+            "type": "string"
+          },
           "updated_at": {
             "format": "date-time",
             "type": "string"
@@ -5803,6 +5811,7 @@
           "base_url",
           "noise_reduction",
           "delay",
+          "transport",
           "key_set",
           "key_last4",
           "usable",
@@ -5851,6 +5860,14 @@
               "off"
             ],
             "type": "string"
+          },
+          "transport": {
+            "description": "Empty = relay",
+            "enum": [
+              "relay",
+              "webrtc"
+            ],
+            "type": "string"
           }
         },
         "required": [
@@ -5874,6 +5891,14 @@
             ]
           },
           "provider": {
+            "type": "string"
+          },
+          "transport": {
+            "description": "relay: stream to GET /api/voice/stream; webrtc: POST /api/voice/session then connect to OpenAI",
+            "enum": [
+              "relay",
+              "webrtc"
+            ],
             "type": "string"
           }
         },

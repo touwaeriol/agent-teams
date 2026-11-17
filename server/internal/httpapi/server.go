@@ -160,6 +160,7 @@ func (s *Server) register(api huma.API, r gin.IRoutes) {
 	s.registerOffice(api)
 	s.registerHealth(api)
 	s.registerVoice(api)
+	s.registerVoiceStream(r)
 }
 
 // Handler is the root http.Handler.

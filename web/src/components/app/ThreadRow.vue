@@ -1,25 +1,21 @@
 <script setup lang="ts">
-// One row of the panel list. Rich (进行中 / 失败): mark, "#N 标题" in bold ink (PR icon when it
-// opened one), the node icon and last activity on the right (⋯ menu on hover), a grey one-line
-// progress joined to the mark by a thin tree line, then small tags: plan "2/7" and "N 个交付物"
-// (opens the thread's deliverables). Compact (已解决 / 已暂停 / 已归档): mark, a regular-weight
-// title and the time on one roomy line.
+// One row of the panel list. Rich (等你处理 / 进行中): mark, "#N 标题" (PR icon when it opened
+// one), the node icon and last activity on the right (⋯ menu on hover), a grey one-line
+// progress, then small tags: plan "2/7" and "N 个交付物" (opens the thread's deliverables).
+// Compact (空闲 / 已完成 / 已归档): mark, title and time on one short line.
 // A pin marks a pinned thread; "提醒" a reminder that fired, "提醒 明天 09:00" one still to come.
 import { Bell, GitPullRequest, ListChecks, Package, Pin } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import { RouterLink } from "vue-router";
 import type { ThreadView } from "@/api/views";
-import { INK } from "@/lib/present";
 import { cn } from "@/lib/utils";
-import { shortAgo } from "@/lib/relativeTime";
-import { deliverableCount, lastActivity, mainProgress, reminderLabel, type RowMark } from "@/lib/threadList";
+import { deliverableCount, lastActivity, mainProgress, reminderLabel, shortAgo, type RowMark } from "@/lib/threadList";
 import NodeStatus from "./NodeStatus.vue";
 import TitleEdit from "./thread/TitleEdit.vue";
+import ThreadMark from "./ThreadMark.vue";
 import ThreadMenu from "./ThreadMenu.vue";
-import ThreadStatusIcon from "./ThreadStatusIcon.vue";
 
-/** `waits`: a settled row (已解决 / 已暂停 / 失败) that still has a card or approval open for the user: a small orange dot at the end. */
-const props = defineProps<{ thread: ThreadView; line: string; menu: boolean; mark: RowMark; now: number; compact?: boolean; waits?: boolean }>();
+const props = defineProps<{ thread: ThreadView; line: string; menu: boolean; mark: RowMark; now: number; compact?: boolean }>();
 const emit = defineEmits<{ open: [no: number] }>();
 const at = computed(() => lastActivity(props.thread));
 const ago = computed(() => shortAgo(at.value, props.now));
@@ -31,26 +27,22 @@ const TAG = "inline-flex h-5 items-center gap-1 rounded-md border bg-panel px-1.
 </script>
 
 <template>
-  <div :class="cn('group -mx-2 rounded-lg transition-colors hover:bg-muted/70', compact && 'rounded-md')" data-row="" :data-compact="compact ? '' : undefined">
+  <div :class="cn('group -mx-2 rounded-lg hover:bg-background', compact && 'rounded-md')" data-row="" :data-compact="compact ? '' : undefined">
     <div :class="cn('flex', compact ? 'items-center' : 'items-start')">
       <div v-if="renaming" :class="cn('flex min-w-0 flex-1 items-center gap-2.5 pl-2 pr-1', compact ? 'py-0.5' : 'py-1')">
-        <ThreadStatusIcon :mark="mark" />
+        <ThreadMark :thread="thread" :mark="mark" />
         <TitleEdit :thread="thread" @done="renaming = false" />
       </div>
-      <button v-else-if="compact" type="button" class="flex h-9 min-w-0 flex-1 items-center gap-2.5 pl-2 pr-1 text-left" :title="line || undefined" @click="emit('open', thread.no)">
-        <ThreadStatusIcon :mark="mark" />
+      <button v-else-if="compact" type="button" class="flex h-8 min-w-0 flex-1 items-center gap-2.5 pl-2 pr-1 text-left" :title="line || undefined" @click="emit('open', thread.no)">
+        <ThreadMark :thread="thread" :mark="mark" class="!mt-0" />
         <Pin v-if="thread.pinned_at" class="size-3 shrink-0 rotate-45 text-muted-foreground" :stroke-width="2" aria-label="已置顶" />
-        <span :class="cn('truncate text-[13px] font-normal', mark === 'archived' ? 'text-foreground/60' : 'text-foreground/75')">#{{ thread.no }} {{ thread.title }}</span>
+        <span :class="cn('truncate text-[13px]', mark === 'archived' || mark === 'done' ? 'text-foreground/70' : 'text-foreground/85')">#{{ thread.no }} {{ thread.title }}</span>
         <Bell v-if="thread.remind_at" class="size-3 shrink-0 text-muted-foreground" :stroke-width="1.8" :aria-label="reminder" data-reminder="" />
       </button>
       <button v-else type="button" class="flex min-w-0 flex-1 gap-2.5 py-2 pl-2 pr-1 text-left" @click="emit('open', thread.no)">
-        <span class="relative flex w-4 shrink-0 justify-center pt-0.5">
-          <ThreadStatusIcon :mark="mark" />
-          <!-- The tree line: from under the mark down and right into the progress line. -->
-          <span v-if="line" aria-hidden="true" class="absolute left-[7.5px] top-[19px] h-[13px] w-3 rounded-bl-[5px] border-b border-l border-foreground/15" data-tree="" />
-        </span>
+        <ThreadMark :thread="thread" :mark="mark" />
         <span class="flex min-w-0 flex-1 flex-col gap-[3px]">
-          <span :class="cn('flex min-w-0 items-center gap-1.5 text-sm leading-5', mark === 'failed' ? 'font-medium text-foreground/85' : 'font-semibold text-foreground')">
+          <span class="flex min-w-0 items-center gap-1.5 text-sm font-medium">
             <Pin v-if="thread.pinned_at" class="size-3 shrink-0 rotate-45 text-muted-foreground" :stroke-width="2" aria-label="已置顶" />
             <span class="truncate">#{{ thread.no }} {{ thread.title }}</span>
             <GitPullRequest v-if="thread.pr_number" class="size-3.5 shrink-0 text-muted-foreground" :stroke-width="1.8" aria-label="有 PR" />
@@ -66,7 +58,6 @@ const TAG = "inline-flex h-5 items-center gap-1 rounded-md border bg-panel px-1.
       </button>
       <span :class="cn('relative flex shrink-0 items-center justify-end gap-2 pr-2', compact ? 'h-8 min-w-12' : 'h-9 min-w-14')">
         <span class="flex items-center gap-2 group-focus-within:invisible group-hover:invisible">
-          <span v-if="waits" class="size-1.5 shrink-0 rounded-full" :style="{ background: INK.wait }" role="img" aria-label="等你处理" title="等你处理" data-waits="" />
           <NodeStatus v-if="!compact" :thread="thread" :size="13" />
           <time :datetime="at" :title="new Date(at).toLocaleString('zh-CN')" class="text-xs text-muted-foreground">{{ ago }}</time>
         </span>

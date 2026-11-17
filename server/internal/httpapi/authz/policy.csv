@@ -162,6 +162,7 @@ p, user, /api/threads/:tid/unarchive, POST
 p, user, /api/threads/:tid/usage, GET
 p, user, /api/voice/config, GET
 p, user, /api/voice/session, POST
+p, user, /api/voice/stream, GET
 
 # Administrators: the admin console.
 p, admin, /api/admin/audit, GET

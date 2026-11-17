@@ -7,6 +7,7 @@ import { toast } from "@/lib/toast";
 import { openMic, startMeter } from "@/lib/voice/audio";
 import { VoiceController, type VoiceDeps, type VoiceState } from "@/lib/voice/controller";
 import { connectOpenAI } from "@/lib/voice/openai";
+import { connectRelay, relaySession } from "@/lib/voice/relay";
 import { readPrefs, writePrefs, type LanguageOption, type VoicePrefs } from "@/lib/voice/prefs";
 import type { Part, Transcript } from "@/lib/voice/transcript";
 
@@ -34,12 +35,15 @@ export interface VoiceInput {
 
 export const isVoiceKey = (e: KeyboardEvent) => e.altKey && !e.ctrlKey && !e.metaKey && e.code === "KeyM";
 
-/** Real browser dependencies; tests build a VoiceController with fakes instead. */
-export function browserDeps(onText: (t: Transcript) => void): VoiceDeps {
+/**
+ * Real browser dependencies; tests build a VoiceController with fakes instead. transport() is the
+ * admin's choice: "relay" (default, audio through our server) or "webrtc" (browser → OpenAI).
+ */
+export function browserDeps(onText: (t: Transcript) => void, transport: () => string = () => "relay"): VoiceDeps {
   return {
-    mint: (language) => voiceApi.session(language),
+    mint: async (language) => (transport() === "webrtc" ? voiceApi.session(language) : relaySession(language)),
     openMic,
-    connect: connectOpenAI,
+    connect: (session, stream, h) => (session.transport === "webrtc" ? connectOpenAI(session, stream, h) : connectRelay(session, stream, h)),
     meter: startMeter,
     now: () => Date.now(),
     onText,
@@ -70,7 +74,7 @@ export function useVoiceInput(text: Ref<string>, field: Ref<Field | null>, makeD
     });
   }
 
-  const ctl = new VoiceController(state, makeDeps(render));
+  const ctl = new VoiceController(state, makeDeps(render, () => config.data.value?.transport ?? "relay"));
   const active = computed(() => state.phase === "connecting" || state.phase === "recording" || state.phase === "stopping");
 
   function syncPrefs() {
@@ -101,8 +105,10 @@ export function useVoiceInput(text: Ref<string>, field: Ref<Field | null>, makeD
     });
   }
 
+  /** Start, or end whatever is going on: cancel while connecting, stop while recording, stop waiting while stopping. */
   function toggle() {
-    if (active.value) void ctl.stop();
+    if (state.phase === "stopping") ctl.hurry();
+    else if (active.value) void ctl.stop();
     else start();
   }
 

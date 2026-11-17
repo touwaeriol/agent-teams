@@ -11,12 +11,12 @@ import Field from "@/components/common/Field.vue";
 import Loading from "@/components/common/Loading.vue";
 
 const saved = useVoiceAdmin();
-const form = reactive({ enabled: false, model: "", base_url: "", noise_reduction: "near_field", delay: "", api_key: "" });
+const form = reactive({ enabled: false, model: "", base_url: "", noise_reduction: "near_field", delay: "", transport: "relay", api_key: "" });
 const result = ref<{ ok: boolean; text: string } | null>(null);
 
 function load(v: VoiceAdmin | undefined) {
   if (!v) return;
-  Object.assign(form, { enabled: v.enabled, model: v.model, base_url: v.base_url, noise_reduction: v.noise_reduction, delay: v.delay, api_key: "" });
+  Object.assign(form, { enabled: v.enabled, model: v.model, base_url: v.base_url, noise_reduction: v.noise_reduction, delay: v.delay, transport: v.transport || "relay", api_key: "" });
 }
 watch(() => saved.data.value, load, { immediate: true });
 
@@ -31,6 +31,7 @@ const body = (patch: Partial<VoiceAdminInput> = {}): VoiceAdminInput => ({
   base_url: form.base_url.trim(),
   noise_reduction: form.noise_reduction as VoiceAdminInput["noise_reduction"],
   delay: (isWhisper.value ? form.delay : "") as VoiceAdminInput["delay"],
+  transport: form.transport as VoiceAdminInput["transport"],
   ...(form.api_key.trim() ? { api_key: form.api_key.trim() } : {}),
   ...patch,
 });
@@ -53,7 +54,7 @@ watch(() => [form.api_key, form.model, form.base_url], () => (result.value = nul
     <div class="flex flex-wrap items-start justify-between gap-3">
       <span class="flex flex-col gap-0.5">
         <span class="font-semibold">语音输入</span>
-        <span class="text-xs text-muted-foreground">开启后，所有用户的输入框旁都有麦克风按钮，说话实时转成文字。声音由浏览器直接发给 OpenAI，不经过本平台。</span>
+        <span class="text-xs text-muted-foreground">开启后，所有用户的输入框旁都有麦克风按钮，说话实时转成文字。声音经本平台服务器转发给 OpenAI，API Key 只在服务器上。</span>
       </span>
       <label class="flex items-center gap-2.5 text-[13px]">
         <el-switch v-model="form.enabled" aria-label="启用语音输入" />
@@ -70,8 +71,14 @@ watch(() => [form.api_key, form.model, form.base_url], () => (result.value = nul
       <Field v-slot="{ id }" label="模型" :hint="`默认 ${v.default_model}（OpenAI 的实时语音转写模型）`">
         <el-input :id="id" v-model="form.model" :placeholder="v.default_model" />
       </Field>
-      <Field v-slot="{ id }" label="接口地址（可选）" hint="留空用 https://api.openai.com/v1；浏览器也会连这个地址。改地址时要重新填写 API Key。">
+      <Field v-slot="{ id }" label="接口地址（可选）" :hint="`留空用 https://api.openai.com/v1${form.transport === 'webrtc' ? '；浏览器也会连这个地址' : ''}。改地址时要重新填写 API Key。`">
         <el-input :id="id" v-model="form.base_url" placeholder="https://api.openai.com/v1" />
+      </Field>
+      <Field v-slot="{ id }" label="连接方式" hint="直连时声音不经过本平台，但用户的浏览器连不上 OpenAI 时麦克风用不了。">
+        <el-select :id="id" v-model="form.transport" data-testid="voice-transport">
+          <el-option value="relay" label="经服务器中转（默认）" />
+          <el-option value="webrtc" label="浏览器直连 OpenAI（更低延迟，需要浏览器能访问 api.openai.com）" />
+        </el-select>
       </Field>
       <Field v-slot="{ id }" label="降噪">
         <el-select :id="id" v-model="form.noise_reduction">

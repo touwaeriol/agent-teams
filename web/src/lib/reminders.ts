@@ -34,7 +34,7 @@ function announce(t: ThreadView, open: (no: number) => void) {
   const title = `提醒：#${t.no} ${t.title}`;
   if (hasNotifications() && Notification.permission === "granted") {
     try {
-      const n = new Notification(title, { body: "你设置的提醒到了，讨论串已回到“进行中”。", tag: `reminder-${t.id}` });
+      const n = new Notification(title, { body: "你设置的提醒到了，讨论串已移到“等你处理”。", tag: `reminder-${t.id}` });
       n.onclick = () => {
         window.focus();
         open(t.no);

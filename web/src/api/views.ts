@@ -132,7 +132,7 @@ export interface ThreadView {
   pinned_at?: string | null;
   /** When the reminder the user set will fire (null: none pending). */
   remind_at?: string | null;
-  /** When a reminder fired; the thread waits on the user (进行中, first, orange mark) until it is cleared. */
+  /** When a reminder fired; the thread waits on the user (等你处理) until it is cleared. */
   reminded_at?: string | null;
 }
 

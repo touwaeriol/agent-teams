@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // The thread ⋯ menu (Claude-app layout): what it offers per status, pin / reminder / feedback
 // through the API, 上一个 / 下一个 in list order, the keyboard shortcuts, and the list helpers
-// behind them (pin order, fired reminders back in 进行中, reminder times and presets).
+// behind them (pin order, reminders under 等你处理, reminder times and presets).
 import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -192,8 +192,8 @@ describe("list order, pins and reminders", () => {
     ];
     expect(groupThreads(list)[0].items.map((t) => t.no)).toEqual([4, 2, 3, 1]);
   });
-  it("a fired reminder brings a thread back to 进行中, unless archived", () => {
-    expect(listGroupOf(thread(1, { status: "done", reminded_at: at(0) }))).toBe("active");
+  it("a fired reminder puts a thread under 等你处理, unless archived", () => {
+    expect(listGroupOf(thread(1, { status: "done", reminded_at: at(0) }))).toBe("waiting");
     expect(listGroupOf(thread(1, { status: "archived", reminded_at: at(0) }))).toBe("archived");
   });
   it("prev / next follow the shown list: groups, filters, folds; no wrapping", () => {
@@ -204,15 +204,15 @@ describe("list order, pins and reminders", () => {
       thread(4, { status: "paused", updated_at: at(4) }),
     ];
     const order = listOrder(list, 4, NO_FILTER);
-    expect(order).toEqual([2, 3, 1, 4]);
-    expect(neighbours(order, 2)).toEqual({ prev: null, next: 3 });
-    expect(neighbours(order, 4)).toEqual({ prev: 1, next: null });
-    expect(listOrder(list, 4, { ...NO_FILTER, groups: ["done", "paused"] })).toEqual([3, 1, 4]);
+    expect(order).toEqual([2, 4, 3, 1]);
+    expect(neighbours(order, 2)).toEqual({ prev: null, next: 4 });
+    expect(neighbours(order, 1)).toEqual({ prev: 3, next: null });
+    expect(listOrder(list, 4, { ...NO_FILTER, groups: ["done", "idle"] })).toEqual([4, 3, 1]);
     expect(listOrder(list, 4, NO_FILTER, undefined, { done: true })).toEqual([2, 4]);
-    expect(listOrder(list, 3, NO_FILTER, undefined, { done: true })).toEqual([2, 3, 1, 4]); // the open one is folded away
-    expect(listOrder(list, 1, { ...NO_FILTER, q: "T4" })).toEqual([2, 3, 1, 4]); // filtered out: whole list
+    expect(listOrder(list, 3, NO_FILTER, undefined, { done: true })).toEqual([2, 4, 3, 1]); // the open one is folded away
+    expect(listOrder(list, 1, { ...NO_FILTER, q: "T4" })).toEqual([2, 4, 3, 1]); // filtered out: whole list
     expect(threadNav([2, 4, 3], 4, (n) => `/t/${n}`)).toEqual({ prev: "/t/2", next: "/t/3" });
-    expect(visibleOrder(list, NO_FILTER)).toEqual([2, 3, 1, 4]); // Alt+↓ from the list opens 2, Alt+↑ opens 4
+    expect(visibleOrder(list, NO_FILTER)).toEqual([2, 4, 3, 1]); // Alt+↓ from the list opens 2, Alt+↑ opens 1
     expect(visibleOrder(list, NO_FILTER, undefined, { done: true })).toEqual([2, 4]);
   });
   it("reminder labels and presets in local time", () => {

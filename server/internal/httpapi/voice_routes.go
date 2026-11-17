@@ -14,7 +14,8 @@ import (
 )
 
 // Voice input: the admin configures an OpenAI key once (sealed, write-only); every signed-in user
-// gets short-lived client secrets and talks to OpenAI from the browser. No audio reaches us.
+// streams audio through the server relay (voice_stream.go, the default) or, in the optional
+// direct mode, gets short-lived client secrets and talks to OpenAI from the browser (WebRTC).
 
 const voiceSettingKey = "voice"
 
@@ -26,6 +27,7 @@ type VoiceAdmin struct {
 	BaseURL        string    `json:"base_url" doc:"Empty = https://api.openai.com/v1"`
 	NoiseReduction string    `json:"noise_reduction" enum:"near_field,far_field,off"`
 	Delay          string    `json:"delay" enum:",minimal,low,medium,high,xhigh" doc:"gpt-realtime-whisper only; empty = OpenAI's default"`
+	Transport      string    `json:"transport" enum:"relay,webrtc" doc:"relay = audio through this server (default); webrtc = browser straight to OpenAI"`
 	KeySet         bool      `json:"key_set"`
 	KeyLast4       string    `json:"key_last4"`
 	Usable         bool      `json:"usable" doc:"Enabled, a key is saved and the server can unseal it"`
@@ -40,6 +42,7 @@ type VoiceAdminInput struct {
 	BaseURL        string `json:"base_url,omitempty" maxLength:"300"`
 	NoiseReduction string `json:"noise_reduction,omitempty" enum:"near_field,far_field,off"`
 	Delay          string `json:"delay,omitempty" enum:",minimal,low,medium,high,xhigh"`
+	Transport      string `json:"transport,omitempty" enum:"relay,webrtc" doc:"Empty = relay"`
 	APIKey         string `json:"api_key,omitempty" maxLength:"500" doc:"New key; omit to keep the saved one"`
 	ClearKey       bool   `json:"clear_key,omitempty"`
 }
@@ -68,6 +71,7 @@ type voiceTestOutput struct {
 type VoiceConfig struct {
 	Enabled   bool             `json:"enabled"`
 	Provider  string           `json:"provider,omitempty"`
+	Transport string           `json:"transport,omitempty" enum:"relay,webrtc" doc:"relay: stream to GET /api/voice/stream; webrtc: POST /api/voice/session then connect to OpenAI"`
 	Languages []voice.Language `json:"languages"`
 }
 
@@ -118,7 +122,7 @@ func (s *Server) voiceUsable(v voice.Settings) bool {
 
 func (s *Server) voiceAdminView(v voice.Settings) VoiceAdmin {
 	return VoiceAdmin{Enabled: v.Enabled, Provider: v.Provider, Model: v.Model, BaseURL: v.BaseURL, NoiseReduction: v.NoiseReduction,
-		Delay: v.Delay, KeySet: v.SealedKey != "", KeyLast4: v.KeyLast4, Usable: s.voiceUsable(v), DefaultModel: voice.DefaultModel, UpdatedAt: v.UpdatedAt}
+		Delay: v.Delay, Transport: v.Transport, KeySet: v.SealedKey != "", KeyLast4: v.KeyLast4, Usable: s.voiceUsable(v), DefaultModel: voice.DefaultModel, UpdatedAt: v.UpdatedAt}
 }
 
 func (s *Server) adminGetVoice(ctx context.Context, _ *struct{}) (*voiceAdminOutput, error) {
@@ -153,6 +157,7 @@ func (s *Server) adminSaveVoice(ctx context.Context, in *voiceAdminSaveInput) (*
 		return nil, err
 	}
 	v.Enabled, v.Model, v.BaseURL, v.NoiseReduction, v.Delay = b.Enabled, strings.TrimSpace(b.Model), b.BaseURL, b.NoiseReduction, b.Delay
+	v.Transport = b.Transport
 	v = v.WithDefaults()
 	if v.Enabled && v.SealedKey == "" {
 		return nil, invalid([]FieldError{{"api_key", "先填 API Key 再启用"}}, "先填 API Key 再启用")
@@ -162,7 +167,7 @@ func (s *Server) adminSaveVoice(ctx context.Context, in *voiceAdminSaveInput) (*
 		return nil, err
 	}
 	s.audit(ctx, admin.User.ID, "voice_settings_change", "settings", voiceSettingKey,
-		map[string]any{"enabled": v.Enabled, "model": v.Model, "key_changed": keyChanged})
+		map[string]any{"enabled": v.Enabled, "model": v.Model, "transport": v.Transport, "key_changed": keyChanged})
 	return &voiceAdminOutput{Body: s.voiceAdminView(v)}, nil
 }
 
@@ -251,7 +256,7 @@ func (s *Server) voiceConfig(ctx context.Context, _ *struct{}) (*voiceConfigOutp
 	if !s.voiceUsable(v) {
 		return &voiceConfigOutput{Body: VoiceConfig{Languages: []voice.Language{}}}, nil
 	}
-	return &voiceConfigOutput{Body: VoiceConfig{Enabled: true, Provider: v.Provider, Languages: slices.Clone(voice.Languages)}}, nil
+	return &voiceConfigOutput{Body: VoiceConfig{Enabled: true, Provider: v.Provider, Transport: v.Transport, Languages: slices.Clone(voice.Languages)}}, nil
 }
 
 func (s *Server) voiceSession(ctx context.Context, in *voiceSessionInput) (*voiceSessionOutput, error) {
