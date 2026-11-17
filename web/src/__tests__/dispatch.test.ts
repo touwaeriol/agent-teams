@@ -33,9 +33,9 @@ const dispatch = (patch: Partial<ThreadDispatch> = {}): ThreadDispatch => ({
   ...patch,
 });
 const source = {
-  message_id: "41",
+  message_id: 41,
   content: "登录页太亮了，照这张图改",
-  attachments: [{ id: "att1", name: "截图.png", content_type: "image/png" as const, size: 10, sha256: "", created_at: "", url: "/api/attachments/att1" }],
+  attachments: [{ id: "att1", name: "截图.png", content_type: "image/png", size: 10 }],
   created_at: "2026-11-17T09:59:00Z",
 };
 

@@ -92,7 +92,7 @@ export const threads = [
       brief: "## 目标\n\n让 **Codex 员工**能像 Claude 员工一样领任务、汇报和提问。\n\n## 要做\n\n1. 节点上实现 `CodexWorker`：启动、事件流解析、中断与恢复\n2. 员工配置里可以选 `codex`，模型列表跟随用户配置\n3. 提问 / 审批卡片在网页上能点，结果回传给 Codex\n4. 节点安装脚本检测并安装 codex CLI\n\n## 验收\n\n- 在 cvp 节点上用 Codex 员工跑通一个小任务\n- `go test ./...` 与 web 测试全部通过",
       opened_by: "coordinator",
       at: ago(66),
-      source: { message_id: "1", content: "员工之间要能互相沟通，审批卡片要能在网页上点。另外 Codex 员工也接上。", attachments: [{ id: "img_seed", name: "截图.png", content_type: "image/svg+xml", size: 0, sha256: "", created_at: ago(75), url: "/api/attachments/img_seed" }], created_at: ago(75) },
+      source: { message_id: 1, content: "员工之间要能互相沟通，审批卡片要能在网页上点。另外 Codex 员工也接上。", attachments: [{ id: "img_seed", name: "截图.png", content_type: "image/svg+xml", size: 0 }], created_at: ago(75) },
     },
   }),
   thread(12, "员工通信与审批", "running", {

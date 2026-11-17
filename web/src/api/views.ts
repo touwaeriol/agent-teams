@@ -153,9 +153,10 @@ export interface ThreadDispatch {
 }
 
 export interface DispatchSource {
-  message_id: string;
+  message_id: number;
   content: string;
-  attachments: AttachmentView[];
+  /** Same shape as meta.attachments; always an array (maybe empty). */
+  attachments: AttachmentRef[];
   created_at: string;
 }
 
