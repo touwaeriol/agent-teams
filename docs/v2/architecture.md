@@ -184,6 +184,8 @@ Go 写的控制台（REST + SSE + 节点 WebSocket + 调度器）存全部状态
 
 ### 6.1 三层角色到会话的映射
 
+> 计划改为项目级共享成员和项目级任务队列，见 [shared-members.md](shared-members.md)（设计稿，未实现）。下面描述的是当前实现。
+
 | 层级 | 每个… | 会话类型 | 工作目录 | 内置工具 | 权限 | 平台工具集 |
 | --- | --- | --- | --- | --- | --- | --- |
 | 项目统筹（coordinator） | 项目 1 个 | Claude，常驻 | `projects/<pid>/coordinator`（空目录，不克隆） | `tools: []`（一个内置工具都没有） | `permissionMode:'dontAsk'` + PreToolUse 钩子只放行 `mcp__platform__*` | coordinator |
@@ -324,6 +326,8 @@ queued ──开工──► running ◄──► waiting（有等你处理的�
 - 主任务下全部小任务 `done` → 主任务自动 `done`（组长也可手动改）。
 
 ### 7.3 任务池调度
+
+> 计划改为项目级共享成员和项目级任务队列，见 [shared-members.md](shared-members.md)（设计稿，未实现）。下面描述的是当前实现。
 
 - 触发：任务新建 / 状态变化、员工会话变空闲（turn 结束且无运行中任务）、节点上线、定时（每 10 s 兜底）。触发写 Valkey 频道 `sched:<thread>`，调度循环（advisory lock 选主）消费。
 - 领取：一个 SQL 事务里 `SELECT … FROM at_tasks WHERE thread_id=$1 AND status='pending' AND role=$2 AND deps_satisfied ORDER BY priority, created_at FOR UPDATE SKIP LOCKED LIMIT 1`，配上“该岗位空闲实例”`SELECT … FROM at_employees WHERE … AND NOT EXISTS (running task) FOR UPDATE SKIP LOCKED`，一起改成 `claimed`。
