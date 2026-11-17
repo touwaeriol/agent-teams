@@ -61,7 +61,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey, true));
 </script>
 
 <template>
-  <header v-if="!sheet" class="flex h-14 shrink-0 items-center gap-0.5 pl-5 pr-2.5">
+  <header v-if="!sheet" class="flex h-12 shrink-0 items-center gap-0.5 border-b border-[#EFEDE8] pl-5 pr-2.5 dark:border-border">
     <nav aria-label="位置" class="flex-1 font-semibold">讨论串</nav>
     <IconButton label="搜索讨论串" :active="view.searching" @click="toggleSearch"><Search :stroke-width="1.8" /></IconButton>
     <el-popover trigger="click" placement="bottom-end" :width="220" :show-arrow="false" popper-class="!p-3">
@@ -87,7 +87,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey, true));
     </IconButton>
     <IconButton label="关闭" @click="close"><X :stroke-width="1.8" /></IconButton>
   </header>
-  <div v-if="view.searching" class="shrink-0 px-4 pb-1">
+  <div v-if="view.searching" class="shrink-0 border-b border-[#EFEDE8] px-4 py-2">
     <el-input v-model="view.q" size="small" placeholder="搜索标题、编号或进展" clearable autofocus aria-label="搜索讨论串" @keydown.esc="toggleSearch">
       <template #prefix><Search class="size-3.5" /></template>
     </el-input>

@@ -32,6 +32,22 @@ describe("listGroupOf", () => {
     expect(listGroupOf(thread(1, { members: [member("idle")] }))).toBe("active");
     expect(listGroupOf(thread(1, { counts: counts({ approvals_open: 1, waiting: 1 }) }))).toBe("active");
   });
+  it("archived stays 已归档 even with something open for the user", () => {
+    expect(listGroupOf(thread(1, { status: "archived", counts: counts({ waiting: 2, approvals_open: 2 }) }))).toBe("archived");
+    expect(threadMark(thread(1, { status: "archived", counts: counts({ waiting: 2 }) }))).toBe("archived");
+  });
+  it("a fired reminder brings a done thread back to 进行中, ahead of newer work that does not wait on the user", () => {
+    const groups = groupThreads([
+      thread(1, { members: [member("typing")], last_activity_at: "2026-11-16T12:00:00Z" }),
+      thread(2, { status: "done", reminded_at: "2026-11-16T09:00:00Z", last_activity_at: "2026-11-10T00:00:00Z" }),
+      thread(3, { status: "done", last_activity_at: "2026-11-16T00:00:00Z" }),
+    ]);
+    expect(groups.map((g) => [g.id, g.items.map((t) => t.no)])).toEqual([
+      ["active", [2, 1]],
+      ["done", [3]],
+    ]);
+    expect(threadMark(thread(2, { status: "done", reminded_at: "2026-11-16T09:00:00Z" }))).toBe("wait");
+  });
   it("done is 已解决, failed 失败, paused 已暂停, archived 已归档", () => {
     expect(listGroupOf(thread(1, { status: "done" }))).toBe("done");
     expect(listGroupOf(thread(1, { status: "failed" }))).toBe("failed");

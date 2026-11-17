@@ -6,7 +6,7 @@
 import { ChevronDown } from "lucide-vue-next";
 import { computed, onBeforeUnmount, ref } from "vue";
 import type { QuestionView, ThreadView } from "@/api/views";
-import { filterThreads, groupThreads, isCompactGroup, NO_FILTER, rowLine, threadMark, type Folded, type ListFilter, type ListGroupId } from "@/lib/threadList";
+import { filterThreads, groupThreads, isCompactGroup, NO_FILTER, rowLine, threadMark, waitsOnUser, type Folded, type ListFilter, type ListGroupId } from "@/lib/threadList";
 import ThreadRow from "./ThreadRow.vue";
 
 const props = withDefaults(
@@ -47,6 +47,7 @@ onBeforeUnmount(() => clearInterval(tick));
           :now="now"
           :menu="menus"
           :compact="isCompactGroup(g.id)"
+          :waits="g.id !== 'active' && g.id !== 'archived' && waitsOnUser(t, waitingByThread)"
           @open="(no) => emit('open', no)"
         />
       </template>

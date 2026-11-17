@@ -9,6 +9,7 @@ import { Bell, GitPullRequest, ListChecks, Package, Pin } from "lucide-vue-next"
 import { computed, ref } from "vue";
 import { RouterLink } from "vue-router";
 import type { ThreadView } from "@/api/views";
+import { INK } from "@/lib/present";
 import { cn } from "@/lib/utils";
 import { shortAgo } from "@/lib/relativeTime";
 import { deliverableCount, lastActivity, mainProgress, reminderLabel, type RowMark } from "@/lib/threadList";
@@ -17,7 +18,8 @@ import TitleEdit from "./thread/TitleEdit.vue";
 import ThreadMenu from "./ThreadMenu.vue";
 import ThreadStatusIcon from "./ThreadStatusIcon.vue";
 
-const props = defineProps<{ thread: ThreadView; line: string; menu: boolean; mark: RowMark; now: number; compact?: boolean }>();
+/** `waits`: a settled row (已解决 / 已暂停 / 失败) that still has a card or approval open for the user: a small orange dot at the end. */
+const props = defineProps<{ thread: ThreadView; line: string; menu: boolean; mark: RowMark; now: number; compact?: boolean; waits?: boolean }>();
 const emit = defineEmits<{ open: [no: number] }>();
 const at = computed(() => lastActivity(props.thread));
 const ago = computed(() => shortAgo(at.value, props.now));
@@ -64,6 +66,7 @@ const TAG = "inline-flex h-5 items-center gap-1 rounded-md border bg-panel px-1.
       </button>
       <span :class="cn('relative flex shrink-0 items-center justify-end gap-2 pr-2', compact ? 'h-8 min-w-12' : 'h-9 min-w-14')">
         <span class="flex items-center gap-2 group-focus-within:invisible group-hover:invisible">
+          <span v-if="waits" class="size-1.5 shrink-0 rounded-full" :style="{ background: INK.wait }" role="img" aria-label="等你处理" title="等你处理" data-waits="" />
           <NodeStatus v-if="!compact" :thread="thread" :size="13" />
           <time :datetime="at" :title="new Date(at).toLocaleString('zh-CN')" class="text-xs text-muted-foreground">{{ ago }}</time>
         </span>
