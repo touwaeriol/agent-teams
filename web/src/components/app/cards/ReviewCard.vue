@@ -4,10 +4,11 @@
  * Accepting is asynchronous: the server answers at once with pr_state "accepting" and merges in the
  * background; live thread events bring "merged" or pr_state back to "open" with merge_error. The card
  * switches to 合并中 the moment the button is pressed (optimistic cache update, rolled back if the
- * request itself fails) and stays locked while pr_state is "accepting".
+ * request itself fails) and the button stays locked while pr_state is "accepting". 提修改意见 stays
+ * open then: rejecting withdraws an accept that waits on long checks.
  */
 import { useMutation, useQueryClient } from "@tanstack/vue-query";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { threads as threadActions } from "@/api/actions";
 import { patchThread } from "@/api/events";
 import { errorText, useAction } from "@/api/mutations";
@@ -39,12 +40,14 @@ const accept = useMutation<ThreadView, Error, void, Before>({
   onMutate: async () => {
     const before: Before = { pr_state: props.thread.pr_state, merge_error: props.thread.merge_error ?? null };
     // A refetch already on its way would land the old state over the optimistic one.
-    await Promise.all(invalidate().slice(0, 2).map((queryKey) => client.cancelQueries({ queryKey })));
+    await client.cancelQueries({ queryKey: keys.threads(props.thread.project_id) });
+    await client.cancelQueries({ queryKey: keys.thread(props.thread.id) });
     patch((t) => ({ ...t, pr_state: "accepting", merge_error: null }));
     return before;
   },
   onSuccess: (view) => {
-    if (view && typeof view === "object") patch((t) => ({ ...t, ...view }));
+    // A live event that came first (merged, or failed back to open) wins over this older answer.
+    if (view && typeof view === "object") patch((t) => (t.pr_state === "accepting" ? { ...t, ...view } : t));
     toast.success("已开始合并，完成后讨论串会自动更新");
   },
   onError: (e, _vars, before) => {
@@ -57,6 +60,14 @@ const accept = useMutation<ThreadView, Error, void, Before>({
     refresh();
   },
 });
+// The api client has no request timeout: when live events end the merge (open with merge_error, or
+// merged) the lock goes too, so a hung request cannot keep the card locked.
+watch(
+  () => props.thread.pr_state,
+  (now, was) => {
+    if (was === "accepting" && now !== "accepting") accepting.value = false;
+  },
+);
 function startAccept() {
   if (accepting.value || merging.value) return;
   accepting.value = true;
@@ -70,7 +81,7 @@ const reject = useAction((reason: string) => threadActions.reject(props.thread.i
   onSuccess: () => (rejecting.value = false),
 });
 function sendReject(reason: string) {
-  if (!reason || sending.value || merging.value) return;
+  if (!reason || sending.value || accepting.value) return;
   sending.value = true;
   reject.mutate(reason, { onSettled: () => (sending.value = false) });
 }
@@ -88,16 +99,16 @@ const label = computed(() => (merging.value ? "合并中" : mergeError.value ? "
   <CardFrame :variant="variant" :code="code" :label="label">
     <template #head>
       <span v-if="merging" class="inline-flex items-center gap-1.5">
-        {{ subject }} <span class="inline-flex items-center gap-1" :style="{ color: INK.merge }"><Spinner class="size-3" />合并中…</span>
+        {{ subject }} <span class="inline-flex items-center gap-1" :style="{ color: INK.merge }"><Spinner class="size-3" decorative />合并中…</span>
       </span>
       <span v-else-if="mergeError">{{ subject }} <span class="text-destructive">合并失败</span> · <span class="text-[#B4530B]">等你处理</span></span>
       <span v-else>{{ subject }} 等你验收 · <span class="text-[#B4530B]">等你处理</span></span>
     </template>
     <p v-if="thread.summary" class="text-xs leading-5 text-[#4A4843]">{{ thread.summary }}</p>
     <p v-if="merging" class="text-xs leading-5 text-muted-foreground">平台正在检查并合并，可以先去做别的，完成后这里会自动更新。</p>
-    <p v-else-if="mergeError" role="alert" class="rounded-lg border border-[#EBC3C3] bg-white px-2.5 py-2 text-xs leading-5 text-destructive">合并没有成功：{{ mergeError }}</p>
+    <p v-else-if="mergeError" role="alert" class="rounded-lg border border-[#EBC3C3] bg-white px-2.5 py-2 text-xs leading-5 text-destructive">{{ mergeError }}</p>
     <ReasonBox
-      v-if="rejecting && !merging"
+      v-if="rejecting"
       placeholder="哪里要改？会发给组长"
       confirm="发给组长"
       required
@@ -107,7 +118,7 @@ const label = computed(() => (merging.value ? "合并中" : mergeError.value ? "
     />
     <CardActions v-else :variant="variant" :count="2">
       <CardButton kind="primary" :variant="variant" :busy="merging" @click="startAccept">{{ merging ? "合并中…" : mergeError ? "重试合并" : "验收通过并合并" }}</CardButton>
-      <CardButton kind="outline" :variant="variant" :disabled="merging" @click="rejecting = true">提修改意见</CardButton>
+      <CardButton kind="outline" :variant="variant" :disabled="accepting" @click="rejecting = true">提修改意见</CardButton>
       <template v-if="variant !== 'mobile'">
         <a
           v-for="pr in prs"

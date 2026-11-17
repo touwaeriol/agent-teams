@@ -23,7 +23,7 @@ const submit = () => !blocked.value && emit("submit", text.value.trim());
     />
     <span class="flex gap-2">
       <button type="submit" :disabled="blocked" class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-[13px] text-primary-foreground disabled:opacity-60">
-        <Spinner v-if="busy" class="size-3.5" />{{ confirm }}
+        <Spinner v-if="busy" class="size-3.5" decorative />{{ confirm }}
       </button>
       <button type="button" :disabled="busy" class="h-8 rounded-lg border border-input bg-white px-3 text-[13px] disabled:opacity-60" @click="emit('cancel')">取消</button>
     </span>

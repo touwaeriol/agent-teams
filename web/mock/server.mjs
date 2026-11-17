@@ -404,7 +404,7 @@ const routes = [
     if (op === "reject") Object.assign(t, { status: "running", merge_error: null });
     if (op === "open-pr") Object.assign(t, { status: "review", pr_number: 42, pr_url: "https://github.com/touwaeriol/agent-teams/pull/42" });
     emit("thread", { thread: threadOut(t) });
-    json(res, op === "accept" ? 202 : 200, threadOut(t));
+    json(res, 200, threadOut(t));
   }],
   ["GET", /^\/api\/nodes$/, (req, res) => json(res, 200, state.nodes)],
   ["POST", /^\/api\/nodes$/, async (req, res) => {

@@ -19,7 +19,7 @@ const click = () => !props.busy && !props.disabled && emit("click");
     :class="cn('inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 text-[13px] disabled:opacity-60', variant === 'mobile' ? 'h-11 rounded-[10px] text-sm' : 'h-8', LOOK[kind])"
     @click="click"
   >
-    <Spinner v-if="busy" class="size-3.5" />
+    <Spinner v-if="busy" class="size-3.5" decorative />
     <slot />
   </button>
 </template>

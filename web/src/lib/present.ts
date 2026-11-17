@@ -61,6 +61,9 @@ export function markTone(t: Pick<ThreadView, "status" | "counts">): string {
   return THREAD_LOOK[kind].tone;
 }
 
+/** The acceptance card shows while the thread is in review (pr_state accepting keeps status review). */
+export const showReviewCard = (t: Pick<ThreadView, "status">): boolean => t.status === "review";
+
 /** One line under a thread title: what is waiting, else the PR, else what the lead said last. */
 export function threadLine(t: ThreadView, open?: QuestionView): string {
   if (open) return questionLine(open);

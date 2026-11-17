@@ -8,7 +8,7 @@ import { defineComponent, h } from "vue";
 import { keys } from "@/api/queries";
 import type { ThreadView } from "@/api/views";
 import ReviewCard from "@/components/app/cards/ReviewCard.vue";
-import { threadLine } from "@/lib/present";
+import { showReviewCard, threadLine } from "@/lib/present";
 import { thread } from "./fixtures";
 
 const api = vi.hoisted(() => ({ accept: vi.fn(), reject: vi.fn() }));
@@ -28,17 +28,29 @@ function setup(patch: Partial<ThreadView> = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   const t = thread(12, { status: "review", pr_number: 7, pr_url: "https://github.com/o/r/pull/7", pr_state: "open", ...patch });
   // What a refetch of the list returns (the server's view).
-  const server = { thread: t };
+  const server: { thread: ThreadView; hold?: boolean } = { thread: t };
   qc.setQueryData(keys.threads("p1"), [t]);
   const Host = defineComponent(() => {
-    const list = useQuery({ queryKey: keys.threads("p1"), queryFn: async () => [server.thread] });
+    const list = useQuery({ queryKey: keys.threads("p1"), queryFn: () => (server.hold ? new Promise<ThreadView[]>(() => {}) : Promise.resolve([server.thread])) });
     return () => (list.data.value?.[0] ? h(ReviewCard, { thread: list.data.value[0] }) : null);
   });
-  const wrapper = mount(Host, { global: { plugins: [[VueQueryPlugin, { queryClient: qc }]] as never[] } });
+  const mountHost = () => mount(Host, { global: { plugins: [[VueQueryPlugin, { queryClient: qc }]] as never[] } });
+  const ctx = { wrapper: mountHost() };
   const cached = () => qc.getQueryData<ThreadView[]>(keys.threads("p1"))![0];
-  const primary = () => wrapper.findAll("button")[0];
-  const outline = () => wrapper.findAll("button")[1];
-  return { qc, server, wrapper, cached, primary, outline };
+  /** What a live thread event does to the caches. */
+  const event = (p: Partial<ThreadView>) => qc.setQueryData<ThreadView[]>(keys.threads("p1"), (l) => l!.map((x) => ({ ...x, ...p })));
+  const primary = () => ctx.wrapper.findAll("button")[0];
+  const outline = () => ctx.wrapper.findAll("button")[1];
+  const remount = () => {
+    ctx.wrapper.unmount();
+    ctx.wrapper = mountHost();
+  };
+  return {
+    qc, server, cached, event, primary, outline, remount,
+    get wrapper() {
+      return ctx.wrapper;
+    },
+  };
 }
 
 beforeEach(() => {
@@ -60,8 +72,10 @@ describe("ReviewCard accept", () => {
     await primary().trigger("click");
     expect(api.accept).toHaveBeenCalledTimes(1);
     expect(primary().attributes("disabled")).toBeDefined();
-    expect(primary().find('[role="status"]').exists()).toBe(true);
-    expect(primary().text()).toContain("合并中");
+    expect(primary().attributes("aria-busy")).toBe("true");
+    // The spinner is decorative: no status region, no "加载中" in the accessible name.
+    expect(primary().find("span").attributes("aria-hidden")).toBe("true");
+    expect(primary().text()).toBe("合并中…");
     expect(outline().attributes("disabled")).toBeDefined();
     server.thread = thread(12, { status: "review", pr_number: 7, pr_state: "accepting" });
     d.resolve(server.thread);
@@ -98,15 +112,20 @@ describe("ReviewCard accept", () => {
     expect(wrapper.find("section").attributes("aria-label")).toBe("合并失败");
   });
 
-  it("is locked while the server reports accepting", async () => {
-    const { wrapper, primary, outline } = setup({ pr_state: "accepting" });
-    expect(primary().attributes("disabled")).toBeDefined();
-    expect(outline().attributes("disabled")).toBeDefined();
-    expect(wrapper.text()).toContain("合并中");
-    await primary().trigger("click");
-    await outline().trigger("click");
+  it("locks the merge button while the server reports accepting, but a change request can withdraw it", async () => {
+    api.reject.mockResolvedValue({});
+    const s = setup({ pr_state: "accepting" });
+    expect(s.primary().attributes("disabled")).toBeDefined();
+    expect(s.wrapper.text()).toContain("合并中");
+    expect(s.wrapper.findAll('[role="status"]')).toHaveLength(0);
+    await s.primary().trigger("click");
     expect(api.accept).not.toHaveBeenCalled();
-    expect(wrapper.find("textarea").exists()).toBe(false);
+    expect(s.outline().attributes("disabled")).toBeUndefined();
+    await s.outline().trigger("click");
+    await s.wrapper.find("textarea").setValue("先别合，标题要改");
+    await s.wrapper.find("form").trigger("submit");
+    await flushPromises();
+    expect(api.reject).toHaveBeenCalledWith("t12", "先别合，标题要改");
   });
 
   it("shows the merge error and retries", async () => {
@@ -121,12 +140,73 @@ describe("ReviewCard accept", () => {
     expect(api.accept).toHaveBeenCalledTimes(1);
   });
 
-  it("follows live events: merged elsewhere, then failed", async () => {
-    const { qc, wrapper, primary } = setup({ pr_state: "accepting" });
-    qc.setQueryData<ThreadView[]>(keys.threads("p1"), (l) => l!.map((t) => ({ ...t, pr_state: "open", merge_error: "权限不足" })));
+  it("follows a live failure event: shows the reason and offers a retry", async () => {
+    const s = setup({ pr_state: "accepting" });
+    s.event({ pr_state: "open", merge_error: "权限不足" });
     await flushPromises();
-    expect(primary().text()).toBe("重试合并");
-    expect(wrapper.find('[role="alert"]').text()).toContain("权限不足");
+    expect(s.primary().text()).toBe("重试合并");
+    expect(s.wrapper.find('[role="alert"]').text()).toContain("权限不足");
+  });
+
+  it("does not roll back when a live event already merged the thread", async () => {
+    const d = deferred<ThreadView>();
+    api.accept.mockReturnValue(d.promise);
+    const s = setup();
+    await s.primary().trigger("click");
+    await flushPromises();
+    s.server.thread = { ...s.cached(), status: "done", pr_state: "merged" };
+    s.event({ status: "done", pr_state: "merged" });
+    d.reject(new Error("网关超时"));
+    await flushPromises();
+    expect(s.cached()).toMatchObject({ status: "done", pr_state: "merged" });
+  });
+
+  it("keeps a live event that came before the response", async () => {
+    const d = deferred<ThreadView>();
+    api.accept.mockReturnValue(d.promise);
+    const s = setup();
+    await s.primary().trigger("click");
+    await flushPromises();
+    s.server.hold = true; // no refetch to paper over a stale write: only the onSuccess guard keeps the event
+    s.event({ pr_state: "open", merge_error: "有冲突" });
+    d.resolve({ ...s.cached(), pr_state: "accepting", merge_error: null });
+    await flushPromises();
+    expect(s.cached()).toMatchObject({ pr_state: "open", merge_error: "有冲突" });
+    expect(s.primary().text()).toBe("重试合并");
+  });
+
+  it("releases the lock when live events end the merge while the request hangs", async () => {
+    api.accept.mockReturnValue(new Promise(() => {}));
+    const s = setup();
+    await s.primary().trigger("click");
+    await flushPromises();
+    expect(s.outline().attributes("disabled")).toBeDefined();
+    s.event({ pr_state: "open", merge_error: "检查未通过" });
+    await flushPromises();
+    expect(s.primary().text()).toBe("重试合并");
+    expect(s.primary().attributes("disabled")).toBeUndefined();
+    expect(s.outline().attributes("disabled")).toBeUndefined();
+    await s.primary().trigger("click");
+    await flushPromises();
+    expect(api.accept).toHaveBeenCalledTimes(2);
+  });
+
+  it("stays 合并中 across an unmount and remount while the request runs", async () => {
+    const d = deferred<ThreadView>();
+    api.accept.mockReturnValue(d.promise);
+    const s = setup();
+    await s.primary().trigger("click");
+    await flushPromises();
+    s.remount();
+    await flushPromises();
+    expect(s.wrapper.find("section").attributes("aria-label")).toBe("合并中");
+    expect(s.primary().attributes("disabled")).toBeDefined();
+    await s.primary().trigger("click");
+    d.reject(new Error("网络错误"));
+    await flushPromises();
+    expect(api.accept).toHaveBeenCalledTimes(1);
+    expect(s.cached().pr_state).toBe("open");
+    expect(s.primary().attributes("disabled")).toBeUndefined();
   });
 });
 
@@ -152,6 +232,15 @@ describe("ReviewCard change request", () => {
     d.resolve({});
     await flushPromises();
     expect(wrapper.find("textarea").exists()).toBe(false);
+  });
+});
+
+describe("where the card shows", () => {
+  it("only in review: a cancelled or failed thread stuck on accepting gets no locked card", () => {
+    expect(showReviewCard(thread(1, { status: "review", pr_state: "accepting" }))).toBe(true);
+    expect(showReviewCard(thread(1, { status: "review", pr_state: "open" }))).toBe(true);
+    expect(showReviewCard(thread(1, { status: "failed", pr_state: "accepting" }))).toBe(false);
+    expect(showReviewCard(thread(1, { status: "done", pr_state: "merged" }))).toBe(false);
   });
 });
 
