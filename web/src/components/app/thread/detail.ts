@@ -1,5 +1,5 @@
 // Pure helpers of the thread panel / page (web/src/components/app/ThreadDetail.tsx).
-import type { ThreadView } from "@/api/views";
+import type { MessageView, ThreadView } from "@/api/views";
 import { isWaking, isWorking, threadActive } from "@/lib/live";
 import { leadOf } from "@/lib/present";
 import { neighbours } from "@/lib/threadList";
@@ -50,4 +50,23 @@ export interface ThreadNav {
 export function threadNav(order: number[], no: number, path: (no: number) => string): ThreadNav {
   const n = neighbours(order, no);
   return { prev: n.prev === null ? null : path(n.prev), next: n.next === null ? null : path(n.next) };
+}
+
+/** Who handed the brief to the lead: the user when they opened the thread, else the coordinator. */
+export function dispatchSpeaker(openedBy: string): string {
+  return openedBy === "user" ? "你 → 组长" : "统筹 → 组长";
+}
+
+/** Lines a collapsed brief shows. */
+export const BRIEF_LINES = 6;
+
+/** A brief long enough to fold to its first lines (more lines than shown, or one long paragraph). */
+export function briefFoldable(brief: string): boolean {
+  const text = brief.trim();
+  return text.split("\n").length > BRIEF_LINES || text.length > 320;
+}
+
+/** The empty state of a thread's chat: shown until the lead's first message. */
+export function leadReading(messages: Pick<MessageView, "role">[], olderPages: boolean): boolean {
+  return !olderPages && !messages.some((m) => m.role === "leader");
 }

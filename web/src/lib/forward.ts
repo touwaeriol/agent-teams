@@ -96,7 +96,7 @@ export const messageAnchor = (id: number | string) => `msg-${id}`;
  * (thread open in the side panel) the thread stays open; from the full-page thread it goes back
  * to the board.
  */
-export function backLink(routePath: string, pid: string, anchor: number): { path: string; query: { msg: string } } {
+export function backLink(routePath: string, pid: string, anchor: number | string): { path: string; query: { msg: string } } {
   const onBoard = new RegExp(`^/projects/${pid}(/threads/\\d+(/(?!full$)[a-z]+)?)?$`).test(routePath);
   return { path: onBoard ? routePath : `/projects/${pid}`, query: { msg: String(anchor) } };
 }

@@ -6,14 +6,14 @@ import type { AttachmentRef } from "@/api/views";
 import { attachmentUrl, isImageType } from "@/lib/images";
 import { cn } from "@/lib/utils";
 
-const props = withDefaults(defineProps<{ items: AttachmentRef[] | undefined; align?: "start" | "end" }>(), { align: "end" });
+const props = withDefaults(defineProps<{ items: AttachmentRef[] | undefined; align?: "start" | "end"; /** smaller thumbnails (quoted messages) */ small?: boolean }>(), { align: "end" });
 const images = computed(() => (props.items ?? []).filter((x) => isImageType(x.content_type)));
 const files = computed(() => (props.items ?? []).filter((x) => !isImageType(x.content_type)));
 </script>
 
 <template>
   <div v-if="items?.length" :class="cn('flex flex-wrap gap-2', align === 'end' ? 'justify-end self-end' : 'self-start')">
-    <a v-for="x in images" :key="x.id" :href="attachmentUrl(x.id)" target="_blank" rel="noreferrer" class="block size-24 overflow-hidden rounded-xl border bg-raised" :title="x.name">
+    <a v-for="x in images" :key="x.id" :href="attachmentUrl(x.id)" target="_blank" rel="noreferrer" :class="cn('block overflow-hidden border bg-raised', small ? 'size-14 rounded-lg' : 'size-24 rounded-xl')" :title="x.name">
       <img :src="attachmentUrl(x.id)" :alt="x.name" loading="lazy" class="size-full object-cover" />
     </a>
     <a

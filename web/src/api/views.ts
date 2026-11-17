@@ -138,6 +138,26 @@ export interface ThreadView {
   remind_at?: string | null;
   /** When a reminder fired; the thread waits on the user (等你处理) until it is cleared. */
   reminded_at?: string | null;
+  /** The brief the thread was opened with, and the user's words it came from (older servers leave it out). */
+  dispatch?: ThreadDispatch | null;
+}
+
+/** How a thread was opened: the brief handed to the lead (by the coordinator or the user). */
+export interface ThreadDispatch {
+  brief: string;
+  /** "user" when the user opened it; otherwise the coordinator. */
+  opened_by: string;
+  at: string;
+  /** The user's project-chat message the coordinator dispatched from. */
+  source: DispatchSource | null;
+}
+
+export interface DispatchSource {
+  message_id: number;
+  content: string;
+  /** Same shape as meta.attachments; always an array (maybe empty). */
+  attachments: AttachmentRef[];
+  created_at: string;
 }
 
 /** One repository of a thread: its base, whether the thread branch exists there, its PR. */

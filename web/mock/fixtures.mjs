@@ -62,7 +62,7 @@ const members13 = [
 const thread = (no, title, status, extra) => ({
   id: `t${no}`, project_id: "p1", no, title, brief: "", status, queue_position: null, pause_reason: "", branch: `thread/${no}`, base_branch: "main",
   pr_number: null, pr_url: null, pr_state: null, merge_error: null, summary: "", auto_approve: false, opened_by: "coordinator", members: [], main_tasks: [],
-  counts: counts({}), lead_last: null, cost_usd_est: null, created_at: ago(70), updated_at: ago(10), ...extra,
+  counts: counts({}), lead_last: null, cost_usd_est: null, created_at: ago(70), updated_at: ago(10), dispatch: null, ...extra,
 });
 
 export const threads = [
@@ -87,9 +87,17 @@ export const threads = [
     main_tasks: [step("m131", 1, "CodexWorker 与事件解析", "done", 2, 2), step("m132", 2, "节点安装与登录", "doing", 1, 3), step("m133", 3, "联调", "todo", 0, 1)],
     counts: counts({ waiting: 1, questions_open: 1, tasks_total: 6, tasks_done: 3, main_total: 3, main_done: 1 }),
     lead_last: { text: "代码部分已完成并通过测试，剩下要在节点上装好 codex 才能联调。", at: ago(9) },
+    // The brief the coordinator handed the lead, from the user's project-chat message 1 (with a screenshot).
+    dispatch: {
+      brief: "## 目标\n\n让 **Codex 员工**能像 Claude 员工一样领任务、汇报和提问。\n\n## 要做\n\n1. 节点上实现 `CodexWorker`：启动、事件流解析、中断与恢复\n2. 员工配置里可以选 `codex`，模型列表跟随用户配置\n3. 提问 / 审批卡片在网页上能点，结果回传给 Codex\n4. 节点安装脚本检测并安装 codex CLI\n\n## 验收\n\n- 在 cvp 节点上用 Codex 员工跑通一个小任务\n- `go test ./...` 与 web 测试全部通过",
+      opened_by: "coordinator",
+      at: ago(66),
+      source: { message_id: 1, content: "员工之间要能互相沟通，审批卡片要能在网页上点。另外 Codex 员工也接上。", attachments: [{ id: "img_seed", name: "截图.png", content_type: "image/svg+xml", size: 0 }], created_at: ago(75) },
+    },
   }),
   thread(12, "员工通信与审批", "running", {
     branch: "thread/12-employee-comms", updated_at: ago(0.5), created_at: ago(70), started_at: ago(68), members: members12,
+    dispatch: { brief: "审批卡片要能在网页上直接点，员工之间也要能互相发消息。细节见 `docs/agent-comms.md`。", opened_by: "user", at: ago(70), source: null },
     summary: "后端已完成待审查，网页卡片进行中；dev-2 有一条命令等你批准。",
     main_tasks: [
       step("m121", 1, "实现约定：工具、事件、数据表和接口", "done", 1, 1),
