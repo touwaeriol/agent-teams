@@ -56,6 +56,17 @@ export function mainProgress(t: Pick<ThreadView, "main_tasks" | "counts">): { do
   return { done, total, label: `${done}/${total}` };
 }
 
+/** A plan step's status as far as the checklist cares; anything it doesn't know counts as todo. */
+const isTodo = (status: string) => !["doing", "done", "failed", "skipped"].includes(status);
+
+/**
+ * The step being worked on: the first `doing`, else the first not-started one (unknown statuses
+ * count as todo); null when nothing is left (all done / failed / skipped, or no plan).
+ */
+export function currentStep<T extends { status: string }>(steps: readonly T[]): T | null {
+  return steps.find((s) => s.status === "doing") ?? steps.find((s) => isTodo(s.status)) ?? null;
+}
+
 /** How many deliverables the thread published (older servers: 1 when it has a newest one). */
 export const deliverableCount = (t: Pick<ThreadView, "counts" | "latest_deliverable">): number =>
   t.counts.deliverables ?? (t.latest_deliverable ? 1 : 0);
