@@ -51,12 +51,14 @@ const handlers = {
   "thread/start": (p) => {
     const id = `th_${threads.size + 1}`;
     threads.set(id, p);
-    return { thread: { id }, model: p.model };
+    // Like the real app-server: no model → its own default; model "" is rejected.
+    if (p.model === "") throw new Error("No models are available. Set `model` explicitly or check your model catalog configuration.");
+    return { thread: { id }, model: p.model ?? "fake-codex-default" };
   },
   "thread/resume": (p) => {
     if (p.threadId === "th_missing") throw new Error("thread not found");
     threads.set(p.threadId, p);
-    return { thread: { id: p.threadId } };
+    return { thread: { id: p.threadId }, model: p.model ?? "fake-codex-default" };
   },
   "mcpServerStatus/list": async (p) => {
     const client = await mcp(p.threadId);

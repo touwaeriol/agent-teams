@@ -119,3 +119,74 @@ func TestBypassDefaultNoWarnings(t *testing.T) {
 		t.Fatal("no warning for deleted node")
 	}
 }
+
+// TestSaveRolesModelValidation: role.model must be in the user's model list with the role's
+// runtime (empty follows the defaults), on both PUT /api/roles and PUT /api/roles/yaml; a value
+// the role already had passes even after it left the list.
+func TestSaveRolesModelValidation(t *testing.T) {
+	h := newHarness(t)
+	c, _ := h.signUp("a@example.com")
+	mine := []map[string]any{{"runtime": "claude", "model": "claude-opus-5-5", "default": true},
+		{"runtime": "claude", "model": "claude-temp"}, {"runtime": "codex", "model": "gpt-x"}}
+	c.must(200, "PUT", "/api/models/mine", map[string]any{"models": mine}, nil)
+	var body RolesBody
+	c.must(200, "GET", "/api/roles", nil, &body)
+	modelError := func(r response) FieldError {
+		t.Helper()
+		if r.Status != 422 {
+			t.Fatalf("status %d %s", r.Status, r.Body)
+		}
+		for _, f := range r.apiError(t).Fields {
+			if strings.HasSuffix(f.Path, ".model") {
+				return f
+			}
+		}
+		t.Fatalf("no model error: %s", r.Body)
+		return FieldError{}
+	}
+	withModel := func(i int, model string) []store.Role {
+		next := append([]store.Role{}, body.Roles...)
+		next[i].Model = model
+		return next
+	}
+	// Not in the list (lead), runtime mismatch (a Codex member with a Claude id).
+	if f := modelError(c.do("PUT", "/api/roles", map[string]any{"roles": withModel(1, "claude-nope")})); f.Path != "roles[1].model" || f.Message != "模型不在你的模型列表里：claude-nope" {
+		t.Fatalf("not in list %+v", f)
+	}
+	codex := append(append([]store.Role{}, body.Roles...), store.Role{Tier: "member", Role: "cx", Runtime: "codex", Model: "claude-opus-5-5"})
+	if f := modelError(c.do("PUT", "/api/roles", map[string]any{"roles": codex})); f.Path != "roles[3].model" || f.Message != "Codex 岗位不能用 Claude 模型：claude-opus-5-5" {
+		t.Fatalf("runtime mismatch %+v", f)
+	}
+	// Empty and listed values save.
+	c.must(200, "PUT", "/api/roles", map[string]any{"roles": withModel(2, "")}, &body)
+	c.must(200, "PUT", "/api/roles", map[string]any{"roles": withModel(2, "claude-temp")}, &body)
+	if body.Roles[2].Model != "claude-temp" {
+		t.Fatalf("saved model %q", body.Roles[2].Model)
+	}
+	// The model leaves the list: the unchanged role still saves (JSON and YAML) ...
+	c.must(200, "PUT", "/api/models/mine", map[string]any{"models": mine[:1]}, nil)
+	next := append([]store.Role{}, body.Roles...)
+	next[2].Title = "后端"
+	c.must(200, "PUT", "/api/roles", map[string]any{"roles": next}, &body)
+	var y struct {
+		YAML string `json:"yaml"`
+	}
+	c.must(200, "GET", "/api/roles/yaml", nil, &y)
+	if !strings.Contains(y.YAML, "model: claude-temp") {
+		t.Fatalf("yaml:\n%s", y.YAML)
+	}
+	c.must(200, "PUT", "/api/roles/yaml", map[string]string{"yaml": strings.Replace(y.YAML, "title: 后端", "title: 服务端", 1)}, &body)
+	if body.Roles[2].Title != "服务端" || body.Roles[2].Model != "claude-temp" {
+		t.Fatalf("yaml save %+v", body.Roles[2])
+	}
+	// ... but the YAML path checks new values like the JSON one.
+	c.must(200, "GET", "/api/roles/yaml", nil, &y)
+	r := c.do("PUT", "/api/roles/yaml", map[string]string{"yaml": strings.Replace(y.YAML, "model: claude-temp", "model: claude-nope", 1)})
+	if f := modelError(r); f.Path != "roles[2].model" {
+		t.Fatalf("yaml model %+v", f)
+	}
+	// Setting the stale value on another role is a change and is rejected.
+	if f := modelError(c.do("PUT", "/api/roles", map[string]any{"roles": withModel(1, "claude-temp")})); f.Path != "roles[1].model" {
+		t.Fatalf("stale on another role %+v", f)
+	}
+}
