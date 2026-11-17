@@ -129,7 +129,7 @@ func libraryFile(b UploadBody) (artifacts.ArtifactFile, error) {
 	}
 	if artifacts.Render(artifacts.ContentType(name)) == "image" {
 		return artifacts.ArtifactFile{}, httpapi.Invalid("name",
-			"截图和图片（含 SVG）不是交付物："+uploadName(b.Name)+"。可以把图片放进 HTML 或 Markdown 报告里再上传，或作为附件发在讨论串消息里（"+librarySupported+"）")
+			"截图和图片（含 SVG）不是交付物："+uploadName(b.Name)+"。可以把图片直接内联进 HTML（data: 地址或内嵌 SVG）再上传，或作为附件发在讨论串消息里（"+librarySupported+"）")
 	}
 	data, err := base64.StdEncoding.DecodeString(b.Data)
 	if err != nil || len(data) == 0 {

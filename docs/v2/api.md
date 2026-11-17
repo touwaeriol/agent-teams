@@ -201,7 +201,7 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/projects/{pid}/deliverables?kind=&thread=&q=&cursor=` | → `{items: DeliverableView[], next_cursor, storage_bytes}`；`q` 搜索标题和 `detail.summary`（`pg_trgm`）；`storage_bytes` = 项目托管文件（每个版本都算）占用的字节数，资料库底部“已使用” |
+| GET | `/api/projects/{pid}/deliverables?kind=&thread=&q=&cursor=&no_images=` | → `{items: DeliverableView[], next_cursor, storage_bytes}`；`q` 搜索标题和 `detail.summary`（`pg_trgm`）；`no_images=true` 不返回截图不再算交付物之前发布的托管图片（`detail.hosted` 且 `render = image`），网页的交付物区、资料库和讨论串交付物视图都带上它，按 id 查看的查看器不带；`storage_bytes` = 项目托管文件（每个版本都算）占用的字节数，资料库底部“已使用” |
 | POST | `/api/projects/{pid}/deliverables` | `{kind, title, url, thread_no?}` → 201（用户手动登记链接）；`kind = pr` → 400 `pr_not_deliverable`（PR 由平台在讨论串上自动跟踪，不是交付物） |
 | POST | `/api/projects/{pid}/deliverables/request` | `{kind, brief}` → 202 `MessageView`（“新做一个”磁贴） |
 | PATCH / DELETE | `/api/deliverables/{id}` | 改标题 / 删除 |

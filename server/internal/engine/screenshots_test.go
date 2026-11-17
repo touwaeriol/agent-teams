@@ -10,6 +10,7 @@ import (
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/orchapi"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -150,6 +151,71 @@ func TestScreenshotsAreNotLibraryFiles(t *testing.T) {
 	if len(found.Deliverables) != 1 || found.Deliverables[0].ID != spec.DeliverableID {
 		t.Fatalf("search for the spec %+v", found.Deliverables)
 	}
+	// The deliverables list leaves the old image out only when asked (no_images=true): lists of
+	// deliverables ask, a lookup by id does not.
+	var page struct{ Items []core.DeliverableView }
+	tm.b.must(200, "GET", "/api/projects/"+tm.projectID+"/deliverables?no_images=true", nil, &page)
+	if len(page.Items) != 2 || page.Items[0].ID != spec.DeliverableID {
+		t.Fatalf("no_images list %+v", page.Items)
+	}
+	// @ reference candidates leave it out too.
+	var refs orchapi.RefList
+	tm.b.must(200, "GET", "/api/projects/"+tm.projectID+"/references?kind=deliverable&q=", nil, &refs)
+	if len(refs.Items) != 2 {
+		t.Fatalf("reference candidates %+v", refs.Items)
+	}
+	for _, r := range refs.Items {
+		if r.Label == "旧截图" {
+			t.Fatalf("reference candidates list the old image")
+		}
+	}
+}
+
+// TestPublishFileFakeImageRefused: a file named like an image whose bytes are not PNG/JPEG/GIF/WebP
+// (a PDF renamed to .png) is refused with the reason, nothing is stored and the upload is dropped.
+func TestPublishFileFakeImageRefused(t *testing.T) {
+	tm, _ := startDesignTeam(t)
+	for _, f := range []upFile{{"report.png", "%PDF-1.7 fake pdf"}, {"notes.jpg", "just text"}} {
+		res := tm.dev.publish(map[string]any{"path": f.path, "kind": "doc", "title": "假图片"}, 1<<20, f)
+		if res.Ok || !strings.Contains(text(res), "内容却不是 PNG、JPEG、GIF 或 WebP") || !strings.Contains(text(res), f.path) {
+			t.Fatalf("%s: %+v", f.path, res)
+		}
+	}
+	if left := uploadChunks(t, tm); left != 0 {
+		t.Fatalf("%d upload chunks left", left)
+	}
+	var n int
+	if err := store.QueryRow(tm.w.ctx, tm.w.e.Core.Pool, `SELECT count(*) FROM at_attachments`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 || tm.deliverableCount(t) != 0 || len(ofKind(tm.threadMessages(t), "image")) != 0 {
+		t.Fatalf("fake images stored: %d attachments", n)
+	}
+}
+
+// TestScreenshotAttachmentDeletedWithThread: the attachment behind an "image" card is the
+// project owner's only (another user gets 404) and goes away when the thread is deleted.
+func TestScreenshotAttachmentDeletedWithThread(t *testing.T) {
+	tm, _ := startDesignTeam(t)
+	res := tm.dev.publish(map[string]any{"path": "s.png", "kind": "design", "title": "截图"}, 1<<20, upFile{"s.png", fakePNG})
+	if !res.Ok {
+		t.Fatalf("publish %+v", res)
+	}
+	cards := ofKind(tm.threadMessages(t), "image")
+	raw, _ := json.Marshal(cards[0].Meta["attachments"])
+	var refs []core.AttachmentRef
+	_ = json.Unmarshal(raw, &refs)
+	if len(refs) != 1 {
+		t.Fatalf("attachments %s", raw)
+	}
+	img := "/api/attachments/" + refs[0].ID
+	tm.b.must(200, "GET", img, nil, nil)
+	other := tm.w.signUp("stranger-shot@example.com")
+	if code, _ := other.do("GET", img, nil); code != 404 {
+		t.Fatalf("another user's attachment = %d", code)
+	}
+	tm.b.must(204, "DELETE", "/api/threads/"+tm.thread.ID, nil, nil)
+	tm.b.must(404, "GET", img, nil, nil)
 }
 
 func uploadChunks(t *testing.T, tm *team) int {

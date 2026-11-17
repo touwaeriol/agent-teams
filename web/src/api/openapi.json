@@ -9861,6 +9861,16 @@
               "minimum": 0,
               "type": "integer"
             }
+          },
+          {
+            "description": "Leave out hosted lone images (render=image), published before screenshots stopped being deliverables",
+            "explode": false,
+            "in": "query",
+            "name": "no_images",
+            "schema": {
+              "description": "Leave out hosted lone images (render=image), published before screenshots stopped being deliverables",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
