@@ -172,7 +172,6 @@ p, admin, /api/admin/feedback, GET
 p, admin, /api/admin/feedback/:id, PATCH
 p, admin, /api/admin/github-app, DELETE
 p, admin, /api/admin/github-app/manifest, POST
-p, admin, /api/admin/models, PUT
 p, admin, /api/admin/office/layouts, GET
 p, admin, /api/admin/office/layouts/:id, DELETE
 p, admin, /api/admin/office/layouts/:id, PUT

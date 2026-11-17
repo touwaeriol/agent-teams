@@ -114,7 +114,7 @@ type sessionInput struct {
 	hasRepo  bool
 	repos    []string // repository slugs checked out under the employee's directory
 	protRefs []string
-	defModel string // the platform default model of the employee's runtime ("" = DefaultModel)
+	defModel string // the project owner's default model for the employee's runtime ("" = DefaultModel)
 }
 
 // buildOpen renders session.open for an employee.
@@ -170,9 +170,12 @@ func employeeRef(e core.Employee, t *core.Thread) protocol.EmployeeRef {
 	return ref
 }
 
-// Model is what the employee's sessions run: the model picked for the employee with /model, the
-// project override for its tier (Claude only), the role's model, the platform default of the
-// runtime (def, from the admin model list), else DefaultModel.
+// Model is what the employee's sessions run. The whole fallback order lives here:
+//  1. the model picked for the employee with /model (at_employees.model);
+//  2. the project override for its tier (coordinator_model / thread_model, Claude only);
+//  3. the role's model (the employee's spec);
+//  4. def: the default of the runtime in the project owner's model list (composer.DefaultModel);
+//  5. DefaultModel.
 func Model(e core.Employee, p store.Project, def string) string {
 	if e.Runtime == "codex" {
 		return firstNonEmpty(e.Model, e.Spec.Model, def, DefaultModel)

@@ -20,7 +20,8 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// DefaultModel is the platform default (CLAUDE.md: claude-opus-5-5).
+// DefaultModel is the last resort when neither the employee, the project, the role nor the
+// owner's model list names a model (CLAUDE.md: claude-opus-5-5).
 const DefaultModel = "claude-opus-5-5"
 
 // Errors the REST layer maps to status codes.

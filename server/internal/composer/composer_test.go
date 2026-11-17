@@ -87,16 +87,19 @@ func TestMergeAndModels(t *testing.T) {
 	if c, ok := Find(claude, "tests"); !ok || c.Prompt != "t" {
 		t.Fatal("find")
 	}
-	list := NormalizeModels([]Model{{Model: " claude-x[1m] ", Default: true}, {Runtime: "codex", Model: "gpt-5.5", Default: true}}, false)
-	if list[0].Runtime != "claude" || list[0].Model != "claude-x[1m]" || list[0].Default || list[1].Default {
-		t.Fatalf("user models: %+v", list)
+	list := NormalizeModels([]Model{{Model: " claude-x[1m] ", Default: true}, {Runtime: "codex", Model: "gpt-5.5", Default: true}})
+	if list[0].Runtime != "claude" || list[0].Model != "claude-x[1m]" || !list[0].Default || !list[1].Default {
+		t.Fatalf("user models (one default per runtime kept): %+v", list)
 	}
 	if p := ValidateModels(list); len(p) != 0 {
 		t.Fatalf("valid: %+v", p)
 	}
-	two := NormalizeModels([]Model{{Model: "a", Default: true}, {Model: "b", Default: true}}, true)
+	two := NormalizeModels([]Model{{Model: "a", Default: true}, {Model: "b", Default: true}})
 	if p := ValidateModels(two); len(p) != 1 || p[0].Path != "models[1].default" {
 		t.Fatalf("two defaults: %+v", p)
+	}
+	if p := ValidateModels(nil); len(p) != 1 || p[0].Path != "models" {
+		t.Fatalf("empty list: %+v", p)
 	}
 	if ValidModel("a b") || ValidModel("") || !ValidModel("us.anthropic.claude-x:0") {
 		t.Fatal("ValidModel")

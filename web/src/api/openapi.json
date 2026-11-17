@@ -2412,7 +2412,7 @@
         "additionalProperties": false,
         "properties": {
           "default": {
-            "description": "Platform list only: what sessions of this runtime open with when nothing else names a model (one per runtime)",
+            "description": "What the user's sessions of this runtime open with when no employee, project or role names a model (at most one per runtime)",
             "type": "boolean"
           },
           "id": {
@@ -2425,7 +2425,7 @@
             "type": "string"
           },
           "mine": {
-            "description": "The user's own entry",
+            "description": "Always true: every entry is the user's own (kept for older clients)",
             "readOnly": true,
             "type": "boolean"
           },
@@ -6498,47 +6498,6 @@
         ]
       }
     },
-    "/api/admin/models": {
-      "put": {
-        "operationId": "admin-save-models",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ModelsInputBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ModelsBody"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/APIError"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Replace the platform model list (order, one default per runtime)",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
     "/api/admin/office/layouts": {
       "get": {
         "operationId": "admin-list-office-layouts",
@@ -8644,7 +8603,7 @@
             "description": "Error"
           }
         },
-        "summary": "Models to choose from: the platform list, then the user's own",
+        "summary": "The user's model list (a new user starts with Opus 5.5, the Claude default)",
         "tags": [
           "team"
         ]
@@ -8685,7 +8644,7 @@
             "description": "Error"
           }
         },
-        "summary": "Replace the user's own model entries (in order)",
+        "summary": "Replace the user's model list (in order, at least one model, at most one default per runtime)",
         "tags": [
           "team"
         ]

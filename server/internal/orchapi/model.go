@@ -65,7 +65,7 @@ func (a *API) getModel(ctx context.Context, in *cidInput) (*conversationModelOut
 	}
 	q := a.e.Core.Pool
 	out := ConversationModel{Scope: "thread", Employee: e.Name, Runtime: e.Runtime, Members: []MemberModel{}}
-	out.Model = orchestrator.Model(e, p, composer.DefaultModel(ctx, q, e.Runtime))
+	out.Model = orchestrator.Model(e, p, composer.DefaultModel(ctx, q, p.UserID, e.Runtime))
 	out.Override, out.Inherited = a.overrideOf(ctx, c, e, p)
 	if s, err := core.LiveSession(ctx, q, e.ID); err == nil && s.NodeID != nil {
 		out.Live = true
@@ -83,7 +83,7 @@ func (a *API) getModel(ctx context.Context, in *cidInput) (*conversationModelOut
 
 // overrideOf is the value /model set at this level and what the employee runs without it.
 func (a *API) overrideOf(ctx context.Context, c core.Conversation, e core.Employee, p store.Project) (string, string) {
-	def := composer.DefaultModel(ctx, a.e.Core.Pool, e.Runtime)
+	def := composer.DefaultModel(ctx, a.e.Core.Pool, p.UserID, e.Runtime)
 	if c.Kind == "coordinator" {
 		override := p.CoordinatorModel
 		p.CoordinatorModel = ""
@@ -103,7 +103,7 @@ func (a *API) memberModels(ctx context.Context, threadID string, p store.Project
 	out := make([]MemberModel, 0, len(list))
 	for _, e := range list {
 		out = append(out, MemberModel{Name: e.Name, Tier: e.Tier, Runtime: e.Runtime, Override: e.Model,
-			Model: orchestrator.Model(e, p, composer.DefaultModel(ctx, q, e.Runtime))})
+			Model: orchestrator.Model(e, p, composer.DefaultModel(ctx, q, p.UserID, e.Runtime))})
 	}
 	return out, nil
 }
