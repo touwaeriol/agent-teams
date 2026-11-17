@@ -84,9 +84,10 @@ QuestionView    = {id, thread_no, asker, task_id, audience: "lead"|"user", kind:
                    blocking, answer, status, decided_by,
                    created_at, answered_at}
 MessageView     = {id, role: "user"|"leader"|"employee"|"system"|"error", author,
-                   kind: "chat"|"note"|"interrupt"|"todos"|"plan"|"artifact"|"resumed",   // 后四种是对话卡片（architecture.md §6.6）
+                   kind: "chat"|"note"|"interrupt"|"todos"|"plan"|"artifact"|"image"|"resumed",   // 后五种是对话卡片（architecture.md §6.6）
                    content, meta: {thread_no?, task_id?, opens_thread?: number, employee?, todos?: [{content, status, active_form?}],
-                   deliverable?: {id, kind, title, url, hosted, entry, render, version}}, created_at}
+                   deliverable?: {id, kind, title, url, hosted, entry, render, version},
+                   attachments?: [{id, name, content_type, size}], title?}, created_at}   // image 卡片：员工用 publish_file 发的截图（不是交付物）
                    // todos 卡片原地更新：同一 id 的 message 事件再来一次，网页按 id 替换
 MailView        = {id, sender, recipient, body, created_at}
 EmployeeBrief   = {id, name, tier, role, title, runtime, node: {id, name, online} | null, look: Look,
@@ -204,7 +205,7 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | POST | `/api/projects/{pid}/deliverables` | `{kind, title, url, thread_no?}` → 201（用户手动登记链接）；`kind = pr` → 400 `pr_not_deliverable`（PR 由平台在讨论串上自动跟踪，不是交付物） |
 | POST | `/api/projects/{pid}/deliverables/request` | `{kind, brief}` → 202 `MessageView`（“新做一个”磁贴） |
 | PATCH / DELETE | `/api/deliverables/{id}` | 改标题 / 删除 |
-| POST | `/api/projects/{pid}/library` | 资料库“添加”：`{name, data: base64, title?}` → 201 `DeliverableView`。单个文件，类型与大小限制同 `publish_file`（扩展名白名单，≤ 5 MB，422 `validation`），存成托管交付物第 1 版：`published_by = "user"`，`detail = {by: "user", hosted: true, version: 1, entry, content_type, render, files: 1, size}`，`kind` 按渲染方式（html/图片 → design，Markdown/PDF/文本 → doc，json/csv → data），之后和员工发布的文件一样经签名 URL 沙箱访问 |
+| POST | `/api/projects/{pid}/library` | 资料库“添加”：`{name, data: base64, title?}` → 201 `DeliverableView`。单个文件，只收 html、md、pdf、txt、json、csv（扩展名白名单，≤ 5 MB；截图、图片和 SVG 不是交付物，一律 422 `validation`），存成托管交付物第 1 版：`published_by = "user"`，`detail = {by: "user", hosted: true, version: 1, entry, content_type, render, files: 1, size}`，`kind` 按渲染方式（html → design，Markdown/PDF/文本 → doc，json/csv → data），之后和员工发布的文件一样经签名 URL 沙箱访问 |
 | GET | `/api/deliverables/{id}/files?version=` | 托管交付物（`detail.hosted`）的一版（默认最新）→ `{deliverable_id, version, versions: [{version, files, size, published_by, publisher_thread_no?, created_at}]（新到旧；`publisher_thread_no` = 发布这一版的员工所在讨论串）, entry, render: html\|markdown\|image\|pdf\|text, files: [{path, content_type, size, sha256}], base_url, entry_url, expires_at, isolated}`；`base_url` 是 2 小时有效的签名目录 URL（`architecture.md` §6.5），`isolated` = 配置了 `AGENT_TEAMS_ARTIFACT_ORIGIN` |
 | GET | `/api/deliverables/{id}/comments` | → `{items: [{id, version, text, sent_to, created_at}]}` |
 | POST | `/api/deliverables/{id}/comments` | `{text, version?}` → 201：保存并作为消息投递给被批注那一版（默认最新版）的发布员工，不在了给他讨论串的组长（消息里带 `read_deliverable` → 修改 → `publish_file` 的改稿方法），`sent_to` 是收到它的员工 |
@@ -214,7 +215,7 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 
 网页里“资料库”就是这个列表：主界面右侧的面板（`/projects/:pid?panel=library`）和全屏页 `/projects/:pid/deliverables`，表格列 名称 / 所有者（`published_by`，`user` 显示为“你”）/ 修改日期 / 大小（`detail.size`）/ 类型（托管文件按扩展名，其余按 kind），可按类型筛选、搜索、切换网格。
 
-PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平台轮询 / webhook 更新。设计类和托管交付物（员工用 `publish_file` 发布）在查看器 DesignViewer（`/projects/:pid/deliverables/:id`）里打开：HTML 在 sandbox iframe 里，Markdown 安全渲染，图片内联，可切换版本，批注发回给员工。
+PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平台轮询 / webhook 更新。设计类和托管交付物（员工用 `publish_file` 发布）在查看器 DesignViewer（`/projects/:pid/deliverables/:id`）里打开：HTML 在 sandbox iframe 里，Markdown 安全渲染，图片内联（只有截图不再算交付物之前发布的旧数据），可切换版本，批注发回给员工。
 
 ### 3.6 NewProject 与 ProjectSettings
 

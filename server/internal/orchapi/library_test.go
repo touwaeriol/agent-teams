@@ -1,6 +1,7 @@
 package orchapi
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/touwaeriol/agent-teams/server/internal/artifacts"
@@ -31,10 +32,16 @@ func TestStoredNameKeepsUploadsValid(t *testing.T) {
 }
 
 func TestLibraryFileRejectsUnknownTypes(t *testing.T) {
-	for _, name := range []string{"run.sh", "..", "图片"} {
+	for _, name := range []string{"run.sh", "..", "图片", "shot.png", "a.JPG", "b.jpeg", "c.gif", "d.webp", "e.svg"} {
 		if _, err := libraryFile(UploadBody{Name: name, Data: "aGk="}); err == nil {
 			t.Errorf("%q accepted", name)
 		}
+	}
+	if _, err := libraryFile(UploadBody{Name: "shot.png", Data: "aGk="}); err == nil || !strings.Contains(err.Error(), "不是交付物") {
+		t.Errorf("png refusal %v", err)
+	}
+	if LibraryKind("text/html; charset=utf-8") != "design" || LibraryKind("application/pdf") != "doc" {
+		t.Error("library kinds")
 	}
 	f, err := libraryFile(UploadBody{Name: "说明.md", Data: "aGk="})
 	if err != nil || f.Path != "__.md" || f.Size != 2 {

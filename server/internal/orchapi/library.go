@@ -21,7 +21,7 @@ import (
 
 // UploadBody is POST /api/projects/{pid}/library: one file the user adds to the library.
 type UploadBody struct {
-	Name  string `json:"name" minLength:"1" maxLength:"300" doc:"File name; its extension decides the type (same list as publish_file)"`
+	Name  string `json:"name" minLength:"1" maxLength:"300" doc:"File name; its extension decides the type: html, md, pdf, txt, json or csv (images and SVG are not deliverables and are refused)"`
 	Data  string `json:"data" minLength:"1" maxLength:"6990508" doc:"Base64 of the file, at most 5 MB"`
 	Title string `json:"title,omitempty" maxLength:"300" doc:"Shown name; default the file name"`
 }
@@ -81,10 +81,13 @@ func (a *API) registerLibrary(api huma.API) {
 		summary("Tokens and estimated cost of the project's sessions, per day, thread and employee")), a.projectUsage)
 }
 
+// librarySupported lists the files a user may add as deliverables (images are not deliverables).
+const librarySupported = "支持 html、md、pdf、txt、json、csv"
+
 // LibraryKind is the deliverable kind of an uploaded file, from how it renders.
 func LibraryKind(contentType string) string {
 	switch artifacts.Render(contentType) {
-	case "html", "image":
+	case "html":
 		return "design"
 	case "markdown", "pdf":
 		return "doc"
@@ -122,8 +125,11 @@ func storedName(name string) string {
 func libraryFile(b UploadBody) (artifacts.ArtifactFile, error) {
 	name := storedName(uploadName(b.Name))
 	if !artifacts.ValidPath(name) {
+		return artifacts.ArtifactFile{}, httpapi.Invalid("name", "不支持的文件："+uploadName(b.Name)+"（"+librarySupported+"）")
+	}
+	if artifacts.Render(artifacts.ContentType(name)) == "image" {
 		return artifacts.ArtifactFile{}, httpapi.Invalid("name",
-			"不支持的文件："+uploadName(b.Name)+"（支持 html、md、svg、png、jpg、gif、webp、pdf、json、csv、txt）")
+			"截图和图片（含 SVG）不是交付物："+uploadName(b.Name)+"。可以把图片放进 HTML 或 Markdown 报告里再上传，或作为附件发在讨论串消息里（"+librarySupported+"）")
 	}
 	data, err := base64.StdEncoding.DecodeString(b.Data)
 	if err != nil || len(data) == 0 {

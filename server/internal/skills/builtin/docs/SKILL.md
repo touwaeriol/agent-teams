@@ -28,8 +28,9 @@ come back to you as messages; answer by publishing a new version.
   items; tables for comparisons; fenced code blocks with a language tag.
 - Lead with the conclusion. Each section answers one question.
 - Use the product's language and terminology (write in Chinese if the brief is in Chinese).
-- Diagrams: a Mermaid block (```` ```mermaid ````) or a separate SVG published with the
-  design skill. Keep diagrams small and labelled.
+- Diagrams: a Mermaid block (```` ```mermaid ````), or an SVG inlined in an HTML report made
+  with the design skill. Never publish an SVG or an image on its own: images are not
+  deliverables. Keep diagrams small and labelled.
 - Links: relative links to repository files or absolute https URLs. No HTML in Markdown: it
   is not rendered.
 - Keep it as short as the content allows. Remove filler sentences.
