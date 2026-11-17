@@ -35,7 +35,7 @@ const props = withDefaults(
   { threads: () => [], speakerColor: "#C8622A", inserts: () => [], pid: "", filter: undefined, select: undefined, selectedIds: () => [] },
 );
 const emit = defineEmits<{ openThread: [no: number]; forward: [id: number]; toggle: [id: number] }>();
-defineSlots<{ insert(p: { item: I }): unknown; empty(): unknown; after(): unknown }>();
+defineSlots<{ insert(p: { item: I }): unknown; empty(): unknown; before(): unknown; after(): unknown }>();
 
 const query = useMessages(() => props.cid);
 const messages = computed(() => {
@@ -54,6 +54,8 @@ useChatScroll(() => props.cid, end, () => messages.value.length + props.inserts.
     <button v-if="query.hasNextPage.value" type="button" class="self-center text-xs text-muted-foreground hover:text-foreground" @click="query.fetchNextPage()">
       {{ query.isFetchingNextPage.value ? "加载中…" : "更早的消息" }}
     </button>
+    <!-- What came before the first message (a thread's brief): only once the oldest page is loaded. -->
+    <slot v-if="!query.hasNextPage.value" name="before" />
     <slot v-if="items.length === 0" name="empty" />
     <template v-for="it in items" :key="it.kind === 'block' ? it.block.message.id : it.key">
       <ChatBlockView
