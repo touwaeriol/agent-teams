@@ -40,8 +40,8 @@ func (s *Service) openThread(ctx context.Context, tx *core.Tx, c *call) (Result,
 }
 
 // sourceMessage is the user's project-chat message open_thread is for: the one named by
-// message_id (it must be the user's, in this conversation), else the user's latest message
-// before the call (nil when the user has not written yet).
+// message_id (it must be the user's own, in this conversation), else the user's newest message
+// delivered after the coordinator's previous reply (nil when there is none).
 func (s *Service) sourceMessage(ctx context.Context, tx *core.Tx, c *call, id *int) (*int64, error) {
 	conv, err := s.orch.ConversationOf(ctx, tx, c.emp())
 	if err != nil {
@@ -50,14 +50,14 @@ func (s *Service) sourceMessage(ctx context.Context, tx *core.Tx, c *call, id *i
 	if id == nil {
 		return core.LatestUserMessageID(ctx, tx, conv)
 	}
-	list, err := core.UserMessagesByID(ctx, tx, conv, []int64{int64(*id)})
+	m, err := core.UserWordByID(ctx, tx, conv, int64(*id))
+	if errors.Is(err, core.ErrNotFound) {
+		return nil, refuse("message_id %d 不是用户在项目对话里发的消息（用用户消息末尾的 [message_id: N]，或不写）", *id)
+	}
 	if err != nil {
 		return nil, err
 	}
-	if len(list) == 0 {
-		return nil, refuse("message_id %d 不是用户在项目对话里的消息（用用户消息末尾的 [message_id: N]，或不写）", *id)
-	}
-	return &list[0].ID, nil
+	return &m.ID, nil
 }
 
 func focusOf(in []protocol.RepoFocus) []orchestrator.RepoFocus {

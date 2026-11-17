@@ -107,12 +107,11 @@ type ThreadView struct {
 	// LastActivityAt is the latest of a state change, a message in the thread and a deliverable it published.
 	LastActivityAt    time.Time        `json:"last_activity_at" doc:"Latest state change, message or deliverable of the thread"`
 	LatestDeliverable *DeliverableView `json:"latest_deliverable" doc:"The newest deliverable the thread published (null: none)"`
-	Dispatch          *ThreadDispatch  `json:"dispatch" doc:"How the thread was handed over: the brief and the user's message it was opened for (null: empty brief)"`
+	Dispatch          *ThreadDispatch  `json:"dispatch" doc:"How the thread was handed over (the text itself is brief): who opened it, when, and the user's message it was opened for. Null when the brief is empty or is forwarded user messages (their copies are in the conversation)"`
 }
 
 // ThreadDispatch is the hand-over that opened a thread (coordinator or user → lead).
 type ThreadDispatch struct {
-	Brief    string          `json:"brief" doc:"The brief the lead got (threads.brief)"`
 	OpenedBy string          `json:"opened_by" doc:"coordinator or user"`
 	At       time.Time       `json:"at" doc:"When the thread was opened"`
 	Source   *DispatchSource `json:"source" doc:"The user's project-chat message the thread was opened for (null: none, or deleted)"`
