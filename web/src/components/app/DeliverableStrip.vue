@@ -13,7 +13,7 @@ import ItemLink from "./ItemLink.vue";
 
 const props = defineProps<{ pid: string; folded: boolean; limit?: number }>();
 const emit = defineEmits<{ fold: [folded: boolean]; all: [] }>();
-const list = useDeliverables(() => props.pid, "", "");
+const list = useDeliverables(() => props.pid, "", "", true);
 const items = computed(() => (list.data.value?.items ?? []).filter(isStripDeliverable).slice(0, props.limit ?? 8));
 const seen = useSeenDeliverables(() => props.pid);
 

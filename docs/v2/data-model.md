@@ -693,7 +693,7 @@ CREATE INDEX at_schedules_due ON at_schedules (next_run_at) WHERE enabled;
 
 ```sql
 ALTER TABLE at_threads ADD COLUMN archived_from TEXT NOT NULL DEFAULT '';
-CREATE TABLE at_attachments (   -- 用户附在消息上的图片
+CREATE TABLE at_attachments (   -- 用户附在消息上的图片，以及员工 publish_file 发的截图
   id           TEXT PRIMARY KEY,                -- img_…
   project_id   TEXT NOT NULL REFERENCES at_projects(id) ON DELETE CASCADE,
   user_id      TEXT NOT NULL REFERENCES at_users(id) ON DELETE CASCADE,
@@ -706,9 +706,9 @@ CREATE TABLE at_attachments (   -- 用户附在消息上的图片
 );
 ```
 
-消息只在 `at_messages.meta.attachments` 里记 `{id, name, content_type, size}`；图片跟着项目删除。删除讨论串 = 删它的 `at_conversations` 行，`at_threads`、员工、会话、任务、提问、消息、合并队列等级联删除；`at_deliverables.thread_id` 置空（交付物留在资料库）；`at_events` / `at_status_events` 没有外键，历史事件保留。
+员工用 `publish_file` 发布的单张位图（截图）也存成这里的一行（`user_id` = 项目所有者），不进 `at_deliverables`，并在员工所在对话里写一条 `kind = image` 的消息卡。消息只在 `at_messages.meta.attachments` 里记 `{id, name, content_type, size}`；图片跟着项目删除。删除讨论串 = 删它的 `at_conversations` 行，`at_threads`、员工、会话、任务、提问、消息、合并队列等级联删除；`at_deliverables.thread_id` 置空（交付物留在资料库）；`at_events` / `at_status_events` 没有外键，历史事件保留。
 
-资料库“添加”的文件（`POST /api/projects/{pid}/library`）就是一条 `at_deliverables`（`published_by = 'user'`）加一条 `at_deliverable_files` 第 1 版，与 `publish_file` 同样的类型和 5 MB 限制、同样的签名 URL 沙箱访问。项目用量（`GET /api/projects/{pid}/usage`）直接汇总 `at_usage`，不另建表。
+资料库“添加”的文件（`POST /api/projects/{pid}/library`）就是一条 `at_deliverables`（`published_by = 'user'`）加一条 `at_deliverable_files` 第 1 版，只收 html、md、pdf、txt、json、csv（截图、图片和 SVG 不是交付物，拒绝），5 MB 限制、同样的签名 URL 沙箱访问。项目用量（`GET /api/projects/{pid}/usage`）直接汇总 `at_usage`，不另建表。
 
 ### 2.12 模型列表与自定义命令（00170、00210）
 

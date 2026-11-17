@@ -44,7 +44,14 @@ type DeliverableFilter struct {
 	Q        string
 	Before   string
 	Limit    int
+	// NoImages leaves out hosted lone images (render "image"): screenshots are not deliverables
+	// any more, the ones published before stay stored but are not listed to agents.
+	NoImages bool
 }
+
+// notImageDeliverable (SQL on alias d) leaves out hosted lone images: screenshots stopped being
+// deliverables, the ones published before stay stored but are not counted or listed to agents.
+const notImageDeliverable = "NOT COALESCE(d.detail->>'hosted' = 'true' AND d.detail->>'render' = 'image', false)"
 
 // Deliverables pages a project's deliverables newest first (cursor = id of the last item).
 func Deliverables(ctx context.Context, q DB, projectID string, f DeliverableFilter) ([]Deliverable, error) {
@@ -60,6 +67,9 @@ func Deliverables(ctx context.Context, q DB, projectID string, f DeliverableFilt
 	}
 	if f.Before != "" {
 		g = g.Where("d.id < ?", f.Before)
+	}
+	if f.NoImages {
+		g = g.Where(notImageDeliverable)
 	}
 	return find[Deliverable](g.Order("d.id DESC").Limit(f.Limit))
 }

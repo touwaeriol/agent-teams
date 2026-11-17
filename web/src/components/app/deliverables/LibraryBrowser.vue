@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 资料库: the project's deliverables and published files as a table (or tiles), filtered by
-// type, searchable, with "+ 添加" to upload a file the team can read. Used as the right-hand
+// type, searchable (hosted images are not deliverables and are left out), with "+ 添加" to upload a file the team can read. Used as the right-hand
 // panel of the main board, on the full Deliverables page and as the phone overview's 资料库 tab
 // (`sheet`: no header of its own, the search box follows `search`).
 import { Maximize2, Search, X } from "lucide-vue-next";
@@ -8,7 +8,7 @@ import { computed, ref } from "vue";
 import { useDeliverables } from "@/api/queries";
 import IconButton from "@/components/common/IconButton.vue";
 import Loading from "@/components/common/Loading.vue";
-import { formatBytes, nextSort, sortLibrary, type SortKey } from "@/lib/library";
+import { formatBytes, isLibraryDeliverable, nextSort, sortLibrary, type SortKey } from "@/lib/library";
 import { cn } from "@/lib/utils";
 import AddButton from "./AddButton.vue";
 import { saveView, storedView, type LibraryView } from "./browser";
@@ -25,8 +25,8 @@ const ownSearch = ref(props.variant === "page");
 const searching = computed({ get: () => (props.variant === "sheet" ? Boolean(props.search) : ownSearch.value), set: (v) => (ownSearch.value = v) });
 const view = ref<LibraryView>(storedView());
 const sort = ref<{ key: SortKey; dir: "asc" | "desc" }>({ key: "modified", dir: "desc" });
-const list = useDeliverables(() => props.pid, kind, q);
-const items = computed(() => sortLibrary(list.data.value?.items ?? [], sort.value.key, sort.value.dir));
+const list = useDeliverables(() => props.pid, kind, q, true);
+const items = computed(() => sortLibrary((list.data.value?.items ?? []).filter(isLibraryDeliverable), sort.value.key, sort.value.dir));
 /** Panel and sheet are padded; only the panel has its own header. */
 const panel = computed(() => props.variant !== "page");
 const pick = (v: LibraryView) => {

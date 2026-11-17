@@ -2761,7 +2761,7 @@ export interface PublishFileResult {
   version: number;
 }
 /**
- * Publish a file you made (HTML prototype, Markdown doc, SVG, image, PDF, JSON, CSV) as a project deliverable. The platform uploads it from your working directory and hosts it; people view it on the Deliverables page and their comments come back to you as messages. A directory with index.html is published as a small site. Pass deliverable_id to publish a new version of an earlier deliverable.
+ * Publish a file you made (HTML prototype, Markdown doc, PDF, text, JSON, CSV) as a project deliverable. The platform uploads it from your working directory and hosts it; people view it on the Deliverables page and their comments come back to you as messages. A directory with index.html is published as a small site (it may contain images and other assets). Pass deliverable_id to publish a new version of an earlier deliverable. Screenshots and images are not deliverables: a lone PNG/JPG/GIF/WebP is saved as an attachment in your thread's messages instead (no deliverable, cannot be a new version), and a lone SVG is refused. To put an image in a report, publish it in one directory with the report's index.html, or inline it in the HTML (an SVG can be written straight into the HTML); Markdown cannot show images. Cite an attachment (its id or URL) only in your written report.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "PublishFileInput".

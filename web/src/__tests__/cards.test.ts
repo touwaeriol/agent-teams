@@ -13,6 +13,8 @@ import type { MessagePages } from "@/api/queries";
 import type { MessageView, QuestionView } from "@/api/views";
 import CheckMark from "@/components/app/CheckMark.vue";
 import ArtifactCard from "@/components/app/chatcards/ArtifactCard.vue";
+import ChatCard from "@/components/app/chatcards/ChatCard.vue";
+import ImageCard from "@/components/app/chatcards/ImageCard.vue";
 import PlanCard from "@/components/app/chatcards/PlanCard.vue";
 import ResumedNote from "@/components/app/chatcards/ResumedNote.vue";
 import TodoCard from "@/components/app/chatcards/TodoCard.vue";
@@ -21,7 +23,7 @@ import StateMark from "@/components/app/StateMark.vue";
 import StatusPill from "@/components/app/StatusPill.vue";
 import ThreadMark from "@/components/app/ThreadMark.vue";
 import { answerBody, answeredRows, askItems, chatQuestions, complete, emptyChoices, letter, oneClick, toggle, typeOther } from "@/lib/ask";
-import { chatBlocks, threadTalk } from "@/lib/chat";
+import { chatBlocks, threadChat, threadTalk } from "@/lib/chat";
 import { readScroll, restoredTop, scrollMarkOf, writeScroll } from "@/lib/persist";
 import { checkLook, taskLook, threadLook } from "@/lib/present";
 import { LEAD_TIMEOUTS, leadTimeoutLabel } from "@/pages/projectSettings/logic";
@@ -105,6 +107,20 @@ describe("chat cards", () => {
     expect(art).toContain('href="/projects/p1/deliverables/dl_1"');
     expect(art).toContain("第 2 版");
     expect(html(ResumedNote, { message: msg("4", { kind: "resumed", content: "会话已恢复" }) })).toContain("会话已恢复");
+  });
+
+  it("keeps an employee's uploaded screenshots as an image card with author, line and thumbnails", () => {
+    const shot = msg("5", { kind: "image", author: "dev-2", content: "dev-2 上传了截图：登录页", meta: { employee: "dev-2", title: "登录页", attachments: [{ id: "att_1", name: "login.png", content_type: "image/png", size: 10 }] } });
+    expect(threadTalk(shot)).toBe(true);
+    expect(threadChat([shot])).toEqual([shot]);
+    expect(chatBlocks([shot]).map((b) => b.kind)).toEqual(["card"]);
+    for (const out of [html(ImageCard, { message: shot }), html(ChatCard, { message: shot, pid: "p1" })]) {
+      expect(out).toContain("data-image-card");
+      expect(out).toContain("dev-2 ·");
+      expect(out).toContain("dev-2 上传了截图：登录页");
+      expect(out).toContain('src="/api/attachments/att_1');
+      expect(out).toContain('alt="login.png"');
+    }
   });
 
   it("replaces an updated card in place", () => {

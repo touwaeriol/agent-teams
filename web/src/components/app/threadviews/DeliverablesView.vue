@@ -4,12 +4,13 @@ import { computed } from "vue";
 import { useDeliverables } from "@/api/queries";
 import type { ThreadView } from "@/api/views";
 import Loading from "@/components/common/Loading.vue";
+import { isLibraryDeliverable } from "@/lib/library";
 import DeliverableCard from "./DeliverableCard.vue";
 import Delivery from "./Delivery.vue";
 
 const props = defineProps<{ pid: string; thread: ThreadView }>();
-const deliverables = useDeliverables(() => props.pid, "", "");
-const mine = computed(() => (deliverables.data.value?.items ?? []).filter((d) => d.thread_no === props.thread.no));
+const deliverables = useDeliverables(() => props.pid, "", "", true);
+const mine = computed(() => (deliverables.data.value?.items ?? []).filter((d) => d.thread_no === props.thread.no && isLibraryDeliverable(d)));
 </script>
 
 <template>

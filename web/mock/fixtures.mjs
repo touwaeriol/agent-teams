@@ -181,6 +181,7 @@ export const messages = {
     ] }), kind: "todos" },
     { ...msg("a46", "system", "dev-2", "## 卡片改版计划\n\n1. 按钮改成一行三个，去掉红框里的说明\n2. 提问卡片用字母标出选项，推荐项加标签\n3. 回答后收起，只留选中的那一项\n\n> 不动审批的接口，只改 `cards.tsx`。", 15, { employee: "dev-2" }), kind: "plan" },
     { ...msg("a47", "system", "dev-2", "dev-2 发布了交付物：审批卡片样式", 12, { employee: "dev-2", deliverable: { id: "d1", kind: "design", title: "审批卡片样式", url: "", hosted: true, entry: "index.html", version: 3 } }), kind: "artifact" },
+    { ...msg("a48", "system", "dev-2", "dev-2 上传了截图：卡片改版后", 10, { employee: "dev-2", title: "卡片改版后", attachments: [{ id: "img_seed", name: "卡片改版后.png", content_type: "image/svg+xml", size: 0 }] }), kind: "image" },
     msg("a5", "leader", "lead-12", "已改，按钮换成一行三个，红框那块去掉了。目前进度：\n\n| 主要任务 | 状态 |\n| --- | --- |\n| 后端通信 | 已合并 |\n| 审批走 permission-prompt-tool | 审查中 |\n| 网页卡片 | 进行中 |\n\n- `pnpm test` 全部通过\n- dev-2 想加一个依赖做长列表虚拟滚动，我拿不准，**需要你定一下**（下面的卡片）。", 8),
   ],
   t13: [], t11: [], t10: [], t9: [],
@@ -240,10 +241,10 @@ export const deliverables = [
   deliverable("d3", "doc", "员工通信实现约定", 12, 60, "docs/agent-comms.md"),
   deliverable("d4", "design", "新建项目下拉框", 10, 120, "仓库与基准分支"),
   deliverable("d5", "data", "审批耗时统计", 12, 60 * 20, "平均等待 4 分钟"),
-  hosted("d7", "design", "06-nodes.png", 60 * 30, 9_400, "user"),
-  hosted("d8", "design", "e2e-main.png", 60 * 31, 381_800, "user"),
+  hosted("d8", "doc", "e2e 验收报告.html", 60 * 31, 381_800, "user", "report.html"),
   hosted("d9", "doc", "架构说明.md", 60 * 33, 24_100, "designer-1"),
   hosted("d10", "design", "落地页 v2", 3, 208_600, "designer-1", "index.html", 14),
+  // History: an image published before images stopped being deliverables. The console hides it.
   hosted("d11", "design", "部署后的控制台截图.png", 52, 48_200, "dev-1", "console.png", 15),
 ];
 

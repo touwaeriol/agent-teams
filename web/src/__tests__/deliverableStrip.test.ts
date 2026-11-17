@@ -18,13 +18,21 @@ describe("isStripDeliverable", () => {
     // even a hosted file can't sneak a PR in
     expect(isStripDeliverable({ kind: "pr", detail: { hosted: true, entry: "a.md", render: "markdown" } })).toBe(false);
   });
-  it("keeps hosted md / html / pdf / images / txt and designs", () => {
+  it("keeps hosted md / html / pdf / txt and designs", () => {
     expect(isStripDeliverable(hosted("doc", "架构.md", "markdown"))).toBe(true);
     expect(isStripDeliverable(hosted("design", "index.html", "html"))).toBe(true);
     expect(isStripDeliverable(hosted("doc", "report.pdf", "pdf"))).toBe(true);
-    expect(isStripDeliverable(hosted("design", "shot.png", "image"))).toBe(true);
     expect(isStripDeliverable(hosted("doc", "notes.txt", "text"))).toBe(true);
     expect(isStripDeliverable(item("e", { kind: "design", url: "https://figma.com/x" }))).toBe(true);
+  });
+  it("drops hosted images, whatever the kind", () => {
+    for (const entry of ["shot.png", "a.JPG", "b.jpeg", "c.gif", "d.webp", "e.svg"]) {
+      expect(isStripDeliverable(hosted("design", entry, "image"))).toBe(false);
+      expect(isStripDeliverable(hosted("doc", entry, "image"))).toBe(false);
+    }
+    // by extension even without render, and by content type
+    expect(isStripDeliverable(item("x", { kind: "design", detail: { hosted: true, entry: "flow.svg" } }))).toBe(false);
+    expect(isStripDeliverable(item("y", { kind: "design", detail: { hosted: true, entry: "blob", content_type: "image/png" } }))).toBe(false);
   });
   it("leaves raw data files to the library", () => {
     expect(isStripDeliverable(hosted("data", "t.csv", "text"))).toBe(false);

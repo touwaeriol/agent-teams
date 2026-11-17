@@ -12,6 +12,7 @@ import (
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 
+	"github.com/touwaeriol/agent-teams/server/internal/artifacts"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw/nodetest"
 	"github.com/touwaeriol/agent-teams/server/internal/orchapi"
@@ -219,15 +220,29 @@ func TestDeliverableReferenceInline(t *testing.T) {
 	var page protocol.PublishFileResult
 	_ = json.Unmarshal(*res.Structured, &page)
 	png := string(append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte{0}, 16)...))
-	res = tm.dev.publish(map[string]any{"path": "logo.png", "kind": "design", "title": "标志"}, 1<<20, upFile{"logo.png", png})
-	var logo protocol.PublishFileResult
-	_ = json.Unmarshal(*res.Structured, &logo)
+	// Images are not deliverables any more (publish_file keeps them as attachments); one published
+	// before that is still stored, and an @ reference to it still describes it.
+	var logo core.Deliverable
+	err := tm.w.e.Core.InTx(tm.w.ctx, func(tx *core.Tx) error {
+		sum := sha256.Sum256([]byte(png))
+		files := []artifacts.ArtifactFile{{Path: "logo.png", ContentType: "image/png", Size: len(png), SHA256: hex.EncodeToString(sum[:]), Data: []byte(png)}}
+		var err error
+		logo, err = core.InsertDeliverable(tm.w.ctx, tx, core.NewDeliverable{ProjectID: tm.projectID, ThreadID: &tm.thread.ID, Kind: "design",
+			Title: "标志", Detail: artifacts.Detail("designer-1", 1, "logo.png", files, nil), PublishedBy: "designer-1"})
+		if err != nil {
+			return err
+		}
+		return artifacts.Save(tm.w.ctx, tx, logo.ID, 1, artifacts.Publisher{Name: "designer-1"}, files)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	refs := []map[string]any{{"kind": "deliverable", "id": page.DeliverableID}, {"kind": "deliverable", "id": logo.DeliverableID}}
+	refs := []map[string]any{{"kind": "deliverable", "id": page.DeliverableID}, {"kind": "deliverable", "id": logo.ID}}
 	tm.b.must(202, "POST", "/api/conversations/"+tm.thread.ID+"/messages", map[string]any{"content": "改一下标题", "refs": refs}, nil)
 	send := tm.lead.expectSend("暗号 77")
 	for _, part := range []string{"### 交付物 落地页", "id：" + page.DeliverableID, "第 1 版（designer-1 发布）", "（只取前 30000 字节）",
-		"read_deliverable(deliverable_id=" + page.DeliverableID, "logo.png 是图片", "read_deliverable(deliverable_id=" + logo.DeliverableID} {
+		"read_deliverable(deliverable_id=" + page.DeliverableID, "logo.png 是图片", "read_deliverable(deliverable_id=" + logo.ID} {
 		if !strings.Contains(send.Text, part) {
 			t.Fatalf("delivered text lacks %q:\n%.2000s", part, send.Text)
 		}

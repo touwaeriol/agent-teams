@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
@@ -45,6 +46,9 @@ func (s *Service) publishFile(ctx context.Context, tx *core.Tx, c *call) (Result
 	if entry == "" {
 		return Result{}, refuse("发布目录时目录里需要有 index.html")
 	}
+	if ct := artifacts.ContentType(entry); artifacts.Render(ct) == "image" {
+		return s.publishImage(ctx, tx, c, in, files[0], ct)
+	}
 	d, version, err := s.fileDeliverable(ctx, tx, c, in, entry, files)
 	if err != nil {
 		return Result{}, err
@@ -63,6 +67,48 @@ func (s *Service) publishFile(ctx context.Context, tx *core.Tx, c *call) (Result
 	}
 	text := fmt.Sprintf("已发布交付物 %s 第 %d 版（%d 个文件）。改稿后用 deliverable_id=%s 再发布，会成为新版本。", d.ID, version, len(files), d.ID)
 	return okJSON(text, protocol.PublishFileResult{DeliverableID: d.ID, Version: version}), nil
+}
+
+// svgRefusal and imageVersionRefusal explain why a lone image is not a deliverable.
+const (
+	svgRefusal          = "SVG 不是交付物，不能单独发布。要放进报告，就把图片和 index.html 放在同一目录、用 publish_file 发布成网站，或直接内联进 HTML（SVG 可以直接写进 HTML）"
+	imageVersionRefusal = "图片不能作为交付物的新版本：截图和图片不是交付物。要放进报告，就把图片和 index.html 放在同一目录、用 publish_file 发布成网站，或直接内联进 HTML（SVG 可以直接写进 HTML）"
+)
+
+// publishImage handles a lone bitmap (a screenshot): it is not a deliverable. The image is kept as
+// a project attachment and shown in the publisher's conversation as an "image" card; SVG and new
+// versions of a deliverable are refused. The upload's chunks are dropped either way.
+func (s *Service) publishImage(ctx context.Context, tx *core.Tx, c *call, in protocol.PublishFileInput,
+	f artifacts.ArtifactFile, contentType string) (Result, error) {
+	if err := artifacts.DeleteUpload(ctx, tx, string(c.upload.UploadID)); err != nil {
+		return Result{}, err
+	}
+	switch {
+	case contentType == "image/svg+xml":
+		return failText("%s", svgRefusal), nil
+	case in.DeliverableID != nil:
+		return failText("%s", imageVersionRefusal), nil
+	}
+	if core.SniffImage(f.Data) == "" {
+		return failText("%s 的扩展名是图片，内容却不是 PNG、JPEG、GIF 或 WebP 图片（比如改了扩展名的 PDF），没有保存。"+
+			"请发布真实的文件：PDF、文档用它本来的扩展名发布", f.Path), nil
+	}
+	title := strings.TrimSpace(in.Title)
+	a, err := core.NewAttachment(c.emp().ProjectID, c.sc.OwnerID, path.Base(f.Path), f.Data)
+	if err != nil {
+		return failText("截图和图片不是交付物，也没能作为附件保存：%s", err.Error()), nil
+	}
+	if a, err = core.InsertAttachment(ctx, tx, a, f.Data); err != nil {
+		return Result{}, err
+	}
+	if err := s.orch.RecordImage(ctx, tx, c.emp(), title, a.Ref()); err != nil {
+		return Result{}, err
+	}
+	url := core.AttachmentURLPrefix + a.ID
+	text := fmt.Sprintf("截图和图片不是交付物，没有发布成交付物。这张图片已作为附件 %s 保存在讨论串消息里（%s），用户能在讨论串里看到。"+
+		"要放进报告，就把图片和 index.html 放在同一目录、用 publish_file 发布成网站，或直接内联进 HTML（SVG 可以直接写进 HTML）；"+
+		"附件只在文字汇报里引用（写附件 id 或地址），Markdown 和网站交付物里引用不到它。", a.ID, url)
+	return okText(text), nil
 }
 
 // fileDeliverable creates the deliverable (version 1) or moves an earlier one to its next version.

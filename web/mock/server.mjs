@@ -219,13 +219,21 @@ const routes = [
   ["GET", /^\/api\/projects\/([^/]+)\/deliverables$/, (req, res, _m, url) => {
     const kind = url.searchParams.get("kind");
     const q = url.searchParams.get("q") ?? "";
-    json(res, 200, { ...page(state.deliverables.filter((d) => (!kind || d.kind === kind) && d.title.includes(q)).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))), storage_bytes: storageBytes() });
+    // no_images=true: leave out hosted images (render=image), like the real server.
+    const noImages = url.searchParams.get("no_images") === "true";
+    const shown = (d) => !(noImages && d.detail?.hosted && d.detail?.render === "image");
+    json(res, 200, { ...page(state.deliverables.filter((d) => (!kind || d.kind === kind) && d.title.includes(q) && shown(d)).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))), storage_bytes: storageBytes() });
   }],
   ["POST", /^\/api\/projects\/([^/]+)\/library$/, async (req, res, [pid]) => {
     const b = await body(req);
     const size = Math.floor((b.data?.length ?? 0) * 0.75);
     const name = String(b.name).split(/[\\/]/).pop();
-    const d = { id: `d${Date.now()}`, project_id: pid, thread_no: null, kind: /\.(png|jpe?g|gif|webp|svg|html?)$/i.test(name) ? "design" : "doc", title: b.title || name, url: "", detail: { hosted: true, entry: name, size, version: 1, files: 1, by: "user" }, published_by: "user", created_at: now(), updated_at: now() };
+    if (/\.(png|jpe?g|gif|webp|svg)$/i.test(name)) {
+      // Same as the real server: 422 validation on the name field.
+      const detail = `截图和图片（含 SVG）不是交付物：${name}。可以把图片直接内联进 HTML（data: 地址或内嵌 SVG）再上传，或作为附件发在讨论串消息里（支持 html、md、pdf、txt、json、csv）`;
+      return json(res, 422, { detail, code: "validation", fields: [{ path: "name", message: detail }] });
+    }
+    const d = { id: `d${Date.now()}`, project_id: pid, thread_no: null, kind: /\.html?$/i.test(name) ? "design" : "doc", title: b.title || name, url: "", detail: { hosted: true, entry: name, size, version: 1, files: 1, by: "user" }, published_by: "user", created_at: now(), updated_at: now() };
     state.deliverables.unshift(d);
     json(res, 201, d);
   }],

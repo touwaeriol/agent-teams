@@ -8,19 +8,44 @@ import { safeHref } from "./safeurl";
 export type SortKey = "name" | "owner" | "modified" | "size" | "type";
 export type SortDir = "asc" | "desc";
 
-/** publish_file's limits and file types (server artifacts.MaxBytes, ContentType). */
+/**
+ * publish_file's limits and the file types the user may add (server artifacts.MaxBytes). Images
+ * are not deliverables: screenshots belong inside a report document (they become thread
+ * attachments on the server), so the library takes no png/jpg/gif/webp/svg.
+ */
 export const LIBRARY_MAX_BYTES = 5 << 20;
-export const LIBRARY_EXTENSIONS = ["html", "htm", "md", "markdown", "svg", "png", "jpg", "jpeg", "gif", "webp", "pdf", "json", "csv", "txt"];
+export const LIBRARY_EXTENSIONS = ["html", "htm", "md", "markdown", "pdf", "json", "csv", "txt"];
 export const LIBRARY_ACCEPT = LIBRARY_EXTENSIONS.map((e) => `.${e}`).join(",");
+export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "svg"];
+export const IMAGE_NOT_DELIVERABLE = "图片不是交付物，请把截图放进报告文档（html/md/pdf）里";
 
 export function extensionOf(name: string): string {
   const dot = name.lastIndexOf(".");
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
 
+/**
+ * A hosted image (render=image, an image content type, or a png/jpg/gif/webp/svg entry). Images
+ * are no longer deliverables; older ones stay in the data but no list shows them.
+ */
+export function isImageDeliverable(d: Pick<DeliverableView, "detail">): boolean {
+  if (!isHosted(d)) return false;
+  if (d.detail.render === "image") return true;
+  const type = d.detail.content_type;
+  if (typeof type === "string" && type.toLowerCase().startsWith("image/")) return true;
+  return IMAGE_EXTENSIONS.includes(extensionOf(String(d.detail.entry ?? "")));
+}
+
+/** Whether the 资料库 (and the thread's 交付物 view) lists a deliverable: everything but images. */
+export function isLibraryDeliverable(d: Pick<DeliverableView, "detail">): boolean {
+  return !isImageDeliverable(d);
+}
+
 /** Why a file cannot be added, or null when it can. */
 export function uploadProblem(file: { name: string; size: number }): string | null {
-  if (!LIBRARY_EXTENSIONS.includes(extensionOf(file.name))) return `不支持 ${file.name}：只能添加 html、md、svg、png、jpg、gif、webp、pdf、json、csv、txt`;
+  const ext = extensionOf(file.name);
+  if (IMAGE_EXTENSIONS.includes(ext)) return `${file.name}：${IMAGE_NOT_DELIVERABLE}`;
+  if (!LIBRARY_EXTENSIONS.includes(ext)) return `不支持 ${file.name}：只能添加 html、md、pdf、json、csv、txt`;
   if (file.size === 0) return `${file.name} 是空文件`;
   if (file.size > LIBRARY_MAX_BYTES) return `${file.name} 超过 5 MB`;
   return null;

@@ -104,7 +104,7 @@ func (a *API) threadRefs(ctx context.Context, pid, q string, out []RefCandidate)
 }
 
 func (a *API) deliverableRefs(ctx context.Context, pid, q string, out []RefCandidate) ([]RefCandidate, error) {
-	list, err := core.Deliverables(ctx, a.e.Core.Pool, pid, core.DeliverableFilter{Limit: 200})
+	list, err := core.Deliverables(ctx, a.e.Core.Pool, pid, core.DeliverableFilter{Limit: 200, NoImages: true})
 	if err != nil {
 		return nil, err
 	}

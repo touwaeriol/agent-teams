@@ -49,13 +49,13 @@ func TestProjectChromeSettings(t *testing.T) {
 func TestLibraryUploadAndUsage(t *testing.T) {
 	tm := startTeam(t)
 	path := "/api/projects/" + tm.projectID
-	png := []byte("\x89PNG\r\n\x1a\nfake")
+	png := []byte("# 发布说明\n")
 	if code, raw := tm.b.do("POST", path+"/library", map[string]any{"name": "run.sh", "data": base64.StdEncoding.EncodeToString(png)}); code != 422 {
 		t.Fatalf("shell script accepted: %d %s", code, raw)
 	}
 	var d core.DeliverableView
-	tm.b.must(201, "POST", path+"/library", map[string]any{"name": "C:\\shots\\main.png", "data": base64.StdEncoding.EncodeToString(png)}, &d)
-	if d.Title != "main.png" || d.PublishedBy != "user" || d.Kind != "design" || d.Detail["hosted"] != true || d.Detail["entry"] != "main.png" {
+	tm.b.must(201, "POST", path+"/library", map[string]any{"name": "C:\\docs\\main.md", "data": base64.StdEncoding.EncodeToString(png)}, &d)
+	if d.Title != "main.md" || d.PublishedBy != "user" || d.Kind != "doc" || d.Detail["hosted"] != true || d.Detail["entry"] != "main.md" {
 		t.Fatalf("uploaded %+v", d)
 	}
 	var page struct {
@@ -68,7 +68,7 @@ func TestLibraryUploadAndUsage(t *testing.T) {
 	}
 	var files struct{ Files []struct{ Path string } }
 	tm.b.must(200, "GET", "/api/deliverables/"+d.ID+"/files", nil, &files)
-	if len(files.Files) != 1 || files.Files[0].Path != "main.png" {
+	if len(files.Files) != 1 || files.Files[0].Path != "main.md" {
 		t.Fatalf("files %+v", files)
 	}
 	turnEnded(tm.dev, 0.02, 100, 40)

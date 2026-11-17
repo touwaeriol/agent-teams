@@ -1,0 +1,228 @@
+package engine_test
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"net/url"
+	"strings"
+	"testing"
+
+	protocol "github.com/touwaeriol/agent-teams/protocol"
+
+	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/orchapi"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
+)
+
+const fakePNG = "\x89PNG\r\n\x1a\nfake screenshot"
+
+// deliverableCount is the number of deliverables the user sees in the project library.
+func (tm *team) deliverableCount(t *testing.T) int {
+	t.Helper()
+	var list struct{ Items []core.DeliverableView }
+	tm.b.must(200, "GET", "/api/projects/"+tm.projectID+"/deliverables", nil, &list)
+	return len(list.Items)
+}
+
+// TestPublishFileScreenshotIsAttachment: a lone PNG sent with publish_file is not a deliverable:
+// it is stored as a project attachment, shown in the thread as an "image" card, and the result
+// explains how to use it. SVG and images as a new version are refused; a site directory with
+// images is still a deliverable.
+func TestPublishFileScreenshotIsAttachment(t *testing.T) {
+	tm, _ := startDesignTeam(t)
+	res := tm.dev.publish(map[string]any{"path": "shots/login.png", "kind": "design", "title": "登录页截图"}, 1<<20,
+		upFile{"login.png", fakePNG})
+	if !res.Ok || res.Structured != nil || !strings.Contains(text(res), "不是交付物") || !strings.Contains(text(res), "/api/attachments/img_") ||
+		!strings.Contains(text(res), "index.html") {
+		t.Fatalf("png publish %+v %s", res, text(res))
+	}
+	if n := tm.deliverableCount(t); n != 0 {
+		t.Fatalf("screenshot became %d deliverables", n)
+	}
+	cards := ofKind(tm.threadMessages(t), "image")
+	if len(cards) != 1 || cards[0].Author != "designer-1" || cards[0].Content != "designer-1 上传了截图：登录页截图" {
+		t.Fatalf("image cards %+v", cards)
+	}
+	raw, _ := json.Marshal(cards[0].Meta["attachments"])
+	var refs []core.AttachmentRef
+	_ = json.Unmarshal(raw, &refs)
+	if len(refs) != 1 || refs[0].ContentType != "image/png" || refs[0].Name != "login.png" || refs[0].Size != len(fakePNG) ||
+		!strings.Contains(text(res), refs[0].ID) {
+		t.Fatalf("attachments %s", raw)
+	}
+	if code, body := tm.b.do("GET", "/api/attachments/"+refs[0].ID, nil); code != 200 || string(body) != fakePNG {
+		t.Fatalf("attachment served %d %q", code, body)
+	}
+	if left := uploadChunks(t, tm); left != 0 {
+		t.Fatalf("%d upload chunks left", left)
+	}
+
+	// A lone SVG is refused, and an image cannot be a deliverable's new version.
+	res = tm.dev.publish(map[string]any{"path": "d.svg", "kind": "design", "title": "图"}, 1<<20, upFile{"d.svg", "<svg/>"})
+	if res.Ok || !strings.Contains(text(res), "SVG 不是交付物") {
+		t.Fatalf("svg publish %+v", res)
+	}
+	site := tm.dev.publish(map[string]any{"path": "report", "kind": "doc", "title": "验收报告"}, 1<<20,
+		upFile{"index.html", `<!doctype html><img src="shot.png">`}, upFile{"shot.png", fakePNG})
+	var pub protocol.PublishFileResult
+	if !site.Ok {
+		t.Fatalf("site with an image %+v", site)
+	}
+	_ = json.Unmarshal(*site.Structured, &pub)
+	res = tm.dev.publish(map[string]any{"path": "x.png", "kind": "doc", "title": "验收报告", "deliverable_id": pub.DeliverableID}, 1<<20,
+		upFile{"x.png", fakePNG})
+	if res.Ok || !strings.Contains(text(res), "不能作为交付物的新版本") {
+		t.Fatalf("image as new version %+v", res)
+	}
+	if left := uploadChunks(t, tm); left != 0 {
+		t.Fatalf("%d upload chunks left after refusals", left)
+	}
+	var files struct {
+		Version int
+		Render  string
+	}
+	tm.b.must(200, "GET", "/api/deliverables/"+pub.DeliverableID+"/files", nil, &files)
+	if files.Version != 1 || files.Render != "html" || tm.deliverableCount(t) != 1 || len(ofKind(tm.threadMessages(t), "image")) != 1 {
+		t.Fatalf("site %+v, %d deliverables", files, tm.deliverableCount(t))
+	}
+}
+
+// TestScreenshotsAreNotLibraryFiles: the library refuses images and SVG; list_deliverables, the
+// thread's deliverable count and latest deliverable, the project overview and search leave out hosted images
+// published before (the rows stay in the library).
+func TestScreenshotsAreNotLibraryFiles(t *testing.T) {
+	tm, _ := startDesignTeam(t)
+	path := "/api/projects/" + tm.projectID + "/library"
+	for _, name := range []string{"main.png", "a.jpg", "b.webp", "c.svg"} {
+		code, body := tm.b.do("POST", path, map[string]any{"name": name, "data": base64.StdEncoding.EncodeToString([]byte(fakePNG))})
+		if code != 422 || !strings.Contains(string(body), "不是交付物") {
+			t.Fatalf("library %s: %d %s", name, code, body)
+		}
+	}
+	tm.b.must(201, "POST", path, map[string]any{"name": "notes.md", "data": base64.StdEncoding.EncodeToString([]byte("# hi"))}, nil)
+	res := tm.dev.publish(map[string]any{"path": "spec.md", "kind": "doc", "title": "规格"}, 1<<20, upFile{"spec.md", "# 规格"})
+	var spec protocol.PublishFileResult
+	_ = json.Unmarshal(*res.Structured, &spec)
+	// An image published to the thread before screenshots stopped being deliverables (newer than the spec).
+	err := tm.w.e.Core.InTx(tm.w.ctx, func(tx *core.Tx) error {
+		_, err := core.InsertDeliverable(tm.w.ctx, tx, core.NewDeliverable{ProjectID: tm.projectID, ThreadID: &tm.thread.ID, Kind: "design",
+			Title: "旧截图", Detail: map[string]any{"hosted": true, "render": "image", "entry": "old.png", "version": 1}, PublishedBy: "designer-1"})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := tm.deliverableCount(t); n != 3 {
+		t.Fatalf("library has %d items, want the old image kept", n)
+	}
+	list := tm.dev.mustCall("list_deliverables", map[string]any{})
+	var out protocol.ListDeliverablesResult
+	_ = json.Unmarshal(*list.Structured, &out)
+	if len(out.Deliverables) != 2 || out.Deliverables[0].ID != spec.DeliverableID || out.Deliverables[1].Title != "notes.md" ||
+		strings.Contains(text(list), "旧截图") {
+		t.Fatalf("list_deliverables %+v", out)
+	}
+	// The thread's badge and latest deliverable, and the project overview, leave the image out too.
+	var th core.ThreadView
+	tm.b.must(200, "GET", "/api/threads/"+tm.thread.ID, nil, &th)
+	if th.Counts.Deliverables != 1 || th.LatestDeliverable == nil || th.LatestDeliverable.ID != spec.DeliverableID {
+		t.Fatalf("thread counts %+v latest %+v", th.Counts, th.LatestDeliverable)
+	}
+	var ov struct {
+		Threads            []core.ThreadView      `json:"threads"`
+		RecentDeliverables []core.DeliverableView `json:"recent_deliverables"`
+	}
+	tm.b.must(200, "GET", "/api/projects/"+tm.projectID+"/overview", nil, &ov)
+	if len(ov.RecentDeliverables) != 2 || len(ov.Threads) != 1 || ov.Threads[0].Counts.Deliverables != 1 {
+		t.Fatalf("overview %+v", ov)
+	}
+	for _, d := range ov.RecentDeliverables {
+		if d.Title == "旧截图" {
+			t.Fatalf("overview lists the old image")
+		}
+	}
+	// Project search shows deliverables too: the old image's title finds nothing, the spec is found.
+	var found struct{ Deliverables []core.DeliverableView }
+	tm.b.must(200, "GET", "/api/projects/"+tm.projectID+"/search?q="+url.QueryEscape("旧截图"), nil, &found)
+	if len(found.Deliverables) != 0 {
+		t.Fatalf("search finds the old image %+v", found.Deliverables)
+	}
+	tm.b.must(200, "GET", "/api/projects/"+tm.projectID+"/search?q="+url.QueryEscape("规格"), nil, &found)
+	if len(found.Deliverables) != 1 || found.Deliverables[0].ID != spec.DeliverableID {
+		t.Fatalf("search for the spec %+v", found.Deliverables)
+	}
+	// The deliverables list leaves the old image out only when asked (no_images=true): lists of
+	// deliverables ask, a lookup by id does not.
+	var page struct{ Items []core.DeliverableView }
+	tm.b.must(200, "GET", "/api/projects/"+tm.projectID+"/deliverables?no_images=true", nil, &page)
+	if len(page.Items) != 2 || page.Items[0].ID != spec.DeliverableID {
+		t.Fatalf("no_images list %+v", page.Items)
+	}
+	// @ reference candidates leave it out too.
+	var refs orchapi.RefList
+	tm.b.must(200, "GET", "/api/projects/"+tm.projectID+"/references?kind=deliverable&q=", nil, &refs)
+	if len(refs.Items) != 2 {
+		t.Fatalf("reference candidates %+v", refs.Items)
+	}
+	for _, r := range refs.Items {
+		if r.Label == "旧截图" {
+			t.Fatalf("reference candidates list the old image")
+		}
+	}
+}
+
+// TestPublishFileFakeImageRefused: a file named like an image whose bytes are not PNG/JPEG/GIF/WebP
+// (a PDF renamed to .png) is refused with the reason, nothing is stored and the upload is dropped.
+func TestPublishFileFakeImageRefused(t *testing.T) {
+	tm, _ := startDesignTeam(t)
+	for _, f := range []upFile{{"report.png", "%PDF-1.7 fake pdf"}, {"notes.jpg", "just text"}} {
+		res := tm.dev.publish(map[string]any{"path": f.path, "kind": "doc", "title": "假图片"}, 1<<20, f)
+		if res.Ok || !strings.Contains(text(res), "内容却不是 PNG、JPEG、GIF 或 WebP") || !strings.Contains(text(res), f.path) {
+			t.Fatalf("%s: %+v", f.path, res)
+		}
+	}
+	if left := uploadChunks(t, tm); left != 0 {
+		t.Fatalf("%d upload chunks left", left)
+	}
+	var n int
+	if err := store.QueryRow(tm.w.ctx, tm.w.e.Core.Pool, `SELECT count(*) FROM at_attachments`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 || tm.deliverableCount(t) != 0 || len(ofKind(tm.threadMessages(t), "image")) != 0 {
+		t.Fatalf("fake images stored: %d attachments", n)
+	}
+}
+
+// TestScreenshotAttachmentDeletedWithThread: the attachment behind an "image" card is the
+// project owner's only (another user gets 404) and goes away when the thread is deleted.
+func TestScreenshotAttachmentDeletedWithThread(t *testing.T) {
+	tm, _ := startDesignTeam(t)
+	res := tm.dev.publish(map[string]any{"path": "s.png", "kind": "design", "title": "截图"}, 1<<20, upFile{"s.png", fakePNG})
+	if !res.Ok {
+		t.Fatalf("publish %+v", res)
+	}
+	cards := ofKind(tm.threadMessages(t), "image")
+	raw, _ := json.Marshal(cards[0].Meta["attachments"])
+	var refs []core.AttachmentRef
+	_ = json.Unmarshal(raw, &refs)
+	if len(refs) != 1 {
+		t.Fatalf("attachments %s", raw)
+	}
+	img := "/api/attachments/" + refs[0].ID
+	tm.b.must(200, "GET", img, nil, nil)
+	other := tm.w.signUp("stranger-shot@example.com")
+	if code, _ := other.do("GET", img, nil); code != 404 {
+		t.Fatalf("another user's attachment = %d", code)
+	}
+	tm.b.must(204, "DELETE", "/api/threads/"+tm.thread.ID, nil, nil)
+	tm.b.must(404, "GET", img, nil, nil)
+}
+
+func uploadChunks(t *testing.T, tm *team) int {
+	t.Helper()
+	var n int
+	if err := store.QueryRow(tm.w.ctx, tm.w.e.Core.Pool, `SELECT count(*) FROM at_upload_chunks`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}

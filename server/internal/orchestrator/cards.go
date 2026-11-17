@@ -17,11 +17,14 @@ import (
 //	todos     the employee's TodoWrite checklist, updated in place while unfinished
 //	plan      an ExitPlanMode plan (Markdown)
 //	artifact  a deliverable published with publish_file / publish_deliverable
+//	image     a screenshot or image sent with publish_file: not a deliverable, kept as an
+//	          attachment (meta.attachments) so the chat shows it
 //	resumed   "会话已恢复": the session was rebuilt from a recap after its transcript was lost
 const (
 	CardTodos    = "todos"
 	CardPlan     = "plan"
 	CardArtifact = "artifact"
+	CardImage    = "image"
 	CardResumed  = "resumed"
 )
 
@@ -75,6 +78,17 @@ func (o *Orchestrator) RecordArtifact(ctx context.Context, tx *core.Tx, e core.E
 		"url": d.URL, "hosted": d.Detail["hosted"] == true, "entry": d.Detail["entry"], "render": d.Detail["render"],
 		"version": version}}
 	return o.recordCard(ctx, tx, e, conv, CardArtifact, fmt.Sprintf("%s 发布了交付物：%s", e.Name, d.Title), meta)
+}
+
+// RecordImage shows an image an employee sent with publish_file (stored as an attachment, not a
+// deliverable) in the employee's conversation.
+func (o *Orchestrator) RecordImage(ctx context.Context, tx *core.Tx, e core.Employee, title string, img core.AttachmentRef) error {
+	conv, err := o.conversationOf(ctx, tx, e)
+	if err != nil {
+		return err
+	}
+	meta := withImages(map[string]any{"employee": e.Name, "title": title}, []core.AttachmentRef{img})
+	return o.recordCard(ctx, tx, e, conv, CardImage, fmt.Sprintf("%s 上传了截图：%s", e.Name, title), meta)
 }
 
 func (o *Orchestrator) recordCard(ctx context.Context, tx *core.Tx, e core.Employee, conv, kind, content string, meta map[string]any) error {

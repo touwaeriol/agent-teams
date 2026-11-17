@@ -5627,7 +5627,7 @@
             "type": "string"
           },
           "name": {
-            "description": "File name; its extension decides the type (same list as publish_file)",
+            "description": "File name; its extension decides the type: html, md, pdf, txt, json or csv (images and SVG are not deliverables and are refused)",
             "maxLength": 300,
             "minLength": 1,
             "type": "string"
@@ -9835,6 +9835,16 @@
               "maximum": 200,
               "minimum": 0,
               "type": "integer"
+            }
+          },
+          {
+            "description": "Leave out hosted lone images (render=image), published before screenshots stopped being deliverables",
+            "explode": false,
+            "in": "query",
+            "name": "no_images",
+            "schema": {
+              "description": "Leave out hosted lone images (render=image), published before screenshots stopped being deliverables",
+              "type": "boolean"
             }
           }
         ],

@@ -5,10 +5,15 @@ description: Make HTML prototypes, UI mockups, diagrams and visual design docume
 
 # Design: HTML prototypes and visual design docs
 
-You design by writing files. A design is a **single self-contained HTML file** (or SVG for a
-diagram) that you write in your working directory and then publish with the platform tool
+You design by writing files. A design is a **single self-contained HTML file** (a diagram is an
+SVG inlined in that HTML) that you write in your working directory and then publish with the platform tool
 `publish_file`. People look at it on the project's Deliverables page and their comments come
 back to you as messages; answer them by publishing a new version.
+
+Screenshots, images and SVG files are **not deliverables**. `publish_file` on a lone PNG/JPG/GIF/WebP
+only saves it as an attachment in the thread's messages (no deliverable is created), and a lone
+SVG is refused. To show an image in a deliverable, put it in a directory with the `index.html` that
+uses it and publish the directory, or inline it in the HTML.
 
 ## 1. Before you start
 
@@ -46,7 +51,10 @@ back to you as messages; answer them by publishing a new version.
 
 - If a browser is available on this machine (for example `npx playwright` or a headless
   Chrome), take screenshots at 390 px and 1280 px wide, in light and dark, and look at them
-  (Read the PNG). Fix overlaps, overflow, clipped text and contrast problems.
+  (Read the PNG). Fix overlaps, overflow, clipped text and contrast problems. These screenshots
+  are for checking your own work, not deliverables; if a reviewer needs one, put it next to an
+  `index.html` that shows it and publish the directory, or cite the attachment (id or URL) in your
+  task report.
 - Without a browser, re-read the HTML carefully: unclosed tags, CSS variables used but not
   defined, scripts that reference missing elements.
 - Open the file with a quick HTML validator if one is installed; otherwise at least make sure

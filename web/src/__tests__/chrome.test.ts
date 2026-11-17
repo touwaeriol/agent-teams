@@ -1,7 +1,7 @@
 // Ported from web/src/__tests__/chrome.test.ts (sidePanelOf now lives in pages/main/logic.ts).
 import { describe, expect, it } from "vitest";
 import type { DeliverableView } from "@/api/views";
-import { fileIcon, formatBytes, formatDateTime, libraryColumns, nextSort, ownerLabel, sortLibrary, typeLabel, uploadProblem } from "@/lib/library";
+import { fileIcon, isImageDeliverable, isLibraryDeliverable, LIBRARY_ACCEPT, formatBytes, formatDateTime, libraryColumns, nextSort, ownerLabel, sortLibrary, typeLabel, uploadProblem } from "@/lib/library";
 import { colorIcon, iconLook } from "@/lib/projectIcon";
 import { fillDays, formatTokens, formatUSD, INSTRUCTIONS_MAX, modelLabel, modelOptions, sectionOf, worktreeChoice } from "@/lib/projectSettings";
 import { describeCron, looksLikeCron, presetOf } from "@/lib/schedules";
@@ -48,8 +48,20 @@ describe("library", () => {
     expect(nextSort({ key: "name", dir: "asc" }, "name")).toEqual({ key: "name", dir: "desc" });
     expect(nextSort({ key: "name", dir: "asc" }, "modified")).toEqual({ key: "modified", dir: "desc" });
   });
+  it("leaves hosted images out of the library", () => {
+    expect(isImageDeliverable(item("a", { kind: "design", detail: { hosted: true, entry: "06-nodes.png", render: "image" } }))).toBe(true);
+    expect(isImageDeliverable(item("b", { kind: "doc", detail: { hosted: true, entry: "flow.SVG" } }))).toBe(true);
+    expect(isImageDeliverable(item("c", { kind: "doc", detail: { hosted: true, entry: "x", content_type: "image/gif" } }))).toBe(true);
+    for (const [entry, render] of [["a.html", "html"], ["b.md", "markdown"], ["c.pdf", "pdf"], ["d.txt", "text"], ["e.csv", "text"]] as const)
+      expect(isLibraryDeliverable(item(entry, { detail: { hosted: true, entry, render } }))).toBe(true);
+    // links are not hosted files: a design link (even one ending in .png) and a PR stay listed
+    expect(isLibraryDeliverable(item("d", { kind: "design", url: "https://figma.com/x.png" }))).toBe(true);
+    expect(isLibraryDeliverable(item("e", { kind: "pr", url: "https://github.com/o/r/pull/1" }))).toBe(true);
+  });
   it("refuses files the server would refuse", () => {
-    expect(uploadProblem({ name: "shot.PNG", size: 10 })).toBeNull();
+    for (const name of ["shot.PNG", "a.jpg", "b.jpeg", "c.gif", "d.webp", "e.svg"]) expect(uploadProblem({ name, size: 10 })).toContain("图片不是交付物");
+    for (const name of ["a.html", "b.md", "c.pdf", "d.txt", "e.json", "f.csv"]) expect(uploadProblem({ name, size: 10 })).toBeNull();
+    expect(LIBRARY_ACCEPT).not.toMatch(/png|jpe?g|gif|webp|svg/);
     expect(uploadProblem({ name: "run.sh", size: 10 })).toContain("不支持");
     expect(uploadProblem({ name: "big.pdf", size: 6 << 20 })).toContain("5 MB");
     expect(uploadProblem({ name: "empty.md", size: 0 })).toContain("空文件");
