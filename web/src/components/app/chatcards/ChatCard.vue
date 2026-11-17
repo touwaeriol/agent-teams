@@ -1,7 +1,8 @@
 <script setup lang="ts">
-/** A chat card by message kind (todos, plan, artifact, resumed); other kinds draw nothing. */
+/** A chat card by message kind (todos, plan, artifact, resumed, image); other kinds draw nothing. */
 import type { MessageView } from "@/api/views";
 import ArtifactCard from "./ArtifactCard.vue";
+import ImageCard from "./ImageCard.vue";
 import PlanCard from "./PlanCard.vue";
 import ResumedNote from "./ResumedNote.vue";
 import TodoCard from "./TodoCard.vue";
@@ -14,4 +15,5 @@ defineProps<{ message: MessageView; pid: string }>();
   <PlanCard v-else-if="message.kind === 'plan'" :message="message" />
   <ArtifactCard v-else-if="message.kind === 'artifact'" :message="message" :pid="pid" />
   <ResumedNote v-else-if="message.kind === 'resumed'" :message="message" />
+  <ImageCard v-else-if="message.kind === 'image'" :message="message" />
 </template>
