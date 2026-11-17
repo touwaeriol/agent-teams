@@ -24,13 +24,14 @@ const FeatureFileDownload = "file_download"
 
 const listDeliverablesLimit = 50
 
-// listDeliverables lists the project's deliverables with their version counts (every thread).
+// listDeliverables lists the project's deliverables with their version counts (every thread);
+// hosted images published before screenshots stopped being deliverables are left out.
 func (s *Service) listDeliverables(ctx context.Context, tx *core.Tx, c *call) (Result, error) {
 	var in protocol.ListDeliverablesInput
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
-	f := core.DeliverableFilter{Limit: listDeliverablesLimit}
+	f := core.DeliverableFilter{Limit: listDeliverablesLimit, NoImages: true}
 	if in.Kind != nil {
 		f.Kind = strings.TrimSpace(*in.Kind)
 	}

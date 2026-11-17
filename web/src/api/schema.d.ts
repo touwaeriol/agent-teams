@@ -3509,7 +3509,7 @@ export interface components {
         UploadBody: {
             /** @description Base64 of the file, at most 5 MB */
             data: string;
-            /** @description File name; its extension decides the type (same list as publish_file) */
+            /** @description File name; its extension decides the type : html, md, pdf, txt, json or csv (images and SVG are not deliverables and are refused) */
             name: string;
             /** @description Shown name; default the file name */
             title?: string;

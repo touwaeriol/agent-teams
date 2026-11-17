@@ -5611,7 +5611,7 @@
             "type": "string"
           },
           "name": {
-            "description": "File name; its extension decides the type (same list as publish_file)",
+            "description": "File name; its extension decides the type: html, md, pdf, txt, json or csv (images and SVG are not deliverables and are refused)",
             "maxLength": 300,
             "minLength": 1,
             "type": "string"
