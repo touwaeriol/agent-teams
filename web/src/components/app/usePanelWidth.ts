@@ -35,11 +35,13 @@ export function useElementWidth(el: Ref<HTMLElement | null | undefined>): Ref<nu
     },
     { immediate: true },
   );
-  if (typeof window !== "undefined") window.addEventListener("resize", onResize);
+  // Without ResizeObserver, follow the window instead.
+  const fallback = typeof ResizeObserver !== "function" && typeof window !== "undefined";
+  if (fallback) window.addEventListener("resize", onResize);
   onBeforeUnmount(() => {
     stop();
     ro?.disconnect();
-    if (typeof window !== "undefined") window.removeEventListener("resize", onResize);
+    if (fallback) window.removeEventListener("resize", onResize);
   });
   return width;
 }

@@ -3,7 +3,7 @@
 // detail) in the resizable right panel. Phones get thread chips and the project overview
 // (?sheet=threads|library|schedules).
 // /projects/:pid/settings[/:section] opens the project settings dialog over the board.
-import { computed, ref, watchEffect } from "vue";
+import { computed, nextTick, ref, watch, watchEffect } from "vue";
 import { MessagesSquare } from "lucide-vue-next";
 import { useRoute, useRouter } from "vue-router";
 import { flattenMessages, useCoordinator, useMe, useMessages, useProject, useThreads } from "@/api/queries";
@@ -62,6 +62,12 @@ const setPanelWidth = (w: number) => (detailOpen.value ? detail.set(w) : setList
 const resetPanelWidth = () => (detailOpen.value ? detail.reset() : setListWidth(PANEL_DEFAULT));
 /** The coordinator chat is squeezed to a strip: clip it at its own width and make it a way back. */
 const peek = computed(() => detailOpen.value && board.value - detail.width.value < COORDINATOR_COMPACT);
+// The strip makes the coordinator chat inert; focus inside it would be dropped, so hand it to the panel.
+const mainEl = ref<HTMLElement | null>(null);
+watch(peek, (on) => {
+  if (!on || !mainEl.value?.contains(document.activeElement)) return;
+  void nextTick(() => boardEl.value?.querySelector<HTMLElement>("aside[aria-label=讨论串]")?.focus({ preventScroll: true }));
+});
 /** The panel is at its widest for this window (the list's expand button then shrinks it back). */
 const isWide = (w: number) => w >= clampWidth(PANEL_MAX, window.innerWidth) && w > PANEL_DEFAULT;
 const openThread = (no: number) => void router.push(threadPath(pid.value, no));
@@ -88,8 +94,8 @@ watchEffect(() => {
   <EmptyState v-if="project.error.value" title="找不到这个项目" :description="errorText(project.error.value)" />
   <Loading v-else-if="!project.data.value" class="h-full" />
   <div v-else ref="boardEl" class="flex h-full min-h-0 min-w-0 flex-1">
-    <main class="relative flex min-h-0 min-w-0 flex-1 overflow-clip" :data-peek="peek ? '' : undefined">
-      <div :class="['flex min-h-0 min-w-0 flex-1 flex-col', peek && 'min-w-[720px]']" :inert="peek">
+    <main ref="mainEl" :class="['relative flex min-h-0 min-w-0 flex-1', peek && 'overflow-clip']" :data-peek="peek ? '' : undefined">
+      <div :class="['flex min-h-0 min-w-0 flex-1 flex-col', peek && 'min-w-[720px]']" :inert="peek || undefined">
         <MainHeader :project="project.data.value" :coordinator="coordinator.data.value" :threads="list" :panel="panel" @panel="setPanel" @schedules="schedules = true" @overview="setSheet('threads')" />
         <ThreadChips :pid="pid" :threads="list" />
         <div class="flex-1 overflow-y-auto">
