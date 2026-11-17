@@ -23,6 +23,7 @@
 | 成员（含审查、决策岗） | **项目** | 岗位模板的 `count` | `at_employees.thread_id = NULL`，名字 `<岗位>-<n>`，项目内唯一 |
 
 - **身份**：用户是老板 / 甲方，不是员工。统筹（项目经理）和组长（讨论串的临时项目组长）是**管理岗**：仍是员工（有会话、状态、会被提问和审批），但**不算编制、不领队列里的任务**，只安排任务。“配几个就几个”只约束成员（**执行岗**）。组长随讨论串上任、卸任，开讨论串不受编制限制（想限制同时进行的讨论串数用已有的 `max_running_threads`，超出排队，默认不限）。
+- **岗位人数的含义变了**：岗位模板的 `count` 原来是“每个讨论串几个”，改成“项目编制几个”。`open_thread` 的 `roles`（按讨论串指定人数）不再有意义，只保留“这个讨论串用哪些岗位”（`only_roles`：组长只能往这些岗位派任务）；传了人数的旧调用忽略人数。
 - **建在哪里**：项目第一次开讨论串时按用户当前的岗位模板建齐成员；之后岗位模板改了 `count`（加员工 / 减员工），下一次调度时补建或把多出来的设为 `active = false`（手里有任务的等任务结束再停）。项目设置里以后可以按项目覆盖人数，第一版用模板的 `count`。
 - **成员当前在哪个讨论串**：新列 `at_employees.current_thread_id`（可空）= 它手里任务所在的讨论串，或它最近一个会话所属的讨论串。用于粘性和办公室显示，不用于权限。
 - **会话**：仍然一个员工最多一个活会话（`at_agent_sessions_live`）。`at_agent_sessions` 加 `thread_id`：这个会话是在哪个讨论串的 worktree 里开的。成员换讨论串 = 关掉旧会话（`close_reason = switch_thread`）、在新讨论串的目录开新会话。
@@ -111,13 +112,13 @@
 - **不每个任务都压缩**：压缩要多花一个回合、会丢细节，完整上下文的缓存命中也更省钱。只按用量阈值压缩；Claude Code 自己快满时也会自动压缩。
 - **clear 后的第一条消息** = 任务简报 + 讨论串交接摘要（组长是谁、主任务计划、这个成员在这个讨论串以前做过的任务和结果），沿用 `handoffSummary` / `threadDigest` 的做法，只换成按“成员 × 讨论串”取。
 
-### 5.0 按岗位配置（员工模板）
+### 5.1 按岗位配置（员工模板）
 
 压缩分两种，都配在岗位模板上（`at_roles` 新列，YAML 视图 `context:` 段），项目不单独覆盖：
 
 | 字段 | 含义 | 由谁执行 |
 | --- | --- | --- |
-| `compact_between_pct` | 任务之间：领下一个任务时上下文 ≥ 这个比例就先压缩 | 平台（§5.1 `session.compact`） |
+| `compact_between_pct` | 任务之间：领下一个任务时上下文 ≥ 这个比例就先压缩 | 平台（§5.3 `session.compact`） |
 | `compact_in_task_pct` | 任务进行中：上下文到这个比例运行时自己压缩 | 运行时：Claude 开会话时设环境变量 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`；Codex 设 `model_auto_compact_token_limit = 上下文窗口 × 比例`。改了在下一个会话生效 |
 | `clear_after_tasks` | 同一会话连续做满几个任务后 clear（0 = 不按次数 clear） | 平台 |
 | `compact_focus` | 压缩时要保留什么（一段话），拼进压缩指令 | 平台 + 钩子（§5.2） |
@@ -141,7 +142,7 @@
 4. **任务太大要反馈给组长**：同一个任务在任务中压缩了 2 次以上，平台给组长发 `[Task t5 · dev-1] 任务很长，已压缩 2 次，考虑拆小`。拆分质量会越来越好。
 5. **记指标**：每个任务记压缩次数、开始和结束时的上下文比例（`at_tasks` 加列），在团队页按岗位看，用来调阈值。
 
-### 5.1 协议改动（节点）
+### 5.3 协议改动（节点）
 
 - `session.event` 的 `turn_ended` 带上 `context: {used_tokens, max_tokens}`：Claude 用 `Query.getContextUsage()`（SDK 0.3.325 已有），Codex 用 `thread/tokenUsage/updated` 通知里的数字。控制台存到 `at_agent_sessions.context_pct`。
 - 新命令 `session.compact {session_id, open_gen}` → 守护进程：Claude 发一条 `/compact` 用户消息，Codex 调 `thread/compact/start`；完成后发现有的 `compacting` 事件（on → off）和 `session.compacted {session_id, open_gen, context}`。控制台等到 `session.compacted`（或 10 分钟超时）再送任务简报。
@@ -187,9 +188,11 @@
 
 ## 10. 分阶段
 
+逐项任务、改动位置、测试和验收见 [shared-members-plan.md](shared-members-plan.md)。
+
 0. **任务衔接（§4.2、§4.3）**：开工前同步 worktree（含审查岗）、回合结束自动推未推送的提交、简报带交接内容。和共享无关，现在就缺，先做。
 1. **共享员工 + 项目级队列**：§2–§4、§6–§8 和网页最少的改动（成员列表、讨论串参与者）。换讨论串一律 clear，同讨论串一律接着用原会话。
-2. **会话管理**：§5 的岗位配置、上下文用量上报、`session.compact`、按阈值压缩、连续 N 个任务后 clear、压缩后补任务锚点、任务太大反馈组长。
+2. **会话管理**：§5 的岗位配置（§5.1）、上下文用量上报（§5.3）、`session.compact`、按阈值压缩、连续 N 个任务后 clear、压缩后补任务锚点、任务太大反馈组长。
 3. **办公室和团队页**：§9。
 4. **调度优化**：可领取集合改成事件驱动维护（不再每次扫描逐个查依赖）、关键路径优先级。
 
