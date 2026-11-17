@@ -52,7 +52,21 @@ back to you as messages; answer them by publishing a new version.
 - Open the file with a quick HTML validator if one is installed; otherwise at least make sure
   the document has `<!doctype html>`, `<meta charset="utf-8">` and a viewport meta tag.
 
-## 4. Publish
+## 4. Revising an existing design
+
+To change a design that already exists (yours from an earlier session, or one another employee or
+thread published), never start a new deliverable:
+
+1. `list_deliverables()` (or `list_deliverables(thread=3, kind="design")`) to find its id.
+2. `read_deliverable(deliverable_id="dl_…")` downloads the latest version (or `version=N`) into
+   `.agent-deliverables/<id>/v<N>/` in your working directory. That folder is git-ignored, a site
+   keeps its sub-folders, and the result also lists the version history and the user's comments.
+3. Edit the files in place there.
+4. `publish_file(path=".agent-deliverables/<id>/v<N>/index.html", kind="design", title="…",
+   deliverable_id="dl_…")` (the folder for a multi-file site): this becomes the next version,
+   recorded under your name, and comments on it come to you.
+
+## 5. Publish
 
 Call `publish_file` with the path relative to your working directory:
 

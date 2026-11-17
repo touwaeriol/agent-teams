@@ -45,7 +45,7 @@ func (s *Service) publishFile(ctx context.Context, tx *core.Tx, c *call) (Result
 	if err != nil {
 		return Result{}, err
 	}
-	if err := artifacts.Save(ctx, tx, d.ID, version, c.emp().Name, files); err != nil {
+	if err := artifacts.Save(ctx, tx, d.ID, version, artifacts.Publisher{Name: c.emp().Name, EmployeeID: c.emp().ID}, files); err != nil {
 		return Result{}, err
 	}
 	if err := artifacts.DeleteUpload(ctx, tx, string(c.upload.UploadID)); err != nil {

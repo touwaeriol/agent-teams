@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/list_deliverables.json",
+  "title": "ListDeliverablesInput",
+  "description": "List this project's deliverables (designs, documents… from every thread), newest first: id, title, kind, versions, who published the latest version, thread and when it changed. Use read_deliverable to fetch one's files.",
+  "x-tool": {
+    "tiers": [
+      "coordinator",
+      "lead",
+      "member"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "thread": {
+      "description": "Only deliverables of this thread number.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "kind": {
+      "description": "Only this kind (design, doc, slides, dashboard, board, data, pr).",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    }
+  },
+  "$defs": {
+    "ListDeliverablesResult": {
+      "title": "ListDeliverablesResult",
+      "type": "object",
+      "required": [
+        "deliverables"
+      ],
+      "properties": {
+        "deliverables": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DeliverableSummary"
+          }
+        }
+      }
+    },
+    "DeliverableSummary": {
+      "title": "DeliverableSummary",
+      "type": "object",
+      "required": [
+        "id",
+        "title",
+        "kind",
+        "hosted",
+        "versions",
+        "latest_version",
+        "published_by",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "hosted": {
+          "description": "Files published with publish_file (read_deliverable can fetch them).",
+          "type": "boolean"
+        },
+        "versions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "latest_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "published_by": {
+          "description": "Who published the latest version.",
+          "type": "string"
+        },
+        "thread": {
+          "description": "Thread number; absent for project-level deliverables.",
+          "type": "integer"
+        },
+        "url": {
+          "description": "External link of a deliverable that is not hosted (PR, document elsewhere).",
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

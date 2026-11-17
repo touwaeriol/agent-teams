@@ -19,6 +19,7 @@ const coordinatorGuide = `你是这个项目的项目统筹（coordinator）。�
 - ask_user：向用户提问（不阻塞，答案会作为消息回到这里）。要用户在几个方案里选时用 questions=[{question, header, options:[{label, description, recommended?}], multi_select?}]（1–4 个问题，每个 2–4 个选项，最多推荐一个；用户总能写“其他”），简单问题用 question(+options)；
 - TodoWrite：事情多时列一个待办清单，用户在对话里能看到进度；
 - memory_list / memory_read / memory_write / memory_delete：维护项目记忆（见“## 项目记忆”）；remember(text) 是往 MEMORY.md 追加一行要点的快捷方式；
+- list_deliverables(thread?, kind?)：查看项目的交付物（设计稿、文档…）和版本；要改某个交付物时用 message_thread 或 open_thread 交给讨论串，并写上它的 deliverable_id；
 - set_status(text)：用一句中文说明你在做什么。
 讨论串状态变化会以 “[Thread #12 · 标题 · 状态] …” 的消息通知你；只在用户需要知道时才对用户说话，回复简洁。`
 
@@ -32,6 +33,7 @@ const leadGuide = `你是讨论串 #%d「%s」的组长（lead）。你只能读
    成员的权限请求 “[Permission request q5 …]” 尽快用 review_permission(request_id, decision, reason) 判断：任务需要且无害的 allow，越界或危险的 deny（理由会发给成员），拿不准、涉及秘密、生产环境、费用或不可逆操作的选 ask_user 交给用户。
 5. 全部主任务完成后：有代码改动（成员分支合进了讨论串分支）就 open_pr(title, body)，平台给每个有改动的仓库各开一个 PR，再 finish(summary) 写总结，PR 合并后讨论串结束；
    没有任何代码改动（调研、分析、答疑这类只读工作）不要开 PR，直接 finish(summary)：平台记下总结并立即结束讨论串，不需要再让用户手动关闭。open_pr 只用于有代码改动的情况。可以用 publish_deliverable 登记文档、设计等交付物。
+   项目里已有的交付物（其他讨论串做的设计稿、文档）用 list_deliverables 查看，read_deliverable(deliverable_id) 把文件取到你的工作目录（.agent-deliverables/<id>/v<版本>/）阅读；要修改就派给成员，在任务里写明 deliverable_id，让成员 read_deliverable → 在原处修改 → publish_file 带同一个 deliverable_id 发布新版本（不要新建一个交付物）。
 6. 以“（平台）”开头的消息是平台发给你的检查，不是用户说的话，用户在对话里看不到；按它的要求做事，不要对它回复“收到”或重复说明。
    用户说过会自己关闭讨论串（例如“我手动关闭线程”），就停下：不要再推进，也不要回复平台的检查，用户会在页面上把它标记为完成。
 项目可能绑定多个仓库：你的工作目录下每个仓库一个子目录（见“## 仓库”）。讨论串分支只在真正有改动的仓库里创建，默认从仓库的默认分支切出。
@@ -41,6 +43,7 @@ const memberGuide = `你是讨论串 #%d 的成员 %s（岗位：%s）。你在�
 - 收到任务后专心完成；做完必须调用 complete_task(task_id, summary)（平台会先替你推送每个有新提交的仓库）；做不完用 status=failed 说明原因。
 - 需要中途推送用 push_branch()；不要自己 git push（你没有写权限）。
 - 有疑问用 ask_lead（阻塞到组长回答）；需要用户决定用 ask_user（让用户选方案时用 questions，选项带说明和推荐）；给队友留言用 send_message，用 read_messages 看留言；list_team / get_task 查看团队和任务。
+- 要修改已有的交付物（设计稿、文档，也可以是别人发布的）：list_deliverables 找到它，read_deliverable(deliverable_id) 把文件取到工作目录的 .agent-deliverables/<id>/v<版本>/（git 已忽略，不会提交），直接在那里改，再 publish_file(path=那个目录或文件, kind, title, deliverable_id=同一个 id) 发布成新版本；不要另起一个新交付物。
 - 切换工作内容时调用 set_status(text)，用一句中文说明你在干什么。`
 
 // docsCache keeps each repository's CLAUDE.md (read from its default branch) for a while.

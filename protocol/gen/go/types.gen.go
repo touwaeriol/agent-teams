@@ -1579,6 +1579,258 @@ func (j *DaemonInfo) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+type DeliverableComment struct {
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt time.Time `json:"created_at"`
+
+	// SentTo corresponds to the JSON schema field "sent_to".
+	SentTo string `json:"sent_to"`
+
+	// Text corresponds to the JSON schema field "text".
+	Text string `json:"text"`
+
+	// Version corresponds to the JSON schema field "version".
+	Version *int `json:"version,omitempty,omitzero"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *DeliverableComment) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["created_at"]; raw != nil && !ok {
+		return fmt.Errorf("field created_at in DeliverableComment: required")
+	}
+	if _, ok := raw["sent_to"]; raw != nil && !ok {
+		return fmt.Errorf("field sent_to in DeliverableComment: required")
+	}
+	if _, ok := raw["text"]; raw != nil && !ok {
+		return fmt.Errorf("field text in DeliverableComment: required")
+	}
+	type Plain DeliverableComment
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = DeliverableComment(plain)
+	return nil
+}
+
+type DeliverableFileInfo struct {
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// Size corresponds to the JSON schema field "size".
+	Size int `json:"size"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *DeliverableFileInfo) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["path"]; raw != nil && !ok {
+		return fmt.Errorf("field path in DeliverableFileInfo: required")
+	}
+	if _, ok := raw["size"]; raw != nil && !ok {
+		return fmt.Errorf("field size in DeliverableFileInfo: required")
+	}
+	type Plain DeliverableFileInfo
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if 0 > plain.Size {
+		return fmt.Errorf("field %s: must be >= %v", "size", 0)
+	}
+	*j = DeliverableFileInfo(plain)
+	return nil
+}
+
+type DeliverableSummary struct {
+	// Files published with publish_file (read_deliverable can fetch them).
+	Hosted bool `json:"hosted"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// LatestVersion corresponds to the JSON schema field "latest_version".
+	LatestVersion int `json:"latest_version"`
+
+	// Who published the latest version.
+	PublishedBy string `json:"published_by"`
+
+	// Thread number; absent for project-level deliverables.
+	Thread *int `json:"thread,omitempty,omitzero"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// External link of a deliverable that is not hosted (PR, document elsewhere).
+	URL *string `json:"url,omitempty,omitzero"`
+
+	// Versions corresponds to the JSON schema field "versions".
+	Versions int `json:"versions"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *DeliverableSummary) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["hosted"]; raw != nil && !ok {
+		return fmt.Errorf("field hosted in DeliverableSummary: required")
+	}
+	if _, ok := raw["id"]; raw != nil && !ok {
+		return fmt.Errorf("field id in DeliverableSummary: required")
+	}
+	if _, ok := raw["kind"]; raw != nil && !ok {
+		return fmt.Errorf("field kind in DeliverableSummary: required")
+	}
+	if _, ok := raw["latest_version"]; raw != nil && !ok {
+		return fmt.Errorf("field latest_version in DeliverableSummary: required")
+	}
+	if _, ok := raw["published_by"]; raw != nil && !ok {
+		return fmt.Errorf("field published_by in DeliverableSummary: required")
+	}
+	if _, ok := raw["title"]; raw != nil && !ok {
+		return fmt.Errorf("field title in DeliverableSummary: required")
+	}
+	if _, ok := raw["updated_at"]; raw != nil && !ok {
+		return fmt.Errorf("field updated_at in DeliverableSummary: required")
+	}
+	if _, ok := raw["versions"]; raw != nil && !ok {
+		return fmt.Errorf("field versions in DeliverableSummary: required")
+	}
+	type Plain DeliverableSummary
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if 0 > plain.LatestVersion {
+		return fmt.Errorf("field %s: must be >= %v", "latest_version", 0)
+	}
+	if 0 > plain.Versions {
+		return fmt.Errorf("field %s: must be >= %v", "versions", 0)
+	}
+	*j = DeliverableSummary(plain)
+	return nil
+}
+
+type DeliverableVersionInfo struct {
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt time.Time `json:"created_at"`
+
+	// PublishedBy corresponds to the JSON schema field "published_by".
+	PublishedBy string `json:"published_by"`
+
+	// Thread number of the employee who published it.
+	Thread *int `json:"thread,omitempty,omitzero"`
+
+	// Version corresponds to the JSON schema field "version".
+	Version int `json:"version"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *DeliverableVersionInfo) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["created_at"]; raw != nil && !ok {
+		return fmt.Errorf("field created_at in DeliverableVersionInfo: required")
+	}
+	if _, ok := raw["published_by"]; raw != nil && !ok {
+		return fmt.Errorf("field published_by in DeliverableVersionInfo: required")
+	}
+	if _, ok := raw["version"]; raw != nil && !ok {
+		return fmt.Errorf("field version in DeliverableVersionInfo: required")
+	}
+	type Plain DeliverableVersionInfo
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if 1 > plain.Version {
+		return fmt.Errorf("field %s: must be >= %v", "version", 1)
+	}
+	*j = DeliverableVersionInfo(plain)
+	return nil
+}
+
+type DownloadFile struct {
+	// Path inside the deliverable version (index.html, assets/logo.svg …).
+	Path string `json:"path"`
+
+	// SHA256 corresponds to the JSON schema field "sha256".
+	SHA256 string `json:"sha256"`
+
+	// Size corresponds to the JSON schema field "size".
+	Size int `json:"size"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *DownloadFile) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["path"]; raw != nil && !ok {
+		return fmt.Errorf("field path in DownloadFile: required")
+	}
+	if _, ok := raw["sha256"]; raw != nil && !ok {
+		return fmt.Errorf("field sha256 in DownloadFile: required")
+	}
+	if _, ok := raw["size"]; raw != nil && !ok {
+		return fmt.Errorf("field size in DownloadFile: required")
+	}
+	type Plain DownloadFile
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Path)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "path", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Path)) > 300 {
+		return fmt.Errorf("field %s length: must be <= %d", "path", 300)
+	}
+	if matched, _ := regexp.MatchString(`^[0-9a-f]{64}$`, string(plain.SHA256)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "SHA256", `^[0-9a-f]{64}$`)
+	}
+	if 0 > plain.Size {
+		return fmt.Errorf("field %s: must be >= %v", "size", 0)
+	}
+	*j = DownloadFile(plain)
+	return nil
+}
+
+// File download id (dn_ + id), generated by the console for read_deliverable.
+type DownloadID string
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *DownloadID) UnmarshalJSON(value []byte) error {
+	type Plain DownloadID
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if matched, _ := regexp.MatchString(`^dn_[0-9A-Za-z_]{10,60}$`, string(plain)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "", `^dn_[0-9A-Za-z_]{10,60}$`)
+	}
+	*j = DownloadID(plain)
+	return nil
+}
+
 type EmployeeRef struct {
 	// Name corresponds to the JSON schema field "name".
 	Name string `json:"name"`
@@ -1853,6 +2105,67 @@ func (j *FileChunk) UnmarshalJSON(value []byte) error {
 		return fmt.Errorf("field %s: must be >= %v", "index", 0)
 	}
 	*j = FileChunk(plain)
+	return nil
+}
+
+// One piece of the files read_deliverable sends to the employee's working
+// directory. Chunks are sent before the tool.result that references their
+// download_id; the daemon keeps them for that call only, checks sizes and
+// checksums, and writes the files under .agent-deliverables/.
+type FileDownload struct {
+	// CallID corresponds to the JSON schema field "call_id".
+	CallID CallID `json:"call_id"`
+
+	// Base64 of at most 1 MiB.
+	Data string `json:"data"`
+
+	// DownloadID corresponds to the JSON schema field "download_id".
+	DownloadID DownloadID `json:"download_id"`
+
+	// 0-based position of this chunk in the download (all files concatenated in
+	// tool.result download.files order).
+	Index int `json:"index"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID SessionID `json:"session_id"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *FileDownload) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["call_id"]; raw != nil && !ok {
+		return fmt.Errorf("field call_id in FileDownload: required")
+	}
+	if _, ok := raw["data"]; raw != nil && !ok {
+		return fmt.Errorf("field data in FileDownload: required")
+	}
+	if _, ok := raw["download_id"]; raw != nil && !ok {
+		return fmt.Errorf("field download_id in FileDownload: required")
+	}
+	if _, ok := raw["index"]; raw != nil && !ok {
+		return fmt.Errorf("field index in FileDownload: required")
+	}
+	if _, ok := raw["session_id"]; raw != nil && !ok {
+		return fmt.Errorf("field session_id in FileDownload: required")
+	}
+	type Plain FileDownload
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Data)) > 1398104 {
+		return fmt.Errorf("field %s length: must be <= %d", "data", 1398104)
+	}
+	if 63 < plain.Index {
+		return fmt.Errorf("field %s: must be <= %v", "index", 63)
+	}
+	if 0 > plain.Index {
+		return fmt.Errorf("field %s: must be >= %v", "index", 0)
+	}
+	*j = FileDownload(plain)
 	return nil
 }
 
@@ -2728,6 +3041,60 @@ func (j *JobID) UnmarshalJSON(value []byte) error {
 		return fmt.Errorf("field %s pattern match: must match %s", "", `^g_`)
 	}
 	*j = JobID(plain)
+	return nil
+}
+
+// List this project's deliverables (designs, documents… from every thread), newest
+// first: id, title, kind, versions, who published the latest version, thread and
+// when it changed. Use read_deliverable to fetch one's files.
+type ListDeliverablesInput struct {
+	// Only this kind (design, doc, slides, dashboard, board, data, pr).
+	Kind *string `json:"kind,omitempty,omitzero"`
+
+	// Only deliverables of this thread number.
+	Thread *int `json:"thread,omitempty,omitzero"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ListDeliverablesInput) UnmarshalJSON(value []byte) error {
+	type Plain ListDeliverablesInput
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.Kind != nil && utf8.RuneCountInString(string(*plain.Kind)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "kind", 1)
+	}
+	if plain.Kind != nil && utf8.RuneCountInString(string(*plain.Kind)) > 32 {
+		return fmt.Errorf("field %s length: must be <= %d", "kind", 32)
+	}
+	if plain.Thread != nil && 1 > *plain.Thread {
+		return fmt.Errorf("field %s: must be >= %v", "thread", 1)
+	}
+	*j = ListDeliverablesInput(plain)
+	return nil
+}
+
+type ListDeliverablesResult struct {
+	// Deliverables corresponds to the JSON schema field "deliverables".
+	Deliverables []DeliverableSummary `json:"deliverables"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ListDeliverablesResult) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["deliverables"]; raw != nil && !ok {
+		return fmt.Errorf("field deliverables in ListDeliverablesResult: required")
+	}
+	type Plain ListDeliverablesResult
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = ListDeliverablesResult(plain)
 	return nil
 }
 
@@ -4440,6 +4807,118 @@ func (j *QuestionID) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+// Fetch the files of a deliverable published with publish_file (any thread of this
+// project) into your working directory under .agent-deliverables/<id>/v<version>/
+// (git-ignored; a multi-file site keeps its folders). Returns the local folder,
+// the file list, the version history and the user's comments. To revise it: edit
+// the files there, then publish_file(path=<that folder or file>,
+// deliverable_id=<id>) to publish the next version.
+type ReadDeliverableInput struct {
+	// DeliverableID corresponds to the JSON schema field "deliverable_id".
+	DeliverableID string `json:"deliverable_id"`
+
+	// Version to fetch; the latest when omitted.
+	Version *int `json:"version,omitempty,omitzero"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ReadDeliverableInput) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["deliverable_id"]; raw != nil && !ok {
+		return fmt.Errorf("field deliverable_id in ReadDeliverableInput: required")
+	}
+	type Plain ReadDeliverableInput
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if matched, _ := regexp.MatchString(`^dl_[A-Za-z0-9]+$`, string(plain.DeliverableID)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "DeliverableID", `^dl_[A-Za-z0-9]+$`)
+	}
+	if plain.Version != nil && 1 > *plain.Version {
+		return fmt.Errorf("field %s: must be >= %v", "version", 1)
+	}
+	*j = ReadDeliverableInput(plain)
+	return nil
+}
+
+type ReadDeliverableResult struct {
+	// The user's comments, oldest first.
+	Comments []DeliverableComment `json:"comments"`
+
+	// DeliverableID corresponds to the JSON schema field "deliverable_id".
+	DeliverableID string `json:"deliverable_id"`
+
+	// Folder relative to your working directory (the daemon adds the absolute path).
+	Dir string `json:"dir"`
+
+	// The file a viewer opens (index.html of a site, or the only file).
+	Entry string `json:"entry"`
+
+	// Files corresponds to the JSON schema field "files".
+	Files []DeliverableFileInfo `json:"files"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+
+	// Version corresponds to the JSON schema field "version".
+	Version int `json:"version"`
+
+	// Newest first.
+	Versions []DeliverableVersionInfo `json:"versions"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ReadDeliverableResult) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["comments"]; raw != nil && !ok {
+		return fmt.Errorf("field comments in ReadDeliverableResult: required")
+	}
+	if _, ok := raw["deliverable_id"]; raw != nil && !ok {
+		return fmt.Errorf("field deliverable_id in ReadDeliverableResult: required")
+	}
+	if _, ok := raw["dir"]; raw != nil && !ok {
+		return fmt.Errorf("field dir in ReadDeliverableResult: required")
+	}
+	if _, ok := raw["entry"]; raw != nil && !ok {
+		return fmt.Errorf("field entry in ReadDeliverableResult: required")
+	}
+	if _, ok := raw["files"]; raw != nil && !ok {
+		return fmt.Errorf("field files in ReadDeliverableResult: required")
+	}
+	if _, ok := raw["kind"]; raw != nil && !ok {
+		return fmt.Errorf("field kind in ReadDeliverableResult: required")
+	}
+	if _, ok := raw["title"]; raw != nil && !ok {
+		return fmt.Errorf("field title in ReadDeliverableResult: required")
+	}
+	if _, ok := raw["version"]; raw != nil && !ok {
+		return fmt.Errorf("field version in ReadDeliverableResult: required")
+	}
+	if _, ok := raw["versions"]; raw != nil && !ok {
+		return fmt.Errorf("field versions in ReadDeliverableResult: required")
+	}
+	type Plain ReadDeliverableResult
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if 1 > plain.Version {
+		return fmt.Errorf("field %s: must be >= %v", "version", 1)
+	}
+	*j = ReadDeliverableResult(plain)
+	return nil
+}
+
 // Return your unread messages (including broadcasts) and mark them read.
 type ReadMessagesInput map[string]interface{}
 
@@ -5132,8 +5611,8 @@ type SessionEvent struct {
 	// notification / error.
 	Message *string `json:"message,omitempty,omitzero"`
 
-	// turn_ended: the model that answered the turn (Claude: the model with the most
-	// output tokens in the result's modelUsage; Codex: the turn's model).
+	// turn_ended: the model that answered the turn (Claude: the model of the turn's
+	// last main-agent assistant message; Codex: the model the turn ran with).
 	Model *string `json:"model,omitempty,omitzero"`
 
 	// notification.
@@ -6930,6 +7409,71 @@ func (j *ToolCancel) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+type ToolDownload struct {
+	// Number of file.download frames (0 when every file is empty).
+	Chunks int `json:"chunks"`
+
+	// DeliverableID corresponds to the JSON schema field "deliverable_id".
+	DeliverableID string `json:"deliverable_id"`
+
+	// DownloadID corresponds to the JSON schema field "download_id".
+	DownloadID DownloadID `json:"download_id"`
+
+	// Files corresponds to the JSON schema field "files".
+	Files []DownloadFile `json:"files"`
+
+	// Version corresponds to the JSON schema field "version".
+	Version int `json:"version"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ToolDownload) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["chunks"]; raw != nil && !ok {
+		return fmt.Errorf("field chunks in ToolDownload: required")
+	}
+	if _, ok := raw["deliverable_id"]; raw != nil && !ok {
+		return fmt.Errorf("field deliverable_id in ToolDownload: required")
+	}
+	if _, ok := raw["download_id"]; raw != nil && !ok {
+		return fmt.Errorf("field download_id in ToolDownload: required")
+	}
+	if _, ok := raw["files"]; raw != nil && !ok {
+		return fmt.Errorf("field files in ToolDownload: required")
+	}
+	if _, ok := raw["version"]; raw != nil && !ok {
+		return fmt.Errorf("field version in ToolDownload: required")
+	}
+	type Plain ToolDownload
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if 64 < plain.Chunks {
+		return fmt.Errorf("field %s: must be <= %v", "chunks", 64)
+	}
+	if 0 > plain.Chunks {
+		return fmt.Errorf("field %s: must be >= %v", "chunks", 0)
+	}
+	if matched, _ := regexp.MatchString(`^dl_[A-Za-z0-9]+$`, string(plain.DeliverableID)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "DeliverableID", `^dl_[A-Za-z0-9]+$`)
+	}
+	if plain.Files != nil && len(plain.Files) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "files", 1)
+	}
+	if len(plain.Files) > 64 {
+		return fmt.Errorf("field %s length: must be <= %d", "files", 64)
+	}
+	if 1 > plain.Version {
+		return fmt.Errorf("field %s: must be >= %v", "version", 1)
+	}
+	*j = ToolDownload(plain)
+	return nil
+}
+
 // Result of a tool.call; ok=false becomes an MCP isError result.
 type ToolResult struct {
 	// CallID corresponds to the JSON schema field "call_id".
@@ -6937,6 +7481,11 @@ type ToolResult struct {
 
 	// Content corresponds to the JSON schema field "content".
 	Content []ContentBlock `json:"content"`
+
+	// read_deliverable: files whose bytes arrived before as file.download frames; the
+	// daemon writes them under .agent-deliverables/<deliverable_id>/v<version>/ in
+	// the session's working directory.
+	Download *ToolDownload `json:"download,omitempty,omitzero"`
 
 	// Ok corresponds to the JSON schema field "ok".
 	Ok bool `json:"ok"`

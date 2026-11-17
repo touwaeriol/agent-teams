@@ -12,6 +12,7 @@ export interface MessageBodies {
   "cred.response": T.CredResponse;
   "error": T.ProtocolError;
   "file.chunk": T.FileChunk;
+  "file.download": T.FileDownload;
   "git.cleanup": T.GitCleanup;
   "git.prepare": T.GitPrepare;
   "git.purge": T.GitPurge;
@@ -66,6 +67,7 @@ export const MESSAGE_META: { readonly [K in MessageType]: MessageMeta } = {
   "cred.response": { direction: "console_to_node", reliable: false, key: ["req_id"] },
   "error": { direction: "both", reliable: false, key: [] },
   "file.chunk": { direction: "node_to_console", reliable: true, key: ["upload_id","index"] },
+  "file.download": { direction: "console_to_node", reliable: true, key: ["download_id","index"] },
   "git.cleanup": { direction: "console_to_node", reliable: true, key: ["job_id"] },
   "git.prepare": { direction: "console_to_node", reliable: true, key: ["job_id"] },
   "git.purge": { direction: "console_to_node", reliable: true, key: ["job_id"] },
@@ -112,6 +114,7 @@ export interface ToolInputs {
   enqueue_merge: T.EnqueueMergeInput;
   finish: T.FinishInput;
   get_task: T.GetTaskInput;
+  list_deliverables: T.ListDeliverablesInput;
   list_tasks: T.ListTasksInput;
   list_team: T.ListTeamInput;
   list_threads: T.ListThreadsInput;
@@ -125,6 +128,7 @@ export interface ToolInputs {
   publish_deliverable: T.PublishDeliverableInput;
   publish_file: T.PublishFileInput;
   push_branch: T.PushBranchInput;
+  read_deliverable: T.ReadDeliverableInput;
   read_messages: T.ReadMessagesInput;
   remember: T.RememberInput;
   reply_to: T.ReplyToInput;
@@ -150,6 +154,7 @@ export interface ToolResults {
   enqueue_merge: T.EnqueueMergeResult;
   finish: unknown;
   get_task: T.GetTaskResult;
+  list_deliverables: T.ListDeliverablesResult;
   list_tasks: T.ListTasksResult;
   list_team: T.ListTeamResult;
   list_threads: T.ListThreadsResult;
@@ -163,6 +168,7 @@ export interface ToolResults {
   publish_deliverable: T.PublishDeliverableResult;
   publish_file: T.PublishFileResult;
   push_branch: T.PushBranchResult;
+  read_deliverable: T.ReadDeliverableResult;
   read_messages: T.ReadMessagesResult;
   remember: unknown;
   reply_to: unknown;
@@ -257,6 +263,13 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     description: "Show a task: instruction, status, dependencies and result.",
     input_schema: {"description":"Show a task: instruction, status, dependencies and result.","type":"object","required":["task_id"],"additionalProperties":false,"properties":{"task_id":{"type":"string","pattern":"^t[0-9]+$"}}},
   },
+  list_deliverables: {
+    tiers: ["coordinator","lead","member"],
+    blocking: [],
+    requires: null,
+    description: "List this project's deliverables (designs, documents… from every thread), newest first: id, title, kind, versions, who published the latest version, thread and when it changed. Use read_deliverable to fetch one's files.",
+    input_schema: {"description":"List this project's deliverables (designs, documents… from every thread), newest first: id, title, kind, versions, who published the latest version, thread and when it changed. Use read_deliverable to fetch one's files.","type":"object","additionalProperties":false,"properties":{"thread":{"description":"Only deliverables of this thread number.","type":"integer","minimum":1},"kind":{"description":"Only this kind (design, doc, slides, dashboard, board, data, pr).","type":"string","minLength":1,"maxLength":32}}},
+  },
   list_tasks: {
     tiers: ["lead"],
     blocking: [],
@@ -347,6 +360,13 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     requires: null,
     description: "Push the HEAD of each of your repository checkouts that has new commits to your member branch (thread/<no>/<name>). You have no write token yourself; commit first, then call this.",
     input_schema: {"description":"Push the HEAD of each of your repository checkouts that has new commits to your member branch (thread/<no>/<name>). You have no write token yourself; commit first, then call this.","type":"object","additionalProperties":false,"properties":{}},
+  },
+  read_deliverable: {
+    tiers: ["lead","member"],
+    blocking: [],
+    requires: null,
+    description: "Fetch the files of a deliverable published with publish_file (any thread of this project) into your working directory under .agent-deliverables/<id>/v<version>/ (git-ignored; a multi-file site keeps its folders). Returns the local folder, the file list, the version history and the user's comments. To revise it: edit the files there, then publish_file(path=<that folder or file>, deliverable_id=<id>) to publish the next version.",
+    input_schema: {"description":"Fetch the files of a deliverable published with publish_file (any thread of this project) into your working directory under .agent-deliverables/<id>/v<version>/ (git-ignored; a multi-file site keeps its folders). Returns the local folder, the file list, the version history and the user's comments. To revise it: edit the files there, then publish_file(path=<that folder or file>, deliverable_id=<id>) to publish the next version.","type":"object","required":["deliverable_id"],"additionalProperties":false,"properties":{"deliverable_id":{"type":"string","pattern":"^dl_[A-Za-z0-9]+$"},"version":{"description":"Version to fetch; the latest when omitted.","type":"integer","minimum":1}}},
   },
   read_messages: {
     tiers: ["member"],

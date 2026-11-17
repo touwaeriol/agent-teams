@@ -195,7 +195,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 170 {
+	if migrations.Latest() != 180 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -636,5 +636,40 @@ INSERT INTO at_roles (id, user_id, tier, role) VALUES ('r1', 'u1', 'lead', 'lead
 	assertNoTable(t, db, "at_models")
 	if _, err := db.Exec(`SELECT hidden_commands FROM at_roles`); err == nil {
 		t.Fatal("hidden_commands survived down")
+	}
+}
+
+// TestDeliverablePublisherMigration: 00180 adds at_deliverable_files.publisher_id (” on existing
+// versions); Down removes it.
+func TestDeliverablePublisherMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 170); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
+INSERT INTO at_deliverables (id, project_id, kind, title) VALUES ('dl_1', 'p1', 'design', 'x');
+INSERT INTO at_deliverable_files (deliverable_id, version, path, content_type, size, sha256, data, published_by)
+VALUES ('dl_1', 1, 'a.md', 'text/markdown', 1, 'x', 'a', 'designer-1');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := migrations.Up(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	var id string
+	if err := db.QueryRow(`SELECT publisher_id FROM at_deliverable_files WHERE deliverable_id = 'dl_1'`).Scan(&id); err != nil || id != "" {
+		t.Fatalf("publisher_id: %q %v", id, err)
+	}
+	if _, err := p.DownTo(ctx, 170); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`SELECT publisher_id FROM at_deliverable_files`); err == nil {
+		t.Fatal("publisher_id survived down")
 	}
 }

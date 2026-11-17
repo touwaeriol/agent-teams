@@ -541,7 +541,8 @@ CREATE TABLE at_deliverable_files (                -- publish_file 发布的文�
   size           INT  NOT NULL,
   sha256         TEXT NOT NULL,
   data           BYTEA NOT NULL,
-  published_by   TEXT NOT NULL DEFAULT '',
+  published_by   TEXT NOT NULL DEFAULT '',        -- 这一版的发布者名字（员工名或 user）
+  publisher_id   TEXT NOT NULL DEFAULT '',        -- 这一版的发布员工 id（00180；'' = 用户或更早的版本）；批注投递按它找人
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (deliverable_id, version, path)
 );
@@ -555,7 +556,7 @@ CREATE TABLE at_upload_chunks (                    -- file.chunk 暂存，tool.c
   PRIMARY KEY (upload_id, idx)
 );
 
-CREATE TABLE at_deliverable_comments (             -- 交付物批注，投递给发布者或组长
+CREATE TABLE at_deliverable_comments (             -- 交付物批注，投递给被批注那一版的发布者，不在了给他讨论串的组长
   id             TEXT PRIMARY KEY,                 -- dc_…
   deliverable_id TEXT NOT NULL REFERENCES at_deliverables(id) ON DELETE CASCADE,
   version        INT,
@@ -755,7 +756,7 @@ ALTER TABLE at_employees ADD COLUMN model TEXT NOT NULL DEFAULT '';            -
 4. `00010_threads.sql`（P3，**v1 防护补丁上线之前禁止执行**：`atctl migrate` 检查 `at_settings.platform.legacy_guard >= 1`，由补丁后的 Python 启动时写入，不满足则拒绝）：项目/对话/消息/任务/提问的新列，`at_roles`、`at_threads`、`at_main_tasks`、`at_employees`、`at_agent_sessions`、`at_tool_calls`、`at_usage`、`at_permission_rules`、`at_events`（含首批分区）、`at_status_events`、`at_employee_status`。
 5. `00020_delivery.sql`（P4）：`at_merge_queue`、`at_ci_runs`、`at_deliverables`、`at_project_memory`、`at_thread_nodes`。
 6. `00030_office.sql`（P5）：`at_office_layouts`、`at_projects.office_layout`。
-   `00050_node_job_index.sql`：`at_node_commands` 的作业索引。`00060_design_skills.sql`：`at_roles.skills`、`at_skills`、`at_deliverable_files`、`at_upload_chunks`、`at_deliverable_comments`（architecture.md §6.5）。
+   `00050_node_job_index.sql`：`at_node_commands` 的作业索引。`00060_design_skills.sql`：`at_roles.skills`、`at_skills`、`at_deliverable_files`、`at_upload_chunks`、`at_deliverable_comments`（architecture.md §6.5）。`00180_deliverable_publisher.sql`：`at_deliverable_files.publisher_id`（谁发布了每一版，任何员工都可以发布下一版）。
 7. `00120_drop_v1.sql`（v1 退役后）：删 v1 的旧对话（`kind` 不是 `coordinator`/`thread` 的 `at_conversations` 行，消息、任务、提问、留言随外键级联删除）；`at_conversations` 删 `history`、`plan`，`kind` 去掉默认值 `'chat'` 并加 `CHECK (kind IN ('coordinator','thread'))`；删 `at_teams`；`at_tasks.output` 并入空的 `summary` 后删除；删 `at_users.platform_version`；删 `at_projects.repo`/`branch`/`git_connection_id`。Down 是空操作（数据回不来，要用备份）。
 
 `00110_casbin_rule.sql`（P6 后）：建 `casbin_rule`，每个用户按 `at_users.role` 写一行 `g, <id>, admin|user`，再删 `at_users.role`；Down 加回该列并按规则回填（§2.1）。

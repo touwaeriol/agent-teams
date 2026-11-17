@@ -330,6 +330,11 @@
           "published_by": {
             "type": "string"
           },
+          "publisher_thread_no": {
+            "description": "Thread number of the employee who published this version",
+            "format": "int64",
+            "type": "integer"
+          },
           "size": {
             "format": "int64",
             "type": "integer"

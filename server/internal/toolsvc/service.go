@@ -38,6 +38,8 @@ type Result struct {
 	WaitMeta map[string]any
 	// Later computes the result after the transaction commits (network work such as open_pr).
 	Later func(ctx context.Context) Result
+	// Download lists the files read_deliverable queued as file.download frames before this result.
+	Download *protocol.ToolDownload
 }
 
 func okText(text string) Result        { return Result{OK: true, Text: text} }
@@ -110,7 +112,8 @@ func (s *Service) table() map[string]handler {
 		protocol.ToolGetTask: s.getTask, protocol.ToolRequestReview: s.requestReview, protocol.ToolAssignSubtask: s.assignSubtask,
 		protocol.ToolWaitTask: s.waitTask, protocol.ToolPublishFile: s.publishFile, protocol.ToolReviewPermission: s.reviewPermission,
 		protocol.ToolMemoryList: s.memoryList, protocol.ToolMemoryRead: s.memoryRead, protocol.ToolMemoryWrite: s.memoryWrite,
-		protocol.ToolMemoryDelete: s.memoryDelete,
+		protocol.ToolMemoryDelete: s.memoryDelete, protocol.ToolListDeliverables: s.listDeliverables,
+		protocol.ToolReadDeliverable: s.readDeliverable,
 	}
 }
 
@@ -318,7 +321,7 @@ func (s *Service) sendResult(ctx context.Context, tx *core.Tx, sessionID, callID
 		text = "ok"
 	}
 	body := protocol.ToolResult{SessionID: protocol.SessionID(sessionID), CallID: protocol.CallID(callID), Ok: res.OK,
-		Content: []protocol.ContentBlock{{Type: "text", Text: text}}}
+		Content: []protocol.ContentBlock{{Type: "text", Text: text}}, Download: res.Download}
 	if res.Structured != nil {
 		raw, _ := json.Marshal(res.Structured)
 		msg := json.RawMessage(raw)

@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/read_deliverable.json",
+  "title": "ReadDeliverableInput",
+  "description": "Fetch the files of a deliverable published with publish_file (any thread of this project) into your working directory under .agent-deliverables/<id>/v<version>/ (git-ignored; a multi-file site keeps its folders). Returns the local folder, the file list, the version history and the user's comments. To revise it: edit the files there, then publish_file(path=<that folder or file>, deliverable_id=<id>) to publish the next version.",
+  "x-tool": {
+    "tiers": [
+      "lead",
+      "member"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "deliverable_id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "deliverable_id": {
+      "type": "string",
+      "pattern": "^dl_[A-Za-z0-9]+$"
+    },
+    "version": {
+      "description": "Version to fetch; the latest when omitted.",
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "$defs": {
+    "ReadDeliverableResult": {
+      "title": "ReadDeliverableResult",
+      "type": "object",
+      "required": [
+        "deliverable_id",
+        "title",
+        "kind",
+        "version",
+        "dir",
+        "entry",
+        "files",
+        "versions",
+        "comments"
+      ],
+      "properties": {
+        "deliverable_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "dir": {
+          "description": "Folder relative to your working directory (the daemon adds the absolute path).",
+          "type": "string"
+        },
+        "entry": {
+          "description": "The file a viewer opens (index.html of a site, or the only file).",
+          "type": "string"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DeliverableFileInfo"
+          }
+        },
+        "versions": {
+          "description": "Newest first.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DeliverableVersionInfo"
+          }
+        },
+        "comments": {
+          "description": "The user's comments, oldest first.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DeliverableComment"
+          }
+        }
+      }
+    },
+    "DeliverableFileInfo": {
+      "title": "DeliverableFileInfo",
+      "type": "object",
+      "required": [
+        "path",
+        "size"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "DeliverableVersionInfo": {
+      "title": "DeliverableVersionInfo",
+      "type": "object",
+      "required": [
+        "version",
+        "published_by",
+        "created_at"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "published_by": {
+          "type": "string"
+        },
+        "thread": {
+          "description": "Thread number of the employee who published it.",
+          "type": "integer"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "DeliverableComment": {
+      "title": "DeliverableComment",
+      "type": "object",
+      "required": [
+        "text",
+        "sent_to",
+        "created_at"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        },
+        "sent_to": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}
