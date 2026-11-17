@@ -241,8 +241,8 @@ export interface MessageView {
   id: string;
   role: "user" | "leader" | "employee" | "system" | "error";
   author: string;
-  /** chat / note / interrupt, or a chat card: todos, plan, artifact, resumed. */
-  kind: "chat" | "note" | "interrupt" | "todos" | "plan" | "artifact" | "resumed";
+  /** chat / note / interrupt, or a chat card: todos, plan, artifact, resumed, image (screenshots an employee uploaded). */
+  kind: "chat" | "note" | "interrupt" | "todos" | "plan" | "artifact" | "resumed" | "image";
   content: string;
   meta: {
     thread_no?: number;
@@ -262,6 +262,8 @@ export interface MessageView {
     forwarded_from?: ForwardedFrom;
     /** The project-chat note of a forward. */
     forwarded_to?: { no: number; count: number; created: boolean; by: "user" | "coordinator"; message_ids: number[] };
+    /** kind=image: the title the employee gave the screenshots. */
+    title?: string;
   };
   created_at: string;
 }

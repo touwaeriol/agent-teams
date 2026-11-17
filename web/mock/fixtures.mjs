@@ -181,6 +181,7 @@ export const messages = {
     ] }), kind: "todos" },
     { ...msg("a46", "system", "dev-2", "## 卡片改版计划\n\n1. 按钮改成一行三个，去掉红框里的说明\n2. 提问卡片用字母标出选项，推荐项加标签\n3. 回答后收起，只留选中的那一项\n\n> 不动审批的接口，只改 `cards.tsx`。", 15, { employee: "dev-2" }), kind: "plan" },
     { ...msg("a47", "system", "dev-2", "dev-2 发布了交付物：审批卡片样式", 12, { employee: "dev-2", deliverable: { id: "d1", kind: "design", title: "审批卡片样式", url: "", hosted: true, entry: "index.html", version: 3 } }), kind: "artifact" },
+    { ...msg("a48", "system", "dev-2", "dev-2 上传了截图：卡片改版后", 10, { employee: "dev-2", title: "卡片改版后", attachments: [{ id: "img_seed", name: "卡片改版后.png", content_type: "image/svg+xml", size: 0 }] }), kind: "image" },
     msg("a5", "leader", "lead-12", "已改，按钮换成一行三个，红框那块去掉了。目前进度：\n\n| 主要任务 | 状态 |\n| --- | --- |\n| 后端通信 | 已合并 |\n| 审批走 permission-prompt-tool | 审查中 |\n| 网页卡片 | 进行中 |\n\n- `pnpm test` 全部通过\n- dev-2 想加一个依赖做长列表虚拟滚动，我拿不准，**需要你定一下**（下面的卡片）。", 8),
   ],
   t13: [], t11: [], t10: [], t9: [],
