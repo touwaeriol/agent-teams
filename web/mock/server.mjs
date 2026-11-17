@@ -33,6 +33,8 @@ const threadOut = (t) => {
   const times = [t.updated_at, t.lead_last?.at, latest?.updated_at].filter(Boolean).map((x) => Date.parse(x));
   return { ...t, counts: { ...t.counts, deliverables: own.length }, latest_deliverable: latest, last_activity_at: new Date(Math.max(...times)).toISOString() };
 };
+/** Threads whose merge already failed once in the mock (the next accept merges). */
+const mergeTried = new Set();
 const threadByNo = (no) => state.threads.find((t) => t.no === Number(no));
 
 function body(req) {
@@ -387,11 +389,22 @@ const routes = [
   ["GET", /^\/api\/threads\/([^/]+)\/checks$/, (req, res, [tid]) => json(res, 200, state.checks[tid] ?? [])],
   ["POST", /^\/api\/threads\/([^/]+)\/(accept|reject|open-pr)$/, (req, res, [tid, op]) => {
     const t = threadById(tid);
-    if (op === "accept") Object.assign(t, { status: "done", pr_state: "merged" });
-    if (op === "reject") t.status = "running";
+    // Accept is asynchronous like the server: answer with pr_state accepting, merge in the background.
+    // The first try of a thread fails (to show merge_error and 重试合并), a retry merges.
+    if (op === "accept") {
+      Object.assign(t, { pr_state: "accepting", merge_error: null });
+      const fail = !mergeTried.has(tid);
+      mergeTried.add(tid);
+      setTimeout(() => {
+        if (fail) Object.assign(t, { pr_state: "open", merge_error: "与基准分支 develop 有冲突，请让组长先解决冲突" });
+        else Object.assign(t, { status: "done", pr_state: "merged", merge_error: null });
+        emit("thread", { thread: threadOut(t) });
+      }, Number(process.env.MOCK_MERGE_MS ?? 3000));
+    }
+    if (op === "reject") Object.assign(t, { status: "running", merge_error: null });
     if (op === "open-pr") Object.assign(t, { status: "review", pr_number: 42, pr_url: "https://github.com/touwaeriol/agent-teams/pull/42" });
     emit("thread", { thread: threadOut(t) });
-    json(res, 200, t);
+    json(res, 200, threadOut(t));
   }],
   ["GET", /^\/api\/nodes$/, (req, res) => json(res, 200, state.nodes)],
   ["POST", /^\/api\/nodes$/, async (req, res) => {

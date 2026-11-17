@@ -195,7 +195,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 200 {
+	if migrations.Latest() != 210 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -616,7 +616,7 @@ INSERT INTO at_roles (id, user_id, tier, role) VALUES ('r1', 'u1', 'lead', 'lead
 	if _, err := db.Exec(seed); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.UpTo(ctx, 170); err != nil { // 00200 moves the platform list to the users
+	if _, err := p.UpTo(ctx, 170); err != nil { // 00210 moves the platform list to the users
 		t.Fatal(err)
 	}
 	var hidden, cmds string
@@ -736,7 +736,7 @@ INSERT INTO at_deliverable_comments (id, deliverable_id, author, text) VALUES ('
 	}
 }
 
-// userModelsSeed (at 00190): u1 already has Opus 5.5 (own label) and an own model, and its
+// userModelsSeed (at 00200): u1 already has Opus 5.5 (own label) and an own model, and its
 // project, role and employee name models missing from every list; u2 has nothing. The platform
 // list is Opus 5.5 (Claude default), Sonnet, gpt-p (Codex default).
 const userModelsSeed = `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x'), ('u2', 'b@example.com', 'x');
@@ -761,7 +761,7 @@ func userModels(t *testing.T, db *sql.DB, user string) string {
 	return s
 }
 
-// TestUserModelsMigration: 00200 copies the platform list to every user (after their own rows,
+// TestUserModelsMigration: 00210 copies the platform list to every user (after their own rows,
 // skipping models they have), adds the models their projects, roles and employees name, gives each
 // user the platform defaults, deletes the platform rows and makes user_id required with one
 // default per user and runtime. Down brings back the platform preset.
@@ -772,7 +772,7 @@ func TestUserModelsMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.UpTo(ctx, 190); err != nil {
+	if _, err := p.UpTo(ctx, 200); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(userModelsSeed); err != nil {
@@ -805,7 +805,7 @@ func TestUserModelsMigration(t *testing.T) {
 		t.Fatal("duplicate model of u2 accepted")
 	}
 
-	if _, err := p.DownTo(ctx, 190); err != nil {
+	if _, err := p.DownTo(ctx, 200); err != nil {
 		t.Fatal(err)
 	}
 	var model string
@@ -816,13 +816,13 @@ func TestUserModelsMigration(t *testing.T) {
 	if err := db.QueryRow(`SELECT count(*) FROM at_models WHERE user_id IS NOT NULL AND is_default`).Scan(&defaults); err != nil || defaults != 0 {
 		t.Fatalf("user defaults after down: %d %v", defaults, err)
 	}
-	if _, err := p.UpTo(ctx, 200); err != nil {
+	if _, err := p.UpTo(ctx, 210); err != nil {
 		t.Fatalf("up again: %v", err)
 	}
 }
 
-// TestUserModelsMigrationCheck: when a user did not get every platform row, 00200 fails and
-// rolls back: the platform list stays, no user row was written and the version stays at 00190.
+// TestUserModelsMigrationCheck: when a user did not get every platform row, 00210 fails and
+// rolls back: the platform list stays, no user row was written and the version stays at 00200.
 func TestUserModelsMigrationCheck(t *testing.T) {
 	db := open(t, testdb.URL(t))
 	ctx := context.Background()
@@ -830,7 +830,7 @@ func TestUserModelsMigrationCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.UpTo(ctx, 190); err != nil {
+	if _, err := p.UpTo(ctx, 200); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(userModelsSeed); err != nil {
@@ -851,7 +851,7 @@ CREATE TRIGGER at_test_skip_u2 BEFORE INSERT ON at_models FOR EACH ROW EXECUTE F
 		platform != 3 || u1 != 2 {
 		t.Fatalf("after the failed up: %d platform rows, %d u1 rows %v", platform, u1, err)
 	}
-	if v, err := p.GetDBVersion(ctx); err != nil || v != 190 {
+	if v, err := p.GetDBVersion(ctx); err != nil || v != 200 {
 		t.Fatalf("version %d %v", v, err)
 	}
 	if _, err := db.Exec(`DROP TRIGGER at_test_skip_u2 ON at_models`); err != nil {
