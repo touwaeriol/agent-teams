@@ -15,10 +15,10 @@ import Dot from "../Dot.vue";
 import MessageImages from "../MessageImages.vue";
 import { BRIEF_LINES, briefFoldable, dispatchSpeaker } from "./detail";
 
-const props = defineProps<{ dispatch: ThreadDispatch; pid: string; compact?: boolean }>();
+const props = defineProps<{ /** ThreadView.brief */ brief: string; dispatch: ThreadDispatch; pid: string; compact?: boolean }>();
 const route = useRoute();
 const open = ref(false);
-const foldable = computed(() => briefFoldable(props.dispatch.brief));
+const foldable = computed(() => briefFoldable(props.brief));
 const folded = computed(() => foldable.value && !open.value);
 const back = computed(() => (props.dispatch.source ? backLink(route.path, props.pid, props.dispatch.source.message_id) : null));
 const fade = "linear-gradient(to bottom, #000 55%, transparent)";
@@ -40,7 +40,7 @@ const foldStyle = computed(() =>
       <RouterLink v-if="back" :to="back" class="self-start text-xs hover:text-foreground hover:underline" data-dispatch-back>在统筹会话中查看原消息</RouterLink>
     </blockquote>
     <div :style="foldStyle" data-brief>
-      <Markdown :source="dispatch.brief" :class="compact ? 'text-sm leading-[26px]' : 'text-[15px] leading-7'" />
+      <Markdown :source="brief" :class="compact ? 'text-sm leading-[26px]' : 'text-[15px] leading-7'" />
     </div>
     <button
       v-if="foldable"
