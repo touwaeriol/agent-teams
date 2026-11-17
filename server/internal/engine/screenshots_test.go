@@ -85,8 +85,9 @@ func TestPublishFileScreenshotIsAttachment(t *testing.T) {
 	}
 }
 
-// TestScreenshotsAreNotLibraryFiles: the library refuses images and SVG; list_deliverables leaves
-// out hosted images published before (the rows stay).
+// TestScreenshotsAreNotLibraryFiles: the library refuses images and SVG; list_deliverables, the
+// thread's deliverable count and latest deliverable and the project overview leave out hosted images
+// published before (the rows stay in the library).
 func TestScreenshotsAreNotLibraryFiles(t *testing.T) {
 	tm, _ := startDesignTeam(t)
 	path := "/api/projects/" + tm.projectID + "/library"
@@ -97,22 +98,46 @@ func TestScreenshotsAreNotLibraryFiles(t *testing.T) {
 		}
 	}
 	tm.b.must(201, "POST", path, map[string]any{"name": "notes.md", "data": base64.StdEncoding.EncodeToString([]byte("# hi"))}, nil)
+	res := tm.dev.publish(map[string]any{"path": "spec.md", "kind": "doc", "title": "规格"}, 1<<20, upFile{"spec.md", "# 规格"})
+	var spec protocol.PublishFileResult
+	_ = json.Unmarshal(*res.Structured, &spec)
+	// An image published to the thread before screenshots stopped being deliverables (newer than the spec).
 	err := tm.w.e.Core.InTx(tm.w.ctx, func(tx *core.Tx) error {
-		_, err := core.InsertDeliverable(tm.w.ctx, tx, core.NewDeliverable{ProjectID: tm.projectID, Kind: "design", Title: "旧截图",
-			Detail: map[string]any{"hosted": true, "render": "image", "entry": "old.png", "version": 1}, PublishedBy: "designer-1"})
+		_, err := core.InsertDeliverable(tm.w.ctx, tx, core.NewDeliverable{ProjectID: tm.projectID, ThreadID: &tm.thread.ID, Kind: "design",
+			Title: "旧截图", Detail: map[string]any{"hosted": true, "render": "image", "entry": "old.png", "version": 1}, PublishedBy: "designer-1"})
 		return err
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := tm.deliverableCount(t); n != 2 {
+	if n := tm.deliverableCount(t); n != 3 {
 		t.Fatalf("library has %d items, want the old image kept", n)
 	}
 	list := tm.dev.mustCall("list_deliverables", map[string]any{})
 	var out protocol.ListDeliverablesResult
 	_ = json.Unmarshal(*list.Structured, &out)
-	if len(out.Deliverables) != 1 || out.Deliverables[0].Title != "notes.md" || strings.Contains(text(list), "旧截图") {
+	if len(out.Deliverables) != 2 || out.Deliverables[0].ID != spec.DeliverableID || out.Deliverables[1].Title != "notes.md" ||
+		strings.Contains(text(list), "旧截图") {
 		t.Fatalf("list_deliverables %+v", out)
+	}
+	// The thread's badge and latest deliverable, and the project overview, leave the image out too.
+	var th core.ThreadView
+	tm.b.must(200, "GET", "/api/threads/"+tm.thread.ID, nil, &th)
+	if th.Counts.Deliverables != 1 || th.LatestDeliverable == nil || th.LatestDeliverable.ID != spec.DeliverableID {
+		t.Fatalf("thread counts %+v latest %+v", th.Counts, th.LatestDeliverable)
+	}
+	var ov struct {
+		Threads            []core.ThreadView      `json:"threads"`
+		RecentDeliverables []core.DeliverableView `json:"recent_deliverables"`
+	}
+	tm.b.must(200, "GET", "/api/projects/"+tm.projectID+"/overview", nil, &ov)
+	if len(ov.RecentDeliverables) != 2 || len(ov.Threads) != 1 || ov.Threads[0].Counts.Deliverables != 1 {
+		t.Fatalf("overview %+v", ov)
+	}
+	for _, d := range ov.RecentDeliverables {
+		if d.Title == "旧截图" {
+			t.Fatalf("overview lists the old image")
+		}
 	}
 }
 
