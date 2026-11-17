@@ -730,7 +730,7 @@ ALTER TABLE at_employees ADD COLUMN model TEXT NOT NULL DEFAULT '';            -
 
 模型列表只由每个用户自己维护（`GET /api/models`、`PUT /api/models/mine`）。用户没有任何一行时（新账号），第一次读列表会写入内置的 `claude-opus-5-5`（Opus 5.5，Claude 默认）；保存时至少保留一个模型。
 
-会话的模型（集中在 `orchestrator.Model`）：`at_employees.model` → 项目 `coordinator_model` / `thread_model`（只对 Claude）→ 岗位 `model` → 项目所有者（`at_projects.user_id`）列表里该类型的默认 → `claude-opus-5-5`。平台内置命令存在 `at_settings.composer_commands = {commands: [...]}`。`at_usage.model` 记每一轮实际回答的模型（`session.event turn_ended.model`）。
+会话的模型（集中在 `orchestrator.Model`）：`at_employees.model` → 项目 `coordinator_model` / `thread_model`（只对 Claude）→ 岗位 `model` → 项目所有者（`at_projects.user_id`）列表里该类型的默认 → 内置兜底（Claude：`claude-opus-5-5`；Codex：空字符串，节点不传 `model`，由 Codex CLI 用自己的默认，Codex 员工不会落到 Claude 模型名）。平台内置命令存在 `at_settings.composer_commands = {commands: [...]}`。`at_usage.model` 记每一轮实际回答的模型（`session.event turn_ended.model`）。
 
 ## 3. 从 v1 表的映射（历史）
 

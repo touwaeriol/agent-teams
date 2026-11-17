@@ -20,9 +20,22 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// DefaultModel is the last resort when neither the employee, the project, the role nor the
-// owner's model list names a model (CLAUDE.md: claude-opus-5-5).
+// DefaultModel is the last resort of a Claude session when neither the employee, the project,
+// the role nor the owner's model list names a model (CLAUDE.md: claude-opus-5-5).
 const DefaultModel = "claude-opus-5-5"
+
+// DefaultCodexModel is the last resort of a Codex session: empty, i.e. the Codex CLI picks its
+// own default (the node leaves an empty model out of thread/start; app-server rejects model "",
+// so this needs a node that does). Never a Claude id: Codex cannot run it.
+const DefaultCodexModel = ""
+
+// builtinModel is the built-in last resort of a runtime.
+func builtinModel(runtime string) string {
+	if runtime == "codex" {
+		return DefaultCodexModel
+	}
+	return DefaultModel
+}
 
 // Errors the REST layer maps to status codes.
 var (

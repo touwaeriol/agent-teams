@@ -157,7 +157,7 @@
     "deny_non_platform_tools": false,              // 统筹 = true（PreToolUse 钩子拒绝非 mcp__platform__*）
     "protected_refs": ["thread/12-employee-comms", "main"]  // 写进平台 pre-push 钩子（纵深防护；员工本就没有写令牌）
   },
-  "codex": null,                                   // runtime=codex 时：{"model","sandbox","approval_policy","developer_instructions","config":{…}}；
+  "codex": null,                                   // runtime=codex 时：{"model","sandbox","approval_policy","developer_instructions","config":{…}}（model 可为 ""：节点不传给 thread/start，用 Codex 自己的默认，init.model 报实际解析出的模型）；
                                                    // 成员 config 含 sandbox_workspace_write.writable_roots=[<shared>/.git]、network_access=true；
                                                    // mcp_servers.platform 由守护进程每次 start/resume 自己填（URL 路径秘密，architecture.md §6.3）
   "platform_tools": [ {"name": "complete_task", "description": "…", "input_schema": {…}, "blocking": false}, … ],
