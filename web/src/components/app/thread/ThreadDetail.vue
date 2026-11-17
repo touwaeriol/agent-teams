@@ -48,11 +48,11 @@ watch(
 
 <template>
   <DetailHeader :thread="thread" :expand="expand" :full-href="fullHref" :nav="nav" :closable="closable" @back="emit('back')" @close="emit('close')" @view="(v) => emit('view', v)" />
-  <div class="scroll-thin flex-1 overflow-y-auto">
-    <div :class="cn('flex flex-col px-5 pb-6 pt-5', layout === 'page' && 'mx-auto w-full max-w-[760px] sm:px-6 sm:pt-8')">
+  <div class="scroll-thin min-h-0 flex-1 overflow-y-auto">
+    <div :class="cn('at-reading flex min-w-0 flex-col px-5 pb-6 pt-5', layout === 'page' && 'sm:px-6 sm:pt-8')">
       <ThreadChat :pid="pid" :thread="thread" :compact="layout !== 'page'" />
     </div>
   </div>
-  <LeadComposer :pid="pid" :thread="thread" :class="layout === 'page' ? 'mx-auto w-full max-w-[760px] px-3 pb-3 sm:px-6 sm:pb-5' : 'px-4 pb-4'" />
+  <LeadComposer :pid="pid" :thread="thread" :class="cn('at-reading', layout === 'page' ? 'px-3 pb-3 sm:px-6 sm:pb-5' : 'px-4 pb-4')" />
   <ThreadViewDialog :pid="pid" :thread="thread" :view="view" @view="(v) => emit('view', v)" />
 </template>

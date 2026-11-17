@@ -55,8 +55,20 @@ export function markdownTree(text: string, transform: UrlTransform = defaultUrlT
   return tree;
 }
 
+/** Wide tables scroll sideways in their own box instead of widening the chat. */
+export function wrapTables(node: Root | Element): void {
+  node.children = node.children.map((child) => {
+    if (child.type !== "element") return child;
+    if (child.tagName === "table") return { type: "element", tagName: "div", properties: { className: ["at-table-scroll"] }, children: [child] } as Element;
+    wrapTables(child);
+    return child;
+  }) as typeof node.children;
+}
+
 export function renderMarkdown(text: string, transform?: UrlTransform): VNode {
-  return toJsxRuntime(markdownTree(text, transform), {
+  const tree = markdownTree(text, transform);
+  wrapTables(tree);
+  return toJsxRuntime(tree, {
     Fragment,
     jsx: jsx as never,
     jsxs: jsxs as never,

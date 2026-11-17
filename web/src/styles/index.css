@@ -4,6 +4,9 @@
 
 @layer components {
   .scroll-thin { scrollbar-width: thin; scrollbar-color: hsl(var(--input)) transparent; }
+  /* Reading column of a thread (wide panel and full page): centered, one max width everywhere. */
+  .at-table-scroll { max-width: 100%; overflow-x: auto; scrollbar-width: thin; }
+  .at-reading { width: 100%; max-width: var(--at-reading-width, 860px); margin-inline: auto; }
 }
 
 /* In-progress marks rotate; with reduced motion they breathe gently instead. */

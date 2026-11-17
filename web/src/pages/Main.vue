@@ -3,7 +3,8 @@
 // detail) in the resizable right panel. Phones get thread chips and the project overview
 // (?sheet=threads|library|schedules).
 // /projects/:pid/settings[/:section] opens the project settings dialog over the board.
-import { computed, ref, watchEffect } from "vue";
+import { computed, nextTick, ref, watch, watchEffect } from "vue";
+import { MessagesSquare } from "lucide-vue-next";
 import { useRoute, useRouter } from "vue-router";
 import { flattenMessages, useCoordinator, useMe, useMessages, useProject, useThreads } from "@/api/queries";
 import type { ForwardView } from "@/api/views";
@@ -26,7 +27,8 @@ import PanelDetail from "./main/PanelDetail.vue";
 import PanelList from "./main/PanelList.vue";
 import MobileOverview from "./main/MobileOverview.vue";
 import ThreadChips from "./main/ThreadChips.vue";
-import { PANEL_DEFAULT, PANEL_MAX, clampWidth } from "@/lib/panelWidth";
+import { COORDINATOR_COMPACT, DETAIL_MIN, PANEL_DEFAULT, PANEL_MAX, PANEL_MIN, clampWidth } from "@/lib/panelWidth";
+import { useDetailWidth, useElementWidth, usePanelWidth } from "@/components/app/usePanelWidth";
 import { overviewTabOf, sidePanelOf, threadPath, type OverviewTab, type SidePanel as Panel } from "./main/logic";
 import { useReminderAlerts } from "@/lib/reminders";
 
@@ -47,6 +49,25 @@ const settings = computed(() => /^\/projects\/[^/]+\/settings(\/|$)/.test(route.
 const section = computed(() => sectionOf(typeof route.params.section === "string" ? route.params.section : undefined));
 const setSection = (s: SettingsSection) => void router.replace(`/projects/${pid.value}/settings/${s}`);
 const setPanel = (p: Panel) => void router.replace({ query: p === "threads" ? {} : { panel: p } });
+// Panel width: the list keeps its remembered width; an open thread fills the board (the area
+// right of the project sidebar, measured live) but a strip of the coordinator chat.
+const userId = () => me.data.value?.id ?? "anon";
+const boardEl = ref<HTMLElement | null>(null);
+const board = useElementWidth(boardEl);
+const [listWidth, setListWidth] = usePanelWidth(userId);
+const detail = useDetailWidth(userId, board);
+const detailOpen = computed(() => panel.value === "threads" && !!props.openNo);
+const panelWidth = computed(() => (detailOpen.value ? detail.width.value : listWidth.value));
+const setPanelWidth = (w: number) => (detailOpen.value ? detail.set(w) : setListWidth(w));
+const resetPanelWidth = () => (detailOpen.value ? detail.reset() : setListWidth(PANEL_DEFAULT));
+/** The coordinator chat is squeezed to a strip: clip it at its own width and make it a way back. */
+const peek = computed(() => detailOpen.value && board.value - detail.width.value < COORDINATOR_COMPACT);
+// The strip makes the coordinator chat inert; focus inside it would be dropped, so hand it to the panel.
+const mainEl = ref<HTMLElement | null>(null);
+watch(peek, (on) => {
+  if (!on || !mainEl.value?.contains(document.activeElement)) return;
+  void nextTick(() => boardEl.value?.querySelector<HTMLElement>("aside[aria-label=讨论串]")?.focus({ preventScroll: true }));
+});
 /** The panel is at its widest for this window (the list's expand button then shrinks it back). */
 const isWide = (w: number) => w >= clampWidth(PANEL_MAX, window.innerWidth) && w > PANEL_DEFAULT;
 const openThread = (no: number) => void router.push(threadPath(pid.value, no));
@@ -72,20 +93,45 @@ watchEffect(() => {
 <template>
   <EmptyState v-if="project.error.value" title="找不到这个项目" :description="errorText(project.error.value)" />
   <Loading v-else-if="!project.data.value" class="h-full" />
-  <div v-else class="flex h-full min-h-0 flex-1">
-    <main class="flex min-h-0 min-w-0 flex-1 flex-col">
-      <MainHeader :project="project.data.value" :coordinator="coordinator.data.value" :threads="list" :panel="panel" @panel="setPanel" @schedules="schedules = true" @overview="setSheet('threads')" />
-      <ThreadChips :pid="pid" :threads="list" />
-      <div class="flex-1 overflow-y-auto">
-        <div class="mx-auto flex max-w-[720px] flex-col px-4 pb-6 pt-4 sm:px-6 sm:pt-8">
-          <CoordinatorChat :pid="pid" :coordinator="coordinator.data.value" :threads="list" @open-thread="openThread" />
+  <div v-else ref="boardEl" class="flex h-full min-h-0 min-w-0 flex-1">
+    <main ref="mainEl" :class="['relative flex min-h-0 min-w-0 flex-1', peek && 'overflow-clip']" :data-peek="peek ? '' : undefined">
+      <div :class="['flex min-h-0 min-w-0 flex-1 flex-col', peek && 'min-w-[720px]']" :inert="peek || undefined">
+        <MainHeader :project="project.data.value" :coordinator="coordinator.data.value" :threads="list" :panel="panel" @panel="setPanel" @schedules="schedules = true" @overview="setSheet('threads')" />
+        <ThreadChips :pid="pid" :threads="list" />
+        <div class="flex-1 overflow-y-auto">
+          <div class="mx-auto flex max-w-[720px] flex-col px-4 pb-6 pt-4 sm:px-6 sm:pt-8">
+            <CoordinatorChat :pid="pid" :coordinator="coordinator.data.value" :threads="list" @open-thread="openThread" />
+          </div>
         </div>
+        <ForwardBar v-if="selecting" :count="selection.ids.length" @forward="picking = true" @cancel="stopSelecting" />
+        <CoordinatorComposer v-else :pid="pid" :coordinator="coordinator.data.value" />
+        <ForwardDialog v-if="cid" v-model:open="picking" :cid="cid" :ids="selection.ids" :messages="flattenMessages(chat.data.value)" :threads="list" @done="forwarded" />
       </div>
-      <ForwardBar v-if="selecting" :count="selection.ids.length" @forward="picking = true" @cancel="stopSelecting" />
-      <CoordinatorComposer v-else :pid="pid" :coordinator="coordinator.data.value" />
-      <ForwardDialog v-if="cid" v-model:open="picking" :cid="cid" :ids="selection.ids" :messages="flattenMessages(chat.data.value)" :threads="list" @done="forwarded" />
+      <button
+        v-if="peek"
+        type="button"
+        title="回到项目统筹会话"
+        aria-label="回到项目统筹会话"
+        class="group absolute inset-0 z-[1] flex h-full w-full cursor-pointer flex-col items-center bg-background/70 pt-16 text-muted-foreground transition-colors hover:bg-background/45 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#2F6FDB]"
+        data-testid="coordinator-peek"
+        @click="router.push(`/projects/${pid}`)"
+      >
+        <span class="flex flex-col items-center gap-2 rounded-full border bg-panel px-1.5 py-2.5 shadow-sm transition-colors group-hover:border-[#2F6FDB]/50 group-hover:text-[#2F6FDB]">
+          <MessagesSquare :size="16" :stroke-width="1.8" />
+          <span class="text-[12px] leading-4 tracking-[2px] [writing-mode:vertical-rl]">项目统筹</span>
+        </span>
+      </button>
     </main>
-    <SidePanel v-if="panel === 'threads'" v-slot="{ width, setWidth }" :user-id="me.data.value?.id ?? 'anon'" label="讨论串" handle-label="调整讨论串宽度">
+    <SidePanel
+      v-if="panel === 'threads'"
+      :width="panelWidth"
+      :min="detailOpen ? Math.min(DETAIL_MIN, detail.max.value) : PANEL_MIN"
+      :max="detailOpen ? detail.max.value : undefined"
+      label="讨论串"
+      handle-label="调整讨论串宽度"
+      @change="setPanelWidth"
+      @reset="resetPanelWidth"
+    >
       <PanelDetail
         v-if="props.openNo"
         :pid="pid"
@@ -104,9 +150,9 @@ watchEffect(() => {
         :threads="list"
         :loading="threads.isLoading.value"
         :user-id="me.data.value?.id ?? 'anon'"
-        :expanded="isWide(width)"
+        :expanded="isWide(listWidth)"
         @open="openThread"
-        @expand="setWidth(isWide(width) ? PANEL_DEFAULT : PANEL_MAX)"
+        @expand="setListWidth(isWide(listWidth) ? PANEL_DEFAULT : PANEL_MAX)"
       />
     </SidePanel>
     <aside
