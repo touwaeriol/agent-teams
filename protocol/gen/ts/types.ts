@@ -2731,7 +2731,7 @@ export interface OpenThreadInput {
         RepoFocus
       ];
   /**
-   * The user's message (its [message_id: N]) this thread is opened for; it is shown with the brief and its images and files go to the lead. Default: the user's latest message in the project chat.
+   * The user's own message (its [message_id: N]) this thread is opened for; it is shown with the brief and its images and files go to the lead. Default: the user's newest message delivered after your previous reply (none: no message is linked).
    */
   message_id?: number;
 }

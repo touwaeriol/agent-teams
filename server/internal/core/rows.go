@@ -27,23 +27,25 @@ type Thread struct {
 	AutoApprove bool
 	OpenedBy    string
 	// SourceMessageID is the user's project-chat message the thread was opened for (nil: none).
-	SourceMessageID *int64       `gorm:"column:source_message_id"`
-	RolesSnapshot   []store.Role `gorm:"serializer:jsonb"`
-	WaitingCount    int
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	StartedAt       *time.Time
-	FinishedAt      *time.Time
-	PinnedAt        *time.Time
-	RemindAt        *time.Time
-	RemindedAt      *time.Time
+	SourceMessageID *int64 `gorm:"column:source_message_id"`
+	// ForwardedBrief: the brief is forwarded user messages (their copies are in the conversation).
+	ForwardedBrief bool
+	RolesSnapshot  []store.Role `gorm:"serializer:jsonb"`
+	WaitingCount   int
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	StartedAt      *time.Time
+	FinishedAt     *time.Time
+	PinnedAt       *time.Time
+	RemindAt       *time.Time
+	RemindedAt     *time.Time
 }
 
 // TableName maps Thread to at_threads.
 func (Thread) TableName() string { return "at_threads" }
 
 const threadCols = `id, project_id, user_id, no, title, brief, status, pause_reason, branch, base_branch, pr_number,
-	pr_url, pr_state, merge_error, summary, auto_approve, opened_by, source_message_id, roles_snapshot, waiting_count, created_at, updated_at,
+	pr_url, pr_state, merge_error, summary, auto_approve, opened_by, source_message_id, forwarded_brief, roles_snapshot, waiting_count, created_at, updated_at,
 	started_at, finished_at, pinned_at, remind_at, reminded_at`
 
 // Active reports whether the thread's sessions should be live.

@@ -3353,7 +3353,7 @@ export interface components {
             counts: components["schemas"]["ThreadCounts"];
             /** Format: date-time */
             created_at: string;
-            /** @description How the thread was handed over: the brief and the user's message it was opened for (null: empty brief) */
+            /** @description How the thread was handed over (the text itself is brief): who opened it, when, and the user's message it was opened for. Null when the brief is empty or is forwarded user messages (their copies are in the conversation) */
             dispatch: components["schemas"]["ThreadDispatch"];
             /**
              * Format: date-time
@@ -3421,8 +3421,6 @@ export interface components {
              * @description When the thread was opened
              */
             at: string;
-            /** @description The brief the lead got (threads.brief) */
-            brief: string;
             /** @description coordinator or user */
             opened_by: string;
             /** @description The user's project-chat message the thread was opened for (null: none, or deleted) */
@@ -3456,7 +3454,7 @@ export interface components {
             counts: components["schemas"]["ThreadCounts"];
             /** Format: date-time */
             created_at: string;
-            /** @description How the thread was handed over: the brief and the user's message it was opened for (null: empty brief) */
+            /** @description How the thread was handed over (the text itself is brief): who opened it, when, and the user's message it was opened for. Null when the brief is empty or is forwarded user messages (their copies are in the conversation) */
             dispatch: components["schemas"]["ThreadDispatch"];
             /**
              * Format: date-time

@@ -5161,7 +5161,7 @@
           },
           "dispatch": {
             "$ref": "#/components/schemas/ThreadDispatch",
-            "description": "How the thread was handed over: the brief and the user's message it was opened for (null: empty brief)"
+            "description": "How the thread was handed over (the text itself is brief): who opened it, when, and the user's message it was opened for. Null when the brief is empty or is forwarded user messages (their copies are in the conversation)"
           },
           "finished_at": {
             "description": "When it reached done, failed or archived",
@@ -5376,10 +5376,6 @@
             "format": "date-time",
             "type": "string"
           },
-          "brief": {
-            "description": "The brief the lead got (threads.brief)",
-            "type": "string"
-          },
           "opened_by": {
             "description": "coordinator or user",
             "type": "string"
@@ -5390,7 +5386,6 @@
           }
         },
         "required": [
-          "brief",
           "opened_by",
           "at",
           "source"
@@ -5497,7 +5492,7 @@
           },
           "dispatch": {
             "$ref": "#/components/schemas/ThreadDispatch",
-            "description": "How the thread was handed over: the brief and the user's message it was opened for (null: empty brief)"
+            "description": "How the thread was handed over (the text itself is brief): who opened it, when, and the user's message it was opened for. Null when the brief is empty or is forwarded user messages (their copies are in the conversation)"
           },
           "finished_at": {
             "description": "When it reached done, failed or archived",

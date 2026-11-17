@@ -235,7 +235,7 @@ func (o *Orchestrator) forwardNew(ctx context.Context, tx *core.Tx, req ForwardR
 		title = titleFrom(items)
 	}
 	t, err := o.OpenThreadTx(ctx, tx, ThreadRequest{UserID: req.UserID, ProjectID: req.ProjectID, Title: title,
-		Brief: forwardText(req, items), OpenedBy: req.By})
+		Brief: forwardText(req, items), OpenedBy: req.By, ForwardedBrief: true})
 	if err != nil {
 		return ForwardResult{}, err
 	}

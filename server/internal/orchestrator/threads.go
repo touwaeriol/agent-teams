@@ -35,6 +35,7 @@ type ThreadRequest struct {
 	OpenedBy  string      // coordinator | user
 	// SourceMessageID is the user's project-chat message the thread is opened for (nil: none).
 	SourceMessageID *int64
+	ForwardedBrief  bool // the brief is the user's forwarded messages
 }
 
 // OpenThread creates a thread (queued), its employees, then starts queued threads within the limit.
@@ -63,7 +64,7 @@ func (o *Orchestrator) OpenThreadTx(ctx context.Context, tx *core.Tx, req Thread
 		return core.Thread{}, err
 	}
 	t, err := core.CreateThread(ctx, tx, core.NewThread{ProjectID: p.ID, UserID: p.UserID, Title: req.Title,
-		Brief: req.Brief, AutoApprove: p.AutoApprove, OpenedBy: req.OpenedBy, Roles: roles, SourceMessageID: req.SourceMessageID})
+		Brief: req.Brief, AutoApprove: p.AutoApprove, OpenedBy: req.OpenedBy, Roles: roles, SourceMessageID: req.SourceMessageID, ForwardedBrief: req.ForwardedBrief})
 	if err != nil {
 		return t, err
 	}
@@ -485,7 +486,11 @@ func (o *Orchestrator) PostToCoordinator(ctx context.Context, userID, projectID,
 		if err != nil {
 			return err
 		}
-		rec := &core.NewMessage{ConversationID: conv, Role: "user", Author: "user", Kind: "chat", Content: content, Meta: meta}
+		marked := map[string]any{core.SystemPostMeta: true}
+		for k, v := range meta {
+			marked[k] = v
+		}
+		rec := &core.NewMessage{ConversationID: conv, Role: "user", Author: "user", Kind: "chat", Content: content, Meta: marked}
 		m, err = o.Deliver(ctx, tx, emp, Delivery{Text: content, Kind: "user", Priority: "next", Record: rec})
 		return err
 	})
