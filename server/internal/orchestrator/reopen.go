@@ -41,9 +41,9 @@ func (o *Orchestrator) Reopen(ctx context.Context, tx *core.Tx, t core.Thread, c
 		return err
 	}
 	next := "running"
-	if running, err := core.RunningThreadCount(ctx, tx, t.UserID); err != nil {
+	if free, err := o.threadSlotFree(ctx, tx, t.UserID); err != nil {
 		return err
-	} else if running >= o.maxRunning(ctx, t.UserID) {
+	} else if !free {
 		next = "queued"
 	}
 	if err := o.setStatus(ctx, tx, t, next, ""); err != nil {

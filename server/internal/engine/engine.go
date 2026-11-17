@@ -95,6 +95,7 @@ func (e *Engine) Start(ctx context.Context) {
 	go e.Delivery.Run(ctx)
 	go e.Approvals.RunSweeper(ctx, 15*time.Second)
 	go e.Timers.Run(ctx)
+	go e.Orch.StartAllQueued(ctx)
 }
 
 // Hooks returns the platform.Hooks implementation.

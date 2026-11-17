@@ -1,7 +1,9 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import type { Query } from "@anthropic-ai/claude-agent-sdk";
 import { claudeOpen, startHarness, type Harness } from "./helpers/daemon.js";
+import { fakeQueryFactory, type FakeQueryLog } from "./helpers/fake-query.js";
 
 let h: Harness;
 afterEach(async () => {
@@ -172,6 +174,41 @@ describe("daemon with a fake console", () => {
     expect(h.daemon.sessions.stats.active).toBe(1);
     const report = h.daemon.sessions.report().sessions.map((s) => [s.session_id, s.state]);
     expect(report).toEqual(expect.arrayContaining([["s_F", "parked"], ["s_G", "active"]]));
+  });
+
+  it("starts every session when no limit is set", async () => {
+    h = await startHarness({ maxActive: undefined });
+    expect(h.console.ofType("hello")[0]!.body.capacity.max_active_sessions).toBeUndefined();
+    const ids = ["s_U1", "s_U2", "s_U3", "s_U4", "s_U5", "s_U6"];
+    for (const id of ids) await openAndRelease(id);
+    expect(h.daemon.sessions.stats).toMatchObject({ active: ids.length, parked: 0, queued: 0 });
+    expect(h.console.ofType("session.state").some((f) => f.body.state === "parked" || f.body.state === "queued")).toBe(false);
+  });
+
+  it("never parks a session that is still starting to make room for another", async () => {
+    // Before: s_K, still waiting for its initialize answer, counted as idle, so opening s_L parked
+    // it and closed its query: "Query closed before initialize was sent" → spawn_failed.
+    const log: FakeQueryLog = { options: [], prompts: [], closed: 0, interrupts: 0, modes: [] };
+    const base = fakeQueryFactory(log);
+    let releaseInit!: () => void;
+    const initGate = new Promise<void>((r) => (releaseInit = r));
+    const queryFn = (p: Parameters<typeof base>[0]): Query => {
+      const q = base(p);
+      if (log.options.length > 1) return q;
+      const init = q.initializationResult.bind(q);
+      q.initializationResult = async () => (await initGate, init());
+      return q;
+    };
+    h = await startHarness({ maxActive: 1, queryFn });
+    h.console.command("session.open", claudeOpen("s_K"));
+    await h.console.waitType("session.state", (b) => b.session_id === "s_K" && b.state === "starting");
+    await h.console.waitFor(() => log.options.length === 1, 5000, "s_K query");
+    h.console.command("session.open", claudeOpen("s_L"));
+    await h.console.waitType("session.state", (b) => b.session_id === "s_L" && b.state === "queued");
+    releaseInit();
+    await h.console.waitType("session.opened", (b) => b.session_id === "s_K");
+    expect(log.closed).toBe(0);
+    expect(h.console.ofType("session.event").filter((f) => f.body.code === "spawn_failed")).toEqual([]);
   });
 
   it("closes a session, cancels its pending tool calls and reports session.closed", async () => {

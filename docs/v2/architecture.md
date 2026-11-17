@@ -204,7 +204,7 @@ Codex 对应：组长和 `read_only` 岗位 `sandbox: read-only, approvalPolicy:
 ### 6.2 “逻辑会话”和“进程”分开
 
 - **逻辑会话**（`at_agent_sessions` 一行）：属于某个员工实例，记录 SDK `session_id` 或 Codex `thread.id`、节点、cwd、分支、状态。员工存在多久它就存在多久（统筹跟项目一样久，组长和成员跟讨论串一样久）。
-- **进程**：Claude 会话对应一个 `query()` 子进程（约 250 MB）。空闲超过 `park_after`（默认 15 分钟，无运行中的回合、无待审批）就 `close()` 掉进程，会话标为 `parked`；下一条消息到来时用 `resume: <session_id>` 重开。这样一台节点可以挂几十个逻辑会话，同时活跃的进程受 `max_active_sessions`（默认 4，节点 hello 上报，可在节点页调）限制。
+- **进程**：Claude 会话对应一个 `query()` 子进程（约 250 MB）。空闲超过 `park_after`（默认 15 分钟，无运行中的回合、无待审批）就 `close()` 掉进程，会话标为 `parked`；下一条消息到来时用 `resume: <session_id>` 重开。这样一台节点可以挂几十个逻辑会话，同时活跃的进程默认不限；节点页或守护进程 `--max-sessions` 设了 `max_active_sessions` 时才按它限制（满了先停放最久空闲的会话，还在启动中的会话不算空闲）。
 - Codex：一个 `codex app-server` 托管该节点所有 Codex 会话（同一 `CODEX_HOME`）；空闲 thread 不占额外进程，app-server 重启后 `thread/resume {excludeTurns:true}`。
 - 守护进程重启：从 `state/sessions/*.json` 知道本机有哪些逻辑会话，但**不主动恢复**；等控制台在重连后按需重新 `session.open {resume}`（控制台是唯一的真相）。控制台记录为 `turn_running`、之后却变成 `parked`（关机时停放的 `session.state`，或重启后的报告）或重新 `starting`（会话进程崩溃后自动重启）的会话，说明回合被打断了；丢了待审批请求的会话同样如此。控制台给这个员工（成员或组长）发一条系统消息（“守护进程重启打断了你上一个回合，请继续”，并列出失效的审批请求和仍在等待回答的提问），会话随之按 SDK session id resume 接着干，不会卡在进行中的任务上；同一次中断只发一次。重连对账后，若某个运行中的讨论串没有任何员工在工作、没有未处理的卡片或提问、也没有在途消息，组长收到一条提醒（这条提醒已是最新消息时不重复）。
 - **会话钉在节点上**：Claude 转录（员工 HOME 下的 `.claude/projects`）和 Codex rollout（`$CODEX_HOME/sessions`）只存在于跑过它的节点，所以 `resume` 只发给 `at_agent_sessions.node_id` 那台节点。必须换节点时（节点被删、离线超过 `rehome_after`（默认 30 分钟）且员工有待办任务、节点 drain），orchestrator 关闭旧逻辑会话，在新节点开一个**全新**会话（`resume: null`），第一条消息是平台生成的**会话恢复摘要**（`handoffSummary`）：员工身份、主任务计划、（组长）全部任务及状态、（成员）当前任务和分支、还没回答的提问、这个员工对话里最近 20 条已送达的消息和它自己的回复（用户 / 你 / 平台，统筹按自己的对话取，不再是空的）。不做转录同步（SDK `sessionStore` 以后可作为改进）。
@@ -308,7 +308,7 @@ queued ──开工──► running ◄──► waiting（有等你处理的�
    └───────────────┴──► failed（组长报告失败或不可恢复错误）
 ```
 
-开工（`queued → running`）由 orchestrator 做。同一用户（跨项目）同时处于 `running` 或 `waiting` 的讨论串数（Admin 页“每人最多同时运行的讨论串”）受 `max_running_threads` 限制（全局默认在 `at_settings.platform.max_running_threads`，默认 3；`at_users.max_running_threads` 可单独覆盖，NULL = 用全局），超出的新串停在 `queued`，有串结束或暂停时按创建顺序开工；Thread 页对排队的串显示“排队中（前面还有 n 个）”。
+开工（`queued → running`）由 orchestrator 做。同一用户（跨项目）同时处于 `running` 或 `waiting` 的讨论串数（Admin 页“每人最多同时运行的讨论串”）可用 `max_running_threads` 限制（全局在 `at_settings.platform.max_running_threads`，默认 0 = 不限；`at_users.max_running_threads` 可单独覆盖，NULL = 用全局，0 = 不限），设了上限时超出的新串停在 `queued`，有串结束或暂停时按创建顺序开工；Thread 页对排队的串显示“排队中（前面还有 n 个）”。
 
 1. 分配编号与分支名 `thread/<no>-<slug>`；GitHub API 从基准分支建 ref（已存在跳过）。
 2. 按岗位模板实例化员工 `<role>-<n>`（写 `at_employees`），节点在岗位 `nodes` 里按“当前活跃会话最少”挑，不再是纯轮转。

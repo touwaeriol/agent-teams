@@ -42,7 +42,7 @@ export interface DaemonOptions {
   configDir: string;
   platformDir: string;
   runtimeDir: string;
-  maxActive: number;
+  maxActive?: number;
   passEnv: string[];
   gitBaseUrl: string;
   claudeConfigDir: string;
@@ -171,7 +171,7 @@ export class Daemon {
       acked_cmd_seq: this.inbox.acked,
       host: hostname(),
       root: resolve(this.o.root),
-      capacity: { max_active_sessions: this.o.maxActive, cpus: cpus().length, mem_mb: Math.round(totalmem() / 1048576) },
+      capacity: { ...(this.o.maxActive ? { max_active_sessions: this.o.maxActive } : {}), cpus: cpus().length, mem_mb: Math.round(totalmem() / 1048576) },
       runtimes: { claude: this.claudeRuntime, codex: this.codexRuntime },
       features: existsSync(join(this.o.configDir, "release.pub")) ? FEATURES : FEATURES.filter((f) => f !== "upgrade"),
       isolated: false,

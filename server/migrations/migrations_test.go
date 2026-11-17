@@ -862,6 +862,38 @@ CREATE TRIGGER at_test_skip_u2 BEFORE INSERT ON at_models FOR EACH ROW EXECUTE F
 	}
 }
 
+// TestUnlimitedSessionsMigration: 00220 clears the stored running-thread and node-session limits
+// (platform setting to 0, user and node overrides to NULL) and leaves other platform settings alone.
+func TestUnlimitedSessionsMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 210); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash, max_running_threads) VALUES ('u1', 'a@example.com', 'x', 2);
+INSERT INTO at_nodes (id, user_id, name, token_hash, max_active_sessions) VALUES ('n1', 'u1', 'box', 'h', 4);
+INSERT INTO at_settings (key, value) VALUES ('platform', '{"registration_open": false, "default_max_nodes": 5, "max_running_threads": 3}');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := migrations.Up(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	var platform string
+	if err := db.QueryRow(`SELECT value::text FROM at_settings WHERE key = 'platform'`).Scan(&platform); err != nil ||
+		platform != `{"default_max_nodes": 5, "registration_open": false, "max_running_threads": 0}` {
+		t.Fatalf("platform %s %v", platform, err)
+	}
+	var user, node sql.NullInt64
+	if err := db.QueryRow(`SELECT (SELECT max_running_threads FROM at_users WHERE id = 'u1'), (SELECT max_active_sessions FROM at_nodes WHERE id = 'n1')`).Scan(&user, &node); err != nil || user.Valid || node.Valid {
+		t.Fatalf("user %v node %v %v", user, node, err)
+	}
+}
+
 // TestThreadCodexModelMigration: 00230 adds at_projects.thread_codex_model (” for existing
 // projects) and turns Codex leads into Claude leads following the defaults; other roles keep
 // their runtime and model. Down drops the column and leaves the leads on Claude.
@@ -872,7 +904,7 @@ func TestThreadCodexModelMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.UpTo(ctx, 210); err != nil {
+	if _, err := p.UpTo(ctx, 220); err != nil {
 		t.Fatal(err)
 	}
 	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
@@ -908,7 +940,7 @@ INSERT INTO at_roles (id, user_id, tier, role, runtime, model) VALUES ('r2', 'u2
 	if got := roles(); got != want {
 		t.Fatalf("roles:\n got %s\nwant %s", got, want)
 	}
-	if _, err := p.DownTo(ctx, 210); err != nil {
+	if _, err := p.DownTo(ctx, 220); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`SELECT thread_codex_model FROM at_projects`); err == nil {

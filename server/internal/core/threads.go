@@ -49,6 +49,13 @@ func QueuedThreads(ctx context.Context, q DB, userID string) ([]Thread, error) {
 	return find[Thread](threads(ctx, q).Where("user_id = ? AND status = 'queued'", userID).Order("created_at, no"))
 }
 
+// QueuedThreadUsers lists the users that have queued threads.
+func QueuedThreadUsers(ctx context.Context, q DB) ([]string, error) {
+	var out []string
+	err := threads(ctx, q).Where("status = 'queued'").Distinct().Pluck("user_id", &out).Error
+	return out, err
+}
+
 // RunningThreadCount counts the user's threads that hold a running slot.
 func RunningThreadCount(ctx context.Context, q DB, userID string) (int, error) {
 	return count(threads(ctx, q).Where("user_id = ? AND status IN ('running','waiting')", userID))

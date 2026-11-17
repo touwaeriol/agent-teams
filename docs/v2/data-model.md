@@ -73,7 +73,7 @@ CREATE TABLE casbin_rule (
 );
 CREATE UNIQUE INDEX idx_casbin_rule ON casbin_rule (ptype, v0, v1, v2, v3, v4, v5);
 
--- v1: key PK, value JSONB。键：platform、github_app。platform 增加字段 max_running_threads（默认 3）。v2 新增键：
+-- v1: key PK, value JSONB。键：platform、github_app。platform 增加字段 max_running_threads（默认 0 = 不限）。v2 新增键：
 --   office_default   {"layout": "default"}           默认布局文件名
 --   delivery_default {"gates": {...}, "ci": {...}}  新项目的交付流程默认值
 --   node_release     {"version": "2.0.3", "sha256": "…", "signature": "…"}   -- 签名用发布私钥离线生成，控制台不持有私钥
@@ -97,7 +97,7 @@ CREATE INDEX at_audit_log_user ON at_audit_log (user_id, created_at DESC);
 ```sql
 -- v1: id, user_id, name, token_hash UNIQUE, created_at, UNIQUE(user_id, name)
 ALTER TABLE at_nodes
-  ADD COLUMN IF NOT EXISTS max_active_sessions INT,              -- NULL = 用守护进程上报值
+  ADD COLUMN IF NOT EXISTS max_active_sessions INT,              -- NULL = 用守护进程上报值（不报 = 不限）
   ADD COLUMN IF NOT EXISTS park_after_s INT,
   ADD COLUMN IF NOT EXISTS isolated BOOLEAN NOT NULL DEFAULT FALSE,           -- 用户声明：整台机器只给员工用
   ADD COLUMN IF NOT EXISTS isolation TEXT NOT NULL DEFAULT 'none',          -- 守护进程探测：agent_user | sandbox | none（architecture.md §10.3）

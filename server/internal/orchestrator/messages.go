@@ -313,11 +313,11 @@ func (o *Orchestrator) Pause(ctx context.Context, tx *core.Tx, t core.Thread, re
 
 // Resume puts a paused thread back to running (or queued when no slot is free).
 func (o *Orchestrator) Resume(ctx context.Context, tx *core.Tx, t core.Thread) error {
-	running, err := core.RunningThreadCount(ctx, tx, t.UserID)
+	free, err := o.threadSlotFree(ctx, tx, t.UserID)
 	if err != nil {
 		return err
 	}
-	if running >= o.maxRunning(ctx, t.UserID) {
+	if !free {
 		return o.setStatus(ctx, tx, t, "queued", "")
 	}
 	return o.setStatus(ctx, tx, t, "running", "")

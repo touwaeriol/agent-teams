@@ -37,7 +37,7 @@ func (g *Gateway) Status(nodeID string) platform.NodeLive {
 	return live
 }
 
-// Capacity is the node's max_active_sessions (setting, else hello, else 4).
+// Capacity is the node's max_active_sessions (setting, else hello); 0 means no limit.
 func (g *Gateway) Capacity(node store.Node) int {
 	if node.MaxActiveSessions != nil {
 		return *node.MaxActiveSessions
@@ -45,7 +45,7 @@ func (g *Gateway) Capacity(node store.Node) int {
 	if l := g.link(node.ID); l != nil && l.hello.Capacity != nil && l.hello.Capacity.MaxActiveSessions != nil {
 		return *l.hello.Capacity.MaxActiveSessions
 	}
-	return 4
+	return 0
 }
 
 func toMap(v any) map[string]any {

@@ -62,7 +62,7 @@ export class SessionManager implements SessionHost {
     this.approvals = d.approvals;
     this.tools = d.tools;
     this.parkAfterMs = d.parkAfterMs ?? 900_000;
-    this.maxActive = d.maxActive ?? 4;
+    this.maxActive = d.maxActive ?? Infinity;
     this.dir = join(d.stateDir, "sessions");
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
     this.loadRecords();
