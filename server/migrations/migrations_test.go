@@ -195,7 +195,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 220 {
+	if migrations.Latest() != 240 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -862,7 +862,7 @@ CREATE TRIGGER at_test_skip_u2 BEFORE INSERT ON at_models FOR EACH ROW EXECUTE F
 	}
 }
 
-// TestUnlimitedSessionsMigration: 00220 clears the stored running-thread and node-session limits
+// TestUnlimitedSessionsMigration: 00240 clears the stored running-thread and node-session limits
 // (platform setting to 0, user and node overrides to NULL) and leaves other platform settings alone.
 func TestUnlimitedSessionsMigration(t *testing.T) {
 	db := open(t, testdb.URL(t))
@@ -871,7 +871,7 @@ func TestUnlimitedSessionsMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.UpTo(ctx, 210); err != nil {
+	if _, err := p.UpTo(ctx, 230); err != nil {
 		t.Fatal(err)
 	}
 	seed := `INSERT INTO at_users (id, email, password_hash, max_running_threads) VALUES ('u1', 'a@example.com', 'x', 2);
