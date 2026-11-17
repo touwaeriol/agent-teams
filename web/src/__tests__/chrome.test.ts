@@ -30,7 +30,7 @@ describe("library", () => {
   });
   it("labels types and owners", () => {
     expect(typeLabel(item("a", { kind: "design", detail: { hosted: true, entry: "06-nodes.png" } }))).toBe("PNG");
-    expect(typeLabel(item("b", { kind: "pr" }))).toBe("PR");
+    expect(typeLabel(item("b", { kind: "board" }))).toBe("白板");
     expect(typeLabel(item("c", { kind: "doc" }))).toBe("文档");
     expect(ownerLabel("user")).toBe("你");
     expect(ownerLabel("")).toBe("平台");
@@ -128,7 +128,7 @@ describe("library rows", () => {
     expect(fileIcon(item("a", { kind: "design", detail: { hosted: true, entry: "06-nodes.png" } }))).toBe("image");
     expect(fileIcon(item("b", { kind: "design", detail: { hosted: true, entry: "index.html" } }))).toBe("code");
     expect(fileIcon(item("c", { kind: "data", detail: { hosted: true, entry: "t.csv" } }))).toBe("table");
-    expect(fileIcon(item("d", { kind: "pr" }))).toBe("pr");
+    expect(fileIcon(item("d", { kind: "pr" }))).toBe("link"); // PRs are no longer deliverables
     expect(fileIcon(item("e", { kind: "doc" }))).toBe("text");
     expect(fileIcon(item("f", { kind: "other" }))).toBe("link");
   });

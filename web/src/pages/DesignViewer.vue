@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // Deliverable viewer page (/projects/:pid/deliverables/:id): finds the deliverable and its thread.
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import { useDeliverables, useThreads } from "@/api/queries";
 import EmptyState from "@/components/common/EmptyState.vue";
 import Loading from "@/components/common/Loading.vue";
+import { useSeenDeliverables } from "@/lib/deliverableStrip";
 import Viewer from "./design/Viewer.vue";
 
 const route = useRoute();
@@ -13,6 +14,13 @@ const list = useDeliverables(pid, "", "");
 const threads = useThreads(pid);
 const item = computed(() => list.data.value?.items.find((d) => d.id === route.params.id));
 const thread = computed(() => threads.data.value?.find((t) => t.no === item.value?.thread_no));
+// opening it here clears its "新内容" tag in the panel list's 交付物 strip (also when it updates while open)
+const seen = useSeenDeliverables(() => pid.value);
+watch(
+  () => item.value && [item.value.id, item.value.updated_at],
+  () => item.value && seen.markSeen(item.value),
+  { immediate: true },
+);
 </script>
 
 <template>

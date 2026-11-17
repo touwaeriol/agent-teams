@@ -45,12 +45,12 @@ export function sizeOf(d: Pick<DeliverableView, "detail">): number | undefined {
   return typeof size === "number" ? size : undefined;
 }
 
-/** PNG / HTML for hosted files, otherwise the kind's name (PR, 文档…). */
+/** PNG / HTML for hosted files, otherwise the kind's name (设计稿, 文档…). */
 export function typeLabel(d: Pick<DeliverableView, "kind" | "detail">): string {
   const entry = d.detail.hosted ? d.detail.entry : undefined;
   const ext = entry ? extensionOf(entry) : "";
   if (ext) return ext === "markdown" ? "MD" : ext.toUpperCase();
-  return d.kind === "pr" ? "PR" : deliverableKind(d.kind).label;
+  return deliverableKind(d.kind).label;
 }
 
 /** Who added it: you, the platform, or the employee's name. */
@@ -109,14 +109,14 @@ export function deliverableHref(pid: string, d: Pick<DeliverableView, "id" | "ki
   return { href: safeHref(d.url) };
 }
 
-export type FileIconKind = "image" | "code" | "text" | "table" | "pr" | "design" | "link";
+export type FileIconKind = "image" | "code" | "text" | "table" | "design" | "link";
 
 const ICON_BY_EXT: Record<string, FileIconKind> = {
   png: "image", jpg: "image", jpeg: "image", gif: "image", webp: "image", svg: "image",
   html: "code", htm: "code", json: "table", csv: "table",
   md: "text", markdown: "text", txt: "text", pdf: "text",
 };
-const ICON_BY_KIND: Record<string, FileIconKind> = { pr: "pr", design: "design", doc: "text", data: "table", dashboard: "table", slides: "design", board: "design" };
+const ICON_BY_KIND: Record<string, FileIconKind> = { design: "design", doc: "text", data: "table", dashboard: "table", slides: "design", board: "design" };
 
 /** Which outline icon a library row shows: by the hosted file's extension, else by kind. */
 export function fileIcon(d: Pick<DeliverableView, "kind" | "detail">): FileIconKind {
