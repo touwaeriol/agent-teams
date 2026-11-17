@@ -17,7 +17,7 @@ export const keys = {
   threads: (pid: string) => ["p", pid, "threads"] as const,
   waiting: (pid: string) => ["p", pid, "waiting"] as const,
   overview: (pid: string) => ["p", pid, "overview"] as const,
-  deliverables: (pid: string, kind = "", q = "") => ["p", pid, "deliverables", kind, q] as const,
+  deliverables: (pid: string, kind = "", q = "", noImages = false) => ["p", pid, "deliverables", kind, q, noImages] as const,
   allDeliverables: (pid: string) => ["p", pid, "deliverables"] as const,
   memory: (pid: string) => ["p", pid, "memory"] as const,
   memoryFile: (pid: string, name: string) => ["p", pid, "memory", name] as const,
@@ -162,10 +162,19 @@ export function flattenMessages(data: { pages: Page<MessageView>[] } | undefined
   return [...data.pages].reverse().flatMap((p) => p.items);
 }
 
-export const useDeliverables = (pid: Arg, kind: Arg, q: Arg) =>
+/**
+ * A project's deliverables. noImages asks the server to leave out hosted images published before
+ * screenshots stopped being deliverables (lists of deliverables); a lookup by id keeps them.
+ */
+export const useDeliverables = (pid: Arg, kind: Arg, q: Arg, noImages = false) =>
   useKeyed(
-    () => keys.deliverables(val(pid), val(kind), val(q)),
-    () => unwrap(client.GET("/api/projects/{pid}/deliverables", { params: { path: { pid: val(pid) }, query: { kind: val(kind) || undefined, q: val(q) || undefined } } })),
+    () => keys.deliverables(val(pid), val(kind), val(q), noImages),
+    () =>
+      unwrap(
+        client.GET("/api/projects/{pid}/deliverables", {
+          params: { path: { pid: val(pid) }, query: { kind: val(kind) || undefined, q: val(q) || undefined, no_images: noImages || undefined } },
+        }),
+      ),
     { enabled: has(pid) },
   );
 

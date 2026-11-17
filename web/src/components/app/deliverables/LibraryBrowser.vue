@@ -25,7 +25,7 @@ const ownSearch = ref(props.variant === "page");
 const searching = computed({ get: () => (props.variant === "sheet" ? Boolean(props.search) : ownSearch.value), set: (v) => (ownSearch.value = v) });
 const view = ref<LibraryView>(storedView());
 const sort = ref<{ key: SortKey; dir: "asc" | "desc" }>({ key: "modified", dir: "desc" });
-const list = useDeliverables(() => props.pid, kind, q);
+const list = useDeliverables(() => props.pid, kind, q, true);
 const items = computed(() => sortLibrary((list.data.value?.items ?? []).filter(isLibraryDeliverable), sort.value.key, sort.value.dir));
 /** Panel and sheet are padded; only the panel has its own header. */
 const panel = computed(() => props.variant !== "page");

@@ -55,7 +55,7 @@ export interface OrchestrationPaths {
   "/api/projects/{pid}/overview": { get: Op<Ok<OverviewView>, Pid> };
   "/api/projects/{pid}/search": { get: Op<Ok<SearchResult>, Pid, { q: string }> };
   "/api/projects/{pid}/deliverables": {
-    get: Op<Ok<Page<DeliverableView>>, Pid, { kind?: string; thread?: number; q?: string; cursor?: string }>;
+    get: Op<Ok<Page<DeliverableView>>, Pid, { kind?: string; thread?: number; q?: string; cursor?: string; no_images?: boolean }>;
     post: Op<Ok<DeliverableView, 201>, Pid, never, { kind: string; title: string; url: string; thread_no?: number }>;
   };
   "/api/projects/{pid}/deliverables/request": { post: Op<Ok<MessageView, 202>, Pid, never, { kind: string; brief: string }> };

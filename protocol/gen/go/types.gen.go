@@ -4683,8 +4683,10 @@ func (j *PublishDeliverableResult) UnmarshalJSON(value []byte) error {
 // version of an earlier deliverable. Screenshots and images are not deliverables:
 // a lone PNG/JPG/GIF/WebP is saved as an attachment in your thread's messages
 // instead (no deliverable, cannot be a new version), and a lone SVG is refused. To
-// back up a report with screenshots, put them in a directory with the report's
-// index.html, or cite the attachment in your report.
+// put an image in a report, publish it in one directory with the report's
+// index.html, or inline it in the HTML (an SVG can be written straight into the
+// HTML); Markdown cannot show images. Cite an attachment (its id or URL) only in
+// your written report.
 type PublishFileInput struct {
 	// An earlier deliverable of this project published with publish_file; the file
 	// becomes its next version.

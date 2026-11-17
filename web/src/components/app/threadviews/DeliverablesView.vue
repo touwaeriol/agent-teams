@@ -9,7 +9,7 @@ import DeliverableCard from "./DeliverableCard.vue";
 import Delivery from "./Delivery.vue";
 
 const props = defineProps<{ pid: string; thread: ThreadView }>();
-const deliverables = useDeliverables(() => props.pid, "", "");
+const deliverables = useDeliverables(() => props.pid, "", "", true);
 const mine = computed(() => (deliverables.data.value?.items ?? []).filter((d) => d.thread_no === props.thread.no && isLibraryDeliverable(d)));
 </script>
 

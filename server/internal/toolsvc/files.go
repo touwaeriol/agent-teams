@@ -71,8 +71,8 @@ func (s *Service) publishFile(ctx context.Context, tx *core.Tx, c *call) (Result
 
 // svgRefusal and imageVersionRefusal explain why a lone image is not a deliverable.
 const (
-	svgRefusal          = "SVG 不是交付物，请把它嵌进 HTML 或 Markdown 报告里发布（例如放进带 index.html 的目录，或直接内联到 HTML 里）"
-	imageVersionRefusal = "图片不能作为交付物的新版本：截图和图片不是交付物。要更新报告，就把图片和 index.html 放在同一目录发布成网站，或在报告文档里引用它"
+	svgRefusal          = "SVG 不是交付物，不能单独发布。要放进报告，就把图片和 index.html 放在同一目录、用 publish_file 发布成网站，或直接内联进 HTML（SVG 可以直接写进 HTML）"
+	imageVersionRefusal = "图片不能作为交付物的新版本：截图和图片不是交付物。要放进报告，就把图片和 index.html 放在同一目录、用 publish_file 发布成网站，或直接内联进 HTML（SVG 可以直接写进 HTML）"
 )
 
 // publishImage handles a lone bitmap (a screenshot): it is not a deliverable. The image is kept as
@@ -89,6 +89,10 @@ func (s *Service) publishImage(ctx context.Context, tx *core.Tx, c *call, in pro
 	case in.DeliverableID != nil:
 		return failText("%s", imageVersionRefusal), nil
 	}
+	if core.SniffImage(f.Data) == "" {
+		return failText("%s 的扩展名是图片，内容却不是 PNG、JPEG、GIF 或 WebP 图片（比如改了扩展名的 PDF），没有保存。"+
+			"请发布真实的文件：PDF、文档用它本来的扩展名发布", f.Path), nil
+	}
 	title := strings.TrimSpace(in.Title)
 	a, err := core.NewAttachment(c.emp().ProjectID, c.sc.OwnerID, path.Base(f.Path), f.Data)
 	if err != nil {
@@ -102,8 +106,8 @@ func (s *Service) publishImage(ctx context.Context, tx *core.Tx, c *call, in pro
 	}
 	url := core.AttachmentURLPrefix + a.ID
 	text := fmt.Sprintf("截图和图片不是交付物，没有发布成交付物。这张图片已作为附件 %s 保存在讨论串消息里（%s），用户能在讨论串里看到。"+
-		"要把截图写进报告，就把图片和 index.html 放在同一目录、用 publish_file 发布成网站，或在 Markdown/HTML 报告里引用它；"+
-		"汇报时也可以直接引用这个附件地址。", a.ID, url)
+		"要放进报告，就把图片和 index.html 放在同一目录、用 publish_file 发布成网站，或直接内联进 HTML（SVG 可以直接写进 HTML）；"+
+		"附件只在文字汇报里引用（写附件 id 或地址），Markdown 和网站交付物里引用不到它。", a.ID, url)
 	return okText(text), nil
 }
 

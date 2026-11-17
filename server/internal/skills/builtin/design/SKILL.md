@@ -52,8 +52,9 @@ uses it and publish the directory, or inline it in the HTML.
 - If a browser is available on this machine (for example `npx playwright` or a headless
   Chrome), take screenshots at 390 px and 1280 px wide, in light and dark, and look at them
   (Read the PNG). Fix overlaps, overflow, clipped text and contrast problems. These screenshots
-  are for checking your own work, not deliverables; if a reviewer needs one, put it in the report
-  or mention it in your task report.
+  are for checking your own work, not deliverables; if a reviewer needs one, put it next to an
+  `index.html` that shows it and publish the directory, or cite the attachment (id or URL) in your
+  task report.
 - Without a browser, re-read the HTML carefully: unclosed tags, CSS variables used but not
   defined, scripts that reference missing elements.
 - Open the file with a quick HTML validator if one is installed; otherwise at least make sure
