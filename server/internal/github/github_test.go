@@ -189,3 +189,45 @@ func TestRestErrorKeepsValidationMessages(t *testing.T) {
 		t.Fatalf("error %q", err)
 	}
 }
+
+func TestTokensNarrowToGrantedPermissions(t *testing.T) {
+	var asked []map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/access_tokens"):
+			var req TokenRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			asked = append(asked, req.Permissions)
+			if req.Permissions["pull_requests"] == "write" || req.Permissions["checks"] != "" {
+				w.WriteHeader(422)
+				_, _ = w.Write([]byte(`{"message":"The permissions requested are not granted to this installation."}`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"token": "ghs_ok", "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)})
+		case r.Method == "GET" && r.URL.Path == "/app/installations/9":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 9, "permissions": map[string]string{"contents": "write", "pull_requests": "read", "metadata": "read"}})
+		default:
+			w.WriteHeader(500)
+		}
+	}))
+	defer srv.Close()
+	_, pemText := testKey(t)
+	box := auth.NewSecretBox("k")
+	apps := NewApps(memSettings{}, box)
+	if _, err := apps.Save(context.Background(), map[string]any{
+		"id": float64(7), "slug": "at", "client_id": "cid", "client_secret": "cs", "pem": pemText,
+		"owner": map[string]any{"login": "me"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	client := &Client{BaseURL: srv.URL, WebURL: srv.URL, HTTP: srv.Client()}
+	tokens := NewTokens(client, apps, kv.NewMemory(), box)
+	want := map[string]string{"contents": "write", "pull_requests": "write", "checks": "read"}
+	tok, err := tokens.Installation(context.Background(), 9, TokenRequest{Repositories: []string{"r"}, Permissions: want})
+	if err != nil || tok != "ghs_ok" {
+		t.Fatalf("tok=%q err=%v", tok, err)
+	}
+	last := asked[len(asked)-1]
+	if len(asked) != 2 || last["contents"] != "write" || last["pull_requests"] != "read" || last["checks"] != "" {
+		t.Fatalf("asked %v", asked)
+	}
+}

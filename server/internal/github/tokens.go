@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -66,7 +68,46 @@ func (t *Tokens) mint(ctx context.Context, installationID int64, req TokenReques
 	if err != nil {
 		return Token{}, err
 	}
-	return t.client.InstallationToken(ctx, jwt, installationID, req)
+	tok, err := t.client.InstallationToken(ctx, jwt, installationID, req)
+	if err == nil || len(req.Permissions) == 0 || !notGranted(err) {
+		return tok, err
+	}
+	// The installation lacks some requested permission (an App created before the
+	// platform asked for it, not re-approved yet): ask for what it does grant.
+	inst, ierr := t.client.Installation(ctx, jwt, installationID)
+	if ierr != nil {
+		return Token{}, err
+	}
+	narrowed := grantedSubset(req.Permissions, inst.Permissions)
+	slog.Warn("installation lacks requested permissions; narrowed the token",
+		"installation", installationID, "requested", req.Permissions, "granted", inst.Permissions, "using", narrowed)
+	if len(narrowed) == 0 {
+		return Token{}, err
+	}
+	return t.client.InstallationToken(ctx, jwt, installationID, TokenRequest{Repositories: req.Repositories, Permissions: narrowed})
+}
+
+func notGranted(err error) bool {
+	var ge *Error
+	return errors.As(err, &ge) && ge.Status == 422 && strings.Contains(ge.Message, "not granted")
+}
+
+// grantedSubset keeps each requested permission at the level the installation grants
+// (write → read when only read is granted) and drops the ones it lacks.
+func grantedSubset(want, granted map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, level := range want {
+		g := granted[k]
+		switch {
+		case g == "":
+			continue
+		case level == "write" && g != "write" && g != "admin":
+			out[k] = "read"
+		default:
+			out[k] = level
+		}
+	}
+	return out
 }
 
 func (t *Tokens) fresh(tok Token) bool { return tok.ExpiresAt.Sub(t.now()) > RefreshMargin }
