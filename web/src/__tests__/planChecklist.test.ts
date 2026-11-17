@@ -6,7 +6,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
 import PlanChecklist from "@/components/app/plan/PlanChecklist.vue";
-import { stepLook } from "@/components/app/plan/steps";
+import { CircleDone, stepLook } from "@/components/app/plan/steps";
 import ThreadDetail from "@/components/app/thread/ThreadDetail.vue";
 import type { MainTaskView } from "@/api/views";
 import { currentStep } from "@/lib/threadList";
@@ -62,7 +62,15 @@ describe("PlanChecklist", () => {
     expect(title(4)).not.toContain("line-through");
     // unknown: as todo
     expect(icon(5).classes()).toContain("lucide-circle-dashed");
-    expect(icon(1).attributes("aria-label")).toBe("进行中");
+    // every status icon is a labelled image for screen readers
+    expect(rows(w).map((r) => [r.get("svg").attributes("role"), r.get("svg").attributes("aria-label"), r.get("svg").attributes("aria-hidden")])).toEqual([
+      ["img", "已完成", undefined],
+      ["img", "进行中", undefined],
+      ["img", "未开始", undefined],
+      ["img", "失败", undefined],
+      ["img", "已跳过", undefined],
+      ["img", "未开始", undefined],
+    ]);
     expect(stepLook("nope").status).toBe("todo");
   });
 
@@ -81,13 +89,29 @@ describe("PlanChecklist", () => {
     expect(w.get("button").text()).toBe("收起");
   });
 
-  it("folded: first todo when nothing is doing, 全部完成 when nothing is left", async () => {
+  it("folded: first todo when nothing is doing; 全部完成 only when every step is done, else 已结束", async () => {
     const w = mount(PlanChecklist, { props: { steps: [step(1, "done"), step(2, "todo"), step(3, "todo")], defaultOpen: false } });
     expect(w.get("[data-current]").text()).toBe("第 2 步");
+    expect(w.get("[data-current] svg").attributes("role")).toBe("img");
     expect(w.get("[data-plan-progress]").text()).toBe("1/3");
     await w.setProps({ steps: [step(1, "done"), step(2, "done"), step(3, "skipped")] });
-    expect(w.get("[data-current]").text()).toBe("全部完成");
+    expect(w.get("[data-current]").text()).toBe("已结束");
+    expect(w.get("[data-current] svg").attributes()).toMatchObject({ role: "img", "aria-label": "已结束" });
     expect(w.get("[data-plan-progress]").text()).toBe("2/3");
+    await w.setProps({ steps: [step(1, "done"), step(2, "failed")] });
+    expect(w.get("[data-current]").text()).toBe("已结束");
+    await w.setProps({ steps: [step(1, "done"), step(2, "done")] });
+    expect(w.get("[data-current]").text()).toBe("全部完成");
+    const done = w.get("[data-current] svg");
+    expect(done.attributes()).toMatchObject({ role: "img", "aria-label": "已完成" });
+    expect(done.attributes("aria-hidden")).toBeUndefined();
+    expect(w.get("[data-plan-progress]").text()).toBe("2/2");
+  });
+
+  it("CircleDone without a label is decoration hidden from screen readers", () => {
+    const w = mount(CircleDone);
+    expect(w.attributes("aria-hidden")).toBe("true");
+    expect(w.attributes("role")).toBeUndefined();
   });
 
   it("re-renders when the steps change", async () => {

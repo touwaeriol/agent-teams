@@ -3,12 +3,15 @@
 import { CircleDashed, CircleEllipsis, CircleSlash, CircleX } from "lucide-vue-next";
 import { defineComponent, h, type Component } from "vue";
 
-/** The filled grey circle with a tick (lucide only has the outline one). */
+/**
+ * The filled grey circle with a tick (lucide only has the outline one). With an aria-label it is
+ * an image screen readers announce; without one it is decoration and hidden from them.
+ */
 export const CircleDone = defineComponent({
   name: "CircleDone",
   props: { size: { type: [Number, String], default: 16 } },
-  setup: (props) => () =>
-    h("svg", { width: props.size, height: props.size, viewBox: "0 0 16 16", "aria-hidden": "true" }, [
+  setup: (props, { attrs }) => () =>
+    h("svg", { width: props.size, height: props.size, viewBox: "0 0 16 16", ...(attrs["aria-label"] ? { role: "img" } : { "aria-hidden": "true" }) }, [
       h("circle", { cx: 8, cy: 8, r: 7, fill: "currentColor" }),
       h("path", { d: "M4.9 8.2l2.1 2.1 4.2-4.4", fill: "none", stroke: "hsl(var(--panel))", "stroke-width": 1.7, "stroke-linecap": "round", "stroke-linejoin": "round" }),
     ]),
