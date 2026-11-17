@@ -736,7 +736,7 @@ INSERT INTO at_deliverable_comments (id, deliverable_id, author, text) VALUES ('
 	}
 }
 
-// userModelsSeed (at 00190): u1 already has Opus 5.5 (own label) and an own model, and its
+// userModelsSeed (at 00200): u1 already has Opus 5.5 (own label) and an own model, and its
 // project, role and employee name models missing from every list; u2 has nothing. The platform
 // list is Opus 5.5 (Claude default), Sonnet, gpt-p (Codex default).
 const userModelsSeed = `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x'), ('u2', 'b@example.com', 'x');
@@ -746,7 +746,8 @@ INSERT INTO at_models (id, user_id, runtime, model, label, sort, is_default) VAL
   ('mu1', 'u1', 'claude', 'claude-opus-5-5', 'mine', 0, FALSE),
   ('mu2', 'u1', 'claude', 'claude-mine', '', 1, FALSE);
 INSERT INTO at_projects (id, user_id, name, coordinator_model, thread_model) VALUES ('p1', 'u1', 'A', 'claude-coord', 'claude-opus-5-5');
-INSERT INTO at_roles (id, user_id, tier, role, runtime, model) VALUES ('r1', 'u1', 'member', 'dev', 'codex', 'gpt-role');
+INSERT INTO at_roles (id, user_id, tier, role, runtime, model) VALUES ('r1', 'u1', 'member', 'dev', 'codex', 'gpt-role'),
+  ('r2', 'u1', 'member', 'qa', 'claude', 'bad model id'), ('r3', 'u1', 'member', 'ops', 'claude', 'us.anthropic.claude-x:0[1m]');
 INSERT INTO at_employees (id, project_id, name, tier, role, runtime, model, spec) VALUES
   ('e1', 'p1', 'lead', 'lead', 'lead', 'claude', 'claude-emp', '{"model": "claude-spec"}');`
 
@@ -780,8 +781,9 @@ func TestUserModelsMigration(t *testing.T) {
 	if _, err := migrations.Up(ctx, db); err != nil {
 		t.Fatal(err)
 	}
+	// 'bad model id' (not a valid id) is left out; the id with : [ ] is kept.
 	want1 := "claude:claude-opus-5-5:mine:* claude:claude-mine: claude:claude-sonnet-p:Sonnet codex:gpt-p::* " +
-		"claude:claude-coord: claude:claude-emp: claude:claude-spec: codex:gpt-role:"
+		"claude:claude-coord: claude:claude-emp: claude:claude-spec: claude:us.anthropic.claude-x:0[1m]: codex:gpt-role:"
 	if got := userModels(t, db, "u1"); got != want1 {
 		t.Fatalf("u1:\n got %s\nwant %s", got, want1)
 	}
