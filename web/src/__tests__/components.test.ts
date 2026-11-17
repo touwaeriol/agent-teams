@@ -181,12 +181,14 @@ describe("ThreadList", () => {
   const idle = { members: [{ id: "e", name: "lead", tier: "lead", status: { state: "idle" } }] } as unknown as Partial<ThreadView>;
   it("groups threads into chips with counts; archived starts folded and folding is reported", async () => {
     const w = mountWith(ThreadList, {
-      threads: [thread(1, idle), thread(2, { status: "done" }), thread(4, { status: "failed" }), thread(3, { status: "archived", summary: "旧的" })],
+      threads: [thread(1, idle), thread(2, { status: "done" }), thread(4, { status: "failed" }), thread(5, { status: "paused" }), thread(3, { status: "archived", summary: "旧的" })],
     });
     const chips = w.findAll("section[data-group] > button").map((b) => b.text());
-    expect(chips).toEqual(["空闲 · 1", "已完成 · 2", "已归档 · 1"]);
-    expect(w.find("[data-group=idle] [data-mark=idle]").exists()).toBe(true);
-    expect(w.find("[data-group=done] [data-mark=failed]").exists()).toBe(true);
+    expect(chips).toEqual(["进行中 · 1", "已解决 · 1", "失败 · 1", "已暂停 · 1", "已归档 · 1"]);
+    expect(w.find("[data-group=active] [data-mark=idle]").exists()).toBe(true);
+    expect(w.find("[data-group=done] [data-mark=done]").exists()).toBe(true);
+    expect(w.find("[data-group=failed] [data-mark=failed]").exists()).toBe(true);
+    expect(w.find("[data-group=paused] [data-mark=paused]").exists()).toBe(true);
     expect(w.text()).toContain("#1 T1");
     expect(w.text()).not.toContain("#3 T3");
     await w.get("[data-group=archived] > button").trigger("click");
@@ -207,29 +209,59 @@ describe("ThreadList", () => {
     await w.setProps({ filter: { q: "没有", groups: [], withDeliverable: false } });
     expect(w.text()).toContain("没有符合条件的讨论串");
   });
-  it("rich rows (进行中) tag the plan and the deliverables; compact rows (空闲) are one line with the last activity", () => {
+  it("rich rows (进行中) tag the plan and the deliverables and join the mark to the progress line; compact rows (已解决) are one line with the last activity", () => {
     const d = { id: "d1", project_id: "p1", thread_no: 1, kind: "doc", title: "说明", url: "https://x.dev/a", detail: {}, published_by: "dev", created_at: "", updated_at: "" };
     const working = { members: [{ id: "e", name: "lead", tier: "lead", node: { id: "n1", name: "rc", online: true }, status: { state: "typing" } }] } as unknown as Partial<ThreadView>;
     const w = mountWith(ThreadList, {
       threads: [
         thread(2, { ...working, latest_deliverable: d, counts: { ...thread(2).counts, deliverables: 3, main_total: 7, main_done: 2 } }),
-        thread(1, { ...idle, latest_deliverable: d, last_activity_at: new Date(Date.now() - 51 * 60_000).toISOString() }),
+        thread(1, { status: "done", latest_deliverable: d, last_activity_at: new Date(Date.now() - 51 * 60_000).toISOString() }),
       ],
     });
     const rich = w.get("[data-group=active] [data-row]");
     expect(rich.attributes("data-compact")).toBeUndefined();
     expect(rich.get("[data-mark]").attributes("data-mark")).toBe("working");
+    expect(rich.find("[data-tree]").exists()).toBe(true);
     expect(rich.get("[data-node]").attributes("data-node")).toBe("online");
     expect(rich.get("[data-tags]").text()).toContain("2/7");
     expect(rich.get("[data-deliverables]").text()).toBe("3 个交付物");
     expect(rich.get("[data-deliverables]").attributes("href")).toBe("/projects/p1/threads/2/deliverables");
     expect(rich.find("a[href='https://x.dev/a']").exists()).toBe(false);
-    const compact = w.get("[data-group=idle] [data-row]");
+    const compact = w.get("[data-group=done] [data-row]");
+    expect(compact.get("[data-mark]").attributes("data-mark")).toBe("done");
+    expect(compact.find("[data-tree]").exists()).toBe(false);
     expect(compact.attributes("data-compact")).toBe("");
     expect(compact.find("[data-tags]").exists()).toBe(false);
     expect(compact.find("[data-node]").exists()).toBe(false);
     expect(compact.findAll("button span.truncate").map((s) => s.text())).toEqual(["#1 T1"]);
     expect(compact.get("time").text()).toBe("51分钟");
+  });
+  it("settled rows (已解决 / 已暂停 / 失败) with an open card get a small orange dot; the group does not change", () => {
+    const w = mountWith(ThreadList, {
+      threads: [
+        thread(1, { status: "done", counts: { ...thread(1).counts, waiting: 1, approvals_open: 1 } }),
+        thread(2, { status: "paused" }),
+        thread(3, { status: "failed" }),
+        thread(4, { status: "done" }),
+        thread(5, { status: "archived", counts: { ...thread(5).counts, waiting: 1 } }),
+        thread(6, { members: [{ id: "e", name: "lead", tier: "lead", status: { state: "typing" } }] as never, counts: { ...thread(6).counts, waiting: 1 } }),
+      ],
+      waitingByThread: new Map([[2, question("q", { thread_no: 2 })], [3, question("q3", { thread_no: 3 })]]),
+      folded: {},
+    });
+    const row = (no: number) => w.findAll("[data-row]").find((r) => r.text().includes(`#${no} `))!;
+    const dot = (no: number) => row(no).find("[data-waits]");
+    expect(w.findAll("section[data-group]").map((s) => s.attributes("data-group"))).toEqual(["active", "done", "failed", "paused", "archived"]);
+    expect(w.findAll("[data-group=done] [data-row]")).toHaveLength(2);
+    expect(dot(1).exists()).toBe(true);
+    expect(dot(1).attributes("aria-label")).toBe("等你处理");
+    expect(dot(1).attributes("title")).toBe("等你处理");
+    expect(dot(2).exists()).toBe(true);
+    expect(dot(3).exists()).toBe(true);
+    expect(dot(4).exists()).toBe(false);
+    expect(dot(5).exists()).toBe(false); // archived stays quiet
+    expect(dot(6).exists()).toBe(false); // 进行中 shows it in the mark instead
+    expect(row(6).get("[data-mark]").attributes("data-mark")).toBe("wait");
   });
   it("says what to do when there are none", () => {
     expect(mountWith(ThreadList, { threads: [] }).text()).toContain("还没有讨论串");

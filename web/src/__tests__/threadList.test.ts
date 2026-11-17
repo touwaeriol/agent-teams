@@ -13,7 +13,6 @@ import {
   mainProgress,
   NO_FILTER,
   rowLine,
-  rowMark,
   saveFolded,
   shortAgo,
   threadMark,
@@ -28,20 +27,31 @@ const deliverable = (id: string): DeliverableView => ({ id, project_id: "p1", th
 beforeEach(() => window.localStorage.clear());
 
 describe("listGroupOf", () => {
-  it("waiting on the user wins over working", () => {
-    expect(listGroupOf(thread(1, { status: "review" }))).toBe("waiting");
-    expect(listGroupOf(thread(1, { members: [member("typing")], counts: counts({ approvals_open: 1, waiting: 1 }) }))).toBe("waiting");
-    expect(listGroupOf(thread(1, { members: [member("typing")] }), new Map([[1, question("q", { thread_no: 1 })]]))).toBe("waiting");
+  it("queued / running / waiting / review are 进行中, whoever works", () => {
+    for (const status of ["queued", "running", "waiting", "review"] as const) expect(listGroupOf(thread(1, { status }))).toBe("active");
+    expect(listGroupOf(thread(1, { members: [member("idle")] }))).toBe("active");
+    expect(listGroupOf(thread(1, { counts: counts({ approvals_open: 1, waiting: 1 }) }))).toBe("active");
   });
-  it("working or queued is 进行中, running/paused with nobody working is 空闲", () => {
-    expect(listGroupOf(thread(1, { members: [member("typing")] }))).toBe("active");
-    expect(listGroupOf(thread(1, { status: "queued" }))).toBe("active");
-    expect(listGroupOf(thread(1, { members: [member("idle")] }))).toBe("idle");
-    expect(listGroupOf(thread(1, { status: "paused", members: [member("typing")] }))).toBe("idle");
+  it("archived stays 已归档 even with something open for the user", () => {
+    expect(listGroupOf(thread(1, { status: "archived", counts: counts({ waiting: 2, approvals_open: 2 }) }))).toBe("archived");
+    expect(threadMark(thread(1, { status: "archived", counts: counts({ waiting: 2 }) }))).toBe("archived");
   });
-  it("done and failed are 已完成, archived its own", () => {
+  it("a fired reminder brings a done thread back to 进行中, ahead of newer work that does not wait on the user", () => {
+    const groups = groupThreads([
+      thread(1, { members: [member("typing")], last_activity_at: "2026-11-16T12:00:00Z" }),
+      thread(2, { status: "done", reminded_at: "2026-11-16T09:00:00Z", last_activity_at: "2026-11-10T00:00:00Z" }),
+      thread(3, { status: "done", last_activity_at: "2026-11-16T00:00:00Z" }),
+    ]);
+    expect(groups.map((g) => [g.id, g.items.map((t) => t.no)])).toEqual([
+      ["active", [2, 1]],
+      ["done", [3]],
+    ]);
+    expect(threadMark(thread(2, { status: "done", reminded_at: "2026-11-16T09:00:00Z" }))).toBe("wait");
+  });
+  it("done is 已解决, failed 失败, paused 已暂停, archived 已归档", () => {
     expect(listGroupOf(thread(1, { status: "done" }))).toBe("done");
-    expect(listGroupOf(thread(1, { status: "failed" }))).toBe("done");
+    expect(listGroupOf(thread(1, { status: "failed" }))).toBe("failed");
+    expect(listGroupOf(thread(1, { status: "paused", members: [member("typing")] }))).toBe("paused");
     expect(listGroupOf(thread(1, { status: "archived" }))).toBe("archived");
   });
 });
@@ -54,21 +64,35 @@ describe("groupThreads", () => {
       thread(3, { status: "archived" }),
       thread(4, { status: "review" }),
       thread(5, { members: [member("idle")] }),
+      thread(6, { status: "paused" }),
     ]);
     expect(groups.map((g) => [g.id, g.label, g.items.map((t) => t.no)])).toEqual([
-      ["waiting", "等你处理", [4]],
-      ["idle", "空闲", [5]],
-      ["done", "已完成", [2, 1]],
+      ["active", "进行中", [4, 5]],
+      ["done", "已解决", [2, 1]],
+      ["paused", "已暂停", [6]],
       ["archived", "已归档", [3]],
     ]);
   });
-  it("row marks follow the group and failure", () => {
-    expect(rowMark(thread(1, { status: "failed" }), "done")).toBe("failed");
-    expect(rowMark(thread(1, { status: "done" }), "done")).toBe("done");
-    expect(rowMark(thread(1, { status: "queued" }), "active")).toBe("queued");
-    expect(rowMark(thread(1), "active")).toBe("working");
-    expect(rowMark(thread(1), "waiting")).toBe("wait");
-    expect(rowMark(thread(1), "idle")).toBe("idle");
+  it("in 进行中 what waits on the user comes first, even before pins and newer activity", () => {
+    const groups = groupThreads(
+      [
+        thread(1, { members: [member("typing")], last_activity_at: "2026-11-16T00:00:00Z", pinned_at: "2026-11-16T00:00:00Z" }),
+        thread(2, { last_activity_at: "2026-11-01T00:00:00Z" }),
+        thread(3, { status: "review", last_activity_at: "2026-11-02T00:00:00Z" }),
+      ],
+      new Map([[2, question("q", { thread_no: 2 })]]),
+    );
+    expect(groups[0].items.map((t) => t.no)).toEqual([3, 2, 1]);
+  });
+  it("marks: settled groups by status; in 进行中 waiting, working, queued or idle", () => {
+    expect(threadMark(thread(1, { status: "failed" }))).toBe("failed");
+    expect(threadMark(thread(1, { status: "done" }))).toBe("done");
+    expect(threadMark(thread(1, { status: "paused", members: [member("typing")] }))).toBe("paused");
+    expect(threadMark(thread(1, { status: "archived", reminded_at: "2026-11-16T00:00:00Z" }))).toBe("archived");
+    expect(threadMark(thread(1, { status: "queued" }))).toBe("queued");
+    expect(threadMark(thread(1, { members: [member("typing")] }))).toBe("working");
+    expect(threadMark(thread(1, { status: "review" }))).toBe("wait");
+    expect(threadMark(thread(1, { members: [member("idle")] }))).toBe("idle");
   });
 });
 
@@ -110,7 +134,8 @@ describe("filterThreads", () => {
     expect(nos({ q: "  " })).toEqual([1, 2, 3]);
   });
   it("filters by group and by having a deliverable", () => {
-    expect(nos({ groups: ["active", "done"] })).toEqual([1, 2]);
+    expect(nos({ groups: ["active", "done"] })).toEqual([1, 2, 3]);
+    expect(nos({ groups: ["done"] })).toEqual([1]);
     expect(nos({ withDeliverable: true })).toEqual([1]);
     expect(nos({ groups: ["active"], withDeliverable: true })).toEqual([]);
   });
@@ -125,11 +150,17 @@ describe("folded sections", () => {
     saveFolded("u1", { archived: true, done: false });
     expect(window.localStorage.getItem(foldedKey("u1"))).toBeNull();
   });
+  it("ignores folds saved for the old 等你处理 / 空闲 groups", () => {
+    window.localStorage.setItem(foldedKey("u1"), JSON.stringify({ waiting: true, idle: true, done: true }));
+    expect(loadFolded("u1")).toEqual({ archived: true, done: true });
+    saveFolded("u1", { archived: true, waiting: true });
+    expect(window.localStorage.getItem(foldedKey("u1"))).toBeNull();
+  });
   it("survives broken or unavailable storage", () => {
     window.localStorage.setItem(foldedKey("u1"), "{not json");
     expect(loadFolded("u1")).toEqual({ archived: true });
-    window.localStorage.setItem(foldedKey("u1"), JSON.stringify({ done: "yes", idle: true }));
-    expect(loadFolded("u1")).toEqual({ archived: true, idle: true });
+    window.localStorage.setItem(foldedKey("u1"), JSON.stringify({ done: "yes", paused: true }));
+    expect(loadFolded("u1")).toEqual({ archived: true, paused: true });
     const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("blocked");
     });
@@ -144,18 +175,18 @@ describe("folded sections", () => {
 });
 
 describe("list layout (Claude app style)", () => {
-  it("orders 等你处理 → 进行中 → 空闲 → 已完成 → 已归档 whatever the input order", () => {
+  it("orders 进行中 → 已解决 → 失败 → 已暂停 → 已归档 whatever the input order", () => {
     const ids = groupThreads([
       thread(1, { status: "archived" }),
       thread(2, { status: "done" }),
-      thread(3, { members: [member("idle")] }),
-      thread(4, { members: [member("typing")] }),
-      thread(5, { status: "review" }),
+      thread(3, { status: "paused" }),
+      thread(4, { status: "failed" }),
+      thread(5, { status: "waiting" }),
     ]).map((g) => g.id);
-    expect(ids).toEqual(["waiting", "active", "idle", "done", "archived"]);
+    expect(ids).toEqual(["active", "done", "failed", "paused", "archived"]);
   });
-  it("空闲, 已完成 and 已归档 rows are compact; 等你处理 and 进行中 stay rich", () => {
-    expect((["waiting", "active", "idle", "done", "archived"] as const).map(isCompactGroup)).toEqual([false, false, true, true, true]);
+  it("已解决, 已暂停 and 已归档 rows are compact; 进行中 and 失败 stay rich", () => {
+    expect((["active", "done", "failed", "paused", "archived"] as const).map(isCompactGroup)).toEqual([false, true, false, true, true]);
   });
   it("the header mark follows the list: spinner working, orange waiting, dashed idle, ✓ done, ✕ failed", () => {
     expect(threadMark(thread(1, { members: [member("typing")] }))).toBe("working");

@@ -1,21 +1,23 @@
 <script setup lang="ts">
 /**
- * The open thread's top bar in capsules (like the Claude app): a round ‹ back to the list; a
- * centred capsule with the status mark (blue spinner working, pulsing orange dot waiting, dashed
- * ring idle, ✓ done, ✕ failed), "#12 标题" (double-click renames in place) and the plan "2/7";
- * a right capsule with the node status and ✓ (archive) and ⋯ (the thread menu, with its
- * shortcuts); then expand and close where they apply.
+ * The open thread's top bar as a left-aligned breadcrumb (like the Claude web app):
+ * "讨论串 › ● #12 标题 2/7". "讨论串" goes back to the list; the status icon (ThreadStatusIcon)
+ * shows working / queued / waiting / idle / paused / done / failed / archived; the title truncates
+ * and double-click renames it in place. On the right, borderless icon buttons: node status,
+ * ✓ (archive), ⋯ (the thread menu, with its shortcuts), then expand and close where they apply.
  */
-import { ChevronLeft, Maximize2, Minimize2, Pin, X } from "lucide-vue-next";
+import { ChevronRight, Maximize2, Minimize2, Pin, X } from "lucide-vue-next";
 import { computed, ref } from "vue";
+import { useWaiting } from "@/api/queries";
 import type { ThreadView } from "@/api/views";
 import IconButton from "@/components/common/IconButton.vue";
 import { threadLook } from "@/lib/present";
 import { mainProgress, threadMark } from "@/lib/threadList";
+import { waitingIndex } from "@/pages/main/logic";
 import NodeStatus from "../NodeStatus.vue";
 import ResolveButton from "../ResolveButton.vue";
-import ThreadMark from "../ThreadMark.vue";
 import ThreadMenu from "../ThreadMenu.vue";
+import ThreadStatusIcon from "../ThreadStatusIcon.vue";
 import type { ThreadViewId } from "../threadMenu";
 import type { ExpandLink, ThreadNav } from "./detail";
 import TitleEdit from "./TitleEdit.vue";
@@ -28,41 +30,44 @@ const props = withDefaults(defineProps<{ thread: ThreadView; expand?: ExpandLink
 });
 const emit = defineEmits<{ back: []; close: []; view: [view: ThreadViewId] }>();
 const look = computed(() => threadLook(props.thread));
-const mark = computed(() => threadMark(props.thread));
 const progress = computed(() => mainProgress(props.thread));
+// Same waiting map as the list, so a thread whose only open card is a question shows 等你处理 here too.
+const waiting = useWaiting(() => props.thread.project_id);
+const mark = computed(() => threadMark(props.thread, waitingIndex(waiting.data.value?.questions)));
 const renaming = ref(false);
-const PILL = "border border-[#E7E5E0] bg-panel shadow-[0_1px_2px_rgba(0,0,0,0.05)] dark:border-border";
 </script>
 
 <template>
-  <header class="flex h-14 shrink-0 items-center gap-2 border-b border-[#EFEDE8] px-2.5">
-    <el-tooltip content="讨论串列表" placement="bottom" :show-after="300" :hide-after="0" effect="dark" :show-arrow="false">
+  <header class="flex h-12 shrink-0 items-center gap-2 border-b border-[#EFEDE8] pl-4 pr-2 dark:border-border">
+    <nav aria-label="面包屑" class="flex min-w-0 flex-1 items-center gap-1.5 text-[13px]" data-crumb="">
       <button
         type="button"
         aria-label="返回讨论串列表"
-        :class="[PILL, 'flex size-9 shrink-0 items-center justify-center rounded-full text-[#4A4843] hover:bg-raised dark:text-foreground/80']"
+        title="返回讨论串列表"
+        class="-ml-1.5 shrink-0 rounded-md px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-raised hover:text-foreground"
         @click="emit('back')"
       >
-        <ChevronLeft class="size-[18px]" :stroke-width="1.9" />
+        讨论串
       </button>
-    </el-tooltip>
-    <div class="flex min-w-0 flex-1 justify-center">
+      <ChevronRight class="size-3.5 shrink-0 text-muted-foreground/60" :stroke-width="1.5" aria-hidden="true" />
       <div
-        :class="[PILL, 'flex h-9 min-w-0 max-w-full items-center gap-2 rounded-full pl-3 pr-3.5']"
+        class="flex min-w-0 flex-1 items-center gap-1.5"
         :title="`#${thread.no} ${thread.title} · ${look.label}${progress ? ` · 主任务 ${progress.label}` : ''}`"
-        data-capsule="title"
+        data-crumb="title"
       >
-        <ThreadMark :thread="thread" :mark="mark" class="!mt-0" />
+        <ThreadStatusIcon :mark="mark" :size="14" />
         <TitleEdit v-if="renaming" :thread="thread" @done="renaming = false" />
         <template v-else>
           <Pin v-if="thread.pinned_at" class="size-3 shrink-0 rotate-45 text-muted-foreground" :stroke-width="2" aria-label="已置顶" />
-          <span aria-current="page" class="truncate text-[13px] font-medium" @dblclick="renaming = true">#{{ thread.no }} {{ thread.title }}</span>
+          <span aria-current="page" class="min-w-0 truncate font-normal text-foreground" @dblclick="renaming = true"
+            ><span class="text-muted-foreground tabular-nums">#{{ thread.no }}</span> {{ thread.title }}</span
+          >
           <span v-if="progress" class="shrink-0 text-xs tabular-nums text-muted-foreground" :aria-label="`主任务完成 ${progress.label}`" data-progress="">{{ progress.label }}</span>
         </template>
       </div>
-    </div>
-    <div :class="[PILL, 'flex h-9 shrink-0 items-center gap-0.5 rounded-full pl-2.5 pr-0.5 [&_button]:rounded-full']" data-capsule="actions">
-      <span class="mr-1 flex"><NodeStatus :thread="thread" /></span>
+    </nav>
+    <div class="flex shrink-0 items-center gap-0.5" data-actions="">
+      <span class="flex size-8 items-center justify-center"><NodeStatus :thread="thread" /></span>
       <span class="max-sm:hidden"><ResolveButton :thread="thread" /></span>
       <ThreadMenu
         :thread="thread"
@@ -74,11 +79,11 @@ const PILL = "border border-[#E7E5E0] bg-panel shadow-[0_1px_2px_rgba(0,0,0,0.05
         @rename="renaming = true"
         @deleted="emit('back')"
       />
+      <IconButton v-if="expand" :label="expand.label" :to="expand.to" class="max-sm:hidden">
+        <Minimize2 v-if="expand.collapse" :stroke-width="1.8" />
+        <Maximize2 v-else :stroke-width="1.8" />
+      </IconButton>
+      <IconButton v-if="closable" label="关闭" @click="emit('close')"><X :stroke-width="1.8" /></IconButton>
     </div>
-    <IconButton v-if="expand" :label="expand.label" :to="expand.to" class="max-sm:hidden">
-      <Minimize2 v-if="expand.collapse" :stroke-width="1.8" />
-      <Maximize2 v-else :stroke-width="1.8" />
-    </IconButton>
-    <IconButton v-if="closable" label="关闭" class="-ml-1" @click="emit('close')"><X :stroke-width="1.8" /></IconButton>
   </header>
 </template>

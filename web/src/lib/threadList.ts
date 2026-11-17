@@ -6,47 +6,71 @@ import { isWorking, liveLine } from "./live";
 import { readLocal, writeLocal } from "./persist";
 import { threadLine } from "./present";
 
-export type ListGroupId = "waiting" | "active" | "idle" | "done" | "archived";
+export { shortAgo } from "./relativeTime";
+
+export type ListGroupId = "active" | "done" | "failed" | "paused" | "archived";
 
 export const LIST_GROUPS: { id: ListGroupId; label: string }[] = [
-  { id: "waiting", label: "等你处理" },
   { id: "active", label: "进行中" },
-  { id: "idle", label: "空闲" },
-  { id: "done", label: "已完成" },
+  { id: "done", label: "已解决" },
+  { id: "failed", label: "失败" },
+  { id: "paused", label: "已暂停" },
   { id: "archived", label: "已归档" },
 ];
 
+const GROUP_BY_STATUS: Record<ThreadView["status"], ListGroupId> = {
+  queued: "active",
+  running: "active",
+  waiting: "active",
+  review: "active",
+  done: "done",
+  failed: "failed",
+  paused: "paused",
+  archived: "archived",
+};
+
 /**
- * Where a thread goes: 等你处理 (an open card or acceptance waits on the user, or a reminder
- * the user set has fired; archived threads stay archived), 进行中
- * (someone is working, or it waits for a node), 空闲 (running or paused, nobody working and
- * nothing waiting), 已完成 (done or failed), 已归档.
+ * Where a thread goes, by its status: queued / running / waiting / review are 进行中, done is
+ * 已解决, failed 失败, paused 已暂停, archived 已归档. A reminder the user set that has fired
+ * brings a thread back to 进行中 (archived threads stay archived). What waits on the user is
+ * told apart inside 进行中 by the row's mark (and sorted first), not by a group of its own.
  */
-export function listGroupOf(t: ThreadView, waiting?: Map<number, QuestionView>): ListGroupId {
+export function listGroupOf(t: ThreadView): ListGroupId {
   if (t.status === "archived") return "archived";
-  if (t.reminded_at) return "waiting";
-  if (t.status === "done" || t.status === "failed") return "done";
-  if (t.status === "review" || t.status === "waiting" || t.counts.waiting > 0 || waiting?.has(t.no)) return "waiting";
-  if (t.status === "queued") return "active";
-  if (t.status === "running" && t.members.some(isWorking)) return "active";
-  return "idle";
+  if (t.reminded_at) return "active";
+  return GROUP_BY_STATUS[t.status] ?? "active";
 }
 
-/** The round mark before a row. */
-export type RowMark = "wait" | "working" | "queued" | "idle" | "done" | "failed" | "archived";
-
-export function rowMark(t: ThreadView, group: ListGroupId): RowMark {
-  if (group === "waiting") return "wait";
-  if (group === "active") return t.status === "queued" ? "queued" : "working";
-  if (group === "done") return t.status === "failed" ? "failed" : "done";
-  return group;
+/** Something waits on the user: acceptance, an open card or approval, a question, or a fired reminder. */
+export function waitsOnUser(t: ThreadView, waiting?: Map<number, QuestionView>): boolean {
+  if (t.status === "archived") return false;
+  return Boolean(t.reminded_at) || t.status === "review" || t.status === "waiting" || t.counts.waiting > 0 || Boolean(waiting?.has(t.no));
 }
 
-/** 空闲, 已完成 and 已归档 rows are one compact line; 等你处理 and 进行中 keep the two-line row. */
-export const isCompactGroup = (g: ListGroupId) => g === "idle" || g === "done" || g === "archived";
+/** The round mark before a row (and in the open thread's header): see ThreadStatusIcon. */
+export type RowMark = "wait" | "working" | "queued" | "idle" | "done" | "failed" | "paused" | "archived";
 
-/** The status mark of a thread on its own (the open thread's header). */
-export const threadMark = (t: ThreadView, waiting?: Map<number, QuestionView>): RowMark => rowMark(t, listGroupOf(t, waiting));
+const SETTLED_MARK: Partial<Record<ListGroupId, RowMark>> = { done: "done", failed: "failed", paused: "paused", archived: "archived" };
+
+/**
+ * The status mark of a thread: settled groups have their own mark; in 进行中, orange when it
+ * waits on the user, a spinner when someone works (grey while queued), a dashed ring when idle.
+ */
+export function threadMark(t: ThreadView, waiting?: Map<number, QuestionView>): RowMark {
+  const group = listGroupOf(t);
+  const settled = group === "active" ? undefined : SETTLED_MARK[group];
+  if (settled) return settled;
+  if (waitsOnUser(t, waiting)) return "wait";
+  if (t.status === "queued") return "queued";
+  return t.members.some(isWorking) ? "working" : "idle";
+}
+
+/**
+ * Only 进行中 and 失败 rows have a second line (progress, tags, the tree line); 已解决 / 已暂停 /
+ * 已归档 are one compact line. 失败 stays rich on purpose: a failure needs the user's attention,
+ * so its reason and plan progress stay visible.
+ */
+export const isCompactGroup = (g: ListGroupId) => g !== "active" && g !== "failed";
 
 /** Main tasks done / total ("2/7"), from the plan when the thread carries it; null without a plan. */
 export function mainProgress(t: Pick<ThreadView, "main_tasks" | "counts">): { done: number; total: number; label: string } | null {
@@ -94,14 +118,18 @@ export interface ListGroup {
   items: ThreadView[];
 }
 
-/** Every thread in exactly one group, pinned ones first, then newest activity first; empty groups are left out. */
+/**
+ * Every thread in exactly one group, groups in LIST_GROUPS order, empty ones left out. Inside a
+ * group: what waits on the user first (进行中), then pinned ones, then newest activity first.
+ */
 export function groupThreads(threads: ThreadView[], waiting?: Map<number, QuestionView>): ListGroup[] {
   const by = new Map<ListGroupId, ThreadView[]>();
   for (const t of threads) {
-    const g = listGroupOf(t, waiting);
+    const g = listGroupOf(t);
     by.set(g, [...(by.get(g) ?? []), t]);
   }
-  return LIST_GROUPS.filter((g) => by.has(g.id)).map((g) => ({ ...g, items: by.get(g.id)!.sort(byPinThenActivity) }));
+  const userFirst = (a: ThreadView, b: ThreadView) => Number(waitsOnUser(b, waiting)) - Number(waitsOnUser(a, waiting)) || byPinThenActivity(a, b);
+  return LIST_GROUPS.filter((g) => by.has(g.id)).map((g) => ({ ...g, items: by.get(g.id)!.sort(g.id === "active" ? userFirst : byPinThenActivity) }));
 }
 
 const firstLine = (s: string) => s.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
@@ -125,35 +153,22 @@ export const NO_FILTER: ListFilter = { q: "", groups: [], withDeliverable: false
 export const filterActive = (f: ListFilter) => f.groups.length > 0 || f.withDeliverable;
 
 /** Search by number, title, summary, brief or the lead's latest message; then the popover's filters. */
-export function filterThreads(threads: ThreadView[], f: ListFilter, waiting?: Map<number, QuestionView>): ThreadView[] {
+export function filterThreads(threads: ThreadView[], f: ListFilter): ThreadView[] {
   const q = f.q.trim().toLowerCase().replace(/^#/, "");
   return threads.filter((t) => {
     if (f.withDeliverable && !t.latest_deliverable) return false;
-    if (f.groups.length > 0 && !f.groups.includes(listGroupOf(t, waiting))) return false;
+    if (f.groups.length > 0 && !f.groups.includes(listGroupOf(t))) return false;
     if (!q) return true;
     return String(t.no) === q || [t.title, t.summary, t.brief, t.lead_last?.text ?? ""].some((s) => s.toLowerCase().includes(q));
   });
-}
-
-/** "刚刚" / "51分钟" / "3小时" / "1天" / "11月2日" (older than 30 days). */
-export function shortAgo(iso: string, now: number = Date.now()): string {
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return "";
-  const m = Math.floor(Math.max(0, now - t) / 60_000);
-  if (m < 1) return "刚刚";
-  if (m < 60) return `${m}分钟`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}小时`;
-  const d = Math.floor(h / 24);
-  if (d <= 30) return `${d}天`;
-  const date = new Date(t);
-  return `${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
 /** Folded sections of the list ("deliverables" plus the group ids); 已归档 starts folded. */
 export type Folded = Record<string, boolean>;
 
 const DEFAULT_FOLDED: Folded = { archived: true };
+/** Keys still in use; folds saved for groups that no longer exist (等你处理 / 空闲) are dropped. */
+const FOLD_KEYS = new Set<string>(["deliverables", ...LIST_GROUPS.map((g) => g.id)]);
 
 export const foldedKey = (userId: string) => `at:thread-list-folded:${userId}`;
 
@@ -164,7 +179,7 @@ export function loadFolded(userId: string): Folded {
     const v = JSON.parse(raw) as unknown;
     if (!v || typeof v !== "object" || Array.isArray(v)) return { ...DEFAULT_FOLDED };
     const out: Folded = { ...DEFAULT_FOLDED };
-    for (const [k, b] of Object.entries(v)) if (typeof b === "boolean") out[k] = b;
+    for (const [k, b] of Object.entries(v)) if (typeof b === "boolean" && FOLD_KEYS.has(k)) out[k] = b;
     return out;
   } catch {
     return { ...DEFAULT_FOLDED };
@@ -172,8 +187,13 @@ export function loadFolded(userId: string): Folded {
 }
 
 export function saveFolded(userId: string, folded: Folded): void {
-  const diff = Object.fromEntries(Object.entries(folded).filter(([k, v]) => v !== Boolean(DEFAULT_FOLDED[k])));
+  const diff = Object.fromEntries(Object.entries(folded).filter(([k, v]) => FOLD_KEYS.has(k) && v !== Boolean(DEFAULT_FOLDED[k])));
   writeLocal(foldedKey(userId), Object.keys(diff).length ? JSON.stringify(diff) : null);
+}
+
+/** Thread numbers in the order the list shows them (folded groups skipped unless searching). */
+export function visibleOrder(threads: ThreadView[], f: ListFilter, waiting?: Map<number, QuestionView>, folded: Folded = {}): number[] {
+  return groupThreads(filterThreads(threads, f), waiting).flatMap((g) => (folded[g.id] && !f.q.trim() ? [] : g.items.map((t) => t.no)));
 }
 
 /**
@@ -181,15 +201,10 @@ export function saveFolded(userId: string, folded: Folded): void {
  * folded groups skipped. A thread the list hides (folded or filtered out) still gets neighbours:
  * the order is then taken without folds, and failing that without filters.
  */
-/** Thread numbers in the order the list shows them (folded groups skipped unless searching). */
-export function visibleOrder(threads: ThreadView[], f: ListFilter, waiting?: Map<number, QuestionView>, folded: Folded = {}): number[] {
-  return groupThreads(filterThreads(threads, f, waiting), waiting).flatMap((g) => (folded[g.id] && !f.q.trim() ? [] : g.items.map((t) => t.no)));
-}
-
 export function listOrder(threads: ThreadView[], no: number, f: ListFilter, waiting?: Map<number, QuestionView>, folded: Folded = {}): number[] {
   const order = (list: ThreadView[], skip: Folded) =>
     groupThreads(list, waiting).flatMap((g) => (skip[g.id] && !f.q.trim() ? [] : g.items.map((t) => t.no)));
-  const shown = filterThreads(threads, f, waiting);
+  const shown = filterThreads(threads, f);
   for (const candidate of [order(shown, folded), order(shown, {}), order(threads, {})]) if (candidate.includes(no)) return candidate;
   return [];
 }
