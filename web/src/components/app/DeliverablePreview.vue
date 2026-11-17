@@ -3,7 +3,7 @@
 // The top sheet shows the document itself: a published Markdown file its first lines, a page
 // scaled down in a sandboxed inert iframe, an image cropped to fit; anything else a blank sheet.
 // fresh (updated since last opened) tints the ground light blue.
-import { computed } from "vue";
+import { computed, h } from "vue";
 import { useDeliverableFiles } from "@/api/queries";
 import type { DeliverableView } from "@/api/views";
 import { frameSandbox, isHosted } from "@/lib/artifacts";
@@ -13,6 +13,12 @@ const props = defineProps<{ item: DeliverableView; fresh?: boolean }>();
 const render = computed(() => (isHosted(props.item) ? (props.item.detail.render ?? "") : ""));
 const live = computed(() => render.value === "html" || render.value === "image" || render.value === "markdown");
 const files = useDeliverableFiles(() => props.item.id, 0, live);
+/** Grey placeholder lines on the top sheet (also while a Markdown text loads or when it failed). */
+const PaperLines = () =>
+  h("span", { "data-blank": "", class: "flex flex-col gap-[5px] px-2.5 pt-3", "aria-hidden": "true" }, [
+    h("span", { class: "h-[5px] w-3/5 rounded-full bg-foreground/15" }),
+    ...["w-full", "w-11/12", "w-4/5", "w-full"].map((w) => h("span", { class: `h-[3px] ${w} rounded-full bg-foreground/[0.08]` })),
+  ]);
 const entry = computed(() => (live.value ? files.data.value?.entry_url : undefined));
 </script>
 
@@ -38,15 +44,11 @@ const entry = computed(() => (live.value ? files.data.value?.entry_url : undefin
         class="pointer-events-none absolute left-0 top-0 h-[500%] w-[500%] origin-top-left scale-[0.2] border-0 bg-white"
       />
       <span v-else-if="entry && files.data.value?.render === 'markdown'" class="block px-2 pt-2">
-        <MarkdownPeek :url="entry" :base-url="files.data.value.base_url" />
+        <MarkdownPeek :url="entry" :base-url="files.data.value.base_url"><PaperLines class="-mx-2 -mt-2" /></MarkdownPeek>
       </span>
-      <span v-else data-blank="" class="flex flex-col gap-[5px] px-2.5 pt-3" aria-hidden="true">
-        <span class="h-[5px] w-3/5 rounded-full bg-foreground/15" />
-        <span class="h-[3px] w-full rounded-full bg-foreground/[0.08]" />
-        <span class="h-[3px] w-11/12 rounded-full bg-foreground/[0.08]" />
-        <span class="h-[3px] w-4/5 rounded-full bg-foreground/[0.08]" />
-        <span class="h-[3px] w-full rounded-full bg-foreground/[0.08]" />
-      </span>
+      <!-- PDF, .txt, design links, or no signed URL yet: a blank sheet with grey lines. PDFs are not
+           rendered here on purpose: that needs the browser's PDF viewer (heavy, not inert) or a PDF library. -->
+      <PaperLines v-else />
     </span>
   </span>
 </template>

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
 import type { DeliverableView } from "@/api/views";
+import { markdownTree, stripForPreview } from "@/lib/markdown";
 import { isNewDeliverable, isStripDeliverable, markSeen, parseSeen, resetSeenCache, scrollEdges, useSeenDeliverables, type SeenRecord } from "@/lib/deliverableStrip";
 
 function item(id: string, patch: Partial<DeliverableView> = {}): DeliverableView {
@@ -51,6 +52,19 @@ describe("新内容", () => {
     const ahead = markSeen(rec, { id: "d2", updated_at: "2026-11-14T12:00:00Z" }, Date.parse("2026-11-14T10:05:00Z"));
     expect(isNewDeliverable({ id: "d2", updated_at: "2026-11-14T12:00:00Z" }, ahead)).toBe(false);
   });
+  it("keeps at most 300 entries and moves since up to the latest forgotten one", () => {
+    const base = Date.parse("2026-11-14T00:00:00Z");
+    let rec: SeenRecord = { since: "2026-11-13T00:00:00Z", seen: {} };
+    for (let i = 0; i < 302; i++) rec = markSeen(rec, { id: `x${i}`, updated_at: "2026-11-13T00:00:00Z" }, base + i * 1000);
+    expect(Object.keys(rec.seen)).toHaveLength(300);
+    expect(rec.seen.x0).toBeUndefined();
+    expect(rec.seen.x1).toBeUndefined();
+    expect(rec.since).toBe(new Date(base + 1000).toISOString());
+    // the forgotten ones stay seen, until they update again
+    expect(isNewDeliverable({ id: "x0", updated_at: new Date(base).toISOString() }, rec)).toBe(false);
+    expect(isNewDeliverable({ id: "x1", updated_at: new Date(base + 1000).toISOString() }, rec)).toBe(false);
+    expect(isNewDeliverable({ id: "x1", updated_at: new Date(base + 5000).toISOString() }, rec)).toBe(true);
+  });
   it("parses stored records defensively", () => {
     expect(parseSeen(null)).toBeNull();
     expect(parseSeen("{oops")).toBeNull();
@@ -75,6 +89,12 @@ describe("新内容", () => {
     expect(useSeenDeliverables(() => "p1").isNew(fresh)).toBe(false);
     expect(localStorage.getItem("deliverables.seen.p2")).toBeNull();
   });
+  it("writes nothing without a project", () => {
+    const s = useSeenDeliverables(() => "");
+    expect(s.isNew(item("n", { updated_at: new Date(Date.now() + 60_000).toISOString() }))).toBe(false);
+    s.markSeen(item("n"));
+    expect(localStorage.length).toBe(0);
+  });
 });
 
 describe("scrollEdges", () => {
@@ -84,5 +104,22 @@ describe("scrollEdges", () => {
     expect(scrollEdges(300, 300, 900)).toEqual({ left: true, right: true });
     expect(scrollEdges(600, 300, 900)).toEqual({ left: true, right: false });
     expect(scrollEdges(599.5, 300, 900)).toEqual({ left: true, right: false });
+  });
+});
+
+describe("markdown preview", () => {
+  it("turns links into text and drops images", () => {
+    const tree = markdownTree("# 标题\n\n看 [文档](https://x.dev/a) 和 ![图](a.png)\n\n- [x] 完成");
+    stripForPreview(tree);
+    const tags: string[] = [];
+    const walk = (n: { type: string; tagName?: string; children?: unknown[] }) => {
+      if (n.type === "element") tags.push(n.tagName!);
+      for (const c of n.children ?? []) walk(c as never);
+    };
+    walk(tree as never);
+    expect(tags).not.toContain("a");
+    expect(tags).not.toContain("img");
+    expect(tags).toEqual(expect.arrayContaining(["h1", "span", "input"]));
+    expect(JSON.stringify(tree)).toContain("文档");
   });
 });
