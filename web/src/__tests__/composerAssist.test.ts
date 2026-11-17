@@ -106,7 +106,7 @@ function stubApi() {
         hidden: ["memory"], custom: [{ name: "plan", description: "先出计划", mode: "prompt", prompt: "x", source: "role" }],
       });
     if (url.includes("/api/models"))
-      return json({ models: [{ id: "m1", runtime: "claude", model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: false }, { id: "m2", runtime: "claude", model: "claude-haiku-x", label: "Haiku", mine: true }] });
+      return json({ models: [{ id: "m1", runtime: "claude", model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: true }, { id: "m2", runtime: "claude", model: "claude-haiku-x", label: "Haiku", default: false, mine: true }] });
     if (url.includes("/model") && (input as Request).method === "PUT") return json({ applied: [{ employee: "lead-1", model: "claude-haiku-x", live: true }], skipped: ["codex-1"] });
     if (url.includes("/model"))
       return json({
@@ -187,7 +187,8 @@ describe("Composer with assist", () => {
     const panel = w.get("[data-testid=model-panel]");
     expect(panel.text()).toContain("会话运行中，上一轮用的是 Opus 5.5");
     const rows = panel.findAll("button").filter((b) => b.text().includes("Opus") || b.text().includes("Haiku"));
-    expect(rows.map((b) => b.text())).toEqual([expect.stringMatching(/Opus 5\.5.*默认.*当前/), expect.stringMatching(/Haiku.*我的/)]);
+    expect(rows.map((b) => b.text())).toEqual([expect.stringMatching(/Opus 5\.5.*默认.*当前/), expect.stringMatching(/Haiku/)]);
+    expect(rows[1]!.text()).not.toMatch(/我的|默认|当前/);
     await panel.findAll("[role=radio]").find((b) => b.text() === "整个讨论串")!.trigger("click");
     expect(w.get("[data-testid=model-panel]").text()).toContain("codex-1 不是 Claude Code，不受影响");
     await rows[1]!.trigger("click");

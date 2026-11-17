@@ -32,46 +32,112 @@ func (a *fakeAgent) expectSetMode() string {
 	return *m.Model
 }
 
-// TestModelLists: everyone reads the platform list (Opus 5.5, the Claude default) followed by
-// their own entries; users replace only their own list; the platform list is admin-only, keeps
-// order and one default per runtime, and the default is what sessions open with.
+// TestModelLists: every user keeps their own model list. A new user starts with Opus 5.5 (the
+// Claude default); a saved list keeps its order and one default per runtime and needs at least
+// one model; lists never leak between users; the platform list and PUT /api/admin/models are
+// gone (404).
 func TestModelLists(t *testing.T) {
 	tm := startTeam(t) // the first user is the administrator
 	user := tm.w.signUp("plain-models@example.com")
 	var list httpapi.ModelsBody
 	user.must(200, "GET", "/api/models", nil, &list)
-	if len(list.Models) != 1 || list.Models[0].Model != "claude-opus-5-5" || !list.Models[0].Default || list.Models[0].Mine {
-		t.Fatalf("platform list: %+v", list.Models)
+	if len(list.Models) != 1 || list.Models[0].Model != "claude-opus-5-5" || list.Models[0].Label != "Opus 5.5" ||
+		!list.Models[0].Default || !list.Models[0].Mine || list.Models[0].ID == "" {
+		t.Fatalf("starter list: %+v", list.Models)
 	}
-	mine := []map[string]any{{"runtime": "claude", "model": "claude-sonnet-x", "label": "Sonnet"}, {"runtime": "codex", "model": "gpt-x", "default": true}}
+	starter := list.Models[0].ID
+	user.must(200, "GET", "/api/models", nil, &list)
+	if len(list.Models) != 1 || list.Models[0].ID != starter {
+		t.Fatalf("starter list saved once: %+v", list.Models)
+	}
+	mine := []map[string]any{{"runtime": "claude", "model": "claude-sonnet-x", "label": "Sonnet", "default": true},
+		{"runtime": "claude", "model": "claude-opus-5-5"}, {"runtime": "codex", "model": "gpt-x", "default": true}}
 	user.must(200, "PUT", "/api/models/mine", map[string]any{"models": mine}, &list)
-	if len(list.Models) != 3 || !list.Models[1].Mine || list.Models[1].Label != "Sonnet" || list.Models[2].Default {
-		t.Fatalf("own list (a user entry is never a default): %+v", list.Models)
+	if len(list.Models) != 3 || list.Models[0].Model != "claude-sonnet-x" || !list.Models[0].Default || list.Models[0].Label != "Sonnet" ||
+		list.Models[1].Default || !list.Models[2].Default || !list.Models[2].Mine {
+		t.Fatalf("own list: %+v", list.Models)
 	}
 	tm.b.must(200, "GET", "/api/models", nil, &list)
-	if len(list.Models) != 1 {
+	if len(list.Models) != 1 || list.Models[0].Model != "claude-opus-5-5" {
 		t.Fatalf("another user's entries leaked: %+v", list.Models)
 	}
-	for _, bad := range []map[string]any{{"runtime": "claude", "model": "has space"}, {"runtime": "gemini", "model": "x"}} {
-		user.must(422, "PUT", "/api/models/mine", map[string]any{"models": []map[string]any{bad}}, nil)
+	for _, bad := range [][]map[string]any{
+		{{"runtime": "claude", "model": "has space"}},
+		{{"runtime": "gemini", "model": "x"}},
+		{mine[0], mine[0]},
+		{mine[0], {"runtime": "claude", "model": "z", "default": true}},
+		{},
+	} {
+		user.must(422, "PUT", "/api/models/mine", map[string]any{"models": bad}, nil)
 	}
-	user.must(422, "PUT", "/api/models/mine", map[string]any{"models": []map[string]any{mine[0], mine[0]}}, nil)
-	platform := []map[string]any{{"runtime": "claude", "model": "claude-haiku-y", "label": "Haiku", "default": true}, {"runtime": "claude", "model": "claude-opus-5-5", "label": "Opus 5.5"}}
-	if code, _ := user.do("PUT", "/api/admin/models", map[string]any{"models": platform}); code != 403 {
-		t.Fatalf("non-admin saved the platform list: %d", code)
+	user.must(200, "GET", "/api/models", nil, &list)
+	if len(list.Models) != 3 {
+		t.Fatalf("refused saves changed the list: %+v", list.Models)
 	}
-	tm.b.must(422, "PUT", "/api/admin/models", map[string]any{"models": []map[string]any{platform[0], {"runtime": "claude", "model": "z", "default": true}}}, nil)
-	tm.b.must(200, "PUT", "/api/admin/models", map[string]any{"models": platform}, &list)
-	if len(list.Models) != 2 || list.Models[0].Model != "claude-haiku-y" || !list.Models[0].Default {
-		t.Fatalf("platform list saved: %+v", list.Models)
+	for _, c := range []*browser{user, tm.b} {
+		if code, _ := c.do("PUT", "/api/admin/models", map[string]any{"models": mine}); code != 404 {
+			t.Fatalf("PUT /api/admin/models = %d, want 404", code)
+		}
 	}
-	if got := composer.DefaultModel(tm.w.ctx, tm.w.e.Core.Pool, "claude"); got != "claude-haiku-y" {
-		t.Fatalf("default = %q", got)
-	}
+}
+
+// TestModelFallback: a session's model falls back from the employee (/model) to the project, the
+// role, the project owner's default and finally Opus 5.5; another user's default never applies.
+func TestModelFallback(t *testing.T) {
+	tm := startTeam(t)
+	b := tm.b
+	conv := "/api/conversations/" + tm.thread.ID + "/model"
 	var cm orchapi.ConversationModel
-	tm.b.must(200, "GET", "/api/conversations/"+tm.thread.ID+"/model", nil, &cm)
-	if cm.Model != "claude-haiku-y" || cm.Inherited != "claude-haiku-y" || cm.Override != "" {
-		t.Fatalf("lead follows the platform default: %+v", cm)
+	b.must(200, "GET", conv, nil, &cm)
+	if cm.Model != "claude-opus-5-5" || cm.Inherited != "claude-opus-5-5" || cm.Override != "" {
+		t.Fatalf("nothing configured: %+v", cm)
+	}
+	other := tm.w.signUp("fallback-other@example.com")
+	other.must(200, "PUT", "/api/models/mine", map[string]any{"models": []map[string]any{{"runtime": "claude", "model": "claude-other", "default": true}}}, nil)
+	b.must(200, "GET", conv, nil, &cm)
+	if cm.Model != "claude-opus-5-5" {
+		t.Fatalf("another user's default applied: %+v", cm)
+	}
+
+	b.must(200, "PUT", "/api/models/mine", map[string]any{"models": []map[string]any{
+		{"runtime": "claude", "model": "claude-opus-5-5"}, {"runtime": "claude", "model": "claude-haiku-y", "default": true}}}, nil)
+	var owner string
+	if err := store.QueryRow(tm.w.ctx, tm.w.e.Core.Pool, `SELECT user_id FROM at_projects WHERE id = $1`, tm.projectID).Scan(&owner); err != nil {
+		t.Fatal(err)
+	}
+	if got := composer.DefaultModel(tm.w.ctx, tm.w.e.Core.Pool, owner, "claude"); got != "claude-haiku-y" {
+		t.Fatalf("owner default = %q", got)
+	}
+	if got := composer.DefaultModel(tm.w.ctx, tm.w.e.Core.Pool, owner, "codex"); got != "" {
+		t.Fatalf("no codex default = %q", got)
+	}
+	b.must(200, "GET", conv, nil, &cm)
+	if cm.Model != "claude-haiku-y" || cm.Inherited != "claude-haiku-y" {
+		t.Fatalf("owner default: %+v", cm)
+	}
+	for _, m := range cm.Members {
+		if m.Model != "claude-haiku-y" {
+			t.Fatalf("members follow the owner default: %+v", cm.Members)
+		}
+	}
+
+	b.must(200, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"thread_model": "claude-project-z"}, nil)
+	b.must(200, "GET", conv, nil, &cm)
+	if cm.Model != "claude-project-z" {
+		t.Fatalf("project ahead of the owner default: %+v", cm)
+	}
+	b.must(200, "PUT", conv, map[string]any{"model": "claude-picked"}, nil)
+	b.must(200, "GET", conv, nil, &cm)
+	if cm.Model != "claude-picked" || cm.Inherited != "claude-project-z" {
+		t.Fatalf("/model ahead of the project: %+v", cm)
+	}
+
+	b.must(200, "PUT", conv, map[string]any{"model": ""}, nil)
+	b.must(200, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"thread_model": ""}, nil)
+	b.must(200, "PUT", "/api/models/mine", map[string]any{"models": []map[string]any{{"runtime": "claude", "model": "claude-haiku-y"}}}, nil)
+	b.must(200, "GET", conv, nil, &cm)
+	if cm.Model != "claude-opus-5-5" {
+		t.Fatalf("no default anywhere falls back to Opus 5.5: %+v", cm)
 	}
 }
 

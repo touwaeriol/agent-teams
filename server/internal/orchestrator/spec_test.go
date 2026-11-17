@@ -212,7 +212,7 @@ func TestProjectModelOverrides(t *testing.T) {
 }
 
 // TestModelPrecedence: /model on the employee, then the project override for its tier (Claude
-// only), the role, the platform default of the runtime, DefaultModel.
+// only), the role, the default of the runtime in the project owner's model list, DefaultModel.
 func TestModelPrecedence(t *testing.T) {
 	lead := emp("lead", "lead", store.Role{Model: "role-m"})
 	p := store.Project{ThreadModel: "project-m", CoordinatorModel: "coord-m"}

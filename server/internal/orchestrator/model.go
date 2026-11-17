@@ -100,7 +100,7 @@ func (o *Orchestrator) setThreadModel(ctx context.Context, tx *core.Tx, threadID
 
 // ApplyModel sends the employee's model to its session on a node, if it has one.
 func (o *Orchestrator) ApplyModel(ctx context.Context, tx *core.Tx, e core.Employee, p store.Project) (ModelApplied, error) {
-	m := Model(e, p, composer.DefaultModel(ctx, tx, e.Runtime))
+	m := Model(e, p, composer.DefaultModel(ctx, tx, p.UserID, e.Runtime))
 	out := ModelApplied{Employee: e.Name, Model: m}
 	s, err := core.LiveSession(ctx, tx, e.ID)
 	if errors.Is(err, core.ErrNotFound) || (err == nil && s.NodeID == nil) {

@@ -418,6 +418,13 @@ const routes = [
   ["POST", /^\/api\/nodes\/([^/]+)\/token$/, (req, res) => json(res, 200, { token: "atn_new", install: "curl -fsSL http://localhost:5173/install-node.sh | sh -s -- --token atn_new" })],
   ["POST", /^\/api\/nodes\/([^/]+)\/upgrade$/, (req, res) => json(res, 202)],
   ["GET", /^\/api\/nodes\/([^/]+)\/sessions$/, (req, res, [id]) => json(res, 200, state.nodeSessions[id] ?? [])],
+  ["GET", /^\/api\/models$/, (req, res) => json(res, 200, { models: state.models })],
+  ["PUT", /^\/api\/models\/mine$/, async (req, res) => {
+    const b = await body(req);
+    if (!b.models?.length) return fail(res, 422, "至少保留一个模型", "invalid");
+    state.models = b.models.map((m, i) => ({ ...m, id: m.id || `m${Date.now()}${i}`, label: m.label ?? "", default: Boolean(m.default), mine: true }));
+    json(res, 200, { models: state.models });
+  }],
   ["GET", /^\/api\/roles$/, (req, res) => json(res, 200, { roles: state.roles, warnings: [] })],
   ["PUT", /^\/api\/roles$/, async (req, res) => {
     const b = await body(req);

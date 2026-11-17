@@ -50,7 +50,7 @@ func TestAdminRoutesOverHTTP(t *testing.T) {
 			t.Errorf("admin %s %s = %d %s", r.Method, path, code, raw)
 		}
 	}
-	if swept < 25 {
+	if swept < 24 { // PUT /api/admin/models is gone (00210: model lists are per user)
 		t.Fatalf("only %d admin routes swept", swept)
 	}
 	if code, raw := admin.do("GET", "/api/me", nil); code != http.StatusOK || !strings.Contains(string(raw), `"role":"admin"`) {

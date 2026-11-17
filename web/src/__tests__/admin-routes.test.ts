@@ -20,7 +20,7 @@ async function visit(role: "admin" | "member", url: string) {
   return { router, route: router.currentRoute.value };
 }
 
-const ADMIN_PAGES = ["/admin/users", "/admin/platform", "/admin/models", "/admin/library", "/admin/feedback", "/admin/github-app", "/admin/audit"];
+const ADMIN_PAGES = ["/admin/users", "/admin/platform", "/admin/library", "/admin/feedback", "/admin/github-app", "/admin/audit"];
 
 // The first visits import the real (lazy) page modules, which takes a few seconds cold.
 describe("admin console routes", { timeout: 30_000 }, () => {
@@ -41,6 +41,12 @@ describe("admin console routes", { timeout: 30_000 }, () => {
       expect(route.name).toBe("not-found");
       expect(route.fullPath).toBe(url);
       expect(route.matched.map((r) => r.path)).toEqual(["/:rest(.*)*"]);
+    }
+  });
+  it("has no models page any more (each user keeps their own list in 设置 → 团队)", async () => {
+    for (const role of ["admin", "member"] as const) {
+      const { route } = await visit(role, "/admin/models");
+      expect([route.name, route.fullPath]).toEqual(["not-found", "/admin/models"]);
     }
   });
   it("404s unknown addresses for everyone", async () => {
@@ -79,5 +85,6 @@ describe("sidebars", { timeout: 30_000 }, () => {
     const links = w.findAll("a");
     expect(links[0].text()).toBe("返回用户端");
     expect(links.map((a) => a.attributes("href"))).toEqual(["/projects", ...ADMIN_PAGES]);
+    expect(w.text()).not.toContain("模型");
   });
 });

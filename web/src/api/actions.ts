@@ -146,7 +146,6 @@ export const admin = {
   removeUser: (id: string) => unwrap(client.DELETE("/api/admin/users/{id}", { params: { path: { id } } })),
   resetPassword: (id: string) => unwrap(client.POST("/api/admin/users/{id}/password-reset", { params: { path: { id } } })),
   saveSettings: (body: S["AdminSettings"]) => unwrap(client.PUT("/api/admin/settings", { body })),
-  saveModels: (list: S["Model"][]) => unwrap(client.PUT("/api/admin/models", { body: { models: list } })),
   saveCommands: (list: S["CustomCommand"][]) => unwrap(client.PUT("/api/admin/commands", { body: { commands: list } })),
   uploadPlugin: (zip: string) => unwrap(client.POST("/api/admin/plugins", { body: { zip } })),
   setPluginEnabled: (id: string, enabled: boolean) => unwrap(client.PATCH("/api/admin/plugins/{id}", { params: { path: { id } }, body: { enabled } })),

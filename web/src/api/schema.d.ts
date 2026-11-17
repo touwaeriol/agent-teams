@@ -103,23 +103,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/admin/models": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Replace the platform model list (order, one default per runtime) */
-        put: operations["admin-save-models"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/admin/office/layouts": {
         parameters: {
             query?: never;
@@ -745,7 +728,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Models to choose from: the platform list, then the user's own */
+        /** The user's model list (a new user starts with Opus 5.5, the Claude default) */
         get: operations["list-models"];
         put?: never;
         post?: never;
@@ -763,7 +746,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Replace the user's own model entries (in order) */
+        /** Replace the user's model list (in order, at least one model, at most one default per runtime) */
         put: operations["save-my-models"];
         post?: never;
         delete?: never;
@@ -2647,12 +2630,12 @@ export interface components {
             role: string;
         };
         Model: {
-            /** @description Platform list only: what sessions of this runtime open with when nothing else names a model (one per runtime) */
+            /** @description What the user's sessions of this runtime open with when no employee, project or role names a model (at most one per runtime) */
             default?: boolean;
             readonly id: string;
             /** @description Display name; empty shows the id */
             label?: string;
-            /** @description The user's own entry */
+            /** @description Always true: every entry is the user's own (kept for older clients) */
             readonly mine: boolean;
             /** @description The id the runtime is given (claude-…, gpt-…) */
             model: string;
@@ -3872,39 +3855,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ManifestOutputBody"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    "admin-save-models": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ModelsInputBody"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelsBody"];
                 };
             };
             /** @description Error */
