@@ -23,7 +23,7 @@ export class FakeConsole {
   autoAck = true;
   ackSeq = 0;
   welcomeAckSeq: number | null = null;
-  welcomeConfig: Record<string, unknown> = { park_after_s: 900, max_active_sessions: 4 };
+  welcomeConfig: Record<string, unknown> = { park_after_s: 900 };
   token = "test-token";
   /** Images served at GET /nodes/attachments/{id} (node token required). */
   readonly images = new Map<string, Buffer>();

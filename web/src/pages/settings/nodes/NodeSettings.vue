@@ -33,7 +33,7 @@ const save = useAction(() => nodeActions.update(props.node.id, settingsPatch(max
 <template>
   <FormDialog v-model:open="open" :title="`${node.name} 的设置`" submit-label="保存" :busy="save.isPending.value" @submit="save.mutate()">
     <div class="grid gap-3 sm:grid-cols-2">
-      <Field v-slot="{ id }" label="最多同时运行的会话" hint="留空用守护进程上报的值"><el-input :id="id" v-model="max" type="number" :min="1" /></Field>
+      <Field v-slot="{ id }" label="最多同时运行的会话" hint="留空不限（守护进程用 --max-sessions 设了上限时按它）"><el-input :id="id" v-model="max" type="number" :min="1" /></Field>
       <Field v-slot="{ id }" label="空闲多久后停放（秒）" hint="留空用默认 900"><el-input :id="id" v-model="park" type="number" :min="60" /></Field>
     </div>
     <Field v-slot="{ id }" label="标签"><TagInput :id="id" v-model="labels" placeholder="gpu、big-disk" /></Field>

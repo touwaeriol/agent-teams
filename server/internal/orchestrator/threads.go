@@ -14,8 +14,8 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// DefaultMaxRunningThreads applies when at_settings.platform has no value.
-const DefaultMaxRunningThreads = 3
+// DefaultMaxRunningThreads applies when at_settings.platform has no value; 0 means no limit.
+const DefaultMaxRunningThreads = 0
 
 // RoleCount adjusts how many instances of a role a thread gets.
 type RoleCount struct {
@@ -175,7 +175,7 @@ func (o *Orchestrator) hairFor(i int) *string {
 	return &h
 }
 
-// maxRunning is the user's running-thread limit.
+// maxRunning is the user's running-thread limit (0 = no limit).
 func (o *Orchestrator) maxRunning(ctx context.Context, userID string) int {
 	u, err := o.store.UserByID(ctx, userID)
 	if err == nil && u.MaxRunningThreads != nil {
@@ -190,11 +190,31 @@ func (o *Orchestrator) maxRunning(ctx context.Context, userID string) int {
 	return DefaultMaxRunningThreads
 }
 
+// threadSlotFree reports whether the user may run one more thread.
+func (o *Orchestrator) threadSlotFree(ctx context.Context, q core.DB, userID string) (bool, error) {
+	limit := o.maxRunning(ctx, userID)
+	if limit <= 0 {
+		return true, nil
+	}
+	running, err := core.RunningThreadCount(ctx, q, userID)
+	return running < limit, err
+}
+
+// StartAllQueued starts every user's queued threads within their limits (server start: threads
+// that queued under an older, tighter limit run without waiting for the next thread event).
+func (o *Orchestrator) StartAllQueued(ctx context.Context) {
+	users, err := core.QueuedThreadUsers(ctx, o.core.Pool)
+	o.logErr("list users with queued threads", err)
+	for _, u := range users {
+		o.StartQueued(ctx, u)
+	}
+}
+
 // StartQueued starts the user's queued threads in creation order while slots are free.
 func (o *Orchestrator) StartQueued(ctx context.Context, userID string) {
 	for {
-		running, err := core.RunningThreadCount(ctx, o.core.Pool, userID)
-		if err != nil || running >= o.maxRunning(ctx, userID) {
+		free, err := o.threadSlotFree(ctx, o.core.Pool, userID)
+		if err != nil || !free {
 			o.logErr("count running threads", err)
 			return
 		}

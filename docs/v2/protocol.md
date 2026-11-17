@@ -219,7 +219,7 @@
 
 ### 4.7 停放（守护进程自主）
 
-空闲超过 `welcome.config.park_after_s` 且无运行中回合、无待审批、无待工具调用 → `q.close()`，发 `session.state {session_id, state:"parked"}`。下一次 `session.send` 自动 resume。活跃会话数达到 `max_active_sessions` 时，新 `session.send` 进入守护进程的等待队列，并发 `session.state {state:"queued"}`（办公室显示“排队等工位”）；需要时优先停放最久空闲的会话腾出位置。
+空闲超过 `welcome.config.park_after_s` 且无运行中回合、无待审批、无待工具调用 → `q.close()`，发 `session.state {session_id, state:"parked"}`。下一次 `session.send` 自动 resume。设了 `max_active_sessions`（不设 = 不限）且活跃会话数达到它时，新 `session.send` 进入守护进程的等待队列，并发 `session.state {state:"queued"}`（办公室显示“排队等工位”）；需要时优先停放最久空闲的会话腾出位置。
 
 ### 4.8 会话事件（守护进程 → 控制台，可靠，键：`session_id + event_no`）
 

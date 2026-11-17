@@ -1965,7 +1965,10 @@ export interface components {
             /** Format: int64 */
             default_max_nodes: number;
             delivery_default: components["schemas"]["Delivery"];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description 0 = no limit
+             */
             max_running_threads: number;
             /** @description Omit to clear */
             node_release?: components["schemas"]["NodeRelease"];
@@ -3529,7 +3532,10 @@ export interface components {
             display_name?: string;
             /** Format: int64 */
             max_nodes?: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description 0 = no limit
+             */
             max_running_threads?: number;
             /** @enum {string} */
             role?: "admin" | "user";

@@ -13,7 +13,8 @@ export interface NodeConfig {
   platformDir: string;
   runtimeDir: string;
   installDir: string;
-  maxActive: number;
+  /** Cap on concurrent session processes; undefined = no limit. */
+  maxActive?: number;
   passEnv: string[];
   gitBaseUrl: string;
   claudeConfigDir: string;
@@ -94,7 +95,7 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
     stateDir: resolve(get("AGENT_TEAMS_STATE") ?? join(env.XDG_STATE_HOME ?? join(home, ".local", "state"), "agent-teams")),
     configDir, platformDir: join(dataDir, "platform"), installDir: join(dataDir, "node"),
     runtimeDir: join(env.XDG_RUNTIME_DIR ?? join(dataDir, "run"), "agent-teams"),
-    maxActive: positiveInt(get("AGENT_TEAMS_MAX_SESSIONS"), 4),
+    maxActive: positiveInt(get("AGENT_TEAMS_MAX_SESSIONS")),
     passEnv: passList(get("AGENT_TEAMS_PASS_ENV")),
     gitBaseUrl: get("AGENT_TEAMS_GIT_BASE_URL") ?? "https://github.com",
     claudeConfigDir: resolve(env.CLAUDE_CONFIG_DIR ?? join(home, ".claude")),
@@ -103,9 +104,9 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
   };
 }
 
-function positiveInt(v: string | undefined, fallback: number): number {
+function positiveInt(v: string | undefined): number | undefined {
   const n = Number(v);
-  return Number.isInteger(n) && n > 0 ? n : fallback;
+  return Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
 function passList(v: string | undefined): string[] {

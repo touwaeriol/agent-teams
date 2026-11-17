@@ -53,8 +53,9 @@ export class Session implements SessionSink {
     return this.spec.open_gen;
   }
 
+  /** Parkable: running and between turns. A process still starting is never idle (parking it kills the init). */
   get idle(): boolean {
-    return !this.driver?.busy && this.host.approvals.pendingFor(this.id).length === 0 && this.host.tools.pendingFor(this.id).length === 0;
+    return this.state !== "starting" && !this.driver?.busy && this.host.approvals.pendingFor(this.id).length === 0 && this.host.tools.pendingFor(this.id).length === 0;
   }
 
   setState(state: State, detail?: string): void {

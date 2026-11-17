@@ -20,6 +20,6 @@ const put = (patch: Partial<AdminSettings>) => settings.data.value && save.mutat
       开放注册
     </label>
     <NumberSetting label="每人最多节点" :value="settings.data.value.default_max_nodes" @save="(n: number) => put({ default_max_nodes: n })" />
-    <NumberSetting label="每人最多同时运行的讨论串" :value="settings.data.value.max_running_threads" @save="(n: number) => put({ max_running_threads: n })" />
+    <NumberSetting label="每人最多同时运行的讨论串（0 不限）" :value="settings.data.value.max_running_threads" @save="(n: number) => put({ max_running_threads: n })" />
   </section>
 </template>

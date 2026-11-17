@@ -17,7 +17,7 @@ describe("config", () => {
       expect(loadConfig(["--token=tok-flag", "--max-sessions", "2"], env)).toMatchObject({ token: "tok-flag", maxActive: 2 });
       // The retired v1 key is ignored: the default applies.
       writeFileSync(join(home, ".config/agent-teams/node.env"), "AGENT_TEAMS_CONSOLE=https://c\nAGENT_TEAMS_NODE_TOKEN=t\nAGENT_TEAMS_MAX_RUNS=6\n");
-      expect(loadConfig([], { HOME: home })).toMatchObject({ maxActive: 4 });
+      expect(loadConfig([], { HOME: home }).maxActive).toBeUndefined();
       expect(() => loadConfig([], { HOME: join(home, "nowhere") })).toThrow(/AGENT_TEAMS_CONSOLE/);
       expect(() => loadConfig(["--bogus", "1"], env)).toThrow(/unknown option/);
     } finally {

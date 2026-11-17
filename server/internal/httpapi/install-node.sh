@@ -4,11 +4,11 @@
 # Codex logins it uses.
 #
 #   curl -fsSL __CONSOLE__/install-node.sh | AGENT_TEAMS_NODE_TOKEN=<token> \
-#     bash -s -- --console __CONSOLE__ --name build-1 [--root ~/.agents_team] [--max-sessions 4]
+#     bash -s -- --console __CONSOLE__ --name build-1 [--root ~/.agents_team] [--max-sessions N]
 #
 # Re-running upgrades in place. An existing ~/.config/agent-teams/node.env
 # supplies the token, console, name, root and max sessions, so upgrading needs
-# no new token. --rollback switches back
+# no new token. Sessions are unlimited unless --max-sessions caps them. --rollback switches back
 # to the previous version.
 set -euo pipefail
 
@@ -50,8 +50,11 @@ console="${console:-__CONSOLE__}"
 name="${name:-$(existing AGENT_TEAMS_NODE)}"
 root="${root:-$(existing AGENT_TEAMS_ROOT)}"
 root="${root:-$HOME/.agents_team}"
-max_sessions="${max_sessions:-$(existing AGENT_TEAMS_MAX_SESSIONS)}"
-max_sessions="${max_sessions:-4}"
+if [ -z "$max_sessions" ]; then
+  max_sessions="$(existing AGENT_TEAMS_MAX_SESSIONS)"
+  # 4 was the old default cap, written by every earlier install: drop it (no limit now).
+  [ "$max_sessions" = 4 ] && max_sessions=""
+fi
 
 restart_service() {
   if systemctl --user show-environment > /dev/null 2>&1; then
