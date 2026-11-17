@@ -331,6 +331,7 @@ queued ──开工──► running ◄──► waiting（有等你处理的�
 - **完成判定**：成员调用 `complete_task` 才算完成；完成后按 §6.4 通知组长。若回合结束（`result`）而任务仍 running，平台推一条提醒“如果做完了请调用 complete_task；没做完请继续”；连续 2 次回合结束仍未完成 → 任务标 `blocked`，给组长发 `[Task t7 · dev-1 · 需要关注]`。这比 v1 “用最后一条 result 当输出”可靠，因为常驻会话里一个回合不等于一个任务。
 - 一个成员同一时间只有一个 running 任务；`can_delegate` 的子任务也进同一个池。
 - 失败重试：`complete_task` 报失败或会话崩溃时任务回池（`attempt+1`，上限 2），超限 `failed` 并通知组长。
+- 依赖断了：任务 `failed` 或 `cancelled` 时，依赖它的 `pending` 任务（以及再依赖它们的）都标为 `blocked` 并给组长发一条 `[Task t3 · 失败了] 依赖它的 t5、t6 已标为 blocked…`：依赖必须 `done` 才能开工，这些任务永远等不到，不能悄悄留在池里。组长 `cancel_task` 后重新拆，或由用户在任务页重试。
 
 ## 8. 分支、worktree、合并队列、CI、PR
 

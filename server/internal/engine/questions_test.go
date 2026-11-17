@@ -510,3 +510,28 @@ func TestLeadReviewGuards(t *testing.T) {
 		t.Fatalf("card closed by a refused call: %+v", c)
 	}
 }
+
+// TestDependentsBlockedWhenDepEnds: tasks waiting on a task that is cancelled (or fails) could
+// never start; they and the tasks waiting on them become blocked and the lead is told, instead
+// of sitting in the pool unseen. Tasks with other dependencies are left alone.
+func TestDependentsBlockedWhenDepEnds(t *testing.T) {
+	tm := startTeam(t)
+	tm.lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "do t2 after t1", "main": "做", "depends_on": []string{"t1"}})
+	tm.lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "do t3 after t2", "main": "做", "depends_on": []string{"t2"}})
+	tm.lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "do t4", "main": "做"})
+	tm.lead.mustCall("cancel_task", map[string]any{"task_id": "t1", "reason": "不做了"})
+	tm.lead.expectSend("依赖它的 t2、t3 已标为 blocked")
+	status := func(id string) string {
+		task, err := core.TaskByID(tm.w.ctx, tm.w.e.Core.Pool, tm.thread.ID, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return task.Status
+	}
+	if got := status("t2") + " " + status("t3"); got != "blocked blocked" {
+		t.Fatalf("dependents after cancelling t1: %s", got)
+	}
+	if got := status("t4"); got == "blocked" {
+		t.Fatalf("t4 has no dependency but is %s", got)
+	}
+}

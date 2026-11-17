@@ -133,6 +133,14 @@ func (tx *Tx) EmitTask(ctx context.Context, t Task) error {
 	return err
 }
 
+// PendingDependents locks the pending tasks of the same thread that depend on task id.
+func PendingDependents(ctx context.Context, tx *Tx, conversationID, id string) ([]Task, error) {
+	dep, _ := json.Marshal([]string{id})
+	return find[Task](tasks(ctx, tx).Clauses(ForUpdate).
+		Where("conversation_id = ? AND status = 'pending' AND depends_on @> ?::jsonb", conversationID, string(dep)).
+		Order("created_at, substring(id from 2)::int"))
+}
+
 // DepsSatisfied reports whether every dependency of the task is done.
 func DepsSatisfied(ctx context.Context, q DB, t Task) (bool, error) {
 	if len(t.DependsOn) == 0 {

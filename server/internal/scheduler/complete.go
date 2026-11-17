@@ -229,8 +229,48 @@ func (s *Scheduler) finish(ctx context.Context, tx *core.Tx, task core.Task, fin
 	if err := s.TaskFinished(ctx, tx, task); err != nil {
 		return task, err
 	}
+	if final == "failed" || final == "cancelled" {
+		if err := s.blockDependents(ctx, tx, task); err != nil {
+			return task, err
+		}
+	}
 	s.kickAfter(tx, task.ConversationID)
 	return task, nil
+}
+
+var finalWord = map[string]string{"failed": "失败了", "cancelled": "被取消了"}
+
+// blockDependents marks blocked the pending tasks that wait on a failed or cancelled task, and
+// the ones waiting on those: they could never start (a dependency must be done), so instead of
+// sitting in the pool unseen they show as blocked and the lead decides what happens to them.
+func (s *Scheduler) blockDependents(ctx context.Context, tx *core.Tx, task core.Task) error {
+	ids, err := s.blockChain(ctx, tx, task, nil)
+	if err != nil || len(ids) == 0 {
+		return err
+	}
+	th, err := core.ThreadByID(ctx, tx, task.ConversationID)
+	if err != nil {
+		return err
+	}
+	return s.notifyLead(ctx, tx, th, fmt.Sprintf("[Task %s · %s] 依赖它的 %s 已标为 blocked，不会自动开始。"+
+		"需要的话 cancel_task 掉它们，再用 assign_task 重新拆（depends_on 写新任务）；也可以让用户在任务页重试。",
+		task.ID, finalWord[task.Status], strings.Join(ids, "、")))
+}
+
+func (s *Scheduler) blockChain(ctx context.Context, tx *core.Tx, task core.Task, ids []string) ([]string, error) {
+	deps, err := core.PendingDependents(ctx, tx, task.ConversationID, task.ID)
+	if err != nil {
+		return ids, err
+	}
+	for _, d := range deps {
+		if d, err = s.setStatus(ctx, tx, d, "blocked"); err != nil {
+			return ids, err
+		}
+		if ids, err = s.blockChain(ctx, tx, d, append(ids, d.ID)); err != nil {
+			return ids, err
+		}
+	}
+	return ids, nil
 }
 
 // Finish exposes finish (merge queue: merged task → done).
