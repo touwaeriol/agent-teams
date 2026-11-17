@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 管理 → 反馈: what users sent from a thread's ⋯ → 发送反馈, newest first; 待处理 / 已处理 / 全部,
+// 管理后台 → 反馈: what users sent from a thread's ⋯ → 发送反馈, newest first; 待处理 / 已处理 / 全部,
 // mark handled (or back to open), and the attached conversation when the user included it.
 import { computed, ref } from "vue";
 import { feedback as feedbackActions } from "@/api/actions";

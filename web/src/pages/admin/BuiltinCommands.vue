@@ -38,7 +38,7 @@ function put(c: CustomCommand) {
       <span class="text-xs leading-5 text-muted-foreground">每个岗位的聊天框都会列出这些自定义命令；岗位自己有同名命令时用岗位的。透传命令不会给 Codex 岗位和成员。</span>
     </div>
     <div class="flex flex-wrap items-center gap-1.5 text-[13px]">
-      <span v-for="(c, i) in draft" :key="c.name" class="inline-flex h-6 items-center gap-1 rounded-md border border-input bg-white pl-2 pr-0.5 text-xs" :title="c.description || c.prompt">
+      <span v-for="(c, i) in draft" :key="c.name" class="inline-flex h-6 items-center gap-1 rounded-md border border-input bg-card pl-2 pr-0.5 text-xs" :title="c.description || c.prompt">
         <span class="font-mono">/{{ c.name }}</span><span class="text-muted-foreground">{{ modeLabel(c) }}</span>
         <button type="button" :aria-label="`编辑 /${c.name}`" class="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-raised" @click="edit(i)"><Pencil class="size-3" /></button>
         <button type="button" :aria-label="`删除 /${c.name}`" class="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-raised" @click="draft = draft.filter((_, j) => j !== i)"><X class="size-3" /></button>

@@ -28,14 +28,14 @@ const TD = "px-4 py-3";
 </script>
 
 <template>
-  <tr class="border-t border-[#F1EFEA]">
+  <tr class="border-t border-[#F1EFEA] dark:border-border">
     <td :class="TD">
-      {{ user.email }}{{ self ? "（你）" : "" }}<span v-if="user.must_change_password" class="ml-1.5 text-xs text-[#B4530B]">待改密码</span>
+      {{ user.email }}{{ self ? "（你）" : "" }}<span v-if="user.must_change_password" class="ml-1.5 text-xs text-warn">待改密码</span>
     </td>
     <td :class="TD">{{ user.role === "admin" ? "管理员" : "成员" }}</td>
     <td :class="TD">{{ user.nodes }}</td>
     <td :class="TD">{{ user.running_tasks }}</td>
-    <td :class="TD" :style="{ color: user.active ? '#2E7D4F' : '#B42318' }">{{ user.active ? "启用" : "停用" }}</td>
+    <td :class="[TD, user.active ? 'text-ok' : 'text-destructive']">{{ user.active ? "启用" : "停用" }}</td>
     <td :class="[TD, 'text-muted-foreground']">{{ user.last_login_at ? timeAgo(user.last_login_at) : "—" }}</td>
     <td :class="[TD, 'text-muted-foreground']">{{ shortDate(user.created_at) }}</td>
     <td class="px-2 py-3">

@@ -36,7 +36,7 @@ const details = computed(() => {
 
 <template>
   <Card v-if="app" class="gap-4">
-    <CardTitle>GitHub App<template #action><StatusPill tone="#2E7D4F" label="已创建" /></template></CardTitle>
+    <CardTitle>GitHub App<template #action><StatusPill tone="hsl(var(--ok))" label="已创建" /></template></CardTitle>
     <KeyValueList :items="details" />
     <div class="flex flex-wrap gap-2 [&>.el-button]:!ml-0">
       <el-button tag="a" :href="app.html_url" target="_blank" rel="noreferrer">在 GitHub 上查看 <ExternalLink /></el-button>
@@ -44,7 +44,7 @@ const details = computed(() => {
     </div>
   </Card>
   <Card v-else tone="ask" class="gap-4">
-    <CardTitle>创建 GitHub App<template #action><StatusPill tone="#C2570C" label="未创建" /></template></CardTitle>
+    <CardTitle>创建 GitHub App<template #action><StatusPill tone="hsl(var(--warn))" label="未创建" /></template></CardTitle>
     <Field v-slot="{ id }" label="创建在哪个组织下（可选，留空则创建在你自己的 GitHub 账号下）">
       <el-input :id="id" v-model="organization" placeholder="组织名，例如 my-org" />
     </Field>
