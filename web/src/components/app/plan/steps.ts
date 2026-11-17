@@ -2,6 +2,7 @@
 // colour and the title's style. Theme tokens only, so light and dark both work.
 import { CircleDashed, CircleEllipsis, CircleSlash, CircleX } from "lucide-vue-next";
 import { defineComponent, h, type Component } from "vue";
+import { stepStatus, type StepStatus } from "@/lib/threadList";
 
 /**
  * The filled grey circle with a tick (lucide only has the outline one). With an aria-label it is
@@ -16,8 +17,6 @@ export const CircleDone = defineComponent({
       h("path", { d: "M4.9 8.2l2.1 2.1 4.2-4.4", fill: "none", stroke: "hsl(var(--panel))", "stroke-width": 1.7, "stroke-linecap": "round", "stroke-linejoin": "round" }),
     ]),
 });
-
-export type StepStatus = "todo" | "doing" | "done" | "failed" | "skipped";
 
 export interface StepLook {
   status: StepStatus;
@@ -38,4 +37,4 @@ const LOOKS: Record<StepStatus, StepLook> = {
 };
 
 /** The look of a status; unknown ones render as todo. */
-export const stepLook = (status: string): StepLook => LOOKS[status as StepStatus] ?? LOOKS.todo;
+export const stepLook = (status: string): StepLook => LOOKS[stepStatus(status)];

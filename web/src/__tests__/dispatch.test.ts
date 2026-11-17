@@ -116,7 +116,9 @@ describe("DispatchMessage", () => {
     expect(quote.text()).toContain("登录页太亮了，照这张图改");
     const img = quote.get("img");
     expect(img.attributes("src")).toBe("/api/attachments/att1");
-    expect(img.element.closest("a")?.getAttribute("href")).toBe("/api/attachments/att1");
+    // The thumbnail opens the in-page preview (MessageImages), not a new tab.
+    expect(img.element.closest("a")).toBeNull();
+    expect(img.element.closest("button")?.getAttribute("aria-label")).toContain("查看图片");
     // On the board the thread panel stays open; the project chat scrolls to ?msg=41.
     expect(quote.get("[data-dispatch-back]").attributes("href")).toBe("/projects/p1/threads/12?msg=41");
   });

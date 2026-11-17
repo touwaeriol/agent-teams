@@ -48,23 +48,37 @@ export const isCompactGroup = (g: ListGroupId) => g === "idle" || g === "done" |
 /** The status mark of a thread on its own (the open thread's header). */
 export const threadMark = (t: ThreadView, waiting?: Map<number, QuestionView>): RowMark => rowMark(t, listGroupOf(t, waiting));
 
-/** Main tasks done / total ("2/7"), from the plan when the thread carries it; null without a plan. */
-export function mainProgress(t: Pick<ThreadView, "main_tasks" | "counts">): { done: number; total: number; label: string } | null {
-  const total = t.main_tasks.length || t.counts.main_total;
-  if (!total) return null;
-  const done = t.main_tasks.length ? t.main_tasks.filter((m) => m.status === "done").length : t.counts.main_done;
-  return { done, total, label: `${done}/${total}` };
+export interface StepProgress {
+  done: number;
+  total: number;
+  label: string;
 }
 
-/** A plan step's status as far as the checklist cares; anything it doesn't know counts as todo. */
-const isTodo = (status: string) => !["doing", "done", "failed", "skipped"].includes(status);
+const progressOf = (done: number, total: number): StepProgress => ({ done, total, label: `${done}/${total}` });
+
+/** Steps done / total ("2/7"). */
+export const stepsProgress = (steps: readonly { status: string }[]): StepProgress =>
+  progressOf(steps.filter((s) => s.status === "done").length, steps.length);
+
+/** Main tasks done / total ("2/7"), from the plan when the thread carries it; null without a plan. */
+export function mainProgress(t: Pick<ThreadView, "main_tasks" | "counts">): StepProgress | null {
+  if (t.main_tasks.length) return stepsProgress(t.main_tasks);
+  return t.counts.main_total ? progressOf(t.counts.main_done, t.counts.main_total) : null;
+}
+
+/** Plan step statuses the checklist knows (the API sends todo / doing / done). */
+export type StepStatus = "todo" | "doing" | "done" | "failed" | "skipped";
+const STEP_STATUSES: readonly string[] = ["todo", "doing", "done", "failed", "skipped"] satisfies StepStatus[];
+
+/** A step's status as the checklist treats it: anything unknown counts as todo. */
+export const stepStatus = (status: string): StepStatus => (STEP_STATUSES.includes(status) ? (status as StepStatus) : "todo");
 
 /**
  * The step being worked on: the first `doing`, else the first not-started one (unknown statuses
  * count as todo); null when nothing is left (all done / failed / skipped, or no plan).
  */
 export function currentStep<T extends { status: string }>(steps: readonly T[]): T | null {
-  return steps.find((s) => s.status === "doing") ?? steps.find((s) => isTodo(s.status)) ?? null;
+  return steps.find((s) => s.status === "doing") ?? steps.find((s) => stepStatus(s.status) === "todo") ?? null;
 }
 
 /** How many deliverables the thread published (older servers: 1 when it has a newest one). */

@@ -12,7 +12,7 @@
  */
 import { CircleSlash } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
-import { currentStep } from "@/lib/threadList";
+import { currentStep, stepsProgress } from "@/lib/threadList";
 import { cn } from "@/lib/utils";
 import { CircleDone, stepLook } from "./steps";
 
@@ -42,7 +42,7 @@ function toggle() {
 const current = computed(() => currentStep(props.steps));
 /** Nothing left and every step done; otherwise (some failed / skipped) the plan merely ended. */
 const allDone = computed(() => props.steps.every((s) => s.status === "done"));
-const progress = computed(() => `${props.steps.filter((s) => s.status === "done").length}/${props.steps.length}`);
+const progress = computed(() => stepsProgress(props.steps).label);
 </script>
 
 <template>
