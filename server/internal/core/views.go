@@ -64,6 +64,8 @@ type ThreadCounts struct {
 	MainTotal     int `json:"main_total"`
 	MainDone      int `json:"main_done"`
 	Deliverables  int `json:"deliverables" doc:"Deliverables the thread published"`
+	// MergePolicy is the project's (pr | auto | manual), read with the counts for AwaitsUser.
+	MergePolicy string `json:"-"`
 }
 
 // LeadLast is the lead's latest reply.
@@ -89,6 +91,7 @@ type ThreadView struct {
 	PRURL         *string          `json:"pr_url"`
 	PRState       string           `json:"pr_state"`
 	MergeError    *string          `json:"merge_error" doc:"Why accepting could not merge the PRs (checks, conflict, permission); null when none. Cleared on accept, reject and merge"`
+	MergePolicy   string           `json:"merge_policy" enum:"pr,auto,manual" doc:"The project's: how the thread ends once its PRs are open (architecture.md §8.4)"`
 	Summary       string           `json:"summary"`
 	AutoApprove   bool             `json:"auto_approve"`
 	OpenedBy      string           `json:"opened_by"`

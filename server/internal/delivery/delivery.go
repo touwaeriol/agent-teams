@@ -60,9 +60,9 @@ type Engine struct {
 
 	// PollInterval is how often waiting CI is polled (§8.3: 15 s).
 	PollInterval time.Duration
-	// AcceptTimeout bounds a background merge after accept (require_acceptance off).
+	// AcceptTimeout bounds a background merge after accept (merge_policy pr or auto).
 	AcceptTimeout time.Duration
-	// accepting holds the threads Accept is merging in the background (require_acceptance off).
+	// accepting holds the threads Accept is merging in the background (merge_policy pr or auto).
 	accepting sync.Map
 
 	// PushDone runs inside the transaction that recorded a push job's git.result.

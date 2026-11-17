@@ -332,7 +332,7 @@ func (e *Engine) prCheckOne(ctx context.Context, t core.Thread, repo ghops.Repo,
 
 // mergePRs merges every open pull request with the project's merge method, then finishes the
 // thread. want is the pr_state the merge started from ("accepting", or "open" for the automatic
-// merge without require_acceptance): errStopped once the thread left it.
+// merge under merge_policy auto): errStopped once the thread left it.
 func (e *Engine) mergePRs(ctx context.Context, t core.Thread, want string) error {
 	d, err := core.DeliveryOf(ctx, e.core.Pool, t.ProjectID)
 	if err != nil {
@@ -379,11 +379,12 @@ func (e *Engine) mergedMeanwhile(ctx context.Context, repo ghops.Repo, tr core.T
 }
 
 // Merged records that the thread's pull requests are merged: thread done once none is open.
-// Idempotent: a thread already done is left as it is (SetStatus("done") runs once).
+// Idempotent: SetStatus("done") runs once. A thread already done (merge_policy pr: it finished
+// with its PRs open and a person merged them later) only gets pr_state merged.
 func (e *Engine) Merged(ctx context.Context, threadID string) error {
 	return e.core.InTx(ctx, func(tx *core.Tx) error {
 		t, err := core.LockThread(ctx, tx, threadID)
-		if err != nil || t.Status == "done" {
+		if err != nil || (t.Status == "done" && t.PRState == "merged") {
 			return ignoreMissing(err)
 		}
 		if open, err := anyOpenPR(ctx, tx, t.ID); err != nil || open {
@@ -391,6 +392,31 @@ func (e *Engine) Merged(ctx context.Context, threadID string) error {
 		}
 		if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"pr_state": "merged", "merge_error": nil}); err != nil {
 			return err
+		}
+		if t.Status == "done" {
+			return tx.EmitThread(ctx, t.ID)
+		}
+		return e.orch.SetStatus(ctx, tx, t, "done", "")
+	})
+}
+
+// policy is the thread's project merge_policy; "manual" when the project cannot be read, so
+// nothing finishes or merges without the user.
+func (e *Engine) policy(ctx context.Context, t core.Thread) string {
+	p, err := e.orch.Project(ctx, t.ProjectID)
+	if err != nil {
+		return "manual"
+	}
+	return p.MergePolicy
+}
+
+// finishWithOpenPRs finishes a thread whose pull requests passed their checks under merge_policy pr: the
+// PRs stay open for a person to merge (Merged records it later); nobody has to accept.
+func (e *Engine) finishWithOpenPRs(ctx context.Context, threadID string) error {
+	return e.core.InTx(ctx, func(tx *core.Tx) error {
+		t, err := core.LockThread(ctx, tx, threadID)
+		if err != nil || t.Status != "review" || t.PRState != "open" {
+			return ignoreMissing(err)
 		}
 		return e.orch.SetStatus(ctx, tx, t, "done", "")
 	})
@@ -406,12 +432,13 @@ func anyOpenPR(ctx context.Context, q core.DB, threadID string) (bool, error) {
 	return false, err
 }
 
-// prTick merges PRs whose checks passed (auto-merge, or accepted) and reports failures to the lead.
+// prTick acts on PRs whose checks passed — merges accepted ones and those of auto projects,
+// finishes the threads of pr projects (prStep) — and reports failures to the lead.
 func (e *Engine) prTick(ctx context.Context) {
 	var ids []string
 	err := e.core.Pool.Gorm(ctx).Table("at_threads t").Joins("JOIN at_projects p ON p.id = t.project_id").
 		Where(`t.status = 'review' AND t.pr_number IS NOT NULL
-			AND (t.pr_state = 'accepting' OR (t.pr_state = 'open' AND NOT p.require_acceptance))`).Pluck("t.id", &ids).Error
+			AND (t.pr_state = 'accepting' OR (t.pr_state = 'open' AND p.merge_policy <> 'manual'))`).Pluck("t.id", &ids).Error
 	if err != nil {
 		e.log.Warn("pr tick", "err", err)
 		return
@@ -435,6 +462,8 @@ func (e *Engine) prStep(ctx context.Context, threadID string) error {
 	switch {
 	case err != nil:
 		return e.loopFailed(ctx, t, "读取 PR 状态失败", err)
+	case v == CIPass && t.PRState == "open" && e.policy(ctx, t) == "pr":
+		return e.finishWithOpenPRs(ctx, t.ID)
 	case v == CIPass:
 		if err := e.mergePRs(ctx, t, t.PRState); !errors.Is(err, errStopped) {
 			return e.loopFailed(ctx, t, "合并失败", err)
@@ -447,8 +476,8 @@ func (e *Engine) prStep(ctx context.Context, threadID string) error {
 
 // loopFailed reports a merge-loop error the user has to act on (permission, conflict, not
 // mergeable) on an accepted thread (merge_error, back to open); others (rate limits, GitHub 5xx,
-// the network) are retried on the next tick. An open PR merged automatically (require_acceptance
-// off) that fails is only logged and retried: there is no acceptance to report it on.
+// the network) are retried on the next tick. An open PR merged automatically (merge_policy auto)
+// that fails is only logged and retried: there is no acceptance to report it on.
 func (e *Engine) loopFailed(ctx context.Context, t core.Thread, label string, err error) error {
 	if err == nil || !permanent(err) {
 		return err

@@ -104,7 +104,7 @@ func deliveryTwoRepos(t *testing.T, webhook bool) {
 		ID    string
 		Repos []struct{ Repo string }
 	}
-	b.must(201, "POST", "/api/projects", map[string]any{"name": "shop", "context": "仓库 o/web 的基准分支：dev",
+	b.must(201, "POST", "/api/projects", map[string]any{"name": "shop", "merge_policy": "manual", "context": "仓库 o/web 的基准分支：dev",
 		"repos": []map[string]any{{"repo": "o/r", "git_connection_id": conn.ID}, {"repo": "o/web", "git_connection_id": conn.ID}}}, &project)
 	if len(project.Repos) != 2 || project.Repos[1].Repo != "o/web" {
 		t.Fatalf("project repos %+v", project.Repos)

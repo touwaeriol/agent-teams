@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// 高级: approvals (only when some role asks), ask notifications, acceptance, workflow edits, merge method,
+// 高级: approvals (only when some role asks), ask notifications, how threads with PRs end (merge_policy),
+// workflow edits, merge method,
 // and how thread branches are named and cleaned up (fixed by the platform, shown for reference).
 import { computed } from "vue";
 import { useRoles } from "@/api/queries";
@@ -15,6 +16,11 @@ const props = defineProps<{ project: ProjectView }>();
 const update = useUpdate(() => props.project.id);
 const roles = useRoles();
 const ask = computed(() => usesAsk(roles.data.value?.roles ?? []));
+const POLICY: { value: ProjectView["merge_policy"]; label: string }[] = [
+  { value: "pr", label: "提交 PR 即完成" },
+  { value: "auto", label: "检查通过后自动合并" },
+  { value: "manual", label: "等我验收" },
+];
 const MERGE = [
   { value: "squash", label: "squash" },
   { value: "merge", label: "merge commit" },
@@ -34,7 +40,16 @@ const MERGE = [
       :checked="project.delivery.notify_on_ask"
       @change="(v: boolean) => update.mutate({ delivery: { notify_on_ask: v } })"
     />
-    <SwitchRow title="讨论串完成后需要我验收" desc="关闭后 PR 一通过检查就自动合并到基准分支。" :checked="project.require_acceptance" @change="(v: boolean) => update.mutate({ require_acceptance: v })" />
+    <Row title="讨论串开出 PR 后" desc="提交 PR 即完成：检查通过就结束，PR 留给你在 GitHub 上合并。自动合并：检查通过后直接合并进基准分支。等我验收：停在待验收，你点了才合并。检查没过都会交回员工修。">
+      <el-select
+        :model-value="project.merge_policy"
+        aria-label="讨论串开出 PR 后"
+        class="at-select-36 at-raised !w-44"
+        @update:model-value="(v: ProjectView['merge_policy']) => update.mutate({ merge_policy: v })"
+      >
+        <el-option v-for="m in POLICY" :key="m.value" :value="m.value" :label="m.label" />
+      </el-select>
+    </Row>
     <SwitchRow
       title="允许员工修改 workflow"
       desc="允许成员改 .github/workflows 下的文件（默认不允许）。"

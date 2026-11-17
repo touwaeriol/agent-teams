@@ -30,7 +30,7 @@ export function prText(t: Pick<ThreadView, "pr_number" | "status">): string {
 }
 
 /** A card's pill: finished threads (done or failed) read 已完成. */
-export function cardLook(t: Pick<ThreadView, "status" | "counts">): Look {
+export function cardLook(t: Pick<ThreadView, "status" | "counts" | "merge_policy" | "merge_error">): Look {
   return threadKind(t) === "done" ? { tone: "#2E7D4F", label: "已完成" } : threadLook(t);
 }
 

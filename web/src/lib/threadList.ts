@@ -4,7 +4,7 @@
 import type { QuestionView, ThreadView } from "@/api/views";
 import { isWorking, liveLine } from "./live";
 import { readLocal, writeLocal } from "./persist";
-import { threadLine } from "./present";
+import { awaitsAcceptance, threadLine } from "./present";
 
 export type ListGroupId = "waiting" | "active" | "idle" | "done" | "archived";
 
@@ -26,7 +26,7 @@ export function listGroupOf(t: ThreadView, waiting?: Map<number, QuestionView>):
   if (t.status === "archived") return "archived";
   if (t.reminded_at) return "waiting";
   if (t.status === "done" || t.status === "failed") return "done";
-  if (t.status === "review" || t.status === "waiting" || t.counts.waiting > 0 || waiting?.has(t.no)) return "waiting";
+  if (awaitsAcceptance(t) || t.status === "waiting" || t.counts.waiting > 0 || waiting?.has(t.no)) return "waiting";
   if (t.status === "queued") return "active";
   if (t.status === "running" && t.members.some(isWorking)) return "active";
   return "idle";

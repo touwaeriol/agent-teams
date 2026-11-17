@@ -346,9 +346,9 @@ func (s *Service) finish(ctx context.Context, tx *core.Tx, c *call) (Result, err
 		tx.AfterCommit(func(ctx context.Context) { s.endWithoutPR(context.WithoutCancel(ctx), t.ID) })
 		return okText("总结已记录。这个讨论串没有代码改动，不需要开 PR：讨论串现在结束（done），成员和你的会话随即关闭，不用再做别的。"), nil
 	case finishNeedsPR:
-		return okText("总结已记录。讨论串有代码改动还没有开 PR：请调用 open_pr(title, body)，PR 合并后讨论串结束。"), nil
+		return okText("总结已记录。讨论串有代码改动还没有开 PR：请调用 open_pr(title, body)，之后平台按项目设置收尾（PR 检查通过即结束、自动合并或等用户验收）。"), nil
 	}
-	return okText("总结已记录，PR 合并后讨论串结束。"), nil
+	return okText("总结已记录。平台按项目设置收尾：PR 检查通过即结束、自动合并或等用户验收；检查没过会把失败的检查发给你。"), nil
 }
 
 // What finish does besides recording the summary.

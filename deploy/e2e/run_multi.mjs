@@ -49,7 +49,7 @@ async function setup(c) {
   state.nodeId = node.node.id;
   state.nodeToken = node.token;
   const conn = await c.post("/api/git/connections", { name: "local-multi", token: "ghp_e2eToken" });
-  const project = await c.post("/api/projects", { name: "web + api", context: CONTEXT, delivery: ASK_ME, require_acceptance: true,
+  const project = await c.post("/api/projects", { name: "web + api", context: CONTEXT, delivery: ASK_ME, merge_policy: "manual",
     delivery: { ci: { mode: "off" } },
     repos: [{ repo: WEB, git_connection_id: conn.id }, { repo: API, git_connection_id: conn.id }] });
   check(project.repos?.map((r) => r.repo).join(",") === `${WEB},${API}`, `project binds ${WEB} and ${API} in order`, project.repos);

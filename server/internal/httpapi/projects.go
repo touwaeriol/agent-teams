@@ -15,28 +15,28 @@ import (
 
 // ProjectView is api.md §2 ProjectView.
 type ProjectView struct {
-	ID                string    `json:"id"`
-	Name              string    `json:"name"`
-	Description       string    `json:"description"`
-	Context           string    `json:"context" doc:"项目指令: the owner's instructions (like CLAUDE.md), read by every session"`
-	Repos             []RepoRef `json:"repos" doc:"Bound repositories in project order; base branches belong in context (the project instructions)"`
-	Pinned            bool      `json:"pinned"`
-	Archived          bool      `json:"archived"`
-	WorkMode          string    `json:"work_mode" enum:"worktree,clone"`
-	AutoApprove       bool      `json:"auto_approve"`
-	RequireAcceptance bool      `json:"require_acceptance"`
-	Delivery          Delivery  `json:"delivery"`
-	OfficeLayout      string    `json:"office_layout"`
-	Icon              string    `json:"icon" doc:"'' = initial on the default color; an emoji; or color:#RRGGBB"`
-	CoordinatorModel  string    `json:"coordinator_model" doc:"'' = the coordinator role's model"`
-	ThreadModel       string    `json:"thread_model" doc:"Claude leads and members; '' = each role's model"`
-	ThreadCodexModel  string    `json:"thread_codex_model" doc:"Codex leads and members; '' = each role's model"`
-	ThreadEffort      string    `json:"thread_effort" doc:"'' = each role's effort; low | medium | high | xhigh | max"`
-	AutoResume        bool      `json:"auto_resume" doc:"Continue threads paused by a usage limit once it resets"`
-	Waiting           int       `json:"waiting"`
-	ThreadsActive     int       `json:"threads_active"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	Description      string    `json:"description"`
+	Context          string    `json:"context" doc:"项目指令: the owner's instructions (like CLAUDE.md), read by every session"`
+	Repos            []RepoRef `json:"repos" doc:"Bound repositories in project order; base branches belong in context (the project instructions)"`
+	Pinned           bool      `json:"pinned"`
+	Archived         bool      `json:"archived"`
+	WorkMode         string    `json:"work_mode" enum:"worktree,clone"`
+	AutoApprove      bool      `json:"auto_approve"`
+	MergePolicy      string    `json:"merge_policy" enum:"pr,auto,manual" doc:"How a thread with PRs ends: pr = done once the checks pass, the PRs stay open for a person to merge; auto = merged into the base once the checks pass; manual = the user accepts"`
+	Delivery         Delivery  `json:"delivery"`
+	OfficeLayout     string    `json:"office_layout"`
+	Icon             string    `json:"icon" doc:"'' = initial on the default color; an emoji; or color:#RRGGBB"`
+	CoordinatorModel string    `json:"coordinator_model" doc:"'' = the coordinator role's model"`
+	ThreadModel      string    `json:"thread_model" doc:"Claude leads and members; '' = each role's model"`
+	ThreadCodexModel string    `json:"thread_codex_model" doc:"Codex leads and members; '' = each role's model"`
+	ThreadEffort     string    `json:"thread_effort" doc:"'' = each role's effort; low | medium | high | xhigh | max"`
+	AutoResume       bool      `json:"auto_resume" doc:"Continue threads paused by a usage limit once it resets"`
+	Waiting          int       `json:"waiting"`
+	ThreadsActive    int       `json:"threads_active"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 func (s *Server) projectView(p store.Project, defaults Delivery) ProjectView {
@@ -47,7 +47,7 @@ func (s *Server) projectView(p store.Project, defaults Delivery) ProjectView {
 func ProjectViewOf(p store.Project, d Delivery) ProjectView {
 	return ProjectView{ID: p.ID, Name: p.Name, Description: p.Description, Context: p.Context, Repos: RepoRefs(p.Repos),
 		Pinned: p.Pinned, Archived: p.Archived,
-		WorkMode: p.WorkMode, AutoApprove: p.AutoApprove, RequireAcceptance: p.RequireAcceptance,
+		WorkMode: p.WorkMode, AutoApprove: p.AutoApprove, MergePolicy: p.MergePolicy,
 		Delivery: d, OfficeLayout: p.OfficeLayout, Icon: p.Icon, CoordinatorModel: p.CoordinatorModel,
 		ThreadModel: p.ThreadModel, ThreadCodexModel: p.ThreadCodexModel, ThreadEffort: p.ThreadEffort, AutoResume: p.AutoResume, Waiting: p.Waiting,
 		ThreadsActive: p.ThreadsActive, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
@@ -55,39 +55,39 @@ func ProjectViewOf(p store.Project, d Delivery) ProjectView {
 
 // ProjectInput is POST /api/projects.
 type ProjectInput struct {
-	Name              string         `json:"name" maxLength:"200"`
-	Description       string         `json:"description,omitempty" maxLength:"2000"`
-	Context           string         `json:"context,omitempty" maxLength:"16000" doc:"项目指令"`
-	Repos             []RepoRef      `json:"repos,omitempty" maxItems:"20"`
-	WorkMode          string         `json:"work_mode,omitempty" enum:"worktree,clone"`
-	AutoApprove       bool           `json:"auto_approve,omitempty"`
-	RequireAcceptance *bool          `json:"require_acceptance,omitempty"`
-	Delivery          *DeliveryPatch `json:"delivery,omitempty"`
-	FirstMessage      string         `json:"first_message,omitempty" maxLength:"50000" doc:"Delivered to the project coordinator"`
-	CoordinatorModel  string         `json:"coordinator_model,omitempty" maxLength:"100" doc:"Claude model of the coordinator; '' = the role's model"`
-	ThreadModel       string         `json:"thread_model,omitempty" maxLength:"100" doc:"Claude model of Claude leads and members; '' = each role's model"`
-	ThreadCodexModel  string         `json:"thread_codex_model,omitempty" maxLength:"100" doc:"Codex model of Codex leads and members; '' = each role's model"`
+	Name             string         `json:"name" maxLength:"200"`
+	Description      string         `json:"description,omitempty" maxLength:"2000"`
+	Context          string         `json:"context,omitempty" maxLength:"16000" doc:"项目指令"`
+	Repos            []RepoRef      `json:"repos,omitempty" maxItems:"20"`
+	WorkMode         string         `json:"work_mode,omitempty" enum:"worktree,clone"`
+	AutoApprove      bool           `json:"auto_approve,omitempty"`
+	MergePolicy      string         `json:"merge_policy,omitempty" enum:"pr,auto,manual" doc:"Default pr"`
+	Delivery         *DeliveryPatch `json:"delivery,omitempty"`
+	FirstMessage     string         `json:"first_message,omitempty" maxLength:"50000" doc:"Delivered to the project coordinator"`
+	CoordinatorModel string         `json:"coordinator_model,omitempty" maxLength:"100" doc:"Claude model of the coordinator; '' = the role's model"`
+	ThreadModel      string         `json:"thread_model,omitempty" maxLength:"100" doc:"Claude model of Claude leads and members; '' = each role's model"`
+	ThreadCodexModel string         `json:"thread_codex_model,omitempty" maxLength:"100" doc:"Codex model of Codex leads and members; '' = each role's model"`
 }
 
 // ProjectUpdate is PATCH /api/projects/{pid}.
 type ProjectUpdate struct {
-	Name              *string        `json:"name,omitempty" maxLength:"200"`
-	Description       *string        `json:"description,omitempty" maxLength:"2000"`
-	Context           *string        `json:"context,omitempty" maxLength:"16000" doc:"项目指令"`
-	Repos             *[]RepoRef     `json:"repos,omitempty" maxItems:"20" doc:"Replaces the bound repositories (order kept); [] unbinds all"`
-	Pinned            *bool          `json:"pinned,omitempty"`
-	Archived          *bool          `json:"archived,omitempty"`
-	WorkMode          *string        `json:"work_mode,omitempty" enum:"worktree,clone"`
-	AutoApprove       *bool          `json:"auto_approve,omitempty"`
-	RequireAcceptance *bool          `json:"require_acceptance,omitempty"`
-	Delivery          *DeliveryPatch `json:"delivery,omitempty"`
-	OfficeLayout      *string        `json:"office_layout,omitempty" doc:"'' = global default"`
-	Icon              *string        `json:"icon,omitempty" maxLength:"32" doc:"'' = initial; an emoji; or color:#RRGGBB"`
-	CoordinatorModel  *string        `json:"coordinator_model,omitempty" maxLength:"100" doc:"'' = the role's model"`
-	ThreadModel       *string        `json:"thread_model,omitempty" maxLength:"100" doc:"Claude leads and members; '' = each role's model"`
-	ThreadCodexModel  *string        `json:"thread_codex_model,omitempty" maxLength:"100" doc:"Codex leads and members; '' = each role's model"`
-	ThreadEffort      *string        `json:"thread_effort,omitempty" maxLength:"16" doc:"'' | low | medium | high | xhigh | max"`
-	AutoResume        *bool          `json:"auto_resume,omitempty"`
+	Name             *string        `json:"name,omitempty" maxLength:"200"`
+	Description      *string        `json:"description,omitempty" maxLength:"2000"`
+	Context          *string        `json:"context,omitempty" maxLength:"16000" doc:"项目指令"`
+	Repos            *[]RepoRef     `json:"repos,omitempty" maxItems:"20" doc:"Replaces the bound repositories (order kept); [] unbinds all"`
+	Pinned           *bool          `json:"pinned,omitempty"`
+	Archived         *bool          `json:"archived,omitempty"`
+	WorkMode         *string        `json:"work_mode,omitempty" enum:"worktree,clone"`
+	AutoApprove      *bool          `json:"auto_approve,omitempty"`
+	MergePolicy      *string        `json:"merge_policy,omitempty" enum:"pr,auto,manual"`
+	Delivery         *DeliveryPatch `json:"delivery,omitempty"`
+	OfficeLayout     *string        `json:"office_layout,omitempty" doc:"'' = global default"`
+	Icon             *string        `json:"icon,omitempty" maxLength:"32" doc:"'' = initial; an emoji; or color:#RRGGBB"`
+	CoordinatorModel *string        `json:"coordinator_model,omitempty" maxLength:"100" doc:"'' = the role's model"`
+	ThreadModel      *string        `json:"thread_model,omitempty" maxLength:"100" doc:"Claude leads and members; '' = each role's model"`
+	ThreadCodexModel *string        `json:"thread_codex_model,omitempty" maxLength:"100" doc:"Codex leads and members; '' = each role's model"`
+	ThreadEffort     *string        `json:"thread_effort,omitempty" maxLength:"16" doc:"'' | low | medium | high | xhigh | max"`
+	AutoResume       *bool          `json:"auto_resume,omitempty"`
 }
 
 type projectsInput struct {
@@ -188,17 +188,13 @@ func (s *Server) createProject(ctx context.Context, in *createProjectInput) (*pr
 
 func newProject(b ProjectInput, name string, repos []store.ProjectRepo, defaults Delivery) store.NewProject {
 	raw, _ := json.Marshal(applyPatch(defaults, b.Delivery))
-	requireAcceptance := true
-	if b.RequireAcceptance != nil {
-		requireAcceptance = *b.RequireAcceptance
-	}
 	workMode := b.WorkMode
 	if workMode == "" {
 		workMode = "worktree"
 	}
 	return store.NewProject{Name: name, Description: b.Description, Context: b.Context, Repos: repos,
 		WorkMode: workMode, AutoApprove: b.AutoApprove,
-		RequireAcceptance: requireAcceptance, Delivery: raw, CoordinatorModel: strings.TrimSpace(b.CoordinatorModel),
+		MergePolicy: b.MergePolicy, Delivery: raw, CoordinatorModel: strings.TrimSpace(b.CoordinatorModel),
 		ThreadModel: strings.TrimSpace(b.ThreadModel), ThreadCodexModel: strings.TrimSpace(b.ThreadCodexModel)}
 }
 
@@ -254,7 +250,7 @@ func (s *Server) projectChanges(ctx context.Context, userID string, cur store.Pr
 	add(b.Pinned != nil, "pinned", deref(b.Pinned))
 	add(b.Archived != nil, "archived", deref(b.Archived))
 	add(b.WorkMode != nil, "work_mode", deref(b.WorkMode))
-	add(b.RequireAcceptance != nil, "require_acceptance", deref(b.RequireAcceptance))
+	add(b.MergePolicy != nil, "merge_policy", deref(b.MergePolicy))
 	add(b.AutoResume != nil, "auto_resume", deref(b.AutoResume))
 	chromeCh, err := chromeChanges(b)
 	if err != nil {

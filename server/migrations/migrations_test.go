@@ -102,13 +102,14 @@ var droppedV1 = []string{"at_users.role ", "at_teams.", "constraint at_teams_", 
 func assertV1AccountsKept(t *testing.T, db *sql.DB) {
 	t.Helper()
 	var email string
-	var pinned, requireAcceptance bool
-	row := db.QueryRow(`SELECT u.email, p.pinned, p.require_acceptance FROM at_users u JOIN at_projects p ON p.user_id = u.id`)
-	if err := row.Scan(&email, &pinned, &requireAcceptance); err != nil {
+	var pinned bool
+	var policy string
+	row := db.QueryRow(`SELECT u.email, p.pinned, p.merge_policy FROM at_users u JOIN at_projects p ON p.user_id = u.id`)
+	if err := row.Scan(&email, &pinned, &policy); err != nil {
 		t.Fatal(err)
 	}
-	if email != "a@example.com" || !pinned || !requireAcceptance {
-		t.Fatalf("data changed: %s %v %v", email, pinned, requireAcceptance)
+	if email != "a@example.com" || !pinned || policy != "pr" {
+		t.Fatalf("data changed: %s %v %v", email, pinned, policy)
 	}
 	var sessions, nodes, conns, settings, repos int
 	_ = db.QueryRow(`SELECT count(*) FROM at_sessions WHERE csrf_secret = ''`).Scan(&sessions)
@@ -195,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 240 {
+	if migrations.Latest() != 250 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -1008,5 +1009,44 @@ INSERT INTO at_roles (id, user_id, tier, role, runtime, model) VALUES ('r2', 'u2
 	}
 	if _, err := p.UpTo(ctx, 230); err != nil {
 		t.Fatalf("up again: %v", err)
+	}
+}
+
+// TestMergePolicyMigration: 00250 turns require_acceptance into merge_policy — acceptance required
+// (the old default) becomes pr, automatic merging stays auto — and Down maps back (manual and pr
+// required acceptance, auto did not).
+func TestMergePolicyMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 240); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name, require_acceptance) VALUES ('p1', 'u1', 'A', TRUE), ('p2', 'u1', 'B', FALSE);`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 250); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.QueryRow(`SELECT string_agg(id || ':' || merge_policy, ' ' ORDER BY id) FROM at_projects`).Scan(&got); err != nil || got != "p1:pr p2:auto" {
+		t.Fatalf("after 00250: %q %v", got, err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_projects (id, user_id, name, merge_policy) VALUES ('p3', 'u1', 'C', 'manual')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE at_projects SET merge_policy = 'bogus' WHERE id = 'p1'`); err == nil {
+		t.Fatal("merge_policy accepted an unknown value")
+	}
+	if _, err := p.DownTo(ctx, 240); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT string_agg(id || ':' || require_acceptance, ' ' ORDER BY id) FROM at_projects`).Scan(&got); err != nil || got != "p1:true p2:false p3:true" {
+		t.Fatalf("after down: %q %v", got, err)
 	}
 }

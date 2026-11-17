@@ -156,13 +156,20 @@ func ThreadCountsOf(ctx context.Context, q DB, t Thread) (ThreadCounts, error) {
 		(SELECT count(*) FROM at_tasks WHERE thread_id = $1 AND status = 'done'),
 		(SELECT count(*) FROM at_main_tasks WHERE thread_id = $1),
 		(SELECT count(*) FROM at_main_tasks WHERE thread_id = $1 AND status = 'done'),
-		(SELECT count(*) FROM at_deliverables d WHERE d.thread_id = $1 AND `+notImageDeliverable+`)`, t.ID).
-		Scan(&c.QuestionsOpen, &c.ApprovalsOpen, &c.TasksTotal, &c.TasksDone, &c.MainTotal, &c.MainDone, &c.Deliverables)
+		(SELECT count(*) FROM at_deliverables d WHERE d.thread_id = $1 AND `+notImageDeliverable+`),
+		(SELECT merge_policy FROM at_projects WHERE id = $2)`, t.ID, t.ProjectID).
+		Scan(&c.QuestionsOpen, &c.ApprovalsOpen, &c.TasksTotal, &c.TasksDone, &c.MainTotal, &c.MainDone, &c.Deliverables, &c.MergePolicy)
 	c.Waiting = c.QuestionsOpen + c.ApprovalsOpen
-	if t.Status == "review" {
+	if AwaitsUser(t, c.MergePolicy) {
 		c.Waiting++
 	}
 	return c, err
+}
+
+// AwaitsUser reports whether a thread in review waits on the user: an acceptance under
+// merge_policy manual, or a merge that failed. Under pr and auto it waits on its PRs' checks only.
+func AwaitsUser(t Thread, policy string) bool {
+	return t.Status == "review" && (policy == "manual" || t.MergeError != nil)
 }
 
 // MainTaskViews lists the plan with per-step task counts.
@@ -191,6 +198,7 @@ func (s *Store) ThreadViewOf(ctx context.Context, q DB, t Thread) (ThreadView, e
 	if v.Counts, err = ThreadCountsOf(ctx, q, t); err != nil {
 		return v, err
 	}
+	v.MergePolicy = v.Counts.MergePolicy
 	if v.Repos, err = ThreadRepoViews(ctx, q, t.ID); err != nil {
 		return v, err
 	}

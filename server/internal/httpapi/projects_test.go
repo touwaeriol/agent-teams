@@ -14,7 +14,7 @@ func TestProjectsCRUD(t *testing.T) {
 	other, _ := h.signUp("b@example.com")
 	var p ProjectView
 	c.must(201, "POST", "/api/projects", map[string]any{"name": " Alpha ", "description": "first"}, &p)
-	if p.Name != "Alpha" || p.WorkMode != "worktree" || !p.RequireAcceptance || len(p.Repos) != 0 {
+	if p.Name != "Alpha" || p.WorkMode != "worktree" || p.MergePolicy != "pr" || len(p.Repos) != 0 {
 		t.Fatalf("created %+v", p)
 	}
 	if !p.Delivery.Gates.Review || p.Delivery.MergeMethod != "squash" || p.Delivery.CI.TimeoutS != 3600 || !p.Delivery.NotifyOnAsk {

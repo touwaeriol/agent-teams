@@ -33,9 +33,9 @@ var errStopped = errors.New("merge stopped: thread no longer accepting")
 //   - ErrNotInReview (409) when it is not in review or its PRs are merged / closed.
 //
 // Otherwise pr_state becomes "accepting" and merge_error is cleared (thread event). A thread already
-// accepting is left as it is: repeated clicks start no second merge. With require_acceptance the
-// merge loop merges once the checks pass; without it the PRs are checked and merged now, in the
-// background (mergeInBackground). When that cannot merge, pr_state goes back to "open" and
+// accepting is left as it is: repeated clicks start no second merge. Under merge_policy manual the
+// merge loop merges once the checks pass; under pr and auto ("merge now, don't wait") the PRs are
+// checked and merged now, in the background (mergeInBackground). When that cannot merge, pr_state goes back to "open" and
 // merge_error says why; the user accepts again to retry.
 func (e *Engine) Accept(ctx context.Context, userID, threadID string) (core.Thread, error) {
 	t, err := core.ThreadOfUser(ctx, e.core.Pool, userID, threadID)
@@ -58,7 +58,7 @@ func (e *Engine) Accept(ctx context.Context, userID, threadID string) (core.Thre
 		return t, err
 	}
 	audit(ctx, e.core, userID, "thread_accept", t.ID)
-	if p.RequireAcceptance {
+	if p.MergePolicy == "manual" {
 		e.Kick(ctx)
 	} else {
 		e.mergeInBackground(ctx, t.ID)
@@ -94,7 +94,7 @@ func (e *Engine) startAccepting(ctx context.Context, threadID string) (bool, err
 }
 
 // mergeInBackground checks and merges an accepted thread's pull requests outside the request
-// (require_acceptance off), on a context of its own (AcceptTimeout).
+// (merge_policy pr or auto), on a context of its own (AcceptTimeout).
 //
 // e.accepting only deduplicates within this process: the merge loop here skips the thread while
 // the merge runs. Across replicas startAccepting's row lock lets one Accept start a merge, the
@@ -129,12 +129,12 @@ func (e *Engine) mergeInBackground(ctx context.Context, threadID string) {
 
 // acceptNow merges right away when every check passed; anything else is recorded on the thread.
 //
-// Error handling (require_acceptance off): GitHub rate limits (429, a 403 saying "rate limit")
+// Error handling (merge_policy pr or auto): GitHub rate limits (429, a 403 saying "rate limit")
 // leave the thread accepting and end the background merge; the merge loop picks accepting
 // threads up on its next tick and retries (merging once the checks pass). Every other error — a
 // 4xx, and also a GitHub 5xx or a network error — ends the attempt: pr_state back to "open"
-// with merge_error, and the user accepts again to retry. (Without require_acceptance the loop
-// also keeps auto-merging an open PR of a thread in review once its checks pass.)
+// with merge_error, and the user accepts again to retry. (Under auto the loop also keeps
+// merging an open PR of a thread in review once its checks pass.)
 func (e *Engine) acceptNow(ctx context.Context, threadID string) error {
 	t, err := core.ThreadByID(ctx, e.core.Pool, threadID)
 	if err != nil {

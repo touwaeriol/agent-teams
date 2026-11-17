@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -20,10 +21,10 @@ type acceptCase struct {
 	events *sse
 }
 
-// newAcceptCase: status is the thread's status ("review" for a PR awaiting acceptance). Without
-// require_acceptance the merge loop also merges the open PRs of a thread in review by itself, as
-// in production: the tests below run Accept's background merge next to it.
-func newAcceptCase(t *testing.T, requireAcceptance bool, status string) *acceptCase {
+// newAcceptCase: policy is the project's merge_policy, status the thread's ("review" for open PRs
+// the platform is acting on). Under auto the merge loop also merges the open PRs of a thread in
+// review by itself, as in production: the tests below run Accept's background merge next to it.
+func newAcceptCase(t *testing.T, policy, status string) *acceptCase {
 	t.Helper()
 	gh, ghSrv := newFakeGitHub(t)
 	w := newWorld(t, ghSrv)
@@ -35,7 +36,7 @@ func newAcceptCase(t *testing.T, requireAcceptance bool, status string) *acceptC
 	var conn struct{ ID string }
 	b.must(201, "POST", "/api/git/connections", map[string]string{"name": "gh", "token": "ghp_good"}, &conn)
 	var project struct{ ID string }
-	b.must(201, "POST", "/api/projects", map[string]any{"name": "acc", "require_acceptance": requireAcceptance,
+	b.must(201, "POST", "/api/projects", map[string]any{"name": "acc", "merge_policy": policy,
 		"repos": []map[string]any{{"repo": "o/r", "git_connection_id": conn.ID}}}, &project)
 	c := &acceptCase{w: w, gh: gh, b: b}
 	c.events = b.stream("/api/projects/"+project.ID+"/events?topics=thread", "")
@@ -114,12 +115,12 @@ func mergeError(v core.ThreadView) string {
 	return *v.MergeError
 }
 
-// TestAcceptAsync: without require_acceptance, accept answers at once with pr_state accepting and
+// TestAcceptAsync: under merge_policy auto, accept answers at once with pr_state accepting and
 // checks and merges in the background (a slow GitHub no longer holds the request). The merge
 // loop, which auto-merges open PRs of threads in review, runs next to it and repeated clicks
 // arrive while it merges: the PR is still merged exactly once.
 func TestAcceptAsync(t *testing.T) {
-	c := newAcceptCase(t, false, "review")
+	c := newAcceptCase(t, "auto", "review")
 	c.setLatency(500 * time.Millisecond) // the background merge makes ≥ 4 GitHub calls: ≥ 2 s
 	var seen int
 	c.set(func(gh *fakeGitHub) { seen = gh.requests })
@@ -154,7 +155,7 @@ func TestAcceptAsync(t *testing.T) {
 
 // TestAcceptNotInReview: only a thread in review can be accepted.
 func TestAcceptNotInReview(t *testing.T) {
-	c := newAcceptCase(t, false, "running")
+	c := newAcceptCase(t, "auto", "running")
 	if code, raw := c.b.do("POST", "/api/threads/"+c.thread.ID+"/accept", nil); code != 409 || !strings.Contains(string(raw), "not_in_review") {
 		t.Fatalf("accept outside review: %d %s", code, raw)
 	}
@@ -166,7 +167,7 @@ func TestAcceptNotInReview(t *testing.T) {
 // TestAcceptMergeFails: GitHub refusing the merge (405) puts the PR back to open with the reason
 // in merge_error; accepting again clears it and, once GitHub allows it, merges.
 func TestAcceptMergeFails(t *testing.T) {
-	c := newAcceptCase(t, false, "review")
+	c := newAcceptCase(t, "auto", "review")
 	key := "o/r#" + itoa(c.pr)
 	c.set(func(gh *fakeGitHub) { gh.mergeFail[key] = 405 })
 	c.accept(t)
@@ -192,7 +193,7 @@ func TestAcceptMergeFails(t *testing.T) {
 
 // TestAcceptChecksPending: checks still running are reported (no 409); the PR merges by itself later.
 func TestAcceptChecksPending(t *testing.T) {
-	c := newAcceptCase(t, false, "review")
+	c := newAcceptCase(t, "auto", "review")
 	c.set(func(gh *fakeGitHub) {
 		gh.checks["sha-thread"] = []map[string]any{{"name": "verify", "status": "in_progress"}}
 	})
@@ -206,7 +207,7 @@ func TestAcceptChecksPending(t *testing.T) {
 // TestAcceptRateLimited: a rate-limited merge (429) is no failure: the thread stays accepting
 // without merge_error, the merge loop retries and merges once GitHub lets it.
 func TestAcceptRateLimited(t *testing.T) {
-	c := newAcceptCase(t, false, "review")
+	c := newAcceptCase(t, "auto", "review")
 	key := "o/r#" + itoa(c.pr)
 	c.set(func(gh *fakeGitHub) { gh.mergeFail[key] = 429 })
 	c.accept(t)
@@ -224,7 +225,7 @@ func TestAcceptRateLimited(t *testing.T) {
 // TestAcceptRejectStopsMerge: a reject while the background merge reads the checks stops it
 // before anything is merged.
 func TestAcceptRejectStopsMerge(t *testing.T) {
-	c := newAcceptCase(t, false, "review")
+	c := newAcceptCase(t, "auto", "review")
 	c.setLatency(400 * time.Millisecond)
 	c.accept(t)
 	if v := c.reject(t); v.Status != "running" || v.PRState != "open" {
@@ -240,7 +241,7 @@ func TestAcceptRejectStopsMerge(t *testing.T) {
 // TestAcceptRejectKeepsResult: a merge already in flight when the user rejects fails afterwards;
 // its failure does not overwrite the reject (no merge_error, still running and open).
 func TestAcceptRejectKeepsResult(t *testing.T) {
-	c := newAcceptCase(t, false, "review")
+	c := newAcceptCase(t, "auto", "review")
 	c.set(func(gh *fakeGitHub) {
 		gh.mergeFail["o/r#"+itoa(c.pr)] = 405
 		gh.mergeDelay = time.Second
@@ -258,7 +259,7 @@ func TestAcceptRejectKeepsResult(t *testing.T) {
 
 // TestAcceptTimeout: a background merge that runs out of time says so in merge_error.
 func TestAcceptTimeout(t *testing.T) {
-	c := newAcceptCase(t, false, "review")
+	c := newAcceptCase(t, "auto", "review")
 	c.w.e.Delivery.AcceptTimeout = 300 * time.Millisecond
 	c.setLatency(time.Second)
 	c.accept(t)
@@ -268,11 +269,11 @@ func TestAcceptTimeout(t *testing.T) {
 	}
 }
 
-// TestAcceptLoopMergeFails: with require_acceptance the merge loop merges; a merge GitHub
+// TestAcceptLoopMergeFails: under merge_policy manual the merge loop merges; a merge GitHub
 // refuses (403) is reported on the thread (open + merge_error) instead of retried silently, and
 // rejecting clears it.
 func TestAcceptLoopMergeFails(t *testing.T) {
-	c := newAcceptCase(t, true, "review")
+	c := newAcceptCase(t, "manual", "review")
 	c.set(func(gh *fakeGitHub) { gh.mergeFail["o/r#"+itoa(c.pr)] = 403 })
 	v, _ := c.accept(t)
 	if v.PRState != "accepting" {
@@ -294,9 +295,9 @@ func TestAcceptLoopMergeFails(t *testing.T) {
 	}
 }
 
-// TestAcceptLoopChecksFail: with require_acceptance failed checks reach the user too.
+// TestAcceptLoopChecksFail: under merge_policy manual failed checks reach the user too.
 func TestAcceptLoopChecksFail(t *testing.T) {
-	c := newAcceptCase(t, true, "review")
+	c := newAcceptCase(t, "manual", "review")
 	c.set(func(gh *fakeGitHub) {
 		gh.checks["sha-thread"] = []map[string]any{{"name": "verify", "status": "completed", "conclusion": "failure"}}
 	})
@@ -304,5 +305,55 @@ func TestAcceptLoopChecksFail(t *testing.T) {
 	v := c.waitFor(t, "checks failure reported", func(v core.ThreadView) bool { return v.PRState == "open" })
 	if !strings.Contains(mergeError(v), "verify：failure") || c.mergeCalls() != 0 {
 		t.Fatalf("checks failure: %q", mergeError(v))
+	}
+}
+
+// TestMergePolicyPR: under merge_policy pr (the default) a thread in review waits on nobody: once
+// its PR's checks pass it is done with the PR left open and unmerged; a person merging it on
+// GitHub later only records pr_state merged.
+func TestMergePolicyPR(t *testing.T) {
+	c := newAcceptCase(t, "pr", "review")
+	if v := c.view(t); v.MergePolicy != "pr" {
+		t.Fatalf("merge_policy %q", v.MergePolicy)
+	}
+	v := c.waitFor(t, "done with the PR open", func(v core.ThreadView) bool { return v.Status == "done" })
+	if v.PRState != "open" || v.Counts.Waiting != 0 || c.mergeCalls() != 0 {
+		t.Fatalf("pr policy: pr_state %q waiting %d merges %d", v.PRState, v.Counts.Waiting, c.mergeCalls())
+	}
+	c.set(func(gh *fakeGitHub) { gh.pulls["o/r#"+itoa(c.pr)].merged = true })
+	payload, _ := json.Marshal(map[string]any{"action": "closed", "pull_request": map[string]any{"html_url": prURL("o/r", c.pr), "merged": true}})
+	if err := c.w.e.Delivery.GitHubEvent(c.w.ctx, "pull_request", payload); err != nil {
+		t.Fatal(err)
+	}
+	if v := c.view(t); v.Status != "done" || v.PRState != "merged" {
+		t.Fatalf("after the person merged: %s %q", v.Status, v.PRState)
+	}
+}
+
+// TestMergePolicyPRChecksPending: while the checks run, a pr thread stays in review without
+// waiting on the user; manual counts the acceptance as waiting.
+func TestMergePolicyPRChecksPending(t *testing.T) {
+	for policy, waiting := range map[string]int{"pr": 0, "auto": 0, "manual": 1} {
+		t.Run(policy, func(t *testing.T) {
+			c := newAcceptCase(t, policy, "running")
+			c.set(func(gh *fakeGitHub) {
+				gh.checks["sha-thread"] = []map[string]any{{"name": "verify", "status": "in_progress"}}
+			})
+			if err := c.w.e.Core.InTx(c.w.ctx, func(tx *core.Tx) error {
+				return core.UpdateThread(c.w.ctx, tx, c.thread.ID, map[string]any{"status": "review"})
+			}); err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(600 * time.Millisecond) // a few loop ticks
+			v := c.view(t)
+			if v.Status != "review" || v.Counts.Waiting != waiting || c.mergeCalls() != 0 {
+				t.Fatalf("%s: status %s waiting %d merges %d", policy, v.Status, v.Counts.Waiting, c.mergeCalls())
+			}
+			var p struct{ Waiting int }
+			c.b.must(200, "GET", "/api/projects/"+v.ProjectID, nil, &p)
+			if p.Waiting != waiting {
+				t.Fatalf("%s: project waiting %d", policy, p.Waiting)
+			}
+		})
 	}
 }

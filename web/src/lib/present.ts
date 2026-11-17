@@ -31,8 +31,9 @@ export type ThreadKind = "wait" | "doing" | "queued" | "review" | "paused" | "do
  * A thread's state: an open question to the user (or `waiting`) makes it 等你;
  * a pending permission request alone keeps it 进行中 (the work goes on), as on the design.
  */
-export function threadKind(t: Pick<ThreadView, "status" | "counts">): ThreadKind {
-  if (t.status === "review") return "review";
+export function threadKind(t: Pick<ThreadView, "status" | "counts" | "merge_policy" | "merge_error">): ThreadKind {
+  if (awaitsAcceptance(t)) return "review";
+  if (t.status === "review") return "doing"; // pr / auto: the platform waits on the PR's checks
   if (t.status === "done" || t.status === "failed" || t.status === "archived") return t.status;
   if (t.counts.questions_open > 0 || t.status === "waiting") return "wait";
   if (t.status === "paused") return "paused";
@@ -51,25 +52,36 @@ export const THREAD_LOOK: Record<ThreadKind, Look> = {
   archived: { tone: INK.gray, label: "已归档" },
 };
 
-export const threadLook = (t: Pick<ThreadView, "status" | "counts">): Look => THREAD_LOOK[threadKind(t)];
+export const threadLook = (t: Pick<ThreadView, "status" | "counts" | "merge_policy" | "merge_error">): Look => THREAD_LOOK[threadKind(t)];
 
 /** List marks and chips: anything waiting for the user (approvals too) shows in the 等你 colour. */
-export function markTone(t: Pick<ThreadView, "status" | "counts">): string {
+export function markTone(t: Pick<ThreadView, "status" | "counts" | "merge_policy" | "merge_error">): string {
   const kind = threadKind(t);
   if (kind === "done") return INK.gray;
   if (kind === "doing" && t.counts.waiting > 0) return INK.wait;
   return THREAD_LOOK[kind].tone;
 }
 
-/** The acceptance card shows while the thread is in review (pr_state accepting keeps status review). */
-export const showReviewCard = (t: Pick<ThreadView, "status">): boolean => t.status === "review";
+/**
+ * A thread in review waits on the user only for an acceptance (merge_policy manual) or after a
+ * merge failed; under pr and auto the platform waits on the PR's checks by itself (as the server's
+ * counts.waiting does).
+ */
+export const awaitsAcceptance = (t: Pick<ThreadView, "status" | "merge_policy" | "merge_error">): boolean =>
+  t.status === "review" && (t.merge_policy === "manual" || Boolean(t.merge_error));
+
+/** The acceptance card shows while the thread waits on the user's acceptance (pr_state accepting keeps it). */
+export const showReviewCard = (t: Pick<ThreadView, "status" | "merge_policy" | "merge_error" | "pr_state">): boolean =>
+  awaitsAcceptance(t) || (t.status === "review" && t.pr_state === "accepting");
+
+const REVIEW_LINE: Record<ThreadView["merge_policy"], string> = { pr: "等检查通过", auto: "检查通过后自动合并", manual: "等你验收" };
 
 /** One line under a thread title: what is waiting, else the PR, else what the lead said last. */
 export function threadLine(t: ThreadView, open?: QuestionView): string {
   if (open) return questionLine(open);
   if (t.status === "review" && t.pr_number && t.pr_state === "accepting") return `PR #${t.pr_number} 合并中`;
   if (t.status === "review" && t.pr_number && t.merge_error) return `PR #${t.pr_number} 合并失败，等你处理`;
-  if (t.status === "review" && t.pr_number) return `PR #${t.pr_number} 等你验收`;
+  if (t.status === "review" && t.pr_number) return `PR #${t.pr_number} ${REVIEW_LINE[t.merge_policy] ?? REVIEW_LINE.manual}`;
   if (t.status === "done" && t.pr_number) return mergedLine(t);
   if (t.status === "queued") return t.queue_position ? `排队中，前面还有 ${t.queue_position} 个` : "排队等节点";
   if (t.status === "paused") return pauseLine(t.pause_reason);
@@ -282,8 +294,10 @@ export function threadBases(t: Pick<ThreadView, "base_branch" | "repos">): strin
   return bases.length > 0 ? bases.join("、") : t.base_branch;
 }
 
+/** A finished thread's PRs: merged, or (merge_policy pr) still open for a person to merge on GitHub. */
 function mergedLine(t: ThreadView): string {
   const prs = threadPRs(t);
+  if (t.pr_state === "open") return prs.length > 1 ? `${prs.length} 个 PR 已提交，等合并` : `PR #${t.pr_number} 已提交，等合并`;
   if (prs.length > 1) return `${prs.length} 个 PR 已合并`;
   const base = prs[0]?.base || t.base_branch;
   return base ? `PR #${t.pr_number} 已合并到 ${base}` : `PR #${t.pr_number} 已合并`;

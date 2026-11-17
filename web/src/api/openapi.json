@@ -3529,6 +3529,15 @@
             "maxLength": 50000,
             "type": "string"
           },
+          "merge_policy": {
+            "description": "Default pr",
+            "enum": [
+              "pr",
+              "auto",
+              "manual"
+            ],
+            "type": "string"
+          },
           "name": {
             "maxLength": 200,
             "type": "string"
@@ -3542,9 +3551,6 @@
               "array",
               "null"
             ]
-          },
-          "require_acceptance": {
-            "type": "boolean"
           },
           "thread_codex_model": {
             "description": "Codex model of Codex leads and members; '' = each role's model",
@@ -3619,6 +3625,14 @@
             "maxLength": 32,
             "type": "string"
           },
+          "merge_policy": {
+            "enum": [
+              "pr",
+              "auto",
+              "manual"
+            ],
+            "type": "string"
+          },
           "name": {
             "maxLength": 200,
             "type": "string"
@@ -3637,9 +3651,6 @@
             },
             "maxItems": 20,
             "type": "array"
-          },
-          "require_acceptance": {
-            "type": "boolean"
           },
           "thread_codex_model": {
             "description": "Codex leads and members; '' = each role's model",
@@ -3761,6 +3772,15 @@
           "id": {
             "type": "string"
           },
+          "merge_policy": {
+            "description": "How a thread with PRs ends: pr = done once the checks pass, the PRs stay open for a person to merge; auto = merged into the base once the checks pass; manual = the user accepts",
+            "enum": [
+              "pr",
+              "auto",
+              "manual"
+            ],
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -3779,9 +3799,6 @@
               "array",
               "null"
             ]
-          },
-          "require_acceptance": {
-            "type": "boolean"
           },
           "thread_codex_model": {
             "description": "Codex leads and members; '' = each role's model",
@@ -3825,7 +3842,7 @@
           "archived",
           "work_mode",
           "auto_approve",
-          "require_acceptance",
+          "merge_policy",
           "delivery",
           "office_layout",
           "icon",
@@ -5237,6 +5254,15 @@
               "null"
             ]
           },
+          "merge_policy": {
+            "description": "The project's: how the thread ends once its PRs are open (architecture.md §8.4)",
+            "enum": [
+              "pr",
+              "auto",
+              "manual"
+            ],
+            "type": "string"
+          },
           "messages": {
             "items": {
               "$ref": "#/components/schemas/MessageView"
@@ -5373,6 +5399,7 @@
           "pr_url",
           "pr_state",
           "merge_error",
+          "merge_policy",
           "summary",
           "auto_approve",
           "opened_by",
@@ -5568,6 +5595,15 @@
               "null"
             ]
           },
+          "merge_policy": {
+            "description": "The project's: how the thread ends once its PRs are open (architecture.md §8.4)",
+            "enum": [
+              "pr",
+              "auto",
+              "manual"
+            ],
+            "type": "string"
+          },
           "no": {
             "format": "int64",
             "type": "integer"
@@ -5686,6 +5722,7 @@
           "pr_url",
           "pr_state",
           "merge_error",
+          "merge_policy",
           "summary",
           "auto_approve",
           "opened_by",

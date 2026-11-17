@@ -1,5 +1,6 @@
 import type { CoordinatorView, QuestionView, ThreadView } from "@/api/views";
 import type { ThreadViewId } from "@/components/app/threadMenu";
+import { awaitsAcceptance } from "@/lib/present";
 
 /** Waiting questions keyed by thread number (first open one wins), for list lines. */
 export function waitingIndex(questions: QuestionView[] | undefined): Map<number, QuestionView> {
@@ -29,8 +30,8 @@ export function coordinatorState(c: CoordinatorView | undefined): { tone: string
 
 /** Threads waiting on the user (open questions + PRs to accept) and the first such thread. */
 export function waitingSummary(threads: ThreadView[]): { count: number; first: ThreadView | undefined } {
-  const count = threads.reduce((n, t) => n + t.counts.waiting + (t.status === "review" ? 1 : 0), 0);
-  return { count, first: threads.find((t) => t.counts.waiting > 0 || t.status === "review") };
+  const count = threads.reduce((n, t) => n + t.counts.waiting + (awaitsAcceptance(t) ? 1 : 0), 0);
+  return { count, first: threads.find((t) => t.counts.waiting > 0 || awaitsAcceptance(t)) };
 }
 
 export function coordinatorBusy(c: CoordinatorView | undefined): boolean {

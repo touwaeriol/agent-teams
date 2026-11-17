@@ -2917,9 +2917,13 @@ export interface components {
             description?: string;
             /** @description Delivered to the project coordinator */
             first_message?: string;
+            /**
+             * @description Default pr
+             * @enum {string}
+             */
+            merge_policy?: "pr" | "auto" | "manual";
             name: string;
             repos?: components["schemas"]["RepoRef"][] | null;
-            require_acceptance?: boolean;
             /** @description Codex model of Codex leads and members; '' = each role's model */
             thread_codex_model?: string;
             /** @description Claude model of Claude leads and members; '' = each role's model */
@@ -2943,13 +2947,14 @@ export interface components {
             description?: string;
             /** @description '' = initial; an emoji; or color:#RRGGBB */
             icon?: string;
+            /** @enum {string} */
+            merge_policy?: "pr" | "auto" | "manual";
             name?: string;
             /** @description '' = global default */
             office_layout?: string;
             pinned?: boolean;
             /** @description Replaces the bound repositories (order kept); [] unbinds all */
             repos?: components["schemas"]["RepoRef"][];
-            require_acceptance?: boolean;
             /** @description Codex leads and members; '' = each role's model */
             thread_codex_model?: string;
             /** @description '' | low | medium | high | xhigh | max */
@@ -2987,12 +2992,16 @@ export interface components {
             /** @description '' = initial on the default color; an emoji; or color:#RRGGBB */
             icon: string;
             id: string;
+            /**
+             * @description How a thread with PRs ends: pr = done once the checks pass, the PRs stay open for a person to merge; auto = merged into the base once the checks pass; manual = the user accepts
+             * @enum {string}
+             */
+            merge_policy: "pr" | "auto" | "manual";
             name: string;
             office_layout: string;
             pinned: boolean;
             /** @description Bound repositories in project order; base branches belong in context (the project instructions) */
             repos: components["schemas"]["RepoRef"][] | null;
-            require_acceptance: boolean;
             /** @description Codex leads and members; '' = each role's model */
             thread_codex_model: string;
             /** @description '' = each role's effort; low | medium | high | xhigh | max */
@@ -3386,6 +3395,11 @@ export interface components {
             members: components["schemas"]["EmployeeBrief"][] | null;
             /** @description Why accepting could not merge the PRs (checks, conflict, permission); null when none. Cleared on accept, reject and merge */
             merge_error: string | null;
+            /**
+             * @description The project's: how the thread ends once its PRs are open (architecture.md §8.4)
+             * @enum {string}
+             */
+            merge_policy: "pr" | "auto" | "manual";
             messages?: components["schemas"]["MessageView"][] | null;
             /** Format: int64 */
             no: number;
@@ -3487,6 +3501,11 @@ export interface components {
             members: components["schemas"]["EmployeeBrief"][] | null;
             /** @description Why accepting could not merge the PRs (checks, conflict, permission); null when none. Cleared on accept, reject and merge */
             merge_error: string | null;
+            /**
+             * @description The project's: how the thread ends once its PRs are open (architecture.md §8.4)
+             * @enum {string}
+             */
+            merge_policy: "pr" | "auto" | "manual";
             /** Format: int64 */
             no: number;
             opened_by: string;

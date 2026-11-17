@@ -87,7 +87,7 @@ func TestDeliveryEndToEnd(t *testing.T) {
 	var conn struct{ ID string }
 	b.must(201, "POST", "/api/git/connections", map[string]string{"name": "gh", "token": "ghp_good"}, &conn)
 	var project struct{ ID string }
-	b.must(201, "POST", "/api/projects", map[string]any{"name": "web", "repos": []map[string]any{{"repo": "o/r", "git_connection_id": conn.ID}}}, &project)
+	b.must(201, "POST", "/api/projects", map[string]any{"name": "web", "merge_policy": "manual", "repos": []map[string]any{{"repo": "o/r", "git_connection_id": conn.ID}}}, &project)
 	n := w.connect(node.Token, nodetest.Options{})
 	events := b.stream("/api/projects/"+project.ID+"/events?topics=merge,thread,task,deliverable,ci", "")
 

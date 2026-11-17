@@ -55,7 +55,7 @@ ProjectView     = {id, name, description, context, repos: RepoRef[],   // contex
 RepoRef         = {repo: "owner/name", git_connection_id: string|null}
                    /* ProjectView 其余字段： */
                    pinned, archived, work_mode: "worktree"|"clone", auto_approve,
-                   require_acceptance,      // true：用户验收后平台合并；false：PR 的必需 check 通过后平台按 merge_method 自动合并（architecture.md §8.4）
+                   merge_policy,            // pr（默认）：PR 的必需 check 通过即完成，PR 留给人合并；auto：check 通过后平台按 merge_method 自动合并；manual：用户验收后平台合并（architecture.md §8.4）
                    delivery: DeliverySettings, office_layout: string, waiting: number, threads_active: number,
                    icon: string,            // '' = 名字首字母配稳定底色；一个表情；或 "color:#RRGGBB" = 首字母配该颜色
                    coordinator_model: string, thread_model: string, thread_codex_model: string, thread_effort: string,  // 项目级覆盖，按类型：统筹 / Claude 组长和成员 / Codex 组长和成员；'' = 跟随岗位（下次开会话生效）
@@ -69,6 +69,7 @@ DeliverySettings = {gates: {review, decision, merge_queue}, ci: {mode, required,
                    lead_review_timeout_s: number}   // 组长判断时限，10–3600，默认 120；到期转给用户
 ThreadView      = {id, project_id, no, title, brief, status, queue_position: number|null, pause_reason: string, branch, base_branch /*旧字段*/, pr_number, pr_url, pr_state, summary,
                    merge_error: string|null,  // 验收后没能合并的原因（检查未通过/还在跑、冲突、没有权限…，中文可读）；accept、reject 和合并成功时清空
+                   merge_policy: 'pr'|'auto'|'manual',  // 项目的合并策略（architecture.md §8.4）；review 只在 manual 或有 merge_error 时算“等你处理”（counts.waiting）
                    repos: ThreadRepoView[],   // 每个仓库：{repo, base_branch, branch_created, pr_number, pr_url, pr_state}；pr_number/pr_url = 第一个 PR，pr_state = 汇总
                    auto_approve, opened_by, members: EmployeeBrief[], main_tasks: MainTaskView[],
                    counts: {waiting, questions_open, approvals_open, tasks_total, tasks_done, main_total, main_done},
@@ -186,8 +187,8 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | GET | `/api/threads/{tid}/merge-queue` | → `MergeEntryView[]` |
 | GET | `/api/threads/{tid}/checks` | → 最近一次合并的 `CheckView[]` |
 | POST | `/api/threads/{tid}/open-pr` | `{title?, body?, force?: bool}` → `ThreadView`（Thread 页“开 PR”按钮；每个已有讨论串分支、还没有 PR 的仓库各开一个，base 为本讨论串在该仓库的基准分支，409 `nothing_to_pr` = 还没有合并进任何仓库的改动；前提同组长 `open_pr`：无 `merging` 条目、主任务全部 done（`force` 可跳过这一条）；标题/正文缺省时平台由讨论串标题、主任务和小任务总结生成；409 `pr_exists`、409 `merge_in_progress`） |
-| POST | `/api/threads/{tid}/accept` | → 200 `ThreadView`，立即返回，不在请求里调 GitHub：讨论串必须是自己的、在 `review`、有未合并的 PR（没有 PR → 409 `no_pr`；不在 review 或 PR 已合并/关闭 → 409 `not_in_review`），然后 `pr_state` 置为 `accepting`、清空 `merge_error`（推 `thread` 事件）。已经是 `accepting` 时原样返回，不会重复合并（同一进程内去重；跨副本靠讨论串行锁，合并前在锁里再确认一次 `pr_state`，已被别处合并的 PR 算成功）。`require_acceptance` 开：合并循环等 PR 必需 check 通过后按 `merge_method` 合并 → `pr_state = merged`、讨论串 done；GitHub 4xx（无权限、405 不可合并、409 冲突等）→ `pr_state` 回到 `open` 并写 `merge_error`；限流和 5xx / 网络错误下一轮自动重试。关：PR 本来就会在 check 通过后自动合并，accept = “不等了，现在合并”，平台在后台（最长 3 分钟）检查并合并：check 还在跑或没通过、GitHub 4xx、5xx 或网络错误、超时 → `pr_state` 回到 `open`、原因写进 `merge_error`，由用户再点 accept 重试；GitHub 限流（429，或正文含 rate limit 的 403）不算失败，讨论串保持 `accepting`，交给合并循环下一轮接着重试。合并前若用户已 reject，合并停止，失败也不会覆盖 reject 的结果。check 没通过时组长也会收到通知、讨论串回到 running（原有逻辑） |
-| POST | `/api/threads/{tid}/reject` | `{reason}` → `ThreadView`（原因发给组长，回到 running，清空 `merge_error`；不在 review → 409 `not_in_review`；`require_acceptance` 关时也可用，在自动合并前拦下） |
+| POST | `/api/threads/{tid}/accept` | → 200 `ThreadView`，立即返回，不在请求里调 GitHub：讨论串必须是自己的、在 `review`、有未合并的 PR（没有 PR → 409 `no_pr`；不在 review 或 PR 已合并/关闭 → 409 `not_in_review`），然后 `pr_state` 置为 `accepting`、清空 `merge_error`（推 `thread` 事件）。已经是 `accepting` 时原样返回，不会重复合并（同一进程内去重；跨副本靠讨论串行锁，合并前在锁里再确认一次 `pr_state`，已被别处合并的 PR 算成功）。`merge_policy = manual`：合并循环等 PR 必需 check 通过后按 `merge_method` 合并 → `pr_state = merged`、讨论串 done；GitHub 4xx（无权限、405 不可合并、409 冲突等）→ `pr_state` 回到 `open` 并写 `merge_error`；限流和 5xx / 网络错误下一轮自动重试。`pr` / `auto`：accept = “不等了，现在合并”，平台在后台（最长 3 分钟）检查并合并：check 还在跑或没通过、GitHub 4xx、5xx 或网络错误、超时 → `pr_state` 回到 `open`、原因写进 `merge_error`，由用户再点 accept 重试；GitHub 限流（429，或正文含 rate limit 的 403）不算失败，讨论串保持 `accepting`，交给合并循环下一轮接着重试。合并前若用户已 reject，合并停止，失败也不会覆盖 reject 的结果。check 没通过时组长也会收到通知、讨论串回到 running（原有逻辑） |
+| POST | `/api/threads/{tid}/reject` | `{reason}` → `ThreadView`（原因发给组长，回到 running，清空 `merge_error`；不在 review → 409 `not_in_review`；`pr` / `auto` 下也可用，在完成或自动合并前拦下） |
 | GET | `/api/threads/{tid}/usage` | → `{cost_usd_est, tokens: {...}, by_employee: [...]}` |
 
 讨论串里的员工碰到 Claude **使用限额**（`session.event` 的 `rate_limited` 带 `retry_at`，且离现在至少 2 分钟；几秒的 API 重试不算）时，平台记下等待（`at_rate_limit_waits`），把讨论串暂停成 `status = "paused"`、`pause_reason = "rate_limit"`，等待期间该员工回合结束不再催（不发“任务还没完成”的提醒）。到 `retry_at` 后：项目开了 `auto_resume` 就恢复讨论串，并给碰到限额的员工发一条系统消息让它从中断处继续；没开则只清掉等待，讨论串保持暂停，由用户手动继续。统筹碰到限额同理（没有讨论串可暂停，到点只发消息）。
@@ -225,8 +226,8 @@ PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平�
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/projects` | `{name, description?, context?, repos?: RepoRef[], work_mode?, auto_approve?, require_acceptance?, delivery?, first_message?}` → 201 `ProjectView`。`first_message` 有值时投递给统筹（v1 是新建对话再发消息） |
-| PATCH | `/api/projects/{pid}` | `name, description, context, pinned, archived`，`repos?: RepoRef[]`（整体替换并保持顺序，`[]` 解绑全部；每个仓库要有能访问它的连接，重复 422）+ `work_mode, auto_approve, require_acceptance, delivery, office_layout`（`delivery.notify_on_ask` = “成员提问时通知我”；`auto_approve` 只影响 `ask` 岗位，任何节点都能开）+ `icon`（`''`、一个表情或 `color:#RRGGBB`，其他 422）、`coordinator_model`、`thread_model`、`thread_codex_model`（模型 id，`''` = 跟随岗位；非空必须在项目所有者的模型列表里且类型对得上：前两个是 Claude，`thread_codex_model` 是 Codex，否则 422 字段级错误；和已保存值相同的放行）、`thread_effort`（`'' \| low \| medium \| high \| xhigh \| max`，即 SDK 0.3.325 的 `effort`）、`auto_resume`。模型覆盖在开会话时生效：统筹用 `coordinator_model`，Claude 组长和成员用 `thread_model`，Codex 组长和成员用 `thread_codex_model`，组长和成员都用 `thread_effort` |
+| POST | `/api/projects` | `{name, description?, context?, repos?: RepoRef[], work_mode?, auto_approve?, merge_policy?, delivery?, first_message?}` → 201 `ProjectView`。`first_message` 有值时投递给统筹（v1 是新建对话再发消息） |
+| PATCH | `/api/projects/{pid}` | `name, description, context, pinned, archived`，`repos?: RepoRef[]`（整体替换并保持顺序，`[]` 解绑全部；每个仓库要有能访问它的连接，重复 422）+ `work_mode, auto_approve, merge_policy, delivery, office_layout`（`delivery.notify_on_ask` = “成员提问时通知我”；`auto_approve` 只影响 `ask` 岗位，任何节点都能开）+ `icon`（`''`、一个表情或 `color:#RRGGBB`，其他 422）、`coordinator_model`、`thread_model`、`thread_codex_model`（模型 id，`''` = 跟随岗位；非空必须在项目所有者的模型列表里且类型对得上：前两个是 Claude，`thread_codex_model` 是 Codex，否则 422 字段级错误；和已保存值相同的放行）、`thread_effort`（`'' \| low \| medium \| high \| xhigh \| max`，即 SDK 0.3.325 的 `effort`）、`auto_resume`。模型覆盖在开会话时生效：统筹用 `coordinator_model`，Claude 组长和成员用 `thread_model`，Codex 组长和成员用 `thread_codex_model`，组长和成员都用 `thread_effort` |
 | GET | `/api/projects/{pid}/usage?days=7` | 项目用量（`at_usage`，每个回合结束时 SDK 报告的 token 和费用）→ `{days, cost_usd_est, tokens: {input, output, cache_read, cache_write}, turns, by_day: [{day, cost_usd, tokens}], by_thread: [{thread_no: number\|null, title, cost_usd, tokens}], by_employee: [{employee, thread_no, cost_usd, tokens}]}`；`thread_no = null` 是项目统筹；`days` 1–90，缺省 7；按天按 UTC 日期分组 |
 | GET | `/api/projects/{pid}/schedules` | 定时任务 → `ScheduleView[]` = `{id, project_id, name, cron, timezone, message, enabled, next_run_at, last_run_at, last_error, created_at, updated_at}` |
 | POST | `/api/projects/{pid}/schedules` | `{name, cron, timezone?, message, enabled?}` → 201。`cron` 五段（分 时 日 月 周，支持 `*`、数字、`a-b`、`/n`、逗号；周 0 和 7 都是周日；日和周都限定时任一满足即可），`timezone` 是 IANA 名（缺省 UTC，网页传浏览器时区）；表达式或时区不对 422（`fields[0].path` 指出字段）；每个项目最多 20 个 |

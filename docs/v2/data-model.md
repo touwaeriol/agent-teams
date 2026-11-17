@@ -200,7 +200,7 @@ CREATE UNIQUE INDEX at_roles_one_lead  ON at_roles (user_id, COALESCE(project_id
 ALTER TABLE at_projects
   ADD COLUMN IF NOT EXISTS work_mode TEXT NOT NULL DEFAULT 'worktree',      -- worktree | clone
   ADD COLUMN IF NOT EXISTS auto_approve BOOLEAN NOT NULL DEFAULT FALSE,     -- 新讨论串默认“全部放行”
-  ADD COLUMN IF NOT EXISTS require_acceptance BOOLEAN NOT NULL DEFAULT TRUE,
+  ADD COLUMN IF NOT EXISTS require_acceptance BOOLEAN NOT NULL DEFAULT TRUE,  -- 00250 起删除，见 merge_policy
   ADD COLUMN IF NOT EXISTS thread_seq INT NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS event_seq BIGINT NOT NULL DEFAULT 0,             -- 项目事件序号：at_events 与 at_status_events 共用（architecture.md §11.1）
   ADD COLUMN IF NOT EXISTS delivery JSONB NOT NULL DEFAULT '{}',
@@ -211,7 +211,8 @@ ALTER TABLE at_projects
     --  "allow_workflow_edits":false,    -- 推送作业令牌是否带 workflows: write
     --  "approval_routing":"lead_first", -- 审批方式：lead_first | user（architecture.md §9.2）
     --  "lead_review_timeout_s":120}     -- 组长判断时限
-    -- require_acceptance=false 时 PR 的必需 check 通过后按 merge_method 自动合并（architecture.md §8.4）
+    -- 讨论串开出 PR 后怎么收尾看 merge_policy（00250，architecture.md §8.4）：
+    --   pr（默认）PR 的 check 通过即 done，PR 留给人合并；auto check 通过后按 merge_method 自动合并；manual 等用户验收
   ADD COLUMN IF NOT EXISTS office_layout TEXT NOT NULL DEFAULT '';          -- '' = 全局默认；否则布局 id
 
 ALTER TABLE at_projects                                                     -- 00090
