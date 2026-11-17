@@ -431,3 +431,22 @@ func (s *Service) endWithoutPR(ctx context.Context, threadID string) {
 		s.log.Warn("finish without PR", "thread_id", threadID, "err", err)
 	}
 }
+
+// tellUser posts the lead's short message to the user in the thread conversation right away
+// (role leader, as a final reply would be), without ending the turn.
+func (s *Service) tellUser(ctx context.Context, tx *core.Tx, c *call) (Result, error) {
+	if _, err := requireThread(c); err != nil {
+		return Result{}, err
+	}
+	var in protocol.TellUserInput
+	if err := c.decode(&in); err != nil {
+		return Result{}, err
+	}
+	if strings.TrimSpace(in.Text) == "" {
+		return Result{}, refuse("text 不能为空")
+	}
+	if err := s.orch.RecordReply(ctx, tx, c.emp(), in.Text); err != nil {
+		return Result{}, err
+	}
+	return okText("已发给用户"), nil
+}

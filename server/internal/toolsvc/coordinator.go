@@ -18,8 +18,13 @@ func (s *Service) openThread(ctx context.Context, tx *core.Tx, c *call) (Result,
 		return Result{}, err
 	}
 	owner := c.sc.OwnerID
+	source, err := s.sourceMessage(ctx, tx, c, in.MessageID)
+	if err != nil {
+		return Result{}, err
+	}
 	t, err := s.orch.OpenThreadTx(ctx, tx, orchestrator.ThreadRequest{UserID: owner, ProjectID: c.emp().ProjectID,
-		Title: strings.TrimSpace(in.Title), Brief: in.Brief, OnlyRoles: in.Roles, Repos: focusOf(in.Repos), OpenedBy: "coordinator"})
+		Title: strings.TrimSpace(in.Title), Brief: in.Brief, OnlyRoles: in.Roles, Repos: focusOf(in.Repos), OpenedBy: "coordinator",
+		SourceMessageID: source})
 	if errors.Is(err, orchestrator.ErrUnknownRepo) {
 		return Result{}, refuse("%s", err.Error())
 	}
@@ -32,6 +37,27 @@ func (s *Service) openThread(ctx context.Context, tx *core.Tx, c *call) (Result,
 	tx.AfterCommit(func(ctx context.Context) { go s.orch.StartQueued(context.WithoutCancel(ctx), owner) })
 	out := protocol.OpenThreadResult{No: protocol.ThreadNo(t.No), ThreadID: t.ID, Branch: t.Branch}
 	return okJSON(fmt.Sprintf("已开讨论串 #%d（%s），分支 %s", t.No, t.Title, t.Branch), out), nil
+}
+
+// sourceMessage is the user's project-chat message open_thread is for: the one named by
+// message_id (it must be the user's own, in this conversation), else the user's newest message
+// delivered after the coordinator's previous reply (nil when there is none).
+func (s *Service) sourceMessage(ctx context.Context, tx *core.Tx, c *call, id *int) (*int64, error) {
+	conv, err := s.orch.ConversationOf(ctx, tx, c.emp())
+	if err != nil {
+		return nil, err
+	}
+	if id == nil {
+		return core.LatestUserMessageID(ctx, tx, conv)
+	}
+	m, err := core.UserWordByID(ctx, tx, conv, int64(*id))
+	if errors.Is(err, core.ErrNotFound) {
+		return nil, refuse("message_id %d 不是用户在项目对话里发的消息（用用户消息末尾的 [message_id: N]，或不写）", *id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &m.ID, nil
 }
 
 func focusOf(in []protocol.RepoFocus) []orchestrator.RepoFocus {

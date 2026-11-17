@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/tell_user.json",
+  "title": "TellUserInput",
+  "description": "Post a short message to the user in the thread conversation right away (shown as the lead's own message), without ending the turn. Use it for the receipt after the brief and for updates the user should see; it is not a question (use ask_user to ask).",
+  "x-tool": {
+    "tiers": [
+      "lead"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "text"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    }
+  }
+}

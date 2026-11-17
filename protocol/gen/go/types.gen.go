@@ -4105,6 +4105,12 @@ type OpenThreadInput struct {
 	// Instructions for the thread lead.
 	Brief string `json:"brief"`
 
+	// The user's own message (its [message_id: N]) this thread is opened for; it is
+	// shown with the brief and its images and files go to the lead. Default: the
+	// user's newest message delivered after your previous reply (none: no message is
+	// linked).
+	MessageID *int `json:"message_id,omitempty,omitzero"`
+
 	// Repositories of the project the thread should work in, with an optional
 	// explicit base branch each (when the project context states one).
 	Repos []RepoFocus `json:"repos,omitempty,omitzero"`
@@ -4135,6 +4141,9 @@ func (j *OpenThreadInput) UnmarshalJSON(value []byte) error {
 	}
 	if utf8.RuneCountInString(string(plain.Brief)) < 1 {
 		return fmt.Errorf("field %s length: must be >= %d", "brief", 1)
+	}
+	if plain.MessageID != nil && 1 > *plain.MessageID {
+		return fmt.Errorf("field %s: must be >= %v", "message_id", 1)
 	}
 	if len(plain.Repos) > 20 {
 		return fmt.Errorf("field %s length: must be <= %d", "repos", 20)
@@ -7109,6 +7118,39 @@ func (j *TeamMember) UnmarshalJSON(value []byte) error {
 		return err
 	}
 	*j = TeamMember(plain)
+	return nil
+}
+
+// Post a short message to the user in the thread conversation right away (shown as
+// the lead's own message), without ending the turn. Use it for the receipt after
+// the brief and for updates the user should see; it is not a question (use
+// ask_user to ask).
+type TellUserInput struct {
+	// Text corresponds to the JSON schema field "text".
+	Text string `json:"text"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *TellUserInput) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["text"]; raw != nil && !ok {
+		return fmt.Errorf("field text in TellUserInput: required")
+	}
+	type Plain TellUserInput
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Text)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "text", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Text)) > 2000 {
+		return fmt.Errorf("field %s length: must be <= %d", "text", 2000)
+	}
+	*j = TellUserInput(plain)
 	return nil
 }
 

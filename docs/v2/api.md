@@ -74,6 +74,9 @@ ThreadView      = {id, project_id, no, title, brief, status, queue_position: num
                    counts: {waiting, questions_open, approvals_open, tasks_total, tasks_done, main_total, main_done},
                    lead_last: {text, at} | null, cost_usd_est: number|null, created_at, updated_at,
                    last_activity_at,                          // 状态变化、讨论串里的消息、它发布的交付物中最新的时间
+                   dispatch: {opened_by, at /*讨论串创建时间*/,  // 派发给组长的交接信息（brief 本身看 thread.brief）；brief 为空或是转发的原话（副本已在对话里）时整个为 null
+                              source: {message_id: number, content, attachments: AttachmentRef[] /*同 meta.attachments*/, created_at} | null} | null,
+                              // source = 触发 open_thread 的用户原话（见 data-model source_message_id），没有关联或已删除时为 null
                    latest_deliverable: DeliverableView | null} // 讨论串发布的最新一个交付物
 MainTaskView    = {id, pos, title, status: "todo"|"doing"|"done", auto_done, tasks_total, tasks_done}
 TaskView        = {id, thread_no, main_task_id, assignee, role, claimed_by, kind, instruction, status, depends_on: string[],

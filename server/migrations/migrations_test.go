@@ -893,3 +893,60 @@ INSERT INTO at_settings (key, value) VALUES ('platform', '{"registration_open": 
 		t.Fatalf("user %v node %v %v", user, node, err)
 	}
 }
+
+// TestThreadSourceMessageMigration: 00220 adds source_message_id (NULL on existing threads, set
+// to NULL when the message is deleted) and forwarded_brief, backfilled for threads whose brief is
+// forwarded user messages; Down removes both.
+func TestThreadSourceMessageMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 210); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
+INSERT INTO at_conversations (id, user_id, title, project_id, kind) VALUES ('th1', 'u1', 't', 'p1', 'thread'), ('th2', 'u1', 't', 'p1', 'thread'),
+  ('th3', 'u1', 't', 'p1', 'thread');
+INSERT INTO at_threads (id, project_id, user_id, no, title, branch, brief) VALUES
+  ('th1', 'p1', 'u1', 1, 'x', 'thread/1-x', '修登录页'),
+  ('th2', 'p1', 'u1', 2, 'y', 'thread/2-y', '[用户把用户在项目对话里说的 1 条消息原样转发给你。下面是用户本人的原话]' || chr(10) || '加暗色'),
+  ('th3', 'p1', 'u1', 3, 'z', 'thread/3-z', '[项目统筹把用户在项目对话里说的 2 条消息原样转发给你。下面是用户本人的原话]');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 220); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.QueryRow(`SELECT string_agg(id || ':' || forwarded_brief || ':' || (source_message_id IS NULL), ' ' ORDER BY id) FROM at_threads`).Scan(&got); err != nil ||
+		got != "th1:false:true th2:true:true th3:true:true" {
+		t.Fatalf("threads after 00220: %q %v", got, err)
+	}
+	var msg int64
+	if err := db.QueryRow(`INSERT INTO at_messages (conversation_id, role, content) VALUES ('th1', 'user', 'hi') RETURNING id`).Scan(&msg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE at_threads SET source_message_id = $1 WHERE id = 'th1'`, msg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM at_messages WHERE id = $1`, msg); err != nil {
+		t.Fatal(err)
+	}
+	var left *int64
+	if err := db.QueryRow(`SELECT source_message_id FROM at_threads WHERE id = 'th1'`).Scan(&left); err != nil || left != nil {
+		t.Fatalf("source after delete: %v %v", left, err)
+	}
+	if _, err := p.DownTo(ctx, 210); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`SELECT source_message_id FROM at_threads`); err == nil {
+		t.Fatal("source_message_id survived down")
+	}
+	if _, err := db.Exec(`SELECT forwarded_brief FROM at_threads`); err == nil {
+		t.Fatal("forwarded_brief survived down")
+	}
+}

@@ -138,6 +138,7 @@ export interface ToolInputs {
   review_permission: T.ReviewPermissionInput;
   send_message: T.SendMessageInput;
   set_status: T.SetStatusInput;
+  tell_user: T.TellUserInput;
   thread_status: T.ThreadStatusInput;
   update_plan: T.UpdatePlanInput;
   wait_task: T.WaitTaskInput;
@@ -179,6 +180,7 @@ export interface ToolResults {
   review_permission: unknown;
   send_message: unknown;
   set_status: unknown;
+  tell_user: unknown;
   thread_status: T.ThreadStatusResult;
   update_plan: unknown;
   wait_task: T.WaitTaskResult;
@@ -347,7 +349,7 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     blocking: [],
     requires: null,
     description: "Open a new thread (number, branch, member instances) for a piece of work; the brief becomes the lead's first message. Returns #no immediately.",
-    input_schema: {"description":"Open a new thread (number, branch, member instances) for a piece of work; the brief becomes the lead's first message. Returns #no immediately.","type":"object","required":["title","brief"],"additionalProperties":false,"properties":{"title":{"type":"string","minLength":1,"maxLength":200},"brief":{"description":"Instructions for the thread lead.","type":"string","minLength":1},"roles":{"description":"Role names to staff the thread with; default = all member roles of the team.","type":"array","items":{"type":"string"}},"repos":{"description":"Repositories of the project the thread should work in, with an optional explicit base branch each (when the project context states one).","type":"array","maxItems":20,"items":{"type":"object","required":["repo"],"additionalProperties":false,"properties":{"repo":{"description":"Repository of the project (owner/name).","type":"string","minLength":1,"maxLength":300},"base":{"description":"Base branch for this repository; default its default branch.","type":"string","minLength":1,"maxLength":255}}}}}},
+    input_schema: {"description":"Open a new thread (number, branch, member instances) for a piece of work; the brief becomes the lead's first message. Returns #no immediately.","type":"object","required":["title","brief"],"additionalProperties":false,"properties":{"title":{"type":"string","minLength":1,"maxLength":200},"brief":{"description":"Instructions for the thread lead.","type":"string","minLength":1},"roles":{"description":"Role names to staff the thread with; default = all member roles of the team.","type":"array","items":{"type":"string"}},"repos":{"description":"Repositories of the project the thread should work in, with an optional explicit base branch each (when the project context states one).","type":"array","maxItems":20,"items":{"type":"object","required":["repo"],"additionalProperties":false,"properties":{"repo":{"description":"Repository of the project (owner/name).","type":"string","minLength":1,"maxLength":300},"base":{"description":"Base branch for this repository; default its default branch.","type":"string","minLength":1,"maxLength":255}}}},"message_id":{"description":"The user's own message (its [message_id: N]) this thread is opened for; it is shown with the brief and its images and files go to the lead. Default: the user's newest message delivered after your previous reply (none: no message is linked).","type":"integer","minimum":1}}},
   },
   publish_deliverable: {
     tiers: ["lead","member"],
@@ -432,6 +434,13 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     requires: null,
     description: "Set your speech-bubble text in the office (one short sentence on what you are doing). Call it when you switch work; it does not change your state or position and expires after 10 minutes.",
     input_schema: {"description":"Set your speech-bubble text in the office (one short sentence on what you are doing). Call it when you switch work; it does not change your state or position and expires after 10 minutes.","type":"object","required":["text"],"additionalProperties":false,"properties":{"text":{"type":"string","minLength":1,"maxLength":120},"kind":{"type":"string","enum":["plain","ask","error","done"]}}},
+  },
+  tell_user: {
+    tiers: ["lead"],
+    blocking: [],
+    requires: null,
+    description: "Post a short message to the user in the thread conversation right away (shown as the lead's own message), without ending the turn. Use it for the receipt after the brief and for updates the user should see; it is not a question (use ask_user to ask).",
+    input_schema: {"description":"Post a short message to the user in the thread conversation right away (shown as the lead's own message), without ending the turn. Use it for the receipt after the brief and for updates the user should see; it is not a question (use ask_user to ask).","type":"object","required":["text"],"additionalProperties":false,"properties":{"text":{"type":"string","minLength":1,"maxLength":2000}}},
   },
   thread_status: {
     tiers: ["coordinator"],

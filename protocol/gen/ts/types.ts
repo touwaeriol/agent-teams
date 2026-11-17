@@ -2730,6 +2730,10 @@ export interface OpenThreadInput {
         RepoFocus,
         RepoFocus
       ];
+  /**
+   * The user's own message (its [message_id: N]) this thread is opened for; it is shown with the brief and its images and files go to the lead. Default: the user's newest message delivered after your previous reply (none: no message is linked).
+   */
+  message_id?: number;
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -2973,6 +2977,15 @@ export interface SendMessageInput {
 export interface SetStatusInput {
   text: string;
   kind?: BubbleKind;
+}
+/**
+ * Post a short message to the user in the thread conversation right away (shown as the lead's own message), without ending the turn. Use it for the receipt after the brief and for updates the user should see; it is not a question (use ask_user to ask).
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "TellUserInput".
+ */
+export interface TellUserInput {
+  text: string;
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema

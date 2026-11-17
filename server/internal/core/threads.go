@@ -71,6 +71,10 @@ type NewThread struct {
 	AutoApprove bool
 	OpenedBy    string
 	Roles       []store.Role
+	// SourceMessageID is the user's message the thread was opened for (nil: none).
+	SourceMessageID *int64
+	// ForwardedBrief: the brief is the user's forwarded messages (forward into a new thread).
+	ForwardedBrief bool
 }
 
 // CreateThread inserts the thread's conversation (kind thread) and the thread row (status queued).
@@ -90,7 +94,8 @@ func CreateThread(ctx context.Context, tx *Tx, n NewThread) (Thread, error) {
 	err = tx.Gorm(ctx).Table("at_threads").Create(map[string]any{"id": id, "project_id": n.ProjectID,
 		"user_id": n.UserID, "no": no, "title": n.Title, "brief": n.Brief,
 		"branch": fmt.Sprintf("thread/%d-%s", no, Slug(n.Title)), "base_branch": n.BaseBranch,
-		"auto_approve": n.AutoApprove, "opened_by": n.OpenedBy, "roles_snapshot": roles}).Error
+		"auto_approve": n.AutoApprove, "opened_by": n.OpenedBy, "roles_snapshot": roles,
+		"source_message_id": n.SourceMessageID, "forwarded_brief": n.ForwardedBrief}).Error
 	if err != nil {
 		return Thread{}, err
 	}
@@ -198,8 +203,83 @@ func (s *Store) ThreadViewOf(ctx context.Context, q DB, t Thread) (ThreadView, e
 	if err = threadActivity(ctx, q, t, &v); err != nil {
 		return v, err
 	}
+	if v.Dispatch, err = DispatchOf(ctx, q, t); err != nil {
+		return v, err
+	}
 	v.QueuePosition, err = queuePosition(ctx, q, t)
 	return v, err
+}
+
+// DispatchOf is the thread's hand-over: who opened it, when, and the user's message it was opened
+// for. Nil when the brief is empty or is the user's forwarded messages (their copies are already
+// in the conversation); Source is nil without a message or when it was deleted.
+func DispatchOf(ctx context.Context, q DB, t Thread) (*ThreadDispatch, error) {
+	if strings.TrimSpace(t.Brief) == "" || t.ForwardedBrief {
+		return nil, nil
+	}
+	d := &ThreadDispatch{OpenedBy: t.OpenedBy, At: t.CreatedAt}
+	m, err := SourceMessage(ctx, q, t)
+	if err != nil || m == nil {
+		return d, err
+	}
+	atts := AttachmentsOf(*m)
+	if atts == nil {
+		atts = []AttachmentRef{}
+	}
+	d.Source = &DispatchSource{MessageID: m.ID, Content: m.Content, Attachments: atts, CreatedAt: m.CreatedAt}
+	return d, nil
+}
+
+// SourceMessage loads the user's message the thread was opened for (nil: none or deleted).
+func SourceMessage(ctx context.Context, q DB, t Thread) (*Message, error) {
+	if t.SourceMessageID == nil {
+		return nil, nil
+	}
+	m, err := take[Message](q.Gorm(ctx).Where("id = ?", *t.SourceMessageID))
+	if err == ErrNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+// SystemPostMeta marks a role=user message the platform wrote for the user (scheduled tasks):
+// it is never the user's own words behind a thread.
+const SystemPostMeta = "system_post"
+
+// userWords filters a conversation's messages to the user's own words (role user, not a
+// platform post; schedule_id marks scheduled posts written before system_post existed).
+func userWords(g *gorm.DB, conversationID string) *gorm.DB {
+	return g.Where(`conversation_id = ? AND role = 'user' AND NOT jsonb_exists(meta, ?)
+		AND NOT jsonb_exists(meta, 'schedule_id')`, conversationID, SystemPostMeta)
+}
+
+// LatestUserMessageID is the user's message a coordinator turn acts on: the newest of the user's
+// own messages delivered to the coordinator after its previous reply (nil: none, e.g. the turn
+// was started by a thread report or a scheduled task).
+func LatestUserMessageID(ctx context.Context, q DB, conversationID string) (*int64, error) {
+	var after int64
+	if err := q.Gorm(ctx).Table("at_messages").Select("COALESCE(max(id), 0)").
+		Where("conversation_id = ? AND role = 'leader'", conversationID).Row().Scan(&after); err != nil {
+		return nil, err
+	}
+	m, err := take[Message](userWords(q.Gorm(ctx).Model(&Message{}), conversationID).
+		Where("id > ? AND delivered_at IS NOT NULL", after).Order("id DESC"))
+	if err == ErrNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &m.ID, nil
+}
+
+// UserWordByID loads one of the user's own messages of the conversation (ErrNotFound otherwise:
+// another conversation, an employee's message or a platform post).
+func UserWordByID(ctx context.Context, q DB, conversationID string, id int64) (Message, error) {
+	return take[Message](userWords(q.Gorm(ctx).Model(&Message{}), conversationID).Where("id = ?", id))
 }
 
 func leadLast(ctx context.Context, q DB, threadID string) (*LeadLast, error) {
