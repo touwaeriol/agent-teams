@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * A model field: the runtime's list (platform, then the user's own) plus any id typed in.
+ * A model field: the runtime's models from the user's list, plus any id typed in (kept shown).
  * `emptyLabel` adds a choice for "" (follow the role / project setting).
  */
 import { computed } from "vue";
@@ -37,7 +37,7 @@ function pick(v: string) {
     <el-option v-for="c in choices" :key="c.value" :value="c.value" :label="c.label">
       <span class="flex items-center justify-between gap-3">
         <span>{{ c.label }}</span>
-        <span class="text-xs text-muted-foreground">{{ c.isDefault ? "默认" : c.mine ? "我的" : c.custom ? "自定义" : c.label === c.value ? "" : c.value }}</span>
+        <span class="text-xs text-muted-foreground">{{ c.isDefault ? "默认" : c.custom ? "自定义" : c.label === c.value ? "" : c.value }}</span>
       </span>
     </el-option>
   </el-select>

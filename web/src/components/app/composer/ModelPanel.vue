@@ -64,7 +64,7 @@ const seg = (on: boolean) => cn("rounded-md px-2.5 py-1 text-xs", on ? "bg-backg
           {{ c.label }}<span v-if="c.label !== c.value" class="ml-2 font-mono text-[11.5px] text-muted-foreground">{{ c.value }}</span>
         </span>
         <span class="flex shrink-0 gap-1.5 text-xs text-muted-foreground">
-          <span v-if="c.isDefault">默认</span><span v-if="c.mine">我的</span><span v-if="c.value === s.model" class="text-foreground">当前</span>
+          <span v-if="c.isDefault">默认</span><span v-if="c.value === s.model" class="text-foreground">当前</span>
         </span>
       </button>
     </div>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Admin console sidebar: back to the user side, then the admin pages.
-import { ArrowLeft, Bot, Boxes, FileClock, Github, MessageSquareText, SlidersHorizontal, Users } from "lucide-vue-next";
+import { ArrowLeft, Boxes, FileClock, Github, MessageSquareText, SlidersHorizontal, Users } from "lucide-vue-next";
 import { computed } from "vue";
 import { RouterLink } from "vue-router";
 import type { UserView } from "@/api/views";
@@ -13,7 +13,6 @@ const emit = defineEmits<{ navigate: [] }>();
 const ITEMS = [
   { to: "/admin/users", label: "用户", hint: "账号、角色和节点", icon: Users },
   { to: "/admin/platform", label: "平台设置", hint: "注册、限额和语音输入", icon: SlidersHorizontal },
-  { to: "/admin/models", label: "模型", hint: "所有用户可选的模型", icon: Bot },
   { to: "/admin/library", label: "内置命令和插件", hint: "内置命令、插件、技能", icon: Boxes },
   { to: "/admin/feedback", label: "反馈", hint: "用户提交的反馈", icon: MessageSquareText },
   { to: "/admin/github-app", label: "GitHub App", hint: "平台 App 的创建和状态", icon: Github },

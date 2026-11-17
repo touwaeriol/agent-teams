@@ -1,20 +1,20 @@
 <script setup lang="ts">
 /**
- * An editable model list (one owner): type, model id, display name, order, and for the platform
- * list one default per type. Edits a draft; 保存 hands the whole list back.
+ * The user's editable model list: type, model id, display name, order and one default per type.
+ * Edits a draft; 保存 hands the whole list back (PUT /api/models/mine replaces it).
  */
 import { ArrowDown, ArrowUp, X } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 import Spinner from "@/components/common/Spinner.vue";
 import { modelProblems, type ModelEntry } from "@/lib/models";
 
-const props = defineProps<{ rows: ModelEntry[]; withDefault?: boolean; busy?: boolean }>();
+const props = defineProps<{ rows: ModelEntry[]; busy?: boolean }>();
 const emit = defineEmits<{ save: [list: ModelEntry[]] }>();
 const draft = ref<ModelEntry[]>([]);
 watch(() => props.rows, (r) => (draft.value = r.map((m) => ({ ...m }))), { immediate: true });
 const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(props.rows));
 const problems = computed(() => modelProblems(draft.value.map((m) => ({ ...m, model: m.model.trim() }))));
-const add = () => (draft.value = [...draft.value, { id: "", runtime: "claude", model: "", label: "", default: false, mine: !props.withDefault }]);
+const add = () => (draft.value = [...draft.value, { id: "", runtime: "claude", model: "", label: "", default: false, mine: true }]);
 const remove = (i: number) => (draft.value = draft.value.filter((_, j) => j !== i));
 function move(i: number, d: number) {
   const next = [...draft.value];
@@ -38,8 +38,8 @@ const save = () => emit("save", draft.value.map((m) => ({ ...m, model: m.model.t
       </el-select>
       <el-input v-model="m.model" size="small" class="at-mono !w-[220px]" placeholder="模型 ID" aria-label="模型 ID" />
       <el-input v-model="m.label" size="small" class="!w-[140px]" placeholder="显示名（可选）" aria-label="显示名" />
-      <label v-if="withDefault" class="flex items-center gap-1 text-xs text-muted-foreground">
-        <el-checkbox :model-value="Boolean(m.default)" size="small" @update:model-value="(v: string | number | boolean) => setDefault(i, Boolean(v))" />默认
+      <label class="flex items-center gap-1 text-xs text-muted-foreground">
+        <el-checkbox :model-value="Boolean(m.default)" size="small" @update:model-value="(v: string | number | boolean) => setDefault(i, Boolean(v))" />我的默认
       </label>
       <span class="flex">
         <button type="button" aria-label="上移" :disabled="i === 0" class="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-raised disabled:opacity-30" @click="move(i, -1)"><ArrowUp class="size-3.5" /></button>
@@ -47,7 +47,7 @@ const save = () => emit("save", draft.value.map((m) => ({ ...m, model: m.model.t
         <button type="button" aria-label="删除" class="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-raised" @click="remove(i)"><X class="size-3.5" /></button>
       </span>
     </div>
-    <p v-if="draft.length === 0" class="text-xs text-muted-foreground">还没有模型。</p>
+    <p v-if="draft.length === 0" class="text-xs text-muted-foreground">还没有模型，至少要留一个。</p>
     <p v-if="dirty && problems.length" class="text-xs text-destructive">{{ problems.join("；") }}</p>
     <div class="flex gap-2">
       <el-button size="small" @click="add">添加模型</el-button>

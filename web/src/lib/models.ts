@@ -1,5 +1,5 @@
 // Model lists (pure): the choices /model, the role model field and the project model fields
-// offer for one runtime, from GET /api/models (the platform list in order, then the user's own).
+// offer for one runtime, from GET /api/models (the user's own list, in order; set in 设置 → 团队).
 import type { components } from "@/api/schema";
 
 export type ModelEntry = components["schemas"]["Model"];
@@ -8,10 +8,8 @@ export type Runtime = "claude" | "codex";
 export interface ModelChoice {
   value: string;
   label: string;
-  /** The platform default of the runtime. */
+  /** The user's default of the runtime. */
   isDefault: boolean;
-  /** The user's own entry. */
-  mine: boolean;
   /** Not in any list (a typed id that is saved now). */
   custom: boolean;
 }
@@ -19,16 +17,19 @@ export interface ModelChoice {
 /** Same rule as the server (composer.ValidModel). */
 export const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]{0,99}$/;
 
+/** Same limit as PUT /api/models/mine. */
+export const MAX_MODELS = 50;
+
 export const runtimeLabel = (r: string) => (r === "codex" ? "Codex" : "Claude Code");
 
-/** The runtime's choices, each id once (platform first); `current` is added when no list has it. */
+/** The runtime's choices in list order, each id once; `current` is added when the list lacks it. */
 export function modelChoices(list: ModelEntry[], runtime: Runtime, current = ""): ModelChoice[] {
   const out: ModelChoice[] = [];
   for (const m of list) {
     if (m.runtime !== runtime || out.some((c) => c.value === m.model)) continue;
-    out.push({ value: m.model, label: m.label || m.model, isDefault: Boolean(m.default), mine: m.mine, custom: false });
+    out.push({ value: m.model, label: m.label || m.model, isDefault: Boolean(m.default), custom: false });
   }
-  if (current && !out.some((c) => c.value === current)) out.push({ value: current, label: current, isDefault: false, mine: false, custom: true });
+  if (current && !out.some((c) => c.value === current)) out.push({ value: current, label: current, isDefault: false, custom: true });
   return out;
 }
 
@@ -37,14 +38,9 @@ export function modelName(list: ModelEntry[], id: string): string {
   return list.find((m) => m.model === id)?.label || id;
 }
 
-/** The platform default of a runtime ("" when the admin list names none). */
-export function platformDefault(list: ModelEntry[], runtime: Runtime): string {
-  return list.find((m) => !m.mine && m.runtime === runtime && m.default)?.model ?? "";
-}
-
-/** The rows of an owner's editable list, as PUT expects them. */
-export function editable(list: ModelEntry[], mine: boolean): ModelEntry[] {
-  return list.filter((m) => m.mine === mine).map((m) => ({ ...m }));
+/** The user's default of a runtime ("" when the list names none). */
+export function defaultModel(list: ModelEntry[], runtime: Runtime): string {
+  return list.find((m) => m.runtime === runtime && m.default)?.model ?? "";
 }
 
 /** Local check of an edited list (the server is the authority). */
@@ -52,6 +48,8 @@ export function modelProblems(list: Pick<ModelEntry, "runtime" | "model" | "defa
   const out: string[] = [];
   const seen = new Set<string>();
   const defaults = new Set<string>();
+  if (list.length === 0) out.push("至少保留一个模型");
+  if (list.length > MAX_MODELS) out.push(`最多 ${MAX_MODELS} 个模型`);
   for (const m of list) {
     if (!MODEL_ID.test(m.model)) out.push(`模型 ID “${m.model}” 只能用字母、数字和 . _ - : / @ [ ]`);
     if (seen.has(`${m.runtime}/${m.model}`)) out.push(`${m.model} 重复了`);

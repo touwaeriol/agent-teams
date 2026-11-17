@@ -64,10 +64,10 @@ describe("project settings", () => {
     expect(worktreeChoice("clone").label).toBe("关闭，直接在检出目录工作");
     expect(worktreeChoice("").label).toBe("开启，使用工作树");
   });
-  it("offers models from the model lists", () => {
+  it("offers the user's Claude models in order, keeping the current value", () => {
     const list = [
-      { id: "m1", runtime: "claude" as const, model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: false },
-      { id: "m2", runtime: "codex" as const, model: "gpt-x", label: "", default: false, mine: false },
+      { id: "m1", runtime: "claude" as const, model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: true },
+      { id: "m2", runtime: "codex" as const, model: "gpt-x", label: "", default: false, mine: true },
       { id: "m3", runtime: "claude" as const, model: "claude-sonnet-x", label: "Sonnet", default: false, mine: true },
     ];
     expect(modelLabel("")).toBe("跟随岗位设置");
