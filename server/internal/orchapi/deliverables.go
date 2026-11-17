@@ -8,6 +8,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/delivery"
 )
 
 type deliverablesInput struct {
@@ -145,6 +146,9 @@ func (a *API) addDeliverable(ctx context.Context, in *newDeliverableInput) (*del
 }
 
 func (a *API) requestDeliverable(ctx context.Context, in *requestDeliverableInput) (*messageOutput, error) {
+	if delivery.IsPRKind(in.Body.Kind) {
+		return nil, fail(delivery.ErrPRKind, "")
+	}
 	u, p, err := a.project(ctx, in.PID)
 	if err != nil {
 		return nil, err
