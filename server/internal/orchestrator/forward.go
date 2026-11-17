@@ -357,17 +357,27 @@ func (o *Orchestrator) forwardNote(ctx context.Context, tx *core.Tx, req Forward
 	return tx.EmitMessage(ctx, req.ProjectID, nil, m)
 }
 
-// briefFiles are the images and PDFs of the messages forwarded into a new thread before it
-// started: they go to the lead with the brief.
-func briefFiles(ctx context.Context, tx *core.Tx, threadID string) ([]core.AttachmentRef, error) {
-	list, err := core.MessagesWithMeta(ctx, tx, threadID, "forwarded_from")
+// briefFiles are the images and PDFs that go to the lead with the brief: those of the user's
+// message the thread was opened for, then those of the messages forwarded into it before it
+// started (each attachment once).
+func briefFiles(ctx context.Context, tx *core.Tx, t core.Thread) ([]core.AttachmentRef, error) {
+	list, err := core.MessagesWithMeta(ctx, tx, t.ID, "forwarded_from")
 	if err != nil {
 		return nil, err
 	}
+	src, err := core.SourceMessage(ctx, tx, t)
+	if err != nil {
+		return nil, err
+	}
+	if src != nil {
+		list = append([]core.Message{*src}, list...)
+	}
 	var out []core.AttachmentRef
+	seen := map[string]bool{}
 	for _, m := range list {
 		for _, r := range core.AttachmentsOf(m) {
-			if !core.IsInlineText(r.ContentType) {
+			if !core.IsInlineText(r.ContentType) && !seen[r.ID] {
+				seen[r.ID] = true
 				out = append(out, r)
 			}
 		}

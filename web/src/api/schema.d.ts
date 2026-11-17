@@ -2052,6 +2052,13 @@ export interface components {
             /** @description File name, shown under the thumbnail; a text file is recognised by its extension */
             name: string;
         };
+        AttachmentRef: {
+            content_type: string;
+            id: string;
+            name: string;
+            /** Format: int64 */
+            size: number;
+        };
         AttachmentView: {
             /** @enum {string} */
             content_type: "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "application/pdf" | "text/plain";
@@ -2336,6 +2343,15 @@ export interface components {
             repo: string;
             ruleset: components["schemas"]["Ruleset"];
             workflows: components["schemas"]["Workflow"][] | null;
+        };
+        DispatchSource: {
+            /** @description Same shape as a message's meta.attachments */
+            attachments: components["schemas"]["AttachmentRef"][] | null;
+            content: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int64 */
+            message_id: number;
         };
         DrainInputBody: {
             /** Format: int64 */
@@ -3337,6 +3353,8 @@ export interface components {
             counts: components["schemas"]["ThreadCounts"];
             /** Format: date-time */
             created_at: string;
+            /** @description How the thread was handed over: the brief and the user's message it was opened for (null: empty brief) */
+            dispatch: components["schemas"]["ThreadDispatch"];
             /**
              * Format: date-time
              * @description When it reached done, failed or archived
@@ -3397,6 +3415,19 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        ThreadDispatch: {
+            /**
+             * Format: date-time
+             * @description When the thread was opened
+             */
+            at: string;
+            /** @description The brief the lead got (threads.brief) */
+            brief: string;
+            /** @description coordinator or user */
+            opened_by: string;
+            /** @description The user's project-chat message the thread was opened for (null: none, or deleted) */
+            source: components["schemas"]["DispatchSource"];
+        };
         ThreadRepoView: {
             base_branch: string;
             branch_created: boolean;
@@ -3425,6 +3456,8 @@ export interface components {
             counts: components["schemas"]["ThreadCounts"];
             /** Format: date-time */
             created_at: string;
+            /** @description How the thread was handed over: the brief and the user's message it was opened for (null: empty brief) */
+            dispatch: components["schemas"]["ThreadDispatch"];
             /**
              * Format: date-time
              * @description When it reached done, failed or archived

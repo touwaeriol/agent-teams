@@ -257,6 +257,7 @@ CREATE TABLE at_threads (
   summary        TEXT NOT NULL DEFAULT '',
   auto_approve   BOOLEAN NOT NULL DEFAULT FALSE,
   opened_by      TEXT NOT NULL DEFAULT 'coordinator', -- coordinator | user
+  source_message_id BIGINT REFERENCES at_messages(id) ON DELETE SET NULL, -- 00220：统筹 open_thread 时对应的用户原话（open_thread 的 message_id，默认项目对话里最新一条已送达的用户消息）；手动开、转发开的为 NULL
   roles_snapshot JSONB NOT NULL DEFAULT '[]',     -- 开串时的岗位模板快照（之后模板改动不影响进行中的串）
   waiting_count  INT NOT NULL DEFAULT 0,          -- 冗余：等你处理数（触发器/应用维护），列表排序用
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),

@@ -33,6 +33,8 @@ type ThreadRequest struct {
 	OnlyRoles []string    // open_thread(roles): member roles to include (nil = all)
 	Repos     []RepoFocus // open_thread(repos): repositories to work in, with optional explicit bases
 	OpenedBy  string      // coordinator | user
+	// SourceMessageID is the user's project-chat message the thread is opened for (nil: none).
+	SourceMessageID *int64
 }
 
 // OpenThread creates a thread (queued), its employees, then starts queued threads within the limit.
@@ -61,7 +63,7 @@ func (o *Orchestrator) OpenThreadTx(ctx context.Context, tx *core.Tx, req Thread
 		return core.Thread{}, err
 	}
 	t, err := core.CreateThread(ctx, tx, core.NewThread{ProjectID: p.ID, UserID: p.UserID, Title: req.Title,
-		Brief: req.Brief, AutoApprove: p.AutoApprove, OpenedBy: req.OpenedBy, Roles: roles})
+		Brief: req.Brief, AutoApprove: p.AutoApprove, OpenedBy: req.OpenedBy, Roles: roles, SourceMessageID: req.SourceMessageID})
 	if err != nil {
 		return t, err
 	}
@@ -229,22 +231,32 @@ func (o *Orchestrator) start(ctx context.Context, t core.Thread) error {
 		if err != nil {
 			return err
 		}
-		files, err := briefFiles(ctx, tx, t.ID)
+		files, err := briefFiles(ctx, tx, cur)
 		if err != nil {
 			return err
 		}
-		_, err = o.Deliver(ctx, tx, lead, Delivery{Text: briefText(cur, p), Kind: "user", Priority: "next", Images: files})
+		src, err := core.SourceMessage(ctx, tx, cur)
+		if err != nil {
+			return err
+		}
+		_, err = o.Deliver(ctx, tx, lead, Delivery{Text: briefText(cur, p, src), Kind: "user", Priority: "next", Images: files})
 		return err
 	})
 }
 
-func briefText(t core.Thread, p store.Project) string {
+func briefText(t core.Thread, p store.Project, src *core.Message) string {
 	text := fmt.Sprintf("[Thread #%d · %s]\n%s\n\n讨论串分支：%s", t.No, t.Title, t.Brief, t.Branch)
 	if p.HasRepos() {
 		text += fmt.Sprintf("（只在有改动的仓库里创建，默认从各仓库的默认分支切出）\n项目仓库：%s", strings.Join(repoNames(p), "、"))
 	}
-	return text
+	if src != nil && strings.TrimSpace(src.Content) != "" {
+		text += "\n\n触发这个讨论串的用户原话（附带的图片和文件随本消息一起发给你）：\n" + src.Content
+	}
+	return text + "\n\n" + receiptAsk
 }
+
+// receiptAsk asks the lead for the receipt (tell_user) before it starts working.
+const receiptAsk = "请先用 tell_user 给用户发一条简短回执（3～8 行：你对任务的理解、打算怎么拆分、预计需要用户决定什么），发完继续调研和派任务，不要结束本轮。"
 
 // notifyStatuses are the transitions reported to the coordinator (threads.md).
 var notifyStatuses = map[string]bool{"waiting": true, "review": true, "done": true, "failed": true}

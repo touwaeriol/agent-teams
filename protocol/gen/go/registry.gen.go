@@ -130,6 +130,7 @@ const (
 	ToolReviewPermission   = "review_permission"
 	ToolSendMessage        = "send_message"
 	ToolSetStatus          = "set_status"
+	ToolTellUser           = "tell_user"
 	ToolThreadStatus       = "thread_status"
 	ToolUpdatePlan         = "update_plan"
 	ToolWaitTask           = "wait_task"
@@ -272,6 +273,10 @@ var Tools = map[string]ToolMeta{
 	ToolSetStatus: {
 		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(SetStatusInput) }, NewResult: nil,
+	},
+	ToolTellUser: {
+		Tiers: []Tier{TierLead}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(TellUserInput) }, NewResult: nil,
 	},
 	ToolThreadStatus: {
 		Tiers: []Tier{TierCoordinator}, Blocking: nil, Requires: "",

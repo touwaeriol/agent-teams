@@ -64,6 +64,8 @@ type NewThread struct {
 	AutoApprove bool
 	OpenedBy    string
 	Roles       []store.Role
+	// SourceMessageID is the user's message the thread was opened for (nil: none).
+	SourceMessageID *int64
 }
 
 // CreateThread inserts the thread's conversation (kind thread) and the thread row (status queued).
@@ -83,7 +85,8 @@ func CreateThread(ctx context.Context, tx *Tx, n NewThread) (Thread, error) {
 	err = tx.Gorm(ctx).Table("at_threads").Create(map[string]any{"id": id, "project_id": n.ProjectID,
 		"user_id": n.UserID, "no": no, "title": n.Title, "brief": n.Brief,
 		"branch": fmt.Sprintf("thread/%d-%s", no, Slug(n.Title)), "base_branch": n.BaseBranch,
-		"auto_approve": n.AutoApprove, "opened_by": n.OpenedBy, "roles_snapshot": roles}).Error
+		"auto_approve": n.AutoApprove, "opened_by": n.OpenedBy, "roles_snapshot": roles,
+		"source_message_id": n.SourceMessageID}).Error
 	if err != nil {
 		return Thread{}, err
 	}
@@ -191,8 +194,60 @@ func (s *Store) ThreadViewOf(ctx context.Context, q DB, t Thread) (ThreadView, e
 	if err = threadActivity(ctx, q, t, &v); err != nil {
 		return v, err
 	}
+	if v.Dispatch, err = DispatchOf(ctx, q, t); err != nil {
+		return v, err
+	}
 	v.QueuePosition, err = queuePosition(ctx, q, t)
 	return v, err
+}
+
+// DispatchOf is the thread's hand-over: its brief and the user's message it was opened for
+// (nil when the brief is empty; Source nil without a message or when it was deleted).
+func DispatchOf(ctx context.Context, q DB, t Thread) (*ThreadDispatch, error) {
+	if strings.TrimSpace(t.Brief) == "" {
+		return nil, nil
+	}
+	d := &ThreadDispatch{Brief: t.Brief, OpenedBy: t.OpenedBy, At: t.CreatedAt}
+	m, err := SourceMessage(ctx, q, t)
+	if err != nil || m == nil {
+		return d, err
+	}
+	atts := AttachmentsOf(*m)
+	if atts == nil {
+		atts = []AttachmentRef{}
+	}
+	d.Source = &DispatchSource{MessageID: m.ID, Content: m.Content, Attachments: atts, CreatedAt: m.CreatedAt}
+	return d, nil
+}
+
+// SourceMessage loads the user's message the thread was opened for (nil: none or deleted).
+func SourceMessage(ctx context.Context, q DB, t Thread) (*Message, error) {
+	if t.SourceMessageID == nil {
+		return nil, nil
+	}
+	m, err := take[Message](q.Gorm(ctx).Where("id = ?", *t.SourceMessageID))
+	if err == ErrNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+// LatestUserMessageID is the user's message a coordinator turn is most likely about: the newest
+// user message of the conversation that already reached the session (a message the user sent
+// during the turn is not), else the newest one (nil: none).
+func LatestUserMessageID(ctx context.Context, q DB, conversationID string) (*int64, error) {
+	m, err := take[Message](q.Gorm(ctx).Where("conversation_id = ? AND role = 'user'", conversationID).
+		Order("(delivered_at IS NULL), id DESC"))
+	if err == ErrNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &m.ID, nil
 }
 
 func leadLast(ctx context.Context, q DB, threadID string) (*LeadLast, error) {

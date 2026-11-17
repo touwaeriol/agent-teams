@@ -1,6 +1,6 @@
 {
 "valid": {
-"open_thread":[{"title":"Employee comms","brief":"Implement mail and questions.","roles":["dev","qa"]}],
+"open_thread":[{"title":"Employee comms","brief":"Implement mail and questions.","roles":["dev","qa"]},{"title":"Login fix","brief":"Fix the login redirect.","message_id":42}],
 "list_threads":[{},{"status":"running"}],
 "thread_status":[{"no":12}],
 "message_thread":[{"no":12,"text":"Please prioritise the API."}],
@@ -23,6 +23,7 @@
 "enqueue_merge":[{"member":"dev-1"},{"task_id":"t7"}],
 "open_pr":[{"title":"Employee comms","body":"Closes #12"}],
 "finish":[{"summary":"Mail and questions shipped."}],
+"tell_user":[{"text":"收到：我理解要做的是……，打算拆成 server 和 web 两块，需要你决定……"}],
 "list_deliverables":[{},{"thread":1,"kind":"design"}],
 "read_deliverable":[{"deliverable_id":"dl_01JD3V"},{"deliverable_id":"dl_01JD3V","version":2}],
 "publish_file":[{"path":"design/index.html","kind":"design","title":"Login page"},{"path":"docs/spec.md","kind":"doc","title":"Spec","deliverable_id":"dl_01JD3V"}],

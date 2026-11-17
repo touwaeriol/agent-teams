@@ -40,6 +40,11 @@
       "items": {
         "$ref": "#/$defs/RepoFocus"
       }
+    },
+    "message_id": {
+      "description": "The user's message (its [message_id: N]) this thread is opened for; it is shown with the brief and its images and files go to the lead. Default: the user's latest message in the project chat.",
+      "type": "integer",
+      "minimum": 1
     }
   },
   "$defs": {
