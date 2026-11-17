@@ -20,7 +20,7 @@ const disc = computed(() => ({ width: `${inner.value}px`, height: `${inner.value
 </script>
 
 <template>
-  <span class="flex shrink-0 items-center justify-center" :style="box" role="img" :aria-label="LABEL[mark]" :data-mark="mark">
+  <span class="flex shrink-0 items-center justify-center" :style="box" role="img" :aria-label="LABEL[mark]" :title="LABEL[mark]" :data-mark="mark">
     <Spin v-if="mark === 'working' || mark === 'queued'" :color="mark === 'working' ? INK.doing : INK.gray" :size="inner" />
     <span v-else-if="mark === 'wait'" class="at-halo size-2.5 rounded-full" :style="{ background: INK.wait }" />
     <span v-else-if="mark === 'idle'" class="rounded-full border-[1.5px] border-dashed" :style="{ ...disc, borderColor: INK.faint }" />
