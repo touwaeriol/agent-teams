@@ -40,7 +40,7 @@ const foldStyle = computed(() =>
       <RouterLink v-if="back" :to="back" class="self-start text-xs hover:text-foreground hover:underline" data-dispatch-back>在统筹会话中查看原消息</RouterLink>
     </blockquote>
     <div :style="foldStyle" data-brief>
-      <Markdown :source="brief" :class="compact ? 'text-sm leading-[26px]' : 'text-[15px] leading-7'" />
+      <Markdown :source="brief" breaks :class="compact ? 'text-sm leading-[26px]' : 'text-[15px] leading-7'" />
     </div>
     <button
       v-if="foldable"

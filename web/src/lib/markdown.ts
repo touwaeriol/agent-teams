@@ -27,7 +27,36 @@ export function defaultUrlTransform(value: string): string {
   return relative || SAFE_PROTOCOL.test(value.slice(0, colon)) ? value : "";
 }
 
+type MdNode = { type: string; value?: string; children?: MdNode[] };
+
+/**
+ * remark-breaks without the dependency: every line ending inside text becomes a hard break, so a
+ * brief written line by line ("目标：…\n约束：…") keeps its lines. Text nodes only occur in phrasing
+ * content (never in code), so nothing else changes.
+ */
+export function remarkBreaks() {
+  const walk = (node: MdNode): void => {
+    if (!node.children) return;
+    node.children = node.children.flatMap((child): MdNode[] => {
+      if (child.type !== "text" || !child.value?.includes("\n")) {
+        walk(child);
+        return [child];
+      }
+      return child.value.split(/\r?\n|\r/).flatMap((part, i): MdNode[] => [...(i > 0 ? [{ type: "break" }] : []), ...(part ? [{ type: "text", value: part }] : [])]);
+    });
+  };
+  return (tree: MdNode) => walk(tree);
+}
+
 const processor = unified().use(remarkParse).use(remarkGfm).use(remarkRehype, { allowDangerousHtml: true });
+const breaksProcessor = unified().use(remarkParse).use(remarkGfm).use(remarkBreaks).use(remarkRehype, { allowDangerousHtml: true });
+
+export interface MarkdownOptions {
+  /** Links as text, no images (see stripForPreview). */
+  preview?: boolean;
+  /** Single line endings are hard breaks (a thread's brief), not soft wraps. */
+  breaks?: boolean;
+}
 
 /** react-markdown: raw HTML nodes become plain text (never markup). */
 function rawAsText(node: Root | Element): void {
@@ -48,8 +77,9 @@ function transformUrls(node: Root | Element, transform: UrlTransform): void {
 }
 
 /** The hast tree of a Markdown text (exported for tests). */
-export function markdownTree(text: string, transform: UrlTransform = defaultUrlTransform): Root {
-  const tree = processor.runSync(processor.parse(fenceCjkUrls(text))) as Root;
+export function markdownTree(text: string, transform: UrlTransform = defaultUrlTransform, opts: Pick<MarkdownOptions, "breaks"> = {}): Root {
+  const p = opts.breaks ? breaksProcessor : processor;
+  const tree = p.runSync(p.parse(fenceCjkUrls(text))) as Root;
   rawAsText(tree);
   transformUrls(tree, transform);
   return tree;
@@ -81,8 +111,8 @@ export function stripForPreview(node: Root | Element): void {
   node.children = out as typeof node.children;
 }
 
-export function renderMarkdown(text: string, transform?: UrlTransform, opts: { preview?: boolean } = {}): VNode {
-  const tree = markdownTree(text, transform);
+export function renderMarkdown(text: string, transform?: UrlTransform, opts: MarkdownOptions = {}): VNode {
+  const tree = markdownTree(text, transform, opts);
   if (opts.preview) stripForPreview(tree);
   wrapTables(tree);
   return toJsxRuntime(tree, {
