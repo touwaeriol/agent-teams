@@ -24,7 +24,7 @@ const inserts = computed(() => chatQuestions(questions.data.value).map((q: Quest
       <p class="py-10 text-center text-[13px] leading-6 text-muted-foreground">还没有对话。组长汇报会出现在这里，你也可以直接给组长发消息。</p>
     </template>
     <template #after>
-      <ReviewCard v-if="thread.status === 'review'" :thread="thread" variant="soft" />
+      <ReviewCard v-if="thread.status === 'review' || thread.pr_state === 'accepting'" :thread="thread" variant="soft" />
       <TypingLine :thread="thread" />
     </template>
   </Chat>

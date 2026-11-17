@@ -64,6 +64,8 @@ export function markTone(t: Pick<ThreadView, "status" | "counts">): string {
 /** One line under a thread title: what is waiting, else the PR, else what the lead said last. */
 export function threadLine(t: ThreadView, open?: QuestionView): string {
   if (open) return questionLine(open);
+  if (t.status === "review" && t.pr_number && t.pr_state === "accepting") return `PR #${t.pr_number} 合并中`;
+  if (t.status === "review" && t.pr_number && t.merge_error) return `PR #${t.pr_number} 合并失败，等你处理`;
   if (t.status === "review" && t.pr_number) return `PR #${t.pr_number} 等你验收`;
   if (t.status === "done" && t.pr_number) return mergedLine(t);
   if (t.status === "queued") return t.queue_position ? `排队中，前面还有 ${t.queue_position} 个` : "排队等节点";
