@@ -68,6 +68,7 @@ DeliverySettings = {gates: {review, decision, merge_queue}, ci: {mode, required,
                    approval_routing: "lead_first"|"user",  // 审批方式：组长先判断，拿不准再问我（默认）/ 全部问我（architecture.md §9.2）
                    lead_review_timeout_s: number}   // 组长判断时限，10–3600，默认 120；到期转给用户
 ThreadView      = {id, project_id, no, title, brief, status, queue_position: number|null, pause_reason: string, branch, base_branch /*旧字段*/, pr_number, pr_url, pr_state, summary,
+                   merge_error: string|null,  // 验收后没能合并的原因（检查未通过/还在跑、冲突、没有权限…，中文可读）；accept、reject 和合并成功时清空
                    repos: ThreadRepoView[],   // 每个仓库：{repo, base_branch, branch_created, pr_number, pr_url, pr_state}；pr_number/pr_url = 第一个 PR，pr_state = 汇总
                    auto_approve, opened_by, members: EmployeeBrief[], main_tasks: MainTaskView[],
                    counts: {waiting, questions_open, approvals_open, tasks_total, tasks_done, main_total, main_done},
@@ -181,8 +182,8 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | GET | `/api/threads/{tid}/merge-queue` | → `MergeEntryView[]` |
 | GET | `/api/threads/{tid}/checks` | → 最近一次合并的 `CheckView[]` |
 | POST | `/api/threads/{tid}/open-pr` | `{title?, body?, force?: bool}` → `ThreadView`（Thread 页“开 PR”按钮；每个已有讨论串分支、还没有 PR 的仓库各开一个，base 为本讨论串在该仓库的基准分支，409 `nothing_to_pr` = 还没有合并进任何仓库的改动；前提同组长 `open_pr`：无 `merging` 条目、主任务全部 done（`force` 可跳过这一条）；标题/正文缺省时平台由讨论串标题、主任务和小任务总结生成；409 `pr_exists`、409 `merge_in_progress`） |
-| POST | `/api/threads/{tid}/accept` | → `ThreadView`。`require_acceptance` 开：等 PR 必需 check 通过后按 `merge_method` 合并 → done。关：PR 本来就会在 check 通过后自动合并，accept = “不等了，现在合并”（check 未通过时 409 `checks_pending`） |
-| POST | `/api/threads/{tid}/reject` | `{reason}` → `ThreadView`（原因发给组长，回到 running；`require_acceptance` 关时也可用，在自动合并前拦下） |
+| POST | `/api/threads/{tid}/accept` | → 200 `ThreadView`，立即返回：校验（自己的讨论串、有未合并的 PR）通过后 `pr_state` 置为 `accepting`、清空 `merge_error`（推 `thread` 事件），不在请求里调 GitHub。已经是 `accepting` 时原样返回，不会重复合并。`require_acceptance` 开：合并循环等 PR 必需 check 通过后按 `merge_method` 合并 → `pr_state = merged`、讨论串 done。关：PR 本来就会在 check 通过后自动合并，accept = “不等了，现在合并”，平台在后台检查并合并。合并不成（check 还在跑或没通过、冲突、GitHub 403/405 等）→ `pr_state` 回到 `open`，原因写进 `merge_error`（`thread` 事件推送），用户可以再点 accept 重试；GitHub 5xx / 网络错误在合并循环里自动重试。check 没通过时（两种模式）组长也会收到通知、讨论串回到 running |
+| POST | `/api/threads/{tid}/reject` | `{reason}` → `ThreadView`（原因发给组长，回到 running，清空 `merge_error`；`require_acceptance` 关时也可用，在自动合并前拦下） |
 | GET | `/api/threads/{tid}/usage` | → `{cost_usd_est, tokens: {...}, by_employee: [...]}` |
 
 讨论串里的员工碰到 Claude **使用限额**（`session.event` 的 `rate_limited` 带 `retry_at`，且离现在至少 2 分钟；几秒的 API 重试不算）时，平台记下等待（`at_rate_limit_waits`），把讨论串暂停成 `status = "paused"`、`pause_reason = "rate_limit"`，等待期间该员工回合结束不再催（不发“任务还没完成”的提醒）。到 `retry_at` 后：项目开了 `auto_resume` 就恢复讨论串，并给碰到限额的员工发一条系统消息让它从中断处继续；没开则只清掉等待，讨论串保持暂停，由用户手动继续。统筹碰到限额同理（没有讨论串可暂停，到点只发消息）。

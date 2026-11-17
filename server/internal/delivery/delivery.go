@@ -15,6 +15,7 @@ import (
 	"maps"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
@@ -59,6 +60,9 @@ type Engine struct {
 
 	// PollInterval is how often waiting CI is polled (§8.3: 15 s).
 	PollInterval time.Duration
+	// accepting holds the threads Accept is merging in the background (require_acceptance off).
+	accepting sync.Map
+
 	// PushDone runs inside the transaction that recorded a push job's git.result.
 	PushDone func(ctx context.Context, tx *core.Tx, meta map[string]any, r *protocol.GitResult) error
 }

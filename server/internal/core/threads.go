@@ -166,7 +166,7 @@ func MainTaskViews(ctx context.Context, q DB, threadID string) ([]MainTaskView, 
 func (s *Store) ThreadViewOf(ctx context.Context, q DB, t Thread) (ThreadView, error) {
 	v := ThreadView{ID: t.ID, ProjectID: t.ProjectID, No: t.No, Title: t.Title, Brief: t.Brief, Status: t.Status,
 		PauseReason: t.PauseReason, Branch: t.Branch, BaseBranch: t.BaseBranch, PRNumber: t.PRNumber, PRURL: t.PRURL,
-		PRState: t.PRState, Summary: t.Summary, AutoApprove: t.AutoApprove, OpenedBy: t.OpenedBy,
+		PRState: t.PRState, MergeError: t.MergeError, Summary: t.Summary, AutoApprove: t.AutoApprove, OpenedBy: t.OpenedBy,
 		CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt, StartedAt: t.StartedAt, FinishedAt: t.FinishedAt,
 		PinnedAt: t.PinnedAt, RemindAt: t.RemindAt, RemindedAt: t.RemindedAt}
 	var err error
