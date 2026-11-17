@@ -142,22 +142,11 @@ export interface ThreadView {
   dispatch?: ThreadDispatch | null;
 }
 
-/** How a thread was opened: who handed the brief (ThreadView.brief) to the lead, when, and from which of the user's words. */
-export interface ThreadDispatch {
-  /** "user" when the user opened it; otherwise the coordinator. */
-  opened_by: string;
-  at: string;
-  /** The user's project-chat message the coordinator dispatched from. */
-  source: DispatchSource | null;
-}
+/** How a thread was opened: who handed the brief (ThreadView.brief) to the lead, when, and from which of the user's words (null: none, or deleted). */
+export type ThreadDispatch = Omit<S["ThreadDispatch"], "source"> & { source: DispatchSource | null };
 
-export interface DispatchSource {
-  message_id: number;
-  content: string;
-  /** Same shape as meta.attachments; always an array (maybe empty). */
-  attachments: AttachmentRef[];
-  created_at: string;
-}
+/** The user's project-chat message a thread was opened for (attachments: same shape as meta.attachments). */
+export type DispatchSource = S["DispatchSource"];
 
 /** One repository of a thread: its base, whether the thread branch exists there, its PR. */
 export interface ThreadRepoView {
