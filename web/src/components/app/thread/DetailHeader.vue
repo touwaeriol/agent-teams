@@ -11,13 +11,13 @@ import { computed, ref } from "vue";
 import type { ThreadView } from "@/api/views";
 import IconButton from "@/components/common/IconButton.vue";
 import { threadLook } from "@/lib/present";
-import { mainProgress } from "@/lib/threadList";
+import { mainProgress, threadMark } from "@/lib/threadList";
 import NodeStatus from "../NodeStatus.vue";
 import ResolveButton from "../ResolveButton.vue";
 import ThreadMenu from "../ThreadMenu.vue";
+import ThreadStatusIcon from "../ThreadStatusIcon.vue";
 import type { ThreadViewId } from "../threadMenu";
 import type { ExpandLink, ThreadNav } from "./detail";
-import ThreadStatusIcon from "./ThreadStatusIcon.vue";
 import TitleEdit from "./TitleEdit.vue";
 
 const props = withDefaults(defineProps<{ thread: ThreadView; expand?: ExpandLink; fullHref?: string; nav?: ThreadNav; closable?: boolean }>(), {
@@ -29,6 +29,7 @@ const props = withDefaults(defineProps<{ thread: ThreadView; expand?: ExpandLink
 const emit = defineEmits<{ back: []; close: []; view: [view: ThreadViewId] }>();
 const look = computed(() => threadLook(props.thread));
 const progress = computed(() => mainProgress(props.thread));
+const mark = computed(() => threadMark(props.thread));
 const renaming = ref(false);
 </script>
 
@@ -50,7 +51,7 @@ const renaming = ref(false);
         :title="`#${thread.no} ${thread.title} · ${look.label}${progress ? ` · 主任务 ${progress.label}` : ''}`"
         data-crumb="title"
       >
-        <ThreadStatusIcon :thread="thread" />
+        <ThreadStatusIcon :mark="mark" :size="14" />
         <TitleEdit v-if="renaming" :thread="thread" @done="renaming = false" />
         <template v-else>
           <Pin v-if="thread.pinned_at" class="size-3 shrink-0 rotate-45 text-muted-foreground" :stroke-width="2" aria-label="已置顶" />
