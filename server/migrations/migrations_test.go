@@ -675,7 +675,7 @@ VALUES ('dl_1', 1, 'a.md', 'text/markdown', 1, 'x', 'a', 'designer-1');`
 }
 
 // TestPRNotDeliverableMigration: 00190 adds at_thread_repos.pr_opened_at, fills it from the
-// created_at of the thread's kind='pr' deliverable with the same URL (null without one), deletes
+// created_at of the thread's kind='pr' deliverable (any case, surrounding blanks) with the same URL (null without one), deletes
 // every pr deliverable (its comments cascade) and keeps the other deliverables; Down drops the column.
 func TestPRNotDeliverableMigration(t *testing.T) {
 	db := open(t, testdb.URL(t))
@@ -697,6 +697,8 @@ INSERT INTO at_thread_repos (thread_id, repo, pr_number, pr_url, pr_state) VALUE
   ('th1', 'o/c', NULL, NULL, '');
 INSERT INTO at_deliverables (id, project_id, thread_id, kind, title, url, created_at) VALUES
   ('dl_pr', 'p1', 'th1', 'pr', 'o/a#1', 'https://github.com/o/a/pull/1', '2026-01-02T03:04:05Z'),
+  ('dl_pr_upper', 'p1', 'th1', 'PR', 'o/b#2', 'https://github.com/o/b/pull/2', '2026-01-03T00:00:00Z'),
+  ('dl_pr_spaced', 'p1', NULL, ' pr ', 'x', 'https://github.com/o/x/pull/9', now()),
   ('dl_doc', 'p1', 'th1', 'doc', '设计', 'https://example.com/doc', now());
 INSERT INTO at_deliverable_comments (id, deliverable_id, author, text) VALUES ('c1', 'dl_pr', 'user', 'x');`
 	if _, err := db.Exec(seed); err != nil {
@@ -710,8 +712,12 @@ INSERT INTO at_deliverable_comments (id, deliverable_id, author, text) VALUES ('
 		!opened.Valid || opened.Time.UTC().Format("2006-01-02T15:04:05Z") != "2026-01-02T03:04:05Z" {
 		t.Fatalf("o/a pr_opened_at: %v %v", opened, err)
 	}
+	if err := db.QueryRow(`SELECT pr_opened_at FROM at_thread_repos WHERE repo = 'o/b'`).Scan(&opened); err != nil ||
+		!opened.Valid || opened.Time.UTC().Format("2006-01-02") != "2026-01-03" {
+		t.Fatalf("o/b pr_opened_at from kind 'PR': %v %v", opened, err)
+	}
 	var unset int
-	if err := db.QueryRow(`SELECT count(*) FROM at_thread_repos WHERE repo IN ('o/b','o/c') AND pr_opened_at IS NULL`).Scan(&unset); err != nil || unset != 2 {
+	if err := db.QueryRow(`SELECT count(*) FROM at_thread_repos WHERE repo = 'o/c' AND pr_opened_at IS NULL`).Scan(&unset); err != nil || unset != 1 {
 		t.Fatalf("unmatched rows: %d %v", unset, err)
 	}
 	var kinds string

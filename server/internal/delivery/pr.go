@@ -402,7 +402,12 @@ func (e *Engine) mergeOne(ctx context.Context, t core.Thread, repo ghops.Repo, t
 			return fmt.Errorf("%s：%w", tr.Repo, err)
 		}
 	}
-	return core.SetThreadRepoPRState(ctx, e.core.Pool, t.ID, tr.Repo, "merged")
+	return e.core.InTx(ctx, func(tx *core.Tx) error {
+		if err := core.SetThreadRepoPRState(ctx, tx, t.ID, tr.Repo, "merged"); err != nil {
+			return err
+		}
+		return tx.EmitThread(ctx, t.ID) // repos[].pr_state changes before the whole thread is done
+	})
 }
 
 // Merged records that the thread's pull requests are merged: thread done once none is open.
@@ -524,11 +529,10 @@ func (e *Engine) pullRequestEvent(ctx context.Context, payload json.RawMessage) 
 		if err := core.SetThreadRepoPRState(ctx, tx, tr.ThreadID, tr.Repo, state); err != nil {
 			return err
 		}
-		if state == "merged" {
-			return nil
-		}
-		if err := core.UpdateThread(ctx, tx, tr.ThreadID, map[string]any{"pr_state": "closed"}); err != nil {
-			return err
+		if state == "closed" {
+			if err := core.UpdateThread(ctx, tx, tr.ThreadID, map[string]any{"pr_state": "closed"}); err != nil {
+				return err
+			}
 		}
 		return tx.EmitThread(ctx, tr.ThreadID)
 	})

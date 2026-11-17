@@ -246,6 +246,10 @@ func TestPublishFileRefusals(t *testing.T) {
 		map[string]any{"kind": " PR ", "title": "x", "url": "https://github.com/o/r/pull/1"}); code != 400 || !strings.Contains(string(body), "不是交付物") {
 		t.Fatalf("POST kind=pr: %d %s", code, body)
 	}
+	if code, body := tm.b.do("POST", "/api/projects/"+tm.projectID+"/deliverables/request",
+		map[string]any{"kind": "pr", "brief": "开个 PR"}); code != 400 || !strings.Contains(string(body), "pr_not_deliverable") {
+		t.Fatalf("request kind=pr: %d %s", code, body)
+	}
 	var list struct{ Items []core.DeliverableView }
 	tm.b.must(200, "GET", "/api/projects/"+tm.projectID+"/deliverables", nil, &list)
 	if len(list.Items) != 0 {
