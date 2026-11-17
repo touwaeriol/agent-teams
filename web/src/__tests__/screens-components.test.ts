@@ -219,7 +219,7 @@ describe("MobileOverview", () => {
     const tabs = w.findAll("[role=tab]");
     expect(tabs.map((t) => t.text())).toEqual(["讨论串", "资料库", "定时任务"]);
     expect(tabs[0].attributes("aria-selected")).toBe("true");
-    expect(w.findAll("section[data-group]").map((s) => s.attributes("data-group"))).toEqual(["waiting", "done"]);
+    expect(w.findAll("section[data-group]").map((s) => s.attributes("data-group"))).toEqual(["active", "done"]);
     expect(w.find("[data-group=done] [data-row][data-compact]").exists()).toBe(true);
     await w.get("header button[aria-label=搜索讨论串]").trigger("click");
     await w.get("input[aria-label=搜索讨论串]").setValue("部署");
