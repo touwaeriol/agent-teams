@@ -3453,6 +3453,11 @@
             "maxLength": 16000,
             "type": "string"
           },
+          "coordinator_model": {
+            "description": "Claude model of the coordinator; '' = the role's model",
+            "maxLength": 100,
+            "type": "string"
+          },
           "delivery": {
             "$ref": "#/components/schemas/DeliveryPatch"
           },
@@ -3482,24 +3487,22 @@
           "require_acceptance": {
             "type": "boolean"
           },
+          "thread_codex_model": {
+            "description": "Codex model of Codex leads and members; '' = each role's model",
+            "maxLength": 100,
+            "type": "string"
+          },
+          "thread_model": {
+            "description": "Claude model of Claude leads and members; '' = each role's model",
+            "maxLength": 100,
+            "type": "string"
+          },
           "work_mode": {
             "enum": [
               "worktree",
               "clone"
             ],
             "type": "string"
-          },
-          "coordinator_model": {
-            "type": "string",
-            "description": "'' = the coordinator role's model"
-          },
-          "thread_model": {
-            "type": "string",
-            "description": "'' = each Claude Code lead/member role's model"
-          },
-          "thread_codex_model": {
-            "type": "string",
-            "description": "'' = each Codex lead/member role's model"
           }
         },
         "required": [
@@ -3579,13 +3582,18 @@
           "require_acceptance": {
             "type": "boolean"
           },
+          "thread_codex_model": {
+            "description": "Codex leads and members; '' = each role's model",
+            "maxLength": 100,
+            "type": "string"
+          },
           "thread_effort": {
             "description": "'' | low | medium | high | xhigh | max",
             "maxLength": 16,
             "type": "string"
           },
           "thread_model": {
-            "description": "'' = each role's model",
+            "description": "Claude leads and members; '' = each role's model",
             "maxLength": 100,
             "type": "string"
           },
@@ -3595,10 +3603,6 @@
               "clone"
             ],
             "type": "string"
-          },
-          "thread_codex_model": {
-            "type": "string",
-            "description": "'' = each Codex lead/member role's model"
           }
         },
         "type": "object"
@@ -3720,12 +3724,16 @@
           "require_acceptance": {
             "type": "boolean"
           },
+          "thread_codex_model": {
+            "description": "Codex leads and members; '' = each role's model",
+            "type": "string"
+          },
           "thread_effort": {
             "description": "'' = each role's effort; low | medium | high | xhigh | max",
             "type": "string"
           },
           "thread_model": {
-            "description": "'' = each Claude Code lead/member role's model",
+            "description": "Claude leads and members; '' = each role's model",
             "type": "string"
           },
           "threads_active": {
@@ -3746,10 +3754,6 @@
               "clone"
             ],
             "type": "string"
-          },
-          "thread_codex_model": {
-            "type": "string",
-            "description": "'' = each Codex lead/member role's model"
           }
         },
         "required": [
@@ -9991,7 +9995,7 @@
             "description": "Error"
           }
         },
-        "summary": "Ask the coordinator to make one (sends 做一个<kind>：<brief>)",
+        "summary": "Ask the coordinator to make one (sends 做一个\u003ckind\u003e：\u003cbrief\u003e)",
         "tags": [
           "deliverables"
         ]

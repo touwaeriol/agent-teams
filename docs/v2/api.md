@@ -58,7 +58,7 @@ RepoRef         = {repo: "owner/name", git_connection_id: string|null}
                    require_acceptance,      // true：用户验收后平台合并；false：PR 的必需 check 通过后平台按 merge_method 自动合并（architecture.md §8.4）
                    delivery: DeliverySettings, office_layout: string, waiting: number, threads_active: number,
                    icon: string,            // '' = 名字首字母配稳定底色；一个表情；或 "color:#RRGGBB" = 首字母配该颜色
-                   coordinator_model: string, thread_model: string, thread_effort: string,  // 项目级覆盖，'' = 跟随岗位模板（下次开会话生效）
+                   coordinator_model: string, thread_model: string, thread_codex_model: string, thread_effort: string,  // 项目级覆盖，按类型：统筹 / Claude 组长和成员 / Codex 组长和成员；'' = 跟随岗位（下次开会话生效）
                    auto_resume: boolean,    // 使用限额重置后自动继续讨论串（data-model.md §2.10）
                    created_at, updated_at}
 DeliverySettings = {gates: {review, decision, merge_queue}, ci: {mode, required, appear_timeout_s, timeout_s, on_missing},
@@ -223,7 +223,7 @@ PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平�
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | POST | `/api/projects` | `{name, description?, context?, repos?: RepoRef[], work_mode?, auto_approve?, require_acceptance?, delivery?, first_message?}` → 201 `ProjectView`。`first_message` 有值时投递给统筹（v1 是新建对话再发消息） |
-| PATCH | `/api/projects/{pid}` | `name, description, context, pinned, archived`，`repos?: RepoRef[]`（整体替换并保持顺序，`[]` 解绑全部；每个仓库要有能访问它的连接，重复 422）+ `work_mode, auto_approve, require_acceptance, delivery, office_layout`（`delivery.notify_on_ask` = “成员提问时通知我”；`auto_approve` 只影响 `ask` 岗位，任何节点都能开）+ `icon`（`''`、一个表情或 `color:#RRGGBB`，其他 422）、`coordinator_model`、`thread_model`（模型 id，`''` = 跟随岗位）、`thread_effort`（`'' \| low \| medium \| high \| xhigh \| max`，即 SDK 0.3.325 的 `effort`）、`auto_resume`。模型覆盖在开会话时生效：统筹用 `coordinator_model`，组长和成员用 `thread_model` 与 `thread_effort`（Codex 岗位不受影响） |
+| PATCH | `/api/projects/{pid}` | `name, description, context, pinned, archived`，`repos?: RepoRef[]`（整体替换并保持顺序，`[]` 解绑全部；每个仓库要有能访问它的连接，重复 422）+ `work_mode, auto_approve, require_acceptance, delivery, office_layout`（`delivery.notify_on_ask` = “成员提问时通知我”；`auto_approve` 只影响 `ask` 岗位，任何节点都能开）+ `icon`（`''`、一个表情或 `color:#RRGGBB`，其他 422）、`coordinator_model`、`thread_model`、`thread_codex_model`（模型 id，`''` = 跟随岗位；非空必须在项目所有者的模型列表里且类型对得上：前两个是 Claude，`thread_codex_model` 是 Codex，否则 422 字段级错误；和已保存值相同的放行）、`thread_effort`（`'' \| low \| medium \| high \| xhigh \| max`，即 SDK 0.3.325 的 `effort`）、`auto_resume`。模型覆盖在开会话时生效：统筹用 `coordinator_model`，Claude 组长和成员用 `thread_model`，Codex 组长和成员用 `thread_codex_model`，组长和成员都用 `thread_effort` |
 | GET | `/api/projects/{pid}/usage?days=7` | 项目用量（`at_usage`，每个回合结束时 SDK 报告的 token 和费用）→ `{days, cost_usd_est, tokens: {input, output, cache_read, cache_write}, turns, by_day: [{day, cost_usd, tokens}], by_thread: [{thread_no: number\|null, title, cost_usd, tokens}], by_employee: [{employee, thread_no, cost_usd, tokens}]}`；`thread_no = null` 是项目统筹；`days` 1–90，缺省 7；按天按 UTC 日期分组 |
 | GET | `/api/projects/{pid}/schedules` | 定时任务 → `ScheduleView[]` = `{id, project_id, name, cron, timezone, message, enabled, next_run_at, last_run_at, last_error, created_at, updated_at}` |
 | POST | `/api/projects/{pid}/schedules` | `{name, cron, timezone?, message, enabled?}` → 201。`cron` 五段（分 时 日 月 周，支持 `*`、数字、`a-b`、`/n`、逗号；周 0 和 7 都是周日；日和周都限定时任一满足即可），`timezone` 是 IANA 名（缺省 UTC，网页传浏览器时区）；表达式或时区不对 422（`fields[0].path` 指出字段）；每个项目最多 20 个 |

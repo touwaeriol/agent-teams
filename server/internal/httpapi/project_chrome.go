@@ -1,17 +1,19 @@
 package httpapi
 
 import (
+	"context"
+	"fmt"
 	"regexp"
 	"strings"
 	"unicode"
 
+	"github.com/touwaeriol/agent-teams/server/internal/composer"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 var (
-	iconColor    = regexp.MustCompile(`^color:#[0-9A-Fa-f]{6}$`)
-	modelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:@\[\]-]{0,99}$`)
-	efforts      = map[string]bool{"": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true}
+	iconColor = regexp.MustCompile(`^color:#[0-9A-Fa-f]{6}$`)
+	efforts   = map[string]bool{"": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true}
 )
 
 // ValidIcon accepts ” (initial), color:#RRGGBB, or a short emoji/symbol without letters, digits or spaces.
@@ -30,10 +32,7 @@ func ValidIcon(icon string) bool {
 	return true
 }
 
-// ValidModel accepts ” (follow the role) or a model id.
-func ValidModel(m string) bool { return m == "" || modelPattern.MatchString(m) }
-
-// chromeChanges validates and collects the icon and model overrides of a project update.
+// chromeChanges validates and collects the icon and effort of a project update (models: modelChanges).
 func chromeChanges(b ProjectUpdate) ([]store.Change, error) {
 	var ch []store.Change
 	var errs []FieldError
@@ -43,19 +42,6 @@ func chromeChanges(b ProjectUpdate) ([]store.Change, error) {
 			errs = append(errs, FieldError{"icon", "图标只能是一个表情，或 color:#RRGGBB"})
 		}
 		ch = append(ch, store.Change{Col: "icon", Val: icon})
-	}
-	for _, m := range []struct {
-		field, col string
-		val        *string
-	}{{"coordinator_model", "coordinator_model", b.CoordinatorModel}, {"thread_model", "thread_model", b.ThreadModel}} {
-		if m.val == nil {
-			continue
-		}
-		v := strings.TrimSpace(*m.val)
-		if !ValidModel(v) {
-			errs = append(errs, FieldError{m.field, "模型名称不对"})
-		}
-		ch = append(ch, store.Change{Col: m.col, Val: v})
 	}
 	if b.ThreadEffort != nil {
 		if !efforts[*b.ThreadEffort] {
@@ -67,4 +53,87 @@ func chromeChanges(b ProjectUpdate) ([]store.Change, error) {
 		return nil, invalid(errs, errs[0].Message)
 	}
 	return ch, nil
+}
+
+// projectModel is one model override of a project: field (= column), the runtime it is for, the
+// new value (nil = unchanged) and the stored one.
+type projectModel struct {
+	field, runtime string
+	val            *string
+	saved          string
+}
+
+// modelChanges validates and collects the model overrides of a project update.
+func (s *Server) modelChanges(ctx context.Context, userID string, cur store.Project, b ProjectUpdate) ([]store.Change, error) {
+	models := []projectModel{
+		{"coordinator_model", "claude", trimmed(b.CoordinatorModel), cur.CoordinatorModel},
+		{"thread_model", "claude", trimmed(b.ThreadModel), cur.ThreadModel},
+		{"thread_codex_model", "codex", trimmed(b.ThreadCodexModel), cur.ThreadCodexModel},
+	}
+	if err := s.checkProjectModels(ctx, userID, models); err != nil {
+		return nil, err
+	}
+	var ch []store.Change
+	for _, m := range models {
+		if m.val != nil {
+			ch = append(ch, store.Change{Col: m.field, Val: *m.val})
+		}
+	}
+	return ch, nil
+}
+
+func trimmed(p *string) *string {
+	if p == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*p)
+	return &v
+}
+
+// checkProjectModels checks the project's model overrides against the owner's model list
+// (composer.ListModels; the owner is the user editing the project): ” follows each role; any
+// other id must be an entry of the field's runtime (coordinator_model and thread_model: Claude,
+// thread_codex_model: Codex). A value equal to the stored one passes even when it has since left
+// the list, so deleting a model does not lock the settings page (as roles.modelProblems).
+func (s *Server) checkProjectModels(ctx context.Context, userID string, models []projectModel) error {
+	var list []composer.Model
+	var errs []FieldError
+	for _, m := range models {
+		if m.val == nil || *m.val == "" || *m.val == m.saved {
+			continue
+		}
+		if list == nil {
+			var err error
+			if list, err = composer.ListModels(ctx, s.store.Pool, userID); err != nil {
+				return err
+			}
+		}
+		if msg := modelProblem(list, m.runtime, *m.val); msg != "" {
+			errs = append(errs, FieldError{m.field, msg})
+		}
+	}
+	if len(errs) > 0 {
+		return invalid(errs, errs[0].Message)
+	}
+	return nil
+}
+
+var runtimeLabel = map[string]string{"claude": "Claude", "codex": "Codex"}
+
+// modelProblem is why id cannot be used for runtime (” = it can).
+func modelProblem(list []composer.Model, runtime, id string) string {
+	other := ""
+	for _, m := range list {
+		if m.Model != id {
+			continue
+		}
+		if m.Runtime == runtime {
+			return ""
+		}
+		other = m.Runtime
+	}
+	if other != "" {
+		return fmt.Sprintf("这里只能选 %s 模型，%s 是 %s 模型", runtimeLabel[runtime], id, runtimeLabel[other])
+	}
+	return "模型不在你的模型列表里：" + id
 }

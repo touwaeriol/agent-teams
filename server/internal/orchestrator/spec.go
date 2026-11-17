@@ -185,20 +185,21 @@ func Model(e core.Employee, p store.Project, def string) string {
 func modelSteps(e core.Employee, p store.Project, def string) []string {
 	return []string{
 		e.Model,                 // 1. picked for the employee with /model (at_employees.model)
-		projectModel(e, p),      // 2. the project override for the tier (Claude only)
+		projectModel(e, p),      // 2. the project override for the employee's runtime and tier
 		e.Spec.Model,            // 3. the role's model (the employee's spec)
 		def,                     // 4. the owner's default for the runtime
 		builtinModel(e.Runtime), // 5. built in: DefaultModel / DefaultCodexModel
 	}
 }
 
-// projectModel is the project's model override for the employee's tier: coordinator_model for the
-// coordinator, thread_model for leads and members. Claude only: the project picks Claude ids, so
-// Codex employees ignore it.
+// projectModel is the project's model override for the employee, by runtime so an override only
+// reaches roles of its own runtime: thread_codex_model for Codex leads and members (never
+// thread_model, a Claude id); coordinator_model for the coordinator (always Claude); thread_model
+// for Claude leads and members. ” falls through to the role's model.
 func projectModel(e core.Employee, p store.Project) string {
 	switch {
 	case e.Runtime == "codex":
-		return ""
+		return p.ThreadCodexModel
 	case e.Tier == "coordinator":
 		return p.CoordinatorModel
 	default:

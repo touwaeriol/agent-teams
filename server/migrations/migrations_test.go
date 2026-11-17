@@ -195,7 +195,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 210 {
+	if migrations.Latest() != 230 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -859,5 +859,65 @@ CREATE TRIGGER at_test_skip_u2 BEFORE INSERT ON at_models FOR EACH ROW EXECUTE F
 	}
 	if _, err := migrations.Up(ctx, db); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestThreadCodexModelMigration: 00230 adds at_projects.thread_codex_model (” for existing
+// projects) and turns Codex leads into Claude leads following the defaults; other roles keep
+// their runtime and model. Down drops the column and leaves the leads on Claude.
+func TestThreadCodexModelMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 210); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name, thread_model) VALUES ('p1', 'u1', 'A', 'claude-t');
+INSERT INTO at_roles (id, user_id, tier, role, runtime, model) VALUES
+  ('r1', 'u1', 'lead', 'lead', 'codex', 'gpt-lead'),
+  ('r3', 'u1', 'member', 'dev', 'codex', 'gpt-dev');
+INSERT INTO at_users (id, email, password_hash) VALUES ('u2', 'b@example.com', 'x');
+INSERT INTO at_roles (id, user_id, tier, role, runtime, model) VALUES ('r2', 'u2', 'lead', 'lead', 'claude', 'claude-lead');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := migrations.Up(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	var codex, thread string
+	if err := db.QueryRow(`SELECT thread_codex_model, thread_model FROM at_projects WHERE id = 'p1'`).Scan(&codex, &thread); err != nil ||
+		codex != "" || thread != "claude-t" {
+		t.Fatalf("project: %q %q %v", codex, thread, err)
+	}
+	if _, err := db.Exec(`UPDATE at_projects SET thread_codex_model = 'gpt-x' WHERE id = 'p1'`); err != nil {
+		t.Fatal(err)
+	}
+	roles := func() string {
+		t.Helper()
+		var s string
+		if err := db.QueryRow(`SELECT string_agg(id || ':' || runtime || ':' || model, ' ' ORDER BY id) FROM at_roles`).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	want := "r1:claude: r2:claude:claude-lead r3:codex:gpt-dev"
+	if got := roles(); got != want {
+		t.Fatalf("roles:\n got %s\nwant %s", got, want)
+	}
+	if _, err := p.DownTo(ctx, 210); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`SELECT thread_codex_model FROM at_projects`); err == nil {
+		t.Fatal("thread_codex_model survived down")
+	}
+	if got := roles(); got != want {
+		t.Fatalf("roles after down: %s", got)
+	}
+	if _, err := p.UpTo(ctx, 230); err != nil {
+		t.Fatalf("up again: %v", err)
 	}
 }
