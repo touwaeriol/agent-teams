@@ -37,6 +37,7 @@ describe("model lists", () => {
     ]);
     expect(modelProblems([{ runtime: "claude", model: "a", default: true }, { runtime: "codex", model: "a", default: true }])).toEqual([]);
     expect(modelProblems([])).toEqual(["至少保留一个模型"]);
+    expect(modelProblems(Array.from({ length: 51 }, (_, i) => ({ runtime: "claude" as const, model: `m${i}` })))).toEqual(["最多 50 个模型"]);
   });
 
   it("words the /model result: live, next session, skipped", () => {

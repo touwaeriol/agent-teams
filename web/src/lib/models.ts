@@ -17,6 +17,9 @@ export interface ModelChoice {
 /** Same rule as the server (composer.ValidModel). */
 export const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]{0,99}$/;
 
+/** Same limit as PUT /api/models/mine. */
+export const MAX_MODELS = 50;
+
 export const runtimeLabel = (r: string) => (r === "codex" ? "Codex" : "Claude Code");
 
 /** The runtime's choices in list order, each id once; `current` is added when the list lacks it. */
@@ -46,6 +49,7 @@ export function modelProblems(list: Pick<ModelEntry, "runtime" | "model" | "defa
   const seen = new Set<string>();
   const defaults = new Set<string>();
   if (list.length === 0) out.push("至少保留一个模型");
+  if (list.length > MAX_MODELS) out.push(`最多 ${MAX_MODELS} 个模型`);
   for (const m of list) {
     if (!MODEL_ID.test(m.model)) out.push(`模型 ID “${m.model}” 只能用字母、数字和 . _ - : / @ [ ]`);
     if (seen.has(`${m.runtime}/${m.model}`)) out.push(`${m.model} 重复了`);
