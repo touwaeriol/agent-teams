@@ -1,7 +1,9 @@
 <script setup lang="ts">
 // One row of the panel list. Rich (等你处理 / 进行中): mark, "#N 标题" (PR icon when it opened
 // one), the node icon and last activity on the right (⋯ menu on hover), a grey one-line
-// progress, then small tags: plan "2/7" and "N 个交付物" (opens the thread's deliverables).
+// progress, then small tags: plan "2/7" and "N 个交付物" (opens the thread's deliverables), and
+// the step being worked on (one line). The "2/7" tag is a button that unfolds the whole plan
+// as a checklist card under the row.
 // Compact (空闲 / 已完成 / 已归档): mark, title and time on one short line.
 // A pin marks a pinned thread; "提醒" a reminder that fired, "提醒 明天 09:00" one still to come.
 import { Bell, GitPullRequest, ListChecks, Package, Pin } from "lucide-vue-next";
@@ -9,7 +11,8 @@ import { computed, ref } from "vue";
 import { RouterLink } from "vue-router";
 import type { ThreadView } from "@/api/views";
 import { cn } from "@/lib/utils";
-import { deliverableCount, lastActivity, mainProgress, reminderLabel, shortAgo, type RowMark } from "@/lib/threadList";
+import { currentStep, deliverableCount, lastActivity, mainProgress, reminderLabel, shortAgo, type RowMark } from "@/lib/threadList";
+import PlanChecklist from "./plan/PlanChecklist.vue";
 import NodeStatus from "./NodeStatus.vue";
 import TitleEdit from "./thread/TitleEdit.vue";
 import ThreadMark from "./ThreadMark.vue";
@@ -23,6 +26,8 @@ const renaming = ref(false);
 const reminder = computed(() => (props.thread.remind_at ? `提醒 ${reminderLabel(props.thread.remind_at, props.now)}` : ""));
 const progress = computed(() => mainProgress(props.thread));
 const delivered = computed(() => deliverableCount(props.thread));
+const step = computed(() => currentStep(props.thread.main_tasks));
+const planOpen = ref(false);
 const TAG = "inline-flex h-5 items-center gap-1 rounded-md border bg-panel px-1.5 text-[11px] leading-none text-muted-foreground";
 </script>
 
@@ -69,16 +74,33 @@ const TAG = "inline-flex h-5 items-center gap-1 rounded-md border bg-panel px-1.
         />
       </span>
     </div>
-    <div v-if="!compact && (progress || delivered > 0)" class="-mt-1 flex flex-wrap items-center gap-1.5 pb-2 pl-[34px] pr-2" data-tags="">
-      <span v-if="progress" :class="TAG" :title="`主任务完成 ${progress.label}`"><ListChecks class="size-3" :stroke-width="1.8" />{{ progress.label }}</span>
+    <div v-if="!compact && (progress || delivered > 0)" class="-mt-1 flex min-w-0 items-center gap-1.5 pb-2 pl-[34px] pr-2" data-tags="">
+      <template v-if="progress">
+        <button
+          v-if="thread.main_tasks.length"
+          type="button"
+          :class="cn(TAG, 'shrink-0 hover:border-input hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', planOpen && 'border-input text-foreground')"
+          :title="`主任务完成 ${progress.label}，${planOpen ? '收起' : '展开'}计划`"
+          :aria-expanded="planOpen"
+          data-plan-toggle=""
+          @click.stop="planOpen = !planOpen"
+        >
+          <ListChecks class="size-3" :stroke-width="1.8" />{{ progress.label }}
+        </button>
+        <span v-else :class="cn(TAG, 'shrink-0')" :title="`主任务完成 ${progress.label}`"><ListChecks class="size-3" :stroke-width="1.8" />{{ progress.label }}</span>
+      </template>
       <RouterLink
         v-if="delivered > 0"
         :to="`/projects/${thread.project_id}/threads/${thread.no}/deliverables`"
-        :class="cn(TAG, 'hover:border-input hover:text-foreground')"
+        :class="cn(TAG, 'shrink-0 hover:border-input hover:text-foreground')"
         data-deliverables=""
       >
         <Package class="size-3" :stroke-width="1.8" />{{ delivered }} 个交付物
       </RouterLink>
+      <span v-if="step" class="min-w-0 truncate text-xs text-muted-foreground" :title="step.title" data-current-step="">{{ step.title }}</span>
+    </div>
+    <div v-if="!compact && planOpen && thread.main_tasks.length" class="pb-2 pl-[34px] pr-2" data-row-plan="">
+      <PlanChecklist :steps="thread.main_tasks" :collapsible="false" list-class="max-h-64" />
     </div>
   </div>
 </template>
