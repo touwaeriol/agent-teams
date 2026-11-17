@@ -1,21 +1,32 @@
 <script setup lang="ts">
-/** Attachments of a sent message: images as thumbnails that open the full image, PDFs and text files as chips. */
-import { computed } from "vue";
+/** Attachments of a sent message: images as thumbnails that open the in-page preview, PDFs and text files as chips. */
+import { computed, ref } from "vue";
 import { FileText } from "lucide-vue-next";
 import type { AttachmentRef } from "@/api/views";
 import { attachmentUrl, isImageType } from "@/lib/images";
 import { cn } from "@/lib/utils";
+import ImagePreview from "./ImagePreview.vue";
 
 const props = withDefaults(defineProps<{ items: AttachmentRef[] | undefined; align?: "start" | "end" }>(), { align: "end" });
 const images = computed(() => (props.items ?? []).filter((x) => isImageType(x.content_type)));
 const files = computed(() => (props.items ?? []).filter((x) => !isImageType(x.content_type)));
+const urls = computed(() => images.value.map((x) => attachmentUrl(x.id)));
+const viewing = ref<number | null>(null);
 </script>
 
 <template>
   <div v-if="items?.length" :class="cn('flex flex-wrap gap-2', align === 'end' ? 'justify-end self-end' : 'self-start')">
-    <a v-for="x in images" :key="x.id" :href="attachmentUrl(x.id)" target="_blank" rel="noreferrer" class="block size-24 overflow-hidden rounded-xl border bg-raised" :title="x.name">
-      <img :src="attachmentUrl(x.id)" :alt="x.name" loading="lazy" class="size-full object-cover" />
-    </a>
+    <button
+      v-for="(x, i) in images"
+      :key="x.id"
+      type="button"
+      class="block size-24 cursor-zoom-in overflow-hidden rounded-xl border bg-raised"
+      :title="x.name"
+      :aria-label="`查看图片 ${x.name}`"
+      @click="viewing = i"
+    >
+      <img :src="urls[i]" :alt="x.name" loading="lazy" class="size-full object-cover" />
+    </button>
     <a
       v-for="x in files"
       :key="x.id"
@@ -29,5 +40,6 @@ const files = computed(() => (props.items ?? []).filter((x) => !isImageType(x.co
       <span class="truncate">{{ x.name }}</span>
       <span class="shrink-0 text-muted-foreground">{{ x.content_type === "application/pdf" ? "PDF" : "文本" }}</span>
     </a>
+    <ImagePreview :urls="urls" :index="viewing" @close="viewing = null" />
   </div>
 </template>
