@@ -349,4 +349,4 @@ v1 的旧对话只读页和它的接口（`GET /api/conversations`、`…/{cid}/
 | `/projects/:pid/deliverables` | Deliverables |
 | `/projects/:pid/office` | Office |
 | `/projects/:pid/settings` · `/projects/:pid/settings/:section` | ProjectSettings：Main 上打开的设置对话框，分区 `general`（通用：名称图标、简介、模型、自动继续、归档删除）· `memory`（记忆：项目指令 = `context`，自动记忆 = MEMORY.md 和记忆文件）· `environment`（环境：每个讨论串都包含的仓库，工作树开关 = `work_mode`：开启 `worktree` / 关闭 `clone` 独立克隆；没有云环境或远程环境，节点在 设置 → 节点）· `usage`（使用情况）· `advanced`（高级：审批与交付、合并方式、分支命名与清理说明），关闭回到 `/projects/:pid` |
-| `/settings/team` · `/settings/nodes` · `/settings/git` · `/settings/appearance` · `/settings/admin` · `/setup/github` | Team · Nodes · GitHub · 外观 · Admin · GitHub App 创建 |
+| `/settings/team` · `/settings/nodes` · `/settings/git` · `/settings/appearance` · `/settings/admin` · `/admin/github-app`（旧地址 `/setup/github` 重定向到这里） | Team · Nodes · GitHub · 外观 · Admin · GitHub App 创建 |

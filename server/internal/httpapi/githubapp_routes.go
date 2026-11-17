@@ -202,7 +202,7 @@ func (s *Server) appCreated(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	admin := s.signedUser(ctx, auth.PurposeCreate, q.Get("state"))
 	if admin == nil || s.authz.role(admin.ID) != roleAdmin {
-		back(w, r, "/setup/github", map[string]string{"error": "创建请求已过期或不是你发起的，请重新创建"})
+		back(w, r, "/admin/github-app", map[string]string{"error": "创建请求已过期或不是你发起的，请重新创建"})
 		return
 	}
 	conv, err := s.gh.ConvertManifest(ctx, q.Get("code"))
@@ -211,12 +211,12 @@ func (s *Server) appCreated(w http.ResponseWriter, r *http.Request) {
 		app, err = s.apps.Save(ctx, conv, appPermissions)
 	}
 	if err != nil {
-		back(w, r, "/setup/github", map[string]string{"error": "保存 GitHub App 失败：" + err.Error()})
+		back(w, r, "/admin/github-app", map[string]string{"error": "保存 GitHub App 失败：" + err.Error()})
 		return
 	}
 	_ = s.tokens.Reset(ctx)
 	s.audit(ctx, admin.ID, "github_app_create", "github_app", app.Slug, nil)
-	back(w, r, "/setup/github", map[string]string{"github_app": app.Slug})
+	back(w, r, "/admin/github-app", map[string]string{"github_app": app.Slug})
 }
 
 // appInstalled: back from GitHub after installing (or changing) the App.

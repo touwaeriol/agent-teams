@@ -75,7 +75,7 @@ func TestGitHubAppFlow(t *testing.T) {
 	// GitHub redirects back without our cookie; the signed state identifies the admin.
 	anon := h.client()
 	r := anon.do("GET", "/api/git/github-app/created?code=good-code&state="+url.QueryEscape(state), nil)
-	if r.Status != http.StatusSeeOther || r.Header.Get("Location") != "/setup/github?github_app=agent-teams-test" {
+	if r.Status != http.StatusSeeOther || r.Header.Get("Location") != "/admin/github-app?github_app=agent-teams-test" {
 		t.Fatalf("created = %d %s", r.Status, r.Header.Get("Location"))
 	}
 	r = anon.do("GET", "/api/git/github-app/created?code=good-code&state=forged.1.x", nil)
