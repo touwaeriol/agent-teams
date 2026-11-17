@@ -143,7 +143,17 @@ func TestDeliveryEndToEnd(t *testing.T) {
 		t.Fatalf("open_pr %+v", res)
 	}
 	events.wait(t, "thread", `"status":"review"`, `"pr_number":7`)
-	events.wait(t, "deliverable", `"kind":"pr"`)
+	// The PR is tracked on the thread only: no pr deliverable, and its checks count from when it opened.
+	var dls struct{ Items []core.DeliverableView }
+	b.must(200, "GET", "/api/projects/"+project.ID+"/deliverables", nil, &dls)
+	for _, d := range dls.Items {
+		if d.Kind == "pr" || strings.Contains(d.URL, "/pull/") {
+			t.Fatalf("PR published as a deliverable: %+v", d)
+		}
+	}
+	if tr, err := core.ThreadRepoOf(w.ctx, w.e.Core.Pool, thread.ID, "o/r"); err != nil || tr.PROpenedAt == nil {
+		t.Fatalf("pr_opened_at not recorded: %+v %v", tr, err)
+	}
 
 	b.must(200, "POST", "/api/threads/"+thread.ID+"/accept", nil, nil)
 	events.wait(t, "thread", `"status":"done"`, `"pr_state":"merged"`)

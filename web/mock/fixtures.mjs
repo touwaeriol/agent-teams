@@ -237,11 +237,9 @@ const deliverable = (id, kind, title, thread_no, min, summary, extra = {}) => ({
 
 export const deliverables = [
   deliverable("d1", "design", "审批卡片样式", 12, 12, "审批与提问卡片", { version: 3, author: "dev-2" }),
-  deliverable("d2", "pr", "PR #41 项目菜单", 11, 20, "thread/11-project-menu → main"),
   deliverable("d3", "doc", "员工通信实现约定", 12, 60, "docs/agent-comms.md"),
   deliverable("d4", "design", "新建项目下拉框", 10, 120, "仓库与基准分支"),
   deliverable("d5", "data", "审批耗时统计", 12, 60 * 20, "平均等待 4 分钟"),
-  deliverable("d6", "pr", "PR #36 GitHub 一键连接", 9, 60 * 22, "thread/9-github-app → main"),
   hosted("d7", "design", "06-nodes.png", 60 * 30, 9_400, "user"),
   hosted("d8", "design", "e2e-main.png", 60 * 31, 381_800, "user"),
   hosted("d9", "doc", "架构说明.md", 60 * 33, 24_100, "designer-1"),

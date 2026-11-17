@@ -2287,7 +2287,7 @@ export interface ListDeliverablesInput {
    */
   thread?: number;
   /**
-   * Only this kind (design, doc, slides, dashboard, board, data, pr).
+   * Only this kind (design, doc, slides, dashboard, board, data).
    */
   kind?: string;
 }
@@ -2739,14 +2739,14 @@ export interface PublishDeliverableResult {
   deliverable_id: string;
 }
 /**
- * Register a deliverable link for the project (doc, design, slides, dashboard, board, data...). PRs are registered by the platform.
+ * Register a deliverable link for the project (doc, design, slides, dashboard, board, data...). Pull requests are not deliverables (the platform tracks them on the thread).
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "PublishDeliverableInput".
  */
 export interface PublishDeliverableInput {
   /**
-   * Known: pr, doc, design, slides, dashboard, board, data; anything else is shown as a link.
+   * Known: doc, design, slides, dashboard, board, data; anything else is shown as a link. Not pr: pull requests are tracked by the platform on the thread and are not deliverables.
    */
   kind: string;
   title: string;

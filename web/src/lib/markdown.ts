@@ -65,8 +65,25 @@ export function wrapTables(node: Root | Element): void {
   }) as typeof node.children;
 }
 
-export function renderMarkdown(text: string, transform?: UrlTransform): VNode {
+/**
+ * For small previews inside a link (cards): links become plain text (no nested <a>, nothing to
+ * focus) and images are dropped from the tree entirely, so the browser never downloads them.
+ */
+export function stripForPreview(node: Root | Element): void {
+  const out: RootContent[] = [];
+  for (const child of node.children as RootContent[]) {
+    if (child.type !== "element") out.push(child);
+    else if (child.tagName !== "img") {
+      stripForPreview(child);
+      out.push(child.tagName === "a" ? ({ type: "element", tagName: "span", properties: {}, children: child.children } as Element) : child);
+    }
+  }
+  node.children = out as typeof node.children;
+}
+
+export function renderMarkdown(text: string, transform?: UrlTransform, opts: { preview?: boolean } = {}): VNode {
   const tree = markdownTree(text, transform);
+  if (opts.preview) stripForPreview(tree);
   wrapTables(tree);
   return toJsxRuntime(tree, {
     Fragment,

@@ -10,6 +10,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/artifacts"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/delivery"
 )
 
 // HandleChunk stores one file.chunk of a publish_file upload. A malformed chunk is
@@ -29,6 +30,9 @@ func (s *Service) publishFile(ctx context.Context, tx *core.Tx, c *call) (Result
 	var in protocol.PublishFileInput
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
+	}
+	if delivery.IsPRKind(in.Kind) {
+		return Result{}, delivery.ErrPRKind
 	}
 	if c.upload == nil {
 		return Result{}, refuse("没有收到文件内容：节点守护进程需要升级到支持 publish_file 的版本")
