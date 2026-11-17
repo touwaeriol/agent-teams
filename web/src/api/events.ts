@@ -89,7 +89,8 @@ function conversationOf(qc: QueryClient, pid: string, no: number | null | undefi
   return threadOf(qc, pid, no)?.id;
 }
 
-function patchThread(qc: QueryClient, pid: string, tid: string, patch: (t: ThreadView) => ThreadView) {
+/** Rewrites one thread in the project list and in its own query (live events, optimistic updates). */
+export function patchThread(qc: QueryClient, pid: string, tid: string, patch: (t: ThreadView) => ThreadView) {
   qc.setQueryData<ThreadView[]>(keys.threads(pid), (list) => list?.map((t) => (t.id === tid ? patch(t) : t)));
   qc.setQueryData<ThreadDetail>(keys.thread(tid), (t) => (t ? { ...t, ...patch(t) } : t));
 }

@@ -15,6 +15,7 @@ import (
 	"maps"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
@@ -36,7 +37,7 @@ var (
 	ErrMergeInProgress = errors.New("合并队列里还有正在合并的条目，等它们处理完再开 PR")
 	ErrPlanOpen        = errors.New("还有主任务没有完成")
 	ErrNoPR            = errors.New("这个讨论串还没有 PR")
-	ErrChecksPending   = errors.New("PR 的检查还没有全部通过")
+	ErrNotInReview     = errors.New("这个讨论串现在不在等待验收（PR 可能已经合并或关闭，或者讨论串已经回到进行中），请刷新后再看")
 	ErrTaskNotReady    = errors.New("任务还不能进合并队列（需要成员先 complete_task）")
 	ErrNotPushed       = errors.New("这个仓库没有可合并的改动")
 	ErrBadURL          = errors.New("交付物链接必须是 http:// 或 https:// 开头的网址")
@@ -59,6 +60,11 @@ type Engine struct {
 
 	// PollInterval is how often waiting CI is polled (§8.3: 15 s).
 	PollInterval time.Duration
+	// AcceptTimeout bounds a background merge after accept (require_acceptance off).
+	AcceptTimeout time.Duration
+	// accepting holds the threads Accept is merging in the background (require_acceptance off).
+	accepting sync.Map
+
 	// PushDone runs inside the transaction that recorded a push job's git.result.
 	PushDone func(ctx context.Context, tx *core.Tx, meta map[string]any, r *protocol.GitResult) error
 }
@@ -67,8 +73,8 @@ type Engine struct {
 func New(cs *core.Store, orch *orchestrator.Orchestrator, sched *scheduler.Scheduler, gh *ghops.GitHub, gw *nodegw.Gateway,
 	hub *fanout.Hub, log *slog.Logger) *Engine {
 	return &Engine{core: cs, orch: orch, sched: sched, gh: gh, gw: gw, hub: hub, log: log, now: time.Now,
-		PollInterval: 15 * time.Second,
-		PushDone:     func(context.Context, *core.Tx, map[string]any, *protocol.GitResult) error { return nil }}
+		PollInterval: 15 * time.Second, AcceptTimeout: defaultAcceptTimeout,
+		PushDone: func(context.Context, *core.Tx, map[string]any, *protocol.GitResult) error { return nil }}
 }
 
 // reposOf resolves a project's repositories.
