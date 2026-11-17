@@ -19,3 +19,9 @@
     .at-halo { animation: none; box-shadow: 0 0 0 3px rgb(194 87 12 / 0.15); }
   }
 }
+
+/* A message the user jumped to (the link under a forwarded copy): a brief tint. */
+@keyframes at-flash { 0%, 60% { background: hsl(var(--primary) / 0.12); } 100% { background: transparent; } }
+@layer components {
+  .at-flash { animation: at-flash 2s ease-out; }
+}

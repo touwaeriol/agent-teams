@@ -83,6 +83,8 @@ func (a *API) registerConversations(api huma.API) {
 	huma.Register(api, op("list-messages", "GET", "/api/conversations/{cid}/messages", "conversations"), a.listMessages)
 	huma.Register(api, op("post-message", "POST", "/api/conversations/{cid}/messages", "conversations", status(202),
 		summary("Send a message to the conversation's employee (coordinator or thread lead)")), a.postMessage)
+	huma.Register(api, op("forward-messages", "POST", "/api/conversations/{cid}/forward", "conversations",
+		summary("Forward your own project-chat messages to a thread's lead (or into a new thread) as your words")), a.forward)
 	huma.Register(api, op("interrupt-conversation", "POST", "/api/conversations/{cid}/interrupt", "conversations", status(202)), a.interrupt)
 	huma.Register(api, op("list-questions", "GET", "/api/conversations/{cid}/questions", "conversations"), a.listQuestions)
 	huma.Register(api, op("answer-question", "POST", "/api/conversations/{cid}/questions/{qid}/answer", "conversations",
@@ -231,4 +233,79 @@ func (a *API) answerCard(ctx context.Context, u store.User, convID string, in *a
 	}
 	no, err := core.ThreadNoOf(ctx, a.e.Core.Pool, q.ThreadID)
 	return core.QuestionViewOf(q, no), err
+}
+
+type forwardInput struct {
+	CID            string `path:"cid" maxLength:"64" doc:"The project's coordinator conversation"`
+	IdempotencyKey string `header:"Idempotency-Key" maxLength:"128"`
+	Body           struct {
+		MessageIDs []int64           `json:"message_ids" minItems:"1" maxItems:"20" doc:"Your own messages in this conversation, any order (forwarded oldest first)"`
+		ThreadNo   int               `json:"thread_no,omitempty" minimum:"0" doc:"Target thread; omit (0) with new_thread to open one"`
+		NewThread  *ForwardNewThread `json:"new_thread,omitempty" doc:"Open a new thread whose brief is the forwarded messages"`
+		Note       string            `json:"note,omitempty" maxLength:"2000" doc:"A short line sent with the messages"`
+	}
+}
+
+// ForwardNewThread opens a thread for forwarded messages.
+type ForwardNewThread struct {
+	Title string `json:"title,omitempty" maxLength:"200" doc:"Default: the first forwarded line"`
+}
+
+// ForwardView is what POST /api/conversations/{cid}/forward did.
+type ForwardView struct {
+	ThreadNo  int                `json:"thread_no"`
+	ThreadID  string             `json:"thread_id"`
+	Title     string             `json:"title"`
+	Count     int                `json:"count"`
+	Created   bool               `json:"created" doc:"A new thread was opened"`
+	Duplicate bool               `json:"duplicate" doc:"The same messages went to the same place moments ago; nothing new was sent"`
+	Messages  []core.MessageView `json:"messages" doc:"The copies in the thread conversation"`
+}
+
+type forwardOutput struct{ Body ForwardView }
+
+func (a *API) forward(ctx context.Context, in *forwardInput) (*forwardOutput, error) {
+	u, c, err := a.conversation(ctx, in.CID)
+	if err != nil {
+		return nil, err
+	}
+	if c.Kind != "coordinator" {
+		return nil, httpapi.Invalid("cid", "只能从项目对话转发消息")
+	}
+	if (in.Body.ThreadNo > 0) == (in.Body.NewThread != nil) {
+		return nil, httpapi.Invalid("thread_no", "选一个讨论串，或者新建一个")
+	}
+	if err := a.limitMessages(ctx, u.ID); err != nil {
+		return nil, err
+	}
+	req := orchestrator.ForwardRequest{UserID: u.ID, ProjectID: deref(c.ProjectID), MessageIDs: in.Body.MessageIDs,
+		ThreadNo: in.Body.ThreadNo, Note: in.Body.Note, By: "user"}
+	if in.Body.NewThread != nil {
+		req.NewTitle = in.Body.NewThread.Title
+	}
+	v, err := idempotent(ctx, a, u.ID, "forward:"+c.ID, in.IdempotencyKey, func() (ForwardView, error) {
+		return a.runForward(ctx, req)
+	})
+	if err != nil {
+		return nil, fail(err, "没有这个讨论串")
+	}
+	return &forwardOutput{Body: v}, nil
+}
+
+func (a *API) runForward(ctx context.Context, req orchestrator.ForwardRequest) (ForwardView, error) {
+	var res orchestrator.ForwardResult
+	err := a.e.Core.InTx(ctx, func(tx *core.Tx) error {
+		var err error
+		res, err = a.e.Orch.Forward(ctx, tx, req)
+		return err
+	})
+	if err != nil {
+		return ForwardView{}, err
+	}
+	v := ForwardView{ThreadNo: res.Thread.No, ThreadID: res.Thread.ID, Title: res.Thread.Title, Count: len(res.Sources),
+		Created: res.Created, Duplicate: res.Duplicate, Messages: make([]core.MessageView, 0, len(res.Messages))}
+	for _, m := range res.Messages {
+		v.Messages = append(v.Messages, core.MessageViewOf(m))
+	}
+	return v, nil
 }

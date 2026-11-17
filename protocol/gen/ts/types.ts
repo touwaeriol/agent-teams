@@ -2032,6 +2032,192 @@ export interface FinishInput {
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "ForwardToThreadResult".
+ */
+export interface ForwardToThreadResult {
+  no: ThreadNo;
+  thread_id: string;
+  count: number;
+  created: boolean;
+}
+/**
+ * Forward the user's own project-chat messages, word for word with their images, files and @ references, to a thread's lead (thread_no; a finished thread is reopened, an archived one refuses) or into a new thread (new_thread, the messages become its brief). The lead receives them as the user's words; use this instead of paraphrasing when the request belongs to a thread. Each user message ends with [message_id: N]; without message_ids the user's latest messages are forwarded.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "ForwardToThreadInput".
+ */
+export interface ForwardToThreadInput {
+  thread_no?: ThreadNo;
+  /**
+   * Open a new thread for the messages instead of thread_no.
+   */
+  new_thread?: {
+    title?: string;
+  };
+  /**
+   * The user's messages to forward ([message_id: N] at the end of each), any order.
+   *
+   * @minItems 1
+   * @maxItems 20
+   */
+  message_ids?:
+    | [number]
+    | [number, number]
+    | [number, number, number]
+    | [number, number, number, number]
+    | [number, number, number, number, number]
+    | [number, number, number, number, number, number]
+    | [number, number, number, number, number, number, number]
+    | [number, number, number, number, number, number, number, number]
+    | [number, number, number, number, number, number, number, number, number]
+    | [number, number, number, number, number, number, number, number, number, number]
+    | [number, number, number, number, number, number, number, number, number, number, number]
+    | [number, number, number, number, number, number, number, number, number, number, number, number]
+    | [number, number, number, number, number, number, number, number, number, number, number, number, number]
+    | [
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number
+      ]
+    | [
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number
+      ]
+    | [
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number
+      ]
+    | [
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number
+      ]
+    | [
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number
+      ]
+    | [
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number
+      ]
+    | [
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number
+      ];
+  /**
+   * Without message_ids: forward the user's latest N messages (default 1).
+   */
+  latest?: number;
+  /**
+   * Optional short note of yours sent along (context the lead needs; never a rewrite of the user's words).
+   */
+  note?: string;
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "GetTaskResult".
  */
 export interface GetTaskResult {

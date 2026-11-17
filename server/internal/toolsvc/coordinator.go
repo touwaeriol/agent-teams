@@ -170,3 +170,53 @@ func (s *Service) messageThread(ctx context.Context, tx *core.Tx, c *call) (Resu
 	}
 	return okText(fmt.Sprintf("已转给 #%d 的组长", t.No)), nil
 }
+
+// forwardToThread passes the user's own project-chat messages, word for word, to a thread's
+// lead (or into a new thread) as the user's words (coordinator).
+func (s *Service) forwardToThread(ctx context.Context, tx *core.Tx, c *call) (Result, error) {
+	var in protocol.ForwardToThreadInput
+	if err := c.decode(&in); err != nil {
+		return Result{}, err
+	}
+	if (in.ThreadNo != nil) == (in.NewThread != nil) {
+		return Result{}, refuse("thread_no 和 new_thread 二选一")
+	}
+	req := orchestrator.ForwardRequest{UserID: c.sc.OwnerID, ProjectID: c.emp().ProjectID, Note: deref(in.Note), By: "coordinator", Latest: 1}
+	for _, id := range in.MessageIds {
+		req.MessageIDs = append(req.MessageIDs, int64(id))
+	}
+	if in.Latest != nil {
+		req.Latest = *in.Latest
+	}
+	if in.ThreadNo != nil {
+		req.ThreadNo = int(*in.ThreadNo)
+	} else {
+		req.NewTitle = deref(in.NewThread.Title)
+	}
+	res, err := s.orch.Forward(ctx, tx, req)
+	if err != nil {
+		return Result{}, refuseForward(err, req.ThreadNo)
+	}
+	out := protocol.ForwardToThreadResult{No: protocol.ThreadNo(res.Thread.No), ThreadID: res.Thread.ID, Count: len(res.Sources), Created: res.Created}
+	switch {
+	case res.Duplicate:
+		return okJSON(fmt.Sprintf("这些消息刚刚已经转发给 #%d 了，没有重复发送", res.Thread.No), out), nil
+	case res.Created:
+		return okJSON(fmt.Sprintf("已新开讨论串 #%d（%s），用户的 %d 条消息作为任务说明转给了组长", res.Thread.No, res.Thread.Title, len(res.Sources)), out), nil
+	}
+	return okJSON(fmt.Sprintf("已把用户的 %d 条消息原样转给 #%d 的组长", len(res.Sources), res.Thread.No), out), nil
+}
+
+// refuseForward explains a refused forward to the coordinator.
+func refuseForward(err error, no int) error {
+	switch {
+	case errors.Is(err, orchestrator.ErrArchived):
+		return refuse("讨论串 #%d 已归档，不能转发：请用户先在页面上取消归档，或者用 new_thread 新开一个讨论串", no)
+	case errors.Is(err, core.ErrNotFound):
+		return refuse("没有讨论串 #%d", no)
+	case errors.Is(err, orchestrator.ErrForwardEmpty), errors.Is(err, orchestrator.ErrForwardNotUser),
+		errors.Is(err, orchestrator.ErrForwardTooMany), errors.Is(err, orchestrator.ErrForwardFiles):
+		return refuse("%s（message_ids 是用户消息末尾的 [message_id: N]）", err.Error())
+	}
+	return err
+}

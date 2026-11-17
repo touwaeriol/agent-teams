@@ -54,6 +54,9 @@ type Orchestrator struct {
 	ThreadEnded func(ctx context.Context, threadID string)
 	// Approvals is consulted for allowed_tools expansion of remembered rules.
 	Rules func(ctx context.Context, q core.DB, projectID string, threadID *string, employee string) ([]string, error)
+	// RefContext resolves @ reference chips (meta.refs) again into the context block a
+	// forwarded message carries to the lead (set by the REST layer, which owns the lookups).
+	RefContext func(ctx context.Context, userID, projectID string, chips []map[string]any) string
 }
 
 // New builds the orchestrator.

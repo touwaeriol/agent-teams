@@ -2,12 +2,16 @@
 // SSE reading and small assertions. Node >= 22 (global fetch, WebSocket).
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { deflateSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 
 export const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = join(here, "..", "..");
 
-export function readEnv(file = join(here, "..", ".env.e2e")) {
+/** The stack's env file: E2E_ENV_FILE (a second stack, see up.sh) or deploy/.env.e2e. */
+export const envFile = process.env.E2E_ENV_FILE || join(here, "..", ".env.e2e");
+
+export function readEnv(file = envFile) {
   const env = {};
   for (const line of readFileSync(file, "utf8").split("\n")) {
     const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
@@ -115,4 +119,37 @@ export class SSE {
 
   types() { return [...new Set(this.events.map((e) => e.event))]; }
   close() { this.ctrl.abort(); }
+}
+
+// ---- a solid-colour PNG, built by hand (no image library) ----
+
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+
+function crc32(buf) {
+  let c = 0xffffffff;
+  for (const b of buf) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function chunk(type, data) {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length);
+  const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(body));
+  return Buffer.concat([len, body, crc]);
+}
+
+export function solidPNG(size, [r, g, b]) {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(size, 0);
+  ihdr.writeUInt32BE(size, 4);
+  ihdr.set([8, 2, 0, 0, 0], 8); // 8-bit RGB
+  const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: size }, () => [r, g, b]).flat())]);
+  const raw = Buffer.concat(Array.from({ length: size }, () => row));
+  return Buffer.concat([Buffer.from("\x89PNG\r\n\x1a\n", "binary"), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
 }

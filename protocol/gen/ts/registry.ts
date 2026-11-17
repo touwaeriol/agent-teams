@@ -113,6 +113,7 @@ export interface ToolInputs {
   complete_task: T.CompleteTaskInput;
   enqueue_merge: T.EnqueueMergeInput;
   finish: T.FinishInput;
+  forward_to_thread: T.ForwardToThreadInput;
   get_task: T.GetTaskInput;
   list_deliverables: T.ListDeliverablesInput;
   list_tasks: T.ListTasksInput;
@@ -153,6 +154,7 @@ export interface ToolResults {
   complete_task: T.CompleteTaskResult;
   enqueue_merge: T.EnqueueMergeResult;
   finish: unknown;
+  forward_to_thread: T.ForwardToThreadResult;
   get_task: T.GetTaskResult;
   list_deliverables: T.ListDeliverablesResult;
   list_tasks: T.ListTasksResult;
@@ -255,6 +257,13 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     requires: null,
     description: "Write the thread summary; it is also added to the project memory. With code changes, call it after open_pr: the thread ends when the PR merges. A thread that changed no repository (research, review, Q&A) needs no PR: finish ends it right away (done).",
     input_schema: {"description":"Write the thread summary; it is also added to the project memory. With code changes, call it after open_pr: the thread ends when the PR merges. A thread that changed no repository (research, review, Q&A) needs no PR: finish ends it right away (done).","type":"object","required":["summary"],"additionalProperties":false,"properties":{"summary":{"type":"string","minLength":1}}},
+  },
+  forward_to_thread: {
+    tiers: ["coordinator"],
+    blocking: [],
+    requires: null,
+    description: "Forward the user's own project-chat messages, word for word with their images, files and @ references, to a thread's lead (thread_no; a finished thread is reopened, an archived one refuses) or into a new thread (new_thread, the messages become its brief). The lead receives them as the user's words; use this instead of paraphrasing when the request belongs to a thread. Each user message ends with [message_id: N]; without message_ids the user's latest messages are forwarded.",
+    input_schema: {"description":"Forward the user's own project-chat messages, word for word with their images, files and @ references, to a thread's lead (thread_no; a finished thread is reopened, an archived one refuses) or into a new thread (new_thread, the messages become its brief). The lead receives them as the user's words; use this instead of paraphrasing when the request belongs to a thread. Each user message ends with [message_id: N]; without message_ids the user's latest messages are forwarded.","type":"object","additionalProperties":false,"properties":{"thread_no":{"description":"Thread number inside the project (#12).","type":"integer","minimum":1},"new_thread":{"description":"Open a new thread for the messages instead of thread_no.","type":"object","additionalProperties":false,"properties":{"title":{"type":"string","minLength":1,"maxLength":200}}},"message_ids":{"description":"The user's messages to forward ([message_id: N] at the end of each), any order.","type":"array","minItems":1,"maxItems":20,"items":{"type":"integer","minimum":1}},"latest":{"description":"Without message_ids: forward the user's latest N messages (default 1).","type":"integer","minimum":1,"maximum":20},"note":{"description":"Optional short note of yours sent along (context the lead needs; never a rewrite of the user's words).","type":"string","maxLength":2000}}},
   },
   get_task: {
     tiers: ["member"],

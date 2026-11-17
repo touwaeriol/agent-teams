@@ -5,7 +5,11 @@
 // /projects/:pid/settings[/:section] opens the project settings dialog over the board.
 import { computed, ref, watchEffect } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { useCoordinator, useMe, useProject, useThreads } from "@/api/queries";
+import { flattenMessages, useCoordinator, useMe, useMessages, useProject, useThreads } from "@/api/queries";
+import type { ForwardView } from "@/api/views";
+import ForwardBar from "@/components/app/forward/ForwardBar.vue";
+import ForwardDialog from "@/components/app/forward/ForwardDialog.vue";
+import { isSelecting, selection, stopSelecting } from "@/lib/forward";
 import SidePanel from "@/components/app/SidePanel.vue";
 import EmptyState from "@/components/common/EmptyState.vue";
 import SchedulesDialog from "@/components/app/schedules/SchedulesDialog.vue";
@@ -47,6 +51,15 @@ const setPanel = (p: Panel) => void router.replace({ query: p === "threads" ? {}
 const isWide = (w: number) => w >= clampWidth(PANEL_MAX, window.innerWidth) && w > PANEL_DEFAULT;
 const openThread = (no: number) => void router.push(threadPath(pid.value, no));
 useReminderAlerts(() => list.value, openThread);
+// Forwarding project-chat messages: the bar replaces the composer while selecting.
+const cid = computed(() => coordinator.data.value?.conversation_id);
+const chat = useMessages(cid);
+const selecting = computed(() => isSelecting(cid.value));
+const picking = ref(false);
+const forwarded = (v: ForwardView) => {
+  stopSelecting();
+  openThread(v.thread_no);
+};
 const setView = (v: ThreadViewId | null) => props.openNo && void router.replace(threadPath(pid.value, props.openNo, v));
 
 // Old links (?thread=N) open the thread route.
@@ -68,7 +81,9 @@ watchEffect(() => {
           <CoordinatorChat :pid="pid" :coordinator="coordinator.data.value" :threads="list" @open-thread="openThread" />
         </div>
       </div>
-      <CoordinatorComposer :pid="pid" :coordinator="coordinator.data.value" />
+      <ForwardBar v-if="selecting" :count="selection.ids.length" @forward="picking = true" @cancel="stopSelecting" />
+      <CoordinatorComposer v-else :pid="pid" :coordinator="coordinator.data.value" />
+      <ForwardDialog v-if="cid" v-model:open="picking" :cid="cid" :ids="selection.ids" :messages="flattenMessages(chat.data.value)" :threads="list" @done="forwarded" />
     </main>
     <SidePanel v-if="panel === 'threads'" v-slot="{ width, setWidth }" :user-id="me.data.value?.id ?? 'anon'" label="讨论串" handle-label="调整讨论串宽度">
       <PanelDetail

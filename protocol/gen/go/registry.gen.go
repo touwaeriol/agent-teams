@@ -105,6 +105,7 @@ const (
 	ToolCompleteTask       = "complete_task"
 	ToolEnqueueMerge       = "enqueue_merge"
 	ToolFinish             = "finish"
+	ToolForwardToThread    = "forward_to_thread"
 	ToolGetTask            = "get_task"
 	ToolListDeliverables   = "list_deliverables"
 	ToolListTasks          = "list_tasks"
@@ -171,6 +172,10 @@ var Tools = map[string]ToolMeta{
 	ToolFinish: {
 		Tiers: []Tier{TierLead}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(FinishInput) }, NewResult: nil,
+	},
+	ToolForwardToThread: {
+		Tiers: []Tier{TierCoordinator}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(ForwardToThreadInput) }, NewResult: func() any { return new(ForwardToThreadResult) },
 	},
 	ToolGetTask: {
 		Tiers: []Tier{TierMember}, Blocking: nil, Requires: "",

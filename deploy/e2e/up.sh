@@ -4,10 +4,12 @@
 # for run_multi.mjs), then runs postgres + valkey + migrate + control-plane + localgh on an
 # empty database.
 #   deploy/e2e/up.sh <scratch-dir>
+# A second stack next to a running one: E2E_ENV_FILE=<scratch>/env E2E_PROJECT=at-mine E2E_IMAGE=<tag>
+# (the run scripts read E2E_ENV_FILE too).
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 dir="$(mkdir -p "$1" && cd "$1" && pwd)"
-env_file="$repo/deploy/.env.e2e"
+env_file="${E2E_ENV_FILE:-$repo/deploy/.env.e2e}"
 compose() { ENV_FILE="$env_file" "$repo/deploy/compose.sh" -f "$repo/deploy/docker-compose.e2e.yml" "$@"; }
 port_free() { ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
 pick_port() { for p in $(seq 3470 3499); do port_free "$p" && { echo "$p"; return; }; done; exit 1; }
@@ -17,14 +19,14 @@ write_env() {
   local port; port="$(pick_port)"
   umask 077
   cat > "$env_file" <<ENV
-COMPOSE_PROJECT_NAME=at-v2e2e
+COMPOSE_PROJECT_NAME=${E2E_PROJECT:-at-v2e2e}
 PORT=$port
 BIND=127.0.0.1
 AGENT_TEAMS_PUBLIC_URL=http://127.0.0.1:$port
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
 VALKEY_PASSWORD=$(openssl rand -hex 24)
 AGENT_TEAMS_SECRET_KEY=$(openssl rand -hex 24)
-AGENT_TEAMS_IMAGE=agent-teams-server:e2e
+AGENT_TEAMS_IMAGE=${E2E_IMAGE:-agent-teams-server:e2e}
 DATA_DIR=$dir/data
 E2E_GIT_ROOT=$dir/gitroot
 E2E_UID=$(id -u)

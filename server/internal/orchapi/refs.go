@@ -253,6 +253,38 @@ func (a *API) resolveRefs(ctx context.Context, u store.User, c core.Conversation
 	return b.String(), chips, nil
 }
 
+// refContext resolves stored reference chips (meta.refs) again for a forwarded message;
+// a reference that no longer resolves becomes a line saying so instead of failing the forward.
+func (a *API) refContext(ctx context.Context, userID, projectID string, chips []map[string]any) string {
+	p, err := a.e.Store.ProjectOf(ctx, userID, projectID)
+	if err != nil || len(chips) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n---\n[用户用 @ 引用的上下文]")
+	for _, chip := range chips {
+		section, _, err := a.resolveRef(ctx, store.User{ID: userID}, p, refOfChip(chip))
+		if err != nil {
+			section = fmt.Sprintf("### %v\n（这个引用现在读不到了：%v）", chip["label"], err)
+		}
+		b.WriteString("\n\n" + section)
+	}
+	return b.String()
+}
+
+// refOfChip turns a stored chip back into the reference it was made from.
+func refOfChip(chip map[string]any) MessageRef {
+	str := func(k string) string { v, _ := chip[k].(string); return v }
+	no := 0
+	switch v := chip["no"].(type) {
+	case float64:
+		no = int(v)
+	case int:
+		no = v
+	}
+	return MessageRef{Kind: str("kind"), Repo: str("repo"), Path: str("path"), No: no, ID: str("id"), Name: str("name")}
+}
+
 func (a *API) resolveRef(ctx context.Context, u store.User, p store.Project, r MessageRef) (string, map[string]any, error) {
 	switch r.Kind {
 	case "file":

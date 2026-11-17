@@ -86,10 +86,28 @@ func (o *Orchestrator) PostUserMessageWith(ctx context.Context, in UserMessage) 
 			return err
 		}
 		rec := &core.NewMessage{ConversationID: c.ID, Role: "user", Author: "user", Kind: kind, Content: content, Meta: meta}
-		m, err = o.Deliver(ctx, tx, emp, Delivery{Text: text + in.Context, Kind: "user", Priority: prio, Interrupt: interrupt, Record: rec, Images: files})
+		tag, err := messageTag(ctx, tx, c, rec)
+		if err != nil {
+			return err
+		}
+		m, err = o.Deliver(ctx, tx, emp, Delivery{Text: text + in.Context + tag, Kind: "user", Priority: prio, Interrupt: interrupt, Record: rec, Images: files})
 		return err
 	})
 	return m, err
+}
+
+// messageTag gives the coordinator the stored id of each user message ("[message_id: 42]" at
+// the end), so forward_to_thread can name the messages it forwards.
+func messageTag(ctx context.Context, tx *core.Tx, c core.Conversation, rec *core.NewMessage) (string, error) {
+	if c.Kind != "coordinator" {
+		return "", nil
+	}
+	id, err := core.NextMessageID(ctx, tx)
+	if err != nil {
+		return "", err
+	}
+	rec.ID = id
+	return fmt.Sprintf("\n\n[message_id: %d]", id), nil
 }
 
 // messageImages loads the attached images; they must belong to the conversation's project.

@@ -40,7 +40,13 @@ type API struct {
 }
 
 // New returns the API for an engine.
-func New(e *engine.Engine, reg *office.Registry) *API { return &API{e: e, office: reg} }
+func New(e *engine.Engine, reg *office.Registry) *API {
+	a := &API{e: e, office: reg}
+	if e != nil {
+		e.Orch.RefContext = a.refContext
+	}
+	return a
+}
 
 // Register mounts every route (httpapi Deps.Extensions).
 func (a *API) Register(api huma.API, r gin.IRoutes) {
@@ -110,6 +116,10 @@ var errorMap = []struct {
 	{orchestrator.ErrBadState, 409, "bad_state"},
 	{orchestrator.ErrPRAwaiting, 409, "pr_awaiting"},
 	{orchestrator.ErrMerging, 409, "merge_in_progress"},
+	{orchestrator.ErrForwardEmpty, 422, "validation"},
+	{orchestrator.ErrForwardNotUser, 422, "validation"},
+	{orchestrator.ErrForwardTooMany, 422, "validation"},
+	{orchestrator.ErrForwardFiles, 422, "validation"},
 	{delivery.ErrPRExists, 409, "pr_exists"},
 	{delivery.ErrNothingToPR, 409, "nothing_to_pr"},
 	{delivery.ErrBaseNeedsRepo, 422, "validation"},

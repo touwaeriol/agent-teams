@@ -64,6 +64,9 @@ export const conversations = {
         ...idem(),
       }),
     ),
+  /** Forward the user's own messages of this project chat to a thread (thread_no) or into a new one (new_thread). */
+  forward: (cid: string, body: S["ForwardInputBody"]) =>
+    unwrap(client.POST("/api/conversations/{cid}/forward", { params: { path: { cid } }, body, ...idem() })),
   interrupt: (cid: string) => unwrap(client.POST("/api/conversations/{cid}/interrupt", { params: { path: { cid } } })),
   answer: (cid: string, qid: string, answer: string, reason?: string, answers?: AskChoice[]) =>
     unwrap(client.POST("/api/conversations/{cid}/questions/{qid}/answer", { params: { path: { cid, qid } }, body: { answer, reason, ...(answers ? { answers } : {}) }, ...idem() })),

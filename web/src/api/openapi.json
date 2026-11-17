@@ -1716,6 +1716,101 @@
         ],
         "type": "object"
       },
+      "ForwardInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "message_ids": {
+            "description": "Your own messages in this conversation, any order (forwarded oldest first)",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "new_thread": {
+            "$ref": "#/components/schemas/ForwardNewThread",
+            "description": "Open a new thread whose brief is the forwarded messages"
+          },
+          "note": {
+            "description": "A short line sent with the messages",
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "thread_no": {
+            "description": "Target thread; omit (0) with new_thread to open one",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "message_ids"
+        ],
+        "type": "object"
+      },
+      "ForwardNewThread": {
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "description": "Default: the first forwarded line",
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ForwardView": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "created": {
+            "description": "A new thread was opened",
+            "type": "boolean"
+          },
+          "duplicate": {
+            "description": "The same messages went to the same place moments ago; nothing new was sent",
+            "type": "boolean"
+          },
+          "messages": {
+            "description": "The copies in the thread conversation",
+            "items": {
+              "$ref": "#/components/schemas/MessageView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "thread_id": {
+            "type": "string"
+          },
+          "thread_no": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_no",
+          "thread_id",
+          "title",
+          "count",
+          "created",
+          "duplicate",
+          "messages"
+        ],
+        "type": "object"
+      },
       "Gates": {
         "additionalProperties": false,
         "properties": {
@@ -7306,6 +7401,68 @@
           }
         },
         "summary": "What the conversation's employee works from: instructions, memory, conversation and session token use",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/api/conversations/{cid}/forward": {
+      "post": {
+        "operationId": "forward-messages",
+        "parameters": [
+          {
+            "description": "The project's coordinator conversation",
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "description": "The project's coordinator conversation",
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForwardInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForwardView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Forward your own project-chat messages to a thread's lead (or into a new thread) as your words",
         "tags": [
           "conversations"
         ]

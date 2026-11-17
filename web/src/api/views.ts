@@ -5,6 +5,7 @@
 // tasks, questions, messages, deliverables, office) are written here from
 // api.md until the orchestration routes land in openapi.json; when they do,
 // replace each hand-written type with the generated one in this file only.
+import type { ForwardedFrom } from "@/lib/forward";
 import type { components } from "./schema";
 
 type S = components["schemas"];
@@ -40,6 +41,7 @@ export type APIErrorBody = S["APIError"];
 export type ScheduleView = S["Schedule"];
 export type ScheduleBody = S["ScheduleBody"];
 export type ProjectUsage = S["ProjectUsage"];
+export type ForwardView = S["ForwardView"];
 
 export type ThreadStatus = "queued" | "running" | "waiting" | "review" | "done" | "failed" | "paused" | "archived";
 export type MainTaskStatus = "todo" | "doing" | "done";
@@ -256,6 +258,10 @@ export interface MessageView {
     employee?: string;
     todos?: TodoItem[];
     deliverable?: { id: string; kind: string; title: string; url: string; hosted?: boolean; entry?: string; render?: string; version?: number };
+    /** A copy in a thread chat of the user's project-chat message (forwarded). */
+    forwarded_from?: ForwardedFrom;
+    /** The project-chat note of a forward. */
+    forwarded_to?: { no: number; count: number; created: boolean; by: "user" | "coordinator"; message_ids: number[] };
   };
   created_at: string;
 }

@@ -58,6 +58,8 @@ func EnsureCoordinatorConversation(ctx context.Context, tx *Tx, userID, projectI
 
 // NewMessage is what InsertMessage stores.
 type NewMessage struct {
+	// ID is a reserved id (NextMessageID); 0 takes the next one.
+	ID             int64
 	ConversationID string
 	Role           string
 	Author         string
@@ -74,7 +76,7 @@ func InsertMessage(ctx context.Context, tx *Tx, n NewMessage) (Message, error) {
 	if n.Meta == nil {
 		n.Meta = map[string]any{}
 	}
-	m := Message{ConversationID: n.ConversationID, Role: n.Role, Content: n.Content, Author: n.Author, Kind: n.Kind,
+	m := Message{ID: n.ID, ConversationID: n.ConversationID, Role: n.Role, Content: n.Content, Author: n.Author, Kind: n.Kind,
 		Meta: n.Meta}
 	if err := tx.Gorm(ctx).Clauses(clause.Returning{}).Create(&m).Error; err != nil {
 		return m, err

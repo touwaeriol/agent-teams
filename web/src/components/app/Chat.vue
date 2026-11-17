@@ -26,10 +26,15 @@ const props = withDefaults(
     inserts?: I[];
     /** Project id, for links from cards (deliverables). */
     pid?: string;
+    /** The user's bubbles can be forwarded to a thread (project chat). */
+    forwardable?: boolean;
+    /** Selecting messages to forward: the chosen ids. */
+    selecting?: boolean;
+    selectedIds?: number[];
   }>(),
-  { threads: () => [], speakerColor: "#C8622A", inserts: () => [], pid: "", filter: undefined, select: undefined },
+  { threads: () => [], speakerColor: "#C8622A", inserts: () => [], pid: "", filter: undefined, select: undefined, selectedIds: () => [] },
 );
-const emit = defineEmits<{ openThread: [no: number] }>();
+const emit = defineEmits<{ openThread: [no: number]; forward: [id: number]; toggle: [id: number] }>();
 defineSlots<{ insert(p: { item: I }): unknown; empty(): unknown; after(): unknown }>();
 
 const query = useMessages(() => props.cid);
@@ -58,7 +63,12 @@ useChatScroll(() => props.cid, end, () => messages.value.length + props.inserts.
         :speaker-color="speakerColor"
         :compact="compact"
         :pid="pid"
+        :forwardable="forwardable"
+        :selecting="selecting && it.block.kind === 'user'"
+        :selected="selectedIds.includes(Number(it.block.message.id))"
         @open-thread="(no) => emit('openThread', no)"
+        @forward="(id) => emit('forward', id)"
+        @toggle="(id) => emit('toggle', id)"
       />
       <div v-else><slot name="insert" :item="it.node as I" /></div>
     </template>

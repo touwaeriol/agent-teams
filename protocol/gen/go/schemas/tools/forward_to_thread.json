@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/forward_to_thread.json",
+  "title": "ForwardToThreadInput",
+  "description": "Forward the user's own project-chat messages, word for word with their images, files and @ references, to a thread's lead (thread_no; a finished thread is reopened, an archived one refuses) or into a new thread (new_thread, the messages become its brief). The lead receives them as the user's words; use this instead of paraphrasing when the request belongs to a thread. Each user message ends with [message_id: N]; without message_ids the user's latest messages are forwarded.",
+  "x-tool": {
+    "tiers": [
+      "coordinator"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "thread_no": {
+      "$ref": "common.json#/$defs/ThreadNo"
+    },
+    "new_thread": {
+      "description": "Open a new thread for the messages instead of thread_no.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      }
+    },
+    "message_ids": {
+      "description": "The user's messages to forward ([message_id: N] at the end of each), any order.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "latest": {
+      "description": "Without message_ids: forward the user's latest N messages (default 1).",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20
+    },
+    "note": {
+      "description": "Optional short note of yours sent along (context the lead needs; never a rewrite of the user's words).",
+      "type": "string",
+      "maxLength": 2000
+    }
+  },
+  "$defs": {
+    "ForwardToThreadResult": {
+      "title": "ForwardToThreadResult",
+      "type": "object",
+      "required": [
+        "no",
+        "thread_id",
+        "count",
+        "created"
+      ],
+      "properties": {
+        "no": {
+          "$ref": "common.json#/$defs/ThreadNo"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "created": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

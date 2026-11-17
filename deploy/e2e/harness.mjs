@@ -4,7 +4,7 @@
 import { spawn, execFileSync } from "node:child_process";
 import { createWriteStream, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { Client, check, repoRoot } from "./lib.mjs";
+import { Client, check, envFile, repoRoot } from "./lib.mjs";
 
 export const E2E_USER = { email: "e2e@example.com", password: "e2e-password-123456" };
 
@@ -113,5 +113,5 @@ export function gitIsAncestor(gitRoot, slug, a, b) {
 /** sql runs a read-only query in the compose PostgreSQL (facts the REST API does not expose). */
 export function sql(query) {
   return execFileSync(join(repoRoot, "deploy/compose.sh"), ["exec", "-T", "postgres", "psql", "-U", "agent_teams", "-d", "agent_teams", "-At", "-c", query],
-    { env: { ...process.env, ENV_FILE: join(repoRoot, "deploy/.env.e2e") } }).toString().trim();
+    { env: { ...process.env, ENV_FILE: envFile } }).toString().trim();
 }

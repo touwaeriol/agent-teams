@@ -49,6 +49,7 @@ p, node-token, /nodes/v2/connect, GET
 p, user, /api/attachments/:id, GET
 p, user, /api/conversations/:cid/commands, GET
 p, user, /api/conversations/:cid/context, GET
+p, user, /api/conversations/:cid/forward, POST
 p, user, /api/conversations/:cid/interrupt, POST
 p, user, /api/conversations/:cid/model, GET
 p, user, /api/conversations/:cid/model, PUT

@@ -2234,6 +2234,121 @@ func (j *FirstMessage) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+// Forward the user's own project-chat messages, word for word with their images,
+// files and @ references, to a thread's lead (thread_no; a finished thread is
+// reopened, an archived one refuses) or into a new thread (new_thread, the
+// messages become its brief). The lead receives them as the user's words; use this
+// instead of paraphrasing when the request belongs to a thread. Each user message
+// ends with [message_id: N]; without message_ids the user's latest messages are
+// forwarded.
+type ForwardToThreadInput struct {
+	// Without message_ids: forward the user's latest N messages (default 1).
+	Latest *int `json:"latest,omitempty,omitzero"`
+
+	// The user's messages to forward ([message_id: N] at the end of each), any order.
+	MessageIds []int `json:"message_ids,omitempty,omitzero"`
+
+	// Open a new thread for the messages instead of thread_no.
+	NewThread *ForwardToThreadInputNewThread `json:"new_thread,omitempty,omitzero"`
+
+	// Optional short note of yours sent along (context the lead needs; never a
+	// rewrite of the user's words).
+	Note *string `json:"note,omitempty,omitzero"`
+
+	// ThreadNo corresponds to the JSON schema field "thread_no".
+	ThreadNo *ThreadNo `json:"thread_no,omitempty,omitzero"`
+}
+
+// Open a new thread for the messages instead of thread_no.
+type ForwardToThreadInputNewThread struct {
+	// Title corresponds to the JSON schema field "title".
+	Title *string `json:"title,omitempty,omitzero"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ForwardToThreadInputNewThread) UnmarshalJSON(value []byte) error {
+	type Plain ForwardToThreadInputNewThread
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.Title != nil && utf8.RuneCountInString(string(*plain.Title)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "title", 1)
+	}
+	if plain.Title != nil && utf8.RuneCountInString(string(*plain.Title)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "title", 200)
+	}
+	*j = ForwardToThreadInputNewThread(plain)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ForwardToThreadInput) UnmarshalJSON(value []byte) error {
+	type Plain ForwardToThreadInput
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.Latest != nil && 20 < *plain.Latest {
+		return fmt.Errorf("field %s: must be <= %v", "latest", 20)
+	}
+	if plain.Latest != nil && 1 > *plain.Latest {
+		return fmt.Errorf("field %s: must be >= %v", "latest", 1)
+	}
+	if plain.MessageIds != nil && len(plain.MessageIds) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "message_ids", 1)
+	}
+	if len(plain.MessageIds) > 20 {
+		return fmt.Errorf("field %s length: must be <= %d", "message_ids", 20)
+	}
+	if plain.Note != nil && utf8.RuneCountInString(string(*plain.Note)) > 2000 {
+		return fmt.Errorf("field %s length: must be <= %d", "note", 2000)
+	}
+	*j = ForwardToThreadInput(plain)
+	return nil
+}
+
+type ForwardToThreadResult struct {
+	// Count corresponds to the JSON schema field "count".
+	Count int `json:"count"`
+
+	// Created corresponds to the JSON schema field "created".
+	Created bool `json:"created"`
+
+	// No corresponds to the JSON schema field "no".
+	No ThreadNo `json:"no"`
+
+	// ThreadID corresponds to the JSON schema field "thread_id".
+	ThreadID string `json:"thread_id"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ForwardToThreadResult) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["count"]; raw != nil && !ok {
+		return fmt.Errorf("field count in ForwardToThreadResult: required")
+	}
+	if _, ok := raw["created"]; raw != nil && !ok {
+		return fmt.Errorf("field created in ForwardToThreadResult: required")
+	}
+	if _, ok := raw["no"]; raw != nil && !ok {
+		return fmt.Errorf("field no in ForwardToThreadResult: required")
+	}
+	if _, ok := raw["thread_id"]; raw != nil && !ok {
+		return fmt.Errorf("field thread_id in ForwardToThreadResult: required")
+	}
+	type Plain ForwardToThreadResult
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = ForwardToThreadResult(plain)
+	return nil
+}
+
 // Show a task: instruction, status, dependencies and result.
 type GetTaskInput struct {
 	// TaskID corresponds to the JSON schema field "task_id".

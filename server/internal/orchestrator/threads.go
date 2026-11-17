@@ -229,7 +229,11 @@ func (o *Orchestrator) start(ctx context.Context, t core.Thread) error {
 		if err != nil {
 			return err
 		}
-		_, err = o.Deliver(ctx, tx, lead, Delivery{Text: briefText(cur, p), Kind: "user", Priority: "next"})
+		files, err := briefFiles(ctx, tx, t.ID)
+		if err != nil {
+			return err
+		}
+		_, err = o.Deliver(ctx, tx, lead, Delivery{Text: briefText(cur, p), Kind: "user", Priority: "next", Images: files})
 		return err
 	})
 }

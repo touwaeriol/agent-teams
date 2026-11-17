@@ -102,7 +102,7 @@ func New(cs *core.Store, st *store.Store, orch *orchestrator.Orchestrator, sched
 func (s *Service) table() map[string]handler {
 	return map[string]handler{
 		protocol.ToolOpenThread: s.openThread, protocol.ToolListThreads: s.listThreads, protocol.ToolThreadStatus: s.threadStatus,
-		protocol.ToolMessageThread: s.messageThread, protocol.ToolRemember: s.remember, protocol.ToolAskUser: s.askUser,
+		protocol.ToolMessageThread: s.messageThread, protocol.ToolForwardToThread: s.forwardToThread, protocol.ToolRemember: s.remember, protocol.ToolAskUser: s.askUser,
 		protocol.ToolSetStatus: s.setStatus, protocol.ToolUpdatePlan: s.updatePlan, protocol.ToolAssignTask: s.assignTask,
 		protocol.ToolListTasks: s.listTasks, protocol.ToolCancelTask: s.cancelTask, protocol.ToolReplyTo: s.replyTo,
 		protocol.ToolBroadcast: s.broadcast, protocol.ToolSendMessage: s.sendMessage, protocol.ToolEnqueueMerge: s.enqueueMerge,

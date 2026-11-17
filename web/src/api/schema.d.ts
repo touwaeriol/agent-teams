@@ -387,6 +387,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/conversations/{cid}/forward": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Forward your own project-chat messages to a thread's lead (or into a new thread) as your words */
+        post: operations["forward-messages"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/conversations/{cid}/interrupt": {
         parameters: {
             query?: never;
@@ -2429,6 +2446,37 @@ export interface components {
         File: {
             content: string;
             path: string;
+        };
+        ForwardInputBody: {
+            /** @description Your own messages in this conversation, any order (forwarded oldest first) */
+            message_ids: number[] | null;
+            /** @description Open a new thread whose brief is the forwarded messages */
+            new_thread?: components["schemas"]["ForwardNewThread"];
+            /** @description A short line sent with the messages */
+            note?: string;
+            /**
+             * Format: int64
+             * @description Target thread; omit (0) with new_thread to open one
+             */
+            thread_no?: number;
+        };
+        ForwardNewThread: {
+            /** @description Default: the first forwarded line */
+            title?: string;
+        };
+        ForwardView: {
+            /** Format: int64 */
+            count: number;
+            /** @description A new thread was opened */
+            created: boolean;
+            /** @description The same messages went to the same place moments ago; nothing new was sent */
+            duplicate: boolean;
+            /** @description The copies in the thread conversation */
+            messages: components["schemas"]["MessageView"][] | null;
+            thread_id: string;
+            /** Format: int64 */
+            thread_no: number;
+            title: string;
         };
         Gates: {
             decision: boolean;
@@ -4546,6 +4594,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ComposerContext"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "forward-messages": {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                /** @description The project's coordinator conversation */
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ForwardInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForwardView"];
                 };
             };
             /** @description Error */

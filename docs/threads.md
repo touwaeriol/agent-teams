@@ -73,6 +73,7 @@ members:
 | `list_threads` | `status?` | 讨论串一行一个：编号、标题、状态、主要任务进度、待你处理数 |
 | `thread_status` | `no` | 计划、最近动态、组长最近一条回复、PR |
 | `message_thread` | `no`, `text` | 以“项目统筹”身份给组长发消息 |
+| `forward_to_thread` | `thread_no` 或 `new_thread`，`message_ids` / `latest`，`note?` | v2：把用户在项目对话里的原话（含图片、附件、@ 引用）原样转给组长，或作为新讨论串的任务说明 |
 | `ask_user` | `question`, `options?` | 同 agent-comms：不阻塞，答案回到统筹对话 |
 | `remember` | `text` | 写入项目记忆（source = 统筹） |
 
