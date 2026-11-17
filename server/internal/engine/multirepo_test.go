@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -82,8 +83,15 @@ func completeTask(t *testing.T, w *world, gh *fakeGitHub, n *nodetest.Node, dev 
 // TestDeliveryTwoRepos: a project with two repositories. Checkouts per repository, a base branch
 // given by the lead for one of them, thread branches created only where something merges, a merge
 // queue entry per changed repository, one PR per repository (each to its own base), acceptance
-// merging both, credentials scoped to the job's repository and cleanup per shared clone.
+// merging both, credentials scoped to the job's repository and cleanup per shared clone. A PR that
+// merges while the other is still open emits a thread event (repos[].pr_state), both when the
+// platform merges it on acceptance and when a pull_request webhook reports it.
 func TestDeliveryTwoRepos(t *testing.T) {
+	t.Run("accept", func(t *testing.T) { deliveryTwoRepos(t, false) })
+	t.Run("webhook", func(t *testing.T) { deliveryTwoRepos(t, true) })
+}
+
+func deliveryTwoRepos(t *testing.T, webhook bool) {
 	gh, ghSrv := newFakeGitHub(t)
 	w := newWorld(t, ghSrv)
 	b := w.signUp("multi@example.com")
@@ -173,8 +181,30 @@ func TestDeliveryTwoRepos(t *testing.T) {
 		t.Fatalf("thread tracks both PRs: %+v", view.Repos)
 	}
 
+	if webhook {
+		webPR, _ := gh.prOf("o/web", "thread/1-cart")
+		payload, _ := json.Marshal(map[string]any{"action": "closed", "pull_request": map[string]any{
+			"html_url": prURL("o/web", webPR.number), "merged": true}})
+		gh.mu.Lock()
+		gh.pulls["o/web#"+strconv.Itoa(webPR.number)].merged = true
+		gh.mu.Unlock()
+		if err := w.e.Delivery.GitHubEvent(w.ctx, "pull_request", payload); err != nil {
+			t.Fatal(err)
+		}
+		// Thread-level pr_state stays open: "merged" can only be o/web's repos[] entry.
+		events.wait(t, "thread", `"status":"review"`, `"pr_state":"open"`, `"pr_state":"merged"`)
+	}
 	b.must(200, "POST", "/api/threads/"+thread.ID+"/accept", nil, nil)
+	if !webhook {
+		// After the first mergeOne: one repository merged, the other still being accepted.
+		events.wait(t, "thread", `"status":"review"`, `"pr_state":"accepting"`, `"pr_state":"merged"`)
+	}
 	events.wait(t, "thread", `"status":"done"`, `"pr_state":"merged"`)
+	eventually(t, "thread done", func() bool { // the needles above also match a partial-merge frame
+		var v core.ThreadView
+		b.must(200, "GET", "/api/threads/"+thread.ID, nil, &v)
+		return v.Status == "done"
+	})
 	if web, _ := gh.prOf("o/web", "thread/1-cart"); !web.merged {
 		t.Fatal("o/web PR not merged")
 	}

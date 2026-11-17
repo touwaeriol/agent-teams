@@ -277,7 +277,7 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     blocking: [],
     requires: null,
     description: "List this project's deliverables (designs, documents… from every thread), newest first: id, title, kind, versions, who published the latest version, thread and when it changed. Use read_deliverable to fetch one's files.",
-    input_schema: {"description":"List this project's deliverables (designs, documents… from every thread), newest first: id, title, kind, versions, who published the latest version, thread and when it changed. Use read_deliverable to fetch one's files.","type":"object","additionalProperties":false,"properties":{"thread":{"description":"Only deliverables of this thread number.","type":"integer","minimum":1},"kind":{"description":"Only this kind (design, doc, slides, dashboard, board, data, pr).","type":"string","minLength":1,"maxLength":32}}},
+    input_schema: {"description":"List this project's deliverables (designs, documents… from every thread), newest first: id, title, kind, versions, who published the latest version, thread and when it changed. Use read_deliverable to fetch one's files.","type":"object","additionalProperties":false,"properties":{"thread":{"description":"Only deliverables of this thread number.","type":"integer","minimum":1},"kind":{"description":"Only this kind (design, doc, slides, dashboard, board, data).","type":"string","minLength":1,"maxLength":32}}},
   },
   list_tasks: {
     tiers: ["lead"],
@@ -353,8 +353,8 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     tiers: ["lead","member"],
     blocking: [],
     requires: null,
-    description: "Register a deliverable link for the project (doc, design, slides, dashboard, board, data...). PRs are registered by the platform.",
-    input_schema: {"description":"Register a deliverable link for the project (doc, design, slides, dashboard, board, data...). PRs are registered by the platform.","type":"object","required":["kind","title","url"],"additionalProperties":false,"properties":{"kind":{"description":"Known: pr, doc, design, slides, dashboard, board, data; anything else is shown as a link.","type":"string","minLength":1,"examples":["doc","design","slides","dashboard","board","data"]},"title":{"type":"string","minLength":1},"url":{"type":"string","format":"uri"}}},
+    description: "Register a deliverable link for the project (doc, design, slides, dashboard, board, data...). Pull requests are not deliverables (the platform tracks them on the thread).",
+    input_schema: {"description":"Register a deliverable link for the project (doc, design, slides, dashboard, board, data...). Pull requests are not deliverables (the platform tracks them on the thread).","type":"object","required":["kind","title","url"],"additionalProperties":false,"properties":{"kind":{"description":"Known: doc, design, slides, dashboard, board, data; anything else is shown as a link. Not pr: pull requests are tracked by the platform on the thread and are not deliverables.","type":"string","minLength":1,"examples":["doc","design","slides","dashboard","board","data"]},"title":{"type":"string","minLength":1},"url":{"type":"string","format":"uri"}}},
   },
   publish_file: {
     tiers: ["lead","member"],

@@ -40,6 +40,7 @@ var (
 	ErrTaskNotReady    = errors.New("任务还不能进合并队列（需要成员先 complete_task）")
 	ErrNotPushed       = errors.New("这个仓库没有可合并的改动")
 	ErrBadURL          = errors.New("交付物链接必须是 http:// 或 https:// 开头的网址")
+	ErrPRKind          = errors.New("PR 由平台在讨论串上自动跟踪，不是交付物，不能用 kind=pr 发布")
 )
 
 // mergeChannel relays merge queue hints between replicas.
@@ -283,6 +284,9 @@ func clip(s string, n int) string {
 // Publish registers a deliverable (publish_deliverable, REST).
 func (e *Engine) Publish(ctx context.Context, tx *core.Tx, projectID string, threadID *string, kind, title, url, by string,
 	detail map[string]any) (core.Deliverable, error) {
+	if IsPRKind(kind) {
+		return core.Deliverable{}, ErrPRKind
+	}
 	if !WebURL(url) {
 		return core.Deliverable{}, ErrBadURL
 	}
@@ -293,6 +297,10 @@ func (e *Engine) Publish(ctx context.Context, tx *core.Tx, projectID string, thr
 	}
 	return d, tx.EmitDeliverable(ctx, d)
 }
+
+// IsPRKind reports whether a deliverable kind names a pull request: pull requests are tracked on
+// the thread (at_thread_repos), never published as deliverables.
+func IsPRKind(kind string) bool { return strings.EqualFold(strings.TrimSpace(kind), "pr") }
 
 // WebURL reports whether a deliverable link is an absolute http(s) URL; anything else
 // (javascript:, data:, relative paths) would run or navigate inside the web app when clicked.

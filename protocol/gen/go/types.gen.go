@@ -3163,7 +3163,7 @@ func (j *JobID) UnmarshalJSON(value []byte) error {
 // first: id, title, kind, versions, who published the latest version, thread and
 // when it changed. Use read_deliverable to fetch one's files.
 type ListDeliverablesInput struct {
-	// Only this kind (design, doc, slides, dashboard, board, data, pr).
+	// Only this kind (design, doc, slides, dashboard, board, data).
 	Kind *string `json:"kind,omitempty,omitzero"`
 
 	// Only deliverables of this thread number.
@@ -4607,10 +4607,12 @@ func (j *ProtocolError) UnmarshalJSON(value []byte) error {
 }
 
 // Register a deliverable link for the project (doc, design, slides, dashboard,
-// board, data...). PRs are registered by the platform.
+// board, data...). Pull requests are not deliverables (the platform tracks them on
+// the thread).
 type PublishDeliverableInput struct {
-	// Known: pr, doc, design, slides, dashboard, board, data; anything else is shown
-	// as a link.
+	// Known: doc, design, slides, dashboard, board, data; anything else is shown as a
+	// link. Not pr: pull requests are tracked by the platform on the thread and are
+	// not deliverables.
 	Kind string `json:"kind"`
 
 	// Title corresponds to the JSON schema field "title".
