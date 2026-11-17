@@ -4,7 +4,8 @@
 --   1. every user gets a copy of each platform row they do not already have (same runtime and
 --      model; label and order kept, placed after the user's own rows);
 --   2. model ids the user's projects (coordinator_model / thread_model, Claude), roles and
---      employees (/model picks and role snapshots) name but the list lacks are added too;
+--      employees (/model picks and role snapshots) name but the list lacks are added too
+--      (only ids composer.ValidModel accepts);
 --   3. per runtime, a user without a default gets the platform default of that runtime;
 --   4. the copy is checked (every user has every platform row) before the platform rows are
 --      deleted; a failed check aborts the migration and the transaction rolls everything back.
@@ -30,7 +31,10 @@ WITH refs AS (
     UNION SELECT p.user_id, e.runtime, btrim(COALESCE(e.spec->>'model', '')) FROM at_employees e JOIN at_projects p ON p.id = e.project_id
 ), missing AS (
     SELECT r.user_id, r.runtime, r.model FROM refs r
-     WHERE r.model <> '' AND r.runtime IN ('claude', 'codex')
+     WHERE r.runtime IN ('claude', 'codex')
+       -- Same pattern as composer.ValidModel: an id the settings page would refuse stays out of the
+       -- list (sessions still run it as named).
+       AND r.model ~ '^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,99}$'
        AND EXISTS (SELECT 1 FROM at_users u WHERE u.id = r.user_id)
        AND NOT EXISTS (SELECT 1 FROM at_models m WHERE m.user_id = r.user_id AND m.runtime = r.runtime AND m.model = r.model)
 )
