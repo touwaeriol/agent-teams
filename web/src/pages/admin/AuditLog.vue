@@ -5,7 +5,7 @@ import Card from "@/components/app/Card.vue";
 import CardTitle from "@/components/app/CardTitle.vue";
 import { auditTime } from "./admin";
 
-const open = ref(false);
+const open = ref(true);
 const audit = useAudit();
 </script>
 

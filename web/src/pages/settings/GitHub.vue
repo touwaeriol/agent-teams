@@ -38,7 +38,7 @@ const installUrl = computed(() => (app.data.value?.configured ? app.data.value.i
         </span>
       </header>
       <Callout v-if="app.data.value && !app.data.value.configured" tone="warn">
-        平台的 GitHub App 还没创建，“连接 GitHub”暂时不可用。<RouterLink v-if="me.data.value?.role === 'admin'" to="/setup/github">去创建</RouterLink><template v-else>请联系管理员。</template>
+        平台的 GitHub App 还没创建，“连接 GitHub”暂时不可用。<RouterLink v-if="me.data.value?.role === 'admin'" to="/admin/github-app">去创建</RouterLink><template v-else>请联系管理员。</template>
       </Callout>
       <Loading v-if="connections.isLoading.value" />
       <EmptyState v-if="connections.data.value?.length === 0" title="还没有连接" description="连接后，新建项目时就能直接选仓库。" />

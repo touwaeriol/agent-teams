@@ -8,7 +8,7 @@ import { keys, useBuiltinCommands } from "@/api/queries";
 import Card from "@/components/app/Card.vue";
 import Spinner from "@/components/common/Spinner.vue";
 import { modeLabel, type CustomCommand } from "@/lib/commands";
-import CommandDialog from "../team/CommandDialog.vue";
+import CommandDialog from "@/pages/settings/team/CommandDialog.vue";
 
 const saved = useBuiltinCommands();
 const draft = ref<CustomCommand[]>([]);

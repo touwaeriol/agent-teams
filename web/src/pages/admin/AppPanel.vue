@@ -13,7 +13,7 @@ import ConfirmAction from "@/components/common/ConfirmAction.vue";
 import Field from "@/components/common/Field.vue";
 import KeyValueList from "@/components/common/KeyValueList.vue";
 import Spinner from "@/components/common/Spinner.vue";
-import { postToGitHub } from "./github";
+import { postToGitHub } from "@/pages/settings/github/github";
 
 const props = defineProps<{ status: GitHubAppStatus }>();
 const organization = ref("");
