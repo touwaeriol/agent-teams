@@ -88,6 +88,7 @@ type ThreadView struct {
 	PRNumber      *int             `json:"pr_number"`
 	PRURL         *string          `json:"pr_url"`
 	PRState       string           `json:"pr_state"`
+	MergeError    *string          `json:"merge_error" doc:"Why accepting could not merge the PRs (checks, conflict, permission); null when none. Cleared on accept, reject and merge"`
 	Summary       string           `json:"summary"`
 	AutoApprove   bool             `json:"auto_approve"`
 	OpenedBy      string           `json:"opened_by"`

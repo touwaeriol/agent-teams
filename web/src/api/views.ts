@@ -110,6 +110,8 @@ export interface ThreadView {
   pr_number: number | null;
   pr_url: string | null;
   pr_state: string | null;
+  /** Why the last accept failed to merge (Chinese, for the user); null once accepted again, rejected or merged. */
+  merge_error: S["ThreadView"]["merge_error"];
   /** Repositories the thread set a base for, branched or opened a PR in. */
   repos?: ThreadRepoView[];
   summary: string;

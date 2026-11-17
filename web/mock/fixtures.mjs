@@ -61,7 +61,7 @@ const members13 = [
 
 const thread = (no, title, status, extra) => ({
   id: `t${no}`, project_id: "p1", no, title, brief: "", status, queue_position: null, pause_reason: "", branch: `thread/${no}`, base_branch: "main",
-  pr_number: null, pr_url: null, pr_state: null, summary: "", auto_approve: false, opened_by: "coordinator", members: [], main_tasks: [],
+  pr_number: null, pr_url: null, pr_state: null, merge_error: null, summary: "", auto_approve: false, opened_by: "coordinator", members: [], main_tasks: [],
   counts: counts({}), lead_last: null, cost_usd_est: null, created_at: ago(70), updated_at: ago(10), ...extra,
 });
 

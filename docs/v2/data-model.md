@@ -253,6 +253,7 @@ CREATE TABLE at_threads (
   pr_number      INT,
   pr_url         TEXT,
   pr_state       TEXT NOT NULL DEFAULT '',        -- '' | open | accepting | merged | closed：全部 PR 的汇总状态；pr_number/pr_url = 第一个 PR
+  merge_error    TEXT,                            -- 00200：验收后没能合并的原因（展示给用户）；accept / reject / 合并成功时清空
   summary        TEXT NOT NULL DEFAULT '',
   auto_approve   BOOLEAN NOT NULL DEFAULT FALSE,
   opened_by      TEXT NOT NULL DEFAULT 'coordinator', -- coordinator | user
