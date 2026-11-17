@@ -3,6 +3,7 @@ package engine_test
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -86,7 +87,7 @@ func TestPublishFileScreenshotIsAttachment(t *testing.T) {
 }
 
 // TestScreenshotsAreNotLibraryFiles: the library refuses images and SVG; list_deliverables, the
-// thread's deliverable count and latest deliverable and the project overview leave out hosted images
+// thread's deliverable count and latest deliverable, the project overview and search leave out hosted images
 // published before (the rows stay in the library).
 func TestScreenshotsAreNotLibraryFiles(t *testing.T) {
 	tm, _ := startDesignTeam(t)
@@ -138,6 +139,16 @@ func TestScreenshotsAreNotLibraryFiles(t *testing.T) {
 		if d.Title == "旧截图" {
 			t.Fatalf("overview lists the old image")
 		}
+	}
+	// Project search shows deliverables too: the old image's title finds nothing, the spec is found.
+	var found struct{ Deliverables []core.DeliverableView }
+	tm.b.must(200, "GET", "/api/projects/"+tm.projectID+"/search?q="+url.QueryEscape("旧截图"), nil, &found)
+	if len(found.Deliverables) != 0 {
+		t.Fatalf("search finds the old image %+v", found.Deliverables)
+	}
+	tm.b.must(200, "GET", "/api/projects/"+tm.projectID+"/search?q="+url.QueryEscape("规格"), nil, &found)
+	if len(found.Deliverables) != 1 || found.Deliverables[0].ID != spec.DeliverableID {
+		t.Fatalf("search for the spec %+v", found.Deliverables)
 	}
 }
 
