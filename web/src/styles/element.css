@@ -360,3 +360,17 @@ html.dark .el-message--warning { --el-message-bg-color: hsl(64 100% 6%); --el-me
 .at-submenu > .el-dropdown { display: block; width: 100%; }
 .at-submenu .el-dropdown-menu__item { cursor: pointer; outline: none; }
 .el-dropdown-menu__item.is-disabled .at-kbd { opacity: 0.7; }
+
+/* Image preview (components/app/ImagePreview.vue): a darker mask so the image stands out, and
+   the "2 / 5" counter as a pill above the toolbar, readable on any page behind it. Scoped under
+   the wrapper: the Element Plus chunk's CSS can load after this file in the build. */
+.el-image-viewer__wrapper .el-image-viewer__mask { opacity: 0.8; }
+.el-image-viewer__wrapper .el-image-viewer__progress {
+  bottom: 88px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.55);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  opacity: 1;
+}

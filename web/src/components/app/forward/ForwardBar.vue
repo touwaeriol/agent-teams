@@ -6,8 +6,8 @@ import { MAX_FORWARD } from "@/lib/forward";
 
 defineProps<{ count: number }>();
 const emit = defineEmits<{ forward: []; cancel: [] }>();
-// Esc leaves the selection (unless a dialog is open: it closes first).
-const onKey = (e: KeyboardEvent) => e.key === "Escape" && !document.querySelector(".el-overlay-dialog") && emit("cancel");
+// Esc leaves the selection (unless a dialog or the image preview is open: it closes first).
+const onKey = (e: KeyboardEvent) => e.key === "Escape" && !document.querySelector(".el-overlay-dialog, .el-image-viewer__wrapper") && emit("cancel");
 onMounted(() => window.addEventListener("keydown", onKey));
 onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 </script>
