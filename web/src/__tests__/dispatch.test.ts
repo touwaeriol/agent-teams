@@ -124,6 +124,11 @@ describe("DispatchMessage", () => {
     const w = await mountDispatch(dispatch({ source }), "/projects/p1/threads/12/full");
     expect(w.get("[data-dispatch-back]").attributes("href")).toBe("/projects/p1?msg=41");
   });
+  it("a quote whose attachments are null shows just the words", async () => {
+    const w = await mountDispatch(dispatch({ source: { ...source, attachments: null } }));
+    expect(w.get("[data-dispatch-source]").text()).toContain("登录页太亮了");
+    expect(w.find("[data-dispatch-source] img").exists()).toBe(false);
+  });
   it("shows no quote without a source", async () => {
     const w = await mountDispatch(dispatch());
     expect(w.find("[data-dispatch-source]").exists()).toBe(false);

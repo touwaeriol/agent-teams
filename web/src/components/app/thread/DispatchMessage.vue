@@ -36,7 +36,7 @@ const foldStyle = computed(() =>
     <blockquote v-if="dispatch.source" class="flex flex-col gap-2 rounded-r-lg border-l-[3px] border-border bg-raised/60 py-2 pl-3 pr-3 text-[13px] leading-[22px] text-muted-foreground" data-dispatch-source>
       <span class="text-xs">你的原话</span>
       <p v-if="dispatch.source.content" class="line-clamp-3 whitespace-pre-wrap break-words text-foreground/80">{{ dispatch.source.content }}</p>
-      <MessageImages :items="dispatch.source.attachments" align="start" small />
+      <MessageImages :items="dispatch.source.attachments ?? undefined" align="start" small />
       <RouterLink v-if="back" :to="back" class="self-start text-xs hover:text-foreground hover:underline" data-dispatch-back>在统筹会话中查看原消息</RouterLink>
     </blockquote>
     <div :style="foldStyle" data-brief>
