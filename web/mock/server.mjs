@@ -189,7 +189,7 @@ const routes = [
   ["GET", /^\/api\/projects$/, (req, res) => json(res, 200, state.projects)],
   ["POST", /^\/api\/projects$/, async (req, res) => {
     const b = await body(req);
-    const p = { ...state.projects[3], id: `p${Date.now()}`, name: b.name, repo: b.repo ?? null, branch: b.branch ?? "main", git_connection_id: b.git_connection_id ?? null, pinned: false, archived: false, waiting: 0, created_at: now(), updated_at: now() };
+    const p = { ...state.projects[3], id: `p${Date.now()}`, name: b.name, coordinator_model: b.coordinator_model ?? "", thread_model: b.thread_model ?? "", thread_codex_model: b.thread_codex_model ?? "", repo: b.repo ?? null, branch: b.branch ?? "main", git_connection_id: b.git_connection_id ?? null, pinned: false, archived: false, waiting: 0, created_at: now(), updated_at: now() };
     state.projects.unshift(p);
     json(res, 201, p);
   }],

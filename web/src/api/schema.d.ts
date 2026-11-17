@@ -2901,6 +2901,12 @@ export interface components {
             require_acceptance?: boolean;
             /** @enum {string} */
             work_mode?: "worktree" | "clone";
+            /** @description '' = the coordinator role's model */
+            coordinator_model?: string;
+            /** @description '' = each Claude Code lead/member role's model */
+            thread_model?: string;
+            /** @description '' = each Codex lead/member role's model */
+            thread_codex_model?: string;
         };
         ProjectRef: {
             id: string;
@@ -2931,6 +2937,8 @@ export interface components {
             thread_model?: string;
             /** @enum {string} */
             work_mode?: "worktree" | "clone";
+            /** @description '' = each Codex lead/member role's model */
+            thread_codex_model?: string;
         };
         ProjectUsage: {
             by_day: components["schemas"]["DayUsage"][] | null;
@@ -2968,7 +2976,7 @@ export interface components {
             require_acceptance: boolean;
             /** @description '' = each role's effort; low | medium | high | xhigh | max */
             thread_effort: string;
-            /** @description '' = each lead/member role's model */
+            /** @description '' = each Claude Code lead/member role's model */
             thread_model: string;
             /** Format: int64 */
             threads_active: number;
@@ -2978,6 +2986,8 @@ export interface components {
             waiting: number;
             /** @enum {string} */
             work_mode: "worktree" | "clone";
+            /** @description '' = each Codex lead/member role's model */
+            thread_codex_model: string;
         };
         PutLayoutInputBody: {
             /** @description Layout document (office-layout.schema.json) */
