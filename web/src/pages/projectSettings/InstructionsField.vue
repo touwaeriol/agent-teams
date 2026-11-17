@@ -27,7 +27,7 @@ const over = computed(() => text.value.length > INSTRUCTIONS_MAX);
       class="at-raised"
       placeholder="例如：回答用中文；改完前端要跑 tsc 和 vite build；仓库 org/web 的基准分支：develop。"
     />
-    <span class="flex items-center justify-end gap-3 text-[13px] text-muted-foreground">
+    <span class="flex flex-wrap items-center justify-end gap-3 text-[13px] text-muted-foreground">
       <template v-if="dirty">
         <el-button size="small" text @click="text = project.context">取消</el-button>
         <el-button size="small" type="primary" class="!ml-0" :disabled="over || update.isPending.value" @click="update.mutate({ context: text })">保存</el-button>

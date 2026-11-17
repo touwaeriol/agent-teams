@@ -35,7 +35,7 @@ const close = (o: boolean) => !o && emit("close");
         <span class="sr-only">{{ project.name }} 的设置</span>
       </div>
     </template>
-    <div class="flex h-full min-h-0 flex-1 max-md:flex-col">
+    <div class="flex h-full min-h-0 min-w-0 flex-1 max-md:flex-col">
       <nav aria-label="设置分区" class="scroll-thin flex shrink-0 gap-0.5 overflow-x-auto border-r p-3 max-md:border-b max-md:border-r-0 md:w-[200px] md:flex-col">
         <button
           v-for="s in SETTINGS_SECTIONS"
@@ -54,7 +54,8 @@ const close = (o: boolean) => !o && emit("close");
           {{ s.label }}
         </button>
       </nav>
-      <div class="scroll-thin min-h-0 flex-1 overflow-y-auto px-5 pb-8 pt-4">
+      <!-- overflow-x-hidden is only a safety net; the fix is min-w-0 above and `.at-dialog-flush .el-dialog__body > *` in element.css. -->
+      <div class="scroll-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 pb-8 pt-4">
         <MemorySection v-if="section === 'memory'" :project="project" />
         <EnvironmentSection v-else-if="section === 'environment'" :project="project" />
         <UsageSection v-else-if="section === 'usage'" :pid="project.id" />
