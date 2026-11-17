@@ -9,6 +9,7 @@ import { nextTick } from "vue";
 import { createMemoryHistory, createRouter } from "vue-router";
 import type { MessageView, ThreadDispatch, ThreadView } from "@/api/views";
 import DispatchMessage from "@/components/app/thread/DispatchMessage.vue";
+import Markdown from "@/components/Markdown.vue";
 import { briefFoldable, dispatchSpeaker, leadReading } from "@/components/app/thread/detail";
 import ThreadChat from "@/components/app/thread/ThreadChat.vue";
 import { message, thread } from "./fixtures";
@@ -67,6 +68,30 @@ describe("DispatchMessage", () => {
     expect(w.get("[data-brief] strong").text()).toBe("登录页");
     expect(w.find("[data-brief-toggle]").exists()).toBe(false);
     expect(w.get("[data-brief]").attributes("style") ?? "").not.toContain("max-height");
+  });
+  it("keeps the brief's single line endings as line breaks; other Markdown still soft-wraps", async () => {
+    const lines = "目标：登录页改暗色\n约束：只改 web/\n验收：亮暗两套截图";
+    const w = await mountDispatch(dispatch(), undefined, lines);
+    const p = w.get("[data-brief] p");
+    expect(p.findAll("br")).toHaveLength(2);
+    expect(p.element.innerHTML.replace(/\n/g, "")).toBe("目标：登录页改暗色<br>约束：只改 web/<br>验收：亮暗两套截图");
+    // Code blocks keep their own lines (no <br> inside).
+    const code = await mountDispatch(dispatch(), undefined, "看这里：\n下一行\n```\na\nb\n```");
+    expect(code.findAll("[data-brief] pre br")).toHaveLength(0);
+    expect(code.findAll("[data-brief] p br")).toHaveLength(1);
+    // Everywhere else a single line ending stays a soft wrap.
+    const plain = mount(Markdown, { props: { source: lines } });
+    expect(plain.findAll("br")).toHaveLength(0);
+    expect(plain.get("p").text()).toBe("目标：登录页改暗色\n约束：只改 web/\n验收：亮暗两套截图");
+  });
+  it("folds by rendered lines: 6 one-line items fit, the 7th folds to 6 lines", async () => {
+    const six = Array.from({ length: 6 }, (_, i) => `第 ${i + 1} 行`).join("\n");
+    const fit = await mountDispatch(dispatch(), undefined, six);
+    expect(fit.findAll("[data-brief] br")).toHaveLength(5);
+    expect(fit.find("[data-brief-toggle]").exists()).toBe(false);
+    const seven = await mountDispatch(dispatch(), undefined, `${six}\n第 7 行`);
+    expect(seven.findAll("[data-brief] br")).toHaveLength(6);
+    expect(seven.get("[data-brief]").attributes("style")).toContain(`max-height: ${6 * 26}px`);
   });
   it("says 你 → 组长 when the user opened the thread", async () => {
     const w = await mountDispatch(dispatch({ opened_by: "user" }));

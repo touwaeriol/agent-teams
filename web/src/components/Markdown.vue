@@ -4,8 +4,8 @@ import { computed } from "vue";
 import { renderMarkdown, type UrlTransform } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
 
-const props = defineProps<{ source: string; class?: string; urlTransform?: UrlTransform; /** links as text, no images (see stripForPreview) */ preview?: boolean }>();
-const Rendered = computed(() => () => renderMarkdown(props.source, props.urlTransform, { preview: props.preview }));
+const props = defineProps<{ source: string; class?: string; urlTransform?: UrlTransform; /** links as text, no images (see stripForPreview) */ preview?: boolean; /** single line endings are hard breaks */ breaks?: boolean }>();
+const Rendered = computed(() => () => renderMarkdown(props.source, props.urlTransform, { preview: props.preview, breaks: props.breaks }));
 const classes = computed(() =>
   cn(
     "prose prose-sm dark:prose-invert max-w-none break-words leading-6",
