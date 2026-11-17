@@ -31,14 +31,24 @@ func (c *Client) Do(ctx context.Context, method, path, token string, body, out a
 	return resp.StatusCode, json.Unmarshal(raw, out)
 }
 
-// restError keeps GitHub's own message (needed to tell "merge conflict" from "not fast-forward").
+// restError keeps GitHub's own message (needed to tell "merge conflict" from "not fast-forward")
+// and the messages of a 422's errors[] ("No commits between …", "A pull request already exists …").
 func restError(code int, raw []byte) error {
 	var body struct {
 		Message string `json:"message"`
+		Errors  []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
 	}
 	_ = json.Unmarshal(raw, &body)
 	if body.Message == "" {
 		return statusError(code, raw)
 	}
-	return &Error{Status: code, Message: fmt.Sprintf("GitHub 返回 %d：%s", code, body.Message)}
+	msg := body.Message
+	for _, e := range body.Errors {
+		if e.Message != "" {
+			msg += "; " + e.Message
+		}
+	}
+	return &Error{Status: code, Message: fmt.Sprintf("GitHub 返回 %d：%s", code, msg)}
 }

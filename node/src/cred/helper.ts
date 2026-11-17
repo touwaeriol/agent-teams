@@ -1,7 +1,8 @@
 import { spawn, spawnSync } from "node:child_process";
 import { connect } from "node:net";
-import { delimiter, join } from "node:path";
-import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { existsSync, readdirSync } from "node:fs";
+import { ghOnPath } from "../git/gh-install.js";
 import type { CredSocketRequest } from "./server.js";
 import { shellQuote } from "../git/platform.js";
 
@@ -23,7 +24,7 @@ export function gitCredentialEnv(nodeCmd: string[], socket: string, session: str
   };
 }
 
-export function askSocket(socket: string, req: CredSocketRequest, timeoutMs = 40_000): Promise<{ ok: boolean; username?: string; password?: string; error?: string }> {
+export function askSocket(socket: string, req: CredSocketRequest, timeoutMs = 11 * 60_000): Promise<SocketReply> {
   return new Promise((resolve) => {
     const sock = connect(socket);
     let buf = "";
@@ -45,7 +46,7 @@ export function askSocket(socket: string, req: CredSocketRequest, timeoutMs = 40
   });
 }
 
-function parseReply(text: string): { ok: boolean; username?: string; password?: string; error?: string } {
+function parseReply(text: string): SocketReply {
   try {
     return JSON.parse(text);
   } catch {
@@ -68,36 +69,112 @@ export async function gitCredentialMain(args: Record<string, string>, op: string
   if (op !== "get") return { out: "", code: 0 };
   const input = parseCredentialInput(stdin);
   if (input.protocol !== "https" || !input.host) return { out: "", code: 0 };
-  const reply = await askSocket(args.socket!, { session: args.session!, secret: args.secret!, host: input.host, path: input.path ?? "" });
+  const reply = await askSocket(args.socket!, { session: args.session!, secret: args.secret!, host: input.host, path: input.path ?? "" }, 40_000);
   if (!reply.ok) return { out: "quit=1\n", code: 0 };
   return { out: `username=${reply.username}\npassword=${reply.password}\n`, code: 0 };
 }
 
-/** `gh` wrapper: fetches a read token for the cwd's GitHub repo, then runs the real gh with GH_TOKEN. */
-export async function ghMain(argv: string[], env: NodeJS.ProcessEnv): Promise<number> {
-  const real = findRealGh(env.PATH ?? "", env.AT_GH_WRAPPER_DIR);
-  if (!real) {
-    process.stderr.write("gh is not installed on this node\n");
+export interface SocketReply {
+  ok: boolean;
+  username?: string;
+  password?: string;
+  error?: string;
+  gh?: string;
+  config_dir?: string;
+  token_error?: string;
+}
+
+/**
+ * `gh` wrapper (architecture.md §10.4): asks the daemon for the real gh (downloaded when the node
+ * has none), an empty per-session config dir and a short-lived token for the repository gh will
+ * talk to, then runs gh with GH_TOKEN/GITHUB_TOKEN only in that child's environment.
+ */
+export async function ghMain(argv: string[], env: NodeJS.ProcessEnv, cwd = process.cwd()): Promise<number> {
+  const plan = await ghPlan(argv, env, cwd);
+  if ("error" in plan) {
+    process.stderr.write(`agent-teams: ${plan.error}\n`);
     return 127;
   }
-  const path = repoPathFromRemote();
-  const reply = env.AT_CRED_SOCK && path ? await askSocket(env.AT_CRED_SOCK, { session: env.AT_CRED_SESSION ?? "", secret: env.AT_CRED_SECRET ?? "", host: "github.com", path }) : { ok: false };
-  const childEnv: NodeJS.ProcessEnv = { ...env, ...(reply.ok && reply.password ? { GH_TOKEN: reply.password } : {}) };
-  delete childEnv.AT_CRED_SECRET;
+  if (plan.note) process.stderr.write(`agent-teams: ${plan.note}\n`);
   return new Promise((resolve) => {
-    const child = spawn(real, argv, { stdio: "inherit", env: childEnv });
+    const child = spawn(plan.bin, argv, { stdio: "inherit", env: plan.env, cwd });
     child.on("close", (code) => resolve(code ?? 1));
     child.on("error", () => resolve(127));
   });
 }
 
-function findRealGh(pathVar: string, wrapperDir?: string): string | null {
-  for (const dir of pathVar.split(delimiter)) {
-    if (!dir || dir === wrapperDir) continue;
-    const p = join(dir, "gh");
-    if (existsSync(p)) return p;
+export type GhPlan = { bin: string; env: NodeJS.ProcessEnv; note?: string } | { error: string };
+
+/** What ghMain runs: the binary, its environment (with the token) and a note for stderr. */
+export async function ghPlan(argv: string[], env: NodeJS.ProcessEnv, cwd: string): Promise<GhPlan> {
+  if (!env.AT_CRED_SOCK) {
+    const bin = ghOnPath(env.PATH ?? "", env.AT_GH_WRAPPER_DIR ? [env.AT_GH_WRAPPER_DIR] : []);
+    return bin ? { bin, env } : { error: "gh is not installed on this node" };
+  }
+  const path = repoForGh(argv, env, cwd) ?? "";
+  const reply: SocketReply = await askSocket(env.AT_CRED_SOCK, { op: "gh", session: env.AT_CRED_SESSION ?? "", secret: env.AT_CRED_SECRET ?? "", host: "github.com", path });
+  if (!reply.ok || !reply.gh) return { error: reply.error ?? "gh is not available on this node" };
+  const quiet = reply.password || NO_AUTH_COMMANDS.has(argv[0] ?? "");
+  return { bin: reply.gh, env: ghChildEnv(env, reply), ...(quiet ? {} : { note: `no GitHub token (${reply.token_error ?? "refused"}); gh runs unauthenticated` }) };
+}
+
+/** gh commands that never need a token: no note about a missing one. */
+const NO_AUTH_COMMANDS = new Set(["--version", "version", "help", "--help", "-h", "completion"]);
+
+/** The child's environment: never written anywhere, and without the socket secret. */
+export function ghChildEnv(env: NodeJS.ProcessEnv, reply: SocketReply): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = { ...env, GH_HOST: env.GH_HOST ?? "github.com", GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", GH_NO_EXTENSION_UPDATE_NOTIFIER: "1" };
+  if (reply.config_dir) out.GH_CONFIG_DIR = reply.config_dir;
+  if (reply.password) {
+    out.GH_TOKEN = reply.password;
+    out.GITHUB_TOKEN = reply.password;
+    if (out.GH_HOST !== "github.com") out.GH_ENTERPRISE_TOKEN = reply.password;
+  }
+  delete out.AT_CRED_SECRET;
+  return out;
+}
+
+/**
+ * The repository gh will act on, as owner/name.git: -R/--repo, then GH_REPO, then the cwd's
+ * origin, then the only repository directly under the cwd (an employee directory with one checkout).
+ */
+export function repoForGh(argv: string[], env: NodeJS.ProcessEnv, cwd: string): string | null {
+  const flag = repoFlag(argv) ?? env.GH_REPO;
+  if (flag) return repoSlugPath(flag);
+  const here = repoPathFromRemote(cwd);
+  if (here) return here;
+  const found = new Set<string>();
+  for (const d of safeReaddir(cwd)) {
+    const p = existsSync(join(cwd, d, ".git")) ? repoPathFromRemote(join(cwd, d)) : null;
+    if (p) found.add(p);
+  }
+  return found.size === 1 ? [...found][0]! : null;
+}
+
+function repoFlag(argv: string[]): string | null {
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]!;
+    if (a === "-R" || a === "--repo") return argv[i + 1] ?? null;
+    if (a.startsWith("--repo=")) return a.slice(7);
+    if (a.startsWith("-R") && a.length > 2) return a.slice(2);
   }
   return null;
+}
+
+/** owner/name.git from owner/name, HOST/owner/name or a URL. */
+export function repoSlugPath(v: string): string | null {
+  const url = githubPath(v);
+  if (url) return url;
+  const parts = v.replace(/\.git$/, "").split("/").filter(Boolean);
+  return parts.length >= 2 ? `${parts.at(-2)}/${parts.at(-1)}.git` : null;
+}
+
+function safeReaddir(dir: string): string[] {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
 }
 
 /** owner/name.git from `git remote get-url origin` when it points at github.com. */

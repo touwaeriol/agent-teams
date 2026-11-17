@@ -332,7 +332,7 @@ func setPermissionMode(ctx context.Context, tx *core.Tx, sessionID, mode string)
 	return tx.Gorm(ctx).Table("at_agent_sessions").Where("id = ?", sessionID).Update("permission_mode", mode).Error
 }
 
-// protectedRefs are the thread branch and the thread's base branch in every repository.
+// protectedRefs are the thread branch and the thread's base and default branch in every repository.
 func (o *Orchestrator) protectedRefs(ctx context.Context, q core.DB, env sessionEnv) []string {
 	refs := []string{}
 	if env.thread == nil {
@@ -340,8 +340,10 @@ func (o *Orchestrator) protectedRefs(ctx context.Context, q core.DB, env session
 	}
 	refs = append(refs, env.thread.Branch)
 	for _, r := range env.repos {
-		if base := o.BaseFor(ctx, q, *env.thread, r); !slices.Contains(refs, base) {
-			refs = append(refs, base)
+		for _, b := range []string{o.BaseFor(ctx, q, *env.thread, r), o.DefaultBranch(ctx, r)} {
+			if b != "" && !slices.Contains(refs, b) {
+				refs = append(refs, b)
+			}
 		}
 	}
 	return refs

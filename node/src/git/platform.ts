@@ -8,18 +8,33 @@ export interface PlatformFiles {
   binDir: string;
 }
 
+/**
+ * Employees push with their own short-lived token (§10.4); this hook keeps them off the branches
+ * the platform owns: AT_PROTECTED_REFS (thread, base and default branches, set by the console),
+ * main/master and origin/HEAD as a fallback, other employees' thread/* branches, tags and
+ * anything that is not a branch. Merging stays with the merge queue and user acceptance.
+ */
 const PRE_PUSH = `#!/bin/sh
-# agent-teams: employees cannot push themselves; the platform pushes member branches.
-branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+# agent-teams platform hook (architecture.md §8.1, §10.4)
+own=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+default=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+default=\${default#origin/}
+protected="$AT_PROTECTED_REFS main master $default"
+refuse() {
+  echo "agent-teams: pushing $1 is not allowed: $2" >&2
+  exit 1
+}
 while read -r local_ref local_sha remote_ref remote_sha; do
-  case "$branch" in thread/*/*) ;; *) branch="";; esac
-  if [ -z "$branch" ] || [ "$remote_ref" != "refs/heads/$branch" ]; then
-    echo "agent-teams: pushing $remote_ref is not allowed. Use the push_branch tool to publish your branch." >&2
-    exit 1
-  fi
+  branch=\${remote_ref#refs/heads/}
+  [ "$branch" != "$remote_ref" ] || refuse "$remote_ref" "only branches can be pushed."
+  for p in $protected; do
+    [ "$branch" != "$p" ] || refuse "$branch" "it is a protected branch (base, default or thread branch). Push your own branch; merging goes through the merge queue (enqueue_merge / open_pr) and user acceptance."
+  done
+  case "$branch" in
+    thread/*) [ "$branch" = "$own" ] || refuse "$branch" "thread/* branches belong to the platform and other employees; push your own branch ($own) or use push_branch." ;;
+  esac
 done
-echo "agent-teams: use the push_branch tool to publish your branch." >&2
-exit 1
+exit 0
 `;
 
 const ASKPASS = `#!/bin/sh

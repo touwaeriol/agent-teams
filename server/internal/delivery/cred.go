@@ -82,7 +82,12 @@ func (e *Engine) credScope(ctx context.Context, node store.Node, r *protocol.Cre
 	return callerScope{}, errors.New("no_caller")
 }
 
-func (e *Engine) sessionScope(ctx context.Context, sessionID string, purpose protocol.CredRequestPurpose) (string, ghops.Scope, error) {
+// sessionScope: leads and members get one token per repository that can fetch, push branches
+// and open pull requests and issues (architecture.md §10.4; the user asked for gh and git push in
+// every employee session). The purpose is ignored: git's credential helper cannot tell a fetch
+// from a push. Protected branches are refused by the platform pre-push hook; merging stays with
+// the merge queue and user acceptance. The coordinator gets nothing.
+func (e *Engine) sessionScope(ctx context.Context, sessionID string, _ protocol.CredRequestPurpose) (string, ghops.Scope, error) {
 	sc, err := core.SessionContextOf(ctx, e.core.Pool, sessionID)
 	if err != nil {
 		return "", 0, errors.New("unknown_session")
@@ -90,10 +95,11 @@ func (e *Engine) sessionScope(ctx context.Context, sessionID string, purpose pro
 	if sc.Employee.Tier == "coordinator" {
 		return "", 0, errors.New("coordinator_has_no_credentials")
 	}
-	if purpose == "push" {
-		return "", 0, errors.New("push_only_via_platform")
+	scope := ghops.ScopeEmployee
+	if d, err := core.DeliveryOf(ctx, e.core.Pool, sc.Employee.ProjectID); err == nil && d.AllowWorkflowEdits {
+		scope = ghops.ScopeEmployeeFlows
 	}
-	return sc.Employee.ProjectID, ghops.ScopeRead, nil
+	return sc.Employee.ProjectID, scope, nil
 }
 
 func (e *Engine) jobScope(ctx context.Context, node store.Node, jobID string) (callerScope, error) {

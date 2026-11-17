@@ -26,9 +26,14 @@ var (
 	writeTools        = []string{"Edit", "Write", "NotebookEdit", "MultiEdit"}
 	coordinatorDeny   = []string{"Bash", "Edit", "Write", "MultiEdit", "NotebookEdit", "Read", "Glob", "Grep", "WebFetch", "WebSearch", "Task"}
 	readOnlyBashAllow = []string{"git log", "git diff", "git show", "git status", "git rev-parse", "git ls-files", "git blame",
-		"git merge-base", "git branch:list", "gh pr view", "gh pr diff", "gh pr checks"}
+		"git merge-base", "git branch:list", "gh pr view", "gh pr diff", "gh pr checks", "gh pr list", "gh pr status",
+		"gh pr create", "gh pr comment", "gh pr review", "gh pr edit", "gh issue", "gh run list", "gh run view",
+		"gh workflow list", "gh workflow view", "gh repo view", "gh search", "gh release list", "gh release view", "gh auth status"}
 	readOnlyDenyFlags = []string{"--output", "-o", "--ext-diff", "--textconv", "-c", "--exec-path", "--git-dir", "--work-tree"}
 )
+
+// ProtectedRefsEnv names the branches an employee may not push, space separated (read by the pre-push hook).
+const ProtectedRefsEnv = "AT_PROTECTED_REFS"
 
 // Paths are an employee's directory and branch on the node (relative to the node root).
 // The directory holds one checkout per project repository, named owner__name (RepoCwd).
@@ -127,6 +132,10 @@ func buildOpen(in sessionInput) (protocol.SessionOpen, error) {
 		Employee: employeeRef(in.emp, in.thread), Runtime: protocol.Runtime(in.emp.Runtime), Cwd: protocol.RelPath(in.sess.Cwd),
 		PlatformTools: tools, Env: protocol.SessionOpenEnv{"LANG": "C.UTF-8"}, GitCredentials: &gitCreds,
 		FirstMessage: in.first, Resume: in.resume}
+	if gitCreds && len(in.protRefs) > 0 {
+		// The platform pre-push hook refuses these (architecture.md §8.1), whatever the runtime.
+		open.Env[ProtectedRefsEnv] = strings.Join(in.protRefs, " ")
+	}
 	setPrepare(&open, in.prepare)
 	if in.emp.Runtime == "codex" {
 		c := codexOptions(in)

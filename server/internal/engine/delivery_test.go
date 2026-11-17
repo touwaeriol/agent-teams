@@ -100,7 +100,7 @@ func TestDeliveryEndToEnd(t *testing.T) {
 	if _, ok := gh.ref("thread/1-login"); ok {
 		t.Fatal("the thread branch is created lazily, when something is merged into it")
 	}
-	if leadOpen.Prepare == nil || !*leadOpen.GitCredentials {
+	if leadOpen.Prepare == nil || !*leadOpen.GitCredentials || leadOpen.Env["AT_PROTECTED_REFS"] != "thread/1-login main" {
 		t.Fatalf("lead session needs its worktree prepared: %+v", leadOpen)
 	}
 	answerPrepares(t, w, n)
@@ -134,6 +134,10 @@ func TestDeliveryEndToEnd(t *testing.T) {
 
 	conflictAndFix(t, w, gh, n, lead, dev, events)
 
+	// An employee already opened the thread PR with gh: open_pr adopts it instead of failing.
+	if n := gh.openPRByHand("o/r", "thread/1-login", "main"); n != 7 {
+		t.Fatalf("hand-made PR #%d", n)
+	}
 	res = lead.call("open_pr", map[string]any{"title": "登录页", "body": "完成"})
 	if !res.Ok || !strings.Contains(string(*res.Structured), "pull/7") {
 		t.Fatalf("open_pr %+v", res)
@@ -203,7 +207,8 @@ func reopenAfterMerge(t *testing.T, w *world, gh *fakeGitHub, n *nodetest.Node, 
 	events.wait(t, "thread", `"status":"review"`, `"pr_number":8`)
 }
 
-// assertCredentials: push jobs get a write token, employee sessions with a PAT connection get none.
+// assertCredentials: push jobs get a write token; employee sessions get the connection's token
+// too (a PAT cannot be narrowed; the user's own nodes, architecture.md §10.4), only for project repositories.
 func assertCredentials(t *testing.T, w *world, n *nodetest.Node, dev *fakeAgent, pushed protocol.GitPush) {
 	t.Helper()
 	job := pushed.JobID
@@ -212,9 +217,13 @@ func assertCredentials(t *testing.T, w *world, n *nodetest.Node, dev *fakeAgent,
 		t.Fatalf("push job credential %+v", ok)
 	}
 	sid := protocol.SessionID(dev.session)
-	refused := credential(t, w, n, protocol.CredRequest{ReqID: "r2", SessionID: &sid, Host: "github.com", Path: "o/r.git", Purpose: "read"})
-	if refused.Ok || refused.Error == nil || *refused.Error != "pat_not_narrowable" {
-		t.Fatalf("session credential with a PAT %+v", refused)
+	sess := credential(t, w, n, protocol.CredRequest{ReqID: "r2", SessionID: &sid, Host: "github.com", Path: "o/r.git", Purpose: "read"})
+	if !sess.Ok || sess.Password == nil || *sess.Password != "ghp_good" {
+		t.Fatalf("session credential with a PAT %+v", sess)
+	}
+	foreign := credential(t, w, n, protocol.CredRequest{ReqID: "r4", SessionID: &sid, Host: "github.com", Path: "evil/repo.git", Purpose: "push"})
+	if foreign.Ok || foreign.Error == nil || *foreign.Error != "repo_not_in_project" {
+		t.Fatalf("session credential for a foreign repository %+v", foreign)
 	}
 	other := credential(t, w, n, protocol.CredRequest{ReqID: "r3", JobID: &job, Host: "github.com", Path: "evil/repo.git", Purpose: "push"})
 	if other.Ok {

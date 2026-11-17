@@ -108,10 +108,26 @@ func (e *Engine) openOne(ctx context.Context, t core.Thread, target prTarget, re
 	if ghops.Status(err) == 422 && strings.Contains(err.Error(), "No commits between") {
 		return false, nil
 	}
+	if ghops.Status(err) == 422 && strings.Contains(err.Error(), "already exists") {
+		pr, err = e.adoptPR(ctx, t, target, err)
+	}
 	if err != nil {
 		return false, fmt.Errorf("%s：%w", target.repo.Slug, err)
 	}
 	return true, e.recordPR(ctx, t, target.repo.Slug, pr, req.By)
+}
+
+// adoptPR takes over the open pull request someone already opened from the thread branch
+// (an employee with gh, architecture.md §8.4), so acceptance and merging track it.
+func (e *Engine) adoptPR(ctx context.Context, t core.Thread, target prTarget, createErr error) (ghops.PR, error) {
+	pr, ok, err := e.gh.OpenPRFor(ctx, target.repo, t.Branch, target.base)
+	if err != nil {
+		return pr, err
+	}
+	if !ok {
+		return pr, createErr
+	}
+	return pr, nil
 }
 
 func (e *Engine) prReady(ctx context.Context, t core.Thread, force bool) error {

@@ -245,3 +245,25 @@ func TestModelPrecedence(t *testing.T) {
 		t.Fatalf("session.open model %q", o.Claude.Model)
 	}
 }
+
+// TestProtectedRefsEnv: employees with credentials learn the protected branches (pre-push hook),
+// the coordinator gets neither credentials nor the list; the lead may use gh for PRs and issues.
+func TestProtectedRefsEnv(t *testing.T) {
+	in := open(t, emp("member", "dev", store.Role{}), store.Node{Isolation: "none"})
+	in.protRefs = []string{"thread/3-x", "main", "develop"}
+	dev, _ := buildOpen(in)
+	if dev.Env[ProtectedRefsEnv] != "thread/3-x main develop" {
+		t.Fatalf("member env %+v", dev.Env)
+	}
+	cin := open(t, emp("coordinator", "coordinator", store.Role{}), store.Node{Isolation: "none"})
+	cin.protRefs = []string{"main"}
+	coord, _ := buildOpen(cin)
+	if _, ok := coord.Env[ProtectedRefsEnv]; ok || *coord.GitCredentials {
+		t.Fatalf("coordinator env %+v", coord.Env)
+	}
+	lead, _ := buildOpen(open(t, emp("lead", "lead", store.Role{}), store.Node{Isolation: "none"}))
+	allow := lead.Claude.BashPolicy.Allow
+	if !contains(allow, "gh pr create") || !contains(allow, "gh issue") || contains(allow, "gh api") || contains(allow, "gh pr merge") {
+		t.Fatalf("lead gh allow list %v", allow)
+	}
+}

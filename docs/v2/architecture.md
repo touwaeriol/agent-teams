@@ -347,9 +347,10 @@ queued ──开工──► running ◄──► waiting（有等你处理的�
 - **讨论串分支按仓库懒创建**：开串时不建分支；某个仓库第一次有条目进合并队列时，平台才在该仓库从“本讨论串在该仓库的基准分支”建 `thread/<no>-<slug>`（`at_thread_repos.branch_created`）。基准分支 = 组长/统筹显式给的（`open_thread(repos=[{repo, base}])`、`assign_task(repo, base)`、`enqueue_merge(repo, base)`，记在 `at_thread_repos.base_branch`，分支建好后就固定），否则该仓库的默认分支。成员 worktree 从讨论串分支（已存在时）或该基准分支切出。
 - `git.prepare {mode: worktree|clone, repo, shared, cwd, branch, base}`：每个仓库一个作业，`session.open.prepare_jobs` 列出全部（`prepare` 为第一个，兼容旧守护进程），守护进程等它们全部成功再开会话。没有共享克隆就 clone；`git -C shared fetch origin --prune`；目标不是 worktree 就 `git -C shared worktree add -B <branch> <cwd> origin/<branch 已存在时> | origin/<base>`。clone 模式沿用 v1（每个仓库一份克隆）。
 - 每台节点上每个仓库一份共享克隆；同一节点上的 fetch / worktree 操作按共享克隆加文件锁（`.<dir>.agent-teams.lock`），避免并发 `worktree add` 打架。
-- **员工手里没有写令牌**（§10.4）：成员自己 `git commit`，但推送由平台做。成员调用 `push_branch()`（`complete_task` 前平台也会自动调用）→ 控制台给每个仓库发一个 `git.push {job_id, repo, cwd, refspec: "HEAD:refs/heads/thread/<no>/<name>", unchanged_against: [讨论串分支, 基准分支]}` 作业（同一次调用的作业共享 `meta.push_group`，全部回报后工具才返回）；HEAD 在这些分支之外没有提交的仓库，守护进程不推送，回 `unchanged: true`。推送过的仓库记在任务的 `at_tasks.pushed`（repo → sha） → 守护进程用**只为这一个作业**申请的令牌（只给本仓库、`contents: write`）执行 `git push --no-verify origin <固定 refspec>`，令牌不进任何员工进程的环境。refspec 由控制台按员工身份生成，守护进程只接受 `refs/heads/thread/<no>/<employee>` 形式，所以无论 Bash、Codex、脚本还是 git 别名，员工都推不了讨论串分支和基准分支。讨论串分支只由控制台（合并队列，App 令牌）改动。
+- **平台推送 + 员工自己推送**（§10.4）：成员调用 `push_branch()`（`complete_task` 前平台也会自动调用）→ 控制台给每个仓库发一个 `git.push {job_id, repo, cwd, refspec: "HEAD:refs/heads/thread/<no>/<name>", unchanged_against: [讨论串分支, 基准分支]}` 作业（同一次调用的作业共享 `meta.push_group`，全部回报后工具才返回）；HEAD 在这些分支之外没有提交的仓库，守护进程不推送，回 `unchanged: true`。推送过的仓库记在任务的 `at_tasks.pushed`（repo → sha） → 守护进程用**只为这一个作业**申请的令牌（只给本仓库、`contents: write`）执行 `git push --no-verify origin <固定 refspec>`。refspec 由控制台按员工身份生成，守护进程只接受 `refs/heads/thread/<no>/<employee>` 形式。讨论串分支只由控制台（合并队列，App 令牌）改动。
+  2026-11-17 起（用户：“用户会配置 gh 的，要把临时密钥让每个员工都能用上”）组长和成员的会话令牌也能推送分支、开 PR（§10.4），员工可以自己 `git push origin HEAD`、用 `gh`；平台的 `push_branch`/`complete_task` 推送、合并队列、`open_pr` 照旧。保护靠下面的 pre-push 钩子（加上 PreToolUse 的固定拒绝：`git push --no-verify`、`git -c core.hooksPath=…`、`gh pr merge`、`gh api …/merge`、`gh auth token`、`git credential`）和建议的 GitHub 规则集。
 - **令牌只在守护进程自己的镜像里用**：共享克隆的 `.git` 员工可写（提交要落在那里），其中的 `remote.origin.url`、`url.*.insteadOf`、`http.proxy`、`core.fsmonitor`、过滤器等配置都不可信。所以守护进程为每个仓库在 `state/mirrors/<owner>__<repo>.git`（0700，员工不可读写）维护一个裸镜像：带令牌的 fetch 和 push 只在镜像里做（推送时先把 worktree 的 HEAD 取进镜像，再从镜像推固定 refspec 到固定 URL），共享克隆只从镜像本地 fetch，环境里没有令牌；守护进程在共享克隆和 worktree 里跑的所有 git 命令都用 `-c` 覆盖 `core.fsmonitor`、`core.hooksPath` 并清空已配置的过滤器驱动，环境里剔除 `AGENT_TEAMS_*`。
-- **纵深防护**：守护进程把共享克隆及其所有 worktree 的 `core.hooksPath` 设为平台目录（员工不可写，§10.3）里的 `pre-push` 钩子，拒绝推送 `protected_refs` 和任何非本员工分支，并提示“请用 push_branch 工具”（钩子可被 `--no-verify` 绕过，但员工本来就没有写令牌，这一层只是给出清楚的报错）。`ci/detect` 同时建议用户在仓库建一个规则集：保护基准分支和 `thread/*`（GitHub 规则集的 `*` 不跨 `/`，因此不覆盖 `thread/<no>/<name>` 成员分支），限制更新与强推，绕过者只设平台 App。
+- **pre-push 钩子**：守护进程把共享克隆及其所有 worktree 的 `core.hooksPath` 设为平台目录（员工不可写，§10.3）里的 `pre-push` 钩子。它拒绝：`AT_PROTECTED_REFS` 里的分支（控制台在 `session.open.env` 里给：讨论串分支、每个仓库本讨论串的基准分支和默认分支）、`main`/`master`/`origin/HEAD` 指向的分支（兜底）、不是自己当前分支的 `thread/*`（别的成员和讨论串的分支）、标签和任何非分支 ref；别的分支（自己的成员分支、新建的 `feature/*` 等）放行。提示里说明合并走合并队列（`enqueue_merge`/`open_pr`）和用户验收。钩子可被 `--no-verify` 或 `-c core.hooksPath` 绕过，PreToolUse 固定拒绝名单拦这两种写法，但员工手里确实有写令牌，所以 `ci/detect` 仍建议用户在仓库建规则集：保护基准分支和 `thread/*`（GitHub 规则集的 `*` 不跨 `/`，因此不覆盖 `thread/<no>/<name>` 成员分支），限制更新与强推，绕过者只设平台 App。
 - **workflow 文件**：写令牌不带 `workflows` 权限，GitHub 会拒绝任何改了 `.github/workflows/**` 的推送，所以员工写的 workflow 不可能在 `mq/**`、`thread/**` 的 push 上带着仓库 Actions secrets 运行。需要改 CI 的任务，平台在推送被拒时告诉员工“workflow 变更请写进交付说明，由用户合并”；项目设置里的“允许员工修改 workflow”开关（默认关，打开要二次确认并审计）会让推送作业的令牌带上 `workflows: write`。
 
 ### 8.2 合并队列（成员分支 → 讨论串分支，全部在 GitHub 上做，不占节点）
@@ -379,7 +380,8 @@ queued ──开工──► running ◄──► waiting（有等你处理的�
 - **`require_acceptance` 开**（默认，设置页“讨论串完成后需要我验收”）：用户 `POST /api/threads/{id}/accept` → 平台等 PR head 上的必需 check 通过后合并 PR（`PUT /pulls/{n}/merge`，方法按 `delivery.merge_method` squash|merge|rebase，默认 squash），→ `done`。`reject {reason}` → 原因作为消息发给组长，→ `running`。
 - **`require_acceptance` 关**（按设计稿：“PR 通过检查后自动合并进基准分支”）：讨论串进入 `review` 后，delivery 引擎轮询 PR head 的 check（与 §8.3 同一套规则：`required`、`appear_timeout_s`、`on_missing`），全部通过且 PR 可合并时用 `merge_method` 自动合并，→ `done` 并通知统筹；check 失败 → 给组长发 `[Thread #12 · CI 失败]`（附失败 check），讨论串回 `running`；合并冲突（基准分支前进）→ 给组长发修复指令，回 `running`。此时 accept 接口只是“立即合并（不等自动流程）”，reject 仍可用（在自动合并前拦下）。
 - `done/archived` 后：所有会话 `session.close`，对涉及的节点按共享克隆各发一个 `git.cleanup`（有未推送提交的 worktree 保留并回报），远端在每个仓库删除 `thread/<no>/*` 成员分支（讨论串分支随 PR 合并删除）。
-- **凭证按仓库**：推送/准备作业的 `cred.request` 只能拿到作业自己那个仓库（`body.repo`）的令牌，用该仓库绑定的 Git 连接铸造；员工会话可以读项目的任何一个仓库。CI 检测（`GET /api/projects/{pid}/ci/detect?repo=`）按仓库，读该仓库默认分支上的 workflow。
+- **凭证按仓库**：推送/准备作业的 `cred.request` 只能拿到作业自己那个仓库（`body.repo`）的令牌，用该仓库绑定的 Git 连接铸造；员工会话可以拿项目的任何一个仓库的令牌（每次只缩小到一个仓库）。
+- **员工用 gh 开的 PR**：讨论串的 PR 约定由组长用 `open_pr` 开（提示词这样写，平台据此跟踪验收、CI 和合并）；员工用 gh 为别的分支开 PR、评论、看 issue 都可以。如果有人已经用 gh 从讨论串分支向基准分支开了 PR，`open_pr` 建 PR 时 GitHub 回 422 “A pull request already exists”，平台按 `head=<owner>:<讨论串分支>&base=<基准>` 查到那个打开的 PR 并接管（写 `at_thread_repos.pr_*`，之后和平台自己开的 PR 一样）。员工开 PR 不会自动挂到讨论串上，要等 `open_pr`。CI 检测（`GET /api/projects/{pid}/ci/detect?repo=`）按仓库，读该仓库默认分支上的 workflow。
 
 ## 9. 审批端到端
 
@@ -462,7 +464,7 @@ Claude 子进程                守护进程                      控制台     
 **只读会话**（组长，以及 `read_only` 的岗位，如审查、决策）同样三道：
 
 1. 会话配置：`disallowedTools: Edit, Write, NotebookEdit`；Claude Bash 沙箱开启且**没有任何可写路径**（§10.3），`allowUnsandboxedCommands: false`；文件工具（Read/Glob/Grep）由 PreToolUse 钩子限制在 cwd 和共享克隆的 `.git` 内。Codex 用 `sandbox: read-only`。
-2. Bash 钩子按 **argv 解析**（不是正则）：只允许 `git log|diff|show|status|rev-parse|ls-files|blame|merge-base`、`git branch` 的列表形式（无位置参数，或只带 `--list`/`-a`/`-r`/`--contains <sha>`/`--merged`）、`gh pr view|diff|checks`；拒绝 `--output`/`-o`、`--ext-diff`、`--textconv`、`-c`、`--exec-path`、`--git-dir`/`--work-tree` 和任何 shell 元字符、重定向、管道、命令替换。
+2. Bash 钩子按 **argv 解析**（不是正则）：只允许 `git log|diff|show|status|rev-parse|ls-files|blame|merge-base`、`git branch` 的列表形式（无位置参数，或只带 `--list`/`-a`/`-r`/`--contains <sha>`/`--merged`）、`gh pr view|diff|checks|list|status|create|comment|review|edit`、`gh issue …`、`gh run list|view`、`gh workflow list|view`、`gh repo view`、`gh search`、`gh release list|view`、`gh auth status`（不含 `gh api`、`gh pr merge|checkout`；Codex 组长的只读沙箱没有网络，用不了 gh）；拒绝 `--output`/`-o`、`--ext-diff`、`--textconv`、`-c`、`--exec-path`、`--git-dir`/`--work-tree` 和任何 shell 元字符、重定向、管道、命令替换。
 3. init 工具核对（同上）。
 
 组长要看成员新推的分支：控制台在每条审查类消息（`[Task … done]`、`request_review`、合并队列结果）发给只读会话前，先对它的 worktree 发 `git.prepare {fetch: true}`（只 fetch，不改工作区）；只读会话自己的 Bash 不允许 `git fetch`。
@@ -483,7 +485,7 @@ Claude 子进程                守护进程                      控制台     
 
 - 岗位的 `bypass` 和讨论串的 `auto_approve` 在任何隔离级别的节点上都生效（用户 2026-11-15 的决定：节点是用户自己的，讨论串里不再弹权限确认）。隔离级别仍决定秘密路径怎么挡：`agent_user` 靠 Unix 用户，`sandbox` 靠 Bash 沙箱，所有级别都有 PreToolUse 钩子的固定拒绝名单。
 - 固定拒绝名单（策略 ⓪，§9）：Read/Edit/Bash 涉及上述秘密路径；`curl|wget … | sh`；`git config` 改 `core.hooksPath`/`credential.*`；读 `/proc/*/environ`。名单写在控制台代码里，守护进程的 PreToolUse 钩子也用同一份名单先拦一道。
-- 平台的 git 钩子目录（`core.hooksPath`，§8.1）和 gh 包装脚本放在员工不可写的目录。
+- 平台的 git 钩子目录（`core.hooksPath`，§8.1）、gh 包装脚本和下载的 gh 放在员工不可写的目录（`<data>/agent-teams/platform`、`tools`）。
 
 ### 10.4 GitHub 凭证不落盘
 
@@ -491,8 +493,10 @@ v1 在每次运行开始把 `GH_TOKEN` 放进环境。v2 会话是常驻的，�
 
 - 守护进程给每个会话设置 `GIT_CONFIG_COUNT/KEY/VALUE`：`credential.https://github.com.helper` 先清空，再设为 `!<node-bin> git-credential --session <sid>`；`GIT_TERMINAL_PROMPT=0`。
 - `git-credential` 子命令通过守护进程的本地 unix socket（`$XDG_RUNTIME_DIR/agent-teams/cred.sock`，与守护进程主 socket 分开）请求凭证，请求里带会话打开时生成的每会话秘密（放在 `GIT_CONFIG_VALUE` 的 helper 参数里），守护进程再核对对端 uid（`SO_PEERCRED`）；守护进程向控制台发 `cred.request {session_id, host, repo}`，控制台核对节点归属（协议 §8）、该会话属于哪个项目、仓库是否匹配，返回**缩小过的**安装令牌（剩余 < 10 分钟就换新），守护进程内存缓存到过期前 5 分钟。
-- **按仓库、按角色缩小令牌**：GitHub 允许铸造只针对指定仓库和部分权限的安装令牌（`POST /app/installations/{id}/access_tokens {repositories: [name], permissions: {...}}`）。员工会话拿到的令牌：成员和组长 `{contents: read, pull_requests: read, checks: read, metadata: read}`（能 fetch、`gh pr view/checks`，不能推送）；统筹不设 helper、拿不到任何令牌。写令牌只用于平台自己的作业：推送作业（§8.1，`{contents: write}`，项目允许时加 `workflows: write`）、控制台侧的合并队列/PR/合并（完整权限，只在控制台进程内）。PAT 连接无法缩小：使用 PAT 的项目在节点上只给推送作业使用 PAT，员工会话的 `cred.request` 一律拒绝（不能 fetch 私有仓库时由平台先 `git.prepare fetch`），项目设置页提示“建议改用 GitHub App 连接”。
-- `gh`：会话 PATH 最前面放一个 `gh` 包装脚本（员工不可写目录），执行时同样取只读令牌后以 `GH_TOKEN=… exec <真实 gh>`；令牌只存在于那一次 gh 进程的环境里。
+- **按仓库、按角色缩小令牌**：GitHub 允许铸造只针对指定仓库和部分权限的安装令牌（`POST /app/installations/{id}/access_tokens {repositories: [name], permissions: {...}}`）。员工会话（组长和成员，含只读岗位）拿到的令牌（`ghops.ScopeEmployee`）：`{contents: write, pull_requests: write, issues: write, checks: read（App 有时）, metadata: read}`，项目允许改 workflow 时加 `workflows: write`；每个令牌只含请求的那一个仓库，且控制台只给本项目绑定的仓库（`repo_not_in_project`）。统筹不设 helper、拿不到任何令牌（`coordinator_has_no_credentials`）。`cred.request` 的 `purpose` 对会话不起作用。平台作业照旧：准备作业只读、推送作业 `{contents: write}`、控制台侧合并队列/PR/合并用完整权限（只在控制台进程内）。PAT 连接无法缩小：2026-11-17 起员工会话也直接拿 PAT（节点是用户自己的；用户明确要求员工都能用 gh），项目设置仍建议改用 GitHub App 连接，这样令牌只有 1 小时、只含一个仓库。
+- **能做什么、不能做什么**：员工能 fetch、推送非保护分支、开 PR/评论/审查、看 CI；推送基准/默认/讨论串分支由 pre-push 钩子拒绝（§8.1），合并 PR 由 PreToolUse 拒绝 `gh pr merge` 和 `gh api …/merge`，合并只走合并队列和用户验收。这些是给出清楚报错的软防线，硬防线是 GitHub 规则集（App 是唯一绕过者）。
+- `gh`：员工节点通常没装 gh。守护进程启动时（以及第一次用时）把锁定版本的官方发行包（`git/gh-install.ts`，`gh 2.103.3`，linux amd64/arm64 tar.gz、macOS zip）下到 `<data>/agent-teams/tools/gh-<ver>/`，sha256 必须同时等于代码里锁定的值和该发行版的 `gh_<ver>_checksums.txt`；PATH 上已有 gh 时直接用。会话 PATH 最前面是平台目录 `<data>/agent-teams/platform/bin`（员工不可写），里面的 `gh` 包装脚本执行 `agent-teams-node gh`：通过 cred socket（`op: "gh"`，带每会话秘密）向守护进程要真实 gh 的路径、一个空的每会话 `GH_CONFIG_DIR`（`<data>/agent-teams/gh-config/<session>`，会话结束删除，不在 worktree 里）和令牌，再以 `GH_TOKEN`/`GITHUB_TOKEN`、`GH_HOST=github.com`、`GH_PROMPT_DISABLED=1`、`GH_NO_UPDATE_NOTIFIER=1` 运行真实 gh；令牌只存在于那一次 gh 进程的环境里，不进会话环境、不写任何文件。仓库按 `-R/--repo`、`GH_REPO`、cwd 的 origin、员工目录下唯一的仓库子目录依次确定；确定不了时 gh 照常运行但不带令牌，并在 stderr 说明。系统提示词告诉组长和成员 gh 已安装并自动带令牌、讨论串 PR 用 `open_pr`、不要用 gh 合并。
+- **已知限制**：`sandbox` 隔离级别的节点上，Bash 沙箱的 `denyRead` 包含 `$XDG_RUNTIME_DIR/agent-teams`（cred socket 所在目录），沙箱里的 git/gh 连不上 socket，拿不到令牌（与之前的只读令牌相同，尚未解决）；`none`（目前生产的两台节点）和 `agent_user` 不受影响。
 
 ### 10.5 秘密与密钥
 
@@ -690,7 +694,7 @@ Go 接管的、在 Python 内存里有副作用的接口，**先写库，再同�
 | R6 | 迁移期 Python 与 Go 共用库：① Python 的启动 DDL 与 v2 迁移冲突；② **语义冲突**：v1 `Hub.recover()` 按 `at_tasks.status IN ('pending','running')` 恢复对话，不分所有者和对话类型，会接管 v2 讨论串、改写任务、取消 v2 提问；v1 对话列表会列出统筹/讨论串对话 | 数据、回退 | ① “只加不改”规则；② v1 防护补丁（只看 `kind='chat'` 且所有者 `platform_version=1`，§14.1 第 4 条）在 P1 上线、早于 `00010`；CI 冒烟测试种入 v2 行后重启 Python v1 并断言不变；回退流程先暂停 v2 讨论串（§14.4） |
 | R7 | 内置 `claude` 二进制每节点约 366 MB 下载，锁 SDK 即锁 Claude Code 版本 | 安装、升级 | 控制台提供升级按钮；守护进程支持 `pathToClaudeCodeExecutable` 覆盖（节点页高级设置） |
 | R8 | 控制台单副本 | 可用性 | 状态全在 PG，重启无损（会话在节点上继续跑，重连后重放）；P7 多副本 |
-| R9 | 员工与守护进程同机运行，可能读到节点令牌和运行时登录；Codex 沙箱只限写不限读 | 凭证泄露 | 隔离级别（§10.3）：推荐 `agent_user`；`sandbox` 级别靠 Claude Bash 沙箱 + 路径拒绝，Codex 员工只派到 `agent_user`/`isolated` 节点；员工令牌按仓库只读缩小、写操作只走平台作业（§8.1、§10.4）。P3 实测 Claude 沙箱的 `denyRead` 对子进程生效、`CLAUDE_CONFIG_DIR` 指向员工不可读目录时 claude 仍能登录；若 Codex 后续支持限制读路径，再放宽 `sandbox` 级别对 Codex 的限制 |
+| R9 | 员工与守护进程同机运行，可能读到节点令牌和运行时登录；Codex 沙箱只限写不限读 | 凭证泄露 | 隔离级别（§10.3）：推荐 `agent_user`；`sandbox` 级别靠 Claude Bash 沙箱 + 路径拒绝，Codex 员工只派到 `agent_user`/`isolated` 节点；员工令牌按仓库缩小（2026-11-17 起能推送非保护分支、开 PR，保护分支靠 pre-push 钩子和 GitHub 规则集，§8.1、§10.4）。P3 实测 Claude 沙箱的 `denyRead` 对子进程生效、`CLAUDE_CONFIG_DIR` 指向员工不可读目录时 claude 仍能登录；若 Codex 后续支持限制读路径，再放宽 `sandbox` 级别对 Codex 的限制 |
 | R10 | 一个项目的事件写入用 `at_projects.event_seq` 行锁串行化 | 高频状态事件时的写吞吐 | 状态去抖 800 ms、事件插入放在事务最后；P5 压测（单项目 30 员工）若锁等待明显，改为“IDENTITY + 安全窗口重读（`seq > last − 200` 且客户端按 id 去重）” |
 | Q1 | 每个讨论串的成员是否允许跨项目共享节点额度上限？ | — | 先按节点 `max_active_sessions` 全局限制，不分项目 |
 | Q2 | 审查岗是独立会话还是组长兼任？ | — | 默认岗位模板里可选 `review` 岗；没有审查岗时审查关卡由组长执行（组长只读，正好） |

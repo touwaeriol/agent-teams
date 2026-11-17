@@ -363,7 +363,7 @@
 
 每个仓库一个作业。带 `unchanged_against` 时守护进程先同步镜像，HEAD 在这些分支（不存在的忽略）之外没有提交就不推送，回 `git.result {job_id, ok: true, unchanged: true, head_sha}`：员工没改这个仓库。
 
-员工的推送只走这个作业（architecture.md §8.1）。守护进程校验 `refspec` 的目标必须是 `refs/heads/thread/<thread_no>/<employee>`、不带 `+`（不强推，除非 body 里 `force_with_lease: "<sha>"`，只用于冲突修复后的成员分支）；用 `cred.request {job_id, purpose:"push"}` 取只对这一次作业有效的写令牌，经 `GIT_ASKPASS` 只传给这一个 `git push --no-verify` 子进程。结果 `git.result {job_id, ok, head_sha, error_code?}`，`error_code`：`rejected_non_ff|workflow_permission|auth_failed|refspec_not_allowed`。
+平台替员工推送成员分支走这个作业（`push_branch`、`complete_task`，architecture.md §8.1；员工也可以用自己的令牌直接 `git push` 非保护分支）。守护进程校验 `refspec` 的目标必须是 `refs/heads/thread/<thread_no>/<employee>`、不带 `+`（不强推，除非 body 里 `force_with_lease: "<sha>"`，只用于冲突修复后的成员分支）；用 `cred.request {job_id, purpose:"push"}` 取只对这一次作业有效的写令牌，经 `GIT_ASKPASS` 只传给这一个 `git push --no-verify` 子进程。结果 `git.result {job_id, ok, head_sha, error_code?}`，`error_code`：`rejected_non_ff|workflow_permission|auth_failed|refspec_not_allowed`。
 
 ### 7.4 `git.cleanup`（键：`job_id`）
 
@@ -386,7 +386,7 @@
 
 `{"req_id", "session_id"|"job_id", "open_gen"?, "host": "github.com", "path": "owner/name.git", "purpose": "read|push"}`
 
-控制台先做 §2.3 的归属校验，再按调用方决定令牌范围（architecture.md §10.4）：员工会话只给本项目仓库的只读令牌（`purpose: push` 来自会话一律拒绝）；`git.prepare`/`git.status` 作业给只读令牌；`git.push` 作业给 `contents: write`（项目允许时加 `workflows: write`）；作业的令牌只发给作业自己的仓库（`body.repo`），用该仓库绑定的 Git 连接铸造；统筹会话一律拒绝。
+控制台先做 §2.3 的归属校验，再按调用方决定令牌范围（architecture.md §10.4）：组长和成员的会话只给本项目仓库、按仓库缩小的员工令牌（`contents: write, pull_requests: write, issues: write, checks: read`，项目允许时加 `workflows: write`；PAT 连接直接给 PAT），`purpose` 对会话不起作用（git 的 credential helper 分不清 fetch 和 push），受保护分支由平台 pre-push 钩子拒绝；`git.prepare`/`git.status` 作业给只读令牌；`git.push` 作业给 `contents: write`（项目允许时加 `workflows: write`）；作业的令牌只发给作业自己的仓库（`body.repo`），用该仓库绑定的 Git 连接铸造；统筹会话一律拒绝。
 
 ### `cred.response`（控制台 → 守护进程，不可靠）
 

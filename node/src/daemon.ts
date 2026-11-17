@@ -1,11 +1,12 @@
 import { cpus, hostname, loadavg, totalmem } from "node:os";
 import { existsSync, mkdirSync, statfsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { ApprovalBroker } from "./approvals.js";
 import { CredBroker } from "./cred/broker.js";
 import { gitCredentialEnv } from "./cred/helper.js";
 import { CredServer, credSocketPath } from "./cred/server.js";
 import { GitJobs } from "./git/jobs.js";
+import { GhInstaller, type GhInstallOptions } from "./git/gh-install.js";
 import { installPlatformFiles, type PlatformFiles } from "./git/platform.js";
 import { probeIsolation, type Isolation } from "./isolation.js";
 import { Link } from "./link/client.js";
@@ -57,6 +58,12 @@ export interface DaemonOptions {
   link?: { pingMs?: number; deadMs?: number; backoff?: { minMs: number; maxMs: number } };
   crashDelaysMs?: number[];
   onExit?: (code: number) => void;
+  /** Where the GitHub CLI is downloaded when the node has none (default <data>/tools). */
+  toolsDir?: string;
+  /** Overrides for the gh download (tests). */
+  gh?: Partial<GhInstallOptions>;
+  /** Download gh at start instead of on first use (default: when probing runtimes). */
+  prefetchGh?: boolean;
 }
 
 const FEATURES = ["sessions", "codex_app_server", "git_worktree", "cred_helper", "upgrade", "file_download"];
@@ -76,6 +83,7 @@ export class Daemon {
   private readonly toolhost: LoopbackToolHost;
   private readonly hub: CodexHub;
   private readonly platform: PlatformFiles;
+  private readonly gh: GhInstaller;
   private readonly employeeHome: string;
   /** Per-employee skill plugins (sessions/skills.ts), outside every worktree. */
   private readonly skillsRoot: string;
@@ -100,9 +108,11 @@ export class Daemon {
     this.approvals = new ApprovalBroker(send);
     this.tools = new ToolBroker(send);
     this.creds = new CredBroker(send);
-    this.credServer = new CredServer(credSocketPath(o.runtimeDir), this.creds, o.log);
-    this.toolhost = new LoopbackToolHost(o.log);
     this.platform = installPlatformFiles(o.platformDir, o.nodeCmd);
+    const dataDir = dirname(o.platformDir);
+    this.gh = new GhInstaller({ toolsDir: o.toolsDir ?? join(dataDir, "tools"), path: process.env.PATH ?? "", skip: [this.platform.binDir], ...o.gh });
+    this.credServer = new CredServer(credSocketPath(o.runtimeDir), this.creds, o.log, { gh: () => this.gh.resolve(), ghConfigRoot: join(dataDir, "gh-config") });
+    this.toolhost = new LoopbackToolHost(o.log);
     this.hub = new CodexHub({ env: this.codexServerEnv(), log: o.log, clientVersion: DAEMON_VERSION, ...(o.codexCommand ? { command: o.codexCommand } : {}) });
     this.git = new GitJobs({ root: o.root, platform: this.platform, gitBaseUrl: o.gitBaseUrl, mirrorDir: join(o.stateDir, "mirrors"), log: o.log, credential: (job, repo, purpose) => this.jobCredential(job, repo, purpose), lookup: (id) => this.recordedResult(id) });
     this.sessions = new SessionManager({
@@ -123,6 +133,7 @@ export class Daemon {
     await this.credServer.start();
     await this.toolhost.start();
     if (this.o.probeRuntimes !== false) await this.probe();
+    if (this.o.prefetchGh ?? this.o.probeRuntimes !== false) this.prefetchGh();
     this.cancelOrphans();
     this.dispatcher.resumeUnfinished();
     this.sessions.startTimers();
@@ -136,6 +147,14 @@ export class Daemon {
     this.hub.stop();
     await this.toolhost.stop();
     await this.credServer.stop();
+  }
+
+  /** Fetches gh in the background so the first `gh` in a session does not wait for the download. */
+  private prefetchGh(): void {
+    this.gh.resolve().then(
+      (bin) => this.o.log.info({ gh: bin }, "gh ready"),
+      (err: Error) => this.o.log.warn({ err: err.message }, "gh download failed; retried on first use"),
+    );
   }
 
   private async probe(): Promise<void> {

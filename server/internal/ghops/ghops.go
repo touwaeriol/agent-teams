@@ -26,17 +26,19 @@ type Scope int
 
 // Scopes.
 const (
-	ScopeFull      Scope = iota // console-side merge queue, PRs, merges
-	ScopeRead                   // employee sessions, prepare/status jobs
-	ScopePush                   // push jobs: contents write
-	ScopePushFlows              // push jobs when workflow edits are allowed
+	ScopeFull          Scope = iota // console-side merge queue, PRs, merges
+	ScopeRead                       // prepare/status jobs
+	ScopePush                       // push jobs: contents write
+	ScopePushFlows                  // push jobs when workflow edits are allowed
+	ScopeEmployee                   // lead/member sessions: push branches, open PRs and issues, read checks
+	ScopeEmployeeFlows              // ScopeEmployee when workflow edits are allowed
 )
 
 // ErrNoRepo means the project has no GitHub repository with a connection.
 var ErrNoRepo = errors.New("项目没有关联 GitHub 仓库")
 
-// ErrPATNarrow means a PAT cannot be narrowed for employee sessions.
-var ErrPATNarrow = errors.New("个人令牌无法缩小权限，员工会话不发令牌（建议改用 GitHub App 连接）")
+// ErrPATNarrow means a PAT cannot be narrowed to the read-only scope.
+var ErrPATNarrow = errors.New("个人令牌无法缩小为只读权限（建议改用 GitHub App 连接）")
 
 // ErrNoChecks means the App installation lacks checks:read.
 var ErrNoChecks = errors.New("GitHub App 没有 checks:read 权限")
@@ -180,6 +182,14 @@ func request(r Repo, scope Scope) github.TokenRequest {
 		req.Permissions = map[string]string{"contents": "write", "metadata": "read"}
 	case ScopePushFlows:
 		req.Permissions = map[string]string{"contents": "write", "workflows": "write", "metadata": "read"}
+	case ScopeEmployee, ScopeEmployeeFlows:
+		req.Permissions = map[string]string{"contents": "write", "pull_requests": "write", "issues": "write", "metadata": "read"}
+		if r.HasChecks() {
+			req.Permissions["checks"] = "read"
+		}
+		if scope == ScopeEmployeeFlows {
+			req.Permissions["workflows"] = "write"
+		}
 	}
 	return req
 }
@@ -287,6 +297,21 @@ func (g *GitHub) CreatePR(ctx context.Context, r Repo, head, base, title, body s
 	var out PR
 	_, err := g.call(ctx, r, http.MethodPost, "/pulls", map[string]string{"head": head, "base": base, "title": title, "body": body}, &out)
 	return out, err
+}
+
+// OpenPRFor finds the open pull request from head into base (an employee may have opened it
+// with gh); ok=false when there is none.
+func (g *GitHub) OpenPRFor(ctx context.Context, r Repo, head, base string) (PR, bool, error) {
+	owner := r.Slug[:strings.Index(r.Slug, "/")]
+	q := url.Values{"state": {"open"}, "head": {owner + ":" + head}, "base": {base}}
+	var out []PR
+	if _, err := g.call(ctx, r, http.MethodGet, "/pulls?"+q.Encode(), nil, &out); err != nil {
+		return PR{}, false, err
+	}
+	if len(out) == 0 {
+		return PR{}, false, nil
+	}
+	return out[0], true, nil
 }
 
 // GetPR reads a pull request.

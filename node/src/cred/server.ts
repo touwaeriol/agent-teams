@@ -23,10 +23,19 @@ export function credSocketPath(runtimeDir: string, tmp = tmpdir()): string {
 }
 
 export interface CredSocketRequest {
+  /** "cred" (default): a token for git; "gh": the real gh binary, its config dir and a token. */
+  op?: "cred" | "gh";
   session: string;
   secret: string;
   host: string;
   path: string;
+}
+
+export interface CredServerOptions {
+  /** Resolves (downloading when needed) the real gh binary. */
+  gh?: () => Promise<string>;
+  /** Per-session GH_CONFIG_DIR parent, outside every worktree. */
+  ghConfigRoot?: string;
 }
 
 interface SessionEntry {
@@ -38,13 +47,14 @@ interface SessionEntry {
  * Local unix socket answering the git credential helper and gh wrapper
  * (architecture.md §10.4). Callers prove which session they belong to with the
  * per-session secret placed in the helper arguments; the socket directory is 0700.
- * Only read tokens are served here; push tokens exist only inside git.push jobs.
+ * The console decides the token's scope by the session's role: leads and members get one
+ * that can push branches and open PRs on the project's repositories, the coordinator none.
  */
 export class CredServer {
   private server: Server | null = null;
   private readonly sessions = new Map<string, SessionEntry>();
 
-  constructor(readonly socketPath: string, private readonly broker: CredBroker, private readonly log: Logger) {}
+  constructor(readonly socketPath: string, private readonly broker: CredBroker, private readonly log: Logger, private readonly opts: CredServerOptions = {}) {}
 
   async start(): Promise<void> {
     const dir = dirname(this.socketPath);
@@ -81,6 +91,14 @@ export class CredServer {
 
   unregister(sessionId: string): void {
     this.sessions.delete(sessionId);
+    const dir = this.ghConfigDir(sessionId);
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  }
+
+  /** Empty per-session gh config directory (gh writes nothing secret there: the token comes from GH_TOKEN). */
+  private ghConfigDir(sessionId: string): string | null {
+    if (!this.opts.ghConfigRoot) return null;
+    return join(this.opts.ghConfigRoot, sessionId.replace(/[^A-Za-z0-9_.-]/g, "_"));
   }
 
   private onConnection(sock: Socket): void {
@@ -103,6 +121,11 @@ export class CredServer {
     const req = parse(line);
     const entry = req ? this.sessions.get(req.session) : undefined;
     if (!req || !entry || !safeEqual(entry.secret, req.secret)) return { ok: false, error: "unknown session" };
+    return req.op === "gh" ? this.ghReply(req, entry) : this.credReply(req, entry);
+  }
+
+  /** The broker's token for one repository (the console decides the scope by the session's role, §10.4). */
+  private async credReply(req: CredSocketRequest, entry: SessionEntry): Promise<Record<string, unknown>> {
     try {
       const cred = await this.broker.get({ session_id: req.session, open_gen: entry.openGen }, req.host, req.path, "read");
       return { ok: true, username: cred.username, password: cred.password };
@@ -110,6 +133,24 @@ export class CredServer {
       this.log.info({ session: req.session, err: (err as Error).message }, "credential request refused");
       return { ok: false, error: (err as Error).message };
     }
+  }
+
+  /** gh wrapper: the real binary and config dir always; the token when the repository is known and allowed. */
+  private async ghReply(req: CredSocketRequest, entry: SessionEntry): Promise<Record<string, unknown>> {
+    let gh: string;
+    try {
+      if (!this.opts.gh) throw new Error("gh is not configured on this node");
+      gh = await this.opts.gh();
+    } catch (err) {
+      this.log.warn({ err: (err as Error).message }, "gh unavailable");
+      return { ok: false, error: `gh is not available on this node: ${(err as Error).message}` };
+    }
+    const configDir = this.ghConfigDir(req.session);
+    if (configDir) mkdirSync(configDir, { recursive: true, mode: 0o700 });
+    const out: Record<string, unknown> = { ok: true, gh, ...(configDir ? { config_dir: configDir } : {}) };
+    if (!req.path) return { ...out, token_error: "no repository: run gh inside a repository directory or pass -R owner/repo" };
+    const cred = await this.credReply(req, entry);
+    return cred.ok ? { ...out, password: cred.password } : { ...out, token_error: cred.error };
   }
 }
 

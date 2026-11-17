@@ -177,3 +177,15 @@ func TestClientPagingAndErrors(t *testing.T) {
 		t.Fatalf("want 404 error, got %v", err)
 	}
 }
+
+// TestRestErrorKeepsValidationMessages: a 422's errors[] messages reach callers (open_pr tells
+// "No commits between" and "A pull request already exists" apart).
+func TestRestErrorKeepsValidationMessages(t *testing.T) {
+	err := restError(422, []byte(`{"message":"Validation Failed","errors":[{"resource":"PullRequest","code":"custom","message":"A pull request already exists for o:thread/1-x."}]}`))
+	if !strings.Contains(err.Error(), "Validation Failed; A pull request already exists") {
+		t.Fatalf("error %q", err)
+	}
+	if err := restError(409, []byte(`{"message":"Merge conflict"}`)); err.Error() != "GitHub 返回 409：Merge conflict" {
+		t.Fatalf("error %q", err)
+	}
+}

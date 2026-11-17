@@ -62,7 +62,7 @@ describe("git jobs", () => {
         return String((e as { stderr?: string }).stderr ?? e);
       }
     })();
-    expect(blocked).toContain("push_branch");
+    expect(blocked).toContain("protected branch");
 
     h.console.command("git.status", { job_id: "g_3", cwd: "projects/p1/threads/12/dev-2" });
     const st = await h.console.waitType("git.result", (b) => b.job_id === "g_3");

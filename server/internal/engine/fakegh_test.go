@@ -51,6 +51,7 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 	mux.HandleFunc("GET /repos/{o}/{r}/commits/{sha}/check-runs", f.checkRuns)
 	mux.HandleFunc("POST /repos/{o}/{r}/pulls", f.createPR)
 	mux.HandleFunc("GET /repos/{o}/{r}/pulls/{n}", f.getPR)
+	mux.HandleFunc("GET /repos/{o}/{r}/pulls", f.listPRs)
 	mux.HandleFunc("PUT /repos/{o}/{r}/pulls/{n}/merge", f.mergePR)
 	mux.HandleFunc("GET /repos/{o}/{r}/contents/{path...}", f.contents)
 	mux.HandleFunc("GET /repos/{o}/{r}/git/trees/{ref...}", f.tree)
@@ -174,12 +175,50 @@ func (f *fakeGitHub) createPR(w http.ResponseWriter, r *http.Request) {
 	var body struct{ Head, Base string }
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	repo := repoOf(r)
+	if _, open := f.openPR(repo, body.Head, body.Base); open {
+		write(w, 422, map[string]any{"message": "Validation Failed", "errors": []map[string]string{{"message": "A pull request already exists for " + body.Head + "."}}})
+		return
+	}
 	f.mu.Lock()
 	f.prs++
 	pr := &fakePR{number: 6 + f.prs, head: body.Head, base: body.Base}
 	f.pulls[fmt.Sprintf("%s#%d", repo, pr.number)] = pr
 	f.mu.Unlock()
 	write(w, 201, map[string]any{"number": pr.number, "html_url": prURL(repo, pr.number), "state": "open"})
+}
+
+// openPR is the unmerged pull request from head into base.
+func (f *fakeGitHub) openPR(repo, head, base string) (fakePR, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for k, pr := range f.pulls {
+		if strings.HasPrefix(k, repo+"#") && pr.head == head && pr.base == base && !pr.merged {
+			return *pr, true
+		}
+	}
+	return fakePR{}, false
+}
+
+// listPRs answers GET /pulls?state=open&head=owner:branch&base=b.
+func (f *fakeGitHub) listPRs(w http.ResponseWriter, r *http.Request) {
+	repo := repoOf(r)
+	head := r.URL.Query().Get("head")
+	head = head[strings.Index(head, ":")+1:]
+	out := []map[string]any{}
+	if pr, ok := f.openPR(repo, head, r.URL.Query().Get("base")); ok {
+		out = append(out, map[string]any{"number": pr.number, "html_url": prURL(repo, pr.number), "state": "open", "head": map[string]string{"ref": pr.head}})
+	}
+	write(w, 200, out)
+}
+
+// openPRByHand opens a pull request the way an employee's gh would (not through the platform).
+func (f *fakeGitHub) openPRByHand(repo, head, base string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.prs++
+	pr := &fakePR{number: 6 + f.prs, head: head, base: base}
+	f.pulls[fmt.Sprintf("%s#%d", repo, pr.number)] = pr
+	return pr.number
 }
 
 func prURL(repo string, n int) string { return fmt.Sprintf("https://github.com/%s/pull/%d", repo, n) }
