@@ -194,7 +194,6 @@ export const DELIVERABLE_KINDS: Record<string, { label: string; glyph: string; b
   slides: { label: "幻灯片", glyph: "▭", bg: "#FBE9DF", fg: "#B4530B", block: "#FBE9DF" },
   dashboard: { label: "数据看板", glyph: "▥", bg: "#FBE7E6", fg: "#B42318", block: "#EAF0FB" },
   board: { label: "白板", glyph: "◇", bg: "#FBE6F0", fg: "#A2346B", block: "#FBE6F0" },
-  pr: { label: "PR", glyph: "⇡", bg: "#EAF0FB", fg: "#2F6FDB", block: "#E6F2EA" },
   data: { label: "数据", glyph: "▦", bg: "#FBEDEC", fg: "#B42318", block: "#EAF0FB" },
 };
 
