@@ -64,7 +64,7 @@ BEGIN
      WHERE p.user_id IS NULL AND p.is_default
        AND NOT EXISTS (SELECT 1 FROM at_models m WHERE m.user_id = u.id AND m.runtime = p.runtime AND m.is_default);
     IF missing_rows > 0 OR missing_defaults > 0 THEN
-        RAISE EXCEPTION '00200_user_models: platform models not copied to every user (% rows, % defaults missing)',
+        RAISE EXCEPTION '00210_user_models: platform models not copied to every user (% rows, % defaults missing)',
             missing_rows, missing_defaults;
     END IF;
 END $$;
