@@ -65,7 +65,11 @@ export function threadMark(t: ThreadView, waiting?: Map<number, QuestionView>): 
   return t.members.some(isWorking) ? "working" : "idle";
 }
 
-/** Only 进行中 and 失败 rows have a second line; 已解决 / 已暂停 / 已归档 are one compact line. */
+/**
+ * Only 进行中 and 失败 rows have a second line (progress, tags, the tree line); 已解决 / 已暂停 /
+ * 已归档 are one compact line. 失败 stays rich on purpose: a failure needs the user's attention,
+ * so its reason and plan progress stay visible.
+ */
 export const isCompactGroup = (g: ListGroupId) => g !== "active" && g !== "failed";
 
 /** Main tasks done / total ("2/7"), from the plan when the thread carries it; null without a plan. */

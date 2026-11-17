@@ -236,6 +236,33 @@ describe("ThreadList", () => {
     expect(compact.findAll("button span.truncate").map((s) => s.text())).toEqual(["#1 T1"]);
     expect(compact.get("time").text()).toBe("51分钟");
   });
+  it("settled rows (已解决 / 已暂停 / 失败) with an open card get a small orange dot; the group does not change", () => {
+    const w = mountWith(ThreadList, {
+      threads: [
+        thread(1, { status: "done", counts: { ...thread(1).counts, waiting: 1, approvals_open: 1 } }),
+        thread(2, { status: "paused" }),
+        thread(3, { status: "failed" }),
+        thread(4, { status: "done" }),
+        thread(5, { status: "archived", counts: { ...thread(5).counts, waiting: 1 } }),
+        thread(6, { members: [{ id: "e", name: "lead", tier: "lead", status: { state: "typing" } }] as never, counts: { ...thread(6).counts, waiting: 1 } }),
+      ],
+      waitingByThread: new Map([[2, question("q", { thread_no: 2 })], [3, question("q3", { thread_no: 3 })]]),
+      folded: {},
+    });
+    const row = (no: number) => w.findAll("[data-row]").find((r) => r.text().includes(`#${no} `))!;
+    const dot = (no: number) => row(no).find("[data-waits]");
+    expect(w.findAll("section[data-group]").map((s) => s.attributes("data-group"))).toEqual(["active", "done", "failed", "paused", "archived"]);
+    expect(w.findAll("[data-group=done] [data-row]")).toHaveLength(2);
+    expect(dot(1).exists()).toBe(true);
+    expect(dot(1).attributes("aria-label")).toBe("等你处理");
+    expect(dot(1).attributes("title")).toBe("等你处理");
+    expect(dot(2).exists()).toBe(true);
+    expect(dot(3).exists()).toBe(true);
+    expect(dot(4).exists()).toBe(false);
+    expect(dot(5).exists()).toBe(false); // archived stays quiet
+    expect(dot(6).exists()).toBe(false); // 进行中 shows it in the mark instead
+    expect(row(6).get("[data-mark]").attributes("data-mark")).toBe("wait");
+  });
   it("says what to do when there are none", () => {
     expect(mountWith(ThreadList, { threads: [] }).text()).toContain("还没有讨论串");
   });

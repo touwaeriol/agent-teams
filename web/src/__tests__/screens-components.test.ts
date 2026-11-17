@@ -14,7 +14,7 @@ import { useText } from "@/pages/design/viewer";
 import MobileOverview from "@/pages/main/MobileOverview.vue";
 import PanelList from "@/pages/main/PanelList.vue";
 import { foldedKey } from "@/lib/threadList";
-import { thread } from "./fixtures";
+import { question, thread } from "./fixtures";
 import { resetListViews } from "@/lib/threadListView";
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -87,6 +87,15 @@ describe("ThreadDetail", () => {
     expect(w.get("[data-crumb=title] [data-mark]").attributes("data-mark")).toBe("paused");
     await w.setProps({ thread: thread(12, { status: "failed", members: [] }) });
     expect(w.get("[data-crumb=title] [data-mark]").attributes("data-mark")).toBe("failed");
+  });
+  it("header mark uses the list's waiting map: an open question alone (counts.waiting 0) shows 等你处理", async () => {
+    stubApi({ "/messages": { items: [], next_cursor: null }, "/questions": [], "/waiting": { questions: [question("q1", { thread_no: 12 })], reviews: [] } });
+    const lead = { id: "e1", name: "lead", tier: "lead", status: { state: "typing" } };
+    const w = mountWith(ThreadDetail, { pid: "p1", thread: thread(12, { members: [lead] as never }), view: null });
+    await flushPromises();
+    expect(w.get("[data-crumb=title] [data-mark]").attributes("data-mark")).toBe("wait");
+    await w.setProps({ thread: thread(13, { members: [lead] as never }) });
+    expect(w.get("[data-crumb=title] [data-mark]").attributes("data-mark")).toBe("working");
   });
   it("tells an archived thread's composer how to go on and unarchives in one click", async () => {
     const fetch = stubApi({ "/messages": { items: [], next_cursor: null }, "/questions": [] });

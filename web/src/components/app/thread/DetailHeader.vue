@@ -8,10 +8,12 @@
  */
 import { ChevronRight, Maximize2, Minimize2, Pin, X } from "lucide-vue-next";
 import { computed, ref } from "vue";
+import { useWaiting } from "@/api/queries";
 import type { ThreadView } from "@/api/views";
 import IconButton from "@/components/common/IconButton.vue";
 import { threadLook } from "@/lib/present";
 import { mainProgress, threadMark } from "@/lib/threadList";
+import { waitingIndex } from "@/pages/main/logic";
 import NodeStatus from "../NodeStatus.vue";
 import ResolveButton from "../ResolveButton.vue";
 import ThreadMenu from "../ThreadMenu.vue";
@@ -29,7 +31,9 @@ const props = withDefaults(defineProps<{ thread: ThreadView; expand?: ExpandLink
 const emit = defineEmits<{ back: []; close: []; view: [view: ThreadViewId] }>();
 const look = computed(() => threadLook(props.thread));
 const progress = computed(() => mainProgress(props.thread));
-const mark = computed(() => threadMark(props.thread));
+// Same waiting map as the list, so a thread whose only open card is a question shows 等你处理 here too.
+const waiting = useWaiting(() => props.thread.project_id);
+const mark = computed(() => threadMark(props.thread, waitingIndex(waiting.data.value?.questions)));
 const renaming = ref(false);
 </script>
 
@@ -56,7 +60,7 @@ const renaming = ref(false);
         <template v-else>
           <Pin v-if="thread.pinned_at" class="size-3 shrink-0 rotate-45 text-muted-foreground" :stroke-width="2" aria-label="已置顶" />
           <span aria-current="page" class="min-w-0 truncate font-normal text-foreground" @dblclick="renaming = true"
-            ><span class="text-muted-foreground/70 tabular-nums">#{{ thread.no }}</span> {{ thread.title }}</span
+            ><span class="text-muted-foreground tabular-nums">#{{ thread.no }}</span> {{ thread.title }}</span
           >
           <span v-if="progress" class="shrink-0 text-xs tabular-nums text-muted-foreground" :aria-label="`主任务完成 ${progress.label}`" data-progress="">{{ progress.label }}</span>
         </template>
