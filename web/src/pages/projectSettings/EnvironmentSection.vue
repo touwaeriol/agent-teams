@@ -26,6 +26,6 @@ const update = useUpdate(() => props.project.id);
         <el-option v-for="c in WORKTREE_CHOICES" :key="c.value" :value="c.value" :label="c.label" />
       </el-select>
     </div>
-    <p class="text-[13px] leading-5 text-muted-foreground">{{ worktreeChoice(project.work_mode).desc }} 已有检出的员工在下次准备工作目录时按新方式；最好在没有进行中的讨论串时修改。</p>
+    <p class="break-words text-[13px] leading-5 text-muted-foreground">{{ worktreeChoice(project.work_mode).desc }} 已有检出的员工在下次准备工作目录时按新方式；最好在没有进行中的讨论串时修改。</p>
   </div>
 </template>
