@@ -1,0 +1,150 @@
+// @vitest-environment jsdom
+// The first message of a thread chat: the brief the thread was opened with (Markdown, folded when
+// long), the user's words it came from (text, thumbnails, link back to the project chat), and the
+// "组长正在阅读任务…" line until the lead's first message.
+import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
+import { flushPromises, mount } from "@vue/test-utils";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { nextTick } from "vue";
+import { createMemoryHistory, createRouter } from "vue-router";
+import type { MessageView, ThreadDispatch, ThreadView } from "@/api/views";
+import DispatchMessage from "@/components/app/thread/DispatchMessage.vue";
+import { briefFoldable, dispatchSpeaker, leadReading } from "@/components/app/thread/detail";
+import ThreadChat from "@/components/app/thread/ThreadChat.vue";
+import { message, thread } from "./fixtures";
+
+async function plugins(path = "/projects/p1/threads/12") {
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/:p(.*)*", component: { render: () => null } }] });
+  await router.push(path);
+  return [[VueQueryPlugin, { queryClient: new QueryClient() }], router] as never[];
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  document.body.innerHTML = "";
+});
+
+const longBrief = ["## 目标", "", ...Array.from({ length: 10 }, (_, i) => `- 第 ${i + 1} 条要求`)].join("\n");
+const dispatch = (patch: Partial<ThreadDispatch> = {}): ThreadDispatch => ({
+  brief: "把 **登录页** 改成暗色",
+  opened_by: "coordinator",
+  at: "2026-11-17T10:00:00Z",
+  source: null,
+  ...patch,
+});
+const source = {
+  message_id: "41",
+  content: "登录页太亮了，照这张图改",
+  attachments: [{ id: "att1", name: "截图.png", content_type: "image/png" as const, size: 10, sha256: "", created_at: "", url: "/api/attachments/att1" }],
+  created_at: "2026-11-17T09:59:00Z",
+};
+
+const mountDispatch = async (d: ThreadDispatch, path?: string) =>
+  mount(DispatchMessage, { props: { dispatch: d, pid: "p1", compact: true }, global: { plugins: await plugins(path) } });
+
+describe("helpers", () => {
+  it("names who handed over the brief", () => {
+    expect(dispatchSpeaker("coordinator")).toBe("统筹 → 组长");
+    expect(dispatchSpeaker("user")).toBe("你 → 组长");
+  });
+  it("folds briefs longer than six lines or one long paragraph", () => {
+    expect(briefFoldable("一行")).toBe(false);
+    expect(briefFoldable(longBrief)).toBe(true);
+    expect(briefFoldable("字".repeat(400))).toBe(true);
+  });
+  it("the lead reads until its first message (and not while older pages are unloaded)", () => {
+    expect(leadReading([], false)).toBe(true);
+    expect(leadReading([{ role: "user" }, { role: "system" }], false)).toBe(true);
+    expect(leadReading([{ role: "user" }, { role: "leader" }], false)).toBe(false);
+    expect(leadReading([], true)).toBe(false);
+  });
+});
+
+describe("DispatchMessage", () => {
+  it("renders the brief as Markdown under 统筹 → 组长", async () => {
+    const w = await mountDispatch(dispatch());
+    expect(w.text()).toContain("统筹 → 组长");
+    expect(w.get("[data-brief] strong").text()).toBe("登录页");
+    expect(w.find("[data-brief-toggle]").exists()).toBe(false);
+    expect(w.get("[data-brief]").attributes("style") ?? "").not.toContain("max-height");
+  });
+  it("says 你 → 组长 when the user opened the thread", async () => {
+    const w = await mountDispatch(dispatch({ opened_by: "user" }));
+    expect(w.text()).toContain("你 → 组长");
+  });
+  it("folds a long brief and toggles 展开 / 收起", async () => {
+    const w = await mountDispatch(dispatch({ brief: longBrief }));
+    const toggle = w.get("[data-brief-toggle]");
+    expect(toggle.text()).toBe("展开");
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    expect(w.get("[data-brief]").attributes("style")).toContain("max-height: 156px");
+    await toggle.trigger("click");
+    expect(toggle.text()).toBe("收起");
+    expect(w.get("[data-brief]").attributes("style") ?? "").not.toContain("max-height");
+    await toggle.trigger("click");
+    expect(toggle.text()).toBe("展开");
+    expect(w.get("[data-brief]").attributes("style")).toContain("max-height");
+  });
+  it("quotes the user's words with thumbnails and a link back to the project chat", async () => {
+    const w = await mountDispatch(dispatch({ source }));
+    const quote = w.get("[data-dispatch-source]");
+    expect(quote.text()).toContain("登录页太亮了，照这张图改");
+    const img = quote.get("img");
+    expect(img.attributes("src")).toBe("/api/attachments/att1");
+    expect(img.element.closest("a")?.getAttribute("href")).toBe("/api/attachments/att1");
+    // On the board the thread panel stays open; the project chat scrolls to ?msg=41.
+    expect(quote.get("[data-dispatch-back]").attributes("href")).toBe("/projects/p1/threads/12?msg=41");
+  });
+  it("from the full-page thread the link goes back to the board", async () => {
+    const w = await mountDispatch(dispatch({ source }), "/projects/p1/threads/12/full");
+    expect(w.get("[data-dispatch-back]").attributes("href")).toBe("/projects/p1?msg=41");
+  });
+  it("shows no quote without a source", async () => {
+    const w = await mountDispatch(dispatch());
+    expect(w.find("[data-dispatch-source]").exists()).toBe(false);
+    expect(w.find("[data-dispatch-back]").exists()).toBe(false);
+    expect(w.find("img").exists()).toBe(false);
+  });
+});
+
+describe("ThreadChat", () => {
+  function serve(messages: MessageView[]) {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = (input as Request).url;
+      const body = url.includes("/messages") ? { items: messages, next_cursor: null } : [];
+      return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+  }
+  async function mountChat(t: ThreadView) {
+    const w = mount(ThreadChat, { props: { pid: "p1", thread: t, compact: true }, global: { plugins: await plugins() } });
+    await flushPromises();
+    await nextTick();
+    return w;
+  }
+
+  it("shows the brief first and 组长正在阅读任务… under it while the lead has not spoken", async () => {
+    serve([message("1", { role: "user", content: "补充一句" })]);
+    const w = await mountChat(thread(12, { dispatch: dispatch() }));
+    const html = w.html();
+    expect(w.find("[data-dispatch]").exists()).toBe(true);
+    expect(w.get("[data-lead-reading]").text()).toBe("组长正在阅读任务…");
+    expect(html.indexOf("data-dispatch")).toBeLessThan(html.indexOf("补充一句"));
+    expect(html.indexOf("补充一句")).toBeLessThan(html.indexOf("data-lead-reading"));
+    expect(w.text()).not.toContain("还没有对话");
+  });
+  it("drops the reading line once the lead's first message is there", async () => {
+    serve([message("2", { role: "leader", content: "收到，开始拆任务。" })]);
+    const w = await mountChat(thread(12, { dispatch: dispatch() }));
+    expect(w.find("[data-dispatch]").exists()).toBe(true);
+    expect(w.find("[data-lead-reading]").exists()).toBe(false);
+    expect(w.text()).toContain("收到，开始拆任务。");
+  });
+  it("an older thread with a dispatch shows it; without one, no brief", async () => {
+    serve([message("2", { role: "leader", content: "已完成" })]);
+    const done = await mountChat(thread(9, { status: "done", dispatch: dispatch({ brief: "旧任务" }) }));
+    expect(done.get("[data-dispatch]").text()).toContain("旧任务");
+    expect(done.find("[data-lead-reading]").exists()).toBe(false);
+    const none = await mountChat(thread(8, { dispatch: null }));
+    expect(none.find("[data-dispatch]").exists()).toBe(false);
+  });
+});
