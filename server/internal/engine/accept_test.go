@@ -20,8 +20,9 @@ type acceptCase struct {
 	events *sse
 }
 
-// newAcceptCase: status is the thread's status. Without require_acceptance the merge loop merges
-// the open PRs of a thread in review by itself; "running" keeps it out of the way, so only Accept merges.
+// newAcceptCase: status is the thread's status ("review" for a PR awaiting acceptance). Without
+// require_acceptance the merge loop also merges the open PRs of a thread in review by itself, as
+// in production: the tests below run Accept's background merge next to it.
 func newAcceptCase(t *testing.T, requireAcceptance bool, status string) *acceptCase {
 	t.Helper()
 	gh, ghSrv := newFakeGitHub(t)
@@ -65,6 +66,19 @@ func (c *acceptCase) view(t *testing.T) core.ThreadView {
 	return v
 }
 
+func (c *acceptCase) set(fn func(gh *fakeGitHub)) {
+	c.gh.mu.Lock()
+	defer c.gh.mu.Unlock()
+	fn(c.gh)
+}
+
+func (c *acceptCase) reject(t *testing.T) core.ThreadView {
+	t.Helper()
+	var v core.ThreadView
+	c.b.must(200, "POST", "/api/threads/"+c.thread.ID+"/reject", map[string]string{"reason": "再改改"}, &v)
+	return v
+}
+
 func (c *acceptCase) accept(t *testing.T) (core.ThreadView, time.Duration) {
 	t.Helper()
 	var v core.ThreadView
@@ -101,11 +115,20 @@ func mergeError(v core.ThreadView) string {
 }
 
 // TestAcceptAsync: without require_acceptance, accept answers at once with pr_state accepting and
-// checks and merges in the background (a slow GitHub no longer holds the request); repeated
-// clicks while it runs start no second merge.
+// checks and merges in the background (a slow GitHub no longer holds the request). The merge
+// loop, which auto-merges open PRs of threads in review, runs next to it and repeated clicks
+// arrive while it merges: the PR is still merged exactly once.
 func TestAcceptAsync(t *testing.T) {
-	c := newAcceptCase(t, false, "running")
+	c := newAcceptCase(t, false, "review")
 	c.setLatency(500 * time.Millisecond) // the background merge makes ≥ 4 GitHub calls: ≥ 2 s
+	var seen int
+	c.set(func(gh *fakeGitHub) { seen = gh.requests })
+	// Accept while a loop step is reading the PR: both reach the merge at about the same time.
+	eventually(t, "merge loop reading the PR", func() bool {
+		n := 0
+		c.set(func(gh *fakeGitHub) { n = gh.requests })
+		return n > seen
+	})
 	v, took := c.accept(t)
 	t.Logf("accept answered in %v with GitHub at 500 ms a request", took)
 	if v.PRState != "accepting" || v.MergeError != nil || took > 400*time.Millisecond {
@@ -120,6 +143,7 @@ func TestAcceptAsync(t *testing.T) {
 	if v.PRState != "merged" || v.MergeError != nil || len(v.Repos) != 1 || v.Repos[0].PRState != "merged" {
 		t.Fatalf("after merge: %s %q %v %+v", v.Status, v.PRState, v.MergeError, v.Repos)
 	}
+	time.Sleep(time.Second) // a loop step that started before accept would have merged by now
 	if n := c.mergeCalls(); n != 1 {
 		t.Fatalf("PR merged %d times", n)
 	}
@@ -128,14 +152,23 @@ func TestAcceptAsync(t *testing.T) {
 	}
 }
 
+// TestAcceptNotInReview: only a thread in review can be accepted.
+func TestAcceptNotInReview(t *testing.T) {
+	c := newAcceptCase(t, false, "running")
+	if code, raw := c.b.do("POST", "/api/threads/"+c.thread.ID+"/accept", nil); code != 409 || !strings.Contains(string(raw), "not_in_review") {
+		t.Fatalf("accept outside review: %d %s", code, raw)
+	}
+	if v := c.view(t); v.PRState != "open" || c.mergeCalls() != 0 {
+		t.Fatalf("thread changed: %q", v.PRState)
+	}
+}
+
 // TestAcceptMergeFails: GitHub refusing the merge (405) puts the PR back to open with the reason
 // in merge_error; accepting again clears it and, once GitHub allows it, merges.
 func TestAcceptMergeFails(t *testing.T) {
-	c := newAcceptCase(t, false, "running")
+	c := newAcceptCase(t, false, "review")
 	key := "o/r#" + itoa(c.pr)
-	c.gh.mu.Lock()
-	c.gh.mergeFail[key] = 405
-	c.gh.mu.Unlock()
+	c.set(func(gh *fakeGitHub) { gh.mergeFail[key] = 405 })
 	c.accept(t)
 	v := c.waitFor(t, "merge failed", func(v core.ThreadView) bool { return v.PRState == "open" })
 	if !strings.Contains(mergeError(v), "405") || !strings.Contains(mergeError(v), "o/r#") || v.Repos[0].PRState != "open" {
@@ -143,10 +176,10 @@ func TestAcceptMergeFails(t *testing.T) {
 	}
 	c.events.wait(t, "thread", `"merge_error":"合并失败`)
 
-	c.gh.mu.Lock()
-	delete(c.gh.mergeFail, key)
-	c.gh.latency = 300 * time.Millisecond
-	c.gh.mu.Unlock()
+	c.set(func(gh *fakeGitHub) {
+		delete(gh.mergeFail, key)
+		gh.latency = 300 * time.Millisecond // the loop's own auto-merge needs ≥ 0.9 s: accept comes first
+	})
 	v, _ = c.accept(t)
 	if v.PRState != "accepting" || v.MergeError != nil {
 		t.Fatalf("retry: %q %v", v.PRState, v.MergeError)
@@ -157,26 +190,81 @@ func TestAcceptMergeFails(t *testing.T) {
 	}
 }
 
-// TestAcceptChecksNotPassed: checks still running or failed are reported, not a 409.
-func TestAcceptChecksNotPassed(t *testing.T) {
-	c := newAcceptCase(t, false, "running")
-	c.gh.mu.Lock()
-	c.gh.checks["sha-thread"] = []map[string]any{{"name": "verify", "status": "in_progress"}}
-	c.gh.mu.Unlock()
+// TestAcceptChecksPending: checks still running are reported (no 409); the PR merges by itself later.
+func TestAcceptChecksPending(t *testing.T) {
+	c := newAcceptCase(t, false, "review")
+	c.set(func(gh *fakeGitHub) {
+		gh.checks["sha-thread"] = []map[string]any{{"name": "verify", "status": "in_progress"}}
+	})
 	c.accept(t)
 	v := c.waitFor(t, "pending reported", func(v core.ThreadView) bool { return v.PRState == "open" })
-	if !strings.Contains(mergeError(v), "还没有全部通过") {
+	if !strings.Contains(mergeError(v), "通过后会自动合并") || c.mergeCalls() != 0 {
 		t.Fatalf("pending: %q", mergeError(v))
 	}
-	c.gh.mu.Lock()
-	c.gh.checks["sha-thread"] = []map[string]any{{"name": "verify", "status": "completed", "conclusion": "failure"}}
-	c.gh.mu.Unlock()
+}
+
+// TestAcceptRateLimited: a rate-limited merge (429) is no failure: the thread stays accepting
+// without merge_error, the merge loop retries and merges once GitHub lets it.
+func TestAcceptRateLimited(t *testing.T) {
+	c := newAcceptCase(t, false, "review")
+	key := "o/r#" + itoa(c.pr)
+	c.set(func(gh *fakeGitHub) { gh.mergeFail[key] = 429 })
 	c.accept(t)
-	v = c.waitFor(t, "failure reported", func(v core.ThreadView) bool {
-		return v.PRState == "open" && strings.Contains(mergeError(v), "没有通过")
+	eventually(t, "loop retries", func() bool { return c.mergeCalls() >= 3 })
+	if v := c.view(t); v.PRState != "accepting" || v.MergeError != nil {
+		t.Fatalf("rate limited: %q %q", v.PRState, mergeError(v))
+	}
+	c.set(func(gh *fakeGitHub) { delete(gh.mergeFail, key) })
+	v := c.waitFor(t, "merged after the rate limit", func(v core.ThreadView) bool { return v.Status == "done" })
+	if v.PRState != "merged" || v.MergeError != nil {
+		t.Fatalf("after rate limit: %q %v", v.PRState, v.MergeError)
+	}
+}
+
+// TestAcceptRejectStopsMerge: a reject while the background merge reads the checks stops it
+// before anything is merged.
+func TestAcceptRejectStopsMerge(t *testing.T) {
+	c := newAcceptCase(t, false, "review")
+	c.setLatency(400 * time.Millisecond)
+	c.accept(t)
+	if v := c.reject(t); v.Status != "running" || v.PRState != "open" {
+		t.Fatalf("reject: %s %q", v.Status, v.PRState)
+	}
+	time.Sleep(3 * time.Second) // the background merge and a loop step in flight both get past their checks
+	v := c.view(t)
+	if n := c.mergeCalls(); n != 0 || v.Status != "running" || v.PRState != "open" || v.MergeError != nil {
+		t.Fatalf("after reject: merges %d, %s %q %q", n, v.Status, v.PRState, mergeError(v))
+	}
+}
+
+// TestAcceptRejectKeepsResult: a merge already in flight when the user rejects fails afterwards;
+// its failure does not overwrite the reject (no merge_error, still running and open).
+func TestAcceptRejectKeepsResult(t *testing.T) {
+	c := newAcceptCase(t, false, "review")
+	c.set(func(gh *fakeGitHub) {
+		gh.mergeFail["o/r#"+itoa(c.pr)] = 405
+		gh.mergeDelay = time.Second
 	})
-	if !strings.Contains(mergeError(v), "o/r · verify：failure") || c.mergeCalls() != 0 {
-		t.Fatalf("failure: %q merges %d", mergeError(v), c.mergeCalls())
+	c.accept(t)
+	time.Sleep(200 * time.Millisecond)
+	if v := c.reject(t); v.Status != "running" {
+		t.Fatalf("reject: %s", v.Status)
+	}
+	time.Sleep(1500 * time.Millisecond)
+	if v := c.view(t); v.Status != "running" || v.PRState != "open" || v.MergeError != nil {
+		t.Fatalf("merge failure overwrote the reject: %s %q %q", v.Status, v.PRState, mergeError(v))
+	}
+}
+
+// TestAcceptTimeout: a background merge that runs out of time says so in merge_error.
+func TestAcceptTimeout(t *testing.T) {
+	c := newAcceptCase(t, false, "review")
+	c.w.e.Delivery.AcceptTimeout = 300 * time.Millisecond
+	c.setLatency(time.Second)
+	c.accept(t)
+	v := c.waitFor(t, "timeout reported", func(v core.ThreadView) bool { return v.MergeError != nil })
+	if mergeError(v) != "合并超时，请稍后重试" || v.PRState != "open" {
+		t.Fatalf("timeout: %q %q", v.PRState, mergeError(v))
 	}
 }
 
@@ -185,9 +273,7 @@ func TestAcceptChecksNotPassed(t *testing.T) {
 // rejecting clears it.
 func TestAcceptLoopMergeFails(t *testing.T) {
 	c := newAcceptCase(t, true, "review")
-	c.gh.mu.Lock()
-	c.gh.mergeFail["o/r#"+itoa(c.pr)] = 403
-	c.gh.mu.Unlock()
+	c.set(func(gh *fakeGitHub) { gh.mergeFail["o/r#"+itoa(c.pr)] = 403 })
 	v, _ := c.accept(t)
 	if v.PRState != "accepting" {
 		t.Fatalf("accept: %q", v.PRState)
@@ -201,7 +287,7 @@ func TestAcceptLoopMergeFails(t *testing.T) {
 		t.Fatalf("merge retried %d times", n)
 	}
 	start := time.Now()
-	c.b.must(200, "POST", "/api/threads/"+c.thread.ID+"/reject", map[string]string{"reason": "再改改"}, &v)
+	v = c.reject(t)
 	t.Logf("reject answered in %v", time.Since(start))
 	if v.MergeError != nil || v.Status != "running" {
 		t.Fatalf("reject: %s %v", v.Status, v.MergeError)
@@ -211,9 +297,9 @@ func TestAcceptLoopMergeFails(t *testing.T) {
 // TestAcceptLoopChecksFail: with require_acceptance failed checks reach the user too.
 func TestAcceptLoopChecksFail(t *testing.T) {
 	c := newAcceptCase(t, true, "review")
-	c.gh.mu.Lock()
-	c.gh.checks["sha-thread"] = []map[string]any{{"name": "verify", "status": "completed", "conclusion": "failure"}}
-	c.gh.mu.Unlock()
+	c.set(func(gh *fakeGitHub) {
+		gh.checks["sha-thread"] = []map[string]any{{"name": "verify", "status": "completed", "conclusion": "failure"}}
+	})
 	c.accept(t)
 	v := c.waitFor(t, "checks failure reported", func(v core.ThreadView) bool { return v.PRState == "open" })
 	if !strings.Contains(mergeError(v), "verify：failure") || c.mergeCalls() != 0 {

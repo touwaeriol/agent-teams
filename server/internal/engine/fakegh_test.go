@@ -37,7 +37,9 @@ type fakeGitHub struct {
 
 	latency    time.Duration  // added to every request (a slow GitHub)
 	mergeFail  map[string]int // "repo#n" → HTTP status PUT .../merge answers instead of merging
+	mergeDelay time.Duration  // added to PUT .../merge (a merge in flight)
 	mergeCalls int            // PUT .../merge requests seen
+	requests   int            // requests seen (counted on arrival)
 }
 
 func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
@@ -63,6 +65,7 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		d := f.latency
+		f.requests++
 		f.mu.Unlock()
 		time.Sleep(d)
 		mux.ServeHTTP(w, r)
@@ -261,6 +264,10 @@ func (f *fakeGitHub) mergePR(w http.ResponseWriter, r *http.Request) {
 		write(w, 404, map[string]string{"message": "Not Found"})
 		return
 	}
+	f.mu.Lock()
+	delay := f.mergeDelay
+	f.mu.Unlock()
+	time.Sleep(delay)
 	f.mu.Lock()
 	f.mergeCalls++
 	status := f.mergeFail[repoOf(r)+"#"+r.PathValue("n")]
