@@ -24,6 +24,8 @@ func TestProjectChromeSettings(t *testing.T) {
 			t.Fatalf("PATCH %v = %d %s", bad, code, raw)
 		}
 	}
+	tm.b.must(200, "PUT", "/api/models/mine", map[string]any{"models": []map[string]any{
+		{"runtime": "claude", "model": "claude-opus-5-5", "default": true}, {"runtime": "claude", "model": "claude-thread-test"}}}, nil)
 	var p struct {
 		Icon, CoordinatorModel, ThreadModel, ThreadEffort string
 		AutoResume                                        bool `json:"auto_resume"`
@@ -237,5 +239,70 @@ func TestUsageLimitWaitsForEveryone(t *testing.T) {
 	tm.dev.expectSend("使用限额已重置")
 	if st, _ := threadStatus(tm); st != "running" || countWaits() != 0 {
 		t.Fatalf("after both resets: %s, %d waits", st, countWaits())
+	}
+}
+
+// TestProjectModels: the project's model overrides (coordinator_model and thread_model: Claude,
+// thread_codex_model: Codex) are checked against the owner's model list on create and on update:
+// ” follows each role, an id must be in the list with the field's runtime, and a stored value
+// that has since left the list may be sent again unchanged.
+func TestProjectModels(t *testing.T) {
+	tm := startTeam(t)
+	tm.b.must(200, "PUT", "/api/models/mine", map[string]any{"models": []map[string]any{
+		{"runtime": "claude", "model": "claude-opus-5-5", "default": true}, {"runtime": "claude", "model": "claude-sonnet-x"},
+		{"runtime": "codex", "model": "gpt-x", "default": true}, {"runtime": "codex", "model": "gpt-y"}}}, nil)
+	type project struct {
+		ID               string
+		CoordinatorModel string `json:"coordinator_model"`
+		ThreadModel      string `json:"thread_model"`
+		ThreadCodexModel string `json:"thread_codex_model"`
+	}
+	type fieldErr struct {
+		Fields []struct{ Path, Message string }
+	}
+	refuse := func(method, path string, body map[string]any, field, msg string) {
+		t.Helper()
+		code, raw := tm.b.do(method, path, body)
+		var e fieldErr
+		_ = json.Unmarshal(raw, &e)
+		if code != 422 || len(e.Fields) != 1 || e.Fields[0].Path != field || !strings.Contains(e.Fields[0].Message, msg) {
+			t.Fatalf("%s %s %v = %d %s", method, path, body, code, raw)
+		}
+	}
+
+	// Create: defaults are '' (follow the roles); models are checked like updates.
+	var plain project
+	tm.b.must(201, "POST", "/api/projects", map[string]any{"name": "plain"}, &plain)
+	if plain.CoordinatorModel != "" || plain.ThreadModel != "" || plain.ThreadCodexModel != "" {
+		t.Fatalf("defaults %+v", plain)
+	}
+	refuse("POST", "/api/projects", map[string]any{"name": "x", "thread_model": "claude-nope"}, "thread_model", "不在你的模型列表里")
+	refuse("POST", "/api/projects", map[string]any{"name": "x", "thread_codex_model": "claude-sonnet-x"}, "thread_codex_model", "只能选 Codex 模型")
+	refuse("POST", "/api/projects", map[string]any{"name": "x", "coordinator_model": "gpt-x"}, "coordinator_model", "只能选 Claude 模型")
+	var made project
+	tm.b.must(201, "POST", "/api/projects", map[string]any{"name": "with models", "coordinator_model": "claude-sonnet-x",
+		"thread_model": " claude-opus-5-5 ", "thread_codex_model": "gpt-y"}, &made)
+	if made.CoordinatorModel != "claude-sonnet-x" || made.ThreadModel != "claude-opus-5-5" || made.ThreadCodexModel != "gpt-y" {
+		t.Fatalf("created %+v", made)
+	}
+
+	// Update.
+	path := "/api/projects/" + made.ID
+	refuse("PATCH", path, map[string]any{"thread_codex_model": "gpt-nope"}, "thread_codex_model", "不在你的模型列表里")
+	refuse("PATCH", path, map[string]any{"thread_model": "gpt-x"}, "thread_model", "只能选 Claude 模型")
+	var p project
+	tm.b.must(200, "PATCH", path, map[string]any{"thread_codex_model": "gpt-x"}, &p)
+	if p.ThreadCodexModel != "gpt-x" || p.ThreadModel != "claude-opus-5-5" {
+		t.Fatalf("patched %+v", p)
+	}
+	// gpt-x and claude-sonnet-x leave the list: the stored values still save unchanged, new ones do not.
+	tm.b.must(200, "PUT", "/api/models/mine", map[string]any{"models": []map[string]any{
+		{"runtime": "claude", "model": "claude-opus-5-5", "default": true}, {"runtime": "codex", "model": "gpt-y"}}}, nil)
+	tm.b.must(200, "PATCH", path, map[string]any{"coordinator_model": "claude-sonnet-x", "thread_codex_model": "gpt-x", "name": "renamed"}, &p)
+	refuse("PATCH", "/api/projects/"+plain.ID, map[string]any{"thread_codex_model": "gpt-x"}, "thread_codex_model", "不在你的模型列表里")
+	// '' goes back to the roles.
+	tm.b.must(200, "PATCH", path, map[string]any{"coordinator_model": "", "thread_model": "", "thread_codex_model": ""}, &p)
+	if p.CoordinatorModel != "" || p.ThreadModel != "" || p.ThreadCodexModel != "" {
+		t.Fatalf("cleared %+v", p)
 	}
 }

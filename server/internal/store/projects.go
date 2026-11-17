@@ -28,6 +28,7 @@ type Project struct {
 	Icon              string
 	CoordinatorModel  string
 	ThreadModel       string
+	ThreadCodexModel  string
 	ThreadEffort      string
 	AutoResume        bool
 	Waiting           int `gorm:"->"`
@@ -45,6 +46,8 @@ type NewProject struct {
 	AutoApprove                bool
 	RequireAcceptance          bool
 	Delivery                   json.RawMessage
+	// Model overrides ('' = each role's model): the coordinator, Claude leads/members, Codex leads/members.
+	CoordinatorModel, ThreadModel, ThreadCodexModel string
 }
 
 // ProjectRepo is one repository bound to a project (at_project_repos), in project order.
@@ -57,7 +60,7 @@ const projectCols = `p.id, p.user_id, p.name, p.description, p.context,
 	COALESCE((SELECT json_agg(json_build_object('repo', r.repo, 'git_connection_id', r.git_connection_id)
 	  ORDER BY r.position, r.created_at) FROM at_project_repos r WHERE r.project_id = p.id), '[]'::json) AS repos,
 	p.created_at, p.updated_at, p.pinned, p.archived, p.work_mode, p.auto_approve, p.require_acceptance,
-	p.delivery, p.office_layout, p.icon, p.coordinator_model, p.thread_model, p.thread_effort, p.auto_resume,
+	p.delivery, p.office_layout, p.icon, p.coordinator_model, p.thread_model, p.thread_codex_model, p.thread_effort, p.auto_resume,
 	(SELECT count(*) FROM at_questions q WHERE q.project_id = p.id AND q.status = 'open' AND q.audience = 'user')
 	  + (SELECT count(*) FROM at_threads t WHERE t.project_id = p.id AND t.status = 'review') AS waiting,
 	(SELECT count(*) FROM at_threads t WHERE t.project_id = p.id
@@ -98,7 +101,8 @@ func (s *Store) CreateProject(ctx context.Context, userID string, n NewProject) 
 	err := s.Tx(ctx, func(tx *Store) error {
 		err := tx.g(ctx).Table("at_projects").Create(map[string]any{"id": id, "user_id": userID, "name": n.Name,
 			"description": n.Description, "context": n.Context, "work_mode": n.WorkMode, "auto_approve": n.AutoApprove,
-			"require_acceptance": n.RequireAcceptance, "delivery": delivery}).Error
+			"require_acceptance": n.RequireAcceptance, "delivery": delivery,
+			"coordinator_model": n.CoordinatorModel, "thread_model": n.ThreadModel, "thread_codex_model": n.ThreadCodexModel}).Error
 		if err != nil {
 			return err
 		}

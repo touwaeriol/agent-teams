@@ -99,9 +99,17 @@ func (o *Orchestrator) setThreadModel(ctx context.Context, tx *core.Tx, threadID
 }
 
 // ApplyModel sends the employee's model to its session on a node, if it has one.
+//
+// m is ” only for a Codex employee with nothing set at any level (DefaultCodexModel). Nothing is
+// sent then (Live false): a set_mode with an empty model would be ignored by the node anyway, and
+// the running Codex session keeps what it runs; the next session opens without a model, on the
+// Codex CLI's own default.
 func (o *Orchestrator) ApplyModel(ctx context.Context, tx *core.Tx, e core.Employee, p store.Project) (ModelApplied, error) {
 	m := Model(e, p, composer.DefaultModel(ctx, tx, p.UserID, e.Runtime))
 	out := ModelApplied{Employee: e.Name, Model: m}
+	if m == "" {
+		return out, nil
+	}
 	s, err := core.LiveSession(ctx, tx, e.ID)
 	if errors.Is(err, core.ErrNotFound) || (err == nil && s.NodeID == nil) {
 		return out, nil

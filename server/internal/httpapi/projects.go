@@ -29,7 +29,8 @@ type ProjectView struct {
 	OfficeLayout      string    `json:"office_layout"`
 	Icon              string    `json:"icon" doc:"'' = initial on the default color; an emoji; or color:#RRGGBB"`
 	CoordinatorModel  string    `json:"coordinator_model" doc:"'' = the coordinator role's model"`
-	ThreadModel       string    `json:"thread_model" doc:"'' = each lead/member role's model"`
+	ThreadModel       string    `json:"thread_model" doc:"Claude leads and members; '' = each role's model"`
+	ThreadCodexModel  string    `json:"thread_codex_model" doc:"Codex leads and members; '' = each role's model"`
 	ThreadEffort      string    `json:"thread_effort" doc:"'' = each role's effort; low | medium | high | xhigh | max"`
 	AutoResume        bool      `json:"auto_resume" doc:"Continue threads paused by a usage limit once it resets"`
 	Waiting           int       `json:"waiting"`
@@ -48,7 +49,7 @@ func ProjectViewOf(p store.Project, d Delivery) ProjectView {
 		Pinned: p.Pinned, Archived: p.Archived,
 		WorkMode: p.WorkMode, AutoApprove: p.AutoApprove, RequireAcceptance: p.RequireAcceptance,
 		Delivery: d, OfficeLayout: p.OfficeLayout, Icon: p.Icon, CoordinatorModel: p.CoordinatorModel,
-		ThreadModel: p.ThreadModel, ThreadEffort: p.ThreadEffort, AutoResume: p.AutoResume, Waiting: p.Waiting,
+		ThreadModel: p.ThreadModel, ThreadCodexModel: p.ThreadCodexModel, ThreadEffort: p.ThreadEffort, AutoResume: p.AutoResume, Waiting: p.Waiting,
 		ThreadsActive: p.ThreadsActive, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
 }
 
@@ -63,6 +64,9 @@ type ProjectInput struct {
 	RequireAcceptance *bool          `json:"require_acceptance,omitempty"`
 	Delivery          *DeliveryPatch `json:"delivery,omitempty"`
 	FirstMessage      string         `json:"first_message,omitempty" maxLength:"50000" doc:"Delivered to the project coordinator"`
+	CoordinatorModel  string         `json:"coordinator_model,omitempty" maxLength:"100" doc:"Claude model of the coordinator; '' = the role's model"`
+	ThreadModel       string         `json:"thread_model,omitempty" maxLength:"100" doc:"Claude model of Claude leads and members; '' = each role's model"`
+	ThreadCodexModel  string         `json:"thread_codex_model,omitempty" maxLength:"100" doc:"Codex model of Codex leads and members; '' = each role's model"`
 }
 
 // ProjectUpdate is PATCH /api/projects/{pid}.
@@ -80,7 +84,8 @@ type ProjectUpdate struct {
 	OfficeLayout      *string        `json:"office_layout,omitempty" doc:"'' = global default"`
 	Icon              *string        `json:"icon,omitempty" maxLength:"32" doc:"'' = initial; an emoji; or color:#RRGGBB"`
 	CoordinatorModel  *string        `json:"coordinator_model,omitempty" maxLength:"100" doc:"'' = the role's model"`
-	ThreadModel       *string        `json:"thread_model,omitempty" maxLength:"100" doc:"'' = each role's model"`
+	ThreadModel       *string        `json:"thread_model,omitempty" maxLength:"100" doc:"Claude leads and members; '' = each role's model"`
+	ThreadCodexModel  *string        `json:"thread_codex_model,omitempty" maxLength:"100" doc:"Codex leads and members; '' = each role's model"`
 	ThreadEffort      *string        `json:"thread_effort,omitempty" maxLength:"16" doc:"'' | low | medium | high | xhigh | max"`
 	AutoResume        *bool          `json:"auto_resume,omitempty"`
 }
@@ -160,7 +165,14 @@ func (s *Server) createProject(ctx context.Context, in *createProjectInput) (*pr
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.store.CreateProject(ctx, p.User.ID, newProject(b, name, repos, s.deliveryDefault(ctx)))
+	np := newProject(b, name, repos, s.deliveryDefault(ctx))
+	if err := s.checkProjectModels(ctx, p.User.ID, []projectModel{
+		{"coordinator_model", "claude", &np.CoordinatorModel, ""},
+		{"thread_model", "claude", &np.ThreadModel, ""},
+		{"thread_codex_model", "codex", &np.ThreadCodexModel, ""}}); err != nil {
+		return nil, err
+	}
+	row, err := s.store.CreateProject(ctx, p.User.ID, np)
 	if errors.Is(err, store.ErrConflict) {
 		return nil, fail(http.StatusConflict, "project_exists", "已经有叫 "+name+" 的项目了")
 	}
@@ -186,7 +198,8 @@ func newProject(b ProjectInput, name string, repos []store.ProjectRepo, defaults
 	}
 	return store.NewProject{Name: name, Description: b.Description, Context: b.Context, Repos: repos,
 		WorkMode: workMode, AutoApprove: b.AutoApprove,
-		RequireAcceptance: requireAcceptance, Delivery: raw}
+		RequireAcceptance: requireAcceptance, Delivery: raw, CoordinatorModel: strings.TrimSpace(b.CoordinatorModel),
+		ThreadModel: strings.TrimSpace(b.ThreadModel), ThreadCodexModel: strings.TrimSpace(b.ThreadCodexModel)}
 }
 
 func (s *Server) updateProject(ctx context.Context, in *updateProjectInput) (*projectOutput, error) {
@@ -247,6 +260,11 @@ func (s *Server) projectChanges(ctx context.Context, userID string, cur store.Pr
 	if err != nil {
 		return nil, err
 	}
+	modelCh, err := s.modelChanges(ctx, userID, cur, b)
+	if err != nil {
+		return nil, err
+	}
+	ch = append(ch, modelCh...)
 	ch = append(ch, chromeCh...)
 	settingCh, err := s.settingChanges(ctx, userID, cur, b)
 	if err != nil {

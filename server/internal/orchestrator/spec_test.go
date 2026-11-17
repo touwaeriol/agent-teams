@@ -246,6 +246,34 @@ func TestModelPrecedence(t *testing.T) {
 	}
 }
 
+// TestProjectModelOverride: a project without an override runs the role's model; setting one
+// switches the employees of its runtime to it; setting it back to ” returns to the role's model.
+// Codex employees follow thread_codex_model only, Claude leads and members thread_model only.
+func TestProjectModelOverride(t *testing.T) {
+	claudeDev := emp("member", "dev", store.Role{Model: "claude-role"})
+	codexDev := emp("member", "dev", store.Role{Model: "gpt-role"})
+	codexDev.Runtime = "codex"
+	steps := []struct {
+		name               string
+		p                  store.Project
+		wantClaude, wantCx string
+	}{
+		{"not set", store.Project{}, "claude-role", "gpt-role"},
+		{"thread_model set", store.Project{ThreadModel: "claude-proj"}, "claude-proj", "gpt-role"},
+		{"thread_codex_model set", store.Project{ThreadCodexModel: "gpt-proj"}, "claude-role", "gpt-proj"},
+		{"both set", store.Project{ThreadModel: "claude-proj", ThreadCodexModel: "gpt-proj"}, "claude-proj", "gpt-proj"},
+		{"back to ''", store.Project{}, "claude-role", "gpt-role"},
+	}
+	for _, s := range steps {
+		if got := Model(claudeDev, s.p, "def"); got != s.wantClaude {
+			t.Errorf("%s: claude %q, want %q", s.name, got, s.wantClaude)
+		}
+		if got := Model(codexDev, s.p, "gpt-def"); got != s.wantCx {
+			t.Errorf("%s: codex %q, want %q", s.name, got, s.wantCx)
+		}
+	}
+}
+
 // TestModelSteps: every level of the fallback order for each tier and runtime, one step at a
 // time from the top, and a Codex employee never ends on a Claude id.
 func TestModelSteps(t *testing.T) {
@@ -254,7 +282,8 @@ func TestModelSteps(t *testing.T) {
 		e.Runtime, e.Model = runtime, picked
 		return e
 	}
-	full := store.Project{ThreadModel: "thread-m", CoordinatorModel: "coord-m"}
+	full := store.Project{ThreadModel: "thread-m", CoordinatorModel: "coord-m", ThreadCodexModel: "gpt-project"}
+	claudeOnly := store.Project{ThreadModel: "thread-m", CoordinatorModel: "coord-m"}
 	cases := []struct {
 		name                      string
 		tier, runtime, picked, rm string
@@ -275,9 +304,12 @@ func TestModelSteps(t *testing.T) {
 		{"claude member owner default", "member", "claude", "", "", store.Project{}, "def", "def"},
 		{"claude member built in", "member", "claude", "", "", store.Project{}, "", DefaultModel},
 		{"codex /model", "member", "codex", "gpt-picked", "gpt-role", full, "gpt-def", "gpt-picked"},
-		{"codex skips the project override", "member", "codex", "", "gpt-role", full, "gpt-def", "gpt-role"},
-		{"codex owner default", "member", "codex", "", "", full, "gpt-def", "gpt-def"},
-		{"codex built in is empty", "member", "codex", "", "", full, "", DefaultCodexModel},
+		{"codex project", "member", "codex", "", "gpt-role", full, "gpt-def", "gpt-project"},
+		{"codex lead project", "lead", "codex", "", "gpt-role", full, "gpt-def", "gpt-project"},
+		{"codex ignores thread_model", "member", "codex", "", "gpt-role", claudeOnly, "gpt-def", "gpt-role"},
+		{"codex owner default", "member", "codex", "", "", claudeOnly, "gpt-def", "gpt-def"},
+		{"codex built in is empty", "member", "codex", "", "", claudeOnly, "", DefaultCodexModel},
+		{"claude ignores thread_codex_model", "member", "claude", "", "role-m", store.Project{ThreadCodexModel: "gpt-project"}, "def", "role-m"},
 	}
 	for _, c := range cases {
 		got := Model(withRuntime(c.tier, c.tier, c.runtime, c.picked, c.rm), c.p, c.def)
@@ -294,7 +326,7 @@ func TestModelSteps(t *testing.T) {
 	// A Codex session.open with nothing configured carries an empty model, never a Claude id.
 	cx := withRuntime("member", "dev", "codex", "", "")
 	in := open(t, cx, store.Node{})
-	in.project = full
+	in.project = claudeOnly
 	if o := codexOptions(in); o.Model != "" {
 		t.Fatalf("codex session.open model %q", o.Model)
 	}
