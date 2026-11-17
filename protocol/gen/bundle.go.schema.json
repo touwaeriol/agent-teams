@@ -4049,6 +4049,11 @@
           "items": {
             "$ref": "#/$defs/RepoFocus"
           }
+        },
+        "message_id": {
+          "description": "The user's message (its [message_id: N]) this thread is opened for; it is shown with the brief and its images and files go to the lead. Default: the user's latest message in the project chat.",
+          "type": "integer",
+          "minimum": 1
         }
       }
     },
@@ -4528,6 +4533,22 @@
         },
         "kind": {
           "$ref": "#/$defs/BubbleKind"
+        }
+      }
+    },
+    "TellUserInput": {
+      "title": "TellUserInput",
+      "description": "Post a short message to the user in the thread conversation right away (shown as the lead's own message), without ending the turn. Use it for the receipt after the brief and for updates the user should see; it is not a question (use ask_user to ask).",
+      "type": "object",
+      "required": [
+        "text"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
         }
       }
     },
