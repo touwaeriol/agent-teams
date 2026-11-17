@@ -64,11 +64,18 @@ describe("project settings", () => {
     expect(worktreeChoice("clone").label).toBe("关闭，直接在检出目录工作");
     expect(worktreeChoice("").label).toBe("开启，使用工作树");
   });
-  it("offers models", () => {
+  it("offers models from the model lists", () => {
+    const list = [
+      { id: "m1", runtime: "claude" as const, model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: false },
+      { id: "m2", runtime: "codex" as const, model: "gpt-x", label: "", default: false, mine: false },
+      { id: "m3", runtime: "claude" as const, model: "claude-sonnet-x", label: "Sonnet", default: false, mine: true },
+    ];
     expect(modelLabel("")).toBe("跟随岗位设置");
-    expect(modelLabel("claude-opus-5-5")).toBe("Opus 5.5");
-    expect(modelOptions("").map((o) => o.value)).toEqual(["", "claude-opus-5-5"]);
-    expect(modelOptions("claude-x").map((o) => o.value)).toEqual(["", "claude-opus-5-5", "claude-x"]);
+    expect(modelLabel("claude-opus-5-5", list)).toBe("Opus 5.5");
+    expect(modelLabel("claude-y", list)).toBe("claude-y");
+    expect(modelOptions("", list).map((o) => o.value)).toEqual(["", "claude-opus-5-5", "claude-sonnet-x"]);
+    expect(modelOptions("claude-x", list).map((o) => o.value)).toEqual(["", "claude-opus-5-5", "claude-sonnet-x", "claude-x"]);
+    expect(modelOptions("", []).map((o) => o.value)).toEqual([""]);
   });
   it("formats usage", () => {
     expect(formatTokens(950)).toBe("950");

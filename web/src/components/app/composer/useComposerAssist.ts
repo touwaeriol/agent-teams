@@ -67,7 +67,8 @@ export function useComposerAssist(options: MaybeRefOrGetter<AssistOptions | unde
   const items = computed<AssistItem[]>(() => {
     const t = trigger.value;
     if (!t || !opts.value) return [];
-    if (t.kind === "slash") return slashItems(t.query, opts.value.scope, commands.data.value?.commands ?? []);
+    const d = commands.data.value;
+    if (t.kind === "slash") return slashItems(t.query, opts.value.scope, d?.commands ?? [], { hidden: d?.hidden ?? [], custom: d?.custom ?? [] });
     return mentionItems(refs.data.value?.items ?? []);
   });
   const loading = computed(() => (slashOpen.value ? commands.isFetching.value && !commands.data.value : mentionOpen.value && refs.isFetching.value && !refs.data.value));
@@ -192,7 +193,7 @@ export function useComposerAssist(options: MaybeRefOrGetter<AssistOptions | unde
     /** A whole message that is a platform command runs here instead of being sent. */
     intercept(value: string): boolean {
       const o = opts.value;
-      const name = o ? commandOf(value, o.scope) : null;
+      const name = o ? commandOf(value, o.scope, commands.data.value?.hidden ?? []) : null;
       if (!name) return false;
       runCommand(name);
       return true;

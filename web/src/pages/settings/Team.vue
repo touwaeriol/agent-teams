@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 团队岗位: role templates (coordinator → lead → members) edited as one draft and saved together,
-// presets, a YAML view, then the skill and plugin libraries.
+// presets, a YAML view, then the user's models and the skill and plugin libraries.
 import { computed, ref, watch } from "vue";
 import { roles as roleActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
@@ -16,6 +16,7 @@ import NavButton from "@/components/shell/NavButton.vue";
 import { fromPreset, LEVEL, newRole, roleProblems, sortRoles } from "@/lib/roles";
 import PresetMenu from "./team/PresetMenu.vue";
 import RoleCard from "./team/RoleCard.vue";
+import MyModels from "./team/MyModels.vue";
 import { isDirty, ordered, patchAt, removeAt } from "./team/team";
 import YamlEditor from "./team/YamlEditor.vue";
 
@@ -78,6 +79,7 @@ const PILL = "rounded-full px-2.5 py-1";
       <div v-else class="grid gap-3.5 lg:grid-cols-2">
         <RoleCard v-for="(r, i) in draft" :key="r.id || `new-${i}`" :role="r" :layout="layout" @change="(p) => setRole(i, p)" @remove="removeRole(i)" />
       </div>
+      <MyModels v-if="!yaml" />
       <SkillLibrary v-if="!yaml" />
       <PluginLibrary v-if="!yaml" />
     </div>

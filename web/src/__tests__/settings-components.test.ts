@@ -143,6 +143,93 @@ describe("Team", () => {
   });
 });
 
+describe("Team · commands and models", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = "";
+  });
+
+  it("hides a platform command, adds a prompt command on the lead card and saves them with the roles", async () => {
+    const coordinator = { ...newRole([], "#111"), id: "r0", tier: "coordinator" as const, role: "coordinator", title: "项目统筹", sort: 0 };
+    const lead = { ...newRole([], "#222"), id: "r1", tier: "lead" as const, role: "lead", title: "组长", sort: 1 };
+    const codex = { ...newRole([], "#333"), id: "r2", role: "dev", title: "开发", runtime: "codex" as const, sort: 2 };
+    const spy = api([
+      ["GET", /\/api\/roles$/, { roles: [coordinator, lead, codex], warnings: [] }],
+      ["PUT", /\/api\/roles$/, { roles: [], warnings: [] }],
+      ["GET", /\/api\/models$/, { models: [{ id: "m1", runtime: "claude", model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: false }] }],
+      ["PUT", /\/api\/models\/mine$/, { models: [] }],
+      ["GET", /\/api\/(skills|plugins|nodes|roles\/presets)$/, {}],
+    ]);
+    const w = mountWith(Team);
+    await flushPromises();
+    const editors = w.findAll("[data-testid=command-editor]");
+    expect(editors).toHaveLength(3);
+    const leadEditor = editors[1]!;
+    expect(leadEditor.findAll("button[aria-pressed]").map((b) => b.text())).toContain("/effort");
+    expect(editors[0]!.findAll("button[aria-pressed]").map((b) => b.text())).not.toContain("/effort");
+    expect(editors[2]!.findAll("button[aria-pressed]")).toHaveLength(0);
+    expect(editors[2]!.text()).toContain("Codex 没有斜杠命令");
+    await leadEditor.findAll("button[aria-pressed]").find((b) => b.text() === "/usage")!.trigger("click");
+    await w.findAll("[data-testid=command-editor]")[1]!.findAll("button").find((b) => b.text().includes("添加命令"))!.trigger("click");
+    await flushPromises();
+    const dialog = document.querySelector(".at-dialog")!;
+    expect(dialog.textContent).toContain("透传给 Claude Code");
+    const inputs = dialog.querySelectorAll<HTMLInputElement>("input.el-input__inner");
+    inputs[0]!.value = "plan";
+    inputs[0]!.dispatchEvent(new Event("input"));
+    const area = dialog.querySelector<HTMLTextAreaElement>("textarea")!;
+    area.value = "先列计划：{{args}}";
+    area.dispatchEvent(new Event("input"));
+    await flushPromises();
+    dialog.querySelector("form")!.dispatchEvent(new Event("submit"));
+    await flushPromises();
+    expect(w.findAll("[data-testid=command-editor]")[1]!.text()).toContain("/plan");
+    await w.findAll("button").find((b) => b.text() === "保存")!.trigger("click");
+    await flushPromises();
+    const body = (await calls(spy, "PUT", /\/api\/roles$/)[0]!.json()) as { roles: { role: string; hidden_commands: string[]; commands: unknown[] }[] };
+    const saved = body.roles.find((r) => r.role === "lead")!;
+    expect(saved.hidden_commands).toEqual(["usage"]);
+    expect(saved.commands).toEqual([{ name: "plan", description: "", mode: "prompt", prompt: "先列计划：{{args}}" }]);
+  });
+
+  it("offers only prompt templates for a Codex role's command", async () => {
+    const coordinator = { ...newRole([], "#111"), id: "r0", tier: "coordinator" as const, role: "coordinator", sort: 0 };
+    const lead = { ...newRole([], "#222"), id: "r1", tier: "lead" as const, role: "lead", sort: 1 };
+    const codex = { ...newRole([], "#333"), id: "r2", role: "dev", runtime: "codex" as const, sort: 2 };
+    api([
+      ["GET", /\/api\/roles$/, { roles: [coordinator, lead, codex], warnings: [] }],
+      ["GET", /\/api\/models$/, { models: [] }],
+    ]);
+    const w = mountWith(Team);
+    await flushPromises();
+    await w.findAll("[data-testid=command-editor]")[2]!.findAll("button").find((b) => b.text().includes("添加命令"))!.trigger("click");
+    await flushPromises();
+    const dialog = document.querySelector(".at-dialog")!;
+    expect(dialog.textContent).toContain("提示词模板");
+    expect(dialog.textContent).not.toContain("透传给 Claude Code");
+    expect(dialog.textContent).toContain("Codex 没有斜杠命令");
+  });
+
+  it("adds an own model and saves the user's list", async () => {
+    const spy = api([
+      ["GET", /\/api\/roles$/, { roles: [], warnings: [] }],
+      ["GET", /\/api\/models$/, { models: [{ id: "m1", runtime: "claude", model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: false }] }],
+      ["PUT", /\/api\/models\/mine$/, { models: [] }],
+    ]);
+    const w = mountWith(Team);
+    await flushPromises();
+    const editor = w.get("[data-testid=model-list-editor]");
+    expect(w.text()).toContain("Opus 5.5（Claude Code，默认）");
+    await editor.findAll("button").find((b) => b.text() === "添加模型")!.trigger("click");
+    const idInput = editor.findAll("input").find((i) => i.attributes("placeholder") === "模型 ID")!;
+    await idInput.setValue("claude-haiku-x");
+    await editor.findAll("button").find((b) => b.text() === "保存")!.trigger("click");
+    await flushPromises();
+    const body = (await calls(spy, "PUT", /\/api\/models\/mine$/)[0]!.json()) as { models: { runtime: string; model: string }[] };
+    expect(body.models.map((m) => [m.runtime, m.model])).toEqual([["claude", "claude-haiku-x"]]);
+  });
+});
+
 describe("Project settings · 通用", () => {
   it("saves switches at once and the intro on blur", async () => {
     const project = {

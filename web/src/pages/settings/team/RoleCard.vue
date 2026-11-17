@@ -7,6 +7,7 @@ import type { RoleView } from "@/api/views";
 import DropdownMenu from "@/components/common/DropdownMenu.vue";
 import type { OfficeLayout } from "@/office";
 import { canHaveSkills, countText, isReadOnly, kindText, LEVEL, roleName, ruleText } from "@/lib/roles";
+import CommandEditor from "./CommandEditor.vue";
 import LookEditor from "./LookEditor.vue";
 import NodePicker from "./NodePicker.vue";
 import PermissionField from "./PermissionField.vue";
@@ -67,6 +68,7 @@ function save(r: RoleView) {
     <SkillPicker v-if="canHaveSkills(role)" :model-value="role.skills ?? []" @update:model-value="(skills: string[]) => emit('change', { skills })" />
     <PluginPicker v-if="canHaveSkills(role)" :role="role" @change="(plugins: string[]) => emit('change', { plugins })" />
     <PermissionField v-if="role.tier === 'member' && !isReadOnly(role)" :role="role" @change="(p) => emit('change', p)" />
+    <CommandEditor :role="role" @change="(p) => emit('change', p)" />
     <RoleDialog v-model:open="editing" :role="role" @save="save" />
   </article>
 </template>

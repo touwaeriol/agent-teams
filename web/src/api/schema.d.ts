@@ -20,6 +20,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/commands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace the platform's built-in custom commands */
+        put: operations["admin-save-commands"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/feedback": {
         parameters: {
             query?: never;
@@ -80,6 +97,23 @@ export interface paths {
         put?: never;
         /** Form data to create the platform GitHub App from a manifest */
         post: operations["admin-github-app-manifest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace the platform model list (order, one default per runtime) */
+        put: operations["admin-save-models"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -302,6 +336,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/commands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The platform's built-in custom commands */
+        get: operations["builtin-commands"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/conversations/{cid}/commands": {
         parameters: {
             query?: never;
@@ -363,6 +414,24 @@ export interface paths {
         put?: never;
         /** Send a message to the conversation's employee (coordinator or thread lead) */
         post: operations["post-message"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{cid}/model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The model of the conversation's employee (and of the thread's employees) */
+        get: operations["conversation-model"];
+        /** Change the model: the project coordinator, or the thread lead / whole thread; running sessions switch from their next turn */
+        put: operations["set-conversation-model"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -647,6 +716,40 @@ export interface paths {
         post?: never;
         /** Sign out one of my sessions */
         delete: operations["delete-my-session"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Models to choose from: the platform list, then the user's own */
+        get: operations["list-models"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/models/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace the user's own model entries (in order) */
+        put: operations["save-my-models"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2012,6 +2115,15 @@ export interface components {
             summary: string;
             url: string;
         };
+        CommandsBody: {
+            /** @description Built-in custom commands every role gets (a role's own command of the same name wins; passthrough ones skip Codex roles) */
+            commands: components["schemas"]["CustomCommand"][] | null;
+            /** @description Names of the platform commands (taken) */
+            readonly platform: string[] | null;
+        };
+        CommandsInputBody: {
+            commands: components["schemas"]["CustomCommand"][] | null;
+        };
         CommentView: {
             /** Format: date-time */
             created_at: string;
@@ -2040,12 +2152,16 @@ export interface components {
         ComposerCommands: {
             /** @description Empty for Codex employees */
             commands: components["schemas"]["ComposerCommand"][] | null;
+            /** @description The role's custom commands, then the platform built-ins (prompt: expanded by the server; passthrough: sent to Claude Code as typed) */
+            custom: components["schemas"]["Resolved"][] | null;
             employee: string;
             /**
              * @description session: what the latest session reported; role: the role's configured skills and plugins
              * @enum {string}
              */
             from: "session" | "role";
+            /** @description Platform commands the employee's role leaves out of its chats */
+            hidden: string[] | null;
             runtime: string;
             /** @enum {string} */
             tier: "coordinator" | "lead";
@@ -2078,6 +2194,24 @@ export interface components {
             /** @description null before the first session */
             session: components["schemas"]["SessionUsage"];
         };
+        ConversationModel: {
+            employee: string;
+            /** @description What the employee runs without the override */
+            inherited: string;
+            /** @description A session is open on a node: a change takes effect from its next turn */
+            live: boolean;
+            /** @description Thread: every employee of the thread (lead first) */
+            members: components["schemas"]["MemberModel"][] | null;
+            /** @description What the employee runs (or opens its next session with) */
+            model: string;
+            /** @description Picked with /model: the project coordinator model, or the lead's own ('' = not set) */
+            override: string;
+            runtime: string;
+            /** @enum {string} */
+            scope: "coordinator" | "thread";
+            /** @description The model the live session reported for its last turn ('' = no live session or no turn yet) */
+            session: string;
+        };
         CoordinatorView: {
             conversation_id: string;
             employee: components["schemas"]["EmployeeBrief"];
@@ -2087,6 +2221,18 @@ export interface components {
         Credentials: {
             email: string;
             password: string;
+        };
+        CustomCommand: {
+            description?: string;
+            /**
+             * @description Default prompt
+             * @enum {string}
+             */
+            mode?: "prompt" | "passthrough";
+            /** @description Typed after the slash */
+            name: string;
+            /** @description mode prompt: the instruction sent instead; {{args}} is what follows the name */
+            prompt?: string;
         };
         DayCost: {
             /** Format: double */
@@ -2367,6 +2513,14 @@ export interface components {
         MemberMessageInputBody: {
             content: string;
         };
+        MemberModel: {
+            model: string;
+            name: string;
+            /** @description Picked with /model ('' = project or role setting) */
+            override: string;
+            runtime: string;
+            tier: string;
+        };
         MemoryBrief: {
             description: string;
             name: string;
@@ -2438,6 +2592,37 @@ export interface components {
                 [key: string]: unknown;
             };
             role: string;
+        };
+        Model: {
+            /** @description Platform list only: what sessions of this runtime open with when nothing else names a model (one per runtime) */
+            default?: boolean;
+            readonly id: string;
+            /** @description Display name; empty shows the id */
+            label?: string;
+            /** @description The user's own entry */
+            readonly mine: boolean;
+            /** @description The id the runtime is given (claude-…, gpt-…) */
+            model: string;
+            /** @enum {string} */
+            runtime: "claude" | "codex";
+        };
+        ModelApplied: {
+            employee: string;
+            /** @description Sent to the employee's running session (from its next turn); false: the next session opens with it */
+            live: boolean;
+            /** @description What the employee runs from now on */
+            model: string;
+        };
+        ModelResult: {
+            applied: components["schemas"]["ModelApplied"][] | null;
+            /** @description Employees of another runtime (Codex members) that keep their model */
+            skipped: string[] | null;
+        };
+        ModelsBody: {
+            models: components["schemas"]["Model"][] | null;
+        };
+        ModelsInputBody: {
+            models: components["schemas"]["Model"][] | null;
         };
         NewCommentInputBody: {
             text: string;
@@ -2865,15 +3050,36 @@ export interface components {
             brief: string;
             kind: string;
         };
+        Resolved: {
+            description?: string;
+            /**
+             * @description Default prompt
+             * @enum {string}
+             */
+            mode?: "prompt" | "passthrough";
+            /** @description Typed after the slash */
+            name: string;
+            /** @description mode prompt: the instruction sent instead; {{args}} is what follows the name */
+            prompt?: string;
+            /**
+             * @description role: the employee's role; platform: a built-in every role gets
+             * @enum {string}
+             */
+            source: "role" | "platform";
+        };
         Role: {
             allowed_tools: string[] | null;
             can_delegate: boolean;
+            /** @description The role's own slash commands */
+            commands?: components["schemas"]["CustomCommand"][] | null;
             /** Format: int64 */
             count: number;
             description: string;
             disallowed_tools: string[] | null;
             effort: string;
             gate: string;
+            /** @description Platform commands (model, status…) the role's chats do not offer */
+            hidden_commands?: string[] | null;
             id: string;
             instructions: string;
             look: components["schemas"]["Look"];
@@ -2991,6 +3197,16 @@ export interface components {
             /** Format: date-time */
             last_seen_at: string | null;
             user_agent: string;
+        };
+        SetModelInputBody: {
+            /** @description Model id; '' goes back to the project / role setting */
+            model: string;
+            /**
+             * @description Thread conversations: only the lead, or every employee of the thread with the lead's runtime
+             * @default lead
+             * @enum {string}
+             */
+            scope: "lead" | "thread";
         };
         SetupPROutputBody: {
             pr_url: string;
@@ -3437,6 +3653,39 @@ export interface operations {
             };
         };
     };
+    "admin-save-commands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommandsInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommandsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     "admin-list-feedback": {
         parameters: {
             query?: {
@@ -3551,6 +3800,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ManifestOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "admin-save-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelsInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelsBody"];
                 };
             };
             /** @description Error */
@@ -4166,6 +4448,35 @@ export interface operations {
             };
         };
     };
+    "builtin-commands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommandsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     "conversation-commands": {
         parameters: {
             query?: never;
@@ -4317,6 +4628,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MessageView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "conversation-model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationModel"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "set-conversation-model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetModelInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelResult"];
                 };
             };
             /** @description Error */
@@ -4955,6 +5332,68 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "save-my-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelsInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelsBody"];
+                };
             };
             /** @description Error */
             default: {

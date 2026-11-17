@@ -10,6 +10,7 @@ export interface FakeQueryLog {
   closed: number;
   interrupts: number;
   modes: string[];
+  models?: string[];
 }
 
 /**
@@ -57,7 +58,12 @@ class FakeQuery {
     this.log.modes.push(m);
   }
 
-  async setModel() {}
+  private model: string | undefined;
+
+  async setModel(m?: string) {
+    (this.log.models ??= []).push(m ?? "");
+    this.model = m;
+  }
 
   close() {
     this.log.closed++;
@@ -104,7 +110,7 @@ class FakeQuery {
       this.transcript({ type: "user", uuid: msg.uuid, message: { role: "user", content: text } });
       this.push({ type: "system", subtype: "init", tools: [...(this.options.tools as string[]), "mcp__platform__complete_task"], session_id: this.sid });
       const reply = await this.respond(text);
-      this.push({ type: "assistant", message: { content: [{ type: "text", text: reply }] }, user_message_uuids: [msg.uuid], session_id: this.sid });
+      this.push({ type: "assistant", message: { model: this.model ?? this.options.model, content: [{ type: "text", text: reply }] }, parent_tool_use_id: null, user_message_uuids: [msg.uuid], session_id: this.sid });
       this.push({ type: "result", subtype: "success", result: reply, is_error: false, num_turns: 1, duration_ms: 5, total_cost_usd: 0, usage: {}, session_id: this.sid });
     }
   }

@@ -50,6 +50,8 @@ p, user, /api/attachments/:id, GET
 p, user, /api/conversations/:cid/commands, GET
 p, user, /api/conversations/:cid/context, GET
 p, user, /api/conversations/:cid/interrupt, POST
+p, user, /api/conversations/:cid/model, GET
+p, user, /api/conversations/:cid/model, PUT
 p, user, /api/conversations/:cid/messages, GET
 p, user, /api/conversations/:cid/messages, POST
 p, user, /api/conversations/:cid/questions, GET
@@ -116,6 +118,9 @@ p, user, /api/projects/:pid/threads, GET
 p, user, /api/projects/:pid/threads, POST
 p, user, /api/projects/:pid/usage, GET
 p, user, /api/projects/:pid/waiting, GET
+p, user, /api/commands, GET
+p, user, /api/models, GET
+p, user, /api/models/mine, PUT
 p, user, /api/roles, GET
 p, user, /api/roles, PUT
 p, user, /api/roles/look/random, POST
@@ -160,10 +165,12 @@ p, user, /api/voice/session, POST
 
 # Administrators: the admin console.
 p, admin, /api/admin/audit, GET
+p, admin, /api/admin/commands, PUT
 p, admin, /api/admin/feedback, GET
 p, admin, /api/admin/feedback/:id, PATCH
 p, admin, /api/admin/github-app, DELETE
 p, admin, /api/admin/github-app/manifest, POST
+p, admin, /api/admin/models, PUT
 p, admin, /api/admin/office/layouts, GET
 p, admin, /api/admin/office/layouts/:id, DELETE
 p, admin, /api/admin/office/layouts/:id, PUT

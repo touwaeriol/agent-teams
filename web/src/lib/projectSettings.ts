@@ -1,4 +1,5 @@
 // 项目设置 dialog: sections, the instructions limit, worktree choice, model and effort choices, usage numbers.
+import { modelChoices, modelName, type ModelEntry } from "./models";
 
 export const SETTINGS_SECTIONS = [
   { id: "general", label: "通用" },
@@ -29,20 +30,15 @@ export function worktreeChoice(mode: string) {
   return WORKTREE_CHOICES.find((c) => c.value === mode) ?? WORKTREE_CHOICES[0];
 }
 
-export const DEFAULT_MODEL = "claude-opus-5-5";
-
-const MODEL_NAMES: Record<string, string> = { [DEFAULT_MODEL]: "Opus 5.5" };
-
-export function modelLabel(id: string): string {
+/** "跟随岗位设置" for an empty model override, else the model's name in the lists. */
+export function modelLabel(id: string, list: ModelEntry[] = []): string {
   if (!id) return "跟随岗位设置";
-  return MODEL_NAMES[id] ?? id;
+  return modelName(list, id);
 }
 
-/** Model choices: follow the role, the platform default, and whatever is saved now. */
-export function modelOptions(current: string): { value: string; label: string }[] {
-  const ids = ["", DEFAULT_MODEL];
-  if (current && !ids.includes(current)) ids.push(current);
-  return ids.map((value) => ({ value, label: modelLabel(value) }));
+/** Project model choices: follow the role, then the Claude list (and whatever is saved now). */
+export function modelOptions(current: string, list: ModelEntry[]): { value: string; label: string }[] {
+  return [{ value: "", label: modelLabel("") }, ...modelChoices(list, "claude", current).map((c) => ({ value: c.value, label: c.label }))];
 }
 
 export const EFFORTS = [

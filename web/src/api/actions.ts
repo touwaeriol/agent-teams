@@ -109,6 +109,14 @@ export const roles = {
   randomLook: (role: string) => unwrap(client.POST("/api/roles/look/random", { body: { role } })),
 };
 
+export const models = {
+  /** The user's own model entries, in order (replaces the list). */
+  saveMine: (list: S["Model"][]) => unwrap(client.PUT("/api/models/mine", { body: { models: list } })),
+  /** /model: the conversation's employee (thread: scope lead or the whole thread). */
+  setConversation: (cid: string, model: string, scope: "lead" | "thread" = "lead") =>
+    unwrap(client.PUT("/api/conversations/{cid}/model", { params: { path: { cid } }, body: { model, scope } })),
+};
+
 export const skills = {
   /** zip: base64 of a zip file; files: a picked folder's text files. */
   create: (body: S["NewSkillInputBody"]) => unwrap(client.POST("/api/skills", { body })),
@@ -135,6 +143,8 @@ export const admin = {
   removeUser: (id: string) => unwrap(client.DELETE("/api/admin/users/{id}", { params: { path: { id } } })),
   resetPassword: (id: string) => unwrap(client.POST("/api/admin/users/{id}/password-reset", { params: { path: { id } } })),
   saveSettings: (body: S["AdminSettings"]) => unwrap(client.PUT("/api/admin/settings", { body })),
+  saveModels: (list: S["Model"][]) => unwrap(client.PUT("/api/admin/models", { body: { models: list } })),
+  saveCommands: (list: S["CustomCommand"][]) => unwrap(client.PUT("/api/admin/commands", { body: { commands: list } })),
   uploadPlugin: (zip: string) => unwrap(client.POST("/api/admin/plugins", { body: { zip } })),
   setPluginEnabled: (id: string, enabled: boolean) => unwrap(client.PATCH("/api/admin/plugins/{id}", { params: { path: { id } }, body: { enabled } })),
   removePlugin: (id: string) => unwrap(client.DELETE("/api/admin/plugins/{id}", { params: { path: { id } } })),

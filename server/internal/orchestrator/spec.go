@@ -109,6 +109,7 @@ type sessionInput struct {
 	hasRepo  bool
 	repos    []string // repository slugs checked out under the employee's directory
 	protRefs []string
+	defModel string // the platform default model of the employee's runtime ("" = DefaultModel)
 }
 
 // buildOpen renders session.open for an employee.
@@ -160,13 +161,18 @@ func employeeRef(e core.Employee, t *core.Thread) protocol.EmployeeRef {
 	return ref
 }
 
-// model is the project override for the employee's tier, else the role's model, else the default.
-func model(e core.Employee, p store.Project) string {
+// Model is what the employee's sessions run: the model picked for the employee with /model, the
+// project override for its tier (Claude only), the role's model, the platform default of the
+// runtime (def, from the admin model list), else DefaultModel.
+func Model(e core.Employee, p store.Project, def string) string {
+	if e.Runtime == "codex" {
+		return firstNonEmpty(e.Model, e.Spec.Model, def, DefaultModel)
+	}
 	override := p.ThreadModel
 	if e.Tier == "coordinator" {
 		override = p.CoordinatorModel
 	}
-	return firstNonEmpty(override, e.Spec.Model, DefaultModel)
+	return firstNonEmpty(e.Model, override, e.Spec.Model, def, DefaultModel)
 }
 
 // effort is the project's thread effort for leads and members, else the role's.
@@ -189,7 +195,7 @@ func firstNonEmpty(vals ...string) string {
 func claudeOptions(in sessionInput) protocol.ClaudeSessionOptions {
 	e := in.emp
 	system := in.system
-	c := protocol.ClaudeSessionOptions{Model: model(e, in.project), SystemAppend: &system, SettingSources: []string{},
+	c := protocol.ClaudeSessionOptions{Model: Model(e, in.project, in.defModel), SystemAppend: &system, SettingSources: []string{},
 		AllowedTools: []string{"mcp__platform__*"}}
 	if eff := effort(e, in.project); eff != "" {
 		c.Effort = &eff
@@ -250,7 +256,7 @@ func memberClaude(c *protocol.ClaudeSessionOptions, in sessionInput) {
 func codexOptions(in sessionInput) protocol.CodexSessionOptions {
 	e := in.emp
 	dev := in.system
-	c := protocol.CodexSessionOptions{Model: firstNonEmpty(e.Spec.Model, DefaultModel), DeveloperInstructions: &dev, Sandbox: "read-only", ApprovalPolicy: "never"}
+	c := protocol.CodexSessionOptions{Model: Model(e, in.project, in.defModel), DeveloperInstructions: &dev, Sandbox: "read-only", ApprovalPolicy: "never"}
 	switch {
 	case readOnly(e):
 	case Bypass(e):

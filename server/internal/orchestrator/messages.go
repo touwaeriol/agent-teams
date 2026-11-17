@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/touwaeriol/agent-teams/server/internal/composer"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -41,6 +42,9 @@ type UserMessage struct {
 	// Images are attachment ids of the conversation's project, in order (images, PDFs and
 	// text files: a text file's content is put into the delivered text).
 	Images []string
+	// Deliver replaces Content in what the employee gets (an expanded custom command); the stored
+	// message keeps Content.
+	Deliver string
 	// Context is appended to the delivered text only (the resolved @ references); the stored
 	// message keeps the user's own words.
 	Context string
@@ -73,7 +77,11 @@ func (o *Orchestrator) PostUserMessageWith(ctx context.Context, in UserMessage) 
 		if len(images) > 0 {
 			meta = withImages(meta, images)
 		}
-		text, files, err := o.inlineTexts(ctx, tx, c, content, images)
+		deliver := content
+		if in.Deliver != "" {
+			deliver = in.Deliver
+		}
+		text, files, err := o.inlineTexts(ctx, tx, c, deliver, images)
 		if err != nil {
 			return err
 		}
@@ -216,9 +224,19 @@ func (o *Orchestrator) MessageMember(ctx context.Context, t core.Thread, name, c
 		if err != nil {
 			return err
 		}
-		rec := &core.NewMessage{ConversationID: t.ID, Role: "user", Author: "user", Kind: "chat", Content: content,
-			Meta: map[string]any{"to": name}}
-		m, err = o.Deliver(ctx, tx, emp, Delivery{Text: "[用户直接对你说] " + content, Kind: "user", Priority: "next", Record: rec})
+		deliver, cmd, err := composer.ExpandFor(ctx, tx, emp, content)
+		if err != nil {
+			return err
+		}
+		meta := map[string]any{"to": name}
+		if cmd != nil {
+			meta["command"] = cmd
+		}
+		if deliver == "" {
+			deliver = content
+		}
+		rec := &core.NewMessage{ConversationID: t.ID, Role: "user", Author: "user", Kind: "chat", Content: content, Meta: meta}
+		m, err = o.Deliver(ctx, tx, emp, Delivery{Text: "[用户直接对你说] " + deliver, Kind: "user", Priority: "next", Record: rec})
 		return err
 	})
 	return m, err

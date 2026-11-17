@@ -5132,6 +5132,10 @@ type SessionEvent struct {
 	// notification / error.
 	Message *string `json:"message,omitempty,omitzero"`
 
+	// turn_ended: the model that answered the turn (Claude: the model with the most
+	// output tokens in the result's modelUsage; Codex: the turn's model).
+	Model *string `json:"model,omitempty,omitzero"`
+
 	// notification.
 	NotificationType *string `json:"notification_type,omitempty,omitzero"`
 
@@ -5313,6 +5317,9 @@ func (j *SessionEvent) UnmarshalJSON(value []byte) error {
 	}
 	if 1 > plain.EventNo {
 		return fmt.Errorf("field %s: must be >= %v", "event_no", 1)
+	}
+	if plain.Model != nil && utf8.RuneCountInString(string(*plain.Model)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "model", 200)
 	}
 	if plain.NumTurns != nil && 0 > *plain.NumTurns {
 		return fmt.Errorf("field %s: must be >= %v", "num_turns", 0)

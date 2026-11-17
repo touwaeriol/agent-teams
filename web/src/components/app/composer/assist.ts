@@ -6,6 +6,7 @@ type S = components["schemas"];
 export type ComposerCommand = S["ComposerCommand"];
 export type RefCandidate = S["RefCandidate"];
 export type MessageRef = S["MessageRef"];
+export type CustomCommand = S["Resolved"];
 
 /** Which employee the box talks to: the project coordinator or a thread's lead. */
 export type Scope = "coordinator" | "lead";
@@ -50,12 +51,14 @@ export const PLATFORM_COMMANDS: PlatformCommand[] = [
   { name: "config", desc: "打开项目设置", scopes: ["coordinator", "lead"] },
 ];
 
-export const platformCommands = (scope: Scope) => PLATFORM_COMMANDS.filter((c) => c.scopes.includes(scope));
+/** The platform commands of a scope, less those the employee's role hides. */
+export const platformCommands = (scope: Scope, hidden: readonly string[] = []) =>
+  PLATFORM_COMMANDS.filter((c) => c.scopes.includes(scope) && !hidden.includes(c.name));
 
 /** The platform command a whole message names ("/status", "/model  "), if any. */
-export function commandOf(text: string, scope: Scope): string | null {
+export function commandOf(text: string, scope: Scope, hidden: readonly string[] = []): string | null {
   const m = /^\/([a-z]+)\s*$/.exec(text.trim());
-  return m && platformCommands(scope).some((c) => c.name === m[1]) ? m[1]! : null;
+  return m && platformCommands(scope, hidden).some((c) => c.name === m[1]) ? m[1]! : null;
 }
 
 /** One row of the popup. */
@@ -89,24 +92,44 @@ export function matchScore(q: string, text: string): number | null {
   return 100 + pos;
 }
 
-function ranked<T>(q: string, list: T[], name: (x: T) => string): T[] {
-  return list
-    .map((x) => ({ x, s: matchScore(q, name(x)) }))
-    .filter((r): r is { x: T; s: number } => r.s !== null)
-    .sort((p, r) => p.s - r.s)
-    .map((r) => r.x);
+/** How a typed query names a command: 0 exactly, 1 as a prefix (of the name or of the part after "plugin:"), 2 otherwise. */
+function nameTier(q: string, name: string): number {
+  const a = q.toLowerCase();
+  const tier = (n: string) => (n === a ? 0 : n.startsWith(a) ? 1 : 2);
+  const n = name.toLowerCase();
+  return Math.min(tier(n), tier(n.slice(n.lastIndexOf(":") + 1)));
 }
 
-/** "/" rows: platform commands (group 命令), then the employee's skills and plugin commands (group 技能). */
-export function slashItems(q: string, scope: Scope, skills: ComposerCommand[]): AssistItem[] {
-  const commands = ranked(q, platformCommands(scope), (c) => c.name).map<AssistItem>((c) => ({
-    key: `cmd:${c.name}`, group: "命令", label: `/${c.name}`, detail: c.desc, command: c.name,
-  }));
-  const own = ranked(q, skills, (c) => c.name).map<AssistItem>((c) => ({
-    key: `skill:${c.name}`, group: "技能", label: `/${c.name}`, detail: c.description || (c.source === "plugin" ? "插件命令" : "技能"),
-    insert: `/${c.name} `,
-  }));
-  return [...commands, ...own];
+/** What the employee's chat offers besides its platform commands (GET /api/conversations/{cid}/commands). */
+export interface SlashConfig {
+  hidden?: readonly string[];
+  custom?: readonly CustomCommand[];
+}
+
+const customDetail = (c: CustomCommand) => c.description || (c.mode === "passthrough" ? "透传给 Claude Code" : "提示词模板");
+
+/**
+ * "/" rows in three groups: platform commands (命令, less the hidden ones), the role's and the
+ * platform's custom commands (自定义), the session's skills and plugin commands (技能). With a
+ * query, exact and prefix name matches come first across the groups (最佳匹配: /de lists
+ * /design above /model), then the other matches group by group.
+ */
+export function slashItems(q: string, scope: Scope, skills: ComposerCommand[], cfg: SlashConfig = {}): AssistItem[] {
+  const groups: AssistItem[][] = [
+    platformCommands(scope, cfg.hidden).map((c) => ({ key: `cmd:${c.name}`, group: "命令", label: `/${c.name}`, detail: c.desc, command: c.name })),
+    (cfg.custom ?? []).map((c) => ({ key: `custom:${c.name}`, group: "自定义", label: `/${c.name}`, detail: customDetail(c), insert: `/${c.name} ` })),
+    skills.map((c) => ({
+      key: `skill:${c.name}`, group: "技能", label: `/${c.name}`, detail: c.description || (c.source === "plugin" ? "插件命令" : "技能"), insert: `/${c.name} `,
+    })),
+  ];
+  const rows = groups
+    .flatMap((g, gi) => g.map((item, i) => ({ item, gi, i, s: matchScore(q, item.label.slice(1)) })))
+    .filter((r): r is { item: AssistItem; gi: number; i: number; s: number } => r.s !== null);
+  if (!q) return rows.map((r) => r.item);
+  const tiered = rows.map((r) => ({ ...r, t: nameTier(q, r.item.label.slice(1)) }));
+  const best = tiered.filter((r) => r.t < 2).sort((a, b) => a.t - b.t || a.gi - b.gi || a.i - b.i);
+  const rest = tiered.filter((r) => r.t === 2).sort((a, b) => a.gi - b.gi || a.s - b.s || a.i - b.i);
+  return [...best.map((r) => ({ ...r.item, group: "最佳匹配" })), ...rest.map((r) => r.item)];
 }
 
 const REF_GROUPS: Record<RefCandidate["kind"], string> = { file: "文件", thread: "讨论串", deliverable: "交付物", memory: "记忆" };

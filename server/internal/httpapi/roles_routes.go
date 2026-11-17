@@ -5,6 +5,8 @@ import (
 	"errors"
 	"math/rand/v2"
 	"net/http"
+	"reflect"
+	"slices"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -173,7 +175,30 @@ func (s *Server) replaceRoles(ctx context.Context, userID string, list []store.R
 		return err
 	}
 	s.auditBypass(ctx, userID, known, list)
+	s.auditCommands(ctx, userID, known, list)
 	return nil
+}
+
+// auditCommands records every saved role whose custom or hidden platform commands changed.
+func (s *Server) auditCommands(ctx context.Context, userID string, before map[string]store.Role, after []store.Role) {
+	for _, r := range after {
+		old := before[r.ID]
+		if reflect.DeepEqual(nonNil(old.Commands), nonNil(r.Commands)) && slices.Equal(old.HiddenCommands, r.HiddenCommands) {
+			continue
+		}
+		names := make([]string, len(r.Commands))
+		for i, c := range r.Commands {
+			names[i] = c.Name
+		}
+		s.audit(ctx, userID, "role_commands_change", "role", r.ID, map[string]any{"role": r.Role, "commands": names, "hidden": r.HiddenCommands})
+	}
+}
+
+func nonNil(list []store.CustomCommand) []store.CustomCommand {
+	if list == nil {
+		return []store.CustomCommand{}
+	}
+	return list
 }
 
 func rolesInvalid(problems []roles.Problem) error {

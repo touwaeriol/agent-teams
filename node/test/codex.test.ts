@@ -67,6 +67,20 @@ describe("codex sessions over app-server", () => {
     await h!.console.waitType("session.state", (b) => b.state === "active" && b.session_id === "s_X1");
   });
 
+  it("runs the next turn with the model set by session.set_mode and reports it", async () => {
+    const calls = await startCodex();
+    h!.console.command("session.open", codexOpen("s_XM"));
+    await h!.console.waitType("session.opened");
+    h!.console.command("session.release", { session_id: "s_XM", open_gen: 1 });
+    h!.console.command("session.send", { session_id: "s_XM", msg_id: "m_x1", text: "one" });
+    expect((await h!.console.waitType("session.event", (b) => b.kind === "turn_ended")).body.model).toBe("gpt-5.5-codex");
+    h!.console.command("session.set_mode", { session_id: "s_XM", model: "gpt-mini-x" });
+    h!.console.command("session.send", { session_id: "s_XM", msg_id: "m_x2", text: "two" });
+    await h!.console.waitType("session.event", (b) => b.kind === "turn_ended" && b.model === "gpt-mini-x");
+    const turns = calls().filter((c) => c.method === "turn/start");
+    expect(turns.map((t) => t.params.model)).toEqual([undefined, "gpt-mini-x"]);
+  });
+
   it("forwards command approvals and platform tool calls", async () => {
     await startCodex();
     h!.console.command("session.open", codexOpen("s_X2"));

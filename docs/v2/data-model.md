@@ -707,6 +707,26 @@ CREATE TABLE at_attachments (   -- 用户附在消息上的图片
 
 资料库“添加”的文件（`POST /api/projects/{pid}/library`）就是一条 `at_deliverables`（`published_by = 'user'`）加一条 `at_deliverable_files` 第 1 版，与 `publish_file` 同样的类型和 5 MB 限制、同样的签名 URL 沙箱访问。项目用量（`GET /api/projects/{pid}/usage`）直接汇总 `at_usage`，不另建表。
 
+### 2.12 模型列表与自定义命令（00170）
+
+```sql
+CREATE TABLE at_models (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT REFERENCES at_users(id) ON DELETE CASCADE,  -- NULL = 平台列表（管理员维护）
+  runtime     TEXT NOT NULL CHECK (runtime IN ('claude', 'codex')),
+  model       TEXT NOT NULL,
+  label       TEXT NOT NULL DEFAULT '',
+  sort        INT  NOT NULL DEFAULT 0,
+  is_default  BOOLEAN NOT NULL DEFAULT FALSE,                    -- 只用于平台列表，每种类型最多一个
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);  -- 唯一：(COALESCE(user_id, ''), runtime, model)；平台列表预置 claude-opus-5-5（Opus 5.5，Claude 默认）
+ALTER TABLE at_roles ADD COLUMN hidden_commands TEXT[] NOT NULL DEFAULT '{}';  -- 聊天框不显示的平台命令
+ALTER TABLE at_roles ADD COLUMN commands JSONB NOT NULL DEFAULT '[]';          -- [{name, description, mode: prompt|passthrough, prompt}]
+ALTER TABLE at_employees ADD COLUMN model TEXT NOT NULL DEFAULT '';            -- /model 给这位员工选的模型
+```
+
+会话的模型：`at_employees.model` → 项目 `coordinator_model` / `thread_model`（只对 Claude）→ 岗位 `model` → 平台列表该类型的默认 → `claude-opus-5-5`。平台内置命令存在 `at_settings.composer_commands = {commands: [...]}`。`at_usage.model` 记每一轮实际回答的模型（`session.event turn_ended.model`）。
+
 ## 3. 从 v1 表的映射（历史）
 
 切换时 v1 的表原地扩展成 v2 的表；下表是当时的处理。`00120_drop_v1` 之后，v1 独有的表和列、v1 的旧对话都已删除。

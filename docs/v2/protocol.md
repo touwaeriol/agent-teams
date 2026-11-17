@@ -211,7 +211,7 @@
 
 ### 4.5 `session.set_mode`（键：`id`）
 
-`{"session_id": "s_…", "permission_mode": "default|acceptEdits|bypassPermissions|auto", "model": null}` → Claude `q.setPermissionMode()` / `q.setModel()`；Codex 在下一次 `turn/start` 带 `approvalPolicy`。`bypassPermissions` 只有会话以 `allowDangerouslySkipPermissions` 打开时才允许（守护进程否则回错误）。控制台不再发 `auto`（枚举里保留给旧控制台）。`bypassPermissions` 会话不发 `approval.request`：CLI 仍调到 `canUseTool` 时守护进程就地放行；会话打开时 `permission_mode` 是 `bypassPermissions` 的，守护进程总是带上 `allowDangerouslySkipPermissions`。
+`{"session_id": "s_…", "permission_mode": "default|acceptEdits|bypassPermissions|auto", "model": null}` → Claude `q.setPermissionMode()` / `q.setModel()`；Codex 在下一次 `turn/start` 带 `approvalPolicy` / `model`。只带 `model` 的命令来自 /model（`PUT /api/conversations/{cid}/model`）：运行中的会话从下一轮起换模型，守护进程同时改掉本机记录里的模型，之后 resume 也用新模型。`bypassPermissions` 只有会话以 `allowDangerouslySkipPermissions` 打开时才允许（守护进程否则回错误）。控制台不再发 `auto`（枚举里保留给旧控制台）。`bypassPermissions` 会话不发 `approval.request`：CLI 仍调到 `canUseTool` 时守护进程就地放行；会话打开时 `permission_mode` 是 `bypassPermissions` 的，守护进程总是带上 `allowDangerouslySkipPermissions`。
 
 ### 4.6 `session.close`（键：`session_id + open_gen`）
 
@@ -236,7 +236,7 @@
 | `thinking` | — | `assistant` thinking 块（不带内容） |
 | `tool_started` | `tool`, `category`, `subcategory?`, `tool_use_id`, `summary` | PreToolUse 钩子 / `item/started` |
 | `tool_ended` | `tool_use_id`, `ok`, `duration_ms`, `summary?` | PostToolUse(+Failure) / `item/completed` |
-| `turn_ended` | `result_subtype`, `is_error`, `num_turns`, `duration_ms`, `cost_usd?`, `usage{}` | `result` / `turn/completed` |
+| `turn_ended` | `result_subtype`, `is_error`, `num_turns`, `duration_ms`, `cost_usd?`, `usage{}`, `model?` | `result` / `turn/completed`（`model`：Claude 取本轮最后一条主代理 assistant 消息的模型，Codex 取本轮用的模型） |
 | `compacting` | `on: bool` | `system/status` / — |
 | `rate_limited` | `retry_at?`, `detail` | `rate_limit_event`, `api_retry` / 错误通知 |
 | `subagent` | `on: bool`, `agent_type` | SubagentStart/Stop / — |

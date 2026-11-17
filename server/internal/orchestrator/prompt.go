@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/touwaeriol/agent-teams/server/internal/composer"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -167,7 +168,13 @@ func (o *Orchestrator) roster(ctx context.Context, q core.DB, threadID string) (
 		if title == "" {
 			title = m.Role
 		}
-		lines = append(lines, fmt.Sprintf("- %s（%s，%s）%s", m.Name, title, m.Runtime, m.Spec.Description))
+		line := fmt.Sprintf("- %s（%s，%s）%s", m.Name, title, m.Runtime, m.Spec.Description)
+		if m.Tier == "member" {
+			if cmds, err := composer.EmployeeCommands(ctx, q, m, composer.RoleOf(ctx, q, m)); err == nil && len(cmds) > 0 {
+				line += "（命令：" + composer.Names(cmds) + "，send_message 的文本以它开头时平台按岗位展开）"
+			}
+		}
+		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n"), nil
 }

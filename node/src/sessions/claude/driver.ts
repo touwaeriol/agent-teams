@@ -45,6 +45,8 @@ export class ClaudeDriver implements Driver {
   private prompt: AsyncQueue<SDKUserMessage> | null = null;
   private closing = false;
   private turnId: string | undefined;
+  /** The model of the turn's latest main-agent reply (reported with turn_ended). */
+  private turnModel: string | undefined;
   private lastTools: string[] | null = null;
   /** Names of the session's own slash commands (skills, plugin commands), for qualifySlash. */
   private commandNames: string[] = [];
@@ -162,12 +164,14 @@ export class ClaudeDriver implements Driver {
     if (msg.type === "system" && msg.subtype === "init") return this.onInit(msg.tools);
     if (msg.type === "system" && msg.subtype === "commands_changed") this.commandNames = sessionCommands(msg.commands).map((c) => c.name);
     if (msg.type === "assistant") this.onAssistant(msg.user_message_uuids, msg.message.content);
-    for (const ev of mapClaudeMessage(msg)) this.emit(ev);
+    if (msg.type === "assistant" && msg.parent_tool_use_id === null && msg.message.model) this.turnModel = msg.message.model;
+    for (const ev of mapClaudeMessage(msg)) this.emit(ev.kind === "turn_ended" && this.turnModel ? { ...ev, model: this.turnModel } : ev);
     if (msg.type === "result") this.onResult();
   }
 
   private onInit(tools: string[]): void {
     this.turnId = newId("t_");
+    this.turnModel = undefined;
     const triggers = [...this.waitingUuids.values()];
     this.waitingUuids.clear();
     this.setRunning(true);

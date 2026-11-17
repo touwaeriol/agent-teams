@@ -210,3 +210,38 @@ func TestProjectModelOverrides(t *testing.T) {
 		t.Fatalf("lead default %q %v", l.Model, l.Effort)
 	}
 }
+
+// TestModelPrecedence: /model on the employee, then the project override for its tier (Claude
+// only), the role, the platform default of the runtime, DefaultModel.
+func TestModelPrecedence(t *testing.T) {
+	lead := emp("lead", "lead", store.Role{Model: "role-m"})
+	p := store.Project{ThreadModel: "project-m", CoordinatorModel: "coord-m"}
+	cases := []struct {
+		e    core.Employee
+		p    store.Project
+		def  string
+		want string
+	}{
+		{lead, p, "def", "project-m"},
+		{func() core.Employee { e := lead; e.Model = "picked"; return e }(), p, "def", "picked"},
+		{lead, store.Project{}, "def", "role-m"},
+		{emp("lead", "lead", store.Role{}), store.Project{}, "def", "def"},
+		{emp("lead", "lead", store.Role{}), store.Project{}, "", DefaultModel},
+		{emp("coordinator", "coordinator", store.Role{}), p, "", "coord-m"},
+		{func() core.Employee { e := emp("member", "dev", store.Role{}); e.Runtime = "codex"; return e }(), p, "gpt-def", "gpt-def"},
+	}
+	for i, c := range cases {
+		if got := Model(c.e, c.p, c.def); got != c.want {
+			t.Fatalf("case %d: %q, want %q", i, got, c.want)
+		}
+	}
+	o, _ := buildOpen(func() sessionInput {
+		in := open(t, lead, store.Node{})
+		in.defModel = "def"
+		in.project = store.Project{}
+		return in
+	}())
+	if o.Claude.Model != "role-m" {
+		t.Fatalf("session.open model %q", o.Claude.Model)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/touwaeriol/agent-teams/server/internal/composer"
 	"github.com/touwaeriol/agent-teams/server/internal/office"
 	"github.com/touwaeriol/agent-teams/server/internal/plugins"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -83,6 +84,8 @@ func normalizeOne(r *store.Role, looks office.Looks) {
 	r.NodeIDs = dedupe(r.NodeIDs)
 	r.Skills = dedupe(r.Skills)
 	r.Plugins = dedupe(r.Plugins)
+	r.HiddenCommands = dedupe(r.HiddenCommands)
+	r.Commands = composer.NormalizeCommands(r.Commands)
 }
 
 func defaultLook(looks office.Looks, role, tier string) office.LookDefault {
@@ -170,7 +173,19 @@ func validateOne(path string, r *store.Role, c Context) []Problem {
 	}
 	out = append(out, skillProblems(path, r, c.Skills)...)
 	out = append(out, pluginProblems(path, r, c.Plugins)...)
+	out = append(out, commandProblems(path, r)...)
 	return append(out, nodeProblems(path, r, c.Nodes)...)
+}
+
+func commandProblems(path string, r *store.Role) []Problem {
+	var out []Problem
+	for _, p := range composer.HiddenProblems(path+".hidden_commands", r.HiddenCommands) {
+		out = append(out, Problem(p))
+	}
+	for _, p := range composer.ValidateCommands(path+".commands", r.Commands, composer.For(r.Runtime, r.Tier)) {
+		out = append(out, Problem(p))
+	}
+	return out
 }
 
 // MaxSkills is how many skills one role may load.

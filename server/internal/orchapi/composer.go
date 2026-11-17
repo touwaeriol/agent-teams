@@ -9,6 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
+	"github.com/touwaeriol/agent-teams/server/internal/composer"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/plugins"
 	"github.com/touwaeriol/agent-teams/server/internal/skills"
@@ -29,11 +30,13 @@ type ComposerCommand struct {
 
 // ComposerCommands is GET /api/conversations/{cid}/commands.
 type ComposerCommands struct {
-	Employee string            `json:"employee"`
-	Tier     string            `json:"tier" enum:"coordinator,lead"`
-	Runtime  string            `json:"runtime"`
-	From     string            `json:"from" enum:"session,role" doc:"session: what the latest session reported; role: the role's configured skills and plugins"`
-	Commands []ComposerCommand `json:"commands" doc:"Empty for Codex employees"`
+	Employee string              `json:"employee"`
+	Tier     string              `json:"tier" enum:"coordinator,lead"`
+	Runtime  string              `json:"runtime"`
+	From     string              `json:"from" enum:"session,role" doc:"session: what the latest session reported; role: the role's configured skills and plugins"`
+	Commands []ComposerCommand   `json:"commands" doc:"Empty for Codex employees"`
+	Hidden   []string            `json:"hidden" doc:"Platform commands the employee's role leaves out of its chats"`
+	Custom   []composer.Resolved `json:"custom" doc:"The role's custom commands, then the platform built-ins (prompt: expanded by the server; passthrough: sent to Claude Code as typed)"`
 }
 
 type commandsOutput struct{ Body ComposerCommands }
@@ -107,6 +110,11 @@ func (a *API) commands(ctx context.Context, in *cidInput) (*commandsOutput, erro
 		return nil, err
 	}
 	out := ComposerCommands{Employee: e.Name, Tier: e.Tier, Runtime: e.Runtime, From: "role", Commands: []ComposerCommand{}}
+	role := composer.RoleOf(ctx, a.e.Core.Pool, e)
+	out.Hidden = append([]string{}, role.HiddenCommands...)
+	if out.Custom, err = composer.EmployeeCommands(ctx, a.e.Core.Pool, e, role); err != nil {
+		return nil, err
+	}
 	if e.Runtime == "codex" {
 		return &commandsOutput{Body: out}, nil
 	}
@@ -116,6 +124,24 @@ func (a *API) commands(ctx context.Context, in *cidInput) (*commandsOutput, erro
 	}
 	out.Commands, err = a.roleCommands(ctx, u.ID, e)
 	return &commandsOutput{Body: out}, err
+}
+
+// expandCommand turns a message that names a prompt custom command ("/name args") into the text
+// the employee gets; passthrough commands and everything else are delivered as typed. meta
+// records the command on the stored message, which keeps the user's own words.
+func (a *API) expandCommand(ctx context.Context, u store.User, c core.Conversation, content string) (string, map[string]any, error) {
+	if !strings.HasPrefix(content, "/") {
+		return "", nil, nil
+	}
+	e, err := a.employeeOf(ctx, u, c)
+	if err != nil {
+		return "", nil, fail(err, "没有这个对话")
+	}
+	deliver, cmd, err := composer.ExpandFor(ctx, a.e.Core.Pool, e, content)
+	if err != nil || cmd == nil {
+		return "", nil, err
+	}
+	return deliver, map[string]any{"command": cmd}, nil
 }
 
 // latestInit is session.opened's init of the employee's latest session.
@@ -265,9 +291,13 @@ func sessionUsage(ctx context.Context, q core.DB, employeeID string) (*SessionUs
 		return u, nil
 	}
 	l := &u.LastTurn
+	var model string
 	err = store.QueryRow(ctx, q, `SELECT COALESCE(input_tokens, 0), COALESCE(output_tokens, 0), COALESCE(cache_read_tokens, 0),
-		COALESCE(cache_write_tokens, 0) FROM at_usage WHERE session_id = $1 ORDER BY id DESC LIMIT 1`, s.ID).
-		Scan(&l.Input, &l.Output, &l.CacheRead, &l.CacheWrite)
+		COALESCE(cache_write_tokens, 0), model FROM at_usage WHERE session_id = $1 ORDER BY id DESC LIMIT 1`, s.ID).
+		Scan(&l.Input, &l.Output, &l.CacheRead, &l.CacheWrite, &model)
+	if model != "" {
+		u.Model = model // the model that answered the last turn (after a /model switch)
+	}
 	return u, err
 }
 

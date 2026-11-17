@@ -1336,6 +1336,11 @@
           "type": "integer",
           "minimum": 0
         },
+        "model": {
+          "description": "turn_ended: the model that answered the turn (Claude: the model of the turn's last main-agent assistant message; Codex: the model the turn ran with).",
+          "type": "string",
+          "maxLength": 200
+        },
         "cost_usd": {
           "description": "turn_ended.",
           "type": "number",

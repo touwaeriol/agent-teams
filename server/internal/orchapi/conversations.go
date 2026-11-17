@@ -148,13 +148,19 @@ func (a *API) postMessage(ctx context.Context, in *postMessageInput) (*messageOu
 	if err != nil {
 		return nil, err
 	}
-	var meta map[string]any
+	deliver, meta, err := a.expandCommand(ctx, u, c, content)
+	if err != nil {
+		return nil, err
+	}
 	if len(chips) > 0 {
-		meta = map[string]any{"refs": chips}
+		if meta == nil {
+			meta = map[string]any{}
+		}
+		meta["refs"] = chips
 	}
 	v, err := idempotent(ctx, a, u.ID, "message:"+c.ID, in.IdempotencyKey, func() (core.MessageView, error) {
 		m, err := a.e.Orch.PostUserMessageWith(ctx, orchestrator.UserMessage{UserID: u.ID, ConvID: c.ID, Content: content,
-			Interrupt: in.Body.Interrupt, Images: in.Body.Attachments, Meta: meta, Context: refText})
+			Deliver: deliver, Interrupt: in.Body.Interrupt, Images: in.Body.Attachments, Meta: meta, Context: refText})
 		return core.MessageViewOf(m), err
 	})
 	if err != nil {

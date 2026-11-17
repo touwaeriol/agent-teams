@@ -238,6 +238,7 @@ export class SessionManager implements SessionHost {
     if (s.driver) await s.driver.setMode(body.permission_mode, body.model);
     if (claude && body.permission_mode) claude.permission_mode = body.permission_mode;
     if (claude && body.model) claude.model = body.model;
+    if (s.spec.codex && body.model) s.spec.codex.model = body.model;
     this.persist(s);
     return [];
   }

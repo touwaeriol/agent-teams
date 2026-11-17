@@ -1,15 +1,10 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { modelOptions } from "@/lib/projectSettings";
-import { fromChoice, toChoice } from "./logic";
+import ModelPicker from "@/components/app/models/ModelPicker.vue";
 
-const props = defineProps<{ value: string; label: string }>();
+defineProps<{ value: string; label: string }>();
 const emit = defineEmits<{ change: [value: string] }>();
-const options = computed(() => modelOptions(props.value));
 </script>
 
 <template>
-  <el-select :model-value="toChoice(value)" :aria-label="label" class="at-select-36 at-raised" @update:model-value="(v: string) => emit('change', fromChoice(v))">
-    <el-option v-for="o in options" :key="toChoice(o.value)" :value="toChoice(o.value)" :label="o.label" />
-  </el-select>
+  <ModelPicker :model-value="value" runtime="claude" :label="label" empty-label="跟随岗位设置" class="at-select-36 at-raised" @update:model-value="(v: string) => emit('change', v)" />
 </template>

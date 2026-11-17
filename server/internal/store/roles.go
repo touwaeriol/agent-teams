@@ -27,30 +27,48 @@ const (
 
 // Role is a role template (at_roles, user level). JSON tags are the RoleView of api.md.
 type Role struct {
-	ID              string   `json:"id"`
-	Tier            string   `json:"tier" enum:"coordinator,lead,member"`
-	Role            string   `json:"role"`
-	Title           string   `json:"title"`
-	Runtime         string   `json:"runtime" enum:"claude,codex"`
-	Count           int      `json:"count"`
-	NodeIDs         []string `json:"node_ids" gorm:"column:node_ids;serializer:pgtext"`
-	Description     string   `json:"description"`
-	Instructions    string   `json:"instructions"`
-	Model           string   `json:"model"`
-	Effort          string   `json:"effort"`
-	PermissionMode  string   `json:"permission_mode,omitempty" enum:"bypass,ask" doc:"bypass (default): members run without permission prompts on any node; ask: every non-read tool asks (lead or user, per the project's approval routing). Ignored for the coordinator, the lead and read-only roles"`
-	CanDelegate     bool     `json:"can_delegate"`
-	ReadOnly        *bool    `json:"read_only,omitempty" nullable:"true" doc:"Omitted: defaults to true for gate review/decision"`
-	AllowedTools    []string `json:"allowed_tools" gorm:"serializer:pgtext"`
-	DisallowedTools []string `json:"disallowed_tools" gorm:"serializer:pgtext"`
-	Sandbox         string   `json:"sandbox"`
-	MaxTurns        *int     `json:"max_turns" nullable:"true"`
-	Gate            string   `json:"gate"`
-	TaskKinds       []string `json:"task_kinds" gorm:"serializer:pgtext"`
-	Look            Look     `json:"look" gorm:"serializer:jsonb"`
-	Skills          []string `json:"skills" gorm:"serializer:pgtext" doc:"Skill names (built-in or uploaded) the role's sessions load"`
-	Plugins         []string `json:"plugins" gorm:"serializer:pgtext" doc:"Plugins the role's sessions load: name (latest version) or name@N (pinned)"`
-	Sort            int      `json:"sort" doc:"Display order; PUT uses the position in the list"`
+	ID              string          `json:"id"`
+	Tier            string          `json:"tier" enum:"coordinator,lead,member"`
+	Role            string          `json:"role"`
+	Title           string          `json:"title"`
+	Runtime         string          `json:"runtime" enum:"claude,codex"`
+	Count           int             `json:"count"`
+	NodeIDs         []string        `json:"node_ids" gorm:"column:node_ids;serializer:pgtext"`
+	Description     string          `json:"description"`
+	Instructions    string          `json:"instructions"`
+	Model           string          `json:"model"`
+	Effort          string          `json:"effort"`
+	PermissionMode  string          `json:"permission_mode,omitempty" enum:"bypass,ask" doc:"bypass (default): members run without permission prompts on any node; ask: every non-read tool asks (lead or user, per the project's approval routing). Ignored for the coordinator, the lead and read-only roles"`
+	CanDelegate     bool            `json:"can_delegate"`
+	ReadOnly        *bool           `json:"read_only,omitempty" nullable:"true" doc:"Omitted: defaults to true for gate review/decision"`
+	AllowedTools    []string        `json:"allowed_tools" gorm:"serializer:pgtext"`
+	DisallowedTools []string        `json:"disallowed_tools" gorm:"serializer:pgtext"`
+	Sandbox         string          `json:"sandbox"`
+	MaxTurns        *int            `json:"max_turns" nullable:"true"`
+	Gate            string          `json:"gate"`
+	TaskKinds       []string        `json:"task_kinds" gorm:"serializer:pgtext"`
+	Look            Look            `json:"look" gorm:"serializer:jsonb"`
+	Skills          []string        `json:"skills" gorm:"serializer:pgtext" doc:"Skill names (built-in or uploaded) the role's sessions load"`
+	Plugins         []string        `json:"plugins" gorm:"serializer:pgtext" doc:"Plugins the role's sessions load: name (latest version) or name@N (pinned)"`
+	HiddenCommands  []string        `json:"hidden_commands,omitempty" gorm:"serializer:pgtext" doc:"Platform commands (model, status…) the role's chats do not offer"`
+	Commands        []CustomCommand `json:"commands,omitempty" gorm:"serializer:jsonb" doc:"The role's own slash commands"`
+	Sort            int             `json:"sort" doc:"Display order; PUT uses the position in the list"`
+}
+
+// Custom command modes: prompt expands the template on the server before delivery; passthrough
+// sends "/name args" to the session unchanged (Claude Code runs it; not for Codex).
+const (
+	CommandPrompt      = "prompt"
+	CommandPassthrough = "passthrough"
+)
+
+// CustomCommand is a slash command of a role (at_roles.commands) or a platform built-in
+// (at_settings.composer_commands).
+type CustomCommand struct {
+	Name        string `json:"name" maxLength:"48" doc:"Typed after the slash"`
+	Description string `json:"description,omitempty" maxLength:"200"`
+	Mode        string `json:"mode,omitempty" enum:"prompt,passthrough" doc:"Default prompt"`
+	Prompt      string `json:"prompt,omitempty" maxLength:"8000" doc:"mode prompt: the instruction sent instead; {{args}} is what follows the name"`
 }
 
 // TableName maps Role to at_roles.
@@ -102,7 +120,14 @@ func roleColumns(r *Role) map[string]any {
 		"read_only": r.ReadOnly != nil && *r.ReadOnly, "allowed_tools": TextArray(r.AllowedTools),
 		"disallowed_tools": TextArray(r.DisallowedTools), "sandbox": r.Sandbox, "max_turns": r.MaxTurns, "gate": r.Gate,
 		"task_kinds": TextArray(r.TaskKinds), "look": r.Look, "sort": r.Sort, "skills": TextArray(r.Skills),
-		"plugins": TextArray(r.Plugins)}
+		"plugins": TextArray(r.Plugins), "hidden_commands": TextArray(r.HiddenCommands), "commands": commandsJSON(r.Commands)}
+}
+
+func commandsJSON(list []CustomCommand) any {
+	if list == nil {
+		list = []CustomCommand{}
+	}
+	return Param(list)
 }
 
 func (s *Store) saveRole(ctx context.Context, userID string, r *Role) error {

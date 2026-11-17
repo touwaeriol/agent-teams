@@ -195,7 +195,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 160 {
+	if migrations.Latest() != 170 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -596,5 +596,45 @@ INSERT INTO at_threads (id, project_id, user_id, no, title, branch, base_branch)
 	assertNoTable(t, db, "at_feedback")
 	if _, err := db.Exec(`SELECT pinned_at FROM at_threads`); err == nil {
 		t.Fatal("pinned_at survived down")
+	}
+}
+
+// TestModelsCommandsMigration: 00170 adds at_models with the platform Opus 5.5 default, the role
+// command columns and at_employees.model with empty defaults on existing rows; Down removes them.
+func TestModelsCommandsMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 160); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_roles (id, user_id, tier, role) VALUES ('r1', 'u1', 'lead', 'lead');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := migrations.Up(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	var hidden, cmds string
+	if err := db.QueryRow(`SELECT hidden_commands::text, commands::text FROM at_roles WHERE id = 'r1'`).Scan(&hidden, &cmds); err != nil || hidden != "{}" || cmds != "[]" {
+		t.Fatalf("role columns: %q %q %v", hidden, cmds, err)
+	}
+	var model string
+	if err := db.QueryRow(`SELECT model FROM at_models WHERE user_id IS NULL AND runtime = 'claude' AND is_default`).Scan(&model); err != nil || model != "claude-opus-5-5" {
+		t.Fatalf("default model: %q %v", model, err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_models (id, runtime, model, is_default) VALUES ('m2', 'claude', 'x', true)`); err == nil {
+		t.Fatal("second platform default accepted")
+	}
+	if _, err := p.DownTo(ctx, 160); err != nil {
+		t.Fatal(err)
+	}
+	assertNoTable(t, db, "at_models")
+	if _, err := db.Exec(`SELECT hidden_commands FROM at_roles`); err == nil {
+		t.Fatal("hidden_commands survived down")
 	}
 }

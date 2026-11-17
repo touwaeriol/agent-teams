@@ -62,6 +62,7 @@ type Employee struct {
 	InstanceNo int
 	Look       store.Look `gorm:"serializer:jsonb"`
 	Spec       store.Role `gorm:"serializer:jsonb"`
+	Model      string     // picked with /model; ahead of the project and role models
 	Active     bool
 	CreatedAt  time.Time
 }
@@ -70,7 +71,7 @@ type Employee struct {
 func (Employee) TableName() string { return "at_employees" }
 
 const employeeCols = `id, project_id, thread_id, name, tier, role, role_id, runtime, node_id, instance_no, look, spec,
-	active, created_at`
+	model, active, created_at`
 
 // AgentSession is a row of at_agent_sessions (one logical session).
 type AgentSession struct {

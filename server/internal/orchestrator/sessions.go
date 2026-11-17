@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
+	"github.com/touwaeriol/agent-teams/server/internal/composer"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
@@ -299,7 +300,7 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 	}
 	open, err := buildOpen(sessionInput{emp: env.emp, thread: env.thread, project: env.project, node: node, sess: sess,
 		prepare: prepare, first: first, resume: resume, system: system, rules: rules, hasRepo: len(env.repos) > 0,
-		repos: env.slugs(), protRefs: o.protectedRefs(ctx, tx, env)})
+		repos: env.slugs(), protRefs: o.protectedRefs(ctx, tx, env), defModel: composer.DefaultModel(ctx, tx, env.emp.Runtime)})
 	if err != nil {
 		return err
 	}

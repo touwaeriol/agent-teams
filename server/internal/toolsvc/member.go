@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
+	"github.com/touwaeriol/agent-teams/server/internal/composer"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/delivery"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
@@ -274,9 +275,22 @@ func (s *Service) listTeam(ctx context.Context, tx *core.Tx, c *call) (Result, e
 	for _, e := range emps {
 		m := s.member(ctx, tx, t, e)
 		out.Members = append(out.Members, m)
-		lines = append(lines, fmt.Sprintf("%s（%s）%s", e.Name, deref(m.Title), deref(m.Status)))
+		lines = append(lines, fmt.Sprintf("%s（%s）%s%s", e.Name, deref(m.Title), deref(m.Status), memberCommands(ctx, tx, e)))
 	}
 	return okJSON(strings.Join(lines, "\n"), out), nil
+}
+
+// memberCommands names a member's custom commands for list_team: a send_message that starts
+// with one is expanded for that member.
+func memberCommands(ctx context.Context, tx *core.Tx, e core.Employee) string {
+	if e.Tier != "member" {
+		return ""
+	}
+	cmds, err := composer.EmployeeCommands(ctx, tx, e, composer.RoleOf(ctx, tx, e))
+	if err != nil || len(cmds) == 0 {
+		return ""
+	}
+	return "；命令（send_message 以它开头）：" + composer.Names(cmds)
 }
 
 func (s *Service) member(ctx context.Context, tx *core.Tx, t core.Thread, e core.Employee) protocol.TeamMember {

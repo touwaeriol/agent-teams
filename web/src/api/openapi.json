@@ -629,6 +629,56 @@
         ],
         "type": "object"
       },
+      "CommandsBody": {
+        "additionalProperties": false,
+        "properties": {
+          "commands": {
+            "description": "Built-in custom commands every role gets (a role's own command of the same name wins; passthrough ones skip Codex roles)",
+            "items": {
+              "$ref": "#/components/schemas/CustomCommand"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "platform": {
+            "description": "Names of the platform commands (taken)",
+            "items": {
+              "type": "string"
+            },
+            "readOnly": true,
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "commands",
+          "platform"
+        ],
+        "type": "object"
+      },
+      "CommandsInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "commands": {
+            "items": {
+              "$ref": "#/components/schemas/CustomCommand"
+            },
+            "maxItems": 30,
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "commands"
+        ],
+        "type": "object"
+      },
       "CommentView": {
         "additionalProperties": false,
         "properties": {
@@ -734,6 +784,16 @@
               "null"
             ]
           },
+          "custom": {
+            "description": "The role's custom commands, then the platform built-ins (prompt: expanded by the server; passthrough: sent to Claude Code as typed)",
+            "items": {
+              "$ref": "#/components/schemas/Resolved"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "employee": {
             "type": "string"
           },
@@ -744,6 +804,16 @@
               "role"
             ],
             "type": "string"
+          },
+          "hidden": {
+            "description": "Platform commands the employee's role leaves out of its chats",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "runtime": {
             "type": "string"
@@ -761,7 +831,9 @@
           "tier",
           "runtime",
           "from",
-          "commands"
+          "commands",
+          "hidden",
+          "custom"
         ],
         "type": "object"
       },
@@ -815,6 +887,66 @@
         ],
         "type": "object"
       },
+      "ConversationModel": {
+        "additionalProperties": false,
+        "properties": {
+          "employee": {
+            "type": "string"
+          },
+          "inherited": {
+            "description": "What the employee runs without the override",
+            "type": "string"
+          },
+          "live": {
+            "description": "A session is open on a node: a change takes effect from its next turn",
+            "type": "boolean"
+          },
+          "members": {
+            "description": "Thread: every employee of the thread (lead first)",
+            "items": {
+              "$ref": "#/components/schemas/MemberModel"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "model": {
+            "description": "What the employee runs (or opens its next session with)",
+            "type": "string"
+          },
+          "override": {
+            "description": "Picked with /model: the project coordinator model, or the lead's own ('' = not set)",
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "coordinator",
+              "thread"
+            ],
+            "type": "string"
+          },
+          "session": {
+            "description": "The model the live session reported for its last turn ('' = no live session or no turn yet)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "employee",
+          "runtime",
+          "model",
+          "override",
+          "inherited",
+          "session",
+          "live",
+          "members"
+        ],
+        "type": "object"
+      },
       "CoordinatorView": {
         "additionalProperties": false,
         "properties": {
@@ -851,6 +983,37 @@
         "required": [
           "email",
           "password"
+        ],
+        "type": "object"
+      },
+      "CustomCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "mode": {
+            "description": "Default prompt",
+            "enum": [
+              "prompt",
+              "passthrough"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "Typed after the slash",
+            "maxLength": 48,
+            "type": "string"
+          },
+          "prompt": {
+            "description": "mode prompt: the instruction sent instead; {{args}} is what follows the name",
+            "maxLength": 8000,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
         ],
         "type": "object"
       },
@@ -1870,6 +2033,35 @@
         ],
         "type": "object"
       },
+      "MemberModel": {
+        "additionalProperties": false,
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "override": {
+            "description": "Picked with /model ('' = project or role setting)",
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "tier": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "tier",
+          "runtime",
+          "model",
+          "override"
+        ],
+        "type": "object"
+      },
       "MemoryBrief": {
         "additionalProperties": false,
         "properties": {
@@ -2113,6 +2305,136 @@
           "content",
           "meta",
           "created_at"
+        ],
+        "type": "object"
+      },
+      "Model": {
+        "additionalProperties": false,
+        "properties": {
+          "default": {
+            "description": "Platform list only: what sessions of this runtime open with when nothing else names a model (one per runtime)",
+            "type": "boolean"
+          },
+          "id": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "label": {
+            "description": "Display name; empty shows the id",
+            "maxLength": 40,
+            "type": "string"
+          },
+          "mine": {
+            "description": "The user's own entry",
+            "readOnly": true,
+            "type": "boolean"
+          },
+          "model": {
+            "description": "The id the runtime is given (claude-…, gpt-…)",
+            "maxLength": 100,
+            "type": "string"
+          },
+          "runtime": {
+            "enum": [
+              "claude",
+              "codex"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "runtime",
+          "model",
+          "mine"
+        ],
+        "type": "object"
+      },
+      "ModelApplied": {
+        "additionalProperties": false,
+        "properties": {
+          "employee": {
+            "type": "string"
+          },
+          "live": {
+            "description": "Sent to the employee's running session (from its next turn); false: the next session opens with it",
+            "type": "boolean"
+          },
+          "model": {
+            "description": "What the employee runs from now on",
+            "type": "string"
+          }
+        },
+        "required": [
+          "employee",
+          "model",
+          "live"
+        ],
+        "type": "object"
+      },
+      "ModelResult": {
+        "additionalProperties": false,
+        "properties": {
+          "applied": {
+            "items": {
+              "$ref": "#/components/schemas/ModelApplied"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "skipped": {
+            "description": "Employees of another runtime (Codex members) that keep their model",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "applied",
+          "skipped"
+        ],
+        "type": "object"
+      },
+      "ModelsBody": {
+        "additionalProperties": false,
+        "properties": {
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/Model"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "models"
+        ],
+        "type": "object"
+      },
+      "ModelsInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/Model"
+            },
+            "maxItems": 50,
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "models"
         ],
         "type": "object"
       },
@@ -3734,6 +4056,46 @@
         ],
         "type": "object"
       },
+      "Resolved": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "mode": {
+            "description": "Default prompt",
+            "enum": [
+              "prompt",
+              "passthrough"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "Typed after the slash",
+            "maxLength": 48,
+            "type": "string"
+          },
+          "prompt": {
+            "description": "mode prompt: the instruction sent instead; {{args}} is what follows the name",
+            "maxLength": 8000,
+            "type": "string"
+          },
+          "source": {
+            "description": "role: the employee's role; platform: a built-in every role gets",
+            "enum": [
+              "role",
+              "platform"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "name"
+        ],
+        "type": "object"
+      },
       "Role": {
         "additionalProperties": false,
         "properties": {
@@ -3748,6 +4110,16 @@
           },
           "can_delegate": {
             "type": "boolean"
+          },
+          "commands": {
+            "description": "The role's own slash commands",
+            "items": {
+              "$ref": "#/components/schemas/CustomCommand"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "count": {
             "format": "int64",
@@ -3770,6 +4142,16 @@
           },
           "gate": {
             "type": "string"
+          },
+          "hidden_commands": {
+            "description": "Platform commands (model, status…) the role's chats do not offer",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "id": {
             "type": "string"
@@ -4244,6 +4626,29 @@
           "created_at",
           "last_seen_at",
           "expires_at"
+        ],
+        "type": "object"
+      },
+      "SetModelInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "model": {
+            "description": "Model id; '' goes back to the project / role setting",
+            "maxLength": 100,
+            "type": "string"
+          },
+          "scope": {
+            "default": "lead",
+            "description": "Thread conversations: only the lead, or every employee of the thread with the lead's runtime",
+            "enum": [
+              "lead",
+              "thread"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
         ],
         "type": "object"
       },
@@ -5758,6 +6163,47 @@
         ]
       }
     },
+    "/api/admin/commands": {
+      "put": {
+        "operationId": "admin-save-commands",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommandsInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandsBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Replace the platform's built-in custom commands",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/admin/feedback": {
       "get": {
         "operationId": "admin-list-feedback",
@@ -5922,6 +6368,47 @@
           }
         },
         "summary": "Form data to create the platform GitHub App from a manifest",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/models": {
+      "put": {
+        "operationId": "admin-save-models",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelsInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelsBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Replace the platform model list (order, one default per runtime)",
         "tags": [
           "admin"
         ]
@@ -6679,6 +7166,37 @@
         ]
       }
     },
+    "/api/commands": {
+      "get": {
+        "operationId": "builtin-commands",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandsBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "The platform's built-in custom commands",
+        "tags": [
+          "team"
+        ]
+      }
+    },
     "/api/conversations/{cid}/commands": {
       "get": {
         "operationId": "conversation-commands",
@@ -6914,6 +7432,98 @@
           }
         },
         "summary": "Send a message to the conversation's employee (coordinator or thread lead)",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/api/conversations/{cid}/model": {
+      "get": {
+        "operationId": "conversation-model",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationModel"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "The model of the conversation's employee (and of the thread's employees)",
+        "tags": [
+          "conversations"
+        ]
+      },
+      "put": {
+        "operationId": "set-conversation-model",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetModelInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Change the model: the project coordinator, or the thread lead / whole thread; running sessions switch from their next turn",
         "tags": [
           "conversations"
         ]
@@ -7819,6 +8429,78 @@
         "summary": "Sign out one of my sessions",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/models": {
+      "get": {
+        "operationId": "list-models",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelsBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Models to choose from: the platform list, then the user's own",
+        "tags": [
+          "team"
+        ]
+      }
+    },
+    "/api/models/mine": {
+      "put": {
+        "operationId": "save-my-models",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelsInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelsBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Replace the user's own model entries (in order)",
+        "tags": [
+          "team"
         ]
       }
     },

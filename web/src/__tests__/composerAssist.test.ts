@@ -34,6 +34,25 @@ describe("assist logic", () => {
     expect(commandOf("/design 做", "lead")).toBeNull();
   });
 
+  it("puts exact and prefix name matches first across groups, then custom commands and skills", () => {
+    const skills = [{ name: "design", description: "做原型", argument_hint: "", source: "skill" as const }, { name: "review:deploy", description: "", argument_hint: "", source: "plugin" as const }];
+    const custom = [{ name: "plan", description: "先出计划", mode: "prompt" as const, prompt: "x", source: "role" as const }, { name: "compact", mode: "passthrough" as const, source: "platform" as const }];
+    const de = slashItems("de", "lead", skills, { custom });
+    expect(de.map((i) => [i.group, i.label])).toEqual([
+      ["最佳匹配", "/design"],
+      ["最佳匹配", "/review:deploy"],
+      ["命令", "/model"],
+    ]);
+    const exact = slashItems("plan", "lead", skills, { custom });
+    expect(exact[0]).toMatchObject({ group: "最佳匹配", label: "/plan", insert: "/plan " });
+    const all = slashItems("", "lead", skills, { hidden: ["usage", "memory"], custom });
+    expect([...new Set(all.map((i) => i.group))]).toEqual(["命令", "自定义", "技能"]);
+    expect(all.some((i) => i.label === "/usage")).toBe(false);
+    expect(all.find((i) => i.label === "/compact")!.detail).toBe("透传给 Claude Code");
+    expect(all.find((i) => i.label === "/plan")!.detail).toBe("先出计划");
+    expect(commandOf("/usage", "lead", ["usage"])).toBeNull();
+  });
+
   it("groups @ candidates and keeps only references whose token is still in the text", () => {
     const items = mentionItems([
       { kind: "memory", label: "deploy.md", detail: "部署", name: "deploy.md" },
@@ -81,7 +100,19 @@ const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200, head
 function stubApi() {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = (input as Request).url;
-    if (url.includes("/commands")) return json({ employee: "lead-1", tier: "lead", runtime: "claude", from: "session", commands: [{ name: "design", description: "做原型", argument_hint: "", source: "skill" }] });
+    if (url.includes("/commands"))
+      return json({
+        employee: "lead-1", tier: "lead", runtime: "claude", from: "session", commands: [{ name: "design", description: "做原型", argument_hint: "", source: "skill" }],
+        hidden: ["memory"], custom: [{ name: "plan", description: "先出计划", mode: "prompt", prompt: "x", source: "role" }],
+      });
+    if (url.includes("/api/models"))
+      return json({ models: [{ id: "m1", runtime: "claude", model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: false }, { id: "m2", runtime: "claude", model: "claude-haiku-x", label: "Haiku", mine: true }] });
+    if (url.includes("/model") && (input as Request).method === "PUT") return json({ applied: [{ employee: "lead-1", model: "claude-haiku-x", live: true }], skipped: ["codex-1"] });
+    if (url.includes("/model"))
+      return json({
+        scope: "thread", employee: "lead-1", runtime: "claude", model: "claude-opus-5-5", override: "", inherited: "claude-opus-5-5", session: "claude-opus-5-5", live: true,
+        members: [{ name: "lead-1", tier: "lead", runtime: "claude", model: "claude-opus-5-5", override: "" }, { name: "codex-1", tier: "member", runtime: "codex", model: "gpt-x", override: "" }],
+      });
     if (url.includes("/references")) return json({ items: [{ kind: "file", label: "src/app.go", detail: "o/r@main", repo: "o/r", path: "src/app.go" }], files_note: "" });
     if (url.includes("/context")) return json({ employee: "lead-1", runtime: "claude", instructions_chars: 3, memory_index_chars: 10, memory_files: 0, messages: 1, message_chars: 5, session: null });
     return json({});
@@ -117,7 +148,7 @@ describe("Composer with assist", () => {
     const input = w.get("input");
     await input.setValue("/des");
     await settle();
-    expect(document.body.textContent).toContain("技能");
+    expect(document.body.textContent).toContain("最佳匹配");
     expect(w.findAll("[role=option]").map((o) => o.text())).toEqual([expect.stringContaining("/design")]);
     await input.trigger("keydown", { key: "Enter" });
     await settle();
@@ -127,6 +158,43 @@ describe("Composer with assist", () => {
     await input.trigger("keydown", { key: "Enter" });
     await settle();
     expect(onSend).toHaveBeenCalledWith("/design 登录页", [], []);
+  });
+
+  it("lists /design first for /de, shows custom commands and leaves hidden platform commands out", async () => {
+    stubApi();
+    const { w } = mountComposer(vi.fn());
+    const input = w.get("input");
+    await input.setValue("/de");
+    await settle();
+    const options = w.findAll("[role=option]").map((o) => o.text());
+    expect(options[0]).toContain("/design");
+    expect(options.findIndex((o) => o.includes("/design"))).toBeLessThan(options.findIndex((o) => o.includes("/model")));
+    await input.setValue("/");
+    await settle();
+    const all = w.findAll("[role=option]").map((o) => o.text());
+    expect(all.some((o) => o.includes("/plan") && o.includes("先出计划"))).toBe(true);
+    expect(all.some((o) => o.includes("/memory"))).toBe(false);
+  });
+
+  it("/model lists the runtime's models with the current one and switches the whole thread", async () => {
+    const spy = stubApi();
+    const { w } = mountComposer(vi.fn());
+    const input = w.get("input");
+    await input.setValue("/model");
+    await input.trigger("keydown", { key: "Escape" });
+    await input.trigger("keydown", { key: "Enter" });
+    await settle(10);
+    const panel = w.get("[data-testid=model-panel]");
+    expect(panel.text()).toContain("会话运行中，上一轮用的是 Opus 5.5");
+    const rows = panel.findAll("button").filter((b) => b.text().includes("Opus") || b.text().includes("Haiku"));
+    expect(rows.map((b) => b.text())).toEqual([expect.stringMatching(/Opus 5\.5.*默认.*当前/), expect.stringMatching(/Haiku.*我的/)]);
+    await panel.findAll("[role=radio]").find((b) => b.text() === "整个讨论串")!.trigger("click");
+    expect(w.get("[data-testid=model-panel]").text()).toContain("codex-1 不是 Claude Code，不受影响");
+    await rows[1]!.trigger("click");
+    await settle();
+    const put = spy.mock.calls.map((c) => c[0] as Request).find((r) => r.method === "PUT")!;
+    expect(new URL(put.url).pathname).toBe("/api/conversations/c1/model");
+    expect(await put.json()).toEqual({ model: "claude-haiku-x", scope: "thread" });
   });
 
   it("runs a platform command instead of sending it, and opens settings ones", async () => {

@@ -1,4 +1,5 @@
 // Role template helpers for the Team page (pure, unit-tested).
+import { unfit } from "./commands";
 import type { RoleView } from "@/api/views";
 
 export const LEVEL: Record<RoleView["tier"], { label: string; bg: string; fg: string }> = {
@@ -117,6 +118,8 @@ export function newRole(list: RoleView[], color: string): RoleView {
     task_kinds: [],
     skills: [],
     plugins: [],
+    hidden_commands: [],
+    commands: [],
     look: { color, outfit: "tee", accessory: "none", hair: null },
     sort: list.length,
   };
@@ -137,7 +140,8 @@ export function fromPreset(list: RoleView[], preset: RoleView): RoleView {
   const taken = new Set(list.map((r) => r.role));
   let role = preset.role;
   for (let n = 2; taken.has(role); n++) role = `${preset.role}-${n}`;
-  return { ...preset, id: "", role, sort: list.length, skills: [...(preset.skills ?? [])], plugins: [...(preset.plugins ?? [])] };
+  return { ...preset, id: "", role, sort: list.length, skills: [...(preset.skills ?? [])], plugins: [...(preset.plugins ?? [])],
+    hidden_commands: [...(preset.hidden_commands ?? [])], commands: [...(preset.commands ?? [])] };
 }
 
 /** Local validation mirroring PUT /api/roles (the server is the authority). */
@@ -153,5 +157,6 @@ export function roleProblems(list: RoleView[]): string[] {
   list.filter((r) => r.tier === "member" && (r.count < 1 || r.count > 8)).forEach((r) => problems.push(`${roleName(r)} 的数量要在 1–8 之间`));
   list.filter((r) => !canHaveSkills(r) && (r.skills ?? []).length > 0).forEach((r) => problems.push(`${roleName(r)} 不能加载技能`));
   list.filter((r) => !canHaveSkills(r) && (r.plugins ?? []).length > 0).forEach((r) => problems.push(`${roleName(r)} 不能加载插件`));
+  list.filter((r) => unfit(r).length > 0).forEach((r) => problems.push(`${roleName(r)} 只能用提示词模板命令`));
   return problems;
 }

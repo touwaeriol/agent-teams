@@ -310,10 +310,10 @@ func recordUsage(ctx context.Context, tx *core.Tx, sc core.SessionContext, ev *p
 		_ = json.Unmarshal(*ev.Usage, &usage)
 	}
 	_, err := store.Exec(ctx, tx, `INSERT INTO at_usage (session_id, project_id, thread_id, turn_id, cost_usd, input_tokens,
-		output_tokens, cache_read_tokens, cache_write_tokens, duration_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		output_tokens, cache_read_tokens, cache_write_tokens, duration_ms, model) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		ON CONFLICT (session_id, turn_id) DO NOTHING`, sc.Session.ID, sc.Employee.ProjectID, sc.Employee.ThreadID, turn,
 		ev.CostUSD, num(usage, "input_tokens"), num(usage, "output_tokens"), num(usage, "cache_read_input_tokens"),
-		num(usage, "cache_creation_input_tokens"), ev.DurationMS)
+		num(usage, "cache_creation_input_tokens"), ev.DurationMS, val(ev.Model))
 	return err
 }
 

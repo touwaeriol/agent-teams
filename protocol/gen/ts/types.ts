@@ -815,6 +815,10 @@ export interface SessionEvent {
    */
   num_turns?: number;
   /**
+   * turn_ended: the model that answered the turn (Claude: the model of the turn's last main-agent assistant message; Codex: the model the turn ran with).
+   */
+  model?: string;
+  /**
    * turn_ended.
    */
   cost_usd?: number;

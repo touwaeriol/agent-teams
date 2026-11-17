@@ -201,6 +201,19 @@ describe("daemon with a fake console", () => {
     expect(h.log.modes).toEqual(["acceptEdits"]);
   });
 
+  it("switches the model of a running session (Query.setModel) and reports it with turn_ended", async () => {
+    h = await startHarness();
+    await openAndRelease("s_MD");
+    h.console.command("session.send", { session_id: "s_MD", msg_id: "m_md1", text: "hi" });
+    expect((await h.console.waitType("session.event", (b) => b.kind === "turn_ended" && b.session_id === "s_MD")).body.model).toBe("claude-opus-5-5");
+    h.console.command("session.set_mode", { session_id: "s_MD", model: "claude-haiku-x" });
+    await h.console.waitFor(() => (h.log.models ?? []).length === 1, 5000, "setModel");
+    expect(h.log.models).toEqual(["claude-haiku-x"]);
+    h.console.command("session.send", { session_id: "s_MD", msg_id: "m_md2", text: "again" });
+    await h.console.waitType("session.event", (b) => b.kind === "turn_ended" && b.session_id === "s_MD" && b.model === "claude-haiku-x");
+    expect(h.log.modes).toEqual([]);
+  });
+
   it("restarts a crashed session by resuming it", async () => {
     h = await startHarness({ crashDelaysMs: [10, 10, 10] });
     await openAndRelease("s_N");

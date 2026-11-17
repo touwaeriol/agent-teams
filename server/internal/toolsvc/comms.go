@@ -8,6 +8,7 @@ import (
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/approvals"
+	"github.com/touwaeriol/agent-teams/server/internal/composer"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
@@ -270,7 +271,13 @@ func (s *Service) sendMessage(ctx context.Context, tx *core.Tx, c *call) (Result
 	if err := s.mail(ctx, tx, t, c.emp().Name, to.Name, in.Text); err != nil {
 		return Result{}, err
 	}
-	return okText("sent"), s.pushMail(ctx, tx, to, fmt.Sprintf("[Message from %s]\n%s", c.emp().Name, in.Text))
+	text := in.Text
+	if deliver, _, err := composer.ExpandFor(ctx, tx, to, text); err != nil {
+		return Result{}, err
+	} else if deliver != "" {
+		text = deliver // the recipient's prompt command, expanded
+	}
+	return okText("sent"), s.pushMail(ctx, tx, to, fmt.Sprintf("[Message from %s]\n%s", c.emp().Name, text))
 }
 
 func (s *Service) recipient(ctx context.Context, tx *core.Tx, t core.Thread, from core.Employee, to string) (core.Employee, error) {

@@ -171,7 +171,8 @@ export class CodexDriver implements Driver, ThreadListener {
   }
 
   private onTurnCompleted(turn: { id: string; status: string }): void {
-    for (const ev of turnCompleted(turn, this.turnStartedAt, this.lastText)) this.emit(ev);
+    const model = this.modeOverride.model ?? this.codex.model;
+    for (const ev of turnCompleted(turn, this.turnStartedAt, this.lastText)) this.emit(ev.kind === "turn_ended" && model ? { ...ev, model } : ev);
     this.activeTurn = null;
     this.authReported = false;
     this.ctx.sink.turn(false);

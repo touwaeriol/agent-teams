@@ -9,9 +9,10 @@ import { useAction } from "@/api/mutations";
 import { keys, useCoordinator, useOverview, useProject } from "@/api/queries";
 import type { OverviewView } from "@/api/views";
 import Spinner from "@/components/common/Spinner.vue";
-import { EFFORTS, modelOptions } from "@/lib/projectSettings";
+import { EFFORTS } from "@/lib/projectSettings";
 import { cn } from "@/lib/utils";
 import type { Scope } from "./assist";
+import ModelPanel from "./ModelPanel.vue";
 import { contextRows, statusSummary } from "./panels";
 import type { ComposerAssist, Panel } from "./useComposerAssist";
 
@@ -30,9 +31,6 @@ const update = useAction((body: Parameters<typeof projects.update>[1]) => projec
 });
 
 const TITLES: Record<Panel, string> = { model: "模型", effort: "思考强度", status: "状态", context: "上下文", skills: "技能和插件" };
-const modelKey = computed(() => (props.scope === "coordinator" ? "coordinator_model" : "thread_model"));
-const model = computed(() => project.data.value?.[modelKey.value] ?? "");
-const models = computed(() => modelOptions(model.value));
 const effort = computed(() => project.data.value?.thread_effort ?? "");
 const status = computed(() => (overview.data.value ? statusSummary(overview.data.value as unknown as OverviewView, coordinator.data.value) : null));
 const rows = computed(() => (context.data.value ? contextRows(context.data.value) : []));
@@ -41,10 +39,8 @@ const skills = computed(() => {
   return d ? { ...d, commands: d.commands ?? [] } : undefined;
 });
 const loading = computed(
-  () => ({ model: project.isLoading, effort: project.isLoading, status: overview.isLoading, context: context.isLoading, skills: props.assist.commands.isLoading })[props.panel].value,
+  () => ({ model: { value: false }, effort: project.isLoading, status: overview.isLoading, context: context.isLoading, skills: props.assist.commands.isLoading })[props.panel].value,
 );
-const choice = (on: boolean) =>
-  cn("flex items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] hover:bg-raised", on && "bg-raised font-medium");
 </script>
 
 <template>
@@ -56,16 +52,7 @@ const choice = (on: boolean) =>
       </button>
     </header>
     <Spinner v-if="loading" class="size-4" />
-    <template v-else-if="panel === 'model'">
-      <p class="mb-2 text-xs text-muted-foreground">
-        {{ scope === "coordinator" ? "项目统筹的模型" : "这个项目所有讨论串（组长和成员）的模型" }}，对之后打开的会话生效。
-      </p>
-      <div class="flex flex-col gap-0.5">
-        <button v-for="m in models" :key="m.value" type="button" :class="choice(m.value === model)" @click="update.mutate({ [modelKey]: m.value })">
-          {{ m.label }}<span v-if="m.value === model" class="text-xs text-muted-foreground">当前</span>
-        </button>
-      </div>
-    </template>
+    <ModelPanel v-else-if="panel === 'model'" :pid="pid" :cid="cid" :scope="scope" />
     <template v-else-if="panel === 'effort'">
       <p class="mb-2 text-xs text-muted-foreground">这个项目所有讨论串的思考强度，对之后打开的会话生效。</p>
       <div class="flex flex-wrap gap-1.5">
@@ -101,6 +88,15 @@ const choice = (on: boolean) =>
       </template>
     </dl>
     <template v-else-if="panel === 'skills' && skills">
+      <template v-if="(skills.custom ?? []).length">
+        <p class="mb-1.5 text-xs text-muted-foreground">自定义命令（在团队岗位里配置），输入 /名字 使用。</p>
+        <ul class="mb-2.5 flex flex-col gap-1">
+          <li v-for="c in skills.custom ?? []" :key="c.name" class="flex gap-2">
+            <span class="shrink-0 font-mono">/{{ c.name }}</span>
+            <span class="truncate text-muted-foreground">{{ c.description || (c.mode === "passthrough" ? "透传给 Claude Code" : "提示词模板") }}{{ c.source === "platform" ? " · 平台内置" : "" }}</span>
+          </li>
+        </ul>
+      </template>
       <p v-if="skills.runtime === 'codex'" class="text-muted-foreground">Codex 员工没有斜杠技能。</p>
       <p v-else-if="skills.commands.length === 0" class="text-muted-foreground">
         {{ skills.tier === "coordinator" ? "项目统筹不带技能和插件。" : `${skills.employee} 的岗位没有配置技能或插件。` }}
