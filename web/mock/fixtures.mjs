@@ -16,7 +16,7 @@ const delivery = {
 const project = (id, name, extra = {}) => ({
   id, name, description: "", context: "", repo: null, branch: "main", git_connection_id: null, pinned: false, archived: false,
   work_mode: "worktree", auto_approve: false, require_acceptance: true, delivery, office_layout: "default", waiting: 0,
-  icon: "", coordinator_model: "", thread_model: "", thread_effort: "", auto_resume: false,
+  icon: "", coordinator_model: "", thread_model: "", thread_codex_model: "", thread_effort: "", auto_resume: false,
   threads_active: 0, created_at: ago(60 * 24 * 3), updated_at: ago(30), ...extra,
 });
 
@@ -309,9 +309,9 @@ export const models = [
 ];
 
 export const roles = [
-  role("r0", "coordinator", "coordinator", "项目统筹", "claude", 1, ["n1"], "和你对话，判断要做什么，开讨论串、跟进状态、向你汇报。", look("#7A4FD1", "hoodie", "headset", "#3B2A20"), { model: "opus" }),
-  role("r1", "lead", "lead", "组长", "claude", 1, ["n1", "n2"], "列主要任务、拆小任务、审查成员提交并合并，完成后向统筹交总结。", look("#C8622A", "suit", "none", "#3B2A20"), { model: "opus" }),
-  role("r2", "member", "dev", "开发", "claude", 2, ["n1", "n2"], "从任务池领开发类小任务，在自己的 worktree 里改代码、跑测试、提交。", look("#4C7BD0", "tee", "none", "#8A5A36"), { model: "sonnet", sort: 1, task_kinds: ["dev"], skills: ["docs"], plugins: ["release-notes@2", "pr-review"] }),
+  role("r0", "coordinator", "coordinator", "项目统筹", "claude", 1, ["n1"], "和你对话，判断要做什么，开讨论串、跟进状态、向你汇报。", look("#7A4FD1", "hoodie", "headset", "#3B2A20")),
+  role("r1", "lead", "lead", "组长", "claude", 1, ["n1", "n2"], "列主要任务、拆小任务、审查成员提交并合并，完成后向统筹交总结。", look("#C8622A", "suit", "none", "#3B2A20"), { model: "claude-opus-5-5" }),
+  role("r2", "member", "dev", "开发", "claude", 2, ["n1", "n2"], "从任务池领开发类小任务，在自己的 worktree 里改代码、跑测试、提交。", look("#4C7BD0", "tee", "none", "#8A5A36"), { model: "claude-sonnet-5-5", sort: 1, task_kinds: ["dev"], skills: ["docs"], plugins: ["release-notes@2", "pr-review"] }),
   role("r3", "member", "qa", "测试", "codex", 1, ["n2"], "领测试类小任务：补用例、跑全量测试、复现问题并报告。", look("#3F8F6B", "coat", "glasses", "#6B4A2E"), { sort: 2, permission_mode: "ask", sandbox: "workspace-write", task_kinds: ["test"], plugins: ["playwright-kit"] }),
   role("r4", "member", "review", "审查", "claude", 1, ["n1"], "审查合并前的改动，指出问题，不改代码。", look("#4A4843", "suit", "glasses", "#1F1E1C"), { sort: 3, gate: "review", model: "opus" }),
 ];

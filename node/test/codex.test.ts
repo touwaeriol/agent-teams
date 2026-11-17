@@ -67,6 +67,18 @@ describe("codex sessions over app-server", () => {
     await h!.console.waitType("session.state", (b) => b.state === "active" && b.session_id === "s_X1");
   });
 
+  it("leaves an empty model out of thread/start so Codex picks its own default, and reports that model", async () => {
+    const calls = await startCodex();
+    const open = codexOpen("s_XE");
+    h!.console.command("session.open", { ...open, codex: { ...open.codex, model: "" } });
+    const opened = await h!.console.waitType("session.opened");
+    expect(opened.body.init.model).toBe("fake-codex-default");
+    expect("model" in calls().find((c) => c.method === "thread/start")!.params).toBe(false);
+    h!.console.command("session.release", { session_id: "s_XE", open_gen: 1 });
+    h!.console.command("session.send", { session_id: "s_XE", msg_id: "m_e1", text: "hi" });
+    expect((await h!.console.waitType("session.event", (b) => b.kind === "turn_ended")).body.model).toBe("fake-codex-default");
+  });
+
   it("runs the next turn with the model set by session.set_mode and reports it", async () => {
     const calls = await startCodex();
     h!.console.command("session.open", codexOpen("s_XM"));

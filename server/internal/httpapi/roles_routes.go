@@ -10,6 +10,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/touwaeriol/agent-teams/server/internal/composer"
 	"github.com/touwaeriol/agent-teams/server/internal/office"
 	"github.com/touwaeriol/agent-teams/server/internal/plugins"
 	"github.com/touwaeriol/agent-teams/server/internal/roles"
@@ -168,7 +169,12 @@ func (s *Server) replaceRoles(ctx context.Context, userID string, list []store.R
 	if err != nil {
 		return err
 	}
-	if problems := roles.Validate(list, roles.Context{Nodes: byID, Looks: looks, Skills: skillNames, Plugins: pluginChoices}); len(problems) > 0 {
+	models, err := composer.ListModels(ctx, s.store.Pool, userID)
+	if err != nil {
+		return err
+	}
+	vc := roles.Context{Nodes: byID, Looks: looks, Skills: skillNames, Plugins: pluginChoices, Models: models, Saved: known}
+	if problems := roles.Validate(list, vc); len(problems) > 0 {
 		return rolesInvalid(problems)
 	}
 	if err := s.store.Tx(ctx, func(tx *store.Store) error { return tx.ReplaceRoles(ctx, userID, list) }); err != nil {

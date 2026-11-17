@@ -100,7 +100,8 @@ func TestModelFallback(t *testing.T) {
 	}
 
 	b.must(200, "PUT", "/api/models/mine", map[string]any{"models": []map[string]any{
-		{"runtime": "claude", "model": "claude-opus-5-5"}, {"runtime": "claude", "model": "claude-haiku-y", "default": true}}}, nil)
+		{"runtime": "claude", "model": "claude-opus-5-5"}, {"runtime": "claude", "model": "claude-haiku-y", "default": true},
+		{"runtime": "claude", "model": "claude-project-z"}}}, nil)
 	var owner string
 	if err := store.QueryRow(tm.w.ctx, tm.w.e.Core.Pool, `SELECT user_id FROM at_projects WHERE id = $1`, tm.projectID).Scan(&owner); err != nil {
 		t.Fatal(err)

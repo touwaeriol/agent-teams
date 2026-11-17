@@ -13,7 +13,7 @@ const save = useAction(modelActions.saveMine, { invalidate: [keys.models], succe
 </script>
 
 <template>
-  <Card class="gap-3">
+  <Card id="my-models" class="scroll-mt-4 gap-3">
     <div class="flex flex-col gap-1">
       <span class="font-semibold">模型</span>
       <span class="text-xs leading-5 text-muted-foreground">

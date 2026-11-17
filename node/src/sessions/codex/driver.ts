@@ -36,6 +36,8 @@ export class CodexDriver implements Driver, ThreadListener {
   private closed = false;
   private authReported = false;
   private readonly codex: CodexSessionOptions;
+  /** The model Codex resolved for the thread (its own default when codex.model is empty). */
+  private resolvedModel: string | undefined;
 
   constructor(private readonly ctx: DriverContext, private readonly deps: CodexDriverDeps) {
     this.codex = ctx.spec.codex!;
@@ -51,13 +53,14 @@ export class CodexDriver implements Driver, ThreadListener {
     this.closed = false;
     const url = this.deps.toolhost.rotate(this.ctx.spec.session_id, this.ctx.spec.platform_tools, (tool, args) => this.ctx.sink.callTool(tool, args));
     const params = this.threadParams(url);
-    const resp = this.threadId ? await this.resume(server, params) : await server.request<{ thread: { id: string } }>("thread/start", params);
+    const resp = this.threadId ? await this.resume(server, params) : await server.request<{ thread: { id: string }; model?: string }>("thread/start", params);
     this.threadId = resp.thread.id;
+    this.resolvedModel = this.codex.model || resp.model || undefined;
     this.deps.hub.register(this.threadId, this);
     return { codex_thread_id: this.threadId, init: await this.init(server) };
   }
 
-  private async resume(server: AppServer, params: Record<string, unknown>): Promise<{ thread: { id: string } }> {
+  private async resume(server: AppServer, params: Record<string, unknown>): Promise<{ thread: { id: string }; model?: string }> {
     try {
       return await server.request("thread/resume", { ...params, threadId: this.threadId, excludeTurns: true });
     } catch (err) {
@@ -72,7 +75,9 @@ export class CodexDriver implements Driver, ThreadListener {
       shell_environment_policy: { inherit: "core", set: this.ctx.env },
     };
     return {
-      model: this.codex.model, cwd: this.ctx.absCwd, approvalPolicy: this.codex.approval_policy, sandbox: this.codex.sandbox, config,
+      // An empty model is left out so Codex uses its own default: app-server rejects model "".
+      ...(this.codex.model ? { model: this.codex.model } : {}),
+      cwd: this.ctx.absCwd, approvalPolicy: this.codex.approval_policy, sandbox: this.codex.sandbox, config,
       ...(this.codex.developer_instructions ? { developerInstructions: this.codex.developer_instructions } : {}),
     };
   }
@@ -81,7 +86,7 @@ export class CodexDriver implements Driver, ThreadListener {
     const status = await server.request<{ data: Array<{ name: string; tools: Record<string, unknown>; toolsError: string | null }> }>("mcpServerStatus/list", { threadId: this.threadId, serverName: "platform", detail: "toolsAndAuthOnly" }).catch(() => ({ data: [] }));
     const platform = status.data.find((s) => s.name === "platform");
     const tools = Object.keys(platform?.tools ?? {}).map((t) => `mcp__platform__${t}`);
-    return { model: this.codex.model, tools, permission_mode: `${this.codex.sandbox}/${this.codex.approval_policy}`, mcp_servers: [{ name: "platform", status: platform && !platform.toolsError ? "connected" : "failed" }] };
+    return { ...(this.resolvedModel ? { model: this.resolvedModel } : {}), tools, permission_mode: `${this.codex.sandbox}/${this.codex.approval_policy}`, mcp_servers: [{ name: "platform", status: platform && !platform.toolsError ? "connected" : "failed" }] };
   }
 
   async push(msg: OutgoingMessage): Promise<{ turn_id?: string }> {
@@ -171,7 +176,7 @@ export class CodexDriver implements Driver, ThreadListener {
   }
 
   private onTurnCompleted(turn: { id: string; status: string }): void {
-    const model = this.modeOverride.model ?? this.codex.model;
+    const model = this.modeOverride.model ?? this.resolvedModel;
     for (const ev of turnCompleted(turn, this.turnStartedAt, this.lastText)) this.emit(ev.kind === "turn_ended" && model ? { ...ev, model } : ev);
     this.activeTurn = null;
     this.authReported = false;

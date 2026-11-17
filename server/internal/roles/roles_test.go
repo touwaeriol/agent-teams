@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/touwaeriol/agent-teams/server/internal/composer"
 	"github.com/touwaeriol/agent-teams/server/internal/office"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -214,5 +215,70 @@ func TestPluginsValidation(t *testing.T) {
 	parsed, err := FromYAML(text, nil)
 	if err != nil || strings.Join(parsed.Roles[2].Plugins, ",") != "tinyplug@2" {
 		t.Fatalf("yaml round trip %+v %v", parsed.Roles, err)
+	}
+}
+
+func TestLeadRuntimeIsClaude(t *testing.T) {
+	roles := Defaults(looks)
+	roles[1].Runtime = Codex
+	Normalize(roles, looks)
+	got := Validate(roles, Context{Nodes: nodes(), Looks: looks})
+	if problemPaths(got) != "roles[1].runtime" || got[0].Message != "组长只能用 Claude" {
+		t.Fatalf("problems %v", got)
+	}
+}
+
+// TestModelValidation: role.model empty follows the defaults; otherwise it must be in the user's
+// list with the role's runtime, unless it is the value the saved role already had.
+func TestModelValidation(t *testing.T) {
+	models := []composer.Model{{Runtime: Claude, Model: "claude-opus-5-5"}, {Runtime: Codex, Model: "gpt-x"}}
+	member := func(id, runtime, model string) store.Role {
+		return store.Role{ID: id, Tier: Member, Role: "m" + id, Runtime: runtime, Model: model, NodeIDs: []string{"n1"}}
+	}
+	saved := map[string]store.Role{
+		"r1": member("r1", Claude, "claude-gone"),
+		"r2": member("r2", Claude, "claude-gone"),
+		"r3": member("r3", Codex, "claude-opus-5-5"),
+	}
+	cases := []struct {
+		name string
+		role store.Role
+		want string // the problem message, "" = valid
+	}{
+		{"empty follows the defaults", member("", Claude, ""), ""},
+		{"claude in list", member("", Claude, "claude-opus-5-5"), ""},
+		{"codex in list", member("", Codex, "gpt-x"), ""},
+		{"not in list", member("", Claude, "claude-nope"), "模型不在你的模型列表里：claude-nope"},
+		{"codex role with a claude model", member("", Codex, "claude-opus-5-5"), "Codex 岗位不能用 Claude 模型：claude-opus-5-5"},
+		{"claude role with a codex model", member("", Claude, "gpt-x"), "Claude 岗位不能用 Codex 模型：gpt-x"},
+		{"unchanged old value passes", member("r1", Claude, "claude-gone"), ""},
+		{"old value on another role is checked", member("r9", Claude, "claude-gone"), "模型不在你的模型列表里：claude-gone"},
+		{"old value with the runtime changed is checked", member("r2", Codex, "claude-gone"), "模型不在你的模型列表里：claude-gone"},
+		{"runtime changed to match the model is checked", member("r3", Claude, "claude-opus-5-5"), ""},
+		{"lead model checked too", store.Role{Tier: Lead, Role: "lead", Model: "claude-nope"}, "模型不在你的模型列表里：claude-nope"},
+	}
+	for _, c := range cases {
+		roles := Defaults(looks)
+		if c.role.Tier == Lead {
+			roles[1].Model = c.role.Model
+		} else {
+			roles = append(roles, c.role)
+		}
+		Normalize(roles, looks)
+		var msgs []string
+		for _, p := range Validate(roles, Context{Nodes: nodes(), Looks: looks, Models: models, Saved: saved}) {
+			if strings.HasSuffix(p.Path, ".model") {
+				msgs = append(msgs, p.Message)
+			}
+		}
+		if got := strings.Join(msgs, "; "); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+	// No model list (nil) skips the check.
+	roles := append(Defaults(looks), member("", Claude, "anything"))
+	Normalize(roles, looks)
+	if p := Validate(roles, Context{Nodes: nodes(), Looks: looks}); len(p) != 0 {
+		t.Fatalf("nil models: %v", p)
 	}
 }

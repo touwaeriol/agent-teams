@@ -2911,6 +2911,8 @@ export interface components {
             auto_approve?: boolean;
             /** @description 项目指令 */
             context?: string;
+            /** @description Claude model of the coordinator; '' = the role's model */
+            coordinator_model?: string;
             delivery?: components["schemas"]["DeliveryPatch"];
             description?: string;
             /** @description Delivered to the project coordinator */
@@ -2918,6 +2920,10 @@ export interface components {
             name: string;
             repos?: components["schemas"]["RepoRef"][] | null;
             require_acceptance?: boolean;
+            /** @description Codex model of Codex leads and members; '' = each role's model */
+            thread_codex_model?: string;
+            /** @description Claude model of Claude leads and members; '' = each role's model */
+            thread_model?: string;
             /** @enum {string} */
             work_mode?: "worktree" | "clone";
         };
@@ -2944,9 +2950,11 @@ export interface components {
             /** @description Replaces the bound repositories (order kept); [] unbinds all */
             repos?: components["schemas"]["RepoRef"][];
             require_acceptance?: boolean;
+            /** @description Codex leads and members; '' = each role's model */
+            thread_codex_model?: string;
             /** @description '' | low | medium | high | xhigh | max */
             thread_effort?: string;
-            /** @description '' = each role's model */
+            /** @description Claude leads and members; '' = each role's model */
             thread_model?: string;
             /** @enum {string} */
             work_mode?: "worktree" | "clone";
@@ -2985,9 +2993,11 @@ export interface components {
             /** @description Bound repositories in project order; base branches belong in context (the project instructions) */
             repos: components["schemas"]["RepoRef"][] | null;
             require_acceptance: boolean;
+            /** @description Codex leads and members; '' = each role's model */
+            thread_codex_model: string;
             /** @description '' = each role's effort; low | medium | high | xhigh | max */
             thread_effort: string;
-            /** @description '' = each lead/member role's model */
+            /** @description Claude leads and members; '' = each role's model */
             thread_model: string;
             /** Format: int64 */
             threads_active: number;

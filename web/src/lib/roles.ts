@@ -72,11 +72,6 @@ export function usesAsk(list: Pick<RoleView, "tier" | "permission_mode" | "read_
   return list.some((r) => r.tier === "member" && !isReadOnly(r) && permissionMode(r) === "ask");
 }
 
-export function kindText(r: Pick<RoleView, "runtime" | "model">): string {
-  const base = r.runtime === "codex" ? "Codex" : "Claude Code";
-  return r.model ? `${base} · ${r.model}` : base;
-}
-
 /** The name tags the preview shows: lead-1 / dev-1, dev-2 … */
 export function previewTags(r: Pick<RoleView, "tier" | "role">): [string, string] {
   if (r.tier === "coordinator") return ["leader", "leader"];

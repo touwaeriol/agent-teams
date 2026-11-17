@@ -15,7 +15,7 @@ const status = { state: "idle", substate: "", bubble: "", bubble_kind: "", task_
 const employee = { id: "e0", name: "leader", tier: "coordinator", role: "coordinator", title: "项目统筹", runtime: "claude", node: { id: "n1", name: "rc", online: true }, look: null, status };
 const project = {
   id: "p1", name: "agent team", description: "", context: "", repo: null, branch: "main", git_connection_id: null, pinned: false, archived: false, work_mode: "worktree",
-  auto_approve: false, require_acceptance: true, office_layout: "default", waiting: 0, icon: "", coordinator_model: "", thread_model: "", thread_effort: "", auto_resume: false,
+  auto_approve: false, require_acceptance: true, office_layout: "default", waiting: 0, icon: "", coordinator_model: "", thread_model: "", thread_codex_model: "", thread_effort: "", auto_resume: false,
   threads_active: 0, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
 };
 /** Answers GETs by URL fragment (first match), everything else with {}. */

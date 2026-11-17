@@ -59,3 +59,53 @@ export function modelProblems(list: Pick<ModelEntry, "runtime" | "model" | "defa
   }
   return out;
 }
+
+/** The "" choice of a role's model field: follow the user's default of the runtime. */
+export function followLabel(list: ModelEntry[], runtime: Runtime): string {
+  const id = defaultModel(list, runtime);
+  return `跟随我的默认（${id ? `当前：${modelName(list, id)}` : "未设置"}）`;
+}
+
+/** Whether a role may keep `model` with `runtime` ("" always fits; otherwise it must be in the runtime's list). */
+export function modelFits(list: ModelEntry[], runtime: Runtime, model: string): boolean {
+  return !model || list.some((m) => m.runtime === runtime && m.model === model);
+}
+
+/** Which roles a project model field overrides: the coordinator, or the leads and members of one runtime. */
+export type ProjectModelScope = "coordinator" | Runtime;
+
+interface ScopedRole {
+  tier: string;
+  runtime: string;
+  model?: string;
+  title?: string;
+  role?: string;
+}
+
+/** The roles a project field covers. */
+export function scopeRoles<R extends ScopedRole>(roles: R[], scope: ProjectModelScope): R[] {
+  return scope === "coordinator" ? roles.filter((r) => r.tier === "coordinator") : roles.filter((r) => r.tier !== "coordinator" && r.runtime === scope);
+}
+
+/** The model names the covered roles run with (each role's model, else the user's default), once each. */
+export function roleModelNames(roles: ScopedRole[], list: ModelEntry[], scope: ProjectModelScope): string[] {
+  const out: string[] = [];
+  for (const r of scopeRoles(roles, scope)) {
+    const id = r.model || defaultModel(list, r.runtime as Runtime);
+    const name = id ? modelName(list, id) : "我的默认（未设置）";
+    if (!out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
+/** The effective state of a project model field: 项目指定：X, or 跟随岗位配置（岗位：…）. */
+export function projectModelStatus(value: string, roles: ScopedRole[], list: ModelEntry[], scope: ProjectModelScope): string {
+  if (value) return `项目指定：${modelName(list, value)}`;
+  const names = roleModelNames(roles, list, scope);
+  return `跟随岗位配置（${names.length ? `岗位：${names.join("、")}` : "没有这类岗位"}）`;
+}
+
+/** Whether to offer the Codex field: the user has a Codex model or a Codex lead/member role, or it is set. */
+export function offersCodex(roles: ScopedRole[], list: ModelEntry[], value = ""): boolean {
+  return Boolean(value) || list.some((m) => m.runtime === "codex") || scopeRoles(roles, "codex").length > 0;
+}

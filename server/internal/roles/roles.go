@@ -53,6 +53,11 @@ type Context struct {
 	Skills map[string]bool
 	// Plugins maps the plugin names the user may tick to their versions; nil skips the check.
 	Plugins map[string]map[int]bool
+	// Models is the user's model list (composer.ListModels); nil skips the model check.
+	Models []composer.Model
+	// Saved are the roles as stored before this save, by id: a model kept unchanged is not
+	// rechecked (see modelProblems).
+	Saved map[string]store.Role
 }
 
 // Normalize fills defaults in place: fixed counts, read_only from gate, look from the layout.
@@ -156,6 +161,7 @@ func validateOne(path string, r *store.Role, c Context) []Problem {
 		{"role", !keyPattern.MatchString(r.Role), "岗位键只能用小写字母开头的小写字母、数字和 -，最多 24 个字符"},
 		{"runtime", r.Runtime != Claude && r.Runtime != Codex, "runtime 只能是 claude 或 codex"},
 		{"runtime", r.Tier == Coordinator && r.Runtime != Claude, "统筹只能用 Claude"},
+		{"runtime", r.Tier == Lead && r.Runtime != Claude, "组长只能用 Claude"},
 		{"count", r.Count < 1 || r.Count > MaxCount, fmt.Sprintf("人数在 1 到 %d 之间", MaxCount)},
 		{"gate", !slices.Contains(gates, r.Gate), "gate 只能是空、review 或 decision"},
 		{"sandbox", !slices.Contains(sandboxes, r.Sandbox), "sandbox 只能是 read-only、workspace-write 或 danger-full-access"},
@@ -174,7 +180,38 @@ func validateOne(path string, r *store.Role, c Context) []Problem {
 	out = append(out, skillProblems(path, r, c.Skills)...)
 	out = append(out, pluginProblems(path, r, c.Plugins)...)
 	out = append(out, commandProblems(path, r)...)
+	out = append(out, modelProblems(path, r, c)...)
 	return append(out, nodeProblems(path, r, c.Nodes)...)
+}
+
+var runtimeLabel = map[string]string{Claude: "Claude", Codex: "Codex"}
+
+// modelProblems checks role.model against the user's model list: empty follows the defaults;
+// otherwise it must be an entry of the role's runtime. A value equal to what the role already
+// had (same id, same runtime) passes even when it has since left the list, so deleting a model
+// does not lock the whole Team page; only new or changed values are checked. Sessions of such a
+// role still run the stored id.
+func modelProblems(path string, r *store.Role, c Context) []Problem {
+	if r.Model == "" || c.Models == nil {
+		return nil
+	}
+	if old, ok := c.Saved[r.ID]; ok && r.ID != "" && old.Model == r.Model && old.Runtime == r.Runtime {
+		return nil
+	}
+	var other string
+	for _, m := range c.Models {
+		if m.Model != r.Model {
+			continue
+		}
+		if m.Runtime == r.Runtime {
+			return nil
+		}
+		other = m.Runtime
+	}
+	if other != "" {
+		return []Problem{{path + ".model", fmt.Sprintf("%s 岗位不能用 %s 模型：%s", runtimeLabel[r.Runtime], runtimeLabel[other], r.Model)}}
+	}
+	return []Problem{{path + ".model", "模型不在你的模型列表里：" + r.Model}}
 }
 
 func commandProblems(path string, r *store.Role) []Problem {

@@ -114,7 +114,7 @@ type sessionInput struct {
 	hasRepo  bool
 	repos    []string // repository slugs checked out under the employee's directory
 	protRefs []string
-	defModel string // the project owner's default model for the employee's runtime ("" = DefaultModel)
+	defModel string // the project owner's default model for the employee's runtime ("" = builtinModel)
 }
 
 // buildOpen renders session.open for an employee.
@@ -170,21 +170,41 @@ func employeeRef(e core.Employee, t *core.Thread) protocol.EmployeeRef {
 	return ref
 }
 
-// Model is what the employee's sessions run. The whole fallback order lives here:
-//  1. the model picked for the employee with /model (at_employees.model);
-//  2. the project override for its tier (coordinator_model / thread_model, Claude only);
-//  3. the role's model (the employee's spec);
-//  4. def: the default of the runtime in the project owner's model list (composer.DefaultModel);
-//  5. DefaultModel.
+// Model is what the employee's sessions run: the first non-empty step of the fallback order
+// below. The whole order lives here, one line per step; to change the precedence (say the role
+// before the project override) swap the lines.
+//
+// def is the default of the employee's runtime in the project owner's model list
+// (composer.DefaultModel). A Codex employee never falls through to a Claude id: its built-in last
+// resort is DefaultCodexModel (""), which leaves the choice to the Codex CLI.
 func Model(e core.Employee, p store.Project, def string) string {
-	if e.Runtime == "codex" {
-		return firstNonEmpty(e.Model, e.Spec.Model, def, DefaultModel)
+	return firstNonEmpty(modelSteps(e, p, def)...)
+}
+
+// modelSteps is Model's fallback order, highest precedence first.
+func modelSteps(e core.Employee, p store.Project, def string) []string {
+	return []string{
+		e.Model,                 // 1. picked for the employee with /model (at_employees.model)
+		projectModel(e, p),      // 2. the project override for the employee's runtime and tier
+		e.Spec.Model,            // 3. the role's model (the employee's spec)
+		def,                     // 4. the owner's default for the runtime
+		builtinModel(e.Runtime), // 5. built in: DefaultModel / DefaultCodexModel
 	}
-	override := p.ThreadModel
-	if e.Tier == "coordinator" {
-		override = p.CoordinatorModel
+}
+
+// projectModel is the project's model override for the employee, by runtime so an override only
+// reaches roles of its own runtime: thread_codex_model for Codex leads and members (never
+// thread_model, a Claude id); coordinator_model for the coordinator (always Claude); thread_model
+// for Claude leads and members. ” falls through to the role's model.
+func projectModel(e core.Employee, p store.Project) string {
+	switch {
+	case e.Runtime == "codex":
+		return p.ThreadCodexModel
+	case e.Tier == "coordinator":
+		return p.CoordinatorModel
+	default:
+		return p.ThreadModel
 	}
-	return firstNonEmpty(e.Model, override, e.Spec.Model, def, DefaultModel)
 }
 
 // effort is the project's thread effort for leads and members, else the role's.
