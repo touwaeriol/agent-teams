@@ -37,7 +37,7 @@ var (
 	ErrMergeInProgress = errors.New("合并队列里还有正在合并的条目，等它们处理完再开 PR")
 	ErrPlanOpen        = errors.New("还有主任务没有完成")
 	ErrNoPR            = errors.New("这个讨论串还没有 PR")
-	ErrNotInReview     = errors.New("讨论串不在验收中（PR 已合并、已关闭，或讨论串不在 review 状态）")
+	ErrNotInReview     = errors.New("这个讨论串现在不在等待验收（PR 可能已经合并或关闭，或者讨论串已经回到进行中），请刷新后再看")
 	ErrTaskNotReady    = errors.New("任务还不能进合并队列（需要成员先 complete_task）")
 	ErrNotPushed       = errors.New("这个仓库没有可合并的改动")
 	ErrBadURL          = errors.New("交付物链接必须是 http:// 或 https:// 开头的网址")
