@@ -1,6 +1,6 @@
 // The "交付物" strip at the top of the panel list: which deliverables it shows, which of them are
 // new to this viewer, and the scroll arrows. Pure helpers plus a small per-project seen store.
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import type { DeliverableView } from "@/api/views";
 import { isHosted } from "./artifacts";
 import { extensionOf } from "./library";
@@ -34,8 +34,13 @@ export function isStripDeliverable(d: Pick<DeliverableView, "kind" | "detail">):
 }
 
 /**
- * What this browser has seen of a project's deliverables: since = when the strip was first used
- * here (anything updated before counts as seen), seen = per deliverable, the time it was opened.
+ * What this browser has seen of a project's deliverables: since = anything updated before it counts
+ * as seen (first: when the strip was first used here), seen = per deliverable, the time it was opened.
+ *
+ * Times are the browser's clock compared with the server's updated_at. markSeen takes the later of
+ * the two, so opening a deliverable always clears it; but `since` starts at the browser's "now":
+ * with a browser clock behind the server, deliverables updated just before first use can show as
+ * new once, and with a clock ahead, ones updated just after can be missed. Good enough for a hint.
  */
 export interface SeenRecord {
   since: string;
@@ -66,12 +71,18 @@ export function markSeen(rec: SeenRecord | null | undefined, d: Pick<Deliverable
   const at = new Date(Math.max(now, time(d.updated_at))).toISOString();
   const seen = { ...base.seen, [d.id]: at };
   const ids = Object.keys(seen);
+  let since = base.since;
   if (ids.length > MAX_SEEN) {
-    // forget the oldest; they fall back to `since`, which they predate unless updated again
+    // forget the oldest entries and move `since` up to the latest of them, so a forgotten one
+    // stays seen (unless updated again). Never-opened ones updated before that time also count as
+    // seen from then on: after 300 opens that is an acceptable loss for a bounded record.
     ids.sort((a, b) => time(seen[a]) - time(seen[b]));
-    for (const id of ids.slice(0, ids.length - MAX_SEEN)) delete seen[id];
+    for (const id of ids.slice(0, ids.length - MAX_SEEN)) {
+      if (time(seen[id]) > time(since)) since = seen[id];
+      delete seen[id];
+    }
   }
-  return { since: base.since, seen };
+  return { since, seen };
 }
 
 export function parseSeen(raw: string | null): SeenRecord | null {
@@ -102,14 +113,19 @@ function load(pid: string): SeenRecord {
   return rec;
 }
 
-/** "新内容" state of a project's deliverables in this browser (localStorage, per project). */
+/**
+ * "新内容" state of a project's deliverables in this browser (localStorage, per project). The record
+ * is loaded (and created on first use) when the project is known, not while rendering; no project,
+ * nothing is written.
+ */
 export function useSeenDeliverables(pid: () => string) {
+  watch(pid, (p) => p && load(p), { immediate: true });
   return {
-    isNew: (d: Pick<DeliverableView, "id" | "updated_at">) => isNewDeliverable(d, load(pid())),
+    isNew: (d: Pick<DeliverableView, "id" | "updated_at">) => isNewDeliverable(d, records.value[pid()]),
     markSeen: (d: Pick<DeliverableView, "id" | "updated_at">) => {
       const p = pid();
       if (!p) return;
-      const rec = markSeen(load(p), d);
+      const rec = markSeen(records.value[p] ?? load(p), d);
       records.value = { ...records.value, [p]: rec };
       writeLocal(seenKey(p), JSON.stringify(rec));
     },
