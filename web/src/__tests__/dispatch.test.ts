@@ -25,8 +25,8 @@ afterEach(() => {
 });
 
 const longBrief = ["## 目标", "", ...Array.from({ length: 10 }, (_, i) => `- 第 ${i + 1} 条要求`)].join("\n");
+const BRIEF = "把 **登录页** 改成暗色";
 const dispatch = (patch: Partial<ThreadDispatch> = {}): ThreadDispatch => ({
-  brief: "把 **登录页** 改成暗色",
   opened_by: "coordinator",
   at: "2026-11-17T10:00:00Z",
   source: null,
@@ -39,8 +39,8 @@ const source = {
   created_at: "2026-11-17T09:59:00Z",
 };
 
-const mountDispatch = async (d: ThreadDispatch, path?: string) =>
-  mount(DispatchMessage, { props: { dispatch: d, pid: "p1", compact: true }, global: { plugins: await plugins(path) } });
+const mountDispatch = async (d: ThreadDispatch, path?: string, brief = BRIEF) =>
+  mount(DispatchMessage, { props: { brief, dispatch: d, pid: "p1", compact: true }, global: { plugins: await plugins(path) } });
 
 describe("helpers", () => {
   it("names who handed over the brief", () => {
@@ -73,7 +73,7 @@ describe("DispatchMessage", () => {
     expect(w.text()).toContain("你 → 组长");
   });
   it("folds a long brief and toggles 展开 / 收起", async () => {
-    const w = await mountDispatch(dispatch({ brief: longBrief }));
+    const w = await mountDispatch(dispatch(), undefined, longBrief);
     const toggle = w.get("[data-brief-toggle]");
     expect(toggle.text()).toBe("展开");
     expect(toggle.attributes("aria-expanded")).toBe("false");
@@ -108,10 +108,10 @@ describe("DispatchMessage", () => {
 });
 
 describe("ThreadChat", () => {
-  function serve(messages: MessageView[]) {
+  function serve(messages: MessageView[], questions: unknown[] = []) {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = (input as Request).url;
-      const body = url.includes("/messages") ? { items: messages, next_cursor: null } : [];
+      const body = url.includes("/messages") ? { items: messages, next_cursor: null } : url.includes("/questions") ? questions : [];
       return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
     });
   }
@@ -121,30 +121,60 @@ describe("ThreadChat", () => {
     await nextTick();
     return w;
   }
+  const EMPTY = "还没有对话";
 
-  it("shows the brief first and 组长正在阅读任务… under it while the lead has not spoken", async () => {
+  it("shows the brief (thread.brief) first and 组长正在阅读任务… under it while the lead has not spoken", async () => {
     serve([message("1", { role: "user", content: "补充一句" })]);
-    const w = await mountChat(thread(12, { dispatch: dispatch() }));
+    const w = await mountChat(thread(12, { brief: BRIEF, dispatch: dispatch() }));
     const html = w.html();
-    expect(w.find("[data-dispatch]").exists()).toBe(true);
+    expect(w.get("[data-dispatch] [data-brief] strong").text()).toBe("登录页");
     expect(w.get("[data-lead-reading]").text()).toBe("组长正在阅读任务…");
     expect(html.indexOf("data-dispatch")).toBeLessThan(html.indexOf("补充一句"));
     expect(html.indexOf("补充一句")).toBeLessThan(html.indexOf("data-lead-reading"));
-    expect(w.text()).not.toContain("还没有对话");
+    expect(w.text()).not.toContain(EMPTY);
+  });
+  it("a queued thread reads too", async () => {
+    serve([]);
+    const w = await mountChat(thread(12, { status: "queued", brief: BRIEF, dispatch: dispatch() }));
+    expect(w.find("[data-lead-reading]").exists()).toBe(true);
   });
   it("drops the reading line once the lead's first message is there", async () => {
     serve([message("2", { role: "leader", content: "收到，开始拆任务。" })]);
-    const w = await mountChat(thread(12, { dispatch: dispatch() }));
+    const w = await mountChat(thread(12, { brief: BRIEF, dispatch: dispatch() }));
     expect(w.find("[data-dispatch]").exists()).toBe(true);
     expect(w.find("[data-lead-reading]").exists()).toBe(false);
     expect(w.text()).toContain("收到，开始拆任务。");
   });
-  it("an older thread with a dispatch shows it; without one, no brief", async () => {
+  it("no reading line once the lead asked (a question card)", async () => {
+    const q = { id: "q1", thread_no: 12, asker: "lead-12", task_id: null, audience: "user", kind: "choice", text: "用哪个方案？", options: [], detail: {}, blocking: true, answer: null, status: "open", decided_by: null, created_at: "2026-11-17T10:01:00Z", answered_at: null };
+    serve([], [q]);
+    const w = await mountChat(thread(12, { brief: BRIEF, dispatch: dispatch() }));
+    expect(w.text()).toContain("用哪个方案？");
+    expect(w.find("[data-lead-reading]").exists()).toBe(false);
+  });
+  it.each(["waiting", "review", "paused", "done"] as const)("no reading line while %s", async (status) => {
+    serve([]);
+    const w = await mountChat(thread(12, { status, brief: BRIEF, dispatch: dispatch() }));
+    expect(w.find("[data-dispatch]").exists()).toBe(true);
+    expect(w.find("[data-lead-reading]").exists()).toBe(false);
+    expect(w.text()).not.toContain(EMPTY);
+  });
+  it("an older thread with a dispatch shows it", async () => {
     serve([message("2", { role: "leader", content: "已完成" })]);
-    const done = await mountChat(thread(9, { status: "done", dispatch: dispatch({ brief: "旧任务" }) }));
-    expect(done.get("[data-dispatch]").text()).toContain("旧任务");
-    expect(done.find("[data-lead-reading]").exists()).toBe(false);
-    const none = await mountChat(thread(8, { dispatch: null }));
-    expect(none.find("[data-dispatch]").exists()).toBe(false);
+    const w = await mountChat(thread(9, { status: "done", brief: "旧任务", dispatch: dispatch() }));
+    expect(w.get("[data-dispatch]").text()).toContain("旧任务");
+  });
+  it("an older thread with no dispatch and no messages keeps the empty state", async () => {
+    serve([]);
+    const w = await mountChat(thread(8, { status: "done", brief: "旧任务", dispatch: null }));
+    expect(w.find("[data-dispatch]").exists()).toBe(false);
+    expect(w.text()).toContain(EMPTY);
+  });
+  it("a forwarded thread (dispatch null) shows no brief; while running it reads instead of the empty state", async () => {
+    serve([message("1", { role: "user", content: "转发来的原话" })]);
+    const w = await mountChat(thread(8, { brief: "x", dispatch: null }));
+    expect(w.find("[data-dispatch]").exists()).toBe(false);
+    expect(w.find("[data-lead-reading]").exists()).toBe(true);
+    expect(w.text()).not.toContain(EMPTY);
   });
 });

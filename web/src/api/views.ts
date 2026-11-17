@@ -138,13 +138,12 @@ export interface ThreadView {
   remind_at?: string | null;
   /** When a reminder fired; the thread waits on the user (等你处理) until it is cleared. */
   reminded_at?: string | null;
-  /** The brief the thread was opened with, and the user's words it came from (older servers leave it out). */
+  /** Who handed over the brief and the user's words it came from (null: forwarded, or older threads; older servers leave it out). */
   dispatch?: ThreadDispatch | null;
 }
 
-/** How a thread was opened: the brief handed to the lead (by the coordinator or the user). */
+/** How a thread was opened: who handed the brief (ThreadView.brief) to the lead, when, and from which of the user's words. */
 export interface ThreadDispatch {
-  brief: string;
   /** "user" when the user opened it; otherwise the coordinator. */
   opened_by: string;
   at: string;
