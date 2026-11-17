@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // Settings sidebar (SettingsNav board): back to projects, then the settings pages.
+// No admin entry here: the admin console lives at /admin.
 import { ArrowLeft } from "lucide-vue-next";
 import { computed } from "vue";
 import { RouterLink } from "vue-router";
@@ -15,9 +16,7 @@ const ITEMS = [
   { to: "/settings/nodes", label: "节点", hint: "运行成员的机器" },
   { to: "/settings/git", label: "GitHub 连接", hint: "授权你的仓库" },
   { to: "/settings/appearance", label: "外观", hint: "亮色 / 暗色" },
-  { to: "/settings/admin", label: "管理", hint: "用户和平台", admin: true },
 ];
-const items = computed(() => ITEMS.filter((i) => !i.admin || props.me.role === "admin"));
 const name = computed(() => props.me.display_name || props.me.email.split("@")[0]);
 </script>
 
@@ -33,7 +32,7 @@ const name = computed(() => props.me.display_name || props.me.email.split("@")[0
         返回项目
       </RouterLink>
       <span class="block px-2.5 pb-1.5 pt-4 text-xs text-muted-foreground">设置</span>
-      <RouterLink v-for="i in items" :key="i.to" v-slot="{ href, navigate, isActive }" :to="i.to" custom>
+      <RouterLink v-for="i in ITEMS" :key="i.to" v-slot="{ href, navigate, isActive }" :to="i.to" custom>
         <a
           :href="href"
           :class="cn('flex flex-col gap-px rounded-lg px-2.5 py-2', isActive ? 'bg-accent font-semibold' : 'hover:bg-accent/60')"

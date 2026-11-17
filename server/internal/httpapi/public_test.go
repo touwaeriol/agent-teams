@@ -72,3 +72,37 @@ func TestHealthAndOpenAPI(t *testing.T) {
 		t.Fatalf("openapi %s", r.Body[:200])
 	}
 }
+
+// TestAdminPagesFallBackToWebApp: the console's /admin/* pages are web app routes (the
+// server serves index.html, the API decides who sees data), while unknown /api/admin/ paths
+// stay JSON errors and never turn into the web page.
+func TestAdminPagesFallBackToWebApp(t *testing.T) {
+	h := newHarness(t)
+	_ = os.WriteFile(filepath.Join(h.cfg.WebDir, "index.html"), []byte("<html>app</html>"), 0o644)
+	anon := h.client()
+	_, _ = h.signUp("first@example.com") // the first account becomes admin
+	user, _ := h.signUp("someone@example.com")
+	for _, c := range []*client{anon, user} {
+		for _, path := range []string{"/admin", "/admin/", "/admin/users", "/admin/platform", "/admin/users/u1"} {
+			r := c.do("GET", path, nil)
+			if r.Status != 200 || string(r.Body) != "<html>app</html>" || !strings.HasPrefix(r.Header.Get("Content-Type"), "text/html") {
+				t.Fatalf("%s = %d %q %s", path, r.Status, r.Header.Get("Content-Type"), r.Body)
+			}
+		}
+	}
+	for _, path := range []string{"/api/admin/nope", "/api/admin", "/api/admin/users/u1/nope"} {
+		r := anon.do("GET", path, nil)
+		if r.Status != 404 || r.Header.Get("Content-Type") != "application/json" || strings.Contains(string(r.Body), "<html>") {
+			t.Fatalf("%s = %d %q %s", path, r.Status, r.Header.Get("Content-Type"), r.Body)
+		}
+	}
+	for _, c := range []struct {
+		cl   *client
+		want int
+	}{{anon, 401}, {user, 403}} {
+		r := c.cl.do("GET", "/api/admin/users", nil)
+		if r.Status != c.want || r.Header.Get("Content-Type") != "application/json" {
+			t.Fatalf("GET /api/admin/users = %d %q, want %d JSON", r.Status, r.Header.Get("Content-Type"), c.want)
+		}
+	}
+}

@@ -17,7 +17,7 @@ const latest = computed(() => props.plugin.versions?.[0]);
         <span class="font-mono">{{ plugin.name }}</span>
         <span class="rounded-full bg-raised px-2 py-0.5 text-[11px] font-normal text-muted-foreground">v{{ plugin.latest }}{{ latest?.manifest_version ? ` · ${latest.manifest_version}` : "" }}</span>
         <span v-if="plugin.builtin" class="rounded-full bg-raised px-2 py-0.5 text-[11px] font-normal text-muted-foreground">内置</span>
-        <span v-if="!plugin.enabled" class="rounded-full bg-[#F6E3E3] px-2 py-0.5 text-[11px] font-normal text-destructive">已停用</span>
+        <span v-if="!plugin.enabled" class="rounded-full bg-[#F6E3E3] px-2 py-0.5 text-[11px] font-normal text-destructive dark:bg-destructive/15">已停用</span>
       </span>
       <span v-if="latest?.description" class="line-clamp-2 text-xs leading-[18px] text-muted-foreground">{{ latest.description }}</span>
       <span class="text-xs text-muted-foreground">{{ contentsText(latest?.contents) }}{{ latest ? ` · ${formatBytes(latest.size)} · ${timeAgo(latest.created_at)}上传` : "" }}</span>

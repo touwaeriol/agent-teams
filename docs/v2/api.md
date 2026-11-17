@@ -349,4 +349,8 @@ v1 的旧对话只读页和它的接口（`GET /api/conversations`、`…/{cid}/
 | `/projects/:pid/deliverables` | Deliverables |
 | `/projects/:pid/office` | Office |
 | `/projects/:pid/settings` · `/projects/:pid/settings/:section` | ProjectSettings：Main 上打开的设置对话框，分区 `general`（通用：名称图标、简介、模型、自动继续、归档删除）· `memory`（记忆：项目指令 = `context`，自动记忆 = MEMORY.md 和记忆文件）· `environment`（环境：每个讨论串都包含的仓库，工作树开关 = `work_mode`：开启 `worktree` / 关闭 `clone` 独立克隆；没有云环境或远程环境，节点在 设置 → 节点）· `usage`（使用情况）· `advanced`（高级：审批与交付、合并方式、分支命名与清理说明），关闭回到 `/projects/:pid` |
-| `/settings/team` · `/settings/nodes` · `/settings/git` · `/settings/appearance` · `/settings/admin` · `/setup/github` | Team · Nodes · GitHub · 外观 · Admin · GitHub App 创建 |
+| `/settings/team` · `/settings/nodes` · `/settings/git` · `/settings/appearance` | Team · Nodes · GitHub · 外观（用户端设置，侧栏里没有管理入口） |
+| `/admin` → `/admin/users` | 管理后台（只给管理员；独立侧栏，顶部“管理后台”，“返回用户端”回 `/projects`）。非管理员访问任何 `/admin/*` 看到 404 页，地址不变，不加载管理后台也不请求管理接口 |
+| `/admin/users` · `/admin/platform` · `/admin/models` · `/admin/library` · `/admin/feedback` · `/admin/github-app` · `/admin/audit` | 用户 · 平台设置（注册、限额、语音输入）· 模型 · 内置命令和插件（内置命令、插件、技能）· 反馈 · GitHub App（创建和状态；服务端的 manifest 回调直接跳到这里，带 `?github_app=<slug>` 或 `?error=…`）· 审计日志 |
+| `/settings/admin` · `/setup/github` | 旧地址，分别重定向到 `/admin` 和 `/admin/github-app`，保留 query |
+| 其他不存在的地址 | NotFound（404 页，“返回首页”到 `/projects`）。未登录访问任何非公开地址跳 `/login?from=<原地址含 query>`，登录后回去；`from` 只接受站内路径（以 `/` 开头，不能是 `//` 或 `/\`） |

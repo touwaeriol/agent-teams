@@ -6,7 +6,7 @@ import { sidebarGroups } from "@/components/shell/projects";
 import { defaultUrlTransform, markdownTree } from "@/lib/markdown";
 import { coordinatorBusy, coordinatorState, sidePanelOf, threadPath, waitingIndex, waitingSummary } from "@/pages/main/logic";
 import { sx } from "@/office/sx";
-import { guard } from "@/router";
+import { guard, safeFrom } from "@/router";
 import { question, thread } from "./fixtures";
 
 class FakeSource {
@@ -113,16 +113,31 @@ describe("markdown", () => {
 
 describe("router guard", () => {
   const me = (role = "member") => ({ id: "u", email: "a@b.c", role }) as never;
-  const to = (path: string, meta: Record<string, unknown> = {}, query: Record<string, unknown> = {}) => ({ path, meta, query });
+  const to = (path: string, meta: Record<string, unknown> = {}, query: Record<string, string> = {}, fullPath?: string) => ({ path, meta, query, fullPath });
   it("sends signed-out users to login and back after", () => {
     expect(guard(to("/projects/p1"), null)).toBe("/login?from=%2Fprojects%2Fp1");
     expect(guard(to("/login", { public: true }), null)).toBe(true);
     expect(guard(to("/login", { public: true }, { from: "/projects/p1" }), me())).toBe("/projects/p1");
     expect(guard(to("/login", { public: true }), me())).toBe("/projects");
   });
-  it("keeps admin pages for admins", () => {
-    expect(guard(to("/settings/admin", { admin: true }), me())).toBe("/projects");
-    expect(guard(to("/settings/admin", { admin: true }), me("admin"))).toBe(true);
+  it("keeps the query of the page to come back to", () => {
+    const target = guard(to("/admin/users", { admin: true }, { x: "1" }, "/admin/users?x=1"), null);
+    expect(target).toBe("/login?from=%2Fadmin%2Fusers%3Fx%3D1");
+    const from = new URLSearchParams(String(target).split("?")[1]).get("from");
+    expect(guard(to("/login", { public: true }, { from: from ?? "" }), me("admin"))).toBe("/admin/users?x=1");
+  });
+  it("only follows `from` to paths on this site", () => {
+    for (const bad of ["https://evil.example/x", "//evil.example", "/\\evil.example", "/\t/evil.example", "javascript:alert(1)", "evil", "", "/login", "/login?from=/x"]) {
+      expect(guard(to("/login", { public: true }, { from: bad }), me())).toBe("/projects");
+    }
+    expect(guard({ path: "/login", meta: { public: true }, query: { from: ["/a", "/b"] } } as never, me())).toBe("/projects");
+    expect(safeFrom("/projects/p1?tab=x#y")).toBe("/projects/p1?tab=x#y");
+  });
+  it("shows non-admins the 404 page at the same address", () => {
+    expect(guard(to("/admin/users", { admin: true }, { x: "1" }), me())).toEqual({ name: "not-found", params: { rest: ["admin", "users"] }, query: { x: "1" }, hash: undefined, replace: true });
+    expect(guard(to("/admin/users", { admin: true }), me("admin"))).toBe(true);
+    expect(guard(to("/settings/team"), me("admin"))).toBe(true);
+    expect(guard(to("/projects/p1"), me("admin"))).toBe(true);
   });
 });
 

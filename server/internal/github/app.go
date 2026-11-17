@@ -12,7 +12,7 @@ import (
 const AppSetting = "github_app"
 
 // ErrNoApp means the administrator has not created the platform App yet.
-var ErrNoApp = errors.New("平台的 GitHub App 还没有创建（部署设置：管理员打开 /setup/github 创建）")
+var ErrNoApp = errors.New("平台的 GitHub App 还没有创建（部署设置：管理员打开 /admin/github-app 创建）")
 
 // App is the platform's GitHub App with its secrets opened.
 type App struct {

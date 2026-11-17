@@ -60,7 +60,7 @@ curl -fsS http://127.0.0.1:$PORT/healthz
 
 - `POSTGRES_PASSWORD`、`VALKEY_PASSWORD`、`AGENT_TEAMS_SECRET_KEY` 生成后不要改：数据目录用前两个初始化，第三个解开所有加密保存的 Git 令牌和 GitHub App 密钥（轮换用 `AGENT_TEAMS_SECRET_KEYS=new,old` + `atctl admin reseal`）。
 - 服务默认只监听 `127.0.0.1:$PORT`，由宿主机的 Caddy 提供 HTTPS：`agent.example.com { reverse_proxy 127.0.0.1:3001 { flush_interval -1 } }`（SSE 不能缓冲；WebSocket 自动转发）。
-- “连接 GitHub”需要一个 GitHub App：部署后用管理员账号打开 `/setup/github`，一键创建（GitHub 的 manifest 流程，只做一次）。
+- “连接 GitHub”需要一个 GitHub App：部署后用管理员账号打开 `/admin/github-app`（管理后台 → GitHub App），一键创建（GitHub 的 manifest 流程，只做一次）。
 - 镜像里带网页和节点守护进程的发布包（`/node/dist/`），办公室布局从 `./office` 挂载并热加载。
 
 **升级**（生产把源码放在 `./src`，`.env` 里设 `BUILD_CONTEXT=./src`、`OFFICE_HOST_DIR=./src/office`、`AGENT_TEAMS_IMAGE=agent-teams-server:<sha>`）：
