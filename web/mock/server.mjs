@@ -223,7 +223,8 @@ const routes = [
     const b = await body(req);
     const size = Math.floor((b.data?.length ?? 0) * 0.75);
     const name = String(b.name).split(/[\\/]/).pop();
-    const d = { id: `d${Date.now()}`, project_id: pid, thread_no: null, kind: /\.(png|jpe?g|gif|webp|svg|html?)$/i.test(name) ? "design" : "doc", title: b.title || name, url: "", detail: { hosted: true, entry: name, size, version: 1, files: 1, by: "user" }, published_by: "user", created_at: now(), updated_at: now() };
+    if (/\.(png|jpe?g|gif|webp|svg)$/i.test(name)) return fail(res, 400, "图片不是交付物，请把截图放进报告文档里", "image_not_deliverable");
+    const d = { id: `d${Date.now()}`, project_id: pid, thread_no: null, kind: /\.html?$/i.test(name) ? "design" : "doc", title: b.title || name, url: "", detail: { hosted: true, entry: name, size, version: 1, files: 1, by: "user" }, published_by: "user", created_at: now(), updated_at: now() };
     state.deliverables.unshift(d);
     json(res, 201, d);
   }],

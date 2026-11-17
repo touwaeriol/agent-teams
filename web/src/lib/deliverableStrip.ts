@@ -3,28 +3,31 @@
 import { ref, watch } from "vue";
 import type { DeliverableView } from "@/api/views";
 import { isHosted } from "./artifacts";
-import { extensionOf } from "./library";
+import { extensionOf, isImageDeliverable } from "./library";
 import { readLocal, writeLocal } from "./persist";
 
 /**
- * Hosted renders that read as a document or a picture: web pages (html/htm), Markdown (md),
- * PDF, images (png/jpg/gif/webp/svg). "text" counts only for .txt: raw .json/.csv data files
- * (also rendered as text) belong in the library, not the strip.
+ * Hosted renders that read as a document: web pages (html/htm), Markdown (md), PDF. "text"
+ * counts only for .txt: raw .json/.csv data files (also rendered as text) belong in the
+ * library, not the strip. Images are not deliverables (see isImageDeliverable).
  */
-const DOC_RENDERS = new Set(["html", "markdown", "pdf", "image"]);
+const DOC_RENDERS = new Set(["html", "markdown", "pdf"]);
 
 /**
  * Whether the strip shows a deliverable. Only documents the viewer opens in the console:
  * - kept: files published with publish_file (detail.hosted) rendered as html / markdown / pdf /
- *   image / .txt text, whatever their kind (design, doc, slides, dashboard, board, data);
+ *   .txt text, whatever their kind (design, doc, slides, dashboard, board, data);
  *   and kind=design links, which open in the in-app viewer.
- * - dropped: kind=pr (PRs show on the thread instead: ThreadRow's PR icon, the thread's 交付 lines),
+ * - dropped: hosted images (png/jpg/jpeg/gif/webp/svg, by render, content type or extension;
+ *   also when kind=design): screenshots go into a report document, older image deliverables
+ *   stay in the data but are not shown; kind=pr (PRs show on the thread instead: ThreadRow's PR icon, the thread's 交付 lines),
  *   plain external links registered with publish_deliverable (doc/slides/dashboard/board/data or
  *   unknown kinds with only a URL), and hosted raw data files (.json/.csv).
  * The server no longer creates kind=pr; this also guards against old cache entries and events.
  */
 export function isStripDeliverable(d: Pick<DeliverableView, "kind" | "detail">): boolean {
   if (d.kind === "pr") return false;
+  if (isImageDeliverable(d)) return false;
   if (isHosted(d)) {
     const render = d.detail.render ?? "";
     if (DOC_RENDERS.has(render)) return true;
