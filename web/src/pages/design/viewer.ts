@@ -19,8 +19,18 @@ export function pickedVersion(files: Pick<DeliverableFiles, "versions" | "versio
   return picked === latest ? 0 : picked;
 }
 
-export function versionLabel(v: Pick<DeliverableVersion, "version" | "published_by" | "created_at">, latest: number): string {
-  return `第 ${v.version} 版${v.version === latest ? "（最新）" : ""} · ${v.published_by} · ${timeAgo(v.created_at)}`;
+/**
+ * "v3（最新） · dev-2 修改 · 3 分钟前" in the version switcher: v1 is 发布, later versions 修改; the
+ * publisher's thread is added when it is not the deliverable's own thread ("dev-1 修改（#2）").
+ */
+export function versionLabel(
+  v: Pick<DeliverableVersion, "version" | "published_by" | "created_at" | "publisher_thread_no">,
+  latest: number,
+  threadNo?: number | null,
+): string {
+  const where = v.publisher_thread_no && v.publisher_thread_no !== threadNo ? `（#${v.publisher_thread_no}）` : "";
+  const who = v.published_by === "user" ? "你" : v.published_by;
+  return `v${v.version}${v.version === latest ? "（最新）" : ""} · ${who} ${v.version === 1 ? "发布" : "修改"}${where} · ${timeAgo(v.created_at)}`;
 }
 
 /** The text at a signed URL (no cookies, no referrer); refetched when the URL changes. */

@@ -301,7 +301,7 @@ func Presets(looks office.Looks) []store.Role {
 		{Tier: Member, Role: "designer", Title: "设计师", Runtime: Claude, Count: 1,
 			Description: "做 HTML 原型、界面稿、示意图和设计文档，发布成交付物",
 			Instructions: "你是设计师。按 design 技能做单文件 HTML 原型或 SVG 示意图，按 docs 技能写设计文档；" +
-				"做完用 publish_file 发布，收到批注后改稿并用同一个 deliverable_id 发布新版本。不要改产品代码，除非任务明确要求。",
+				"做完用 publish_file 发布，收到批注后改稿并用同一个 deliverable_id 发布新版本；改已有的稿（包括别人做的）先 read_deliverable 取回文件，在原处修改后再发布。不要改产品代码，除非任务明确要求。",
 			TaskKinds: []string{"design", "doc"}, Skills: []string{"design", "docs"},
 			Look: store.Look{Accessory: "glasses"}},
 	}

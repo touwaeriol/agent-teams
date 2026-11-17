@@ -137,7 +137,11 @@ describe("library and viewer", () => {
     const files = { version: 2, versions: [{ version: 3 }, { version: 2 }] } as never;
     expect(pickedVersion(files, 3)).toBe(0);
     expect(pickedVersion(files, 2)).toBe(2);
-    expect(versionLabel({ version: 3, published_by: "dev-2", created_at: new Date().toISOString() }, 3)).toMatch(/^第 3 版（最新） · dev-2 · /);
+    const now = new Date().toISOString();
+    expect(versionLabel({ version: 3, published_by: "dev-2", created_at: now }, 3)).toMatch(/^v3（最新） · dev-2 修改 · /);
+    expect(versionLabel({ version: 1, published_by: "designer-1", created_at: now, publisher_thread_no: 1 }, 3, 1)).toMatch(/^v1 · designer-1 发布 · /);
+    expect(versionLabel({ version: 2, published_by: "dev-1", created_at: now, publisher_thread_no: 2 }, 3, 1)).toMatch(/^v2 · dev-1 修改（#2） · /);
+    expect(versionLabel({ version: 1, published_by: "user", created_at: now }, 1)).toMatch(/^v1（最新） · 你 发布 · /);
     expect(viewerSubtitle(undefined, "", new Date().toISOString())).not.toContain("做的");
     expect(viewerSubtitle({ no: 12, title: "T" }, "dev-2", new Date().toISOString())).toMatch(/^#12 T · dev-2 做的 · /);
     expect(approvalText("设计稿", "卡片", 3)).toBe("设计稿「卡片」第 3 版通过，按这个做。");

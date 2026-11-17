@@ -13,6 +13,7 @@ const (
 	TypeCredResponse       = "cred.response"
 	TypeError              = "error"
 	TypeFileChunk          = "file.chunk"
+	TypeFileDownload       = "file.download"
 	TypeGitCleanup         = "git.cleanup"
 	TypeGitPrepare         = "git.prepare"
 	TypeGitPurge           = "git.purge"
@@ -58,6 +59,7 @@ var Messages = map[string]MessageMeta{
 	TypeCredResponse:       {Direction: ConsoleToNode, Reliable: false, Key: []string{"req_id"}, New: func() any { return new(CredResponse) }},
 	TypeError:              {Direction: Both, Reliable: false, Key: nil, New: func() any { return new(ProtocolError) }},
 	TypeFileChunk:          {Direction: NodeToConsole, Reliable: true, Key: []string{"upload_id", "index"}, New: func() any { return new(FileChunk) }},
+	TypeFileDownload:       {Direction: ConsoleToNode, Reliable: true, Key: []string{"download_id", "index"}, New: func() any { return new(FileDownload) }},
 	TypeGitCleanup:         {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitCleanup) }},
 	TypeGitPrepare:         {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitPrepare) }},
 	TypeGitPurge:           {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitPurge) }},
@@ -104,6 +106,7 @@ const (
 	ToolEnqueueMerge       = "enqueue_merge"
 	ToolFinish             = "finish"
 	ToolGetTask            = "get_task"
+	ToolListDeliverables   = "list_deliverables"
 	ToolListTasks          = "list_tasks"
 	ToolListTeam           = "list_team"
 	ToolListThreads        = "list_threads"
@@ -117,6 +120,7 @@ const (
 	ToolPublishDeliverable = "publish_deliverable"
 	ToolPublishFile        = "publish_file"
 	ToolPushBranch         = "push_branch"
+	ToolReadDeliverable    = "read_deliverable"
 	ToolReadMessages       = "read_messages"
 	ToolRemember           = "remember"
 	ToolReplyTo            = "reply_to"
@@ -172,6 +176,10 @@ var Tools = map[string]ToolMeta{
 		Tiers: []Tier{TierMember}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(GetTaskInput) }, NewResult: func() any { return new(GetTaskResult) },
 	},
+	ToolListDeliverables: {
+		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(ListDeliverablesInput) }, NewResult: func() any { return new(ListDeliverablesResult) },
+	},
 	ToolListTasks: {
 		Tiers: []Tier{TierLead}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(ListTasksInput) }, NewResult: func() any { return new(ListTasksResult) },
@@ -223,6 +231,10 @@ var Tools = map[string]ToolMeta{
 	ToolPushBranch: {
 		Tiers: []Tier{TierMember}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(PushBranchInput) }, NewResult: func() any { return new(PushBranchResult) },
+	},
+	ToolReadDeliverable: {
+		Tiers: []Tier{TierLead, TierMember}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(ReadDeliverableInput) }, NewResult: func() any { return new(ReadDeliverableResult) },
 	},
 	ToolReadMessages: {
 		Tiers: []Tier{TierMember}, Blocking: nil, Requires: "",

@@ -12,7 +12,7 @@ import { Link } from "./link/client.js";
 import { Dispatcher, type CommandHandler } from "./link/dispatcher.js";
 import { Inbox, type Reply } from "./link/inbox.js";
 import { Outbox } from "./link/outbox.js";
-import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, SessionClose, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
+import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, FileDownload, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, SessionClose, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
 import { probeClaude, probeCodex } from "./runtimes.js";
 import { ClaudeDriver, type QueryFn } from "./sessions/claude/driver.js";
 import { CodexDriver } from "./sessions/codex/driver.js";
@@ -59,7 +59,7 @@ export interface DaemonOptions {
   onExit?: (code: number) => void;
 }
 
-const FEATURES = ["sessions", "codex_app_server", "git_worktree", "cred_helper", "upgrade"];
+const FEATURES = ["sessions", "codex_app_server", "git_worktree", "cred_helper", "upgrade", "file_download"];
 
 /** Wires the link, command handlers, sessions, tools, git and credentials together. */
 export class Daemon {
@@ -199,6 +199,7 @@ export class Daemon {
       "session.watch": { run: async (b) => s.watch(b as unknown as SessionWatch) },
       "approval.resolve": { run: async (b) => [{ type: "approval.ack", body: this.approvals.resolve(b as unknown as ApprovalResolve) }] },
       "tool.result": { run: async (b) => (this.tools.resolve(b as unknown as ToolResult), []) },
+      "file.download": { run: async (b) => (this.tools.chunk(b as unknown as FileDownload), []) },
       "cred.response": { run: async (b) => (this.creds.resolve(b as unknown as CredResponse), []) },
       "git.prepare": { run: (b) => this.gitReply(this.git.prepare(b as unknown as GitPrepare)) },
       "git.status": { run: (b) => this.gitReply(this.git.status(b as unknown as GitStatus)) },

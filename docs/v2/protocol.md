@@ -323,6 +323,16 @@
 
 可靠消息按序处理，所以控制台处理 `tool.call` 时分段都已到齐；分段数不对、大小或 sha256 不符、扩展名不允许都作为工具失败返回。分段只属于发它的会话；一天没被认领的分段会被清掉；一个会话未认领的分段合计超过 10 MB（两次满额上传）时，新分段直接丢弃，随后的 `tool.call` 按“分段不完整”失败。路径不合法等本机就能判断的错误不发到控制台，守护进程直接回 `isError`。
 
+### 6.4 `file.download`（控制台 → 守护进程，可靠，键：`download_id + index`）
+
+```json
+{"session_id": "s_…", "call_id": "tc_01JF…", "download_id": "dn_01jd3v00000000000000000000", "index": 0, "data": "PGh0bWw+PC9odG1sPg=="}
+```
+
+`read_deliverable` 的文件内容，方向与 `file.chunk` 相反：控制台把那一版的文件按 `download.files` 的顺序拼起来，切成每段 ≤ 1 MiB 的 base64，先按序发 `file.download`，再发带 `download` 的 `tool.result`（`download = {download_id, deliverable_id, version, chunks, files: [{path, size, sha256}]}`，与 `tool.call.upload` 对称，`examples/messages.json` 里有完整的一对帧）。
+
+守护进程只为仍在等待、且属于同一会话的 `read_deliverable` 调用保存分段（内存里，合计不超过 5 MB 的 base64），其他分段丢弃。收到 `tool.result` 后写到会话 cwd 下的 `.agent-deliverables/<deliverable_id>/v<version>/`，写之前重新校验 id 和版本、每个路径（相对、各段不以点开头、扩展名在白名单内、不重复）、分段是否到齐、合计 ≤ 5 MB、每个文件的大小和 sha256；`.agent-deliverables` 和其下目录必须是真目录，版本目录先整体删掉再写，文件以 `O_CREAT | O_EXCL | O_NOFOLLOW` 创建，顶层写 `.gitignore`（`*`）。成功时在结果文字前加一行本地绝对路径（`structured.abs_dir` 同样），失败（分段不全、校验不符、路径不合法）时把结果改成 `ok:false` 的工具失败。守护进程重启后未完成的调用按 §6.2 取消，分段随之作废；控制台对重复的 `tool.call` 只重发结果、不重发分段，这时结果按“内容不完整”失败，员工重新调用即可。只有 hello 带 `file_download` 特性的守护进程才会收到 `file.download`，否则工具直接失败并提示升级。
+
 ## 7. Git 作业
 
 所有 git 命令以会话无关的节点作业执行，凭证同样经 credential helper 获取（`git_credentials` 绑定到 `project_id`）。

@@ -49,6 +49,10 @@ publish_file(path="docs/search-spec.md", kind="doc", title="Search spec")
 
 - Keep the returned `deliverable_id`; publish the same path again with `deliverable_id` to
   release a new version after comments.
+- To revise a document someone else published (or yours from an earlier session):
+  `read_deliverable(deliverable_id="dl_…")` downloads it to `.agent-deliverables/<id>/v<N>/`
+  (git-ignored) with its versions and comments; edit it there and `publish_file` that file with
+  the same `deliverable_id`. `list_deliverables()` finds the id.
 - Mention the deliverable id and a two-line summary in your task report.
 - Documents that belong in the repository (README, docs/ the project maintains) are also
   committed as part of your task; ad-hoc reports and proposals are only published.

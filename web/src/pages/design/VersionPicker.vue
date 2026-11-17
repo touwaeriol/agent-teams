@@ -3,7 +3,7 @@ import { computed } from "vue";
 import type { DeliverableFiles } from "@/api/views";
 import { pickedVersion, versionLabel } from "./viewer";
 
-const props = defineProps<{ files: DeliverableFiles }>();
+const props = defineProps<{ files: DeliverableFiles; threadNo?: number | null }>();
 const emit = defineEmits<{ pick: [version: number] }>();
 const latest = computed(() => props.files.versions[0]?.version ?? props.files.version);
 </script>
@@ -18,7 +18,7 @@ const latest = computed(() => props.files.versions[0]?.version ?? props.files.ve
     :fit-input-width="false"
     @update:model-value="(v: number) => emit('pick', pickedVersion(files, v))"
   >
-    <el-option v-for="v in files.versions" :key="v.version" :value="v.version" :label="versionLabel(v, latest)" />
+    <el-option v-for="v in files.versions" :key="v.version" :value="v.version" :label="versionLabel(v, latest, threadNo)" />
   </el-select>
 </template>
 

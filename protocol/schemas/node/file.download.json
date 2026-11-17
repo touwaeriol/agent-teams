@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/file.download.json",
+  "title": "FileDownload",
+  "description": "One piece of the files read_deliverable sends to the employee's working directory. Chunks are sent before the tool.result that references their download_id; the daemon keeps them for that call only, checks sizes and checksums, and writes the files under .agent-deliverables/.",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "download_id",
+    "index"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "session_id",
+    "call_id",
+    "download_id",
+    "index",
+    "data"
+  ],
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "call_id": {
+      "$ref": "common.json#/$defs/CallId"
+    },
+    "download_id": {
+      "$ref": "common.json#/$defs/DownloadId"
+    },
+    "index": {
+      "description": "0-based position of this chunk in the download (all files concatenated in tool.result download.files order).",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 63
+    },
+    "data": {
+      "description": "Base64 of at most 1 MiB.",
+      "type": "string",
+      "maxLength": 1398104,
+      "contentEncoding": "base64"
+    }
+  }
+}

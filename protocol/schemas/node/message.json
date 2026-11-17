@@ -194,6 +194,25 @@
     {
       "properties": {
         "type": {
+          "const": "file.download"
+        },
+        "body": {
+          "$ref": "file.download.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^c_"
+        }
+      },
+      "required": [
+        "type",
+        "body",
+        "seq"
+      ]
+    },
+    {
+      "properties": {
+        "type": {
           "const": "git.cleanup"
         },
         "body": {
