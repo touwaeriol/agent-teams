@@ -79,6 +79,16 @@
       ]
     },
     {
+      "type": "file.download",
+      "name": "FileDownload",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "download_id",
+        "index"
+      ]
+    },
+    {
       "type": "git.cleanup",
       "name": "GitCleanup",
       "direction": "console_to_node",
@@ -772,6 +782,37 @@
       }
     },
     {
+      "name": "list_deliverables",
+      "input": "ListDeliverablesInput",
+      "result": "ListDeliverablesResult",
+      "tiers": [
+        "coordinator",
+        "lead",
+        "member"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "List this project's deliverables (designs, documents… from every thread), newest first: id, title, kind, versions, who published the latest version, thread and when it changed. Use read_deliverable to fetch one's files.",
+      "input_schema": {
+        "description": "List this project's deliverables (designs, documents… from every thread), newest first: id, title, kind, versions, who published the latest version, thread and when it changed. Use read_deliverable to fetch one's files.",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread": {
+            "description": "Only deliverables of this thread number.",
+            "type": "integer",
+            "minimum": 1
+          },
+          "kind": {
+            "description": "Only this kind (design, doc, slides, dashboard, board, data, pr).",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          }
+        }
+      }
+    },
+    {
       "name": "list_tasks",
       "input": "ListTasksInput",
       "result": "ListTasksResult",
@@ -1213,6 +1254,37 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {}
+      }
+    },
+    {
+      "name": "read_deliverable",
+      "input": "ReadDeliverableInput",
+      "result": "ReadDeliverableResult",
+      "tiers": [
+        "lead",
+        "member"
+      ],
+      "blocking": [],
+      "requires": null,
+      "description": "Fetch the files of a deliverable published with publish_file (any thread of this project) into your working directory under .agent-deliverables/<id>/v<version>/ (git-ignored; a multi-file site keeps its folders). Returns the local folder, the file list, the version history and the user's comments. To revise it: edit the files there, then publish_file(path=<that folder or file>, deliverable_id=<id>) to publish the next version.",
+      "input_schema": {
+        "description": "Fetch the files of a deliverable published with publish_file (any thread of this project) into your working directory under .agent-deliverables/<id>/v<version>/ (git-ignored; a multi-file site keeps its folders). Returns the local folder, the file list, the version history and the user's comments. To revise it: edit the files there, then publish_file(path=<that folder or file>, deliverable_id=<id>) to publish the next version.",
+        "type": "object",
+        "required": [
+          "deliverable_id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "deliverable_id": {
+            "type": "string",
+            "pattern": "^dl_[A-Za-z0-9]+$"
+          },
+          "version": {
+            "description": "Version to fetch; the latest when omitted.",
+            "type": "integer",
+            "minimum": 1
+          }
+        }
       }
     },
     {

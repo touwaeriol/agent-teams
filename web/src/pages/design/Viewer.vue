@@ -44,7 +44,7 @@ const external = computed(() => (hosted.value ? files.data.value?.entry_url : sa
         <span class="truncate text-xs text-muted-foreground">{{ sub }}</span>
       </span>
       <span class="flex flex-wrap items-center gap-1.5">
-        <VersionPicker v-if="hosted && files.data.value" :files="files.data.value" @pick="(v) => (version = v)" />
+        <VersionPicker v-if="hosted && files.data.value" :files="files.data.value" :thread-no="item.thread_no" @pick="(v) => (version = v)" />
         <el-button tag="a" size="small" :href="external" target="_blank" rel="noreferrer noopener" class="!ml-0">新窗口打开 <ExternalLink /></el-button>
         <el-button type="primary" size="small" class="!ml-0" :disabled="!thread || approve.isPending.value" @click="approve.mutate()">通过，按这个做</el-button>
       </span>

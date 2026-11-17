@@ -335,6 +335,8 @@ export interface DeliverableVersion {
   files: number;
   size: number;
   published_by: string;
+  /** Thread number of the employee who published this version (absent for the user and older versions). */
+  publisher_thread_no?: number;
   created_at: string;
 }
 

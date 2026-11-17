@@ -40,6 +40,11 @@ export function contentType(path: string): string | undefined {
   return TYPES[extname(path).toLowerCase()];
 }
 
+/** A stored file path: relative segments that do not start with a dot, an allowed extension (same rule as the console). */
+export function validFilePath(path: string): boolean {
+  return path.length > 0 && path.length <= 300 && !!contentType(path) && path.split("/").every((part) => NAME.test(part));
+}
+
 /**
  * Reads what publish_file points at: one file, or a directory with index.html (a small site).
  * The path must stay inside the employee's working directory after resolving symlinks; hidden

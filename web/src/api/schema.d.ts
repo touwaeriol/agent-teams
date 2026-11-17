@@ -2036,6 +2036,11 @@ export interface components {
             /** Format: int64 */
             files: number;
             published_by: string;
+            /**
+             * Format: int64
+             * @description Thread number of the employee who published this version
+             */
+            publisher_thread_no?: number;
             /** Format: int64 */
             size: number;
             /** Format: int64 */

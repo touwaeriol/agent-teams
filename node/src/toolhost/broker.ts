@@ -1,7 +1,8 @@
-import type { ContentBlock, ToolCancel, ToolResult } from "../protocol.js";
+import type { ContentBlock, FileDownload, ToolCancel, ToolResult } from "../protocol.js";
 import { deferred, type Deferred } from "../util/async.js";
 import { newId } from "../util/ids.js";
-import { prepareUpload, type PreparedUpload } from "./upload.js";
+import { DownloadError, writeDownload } from "./download.js";
+import { MAX_BYTES, MAX_FILES, prepareUpload, type PreparedUpload } from "./upload.js";
 
 export type SendFn = (type: string, body: object) => void;
 
@@ -27,8 +28,16 @@ export interface McpToolResult {
 
 interface Pending {
   sessionId: string;
+  cwd?: string;
+  tool: string;
   wait: Deferred<ToolResult>;
+  /** read_deliverable: file.download chunks (base64 by index) that arrived for this call. */
+  chunks?: Map<number, string>;
+  chunkBytes?: number;
 }
+
+/** Base64 a download may take in memory before its tool.result (4/3 of the size limit plus slack). */
+const MAX_DOWNLOAD_B64 = Math.ceil((MAX_BYTES * 4) / 3) + 4 * MAX_FILES;
 
 /**
  * Forwards platform tool calls to the console (protocol.md §6): tool.call (reliable,
@@ -51,7 +60,7 @@ export class ToolBroker {
     }
     const callId = newId("tc_");
     const wait = deferred<ToolResult>();
-    this.pending.set(callId, { sessionId: req.sessionId, wait });
+    this.pending.set(callId, { sessionId: req.sessionId, tool: req.tool, wait, ...(req.cwd ? { cwd: req.cwd } : {}) });
     if (upload) this.sendChunks(req, upload);
     this.send("tool.call", {
       call_id: callId,
@@ -78,13 +87,47 @@ export class ToolBroker {
     );
   }
 
+  /**
+   * Keeps one file.download chunk until its tool.result arrives. Chunks of calls that are not
+   * waiting (stale, another session) or past the size budget are dropped; the result then
+   * reports the download as incomplete.
+   */
+  chunk(body: FileDownload): void {
+    const p = this.pending.get(body.call_id);
+    if (!p || p.sessionId !== body.session_id || p.tool !== "read_deliverable") return;
+    p.chunks ??= new Map();
+    if (p.chunks.has(body.index)) return;
+    const bytes = (p.chunkBytes ?? 0) + body.data.length;
+    if (bytes > MAX_DOWNLOAD_B64 || p.chunks.size >= MAX_FILES) return;
+    p.chunkBytes = bytes;
+    p.chunks.set(body.index, body.data);
+  }
+
   /** Handles tool.result; false when no call is waiting (stale). */
   resolve(body: ToolResult): boolean {
     const p = this.pending.get(body.call_id);
     if (!p || p.sessionId !== body.session_id) return false;
     this.pending.delete(body.call_id);
+    if (body.ok && body.download) {
+      void this.saveDownload(p, body).then((r) => p.wait.resolve(r));
+      return true;
+    }
     p.wait.resolve(body);
     return true;
+  }
+
+  /** Writes read_deliverable's files into the working directory and adds where they are to the result. */
+  private async saveDownload(p: Pending, body: ToolResult): Promise<ToolResult> {
+    const dl = body.download!;
+    try {
+      const out = await writeDownload(p.cwd ?? "", dl, p.chunks ?? new Map());
+      const note = `Saved ${out.files.length} file(s) to ${out.abs} (relative: ${out.rel}; git-ignored).`;
+      const structured = body.structured ? { ...body.structured, abs_dir: out.abs } : body.structured;
+      return { ...body, content: [{ type: "text", text: note }, ...body.content], ...(structured ? { structured } : {}) };
+    } catch (err) {
+      const msg = err instanceof DownloadError ? err.message : `could not write the files: ${(err as Error).message}`;
+      return { session_id: body.session_id, call_id: body.call_id, ok: false, content: [{ type: "text", text: `read_deliverable: ${msg}` }] };
+    }
   }
 
   cancelSession(sessionId: string, reason: ToolCancel["reason"]): void {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/touwaeriol/agent-teams/server/internal/artifacts"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
@@ -335,14 +336,74 @@ func (a *API) deliverableRef(ctx context.Context, u store.User, p store.Project,
 		return "", nil, err
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "### 交付物 %s\n类型：%s\n地址：%s", d.Title, d.Kind, d.URL)
+	fmt.Fprintf(&b, "### 交付物 %s\nid：%s\n类型：%s", d.Title, d.ID, d.Kind)
+	if d.URL != "" {
+		fmt.Fprintf(&b, "\n地址：%s", d.URL)
+	}
 	for _, key := range []string{"summary", "description", "path"} {
 		if s, ok := d.Detail[key].(string); ok && s != "" {
 			body, _ := clip(s, 4000)
 			fmt.Fprintf(&b, "\n%s：%s", key, body)
 		}
 	}
+	if d.Detail["hosted"] == true {
+		if err := a.hostedRef(ctx, &b, d); err != nil {
+			return "", nil, err
+		}
+	}
 	return b.String(), map[string]any{"kind": "deliverable", "label": d.Title, "id": d.ID}, nil
+}
+
+// hostedRef adds the latest version of a hosted deliverable: its files, the entry file's text when
+// it is text-like (cut at maxRefText), and how to fetch the full version with read_deliverable.
+func (a *API) hostedRef(ctx context.Context, b *strings.Builder, d core.Deliverable) error {
+	versions, err := artifacts.Versions(ctx, a.e.Core.Pool, d.ID)
+	if err != nil || len(versions) == 0 {
+		return err
+	}
+	v := versions[0]
+	files, err := artifacts.Files(ctx, a.e.Core.Pool, d.ID, v.Version)
+	if err != nil {
+		return err
+	}
+	paths := make([]string, len(files))
+	for i, f := range files {
+		paths[i] = f.Path
+	}
+	entry := artifacts.Entry(paths)
+	fmt.Fprintf(b, "\n最新版本：第 %d 版（%s 发布），%d 个文件：%s", v.Version, v.PublishedBy, len(files), strings.Join(paths, "、"))
+	fetch := fmt.Sprintf("read_deliverable(deliverable_id=%s)", d.ID)
+	if !textLike(entry) {
+		fmt.Fprintf(b, "\n%s 是%s，这里不附内容；需要时用 %s 把文件取到工作目录查看。", entry, binaryKind(entry), fetch)
+		return nil
+	}
+	f, err := artifacts.Load(ctx, a.e.Core.Pool, d.ID, v.Version, entry)
+	if err != nil {
+		return err
+	}
+	body, note := clip(string(f.Data), maxRefText)
+	fmt.Fprintf(b, "\n%s 的内容%s：\n```\n%s\n```", entry, note, body)
+	if note != "" || len(files) > 1 {
+		fmt.Fprintf(b, "\n完整内容（含全部文件）用 %s 取到工作目录。", fetch)
+	}
+	fmt.Fprintf(b, "\n要修改：%s 取回后在本地改，再用 publish_file 带 deliverable_id=%s 发布新版本。", fetch, d.ID)
+	return nil
+}
+
+// textLike is a file whose content goes into the message (html, md, svg, json, csv, txt, css, js).
+func textLike(path string) bool {
+	ct := artifacts.ContentType(path)
+	return strings.HasPrefix(ct, "text/") || strings.HasPrefix(ct, "application/json") || strings.HasPrefix(ct, "image/svg+xml")
+}
+
+func binaryKind(path string) string {
+	switch artifacts.Render(artifacts.ContentType(path)) {
+	case "pdf":
+		return "PDF 文件"
+	case "image":
+		return "图片"
+	}
+	return "二进制文件"
 }
 
 func (a *API) memoryRef(ctx context.Context, p store.Project, r MessageRef) (string, map[string]any, error) {

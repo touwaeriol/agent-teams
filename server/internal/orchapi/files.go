@@ -206,29 +206,76 @@ func (a *API) addComment(ctx context.Context, in *newCommentInput) (*commentOutp
 	return &commentOutput{Body: c}, err
 }
 
-// deliverComment sends the comment to the publishing employee, else the thread lead;
-// "" when the deliverable has no thread or nobody is there any more.
+// deliverComment sends the comment to the employee who published the commented version (the latest
+// when none is named), else the lead of that employee's thread, else the deliverable thread's lead;
+// "" when nobody can receive it.
 func (a *API) deliverComment(ctx context.Context, tx *core.Tx, d core.Deliverable, c CommentView) (string, error) {
-	if d.ThreadID == nil {
-		return "", nil
+	pub, err := versionPublisher(ctx, tx, d, c.Version)
+	if err != nil {
+		return "", err
 	}
-	emp, err := commentRecipient(ctx, tx, d)
+	emp, err := commentRecipient(ctx, tx, d, pub)
 	if errors.Is(err, core.ErrNotFound) {
 		return "", nil
 	}
 	if err != nil {
 		return "", err
 	}
-	text := commentText(d, c)
-	rec := &core.NewMessage{ConversationID: *d.ThreadID, Role: "user", Author: "user", Kind: "chat", Content: text,
+	text := commentText(d, c, pub.name, emp.Name)
+	conv := emp.ThreadID
+	if conv == nil {
+		conv = d.ThreadID
+	}
+	rec := &core.NewMessage{ConversationID: deref(conv), Role: "user", Author: "user", Kind: "chat", Content: text,
 		Meta: map[string]any{"to": emp.Name, "deliverable_id": d.ID}}
 	_, err = a.e.Orch.Deliver(ctx, tx, emp, orchestrator.Delivery{Text: text, Kind: "user", Priority: "next", Record: rec})
 	return emp.Name, err
 }
 
-func commentRecipient(ctx context.Context, tx *core.Tx, d core.Deliverable) (core.Employee, error) {
-	if d.PublishedBy != "" && d.PublishedBy != "user" && d.PublishedBy != "platform" {
-		emp, err := core.EmployeeByName(ctx, tx, d.ProjectID, d.ThreadID, d.PublishedBy)
+// publisher is who published a version: the name, and the employee id when it was recorded.
+type publisher struct {
+	name string
+	id   string
+}
+
+// versionPublisher reads the publisher of the version (latest when nil) of a hosted deliverable;
+// the deliverable's own publisher otherwise.
+func versionPublisher(ctx context.Context, tx *core.Tx, d core.Deliverable, version *int) (publisher, error) {
+	var row struct {
+		PublishedBy string
+		PublisherID string
+	}
+	q := tx.Gorm(ctx).Table("at_deliverable_files").Select("published_by, publisher_id").Where("deliverable_id = ?", d.ID)
+	if version != nil {
+		q = q.Where("version = ?", *version)
+	}
+	err := core.MapErr(q.Order("version DESC").Limit(1).Take(&row).Error)
+	if errors.Is(err, core.ErrNotFound) {
+		return publisher{name: d.PublishedBy}, nil
+	}
+	return publisher{name: row.PublishedBy, id: row.PublisherID}, err
+}
+
+// commentRecipient is the publishing employee while active, else the lead of its thread, else
+// (versions without an employee id) the employee of that name in the deliverable's thread or its lead.
+func commentRecipient(ctx context.Context, tx *core.Tx, d core.Deliverable, pub publisher) (core.Employee, error) {
+	if pub.id != "" {
+		emp, err := core.EmployeeByID(ctx, tx, pub.id)
+		if err == nil && emp.Active && emp.ThreadID != nil {
+			return emp, nil
+		}
+		if err == nil && emp.ThreadID != nil {
+			return core.Lead(ctx, tx, *emp.ThreadID)
+		}
+		if err != nil && !errors.Is(err, core.ErrNotFound) {
+			return emp, err
+		}
+	}
+	if d.ThreadID == nil {
+		return core.Employee{}, core.ErrNotFound
+	}
+	if pub.name != "" && pub.name != "user" && pub.name != "platform" {
+		emp, err := core.EmployeeByName(ctx, tx, d.ProjectID, d.ThreadID, pub.name)
 		if err == nil || !errors.Is(err, core.ErrNotFound) {
 			return emp, err
 		}
@@ -236,14 +283,18 @@ func commentRecipient(ctx context.Context, tx *core.Tx, d core.Deliverable) (cor
 	return core.Lead(ctx, tx, *d.ThreadID)
 }
 
-func commentText(d core.Deliverable, c CommentView) string {
+func commentText(d core.Deliverable, c CommentView, publishedBy, to string) string {
 	version := ""
 	if c.Version != nil {
 		version = fmt.Sprintf(" 第 %d 版", *c.Version)
 	}
 	text := fmt.Sprintf("[交付物批注] 对「%s」%s的批注：%s", d.Title, version, c.Text)
+	if publishedBy != "" && publishedBy != to && publishedBy != "user" {
+		text += fmt.Sprintf("\n（这一版由 %s 发布，%s 已不在，批注转给你；需要改稿就派给合适的成员。）", publishedBy, publishedBy)
+	}
 	if d.Detail["hosted"] == true {
-		text += fmt.Sprintf("\n改好后用 publish_file 并带 deliverable_id=%s 发布新版本。", d.ID)
+		text += fmt.Sprintf("\n改稿：先 read_deliverable(deliverable_id=%s) 把文件取到工作目录（.agent-deliverables/%s/v<版本>/），"+
+			"在那里修改，再用 publish_file(path=<那个目录或文件>, deliverable_id=%s) 发布新版本。", d.ID, d.ID, d.ID)
 	}
 	return text
 }

@@ -159,7 +159,7 @@ func (a *API) uploadLibraryFile(ctx context.Context, in *uploadInput) (*delivera
 		if err != nil {
 			return err
 		}
-		if err := artifacts.Save(ctx, tx, d.ID, 1, "user", files); err != nil {
+		if err := artifacts.Save(ctx, tx, d.ID, 1, artifacts.Publisher{Name: "user"}, files); err != nil {
 			return err
 		}
 		return tx.EmitDeliverable(ctx, d)

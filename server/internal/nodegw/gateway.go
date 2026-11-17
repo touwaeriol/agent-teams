@@ -38,7 +38,7 @@ const (
 const MaxFrame = 4 << 20
 
 // Features the console supports (welcome.features is the intersection with hello.features).
-var Features = []string{"sessions", "codex_app_server", "git_worktree", "cred_helper", "upgrade"}
+var Features = []string{"sessions", "codex_app_server", "git_worktree", "cred_helper", "upgrade", "file_download"}
 
 // Handler receives the messages of authenticated links, one at a time per link.
 type Handler interface {
