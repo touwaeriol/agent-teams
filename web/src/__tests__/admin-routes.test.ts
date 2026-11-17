@@ -22,7 +22,8 @@ async function visit(role: "admin" | "member", url: string) {
 
 const ADMIN_PAGES = ["/admin/users", "/admin/platform", "/admin/models", "/admin/library", "/admin/feedback", "/admin/github-app", "/admin/audit"];
 
-describe("admin console routes", () => {
+// The first visits import the real (lazy) page modules, which takes a few seconds cold.
+describe("admin console routes", { timeout: 30_000 }, () => {
   it("opens every admin page for admins, inside the admin shell", async () => {
     for (const path of ADMIN_PAGES) {
       const { route } = await visit("admin", path);
@@ -59,7 +60,7 @@ describe("admin console routes", () => {
   });
 });
 
-describe("sidebars", () => {
+describe("sidebars", { timeout: 30_000 }, () => {
   const mountNav = async (c: typeof SettingsNav | typeof AdminNav, role: "admin" | "member") => {
     const { router } = await visit(role, "/settings/team");
     return mount(c, { props: { me: user(role) }, global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }], router] as never[] } });
