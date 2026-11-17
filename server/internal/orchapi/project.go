@@ -224,7 +224,7 @@ func (a *API) overview(ctx context.Context, in *pidInput) (*overviewOutput, erro
 	if ov.Waiting, err = a.waitingOf(ctx, p.ID); err != nil {
 		return nil, err
 	}
-	if ov.RecentDeliverables, err = a.deliverables(ctx, p.ID, core.DeliverableFilter{Limit: 6}); err != nil {
+	if ov.RecentDeliverables, err = a.deliverables(ctx, p.ID, core.DeliverableFilter{Limit: 6, NoImages: true}); err != nil {
 		return nil, err
 	}
 	if ov.Memory, err = a.recentMemory(ctx, p.ID); err != nil {

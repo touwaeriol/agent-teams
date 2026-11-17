@@ -144,7 +144,7 @@ func ThreadCountsOf(ctx context.Context, q DB, t Thread) (ThreadCounts, error) {
 		(SELECT count(*) FROM at_tasks WHERE thread_id = $1 AND status = 'done'),
 		(SELECT count(*) FROM at_main_tasks WHERE thread_id = $1),
 		(SELECT count(*) FROM at_main_tasks WHERE thread_id = $1 AND status = 'done'),
-		(SELECT count(*) FROM at_deliverables WHERE thread_id = $1)`, t.ID).
+		(SELECT count(*) FROM at_deliverables d WHERE d.thread_id = $1 AND `+notImageDeliverable+`)`, t.ID).
 		Scan(&c.QuestionsOpen, &c.ApprovalsOpen, &c.TasksTotal, &c.TasksDone, &c.MainTotal, &c.MainDone, &c.Deliverables)
 	c.Waiting = c.QuestionsOpen + c.ApprovalsOpen
 	if t.Status == "review" {
@@ -204,10 +204,10 @@ func leadLast(ctx context.Context, q DB, threadID string) (*LeadLast, error) {
 	return &l, err
 }
 
-// threadActivity fills the thread's newest deliverable and when anything last happened in it.
+// threadActivity fills the thread's newest deliverable (hosted images are not deliverables any more) and when anything last happened in it.
 func threadActivity(ctx context.Context, q DB, t Thread, v *ThreadView) error {
 	v.LastActivityAt = t.UpdatedAt
-	ds, err := Deliverables(ctx, q, t.ProjectID, DeliverableFilter{ThreadID: t.ID, Limit: 1})
+	ds, err := Deliverables(ctx, q, t.ProjectID, DeliverableFilter{ThreadID: t.ID, Limit: 1, NoImages: true})
 	if err != nil {
 		return err
 	}

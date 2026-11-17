@@ -49,6 +49,10 @@ type DeliverableFilter struct {
 	NoImages bool
 }
 
+// notImageDeliverable (SQL on alias d) leaves out hosted lone images: screenshots stopped being
+// deliverables, the ones published before stay stored but are not counted or listed to agents.
+const notImageDeliverable = "NOT COALESCE(d.detail->>'hosted' = 'true' AND d.detail->>'render' = 'image', false)"
+
 // Deliverables pages a project's deliverables newest first (cursor = id of the last item).
 func Deliverables(ctx context.Context, q DB, projectID string, f DeliverableFilter) ([]Deliverable, error) {
 	g := deliverables(ctx, q).Where("d.project_id = ?", projectID)
@@ -65,7 +69,7 @@ func Deliverables(ctx context.Context, q DB, projectID string, f DeliverableFilt
 		g = g.Where("d.id < ?", f.Before)
 	}
 	if f.NoImages {
-		g = g.Where("COALESCE(d.detail->>'render', '') <> 'image'")
+		g = g.Where(notImageDeliverable)
 	}
 	return find[Deliverable](g.Order("d.id DESC").Limit(f.Limit))
 }
