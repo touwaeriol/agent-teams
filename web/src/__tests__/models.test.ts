@@ -1,30 +1,31 @@
-// Model lists and custom commands (pure parts): choices per runtime, the platform default, list
+// Model lists and custom commands (pure parts): choices per runtime, the user's default, list
 // problems, command validation, the role card hints and the /model toast.
 import { describe, expect, it } from "vitest";
 import { modelAppliedText } from "@/components/app/composer/panels";
 import { chatScope, cleanCommand, commandProblem, commandsHint, promptOnly, toggleHidden, togglable, unfit } from "@/lib/commands";
-import { editable, MODEL_ID, modelChoices, modelName, modelProblems, platformDefault } from "@/lib/models";
+import { defaultModel, MODEL_ID, modelChoices, modelName, modelProblems } from "@/lib/models";
 import { newRole, roleProblems } from "@/lib/roles";
 
 const list = [
-  { id: "m1", runtime: "claude" as const, model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: false },
-  { id: "m2", runtime: "codex" as const, model: "gpt-x", label: "", default: true, mine: false },
-  { id: "m3", runtime: "claude" as const, model: "claude-haiku-x", label: "Haiku", default: false, mine: true },
-  { id: "m4", runtime: "claude" as const, model: "claude-opus-5-5", label: "mine too", default: false, mine: true },
+  { id: "m1", runtime: "claude" as const, model: "claude-haiku-x", label: "Haiku", default: false, mine: true },
+  { id: "m2", runtime: "codex" as const, model: "gpt-x", label: "", default: true, mine: true },
+  { id: "m3", runtime: "claude" as const, model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: true },
+  { id: "m4", runtime: "claude" as const, model: "claude-opus-5-5", label: "again", default: false, mine: true },
 ];
 
 describe("model lists", () => {
-  it("lists one runtime's models once, platform first, and keeps a typed id", () => {
-    expect(modelChoices(list, "claude").map((c) => [c.value, c.label, c.isDefault, c.mine])).toEqual([
+  it("lists one runtime's models once, in the user's order, and keeps a typed id", () => {
+    expect(modelChoices(list, "claude").map((c) => [c.value, c.label, c.isDefault, c.custom])).toEqual([
+      ["claude-haiku-x", "Haiku", false, false],
       ["claude-opus-5-5", "Opus 5.5", true, false],
-      ["claude-haiku-x", "Haiku", false, true],
     ]);
+    expect(modelChoices(list, "claude", "claude-opus-5-5").map((c) => c.value)).toEqual(["claude-haiku-x", "claude-opus-5-5"]);
     expect(modelChoices(list, "codex", "gpt-y").map((c) => [c.value, c.custom])).toEqual([["gpt-x", false], ["gpt-y", true]]);
     expect(modelName(list, "claude-haiku-x")).toBe("Haiku");
     expect(modelName(list, "gpt-x")).toBe("gpt-x");
-    expect(platformDefault(list, "codex")).toBe("gpt-x");
-    expect(platformDefault([], "claude")).toBe("");
-    expect(editable(list, true).map((m) => m.id)).toEqual(["m3", "m4"]);
+    expect(defaultModel(list, "claude")).toBe("claude-opus-5-5");
+    expect(defaultModel(list, "codex")).toBe("gpt-x");
+    expect(defaultModel([], "claude")).toBe("");
   });
 
   it("checks an edited list like the server", () => {
@@ -34,6 +35,8 @@ describe("model lists", () => {
       "a 重复了",
       "Claude Code 只能有一个默认模型",
     ]);
+    expect(modelProblems([{ runtime: "claude", model: "a", default: true }, { runtime: "codex", model: "a", default: true }])).toEqual([]);
+    expect(modelProblems([])).toEqual(["至少保留一个模型"]);
   });
 
   it("words the /model result: live, next session, skipped", () => {

@@ -34,7 +34,6 @@ export const adminRoutes: RouteRecordRaw[] = [
   { path: "", component: () => import("@/pages/admin/Users.vue"), beforeEnter: (to) => ({ path: "/admin/users", query: to.query, hash: to.hash, replace: true }) },
   { path: "users", component: () => import("@/pages/admin/Users.vue") },
   { path: "platform", component: () => import("@/pages/admin/Platform.vue") },
-  { path: "models", component: () => import("@/pages/admin/Models.vue") },
   { path: "library", component: () => import("@/pages/admin/Library.vue") },
   { path: "feedback", component: () => import("@/pages/admin/Feedback.vue") },
   { path: "github-app", component: () => import("@/pages/admin/GitHubApp.vue") },

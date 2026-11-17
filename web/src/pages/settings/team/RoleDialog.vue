@@ -8,7 +8,7 @@ import FormDialog from "@/components/common/FormDialog.vue";
 import TagInput from "@/components/common/TagInput.vue";
 import { useModels } from "@/api/queries";
 import ModelPicker from "@/components/app/models/ModelPicker.vue";
-import { modelName, platformDefault } from "@/lib/models";
+import { defaultModel, modelName } from "@/lib/models";
 import { roleName } from "@/lib/roles";
 import { GATES } from "./team";
 
@@ -23,7 +23,7 @@ const readOnly = computed(() => d.value.read_only ?? (d.value.gate === "review" 
 const models = useModels();
 const defaultName = computed(() => {
   const list = models.data.value?.models ?? [];
-  const id = platformDefault(list, d.value.runtime);
+  const id = defaultModel(list, d.value.runtime);
   return id ? modelName(list, id) : "未设置";
 });
 const num = (v: string) => (v === "" ? null : Number(v));
@@ -40,7 +40,7 @@ const num = (v: string) => (v === "" ? null : Number(v));
         <el-input :id="id" type="number" :min="1" :max="8" :model-value="String(d.count)" @update:model-value="(v: string) => (d.count = Number(v))" />
       </Field>
       <Field v-slot="{ id }" label="模型" hint="从模型列表选，或输入模型 ID">
-        <ModelPicker :id="id" v-model="d.model" :runtime="d.runtime" label="模型" :empty-label="`平台默认（${defaultName}）`" />
+        <ModelPicker :id="id" v-model="d.model" :runtime="d.runtime" label="模型" :empty-label="`我的默认（${defaultName}）`" />
       </Field>
       <Field v-slot="{ id }" label="思考强度（effort）">
         <el-input :id="id" :model-value="d.effort" placeholder="例如 high" @update:model-value="(v: string) => (d.effort = v.trim())" />

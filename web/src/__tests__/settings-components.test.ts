@@ -156,7 +156,7 @@ describe("Team · commands and models", () => {
     const spy = api([
       ["GET", /\/api\/roles$/, { roles: [coordinator, lead, codex], warnings: [] }],
       ["PUT", /\/api\/roles$/, { roles: [], warnings: [] }],
-      ["GET", /\/api\/models$/, { models: [{ id: "m1", runtime: "claude", model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: false }] }],
+      ["GET", /\/api\/models$/, { models: [{ id: "m1", runtime: "claude", model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: true }] }],
       ["PUT", /\/api\/models\/mine$/, { models: [] }],
       ["GET", /\/api\/(skills|plugins|nodes|roles\/presets)$/, {}],
     ]);
@@ -210,23 +210,68 @@ describe("Team · commands and models", () => {
     expect(dialog.textContent).toContain("Codex 没有斜杠命令");
   });
 
-  it("adds an own model and saves the user's list", async () => {
+  it("edits the user's model list: add, rename, reorder, default per type, remove, save", async () => {
     const spy = api([
       ["GET", /\/api\/roles$/, { roles: [], warnings: [] }],
-      ["GET", /\/api\/models$/, { models: [{ id: "m1", runtime: "claude", model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: false }] }],
+      [
+        "GET",
+        /\/api\/models$/,
+        {
+          models: [
+            { id: "m1", runtime: "claude", model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: true },
+            { id: "m2", runtime: "claude", model: "claude-sonnet-x", label: "Sonnet", default: false, mine: true },
+            { id: "m3", runtime: "codex", model: "gpt-x", label: "", default: false, mine: true },
+          ],
+        },
+      ],
       ["PUT", /\/api\/models\/mine$/, { models: [] }],
     ]);
     const w = mountWith(Team);
     await flushPromises();
-    const editor = w.get("[data-testid=model-list-editor]");
-    expect(w.text()).toContain("Opus 5.5（Claude Code，默认）");
-    await editor.findAll("button").find((b) => b.text() === "添加模型")!.trigger("click");
-    const idInput = editor.findAll("input").find((i) => i.attributes("placeholder") === "模型 ID")!;
-    await idInput.setValue("claude-haiku-x");
-    await editor.findAll("button").find((b) => b.text() === "保存")!.trigger("click");
+    expect(w.text()).toContain("/model 和岗位模型字段按这个顺序列出这里的模型");
+    expect(w.text()).toContain("岗位和项目都没指定模型时，会话用它");
+    expect(w.text()).not.toContain("平台");
+    const editor = () => w.get("[data-testid=model-list-editor]");
+    const btn = (label: string, i = 0) => editor().findAll(`button[aria-label=${label}]`)[i]!;
+    const ids = () => editor().findAll("input[aria-label='模型 ID']").map((i) => (i.element as HTMLInputElement).value);
+    expect(ids()).toEqual(["claude-opus-5-5", "claude-sonnet-x", "gpt-x"]);
+    // add a Claude model, rename it, move it to the top and make it the Claude default
+    await editor().findAll("button").find((b) => b.text() === "添加模型")!.trigger("click");
+    await editor().findAll("input[aria-label='模型 ID']")[3]!.setValue("claude-haiku-x");
+    await editor().findAll("input[aria-label='显示名']")[3]!.setValue("Haiku");
+    for (let i = 3; i > 0; i--) await btn("上移", i).trigger("click");
+    expect(ids()).toEqual(["claude-haiku-x", "claude-opus-5-5", "claude-sonnet-x", "gpt-x"]);
+    expect(btn("上移", 0).attributes("disabled")).toBeDefined();
+    expect(btn("下移", 3).attributes("disabled")).toBeDefined();
+    const defaults = () => editor().findAll(".el-checkbox");
+    await defaults()[0]!.trigger("click");
+    await defaults()[3]!.trigger("click");
+    // move sonnet below gpt, then remove it
+    await btn("下移", 2).trigger("click");
+    expect(ids()).toEqual(["claude-haiku-x", "claude-opus-5-5", "gpt-x", "claude-sonnet-x"]);
+    await btn("删除", 3).trigger("click");
+    await editor().findAll("button").find((b) => b.text() === "保存")!.trigger("click");
     await flushPromises();
-    const body = (await calls(spy, "PUT", /\/api\/models\/mine$/)[0]!.json()) as { models: { runtime: string; model: string }[] };
-    expect(body.models.map((m) => [m.runtime, m.model])).toEqual([["claude", "claude-haiku-x"]]);
+    const body = (await calls(spy, "PUT", /\/api\/models\/mine$/)[0]!.json()) as { models: { runtime: string; model: string; label: string; default: boolean }[] };
+    expect(body.models.map((m) => [m.runtime, m.model, m.label, m.default])).toEqual([
+      ["claude", "claude-haiku-x", "Haiku", true],
+      ["claude", "claude-opus-5-5", "Opus 5.5", false],
+      ["codex", "gpt-x", "", true],
+    ]);
+  });
+
+  it("will not save an empty list", async () => {
+    api([
+      ["GET", /\/api\/roles$/, { roles: [], warnings: [] }],
+      ["GET", /\/api\/models$/, { models: [{ id: "m1", runtime: "claude", model: "claude-opus-5-5", label: "", default: true, mine: true }] }],
+    ]);
+    const w = mountWith(Team);
+    await flushPromises();
+    const editor = () => w.get("[data-testid=model-list-editor]");
+    const save = () => editor().findAll("button").find((b) => b.text() === "保存")!;
+    await editor().get("button[aria-label=删除]").trigger("click");
+    expect(editor().text()).toContain("至少保留一个模型");
+    expect(save().attributes("disabled")).toBeDefined();
   });
 });
 

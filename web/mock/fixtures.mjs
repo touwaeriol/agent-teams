@@ -291,6 +291,13 @@ const role = (id, tier, roleKey, title, runtime, count, node_ids, description, l
   can_delegate: false, read_only: null, allowed_tools: [], disallowed_tools: [], sandbox: "", max_turns: null, gate: "", task_kinds: [], skills: [], plugins: [], look: lk, sort: 0, ...extra,
 });
 
+/** GET /api/models: the user's own list, in order (one default per runtime). */
+export const models = [
+  { id: "m1", runtime: "claude", model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: true },
+  { id: "m2", runtime: "claude", model: "claude-sonnet-5-5", label: "Sonnet 5.5", default: false, mine: true },
+  { id: "m3", runtime: "codex", model: "gpt-5.5-codex", label: "", default: true, mine: true },
+];
+
 export const roles = [
   role("r0", "coordinator", "coordinator", "项目统筹", "claude", 1, ["n1"], "和你对话，判断要做什么，开讨论串、跟进状态、向你汇报。", look("#7A4FD1", "hoodie", "headset", "#3B2A20"), { model: "opus" }),
   role("r1", "lead", "lead", "组长", "claude", 1, ["n1", "n2"], "列主要任务、拆小任务、审查成员提交并合并，完成后向统筹交总结。", look("#C8622A", "suit", "none", "#3B2A20"), { model: "opus" }),
