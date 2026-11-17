@@ -3,12 +3,14 @@
 // conversation between you and the lead — question cards (answered ones collapsed to your
 // choice), the lead's checklist, plans, published files and the acceptance card sit where they
 // happened — and the message box. 任务 / 交付物 / 成员 open in a dialog over the chat.
-import { watch } from "vue";
+import { ref, watch } from "vue";
 import { threads as threadActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import { keys } from "@/api/queries";
 import type { ThreadView } from "@/api/views";
+import { readLocal, writeLocal } from "@/lib/persist";
 import { cn } from "@/lib/utils";
+import PlanChecklist from "../plan/PlanChecklist.vue";
 import type { ThreadViewId } from "../threadMenu";
 import ThreadViewDialog from "../threadviews/ThreadViewDialog.vue";
 import DetailHeader from "./DetailHeader.vue";
@@ -44,6 +46,19 @@ watch(
   (at) => at && !seen.isPending.value && seen.mutate(props.thread.id),
   { immediate: true },
 );
+
+// The plan card above the message box: folded or not is remembered per thread (open by default).
+const planKey = (tid: string) => `at:plan-open:${tid}`;
+const planOpen = ref(true);
+watch(
+  () => props.thread.id,
+  (tid) => (planOpen.value = readLocal(planKey(tid)) !== "0"),
+  { immediate: true },
+);
+function setPlanOpen(open: boolean) {
+  planOpen.value = open;
+  writeLocal(planKey(props.thread.id), open ? null : "0");
+}
 </script>
 
 <template>
@@ -52,6 +67,9 @@ watch(
     <div :class="cn('at-reading flex min-w-0 flex-col px-5 pb-6 pt-5', layout === 'page' && 'sm:px-6 sm:pt-8')">
       <ThreadChat :pid="pid" :thread="thread" :compact="layout !== 'page'" />
     </div>
+  </div>
+  <div v-if="thread.main_tasks.length" :class="cn('at-reading shrink-0 pb-2', layout === 'page' ? 'px-3 sm:px-6' : 'px-4')" data-plan-dock>
+    <PlanChecklist :steps="thread.main_tasks" :open="planOpen" list-class="max-h-[min(40vh,280px)]" @update:open="setPlanOpen" />
   </div>
   <LeadComposer :pid="pid" :thread="thread" :class="cn('at-reading', layout === 'page' ? 'px-3 pb-3 sm:px-6 sm:pb-5' : 'px-4 pb-4')" />
   <ThreadViewDialog :pid="pid" :thread="thread" :view="view" @view="(v) => emit('view', v)" />
