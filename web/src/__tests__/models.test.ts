@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { modelAppliedText } from "@/components/app/composer/panels";
 import { chatScope, cleanCommand, commandProblem, commandsHint, promptOnly, toggleHidden, togglable, unfit } from "@/lib/commands";
-import { defaultModel, followLabel, MODEL_ID, modelChoices, modelFits, modelName, modelProblems } from "@/lib/models";
+import { defaultModel, followLabel, MODEL_ID, modelChoices, modelFits, modelName, modelProblems, offersCodex, projectModelStatus } from "@/lib/models";
 import { newRole, roleProblems } from "@/lib/roles";
 
 const list = [
@@ -18,6 +18,26 @@ describe("model lists", () => {
     expect(followLabel(list, "claude")).toBe("跟随我的默认（当前：Opus 5.5）");
     expect(followLabel(list, "codex")).toBe("跟随我的默认（当前：gpt-x）");
     expect(followLabel(list.filter((m) => m.runtime === "claude"), "codex")).toBe("跟随我的默认（未设置）");
+  });
+
+  it("says what a project model field puts in effect", () => {
+    const roles = [
+      { tier: "coordinator", runtime: "claude", model: "" },
+      { tier: "lead", runtime: "claude", model: "claude-haiku-x" },
+      { tier: "member", runtime: "claude", model: "" },
+      { tier: "member", runtime: "claude", model: "claude-haiku-x" },
+    ];
+    expect(projectModelStatus("", roles, list, "coordinator")).toBe("跟随岗位配置（岗位：Opus 5.5）");
+    expect(projectModelStatus("", roles, list, "claude")).toBe("跟随岗位配置（岗位：Haiku、Opus 5.5）");
+    expect(projectModelStatus("", roles, list, "codex")).toBe("跟随岗位配置（没有这类岗位）");
+    expect(projectModelStatus("", [{ tier: "member", runtime: "codex", model: "" }], [], "codex")).toBe("跟随岗位配置（岗位：我的默认（未设置））");
+    expect(projectModelStatus("claude-haiku-x", roles, list, "claude")).toBe("项目指定：Haiku");
+    expect(projectModelStatus("gone", roles, list, "claude")).toBe("项目指定：gone");
+    expect(offersCodex(roles, list.filter((m) => m.runtime === "claude"))).toBe(false);
+    expect(offersCodex(roles, list)).toBe(true);
+    expect(offersCodex([{ tier: "member", runtime: "codex" }], [])).toBe(true);
+    expect(offersCodex([{ tier: "coordinator", runtime: "codex" }], [])).toBe(false);
+    expect(offersCodex([], [], "gpt-x")).toBe(true);
   });
 
   it("keeps a role's model across a type switch only when the new type lists it", () => {

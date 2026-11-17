@@ -16,7 +16,7 @@ const delivery = {
 const project = (id, name, extra = {}) => ({
   id, name, description: "", context: "", repo: null, branch: "main", git_connection_id: null, pinned: false, archived: false,
   work_mode: "worktree", auto_approve: false, require_acceptance: true, delivery, office_layout: "default", waiting: 0,
-  icon: "", coordinator_model: "", thread_model: "", thread_effort: "", auto_resume: false,
+  icon: "", coordinator_model: "", thread_model: "", thread_codex_model: "", thread_effort: "", auto_resume: false,
   threads_active: 0, created_at: ago(60 * 24 * 3), updated_at: ago(30), ...extra,
 });
 
