@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // defaultRepo is the repository the single-repository helpers (ref, setRef) talk about.
@@ -33,11 +34,17 @@ type fakeGitHub struct {
 	prs       int
 	n         int
 	files     map[string]string // "repo:path" → content, served by contents and git/trees at any ref
+
+	latency    time.Duration  // added to every request (a slow GitHub)
+	mergeFail  map[string]int // "repo#n" → HTTP status PUT .../merge answers instead of merging
+	mergeDelay time.Duration  // added to PUT .../merge (a merge in flight)
+	mergeCalls int            // PUT .../merge requests seen
+	requests   int            // requests seen (counted on arrival)
 }
 
 func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 	f := &fakeGitHub{refs: map[string]string{"o/r:main": "sha-main", "o/web:main": "sha-web-main", "o/web:dev": "sha-web-dev"},
-		conflicts: map[string]bool{}, checks: map[string][]map[string]any{}, pulls: map[string]*fakePR{}, files: map[string]string{}}
+		conflicts: map[string]bool{}, mergeFail: map[string]int{}, checks: map[string][]map[string]any{}, pulls: map[string]*fakePR{}, files: map[string]string{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /user", f.user)
 	mux.HandleFunc("GET /repos/{o}/{r}", func(w http.ResponseWriter, r *http.Request) {
@@ -55,7 +62,14 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 	mux.HandleFunc("PUT /repos/{o}/{r}/pulls/{n}/merge", f.mergePR)
 	mux.HandleFunc("GET /repos/{o}/{r}/contents/{path...}", f.contents)
 	mux.HandleFunc("GET /repos/{o}/{r}/git/trees/{ref...}", f.tree)
-	srv := httptest.NewServer(mux)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		d := f.latency
+		f.requests++
+		f.mu.Unlock()
+		time.Sleep(d)
+		mux.ServeHTTP(w, r)
+	}))
 	t.Cleanup(srv.Close)
 	return f, srv
 }
@@ -251,8 +265,20 @@ func (f *fakeGitHub) mergePR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.mu.Lock()
-	pr.merged = true
+	delay := f.mergeDelay
 	f.mu.Unlock()
+	time.Sleep(delay)
+	f.mu.Lock()
+	f.mergeCalls++
+	status := f.mergeFail[repoOf(r)+"#"+r.PathValue("n")]
+	if status == 0 {
+		pr.merged = true
+	}
+	f.mu.Unlock()
+	if status != 0 {
+		write(w, status, map[string]string{"message": "Pull Request is not mergeable"})
+		return
+	}
 	write(w, 200, map[string]any{"merged": true})
 }
 

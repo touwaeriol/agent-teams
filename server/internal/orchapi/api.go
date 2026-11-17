@@ -128,7 +128,7 @@ var errorMap = []struct {
 	{delivery.ErrMergeInProgress, 409, "merge_in_progress"},
 	{delivery.ErrPlanOpen, 409, "plan_open"},
 	{delivery.ErrNoPR, 409, "no_pr"},
-	{delivery.ErrChecksPending, 409, "checks_pending"},
+	{delivery.ErrNotInReview, 409, "not_in_review"},
 	{delivery.ErrNoWorkflow, 409, "no_workflow"},
 	{delivery.ErrBadURL, 422, "validation"},
 	{delivery.ErrPRKind, 400, "pr_not_deliverable"},

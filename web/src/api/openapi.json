@@ -5142,6 +5142,13 @@
               "null"
             ]
           },
+          "merge_error": {
+            "description": "Why accepting could not merge the PRs (checks, conflict, permission); null when none. Cleared on accept, reject and merge",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "messages": {
             "items": {
               "$ref": "#/components/schemas/MessageView"
@@ -5277,6 +5284,7 @@
           "pr_number",
           "pr_url",
           "pr_state",
+          "merge_error",
           "summary",
           "auto_approve",
           "opened_by",
@@ -5436,6 +5444,13 @@
               "null"
             ]
           },
+          "merge_error": {
+            "description": "Why accepting could not merge the PRs (checks, conflict, permission); null when none. Cleared on accept, reject and merge",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "no": {
             "format": "int64",
             "type": "integer"
@@ -5553,6 +5568,7 @@
           "pr_number",
           "pr_url",
           "pr_state",
+          "merge_error",
           "summary",
           "auto_approve",
           "opened_by",
