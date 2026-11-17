@@ -20,9 +20,10 @@ type ThreadRepo struct {
 	Repo          string
 	BaseBranch    string // explicit base (lead/coordinator) or the default branch the thread branch was cut from
 	BranchCreated bool
-	PRNumber      *int    `gorm:"column:pr_number"`
-	PRURL         *string `gorm:"column:pr_url"`
-	PRState       string  `gorm:"column:pr_state"`
+	PRNumber      *int       `gorm:"column:pr_number"`
+	PRURL         *string    `gorm:"column:pr_url"`
+	PRState       string     `gorm:"column:pr_state"`
+	PROpenedAt    *time.Time `gorm:"column:pr_opened_at"`
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -104,10 +105,10 @@ func threadRepoRow(ctx context.Context, q DB, threadID, repo string) *gorm.DB {
 	return q.Gorm(ctx).Table("at_thread_repos").Where("thread_id = ? AND repo = ?", threadID, repo)
 }
 
-// SetThreadRepoPR records a repository's pull request (state open).
+// SetThreadRepoPR records a repository's pull request (state open) and when it was opened.
 func SetThreadRepoPR(ctx context.Context, q DB, threadID, repo string, number int, url string) error {
 	return Changed(threadRepoRow(ctx, q, threadID, repo).Updates(map[string]any{"pr_number": number, "pr_url": url,
-		"pr_state": "open", "updated_at": gorm.Expr("now()")}))
+		"pr_state": "open", "pr_opened_at": gorm.Expr("now()"), "updated_at": gorm.Expr("now()")}))
 }
 
 // UpdateThreadRepo applies column changes to one repository row of a thread.

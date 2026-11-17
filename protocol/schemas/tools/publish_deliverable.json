@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/tools/publish_deliverable.json",
   "title": "PublishDeliverableInput",
-  "description": "Register a deliverable link for the project (doc, design, slides, dashboard, board, data...). PRs are registered by the platform.",
+  "description": "Register a deliverable link for the project (doc, design, slides, dashboard, board, data...). Pull requests are not deliverables (the platform tracks them on the thread).",
   "x-tool": {
     "tiers": [
       "lead",
@@ -19,7 +19,7 @@
   "additionalProperties": false,
   "properties": {
     "kind": {
-      "description": "Known: pr, doc, design, slides, dashboard, board, data; anything else is shown as a link.",
+      "description": "Known: doc, design, slides, dashboard, board, data; anything else is shown as a link. Not pr: pull requests are tracked by the platform on the thread and are not deliverables.",
       "type": "string",
       "minLength": 1,
       "examples": [

@@ -195,7 +195,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 180 {
+	if migrations.Latest() != 190 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -671,5 +671,61 @@ VALUES ('dl_1', 1, 'a.md', 'text/markdown', 1, 'x', 'a', 'designer-1');`
 	}
 	if _, err := db.Exec(`SELECT publisher_id FROM at_deliverable_files`); err == nil {
 		t.Fatal("publisher_id survived down")
+	}
+}
+
+// TestPRNotDeliverableMigration: 00190 adds at_thread_repos.pr_opened_at, fills it from the
+// created_at of the thread's kind='pr' deliverable with the same URL (null without one), deletes
+// every pr deliverable (its comments cascade) and keeps the other deliverables; Down drops the column.
+func TestPRNotDeliverableMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 180); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
+INSERT INTO at_conversations (id, user_id, title, project_id, kind) VALUES ('th1', 'u1', 't', 'p1', 'thread');
+INSERT INTO at_threads (id, project_id, user_id, no, title, branch, base_branch) VALUES ('th1', 'p1', 'u1', 1, 'x', 'thread/1-x', 'main');
+INSERT INTO at_thread_repos (thread_id, repo, pr_number, pr_url, pr_state) VALUES
+  ('th1', 'o/a', 1, 'https://github.com/o/a/pull/1', 'open'),
+  ('th1', 'o/b', 2, 'https://github.com/o/b/pull/2', 'merged'),
+  ('th1', 'o/c', NULL, NULL, '');
+INSERT INTO at_deliverables (id, project_id, thread_id, kind, title, url, created_at) VALUES
+  ('dl_pr', 'p1', 'th1', 'pr', 'o/a#1', 'https://github.com/o/a/pull/1', '2026-01-02T03:04:05Z'),
+  ('dl_doc', 'p1', 'th1', 'doc', '设计', 'https://example.com/doc', now());
+INSERT INTO at_deliverable_comments (id, deliverable_id, author, text) VALUES ('c1', 'dl_pr', 'user', 'x');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := migrations.Up(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	var opened sql.NullTime
+	if err := db.QueryRow(`SELECT pr_opened_at FROM at_thread_repos WHERE repo = 'o/a'`).Scan(&opened); err != nil ||
+		!opened.Valid || opened.Time.UTC().Format("2006-01-02T15:04:05Z") != "2026-01-02T03:04:05Z" {
+		t.Fatalf("o/a pr_opened_at: %v %v", opened, err)
+	}
+	var unset int
+	if err := db.QueryRow(`SELECT count(*) FROM at_thread_repos WHERE repo IN ('o/b','o/c') AND pr_opened_at IS NULL`).Scan(&unset); err != nil || unset != 2 {
+		t.Fatalf("unmatched rows: %d %v", unset, err)
+	}
+	var kinds string
+	if err := db.QueryRow(`SELECT string_agg(kind, ',' ORDER BY kind) FROM at_deliverables`).Scan(&kinds); err != nil || kinds != "doc" {
+		t.Fatalf("deliverables left: %q %v", kinds, err)
+	}
+	var comments int
+	if err := db.QueryRow(`SELECT count(*) FROM at_deliverable_comments`).Scan(&comments); err != nil || comments != 0 {
+		t.Fatalf("comments left: %d %v", comments, err)
+	}
+	if _, err := p.DownTo(ctx, 180); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`SELECT pr_opened_at FROM at_thread_repos`); err == nil {
+		t.Fatal("pr_opened_at survived down")
 	}
 }

@@ -96,7 +96,7 @@ Look            = {color, outfit: string, accessory: string, hair: string|null}
                   // outfit/accessory 是字符串，不是枚举：取值 = 当前全局布局 looks.outfits / looks.accessories 的键
                   // （内置 tee|hoodie|suit|coat、none|glasses|headset|cap 必有），服务端保存时按布局校验，422 带 fields
 DeliverableView = {id, project_id, thread_no, kind: string, title, url, detail, published_by, created_at, updated_at}
-                  // kind 已知集合：pr | doc | design | slides | dashboard | board | data；其他字符串按“链接”卡片显示
+                  // kind 已知集合：doc | design | slides | dashboard | board | data；其他字符串按“链接”卡片显示。pr 不是交付物（PR 记在讨论串上），发布时拒绝
 MergeEntryView  = {id, thread_no, task_id, employee, repo, head_branch, status, attempts, error, created_at, updated_at}   // 每个仓库一个条目
 CheckView       = {name, status, conclusion, url, summary}
 NodeView        = {id, name, online, since, last_seen_at, version, protocol, isolation: "agent_user"|"sandbox"|"none", runtimes: {...}, capacity: {...},
@@ -201,7 +201,7 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/projects/{pid}/deliverables?kind=&thread=&q=&cursor=` | → `{items: DeliverableView[], next_cursor, storage_bytes}`；`q` 搜索标题和 `detail.summary`（`pg_trgm`）；`storage_bytes` = 项目托管文件（每个版本都算）占用的字节数，资料库底部“已使用” |
-| POST | `/api/projects/{pid}/deliverables` | `{kind, title, url, thread_no?}` → 201（用户手动登记链接） |
+| POST | `/api/projects/{pid}/deliverables` | `{kind, title, url, thread_no?}` → 201（用户手动登记链接）；`kind = pr` → 400 `pr_not_deliverable`（PR 由平台在讨论串上自动跟踪，不是交付物） |
 | POST | `/api/projects/{pid}/deliverables/request` | `{kind, brief}` → 202 `MessageView`（“新做一个”磁贴） |
 | PATCH / DELETE | `/api/deliverables/{id}` | 改标题 / 删除 |
 | POST | `/api/projects/{pid}/library` | 资料库“添加”：`{name, data: base64, title?}` → 201 `DeliverableView`。单个文件，类型与大小限制同 `publish_file`（扩展名白名单，≤ 5 MB，422 `validation`），存成托管交付物第 1 版：`published_by = "user"`，`detail = {by: "user", hosted: true, version: 1, entry, content_type, render, files: 1, size}`，`kind` 按渲染方式（html/图片 → design，Markdown/PDF/文本 → doc，json/csv → data），之后和员工发布的文件一样经签名 URL 沙箱访问 |
@@ -214,7 +214,7 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 
 网页里“资料库”就是这个列表：主界面右侧的面板（`/projects/:pid?panel=library`）和全屏页 `/projects/:pid/deliverables`，表格列 名称 / 所有者（`published_by`，`user` 显示为“你”）/ 修改日期 / 大小（`detail.size`）/ 类型（托管文件按扩展名，其余按 kind），可按类型筛选、搜索、切换网格。
 
-PR 类交付物的 `detail.state` 由平台轮询 / webhook 更新。设计类和托管交付物（员工用 `publish_file` 发布）在查看器 DesignViewer（`/projects/:pid/deliverables/:id`）里打开：HTML 在 sandbox iframe 里，Markdown 安全渲染，图片内联，可切换版本，批注发回给员工。
+PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平台轮询 / webhook 更新。设计类和托管交付物（员工用 `publish_file` 发布）在查看器 DesignViewer（`/projects/:pid/deliverables/:id`）里打开：HTML 在 sandbox iframe 里，Markdown 安全渲染，图片内联，可切换版本，批注发回给员工。
 
 ### 3.6 NewProject 与 ProjectSettings
 

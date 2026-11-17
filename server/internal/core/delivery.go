@@ -37,12 +37,6 @@ func DeliverableByID(ctx context.Context, q DB, userID, id string) (Deliverable,
 		Where("d.id = ? AND p.user_id = ?", id, userID))
 }
 
-// PRDeliverableByURL finds the pr deliverable of a thread for one pull request.
-func PRDeliverableByURL(ctx context.Context, q DB, threadID, url string) (Deliverable, error) {
-	return take[Deliverable](deliverables(ctx, q).Where("d.thread_id = ? AND d.kind = 'pr' AND d.url = ?", threadID, url).
-		Order("d.created_at DESC"))
-}
-
 // DeliverableFilter narrows Deliverables.
 type DeliverableFilter struct {
 	Kind     string
