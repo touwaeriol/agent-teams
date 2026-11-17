@@ -35,9 +35,9 @@ export function saveWidth(userId: string, width: number, storage: Pick<Storage, 
   }
 }
 
-/** Dragging the handle left widens the panel (it sits on the right). */
-export function dragWidth(startWidth: number, startX: number, x: number, viewport: number): number {
-  return clampWidth(startWidth + (startX - x), viewport);
+/** Dragging the handle left widens the panel (it sits on the right); the caller clamps. */
+export function dragWidth(startWidth: number, startX: number, x: number): number {
+  return startWidth + (startX - x);
 }
 
 function globalStorage(): Storage | undefined {
@@ -45,5 +45,52 @@ function globalStorage(): Storage | undefined {
     return typeof window === "undefined" ? undefined : window.localStorage;
   } catch {
     return undefined;
+  }
+}
+
+// ── Thread detail mode ──────────────────────────────────────────────────────────────────
+// With a thread open the panel fills the board and leaves the coordinator chat a narrow
+// strip (like Claude Code's desktop app). The board is the area right of the project
+// sidebar, measured live, so a collapsed sidebar gives the panel more room.
+
+/** What stays of the coordinator chat when the detail panel is at its widest. */
+export const COORDINATOR_PEEK = 80;
+/** The detail panel never gets narrower than this when dragged. */
+export const DETAIL_MIN = 420;
+/** Below this the coordinator chat shows as the clickable strip instead of reflowing. */
+export const COORDINATOR_COMPACT = 360;
+
+/** Default (and widest) detail width: the whole board but the coordinator strip. */
+export function detailDefault(board: number): number {
+  return Math.max(0, Math.floor(board - COORDINATOR_PEEK));
+}
+
+/** Clamp a dragged / remembered width to [DETAIL_MIN, default]; `null` (or junk) follows the default. */
+export function clampDetail(width: number | null, board: number): number {
+  const max = detailDefault(board);
+  if (width === null || !Number.isFinite(width)) return max;
+  return Math.round(Math.min(max, Math.max(Math.min(DETAIL_MIN, max), width)));
+}
+
+export const detailKey = (userId: string) => `at:thread-detail-width:${userId}`;
+
+/** The remembered detail width, or `null` for "fill the board" (also when nothing is stored or storage is blocked). */
+export function loadDetail(userId: string, storage: Pick<Storage, "getItem"> | undefined = globalStorage()): number | null {
+  try {
+    const raw = storage?.getItem(detailKey(userId));
+    const n = raw ? Number(raw) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Remember a detail width; at the default (widest) it is forgotten so a bigger screen fills up again. */
+export function saveDetail(userId: string, width: number | null, board: number, storage: Pick<Storage, "setItem" | "removeItem"> | undefined = globalStorage()): void {
+  try {
+    if (width === null || width >= detailDefault(board)) storage?.removeItem(detailKey(userId));
+    else storage?.setItem(detailKey(userId), String(Math.round(width)));
+  } catch {
+    // storage blocked: the width just is not remembered
   }
 }
