@@ -146,7 +146,7 @@ func (a *API) search(ctx context.Context, in *searchInput) (*searchOutput, error
 	if res.Tasks, err = a.searchTasks(ctx, p.ID, q); err != nil {
 		return nil, err
 	}
-	res.Deliverables, err = a.deliverables(ctx, p.ID, core.DeliverableFilter{Q: q, Limit: 20})
+	res.Deliverables, err = a.deliverables(ctx, p.ID, core.DeliverableFilter{Q: q, Limit: 20, NoImages: true})
 	return &searchOutput{Body: res}, err
 }
 
