@@ -59,3 +59,14 @@ export function modelProblems(list: Pick<ModelEntry, "runtime" | "model" | "defa
   }
   return out;
 }
+
+/** The "" choice of a role's model field: follow the user's default of the runtime. */
+export function followLabel(list: ModelEntry[], runtime: Runtime): string {
+  const id = defaultModel(list, runtime);
+  return `跟随我的默认（${id ? `当前：${modelName(list, id)}` : "未设置"}）`;
+}
+
+/** Whether a role may keep `model` with `runtime` ("" always fits; otherwise it must be in the runtime's list). */
+export function modelFits(list: ModelEntry[], runtime: Runtime, model: string): boolean {
+  return !model || list.some((m) => m.runtime === runtime && m.model === model);
+}

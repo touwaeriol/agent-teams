@@ -1,18 +1,22 @@
 <script setup lang="ts">
-// One role template: name and tier, count, menu (编辑详情 / 删除岗位), runtime and nodes, the rule
+// One role template: name and tier, count, menu (编辑详情 / 删除岗位), runtime, model and nodes, the rule
 // line, look, skills, plugins and (members) permission mode. Emits patches; the page keeps the draft.
 import { MoreHorizontal } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import type { RoleView } from "@/api/views";
 import DropdownMenu from "@/components/common/DropdownMenu.vue";
 import type { OfficeLayout } from "@/office";
-import { canHaveSkills, countText, isReadOnly, kindText, LEVEL, roleName, ruleText } from "@/lib/roles";
+import { useModels } from "@/api/queries";
+import { modelFits } from "@/lib/models";
+import { canHaveSkills, countText, isReadOnly, LEVEL, roleName, ruleText } from "@/lib/roles";
+import { toast } from "@/lib/toast";
 import CommandEditor from "./CommandEditor.vue";
 import LookEditor from "./LookEditor.vue";
 import NodePicker from "./NodePicker.vue";
 import PermissionField from "./PermissionField.vue";
 import PluginPicker from "./PluginPicker.vue";
 import RoleDialog from "./RoleDialog.vue";
+import RoleModelSelect from "./RoleModelSelect.vue";
 import SkillPicker from "./SkillPicker.vue";
 
 const props = defineProps<{ role: RoleView; layout: OfficeLayout }>();
@@ -20,6 +24,13 @@ const emit = defineEmits<{ change: [patch: Partial<RoleView>]; remove: [] }>();
 const level = computed(() => LEVEL[props.role.tier]);
 const editing = ref(false);
 const COMMANDS: Record<string, () => void> = { edit: () => (editing.value = true), remove: () => emit("remove") };
+const models = useModels();
+/** A new runtime drops a model that is not one of its models (the role then follows the default). */
+function setRuntime(runtime: RoleView["runtime"]) {
+  if (modelFits(models.data.value?.models ?? [], runtime, props.role.model ?? "")) return emit("change", { runtime });
+  emit("change", { runtime, model: "" });
+  toast.info("已改为跟随默认模型");
+}
 function save(r: RoleView) {
   emit("change", r);
   editing.value = false;
@@ -49,16 +60,19 @@ function save(r: RoleView) {
         </DropdownMenu>
       </span>
     </div>
-    <div class="grid grid-cols-2 gap-2.5 text-[13px]">
-      <span class="flex flex-col gap-1">
+    <div class="grid grid-cols-1 gap-2.5 text-[13px] min-[480px]:grid-cols-[8rem_minmax(0,1.25fr)_minmax(0,1fr)]">
+      <span class="flex min-w-0 flex-col gap-1">
         <span class="text-xs text-muted-foreground">类型</span>
-        <el-select :model-value="role.runtime" :disabled="role.tier !== 'member'" class="at-select-36 at-text-13" aria-label="类型" @update:model-value="(v: RoleView['runtime']) => emit('change', { runtime: v })">
-          <template #label>{{ kindText(role) }}</template>
+        <el-select :model-value="role.runtime" :disabled="role.tier !== 'member'" class="at-select-36 at-text-13" aria-label="类型" @update:model-value="setRuntime">
           <el-option value="claude" label="Claude Code" />
           <el-option value="codex" label="Codex" />
         </el-select>
       </span>
-      <span class="flex flex-col gap-1">
+      <span class="flex min-w-0 flex-col gap-1">
+        <span class="text-xs text-muted-foreground">模型</span>
+        <RoleModelSelect :runtime="role.runtime" :model-value="role.model ?? ''" @update:model-value="(model: string) => emit('change', { model })" />
+      </span>
+      <span class="flex min-w-0 flex-col gap-1">
         <span class="text-xs text-muted-foreground">可用节点</span>
         <NodePicker :model-value="role.node_ids ?? []" @update:model-value="(ids: string[]) => emit('change', { node_ids: ids })" />
       </span>

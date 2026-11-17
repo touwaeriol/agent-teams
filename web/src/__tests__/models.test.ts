@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { modelAppliedText } from "@/components/app/composer/panels";
 import { chatScope, cleanCommand, commandProblem, commandsHint, promptOnly, toggleHidden, togglable, unfit } from "@/lib/commands";
-import { defaultModel, MODEL_ID, modelChoices, modelName, modelProblems } from "@/lib/models";
+import { defaultModel, followLabel, MODEL_ID, modelChoices, modelFits, modelName, modelProblems } from "@/lib/models";
 import { newRole, roleProblems } from "@/lib/roles";
 
 const list = [
@@ -14,6 +14,19 @@ const list = [
 ];
 
 describe("model lists", () => {
+  it("names the follow-my-default choice of a role's model per runtime", () => {
+    expect(followLabel(list, "claude")).toBe("跟随我的默认（当前：Opus 5.5）");
+    expect(followLabel(list, "codex")).toBe("跟随我的默认（当前：gpt-x）");
+    expect(followLabel(list.filter((m) => m.runtime === "claude"), "codex")).toBe("跟随我的默认（未设置）");
+  });
+
+  it("keeps a role's model across a type switch only when the new type lists it", () => {
+    expect(modelFits(list, "codex", "")).toBe(true);
+    expect(modelFits(list, "claude", "claude-haiku-x")).toBe(true);
+    expect(modelFits(list, "codex", "claude-haiku-x")).toBe(false);
+    expect(modelFits(list, "codex", "gone-model")).toBe(false);
+  });
+
   it("lists one runtime's models once, in the user's order, and keeps a typed id", () => {
     expect(modelChoices(list, "claude").map((c) => [c.value, c.label, c.isDefault, c.custom])).toEqual([
       ["claude-haiku-x", "Haiku", false, false],
