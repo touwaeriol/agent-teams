@@ -3,13 +3,11 @@ package orchapi
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
-	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
 )
 
 type deliverablesInput struct {
@@ -63,7 +61,7 @@ type patchDeliverableInput struct {
 
 // kindNames are the Chinese names used in the "新做一个" message (api.md §3.5).
 var kindNames = map[string]string{"doc": "文档", "design": "设计", "slides": "幻灯片", "dashboard": "看板", "board": "白板",
-	"data": "数据", "pr": "PR"}
+	"data": "数据"}
 
 func (a *API) registerDeliverables(api huma.API) {
 	t := "deliverables"
@@ -204,9 +202,6 @@ func (a *API) deleteDeliverable(ctx context.Context, in *deliverableIDInput) (*s
 	d, err := a.ownDeliverable(ctx, in.ID)
 	if err != nil {
 		return nil, err
-	}
-	if d.Kind == "pr" && d.Detail["state"] == "open" {
-		return nil, httpapi.Fail(http.StatusConflict, "pr_open", "PR 还开着，不能删除它的交付物")
 	}
 	return nil, a.e.Core.InTx(ctx, func(tx *core.Tx) error {
 		if err := core.DeleteDeliverable(ctx, tx, d.ID); err != nil {

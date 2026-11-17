@@ -214,6 +214,7 @@ func TestPublishFileRefusals(t *testing.T) {
 		{"exe", map[string]any{"path": "a.exe", "kind": "data", "title": "x"}, []upFile{{"a.exe", "MZ"}}, "不支持的文件"},
 		{"no index", map[string]any{"path": "d", "kind": "design", "title": "x"}, []upFile{{"a.html", "a"}, {"b.html", "b"}}, "index.html"},
 		{"foreign id", map[string]any{"path": "a.md", "kind": "doc", "title": "x", "deliverable_id": "dl_nope"}, []upFile{{"a.md", "a"}}, "dl_nope"},
+		{"pr kind", map[string]any{"path": "a.md", "kind": "pr", "title": "x"}, []upFile{{"a.md", "a"}}, "不是交付物"},
 	}
 	for _, c := range cases {
 		res := tm.dev.publish(c.args, 1<<20, c.files...)
@@ -235,6 +236,15 @@ func TestPublishFileRefusals(t *testing.T) {
 	}
 	if res := tm.dev.call("publish_file", map[string]any{"path": "a.md", "kind": "doc", "title": "x"}); res.Ok {
 		t.Fatalf("call without upload accepted")
+	}
+	// Pull requests are tracked on the thread, never published as deliverables.
+	if res := tm.dev.call("publish_deliverable", map[string]any{"kind": "pr", "title": "x", "url": "https://github.com/o/r/pull/1"}); res.Ok ||
+		!strings.Contains(text(res), "不是交付物") {
+		t.Fatalf("publish_deliverable kind=pr: %+v", res)
+	}
+	if code, body := tm.b.do("POST", "/api/projects/"+tm.projectID+"/deliverables",
+		map[string]any{"kind": " PR ", "title": "x", "url": "https://github.com/o/r/pull/1"}); code != 400 || !strings.Contains(string(body), "不是交付物") {
+		t.Fatalf("POST kind=pr: %d %s", code, body)
 	}
 	var list struct{ Items []core.DeliverableView }
 	tm.b.must(200, "GET", "/api/projects/"+tm.projectID+"/deliverables", nil, &list)

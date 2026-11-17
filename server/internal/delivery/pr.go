@@ -114,7 +114,7 @@ func (e *Engine) openOne(ctx context.Context, t core.Thread, target prTarget, re
 	if err != nil {
 		return false, fmt.Errorf("%s：%w", target.repo.Slug, err)
 	}
-	return true, e.recordPR(ctx, t, target.repo.Slug, pr, req.By)
+	return true, e.recordPR(ctx, t, target.repo.Slug, pr)
 }
 
 // adoptPR takes over the open pull request someone already opened from the thread branch
@@ -184,9 +184,10 @@ func (e *Engine) prText(ctx context.Context, t core.Thread, req PRRequest) (stri
 	return title, b.String(), nil
 }
 
-// recordPR stores one repository's pull request and its deliverable; the thread keeps the first
+// recordPR stores one repository's pull request (a pull request is tracked on the thread, not
+// published as a deliverable); the thread keeps the first
 // pull request in pr_number/pr_url for older clients.
-func (e *Engine) recordPR(ctx context.Context, t core.Thread, repo string, pr ghops.PR, by string) error {
+func (e *Engine) recordPR(ctx context.Context, t core.Thread, repo string, pr ghops.PR) error {
 	return e.core.InTx(ctx, func(tx *core.Tx) error {
 		if err := core.SetThreadRepoPR(ctx, tx, t.ID, repo, pr.Number, pr.HTMLURL); err != nil {
 			return err
@@ -195,13 +196,7 @@ func (e *Engine) recordPR(ctx context.Context, t core.Thread, repo string, pr gh
 		if cur, err := core.LockThread(ctx, tx, t.ID); err == nil && cur.PRNumber == nil {
 			set["pr_number"], set["pr_url"] = pr.Number, pr.HTMLURL
 		}
-		if err := core.UpdateThread(ctx, tx, t.ID, set); err != nil {
-			return err
-		}
-		detail := map[string]any{"number": pr.Number, "state": "open", "repo": repo, "additions": pr.Additions, "deletions": pr.Deletions}
-		_, err := e.Publish(ctx, tx, t.ProjectID, &t.ID, "pr", fmt.Sprintf("%s#%d %s", repo, pr.Number, t.Title), pr.HTMLURL,
-			orDefault(by, "platform"), detail)
-		return err
+		return core.UpdateThread(ctx, tx, t.ID, set)
 	})
 }
 
@@ -368,8 +363,8 @@ func (e *Engine) prCheckOne(ctx context.Context, t core.Thread, repo ghops.Repo,
 		return CIPass, nil, nil
 	}
 	since := tr.UpdatedAt
-	if d, err := core.PRDeliverableByURL(ctx, e.core.Pool, t.ID, deref(tr.PRURL)); err == nil {
-		since = d.CreatedAt
+	if tr.PROpenedAt != nil {
+		since = *tr.PROpenedAt
 	}
 	v, failed, err := e.ciVerdict(ctx, t, repo, pr.Head.SHA, nil, since)
 	if err == nil && v == CIPass && pr.Mergeable != nil && !*pr.Mergeable {
@@ -407,12 +402,7 @@ func (e *Engine) mergeOne(ctx context.Context, t core.Thread, repo ghops.Repo, t
 			return fmt.Errorf("%s：%w", tr.Repo, err)
 		}
 	}
-	return e.core.InTx(ctx, func(tx *core.Tx) error {
-		if err := core.SetThreadRepoPRState(ctx, tx, t.ID, tr.Repo, "merged"); err != nil {
-			return err
-		}
-		return e.markPRDeliverable(ctx, tx, t.ID, deref(tr.PRURL), "merged")
-	})
+	return core.SetThreadRepoPRState(ctx, e.core.Pool, t.ID, tr.Repo, "merged")
 }
 
 // Merged records that the thread's pull requests are merged: thread done once none is open.
@@ -440,20 +430,6 @@ func anyOpenPR(ctx context.Context, q core.DB, threadID string) (bool, error) {
 		}
 	}
 	return false, err
-}
-
-// markPRDeliverable sets the state of the pr deliverable with this URL.
-func (e *Engine) markPRDeliverable(ctx context.Context, tx *core.Tx, threadID, url, state string) error {
-	d, err := core.PRDeliverableByURL(ctx, tx, threadID, url)
-	if err != nil {
-		return ignoreMissing(err)
-	}
-	d.Detail["state"] = state
-	d, err = core.UpdateDeliverable(ctx, tx, d.ID, nil, d.Detail)
-	if err != nil {
-		return err
-	}
-	return tx.EmitDeliverable(ctx, d)
 }
 
 // prTick merges PRs whose checks passed (auto-merge, or accepted) and reports failures to the lead.
@@ -546,9 +522,6 @@ func (e *Engine) pullRequestEvent(ctx context.Context, payload json.RawMessage) 
 	state := map[bool]string{true: "merged", false: "closed"}[ev.PullRequest.Merged]
 	err = e.core.InTx(ctx, func(tx *core.Tx) error {
 		if err := core.SetThreadRepoPRState(ctx, tx, tr.ThreadID, tr.Repo, state); err != nil {
-			return err
-		}
-		if err := e.markPRDeliverable(ctx, tx, tr.ThreadID, ev.PullRequest.HTMLURL, state); err != nil {
 			return err
 		}
 		if state == "merged" {
