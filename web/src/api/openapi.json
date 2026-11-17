@@ -90,8 +90,9 @@
             "$ref": "#/components/schemas/Delivery"
           },
           "max_running_threads": {
+            "description": "0 = no limit",
             "format": "int64",
-            "minimum": 1,
+            "minimum": 0,
             "type": "integer"
           },
           "node_release": {
@@ -5772,6 +5773,7 @@
             "type": "integer"
           },
           "max_running_threads": {
+            "description": "0 = no limit",
             "format": "int64",
             "minimum": 0,
             "type": "integer"

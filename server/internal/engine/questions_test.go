@@ -3,6 +3,7 @@ package engine_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -264,6 +265,26 @@ func TestThreadLimitAndPause(t *testing.T) {
 	tm.b.must(200, "GET", "/api/threads/"+tm.thread.ID, nil, &got)
 	if got.Status != "queued" {
 		t.Fatalf("resumed thread should queue behind the limit: %s", got.Status)
+	}
+	// Lifting the limit (0 = no limit) starts the queued thread on the next sweep (server start).
+	settings["max_running_threads"] = 0
+	tm.b.must(200, "PUT", "/api/admin/settings", settings, nil)
+	tm.w.e.Orch.StartAllQueued(tm.w.ctx)
+	tm.b.must(200, "GET", "/api/threads/"+tm.thread.ID, nil, &got)
+	if got.Status != "running" {
+		t.Fatalf("queued thread did not start once the limit was lifted: %s", got.Status)
+	}
+}
+
+// TestThreadsUnlimitedByDefault: with no limit configured, every opened thread runs at once.
+func TestThreadsUnlimitedByDefault(t *testing.T) {
+	tm := startTeam(t)
+	for i := range 4 {
+		var th core.ThreadView
+		tm.b.must(201, "POST", "/api/projects/"+tm.projectID+"/threads", map[string]any{"title": fmt.Sprintf("T%d", i), "brief": "go"}, &th)
+		if th.Status != "running" || th.QueuePosition != nil {
+			t.Fatalf("thread %d queued without a limit: %+v", i, th)
+		}
 	}
 }
 

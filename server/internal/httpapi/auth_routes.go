@@ -65,7 +65,7 @@ type PlatformSettings struct {
 }
 
 func defaultPlatform() PlatformSettings {
-	return PlatformSettings{RegistrationOpen: true, DefaultMaxNodes: 5, MaxRunningThreads: 3}
+	return PlatformSettings{RegistrationOpen: true, DefaultMaxNodes: 5}
 }
 
 func (s *Server) platformSettings(ctx context.Context) (PlatformSettings, error) {

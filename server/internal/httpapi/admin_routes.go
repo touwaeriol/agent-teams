@@ -26,7 +26,7 @@ type userPatchInput struct {
 		Active                 *bool   `json:"active,omitempty"`
 		MaxNodes               *int    `json:"max_nodes,omitempty" minimum:"0"`
 		ClearMaxNodes          bool    `json:"clear_max_nodes,omitempty"`
-		MaxRunningThreads      *int    `json:"max_running_threads,omitempty" minimum:"0"`
+		MaxRunningThreads      *int    `json:"max_running_threads,omitempty" minimum:"0" doc:"0 = no limit"`
 		ClearMaxRunningThreads bool    `json:"clear_max_running_threads,omitempty"`
 		DisplayName            *string `json:"display_name,omitempty" maxLength:"100"`
 	}
@@ -42,7 +42,7 @@ type tempPasswordOutput struct {
 type AdminSettings struct {
 	RegistrationOpen  bool                  `json:"registration_open"`
 	DefaultMaxNodes   int                   `json:"default_max_nodes" minimum:"0"`
-	MaxRunningThreads int                   `json:"max_running_threads" minimum:"1"`
+	MaxRunningThreads int                   `json:"max_running_threads" minimum:"0" doc:"0 = no limit"`
 	DeliveryDefault   Delivery              `json:"delivery_default"`
 	OfficeDefault     string                `json:"office_default" doc:"Default office layout id"`
 	NodeRelease       *platform.NodeRelease `json:"node_release,omitempty" doc:"Omit to clear"`

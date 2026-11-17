@@ -453,11 +453,19 @@ func (o *Orchestrator) leastLoaded(ctx context.Context, tx *core.Tx, cands []sto
 		if err != nil {
 			continue
 		}
-		if free := o.gw.Capacity(n) - active; free > bestFree {
+		if free := freeSlots(o.gw.Capacity(n), active); free > bestFree {
 			best, bestFree = n, free
 		}
 	}
 	return best
+}
+
+// freeSlots ranks a node: an unlimited node (capacity 0) counts as far roomier than any capped one.
+func freeSlots(capacity, active int) int {
+	if capacity <= 0 {
+		capacity = 1 << 20
+	}
+	return capacity - active
 }
 
 // reopen starts a new open generation of the same logical session with resume.

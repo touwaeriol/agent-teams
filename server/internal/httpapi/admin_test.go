@@ -58,7 +58,7 @@ func TestAdminSettings(t *testing.T) {
 	admin, _ := h.signUp("a@example.com")
 	var s AdminSettings
 	admin.must(200, "GET", "/api/admin/settings", nil, &s)
-	if !s.RegistrationOpen || s.DefaultMaxNodes != 5 || s.MaxRunningThreads != 3 || s.OfficeDefault != "default" || s.NodeRelease != nil {
+	if !s.RegistrationOpen || s.DefaultMaxNodes != 5 || s.MaxRunningThreads != 0 || s.OfficeDefault != "default" || s.NodeRelease != nil {
 		t.Fatalf("defaults %+v", s)
 	}
 	s.DeliveryDefault.MergeMethod = "merge"

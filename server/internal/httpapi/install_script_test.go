@@ -102,7 +102,7 @@ func TestInstallScriptFreshInstall(t *testing.T) {
 	}
 	envFile := e.read(".config/agent-teams/node.env")
 	for _, want := range []string{"AGENT_TEAMS_NODE_TOKEN=tok-1", "AGENT_TEAMS_CONSOLE=https://console.test",
-		"AGENT_TEAMS_NODE=rc-erio", "AGENT_TEAMS_MAX_SESSIONS=4"} {
+		"AGENT_TEAMS_NODE=rc-erio", "AGENT_TEAMS_MAX_SESSIONS=\n"} {
 		if !strings.Contains(envFile, want) {
 			t.Errorf("node.env missing %s:\n%s", want, envFile)
 		}
