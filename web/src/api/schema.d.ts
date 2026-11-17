@@ -3370,6 +3370,8 @@ export interface components {
             lead_last: components["schemas"]["LeadLast"];
             main_tasks: components["schemas"]["MainTaskView"][] | null;
             members: components["schemas"]["EmployeeBrief"][] | null;
+            /** @description Why accepting could not merge the PRs (checks, conflict, permission); null when none. Cleared on accept, reject and merge */
+            merge_error: string | null;
             messages?: components["schemas"]["MessageView"][] | null;
             /** Format: int64 */
             no: number;
@@ -3456,6 +3458,8 @@ export interface components {
             lead_last: components["schemas"]["LeadLast"];
             main_tasks: components["schemas"]["MainTaskView"][] | null;
             members: components["schemas"]["EmployeeBrief"][] | null;
+            /** @description Why accepting could not merge the PRs (checks, conflict, permission); null when none. Cleared on accept, reject and merge */
+            merge_error: string | null;
             /** Format: int64 */
             no: number;
             opened_by: string;

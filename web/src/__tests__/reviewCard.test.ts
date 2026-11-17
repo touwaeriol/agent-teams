@@ -5,6 +5,7 @@ import { QueryClient, useQuery, VueQueryPlugin } from "@tanstack/vue-query";
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h } from "vue";
+import { toApiError } from "@/api/client";
 import { keys } from "@/api/queries";
 import type { ThreadView } from "@/api/views";
 import ReviewCard from "@/components/app/cards/ReviewCard.vue";
@@ -110,6 +111,32 @@ describe("ReviewCard accept", () => {
     expect(primary().attributes("disabled")).toBeUndefined();
     expect(outline().attributes("disabled")).toBeUndefined();
     expect(wrapper.find("section").attributes("aria-label")).toBe("合并失败");
+  });
+
+  it("handles 409 not_in_review: readable toast, rollback, buttons usable again", async () => {
+    // What the server sends when the thread left review (merged / closed elsewhere).
+    const conflict = toApiError(409, { detail: "讨论串不在验收中（PR 已合并、已关闭，或讨论串不在 review 状态）", code: "not_in_review" });
+    api.accept.mockRejectedValue(conflict);
+    const s = setup();
+    await s.primary().trigger("click");
+    await flushPromises();
+    expect(toasts.error).toHaveBeenCalledWith("讨论串不在验收中（PR 已合并、已关闭，或讨论串不在 review 状态）");
+    expect(s.cached()).toMatchObject({ pr_state: "open", merge_error: null });
+    expect(s.wrapper.find("section").attributes("aria-label")).toBe("等你验收");
+    expect(s.primary().attributes("disabled")).toBeUndefined();
+    expect(s.outline().attributes("disabled")).toBeUndefined();
+  });
+
+  it("keeps the change request text when reject answers 409 not_in_review", async () => {
+    api.reject.mockRejectedValue(toApiError(409, { detail: "讨论串不在验收中（PR 已合并、已关闭，或讨论串不在 review 状态）", code: "not_in_review" }));
+    const s = setup();
+    await s.outline().trigger("click");
+    await s.wrapper.find("textarea").setValue("标题改一下");
+    await s.wrapper.find("form").trigger("submit");
+    await flushPromises();
+    expect(toasts.error).toHaveBeenCalledWith(expect.stringContaining("讨论串不在验收中"));
+    expect((s.wrapper.find("textarea").element as HTMLTextAreaElement).value).toBe("标题改一下");
+    expect(s.wrapper.find('button[type="submit"]').attributes("disabled")).toBeUndefined();
   });
 
   it("locks the merge button while the server reports accepting, but a change request can withdraw it", async () => {
