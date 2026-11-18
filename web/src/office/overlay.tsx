@@ -506,13 +506,16 @@ export interface BubbleFit {
 const BUBBLE_LIFT = 20;
 
 /**
- * A bubble over a staff desk: about two cells wide at most, and every other column raised, so the
- * bubbles of neighbours (one cell apart) stay readable.
+ * A bubble over a staff desk, so the bubbles of neighbours (one cell apart) stay readable: about
+ * two cells wide at most, every other column raised. The first row has the thread tables' name
+ * tags right above it, so there nothing is raised and bubbles stay one cell wide.
  */
 export function staffBubbleFit(scene: Scene, desk: DeskInstance): BubbleFit | undefined {
   const area = scene.layout.staffArea;
   if (!area) return undefined;
-  return { maxWidth: Math.max(40, 2 * area.cell[0] * desk.scale - 6), lift: (desk.col ?? 0) % 2 ? BUBBLE_LIFT : 0 };
+  const cell = area.cell[0] * desk.scale;
+  if (!desk.row) return { maxWidth: Math.max(40, cell - 6), lift: 0 };
+  return { maxWidth: Math.max(40, 2 * cell - 6), lift: (desk.col ?? 0) % 2 ? BUBBLE_LIFT : 0 };
 }
 
 function SpeechBubble({ layout: l, bubble, x, fit }: { layout: OfficeLayout; bubble: NonNullable<ActorView["bubble"]>; x: number; fit?: BubbleFit }) {

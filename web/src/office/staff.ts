@@ -30,7 +30,7 @@ export function placeStaff(layout: OfficeLayout, employees: OfficeEmployee[], gr
   const plan = planStaff(area, sortMembers(employees.filter(isMember), area.order ?? MEMBER_ORDER));
   plan.rows.forEach((row, r) => {
     const node = rowNode(area, graph, r, plan.scale);
-    row.forEach((e, i) => placeDesk(layout, area, out, e, { cell: cellAt(area, r, i, plan.scale), col: i, s: plan.scale, node }));
+    row.forEach((e, i) => placeDesk(layout, area, out, e, { cell: cellAt(area, r, i, plan.scale), row: r, col: i, s: plan.scale, node }));
   });
   stackExtra(area, out, plan);
   return out;
@@ -94,12 +94,13 @@ function rowNode(area: StaffArea, g: NavGraph, row: number, s: number): string {
 
 interface DeskSpot {
   cell: Point;
+  row: number;
   col: number;
   s: number;
   node: string;
 }
 
-function placeDesk(layout: OfficeLayout, area: StaffArea, out: StaffPlacement, e: OfficeEmployee, { cell, col, s, node }: DeskSpot): void {
+function placeDesk(layout: OfficeLayout, area: StaffArea, out: StaffPlacement, e: OfficeEmployee, { cell, row, col, s, node }: DeskSpot): void {
   const sprite = layout.sprites[area.desk.sprite];
   const local = area.desk.at ?? [0, 0];
   const at: Point = [cell[0] + local[0] * s, cell[1] + local[1] * s];
@@ -117,6 +118,7 @@ function placeDesk(layout: OfficeLayout, area: StaffArea, out: StaffPlacement, e
     timer: t && [at[0] + t[0] * s, at[1] + t[1] * s],
     owner: e.id,
     tag: tag && [at[0] + tag[0] * s, at[1] + tag[1] * s],
+    row,
     col,
   };
   out.desks.set(e.id, desk);

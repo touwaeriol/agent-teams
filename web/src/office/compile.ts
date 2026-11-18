@@ -29,9 +29,10 @@ export interface DeskInstance extends PlacedSprite {
   timer?: Point;
   /** The pod's thread; undefined for staff desks. */
   threadNo?: number;
-  /** Staff desks: the member who owns it, where its `#18 · t5` work tag goes, its column in the row. */
+  /** Staff desks: the member who owns it, where its `#18 · t5` work tag goes, its row and column. */
   owner?: string;
   tag?: Point;
+  row?: number;
   col?: number;
 }
 
