@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/node/session.compacted.json",
   "title": "SessionCompacted",
-  "description": "session.compact finished (ok=false: the runtime did not compact, e.g. too little context or an error).",
+  "description": "session.compact finished (ok=false: the runtime did not compact; error says why, e.g. busy: the session stayed in a turn or got a new message first, exited: the runtime ended during the compaction, restarted: the daemon restarted before it finished).",
   "x-direction": "node_to_console",
   "x-key": [
     "compact_id"

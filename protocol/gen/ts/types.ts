@@ -811,7 +811,7 @@ export interface SessionCompact {
   instructions?: string;
 }
 /**
- * session.compact finished (ok=false: the runtime did not compact, e.g. too little context or an error).
+ * session.compact finished (ok=false: the runtime did not compact; error says why, e.g. busy: the session stayed in a turn or got a new message first, exited: the runtime ended during the compaction, restarted: the daemon restarted before it finished).
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "SessionCompacted".
@@ -1300,7 +1300,7 @@ export interface SessionOpen {
     [k: string]: string;
   };
   /**
-   * Context management of the role (shared-members.md §5.1): the runtime compacts by itself at limit_tokens × in_task_pct / 100 (without limit_tokens: in_task_pct of the model's window); focus is added to the instructions of such a compaction.
+   * Context management of the role (shared-members.md §5.1): the runtime compacts by itself at limit_tokens × in_task_pct / 100 (Codex: limit_tokens capped at window_tokens). Without limit_tokens the target is in_task_pct of window_tokens; without either, Codex keeps its own default and Claude applies in_task_pct to its effective window (window − 20K). Claude never compacts later than its effective window − 13K. focus is added to the instructions of such a compaction.
    */
   context?: {
     /**
@@ -1308,6 +1308,10 @@ export interface SessionOpen {
      */
     limit_tokens?: number;
     in_task_pct?: number;
+    /**
+     * The context window the runtime reported for this employee's last session (tokens), when known. Codex caps limit_tokens at it (a limit above the model's window would never trigger); without limit_tokens both runtimes take in_task_pct of it as the token target.
+     */
+    window_tokens?: number;
     /**
      * What a compaction must keep.
      */
@@ -1760,6 +1764,10 @@ export interface ToolResult {
   structured?: {
     [k: string]: unknown;
   } | null;
+  /**
+   * Set when the call ended the caller's task (complete_task): the new task anchor, "" to clear the stored one (as session.send anchor).
+   */
+  anchor?: string;
   download?: ToolDownload1;
 }
 /**

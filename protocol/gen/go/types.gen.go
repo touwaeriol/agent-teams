@@ -5974,8 +5974,10 @@ func (j *SessionCompact) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// session.compact finished (ok=false: the runtime did not compact, e.g. too little
-// context or an error).
+// session.compact finished (ok=false: the runtime did not compact; error says why,
+// e.g. busy: the session stayed in a turn or got a new message first, exited: the
+// runtime ended during the compaction, restarted: the daemon restarted before it
+// finished).
 type SessionCompacted struct {
 	// CompactID corresponds to the JSON schema field "compact_id".
 	CompactID string `json:"compact_id"`
@@ -6477,9 +6479,12 @@ type SessionOpen struct {
 	Codex *CodexSessionOptions `json:"codex,omitempty,omitzero"`
 
 	// Context management of the role (shared-members.md §5.1): the runtime compacts
-	// by itself at limit_tokens × in_task_pct / 100 (without limit_tokens:
-	// in_task_pct of the model's window); focus is added to the instructions of such
-	// a compaction.
+	// by itself at limit_tokens × in_task_pct / 100 (Codex: limit_tokens capped at
+	// window_tokens). Without limit_tokens the target is in_task_pct of
+	// window_tokens; without either, Codex keeps its own default and Claude applies
+	// in_task_pct to its effective window (window − 20K). Claude never compacts later
+	// than its effective window − 13K. focus is added to the instructions of such a
+	// compaction.
 	Context *SessionOpenContext `json:"context,omitempty,omitzero"`
 
 	// Cwd corresponds to the JSON schema field "cwd".
@@ -6535,8 +6540,11 @@ type SessionOpen struct {
 }
 
 // Context management of the role (shared-members.md §5.1): the runtime compacts by
-// itself at limit_tokens × in_task_pct / 100 (without limit_tokens: in_task_pct of
-// the model's window); focus is added to the instructions of such a compaction.
+// itself at limit_tokens × in_task_pct / 100 (Codex: limit_tokens capped at
+// window_tokens). Without limit_tokens the target is in_task_pct of window_tokens;
+// without either, Codex keeps its own default and Claude applies in_task_pct to
+// its effective window (window − 20K). Claude never compacts later than its
+// effective window − 13K. focus is added to the instructions of such a compaction.
 type SessionOpenContext struct {
 	// What a compaction must keep.
 	Focus *string `json:"focus,omitempty,omitzero"`
@@ -6546,6 +6554,12 @@ type SessionOpenContext struct {
 
 	// The role's context limit in tokens.
 	LimitTokens *int `json:"limit_tokens,omitempty,omitzero"`
+
+	// The context window the runtime reported for this employee's last session
+	// (tokens), when known. Codex caps limit_tokens at it (a limit above the model's
+	// window would never trigger); without limit_tokens both runtimes take
+	// in_task_pct of it as the token target.
+	WindowTokens *int `json:"window_tokens,omitempty,omitzero"`
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -6566,6 +6580,9 @@ func (j *SessionOpenContext) UnmarshalJSON(value []byte) error {
 	}
 	if plain.LimitTokens != nil && 10000 > *plain.LimitTokens {
 		return fmt.Errorf("field %s: must be >= %v", "limit_tokens", 10000)
+	}
+	if plain.WindowTokens != nil && 1 > *plain.WindowTokens {
+		return fmt.Errorf("field %s: must be >= %v", "window_tokens", 1)
 	}
 	*j = SessionOpenContext(plain)
 	return nil
@@ -8062,6 +8079,10 @@ func (j *ToolDownload) UnmarshalJSON(value []byte) error {
 
 // Result of a tool.call; ok=false becomes an MCP isError result.
 type ToolResult struct {
+	// Set when the call ended the caller's task (complete_task): the new task anchor,
+	// "" to clear the stored one (as session.send anchor).
+	Anchor *string `json:"anchor,omitempty,omitzero"`
+
 	// CallID corresponds to the JSON schema field "call_id".
 	CallID CallID `json:"call_id"`
 
@@ -8106,6 +8127,9 @@ func (j *ToolResult) UnmarshalJSON(value []byte) error {
 	var plain Plain
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
+	}
+	if plain.Anchor != nil && utf8.RuneCountInString(string(*plain.Anchor)) > 8000 {
+		return fmt.Errorf("field %s length: must be <= %d", "anchor", 8000)
 	}
 	*j = ToolResult(plain)
 	return nil

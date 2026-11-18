@@ -99,7 +99,7 @@
       }
     },
     "context": {
-      "description": "Context management of the role (shared-members.md §5.1): the runtime compacts by itself at limit_tokens × in_task_pct / 100 (without limit_tokens: in_task_pct of the model's window); focus is added to the instructions of such a compaction.",
+      "description": "Context management of the role (shared-members.md §5.1): the runtime compacts by itself at limit_tokens × in_task_pct / 100 (Codex: limit_tokens capped at window_tokens). Without limit_tokens the target is in_task_pct of window_tokens; without either, Codex keeps its own default and Claude applies in_task_pct to its effective window (window − 20K). Claude never compacts later than its effective window − 13K. focus is added to the instructions of such a compaction.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -112,6 +112,11 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 100
+        },
+        "window_tokens": {
+          "description": "The context window the runtime reported for this employee's last session (tokens), when known. Codex caps limit_tokens at it (a limit above the model's window would never trigger); without limit_tokens both runtimes take in_task_pct of it as the token target.",
+          "type": "integer",
+          "minimum": 1
         },
         "focus": {
           "description": "What a compaction must keep.",

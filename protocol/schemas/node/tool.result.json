@@ -38,6 +38,11 @@
         "null"
       ]
     },
+    "anchor": {
+      "description": "Set when the call ended the caller's task (complete_task): the new task anchor, \"\" to clear the stored one (as session.send anchor).",
+      "type": "string",
+      "maxLength": 8000
+    },
     "download": {
       "description": "read_deliverable: files whose bytes arrived before as file.download frames; the daemon writes them under .agent-deliverables/<deliverable_id>/v<version>/ in the session's working directory.",
       "$ref": "#/$defs/ToolDownload"
