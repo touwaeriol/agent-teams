@@ -56,25 +56,16 @@ func taskNote(ctx context.Context, q core.DB, t core.Thread, task core.Task, hea
 	return clip(b.String(), AnchorMax), nil
 }
 
-// currentAnchor is the anchor of the task a project member holds (claimed or running);
-// ok=false when it holds none.
-func currentAnchor(ctx context.Context, q core.DB, e core.Employee) (string, bool, error) {
+// heldTask is the task a member holds (claimed or running); ok=false when it holds none.
+func heldTask(ctx context.Context, q core.DB, e core.Employee) (core.Task, bool, error) {
 	if e.Tier != "member" {
-		return "", false, nil
+		return core.Task{}, false, nil
 	}
 	task, err := core.CurrentTaskOf(ctx, q, e)
 	if errors.Is(err, core.ErrNotFound) {
-		return "", false, nil
+		return task, false, nil
 	}
-	if err != nil {
-		return "", false, err
-	}
-	t, err := core.ThreadByID(ctx, q, task.ConversationID)
-	if err != nil {
-		return "", false, err
-	}
-	anchor, err := TaskAnchor(ctx, q, t, task)
-	return anchor, err == nil, err
+	return task, err == nil, err
 }
 
 // sendAnchor is the anchor a session.send to a running session carries: the delivery's own (a
@@ -84,7 +75,7 @@ func sendAnchor(ctx context.Context, q core.DB, e core.Employee, d Delivery) (*s
 	if d.Anchor != nil || e.Tier != "member" {
 		return d.Anchor, nil
 	}
-	_, holds, err := currentAnchor(ctx, q, e)
+	_, holds, err := heldTask(ctx, q, e)
 	if err != nil || holds {
 		return nil, err
 	}
@@ -100,9 +91,14 @@ func openAnchor(ctx context.Context, q core.DB, e core.Employee, first *protocol
 	if first != nil && first.Anchor != nil {
 		return nil, nil
 	}
-	anchor, holds, err := currentAnchor(ctx, q, e)
+	task, holds, err := heldTask(ctx, q, e)
 	if err != nil || !holds {
 		return nil, err
 	}
-	return &anchor, nil
+	t, err := core.ThreadByID(ctx, q, task.ConversationID)
+	if err != nil {
+		return nil, err
+	}
+	anchor, err := TaskAnchor(ctx, q, t, task)
+	return &anchor, err
 }
