@@ -50,7 +50,7 @@ const files = (id, version) => sql(`SELECT path || '|' || published_by || '|' ||
   WHERE deliverable_id = '${id}' AND version = ${version} ORDER BY path`).split("\n").filter(Boolean);
 const content = (id, version, path) => sql(`SELECT convert_from(data, 'UTF8') FROM at_deliverable_files
   WHERE deliverable_id = '${id}' AND version = ${version} AND path = '${path}'`);
-const employeeId = (tid, name) => sql(`SELECT id FROM at_employees WHERE thread_id = '${tid}' AND name = '${name}'`);
+const employeeId = (tid, name) => sql(`SELECT id FROM at_employees WHERE project_id = (SELECT project_id FROM at_threads WHERE id = '${tid}') AND thread_id IS NULL AND name = '${name}'`); // project member
 const toolCalls = (empId, tool) => sql(`SELECT count(*) FROM at_tool_calls c JOIN at_agent_sessions s ON s.id = c.session_id
   WHERE s.employee_id = '${empId}' AND c.tool = '${tool}' AND c.status = 'done'`);
 

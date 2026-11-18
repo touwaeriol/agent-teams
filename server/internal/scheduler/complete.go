@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
@@ -69,24 +70,30 @@ func (s *Scheduler) afterWork(ctx context.Context, tx *core.Tx, th core.Thread, 
 	if err != nil {
 		return err
 	}
-	if role := gateRole(ctx, tx, th.ID, "review"); d.Gates.Review && role != "" {
+	role, err := gateRole(ctx, tx, th, "review")
+	if err != nil {
+		return err
+	}
+	if d.Gates.Review && role != "" {
 		return s.openGate(ctx, tx, th, task, "review", role)
 	}
 	return s.notifyLead(ctx, tx, th, fmt.Sprintf("[Task %s · %s · done] %s\n分支：%s%s", task.ID, task.ClaimedBy, task.Summary, task.Branch, pushedNote(task)))
 }
 
-// gateRole is the role of the thread's member responsible for a gate ("" when none).
-func gateRole(ctx context.Context, q core.DB, threadID, gate string) string {
-	emps, err := core.ThreadEmployees(ctx, q, threadID)
+// gateRole is the role of the member responsible for a gate: a project member's, else one of
+// the thread's legacy members ("" when none).
+func gateRole(ctx context.Context, q core.DB, th core.Thread, gate string) (string, error) {
+	staff, err := core.ProjectMembers(ctx, q, th.ProjectID)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	for _, e := range emps {
+	legacy, err := core.ThreadEmployees(ctx, q, th.ID)
+	for _, e := range append(staff, legacy...) {
 		if e.Tier == "member" && e.Spec.Gate == gate {
-			return e.Role
+			return e.Role, err
 		}
 	}
-	return ""
+	return "", err
 }
 
 func (s *Scheduler) openGate(ctx context.Context, tx *core.Tx, th core.Thread, task core.Task, kind, role string) error {
@@ -106,7 +113,7 @@ func (s *Scheduler) openGate(ctx context.Context, tx *core.Tx, th core.Thread, t
 			return err
 		}
 	}
-	s.kickAfter(tx, th.ID)
+	s.kickAfter(tx, th.ProjectID)
 	return nil
 }
 
@@ -139,7 +146,11 @@ func (s *Scheduler) passed(ctx context.Context, tx *core.Tx, th core.Thread, par
 	if err != nil {
 		return err
 	}
-	if role := gateRole(ctx, tx, th.ID, "decision"); gate.Kind == "review" && d.Gates.Decision && role != "" {
+	role, err := gateRole(ctx, tx, th, "decision")
+	if err != nil {
+		return err
+	}
+	if gate.Kind == "review" && d.Gates.Decision && role != "" {
 		return s.openGate(ctx, tx, th, parent, "decision", role)
 	}
 	if parent.Status == "decision" {
@@ -158,26 +169,35 @@ func gateName(t core.Task) string {
 	return "审查"
 }
 
-// rejected sends a reviewed task back to its member and informs the lead.
+// rejected puts a reviewed task back into the queue as rework reserved for its member for
+// ReserveFor (shared-members.md §4.1): it claims it again when free, with the verdict in the
+// brief; after that another member of the role may take it over. The lead is informed.
 func (s *Scheduler) rejected(ctx context.Context, tx *core.Tx, th core.Thread, parent, gate core.Task) error {
 	text := fmt.Sprintf("[%s %s · %s · rejected] %s", gateName(gate), gate.ID, gate.ClaimedBy, gate.Summary)
 	if gate.Kind == "decision" {
 		return s.notifyLead(ctx, tx, th, text+fmt.Sprintf("\n任务 %s 等你决定。", parent.ID))
 	}
-	parent, err := core.UpdateTask(ctx, tx, parent, map[string]any{"status": "running", "nudges": 0})
+	parent, err := core.RequeueTask(ctx, tx, parent, reworkOf(parent.ClaimedBy))
 	if err != nil {
 		return err
 	}
 	if err := tx.EmitTask(ctx, parent); err != nil {
 		return err
 	}
-	if member, err := core.EmployeeByName(ctx, tx, th.ProjectID, &th.ID, parent.ClaimedBy); err == nil {
-		msg := text + fmt.Sprintf("\n请按审查意见修改任务 %s，然后再次调用 complete_task。", parent.ID)
-		if _, err := s.orch.Deliver(ctx, tx, member, orchestrator.Delivery{Text: msg, Kind: "task", Priority: "next"}); err != nil {
-			return err
-		}
-	}
-	return s.notifyLead(ctx, tx, th, text)
+	s.kickAfter(tx, th.ProjectID)
+	return s.notifyLead(ctx, tx, th, text+fmt.Sprintf("\n任务 %s 已退回队列，预留给 %s 返工。", parent.ID, parent.ReservedFor))
+}
+
+// reworkOf is the change that returns a task to the queue reserved for member.
+func reworkOf(member string) map[string]any {
+	return map[string]any{"claimed_by": "", "claimed_at": nil, "nudges": 0,
+		"reserved_for": member, "reserved_until": time.Now().Add(ReserveFor).UTC()}
+}
+
+// Reserve reserves a new task (a merge conflict or CI fix) for the member whose work it fixes.
+func (s *Scheduler) Reserve(ctx context.Context, tx *core.Tx, task core.Task, member string) (core.Task, error) {
+	return core.UpdateTask(ctx, tx, task, map[string]any{"reserved_for": member,
+		"reserved_until": time.Now().Add(ReserveFor).UTC()})
 }
 
 // failOrRetry returns a failed task to the pool until MaxAttempts, then fails it and tells the lead.
@@ -188,12 +208,11 @@ func (s *Scheduler) failOrRetry(ctx context.Context, tx *core.Tx, task core.Task
 	}
 	who := task.ClaimedBy
 	if task.Attempt+1 < MaxAttempts {
-		task, err = core.UpdateTask(ctx, tx, task, map[string]any{"status": "pending", "claimed_by": "",
-			"attempt": task.Attempt + 1, "claimed_at": nil})
+		task, err = core.RequeueTask(ctx, tx, task, map[string]any{"claimed_by": "", "attempt": task.Attempt + 1, "claimed_at": nil})
 		if err != nil {
 			return task, err
 		}
-		s.kickAfter(tx, th.ID)
+		s.kickAfter(tx, th.ProjectID)
 		return task, tx.EmitTask(ctx, task)
 	}
 	task, err = core.UpdateTask(ctx, tx, task, map[string]any{"attempt": task.Attempt + 1})
@@ -234,8 +253,12 @@ func (s *Scheduler) finish(ctx context.Context, tx *core.Tx, task core.Task, fin
 			return task, err
 		}
 	}
-	s.kickAfter(tx, task.ConversationID)
-	return task, nil
+	if final == "done" {
+		if err := core.MarkReady(ctx, tx, task.ConversationID, task.ID); err != nil {
+			return task, err
+		}
+	}
+	return task, s.kickTaskAfter(ctx, tx, task)
 }
 
 var finalWord = map[string]string{"failed": "失败了", "cancelled": "被取消了"}
@@ -315,13 +338,29 @@ func (s *Scheduler) touchMember(ctx context.Context, tx *core.Tx, task core.Task
 	if err != nil {
 		return
 	}
-	if e, err := core.EmployeeByName(ctx, tx, th.ProjectID, &th.ID, task.ClaimedBy); err == nil {
-		s.orch.Touch(tx, e.ID, "task:"+task.ID)
+	e, err := core.EmployeeByName(ctx, tx, th.ProjectID, &th.ID, task.ClaimedBy)
+	if err != nil {
+		return
+	}
+	s.orch.Touch(tx, e.ID, "task:"+task.ID)
+	if e.ProjectMember() && task.Status != "claimed" && task.Status != "running" {
+		tx.AfterCommit(func(ctx context.Context) { s.orch.Released(ctx, e) })
 	}
 }
 
-func (s *Scheduler) kickAfter(tx *core.Tx, threadID string) {
-	tx.AfterCommit(func(ctx context.Context) { s.Kick(ctx, threadID) })
+// kickAfter asks for a pass over the project's queue after the commit.
+func (s *Scheduler) kickAfter(tx *core.Tx, projectID string) {
+	tx.AfterCommit(func(ctx context.Context) { s.Kick(ctx, projectID) })
+}
+
+// kickTaskAfter asks for a pass over the queue of the task's project after the commit.
+func (s *Scheduler) kickTaskAfter(ctx context.Context, tx *core.Tx, task core.Task) error {
+	th, err := core.ThreadByID(ctx, tx, task.ConversationID)
+	if err != nil {
+		return err
+	}
+	s.kickAfter(tx, th.ProjectID)
+	return nil
 }
 
 // notifyLead sends a platform note to the thread's lead (priority later), refreshing its worktree first.

@@ -38,6 +38,8 @@ describe("listGroupOf", () => {
     expect(listGroupOf(thread(1, { status: "queued" }))).toBe("active");
     expect(listGroupOf(thread(1, { members: [member("idle")] }))).toBe("idle");
     expect(listGroupOf(thread(1, { status: "paused", members: [member("typing")] }))).toBe("idle");
+    // A shared member typing for another thread does not make this one active.
+    expect(listGroupOf(thread(1, { members: [{ ...member("typing"), busy_elsewhere: true, thread_no: 2 }] }))).toBe("idle");
   });
   it("done and failed are 已完成, archived its own", () => {
     expect(listGroupOf(thread(1, { status: "done" }))).toBe("done");

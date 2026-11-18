@@ -1,7 +1,7 @@
 import type { RoleView } from "@/api/views";
 import { RUNTIME_LABEL } from "@/lib/present";
 
-/** Lead + member roles as chips (NewProject “每个讨论串的团队”). */
+/** Lead + member roles as chips (NewProject “项目团队”). */
 export function teamChips(roles: RoleView[]): { name: string; n: number; kind: string }[] {
   return roles
     .filter((r) => r.tier !== "coordinator")

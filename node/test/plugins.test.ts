@@ -43,6 +43,19 @@ describe("plugins", () => {
     expect(existsSync(join(root, "agent-plugins", "p1", "3", "dev-1"))).toBe(false);
   });
 
+  it("keeps a project member's plugins in <project>/project/<name> whatever thread it works in", () => {
+    const root = mkdtempSync(join(tmpdir(), "at-plugins-"));
+    const shared = { ...employee, scope: "project" as const };
+    const [a] = materializePlugins(root, { employee: shared, plugins: [tinyplug()] });
+    expect(a!.dir).toBe(join(root, "p1", "project", "dev-1", "tinyplug@2"));
+    const [b] = materializePlugins(root, { employee: { ...shared, thread_no: 7 }, plugins: [tinyplug()] });
+    expect(b!.dir).toBe(a!.dir);
+    expect(existsSync(join(root, "p1", "7"))).toBe(false);
+    // A thread-scoped employee (a lead) stays under its thread number.
+    const [lead] = materializePlugins(root, { employee: { ...employee, name: "lead-3", tier: "lead", scope: "thread" }, plugins: [tinyplug()] });
+    expect(lead!.dir).toBe(join(root, "p1", "3", "lead-3", "tinyplug@2"));
+  });
+
   it("never gives the coordinator plugins", () => {
     const root = mkdtempSync(join(tmpdir(), "at-plugins-"));
     expect(materializePlugins(root, { employee: { ...employee, tier: "coordinator", thread_no: null }, plugins: [tinyplug()] })).toEqual([]);

@@ -222,7 +222,7 @@ func (a *API) deliverComment(ctx context.Context, tx *core.Tx, d core.Deliverabl
 		return "", err
 	}
 	text := commentText(d, c, pub.name, emp.Name)
-	conv := emp.ThreadID
+	conv := emp.WorkThreadID()
 	if conv == nil {
 		conv = d.ThreadID
 	}
@@ -256,16 +256,17 @@ func versionPublisher(ctx context.Context, tx *core.Tx, d core.Deliverable, vers
 	return publisher{name: row.PublishedBy, id: row.PublisherID}, err
 }
 
-// commentRecipient is the publishing employee while active, else the lead of its thread, else
+// commentRecipient is the publishing employee while active, else the lead of its (current) thread, else
 // (versions without an employee id) the employee of that name in the deliverable's thread or its lead.
 func commentRecipient(ctx context.Context, tx *core.Tx, d core.Deliverable, pub publisher) (core.Employee, error) {
 	if pub.id != "" {
 		emp, err := core.EmployeeByID(ctx, tx, pub.id)
-		if err == nil && emp.Active && emp.ThreadID != nil {
+		th := emp.WorkThreadID()
+		if err == nil && emp.Active && th != nil {
 			return emp, nil
 		}
-		if err == nil && emp.ThreadID != nil {
-			return core.Lead(ctx, tx, *emp.ThreadID)
+		if err == nil && th != nil {
+			return core.Lead(ctx, tx, *th)
 		}
 		if err != nil && !errors.Is(err, core.ErrNotFound) {
 			return emp, err

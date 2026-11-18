@@ -458,7 +458,8 @@ func (e *Engine) problem(ctx context.Context, t core.Thread, entry core.MergeEnt
 	})
 }
 
-// fixTask blocks the original task and assigns a fix task to the same member.
+// fixTask blocks the original task and queues a fix task for the member's role, reserved for
+// the member whose branch it fixes (scheduler.ReserveFor; shared-members.md §4.1).
 func (e *Engine) fixTask(ctx context.Context, tx *core.Tx, t core.Thread, entry core.MergeEntry, instruction string) (string, error) {
 	var mainID, parent string
 	if entry.TaskID != nil {
@@ -474,8 +475,12 @@ func (e *Engine) fixTask(ctx context.Context, tx *core.Tx, t core.Thread, entry 
 			mainID = *task.MainTaskID
 		}
 	}
-	fix, _, err := e.sched.Assign(ctx, tx, scheduler.Assignment{Thread: t, Assignee: entry.Employee, Instruction: instruction,
-		Main: mainID, Kind: "fix", Parent: parent, CreatedBy: "platform", Priority: 50})
+	assignee := entry.Employee
+	if m, err := core.EmployeeByName(ctx, tx, t.ProjectID, &t.ID, entry.Employee); err == nil {
+		assignee = m.Role
+	}
+	fix, _, err := e.sched.Assign(ctx, tx, scheduler.Assignment{Thread: t, Assignee: assignee, Instruction: instruction,
+		Main: mainID, Kind: "fix", Parent: parent, CreatedBy: "platform", Priority: 50, ReservedFor: entry.Employee})
 	return fix.ID, err
 }
 

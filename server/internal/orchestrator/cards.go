@@ -47,7 +47,7 @@ func (o *Orchestrator) RecordTodos(ctx context.Context, tx *core.Tx, e core.Empl
 		if err != nil {
 			return err
 		}
-		return tx.EmitMessage(ctx, e.ProjectID, e.ThreadID, m)
+		return tx.EmitMessage(ctx, e.ProjectID, e.WorkThreadID(), m)
 	}
 	if err != nil && !errors.Is(err, core.ErrNotFound) {
 		return err
@@ -97,7 +97,7 @@ func (o *Orchestrator) recordCard(ctx context.Context, tx *core.Tx, e core.Emplo
 	if err != nil {
 		return err
 	}
-	return tx.EmitMessage(ctx, e.ProjectID, e.ThreadID, m)
+	return tx.EmitMessage(ctx, e.ProjectID, e.WorkThreadID(), m)
 }
 
 func todoMeta(todos []protocol.TodoItem) []map[string]any {

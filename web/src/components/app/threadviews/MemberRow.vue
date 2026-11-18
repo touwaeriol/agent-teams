@@ -4,19 +4,22 @@ import { computed } from "vue";
 import { threads as threadActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import type { EmployeeBrief, ThreadView } from "@/api/views";
-import { askingLabel, elapsed, isWorking } from "@/lib/live";
-import { memberTone, RUNTIME_LABEL, TIER_LABEL } from "@/lib/present";
+import { askingLabel, elapsed, workingHere } from "@/lib/live";
+import { busyElsewhereText, memberTone, RUNTIME_LABEL, TIER_LABEL } from "@/lib/present";
 import LiveDot from "../LiveDot.vue";
 import { memberStatusLine } from "./members";
 
 const props = defineProps<{ thread: ThreadView; member: EmployeeBrief; asking: boolean; now: number }>();
 const stop = useAction(() => threadActions.interruptMember(props.thread.id, props.member.name), { success: `已让 ${props.member.name} 停下` });
-const working = computed(() => isWorking(props.member));
+const working = computed(() => workingHere(props.member));
+const elsewhere = computed(() => busyElsewhereText(props.member));
 const where = computed(() => {
   const n = props.member.node;
   return `${RUNTIME_LABEL[props.member.runtime] ?? props.member.runtime} · ${n ? `${n.name}${n.online ? "" : "（离线）"}` : "未分配节点"}`;
 });
-const status = computed(() => memberStatusLine(askingLabel(props.member, props.asking), props.member.status, (since) => elapsed(since, props.now)));
+const status = computed(() =>
+  elsewhere.value || memberStatusLine(askingLabel(props.member, props.asking), props.member.status, (since) => elapsed(since, props.now)),
+);
 </script>
 
 <template>

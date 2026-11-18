@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 260 {
+	if migrations.Latest() != 270 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -1078,5 +1078,77 @@ func TestTaskHandoffMigration(t *testing.T) {
 	}
 	if _, err := db.Exec(`SELECT handoff FROM at_tasks`); err == nil {
 		t.Fatal("handoff survived down")
+	}
+}
+
+// TestSharedMembersMigration: 00270 adds the shared-member columns, backfills a session's thread
+// from its employee (coordinator sessions stay NULL) and ready_at of the pending tasks whose
+// dependencies are done, and current_thread_id / session thread_id go NULL when the thread is
+// deleted. Down drops them.
+func TestSharedMembersMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 260); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
+INSERT INTO at_conversations (id, user_id, title, project_id, kind) VALUES ('th1', 'u1', 't', 'p1', 'thread');
+INSERT INTO at_threads (id, project_id, user_id, no, title, branch) VALUES ('th1', 'p1', 'u1', 1, 'x', 'thread/1-x');
+INSERT INTO at_employees (id, project_id, thread_id, name, tier, role, runtime) VALUES
+  ('e1', 'p1', 'th1', 'dev-1', 'member', 'dev', 'claude'), ('e2', 'p1', NULL, 'coordinator', 'coordinator', 'coordinator', 'claude');
+INSERT INTO at_agent_sessions (id, employee_id, runtime, cwd, state) VALUES ('s1', 'e1', 'claude', '/w', 'closed'), ('s2', 'e2', 'claude', '/w', 'closed');
+INSERT INTO at_tasks (conversation_id, id, thread_id, assignee, instruction, depends_on, status) VALUES
+  ('th1', 't1', 'th1', 'dev', 'free', '[]', 'pending'), ('th1', 't2', 'th1', 'dev', 'waits', '["t3"]', 'pending'),
+  ('th1', 't3', 'th1', 'dev', 'runs', '[]', 'running'), ('th1', 't4', 'th1', 'dev', 'dep done', '["t5"]', 'pending'),
+  ('th1', 't5', 'th1', 'dev', 'done', '[]', 'done');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 270); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.QueryRow(`SELECT string_agg(id || ':' || (ready_at IS NOT NULL)::text, ' ' ORDER BY id) FROM at_tasks`).Scan(&got); err != nil ||
+		got != "t1:true t2:false t3:false t4:true t5:false" {
+		t.Fatalf("ready_at after 00270: %q %v", got, err)
+	}
+	if err := db.QueryRow(`SELECT count(*)::text FROM at_agent_sessions WHERE NOT in_turn`).Scan(&got); err != nil || got != "2" {
+		t.Fatalf("in_turn after 00270: %q %v", got, err)
+	}
+	if err := db.QueryRow(`SELECT string_agg(id || ':' || COALESCE(thread_id, '-'), ' ' ORDER BY id) FROM at_agent_sessions`).Scan(&got); err != nil ||
+		got != "s1:th1 s2:-" {
+		t.Fatalf("sessions after 00270: %q %v", got, err)
+	}
+	if err := db.QueryRow(`SELECT string_agg(column_name || '=' || coalesce(column_default, '') || ':' || is_nullable, ' ' ORDER BY column_name)
+		FROM information_schema.columns WHERE table_name = 'at_tasks' AND column_name IN ('reserved_for','reserved_until','ready_at')`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if want := "ready_at=:YES reserved_for=''::text:NO reserved_until=:YES"; got != want {
+		t.Fatalf("task columns:\n got %s\nwant %s", got, want)
+	}
+	if _, err := db.Exec(`UPDATE at_employees SET current_thread_id = 'th1' WHERE id = 'e2';
+UPDATE at_threads SET only_roles = '["dev"]' WHERE id = 'th1';
+DELETE FROM at_tasks WHERE thread_id = 'th1';
+DELETE FROM at_employees WHERE id = 'e1';
+DELETE FROM at_threads WHERE id = 'th1'`); err != nil {
+		t.Fatal(err)
+	}
+	var cur *string
+	if err := db.QueryRow(`SELECT current_thread_id FROM at_employees WHERE id = 'e2'`).Scan(&cur); err != nil || cur != nil {
+		t.Fatalf("current_thread_id after delete: %v %v", cur, err)
+	}
+	if _, err := p.DownTo(ctx, 260); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{`SELECT current_thread_id FROM at_employees`, `SELECT thread_id FROM at_agent_sessions`,
+		`SELECT reserved_for FROM at_tasks`, `SELECT only_roles FROM at_threads`, `SELECT in_turn FROM at_agent_sessions`} {
+		if _, err := db.Exec(q); err == nil {
+			t.Fatalf("%s survived down", q)
+		}
 	}
 }

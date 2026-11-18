@@ -62,8 +62,8 @@ type Orchestrator struct {
 	office *office.Registry
 	log    *slog.Logger
 
-	// Kick asks the scheduler to look at a thread's task pool (set by the engine).
-	Kick func(ctx context.Context, threadID string)
+	// Kick asks the scheduler to look at a project's task queue (set by the engine).
+	Kick func(ctx context.Context, projectID string)
 	// ThreadEnded runs (after commit) when a thread reaches done/failed/archived: cleanup.
 	ThreadEnded func(ctx context.Context, threadID string)
 	// Approvals is consulted for allowed_tools expansion of remembered rules.

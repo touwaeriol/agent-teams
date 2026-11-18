@@ -142,7 +142,7 @@ func TestModelFallback(t *testing.T) {
 	}
 }
 
-// TestModelCommand: /model in a thread changes the lead (or every employee of the thread with
+// TestModelCommand: /model in a thread changes the lead (or every participant of the thread with
 // the lead's runtime) and sends the running sessions session.set_mode; in the coordinator chat it
 // sets the project's coordinator model. A turn_ended model shows as the session's model.
 func TestModelCommand(t *testing.T) {
@@ -159,7 +159,7 @@ func TestModelCommand(t *testing.T) {
 	}
 	var cm orchapi.ConversationModel
 	b.must(200, "GET", conv, nil, &cm)
-	if cm.Scope != "thread" || cm.Model != "claude-sonnet-x" || cm.Override != "claude-sonnet-x" || cm.Inherited != "claude-opus-5-5" || !cm.Live || len(cm.Members) != 3 {
+	if cm.Scope != "thread" || cm.Model != "claude-sonnet-x" || cm.Override != "claude-sonnet-x" || cm.Inherited != "claude-opus-5-5" || !cm.Live || len(cm.Members) != 2 {
 		t.Fatalf("thread model: %+v", cm)
 	}
 	for _, m := range cm.Members {
@@ -169,7 +169,7 @@ func TestModelCommand(t *testing.T) {
 	}
 
 	b.must(200, "PUT", conv, map[string]any{"model": "claude-haiku-y", "scope": "thread"}, &res)
-	if len(res.Applied) != 3 {
+	if len(res.Applied) != 2 { // lead-1 and dev-1, the project member working here (dev-2 never did)
 		t.Fatalf("whole thread: %+v", res)
 	}
 	if tm.lead.expectSetMode() != "claude-haiku-y" || tm.dev.expectSetMode() != "claude-haiku-y" {

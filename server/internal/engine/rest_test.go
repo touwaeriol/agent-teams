@@ -31,7 +31,7 @@ func TestRESTSurface(t *testing.T) {
 	}
 	var members []core.EmployeeBrief
 	b.must(200, "GET", "/api/threads/"+tid+"/members", nil, &members)
-	if len(members) != 3 || members[0].Name != "lead-1" || members[0].Node == nil || !members[0].Node.Online {
+	if len(members) != 2 || members[0].Name != "lead-1" || members[0].Node == nil || !members[0].Node.Online {
 		t.Fatalf("members %+v", members)
 	}
 	var mains []core.MainTaskView

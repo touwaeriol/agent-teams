@@ -84,8 +84,10 @@ describe("assist logic", () => {
 
   it("summarises /status and /context", () => {
     const busy = thread(2, { status: "running", members: [{ ...thread(2).members[0]!, name: "dev-1", status: { state: "typing", bubble: "写表单" } }] } as never);
-    const s = statusSummary({ threads: [busy, thread(3, { status: "done" })], waiting: { questions: [{} as never], reviews: [] }, nodes: [{ online: true } as never, { online: false } as never] });
-    expect(s).toEqual({ busy: [{ name: "dev-1", where: "#2", doing: "写表单" }], activeThreads: 1, cards: 1, reviews: 0, nodesOnline: 1, nodesTotal: 2 });
+    // dev-1 is a shared member: thread #4 lists it too, busy elsewhere; it is counted once, at #2.
+    const other = thread(4, { status: "running", members: [{ ...thread(4).members[0]!, name: "dev-1", busy_elsewhere: true, thread_no: 2, status: { state: "typing" } }] } as never);
+    const s = statusSummary({ threads: [busy, other, thread(3, { status: "done" })], waiting: { questions: [{} as never], reviews: [] }, nodes: [{ online: true } as never, { online: false } as never] });
+    expect(s).toEqual({ busy: [{ name: "dev-1", where: "#2", doing: "写表单" }], activeThreads: 2, cards: 1, reviews: 0, nodesOnline: 1, nodesTotal: 2 });
     const rows = contextRows({
       employee: "lead-1", runtime: "claude", instructions_chars: 12, memory_index_chars: 0, memory_files: 2, messages: 4, message_chars: 300,
       session: { state: "active", model: "claude-opus-5-5", turns: 2, cost_usd: 1, total: { input: 10, output: 200, cache_read: 3000, cache_write: 100 }, last_turn: { input: 5, output: 100, cache_read: 1500, cache_write: 50 } },

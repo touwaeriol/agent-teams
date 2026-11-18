@@ -71,8 +71,19 @@ func (r *router) other(ctx context.Context, node store.Node, typ string, body an
 	return nil
 }
 
-// NodeOnline implements nodegw.Handler.
-func (r *router) NodeOnline(ctx context.Context, node store.Node) { r.nodeChanged(ctx, node, true) }
+// NodeOnline implements nodegw.Handler: besides the state change, the owner's projects with
+// queued work get a scheduling pass (shared-members.md §4).
+func (r *router) NodeOnline(ctx context.Context, node store.Node) {
+	r.nodeChanged(ctx, node, true)
+	ids, err := core.UserProjectsWithWork(ctx, r.e.Core.Pool, node.UserID)
+	if err != nil {
+		r.e.log.Warn("projects with work", "node_id", node.ID, "err", err)
+		return
+	}
+	for _, id := range ids {
+		r.e.Sched.Kick(ctx, id)
+	}
+}
 
 // NodeOffline implements nodegw.Handler.
 func (r *router) NodeOffline(ctx context.Context, node store.Node) { r.nodeChanged(ctx, node, false) }
@@ -123,7 +134,7 @@ func (r *router) sessionState(ctx context.Context, m *protocol.SessionState) err
 		if err != nil {
 			return ignoreMissing(err)
 		}
-		return r.e.Sched.SessionLost(ctx, tx, sc.Employee)
+		return r.e.Sched.SessionLost(ctx, tx, sc)
 	})
 }
 
@@ -213,6 +224,9 @@ func (r *router) applyEvent(ctx context.Context, tx *core.Tx, sc core.SessionCon
 	cause := string(ev.Kind)
 	switch ev.Kind {
 	case "turn_started":
+		if err := core.SetInTurn(ctx, tx, sc.Session.ID, true); err != nil {
+			return nil, err
+		}
 		return []status.Observation{{Kind: status.TurnStarted, Cause: cause}}, r.checkTools(ctx, tx, sc, ev.Tools)
 	case "tool_started":
 		return r.toolStarted(ctx, tx, sc, ev)
@@ -268,12 +282,15 @@ func (r *router) toolStarted(ctx context.Context, tx *core.Tx, sc core.SessionCo
 		return []status.Observation{o}, nil
 	}
 	text := fmt.Sprintf("%s %s", tool, o.Summary)
-	return []status.Observation{o}, tx.EmitActivity(ctx, sc.Employee.ProjectID, sc.Employee.ThreadID, sc.Employee.Name, text)
+	return []status.Observation{o}, tx.EmitActivity(ctx, sc.Employee.ProjectID, sc.Employee.WorkThreadID(), sc.Employee.Name, text)
 }
 
 // turnEnded records usage and nudges a member whose task is still running.
 // An employee waiting for its usage limit to reset is not nudged: its thread is paused.
 func (r *router) turnEnded(ctx context.Context, tx *core.Tx, sc core.SessionContext, ev *protocol.SessionEvent) error {
+	if err := core.SetInTurn(ctx, tx, sc.Session.ID, false); err != nil {
+		return err
+	}
 	if err := recordUsage(ctx, tx, sc, ev); err != nil {
 		return err
 	}
@@ -284,14 +301,14 @@ func (r *router) turnEnded(ctx context.Context, tx *core.Tx, sc core.SessionCont
 	if err != nil || waiting {
 		return err
 	}
-	return r.e.Sched.TurnEnded(ctx, tx, sc.Employee)
+	return r.e.Sched.TurnEnded(ctx, tx, sc)
 }
 
 // rateLimited logs the limit as activity; a usage limit (reset minutes or hours away)
 // also pauses the employee's thread until then (data-model.md §2.10).
 func (r *router) rateLimited(ctx context.Context, tx *core.Tx, sc core.SessionContext, ev *protocol.SessionEvent) error {
 	e := sc.Employee
-	if err := tx.EmitActivity(ctx, e.ProjectID, e.ThreadID, e.Name, "限速中："+val(ev.Detail)); err != nil {
+	if err := tx.EmitActivity(ctx, e.ProjectID, e.WorkThreadID(), e.Name, "限速中："+val(ev.Detail)); err != nil {
 		return err
 	}
 	if !timers.IsUsageLimit(ev.RetryAt, time.Now()) {
@@ -311,7 +328,7 @@ func recordUsage(ctx context.Context, tx *core.Tx, sc core.SessionContext, ev *p
 	}
 	_, err := store.Exec(ctx, tx, `INSERT INTO at_usage (session_id, project_id, thread_id, turn_id, cost_usd, input_tokens,
 		output_tokens, cache_read_tokens, cache_write_tokens, duration_ms, model) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-		ON CONFLICT (session_id, turn_id) DO NOTHING`, sc.Session.ID, sc.Employee.ProjectID, sc.Employee.ThreadID, turn,
+		ON CONFLICT (session_id, turn_id) DO NOTHING`, sc.Session.ID, sc.Employee.ProjectID, sc.Employee.WorkThreadID(), turn,
 		ev.CostUSD, num(usage, "input_tokens"), num(usage, "output_tokens"), num(usage, "cache_read_input_tokens"),
 		num(usage, "cache_creation_input_tokens"), ev.DurationMS, val(ev.Model))
 	return err
@@ -335,7 +352,7 @@ func (r *router) text(ctx context.Context, tx *core.Tx, sc core.SessionContext, 
 	if e.Tier == "coordinator" || e.Tier == "lead" {
 		return r.e.Orch.RecordReply(ctx, tx, e, *ev.Text)
 	}
-	return tx.EmitActivity(ctx, e.ProjectID, e.ThreadID, e.Name, clip(*ev.Text, 300))
+	return tx.EmitActivity(ctx, e.ProjectID, e.WorkThreadID(), e.Name, clip(*ev.Text, 300))
 }
 
 func (r *router) sessionError(ctx context.Context, tx *core.Tx, sc core.SessionContext, ev *protocol.SessionEvent) error {

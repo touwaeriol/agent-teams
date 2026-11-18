@@ -86,7 +86,7 @@ async function main() {
     const question = await waitFor("the dev's ask_user reaches the user", async () =>
       ((await c.get(`/api/projects/${state.projectId}/waiting`)).questions ?? []).find((q) => q.kind !== "approval" && String(q.asker).startsWith("dev")),
     { timeoutMs: 900_000, everyMs: 3000 });
-    const mode = sql(`SELECT s.permission_mode FROM at_agent_sessions s JOIN at_employees e ON e.id = s.employee_id WHERE e.thread_id = '${t.id}' AND e.tier = 'member' LIMIT 1`);
+    const mode = sql(`SELECT s.permission_mode FROM at_agent_sessions s JOIN at_employees e ON e.id = s.employee_id WHERE s.thread_id = '${t.id}' AND e.tier = 'member' LIMIT 1`);
     check(mode === "bypassPermissions", `the dev's session opened in permission mode ${mode}`);
     check(worktreeFile(t, "listing.txt")?.startsWith("total") && worktreeFile(t, "out.txt")?.trim() === "built", "the dev ran Bash (ls, mkdir, echo) in its worktree");
     check(worktreeFile(t, "hello.txt")?.includes("hello from bypass"), "the dev wrote hello.txt with the Write tool");

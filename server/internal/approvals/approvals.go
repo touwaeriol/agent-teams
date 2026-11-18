@@ -115,12 +115,10 @@ func (e *Engine) insertCard(ctx context.Context, tx *core.Tx, sc core.SessionCon
 	}
 	pid, aid, sid := sc.Employee.ProjectID, string(m.ApprovalID), sc.Session.ID
 	var taskID *string
-	if sc.Employee.ThreadID != nil {
-		if t, err := core.CurrentTask(ctx, tx, *sc.Employee.ThreadID, sc.Employee.Name); err == nil {
-			taskID = &t.ID
-		}
+	if t, err := core.SessionTask(ctx, tx, sc); err == nil {
+		taskID = &t.ID
 	}
-	return core.InsertQuestion(ctx, tx, core.NewQuestion{ConversationID: conv, ProjectID: pid, ThreadID: sc.Employee.ThreadID,
+	return core.InsertQuestion(ctx, tx, core.NewQuestion{ConversationID: conv, ProjectID: pid, ThreadID: sc.Employee.WorkThreadID(),
 		Asker: sc.Employee.Name, TaskID: taskID, Audience: "user", Kind: "approval", Text: text,
 		Options: availableOf(m), Detail: detail, SessionID: &sid, ApprovalID: &aid})
 }
@@ -173,16 +171,16 @@ func (e *Engine) decide(ctx context.Context, tx *core.Tx, sc core.SessionContext
 }
 
 func threadAuto(ctx context.Context, q core.DB, emp core.Employee) (bool, error) {
-	if emp.ThreadID == nil {
+	if emp.WorkThreadID() == nil {
 		return false, nil
 	}
-	t, err := core.ThreadByID(ctx, q, *emp.ThreadID)
+	t, err := core.ThreadByID(ctx, q, *emp.WorkThreadID())
 	return t.AutoApprove, err
 }
 
 func matchRule(ctx context.Context, q core.DB, emp core.Employee, tool, hash string) (string, error) {
 	var rule struct{ ID string }
-	err := core.MapErr(rulesFor(ctx, q, emp.ProjectID, emp.ThreadID, emp.Name).Select("id").
+	err := core.MapErr(rulesFor(ctx, q, emp.ProjectID, emp.WorkThreadID(), emp.Name).Select("id").
 		Where("tool_name = ? AND input_hash = ?", tool, hash).Order("created_at").Take(&rule).Error)
 	if errors.Is(err, core.ErrNotFound) {
 		return "", nil

@@ -269,6 +269,7 @@ CREATE TABLE at_threads (
   finished_at    TIMESTAMPTZ,
   archived_from  TEXT NOT NULL DEFAULT '',        -- 00095：归档前的状态（取消归档时 done/failed 回原状态，其余回 paused）
   stalled_note_at TIMESTAMPTZ,                    -- 00130：上次给组长发“守护进程重启后无人工作”检查的时间；同一次停滞只发一次（之后有用户消息/回答、任务/计划/合并/CI/PR 变化或恢复运行才再发，且 10 分钟内不重发）
+  only_roles     JSONB,                           -- 00270：open_thread(roles) 限定的成员岗位（组长只能往这些岗位派活；平台建的审查 / 修复任务不受限）；NULL = 全部
   UNIQUE (project_id, no)
 );
 CREATE INDEX at_threads_project ON at_threads (project_id, status, updated_at DESC);
@@ -324,6 +325,13 @@ ALTER TABLE at_tasks
   ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
+-- 00270（shared-members.md §4）：任务进项目级队列，由项目成员领取
+ALTER TABLE at_tasks
+  ADD COLUMN reserved_for TEXT NOT NULL DEFAULT '',  -- 返工预留给的原成员（审查打回、CI / 冲突修复）
+  ADD COLUMN reserved_until TIMESTAMPTZ,             -- 预留到期（10 分钟），过期后同岗位其他成员可领
+  ADD COLUMN ready_at TIMESTAMPTZ;                   -- 依赖都满足、可领取的时刻（饿死保护按它算 5 分钟）
+CREATE INDEX at_tasks_queue ON at_tasks (thread_id, status, role);
+-- claimed_by 仍是员工名：名字解析先找讨论串自己的员工（组长、旧成员），再找项目成员
 -- v2 status 取值：pending | claimed | running | blocked | review | decision | merging | done | failed | cancelled
 -- 注意：pending/running 与 v1 重叠，v1 只靠防护补丁（kind='chat' 且 platform_version=1）避开 v2 行；补丁同时把 v1 TaskView.status 改为 str
 CREATE INDEX IF NOT EXISTS at_tasks_pool ON at_tasks (thread_id, role, priority, created_at) WHERE status = 'pending';
@@ -364,8 +372,9 @@ CREATE INDEX IF NOT EXISTS at_questions_open ON at_questions (project_id, create
 CREATE TABLE at_employees (
   id          TEXT PRIMARY KEY,                    -- em_…
   project_id  TEXT NOT NULL REFERENCES at_projects(id) ON DELETE CASCADE,
-  thread_id   TEXT REFERENCES at_threads(id) ON DELETE CASCADE,   -- NULL = 项目统筹
-  name        TEXT NOT NULL,                       -- coordinator | lead-12 | dev-1
+  thread_id   TEXT REFERENCES at_threads(id) ON DELETE CASCADE,   -- NULL = 项目统筹和项目成员（所有讨论串共用，00270 起）；非空 = 组长和迁移前随讨论串建的旧成员
+  current_thread_id TEXT REFERENCES at_threads(id) ON DELETE SET NULL, -- 00270：项目成员当前在哪个讨论串干活（领任务时写，会话所在讨论串；讨论串结束时清空）。粘性和办公室显示用，不用于权限
+  name        TEXT NOT NULL,                       -- coordinator | lead-12 | dev-1（项目成员 <岗位>-<n>，项目内唯一）
   tier        TEXT NOT NULL,
   role        TEXT NOT NULL,
   role_id     TEXT REFERENCES at_roles(id) ON DELETE SET NULL,
@@ -396,7 +405,9 @@ CREATE TABLE at_agent_sessions (
   opened_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_active_at  TIMESTAMPTZ,
   closed_at       TIMESTAMPTZ,
-  close_reason    TEXT NOT NULL DEFAULT ''
+  close_reason    TEXT NOT NULL DEFAULT '',        -- … | thread_done | switch_thread（项目成员换到别的讨论串）
+  thread_id       TEXT REFERENCES at_threads(id) ON DELETE SET NULL, -- 00270：会话开在哪个讨论串的 worktree（讨论串结束按它关会话）
+  in_turn         BOOLEAN NOT NULL DEFAULT false   -- 00270：正在跑回合（turn_started 置位，turn_ended / 离开 active 清掉）；项目成员回合中不领别的讨论串的任务
 );
 CREATE UNIQUE INDEX at_agent_sessions_live ON at_agent_sessions (employee_id) WHERE state <> 'closed';  -- 一个员工最多一个活会话
 CREATE INDEX at_agent_sessions_node ON at_agent_sessions (node_id) WHERE state <> 'closed';

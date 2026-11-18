@@ -109,7 +109,7 @@ func (s *Store) NodeSessions(ctx context.Context, nodeID string) ([]NodeSession,
 	err := s.g(ctx).Table("at_agent_sessions a").
 		Select("a.id AS session_id, e.name AS employee, p.name AS project, t.no AS thread_no, a.state, a.last_active_at").
 		Joins("JOIN at_employees e ON e.id = a.employee_id").Joins("JOIN at_projects p ON p.id = e.project_id").
-		Joins("LEFT JOIN at_threads t ON t.id = e.thread_id").
+		Joins("LEFT JOIN at_threads t ON t.id = COALESCE(e.thread_id, a.thread_id)").
 		Where("a.node_id = ? AND a.state <> 'closed'", nodeID).Order("a.opened_at").Find(&out).Error
 	return out, err
 }

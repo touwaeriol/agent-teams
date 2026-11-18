@@ -14,25 +14,26 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/status"
 )
 
-func (s *Scheduler) claimOne(ctx context.Context, threadID string) (bool, error) {
+// claimOne claims the best (idle member, claimable task) pair of the project's queue
+// (shared-members.md §4.1); false when there is none. It takes the project row lock first and
+// then the pair without waiting (SKIP LOCKED): it never holds a member or task row while waiting
+// for the project row, the lock order of re-staffing and deliveries (core.LockProject).
+func (s *Scheduler) claimOne(ctx context.Context, projectID string) (bool, error) {
 	claimed := false
 	err := s.core.InTx(ctx, func(tx *core.Tx) error {
-		t, err := core.ThreadByID(ctx, tx, threadID)
-		if err != nil || (t.Status != "running" && t.Status != "waiting") {
-			return ignoreMissing(err)
+		if err := core.LockProject(ctx, tx, projectID); err != nil {
+			return err
 		}
-		tasks, err := pendingTasks(ctx, tx, threadID)
+		m, task, ok, err := s.choose(ctx, tx, projectID)
+		if err != nil || !ok {
+			return err
+		}
+		t, err := core.ThreadByID(ctx, tx, task.ConversationID)
 		if err != nil {
 			return err
 		}
-		for _, task := range tasks {
-			ok, err := s.tryClaim(ctx, tx, t, task)
-			if err != nil || ok {
-				claimed = ok
-				return err
-			}
-		}
-		return nil
+		claimed = true
+		return s.claim(ctx, tx, t, task, m)
 	})
 	return claimed, err
 }
@@ -44,54 +45,90 @@ func ignoreMissing(err error) error {
 	return err
 }
 
-// pendingTasks locks up to 50 claimable tasks of a thread, skipping rows another scheduler holds.
-func pendingTasks(ctx context.Context, tx *core.Tx, threadID string) ([]core.Task, error) {
-	out := []core.Task{}
-	err := tx.Gorm(ctx).Model(&core.Task{}).Clauses(core.SkipLocked).Where("thread_id = ? AND status = 'pending'", threadID).
-		Order("priority, created_at, substring(id from 2)::int").Limit(50).Find(&out).Error
-	return out, err
+// choose loads the idle members and claimable tasks, scores them and locks the chosen pair
+// (ok=false when no member can take a task, or the pair changed under us).
+func (s *Scheduler) choose(ctx context.Context, tx *core.Tx, projectID string) (core.Employee, core.Task, bool, error) {
+	idle, err := core.IdleMembers(ctx, tx, projectID)
+	if err != nil || len(idle) == 0 {
+		return core.Employee{}, core.Task{}, false, err
+	}
+	queue, err := core.ClaimableTasks(ctx, tx, projectID, rolesOf(idle))
+	if err != nil || len(queue) == 0 {
+		return core.Employee{}, core.Task{}, false, err
+	}
+	repos, err := core.ThreadRepoSets(ctx, tx, projectID)
+	if err != nil {
+		return core.Employee{}, core.Task{}, false, err
+	}
+	si, ji, ok := pick(seatsOf(idle, repos), jobsOf(queue, repos), time.Now())
+	if !ok {
+		return core.Employee{}, core.Task{}, false, nil
+	}
+	return lockPair(ctx, tx, idle[si].Employee, queue[ji].Task)
 }
 
-func (s *Scheduler) tryClaim(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task) (bool, error) {
-	ok, err := core.DepsSatisfied(ctx, tx, task)
-	if err != nil || !ok {
-		return false, err
+func rolesOf(idle []core.IdleMember) []string {
+	var out []string
+	for _, m := range idle {
+		if !slices.Contains(out, m.Role) {
+			out = append(out, m.Role)
+		}
 	}
-	member, err := idleMember(ctx, tx, t, task)
-	if err == core.ErrNotFound {
-		return false, nil
+	return out
+}
+
+// lockPair locks the chosen member and task (skipping rows another transaction holds) and
+// checks both are still free: the member active with no task, the task pending.
+func lockPair(ctx context.Context, tx *core.Tx, m core.Employee, task core.Task) (core.Employee, core.Task, bool, error) {
+	m, err := core.TryLockEmployee(ctx, tx, m.ID)
+	if err != nil || !m.Active {
+		return m, task, false, ignoreMissing(err)
 	}
-	if err != nil {
-		return false, err
+	if _, err := core.CurrentTaskOf(ctx, tx, m); err != core.ErrNotFound {
+		return m, task, false, ignoreMissing(err)
 	}
-	return true, s.claim(ctx, tx, t, task, member)
+	task, err = core.TryLockTask(ctx, tx, task.ConversationID, task.ID)
+	if err != nil || task.Status != "pending" {
+		return m, task, false, ignoreMissing(err)
+	}
+	return m, task, true, nil
+}
+
+func seatsOf(idle []core.IdleMember, repos map[string][]string) []seat {
+	out := make([]seat, len(idle))
+	for i, m := range idle {
+		out[i] = seat{Name: m.Name, Role: m.Role, Legacy: deref(m.ThreadID), Thread: m.Thread, TurnThread: m.TurnThread,
+			Repos: repos[m.Thread]}
+	}
+	return out
+}
+
+func jobsOf(queue []core.QueuedTask, repos map[string][]string) []job {
+	out := make([]job, len(queue))
+	for i, q := range queue {
+		th := q.ConversationID
+		j := job{Thread: th, Role: q.Role, Gate: q.CreatedBy == "platform", OnlyRoles: q.OnlyRoles,
+			ReservedFor: q.ReservedFor, ReservedUntil: q.ReservedUntil, DepWorkers: q.DepWorkers, Repos: repos[th],
+			Legacy: q.Legacy, Priority: q.Priority, Downstream: q.Downstream, Ready: q.Ready, Created: q.CreatedAt}
+		if Named(q.Task) && q.NamedActive {
+			j.Named = q.Assignee // a task named to a retired member goes to the role's pool
+		}
+		out[i] = j
+	}
+	return out
 }
 
 // Named reports whether a task was assigned to an instance rather than a role.
 func Named(task core.Task) bool { return task.Assignee != "" && task.Assignee != task.Role }
 
-func idleMember(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task) (core.Employee, error) {
-	name := ""
-	if Named(task) {
-		name = task.Assignee
-	}
-	g := tx.Gorm(ctx).Table("at_employees e").Select("e.*").Clauses(core.SkipLocked).
-		Where("e.thread_id = ? AND e.active AND e.tier = 'member'", t.ID).
-		Where(`NOT EXISTS (SELECT 1 FROM at_tasks x WHERE x.thread_id = e.thread_id AND x.claimed_by = e.name
-			AND x.status IN ('claimed','running'))`)
-	if name != "" {
-		g = g.Where("e.name = ?", name)
-	} else {
-		g = g.Where("e.role = ?", task.Role)
-	}
-	var e core.Employee
-	err := g.Order("e.instance_no").Take(&e).Error
-	return e, core.MapErr(err)
-}
-
-// claim marks the task claimed, emits task.claimed and sends the member its brief.
+// claim marks the task claimed, emits task.claimed and sends the member its brief; a project
+// member moves to the task's thread first.
 func (s *Scheduler) claim(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task, m core.Employee) error {
-	task, err := core.UpdateTask(ctx, tx, task, map[string]any{"status": "claimed", "claimed_by": m.Name,
+	m, err := s.orch.MoveToThread(ctx, tx, m, t.ID)
+	if err != nil {
+		return err
+	}
+	task, err = core.UpdateTask(ctx, tx, task, map[string]any{"status": "claimed", "claimed_by": m.Name,
 		"claimed_at": time.Now().UTC(), "branch": orchestrator.MemberBranch(t.No, m.Name), "nudges": 0,
 		"sync": map[string]core.TaskSync{}, "sync_pending": 0, "sync_round": ""})
 	if err != nil {
@@ -251,6 +288,9 @@ func (s *Scheduler) taskBrief(ctx context.Context, tx *core.Tx, t core.Thread, t
 	if err := depResults(ctx, tx, &b, task); err != nil {
 		return "", err
 	}
+	if err := reworkNotes(ctx, tx, &b, t, task, m); err != nil {
+		return "", err
+	}
 	if len(task.Sync) > 0 {
 		sync, err := s.syncFor(ctx, tx, t, task)
 		if err != nil {
@@ -321,6 +361,27 @@ func mergedNote(b *strings.Builder, d core.Task) {
 }
 
 var gateVerb = map[string]string{"review": "审查", "decision": "决策"}
+
+// reworkNotes add what a task that comes back carries: the gate verdicts on it so far, and when
+// a member takes over rework reserved for someone else, where that member's commits are.
+func reworkNotes(ctx context.Context, tx *core.Tx, b *strings.Builder, t core.Thread, task core.Task, m core.Employee) error {
+	gates, err := core.GateVerdicts(ctx, tx, task.ConversationID, task.ID)
+	if err != nil {
+		return err
+	}
+	if len(gates) > 0 {
+		b.WriteString("\n之前的审查 / 决策：\n")
+		if err := gateNotes(ctx, tx, b, task); err != nil {
+			return err
+		}
+	}
+	if task.ReservedFor != "" && task.ReservedFor != m.Name {
+		prev := orchestrator.MemberBranch(t.No, task.ReservedFor)
+		fmt.Fprintf(b, "\n这是 %s 的返工，它没能在预留时间内接手，改由你来做。它的提交在 origin/%s：先 git fetch，再 git merge origin/%s，在此基础上修改。\n",
+			task.ReservedFor, prev, prev)
+	}
+	return nil
+}
 
 // gateNotes adds the review / decision verdicts on the dependency.
 func gateNotes(ctx context.Context, tx *core.Tx, b *strings.Builder, d core.Task) error {

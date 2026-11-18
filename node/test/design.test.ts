@@ -39,6 +39,14 @@ describe("skills", () => {
     expect(materializeSkills(join(root, "agent-skills"), { employee, skills: [] })).toBeNull();
   });
 
+  it("puts a project member's skills in <project>/project/<name>, not under its current thread", () => {
+    const root = mkdtempSync(join(tmpdir(), "at-skills-"));
+    const m = materializeSkills(root, { employee: { ...employee, scope: "project" }, skills: [skill("design", { "SKILL.md": "x" })] })!;
+    expect(m.pluginDir).toBe(join(root, "p1", "project", "designer-1"));
+    // Without a scope (an older console) the thread number still decides.
+    expect(materializeSkills(root, { employee, skills: [skill("design", { "SKILL.md": "x" })] })!.pluginDir).toBe(join(root, "p1", "3", "designer-1"));
+  });
+
   it("refuses paths that escape the skill directory", () => {
     const root = mkdtempSync(join(tmpdir(), "at-skills-"));
     expect(() => materializeSkills(root, { employee, skills: [skill("evil", { "../../x.md": "x" })] })).toThrow();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  approvalCardStatus, approvalCommand, reviewNote, checkLook, deliverableKind, mainProgress, markTone, memberDoing, memberTone, mergeLook, openForUser,
+  approvalCardStatus, approvalCommand, busyElsewhereText, reviewNote, checkLook, deliverableKind, mainProgress, markTone, memberDoing, memberTone, mergeLook, openForUser,
   projectTint, onePRLook, prLook, questionLine, taskLook, taskTitle, threadBases, threadKind, threadLine, threadPRs, INK,
 } from "@/lib/present";
 import { question, task, thread } from "./fixtures";
@@ -68,6 +68,9 @@ describe("looks", () => {
   it("members", () => {
     expect(memberTone({ status: null, node: null })).toBe(INK.idle);
     expect(memberTone({ status: { state: "raising_hand" }, node: null })).toBe(INK.wait);
+    expect(memberTone({ status: { state: "typing" }, node: null, busy_elsewhere: true })).toBe(INK.gray);
+    expect(busyElsewhereText({ busy_elsewhere: true, thread_no: 12 })).toBe("在 #12 忙");
+    expect(busyElsewhereText({ busy_elsewhere: false, thread_no: 12 })).toBe("");
     expect(memberDoing({ status: { state: "typing" } })).toBe("写代码");
     expect(memberDoing({ status: { state: "typing", bubble: "改 A" } })).toBe("改 A");
   });

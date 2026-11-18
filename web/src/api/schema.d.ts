@@ -2361,6 +2361,8 @@ export interface components {
             deadline_s: number;
         };
         EmployeeBrief: {
+            /** @description In a thread's member list: the member's claimed or running task is in another thread (thread_no names it); false elsewhere */
+            busy_elsewhere: boolean;
             id: string;
             look: components["schemas"]["Look"];
             name: string;
@@ -2368,12 +2370,17 @@ export interface components {
             role: string;
             runtime: string;
             status: components["schemas"]["EmployeeStatusView"];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The employee's thread: a lead's own; for a project member the thread of its current task, else the thread it last worked in (null: none)
+             */
             thread_no: number | null;
             tier: string;
             title: string;
         };
         EmployeeCard: {
+            /** @description In a thread's member list: the member's claimed or running task is in another thread (thread_no names it); false elsewhere */
+            busy_elsewhere: boolean;
             current_task: components["schemas"]["TaskView"];
             id: string;
             look: components["schemas"]["Look"];
@@ -2384,7 +2391,10 @@ export interface components {
             runtime: string;
             session: components["schemas"]["SessionBrief"];
             status: components["schemas"]["EmployeeStatusView"];
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The employee's thread: a lead's own; for a project member the thread of its current task, else the thread it last worked in (null: none)
+             */
             thread_no: number | null;
             tier: string;
             title: string;
@@ -2719,7 +2729,7 @@ export interface components {
         };
         NewThreadInputBody: {
             brief?: string;
-            /** @description Override member counts for this thread */
+            /** @description Restricts the thread to these member roles: the lead may assign tasks only to them (platform review, decision and fix tasks are exempt). Changed meaning: this used to override per-thread headcounts; members are project staff now, so count is ignored. Omitted = every role. */
             roles?: components["schemas"]["RoleCount"][] | null;
             title: string;
         };

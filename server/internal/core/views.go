@@ -37,10 +37,12 @@ type EmployeeBrief struct {
 	Role     string              `json:"role"`
 	Title    string              `json:"title"`
 	Runtime  string              `json:"runtime"`
-	ThreadNo *int                `json:"thread_no"`
+	ThreadNo *int                `json:"thread_no" doc:"The employee's thread: a lead's own; for a project member the thread of its current task, else the thread it last worked in (null: none)"`
 	Node     *NodeRef            `json:"node"`
 	Look     store.Look          `json:"look"`
 	Status   *EmployeeStatusView `json:"status"`
+	// BusyElsewhere is set in a thread's member list only.
+	BusyElsewhere bool `json:"busy_elsewhere" doc:"In a thread's member list: the member's claimed or running task is in another thread (thread_no names it); false elsewhere"`
 }
 
 // MainTaskView is a step of the thread plan.

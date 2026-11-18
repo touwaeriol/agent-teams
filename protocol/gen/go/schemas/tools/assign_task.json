@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/tools/assign_task.json",
   "title": "AssignTaskInput",
-  "description": "Create a task under a main task. assignee is an instance name (dev-2) to assign directly, or a role name (dev) to put it in the task pool where the first free instance claims it.",
+  "description": "Create a task under a main task. assignee is a role name (dev) to put it in the project's task queue, where an idle member of that role claims it (members are shared by every thread of the project and may be busy in another one), or an instance name (dev-2) to assign it directly (it waits while that member is busy).",
   "x-tool": {
     "tiers": [
       "lead"

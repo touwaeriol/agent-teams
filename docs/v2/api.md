@@ -71,7 +71,8 @@ ThreadView      = {id, project_id, no, title, brief, status, queue_position: num
                    merge_error: string|null,  // 验收后没能合并的原因（检查未通过/还在跑、冲突、没有权限…，中文可读）；accept、reject 和合并成功时清空
                    merge_policy: 'pr'|'auto'|'manual',  // 项目的合并策略（architecture.md §8.4）；review 只在 manual 或有 merge_error 时算“等你处理”（counts.waiting）
                    repos: ThreadRepoView[],   // 每个仓库：{repo, base_branch, branch_created, pr_number, pr_url, pr_state}；pr_number/pr_url = 第一个 PR，pr_state = 汇总
-                   auto_approve, opened_by, members: EmployeeBrief[], main_tasks: MainTaskView[],
+                   auto_approve, opened_by, main_tasks: MainTaskView[],
+                   members: EmployeeBrief[],  // 讨论串参与者（shared-members.md §3）：组长、讨论串自己的旧成员、在这里有任务或开过会话的项目成员；busy_elsewhere 只在这里有意义
                    counts: {waiting, questions_open, approvals_open, tasks_total, tasks_done, main_total, main_done},
                    lead_last: {text, at} | null, cost_usd_est: number|null, created_at, updated_at,
                    last_activity_at,                          // 状态变化、讨论串里的消息、它发布的交付物中最新的时间
@@ -96,7 +97,9 @@ MessageView     = {id, role: "user"|"leader"|"employee"|"system"|"error", author
                    // todos 卡片原地更新：同一 id 的 message 事件再来一次，网页按 id 替换
 MailView        = {id, sender, recipient, body, created_at}
 EmployeeBrief   = {id, name, tier, role, title, runtime, node: {id, name, online} | null, look: Look,
-                   status: EmployeeStatusView | null}
+                   status: EmployeeStatusView | null,
+                   thread_no: number|null,    // 组长 / 旧成员 = 自己的讨论串；项目成员 = 当前 claimed / running 任务的讨论串，否则最近干活的讨论串；统筹和闲着的成员为 null
+                   busy_elsewhere: boolean}   // 讨论串成员列表里：这个项目成员当前的任务在别的讨论串（thread_no 是哪个），网页显示“在 #12 忙”；其他地方恒为 false
 EmployeeStatusView = {state, substate, bubble, bubble_kind, task_id, task_kind, tier, role, since, seq}
 Look            = {color, outfit: string, accessory: string, hair: string|null}
                   // outfit/accessory 是字符串，不是枚举：取值 = 当前全局布局 looks.outfits / looks.accessories 的键
@@ -166,7 +169,7 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/projects/{pid}/threads` | `{title, brief, roles?: [{role, count}]}` → 201 `ThreadView`（用户直接开串，跳过统筹；`roles` 可临时调整本串岗位数量） |
+| POST | `/api/projects/{pid}/threads` | `{title, brief, roles?: [{role, count}]}` → 201 `ThreadView`（用户直接开串，跳过统筹）。**`roles` 的含义变了**：以前是按岗位覆盖这个讨论串的人数，现在成员按项目编制共用，`roles` 只取岗位名，**限定**组长只能往这些岗位派任务（`only_roles`；平台建的审查 / 决策 / 修复任务不受限），`count` 忽略；不传 = 所有岗位。传了模板里没有的岗位 → 422 |
 | GET | `/api/threads/{tid}` | → `ThreadView` |
 | PATCH | `/api/threads/{tid}` | `{title?, status?: "paused"|"running"|"archived", auto_approve?}` → `ThreadView`。`auto_approve` = “本讨论串内全部放行”（只影响 `ask` 岗位，任何节点都能开；打开时一并放行当前所有待审批，并审计） |
 | POST | `/api/threads/{tid}/archive` | → `ThreadView`。归档：讨论串结束（会话关闭、节点上的检出按 `git.cleanup keep_unpushed` 清理），从主列表移到“已归档”，记下归档前的状态（`at_threads.archived_from`）。已结束的讨论串（done / failed）常用它在“解决后归档” |

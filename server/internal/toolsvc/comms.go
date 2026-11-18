@@ -31,7 +31,7 @@ func (s *Service) ask(ctx context.Context, tx *core.Tx, c *call, audience string
 		return core.Question{}, err
 	}
 	sid := c.sc.Session.ID
-	n := core.NewQuestion{ConversationID: conv, ProjectID: e.ProjectID, ThreadID: e.ThreadID, Asker: e.Name, Audience: audience,
+	n := core.NewQuestion{ConversationID: conv, ProjectID: e.ProjectID, ThreadID: e.WorkThreadID(), Asker: e.Name, Audience: audience,
 		Kind: "question", Text: text, Options: options, Detail: spec.detail, SessionID: &sid, Blocking: blocking}
 	if blocking {
 		n.CallID = &c.callID
@@ -230,8 +230,19 @@ func (s *Service) answer(ctx context.Context, tx *core.Tx, q core.Question, answ
 		return err
 	}
 	text := fmt.Sprintf("[Answer to %s] %s", closed.ID, answer)
-	_, err = s.orch.Deliver(ctx, tx, asker, orchestrator.Delivery{Text: text, Kind: "answer", Priority: "next"})
+	_, err = s.orch.Deliver(ctx, tx, asker, orchestrator.Delivery{Text: text, Kind: "answer", Priority: "next",
+		Record: answerRecord(closed, asker, text)})
 	return err
+}
+
+// answerRecord keeps a project member's answer in the question's thread, wherever the member
+// works now (nil: the asker's own conversation).
+func answerRecord(q core.Question, asker core.Employee, text string) *core.NewMessage {
+	if !asker.ProjectMember() || q.ThreadID == nil {
+		return nil
+	}
+	return &core.NewMessage{ConversationID: *q.ThreadID, Role: "system", Author: "platform", Kind: "note", Content: text,
+		Meta: map[string]any{"to": asker.Name}}
 }
 
 func (s *Service) answerCall(ctx context.Context, tx *core.Tx, q core.Question, answer string) (bool, error) {
@@ -277,7 +288,28 @@ func (s *Service) sendMessage(ctx context.Context, tx *core.Tx, c *call) (Result
 	} else if deliver != "" {
 		text = deliver // the recipient's prompt command, expanded
 	}
-	return okText("sent"), s.pushMail(ctx, tx, to, fmt.Sprintf("[Message from %s]\n%s", c.emp().Name, text))
+	head, err := mailHeader(ctx, tx, t, to, c.emp().Name, "Message", "留言")
+	if err != nil {
+		return Result{}, err
+	}
+	return okText("sent"), s.pushMail(ctx, tx, to, head+"\n"+text)
+}
+
+// mailHeader opens mail pushed to a teammate. A project member working in another thread (or in
+// none) gets it where it is, without switching threads, told which thread it comes from: the mail
+// stays in the sender's thread (shared-members.md §6).
+func mailHeader(ctx context.Context, tx *core.Tx, t core.Thread, to core.Employee, from, kind, kindZh string) (string, error) {
+	if !to.ProjectMember() {
+		return fmt.Sprintf("[%s from %s]", kind, from), nil
+	}
+	th, err := core.WorkThreadOf(ctx, tx, to)
+	if err != nil {
+		return "", err
+	}
+	if th != nil && *th == t.ID {
+		return fmt.Sprintf("[%s from %s]", kind, from), nil
+	}
+	return fmt.Sprintf("[#%d · 来自 %s 的%s]", t.No, from, kindZh), nil
 }
 
 func (s *Service) recipient(ctx context.Context, tx *core.Tx, t core.Thread, from core.Employee, to string) (core.Employee, error) {
@@ -328,7 +360,7 @@ func (s *Service) broadcast(ctx context.Context, tx *core.Tx, c *call) (Result, 
 	if err := s.mail(ctx, tx, t, c.emp().Name, "*", in.Text); err != nil {
 		return Result{}, err
 	}
-	emps, err := core.ThreadEmployees(ctx, tx, t.ID)
+	emps, err := core.ThreadParticipants(ctx, tx, t.ID)
 	if err != nil {
 		return Result{}, err
 	}
@@ -336,14 +368,20 @@ func (s *Service) broadcast(ctx context.Context, tx *core.Tx, c *call) (Result, 
 		if e.Tier != "member" {
 			continue
 		}
-		if err := s.pushMail(ctx, tx, e, fmt.Sprintf("[Broadcast from %s]\n%s", c.emp().Name, in.Text)); err != nil {
+		head, err := mailHeader(ctx, tx, t, e, c.emp().Name, "Broadcast", "广播")
+		if err != nil {
+			return Result{}, err
+		}
+		if err := s.pushMail(ctx, tx, e, head+"\n"+in.Text); err != nil {
 			return Result{}, err
 		}
 	}
 	return okText("sent"), nil
 }
 
-// readMessages returns unread mail (direct and broadcast) and marks it read.
+// readMessages returns the unread mail (direct and broadcast) of the thread the caller works in
+// and marks it read; a project member is also told about unread mail addressed to it in the
+// project's other threads (read there, when it works there).
 func (s *Service) readMessages(ctx context.Context, tx *core.Tx, c *call) (Result, error) {
 	t, err := requireThread(c)
 	if err != nil {
@@ -361,9 +399,31 @@ func (s *Service) readMessages(ctx context.Context, tx *core.Tx, c *call) (Resul
 		lines = append(lines, fmt.Sprintf("%s → %s：%s", m.Sender, m.Recipient, m.Body))
 	}
 	if len(lines) == 0 {
-		return okJSON("没有未读留言", out), nil
+		lines = append(lines, "没有未读留言")
+	}
+	if c.emp().ProjectMember() {
+		other, err := core.UnreadElsewhere(ctx, tx, t.ProjectID, t.ID, c.emp().Name)
+		if err != nil {
+			return Result{}, err
+		}
+		if note := elsewhereNote(other); note != "" {
+			lines = append(lines, note)
+		}
 	}
 	return okJSON(strings.Join(lines, "\n"), out), nil
+}
+
+// elsewhereNote mentions unread mail in other threads ("" when none).
+func elsewhereNote(other []core.ThreadCount) string {
+	if len(other) == 0 {
+		return ""
+	}
+	parts := make([]string, len(other))
+	for i, o := range other {
+		parts[i] = fmt.Sprintf("#%d %d 条", o.No, o.N)
+	}
+	return "其他讨论串还有发给你的未读留言：" + strings.Join(parts, "、") +
+		"（推送到你会话时已标明讨论串；到那个讨论串干活时用 read_messages 查看）"
 }
 
 // setStatus updates the bubble only (§11.3).
@@ -389,7 +449,7 @@ func (s *Service) reportProgress(ctx context.Context, tx *core.Tx, c *call) (Res
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
-	return okText("ok"), tx.EmitActivity(ctx, c.emp().ProjectID, c.emp().ThreadID, c.emp().Name, in.Text)
+	return okText("ok"), tx.EmitActivity(ctx, c.emp().ProjectID, c.emp().WorkThreadID(), c.emp().Name, in.Text)
 }
 
 // publish registers a deliverable link.
@@ -398,7 +458,7 @@ func (s *Service) publish(ctx context.Context, tx *core.Tx, c *call) (Result, er
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
-	d, err := s.deliv.Publish(ctx, tx, c.emp().ProjectID, c.emp().ThreadID, in.Kind, in.Title, in.URL, c.emp().Name,
+	d, err := s.deliv.Publish(ctx, tx, c.emp().ProjectID, c.emp().WorkThreadID(), in.Kind, in.Title, in.URL, c.emp().Name,
 		map[string]any{"by": c.emp().Name})
 	if err != nil {
 		return Result{}, err

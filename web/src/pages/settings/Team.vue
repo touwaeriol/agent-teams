@@ -71,7 +71,8 @@ const PILL = "rounded-full px-2.5 py-1";
         <span class="text-[#8A877F]">→</span>
         <span :class="PILL" :style="{ background: LEVEL.lead.bg, color: LEVEL.lead.fg }">组长 · 每讨论串 1 个</span>
         <span class="text-[#8A877F]">→</span>
-        <span :class="PILL" :style="{ background: LEVEL.member.bg, color: LEVEL.member.fg }">成员 · 每讨论串按岗位数量</span>
+        <span :class="PILL" :style="{ background: LEVEL.member.bg, color: LEVEL.member.fg }">成员 · 每项目按岗位编制</span>
+        <span class="basis-full text-xs text-muted-foreground">成员是项目的固定编制：岗位人数就是每个项目配几个，所有讨论串共用、轮流领任务队列里的活；人手不够就加人数。</span>
       </section>
       <Callout v-for="w in warnings" :key="`${w.role}-${w.message}`" tone="warn">{{ w.role ? `${w.role}：` : "" }}{{ w.message }}</Callout>
       <Callout v-if="dirty && problems.length > 0" tone="warn">{{ problems.join("；") }}</Callout>

@@ -53,7 +53,8 @@ const seg = (on: boolean) => cn("rounded-md px-2.5 py-1 text-xs", on ? "bg-backg
       </div>
     </div>
     <p class="text-xs text-muted-foreground">
-      {{ live }}<template v-if="whole && others.length">{{ others.join("、") }} 不是 {{ runtimeLabel(s.runtime) }}，不受影响。</template>
+      {{ live }}<template v-if="whole && others.length">{{ others.join("、") }} 不是 {{ runtimeLabel(s.runtime) }}，不受影响。</template
+      ><template v-if="whole">成员是整个项目共用的，换模型后他们给其他讨论串干活时也用这个模型。</template>
     </p>
     <div class="flex max-h-[220px] flex-col gap-0.5 overflow-y-auto">
       <button v-if="s.override" type="button" :class="row(false)" :disabled="set.isPending.value" @click="set.mutate('')">

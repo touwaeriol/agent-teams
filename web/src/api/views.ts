@@ -71,6 +71,10 @@ export interface EmployeeBrief {
   node: { id: string; name: string; online: boolean } | null;
   look: Look;
   status: EmployeeStatusView | null;
+  /** A lead's own thread; for a project member the thread of its current task, else the one it last worked in. */
+  thread_no?: number | null;
+  /** In a thread's member list: the member's current task is in another thread (thread_no). */
+  busy_elsewhere?: boolean;
 }
 
 export interface MainTaskView {

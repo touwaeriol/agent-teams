@@ -188,5 +188,5 @@ func DetachedSummary(ctx context.Context, q core.DB, emp core.Employee) ([]strin
 func detachedCards(ctx context.Context, q core.DB, emp core.Employee) *gorm.DB {
 	return q.Gorm(ctx).Model(&core.Question{}).Where(`kind = 'approval' AND status IN ('open','answered')
 		AND jsonb_exists(detail, 'detached_at') AND project_id = ? AND COALESCE(thread_id, '') = COALESCE(?, '')
-		AND asker = ?`, emp.ProjectID, emp.ThreadID, emp.Name)
+		AND asker = ?`, emp.ProjectID, emp.WorkThreadID(), emp.Name)
 }

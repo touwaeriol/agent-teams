@@ -116,7 +116,7 @@ func (s *Service) fileDeliverable(ctx context.Context, tx *core.Tx, c *call, in 
 	files []artifacts.ArtifactFile) (core.Deliverable, int, error) {
 	if in.DeliverableID == nil {
 		detail := artifacts.Detail(c.emp().Name, 1, entry, files, nil)
-		d, err := core.InsertDeliverable(ctx, tx, core.NewDeliverable{ProjectID: c.emp().ProjectID, ThreadID: c.emp().ThreadID,
+		d, err := core.InsertDeliverable(ctx, tx, core.NewDeliverable{ProjectID: c.emp().ProjectID, ThreadID: c.emp().WorkThreadID(),
 			Kind: strings.TrimSpace(in.Kind), Title: strings.TrimSpace(in.Title), Detail: detail, PublishedBy: c.emp().Name})
 		return d, 1, err
 	}

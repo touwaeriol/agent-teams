@@ -74,13 +74,16 @@ func Save(ctx context.Context, q store.DB, deliverableID string, version int, by
 	return q.Gorm(ctx).Create(&rows).Error
 }
 
-// Versions lists a deliverable's versions, newest first, with the publisher's thread number.
+// Versions lists a deliverable's versions, newest first, with the publisher's thread number: its
+// own thread, or for a project member the thread of the session it published from.
 func Versions(ctx context.Context, q store.DB, deliverableID string) ([]ArtifactVersion, error) {
 	out := []ArtifactVersion{}
 	err := q.Gorm(ctx).Raw(`SELECT v.*, t.no AS publisher_thread_no FROM (SELECT version, count(*) AS files, sum(size) AS size,
 		min(published_by) AS published_by, min(publisher_id) AS publisher_id, min(created_at) AS created_at
 		FROM at_deliverable_files WHERE deliverable_id = ? GROUP BY version) v
-		LEFT JOIN at_employees e ON e.id = v.publisher_id LEFT JOIN at_threads t ON t.id = e.thread_id
+		LEFT JOIN at_employees e ON e.id = v.publisher_id
+		LEFT JOIN at_threads t ON t.id = COALESCE(e.thread_id, (SELECT a.thread_id FROM at_agent_sessions a
+			WHERE a.employee_id = e.id AND a.opened_at <= v.created_at ORDER BY a.opened_at DESC LIMIT 1))
 		ORDER BY v.version DESC`, deliverableID).Scan(&out).Error
 	return out, err
 }

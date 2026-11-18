@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"gorm.io/gorm"
@@ -17,7 +18,7 @@ import (
 // DefaultMaxRunningThreads applies when at_settings.platform has no value; 0 means no limit.
 const DefaultMaxRunningThreads = 0
 
-// RoleCount adjusts how many instances of a role a thread gets.
+// RoleCount names a member role a thread uses; Count is ignored (members are project staff).
 type RoleCount struct {
 	Role  string `json:"role"`
 	Count int    `json:"count" minimum:"1" maximum:"8"`
@@ -29,8 +30,8 @@ type ThreadRequest struct {
 	ProjectID string
 	Title     string
 	Brief     string
-	Roles     []RoleCount // nil = template counts; Count 0 = template count
-	OnlyRoles []string    // open_thread(roles): member roles to include (nil = all)
+	Roles     []RoleCount // REST: member roles the thread uses (counts ignored; nil = all)
+	OnlyRoles []string    // open_thread(roles): member roles the lead may assign to (nil = all)
 	Repos     []RepoFocus // open_thread(repos): repositories to work in, with optional explicit bases
 	OpenedBy  string      // coordinator | user
 	// SourceMessageID is the user's project-chat message the thread is opened for (nil: none).
@@ -53,7 +54,8 @@ func (o *Orchestrator) OpenThread(ctx context.Context, req ThreadRequest) (core.
 	return core.ThreadByID(ctx, o.core.Pool, t.ID)
 }
 
-// OpenThreadTx creates the thread inside tx; the caller starts queued threads after the commit (StartQueued).
+// OpenThreadTx creates the thread and its lead inside tx and makes sure the project has its
+// members (EnsureStaff); the caller starts queued threads after the commit (StartQueued).
 func (o *Orchestrator) OpenThreadTx(ctx context.Context, tx *core.Tx, req ThreadRequest) (core.Thread, error) {
 	p, err := o.store.ProjectOf(ctx, req.UserID, req.ProjectID)
 	if err != nil {
@@ -64,8 +66,12 @@ func (o *Orchestrator) OpenThreadTx(ctx context.Context, tx *core.Tx, req Thread
 		return core.Thread{}, err
 	}
 	t, err := core.CreateThread(ctx, tx, core.NewThread{ProjectID: p.ID, UserID: p.UserID, Title: req.Title,
-		Brief: req.Brief, AutoApprove: p.AutoApprove, OpenedBy: req.OpenedBy, Roles: roles, SourceMessageID: req.SourceMessageID, ForwardedBrief: req.ForwardedBrief})
+		Brief: req.Brief, AutoApprove: p.AutoApprove, OpenedBy: req.OpenedBy, Roles: roles, OnlyRoles: onlyRoles(req),
+		SourceMessageID: req.SourceMessageID, ForwardedBrief: req.ForwardedBrief})
 	if err != nil {
+		return t, err
+	}
+	if err := o.EnsureStaff(ctx, tx, p.ID); err != nil {
 		return t, err
 	}
 	if t, err = o.focusThread(ctx, tx, p, t, req.Repos); err != nil {
@@ -87,27 +93,21 @@ func (o *Orchestrator) focusThread(ctx context.Context, tx *core.Tx, p store.Pro
 	return t, core.UpdateThread(ctx, tx, t.ID, map[string]any{"brief": t.Brief})
 }
 
-// threadRoles snapshots the user's lead and member templates with the requested counts.
+// threadRoles snapshots the user's lead and member templates. Members are project staff now
+// (EnsureStaff): requested counts are ignored, only the role names are checked.
 func (o *Orchestrator) threadRoles(ctx context.Context, req ThreadRequest) ([]store.Role, error) {
 	all, err := o.userRoles(ctx, req.UserID)
 	if err != nil {
 		return nil, err
 	}
-	counts := map[string]int{}
-	for _, rc := range req.Roles {
-		counts[rc.Role] = rc.Count
-	}
-	if err := unknownRoles(all, counts, req.OnlyRoles); err != nil {
+	if err := unknownRoles(all, onlyRoles(req)); err != nil {
 		return nil, err
 	}
 	var out []store.Role
 	hasLead := false
 	for _, r := range all {
-		if !keepRole(r, counts, req.OnlyRoles) {
+		if r.Tier == "coordinator" {
 			continue
-		}
-		if n := counts[r.Role]; n > 0 && r.Tier == "member" {
-			r.Count = n
 		}
 		hasLead = hasLead || r.Tier == "lead"
 		out = append(out, r)
@@ -118,30 +118,24 @@ func (o *Orchestrator) threadRoles(ctx context.Context, req ThreadRequest) ([]st
 	return out, nil
 }
 
-func keepRole(r store.Role, counts map[string]int, only []string) bool {
-	switch {
-	case r.Tier == "coordinator":
-		return false
-	case r.Tier == "lead":
-		return true
-	case len(only) > 0:
-		return contains(only, r.Role)
+// onlyRoles are the member roles the thread's lead may assign to (nil: all): open_thread(roles)
+// and the roles named by the REST counts.
+func onlyRoles(req ThreadRequest) []string {
+	out := slices.Clone(req.OnlyRoles)
+	for _, rc := range req.Roles {
+		if !slices.Contains(out, rc.Role) {
+			out = append(out, rc.Role)
+		}
 	}
-	n, set := counts[r.Role]
-	return !set || n > 0
+	return out
 }
 
-func unknownRoles(all []store.Role, counts map[string]int, only []string) error {
+func unknownRoles(all []store.Role, names []string) error {
 	known := map[string]bool{}
 	for _, r := range all {
 		known[r.Role] = true
 	}
-	for role := range counts {
-		if !known[role] {
-			return fmt.Errorf("%w：%s", ErrRoleNotFound, role)
-		}
-	}
-	for _, role := range only {
+	for _, role := range names {
 		if !known[role] {
 			return fmt.Errorf("%w：%s", ErrRoleNotFound, role)
 		}
@@ -352,7 +346,7 @@ func (o *Orchestrator) afterStatus(ctx context.Context, tx *core.Tx, t core.Thre
 		if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"stalled_note_at": nil}); err != nil {
 			return err
 		}
-		tx.AfterCommit(func(ctx context.Context) { o.Kick(ctx, t.ID) })
+		tx.AfterCommit(func(ctx context.Context) { o.Kick(ctx, t.ProjectID) })
 	}
 	return nil
 }
@@ -367,6 +361,9 @@ func (o *Orchestrator) EndThreadWork(ctx context.Context, tx *core.Tx, threadID 
 		return err
 	}
 	if err := o.closeAll(ctx, tx, sessions, "thread_done"); err != nil {
+		return err
+	}
+	if err := core.LeaveThread(ctx, tx, threadID); err != nil {
 		return err
 	}
 	if err := o.cancelOpenCards(ctx, tx, tx.Gorm(ctx).Where("thread_id = ?", threadID), "system:thread_ended"); err != nil {
@@ -575,7 +572,7 @@ func (o *Orchestrator) handoffSummary(ctx context.Context, tx *core.Tx, e core.E
 	var b strings.Builder
 	fmt.Fprintf(&b, "[会话恢复] 你之前的会话记录无法恢复（换了节点，或节点上的会话记录丢失），平台开了新会话让你继续担任 %s（%s）。"+
 		"下面是平台整理的现状和最近的对话，请接着之前的工作继续，不要从头再来，也不要向用户重复已经说过的话：\n", e.Name, e.Role)
-	if e.ThreadID != nil {
+	if e.WorkThreadID() != nil {
 		if err := o.threadDigest(ctx, tx, &b, e); err != nil {
 			return "", err
 		}
@@ -641,7 +638,7 @@ func openQuestionsDigest(ctx context.Context, tx *core.Tx, b *strings.Builder, e
 }
 
 func (o *Orchestrator) threadDigest(ctx context.Context, tx *core.Tx, b *strings.Builder, e core.Employee) error {
-	plan, err := core.MainTasks(ctx, tx, *e.ThreadID)
+	plan, err := core.MainTasks(ctx, tx, *e.WorkThreadID())
 	if err != nil {
 		return err
 	}
@@ -650,15 +647,69 @@ func (o *Orchestrator) threadDigest(ctx context.Context, tx *core.Tx, b *strings
 		fmt.Fprintf(b, "- [%s] %s\n", m.Status, m.Title)
 	}
 	if e.Tier == "lead" {
-		if err := tasksDigest(ctx, tx, b, *e.ThreadID); err != nil {
+		if err := tasksDigest(ctx, tx, b, *e.WorkThreadID()); err != nil {
 			return err
 		}
 	}
-	if task, err := core.CurrentTask(ctx, tx, *e.ThreadID, e.Name); err == nil {
+	if task, err := core.CurrentTaskOf(ctx, tx, e); err == nil {
 		fmt.Fprintf(b, "你当前的任务 %s：%s\n", task.ID, task.Instruction)
 	}
-	if t, err := core.ThreadByID(ctx, tx, *e.ThreadID); err == nil && e.Tier == "member" {
+	if t, err := core.ThreadByID(ctx, tx, *e.WorkThreadID()); err == nil && e.Tier == "member" {
 		fmt.Fprintf(b, "你的分支：%s\n", MemberBranch(t.No, e.Name))
+	}
+	return nil
+}
+
+// switchDigest opens the fresh session of a project member that moved to another thread
+// (shared-members.md §5): who leads the thread, its plan, and what the member did there before.
+func (o *Orchestrator) switchDigest(ctx context.Context, tx *core.Tx, e core.Employee, threadID string) (string, error) {
+	t, err := core.ThreadByID(ctx, tx, threadID)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "[换讨论串] 你是项目的固定成员 %s，现在给讨论串 #%d「%s」干活%s。这是新会话：工作目录和分支都是这个讨论串的，"+
+		"之前讨论串的上下文不再适用。\n", e.Name, t.No, t.Title, leadOf(ctx, tx, t.ID))
+	plan, err := core.MainTasks(ctx, tx, t.ID)
+	if err != nil {
+		return "", err
+	}
+	if len(plan) > 0 {
+		b.WriteString("主任务：\n")
+		for _, m := range plan {
+			fmt.Fprintf(&b, "- [%s] %s\n", m.Status, m.Title)
+		}
+	}
+	if err := ownTasksDigest(ctx, tx, &b, t.ID, e.Name); err != nil {
+		return "", err
+	}
+	fmt.Fprintf(&b, "你的分支：%s\n", MemberBranch(t.No, e.Name))
+	return b.String(), nil
+}
+
+func leadOf(ctx context.Context, q core.DB, threadID string) string {
+	if lead, err := core.Lead(ctx, q, threadID); err == nil {
+		return "（组长 " + lead.Name + "）"
+	}
+	return ""
+}
+
+// ownTasksDigest lists what a member did in a thread before (its finished or handed-on tasks).
+func ownTasksDigest(ctx context.Context, tx *core.Tx, b *strings.Builder, threadID, name string) error {
+	var tasks []struct{ ID, Status, Instruction, Summary string }
+	err := tx.Gorm(ctx).Table("at_tasks").Select("id, status, instruction, summary").
+		Where("thread_id = ? AND claimed_by = ? AND status NOT IN ('claimed','running')", threadID, name).
+		Order("created_at, id").Find(&tasks).Error
+	if err != nil || len(tasks) == 0 {
+		return err
+	}
+	b.WriteString("你以前在这个讨论串做过的任务：\n")
+	for _, t := range tasks {
+		fmt.Fprintf(b, "- %s [%s] %s", t.ID, t.Status, clip(t.Instruction, 200))
+		if t.Summary != "" {
+			fmt.Fprintf(b, " → %s", clip(t.Summary, 400))
+		}
+		b.WriteString("\n")
 	}
 	return nil
 }

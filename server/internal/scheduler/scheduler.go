@@ -20,8 +20,8 @@ import (
 // MaxAttempts is how often a failed task returns to the pool before it fails.
 const MaxAttempts = 2
 
-// kickChannel relays scheduling hints between replicas.
-const kickChannel = "sched:all"
+// kickPrefix + project id is the channel that relays scheduling hints between replicas.
+const kickPrefix = "sched:"
 
 // Scheduler runs the task pool.
 type Scheduler struct {
@@ -55,15 +55,15 @@ func New(cs *core.Store, orch *orchestrator.Orchestrator, se *status.Engine, hub
 		pending:       map[string]bool{}, signal: make(chan struct{}, 1), lastPush: map[string]time.Time{}}
 }
 
-// Kick asks for a scheduling pass over a thread (local and other replicas).
-func (s *Scheduler) Kick(ctx context.Context, threadID string) {
-	s.mark(threadID)
-	s.hub.Publish(ctx, kickChannel, threadID)
+// Kick asks for a scheduling pass over a project's task queue (local and other replicas).
+func (s *Scheduler) Kick(ctx context.Context, projectID string) {
+	s.mark(projectID)
+	s.hub.Publish(ctx, kickPrefix+projectID, projectID)
 }
 
-func (s *Scheduler) mark(threadID string) {
+func (s *Scheduler) mark(projectID string) {
 	s.mu.Lock()
-	s.pending[threadID] = true
+	s.pending[projectID] = true
 	s.mu.Unlock()
 	select {
 	case s.signal <- struct{}{}:
@@ -84,7 +84,7 @@ func (s *Scheduler) take() []string {
 
 // Run is the scheduling loop; only the advisory-lock holder schedules.
 func (s *Scheduler) Run(ctx context.Context) {
-	hints, cancel := s.hub.Subscribe(kickChannel)
+	hints, cancel := s.hub.SubscribePrefix(kickPrefix)
 	defer cancel()
 	go func() {
 		for {
@@ -117,28 +117,43 @@ func (s *Scheduler) loop(ctx context.Context) {
 	}
 }
 
-// sweep schedules every active thread with claimable work (the 10 s safety net) and sends the
-// briefs whose pre-task sync timed out.
+// sweep schedules every project with claimable work (the 10 s safety net) and sends the briefs
+// whose pre-task sync timed out. A project that has work but no members yet (created before
+// members were project staff) is staffed first.
 func (s *Scheduler) sweep(ctx context.Context) {
 	s.releaseStaleSyncs(ctx)
-	var ids []string
-	err := s.core.Pool.Gorm(ctx).Table("at_tasks t").Distinct("t.thread_id").Joins("JOIN at_threads th ON th.id = t.thread_id").
-		Where("t.status = 'pending' AND th.status IN ('running','waiting')").Pluck("t.thread_id", &ids).Error
+	ids, err := core.ProjectsWithWork(ctx, s.core.Pool)
 	if err != nil {
 		s.log.Warn("scheduler sweep", "err", err)
 		return
 	}
 	for _, id := range ids {
+		s.staff(ctx, id)
 		s.Schedule(ctx, id)
 	}
 }
 
-// Schedule claims as many pending tasks of the thread as there are idle instances.
-func (s *Scheduler) Schedule(ctx context.Context, threadID string) {
+// staff creates the project's members when it has none (EnsureStaff otherwise runs when a
+// thread opens and when the role templates are saved).
+func (s *Scheduler) staff(ctx context.Context, projectID string) {
+	err := s.core.InTx(ctx, func(tx *core.Tx) error {
+		has, err := core.HasStaff(ctx, tx, projectID)
+		if err != nil || has {
+			return err
+		}
+		return s.orch.EnsureStaff(ctx, tx, projectID)
+	})
+	if err != nil {
+		s.log.Warn("staff project", "project_id", projectID, "err", err)
+	}
+}
+
+// Schedule claims tasks of the project's queue while idle members can take them.
+func (s *Scheduler) Schedule(ctx context.Context, projectID string) {
 	for i := 0; i < 50; i++ {
-		claimed, err := s.claimOne(ctx, threadID)
+		claimed, err := s.claimOne(ctx, projectID)
 		if err != nil {
-			s.log.Warn("claim task", "thread_id", threadID, "err", err)
+			s.log.Warn("claim task", "project_id", projectID, "err", err)
 			return
 		}
 		if !claimed {

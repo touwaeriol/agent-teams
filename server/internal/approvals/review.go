@@ -52,14 +52,14 @@ func (e *Engine) route(ctx context.Context, tx *core.Tx, sc core.SessionContext,
 
 // reviewerOf is the lead that reviews an employee's requests (ok=false: ask the user directly).
 func reviewerOf(ctx context.Context, tx *core.Tx, emp core.Employee) (core.Employee, bool, error) {
-	if emp.ThreadID == nil || emp.Tier != "member" {
+	if emp.WorkThreadID() == nil || emp.Tier != "member" {
 		return core.Employee{}, false, nil
 	}
 	d, err := core.DeliveryOf(ctx, tx, emp.ProjectID)
 	if err != nil || d.ApprovalRouting == core.RouteUser {
 		return core.Employee{}, false, err
 	}
-	lead, err := core.Lead(ctx, tx, *emp.ThreadID)
+	lead, err := core.Lead(ctx, tx, *emp.WorkThreadID())
 	if errors.Is(err, core.ErrNotFound) {
 		return core.Employee{}, false, nil
 	}
@@ -76,7 +76,7 @@ func (e *Engine) toLead(ctx context.Context, tx *core.Tx, sc core.SessionContext
 		return err
 	}
 	e.orch.Touch(tx, sc.Employee.ID, "approval.open:"+deref(q.ApprovalID))
-	if err := tx.EmitActivity(ctx, sc.Employee.ProjectID, sc.Employee.ThreadID, q.Asker,
+	if err := tx.EmitActivity(ctx, sc.Employee.ProjectID, sc.Employee.WorkThreadID(), q.Asker,
 		fmt.Sprintf("请求 %s，等组长 %s 判断", Summary(q), lead.Name)); err != nil {
 		return err
 	}

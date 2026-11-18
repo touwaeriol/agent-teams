@@ -1,5 +1,5 @@
 // Package fanout delivers realtime hints ("project p has new events", "node n
-// has commands to send", "thread t needs scheduling") to subscribers in this
+// has commands to send", "project p needs scheduling") to subscribers in this
 // process and, through Valkey pub/sub, in other replicas. Hints carry no data
 // that matters: receivers re-read PostgreSQL, so a lost or duplicated hint is
 // harmless (architecture.md §11.4).
@@ -8,6 +8,7 @@ package fanout
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,15 +22,17 @@ var Patterns = []string{"project:*", "user:*", "node:*", "sched:*", "merge:*"}
 
 // Hub is the process-local subscriber registry plus the Valkey relay.
 type Hub struct {
-	mu     sync.Mutex
-	subs   map[string]map[chan string]struct{}
-	valkey valkey.Client
-	log    *slog.Logger
+	mu   sync.Mutex
+	subs map[string]map[chan string]struct{}
+	// prefixes are subscriptions to every channel that starts with a prefix (SubscribePrefix).
+	prefixes map[string]map[chan string]struct{}
+	valkey   valkey.Client
+	log      *slog.Logger
 }
 
 // New returns a hub; with a *kv.Valkey store hints also cross replicas.
 func New(store kv.KV, log *slog.Logger) *Hub {
-	h := &Hub{subs: map[string]map[chan string]struct{}{}, log: log}
+	h := &Hub{subs: map[string]map[chan string]struct{}{}, prefixes: map[string]map[chan string]struct{}{}, log: log}
 	if v, ok := store.(*kv.Valkey); ok {
 		h.valkey = v.Client
 	}
@@ -61,6 +64,24 @@ func (h *Hub) Subscribe(channel string) (<-chan string, func()) {
 	return ch, func() { h.unsubscribe(channel, ch) }
 }
 
+// SubscribePrefix receives the messages of every channel that starts with prefix (e.g. one
+// scheduling hint per project on sched:<project>). Unlike Subscribe it buffers distinct
+// messages (up to 256 pending); call cancel to stop.
+func (h *Hub) SubscribePrefix(prefix string) (<-chan string, func()) {
+	ch := make(chan string, 256)
+	h.mu.Lock()
+	if h.prefixes[prefix] == nil {
+		h.prefixes[prefix] = map[chan string]struct{}{}
+	}
+	h.prefixes[prefix][ch] = struct{}{}
+	h.mu.Unlock()
+	return ch, func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		delete(h.prefixes[prefix], ch)
+	}
+}
+
 func (h *Hub) unsubscribe(channel string, ch chan string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -84,6 +105,17 @@ func (h *Hub) deliver(channel, msg string) {
 		select {
 		case ch <- msg:
 		default:
+		}
+	}
+	for prefix, subs := range h.prefixes {
+		if !strings.HasPrefix(channel, prefix) {
+			continue
+		}
+		for ch := range subs {
+			select {
+			case ch <- msg:
+			default:
+			}
 		}
 	}
 }

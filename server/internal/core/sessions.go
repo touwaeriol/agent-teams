@@ -49,6 +49,7 @@ type NewSession struct {
 	Cwd            string
 	Branch         string
 	PermissionMode string
+	ThreadID       *string // the thread whose worktree it opens in (nil: coordinator)
 }
 
 // InsertSession creates a logical session at open_gen 1.
@@ -56,7 +57,7 @@ func InsertSession(ctx context.Context, tx *Tx, n NewSession) (AgentSession, err
 	id := NewID("s")
 	err := tx.Gorm(ctx).Table("at_agent_sessions").Create(map[string]any{"id": id, "employee_id": n.EmployeeID,
 		"node_id": n.NodeID, "runtime": n.Runtime, "cwd": n.Cwd, "branch": n.Branch, "state": "opening", "open_gen": 1,
-		"permission_mode": n.PermissionMode}).Error
+		"permission_mode": n.PermissionMode, "thread_id": n.ThreadID}).Error
 	if err != nil {
 		return AgentSession{}, err
 	}
@@ -66,7 +67,7 @@ func InsertSession(ctx context.Context, tx *Tx, n NewSession) (AgentSession, err
 // BumpOpenGen starts a new open generation (resume) and returns it.
 func BumpOpenGen(ctx context.Context, tx *Tx, id string) (int, error) {
 	var gen int
-	err := store.QueryRow(ctx, tx, `UPDATE at_agent_sessions SET open_gen = open_gen + 1, state = 'opening' WHERE id = $1
+	err := store.QueryRow(ctx, tx, `UPDATE at_agent_sessions SET open_gen = open_gen + 1, state = 'opening', in_turn = false WHERE id = $1
 		RETURNING open_gen`, id).Scan(&gen)
 	return gen, MapErr(err)
 }
@@ -76,9 +77,20 @@ func openSession(ctx context.Context, tx *Tx, id string) *gorm.DB {
 	return tx.Gorm(ctx).Table("at_agent_sessions").Where("id = ? AND state <> 'closed'", id)
 }
 
-// SetSessionState records the node-reported session state.
+// SetSessionState records the node-reported session state; a session that is not active runs
+// no turn.
 func SetSessionState(ctx context.Context, tx *Tx, id, state string) error {
-	return Changed(openSession(ctx, tx, id).Updates(map[string]any{"state": state, "last_active_at": gorm.Expr("now()")}))
+	set := map[string]any{"state": state, "last_active_at": gorm.Expr("now()")}
+	if state != "active" {
+		set["in_turn"] = false
+	}
+	return Changed(openSession(ctx, tx, id).Updates(set))
+}
+
+// SetInTurn records whether a turn runs in the session (turn_started / turn_ended): a project
+// member mid-turn takes no task of another thread (shared-members.md §4.1).
+func SetInTurn(ctx context.Context, tx *Tx, id string, on bool) error {
+	return openSession(ctx, tx, id).Update("in_turn", on).Error
 }
 
 // RecordOpened stores session.opened (SDK session id, init) and marks the session active.
@@ -137,8 +149,26 @@ func SessionContextOf(ctx context.Context, q DB, sessionID string) (SessionConte
 	if sc.Employee, err = EmployeeByID(ctx, q, sc.Session.EmployeeID); err != nil {
 		return sc, err
 	}
+	if sc.Employee.ProjectMember() && sc.Session.ThreadID != nil {
+		// A project member's session acts in the thread it was opened in, even after the member
+		// moved on (the tail of a closed session): conversation, usage and activity stay there.
+		sc.Employee.CurrentThreadID = sc.Session.ThreadID
+	}
 	sc.OwnerID, err = ProjectOwner(ctx, q, sc.Employee.ProjectID)
 	return sc, err
+}
+
+// SessionTask is the employee's current task when it belongs to the session: a project member's
+// session of another thread (closed when it moved) has nothing to do with the task it has now.
+func SessionTask(ctx context.Context, q DB, sc SessionContext) (Task, error) {
+	task, err := CurrentTaskOf(ctx, q, sc.Employee)
+	if err != nil {
+		return task, err
+	}
+	if sc.Employee.ProjectMember() && sc.Session.ThreadID != nil && *sc.Session.ThreadID != task.ConversationID {
+		return task, ErrNotFound
+	}
+	return task, nil
 }
 
 // ProjectOwner returns the id of the user who owns a project.
@@ -153,9 +183,10 @@ func liveSessionsJoined(ctx context.Context, q DB) *gorm.DB {
 		Where("a.state <> 'closed'")
 }
 
-// ThreadLiveSessions lists the live sessions of a thread's employees.
+// ThreadLiveSessions lists the live sessions of a thread's employees and the sessions project
+// members opened in the thread.
 func ThreadLiveSessions(ctx context.Context, q DB, threadID string) ([]AgentSession, error) {
-	return find[AgentSession](liveSessionsJoined(ctx, q).Where("e.thread_id = ?", threadID))
+	return find[AgentSession](liveSessionsJoined(ctx, q).Where("e.thread_id = ? OR a.thread_id = ?", threadID, threadID))
 }
 
 // ProjectLiveSessions lists the live sessions of a project.

@@ -201,12 +201,20 @@
           "minLength": 1
         },
         "thread_no": {
-          "description": "null for the coordinator.",
+          "description": "The thread the session works in; null for the coordinator and a project member outside any thread.",
           "type": [
             "integer",
             "null"
           ],
           "minimum": 1
+        },
+        "scope": {
+          "description": "Where the employee belongs: \"project\" for the coordinator and the project members shared by every thread (skills and plugins live in <project>/project/<name>), \"thread\" for a lead or a member created with a thread. Absent from older consoles: a null thread_no means project.",
+          "type": "string",
+          "enum": [
+            "project",
+            "thread"
+          ]
         }
       }
     },

@@ -9,6 +9,14 @@ export function isWorking(m: Pick<EmployeeBrief, "status">): boolean {
   return WORKING.has(m.status?.state ?? "idle");
 }
 
+/**
+ * Working for this thread: a shared project member working in another thread (busy_elsewhere in
+ * a thread's member list) does not count here.
+ */
+export function workingHere(m: Pick<EmployeeBrief, "status" | "busy_elsewhere">): boolean {
+  return !m.busy_elsewhere && isWorking(m);
+}
+
 /** A message is on its way to a parked or closed session, which is coming back up. */
 export function isWaking(m: Pick<EmployeeBrief, "status">): boolean {
   return m.status?.state === "thinking" && m.status.substate === "waking";
@@ -79,9 +87,9 @@ export function threadActive(t: Pick<ThreadView, "status">): boolean {
 /** The employee to feature in a one-line live status: someone raising a hand, else someone working, else the lead. */
 export function featured(t: Pick<ThreadView, "members">): EmployeeBrief | undefined {
   return (
-    t.members.find((m) => m.status?.state === "raising_hand") ??
-    t.members.find((m) => m.tier === "member" && isWorking(m)) ??
-    t.members.find((m) => isWorking(m)) ??
+    t.members.find((m) => !m.busy_elsewhere && m.status?.state === "raising_hand") ??
+    t.members.find((m) => m.tier === "member" && workingHere(m)) ??
+    t.members.find((m) => workingHere(m)) ??
     t.members.find((m) => m.tier === "lead")
   );
 }

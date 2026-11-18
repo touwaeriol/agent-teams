@@ -60,7 +60,8 @@ func (a *fakeAgent) readCall(args map[string]any) (protocol.ToolResult, map[stri
 	return res, files
 }
 
-// openSecondThread opens thread #2 and returns its lead and its designer-1 (same name as thread #1's).
+// openSecondThread opens thread #2 and returns its lead and designer-1 (the project's only designer,
+// moved over from thread #1).
 func openSecondThread(t *testing.T, tm *team) (*fakeAgent, *fakeAgent, core.ThreadView) {
 	t.Helper()
 	var th core.ThreadView
@@ -73,8 +74,8 @@ func openSecondThread(t *testing.T, tm *team) (*fakeAgent, *fakeAgent, core.Thre
 	return lead, dev, th
 }
 
-// TestReviseDeliverableAcrossThreads: designer-1 in thread #1 publishes a site; designer-1 of thread #2
-// lists it, downloads it (chunked file.download frames with checksums, comments and history in the
+// TestReviseDeliverableAcrossThreads: designer-1 publishes a site in thread #1, then works in thread #2:
+// there it lists it, downloads it (chunked file.download frames with checksums, comments and history in the
 // result), publishes v2 with the same id; the version history records who published each version
 // and comments go to that version's publisher, or to the lead of its thread once it is gone.
 func TestReviseDeliverableAcrossThreads(t *testing.T) {
@@ -91,8 +92,9 @@ func TestReviseDeliverableAcrossThreads(t *testing.T) {
 		t.Fatalf("v1 comment %+v", c)
 	}
 	tm.dev.expectSend("主色换成蓝色")
+	tm.dev.mustCall("complete_task", map[string]any{"task_id": "t1", "summary": "v1 published"})
 
-	lead2, dev2, th2 := openSecondThread(t, tm)
+	lead2, dev2, _ := openSecondThread(t, tm)
 	list := dev2.mustCall("list_deliverables", map[string]any{})
 	var summaries protocol.ListDeliverablesResult
 	_ = json.Unmarshal(*list.Structured, &summaries)
@@ -133,7 +135,7 @@ func TestReviseDeliverableAcrossThreads(t *testing.T) {
 		t.Fatalf("v2 content %q", v2["index.html"])
 	}
 
-	// Comments follow the version's publisher (by employee id, not name): v2 → thread #2's designer-1.
+	// Comments follow the version's publisher (by employee id, not name): v2 → designer-1, now in thread #2.
 	tm.b.must(201, "POST", "/api/deliverables/"+id+"/comments", map[string]any{"text": "标题再短一点", "version": 2}, &c)
 	if c.SentTo != "designer-1" {
 		t.Fatalf("v2 comment %+v", c)
@@ -142,7 +144,7 @@ func TestReviseDeliverableAcrossThreads(t *testing.T) {
 		t.Fatalf("comment text %q", send.Text)
 	}
 	// The publisher is gone: the lead of its thread gets the comment with how to fetch and revise.
-	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `UPDATE at_employees SET active = false WHERE thread_id = $1 AND name = 'designer-1'`, th2.ID); err != nil {
+	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `UPDATE at_employees SET active = false WHERE project_id = $1 AND name = 'designer-1'`, tm.projectID); err != nil {
 		t.Fatal(err)
 	}
 	tm.b.must(201, "POST", "/api/deliverables/"+id+"/comments", map[string]any{"text": "按钮圆角"}, &c)

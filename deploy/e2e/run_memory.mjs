@@ -82,7 +82,7 @@ async function main() {
     }, { timeoutMs: 600_000, everyMs: 3000 });
     check(String(done.summary).includes(CODE), `new lead answered from memory: ${String(done.summary).trim().slice(0, 60)}`);
     const tools = sql(`SELECT string_agg(DISTINCT c.tool, ',') FROM at_tool_calls c JOIN at_agent_sessions s ON s.id = c.session_id
-      JOIN at_employees e ON e.id = s.employee_id WHERE e.thread_id = '${t.id}' AND c.tool LIKE 'memory_%'`);
+      JOIN at_employees e ON e.id = s.employee_id WHERE s.thread_id = '${t.id}' AND c.tool LIKE 'memory_%'`);
     check(true, `lead memory tools used: ${tools || "(none — answered from the injected MEMORY.md)"}`);
     const summaries = await c.get(`/api/projects/${st.projectId}/memory/thread-summaries.md`);
     check(summaries.content.includes(`## #${done.no} 发布代号`), "finish summary filed under thread-summaries.md");

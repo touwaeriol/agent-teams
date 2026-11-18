@@ -162,7 +162,11 @@ func setPrepare(open *protocol.SessionOpen, jobs []string) {
 
 func employeeRef(e core.Employee, t *core.Thread) protocol.EmployeeRef {
 	role := e.Role
-	ref := protocol.EmployeeRef{Name: e.Name, ProjectID: e.ProjectID, Role: &role, Tier: protocol.Tier(e.Tier)}
+	scope := protocol.EmployeeRefScopeThread
+	if e.ThreadID == nil {
+		scope = protocol.EmployeeRefScopeProject // the coordinator and the project members
+	}
+	ref := protocol.EmployeeRef{Name: e.Name, ProjectID: e.ProjectID, Role: &role, Tier: protocol.Tier(e.Tier), Scope: &scope}
 	if t != nil {
 		no := t.No
 		ref.ThreadNo = &no

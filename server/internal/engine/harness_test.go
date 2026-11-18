@@ -50,6 +50,12 @@ type world struct {
 
 func newWorld(t *testing.T, gh *httptest.Server) *world {
 	t.Helper()
+	return newWorldWith(t, gh, nil)
+}
+
+// newWorldWith is newWorld with a chance to tune the engines before they start.
+func newWorldWith(t *testing.T, gh *httptest.Server, tune func(*engine.Engine)) *world {
+	t.Helper()
 	dbURL := testdb.Migrated(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -77,6 +83,9 @@ func newWorld(t *testing.T, gh *httptest.Server) *world {
 	}
 	e.Status.Debounce = 0
 	e.Delivery.PollInterval = 200 * time.Millisecond
+	if tune != nil {
+		tune(e)
+	}
 	cfg := config.Config{PublicURL: "http://console.test", SecretKeys: []string{secret}, WebDir: t.TempDir(),
 		NodeDistDir: t.TempDir(), OfficeDir: t.TempDir()}
 	h := httpapi.New(httpapi.Deps{Config: cfg, Store: db, KV: cache, GitHub: client, Tokens: tokens, Office: reg, Log: log,

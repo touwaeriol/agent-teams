@@ -28,7 +28,8 @@ const leadGuide = `你是讨论串 #%d「%s」的组长（lead）。你只能读
 工作方式：
 0. 收到任务说明（brief）后，第一件事是用 tell_user(text) 给用户发一条简短回执（3～8 行）：你怎么理解这个任务、打算怎么拆分、预计需要用户决定什么（没有就说没有）。回执根据 brief 的实际内容写，不要套模板；发完不要结束本轮，接着调研、写计划、派任务。
 1. 先用 update_plan(steps) 写出主任务计划；计划有变就再调用一次（标题不变的步骤会保留）。
-2. 用 assign_task(assignee, instruction, main, depends_on?, kind?) 拆小任务：assignee 写岗位名（如 dev）进任务池由空闲成员领取，写实例名（如 dev-2）则点名指派；main 写所属主任务的标题。
+2. 用 assign_task(assignee, instruction, main, depends_on?, kind?) 拆小任务：assignee 写岗位名（如 dev）时任务进项目的任务队列，由空闲的同岗位成员领取；写实例名（如 dev-2）则点名指派，它手里有别的任务时排队等它。main 写所属主任务的标题。
+   成员是整个项目共用的固定编制，可能正在给别的讨论串干活（list_team 能看到谁在哪个讨论串忙），你的任务会在有人空出来时被领走；不用为了抢人而点名。
 3. 成员完成后你会收到 “[Task t7 · dev-1 · done] 总结”；审查后用 enqueue_merge(task_id) 把成员分支放进合并队列。
 4. 成员的提问 “[Question q3 …]” 尽快用 reply_to 回答；需要用户决定时用 ask_user（不阻塞；有几个方案让用户选时用 questions 结构化提问，带上每个选项的说明和推荐）。
    你的 TodoWrite 清单会显示在用户的对话里，适合跟踪讨论串的进度。用户需要知道、但不必回答的进展用 tell_user(text) 发出（立即出现在对话里，不结束本轮）。
@@ -43,7 +44,14 @@ gh（GitHub CLI）已安装并自动带上本项目仓库的临时令牌：在�
 项目可能绑定多个仓库：你的工作目录下每个仓库一个子目录（见“## 仓库”）。讨论串分支只在真正有改动的仓库里创建，默认从仓库的默认分支切出。
 项目指令或用户要求里写了某个仓库的基准分支时，第一次给这个仓库派任务就在 assign_task 里写上 repo 和 base（之后 enqueue_merge / open_pr 也可以带 repo、base）；没写的仓库不用传 base。`
 
-const memberGuide = `你是讨论串 #%d 的成员 %s（岗位：%s）。你在自己的工作目录里工作，每个仓库一个子目录，分支都是 %s；改了哪个仓库就在哪个子目录里 git commit。
+// memberIntro opens a thread's own (legacy) member's guide; staffIntro a project member's
+// (arguments: thread no, name, role).
+const (
+	memberIntro = `你是讨论串 #%d 的成员 %s（岗位：%s）。`
+	staffIntro  = `你是项目的固定成员 %[2]s（岗位：%[3]s），会轮流给不同讨论串干活；这个会话在讨论串 #%[1]d 里，换到别的讨论串时平台会关掉它、在那边开新会话并附上交接摘要。每个任务开始时看任务简报里的讨论串号和分支。`
+)
+
+const memberGuide = `你在自己的工作目录里工作，每个仓库一个子目录，分支都是 %s；改了哪个仓库就在哪个子目录里 git commit。
 - 收到任务后专心完成；做完必须调用 complete_task(task_id, summary)（平台会先替你推送每个有新提交的仓库）；做不完用 status=failed 说明原因。有别的任务依赖你的任务时，complete_task 再带上 handoff：写给接手的人，还没做完的、要注意的坑、约定好的接口和文件。
 - 任务简报里的“工作目录”一节说明平台开工前怎么同步了你的分支（已同步到讨论串分支、合并了、有冲突或有未提交的改动），按它处理后再开工。勤提交：平台每个回合结束会把你已提交的工作推到你的成员分支，未提交的改动只在这台机器上。
 - 需要中途推送用 push_branch()（推到你的成员分支）；也可以自己 git push origin HEAD。基准分支、默认分支和讨论串分支受保护，推送会被拒绝，合并只走合并队列和平台（按项目设置：PR 检查通过即完成、自动合并或用户验收）。
@@ -125,11 +133,11 @@ func (o *Orchestrator) systemAppend(ctx context.Context, q core.DB, e core.Emplo
 	}
 	parts = append(parts, memorySection(e, mem))
 	if t != nil {
-		roster, err := o.roster(ctx, q, t.ID)
+		roster, err := o.roster(ctx, q, *t)
 		if err != nil {
 			return "", err
 		}
-		parts = append(parts, "## 本讨论串成员\n"+roster)
+		parts = append(parts, "## 团队（成员是项目共用的，谁正在哪个讨论串忙用 list_team 查看）\n"+roster)
 	}
 	return strings.Join(parts, "\n\n"), nil
 }
@@ -141,7 +149,11 @@ func guide(e core.Employee, t *core.Thread) string {
 	case e.Tier == "lead":
 		return fmt.Sprintf(leadGuide, t.No, t.Title)
 	}
-	return fmt.Sprintf(memberGuide, t.No, e.Name, e.Role, MemberBranch(t.No, e.Name))
+	intro := memberIntro
+	if e.ProjectMember() {
+		intro = staffIntro
+	}
+	return fmt.Sprintf(intro, t.No, e.Name, e.Role) + fmt.Sprintf(memberGuide, MemberBranch(t.No, e.Name))
 }
 
 const memoryGuide = `这是项目跨会话的自动记忆。MEMORY.md 是索引，每个会话开始时都会读到（内容在下面）；细节在各个主题文件里，需要时用 memory_read(name) 读全文，memory_list 列出全部文件。
@@ -167,8 +179,9 @@ func memorySection(e core.Employee, mem string) string {
 	return "## 项目记忆\n" + how + "\n\n" + mem
 }
 
-func (o *Orchestrator) roster(ctx context.Context, q core.DB, threadID string) (string, error) {
-	emps, err := core.ThreadEmployees(ctx, q, threadID)
+// roster lists the thread's team: its lead and the project members it can work with.
+func (o *Orchestrator) roster(ctx context.Context, q core.DB, t core.Thread) (string, error) {
+	emps, err := core.ThreadTeam(ctx, q, t)
 	if err != nil {
 		return "", err
 	}

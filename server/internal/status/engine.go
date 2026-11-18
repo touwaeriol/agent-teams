@@ -185,7 +185,7 @@ func (e *Engine) write(ctx context.Context, tx *core.Tx, employeeID string) erro
 }
 
 func (e *Engine) row(emp core.Employee, d Decision, a activity, task core.Task) core.StatusRow {
-	row := core.StatusRow{ProjectID: emp.ProjectID, ThreadID: emp.ThreadID, EmployeeID: emp.ID, Tier: emp.Tier,
+	row := core.StatusRow{ProjectID: emp.ProjectID, ThreadID: emp.WorkThreadID(), EmployeeID: emp.ID, Tier: emp.Tier,
 		Role: emp.Role, State: d.State, Substate: d.Substate, TaskID: task.ID, TaskKind: task.Kind, Cause: a.cause}
 	if a.claimTask != "" {
 		row.TaskID, row.TaskKind = a.claimTask, a.claimKind

@@ -31,21 +31,23 @@ type Thread struct {
 	// ForwardedBrief: the brief is forwarded user messages (their copies are in the conversation).
 	ForwardedBrief bool
 	RolesSnapshot  []store.Role `gorm:"serializer:jsonb"`
-	WaitingCount   int
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	StartedAt      *time.Time
-	FinishedAt     *time.Time
-	PinnedAt       *time.Time
-	RemindAt       *time.Time
-	RemindedAt     *time.Time
+	// OnlyRoles are the member roles the lead may assign to (empty: all; NULL in the table).
+	OnlyRoles    []string `gorm:"serializer:jsonb"`
+	WaitingCount int
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	StartedAt    *time.Time
+	FinishedAt   *time.Time
+	PinnedAt     *time.Time
+	RemindAt     *time.Time
+	RemindedAt   *time.Time
 }
 
 // TableName maps Thread to at_threads.
 func (Thread) TableName() string { return "at_threads" }
 
 const threadCols = `id, project_id, user_id, no, title, brief, status, pause_reason, branch, base_branch, pr_number,
-	pr_url, pr_state, merge_error, summary, auto_approve, opened_by, source_message_id, forwarded_brief, roles_snapshot, waiting_count, created_at, updated_at,
+	pr_url, pr_state, merge_error, summary, auto_approve, opened_by, source_message_id, forwarded_brief, roles_snapshot, only_roles, waiting_count, created_at, updated_at,
 	started_at, finished_at, pinned_at, remind_at, reminded_at`
 
 // Active reports whether the thread's sessions should be live.
@@ -70,13 +72,28 @@ type Employee struct {
 	Model      string     // picked with /model; ahead of the project and role models
 	Active     bool
 	CreatedAt  time.Time
+	// CurrentThreadID is where a project member works: its current task's thread, or the thread
+	// of its latest session (shared-members.md §2). Nil for the coordinator, leads, legacy members.
+	CurrentThreadID *string
+}
+
+// ProjectMember reports whether the employee is project staff (a member shared by every thread).
+func (e Employee) ProjectMember() bool { return e.ThreadID == nil && e.Tier == "member" }
+
+// WorkThreadID is the thread the employee works in: its own thread (lead, legacy member) or,
+// for a project member, its current thread; nil for the coordinator and an unassigned member.
+func (e Employee) WorkThreadID() *string {
+	if e.ThreadID != nil {
+		return e.ThreadID
+	}
+	return e.CurrentThreadID
 }
 
 // TableName maps Employee to at_employees.
 func (Employee) TableName() string { return "at_employees" }
 
 const employeeCols = `id, project_id, thread_id, name, tier, role, role_id, runtime, node_id, instance_no, look, spec,
-	model, active, created_at`
+	model, active, created_at, current_thread_id`
 
 // AgentSession is a row of at_agent_sessions (one logical session).
 type AgentSession struct {
@@ -97,13 +114,17 @@ type AgentSession struct {
 	LastActiveAt   *time.Time
 	ClosedAt       *time.Time
 	CloseReason    string
+	// ThreadID is the thread whose worktree the session was opened in (nil: coordinator).
+	ThreadID *string
+	// InTurn: a turn runs in the session (between turn_started and turn_ended).
+	InTurn bool
 }
 
 // TableName maps AgentSession to at_agent_sessions.
 func (AgentSession) TableName() string { return "at_agent_sessions" }
 
 const sessionCols = `id, employee_id, node_id, runtime, sdk_session_id, codex_thread_id, cwd, branch, state, open_gen,
-	permission_mode, init, last_event_no, opened_at, last_active_at, closed_at, close_reason`
+	permission_mode, init, last_event_no, opened_at, last_active_at, closed_at, close_reason, thread_id, in_turn`
 
 // Task is a row of at_tasks.
 type Task struct {
@@ -140,6 +161,11 @@ type Task struct {
 	HandoffAsked bool
 	// Merged is what the task's merge added to the thread branch, per repository.
 	Merged map[string]TaskMerge `gorm:"serializer:jsonb"`
+	// ReservedFor keeps rework for the member who did the task until ReservedUntil; ReadyAt is
+	// when the task's dependencies were met (shared-members.md §4).
+	ReservedFor   string
+	ReservedUntil *time.Time
+	ReadyAt       *time.Time
 }
 
 // TaskSync is one repository's pre-task sync result (Error when the job failed).
@@ -162,7 +188,8 @@ func (Task) TableName() string { return "at_tasks" }
 
 const taskCols = `conversation_id, id, thread_id, main_task_id, assignee, role, claimed_by, kind, instruction,
 	depends_on, status, parent, priority, attempt, summary, branch, head_sha, pushed, nudges, created_by, created_at,
-	updated_at, claimed_at, finished_at, sync, sync_pending, sync_round, handoff, handoff_asked, merged`
+	updated_at, claimed_at, finished_at, sync, sync_pending, sync_round, handoff, handoff_asked, merged,
+	reserved_for, reserved_until, ready_at`
 
 // Finished reports whether the task reached a final state.
 func (t Task) Finished() bool {

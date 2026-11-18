@@ -219,7 +219,21 @@ export class Director {
     this.release(a);
     const seat = this.scene.seats.get(a.employee.id);
     if (seat) return { point: seat.point, accessNode: seat.accessNode, deskKey: seat.deskKey };
+    const rest = this.restAnchor(a);
+    if (rest) return this.claimAnchor(a, rest);
     return { point: a.pos, accessNode: a.accessNode, hidden: true };
+  }
+
+  /**
+   * Where a shared project member without a thread (so without a pod seat) stays instead of
+   * vanishing: the anchor the layout sends idle people of its tier and role to, if any.
+   * People of pods on other pages stay hidden as before.
+   */
+  private restAnchor(a: Actor): string | undefined {
+    const e = a.employee;
+    if (e.thread_no != null || e.tier === "coordinator") return undefined;
+    const place = matchRule(this.layout.states.rules, subjectOf({ state: "idle" }, e)).place;
+    return place.startsWith("anchor:") && this.scene.anchors[place.slice(7)] ? place.slice(7) : undefined;
   }
 
   private claimAnchor(a: Actor, name: string): Place {
