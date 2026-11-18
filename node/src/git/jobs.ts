@@ -40,6 +40,11 @@ class JobError extends Error {
 
 const LOG_TAIL = 4096;
 
+type GitSyncRequest = NonNullable<GitPrepare["sync"]>;
+type GitSyncResult = NonNullable<GitResult["sync"]>;
+/** The merge commit a sync makes is the platform's, not the employee's. */
+const SYNC_IDENTITY = ["-c", "user.name=Agent Teams", "-c", "user.email=platform@agent-teams.local"];
+
 /** Local git work for the console (protocol.md §7, architecture.md §8.1). Every job is idempotent. */
 export class GitJobs {
   private readonly results = new Map<string, GitResult>();
@@ -116,12 +121,61 @@ export class GitJobs {
     const cloned = await this.ensureClone(b.job_id, b.repo, shared);
     if (!cloned && b.fetch !== false) await this.fetch(b.job_id, b.repo, shared);
     await this.git(shared, ["config", "core.hooksPath", this.o.platform.hooksDir]);
-    if (isGitDir(cwd)) return { created: false, head_sha: await this.head(cwd) };
+    if (isGitDir(cwd)) return { created: false, ...(b.sync ? await this.syncWorktree(cwd, b.sync) : { head_sha: await this.head(cwd) }) };
     if (existsSync(cwd) && readdirSync(cwd).length > 0) throw new JobError("dirty_conflict", `${b.cwd} exists and is not a worktree`);
     const start = await this.startPoint(shared, b.branch, b.base);
     const add = await this.git(shared, ["worktree", "add", "-B", b.branch, cwd, start]);
     if (add.code !== 0) throw new JobError("dirty_conflict", "git worktree add failed", add.stderr);
     return { created: true, head_sha: await this.head(cwd), log_tail: tail(add.stdout + add.stderr) };
+  }
+
+  /**
+   * Brings an existing worktree up to date before a task (shared-members.md §4.2). The shared
+   * clone was just fetched, so origin/* is current: a member's branch follows the thread branch,
+   * a reviewer checks out the branch under review. Nothing is ever discarded: a dirty tree is
+   * reported, a conflicting merge is aborted and its paths reported.
+   */
+  private async syncWorktree(cwd: string, s: GitSyncRequest): Promise<Partial<GitResult>> {
+    const target = `origin/${s.ref}`;
+    const exists = await this.git(cwd, ["rev-parse", "--verify", "--quiet", `refs/remotes/${target}`]);
+    if (exists.code !== 0) return this.syncDone(cwd, "current"); // the branch is not on the remote yet
+    if (await this.dirty(cwd)) return this.syncDone(cwd, "dirty");
+    return s.mode === "review" ? this.syncReview(cwd, target) : this.syncMember(cwd, target);
+  }
+
+  private async syncReview(cwd: string, target: string): Promise<Partial<GitResult>> {
+    const r = await this.git(cwd, ["checkout", "--detach", target]);
+    if (r.code !== 0) throw new JobError("dirty_conflict", `cannot check out ${target}`, r.stderr);
+    return this.syncDone(cwd, "checkout");
+  }
+
+  private async syncMember(cwd: string, target: string): Promise<Partial<GitResult>> {
+    const behind = await this.count(cwd, `HEAD..${target}`);
+    if (behind === 0) return this.syncDone(cwd, "current");
+    if ((await this.count(cwd, `${target}..HEAD`)) === 0) {
+      const r = await this.git(cwd, ["reset", "--hard", target]);
+      if (r.code !== 0) throw new JobError("dirty_conflict", `cannot move to ${target}`, r.stderr);
+      return this.syncDone(cwd, "reset");
+    }
+    const merge = await this.git(cwd, [...SYNC_IDENTITY, "merge", "--no-edit", target]);
+    if (merge.code === 0) return this.syncDone(cwd, "merged");
+    const conflicts = (await this.git(cwd, ["diff", "--name-only", "--diff-filter=U"])).stdout.split("\n").filter(Boolean);
+    await this.git(cwd, ["merge", "--abort"]);
+    return this.syncDone(cwd, "conflict", conflicts);
+  }
+
+  private async syncDone(cwd: string, action: GitSyncResult["action"], conflicts?: string[]): Promise<Partial<GitResult>> {
+    const head_sha = await this.head(cwd);
+    return { head_sha, sync: { action, head_sha, ...(conflicts?.length ? { conflicts } : {}) } };
+  }
+
+  /** Tracked changes only: untracked files survive a reset and never block it. */
+  private async dirty(cwd: string): Promise<boolean> {
+    return (await this.git(cwd, ["status", "--porcelain", "--untracked-files=no"])).stdout.trim() !== "";
+  }
+
+  private async count(cwd: string, range: string): Promise<number> {
+    return Number((await this.git(cwd, ["rev-list", "--count", range])).stdout.trim()) || 0;
   }
 
   private async prepareClone(b: GitPrepare): Promise<Partial<GitResult>> {
