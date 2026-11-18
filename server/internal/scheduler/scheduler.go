@@ -123,6 +123,7 @@ func (s *Scheduler) loop(ctx context.Context) {
 func (s *Scheduler) sweep(ctx context.Context) {
 	s.releaseStaleCompactions(ctx)
 	s.releaseStaleSyncs(ctx)
+	s.repairReady(ctx)
 	ids, err := core.ProjectsWithWork(ctx, s.core.Pool)
 	if err != nil {
 		s.log.Warn("scheduler sweep", "err", err)
@@ -131,6 +132,22 @@ func (s *Scheduler) sweep(ctx context.Context) {
 	for _, id := range ids {
 		s.staff(ctx, id)
 		s.Schedule(ctx, id)
+	}
+}
+
+// ReadyRepairAfter is how long a pending task whose dependencies are all done may stay without
+// ready_at before the sweep stamps it (the events stamp it at once; this only catches misses).
+const ReadyRepairAfter = 2 * time.Minute
+
+// repairReady stamps the tasks an event failed to make ready, and says so: each one is a bug.
+func (s *Scheduler) repairReady(ctx context.Context) {
+	ids, err := core.RepairReady(ctx, s.core.Pool, ReadyRepairAfter)
+	if err != nil {
+		s.log.Warn("repair ready", "err", err)
+		return
+	}
+	if len(ids) > 0 {
+		s.log.Warn("tasks were ready without ready_at", "tasks", ids)
 	}
 }
 

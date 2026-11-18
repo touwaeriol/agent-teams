@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 290 {
+	if migrations.Latest() != 300 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -1234,5 +1234,49 @@ func TestSessionContextMigration(t *testing.T) {
 		if _, err := db.Exec(q); err == nil {
 			t.Fatalf("%s survived down", q)
 		}
+	}
+}
+
+// TestTaskDownstreamMigration: 00300 counts each task's distinct unfinished transitive
+// dependents (a diamond counts once, a cancelled dependent not at all), stamps ready_at on
+// pending tasks whose dependencies are done, and Down drops the column again.
+func TestTaskDownstreamMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 290); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
+INSERT INTO at_conversations (id, user_id, title, project_id, kind) VALUES ('th1', 'u1', 't', 'p1', 'thread');
+INSERT INTO at_threads (id, project_id, user_id, no, title, branch) VALUES ('th1', 'p1', 'u1', 1, 'x', 'thread/1-x');
+INSERT INTO at_tasks (conversation_id, id, thread_id, assignee, instruction, depends_on, status) VALUES
+  ('th1', 't1', 'th1', 'dev', 'root', '[]', 'pending'), ('th1', 't2', 'th1', 'dev', 'left', '["t1"]', 'pending'),
+  ('th1', 't3', 'th1', 'dev', 'right', '["t1"]', 'pending'), ('th1', 't4', 'th1', 'dev', 'join', '["t2","t3"]', 'pending'),
+  ('th1', 't5', 'th1', 'dev', 'done', '[]', 'done'), ('th1', 't6', 'th1', 'dev', 'gone', '["t2"]', 'cancelled'),
+  ('th1', 't7', 'th1', 'dev', 'after done', '["t5"]', 'pending');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 300); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.QueryRow(`SELECT string_agg(id || ':' || downstream || ':' || (ready_at IS NOT NULL)::text, ' ' ORDER BY id)
+		FROM at_tasks`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if want := "t1:3:true t2:1:false t3:1:false t4:0:false t5:1:false t6:0:false t7:0:true"; got != want {
+		t.Fatalf("after 00300:\n got %s\nwant %s", got, want)
+	}
+	if _, err := p.DownTo(ctx, 290); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`SELECT downstream FROM at_tasks`); err == nil {
+		t.Fatal("downstream survived down")
 	}
 }
