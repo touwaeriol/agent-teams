@@ -1274,7 +1274,8 @@
             "thread_done",
             "employee_removed",
             "policy_violation",
-            "node_drain"
+            "node_drain",
+            "switch_thread"
           ]
         },
         "forget": {

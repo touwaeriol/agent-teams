@@ -753,7 +753,7 @@ export interface NodeUpgradeResult {
 export interface SessionClose {
   session_id: SessionId;
   open_gen?: OpenGen;
-  reason?: "thread_done" | "employee_removed" | "policy_violation" | "node_drain";
+  reason?: "thread_done" | "employee_removed" | "policy_violation" | "node_drain" | "switch_thread";
   /**
    * Also delete the local session record (SDK transcript is kept 7 days).
    */

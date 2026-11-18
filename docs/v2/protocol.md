@@ -215,7 +215,7 @@
 
 ### 4.6 `session.close`（键：`session_id + open_gen`）
 
-`{"session_id": "s_…", "reason": "thread_done|employee_removed|policy_violation|node_drain", "forget": false}` → Claude `q.close()`；Codex 不再路由该 thread（app-server 无需关闭）。`forget: true` 同时删除本机会话记录（SDK 转录文件保留，用于排查，按 7 天清理）。回 `session.closed`。
+`{"session_id": "s_…", "reason": "thread_done|employee_removed|policy_violation|node_drain|switch_thread", "forget": false}` → Claude `q.close()`；Codex 不再路由该 thread（app-server 无需关闭）。`forget: true` 同时删除本机会话记录（SDK 转录文件保留，用于排查，按 7 天清理）。回 `session.closed`。
 
 ### 4.7 停放（守护进程自主）
 

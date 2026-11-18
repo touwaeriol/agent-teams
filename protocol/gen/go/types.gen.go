@@ -5755,6 +5755,7 @@ type SessionCloseReason string
 const SessionCloseReasonEmployeeRemoved SessionCloseReason = "employee_removed"
 const SessionCloseReasonNodeDrain SessionCloseReason = "node_drain"
 const SessionCloseReasonPolicyViolation SessionCloseReason = "policy_violation"
+const SessionCloseReasonSwitchThread SessionCloseReason = "switch_thread"
 const SessionCloseReasonThreadDone SessionCloseReason = "thread_done"
 
 var enumValues_SessionCloseReason = []interface{}{
@@ -5762,6 +5763,7 @@ var enumValues_SessionCloseReason = []interface{}{
 	"employee_removed",
 	"policy_violation",
 	"node_drain",
+	"switch_thread",
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
