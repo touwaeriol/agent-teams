@@ -1,6 +1,6 @@
 # 项目级共享员工与任务队列
 
-状态：设计稿（2026-11-17）；阶段 1（§2–§4、§6–§8，网页最少改动）已实现（`feat/staff-p1`），阶段 2–4 待做。取代 architecture.md §6.1 “成员 = 讨论串 × 岗位 × count”和 §7.3 “按讨论串调度”的做法；其余章节不变。
+状态：设计稿（2026-11-17）；阶段 1（§2–§4、§6–§8，网页最少改动）已实现（`feat/staff-p1`），阶段 2（§5 会话管理）已实现（`feat/staff-p2`），阶段 3–4 待做。取代 architecture.md §6.1 “成员 = 讨论串 × 岗位 × count”和 §7.3 “按讨论串调度”的做法；其余章节不变。
 
 ## 1. 要解决的问题
 
@@ -117,13 +117,14 @@
 | 情况 | 做法 |
 | --- | --- |
 | 同一讨论串，上下文用量 < 岗位的 `compact_between_pct`（dev 默认 60%） | 直接在原会话里发任务简报 |
-| 同一讨论串，用量 ≥ `compact_between_pct` | 先压缩，再发任务简报 |
+| 同一讨论串，用量 ≥ `context_limit × compact_between_pct`（没设上限就按运行时报的窗口） | 先压缩，再发任务简报；节点不支持 `session_compact` 时改为 clear |
 | 同一讨论串，这个会话已经连续做满 `clear_after_tasks` 个任务（dev 默认 8，审查岗 1） | clear：关掉会话，开新会话 |
 | 换讨论串 | clear：关掉会话，在新讨论串的 worktree 开新会话 |
 | 讨论串结束 | 关掉成员在这个讨论串的会话（成员本身不受影响） |
 
 - **不每个任务都压缩**：压缩要多花一个回合、会丢细节，完整上下文的缓存命中也更省钱。只按用量阈值压缩；Claude Code 自己快满时也会自动压缩。
 - **clear 后的第一条消息** = 任务简报 + 讨论串交接摘要（组长是谁、主任务计划、这个成员在这个讨论串以前做过的任务和结果），沿用 `handoffSummary` / `threadDigest` 的做法，只换成按“成员 × 讨论串”取。
+- **实现**（`scheduler/session.go`）：判断表是纯函数 `decideStep`，先看 clear（会话已收到的任务简报数 `at_agent_sessions.tasks_done` ≥ `clear_after_tasks`），再看压缩（上次回合结束记下的 `context_used`）。会话正在跑回合、还在启动或崩溃了就不动它（直接发简报）。压缩时任务停在 `claimed`（`at_tasks.compact_id`），收到 `session.compacted`（不管成功与否）或 10 分钟后再走开工前同步，同步完才发简报——两段等待串起来，每段超时按 `wait_since` 算。clear = 以 `context_clear` 关会话，简报照常投递时开新会话，`continuation` 看到这个关闭原因就在前面加 `[新会话]` 摘要（换讨论串的 `[换讨论串]` 摘要同一个函数）。旧守护进程（没有 `context_usage`）不报用量，就只按任务数 clear。
 
 ### 5.1 按岗位配置（员工模板）
 
@@ -152,11 +153,11 @@
 
 ### 5.2 单个任务很长、任务中途就压缩了怎么办
 
-1. **压缩后补“任务锚点”**：压缩会把任务说明压成摘要，长任务容易跑偏。平台在压缩完成后（Claude 的 `compact_boundary` / SessionStart(`compact`) 钩子，Codex 的 `thread/compacted`）给成员补一条短消息：任务 id、原始任务说明、分支、依赖的交接说明、目前已报的进度（`report_progress`）。Claude 优先用 SessionStart 钩子的 `additionalContext` 注入（不占一条用户消息），Codex 用一条 `later` 优先级的平台消息。
+1. **压缩后补“任务锚点”**：压缩会把任务说明压成摘要，长任务容易跑偏。平台在压缩完成后（Claude 的 `compact_boundary` / SessionStart(`compact`) 钩子，Codex 的 `thread/compacted`）给成员补一条短消息：任务 id、原始任务说明、分支、依赖的交接说明、目前已报的进度（`report_progress`）。Claude 用 SessionStart 钩子的 `additionalContext` 注入（不占一条用户消息），Codex 在压缩后用 `turn/steer` 插进还在跑的回合。
 2. **压缩指令带重点**：平台主动压缩时发 `/compact <compact_focus + 当前任务锚点>`；运行时自己压缩时用 PreCompact 钩子补同样的指令（钩子返回的 `systemMessage` 会拼进压缩指令，见下面的实测）。dev 的默认重点：“保留当前任务 id、分支、改过的文件、做过的决定、还没做完的事和已知的坑”。
 3. **进度落盘**：提示词要求长任务定期 `report_progress`，并把工作笔记写到 worktree 里 git 忽略的 `.agent-notes/<任务id>.md`；压缩、clear、换节点都丢不掉。
 4. **任务太大要反馈给组长**：同一个任务在任务中压缩了 2 次以上，平台给组长发 `[Task t5 · dev-1] 任务很长，已压缩 2 次，考虑拆小`。拆分质量会越来越好。
-5. **记指标**：每个任务记压缩次数、开始和结束时的上下文比例（`at_tasks` 加列），在团队页按岗位看，用来调阈值。
+5. **记指标**：每个任务记任务中压缩次数、开始和结束时的上下文 token 数（`at_tasks.compactions` / `ctx_start` / `ctx_end`），在团队页按岗位看（阶段 3），用来调阈值。
 
 **实测（SDK 0.3.325，`node/scripts/smoke-compact.ts`，小模型、窗口调到 100K，约 0.11 美元）**：
 
@@ -166,11 +167,17 @@
 - **d. PreCompact 钩子**：没有 `hookSpecificOutput`，但 SDK 回调钩子返回的 `systemMessage` 会作为附加压缩指令，和 `/compact` 后面的指令拼在一起（摘要里出现了只在钩子里要求的暗号）。所以自动压缩时由钩子补 `compact_focus + 锚点`；平台主动压缩时指令已经在 `/compact` 里，钩子不再重复。
 - **e. SessionStart(`compact`)**：自动和手动压缩之后都会触发，返回的 `additionalContext` 能被模型看到（压缩后问只写在 `additionalContext` 里的暗号，答对了）。所以 Claude 的锚点走这个钩子，不额外发消息。
 
+**按实测选的做法**：Claude 的锚点走 SessionStart(`compact`) 钩子的 `additionalContext`，自动压缩的重点和锚点走 PreCompact 钩子的 `systemMessage`；平台主动压缩发 `/compact <compact_focus + 下一个任务>`（这时上一个任务已经结束，守护进程清掉旧锚点，钩子不再补）。Codex 没有压缩指令参数，`compact_focus` 只对 Claude 生效；Codex 运行时自己压缩后，回合还在跑就用 `turn/steer` 把锚点插进当前回合（不用 `later`：`later` 要等回合结束，那时任务可能已经交了），回合已经结束就不补。
+
+**任务锚点**的内容（`scheduler/session.go` `taskAnchor`，≤ 7500 字）：讨论串号和任务 id、原始说明、成员分支、依赖任务的交接说明、最近一次 `report_progress`（存在 `at_tasks.progress`）和工作笔记路径 `.agent-notes/<任务id>.md`。锚点随任务简报下发一次（`session.send.anchor`，开新会话时是 `first_message.anchor`），之后报的进度不会再推给守护进程——压缩后模型按锚点去读工作笔记。
+
 ### 5.3 协议改动（节点）
 
-- `session.event` 的 `turn_ended` 带上 `context: {used_tokens, max_tokens}`：Claude 用 `Query.getContextUsage()`（SDK 0.3.325 已有），Codex 用 `thread/tokenUsage/updated` 通知里的数字。控制台存到 `at_agent_sessions.context_pct`。
-- 新命令 `session.compact {session_id, open_gen}` → 守护进程：Claude 发一条 `/compact` 用户消息，Codex 调 `thread/compact/start`；完成后发现有的 `compacting` 事件（on → off）和 `session.compacted {session_id, open_gen, context}`。控制台等到 `session.compacted`（或 10 分钟超时）再送任务简报。
-- clear 不需要新命令：`session.close` + 不带 resume 的 `session.open`（现在就是这样）。
+- `session.event` 的 `turn_ended` 带上 `context: {used_tokens, max_tokens}`：Claude 用 `Query.getContextUsage({detail: "summary"})`，Codex 用 `thread/tokenUsage/updated` 的 `last.totalTokens` / `modelContextWindow`。控制台存到 `at_agent_sessions.context_used` / `context_max`（token），比例在领取时按岗位的 `context_limit` 算。
+- 新命令 `session.compact {session_id, open_gen, compact_id, instructions}` → 守护进程：等当前回合结束，Claude 发一条 `/compact <instructions>` 用户消息，Codex 调 `thread/compact/start`；完成后发现有的 `compacting` 事件（on → off）和 `session.compacted {session_id, open_gen, compact_id, ok, context}`（键都是 `compact_id`，控制台按它找到等着的任务）。控制台等到 `session.compacted`（或 10 分钟超时）再同步、送任务简报。
+- `session.open` 加 `context {limit_tokens, in_task_pct, focus}`（岗位快照里的值），`session.send` 和 `first_message` 加 `anchor`。
+- clear 用 `session.close`（新原因 `context_clear`；没有 `session_compact` 的旧守护进程收到 `switch_thread`，效果一样）+ 不带 resume 的 `session.open`。
+- `hello.features`：`context_usage`、`session_compact`。
 
 ## 6. 平台工具和提示词
 

@@ -177,6 +177,14 @@ CREATE TABLE at_roles (
   look             JSONB NOT NULL DEFAULT '{}',         -- {"color":"#4C7BD0","outfit":"tee","accessory":"none","hair":null}；outfit/accessory 为字符串
   skills           TEXT[] NOT NULL DEFAULT '{}',        -- 技能名（内置 design/docs 或 at_skills.name），统筹必须为空（00060）
   plugins          TEXT[] NOT NULL DEFAULT '{}',        -- 插件：name（最新版本）或 name@N（钉住版本），最多 8 个，统筹必须为空（00080）
+  -- 00280（shared-members.md §5.1）：会话管理，百分比都相对 context_limit（不是模型窗口）
+  context_limit        INT,                             -- 岗位的上下文上限（token，≥ 10000）；NULL = 模型窗口
+  compact_between_pct  INT,                             -- 成员领下一个任务时已用 ≥ 上限 × 比例就先压缩；NULL = 不压缩（组长、统筹总是 NULL）
+  compact_in_task_pct  INT,                             -- 任务中运行时自己压缩的比例；NULL = 运行时默认
+  clear_after_tasks    INT,                             -- 同一会话做满几个任务就换新会话；0 = 不按次数，NULL = 不适用（组长、统筹）
+  compact_focus        TEXT NOT NULL DEFAULT '',        -- 压缩时要保留什么，拼进压缩指令
+                                                        -- 默认值：写代码的成员 60/80/8 + 默认重点，审查 / 决策 —/80/1，组长和统筹 —/70/—；
+                                                        -- 迁移同时写进 at_employees.spec（员工按岗位快照用这些值）
   sort             INT NOT NULL DEFAULT 0,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -331,6 +339,15 @@ ALTER TABLE at_tasks
   ADD COLUMN reserved_until TIMESTAMPTZ,             -- 预留到期（10 分钟），过期后同岗位其他成员可领
   ADD COLUMN ready_at TIMESTAMPTZ;                   -- 依赖都满足、可领取的时刻（饿死保护按它算 5 分钟）
 CREATE INDEX at_tasks_queue ON at_tasks (thread_id, status, role);
+-- 00290（shared-members.md §5）：领取时的压缩、任务锚点里的进度、长任务指标
+ALTER TABLE at_tasks
+  ADD COLUMN compact_id TEXT NOT NULL DEFAULT '',  -- 领取后先压缩：等这个 compact_id 的 session.compacted（10 分钟超时）再同步、发简报
+  ADD COLUMN wait_since TIMESTAMPTZ,               -- 当前这段等待（压缩、开工前同步）从什么时候开始，超时按它算
+  ADD COLUMN progress TEXT NOT NULL DEFAULT '',    -- 最近一次 report_progress（任务锚点带上）
+  ADD COLUMN compactions INT NOT NULL DEFAULT 0,   -- 任务进行中运行时压缩了几次（≥ 2 时给组长发一次“考虑拆小”，split_hinted 记已发）
+  ADD COLUMN ctx_start INT, ADD COLUMN ctx_end INT, -- 任务开始（简报送达）和最近一个回合结束时的上下文 token 数
+  ADD COLUMN split_hinted BOOLEAN NOT NULL DEFAULT false;
+CREATE INDEX at_tasks_compact ON at_tasks (compact_id) WHERE compact_id <> '';
 -- claimed_by 仍是员工名：名字解析先找讨论串自己的员工（组长、旧成员），再找项目成员
 -- v2 status 取值：pending | claimed | running | blocked | review | decision | merging | done | failed | cancelled
 -- 注意：pending/running 与 v1 重叠，v1 只靠防护补丁（kind='chat' 且 platform_version=1）避开 v2 行；补丁同时把 v1 TaskView.status 改为 str
@@ -405,9 +422,12 @@ CREATE TABLE at_agent_sessions (
   opened_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_active_at  TIMESTAMPTZ,
   closed_at       TIMESTAMPTZ,
-  close_reason    TEXT NOT NULL DEFAULT '',        -- … | thread_done | switch_thread（项目成员换到别的讨论串）
+  close_reason    TEXT NOT NULL DEFAULT '',        -- … | thread_done | switch_thread（项目成员换到别的讨论串）| context_clear（做满任务数或上下文太满，下一个任务开新会话）
   thread_id       TEXT REFERENCES at_threads(id) ON DELETE SET NULL, -- 00270：会话开在哪个讨论串的 worktree（讨论串结束按它关会话）
-  in_turn         BOOLEAN NOT NULL DEFAULT false   -- 00270：正在跑回合（turn_started 置位，turn_ended / 离开 active 清掉）；项目成员回合中不领别的讨论串的任务
+  in_turn         BOOLEAN NOT NULL DEFAULT false,  -- 00270：正在跑回合（turn_started 置位，turn_ended / 离开 active 清掉）；项目成员回合中不领别的讨论串的任务
+  context_used    INT,                             -- 00290：最近一个回合结束时的上下文 token 数（turn_ended.context / session.compacted）
+  context_max     INT,                             -- 00290：运行时衡量用的窗口（岗位没设上限时按它算比例）
+  tasks_done      INT NOT NULL DEFAULT 0           -- 00290：送进这个会话的任务简报数（clear_after_tasks）
 );
 CREATE UNIQUE INDEX at_agent_sessions_live ON at_agent_sessions (employee_id) WHERE state <> 'closed';  -- 一个员工最多一个活会话
 CREATE INDEX at_agent_sessions_node ON at_agent_sessions (node_id) WHERE state <> 'closed';
