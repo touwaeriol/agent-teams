@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
 import type { StatusFrame } from "@/api/events";
 import type { EmployeeBrief, OfficeSnapshot } from "@/api/views";
-import { rosterAfter, staffSummary, staffSummaryText, toOfficeEmployees, toWidgetData } from "@/lib/office";
+import { officeRoster, rosterAfter, staffSummary, staffSummaryText, toOfficeEmployees, toWidgetData } from "@/lib/office";
 import { newRole } from "@/lib/roles";
 import Team from "@/pages/settings/Team.vue";
 import { addEmployee, headcountText, staffGroups, staffRow } from "@/pages/settings/team/staff";
@@ -64,6 +64,13 @@ describe("office top bar", () => {
     expect(after.find((e) => e.id === "qa-1")!.thread_no).toBe(12);
     expect(after.find((e) => e.id === "lead-12")!.thread_no).toBe(12);
     expect(rosterAfter(roster, [], 10)).toBe(roster);
+  });
+
+  it("a refetched snapshot is not overlaid with frames older than it", () => {
+    const frames: StatusFrame[] = [{ seq: 11, at: "", employee: { id: "dev-1", thread_no: 13 }, status: busy("t8")! }];
+    const fresh = { ...snapshot, last_event_id: 20, employees: snapshot.employees.map((e) => (e.id === "dev-1" ? { ...e, thread_no: 12 } : e)) };
+    expect(officeRoster({ ...snapshot, last_event_id: 10 }, frames).find((e) => e.id === "dev-1")!.thread_no).toBe(13);
+    expect(officeRoster(fresh, frames).find((e) => e.id === "dev-1")!.thread_no).toBe(12);
   });
 });
 

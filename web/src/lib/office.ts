@@ -33,6 +33,11 @@ export function rosterAfter(employees: OfficeEmployee[], frames: StatusFrame[], 
   return employees.map((e) => (latest.has(e.id) && e.tier === "member" ? { ...e, thread_no: latest.get(e.id)! } : e));
 }
 
+/** The office roster: the snapshot's employees after the status frames newer than the snapshot (older ones are in it already). */
+export function officeRoster(s: Pick<OfficeSnapshot, "employees" | "last_event_id">, frames: StatusFrame[]): OfficeEmployee[] {
+  return rosterAfter(toOfficeEmployees(s), frames, s.last_event_id);
+}
+
 export interface StaffSummary {
   headcount: number;
   working: number;

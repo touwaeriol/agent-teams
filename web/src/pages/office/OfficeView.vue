@@ -6,7 +6,7 @@ import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { layoutTickKey, statusLogKey, type StatusFrame } from "@/api/events";
 import type { OfficeSnapshot } from "@/api/views";
-import { rosterAfter, staffSummary, staffSummaryText, toOfficeEmployees, toOfficeEvents, toOfficeThreads, toWidgetData } from "@/lib/office";
+import { officeRoster, staffSummary, staffSummaryText, toOfficeEvents, toOfficeThreads, toWidgetData } from "@/lib/office";
 import { Office, useRemoteLayout, type OfficeAction } from "@/office";
 import { foldStatuses } from "@/office/replay";
 import { actionTarget, DARK, liveThreads } from "./logic";
@@ -16,10 +16,12 @@ import ReplayOffice from "./ReplayOffice.vue";
 
 const props = defineProps<{ pid: string; name: string; snapshot: OfficeSnapshot; layoutId: string }>();
 const router = useRouter();
-const after = props.snapshot.last_event_id;
+// The status feed starts at the first snapshot and only grows (a shorter feed would teleport everyone);
+// the roster follows each refetched snapshot (officeRoster skips the frames it already has).
+const feedStart = props.snapshot.last_event_id;
 const log = useQuery<StatusFrame[]>({ queryKey: computed(() => statusLogKey(props.pid)), queryFn: () => [], staleTime: Infinity, initialData: [] });
 const tick = useQuery<number>({ queryKey: computed(() => layoutTickKey(props.pid)), queryFn: () => 0, staleTime: Infinity, initialData: 0 });
-const live = computed(() => toOfficeEvents(log.data.value ?? [], after));
+const live = computed(() => toOfficeEvents(log.data.value ?? [], feedStart));
 const remote = useRemoteLayout(() => props.layoutId);
 watch(() => tick.data.value, (n) => n && remote.reload());
 const focus = ref<number | null>(null);
@@ -40,7 +42,7 @@ const common = computed(() => ({
   data: toWidgetData(props.snapshot, focus.value),
   onAction,
 }));
-const employees = computed(() => rosterAfter(toOfficeEmployees(props.snapshot), log.data.value ?? [], after));
+const employees = computed(() => officeRoster(props.snapshot, log.data.value ?? []));
 const summary = computed(() => staffSummaryText(staffSummary(employees.value, foldStatuses(employees.value, live.value), threads.value)));
 </script>
 
