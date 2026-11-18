@@ -42,7 +42,7 @@ const messages = async (c, cid) => (await c.get(`/api/conversations/${cid}/messa
 const lastId = async (c, cid) => Math.max(0, ...(await messages(c, cid)).map((m) => Number(m.id)));
 
 const threadSessions = (tid) => sql(`SELECT s.id || ':' || s.state || ':' || coalesce(s.close_reason, '') FROM at_agent_sessions s
-  JOIN at_employees e ON e.id = s.employee_id WHERE e.thread_id = '${tid}' ORDER BY s.opened_at`).split("\n").filter(Boolean);
+  JOIN at_employees e ON e.id = s.employee_id WHERE s.thread_id = '${tid}' ORDER BY s.opened_at`).split("\n").filter(Boolean);
 
 const coordSession = (pid) => sql(`SELECT s.state FROM at_agent_sessions s JOIN at_employees e ON e.id = s.employee_id
   WHERE e.project_id = '${pid}' AND e.tier = 'coordinator' AND s.state <> 'closed' ORDER BY s.opened_at DESC LIMIT 1`);

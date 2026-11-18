@@ -128,7 +128,7 @@ async function archiveAndDelete(c, t) {
   let v = await c.post(`/api/threads/${t.id}/archive`);
   check(v.status === "archived", "archive → archived");
   await waitFor("the thread's sessions close", async () =>
-    sql(`SELECT count(*) FROM at_agent_sessions s JOIN at_employees e ON e.id = s.employee_id WHERE e.thread_id = '${t.id}' AND s.state <> 'closed'`) === "0",
+    sql(`SELECT count(*) FROM at_agent_sessions s JOIN at_employees e ON e.id = s.employee_id WHERE s.thread_id = '${t.id}' AND s.state <> 'closed'`) === "0",
   { timeoutMs: 60_000 });
   check(true, "archiving closed every session of the thread");
   const listed = await c.get(`/api/projects/${state.projectId}/threads`);

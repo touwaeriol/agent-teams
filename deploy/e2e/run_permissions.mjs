@@ -136,7 +136,7 @@ async function main() {
     check(true, `daemon online: ${node.version ?? ""}`);
     const coord = await c.get(`/api/projects/${state.projectId}/coordinator`);
     const t = await openThread(c, coord);
-    const mode = sql(`SELECT s.permission_mode FROM at_agent_sessions s JOIN at_employees e ON e.id = s.employee_id WHERE e.thread_id = '${t.id}' AND e.tier = 'member' LIMIT 1`);
+    const mode = sql(`SELECT s.permission_mode FROM at_agent_sessions s JOIN at_employees e ON e.id = s.employee_id WHERE s.thread_id = '${t.id}' AND e.tier = 'member' LIMIT 1`);
     check(mode === "default", `the dev's session opened in permission mode ${mode}`);
     await leadDecides(t);
     await userDecides(c, t);

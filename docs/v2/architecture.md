@@ -184,13 +184,13 @@ Go 写的控制台（REST + SSE + 节点 WebSocket + 调度器）存全部状态
 
 ### 6.1 三层角色到会话的映射
 
-> 计划改为项目级共享成员和项目级任务队列，见 [shared-members.md](shared-members.md)（设计稿，未实现）。下面描述的是当前实现。
+成员是**项目级固定编制**（[shared-members.md](shared-members.md) §2）：岗位模板的 `count` 是项目里这个岗位配几个人（`<岗位>-<n>`，`at_employees.thread_id = NULL`），所有讨论串共用；开讨论串只建组长 `lead-<no>`。成员同一时间只做一个任务、只有一个会话，会话开在当前任务所在讨论串的 worktree（`at_agent_sessions.thread_id`），换讨论串就关掉旧会话（`switch_thread`）、在新讨论串开新会话并附交接摘要。项目成员的技能 / 插件目录是 `<project>/project/<name>`（`session.open.employee.scope = project`）。迁移前随讨论串建的旧成员仍在自己的讨论串做完手里的任务。
 
 | 层级 | 每个… | 会话类型 | 工作目录 | 内置工具 | 权限 | 平台工具集 |
 | --- | --- | --- | --- | --- | --- | --- |
 | 项目统筹（coordinator） | 项目 1 个 | Claude，常驻 | `projects/<pid>/coordinator`（空目录，不克隆） | `tools: []`（一个内置工具都没有） | `permissionMode:'dontAsk'` + PreToolUse 钩子只放行 `mcp__platform__*` | coordinator |
 | 组长（lead） | 讨论串 1 个 | Claude（或 Codex），常驻 | `projects/<pid>/threads/<no>/lead`（讨论串分支的 worktree） | `Read, Glob, Grep, Bash` | `dontAsk`；`disallowedTools: Edit, Write, NotebookEdit`；**只读策略**（§10.2：Bash argv 白名单 + Claude Bash 沙箱无可写路径 + 文件工具限 cwd） | lead |
-| 成员（member） | 讨论串 × 岗位 × count | Claude 或 Codex，常驻 | `projects/<pid>/threads/<no>/<name>`（分支 `thread/<no>/<name>`） | 按岗位模板 | 岗位 `permission_mode`（§9.1）：`bypass`（默认）= `bypassPermissions`，任何节点上都不弹权限确认；`ask` = `default`（除读文件外都走 canUseTool → 审批路由）；岗位 `read_only`（审查岗、决策岗默认开）= 与组长相同的只读策略（`dontAsk`，与权限模式无关） | member（+ `can_delegate` 时有派子任务） |
+| 成员（member） | 项目 × 岗位 × count（所有讨论串共用） | Claude 或 Codex，常驻（一次一个会话，开在当前讨论串） | `projects/<pid>/threads/<no>/<name>`（`<no>` = 当前任务的讨论串，分支 `thread/<no>/<name>`） | 按岗位模板 | 岗位 `permission_mode`（§9.1）：`bypass`（默认）= `bypassPermissions`，任何节点上都不弹权限确认；`ask` = `default`（除读文件外都走 canUseTool → 审批路由）；岗位 `read_only`（审查岗、决策岗默认开）= 与组长相同的只读策略（`dontAsk`，与权限模式无关） | member（+ `can_delegate` 时有派子任务） |
 
 Codex 对应：组长和 `read_only` 岗位 `sandbox: read-only, approvalPolicy: never`；`ask` 成员 `sandbox: workspace-write, approvalPolicy: untrusted`，并在 `thread/start.config` 里设 `sandbox_workspace_write.writable_roots = [<shared>/.git]`（worktree 的对象库和 refs 在共享克隆的 `.git` 里，不在 cwd 下，否则每次 `git commit` 都会被沙箱拦或弹审批）和 `sandbox_workspace_write.network_access = true`（装依赖需要；推送不靠它，见 §8.1）；`bypass` 成员（默认）= `danger-full-access + never`，任何节点上都一样。P3 的 SDK/Codex 验收脚本要实测 Codex 成员在 worktree 里能 `git commit`。
 
@@ -327,16 +327,17 @@ queued ──开工──► running ◄──► waiting（有等你处理的�
 
 ### 7.3 任务池调度
 
-> 计划改为项目级共享成员和项目级任务队列，见 [shared-members.md](shared-members.md)（设计稿，未实现）。下面描述的是当前实现。
+任务进**项目级任务队列**，由项目的空闲成员领取（细节见 [shared-members.md](shared-members.md) §4）：
 
-- 触发：任务新建 / 状态变化、员工会话变空闲（turn 结束且无运行中任务）、节点上线、定时（每 10 s 兜底）。触发写 Valkey 频道 `sched:<thread>`，调度循环（advisory lock 选主）消费。
-- 领取：一个 SQL 事务里 `SELECT … FROM at_tasks WHERE thread_id=$1 AND status='pending' AND role=$2 AND deps_satisfied ORDER BY priority, created_at FOR UPDATE SKIP LOCKED LIMIT 1`，配上“该岗位空闲实例”`SELECT … FROM at_employees WHERE … AND NOT EXISTS (running task) FOR UPDATE SKIP LOCKED`，一起改成 `claimed`。
+- 触发：任务新建 / 状态变化、成员回合结束且手里没任务、节点上线（节点主人有待领任务的项目）、定时（每 10 s 兜底）。触发写 Valkey 频道 `sched:<project>`，调度循环（advisory lock 选主）按项目消费。
+- 领取：可领取 = `pending`、依赖都 `done`（`ready_at` 非空）、讨论串 `running` / `waiting`、岗位匹配；空闲 = 全项目没有 claimed / running 任务。每一轮取空闲成员和最多 200 个可领取任务，纯函数 `pick`（`scheduler/score.go`）按档位挑最好的一对：点名 > 返工预留（审查打回、CI / 冲突修复留给原成员 10 分钟）> 饿死（可领取超过 5 分钟）> 依赖粘性 > 讨论串粘性 > 同仓库 > 其他；锁住成员和任务再核对一次后改成 `claimed`。
 - 领取后发事件 `task.claimed`（办公室里那人“走到任务板 → 领取 → 回工位”就由它驱动），再给该成员 `session.send`（必要时先 `git.prepare` + `session.open`）。消息正文 = 任务说明 + 依赖任务的交接内容 + 工作目录同步结果 + 简报（名单、未读留言）。
 - **开工前同步**（shared-members.md §4.2）：员工已有节点、节点支持 `git_sync` 时，领取后先按仓库发 `git.prepare {sync}`（普通任务 `member` 模式同步到讨论串分支；审查 / 决策任务 `review` 模式检出被审的成员分支），任务停在 `claimed`（`sync_pending`），结果都回来才发任务简报；2 分钟没回来照发，并注明没同步。
 - **交接内容**：每个依赖任务给出做的人、总结（≤ 3000 字）、`complete_task` 的 `handoff`（有下游依赖时第一次不写会被提醒一次）、合并进讨论串分支的范围和改动文件（`at_merge_queue.base_sha` 到合并后的 sha，GitHub compare 取文件，记在 `at_tasks.merged`）和审查 / 决策结论。
 - **自动推送**：成员回合结束时手里的任务还在 running，平台把已提交的工作推到成员分支（每人 5 分钟最多一次，没有新提交节点不推），节点掉线也丢不了已提交的工作。
 - **完成判定**：成员调用 `complete_task` 才算完成；完成后按 §6.4 通知组长。若回合结束（`result`）而任务仍 running，平台推一条提醒“如果做完了请调用 complete_task；没做完请继续”；连续 2 次回合结束仍未完成 → 任务标 `blocked`，给组长发 `[Task t7 · dev-1 · 需要关注]`。这比 v1 “用最后一条 result 当输出”可靠，因为常驻会话里一个回合不等于一个任务。
-- 一个成员同一时间只有一个 running 任务；`can_delegate` 的子任务也进同一个池。
+- 一个成员全项目同一时间只有一个 claimed / running 任务；`can_delegate` 的子任务也进同一个队列。领到别的讨论串的任务时先关掉旧会话（`switch_thread`），在新讨论串开会话。
+- 讨论串结束：关掉在这个讨论串开着的会话（组长和在这里干活的成员），清空成员的 `current_thread_id`，按“在这里干过活的成员”删成员分支、清 checkout；成员本身不受影响。
 - 失败重试：`complete_task` 报失败或会话崩溃时任务回池（`attempt+1`，上限 2），超限 `failed` 并通知组长。
 - 依赖断了：任务 `failed` 或 `cancelled` 时，依赖它的 `pending` 任务（以及再依赖它们的）都标为 `blocked` 并给组长发一条 `[Task t3 · 失败了] 依赖它的 t5、t6 已标为 blocked…`：依赖必须 `done` 才能开工，这些任务永远等不到，不能悄悄留在池里。组长 `cancel_task` 后重新拆，或由用户在任务页重试。
 

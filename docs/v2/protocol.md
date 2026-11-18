@@ -133,7 +133,7 @@
 {
   "session_id": "s_01JD…",
   "open_gen": 3,                                  // 第几次打开（每次 resume 加 1）
-  "employee": {"name": "dev-2", "role": "dev", "tier": "member", "project_id": "…", "thread_no": 12},
+  "employee": {"name": "dev-2", "role": "dev", "tier": "member", "project_id": "…", "thread_no": 12, "scope": "project"},
   "runtime": "claude",                             // claude | codex
   "cwd": "projects/7a1c…/threads/12/dev-2",       // 相对 root
   "prepare": "g_01JD…",                            // 可选：依赖的 git.prepare 命令键，守护进程先确保它已成功
@@ -174,8 +174,8 @@
 1. 校验 `cwd` 在 root 内；`prepare_jobs`（没有时 `prepare`）指定的 git 操作逐个等待成功（每个最多 10 分钟），任何一个失败就打开失败。
 2. Claude：构造 `options`（`env` 逐项构造、`permissionMode` 显式、`settingSources: []`、`allowedTools`（含控制台由“总是允许”规则展开的项）、`settings`（沙箱与拒绝规则）、`canUseTool`、`hooks`、`mcpServers.platform = createSdkMcpServer(...)`、`includeHookEvents: true`、`resume`），用一个异步队列作为 `prompt` 调 `query()`，随即 `await q.initializationResult()` 拿工具列表和 MCP 状态（不等第一个回合的 `system/init`）。Codex：确保本机 app-server 在跑，`thread/start` 或 `thread/resume`（带新的 `mcp_servers.platform` 配置），工具列表取自 `mcpServerStatus/list` + 沙箱配置。
 3. 回 `session.opened`。`first_message` 先扣住，收到 `session.release {session_id, open_gen}` 才推送。
-4. `skills`（只有 Claude 会话会收到）：写成本地插件 `<root>/agent-skills/<project>/<thread_no>/<employee>/`（每次打开重建，不在 worktree 里），`options.plugins = [{type:'local', path, skipMcpDiscovery:true}]`、`options.skills = ['agent-teams-skills:<name>', …]`；`Skill` 工具由控制台放进 `tools`/`allowed_tools`。
-4a. `plugins`：每个写到 `<root>/agent-plugins/<project>/<thread_no>/<employee>/<name>@<version>/`（每次打开整目录重建，不在 worktree 里；统筹忽略）。Claude：`options.plugins` 追加一个 local 插件项（skipMcpDiscovery 为 true），`options.skills` 追加 bundle 的 `skills`，`mcp_servers` 里的 `${CLAUDE_PLUGIN_ROOT}` 换成插件目录后以 `plugin_<plugin>_<server>` 放进 `options.mcpServers`（`strictMcpConfig` 不变）。Codex：只把 `mcp_servers` 的 stdio/http 服务器并进 thread 配置的 `mcp_servers`。
+4. `skills`（只有 Claude 会话会收到）：写成本地插件 `<root>/agent-skills/<project>/<thread_no 或 project>/<employee>/`（`employee.scope = "project"`——统筹和项目共用的成员——用 `project`，不随会话所在的讨论串变；`thread` 用讨论串号；旧控制台不带 scope 时 thread_no 为空就是 `project`）（每次打开重建，不在 worktree 里），`options.plugins = [{type:'local', path, skipMcpDiscovery:true}]`、`options.skills = ['agent-teams-skills:<name>', …]`；`Skill` 工具由控制台放进 `tools`/`allowed_tools`。
+4a. `plugins`：每个写到 `<root>/agent-plugins/<project>/<thread_no 或 project>/<employee>/<name>@<version>/`（目录规则同上）（每次打开整目录重建，不在 worktree 里；统筹忽略）。Claude：`options.plugins` 追加一个 local 插件项（skipMcpDiscovery 为 true），`options.skills` 追加 bundle 的 `skills`，`mcp_servers` 里的 `${CLAUDE_PLUGIN_ROOT}` 换成插件目录后以 `plugin_<plugin>_<server>` 放进 `options.mcpServers`（`strictMcpConfig` 不变）。Codex：只把 `mcp_servers` 的 stdio/http 服务器并进 thread 配置的 `mcp_servers`。
 5. `resume` 失败（转录不存在、thread 找不到）：不自动开新会话，回 `session.opened {resume_failed: true, error}`，由控制台走交接流程（architecture.md §6.2）。停放的会话被 `session.send` 唤醒、或崩溃后自动重启时 resume 失败，同样回这一条（`open_gen` 不变）并删掉本机记录；此前**不发** `session.state closed`。
 6. Claude 的 `AskUserQuestion`：PreToolUse 钩子（`matcher: AskUserQuestion`）发 `tool.call ask_user {questions, via: "AskUserQuestion"}`（`tool_use_id` 是这次 AskUserQuestion 的），等 `tool.result` 的 `structured.answers`，以 `allow` + `updatedInput.answers` 交回 CLI（architecture.md §6.6）。
 
