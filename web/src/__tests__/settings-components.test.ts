@@ -141,6 +141,11 @@ describe("Team", () => {
     expect(w.text()).toContain("新岗位");
     await save().trigger("click");
     await flushPromises();
+    // A new member role changes 编制: saving asks first.
+    const dialog = document.querySelector("[role=alertdialog]") as HTMLElement;
+    expect(dialog.textContent).toContain("0→1");
+    [...dialog.querySelectorAll("button")].find((b) => b.textContent?.trim() === "保存")!.click();
+    await flushPromises();
     const body = (await calls(spy, "PUT", /\/api\/roles$/)[0].json()) as { roles: { role: string; sort: number }[] };
     expect(body.roles.map((r) => [r.role, r.sort])).toEqual([["coordinator", 0], ["lead", 1], ["dev", 2], ["role-1", 3]]);
   }, 15000);

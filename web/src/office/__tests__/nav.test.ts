@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { compileScene } from "../compile";
 import { addEdge, addNode, advance, astar, createGraph, pathLength, route } from "../nav";
-import { crew, defaultLayout, twoThreads } from "./fixtures";
+import { crew, legacyLayout, twoThreads } from "./fixtures";
 
 describe("astar", () => {
   it("finds the shortest path by Euclidean length", () => {
@@ -27,7 +27,7 @@ describe("astar", () => {
 
 describe("route through the office", () => {
   it("desk → task board goes up the pod aisle and out of the pod door", () => {
-    const l = defaultLayout();
+    const l = legacyLayout();
     const scene = compileScene(l, { threads: twoThreads, employees: crew });
     const seat = scene.seats.get("dev-2")!;
     const board = l.anchors.boardClaim;
@@ -38,7 +38,7 @@ describe("route through the office", () => {
   });
 
   it("seat → lounge leaves the dev room by the south door", () => {
-    const l = defaultLayout();
+    const l = legacyLayout();
     const scene = compileScene(l, { threads: twoThreads, employees: crew });
     const seat = scene.seats.get("dev-1")!;
     const path = route(scene.graph, seat.point, seat.accessNode, l.anchors.lounge.points[0], l.anchors.lounge.nav);

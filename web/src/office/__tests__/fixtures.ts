@@ -12,6 +12,11 @@ export function defaultLayout(): OfficeLayout {
   return readJson<OfficeLayout>("office/default.json");
 }
 
+/** The layout before shared members (no staffArea; members sit in their thread's pod): must keep working. */
+export function legacyLayout(): OfficeLayout {
+  return readJson<OfficeLayout>("web/src/office/__tests__/legacy-layout.json");
+}
+
 export const twoThreads: OfficeThread[] = [
   { no: 12, title: "员工通信与审批", status: "running", counts: { main_done: 7, main_total: 13 } },
   { no: 13, title: "Codex 员工接入", status: "running", counts: { main_done: 3, main_total: 6 } },

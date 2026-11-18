@@ -99,5 +99,5 @@
 | 0 任务衔接 | 完成（`feat/staff-p0`）；交付物没有任务关联，简报里暂不列交付物 |
 | 1 共享员工 + 项目级队列 | 完成（`feat/staff-p1`）：P1-1～P1-14 和 e2e 脚本 `deploy/e2e/run_shared.mjs`（待用真 Claude 跑一遍）。补充：跨讨论串留言带讨论串号、不换讨论串（设计 §6），节点上线触发主人项目的调度，没有讨论串的成员在办公室里站在空闲锚点 |
 | 2 会话管理 | 完成（`feat/staff-p2`）：P2-1～P2-8。P2-7 实测记在设计 §5.2（Claude 的 PCT 要换算到“窗口 − 20K”，锚点走 SessionStart 钩子、重点走 PreCompact 的 systemMessage）；补充：`first_message` 也带锚点、`session.close` 加 `context_clear`、会话跑回合时领取不动它、压缩和开工前同步串行。审查后的修复：Codex 补锚点只走 `turn/steer`；`session.compact` 等空闲最多 2 分钟、来新消息就放弃，崩溃 / 重启都回 `ok: false`；任务间和 Codex 任务中的阈值按上次报的窗口封顶（`window_tokens`），没设上限时用它换算；锚点随任务结束清掉、重开会话带上（`session.open.anchor`）；上下文上限至少 100K；`session.compacted` 校验节点；重新排队清零进度和指标。指标（`compactions` / `ctx_start` / `ctx_end`，token）先存在 `at_tasks`，团队页按岗位展示留到阶段 3；阶段验收的真 Claude e2e 未跑 |
-| 3 办公室和团队页 | 未开始 |
+| 3 办公室和团队页 | 完成（`feat/staff-p3`）：P3-1～P3-5。默认布局改为上方一排讨论串工作台（只坐组长 + 参与者头像条）、下方按岗位分排的成员工位，场景高 892；旧布局（无 `staffArea`）保留原行为。补充：快照 `board.queue`（待领任务、依赖锁、有效预留）和 `EmployeeBrief.sort / instance`；`task` 事件后网页重取办公室快照；工作台在讨论串结束后保留 `fadeMs` 淡出、组长走出去；团队页的“项目编制”面板按项目列成员，“加一人（所有项目）”改岗位编制（未保存时显示“编制 2→3 人（未保存）”，保存前确认会影响几个项目）。审查后修复：任务板按领取顺序、每个讨论串最多 12 张、只列能领的；组长出门后才撤工作台、淡出中恢复的讨论串组长走回来；`hide` 只在 threadEnded 序列里持续；办公室快照按项目节流重取；visitPods 只带有任务的成员 |
 | 4 调度优化 | 未开始 |

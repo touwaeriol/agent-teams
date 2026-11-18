@@ -1,0 +1,417 @@
+{
+  "$schema": "../office-layout.schema.json",
+  "format": 1,
+  "id": "default",
+  "name": "旧版办公室（成员坐讨论串工作组）",
+  "canvas": {
+    "width": 1180,
+    "height": 760,
+    "pixel": 4,
+    "background": "#EDE6D8",
+    "frame": { "color": "#3A3D48", "width": 4, "radius": 12 },
+    "page": "#1E2027"
+  },
+  "fonts": {
+    "label": "Silkscreen, 'JetBrains Mono', monospace",
+    "bubble": "Inter, 'PingFang SC', 'Noto Sans SC', sans-serif",
+    "googleFonts": ["Silkscreen"]
+  },
+  "palette": {
+    "ink": "#1F1E1C",
+    "paper": "#FFF6E6",
+    "wood": "#B07D4F",
+    "woodEdge": "#7A5534",
+    "darkWood": "#8A6A45",
+    "monitor": "#3B3F4A",
+    "monitorEdge": "#23262D",
+    "chair": "#5F7F6B",
+    "chairEdge": "#3E5546",
+    "plant": "#4F8F57",
+    "rack": "#23262D",
+    "rackEdge": "#14161B",
+    "rackSlot": "#2E323C",
+    "ledOn": "#5FD08A",
+    "ledParked": "#2E7D4F",
+    "ledQueued": "#F2C14E",
+    "ledOff": "#2E323C",
+    "ledError": "#E5484D",
+    "skin": "#F1C9A5",
+    "shoe": "#2B2B2B",
+    "podEdge": "#B08A5C",
+    "screenOff": "#3B3F4A",
+    "screenTyping": "#9BE3B0",
+    "screenReading": "#C2B6F0",
+    "screenRunning": "#F5C08A",
+    "screenThinking": "#BFE3FF",
+    "screenBroken": "#E5484D"
+  },
+  "floors": {
+    "devPlanks": { "base": "#E9C997", "pattern": "planks", "line": "rgba(150,100,50,0.18)", "line2": "rgba(150,100,50,0.10)", "stepX": 88, "stepY": 28, "lineWidth": 2 },
+    "blueGrid": { "base": "#DCE4EE", "pattern": "grid", "line": "rgba(80,100,130,0.15)", "stepX": 24, "stepY": 24, "lineWidth": 2 },
+    "greenGrid": { "base": "#CFE7D5", "pattern": "grid", "line": "rgba(60,120,80,0.15)", "stepX": 24, "stepY": 24, "lineWidth": 2 },
+    "loungeTiles": { "base": "#F3E9DC", "pattern": "grid", "line": "rgba(160,120,90,0.14)", "stepX": 40, "stepY": 20, "lineWidth": 2 },
+    "plain": { "base": "#EDE6D8", "pattern": "plain" },
+    "serverChecker": { "base": "#3A3D48", "pattern": "checker", "line": "#444857", "stepX": 16, "stepY": 16 }
+  },
+  "sprites": {
+    "desk": {
+      "kind": "shapes", "w": 112, "h": 58,
+      "shapes": [
+        { "type": "rect", "x": 0, "y": 14, "w": 112, "h": 28, "fill": "$wood", "stroke": "$woodEdge", "strokeWidth": 3 },
+        { "type": "rect", "x": 40, "y": 0, "w": 32, "h": 22, "fill": "$monitor", "stroke": "$monitorEdge", "strokeWidth": 3 },
+        { "type": "rect", "x": 45, "y": 5, "w": 22, "h": 12, "fill": "@screen" },
+        { "type": "rect", "x": 44, "y": 44, "w": 24, "h": 14, "fill": "$chair", "stroke": "$chairEdge", "strokeWidth": 2 }
+      ],
+      "slots": { "screen": "$screenOff" }
+    },
+    "deskSmall": {
+      "kind": "shapes", "w": 72, "h": 50,
+      "shapes": [
+        { "type": "rect", "x": 0, "y": 12, "w": 72, "h": 24, "fill": "$wood", "stroke": "$woodEdge", "strokeWidth": 3 },
+        { "type": "rect", "x": 24, "y": 0, "w": 24, "h": 18, "fill": "$monitor", "stroke": "$monitorEdge", "strokeWidth": 3 },
+        { "type": "rect", "x": 28, "y": 4, "w": 16, "h": 10, "fill": "@screen" },
+        { "type": "rect", "x": 26, "y": 38, "w": 20, "h": 12, "fill": "$chair", "stroke": "$chairEdge", "strokeWidth": 2 }
+      ],
+      "slots": { "screen": "$screenOff" }
+    },
+    "taskBoard": {
+      "kind": "shapes", "w": 136, "h": 40,
+      "shapes": [
+        { "type": "rect", "x": 0, "y": 0, "w": 136, "h": 40, "fill": "#3A2E22", "stroke": "#6B5238", "strokeWidth": 3 },
+        { "type": "rect", "x": 5, "y": 13, "w": 18, "h": 14, "fill": "#FFF3B0" },
+        { "type": "rect", "x": 27, "y": 13, "w": 18, "h": 14, "fill": "#BFE3FF" },
+        { "type": "rect", "x": 49, "y": 13, "w": 18, "h": 14, "fill": "#FFD1D1" }
+      ]
+    },
+    "meetingTable": {
+      "kind": "shapes", "w": 100, "h": 50,
+      "shapes": [{ "type": "rect", "x": 0, "y": 0, "w": 100, "h": 50, "fill": "#A47148", "stroke": "#6E4A2C", "strokeWidth": 3 }]
+    },
+    "bossDesk": {
+      "kind": "shapes", "w": 112, "h": 34,
+      "shapes": [{ "type": "rect", "x": 0, "y": 0, "w": 112, "h": 34, "fill": "$wood", "stroke": "$woodEdge", "strokeWidth": 3 }]
+    },
+    "plantTall": {
+      "kind": "shapes", "w": 26, "h": 40,
+      "shapes": [{ "type": "rect", "x": 0, "y": 0, "w": 26, "h": 40, "fill": "$plant", "radius": [13, 13, 4, 4] }]
+    },
+    "plantBig": {
+      "kind": "shapes", "w": 30, "h": 46,
+      "shapes": [{ "type": "rect", "x": 0, "y": 0, "w": 30, "h": 46, "fill": "$plant", "radius": [15, 15, 4, 4] }]
+    },
+    "sofa": {
+      "kind": "shapes", "w": 150, "h": 46,
+      "shapes": [{ "type": "rect", "x": 0, "y": 0, "w": 150, "h": 46, "fill": "#B5485A", "stroke": "#7E2F3D", "strokeWidth": 4 }]
+    },
+    "coffeeTable": {
+      "kind": "shapes", "w": 54, "h": 34,
+      "shapes": [{ "type": "rect", "x": 0, "y": 0, "w": 54, "h": 34, "fill": "$darkWood", "stroke": "#5E4630", "strokeWidth": 3 }]
+    },
+    "bench": {
+      "kind": "shapes", "w": 190, "h": 16,
+      "shapes": [{ "type": "rect", "x": 0, "y": 0, "w": 190, "h": 16, "fill": "#9C7B57", "stroke": "#6E5438", "strokeWidth": 3 }]
+    },
+    "rack": {
+      "kind": "shapes", "w": 56, "h": 120,
+      "shapes": [{ "type": "rect", "x": 0, "y": 0, "w": 56, "h": 120, "fill": "$rack", "stroke": "$rackEdge", "strokeWidth": 3 }]
+    },
+    "rackSlot": {
+      "kind": "shapes", "w": 36, "h": 10,
+      "shapes": [
+        { "type": "rect", "x": 0, "y": 0, "w": 36, "h": 10, "fill": "$rackSlot" },
+        { "type": "rect", "x": 4, "y": 2, "w": 5, "h": 5, "fill": "@led" },
+        { "type": "rect", "x": 12, "y": 2, "w": 5, "h": 5, "fill": "@led2" }
+      ],
+      "slots": { "led": "$ledOff", "led2": "$ledOff" }
+    }
+  },
+  "characters": {
+    "person": {
+      "pixel": 4,
+      "width": 11,
+      "anchor": { "x": 20, "y": 56 },
+      "colors": { "h": "@hair", "s": "@skin", "e": "#2B2B2B", "S": "@skin", "c": "@shirt", "a": "@accent", "p": "@pants", "k": "$shoe" },
+      "parts": {
+        "head": ["...hhhh....", "..hhhhhh...", "..hssssh...", "..seSSes...", "..ssssss...", "...ssss...."],
+        "torso": ["..cccccc...", ".cccaaccc..", ".scccccc.s.", ".sccccccs..", "..cccccc..."],
+        "torsoTypeA": ["..cccccc...", ".cccaaccc..", ".cccccccc..", "ss.cccc.ss.", "..cccccc..."],
+        "torsoTypeB": ["..cccccc...", ".cccaaccc..", ".cccccccc..", ".ss.cc.ss..", "..cccccc..."],
+        "legsStand": ["..pp..pp...", "..pp..pp...", "..kk..kk..."],
+        "legsWalkA": ["..pp...pp..", ".pp....pp..", ".kk.....kk."],
+        "legsWalkB": ["...pp.pp...", "...pp.pp...", "...kk.kk..."],
+        "legsSit": [".pppppppp..", ".pp....pp..", ".kk....kk.."]
+      },
+      "frames": {
+        "stand": ["head", "torso", "legsStand"],
+        "walkA": ["head", "torso", "legsWalkA"],
+        "walkB": ["head", "torso", "legsWalkB"],
+        "sit": ["head", "torso", "legsSit"],
+        "typeA": ["head", "torsoTypeA", "legsSit"],
+        "typeB": ["head", "torsoTypeB", "legsSit"]
+      },
+      "animations": {
+        "stand": { "frames": ["stand"], "fps": 1 },
+        "walk": { "frames": ["walkA", "walkB"], "fps": 4 },
+        "sit": { "frames": ["sit"], "fps": 1 },
+        "typing": { "frames": ["typeA", "typeB"], "fps": 5 },
+        "reading": { "frames": ["sit"], "fps": 1, "bob": 1 },
+        "thinking": { "frames": ["sit"], "fps": 1, "bob": 2 }
+      },
+      "overlays": {
+        "raiseHand": { "cells": [[10, 1, "s"], [10, 2, "s"], [10, 3, "s"], [10, 4, "s"]], "blinkFps": 1.5 },
+        "smoke": { "cells": [[4, -3, "#9A9A9A"], [5, -4, "#BBBBBB"], [6, -5, "#DDDDDD"]], "blinkFps": 2 }
+      }
+    }
+  },
+  "looks": {
+    "outfits": {
+      "tee": { "label": "T 恤", "colors": { "shirt": "@color", "accent": "shade(@color,-0.3)", "pants": "#2F3A55" } },
+      "hoodie": { "label": "卫衣", "colors": { "shirt": "@color", "accent": "shade(@color,0.25)", "pants": "#3B3F4A" }, "patch": { "torso": { "0": ".cccccccc.." } } },
+      "suit": { "label": "西装", "colors": { "shirt": "@color", "accent": "#FFFFFF", "pants": "#23262D" } },
+      "coat": { "label": "白大褂", "colors": { "shirt": "#F4F4F2", "accent": "@color", "pants": "@color" } }
+    },
+    "accessories": {
+      "none": { "label": "无" },
+      "glasses": { "label": "眼镜", "colors": { "S": "#2B2B2B" } },
+      "headset": { "label": "耳机", "cells": [[1, 2, "#2B2B2B"], [1, 3, "#2B2B2B"], [8, 2, "#2B2B2B"], [8, 3, "#2B2B2B"], [8, 4, "#2B2B2B"], [7, 5, "#2B2B2B"]] },
+      "cap": { "label": "帽子", "patch": { "head": { "0": "..CCCC.....", "1": ".CCCCCCCC.." } }, "colors": { "C": "@color" } }
+    },
+    "colors": ["#4C7BD0", "#3F8F6B", "#C8622A", "#7A4FD1", "#B7413E", "#2F8F9D", "#C79A1E", "#4A4843"],
+    "hair": ["#3B2A20", "#6B4A2E", "#1F1E1C", "#8A5A36", "#B07A3E", "#5A3A2A"],
+    "skin": ["#F1C9A5"],
+    "variation": { "hair": "byInstance", "shirtShade": [0, -0.12, 0.12] },
+    "defaults": {
+      "coordinator": { "color": "#7A4FD1", "outfit": "hoodie", "accessory": "headset", "hair": "#3B2A20" },
+      "lead": { "color": "#C8622A", "outfit": "suit", "accessory": "none", "hair": "#3B2A20" },
+      "dev": { "color": "#4C7BD0", "outfit": "tee", "accessory": "none" },
+      "qa": { "color": "#3F8F6B", "outfit": "coat", "accessory": "glasses" },
+      "review": { "color": "#4A4843", "outfit": "suit", "accessory": "glasses", "hair": "#1F1E1C" },
+      "decision": { "color": "#4A4843", "outfit": "suit", "accessory": "glasses", "hair": "#1F1E1C" },
+      "*": { "color": "#4A4843", "outfit": "tee", "accessory": "none" }
+    }
+  },
+  "rooms": [
+    { "id": "dev", "label": "开发区", "kind": "dev", "rect": [16, 16, 704, 428], "floor": "devPlanks", "doors": [{ "side": "e", "offset": 30, "width": 24 }, { "side": "s", "offset": 352, "width": 40 }], "wall": { "color": "#8A6A45", "width": 4 }, "labelStyle": { "bg": "#8A6A45", "fg": "#FFF6E6" } },
+    { "id": "decision", "label": "决策室", "kind": "decision", "rect": [736, 16, 200, 210], "floor": "blueGrid", "doors": [{ "side": "w", "offset": 104, "width": 24 }], "wall": { "color": "#7D8BA0", "width": 4 }, "labelStyle": { "bg": "#7D8BA0", "fg": "#FFFFFF" } },
+    { "id": "coordinator", "label": "项目统筹", "kind": "coordinator", "rect": [952, 16, 212, 210], "floor": "greenGrid", "doors": [{ "side": "s", "offset": 106, "width": 24 }], "wall": { "color": "#6E9C7A", "width": 4 }, "labelStyle": { "bg": "#6E9C7A", "fg": "#FFFFFF" } },
+    { "id": "lounge", "label": "休息区", "kind": "lounge", "rect": [16, 456, 440, 288], "floor": "loungeTiles", "doors": [{ "side": "n", "offset": 220, "width": 32 }], "wall": { "color": "#B49A7C", "width": 4 }, "labelStyle": { "bg": "#B49A7C", "fg": "#FFFFFF" } },
+    { "id": "bench", "label": "等候凳 · 等任务放出", "kind": "waiting", "rect": [472, 456, 248, 130], "floor": "plain", "doors": [{ "side": "n", "offset": 124, "width": 32 }], "wall": { "color": "#B49A7C", "width": 4, "style": "dashed" }, "labelStyle": { "bg": "#B49A7C", "fg": "#FFFFFF" } },
+    { "id": "machine", "label": "机房", "kind": "machine", "rect": [736, 240, 428, 504], "floor": "serverChecker", "doors": [{ "side": "w", "offset": 60, "width": 24 }], "wall": { "color": "#23262D", "width": 4 }, "labelStyle": { "bg": "#23262D", "fg": "#E6E3DC" } }
+  ],
+  "furniture": [
+    { "id": "decisionTable", "sprite": "meetingTable", "at": [786, 110], "room": "decision" },
+    { "id": "coordDesk", "sprite": "bossDesk", "at": [1004, 104], "room": "coordinator" },
+    { "id": "coordPlant", "sprite": "plantTall", "at": [1124, 56], "room": "coordinator" },
+    { "id": "sofa", "sprite": "sofa", "at": [150, 610], "room": "lounge" },
+    { "id": "coffee", "sprite": "coffeeTable", "at": [60, 540], "room": "lounge" },
+    { "id": "loungePlant", "sprite": "plantBig", "at": [380, 500], "room": "lounge" },
+    { "id": "waitBench", "sprite": "bench", "at": [500, 548], "room": "bench" }
+  ],
+  "widgets": [
+    {
+      "id": "board", "type": "taskBoard", "sprite": "taskBoard", "at": [300, 4], "z": 5,
+      "text": { "value": "任务板 可领 {claimable}", "at": [69, 13], "color": "#FFF6E6", "size": 10 },
+      "click": "openTaskPool"
+    },
+    {
+      "id": "racks", "type": "nodeRacks", "at": [760, 290], "room": "machine",
+      "grid": { "columns": 2, "stepX": 100, "stepY": 170, "maxItems": 6 },
+      "sprite": "rack",
+      "slot": { "sprite": "rackSlot", "at": [10, 10], "stepY": 26, "max": 4 },
+      "slotColors": {
+        "active": { "led": "$ledOn", "led2": "$ledOn", "blink": "led" },
+        "parked": { "led": "$ledParked", "led2": "$ledOff" },
+        "queued": { "led": "$ledQueued", "led2": "$ledQueued", "blink": "led2" },
+        "empty": { "led": "$ledOff", "led2": "$ledOff" },
+        "offline": { "led": "$ledError", "led2": "$ledOff" }
+      },
+      "label": { "value": "{name} {active}/{capacity}", "at": [-14, 126], "bg": "#14161B", "color": "#E6E3DC", "size": 10 },
+      "overflowLabel": "+{rest} 台节点",
+      "click": "openNode"
+    },
+    {
+      "id": "pipeline", "type": "pipelinePanel", "at": [960, 290], "w": 188, "room": "machine",
+      "style": { "bg": "#14161B", "border": "#5C5F6B", "color": "#E6E3DC", "title": "#F2C14E", "size": 10, "padding": 8, "gap": 6 },
+      "sections": [
+        { "kind": "mergeQueue", "title": "合并队列", "maxItems": 4, "row": "#{threadNo} {employee} → 讨论串",
+          "stateLabels": { "queued": "排队", "merging": "合并中", "ci_running": "等 CI", "conflict": "冲突", "ci_failed": "CI 失败", "merged": "已合并" },
+          "stateColors": { "queued": "#A8A49B", "merging": "#F2C14E", "ci_running": "#F2C14E", "conflict": "#F2A65E", "ci_failed": "#E5484D", "merged": "#5FD08A" } },
+        { "kind": "ci", "title": "CI", "maxItems": 4,
+          "colors": { "success": "#5FD08A", "in_progress": "#F2C14E", "queued": "#5C5F6B", "failure": "#E5484D", "none": "#5C5F6B" }, "blink": ["in_progress"] }
+      ],
+      "click": "openMergeQueue"
+    }
+  ],
+  "threadPods": {
+    "area": { "room": "dev", "rect": [24, 48, 688, 388] },
+    "templates": {
+      "full": {
+        "size": [336, 386],
+        "frame": { "color": "$podEdge", "focusColor": "{threadColor}", "width": 2, "style": "dashed" },
+        "plate": { "at": [6, 6], "value": "#{no} {title} · {mainDone}/{mainTotal}", "maxChars": 22, "bg": "#FFFFFF", "border": "{threadColor}", "color": "$ink", "size": 10 },
+        "desks": [
+          { "id": "d1", "sprite": "desk", "at": [16, 72], "seat": [52, 48], "for": "lead", "timer": [74, -2] },
+          { "id": "d2", "sprite": "desk", "at": [176, 72], "seat": [212, 48], "timer": [74, -2] },
+          { "id": "d3", "sprite": "desk", "at": [16, 242], "seat": [52, 218], "timer": [74, -2] },
+          { "id": "d4", "sprite": "desk", "at": [176, 242], "seat": [212, 218], "timer": [74, -2] }
+        ],
+        "overflowSeats": [[300, 120], [300, 290], [140, 350]],
+        "nav": {
+          "nodes": { "door": [160, -6], "aisleTop": [160, 40], "aisleMid": [160, 190], "aisleBottom": [160, 360], "doorBottom": [160, 392] },
+          "edges": [["door", "aisleTop"], ["aisleTop", "aisleMid"], ["aisleMid", "aisleBottom"], ["aisleBottom", "doorBottom"]],
+          "seatLinks": { "row1": "aisleTop", "row2": "aisleMid" },
+          "exits": { "door": "hallTop", "doorBottom": "devSouth" }
+        }
+      },
+      "compact": {
+        "size": [336, 185],
+        "frame": { "color": "$podEdge", "focusColor": "{threadColor}", "width": 2, "style": "dashed" },
+        "plate": { "at": [6, 6], "value": "#{no} {title} · {mainDone}/{mainTotal}", "maxChars": 22, "bg": "#FFFFFF", "border": "{threadColor}", "color": "$ink", "size": 10 },
+        "desks": [
+          { "id": "d1", "sprite": "deskSmall", "at": [8, 100], "seat": [24, 76], "for": "lead" },
+          { "id": "d2", "sprite": "deskSmall", "at": [88, 100], "seat": [104, 76] },
+          { "id": "d3", "sprite": "deskSmall", "at": [168, 100], "seat": [184, 76] },
+          { "id": "d4", "sprite": "deskSmall", "at": [248, 100], "seat": [264, 76] }
+        ],
+        "overflowSeats": [[300, 150], [20, 150]],
+        "nav": {
+          "nodes": { "door": [160, -6], "aisle": [160, 60], "doorBottom": [160, 191] },
+          "edges": [["door", "aisle"], ["aisle", "doorBottom"]],
+          "seatLinks": { "row1": "aisle" },
+          "exits": { "door": "hallTop", "doorBottom": "devSouth" }
+        }
+      }
+    },
+    "layout": {
+      "mode": "grid",
+      "gap": [16, 2],
+      "columns": 2,
+      "use": [
+        { "maxThreads": 2, "template": "full" },
+        { "maxThreads": 4, "template": "compact" }
+      ],
+      "overflow": "paginate",
+      "offPage": "anchorsWithBadge",
+      "order": "no",
+      "pinFocused": true,
+      "show": ["running", "waiting", "review", "paused", "queued"]
+    },
+    "seating": { "leadDesk": "d1", "order": ["roleSort", "instance"], "rowOf": { "d1": "row1", "d2": "row1", "d3": "row2", "d4": "row2" } },
+    "threadColors": ["#2F6FDB", "#C2570C", "#3F8F6B", "#7A4FD1", "#B7413E", "#2F8F9D"]
+  },
+  "anchors": {
+    "boardClaim": { "points": [[352, 46], [316, 46], [388, 46], [334, 52], [370, 52]], "facing": "up", "nav": "hallTop" },
+    "lounge": { "points": [[200, 560], [250, 560], [300, 560], [170, 660], [230, 660], [290, 660], [80, 600], [360, 620]], "nav": "loungeIn", "overflow": "jitter" },
+    "bench": { "points": [[510, 488], [550, 488], [590, 488], [630, 488], [670, 488]], "pose": "sit", "nav": "benchIn", "overflow": "standBehind" },
+    "decisionSeats": { "points": [[816, 64], [776, 160], [856, 160]], "nav": "decisionIn" },
+    "coordinatorDesk": { "points": [[1040, 52]], "pose": "sit", "nav": "coordIn" },
+    "coordinatorVisitor": { "points": [[1000, 160], [1060, 160]], "nav": "coordIn" },
+    "machineWatch": { "points": [[930, 600], [980, 600]], "nav": "machineIn" }
+  },
+  "nav": {
+    "walkSpeed": 90,
+    "nodes": {
+      "hallTop": [368, 46],
+      "hallTopEast": [712, 46],
+      "devSouth": [368, 438],
+      "corridorNE": [728, 46],
+      "decisionDoor": [728, 120],
+      "decisionIn": [760, 120],
+      "corridorJ": [728, 233],
+      "coordDoor": [1058, 233],
+      "coordIn": [1058, 200],
+      "machineDoor": [728, 300],
+      "machineIn": [760, 300],
+      "hallBottom": [368, 450],
+      "hallRight": [728, 450],
+      "loungeDoor": [236, 450],
+      "loungeIn": [236, 476],
+      "benchDoor": [596, 450],
+      "benchIn": [596, 472]
+    },
+    "edges": [
+      ["hallTop", "hallTopEast"],
+      ["hallTopEast", "corridorNE"],
+      ["corridorNE", "decisionDoor"],
+      ["decisionDoor", "decisionIn"],
+      ["decisionDoor", "corridorJ"],
+      ["corridorJ", "coordDoor"],
+      ["coordDoor", "coordIn"],
+      ["corridorJ", "machineDoor"],
+      ["machineDoor", "machineIn"],
+      ["machineDoor", "hallRight"],
+      ["devSouth", "hallBottom"],
+      ["hallBottom", "loungeDoor"],
+      ["loungeDoor", "loungeIn"],
+      ["hallBottom", "benchDoor"],
+      ["benchDoor", "benchIn"],
+      ["benchDoor", "hallRight"]
+    ]
+  },
+  "states": {
+    "rules": [
+      { "match": { "tier": "coordinator", "state": ["offline"] }, "place": "anchor:coordinatorDesk", "anim": "sit", "opacity": 0.35, "grayscale": true },
+      { "match": { "tier": "coordinator", "state": ["raising_hand"] }, "place": "anchor:coordinatorDesk", "anim": "sit", "overlay": "raiseHand", "bubbleKind": "ask" },
+      { "match": { "tier": "coordinator" }, "place": "anchor:coordinatorDesk", "anim": "typing" },
+
+      { "match": { "state": ["offline"] }, "place": "seat", "anim": "sit", "opacity": 0.35, "grayscale": true, "screen": "$screenOff", "bubble": "离线" },
+      { "match": { "state": ["broken"] }, "place": "seat", "anim": "sit", "overlay": "smoke", "screen": "$screenBroken", "bubbleKind": "error", "bubble": "出错了" },
+      { "match": { "state": ["raising_hand"] }, "place": "current", "anim": "keep", "overlay": "raiseHand", "bubbleKind": "ask" },
+      { "match": { "substate": ["rate_limited"] }, "place": "anchor:lounge", "anim": "stand", "bubble": "额度用完，稍后继续", "bubbleKind": "error" },
+      { "match": { "state": ["waiting"], "substate": ["merge", "ci"] }, "place": "anchor:machineWatch", "anim": "stand", "bubble": "等合并" },
+      { "match": { "state": ["typing", "reading", "running", "thinking"], "taskKind": ["decision"] }, "place": "anchor:decisionSeats", "anim": "stand" },
+      { "match": { "state": ["running"], "substate": ["ci"] }, "place": "anchor:machineWatch", "anim": "stand", "bubble": "看 CI" },
+      { "match": { "state": ["typing", "reading", "running", "thinking"], "taskKind": ["review"] }, "place": "seat", "anim": "reading", "screen": "$screenReading", "timer": true, "bubble": "审查中" },
+      { "match": { "state": ["running"], "substate": ["git_commit", "git_push"] }, "place": "seat", "anim": "typing", "screen": "$screenRunning", "timer": true, "bubble": "提交代码" },
+      { "match": { "state": ["typing"] }, "place": "seat", "anim": "typing", "screen": "$screenTyping", "timer": true },
+      { "match": { "state": ["reading"] }, "place": "seat", "anim": "reading", "screen": "$screenReading", "timer": true },
+      { "match": { "state": ["running"] }, "place": "seat", "anim": "sit", "screen": "$screenRunning", "timer": true },
+      { "match": { "state": ["thinking"] }, "place": "seat", "anim": "thinking", "screen": "$screenThinking", "timer": true },
+      { "match": { "state": ["walking_to_board", "claiming"] }, "place": "anchor:boardClaim", "anim": "stand" },
+      { "match": { "state": ["returning"] }, "place": "seat", "anim": "sit" },
+      { "match": { "tier": "lead", "state": ["idle", "waiting"] }, "place": "seat", "anim": "sit", "screen": "$screenOff" },
+      { "match": { "state": ["waiting", "queued"] }, "place": "anchor:bench", "anim": "sit", "bubble": "等任务放出" },
+      { "match": { "state": ["idle"] }, "place": "anchor:lounge", "anim": "stand", "bubble": "空闲" },
+      { "match": {}, "place": "seat", "anim": "sit" }
+    ],
+    "sequences": {
+      "claim": {
+        "trigger": { "state": "claiming", "cause": "task.claimed" },
+        "steps": [
+          { "goto": "anchor:boardClaim", "anim": "walk", "bubble": "去任务板" },
+          { "wait": 1500, "anim": "stand", "bubble": "领取 {taskId} {taskTitle}" },
+          { "goto": "seat", "anim": "walk", "bubble": "回工位" }
+        ]
+      }
+    },
+    "walkAnim": "walk",
+    "maxConcurrentWalks": 12
+  },
+  "labels": {
+    "room": { "font": "label", "size": 11, "padding": [2, 6], "offset": [8, 6] },
+    "nameTag": { "font": "label", "size": 9, "color": "#FFFFFF", "bg": "@tag", "padding": [1, 4], "offset": [0, 60], "dot": "#FFFFFF" },
+    "timer": { "font": "label", "size": 9, "color": "#8FD3A2", "bg": "#23262D" }
+  },
+  "bubbles": {
+    "font": "bubble",
+    "size": 11,
+    "maxChars": 24,
+    "offset": [0, -82],
+    "shadow": "2px 2px 0 rgba(0,0,0,0.15)",
+    "ttlMs": 600000,
+    "kinds": {
+      "plain": { "bg": "#FFFFFF", "border": "#3B3A36", "color": "$ink" },
+      "ask": { "bg": "#FFF1E2", "border": "#C2570C", "color": "$ink" },
+      "error": { "bg": "#FDECEC", "border": "#B42318", "color": "$ink" },
+      "done": { "bg": "#E8F6EC", "border": "#3F8F6B", "color": "$ink" }
+    }
+  },
+  "focus": { "dimOpacity": 0.3, "clickPlate": "focusThread" },
+  "legend": [
+    { "label": "工作中", "color": "#9BE3B0" },
+    { "label": "看代码", "color": "#C2B6F0" },
+    { "label": "跑命令", "color": "#F5C08A" },
+    { "label": "举手等你", "color": "#F2A65E" },
+    { "label": "空闲 / 等任务", "color": "#A8A49B" }
+  ]
+}

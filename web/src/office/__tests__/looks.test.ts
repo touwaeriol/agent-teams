@@ -64,7 +64,7 @@ describe("render helpers", () => {
 
   it("cuts door gaps out of walls", () => {
     const dev = layout.rooms.find((r) => r.id === "dev")!;
-    expect(wallSpans(dev, "e")).toEqual([[0, 18], [42, 428]]);
+    expect(wallSpans(dev, "e")).toEqual([[0, 18], [42, 560]]);
     expect(wallSpans(dev, "n")).toEqual([[0, 704]]);
   });
 

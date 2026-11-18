@@ -1,11 +1,11 @@
 {
-  "$schema": "./office-layout.schema.json",
+  "$schema": "../protocol/schemas/office/office-layout.schema.json",
   "format": 1,
   "id": "default",
-  "name": "默认办公室（设计稿）",
+  "name": "默认办公室（共享成员）",
   "canvas": {
     "width": 1180,
-    "height": 760,
+    "height": 892,
     "pixel": 4,
     "background": "#EDE6D8",
     "frame": { "color": "#3A3D48", "width": 4, "radius": 12 },
@@ -43,7 +43,11 @@
     "screenReading": "#C2B6F0",
     "screenRunning": "#F5C08A",
     "screenThinking": "#BFE3FF",
-    "screenBroken": "#E5484D"
+    "screenBroken": "#E5484D",
+    "labelText": "#FFFFFF",
+    "labelDark": "#23262D",
+    "labelMuted": "#5C5F6B",
+    "roomLabel": "#8A6A45"
   },
   "floors": {
     "devPlanks": { "base": "#E9C997", "pattern": "planks", "line": "rgba(150,100,50,0.18)", "line2": "rgba(150,100,50,0.10)", "stepX": 88, "stepY": 28, "lineWidth": 2 },
@@ -74,13 +78,28 @@
       ],
       "slots": { "screen": "$screenOff" }
     },
-    "taskBoard": {
-      "kind": "shapes", "w": 136, "h": 40,
+    "staffDesk": {
+      "kind": "shapes", "w": 72, "h": 50,
       "shapes": [
-        { "type": "rect", "x": 0, "y": 0, "w": 136, "h": 40, "fill": "#3A2E22", "stroke": "#6B5238", "strokeWidth": 3 },
-        { "type": "rect", "x": 10, "y": 13, "w": 18, "h": 14, "fill": "#FFF3B0" },
-        { "type": "rect", "x": 32, "y": 13, "w": 18, "h": 14, "fill": "#BFE3FF" },
-        { "type": "rect", "x": 54, "y": 13, "w": 18, "h": 14, "fill": "#FFD1D1" }
+        { "type": "rect", "x": 0, "y": 12, "w": 72, "h": 24, "fill": "$wood", "stroke": "$woodEdge", "strokeWidth": 3 },
+        { "type": "rect", "x": 24, "y": 0, "w": 24, "h": 18, "fill": "$monitor", "stroke": "@thread", "strokeWidth": 3 },
+        { "type": "rect", "x": 28, "y": 4, "w": 16, "h": 10, "fill": "@screen" },
+        { "type": "rect", "x": 26, "y": 38, "w": 20, "h": 12, "fill": "$chair", "stroke": "$chairEdge", "strokeWidth": 2 }
+      ],
+      "slots": { "screen": "$screenOff", "thread": "$monitorEdge" }
+    },
+    "workTable": {
+      "kind": "shapes", "w": 76, "h": 36,
+      "shapes": [
+        { "type": "rect", "x": 0, "y": 0, "w": 76, "h": 36, "fill": "$darkWood", "stroke": "#5E4630", "strokeWidth": 3 },
+        { "type": "rect", "x": 6, "y": 26, "w": 64, "h": 4, "fill": "#7A5534" }
+      ]
+    },
+    "taskBoard": {
+      "kind": "shapes", "w": 380, "h": 44,
+      "shapes": [
+        { "type": "rect", "x": 0, "y": 0, "w": 380, "h": 44, "fill": "#3A2E22", "stroke": "#6B5238", "strokeWidth": 3 },
+        { "type": "rect", "x": 94, "y": 4, "w": 2, "h": 36, "fill": "#6B5238" }
       ]
     },
     "meetingTable": {
@@ -191,26 +210,27 @@
     }
   },
   "rooms": [
-    { "id": "dev", "label": "开发区", "kind": "dev", "rect": [16, 16, 704, 428], "floor": "devPlanks", "doors": [{ "side": "e", "offset": 30, "width": 24 }, { "side": "s", "offset": 352, "width": 40 }], "wall": { "color": "#8A6A45", "width": 4 }, "labelStyle": { "bg": "#8A6A45", "fg": "#FFF6E6" } },
+    { "id": "dev", "label": "开发区", "kind": "dev", "rect": [16, 16, 704, 560], "floor": "devPlanks", "doors": [{ "side": "e", "offset": 30, "width": 24 }, { "side": "s", "offset": 352, "width": 40 }], "wall": { "color": "#8A6A45", "width": 4 }, "labelStyle": { "bg": "#8A6A45", "fg": "#FFF6E6" } },
     { "id": "decision", "label": "决策室", "kind": "decision", "rect": [736, 16, 200, 210], "floor": "blueGrid", "doors": [{ "side": "w", "offset": 104, "width": 24 }], "wall": { "color": "#7D8BA0", "width": 4 }, "labelStyle": { "bg": "#7D8BA0", "fg": "#FFFFFF" } },
     { "id": "coordinator", "label": "项目统筹", "kind": "coordinator", "rect": [952, 16, 212, 210], "floor": "greenGrid", "doors": [{ "side": "s", "offset": 106, "width": 24 }], "wall": { "color": "#6E9C7A", "width": 4 }, "labelStyle": { "bg": "#6E9C7A", "fg": "#FFFFFF" } },
-    { "id": "lounge", "label": "休息区", "kind": "lounge", "rect": [16, 456, 440, 288], "floor": "loungeTiles", "doors": [{ "side": "n", "offset": 220, "width": 32 }], "wall": { "color": "#B49A7C", "width": 4 }, "labelStyle": { "bg": "#B49A7C", "fg": "#FFFFFF" } },
-    { "id": "bench", "label": "等候凳 · 等任务放出", "kind": "waiting", "rect": [472, 456, 248, 130], "floor": "plain", "doors": [{ "side": "n", "offset": 124, "width": 32 }], "wall": { "color": "#B49A7C", "width": 4, "style": "dashed" }, "labelStyle": { "bg": "#B49A7C", "fg": "#FFFFFF" } },
-    { "id": "machine", "label": "机房", "kind": "machine", "rect": [736, 240, 428, 504], "floor": "serverChecker", "doors": [{ "side": "w", "offset": 60, "width": 24 }], "wall": { "color": "#23262D", "width": 4 }, "labelStyle": { "bg": "#23262D", "fg": "#E6E3DC" } }
+    { "id": "lounge", "label": "休息区", "kind": "lounge", "rect": [16, 588, 440, 288], "floor": "loungeTiles", "doors": [{ "side": "n", "offset": 220, "width": 32 }], "wall": { "color": "#B49A7C", "width": 4 }, "labelStyle": { "bg": "#B49A7C", "fg": "#FFFFFF" } },
+    { "id": "bench", "label": "等候凳 · 等任务放出", "kind": "waiting", "rect": [472, 588, 248, 130], "floor": "plain", "doors": [{ "side": "n", "offset": 124, "width": 32 }], "wall": { "color": "#B49A7C", "width": 4, "style": "dashed" }, "labelStyle": { "bg": "#B49A7C", "fg": "#FFFFFF" } },
+    { "id": "machine", "label": "机房", "kind": "machine", "rect": [736, 240, 428, 636], "floor": "serverChecker", "doors": [{ "side": "w", "offset": 60, "width": 24 }], "wall": { "color": "#23262D", "width": 4 }, "labelStyle": { "bg": "#23262D", "fg": "#E6E3DC", "offset": [8, 612] } }
   ],
   "furniture": [
     { "id": "decisionTable", "sprite": "meetingTable", "at": [786, 110], "room": "decision" },
     { "id": "coordDesk", "sprite": "bossDesk", "at": [1004, 104], "room": "coordinator" },
     { "id": "coordPlant", "sprite": "plantTall", "at": [1124, 56], "room": "coordinator" },
-    { "id": "sofa", "sprite": "sofa", "at": [150, 610], "room": "lounge" },
-    { "id": "coffee", "sprite": "coffeeTable", "at": [60, 540], "room": "lounge" },
-    { "id": "loungePlant", "sprite": "plantBig", "at": [380, 500], "room": "lounge" },
-    { "id": "waitBench", "sprite": "bench", "at": [500, 548], "room": "bench" }
+    { "id": "sofa", "sprite": "sofa", "at": [150, 742], "room": "lounge" },
+    { "id": "coffee", "sprite": "coffeeTable", "at": [60, 672], "room": "lounge" },
+    { "id": "loungePlant", "sprite": "plantBig", "at": [380, 632], "room": "lounge" },
+    { "id": "waitBench", "sprite": "bench", "at": [500, 680], "room": "bench" }
   ],
   "widgets": [
     {
-      "id": "board", "type": "taskBoard", "sprite": "taskBoard", "at": [300, 4], "z": 5,
-      "text": { "value": "任务板 可领 {claimable}", "at": [78, 14], "color": "#FFF6E6", "size": 10 },
+      "id": "board", "type": "taskBoard", "sprite": "taskBoard", "at": [170, 2], "z": 5,
+      "text": { "value": "任务板 可领 {claimable}", "at": [8, 15], "color": "#FFF6E6", "size": 10 },
+      "cards": { "at": [102, 5], "size": [62, 15], "gap": [4, 4], "columns": 4, "max": 8, "text": { "value": "{taskId}", "size": 8, "color": "#FFFFFF" } },
       "click": "openTaskPool"
     },
     {
@@ -241,79 +261,74 @@
       ],
       "click": "openMergeQueue"
     }
-  ],
-  "threadPods": {
-    "area": { "room": "dev", "rect": [24, 48, 688, 388] },
+  ],  "threadPods": {
+    "area": { "room": "dev", "rect": [24, 56, 688, 136] },
     "templates": {
-      "full": {
-        "size": [336, 386],
+      "table": {
+        "size": [164, 132],
         "frame": { "color": "$podEdge", "focusColor": "{threadColor}", "width": 2, "style": "dashed" },
-        "plate": { "at": [6, 6], "value": "#{no} {title} · {mainDone}/{mainTotal}", "maxChars": 22, "bg": "#FFFFFF", "border": "{threadColor}", "color": "$ink", "size": 10 },
+        "plate": { "at": [4, 4], "value": "#{no} {title} · {mainDone}/{mainTotal}", "maxChars": 14, "bg": "#FFFFFF", "border": "{threadColor}", "color": "$ink", "size": 9 },
         "desks": [
-          { "id": "d1", "sprite": "desk", "at": [16, 72], "seat": [52, 48], "for": "lead", "timer": [74, -2] },
-          { "id": "d2", "sprite": "desk", "at": [176, 72], "seat": [212, 48], "timer": [74, -2] },
-          { "id": "d3", "sprite": "desk", "at": [16, 242], "seat": [52, 218], "timer": [74, -2] },
-          { "id": "d4", "sprite": "desk", "at": [176, 242], "seat": [212, 218], "timer": [74, -2] }
+          { "id": "lead", "sprite": "deskSmall", "at": [8, 76], "seat": [24, 52], "for": "lead", "timer": [44, -6] },
+          { "id": "table", "sprite": "workTable", "at": [84, 80], "seat": [100, 54], "for": "member" }
         ],
-        "overflowSeats": [[300, 120], [300, 290], [140, 350]],
+        "participants": { "at": [88, 86], "size": 16, "step": [18, 0], "max": 4 },
+        "visit": [112, 40],
+        "overflowSeats": [[128, 54], [140, 60]],
         "nav": {
-          "nodes": { "door": [160, -6], "aisleTop": [160, 40], "aisleMid": [160, 190], "aisleBottom": [160, 360], "doorBottom": [160, 392] },
-          "edges": [["door", "aisleTop"], ["aisleTop", "aisleMid"], ["aisleMid", "aisleBottom"], ["aisleBottom", "doorBottom"]],
-          "seatLinks": { "row1": "aisleTop", "row2": "aisleMid" },
-          "exits": { "door": "hallTop", "doorBottom": "devSouth" }
-        }
-      },
-      "compact": {
-        "size": [336, 185],
-        "frame": { "color": "$podEdge", "focusColor": "{threadColor}", "width": 2, "style": "dashed" },
-        "plate": { "at": [6, 6], "value": "#{no} {title} · {mainDone}/{mainTotal}", "maxChars": 22, "bg": "#FFFFFF", "border": "{threadColor}", "color": "$ink", "size": 10 },
-        "desks": [
-          { "id": "d1", "sprite": "deskSmall", "at": [8, 100], "seat": [24, 76], "for": "lead" },
-          { "id": "d2", "sprite": "deskSmall", "at": [88, 100], "seat": [104, 76] },
-          { "id": "d3", "sprite": "deskSmall", "at": [168, 100], "seat": [184, 76] },
-          { "id": "d4", "sprite": "deskSmall", "at": [248, 100], "seat": [264, 76] }
-        ],
-        "overflowSeats": [[300, 150], [20, 150]],
-        "nav": {
-          "nodes": { "door": [160, -6], "aisle": [160, 60], "doorBottom": [160, 191] },
-          "edges": [["door", "aisle"], ["aisle", "doorBottom"]],
-          "seatLinks": { "row1": "aisle" },
-          "exits": { "door": "hallTop", "doorBottom": "devSouth" }
+          "nodes": { "door": [82, 126] },
+          "edges": [],
+          "seatLinks": { "row1": "door" },
+          "exits": { "door": "devMid" }
         }
       }
     },
     "layout": {
       "mode": "grid",
-      "gap": [16, 2],
-      "columns": 2,
-      "use": [
-        { "maxThreads": 2, "template": "full" },
-        { "maxThreads": 4, "template": "compact" }
-      ],
+      "gap": [10, 8],
+      "columns": 4,
+      "use": [{ "maxThreads": 4, "template": "table" }],
       "overflow": "paginate",
       "offPage": "anchorsWithBadge",
       "order": "no",
       "pinFocused": true,
       "show": ["running", "waiting", "review", "paused", "queued"]
     },
-    "seating": { "leadDesk": "d1", "order": ["roleSort", "instance"], "rowOf": { "d1": "row1", "d2": "row1", "d3": "row2", "d4": "row2" } },
-    "threadColors": ["#2F6FDB", "#C2570C", "#3F8F6B", "#7A4FD1", "#B7413E", "#2F8F9D"]
+    "seating": { "leadDesk": "lead", "order": ["roleSort", "instance"], "rowOf": { "lead": "row1", "table": "row1" } },
+    "threadColors": ["#2F6FDB", "#C2570C", "#3F8F6B", "#7A4FD1", "#B7413E", "#2F8F9D"],
+    "fadeMs": 10000
   },
+  "staffArea": {
+    "room": "dev",
+    "rect": [40, 212, 672, 352],
+    "desk": { "sprite": "staffDesk", "at": [6, 24], "seat": [22, 0], "timer": [46, -4], "tag": [38, 50] },
+    "cell": [84, 88],
+    "perRow": "auto",
+    "group": "role",
+    "order": ["roleSort", "instance"],
+    "overflow": "scale",
+    "nav": { "entry": "devWest", "spineX": 28 }
+  },
+
   "anchors": {
     "boardClaim": { "points": [[352, 46], [316, 46], [388, 46], [334, 52], [370, 52]], "facing": "up", "nav": "hallTop" },
-    "lounge": { "points": [[200, 560], [250, 560], [300, 560], [170, 660], [230, 660], [290, 660], [80, 600], [360, 620]], "nav": "loungeIn", "overflow": "jitter" },
-    "bench": { "points": [[510, 488], [550, 488], [590, 488], [630, 488], [670, 488]], "pose": "sit", "nav": "benchIn", "overflow": "standBehind" },
+    "lounge": { "points": [[200, 692], [250, 692], [300, 692], [170, 792], [230, 792], [290, 792], [80, 732], [360, 752]], "nav": "loungeIn", "overflow": "jitter" },
+    "bench": { "points": [[510, 620], [550, 620], [590, 620], [630, 620], [670, 620]], "pose": "sit", "nav": "benchIn", "overflow": "standBehind" },
     "decisionSeats": { "points": [[816, 64], [776, 160], [856, 160]], "nav": "decisionIn" },
     "coordinatorDesk": { "points": [[1040, 52]], "pose": "sit", "nav": "coordIn" },
     "coordinatorVisitor": { "points": [[1000, 160], [1060, 160]], "nav": "coordIn" },
-    "machineWatch": { "points": [[930, 600], [980, 600]], "nav": "machineIn" }
+    "exit": { "points": [[728, 0]], "nav": "corridorNE", "overflow": "stack" },
+    "machineWatch": { "points": [[930, 732], [980, 732]], "nav": "machineIn" }
   },
   "nav": {
     "walkSpeed": 90,
     "nodes": {
       "hallTop": [368, 46],
+      "devMid": [368, 196],
+      "devWest": [28, 196],
+      "devSW": [28, 570],
       "hallTopEast": [712, 46],
-      "devSouth": [368, 438],
+      "devSouth": [368, 570],
       "corridorNE": [728, 46],
       "decisionDoor": [728, 120],
       "decisionIn": [760, 120],
@@ -322,12 +337,12 @@
       "coordIn": [1058, 200],
       "machineDoor": [728, 300],
       "machineIn": [760, 300],
-      "hallBottom": [368, 450],
-      "hallRight": [728, 450],
-      "loungeDoor": [236, 450],
-      "loungeIn": [236, 476],
-      "benchDoor": [596, 450],
-      "benchIn": [596, 472]
+      "hallBottom": [368, 582],
+      "hallRight": [728, 582],
+      "loungeDoor": [236, 582],
+      "loungeIn": [236, 608],
+      "benchDoor": [596, 582],
+      "benchIn": [596, 604]
     },
     "edges": [
       ["hallTop", "hallTopEast"],
@@ -340,6 +355,10 @@
       ["corridorJ", "machineDoor"],
       ["machineDoor", "machineIn"],
       ["machineDoor", "hallRight"],
+      ["hallTop", "devMid"],
+      ["devMid", "devWest"],
+      ["devWest", "devSW"],
+      ["devSW", "devSouth"],
       ["devSouth", "hallBottom"],
       ["hallBottom", "loungeDoor"],
       ["loungeDoor", "loungeIn"],
@@ -357,8 +376,12 @@
       { "match": { "state": ["offline"] }, "place": "seat", "anim": "sit", "opacity": 0.35, "grayscale": true, "screen": "$screenOff", "bubble": "离线" },
       { "match": { "state": ["broken"] }, "place": "seat", "anim": "sit", "overlay": "smoke", "screen": "$screenBroken", "bubbleKind": "error", "bubble": "出错了" },
       { "match": { "state": ["raising_hand"] }, "place": "current", "anim": "keep", "overlay": "raiseHand", "bubbleKind": "ask" },
+      { "match": { "substate": ["rate_limited"] }, "place": "anchor:lounge", "anim": "stand", "bubble": "额度用完，稍后继续", "bubbleKind": "error" },
+      { "match": { "state": ["waiting"], "substate": ["merge", "ci"] }, "place": "anchor:machineWatch", "anim": "stand", "bubble": "等合并" },
       { "match": { "state": ["typing", "reading", "running", "thinking"], "taskKind": ["decision"] }, "place": "anchor:decisionSeats", "anim": "stand" },
       { "match": { "state": ["running"], "substate": ["ci"] }, "place": "anchor:machineWatch", "anim": "stand", "bubble": "看 CI" },
+      { "match": { "state": ["typing", "reading", "running", "thinking"], "taskKind": ["review"] }, "place": "seat", "anim": "reading", "screen": "$screenReading", "timer": true, "bubble": "审查中" },
+      { "match": { "state": ["running"], "substate": ["git_commit", "git_push"] }, "place": "seat", "anim": "typing", "screen": "$screenRunning", "timer": true, "bubble": "提交代码" },
       { "match": { "state": ["typing"] }, "place": "seat", "anim": "typing", "screen": "$screenTyping", "timer": true },
       { "match": { "state": ["reading"] }, "place": "seat", "anim": "reading", "screen": "$screenReading", "timer": true },
       { "match": { "state": ["running"] }, "place": "seat", "anim": "sit", "screen": "$screenRunning", "timer": true },
@@ -371,6 +394,21 @@
       { "match": {}, "place": "seat", "anim": "sit" }
     ],
     "sequences": {
+      "openThread": {
+        "trigger": { "event": "threadOpened" },
+        "steps": [
+          { "goto": "pod", "anim": "walk", "bubble": "给 #{threadNo} 放一张工作台" },
+          { "wait": 1500, "anim": "stand", "bubble": "#{threadNo} {threadTitle} 开工" }
+        ]
+      },
+      "leaveThread": {
+        "trigger": { "event": "threadEnded" },
+        "steps": [
+          { "wait": 800, "anim": "stand", "bubble": "#{threadNo} 收工" },
+          { "goto": "anchor:exit", "anim": "walk" },
+          { "hide": true }
+        ]
+      },
       "claim": {
         "trigger": { "state": "claiming", "cause": "task.claimed" },
         "steps": [

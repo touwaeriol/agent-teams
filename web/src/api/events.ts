@@ -127,9 +127,30 @@ function onMainTask(qc: QueryClient, pid: string, d: { thread_no: number; main_t
   if (t) patchThread(qc, pid, t.id, (x) => ({ ...x, main_tasks: d.main_tasks }));
 }
 
+/** At most one office snapshot refetch per project in this window (trailing): a burst of task events is one fetch. */
+export const OFFICE_REFRESH_MS = 750;
+const officeRefresh = new WeakMap<QueryClient, Map<string, ReturnType<typeof setTimeout>>>();
+
+/** Refetches the project's office snapshot at the end of the current window (one is already due: nothing). */
+export function refreshOffice(qc: QueryClient, pid: string): void {
+  let due = officeRefresh.get(qc);
+  if (!due) officeRefresh.set(qc, (due = new Map()));
+  if (due.has(pid)) return;
+  const pending = due;
+  pending.set(
+    pid,
+    setTimeout(() => {
+      pending.delete(pid);
+      qc.invalidateQueries({ queryKey: keys.office(pid) });
+    }, OFFICE_REFRESH_MS),
+  );
+}
+
+/** A task changed: its thread's list, and the office (the board shows the project queue). */
 function onTask(qc: QueryClient, pid: string, d: { thread_no: number; task: TaskView }) {
   const t = threadOf(qc, pid, d.thread_no);
   if (t) qc.setQueryData<TaskView[]>(keys.tasks(t.id), (list) => (list ? upsert(list, d.task) : list));
+  refreshOffice(qc, pid);
 }
 
 function onQuestion(qc: QueryClient, pid: string, d: { thread_no?: number | null; question: QuestionView }) {
@@ -203,7 +224,7 @@ function onDeliverable(qc: QueryClient, pid: string, _d: { deliverable: Delivera
 
 function onNode(qc: QueryClient, pid: string) {
   qc.invalidateQueries({ queryKey: keys.nodes });
-  qc.invalidateQueries({ queryKey: keys.office(pid) });
+  refreshOffice(qc, pid);
 }
 
 export const layoutTickKey = (pid: string) => ["p", pid, "layout-tick"] as const;

@@ -122,7 +122,7 @@ func InsertTask(ctx context.Context, tx *Tx, n NewTask) (Task, error) {
 // stampReadyTask records that a pending task is claimable from now when it has no dependencies
 // or they are all done already (NULL otherwise: MarkReady stamps it when the last one finishes).
 func stampReadyTask(ctx context.Context, tx *Tx, conversationID, id string) error {
-	_, err := store.Exec(ctx, tx, `UPDATE at_tasks t SET ready_at = CASE WHEN `+depsDone+` THEN now() END
+	_, err := store.Exec(ctx, tx, `UPDATE at_tasks t SET ready_at = CASE WHEN `+DepsDone+` THEN now() END
 		WHERE t.conversation_id = $1 AND t.id = $2 AND t.status = 'pending'`, conversationID, id)
 	return err
 }

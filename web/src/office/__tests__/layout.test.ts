@@ -20,6 +20,23 @@ describe("layout files", () => {
     }
   });
 
+  it("a layout from before shared members (no staffArea, members in the pods) still loads", () => {
+    const { layout, warnings } = validateLayout(readJson("web/src/office/__tests__/legacy-layout.json"));
+    expect(layout.staffArea).toBeUndefined();
+    expect(warnings).toEqual([]);
+  });
+
+  it("checks the staff area's references and bounds", () => {
+    const l = defaultLayout();
+    l.staffArea!.desk.sprite = "nope";
+    l.staffArea!.nav.entry = "nowhere";
+    l.staffArea!.rect = [40, 212, 672, 900];
+    const r = validateSemantics(l);
+    expect(r.errors).toContain('staffArea.desk.sprite: unknown "nope"');
+    expect(r.errors).toContain('staffArea.nav.entry: unknown "nowhere"');
+    expect(r.errors).toContain("staffArea is outside the canvas");
+  });
+
   it("rejects misspelled fields (additionalProperties false)", () => {
     const doc = { ...defaultLayout(), colour: "#fff" };
     expect(schemaProblems(doc).join()).toMatch(/additional/);

@@ -84,6 +84,15 @@
       "items": { "$ref": "#/$defs/widget" }
     },
     "threadPods": { "$ref": "#/$defs/threadPods" },
+    "staffArea": { "$ref": "#/$defs/staffArea" },
+    "members": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How project members (the headcount) are placed.",
+      "properties": {
+        "visitPods": { "type": "boolean", "default": false, "description": "true: a member working for a thread sits at that thread's work table (its non-lead desks and overflow seats) instead of its own staff desk." }
+      }
+    },
     "anchors": {
       "type": "object",
       "description": "Named groups of positions people can be sent to (place: 'anchor:<name>').",
@@ -427,7 +436,12 @@
         "labelStyle": {
           "type": "object",
           "additionalProperties": false,
-          "properties": { "bg": { "$ref": "#/$defs/color" }, "fg": { "$ref": "#/$defs/color" }, "hidden": { "type": "boolean" } }
+          "properties": {
+            "bg": { "$ref": "#/$defs/color" },
+            "fg": { "$ref": "#/$defs/color" },
+            "hidden": { "type": "boolean" },
+            "offset": { "$ref": "#/$defs/point", "description": "Where this room's name plate goes, from the room's top-left corner (default labels.room.offset), e.g. away from a corridor where walking people's name tags pass." }
+          }
         },
         "z": { "type": "integer" }
       }
@@ -481,6 +495,21 @@
             "type": { "const": "taskBoard" },
             "sprite": { "$ref": "#/$defs/id" },
             "text": { "$ref": "#/$defs/textStyle" },
+            "cards": {
+              "type": "object",
+              "description": "The project queue as cards on the board: one card per pending task in its thread colour, a lock while a dependency is not done, the member it is reserved for.",
+              "required": ["at", "size", "columns", "max"],
+              "additionalProperties": false,
+              "properties": {
+                "at": { "$ref": "#/$defs/point", "description": "Board-local top-left of the first card." },
+                "size": { "$ref": "#/$defs/point" },
+                "gap": { "$ref": "#/$defs/point" },
+                "columns": { "type": "integer", "minimum": 1, "maximum": 16 },
+                "max": { "type": "integer", "minimum": 1, "maximum": 64, "description": "Cards shown; the last one becomes +N when more wait." },
+                "text": { "$ref": "#/$defs/textStyle", "description": "value: {threadNo} {taskId} {reservedFor} {role}." },
+                "color": { "$ref": "#/$defs/color", "description": "Card colour; default {threadColor}." }
+              }
+            },
             "id": true, "at": true, "room": true, "z": true, "click": true
           },
           "required": ["sprite"],
@@ -615,6 +644,19 @@
           }
         },
         "overflowSeats": { "type": "array", "items": { "$ref": "#/$defs/point" }, "maxItems": 16 },
+        "participants": {
+          "type": "object",
+          "description": "Strip of small avatars (in the thread colour) of the members working for this thread now.",
+          "required": ["at", "max"],
+          "additionalProperties": false,
+          "properties": {
+            "at": { "$ref": "#/$defs/point", "description": "Pod-local top-left of the first avatar." },
+            "size": { "type": "number", "minimum": 6, "maximum": 64, "default": 16 },
+            "step": { "$ref": "#/$defs/point", "description": "Offset from one avatar to the next; default [size + 2, 0]." },
+            "max": { "type": "integer", "minimum": 1, "maximum": 32, "description": "Avatars drawn; more show as +N." }
+          }
+        },
+        "visit": { "$ref": "#/$defs/point", "description": "Pod-local spot where visitors stand (place 'pod', e.g. the coordinator setting up a new table); default the first exit node." },
         "nav": {
           "type": "object",
           "required": ["nodes", "edges", "seatLinks", "exits"],
@@ -688,7 +730,44 @@
             "rowOf": { "type": "object", "additionalProperties": { "type": "string" } }
           }
         },
-        "threadColors": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/literalColor" } }
+        "threadColors": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/literalColor" } },
+        "fadeMs": { "type": "integer", "minimum": 0, "maximum": 30000, "default": 3000, "description": "How long the work table of a thread that just ended stays (fading out) while its lead leaves." }
+      }
+    },
+    "staffArea": {
+      "type": "object",
+      "description": "The members' own desks: one fixed desk per project member, in rows by role (role-template order), then by instance.",
+      "required": ["rect", "desk", "cell", "nav"],
+      "additionalProperties": false,
+      "properties": {
+        "room": { "$ref": "#/$defs/id" },
+        "rect": { "$ref": "#/$defs/rect" },
+        "desk": {
+          "type": "object",
+          "required": ["sprite", "seat"],
+          "additionalProperties": false,
+          "properties": {
+            "sprite": { "$ref": "#/$defs/id", "description": "Desk sprite; its @screen slot follows the state rules, its @thread slot (if any) takes the colour of the thread the member works for." },
+            "at": { "$ref": "#/$defs/point", "description": "Cell-local position of the desk sprite (default [0, 0])." },
+            "seat": { "$ref": "#/$defs/point", "description": "Cell-local top-left of the person sitting here." },
+            "timer": { "$ref": "#/$defs/point", "description": "Desk-local position of the time-in-task label." },
+            "tag": { "$ref": "#/$defs/point", "description": "Desk-local centre-top of the '#18 · t5' tag (thread colour) shown while the member works on a task." }
+          }
+        },
+        "cell": { "$ref": "#/$defs/point", "description": "Pitch of one desk: [width, height] (a row is one cell high)." },
+        "perRow": { "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 64 }, { "const": "auto" }], "description": "Desks per row; auto = as many cells as fit the width." },
+        "group": { "enum": ["role", "none"], "default": "role", "description": "role: each role starts a new row (falls back to none when the rows do not fit); none: desks follow each other in role order." },
+        "order": { "type": "array", "items": { "enum": ["roleSort", "instance", "name"] } },
+        "overflow": { "enum": ["scale", "stack"], "default": "scale", "description": "When the desks do not fit even without grouping: scale = shrink the cells (not below 0.5); stack = people beyond the last desk stand next to it 6 px apart." },
+        "nav": {
+          "type": "object",
+          "required": ["entry", "spineX"],
+          "additionalProperties": false,
+          "properties": {
+            "entry": { "$ref": "#/$defs/id", "description": "Global nav node the desk rows hang off." },
+            "spineX": { "type": "number", "description": "Scene x of the walkway the rows branch from; each row gets a node there at its seat line." }
+          }
+        }
       }
     },
     "anchor": {
@@ -705,7 +784,8 @@
     },
     "place": {
       "type": "string",
-      "pattern": "^(seat|current|anchor:[A-Za-z][A-Za-z0-9_-]*)$"
+      "pattern": "^(seat|current|pod|anchor:[A-Za-z][A-Za-z0-9_-]*)$",
+      "description": "seat: a member's staff desk (or work table seat with members.visitPods), a lead's work table seat; pod: the visit spot of the thread's work table; current: stay; anchor:<name>."
     },
     "stateName": {
       "enum": ["typing", "reading", "running", "thinking", "walking_to_board", "claiming", "returning", "raising_hand", "idle", "waiting", "queued", "offline", "broken"]
@@ -753,9 +833,14 @@
             "properties": {
               "trigger": {
                 "type": "object",
-                "required": ["state"],
                 "additionalProperties": false,
-                "properties": { "state": { "$ref": "#/$defs/stateName" }, "cause": { "type": "string" } }
+                "anyOf": [{ "required": ["state"] }, { "required": ["event"] }],
+                "properties": {
+                  "state": { "$ref": "#/$defs/stateName" },
+                  "cause": { "type": "string" },
+                  "event": { "enum": ["threadOpened", "threadEnded"], "description": "Scene events: a new work table appears (played by the coordinator) or a thread ends (played by its lead)." },
+                  "tier": { "enum": ["coordinator", "lead", "member"], "description": "With event: who plays it (default: coordinator for threadOpened, lead for threadEnded)." }
+                }
               },
               "steps": {
                 "type": "array",
@@ -767,7 +852,8 @@
                     "goto": { "$ref": "#/$defs/place" },
                     "wait": { "type": "integer", "minimum": 0, "maximum": 60000 },
                     "anim": { "type": "string" },
-                    "bubble": { "$ref": "#/$defs/template" }
+                    "bubble": { "$ref": "#/$defs/template", "description": "{taskId} {taskTitle} {threadNo} {threadTitle}." },
+                    "hide": { "type": "boolean", "description": "From this step on the person is not drawn. In a threadEnded sequence until the thread's table is back (the lead left the office); in any other sequence only until that sequence ends." }
                   }
                 }
               }

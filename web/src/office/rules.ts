@@ -1,5 +1,5 @@
-// State rules (office-layout.md §4.8): first matching rule wins.
-import type { BubbleKind, EmployeeStatus, OfficeEmployee, Sequence, StateRule } from "./types";
+// State rules (office-layout.md §4.9): first matching rule wins.
+import type { BubbleKind, EmployeeStatus, OfficeEmployee, SceneEvent, Sequence, StateRule } from "./types";
 
 export interface RuleSubject {
   state: string;
@@ -70,9 +70,14 @@ export function toMs(v: string | number | undefined): number | undefined {
 /** The sequence a status change triggers, if any. */
 export function sequenceFor(sequences: Record<string, Sequence> | undefined, status: EmployeeStatus): Sequence | undefined {
   for (const seq of Object.values(sequences ?? {})) {
-    if (seq.trigger.state !== status.state) continue;
+    if (seq.trigger.event || seq.trigger.state !== status.state) continue;
     if (seq.trigger.cause && !(status.cause ?? "").startsWith(seq.trigger.cause)) continue;
     return seq;
   }
   return undefined;
+}
+
+/** The sequences a scene event (a new work table, an ended thread) triggers. */
+export function eventSequences(sequences: Record<string, Sequence> | undefined, event: SceneEvent): Sequence[] {
+  return Object.values(sequences ?? {}).filter((s) => s.trigger.event === event);
 }
