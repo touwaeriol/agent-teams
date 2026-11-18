@@ -4324,6 +4324,14 @@
           "can_delegate": {
             "type": "boolean"
           },
+          "clear_after_tasks": {
+            "description": "Members: a session that did this many tasks in a row is closed and the next task starts a fresh one (0: never). Null: not applicable",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "commands": {
             "description": "The role's own slash commands",
             "items": {
@@ -4331,6 +4339,34 @@
             },
             "type": [
               "array",
+              "null"
+            ]
+          },
+          "compact_between_pct": {
+            "description": "Members: claiming the next task with context ≥ limit × pct compacts the session first. Null: never",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "compact_focus": {
+            "description": "What a compaction must keep, added to its instructions",
+            "type": "string"
+          },
+          "compact_in_task_pct": {
+            "description": "The runtime compacts by itself at limit × pct during a turn. Null: the runtime's default",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "context_limit": {
+            "description": "The role's context limit in tokens (e.g. 600000); the percentages below are of it. Null: the model's window",
+            "format": "int64",
+            "type": [
+              "integer",
               "null"
             ]
           },
@@ -4490,7 +4526,12 @@
           "look",
           "skills",
           "plugins",
-          "sort"
+          "sort",
+          "context_limit",
+          "compact_between_pct",
+          "compact_in_task_pct",
+          "clear_after_tasks",
+          "compact_focus"
         ],
         "type": "object"
       },

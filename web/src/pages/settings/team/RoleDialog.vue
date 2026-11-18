@@ -7,6 +7,7 @@ import Field from "@/components/common/Field.vue";
 import FormDialog from "@/components/common/FormDialog.vue";
 import TagInput from "@/components/common/TagInput.vue";
 import { roleName } from "@/lib/roles";
+import ContextFields from "./ContextFields.vue";
 import { GATES } from "./team";
 
 const props = defineProps<{ role: RoleView }>();
@@ -39,6 +40,7 @@ const num = (v: string) => (v === "" ? null : Number(v));
     </div>
     <Field v-slot="{ id }" label="职责说明"><el-input :id="id" v-model="d.description" type="textarea" :rows="2" /></Field>
     <Field v-slot="{ id }" label="指令" hint="开工时写进系统提示"><el-input :id="id" v-model="d.instructions" type="textarea" :rows="4" /></Field>
+    <ContextFields v-model="d" />
     <div v-if="member" class="grid gap-3 sm:grid-cols-2">
       <Field v-slot="{ id }" label="把关">
         <el-select :id="id" :model-value="d.gate || 'none'" @update:model-value="(v: string) => (d.gate = v === 'none' ? '' : v)">

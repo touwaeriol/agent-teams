@@ -89,8 +89,38 @@ export function nextRoleKey(list: Pick<RoleView, "role">[]): string {
 
 export const ROLE_KEY = /^[a-z][a-z0-9-]{0,23}$/;
 
+/** What a writing member's compaction keeps by default (server roles.DevFocus). */
+export const DEV_FOCUS = "保留当前任务 id、分支、改过的文件、做过的决定、还没做完的事和已知的坑";
+
+export type ContextFields = Pick<RoleView, "context_limit" | "compact_between_pct" | "compact_in_task_pct" | "clear_after_tasks" | "compact_focus">;
+
+/** Session-management defaults by kind of role (shared-members.md §5.1; server roles.ContextDefaults). */
+export function contextDefaults(r: Pick<RoleView, "tier" | "gate">): ContextFields {
+  const none = { context_limit: null, compact_between_pct: null, clear_after_tasks: null, compact_focus: "" };
+  if (r.tier !== "member") return { ...none, compact_in_task_pct: 70 };
+  if (r.gate === "review" || r.gate === "decision") return { ...none, compact_in_task_pct: 80, clear_after_tasks: 1 };
+  return { context_limit: null, compact_between_pct: 60, compact_in_task_pct: 80, clear_after_tasks: 8, compact_focus: DEV_FOCUS };
+}
+
+/** The token counts the role's percentages come to ("360K"), or null without a limit. */
+export function contextTokens(limit: number | null | undefined, pct: number | null | undefined): string | null {
+  if (!limit || !pct) return null;
+  return `${Math.round((limit * pct) / 100 / 1000)}K`;
+}
+
+/** Problems of the context settings (mirrors server roles.contextChecks). */
+export function contextProblems(r: RoleView): string[] {
+  const out: string[] = [];
+  const pct = (v: number | null | undefined) => v != null && (v < 1 || v > 100 || !Number.isInteger(v));
+  if (r.context_limit != null && r.context_limit < 10000) out.push(`${roleName(r)} 的上下文上限至少 10000 token`);
+  if (pct(r.compact_between_pct) || pct(r.compact_in_task_pct)) out.push(`${roleName(r)} 的压缩比例要在 1–100 之间`);
+  if (r.clear_after_tasks != null && r.clear_after_tasks < 0) out.push(`${roleName(r)} 的连续任务数不能是负数`);
+  return out;
+}
+
 export function newRole(list: RoleView[], color: string): RoleView {
   return {
+    ...contextDefaults({ tier: "member", gate: "" }),
     id: "",
     tier: "member",
     role: nextRoleKey(list),
@@ -153,5 +183,6 @@ export function roleProblems(list: RoleView[]): string[] {
   list.filter((r) => !canHaveSkills(r) && (r.skills ?? []).length > 0).forEach((r) => problems.push(`${roleName(r)} 不能加载技能`));
   list.filter((r) => !canHaveSkills(r) && (r.plugins ?? []).length > 0).forEach((r) => problems.push(`${roleName(r)} 不能加载插件`));
   list.filter((r) => unfit(r).length > 0).forEach((r) => problems.push(`${roleName(r)} 只能用提示词模板命令`));
+  list.forEach((r) => problems.push(...contextProblems(r)));
   return problems;
 }

@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 270 {
+	if migrations.Latest() != 280 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -1150,5 +1150,54 @@ DELETE FROM at_threads WHERE id = 'th1'`); err != nil {
 		if _, err := db.Exec(q); err == nil {
 			t.Fatalf("%s survived down", q)
 		}
+	}
+}
+
+// TestRoleContextMigration: 00280 adds the session-management columns to at_roles with the defaults
+// of each kind of role (dev 60/80/8 + focus, gates —/80/1, lead and coordinator —/70/—) and copies
+// them into the employees' role snapshots. Down drops them again.
+func TestRoleContextMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 270); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
+INSERT INTO at_roles (id, user_id, tier, role, runtime, gate) VALUES ('r1', 'u1', 'coordinator', 'coordinator', 'claude', ''),
+  ('r2', 'u1', 'lead', 'lead', 'claude', ''), ('r3', 'u1', 'member', 'dev', 'claude', ''), ('r4', 'u1', 'member', 'review', 'claude', 'review');
+INSERT INTO at_employees (id, project_id, name, tier, role, role_id, runtime, spec) VALUES
+  ('e1', 'p1', 'dev-1', 'member', 'dev', 'r3', 'claude', '{"role": "dev"}');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 280); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.QueryRow(`SELECT string_agg(role || ':' || COALESCE(context_limit::text, '-') || '/' || COALESCE(compact_between_pct::text, '-')
+		|| '/' || COALESCE(compact_in_task_pct::text, '-') || '/' || COALESCE(clear_after_tasks::text, '-') || '/' || (compact_focus <> '')::text,
+		' ' ORDER BY id) FROM at_roles`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if want := "coordinator:-/-/70/-/false lead:-/-/70/-/false dev:-/60/80/8/true review:-/-/80/1/false"; got != want {
+		t.Fatalf("roles after 00280:\n got %s\nwant %s", got, want)
+	}
+	if err := db.QueryRow(`SELECT spec->>'role' || ' ' || (spec->>'compact_between_pct') || ' ' || (spec->>'clear_after_tasks') || ' ' ||
+		COALESCE(spec->>'context_limit', 'null') FROM at_employees WHERE id = 'e1'`).Scan(&got); err != nil || got != "dev 60 8 null" {
+		t.Fatalf("spec after 00280: %q %v", got, err)
+	}
+	if _, err := p.DownTo(ctx, 270); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`SELECT context_limit FROM at_roles`); err == nil {
+		t.Fatal("context_limit survived down")
+	}
+	if err := db.QueryRow(`SELECT spec::text FROM at_employees WHERE id = 'e1'`).Scan(&got); err != nil || got != `{"role": "dev"}` {
+		t.Fatalf("spec after down: %q %v", got, err)
 	}
 }

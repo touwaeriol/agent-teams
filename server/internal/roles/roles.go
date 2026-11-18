@@ -91,6 +91,7 @@ func normalizeOne(r *store.Role, looks office.Looks) {
 	r.Plugins = dedupe(r.Plugins)
 	r.HiddenCommands = dedupe(r.HiddenCommands)
 	r.Commands = composer.NormalizeCommands(r.Commands)
+	normalizeContext(r)
 }
 
 func defaultLook(looks office.Looks, role, tier string) office.LookDefault {
@@ -171,6 +172,7 @@ func validateOne(path string, r *store.Role, c Context) []Problem {
 		{"look.outfit", !slices.Contains(c.Looks.Outfits, r.Look.Outfit), "当前办公室布局里没有这种服装：" + r.Look.Outfit},
 		{"look.accessory", !slices.Contains(c.Looks.Accessories, r.Look.Accessory), "当前办公室布局里没有这种配饰：" + r.Look.Accessory},
 	}
+	checks = append(checks, contextChecks(r)...)
 	var out []Problem
 	for _, ch := range checks {
 		if ch.bad {
