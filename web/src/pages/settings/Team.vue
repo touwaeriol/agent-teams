@@ -17,6 +17,8 @@ import { fromPreset, LEVEL, newRole, roleProblems, sortRoles } from "@/lib/roles
 import PresetMenu from "./team/PresetMenu.vue";
 import RoleCard from "./team/RoleCard.vue";
 import MyModels from "./team/MyModels.vue";
+import { addEmployee } from "./team/staff";
+import StaffPanel from "./team/StaffPanel.vue";
 import { isDirty, ordered, patchAt, removeAt } from "./team/team";
 import YamlEditor from "./team/YamlEditor.vue";
 
@@ -35,6 +37,7 @@ const list = () => draft.value ?? [];
 const setRole = (i: number, patch: Partial<RoleView>) => (draft.value = patchAt(list(), i, patch));
 const removeRole = (i: number) => (draft.value = removeAt(list(), i));
 const addPreset = (p: RoleView) => (draft.value = [...list(), fromPreset(list(), p)]);
+const addStaff = (role: string) => (draft.value = addEmployee(list(), role));
 function add() {
   const colors = layout.value.looks.colors;
   draft.value = [...list(), newRole(list(), colors[list().length % colors.length] ?? "#4C7BD0")];
@@ -51,7 +54,7 @@ const PILL = "rounded-full px-2.5 py-1";
           <NavButton />
           <div class="flex flex-col gap-1.5">
             <h1 class="text-2xl font-semibold">团队岗位</h1>
-            <p class="max-w-[640px] text-[13px] leading-[22px] text-muted-foreground">每个项目有一个项目统筹；每开一个讨论串，就按下面的岗位拉一组组长和成员。这里是模板，具体实例在讨论串里。</p>
+            <p class="max-w-[640px] text-[13px] leading-[22px] text-muted-foreground">每个项目有一个项目统筹；每开一个讨论串配一个组长；成员按下面的岗位人数常驻每个项目，所有讨论串共用。</p>
           </div>
         </div>
         <div class="flex gap-2">
@@ -76,6 +79,7 @@ const PILL = "rounded-full px-2.5 py-1";
       </section>
       <Callout v-for="w in warnings" :key="`${w.role}-${w.message}`" tone="warn">{{ w.role ? `${w.role}：` : "" }}{{ w.message }}</Callout>
       <Callout v-if="dirty && problems.length > 0" tone="warn">{{ problems.join("；") }}</Callout>
+      <StaffPanel v-if="!yaml" :roles="draft" @add="addStaff" />
       <YamlEditor v-if="yaml" />
       <div v-else class="grid gap-3.5 lg:grid-cols-2">
         <RoleCard v-for="(r, i) in draft" :key="r.id || `new-${i}`" :role="r" :layout="layout" @change="(p) => setRole(i, p)" @remove="removeRole(i)" />
