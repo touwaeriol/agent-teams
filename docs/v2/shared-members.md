@@ -118,8 +118,9 @@
 
 | 字段 | 含义 | 由谁执行 |
 | --- | --- | --- |
-| `compact_between_pct` | 任务之间：领下一个任务时上下文 ≥ 这个比例就先压缩 | 平台（§5.3 `session.compact`） |
-| `compact_in_task_pct` | 任务进行中：上下文到这个比例运行时自己压缩 | 运行时：Claude 开会话时设环境变量 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`；Codex 设 `model_auto_compact_token_limit = 上下文窗口 × 比例`。改了在下一个会话生效 |
+| `context_limit` | 这个岗位的**上下文上限**（token，例如 600K）；下面的百分比都相对它，不相对模型本身的窗口（1M 的模型设 600K，60% 就是 360K）。不填 = 模型窗口 | — |
+| `compact_between_pct` | 任务之间：领下一个任务时已用上下文 ≥ `context_limit × 比例` 就先压缩 | 平台（§5.3 `session.compact`） |
+| `compact_in_task_pct` | 任务进行中：已用上下文到 `context_limit × 比例` 时运行时自己压缩 | 运行时：Codex 设 `model_auto_compact_token_limit = context_limit × 比例`（绝对 token 数）；Claude 设 `CLAUDE_CODE_AUTO_COMPACT_WINDOW = context_limit` + `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = 比例`（两者语义 P2-7 实测；不行就换算成相对模型窗口的百分比）。改了在下一个会话生效 |
 | `clear_after_tasks` | 同一会话连续做满几个任务后 clear（0 = 不按次数 clear） | 平台 |
 | `compact_focus` | 压缩时要保留什么（一段话），拼进压缩指令 | 平台 + 钩子（§5.2） |
 
@@ -131,6 +132,8 @@
 | 审查 / 决策岗 | — | 80% | **1** | 每次审的是不同的分支，上一次的上下文只是噪音，每个任务都 clear |
 | 组长 | 不适用（不领池里的任务） | 70% | 不适用 | 计划、任务、提问都在平台里，压缩丢不了要紧的东西 |
 | 统筹 | 不适用 | 70% | 不适用 | 讨论串列表和状态随时能查 |
+
+例：岗位 `context_limit = 600K`、任务间 60%、任务中 80% → 领任务时已用 ≥ 360K 先压缩，任务中到 480K 自动压缩，与模型是不是 1M 窗口无关。
 
 任务中阈值不要设太低：每次压缩多花一个回合、丢细节；Claude Code 自己的默认阈值已经接近满窗口，80% 是给长任务留出余量。
 
