@@ -32,6 +32,8 @@ type Assignment struct {
 	Parent      string
 	CreatedBy   string
 	Priority    int
+	// ReservedFor keeps the task for that member for ReserveFor (rework of its own work).
+	ReservedFor string
 }
 
 // Assign validates and stores a task, then asks for a scheduling pass.
@@ -53,13 +55,18 @@ func (s *Scheduler) Assign(ctx context.Context, tx *core.Tx, a Assignment) (core
 	if err != nil {
 		return task, false, err
 	}
+	if a.ReservedFor != "" {
+		if task, err = s.Reserve(ctx, tx, task, a.ReservedFor); err != nil {
+			return task, false, err
+		}
+	}
 	if err := tx.EmitTask(ctx, task); err != nil {
 		return task, false, err
 	}
 	if err := s.tickMain(ctx, tx, task); err != nil {
 		return task, false, err
 	}
-	s.kickAfter(tx, a.Thread.ID)
+	s.kickAfter(tx, a.Thread.ProjectID)
 	return task, !named, nil
 }
 
@@ -144,7 +151,9 @@ func (s *Scheduler) Retry(ctx context.Context, tx *core.Tx, task core.Task) (cor
 	if err != nil {
 		return task, err
 	}
-	s.kickAfter(tx, task.ConversationID)
+	if err := s.kickTaskAfter(ctx, tx, task); err != nil {
+		return task, err
+	}
 	return task, tx.EmitTask(ctx, task)
 }
 
@@ -166,11 +175,12 @@ func (s *Scheduler) TaskDelivered(ctx context.Context, tx *core.Tx, m core.Messa
 const nudgeText = "[平台提醒] 任务 %s 还没有完成：如果已经做完，请调用 complete_task(task_id=\"%s\", summary=…)；没做完请继续。"
 
 // TurnEnded nudges once, then marks the task blocked and tells the lead.
-func (s *Scheduler) TurnEnded(ctx context.Context, tx *core.Tx, e core.Employee) error {
-	if e.WorkThreadID() == nil || e.Tier != "member" {
+func (s *Scheduler) TurnEnded(ctx context.Context, tx *core.Tx, sc core.SessionContext) error {
+	e := sc.Employee
+	if e.Tier != "member" {
 		return nil
 	}
-	task, err := core.CurrentTask(ctx, tx, *e.WorkThreadID(), e.Name)
+	task, err := sessionTask(ctx, tx, sc)
 	if err != nil || task.Status != "running" {
 		return ignoreMissing(err)
 	}
@@ -225,14 +235,24 @@ func (s *Scheduler) pushDue(employeeID string) bool {
 }
 
 // SessionLost returns the employee's running task to the pool (crash) with an attempt counted.
-func (s *Scheduler) SessionLost(ctx context.Context, tx *core.Tx, e core.Employee) error {
-	if e.WorkThreadID() == nil {
-		return nil
-	}
-	task, err := core.CurrentTask(ctx, tx, *e.WorkThreadID(), e.Name)
+func (s *Scheduler) SessionLost(ctx context.Context, tx *core.Tx, sc core.SessionContext) error {
+	task, err := sessionTask(ctx, tx, sc)
 	if err != nil {
 		return ignoreMissing(err)
 	}
-	_, err = s.failOrRetry(ctx, tx, task, e.Name+" 的会话崩溃了")
+	_, err = s.failOrRetry(ctx, tx, task, sc.Employee.Name+" 的会话崩溃了")
 	return err
+}
+
+// sessionTask is the employee's current task when it belongs to the session: a project member's
+// session of another thread (closed when it moved) has nothing to do with the task it has now.
+func sessionTask(ctx context.Context, tx *core.Tx, sc core.SessionContext) (core.Task, error) {
+	task, err := core.CurrentTaskOf(ctx, tx, sc.Employee)
+	if err != nil {
+		return task, err
+	}
+	if sc.Employee.ProjectMember() && sc.Session.ThreadID != nil && *sc.Session.ThreadID != task.ConversationID {
+		return task, core.ErrNotFound
+	}
+	return task, nil
 }

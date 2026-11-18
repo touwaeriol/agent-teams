@@ -59,6 +59,17 @@ func staffCount(r store.Role) int {
 	return max(r.Count, 1)
 }
 
+// Surplus reports whether a project member is beyond what the role templates count (its role
+// is gone or its instance number exceeds the role's count): EnsureStaff would retire it.
+func Surplus(e Employee, roles []store.Role) bool {
+	for _, r := range roles {
+		if r.Tier == "member" && r.Role == e.Role {
+			return e.InstanceNo > staffCount(r)
+		}
+	}
+	return true
+}
+
 // staffByName loads every project member, active or not.
 func staffByName(ctx context.Context, q DB, projectID string) (map[string]Employee, error) {
 	list, err := find[Employee](employees(ctx, q).Where("project_id = ? AND thread_id IS NULL AND tier = 'member'", projectID))
@@ -101,21 +112,6 @@ func retireSurplus(ctx context.Context, tx *Tx, projectID string, staff map[stri
 		return nil
 	}
 	return tx.Gorm(ctx).Table("at_employees").Where("id IN ?", retire).Update("active", false).Error
-}
-
-// BusyMembers names the project members holding a claimed or running task anywhere in the
-// project (a task in a thread whose legacy member has that name is the legacy member's).
-func BusyMembers(ctx context.Context, q DB, projectID string) (map[string]bool, error) {
-	var names []string
-	err := q.Gorm(ctx).Raw(`SELECT DISTINCT x.claimed_by FROM at_tasks x JOIN at_threads t ON t.id = x.thread_id
-		WHERE t.project_id = ? AND x.status IN ('claimed','running')
-		AND NOT EXISTS (SELECT 1 FROM at_employees l WHERE l.thread_id = x.thread_id AND l.name = x.claimed_by)`, projectID).
-		Scan(&names).Error
-	out := make(map[string]bool, len(names))
-	for _, n := range names {
-		out[n] = true
-	}
-	return out, err
 }
 
 // placeHomeless gives every active member without a node a home node, spreading members over

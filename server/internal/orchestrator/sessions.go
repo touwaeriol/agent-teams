@@ -33,8 +33,11 @@ type Delivery struct {
 // Deliver records the message and sends it to the employee's session, opening one when needed.
 func (o *Orchestrator) Deliver(ctx context.Context, tx *core.Tx, e core.Employee, d Delivery) (core.Message, error) {
 	msgID := core.NewID("m")
-	e, err := o.engage(ctx, tx, e, d.Record)
+	e, err := atWork(ctx, tx, e)
 	if err != nil {
+		return core.Message{}, err
+	}
+	if e, err = o.engage(ctx, tx, e, d.Record); err != nil {
 		return core.Message{}, err
 	}
 	m, err := o.recordDelivery(ctx, tx, e, d, msgID)
@@ -106,9 +109,10 @@ func (o *Orchestrator) wake(tx *core.Tx, employeeID string) {
 }
 
 // resumableClose are close reasons after which the employee's next session picks up the old
-// conversation by its SDK session id (thread finished and reopened, user cut off and back).
+// conversation by its SDK session id (thread finished and reopened, user cut off and back, a
+// project member back in the thread it left before its next session opened elsewhere).
 // A policy violation starts clean; a removed node cannot resume and gets the recap instead.
-var resumableClose = []string{"thread_done", "employee_removed", "node_closed"}
+var resumableClose = []string{"thread_done", "employee_removed", "node_closed", "switch_thread"}
 
 // reopenedPrefix starts the first message of a session that resumes after its thread ended
 // (the user reopened it, or unarchived and resumed it): the employee goes on from where it was.
@@ -132,7 +136,12 @@ func (o *Orchestrator) continuation(ctx context.Context, tx *core.Tx, e core.Emp
 		return summary + "\n\n---\n" + text, nil, o.resumedNote(ctx, tx, e)
 	}
 	if movedThread(e, last) {
-		return text, nil, nil // a project member's session belongs to one thread's worktree
+		// A project member's session belongs to one thread's worktree: a fresh one, with a digest.
+		digest, err := o.switchDigest(ctx, tx, e, *e.CurrentThreadID)
+		if err != nil {
+			return "", nil, err
+		}
+		return digest + "\n---\n" + text, nil, nil
 	}
 	if slices.Contains(resumableClose, last.CloseReason) {
 		if last.CloseReason == "thread_done" && e.WorkThreadID() != nil {
@@ -150,8 +159,9 @@ func movedThread(e core.Employee, last core.AgentSession) bool {
 }
 
 // MoveToThread makes a project member work in a thread (it claimed a task there): its current
-// thread is recorded and a live session it has in another thread's worktree is closed, so the
-// next message opens a fresh session in this thread's worktree. Others are returned unchanged.
+// thread is recorded and a live or parked session it has in another thread's worktree is closed
+// (switch_thread), so the next message opens a fresh session in this thread's worktree whose
+// first message carries a digest of the thread (continuation). Others are returned unchanged.
 func (o *Orchestrator) MoveToThread(ctx context.Context, tx *core.Tx, e core.Employee, threadID string) (core.Employee, error) {
 	if !e.ProjectMember() {
 		return e, nil
@@ -167,7 +177,18 @@ func (o *Orchestrator) MoveToThread(ctx context.Context, tx *core.Tx, e core.Emp
 	if err != nil {
 		return e, err
 	}
-	return e, o.closeSession(ctx, tx, s, "employee_removed")
+	return e, o.closeAll(ctx, tx, []core.AgentSession{s}, "switch_thread")
+}
+
+// atWork pins a project member to the thread it works in now (its current task's, else its
+// current thread; shared-members.md §3), so paths, conversation and session follow that thread.
+func atWork(ctx context.Context, q core.DB, e core.Employee) (core.Employee, error) {
+	if !e.ProjectMember() {
+		return e, nil
+	}
+	th, err := core.WorkThreadOf(ctx, q, e)
+	e.CurrentThreadID = th
+	return e, err
 }
 
 // NodeRemoved closes the sessions of a node that is being deleted; the next message to
@@ -257,6 +278,10 @@ func (o *Orchestrator) openSession(ctx context.Context, tx *core.Tx, e core.Empl
 	if err != nil {
 		return core.AgentSession{}, err
 	}
+	e = env.emp
+	if err := o.pinThread(ctx, tx, e); err != nil {
+		return core.AgentSession{}, err
+	}
 	node, err := o.pickNode(ctx, tx, e, env.project)
 	if err != nil {
 		return core.AgentSession{}, err
@@ -271,6 +296,14 @@ func (o *Orchestrator) openSession(ctx context.Context, tx *core.Tx, e core.Empl
 		return sess, err
 	}
 	return sess, o.queueOpen(ctx, tx, env, node, sess, first, resume)
+}
+
+// pinThread records the thread a project member opens a session in as its current thread.
+func (o *Orchestrator) pinThread(ctx context.Context, tx *core.Tx, e core.Employee) error {
+	if !e.ProjectMember() || e.CurrentThreadID == nil {
+		return nil
+	}
+	return core.SetCurrentThread(ctx, tx, e.ID, e.CurrentThreadID)
 }
 
 // sessionEnv is what opening a session needs to know besides the employee.
@@ -315,8 +348,11 @@ func (o *Orchestrator) checkoutPaths(ctx context.Context, q core.DB, p Paths, en
 }
 
 func (o *Orchestrator) loadEnv(ctx context.Context, tx *core.Tx, e core.Employee) (sessionEnv, error) {
+	e, err := atWork(ctx, tx, e)
+	if err != nil {
+		return sessionEnv{emp: e}, err
+	}
 	env := sessionEnv{emp: e}
-	var err error
 	if env.project, err = o.project(ctx, tx, e.ProjectID); err != nil {
 		return env, err
 	}

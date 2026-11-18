@@ -203,15 +203,43 @@ func (s *Service) prepare(ctx context.Context, tx *core.Tx, m *protocol.ToolCall
 	if err := s.validator.ValidateToolInput(m.Tool, m.Args); err != nil {
 		return nil, failText("参数不正确：%v", err)
 	}
+	th, err := callThread(ctx, tx, sc)
+	if err != nil {
+		return nil, failText("%s", err.Error())
+	}
 	c := &call{sc: sc, callID: string(m.CallID), tool: m.Tool, args: m.Args, upload: m.Upload}
-	if th := sc.Employee.WorkThreadID(); th != nil {
+	if th != nil {
 		t, err := core.ThreadByID(ctx, tx, *th)
 		if err != nil {
 			return nil, failText("讨论串不存在")
 		}
 		c.thread = &t
+		if c.sc.Employee.ProjectMember() {
+			c.sc.Employee.CurrentThreadID = &t.ID // emp().WorkThreadID() is the call's thread from here on
+		}
 	}
 	return c, Result{}
+}
+
+// callThread is the thread a call acts in (shared-members.md §3): a lead's or legacy member's
+// own thread; for a project member the thread of its current task, else the thread its session
+// was opened in; nil for the coordinator.
+func callThread(ctx context.Context, q core.DB, sc core.SessionContext) (*string, error) {
+	e := sc.Employee
+	if !e.ProjectMember() {
+		return e.WorkThreadID(), nil
+	}
+	task, err := core.CurrentTaskOf(ctx, q, e)
+	if err == nil {
+		return &task.ConversationID, nil
+	}
+	if !errors.Is(err, core.ErrNotFound) {
+		return nil, err
+	}
+	if sc.Session.ThreadID != nil {
+		return sc.Session.ThreadID, nil
+	}
+	return e.CurrentThreadID, nil
 }
 
 func (s *Service) unavailable(e core.Employee, tool string) string {

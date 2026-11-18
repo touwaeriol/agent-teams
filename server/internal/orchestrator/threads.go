@@ -346,7 +346,7 @@ func (o *Orchestrator) afterStatus(ctx context.Context, tx *core.Tx, t core.Thre
 		if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"stalled_note_at": nil}); err != nil {
 			return err
 		}
-		tx.AfterCommit(func(ctx context.Context) { o.Kick(ctx, t.ID) })
+		tx.AfterCommit(func(ctx context.Context) { o.Kick(ctx, t.ProjectID) })
 	}
 	return nil
 }
@@ -651,11 +651,65 @@ func (o *Orchestrator) threadDigest(ctx context.Context, tx *core.Tx, b *strings
 			return err
 		}
 	}
-	if task, err := core.CurrentTask(ctx, tx, *e.WorkThreadID(), e.Name); err == nil {
+	if task, err := core.CurrentTaskOf(ctx, tx, e); err == nil {
 		fmt.Fprintf(b, "你当前的任务 %s：%s\n", task.ID, task.Instruction)
 	}
 	if t, err := core.ThreadByID(ctx, tx, *e.WorkThreadID()); err == nil && e.Tier == "member" {
 		fmt.Fprintf(b, "你的分支：%s\n", MemberBranch(t.No, e.Name))
+	}
+	return nil
+}
+
+// switchDigest opens the fresh session of a project member that moved to another thread
+// (shared-members.md §5): who leads the thread, its plan, and what the member did there before.
+func (o *Orchestrator) switchDigest(ctx context.Context, tx *core.Tx, e core.Employee, threadID string) (string, error) {
+	t, err := core.ThreadByID(ctx, tx, threadID)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "[换讨论串] 你是项目的固定成员 %s，现在给讨论串 #%d「%s」干活%s。这是新会话：工作目录和分支都是这个讨论串的，"+
+		"之前讨论串的上下文不再适用。\n", e.Name, t.No, t.Title, leadOf(ctx, tx, t.ID))
+	plan, err := core.MainTasks(ctx, tx, t.ID)
+	if err != nil {
+		return "", err
+	}
+	if len(plan) > 0 {
+		b.WriteString("主任务：\n")
+		for _, m := range plan {
+			fmt.Fprintf(&b, "- [%s] %s\n", m.Status, m.Title)
+		}
+	}
+	if err := ownTasksDigest(ctx, tx, &b, t.ID, e.Name); err != nil {
+		return "", err
+	}
+	fmt.Fprintf(&b, "你的分支：%s\n", MemberBranch(t.No, e.Name))
+	return b.String(), nil
+}
+
+func leadOf(ctx context.Context, q core.DB, threadID string) string {
+	if lead, err := core.Lead(ctx, q, threadID); err == nil {
+		return "（组长 " + lead.Name + "）"
+	}
+	return ""
+}
+
+// ownTasksDigest lists what a member did in a thread before (its finished or handed-on tasks).
+func ownTasksDigest(ctx context.Context, tx *core.Tx, b *strings.Builder, threadID, name string) error {
+	var tasks []struct{ ID, Status, Instruction, Summary string }
+	err := tx.Gorm(ctx).Table("at_tasks").Select("id, status, instruction, summary").
+		Where("thread_id = ? AND claimed_by = ? AND status NOT IN ('claimed','running')", threadID, name).
+		Order("created_at, id").Find(&tasks).Error
+	if err != nil || len(tasks) == 0 {
+		return err
+	}
+	b.WriteString("你以前在这个讨论串做过的任务：\n")
+	for _, t := range tasks {
+		fmt.Fprintf(b, "- %s [%s] %s", t.ID, t.Status, clip(t.Instruction, 200))
+		if t.Summary != "" {
+			fmt.Fprintf(b, " → %s", clip(t.Summary, 400))
+		}
+		b.WriteString("\n")
 	}
 	return nil
 }

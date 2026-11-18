@@ -123,7 +123,7 @@ func (r *router) sessionState(ctx context.Context, m *protocol.SessionState) err
 		if err != nil {
 			return ignoreMissing(err)
 		}
-		return r.e.Sched.SessionLost(ctx, tx, sc.Employee)
+		return r.e.Sched.SessionLost(ctx, tx, sc)
 	})
 }
 
@@ -284,7 +284,7 @@ func (r *router) turnEnded(ctx context.Context, tx *core.Tx, sc core.SessionCont
 	if err != nil || waiting {
 		return err
 	}
-	return r.e.Sched.TurnEnded(ctx, tx, sc.Employee)
+	return r.e.Sched.TurnEnded(ctx, tx, sc)
 }
 
 // rateLimited logs the limit as activity; a usage limit (reset minutes or hours away)

@@ -86,7 +86,18 @@ func InsertTask(ctx context.Context, tx *Tx, n NewTask) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
+	if err := stampReadyTask(ctx, tx, n.Thread.ID, id); err != nil {
+		return Task{}, err
+	}
 	return TaskByID(ctx, tx, n.Thread.ID, id)
+}
+
+// stampReadyTask records that a new pending task is claimable from now when it has no
+// dependencies or they are all done already.
+func stampReadyTask(ctx context.Context, tx *Tx, conversationID, id string) error {
+	_, err := store.Exec(ctx, tx, `UPDATE at_tasks t SET ready_at = now() WHERE t.conversation_id = $1 AND t.id = $2
+		AND t.status = 'pending' AND `+depsDone, conversationID, id)
+	return err
 }
 
 func nonNilStrings(v []string) []string {

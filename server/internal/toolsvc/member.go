@@ -327,7 +327,7 @@ func (s *Service) member(ctx context.Context, tx *core.Tx, t core.Thread, e core
 		typ = "codex"
 	}
 	m := protocol.TeamMember{Name: e.Name, Role: e.Role, Title: &title, Type: &typ}
-	if task, err := core.CurrentTask(ctx, tx, deref(e.WorkThreadID()), e.Name); err == nil && task.ConversationID != t.ID {
+	if task, err := core.CurrentTaskOf(ctx, tx, e); err == nil && task.ConversationID != t.ID {
 		busy := "在别的讨论串忙"
 		m.Status = &busy
 	} else if err == nil {

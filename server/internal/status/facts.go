@@ -37,16 +37,16 @@ func (e *Engine) facts(ctx context.Context, tx *core.Tx, emp core.Employee, a ac
 
 // currentWork returns the employee's current task and whether it is waiting on others.
 func currentWork(ctx context.Context, tx *core.Tx, emp core.Employee) (core.Task, bool, error) {
-	if emp.WorkThreadID() == nil {
-		return core.Task{}, false, nil
-	}
-	task, err := core.CurrentTask(ctx, tx, *emp.WorkThreadID(), emp.Name)
+	task, err := core.CurrentTaskOf(ctx, tx, emp)
 	if err == nil {
 		ok, err := core.DepsSatisfied(ctx, tx, task)
 		return task, !ok, err
 	}
 	if err != core.ErrNotFound {
 		return core.Task{}, false, err
+	}
+	if emp.WorkThreadID() == nil {
+		return core.Task{}, false, nil
 	}
 	var n int64
 	err = tx.Gorm(ctx).Model(&core.Task{}).Where("thread_id = ? AND claimed_by = ? AND status IN ('review','decision','merging')",

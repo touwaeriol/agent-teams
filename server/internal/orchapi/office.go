@@ -299,15 +299,13 @@ func (a *API) card(ctx context.Context, emp core.Employee) (EmployeeCard, error)
 		return EmployeeCard{}, err
 	}
 	c := EmployeeCard{EmployeeBrief: brief, RecentActivity: []core.Activity{}}
-	if emp.WorkThreadID() != nil {
-		if task, err := core.CurrentTask(ctx, a.e.Core.Pool, *emp.WorkThreadID(), emp.Name); err == nil {
-			no := 0
-			if brief.ThreadNo != nil {
-				no = *brief.ThreadNo
-			}
-			v := core.TaskViewOf(task, no)
-			c.CurrentTask = &v
+	if task, err := core.CurrentTaskOf(ctx, a.e.Core.Pool, emp); err == nil {
+		no := 0
+		if brief.ThreadNo != nil {
+			no = *brief.ThreadNo
 		}
+		v := core.TaskViewOf(task, no)
+		c.CurrentTask = &v
 	}
 	if s, err := core.LiveSession(ctx, a.e.Core.Pool, emp.ID); err == nil {
 		c.Session = &SessionBrief{State: s.State, Node: brief.Node}
