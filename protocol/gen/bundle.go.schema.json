@@ -639,7 +639,7 @@
     },
     "GitPrepare": {
       "title": "GitPrepare",
-      "description": "Clone the shared repo and/or add the worktree (architecture.md 8.1). Idempotent.",
+      "description": "Clone the shared repo and/or add the worktree (architecture.md 8.1). Idempotent. With sync, an existing worktree is brought up to date before a task starts (shared-members.md 4.2).",
       "type": "object",
       "required": [
         "job_id",
@@ -685,6 +685,29 @@
         "fetch": {
           "type": "boolean",
           "default": true
+        },
+        "sync": {
+          "description": "Bring an existing worktree up to date (daemon feature git.sync). member: fetch, then reset the member branch to origin/<ref> when it has no commits outside it and the tree is clean, else merge origin/<ref> into it (abort on conflict). review: fetch and check out origin/<ref> detached (read-only review of another member's branch).",
+          "type": "object",
+          "required": [
+            "mode",
+            "ref"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "member",
+                "review"
+              ]
+            },
+            "ref": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Remote branch name without origin/: the thread branch (member) or the branch under review (review)."
+            }
+          }
         }
       }
     },
@@ -878,6 +901,39 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/GitKeptPath"
+          }
+        },
+        "sync": {
+          "description": "git.prepare with sync: what the sync did.",
+          "type": "object",
+          "required": [
+            "action",
+            "head_sha"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "reset",
+                "merged",
+                "conflict",
+                "dirty",
+                "checkout",
+                "current"
+              ],
+              "description": "reset: member branch moved to origin/<ref>; merged: origin/<ref> merged into unmerged member commits; conflict: that merge conflicted and was aborted; dirty: uncommitted changes, nothing done; checkout: review checkout; current: already up to date."
+            },
+            "head_sha": {
+              "type": "string"
+            },
+            "conflicts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "conflict: the conflicting paths."
+            }
           }
         }
       }

@@ -427,7 +427,7 @@ export interface GitCleanup {
   delete_local_branches?: boolean;
 }
 /**
- * Clone the shared repo and/or add the worktree (architecture.md 8.1). Idempotent.
+ * Clone the shared repo and/or add the worktree (architecture.md 8.1). Idempotent. With sync, an existing worktree is brought up to date before a task starts (shared-members.md 4.2).
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "GitPrepare".
@@ -445,6 +445,16 @@ export interface GitPrepare {
    */
   base?: string;
   fetch?: boolean;
+  /**
+   * Bring an existing worktree up to date (daemon feature git.sync). member: fetch, then reset the member branch to origin/<ref> when it has no commits outside it and the tree is clean, else merge origin/<ref> into it (abort on conflict). review: fetch and check out origin/<ref> detached (read-only review of another member's branch).
+   */
+  sync?: {
+    mode: "member" | "review";
+    /**
+     * Remote branch name without origin/: the thread branch (member) or the branch under review (review).
+     */
+    ref: string;
+  };
 }
 /**
  * Delete a whole project directory, or one thread's directory (projects/<pid>/threads/<no>, thread deleted), once no session is active there.
@@ -543,6 +553,20 @@ export interface GitResult {
    * git.cleanup.
    */
   kept?: GitKeptPath[];
+  /**
+   * git.prepare with sync: what the sync did.
+   */
+  sync?: {
+    /**
+     * reset: member branch moved to origin/<ref>; merged: origin/<ref> merged into unmerged member commits; conflict: that merge conflicted and was aborted; dirty: uncommitted changes, nothing done; checkout: review checkout; current: already up to date.
+     */
+    action: "reset" | "merged" | "conflict" | "dirty" | "checkout" | "current";
+    head_sha: string;
+    /**
+     * conflict: the conflicting paths.
+     */
+    conflicts?: string[];
+  };
 }
 /**
  * Report branch/ahead/behind/dirty state of a checkout.

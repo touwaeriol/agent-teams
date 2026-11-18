@@ -2577,6 +2577,8 @@ func (j *GitKeptPath) UnmarshalJSON(value []byte) error {
 }
 
 // Clone the shared repo and/or add the worktree (architecture.md 8.1). Idempotent.
+// With sync, an existing worktree is brought up to date before a task starts
+// (shared-members.md 4.2).
 type GitPrepare struct {
 	// Branch to create from when branch does not exist yet.
 	Base *string `json:"base,omitempty,omitzero"`
@@ -2604,6 +2606,13 @@ type GitPrepare struct {
 
 	// Shared clone (worktree mode).
 	Shared *RelPath `json:"shared,omitempty,omitzero"`
+
+	// Bring an existing worktree up to date (daemon feature git.sync). member: fetch,
+	// then reset the member branch to origin/<ref> when it has no commits outside it
+	// and the tree is clean, else merge origin/<ref> into it (abort on conflict).
+	// review: fetch and check out origin/<ref> detached (read-only review of another
+	// member's branch).
+	Sync *GitPrepareSync `json:"sync,omitempty,omitzero"`
 }
 
 type GitPrepareMode string
@@ -2633,6 +2642,74 @@ func (j *GitPrepareMode) UnmarshalJSON(value []byte) error {
 		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_GitPrepareMode, v)
 	}
 	*j = GitPrepareMode(v)
+	return nil
+}
+
+// Bring an existing worktree up to date (daemon feature git.sync). member: fetch,
+// then reset the member branch to origin/<ref> when it has no commits outside it
+// and the tree is clean, else merge origin/<ref> into it (abort on conflict).
+// review: fetch and check out origin/<ref> detached (read-only review of another
+// member's branch).
+type GitPrepareSync struct {
+	// Mode corresponds to the JSON schema field "mode".
+	Mode GitPrepareSyncMode `json:"mode"`
+
+	// Remote branch name without origin/: the thread branch (member) or the branch
+	// under review (review).
+	Ref string `json:"ref"`
+}
+
+type GitPrepareSyncMode string
+
+const GitPrepareSyncModeMember GitPrepareSyncMode = "member"
+const GitPrepareSyncModeReview GitPrepareSyncMode = "review"
+
+var enumValues_GitPrepareSyncMode = []interface{}{
+	"member",
+	"review",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *GitPrepareSyncMode) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_GitPrepareSyncMode {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_GitPrepareSyncMode, v)
+	}
+	*j = GitPrepareSyncMode(v)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *GitPrepareSync) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["mode"]; raw != nil && !ok {
+		return fmt.Errorf("field mode in GitPrepareSync: required")
+	}
+	if _, ok := raw["ref"]; raw != nil && !ok {
+		return fmt.Errorf("field ref in GitPrepareSync: required")
+	}
+	type Plain GitPrepareSync
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Ref)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "ref", 1)
+	}
+	*j = GitPrepareSync(plain)
 	return nil
 }
 
@@ -2830,6 +2907,9 @@ type GitResult struct {
 	// Status corresponds to the JSON schema field "status".
 	Status *GitCheckoutStatus `json:"status,omitempty,omitzero"`
 
+	// git.prepare with sync: what the sync did.
+	Sync *GitResultSync `json:"sync,omitempty,omitzero"`
+
 	// Truncated corresponds to the JSON schema field "truncated".
 	Truncated *bool `json:"truncated,omitempty,omitzero"`
 
@@ -2881,6 +2961,80 @@ func (j *GitResultErrorCode) UnmarshalJSON(value []byte) error {
 		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_GitResultErrorCode, v)
 	}
 	*j = GitResultErrorCode(v)
+	return nil
+}
+
+// git.prepare with sync: what the sync did.
+type GitResultSync struct {
+	// reset: member branch moved to origin/<ref>; merged: origin/<ref> merged into
+	// unmerged member commits; conflict: that merge conflicted and was aborted;
+	// dirty: uncommitted changes, nothing done; checkout: review checkout; current:
+	// already up to date.
+	Action GitResultSyncAction `json:"action"`
+
+	// conflict: the conflicting paths.
+	Conflicts []string `json:"conflicts,omitempty,omitzero"`
+
+	// HeadSHA corresponds to the JSON schema field "head_sha".
+	HeadSHA string `json:"head_sha"`
+}
+
+type GitResultSyncAction string
+
+const GitResultSyncActionCheckout GitResultSyncAction = "checkout"
+const GitResultSyncActionConflict GitResultSyncAction = "conflict"
+const GitResultSyncActionCurrent GitResultSyncAction = "current"
+const GitResultSyncActionDirty GitResultSyncAction = "dirty"
+const GitResultSyncActionMerged GitResultSyncAction = "merged"
+const GitResultSyncActionReset GitResultSyncAction = "reset"
+
+var enumValues_GitResultSyncAction = []interface{}{
+	"reset",
+	"merged",
+	"conflict",
+	"dirty",
+	"checkout",
+	"current",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *GitResultSyncAction) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_GitResultSyncAction {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_GitResultSyncAction, v)
+	}
+	*j = GitResultSyncAction(v)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *GitResultSync) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["action"]; raw != nil && !ok {
+		return fmt.Errorf("field action in GitResultSync: required")
+	}
+	if _, ok := raw["head_sha"]; raw != nil && !ok {
+		return fmt.Errorf("field head_sha in GitResultSync: required")
+	}
+	type Plain GitResultSync
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = GitResultSync(plain)
 	return nil
 }
 
