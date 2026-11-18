@@ -655,9 +655,11 @@ func (j *AssignSubtaskResult) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// Create a task under a main task. assignee is an instance name (dev-2) to assign
-// directly, or a role name (dev) to put it in the task pool where the first free
-// instance claims it.
+// Create a task under a main task. assignee is a role name (dev) to put it in the
+// project's task queue, where an idle member of that role claims it (members are
+// shared by every thread of the project and may be busy in another one), or an
+// instance name (dev-2) to assign it directly (it waits while that member is
+// busy).
 type AssignTaskInput struct {
 	// Assignee corresponds to the JSON schema field "assignee".
 	Assignee string `json:"assignee"`
@@ -1848,11 +1850,48 @@ type EmployeeRef struct {
 	// Role corresponds to the JSON schema field "role".
 	Role *string `json:"role,omitempty,omitzero"`
 
-	// null for the coordinator.
+	// Where the employee belongs: "project" for the coordinator and the project
+	// members shared by every thread (skills and plugins live in
+	// <project>/project/<name>), "thread" for a lead or a member created with a
+	// thread. Absent from older consoles: a null thread_no means project.
+	Scope *EmployeeRefScope `json:"scope,omitempty,omitzero"`
+
+	// The thread the session works in; null for the coordinator and a project member
+	// outside any thread.
 	ThreadNo *int `json:"thread_no,omitempty,omitzero"`
 
 	// Tier corresponds to the JSON schema field "tier".
 	Tier Tier `json:"tier"`
+}
+
+type EmployeeRefScope string
+
+const EmployeeRefScopeProject EmployeeRefScope = "project"
+const EmployeeRefScopeThread EmployeeRefScope = "thread"
+
+var enumValues_EmployeeRefScope = []interface{}{
+	"project",
+	"thread",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *EmployeeRefScope) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_EmployeeRefScope {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_EmployeeRefScope, v)
+	}
+	*j = EmployeeRefScope(v)
+	return nil
 }
 
 // UnmarshalJSON implements json.Unmarshaler.

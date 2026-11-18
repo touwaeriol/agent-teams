@@ -956,9 +956,13 @@ export interface EmployeeRef {
   tier: Tier;
   project_id: string;
   /**
-   * null for the coordinator.
+   * The thread the session works in; null for the coordinator and a project member outside any thread.
    */
   thread_no?: number | null;
+  /**
+   * Where the employee belongs: "project" for the coordinator and the project members shared by every thread (skills and plugins live in <project>/project/<name>), "thread" for a lead or a member created with a thread. Absent from older consoles: a null thread_no means project.
+   */
+  scope?: "project" | "thread";
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -1872,7 +1876,7 @@ export interface AssignTaskResult {
   pooled: boolean;
 }
 /**
- * Create a task under a main task. assignee is an instance name (dev-2) to assign directly, or a role name (dev) to put it in the task pool where the first free instance claims it.
+ * Create a task under a main task. assignee is a role name (dev) to put it in the project's task queue, where an idle member of that role claims it (members are shared by every thread of the project and may be busy in another one), or an instance name (dev-2) to assign it directly (it waits while that member is busy).
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "AssignTaskInput".

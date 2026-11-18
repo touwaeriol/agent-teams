@@ -539,9 +539,9 @@
       ],
       "blocking": [],
       "requires": null,
-      "description": "Create a task under a main task. assignee is an instance name (dev-2) to assign directly, or a role name (dev) to put it in the task pool where the first free instance claims it.",
+      "description": "Create a task under a main task. assignee is a role name (dev) to put it in the project's task queue, where an idle member of that role claims it (members are shared by every thread of the project and may be busy in another one), or an instance name (dev-2) to assign it directly (it waits while that member is busy).",
       "input_schema": {
-        "description": "Create a task under a main task. assignee is an instance name (dev-2) to assign directly, or a role name (dev) to put it in the task pool where the first free instance claims it.",
+        "description": "Create a task under a main task. assignee is a role name (dev) to put it in the project's task queue, where an idle member of that role claims it (members are shared by every thread of the project and may be busy in another one), or an instance name (dev-2) to assign it directly (it waits while that member is busy).",
         "type": "object",
         "required": [
           "assignee",

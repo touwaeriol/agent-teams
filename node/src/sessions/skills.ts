@@ -32,9 +32,14 @@ export function materializeSkills(skillsRoot: string, spec: Pick<SessionOpen, "e
   return { pluginDir, names: skills.map((s) => `${SKILLS_PLUGIN}:${s.name}`) };
 }
 
-/** <root>/<project>/<thread no or "project">/<employee>, every segment made safe. */
+/**
+ * <root>/<project>/<thread no or "project">/<employee>, every segment made safe. Project-scoped
+ * employees (the coordinator, members shared by every thread) keep one directory whatever
+ * thread they work in; an older console sends no scope, and then a null thread_no means project.
+ */
 export function employeeDir(skillsRoot: string, e: SessionOpen["employee"]): string {
-  const parts = [e.project_id, e.thread_no ? String(e.thread_no) : "project", e.name].map(safeSegment);
+  const project = e.scope === "project" || !e.thread_no;
+  const parts = [e.project_id, project ? "project" : String(e.thread_no), e.name].map(safeSegment);
   return resolveInRoot(skillsRoot, join(...parts));
 }
 
