@@ -30,10 +30,23 @@ function actors(): { scene: ReturnType<typeof compileScene>; list: ActorView[]; 
 }
 
 describe("table participants", () => {
-  it("lists the members working for each table now, by name; not the lead, not the idle", () => {
+  it("lists the members working for each table now, in seating order; not the lead, not the idle", () => {
     const { scene, list } = actors();
     const strips = participantsByPod(scene, list).map(([p, people]) => [p.threadNo, people.map((a) => a.id)]);
     expect(strips).toEqual([[12, ["dev-1", "dev-2"]], [13, ["qa-2"]]]);
+  });
+
+  it("orders the strip by role, then instance number: dev-2 before dev-10", () => {
+    const busy = { state: "typing" as const, task_id: "t1" };
+    const crew: OfficeEmployee[] = [
+      { id: "qa-1", name: "qa-1", tier: "member", role: "qa", sort: 3, thread_no: 12, status: busy },
+      { id: "dev-10", name: "dev-10", tier: "member", role: "dev", sort: 2, thread_no: 12, status: busy },
+      { id: "dev-2", name: "dev-2", tier: "member", role: "dev", sort: 2, thread_no: 12, status: busy },
+    ];
+    const scene = compileScene(defaultLayout(), { threads, employees: crew });
+    const d = new Director(scene, { now: () => 0 });
+    d.setEmployees(crew);
+    expect(participantsByPod(scene, d.actors())[0][1].map((a) => a.id)).toEqual(["dev-2", "dev-10", "qa-1"]);
   });
 
   it("turns the last slot into +N when more work for the thread than the strip holds", () => {

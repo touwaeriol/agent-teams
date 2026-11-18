@@ -104,7 +104,8 @@ export interface Room {
   floor: string;
   doors?: Door[];
   wall?: { color?: Color; width?: number; style?: "solid" | "dashed" };
-  labelStyle?: { bg?: Color; fg?: Color; hidden?: boolean };
+  /** Name plate colours; `offset` from the room's top-left corner (default `labels.room.offset`). */
+  labelStyle?: { bg?: Color; fg?: Color; hidden?: boolean; offset?: Point };
   z?: number;
 }
 

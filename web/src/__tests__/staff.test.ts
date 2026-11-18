@@ -95,6 +95,11 @@ describe("项目编制 helpers", () => {
     expect(headcountText(groups)).toBe("在编 3 人 · 干活 2 · 空闲 1");
   });
 
+  it("orders a role's members by instance number, from the name when the snapshot has none", () => {
+    const devs = [brief("dev-10", "member", "dev"), brief("dev-2", "member", "dev"), brief("dev-1", "member", "dev", { instance: 1 })];
+    expect(staffGroups({ ...snapshot, employees: devs }, roles())[0].rows.map((r) => r.name)).toEqual(["dev-1", "dev-2", "dev-10"]);
+  });
+
   it("lists members of a role no longer in the template last, without 加一人", () => {
     const groups = staffGroups({ ...snapshot, employees: [...employees, brief("designer-1", "member", "designer")] }, roles());
     expect(groups.at(-1)).toMatchObject({ role: "designer", template: false, count: 0 });

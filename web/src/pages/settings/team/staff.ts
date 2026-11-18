@@ -3,6 +3,7 @@
 import type { EmployeeBrief, OfficeSnapshot, RoleView, ThreadView } from "@/api/views";
 import { roleName } from "@/lib/roles";
 import { STATE_LABELS } from "@/office/overlay";
+import { sortMembers } from "@/office/people";
 
 export interface StaffRow {
   id: string;
@@ -47,7 +48,7 @@ export function staffRow(e: EmployeeBrief, threads: Pick<ThreadView, "no" | "tit
 
 /** Member roles of the template (in its order) with the project's members of each; members of roles no longer in the template come last. */
 export function staffGroups(snapshot: Pick<OfficeSnapshot, "employees" | "threads">, roles: RoleView[]): StaffGroup[] {
-  const members = snapshot.employees.filter((e) => e.tier === "member").sort((a, b) => (a.instance ?? 0) - (b.instance ?? 0) || a.name.localeCompare(b.name));
+  const members = sortMembers(snapshot.employees.filter((e) => e.tier === "member"), ["instance", "name"], (e) => ({ ...e, instance: e.instance || undefined }));
   const rowsOf = (role: string) => members.filter((e) => e.role === role).map((e) => staffRow(e, snapshot.threads));
   const templ = roles.filter((r) => r.tier === "member");
   const known = new Set(templ.map((r) => r.role));

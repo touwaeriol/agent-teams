@@ -4,26 +4,39 @@ import type { EmployeeStatus, OfficeEmployee } from "./types";
 
 const NUM_SUFFIX = /(\d+)$/;
 
-export function instanceOf(e: OfficeEmployee): number {
+/** What ordering looks at (an office employee, an API EmployeeBrief…). */
+export type Sortable = Pick<OfficeEmployee, "id" | "name" | "role" | "sort" | "instance">;
+
+export function instanceOf(e: Pick<OfficeEmployee, "name" | "instance">): number {
   if (e.instance !== undefined) return e.instance;
   const m = NUM_SUFFIX.exec(e.name);
   return m ? Number(m[1]) : 1;
 }
 
-export function sortMembers(list: OfficeEmployee[], order: string[]): OfficeEmployee[] {
-  const keys: Record<string, (a: OfficeEmployee, b: OfficeEmployee) => number> = {
-    roleSort: (a, b) => (a.sort ?? 0) - (b.sort ?? 0) || a.role.localeCompare(b.role),
-    instance: (a, b) => instanceOf(a) - instanceOf(b),
-    name: (a, b) => a.name.localeCompare(b.name),
-  };
-  return [...list].sort((a, b) => {
+const KEYS: Record<string, (a: Sortable, b: Sortable) => number> = {
+  roleSort: (a, b) => (a.sort ?? 0) - (b.sort ?? 0) || a.role.localeCompare(b.role),
+  instance: (a, b) => instanceOf(a) - instanceOf(b),
+  name: (a, b) => a.name.localeCompare(b.name),
+};
+
+/**
+ * Sorts people by `order` (`roleSort`, `instance`, `name`), then id: dev-2 before dev-10.
+ * `person` picks the employee out of each item (default: the item itself).
+ */
+export function sortMembers<T>(list: T[], order: string[], person: (x: T) => Sortable = (x) => x as Sortable): T[] {
+  return [...list].sort((x, y) => {
+    const a = person(x);
+    const b = person(y);
     for (const k of order) {
-      const r = keys[k]?.(a, b) ?? 0;
+      const r = KEYS[k]?.(a, b) ?? 0;
       if (r) return r;
     }
     return a.id.localeCompare(b.id);
   });
 }
+
+/** The default seating order: role-template order, then instance number. */
+export const MEMBER_ORDER = ["roleSort", "instance"];
 
 /** Members are the headcount; the coordinator and the leads are management, not counted. */
 export const isMember = (e: Pick<OfficeEmployee, "tier">): boolean => e.tier === "member";

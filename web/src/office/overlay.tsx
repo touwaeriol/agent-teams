@@ -4,7 +4,7 @@
 // web/src/office/overlay.tsx: function components, styles through sx() (Vue adds no px).
 import type { CSSProperties, VNode } from "vue";
 import { colorOr, type ColorContext } from "./color";
-import type { PodInstance, Scene } from "./compile";
+import type { DeskInstance, PodInstance, Scene } from "./compile";
 import type { ActorView, DeskState } from "./director";
 import type { ResolvedLook } from "./looks";
 import { isMember } from "./people";
@@ -48,6 +48,16 @@ export interface OverlayProps {
 }
 
 const ctxOf = (l: OfficeLayout): ColorContext => ({ palette: l.palette });
+
+/** Overlay colours a layout's palette may override (`palette.labelText`…); these are the defaults. */
+const TOKENS = { labelText: "#FFFFFF", labelDark: "#23262D", labelMuted: "#5C5F6B", roomLabel: "#8A6A45" } as const;
+
+export function token(l: OfficeLayout, name: keyof typeof TOKENS): string {
+  return colorOr(`$${name}`, ctxOf(l), TOKENS[name]);
+}
+
+/** Stacking inside the overlay: walking people's name tags pass under the room plates, seated ones stay on top. */
+const Z = { walkingTag: 1, roomLabel: 2, tag: 3 } as const;
 const font = (l: OfficeLayout, which: "label" | "bubble" | undefined) => (which === "bubble" ? l.fonts?.bubble : l.fonts?.label) ?? "monospace";
 
 function textBox(l: OfficeLayout, s: TextStyle | undefined, extra: ColorContext = {}): CSSProperties {
@@ -90,21 +100,23 @@ export function OfficeOverlay(p: OverlayProps) {
 
 function RoomLabels({ layout, scene }: { layout: OfficeLayout; scene: Scene }) {
   const style = layout.labels?.room;
-  const [ox, oy] = style?.offset ?? [8, 6];
   return (
     <>
-      {scene.rooms.filter((r) => !r.labelStyle?.hidden).map((r) => (
-        <span
-          key={r.id}
-          style={sx({
-            position: "absolute", left: r.rect[0] + ox, top: r.rect[1] + oy,
-            ...textBox(layout, { ...style, bg: r.labelStyle?.bg ?? "#8A6A45", color: r.labelStyle?.fg ?? "#FFFFFF" }),
-            lineHeight: "normal",
-          })}
-        >
-          {r.label}
-        </span>
-      ))}
+      {scene.rooms.filter((r) => !r.labelStyle?.hidden).map((r) => {
+        const [ox, oy] = r.labelStyle?.offset ?? style?.offset ?? [8, 6];
+        return (
+          <span
+            key={r.id}
+            style={sx({
+              position: "absolute", left: r.rect[0] + ox, top: r.rect[1] + oy, zIndex: Z.roomLabel,
+              ...textBox(layout, { ...style, bg: r.labelStyle?.bg ?? token(layout, "roomLabel"), color: r.labelStyle?.fg ?? token(layout, "labelText") }),
+              lineHeight: "normal",
+            })}
+          >
+            {r.label}
+          </span>
+        );
+      })}
     </>
   );
 }
@@ -145,7 +157,7 @@ function StripMore({ scene, actors, focus }: OverlayProps) {
       <span
         key={pod.threadNo}
         title={people.map((a) => a.employee.name).join("、")}
-        style={sx({ position: "absolute", left: x, top: y, width: strip.size, height: strip.size, display: "flex", alignItems: "center", justifyContent: "center", background: pod.color, color: "#FFFFFF", fontSize: 8, lineHeight: "normal", opacity: dimFor(l, focus, pod.threadNo) })}
+        style={sx({ position: "absolute", left: x, top: y, width: strip.size, height: strip.size, display: "flex", alignItems: "center", justifyContent: "center", background: pod.color, color: token(l, "labelText"), fontSize: 8, lineHeight: "normal", opacity: dimFor(l, focus, pod.threadNo) })}
       >
         +{more}
       </span>,
@@ -167,8 +179,8 @@ function DeskTags({ scene, actors, focus }: OverlayProps) {
       <span
         key={d.key}
         style={sx({
-          position: "absolute", left: d.tag[0], top: d.tag[1], transform: "translateX(-50%)", padding: "0 3px", whiteSpace: "nowrap", background: scene.threadColors.get(a.thread!) ?? "#23262D",
-          color: "#FFFFFF", fontFamily: font(l, "label"), fontSize: 8, lineHeight: "11px", opacity: dimFor(l, focus, a.thread),
+          position: "absolute", left: d.tag[0], top: d.tag[1], transform: "translateX(-50%)", padding: "0 3px", whiteSpace: "nowrap", background: scene.threadColors.get(a.thread!) ?? token(l, "labelDark"),
+          color: token(l, "labelText"), fontFamily: font(l, "label"), fontSize: 8, lineHeight: "11px", opacity: dimFor(l, focus, a.thread),
         })}
       >
         {tag}
@@ -275,22 +287,23 @@ function QueueCards({ widget: w, cards, scene, queue }: { widget: Widget; cards:
   const [w0, h0] = cards.size;
   const box = (at: [number, number], bg: string): CSSProperties => ({
     position: "absolute", left: at[0], top: at[1], width: w0, height: h0, boxSizing: "border-box", display: "flex", alignItems: "center", gap: 2,
-    padding: "0 3px", overflow: "hidden", whiteSpace: "nowrap", background: bg, color: colorOr(cards.text?.color, c, "#FFFFFF"),
+    padding: "0 3px", overflow: "hidden", whiteSpace: "nowrap", background: bg, color: colorOr(cards.text?.color, c, token(l, "labelText")),
     fontFamily: font(l, cards.text?.font), fontSize: cards.text?.size ?? 8, lineHeight: "normal",
   });
+  const muted = token(l, "labelMuted");
   return (
-    <>
+    <div role="list" aria-label="任务队列" style={sx({ position: "absolute", left: 0, top: 0 })}>
       {cardSlots(w, cards, queue).map((s, i) =>
         s.card ? (
-          <span key={`${s.card.thread_no}-${s.card.id}`} title={cardLabel(s.card)} aria-label={cardLabel(s.card)} style={sx({ ...box(s.at, colorOr(cards.color ?? "{threadColor}", { ...c, vars: { threadColor: scene.threadColors.get(s.card.thread_no) ?? "#5C5F6B" } })), opacity: s.card.locked ? 0.75 : 1 })}>
+          <span role="listitem" key={`${s.card.thread_no}-${s.card.id}`} title={cardLabel(s.card)} aria-label={cardLabel(s.card)} style={sx({ ...box(s.at, colorOr(cards.color ?? "{threadColor}", { ...c, vars: { threadColor: scene.threadColors.get(s.card.thread_no) ?? muted } })), opacity: s.card.locked ? 0.75 : 1 })}>
             {s.card.locked && <LockIcon />}
             {cardText(cards, s.card)}
           </span>
         ) : (
-          <span key={`more-${i}`} style={sx({ ...box(s.at, "#5C5F6B"), justifyContent: "center" })}>+{s.more}</span>
+          <span role="listitem" key={`more-${i}`} aria-label={`还有 ${s.more} 个`} style={sx({ ...box(s.at, muted), justifyContent: "center" })}>+{s.more}</span>
         ),
       )}
-    </>
+    </div>
   );
 }
 
@@ -406,7 +419,7 @@ function Pager({ scene, actors, onPage }: OverlayProps) {
   const btn: CSSProperties = { pointerEvents: "auto", border: "none", background: "transparent", cursor: "pointer", font: "inherit", color: "inherit", padding: "0 3px" };
   const { index, count } = scene.page;
   return (
-    <span style={sx({ position: "absolute", right: scene.width - (ax + aw), top: ay - 26, display: "flex", alignItems: "center", gap: 4, padding: "1px 6px", background: "#23262D", color: "#E6E3DC", fontSize: 10 })}>
+    <span style={sx({ position: "absolute", right: scene.width - (ax + aw), top: ay - 26, display: "flex", alignItems: "center", gap: 4, padding: "1px 6px", background: token(scene.layout, "labelDark"), color: "#E6E3DC", fontSize: 10 })}>
       {hand && <span title="其他页有人举手" style={sx({ width: 6, height: 6, background: "#F2A65E" })} />}
       {hidden > 0 && <span style={sx({ color: "#A8A49B" })}>+{hidden} 人</span>}
       <button type="button" style={sx(btn)} aria-label="上一页" disabled={index === 0} onClick={() => onPage(index - 1)}>‹</button>
@@ -429,10 +442,16 @@ function ActorTag({ actor: a, scene, looks, focus, selected, registerActor, onSe
   const away = Boolean(work) && !a.atDesk;
   const label = `${a.employee.name}，${work ? `在 ${work} ` : ""}${STATE_LABELS[a.status.state] ?? a.status.state}${a.bubble ? `：${a.bubble.text}` : ""}`;
   const isSel = selected === a.id;
+  const desk = a.atDesk ? scene.staff.get(a.id) : undefined;
+  const dark = token(l, "labelDark");
+  const light = token(l, "labelText");
   return (
     <div
       ref={(el) => registerActor(a.id, el as HTMLElement | null)}
-      style={sx({ position: "absolute", left: 0, top: 0, transform: `translate(${a.pos[0]}px, ${a.pos[1]}px)`, opacity: a.opacity * dimFor(l, focus, a.thread), willChange: "transform" })}
+      style={sx({
+        position: "absolute", left: 0, top: 0, transform: `translate(${a.pos[0]}px, ${a.pos[1]}px)`, zIndex: a.walking ? Z.walkingTag : Z.tag,
+        opacity: a.opacity * dimFor(l, focus, a.thread), willChange: "transform",
+      })}
     >
       <button
         type="button"
@@ -448,7 +467,7 @@ function ActorTag({ actor: a, scene, looks, focus, selected, registerActor, onSe
           outline: isSel ? "2px solid #F2C14E" : "none", outlineOffset: 2,
         })}
       />
-      {a.bubble && <SpeechBubble layout={l} bubble={a.bubble} x={ax} />}
+      {a.bubble && <SpeechBubble layout={l} bubble={a.bubble} x={ax} fit={desk && staffBubbleFit(scene, desk)} />}
       <span
         style={sx({
           position: "absolute", top: tag?.offset?.[1] ?? 60, left: ax + (tag?.offset?.[0] ?? 0), transform: "translateX(-50%)",
@@ -461,10 +480,10 @@ function ActorTag({ actor: a, scene, looks, focus, selected, registerActor, onSe
         {tag?.dot !== undefined && <span style={sx({ width: 6, height: 6, background: colorOr(tag.dot, ctxOf(l), "#FFFFFF") })} />}
         {a.employee.name}
         {a.badge !== undefined && !work && (
-          <span style={sx({ marginLeft: 2, padding: "0 3px", background: scene.threadColors.get(a.badge) ?? "#23262D", color: "#FFFFFF" })}>#{a.badge}</span>
+          <span style={sx({ marginLeft: 2, padding: "0 3px", background: scene.threadColors.get(a.badge) ?? dark, color: light })}>#{a.badge}</span>
         )}
         {away && (
-          <span style={sx({ marginLeft: 2, padding: "0 3px", background: scene.threadColors.get(a.thread!) ?? "#23262D", color: "#FFFFFF", boxShadow: "0 0 0 1px rgba(255,255,255,0.6)" })}>#{a.thread}</span>
+          <span style={sx({ marginLeft: 2, padding: "0 3px", background: scene.threadColors.get(a.thread!) ?? dark, color: light, boxShadow: "0 0 0 1px rgba(255,255,255,0.6)" })}>#{a.thread}</span>
         )}
       </span>
     </div>
@@ -477,7 +496,26 @@ export function workTag(a: Pick<ActorView, "employee" | "status" | "thread">): s
   return `#${a.thread} · ${a.status.task_id}`;
 }
 
-function SpeechBubble({ layout: l, bubble, x }: { layout: OfficeLayout; bubble: NonNullable<ActorView["bubble"]>; x: number }) {
+export interface BubbleFit {
+  /** Widest the bubble may be (scene px); longer text ends in an ellipsis, the full text is its title. */
+  maxWidth: number;
+  /** Raised this much (scene px) so the bubbles of neighbours do not overlap. */
+  lift: number;
+}
+
+const BUBBLE_LIFT = 20;
+
+/**
+ * A bubble over a staff desk: about two cells wide at most, and every other column raised, so the
+ * bubbles of neighbours (one cell apart) stay readable.
+ */
+export function staffBubbleFit(scene: Scene, desk: DeskInstance): BubbleFit | undefined {
+  const area = scene.layout.staffArea;
+  if (!area) return undefined;
+  return { maxWidth: Math.max(40, 2 * area.cell[0] * desk.scale - 6), lift: (desk.col ?? 0) % 2 ? BUBBLE_LIFT : 0 };
+}
+
+function SpeechBubble({ layout: l, bubble, x, fit }: { layout: OfficeLayout; bubble: NonNullable<ActorView["bubble"]>; x: number; fit?: BubbleFit }) {
   const b = l.bubbles;
   const kind = b?.kinds?.[bubble.kind] ?? b?.kinds?.plain ?? { bg: "#FFFFFF", border: "#3B3A36" };
   const c = ctxOf(l);
@@ -487,7 +525,9 @@ function SpeechBubble({ layout: l, bubble, x }: { layout: OfficeLayout; bubble: 
   return (
     <span
       style={sx({
-        position: "absolute", top: PERSON_BOX_H + oy, left: x + ox, transform: "translate(-50%, -100%)", whiteSpace: "nowrap",
+        position: "absolute", top: PERSON_BOX_H + oy - (fit?.lift ?? 0), left: x + ox, transform: "translate(-50%, -100%)", whiteSpace: "nowrap",
+        // Capped bubbles take the pointer so their title (the full text) shows on hover.
+        ...(fit ? { maxWidth: fit.maxWidth, overflow: "hidden", textOverflow: "ellipsis", boxSizing: "border-box", pointerEvents: "auto" } : {}),
         padding: "3px 7px", background: colorOr(kind.bg, c), border: `2px solid ${colorOr(kind.border, c)}`,
         color: colorOr(kind.color, c, "#1F1E1C"), fontFamily: font(l, b?.font ?? "bubble"), fontSize: b?.size ?? 11, lineHeight: "15px",
         boxShadow: b?.shadow ?? "2px 2px 0 rgba(0,0,0,0.15)",

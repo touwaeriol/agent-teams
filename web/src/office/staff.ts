@@ -2,7 +2,7 @@
 // desk in `staffArea`, rows by role in role-template order, then by instance. Pure.
 import type { DeskInstance, SeatAssignment } from "./compile";
 import { addEdge, addNode, stacked, type NavGraph } from "./nav";
-import { isMember, sortMembers } from "./people";
+import { isMember, MEMBER_ORDER, sortMembers } from "./people";
 import type { OfficeEmployee, OfficeLayout, Point, StaffArea } from "./types";
 
 export interface StaffPlan {
@@ -27,10 +27,10 @@ export function placeStaff(layout: OfficeLayout, employees: OfficeEmployee[], gr
   const out: StaffPlacement = { desks: new Map(), seats: new Map() };
   const area = layout.staffArea;
   if (!area) return out;
-  const plan = planStaff(area, sortMembers(employees.filter(isMember), area.order ?? ["roleSort", "instance"]));
+  const plan = planStaff(area, sortMembers(employees.filter(isMember), area.order ?? MEMBER_ORDER));
   plan.rows.forEach((row, r) => {
     const node = rowNode(area, graph, r, plan.scale);
-    row.forEach((e, i) => placeDesk(layout, area, out, e, cellAt(area, r, i, plan.scale), plan.scale, node));
+    row.forEach((e, i) => placeDesk(layout, area, out, e, { cell: cellAt(area, r, i, plan.scale), col: i, s: plan.scale, node }));
   });
   stackExtra(area, out, plan);
   return out;
@@ -92,7 +92,14 @@ function rowNode(area: StaffArea, g: NavGraph, row: number, s: number): string {
   return id;
 }
 
-function placeDesk(layout: OfficeLayout, area: StaffArea, out: StaffPlacement, e: OfficeEmployee, cell: Point, s: number, node: string): void {
+interface DeskSpot {
+  cell: Point;
+  col: number;
+  s: number;
+  node: string;
+}
+
+function placeDesk(layout: OfficeLayout, area: StaffArea, out: StaffPlacement, e: OfficeEmployee, { cell, col, s, node }: DeskSpot): void {
   const sprite = layout.sprites[area.desk.sprite];
   const local = area.desk.at ?? [0, 0];
   const at: Point = [cell[0] + local[0] * s, cell[1] + local[1] * s];
@@ -110,6 +117,7 @@ function placeDesk(layout: OfficeLayout, area: StaffArea, out: StaffPlacement, e
     timer: t && [at[0] + t[0] * s, at[1] + t[1] * s],
     owner: e.id,
     tag: tag && [at[0] + tag[0] * s, at[1] + tag[1] * s],
+    col,
   };
   out.desks.set(e.id, desk);
   out.seats.set(e.id, { point: desk.seat, deskKey: desk.key, accessNode: node });

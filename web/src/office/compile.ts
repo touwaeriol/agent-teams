@@ -4,7 +4,7 @@
 // §9); a thread's table seats its lead (and visiting members with
 // `members.visitPods`). Layouts without `staffArea` seat members in the pods.
 import { addEdge, addNode, createGraph, nearestNode, stacked, type NavGraph } from "./nav";
-import { hasTask, isMember, sortMembers } from "./people";
+import { hasTask, isMember, MEMBER_ORDER, sortMembers } from "./people";
 import { placeStaff } from "./staff";
 import { fitTemplate } from "./template";
 import type {
@@ -29,9 +29,10 @@ export interface DeskInstance extends PlacedSprite {
   timer?: Point;
   /** The pod's thread; undefined for staff desks. */
   threadNo?: number;
-  /** Staff desks: the member who owns it, and where its `#18 · t5` work tag goes. */
+  /** Staff desks: the member who owns it, where its `#18 · t5` work tag goes, its column in the row. */
   owner?: string;
   tag?: Point;
+  col?: number;
 }
 
 export interface ParticipantStrip {
@@ -312,7 +313,7 @@ function seatPod(layout: OfficeLayout, pod: PodInstance, members: OfficeEmployee
   const tpl = tp.templates[pod.template];
   const leadDeskId = tp.seating.leadDesk ?? tpl.desks.find((d) => d.for === "lead")?.id;
   const lead = members.find((e) => e.tier === "lead");
-  const others = sortMembers(members.filter((e) => e !== lead), tp.seating.order ?? ["roleSort", "instance"]);
+  const others = sortMembers(members.filter((e) => e !== lead), tp.seating.order ?? MEMBER_ORDER);
   const free = pod.desks.filter((d) => d.deskId !== leadDeskId && tpl.desks.find((t) => t.id === d.deskId)?.for !== "lead");
   const leadDesk = pod.desks.find((d) => d.deskId === leadDeskId);
   const assignDesk = (e: OfficeEmployee, d: DeskInstance) =>

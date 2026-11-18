@@ -5,7 +5,7 @@ import { colorOr, resolveColor, type ColorContext } from "./color";
 import { fadeMsOf, type DeskInstance, type PlacedSprite, type PodInstance, type Scene } from "./compile";
 import type { ActorView, DeskState } from "./director";
 import { frameBitmap, type ResolvedLook, type SpriteBitmap } from "./looks";
-import { isMember } from "./people";
+import { isMember, MEMBER_ORDER, sortMembers } from "./people";
 import type { Floor, OfficeLayout, OfficeNode, Point, Room, Shape, Sprite, Widget } from "./types";
 
 type Ctx = CanvasRenderingContext2D;
@@ -314,11 +314,13 @@ export function deskSlots(scene: Scene, d: DeskInstance, state: DeskState | unde
   return { ...d.slots, ...(state?.screen ? { screen: state.screen } : {}), ...(thread ? { thread } : {}) };
 }
 
-/** Members working for each table's thread now, by name (the participant strip). */
+/** Members working for each table's thread now, in seating order (the participant strip). */
 export function participantsByPod(scene: Scene, actors: ActorView[]): [PodInstance, ActorView[]][] {
+  const order = scene.layout.threadPods.seating.order ?? MEMBER_ORDER;
+  const working = (no: number) => actors.filter((a) => isMember(a.employee) && a.thread === no);
   return scene.pods
     .filter((p) => p.participants)
-    .map((p): [PodInstance, ActorView[]] => [p, actors.filter((a) => isMember(a.employee) && a.thread === p.threadNo).sort((x, y) => x.employee.name.localeCompare(y.employee.name))])
+    .map((p): [PodInstance, ActorView[]] => [p, sortMembers(working(p.threadNo), order, (a) => a.employee)])
     .filter(([, people]) => people.length > 0);
 }
 

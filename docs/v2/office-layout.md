@@ -32,7 +32,7 @@
 format, id, name, extends?
 canvas      场景尺寸、像素倍数、背景、外框、页面底色
 fonts       label（房间名、名牌）、bubble（气泡）、googleFonts（需要加载的字体）
-palette     命名颜色
+palette     命名颜色（labelText / labelDark / labelMuted / roomLabel 是叠加层文字、牌子、卡片的颜色，缺省时用内置值）
 floors      地板样式：plain | planks（横竖两组木纹线）| grid | checker | image
 sprites     家具和小部件的精灵：shapes（矩形/椭圆组合）| pixels（字符网格）| image（/office/assets 下的图片或图集）
 characters  人物像素图（必须有 person）：parts、frames、animations、overlays
@@ -47,7 +47,7 @@ anchors     命名的位置组：任务板前、休息区、等候凳、决策�
 nav         全局路网：节点 + 无向边 + 步行速度
 states      员工状态 → 去哪、什么动作、桌面屏幕颜色、气泡；以及“领任务”这类动画序列
 labels      房间名、名牌、计时器的文字样式
-bubbles     气泡：字体、最长字数、按种类（plain/ask/error/done）的颜色
+bubbles     气泡：字体、最长字数、按种类（plain/ask/error/done）的颜色（坐在工位区自己工位上的人，气泡最宽约两格、超出省略、悬停看全文，奇数列抬高 20 px，相邻工位的气泡不叠在一起）
 focus       聚焦单个讨论串时其他内容的透明度
 legend      侧栏图例
 ```
@@ -64,7 +64,7 @@ legend      侧栏图例
   "labelStyle": { "bg": "#23262D", "fg": "#E6E3DC" } }
 ```
 
-- 先画地板（`floors[floor]`）再画墙（边框画在 rect 内侧，`dashed` 为虚线，如等候凳），名牌画在左上角 `labels.room.offset` 处。
+- 先画地板（`floors[floor]`）再画墙（边框画在 rect 内侧，`dashed` 为虚线，如等候凳），名牌画在左上角 `labels.room.offset` 处；单个房间可用 `labelStyle.offset` 另放（示例把机房的名牌放到左下角，避开统筹走过的走廊）。走动中的人的名牌压在房间名牌下面，坐着的人的名牌在最上面。
 - `kind` 只用于语义（例如“点击休息区显示空闲的人”），渲染上一视同仁。
 - `doors`：墙上的开口 `{"side": "n|s|e|w", "offset": <门中心到房间左边/上边的距离>, "width": 24}`，画墙时在这里留缺口（`draw: false` 则只用于校验不留缺口）。人只能经门进出房间：路网的边、锚点到接入节点的连线穿过某房间的墙时，必须落在一个门的宽度内（§6.3 校验）。示例里每个房间一到两个门，房间之间是 16 px 宽的走廊（`corridorNE`、`corridorJ`、`hallBottom`…），没有人会穿墙或穿过别的讨论串工作组。
 - 家具 `{"id", "sprite", "at", "room", "z"}`；`z` 缺省为 0，同 z 按 y 排序。家具精灵里的 `@slot` 颜色可以在家具上用 `slots` 固定。

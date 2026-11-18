@@ -43,7 +43,11 @@
     "screenReading": "#C2B6F0",
     "screenRunning": "#F5C08A",
     "screenThinking": "#BFE3FF",
-    "screenBroken": "#E5484D"
+    "screenBroken": "#E5484D",
+    "labelText": "#FFFFFF",
+    "labelDark": "#23262D",
+    "labelMuted": "#5C5F6B",
+    "roomLabel": "#8A6A45"
   },
   "floors": {
     "devPlanks": { "base": "#E9C997", "pattern": "planks", "line": "rgba(150,100,50,0.18)", "line2": "rgba(150,100,50,0.10)", "stepX": 88, "stepY": 28, "lineWidth": 2 },
@@ -211,7 +215,7 @@
     { "id": "coordinator", "label": "项目统筹", "kind": "coordinator", "rect": [952, 16, 212, 210], "floor": "greenGrid", "doors": [{ "side": "s", "offset": 106, "width": 24 }], "wall": { "color": "#6E9C7A", "width": 4 }, "labelStyle": { "bg": "#6E9C7A", "fg": "#FFFFFF" } },
     { "id": "lounge", "label": "休息区", "kind": "lounge", "rect": [16, 588, 440, 288], "floor": "loungeTiles", "doors": [{ "side": "n", "offset": 220, "width": 32 }], "wall": { "color": "#B49A7C", "width": 4 }, "labelStyle": { "bg": "#B49A7C", "fg": "#FFFFFF" } },
     { "id": "bench", "label": "等候凳 · 等任务放出", "kind": "waiting", "rect": [472, 588, 248, 130], "floor": "plain", "doors": [{ "side": "n", "offset": 124, "width": 32 }], "wall": { "color": "#B49A7C", "width": 4, "style": "dashed" }, "labelStyle": { "bg": "#B49A7C", "fg": "#FFFFFF" } },
-    { "id": "machine", "label": "机房", "kind": "machine", "rect": [736, 240, 428, 636], "floor": "serverChecker", "doors": [{ "side": "w", "offset": 60, "width": 24 }], "wall": { "color": "#23262D", "width": 4 }, "labelStyle": { "bg": "#23262D", "fg": "#E6E3DC" } }
+    { "id": "machine", "label": "机房", "kind": "machine", "rect": [736, 240, 428, 636], "floor": "serverChecker", "doors": [{ "side": "w", "offset": 60, "width": 24 }], "wall": { "color": "#23262D", "width": 4 }, "labelStyle": { "bg": "#23262D", "fg": "#E6E3DC", "offset": [8, 612] } }
   ],
   "furniture": [
     { "id": "decisionTable", "sprite": "meetingTable", "at": [786, 110], "room": "decision" },

@@ -436,7 +436,12 @@
         "labelStyle": {
           "type": "object",
           "additionalProperties": false,
-          "properties": { "bg": { "$ref": "#/$defs/color" }, "fg": { "$ref": "#/$defs/color" }, "hidden": { "type": "boolean" } }
+          "properties": {
+            "bg": { "$ref": "#/$defs/color" },
+            "fg": { "$ref": "#/$defs/color" },
+            "hidden": { "type": "boolean" },
+            "offset": { "$ref": "#/$defs/point", "description": "Where this room's name plate goes, from the room's top-left corner (default labels.room.offset), e.g. away from a corridor where walking people's name tags pass." }
+          }
         },
         "z": { "type": "integer" }
       }
@@ -848,7 +853,7 @@
                     "wait": { "type": "integer", "minimum": 0, "maximum": 60000 },
                     "anim": { "type": "string" },
                     "bubble": { "$ref": "#/$defs/template", "description": "{taskId} {taskTitle} {threadNo} {threadTitle}." },
-                    "hide": { "type": "boolean", "description": "From this step on the person is not drawn (a lead leaving the office)." }
+                    "hide": { "type": "boolean", "description": "From this step on the person is not drawn. In a threadEnded sequence until the thread's table is back (the lead left the office); in any other sequence only until that sequence ends." }
                   }
                 }
               }
