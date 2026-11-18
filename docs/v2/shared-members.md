@@ -133,7 +133,7 @@
 | --- | --- | --- |
 | `context_limit` | 这个岗位的**上下文上限**（token，例如 600K）；下面的百分比都相对它，不相对模型本身的窗口（1M 的模型设 600K，60% 就是 360K）。不填 = 模型窗口 | — |
 | `compact_between_pct` | 任务之间：领下一个任务时已用上下文 ≥ `context_limit × 比例` 就先压缩 | 平台（§5.3 `session.compact`） |
-| `compact_in_task_pct` | 任务进行中：已用上下文到 `context_limit × 比例` 时运行时自己压缩 | 运行时：Codex 设 `model_auto_compact_token_limit = context_limit × 比例`（绝对 token 数）；Claude 设 `CLAUDE_CODE_AUTO_COMPACT_WINDOW = context_limit` + `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = 比例`（两者语义 P2-7 实测；不行就换算成相对模型窗口的百分比）。改了在下一个会话生效 |
+| `compact_in_task_pct` | 任务进行中：已用上下文到 `context_limit × 比例` 时运行时自己压缩 | 运行时：Codex 设 `model_auto_compact_token_limit = context_limit × 比例`（绝对 token 数）；Claude 设 `CLAUDE_CODE_AUTO_COMPACT_WINDOW = context_limit`，`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` 换算成相对有效窗口的百分比（§5.2 实测）。改了在下一个会话生效 |
 | `clear_after_tasks` | 同一会话连续做满几个任务后 clear（0 = 不按次数 clear） | 平台 |
 | `compact_focus` | 压缩时要保留什么（一段话），拼进压缩指令 | 平台 + 钩子（§5.2） |
 
@@ -153,10 +153,18 @@
 ### 5.2 单个任务很长、任务中途就压缩了怎么办
 
 1. **压缩后补“任务锚点”**：压缩会把任务说明压成摘要，长任务容易跑偏。平台在压缩完成后（Claude 的 `compact_boundary` / SessionStart(`compact`) 钩子，Codex 的 `thread/compacted`）给成员补一条短消息：任务 id、原始任务说明、分支、依赖的交接说明、目前已报的进度（`report_progress`）。Claude 优先用 SessionStart 钩子的 `additionalContext` 注入（不占一条用户消息），Codex 用一条 `later` 优先级的平台消息。
-2. **压缩指令带重点**：平台主动压缩时发 `/compact <compact_focus + 当前任务锚点>`；运行时自己压缩时用 PreCompact 钩子补同样的指令（需要实测 SDK 0.3.325 的 PreCompact 能否改写压缩指令，不能就只靠第 1 条）。dev 的默认重点：“保留当前任务 id、分支、改过的文件、做过的决定、还没做完的事和已知的坑”。
+2. **压缩指令带重点**：平台主动压缩时发 `/compact <compact_focus + 当前任务锚点>`；运行时自己压缩时用 PreCompact 钩子补同样的指令（钩子返回的 `systemMessage` 会拼进压缩指令，见下面的实测）。dev 的默认重点：“保留当前任务 id、分支、改过的文件、做过的决定、还没做完的事和已知的坑”。
 3. **进度落盘**：提示词要求长任务定期 `report_progress`，并把工作笔记写到 worktree 里 git 忽略的 `.agent-notes/<任务id>.md`；压缩、clear、换节点都丢不掉。
 4. **任务太大要反馈给组长**：同一个任务在任务中压缩了 2 次以上，平台给组长发 `[Task t5 · dev-1] 任务很长，已压缩 2 次，考虑拆小`。拆分质量会越来越好。
 5. **记指标**：每个任务记压缩次数、开始和结束时的上下文比例（`at_tasks` 加列），在团队页按岗位看，用来调阈值。
+
+**实测（SDK 0.3.325，`node/scripts/smoke-compact.ts`，小模型、窗口调到 100K，约 0.11 美元）**：
+
+- **a. `Query.getContextUsage({detail: "summary"})`**：返回 `totalTokens`（当前上下文 token 数；只开 Read 工具的空会话约 7–8K）、`maxTokens` = `rawMaxTokens`（衡量用的窗口：设了 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` 就是它，否则是模型窗口，1M 模型默认按 200K 的压缩边界）、`percentage`。`summary` 不调计数接口，回合结束后调用很便宜。
+- **b. 自动压缩阈值**：`CLAUDE_CODE_AUTO_COMPACT_WINDOW` 是 token 数（也接受 `600k`），夹在 100K～1M 之间并且不超过模型窗口；阈值 = `min(有效窗口 × PCT / 100, 有效窗口 − 13K)`，有效窗口 = 窗口 − 20K（给摘要输出留的余量），`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` 可以是小数。实测窗口 100000、PCT 30 → 阈值 24000：18.7K 不压缩，24.25K 在下一次请求前自动压缩（`compact_boundary` trigger `auto`，回合中途也会触发）。所以守护进程按 `window = clamp(context_limit)`、`PCT = context_limit × compact_in_task_pct / (window − 20K)` 设置（`node/src/sessions/claude/compact.ts`）：600K、80% → 窗口 600000、PCT 82.76 → 480K 压缩，1M 模型也一样。`context_limit` 低于 100K 时窗口按 100K 算、PCT 照样换算到目标 token 数。
+- **c. 平台主动压缩**：往提示队列推一条用户消息 `/compact <指令>` 就行，依次收到 `status: compacting` → `status: null, compact_result: success` → `system/init` → `compact_boundary`（trigger `manual`、`pre_tokens`、`post_tokens`）→ `result`（success，正文为空）。守护进程以 `compact_boundary` 之后的 `result` 作为完成。
+- **d. PreCompact 钩子**：没有 `hookSpecificOutput`，但 SDK 回调钩子返回的 `systemMessage` 会作为附加压缩指令，和 `/compact` 后面的指令拼在一起（摘要里出现了只在钩子里要求的暗号）。所以自动压缩时由钩子补 `compact_focus + 锚点`；平台主动压缩时指令已经在 `/compact` 里，钩子不再重复。
+- **e. SessionStart(`compact`)**：自动和手动压缩之后都会触发，返回的 `additionalContext` 能被模型看到（压缩后问只写在 `additionalContext` 里的暗号，答对了）。所以 Claude 的锚点走这个钩子，不额外发消息。
 
 ### 5.3 协议改动（节点）
 
