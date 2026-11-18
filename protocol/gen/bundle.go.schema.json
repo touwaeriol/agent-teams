@@ -1320,7 +1320,8 @@
             "employee_removed",
             "policy_violation",
             "node_drain",
-            "switch_thread"
+            "switch_thread",
+            "context_clear"
           ]
         },
         "forget": {
@@ -1974,6 +1975,11 @@
           "items": {
             "$ref": "#/$defs/ImageRef"
           }
+        },
+        "anchor": {
+          "description": "The task anchor, as session.send anchor.",
+          "type": "string",
+          "maxLength": 8000
         }
       }
     },

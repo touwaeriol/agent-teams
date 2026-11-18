@@ -769,7 +769,13 @@ export interface NodeUpgradeResult {
 export interface SessionClose {
   session_id: SessionId;
   open_gen?: OpenGen;
-  reason?: "thread_done" | "employee_removed" | "policy_violation" | "node_drain" | "switch_thread";
+  reason?:
+    | "thread_done"
+    | "employee_removed"
+    | "policy_violation"
+    | "node_drain"
+    | "switch_thread"
+    | "context_clear";
   /**
    * Also delete the local session record (SDK transcript is kept 7 days).
    */
@@ -1160,6 +1166,10 @@ export interface FirstMessage {
     | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef]
     | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef]
     | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef];
+  /**
+   * The task anchor, as session.send anchor.
+   */
+  anchor?: string;
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema

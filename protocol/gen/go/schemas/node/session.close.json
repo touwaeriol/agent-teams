@@ -27,7 +27,8 @@
         "employee_removed",
         "policy_violation",
         "node_drain",
-        "switch_thread"
+        "switch_thread",
+        "context_clear"
       ]
     },
     "forget": {

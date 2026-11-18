@@ -164,7 +164,7 @@ export class SessionManager implements SessionHost {
     s.released = true;
     this.persist(s);
     const first = s.spec.first_message;
-    const queue = [...(first ? [{ session_id: s.id, msg_id: first.msg_id, text: first.text, kind: "system" as const, ...(first.images ? { images: first.images } : {}) }] : []), ...s.held.splice(0)];
+    const queue = [...(first ? [{ session_id: s.id, msg_id: first.msg_id, text: first.text, kind: "system" as const, ...(first.images ? { images: first.images } : {}), ...(first.anchor !== undefined ? { anchor: first.anchor } : {}) }] : []), ...s.held.splice(0)];
     void this.deliverQueued(s, queue);
     return [];
   }

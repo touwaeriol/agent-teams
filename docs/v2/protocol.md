@@ -204,7 +204,7 @@
 - 会话还没收到本 `open_gen` 的 `session.release`：消息在守护进程排队，release 后按顺序投递（park 后自动 resume 的同一 gen 不需要再 release，但 init 工具若与上次不同则当作违规上报 `session.event{kind:error, code:'protocol'}`）。
 - Claude：向 prompt 队列推 `SDKUserMessage {priority}`。Codex：空闲 `turn/start`，回合中 `turn/steer {expectedTurnId}`（`later` 则排到 `turn/completed` 之后）。
 - `interrupt_first: true`：先 `interrupt()` / `turn/interrupt`，再投递。
-- `anchor`（可选，≤ 8000 字）：任务锚点（任务 id、原始说明、分支、交接说明、最近进度），随任务简报下发。守护进程保存最新的一条（空串清掉），会话在任务中被运行时自己压缩后补给模型（§4.10）。
+- `anchor`（可选，≤ 8000 字；`session.open.first_message` 也可以带）：任务锚点（任务 id、原始说明、分支、交接说明、最近进度），随任务简报下发。守护进程保存最新的一条（空串清掉），会话在任务中被运行时自己压缩后补给模型（§4.10）。
 - 回 `session.delivered {session_id, msg_id, turn_id?}`（可靠）。
 
 ### 4.4 `session.interrupt`（键：`id`）
@@ -217,7 +217,7 @@
 
 ### 4.6 `session.close`（键：`session_id + open_gen`）
 
-`{"session_id": "s_…", "reason": "thread_done|employee_removed|policy_violation|node_drain|switch_thread", "forget": false}` → Claude `q.close()`；Codex 不再路由该 thread（app-server 无需关闭）。`forget: true` 同时删除本机会话记录（SDK 转录文件保留，用于排查，按 7 天清理）。回 `session.closed`。
+`{"session_id": "s_…", "reason": "thread_done|employee_removed|policy_violation|node_drain|switch_thread|context_clear", "forget": false}`（`context_clear`：同一讨论串里做满 `clear_after_tasks` 个任务或上下文太满，下一个任务开新会话；只发给有 `session_compact` 的守护进程，旧的收到 `switch_thread`） → Claude `q.close()`；Codex 不再路由该 thread（app-server 无需关闭）。`forget: true` 同时删除本机会话记录（SDK 转录文件保留，用于排查，按 7 天清理）。回 `session.closed`。
 
 ### 4.7 停放（守护进程自主）
 

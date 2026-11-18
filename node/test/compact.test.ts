@@ -95,6 +95,16 @@ describe("claude sessions", () => {
     ]);
   });
 
+  it("takes the anchor of a fresh session's first message", async () => {
+    h = await startHarness();
+    h.console.command("session.open", claudeOpen("s_C4", 1, { first_message: { msg_id: "m_f", text: "brief", anchor: ANCHOR } }));
+    await h.console.waitType("session.opened");
+    h.console.command("session.release", { session_id: "s_C4", open_gen: 1 });
+    await h.console.waitType("session.event", (b) => b.kind === "turn_ended");
+    await say("s_C4", "m_2", "autocompact");
+    expect(h.log.hooks!.at(-1)).toEqual({ event: "SessionStart", output: { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: ANCHOR } } });
+  });
+
   it("answers ok=false for a session that is not on the node", async () => {
     h = await startHarness();
     h.console.command("session.compact", { session_id: "s_none", open_gen: 1, compact_id: "cp_x" });

@@ -2284,6 +2284,9 @@ func (j *FinishInput) UnmarshalJSON(value []byte) error {
 }
 
 type FirstMessage struct {
+	// The task anchor, as session.send anchor.
+	Anchor *string `json:"anchor,omitempty,omitzero"`
+
 	// Images to deliver with the text (at most 8).
 	Images []ImageRef `json:"images,omitempty,omitzero"`
 
@@ -2310,6 +2313,9 @@ func (j *FirstMessage) UnmarshalJSON(value []byte) error {
 	var plain Plain
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
+	}
+	if plain.Anchor != nil && utf8.RuneCountInString(string(*plain.Anchor)) > 8000 {
+		return fmt.Errorf("field %s length: must be <= %d", "anchor", 8000)
 	}
 	if len(plain.Images) > 8 {
 		return fmt.Errorf("field %s length: must be <= %d", "images", 8)
@@ -5830,6 +5836,7 @@ type SessionClose struct {
 
 type SessionCloseReason string
 
+const SessionCloseReasonContextClear SessionCloseReason = "context_clear"
 const SessionCloseReasonEmployeeRemoved SessionCloseReason = "employee_removed"
 const SessionCloseReasonNodeDrain SessionCloseReason = "node_drain"
 const SessionCloseReasonPolicyViolation SessionCloseReason = "policy_violation"
@@ -5842,6 +5849,7 @@ var enumValues_SessionCloseReason = []interface{}{
 	"policy_violation",
 	"node_drain",
 	"switch_thread",
+	"context_clear",
 }
 
 // UnmarshalJSON implements json.Unmarshaler.

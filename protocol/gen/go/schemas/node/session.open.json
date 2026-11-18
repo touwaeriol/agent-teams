@@ -500,6 +500,11 @@
           "items": {
             "$ref": "common.json#/$defs/ImageRef"
           }
+        },
+        "anchor": {
+          "description": "The task anchor, as session.send anchor.",
+          "type": "string",
+          "maxLength": 8000
         }
       }
     },
