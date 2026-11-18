@@ -42,7 +42,7 @@ func (e *Engine) PurgeThread(ctx context.Context, tx *core.Tx, t core.Thread) er
 	if err := e.purgeThreadDirs(ctx, tx, t); err != nil {
 		return err
 	}
-	emps, err := core.ThreadEmployees(ctx, tx, t.ID)
+	emps, err := core.ThreadParticipants(ctx, tx, t.ID)
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ func (e *Engine) deleteMemberBranches(ctx context.Context, t core.Thread) {
 	if err != nil {
 		return
 	}
-	emps, err := core.ThreadEmployees(ctx, e.core.Pool, t.ID)
+	emps, err := core.ThreadParticipants(ctx, e.core.Pool, t.ID)
 	if err != nil {
 		return
 	}

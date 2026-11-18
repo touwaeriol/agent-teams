@@ -2719,7 +2719,7 @@ export interface components {
         };
         NewThreadInputBody: {
             brief?: string;
-            /** @description Override member counts for this thread */
+            /** @description Member roles this thread uses (counts are ignored: members are project staff) */
             roles?: components["schemas"]["RoleCount"][] | null;
             title: string;
         };

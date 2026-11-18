@@ -287,13 +287,13 @@ func str(v any) string {
 	return s
 }
 
-// listTeam lists the thread's lead and members with their current task.
+// listTeam lists the thread's team (lead, project members it can work with) and their current task.
 func (s *Service) listTeam(ctx context.Context, tx *core.Tx, c *call) (Result, error) {
 	t, err := requireThread(c)
 	if err != nil {
 		return Result{}, err
 	}
-	emps, err := core.ThreadEmployees(ctx, tx, t.ID)
+	emps, err := core.ThreadTeam(ctx, tx, t)
 	if err != nil {
 		return Result{}, err
 	}
@@ -327,7 +327,10 @@ func (s *Service) member(ctx context.Context, tx *core.Tx, t core.Thread, e core
 		typ = "codex"
 	}
 	m := protocol.TeamMember{Name: e.Name, Role: e.Role, Title: &title, Type: &typ}
-	if task, err := core.CurrentTask(ctx, tx, t.ID, e.Name); err == nil {
+	if task, err := core.CurrentTask(ctx, tx, deref(e.WorkThreadID()), e.Name); err == nil && task.ConversationID != t.ID {
+		busy := "在别的讨论串忙"
+		m.Status = &busy
+	} else if err == nil {
 		st := "在做 " + task.ID
 		m.TaskID, m.Status = &task.ID, &st
 	} else {

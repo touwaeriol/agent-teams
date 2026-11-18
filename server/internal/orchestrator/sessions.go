@@ -33,12 +33,19 @@ type Delivery struct {
 // Deliver records the message and sends it to the employee's session, opening one when needed.
 func (o *Orchestrator) Deliver(ctx context.Context, tx *core.Tx, e core.Employee, d Delivery) (core.Message, error) {
 	msgID := core.NewID("m")
+	e, err := o.engage(ctx, tx, e, d.Record)
+	if err != nil {
+		return core.Message{}, err
+	}
 	m, err := o.recordDelivery(ctx, tx, e, d, msgID)
 	if err != nil {
 		return m, err
 	}
 	if ended, err := o.threadEnded(ctx, tx, e); err != nil || ended {
 		return m, err // a finished or archived thread's employees are not woken: the message is only kept
+	}
+	if e.ProjectMember() && e.CurrentThreadID == nil {
+		return m, nil // a project member without a thread has no worktree to wake in: its next task brings it
 	}
 	o.wake(tx, e.ID)
 	sess, err := core.LiveSession(ctx, tx, e.ID)
@@ -58,12 +65,28 @@ func (o *Orchestrator) Deliver(ctx context.Context, tx *core.Tx, e core.Employee
 	return m, o.send(ctx, tx, sess, msgID, d)
 }
 
+// engage brings a project member that works in no thread into the thread a message to it is
+// recorded in (the user or a lead talks to it there).
+func (o *Orchestrator) engage(ctx context.Context, tx *core.Tx, e core.Employee, rec *core.NewMessage) (core.Employee, error) {
+	if !e.ProjectMember() || e.CurrentThreadID != nil || rec == nil {
+		return e, nil
+	}
+	t, err := core.ThreadByID(ctx, tx, rec.ConversationID)
+	if errors.Is(err, core.ErrNotFound) || (err == nil && t.ProjectID != e.ProjectID) {
+		return e, nil
+	}
+	if err != nil {
+		return e, err
+	}
+	return o.MoveToThread(ctx, tx, e, t.ID)
+}
+
 // threadEnded reports whether the employee works in a thread that is done, failed or archived.
 func (o *Orchestrator) threadEnded(ctx context.Context, tx *core.Tx, e core.Employee) (bool, error) {
-	if e.ThreadID == nil {
+	if e.WorkThreadID() == nil {
 		return false, nil
 	}
-	t, err := core.ThreadByID(ctx, tx, *e.ThreadID)
+	t, err := core.ThreadByID(ctx, tx, *e.WorkThreadID())
 	if err != nil {
 		return false, ignoreMissing(err)
 	}
@@ -108,13 +131,43 @@ func (o *Orchestrator) continuation(ctx context.Context, tx *core.Tx, e core.Emp
 		}
 		return summary + "\n\n---\n" + text, nil, o.resumedNote(ctx, tx, e)
 	}
+	if movedThread(e, last) {
+		return text, nil, nil // a project member's session belongs to one thread's worktree
+	}
 	if slices.Contains(resumableClose, last.CloseReason) {
-		if last.CloseReason == "thread_done" && e.ThreadID != nil {
+		if last.CloseReason == "thread_done" && e.WorkThreadID() != nil {
 			text = reopenedPrefix + text
 		}
 		return text, resumeRef(last), nil
 	}
 	return text, nil, nil
+}
+
+// movedThread reports whether a project member's last session was in another thread than the
+// one it works in now.
+func movedThread(e core.Employee, last core.AgentSession) bool {
+	return e.ProjectMember() && last.ThreadID != nil && e.CurrentThreadID != nil && !sameThread(last.ThreadID, e.CurrentThreadID)
+}
+
+// MoveToThread makes a project member work in a thread (it claimed a task there): its current
+// thread is recorded and a live session it has in another thread's worktree is closed, so the
+// next message opens a fresh session in this thread's worktree. Others are returned unchanged.
+func (o *Orchestrator) MoveToThread(ctx context.Context, tx *core.Tx, e core.Employee, threadID string) (core.Employee, error) {
+	if !e.ProjectMember() {
+		return e, nil
+	}
+	if err := core.SetCurrentThread(ctx, tx, e.ID, &threadID); err != nil {
+		return e, err
+	}
+	e.CurrentThreadID = &threadID
+	s, err := core.LiveSession(ctx, tx, e.ID)
+	if errors.Is(err, core.ErrNotFound) || (err == nil && sameThread(s.ThreadID, &threadID)) {
+		return e, nil
+	}
+	if err != nil {
+		return e, err
+	}
+	return e, o.closeSession(ctx, tx, s, "employee_removed")
 }
 
 // NodeRemoved closes the sessions of a node that is being deleted; the next message to
@@ -146,8 +199,8 @@ func (o *Orchestrator) recordDelivery(ctx context.Context, tx *core.Tx, e core.E
 		rec.Meta = map[string]any{}
 	}
 	rec.Meta["msg_id"] = msgID
-	if e.ThreadID != nil {
-		if no, err := core.ThreadNoOf(ctx, tx, e.ThreadID); err == nil && no != nil {
+	if th := e.WorkThreadID(); th != nil {
+		if no, err := core.ThreadNoOf(ctx, tx, th); err == nil && no != nil {
 			rec.Meta["thread_no"] = *no
 		}
 	}
@@ -155,13 +208,13 @@ func (o *Orchestrator) recordDelivery(ctx context.Context, tx *core.Tx, e core.E
 	if err != nil {
 		return m, err
 	}
-	return m, tx.EmitMessage(ctx, e.ProjectID, e.ThreadID, m)
+	return m, tx.EmitMessage(ctx, e.ProjectID, e.WorkThreadID(), m)
 }
 
 // conversationOf is the conversation an employee's messages belong to.
 func (o *Orchestrator) conversationOf(ctx context.Context, tx *core.Tx, e core.Employee) (string, error) {
-	if e.ThreadID != nil {
-		return *e.ThreadID, nil
+	if th := e.WorkThreadID(); th != nil {
+		return *th, nil
 	}
 	userID, err := ownerOf(ctx, tx, e.ProjectID)
 	if err != nil {
@@ -210,7 +263,7 @@ func (o *Orchestrator) openSession(ctx context.Context, tx *core.Tx, e core.Empl
 	}
 	paths := PathsOf(e, env.thread)
 	sess, err := core.InsertSession(ctx, tx, core.NewSession{EmployeeID: e.ID, NodeID: node.ID, Runtime: e.Runtime,
-		Cwd: paths.Cwd, Branch: paths.Branch, PermissionMode: "default"})
+		Cwd: paths.Cwd, Branch: paths.Branch, PermissionMode: "default", ThreadID: env.threadID()})
 	if err != nil {
 		return sess, err
 	}
@@ -226,6 +279,14 @@ type sessionEnv struct {
 	project store.Project
 	thread  *core.Thread
 	repos   []ghops.Repo
+}
+
+// threadID is the thread the session works in (nil: coordinator).
+func (env sessionEnv) threadID() *string {
+	if env.thread == nil {
+		return nil
+	}
+	return &env.thread.ID
 }
 
 // slugs lists the repositories checked out for the employee (none for the coordinator).
@@ -259,8 +320,8 @@ func (o *Orchestrator) loadEnv(ctx context.Context, tx *core.Tx, e core.Employee
 	if env.project, err = o.project(ctx, tx, e.ProjectID); err != nil {
 		return env, err
 	}
-	if e.ThreadID != nil {
-		t, err := core.ThreadByID(ctx, tx, *e.ThreadID)
+	if th := e.WorkThreadID(); th != nil {
+		t, err := core.ThreadByID(ctx, tx, *th)
 		if err != nil {
 			return env, err
 		}
@@ -274,13 +335,14 @@ func (o *Orchestrator) placeEmployee(ctx context.Context, tx *core.Tx, e core.Em
 	if err := core.SetEmployeeNode(ctx, tx, e.ID, &nodeID); err != nil {
 		return err
 	}
-	if e.ThreadID == nil {
+	th := e.WorkThreadID()
+	if th == nil {
 		return nil
 	}
 	_, err := store.Exec(ctx, tx, `INSERT INTO at_thread_nodes (thread_id, node_id, paths) VALUES ($1, $2, $3::text[])
 		ON CONFLICT (thread_id, node_id) DO UPDATE SET cleaned_at = NULL,
 		paths = ARRAY(SELECT DISTINCT unnest(at_thread_nodes.paths || EXCLUDED.paths) ORDER BY 1)`,
-		*e.ThreadID, nodeID, paths)
+		*th, nodeID, paths)
 	return err
 }
 
@@ -295,7 +357,7 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 	if err != nil {
 		return err
 	}
-	rules, err := o.Rules(ctx, tx, env.emp.ProjectID, env.emp.ThreadID, env.emp.Name)
+	rules, err := o.Rules(ctx, tx, env.emp.ProjectID, env.emp.WorkThreadID(), env.emp.Name)
 	if err != nil {
 		return err
 	}
@@ -400,11 +462,11 @@ const FeatureGitSync = "git_sync"
 // QueueSync queues one git.prepare with sync per repository of the employee's thread, so the
 // task about to start sees the current thread branch (member) or the branch under review
 // (review); meta comes back with each result. It returns how many jobs it queued: 0 when there
-// is nothing to sync yet (no node: the session will be opened and prepared anyway), the daemon
-// cannot sync, or the project checks out full clones.
+// is nothing to sync yet (no session in this thread so far: it will be opened and prepared
+// anyway), the daemon cannot sync, or the project checks out full clones.
 func (o *Orchestrator) QueueSync(ctx context.Context, tx *core.Tx, e core.Employee, sync protocol.GitPrepareSync, meta map[string]any) (int, error) {
-	if e.NodeID == nil {
-		return 0, nil
+	if ok, err := o.workedHere(ctx, tx, e); err != nil || !ok {
+		return 0, err
 	}
 	if ok, err := core.NodeHasFeature(ctx, tx, *e.NodeID, FeatureGitSync); err != nil || !ok {
 		return 0, err
@@ -423,6 +485,23 @@ func (o *Orchestrator) QueueSync(ctx context.Context, tx *core.Tx, e core.Employ
 	return len(env.repos), nil
 }
 
+// workedHere reports whether the employee has a node and opened a session in the thread it
+// works in before (so its worktree there exists).
+func (o *Orchestrator) workedHere(ctx context.Context, tx *core.Tx, e core.Employee) (bool, error) {
+	if e.NodeID == nil {
+		return false, nil
+	}
+	last, err := core.LatestSession(ctx, tx, e.ID)
+	if errors.Is(err, core.ErrNotFound) {
+		return false, nil
+	}
+	return err == nil && sameThread(last.ThreadID, e.WorkThreadID()), err
+}
+
+func sameThread(a, b *string) bool {
+	return a != nil && b != nil && *a == *b
+}
+
 // sharedFor is the shared clone a worktree hangs off: the legacy single clone for legacy checkouts.
 func sharedFor(projectID, slug string, legacy bool) string {
 	if legacy {
@@ -433,8 +512,11 @@ func sharedFor(projectID, slug string, legacy bool) string {
 
 // RefreshWorktree queues a fetch for a read-only session's worktree before review messages (§10.2).
 func (o *Orchestrator) RefreshWorktree(ctx context.Context, tx *core.Tx, e core.Employee) error {
-	if !readOnly(e) || e.NodeID == nil {
+	if !readOnly(e) {
 		return nil
+	}
+	if ok, err := o.workedHere(ctx, tx, e); err != nil || !ok {
+		return err
 	}
 	env, err := o.loadEnv(ctx, tx, e)
 	if err != nil {
@@ -458,28 +540,11 @@ func (o *Orchestrator) pickNode(ctx context.Context, tx *core.Tx, e core.Employe
 			}
 		}
 	}
-	cands := candidates(e, nodes)
+	cands := core.NodeCandidates(e, nodes)
 	if len(cands) == 0 {
 		return store.Node{}, ErrNoNode
 	}
 	return o.leastLoaded(ctx, tx, cands), nil
-}
-
-func candidates(e core.Employee, nodes []store.Node) []store.Node {
-	var picked []store.Node
-	for _, n := range nodes {
-		if len(e.Spec.NodeIDs) > 0 && !slices.Contains(e.Spec.NodeIDs, n.ID) {
-			continue
-		}
-		if e.Runtime == "codex" && !(n.Isolated || n.Isolation == "agent_user") {
-			continue
-		}
-		picked = append(picked, n)
-	}
-	if len(picked) == 0 && len(e.Spec.NodeIDs) > 0 && e.Runtime != "codex" {
-		return nodes // configured nodes were deleted: fall back to any of the user's nodes
-	}
-	return picked
 }
 
 func (o *Orchestrator) leastLoaded(ctx context.Context, tx *core.Tx, cands []store.Node) store.Node {

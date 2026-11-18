@@ -71,6 +71,8 @@ type NewThread struct {
 	AutoApprove bool
 	OpenedBy    string
 	Roles       []store.Role
+	// OnlyRoles are the member roles the lead may assign to (empty: all, stored as NULL).
+	OnlyRoles []string
 	// SourceMessageID is the user's message the thread was opened for (nil: none).
 	SourceMessageID *int64
 	// ForwardedBrief: the brief is the user's forwarded messages (forward into a new thread).
@@ -95,11 +97,18 @@ func CreateThread(ctx context.Context, tx *Tx, n NewThread) (Thread, error) {
 		"user_id": n.UserID, "no": no, "title": n.Title, "brief": n.Brief,
 		"branch": fmt.Sprintf("thread/%d-%s", no, Slug(n.Title)), "base_branch": n.BaseBranch,
 		"auto_approve": n.AutoApprove, "opened_by": n.OpenedBy, "roles_snapshot": roles,
-		"source_message_id": n.SourceMessageID, "forwarded_brief": n.ForwardedBrief}).Error
+		"source_message_id": n.SourceMessageID, "forwarded_brief": n.ForwardedBrief, "only_roles": onlyRolesValue(n.OnlyRoles)}).Error
 	if err != nil {
 		return Thread{}, err
 	}
 	return ThreadByID(ctx, tx, id)
+}
+
+func onlyRolesValue(roles []string) any {
+	if len(roles) == 0 {
+		return nil
+	}
+	return jsonOf(roles)
 }
 
 // Slug turns a title into a branch-safe ASCII slug (never empty).

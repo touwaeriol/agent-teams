@@ -182,7 +182,7 @@ func (s *Server) replaceRoles(ctx context.Context, userID string, list []store.R
 	}
 	s.auditBypass(ctx, userID, known, list)
 	s.auditCommands(ctx, userID, known, list)
-	return nil
+	return s.hooks.RolesSaved(ctx, userID)
 }
 
 // auditCommands records every saved role whose custom or hidden platform commands changed.

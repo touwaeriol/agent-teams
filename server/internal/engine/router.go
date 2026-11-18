@@ -268,7 +268,7 @@ func (r *router) toolStarted(ctx context.Context, tx *core.Tx, sc core.SessionCo
 		return []status.Observation{o}, nil
 	}
 	text := fmt.Sprintf("%s %s", tool, o.Summary)
-	return []status.Observation{o}, tx.EmitActivity(ctx, sc.Employee.ProjectID, sc.Employee.ThreadID, sc.Employee.Name, text)
+	return []status.Observation{o}, tx.EmitActivity(ctx, sc.Employee.ProjectID, sc.Employee.WorkThreadID(), sc.Employee.Name, text)
 }
 
 // turnEnded records usage and nudges a member whose task is still running.
@@ -291,7 +291,7 @@ func (r *router) turnEnded(ctx context.Context, tx *core.Tx, sc core.SessionCont
 // also pauses the employee's thread until then (data-model.md §2.10).
 func (r *router) rateLimited(ctx context.Context, tx *core.Tx, sc core.SessionContext, ev *protocol.SessionEvent) error {
 	e := sc.Employee
-	if err := tx.EmitActivity(ctx, e.ProjectID, e.ThreadID, e.Name, "限速中："+val(ev.Detail)); err != nil {
+	if err := tx.EmitActivity(ctx, e.ProjectID, e.WorkThreadID(), e.Name, "限速中："+val(ev.Detail)); err != nil {
 		return err
 	}
 	if !timers.IsUsageLimit(ev.RetryAt, time.Now()) {
@@ -311,7 +311,7 @@ func recordUsage(ctx context.Context, tx *core.Tx, sc core.SessionContext, ev *p
 	}
 	_, err := store.Exec(ctx, tx, `INSERT INTO at_usage (session_id, project_id, thread_id, turn_id, cost_usd, input_tokens,
 		output_tokens, cache_read_tokens, cache_write_tokens, duration_ms, model) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-		ON CONFLICT (session_id, turn_id) DO NOTHING`, sc.Session.ID, sc.Employee.ProjectID, sc.Employee.ThreadID, turn,
+		ON CONFLICT (session_id, turn_id) DO NOTHING`, sc.Session.ID, sc.Employee.ProjectID, sc.Employee.WorkThreadID(), turn,
 		ev.CostUSD, num(usage, "input_tokens"), num(usage, "output_tokens"), num(usage, "cache_read_input_tokens"),
 		num(usage, "cache_creation_input_tokens"), ev.DurationMS, val(ev.Model))
 	return err
@@ -335,7 +335,7 @@ func (r *router) text(ctx context.Context, tx *core.Tx, sc core.SessionContext, 
 	if e.Tier == "coordinator" || e.Tier == "lead" {
 		return r.e.Orch.RecordReply(ctx, tx, e, *ev.Text)
 	}
-	return tx.EmitActivity(ctx, e.ProjectID, e.ThreadID, e.Name, clip(*ev.Text, 300))
+	return tx.EmitActivity(ctx, e.ProjectID, e.WorkThreadID(), e.Name, clip(*ev.Text, 300))
 }
 
 func (r *router) sessionError(ctx context.Context, tx *core.Tx, sc core.SessionContext, ev *protocol.SessionEvent) error {

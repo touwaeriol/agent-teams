@@ -87,7 +87,7 @@ func cutTurnText(ctx context.Context, q core.DB, e core.Employee) (string, error
 func openRequests(ctx context.Context, q core.DB, e core.Employee, where string) ([]string, error) {
 	var qs []core.Question
 	err := q.Gorm(ctx).Select("id, kind, text, detail").
-		Where("project_id = ? AND COALESCE(thread_id, '') = COALESCE(?, '') AND asker = ?", e.ProjectID, e.ThreadID, e.Name).
+		Where("project_id = ? AND COALESCE(thread_id, '') = COALESCE(?, '') AND asker = ?", e.ProjectID, e.WorkThreadID(), e.Name).
 		Where(where).Order("created_at").Find(&qs).Error
 	if err != nil {
 		return nil, err

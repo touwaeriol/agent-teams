@@ -49,6 +49,7 @@ type NewSession struct {
 	Cwd            string
 	Branch         string
 	PermissionMode string
+	ThreadID       *string // the thread whose worktree it opens in (nil: coordinator)
 }
 
 // InsertSession creates a logical session at open_gen 1.
@@ -56,7 +57,7 @@ func InsertSession(ctx context.Context, tx *Tx, n NewSession) (AgentSession, err
 	id := NewID("s")
 	err := tx.Gorm(ctx).Table("at_agent_sessions").Create(map[string]any{"id": id, "employee_id": n.EmployeeID,
 		"node_id": n.NodeID, "runtime": n.Runtime, "cwd": n.Cwd, "branch": n.Branch, "state": "opening", "open_gen": 1,
-		"permission_mode": n.PermissionMode}).Error
+		"permission_mode": n.PermissionMode, "thread_id": n.ThreadID}).Error
 	if err != nil {
 		return AgentSession{}, err
 	}
@@ -153,9 +154,10 @@ func liveSessionsJoined(ctx context.Context, q DB) *gorm.DB {
 		Where("a.state <> 'closed'")
 }
 
-// ThreadLiveSessions lists the live sessions of a thread's employees.
+// ThreadLiveSessions lists the live sessions of a thread's employees and the sessions project
+// members opened in the thread.
 func ThreadLiveSessions(ctx context.Context, q DB, threadID string) ([]AgentSession, error) {
-	return find[AgentSession](liveSessionsJoined(ctx, q).Where("e.thread_id = ?", threadID))
+	return find[AgentSession](liveSessionsJoined(ctx, q).Where("e.thread_id = ? OR a.thread_id = ?", threadID, threadID))
 }
 
 // ProjectLiveSessions lists the live sessions of a project.

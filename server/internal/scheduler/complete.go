@@ -69,19 +69,18 @@ func (s *Scheduler) afterWork(ctx context.Context, tx *core.Tx, th core.Thread, 
 	if err != nil {
 		return err
 	}
-	if role := gateRole(ctx, tx, th.ID, "review"); d.Gates.Review && role != "" {
+	if role := gateRole(ctx, tx, th, "review"); d.Gates.Review && role != "" {
 		return s.openGate(ctx, tx, th, task, "review", role)
 	}
 	return s.notifyLead(ctx, tx, th, fmt.Sprintf("[Task %s · %s · done] %s\n分支：%s%s", task.ID, task.ClaimedBy, task.Summary, task.Branch, pushedNote(task)))
 }
 
-// gateRole is the role of the thread's member responsible for a gate ("" when none).
-func gateRole(ctx context.Context, q core.DB, threadID, gate string) string {
-	emps, err := core.ThreadEmployees(ctx, q, threadID)
-	if err != nil {
-		return ""
-	}
-	for _, e := range emps {
+// gateRole is the role of the member responsible for a gate: a project member's, else one of
+// the thread's legacy members ("" when none).
+func gateRole(ctx context.Context, q core.DB, th core.Thread, gate string) string {
+	staff, _ := core.ProjectMembers(ctx, q, th.ProjectID)
+	legacy, _ := core.ThreadEmployees(ctx, q, th.ID)
+	for _, e := range append(staff, legacy...) {
 		if e.Tier == "member" && e.Spec.Gate == gate {
 			return e.Role
 		}
@@ -139,7 +138,7 @@ func (s *Scheduler) passed(ctx context.Context, tx *core.Tx, th core.Thread, par
 	if err != nil {
 		return err
 	}
-	if role := gateRole(ctx, tx, th.ID, "decision"); gate.Kind == "review" && d.Gates.Decision && role != "" {
+	if role := gateRole(ctx, tx, th, "decision"); gate.Kind == "review" && d.Gates.Decision && role != "" {
 		return s.openGate(ctx, tx, th, parent, "decision", role)
 	}
 	if parent.Status == "decision" {
@@ -320,8 +319,27 @@ func (s *Scheduler) touchMember(ctx context.Context, tx *core.Tx, task core.Task
 	}
 }
 
+// kickAfter asks for a pass over the thread after the commit, and over the project's other
+// threads with pending work: their tasks may wait for the project member this freed.
 func (s *Scheduler) kickAfter(tx *core.Tx, threadID string) {
-	tx.AfterCommit(func(ctx context.Context) { s.Kick(ctx, threadID) })
+	tx.AfterCommit(func(ctx context.Context) {
+		s.Kick(ctx, threadID)
+		for _, id := range s.siblingsWithWork(ctx, threadID) {
+			s.Kick(ctx, id)
+		}
+	})
+}
+
+// siblingsWithWork lists the project's other going threads that have pending tasks.
+func (s *Scheduler) siblingsWithWork(ctx context.Context, threadID string) []string {
+	var ids []string
+	err := s.core.Pool.Gorm(ctx).Raw(`SELECT DISTINCT x.thread_id FROM at_tasks x JOIN at_threads th ON th.id = x.thread_id
+		WHERE th.project_id = (SELECT project_id FROM at_threads WHERE id = ?) AND th.id <> ?
+		AND x.status = 'pending' AND th.status IN ('running','waiting')`, threadID, threadID).Scan(&ids).Error
+	if err != nil {
+		s.log.Warn("sibling threads", "thread_id", threadID, "err", err)
+	}
+	return ids
 }
 
 // notifyLead sends a platform note to the thread's lead (priority later), refreshing its worktree first.

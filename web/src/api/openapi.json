@@ -2749,7 +2749,7 @@
             "type": "string"
           },
           "roles": {
-            "description": "Override member counts for this thread",
+            "description": "Member roles this thread uses (counts are ignored: members are project staff)",
             "items": {
               "$ref": "#/components/schemas/RoleCount"
             },

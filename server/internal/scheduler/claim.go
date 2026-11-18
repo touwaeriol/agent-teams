@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"maps"
 	"slices"
@@ -70,28 +71,45 @@ func (s *Scheduler) tryClaim(ctx context.Context, tx *core.Tx, t core.Thread, ta
 // Named reports whether a task was assigned to an instance rather than a role.
 func Named(task core.Task) bool { return task.Assignee != "" && task.Assignee != task.Role }
 
+// idleCandidates are the members free to claim a task of thread @t: the project's members with
+// no claimed / running task anywhere in the project (not hidden by a legacy member of their
+// name in the thread), and the thread's own legacy members with none in the thread.
+const idleCandidates = `e.active AND e.tier = 'member' AND (
+	(e.thread_id = @t AND NOT EXISTS (SELECT 1 FROM at_tasks x WHERE x.thread_id = e.thread_id AND x.claimed_by = e.name
+		AND x.status IN ('claimed','running')))
+	OR (e.thread_id IS NULL AND e.project_id = @p
+		AND NOT EXISTS (SELECT 1 FROM at_employees l WHERE l.thread_id = @t AND l.name = e.name)
+		AND NOT EXISTS (SELECT 1 FROM at_tasks x JOIN at_threads xt ON xt.id = x.thread_id
+			WHERE xt.project_id = e.project_id AND x.claimed_by = e.name AND x.status IN ('claimed','running')
+			AND NOT EXISTS (SELECT 1 FROM at_employees l WHERE l.thread_id = x.thread_id AND l.name = x.claimed_by))))`
+
+// idleMember picks the member that claims the task: the named one, else the first idle member
+// of the role (project members before the thread's legacy members).
 func idleMember(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task) (core.Employee, error) {
 	name := ""
 	if Named(task) {
 		name = task.Assignee
 	}
 	g := tx.Gorm(ctx).Table("at_employees e").Select("e.*").Clauses(core.SkipLocked).
-		Where("e.thread_id = ? AND e.active AND e.tier = 'member'", t.ID).
-		Where(`NOT EXISTS (SELECT 1 FROM at_tasks x WHERE x.thread_id = e.thread_id AND x.claimed_by = e.name
-			AND x.status IN ('claimed','running'))`)
+		Where(idleCandidates, sql.Named("t", t.ID), sql.Named("p", t.ProjectID))
 	if name != "" {
 		g = g.Where("e.name = ?", name)
 	} else {
 		g = g.Where("e.role = ?", task.Role)
 	}
 	var e core.Employee
-	err := g.Order("e.instance_no").Take(&e).Error
+	err := g.Order("e.thread_id NULLS FIRST, e.instance_no").Take(&e).Error
 	return e, core.MapErr(err)
 }
 
-// claim marks the task claimed, emits task.claimed and sends the member its brief.
+// claim marks the task claimed, emits task.claimed and sends the member its brief; a project
+// member moves to the task's thread first.
 func (s *Scheduler) claim(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task, m core.Employee) error {
-	task, err := core.UpdateTask(ctx, tx, task, map[string]any{"status": "claimed", "claimed_by": m.Name,
+	m, err := s.orch.MoveToThread(ctx, tx, m, t.ID)
+	if err != nil {
+		return err
+	}
+	task, err = core.UpdateTask(ctx, tx, task, map[string]any{"status": "claimed", "claimed_by": m.Name,
 		"claimed_at": time.Now().UTC(), "branch": orchestrator.MemberBranch(t.No, m.Name), "nudges": 0,
 		"sync": map[string]core.TaskSync{}, "sync_pending": 0, "sync_round": ""})
 	if err != nil {

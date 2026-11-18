@@ -299,8 +299,8 @@ func (a *API) card(ctx context.Context, emp core.Employee) (EmployeeCard, error)
 		return EmployeeCard{}, err
 	}
 	c := EmployeeCard{EmployeeBrief: brief, RecentActivity: []core.Activity{}}
-	if emp.ThreadID != nil {
-		if task, err := core.CurrentTask(ctx, a.e.Core.Pool, *emp.ThreadID, emp.Name); err == nil {
+	if emp.WorkThreadID() != nil {
+		if task, err := core.CurrentTask(ctx, a.e.Core.Pool, *emp.WorkThreadID(), emp.Name); err == nil {
 			no := 0
 			if brief.ThreadNo != nil {
 				no = *brief.ThreadNo
@@ -319,7 +319,7 @@ func (a *API) card(ctx context.Context, emp core.Employee) (EmployeeCard, error)
 func (a *API) employeeActivity(ctx context.Context, emp core.Employee) ([]core.Activity, error) {
 	rows, err := store.Query(ctx, a.e.Core.Pool, `SELECT seq, actor, COALESCE(payload->>'text', ''), created_at FROM at_events
 		WHERE project_id = $1 AND type = 'activity' AND actor = $2 AND COALESCE(thread_id, '') = COALESCE($3, '')
-		ORDER BY seq DESC LIMIT 10`, emp.ProjectID, emp.Name, emp.ThreadID)
+		ORDER BY seq DESC LIMIT 10`, emp.ProjectID, emp.Name, emp.WorkThreadID())
 	if err != nil {
 		return nil, err
 	}

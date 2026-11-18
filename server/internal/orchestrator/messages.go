@@ -288,22 +288,26 @@ func (o *Orchestrator) RecordReply(ctx context.Context, tx *core.Tx, e core.Empl
 	if err != nil {
 		return err
 	}
-	if err := tx.EmitMessage(ctx, e.ProjectID, e.ThreadID, m); err != nil {
+	if err := tx.EmitMessage(ctx, e.ProjectID, e.WorkThreadID(), m); err != nil {
 		return err
 	}
-	if e.ThreadID != nil {
-		return tx.EmitThread(ctx, *e.ThreadID)
+	if e.WorkThreadID() != nil {
+		return tx.EmitThread(ctx, *e.WorkThreadID())
 	}
 	return nil
 }
 
-// Pause interrupts every turn of a thread and parks its pool (§7.1 paused).
+// Pause interrupts every turn of a thread and parks its pool (§7.1 paused). A project member
+// working in another thread now is left alone.
 func (o *Orchestrator) Pause(ctx context.Context, tx *core.Tx, t core.Thread, reason string) error {
-	emps, err := core.ThreadEmployees(ctx, tx, t.ID)
+	emps, err := core.ThreadParticipants(ctx, tx, t.ID)
 	if err != nil {
 		return err
 	}
 	for _, e := range emps {
+		if e.ProjectMember() && (e.CurrentThreadID == nil || *e.CurrentThreadID != t.ID) {
+			continue
+		}
 		if err := o.Interrupt(ctx, tx, e, "thread_paused"); err != nil {
 			return err
 		}

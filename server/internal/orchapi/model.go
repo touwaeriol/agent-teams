@@ -96,7 +96,7 @@ func (a *API) overrideOf(ctx context.Context, c core.Conversation, e core.Employ
 
 func (a *API) memberModels(ctx context.Context, threadID string, p store.Project) ([]MemberModel, error) {
 	q := a.e.Core.Pool
-	list, err := core.ThreadEmployees(ctx, q, threadID)
+	list, err := core.ThreadParticipants(ctx, q, threadID)
 	if err != nil {
 		return nil, err
 	}

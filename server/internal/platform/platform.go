@@ -75,6 +75,8 @@ type Hooks interface {
 	UserCutOff(ctx context.Context, userID string) error
 	// NodeDeleting runs before a node row is deleted (reassign its employees).
 	NodeDeleting(ctx context.Context, userID, nodeID string) error
+	// RolesSaved runs after the user's role templates were saved (re-staff the projects).
+	RolesSaved(ctx context.Context, userID string) error
 	// GitHubEvent receives verified webhook deliveries (check_run, pull_request, …).
 	GitHubEvent(ctx context.Context, event string, payload json.RawMessage) error
 }
@@ -127,6 +129,9 @@ func (NoHooks) UserCutOff(context.Context, string) error { return nil }
 
 // NodeDeleting implements Hooks.
 func (NoHooks) NodeDeleting(context.Context, string, string) error { return nil }
+
+// RolesSaved implements Hooks.
+func (NoHooks) RolesSaved(context.Context, string) error { return nil }
 
 // GitHubEvent implements Hooks.
 func (NoHooks) GitHubEvent(context.Context, string, json.RawMessage) error { return nil }

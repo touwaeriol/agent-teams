@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
@@ -17,6 +18,7 @@ var (
 	ErrUnknownMain     = errors.New("计划里没有这个主任务（先 update_plan）")
 	ErrUnknownDep      = errors.New("依赖的任务不存在")
 	ErrTaskState       = errors.New("任务当前状态不允许这个操作")
+	ErrRoleExcluded    = errors.New("这个讨论串不用这个岗位（开讨论串时限定了岗位）")
 )
 
 // Assignment creates a small task.
@@ -61,22 +63,24 @@ func (s *Scheduler) Assign(ctx context.Context, tx *core.Tx, a Assignment) (core
 	return task, !named, nil
 }
 
-// resolveAssignee returns the role and whether the assignee names one instance.
+// resolveAssignee returns the role and whether the assignee names one instance: a role or an
+// instance of the thread's team (project members, the thread's legacy members), within the
+// roles the thread was opened with.
 func resolveAssignee(ctx context.Context, tx *core.Tx, t core.Thread, assignee string) (string, bool, error) {
-	emps, err := core.ThreadEmployees(ctx, tx, t.ID)
+	every := t
+	every.OnlyRoles = nil // a role outside OnlyRoles is refused below with its own reason
+	emps, err := core.ThreadTeam(ctx, tx, every)
 	if err != nil {
 		return "", false, err
 	}
 	for _, e := range emps {
-		if e.Tier != "member" {
+		if e.Tier != "member" || (e.Name != assignee && e.Role != assignee) {
 			continue
 		}
-		if e.Name == assignee {
-			return e.Role, true, nil
+		if len(t.OnlyRoles) > 0 && !slices.Contains(t.OnlyRoles, e.Role) {
+			return "", false, fmt.Errorf("%w：%s（可用：%s）", ErrRoleExcluded, e.Role, strings.Join(t.OnlyRoles, "、"))
 		}
-		if e.Role == assignee {
-			return e.Role, false, nil
-		}
+		return e.Role, e.Name == assignee, nil
 	}
 	return "", false, fmt.Errorf("%w：%s", ErrUnknownAssignee, assignee)
 }
@@ -163,10 +167,10 @@ const nudgeText = "[平台提醒] 任务 %s 还没有完成：如果已经做完
 
 // TurnEnded nudges once, then marks the task blocked and tells the lead.
 func (s *Scheduler) TurnEnded(ctx context.Context, tx *core.Tx, e core.Employee) error {
-	if e.ThreadID == nil || e.Tier != "member" {
+	if e.WorkThreadID() == nil || e.Tier != "member" {
 		return nil
 	}
-	task, err := core.CurrentTask(ctx, tx, *e.ThreadID, e.Name)
+	task, err := core.CurrentTask(ctx, tx, *e.WorkThreadID(), e.Name)
 	if err != nil || task.Status != "running" {
 		return ignoreMissing(err)
 	}
@@ -222,10 +226,10 @@ func (s *Scheduler) pushDue(employeeID string) bool {
 
 // SessionLost returns the employee's running task to the pool (crash) with an attempt counted.
 func (s *Scheduler) SessionLost(ctx context.Context, tx *core.Tx, e core.Employee) error {
-	if e.ThreadID == nil {
+	if e.WorkThreadID() == nil {
 		return nil
 	}
-	task, err := core.CurrentTask(ctx, tx, *e.ThreadID, e.Name)
+	task, err := core.CurrentTask(ctx, tx, *e.WorkThreadID(), e.Name)
 	if err != nil {
 		return ignoreMissing(err)
 	}

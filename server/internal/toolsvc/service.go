@@ -204,8 +204,8 @@ func (s *Service) prepare(ctx context.Context, tx *core.Tx, m *protocol.ToolCall
 		return nil, failText("参数不正确：%v", err)
 	}
 	c := &call{sc: sc, callID: string(m.CallID), tool: m.Tool, args: m.Args, upload: m.Upload}
-	if sc.Employee.ThreadID != nil {
-		t, err := core.ThreadByID(ctx, tx, *sc.Employee.ThreadID)
+	if th := sc.Employee.WorkThreadID(); th != nil {
+		t, err := core.ThreadByID(ctx, tx, *th)
 		if err != nil {
 			return nil, failText("讨论串不存在")
 		}
@@ -236,7 +236,7 @@ func (e userError) Error() string { return e.msg }
 func refuse(format string, a ...any) error { return userError{fmt.Sprintf(format, a...)} }
 
 // knownErrors are engine errors that are explanations for the model, not faults.
-var knownErrors = []error{core.ErrNotFound, scheduler.ErrUnknownAssignee, scheduler.ErrUnknownMain, scheduler.ErrUnknownDep,
+var knownErrors = []error{core.ErrNotFound, scheduler.ErrUnknownAssignee, scheduler.ErrRoleExcluded, scheduler.ErrUnknownMain, scheduler.ErrUnknownDep,
 	scheduler.ErrTaskState, delivery.ErrPRExists, delivery.ErrMergeInProgress, delivery.ErrPlanOpen, delivery.ErrNoRepo,
 	delivery.ErrTaskNotReady, delivery.ErrBadURL, delivery.ErrPRKind, orchestrator.ErrNoNode, orchestrator.ErrRoleNotFound, orchestrator.ErrNoEmployee,
 	delivery.ErrNothingToPR, delivery.ErrBaseNeedsRepo, delivery.ErrNotPushed, orchestrator.ErrUnknownRepo, core.ErrBaseFixed}

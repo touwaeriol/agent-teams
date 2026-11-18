@@ -75,7 +75,7 @@ func (o *Orchestrator) postError(ctx context.Context, tx *core.Tx, e core.Employ
 	if err != nil {
 		return err
 	}
-	return tx.EmitMessage(ctx, e.ProjectID, e.ThreadID, m)
+	return tx.EmitMessage(ctx, e.ProjectID, e.WorkThreadID(), m)
 }
 
 // PostError exposes postError.
@@ -207,7 +207,7 @@ func (o *Orchestrator) closeStale(ctx context.Context, tx *core.Tx, node store.N
 func (o *Orchestrator) closeEnded(ctx context.Context, tx *core.Tx, nodeID string) error {
 	var stale []core.AgentSession
 	err := tx.Gorm(ctx).Table("at_agent_sessions a").Select("a.*").Joins("JOIN at_employees e ON e.id = a.employee_id").
-		Joins("JOIN at_threads t ON t.id = e.thread_id").
+		Joins("JOIN at_threads t ON t.id = COALESCE(e.thread_id, a.thread_id)").
 		Where("a.node_id = ? AND a.state <> 'closed' AND t.status IN ('done','failed','archived')", nodeID).Find(&stale).Error
 	if err != nil {
 		return err

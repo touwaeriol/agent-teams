@@ -31,7 +31,7 @@ func (s *Service) ask(ctx context.Context, tx *core.Tx, c *call, audience string
 		return core.Question{}, err
 	}
 	sid := c.sc.Session.ID
-	n := core.NewQuestion{ConversationID: conv, ProjectID: e.ProjectID, ThreadID: e.ThreadID, Asker: e.Name, Audience: audience,
+	n := core.NewQuestion{ConversationID: conv, ProjectID: e.ProjectID, ThreadID: e.WorkThreadID(), Asker: e.Name, Audience: audience,
 		Kind: "question", Text: text, Options: options, Detail: spec.detail, SessionID: &sid, Blocking: blocking}
 	if blocking {
 		n.CallID = &c.callID
@@ -328,7 +328,7 @@ func (s *Service) broadcast(ctx context.Context, tx *core.Tx, c *call) (Result, 
 	if err := s.mail(ctx, tx, t, c.emp().Name, "*", in.Text); err != nil {
 		return Result{}, err
 	}
-	emps, err := core.ThreadEmployees(ctx, tx, t.ID)
+	emps, err := core.ThreadParticipants(ctx, tx, t.ID)
 	if err != nil {
 		return Result{}, err
 	}
@@ -389,7 +389,7 @@ func (s *Service) reportProgress(ctx context.Context, tx *core.Tx, c *call) (Res
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
-	return okText("ok"), tx.EmitActivity(ctx, c.emp().ProjectID, c.emp().ThreadID, c.emp().Name, in.Text)
+	return okText("ok"), tx.EmitActivity(ctx, c.emp().ProjectID, c.emp().WorkThreadID(), c.emp().Name, in.Text)
 }
 
 // publish registers a deliverable link.
@@ -398,7 +398,7 @@ func (s *Service) publish(ctx context.Context, tx *core.Tx, c *call) (Result, er
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
-	d, err := s.deliv.Publish(ctx, tx, c.emp().ProjectID, c.emp().ThreadID, in.Kind, in.Title, in.URL, c.emp().Name,
+	d, err := s.deliv.Publish(ctx, tx, c.emp().ProjectID, c.emp().WorkThreadID(), in.Kind, in.Title, in.URL, c.emp().Name,
 		map[string]any{"by": c.emp().Name})
 	if err != nil {
 		return Result{}, err

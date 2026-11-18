@@ -74,7 +74,7 @@ func (o *Orchestrator) setCoordinatorModel(ctx context.Context, tx *core.Tx, emp
 func (o *Orchestrator) setThreadModel(ctx context.Context, tx *core.Tx, threadID string, lead core.Employee, p store.Project, in ModelChange, out *ModelResult) error {
 	targets := []core.Employee{lead}
 	if in.WholeThread {
-		all, err := core.ThreadEmployees(ctx, tx, threadID)
+		all, err := core.ThreadParticipants(ctx, tx, threadID)
 		if err != nil {
 			return err
 		}

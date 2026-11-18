@@ -247,7 +247,7 @@ func TestThreadEndToEnd(t *testing.T) {
 
 	var thread core.ThreadView
 	b.must(200, "GET", "/api/threads/"+opened.ThreadID, nil, &thread)
-	if thread.Counts.TasksDone != 1 || thread.Counts.MainDone != 1 || thread.LeadLast == nil || len(thread.Members) != 3 {
+	if thread.Counts.TasksDone != 1 || thread.Counts.MainDone != 1 || thread.LeadLast == nil || len(thread.Members) != 2 {
 		t.Fatalf("thread view %+v", thread)
 	}
 	if errs := n.Errors(); len(errs) > 0 {

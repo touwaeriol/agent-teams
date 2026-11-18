@@ -35,15 +35,15 @@ func RecordLimit(ctx context.Context, tx *core.Tx, orch *orchestrator.Orchestrat
 			{Column: clause.Column{Name: "reset_at"}, Value: gorm.Expr("GREATEST(at_rate_limit_waits.reset_at, EXCLUDED.reset_at)")},
 			{Column: clause.Column{Name: "detail"}, Value: gorm.Expr("EXCLUDED.detail")},
 		},
-	}).Create(map[string]any{"employee_id": e.ID, "project_id": e.ProjectID, "thread_id": e.ThreadID, "reset_at": resetAt,
+	}).Create(map[string]any{"employee_id": e.ID, "project_id": e.ProjectID, "thread_id": e.WorkThreadID(), "reset_at": resetAt,
 		"detail": detail}).Error
 	if err != nil {
 		return err
 	}
-	if e.ThreadID == nil {
+	if e.WorkThreadID() == nil {
 		return nil
 	}
-	t, err := core.LockThread(ctx, tx, *e.ThreadID)
+	t, err := core.LockThread(ctx, tx, *e.WorkThreadID())
 	if err != nil {
 		return ignoreMissing(err)
 	}

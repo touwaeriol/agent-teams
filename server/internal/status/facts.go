@@ -22,7 +22,7 @@ func (e *Engine) facts(ctx context.Context, tx *core.Tx, emp core.Employee, a ac
 	case err != core.ErrNotFound:
 		return f, core.Task{}, err
 	}
-	hands, err := core.RaisedHands(ctx, tx, emp.ProjectID, emp.ThreadID, emp.Name)
+	hands, err := core.RaisedHands(ctx, tx, emp.ProjectID, emp.WorkThreadID(), emp.Name)
 	if err != nil {
 		return f, core.Task{}, err
 	}
@@ -37,10 +37,10 @@ func (e *Engine) facts(ctx context.Context, tx *core.Tx, emp core.Employee, a ac
 
 // currentWork returns the employee's current task and whether it is waiting on others.
 func currentWork(ctx context.Context, tx *core.Tx, emp core.Employee) (core.Task, bool, error) {
-	if emp.ThreadID == nil {
+	if emp.WorkThreadID() == nil {
 		return core.Task{}, false, nil
 	}
-	task, err := core.CurrentTask(ctx, tx, *emp.ThreadID, emp.Name)
+	task, err := core.CurrentTask(ctx, tx, *emp.WorkThreadID(), emp.Name)
 	if err == nil {
 		ok, err := core.DepsSatisfied(ctx, tx, task)
 		return task, !ok, err
@@ -50,6 +50,6 @@ func currentWork(ctx context.Context, tx *core.Tx, emp core.Employee) (core.Task
 	}
 	var n int64
 	err = tx.Gorm(ctx).Model(&core.Task{}).Where("thread_id = ? AND claimed_by = ? AND status IN ('review','decision','merging')",
-		*emp.ThreadID, emp.Name).Count(&n).Error
+		*emp.WorkThreadID(), emp.Name).Count(&n).Error
 	return core.Task{}, n > 0, err
 }

@@ -67,6 +67,11 @@ func (h *Hooks) NodeDeleting(ctx context.Context, _ string, nodeID string) error
 	return h.e.Core.InTx(ctx, func(tx *core.Tx) error { return h.e.Orch.NodeRemoved(ctx, tx, nodeID) })
 }
 
+// RolesSaved brings the user's staffed projects in line with the saved role templates.
+func (h *Hooks) RolesSaved(ctx context.Context, userID string) error {
+	return h.e.Orch.RolesSaved(ctx, userID)
+}
+
 // GitHubEvent forwards verified webhooks to delivery.
 func (h *Hooks) GitHubEvent(ctx context.Context, event string, payload json.RawMessage) error {
 	return h.e.Delivery.GitHubEvent(ctx, event, payload)

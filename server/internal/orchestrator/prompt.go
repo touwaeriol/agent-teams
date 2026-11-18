@@ -125,7 +125,7 @@ func (o *Orchestrator) systemAppend(ctx context.Context, q core.DB, e core.Emplo
 	}
 	parts = append(parts, memorySection(e, mem))
 	if t != nil {
-		roster, err := o.roster(ctx, q, t.ID)
+		roster, err := o.roster(ctx, q, *t)
 		if err != nil {
 			return "", err
 		}
@@ -167,8 +167,9 @@ func memorySection(e core.Employee, mem string) string {
 	return "## 项目记忆\n" + how + "\n\n" + mem
 }
 
-func (o *Orchestrator) roster(ctx context.Context, q core.DB, threadID string) (string, error) {
-	emps, err := core.ThreadEmployees(ctx, q, threadID)
+// roster lists the thread's team: its lead and the project members it can work with.
+func (o *Orchestrator) roster(ctx context.Context, q core.DB, t core.Thread) (string, error) {
+	emps, err := core.ThreadTeam(ctx, q, t)
 	if err != nil {
 		return "", err
 	}
