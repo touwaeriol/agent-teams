@@ -20,6 +20,7 @@ import { colorOr } from "./color";
 import { compileScene, type Scene } from "./compile";
 import { Director, type ActorView } from "./director";
 import { useLeaving, withLeaving } from "./leaving";
+import { hasTask } from "./people";
 import { resolveLook, type ResolvedLook } from "./looks";
 import { OfficeOverlay, STATE_LABELS, type OfficeAction } from "./overlay";
 import { cursorOf, diffFeed, eventEmployee, foldStatuses, type FeedCursor } from "./replay";
@@ -247,7 +248,8 @@ export const Office = defineComponent({
     const leaving = useLeaving(() => layout.value, () => toRaw(props.threads), () => toRaw(props.employees), (id) => director.hasLeft(id));
     const input = () => withLeaving(toRaw(props.threads), toRaw(props.employees), leaving.value);
     // Recompile only when what the scene depends on changes (not on every new array identity).
-    const rosterKey = computed(() => signature(props.employees, (e) => [e.id, e.name, e.thread_no, e.tier, e.role, e.sort, e.instance]));
+    // Holding a task or not decides a visiting member's seat (members.visitPods).
+    const rosterKey = computed(() => signature(props.employees, (e) => [e.id, e.name, e.thread_no, e.tier, e.role, e.sort, e.instance, hasTask(e.status)]));
     const threadsKey = computed(() => signature(props.threads, (t) => [t.no, t.title, t.status, t.counts?.main_done, t.counts?.main_total, t.updated_at]));
     const compile = () => {
       const x = input();

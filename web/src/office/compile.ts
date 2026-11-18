@@ -4,7 +4,7 @@
 // §9); a thread's table seats its lead (and visiting members with
 // `members.visitPods`). Layouts without `staffArea` seat members in the pods.
 import { addEdge, addNode, createGraph, nearestNode, stacked, type NavGraph } from "./nav";
-import { sortMembers } from "./people";
+import { hasTask, isMember, sortMembers } from "./people";
 import { placeStaff } from "./staff";
 import { fitTemplate } from "./template";
 import type {
@@ -293,12 +293,18 @@ function mergePodNav(g: NavGraph, tpl: PodTemplate, pod: PodInstance): void {
 }
 
 /**
- * Who sits at a thread's table: its lead; the members working for the thread too when the layout
- * has no staff area (older layouts) or lets members visit the tables (`members.visitPods`).
+ * Who sits at a thread's table: its lead; with `members.visitPods`, the members holding a task of
+ * the thread (an idle member stays at its desk, not at its last thread's table); in a layout
+ * without a staff area (older layouts), every member of the thread.
  */
 export function podPeople(layout: OfficeLayout, employees: OfficeEmployee[], no: number): OfficeEmployee[] {
-  const visit = !layout.staffArea || Boolean(layout.members?.visitPods);
-  return employees.filter((e) => e.thread_no === no && (e.tier === "lead" || (visit && e.tier === "member")));
+  return employees.filter((e) => e.thread_no === no && (e.tier === "lead" || visitsPod(layout, e)));
+}
+
+function visitsPod(layout: OfficeLayout, e: OfficeEmployee): boolean {
+  if (!isMember(e)) return false;
+  if (!layout.staffArea) return true;
+  return Boolean(layout.members?.visitPods) && hasTask(e.status);
 }
 
 function seatPod(layout: OfficeLayout, pod: PodInstance, members: OfficeEmployee[], g: NavGraph, seats: Map<string, SeatAssignment>): void {

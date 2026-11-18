@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { compileScene, podPeople } from "../compile";
 import { capacity, planStaff } from "../staff";
-import type { OfficeEmployee, OfficeLayout, OfficeThread } from "../types";
+import type { EmployeeStatus, OfficeEmployee, OfficeLayout, OfficeThread } from "../types";
 import { defaultLayout, legacyLayout } from "./fixtures";
 
 const threads: OfficeThread[] = [
@@ -98,10 +98,12 @@ describe("compileScene · staff area (shared members)", () => {
     expect(scene.seats.get("dev-34")!.deskKey).toBeUndefined();
   });
 
-  it("members.visitPods seats members at their thread's table, the others at their desks", () => {
+  it("members.visitPods seats members with a task at their thread's table, the others at their desks", () => {
     const l = defaultLayout();
     l.members = { visitPods: true };
-    const scene = compileScene(l, { threads, employees: staff });
+    const working = (id: string): EmployeeStatus => ({ state: "typing", task_id: `t-${id}` });
+    const employees = staff.map((e) => (["dev-2", "qa-1"].includes(e.id) ? { ...e, status: working(e.id) } : e.id === "dev-3" ? { ...e, thread_no: 12 } : e));
+    const scene = compileScene(l, { threads, employees });
     expect(scene.seats.get("dev-2")).toMatchObject({ deskKey: "pod12.table", threadNo: 12 });
     expect(scene.seats.get("qa-1")!.deskKey).toBeUndefined(); // overflow seat of #12
     expect(scene.seats.get("qa-1")!.threadNo).toBe(12);
