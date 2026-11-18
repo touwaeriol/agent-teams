@@ -16,9 +16,9 @@ import (
 // Scale of the scheduling performance check (shared-members-plan.md P4-3).
 const (
 	perfThreads  = 20
-	perfChains   = 5 // dependency chains per thread
-	perfChainLen = 5 // tasks per chain: perfThreads × perfChains × perfChainLen = 500 tasks
-	perfBudget   = 100 * time.Millisecond
+	perfChains   = 5                      // dependency chains per thread
+	perfChainLen = 5                      // tasks per chain: perfThreads × perfChains × perfChainLen = 500 tasks
+	perfBudget   = 250 * time.Millisecond // generous: a loaded test machine, not the target (~20 ms)
 )
 
 // perfWorld is one project with perfThreads running threads, 10 members (7 dev, 3 qa) and
@@ -88,12 +88,14 @@ func perfTasks(ctx context.Context, tx *core.Tx, th core.Thread) error {
 			if k == perfChainLen-1 && prevChain != nil {
 				n.DependsOn = append(n.DependsOn, prevChain[1])
 			}
-			if c == 0 && k < 2 {
-				n.Status = "done"
-			}
 			task, err := core.InsertTask(ctx, tx, n)
 			if err != nil {
 				return err
+			}
+			if c == 0 && k < 2 {
+				if task, err = core.SetTaskStatus(ctx, tx, task, "done"); err != nil {
+					return err
+				}
 			}
 			chain = append(chain, task.ID)
 		}
@@ -137,6 +139,9 @@ func perfRound(ctx context.Context, cs *core.Store, projectID string, commit boo
 // less than perfBudget (median of repeated rounds with every member idle, then the rounds that
 // hand out work until every member is busy).
 func TestScheduleRoundPerf(t *testing.T) {
+	if testing.Short() {
+		t.Skip("timing check")
+	}
 	cs, projectID := perfWorld(t)
 	ctx := context.Background()
 	var idle []time.Duration

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"strings"
 
@@ -12,6 +13,9 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
+
+// ErrTaskDone refuses moving a done task to another status: done is final.
+var ErrTaskDone = errors.New("任务已完成，done 是终态，不能再改状态")
 
 func tasks(ctx context.Context, q DB) *gorm.DB { return q.Gorm(ctx).Model(&Task{}) }
 
@@ -74,7 +78,7 @@ func CurrentTask(ctx context.Context, q DB, threadID, employee string) (Task, er
 		threadID, employee).Order("claimed_at DESC"))
 }
 
-// NewTask is what InsertTask stores.
+// NewTask is what InsertTask stores (a new task is always pending).
 type NewTask struct {
 	Thread      Thread
 	MainTaskID  *string
@@ -87,10 +91,9 @@ type NewTask struct {
 	Parent      string
 	Priority    int
 	CreatedBy   string
-	Status      string
 }
 
-// InsertTask allocates t<n> in the thread conversation and inserts the task.
+// InsertTask allocates t<n> in the thread conversation and inserts the task as pending.
 func InsertTask(ctx context.Context, tx *Tx, n NewTask) (Task, error) {
 	id, err := nextLocalID(ctx, tx, "at_tasks", "t", n.Thread.ID)
 	if err != nil {
@@ -103,12 +106,9 @@ func InsertTask(ctx context.Context, tx *Tx, n NewTask) (Task, error) {
 	if n.Priority == 0 {
 		n.Priority = 100
 	}
-	if n.Status == "" {
-		n.Status = "pending"
-	}
 	err = tx.Gorm(ctx).Table("at_tasks").Create(map[string]any{"conversation_id": n.Thread.ID, "id": id,
 		"thread_id": n.Thread.ID, "main_task_id": n.MainTaskID, "assignee": n.Assignee, "role": n.Role,
-		"claimed_by": n.ClaimedBy, "kind": n.Kind, "instruction": n.Instruction, "depends_on": deps, "status": n.Status,
+		"claimed_by": n.ClaimedBy, "kind": n.Kind, "instruction": n.Instruction, "depends_on": deps, "status": "pending",
 		"parent": n.Parent, "priority": n.Priority, "created_by": n.CreatedBy}).Error
 	if err != nil {
 		return Task{}, err
@@ -116,16 +116,14 @@ func InsertTask(ctx context.Context, tx *Tx, n NewTask) (Task, error) {
 	if err := stampReadyTask(ctx, tx, n.Thread.ID, id); err != nil {
 		return Task{}, err
 	}
-	if !finalStatus(n.Status) {
-		if err := shiftDownstream(ctx, tx, n.Thread.ID, id, 1); err != nil {
-			return Task{}, err
-		}
-	}
+	tx.settleAfter(n.Thread.ID)
 	return TaskByID(ctx, tx, n.Thread.ID, id)
 }
 
 // stampReadyTask records that a pending task is claimable from now when it has no dependencies
 // or they are all done already (NULL otherwise: MarkReady stamps it when the last one finishes).
+// A dependency done by a transaction that has not committed yet is seen as not done; the
+// settling after the commit (settleAfter) catches that.
 func stampReadyTask(ctx context.Context, tx *Tx, conversationID, id string) error {
 	_, err := store.Exec(ctx, tx, `UPDATE at_tasks t SET ready_at = CASE WHEN `+depsDone+` THEN now() END
 		WHERE t.conversation_id = $1 AND t.id = $2 AND t.status = 'pending'`, conversationID, id)
@@ -143,10 +141,10 @@ func WithAttemptReset(set map[string]any) map[string]any {
 
 // RequeueTask puts a task back into the queue (status pending plus set): it is claimable, and
 // waits for the starvation rule, from now on (shared-members.md §4.1); with a dependency not
-// done yet (a blocked task retried) it waits for MarkReady like a new one.
+// done yet (a blocked task retried) it waits for MarkReady like a new one. A done task is final
+// (ErrTaskDone).
 func RequeueTask(ctx context.Context, tx *Tx, t Task, set map[string]any) (Task, error) {
-	old, err := lockStatus(ctx, tx, t)
-	if err != nil {
+	if _, err := lockStatus(ctx, tx, t, "pending"); err != nil {
 		return t, err
 	}
 	set = WithAttemptReset(set)
@@ -157,54 +155,40 @@ func RequeueTask(ctx context.Context, tx *Tx, t Task, set map[string]any) (Task,
 	if err := stampReadyTask(ctx, tx, t.ConversationID, t.ID); err != nil {
 		return t, err
 	}
-	if err := statusMoved(ctx, tx, t, old, "pending"); err != nil {
-		return t, err
-	}
+	tx.settleAfter(t.ConversationID) // a dependency done meanwhile; it may have left a final state
 	return TaskByID(ctx, tx, t.ConversationID, t.ID)
 }
 
-// lockStatus locks a task row and returns its current status.
-func lockStatus(ctx context.Context, tx *Tx, t Task) (string, error) {
+// lockStatus locks a task row and returns its current status; moving a done task to another
+// status is refused (ErrTaskDone): done is final, which keeps a ready task's dependencies done.
+func lockStatus(ctx context.Context, tx *Tx, t Task, to string) (string, error) {
 	var status string
 	err := store.QueryRow(ctx, tx, `SELECT status FROM at_tasks WHERE conversation_id = $1 AND id = $2 FOR UPDATE`,
 		t.ConversationID, t.ID).Scan(&status)
-	return status, MapErr(err)
+	if err != nil {
+		return status, MapErr(err)
+	}
+	if status == "done" && to != "done" {
+		return status, fmt.Errorf("%w：%s → %s", ErrTaskDone, t.ID, to)
+	}
+	return status, nil
 }
 
-// statusMoved keeps what depends on a task's status (shared-members.md §4.1): a task that became
-// done makes ready those of its direct dependents whose last open dependency it was; a task that
-// became final (or left a final state, retried) no longer counts (counts again) in the
-// downstream of every task it depends on. A done task never leaves done (Retry takes failed, blocked and
-// cancelled tasks only), so a ready task's dependencies stay done.
+// statusMoved keeps what depends on a task's status (shared-members.md §4.1). A task that became
+// done stamps ready_at on those of its direct dependents whose last open dependency it was; a
+// task that entered or left a final state changes the downstream counts of its ancestors. Both
+// run without waiting for other task rows inside the status transaction (MarkReady skips rows
+// another transaction holds), so a status change never waits on a related task's lock: the
+// settling after the commit (settleAfter) stamps what was skipped or not visible yet and
+// recounts downstream.
 func statusMoved(ctx context.Context, tx *Tx, t Task, from, to string) error {
-	if to == "done" && from != "done" {
-		if err := MarkReady(ctx, tx, t.ConversationID, t.ID); err != nil {
-			return err
-		}
+	if finalStatus(from) != finalStatus(to) {
+		tx.settleAfter(t.ConversationID)
 	}
-	switch {
-	case finalStatus(to) && !finalStatus(from):
-		return shiftDownstream(ctx, tx, t.ConversationID, t.ID, -1)
-	case !finalStatus(to) && finalStatus(from):
-		return shiftDownstream(ctx, tx, t.ConversationID, t.ID, 1)
+	if to == "done" && from != "done" {
+		return MarkReady(ctx, tx, t.ConversationID, t.ID)
 	}
 	return nil
-}
-
-// shiftDownstream adds delta to the downstream count of every task that task id depends on,
-// directly or through others (each once, however many paths lead there). The rows are locked
-// newest first: an ancestor is always older than its dependents, so concurrent shifts (and the
-// task row the caller already holds) lock in one order.
-func shiftDownstream(ctx context.Context, tx *Tx, conversationID, id string, delta int) error {
-	_, err := store.Exec(ctx, tx, `WITH RECURSIVE up(id) AS (
-			SELECT dep.id FROM at_tasks t, jsonb_array_elements_text(t.depends_on) dep(id) WHERE t.conversation_id = $1 AND t.id = $2
-			UNION
-			SELECT dep.id FROM up JOIN at_tasks t ON t.conversation_id = $1 AND t.id = up.id, jsonb_array_elements_text(t.depends_on) dep(id)),
-		locked AS (SELECT a.id FROM at_tasks a JOIN up ON a.conversation_id = $1 AND a.id = up.id
-			ORDER BY substring(a.id from 2)::int DESC FOR UPDATE OF a)
-		UPDATE at_tasks a SET downstream = a.downstream + $3 FROM locked WHERE a.conversation_id = $1 AND a.id = locked.id`,
-		conversationID, id, delta)
-	return err
 }
 
 func nonNilStrings(v []string) []string {
@@ -220,9 +204,9 @@ func taskRow(ctx context.Context, tx *Tx, t Task) *gorm.DB {
 }
 
 // SetTaskStatus updates status and stamps finished_at for final states; dependents' readiness
-// and the downstream counts follow (statusMoved).
+// and the downstream counts follow (statusMoved). A done task is final (ErrTaskDone).
 func SetTaskStatus(ctx context.Context, tx *Tx, t Task, status string) (Task, error) {
-	old, err := lockStatus(ctx, tx, t)
+	old, err := lockStatus(ctx, tx, t, status)
 	if err != nil {
 		return t, err
 	}

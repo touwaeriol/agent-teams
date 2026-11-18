@@ -140,14 +140,22 @@ func (s *Scheduler) sweep(ctx context.Context) {
 const ReadyRepairAfter = 2 * time.Minute
 
 // repairReady stamps the tasks an event failed to make ready, and says so: each one is a bug.
+// It also recounts the downstream of the live threads: a settling after a commit skips rows
+// other transactions hold, so a count may lag until here (a tie-break; nothing to report).
 func (s *Scheduler) repairReady(ctx context.Context) {
 	ids, err := core.RepairReady(ctx, s.core.Pool, ReadyRepairAfter)
 	if err != nil {
 		s.log.Warn("repair ready", "err", err)
-		return
 	}
 	if len(ids) > 0 {
 		s.log.Warn("tasks were ready without ready_at", "tasks", ids)
+	}
+	threads, err := core.LiveTaskThreads(ctx, s.core.Pool)
+	if err == nil && len(threads) > 0 {
+		err = core.RecountDownstream(ctx, s.core.Pool, threads)
+	}
+	if err != nil {
+		s.log.Warn("recount downstream", "err", err)
 	}
 }
 

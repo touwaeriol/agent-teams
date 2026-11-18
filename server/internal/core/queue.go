@@ -155,16 +155,79 @@ func ClaimableTasks(ctx context.Context, q DB, projectID string, roles []string)
 
 // MarkReady stamps ready_at on the pending tasks of a thread that waited on task id and now
 // have every dependency done (id just became done): only its direct dependents are looked at.
+// It runs inside the transaction that made id done and never waits: a dependent another
+// transaction holds is skipped, and a dependency done by a transaction not committed yet looks
+// open; Store.SettleTasks after the commit stamps both.
 func MarkReady(ctx context.Context, tx *Tx, conversationID, id string) error {
-	_, err := store.Exec(ctx, tx, `UPDATE at_tasks t SET ready_at = now() WHERE t.conversation_id = $1 AND t.status = 'pending'
-		AND t.ready_at IS NULL AND jsonb_exists(t.depends_on, $2) AND `+depsDone, conversationID, id)
+	_, err := store.Exec(ctx, tx, `WITH c AS (SELECT t.id FROM at_tasks t WHERE t.conversation_id = $1 AND t.status = 'pending'
+			AND t.ready_at IS NULL AND jsonb_exists(t.depends_on, $2) AND `+depsDone+` FOR UPDATE SKIP LOCKED)
+		UPDATE at_tasks t SET ready_at = now() FROM c WHERE t.conversation_id = $1 AND t.id = c.id`, conversationID, id)
 	return err
+}
+
+// SettleTasks brings the event-kept columns of a thread conversation up to date with everything
+// committed (shared-members.md §4.1). It runs after the commit of every transaction that
+// inserted, requeued or finished a task there (Tx.settleAfter), in its own short transaction
+// whose statements see what concurrent transactions committed meanwhile: of two last
+// dependencies done at once, the later commit's settling finds both done. The settlings of one
+// thread take turns (a transaction-scoped advisory lock no other transaction takes), so a later
+// one never works from an older snapshot than an earlier one. ready_at: the pending tasks whose
+// dependencies are all done get it, locked in id order (it waits for a row another transaction
+// holds, holding only rows of such tasks itself). downstream: RecountDownstream.
+func (s *Store) SettleTasks(ctx context.Context, conversationID string) error {
+	return s.InTx(ctx, func(tx *Tx) error {
+		if _, err := store.Exec(ctx, tx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "settle:"+conversationID); err != nil {
+			return err
+		}
+		_, err := store.Exec(ctx, tx, `WITH c AS (SELECT t.id FROM at_tasks t
+				WHERE t.conversation_id = $1 AND t.status = 'pending' AND t.ready_at IS NULL AND `+depsDone+`
+				ORDER BY substring(t.id from 2)::int FOR UPDATE)
+			UPDATE at_tasks t SET ready_at = now() FROM c WHERE t.conversation_id = $1 AND t.id = c.id`, conversationID)
+		if err != nil {
+			return err
+		}
+		return RecountDownstream(ctx, tx, []string{conversationID})
+	})
+}
+
+// RecountDownstream recomputes the critical-path count of every task of the given thread
+// conversations: the distinct tasks not done, failed or cancelled that depend on it, directly or
+// through others (walked up from the unfinished tasks, so a thread's finished history costs
+// little). Only the rows whose count changed are written, and a row another transaction holds
+// is skipped (it is a tie-break: the next settling or the scheduler sweep fixes it), so it never
+// waits.
+func RecountDownstream(ctx context.Context, q DB, conversationIDs []string) error {
+	_, err := store.Exec(ctx, q, `WITH RECURSIVE up(conversation_id, anc, id) AS (
+			SELECT t.conversation_id, dep.id, t.id FROM at_tasks t, jsonb_array_elements_text(t.depends_on) dep(id)
+			WHERE t.conversation_id = ANY($1::text[]) AND t.status NOT IN ('done','failed','cancelled')
+			UNION
+			SELECT u.conversation_id, dep.id, u.id FROM up u
+				JOIN at_tasks t ON t.conversation_id = u.conversation_id AND t.id = u.anc, jsonb_array_elements_text(t.depends_on) dep(id)),
+		counts AS (SELECT conversation_id, anc, count(*) AS n FROM up GROUP BY conversation_id, anc),
+		want AS (SELECT a.conversation_id, a.id, COALESCE(c.n, 0) AS n FROM at_tasks a
+			LEFT JOIN counts c ON c.conversation_id = a.conversation_id AND c.anc = a.id
+			WHERE a.conversation_id = ANY($1::text[]) AND a.downstream <> COALESCE(c.n, 0)),
+		locked AS (SELECT a.conversation_id, a.id, w.n FROM at_tasks a JOIN want w ON a.conversation_id = w.conversation_id AND a.id = w.id
+			FOR UPDATE OF a SKIP LOCKED)
+		UPDATE at_tasks a SET downstream = l.n FROM locked l WHERE a.conversation_id = l.conversation_id AND a.id = l.id`,
+		store.TextArray(conversationIDs))
+	return err
+}
+
+// LiveTaskThreads lists the threads that are not over and have an unfinished task: what the
+// sweep recounts (RecountDownstream) as the safety net of the settling after commits.
+func LiveTaskThreads(ctx context.Context, q DB) ([]string, error) {
+	var ids []string
+	err := store.Raw(ctx, q, `SELECT th.id FROM at_threads th WHERE th.status NOT IN ('done','failed','archived')
+		AND EXISTS (SELECT 1 FROM at_tasks t WHERE t.thread_id = th.id AND t.status NOT IN ('done','failed','cancelled'))`).
+		Scan(&ids).Error
+	return ids, err
 }
 
 // RepairReady is the safety net of the ready_at events: it stamps the pending tasks whose
 // dependencies are all done but that stayed unstamped and untouched for olderThan (an event
-// path that missed the stamp; normally it happens in the transaction of the last dependency's
-// done) and returns them as "conversation/task".
+// path that missed the stamp; normally the last dependency's done or the settling after its
+// commit stamps it) and returns them as "conversation/task".
 func RepairReady(ctx context.Context, q DB, olderThan time.Duration) ([]string, error) {
 	var ids []string
 	err := store.Raw(ctx, q, `UPDATE at_tasks t SET ready_at = now() WHERE t.status = 'pending' AND t.ready_at IS NULL

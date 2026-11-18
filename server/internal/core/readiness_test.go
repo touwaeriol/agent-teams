@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -8,8 +9,8 @@ import (
 	"time"
 )
 
-// step is one change to a thread's tasks: add a task (deps by step index, as t<n+1>), move a
-// task to a status (SetTaskStatus) or requeue it (RequeueTask).
+// step is one change to a thread's tasks: add a task (deps by id; with status, moved there in
+// the same transaction), move a task to a status (SetTaskStatus) or requeue it (RequeueTask).
 type step struct {
 	add     []string // dependencies of a new task
 	status  string   // with add: the new task's status ("" pending); else the target status of id
@@ -28,7 +29,11 @@ func (w *staffWorld) apply(th Thread, s step) {
 	w.t.Helper()
 	w.tx(func(tx *Tx) error {
 		if s.add != nil {
-			_, err := InsertTask(w.ctx, tx, NewTask{Thread: th, Assignee: "dev", Role: "dev", DependsOn: s.add, Status: s.status})
+			task, err := InsertTask(w.ctx, tx, NewTask{Thread: th, Assignee: "dev", Role: "dev", DependsOn: s.add})
+			if err != nil || s.status == "" {
+				return err
+			}
+			_, err = SetTaskStatus(w.ctx, tx, task, s.status)
 			return err
 		}
 		task, err := TaskByID(w.ctx, tx, th.ID, s.id)
@@ -88,7 +93,7 @@ func TestDownstream(t *testing.T) {
 		{"blocked still counts", []step{addTask(), addTask("t1"), addTask("t2"), moveTask("t3", "blocked")}, "t1:2 t2:1 t3:0"},
 		{"done dependents leave their ancestors", []step{addTask(), addTask("t1"), addTask("t2"), moveTask("t1", "done"), moveTask("t2", "done")},
 			"t1:1 t2:1 t3:0"},
-		{"a task inserted final is not counted", []step{addTask(), addTaskAs("done", "t1"), addTaskAs("cancelled", "t1")}, "t1:0 t2:0 t3:0"},
+		{"a task finished where it was added is not counted", []step{addTask(), addTaskAs("done", "t1"), addTaskAs("cancelled", "t1")}, "t1:0 t2:0 t3:0"},
 		{"two roots and a shared tail", []step{addTask(), addTask(), addTask("t1", "t2"), addTask("t3"), addTask("t1")}, "t1:3 t2:2 t3:1 t4:0 t5:0"},
 		{"claim and back do not change it", []step{addTask(), addTask("t1"), moveTask("t2", "claimed"), moveTask("t2", "running"), requeueTask("t2")},
 			"t1:1 t2:0"},
@@ -179,3 +184,225 @@ func TestReadyEvents(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// interleave runs each fn in its own transaction, all open at once: every fn runs to its end
+// before any transaction commits; then they commit in argument order, each commit's settling
+// (Store.SettleTasks) finished before the next commit. A fn that waits for a row lock the others hold
+// never ends: that fails the test (status changes must not wait on related tasks' rows).
+func (w *staffWorld) interleave(fns ...func(tx *Tx) error) {
+	w.t.Helper()
+	ran := make(chan int, len(fns))
+	commit := make([]chan struct{}, len(fns))
+	done := make([]chan error, len(fns))
+	for i, fn := range fns {
+		commit[i], done[i] = make(chan struct{}), make(chan error, 1)
+		go func() {
+			done[i] <- w.s.InTx(w.ctx, func(tx *Tx) error {
+				err := fn(tx)
+				ran <- i
+				<-commit[i]
+				return err
+			})
+		}()
+	}
+	release := func() {
+		for _, c := range commit {
+			close(c)
+		}
+	}
+	for range fns {
+		select {
+		case <-ran:
+		case <-time.After(10 * time.Second):
+			release()
+			w.t.Fatal("a transaction waited for another one's locks")
+		}
+	}
+	for i := range fns {
+		close(commit[i])
+		if err := <-done[i]; err != nil {
+			for _, c := range commit[i+1:] {
+				close(c)
+			}
+			w.t.Fatalf("transaction %d: %v", i, err)
+		}
+	}
+}
+
+// statusOf returns a transaction step moving task id of th to status.
+func (w *staffWorld) statusOf(th Thread, id, status string) func(tx *Tx) error {
+	return func(tx *Tx) error {
+		task, err := TaskByID(w.ctx, tx, th.ID, id)
+		if err == nil {
+			_, err = SetTaskStatus(w.ctx, tx, task, status)
+		}
+		return err
+	}
+}
+
+// TestReadyConcurrentCommits: ready_at and downstream are right whatever two transactions do at
+// once under READ COMMITTED, where neither sees the other's change before it commits: the two
+// last dependencies of a task done at once, a task added or a blocked task retried while its
+// dependency is being done; in both commit orders.
+func TestReadyConcurrentCommits(t *testing.T) {
+	w := newStaffWorld(t)
+	w.ensure(lead(), member("dev", 1))
+	cases := []struct {
+		name  string
+		setup []step
+		a, b  func(th Thread) func(tx *Tx) error
+		ready string
+	}{
+		{"two last dependencies done at once", []step{addTask(), addTask(), addTask("t1", "t2")},
+			func(th Thread) func(tx *Tx) error { return w.statusOf(th, "t1", "done") },
+			func(th Thread) func(tx *Tx) error { return w.statusOf(th, "t2", "done") },
+			"t1:true t2:true t3:true"},
+		{"task added on a dependency being done", []step{addTask()},
+			func(th Thread) func(tx *Tx) error { return w.statusOf(th, "t1", "done") },
+			func(th Thread) func(tx *Tx) error {
+				return func(tx *Tx) error {
+					_, err := InsertTask(w.ctx, tx, NewTask{Thread: th, Assignee: "dev", Role: "dev", DependsOn: []string{"t1"}})
+					return err
+				}
+			},
+			"t1:true t2:true"},
+		{"blocked task retried while its dependency is being done", []step{addTask(), addTask("t1"), moveTask("t2", "blocked")},
+			func(th Thread) func(tx *Tx) error { return w.statusOf(th, "t1", "done") },
+			func(th Thread) func(tx *Tx) error {
+				return func(tx *Tx) error {
+					task, err := TaskByID(w.ctx, tx, th.ID, "t2")
+					if err == nil {
+						_, err = RequeueTask(w.ctx, tx, task, map[string]any{"claimed_by": ""})
+					}
+					return err
+				}
+			},
+			"t1:true t2:true"},
+	}
+	n := 0
+	for _, c := range cases {
+		for _, order := range []string{"a first", "b first"} {
+			t.Run(c.name+", "+order, func(t *testing.T) {
+				n++
+				th := w.thread(fmt.Sprint("C", n))
+				for _, s := range c.setup {
+					w.apply(th, s)
+				}
+				a, b := c.a(th), c.b(th)
+				if order == "b first" {
+					a, b = b, a
+				}
+				w.interleave(a, b)
+				if got := w.render(th, "(ready_at IS NOT NULL)::text"); got != c.ready {
+					t.Fatalf("ready\n got %s\nwant %s", got, c.ready)
+				}
+				if got, want := w.render(th, "downstream"), w.recount(th); got != want {
+					t.Fatalf("downstream %s, recount %s", got, want)
+				}
+			})
+		}
+	}
+}
+
+// race moves two tasks of th at once, each in its own transaction that first locks its task and
+// then waits until the other has locked its own: the classic setup of a deadlock when either
+// change went on to lock the other's row. Both must commit.
+func (w *staffWorld) race(th Thread, a, b [2]string) error {
+	locked := make(chan struct{}, 2)
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	for _, m := range [][2]string{a, b} {
+		go func() {
+			errs <- w.s.InTx(w.ctx, func(tx *Tx) error {
+				task, err := LockTask(w.ctx, tx, th.ID, m[0])
+				locked <- struct{}{}
+				<-start
+				if err == nil {
+					_, err = SetTaskStatus(w.ctx, tx, task, m[1])
+				}
+				return err
+			})
+		}()
+	}
+	<-locked
+	<-locked
+	close(start)
+	timeout := time.After(20 * time.Second)
+	var err error
+	for range 2 {
+		select {
+		case e := <-errs:
+			err = errors.Join(err, e)
+		case <-timeout:
+			return errors.New("the transactions did not finish")
+		}
+	}
+	return err
+}
+
+// TestStatusChangesNeverDeadlock: finishing a task while a pending task that depends on it
+// (directly or through a third) is cancelled, failed or blocked, each transaction holding its own
+// task first: neither change locks the other's row while waiting (MarkReady skips a dependent
+// another transaction holds; downstream is recounted after the commit), so there is no deadlock,
+// many times over; afterwards readiness and the downstream counts are right.
+func TestStatusChangesNeverDeadlock(t *testing.T) {
+	w := newStaffWorld(t)
+	w.ensure(lead(), member("dev", 1))
+	chain := []step{addTask(), addTask("t1"), addTask("t2"), addTask("t3")} // t1 ← t2 ← t3 ← t4
+	pairs := [][2][2]string{
+		{{"t2", "done"}, {"t3", "cancelled"}},
+		{{"t2", "done"}, {"t3", "failed"}},
+		{{"t2", "done"}, {"t3", "blocked"}},
+		{{"t1", "done"}, {"t3", "cancelled"}},
+		{{"t2", "cancelled"}, {"t3", "cancelled"}},
+		{{"t1", "done"}, {"t2", "failed"}},
+	}
+	for i := range 60 {
+		p := pairs[i%len(pairs)]
+		th := w.thread(fmt.Sprint("W", i))
+		for _, s := range chain {
+			w.apply(th, s)
+		}
+		if err := w.race(th, p[0], p[1]); err != nil {
+			t.Fatalf("round %d %v: %v", i, p, err)
+		}
+		if got, want := w.render(th, "downstream"), w.recount(th); got != want {
+			t.Fatalf("round %d %v: downstream %s, recount %s", i, p, got, want)
+		}
+		var wrong int
+		if err := w.s.Pool.Gorm(w.ctx).Raw(`SELECT count(*) FROM at_tasks t WHERE t.thread_id = $1 AND t.status = 'pending'
+			AND (t.ready_at IS NOT NULL) <> (`+depsDone+`)`, th.ID).Scan(&wrong).Error; err != nil || wrong != 0 {
+			t.Fatalf("round %d %v: pending tasks with a wrong ready_at: %d %v (%s)", i, p, wrong, err,
+				w.render(th, "status || '/' || (ready_at IS NOT NULL)::text"))
+		}
+	}
+}
+
+// TestDoneIsFinal: a done task never leaves done (a ready task's dependencies stay done).
+func TestDoneIsFinal(t *testing.T) {
+	w := newStaffWorld(t)
+	w.ensure(lead(), member("dev", 1))
+	th := w.thread("F")
+	w.apply(th, addTask())
+	w.apply(th, moveTask("t1", "done"))
+	for _, to := range []string{"failed", "cancelled", "blocked", "running", "requeue"} {
+		err := w.s.InTx(w.ctx, func(tx *Tx) error {
+			task, err := TaskByID(w.ctx, tx, th.ID, "t1")
+			if err != nil {
+				return err
+			}
+			if to == "requeue" {
+				_, err = RequeueTask(w.ctx, tx, task, nil)
+			} else {
+				_, err = SetTaskStatus(w.ctx, tx, task, to)
+			}
+			return err
+		})
+		if !errors.Is(err, ErrTaskDone) {
+			t.Fatalf("done → %s: %v", to, err)
+		}
+	}
+	if got := w.render(th, "status"); got != "t1:done" {
+		t.Fatalf("after the refusals %s", got)
+	}
+}

@@ -351,7 +351,7 @@ CREATE INDEX at_tasks_compact ON at_tasks (compact_id) WHERE compact_id <> '';
 -- 00300（shared-members.md §4.1，阶段 4 调度优化）：关键路径计数，可领取 / 待补 ready_at 的部分索引
 ALTER TABLE at_tasks
   ADD COLUMN downstream INT NOT NULL DEFAULT 0;    -- 直接或间接依赖它、还没结束（不是 done / failed / cancelled）的任务数，每个只算一次；
-                                                   -- 新建任务时给它的所有上游 +1，任务进入 / 离开结束状态时 −1 / +1（core.SetTaskStatus、RequeueTask）
+                                                   -- 新建、重排、进出结束状态的事务提交后整讨论串重算（core.RecountDownstream，跳过别人锁着的行），扫描每 10 秒兜底
 CREATE INDEX at_tasks_ready ON at_tasks (thread_id, role) WHERE status = 'pending' AND ready_at IS NOT NULL;
 CREATE INDEX at_tasks_unready ON at_tasks (updated_at) WHERE status = 'pending' AND ready_at IS NULL;  -- 调度兜底补写 ready_at 用
 -- claimed_by 仍是员工名：名字解析先找讨论串自己的员工（组长、旧成员），再找项目成员

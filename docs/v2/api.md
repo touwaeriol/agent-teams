@@ -186,7 +186,7 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | PATCH | `/api/threads/{tid}/main-tasks/{mid}` | `{status}`（用户手动打勾/取消） |
 | GET | `/api/threads/{tid}/tasks?status=&main=` | → `TaskView[]`（任务池看板：可领 / 进行中 / 待审查 / 待决策 / 合并中 / 完成） |
 | POST | `/api/threads/{tid}/tasks/{task}/cancel` | 取消小任务 |
-| POST | `/api/threads/{tid}/tasks/{task}/retry` | 失败任务重新入池 |
+| POST | `/api/threads/{tid}/tasks/{task}/retry` | 失败任务重新入池（failed / blocked / cancelled；依赖里有 failed / cancelled 的任务时 409 `dependency_ended`） |
 | GET | `/api/threads/{tid}/members` | → `EmployeeBrief[]`（含实时状态） |
 | POST | `/api/threads/{tid}/members/{name}/interrupt` | 打断某个成员的当前回合 |
 | POST | `/api/threads/{tid}/members/{name}/message` | `{content}` → 直接给成员发话（以“用户”身份，进该成员会话，同时记到讨论串对话里）。讨论串已结束（done / failed）时先自动重新打开；已归档 → 409 `thread_archived` |

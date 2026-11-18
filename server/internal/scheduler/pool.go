@@ -17,6 +17,7 @@ var (
 	ErrUnknownAssignee = errors.New("没有这个岗位或成员")
 	ErrUnknownMain     = errors.New("计划里没有这个主任务（先 update_plan）")
 	ErrUnknownDep      = errors.New("依赖的任务不存在")
+	ErrDepEnded        = errors.New("依赖的任务已失败或已取消，等它的任务永远不会开始（先重试它，或改依赖别的任务）")
 	ErrTaskState       = errors.New("任务当前状态不允许这个操作")
 	ErrRoleExcluded    = errors.New("这个讨论串不用这个岗位（开讨论串时限定了岗位）")
 )
@@ -106,10 +107,16 @@ func resolveMain(ctx context.Context, tx *core.Tx, threadID, main string) (*stri
 	return &m.ID, nil
 }
 
+// checkDeps refuses dependencies that do not exist, and failed or cancelled ones: a pending task
+// waits for every dependency to be done, so it would never start (architecture.md §7.3).
 func checkDeps(ctx context.Context, tx *core.Tx, threadID string, deps []string) error {
 	for _, d := range deps {
-		if _, err := core.TaskByID(ctx, tx, threadID, d); err != nil {
+		dep, err := core.TaskByID(ctx, tx, threadID, d)
+		if err != nil {
 			return fmt.Errorf("%w：%s", ErrUnknownDep, d)
+		}
+		if dep.Status == "failed" || dep.Status == "cancelled" {
+			return fmt.Errorf("%w：%s（%s）", ErrDepEnded, d, dep.Status)
 		}
 	}
 	return nil
@@ -145,6 +152,9 @@ func (s *Scheduler) Cancel(ctx context.Context, tx *core.Tx, task core.Task, rea
 func (s *Scheduler) Retry(ctx context.Context, tx *core.Tx, task core.Task) (core.Task, error) {
 	if !slices.Contains([]string{"failed", "blocked", "cancelled"}, task.Status) {
 		return task, ErrTaskState
+	}
+	if err := checkDeps(ctx, tx, task.ConversationID, task.DependsOn); err != nil {
+		return task, err
 	}
 	task, err := core.RequeueTask(ctx, tx, task, map[string]any{"claimed_by": "", "attempt": 0,
 		"nudges": 0, "finished_at": nil, "claimed_at": nil})

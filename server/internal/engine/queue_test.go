@@ -150,7 +150,7 @@ func TestReadyRepairSweep(t *testing.T) {
 	}
 }
 
-// TestStarvationAndThreadSwitch:with one dev, a task that waited past the starvation limit in
+// TestStarvationAndThreadSwitch: with one dev, a task that waited past the starvation limit in
 // thread #2 goes before the next task of dev-1's own thread. Moving to #2 closes its session
 // (switch_thread) and opens a fresh one in #2's worktree with a digest; its tools act on #2.
 // Back in #1 the digest lists what it did there before.
