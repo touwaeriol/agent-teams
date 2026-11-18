@@ -9,6 +9,7 @@ import { createMemoryHistory, createRouter } from "vue-router";
 import LibraryBrowser from "@/components/app/deliverables/LibraryBrowser.vue";
 import ThreadDetail from "@/components/app/thread/ThreadDetail.vue";
 import AutoApproveToggle from "@/components/app/threadviews/AutoApproveToggle.vue";
+import MembersView from "@/components/app/threadviews/MembersView.vue";
 import ThreadViewDialog from "@/components/app/threadviews/ThreadViewDialog.vue";
 import { useText } from "@/pages/design/viewer";
 import MobileOverview from "@/pages/main/MobileOverview.vue";
@@ -119,6 +120,25 @@ describe("ThreadViewDialog", () => {
     document.body.querySelector<HTMLButtonElement>("button .sr-only")?.parentElement?.click();
     await flushPromises();
     expect(w.emitted("view")?.at(-1)).toEqual([null]);
+  });
+});
+
+describe("MembersView", () => {
+  it("marks a shared member working in another thread “在 #12 忙” without a stop button", async () => {
+    stubApi({ "/roles": { roles: [] }, "/questions": [] });
+    const base = { tier: "member", role: "dev", title: "开发", runtime: "claude", node: null, look: {} };
+    const members = [
+      { ...base, id: "a", name: "dev-1", thread_no: 3, status: { state: "typing", since: "2026-11-14T10:00:00Z", task_id: "t2" } },
+      { ...base, id: "b", name: "dev-2", thread_no: 12, busy_elsewhere: true, status: { state: "typing", since: "2026-11-14T10:00:00Z", task_id: "t5" } },
+    ];
+    const w = mountWith(MembersView, { thread: thread(3, { members } as never) });
+    await flushPromises();
+    const rows = w.findAll(".rounded-lg.border");
+    expect(rows[0].text()).toContain("任务 t2");
+    expect(rows[0].find("button").exists()).toBe(true);
+    expect(rows[1].text()).toContain("在 #12 忙");
+    expect(rows[1].text()).not.toContain("t5");
+    expect(rows[1].find("button").exists()).toBe(false);
   });
 });
 

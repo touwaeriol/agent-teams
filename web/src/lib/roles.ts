@@ -23,7 +23,7 @@ export function roleName(r: Pick<RoleView, "tier" | "title" | "role">): string {
 export function countText(r: Pick<RoleView, "tier" | "count" | "gate">): string {
   if (r.tier === "coordinator") return "每个项目 1 个";
   if (r.tier === "lead") return "每个讨论串 1 个";
-  return `每个讨论串 ${r.count} 个${r.gate ? "（可选）" : ""}`;
+  return `项目编制 ${r.count} 个${r.gate ? "（可选）" : ""}`;
 }
 
 /** read_only defaults by gate (api.md §2 RoleView). */

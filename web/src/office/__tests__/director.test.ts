@@ -44,6 +44,16 @@ describe("Director", () => {
     expect(d.desks().get("pod12.d2")!.screen).toBe("$screenTyping");
   });
 
+  it("a shared member without a thread stays in the lounge instead of vanishing from a seat", () => {
+    const free: OfficeEmployee = { id: "dev-9", name: "dev-9", tier: "member", role: "dev", thread_no: null, status: { state: "offline" } };
+    const { d } = setup([...crew, free]);
+    const a = d.actor("dev-9")!;
+    expect(a.hidden).toBe(false);
+    expect(a.pos).toEqual(anchorPoint(defaultLayout().anchors.lounge, 5, "dev-9")); // after the five idle members
+    d.apply("dev-9", { state: "typing" }, true);
+    expect(d.actor("dev-9")!.hidden).toBe(false);
+  });
+
   it("frees anchor slots on leave and reuses them first-come first-served", () => {
     const { d } = setup();
     expect(d.actor("dev-2")!.pos).toEqual([250, 560]);

@@ -27,7 +27,7 @@ const num = (v: string) => (v === "" ? null : Number(v));
       <Field v-slot="{ id }" label="岗位键" hint="小写字母、数字和 -，成员编号用它（dev-1）">
         <el-input :id="id" :model-value="d.role" :disabled="!member" class="at-mono" @update:model-value="(v: string) => (d.role = v.trim())" />
       </Field>
-      <Field v-if="member" v-slot="{ id }" label="每个讨论串的数量">
+      <Field v-if="member" v-slot="{ id }" label="项目编制（人数）" hint="每个项目按这个人数配成员，所有讨论串共用">
         <el-input :id="id" type="number" :min="1" :max="8" :model-value="String(d.count)" @update:model-value="(v: string) => (d.count = Number(v))" />
       </Field>
       <Field v-slot="{ id }" label="思考强度（effort）">

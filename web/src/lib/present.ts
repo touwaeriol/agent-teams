@@ -180,13 +180,20 @@ const STATE_TEXT: Record<string, string> = {
   broken: "出错",
 };
 
-export function memberTone(m: Pick<EmployeeBrief, "status" | "node">): string {
+export function memberTone(m: Pick<EmployeeBrief, "status" | "node"> & { busy_elsewhere?: boolean }): string {
+  if (m.busy_elsewhere) return INK.gray;
   const s = m.status?.state ?? "idle";
   if (s === "raising_hand") return INK.wait;
   if (s === "waiting") return INK.review;
   if (s === "offline" || s === "broken") return INK.bad;
   if (s === "idle" || s === "queued") return INK.idle;
   return INK.doing;
+}
+
+/** “在 #12 忙” for a shared member working in another thread ("" otherwise). */
+export function busyElsewhereText(m: Pick<EmployeeBrief, "busy_elsewhere" | "thread_no">): string {
+  if (!m.busy_elsewhere) return "";
+  return m.thread_no ? `在 #${m.thread_no} 忙` : "在别的讨论串忙";
 }
 
 export function memberDoing(m: Pick<EmployeeBrief, "status">): string {

@@ -1,7 +1,7 @@
 // What the /status and /context panels show, pure and unit-tested.
 import type { components } from "@/api/schema";
 import type { CoordinatorView, EmployeeBrief, OverviewView } from "@/api/views";
-import { isWorking, stateLabel } from "@/lib/live";
+import { isWorking, stateLabel, workingHere } from "@/lib/live";
 import { formatTokens } from "@/lib/projectSettings";
 
 type ComposerContext = components["schemas"]["ComposerContext"];
@@ -30,7 +30,7 @@ export function statusSummary(o: Pick<OverviewView, "threads" | "waiting" | "nod
   const busy: BusyRow[] = [];
   if (coordinator && isWorking(coordinator.employee)) busy.push(row(coordinator.employee, "项目"));
   for (const t of o.threads) {
-    for (const m of t.members) if (isWorking(m)) busy.push(row(m, `#${t.no}`));
+    for (const m of t.members) if (workingHere(m)) busy.push(row(m, `#${t.no}`));
   }
   return {
     busy,

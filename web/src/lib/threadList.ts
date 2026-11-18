@@ -2,7 +2,7 @@
 // line, search and filters, relative times, and which groups the viewer folded (per user,
 // in localStorage). Pure and unit-tested.
 import type { QuestionView, ThreadView } from "@/api/views";
-import { isWorking, liveLine } from "./live";
+import { liveLine, workingHere } from "./live";
 import { readLocal, writeLocal } from "./persist";
 import { awaitsAcceptance, threadLine } from "./present";
 
@@ -28,7 +28,7 @@ export function listGroupOf(t: ThreadView, waiting?: Map<number, QuestionView>):
   if (t.status === "done" || t.status === "failed") return "done";
   if (awaitsAcceptance(t) || t.status === "waiting" || t.counts.waiting > 0 || waiting?.has(t.no)) return "waiting";
   if (t.status === "queued") return "active";
-  if (t.status === "running" && t.members.some(isWorking)) return "active";
+  if (t.status === "running" && t.members.some(workingHere)) return "active";
   return "idle";
 }
 
