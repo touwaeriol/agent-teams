@@ -373,6 +373,8 @@ export interface OfficeEmployee {
   sort?: number;
   /** Role title from the team template. */
   title?: string;
+  /** Counts towards the project's headcount (a project-level member). Absent (older data): every member counts. */
+  staff?: boolean;
 }
 
 /** ThreadView subset. */

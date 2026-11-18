@@ -1,6 +1,7 @@
 // 项目编制 (shared-members.md §9): a project's members — the headcount — with the thread and task
 // each one works on now, grouped by member role in template order. Pure helpers of StaffPanel.vue.
 import type { EmployeeBrief, OfficeSnapshot, RoleView, ThreadView } from "@/api/views";
+import { isStaff } from "@/lib/office";
 import { roleName } from "@/lib/roles";
 import { STATE_LABELS } from "@/office/overlay";
 import { sortMembers } from "@/office/people";
@@ -55,7 +56,7 @@ const memberCount = (list: RoleView[], role: string): number => list.find((r) =>
  * roles no longer in the template come last. `saved`: the saved templates (default: the draft).
  */
 export function staffGroups(snapshot: Pick<OfficeSnapshot, "employees" | "threads">, roles: RoleView[], saved: RoleView[] = roles): StaffGroup[] {
-  const members = sortMembers(snapshot.employees.filter((e) => e.tier === "member"), ["instance", "name"], (e) => ({ ...e, instance: e.instance || undefined }));
+  const members = sortMembers(snapshot.employees.filter(isStaff), ["instance", "name"], (e) => ({ ...e, instance: e.instance || undefined }));
   const rowsOf = (role: string) => members.filter((e) => e.role === role).map((e) => staffRow(e, snapshot.threads));
   const templ = roles.filter((r) => r.tier === "member");
   const known = new Set(templ.map((r) => r.role));

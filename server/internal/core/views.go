@@ -45,6 +45,7 @@ type EmployeeBrief struct {
 	Status   *EmployeeStatusView `json:"status"`
 	// BusyElsewhere is set in a thread's member list only.
 	BusyElsewhere bool `json:"busy_elsewhere" doc:"In a thread's member list: the member's claimed or running task is in another thread (thread_no names it); false elsewhere"`
+	Staff         bool `json:"staff" doc:"Counts towards the project's headcount (编制): a project-level member, not the coordinator, a lead or a pre-shared-members per-thread member"`
 }
 
 // MainTaskView is a step of the thread plan.

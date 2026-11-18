@@ -91,7 +91,7 @@ const chips = computed(() => teamChips(roles.data.value?.roles ?? []));
           项目团队
           <template #action><RouterLink to="/settings/team" class="text-[13px] underline-offset-2 hover:underline">编辑岗位模板</RouterLink></template>
         </CardTitle>
-        <p class="text-[13px] text-muted-foreground">项目按这里的岗位编制配成员，所有讨论串共用；每个讨论串只多一个组长。节点槽位不够时排队。</p>
+        <p class="text-[13px] text-muted-foreground">项目按这里的岗位编制配成员，所有讨论串共用；每个讨论串只多一个组长。</p>
         <div class="flex flex-wrap gap-2">
           <span v-for="r in chips" :key="r.name" class="flex h-[34px] items-center gap-2 rounded-lg border bg-background px-3 text-[13px]">
             {{ r.name }}

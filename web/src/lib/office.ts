@@ -16,6 +16,7 @@ export function toOfficeEmployees(s: Pick<OfficeSnapshot, "employees">): OfficeE
     status: (e.status as EmployeeStatus | null) ?? null,
     ...(e.sort === undefined ? {} : { sort: e.sort }),
     ...(e.instance ? { instance: e.instance } : {}),
+    ...(e.staff !== undefined ? { staff: e.staff } : {}),
   }));
 }
 
@@ -52,8 +53,11 @@ const RUNNING_THREAD = new Set(["running", "waiting", "review", "paused"]);
  * and the leads are management, not counted); working = members holding a task; threads = threads
  * under way (queued ones not yet).
  */
+/** Headcount member: a project-level member (older snapshots without `staff`: any member). */
+export const isStaff = (e: Pick<OfficeEmployee, "tier" | "staff">): boolean => e.tier === "member" && e.staff !== false;
+
 export function staffSummary(employees: OfficeEmployee[], statuses: Map<string, EmployeeStatus>, threads: { status: string }[]): StaffSummary {
-  const members = employees.filter((e) => e.tier === "member");
+  const members = employees.filter(isStaff);
   const working = members.filter((e) => Boolean((statuses.get(e.id) ?? e.status)?.task_id)).length;
   return { headcount: members.length, working, idle: members.length - working, threads: threads.filter((t) => RUNNING_THREAD.has(t.status)).length };
 }

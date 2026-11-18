@@ -75,6 +75,8 @@ export interface EmployeeBrief {
   thread_no?: number | null;
   /** In a thread's member list: the member's current task is in another thread (thread_no). */
   busy_elsewhere?: boolean;
+  /** Counts towards the project's headcount (a project-level member); absent in older data. */
+  staff?: boolean;
   /** Position of the role in the team template (office desk rows). */
   sort?: number;
   /** Instance number among the role's employees (dev-2 → 2). */

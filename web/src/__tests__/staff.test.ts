@@ -82,6 +82,16 @@ const roles = () => [
   { ...newRole([], "#555"), id: "r4", role: "review", title: "审查", count: 1, sort: 4 },
 ];
 
+describe("headcount excludes pre-shared-members per-thread members", () => {
+  it("counts only staff members in the team panel and the office top bar", () => {
+    const legacy = [1, 2, 3].map((no) => brief(`dev-a-1@${no}`, "member", "dev", { name: "dev-a-1", thread_no: no, staff: false }));
+    const staffed = employees.map((e) => (e.tier === "member" ? { ...e, staff: true } : e));
+    const withLegacy = { ...snapshot, employees: [...staffed, ...legacy] } as unknown as OfficeSnapshot;
+    expect(headcountText(staffGroups(withLegacy, roles()))).toBe("在编 3 人 · 干活 2 · 空闲 1");
+    expect(staffSummary(toOfficeEmployees(withLegacy), new Map(), snapshot.threads).headcount).toBe(3);
+  });
+});
+
 describe("项目编制 helpers", () => {
   it("groups the members by template role with their thread and task", () => {
     const groups = staffGroups(snapshot, roles());

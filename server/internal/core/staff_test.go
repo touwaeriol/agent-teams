@@ -383,3 +383,27 @@ func names(t *testing.T, w *staffWorld, threadID string) string {
 	sort.SliceStable(out[1:], func(i, j int) bool { return out[1+i] < out[1+j] })
 	return strings.Join(out, " ")
 }
+
+// TestEmployeeBriefsProjectWide: the office list leaves out the employees of ended threads (their
+// lead and legacy per-thread members) and marks only project members as staff (headcount).
+func TestEmployeeBriefsProjectWide(t *testing.T) {
+	w := newStaffWorld(t)
+	w.ensure(member("dev", 2))
+	a, b := w.thread("a"), w.thread("b")
+	w.legacy(a, "dev-1")
+	w.legacy(b, "dev-1")
+	if _, err := store.Exec(w.ctx, w.s.Pool, `UPDATE at_threads SET status = 'done' WHERE id = $1`, b.ID); err != nil {
+		t.Fatal(err)
+	}
+	briefs, err := w.s.EmployeeBriefs(w.ctx, w.s.Pool, "p1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range briefs {
+		got = append(got, fmt.Sprintf("%s:%v", e.Name, e.Staff))
+	}
+	if strings.Join(got, " ") != "lead-1:false dev-1:false dev-1:true dev-2:true" {
+		t.Fatalf("project-wide briefs: %v", got)
+	}
+}

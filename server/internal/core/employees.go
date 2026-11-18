@@ -202,7 +202,7 @@ func LeaveThread(ctx context.Context, tx *Tx, threadID string) error {
 const briefSelect = `SELECT e.id, e.name, e.tier, e.role, COALESCE(e.spec->>'title', ''), e.runtime, t.no,
 	COALESCE((e.spec->>'sort')::int, 0), e.instance_no,
 	n.id, n.name, e.look, st.state, st.substate, st.bubble, st.bubble_kind, st.task_id, st.task_kind, st.since, st.seq,
-	COALESCE(cur.thread_id <> $1::text, false)
+	COALESCE(cur.thread_id <> $1::text, false), (e.thread_id IS NULL AND e.tier = 'member')
 	FROM at_employees e LEFT JOIN at_threads o ON o.id = e.thread_id
 	LEFT JOIN LATERAL (SELECT x.thread_id FROM at_tasks x JOIN at_threads xt ON xt.id = x.thread_id
 		WHERE e.thread_id IS NULL AND e.tier = 'member' AND xt.project_id = e.project_id AND x.claimed_by = e.name
@@ -213,7 +213,8 @@ const briefSelect = `SELECT e.id, e.name, e.tier, e.role, COALESCE(e.spec->>'tit
 
 // EmployeeBriefs lists employees of a project (threadID nil = all, else that thread's
 // participants, marked busy_elsewhere when their current task is in another thread) with
-// status and node.
+// status and node. The project-wide list leaves out the employees of ended threads (their lead
+// and pre-shared-members per-thread members): they can never work again.
 func (s *Store) EmployeeBriefs(ctx context.Context, q DB, projectID string, threadID *string) ([]EmployeeBrief, error) {
 	ids, err := participantIDs(ctx, q, threadID)
 	if err != nil {
@@ -221,6 +222,7 @@ func (s *Store) EmployeeBriefs(ctx context.Context, q DB, projectID string, thre
 	}
 	rows, err := store.Query(ctx, q, briefSelect+`
 		WHERE e.project_id = $2 AND e.active AND ($1::text IS NULL OR e.id = ANY($3))
+		AND ($1::text IS NOT NULL OR o.id IS NULL OR o.status NOT IN ('done','failed','archived'))
 		ORDER BY (e.thread_id IS NULL AND e.tier = 'member'), o.no NULLS FIRST, CASE e.tier WHEN 'coordinator' THEN 0 WHEN 'lead' THEN 1 ELSE 2 END, e.role, e.instance_no`,
 		threadID, projectID, ids)
 	return collect(rows, err, s.scanBrief)
@@ -252,7 +254,7 @@ func (s *Store) scanBrief(r Scanner) (EmployeeBrief, error) {
 	var since *time.Time
 	var seq *int64
 	err := r.Scan(&b.ID, &b.Name, &b.Tier, &b.Role, &b.Title, &b.Runtime, &b.ThreadNo, &b.Sort, &b.Instance, &nodeID, &nodeName, &b.Look,
-		&state, &sub, &bubble, &bk, &taskID, &taskKind, &since, &seq, &b.BusyElsewhere)
+		&state, &sub, &bubble, &bk, &taskID, &taskKind, &since, &seq, &b.BusyElsewhere, &b.Staff)
 	if err != nil {
 		return b, err
 	}

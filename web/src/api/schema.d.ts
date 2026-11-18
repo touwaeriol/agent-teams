@@ -2381,6 +2381,8 @@ export interface components {
              * @description Position of the employee's role in the team template (office desk rows)
              */
             sort: number;
+            /** @description Counts towards the project's headcount (编制): a project-level member, not the coordinator, a lead or a pre-shared-members per-thread member */
+            staff: boolean;
             status: components["schemas"]["EmployeeStatusView"];
             /**
              * Format: int64
@@ -2412,6 +2414,8 @@ export interface components {
              * @description Position of the employee's role in the team template (office desk rows)
              */
             sort: number;
+            /** @description Counts towards the project's headcount (编制): a project-level member, not the coordinator, a lead or a pre-shared-members per-thread member */
+            staff: boolean;
             status: components["schemas"]["EmployeeStatusView"];
             /**
              * Format: int64

@@ -1482,6 +1482,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "staff": {
+            "description": "Counts towards the project's headcount (编制): a project-level member, not the coordinator, a lead or a pre-shared-members per-thread member",
+            "type": "boolean"
+          },
           "status": {
             "$ref": "#/components/schemas/EmployeeStatusView"
           },
@@ -1513,7 +1517,8 @@
           "node",
           "look",
           "status",
-          "busy_elsewhere"
+          "busy_elsewhere",
+          "staff"
         ],
         "type": "object"
       },
@@ -1567,6 +1572,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "staff": {
+            "description": "Counts towards the project's headcount (编制): a project-level member, not the coordinator, a lead or a pre-shared-members per-thread member",
+            "type": "boolean"
+          },
           "status": {
             "$ref": "#/components/schemas/EmployeeStatusView"
           },
@@ -1601,7 +1610,8 @@
           "node",
           "look",
           "status",
-          "busy_elsewhere"
+          "busy_elsewhere",
+          "staff"
         ],
         "type": "object"
       },
