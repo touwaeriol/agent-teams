@@ -168,3 +168,10 @@ func UserLiveSessions(ctx context.Context, q DB, userID string) ([]AgentSession,
 	return find[AgentSession](liveSessionsJoined(ctx, q).Joins("JOIN at_projects p ON p.id = e.project_id").
 		Where("p.user_id = ?", userID))
 }
+
+// NodeHasFeature reports whether the node's last hello listed the feature.
+func NodeHasFeature(ctx context.Context, q DB, nodeID, feature string) (bool, error) {
+	var n int64
+	err := q.Gorm(ctx).Table("at_nodes").Where("id = ? AND last_hello->'features' @> jsonb_build_array(?::text)", nodeID, feature).Count(&n).Error
+	return n > 0, err
+}

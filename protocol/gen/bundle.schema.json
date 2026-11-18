@@ -3311,6 +3311,11 @@
           "items": {
             "type": "string"
           }
+        },
+        "handoff": {
+          "type": "string",
+          "maxLength": 4000,
+          "description": "Note for whoever builds on this task: what is left, pitfalls, interfaces agreed on. Asked for when other tasks depend on this one."
         }
       }
     },

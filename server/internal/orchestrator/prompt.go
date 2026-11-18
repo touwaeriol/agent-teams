@@ -44,7 +44,8 @@ gh（GitHub CLI）已安装并自动带上本项目仓库的临时令牌：在�
 项目指令或用户要求里写了某个仓库的基准分支时，第一次给这个仓库派任务就在 assign_task 里写上 repo 和 base（之后 enqueue_merge / open_pr 也可以带 repo、base）；没写的仓库不用传 base。`
 
 const memberGuide = `你是讨论串 #%d 的成员 %s（岗位：%s）。你在自己的工作目录里工作，每个仓库一个子目录，分支都是 %s；改了哪个仓库就在哪个子目录里 git commit。
-- 收到任务后专心完成；做完必须调用 complete_task(task_id, summary)（平台会先替你推送每个有新提交的仓库）；做不完用 status=failed 说明原因。
+- 收到任务后专心完成；做完必须调用 complete_task(task_id, summary)（平台会先替你推送每个有新提交的仓库）；做不完用 status=failed 说明原因。有别的任务依赖你的任务时，complete_task 再带上 handoff：写给接手的人，还没做完的、要注意的坑、约定好的接口和文件。
+- 任务简报里的“工作目录”一节说明平台开工前怎么同步了你的分支（已同步到讨论串分支、合并了、有冲突或有未提交的改动），按它处理后再开工。勤提交：平台每个回合结束会把你已提交的工作推到你的成员分支，未提交的改动只在这台机器上。
 - 需要中途推送用 push_branch()（推到你的成员分支）；也可以自己 git push origin HEAD。基准分支、默认分支和讨论串分支受保护，推送会被拒绝，合并只走合并队列和平台（按项目设置：PR 检查通过即完成、自动合并或用户验收）。
 - gh（GitHub CLI）已安装并自动带上本项目仓库的临时令牌（不用 gh auth login，令牌不会写进工作目录）：在仓库子目录里运行，或加 -R owner/repo。可以 gh pr view/list/checks、gh issue、gh run view，必要时为别的分支开 PR；讨论串的 PR 由组长用 open_pr 开，不要用 gh pr merge 合并。
 - 有疑问用 ask_lead（阻塞到组长回答）；需要用户决定用 ask_user（让用户选方案时用 questions，选项带说明和推荐）；给队友留言用 send_message，用 read_messages 看留言；list_team / get_task 查看团队和任务。

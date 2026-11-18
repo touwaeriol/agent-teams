@@ -131,6 +131,29 @@ type Task struct {
 	UpdatedAt      time.Time
 	ClaimedAt      *time.Time
 	FinishedAt     *time.Time
+	// Sync is what the pre-task worktree sync did, per repository; SyncPending counts jobs still out.
+	Sync        map[string]TaskSync `gorm:"serializer:jsonb"`
+	SyncPending int
+	// Handoff is complete_task's note for whoever builds on the task (HandoffAsked: asked once).
+	Handoff      string
+	HandoffAsked bool
+	// Merged is what the task's merge added to the thread branch, per repository.
+	Merged map[string]TaskMerge `gorm:"serializer:jsonb"`
+}
+
+// TaskSync is one repository's pre-task sync result (Error when the job failed).
+type TaskSync struct {
+	Action    string   `json:"action,omitempty"`
+	HeadSHA   string   `json:"head_sha,omitempty"`
+	Conflicts []string `json:"conflicts,omitempty"`
+	Error     string   `json:"error,omitempty"`
+}
+
+// TaskMerge is the range a task's merge added to the thread branch in one repository.
+type TaskMerge struct {
+	Base  string   `json:"base"`
+	Head  string   `json:"head"`
+	Files []string `json:"files"`
 }
 
 // TableName maps Task to at_tasks.
@@ -138,7 +161,7 @@ func (Task) TableName() string { return "at_tasks" }
 
 const taskCols = `conversation_id, id, thread_id, main_task_id, assignee, role, claimed_by, kind, instruction,
 	depends_on, status, parent, priority, attempt, summary, branch, head_sha, pushed, nudges, created_by, created_at,
-	updated_at, claimed_at, finished_at`
+	updated_at, claimed_at, finished_at, sync, sync_pending, handoff, handoff_asked, merged`
 
 // Finished reports whether the task reached a final state.
 func (t Task) Finished() bool {
@@ -257,6 +280,7 @@ type MergeEntry struct {
 	HeadSHA     string `gorm:"column:head_sha"`
 	TrialBranch string
 	TrialSHA    string `gorm:"column:trial_sha"`
+	BaseSHA     string `gorm:"column:base_sha"` // the thread branch before the merge
 	Status      string
 	Attempts    int
 	Error       string
@@ -268,5 +292,5 @@ type MergeEntry struct {
 // TableName maps MergeEntry to at_merge_queue.
 func (MergeEntry) TableName() string { return "at_merge_queue" }
 
-const mergeCols = `id, thread_id, task_id, employee, repo, head_branch, head_sha, trial_branch, trial_sha, status, attempts,
+const mergeCols = `id, thread_id, task_id, employee, repo, head_branch, head_sha, trial_branch, trial_sha, base_sha, status, attempts,
 	error, position, created_at, updated_at`

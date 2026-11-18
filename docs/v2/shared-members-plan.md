@@ -6,7 +6,7 @@
 
 - **一个阶段一个分支**（`feat/staff-p0` … `feat/staff-p4`），阶段内按任务逐个提交；阶段做完：全量测试（Go、node、web、protocol）→ 代码审查（抽象 / 复用 / 解耦 / 低嵌套 / 简洁 / 低侵入）→ 修复 → 合并 `develop`。
 - **每个任务都带测试**：Go 用真实 PG / Valkey（`server/scripts/test.sh`），node 和 web 用 vitest 假件；改了协议跑 `make gen-protocol`，改了 API 重新生成 `openapi.json` / `schema.d.ts`，加迁移同时加 `migrations_test.go` 用例并更新 `TestLatest`。
-- **新旧守护进程共存**：节点新能力都在 `hello.features` 里声明（`git.sync`、`session.compact`、`context.usage`），控制台看到才用，没有就退回现在的行为。所以控制台可以先于节点上线，节点按版本逐台升级。
+- **新旧守护进程共存**：节点新能力都在 `hello.features` 里声明（`git_sync`、`session_compact`、`context_usage`），控制台看到才用，没有就退回现在的行为。所以控制台可以先于节点上线，节点按版本逐台升级。
 - **上线顺序**：每个阶段先部署控制台（跑迁移），再发节点新版本、各节点升级。阶段之间可以停，每个阶段单独上线也有用。
 
 ## 阶段 0：任务衔接（设计 §4.2、§4.3）
@@ -15,9 +15,9 @@
 
 | # | 任务 | 改哪里 | 测试 / 验收 |
 | --- | --- | --- | --- |
-| P0-1 | **协议**：`git.prepare` 加 `sync: {mode: "member" \| "review", ref?}`；`git.result` 加 `sync: {head_sha, action: reset \| merged \| conflict \| dirty \| checkout, conflicts: string[]}`；`hello.features` 加 `git.sync` | `protocol/schemas/node/git.prepare.json`、`git.result.json`、`hello.json`，`make gen-protocol` | protocol 测试、示例校验 |
+| P0-1 | **协议**：`git.prepare` 加 `sync: {mode: "member" \| "review", ref?}`；`git.result` 加 `sync: {head_sha, action: reset \| merged \| conflict \| dirty \| checkout, conflicts: string[]}`；`hello.features` 加 `git_sync` | `protocol/schemas/node/git.prepare.json`、`git.result.json`、`hello.json`，`make gen-protocol` | protocol 测试、示例校验 |
 | P0-2 | **节点同步**：`worktreeLocked` 遇到已存在的 worktree 且带 `sync` 时：fetch → `member`：工作区脏就返回 `dirty`；成员分支没有讨论串分支以外的提交 → `checkout -B <成员分支> origin/<讨论串分支>`（`reset`）；有 → `merge origin/<讨论串分支>`，冲突则 `merge --abort` 并返回冲突文件（`conflict`）。`review`：只读检出 `origin/<ref>`（detached，`checkout`） | `node/src/git/jobs.ts` | `node/test/git.test.ts` 用本地裸仓库覆盖 5 种结果 |
-| P0-3 | **控制台在领取时同步**：`claim` 不再只给只读岗 `RefreshWorktree`，而是对所有成员排一个 `git.prepare(sync)`（审查任务 `mode=review, ref=被审任务的成员分支`），任务进 `claimed` 后**等同步结果**再发任务简报（`git.result` 回调里带 `meta.task_id` → 生成简报 → `Deliver`）；节点不支持 `git.sync`、会话还没开（首次 open 本来就会 prepare）或 2 分钟没回结果时直接发简报并注明“未同步” | `scheduler/claim.go`、`orchestrator/sessions.go`（`RefreshWorktree` → `SyncWorktree`）、`delivery` 的 git 结果分发 | engine 测试：dev-1 先做 t1，dev-2 做的 t2 合并后 dev-1 领 t3（依赖 t2），断言收到 sync(member) 且简报写“已同步到 <sha>”；审查任务收到 sync(review, ref=thread/N/dev-1)；冲突时简报列出冲突文件 |
+| P0-3 | **控制台在领取时同步**：`claim` 不再只给只读岗 `RefreshWorktree`，而是对所有成员排一个 `git.prepare(sync)`（审查任务 `mode=review, ref=被审任务的成员分支`），任务进 `claimed` 后**等同步结果**再发任务简报（`git.result` 回调里带 `meta.task_id` → 生成简报 → `Deliver`）；节点不支持 `git_sync`、会话还没开（首次 open 本来就会 prepare）或 2 分钟没回结果时直接发简报并注明“未同步” | `scheduler/claim.go`、`orchestrator/sessions.go`（`RefreshWorktree` → `SyncWorktree`）、`delivery` 的 git 结果分发 | engine 测试：dev-1 先做 t1，dev-2 做的 t2 合并后 dev-1 领 t3（依赖 t2），断言收到 sync(member) 且简报写“已同步到 <sha>”；审查任务收到 sync(review, ref=thread/N/dev-1)；冲突时简报列出冲突文件 |
 | P0-4 | **记录合并范围**：`at_merge_queue` 加 `base_sha`（合并前讨论串分支的 sha，`startEntry` / `directMerge` 时写）；合并成功时用 GitHub compare 取 `base..head` 的改动文件，写到 `at_tasks.merged`（JSONB：`{repo: {base, head, files[]}}`，文件最多 200 个） | 迁移 `00260_task_handoff.sql`、`delivery/mergeq.go`、`ghops`（compare） | 迁移测试；engine 测试断言 `merged` 写入；fake GitHub 加 compare |
 | P0-5 | **交接说明**：`complete_task` 加可选 `handoff`（≤ 4000 字），存 `at_tasks.handoff`；任务有未完成的下游依赖而 `handoff` 为空时，第一次 `complete_task` 返回 `isError` 提醒补写（再调一次就放行） | `protocol/schemas/tools/complete_task.json`、`toolsvc/member.go`、同一个迁移 | toolsvc / engine 测试 |
 | P0-6 | **简报带交接内容**：`depResults` 改成每个依赖给：谁做的、总结（≤ 3000 字）、`handoff`、合并范围和文件列表、“用 `git log base..head` / `git show` 看细节”、审查结论（`Parent` 指向它的 review / decision 任务的总结）、它发布的交付物 | `scheduler/claim.go`（`taskBrief`、`depResults`） | 单元测试断言简报内容 |
@@ -52,7 +52,7 @@
 | # | 任务 | 改哪里 | 测试 / 验收 |
 | --- | --- | --- | --- |
 | P2-1 | **岗位配置**：`at_roles` 加 `context_limit`（token，空 = 模型窗口）、`compact_between_pct`、`compact_in_task_pct`、`clear_after_tasks`、`compact_focus`，百分比都相对 `context_limit`；YAML 视图 `context:` 段；按岗位类型填默认值（dev 60 / 80 / 8，审查 / 决策 — / 80 / 1，组长和统筹 — / 70 / —）；团队页岗位弹窗加这几项 | 迁移 `00280_role_context.sql`、`roles/*.go`、`httpapi`、`web/src/pages/settings/team/RoleDialog.vue` | 迁移测试、roles 校验测试、vitest |
-| P2-2 | **协议**：`session.event` 的 `turn_ended` 加 `context: {used_tokens, max_tokens}`；新命令 `session.compact {session_id, open_gen, instructions}`、新上报 `session.compacted {session_id, open_gen, context}`；`session.open` 加 `context: {limit_tokens, in_task_pct}`；`session.send` 加 `anchor`（任务锚点文本，守护进程保存给压缩后用）；features `context.usage`、`session.compact` | `protocol/schemas/node/*.json`，`make gen-protocol` | protocol 测试 |
+| P2-2 | **协议**：`session.event` 的 `turn_ended` 加 `context: {used_tokens, max_tokens}`；新命令 `session.compact {session_id, open_gen, instructions}`、新上报 `session.compacted {session_id, open_gen, context}`；`session.open` 加 `context: {limit_tokens, in_task_pct}`；`session.send` 加 `anchor`（任务锚点文本，守护进程保存给压缩后用）；features `context_usage`、`session_compact` | `protocol/schemas/node/*.json`，`make gen-protocol` | protocol 测试 |
 | P2-3 | **节点 · Claude**：回合结束调 `Query.getContextUsage()` 填 `context`；`session.compact` = 推一条 `/compact <instructions>`，等 `compact_boundary` 发 `session.compacted`；开会话时设 `CLAUDE_CODE_AUTO_COMPACT_WINDOW = limit_tokens` 和 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = in_task_pct`（按 P2-7 实测结果，必要时换算成相对模型窗口的百分比） | `node/src/sessions/claude/driver.ts`、`options.ts`、`manager.ts` | vitest（fake-query 加 getContextUsage / compact_boundary） |
 | P2-4 | **节点 · Codex**：用 `thread/tokenUsage/updated`（`last`、`modelContextWindow`）填 `context`；`session.compact` = `thread/compact/start`，`thread/compacted` 后上报；`thread/start` 配置 `model_auto_compact_token_limit = limit_tokens × in_task_pct` | `node/src/sessions/codex/driver.ts`、`mapper.ts` | vitest（fake-codex） |
 | P2-5 | **控制台的开工决策**：存 `at_agent_sessions.context_used`（token），和岗位 `context_limit` 比、`tasks_in_session`；领取时按设计 §5 的表决定 继续 / 压缩 / clear；压缩时任务停在 `claimed`，等 `session.compacted`（10 分钟超时就直接发简报）；节点没有 `session.compact` 能力时超过阈值改为 clear | `scheduler/claim.go`、`orchestrator/sessions.go` | engine 测试覆盖 4 种情况 |
@@ -96,7 +96,7 @@
 
 | 阶段 | 状态 |
 | --- | --- |
-| 0 任务衔接 | 未开始 |
+| 0 任务衔接 | 完成（`feat/staff-p0`）；交付物没有任务关联，简报里暂不列交付物 |
 | 1 共享员工 + 项目级队列 | 未开始 |
 | 2 会话管理 | 未开始 |
 | 3 办公室和团队页 | 未开始 |

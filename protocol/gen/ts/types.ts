@@ -2006,6 +2006,10 @@ export interface CompleteTaskInput {
    * Paths, commit SHAs or URLs produced by the task.
    */
   artifacts?: string[];
+  /**
+   * Note for whoever builds on this task: what is left, pitfalls, interfaces agreed on. Asked for when other tasks depend on this one.
+   */
+  handoff?: string;
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema

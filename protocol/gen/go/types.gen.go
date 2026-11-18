@@ -1254,6 +1254,10 @@ type CompleteTaskInput struct {
 	// Paths, commit SHAs or URLs produced by the task.
 	Artifacts []string `json:"artifacts,omitempty,omitzero"`
 
+	// Note for whoever builds on this task: what is left, pitfalls, interfaces agreed
+	// on. Asked for when other tasks depend on this one.
+	Handoff *string `json:"handoff,omitempty,omitzero"`
+
 	// Status corresponds to the JSON schema field "status".
 	Status CompleteTaskInputStatus `json:"status,omitempty,omitzero"`
 
@@ -1310,6 +1314,9 @@ func (j *CompleteTaskInput) UnmarshalJSON(value []byte) error {
 	var plain Plain
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
+	}
+	if plain.Handoff != nil && utf8.RuneCountInString(string(*plain.Handoff)) > 4000 {
+		return fmt.Errorf("field %s length: must be <= %d", "handoff", 4000)
 	}
 	if v, ok := raw["status"]; !ok || v == nil {
 		plain.Status = "done"

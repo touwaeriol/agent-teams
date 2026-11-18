@@ -223,8 +223,12 @@ func (e *Engine) continueJob(ctx context.Context, tx *core.Tx, node store.Node, 
 	return nil
 }
 
-// prepared reports a failed worktree preparation in the employee's conversation.
+// prepared hands a pre-task sync result to the scheduler (the brief waits for it) and reports a
+// failed worktree preparation in the employee's conversation.
 func (e *Engine) prepared(ctx context.Context, tx *core.Tx, meta map[string]any, r *protocol.GitResult) error {
+	if str(meta["purpose"]) == "sync" {
+		return e.sched.SyncDone(ctx, tx, meta, r)
+	}
 	if r.Ok {
 		return nil
 	}

@@ -34,17 +34,25 @@ type Scheduler struct {
 
 	// TaskFinished runs inside the transaction that finished a task (wait_task / request_review results).
 	TaskFinished func(ctx context.Context, tx *core.Tx, t core.Task) error
+	// PushWork pushes a member's committed work to its member branch (delivery.Push), so it
+	// survives the node going away (shared-members.md §4.3).
+	PushWork func(ctx context.Context, tx *core.Tx, e core.Employee, t core.Thread) error
+	// AutoPushEvery throttles PushWork per member.
+	AutoPushEvery time.Duration
 
-	mu      sync.Mutex
-	pending map[string]bool
-	signal  chan struct{}
+	mu       sync.Mutex
+	pending  map[string]bool
+	signal   chan struct{}
+	lastPush map[string]time.Time // employee id → last automatic push
 }
 
 // New builds the scheduler.
 func New(cs *core.Store, orch *orchestrator.Orchestrator, se *status.Engine, hub *fanout.Hub, log *slog.Logger) *Scheduler {
 	return &Scheduler{core: cs, orch: orch, status: se, hub: hub, log: log, Interval: 10 * time.Second,
-		TaskFinished: func(context.Context, *core.Tx, core.Task) error { return nil },
-		pending:      map[string]bool{}, signal: make(chan struct{}, 1)}
+		TaskFinished:  func(context.Context, *core.Tx, core.Task) error { return nil },
+		PushWork:      func(context.Context, *core.Tx, core.Employee, core.Thread) error { return nil },
+		AutoPushEvery: 5 * time.Minute,
+		pending:       map[string]bool{}, signal: make(chan struct{}, 1), lastPush: map[string]time.Time{}}
 }
 
 // Kick asks for a scheduling pass over a thread (local and other replicas).
@@ -109,8 +117,10 @@ func (s *Scheduler) loop(ctx context.Context) {
 	}
 }
 
-// sweep schedules every active thread with claimable work (the 10 s safety net).
+// sweep schedules every active thread with claimable work (the 10 s safety net) and sends the
+// briefs whose pre-task sync timed out.
 func (s *Scheduler) sweep(ctx context.Context) {
+	s.releaseStaleSyncs(ctx)
 	var ids []string
 	err := s.core.Pool.Gorm(ctx).Table("at_tasks t").Distinct("t.thread_id").Joins("JOIN at_threads th ON th.id = t.thread_id").
 		Where("t.status = 'pending' AND th.status IN ('running','waiting')").Pluck("t.thread_id", &ids).Error

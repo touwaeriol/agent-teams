@@ -222,6 +222,27 @@ func (g *GitHub) RefSHA(ctx context.Context, r Repo, branch string) (string, err
 	return out.Object.SHA, err
 }
 
+// MaxCompareFiles caps the file list Compare returns.
+const MaxCompareFiles = 200
+
+// Compare lists the files changed between two commits (GitHub compare, base...head), at most
+// MaxCompareFiles of them.
+func (g *GitHub) Compare(ctx context.Context, r Repo, base, head string) ([]string, error) {
+	var out struct {
+		Files []struct {
+			Filename string `json:"filename"`
+		} `json:"files"`
+	}
+	if _, err := g.call(ctx, r, http.MethodGet, "/compare/"+url.PathEscape(base)+"..."+url.PathEscape(head), nil, &out); err != nil {
+		return nil, err
+	}
+	files := make([]string, 0, min(len(out.Files), MaxCompareFiles))
+	for _, f := range out.Files[:min(len(out.Files), MaxCompareFiles)] {
+		files = append(files, f.Filename)
+	}
+	return files, nil
+}
+
 // CreateRef creates refs/heads/<branch> at sha; an existing ref is not an error.
 func (g *GitHub) CreateRef(ctx context.Context, r Repo, branch, sha string) error {
 	body := map[string]string{"ref": "refs/heads/" + branch, "sha": sha}
