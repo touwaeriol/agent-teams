@@ -1,9 +1,9 @@
 // Ported from web/src/__tests__/logic.test.ts (client, events, chat parts): the same API and
 // cache logic must behave identically on vue-query.
 import { QueryClient } from "@tanstack/vue-query";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { isWrite, readCookie, toApiError } from "@/api/client";
-import { appendMessage, applyProjectEvent, applyUserEvent, layoutTickKey, statusLogKey, upsert, type StatusFrame } from "@/api/events";
+import { appendMessage, applyProjectEvent, applyUserEvent, layoutTickKey, OFFICE_REFRESH_MS, statusLogKey, upsert, type StatusFrame } from "@/api/events";
 import { flattenMessages, keys, type MessagePages } from "@/api/queries";
 import { backoff, streamUrl } from "@/api/sse";
 import type { OfficeSnapshot, QuestionView, TaskView, ThreadView } from "@/api/views";
@@ -94,6 +94,25 @@ describe("events → cache", () => {
     expect(office.ci["12"]).toHaveLength(1);
     expect(office.merge_queue).toHaveLength(1);
     expect(qc.getQueryData(keys.checks("t12"))).toHaveLength(1);
+  });
+  it("task events refetch the office once per window, per project", () => {
+    vi.useFakeTimers();
+    try {
+      const qc = seeded();
+      const spy = vi.spyOn(qc, "invalidateQueries");
+      const officeCalls = (pid: string) => spy.mock.calls.filter(([f]) => JSON.stringify(f?.queryKey) === JSON.stringify(keys.office(pid))).length;
+      for (let i = 0; i < 20; i++) applyProjectEvent(qc, "p1", "task", { thread_no: 12, task: task(`t${i}`) });
+      applyProjectEvent(qc, "p2", "node", {});
+      expect(officeCalls("p1")).toBe(0);
+      vi.advanceTimersByTime(OFFICE_REFRESH_MS);
+      expect(officeCalls("p1")).toBe(1);
+      expect(officeCalls("p2")).toBe(1);
+      applyProjectEvent(qc, "p1", "task", { thread_no: 12, task: task("late") });
+      vi.advanceTimersByTime(OFFICE_REFRESH_MS);
+      expect(officeCalls("p1")).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it("status frames update members and the office log; layout bumps the tick", () => {
     const qc = seeded();
