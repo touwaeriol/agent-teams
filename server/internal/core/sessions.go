@@ -206,3 +206,14 @@ func NodeHasFeature(ctx context.Context, q DB, nodeID, feature string) (bool, er
 	err := q.Gorm(ctx).Table("at_nodes").Where("id = ? AND last_hello->'features' @> jsonb_build_array(?::text)", nodeID, feature).Count(&n).Error
 	return n > 0, err
 }
+
+// RecordContext stores the context a session used at its last turn end, and the window it was
+// measured against (shared-members.md §5.3).
+func RecordContext(ctx context.Context, tx *Tx, id string, used, max int) error {
+	return openSession(ctx, tx, id).Updates(map[string]any{"context_used": used, "context_max": max}).Error
+}
+
+// CountTaskBrief counts a task brief that reached the session (clear_after_tasks).
+func CountTaskBrief(ctx context.Context, tx *Tx, id string) error {
+	return openSession(ctx, tx, id).Update("tasks_done", gorm.Expr("tasks_done + 1")).Error
+}

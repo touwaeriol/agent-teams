@@ -131,7 +131,7 @@ func buildOpen(in sessionInput) (protocol.SessionOpen, error) {
 	open := protocol.SessionOpen{SessionID: protocol.SessionID(in.sess.ID), OpenGen: protocol.OpenGen(in.sess.OpenGen),
 		Employee: employeeRef(in.emp, in.thread), Runtime: protocol.Runtime(in.emp.Runtime), Cwd: protocol.RelPath(in.sess.Cwd),
 		PlatformTools: tools, Env: protocol.SessionOpenEnv{"LANG": "C.UTF-8"}, GitCredentials: &gitCreds,
-		FirstMessage: in.first, Resume: in.resume}
+		FirstMessage: in.first, Resume: in.resume, Context: sessionContext(in.emp.Spec)}
 	if gitCreds && len(in.protRefs) > 0 {
 		// The platform pre-push hook refuses these (architecture.md §8.1), whatever the runtime.
 		open.Env[ProtectedRefsEnv] = strings.Join(in.protRefs, " ")

@@ -121,7 +121,7 @@ func (s *Scheduler) Cancel(ctx context.Context, tx *core.Tx, task core.Task, rea
 		return task, ErrTaskState
 	}
 	worker := task.ClaimedBy
-	if task.SyncPending > 0 {
+	if task.SyncPending > 0 || task.CompactID != "" {
 		worker = "" // its brief never went out: nothing to stop
 	}
 	task, err := s.finish(ctx, tx, task, "cancelled")
@@ -157,8 +157,9 @@ func (s *Scheduler) Retry(ctx context.Context, tx *core.Tx, task core.Task) (cor
 	return task, tx.EmitTask(ctx, task)
 }
 
-// TaskDelivered marks a claimed task running once its brief reached the member's session.
-func (s *Scheduler) TaskDelivered(ctx context.Context, tx *core.Tx, m core.Message) error {
+// TaskDelivered marks a claimed task running once its brief reached the member's session, and
+// counts the brief in that session (clear_after_tasks, shared-members.md §5).
+func (s *Scheduler) TaskDelivered(ctx context.Context, tx *core.Tx, m core.Message, sessionID string) error {
 	taskID, _ := m.Meta["task_id"].(string)
 	if taskID == "" {
 		return nil
@@ -167,8 +168,10 @@ func (s *Scheduler) TaskDelivered(ctx context.Context, tx *core.Tx, m core.Messa
 	if err != nil || task.Status != "claimed" {
 		return ignoreMissing(err)
 	}
-	_, err = s.setStatus(ctx, tx, task, "running")
-	return err
+	if task, err = s.setStatus(ctx, tx, task, "running"); err != nil {
+		return err
+	}
+	return briefDelivered(ctx, tx, task, sessionID)
 }
 
 // nudgeText reminds a member whose turn ended with the task still open (§7.3).

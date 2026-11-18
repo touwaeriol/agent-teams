@@ -38,7 +38,8 @@ type Queued struct {
 // expiry is how long a command may wait to be (re)sent (protocol.md §2.1).
 func expiry(typ string) time.Duration {
 	switch {
-	case typ == protocol.TypeSessionSend || typ == protocol.TypeSessionInterrupt || typ == protocol.TypeSessionSetMode:
+	case typ == protocol.TypeSessionSend || typ == protocol.TypeSessionInterrupt || typ == protocol.TypeSessionSetMode ||
+		typ == protocol.TypeSessionCompact:
 		return 10 * time.Minute
 	case typ == protocol.TypeApprovalResolve || typ == protocol.TypeToolResult:
 		return 24 * time.Hour

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"gorm.io/gorm"
@@ -21,6 +22,26 @@ func TaskByID(ctx context.Context, q DB, conversationID, id string) (Task, error
 // LockTask loads a task FOR UPDATE.
 func LockTask(ctx context.Context, tx *Tx, conversationID, id string) (Task, error) {
 	return take[Task](tasks(ctx, tx).Clauses(ForUpdate).Where("conversation_id = ? AND id = ?", conversationID, id))
+}
+
+// SetTaskProgress keeps the latest report_progress of the employee's current task (if any).
+func SetTaskProgress(ctx context.Context, tx *Tx, e Employee, text string) error {
+	task, err := CurrentTaskOf(ctx, tx, e)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if r := []rune(text); len(r) > 2000 {
+		text = string(r[:2000])
+	}
+	return taskRow(ctx, tx, task).Update("progress", text).Error
+}
+
+// LockTaskByCompact loads FOR UPDATE the claimed task that waits for session.compacted of compactID.
+func LockTaskByCompact(ctx context.Context, tx *Tx, compactID string) (Task, error) {
+	return take[Task](tasks(ctx, tx).Clauses(ForUpdate).Where("compact_id = ? AND status = 'claimed'", compactID))
 }
 
 // TryLockTask loads a task FOR UPDATE SKIP LOCKED (ErrNotFound when another transaction holds it).

@@ -29,6 +29,21 @@ type Delivery struct {
 	// Record is the conversation message to store with the msg_id; nil stores a note
 	// in the employee's conversation addressed to it (meta.to).
 	Record *core.NewMessage
+	// Anchor is the task anchor the daemon keeps and re-injects after the runtime compacts
+	// (task briefs; shared-members.md §5.2). Empty: the daemon keeps what it has.
+	Anchor string
+}
+
+// firstMessage is a delivery that opens (or reopens) a session.
+func firstMessage(msgID, text string, d Delivery) *protocol.FirstMessage {
+	return &protocol.FirstMessage{MsgID: protocol.MsgID(msgID), Text: text, Images: imageRefs(d.Images), Anchor: anchorOf(d)}
+}
+
+func anchorOf(d Delivery) *string {
+	if d.Anchor == "" {
+		return nil
+	}
+	return &d.Anchor
 }
 
 // Deliver records the message and sends it to the employee's session, opening one when needed.
@@ -61,12 +76,12 @@ func (o *Orchestrator) Deliver(ctx context.Context, tx *core.Tx, e core.Employee
 		if err != nil {
 			return m, err
 		}
-		_, err = o.openSession(ctx, tx, e, &protocol.FirstMessage{MsgID: protocol.MsgID(msgID), Text: text, Images: imageRefs(d.Images)}, resume)
+		_, err = o.openSession(ctx, tx, e, firstMessage(msgID, text, d), resume)
 		return m, err
 	case err != nil:
 		return m, err
 	case sess.State == "crashed":
-		return m, o.reopen(ctx, tx, e, sess, &protocol.FirstMessage{MsgID: protocol.MsgID(msgID), Text: d.Text, Images: imageRefs(d.Images)})
+		return m, o.reopen(ctx, tx, e, sess, firstMessage(msgID, d.Text, d))
 	}
 	return m, o.send(ctx, tx, sess, msgID, d)
 }
@@ -246,9 +261,10 @@ func (o *Orchestrator) continuation(ctx context.Context, tx *core.Tx, e core.Emp
 		}
 		return summary + "\n\n---\n" + text, nil, o.resumedNote(ctx, tx, e)
 	}
-	if movedThread(e, last) {
-		// A project member's session belongs to one thread's worktree: a fresh one, with a digest.
-		digest, err := o.switchDigest(ctx, tx, e, *e.CurrentThreadID)
+	if fresh := freshReason(e, last); fresh != "" {
+		// A project member's session belongs to one thread's worktree (moved), or was cleared
+		// after its tasks (context_clear): a fresh one, with a digest of the thread.
+		digest, err := o.switchDigest(ctx, tx, e, *e.WorkThreadID(), fresh)
 		if err != nil {
 			return "", nil, err
 		}
@@ -261,6 +277,22 @@ func (o *Orchestrator) continuation(ctx context.Context, tx *core.Tx, e core.Emp
 		return text, resumeRef(last), nil
 	}
 	return text, nil, nil
+}
+
+// CloseContextClear closes a member's session after clear_after_tasks tasks or a context too full
+// to compact (shared-members.md §5): the next task starts a fresh session with a thread digest.
+const CloseContextClear = "context_clear"
+
+// freshReason is why the employee's next session starts fresh with a thread digest:
+// switch_thread (a project member moved threads) or context_clear; "" otherwise.
+func freshReason(e core.Employee, last core.AgentSession) string {
+	if movedThread(e, last) {
+		return "switch_thread"
+	}
+	if last.CloseReason == CloseContextClear && e.WorkThreadID() != nil {
+		return CloseContextClear
+	}
+	return ""
 }
 
 // movedThread reports whether a project member's last session was in another thread than the
@@ -367,7 +399,8 @@ func (o *Orchestrator) send(ctx context.Context, tx *core.Tx, s core.AgentSessio
 	}
 	kind := protocol.SessionSendKind(orDefault(d.Kind, "system"))
 	body := protocol.SessionSend{SessionID: protocol.SessionID(s.ID), MsgID: protocol.MsgID(msgID), Text: d.Text,
-		Priority: protocol.SessionSendPriority(prio), Kind: &kind, InterruptFirst: d.Interrupt, Images: imageRefs(d.Images)}
+		Priority: protocol.SessionSendPriority(prio), Kind: &kind, InterruptFirst: d.Interrupt, Images: imageRefs(d.Images),
+		Anchor: anchorOf(d)}
 	_, err := o.gw.Enqueue(ctx, tx, *s.NodeID, nodegw.Command{Type: protocol.TypeSessionSend, Body: body,
 		SessionID: s.ID, OpenGen: s.OpenGen})
 	return err
@@ -871,7 +904,7 @@ func (o *Orchestrator) closeSession(ctx context.Context, tx *core.Tx, s core.Age
 	if s.NodeID == nil {
 		return nil
 	}
-	r := protocol.SessionCloseReason(reason)
+	r := protocol.SessionCloseReason(wireCloseReason(ctx, tx, *s.NodeID, reason))
 	gen := protocol.OpenGen(s.OpenGen)
 	_, err := o.gw.Enqueue(ctx, tx, *s.NodeID, nodegw.Command{Type: protocol.TypeSessionClose,
 		Body: protocol.SessionClose{SessionID: protocol.SessionID(s.ID), OpenGen: &gen, Reason: &r}, SessionID: s.ID, OpenGen: s.OpenGen})

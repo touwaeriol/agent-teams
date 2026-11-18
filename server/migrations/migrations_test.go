@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 280 {
+	if migrations.Latest() != 290 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -1199,5 +1199,40 @@ INSERT INTO at_employees (id, project_id, name, tier, role, role_id, runtime, sp
 	}
 	if err := db.QueryRow(`SELECT spec::text FROM at_employees WHERE id = 'e1'`).Scan(&got); err != nil || got != `{"role": "dev"}` {
 		t.Fatalf("spec after down: %q %v", got, err)
+	}
+}
+
+// TestSessionContextMigration: 00290 adds the session counters and the task's compaction wait,
+// progress and metrics columns with their defaults; Down drops them.
+func TestSessionContextMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 290); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.QueryRow(`SELECT string_agg(table_name || '.' || column_name || '=' || coalesce(column_default, '') || ':' || is_nullable, ' '
+		ORDER BY table_name, column_name) FROM information_schema.columns WHERE (table_name = 'at_agent_sessions'
+		AND column_name IN ('context_used','context_max','tasks_done')) OR (table_name = 'at_tasks' AND column_name IN
+		('compact_id','wait_since','progress','compactions','ctx_start','ctx_end','split_hinted'))`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	want := "at_agent_sessions.context_max=:YES at_agent_sessions.context_used=:YES at_agent_sessions.tasks_done=0:NO " +
+		"at_tasks.compact_id=''::text:NO at_tasks.compactions=0:NO at_tasks.ctx_end=:YES at_tasks.ctx_start=:YES " +
+		"at_tasks.progress=''::text:NO at_tasks.split_hinted=false:NO at_tasks.wait_since=:YES"
+	if got != want {
+		t.Fatalf("columns:\n got %s\nwant %s", got, want)
+	}
+	if _, err := p.DownTo(ctx, 280); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{`SELECT tasks_done FROM at_agent_sessions`, `SELECT compact_id FROM at_tasks`} {
+		if _, err := db.Exec(q); err == nil {
+			t.Fatalf("%s survived down", q)
+		}
 	}
 }

@@ -660,16 +660,23 @@ func (o *Orchestrator) threadDigest(ctx context.Context, tx *core.Tx, b *strings
 	return nil
 }
 
-// switchDigest opens the fresh session of a project member that moved to another thread
-// (shared-members.md §5): who leads the thread, its plan, and what the member did there before.
-func (o *Orchestrator) switchDigest(ctx context.Context, tx *core.Tx, e core.Employee, threadID string) (string, error) {
+// freshHeaders head the first message of a fresh session in a thread, by why it is fresh.
+var freshHeaders = map[string]string{
+	"switch_thread": "[换讨论串] 你是项目的固定成员 %s，现在给讨论串 #%d「%s」干活%s。这是新会话：工作目录和分支都是这个讨论串的，" +
+		"之前讨论串的上下文不再适用。\n",
+	CloseContextClear: "[新会话] 你是项目的固定成员 %s，继续给讨论串 #%d「%s」干活%s。上一个会话已经连续做了不少任务（或上下文太满），" +
+		"平台换了新会话：之前的对话不在上下文里，需要的细节看下面的摘要、任务交接说明和 git log。\n",
+}
+
+// switchDigest opens the fresh session of a project member in a thread (it moved there, or its
+// session was cleared): who leads, the plan, the member's own tasks there and its branch.
+func (o *Orchestrator) switchDigest(ctx context.Context, tx *core.Tx, e core.Employee, threadID, reason string) (string, error) {
 	t, err := core.ThreadByID(ctx, tx, threadID)
 	if err != nil {
 		return "", err
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "[换讨论串] 你是项目的固定成员 %s，现在给讨论串 #%d「%s」干活%s。这是新会话：工作目录和分支都是这个讨论串的，"+
-		"之前讨论串的上下文不再适用。\n", e.Name, t.No, t.Title, leadOf(ctx, tx, t.ID))
+	fmt.Fprintf(&b, freshHeaders[reason], e.Name, t.No, t.Title, leadOf(ctx, tx, t.ID))
 	plan, err := core.MainTasks(ctx, tx, t.ID)
 	if err != nil {
 		return "", err
