@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { compileScene } from "../compile";
 import { anchorPoint, Director } from "../director";
 import type { OfficeEmployee } from "../types";
-import { crew, defaultLayout, twoThreads } from "./fixtures";
+import { crew, legacyLayout, twoThreads } from "./fixtures";
 
 function setup(employees: OfficeEmployee[] = crew, opts: { titles?: Record<string, string> } = {}) {
-  const layout = defaultLayout();
+  const layout = legacyLayout();
   const scene = compileScene(layout, { threads: twoThreads, employees });
   let now = 0;
   const d = new Director(scene, { now: () => now, taskTitle: (id) => opts.titles?.[id] });
@@ -19,7 +19,7 @@ function setup(employees: OfficeEmployee[] = crew, opts: { titles?: Record<strin
   return { layout, scene, d, run };
 }
 
-describe("Director", () => {
+describe("Director · legacy layout", () => {
   it("places everyone instantly from their initial status", () => {
     const { d } = setup();
     expect(d.actor("lead-12")!.pos).toEqual([76, 96]);
@@ -49,7 +49,7 @@ describe("Director", () => {
     const { d } = setup([...crew, free]);
     const a = d.actor("dev-9")!;
     expect(a.hidden).toBe(false);
-    expect(a.pos).toEqual(anchorPoint(defaultLayout().anchors.lounge, 5, "dev-9")); // after the five idle members
+    expect(a.pos).toEqual(anchorPoint(legacyLayout().anchors.lounge, 5, "dev-9")); // after the five idle members
     d.apply("dev-9", { state: "typing" }, true);
     expect(d.actor("dev-9")!.hidden).toBe(false);
   });
@@ -66,12 +66,12 @@ describe("Director", () => {
   });
 
   it("anchor overflow: standBehind, stack and jitter", () => {
-    const bench = defaultLayout().anchors.bench;
+    const bench = legacyLayout().anchors.bench;
     expect(anchorPoint(bench, 5, "x")).toEqual([510, 512]);
     expect(anchorPoint(bench, 11, "x")).toEqual([550, 536]);
     const stack = { points: [[0, 0]] as [number, number][], overflow: "stack" as const };
     expect(anchorPoint(stack, 2, "x")).toEqual([12, 12]);
-    const lounge = defaultLayout().anchors.lounge;
+    const lounge = legacyLayout().anchors.lounge;
     const j = anchorPoint(lounge, 8, "x");
     expect(Math.abs(j[0] - 360)).toBeLessThanOrEqual(12);
   });
@@ -138,7 +138,7 @@ describe("Director", () => {
   });
 
   it("off-page people are hidden at their seat and badged at shared anchors", () => {
-    const layout = defaultLayout();
+    const layout = legacyLayout();
     const threads = Array.from({ length: 5 }, (_, i) => ({ no: 12 + i, title: `t${i}`, status: "running" as const }));
     const people: OfficeEmployee[] = [
       { id: "a", name: "dev-1", tier: "member", role: "dev", thread_no: 16, status: { state: "typing" } },

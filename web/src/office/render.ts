@@ -4,7 +4,8 @@
 import { colorOr, resolveColor, type ColorContext } from "./color";
 import type { DeskInstance, PlacedSprite, PodInstance, Scene } from "./compile";
 import type { ActorView, DeskState } from "./director";
-import { frameBitmap, type ResolvedLook } from "./looks";
+import { frameBitmap, type ResolvedLook, type SpriteBitmap } from "./looks";
+import { isMember } from "./people";
 import type { Floor, OfficeLayout, OfficeNode, Point, Room, Shape, Sprite, Widget } from "./types";
 
 type Ctx = CanvasRenderingContext2D;
@@ -245,6 +246,20 @@ function runtimeSlots(item: PlacedSprite): Set<string> {
   return new Set(Object.keys(item.sprite.slots ?? {}));
 }
 
+function drawPodStatic(ctx: Ctx, scene: Scene, pod: PodInstance, view: ViewOptions, alpha: number): void {
+  const color = palette(scene.layout);
+  ctx.globalAlpha = alpha;
+  drawPodFrame(ctx, pod, view.focus === pod.threadNo, color);
+  for (const d of pod.desks) drawSprite(ctx, d.sprite, d.at, { ...color, slots: d.slots }, { scale: d.scale, only: "static", runtime: runtimeSlots(d) });
+  ctx.globalAlpha = 1;
+}
+
+/** Opacity of an ended thread's table `since` ms into its fade (1 → 0 over `fadeMs`). */
+export function leaveAlpha(since: number, time: number, fadeMs: number): number {
+  if (fadeMs <= 0) return 0;
+  return Math.max(0, Math.min(1, 1 - (time - since) / fadeMs));
+}
+
 export function drawStatic(ctx: Ctx, scene: Scene, view: ViewOptions): void {
   const layout = scene.layout;
   const color = palette(layout);
@@ -252,12 +267,8 @@ export function drawStatic(ctx: Ctx, scene: Scene, view: ViewOptions): void {
   ctx.fillRect(0, 0, scene.width, scene.height);
   for (const room of scene.rooms) drawFloor(ctx, layout.floors?.[room.floor], room.rect, color);
   for (const room of scene.rooms) drawWalls(ctx, room, color);
-  for (const pod of scene.pods) {
-    ctx.globalAlpha = dimFor(layout, view.focus, pod.threadNo);
-    drawPodFrame(ctx, pod, view.focus === pod.threadNo, color);
-    for (const d of pod.desks) drawSprite(ctx, d.sprite, d.at, { ...color, slots: d.slots }, { scale: d.scale, only: "static", runtime: runtimeSlots(d) });
-    ctx.globalAlpha = 1;
-  }
+  for (const pod of scene.pods) if (pod.leaving === undefined) drawPodStatic(ctx, scene, pod, view, dimFor(layout, view.focus, pod.threadNo));
+  for (const d of scene.staff.values()) drawSprite(ctx, d.sprite, d.at, { ...color, slots: d.slots }, { scale: d.scale, only: "static", runtime: runtimeSlots(d) });
   for (const f of scene.furniture) drawSprite(ctx, f.sprite, f.at, { ...color, slots: f.slots }, { flip: f.flip });
   for (const w of layout.widgets ?? []) if (w.type === "taskBoard" && w.sprite) drawSprite(ctx, layout.sprites[w.sprite], w.at, color);
 }
@@ -277,7 +288,10 @@ export interface DynamicInput {
 export function drawDynamic(ctx: Ctx, input: DynamicInput): void {
   const { scene } = input;
   ctx.clearRect(0, 0, scene.width, scene.height);
-  for (const pod of scene.pods) for (const d of pod.desks) drawDeskDynamic(ctx, input, d);
+  const fadeMs = scene.layout.threadPods.fadeMs ?? 3000;
+  for (const pod of scene.pods) if (pod.leaving !== undefined) drawPodStatic(ctx, scene, pod, input.view, leaveAlpha(pod.leaving, input.time, fadeMs));
+  for (const d of scene.desks.values()) drawDeskDynamic(ctx, input, d);
+  for (const [pod, people] of participantsByPod(scene, input.actors)) drawParticipants(ctx, input, pod, people);
   for (const w of scene.layout.widgets ?? []) if (w.type === "nodeRacks") drawRacks(ctx, input, w);
   const anchorY = scene.layout.characters.person.anchor?.y ?? 0;
   const order = input.actors.filter((a) => !a.hidden).sort((a, b) => a.pos[1] + anchorY - (b.pos[1] + anchorY));
@@ -286,11 +300,61 @@ export function drawDynamic(ctx: Ctx, input: DynamicInput): void {
 
 function drawDeskDynamic(ctx: Ctx, input: DynamicInput, d: DeskInstance): void {
   const color = palette(input.scene.layout);
-  const screen = input.desks.get(d.key)?.screen;
-  const slots = { ...d.slots, ...(screen ? { screen } : {}) };
-  ctx.globalAlpha = dimFor(input.scene.layout, input.view.focus, d.threadNo);
+  const slots = deskSlots(input.scene, d, input.desks.get(d.key));
+  const pod = d.threadNo === undefined ? undefined : input.scene.pods.find((p) => p.threadNo === d.threadNo);
+  const fade = pod?.leaving === undefined ? 1 : leaveAlpha(pod.leaving, input.time, input.scene.layout.threadPods.fadeMs ?? 3000);
+  ctx.globalAlpha = fade * dimFor(input.scene.layout, input.view.focus, d.threadNo ?? input.desks.get(d.key)?.thread);
   drawSprite(ctx, d.sprite, d.at, { ...color, slots }, { scale: d.scale, only: "dynamic", runtime: runtimeSlots(d) });
   ctx.globalAlpha = 1;
+}
+
+/** Runtime slots of a desk: the state's screen colour, the thread colour of the work at it. */
+export function deskSlots(scene: Scene, d: DeskInstance, state: DeskState | undefined): Record<string, string> {
+  const thread = state?.thread === undefined ? undefined : scene.threadColors.get(state.thread);
+  return { ...d.slots, ...(state?.screen ? { screen: state.screen } : {}), ...(thread ? { thread } : {}) };
+}
+
+/** Members working for each table's thread now, by name (the participant strip). */
+export function participantsByPod(scene: Scene, actors: ActorView[]): [PodInstance, ActorView[]][] {
+  return scene.pods
+    .filter((p) => p.participants)
+    .map((p): [PodInstance, ActorView[]] => [p, actors.filter((a) => isMember(a.employee) && a.thread === p.threadNo).sort((x, y) => x.employee.name.localeCompare(y.employee.name))])
+    .filter(([, people]) => people.length > 0);
+}
+
+/** Avatar slots of a strip: who gets drawn, and how many more there are (shown as +N). */
+export function stripSlots<T>(people: T[], max: number): { shown: T[]; more: number } {
+  if (people.length <= max) return { shown: people, more: 0 };
+  return { shown: people.slice(0, Math.max(0, max - 1)), more: people.length - Math.max(0, max - 1) };
+}
+
+export function stripPoint(strip: NonNullable<PodInstance["participants"]>, i: number): Point {
+  return [strip.at[0] + i * strip.step[0], strip.at[1] + i * strip.step[1]];
+}
+
+function drawParticipants(ctx: Ctx, input: DynamicInput, pod: PodInstance, people: ActorView[]): void {
+  const strip = pod.participants!;
+  const layout = input.scene.layout;
+  ctx.globalAlpha = dimFor(layout, input.view.focus, pod.threadNo) * (pod.leaving === undefined ? 1 : leaveAlpha(pod.leaving, input.time, layout.threadPods.fadeMs ?? 3000));
+  stripSlots(people, strip.max).shown.forEach((a, i) => {
+    const [x, y] = stripPoint(strip, i);
+    ctx.fillStyle = pod.color;
+    ctx.fillRect(x, y, strip.size, strip.size);
+    const look = input.looks.get(a.id);
+    if (look) drawHead(ctx, layout, frameBitmap(layout, look, "stand"), [x + 2, y + 2], strip.size - 4);
+  });
+  ctx.globalAlpha = 1;
+}
+
+/** The head rows of a character frame, fitted into a `size` square. */
+function drawHead(ctx: Ctx, layout: OfficeLayout, bmp: SpriteBitmap, at: Point, size: number): void {
+  const ch = layout.characters.person;
+  const first = ch.frames.stand?.[0] ?? Object.values(ch.frames)[0]?.[0];
+  const rows = Math.max(1, (ch.parts[first ?? ""]?.length ?? bmp.bounds.h) - bmp.bounds.minY);
+  const h = Math.min(rows, bmp.bounds.h);
+  const k = size / Math.max(bmp.bounds.w, h);
+  const w = bmp.bounds.w * k;
+  ctx.drawImage(bmp.canvas, 0, 0, bmp.bounds.w, h, at[0] + (size - w) / 2, at[1] + (size - h * k) / 2, w, h * k);
 }
 
 export type SlotState = "active" | "parked" | "queued" | "empty" | "offline";
@@ -369,7 +433,7 @@ function drawActor(ctx: Ctx, input: DynamicInput, a: ActorView): void {
   const overlay = ov && (still || blinkOn(ov.blinkFps, input.time)) ? a.overlay : undefined;
   const bmp = frameBitmap(layout, look, frame, { overlay, grayscale: a.grayscale });
   const px = ch.pixel;
-  ctx.globalAlpha = a.opacity * dimFor(layout, input.view.focus, a.employee.thread_no);
+  ctx.globalAlpha = a.opacity * dimFor(layout, input.view.focus, a.thread);
   ctx.save();
   const x = Math.round(a.pos[0]);
   const y = Math.round(a.pos[1]) + bob;

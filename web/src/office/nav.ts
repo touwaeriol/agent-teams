@@ -1,4 +1,4 @@
-// Walking graph: A* over undirected straight edges (office-layout.md §4.7).
+// Walking graph: A* over undirected straight edges (office-layout.md §4.8).
 import type { Point } from "./types";
 
 export interface NavGraph {

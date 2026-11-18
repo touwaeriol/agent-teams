@@ -19,6 +19,7 @@ import {
 import { colorOr } from "./color";
 import { compileScene, type Scene } from "./compile";
 import { Director, type ActorView } from "./director";
+import { useLeaving, withLeaving } from "./leaving";
 import { resolveLook, type ResolvedLook } from "./looks";
 import { OfficeOverlay, STATE_LABELS, type OfficeAction } from "./overlay";
 import { cursorOf, diffFeed, eventEmployee, foldStatuses, type FeedCursor } from "./replay";
@@ -108,7 +109,9 @@ function loadGoogleFonts(families: string[] | undefined): void {
   }
 }
 
-function hasLiveAnimation(layout: OfficeLayout, actors: ActorView[], data: OfficeWidgetData): boolean {
+function hasLiveAnimation(scene: Scene, actors: ActorView[], data: OfficeWidgetData): boolean {
+  const layout = scene.layout;
+  if (scene.pods.some((p) => p.leaving !== undefined)) return true;
   const anims = layout.characters.person.animations;
   const animated = actors.some((a) => !a.hidden && ((anims[a.anim]?.frames.length ?? 1) > 1 || anims[a.anim]?.bob || a.overlay));
   const racks = (layout.widgets ?? []).some((w) => w.type === "nodeRacks" && Object.values(w.slotColors ?? {}).some((c) => c?.blink));
@@ -163,7 +166,7 @@ function useAnimationLoop(director: Director, state: () => LoopState): Loop {
       seen = director.version;
       loop.version.value += 1;
     }
-    const more = director.busy || (!s.reducedMotion && hasLiveAnimation(s.scene.layout, actors, s.data));
+    const more = director.busy || (!s.reducedMotion && hasLiveAnimation(s.scene, actors, s.data));
     if (!more) return void (running = false);
     requestAnimationFrame((t2) => step(t2, t));
   };
@@ -240,22 +243,28 @@ export const Office = defineComponent({
     const layout = computed(() => toRaw(props.layout));
     watch(() => layout.value.fonts?.googleFonts, loadGoogleFonts, { immediate: true });
 
+    // Threads that just ended stay (fading) while their leads walk out.
+    const leaving = useLeaving(() => layout.value, () => toRaw(props.threads), () => toRaw(props.employees));
+    const input = () => withLeaving(toRaw(props.threads), toRaw(props.employees), leaving.value);
     // Recompile only when what the scene depends on changes (not on every new array identity).
     const rosterKey = computed(() => signature(props.employees, (e) => [e.id, e.name, e.thread_no, e.tier, e.role, e.sort, e.instance]));
     const threadsKey = computed(() => signature(props.threads, (t) => [t.no, t.title, t.status, t.counts?.main_done, t.counts?.main_total, t.updated_at]));
-    const compile = () => compileScene(layout.value, { threads: toRaw(props.threads), employees: toRaw(props.employees), focus: props.focus, page: page.value });
+    const compile = () => {
+      const x = input();
+      return compileScene(layout.value, { threads: x.threads, employees: x.employees, focus: props.focus, page: page.value, leaving: x.since });
+    };
     const scene = shallowRef<Scene>(compile());
     const looksKey = computed(() => signature(props.employees, (e) => [e.id, e.name, e.tier, e.role, e.look, e.instance]));
-    const resolveLooks = () => new Map<string, ResolvedLook>(toRaw(props.employees).map((e) => [e.id, resolveLook(layout.value, e)]));
+    const resolveLooks = () => new Map<string, ResolvedLook>(input().employees.map((e) => [e.id, resolveLook(layout.value, e)]));
     const looks = shallowRef(resolveLooks());
-    watch([layout, looksKey], () => (looks.value = resolveLooks()));
+    watch([layout, looksKey, leaving], () => (looks.value = resolveLooks()));
 
     const director = new Director(scene.value, {
       now: () => props.now ?? Date.now(),
       clock: () => performance.now(),
       taskTitle: (id) => props.taskTitles?.[id],
     });
-    director.setEmployees(toRaw(props.employees));
+    director.setEmployees(input().employees);
     watch(reducedMotion, (r) => (director.noWalk = r), { immediate: true });
 
     const loop = useAnimationLoop(director, () => ({
@@ -267,10 +276,10 @@ export const Office = defineComponent({
       reducedMotion: reducedMotion.value,
     }));
 
-    watch([layout, rosterKey, threadsKey, () => props.focus, page], () => {
+    watch([layout, rosterKey, threadsKey, () => props.focus, page, leaving], () => {
       scene.value = compile();
       director.setScene(scene.value);
-      director.setEmployees(toRaw(props.employees));
+      director.setEmployees(input().employees);
       loop.kick();
     });
     useStatusFeed(director, props, loop);
@@ -419,13 +428,18 @@ const Stage = defineComponent({
   },
 });
 
-/** Phone fallback (office-layout.md §5): people grouped by thread with their state. */
-function OfficeList(p: { scene: Scene; director: Director; onSelect: (id: string) => void; selected: string | null; version: number }) {
-  const actors = p.director.actors();
-  const groups = [
-    { key: "coord", title: "项目统筹", list: actors.filter((a) => a.employee.thread_no == null) },
-    ...p.scene.visible.map((t) => ({ key: String(t.no), title: `#${t.no} ${t.title}`, list: actors.filter((a) => a.employee.thread_no === t.no) })),
+/** Phone fallback (office-layout.md §5): the coordinator, each thread's lead and the members working for it, then the free members. */
+export function listGroups(scene: Scene, actors: ActorView[]): { key: string; title: string; list: ActorView[] }[] {
+  const shown = new Set(scene.visible.map((t) => t.no));
+  return [
+    { key: "coord", title: "项目统筹", list: actors.filter((a) => a.employee.tier === "coordinator") },
+    ...scene.visible.map((t) => ({ key: String(t.no), title: `#${t.no} ${t.title}`, list: actors.filter((a) => a.thread === t.no) })),
+    { key: "free", title: "空闲成员", list: actors.filter((a) => a.employee.tier === "member" && (a.thread === null || !shown.has(a.thread))) },
   ].filter((g) => g.list.length);
+}
+
+function OfficeList(p: { scene: Scene; director: Director; onSelect: (id: string) => void; selected: string | null; version: number }) {
+  const groups = listGroups(p.scene, p.director.actors());
   return (
     <div style={sx({ display: "flex", flexDirection: "column", gap: 12, color: "#E6E3DC", fontSize: 13 })}>
       {groups.map((g) => (

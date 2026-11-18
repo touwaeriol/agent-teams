@@ -1,12 +1,13 @@
-// Director (office-layout.md §4.5, §4.7, §4.8): status → rule → place,
+// Director (office-layout.md §4.5–§4.9): status → rule → place,
 // animation, desk screen and bubble; anchor slot allocation; walking along
 // the graph; scripted sequences such as "claim". Pure logic, no DOM.
-import type { Scene } from "./compile";
+import type { PodInstance, Scene } from "./compile";
 import { hashString } from "./looks";
 import { advance, dist, route } from "./nav";
-import { bubbleFor, matchRule, sequenceFor, subjectOf, toMs, type Bubble } from "./rules";
+import { workThread } from "./people";
+import { bubbleFor, eventSequences, matchRule, sequenceFor, subjectOf, toMs, type Bubble } from "./rules";
 import { fillTemplate } from "./template";
-import type { EmployeeStatus, OfficeEmployee, Point, SequenceStep, StateRule } from "./types";
+import type { EmployeeStatus, OfficeEmployee, Point, SceneEvent, SequenceStep, StateRule } from "./types";
 
 export interface Place {
   point: Point;
@@ -22,6 +23,8 @@ interface SeqRun {
   index: number;
   waitLeft: number;
   pending?: EmployeeStatus;
+  /** The thread a scene-event sequence is about (place `pod`, bubble {threadNo}). */
+  threadNo?: number;
 }
 
 interface Actor {
@@ -40,6 +43,8 @@ interface Actor {
   flip: boolean;
   bubble?: Bubble;
   seq?: SeqRun;
+  /** Left the office (a sequence step `hide`): not drawn until its table is back. */
+  gone?: boolean;
 }
 
 export interface ActorView {
@@ -58,11 +63,17 @@ export interface ActorView {
   hidden: boolean;
   /** Thread number badge for people of off-page threads shown at shared anchors. */
   badge?: number;
+  /** The thread this person works for now: a lead's own, a member's task thread (null: none). */
+  thread: number | null;
+  /** Sitting at its own desk (not walking, not elsewhere). */
+  atDesk: boolean;
 }
 
 export interface DeskState {
   screen?: string;
   timerSince?: number;
+  /** Thread the person at the desk works for (the desk's @thread slot). */
+  thread?: number;
 }
 
 export interface DirectorOptions {
@@ -107,11 +118,36 @@ export class Director {
    * the others teleport to the place recomputed from the new scene.
    */
   setScene(scene: Scene): void {
+    const prev = this.scene;
     this.scene = scene;
     this.occupancy.clear();
     for (const a of this.claimOrder()) this.rehome(a);
     this.preferred = undefined;
+    for (const [event, pod] of sceneEvents(prev, scene)) this.playEvent(event, pod);
+    for (const a of this.actorsById.values()) if (a.gone && this.tableIsBack(a)) a.gone = false;
     this.version++;
+  }
+
+  /** A new work table (threadOpened) or an ended thread (threadEnded): the layout's sequence for it. */
+  private playEvent(event: SceneEvent, pod: PodInstance): void {
+    for (const seq of eventSequences(this.layout.states.sequences, event)) {
+      const tier = seq.trigger.tier ?? (event === "threadOpened" ? "coordinator" : "lead");
+      for (const a of this.actorsById.values()) {
+        const e = a.employee;
+        if (e.tier !== tier || a.seq || (tier !== "coordinator" && e.thread_no !== pod.threadNo)) continue;
+        this.startSequence(a, seq.steps, pod.threadNo);
+      }
+    }
+  }
+
+  /** Someone who left has a (non-leaving) table again, e.g. the thread resumed. */
+  private tableIsBack(a: Actor): boolean {
+    const table = this.tableOf(a);
+    return Boolean(table) && table!.leaving === undefined;
+  }
+
+  private tableOf(a: Actor, no = a.employee.thread_no): PodInstance | undefined {
+    return no == null ? undefined : this.scene.pods.find((p) => p.threadNo === no);
   }
 
   private rehome(a: Actor): void {
@@ -126,11 +162,13 @@ export class Director {
       return this.applyRule(a, true);
     }
     const rule = matchRule(this.layout.states.rules, subjectOf(a.status, a.employee));
-    const place = this.resolvePlace(a, rule.place);
-    if (!samePlace(prev, place)) return this.applyRule(a, true);
+    // `current` (e.g. a raised hand) means "where it was going" — recomputed in the new scene.
+    const place = this.resolvePlace(a, rule.place === "current" ? a.destPlace ?? "seat" : rule.place);
     a.rule = rule;
-    a.dest = place;
     a.bubble = bubbleFor(a.status, rule, this.opts.now(), this.layout.bubbles?.ttlMs ?? 600_000);
+    if (samePlace(prev, place)) return void (a.dest = place);
+    a.restAnim = rule.anim === "keep" ? a.restAnim : rule.anim ?? place.pose ?? "stand";
+    this.moveTo(a, place, true);
   }
 
   /** Syncs the roster: adds new people at their place, drops missing ones. */
@@ -152,6 +190,7 @@ export class Director {
       status: e.status ?? IDLE,
       rule: { match: {}, place: "seat" },
       pos: this.scene.seats.get(e.id)?.point ?? [0, 0],
+      accessNode: this.scene.seats.get(e.id)?.accessNode,
       path: [],
       anim: "stand",
       restAnim: "stand",
@@ -211,12 +250,14 @@ export class Director {
     this.moveTo(a, place, instant);
   }
 
-  /** Resolves `seat`, `current` or `anchor:<name>` for this actor. */
+  /** Resolves `seat`, `current`, `pod` or `anchor:<name>` for this actor. */
   private resolvePlace(a: Actor, place: string): Place {
     a.destPlace = place === "current" ? a.destPlace : place;
     if (place === "current") return a.dest ? { ...a.dest, point: a.path.length ? a.dest.point : a.pos } : { point: a.pos, accessNode: a.accessNode };
     if (place.startsWith("anchor:")) return this.claimAnchor(a, place.slice(7));
     this.release(a);
+    const table = place === "pod" ? this.tableOf(a, a.seq?.threadNo ?? a.employee.thread_no) : undefined;
+    if (table) return { point: table.visit, accessNode: table.visitNode };
     const seat = this.scene.seats.get(a.employee.id);
     if (seat) return { point: seat.point, accessNode: seat.accessNode, deskKey: seat.deskKey };
     const rest = this.restAnchor(a);
@@ -297,8 +338,8 @@ export class Director {
     a.animStart = (this.opts.clock ?? this.opts.now)();
   }
 
-  private startSequence(a: Actor, steps: SequenceStep[]): void {
-    a.seq = { steps, index: -1, waitLeft: 0 };
+  private startSequence(a: Actor, steps: SequenceStep[], threadNo?: number): void {
+    a.seq = { steps, index: -1, waitLeft: 0, threadNo };
     this.nextStep(a);
   }
 
@@ -309,6 +350,7 @@ export class Director {
     if (!step) return this.endSequence(a);
     this.version++;
     a.bubble = step.bubble ? { text: this.stepBubble(a, step.bubble), kind: "plain" } : a.bubble;
+    if (step.hide) a.gone = true;
     if (step.anim) this.setAnim(a, step.anim);
     if (step.goto) return this.stepGoto(a, step.goto);
     run.waitLeft = step.wait ?? 0;
@@ -322,7 +364,9 @@ export class Director {
 
   private stepBubble(a: Actor, template: string): string {
     const id = a.status.task_id ?? "";
-    return fillTemplate(template, { taskId: id, taskTitle: (id && this.opts.taskTitle?.(id)) || "" });
+    const no = a.seq?.threadNo ?? a.employee.thread_no ?? undefined;
+    const title = no === undefined ? "" : this.scene.visible.find((t) => t.no === no)?.title ?? "";
+    return fillTemplate(template, { taskId: id, taskTitle: (id && this.opts.taskTitle?.(id)) || "", threadNo: no, threadTitle: title });
   }
 
   private endSequence(a: Actor): void {
@@ -380,7 +424,7 @@ export class Director {
 
   private view(a: Actor): ActorView {
     const no = a.employee.thread_no ?? undefined;
-    const offPage = no !== undefined && !this.scene.onPage.has(no);
+    const offPage = no !== undefined && !this.scene.onPage.has(no) && !this.scene.staff.has(a.employee.id);
     const hideOffPage = offPage && (this.layout.threadPods.layout.offPage ?? "anchorsWithBadge") === "hide";
     const inSeq = Boolean(a.seq);
     return {
@@ -396,8 +440,10 @@ export class Director {
       opacity: inSeq ? 1 : a.rule.opacity ?? 1,
       grayscale: !inSeq && Boolean(a.rule.grayscale),
       bubble: a.bubble,
-      hidden: Boolean(a.dest?.hidden) || hideOffPage,
+      hidden: Boolean(a.dest?.hidden) || hideOffPage || Boolean(a.gone),
       badge: offPage ? no : undefined,
+      thread: a.employee.tier === "lead" ? no ?? null : workThread(a.employee, a.status),
+      atDesk: Boolean(a.dest?.deskKey) && !a.path.length && !inSeq,
     };
   }
 
@@ -407,10 +453,24 @@ export class Director {
     for (const a of this.actorsById.values()) {
       const key = a.dest?.deskKey;
       if (!key || a.path.length || a.seq) continue;
-      out.set(key, { screen: a.rule.screen, timerSince: a.rule.timer ? toMs(a.status.since) : undefined });
+      const thread = workThread(a.employee, a.status) ?? undefined;
+      out.set(key, { screen: a.rule.screen, timerSince: a.rule.timer ? toMs(a.status.since) : undefined, thread });
     }
     return out;
   }
+}
+
+/** Tables that appeared (threadOpened) or started leaving (threadEnded) between two scenes. */
+export function sceneEvents(prev: Scene, next: Scene): [SceneEvent, PodInstance][] {
+  const before = new Set(prev.visible.map((t) => t.no));
+  const wasLeaving = new Set(prev.pods.filter((p) => p.leaving !== undefined).map((p) => p.threadNo));
+  const out: [SceneEvent, PodInstance][] = [];
+  for (const pod of next.pods) {
+    const leaving = pod.leaving !== undefined;
+    if (leaving && !wasLeaving.has(pod.threadNo)) out.push(["threadEnded", pod]);
+    else if (!leaving && !before.has(pod.threadNo)) out.push(["threadOpened", pod]);
+  }
+  return out;
 }
 
 function samePlace(a: Place | undefined, b: Place): boolean {

@@ -1,6 +1,11 @@
 // Pure scene compiler (office-layout.md §4.4): layout + visible threads +
-// employees → rooms, furniture, pod instances, seat table and merged graph.
+// employees → rooms, furniture, pod instances (work tables), staff desks, seat
+// table and merged graph. Members sit at their own staff desk (shared-members.md
+// §9); a thread's table seats its lead (and visiting members with
+// `members.visitPods`). Layouts without `staffArea` seat members in the pods.
 import { addEdge, addNode, createGraph, nearestNode, type NavGraph } from "./nav";
+import { sortMembers } from "./people";
+import { placeStaff } from "./staff";
 import { fitTemplate } from "./template";
 import type {
   Anchor, DeskDef, OfficeEmployee, OfficeLayout, OfficeThread, Point, PodTemplate, Rect, Room, Sprite, TextStyle,
@@ -22,7 +27,18 @@ export interface DeskInstance extends PlacedSprite {
   deskId: string;
   seat: Point;
   timer?: Point;
-  threadNo: number;
+  /** The pod's thread; undefined for staff desks. */
+  threadNo?: number;
+  /** Staff desks: the member who owns it, and where its `#18 · t5` work tag goes. */
+  owner?: string;
+  tag?: Point;
+}
+
+export interface ParticipantStrip {
+  at: Point;
+  size: number;
+  step: Point;
+  max: number;
 }
 
 export interface PodInstance {
@@ -35,13 +51,20 @@ export interface PodInstance {
   frame: PodTemplate["frame"];
   plate?: { at: Point; text: string; style: TextStyle };
   desks: DeskInstance[];
+  participants?: ParticipantStrip;
+  /** Where visitors stand (place `pod`) and the nav node it hangs off. */
+  visit: Point;
+  visitNode?: string;
+  /** The thread just ended (since when, animation clock ms): the table fades out while its lead leaves. */
+  leaving?: number;
 }
 
 export interface SeatAssignment {
   point: Point;
   deskKey?: string;
   accessNode?: string;
-  threadNo: number;
+  /** The pod the seat belongs to; undefined for staff desks. */
+  threadNo?: number;
 }
 
 export interface Scene {
@@ -51,7 +74,10 @@ export interface Scene {
   rooms: Room[];
   furniture: PlacedSprite[];
   pods: PodInstance[];
+  /** Every desk: pod desks and staff desks. */
   desks: Map<string, DeskInstance>;
+  /** Staff desks by owner (employee id). */
+  staff: Map<string, DeskInstance>;
   seats: Map<string, SeatAssignment>;
   graph: NavGraph;
   anchors: Record<string, Anchor>;
@@ -68,9 +94,13 @@ export interface CompileInput {
   employees: OfficeEmployee[];
   focus?: number | null;
   page?: number;
+  /** Threads that just ended → since when (animation clock ms): still drawn, fading, while their leads leave. */
+  leaving?: Map<number, number>;
 }
 
 const STACK_STEP = 6;
+
+export { instanceOf, sortMembers } from "./people";
 
 export function compileScene(layout: OfficeLayout, input: CompileInput): Scene {
   const tp = layout.threadPods;
@@ -81,13 +111,15 @@ export function compileScene(layout: OfficeLayout, input: CompileInput): Scene {
   const pageThreads = visible.slice(index * plan.perPage, (index + 1) * plan.perPage);
   const threadColors = new Map(input.threads.map((t) => [t.no, threadColor(layout, t.no)]));
   const graph = baseGraph(layout);
-  const pods = pageThreads.map((t, i) => instantiatePod(layout, t, plan, i, threadColors.get(t.no)!));
-  const desks = new Map(pods.flatMap((p) => p.desks.map((d) => [d.key, d] as const)));
+  const pods = pageThreads.map((t, i) => instantiatePod(layout, t, plan, i, threadColors.get(t.no)!, input.leaving?.get(t.no)));
   const seats = new Map<string, SeatAssignment>();
   for (const pod of pods) {
     mergePodNav(graph, tp.templates[pod.template], pod);
-    seatPod(layout, pod, input.employees, graph, seats);
+    seatPod(layout, pod, podPeople(layout, input.employees, pod.threadNo), graph, seats);
   }
+  const staff = placeStaff(layout, input.employees, graph);
+  for (const [id, seat] of staff.seats) if (!seats.has(id)) seats.set(id, seat);
+  const desks = new Map([...pods.flatMap((p) => p.desks), ...staff.desks.values()].map((d) => [d.key, d] as const));
   return {
     layout,
     width: layout.canvas.width,
@@ -96,6 +128,7 @@ export function compileScene(layout: OfficeLayout, input: CompileInput): Scene {
     furniture: placeFurniture(layout),
     pods,
     desks,
+    staff: staff.desks,
     seats,
     graph,
     anchors: layout.anchors,
@@ -168,7 +201,7 @@ function columnsFor(layout: OfficeLayout, size: Point, scale: number): number {
   return Math.max(1, Math.floor((aw + gx) / (size[0] * scale + gx)));
 }
 
-function instantiatePod(layout: OfficeLayout, thread: OfficeThread, plan: PodPlan, slot: number, color: string): PodInstance {
+function instantiatePod(layout: OfficeLayout, thread: OfficeThread, plan: PodPlan, slot: number, color: string, leaving?: number): PodInstance {
   const tpl = layout.threadPods.templates[plan.template];
   const [ax, ay] = layout.threadPods.area.rect;
   const [gx, gy] = layout.threadPods.layout.gap ?? [0, 0];
@@ -188,7 +221,25 @@ function instantiatePod(layout: OfficeLayout, thread: OfficeThread, plan: PodPla
     frame: tpl.frame,
     plate: tpl.plate && plateFor(tpl.plate, thread, at(tpl.plate.at ?? [6, 6])),
     desks: tpl.desks.map((d) => deskFor(layout, d, thread.no, at, s)),
+    participants: tpl.participants && stripFor(tpl.participants, at, s),
+    ...visitOf(tpl, thread.no, at),
+    ...(leaving === undefined ? {} : { leaving }),
   };
+}
+
+function stripFor(p: NonNullable<PodTemplate["participants"]>, at: (p: Point) => Point, s: number): ParticipantStrip {
+  const size = p.size ?? 16;
+  const step = p.step ?? [size + 2, 0];
+  return { at: at(p.at), size: size * s, step: [step[0] * s, step[1] * s], max: p.max };
+}
+
+/** The visit spot: the template's `visit`, else its first exit node (which it hangs off). */
+function visitOf(tpl: PodTemplate, no: number, at: (p: Point) => Point): { visit: Point; visitNode?: string } {
+  const exit = Object.keys(tpl.nav.exits)[0];
+  const node = exit ? podNodeId(no, exit) : undefined;
+  if (tpl.visit) return { visit: at(tpl.visit), visitNode: node };
+  const local = exit ? tpl.nav.nodes[exit] : undefined;
+  return { visit: at(local ?? [tpl.size[0] / 2, tpl.size[1] / 2]), visitNode: node };
 }
 
 function plateFor(style: TextStyle, thread: OfficeThread, at: Point): PodInstance["plate"] {
@@ -238,10 +289,18 @@ function mergePodNav(g: NavGraph, tpl: PodTemplate, pod: PodInstance): void {
   for (const [local, global] of Object.entries(tpl.nav.exits)) addEdge(g, podNodeId(pod.threadNo, local), global);
 }
 
-function seatPod(layout: OfficeLayout, pod: PodInstance, employees: OfficeEmployee[], g: NavGraph, seats: Map<string, SeatAssignment>): void {
+/**
+ * Who sits at a thread's table: its lead; the members working for the thread too when the layout
+ * has no staff area (older layouts) or lets members visit the tables (`members.visitPods`).
+ */
+export function podPeople(layout: OfficeLayout, employees: OfficeEmployee[], no: number): OfficeEmployee[] {
+  const visit = !layout.staffArea || Boolean(layout.members?.visitPods);
+  return employees.filter((e) => e.thread_no === no && (e.tier === "lead" || (visit && e.tier === "member")));
+}
+
+function seatPod(layout: OfficeLayout, pod: PodInstance, members: OfficeEmployee[], g: NavGraph, seats: Map<string, SeatAssignment>): void {
   const tp = layout.threadPods;
   const tpl = tp.templates[pod.template];
-  const members = employees.filter((e) => e.thread_no === pod.threadNo && e.tier !== "coordinator");
   const leadDeskId = tp.seating.leadDesk ?? tpl.desks.find((d) => d.for === "lead")?.id;
   const lead = members.find((e) => e.tier === "lead");
   const others = sortMembers(members.filter((e) => e !== lead), tp.seating.order ?? ["roleSort", "instance"]);
@@ -280,29 +339,6 @@ function nearestPodNode(g: NavGraph, no: number, p: Point): string | undefined {
   const sub = createGraph();
   for (const [id, q] of g.nodes) if (id.startsWith(prefix)) addNode(sub, id, q);
   return nearestNode(sub, p) ?? nearestNode(g, p);
-}
-
-const NUM_SUFFIX = /(\d+)$/;
-
-export function instanceOf(e: OfficeEmployee): number {
-  if (e.instance !== undefined) return e.instance;
-  const m = NUM_SUFFIX.exec(e.name);
-  return m ? Number(m[1]) : 1;
-}
-
-export function sortMembers(list: OfficeEmployee[], order: string[]): OfficeEmployee[] {
-  const keys: Record<string, (a: OfficeEmployee, b: OfficeEmployee) => number> = {
-    roleSort: (a, b) => (a.sort ?? 0) - (b.sort ?? 0) || a.role.localeCompare(b.role),
-    instance: (a, b) => instanceOf(a) - instanceOf(b),
-    name: (a, b) => a.name.localeCompare(b.name),
-  };
-  return [...list].sort((a, b) => {
-    for (const k of order) {
-      const r = keys[k]?.(a, b) ?? 0;
-      if (r) return r;
-    }
-    return a.id.localeCompare(b.id);
-  });
 }
 
 function placeFurniture(layout: OfficeLayout): PlacedSprite[] {

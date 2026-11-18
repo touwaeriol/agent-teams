@@ -1,7 +1,7 @@
-// Employee looks (office-layout.md §4.6): resolve the look, then compose
+// Employee looks (office-layout.md §4.7): resolve the look, then compose
 // character frames into pixel lists and cache them as small canvases.
 import { grayscale as toGray, resolveColor, shadeColor, type ColorContext } from "./color";
-import { instanceOf } from "./compile";
+import { instanceOf } from "./people";
 import type { Cell, Character, Look, LookPiece, OfficeEmployee, OfficeLayout } from "./types";
 
 export interface ResolvedLook {

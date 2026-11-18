@@ -190,7 +190,7 @@ CREATE UNIQUE INDEX at_roles_one_coord ON at_roles (user_id, COALESCE(project_id
 CREATE UNIQUE INDEX at_roles_one_lead  ON at_roles (user_id, COALESCE(project_id, '')) WHERE tier = 'lead';
 ```
 
-`look` 的取值与办公室布局的 `looks` 对应（`office-layout.md` §4.6）：`outfit` 和 `accessory` 是**字符串**，合法值 = 当前全局布局 `looks.outfits` / `looks.accessories` 的键，由 Go 在保存时校验（库里不加 CHECK，OpenAPI 里也是 `string`，这样布局 JSON 新增一种服装，Team 页和接口不用改代码就能用）。Schema 要求布局至少包含内置的 `tee|hoodie|suit|coat` 和 `none|glasses|headset|cap`。`hair` 为空时按实例编号从布局的发色表里取。
+`look` 的取值与办公室布局的 `looks` 对应（`office-layout.md` §4.7）：`outfit` 和 `accessory` 是**字符串**，合法值 = 当前全局布局 `looks.outfits` / `looks.accessories` 的键，由 Go 在保存时校验（库里不加 CHECK，OpenAPI 里也是 `string`，这样布局 JSON 新增一种服装，Team 页和接口不用改代码就能用）。Schema 要求布局至少包含内置的 `tee|hoodie|suit|coat` 和 `none|glasses|headset|cap`。`hair` 为空时按实例编号从布局的发色表里取。
 
 ### 2.5 项目、对话、讨论串
 
