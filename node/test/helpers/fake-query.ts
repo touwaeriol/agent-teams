@@ -112,7 +112,7 @@ class FakeQuery {
       if (this.done) return;
       const text = promptText(msg.message.content);
       this.log.prompts.push(text);
-      if (text === "crash") {
+      if (text === "crash" || text === "/compact crash") {
         this.crashed = true;
         this.wake?.();
         return;

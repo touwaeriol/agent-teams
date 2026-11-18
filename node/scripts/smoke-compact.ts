@@ -76,7 +76,7 @@ async function usage(label: string, q: ReturnType<typeof query>): Promise<number
 }
 
 async function main(): Promise<void> {
-  const env = claudeCompactEnv(LIMIT, PCT);
+  const env = claudeCompactEnv({ limit_tokens: LIMIT, in_task_pct: PCT });
   console.log("compact env:", JSON.stringify(env), `(limit ${LIMIT} × ${PCT}% = ${Math.floor((LIMIT * PCT) / 100)} tokens)`);
   const on = [{ hooks: [async (i: HookInput) => onHook(i)] }];
   const q = query({

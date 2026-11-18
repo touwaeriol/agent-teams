@@ -9,6 +9,8 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 const threads = new Map();
 const pending = new Map();
 let nextServerId = 1000;
+/** Set by a turn whose text has "steerfail": turn/steer is refused, as after the turn ended. */
+let steerFails = false;
 
 const write = (msg) => process.stdout.write(JSON.stringify(msg) + "\n");
 const log = (entry) => process.env.FAKE_CODEX_LOG && appendFileSync(process.env.FAKE_CODEX_LOG, JSON.stringify(entry) + "\n");
@@ -42,6 +44,7 @@ async function runTurn(threadId, turnId, text) {
     reply = `tool: ${r.content.map((c) => c.text).join("")}`;
     await client.close();
   }
+  if (text.includes("steerfail")) steerFails = true;
   if (text.includes("autocompact")) {
     // the runtime compacts mid-turn by itself; the daemon may steer the anchor in
     compaction(threadId, turnId);
@@ -99,9 +102,13 @@ const handlers = {
     setTimeout(() => void runTurn(p.threadId, turnId, p.input[0].text), 20);
     return { turn: { id: turnId, status: "inProgress", items: [] } };
   },
-  "turn/steer": (p) => ({ turnId: p.expectedTurnId }),
+  "turn/steer": (p) => {
+    if (steerFails) throw new Error("no active turn to steer");
+    return { turnId: p.expectedTurnId };
+  },
   "thread/compact/start": (p) => {
-    setTimeout(() => void compactTurn(p.threadId), 20);
+    // late enough for a message sent right after to run its own turn first
+    setTimeout(() => void compactTurn(p.threadId), 300);
     return {};
   },
   "thread/read": (p) => ({ thread: { id: p.threadId, turns: [{ items: [{ type: "userMessage", content: [{ type: "text", text: "<!-- m_seen -->\nold" }] }] }] } }),

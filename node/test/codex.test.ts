@@ -187,4 +187,31 @@ describe("codex context management", () => {
     expect(steers[0]!.params.input[0].text).toContain("[任务锚点 t7] 拆分模块");
     expect(h!.console.ofType("session.event").filter((f) => f.body.kind === "compacting").map((f) => f.body.on)).toEqual([true, false]);
   });
+
+  it("drops the anchor when it cannot be steered into the turn (never a turn of its own)", async () => {
+    const calls = await startCodex();
+    h!.console.command("session.open", codexOpen("s_XS"));
+    await h!.console.waitType("session.opened");
+    h!.console.command("session.release", { session_id: "s_XS", open_gen: 1 });
+    h!.console.command("session.send", { session_id: "s_XS", msg_id: "m_s1", text: "steerfail autocompact", priority: "next", kind: "task", anchor: "[任务锚点 t8] 迁移" });
+    await h!.console.waitType("session.event", (b) => b.kind === "turn_ended");
+    await new Promise((r) => setTimeout(r, 200));
+    expect(calls().filter((c) => c.method === "turn/steer")).toHaveLength(1);
+    expect(calls().filter((c) => c.method === "turn/start")).toHaveLength(1);
+  });
+
+  it("does not end session.compact at the turn of a message that came in meanwhile", async () => {
+    const calls = await startCodex();
+    h!.console.command("session.open", codexOpen("s_XR"));
+    await h!.console.waitType("session.opened");
+    h!.console.command("session.release", { session_id: "s_XR", open_gen: 1 });
+    h!.console.command("session.send", { session_id: "s_XR", msg_id: "m_r1", text: "hello", priority: "next", kind: "task" });
+    await h!.console.waitType("session.event", (b) => b.kind === "turn_ended");
+    h!.console.command("session.compact", { session_id: "s_XR", open_gen: 1, compact_id: "cp_r" });
+    await h!.console.waitFor(() => calls().some((c) => c.method === "thread/compact/start"), 5000, "compact start");
+    h!.console.command("session.send", { session_id: "s_XR", msg_id: "m_r2", text: "quick one", priority: "next", kind: "mail" });
+    const done = await h!.console.waitType("session.compacted");
+    expect(done.body).toMatchObject({ compact_id: "cp_r", ok: true, context: { used_tokens: 3000 } });
+    expect(h!.console.ofType("session.event").filter((f) => f.body.kind === "turn_ended")).toHaveLength(3);
+  });
 });

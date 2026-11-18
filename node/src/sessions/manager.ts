@@ -4,7 +4,7 @@ import type { ApprovalBroker } from "../approvals.js";
 import type { Reply } from "../link/inbox.js";
 import type { GitResult, SessionClose, SessionCompact, SessionCompacted, SessionInterrupt, SessionOpen, SessionReportItem, SessionSend, SessionSetMode, SessionWatch } from "../protocol.js";
 import type { ToolBroker } from "../toolhost/broker.js";
-import { deferred, sleep, type Deferred } from "../util/async.js";
+import { deferred, sleep, withTimeout, type Deferred } from "../util/async.js";
 import { readJsonFile, writeFileAtomic } from "../util/jsonl.js";
 import type { Logger } from "../util/log.js";
 import { isInside, resolveInRoot } from "../util/paths.js";
@@ -36,9 +36,16 @@ export interface ManagerDeps {
   maxActive?: number;
   crashDelaysMs?: number[];
   prepareTimeoutMs?: number;
-  /** How long session.compact waits for a running turn to end (default 10 minutes, the console's timeout). */
+  /** How long session.compact waits for a running turn to end before it gives up (busy). */
   compactWaitMs?: number;
+  /** How long the compaction itself may take. */
+  compactRunMs?: number;
 }
+
+/** session.compact waits at most this long for the session to go idle (protocol.md §4.10). */
+const COMPACT_WAIT_MS = 120_000;
+/** …and the runtime this long to compact: both together stay under the console's 10 minutes. */
+const COMPACT_RUN_MS = 420_000;
 
 const DEFAULT_CRASH_DELAYS = [5_000, 15_000, 45_000];
 
@@ -189,6 +196,7 @@ export class SessionManager implements SessionHost {
       s.held.push(body);
       return [];
     }
+    s.sends++;
     if (body.anchor !== undefined) this.setAnchor(s, body.anchor);
     if (await this.alreadyDelivered(s, body.msg_id)) return [delivered(s, body.msg_id)];
     try {
@@ -232,6 +240,12 @@ export class SessionManager implements SessionHost {
     this.persist(s);
   }
 
+  /** tool.result anchor: the call ended the session's task (complete_task). */
+  setTaskAnchor(sessionId: string, anchor: string): void {
+    const s = this.sessions.get(sessionId);
+    if (s && s.taskAnchor !== anchor) this.setAnchor(s, anchor);
+  }
+
   /**
    * session.compact (protocol.md §4.10): answered later with session.compacted, so the session's
    * command lane is not held while the runtime summarizes. The anchor belongs to the task that
@@ -240,28 +254,45 @@ export class SessionManager implements SessionHost {
   compact(body: SessionCompact): Reply[] {
     const s = this.sessions.get(body.session_id);
     if (!s || s.gen !== body.open_gen || s.state === "closed") return [compacted(body, { ok: false, error: "no such session on this node" })];
-    this.setAnchor(s, "");
-    void this.runCompact(s, body).then((r) => this.send("session.compacted", compacted(body, r).body));
+    s.taskAnchor = "";
+    s.compacts.add(body.compact_id);
+    this.persist(s);
+    void this.runCompact(s, body).then((r) => {
+      s.compacts.delete(body.compact_id);
+      if (this.sessions.get(s.id) === s) this.persist(s);
+      this.send("session.compacted", compacted(body, r).body);
+    });
     return [];
   }
 
+  /**
+   * Runs the compaction once the session is idle. It gives up (ok=false) when the session stays
+   * in a turn for COMPACT_WAIT_MS or gets a message first (the brief waiting for it then goes out
+   * on top of the full context), and reports a runtime that exits during the compaction.
+   */
   private async runCompact(s: Session, body: SessionCompact): Promise<CompactResult> {
+    const sends = s.sends;
     try {
       await this.ensureRunning(s);
-      await this.untilIdle(s);
-      if (!s.driver?.compact) return { ok: false, error: "the runtime cannot compact" };
-      return await s.driver.compact(body.instructions ?? "");
+      const busy = await this.untilIdle(s, sends);
+      if (busy) return { ok: false, error: busy };
+      const driver = s.driver;
+      if (!driver?.compact) return { ok: false, error: "the runtime cannot compact" };
+      const r = await withTimeout(driver.compact(body.instructions ?? ""), this.d.compactRunMs ?? COMPACT_RUN_MS, () => new Error("timed out: the runtime did not finish compacting"));
+      return !r.ok && s.driver !== driver ? { ...r, error: `exited: ${r.error ?? "the runtime ended during the compaction"}` } : r;
     } catch (err) {
       return { ok: false, error: (err as Error).message.slice(0, 1000) };
     }
   }
 
-  /** Waits for the session's running turn to end (compaction runs between turns). */
-  private async untilIdle(s: Session): Promise<void> {
-    const until = Date.now() + (this.d.compactWaitMs ?? 600_000);
-    while (s.driver?.busy) {
-      if (Date.now() > until) throw new Error("the session stayed busy");
-      await sleep(250);
+  /** Waits for the session's running turn to end; why it gave up ("busy: …"), or null when idle. */
+  private async untilIdle(s: Session, sends: number): Promise<string | null> {
+    const until = Date.now() + (this.d.compactWaitMs ?? COMPACT_WAIT_MS);
+    for (;;) {
+      if (s.sends !== sends) return "busy: a new message arrived before the compaction";
+      if (!s.driver?.busy) return null;
+      if (Date.now() > until) return "busy: the session stayed in a turn";
+      await sleep(100);
     }
   }
 
@@ -412,9 +443,11 @@ export class SessionManager implements SessionHost {
   }
 
   onExit(s: Session, err: Error): void {
-    if (!s.driver) return;
+    const driver = s.driver;
+    if (!driver) return;
     this.d.log.warn({ session: s.id, err: err.message }, "session process exited");
     s.driver = null;
+    void driver.close().catch(() => undefined); // settles a session.compact in progress (ok=false)
     s.cancelPending("process_restarted", "process_restarted");
     this.freeSlot(s);
     void this.restartAfterCrash(s, err);
@@ -466,7 +499,15 @@ export class SessionManager implements SessionHost {
       s.taskAnchor = rec.anchor ?? "";
       s.absCwd = resolveInRoot(this.d.root, rec.spec.cwd);
       this.sessions.set(s.id, s);
+      this.failCompactions(s, rec.compacting ?? []);
     }
+  }
+
+  /** A session.compact that was running when the daemon stopped: the console hears it failed. */
+  private failCompactions(s: Session, ids: string[]): void {
+    if (ids.length === 0) return;
+    for (const id of ids) this.send("session.compacted", { session_id: s.id, open_gen: s.gen, compact_id: id, ok: false, error: "restarted: the daemon restarted during the compaction" });
+    this.persist(s);
   }
 }
 

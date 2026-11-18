@@ -57,6 +57,9 @@ export interface DaemonOptions {
   codexCommand?: string[];
   link?: { pingMs?: number; deadMs?: number; backoff?: { minMs: number; maxMs: number } };
   crashDelaysMs?: number[];
+  /** session.compact: how long to wait for an idle session, and for the compaction (tests). */
+  compactWaitMs?: number;
+  compactRunMs?: number;
   onExit?: (code: number) => void;
   /** Where the GitHub CLI is downloaded when the node has none (default <data>/tools). */
   toolsDir?: string;
@@ -122,6 +125,8 @@ export class Daemon {
       onSessionGone: (id) => this.forgetSession(id),
       fetchImage: consoleImageFetcher(o.url, o.token),
       ...(o.crashDelaysMs ? { crashDelaysMs: o.crashDelaysMs } : {}),
+      ...(o.compactWaitMs ? { compactWaitMs: o.compactWaitMs } : {}),
+      ...(o.compactRunMs ? { compactRunMs: o.compactRunMs } : {}),
     });
     this.dispatcher = new Dispatcher(this.link, this.inbox, this.handlers(), o.log);
     this.link.on("frame", (f: Frame) => this.dispatcher.handle(f));
@@ -180,6 +185,12 @@ export class Daemon {
   }
 
   /** Requests and tool calls whose Promise died with the previous process become cancels (protocol.md §5.3, §6.2). */
+  /** A platform tool's result; one that ended the caller's task also replaces its anchor (protocol.md §4.10). */
+  private toolResult(b: ToolResult): void {
+    this.tools.resolve(b);
+    if (b.anchor !== undefined) this.sessions.setTaskAnchor(b.session_id, b.anchor);
+  }
+
   private cancelOrphans(): void {
     this.outbox.rewritePending((f) => {
       const b = f.body as { approval_id?: string; call_id?: string; session_id: string };
@@ -218,7 +229,7 @@ export class Daemon {
       "session.close": { lane: session, run: (b) => s.close(b as unknown as SessionClose) },
       "session.watch": { run: async (b) => s.watch(b as unknown as SessionWatch) },
       "approval.resolve": { run: async (b) => [{ type: "approval.ack", body: this.approvals.resolve(b as unknown as ApprovalResolve) }] },
-      "tool.result": { run: async (b) => (this.tools.resolve(b as unknown as ToolResult), []) },
+      "tool.result": { run: async (b) => (this.toolResult(b as unknown as ToolResult), []) },
       "file.download": { run: async (b) => (this.tools.chunk(b as unknown as FileDownload), []) },
       "cred.response": { run: async (b) => (this.creds.resolve(b as unknown as CredResponse), []) },
       "git.prepare": { run: (b) => this.gitReply(this.git.prepare(b as unknown as GitPrepare)) },

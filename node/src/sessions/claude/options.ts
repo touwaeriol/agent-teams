@@ -46,7 +46,7 @@ export function buildClaudeOptions(i: OptionInputs): Options {
     ...(c.max_turns ? { maxTurns: c.max_turns } : {}),
     ...(c.max_budget_usd ? { maxBudgetUsd: c.max_budget_usd } : {}),
     systemPrompt: { type: "preset", preset: "claude_code", append: c.system_append ?? "" },
-    env: { ...i.env, ...claudeCompactEnv(i.context?.limit_tokens, i.context?.in_task_pct) },
+    env: { ...i.env, ...claudeCompactEnv(i.context) },
     settings: buildSettings(c, i.root, i.cwd, i.secretPaths),
     canUseTool: i.canUseTool,
     hooks: i.hooks,

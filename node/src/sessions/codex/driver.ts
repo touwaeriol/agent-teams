@@ -41,8 +41,13 @@ export class CodexDriver implements Driver, ThreadListener {
   private resolvedModel: string | undefined;
   /** Context use from the latest thread/tokenUsage/updated. */
   private usage: ContextUsage | undefined;
-  /** A session.compact in progress: done at the turn/completed after the compaction. */
-  private compacting: { done: Deferred<CompactResult>; seen: boolean } | null = null;
+  /**
+   * A session.compact in progress. turn: the turn thread/compact/start ran (the first turn that
+   * starts without a message of ours); seen: a compaction was reported. Done at the end of the
+   * turn that compacted, or ok=false at the end of the compaction turn without one; a turn of
+   * a message that came in meanwhile does not end it.
+   */
+  private compacting: Compacting | null = null;
   /** The turn whose compaction already got the anchor (thread/compacted and the item both report it). */
   private anchoredTurn: string | null = null;
 
@@ -125,6 +130,7 @@ export class CodexDriver implements Driver, ThreadListener {
 
   private markTurn(turnId: string): void {
     if (this.activeTurn === turnId) return;
+    if (this.compacting && !this.compacting.turn && this.triggers.length === 0) this.compacting.turn = turnId;
     this.activeTurn = turnId;
     this.turnStartedAt = Date.now();
     this.lastText = undefined;
@@ -157,14 +163,15 @@ export class CodexDriver implements Driver, ThreadListener {
   async compact(): Promise<CompactResult> {
     if (!this.threadId) return { ok: false, error: "no codex thread" };
     const server = await this.deps.hub.ensure();
-    this.compacting = { done: deferred<CompactResult>(), seen: false };
+    const c: Compacting = { done: deferred<CompactResult>(), seen: false, turn: null };
+    this.compacting = c; // before the request: its turn may start before the response arrives
     try {
       await server.request("thread/compact/start", { threadId: this.threadId });
     } catch (err) {
-      this.compacting = null;
+      if (this.compacting === c) this.compacting = null;
       return { ok: false, error: (err as Error).message };
     }
-    return this.compacting.done.promise;
+    return c.done.promise;
   }
 
   async close(): Promise<void> {
@@ -203,7 +210,8 @@ export class CodexDriver implements Driver, ThreadListener {
   private onTurnCompleted(turn: { id: string; status: string }): void {
     for (const ev of turnCompleted(turn, this.turnStartedAt, this.lastText)) this.emit(this.turnEnded(ev));
     this.activeTurn = null;
-    if (this.compacting) this.finishCompact(this.compacting.seen);
+    const c = this.compacting;
+    if (c && (c.seen || c.turn === turn.id)) this.finishCompact(c.seen);
     this.authReported = false;
     this.ctx.sink.turn(false);
     const next = this.later.shift();
@@ -240,9 +248,20 @@ export class CodexDriver implements Driver, ThreadListener {
       return;
     }
     const anchor = this.ctx.sink.anchor();
-    if (!anchor || !this.activeTurn || this.anchoredTurn === (turnId || this.activeTurn)) return;
-    this.anchoredTurn = turnId || this.activeTurn;
-    void this.push({ msg_id: newId("m_anchor_"), text: anchor, priority: "next" }).catch((err) => this.ctx.log.warn({ err: (err as Error).message }, "anchor after compaction failed"));
+    const turn = turnId || this.activeTurn;
+    if (!anchor || !this.activeTurn || !turn || this.anchoredTurn === turn) return;
+    this.anchoredTurn = turn;
+    void this.steerAnchor(anchor);
+  }
+
+  /**
+   * Only into the running turn (turn/steer): never a turn of its own. When the turn already ended
+   * the anchor is dropped; the next task message brings its own brief.
+   */
+  private async steerAnchor(anchor: string): Promise<void> {
+    const server = await this.deps.hub.ensure();
+    const ok = this.activeTurn !== null && (await this.steer(server, { msg_id: newId("m_anchor_"), text: anchor, priority: "next" }));
+    if (!ok) this.ctx.log.info({ session: this.ctx.spec.session_id }, "anchor after compaction dropped: no running turn");
   }
 
   private finishCompact(ok: boolean): void {
@@ -316,12 +335,20 @@ export class CodexDriver implements Driver, ThreadListener {
   }
 }
 
+type Compacting = { done: Deferred<CompactResult>; seen: boolean; turn: string | null };
 type TokenUsage = { last?: { totalTokens: number }; modelContextWindow?: number | null };
 
-/** The role's in-task compaction as Codex config: an absolute token count (limit × pct). */
+/** The role's in-task compaction as Codex config: an absolute token count (limit × pct; shared-members.md §5.1). */
 export function autoCompactConfig(context: SessionOpen["context"]): Record<string, number> {
-  if (!context?.limit_tokens || !context.in_task_pct) return {};
-  return { model_auto_compact_token_limit: Math.floor((context.limit_tokens * context.in_task_pct) / 100) };
+  const limit = effectiveLimit(context?.limit_tokens, context?.window_tokens);
+  if (!limit || !context?.in_task_pct) return {};
+  return { model_auto_compact_token_limit: Math.floor((limit * context.in_task_pct) / 100) };
+}
+
+/** The role's limit capped at the model's window (a larger one would never trigger), else the window. */
+function effectiveLimit(limit?: number, window?: number): number {
+  if (limit && window) return Math.min(limit, window);
+  return limit ?? window ?? 0;
 }
 
 /** Protocol turn ids start with t_; Codex turn ids are UUIDv7. */
