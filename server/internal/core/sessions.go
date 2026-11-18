@@ -206,3 +206,26 @@ func NodeHasFeature(ctx context.Context, q DB, nodeID, feature string) (bool, er
 	err := q.Gorm(ctx).Table("at_nodes").Where("id = ? AND last_hello->'features' @> jsonb_build_array(?::text)", nodeID, feature).Count(&n).Error
 	return n > 0, err
 }
+
+// RecordContext stores the context a session used at its last turn end, and the window it was
+// measured against (shared-members.md §5.3).
+func RecordContext(ctx context.Context, tx *Tx, id string, used, max int) error {
+	return openSession(ctx, tx, id).Updates(map[string]any{"context_used": used, "context_max": max}).Error
+}
+
+// CountTaskBrief counts a task brief that reached the session (clear_after_tasks).
+func CountTaskBrief(ctx context.Context, tx *Tx, id string) error {
+	return openSession(ctx, tx, id).Update("tasks_done", gorm.Expr("tasks_done + 1")).Error
+}
+
+// LastContextWindow is the context window the employee's latest session of this runtime reported
+// (tokens; nil when none did): session.open's window_tokens (shared-members.md §5.1).
+func LastContextWindow(ctx context.Context, q DB, employeeID, runtime string) (*int, error) {
+	var max []int
+	err := q.Gorm(ctx).Table("at_agent_sessions").Where("employee_id = ? AND runtime = ? AND context_max > 0", employeeID, runtime).
+		Order("opened_at DESC").Limit(1).Pluck("context_max", &max).Error
+	if err != nil || len(max) == 0 {
+		return nil, err
+	}
+	return &max[0], nil
+}

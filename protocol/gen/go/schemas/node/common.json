@@ -202,6 +202,28 @@
           "maxLength": 2000
         }
       }
+    },
+    "ContextUsage": {
+      "title": "ContextUsage",
+      "description": "How much of the context window a session uses (shared-members.md §5.3).",
+      "type": "object",
+      "required": [
+        "used_tokens",
+        "max_tokens"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "used_tokens": {
+          "description": "Tokens in the context now (Claude: getContextUsage totalTokens; Codex: the last request's total tokens).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_tokens": {
+          "description": "The window the runtime measures against (Claude: the autocompact window; Codex: the model's context window); 0 when unknown.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
     }
   }
 }

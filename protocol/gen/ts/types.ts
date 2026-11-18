@@ -326,6 +326,22 @@ export interface TodoItem {
   active_form?: string;
 }
 /**
+ * How much of the context window a session uses (shared-members.md §5.3).
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "ContextUsage".
+ */
+export interface ContextUsage {
+  /**
+   * Tokens in the context now (Claude: getContextUsage totalTokens; Codex: the last request's total tokens).
+   */
+  used_tokens: number;
+  /**
+   * The window the runtime measures against (Claude: the autocompact window; Codex: the model's context window); 0 when unknown.
+   */
+  max_tokens: number;
+}
+/**
  * Credential helper asks for a short-lived token. Unreliable, retried after 10 s with the same req_id; never logged.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -662,7 +678,7 @@ export interface Hello {
   capacity?: Capacity;
   runtimes?: Runtimes;
   /**
-   * Feature names, e.g. sessions, codex_app_server, git_worktree, cred_helper, upgrade.
+   * Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, context_usage (turn_ended carries context), session_compact (session.compact).
    */
   features?: string[];
   isolated?: boolean;
@@ -753,7 +769,13 @@ export interface NodeUpgradeResult {
 export interface SessionClose {
   session_id: SessionId;
   open_gen?: OpenGen;
-  reason?: "thread_done" | "employee_removed" | "policy_violation" | "node_drain" | "switch_thread";
+  reason?:
+    | "thread_done"
+    | "employee_removed"
+    | "policy_violation"
+    | "node_drain"
+    | "switch_thread"
+    | "context_clear";
   /**
    * Also delete the local session record (SDK transcript is kept 7 days).
    */
@@ -769,6 +791,51 @@ export interface SessionClosed {
   session_id: SessionId;
   open_gen?: OpenGen;
   reason?: string;
+}
+/**
+ * Compact the session's context now (between tasks, shared-members.md §5.3). The daemon runs it when the session is between turns and answers session.compacted; the stored task anchor is cleared (the task it belonged to is over).
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "SessionCompact".
+ */
+export interface SessionCompact {
+  session_id: SessionId;
+  open_gen: OpenGen;
+  /**
+   * Chosen by the console; session.compacted echoes it.
+   */
+  compact_id: string;
+  /**
+   * What the summary must keep (Claude: /compact <instructions>; Codex has no instructions and ignores it).
+   */
+  instructions?: string;
+}
+/**
+ * session.compact finished (ok=false: the runtime did not compact; error says why, e.g. busy: the session stayed in a turn or got a new message first, exited: the runtime ended during the compaction, restarted: the daemon restarted before it finished).
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "SessionCompacted".
+ */
+export interface SessionCompacted {
+  session_id: SessionId;
+  open_gen: OpenGen;
+  compact_id: string;
+  ok: boolean;
+  context?: ContextUsage1;
+  error?: string;
+}
+/**
+ * Context use after the compaction.
+ */
+export interface ContextUsage1 {
+  /**
+   * Tokens in the context now (Claude: getContextUsage totalTokens; Codex: the last request's total tokens).
+   */
+  used_tokens: number;
+  /**
+   * The window the runtime measures against (Claude: the autocompact window; Codex: the model's context window); 0 when unknown.
+   */
+  max_tokens: number;
 }
 /**
  * session.send was pushed into the session.
@@ -882,6 +949,7 @@ export interface SessionEvent {
   usage?: {
     [k: string]: unknown;
   };
+  context?: ContextUsage2;
   /**
    * compacting / subagent.
    */
@@ -921,6 +989,19 @@ export interface SessionEvent {
    * plan: the Markdown plan of an ExitPlanMode call, truncated to 32 KB.
    */
   plan?: string;
+}
+/**
+ * turn_ended: context use after the turn (daemons with feature context_usage).
+ */
+export interface ContextUsage2 {
+  /**
+   * Tokens in the context now (Claude: getContextUsage totalTokens; Codex: the last request's total tokens).
+   */
+  used_tokens: number;
+  /**
+   * The window the runtime measures against (Claude: the autocompact window; Codex: the model's context window); 0 when unknown.
+   */
+  max_tokens: number;
 }
 /**
  * Interrupt the running turn.
@@ -1085,6 +1166,10 @@ export interface FirstMessage {
     | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef]
     | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef]
     | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef];
+  /**
+   * The task anchor, as session.send anchor.
+   */
+  anchor?: string;
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -1215,6 +1300,24 @@ export interface SessionOpen {
     [k: string]: string;
   };
   /**
+   * Context management of the role (shared-members.md §5.1): the runtime compacts by itself at limit_tokens × in_task_pct / 100 (Codex: limit_tokens capped at window_tokens). Without limit_tokens the target is in_task_pct of window_tokens; without either, Codex keeps its own default and Claude applies in_task_pct to its effective window (window − 20K). Claude never compacts later than its effective window − 13K. focus is added to the instructions of such a compaction.
+   */
+  context?: {
+    /**
+     * The role's context limit in tokens.
+     */
+    limit_tokens?: number;
+    in_task_pct?: number;
+    /**
+     * The context window the runtime reported for this employee's last session (tokens), when known. Codex caps limit_tokens at it (a limit above the model's window would never trigger); without limit_tokens both runtimes take in_task_pct of it as the token target.
+     */
+    window_tokens?: number;
+    /**
+     * What a compaction must keep.
+     */
+    focus?: string;
+  };
+  /**
    * Install the credential helper and gh wrapper.
    */
   git_credentials?: boolean;
@@ -1222,6 +1325,10 @@ export interface SessionOpen {
    * Held back until session.release.
    */
   first_message?: FirstMessage | null;
+  /**
+   * The anchor of the task the employee holds when the session (re)opens without a first_message anchor (a crash reopen, a reopen after a daemon restart): the new process starts with it, as if session.send had carried it.
+   */
+  anchor?: string;
   /**
    * Skills of the employee's role. Claude: the daemon writes them as a local plugin outside the worktree and loads it (options.plugins + options.skills). Codex gets them in developer_instructions instead.
    *
@@ -1461,6 +1568,10 @@ export interface SessionSend {
     | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef]
     | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef]
     | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef];
+  /**
+   * The task anchor (task id, instruction, branch, hand-off notes, progress). The daemon keeps the latest one and re-injects it after the runtime compacts the session during a task; an empty string clears it.
+   */
+  anchor?: string;
 }
 /**
  * Change permission mode and/or model of a session.
@@ -1657,6 +1768,10 @@ export interface ToolResult {
   structured?: {
     [k: string]: unknown;
   } | null;
+  /**
+   * Set when the call ended the caller's task (complete_task): the new task anchor, "" to clear the stored one (as session.send anchor).
+   */
+  anchor?: string;
   download?: ToolDownload1;
 }
 /**

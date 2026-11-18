@@ -128,9 +128,9 @@ func (s *Scheduler) claim(ctx context.Context, tx *core.Tx, t core.Thread, task 
 	if err != nil {
 		return err
 	}
-	task, err = core.UpdateTask(ctx, tx, task, map[string]any{"status": "claimed", "claimed_by": m.Name,
+	task, err = core.UpdateTask(ctx, tx, task, core.WithAttemptReset(map[string]any{"status": "claimed", "claimed_by": m.Name,
 		"claimed_at": time.Now().UTC(), "branch": orchestrator.MemberBranch(t.No, m.Name), "nudges": 0,
-		"sync": map[string]core.TaskSync{}, "sync_pending": 0, "sync_round": ""})
+		"sync": map[string]core.TaskSync{}, "sync_pending": 0, "sync_round": "", "compact_id": "", "wait_since": nil}))
 	if err != nil {
 		return err
 	}
@@ -147,15 +147,16 @@ func (s *Scheduler) claim(ctx context.Context, tx *core.Tx, t core.Thread, task 
 	return s.startTask(ctx, tx, t, task, m)
 }
 
-// startTask syncs the member's worktree before the brief when the daemon can (shared-members.md
+// syncThenBrief syncs the member's worktree before the brief when the daemon can (shared-members.md
 // §4.2): the task waits in claimed with sync_pending until every result is in (SyncDone) or
 // SyncTimeout passed. Otherwise the brief goes out at once, after the old fetch-only refresh.
-func (s *Scheduler) startTask(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task, m core.Employee) error {
+func (s *Scheduler) syncThenBrief(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task, m core.Employee) error {
 	sync, err := s.syncFor(ctx, tx, t, task)
 	if err != nil {
 		return err
 	}
-	deadline := time.Now().Add(SyncTimeout).UTC()
+	now := time.Now().UTC()
+	deadline := now.Add(SyncTimeout)
 	sync.Deadline = &deadline
 	round := core.NewID("sr")
 	jobs, err := s.orch.QueueSync(ctx, tx, m, sync, map[string]any{"task_id": task.ID, "thread_id": t.ID, "round": round})
@@ -163,7 +164,7 @@ func (s *Scheduler) startTask(ctx context.Context, tx *core.Tx, t core.Thread, t
 		return err
 	}
 	if jobs > 0 {
-		_, err = core.UpdateTask(ctx, tx, task, map[string]any{"sync_pending": jobs, "sync_round": round})
+		_, err = core.UpdateTask(ctx, tx, task, map[string]any{"sync_pending": jobs, "sync_round": round, "wait_since": now})
 		return err
 	}
 	if err := s.orch.RefreshWorktree(ctx, tx, m); err != nil {
@@ -186,13 +187,18 @@ func (s *Scheduler) syncFor(ctx context.Context, tx *core.Tx, t core.Thread, tas
 	return protocol.GitPrepareSync{Mode: protocol.GitPrepareSyncModeReview, Ref: parent.Branch}, nil
 }
 
-// sendBrief delivers the task brief to the member (after the pre-task sync, when there was one).
+// sendBrief delivers the task brief to the member (after the pre-task sync, when there was one),
+// with the task anchor the daemon re-injects after a compaction during the task.
 func (s *Scheduler) sendBrief(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task, m core.Employee) error {
 	text, err := s.taskBrief(ctx, tx, t, task, m)
 	if err != nil {
 		return err
 	}
-	_, err = s.orch.Deliver(ctx, tx, m, orchestrator.Delivery{Text: text, Kind: "task", Priority: "next",
+	anchor, err := orchestrator.TaskAnchor(ctx, tx, t, task)
+	if err != nil {
+		return err
+	}
+	_, err = s.orch.Deliver(ctx, tx, m, orchestrator.Delivery{Text: text, Kind: "task", Priority: "next", Anchor: &anchor,
 		Record: &core.NewMessage{ConversationID: t.ID, Role: "system", Author: "platform", Kind: "note", Content: text,
 			Meta: map[string]any{"to": m.Name, "task_id": task.ID}}})
 	return err
@@ -257,7 +263,7 @@ const SyncTimeout = 2 * time.Minute
 // releaseStaleSyncs sends the briefs whose sync results did not come back in time.
 func (s *Scheduler) releaseStaleSyncs(ctx context.Context) {
 	var stale []core.Task
-	err := s.core.Pool.Gorm(ctx).Model(&core.Task{}).Where("status = 'claimed' AND sync_pending > 0 AND claimed_at < ?",
+	err := s.core.Pool.Gorm(ctx).Model(&core.Task{}).Where("status = 'claimed' AND sync_pending > 0 AND COALESCE(wait_since, claimed_at) < ?",
 		time.Now().Add(-SyncTimeout)).Find(&stale).Error
 	if err != nil {
 		s.log.Warn("stale syncs", "err", err)

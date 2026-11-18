@@ -1,7 +1,8 @@
 import { isAbsolute, resolve } from "node:path";
 import type { CanUseTool, HookCallbackMatcher, HookEvent, McpSdkServerConfigWithInstance, Options, PermissionMode, SettingSource } from "@anthropic-ai/claude-agent-sdk";
-import type { ClaudeSessionOptions, SandboxPolicy } from "../../protocol.js";
+import type { ClaudeSessionOptions, SandboxPolicy, SessionOpen } from "../../protocol.js";
 import { sdkMcpServers, type MaterializedPlugin } from "../plugins.js";
+import { claudeCompactEnv } from "./compact.js";
 
 export interface OptionInputs {
   claude: ClaudeSessionOptions;
@@ -19,6 +20,8 @@ export interface OptionInputs {
   skills?: { pluginDir: string; names: string[] } | null;
   /** The role's plugins at their exact versions (sessions/plugins.ts). */
   plugins?: MaterializedPlugin[];
+  /** The role's context management (session.open context): sets the autocompact window and threshold. */
+  context?: SessionOpen["context"];
 }
 
 const WRITE_TOOLS = ["Edit", "Write", "NotebookEdit"];
@@ -43,7 +46,7 @@ export function buildClaudeOptions(i: OptionInputs): Options {
     ...(c.max_turns ? { maxTurns: c.max_turns } : {}),
     ...(c.max_budget_usd ? { maxBudgetUsd: c.max_budget_usd } : {}),
     systemPrompt: { type: "preset", preset: "claude_code", append: c.system_append ?? "" },
-    env: i.env,
+    env: { ...i.env, ...claudeCompactEnv(i.context) },
     settings: buildSettings(c, i.root, i.cwd, i.secretPaths),
     canUseTool: i.canUseTool,
     hooks: i.hooks,

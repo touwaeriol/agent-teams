@@ -40,6 +40,9 @@ type Result struct {
 	Later func(ctx context.Context) Result
 	// Download lists the files read_deliverable queued as file.download frames before this result.
 	Download *protocol.ToolDownload
+	// EndsTask: the call ended the caller's task (complete_task); the daemon drops its task anchor
+	// so a compaction later in the turn does not bring the finished task back (shared-members.md §5.2).
+	EndsTask bool
 }
 
 func okText(text string) Result        { return Result{OK: true, Text: text} }
@@ -344,6 +347,10 @@ func (s *Service) sendResult(ctx context.Context, tx *core.Tx, sessionID, callID
 	}
 	body := protocol.ToolResult{SessionID: protocol.SessionID(sessionID), CallID: protocol.CallID(callID), Ok: res.OK,
 		Content: []protocol.ContentBlock{{Type: "text", Text: text}}, Download: res.Download}
+	if res.EndsTask {
+		none := ""
+		body.Anchor = &none
+	}
 	if res.Structured != nil {
 		raw, _ := json.Marshal(res.Structured)
 		msg := json.RawMessage(raw)

@@ -417,6 +417,28 @@
         }
       }
     },
+    "ContextUsage": {
+      "title": "ContextUsage",
+      "description": "How much of the context window a session uses (shared-members.md §5.3).",
+      "type": "object",
+      "required": [
+        "used_tokens",
+        "max_tokens"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "used_tokens": {
+          "description": "Tokens in the context now (Claude: getContextUsage totalTokens; Codex: the last request's total tokens).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_tokens": {
+          "description": "The window the runtime measures against (Claude: the autocompact window; Codex: the model's context window); 0 when unknown.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
     "CredRequest": {
       "title": "CredRequest",
       "description": "Credential helper asks for a short-lived token. Unreliable, retried after 10 s with the same req_id; never logged.",
@@ -1094,7 +1116,7 @@
           "$ref": "#/$defs/Runtimes"
         },
         "features": {
-          "description": "Feature names, e.g. sessions, codex_app_server, git_worktree, cred_helper, upgrade.",
+          "description": "Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, context_usage (turn_ended carries context), session_compact (session.compact).",
           "type": "array",
           "items": {
             "type": "string"
@@ -1275,7 +1297,8 @@
             "employee_removed",
             "policy_violation",
             "node_drain",
-            "switch_thread"
+            "switch_thread",
+            "context_clear"
           ]
         },
         "forget": {
@@ -1301,6 +1324,70 @@
         },
         "reason": {
           "type": "string"
+        }
+      }
+    },
+    "SessionCompact": {
+      "title": "SessionCompact",
+      "description": "Compact the session's context now (between tasks, shared-members.md §5.3). The daemon runs it when the session is between turns and answers session.compacted; the stored task anchor is cleared (the task it belonged to is over).",
+      "type": "object",
+      "required": [
+        "session_id",
+        "open_gen",
+        "compact_id"
+      ],
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "open_gen": {
+          "$ref": "#/$defs/OpenGen"
+        },
+        "compact_id": {
+          "description": "Chosen by the console; session.compacted echoes it.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "instructions": {
+          "description": "What the summary must keep (Claude: /compact <instructions>; Codex has no instructions and ignores it).",
+          "type": "string",
+          "maxLength": 8000
+        }
+      }
+    },
+    "SessionCompacted": {
+      "title": "SessionCompacted",
+      "description": "session.compact finished (ok=false: the runtime did not compact; error says why, e.g. busy: the session stayed in a turn or got a new message first, exited: the runtime ended during the compaction, restarted: the daemon restarted before it finished).",
+      "type": "object",
+      "required": [
+        "session_id",
+        "open_gen",
+        "compact_id",
+        "ok"
+      ],
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "open_gen": {
+          "$ref": "#/$defs/OpenGen"
+        },
+        "compact_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "context": {
+          "description": "Context use after the compaction.",
+          "$ref": "#/$defs/ContextUsage"
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 1000
         }
       }
     },
@@ -1455,6 +1542,10 @@
           "description": "turn_ended: token usage as reported by the runtime.",
           "type": "object",
           "additionalProperties": true
+        },
+        "context": {
+          "description": "turn_ended: context use after the turn (daemons with feature context_usage).",
+          "$ref": "#/$defs/ContextUsage"
         },
         "on": {
           "description": "compacting / subagent.",
@@ -1857,6 +1948,11 @@
           "items": {
             "$ref": "#/$defs/ImageRef"
           }
+        },
+        "anchor": {
+          "description": "The task anchor, as session.send anchor.",
+          "type": "string",
+          "maxLength": 8000
         }
       }
     },
@@ -2117,6 +2213,33 @@
             "type": "string"
           }
         },
+        "context": {
+          "description": "Context management of the role (shared-members.md §5.1): the runtime compacts by itself at limit_tokens × in_task_pct / 100 (Codex: limit_tokens capped at window_tokens). Without limit_tokens the target is in_task_pct of window_tokens; without either, Codex keeps its own default and Claude applies in_task_pct to its effective window (window − 20K). Claude never compacts later than its effective window − 13K. focus is added to the instructions of such a compaction.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "limit_tokens": {
+              "description": "The role's context limit in tokens.",
+              "type": "integer",
+              "minimum": 10000
+            },
+            "in_task_pct": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "window_tokens": {
+              "description": "The context window the runtime reported for this employee's last session (tokens), when known. Codex caps limit_tokens at it (a limit above the model's window would never trigger); without limit_tokens both runtimes take in_task_pct of it as the token target.",
+              "type": "integer",
+              "minimum": 1
+            },
+            "focus": {
+              "description": "What a compaction must keep.",
+              "type": "string",
+              "maxLength": 2000
+            }
+          }
+        },
         "git_credentials": {
           "description": "Install the credential helper and gh wrapper.",
           "type": "boolean"
@@ -2131,6 +2254,11 @@
               "type": "null"
             }
           ]
+        },
+        "anchor": {
+          "description": "The anchor of the task the employee holds when the session (re)opens without a first_message anchor (a crash reopen, a reopen after a daemon restart): the new process starts with it, as if session.send had carried it.",
+          "type": "string",
+          "maxLength": 8000
         },
         "skills": {
           "description": "Skills of the employee's role. Claude: the daemon writes them as a local plugin outside the worktree and loads it (options.plugins + options.skills). Codex gets them in developer_instructions instead.",
@@ -2331,6 +2459,11 @@
           "items": {
             "$ref": "#/$defs/ImageRef"
           }
+        },
+        "anchor": {
+          "description": "The task anchor (task id, instruction, branch, hand-off notes, progress). The daemon keeps the latest one and re-injects it after the runtime compacts the session during a task; an empty string clears it.",
+          "type": "string",
+          "maxLength": 8000
         }
       }
     },
@@ -2721,6 +2854,11 @@
             "null"
           ],
           "additionalProperties": true
+        },
+        "anchor": {
+          "description": "Set when the call ended the caller's task (complete_task): the new task anchor, \"\" to clear the stored one (as session.send anchor).",
+          "type": "string",
+          "maxLength": 8000
         },
         "download": {
           "description": "read_deliverable: files whose bytes arrived before as file.download frames; the daemon writes them under .agent-deliverables/<deliverable_id>/v<version>/ in the session's working directory.",

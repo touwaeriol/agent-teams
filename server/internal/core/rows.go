@@ -118,13 +118,20 @@ type AgentSession struct {
 	ThreadID *string
 	// InTurn: a turn runs in the session (between turn_started and turn_ended).
 	InTurn bool
+	// ContextUsed / ContextMax: the context the session used at its last turn end and the window
+	// the runtime measured it against (tokens; nil until a context_usage daemon reports them).
+	ContextUsed *int
+	ContextMax  *int
+	// TasksDone counts the task briefs that reached the session (clear_after_tasks, §5).
+	TasksDone int
 }
 
 // TableName maps AgentSession to at_agent_sessions.
 func (AgentSession) TableName() string { return "at_agent_sessions" }
 
 const sessionCols = `id, employee_id, node_id, runtime, sdk_session_id, codex_thread_id, cwd, branch, state, open_gen,
-	permission_mode, init, last_event_no, opened_at, last_active_at, closed_at, close_reason, thread_id, in_turn`
+	permission_mode, init, last_event_no, opened_at, last_active_at, closed_at, close_reason, thread_id, in_turn,
+	context_used, context_max, tasks_done`
 
 // Task is a row of at_tasks.
 type Task struct {
@@ -166,6 +173,18 @@ type Task struct {
 	ReservedFor   string
 	ReservedUntil *time.Time
 	ReadyAt       *time.Time
+	// CompactID: the claimed task waits for session.compacted of this id; WaitSince is when its
+	// current wait (compaction, then the pre-task sync) began (shared-members.md §5).
+	CompactID string
+	WaitSince *time.Time
+	// Progress is the member's latest report_progress (part of the task anchor).
+	Progress string
+	// Compactions during the task, the context at its start and end (tokens), and whether the
+	// lead was told the task is long (§5.2).
+	Compactions int
+	CtxStart    *int
+	CtxEnd      *int
+	SplitHinted bool
 }
 
 // TaskSync is one repository's pre-task sync result (Error when the job failed).
@@ -189,7 +208,7 @@ func (Task) TableName() string { return "at_tasks" }
 const taskCols = `conversation_id, id, thread_id, main_task_id, assignee, role, claimed_by, kind, instruction,
 	depends_on, status, parent, priority, attempt, summary, branch, head_sha, pushed, nudges, created_by, created_at,
 	updated_at, claimed_at, finished_at, sync, sync_pending, sync_round, handoff, handoff_asked, merged,
-	reserved_for, reserved_until, ready_at`
+	reserved_for, reserved_until, ready_at, compact_id, wait_since, progress, compactions, ctx_start, ctx_end, split_hinted`
 
 // Finished reports whether the task reached a final state.
 func (t Task) Finished() bool {

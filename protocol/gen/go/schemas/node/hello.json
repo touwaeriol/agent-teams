@@ -57,7 +57,7 @@
       "$ref": "#/$defs/Runtimes"
     },
     "features": {
-      "description": "Feature names, e.g. sessions, codex_app_server, git_worktree, cred_helper, upgrade.",
+      "description": "Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, context_usage (turn_ended carries context), session_compact (session.compact).",
       "type": "array",
       "items": {
         "type": "string"

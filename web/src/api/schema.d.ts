@@ -3154,8 +3154,30 @@ export interface components {
         Role: {
             allowed_tools: string[] | null;
             can_delegate: boolean;
+            /**
+             * Format: int64
+             * @description Members: a session that did this many tasks in a row is closed and the next task starts a fresh one (0: never). Null: not applicable
+             */
+            clear_after_tasks: number | null;
             /** @description The role's own slash commands */
             commands?: components["schemas"]["CustomCommand"][] | null;
+            /**
+             * Format: int64
+             * @description Members: claiming the next task with context ≥ limit × pct compacts the session first. Null: never
+             */
+            compact_between_pct: number | null;
+            /** @description What a compaction must keep, added to its instructions */
+            compact_focus: string;
+            /**
+             * Format: int64
+             * @description The runtime compacts by itself at limit × pct during a turn. Null: the runtime's default
+             */
+            compact_in_task_pct: number | null;
+            /**
+             * Format: int64
+             * @description The role's context limit in tokens (e.g. 600000); the percentages below are of it. Null: the model's window
+             */
+            context_limit: number | null;
             /** Format: int64 */
             count: number;
             description: string;

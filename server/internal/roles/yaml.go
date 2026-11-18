@@ -37,6 +37,7 @@ type yamlRole struct {
 	HiddenCommands  []string      `yaml:"hidden_commands,omitempty"`
 	Commands        []yamlCommand `yaml:"commands,omitempty"`
 	Look            *yamlLook     `yaml:"look,omitempty"`
+	Context         *yamlContext  `yaml:"context,omitempty"`
 }
 
 type yamlCommand struct {
@@ -135,6 +136,7 @@ func fromYAMLRole(y yamlRole, tier, key string, nodeIDs map[string]string, repor
 		AllowedTools: y.AllowedTools, DisallowedTools: y.DisallowedTools, Sandbox: y.Sandbox, MaxTurns: y.MaxTurns,
 		Gate: y.Gate, TaskKinds: y.TaskKinds, Skills: y.Skills, Plugins: y.Plugins,
 		HiddenCommands: y.HiddenCommands, Commands: commandsFromYAML(y.Commands)}
+	contextFromYAML(y.Context, tier, y.Gate).apply(&r)
 	r.NodeIDs = resolveNodes(append(nonEmpty(y.Node), y.Nodes...), nodeIDs, r.Role, report)
 	if y.Look != nil {
 		r.Look = store.Look{Color: y.Look.Color, Outfit: y.Look.Outfit, Accessory: y.Look.Accessory, Hair: y.Look.Hair}
@@ -207,7 +209,8 @@ func toYAMLRole(r store.Role, nodeNames map[string]string) yamlRole {
 		CanDelegate: r.CanDelegate, AllowedTools: r.AllowedTools, DisallowedTools: r.DisallowedTools,
 		Sandbox: r.Sandbox, MaxTurns: r.MaxTurns, Gate: r.Gate, TaskKinds: r.TaskKinds, Skills: r.Skills, Plugins: r.Plugins,
 		HiddenCommands: r.HiddenCommands, Commands: commandsToYAML(r.Commands),
-		Look: &yamlLook{Color: r.Look.Color, Outfit: r.Look.Outfit, Accessory: r.Look.Accessory, Hair: r.Look.Hair}}
+		Look:    &yamlLook{Color: r.Look.Color, Outfit: r.Look.Outfit, Accessory: r.Look.Accessory, Hair: r.Look.Hair},
+		Context: contextToYAML(r)}
 	if r.Runtime == Codex {
 		y.Type = "codex"
 	}

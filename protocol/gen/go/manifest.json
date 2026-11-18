@@ -218,6 +218,24 @@
       ]
     },
     {
+      "type": "session.compact",
+      "name": "SessionCompact",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "compact_id"
+      ]
+    },
+    {
+      "type": "session.compacted",
+      "name": "SessionCompacted",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": [
+        "compact_id"
+      ]
+    },
+    {
       "type": "session.delivered",
       "name": "SessionDelivered",
       "direction": "node_to_console",

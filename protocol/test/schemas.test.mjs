@@ -15,12 +15,12 @@ const toolExamples = readJson(join(ROOT, "examples/tools.json"));
 // Message types protocol.md defines (sections 2-9); run.* and protocol 1 are out of scope (architecture.md 14).
 const EXPECTED_TYPES = {
   console_to_node: [
-    "welcome", "session.open", "session.release", "session.send", "session.interrupt", "session.set_mode",
+    "welcome", "session.open", "session.release", "session.send", "session.compact", "session.interrupt", "session.set_mode",
     "session.close", "session.watch", "approval.resolve", "tool.result", "file.download", "git.prepare", "git.status", "git.push",
     "git.cleanup", "git.purge", "cred.response", "node.config", "node.upgrade", "node.drain",
   ],
   node_to_console: [
-    "hello", "sessions.report", "session.opened", "session.delivered", "session.interrupted", "session.closed",
+    "hello", "sessions.report", "session.opened", "session.delivered", "session.compacted", "session.interrupted", "session.closed",
     "session.event", "session.state", "stream.delta", "approval.request", "approval.ack", "approval.cancel",
     "tool.call", "tool.cancel", "file.chunk", "git.result", "cred.request", "node.stats", "node.upgrade_result", "log",
   ],

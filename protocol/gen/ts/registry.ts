@@ -28,6 +28,8 @@ export interface MessageBodies {
   "node.upgrade_result": T.NodeUpgradeResult;
   "session.close": T.SessionClose;
   "session.closed": T.SessionClosed;
+  "session.compact": T.SessionCompact;
+  "session.compacted": T.SessionCompacted;
   "session.delivered": T.SessionDelivered;
   "session.event": T.SessionEvent;
   "session.interrupt": T.SessionInterrupt;
@@ -83,6 +85,8 @@ export const MESSAGE_META: { readonly [K in MessageType]: MessageMeta } = {
   "node.upgrade_result": { direction: "node_to_console", reliable: true, key: [] },
   "session.close": { direction: "console_to_node", reliable: true, key: ["session_id","open_gen"] },
   "session.closed": { direction: "node_to_console", reliable: true, key: ["session_id","open_gen"] },
+  "session.compact": { direction: "console_to_node", reliable: true, key: ["compact_id"] },
+  "session.compacted": { direction: "node_to_console", reliable: true, key: ["compact_id"] },
   "session.delivered": { direction: "node_to_console", reliable: true, key: ["msg_id"] },
   "session.event": { direction: "node_to_console", reliable: true, key: ["session_id","event_no"] },
   "session.interrupt": { direction: "console_to_node", reliable: true, key: ["id"] },

@@ -31,3 +31,18 @@ func TestLeadReceiptPrompt(t *testing.T) {
 		t.Fatalf("brief with source %q", b)
 	}
 }
+
+// TestMemberNotesPrompt: members are asked to keep working notes of long tasks in .agent-notes/
+// and to report progress (shared-members.md §5.2); the lead is not.
+func TestMemberNotesPrompt(t *testing.T) {
+	th := core.Thread{No: 3, Title: "登录", Branch: "thread/3-x"}
+	g := guide(core.Employee{Tier: "member", Name: "dev-1", Role: "dev"}, &th)
+	for _, want := range []string{".agent-notes/<任务id>.md", "report_progress", "任务锚点"} {
+		if !strings.Contains(g, want) {
+			t.Fatalf("member guide lacks %q", want)
+		}
+	}
+	if strings.Contains(guide(core.Employee{Tier: "lead"}, &th), ".agent-notes") {
+		t.Fatal("lead guide asks for notes")
+	}
+}

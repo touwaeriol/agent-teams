@@ -86,7 +86,7 @@
     "claude": {"sdk": "0.3.325", "cli": "2.1.325", "auth": "subscription|api_key|none"},
     "codex":  {"cli": "0.169.0", "auth": "api_key|chatgpt|none", "sandbox_ok": true}
   },
-  "features": ["sessions", "codex_app_server", "git_worktree", "cred_helper", "legacy_runs", "upgrade"],
+  "features": ["sessions", "codex_app_server", "git_worktree", "git_sync", "cred_helper", "upgrade", "context_usage", "session_compact"],
   "isolated": false,
   "isolation": "agent_user|sandbox|none"     // architecture.md §10.3，守护进程启动时探测
 }
@@ -165,7 +165,8 @@
   "git_credentials": true,                         // 是否装 credential helper 与 gh 包装
   "skills": [{"name": "design", "files": [{"path": "SKILL.md", "content": "…"}]}],  // 可选：岗位的技能（architecture.md §6.5）
   "plugins": [{"name": "tinyplug", "version": 2, "files": [{"path": ".claude-plugin/plugin.json", "content": "…"}], "skills": ["tinyplug:greet"], "mcp_servers": {}}],  // 可选：岗位的插件，确切版本（architecture.md §6.5）
-  "first_message": {"msg_id": "m_…", "text": "…"}  // 可选：工具核对通过、收到 session.release 后才发送
+  "first_message": {"msg_id": "m_…", "text": "…"}, // 可选：工具核对通过、收到 session.release 后才发送
+  "context": {"limit_tokens": 600000, "in_task_pct": 80, "focus": "保留当前任务 id、分支…"}  // 可选：岗位的上下文管理（§4.10）
 }
 ```
 
@@ -203,6 +204,7 @@
 - 会话还没收到本 `open_gen` 的 `session.release`：消息在守护进程排队，release 后按顺序投递（park 后自动 resume 的同一 gen 不需要再 release，但 init 工具若与上次不同则当作违规上报 `session.event{kind:error, code:'protocol'}`）。
 - Claude：向 prompt 队列推 `SDKUserMessage {priority}`。Codex：空闲 `turn/start`，回合中 `turn/steer {expectedTurnId}`（`later` 则排到 `turn/completed` 之后）。
 - `interrupt_first: true`：先 `interrupt()` / `turn/interrupt`，再投递。
+- `anchor`（可选，≤ 8000 字；`session.open.first_message` 也可以带）：任务锚点（任务 id、原始说明、分支、交接说明、最近进度），随任务简报下发。守护进程保存最新的一条（空串清掉），会话在任务中被运行时自己压缩后补给模型（§4.10）。控制台在成员手上没有任务时给它的消息带 `anchor: ""`；`complete_task` 的 `tool.result` 也带 `anchor: ""`。会话（重新）打开而首条消息不带锚点时（崩溃重开、守护进程重启后重开），`session.open.anchor` 带成员手上任务的锚点，新进程从它开始。
 - 回 `session.delivered {session_id, msg_id, turn_id?}`（可靠）。
 
 ### 4.4 `session.interrupt`（键：`id`）
@@ -215,7 +217,7 @@
 
 ### 4.6 `session.close`（键：`session_id + open_gen`）
 
-`{"session_id": "s_…", "reason": "thread_done|employee_removed|policy_violation|node_drain|switch_thread", "forget": false}` → Claude `q.close()`；Codex 不再路由该 thread（app-server 无需关闭）。`forget: true` 同时删除本机会话记录（SDK 转录文件保留，用于排查，按 7 天清理）。回 `session.closed`。
+`{"session_id": "s_…", "reason": "thread_done|employee_removed|policy_violation|node_drain|switch_thread|context_clear", "forget": false}`（`context_clear`：同一讨论串里做满 `clear_after_tasks` 个任务或上下文太满，下一个任务开新会话；只发给有 `session_compact` 的守护进程，旧的收到 `switch_thread`） → Claude `q.close()`；Codex 不再路由该 thread（app-server 无需关闭）。`forget: true` 同时删除本机会话记录（SDK 转录文件保留，用于排查，按 7 天清理）。回 `session.closed`。
 
 ### 4.7 停放（守护进程自主）
 
@@ -236,8 +238,8 @@
 | `thinking` | — | `assistant` thinking 块（不带内容） |
 | `tool_started` | `tool`, `category`, `subcategory?`, `tool_use_id`, `summary` | PreToolUse 钩子 / `item/started` |
 | `tool_ended` | `tool_use_id`, `ok`, `duration_ms`, `summary?` | PostToolUse(+Failure) / `item/completed` |
-| `turn_ended` | `result_subtype`, `is_error`, `num_turns`, `duration_ms`, `cost_usd?`, `usage{}`, `model?` | `result` / `turn/completed`（`model`：Claude 取本轮最后一条主代理 assistant 消息的模型，Codex 取本轮用的模型） |
-| `compacting` | `on: bool` | `system/status` / — |
+| `turn_ended` | `result_subtype`, `is_error`, `num_turns`, `duration_ms`, `cost_usd?`, `usage{}`, `model?`, `context?` | `result` / `turn/completed`（`model`：Claude 取本轮最后一条主代理 assistant 消息的模型，Codex 取本轮用的模型；`context {used_tokens, max_tokens}`：`context_usage` 守护进程填，Claude 取 `getContextUsage({detail:"summary"})` 的 `totalTokens` / `maxTokens`，Codex 取最近一次 `thread/tokenUsage/updated` 的 `last.totalTokens` / `modelContextWindow`） |
+| `compacting` | `on: bool` | `system/status`、`compact_boundary` / `contextCompaction` 条目、`thread/compacted` |
 | `rate_limited` | `retry_at?`, `detail` | `rate_limit_event`, `api_retry` / 错误通知 |
 | `subagent` | `on: bool`, `agent_type` | SubagentStart/Stop / — |
 | `notification` | `message`, `notification_type` | Notification 钩子 |
@@ -252,6 +254,14 @@
 ### 4.9 `session.state`（守护进程 → 控制台，可靠）
 
 `{"session_id", "state": "starting|active|turn_running|parked|queued|closed|crashed", "detail"?}`。崩溃（子进程意外退出）时守护进程自动以 `resume` 重开最多 3 次（间隔 5/15/45 s），仍失败则 `crashed` + `session.event{kind:error, fatal:true}`，由控制台决定（员工 → `broken`）。
+
+### 4.10 上下文管理（`hello.features` 含 `context_usage`、`session_compact`）
+
+设计见 `shared-members.md` §5。百分比都相对岗位的 `context_limit`（不是模型窗口）。
+
+- **任务中自动压缩**：`session.open.context {limit_tokens?, in_task_pct?, window_tokens?, focus?}`，`window_tokens` 是这个员工上一个同运行时会话报的窗口（`turn_ended.context.max_tokens`，没有就不带）。Claude：有 `limit_tokens` 时 `CLAUDE_CODE_AUTO_COMPACT_WINDOW = clamp(limit_tokens, 100K, 1M)`，`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = limit_tokens × in_task_pct / (窗口 − 20K)`（CLI 的阈值是有效窗口 = 窗口 − 20K 的百分比，SDK 0.3.325 实测；CLI 自己再把窗口夹到模型窗口，并且最晚在有效窗口 − 13K 压缩）；没有 `limit_tokens` 时不设窗口，有 `window_tokens` 就把 PCT 换算成 `window_tokens × in_task_pct` 个 token（`in_task_pct × W / (W − 20K)`），都没有就直接用 `in_task_pct`（这时是 CLI 有效窗口 = 窗口 − 20K 的百分比）。Codex：`thread/start` 配置 `model_auto_compact_token_limit = L × in_task_pct / 100`，`L = min(limit_tokens, window_tokens)`（上限超过模型窗口时永远到不了），没有 `limit_tokens` 时 `L = window_tokens`，两者都没有就不设（Codex 自己的默认）。
+- **平台主动压缩** `session.compact {session_id, open_gen, compact_id, instructions?}`（可靠，键 `compact_id`）：守护进程清掉保存的锚点，等当前回合结束后压缩——Claude 往提示队列推 `/compact <instructions>`，以 `compact_boundary` 之后的 `result` 为完成；Codex 调 `thread/compact/start`（没有指令参数），以 `contextCompaction` 条目完成（或 `thread/compacted`）之后的 `turn/completed` 为完成。Codex 只把压缩那个回合（`thread/compact/start` 之后第一个不是我们消息触发的回合）或报过压缩的回合的结束算作完成，期间来的消息自己的回合不算。完成后回 `session.compacted {session_id, open_gen, compact_id, ok, context?, error?}`（可靠，键 `compact_id`）。会话停放时先 resume 再压缩；会话不在本机回 `ok: false`。失败也一定回：等空闲最多 2 分钟，期间一直在跑回合或来了新的 `session.send` 就放弃（`error: "busy: …"`，简报直接发，不压缩）；压缩本身最多 7 分钟（`timed out: …`）；压缩中运行时退出回 `exited: …`；守护进程把进行中的 `compact_id` 记在本机会话记录里，重启后对每个回 `restarted: …`。控制台只认跑这个会话的节点发来的 `session.compacted`。
+- **压缩后补锚点**：运行时自己压缩（不是 `session.compact`）后，守护进程把 `session.send.anchor` 存下的锚点补给模型。Claude：SessionStart 钩子（`source: "compact"`）返回 `additionalContext`；自动压缩的 PreCompact 钩子返回 `systemMessage = focus + 锚点`，CLI 把它拼进压缩指令。Codex：压缩完成后如果回合还在跑，用 `turn/steer` 把锚点插进当前回合；回合已经结束（或 steer 被拒）就丢掉，绝不为锚点单开一个回合（下一条任务消息自带简报）。
 
 ## 5. 审批
 

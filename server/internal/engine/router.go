@@ -30,6 +30,8 @@ func (r *router) Handle(ctx context.Context, node store.Node, typ string, body a
 		return r.delivered(ctx, m)
 	case *protocol.SessionClosed:
 		return e.Orch.HandleClosed(ctx, m)
+	case *protocol.SessionCompacted:
+		return e.Sched.Compacted(ctx, node.ID, m)
 	case *protocol.SessionEvent:
 		return r.sessionEvent(ctx, m)
 	case *protocol.SessionsReport:
@@ -152,7 +154,7 @@ func (r *router) delivered(ctx context.Context, m *protocol.SessionDelivered) er
 		if err != nil || !fresh {
 			return err
 		}
-		return r.e.Sched.TaskDelivered(ctx, tx, msg)
+		return r.e.Sched.TaskDelivered(ctx, tx, msg, string(m.SessionID))
 	})
 }
 
@@ -240,6 +242,8 @@ func (r *router) applyEvent(ctx context.Context, tx *core.Tx, sc core.SessionCon
 		return nil, r.rateLimited(ctx, tx, sc, ev)
 	case "error":
 		return []status.Observation{{Kind: status.Touch, Cause: "error"}}, r.sessionError(ctx, tx, sc, ev)
+	case "compacting":
+		return []status.Observation{{Kind: status.Touch, Cause: cause}}, r.compacting(ctx, tx, sc, ev)
 	case "todos":
 		return []status.Observation{{Kind: status.Touch, Cause: cause}}, r.e.Orch.RecordTodos(ctx, tx, sc.Employee, ev.Todos)
 	case "plan":
@@ -294,6 +298,11 @@ func (r *router) turnEnded(ctx context.Context, tx *core.Tx, sc core.SessionCont
 	if err := recordUsage(ctx, tx, sc, ev); err != nil {
 		return err
 	}
+	if ev.Context != nil {
+		if err := r.e.Sched.ContextReported(ctx, tx, sc, *ev.Context); err != nil {
+			return err
+		}
+	}
 	if err := r.e.Approvals.ExpireDetached(ctx, tx, sc.Employee); err != nil {
 		return err
 	}
@@ -302,6 +311,16 @@ func (r *router) turnEnded(ctx context.Context, tx *core.Tx, sc core.SessionCont
 		return err
 	}
 	return r.e.Sched.TurnEnded(ctx, tx, sc)
+}
+
+// compacting: a finished compaction (on=false) during a member's running task is counted on the
+// task (shared-members.md §5.2); the console's own compaction between tasks never is (the task
+// waits in claimed then).
+func (r *router) compacting(ctx context.Context, tx *core.Tx, sc core.SessionContext, ev *protocol.SessionEvent) error {
+	if ev.On == nil || *ev.On {
+		return nil
+	}
+	return r.e.Sched.CompactedInTask(ctx, tx, sc)
 }
 
 // rateLimited logs the limit as activity; a usage limit (reset minutes or hours away)

@@ -56,9 +56,9 @@
 | P2-3 | **节点 · Claude**：回合结束调 `Query.getContextUsage()` 填 `context`；`session.compact` = 推一条 `/compact <instructions>`，等 `compact_boundary` 发 `session.compacted`；开会话时设 `CLAUDE_CODE_AUTO_COMPACT_WINDOW = limit_tokens` 和 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = in_task_pct`（按 P2-7 实测结果，必要时换算成相对模型窗口的百分比） | `node/src/sessions/claude/driver.ts`、`options.ts`、`manager.ts` | vitest（fake-query 加 getContextUsage / compact_boundary） |
 | P2-4 | **节点 · Codex**：用 `thread/tokenUsage/updated`（`last`、`modelContextWindow`）填 `context`；`session.compact` = `thread/compact/start`，`thread/compacted` 后上报；`thread/start` 配置 `model_auto_compact_token_limit = limit_tokens × in_task_pct` | `node/src/sessions/codex/driver.ts`、`mapper.ts` | vitest（fake-codex） |
 | P2-5 | **控制台的开工决策**：存 `at_agent_sessions.context_used`（token），和岗位 `context_limit` 比、`tasks_in_session`；领取时按设计 §5 的表决定 继续 / 压缩 / clear；压缩时任务停在 `claimed`，等 `session.compacted`（10 分钟超时就直接发简报）；节点没有 `session.compact` 能力时超过阈值改为 clear | `scheduler/claim.go`、`orchestrator/sessions.go` | engine 测试覆盖 4 种情况 |
-| P2-6 | **压缩后补任务锚点**：控制台把锚点（任务 id、原始说明、分支、交接说明、最近进度）随任务简报的 `session.send.anchor` 下发，守护进程保存；Claude 用 SessionStart(`compact`) 钩子的 `additionalContext` 注入；Codex 在 `thread/compacted` 后发一条 `later` 消息 | `node/src/sessions/claude/hooks`、`codex/driver.ts`、`scheduler/claim.go` | vitest；engine 测试锚点下发 |
+| P2-6 | **压缩后补任务锚点**：控制台把锚点（任务 id、原始说明、分支、交接说明、最近进度）随任务简报的 `session.send.anchor` 下发，守护进程保存；Claude 用 SessionStart(`compact`) 钩子的 `additionalContext` 注入；Codex 在 `thread/compacted` 后 `turn/steer` 进还在跑的回合（回合结束了就不发） | `node/src/sessions/claude/hooks`、`codex/driver.ts`、`scheduler/claim.go` | vitest；engine 测试锚点下发 |
 | P2-7 | **先做的验证**：用真 Claude 实测 SDK 0.3.325 的 PreCompact 钩子能否改写压缩指令、`CLAUDE_CODE_AUTO_COMPACT_WINDOW` 和 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` 的语义（能否让 1M 模型按 600K 窗口、80% 即 480K 压缩）、SessionStart(`compact`) 是否触发；结果写进设计 §5.2，决定 P2-6 走钩子还是消息 | `node/scripts/smoke-*.ts` | 实测记录 |
-| P2-8 | **长任务**：每个任务记 `compactions`、`ctx_start_pct`、`ctx_end_pct`（`at_tasks` 新列）；同一任务任务中压缩 ≥ 2 次给组长发“考虑拆小”；守护进程把 `.agent-notes/` 写进每个 worktree 的 `info/exclude`，提示词要求长任务记笔记 | 迁移、`scheduler`、`node/src/git/jobs.ts`、`prompt.go` | engine / node 测试 |
+| P2-8 | **长任务**：每个任务记 `compactions`、`ctx_start`、`ctx_end`（token，`at_tasks` 新列）；同一任务任务中压缩 ≥ 2 次给组长发“考虑拆小”；守护进程把 `.agent-notes/` 写进每个 worktree 的 `info/exclude`，提示词要求长任务记笔记 | 迁移、`scheduler`、`node/src/git/jobs.ts`、`prompt.go` | engine / node 测试 |
 
 阶段验收：真 Claude e2e：dev 连做同一讨论串 3 个任务（不压缩）、人为调低阈值触发一次压缩、换讨论串触发 clear；审查员每个任务都是新会话。
 
@@ -98,6 +98,6 @@
 | --- | --- |
 | 0 任务衔接 | 完成（`feat/staff-p0`）；交付物没有任务关联，简报里暂不列交付物 |
 | 1 共享员工 + 项目级队列 | 完成（`feat/staff-p1`）：P1-1～P1-14 和 e2e 脚本 `deploy/e2e/run_shared.mjs`（待用真 Claude 跑一遍）。补充：跨讨论串留言带讨论串号、不换讨论串（设计 §6），节点上线触发主人项目的调度，没有讨论串的成员在办公室里站在空闲锚点 |
-| 2 会话管理 | 未开始 |
+| 2 会话管理 | 完成（`feat/staff-p2`）：P2-1～P2-8。P2-7 实测记在设计 §5.2（Claude 的 PCT 要换算到“窗口 − 20K”，锚点走 SessionStart 钩子、重点走 PreCompact 的 systemMessage）；补充：`first_message` 也带锚点、`session.close` 加 `context_clear`、会话跑回合时领取不动它、压缩和开工前同步串行。审查后的修复：Codex 补锚点只走 `turn/steer`；`session.compact` 等空闲最多 2 分钟、来新消息就放弃，崩溃 / 重启都回 `ok: false`；任务间和 Codex 任务中的阈值按上次报的窗口封顶（`window_tokens`），没设上限时用它换算；锚点随任务结束清掉、重开会话带上（`session.open.anchor`）；上下文上限至少 100K；`session.compacted` 校验节点；重新排队清零进度和指标。指标（`compactions` / `ctx_start` / `ctx_end`，token）先存在 `at_tasks`，团队页按岗位展示留到阶段 3；阶段验收的真 Claude e2e 未跑 |
 | 3 办公室和团队页 | 未开始 |
 | 4 调度优化 | 未开始 |

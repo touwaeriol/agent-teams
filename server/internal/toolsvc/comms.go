@@ -443,10 +443,14 @@ func (s *Service) setStatus(ctx context.Context, tx *core.Tx, c *call) (Result, 
 	return okText("ok"), nil
 }
 
-// reportProgress records an activity line.
+// reportProgress records an activity line and, for a member, the progress of its current task
+// (the task anchor carries it, shared-members.md §5.2).
 func (s *Service) reportProgress(ctx context.Context, tx *core.Tx, c *call) (Result, error) {
 	var in protocol.ReportProgressInput
 	if err := c.decode(&in); err != nil {
+		return Result{}, err
+	}
+	if err := core.SetTaskProgress(ctx, tx, c.emp(), in.Text); err != nil {
 		return Result{}, err
 	}
 	return okText("ok"), tx.EmitActivity(ctx, c.emp().ProjectID, c.emp().WorkThreadID(), c.emp().Name, in.Text)

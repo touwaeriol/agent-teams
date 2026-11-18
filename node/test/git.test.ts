@@ -50,6 +50,11 @@ describe("git jobs", () => {
 
     h.console.command("git.prepare", prepare("g_2", "dev-2"));
     expect((await h.console.waitType("git.result", (b) => b.job_id === "g_2")).body).toMatchObject({ ok: true, created: false });
+    // working notes of long tasks are ignored in every worktree, once (shared-members.md §5.2)
+    expect(readFileSync(join(h.opts.root, "projects/p1/repo/.git/info/exclude"), "utf8").split("\n").filter((l) => l === ".agent-notes/")).toHaveLength(1);
+    mkdirSync(join(wt, ".agent-notes"));
+    writeFileSync(join(wt, ".agent-notes", "t1.md"), "notes\n");
+    expect(git(wt, "status", "--porcelain")).toBe("");
 
     writeFileSync(join(wt, "feature.txt"), "work\n");
     git(wt, "add", ".");

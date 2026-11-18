@@ -53,6 +53,12 @@ type Role struct {
 	HiddenCommands  []string        `json:"hidden_commands,omitempty" gorm:"serializer:pgtext" doc:"Platform commands (model, status…) the role's chats do not offer"`
 	Commands        []CustomCommand `json:"commands,omitempty" gorm:"serializer:jsonb" doc:"The role's own slash commands"`
 	Sort            int             `json:"sort" doc:"Display order; PUT uses the position in the list"`
+	// Session management (shared-members.md §5.1): percentages are of ContextLimit, not of the model's window.
+	ContextLimit      *int   `json:"context_limit" nullable:"true" doc:"The role's context limit in tokens (e.g. 600000); the percentages below are of it. Null: the model's window"`
+	CompactBetweenPct *int   `json:"compact_between_pct" nullable:"true" doc:"Members: claiming the next task with context ≥ limit × pct compacts the session first. Null: never"`
+	CompactInTaskPct  *int   `json:"compact_in_task_pct" nullable:"true" doc:"The runtime compacts by itself at limit × pct during a turn. Null: the runtime's default"`
+	ClearAfterTasks   *int   `json:"clear_after_tasks" nullable:"true" doc:"Members: a session that did this many tasks in a row is closed and the next task starts a fresh one (0: never). Null: not applicable"`
+	CompactFocus      string `json:"compact_focus" doc:"What a compaction must keep, added to its instructions"`
 }
 
 // Custom command modes: prompt expands the template on the server before delivery; passthrough
@@ -120,7 +126,9 @@ func roleColumns(r *Role) map[string]any {
 		"read_only": r.ReadOnly != nil && *r.ReadOnly, "allowed_tools": TextArray(r.AllowedTools),
 		"disallowed_tools": TextArray(r.DisallowedTools), "sandbox": r.Sandbox, "max_turns": r.MaxTurns, "gate": r.Gate,
 		"task_kinds": TextArray(r.TaskKinds), "look": r.Look, "sort": r.Sort, "skills": TextArray(r.Skills),
-		"plugins": TextArray(r.Plugins), "hidden_commands": TextArray(r.HiddenCommands), "commands": commandsJSON(r.Commands)}
+		"plugins": TextArray(r.Plugins), "hidden_commands": TextArray(r.HiddenCommands), "commands": commandsJSON(r.Commands),
+		"context_limit": r.ContextLimit, "compact_between_pct": r.CompactBetweenPct, "compact_in_task_pct": r.CompactInTaskPct,
+		"clear_after_tasks": r.ClearAfterTasks, "compact_focus": r.CompactFocus}
 }
 
 func commandsJSON(list []CustomCommand) any {

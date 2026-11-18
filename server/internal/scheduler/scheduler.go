@@ -117,10 +117,11 @@ func (s *Scheduler) loop(ctx context.Context) {
 	}
 }
 
-// sweep schedules every project with claimable work (the 10 s safety net) and sends the briefs
-// whose pre-task sync timed out. A project that has work but no members yet (created before
+// sweep schedules every project with claimable work (the 10 s safety net) and moves on the tasks
+// whose pre-task compaction or sync timed out. A project that has work but no members yet (created before
 // members were project staff) is staffed first.
 func (s *Scheduler) sweep(ctx context.Context) {
+	s.releaseStaleCompactions(ctx)
 	s.releaseStaleSyncs(ctx)
 	ids, err := core.ProjectsWithWork(ctx, s.core.Pool)
 	if err != nil {

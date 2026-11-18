@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { query as sdkQuery, type HookCallbackMatcher, type HookEvent, type HookInput, type HookJSONOutput, type Options, type PermissionUpdate, type Query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { ClaudeSessionOptions } from "../../protocol.js";
-import { AsyncQueue } from "../../util/async.js";
+import type { ClaudeSessionOptions, ContextUsage } from "../../protocol.js";
+import { AsyncQueue, deferred, withTimeout, type Deferred } from "../../util/async.js";
 import { approvalId, msgUuid } from "../../util/ids.js";
 import { newId } from "../../util/ids.js";
 import { platformSdkServer, PLATFORM_PREFIX } from "../../toolhost/sdk-server.js";
 import { decideTool } from "../policy.js";
-import { ResumeFailed, type Driver, type DriverContext, type EventFields, type OutgoingMessage, type StartResult } from "../types.js";
+import { ResumeFailed, type CompactResult, type Driver, type DriverContext, type EventFields, type OutgoingMessage, type StartResult } from "../types.js";
 import { buildClaudeOptions } from "./options.js";
 import type { MaterializedPlugin } from "../plugins.js";
 import { describeTool, mapClaudeMessage } from "./mapper.js";
@@ -19,6 +19,9 @@ import { qualifySlash, sessionCommands } from "./commands.js";
 
 /** How long an AskUserQuestion may wait for the user (seconds; the hook's timeout). */
 const ASK_TIMEOUT_S = 7 * 24 * 3600;
+
+/** How long turn_ended waits for getContextUsage before it goes out without context. */
+const USAGE_TIMEOUT_MS = 5000;
 
 export type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => Query;
 
@@ -58,6 +61,8 @@ export class ClaudeDriver implements Driver {
   private idleTimer: NodeJS.Timeout | null = null;
   private sdkSessionId: string;
   private readonly claude: ClaudeSessionOptions;
+  /** A session.compact in progress: done once the /compact turn's result arrives. */
+  private compacting: { done: Deferred<CompactResult>; boundary: boolean } | null = null;
 
   constructor(private readonly ctx: DriverContext, private readonly deps: ClaudeDriverDeps) {
     this.claude = ctx.spec.claude!;
@@ -86,6 +91,7 @@ export class ClaudeDriver implements Driver {
       claude: this.claude, root: this.deps.root, cwd: this.ctx.absCwd, env: this.ctx.env, sessionId: this.sdkSessionId, resume, server,
       canUseTool: (tool, input, opts) => this.canUseTool(tool, input, opts),
       hooks: this.hooks(), secretPaths: this.deps.secretPaths, skills: this.deps.skills ?? null, plugins: this.deps.plugins ?? [],
+      context: this.ctx.spec.context,
       stderr: (d) => this.ctx.log.debug({ stderr: d.slice(0, 2000) }, "claude stderr"),
     });
   }
@@ -120,6 +126,18 @@ export class ClaudeDriver implements Driver {
     return this.turnId ? { turn_id: this.turnId } : {};
   }
 
+  /**
+   * session.compact: a "/compact <instructions>" user message (SDK 0.3.325: status compacting →
+   * compact_boundary(manual) → result). Done at that result; ok only when a boundary came.
+   */
+  async compact(instructions: string): Promise<CompactResult> {
+    if (!this.prompt) return { ok: false, error: "session is not running" };
+    this.compacting = { done: deferred<CompactResult>(), boundary: false };
+    this.setRunning(true);
+    this.prompt.push({ type: "user", message: { role: "user", content: `/compact ${instructions}`.trim() }, parent_tool_use_id: null });
+    return this.compacting.done.promise;
+  }
+
   async interrupt(): Promise<string[]> {
     if (!this.q) return [];
     const receipt = await this.q.interrupt();
@@ -141,6 +159,8 @@ export class ClaudeDriver implements Driver {
     this.q?.close();
     this.q = null;
     this.prompt = null;
+    this.compacting?.done.resolve({ ok: false, error: "session closed" });
+    this.compacting = null;
     this.setRunning(false);
   }
 
@@ -153,20 +173,41 @@ export class ClaudeDriver implements Driver {
 
   private async consume(q: Query): Promise<void> {
     try {
-      for await (const msg of q) this.onMessage(msg);
+      for await (const msg of q) await this.onMessage(msg);
       if (!this.closing && this.q === q) this.ctx.sink.exited(new Error("claude process ended"));
     } catch (err) {
       if (!this.closing && this.q === q) this.ctx.sink.exited(err as Error);
     }
   }
 
-  private onMessage(msg: SDKMessage): void {
+  private async onMessage(msg: SDKMessage): Promise<void> {
     if (msg.type === "system" && msg.subtype === "init") return this.onInit(msg.tools);
     if (msg.type === "system" && msg.subtype === "commands_changed") this.commandNames = sessionCommands(msg.commands).map((c) => c.name);
+    if (msg.type === "system" && msg.subtype === "compact_boundary" && msg.compact_metadata.trigger === "manual" && this.compacting) this.compacting.boundary = true;
     if (msg.type === "assistant") this.onAssistant(msg.user_message_uuids, msg.message.content);
     if (msg.type === "assistant" && msg.parent_tool_use_id === null && msg.message.model) this.turnModel = msg.message.model;
-    for (const ev of mapClaudeMessage(msg)) this.emit(ev.kind === "turn_ended" && this.turnModel ? { ...ev, model: this.turnModel } : ev);
-    if (msg.type === "result") this.onResult();
+    const context = msg.type === "result" ? await this.contextUsage() : undefined;
+    for (const ev of mapClaudeMessage(msg)) this.emit(this.turnEnded(ev, context));
+    if (msg.type === "result") this.onResult(context);
+  }
+
+  /** turn_ended carries the turn's model and the context use after it. */
+  private turnEnded(ev: EventFields, context: ContextUsage | undefined): EventFields {
+    if (ev.kind !== "turn_ended") return ev;
+    return { ...ev, ...(this.turnModel ? { model: this.turnModel } : {}), ...(context ? { context } : {}) };
+  }
+
+  /** Context use now (getContextUsage summary: no token-count calls); undefined when it cannot tell. */
+  private async contextUsage(): Promise<ContextUsage | undefined> {
+    const q = this.q;
+    if (!q) return undefined;
+    try {
+      const u = await withTimeout(q.getContextUsage({ detail: "summary" }), USAGE_TIMEOUT_MS, () => new Error("getContextUsage timed out"));
+      return { used_tokens: Math.max(0, Math.round(u.totalTokens)), max_tokens: Math.max(0, Math.round(u.maxTokens)) };
+    } catch (err) {
+      this.ctx.log.debug({ err: (err as Error).message }, "context usage unavailable");
+      return undefined;
+    }
   }
 
   private onInit(tools: string[]): void {
@@ -186,13 +227,21 @@ export class ClaudeDriver implements Driver {
     }
   }
 
-  private onResult(): void {
+  private onResult(context: ContextUsage | undefined): void {
+    this.finishCompact(context);
     if (this.waitingUuids.size === 0) return this.setRunning(false);
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
       this.waitingUuids.clear();
       this.setRunning(false);
     }, this.deps.foldGraceMs ?? 3000);
+  }
+
+  private finishCompact(context: ContextUsage | undefined): void {
+    const c = this.compacting;
+    if (!c) return;
+    this.compacting = null;
+    c.done.resolve(c.boundary ? { ok: true, ...(context ? { context } : {}) } : { ok: false, error: "the runtime did not compact", ...(context ? { context } : {}) });
   }
 
   private setRunning(on: boolean): void {
@@ -240,7 +289,27 @@ export class ClaudeDriver implements Driver {
       Notification: on((i) => this.notification(i)),
       SubagentStart: on((i) => this.subagent(i, true)),
       SubagentStop: on((i) => this.subagent(i, false)),
+      PreCompact: on((i) => this.preCompact(i)),
+      SessionStart: on((i) => this.sessionStart(i)),
     };
+  }
+
+  /**
+   * The runtime compacts by itself: the role's focus and the task anchor join the compaction's
+   * instructions (a callback hook's systemMessage does, SDK 0.3.325). A session.compact already
+   * carries its instructions in /compact.
+   */
+  private preCompact(i: HookInput): HookJSONOutput | void {
+    if (i.hook_event_name !== "PreCompact" || i.trigger !== "auto") return;
+    const text = [this.ctx.spec.context?.focus ?? "", this.ctx.sink.anchor()].filter(Boolean).join("\n\n");
+    return text ? { systemMessage: text } : undefined;
+  }
+
+  /** After a compaction the task anchor goes back into the context (shared-members.md §5.2). */
+  private sessionStart(i: HookInput): HookJSONOutput | void {
+    const anchor = this.ctx.sink.anchor();
+    if (i.hook_event_name !== "SessionStart" || i.source !== "compact" || !anchor) return;
+    return { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: anchor } };
   }
 
   private preToolUse(i: HookInput): HookJSONOutput | void {
