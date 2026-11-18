@@ -141,6 +141,12 @@ func PendingDependents(ctx context.Context, tx *Tx, conversationID, id string) (
 		Order("created_at, substring(id from 2)::int"))
 }
 
+// GateVerdicts lists the finished review / decision tasks on a task, oldest first.
+func GateVerdicts(ctx context.Context, q DB, conversationID, taskID string) ([]Task, error) {
+	return find[Task](tasks(ctx, q).Where("conversation_id = ? AND parent = ? AND kind IN ('review','decision') AND status IN ('done','failed')",
+		conversationID, taskID).Order("finished_at"))
+}
+
 // OpenDependents lists the unfinished tasks of the same thread that depend on task id.
 func OpenDependents(ctx context.Context, q DB, conversationID, id string) ([]string, error) {
 	dep, _ := json.Marshal([]string{id})

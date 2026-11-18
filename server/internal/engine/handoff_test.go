@@ -75,12 +75,23 @@ func TestTaskHandoff(t *testing.T) {
 	if prep.Sync == nil || prep.Sync.Mode != protocol.GitPrepareSyncModeMember || prep.Sync.Ref != thread.Branch {
 		t.Fatalf("sync request %+v", prep.Sync)
 	}
-	if _, err := n.Send(ctx, protocol.TypeGitResult, protocol.GitResult{JobID: prep.JobID, Ok: true, HeadSHA: &m.Head,
-		Sync: &protocol.GitResultSync{Action: protocol.GitResultSyncActionReset, HeadSHA: m.Head}}); err != nil {
+	if prep.Sync.Deadline == nil {
+		t.Fatal("sync without a deadline")
+	}
+	result := protocol.GitResult{JobID: prep.JobID, Ok: true, HeadSHA: &m.Head,
+		Sync: &protocol.GitResultSync{Action: protocol.GitResultSyncActionReset, HeadSHA: m.Head}}
+	if _, err := n.Send(ctx, protocol.TypeGitResult, result); err != nil {
 		t.Fatal(err)
 	}
 	brief := dev.expectSend("[Task t2")
-	for _, want := range []string{"已同步到讨论串分支 " + thread.Branch, "交接说明：接口在 api.go", "t1（dev-1）：接口好了", m.Files[0]} {
+	// The daemon re-sends the result of a repeated job: no second brief.
+	if _, err := n.Send(ctx, protocol.TypeGitResult, result); err != nil {
+		t.Fatal(err)
+	}
+	if f, ok := takeNow(n, protocol.TypeSessionSend); ok && strings.Contains(string(f.Body), "[Task t2") {
+		t.Fatal("brief sent twice")
+	}
+	for _, want := range []string{"已在讨论串分支 " + thread.Branch + " 的最新提交上", "交接说明：接口在 api.go", "t1（dev-1）：接口好了", m.Files[0]} {
 		if !strings.Contains(brief.Text, want) {
 			t.Errorf("brief misses %q:\n%s", want, brief.Text)
 		}

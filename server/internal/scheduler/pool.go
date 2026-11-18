@@ -110,6 +110,9 @@ func (s *Scheduler) Cancel(ctx context.Context, tx *core.Tx, task core.Task, rea
 		return task, ErrTaskState
 	}
 	worker := task.ClaimedBy
+	if task.SyncPending > 0 {
+		worker = "" // its brief never went out: nothing to stop
+	}
 	task, err := s.finish(ctx, tx, task, "cancelled")
 	if err != nil || worker == "" {
 		return task, err
@@ -194,7 +197,7 @@ func (s *Scheduler) TurnEnded(ctx context.Context, tx *core.Tx, e core.Employee)
 // AutoPushEvery; review / decision tasks have nothing to push. A member without a node yet is
 // skipped (nothing on any node to lose).
 func (s *Scheduler) autoPush(ctx context.Context, tx *core.Tx, e core.Employee, task core.Task) error {
-	if isGateTask(task) || e.NodeID == nil || !s.pushDue(e.ID) {
+	if isGateTask(task) || e.NodeID == nil || !s.orch.HasRepo(ctx, e.ProjectID) || !s.pushDue(e.ID) {
 		return nil
 	}
 	t, err := core.ThreadByID(ctx, tx, task.ConversationID)

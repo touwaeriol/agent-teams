@@ -399,9 +399,10 @@ const FeatureGitSync = "git_sync"
 
 // QueueSync queues one git.prepare with sync per repository of the employee's thread, so the
 // task about to start sees the current thread branch (member) or the branch under review
-// (review). It returns how many jobs it queued: 0 when there is nothing to sync yet (no node,
-// the session will be opened and prepared anyway) or the daemon cannot sync.
-func (o *Orchestrator) QueueSync(ctx context.Context, tx *core.Tx, e core.Employee, sync protocol.GitPrepareSync, taskID string) (int, error) {
+// (review); meta comes back with each result. It returns how many jobs it queued: 0 when there
+// is nothing to sync yet (no node: the session will be opened and prepared anyway), the daemon
+// cannot sync, or the project checks out full clones.
+func (o *Orchestrator) QueueSync(ctx context.Context, tx *core.Tx, e core.Employee, sync protocol.GitPrepareSync, meta map[string]any) (int, error) {
 	if e.NodeID == nil {
 		return 0, nil
 	}
@@ -409,10 +410,11 @@ func (o *Orchestrator) QueueSync(ctx context.Context, tx *core.Tx, e core.Employ
 		return 0, err
 	}
 	env, err := o.loadEnv(ctx, tx, e)
-	if err != nil || env.thread == nil {
+	if err != nil || env.thread == nil || env.project.WorkMode == "clone" {
 		return 0, err
 	}
-	meta := map[string]any{"purpose": "sync", "task_id": taskID, "thread_id": env.thread.ID}
+	meta = maps.Clone(meta)
+	meta["purpose"] = "sync"
 	for _, r := range env.repos {
 		if _, err := o.prepareRepo(ctx, tx, env, *e.NodeID, r, prepareOpts{sync: &sync, meta: meta}); err != nil {
 			return 0, err

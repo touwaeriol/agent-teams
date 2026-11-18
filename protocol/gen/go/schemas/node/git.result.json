@@ -89,9 +89,11 @@
             "conflict",
             "dirty",
             "checkout",
-            "current"
+            "current",
+            "absent",
+            "expired"
           ],
-          "description": "reset: member branch moved to origin/<ref>; merged: origin/<ref> merged into unmerged member commits; conflict: that merge conflicted and was aborted; dirty: uncommitted changes, nothing done; checkout: review checkout; current: already up to date."
+          "description": "reset: member branch fast-forwarded to origin/<ref>; merged: origin/<ref> merged into unmerged member commits; conflict: that merge conflicted and was aborted; dirty: uncommitted changes, nothing done; checkout: review checkout; current: already up to date; absent: origin/<ref> does not exist (yet); expired: started after the deadline, nothing done."
         },
         "head_sha": {
           "type": "string"

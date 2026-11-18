@@ -58,7 +58,7 @@ func (s *Service) takeHandoff(ctx context.Context, tx *core.Tx, task core.Task, 
 		_, err := core.UpdateTask(ctx, tx, task, map[string]any{"handoff": handoff})
 		return Result{}, false, err
 	}
-	if task.HandoffAsked || isReviewOnly(task) {
+	if task.Handoff != "" || task.HandoffAsked || isReviewOnly(task) {
 		return Result{}, false, nil
 	}
 	next, err := core.OpenDependents(ctx, tx, task.ConversationID, task.ID)

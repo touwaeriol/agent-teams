@@ -2615,10 +2615,10 @@ type GitPrepare struct {
 	Shared *RelPath `json:"shared,omitempty,omitzero"`
 
 	// Bring an existing worktree up to date (daemon feature git.sync). member: fetch,
-	// then reset the member branch to origin/<ref> when it has no commits outside it
-	// and the tree is clean, else merge origin/<ref> into it (abort on conflict).
-	// review: fetch and check out origin/<ref> detached (read-only review of another
-	// member's branch).
+	// then switch to the member branch if needed, fast-forward it to origin/<ref>
+	// when it has no commits outside it and the tree is clean, else merge
+	// origin/<ref> into it (abort on conflict). review: fetch and check out
+	// origin/<ref> detached (read-only review of another member's branch).
 	Sync *GitPrepareSync `json:"sync,omitempty,omitzero"`
 }
 
@@ -2653,11 +2653,15 @@ func (j *GitPrepareMode) UnmarshalJSON(value []byte) error {
 }
 
 // Bring an existing worktree up to date (daemon feature git.sync). member: fetch,
-// then reset the member branch to origin/<ref> when it has no commits outside it
-// and the tree is clean, else merge origin/<ref> into it (abort on conflict).
-// review: fetch and check out origin/<ref> detached (read-only review of another
-// member's branch).
+// then switch to the member branch if needed, fast-forward it to origin/<ref> when
+// it has no commits outside it and the tree is clean, else merge origin/<ref> into
+// it (abort on conflict). review: fetch and check out origin/<ref> detached
+// (read-only review of another member's branch).
 type GitPrepareSync struct {
+	// Skip the sync (action expired) when the job starts after this time: the console
+	// has already sent the task brief and the member may be working in the tree.
+	Deadline *time.Time `json:"deadline,omitempty,omitzero"`
+
 	// Mode corresponds to the JSON schema field "mode".
 	Mode GitPrepareSyncMode `json:"mode"`
 
@@ -2973,10 +2977,11 @@ func (j *GitResultErrorCode) UnmarshalJSON(value []byte) error {
 
 // git.prepare with sync: what the sync did.
 type GitResultSync struct {
-	// reset: member branch moved to origin/<ref>; merged: origin/<ref> merged into
-	// unmerged member commits; conflict: that merge conflicted and was aborted;
-	// dirty: uncommitted changes, nothing done; checkout: review checkout; current:
-	// already up to date.
+	// reset: member branch fast-forwarded to origin/<ref>; merged: origin/<ref>
+	// merged into unmerged member commits; conflict: that merge conflicted and was
+	// aborted; dirty: uncommitted changes, nothing done; checkout: review checkout;
+	// current: already up to date; absent: origin/<ref> does not exist (yet);
+	// expired: started after the deadline, nothing done.
 	Action GitResultSyncAction `json:"action"`
 
 	// conflict: the conflicting paths.
@@ -2988,10 +2993,12 @@ type GitResultSync struct {
 
 type GitResultSyncAction string
 
+const GitResultSyncActionAbsent GitResultSyncAction = "absent"
 const GitResultSyncActionCheckout GitResultSyncAction = "checkout"
 const GitResultSyncActionConflict GitResultSyncAction = "conflict"
 const GitResultSyncActionCurrent GitResultSyncAction = "current"
 const GitResultSyncActionDirty GitResultSyncAction = "dirty"
+const GitResultSyncActionExpired GitResultSyncAction = "expired"
 const GitResultSyncActionMerged GitResultSyncAction = "merged"
 const GitResultSyncActionReset GitResultSyncAction = "reset"
 
@@ -3002,6 +3009,8 @@ var enumValues_GitResultSyncAction = []interface{}{
 	"dirty",
 	"checkout",
 	"current",
+	"absent",
+	"expired",
 }
 
 // UnmarshalJSON implements json.Unmarshaler.

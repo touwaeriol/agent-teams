@@ -134,6 +134,7 @@ type Task struct {
 	// Sync is what the pre-task worktree sync did, per repository; SyncPending counts jobs still out.
 	Sync        map[string]TaskSync `gorm:"serializer:jsonb"`
 	SyncPending int
+	SyncRound   string
 	// Handoff is complete_task's note for whoever builds on the task (HandoffAsked: asked once).
 	Handoff      string
 	HandoffAsked bool
@@ -161,7 +162,7 @@ func (Task) TableName() string { return "at_tasks" }
 
 const taskCols = `conversation_id, id, thread_id, main_task_id, assignee, role, claimed_by, kind, instruction,
 	depends_on, status, parent, priority, attempt, summary, branch, head_sha, pushed, nudges, created_by, created_at,
-	updated_at, claimed_at, finished_at, sync, sync_pending, handoff, handoff_asked, merged`
+	updated_at, claimed_at, finished_at, sync, sync_pending, sync_round, handoff, handoff_asked, merged`
 
 // Finished reports whether the task reached a final state.
 func (t Task) Finished() bool {

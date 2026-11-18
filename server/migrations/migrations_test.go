@@ -1065,11 +1065,11 @@ func TestTaskHandoffMigration(t *testing.T) {
 	}
 	var got string
 	if err := db.QueryRow(`SELECT string_agg(column_name || '=' || coalesce(column_default, ''), ' ' ORDER BY column_name)
-		FROM information_schema.columns WHERE (table_name = 'at_tasks' AND column_name IN ('sync','sync_pending','handoff','handoff_asked','merged'))
+		FROM information_schema.columns WHERE (table_name = 'at_tasks' AND column_name IN ('sync','sync_pending','sync_round','handoff','handoff_asked','merged'))
 		OR (table_name = 'at_merge_queue' AND column_name = 'base_sha')`).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
-	want := "base_sha=''::text handoff=''::text handoff_asked=false merged='{}'::jsonb sync='{}'::jsonb sync_pending=0"
+	want := "base_sha=''::text handoff=''::text handoff_asked=false merged='{}'::jsonb sync='{}'::jsonb sync_pending=0 sync_round=''::text"
 	if got != want {
 		t.Fatalf("columns:\n got %s\nwant %s", got, want)
 	}

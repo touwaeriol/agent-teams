@@ -2,9 +2,9 @@ package delivery
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -385,13 +385,9 @@ func recordMerged(ctx context.Context, tx *core.Tx, entry core.MergeEntry, added
 	if err != nil {
 		return ignoreMissing(err)
 	}
-	merged := task.Merged
-	if merged == nil {
-		merged = map[string]core.TaskMerge{}
-	}
+	merged := maps.Clone(task.Merged)
 	merged[entry.Repo] = added
-	raw, _ := json.Marshal(merged)
-	_, err = core.UpdateTask(ctx, tx, task, map[string]any{"merged": string(raw)})
+	_, err = core.UpdateTask(ctx, tx, task, map[string]any{"merged": merged})
 	return err
 }
 

@@ -121,7 +121,7 @@ export class GitJobs {
     const cloned = await this.ensureClone(b.job_id, b.repo, shared);
     if (!cloned && b.fetch !== false) await this.fetch(b.job_id, b.repo, shared);
     await this.git(shared, ["config", "core.hooksPath", this.o.platform.hooksDir]);
-    if (isGitDir(cwd)) return { created: false, ...(b.sync ? await this.syncWorktree(cwd, b.sync) : { head_sha: await this.head(cwd) }) };
+    if (isGitDir(cwd)) return { created: false, ...(b.sync ? await this.syncWorktree(cwd, b.branch, b.sync) : { head_sha: await this.head(cwd) }) };
     if (existsSync(cwd) && readdirSync(cwd).length > 0) throw new JobError("dirty_conflict", `${b.cwd} exists and is not a worktree`);
     const start = await this.startPoint(shared, b.branch, b.base);
     const add = await this.git(shared, ["worktree", "add", "-B", b.branch, cwd, start]);
@@ -132,36 +132,50 @@ export class GitJobs {
   /**
    * Brings an existing worktree up to date before a task (shared-members.md §4.2). The shared
    * clone was just fetched, so origin/* is current: a member's branch follows the thread branch,
-   * a reviewer checks out the branch under review. Nothing is ever discarded: a dirty tree is
-   * reported, a conflicting merge is aborted and its paths reported.
+   * a reviewer checks out the branch under review. Nothing is discarded: a dirty tree is
+   * reported, the member branch only fast-forwards, a conflicting merge is aborted and reported.
+   * Past the deadline the console has already sent the brief, so the tree is left alone.
    */
-  private async syncWorktree(cwd: string, s: GitSyncRequest): Promise<Partial<GitResult>> {
+  private async syncWorktree(cwd: string, branch: string, s: GitSyncRequest): Promise<Partial<GitResult>> {
+    if (s.deadline && Date.now() > Date.parse(s.deadline)) return this.syncDone(cwd, "expired");
     const target = `origin/${s.ref}`;
     const exists = await this.git(cwd, ["rev-parse", "--verify", "--quiet", `refs/remotes/${target}`]);
-    if (exists.code !== 0) return this.syncDone(cwd, "current"); // the branch is not on the remote yet
+    if (exists.code !== 0) return this.syncDone(cwd, "absent");
     if (await this.dirty(cwd)) return this.syncDone(cwd, "dirty");
-    return s.mode === "review" ? this.syncReview(cwd, target) : this.syncMember(cwd, target);
+    if (s.mode === "review") return this.syncReview(cwd, target);
+    await this.onBranch(cwd, branch, target);
+    return this.syncMember(cwd, target);
   }
 
   private async syncReview(cwd: string, target: string): Promise<Partial<GitResult>> {
-    const r = await this.git(cwd, ["checkout", "--detach", target]);
-    if (r.code !== 0) throw new JobError("dirty_conflict", `cannot check out ${target}`, r.stderr);
+    await this.mustGit(cwd, ["checkout", "--detach", target], `cannot check out ${target}`);
     return this.syncDone(cwd, "checkout");
   }
 
+  /** A worktree last used for a review sits on a detached HEAD: back to the member's own branch. */
+  private async onBranch(cwd: string, branch: string, target: string): Promise<void> {
+    if ((await this.git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"])).stdout.trim() === branch) return;
+    const local = await this.git(cwd, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]);
+    await this.mustGit(cwd, local.code === 0 ? ["checkout", branch] : ["checkout", "-b", branch, target], `cannot switch to ${branch}`);
+  }
+
   private async syncMember(cwd: string, target: string): Promise<Partial<GitResult>> {
-    const behind = await this.count(cwd, `HEAD..${target}`);
-    if (behind === 0) return this.syncDone(cwd, "current");
+    if ((await this.count(cwd, `HEAD..${target}`)) === 0) return this.syncDone(cwd, "current");
     if ((await this.count(cwd, `${target}..HEAD`)) === 0) {
-      const r = await this.git(cwd, ["reset", "--hard", target]);
-      if (r.code !== 0) throw new JobError("dirty_conflict", `cannot move to ${target}`, r.stderr);
+      await this.mustGit(cwd, ["merge", "--ff-only", target], `cannot fast-forward to ${target}`);
       return this.syncDone(cwd, "reset");
     }
     const merge = await this.git(cwd, [...SYNC_IDENTITY, "merge", "--no-edit", target]);
     if (merge.code === 0) return this.syncDone(cwd, "merged");
     const conflicts = (await this.git(cwd, ["diff", "--name-only", "--diff-filter=U"])).stdout.split("\n").filter(Boolean);
+    if (conflicts.length === 0) throw new JobError("dirty_conflict", `cannot merge ${target}`, merge.stderr);
     await this.git(cwd, ["merge", "--abort"]);
     return this.syncDone(cwd, "conflict", conflicts);
+  }
+
+  private async mustGit(cwd: string, args: string[], message: string): Promise<void> {
+    const r = await this.git(cwd, args);
+    if (r.code !== 0) throw new JobError("dirty_conflict", message, r.stderr);
   }
 
   private async syncDone(cwd: string, action: GitSyncResult["action"], conflicts?: string[]): Promise<Partial<GitResult>> {

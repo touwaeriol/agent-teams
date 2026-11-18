@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -93,7 +92,8 @@ func idleMember(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task)
 // claim marks the task claimed, emits task.claimed and sends the member its brief.
 func (s *Scheduler) claim(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task, m core.Employee) error {
 	task, err := core.UpdateTask(ctx, tx, task, map[string]any{"status": "claimed", "claimed_by": m.Name,
-		"claimed_at": time.Now().UTC(), "branch": orchestrator.MemberBranch(t.No, m.Name), "nudges": 0})
+		"claimed_at": time.Now().UTC(), "branch": orchestrator.MemberBranch(t.No, m.Name), "nudges": 0,
+		"sync": map[string]core.TaskSync{}, "sync_pending": 0, "sync_round": ""})
 	if err != nil {
 		return err
 	}
@@ -107,19 +107,32 @@ func (s *Scheduler) claim(ctx context.Context, tx *core.Tx, t core.Thread, task 
 		s.status.Observe(ctx, m.ID, status.Observation{Kind: status.Claimed, Cause: "task.claimed:" + task.ID,
 			TaskID: task.ID, TaskKind: task.Kind})
 	})
+	return s.startTask(ctx, tx, t, task, m)
+}
+
+// startTask syncs the member's worktree before the brief when the daemon can (shared-members.md
+// §4.2): the task waits in claimed with sync_pending until every result is in (SyncDone) or
+// SyncTimeout passed. Otherwise the brief goes out at once, after the old fetch-only refresh.
+func (s *Scheduler) startTask(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task, m core.Employee) error {
 	sync, err := s.syncFor(ctx, tx, t, task)
 	if err != nil {
 		return err
 	}
-	jobs, err := s.orch.QueueSync(ctx, tx, m, sync, task.ID)
-	if err != nil || jobs == 0 {
-		if err != nil {
-			return err
-		}
-		return s.sendBrief(ctx, tx, t, task, m)
+	deadline := time.Now().Add(SyncTimeout).UTC()
+	sync.Deadline = &deadline
+	round := core.NewID("sr")
+	jobs, err := s.orch.QueueSync(ctx, tx, m, sync, map[string]any{"task_id": task.ID, "thread_id": t.ID, "round": round})
+	if err != nil {
+		return err
 	}
-	_, err = core.UpdateTask(ctx, tx, task, map[string]any{"sync_pending": jobs, "sync": "{}"})
-	return err // the brief goes out once the sync results are in (SyncDone) or SyncTimeout passed
+	if jobs > 0 {
+		_, err = core.UpdateTask(ctx, tx, task, map[string]any{"sync_pending": jobs, "sync_round": round})
+		return err
+	}
+	if err := s.orch.RefreshWorktree(ctx, tx, m); err != nil {
+		return err
+	}
+	return s.sendBrief(ctx, tx, t, task, m)
 }
 
 // syncFor is what the member's worktree is brought to before the task: the thread branch, or for
@@ -148,48 +161,60 @@ func (s *Scheduler) sendBrief(ctx context.Context, tx *core.Tx, t core.Thread, t
 	return err
 }
 
-// SyncDone records one repository's pre-task sync result; the last one sends the brief. A result
-// for a task that is no longer waiting (re-claimed, cancelled, timed out) is ignored.
+// SyncDone records one repository's pre-task sync result; the last one sends the brief. Results
+// of an earlier claim (round), repeated results and results after the timeout are ignored.
 func (s *Scheduler) SyncDone(ctx context.Context, tx *core.Tx, meta map[string]any, r *protocol.GitResult) error {
 	task, err := core.LockTask(ctx, tx, str(meta["thread_id"]), str(meta["task_id"]))
-	if err != nil || task.Status != "claimed" || task.SyncPending == 0 {
+	if err != nil || !awaitingSync(task, str(meta["round"])) {
 		return ignoreMissing(err)
 	}
-	e, err := core.EmployeeByID(ctx, tx, str(meta["employee_id"]))
-	if err != nil || e.Name != task.ClaimedBy {
-		return ignoreMissing(err)
+	repo := str(meta["repo"])
+	if _, seen := task.Sync[repo]; seen {
+		return nil
 	}
-	synced := task.Sync
-	if synced == nil {
-		synced = map[string]core.TaskSync{}
-	}
-	synced[str(meta["repo"])] = syncOf(r)
-	task, err = core.UpdateTask(ctx, tx, task, map[string]any{"sync": jsonOf(synced), "sync_pending": task.SyncPending - 1})
+	return s.finishSync(ctx, tx, task, map[string]core.TaskSync{repo: syncOf(r)}, task.SyncPending-1)
+}
+
+func awaitingSync(task core.Task, round string) bool {
+	return task.Status == "claimed" && task.SyncPending > 0 && task.SyncRound == round
+}
+
+// finishSync records sync results and sends the brief once nothing is pending.
+func (s *Scheduler) finishSync(ctx context.Context, tx *core.Tx, task core.Task, results map[string]core.TaskSync, pending int) error {
+	synced := maps.Clone(task.Sync)
+	maps.Copy(synced, results)
+	task, err := core.UpdateTask(ctx, tx, task, map[string]any{"sync": synced, "sync_pending": pending})
 	if err != nil || task.SyncPending > 0 {
 		return err
 	}
-	return s.briefOf(ctx, tx, task, e)
-}
-
-func syncOf(r *protocol.GitResult) core.TaskSync {
-	if !r.Ok || r.Sync == nil {
-		return core.TaskSync{Error: orDefault(deref(r.Error), "同步失败")}
-	}
-	return core.TaskSync{Action: string(r.Sync.Action), HeadSHA: r.Sync.HeadSHA, Conflicts: r.Sync.Conflicts}
-}
-
-func (s *Scheduler) briefOf(ctx context.Context, tx *core.Tx, task core.Task, e core.Employee) error {
 	t, err := core.ThreadByID(ctx, tx, task.ConversationID)
 	if err != nil {
 		return err
 	}
-	return s.sendBrief(ctx, tx, t, task, e)
+	m, err := core.EmployeeByName(ctx, tx, t.ProjectID, &t.ID, task.ClaimedBy)
+	if err != nil {
+		return ignoreMissing(err)
+	}
+	return s.sendBrief(ctx, tx, t, task, m)
+}
+
+// syncOf turns a git.result into the task's record: a job that succeeded without a sync report
+// created the worktree fresh from the thread branch.
+func syncOf(r *protocol.GitResult) core.TaskSync {
+	switch {
+	case !r.Ok:
+		return core.TaskSync{Error: orDefault(deref(r.Error), "同步失败")}
+	case r.Sync == nil:
+		return core.TaskSync{Action: "created", HeadSHA: deref(r.HeadSHA)}
+	}
+	return core.TaskSync{Action: string(r.Sync.Action), HeadSHA: r.Sync.HeadSHA, Conflicts: r.Sync.Conflicts}
 }
 
 // unreported names the repositories whose sync result never came back.
 const unreported = "其余仓库"
 
-// SyncTimeout is how long a brief waits for the pre-task sync before it goes out unsynced.
+// SyncTimeout is how long a brief waits for the pre-task sync before it goes out unsynced; the
+// sync jobs carry it as their deadline, so a late one leaves the tree alone.
 const SyncTimeout = 2 * time.Minute
 
 // releaseStaleSyncs sends the briefs whose sync results did not come back in time.
@@ -204,26 +229,10 @@ func (s *Scheduler) releaseStaleSyncs(ctx context.Context) {
 	for _, st := range stale {
 		err := s.core.InTx(ctx, func(tx *core.Tx) error {
 			task, err := core.LockTask(ctx, tx, st.ConversationID, st.ID)
-			if err != nil || task.Status != "claimed" || task.SyncPending == 0 {
+			if err != nil || !awaitingSync(task, st.SyncRound) {
 				return ignoreMissing(err)
 			}
-			synced := task.Sync
-			if synced == nil {
-				synced = map[string]core.TaskSync{}
-			}
-			synced[unreported] = core.TaskSync{Error: "超时"}
-			if task, err = core.UpdateTask(ctx, tx, task, map[string]any{"sync_pending": 0, "sync": jsonOf(synced)}); err != nil {
-				return err
-			}
-			t, err := core.ThreadByID(ctx, tx, task.ConversationID)
-			if err != nil {
-				return err
-			}
-			e, err := core.EmployeeByName(ctx, tx, t.ProjectID, &t.ID, task.ClaimedBy)
-			if err != nil {
-				return ignoreMissing(err)
-			}
-			return s.sendBrief(ctx, tx, t, task, e)
+			return s.finishSync(ctx, tx, task, map[string]core.TaskSync{unreported: {Error: "超时"}}, 0)
 		})
 		if err != nil {
 			s.log.Warn("release stale sync", "task_id", st.ID, "err", err)
@@ -242,7 +251,13 @@ func (s *Scheduler) taskBrief(ctx context.Context, tx *core.Tx, t core.Thread, t
 	if err := depResults(ctx, tx, &b, task); err != nil {
 		return "", err
 	}
-	syncNote(&b, t, task)
+	if len(task.Sync) > 0 {
+		sync, err := s.syncFor(ctx, tx, t, task)
+		if err != nil {
+			return "", err
+		}
+		syncNote(&b, sync, task)
+	}
 	mail, err := core.PeekUnread(ctx, tx, t.ID, m.Name)
 	if err != nil {
 		return "", err
@@ -272,7 +287,7 @@ func depResults(ctx context.Context, tx *core.Tx, b *strings.Builder, task core.
 			continue
 		}
 		if i == 0 {
-			b.WriteString("\n依赖任务（已合进讨论串分支）：\n")
+			b.WriteString("\n依赖任务：\n")
 		}
 		fmt.Fprintf(b, "- %s（%s）：%s\n", d.ID, d.ClaimedBy, clip(d.Summary, 3000))
 		if d.Handoff != "" {
@@ -305,44 +320,61 @@ func mergedNote(b *strings.Builder, d core.Task) {
 	}
 }
 
+var gateVerb = map[string]string{"review": "审查", "decision": "决策"}
+
 // gateNotes adds the review / decision verdicts on the dependency.
 func gateNotes(ctx context.Context, tx *core.Tx, b *strings.Builder, d core.Task) error {
-	var gates []core.Task
-	err := tx.Gorm(ctx).Model(&core.Task{}).Where("conversation_id = ? AND parent = ? AND kind IN ('review','decision') AND status IN ('done','failed')",
-		d.ConversationID, d.ID).Order("finished_at").Find(&gates).Error
+	gates, err := core.GateVerdicts(ctx, tx, d.ConversationID, d.ID)
 	for _, g := range gates {
-		verdict := map[bool]string{true: "通过", false: "打回"}[g.Status == "done"]
-		fmt.Fprintf(b, "  %s（%s · %s）：%s\n", map[string]string{"review": "审查", "decision": "决策"}[g.Kind], g.ClaimedBy, verdict, clip(g.Summary, 800))
+		verdict := "打回"
+		if g.Status == "done" {
+			verdict = "通过"
+		}
+		fmt.Fprintf(b, "  %s（%s · %s）：%s\n", gateVerb[g.Kind], g.ClaimedBy, verdict, clip(g.Summary, 800))
 	}
 	return err
 }
 
 // syncNote tells the member what the pre-task sync did to the worktree.
-func syncNote(b *strings.Builder, t core.Thread, task core.Task) {
-	if len(task.Sync) == 0 {
-		return
-	}
+func syncNote(b *strings.Builder, sync protocol.GitPrepareSync, task core.Task) {
 	b.WriteString("\n工作目录：\n")
 	for _, repo := range slices.Sorted(maps.Keys(task.Sync)) {
-		fmt.Fprintf(b, "- %s：%s\n", repo, syncLine(t, task.Sync[repo]))
+		fmt.Fprintf(b, "- %s：%s\n", repo, syncLine(sync, task.Sync[repo]))
 	}
 }
 
-func syncLine(t core.Thread, s core.TaskSync) string {
+func syncLine(sync protocol.GitPrepareSync, s core.TaskSync) string {
+	if sync.Mode == protocol.GitPrepareSyncModeReview {
+		return reviewLine(sync.Ref, s)
+	}
+	ref, sha := sync.Ref, short(s.HeadSHA)
 	switch s.Action {
-	case "reset", "current":
-		return fmt.Sprintf("已同步到讨论串分支 %s（%s），包含已合并的依赖任务的改动", t.Branch, short(s.HeadSHA))
+	case "reset", "current", "created":
+		return fmt.Sprintf("已在讨论串分支 %s 的最新提交上（%s），包含已合并的依赖任务的改动", ref, sha)
 	case "merged":
-		return fmt.Sprintf("已把讨论串分支 %s 合进你的分支（%s），你还没合并的提交都保留", t.Branch, short(s.HeadSHA))
-	case "checkout":
-		return fmt.Sprintf("已只读检出被审分支的最新提交 %s", short(s.HeadSHA))
+		return fmt.Sprintf("已把讨论串分支 %s 合进你的分支（%s），你还没合并的提交都保留", ref, sha)
+	case "absent":
+		return fmt.Sprintf("讨论串分支 %s 还没有建，工作目录基于讨论串的基准分支", ref)
 	case "conflict":
 		return fmt.Sprintf("同步讨论串分支 %s 时和你未合并的提交冲突，已中止：%s。先 git merge origin/%s 解决冲突再开工",
-			t.Branch, strings.Join(s.Conflicts, "、"), t.Branch)
+			ref, strings.Join(s.Conflicts, "、"), ref)
 	case "dirty":
-		return fmt.Sprintf("有未提交的改动，没有同步。先提交或处理掉它们，再 git merge origin/%s", t.Branch)
+		return fmt.Sprintf("有未提交的改动，没有同步。先提交或处理掉它们，再 git merge origin/%s", ref)
 	}
-	return fmt.Sprintf("没能自动同步（%s）。开工前先 git fetch，再 git merge origin/%s", orDefault(s.Error, "超时"), t.Branch)
+	return fmt.Sprintf("没能自动同步（%s）。开工前先 git fetch，再 git merge origin/%s", orDefault(s.Error, "超时"), ref)
+}
+
+// reviewLine: a reviewer only reads, so the advice is a checkout, never a merge.
+func reviewLine(ref string, s core.TaskSync) string {
+	switch s.Action {
+	case "checkout", "created":
+		return fmt.Sprintf("已只读检出被审分支 %s 的最新提交 %s", ref, short(s.HeadSHA))
+	case "absent":
+		return fmt.Sprintf("被审分支 %s 还没推到 GitHub，看到的可能不是最新提交", ref)
+	case "dirty":
+		return fmt.Sprintf("审查目录里有未提交的改动，没有切到被审分支：先 git stash，再 git checkout --detach origin/%s", ref)
+	}
+	return fmt.Sprintf("没能自动检出被审分支（%s）：先 git fetch，再 git checkout --detach origin/%s", orDefault(s.Error, "超时"), ref)
 }
 
 func short(sha string) string {
@@ -384,10 +416,4 @@ func orDefault(v, d string) string {
 		return d
 	}
 	return v
-}
-
-// jsonOf encodes a value for a JSONB column update.
-func jsonOf(v any) string {
-	raw, _ := json.Marshal(v)
-	return string(raw)
 }

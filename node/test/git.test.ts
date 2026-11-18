@@ -102,9 +102,9 @@ describe("git jobs", () => {
       return git(seed, "rev-parse", "HEAD");
     };
     let n = 0;
-    const sync = async (name: string, mode: "member" | "review", ref = "thread/12-comms") => {
+    const sync = async (name: string, mode: "member" | "review", ref = "thread/12-comms", deadline?: string) => {
       const job = `g_s${++n}`;
-      h.console.command("git.prepare", { ...prepare(job, name), sync: { mode, ref } });
+      h.console.command("git.prepare", { ...prepare(job, name), sync: { mode, ref, ...(deadline ? { deadline } : {}) } });
       return (await h.console.waitType("git.result", (b) => b.job_id === job)).body;
     };
     h.console.command("git.prepare", prepare("g_s0", "dev-1"));
@@ -148,6 +148,16 @@ describe("git jobs", () => {
     const review = await sync("reviewer-1", "review", "thread/12/dev-2");
     expect(review.sync).toEqual({ action: "checkout", head_sha: t1 });
     expect(execFileSync("git", ["--git-dir", bare, "rev-parse", "thread/12/dev-2"], { encoding: "utf8" }).trim()).toBe(t1);
+
+    // The same employee's next ordinary task leaves the detached review checkout for its own branch.
+    const rwt = join(h.opts.root, "projects/p1/threads/12/reviewer-1");
+    const back = await sync("reviewer-1", "member");
+    expect(git(rwt, "rev-parse", "--abbrev-ref", "HEAD")).toBe("thread/12/reviewer-1");
+    expect(back.sync.head_sha).toBe(git(seed, "rev-parse", "origin/thread/12-comms"));
+
+    // A branch not on the remote yet, and a sync that started after its deadline, change nothing.
+    expect((await sync("reviewer-1", "review", "thread/12/nobody")).sync.action).toBe("absent");
+    expect((await sync("reviewer-1", "member", "thread/12-comms", "2000-01-01T00:00:00Z")).sync.action).toBe("expired");
   });
 
   it("re-sends the original git.result for a repeated job instead of running it again", async () => {
