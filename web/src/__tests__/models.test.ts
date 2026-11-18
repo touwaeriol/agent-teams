@@ -1,7 +1,6 @@
 // Model lists and custom commands (pure parts): choices per runtime, the user's default, list
-// problems, command validation, the role card hints and the /model toast.
+// problems, command validation and the role card hints.
 import { describe, expect, it } from "vitest";
-import { modelAppliedText } from "@/components/app/composer/panels";
 import { chatScope, cleanCommand, commandProblem, commandsHint, promptOnly, toggleHidden, togglable, unfit } from "@/lib/commands";
 import { defaultModel, followLabel, MODEL_ID, modelChoices, modelFits, modelName, modelProblems, offersCodex, projectModelStatus } from "@/lib/models";
 import { newRole, roleProblems } from "@/lib/roles";
@@ -27,8 +26,10 @@ describe("model lists", () => {
       { tier: "member", runtime: "claude", model: "" },
       { tier: "member", runtime: "claude", model: "claude-haiku-x" },
     ];
-    expect(projectModelStatus("", roles, list, "coordinator")).toBe("跟随岗位配置（岗位：Opus 5.5）");
-    expect(projectModelStatus("", roles, list, "claude")).toBe("跟随岗位配置（岗位：Haiku、Opus 5.5）");
+    // Members only: the lead's own model does not count, the coordinator never does.
+    expect(projectModelStatus("", roles, list, "claude")).toBe("跟随岗位配置（岗位：Opus 5.5、Haiku）");
+    expect(projectModelStatus("", roles.slice(0, 3), list, "claude")).toBe("跟随岗位配置（岗位：Opus 5.5）");
+    expect(projectModelStatus("", roles.slice(0, 2), list, "claude")).toBe("跟随岗位配置（没有这类岗位）");
     expect(projectModelStatus("", roles, list, "codex")).toBe("跟随岗位配置（没有这类岗位）");
     expect(projectModelStatus("", [{ tier: "member", runtime: "codex", model: "" }], [], "codex")).toBe("跟随岗位配置（岗位：我的默认（未设置））");
     expect(projectModelStatus("claude-haiku-x", roles, list, "claude")).toBe("项目指定：Haiku");
@@ -37,6 +38,7 @@ describe("model lists", () => {
     expect(offersCodex(roles, list)).toBe(true);
     expect(offersCodex([{ tier: "member", runtime: "codex" }], [])).toBe(true);
     expect(offersCodex([{ tier: "coordinator", runtime: "codex" }], [])).toBe(false);
+    expect(offersCodex([{ tier: "lead", runtime: "codex" }], [])).toBe(false);
     expect(offersCodex([], [], "gpt-x")).toBe(true);
   });
 
@@ -72,15 +74,6 @@ describe("model lists", () => {
     expect(modelProblems([])).toEqual(["至少保留一个模型"]);
     expect(modelProblems(Array.from({ length: 51 }, (_, i) => ({ runtime: "claude" as const, model: `m${i}` })))).toEqual(["最多 50 个模型"]);
   });
-
-  it("words the /model result: live, next session, skipped", () => {
-    const name = (id: string) => modelName(list, id);
-    expect(modelAppliedText({ applied: [{ employee: "lead-1", model: "claude-haiku-x", live: true }], skipped: [] }, name)).toBe("lead-1 已切换到 Haiku，正在运行的会话从下一轮起生效");
-    expect(modelAppliedText({ applied: [{ employee: "项目统筹", model: "claude-opus-5-5", live: false }], skipped: null }, name)).toBe("项目统筹 改用 Opus 5.5，下次打开会话时生效");
-    expect(
-      modelAppliedText({ applied: [{ employee: "lead-1", model: "claude-haiku-x", live: true }, { employee: "dev-1", model: "claude-haiku-x", live: false }], skipped: ["codex-1"] }, name),
-    ).toBe("2 位员工 改用 Haiku：1 个运行中的会话从下一轮起生效，其余下次打开会话时生效；codex-1 是另一种类型，模型没变");
-  });
 });
 
 describe("custom commands", () => {
@@ -89,7 +82,8 @@ describe("custom commands", () => {
   it("validates names, clashes, modes and templates", () => {
     const ok = { name: "plan", description: "", mode: "prompt" as const, prompt: "计划：{{args}}" };
     expect(commandProblem(ok, [], false)).toBe("");
-    expect(commandProblem({ ...ok, name: "model" }, [], false)).toBe("/model 是平台命令，换个名字");
+    expect(commandProblem({ ...ok, name: "model" }, [], false)).toBe("/model 是平台保留的命令名，换个名字");
+    expect(commandProblem({ ...ok, name: "status" }, [], false)).toBe("/status 是平台保留的命令名，换个名字");
     expect(commandProblem({ ...ok, name: "Plan" }, [], false)).toContain("小写字母开头");
     expect(commandProblem(ok, ["plan"], false)).toBe("已经有 /plan 了");
     expect(commandProblem({ ...ok, prompt: " " }, [], false)).toBe("提示词模板不能为空");
@@ -108,6 +102,10 @@ describe("custom commands", () => {
     expect(togglable({ tier: "coordinator" }).some((c) => c.name === "effort")).toBe(false);
     expect(togglable({ tier: "lead" }).map((c) => c.name)).toContain("effort");
     expect(togglable({ tier: "member" })).toEqual([]);
+    // /model is gone: no toggle for it (a saved hidden list that still names it is kept as is).
+    expect(togglable({ tier: "coordinator" }).some((c) => c.name === "model")).toBe(false);
+    expect(togglable({ tier: "lead" }).some((c) => c.name === "model")).toBe(false);
+    expect(toggleHidden(["model"], "status")).toEqual(["model", "status"]);
     expect(toggleHidden(["usage"], "usage")).toEqual([]);
     expect(toggleHidden(null, "memory")).toEqual(["memory"]);
     expect(commandsHint(codex)).toContain("Codex 没有斜杠命令");
