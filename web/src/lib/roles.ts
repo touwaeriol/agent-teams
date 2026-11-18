@@ -102,18 +102,64 @@ export function contextDefaults(r: Pick<RoleView, "tier" | "gate">): ContextFiel
   return { context_limit: null, compact_between_pct: 60, compact_in_task_pct: 80, clear_after_tasks: 8, compact_focus: DEV_FOCUS };
 }
 
+/** Smallest context limit (server roles.MinContextLimit): a session starts with 15–25K, Claude compacts by window − 33K. */
+export const MIN_CONTEXT_LIMIT = 100_000;
+
+/** Claude's measured autocompact margins (shared-members.md §5.2): window clamped to 100K–1M, never later than window − 20K − 13K. */
+const CLAUDE_WINDOW = { min: 100_000, max: 1_000_000, margin: 33_000 };
+
+/** "360K" */
+export function kTokens(n: number): string {
+  return `${Math.round(n / 1000)}K`;
+}
+
 /** The token counts the role's percentages come to ("360K"), or null without a limit. */
 export function contextTokens(limit: number | null | undefined, pct: number | null | undefined): string | null {
   if (!limit || !pct) return null;
-  return `${Math.round((limit * pct) / 100 / 1000)}K`;
+  return kTokens((limit * pct) / 100);
+}
+
+export interface Threshold {
+  tokens: number;
+  /** Claude compacts no later than window − 33K: the role's target was above it. */
+  cappedAt?: number;
+}
+
+/**
+ * When the runtime compacts by itself during a task: limit × in-task pct; Claude never later than
+ * its window − 33K (window = the limit clamped to 100K–1M). Null without a limit or pct.
+ */
+export function inTaskThreshold(r: Pick<RoleView, "runtime" | "context_limit" | "compact_in_task_pct">): Threshold | null {
+  if (!r.context_limit || !r.compact_in_task_pct) return null;
+  const tokens = (r.context_limit * r.compact_in_task_pct) / 100;
+  if (r.runtime !== "claude") return { tokens };
+  const latest = Math.min(CLAUDE_WINDOW.max, Math.max(CLAUDE_WINDOW.min, r.context_limit)) - CLAUDE_WINDOW.margin;
+  return tokens > latest ? { tokens: latest, cappedAt: latest } : { tokens };
+}
+
+/** One line on a threshold: "，即 480K" or the capped value with why. */
+export function thresholdText(t: Threshold | null): string {
+  if (!t) return "";
+  if (t.cappedAt) return `，即 ${kTokens(t.tokens)}（Claude 最晚在窗口 − 33K 时压缩，按 ${kTokens(t.cappedAt)} 封顶）`;
+  return `，即 ${kTokens(t.tokens)}`;
+}
+
+const CONTEXT_KEYS = ["context_limit", "compact_between_pct", "compact_in_task_pct", "clear_after_tasks", "compact_focus"] as const;
+
+/** Whether the role's context settings are its kind's defaults (not edited). */
+export function hasContextDefaults(r: ContextFields, kind: Pick<RoleView, "tier" | "gate">): boolean {
+  const d = contextDefaults(kind);
+  return CONTEXT_KEYS.every((k) => (r[k] ?? null) === (d[k] ?? null));
 }
 
 /** Problems of the context settings (mirrors server roles.contextChecks). */
 export function contextProblems(r: RoleView): string[] {
   const out: string[] = [];
+  const whole = (v: number | null | undefined) => v == null || Number.isInteger(v);
   const pct = (v: number | null | undefined) => v != null && (v < 1 || v > 100 || !Number.isInteger(v));
-  if (r.context_limit != null && r.context_limit < 10000) out.push(`${roleName(r)} 的上下文上限至少 10000 token`);
-  if (pct(r.compact_between_pct) || pct(r.compact_in_task_pct)) out.push(`${roleName(r)} 的压缩比例要在 1–100 之间`);
+  if (!whole(r.context_limit) || !whole(r.clear_after_tasks)) out.push(`${roleName(r)} 的上下文上限和连续任务数要填整数`);
+  if (r.context_limit != null && r.context_limit < MIN_CONTEXT_LIMIT) out.push(`${roleName(r)} 的上下文上限至少 100000 token`);
+  if (pct(r.compact_between_pct) || pct(r.compact_in_task_pct)) out.push(`${roleName(r)} 的压缩比例要是 1–100 之间的整数`);
   if (r.clear_after_tasks != null && r.clear_after_tasks < 0) out.push(`${roleName(r)} 的连续任务数不能是负数`);
   return out;
 }

@@ -6,7 +6,7 @@ import ElementPlus from "element-plus";
 import { afterEach, describe, expect, it } from "vitest";
 import { defineComponent, h, nextTick, ref } from "vue";
 import type { RoleView } from "@/api/views";
-import { contextDefaults, contextProblems, contextTokens, DEV_FOCUS, newRole, roleProblems } from "@/lib/roles";
+import { contextDefaults, contextProblems, contextTokens, DEV_FOCUS, hasContextDefaults, inTaskThreshold, newRole, roleProblems } from "@/lib/roles";
 import ContextFields from "@/pages/settings/team/ContextFields.vue";
 
 afterEach(() => {
@@ -27,11 +27,32 @@ describe("context defaults", () => {
     expect(contextTokens(null, 80)).toBeNull();
   });
 
-  it("refuses a limit under 10000, percentages outside 1–100 and a negative clear count", () => {
-    const bad = { ...newRole([], "#000"), context_limit: 5000, compact_in_task_pct: 0, clear_after_tasks: -1 };
+  it("refuses a limit under 100000, percentages outside 1–100 and a negative clear count", () => {
+    const bad = { ...newRole([], "#000"), context_limit: 50000, compact_in_task_pct: 0, clear_after_tasks: -1 };
     expect(contextProblems(bad)).toHaveLength(3);
     expect(roleProblems([bad]).filter((p) => p.includes("上下文") || p.includes("比例") || p.includes("连续"))).toHaveLength(3);
     expect(contextProblems({ ...newRole([], "#000"), context_limit: 600000 })).toEqual([]);
+  });
+
+  it("wants whole numbers for the limit and the clear count", () => {
+    expect(contextProblems({ ...newRole([], "#000"), context_limit: 150000.5 })).toEqual(["新岗位 的上下文上限和连续任务数要填整数"]);
+    expect(contextProblems({ ...newRole([], "#000"), clear_after_tasks: 2.5 })).toEqual(["新岗位 的上下文上限和连续任务数要填整数"]);
+  });
+
+  it("shows when the runtime compacts in a task, capped at Claude's window − 33K", () => {
+    const dev = { ...newRole([], "#000"), context_limit: 600000 };
+    expect(inTaskThreshold(dev)).toEqual({ tokens: 480000 });
+    // 100K limit, 80%: 80K > 100K − 33K = 67K
+    expect(inTaskThreshold({ ...dev, context_limit: 100000 })).toEqual({ tokens: 67000, cappedAt: 67000 });
+    expect(inTaskThreshold({ ...dev, context_limit: 100000, runtime: "codex" })).toEqual({ tokens: 80000 });
+    expect(inTaskThreshold({ ...dev, context_limit: null })).toBeNull();
+  });
+
+  it("tells unedited settings from edited ones", () => {
+    const dev = newRole([], "#000");
+    expect(hasContextDefaults(dev, { tier: "member", gate: "" })).toBe(true);
+    expect(hasContextDefaults({ ...dev, compact_in_task_pct: 85 }, { tier: "member", gate: "" })).toBe(false);
+    expect(hasContextDefaults(dev, { tier: "member", gate: "review" })).toBe(false);
   });
 });
 
@@ -57,6 +78,23 @@ describe("ContextFields", () => {
     await input(w, "领任务时压缩（%）").setValue("50");
     await input(w, "连续几个任务后换新会话").setValue("0");
     expect(value.value).toMatchObject({ compact_between_pct: 50, clear_after_tasks: 0 });
+  });
+
+  it("caps the in-task hint at Claude's window − 33K and lists problems in the dialog", async () => {
+    const { w } = mountFields({ ...newRole([], "#000"), context_limit: 100000, clear_after_tasks: 1.5 });
+    expect(w.text()).toContain("即 67K（Claude 最晚在窗口 − 33K 时压缩，按 67K 封顶）");
+    expect(w.find("[role=alert]").text()).toContain("要填整数");
+  });
+
+  it("takes the new kind's defaults when the gate changes, unless the settings were edited", async () => {
+    const { value } = mountFields(newRole([], "#000"));
+    value.value.gate = "review";
+    await nextTick();
+    expect(value.value).toMatchObject({ compact_between_pct: null, compact_in_task_pct: 80, clear_after_tasks: 1, compact_focus: "" });
+    value.value.compact_in_task_pct = 90;
+    value.value.gate = "";
+    await nextTick();
+    expect(value.value).toMatchObject({ compact_in_task_pct: 90, clear_after_tasks: 1 });
   });
 
   it("hides the between-task fields for the lead and restores the defaults of the kind", async () => {
