@@ -100,4 +100,4 @@
 | 1 共享员工 + 项目级队列 | 完成（`feat/staff-p1`）：P1-1～P1-14 和 e2e 脚本 `deploy/e2e/run_shared.mjs`（待用真 Claude 跑一遍）。补充：跨讨论串留言带讨论串号、不换讨论串（设计 §6），节点上线触发主人项目的调度，没有讨论串的成员在办公室里站在空闲锚点 |
 | 2 会话管理 | 完成（`feat/staff-p2`）：P2-1～P2-8。P2-7 实测记在设计 §5.2（Claude 的 PCT 要换算到“窗口 − 20K”，锚点走 SessionStart 钩子、重点走 PreCompact 的 systemMessage）；补充：`first_message` 也带锚点、`session.close` 加 `context_clear`、会话跑回合时领取不动它、压缩和开工前同步串行。审查后的修复：Codex 补锚点只走 `turn/steer`；`session.compact` 等空闲最多 2 分钟、来新消息就放弃，崩溃 / 重启都回 `ok: false`；任务间和 Codex 任务中的阈值按上次报的窗口封顶（`window_tokens`），没设上限时用它换算；锚点随任务结束清掉、重开会话带上（`session.open.anchor`）；上下文上限至少 100K；`session.compacted` 校验节点；重新排队清零进度和指标。指标（`compactions` / `ctx_start` / `ctx_end`，token）先存在 `at_tasks`，团队页按岗位展示留到阶段 3；阶段验收的真 Claude e2e 未跑 |
 | 3 办公室和团队页 | 未开始 |
-| 4 调度优化 | 未开始 |
+| 4 调度优化 | 完成（`feat/staff-p4`）：P4-1～P4-3。`ready_at` 只由事件维护（`core.SetTaskStatus` 置 done 时看直接下游，`InsertTask` / `RequeueTask` 照旧写），领取查询改成 `ready_at IS NOT NULL`，扫描兜底补写超过 2 分钟漏写的并打警告；`at_tasks.downstream`（迁移 00300）缓存传递下游中未结束的任务数，新建 / 进出结束状态时增减，打分和每岗位 200 个的截断都按它排在优先级之后；压测 500 任务 / 20 讨论串 / 10 成员一轮中位数约 18 ms、最慢约 40 ms（改动前约 34 / 70 ms）。设计 §4、§4.1 |

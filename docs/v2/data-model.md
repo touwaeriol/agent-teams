@@ -337,7 +337,7 @@ ALTER TABLE at_tasks
 ALTER TABLE at_tasks
   ADD COLUMN reserved_for TEXT NOT NULL DEFAULT '',  -- 返工预留给的原成员（审查打回、CI / 冲突修复）
   ADD COLUMN reserved_until TIMESTAMPTZ,             -- 预留到期（10 分钟），过期后同岗位其他成员可领
-  ADD COLUMN ready_at TIMESTAMPTZ;                   -- 依赖都满足、可领取的时刻（饿死保护按它算 5 分钟）
+  ADD COLUMN ready_at TIMESTAMPTZ;                   -- 依赖都满足、可领取的时刻（饿死保护按它算 5 分钟）；00300 起领取查询只看它（pending 且非空 = 可领取），不再逐个查依赖
 CREATE INDEX at_tasks_queue ON at_tasks (thread_id, status, role);
 -- 00290（shared-members.md §5）：领取时的压缩、任务锚点里的进度、长任务指标
 ALTER TABLE at_tasks
@@ -348,6 +348,12 @@ ALTER TABLE at_tasks
   ADD COLUMN ctx_start INT, ADD COLUMN ctx_end INT, -- 任务开始（简报送达）和最近一个回合结束时的上下文 token 数
   ADD COLUMN split_hinted BOOLEAN NOT NULL DEFAULT false;
 CREATE INDEX at_tasks_compact ON at_tasks (compact_id) WHERE compact_id <> '';
+-- 00300（shared-members.md §4.1，阶段 4 调度优化）：关键路径计数，可领取 / 待补 ready_at 的部分索引
+ALTER TABLE at_tasks
+  ADD COLUMN downstream INT NOT NULL DEFAULT 0;    -- 直接或间接依赖它、还没结束（不是 done / failed / cancelled）的任务数，每个只算一次；
+                                                   -- 新建任务时给它的所有上游 +1，任务进入 / 离开结束状态时 −1 / +1（core.SetTaskStatus、RequeueTask）
+CREATE INDEX at_tasks_ready ON at_tasks (thread_id, role) WHERE status = 'pending' AND ready_at IS NOT NULL;
+CREATE INDEX at_tasks_unready ON at_tasks (updated_at) WHERE status = 'pending' AND ready_at IS NULL;  -- 调度兜底补写 ready_at 用
 -- claimed_by 仍是员工名：名字解析先找讨论串自己的员工（组长、旧成员），再找项目成员
 -- v2 status 取值：pending | claimed | running | blocked | review | decision | merging | done | failed | cancelled
 -- 注意：pending/running 与 v1 重叠，v1 只靠防护补丁（kind='chat' 且 platform_version=1）避开 v2 行；补丁同时把 v1 TaskView.status 改为 str
@@ -404,6 +410,7 @@ CREATE TABLE at_employees (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX at_employees_name ON at_employees (project_id, COALESCE(thread_id, ''), name);
+CREATE INDEX at_employees_thread ON at_employees (thread_id) WHERE thread_id IS NOT NULL;  -- 00300：领取查询按讨论串查旧成员
 
 CREATE TABLE at_agent_sessions (
   id              TEXT PRIMARY KEY,                -- s_…
