@@ -1,6 +1,7 @@
 <script setup lang="ts">
-// One role template: name and tier, count, menu (编辑详情 / 删除岗位), runtime, model and nodes, the rule
-// line, look, skills, plugins and (members) permission mode. Emits patches; the page keeps the draft.
+// One role template: name and tier, count, menu (编辑详情 / 删除岗位), runtime, model (members; the
+// coordinator and the lead always use the owner's default, shown read-only) and nodes, the rule line,
+// look, skills, plugins and (members) permission mode. Emits patches; the page keeps the draft.
 import { MoreHorizontal } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import type { RoleView } from "@/api/views";
@@ -24,9 +25,11 @@ const emit = defineEmits<{ change: [patch: Partial<RoleView>]; remove: [] }>();
 const level = computed(() => LEVEL[props.role.tier]);
 const editing = ref(false);
 const COMMANDS: Record<string, () => void> = { edit: () => (editing.value = true), remove: () => emit("remove") };
+const member = computed(() => props.role.tier === "member");
 const models = useModels();
-/** A new runtime drops a model that is not one of its models (the role then follows the default). */
+/** Members only (the type is fixed for the others): a new runtime drops a model that is not one of its models (the role then follows the default). */
 function setRuntime(runtime: RoleView["runtime"]) {
+  if (!member.value) return;
   if (modelFits(models.data.value?.models ?? [], runtime, props.role.model ?? "")) return emit("change", { runtime });
   emit("change", { runtime, model: "" });
   toast.info("已改为跟随默认模型");
@@ -55,7 +58,7 @@ function save(r: RoleView) {
           </button>
           <template #menu>
             <el-dropdown-item command="edit">编辑详情</el-dropdown-item>
-            <el-dropdown-item v-if="role.tier === 'member'" command="remove" class="is-destructive">删除岗位</el-dropdown-item>
+            <el-dropdown-item v-if="member" command="remove" class="is-destructive">删除岗位</el-dropdown-item>
           </template>
         </DropdownMenu>
       </span>
@@ -63,14 +66,15 @@ function save(r: RoleView) {
     <div class="grid grid-cols-1 gap-2.5 text-[13px] min-[480px]:grid-cols-[8rem_minmax(0,1.25fr)_minmax(0,1fr)]">
       <span class="flex min-w-0 flex-col gap-1">
         <span class="text-xs text-muted-foreground">类型</span>
-        <el-select :model-value="role.runtime" :disabled="role.tier !== 'member'" class="at-select-36 at-text-13" aria-label="类型" @update:model-value="setRuntime">
+        <el-select :model-value="role.runtime" :disabled="!member" class="at-select-36 at-text-13" aria-label="类型" @update:model-value="setRuntime">
           <el-option value="claude" label="Claude Code" />
           <el-option value="codex" label="Codex" />
         </el-select>
       </span>
       <span class="flex min-w-0 flex-col gap-1">
         <span class="text-xs text-muted-foreground">模型</span>
-        <RoleModelSelect :runtime="role.runtime" :model-value="role.model ?? ''" @update:model-value="(model: string) => emit('change', { model })" />
+        <RoleModelSelect v-if="member" :runtime="role.runtime" :model-value="role.model ?? ''" @update:model-value="(model: string) => emit('change', { model })" />
+        <span v-else class="flex min-h-9 items-center text-xs leading-[18px] text-muted-foreground" data-testid="role-model-fixed">使用我的默认模型，不能切换</span>
       </span>
       <span class="flex min-w-0 flex-col gap-1">
         <span class="text-xs text-muted-foreground">可用节点</span>
@@ -81,7 +85,7 @@ function save(r: RoleView) {
     <LookEditor :role="role" :layout="layout" @change="(look) => emit('change', { look })" />
     <SkillPicker v-if="canHaveSkills(role)" :model-value="role.skills ?? []" @update:model-value="(skills: string[]) => emit('change', { skills })" />
     <PluginPicker v-if="canHaveSkills(role)" :role="role" @change="(plugins: string[]) => emit('change', { plugins })" />
-    <PermissionField v-if="role.tier === 'member' && !isReadOnly(role)" :role="role" @change="(p) => emit('change', p)" />
+    <PermissionField v-if="member && !isReadOnly(role)" :role="role" @change="(p) => emit('change', p)" />
     <CommandEditor :role="role" @change="(p) => emit('change', p)" />
     <RoleDialog v-model:open="editing" :role="role" @save="save" />
   </article>

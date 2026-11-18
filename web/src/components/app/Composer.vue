@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// Message box. `large`: the coordinator chat (textarea + hint row); `inline`: one-line box for the
-// lead. Enter sends, Shift+Enter breaks; IME composition is respected. With `draftKey` the
-// unsent text survives reloads (localStorage). Slots: `hint` (left of the action row), `extra`.
+// Message box. `large`: the coordinator and lead chats (textarea + hint row, with the employee's
+// model as a read-only tag when `assist` names the conversation); `inline`: one-line box. Enter
+// sends, Shift+Enter breaks; IME composition is respected. With `draftKey` the unsent text survives
+// reloads (localStorage). Slots: `hint` (left of the action row), `extra`.
 import { computed, ref } from "vue";
 import { useDraft } from "@/lib/persist";
 import { toast } from "@/lib/toast";
@@ -12,6 +13,7 @@ import { attachmentHandlers, type Attachments } from "./attachments";
 import SendButton from "./SendButton.vue";
 import AssistPopup from "./composer/AssistPopup.vue";
 import CommandPanel from "./composer/CommandPanel.vue";
+import ModelTag from "./composer/ModelTag.vue";
 import PlusMenu from "./composer/PlusMenu.vue";
 import RefChips from "./composer/RefChips.vue";
 import type { MessageRef } from "./composer/assist";
@@ -86,7 +88,7 @@ function onKey(e: KeyboardEvent) {
 <template>
   <form v-if="variant === 'inline'" :class="cn('relative flex flex-col gap-2 rounded-xl border border-[#E2DFD8] bg-panel py-1.5 pr-1.5', assist.enabled.value || attachments ? 'pl-1.5' : 'pl-3', ring, props.class)" v-on="drop" @submit.prevent="send">
     <AssistPopup v-if="assist.enabled.value" :assist="assist" />
-    <CommandPanel v-if="assist.panel.value && props.assist" :assist="assist" :panel="assist.panel.value" v-bind="props.assist" class="!mx-0 !mt-1.5 mr-1.5" />
+    <CommandPanel v-if="assist.panel.value && props.assist" :assist="assist" :panel="assist.panel.value" :pid="props.assist.pid" :cid="props.assist.cid" class="!mx-0 !mt-1.5 mr-1.5" />
     <AttachmentStrip v-if="attachments" :a="attachments" class="pl-1.5 pt-1" />
     <RefChips :assist="assist" class="pl-1.5 pt-1" />
     <span class="flex items-center gap-2">
@@ -113,7 +115,7 @@ function onKey(e: KeyboardEvent) {
   </form>
   <form v-else :class="cn('relative rounded-2xl border border-[#E2DFD8] bg-panel shadow-[0_2px_12px_-4px_rgba(0,0,0,0.08)]', ring, props.class)" v-on="drop" @submit.prevent="send">
     <AssistPopup v-if="assist.enabled.value" :assist="assist" />
-    <CommandPanel v-if="assist.panel.value && props.assist" :assist="assist" :panel="assist.panel.value" v-bind="props.assist" />
+    <CommandPanel v-if="assist.panel.value && props.assist" :assist="assist" :panel="assist.panel.value" :pid="props.assist.pid" :cid="props.assist.cid" />
     <AttachmentStrip v-if="attachments" :a="attachments" class="px-4 pt-3" />
     <RefChips :assist="assist" class="px-4 pt-3" />
     <label :for="inputId" class="sr-only">{{ label }}</label>
@@ -141,7 +143,8 @@ function onKey(e: KeyboardEvent) {
     <div class="flex items-center justify-between gap-2 px-3 pb-3 pt-1.5">
       <span class="flex min-w-0 items-center gap-2">
         <PlusMenu v-if="assist.enabled.value" :assist="assist" :a="attachments" />
-        <span class="text-xs text-muted-foreground"><slot name="hint">{{ hint }}</slot></span>
+        <span class="min-w-0 text-xs text-muted-foreground"><slot name="hint">{{ hint }}</slot></span>
+        <ModelTag v-if="props.assist?.cid" :cid="props.assist.cid" />
       </span>
       <span class="flex items-center gap-2">
         <AttachButton v-if="attachments && !assist.enabled.value" :a="attachments" />
