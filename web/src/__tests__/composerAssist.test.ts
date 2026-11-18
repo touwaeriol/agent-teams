@@ -229,7 +229,9 @@ describe("Composer with assist", () => {
     const hint = w.get("[data-testid=composer-hint]");
     expect(hint.classes()).toEqual(expect.arrayContaining(["truncate", "min-w-0"]));
     expect(hint.element.parentElement!.classList).toContain("min-w-0");
-    expect(w.get("[data-testid=composer-model]").classes()).toContain("shrink-0");
+    const tag = w.get("[data-testid=composer-model]").classes();
+    expect(tag).toEqual(expect.arrayContaining(["shrink-0", "whitespace-nowrap"]));
+    expect(tag).not.toContain("truncate");
   });
 
   it("shows no model tag when the conversation's model is not known", async () => {

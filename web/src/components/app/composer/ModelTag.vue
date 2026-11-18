@@ -25,6 +25,6 @@ const tip = computed(() => `当前模型：${name.value}，统筹和组长使用
     data-testid="composer-model"
     :aria-label="tip"
     :title="tip"
-    class="max-w-[10rem] shrink-0 truncate whitespace-nowrap rounded-full bg-raised px-2 py-0.5 text-[11px] leading-4 text-muted-foreground"
+    class="shrink-0 whitespace-nowrap rounded-full bg-raised px-2 py-0.5 text-[11px] leading-4 text-muted-foreground"
   >{{ name }}</span>
 </template>
