@@ -340,7 +340,7 @@ queued ──开工──► running ◄──► waiting（有等你处理的�
 - **会话管理**（shared-members.md §5）：同一讨论串里领下一个任务时，按岗位的 `clear_after_tasks`（会话已收到的任务简报数 `tasks_done`）和 `compact_between_pct`（上次回合结束的 `context_used` 对 `context_limit` 的比例）决定继续、先压缩（`session.compact`，任务停在 `claimed`，`session.compacted` 或 10 分钟后再同步、发简报）还是 clear（`context_clear` 关会话，简报开新会话并带讨论串摘要）；节点没有 `session_compact` 时该压缩的改为 clear；会话正在跑回合时不动它。任务简报带“任务锚点”（`session.send.anchor`），任务中运行时自己压缩后守护进程把它补回去；同一任务任务中压缩 ≥ 2 次给组长发一次“考虑拆小”。
 - 讨论串结束：关掉在这个讨论串开着的会话（组长和在这里干活的成员），清空成员的 `current_thread_id`，按“在这里干过活的成员”删成员分支、清 checkout；成员本身不受影响。
 - 失败重试：`complete_task` 报失败或会话崩溃时任务回池（`attempt+1`，上限 2），超限 `failed` 并通知组长。
-- 依赖断了：任务 `failed` 或 `cancelled` 时，依赖它的 `pending` 任务（以及再依赖它们的）都标为 `blocked` 并给组长发一条 `[Task t3 · 失败了] 依赖它的 t5、t6 已标为 blocked…`：依赖必须 `done` 才能开工，这些任务永远等不到，不能悄悄留在池里。组长 `cancel_task` 后重新拆，或由用户在任务页重试。
+- 依赖断了：任务 `failed` 或 `cancelled` 时，依赖它的 `pending` 任务（以及再依赖它们的）都标为 `blocked` 并给组长发一条 `[Task t3 · 失败了] 依赖它的 t5、t6 已标为 blocked…`：依赖必须 `done` 才能开工，这些任务永远等不到，不能悄悄留在池里。组长 `cancel_task` 后重新拆，或由用户在任务页重试。同理，`assign_task` 的 `depends_on` 里有 `failed` / `cancelled` 的任务时直接拒绝（错误写明依赖和状态），重试一个依赖仍是 `failed` / `cancelled` 的 blocked 任务也拒绝（409 `dependency_ended`，先重试那个依赖）。
 
 ## 8. 分支、worktree、合并队列、CI、PR
 

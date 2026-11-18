@@ -236,7 +236,8 @@ func (s *Scheduler) setStatus(ctx context.Context, tx *core.Tx, task core.Task, 
 	return task, tx.EmitTask(ctx, task)
 }
 
-// finish moves a task to a final state: plan step auto-tick, waiters, a new pass of the pool.
+// finish moves a task to a final state: plan step auto-tick, waiters, a new pass of the pool
+// (core.SetTaskStatus makes the dependents of a done task ready).
 func (s *Scheduler) finish(ctx context.Context, tx *core.Tx, task core.Task, final string) (core.Task, error) {
 	task, err := s.setStatus(ctx, tx, task, final)
 	if err != nil {
@@ -250,11 +251,6 @@ func (s *Scheduler) finish(ctx context.Context, tx *core.Tx, task core.Task, fin
 	}
 	if final == "failed" || final == "cancelled" {
 		if err := s.blockDependents(ctx, tx, task); err != nil {
-			return task, err
-		}
-	}
-	if final == "done" {
-		if err := core.MarkReady(ctx, tx, task.ConversationID, task.ID); err != nil {
 			return task, err
 		}
 	}

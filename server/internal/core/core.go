@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 
@@ -55,6 +56,8 @@ type Tx struct {
 	store *Store
 	after []func(context.Context)
 	hints map[string]string
+	// settled are the thread conversations whose tasks settle after the commit (settleAfter).
+	settled map[string]bool
 }
 
 // Gorm returns the transaction's handle bound to ctx (Tx satisfies DB).
@@ -92,6 +95,24 @@ func (tx *Tx) flush(ctx context.Context) {
 
 // AfterCommit schedules fn to run once the transaction has committed.
 func (tx *Tx) AfterCommit(fn func(context.Context)) { tx.after = append(tx.after, fn) }
+
+// settleAfter runs Store.SettleTasks for a thread conversation once the transaction has
+// committed (once per conversation). A failure is logged: the scheduler sweep repairs what it missed.
+func (tx *Tx) settleAfter(conversationID string) {
+	if tx.settled[conversationID] {
+		return
+	}
+	if tx.settled == nil {
+		tx.settled = map[string]bool{}
+	}
+	tx.settled[conversationID] = true
+	s := tx.store
+	tx.AfterCommit(func(ctx context.Context) {
+		if err := s.SettleTasks(context.WithoutCancel(ctx), conversationID); err != nil {
+			slog.WarnContext(ctx, "settle tasks", "thread", conversationID, "err", err)
+		}
+	})
+}
 
 // Store returns the Store the transaction belongs to.
 func (tx *Tx) Store() *Store { return tx.store }

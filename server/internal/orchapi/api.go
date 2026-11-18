@@ -139,6 +139,8 @@ var errorMap = []struct {
 	{toolsvc.ErrNotForUser, 409, "not_for_user"},
 	{toolsvc.ErrBadAnswer, 422, "validation"},
 	{scheduler.ErrTaskState, 409, "task_state"},
+	{scheduler.ErrDepEnded, 409, "dependency_ended"},
+	{core.ErrTaskDone, 409, "task_state"},
 }
 
 // fail maps an engine error to the API error format.

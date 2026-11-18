@@ -186,7 +186,7 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | PATCH | `/api/threads/{tid}/main-tasks/{mid}` | `{status}`（用户手动打勾/取消） |
 | GET | `/api/threads/{tid}/tasks?status=&main=` | → `TaskView[]`（任务池看板：可领 / 进行中 / 待审查 / 待决策 / 合并中 / 完成） |
 | POST | `/api/threads/{tid}/tasks/{task}/cancel` | 取消小任务 |
-| POST | `/api/threads/{tid}/tasks/{task}/retry` | 失败任务重新入池 |
+| POST | `/api/threads/{tid}/tasks/{task}/retry` | 失败任务重新入池（failed / blocked / cancelled；依赖里有 failed / cancelled 的任务时 409 `dependency_ended`） |
 | GET | `/api/threads/{tid}/members` | → `EmployeeBrief[]`（含实时状态） |
 | POST | `/api/threads/{tid}/members/{name}/interrupt` | 打断某个成员的当前回合 |
 | POST | `/api/threads/{tid}/members/{name}/message` | `{content}` → 直接给成员发话（以“用户”身份，进该成员会话，同时记到讨论串对话里）。讨论串已结束（done / failed）时先自动重新打开；已归档 → 409 `thread_archived` |
@@ -336,7 +336,7 @@ PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平�
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/office/layouts/{id}` | → 布局 JSON（`ETag` = 内容 hash；`If-None-Match` 304）。`id` 省略规则：项目设置 → 全局默认 → `default` |
-| GET | `/api/projects/{pid}/office` | → 首屏快照 `{layout_id, layout_version, threads: ThreadView[] (活跃的), employees: [EmployeeBrief + {thread_no, status}], board: {claimable, by_thread: {...}, queue: [{thread_no, id, role, assignee, locked, reserved_for}]}, nodes: [NodeView 简版 + slots], merge_queue: MergeEntryView[], ci: {thread_no: CheckView[]}, last_event_id}`。`last_event_id` = 快照读取时（同一个 `REPEATABLE READ` 事务内）的 `at_projects.event_seq`，快照里的一切都反映到这个序号为止。之后用 `GET /api/projects/{pid}/events?topics=status,thread,task,merge,ci,node,layout` 并带 `Last-Event-ID: <last_event_id>` 增量更新。`board.claimable` 和 `board.queue` 只算成员现在能领的：运行中 / 等待中讨论串里 `pending` 的任务（排队、待验收、暂停的讨论串只在 `by_thread` 里计数）。`board.queue` 按讨论串号、再按领取顺序（`priority` 小的先，同优先级等得久的先：`ready_at`，没有时用创建时间）排，每个讨论串最多 12 个、总共最多 120 个，后面的讨论串不会被前面的长队列挤掉：`locked` = 还有依赖没 `done`，`reserved_for` = 返工预留给谁（预留过期后为空），`assignee` = 点名的在职成员（岗位池、或点名的实例已撤编时为空）；网页在 `task` 事件后重新取快照（同一项目节流约 750 ms） |
+| GET | `/api/projects/{pid}/office` | → 首屏快照 `{layout_id, layout_version, threads: ThreadView[] (活跃的), employees: [EmployeeBrief + {thread_no, status}], board: {claimable, by_thread: {...}, queue: [{thread_no, id, role, assignee, locked, reserved_for}]}, nodes: [NodeView 简版 + slots], merge_queue: MergeEntryView[], ci: {thread_no: CheckView[]}, last_event_id}`。`last_event_id` = 快照读取时（同一个 `REPEATABLE READ` 事务内）的 `at_projects.event_seq`，快照里的一切都反映到这个序号为止。之后用 `GET /api/projects/{pid}/events?topics=status,thread,task,merge,ci,node,layout` 并带 `Last-Event-ID: <last_event_id>` 增量更新。`board.claimable` 和 `board.queue` 只算成员现在能领的：运行中 / 等待中讨论串里 `pending` 的任务（排队、待验收、暂停的讨论串只在 `by_thread` 里计数）。`board.queue` 按讨论串号、再按领取顺序（`priority` 小的先，同优先级下游多的先：`downstream`，再等得久的先：`ready_at`，没有时用创建时间）排，每个讨论串最多 12 个、总共最多 120 个，后面的讨论串不会被前面的长队列挤掉：`locked` = 还不能领（`ready_at` 为空，即还有依赖没 `done`，和领取用同一个判断），`reserved_for` = 返工预留给谁（预留过期后为空），`assignee` = 点名的在职成员（岗位池、或点名的实例已撤编时为空）；网页在 `task` 事件后重新取快照（同一项目节流约 750 ms） |
 | GET | `/api/projects/{pid}/office/replay?from=&to=&thread=` | → `{snapshot: (同上，取 from 时刻), events: [{id, at, type, data}]}`；单次最多 6 h，超出 422 |
 | GET | `/api/employees/{id}` | → `EmployeeBrief + {current_task: TaskView|null, recent_activity: [...], session: {state, node}}`（点人物弹出的卡片） |
 

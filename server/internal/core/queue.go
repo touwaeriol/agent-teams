@@ -8,7 +8,9 @@ import (
 )
 
 // The project task queue (shared-members.md §4): pending tasks of a project's going threads
-// whose dependencies are done, claimed by idle members of the role.
+// whose dependencies are done, claimed by idle members of the role. Readiness is kept by events
+// (ready_at, stamped when the last dependency is done) so a scheduling pass never walks the
+// dependencies itself.
 
 // liveThreads are a project's threads that are not over ($1 = project id): a claimed or running
 // task there keeps its member busy (a paused thread's member waits for it to resume).
@@ -93,29 +95,32 @@ func IdleMembers(ctx context.Context, q DB, projectID string) ([]IdleMember, err
 		ORDER BY e.thread_id NULLS FIRST, e.role, e.instance_no`, projectID)
 }
 
-// QueuedTask is a claimable task with what scoring it needs (shared-members.md §4.1).
+// QueuedTask is a claimable task with what scoring it needs (shared-members.md §4.1). Task
+// holds the scheduling columns only (queuedCols): the claim loads the chosen row whole.
 type QueuedTask struct {
 	Task
 	OnlyRoles []string `gorm:"serializer:jsonb"`
 	// DepWorkers are the members who did the task's dependencies (one entry per dependency).
 	DepWorkers []string `gorm:"serializer:jsonb"`
-	// Downstream counts the unfinished tasks that depend on it.
-	Downstream int
 	// Legacy names the thread's own members: a project member of such a name does not work there.
 	Legacy []string `gorm:"serializer:jsonb"`
 	// NamedActive: the task names an instance that is an active member (a task named to a
 	// member that was retired goes to the role's pool).
 	NamedActive bool
-	// Ready is ReadyAt, or now for a task whose readiness was never stamped.
+	// Ready is ReadyAt (always set on a claimable task).
 	Ready time.Time
 }
 
 // QueueLimit bounds the claimable tasks of one role a scheduling pass looks at.
 const QueueLimit = 200
 
-// DepsDone holds for a task (alias t) whose dependencies are all done.
-const DepsDone = `NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(t.depends_on) dep(id)
+// depsDone holds for a task (alias t) whose dependencies are all done.
+const depsDone = `NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(t.depends_on) dep(id)
 	LEFT JOIN at_tasks d ON d.conversation_id = t.conversation_id AND d.id = dep.id WHERE d.status IS DISTINCT FROM 'done')`
+
+// TaskReady holds for a pending task (alias t) whose dependencies are all done: ready_at is kept
+// by events (§4.1), so neither the claim nor the office board walks the dependencies.
+const TaskReady = `t.ready_at IS NOT NULL`
 
 // ClaimingThread holds for a thread (alias th) whose pending tasks members claim now.
 const ClaimingThread = `th.status IN ('running','waiting')`
@@ -125,31 +130,110 @@ const ClaimingThread = `th.status IN ('running','waiting')`
 const NamedActive = `EXISTS (SELECT 1 FROM at_employees n WHERE n.project_id = th.project_id AND n.name = t.assignee AND n.active
 	AND n.tier = 'member' AND (n.thread_id IS NULL OR n.thread_id = t.thread_id))`
 
+// queuedCols are the task columns a scheduling pass reads (alias t).
+const queuedCols = `t.conversation_id, t.id, t.thread_id, t.assignee, t.role, t.kind, t.status, t.depends_on, t.priority,
+	t.created_by, t.created_at, t.reserved_for, t.reserved_until, t.ready_at, t.downstream`
+
 // ClaimableTasks lists the project's claimable tasks of the given roles (those of the idle
-// members): pending, dependencies done, in a running or waiting thread; the most urgent first,
-// at most QueueLimit per role (one busy role's backlog never hides another role's tasks).
+// members): pending and ready (ready_at set: every dependency done), in a running or waiting
+// thread; the most urgent first (priority, critical path, readiness, creation), at most
+// QueueLimit per role (one busy role's backlog never hides another role's tasks).
 func ClaimableTasks(ctx context.Context, q DB, projectID string, roles []string) ([]QueuedTask, error) {
-	return rawAll[QueuedTask](ctx, q, `SELECT * FROM (SELECT t.*, th.only_roles,
-			(SELECT COALESCE(jsonb_agg(d.claimed_by), '[]'::jsonb) FROM at_tasks d
-				WHERE d.conversation_id = t.conversation_id AND jsonb_exists(t.depends_on, d.id)) AS dep_workers,
-			(SELECT count(*) FROM at_tasks n WHERE n.conversation_id = t.conversation_id AND jsonb_exists(n.depends_on, t.id)
-				AND n.status NOT IN ('done','failed','cancelled')) AS downstream,
-			(SELECT COALESCE(jsonb_agg(l.name), '[]'::jsonb) FROM at_employees l WHERE l.thread_id = t.thread_id) AS legacy,
-			`+NamedActive+` AS named_active,
-			COALESCE(t.ready_at, now()) AS ready,
-			row_number() OVER (PARTITION BY t.role ORDER BY t.priority, COALESCE(t.ready_at, now()), t.created_at) AS rank
+	return rawAll[QueuedTask](ctx, q, `SELECT * FROM (SELECT `+queuedCols+`, th.only_roles,
+			(SELECT COALESCE(jsonb_agg(d.claimed_by), '[]'::jsonb) FROM jsonb_array_elements_text(t.depends_on) dep(id)
+				JOIN at_tasks d ON d.conversation_id = t.conversation_id AND d.id = dep.id) AS dep_workers,
+			(SELECT COALESCE(jsonb_agg(l.name), '[]'::jsonb) FROM at_employees l
+				WHERE l.project_id = th.project_id AND l.thread_id = t.thread_id) AS legacy,
+			CASE WHEN t.assignee = t.role THEN false ELSE `+NamedActive+` END AS named_active,
+			t.ready_at AS ready,
+			row_number() OVER (PARTITION BY t.role ORDER BY t.priority, t.downstream DESC, t.ready_at, t.created_at) AS rank
 		FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
-		WHERE th.project_id = $1 AND `+ClaimingThread+` AND t.status = 'pending' AND t.role = ANY($2::text[])
-			AND `+DepsDone+`) q
-		WHERE rank <= $3 ORDER BY priority, ready, created_at`, projectID, store.TextArray(roles), QueueLimit)
+		WHERE th.project_id = $1 AND `+ClaimingThread+` AND t.status = 'pending' AND `+TaskReady+`
+			AND t.role = ANY($2::text[])) q
+		WHERE rank <= $3 ORDER BY priority, downstream DESC, ready, created_at`, projectID, store.TextArray(roles), QueueLimit)
 }
 
 // MarkReady stamps ready_at on the pending tasks of a thread that waited on task id and now
-// have every dependency done (id just finished).
+// have every dependency done (id just became done): only its direct dependents are looked at.
+// It runs inside the transaction that made id done and never waits: a dependent another
+// transaction holds is skipped, and a dependency done by a transaction not committed yet looks
+// open; Store.SettleTasks after the commit stamps both.
 func MarkReady(ctx context.Context, tx *Tx, conversationID, id string) error {
-	_, err := store.Exec(ctx, tx, `UPDATE at_tasks t SET ready_at = now() WHERE t.conversation_id = $1 AND t.status = 'pending'
-		AND t.ready_at IS NULL AND jsonb_exists(t.depends_on, $2) AND `+DepsDone, conversationID, id)
+	_, err := store.Exec(ctx, tx, `WITH c AS (SELECT t.id FROM at_tasks t WHERE t.conversation_id = $1 AND t.status = 'pending'
+			AND t.ready_at IS NULL AND jsonb_exists(t.depends_on, $2) AND `+depsDone+` FOR UPDATE SKIP LOCKED)
+		UPDATE at_tasks t SET ready_at = now() FROM c WHERE t.conversation_id = $1 AND t.id = c.id`, conversationID, id)
 	return err
+}
+
+// SettleTasks brings the event-kept columns of a thread conversation up to date with everything
+// committed (shared-members.md §4.1). It runs after the commit of every transaction that
+// inserted, requeued or finished a task there (Tx.settleAfter), in its own short transaction
+// whose statements see what concurrent transactions committed meanwhile: of two last
+// dependencies done at once, the later commit's settling finds both done. The settlings of one
+// thread take turns (a transaction-scoped advisory lock no other transaction takes), so a later
+// one never works from an older snapshot than an earlier one. ready_at: the pending tasks whose
+// dependencies are all done get it, locked in id order (it waits for a row another transaction
+// holds, holding only rows of such tasks itself). downstream: RecountDownstream.
+func (s *Store) SettleTasks(ctx context.Context, conversationID string) error {
+	return s.InTx(ctx, func(tx *Tx) error {
+		if _, err := store.Exec(ctx, tx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "settle:"+conversationID); err != nil {
+			return err
+		}
+		_, err := store.Exec(ctx, tx, `WITH c AS (SELECT t.id FROM at_tasks t
+				WHERE t.conversation_id = $1 AND t.status = 'pending' AND t.ready_at IS NULL AND `+depsDone+`
+				ORDER BY substring(t.id from 2)::int FOR UPDATE)
+			UPDATE at_tasks t SET ready_at = now() FROM c WHERE t.conversation_id = $1 AND t.id = c.id`, conversationID)
+		if err != nil {
+			return err
+		}
+		return RecountDownstream(ctx, tx, []string{conversationID})
+	})
+}
+
+// RecountDownstream recomputes the critical-path count of every task of the given thread
+// conversations: the distinct tasks not done, failed or cancelled that depend on it, directly or
+// through others (walked up from the unfinished tasks, so a thread's finished history costs
+// little). Only the rows whose count changed are written, and a row another transaction holds
+// is skipped (it is a tie-break: the next settling or the scheduler sweep fixes it), so it never
+// waits.
+func RecountDownstream(ctx context.Context, q DB, conversationIDs []string) error {
+	_, err := store.Exec(ctx, q, `WITH RECURSIVE up(conversation_id, anc, id) AS (
+			SELECT t.conversation_id, dep.id, t.id FROM at_tasks t, jsonb_array_elements_text(t.depends_on) dep(id)
+			WHERE t.conversation_id = ANY($1::text[]) AND t.status NOT IN ('done','failed','cancelled')
+			UNION
+			SELECT u.conversation_id, dep.id, u.id FROM up u
+				JOIN at_tasks t ON t.conversation_id = u.conversation_id AND t.id = u.anc, jsonb_array_elements_text(t.depends_on) dep(id)),
+		counts AS (SELECT conversation_id, anc, count(*) AS n FROM up GROUP BY conversation_id, anc),
+		want AS (SELECT a.conversation_id, a.id, COALESCE(c.n, 0) AS n FROM at_tasks a
+			LEFT JOIN counts c ON c.conversation_id = a.conversation_id AND c.anc = a.id
+			WHERE a.conversation_id = ANY($1::text[]) AND a.downstream <> COALESCE(c.n, 0)),
+		locked AS (SELECT a.conversation_id, a.id, w.n FROM at_tasks a JOIN want w ON a.conversation_id = w.conversation_id AND a.id = w.id
+			FOR UPDATE OF a SKIP LOCKED)
+		UPDATE at_tasks a SET downstream = l.n FROM locked l WHERE a.conversation_id = l.conversation_id AND a.id = l.id`,
+		store.TextArray(conversationIDs))
+	return err
+}
+
+// LiveTaskThreads lists the threads that are not over and have an unfinished task: what the
+// sweep recounts (RecountDownstream) as the safety net of the settling after commits.
+func LiveTaskThreads(ctx context.Context, q DB) ([]string, error) {
+	var ids []string
+	err := store.Raw(ctx, q, `SELECT th.id FROM at_threads th WHERE th.status NOT IN ('done','failed','archived')
+		AND EXISTS (SELECT 1 FROM at_tasks t WHERE t.thread_id = th.id AND t.status NOT IN ('done','failed','cancelled'))`).
+		Scan(&ids).Error
+	return ids, err
+}
+
+// RepairReady is the safety net of the ready_at events: it stamps the pending tasks whose
+// dependencies are all done but that stayed unstamped and untouched for olderThan (an event
+// path that missed the stamp; normally the last dependency's done or the settling after its
+// commit stamps it) and returns them as "conversation/task".
+func RepairReady(ctx context.Context, q DB, olderThan time.Duration) ([]string, error) {
+	var ids []string
+	err := store.Raw(ctx, q, `UPDATE at_tasks t SET ready_at = now() WHERE t.status = 'pending' AND t.ready_at IS NULL
+		AND t.updated_at < now() - make_interval(secs => $1) AND `+depsDone+`
+		RETURNING t.conversation_id || '/' || t.id`, olderThan.Seconds()).Scan(&ids).Error
+	return ids, err
 }
 
 // ThreadRepoSets maps each thread of a project to the repositories it works in (at_thread_repos).
@@ -164,11 +248,12 @@ func ThreadRepoSets(ctx context.Context, q DB, projectID string) (map[string][]s
 	return out, err
 }
 
-// projectsWithWork selects the projects that have pending tasks in running or waiting threads.
+// projectsWithWork selects the projects that have claimable tasks (pending and ready) in running
+// or waiting threads.
 const projectsWithWork = `SELECT DISTINCT th.project_id FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
-	WHERE t.status = 'pending' AND th.status IN ('running','waiting')`
+	WHERE t.status = 'pending' AND ` + TaskReady + ` AND ` + ClaimingThread
 
-// ProjectsWithWork lists the projects that have pending tasks in running or waiting threads.
+// ProjectsWithWork lists the projects that have claimable tasks in running or waiting threads.
 func ProjectsWithWork(ctx context.Context, q DB) ([]string, error) {
 	var ids []string
 	err := store.Raw(ctx, q, projectsWithWork).Scan(&ids).Error

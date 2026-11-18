@@ -173,6 +173,9 @@ type Task struct {
 	ReservedFor   string
 	ReservedUntil *time.Time
 	ReadyAt       *time.Time
+	// Downstream counts the unfinished tasks that depend on this one, directly or through others
+	// (the critical-path tie-break of the queue, shared-members.md §4.1).
+	Downstream int
 	// CompactID: the claimed task waits for session.compacted of this id; WaitSince is when its
 	// current wait (compaction, then the pre-task sync) began (shared-members.md §5).
 	CompactID string
@@ -208,11 +211,14 @@ func (Task) TableName() string { return "at_tasks" }
 const taskCols = `conversation_id, id, thread_id, main_task_id, assignee, role, claimed_by, kind, instruction,
 	depends_on, status, parent, priority, attempt, summary, branch, head_sha, pushed, nudges, created_by, created_at,
 	updated_at, claimed_at, finished_at, sync, sync_pending, sync_round, handoff, handoff_asked, merged,
-	reserved_for, reserved_until, ready_at, compact_id, wait_since, progress, compactions, ctx_start, ctx_end, split_hinted`
+	reserved_for, reserved_until, ready_at, compact_id, wait_since, progress, compactions, ctx_start, ctx_end, split_hinted, downstream`
 
 // Finished reports whether the task reached a final state.
-func (t Task) Finished() bool {
-	return t.Status == "done" || t.Status == "failed" || t.Status == "cancelled"
+func (t Task) Finished() bool { return finalStatus(t.Status) }
+
+// finalStatus reports whether a task status is final (done, failed, cancelled).
+func finalStatus(status string) bool {
+	return status == "done" || status == "failed" || status == "cancelled"
 }
 
 // MainTask is a row of at_main_tasks.

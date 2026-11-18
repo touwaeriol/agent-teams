@@ -239,15 +239,15 @@ func board(ctx context.Context, q core.DB, projectID string) (Board, error) {
 }
 
 // queueCards lists the pending tasks members can claim now (those of running and waiting
-// threads) for the board, per thread in claim order: locked while a dependency is not done,
-// reserved_for only while the reservation holds. A named assignee that is a role or no active
+// threads) for the board, per thread in claim order: locked while not ready (core.TaskReady, the
+// claim's own notion: some dependency is not done), reserved_for only while the reservation holds. A named assignee that is a role or no active
 // member is not a person, so it is left out.
 func queueCards(ctx context.Context, q core.DB, projectID string) ([]QueueCard, error) {
 	rows, err := store.Query(ctx, q, `SELECT no, id, role, assignee, locked, reserved_for FROM (
 			SELECT th.no, t.id, t.role, CASE WHEN `+core.NamedActive+` THEN t.assignee ELSE '' END AS assignee,
-				NOT (`+core.DepsDone+`) AS locked,
+				NOT (`+core.TaskReady+`) AS locked,
 				CASE WHEN t.reserved_until > now() THEN t.reserved_for ELSE '' END AS reserved_for,
-				row_number() OVER (PARTITION BY th.no ORDER BY t.priority, COALESCE(t.ready_at, t.created_at), t.created_at, t.id) AS rank
+				row_number() OVER (PARTITION BY th.no ORDER BY t.priority, t.downstream DESC, COALESCE(t.ready_at, t.created_at), t.created_at, t.id) AS rank
 			FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
 			WHERE th.project_id = $1 AND `+core.ClaimingThread+` AND t.status = 'pending') q
 		WHERE rank <= $2 ORDER BY no, rank LIMIT $3`, projectID, queueCardsPerThread, maxQueueCards)

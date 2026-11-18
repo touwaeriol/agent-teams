@@ -108,7 +108,11 @@ func (w *staffWorld) task(t Thread, who, status string) Task {
 	var task Task
 	w.tx(func(tx *Tx) error {
 		var err error
-		task, err = InsertTask(w.ctx, tx, NewTask{Thread: t, Assignee: "dev", Role: "dev", ClaimedBy: who, Status: status})
+		task, err = InsertTask(w.ctx, tx, NewTask{Thread: t, Assignee: "dev", Role: "dev", ClaimedBy: who})
+		if err != nil || status == "pending" {
+			return err
+		}
+		task, err = SetTaskStatus(w.ctx, tx, task, status)
 		return err
 	})
 	return task

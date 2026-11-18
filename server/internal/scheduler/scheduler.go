@@ -123,6 +123,7 @@ func (s *Scheduler) loop(ctx context.Context) {
 func (s *Scheduler) sweep(ctx context.Context) {
 	s.releaseStaleCompactions(ctx)
 	s.releaseStaleSyncs(ctx)
+	s.repairReady(ctx)
 	ids, err := core.ProjectsWithWork(ctx, s.core.Pool)
 	if err != nil {
 		s.log.Warn("scheduler sweep", "err", err)
@@ -131,6 +132,30 @@ func (s *Scheduler) sweep(ctx context.Context) {
 	for _, id := range ids {
 		s.staff(ctx, id)
 		s.Schedule(ctx, id)
+	}
+}
+
+// ReadyRepairAfter is how long a pending task whose dependencies are all done may stay without
+// ready_at before the sweep stamps it (the events stamp it at once; this only catches misses).
+const ReadyRepairAfter = 2 * time.Minute
+
+// repairReady stamps the tasks an event failed to make ready, and says so: each one is a bug.
+// It also recounts the downstream of the live threads: a settling after a commit skips rows
+// other transactions hold, so a count may lag until here (a tie-break; nothing to report).
+func (s *Scheduler) repairReady(ctx context.Context) {
+	ids, err := core.RepairReady(ctx, s.core.Pool, ReadyRepairAfter)
+	if err != nil {
+		s.log.Warn("repair ready", "err", err)
+	}
+	if len(ids) > 0 {
+		s.log.Warn("tasks were ready without ready_at", "tasks", ids)
+	}
+	threads, err := core.LiveTaskThreads(ctx, s.core.Pool)
+	if err == nil && len(threads) > 0 {
+		err = core.RecountDownstream(ctx, s.core.Pool, threads)
+	}
+	if err != nil {
+		s.log.Warn("recount downstream", "err", err)
 	}
 }
 

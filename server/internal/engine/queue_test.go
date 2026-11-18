@@ -8,6 +8,7 @@ import (
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/engine"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw/nodetest"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -124,6 +125,28 @@ func TestDependencyStickiness(t *testing.T) {
 	dev2.expectSend("on top of b")
 	if task := tm.taskRow(t, th.ID, "t3"); task.ClaimedBy != "dev-2" || task.ReadyAt == nil {
 		t.Fatalf("t3 claimed by %q ready %v", task.ClaimedBy, task.ReadyAt)
+	}
+}
+
+// TestReadyRepairSweep: a task whose dependency got done without the event that stamps its
+// ready_at (here: a direct database write) is not claimable until the sweep's safety net stamps
+// it, once it stayed so for ReadyRepairAfter; then the idle member gets it.
+func TestReadyRepairSweep(t *testing.T) {
+	tm := sharedTeamWith(t, func(e *engine.Engine) { e.Sched.Interval = 200 * time.Millisecond })
+	tm.setRoleCount(t, "dev", 1)
+	th, lead := tm.openThread(t, "Repair", nil)
+	lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "base", "main": "做"})
+	dev1, _ := startTask(t, tm, "dev-1", "base")
+	lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "on top", "main": "做", "depends_on": []string{"t1"}})
+	tm.sql(t, `UPDATE at_tasks SET status = 'done' WHERE thread_id = $1 AND id = 't1'`, th.ID)
+	time.Sleep(time.Second) // a few sweeps: t2 is too fresh for the safety net
+	if task := tm.taskRow(t, th.ID, "t2"); task.Status != "pending" || task.ReadyAt != nil {
+		t.Fatalf("t2 before the repair: %s ready %v", task.Status, task.ReadyAt)
+	}
+	tm.sql(t, `UPDATE at_tasks SET updated_at = now() - interval '3 minutes' WHERE thread_id = $1 AND id = 't2'`, th.ID)
+	dev1.expectSend("on top")
+	if task := tm.taskRow(t, th.ID, "t2"); task.ClaimedBy != "dev-1" || task.ReadyAt == nil {
+		t.Fatalf("t2 after the repair: claimed by %q ready %v", task.ClaimedBy, task.ReadyAt)
 	}
 }
 

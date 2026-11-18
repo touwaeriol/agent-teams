@@ -3,6 +3,7 @@ package engine_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -513,7 +514,9 @@ func TestLeadReviewGuards(t *testing.T) {
 
 // TestDependentsBlockedWhenDepEnds: tasks waiting on a task that is cancelled (or fails) could
 // never start; they and the tasks waiting on them become blocked and the lead is told, instead
-// of sitting in the pool unseen. Tasks with other dependencies are left alone.
+// of sitting in the pool unseen. Tasks with other dependencies are left alone. For the same
+// reason a new task depending on the cancelled one is refused (the text names it and its
+// status), and so is retrying a blocked task while that dependency is still cancelled.
 func TestDependentsBlockedWhenDepEnds(t *testing.T) {
 	tm := startTeam(t)
 	tm.lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "do t2 after t1", "main": "做", "depends_on": []string{"t1"}})
@@ -533,5 +536,20 @@ func TestDependentsBlockedWhenDepEnds(t *testing.T) {
 	}
 	if got := status("t4"); got == "blocked" {
 		t.Fatalf("t4 has no dependency but is %s", got)
+	}
+
+	r := tm.lead.call("assign_task", map[string]any{"assignee": "dev", "instruction": "on a cancelled one", "main": "做", "depends_on": []string{"t4", "t1"}})
+	if r.Ok || !strings.Contains(text(r), "t1（cancelled）") || !strings.Contains(text(r), "已失败或已取消") {
+		t.Fatalf("assign_task on a cancelled dependency = %v %q", r.Ok, text(r))
+	}
+	if code, raw := tm.b.do("POST", "/api/threads/"+tm.thread.ID+"/tasks/t2/retry", nil); code != 409 || !strings.Contains(string(raw), "t1（cancelled）") {
+		t.Fatalf("retrying t2 while t1 is cancelled = %d %s", code, raw)
+	}
+	tm.b.must(200, "POST", "/api/threads/"+tm.thread.ID+"/tasks/t3/retry", nil, nil) // its dependency t2 is blocked, not ended
+	if got := status("t2") + " " + status("t3"); got != "blocked pending" {
+		t.Fatalf("after the refusals: %s", got)
+	}
+	if _, err := core.TaskByID(tm.w.ctx, tm.w.e.Core.Pool, tm.thread.ID, "t5"); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("refused task stored: %v", err)
 	}
 }
