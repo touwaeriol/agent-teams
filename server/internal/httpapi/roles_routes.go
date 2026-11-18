@@ -182,7 +182,11 @@ func (s *Server) replaceRoles(ctx context.Context, userID string, list []store.R
 	}
 	s.auditBypass(ctx, userID, known, list)
 	s.auditCommands(ctx, userID, known, list)
-	return s.hooks.RolesSaved(ctx, userID)
+	if err := s.hooks.RolesSaved(ctx, userID); err != nil {
+		// The roles are saved: the next thread opened (or the next save) re-staffs the projects.
+		s.log.Warn("re-staff after saving roles", "user_id", userID, "err", err)
+	}
+	return nil
 }
 
 // auditCommands records every saved role whose custom or hidden platform commands changed.

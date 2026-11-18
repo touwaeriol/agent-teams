@@ -222,24 +222,18 @@ func (s *Service) prepare(ctx context.Context, tx *core.Tx, m *protocol.ToolCall
 }
 
 // callThread is the thread a call acts in (shared-members.md §3): a lead's or legacy member's
-// own thread; for a project member the thread of its current task, else the thread its session
-// was opened in; nil for the coordinator.
+// own thread; for a project member the thread its session was opened in (a closed session's
+// late calls stay in their thread and see no task of the member's new one), else the thread of
+// its current task or its current thread; nil for the coordinator.
 func callThread(ctx context.Context, q core.DB, sc core.SessionContext) (*string, error) {
 	e := sc.Employee
 	if !e.ProjectMember() {
 		return e.WorkThreadID(), nil
 	}
-	task, err := core.CurrentTaskOf(ctx, q, e)
-	if err == nil {
-		return &task.ConversationID, nil
-	}
-	if !errors.Is(err, core.ErrNotFound) {
-		return nil, err
-	}
 	if sc.Session.ThreadID != nil {
 		return sc.Session.ThreadID, nil
 	}
-	return e.CurrentThreadID, nil
+	return core.WorkThreadOf(ctx, q, e)
 }
 
 func (s *Service) unavailable(e core.Employee, tool string) string {

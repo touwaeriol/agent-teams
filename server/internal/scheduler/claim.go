@@ -15,10 +15,15 @@ import (
 )
 
 // claimOne claims the best (idle member, claimable task) pair of the project's queue
-// (shared-members.md §4.1); false when there is none.
+// (shared-members.md §4.1); false when there is none. It takes the project row lock first and
+// then the pair without waiting (SKIP LOCKED): it never holds a member or task row while waiting
+// for the project row, the lock order of re-staffing and deliveries (core.LockProject).
 func (s *Scheduler) claimOne(ctx context.Context, projectID string) (bool, error) {
 	claimed := false
 	err := s.core.InTx(ctx, func(tx *core.Tx) error {
+		if err := core.LockProject(ctx, tx, projectID); err != nil {
+			return err
+		}
 		m, task, ok, err := s.choose(ctx, tx, projectID)
 		if err != nil || !ok {
 			return err
@@ -47,10 +52,7 @@ func (s *Scheduler) choose(ctx context.Context, tx *core.Tx, projectID string) (
 	if err != nil || len(idle) == 0 {
 		return core.Employee{}, core.Task{}, false, err
 	}
-	if err := core.StampReady(ctx, tx, projectID); err != nil {
-		return core.Employee{}, core.Task{}, false, err
-	}
-	queue, err := core.ClaimableTasks(ctx, tx, projectID)
+	queue, err := core.ClaimableTasks(ctx, tx, projectID, rolesOf(idle))
 	if err != nil || len(queue) == 0 {
 		return core.Employee{}, core.Task{}, false, err
 	}
@@ -65,15 +67,27 @@ func (s *Scheduler) choose(ctx context.Context, tx *core.Tx, projectID string) (
 	return lockPair(ctx, tx, idle[si].Employee, queue[ji].Task)
 }
 
-// lockPair locks the chosen member and task and checks both are still free.
+func rolesOf(idle []core.IdleMember) []string {
+	var out []string
+	for _, m := range idle {
+		if !slices.Contains(out, m.Role) {
+			out = append(out, m.Role)
+		}
+	}
+	return out
+}
+
+// lockPair locks the chosen member and task (skipping rows another transaction holds) and
+// checks both are still free: the member active with no task, the task pending.
 func lockPair(ctx context.Context, tx *core.Tx, m core.Employee, task core.Task) (core.Employee, core.Task, bool, error) {
-	if err := tx.Gorm(ctx).Exec(`SELECT 1 FROM at_employees WHERE id = ? FOR UPDATE`, m.ID).Error; err != nil {
-		return m, task, false, err
+	m, err := core.TryLockEmployee(ctx, tx, m.ID)
+	if err != nil || !m.Active {
+		return m, task, false, ignoreMissing(err)
 	}
 	if _, err := core.CurrentTaskOf(ctx, tx, m); err != core.ErrNotFound {
 		return m, task, false, ignoreMissing(err)
 	}
-	task, err := core.LockTask(ctx, tx, task.ConversationID, task.ID)
+	task, err = core.TryLockTask(ctx, tx, task.ConversationID, task.ID)
 	if err != nil || task.Status != "pending" {
 		return m, task, false, ignoreMissing(err)
 	}
@@ -83,7 +97,8 @@ func lockPair(ctx context.Context, tx *core.Tx, m core.Employee, task core.Task)
 func seatsOf(idle []core.IdleMember, repos map[string][]string) []seat {
 	out := make([]seat, len(idle))
 	for i, m := range idle {
-		out[i] = seat{Name: m.Name, Role: m.Role, Legacy: deref(m.ThreadID), Thread: m.Thread, Repos: repos[m.Thread]}
+		out[i] = seat{Name: m.Name, Role: m.Role, Legacy: deref(m.ThreadID), Thread: m.Thread, TurnThread: m.TurnThread,
+			Repos: repos[m.Thread]}
 	}
 	return out
 }
@@ -95,8 +110,8 @@ func jobsOf(queue []core.QueuedTask, repos map[string][]string) []job {
 		j := job{Thread: th, Role: q.Role, Gate: q.CreatedBy == "platform", OnlyRoles: q.OnlyRoles,
 			ReservedFor: q.ReservedFor, ReservedUntil: q.ReservedUntil, DepWorkers: q.DepWorkers, Repos: repos[th],
 			Legacy: q.Legacy, Priority: q.Priority, Downstream: q.Downstream, Ready: q.Ready, Created: q.CreatedAt}
-		if Named(q.Task) {
-			j.Named = q.Assignee
+		if Named(q.Task) && q.NamedActive {
+			j.Named = q.Assignee // a task named to a retired member goes to the role's pool
 		}
 		out[i] = j
 	}

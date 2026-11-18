@@ -115,7 +115,7 @@ func (e *Engine) insertCard(ctx context.Context, tx *core.Tx, sc core.SessionCon
 	}
 	pid, aid, sid := sc.Employee.ProjectID, string(m.ApprovalID), sc.Session.ID
 	var taskID *string
-	if t, err := core.CurrentTaskOf(ctx, tx, sc.Employee); err == nil {
+	if t, err := core.SessionTask(ctx, tx, sc); err == nil {
 		taskID = &t.ID
 	}
 	return core.InsertQuestion(ctx, tx, core.NewQuestion{ConversationID: conv, ProjectID: pid, ThreadID: sc.Employee.WorkThreadID(),

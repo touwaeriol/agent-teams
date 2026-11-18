@@ -70,7 +70,11 @@ func (s *Scheduler) afterWork(ctx context.Context, tx *core.Tx, th core.Thread, 
 	if err != nil {
 		return err
 	}
-	if role := gateRole(ctx, tx, th, "review"); d.Gates.Review && role != "" {
+	role, err := gateRole(ctx, tx, th, "review")
+	if err != nil {
+		return err
+	}
+	if d.Gates.Review && role != "" {
 		return s.openGate(ctx, tx, th, task, "review", role)
 	}
 	return s.notifyLead(ctx, tx, th, fmt.Sprintf("[Task %s · %s · done] %s\n分支：%s%s", task.ID, task.ClaimedBy, task.Summary, task.Branch, pushedNote(task)))
@@ -78,15 +82,18 @@ func (s *Scheduler) afterWork(ctx context.Context, tx *core.Tx, th core.Thread, 
 
 // gateRole is the role of the member responsible for a gate: a project member's, else one of
 // the thread's legacy members ("" when none).
-func gateRole(ctx context.Context, q core.DB, th core.Thread, gate string) string {
-	staff, _ := core.ProjectMembers(ctx, q, th.ProjectID)
-	legacy, _ := core.ThreadEmployees(ctx, q, th.ID)
+func gateRole(ctx context.Context, q core.DB, th core.Thread, gate string) (string, error) {
+	staff, err := core.ProjectMembers(ctx, q, th.ProjectID)
+	if err != nil {
+		return "", err
+	}
+	legacy, err := core.ThreadEmployees(ctx, q, th.ID)
 	for _, e := range append(staff, legacy...) {
 		if e.Tier == "member" && e.Spec.Gate == gate {
-			return e.Role
+			return e.Role, err
 		}
 	}
-	return ""
+	return "", err
 }
 
 func (s *Scheduler) openGate(ctx context.Context, tx *core.Tx, th core.Thread, task core.Task, kind, role string) error {
@@ -139,7 +146,11 @@ func (s *Scheduler) passed(ctx context.Context, tx *core.Tx, th core.Thread, par
 	if err != nil {
 		return err
 	}
-	if role := gateRole(ctx, tx, th, "decision"); gate.Kind == "review" && d.Gates.Decision && role != "" {
+	role, err := gateRole(ctx, tx, th, "decision")
+	if err != nil {
+		return err
+	}
+	if gate.Kind == "review" && d.Gates.Decision && role != "" {
 		return s.openGate(ctx, tx, th, parent, "decision", role)
 	}
 	if parent.Status == "decision" {
@@ -166,7 +177,7 @@ func (s *Scheduler) rejected(ctx context.Context, tx *core.Tx, th core.Thread, p
 	if gate.Kind == "decision" {
 		return s.notifyLead(ctx, tx, th, text+fmt.Sprintf("\n任务 %s 等你决定。", parent.ID))
 	}
-	parent, err := core.UpdateTask(ctx, tx, parent, reworkOf(parent.ClaimedBy))
+	parent, err := core.RequeueTask(ctx, tx, parent, reworkOf(parent.ClaimedBy))
 	if err != nil {
 		return err
 	}
@@ -179,8 +190,8 @@ func (s *Scheduler) rejected(ctx context.Context, tx *core.Tx, th core.Thread, p
 
 // reworkOf is the change that returns a task to the queue reserved for member.
 func reworkOf(member string) map[string]any {
-	return map[string]any{"status": "pending", "claimed_by": "", "claimed_at": nil, "nudges": 0,
-		"reserved_for": member, "reserved_until": time.Now().Add(ReserveFor).UTC(), "ready_at": time.Now().UTC()}
+	return map[string]any{"claimed_by": "", "claimed_at": nil, "nudges": 0,
+		"reserved_for": member, "reserved_until": time.Now().Add(ReserveFor).UTC()}
 }
 
 // Reserve reserves a new task (a merge conflict or CI fix) for the member whose work it fixes.
@@ -197,8 +208,7 @@ func (s *Scheduler) failOrRetry(ctx context.Context, tx *core.Tx, task core.Task
 	}
 	who := task.ClaimedBy
 	if task.Attempt+1 < MaxAttempts {
-		task, err = core.UpdateTask(ctx, tx, task, map[string]any{"status": "pending", "claimed_by": "",
-			"attempt": task.Attempt + 1, "claimed_at": nil})
+		task, err = core.RequeueTask(ctx, tx, task, map[string]any{"claimed_by": "", "attempt": task.Attempt + 1, "claimed_at": nil})
 		if err != nil {
 			return task, err
 		}

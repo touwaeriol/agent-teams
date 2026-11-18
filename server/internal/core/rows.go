@@ -116,13 +116,15 @@ type AgentSession struct {
 	CloseReason    string
 	// ThreadID is the thread whose worktree the session was opened in (nil: coordinator).
 	ThreadID *string
+	// InTurn: a turn runs in the session (between turn_started and turn_ended).
+	InTurn bool
 }
 
 // TableName maps AgentSession to at_agent_sessions.
 func (AgentSession) TableName() string { return "at_agent_sessions" }
 
 const sessionCols = `id, employee_id, node_id, runtime, sdk_session_id, codex_thread_id, cwd, branch, state, open_gen,
-	permission_mode, init, last_event_no, opened_at, last_active_at, closed_at, close_reason, thread_id`
+	permission_mode, init, last_event_no, opened_at, last_active_at, closed_at, close_reason, thread_id, in_turn`
 
 // Task is a row of at_tasks.
 type Task struct {

@@ -24,6 +24,12 @@ func work(th string) job {
 	return job{Thread: th, Role: "dev", Priority: 100, Ready: ago(time.Minute), Created: ago(time.Minute)}
 }
 
+// inTurn marks a member as mid-turn in thread th.
+func inTurn(s seat, th string) seat {
+	s.TurnThread = th
+	return s
+}
+
 func with(j job, f func(*job)) job {
 	f(&j)
 	return j
@@ -45,6 +51,10 @@ func TestPick(t *testing.T) {
 			jobs: []job{work("A"), with(work("B"), func(j *job) { j.Named = "dev-2" })}, seat: 1, job: 1},
 		{name: "named task only for its member", seats: []seat{dev("dev-1", "")},
 			jobs: []job{with(work("A"), func(j *job) { j.Named = "dev-2" })}, none: true},
+		{name: "mid-turn member takes no task of another thread", seats: []seat{inTurn(dev("dev-1", "A"), "A")},
+			jobs: []job{work("B")}, none: true},
+		{name: "mid-turn member takes a task of its own thread", seats: []seat{inTurn(dev("dev-1", "A"), "A"), dev("dev-2", "")},
+			jobs: []job{work("B"), work("A")}, seat: 0, job: 1},
 		{name: "reserved for it", seats: []seat{dev("dev-1", "B"), dev("dev-2", "A")},
 			jobs: []job{work("A"), with(work("B"), func(j *job) { j.ReservedFor, j.ReservedUntil = "dev-2", until(time.Minute) })},
 			seat: 1, job: 1},

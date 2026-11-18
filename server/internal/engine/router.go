@@ -224,6 +224,9 @@ func (r *router) applyEvent(ctx context.Context, tx *core.Tx, sc core.SessionCon
 	cause := string(ev.Kind)
 	switch ev.Kind {
 	case "turn_started":
+		if err := core.SetInTurn(ctx, tx, sc.Session.ID, true); err != nil {
+			return nil, err
+		}
 		return []status.Observation{{Kind: status.TurnStarted, Cause: cause}}, r.checkTools(ctx, tx, sc, ev.Tools)
 	case "tool_started":
 		return r.toolStarted(ctx, tx, sc, ev)
@@ -285,6 +288,9 @@ func (r *router) toolStarted(ctx context.Context, tx *core.Tx, sc core.SessionCo
 // turnEnded records usage and nudges a member whose task is still running.
 // An employee waiting for its usage limit to reset is not nudged: its thread is paused.
 func (r *router) turnEnded(ctx context.Context, tx *core.Tx, sc core.SessionContext, ev *protocol.SessionEvent) error {
+	if err := core.SetInTurn(ctx, tx, sc.Session.ID, false); err != nil {
+		return err
+	}
 	if err := recordUsage(ctx, tx, sc, ev); err != nil {
 		return err
 	}

@@ -406,7 +406,8 @@ CREATE TABLE at_agent_sessions (
   last_active_at  TIMESTAMPTZ,
   closed_at       TIMESTAMPTZ,
   close_reason    TEXT NOT NULL DEFAULT '',        -- … | thread_done | switch_thread（项目成员换到别的讨论串）
-  thread_id       TEXT REFERENCES at_threads(id) ON DELETE SET NULL  -- 00270：会话开在哪个讨论串的 worktree（讨论串结束按它关会话）
+  thread_id       TEXT REFERENCES at_threads(id) ON DELETE SET NULL, -- 00270：会话开在哪个讨论串的 worktree（讨论串结束按它关会话）
+  in_turn         BOOLEAN NOT NULL DEFAULT false   -- 00270：正在跑回合（turn_started 置位，turn_ended / 离开 active 清掉）；项目成员回合中不领别的讨论串的任务
 );
 CREATE UNIQUE INDEX at_agent_sessions_live ON at_agent_sessions (employee_id) WHERE state <> 'closed';  -- 一个员工最多一个活会话
 CREATE INDEX at_agent_sessions_node ON at_agent_sessions (node_id) WHERE state <> 'closed';

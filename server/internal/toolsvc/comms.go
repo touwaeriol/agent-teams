@@ -230,8 +230,19 @@ func (s *Service) answer(ctx context.Context, tx *core.Tx, q core.Question, answ
 		return err
 	}
 	text := fmt.Sprintf("[Answer to %s] %s", closed.ID, answer)
-	_, err = s.orch.Deliver(ctx, tx, asker, orchestrator.Delivery{Text: text, Kind: "answer", Priority: "next"})
+	_, err = s.orch.Deliver(ctx, tx, asker, orchestrator.Delivery{Text: text, Kind: "answer", Priority: "next",
+		Record: answerRecord(closed, asker, text)})
 	return err
+}
+
+// answerRecord keeps a project member's answer in the question's thread, wherever the member
+// works now (nil: the asker's own conversation).
+func answerRecord(q core.Question, asker core.Employee, text string) *core.NewMessage {
+	if !asker.ProjectMember() || q.ThreadID == nil {
+		return nil
+	}
+	return &core.NewMessage{ConversationID: *q.ThreadID, Role: "system", Author: "platform", Kind: "note", Content: text,
+		Meta: map[string]any{"to": asker.Name}}
 }
 
 func (s *Service) answerCall(ctx context.Context, tx *core.Tx, q core.Question, answer string) (bool, error) {

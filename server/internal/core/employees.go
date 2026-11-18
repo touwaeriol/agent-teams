@@ -20,6 +20,12 @@ func EmployeeByID(ctx context.Context, q DB, id string) (Employee, error) {
 	return take[Employee](employees(ctx, q).Where("id = ?", id))
 }
 
+// TryLockEmployee loads an employee FOR UPDATE SKIP LOCKED (ErrNotFound when another
+// transaction holds it).
+func TryLockEmployee(ctx context.Context, tx *Tx, id string) (Employee, error) {
+	return take[Employee](employees(ctx, tx).Clauses(SkipLocked).Where("id = ?", id))
+}
+
 // EmployeeByName finds an employee of a thread (threadID nil = the project coordinator scope).
 // Inside a thread the thread's own employees (lead, legacy members) come first, then the
 // project member of that name (shared-members.md §3).
@@ -199,8 +205,7 @@ const briefSelect = `SELECT e.id, e.name, e.tier, e.role, COALESCE(e.spec->>'tit
 	FROM at_employees e LEFT JOIN at_threads o ON o.id = e.thread_id
 	LEFT JOIN LATERAL (SELECT x.thread_id FROM at_tasks x JOIN at_threads xt ON xt.id = x.thread_id
 		WHERE e.thread_id IS NULL AND e.tier = 'member' AND xt.project_id = e.project_id AND x.claimed_by = e.name
-		AND x.status IN ('claimed','running') AND xt.status NOT IN ('done','failed','archived')
-		AND NOT EXISTS (SELECT 1 FROM at_employees l WHERE l.thread_id = x.thread_id AND l.name = x.claimed_by)
+		AND x.status IN ('claimed','running') AND xt.status NOT IN ('done','failed','archived') AND ` + staffOwned + `
 		ORDER BY x.claimed_at DESC LIMIT 1) cur ON true
 	LEFT JOIN at_threads t ON t.id = COALESCE(e.thread_id, cur.thread_id, e.current_thread_id)
 	LEFT JOIN at_nodes n ON n.id = e.node_id LEFT JOIN at_employee_status st ON st.employee_id = e.id`

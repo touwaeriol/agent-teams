@@ -23,6 +23,11 @@ func LockTask(ctx context.Context, tx *Tx, conversationID, id string) (Task, err
 	return take[Task](tasks(ctx, tx).Clauses(ForUpdate).Where("conversation_id = ? AND id = ?", conversationID, id))
 }
 
+// TryLockTask loads a task FOR UPDATE SKIP LOCKED (ErrNotFound when another transaction holds it).
+func TryLockTask(ctx context.Context, tx *Tx, conversationID, id string) (Task, error) {
+	return take[Task](tasks(ctx, tx).Clauses(SkipLocked).Where("conversation_id = ? AND id = ?", conversationID, id))
+}
+
 // TaskFilter narrows ThreadTasks.
 type TaskFilter struct {
 	Status []string
@@ -92,12 +97,25 @@ func InsertTask(ctx context.Context, tx *Tx, n NewTask) (Task, error) {
 	return TaskByID(ctx, tx, n.Thread.ID, id)
 }
 
-// stampReadyTask records that a new pending task is claimable from now when it has no
-// dependencies or they are all done already.
+// stampReadyTask records that a pending task is claimable from now when it has no dependencies
+// or they are all done already (NULL otherwise: MarkReady stamps it when the last one finishes).
 func stampReadyTask(ctx context.Context, tx *Tx, conversationID, id string) error {
-	_, err := store.Exec(ctx, tx, `UPDATE at_tasks t SET ready_at = now() WHERE t.conversation_id = $1 AND t.id = $2
-		AND t.status = 'pending' AND `+depsDone, conversationID, id)
+	_, err := store.Exec(ctx, tx, `UPDATE at_tasks t SET ready_at = CASE WHEN `+depsDone+` THEN now() END
+		WHERE t.conversation_id = $1 AND t.id = $2 AND t.status = 'pending'`, conversationID, id)
 	return err
+}
+
+// RequeueTask puts a task back into the queue (status pending plus set): it is claimable, and
+// waits for the starvation rule, from now on (shared-members.md §4.1).
+func RequeueTask(ctx context.Context, tx *Tx, t Task, set map[string]any) (Task, error) {
+	set["status"] = "pending"
+	if err := taskRow(ctx, tx, t).Updates(stamped(set)).Error; err != nil {
+		return t, err
+	}
+	if err := stampReadyTask(ctx, tx, t.ConversationID, t.ID); err != nil {
+		return t, err
+	}
+	return TaskByID(ctx, tx, t.ConversationID, t.ID)
 }
 
 func nonNilStrings(v []string) []string {

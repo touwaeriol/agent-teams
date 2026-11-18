@@ -146,7 +146,7 @@ func (s *Scheduler) Retry(ctx context.Context, tx *core.Tx, task core.Task) (cor
 	if !slices.Contains([]string{"failed", "blocked", "cancelled"}, task.Status) {
 		return task, ErrTaskState
 	}
-	task, err := core.UpdateTask(ctx, tx, task, map[string]any{"status": "pending", "claimed_by": "", "attempt": 0,
+	task, err := core.RequeueTask(ctx, tx, task, map[string]any{"claimed_by": "", "attempt": 0,
 		"nudges": 0, "finished_at": nil, "claimed_at": nil})
 	if err != nil {
 		return task, err
@@ -174,13 +174,17 @@ func (s *Scheduler) TaskDelivered(ctx context.Context, tx *core.Tx, m core.Messa
 // nudgeText reminds a member whose turn ended with the task still open (§7.3).
 const nudgeText = "[平台提醒] 任务 %s 还没有完成：如果已经做完，请调用 complete_task(task_id=\"%s\", summary=…)；没做完请继续。"
 
-// TurnEnded nudges once, then marks the task blocked and tells the lead.
+// TurnEnded nudges once, then marks the task blocked and tells the lead. A project member's
+// ended turn may free it for a task of another thread (shared-members.md §4.1): a pass follows.
 func (s *Scheduler) TurnEnded(ctx context.Context, tx *core.Tx, sc core.SessionContext) error {
 	e := sc.Employee
 	if e.Tier != "member" {
 		return nil
 	}
-	task, err := sessionTask(ctx, tx, sc)
+	if e.ProjectMember() {
+		s.kickAfter(tx, e.ProjectID)
+	}
+	task, err := core.SessionTask(ctx, tx, sc)
 	if err != nil || task.Status != "running" {
 		return ignoreMissing(err)
 	}
@@ -236,23 +240,10 @@ func (s *Scheduler) pushDue(employeeID string) bool {
 
 // SessionLost returns the employee's running task to the pool (crash) with an attempt counted.
 func (s *Scheduler) SessionLost(ctx context.Context, tx *core.Tx, sc core.SessionContext) error {
-	task, err := sessionTask(ctx, tx, sc)
+	task, err := core.SessionTask(ctx, tx, sc)
 	if err != nil {
 		return ignoreMissing(err)
 	}
 	_, err = s.failOrRetry(ctx, tx, task, sc.Employee.Name+" 的会话崩溃了")
 	return err
-}
-
-// sessionTask is the employee's current task when it belongs to the session: a project member's
-// session of another thread (closed when it moved) has nothing to do with the task it has now.
-func sessionTask(ctx context.Context, tx *core.Tx, sc core.SessionContext) (core.Task, error) {
-	task, err := core.CurrentTaskOf(ctx, tx, sc.Employee)
-	if err != nil {
-		return task, err
-	}
-	if sc.Employee.ProjectMember() && sc.Session.ThreadID != nil && *sc.Session.ThreadID != task.ConversationID {
-		return task, core.ErrNotFound
-	}
-	return task, nil
 }

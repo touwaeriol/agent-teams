@@ -101,6 +101,13 @@ describe("events → cache", () => {
     applyProjectEvent(qc, "p1", "status", frame);
     expect(qc.getQueryData<ThreadView[]>(keys.threads("p1"))![0].members[0].status?.state).toBe("typing");
     expect(qc.getQueryData<StatusFrame[]>(statusLogKey("p1"))).toHaveLength(1);
+    const member = () => qc.getQueryData<ThreadView[]>(keys.threads("p1"))![0].members[0];
+    applyProjectEvent(qc, "p1", "status", { ...frame, seq: 6, employee: { id: "e1", thread_no: 3 }, status: { state: "typing", task_id: "t1" } });
+    expect(member()).toMatchObject({ thread_no: 3, busy_elsewhere: true });
+    applyProjectEvent(qc, "p1", "status", { ...frame, seq: 7, employee: { id: "e1", thread_no: 3 }, status: { state: "idle" } });
+    expect(member()).toMatchObject({ thread_no: 3, busy_elsewhere: false });
+    applyProjectEvent(qc, "p1", "status", { ...frame, seq: 8, employee: { id: "e1", thread_no: 12 }, status: { state: "typing", task_id: "t2" } });
+    expect(member().busy_elsewhere).toBe(false);
     applyProjectEvent(qc, "p1", "layout", {});
     applyProjectEvent(qc, "p1", "layout", {});
     expect(qc.getQueryData(layoutTickKey("p1"))).toBe(2);

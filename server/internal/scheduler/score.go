@@ -32,6 +32,7 @@ type seat struct {
 	Name, Role string
 	Legacy     string   // a legacy member's own thread (it works only there); "" for project members
 	Thread     string   // the thread it works in now ("" none)
+	TurnThread string   // the thread of its session while a turn runs there ("" none)
 	Repos      []string // the repositories of that thread
 }
 
@@ -127,13 +128,16 @@ func stickiness(s seat, j job, now time.Time) int {
 }
 
 // eligible: the named instance or a member of the role; a legacy member only in its own thread
-// and a project member only where no legacy member has its name; not reserved for someone
-// else; a role the thread uses.
+// and a project member only where no legacy member has its name; not mid-turn in another thread
+// (switching would close the session under the running turn: it claims once the turn ended);
+// not reserved for someone else; a role the thread uses.
 func eligible(s seat, j job, now time.Time) bool {
 	switch {
 	case j.Named != "" && j.Named != s.Name, j.Named == "" && j.Role != s.Role:
 		return false
 	case s.Legacy != "" && s.Legacy != j.Thread, s.Legacy == "" && slices.Contains(j.Legacy, s.Name):
+		return false
+	case s.TurnThread != "" && s.TurnThread != j.Thread:
 		return false
 	case reserved(j, now) && j.ReservedFor != s.Name:
 		return false

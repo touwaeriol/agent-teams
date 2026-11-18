@@ -2,9 +2,11 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/touwaeriol/agent-teams/server/internal/platform"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -26,6 +28,25 @@ func TestRolesSeededWithDefaults(t *testing.T) {
 	}
 	if r := c.do("GET", "/api/team", nil); r.Status != 404 {
 		t.Fatalf("GET /api/team = %d", r.Status)
+	}
+}
+
+type failingRestaff struct{ platform.NoHooks }
+
+func (failingRestaff) RolesSaved(context.Context, string) error { return errors.New("re-staff failed") }
+
+// TestSaveRolesRestaffFailure: the roles are saved when re-staffing the projects fails
+// afterwards; the save reports success.
+func TestSaveRolesRestaffFailure(t *testing.T) {
+	h := newHarness(t)
+	h.server.hooks = failingRestaff{}
+	c, _ := h.signUp("a@example.com")
+	var body RolesBody
+	c.must(200, "GET", "/api/roles", nil, &body)
+	body.Roles[2].Title = "开发者"
+	c.must(200, "PUT", "/api/roles", map[string]any{"roles": body.Roles}, &body)
+	if body.Roles[2].Title != "开发者" {
+		t.Fatalf("saved %+v", body.Roles[2])
 	}
 }
 

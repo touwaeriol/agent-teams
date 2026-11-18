@@ -51,12 +51,27 @@ func (w *staffWorld) tx(fn func(tx *Tx) error) {
 	}
 }
 
-func (w *staffWorld) ensure(roles ...store.Role) {
+func (w *staffWorld) ensure(roles ...store.Role) []Task {
 	w.t.Helper()
 	hair := func(i int) *string { h := fmt.Sprintf("hair-%d", i); return &h }
+	var released []Task
 	w.tx(func(tx *Tx) error {
-		return EnsureStaff(w.ctx, tx, "p1", Staffing{Roles: roles, Nodes: w.nodes, Hair: hair})
+		var err error
+		released, err = EnsureStaff(w.ctx, tx, "p1", Staffing{Roles: roles, Nodes: w.nodes, Hair: hair})
+		return err
 	})
+	return released
+}
+
+// rowVersions renders the project members' row versions (xmin): unchanged rows keep theirs.
+func (w *staffWorld) rowVersions() string {
+	w.t.Helper()
+	var v string
+	if err := w.s.Pool.Gorm(w.ctx).Raw(`SELECT string_agg(name || '@' || xmin::text, ' ' ORDER BY name) FROM at_employees
+		WHERE project_id = 'p1' AND thread_id IS NULL`).Scan(&v).Error; err != nil {
+		w.t.Fatal(err)
+	}
+	return v
 }
 
 // staff renders the project members as "name:active:node" sorted by name.
@@ -121,9 +136,13 @@ func TestEnsureStaff(t *testing.T) {
 	if got := w.staff(); got != want {
 		t.Fatalf("staff\n got %s\nwant %s", got, want)
 	}
+	versions := w.rowVersions()
 	w.ensure(lead(), member("dev", 3), reviewer, coder)
 	if got := w.staff(); got != want {
 		t.Fatalf("second call changed staff: %s", got)
+	}
+	if got := w.rowVersions(); got != versions {
+		t.Fatalf("second call rewrote unchanged members:\n got %s\nwant %s", got, versions)
 	}
 	e, err := ProjectMemberByName(w.ctx, w.s.Pool, "p1", "dev-2")
 	if err != nil || e.InstanceNo != 2 || e.Spec.Role != "dev" || e.Look.Hair == nil || *e.Look.Hair != "hair-1" || e.ThreadID != nil {
@@ -171,6 +190,32 @@ func TestEnsureStaffShrinkKeepsBusy(t *testing.T) {
 	after, err := ProjectMemberByName(w.ctx, w.s.Pool, "p1", "dev-3")
 	if err != nil || after.ID != before.ID || !after.Active || after.Spec.Instructions != "new" {
 		t.Fatalf("dev-3 again %+v %v", after, err)
+	}
+}
+
+// TestEnsureStaffReleasesNamedTasks: retiring a member turns its pending named tasks into tasks
+// of its role (not a legacy member's of that name, not a finished thread's) and returns them.
+func TestEnsureStaffReleasesNamedTasks(t *testing.T) {
+	w := newStaffWorld(t)
+	w.ensure(member("dev", 2))
+	a, b := w.thread("a"), w.thread("b")
+	var named, legacyNamed Task
+	w.tx(func(tx *Tx) error {
+		var err error
+		if named, err = InsertTask(w.ctx, tx, NewTask{Thread: a, Assignee: "dev-2", Role: "dev"}); err != nil {
+			return err
+		}
+		legacyNamed, err = InsertTask(w.ctx, tx, NewTask{Thread: b, Assignee: "dev-2", Role: "dev"})
+		return err
+	})
+	w.legacy(b, "dev-2")
+	released := w.ensure(member("dev", 1))
+	if len(released) != 1 || released[0].ID != named.ID || released[0].ConversationID != a.ID || released[0].Assignee != "dev" {
+		t.Fatalf("released %+v", released)
+	}
+	got, _ := TaskByID(w.ctx, w.s.Pool, b.ID, legacyNamed.ID)
+	if got.Assignee != "dev-2" {
+		t.Fatalf("the legacy member's task changed: %+v", got)
 	}
 }
 

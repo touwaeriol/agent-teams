@@ -3,6 +3,7 @@ package core
 import (
 	"slices"
 	"testing"
+	"time"
 )
 
 // TestProjectQueue: idle members (project members busy anywhere in the project are not, a legacy
@@ -67,7 +68,7 @@ func TestClaimableTasks(t *testing.T) {
 		t.Fatalf("ready_at on insert: deps %v none %v", top.ReadyAt, free.ReadyAt)
 	}
 	ids := func() []string {
-		q, err := ClaimableTasks(w.ctx, w.s.Pool, "p1")
+		q, err := ClaimableTasks(w.ctx, w.s.Pool, "p1", []string{"dev"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -82,7 +83,7 @@ func TestClaimableTasks(t *testing.T) {
 	}
 	w.exec(`UPDATE at_tasks SET status = 'done' WHERE thread_id = $1 AND id IN ($2, $3)`, a.ID, d1.ID, d2.ID)
 	w.tx(func(tx *Tx) error { return MarkReady(w.ctx, tx, a.ID, d2.ID) })
-	q, err := ClaimableTasks(w.ctx, w.s.Pool, "p1")
+	q, err := ClaimableTasks(w.ctx, w.s.Pool, "p1", []string{"dev"})
 	if err != nil || len(q) != 2 {
 		t.Fatalf("claimable %+v %v", q, err)
 	}
@@ -94,5 +95,88 @@ func TestClaimableTasks(t *testing.T) {
 	w.exec(`UPDATE at_threads SET status = 'paused' WHERE id = $1`, a.ID)
 	if got := ids(); len(got) != 0 {
 		t.Fatalf("claimable in a paused thread %v", got)
+	}
+}
+
+// TestQueueInputs: the claimable tasks are those of the asked roles; a task named to a retired
+// member is not named any more; an idle member mid-turn names the thread of that turn; a task
+// put back into the queue is claimable (and starves) from then on.
+func TestQueueInputs(t *testing.T) {
+	w := newStaffWorld(t)
+	w.ensure(lead(), member("dev", 2), member("qa", 1))
+	a := w.thread("A")
+	w.exec(`UPDATE at_threads SET status = 'running' WHERE id = $1`, a.ID)
+	var toDev1, toDev2, check Task
+	w.tx(func(tx *Tx) error {
+		var err error
+		if toDev1, err = InsertTask(w.ctx, tx, NewTask{Thread: a, Assignee: "dev-1", Role: "dev"}); err != nil {
+			return err
+		}
+		if toDev2, err = InsertTask(w.ctx, tx, NewTask{Thread: a, Assignee: "dev-2", Role: "dev"}); err != nil {
+			return err
+		}
+		check, err = InsertTask(w.ctx, tx, NewTask{Thread: a, Assignee: "qa", Role: "qa"})
+		return err
+	})
+	w.exec(`UPDATE at_employees SET active = false WHERE project_id = 'p1' AND name = 'dev-2'`)
+	q, err := ClaimableTasks(w.ctx, w.s.Pool, "p1", []string{"qa"})
+	if err != nil || len(q) != 1 || q[0].ID != check.ID {
+		t.Fatalf("qa queue %+v %v", q, err)
+	}
+	q, err = ClaimableTasks(w.ctx, w.s.Pool, "p1", []string{"dev"})
+	if err != nil || len(q) != 2 {
+		t.Fatalf("dev queue %+v %v", q, err)
+	}
+	named := map[string]bool{}
+	for _, x := range q {
+		named[x.ID] = x.NamedActive
+	}
+	if !named[toDev1.ID] || named[toDev2.ID] {
+		t.Fatalf("named active %v", named)
+	}
+
+	dev1, _ := ProjectMemberByName(w.ctx, w.s.Pool, "p1", "dev-1")
+	var s AgentSession
+	w.tx(func(tx *Tx) error {
+		var err error
+		s, err = InsertSession(w.ctx, tx, NewSession{EmployeeID: dev1.ID, NodeID: "n1", Runtime: "claude", Cwd: "x", ThreadID: &a.ID})
+		if err != nil {
+			return err
+		}
+		if err := SetSessionState(w.ctx, tx, s.ID, "active"); err != nil {
+			return err
+		}
+		return SetInTurn(w.ctx, tx, s.ID, true)
+	})
+	turnOf := func() string {
+		idle, err := IdleMembers(w.ctx, w.s.Pool, "p1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range idle {
+			if m.ID == dev1.ID {
+				return m.TurnThread
+			}
+		}
+		t.Fatalf("dev-1 not idle: %+v", idle)
+		return ""
+	}
+	if got := turnOf(); got != a.ID {
+		t.Fatalf("dev-1 mid-turn in %q", got)
+	}
+	w.tx(func(tx *Tx) error { return SetSessionState(w.ctx, tx, s.ID, "parked") })
+	if got := turnOf(); got != "" {
+		t.Fatalf("a parked session still runs a turn in %q", got)
+	}
+
+	w.exec(`UPDATE at_tasks SET status = 'failed', ready_at = now() - interval '1 hour' WHERE thread_id = $1 AND id = $2`, a.ID, check.ID)
+	var back Task
+	w.tx(func(tx *Tx) error {
+		var err error
+		back, err = RequeueTask(w.ctx, tx, check, map[string]any{"claimed_by": ""})
+		return err
+	})
+	if back.Status != "pending" || back.ReadyAt == nil || time.Since(*back.ReadyAt) > time.Minute {
+		t.Fatalf("requeued %+v", back)
 	}
 }

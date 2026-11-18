@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"slices"
@@ -22,14 +23,15 @@ type Staffing struct {
 // member templates' counts (shared-members.md §2): <role>-<n> rows are created or re-activated
 // with the template's current snapshot, members beyond the counts are deactivated unless they
 // hold a claimed or running task (a later call stops them), and members without a node get a
-// home node. Idempotent; it locks the project row so concurrent calls run one after another.
-func EnsureStaff(ctx context.Context, tx *Tx, projectID string, s Staffing) error {
-	if err := tx.Gorm(ctx).Exec(`SELECT 1 FROM at_projects WHERE id = ? FOR UPDATE`, projectID).Error; err != nil {
-		return err
+// home node. Idempotent; it locks the project row so concurrent calls run one after another. It
+// returns the pending tasks that named a member it retired, now tasks of the member's role.
+func EnsureStaff(ctx context.Context, tx *Tx, projectID string, s Staffing) ([]Task, error) {
+	if err := LockProject(ctx, tx, projectID); err != nil {
+		return nil, err
 	}
 	staff, err := staffByName(ctx, tx, projectID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	want := map[string]bool{}
 	for _, r := range s.Roles {
@@ -37,14 +39,22 @@ func EnsureStaff(ctx context.Context, tx *Tx, projectID string, s Staffing) erro
 			name := fmt.Sprintf("%s-%d", r.Role, n)
 			want[name] = true
 			if err := keepMember(ctx, tx, projectID, staff[name], r, n, s.Hair); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
-	if err := retireSurplus(ctx, tx, projectID, staff, want); err != nil {
-		return err
+	released, err := retireSurplus(ctx, tx, projectID, staff, want)
+	if err != nil {
+		return nil, err
 	}
-	return placeHomeless(ctx, tx, projectID, s.Nodes)
+	return released, placeHomeless(ctx, tx, projectID, s.Nodes)
+}
+
+// LockProject takes the project row lock. Every event emit updates that row (the event seq), so
+// a transaction that changes members or tasks takes it first: rows are then always locked
+// project → member → task, and a claim pass, re-staffing and deliveries cannot deadlock.
+func LockProject(ctx context.Context, tx *Tx, projectID string) error {
+	return tx.Gorm(ctx).Exec(`SELECT 1 FROM at_projects WHERE id = ? FOR UPDATE`, projectID).Error
 }
 
 // StaffedProjects lists the user's projects that have project members.
@@ -81,12 +91,16 @@ func staffByName(ctx context.Context, q DB, projectID string) (map[string]Employ
 }
 
 // keepMember creates <role>-<n>, or refreshes an existing one from the template and activates
-// it; a member whose runtime changes loses its node so it gets a fitting one.
+// it (only when something changed: no row lock for an unchanged member); a member whose
+// runtime changes loses its node so it gets a fitting one.
 func keepMember(ctx context.Context, tx *Tx, projectID string, e Employee, r store.Role, n int, hair func(int) *string) error {
 	if e.ID == "" {
 		_, err := InsertEmployee(ctx, tx, NewEmployee{ProjectID: projectID, Name: fmt.Sprintf("%s-%d", r.Role, n), Role: r,
 			InstanceNo: n, Look: withHair(r.Look, hair, n-1)})
 		return err
+	}
+	if upToDate(e, r) {
+		return nil
 	}
 	set := map[string]any{"active": true, "spec": jsonOf(r), "runtime": runtimeOf(r),
 		"role_id": gorm.Expr("(SELECT id FROM at_roles WHERE id = ?)", nilIfEmpty(r.ID))}
@@ -96,22 +110,63 @@ func keepMember(ctx context.Context, tx *Tx, projectID string, e Employee, r sto
 	return tx.Gorm(ctx).Table("at_employees").Where("id = ?", e.ID).Updates(set).Error
 }
 
-// retireSurplus deactivates active members the templates no longer count, except busy ones.
-func retireSurplus(ctx context.Context, tx *Tx, projectID string, staff map[string]Employee, want map[string]bool) error {
-	busy, err := BusyMembers(ctx, tx, projectID)
-	if err != nil {
-		return err
-	}
-	var retire []string
+// upToDate reports whether a member already is active with the template's snapshot.
+func upToDate(e Employee, r store.Role) bool {
+	return e.Active && e.Runtime == runtimeOf(r) && deref(e.RoleID) == r.ID && bytes.Equal(jsonOf(e.Spec), jsonOf(r))
+}
+
+// retireSurplus deactivates active members the templates no longer count, except busy ones
+// (their rows are locked first, so no claim slips in between), and turns their pending named
+// tasks into tasks of their role.
+func retireSurplus(ctx context.Context, tx *Tx, projectID string, staff map[string]Employee, want map[string]bool) ([]Task, error) {
+	var surplus []string
 	for name, e := range staff {
-		if e.Active && !want[name] && !busy[name] {
-			retire = append(retire, e.ID)
+		if e.Active && !want[name] {
+			surplus = append(surplus, e.ID)
 		}
 	}
-	if len(retire) == 0 {
-		return nil
+	if len(surplus) == 0 {
+		return nil, nil
 	}
-	return tx.Gorm(ctx).Table("at_employees").Where("id IN ?", retire).Update("active", false).Error
+	if err := tx.Gorm(ctx).Exec(`SELECT 1 FROM at_employees WHERE id IN ? FOR UPDATE`, surplus).Error; err != nil {
+		return nil, err
+	}
+	busy, err := BusyMembers(ctx, tx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	var ids, names []string
+	for _, id := range surplus {
+		if e := staffByID(staff, id); !busy[e.Name] {
+			ids, names = append(ids, id), append(names, e.Name)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	if err := tx.Gorm(ctx).Table("at_employees").Where("id IN ?", ids).Update("active", false).Error; err != nil {
+		return nil, err
+	}
+	return releaseNamed(ctx, tx, projectID, names)
+}
+
+func staffByID(staff map[string]Employee, id string) Employee {
+	for _, e := range staff {
+		if e.ID == id {
+			return e
+		}
+	}
+	return Employee{}
+}
+
+// releaseNamed turns the pending tasks named to the given (retired) project members into tasks
+// of their role, so another member of the role claims them.
+func releaseNamed(ctx context.Context, tx *Tx, projectID string, names []string) ([]Task, error) {
+	return rawAll[Task](ctx, tx, `UPDATE at_tasks x SET assignee = x.role FROM at_threads th
+		WHERE th.id = x.thread_id AND th.project_id = $1 AND th.status NOT IN ('done','failed','archived')
+		AND x.status = 'pending' AND x.assignee = ANY($2::text[]) AND x.assignee <> x.role
+		AND NOT EXISTS (SELECT 1 FROM at_employees l WHERE l.thread_id = x.thread_id AND l.name = x.assignee)
+		RETURNING x.*`, projectID, store.TextArray(names))
 }
 
 // placeHomeless gives every active member without a node a home node, spreading members over

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -31,24 +32,26 @@ type Delivery struct {
 }
 
 // Deliver records the message and sends it to the employee's session, opening one when needed.
+// It takes the project row lock first (core.LockProject): moving a member and opening its
+// session update member rows after the message's event, in the order every claim pass uses.
 func (o *Orchestrator) Deliver(ctx context.Context, tx *core.Tx, e core.Employee, d Delivery) (core.Message, error) {
+	if err := core.LockProject(ctx, tx, e.ProjectID); err != nil {
+		return core.Message{}, err
+	}
 	msgID := core.NewID("m")
-	e, err := atWork(ctx, tx, e)
+	tg, err := o.deliveryTarget(ctx, tx, e, d)
 	if err != nil {
 		return core.Message{}, err
 	}
-	if e, err = o.engage(ctx, tx, e, d.Record); err != nil {
-		return core.Message{}, err
+	e, d = tg.emp, tg.d
+	var m core.Message
+	if tg.conv != "" {
+		if m, err = o.recordDelivery(ctx, tx, e, d, tg.conv, msgID); err != nil {
+			return m, err
+		}
 	}
-	m, err := o.recordDelivery(ctx, tx, e, d, msgID)
-	if err != nil {
-		return m, err
-	}
-	if ended, err := o.threadEnded(ctx, tx, e); err != nil || ended {
-		return m, err // a finished or archived thread's employees are not woken: the message is only kept
-	}
-	if e.ProjectMember() && e.CurrentThreadID == nil {
-		return m, nil // a project member without a thread has no worktree to wake in: its next task brings it
+	if !tg.wake {
+		return m, nil // an ended thread's employee or a member without a thread: the message is only kept
 	}
 	o.wake(tx, e.ID)
 	sess, err := core.LiveSession(ctx, tx, e.ID)
@@ -68,20 +71,128 @@ func (o *Orchestrator) Deliver(ctx context.Context, tx *core.Tx, e core.Employee
 	return m, o.send(ctx, tx, sess, msgID, d)
 }
 
-// engage brings a project member that works in no thread into the thread a message to it is
-// recorded in (the user or a lead talks to it there).
-func (o *Orchestrator) engage(ctx context.Context, tx *core.Tx, e core.Employee, rec *core.NewMessage) (core.Employee, error) {
-	if !e.ProjectMember() || e.CurrentThreadID != nil || rec == nil {
-		return e, nil
-	}
-	t, err := core.ThreadByID(ctx, tx, rec.ConversationID)
-	if errors.Is(err, core.ErrNotFound) || (err == nil && t.ProjectID != e.ProjectID) {
-		return e, nil
-	}
+// target is where a delivery goes.
+type target struct {
+	emp  core.Employee // the employee as it works now (a project member pinned to its work thread)
+	d    Delivery      // the delivery, its text headed when the member works in another thread
+	conv string        // the conversation its row goes to ("" = none)
+	wake bool          // the employee's session gets it
+}
+
+// deliveryTarget decides where a delivery is recorded and whether the session gets it
+// (shared-members.md §6). With a record, the record's conversation (recordTarget). Without one,
+// the employee's own conversation; a project member without a thread gets nothing: the mail,
+// answer or note is kept where it was made (never in the coordinator conversation), and its
+// next task brings it.
+func (o *Orchestrator) deliveryTarget(ctx context.Context, tx *core.Tx, e core.Employee, d Delivery) (target, error) {
+	e, err := atWork(ctx, tx, e)
 	if err != nil {
-		return e, err
+		return target{}, err
 	}
-	return o.MoveToThread(ctx, tx, e, t.ID)
+	if d.Record != nil {
+		return o.recordTarget(ctx, tx, e, d)
+	}
+	tg := target{emp: e, d: d}
+	if e.ProjectMember() && e.CurrentThreadID == nil {
+		return tg, nil
+	}
+	if tg.conv, err = o.conversationOf(ctx, tx, e); err != nil {
+		return tg, err
+	}
+	tg.wake, err = o.awake(ctx, tx, e)
+	return tg, err
+}
+
+// recordTarget: the message is recorded in its record's conversation. A project member that does
+// not work in that thread now moves there when it has no task; while its task is in another
+// thread it gets the message in its current session, headed "[#N · 来自 X 的留言]", without
+// switching.
+func (o *Orchestrator) recordTarget(ctx context.Context, tx *core.Tx, e core.Employee, d Delivery) (target, error) {
+	tg := target{emp: e, d: d, conv: d.Record.ConversationID}
+	t, other, err := otherThread(ctx, tx, e, tg.conv)
+	if err != nil {
+		return tg, err
+	}
+	if other {
+		if tg, err = o.reachElsewhere(ctx, tx, tg, t); err != nil {
+			return tg, err
+		}
+	}
+	tg.wake, err = o.awake(ctx, tx, tg.emp)
+	return tg, err
+}
+
+// reachElsewhere brings a message of thread t to a project member working elsewhere (or nowhere).
+func (o *Orchestrator) reachElsewhere(ctx context.Context, tx *core.Tx, tg target, t core.Thread) (target, error) {
+	stay, err := staysPut(ctx, tx, tg.emp)
+	if err != nil {
+		return tg, err
+	}
+	if !stay {
+		tg.emp, err = o.MoveToThread(ctx, tx, tg.emp, t.ID)
+		return tg, err
+	}
+	tg.d.Text = elsewhereHeader(t.No, tg.d) + "\n" + tg.d.Text
+	return tg, nil
+}
+
+// staysPut: a project member with a task, or in the middle of a turn, is not moved to another
+// thread (moving closes its session).
+func staysPut(ctx context.Context, q core.DB, e core.Employee) (bool, error) {
+	_, err := core.CurrentTaskOf(ctx, q, e)
+	if !errors.Is(err, core.ErrNotFound) {
+		return err == nil, err
+	}
+	s, err := core.LiveSession(ctx, q, e.ID)
+	if errors.Is(err, core.ErrNotFound) {
+		return false, nil
+	}
+	return err == nil && s.InTurn && s.State == "active", err
+}
+
+// otherThread returns the thread conv is when it is a thread of a project member's project that
+// the member does not work in now (other=false otherwise).
+func otherThread(ctx context.Context, q core.DB, e core.Employee, conv string) (core.Thread, bool, error) {
+	if !e.ProjectMember() || sameThread(e.CurrentThreadID, &conv) {
+		return core.Thread{}, false, nil
+	}
+	t, err := core.ThreadByID(ctx, q, conv)
+	if errors.Is(err, core.ErrNotFound) {
+		return t, false, nil
+	}
+	return t, err == nil && t.ProjectID == e.ProjectID, err
+}
+
+// elsewhereKind names what a delivery is in the header of a message from another thread.
+var elsewhereKind = map[string]string{"answer": "回答", "task": "任务", "system": "通知"}
+
+// elsewhereHeader heads a message of thread no for a member working in another thread.
+func elsewhereHeader(no int, d Delivery) string {
+	kind, ok := elsewhereKind[d.Kind]
+	if !ok {
+		kind = "留言"
+	}
+	return fmt.Sprintf("[#%d · 来自 %s 的%s]", no, authorName(d.Record.Author), kind)
+}
+
+func authorName(author string) string {
+	switch author {
+	case "user":
+		return "用户"
+	case "platform", "":
+		return "平台"
+	}
+	return author
+}
+
+// awake reports whether the employee's session gets a delivery: not when it works in a thread
+// that ended, nor when it is a project member without a thread (no worktree to wake in).
+func (o *Orchestrator) awake(ctx context.Context, tx *core.Tx, e core.Employee) (bool, error) {
+	if e.ProjectMember() && e.CurrentThreadID == nil {
+		return false, nil
+	}
+	ended, err := o.threadEnded(ctx, tx, e)
+	return !ended, err
 }
 
 // threadEnded reports whether the employee works in a thread that is done, failed or archived.
@@ -153,9 +264,10 @@ func (o *Orchestrator) continuation(ctx context.Context, tx *core.Tx, e core.Emp
 }
 
 // movedThread reports whether a project member's last session was in another thread than the
-// one it works in now.
+// one it works in now; a session whose thread was deleted (thread_id NULL) counts as another
+// thread: its conversation belongs to a worktree that is gone, never resumed across cwd.
 func movedThread(e core.Employee, last core.AgentSession) bool {
-	return e.ProjectMember() && last.ThreadID != nil && e.CurrentThreadID != nil && !sameThread(last.ThreadID, e.CurrentThreadID)
+	return e.ProjectMember() && e.CurrentThreadID != nil && !sameThread(last.ThreadID, e.CurrentThreadID)
 }
 
 // MoveToThread makes a project member work in a thread (it claimed a task there): its current
@@ -206,13 +318,11 @@ func (o *Orchestrator) NodeRemoved(ctx context.Context, tx *core.Tx, nodeID stri
 	return tx.Gorm(ctx).Table("at_employees").Where("node_id = ?", nodeID).Update("node_id", nil).Error
 }
 
-func (o *Orchestrator) recordDelivery(ctx context.Context, tx *core.Tx, e core.Employee, d Delivery, msgID string) (core.Message, error) {
+// recordDelivery stores the delivery in conv (its record, else a note addressed to the employee)
+// with the msg_id, and emits it on conv's thread.
+func (o *Orchestrator) recordDelivery(ctx context.Context, tx *core.Tx, e core.Employee, d Delivery, conv, msgID string) (core.Message, error) {
 	rec := d.Record
 	if rec == nil {
-		conv, err := o.conversationOf(ctx, tx, e)
-		if err != nil {
-			return core.Message{}, err
-		}
 		rec = &core.NewMessage{ConversationID: conv, Role: "system", Author: "platform", Kind: "note", Content: d.Text,
 			Meta: map[string]any{"to": e.Name}}
 	}
@@ -220,16 +330,15 @@ func (o *Orchestrator) recordDelivery(ctx context.Context, tx *core.Tx, e core.E
 		rec.Meta = map[string]any{}
 	}
 	rec.Meta["msg_id"] = msgID
-	if th := e.WorkThreadID(); th != nil {
-		if no, err := core.ThreadNoOf(ctx, tx, th); err == nil && no != nil {
-			rec.Meta["thread_no"] = *no
-		}
+	var thread *string
+	if no, err := core.ThreadNoOf(ctx, tx, &rec.ConversationID); err == nil && no != nil {
+		rec.Meta["thread_no"], thread = *no, &rec.ConversationID
 	}
 	m, err := core.InsertMessage(ctx, tx, *rec)
 	if err != nil {
 		return m, err
 	}
-	return m, tx.EmitMessage(ctx, e.ProjectID, e.WorkThreadID(), m)
+	return m, tx.EmitMessage(ctx, e.ProjectID, thread, m)
 }
 
 // conversationOf is the conversation an employee's messages belong to.

@@ -255,7 +255,7 @@ func (a *API) usageByThread(ctx context.Context, pid string, since time.Time, ou
 func (a *API) usageByEmployee(ctx context.Context, pid string, since time.Time, out *ProjectUsage) error {
 	rows, err := store.Query(ctx, a.e.Core.Pool, `SELECT e.name, t.no, `+usageSums+`
 		FROM at_usage u JOIN at_agent_sessions s ON s.id = u.session_id JOIN at_employees e ON e.id = s.employee_id
-		LEFT JOIN at_threads t ON t.id = e.thread_id WHERE u.project_id = $1 AND u.created_at >= $2
+		LEFT JOIN at_threads t ON t.id = u.thread_id WHERE u.project_id = $1 AND u.created_at >= $2
 		GROUP BY e.name, t.no ORDER BY 3 DESC, e.name LIMIT 200`, pid, since)
 	if err != nil {
 		return err

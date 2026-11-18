@@ -31,9 +31,13 @@ func (o *Orchestrator) ResumeCutTurn(ctx context.Context, tx *core.Tx, s core.Ag
 // resumeCutTurn sends the employee of s the restart note, once per interruption (the shutdown's
 // parked state, the report and the lost cards may all notice the same restart).
 func (o *Orchestrator) resumeCutTurn(ctx context.Context, tx *core.Tx, s core.AgentSession) error {
-	e, err := core.EmployeeByID(ctx, tx, s.EmployeeID)
+	sc, err := core.SessionContextOf(ctx, tx, s.ID)
 	if err != nil {
 		return ignoreMissing(err)
+	}
+	e := sc.Employee // a project member in the session's thread
+	if e.ProjectMember() && e.CurrentThreadID == nil {
+		return nil // its thread is gone: nothing to resume there
 	}
 	conv, err := o.conversationOf(ctx, tx, e)
 	if err != nil {
@@ -146,11 +150,11 @@ const stalledDebounce = "10 minutes"
 // thread since (a user message or answer, a task, plan, merge or CI change, a PR update; a
 // resume clears the mark) and never within stalledDebounce of the last one.
 func (o *Orchestrator) wakeStalledThreads(ctx context.Context, tx *core.Tx, node store.Node) error {
-	rows, err := store.Query(ctx, tx, `SELECT DISTINCT t.id FROM at_threads t JOIN at_employees e ON e.thread_id = t.id
-		JOIN at_agent_sessions a ON a.employee_id = e.id AND a.state <> 'closed'
+	rows, err := store.Query(ctx, tx, `SELECT DISTINCT t.id FROM at_threads t JOIN at_agent_sessions a ON a.thread_id = t.id
+		AND a.state <> 'closed'
 		WHERE a.node_id = $1 AND t.status = 'running'
-		AND NOT EXISTS (SELECT 1 FROM at_agent_sessions a2 JOIN at_employees e2 ON e2.id = a2.employee_id
-			WHERE e2.thread_id = t.id AND a2.state IN ('turn_running','opening','queued'))
+		AND NOT EXISTS (SELECT 1 FROM at_agent_sessions a2 WHERE a2.thread_id = t.id
+			AND a2.state IN ('turn_running','opening','queued'))
 		AND NOT EXISTS (SELECT 1 FROM at_questions q WHERE q.thread_id = t.id AND q.status = 'open')
 		AND NOT EXISTS (SELECT 1 FROM at_messages m WHERE m.conversation_id = t.id AND m.delivered_at IS NULL
 			AND jsonb_exists(m.meta, 'msg_id') AND m.created_at > now() - interval '1 day')

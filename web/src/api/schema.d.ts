@@ -2729,7 +2729,7 @@ export interface components {
         };
         NewThreadInputBody: {
             brief?: string;
-            /** @description Member roles this thread uses (counts are ignored: members are project staff) */
+            /** @description Restricts the thread to these member roles: the lead may assign tasks only to them (platform review, decision and fix tasks are exempt). Changed meaning: this used to override per-thread headcounts; members are project staff now, so count is ignored. Omitted = every role. */
             roles?: components["schemas"]["RoleCount"][] | null;
             title: string;
         };

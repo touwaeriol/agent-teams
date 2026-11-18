@@ -169,7 +169,7 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/projects/{pid}/threads` | `{title, brief, roles?: [{role, count}]}` → 201 `ThreadView`（用户直接开串，跳过统筹；`roles` 只取岗位名，限定组长能派活的岗位（`only_roles`）；人数忽略，成员按项目编制共用） |
+| POST | `/api/projects/{pid}/threads` | `{title, brief, roles?: [{role, count}]}` → 201 `ThreadView`（用户直接开串，跳过统筹）。**`roles` 的含义变了**：以前是按岗位覆盖这个讨论串的人数，现在成员按项目编制共用，`roles` 只取岗位名，**限定**组长只能往这些岗位派任务（`only_roles`；平台建的审查 / 决策 / 修复任务不受限），`count` 忽略；不传 = 所有岗位。传了模板里没有的岗位 → 422 |
 | GET | `/api/threads/{tid}` | → `ThreadView` |
 | PATCH | `/api/threads/{tid}` | `{title?, status?: "paused"|"running"|"archived", auto_approve?}` → `ThreadView`。`auto_approve` = “本讨论串内全部放行”（只影响 `ask` 岗位，任何节点都能开；打开时一并放行当前所有待审批，并审计） |
 | POST | `/api/threads/{tid}/archive` | → `ThreadView`。归档：讨论串结束（会话关闭、节点上的检出按 `git.cleanup keep_unpushed` 清理），从主列表移到“已归档”，记下归档前的状态（`at_threads.archived_from`）。已结束的讨论串（done / failed）常用它在“解决后归档” |

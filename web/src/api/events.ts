@@ -7,6 +7,7 @@ import type {
   CheckView,
   CoordinatorView,
   DeliverableView,
+  EmployeeBrief,
   EmployeeStatusView,
   MailView,
   MainTaskView,
@@ -153,13 +154,24 @@ function employeeId(frame: StatusFrame): string {
   return typeof frame.employee === "string" ? frame.employee : frame.employee.id;
 }
 
+/**
+ * A member of thread no after a status frame: its status and, when the frame names its thread,
+ * where it works (busy_elsewhere: it holds a task in another thread).
+ */
+export function memberAfter(m: EmployeeBrief, d: StatusFrame, no: number): EmployeeBrief {
+  if (m.id !== employeeId(d)) return m;
+  const at = typeof d.employee === "string" ? undefined : d.employee.thread_no;
+  if (at === undefined) return { ...m, status: d.status };
+  return { ...m, status: d.status, thread_no: at, busy_elsewhere: !!d.status.task_id && at !== null && at !== no };
+}
+
 function onStatus(qc: QueryClient, pid: string, d: StatusFrame) {
   const id = employeeId(d);
-  const withStatus = <T extends { id: string; status: EmployeeStatusView | null }>(m: T): T => (m.id === id ? { ...m, status: d.status } : m);
   for (const t of qc.getQueryData<ThreadView[]>(keys.threads(pid)) ?? []) {
     if (!t.members.some((m) => m.id === id)) continue;
-    patchThread(qc, pid, t.id, (x) => ({ ...x, members: x.members.map(withStatus) }));
-    qc.setQueryData<ThreadView["members"]>(keys.members(t.id), (list) => list?.map(withStatus));
+    const after = (m: EmployeeBrief) => memberAfter(m, d, t.no);
+    patchThread(qc, pid, t.id, (x) => ({ ...x, members: x.members.map(after) }));
+    qc.setQueryData<ThreadView["members"]>(keys.members(t.id), (list) => list?.map(after));
   }
   qc.setQueryData<StatusFrame[]>(statusLogKey(pid), (log) => [...(log ?? []), d].slice(-STATUS_LOG_LIMIT));
 }
