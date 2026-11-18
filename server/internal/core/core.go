@@ -140,12 +140,13 @@ func collect[T any](rows *store.Rows, err error, scan func(Scanner) (T, error)) 
 	return store.Collect(rows, err, scan)
 }
 
-// nextLocalID allocates t<n>/q<n> inside a conversation (v1 id rule). The
-// conversation row is locked so concurrent allocations serialise.
+// nextLocalID allocates t<n>/q<n> inside a conversation (v1 id rule); concurrent
+// allocations serialise on an advisory lock.
 func nextLocalID(ctx context.Context, tx *Tx, table, prefix, conversationID string) (string, error) {
-	var locked []struct{ ID string }
-	if err := tx.Gorm(ctx).Table("at_conversations").Select("id").Clauses(ForUpdate).Where("id = ?", conversationID).
-		Find(&locked).Error; err != nil {
+	// A transaction-scoped advisory lock serializes allocators of one conversation without
+	// locking its row: transactions that emitted an event (project row) and then write a message
+	// (conversation row) would otherwise deadlock with an allocator about to emit one.
+	if _, err := store.Exec(ctx, tx, `SELECT pg_advisory_xact_lock(hashtext($1))`, table+":"+conversationID); err != nil {
 		return "", err
 	}
 	var n int
