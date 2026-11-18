@@ -17,7 +17,8 @@ import (
 )
 
 // ThreadEnded cleans up after done/archived/failed (§8.4): git.cleanup on every node the
-// thread used (worktrees with unpushed work are kept and reported) and the member branches.
+// thread used (worktrees with unpushed work are kept and reported) and the branches of the
+// members that worked there (core.ThreadWorkers: project members too; the members stay).
 func (e *Engine) ThreadEnded(ctx context.Context, threadID string) {
 	t, err := core.ThreadByID(ctx, e.core.Pool, threadID)
 	if err != nil {
@@ -34,26 +35,33 @@ func (e *Engine) queueCleanup(ctx context.Context, t core.Thread) error {
 }
 
 // PurgeThread queues the removal of every checkout of a deleted thread, unpushed work
-// included, and deletes the members' branches after the transaction commits.
+// included, and deletes the branches of the members that worked there after the transaction
+// commits. Project members are not deleted with the thread.
 func (e *Engine) PurgeThread(ctx context.Context, tx *core.Tx, t core.Thread) error {
 	if err := e.queueCleanupTx(ctx, tx, t, false); err != nil {
 		return err
 	}
-	if err := e.purgeThreadDirs(ctx, tx, t); err != nil {
+	emps, err := core.ThreadWorkers(ctx, tx, t.ID)
+	if err != nil {
 		return err
 	}
-	emps, err := core.ThreadParticipants(ctx, tx, t.ID)
-	if err != nil {
+	if err := e.purgeThreadDirs(ctx, tx, t, emps); err != nil {
 		return err
 	}
 	tx.AfterCommit(func(ctx context.Context) { e.deleteBranches(context.WithoutCancel(ctx), t, emps) })
 	return nil
 }
 
-// purgeThreadDirs removes projects/<pid>/threads/<no> (lead notes, leftovers) on every node the thread used.
-func (e *Engine) purgeThreadDirs(ctx context.Context, tx *core.Tx, t core.Thread) error {
+// purgeThreadDirs removes projects/<pid>/threads/<no> (lead notes, members' checkouts,
+// leftovers) on every node the thread used: the nodes it recorded, its lead's and the nodes of
+// the members that worked there.
+func (e *Engine) purgeThreadDirs(ctx context.Context, tx *core.Tx, t core.Thread, workers []core.Employee) error {
+	ids := make([]string, 0, len(workers))
+	for _, w := range workers {
+		ids = append(ids, w.ID)
+	}
 	nodes, err := store.Strings(ctx, tx, `SELECT node_id FROM at_thread_nodes WHERE thread_id = $1
-		UNION SELECT node_id FROM at_employees WHERE thread_id = $1 AND node_id IS NOT NULL`, t.ID)
+		UNION SELECT node_id FROM at_employees WHERE (thread_id = $1 OR id = ANY($2)) AND node_id IS NOT NULL`, t.ID, ids)
 	if err != nil {
 		return err
 	}
@@ -122,13 +130,14 @@ func (e *Engine) cleanupNode(ctx context.Context, tx *core.Tx, t core.Thread, no
 	return err
 }
 
-// deleteMemberBranches deletes the members' branches in every repository of the project.
+// deleteMemberBranches deletes the branches of the members that worked in the thread in every
+// repository of the project.
 func (e *Engine) deleteMemberBranches(ctx context.Context, t core.Thread) {
 	_, repos, err := e.reposOf(ctx, t.ProjectID)
 	if err != nil {
 		return
 	}
-	emps, err := core.ThreadParticipants(ctx, e.core.Pool, t.ID)
+	emps, err := core.ThreadWorkers(ctx, e.core.Pool, t.ID)
 	if err != nil {
 		return
 	}
@@ -145,10 +154,12 @@ func (e *Engine) deleteBranches(ctx context.Context, t core.Thread, emps []core.
 
 func (e *Engine) deleteBranchesIn(ctx context.Context, t core.Thread, emps []core.Employee, repos []ghops.Repo) {
 	for _, repo := range repos {
+		done := map[string]bool{}
 		for _, m := range emps {
-			if m.Tier != "member" {
+			if m.Tier != "member" || done[m.Name] {
 				continue
 			}
+			done[m.Name] = true
 			if err := e.gh.DeleteRef(ctx, repo, orchestrator.MemberBranch(t.No, m.Name)); err != nil {
 				e.log.Warn("delete member branch", "thread_id", t.ID, "repo", repo.Slug, "member", m.Name, "err", err)
 			}

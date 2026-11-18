@@ -7,6 +7,7 @@ import (
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/engine"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw/nodetest"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -14,7 +15,12 @@ import (
 // sharedTeam is a project with one node and the default roles (dev × 2), no thread yet.
 func sharedTeam(t *testing.T) *team {
 	t.Helper()
-	w := newWorld(t, nil)
+	return sharedTeamWith(t, nil)
+}
+
+func sharedTeamWith(t *testing.T, tune func(*engine.Engine)) *team {
+	t.Helper()
+	w := newWorldWith(t, nil, tune)
 	tm := &team{w: w, b: w.signUp("shared@example.com")}
 	var node nodeCreated
 	tm.b.must(201, "POST", "/api/nodes", map[string]string{"name": "fake"}, &node)

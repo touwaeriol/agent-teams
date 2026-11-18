@@ -148,11 +148,21 @@ func ThreadRepoSets(ctx context.Context, q DB, projectID string) (map[string][]s
 	return out, err
 }
 
+// projectsWithWork selects the projects that have pending tasks in running or waiting threads.
+const projectsWithWork = `SELECT DISTINCT th.project_id FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
+	WHERE t.status = 'pending' AND th.status IN ('running','waiting')`
+
 // ProjectsWithWork lists the projects that have pending tasks in running or waiting threads.
 func ProjectsWithWork(ctx context.Context, q DB) ([]string, error) {
 	var ids []string
-	err := store.Raw(ctx, q, `SELECT DISTINCT th.project_id FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
-		WHERE t.status = 'pending' AND th.status IN ('running','waiting')`).Scan(&ids).Error
+	err := store.Raw(ctx, q, projectsWithWork).Scan(&ids).Error
+	return ids, err
+}
+
+// UserProjectsWithWork is ProjectsWithWork for one user's projects.
+func UserProjectsWithWork(ctx context.Context, q DB, userID string) ([]string, error) {
+	var ids []string
+	err := store.Raw(ctx, q, projectsWithWork+` AND th.user_id = $1`, userID).Scan(&ids).Error
 	return ids, err
 }
 

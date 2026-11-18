@@ -277,7 +277,28 @@ func (s *Service) sendMessage(ctx context.Context, tx *core.Tx, c *call) (Result
 	} else if deliver != "" {
 		text = deliver // the recipient's prompt command, expanded
 	}
-	return okText("sent"), s.pushMail(ctx, tx, to, fmt.Sprintf("[Message from %s]\n%s", c.emp().Name, text))
+	head, err := mailHeader(ctx, tx, t, to, c.emp().Name, "Message", "留言")
+	if err != nil {
+		return Result{}, err
+	}
+	return okText("sent"), s.pushMail(ctx, tx, to, head+"\n"+text)
+}
+
+// mailHeader opens mail pushed to a teammate. A project member working in another thread (or in
+// none) gets it where it is, without switching threads, told which thread it comes from: the mail
+// stays in the sender's thread (shared-members.md §6).
+func mailHeader(ctx context.Context, tx *core.Tx, t core.Thread, to core.Employee, from, kind, kindZh string) (string, error) {
+	if !to.ProjectMember() {
+		return fmt.Sprintf("[%s from %s]", kind, from), nil
+	}
+	th, err := core.WorkThreadOf(ctx, tx, to)
+	if err != nil {
+		return "", err
+	}
+	if th != nil && *th == t.ID {
+		return fmt.Sprintf("[%s from %s]", kind, from), nil
+	}
+	return fmt.Sprintf("[#%d · 来自 %s 的%s]", t.No, from, kindZh), nil
 }
 
 func (s *Service) recipient(ctx context.Context, tx *core.Tx, t core.Thread, from core.Employee, to string) (core.Employee, error) {
@@ -336,14 +357,20 @@ func (s *Service) broadcast(ctx context.Context, tx *core.Tx, c *call) (Result, 
 		if e.Tier != "member" {
 			continue
 		}
-		if err := s.pushMail(ctx, tx, e, fmt.Sprintf("[Broadcast from %s]\n%s", c.emp().Name, in.Text)); err != nil {
+		head, err := mailHeader(ctx, tx, t, e, c.emp().Name, "Broadcast", "广播")
+		if err != nil {
+			return Result{}, err
+		}
+		if err := s.pushMail(ctx, tx, e, head+"\n"+in.Text); err != nil {
 			return Result{}, err
 		}
 	}
 	return okText("sent"), nil
 }
 
-// readMessages returns unread mail (direct and broadcast) and marks it read.
+// readMessages returns the unread mail (direct and broadcast) of the thread the caller works in
+// and marks it read; a project member is also told about unread mail addressed to it in the
+// project's other threads (read there, when it works there).
 func (s *Service) readMessages(ctx context.Context, tx *core.Tx, c *call) (Result, error) {
 	t, err := requireThread(c)
 	if err != nil {
@@ -361,9 +388,31 @@ func (s *Service) readMessages(ctx context.Context, tx *core.Tx, c *call) (Resul
 		lines = append(lines, fmt.Sprintf("%s → %s：%s", m.Sender, m.Recipient, m.Body))
 	}
 	if len(lines) == 0 {
-		return okJSON("没有未读留言", out), nil
+		lines = append(lines, "没有未读留言")
+	}
+	if c.emp().ProjectMember() {
+		other, err := core.UnreadElsewhere(ctx, tx, t.ProjectID, t.ID, c.emp().Name)
+		if err != nil {
+			return Result{}, err
+		}
+		if note := elsewhereNote(other); note != "" {
+			lines = append(lines, note)
+		}
 	}
 	return okJSON(strings.Join(lines, "\n"), out), nil
+}
+
+// elsewhereNote mentions unread mail in other threads ("" when none).
+func elsewhereNote(other []core.ThreadCount) string {
+	if len(other) == 0 {
+		return ""
+	}
+	parts := make([]string, len(other))
+	for i, o := range other {
+		parts[i] = fmt.Sprintf("#%d %d 条", o.No, o.N)
+	}
+	return "其他讨论串还有发给你的未读留言：" + strings.Join(parts, "、") +
+		"（推送到你会话时已标明讨论串；到那个讨论串干活时用 read_messages 查看）"
 }
 
 // setStatus updates the bubble only (§11.3).

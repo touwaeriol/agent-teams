@@ -69,6 +69,20 @@ func ThreadParticipants(ctx context.Context, q DB, threadID string) ([]Employee,
 		sql.Named("t", threadID)).Order(participantOrder))
 }
 
+// ThreadWorkers are the members that worked in a thread, active or not (cleanup removes their
+// branches and checkouts there): the thread's own legacy members and the project members that
+// claimed a task there, opened a session there or work there now. A task claimed under a name a
+// legacy member of the thread holds is that legacy member's.
+func ThreadWorkers(ctx context.Context, q DB, threadID string) ([]Employee, error) {
+	return find[Employee](employees(ctx, q).Where(`tier = 'member' AND (thread_id = @t OR (thread_id IS NULL
+		AND project_id = (SELECT project_id FROM at_threads WHERE id = @t)
+		AND (current_thread_id = @t
+			OR EXISTS (SELECT 1 FROM at_agent_sessions a WHERE a.employee_id = at_employees.id AND a.thread_id = @t)
+			OR (name IN (SELECT DISTINCT x.claimed_by FROM at_tasks x WHERE x.thread_id = @t)
+				AND NOT EXISTS (SELECT 1 FROM at_employees l WHERE l.thread_id = @t AND l.name = at_employees.name)))))`,
+		sql.Named("t", threadID)).Order(participantOrder))
+}
+
 // ThreadTeam is who a thread's lead works with: the thread's own employees and the project's
 // active members of the roles the thread uses (OnlyRoles); a legacy member of the thread hides
 // the project member of the same name.
@@ -175,20 +189,34 @@ func LeaveThread(ctx context.Context, tx *Tx, threadID string) error {
 	return tx.Gorm(ctx).Table("at_employees").Where("current_thread_id = ?", threadID).Update("current_thread_id", nil).Error
 }
 
+// briefSelect renders employees (alias e) as EmployeeBrief rows. thread_no is the employee's
+// own thread (lead, legacy member) or, for a project member, the thread of its claimed / running
+// task, else its current thread; busy_elsewhere compares that task's thread with $1 (the thread
+// the list is for; NULL: never).
+const briefSelect = `SELECT e.id, e.name, e.tier, e.role, COALESCE(e.spec->>'title', ''), e.runtime, t.no,
+	n.id, n.name, e.look, st.state, st.substate, st.bubble, st.bubble_kind, st.task_id, st.task_kind, st.since, st.seq,
+	COALESCE(cur.thread_id <> $1::text, false)
+	FROM at_employees e LEFT JOIN at_threads o ON o.id = e.thread_id
+	LEFT JOIN LATERAL (SELECT x.thread_id FROM at_tasks x JOIN at_threads xt ON xt.id = x.thread_id
+		WHERE e.thread_id IS NULL AND e.tier = 'member' AND xt.project_id = e.project_id AND x.claimed_by = e.name
+		AND x.status IN ('claimed','running') AND xt.status NOT IN ('done','failed','archived')
+		AND NOT EXISTS (SELECT 1 FROM at_employees l WHERE l.thread_id = x.thread_id AND l.name = x.claimed_by)
+		ORDER BY x.claimed_at DESC LIMIT 1) cur ON true
+	LEFT JOIN at_threads t ON t.id = COALESCE(e.thread_id, cur.thread_id, e.current_thread_id)
+	LEFT JOIN at_nodes n ON n.id = e.node_id LEFT JOIN at_employee_status st ON st.employee_id = e.id`
+
 // EmployeeBriefs lists employees of a project (threadID nil = all, else that thread's
-// participants) with status and node.
+// participants, marked busy_elsewhere when their current task is in another thread) with
+// status and node.
 func (s *Store) EmployeeBriefs(ctx context.Context, q DB, projectID string, threadID *string) ([]EmployeeBrief, error) {
 	ids, err := participantIDs(ctx, q, threadID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := store.Query(ctx, q, `SELECT e.id, e.name, e.tier, e.role, COALESCE(e.spec->>'title', ''), e.runtime, t.no,
-		n.id, n.name, e.look, st.state, st.substate, st.bubble, st.bubble_kind, st.task_id, st.task_kind, st.since, st.seq
-		FROM at_employees e LEFT JOIN at_threads t ON t.id = e.thread_id LEFT JOIN at_nodes n ON n.id = e.node_id
-		LEFT JOIN at_employee_status st ON st.employee_id = e.id
-		WHERE e.project_id = $1 AND e.active AND ($2 OR e.id = ANY($3))
-		ORDER BY (e.thread_id IS NULL AND e.tier = 'member'), t.no NULLS FIRST, CASE e.tier WHEN 'coordinator' THEN 0 WHEN 'lead' THEN 1 ELSE 2 END, e.role, e.instance_no`,
-		projectID, threadID == nil, ids)
+	rows, err := store.Query(ctx, q, briefSelect+`
+		WHERE e.project_id = $2 AND e.active AND ($1::text IS NULL OR e.id = ANY($3))
+		ORDER BY (e.thread_id IS NULL AND e.tier = 'member'), o.no NULLS FIRST, CASE e.tier WHEN 'coordinator' THEN 0 WHEN 'lead' THEN 1 ELSE 2 END, e.role, e.instance_no`,
+		threadID, projectID, ids)
 	return collect(rows, err, s.scanBrief)
 }
 
@@ -207,10 +235,7 @@ func participantIDs(ctx context.Context, q DB, threadID *string) ([]string, erro
 
 // EmployeeBriefOf renders one employee.
 func (s *Store) EmployeeBriefOf(ctx context.Context, q DB, employeeID string) (EmployeeBrief, error) {
-	row := store.QueryRow(ctx, q, `SELECT e.id, e.name, e.tier, e.role, COALESCE(e.spec->>'title', ''), e.runtime, t.no,
-		n.id, n.name, e.look, st.state, st.substate, st.bubble, st.bubble_kind, st.task_id, st.task_kind, st.since, st.seq
-		FROM at_employees e LEFT JOIN at_threads t ON t.id = e.thread_id LEFT JOIN at_nodes n ON n.id = e.node_id
-		LEFT JOIN at_employee_status st ON st.employee_id = e.id WHERE e.id = $1`, employeeID)
+	row := store.QueryRow(ctx, q, briefSelect+` WHERE e.id = $2`, nil, employeeID)
 	b, err := s.scanBrief(row)
 	return b, MapErr(err)
 }
@@ -221,7 +246,7 @@ func (s *Store) scanBrief(r Scanner) (EmployeeBrief, error) {
 	var since *time.Time
 	var seq *int64
 	err := r.Scan(&b.ID, &b.Name, &b.Tier, &b.Role, &b.Title, &b.Runtime, &b.ThreadNo, &nodeID, &nodeName, &b.Look,
-		&state, &sub, &bubble, &bk, &taskID, &taskKind, &since, &seq)
+		&state, &sub, &bubble, &bk, &taskID, &taskKind, &since, &seq, &b.BusyElsewhere)
 	if err != nil {
 		return b, err
 	}

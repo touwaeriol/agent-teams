@@ -142,6 +142,23 @@ func PeekUnread(ctx context.Context, q DB, threadID, name string) ([]Mail, error
 		AND NOT jsonb_exists(read_by, ?)`, threadID, name, name, name).Order("id"))
 }
 
+// ThreadCount is a count per thread number.
+type ThreadCount struct {
+	No int
+	N  int
+}
+
+// UnreadElsewhere counts the unread mail addressed to a project member in the project's other
+// threads that are not over, by thread number (a thread whose legacy member holds the name is
+// that member's).
+func UnreadElsewhere(ctx context.Context, q DB, projectID, threadID, name string) ([]ThreadCount, error) {
+	return rawAll[ThreadCount](ctx, q, `SELECT th.no, count(*) AS n FROM at_mail m JOIN at_threads th ON th.id = m.conversation_id
+		WHERE th.project_id = $1 AND th.id <> $2 AND th.status NOT IN ('done','failed','archived')
+		AND m.recipient = $3 AND NOT jsonb_exists(m.read_by, $3)
+		AND NOT EXISTS (SELECT 1 FROM at_employees l WHERE l.thread_id = th.id AND l.name = $3)
+		GROUP BY th.no ORDER BY th.no`, projectID, threadID, name)
+}
+
 // MailPage pages a thread's mail newest first before the id cursor.
 func MailPage(ctx context.Context, q DB, threadID string, before int64, limit int) ([]Mail, error) {
 	g := q.Gorm(ctx).Where("conversation_id = ?", threadID)

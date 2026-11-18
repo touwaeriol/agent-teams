@@ -290,6 +290,37 @@ func TestThreadParticipants(t *testing.T) {
 	}
 }
 
+// TestThreadWorkers: cleanup covers the members that worked in a thread, retired ones too
+// (claimed a task, opened a session there), and its legacy members, but not its lead nor a
+// project member hidden by a legacy member of its name.
+func TestThreadWorkers(t *testing.T) {
+	w := newStaffWorld(t)
+	w.ensure(member("dev", 4))
+	a, b := w.thread("a"), w.thread("b")
+	w.task(a, "dev-1", "done")
+	w.task(b, "dev-2", "running")
+	dev4, _ := ProjectMemberByName(w.ctx, w.s.Pool, "p1", "dev-4")
+	w.tx(func(tx *Tx) error {
+		_, err := InsertSession(w.ctx, tx, NewSession{EmployeeID: dev4.ID, NodeID: "n1", Runtime: "claude", Cwd: "x", ThreadID: &a.ID})
+		return err
+	})
+	w.legacy(a, "dev-3")
+	w.task(a, "dev-3", "done")
+	w.ensure(member("dev", 1)) // dev-4 retires; it still worked in a
+	list, err := ThreadWorkers(w.ctx, w.s.Pool, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, len(list))
+	for i, e := range list {
+		got[i] = fmt.Sprintf("%s:%v:%v", e.Name, e.ThreadID != nil, e.Active)
+	}
+	sort.Strings(got)
+	if strings.Join(got, " ") != "dev-1:false:true dev-3:true:true dev-4:false:false" {
+		t.Fatalf("workers of a: %v", got)
+	}
+}
+
 func names(t *testing.T, w *staffWorld, threadID string) string {
 	t.Helper()
 	list, err := ThreadParticipants(w.ctx, w.s.Pool, threadID)

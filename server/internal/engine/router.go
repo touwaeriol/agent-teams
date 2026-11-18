@@ -71,8 +71,19 @@ func (r *router) other(ctx context.Context, node store.Node, typ string, body an
 	return nil
 }
 
-// NodeOnline implements nodegw.Handler.
-func (r *router) NodeOnline(ctx context.Context, node store.Node) { r.nodeChanged(ctx, node, true) }
+// NodeOnline implements nodegw.Handler: besides the state change, the owner's projects with
+// queued work get a scheduling pass (shared-members.md §4).
+func (r *router) NodeOnline(ctx context.Context, node store.Node) {
+	r.nodeChanged(ctx, node, true)
+	ids, err := core.UserProjectsWithWork(ctx, r.e.Core.Pool, node.UserID)
+	if err != nil {
+		r.e.log.Warn("projects with work", "node_id", node.ID, "err", err)
+		return
+	}
+	for _, id := range ids {
+		r.e.Sched.Kick(ctx, id)
+	}
+}
 
 // NodeOffline implements nodegw.Handler.
 func (r *router) NodeOffline(ctx context.Context, node store.Node) { r.nodeChanged(ctx, node, false) }
