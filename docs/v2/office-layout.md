@@ -101,7 +101,7 @@ threadPods
 ├─ layout        mode=grid、gap、columns、use（按可见讨论串数挑模板）、overflow、order、show
 ├─ seating       组长坐哪张桌、成员入座顺序、桌子属于哪一排
 ├─ threadColors  讨论串颜色轮换
-└─ fadeMs        讨论串结束后工作台淡出的时长（组长起身走出去的这段时间，默认 3000）
+└─ fadeMs        讨论串结束后工作台淡出的时长（默认 3000；组长走到门口比这久时，工作台等组长出门再撤）
 ```
 
 **实例化算法**（前端 `office/compile.ts`，纯函数，输入布局 + 讨论串列表，输出场景）：
@@ -116,7 +116,7 @@ threadPods
 
 **参与者**：成员（不含组长）里当前状态带 `task_id`、且所在讨论串（`thread_no`）是这张工作台的，按名字排在 `participants` 头像条上（讨论串颜色的小方块 + 头部像素）。
 
-**讨论串结束**：网页发现一个讨论串从可见列表里消失（结束、归档、删除），把它和它的组长再保留 `fadeMs`：工作台在动态层按时间淡出，组长播 `threadEnded` 序列（§4.9）。新出现的讨论串播 `threadOpened`（统筹走过去“放一张新工作台”）。翻页、聚焦、热更新都不算新出现。
+**讨论串结束**：网页发现一个讨论串从可见列表里消失（结束、归档、删除），把它和它的组长再保留 `fadeMs`、并且直到组长的 `threadEnded` 序列把他藏起来或播完（最多再等 30 秒）：工作台在动态层按时间淡出，组长播 `threadEnded` 序列（§4.9）。淡出期间讨论串又回来（恢复、重新打开）：组长停下序列走回座位；再结束时重新计时。新出现的讨论串播 `threadOpened`（统筹走过去“放一张新工作台”）。翻页、聚焦、热更新都不算新出现。
 
 示例里：一排最多 4 张 164 × 132 的工作台（组长小桌 + 放参与者头像的工作台），更多则分页。
 
@@ -193,7 +193,7 @@ staffArea
 
 **动画序列**（`states.sequences`）：一次状态变化触发一段固定的小剧情。示例 `claim`：收到 `claiming` 且 `cause` 以 `task.claimed` 开头时，人物走到 `anchor:boardClaim` → 停 1.5 s（气泡“领取 t8 计划与子任务展示”，`{taskId}` `{taskTitle}` 由前端从任务缓存填入）→ 走回座位；序列结束后再应用该员工**当前最新**的状态（序列播放期间到达的状态先排队，只保留最后一个）。
 
-场景事件也能触发序列：`trigger.event = "threadOpened"`（新工作台出现，默认由统筹播放）或 `"threadEnded"`（讨论串结束，默认由它的组长播放），`trigger.tier` 可改播放者。步骤里 `goto: "pod"` 走到那张工作台的访客位，`hide: true` 之后这个人不再画出（组长走出办公室），气泡模板多了 `{threadNo} {threadTitle}`。示例：
+场景事件也能触发序列：`trigger.event = "threadOpened"`（新工作台出现，默认由统筹播放）或 `"threadEnded"`（讨论串结束，默认由它的组长播放），`trigger.tier` 可改播放者。步骤里 `goto: "pod"` 走到那张工作台的访客位，`hide: true` 之后这个人不再画出：`threadEnded` 序列里是组长走出办公室，直到他的工作台回来（讨论串恢复）才再画出；状态触发的序列里只藏到这段序列结束（被新状态打断、回放跳转也会让他重新出现），不会把人永久藏掉，气泡模板多了 `{threadNo} {threadTitle}`。示例：
 
 - `openThread`：统筹走到新工作台（“给 #15 放一张工作台”）→ 停 1.5 s（“#15 落地页改版 开工”）→ 序列结束后按规则回办公室。
 - `leaveThread`：组长起身（“#12 收工”）→ 走到 `anchor:exit`（开发区东北角的走廊口）→ 消失；工作台在 `fadeMs` 内淡出。
@@ -217,7 +217,7 @@ staffArea
 load.ts       拉布局（ETag 缓存）→ JSON Schema 校验（ajv，与后端同一份 Schema）→ 解析 extends / palette / shade()
 compile.ts    纯函数：布局 + 可见讨论串 + 员工 → Scene（房间、家具、小部件实例、pod 实例、工位、座位表、合并后的路网）
 staff.ts      工位区：按岗位分排、溢出（scale / stack）、每排走道节点
-leaving.ts    刚结束的讨论串和它的组长保留 fadeMs（淡出 + 组长离开）
+leaving.ts    刚结束的讨论串和它的组长保留到淡出结束、组长出门（每个讨论串一个计时器，恢复即撤）
 looks.ts      形象解析与像素图合成（ImageBitmap 缓存），Team 页预览也用它
 nav.ts        A* 与路径插值
 director.ts   状态 → 规则匹配 → 目标位置/动画/屏幕色/气泡；序列播放；锚点占位分配

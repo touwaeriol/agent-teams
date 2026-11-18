@@ -244,7 +244,7 @@ export const Office = defineComponent({
     watch(() => layout.value.fonts?.googleFonts, loadGoogleFonts, { immediate: true });
 
     // Threads that just ended stay (fading) while their leads walk out.
-    const leaving = useLeaving(() => layout.value, () => toRaw(props.threads), () => toRaw(props.employees));
+    const leaving = useLeaving(() => layout.value, () => toRaw(props.threads), () => toRaw(props.employees), (id) => director.hasLeft(id));
     const input = () => withLeaving(toRaw(props.threads), toRaw(props.employees), leaving.value);
     // Recompile only when what the scene depends on changes (not on every new array identity).
     const rosterKey = computed(() => signature(props.employees, (e) => [e.id, e.name, e.thread_no, e.tier, e.role, e.sort, e.instance]));

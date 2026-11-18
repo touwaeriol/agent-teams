@@ -21,6 +21,14 @@ export function addEdge(g: NavGraph, a: string, b: string): void {
   g.adj.get(b)!.add(a);
 }
 
+/** People stacked past the last free spot stand this far apart (scene px, on both axes). */
+export const STACK_STEP = 6;
+
+/** The k-th point (k ≥ 1) stacked diagonally after `last`. */
+export function stacked(last: Point, k: number): Point {
+  return [last[0] + k * STACK_STEP, last[1] + k * STACK_STEP];
+}
+
 export function dist(a: Point, b: Point): number {
   return Math.hypot(a[0] - b[0], a[1] - b[1]);
 }

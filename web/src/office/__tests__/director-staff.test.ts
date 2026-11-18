@@ -110,6 +110,44 @@ describe("Director · thread tables opening and closing", () => {
     expect(d.actor("lead-12")!.hidden).toBe(false);
   });
 
+  it("a thread resumed while its lead walks out: the lead turns back and stays visible", () => {
+    const { d, compile, run } = setup([twelve]);
+    d.setScene(compile({ leaving: new Map([[12, 0]]) }));
+    run(1500);
+    expect(d.actor("lead-12")!.walking).toBe(true);
+    expect(d.hasLeft("lead-12")).toBe(false);
+    d.setScene(compile());
+    run(30000);
+    expect(d.actor("lead-12")).toMatchObject({ hidden: false, pos: [48, 108] });
+    expect(d.busy).toBe(false);
+  });
+
+  it("hasLeft: only once the threadEnded sequence hid the lead (or never ran)", () => {
+    const { d, compile, run } = setup([twelve]);
+    expect(d.hasLeft("lead-12")).toBe(true);
+    d.setScene(compile({ leaving: new Map([[12, 0]]) }));
+    expect(d.hasLeft("lead-12")).toBe(false);
+    run(30000);
+    expect(d.hasLeft("lead-12")).toBe(true);
+    expect(d.hasLeft("nobody")).toBe(true);
+  });
+
+  it("hide in a status sequence lasts until that sequence ends; reset shows everyone again", () => {
+    const { layout, d, compile, run } = setup([twelve]);
+    layout.states.sequences = { ...layout.states.sequences, coffee: { trigger: { state: "thinking" }, steps: [{ hide: true }, { wait: 500 }] } };
+    d.setScene(compile());
+    d.apply("dev-2", { state: "thinking" });
+    expect(d.actor("dev-2")!.hidden).toBe(true);
+    run(1000);
+    expect(d.actor("dev-2")!.hidden).toBe(false);
+
+    d.setScene(compile({ leaving: new Map([[12, 0]]) }));
+    run(30000);
+    expect(d.actor("lead-12")!.hidden).toBe(true);
+    d.reset(new Map());
+    expect(d.actor("lead-12")!.hidden).toBe(false);
+  });
+
   it("page flips, focus and hot reloads are not openings", () => {
     const { compile } = setup([twelve, thirteen]);
     expect(sceneEvents(compile(), compile({ focus: 13 }))).toEqual([]);

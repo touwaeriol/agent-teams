@@ -3,7 +3,7 @@
 // table and merged graph. Members sit at their own staff desk (shared-members.md
 // §9); a thread's table seats its lead (and visiting members with
 // `members.visitPods`). Layouts without `staffArea` seat members in the pods.
-import { addEdge, addNode, createGraph, nearestNode, type NavGraph } from "./nav";
+import { addEdge, addNode, createGraph, nearestNode, stacked, type NavGraph } from "./nav";
 import { sortMembers } from "./people";
 import { placeStaff } from "./staff";
 import { fitTemplate } from "./template";
@@ -98,9 +98,12 @@ export interface CompileInput {
   leaving?: Map<number, number>;
 }
 
-const STACK_STEP = 6;
-
 export { instanceOf, sortMembers } from "./people";
+
+/** How long an ended thread's table fades out (`threadPods.fadeMs`). */
+export function fadeMsOf(layout: OfficeLayout): number {
+  return layout.threadPods.fadeMs ?? 3000;
+}
 
 export function compileScene(layout: OfficeLayout, input: CompileInput): Scene {
   const tp = layout.threadPods;
@@ -324,8 +327,7 @@ function seatPod(layout: OfficeLayout, pod: PodInstance, members: OfficeEmployee
 function overflowPoint(points: Point[], i: number, pod: PodInstance): Point {
   if (i < points.length) return points[i];
   const last = points[points.length - 1] ?? [pod.rect[0] + pod.rect[2] - 40, pod.rect[1] + pod.rect[3] - 70];
-  const k = i - points.length + 1;
-  return [last[0] + k * STACK_STEP, last[1] + k * STACK_STEP];
+  return stacked(last, i - points.length + 1);
 }
 
 function seatAccess(layout: OfficeLayout, tpl: PodTemplate, pod: PodInstance, deskId: string, seat: Point, g: NavGraph): string | undefined {

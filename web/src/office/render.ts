@@ -2,7 +2,7 @@
 // pod frames, furniture) drawn once per scene, and a dynamic layer per frame
 // (desk screens, rack LEDs, people). Pixel crisp: smoothing off.
 import { colorOr, resolveColor, type ColorContext } from "./color";
-import type { DeskInstance, PlacedSprite, PodInstance, Scene } from "./compile";
+import { fadeMsOf, type DeskInstance, type PlacedSprite, type PodInstance, type Scene } from "./compile";
 import type { ActorView, DeskState } from "./director";
 import { frameBitmap, type ResolvedLook, type SpriteBitmap } from "./looks";
 import { isMember } from "./people";
@@ -288,7 +288,7 @@ export interface DynamicInput {
 export function drawDynamic(ctx: Ctx, input: DynamicInput): void {
   const { scene } = input;
   ctx.clearRect(0, 0, scene.width, scene.height);
-  const fadeMs = scene.layout.threadPods.fadeMs ?? 3000;
+  const fadeMs = fadeMsOf(scene.layout);
   for (const pod of scene.pods) if (pod.leaving !== undefined) drawPodStatic(ctx, scene, pod, input.view, leaveAlpha(pod.leaving, input.time, fadeMs));
   for (const d of scene.desks.values()) drawDeskDynamic(ctx, input, d);
   for (const [pod, people] of participantsByPod(scene, input.actors)) drawParticipants(ctx, input, pod, people);
@@ -302,7 +302,7 @@ function drawDeskDynamic(ctx: Ctx, input: DynamicInput, d: DeskInstance): void {
   const color = palette(input.scene.layout);
   const slots = deskSlots(input.scene, d, input.desks.get(d.key));
   const pod = d.threadNo === undefined ? undefined : input.scene.pods.find((p) => p.threadNo === d.threadNo);
-  const fade = pod?.leaving === undefined ? 1 : leaveAlpha(pod.leaving, input.time, input.scene.layout.threadPods.fadeMs ?? 3000);
+  const fade = pod?.leaving === undefined ? 1 : leaveAlpha(pod.leaving, input.time, fadeMsOf(input.scene.layout));
   ctx.globalAlpha = fade * dimFor(input.scene.layout, input.view.focus, d.threadNo ?? input.desks.get(d.key)?.thread);
   drawSprite(ctx, d.sprite, d.at, { ...color, slots }, { scale: d.scale, only: "dynamic", runtime: runtimeSlots(d) });
   ctx.globalAlpha = 1;
@@ -335,7 +335,7 @@ export function stripPoint(strip: NonNullable<PodInstance["participants"]>, i: n
 function drawParticipants(ctx: Ctx, input: DynamicInput, pod: PodInstance, people: ActorView[]): void {
   const strip = pod.participants!;
   const layout = input.scene.layout;
-  ctx.globalAlpha = dimFor(layout, input.view.focus, pod.threadNo) * (pod.leaving === undefined ? 1 : leaveAlpha(pod.leaving, input.time, layout.threadPods.fadeMs ?? 3000));
+  ctx.globalAlpha = dimFor(layout, input.view.focus, pod.threadNo) * (pod.leaving === undefined ? 1 : leaveAlpha(pod.leaving, input.time, fadeMsOf(layout)));
   stripSlots(people, strip.max).shown.forEach((a, i) => {
     const [x, y] = stripPoint(strip, i);
     ctx.fillStyle = pod.color;

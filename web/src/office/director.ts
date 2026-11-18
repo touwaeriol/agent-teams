@@ -3,7 +3,7 @@
 // the graph; scripted sequences such as "claim". Pure logic, no DOM.
 import type { PodInstance, Scene } from "./compile";
 import { hashString } from "./looks";
-import { advance, dist, route } from "./nav";
+import { advance, dist, route, stacked } from "./nav";
 import { workThread } from "./people";
 import { bubbleFor, eventSequences, matchRule, sequenceFor, subjectOf, toMs, type Bubble } from "./rules";
 import { fillTemplate } from "./template";
@@ -25,6 +25,8 @@ interface SeqRun {
   pending?: EmployeeStatus;
   /** The thread a scene-event sequence is about (place `pod`, bubble {threadNo}). */
   threadNo?: number;
+  /** The scene event that started it (none: a status sequence). */
+  event?: SceneEvent;
 }
 
 interface Actor {
@@ -43,7 +45,10 @@ interface Actor {
   flip: boolean;
   bubble?: Bubble;
   seq?: SeqRun;
-  /** Left the office (a sequence step `hide`): not drawn until its table is back. */
+  /**
+   * Not drawn (a sequence step `hide`): after a threadEnded sequence the lead left the office
+   * until its table is back; in a status sequence only until that sequence ends.
+   */
   gone?: boolean;
 }
 
@@ -85,7 +90,6 @@ export interface DirectorOptions {
 
 const IDLE: EmployeeStatus = { state: "idle" };
 const BEHIND = 24;
-const STACK = 6;
 
 export class Director {
   private scene: Scene;
@@ -123,9 +127,17 @@ export class Director {
     this.occupancy.clear();
     for (const a of this.claimOrder()) this.rehome(a);
     this.preferred = undefined;
+    for (const a of this.actorsById.values()) if (this.tableIsBack(a)) this.comeBack(a);
     for (const [event, pod] of sceneEvents(prev, scene)) this.playEvent(event, pod);
-    for (const a of this.actorsById.values()) if (a.gone && this.tableIsBack(a)) a.gone = false;
     this.version++;
+  }
+
+  /** The thread resumed while its lead was leaving (or after it left): stop leaving and walk back. */
+  private comeBack(a: Actor): void {
+    a.gone = false;
+    if (a.seq?.event !== "threadEnded") return;
+    a.status = this.stopSequence(a);
+    this.applyRule(a, false);
   }
 
   /** A new work table (threadOpened) or an ended thread (threadEnded): the layout's sequence for it. */
@@ -135,15 +147,22 @@ export class Director {
       for (const a of this.actorsById.values()) {
         const e = a.employee;
         if (e.tier !== tier || a.seq || (tier !== "coordinator" && e.thread_no !== pod.threadNo)) continue;
-        this.startSequence(a, seq.steps, pod.threadNo);
+        this.startSequence(a, seq.steps, pod.threadNo, event);
       }
     }
   }
 
-  /** Someone who left has a (non-leaving) table again, e.g. the thread resumed. */
+  /** Someone who left (or is leaving) has a (non-leaving) table again, e.g. the thread resumed. */
   private tableIsBack(a: Actor): boolean {
+    if (!a.gone && a.seq?.event !== "threadEnded") return false;
     const table = this.tableOf(a);
     return Boolean(table) && table!.leaving === undefined;
+  }
+
+  /** The person is out (its threadEnded sequence hid it or is over, or it never played one): an ended table can go. */
+  hasLeft(id: string): boolean {
+    const a = this.actorsById.get(id);
+    return !a || Boolean(a.gone) || a.seq?.event !== "threadEnded";
   }
 
   private tableOf(a: Actor, no = a.employee.thread_no): PodInstance | undefined {
@@ -157,8 +176,7 @@ export class Director {
     if (a.seq) {
       const place = this.resolvePlace(a, a.destPlace ?? "seat");
       if (samePlace(prev, place)) return void (a.dest = place);
-      a.status = a.seq.pending ?? a.status;
-      a.seq = undefined;
+      a.status = this.stopSequence(a);
       return this.applyRule(a, true);
     }
     const rule = matchRule(this.layout.states.rules, subjectOf(a.status, a.employee));
@@ -216,7 +234,7 @@ export class Director {
       a.seq.pending = status;
       return;
     }
-    a.seq = undefined;
+    this.stopSequence(a);
     a.status = status;
     const seq = instant ? undefined : sequenceFor(this.layout.states.sequences, status);
     if (seq) return this.startSequence(a, seq.steps);
@@ -229,6 +247,7 @@ export class Director {
     for (const a of this.claimOrder()) {
       a.claim = undefined;
       a.seq = undefined;
+      a.gone = false;
       a.status = statuses.get(a.employee.id) ?? a.employee.status ?? IDLE;
       this.applyRule(a, true);
     }
@@ -338,8 +357,8 @@ export class Director {
     a.animStart = (this.opts.clock ?? this.opts.now)();
   }
 
-  private startSequence(a: Actor, steps: SequenceStep[], threadNo?: number): void {
-    a.seq = { steps, index: -1, waitLeft: 0, threadNo };
+  private startSequence(a: Actor, steps: SequenceStep[], threadNo?: number, event?: SceneEvent): void {
+    a.seq = { steps, index: -1, waitLeft: 0, threadNo, event };
     this.nextStep(a);
   }
 
@@ -370,10 +389,16 @@ export class Director {
   }
 
   private endSequence(a: Actor): void {
-    const latest = a.seq?.pending ?? a.status;
-    a.seq = undefined;
-    a.status = latest;
+    a.status = this.stopSequence(a);
     this.applyRule(a, false);
+  }
+
+  /** Drops the running sequence and returns the status to go on with; `hide` lasts past it only for threadEnded. */
+  private stopSequence(a: Actor): EmployeeStatus {
+    const run = a.seq;
+    a.seq = undefined;
+    if (run?.event !== "threadEnded") a.gone = false;
+    return run?.pending ?? a.status;
   }
 
   /** Advances walks and sequence waits by `dtMs` (already scaled by replay speed). Returns true while anything moves. */
@@ -492,6 +517,5 @@ export function anchorPoint(anchor: Scene["anchors"][string], index: number, id:
     const h = hashString(`${id}:${index}`);
     return [p[0] + ((h % 25) - 12), p[1] + (((h >> 8) % 17) - 8)];
   }
-  const last = pts[pts.length - 1];
-  return [last[0] + STACK * (extra + 1), last[1] + STACK * (extra + 1)];
+  return stacked(pts[pts.length - 1], extra + 1);
 }

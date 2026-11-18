@@ -1,7 +1,7 @@
 // Staff desks (shared-members.md §9, office-layout.md §4.5): every project member has a fixed
 // desk in `staffArea`, rows by role in role-template order, then by instance. Pure.
 import type { DeskInstance, SeatAssignment } from "./compile";
-import { addEdge, addNode, type NavGraph } from "./nav";
+import { addEdge, addNode, stacked, type NavGraph } from "./nav";
 import { isMember, sortMembers } from "./people";
 import type { OfficeEmployee, OfficeLayout, Point, StaffArea } from "./types";
 
@@ -18,7 +18,6 @@ export interface StaffPlacement {
 }
 
 const MIN_SCALE = 0.5;
-const STACK_STEP = 6;
 
 export const staffDeskKey = (employeeId: string): string => `staff.${employeeId}`;
 export const staffRowNode = (row: number): string => `staff.row${row}`;
@@ -120,7 +119,7 @@ function stackExtra(area: StaffArea, out: StaffPlacement, plan: StaffPlan): void
   const last = [...out.desks.values()].pop();
   const base: Point = last?.seat ?? [area.rect[0], area.rect[1]];
   const node = plan.rows.length ? staffRowNode(plan.rows.length - 1) : area.nav.entry;
-  plan.extra.forEach((e, i) => out.seats.set(e.id, { point: [base[0] + (i + 1) * STACK_STEP, base[1] + (i + 1) * STACK_STEP], accessNode: node }));
+  plan.extra.forEach((e, i) => out.seats.set(e.id, { point: stacked(base, i + 1), accessNode: node }));
 }
 
 function round2(v: number): number {
