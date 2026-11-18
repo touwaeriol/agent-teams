@@ -13,8 +13,8 @@ const MaxFocus = 2000
 // DevFocus is what a writing member's compaction keeps by default (shared-members.md §5.2).
 const DevFocus = "保留当前任务 id、分支、改过的文件、做过的决定、还没做完的事和已知的坑"
 
-// ContextPolicy is a role's session-management settings (shared-members.md §5.1).
-type ContextPolicy struct {
+// contextPolicy is a role's session-management settings (shared-members.md §5.1).
+type contextPolicy struct {
 	Limit      *int
 	BetweenPct *int
 	InTaskPct  *int
@@ -22,38 +22,38 @@ type ContextPolicy struct {
 	Focus      string
 }
 
-// ContextDefaults are the settings a role of this kind starts with: writing members 60 / 80 / 8,
+// contextDefaults are the settings a role of this kind starts with: writing members 60 / 80 / 8,
 // review and decision gates — / 80 / 1 (every task in a fresh session), lead and coordinator — / 70 / —.
-func ContextDefaults(tier, gate string) ContextPolicy {
+func contextDefaults(tier, gate string) contextPolicy {
 	switch {
 	case tier != Member:
-		return ContextPolicy{InTaskPct: ptr(70)}
+		return contextPolicy{InTaskPct: ptr(70)}
 	case gate == "review" || gate == "decision":
-		return ContextPolicy{InTaskPct: ptr(80), ClearAfter: ptr(1)}
+		return contextPolicy{InTaskPct: ptr(80), ClearAfter: ptr(1)}
 	}
-	return ContextPolicy{BetweenPct: ptr(60), InTaskPct: ptr(80), ClearAfter: ptr(8), Focus: DevFocus}
+	return contextPolicy{BetweenPct: ptr(60), InTaskPct: ptr(80), ClearAfter: ptr(8), Focus: DevFocus}
 }
 
-// PolicyOf reads a role's settings.
-func PolicyOf(r store.Role) ContextPolicy {
-	return ContextPolicy{Limit: r.ContextLimit, BetweenPct: r.CompactBetweenPct, InTaskPct: r.CompactInTaskPct,
+// policyOf reads a role's settings.
+func policyOf(r store.Role) contextPolicy {
+	return contextPolicy{Limit: r.ContextLimit, BetweenPct: r.CompactBetweenPct, InTaskPct: r.CompactInTaskPct,
 		ClearAfter: r.ClearAfterTasks, Focus: r.CompactFocus}
 }
 
-func (p ContextPolicy) apply(r *store.Role) {
+func (p contextPolicy) apply(r *store.Role) {
 	r.ContextLimit, r.CompactBetweenPct, r.CompactInTaskPct, r.ClearAfterTasks, r.CompactFocus =
 		p.Limit, p.BetweenPct, p.InTaskPct, p.ClearAfter, p.Focus
 }
 
-func (p ContextPolicy) unset() bool {
+func (p contextPolicy) unset() bool {
 	return p.Limit == nil && p.BetweenPct == nil && p.InTaskPct == nil && p.ClearAfter == nil && p.Focus == ""
 }
 
 // normalizeContext gives a new role without any setting its kind's defaults; the lead and the
 // coordinator never claim queued tasks, so they have no between-task compaction or clear count.
 func normalizeContext(r *store.Role) {
-	if r.ID == "" && PolicyOf(*r).unset() {
-		ContextDefaults(r.Tier, r.Gate).apply(r)
+	if r.ID == "" && policyOf(*r).unset() {
+		contextDefaults(r.Tier, r.Gate).apply(r)
 	}
 	if r.Tier != Member {
 		r.CompactBetweenPct, r.ClearAfterTasks = nil, nil
@@ -84,16 +84,16 @@ type yamlContext struct {
 }
 
 // contextFromYAML: a role without a context: block gets its kind's defaults.
-func contextFromYAML(y *yamlContext, tier, gate string) ContextPolicy {
+func contextFromYAML(y *yamlContext, tier, gate string) contextPolicy {
 	if y == nil {
-		return ContextDefaults(tier, gate)
+		return contextDefaults(tier, gate)
 	}
-	return ContextPolicy{Limit: y.Limit, BetweenPct: y.CompactBetweenPct, InTaskPct: y.CompactInTaskPct,
+	return contextPolicy{Limit: y.Limit, BetweenPct: y.CompactBetweenPct, InTaskPct: y.CompactInTaskPct,
 		ClearAfter: y.ClearAfterTasks, Focus: y.Focus}
 }
 
 func contextToYAML(r store.Role) *yamlContext {
-	p := PolicyOf(r)
+	p := policyOf(r)
 	if p.unset() {
 		return nil
 	}
