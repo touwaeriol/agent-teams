@@ -141,12 +141,12 @@ function onKey(e: KeyboardEvent) {
       />
     </div>
     <div class="flex items-center justify-between gap-2 px-3 pb-3 pt-1.5">
-      <span class="flex min-w-0 items-center gap-2">
+      <span class="flex min-w-0 flex-1 items-center gap-2">
         <PlusMenu v-if="assist.enabled.value" :assist="assist" :a="attachments" />
-        <span class="min-w-0 text-xs text-muted-foreground"><slot name="hint">{{ hint }}</slot></span>
+        <span class="min-w-0 truncate text-xs text-muted-foreground" data-testid="composer-hint"><slot name="hint">{{ hint }}</slot></span>
         <ModelTag v-if="props.assist?.cid" :cid="props.assist.cid" />
       </span>
-      <span class="flex items-center gap-2">
+      <span class="flex shrink-0 items-center gap-2">
         <AttachButton v-if="attachments && !assist.enabled.value" :a="attachments" />
         <slot name="extra" />
         <VoiceButton v-if="voice.enabled.value" :v="voice" />

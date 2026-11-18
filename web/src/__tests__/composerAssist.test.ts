@@ -127,10 +127,10 @@ function stubApi() {
   });
 }
 
-function mountComposer(onSend: ReturnType<typeof vi.fn>, variant: "inline" | "large" = "inline") {
+function mountComposer(onSend: ReturnType<typeof vi.fn>, variant: "inline" | "large" = "inline", scope: "lead" | "coordinator" = "lead") {
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/:p(.*)*", component: { render: () => null } }] });
   const w = mount(Composer, {
-    props: { label: "发给组长", placeholder: "x", onSend: onSend as never, variant, hint: "提示", assist: { pid: "p1", cid: "c1", scope: "lead" } },
+    props: { label: "发给组长", placeholder: "x", onSend: onSend as never, variant, hint: "提示", assist: { pid: "p1", cid: "c1", scope } },
     global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }], router] as never[] },
     attachTo: document.body,
   });
@@ -209,6 +209,27 @@ describe("Composer with assist", () => {
     expect(tag.attributes("title")).toBe("当前模型：Opus 5.5，统筹和组长使用默认模型，不能切换");
     expect(tag.attributes("aria-label")).toBe(tag.attributes("title"));
     expect(tag.element.closest("button, [role=combobox], select")).toBeNull();
+  });
+
+  it("has no /model in the coordinator's / menu", async () => {
+    stubApi();
+    const { w } = mountComposer(vi.fn(), "large", "coordinator");
+    const input = w.get("textarea");
+    await input.setValue("/");
+    await settle();
+    const all = w.findAll("[role=option]").map((o) => o.text());
+    expect(all.length).toBeGreaterThan(0);
+    expect(all.some((o) => o.includes("/model"))).toBe(false);
+  });
+
+  it("keeps the hint on one truncated line and never squeezes the model tag", async () => {
+    stubApi();
+    const { w } = mountComposer(vi.fn(), "large");
+    await settle(10);
+    const hint = w.get("[data-testid=composer-hint]");
+    expect(hint.classes()).toEqual(expect.arrayContaining(["truncate", "min-w-0"]));
+    expect(hint.element.parentElement!.classList).toContain("min-w-0");
+    expect(w.get("[data-testid=composer-model]").classes()).toContain("shrink-0");
   });
 
   it("shows no model tag when the conversation's model is not known", async () => {

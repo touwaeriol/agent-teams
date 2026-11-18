@@ -338,7 +338,8 @@ const routes = [
   ["GET", /^\/api\/conversations\/([^/]+)\/messages$/, (req, res, [cid]) => json(res, 200, page(state.messages[cid] ?? []))],
   ["POST", /^\/api\/conversations\/([^/]+)\/messages$/, (req, res, [cid]) => sendMessage(res, cid, req)],
   ["GET", /^\/api\/conversations\/([^/]+)\/model$/, (req, res, [cid]) => json(res, 200, conversationModel(cid))],
-  ["PUT", /^\/api\/conversations\/([^/]+)\/model$/, (req, res) => fail(res, 422, "统筹和组长使用默认模型，不能切换", "invalid")],
+  // Same refusal as the server (orchestrator.ErrFixedModel → 409 model_fixed); the mock keeps no member overrides.
+  ["PUT", /^\/api\/conversations\/([^/]+)\/model$/, (req, res) => fail(res, 409, "统筹和组长使用默认模型，不能切换", "model_fixed")],
   ["POST", /^\/api\/conversations\/([^/]+)\/interrupt$/, (req, res) => json(res, 202)],
   ["GET", /^\/api\/conversations\/([^/]+)\/questions$/, (req, res, [cid]) => json(res, 200, state.questions[cid] ?? [])],
   ["POST", /^\/api\/conversations\/([^/]+)\/questions\/([^/]+)\/answer$/, (req, res, [cid, qid]) => answer(res, cid, qid, req)],
