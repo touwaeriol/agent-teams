@@ -936,7 +936,7 @@
             "type": "string"
           },
           "inherited": {
-            "description": "What the employee runs without the override",
+            "description": "What the employee runs without the override (= model)",
             "type": "string"
           },
           "live": {
@@ -958,7 +958,7 @@
             "type": "string"
           },
           "override": {
-            "description": "Picked with /model: the project coordinator model, or the lead's own ('' = not set)",
+            "description": "Always '': the coordinator and the lead run the default model (/model only changes members)",
             "type": "string"
           },
           "runtime": {
@@ -2259,7 +2259,7 @@
             "type": "string"
           },
           "override": {
-            "description": "Picked with /model ('' = project or role setting)",
+            "description": "Picked with /model ('' = project or role setting; always '' for the lead)",
             "type": "string"
           },
           "runtime": {
@@ -2601,7 +2601,7 @@
             ]
           },
           "skipped": {
-            "description": "Employees of another runtime (Codex members) that keep their model",
+            "description": "Employees that keep their model: the lead (always the default model) and members of another runtime",
             "items": {
               "type": "string"
             },
@@ -3570,7 +3570,7 @@
             "type": "string"
           },
           "coordinator_model": {
-            "description": "Claude model of the coordinator; '' = the role's model",
+            "description": "Deprecated and ignored (accepted for older clients): the coordinator runs the default model",
             "maxLength": 100,
             "type": "string"
           },
@@ -3610,12 +3610,12 @@
             ]
           },
           "thread_codex_model": {
-            "description": "Codex model of Codex leads and members; '' = each role's model",
+            "description": "Codex model of the Codex members (tier member only); '' = each role's model",
             "maxLength": 100,
             "type": "string"
           },
           "thread_model": {
-            "description": "Claude model of Claude leads and members; '' = each role's model",
+            "description": "Claude model of the Claude members (tier member only); '' = each role's model",
             "maxLength": 100,
             "type": "string"
           },
@@ -3666,7 +3666,7 @@
             "type": "string"
           },
           "coordinator_model": {
-            "description": "'' = the role's model",
+            "description": "Deprecated and ignored (accepted for older clients): the coordinator runs the default model",
             "maxLength": 100,
             "type": "string"
           },
@@ -3710,7 +3710,7 @@
             "type": "array"
           },
           "thread_codex_model": {
-            "description": "Codex leads and members; '' = each role's model",
+            "description": "Codex model of the Codex members (tier member only); '' = each role's model",
             "maxLength": 100,
             "type": "string"
           },
@@ -3720,7 +3720,7 @@
             "type": "string"
           },
           "thread_model": {
-            "description": "Claude leads and members; '' = each role's model",
+            "description": "Claude model of the Claude members (tier member only); '' = each role's model",
             "maxLength": 100,
             "type": "string"
           },
@@ -3809,7 +3809,7 @@
             "type": "string"
           },
           "coordinator_model": {
-            "description": "'' = the coordinator role's model",
+            "description": "Deprecated, always '': the coordinator and thread leads run the default model",
             "type": "string"
           },
           "created_at": {
@@ -3858,7 +3858,7 @@
             ]
           },
           "thread_codex_model": {
-            "description": "Codex leads and members; '' = each role's model",
+            "description": "Codex model of the Codex members (tier member only; leads run the default model); '' = each role's model",
             "type": "string"
           },
           "thread_effort": {
@@ -3866,7 +3866,7 @@
             "type": "string"
           },
           "thread_model": {
-            "description": "Claude leads and members; '' = each role's model",
+            "description": "Claude model of the Claude members (tier member only; leads run the default model); '' = each role's model",
             "type": "string"
           },
           "threads_active": {
@@ -4500,6 +4500,7 @@
             ]
           },
           "model": {
+            "description": "Member roles only: the model of the role's sessions ('' = the defaults). Always '' for the coordinator and the lead (they run the default model; a value sent is dropped)",
             "type": "string"
           },
           "node_ids": {
@@ -4974,7 +4975,7 @@
           },
           "scope": {
             "default": "lead",
-            "description": "Thread conversations: only the lead, or every employee of the thread with the lead's runtime",
+            "description": "thread: every member of the thread with the lead's runtime (the lead keeps the default model). lead, and any change in the coordinator conversation, is refused (409 model_fixed): the coordinator and leads always run the default model",
             "enum": [
               "lead",
               "thread"
@@ -7975,7 +7976,7 @@
             "description": "Error"
           }
         },
-        "summary": "Change the model: the project coordinator, or the thread lead / whole thread; running sessions switch from their next turn",
+        "summary": "Change the model of the thread's members (scope thread); the coordinator and leads cannot switch. Running sessions switch from their next turn",
         "tags": [
           "conversations"
         ]
