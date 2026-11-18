@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 
@@ -356,7 +357,7 @@ func (o *Orchestrator) queuePrepare(ctx context.Context, tx *core.Tx, env sessio
 	}
 	jobs := make([]string, 0, len(env.repos))
 	for _, r := range env.repos {
-		job, err := o.prepareRepo(ctx, tx, env, nodeID, r, fetchOnly)
+		job, err := o.prepareRepo(ctx, tx, env, nodeID, r, prepareOpts{fetchOnly: fetchOnly})
 		if err != nil {
 			return nil, err
 		}
@@ -365,23 +366,61 @@ func (o *Orchestrator) queuePrepare(ctx context.Context, tx *core.Tx, env sessio
 	return jobs, nil
 }
 
+// prepareOpts: fetchOnly marks a refresh of an open session; sync (with its meta) brings an
+// existing worktree up to date before a task (shared-members.md §4.2).
+type prepareOpts struct {
+	fetchOnly bool
+	sync      *protocol.GitPrepareSync
+	meta      map[string]any
+}
+
 // prepareRepo queues git.prepare of one repository: the employee's branch, started from the
 // thread branch when it exists in that repository, else from the thread's base there.
-func (o *Orchestrator) prepareRepo(ctx context.Context, tx *core.Tx, env sessionEnv, nodeID string, r ghops.Repo, fetchOnly bool) (string, error) {
+func (o *Orchestrator) prepareRepo(ctx context.Context, tx *core.Tx, env sessionEnv, nodeID string, r ghops.Repo, opts prepareOpts) (string, error) {
 	p := PathsOf(env.emp, env.thread)
 	base := o.startPoint(ctx, tx, *env.thread, r)
 	mode := protocol.GitPrepareMode(orDefault(env.project.WorkMode, "worktree"))
 	job := core.NewID("g")
 	cwd := o.CheckoutCwd(ctx, tx, env.emp, *env.thread, r.Slug, len(env.repos))
 	body := protocol.GitPrepare{JobID: protocol.JobID(job), ProjectID: env.project.ID, Repo: protocol.Repo(r.Slug),
-		Mode: mode, Cwd: protocol.RelPath(cwd), Branch: p.Branch, Base: &base, Fetch: true}
+		Mode: mode, Cwd: protocol.RelPath(cwd), Branch: p.Branch, Base: &base, Fetch: true, Sync: opts.sync}
 	if mode == "worktree" {
 		shared := protocol.RelPath(sharedFor(env.project.ID, r.Slug, cwd == p.Cwd))
 		body.Shared = &shared
 	}
-	_, err := o.gw.Enqueue(ctx, tx, nodeID, nodegw.Command{Type: protocol.TypeGitPrepare, Body: body,
-		Meta: map[string]any{"purpose": "prepare", "employee_id": env.emp.ID, "fetch_only": fetchOnly, "repo": r.Slug}})
+	meta := map[string]any{"purpose": "prepare", "employee_id": env.emp.ID, "fetch_only": opts.fetchOnly, "repo": r.Slug}
+	maps.Copy(meta, opts.meta)
+	_, err := o.gw.Enqueue(ctx, tx, nodeID, nodegw.Command{Type: protocol.TypeGitPrepare, Body: body, Meta: meta})
 	return job, err
+}
+
+// FeatureGitSync is the hello feature of daemons that sync an existing worktree (git.prepare sync).
+const FeatureGitSync = "git_sync"
+
+// QueueSync queues one git.prepare with sync per repository of the employee's thread, so the
+// task about to start sees the current thread branch (member) or the branch under review
+// (review); meta comes back with each result. It returns how many jobs it queued: 0 when there
+// is nothing to sync yet (no node: the session will be opened and prepared anyway), the daemon
+// cannot sync, or the project checks out full clones.
+func (o *Orchestrator) QueueSync(ctx context.Context, tx *core.Tx, e core.Employee, sync protocol.GitPrepareSync, meta map[string]any) (int, error) {
+	if e.NodeID == nil {
+		return 0, nil
+	}
+	if ok, err := core.NodeHasFeature(ctx, tx, *e.NodeID, FeatureGitSync); err != nil || !ok {
+		return 0, err
+	}
+	env, err := o.loadEnv(ctx, tx, e)
+	if err != nil || env.thread == nil || env.project.WorkMode == "clone" {
+		return 0, err
+	}
+	meta = maps.Clone(meta)
+	meta["purpose"] = "sync"
+	for _, r := range env.repos {
+		if _, err := o.prepareRepo(ctx, tx, env, *e.NodeID, r, prepareOpts{sync: &sync, meta: meta}); err != nil {
+			return 0, err
+		}
+	}
+	return len(env.repos), nil
 }
 
 // sharedFor is the shared clone a worktree hangs off: the legacy single clone for legacy checkouts.

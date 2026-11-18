@@ -331,7 +331,10 @@ queued ──开工──► running ◄──► waiting（有等你处理的�
 
 - 触发：任务新建 / 状态变化、员工会话变空闲（turn 结束且无运行中任务）、节点上线、定时（每 10 s 兜底）。触发写 Valkey 频道 `sched:<thread>`，调度循环（advisory lock 选主）消费。
 - 领取：一个 SQL 事务里 `SELECT … FROM at_tasks WHERE thread_id=$1 AND status='pending' AND role=$2 AND deps_satisfied ORDER BY priority, created_at FOR UPDATE SKIP LOCKED LIMIT 1`，配上“该岗位空闲实例”`SELECT … FROM at_employees WHERE … AND NOT EXISTS (running task) FOR UPDATE SKIP LOCKED`，一起改成 `claimed`。
-- 领取后发事件 `task.claimed`（办公室里那人“走到任务板 → 领取 → 回工位”就由它驱动），再给该成员 `session.send`（必要时先 `git.prepare` + `session.open`）。消息正文 = 任务说明 + 依赖任务的结果摘要 + 简报（名单、未读留言）。
+- 领取后发事件 `task.claimed`（办公室里那人“走到任务板 → 领取 → 回工位”就由它驱动），再给该成员 `session.send`（必要时先 `git.prepare` + `session.open`）。消息正文 = 任务说明 + 依赖任务的交接内容 + 工作目录同步结果 + 简报（名单、未读留言）。
+- **开工前同步**（shared-members.md §4.2）：员工已有节点、节点支持 `git_sync` 时，领取后先按仓库发 `git.prepare {sync}`（普通任务 `member` 模式同步到讨论串分支；审查 / 决策任务 `review` 模式检出被审的成员分支），任务停在 `claimed`（`sync_pending`），结果都回来才发任务简报；2 分钟没回来照发，并注明没同步。
+- **交接内容**：每个依赖任务给出做的人、总结（≤ 3000 字）、`complete_task` 的 `handoff`（有下游依赖时第一次不写会被提醒一次）、合并进讨论串分支的范围和改动文件（`at_merge_queue.base_sha` 到合并后的 sha，GitHub compare 取文件，记在 `at_tasks.merged`）和审查 / 决策结论。
+- **自动推送**：成员回合结束时手里的任务还在 running，平台把已提交的工作推到成员分支（每人 5 分钟最多一次，没有新提交节点不推），节点掉线也丢不了已提交的工作。
 - **完成判定**：成员调用 `complete_task` 才算完成；完成后按 §6.4 通知组长。若回合结束（`result`）而任务仍 running，平台推一条提醒“如果做完了请调用 complete_task；没做完请继续”；连续 2 次回合结束仍未完成 → 任务标 `blocked`，给组长发 `[Task t7 · dev-1 · 需要关注]`。这比 v1 “用最后一条 result 当输出”可靠，因为常驻会话里一个回合不等于一个任务。
 - 一个成员同一时间只有一个 running 任务；`can_delegate` 的子任务也进同一个池。
 - 失败重试：`complete_task` 报失败或会话崩溃时任务回池（`attempt+1`，上限 2），超限 `failed` 并通知组长。

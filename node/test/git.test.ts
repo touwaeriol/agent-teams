@@ -87,6 +87,79 @@ describe("git jobs", () => {
     expect(git(join(h.opts.root, "projects/p1/repo"), "branch", "--list", "thread/12/dev-2")).toBe("");
   });
 
+  it("syncs an existing worktree before a task: reset, current, merged, conflict, dirty, review checkout", async () => {
+    h = await startHarness();
+    const bare = makeRemote(h.dir);
+    expect(h.console.ofType("hello")[0]!.body.features).toContain("git_sync");
+    const seed = join(h.dir, "seed-app");
+    const onThread = (file: string, text: string) => {
+      git(seed, "fetch", "origin");
+      git(seed, "checkout", "-B", "thread/12-comms", "origin/thread/12-comms");
+      writeFileSync(join(seed, file), text);
+      git(seed, "add", ".");
+      git(seed, "commit", "-m", `thread ${file}`);
+      git(seed, "push", "origin", "HEAD:refs/heads/thread/12-comms");
+      return git(seed, "rev-parse", "HEAD");
+    };
+    let n = 0;
+    const sync = async (name: string, mode: "member" | "review", ref = "thread/12-comms", deadline?: string) => {
+      const job = `g_s${++n}`;
+      h.console.command("git.prepare", { ...prepare(job, name), sync: { mode, ref, ...(deadline ? { deadline } : {}) } });
+      return (await h.console.waitType("git.result", (b) => b.job_id === job)).body;
+    };
+    h.console.command("git.prepare", prepare("g_s0", "dev-1"));
+    await h.console.waitType("git.result", (b) => b.job_id === "g_s0");
+    const wt = join(h.opts.root, "projects/p1/threads/12/dev-1");
+
+    expect((await sync("dev-1", "member")).sync).toMatchObject({ action: "current" });
+    // t1 by someone else merged into the thread branch: dev-1's branch has nothing of its own → reset.
+    const t1 = onThread("t1.txt", "t1\n");
+    expect((await sync("dev-1", "member")).sync).toEqual({ action: "reset", head_sha: t1 });
+    expect(git(wt, "rev-parse", "--abbrev-ref", "HEAD")).toBe("thread/12/dev-1");
+    expect(existsSync(join(wt, "t1.txt"))).toBe(true);
+
+    // dev-1 has an unmerged commit (rework) and the thread moved on → merge, keeping both.
+    writeFileSync(join(wt, "mine.txt"), "mine\n");
+    git(wt, "add", ".");
+    git(wt, "commit", "-m", "mine");
+    onThread("t2.txt", "t2\n");
+    const merged = await sync("dev-1", "member");
+    expect(merged.sync.action).toBe("merged");
+    expect(existsSync(join(wt, "mine.txt")) && existsSync(join(wt, "t2.txt"))).toBe(true);
+
+    // Both changed the same file → the merge is aborted and the path reported.
+    writeFileSync(join(wt, "README.md"), "dev-1 says\n");
+    git(wt, "commit", "-am", "readme by dev-1");
+    const before = git(wt, "rev-parse", "HEAD");
+    onThread("README.md", "thread says\n");
+    const conflict = await sync("dev-1", "member");
+    expect(conflict.sync).toEqual({ action: "conflict", head_sha: before, conflicts: ["README.md"] });
+    expect(git(wt, "status", "--porcelain")).toBe("");
+
+    // Uncommitted changes: nothing is touched.
+    writeFileSync(join(wt, "mine.txt"), "half done\n");
+    expect((await sync("dev-1", "member")).sync).toMatchObject({ action: "dirty", head_sha: before });
+    expect(readFileSync(join(wt, "mine.txt"), "utf8")).toBe("half done\n");
+
+    // A reviewer checks out the member branch under review, as pushed.
+    git(seed, "push", "origin", `${t1}:refs/heads/thread/12/dev-2`);
+    h.console.command("git.prepare", prepare("g_sr", "reviewer-1"));
+    await h.console.waitType("git.result", (b) => b.job_id === "g_sr");
+    const review = await sync("reviewer-1", "review", "thread/12/dev-2");
+    expect(review.sync).toEqual({ action: "checkout", head_sha: t1 });
+    expect(execFileSync("git", ["--git-dir", bare, "rev-parse", "thread/12/dev-2"], { encoding: "utf8" }).trim()).toBe(t1);
+
+    // The same employee's next ordinary task leaves the detached review checkout for its own branch.
+    const rwt = join(h.opts.root, "projects/p1/threads/12/reviewer-1");
+    const back = await sync("reviewer-1", "member");
+    expect(git(rwt, "rev-parse", "--abbrev-ref", "HEAD")).toBe("thread/12/reviewer-1");
+    expect(back.sync.head_sha).toBe(git(seed, "rev-parse", "origin/thread/12-comms"));
+
+    // A branch not on the remote yet, and a sync that started after its deadline, change nothing.
+    expect((await sync("reviewer-1", "review", "thread/12/nobody")).sync.action).toBe("absent");
+    expect((await sync("reviewer-1", "member", "thread/12-comms", "2000-01-01T00:00:00Z")).sync.action).toBe("expired");
+  });
+
   it("re-sends the original git.result for a repeated job instead of running it again", async () => {
     h = await startHarness();
     makeRemote(h.dir);

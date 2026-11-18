@@ -55,6 +55,9 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 	mux.HandleFunc("PATCH /repos/{o}/{r}/git/refs/heads/{ref...}", f.updateRef)
 	mux.HandleFunc("DELETE /repos/{o}/{r}/git/refs/heads/{ref...}", f.deleteRef)
 	mux.HandleFunc("POST /repos/{o}/{r}/merges", f.merge)
+	mux.HandleFunc("GET /repos/{o}/{r}/compare/{spec}", func(w http.ResponseWriter, r *http.Request) {
+		write(w, 200, map[string]any{"files": []map[string]string{{"filename": "src/" + r.PathValue("spec") + ".go"}}})
+	})
 	mux.HandleFunc("GET /repos/{o}/{r}/commits/{sha}/check-runs", f.checkRuns)
 	mux.HandleFunc("POST /repos/{o}/{r}/pulls", f.createPR)
 	mux.HandleFunc("GET /repos/{o}/{r}/pulls/{n}", f.getPR)

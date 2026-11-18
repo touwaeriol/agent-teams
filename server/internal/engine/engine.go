@@ -81,6 +81,10 @@ func New(d Deps) (*Engine, error) {
 	}
 	e.Timers = timers.New(cs, e.Orch, d.Log)
 	e.Orch.Kick = e.Sched.Kick
+	e.Sched.PushWork = func(ctx context.Context, tx *core.Tx, emp core.Employee, t core.Thread) error {
+		_, err := e.Delivery.Push(ctx, tx, emp, t, map[string]any{"auto": true})
+		return err
+	}
 	e.Orch.ThreadEnded = e.Delivery.ThreadEnded
 	e.Orch.Rules = e.Approvals.Rules
 	e.Tools.Reviews = e.Approvals

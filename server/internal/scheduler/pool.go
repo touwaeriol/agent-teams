@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
@@ -109,6 +110,9 @@ func (s *Scheduler) Cancel(ctx context.Context, tx *core.Tx, task core.Task, rea
 		return task, ErrTaskState
 	}
 	worker := task.ClaimedBy
+	if task.SyncPending > 0 {
+		worker = "" // its brief never went out: nothing to stop
+	}
 	task, err := s.finish(ctx, tx, task, "cancelled")
 	if err != nil || worker == "" {
 		return task, err
@@ -166,6 +170,9 @@ func (s *Scheduler) TurnEnded(ctx context.Context, tx *core.Tx, e core.Employee)
 	if err != nil || task.Status != "running" {
 		return ignoreMissing(err)
 	}
+	if err := s.autoPush(ctx, tx, e, task); err != nil {
+		return err
+	}
 	task, err = core.UpdateTask(ctx, tx, task, map[string]any{"nudges": task.Nudges + 1})
 	if err != nil {
 		return err
@@ -184,6 +191,33 @@ func (s *Scheduler) TurnEnded(ctx context.Context, tx *core.Tx, e core.Employee)
 		return err
 	}
 	return s.notifyLead(ctx, tx, th, fmt.Sprintf("[Task %s · %s · 需要关注] 两次回合结束都没有调用 complete_task，任务已标为 blocked。", task.ID, e.Name))
+}
+
+// autoPush pushes the member's committed work at the end of a turn, at most once per
+// AutoPushEvery; review / decision tasks have nothing to push. A member without a node yet is
+// skipped (nothing on any node to lose).
+func (s *Scheduler) autoPush(ctx context.Context, tx *core.Tx, e core.Employee, task core.Task) error {
+	if isGateTask(task) || e.NodeID == nil || !s.orch.HasRepo(ctx, e.ProjectID) || !s.pushDue(e.ID) {
+		return nil
+	}
+	t, err := core.ThreadByID(ctx, tx, task.ConversationID)
+	if err != nil {
+		return err
+	}
+	if err := tx.Savepoint(ctx, func(sub *core.Tx) error { return s.PushWork(ctx, sub, e, t) }); err != nil {
+		s.log.Warn("auto push", "employee", e.Name, "err", err)
+	}
+	return nil
+}
+
+func (s *Scheduler) pushDue(employeeID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if last, ok := s.lastPush[employeeID]; ok && time.Since(last) < s.AutoPushEvery {
+		return false
+	}
+	s.lastPush[employeeID] = time.Now()
+	return true
 }
 
 // SessionLost returns the employee's running task to the pool (crash) with an attempt counted.

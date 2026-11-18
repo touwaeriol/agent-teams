@@ -177,7 +177,7 @@ func (s *Service) sendDownload(ctx context.Context, tx *core.Tx, c *call, id str
 	if sess.NodeID == nil {
 		return nil, refuse("会话不在任何节点上")
 	}
-	ok, err := nodeHasFeature(ctx, tx, *sess.NodeID, FeatureFileDownload)
+	ok, err := core.NodeHasFeature(ctx, tx, *sess.NodeID, FeatureFileDownload)
 	if err != nil {
 		return nil, err
 	}
@@ -201,12 +201,6 @@ func (s *Service) sendDownload(ctx context.Context, tx *core.Tx, c *call, id str
 		dl.Chunks++
 	}
 	return dl, nil
-}
-
-func nodeHasFeature(ctx context.Context, tx *core.Tx, nodeID, feature string) (bool, error) {
-	var n int64
-	err := tx.Gorm(ctx).Table("at_nodes").Where("id = ? AND last_hello->'features' @> jsonb_build_array(?::text)", nodeID, feature).Count(&n).Error
-	return n > 0, err
 }
 
 func deliverableComments(ctx context.Context, tx *core.Tx, id string) ([]protocol.DeliverableComment, error) {

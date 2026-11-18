@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 250 {
+	if migrations.Latest() != 260 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -1048,5 +1048,35 @@ INSERT INTO at_projects (id, user_id, name, require_acceptance) VALUES ('p1', 'u
 	}
 	if err := db.QueryRow(`SELECT string_agg(id || ':' || require_acceptance, ' ' ORDER BY id) FROM at_projects`).Scan(&got); err != nil || got != "p1:true p2:false p3:true" {
 		t.Fatalf("after down: %q %v", got, err)
+	}
+}
+
+// TestTaskHandoffMigration: 00260 adds the pre-task sync, hand-off and merged-range columns
+// to at_tasks and base_sha to at_merge_queue, with empty defaults; Down drops them.
+func TestTaskHandoffMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 260); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.QueryRow(`SELECT string_agg(column_name || '=' || coalesce(column_default, ''), ' ' ORDER BY column_name)
+		FROM information_schema.columns WHERE (table_name = 'at_tasks' AND column_name IN ('sync','sync_pending','sync_round','handoff','handoff_asked','merged'))
+		OR (table_name = 'at_merge_queue' AND column_name = 'base_sha')`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	want := "base_sha=''::text handoff=''::text handoff_asked=false merged='{}'::jsonb sync='{}'::jsonb sync_pending=0 sync_round=''::text"
+	if got != want {
+		t.Fatalf("columns:\n got %s\nwant %s", got, want)
+	}
+	if _, err := p.DownTo(ctx, 250); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`SELECT handoff FROM at_tasks`); err == nil {
+		t.Fatal("handoff survived down")
 	}
 }

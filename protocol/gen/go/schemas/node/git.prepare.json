@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/node/git.prepare.json",
   "title": "GitPrepare",
-  "description": "Clone the shared repo and/or add the worktree (architecture.md 8.1). Idempotent.",
+  "description": "Clone the shared repo and/or add the worktree (architecture.md 8.1). Idempotent. With sync, an existing worktree is brought up to date before a task starts (shared-members.md 4.2).",
   "x-direction": "console_to_node",
   "x-key": [
     "job_id"
@@ -53,6 +53,34 @@
     "fetch": {
       "type": "boolean",
       "default": true
+    },
+    "sync": {
+      "description": "Bring an existing worktree up to date (daemon feature git.sync). member: fetch, then switch to the member branch if needed, fast-forward it to origin/<ref> when it has no commits outside it and the tree is clean, else merge origin/<ref> into it (abort on conflict). review: fetch and check out origin/<ref> detached (read-only review of another member's branch).",
+      "type": "object",
+      "required": [
+        "mode",
+        "ref"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "member",
+            "review"
+          ]
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Remote branch name without origin/: the thread branch (member) or the branch under review (review)."
+        },
+        "deadline": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Skip the sync (action expired) when the job starts after this time: the console has already sent the task brief and the member may be working in the tree."
+        }
+      }
     }
   }
 }

@@ -33,6 +33,11 @@ func (s *Service) completeTask(ctx context.Context, tx *core.Tx, c *call) (Resul
 		return Result{}, err
 	}
 	ok := in.Status != "failed"
+	if ok {
+		if res, stop, err := s.takeHandoff(ctx, tx, task, deref(in.Handoff)); err != nil || stop {
+			return res, err
+		}
+	}
 	summary := withArtifacts(in.Summary, in.Artifacts)
 	if !ok || !s.orch.HasRepo(ctx, t.ProjectID) || isReviewOnly(task) {
 		return s.complete(ctx, tx, task, scheduler.Outcome{OK: ok, Summary: summary})
@@ -43,6 +48,28 @@ func (s *Service) completeTask(ctx context.Context, tx *core.Tx, c *call) (Resul
 		return Result{}, err
 	}
 	return Result{Wait: true}, nil
+}
+
+// takeHandoff stores the hand-off note for the tasks that build on this one (shared-members.md
+// §4.2). When some do and the note is missing, the first complete_task is refused with a
+// reminder (stop); calling again without one goes through.
+func (s *Service) takeHandoff(ctx context.Context, tx *core.Tx, task core.Task, handoff string) (Result, bool, error) {
+	if handoff = strings.TrimSpace(handoff); handoff != "" {
+		_, err := core.UpdateTask(ctx, tx, task, map[string]any{"handoff": handoff})
+		return Result{}, false, err
+	}
+	if task.Handoff != "" || task.HandoffAsked || isReviewOnly(task) {
+		return Result{}, false, nil
+	}
+	next, err := core.OpenDependents(ctx, tx, task.ConversationID, task.ID)
+	if err != nil || len(next) == 0 {
+		return Result{}, false, err
+	}
+	if _, err := core.UpdateTask(ctx, tx, task, map[string]any{"handoff_asked": true}); err != nil {
+		return Result{}, false, err
+	}
+	return failText("%s 依赖任务 %s：请在 complete_task 里加 handoff，写给接手的人——还没做完的、要注意的坑、约定好的接口和文件。"+
+		"确实没什么要交代的，再调用一次 complete_task 即可。", strings.Join(next, "、"), task.ID), true, nil
 }
 
 // isReviewOnly: review/decision tasks produce a verdict, not commits.

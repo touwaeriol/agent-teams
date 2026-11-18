@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -205,7 +206,7 @@ func (e *Engine) startEntry(ctx context.Context, t core.Thread, repo ghops.Repo,
 		_ = e.gh.DeleteRef(ctx, repo, trial)
 		return e.mergeProblem(ctx, t, entry, res, err)
 	}
-	return e.toCI(ctx, t, entry, trial, orDefault(res.SHA, head))
+	return e.toCI(ctx, t, entry, trial, orDefault(res.SHA, head), head)
 }
 
 func (e *Engine) mergeProblem(ctx context.Context, t core.Thread, entry core.MergeEntry, res ghops.MergeResult, err error) error {
@@ -217,6 +218,7 @@ func (e *Engine) mergeProblem(ctx context.Context, t core.Thread, entry core.Mer
 
 // directMerge merges the member branch into the thread branch without a trial (merge_queue gate off).
 func (e *Engine) directMerge(ctx context.Context, t core.Thread, repo ghops.Repo, entry core.MergeEntry) error {
+	entry.BaseSHA, _ = e.gh.RefSHA(ctx, repo, t.Branch) // only for the hand-over range; the merge does not need it
 	res, err := e.gh.Merge(ctx, repo, t.Branch, entry.HeadBranch, fmt.Sprintf("Merge %s into thread #%d", entry.HeadBranch, t.No))
 	if err != nil || res.Conflict {
 		return e.mergeProblem(ctx, t, entry, res, err)
@@ -224,10 +226,10 @@ func (e *Engine) directMerge(ctx context.Context, t core.Thread, repo ghops.Repo
 	return e.merged(ctx, t, repo, entry, res.SHA)
 }
 
-func (e *Engine) toCI(ctx context.Context, t core.Thread, entry core.MergeEntry, trial, sha string) error {
+func (e *Engine) toCI(ctx context.Context, t core.Thread, entry core.MergeEntry, trial, sha, base string) error {
 	return e.core.InTx(ctx, func(tx *core.Tx) error {
 		entry, err := core.UpdateMerge(ctx, tx, entry.ID, map[string]any{"status": "ci_running", "trial_branch": trial,
-			"trial_sha": sha, "attempts": entry.Attempts + 1, "error": ""})
+			"trial_sha": sha, "base_sha": base, "attempts": entry.Attempts + 1, "error": ""})
 		if err != nil {
 			return err
 		}
@@ -338,12 +340,16 @@ func (e *Engine) merged(ctx context.Context, t core.Thread, repo ghops.Repo, ent
 	if entry.TrialBranch != "" {
 		_ = e.gh.DeleteRef(ctx, repo, entry.TrialBranch)
 	}
+	added := e.mergeRange(ctx, repo, entry.BaseSHA, sha)
 	return e.core.InTx(ctx, func(tx *core.Tx) error {
-		entry, err := core.UpdateMerge(ctx, tx, entry.ID, map[string]any{"status": "merged", "head_sha": sha})
+		entry, err := core.UpdateMerge(ctx, tx, entry.ID, map[string]any{"status": "merged", "head_sha": sha, "base_sha": entry.BaseSHA})
 		if err != nil {
 			return err
 		}
 		if err := tx.EmitMerge(ctx, t, entry); err != nil {
+			return err
+		}
+		if err := recordMerged(ctx, tx, entry, added); err != nil {
 			return err
 		}
 		task, err := e.finishTasks(ctx, tx, entry)
@@ -353,6 +359,36 @@ func (e *Engine) merged(ctx context.Context, t core.Thread, repo ghops.Repo, ent
 		return e.sched.NotifyLead(ctx, tx, t, fmt.Sprintf("[Merge · %s · %s · merged] %s 已合并进 %s 的 %s", task.ID, entry.Employee,
 			entry.HeadBranch, entry.Repo, t.Branch))
 	})
+}
+
+// mergeRange is what a merge added to the thread branch, for the follow-up tasks' briefs; a
+// failed compare leaves the file list empty (the range alone still helps).
+func (e *Engine) mergeRange(ctx context.Context, repo ghops.Repo, base, head string) core.TaskMerge {
+	m := core.TaskMerge{Base: base, Head: head, Files: []string{}}
+	if base == "" || head == "" || base == head {
+		return m
+	}
+	if files, err := e.gh.Compare(ctx, repo, base, head); err == nil {
+		m.Files = files
+	} else {
+		e.log.Warn("compare merge range", "repo", repo.Slug, "err", err)
+	}
+	return m
+}
+
+// recordMerged stores the range on the merged task, per repository.
+func recordMerged(ctx context.Context, tx *core.Tx, entry core.MergeEntry, added core.TaskMerge) error {
+	if entry.TaskID == nil {
+		return nil
+	}
+	task, err := core.LockTask(ctx, tx, entry.ThreadID, *entry.TaskID)
+	if err != nil {
+		return ignoreMissing(err)
+	}
+	merged := maps.Clone(task.Merged)
+	merged[entry.Repo] = added
+	_, err = core.UpdateTask(ctx, tx, task, map[string]any{"merged": merged})
+	return err
 }
 
 func (e *Engine) finishTasks(ctx context.Context, tx *core.Tx, entry core.MergeEntry) (core.Task, error) {
