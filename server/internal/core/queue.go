@@ -118,6 +118,18 @@ const QueueLimit = 200
 const depsDone = `NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(t.depends_on) dep(id)
 	LEFT JOIN at_tasks d ON d.conversation_id = t.conversation_id AND d.id = dep.id WHERE d.status IS DISTINCT FROM 'done')`
 
+// TaskReady holds for a pending task (alias t) whose dependencies are all done: ready_at is kept
+// by events (§4.1), so neither the claim nor the office board walks the dependencies.
+const TaskReady = `t.ready_at IS NOT NULL`
+
+// ClaimingThread holds for a thread (alias th) whose pending tasks members claim now.
+const ClaimingThread = `th.status IN ('running','waiting')`
+
+// NamedActive holds for a task (alias t, thread alias th) that names an active member of the
+// project (a member of another thread's legacy team or a retired one does not count).
+const NamedActive = `EXISTS (SELECT 1 FROM at_employees n WHERE n.project_id = th.project_id AND n.name = t.assignee AND n.active
+	AND n.tier = 'member' AND (n.thread_id IS NULL OR n.thread_id = t.thread_id))`
+
 // queuedCols are the task columns a scheduling pass reads (alias t).
 const queuedCols = `t.conversation_id, t.id, t.thread_id, t.assignee, t.role, t.kind, t.status, t.depends_on, t.priority,
 	t.created_by, t.created_at, t.reserved_for, t.reserved_until, t.ready_at, t.downstream`
@@ -132,13 +144,11 @@ func ClaimableTasks(ctx context.Context, q DB, projectID string, roles []string)
 				JOIN at_tasks d ON d.conversation_id = t.conversation_id AND d.id = dep.id) AS dep_workers,
 			(SELECT COALESCE(jsonb_agg(l.name), '[]'::jsonb) FROM at_employees l
 				WHERE l.project_id = th.project_id AND l.thread_id = t.thread_id) AS legacy,
-			CASE WHEN t.assignee = t.role THEN false ELSE EXISTS (SELECT 1 FROM at_employees n WHERE n.project_id = th.project_id
-				AND n.name = t.assignee AND n.active AND n.tier = 'member' AND (n.thread_id IS NULL OR n.thread_id = t.thread_id))
-				END AS named_active,
+			CASE WHEN t.assignee = t.role THEN false ELSE `+NamedActive+` END AS named_active,
 			t.ready_at AS ready,
 			row_number() OVER (PARTITION BY t.role ORDER BY t.priority, t.downstream DESC, t.ready_at, t.created_at) AS rank
 		FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
-		WHERE th.project_id = $1 AND th.status IN ('running','waiting') AND t.status = 'pending' AND t.ready_at IS NOT NULL
+		WHERE th.project_id = $1 AND `+ClaimingThread+` AND t.status = 'pending' AND `+TaskReady+`
 			AND t.role = ANY($2::text[])) q
 		WHERE rank <= $3 ORDER BY priority, downstream DESC, ready, created_at`, projectID, store.TextArray(roles), QueueLimit)
 }
@@ -178,7 +188,7 @@ func ThreadRepoSets(ctx context.Context, q DB, projectID string) (map[string][]s
 // projectsWithWork selects the projects that have claimable tasks (pending and ready) in running
 // or waiting threads.
 const projectsWithWork = `SELECT DISTINCT th.project_id FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
-	WHERE t.status = 'pending' AND t.ready_at IS NOT NULL AND th.status IN ('running','waiting')`
+	WHERE t.status = 'pending' AND ` + TaskReady + ` AND ` + ClaimingThread
 
 // ProjectsWithWork lists the projects that have claimable tasks in running or waiting threads.
 func ProjectsWithWork(ctx context.Context, q DB) ([]string, error) {

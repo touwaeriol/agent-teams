@@ -4,12 +4,13 @@
 // A smaller port of web/src/office/demo/OfficeDemo.tsx (no task-board side panel).
 import { computed, onBeforeUnmount, ref, shallowRef } from "vue";
 import layoutText from "../../../../office/default.json?raw";
+import { staffSummary, staffSummaryText } from "@/lib/office";
 import { Office } from "../Office";
 import ReplayBar from "../ReplayBar.vue";
-import { useReplay } from "../replay";
+import { foldStatuses, useReplay } from "../replay";
 import type { OfficeLayout } from "../types";
 import { useHotLayout } from "../useLayout";
-import { DEMO_DATA, DEMO_THREADS, DEMO_TITLES, LOOP_MS, demoRoster, loopEvents, recordedHistory, type DemoEvent } from "./simulation";
+import { DEMO_DATA, DEMO_THREADS, DEMO_TITLES, LOOP_MS, demoRoster, demoThreads, loopEvents, recordedHistory, type DemoEvent } from "./simulation";
 
 const start = Date.now();
 const mode = ref<"live" | "replay">("live");
@@ -21,11 +22,18 @@ const live = shallowRef<DemoEvent[]>([]);
 const replay = useReplay(recordedHistory(start, 4));
 const replayRoster = computed(() => demoRoster(replay.start.value));
 const replaying = computed(() => mode.value === "replay");
+const threads = shallowRef(demoThreads(0));
+const summary = computed(() => {
+  const list = replaying.value ? replayRoster.value : roster;
+  return staffSummaryText(staffSummary(list, foldStatuses(list, replaying.value ? replay.events.value : live.value), replaying.value ? DEMO_THREADS : threads.value));
+});
 
 let loop = 0;
 let queue = loopEvents(start, 0);
 const timer = setInterval(() => {
   const now = Date.now();
+  const next = demoThreads((now - start) % LOOP_MS);
+  if (next.map((t) => t.no).join() !== threads.value.map((t) => t.no).join()) threads.value = next;
   const due = queue.filter((e) => (e.at as number) <= now);
   if (!due.length) return;
   queue = queue.filter((e) => (e.at as number) > now);
@@ -47,6 +55,7 @@ const tab = (on: boolean) => ({ height: "28px", padding: "0 10px", borderRadius:
       <strong style="font-size: 15px">办公室</strong>
       <button type="button" :style="tab(!replaying)" @click="mode = 'live'">实时</button>
       <button type="button" :style="tab(replaying)" @click="mode = 'replay'">回放</button>
+      <span style="color: #a8a49b">{{ summary }}</span>
       <span v-if="focus !== null">聚焦 #{{ focus }} <button type="button" :style="tab(false)" @click="focus = null">全部</button></span>
       <span v-if="selected" style="color: #a8a49b">选中 {{ selected }}</span>
     </div>
@@ -55,7 +64,7 @@ const tab = (on: boolean) => ({ height: "28px", padding: "0 10px", borderRadius:
       :key="mode"
       :layout="hot.layout"
       :employees="replaying ? replayRoster : roster"
-      :threads="DEMO_THREADS"
+      :threads="replaying ? DEMO_THREADS : threads"
       :events="replaying ? replay.events.value : live"
       :focus="focus"
       :selected="selected"

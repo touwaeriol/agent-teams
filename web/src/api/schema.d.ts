@@ -2100,6 +2100,8 @@ export interface components {
             };
             /** Format: int64 */
             claimable: number;
+            /** @description The project queue: pending tasks of running and waiting threads, by thread, then in claim order (priority, then readiness); at most 12 per thread and 120 in all */
+            queue: components["schemas"]["QueueCard"][] | null;
         };
         CIPatch: {
             /** Format: int64 */
@@ -2364,11 +2366,21 @@ export interface components {
             /** @description In a thread's member list: the member's claimed or running task is in another thread (thread_no names it); false elsewhere */
             busy_elsewhere: boolean;
             id: string;
+            /**
+             * Format: int64
+             * @description Instance number among the role's employees (dev-2 → 2)
+             */
+            instance: number;
             look: components["schemas"]["Look"];
             name: string;
             node: components["schemas"]["NodeRef"];
             role: string;
             runtime: string;
+            /**
+             * Format: int64
+             * @description Position of the employee's role in the team template (office desk rows)
+             */
+            sort: number;
             status: components["schemas"]["EmployeeStatusView"];
             /**
              * Format: int64
@@ -2383,6 +2395,11 @@ export interface components {
             busy_elsewhere: boolean;
             current_task: components["schemas"]["TaskView"];
             id: string;
+            /**
+             * Format: int64
+             * @description Instance number among the role's employees (dev-2 → 2)
+             */
+            instance: number;
             look: components["schemas"]["Look"];
             name: string;
             node: components["schemas"]["NodeRef"];
@@ -2390,6 +2407,11 @@ export interface components {
             role: string;
             runtime: string;
             session: components["schemas"]["SessionBrief"];
+            /**
+             * Format: int64
+             * @description Position of the employee's role in the team template (office desk rows)
+             */
+            sort: number;
             status: components["schemas"]["EmployeeStatusView"];
             /**
              * Format: int64
@@ -3055,6 +3077,18 @@ export interface components {
             text: string;
             /** Format: int64 */
             thread_no: number | null;
+        };
+        QueueCard: {
+            /** @description Named active member, or empty when anyone of the role may claim it (a role name or a retired member) */
+            assignee: string;
+            id: string;
+            /** @description Some dependency is not done yet */
+            locked: boolean;
+            /** @description Rework kept for this member until the reservation runs out (empty: none or expired) */
+            reserved_for: string;
+            role: string;
+            /** Format: int64 */
+            thread_no: number;
         };
         RandomLookInputBody: {
             role?: string;

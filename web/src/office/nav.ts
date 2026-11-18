@@ -1,4 +1,4 @@
-// Walking graph: A* over undirected straight edges (office-layout.md §4.7).
+// Walking graph: A* over undirected straight edges (office-layout.md §4.8).
 import type { Point } from "./types";
 
 export interface NavGraph {
@@ -19,6 +19,14 @@ export function addEdge(g: NavGraph, a: string, b: string): void {
   if (!g.nodes.has(a) || !g.nodes.has(b)) return;
   g.adj.get(a)!.add(b);
   g.adj.get(b)!.add(a);
+}
+
+/** People stacked past the last free spot stand this far apart (scene px, on both axes). */
+export const STACK_STEP = 6;
+
+/** The k-th point (k ≥ 1) stacked diagonally after `last`. */
+export function stacked(last: Point, k: number): Point {
+  return [last[0] + k * STACK_STEP, last[1] + k * STACK_STEP];
 }
 
 export function dist(a: Point, b: Point): number {

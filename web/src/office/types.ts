@@ -104,7 +104,8 @@ export interface Room {
   floor: string;
   doors?: Door[];
   wall?: { color?: Color; width?: number; style?: "solid" | "dashed" };
-  labelStyle?: { bg?: Color; fg?: Color; hidden?: boolean };
+  /** Name plate colours; `offset` from the room's top-left corner (default `labels.room.offset`). */
+  labelStyle?: { bg?: Color; fg?: Color; hidden?: boolean; offset?: Point };
   z?: number;
 }
 
@@ -167,6 +168,18 @@ export interface Widget {
   w?: number;
   style?: { bg?: Color; border?: Color; color?: Color; title?: Color; size?: number; padding?: number; gap?: number };
   sections?: PipelineSection[];
+  /** taskBoard: the project queue as cards (thread colour, lock, reserved-for name). */
+  cards?: BoardCards;
+}
+
+export interface BoardCards {
+  at: Point;
+  size: Point;
+  gap?: Point;
+  columns: number;
+  max: number;
+  text?: TextStyle;
+  color?: Color;
 }
 
 export interface DeskDef {
@@ -184,6 +197,10 @@ export interface PodTemplate {
   plate?: TextStyle;
   desks: DeskDef[];
   overflowSeats?: Point[];
+  /** Small avatars of the members working for this thread now. */
+  participants?: { at: Point; size?: number; step?: Point; max: number };
+  /** Where visitors stand (place `pod`); default the first exit node. */
+  visit?: Point;
   nav: {
     nodes: Record<string, Point>;
     edges: [string, string][];
@@ -210,6 +227,21 @@ export interface ThreadPods {
   };
   seating: { leadDesk?: string; order?: ("roleSort" | "instance" | "name")[]; rowOf?: Record<string, string> };
   threadColors?: string[];
+  /** How long an ended thread's table stays, fading, while its lead leaves. */
+  fadeMs?: number;
+}
+
+/** The members' fixed desks, in rows by role (shared-members.md §9). */
+export interface StaffArea {
+  room?: string;
+  rect: Rect;
+  desk: { sprite: string; at?: Point; seat: Point; timer?: Point; tag?: Point };
+  cell: Point;
+  perRow?: number | "auto";
+  group?: "role" | "none";
+  order?: ("roleSort" | "instance" | "name")[];
+  overflow?: "scale" | "stack";
+  nav: { entry: string; spineX: number };
 }
 
 export interface Anchor {
@@ -244,10 +276,14 @@ export interface SequenceStep {
   wait?: number;
   anim?: string;
   bubble?: string;
+  /** From this step on the person is not drawn. */
+  hide?: boolean;
 }
 
+export type SceneEvent = "threadOpened" | "threadEnded";
+
 export interface Sequence {
-  trigger: { state: StateName; cause?: string };
+  trigger: { state?: StateName; cause?: string; event?: SceneEvent; tier?: "coordinator" | "lead" | "member" };
   steps: SequenceStep[];
 }
 
@@ -282,6 +318,8 @@ export interface OfficeLayout {
   furniture?: Furniture[];
   widgets?: Widget[];
   threadPods: ThreadPods;
+  staffArea?: StaffArea;
+  members?: { visitPods?: boolean };
   anchors: Record<string, Anchor>;
   nav: { walkSpeed?: number; nodes: Record<string, Point>; edges: [string, string][] };
   states: States;
@@ -333,6 +371,8 @@ export interface OfficeEmployee {
   instance?: number;
   /** Role order from the team template (seating `roleSort`). */
   sort?: number;
+  /** Role title from the team template. */
+  title?: string;
 }
 
 /** ThreadView subset. */
@@ -376,8 +416,21 @@ export interface OfficeCheck {
   conclusion?: string | null;
 }
 
+/** One pending task of the project queue (the task board's cards). */
+export interface OfficeQueueCard {
+  thread_no: number;
+  id: string;
+  role?: string;
+  /** Some dependency is not done yet. */
+  locked?: boolean;
+  /** Rework kept for this member until the reservation runs out. */
+  reserved_for?: string;
+  /** Named assignee (empty: anyone of the role). */
+  assignee?: string;
+}
+
 export interface OfficeWidgetData {
-  board?: { claimable: number; by_thread?: Record<string, Record<string, number>> };
+  board?: { claimable: number; by_thread?: Record<string, Record<string, number>>; queue?: OfficeQueueCard[] };
   nodes?: OfficeNode[];
   mergeQueue?: OfficeMergeEntry[];
   ci?: OfficeCheck[];

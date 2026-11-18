@@ -2,6 +2,7 @@
 // control plane runs the same checks; the admin editor runs this copy.
 import { compileScene } from "./compile";
 import { component, type NavGraph } from "./nav";
+import { capacity } from "./staff";
 import type { OfficeEmployee, OfficeLayout, OfficeThread, Point, Room, StateName } from "./types";
 
 export interface SemanticReport {
@@ -53,6 +54,7 @@ function checkReferences(l: OfficeLayout, r: SemanticReport): void {
     refCheck(r, rooms, w.room, `widgets[${w.id}].room`);
   }
   refCheck(r, rooms, l.threadPods.area.room, "threadPods.area.room");
+  checkStaffRefs(l, r, rooms);
   for (const u of l.threadPods.layout.use) refCheck(r, l.threadPods.templates, u.template, "threadPods.layout.use");
   for (const [id, t] of Object.entries(l.threadPods.templates)) {
     for (const d of t.desks) refCheck(r, l.sprites, d.sprite, `templates.${id}.desks[${d.id}].sprite`);
@@ -74,6 +76,14 @@ function checkReferences(l: OfficeLayout, r: SemanticReport): void {
   refCheck(r, ch.animations, l.states.walkAnim, "states.walkAnim");
   for (const [id, anim] of Object.entries(ch.animations)) for (const f of anim.frames) refCheck(r, ch.frames, f, `animations.${id}`);
   for (const [id, parts] of Object.entries(ch.frames)) for (const p of parts) refCheck(r, ch.parts, p, `frames.${id}`);
+}
+
+function checkStaffRefs(l: OfficeLayout, r: SemanticReport, rooms: Record<string, Room>): void {
+  const s = l.staffArea;
+  if (!s) return;
+  refCheck(r, rooms, s.room, "staffArea.room");
+  refCheck(r, l.sprites, s.desk.sprite, "staffArea.desk.sprite");
+  refCheck(r, l.nav.nodes, s.nav.entry, "staffArea.nav.entry");
 }
 
 function checkPlace(l: OfficeLayout, r: SemanticReport, place: string, where: string): void {
@@ -110,6 +120,7 @@ function checkBounds(l: OfficeLayout, r: SemanticReport): void {
   const { width: w, height: h } = l.canvas;
   for (const room of l.rooms) if (!inside(room.rect, w, h)) r.errors.push(`rooms[${room.id}] is outside the canvas`);
   if (!inside(l.threadPods.area.rect, w, h)) r.errors.push("threadPods.area is outside the canvas");
+  if (l.staffArea && !inside(l.staffArea.rect, w, h)) r.errors.push("staffArea is outside the canvas");
   for (const f of l.furniture ?? []) {
     const s = l.sprites[f.sprite];
     if (s && !inside([f.at[0], f.at[1], s.w, s.h], w, h)) r.errors.push(`furniture[${f.id}] is outside the canvas`);
@@ -137,11 +148,13 @@ function checkDoors(l: OfficeLayout, r: SemanticReport): void {
   }
 }
 
-/** Compiles with the largest thread count the layout shows without paging. */
+/** Compiles with the largest thread count the layout shows without paging, and a full staff area (its walkways get checked too). */
 function maxThreadsInput(l: OfficeLayout): { threads: OfficeThread[]; employees: OfficeEmployee[] } {
   const max = Math.max(...l.threadPods.layout.use.map((u) => u.maxThreads));
   const threads = Array.from({ length: max }, (_, i): OfficeThread => ({ no: i + 1, title: `t${i + 1}`, status: "running" }));
-  return { threads, employees: [] };
+  const { perRow, maxRows } = l.staffArea ? capacity(l.staffArea, 1) : { perRow: 0, maxRows: 0 };
+  const employees = Array.from({ length: perRow * maxRows }, (_, i): OfficeEmployee => ({ id: `m${i}`, name: `m-${i + 1}`, tier: "member", role: "m" }));
+  return { threads, employees };
 }
 
 function checkConnectivity(l: OfficeLayout, g: NavGraph, r: SemanticReport): void {

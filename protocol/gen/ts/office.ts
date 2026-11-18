@@ -86,12 +86,18 @@ export type Cell = never[];
  */
 export type Rect = never[];
 /**
+ * Where this room's name plate goes, from the room's top-left corner (default labels.room.offset), e.g. away from a corridor where walking people's name tags pass.
+ *
+ * @minItems 2
+ */
+export type Point = never[];
+/**
  * @minItems 2
  *
  * This interface was referenced by `OfficeLayout`'s JSON-Schema
  * via the `definition` "point".
  */
-export type Point = never[];
+export type Point1 = never[];
 /**
  * This interface was referenced by `OfficeLayout`'s JSON-Schema
  * via the `definition` "widget".
@@ -99,7 +105,7 @@ export type Point = never[];
 export type Widget = {
   id: Id;
   type: "taskBoard" | "nodeRacks" | "pipelinePanel";
-  at: Point;
+  at: Point1;
   room?: Id;
   z?: number;
   click?: "openTaskPool" | "openNode" | "openMergeQueue" | "none";
@@ -110,6 +116,24 @@ export type Widget1 =
       type?: "taskBoard";
       sprite: Id;
       text?: TextStyle;
+      /**
+       * The project queue as cards on the board: one card per pending task in its thread colour, a lock while a dependency is not done, the member it is reserved for.
+       */
+      cards?: {
+        at: Point2;
+        size: Point1;
+        gap?: Point1;
+        columns: number;
+        /**
+         * Cards shown; the last one becomes +N when more wait.
+         */
+        max: number;
+        text?: TextStyle1;
+        /**
+         * Literal (#hex, rgb(), rgba()), palette reference ($name), runtime slot (@name: look/sprite slot), template ({threadColor}), or shade(<color>,<-1..1>).
+         */
+        color?: string;
+      };
       id?: unknown;
       at?: unknown;
       room?: unknown;
@@ -127,7 +151,7 @@ export type Widget1 =
       };
       slot: {
         sprite: Id;
-        at: Point;
+        at: Point1;
         stepY: number;
         max: number;
       };
@@ -209,23 +233,47 @@ export type Widget1 =
  */
 export type Template = string;
 /**
- * Pod-local position of the desk sprite.
- *
- * @minItems 2
- */
-export type Point1 = never[];
-/**
- * Pod-local top-left of the person sitting here.
+ * Board-local top-left of the first card.
  *
  * @minItems 2
  */
 export type Point2 = never[];
 /**
- * Desk-local position of the time-in-task label.
+ * Pod-local position of the desk sprite.
  *
  * @minItems 2
  */
 export type Point3 = never[];
+/**
+ * Pod-local top-left of the person sitting here.
+ *
+ * @minItems 2
+ */
+export type Point4 = never[];
+/**
+ * Desk-local position of the time-in-task label.
+ *
+ * @minItems 2
+ */
+export type Point5 = never[];
+/**
+ * Pod-local top-left of the first avatar.
+ *
+ * @minItems 2
+ */
+export type Point6 = never[];
+/**
+ * Offset from one avatar to the next; default [size + 2, 0].
+ *
+ * @minItems 2
+ */
+export type Point7 = never[];
+/**
+ * Pod-local spot where visitors stand (place 'pod', e.g. the coordinator setting up a new table); default the first exit node.
+ *
+ * @minItems 2
+ */
+export type Point8 = never[];
 /**
  * Undirected edges between node ids.
  *
@@ -233,6 +281,36 @@ export type Point3 = never[];
  * via the `definition` "navEdges".
  */
 export type NavEdges = never[][];
+/**
+ * Cell-local position of the desk sprite (default [0, 0]).
+ *
+ * @minItems 2
+ */
+export type Point9 = never[];
+/**
+ * Cell-local top-left of the person sitting here.
+ *
+ * @minItems 2
+ */
+export type Point10 = never[];
+/**
+ * Desk-local position of the time-in-task label.
+ *
+ * @minItems 2
+ */
+export type Point11 = never[];
+/**
+ * Desk-local centre-top of the '#18 · t5' tag (thread colour) shown while the member works on a task.
+ *
+ * @minItems 2
+ */
+export type Point12 = never[];
+/**
+ * Pitch of one desk: [width, height] (a row is one cell high).
+ *
+ * @minItems 2
+ */
+export type Point13 = never[];
 /**
  * This interface was referenced by `OfficeLayout`'s JSON-Schema
  * via the `definition` "stateName".
@@ -252,6 +330,8 @@ export type StateName =
   | "offline"
   | "broken";
 /**
+ * seat: a member's staff desk (or work table seat with members.visitPods), a lead's work table seat; pod: the visit spot of the thread's work table; current: stay; anchor:<name>.
+ *
  * This interface was referenced by `OfficeLayout`'s JSON-Schema
  * via the `definition` "place".
  */
@@ -335,6 +415,16 @@ export interface OfficeLayout {
    */
   widgets?: Widget[];
   threadPods: ThreadPods;
+  staffArea?: StaffArea;
+  /**
+   * How project members (the headcount) are placed.
+   */
+  members?: {
+    /**
+     * true: a member working for a thread sits at that thread's work table (its non-lead desks and overflow seats) instead of its own staff desk.
+     */
+    visitPods?: boolean;
+  };
   /**
    * Named groups of positions people can be sent to (place: 'anchor:<name>').
    */
@@ -359,7 +449,7 @@ export interface OfficeLayout {
     font?: "label" | "bubble";
     size?: number;
     maxChars?: number;
-    offset?: Point;
+    offset?: Point1;
     shadow?: string;
     ttlMs?: number;
     kinds?: {
@@ -2726,6 +2816,7 @@ export interface Room {
     bg?: Color;
     fg?: Color;
     hidden?: boolean;
+    offset?: Point;
   };
   z?: number;
 }
@@ -2736,7 +2827,7 @@ export interface Room {
 export interface Furniture {
   id: Id;
   sprite: Id;
-  at: Point;
+  at: Point1;
   room?: Id;
   z?: number;
   flip?: boolean;
@@ -2751,14 +2842,30 @@ export interface Furniture {
  */
 export interface TextStyle {
   value?: Template;
-  at?: Point;
-  offset?: Point;
+  at?: Point1;
+  offset?: Point1;
   font?: "label" | "bubble";
   size?: number;
   color?: Color;
   bg?: Color;
   border?: Color;
-  padding?: Point;
+  padding?: Point1;
+  maxChars?: number;
+  dot?: Color;
+}
+/**
+ * value: {threadNo} {taskId} {reservedFor} {role}.
+ */
+export interface TextStyle1 {
+  value?: Template;
+  at?: Point1;
+  offset?: Point1;
+  font?: "label" | "bubble";
+  size?: number;
+  color?: Color;
+  bg?: Color;
+  border?: Color;
+  padding?: Point1;
   maxChars?: number;
   dot?: Color;
 }
@@ -2776,7 +2883,7 @@ export interface ThreadPods {
   };
   layout: {
     mode: "grid";
-    gap?: Point;
+    gap?: Point1;
     columns?: number | "auto";
     /**
      * First entry whose maxThreads >= visible thread count picks the template.
@@ -2813,13 +2920,17 @@ export interface ThreadPods {
    * @minItems 1
    */
   threadColors?: [LiteralColor, ...LiteralColor[]];
+  /**
+   * How long the work table of a thread that just ended stays (fading out) while its lead leaves.
+   */
+  fadeMs?: number;
 }
 /**
  * This interface was referenced by `OfficeLayout`'s JSON-Schema
  * via the `definition` "podTemplate".
  */
 export interface PodTemplate {
-  size: Point;
+  size: Point1;
   frame?: {
     color?: Color;
     focusColor?: Color;
@@ -2836,1120 +2947,1120 @@ export interface PodTemplate {
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         }
       ]
     | [
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         }
       ]
     | [
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         }
       ]
     | [
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         }
       ]
     | [
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         }
       ]
     | [
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         }
       ]
     | [
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         }
       ]
     | [
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         }
       ]
     | [
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         }
       ]
     | [
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         }
       ]
     | [
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         }
       ]
     | [
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         }
       ]
     | [
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         }
       ]
     | [
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         }
       ]
     | [
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         }
       ]
     | [
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         },
         {
           id: Id;
           sprite: Id;
-          at: Point1;
-          seat: Point2;
+          at: Point3;
+          seat: Point4;
           for?: "lead" | "member" | "any";
-          timer?: Point3;
+          timer?: Point5;
         }
       ];
   /**
@@ -3957,55 +4068,83 @@ export interface PodTemplate {
    */
   overflowSeats?:
     | []
-    | [Point]
-    | [Point, Point]
-    | [Point, Point, Point]
-    | [Point, Point, Point, Point]
-    | [Point, Point, Point, Point, Point]
-    | [Point, Point, Point, Point, Point, Point]
-    | [Point, Point, Point, Point, Point, Point, Point]
-    | [Point, Point, Point, Point, Point, Point, Point, Point]
-    | [Point, Point, Point, Point, Point, Point, Point, Point, Point]
-    | [Point, Point, Point, Point, Point, Point, Point, Point, Point, Point]
-    | [Point, Point, Point, Point, Point, Point, Point, Point, Point, Point, Point]
-    | [Point, Point, Point, Point, Point, Point, Point, Point, Point, Point, Point, Point]
-    | [Point, Point, Point, Point, Point, Point, Point, Point, Point, Point, Point, Point, Point]
-    | [Point, Point, Point, Point, Point, Point, Point, Point, Point, Point, Point, Point, Point, Point]
+    | [Point1]
+    | [Point1, Point1]
+    | [Point1, Point1, Point1]
+    | [Point1, Point1, Point1, Point1]
+    | [Point1, Point1, Point1, Point1, Point1]
+    | [Point1, Point1, Point1, Point1, Point1, Point1]
+    | [Point1, Point1, Point1, Point1, Point1, Point1, Point1]
+    | [Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1]
+    | [Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1]
+    | [Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1]
+    | [Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1]
+    | [Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1]
+    | [Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1, Point1]
     | [
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1
       ]
     | [
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point,
-        Point
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1
+      ]
+    | [
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1,
+        Point1
       ];
+  /**
+   * Strip of small avatars (in the thread colour) of the members working for this thread now.
+   */
+  participants?: {
+    at: Point6;
+    size?: number;
+    step?: Point7;
+    /**
+     * Avatars drawn; more show as +N.
+     */
+    max: number;
+  };
+  visit?: Point8;
   nav: {
     nodes: NavNodes;
     edges: NavEdges;
@@ -4028,7 +4167,51 @@ export interface PodTemplate {
  * via the `definition` "navNodes".
  */
 export interface NavNodes {
-  [k: string]: Point;
+  [k: string]: Point1;
+}
+/**
+ * The members' own desks: one fixed desk per project member, in rows by role (role-template order), then by instance.
+ *
+ * This interface was referenced by `OfficeLayout`'s JSON-Schema
+ * via the `definition` "staffArea".
+ */
+export interface StaffArea {
+  room?: Id;
+  rect: Rect;
+  desk: {
+    /**
+     * Desk sprite; its @screen slot follows the state rules, its @thread slot (if any) takes the colour of the thread the member works for.
+     */
+    sprite: string;
+    at?: Point9;
+    seat: Point10;
+    timer?: Point11;
+    tag?: Point12;
+  };
+  cell: Point13;
+  /**
+   * Desks per row; auto = as many cells as fit the width.
+   */
+  perRow?: number | "auto";
+  /**
+   * role: each role starts a new row (falls back to none when the rows do not fit); none: desks follow each other in role order.
+   */
+  group?: "role" | "none";
+  order?: ("roleSort" | "instance" | "name")[];
+  /**
+   * When the desks do not fit even without grouping: scale = shrink the cells (not below 0.5); stack = people beyond the last desk stand next to it 6 px apart.
+   */
+  overflow?: "scale" | "stack";
+  nav: {
+    /**
+     * Global nav node the desk rows hang off.
+     */
+    entry: string;
+    /**
+     * Scene x of the walkway the rows branch from; each row gets a node there at its seat line.
+     */
+    spineX: number;
+  };
 }
 /**
  * This interface was referenced by `OfficeLayout`'s JSON-Schema
@@ -4039,7 +4222,7 @@ export interface Anchor {
    * @minItems 1
    * @maxItems 64
    */
-  points: [Point, ...Point[]];
+  points: [Point1, ...Point1[]];
   pose?: "stand" | "sit";
   facing?: "up" | "down" | "left" | "right";
   /**
@@ -4062,8 +4245,7 @@ export interface States {
   sequences?: {
     [k: string]: {
       trigger: {
-        state: StateName;
-        cause?: string;
+        [k: string]: unknown;
       };
       /**
        * @minItems 1
@@ -4073,13 +4255,27 @@ export interface States {
           goto?: Place;
           wait?: number;
           anim?: string;
-          bubble?: Template;
+          /**
+           * Text with {placeholders} filled from live data.
+           */
+          bubble?: string;
+          /**
+           * From this step on the person is not drawn. In a threadEnded sequence until the thread's table is back (the lead left the office); in any other sequence only until that sequence ends.
+           */
+          hide?: boolean;
         },
         ...{
           goto?: Place;
           wait?: number;
           anim?: string;
-          bubble?: Template;
+          /**
+           * Text with {placeholders} filled from live data.
+           */
+          bubble?: string;
+          /**
+           * From this step on the person is not drawn. In a threadEnded sequence until the thread's table is back (the lead left the office); in any other sequence only until that sequence ends.
+           */
+          hide?: boolean;
         }[]
       ];
     };

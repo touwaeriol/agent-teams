@@ -4,13 +4,14 @@
 // web/src/office/overlay.tsx: function components, styles through sx() (Vue adds no px).
 import type { CSSProperties, VNode } from "vue";
 import { colorOr, type ColorContext } from "./color";
-import type { PodInstance, Scene } from "./compile";
+import type { DeskInstance, PodInstance, Scene } from "./compile";
 import type { ActorView, DeskState } from "./director";
 import type { ResolvedLook } from "./looks";
-import { blinkOn, dimFor, rackPosition, visibleRacks } from "./render";
+import { isMember } from "./people";
+import { blinkOn, dimFor, participantsByPod, rackPosition, stripPoint, stripSlots, visibleRacks } from "./render";
 import { fillTemplate } from "./template";
 import { sx } from "./sx";
-import type { OfficeLayout, OfficeWidgetData, PipelineSection, TextStyle, Widget } from "./types";
+import type { BoardCards, OfficeLayout, OfficeQueueCard, OfficeWidgetData, PipelineSection, TextStyle, Widget } from "./types";
 
 export type OfficeAction =
   | { type: "openTaskPool" }
@@ -47,6 +48,16 @@ export interface OverlayProps {
 }
 
 const ctxOf = (l: OfficeLayout): ColorContext => ({ palette: l.palette });
+
+/** Overlay colours a layout's palette may override (`palette.labelText`…); these are the defaults. */
+const TOKENS = { labelText: "#FFFFFF", labelDark: "#23262D", labelMuted: "#5C5F6B", roomLabel: "#8A6A45" } as const;
+
+export function token(l: OfficeLayout, name: keyof typeof TOKENS): string {
+  return colorOr(`$${name}`, ctxOf(l), TOKENS[name]);
+}
+
+/** Stacking inside the overlay: walking people's name tags pass under the room plates, seated ones stay on top. */
+const Z = { walkingTag: 1, roomLabel: 2, tag: 3 } as const;
 const font = (l: OfficeLayout, which: "label" | "bubble" | undefined) => (which === "bubble" ? l.fonts?.bubble : l.fonts?.label) ?? "monospace";
 
 function textBox(l: OfficeLayout, s: TextStyle | undefined, extra: ColorContext = {}): CSSProperties {
@@ -77,6 +88,8 @@ export function OfficeOverlay(p: OverlayProps) {
     <div style={sx({ position: "absolute", inset: 0, pointerEvents: "none", fontFamily: font(l, "label") })}>
       <RoomLabels layout={l} scene={p.scene} />
       {p.scene.pods.map((pod) => <Plate key={pod.threadNo} pod={pod} {...p} />)}
+      <StripMore {...p} />
+      <DeskTags {...p} />
       <DeskTimers {...p} />
       {(l.widgets ?? []).map((w) => <WidgetOverlay key={w.id} widget={w} {...p} />)}
       <Pager {...p} />
@@ -87,21 +100,23 @@ export function OfficeOverlay(p: OverlayProps) {
 
 function RoomLabels({ layout, scene }: { layout: OfficeLayout; scene: Scene }) {
   const style = layout.labels?.room;
-  const [ox, oy] = style?.offset ?? [8, 6];
   return (
     <>
-      {scene.rooms.filter((r) => !r.labelStyle?.hidden).map((r) => (
-        <span
-          key={r.id}
-          style={sx({
-            position: "absolute", left: r.rect[0] + ox, top: r.rect[1] + oy,
-            ...textBox(layout, { ...style, bg: r.labelStyle?.bg ?? "#8A6A45", color: r.labelStyle?.fg ?? "#FFFFFF" }),
-            lineHeight: "normal",
-          })}
-        >
-          {r.label}
-        </span>
-      ))}
+      {scene.rooms.filter((r) => !r.labelStyle?.hidden).map((r) => {
+        const [ox, oy] = r.labelStyle?.offset ?? style?.offset ?? [8, 6];
+        return (
+          <span
+            key={r.id}
+            style={sx({
+              position: "absolute", left: r.rect[0] + ox, top: r.rect[1] + oy, zIndex: Z.roomLabel,
+              ...textBox(layout, { ...style, bg: r.labelStyle?.bg ?? token(layout, "roomLabel"), color: r.labelStyle?.fg ?? token(layout, "labelText") }),
+              lineHeight: "normal",
+            })}
+          >
+            {r.label}
+          </span>
+        );
+      })}
     </>
   );
 }
@@ -121,12 +136,58 @@ function Plate({ pod, scene, focus, onPlate }: { pod: PodInstance } & OverlayPro
         position: "absolute", left: pod.plate.at[0], top: pod.plate.at[1], pointerEvents: "auto", cursor: clickable ? "pointer" : "default",
         ...textBox(l, pod.plate.style, { vars: { threadColor: pod.color } }),
         lineHeight: "normal",
-        opacity: dimFor(l, focus, pod.threadNo),
+        opacity: dimFor(l, focus, pod.threadNo) * (pod.leaving === undefined ? 1 : 0.4),
       })}
     >
       {pod.plate.text}
     </button>
   );
+}
+
+/** "+N" after a table's participant strip when more members work for it than it shows. */
+function StripMore({ scene, actors, focus }: OverlayProps) {
+  const l = scene.layout;
+  const out: VNode[] = [];
+  for (const [pod, people] of participantsByPod(scene, actors)) {
+    const strip = pod.participants!;
+    const { shown, more } = stripSlots(people, strip.max);
+    if (!more) continue;
+    const [x, y] = stripPoint(strip, shown.length);
+    out.push(
+      <span
+        key={pod.threadNo}
+        title={people.map((a) => a.employee.name).join("、")}
+        style={sx({ position: "absolute", left: x, top: y, width: strip.size, height: strip.size, display: "flex", alignItems: "center", justifyContent: "center", background: pod.color, color: token(l, "labelText"), fontSize: 8, lineHeight: "normal", opacity: dimFor(l, focus, pod.threadNo) })}
+      >
+        +{more}
+      </span>,
+    );
+  }
+  return <>{out}</>;
+}
+
+/** `#18 · t5` on a member's own desk while it works on a task (wherever it is right now). */
+function DeskTags({ scene, actors, focus }: OverlayProps) {
+  const l = scene.layout;
+  const byId = new Map(actors.map((a) => [a.id, a]));
+  const out: VNode[] = [];
+  for (const d of scene.staff.values()) {
+    const a = d.owner ? byId.get(d.owner) : undefined;
+    const tag = a && workTag(a);
+    if (!tag || !d.tag) continue;
+    out.push(
+      <span
+        key={d.key}
+        style={sx({
+          position: "absolute", left: d.tag[0], top: d.tag[1], transform: "translateX(-50%)", padding: "0 3px", whiteSpace: "nowrap", background: scene.threadColors.get(a.thread!) ?? token(l, "labelDark"),
+          color: token(l, "labelText"), fontFamily: font(l, "label"), fontSize: 8, lineHeight: "11px", opacity: dimFor(l, focus, a.thread),
+        })}
+      >
+        {tag}
+      </span>,
+    );
+  }
+  return <>{out}</>;
 }
 
 function DeskTimers({ scene, desks, now, focus }: OverlayProps) {
@@ -136,8 +197,9 @@ function DeskTimers({ scene, desks, now, focus }: OverlayProps) {
   for (const d of scene.desks.values()) {
     const since = desks.get(d.key)?.timerSince;
     if (since === undefined || !d.timer) continue;
+    const thread = d.threadNo ?? desks.get(d.key)?.thread;
     out.push(
-      <span key={d.key} style={sx({ position: "absolute", left: d.timer[0], top: d.timer[1], ...textBox(l, { ...style, padding: [0, 3] }), lineHeight: "13px", opacity: dimFor(l, focus, d.threadNo) })}>
+      <span key={d.key} style={sx({ position: "absolute", left: d.timer[0], top: d.timer[1], ...textBox(l, { ...style, padding: [0, 3] }), lineHeight: "13px", opacity: dimFor(l, focus, thread) })}>
         {formatTimer(now - since)}
       </span>,
     );
@@ -178,8 +240,79 @@ function TaskBoardText({ widget: w, scene, data, focus, onAction }: { widget: Wi
   return (
     <>
       <span style={sx({ position: "absolute", left: w.at[0] + tx, top: w.at[1] + ty, ...textBox(l, { ...w.text, padding: [0, 0] }), lineHeight: "normal" })}>{text}</span>
+      {w.cards && <QueueCards widget={w} cards={w.cards} scene={scene} queue={boardQueue(data.board, focus)} />}
       {w.click !== "none" && sprite && clickTarget(onAction && (() => onAction({ type: "openTaskPool" })), text, [w.at[0], w.at[1], sprite.w, sprite.h])}
     </>
+  );
+}
+
+/** The project queue on the board: the focused thread's pending tasks, or everyone's. */
+export function boardQueue(board: OfficeWidgetData["board"], focus: number | null): OfficeQueueCard[] {
+  const queue = board?.queue ?? [];
+  return focus === null ? queue : queue.filter((c) => c.thread_no === focus);
+}
+
+export interface CardSlot {
+  at: [number, number];
+  card?: OfficeQueueCard;
+  /** The last slot shows how many more cards wait. */
+  more?: number;
+}
+
+/** Where each card goes on the board (scene px), the last one turning into +N when more wait. */
+export function cardSlots(w: Widget, cards: BoardCards, queue: OfficeQueueCard[]): CardSlot[] {
+  const { shown, more } = stripSlots(queue, cards.max);
+  const [gx, gy] = cards.gap ?? [4, 4];
+  const at = (i: number): [number, number] => [
+    w.at[0] + cards.at[0] + (i % cards.columns) * (cards.size[0] + gx),
+    w.at[1] + cards.at[1] + Math.floor(i / cards.columns) * (cards.size[1] + gy),
+  ];
+  const slots: CardSlot[] = shown.map((card, i) => ({ at: at(i), card }));
+  return more ? [...slots, { at: at(shown.length), more }] : slots;
+}
+
+/** Card text: `{taskId}` by default; the reserved member after an arrow. */
+export function cardText(cards: BoardCards, c: OfficeQueueCard): string {
+  const base = fillTemplate(cards.text?.value ?? "{taskId}", { threadNo: c.thread_no, taskId: c.id, role: c.role ?? "", reservedFor: c.reserved_for ?? "" });
+  return c.reserved_for && !(cards.text?.value ?? "").includes("{reservedFor}") ? `${base}→${c.reserved_for}` : base;
+}
+
+function cardLabel(c: OfficeQueueCard): string {
+  return [`#${c.thread_no} ${c.id}`, c.locked ? "等依赖" : "", c.reserved_for ? `预留给 ${c.reserved_for}` : "", c.assignee ? `点名 ${c.assignee}` : ""].filter(Boolean).join("，");
+}
+
+function QueueCards({ widget: w, cards, scene, queue }: { widget: Widget; cards: BoardCards; scene: Scene; queue: OfficeQueueCard[] }) {
+  const l = scene.layout;
+  const c = ctxOf(l);
+  const [w0, h0] = cards.size;
+  const box = (at: [number, number], bg: string): CSSProperties => ({
+    position: "absolute", left: at[0], top: at[1], width: w0, height: h0, boxSizing: "border-box", display: "flex", alignItems: "center", gap: 2,
+    padding: "0 3px", overflow: "hidden", whiteSpace: "nowrap", background: bg, color: colorOr(cards.text?.color, c, token(l, "labelText")),
+    fontFamily: font(l, cards.text?.font), fontSize: cards.text?.size ?? 8, lineHeight: "normal",
+  });
+  const muted = token(l, "labelMuted");
+  return (
+    <div role="list" aria-label="任务队列" style={sx({ position: "absolute", left: 0, top: 0 })}>
+      {cardSlots(w, cards, queue).map((s, i) =>
+        s.card ? (
+          <span role="listitem" key={`${s.card.thread_no}-${s.card.id}`} title={cardLabel(s.card)} aria-label={cardLabel(s.card)} style={sx({ ...box(s.at, colorOr(cards.color ?? "{threadColor}", { ...c, vars: { threadColor: scene.threadColors.get(s.card.thread_no) ?? muted } })), opacity: s.card.locked ? 0.75 : 1 })}>
+            {s.card.locked && <LockIcon />}
+            {cardText(cards, s.card)}
+          </span>
+        ) : (
+          <span role="listitem" key={`more-${i}`} aria-label={`还有 ${s.more} 个`} style={sx({ ...box(s.at, muted), justifyContent: "center" })}>+{s.more}</span>
+        ),
+      )}
+    </div>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg width="7" height="8" viewBox="0 0 7 8" aria-hidden="true" style={sx({ flex: "none" })}>
+      <rect x="0" y="3" width="7" height="5" fill="currentColor" />
+      <rect x="1.5" y="0" width="4" height="4" fill="none" stroke="currentColor" stroke-width="1.2" />
+    </svg>
   );
 }
 
@@ -286,7 +419,7 @@ function Pager({ scene, actors, onPage }: OverlayProps) {
   const btn: CSSProperties = { pointerEvents: "auto", border: "none", background: "transparent", cursor: "pointer", font: "inherit", color: "inherit", padding: "0 3px" };
   const { index, count } = scene.page;
   return (
-    <span style={sx({ position: "absolute", right: scene.width - (ax + aw), top: ay - 26, display: "flex", alignItems: "center", gap: 4, padding: "1px 6px", background: "#23262D", color: "#E6E3DC", fontSize: 10 })}>
+    <span style={sx({ position: "absolute", right: scene.width - (ax + aw), top: ay - 26, display: "flex", alignItems: "center", gap: 4, padding: "1px 6px", background: token(scene.layout, "labelDark"), color: "#E6E3DC", fontSize: 10 })}>
       {hand && <span title="其他页有人举手" style={sx({ width: 6, height: 6, background: "#F2A65E" })} />}
       {hidden > 0 && <span style={sx({ color: "#A8A49B" })}>+{hidden} 人</span>}
       <button type="button" style={sx(btn)} aria-label="上一页" disabled={index === 0} onClick={() => onPage(index - 1)}>‹</button>
@@ -304,12 +437,21 @@ function ActorTag({ actor: a, scene, looks, focus, selected, registerActor, onSe
   const tag = l.labels?.nameTag;
   const ax = ch.anchor?.x ?? (ch.width * ch.pixel) / 2;
   const tagBg = colorOr(tag?.bg ?? "@tag", { ...ctxOf(l), slots: look.slots }, look.look.color);
-  const label = `${a.employee.name}，${STATE_LABELS[a.status.state] ?? a.status.state}${a.bubble ? `：${a.bubble.text}` : ""}`;
+  const work = workTag(a);
+  // Seated, the desk (its own `#18 · t5` tag, or the thread's table) says what it works for; away, the name tag does.
+  const away = Boolean(work) && !a.atDesk;
+  const label = `${a.employee.name}，${work ? `在 ${work} ` : ""}${STATE_LABELS[a.status.state] ?? a.status.state}${a.bubble ? `：${a.bubble.text}` : ""}`;
   const isSel = selected === a.id;
+  const desk = a.atDesk ? scene.staff.get(a.id) : undefined;
+  const dark = token(l, "labelDark");
+  const light = token(l, "labelText");
   return (
     <div
       ref={(el) => registerActor(a.id, el as HTMLElement | null)}
-      style={sx({ position: "absolute", left: 0, top: 0, transform: `translate(${a.pos[0]}px, ${a.pos[1]}px)`, opacity: a.opacity * dimFor(l, focus, a.employee.thread_no), willChange: "transform" })}
+      style={sx({
+        position: "absolute", left: 0, top: 0, transform: `translate(${a.pos[0]}px, ${a.pos[1]}px)`, zIndex: a.walking ? Z.walkingTag : Z.tag,
+        opacity: a.opacity * dimFor(l, focus, a.thread), willChange: "transform",
+      })}
     >
       <button
         type="button"
@@ -325,7 +467,7 @@ function ActorTag({ actor: a, scene, looks, focus, selected, registerActor, onSe
           outline: isSel ? "2px solid #F2C14E" : "none", outlineOffset: 2,
         })}
       />
-      {a.bubble && <SpeechBubble layout={l} bubble={a.bubble} x={ax} />}
+      {a.bubble && <SpeechBubble layout={l} bubble={a.bubble} x={ax} fit={desk && staffBubbleFit(scene, desk)} />}
       <span
         style={sx({
           position: "absolute", top: tag?.offset?.[1] ?? 60, left: ax + (tag?.offset?.[0] ?? 0), transform: "translateX(-50%)",
@@ -337,15 +479,46 @@ function ActorTag({ actor: a, scene, looks, focus, selected, registerActor, onSe
       >
         {tag?.dot !== undefined && <span style={sx({ width: 6, height: 6, background: colorOr(tag.dot, ctxOf(l), "#FFFFFF") })} />}
         {a.employee.name}
-        {a.badge !== undefined && (
-          <span style={sx({ marginLeft: 2, padding: "0 3px", background: scene.threadColors.get(a.badge) ?? "#23262D", color: "#FFFFFF" })}>#{a.badge}</span>
+        {a.badge !== undefined && !work && (
+          <span style={sx({ marginLeft: 2, padding: "0 3px", background: scene.threadColors.get(a.badge) ?? dark, color: light })}>#{a.badge}</span>
+        )}
+        {away && (
+          <span style={sx({ marginLeft: 2, padding: "0 3px", background: scene.threadColors.get(a.thread!) ?? dark, color: light, boxShadow: "0 0 0 1px rgba(255,255,255,0.6)" })}>#{a.thread}</span>
         )}
       </span>
     </div>
   );
 }
 
-function SpeechBubble({ layout: l, bubble, x }: { layout: OfficeLayout; bubble: NonNullable<ActorView["bubble"]>; x: number }) {
+/** `#18 · t5`: the thread and task a member works on now (none for the coordinator and leads). */
+export function workTag(a: Pick<ActorView, "employee" | "status" | "thread">): string | undefined {
+  if (!isMember(a.employee) || a.thread === null || !a.status.task_id) return undefined;
+  return `#${a.thread} · ${a.status.task_id}`;
+}
+
+export interface BubbleFit {
+  /** Widest the bubble may be (scene px); longer text ends in an ellipsis, the full text is its title. */
+  maxWidth: number;
+  /** Raised this much (scene px) so the bubbles of neighbours do not overlap. */
+  lift: number;
+}
+
+const BUBBLE_LIFT = 20;
+
+/**
+ * A bubble over a staff desk, so the bubbles of neighbours (one cell apart) stay readable: about
+ * two cells wide at most, every other column raised. The first row has the thread tables' name
+ * tags right above it, so there nothing is raised and bubbles stay one cell wide.
+ */
+export function staffBubbleFit(scene: Scene, desk: DeskInstance): BubbleFit | undefined {
+  const area = scene.layout.staffArea;
+  if (!area) return undefined;
+  const cell = area.cell[0] * desk.scale;
+  if (!desk.row) return { maxWidth: Math.max(40, cell - 6), lift: 0 };
+  return { maxWidth: Math.max(40, 2 * cell - 6), lift: (desk.col ?? 0) % 2 ? BUBBLE_LIFT : 0 };
+}
+
+function SpeechBubble({ layout: l, bubble, x, fit }: { layout: OfficeLayout; bubble: NonNullable<ActorView["bubble"]>; x: number; fit?: BubbleFit }) {
   const b = l.bubbles;
   const kind = b?.kinds?.[bubble.kind] ?? b?.kinds?.plain ?? { bg: "#FFFFFF", border: "#3B3A36" };
   const c = ctxOf(l);
@@ -355,7 +528,9 @@ function SpeechBubble({ layout: l, bubble, x }: { layout: OfficeLayout; bubble: 
   return (
     <span
       style={sx({
-        position: "absolute", top: PERSON_BOX_H + oy, left: x + ox, transform: "translate(-50%, -100%)", whiteSpace: "nowrap",
+        position: "absolute", top: PERSON_BOX_H + oy - (fit?.lift ?? 0), left: x + ox, transform: "translate(-50%, -100%)", whiteSpace: "nowrap",
+        // Capped bubbles take the pointer so their title (the full text) shows on hover.
+        ...(fit ? { maxWidth: fit.maxWidth, overflow: "hidden", textOverflow: "ellipsis", boxSizing: "border-box", pointerEvents: "auto" } : {}),
         padding: "3px 7px", background: colorOr(kind.bg, c), border: `2px solid ${colorOr(kind.border, c)}`,
         color: colorOr(kind.color, c, "#1F1E1C"), fontFamily: font(l, b?.font ?? "bubble"), fontSize: b?.size ?? 11, lineHeight: "15px",
         boxShadow: b?.shadow ?? "2px 2px 0 rgba(0,0,0,0.15)",
