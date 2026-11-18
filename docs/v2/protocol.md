@@ -204,7 +204,7 @@
 - 会话还没收到本 `open_gen` 的 `session.release`：消息在守护进程排队，release 后按顺序投递（park 后自动 resume 的同一 gen 不需要再 release，但 init 工具若与上次不同则当作违规上报 `session.event{kind:error, code:'protocol'}`）。
 - Claude：向 prompt 队列推 `SDKUserMessage {priority}`。Codex：空闲 `turn/start`，回合中 `turn/steer {expectedTurnId}`（`later` 则排到 `turn/completed` 之后）。
 - `interrupt_first: true`：先 `interrupt()` / `turn/interrupt`，再投递。
-- `anchor`（可选，≤ 8000 字；`session.open.first_message` 也可以带）：任务锚点（任务 id、原始说明、分支、交接说明、最近进度），随任务简报下发。守护进程保存最新的一条（空串清掉），会话在任务中被运行时自己压缩后补给模型（§4.10）。
+- `anchor`（可选，≤ 8000 字；`session.open.first_message` 也可以带）：任务锚点（任务 id、原始说明、分支、交接说明、最近进度），随任务简报下发。守护进程保存最新的一条（空串清掉），会话在任务中被运行时自己压缩后补给模型（§4.10）。控制台在成员手上没有任务时给它的消息带 `anchor: ""`；`complete_task` 的 `tool.result` 也带 `anchor: ""`。会话（重新）打开而首条消息不带锚点时（崩溃重开、守护进程重启后重开），`session.open.anchor` 带成员手上任务的锚点，新进程从它开始。
 - 回 `session.delivered {session_id, msg_id, turn_id?}`（可靠）。
 
 ### 4.4 `session.interrupt`（键：`id`）
@@ -259,9 +259,9 @@
 
 设计见 `shared-members.md` §5。百分比都相对岗位的 `context_limit`（不是模型窗口）。
 
-- **任务中自动压缩**：`session.open.context {limit_tokens?, in_task_pct?, focus?}`。Claude：`CLAUDE_CODE_AUTO_COMPACT_WINDOW = clamp(limit_tokens, 100K, 1M)`，`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = limit_tokens × in_task_pct / (窗口 − 20K)`（CLI 的阈值是有效窗口 = 窗口 − 20K 的百分比，SDK 0.3.325 实测）；没有 `limit_tokens` 时只设 PCT。Codex：`thread/start` 配置 `model_auto_compact_token_limit = limit_tokens × in_task_pct / 100`。
-- **平台主动压缩** `session.compact {session_id, open_gen, compact_id, instructions?}`（可靠，键 `compact_id`）：守护进程清掉保存的锚点，等当前回合结束后压缩——Claude 往提示队列推 `/compact <instructions>`，以 `compact_boundary` 之后的 `result` 为完成；Codex 调 `thread/compact/start`（没有指令参数），以 `contextCompaction` 条目完成（或 `thread/compacted`）之后的 `turn/completed` 为完成。完成后回 `session.compacted {session_id, open_gen, compact_id, ok, context?, error?}`（可靠，键 `compact_id`）。会话停放时先 resume 再压缩；会话不在本机回 `ok: false`。
-- **压缩后补锚点**：运行时自己压缩（不是 `session.compact`）后，守护进程把 `session.send.anchor` 存下的锚点补给模型。Claude：SessionStart 钩子（`source: "compact"`）返回 `additionalContext`；自动压缩的 PreCompact 钩子返回 `systemMessage = focus + 锚点`，CLI 把它拼进压缩指令。Codex：压缩完成后如果回合还在跑，用 `turn/steer` 把锚点插进当前回合；回合已经结束就不发（下一条任务消息自带简报）。
+- **任务中自动压缩**：`session.open.context {limit_tokens?, in_task_pct?, window_tokens?, focus?}`，`window_tokens` 是这个员工上一个同运行时会话报的窗口（`turn_ended.context.max_tokens`，没有就不带）。Claude：有 `limit_tokens` 时 `CLAUDE_CODE_AUTO_COMPACT_WINDOW = clamp(limit_tokens, 100K, 1M)`，`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = limit_tokens × in_task_pct / (窗口 − 20K)`（CLI 的阈值是有效窗口 = 窗口 − 20K 的百分比，SDK 0.3.325 实测；CLI 自己再把窗口夹到模型窗口，并且最晚在有效窗口 − 13K 压缩）；没有 `limit_tokens` 时不设窗口，有 `window_tokens` 就把 PCT 换算成 `window_tokens × in_task_pct` 个 token（`in_task_pct × W / (W − 20K)`），都没有就直接用 `in_task_pct`（这时是 CLI 有效窗口 = 窗口 − 20K 的百分比）。Codex：`thread/start` 配置 `model_auto_compact_token_limit = L × in_task_pct / 100`，`L = min(limit_tokens, window_tokens)`（上限超过模型窗口时永远到不了），没有 `limit_tokens` 时 `L = window_tokens`，两者都没有就不设（Codex 自己的默认）。
+- **平台主动压缩** `session.compact {session_id, open_gen, compact_id, instructions?}`（可靠，键 `compact_id`）：守护进程清掉保存的锚点，等当前回合结束后压缩——Claude 往提示队列推 `/compact <instructions>`，以 `compact_boundary` 之后的 `result` 为完成；Codex 调 `thread/compact/start`（没有指令参数），以 `contextCompaction` 条目完成（或 `thread/compacted`）之后的 `turn/completed` 为完成。Codex 只把压缩那个回合（`thread/compact/start` 之后第一个不是我们消息触发的回合）或报过压缩的回合的结束算作完成，期间来的消息自己的回合不算。完成后回 `session.compacted {session_id, open_gen, compact_id, ok, context?, error?}`（可靠，键 `compact_id`）。会话停放时先 resume 再压缩；会话不在本机回 `ok: false`。失败也一定回：等空闲最多 2 分钟，期间一直在跑回合或来了新的 `session.send` 就放弃（`error: "busy: …"`，简报直接发，不压缩）；压缩本身最多 7 分钟（`timed out: …`）；压缩中运行时退出回 `exited: …`；守护进程把进行中的 `compact_id` 记在本机会话记录里，重启后对每个回 `restarted: …`。控制台只认跑这个会话的节点发来的 `session.compacted`。
+- **压缩后补锚点**：运行时自己压缩（不是 `session.compact`）后，守护进程把 `session.send.anchor` 存下的锚点补给模型。Claude：SessionStart 钩子（`source: "compact"`）返回 `additionalContext`；自动压缩的 PreCompact 钩子返回 `systemMessage = focus + 锚点`，CLI 把它拼进压缩指令。Codex：压缩完成后如果回合还在跑，用 `turn/steer` 把锚点插进当前回合；回合已经结束（或 steer 被拒）就丢掉，绝不为锚点单开一个回合（下一条任务消息自带简报）。
 
 ## 5. 审批
 

@@ -124,7 +124,7 @@
 
 - **不每个任务都压缩**：压缩要多花一个回合、会丢细节，完整上下文的缓存命中也更省钱。只按用量阈值压缩；Claude Code 自己快满时也会自动压缩。
 - **clear 后的第一条消息** = 任务简报 + 讨论串交接摘要（组长是谁、主任务计划、这个成员在这个讨论串以前做过的任务和结果），沿用 `handoffSummary` / `threadDigest` 的做法，只换成按“成员 × 讨论串”取。
-- **实现**（`scheduler/session.go`）：判断表是纯函数 `decideStep`，先看 clear（会话已收到的任务简报数 `at_agent_sessions.tasks_done` ≥ `clear_after_tasks`），再看压缩（上次回合结束记下的 `context_used`）。会话正在跑回合、还在启动或崩溃了就不动它（直接发简报）。压缩时任务停在 `claimed`（`at_tasks.compact_id`），收到 `session.compacted`（不管成功与否）或 10 分钟后再走开工前同步，同步完才发简报——两段等待串起来，每段超时按 `wait_since` 算。clear = 以 `context_clear` 关会话，简报照常投递时开新会话，`continuation` 看到这个关闭原因就在前面加 `[新会话]` 摘要（换讨论串的 `[换讨论串]` 摘要同一个函数）。旧守护进程（没有 `context_usage`）不报用量，就只按任务数 clear。
+- **实现**（`scheduler/session.go`）：判断表是纯函数 `decideStep`，先看 clear（会话已收到的任务简报数 `at_agent_sessions.tasks_done` ≥ `clear_after_tasks`），再看压缩（上次回合结束记下的 `context_used`）。会话正在跑回合、还在启动或崩溃了就不动它（直接发简报）。压缩时任务停在 `claimed`（`at_tasks.compact_id`），收到 `session.compacted`（不管成功与否；守护进程等空闲最多 2 分钟、压缩最多 7 分钟，崩溃、重启、一直忙都会回 `ok: false`，见 protocol.md §4.10）或 10 分钟后再走开工前同步，同步完才发简报——两段等待串起来，每段超时按 `wait_since` 算。clear = 以 `context_clear` 关会话，简报照常投递时开新会话，`continuation` 看到这个关闭原因就在前面加 `[新会话]` 摘要（换讨论串的 `[换讨论串]` 摘要同一个函数）。旧守护进程（没有 `context_usage`）不报用量，就只按任务数 clear。
 
 ### 5.1 按岗位配置（员工模板）
 
@@ -132,7 +132,7 @@
 
 | 字段 | 含义 | 由谁执行 |
 | --- | --- | --- |
-| `context_limit` | 这个岗位的**上下文上限**（token，例如 600K）；下面的百分比都相对它，不相对模型本身的窗口（1M 的模型设 600K，60% 就是 360K）。不填 = 模型窗口 | — |
+| `context_limit` | 这个岗位的**上下文上限**（token，例如 600K，至少 100K：会话开局的提示词和工具就占 15–25K，Claude 最晚在窗口 − 33K 压缩）；下面的百分比都相对它，不相对模型本身的窗口（1M 的模型设 600K，60% 就是 360K）。超过模型窗口时按窗口算（领取时取 `min(上限, 上次报的窗口)`；Codex 的任务中阈值同样封顶）。不填 = 模型窗口（上次会话报的窗口；还没报过时见下面“没设上限”） | — |
 | `compact_between_pct` | 任务之间：领下一个任务时已用上下文 ≥ `context_limit × 比例` 就先压缩 | 平台（§5.3 `session.compact`） |
 | `compact_in_task_pct` | 任务进行中：已用上下文到 `context_limit × 比例` 时运行时自己压缩 | 运行时：Codex 设 `model_auto_compact_token_limit = context_limit × 比例`（绝对 token 数）；Claude 设 `CLAUDE_CODE_AUTO_COMPACT_WINDOW = context_limit`，`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` 换算成相对有效窗口的百分比（§5.2 实测）。改了在下一个会话生效 |
 | `clear_after_tasks` | 同一会话连续做满几个任务后 clear（0 = 不按次数 clear） | 平台 |
@@ -147,7 +147,11 @@
 | 组长 | 不适用（不领池里的任务） | 70% | 不适用 | 计划、任务、提问都在平台里，压缩丢不了要紧的东西 |
 | 统筹 | 不适用 | 70% | 不适用 | 讨论串列表和状态随时能查 |
 
-例：岗位 `context_limit = 600K`、任务间 60%、任务中 80% → 领任务时已用 ≥ 360K 先压缩，任务中到 480K 自动压缩，与模型是不是 1M 窗口无关。
+例：岗位 `context_limit = 600K`、任务间 60%、任务中 80% → 领任务时已用 ≥ 360K 先压缩，任务中到 480K 自动压缩，与模型是不是 1M 窗口无关。模型窗口只有 200K 时按 200K 算：任务间 120K，Codex 任务中 160K，Claude 由 CLI 把窗口夹到 200K（约 74%，因为 PCT 是按 600K 换算的）。
+
+**没设上限**（`context_limit` 为空）：控制台把这个员工上一个同运行时会话报的窗口作为 `session.open.context.window_tokens` 发下去，任务中阈值 = 窗口 × `compact_in_task_pct`（Codex 设成绝对 token 数；Claude 不设窗口，只把 PCT 换算到 `窗口 − 20K` 上）。员工还没有会话报过窗口时：Codex 不设阈值（用 Codex 自己的默认），Claude 的 PCT 直接用 `compact_in_task_pct`，即 CLI 有效窗口（窗口 − 20K）的这个比例。任务间的比例一直按上一个回合报的窗口算，没报过就不按用量压缩。
+
+团队页的岗位弹窗按这些规则显示实际阈值：Claude 的任务中阈值超过 `窗口 − 33K`（窗口 = 上限夹到 100K～1M）时显示封顶后的值。
 
 任务中阈值不要设太低：每次压缩多花一个回合、丢细节；Claude Code 自己的默认阈值已经接近满窗口，80% 是给长任务留出余量。
 
@@ -169,7 +173,7 @@
 
 **按实测选的做法**：Claude 的锚点走 SessionStart(`compact`) 钩子的 `additionalContext`，自动压缩的重点和锚点走 PreCompact 钩子的 `systemMessage`；平台主动压缩发 `/compact <compact_focus + 下一个任务>`（这时上一个任务已经结束，守护进程清掉旧锚点，钩子不再补）。Codex 没有压缩指令参数，`compact_focus` 只对 Claude 生效；Codex 运行时自己压缩后，回合还在跑就用 `turn/steer` 把锚点插进当前回合（不用 `later`：`later` 要等回合结束，那时任务可能已经交了），回合已经结束就不补。
 
-**任务锚点**的内容（`scheduler/session.go` `taskAnchor`，≤ 7500 字）：讨论串号和任务 id、原始说明、成员分支、依赖任务的交接说明、最近一次 `report_progress`（存在 `at_tasks.progress`）和工作笔记路径 `.agent-notes/<任务id>.md`。锚点随任务简报下发一次（`session.send.anchor`，开新会话时是 `first_message.anchor`），之后报的进度不会再推给守护进程——压缩后模型按锚点去读工作笔记。
+**任务锚点**的内容（`orchestrator/anchor.go` `TaskAnchor`，≤ 7500 字）：讨论串号和任务 id、原始说明、成员分支、依赖任务的交接说明、最近一次 `report_progress`（存在 `at_tasks.progress`）和工作笔记路径 `.agent-notes/<任务id>.md`。平台主动压缩的指令用同一段内容（换成“接下来要做…”的开头）。锚点随任务简报下发一次（`session.send.anchor`，开新会话时是 `first_message.anchor`），之后报的进度不会再推给守护进程——压缩后模型按锚点去读工作笔记。锚点只属于手上的任务：`complete_task` 的结果和成员没有任务时收到的消息都带 `anchor: ""` 清掉它；会话崩溃重开或守护进程重启后重开、首条消息又不带锚点时，`session.open.anchor` 带上手上任务的锚点。任务重新排队（失败重试、返工、手动重试）或被重新领取时，`progress` 和长任务指标清零。
 
 ### 5.3 协议改动（节点）
 

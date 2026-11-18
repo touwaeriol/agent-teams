@@ -178,7 +178,7 @@ CREATE TABLE at_roles (
   skills           TEXT[] NOT NULL DEFAULT '{}',        -- 技能名（内置 design/docs 或 at_skills.name），统筹必须为空（00060）
   plugins          TEXT[] NOT NULL DEFAULT '{}',        -- 插件：name（最新版本）或 name@N（钉住版本），最多 8 个，统筹必须为空（00080）
   -- 00280（shared-members.md §5.1）：会话管理，百分比都相对 context_limit（不是模型窗口）
-  context_limit        INT,                             -- 岗位的上下文上限（token，≥ 10000）；NULL = 模型窗口
+  context_limit        INT,                             -- 岗位的上下文上限（token，保存时校验 ≥ 100000）；NULL = 模型窗口
   compact_between_pct  INT,                             -- 成员领下一个任务时已用 ≥ 上限 × 比例就先压缩；NULL = 不压缩（组长、统筹总是 NULL）
   compact_in_task_pct  INT,                             -- 任务中运行时自己压缩的比例；NULL = 运行时默认
   clear_after_tasks    INT,                             -- 同一会话做满几个任务就换新会话；0 = 不按次数，NULL = 不适用（组长、统筹）
