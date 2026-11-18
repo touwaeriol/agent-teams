@@ -1,7 +1,8 @@
-import type { ApprovalRequest, ApprovalResolve, CodexSessionOptions } from "../../protocol.js";
+import type { ApprovalRequest, ApprovalResolve, CodexSessionOptions, ContextUsage, SessionOpen } from "../../protocol.js";
 import type { LoopbackToolHost } from "../../toolhost/http-server.js";
+import { deferred, type Deferred } from "../../util/async.js";
 import { approvalId, newId } from "../../util/ids.js";
-import { ResumeFailed, type Driver, type DriverContext, type EventFields, type OutgoingMessage, type StartResult } from "../types.js";
+import { ResumeFailed, type CompactResult, type Driver, type DriverContext, type EventFields, type OutgoingMessage, type StartResult } from "../types.js";
 import type { AppServer } from "./appserver.js";
 import type { CodexHub, ThreadListener } from "./hub.js";
 import { errorNotification, itemCompleted, itemStarted, turnCompleted } from "./mapper.js";
@@ -38,6 +39,12 @@ export class CodexDriver implements Driver, ThreadListener {
   private readonly codex: CodexSessionOptions;
   /** The model Codex resolved for the thread (its own default when codex.model is empty). */
   private resolvedModel: string | undefined;
+  /** Context use from the latest thread/tokenUsage/updated. */
+  private usage: ContextUsage | undefined;
+  /** A session.compact in progress: done at the turn/completed after the compaction. */
+  private compacting: { done: Deferred<CompactResult>; seen: boolean } | null = null;
+  /** The turn whose compaction already got the anchor (thread/compacted and the item both report it). */
+  private anchoredTurn: string | null = null;
 
   constructor(private readonly ctx: DriverContext, private readonly deps: CodexDriverDeps) {
     this.codex = ctx.spec.codex!;
@@ -71,6 +78,7 @@ export class CodexDriver implements Driver, ThreadListener {
   private threadParams(url: string): Record<string, unknown> {
     const config = {
       ...(this.codex.config ?? {}),
+      ...autoCompactConfig(this.ctx.spec.context),
       mcp_servers: { ...(this.deps.pluginServers ?? {}), platform: { url, default_tools_approval_mode: "approve", tool_timeout_sec: 86400 } },
       shell_environment_policy: { inherit: "core", set: this.ctx.env },
     };
@@ -145,7 +153,22 @@ export class CodexDriver implements Driver, ThreadListener {
     return new Set(msgIds.filter((id) => history.includes(`<!-- ${id} -->`)));
   }
 
+  /** session.compact: thread/compact/start (no instructions in the app-server API). */
+  async compact(): Promise<CompactResult> {
+    if (!this.threadId) return { ok: false, error: "no codex thread" };
+    const server = await this.deps.hub.ensure();
+    this.compacting = { done: deferred<CompactResult>(), seen: false };
+    try {
+      await server.request("thread/compact/start", { threadId: this.threadId });
+    } catch (err) {
+      this.compacting = null;
+      return { ok: false, error: (err as Error).message };
+    }
+    return this.compacting.done.promise;
+  }
+
   async close(): Promise<void> {
+    this.finishCompact(false);
     this.closed = true;
     if (this.threadId) this.deps.hub.unregister(this.threadId);
     this.deps.toolhost.remove(this.ctx.spec.session_id);
@@ -165,6 +188,8 @@ export class CodexDriver implements Driver, ThreadListener {
     "item/completed": (p) => this.onItemCompleted(p.item as { type: string; id: string }),
     "item/agentMessage/delta": (p) => this.ctx.sink.delta(String(p.delta ?? ""), this.activeTurn ? turnRef(this.activeTurn) : undefined),
     "serverRequest/resolved": (p) => this.onResolved(String(p.requestId)),
+    "thread/tokenUsage/updated": (p) => this.onTokenUsage(p.tokenUsage as TokenUsage),
+    "thread/compacted": (p) => this.onCompacted(String(p.turnId ?? "")),
     error: (p) => this.onError(p),
   };
 
@@ -176,9 +201,9 @@ export class CodexDriver implements Driver, ThreadListener {
   }
 
   private onTurnCompleted(turn: { id: string; status: string }): void {
-    const model = this.modeOverride.model ?? this.resolvedModel;
-    for (const ev of turnCompleted(turn, this.turnStartedAt, this.lastText)) this.emit(ev.kind === "turn_ended" && model ? { ...ev, model } : ev);
+    for (const ev of turnCompleted(turn, this.turnStartedAt, this.lastText)) this.emit(this.turnEnded(ev));
     this.activeTurn = null;
+    if (this.compacting) this.finishCompact(this.compacting.seen);
     this.authReported = false;
     this.ctx.sink.turn(false);
     const next = this.later.shift();
@@ -191,8 +216,45 @@ export class CodexDriver implements Driver, ThreadListener {
     for (const ev of itemStarted(item)) this.emit(ev);
   }
 
+  /** turn_ended carries the model the turn ran with and the latest context use. */
+  private turnEnded(ev: EventFields): EventFields {
+    if (ev.kind !== "turn_ended") return ev;
+    const model = this.modeOverride.model ?? this.resolvedModel;
+    return { ...ev, ...(model ? { model } : {}), ...(this.usage ? { context: this.usage } : {}) };
+  }
+
+  private onTokenUsage(u: TokenUsage | undefined): void {
+    if (!u?.last) return;
+    this.usage = { used_tokens: Math.max(0, u.last.totalTokens), max_tokens: Math.max(0, u.modelContextWindow ?? 0) };
+  }
+
+  /**
+   * A compaction finished (thread/compacted, or a contextCompaction item). For session.compact it
+   * completes at the turn's end; one the runtime did by itself mid-turn gets the task anchor
+   * steered into the running turn (shared-members.md §5.2).
+   */
+  private onCompacted(turnId: string): void {
+    if (this.compacting) {
+      this.compacting.seen = true;
+      if (!this.activeTurn) this.finishCompact(true);
+      return;
+    }
+    const anchor = this.ctx.sink.anchor();
+    if (!anchor || !this.activeTurn || this.anchoredTurn === (turnId || this.activeTurn)) return;
+    this.anchoredTurn = turnId || this.activeTurn;
+    void this.push({ msg_id: newId("m_anchor_"), text: anchor, priority: "next" }).catch((err) => this.ctx.log.warn({ err: (err as Error).message }, "anchor after compaction failed"));
+  }
+
+  private finishCompact(ok: boolean): void {
+    const c = this.compacting;
+    if (!c) return;
+    this.compacting = null;
+    c.done.resolve(ok ? { ok: true, ...(this.usage ? { context: this.usage } : {}) } : { ok: false, error: "the runtime did not compact" });
+  }
+
   private onItemCompleted(item: { type: string; id: string; [k: string]: unknown }): void {
     if (item.type === "agentMessage" && typeof item.text === "string") this.lastText = item.text;
+    if (item.type === "contextCompaction") this.onCompacted(this.activeTurn ?? "");
     for (const ev of itemCompleted(item, this.itemStarts.get(item.id))) this.emit(ev);
     this.itemStarts.delete(item.id);
   }
@@ -252,6 +314,14 @@ export class CodexDriver implements Driver, ThreadListener {
   private emit(ev: EventFields): void {
     this.ctx.sink.event(this.activeTurn ? { turn_id: turnRef(this.activeTurn), ...ev } : ev);
   }
+}
+
+type TokenUsage = { last?: { totalTokens: number }; modelContextWindow?: number | null };
+
+/** The role's in-task compaction as Codex config: an absolute token count (limit × pct). */
+export function autoCompactConfig(context: SessionOpen["context"]): Record<string, number> {
+  if (!context?.limit_tokens || !context.in_task_pct) return {};
+  return { model_auto_compact_token_limit: Math.floor((context.limit_tokens * context.in_task_pct) / 100) };
 }
 
 /** Protocol turn ids start with t_; Codex turn ids are UUIDv7. */

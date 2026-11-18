@@ -2,7 +2,7 @@ import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { ApprovalBroker } from "../approvals.js";
 import type { Reply } from "../link/inbox.js";
-import type { GitResult, SessionClose, SessionInterrupt, SessionOpen, SessionReportItem, SessionSend, SessionSetMode, SessionWatch } from "../protocol.js";
+import type { GitResult, SessionClose, SessionCompact, SessionCompacted, SessionInterrupt, SessionOpen, SessionReportItem, SessionSend, SessionSetMode, SessionWatch } from "../protocol.js";
 import type { ToolBroker } from "../toolhost/broker.js";
 import { deferred, sleep, type Deferred } from "../util/async.js";
 import { readJsonFile, writeFileAtomic } from "../util/jsonl.js";
@@ -10,7 +10,7 @@ import type { Logger } from "../util/log.js";
 import { isInside, resolveInRoot } from "../util/paths.js";
 import { loadImages, removeImages, type ImageFetcher, type LoadedImage } from "./images.js";
 import { Session, type SendFn, type SessionHost, type SessionRecord } from "./session.js";
-import { ResumeFailed, type Driver, type DriverContext } from "./types.js";
+import { ResumeFailed, type CompactResult, type Driver, type DriverContext } from "./types.js";
 
 export class CommandError extends Error {
   constructor(readonly code: "unknown_session" | "busy" | "bad_schema" | "unsupported", message: string) {
@@ -36,6 +36,8 @@ export interface ManagerDeps {
   maxActive?: number;
   crashDelaysMs?: number[];
   prepareTimeoutMs?: number;
+  /** How long session.compact waits for a running turn to end (default 10 minutes, the console's timeout). */
+  compactWaitMs?: number;
 }
 
 const DEFAULT_CRASH_DELAYS = [5_000, 15_000, 45_000];
@@ -187,6 +189,7 @@ export class SessionManager implements SessionHost {
       s.held.push(body);
       return [];
     }
+    if (body.anchor !== undefined) this.setAnchor(s, body.anchor);
     if (await this.alreadyDelivered(s, body.msg_id)) return [delivered(s, body.msg_id)];
     try {
       await this.ensureRunning(s);
@@ -222,6 +225,44 @@ export class SessionManager implements SessionHost {
     const driver = s.driver ?? this.d.createDriver(s.spec, s.absCwd, s).driver;
     const found = await driver.deliveredMsgIds?.([msgId]).catch(() => new Set<string>());
     return found?.has(msgId) ?? false;
+  }
+
+  private setAnchor(s: Session, anchor: string): void {
+    s.taskAnchor = anchor;
+    this.persist(s);
+  }
+
+  /**
+   * session.compact (protocol.md §4.10): answered later with session.compacted, so the session's
+   * command lane is not held while the runtime summarizes. The anchor belongs to the task that
+   * just ended and is dropped.
+   */
+  compact(body: SessionCompact): Reply[] {
+    const s = this.sessions.get(body.session_id);
+    if (!s || s.gen !== body.open_gen || s.state === "closed") return [compacted(body, { ok: false, error: "no such session on this node" })];
+    this.setAnchor(s, "");
+    void this.runCompact(s, body).then((r) => this.send("session.compacted", compacted(body, r).body));
+    return [];
+  }
+
+  private async runCompact(s: Session, body: SessionCompact): Promise<CompactResult> {
+    try {
+      await this.ensureRunning(s);
+      await this.untilIdle(s);
+      if (!s.driver?.compact) return { ok: false, error: "the runtime cannot compact" };
+      return await s.driver.compact(body.instructions ?? "");
+    } catch (err) {
+      return { ok: false, error: (err as Error).message.slice(0, 1000) };
+    }
+  }
+
+  /** Waits for the session's running turn to end (compaction runs between turns). */
+  private async untilIdle(s: Session): Promise<void> {
+    const until = Date.now() + (this.d.compactWaitMs ?? 600_000);
+    while (s.driver?.busy) {
+      if (Date.now() > until) throw new Error("the session stayed busy");
+      await sleep(250);
+    }
   }
 
   async interrupt(body: SessionInterrupt): Promise<Reply[]> {
@@ -422,6 +463,7 @@ export class SessionManager implements SessionHost {
       s.state = "parked";
       s.released = rec.released;
       s.checkTranscript = true;
+      s.taskAnchor = rec.anchor ?? "";
       s.absCwd = resolveInRoot(this.d.root, rec.spec.cwd);
       this.sessions.set(s.id, s);
     }
@@ -431,6 +473,10 @@ export class SessionManager implements SessionHost {
 function opened(s: Session): Reply {
   const r = s.spec.resume ?? {};
   return { type: "session.opened", body: { session_id: s.id, open_gen: s.gen, sdk_session_id: r.sdk_session_id ?? null, codex_thread_id: r.codex_thread_id ?? null, init: s.init! } };
+}
+
+function compacted(body: SessionCompact, r: CompactResult): { type: "session.compacted"; body: SessionCompacted } {
+  return { type: "session.compacted", body: { session_id: body.session_id, open_gen: body.open_gen, compact_id: body.compact_id, ...r } };
 }
 
 function delivered(s: Session, msgId: string, turnId?: string): Reply {

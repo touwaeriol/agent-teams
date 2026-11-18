@@ -42,7 +42,35 @@ async function runTurn(threadId, turnId, text) {
     reply = `tool: ${r.content.map((c) => c.text).join("")}`;
     await client.close();
   }
+  if (text.includes("autocompact")) {
+    // the runtime compacts mid-turn by itself; the daemon may steer the anchor in
+    compaction(threadId, turnId);
+    await new Promise((r) => setTimeout(r, 100));
+  }
   note("item/completed", { item: { type: "agentMessage", id: "msg_1", text: reply }, completedAtMs: Date.now() });
+  usage(threadId, turnId, 12000);
+  note("turn/completed", { turn: { id: turnId, status: "completed", items: [], error: null } });
+}
+
+function usage(threadId, turnId, tokens) {
+  const b = { totalTokens: tokens, inputTokens: tokens - 100, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 100, reasoningOutputTokens: 0 };
+  write({ method: "thread/tokenUsage/updated", params: { threadId, turnId, tokenUsage: { total: b, last: b, modelContextWindow: 272000 } } });
+}
+
+function compaction(threadId, turnId) {
+  const note = (method, params) => write({ method, params: { threadId, turnId, ...params } });
+  note("item/started", { item: { type: "contextCompaction", id: "cc_1" }, startedAtMs: Date.now() });
+  note("item/completed", { item: { type: "contextCompaction", id: "cc_1" }, completedAtMs: Date.now() });
+  note("thread/compacted", {});
+}
+
+/** thread/compact/start: a turn holding only the compaction, like the app-server. */
+async function compactTurn(threadId) {
+  const turnId = `turn_${Math.random().toString(36).slice(2, 8)}`;
+  const note = (method, params) => write({ method, params: { threadId, turnId, ...params } });
+  note("turn/started", { turn: { id: turnId, status: "inProgress", items: [] } });
+  compaction(threadId, turnId);
+  usage(threadId, turnId, 3000);
   note("turn/completed", { turn: { id: turnId, status: "completed", items: [], error: null } });
 }
 
@@ -72,6 +100,10 @@ const handlers = {
     return { turn: { id: turnId, status: "inProgress", items: [] } };
   },
   "turn/steer": (p) => ({ turnId: p.expectedTurnId }),
+  "thread/compact/start": (p) => {
+    setTimeout(() => void compactTurn(p.threadId), 20);
+    return {};
+  },
   "thread/read": (p) => ({ thread: { id: p.threadId, turns: [{ items: [{ type: "userMessage", content: [{ type: "text", text: "<!-- m_seen -->\nold" }] }] }] } }),
   "turn/interrupt": () => ({}),
 };

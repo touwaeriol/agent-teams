@@ -11,10 +11,13 @@ export interface FakeQueryLog {
   interrupts: number;
   modes: string[];
   models?: string[];
+  /** What PreCompact / SessionStart hooks returned (compaction tests). */
+  hooks?: Array<{ event: string; output: unknown }>;
 }
 
 /**
- * Stand-in for the Agent SDK query(): replies "echo: <text>"; "use <tool> <json>" calls a
+ * Stand-in for the Agent SDK query(): replies "echo: <text>"; "/compact <instructions>" and
+ * "autocompact" compact like SDK 0.3.325 does (hooks, compact_boundary, context shrinks); "use <tool> <json>" calls a
  * platform tool through the real in-process MCP server; "run <command>" asks canUseTool for
  * Bash (after running the PreToolUse hooks) and reports the decision.
  */
@@ -59,6 +62,13 @@ class FakeQuery {
   }
 
   private model: string | undefined;
+  /** Context use: grows 1000 tokens per prompt, a compaction brings it back to 500. */
+  private tokens = 5000;
+
+  async getContextUsage() {
+    const max = Number(this.options.env?.CLAUDE_CODE_AUTO_COMPACT_WINDOW ?? 200000);
+    return { totalTokens: this.tokens, maxTokens: max, rawMaxTokens: max, percentage: Math.round((this.tokens / max) * 100), categories: [], gridRows: [] };
+  }
 
   async setModel(m?: string) {
     (this.log.models ??= []).push(m ?? "");
@@ -108,10 +118,36 @@ class FakeQuery {
         return;
       }
       this.transcript({ type: "user", uuid: msg.uuid, message: { role: "user", content: text } });
+      this.tokens += 1000;
       this.push({ type: "system", subtype: "init", tools: [...(this.options.tools as string[]), "mcp__platform__complete_task"], session_id: this.sid });
+      if (text.startsWith("/compact")) {
+        await this.compaction("manual", text.slice("/compact".length).trim() || null);
+        this.push({ type: "result", subtype: "success", result: "", is_error: false, num_turns: 0, duration_ms: 5, total_cost_usd: 0, usage: {}, session_id: this.sid });
+        continue;
+      }
+      if (text === "autocompact") await this.compaction("auto", null);
       const reply = await this.respond(text);
       this.push({ type: "assistant", message: { model: this.model ?? this.options.model, content: [{ type: "text", text: reply }] }, parent_tool_use_id: null, user_message_uuids: [msg.uuid], session_id: this.sid });
       this.push({ type: "result", subtype: "success", result: reply, is_error: false, num_turns: 1, duration_ms: 5, total_cost_usd: 0, usage: {}, session_id: this.sid });
+    }
+  }
+
+  /** PreCompact hooks, status compacting, compact_boundary, SessionStart(compact) hooks. */
+  private async compaction(trigger: "manual" | "auto", instructions: string | null): Promise<void> {
+    await this.runHooks("PreCompact", { trigger, custom_instructions: instructions });
+    this.push({ type: "system", subtype: "status", status: "compacting", session_id: this.sid });
+    const pre = this.tokens;
+    this.tokens = 500;
+    this.push({ type: "system", subtype: "compact_boundary", compact_metadata: { trigger, pre_tokens: pre, post_tokens: this.tokens }, session_id: this.sid });
+    await this.runHooks("SessionStart", { source: "compact" });
+  }
+
+  private async runHooks(event: "PreCompact" | "SessionStart", fields: Record<string, unknown>): Promise<void> {
+    for (const m of this.options.hooks?.[event] ?? []) {
+      for (const h of m.hooks) {
+        const output = await h({ hook_event_name: event, ...fields, session_id: this.sid, transcript_path: "", cwd: this.options.cwd! } as never, undefined, { signal: new AbortController().signal });
+        (this.log.hooks ??= []).push({ event, output });
+      }
     }
   }
 

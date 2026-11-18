@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import type { GitCleanup, GitKeptPath, GitPrepare, GitPurge, GitPush, GitResult, GitStatus } from "../protocol.js";
 import { deferred, withTimeout, type Deferred } from "../util/async.js";
 import type { Logger } from "../util/log.js";
@@ -12,6 +12,9 @@ import { untrustedRepoArgs } from "./safe.js";
 
 export type JobCredential = (jobId: string, repo: string, purpose: "read" | "push") => Promise<{ username: string; password: string } | null>;
 type ErrorCode = NonNullable<GitResult["error_code"]>;
+
+/** Where members keep the working notes of long tasks (git-ignored through info/exclude). */
+export const NOTES_DIR = ".agent-notes/";
 
 export interface GitJobsOptions {
   root: string;
@@ -121,6 +124,7 @@ export class GitJobs {
     const cloned = await this.ensureClone(b.job_id, b.repo, shared);
     if (!cloned && b.fetch !== false) await this.fetch(b.job_id, b.repo, shared);
     await this.git(shared, ["config", "core.hooksPath", this.o.platform.hooksDir]);
+    await this.excludeNotes(shared);
     if (isGitDir(cwd)) return { created: false, ...(b.sync ? await this.syncWorktree(cwd, b.branch, b.sync) : { head_sha: await this.head(cwd) }) };
     if (existsSync(cwd) && readdirSync(cwd).length > 0) throw new JobError("dirty_conflict", `${b.cwd} exists and is not a worktree`);
     const start = await this.startPoint(shared, b.branch, b.base);
@@ -197,8 +201,23 @@ export class GitJobs {
     const cloned = await this.ensureClone(b.job_id, b.repo, cwd);
     if (!cloned && b.fetch !== false) await this.fetch(b.job_id, b.repo, cwd);
     await this.git(cwd, ["config", "core.hooksPath", this.o.platform.hooksDir]);
+    await this.excludeNotes(cwd);
     if (cloned) await this.checkoutBranch(cwd, b.branch, b.base);
     return { created: cloned, head_sha: await this.head(cwd) };
+  }
+
+  /**
+   * Members keep working notes of long tasks in .agent-notes/ (shared-members.md §5.2): ignored
+   * through the repository's info/exclude, which every worktree of a shared clone reads.
+   */
+  private async excludeNotes(repo: string): Promise<void> {
+    const common = (await this.git(repo, ["rev-parse", "--git-common-dir"])).stdout.trim();
+    if (!common) return;
+    const file = join(resolve(repo, common), "info", "exclude");
+    const text = existsSync(file) ? readFileSync(file, "utf8") : "";
+    if (text.split("\n").includes(NOTES_DIR)) return;
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(file, `${text && !text.endsWith("\n") ? "\n" : ""}${NOTES_DIR}\n`);
   }
 
   private async checkoutBranch(cwd: string, branch: string, base?: string): Promise<void> {

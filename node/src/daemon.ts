@@ -13,7 +13,7 @@ import { Link } from "./link/client.js";
 import { Dispatcher, type CommandHandler } from "./link/dispatcher.js";
 import { Inbox, type Reply } from "./link/inbox.js";
 import { Outbox } from "./link/outbox.js";
-import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, FileDownload, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, SessionClose, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
+import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, FileDownload, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, SessionClose, SessionCompact, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
 import { probeClaude, probeCodex } from "./runtimes.js";
 import { ClaudeDriver, type QueryFn } from "./sessions/claude/driver.js";
 import { CodexDriver } from "./sessions/codex/driver.js";
@@ -66,7 +66,7 @@ export interface DaemonOptions {
   prefetchGh?: boolean;
 }
 
-const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "cred_helper", "upgrade", "file_download"];
+const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "cred_helper", "upgrade", "file_download", "context_usage", "session_compact"];
 
 /** Wires the link, command handlers, sessions, tools, git and credentials together. */
 export class Daemon {
@@ -214,6 +214,7 @@ export class Daemon {
       "session.send": { lane: session, run: (b) => s.sendMessage(b as unknown as SessionSend) },
       "session.interrupt": { run: (b) => s.interrupt(b as unknown as SessionInterrupt) },
       "session.set_mode": { lane: session, run: (b) => s.setMode(b as unknown as SessionSetMode) },
+      "session.compact": { lane: session, run: async (b) => s.compact(b as unknown as SessionCompact) },
       "session.close": { lane: session, run: (b) => s.close(b as unknown as SessionClose) },
       "session.watch": { run: async (b) => s.watch(b as unknown as SessionWatch) },
       "approval.resolve": { run: async (b) => [{ type: "approval.ack", body: this.approvals.resolve(b as unknown as ApprovalResolve) }] },

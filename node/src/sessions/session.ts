@@ -15,6 +15,8 @@ export interface SessionRecord {
   sdk_session_id: string | null;
   codex_thread_id: string | null;
   spec: SessionOpen;
+  /** The task anchor of the last session.send that carried one. */
+  anchor?: string;
 }
 
 export interface SessionHost {
@@ -41,6 +43,8 @@ export class Session implements SessionSink {
   absCwd = "";
   /** Set for sessions loaded from disk: the first send checks the transcript for duplicates. */
   checkTranscript = false;
+  /** The current task anchor (session.send anchor), re-injected after the runtime compacts. */
+  taskAnchor = "";
   private lastEventNo = 0;
 
   constructor(public spec: SessionOpen, private readonly host: SessionHost) {}
@@ -73,6 +77,7 @@ export class Session implements SessionSink {
     return {
       session_id: this.id, open_gen: this.gen, kind: this.spec.runtime, state: this.state, released: this.released,
       sdk_session_id: this.spec.resume?.sdk_session_id ?? null, codex_thread_id: this.spec.resume?.codex_thread_id ?? null, spec: this.spec,
+      ...(this.taskAnchor ? { anchor: this.taskAnchor } : {}),
     };
   }
 
@@ -111,5 +116,9 @@ export class Session implements SessionSink {
 
   exited(err: Error): void {
     this.host.onExit(this, err);
+  }
+
+  anchor(): string {
+    return this.taskAnchor;
   }
 }

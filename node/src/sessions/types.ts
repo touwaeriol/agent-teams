@@ -1,4 +1,4 @@
-import type { ApprovalCancel, ApprovalRequest, ApprovalResolve, SessionEvent, SessionInit, SessionOpen } from "../protocol.js";
+import type { ApprovalCancel, ApprovalRequest, ApprovalResolve, ContextUsage, SessionEvent, SessionInit, SessionOpen } from "../protocol.js";
 import type { McpToolResult } from "../toolhost/broker.js";
 import type { Logger } from "../util/log.js";
 import type { LoadedImage } from "./images.js";
@@ -17,6 +17,8 @@ export interface SessionSink {
   callTool(tool: string, args: Record<string, unknown>, toolUseId?: string): Promise<McpToolResult>;
   /** The runtime process went away without close(). */
   exited(err: Error): void;
+  /** The current task anchor (session.send anchor; "" = none), re-injected after the runtime compacts. */
+  anchor(): string;
 }
 
 export interface DriverContext {
@@ -52,6 +54,15 @@ export interface Driver {
   readonly busy: boolean;
   /** msg_ids already present in the runtime's transcript (dedup after a daemon restart). */
   deliveredMsgIds?(msgIds: string[]): Promise<Set<string>>;
+  /** Compacts the context now (session.compact); called between turns. */
+  compact?(instructions: string): Promise<CompactResult>;
+}
+
+/** The outcome of session.compact. */
+export interface CompactResult {
+  ok: boolean;
+  context?: ContextUsage;
+  error?: string;
 }
 
 export class ResumeFailed extends Error {}

@@ -157,3 +157,34 @@ describe("codex error mapping", () => {
     expect(errorNotification({ message: "boom", codexErrorInfo: "other" }, false)).toMatchObject({ kind: "error", code: "protocol" });
   });
 });
+
+describe("codex context management", () => {
+  it("sets the auto-compact token limit, reports context use and compacts on session.compact", async () => {
+    const calls = await startCodex();
+    h!.console.command("session.open", { ...codexOpen("s_XC"), context: { limit_tokens: 600000, in_task_pct: 80 } });
+    await h!.console.waitType("session.opened");
+    expect(calls().find((c) => c.method === "thread/start")!.params.config.model_auto_compact_token_limit).toBe(480000);
+    h!.console.command("session.release", { session_id: "s_XC", open_gen: 1 });
+    h!.console.command("session.send", { session_id: "s_XC", msg_id: "m_c1", text: "hello", priority: "next", kind: "task", anchor: "[任务锚点 t5] 限流" });
+    const ended = await h!.console.waitType("session.event", (b) => b.kind === "turn_ended");
+    expect(ended.body.context).toEqual({ used_tokens: 12000, max_tokens: 272000 });
+    h!.console.command("session.compact", { session_id: "s_XC", open_gen: 1, compact_id: "cp_1", instructions: "ignored by codex" });
+    const done = await h!.console.waitType("session.compacted");
+    expect(done.body).toEqual({ session_id: "s_XC", open_gen: 1, compact_id: "cp_1", ok: true, context: { used_tokens: 3000, max_tokens: 272000 } });
+    expect(calls().filter((c) => c.method === "thread/compact/start").map((c) => c.params)).toEqual([{ threadId: "th_1" }]);
+    expect(calls().some((c) => c.method === "turn/steer")).toBe(false); // the console's compaction drops the anchor
+  });
+
+  it("steers the task anchor into the turn once after the runtime compacted by itself", async () => {
+    const calls = await startCodex();
+    h!.console.command("session.open", codexOpen("s_XA"));
+    await h!.console.waitType("session.opened");
+    h!.console.command("session.release", { session_id: "s_XA", open_gen: 1 });
+    h!.console.command("session.send", { session_id: "s_XA", msg_id: "m_a1", text: "autocompact please", priority: "next", kind: "task", anchor: "[任务锚点 t7] 拆分模块" });
+    await h!.console.waitType("session.event", (b) => b.kind === "turn_ended");
+    const steers = calls().filter((c) => c.method === "turn/steer");
+    expect(steers).toHaveLength(1);
+    expect(steers[0]!.params.input[0].text).toContain("[任务锚点 t7] 拆分模块");
+    expect(h!.console.ofType("session.event").filter((f) => f.body.kind === "compacting").map((f) => f.body.on)).toEqual([true, false]);
+  });
+});
