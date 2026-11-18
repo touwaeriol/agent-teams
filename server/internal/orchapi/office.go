@@ -21,10 +21,24 @@ const maxReplay = 6 * time.Hour
 // BoardCounts are task counts of one thread by status.
 type BoardCounts map[string]int
 
+// maxQueueCards is how many pending tasks the office board lists.
+const maxQueueCards = 40
+
 // Board is the task board part of the office.
 type Board struct {
 	Claimable int                    `json:"claimable"`
 	ByThread  map[string]BoardCounts `json:"by_thread" doc:"By thread number"`
+	Queue     []QueueCard            `json:"queue" doc:"The project queue: pending tasks of live threads by thread, priority and age (at most 40)"`
+}
+
+// QueueCard is one pending task on the office board (shared-members.md §9).
+type QueueCard struct {
+	ThreadNo    int    `json:"thread_no"`
+	ID          string `json:"id"`
+	Role        string `json:"role"`
+	Assignee    string `json:"assignee" doc:"Named member, or empty when anyone of the role may claim it"`
+	Locked      bool   `json:"locked" doc:"Some dependency is not done yet"`
+	ReservedFor string `json:"reserved_for" doc:"Rework kept for this member until the reservation runs out (empty: none or expired)"`
 }
 
 // OfficeSnapshot is GET /api/projects/{pid}/office.
@@ -190,7 +204,7 @@ func (a *API) layoutOf(ctx context.Context, p store.Project) (string, string) {
 }
 
 func board(ctx context.Context, q core.DB, projectID string) (Board, error) {
-	b := Board{ByThread: map[string]BoardCounts{}}
+	b := Board{ByThread: map[string]BoardCounts{}, Queue: []QueueCard{}}
 	rows, err := store.Query(ctx, q, `SELECT th.no, t.status, count(*) FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
 		WHERE th.project_id = $1 AND th.status IN ('queued','running','waiting','review','paused') GROUP BY th.no, t.status`, projectID)
 	if err != nil {
@@ -212,7 +226,37 @@ func board(ctx context.Context, q core.DB, projectID string) (Board, error) {
 			b.Claimable += n
 		}
 	}
-	return b, rows.Err()
+	if err := rows.Err(); err != nil {
+		return b, err
+	}
+	b.Queue, err = queueCards(ctx, q, projectID)
+	return b, err
+}
+
+// queueCards lists the project's pending tasks for the board: locked while a dependency is not
+// done, reserved_for only while the reservation holds. A named assignee that is a role is not
+// a person, so it is left out.
+func queueCards(ctx context.Context, q core.DB, projectID string) ([]QueueCard, error) {
+	rows, err := store.Query(ctx, q, `SELECT th.no, t.id, t.role, CASE WHEN t.assignee = t.role THEN '' ELSE t.assignee END,
+		EXISTS (SELECT 1 FROM jsonb_array_elements_text(t.depends_on) dep(id) LEFT JOIN at_tasks d
+			ON d.conversation_id = t.conversation_id AND d.id = dep.id WHERE d.status IS DISTINCT FROM 'done'),
+		CASE WHEN t.reserved_until > now() THEN t.reserved_for ELSE '' END
+		FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
+		WHERE th.project_id = $1 AND th.status IN ('queued','running','waiting','review','paused') AND t.status = 'pending'
+		ORDER BY th.no, t.priority DESC, t.created_at, t.id LIMIT $2`, projectID, maxQueueCards)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []QueueCard{}
+	for rows.Next() {
+		var c QueueCard
+		if err := rows.Scan(&c.ThreadNo, &c.ID, &c.Role, &c.Assignee, &c.Locked, &c.ReservedFor); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 func (a *API) officeReplay(ctx context.Context, in *replayInput) (*replayOutput, error) {

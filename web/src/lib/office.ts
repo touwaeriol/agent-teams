@@ -10,10 +10,51 @@ export function toOfficeEmployees(s: Pick<OfficeSnapshot, "employees">): OfficeE
     name: e.name,
     tier: e.tier,
     role: e.role,
+    title: e.title,
     thread_no: e.thread_no,
     look: e.look,
     status: (e.status as EmployeeStatus | null) ?? null,
+    ...(e.sort === undefined ? {} : { sort: e.sort }),
+    ...(e.instance ? { instance: e.instance } : {}),
   }));
+}
+
+/**
+ * The roster after the live status frames: a frame that names the employee's thread moves it
+ * there (a member claiming a task in another thread), so its desk tag and table strip follow.
+ */
+export function rosterAfter(employees: OfficeEmployee[], frames: StatusFrame[], after: number): OfficeEmployee[] {
+  const latest = new Map<string, number | null>();
+  for (const f of frames) {
+    if (f.seq <= after || typeof f.employee === "string" || f.employee.thread_no === undefined) continue;
+    latest.set(f.employee.id, f.employee.thread_no);
+  }
+  if (!latest.size) return employees;
+  return employees.map((e) => (latest.has(e.id) && e.tier === "member" ? { ...e, thread_no: latest.get(e.id)! } : e));
+}
+
+export interface StaffSummary {
+  headcount: number;
+  working: number;
+  idle: number;
+  threads: number;
+}
+
+const RUNNING_THREAD = new Set(["running", "waiting", "review", "paused"]);
+
+/**
+ * The office top bar (shared-members.md §9): headcount = the project's members (the coordinator
+ * and the leads are management, not counted); working = members holding a task; threads = threads
+ * under way (queued ones not yet).
+ */
+export function staffSummary(employees: OfficeEmployee[], statuses: Map<string, EmployeeStatus>, threads: { status: string }[]): StaffSummary {
+  const members = employees.filter((e) => e.tier === "member");
+  const working = members.filter((e) => Boolean((statuses.get(e.id) ?? e.status)?.task_id)).length;
+  return { headcount: members.length, working, idle: members.length - working, threads: threads.filter((t) => RUNNING_THREAD.has(t.status)).length };
+}
+
+export function staffSummaryText(s: StaffSummary): string {
+  return `编制 ${s.headcount} 人 · 干活 ${s.working} · 空闲 ${s.idle} · 讨论串 ${s.threads} 个进行中`;
 }
 
 export function toOfficeThreads(threads: ThreadView[]): OfficeThread[] {

@@ -539,11 +539,22 @@
           "claimable": {
             "format": "int64",
             "type": "integer"
+          },
+          "queue": {
+            "description": "The project queue: pending tasks of live threads by thread, priority and age (at most 40)",
+            "items": {
+              "$ref": "#/components/schemas/QueueCard"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
         "required": [
           "claimable",
-          "by_thread"
+          "by_thread",
+          "queue"
         ],
         "type": "object"
       },
@@ -1446,6 +1457,11 @@
           "id": {
             "type": "string"
           },
+          "instance": {
+            "description": "Instance number among the role's employees (dev-2 → 2)",
+            "format": "int64",
+            "type": "integer"
+          },
           "look": {
             "$ref": "#/components/schemas/Look"
           },
@@ -1460,6 +1476,11 @@
           },
           "runtime": {
             "type": "string"
+          },
+          "sort": {
+            "description": "Position of the employee's role in the team template (office desk rows)",
+            "format": "int64",
+            "type": "integer"
           },
           "status": {
             "$ref": "#/components/schemas/EmployeeStatusView"
@@ -1487,6 +1508,8 @@
           "title",
           "runtime",
           "thread_no",
+          "sort",
+          "instance",
           "node",
           "look",
           "status",
@@ -1506,6 +1529,11 @@
           },
           "id": {
             "type": "string"
+          },
+          "instance": {
+            "description": "Instance number among the role's employees (dev-2 → 2)",
+            "format": "int64",
+            "type": "integer"
           },
           "look": {
             "$ref": "#/components/schemas/Look"
@@ -1533,6 +1561,11 @@
           },
           "session": {
             "$ref": "#/components/schemas/SessionBrief"
+          },
+          "sort": {
+            "description": "Position of the employee's role in the team template (office desk rows)",
+            "format": "int64",
+            "type": "integer"
           },
           "status": {
             "$ref": "#/components/schemas/EmployeeStatusView"
@@ -1563,6 +1596,8 @@
           "title",
           "runtime",
           "thread_no",
+          "sort",
+          "instance",
           "node",
           "look",
           "status",
@@ -3981,6 +4016,42 @@
           "decided_by",
           "created_at",
           "answered_at"
+        ],
+        "type": "object"
+      },
+      "QueueCard": {
+        "additionalProperties": false,
+        "properties": {
+          "assignee": {
+            "description": "Named member, or empty when anyone of the role may claim it",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "locked": {
+            "description": "Some dependency is not done yet",
+            "type": "boolean"
+          },
+          "reserved_for": {
+            "description": "Rework kept for this member until the reservation runs out (empty: none or expired)",
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "thread_no": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "thread_no",
+          "id",
+          "role",
+          "assignee",
+          "locked",
+          "reserved_for"
         ],
         "type": "object"
       },

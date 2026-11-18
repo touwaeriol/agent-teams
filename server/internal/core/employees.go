@@ -200,6 +200,7 @@ func LeaveThread(ctx context.Context, tx *Tx, threadID string) error {
 // task, else its current thread; busy_elsewhere compares that task's thread with $1 (the thread
 // the list is for; NULL: never).
 const briefSelect = `SELECT e.id, e.name, e.tier, e.role, COALESCE(e.spec->>'title', ''), e.runtime, t.no,
+	COALESCE((e.spec->>'sort')::int, 0), e.instance_no,
 	n.id, n.name, e.look, st.state, st.substate, st.bubble, st.bubble_kind, st.task_id, st.task_kind, st.since, st.seq,
 	COALESCE(cur.thread_id <> $1::text, false)
 	FROM at_employees e LEFT JOIN at_threads o ON o.id = e.thread_id
@@ -250,7 +251,7 @@ func (s *Store) scanBrief(r Scanner) (EmployeeBrief, error) {
 	var nodeID, nodeName, state, sub, bubble, bk, taskID, taskKind *string
 	var since *time.Time
 	var seq *int64
-	err := r.Scan(&b.ID, &b.Name, &b.Tier, &b.Role, &b.Title, &b.Runtime, &b.ThreadNo, &nodeID, &nodeName, &b.Look,
+	err := r.Scan(&b.ID, &b.Name, &b.Tier, &b.Role, &b.Title, &b.Runtime, &b.ThreadNo, &b.Sort, &b.Instance, &nodeID, &nodeName, &b.Look,
 		&state, &sub, &bubble, &bk, &taskID, &taskKind, &since, &seq, &b.BusyElsewhere)
 	if err != nil {
 		return b, err

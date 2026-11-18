@@ -38,6 +38,8 @@ type EmployeeBrief struct {
 	Title    string              `json:"title"`
 	Runtime  string              `json:"runtime"`
 	ThreadNo *int                `json:"thread_no" doc:"The employee's thread: a lead's own; for a project member the thread of its current task, else the thread it last worked in (null: none)"`
+	Sort     int                 `json:"sort" doc:"Position of the employee's role in the team template (office desk rows)"`
+	Instance int                 `json:"instance" doc:"Instance number among the role's employees (dev-2 → 2)"`
 	Node     *NodeRef            `json:"node"`
 	Look     store.Look          `json:"look"`
 	Status   *EmployeeStatusView `json:"status"`

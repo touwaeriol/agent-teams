@@ -127,9 +127,11 @@ function onMainTask(qc: QueryClient, pid: string, d: { thread_no: number; main_t
   if (t) patchThread(qc, pid, t.id, (x) => ({ ...x, main_tasks: d.main_tasks }));
 }
 
+/** A task changed: its thread's list, and the office (the board shows the project queue). */
 function onTask(qc: QueryClient, pid: string, d: { thread_no: number; task: TaskView }) {
   const t = threadOf(qc, pid, d.thread_no);
   if (t) qc.setQueryData<TaskView[]>(keys.tasks(t.id), (list) => (list ? upsert(list, d.task) : list));
+  qc.invalidateQueries({ queryKey: keys.office(pid) });
 }
 
 function onQuestion(qc: QueryClient, pid: string, d: { thread_no?: number | null; question: QuestionView }) {

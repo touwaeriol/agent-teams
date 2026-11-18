@@ -75,6 +75,10 @@ export interface EmployeeBrief {
   thread_no?: number | null;
   /** In a thread's member list: the member's current task is in another thread (thread_no). */
   busy_elsewhere?: boolean;
+  /** Position of the role in the team template (office desk rows). */
+  sort?: number;
+  /** Instance number among the role's employees (dev-2 → 2). */
+  instance?: number;
 }
 
 export interface MainTaskView {
@@ -456,11 +460,21 @@ export interface OfficeSnapshot {
   layout_version: string;
   threads: ThreadView[];
   employees: OfficeEmployeeView[];
-  board: { claimable: number; by_thread?: Record<string, Record<string, number>> };
+  board: { claimable: number; by_thread?: Record<string, Record<string, number>>; queue?: QueueCardView[] };
   nodes: NodeBrief[];
   merge_queue: MergeEntryView[];
   ci: Record<string, CheckView[]>;
   last_event_id: number;
+}
+
+/** One pending task of the project queue (office task board). */
+export interface QueueCardView {
+  thread_no: number;
+  id: string;
+  role: string;
+  assignee: string;
+  locked: boolean;
+  reserved_for: string;
 }
 
 export interface ReplayEvent {
