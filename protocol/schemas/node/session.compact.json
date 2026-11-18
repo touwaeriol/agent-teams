@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/session.compact.json",
+  "title": "SessionCompact",
+  "description": "Compact the session's context now (between tasks, shared-members.md §5.3). The daemon runs it when the session is between turns and answers session.compacted; the stored task anchor is cleared (the task it belonged to is over).",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "compact_id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "session_id",
+    "open_gen",
+    "compact_id"
+  ],
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "open_gen": {
+      "$ref": "common.json#/$defs/OpenGen"
+    },
+    "compact_id": {
+      "description": "Chosen by the console; session.compacted echoes it.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "instructions": {
+      "description": "What the summary must keep (Claude: /compact <instructions>; Codex has no instructions and ignores it).",
+      "type": "string",
+      "maxLength": 8000
+    }
+  }
+}

@@ -510,6 +510,44 @@
     {
       "properties": {
         "type": {
+          "const": "session.compact"
+        },
+        "body": {
+          "$ref": "session.compact.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^c_"
+        }
+      },
+      "required": [
+        "type",
+        "body",
+        "seq"
+      ]
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "session.compacted"
+        },
+        "body": {
+          "$ref": "session.compacted.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^n_"
+        }
+      },
+      "required": [
+        "type",
+        "body",
+        "seq"
+      ]
+    },
+    {
+      "properties": {
+        "type": {
           "const": "session.delivered"
         },
         "body": {

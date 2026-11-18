@@ -134,6 +134,10 @@
       "description": "turn_ended: token usage as reported by the runtime.",
       "type": "object"
     },
+    "context": {
+      "description": "turn_ended: context use after the turn (daemons with feature context_usage).",
+      "$ref": "common.json#/$defs/ContextUsage"
+    },
     "on": {
       "description": "compacting / subagent.",
       "type": "boolean"

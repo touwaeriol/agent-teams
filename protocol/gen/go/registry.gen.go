@@ -29,6 +29,8 @@ const (
 	TypeNodeUpgradeResult  = "node.upgrade_result"
 	TypeSessionClose       = "session.close"
 	TypeSessionClosed      = "session.closed"
+	TypeSessionCompact     = "session.compact"
+	TypeSessionCompacted   = "session.compacted"
 	TypeSessionDelivered   = "session.delivered"
 	TypeSessionEvent       = "session.event"
 	TypeSessionInterrupt   = "session.interrupt"
@@ -75,6 +77,8 @@ var Messages = map[string]MessageMeta{
 	TypeNodeUpgradeResult:  {Direction: NodeToConsole, Reliable: true, Key: nil, New: func() any { return new(NodeUpgradeResult) }},
 	TypeSessionClose:       {Direction: ConsoleToNode, Reliable: true, Key: []string{"session_id", "open_gen"}, New: func() any { return new(SessionClose) }},
 	TypeSessionClosed:      {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "open_gen"}, New: func() any { return new(SessionClosed) }},
+	TypeSessionCompact:     {Direction: ConsoleToNode, Reliable: true, Key: []string{"compact_id"}, New: func() any { return new(SessionCompact) }},
+	TypeSessionCompacted:   {Direction: NodeToConsole, Reliable: true, Key: []string{"compact_id"}, New: func() any { return new(SessionCompacted) }},
 	TypeSessionDelivered:   {Direction: NodeToConsole, Reliable: true, Key: []string{"msg_id"}, New: func() any { return new(SessionDelivered) }},
 	TypeSessionEvent:       {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "event_no"}, New: func() any { return new(SessionEvent) }},
 	TypeSessionInterrupt:   {Direction: ConsoleToNode, Reliable: true, Key: []string{"id"}, New: func() any { return new(SessionInterrupt) }},

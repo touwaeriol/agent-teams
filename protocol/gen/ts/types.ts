@@ -326,6 +326,22 @@ export interface TodoItem {
   active_form?: string;
 }
 /**
+ * How much of the context window a session uses (shared-members.md §5.3).
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "ContextUsage".
+ */
+export interface ContextUsage {
+  /**
+   * Tokens in the context now (Claude: getContextUsage totalTokens; Codex: the last request's total tokens).
+   */
+  used_tokens: number;
+  /**
+   * The window the runtime measures against (Claude: the autocompact window; Codex: the model's context window); 0 when unknown.
+   */
+  max_tokens: number;
+}
+/**
  * Credential helper asks for a short-lived token. Unreliable, retried after 10 s with the same req_id; never logged.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -662,7 +678,7 @@ export interface Hello {
   capacity?: Capacity;
   runtimes?: Runtimes;
   /**
-   * Feature names, e.g. sessions, codex_app_server, git_worktree, cred_helper, upgrade.
+   * Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, context_usage (turn_ended carries context), session_compact (session.compact).
    */
   features?: string[];
   isolated?: boolean;
@@ -769,6 +785,51 @@ export interface SessionClosed {
   session_id: SessionId;
   open_gen?: OpenGen;
   reason?: string;
+}
+/**
+ * Compact the session's context now (between tasks, shared-members.md §5.3). The daemon runs it when the session is between turns and answers session.compacted; the stored task anchor is cleared (the task it belonged to is over).
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "SessionCompact".
+ */
+export interface SessionCompact {
+  session_id: SessionId;
+  open_gen: OpenGen;
+  /**
+   * Chosen by the console; session.compacted echoes it.
+   */
+  compact_id: string;
+  /**
+   * What the summary must keep (Claude: /compact <instructions>; Codex has no instructions and ignores it).
+   */
+  instructions?: string;
+}
+/**
+ * session.compact finished (ok=false: the runtime did not compact, e.g. too little context or an error).
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "SessionCompacted".
+ */
+export interface SessionCompacted {
+  session_id: SessionId;
+  open_gen: OpenGen;
+  compact_id: string;
+  ok: boolean;
+  context?: ContextUsage1;
+  error?: string;
+}
+/**
+ * Context use after the compaction.
+ */
+export interface ContextUsage1 {
+  /**
+   * Tokens in the context now (Claude: getContextUsage totalTokens; Codex: the last request's total tokens).
+   */
+  used_tokens: number;
+  /**
+   * The window the runtime measures against (Claude: the autocompact window; Codex: the model's context window); 0 when unknown.
+   */
+  max_tokens: number;
 }
 /**
  * session.send was pushed into the session.
@@ -882,6 +943,7 @@ export interface SessionEvent {
   usage?: {
     [k: string]: unknown;
   };
+  context?: ContextUsage2;
   /**
    * compacting / subagent.
    */
@@ -921,6 +983,19 @@ export interface SessionEvent {
    * plan: the Markdown plan of an ExitPlanMode call, truncated to 32 KB.
    */
   plan?: string;
+}
+/**
+ * turn_ended: context use after the turn (daemons with feature context_usage).
+ */
+export interface ContextUsage2 {
+  /**
+   * Tokens in the context now (Claude: getContextUsage totalTokens; Codex: the last request's total tokens).
+   */
+  used_tokens: number;
+  /**
+   * The window the runtime measures against (Claude: the autocompact window; Codex: the model's context window); 0 when unknown.
+   */
+  max_tokens: number;
 }
 /**
  * Interrupt the running turn.
@@ -1215,6 +1290,20 @@ export interface SessionOpen {
     [k: string]: string;
   };
   /**
+   * Context management of the role (shared-members.md §5.1): the runtime compacts by itself at limit_tokens × in_task_pct / 100 (without limit_tokens: in_task_pct of the model's window); focus is added to the instructions of such a compaction.
+   */
+  context?: {
+    /**
+     * The role's context limit in tokens.
+     */
+    limit_tokens?: number;
+    in_task_pct?: number;
+    /**
+     * What a compaction must keep.
+     */
+    focus?: string;
+  };
+  /**
    * Install the credential helper and gh wrapper.
    */
   git_credentials?: boolean;
@@ -1461,6 +1550,10 @@ export interface SessionSend {
     | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef]
     | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef]
     | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef];
+  /**
+   * The task anchor (task id, instruction, branch, hand-off notes, progress). The daemon keeps the latest one and re-injects it after the runtime compacts the session during a task; an empty string clears it.
+   */
+  anchor?: string;
 }
 /**
  * Change permission mode and/or model of a session.

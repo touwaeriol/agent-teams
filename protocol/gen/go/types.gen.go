@@ -1423,6 +1423,44 @@ func (j *ContentBlock) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+// How much of the context window a session uses (shared-members.md §5.3).
+type ContextUsage struct {
+	// The window the runtime measures against (Claude: the autocompact window; Codex:
+	// the model's context window); 0 when unknown.
+	MaxTokens int `json:"max_tokens"`
+
+	// Tokens in the context now (Claude: getContextUsage totalTokens; Codex: the last
+	// request's total tokens).
+	UsedTokens int `json:"used_tokens"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ContextUsage) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["max_tokens"]; raw != nil && !ok {
+		return fmt.Errorf("field max_tokens in ContextUsage: required")
+	}
+	if _, ok := raw["used_tokens"]; raw != nil && !ok {
+		return fmt.Errorf("field used_tokens in ContextUsage: required")
+	}
+	type Plain ContextUsage
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if 0 > plain.MaxTokens {
+		return fmt.Errorf("field %s: must be >= %v", "max_tokens", 0)
+	}
+	if 0 > plain.UsedTokens {
+		return fmt.Errorf("field %s: must be >= %v", "used_tokens", 0)
+	}
+	*j = ContextUsage(plain)
+	return nil
+}
+
 // Credential helper asks for a short-lived token. Unreliable, retried after 10 s
 // with the same req_id; never logged.
 type CredRequest struct {
@@ -3158,8 +3196,9 @@ type Hello struct {
 	// Outbox epoch; changes only when the state directory is wiped.
 	Epoch string `json:"epoch"`
 
-	// Feature names, e.g. sessions, codex_app_server, git_worktree, cred_helper,
-	// upgrade.
+	// Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync,
+	// cred_helper, upgrade, context_usage (turn_ended carries context),
+	// session_compact (session.compact).
 	Features []string `json:"features,omitempty,omitzero"`
 
 	// Host corresponds to the JSON schema field "host".
@@ -5876,6 +5915,115 @@ func (j *SessionClosed) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+// Compact the session's context now (between tasks, shared-members.md §5.3). The
+// daemon runs it when the session is between turns and answers session.compacted;
+// the stored task anchor is cleared (the task it belonged to is over).
+type SessionCompact struct {
+	// Chosen by the console; session.compacted echoes it.
+	CompactID string `json:"compact_id"`
+
+	// What the summary must keep (Claude: /compact <instructions>; Codex has no
+	// instructions and ignores it).
+	Instructions *string `json:"instructions,omitempty,omitzero"`
+
+	// OpenGen corresponds to the JSON schema field "open_gen".
+	OpenGen OpenGen `json:"open_gen"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID SessionID `json:"session_id"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SessionCompact) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["compact_id"]; raw != nil && !ok {
+		return fmt.Errorf("field compact_id in SessionCompact: required")
+	}
+	if _, ok := raw["open_gen"]; raw != nil && !ok {
+		return fmt.Errorf("field open_gen in SessionCompact: required")
+	}
+	if _, ok := raw["session_id"]; raw != nil && !ok {
+		return fmt.Errorf("field session_id in SessionCompact: required")
+	}
+	type Plain SessionCompact
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.CompactID)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "compact_id", 1)
+	}
+	if utf8.RuneCountInString(string(plain.CompactID)) > 64 {
+		return fmt.Errorf("field %s length: must be <= %d", "compact_id", 64)
+	}
+	if plain.Instructions != nil && utf8.RuneCountInString(string(*plain.Instructions)) > 8000 {
+		return fmt.Errorf("field %s length: must be <= %d", "instructions", 8000)
+	}
+	*j = SessionCompact(plain)
+	return nil
+}
+
+// session.compact finished (ok=false: the runtime did not compact, e.g. too little
+// context or an error).
+type SessionCompacted struct {
+	// CompactID corresponds to the JSON schema field "compact_id".
+	CompactID string `json:"compact_id"`
+
+	// Context use after the compaction.
+	Context *ContextUsage `json:"context,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Ok corresponds to the JSON schema field "ok".
+	Ok bool `json:"ok"`
+
+	// OpenGen corresponds to the JSON schema field "open_gen".
+	OpenGen OpenGen `json:"open_gen"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID SessionID `json:"session_id"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SessionCompacted) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["compact_id"]; raw != nil && !ok {
+		return fmt.Errorf("field compact_id in SessionCompacted: required")
+	}
+	if _, ok := raw["ok"]; raw != nil && !ok {
+		return fmt.Errorf("field ok in SessionCompacted: required")
+	}
+	if _, ok := raw["open_gen"]; raw != nil && !ok {
+		return fmt.Errorf("field open_gen in SessionCompacted: required")
+	}
+	if _, ok := raw["session_id"]; raw != nil && !ok {
+		return fmt.Errorf("field session_id in SessionCompacted: required")
+	}
+	type Plain SessionCompacted
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.CompactID)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "compact_id", 1)
+	}
+	if utf8.RuneCountInString(string(plain.CompactID)) > 64 {
+		return fmt.Errorf("field %s length: must be <= %d", "compact_id", 64)
+	}
+	if plain.Error != nil && utf8.RuneCountInString(string(*plain.Error)) > 1000 {
+		return fmt.Errorf("field %s length: must be <= %d", "error", 1000)
+	}
+	*j = SessionCompacted(plain)
+	return nil
+}
+
 // session.send was pushed into the session.
 type SessionDelivered struct {
 	// MsgID corresponds to the JSON schema field "msg_id".
@@ -5926,6 +6074,9 @@ type SessionEvent struct {
 
 	// error.
 	Code *SessionEventCode `json:"code,omitempty,omitzero"`
+
+	// turn_ended: context use after the turn (daemons with feature context_usage).
+	Context *ContextUsage `json:"context,omitempty,omitzero"`
 
 	// turn_ended.
 	CostUSD *float64 `json:"cost_usd,omitempty,omitzero"`
@@ -6317,6 +6468,12 @@ type SessionOpen struct {
 	// Set when runtime = codex.
 	Codex *CodexSessionOptions `json:"codex,omitempty,omitzero"`
 
+	// Context management of the role (shared-members.md §5.1): the runtime compacts
+	// by itself at limit_tokens × in_task_pct / 100 (without limit_tokens:
+	// in_task_pct of the model's window); focus is added to the instructions of such
+	// a compaction.
+	Context *SessionOpenContext `json:"context,omitempty,omitzero"`
+
 	// Cwd corresponds to the JSON schema field "cwd".
 	Cwd RelPath `json:"cwd"`
 
@@ -6367,6 +6524,43 @@ type SessionOpen struct {
 	// outside the worktree and loads it (options.plugins + options.skills). Codex
 	// gets them in developer_instructions instead.
 	Skills []SkillBundle `json:"skills,omitempty,omitzero"`
+}
+
+// Context management of the role (shared-members.md §5.1): the runtime compacts by
+// itself at limit_tokens × in_task_pct / 100 (without limit_tokens: in_task_pct of
+// the model's window); focus is added to the instructions of such a compaction.
+type SessionOpenContext struct {
+	// What a compaction must keep.
+	Focus *string `json:"focus,omitempty,omitzero"`
+
+	// InTaskPct corresponds to the JSON schema field "in_task_pct".
+	InTaskPct *int `json:"in_task_pct,omitempty,omitzero"`
+
+	// The role's context limit in tokens.
+	LimitTokens *int `json:"limit_tokens,omitempty,omitzero"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SessionOpenContext) UnmarshalJSON(value []byte) error {
+	type Plain SessionOpenContext
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.Focus != nil && utf8.RuneCountInString(string(*plain.Focus)) > 2000 {
+		return fmt.Errorf("field %s length: must be <= %d", "focus", 2000)
+	}
+	if plain.InTaskPct != nil && 100 < *plain.InTaskPct {
+		return fmt.Errorf("field %s: must be <= %v", "in_task_pct", 100)
+	}
+	if plain.InTaskPct != nil && 1 > *plain.InTaskPct {
+		return fmt.Errorf("field %s: must be >= %v", "in_task_pct", 1)
+	}
+	if plain.LimitTokens != nil && 10000 > *plain.LimitTokens {
+		return fmt.Errorf("field %s: must be >= %v", "limit_tokens", 10000)
+	}
+	*j = SessionOpenContext(plain)
+	return nil
 }
 
 // Extra non-secret environment; the daemon adds PATH/HOME/MCP_TOOL_TIMEOUT/git
@@ -6578,6 +6772,11 @@ func (j *SessionReportItem) UnmarshalJSON(value []byte) error {
 
 // Deliver a message to the employee.
 type SessionSend struct {
+	// The task anchor (task id, instruction, branch, hand-off notes, progress). The
+	// daemon keeps the latest one and re-injects it after the runtime compacts the
+	// session during a task; an empty string clears it.
+	Anchor *string `json:"anchor,omitempty,omitzero"`
+
 	// Images to deliver with the text (at most 8).
 	Images []ImageRef `json:"images,omitempty,omitzero"`
 
@@ -6687,6 +6886,9 @@ func (j *SessionSend) UnmarshalJSON(value []byte) error {
 	var plain Plain
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
+	}
+	if plain.Anchor != nil && utf8.RuneCountInString(string(*plain.Anchor)) > 8000 {
+		return fmt.Errorf("field %s length: must be <= %d", "anchor", 8000)
 	}
 	if len(plain.Images) > 8 {
 		return fmt.Errorf("field %s length: must be <= %d", "images", 8)

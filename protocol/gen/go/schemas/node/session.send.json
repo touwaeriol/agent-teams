@@ -54,6 +54,11 @@
       "items": {
         "$ref": "common.json#/$defs/ImageRef"
       }
+    },
+    "anchor": {
+      "description": "The task anchor (task id, instruction, branch, hand-off notes, progress). The daemon keeps the latest one and re-injects it after the runtime compacts the session during a task; an empty string clears it.",
+      "type": "string",
+      "maxLength": 8000
     }
   }
 }

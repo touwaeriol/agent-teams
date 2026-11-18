@@ -433,6 +433,28 @@
         }
       }
     },
+    "ContextUsage": {
+      "title": "ContextUsage",
+      "description": "How much of the context window a session uses (shared-members.md §5.3).",
+      "type": "object",
+      "required": [
+        "used_tokens",
+        "max_tokens"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "used_tokens": {
+          "description": "Tokens in the context now (Claude: getContextUsage totalTokens; Codex: the last request's total tokens).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_tokens": {
+          "description": "The window the runtime measures against (Claude: the autocompact window; Codex: the model's context window); 0 when unknown.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
     "CredRequest": {
       "title": "CredRequest",
       "description": "Credential helper asks for a short-lived token. Unreliable, retried after 10 s with the same req_id; never logged.",
@@ -1111,7 +1133,7 @@
           "$ref": "#/$defs/Runtimes"
         },
         "features": {
-          "description": "Feature names, e.g. sessions, codex_app_server, git_worktree, cred_helper, upgrade.",
+          "description": "Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, context_usage (turn_ended carries context), session_compact (session.compact).",
           "type": "array",
           "items": {
             "type": "string"
@@ -1327,6 +1349,70 @@
         }
       }
     },
+    "SessionCompact": {
+      "title": "SessionCompact",
+      "description": "Compact the session's context now (between tasks, shared-members.md §5.3). The daemon runs it when the session is between turns and answers session.compacted; the stored task anchor is cleared (the task it belonged to is over).",
+      "type": "object",
+      "required": [
+        "session_id",
+        "open_gen",
+        "compact_id"
+      ],
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "open_gen": {
+          "$ref": "#/$defs/OpenGen"
+        },
+        "compact_id": {
+          "description": "Chosen by the console; session.compacted echoes it.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "instructions": {
+          "description": "What the summary must keep (Claude: /compact <instructions>; Codex has no instructions and ignores it).",
+          "type": "string",
+          "maxLength": 8000
+        }
+      }
+    },
+    "SessionCompacted": {
+      "title": "SessionCompacted",
+      "description": "session.compact finished (ok=false: the runtime did not compact, e.g. too little context or an error).",
+      "type": "object",
+      "required": [
+        "session_id",
+        "open_gen",
+        "compact_id",
+        "ok"
+      ],
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "open_gen": {
+          "$ref": "#/$defs/OpenGen"
+        },
+        "compact_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "context": {
+          "description": "Context use after the compaction.",
+          "$ref": "#/$defs/ContextUsage"
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      }
+    },
     "SessionDelivered": {
       "title": "SessionDelivered",
       "description": "session.send was pushed into the session.",
@@ -1485,6 +1571,10 @@
               "encoding/json"
             ]
           }
+        },
+        "context": {
+          "description": "turn_ended: context use after the turn (daemons with feature context_usage).",
+          "$ref": "#/$defs/ContextUsage"
         },
         "on": {
           "description": "compacting / subagent.",
@@ -2116,6 +2206,28 @@
             "type": "string"
           }
         },
+        "context": {
+          "description": "Context management of the role (shared-members.md §5.1): the runtime compacts by itself at limit_tokens × in_task_pct / 100 (without limit_tokens: in_task_pct of the model's window); focus is added to the instructions of such a compaction.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "limit_tokens": {
+              "description": "The role's context limit in tokens.",
+              "type": "integer",
+              "minimum": 10000
+            },
+            "in_task_pct": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "focus": {
+              "description": "What a compaction must keep.",
+              "type": "string",
+              "maxLength": 2000
+            }
+          }
+        },
         "git_credentials": {
           "description": "Install the credential helper and gh wrapper.",
           "type": "boolean"
@@ -2317,6 +2429,11 @@
           "items": {
             "$ref": "#/$defs/ImageRef"
           }
+        },
+        "anchor": {
+          "description": "The task anchor (task id, instruction, branch, hand-off notes, progress). The daemon keeps the latest one and re-injects it after the runtime compacts the session during a task; an empty string clears it.",
+          "type": "string",
+          "maxLength": 8000
         }
       }
     },

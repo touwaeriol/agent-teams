@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/session.compacted.json",
+  "title": "SessionCompacted",
+  "description": "session.compact finished (ok=false: the runtime did not compact, e.g. too little context or an error).",
+  "x-direction": "node_to_console",
+  "x-key": [
+    "compact_id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "session_id",
+    "open_gen",
+    "compact_id",
+    "ok"
+  ],
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "open_gen": {
+      "$ref": "common.json#/$defs/OpenGen"
+    },
+    "compact_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "context": {
+      "description": "Context use after the compaction.",
+      "$ref": "common.json#/$defs/ContextUsage"
+    },
+    "error": {
+      "type": "string",
+      "maxLength": 1000
+    }
+  }
+}

@@ -98,6 +98,28 @@
         "type": "string"
       }
     },
+    "context": {
+      "description": "Context management of the role (shared-members.md §5.1): the runtime compacts by itself at limit_tokens × in_task_pct / 100 (without limit_tokens: in_task_pct of the model's window); focus is added to the instructions of such a compaction.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "limit_tokens": {
+          "description": "The role's context limit in tokens.",
+          "type": "integer",
+          "minimum": 10000
+        },
+        "in_task_pct": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "focus": {
+          "description": "What a compaction must keep.",
+          "type": "string",
+          "maxLength": 2000
+        }
+      }
+    },
     "git_credentials": {
       "description": "Install the credential helper and gh wrapper.",
       "type": "boolean"
