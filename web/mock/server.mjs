@@ -70,14 +70,14 @@ function openStream(req, res, pid) {
 
 // Looping office script: who does what, every 2.5 s.
 const SCRIPT = [
-  ["e12d2", 12, { state: "typing", bubble: "改 QuestionCard.tsx" }],
-  ["e12q", 12, { state: "running", substate: "test", bubble: "跑 pytest tests/test_comms.py" }],
+  ["e12d2", 12, { state: "typing", bubble: "改 QuestionCard.tsx", task_id: "t6" }],
+  ["e12q", 12, { state: "running", substate: "test", bubble: "跑 pytest tests/test_comms.py", task_id: "t4" }],
   ["e12d1", 12, { state: "waiting", substate: "review", bubble: "等审查：审批走 permission-prompt-tool" }],
-  ["e13d", 13, { state: "reading", bubble: "看 codex_worker.py" }],
+  ["e14d", 14, { state: "reading", bubble: "看 Hero.vue", task_id: "t2" }],
   ["e12l", 12, { state: "reading", bubble: "审查 dev-1 的提交" }],
-  ["e12d2", 12, { state: "raising_hand", bubble: "等你批准一条命令", bubble_kind: "ask" }],
+  ["e12d2", 12, { state: "raising_hand", bubble: "等你批准一条命令", bubble_kind: "ask", task_id: "t6" }],
   ["e0", null, { state: "thinking", bubble: "整理 #11 的总结" }],
-  ["e13d", 13, { state: "idle", bubble: "" }],
+  ["e14d", 14, { state: "idle", bubble: "" }],
   ["e0", null, { state: "idle", bubble: "" }],
 ];
 let step = 0;
@@ -110,14 +110,38 @@ attachments.set("img_seed", {
   data: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="240" height="180"><rect width="240" height="180" fill="#F7F6F3"/><rect x="16" y="16" width="208" height="56" rx="10" fill="#FFF9F4" stroke="#F0C9A8"/><rect x="30" y="32" width="96" height="9" rx="4" fill="#C8622A"/><rect x="30" y="48" width="160" height="7" rx="3" fill="#E2DFD8"/><rect x="16" y="86" width="64" height="24" rx="7" fill="#1F1E1C"/><rect x="88" y="86" width="64" height="24" rx="7" fill="#fff" stroke="#E2DFD8"/><rect x="16" y="124" width="208" height="40" rx="8" fill="none" stroke="#D93025" stroke-width="2"/></svg>`),
 });
 
+// Project members are shared by every thread (shared-members.md): each name once, at the
+// thread of its current task; every live thread has its own lead.
+const ROLE_SORT = { lead: 1, dev: 2, qa: 3, designer: 4 };
+const MEMBER_TASK = { e12d2: "t6", e12q: "t4", e14d: "t2" };
+function officeRoster() {
+  const live = state.threads.filter((t) => ["running", "waiting", "review", "queued"].includes(t.status)).sort((a, b) => a.no - b.no);
+  const leads = live.flatMap((t) => t.members.filter((m) => m.tier === "lead").map((m) => ({ ...m, thread_no: t.no, sort: 1, instance: 1 })));
+  const staff = new Map();
+  for (const t of live)
+    for (const m of t.members)
+      if (m.tier === "member" && !staff.has(m.name))
+        staff.set(m.name, { ...m, thread_no: t.no, sort: ROLE_SORT[m.role] ?? 9, instance: Number(m.name.split("-").pop()) || 1, status: { ...m.status, task_id: MEMBER_TASK[m.id] ?? "" } });
+  return [{ ...state.coordinator, thread_no: null, sort: 0, instance: 1 }, ...leads, ...staff.values()];
+}
+
 function officeSnapshot() {
-  const roster = [{ ...state.coordinator, thread_no: null }, ...state.threads.filter((t) => ["running", "waiting", "review", "queued"].includes(t.status)).flatMap((t) => t.members.map((m) => ({ ...m, thread_no: t.no })))];
   return {
     layout_id: "default",
     layout_version: "1",
     threads: state.threads.filter((t) => t.status !== "done"),
-    employees: roster,
-    board: { claimable: 3, by_thread: { 12: 2, 13: 1 } },
+    employees: officeRoster(),
+    board: {
+      claimable: 5,
+      by_thread: { 12: { pending: 2 }, 13: { pending: 1 }, 14: { pending: 2 } },
+      queue: [
+        { thread_no: 12, id: "t7", role: "dev", assignee: "", locked: false, reserved_for: "dev-1" },
+        { thread_no: 12, id: "t8", role: "qa", assignee: "", locked: true, reserved_for: "" },
+        { thread_no: 13, id: "t3", role: "dev", assignee: "", locked: false, reserved_for: "" },
+        { thread_no: 14, id: "t3", role: "designer", assignee: "", locked: false, reserved_for: "" },
+        { thread_no: 14, id: "t4", role: "dev", assignee: "", locked: true, reserved_for: "" },
+      ],
+    },
     nodes: state.nodes.map((n) => ({ id: n.id, name: n.name, online: n.online, isolation: n.isolation, slots: n.max_active_sessions, active_sessions: n.active_sessions, parked_sessions: n.parked_sessions, queued: n.queued })),
     merge_queue: state.mergeQueue.t12,
     ci: { 12: state.checks.t12 },
