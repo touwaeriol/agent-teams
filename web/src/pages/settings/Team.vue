@@ -4,12 +4,13 @@
 import { computed, ref, watch } from "vue";
 import { roles as roleActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
-import { keys, useRoles } from "@/api/queries";
+import { keys, useProjects, useRoles } from "@/api/queries";
 import type { RoleView } from "@/api/views";
 import { useOfficeLayout } from "@/components/app/avatar/layout";
 import PluginLibrary from "@/components/app/library/PluginLibrary.vue";
 import SkillLibrary from "@/components/app/library/SkillLibrary.vue";
 import Callout from "@/components/common/Callout.vue";
+import ConfirmAction from "@/components/common/ConfirmAction.vue";
 import Loading from "@/components/common/Loading.vue";
 import Spinner from "@/components/common/Spinner.vue";
 import NavButton from "@/components/shell/NavButton.vue";
@@ -17,7 +18,7 @@ import { fromPreset, LEVEL, newRole, roleProblems, sortRoles } from "@/lib/roles
 import PresetMenu from "./team/PresetMenu.vue";
 import RoleCard from "./team/RoleCard.vue";
 import MyModels from "./team/MyModels.vue";
-import { addEmployee } from "./team/staff";
+import { addEmployee, headcountChanges, saveImpact } from "./team/staff";
 import StaffPanel from "./team/StaffPanel.vue";
 import { isDirty, ordered, patchAt, removeAt } from "./team/team";
 import YamlEditor from "./team/YamlEditor.vue";
@@ -33,6 +34,11 @@ const dirty = computed(() => draft.value !== null && isDirty(draft.value, saved.
 const problems = computed(() => roleProblems(draft.value ?? []));
 const warnings = computed(() => roles.data.value?.warnings ?? []);
 const list = () => draft.value ?? [];
+// Changing 编制 re-staffs every project: ask first.
+const projects = useProjects();
+const staffChanges = computed(() => headcountChanges(list(), saved.value));
+const confirmStaff = ref(false);
+const onSave = () => (staffChanges.value.length ? (confirmStaff.value = true) : save.mutate());
 
 const setRole = (i: number, patch: Partial<RoleView>) => (draft.value = patchAt(list(), i, patch));
 const removeRole = (i: number) => (draft.value = removeAt(list(), i));
@@ -62,7 +68,7 @@ const PILL = "rounded-full px-2.5 py-1";
           <template v-if="!yaml">
             <PresetMenu @pick="addPreset" />
             <el-button class="!ml-0 h-[38px]" @click="add">添加岗位</el-button>
-            <el-button type="primary" class="!ml-0 h-[38px]" :disabled="!dirty || problems.length > 0 || save.isPending.value" @click="save.mutate()">
+            <el-button type="primary" class="!ml-0 h-[38px]" :disabled="!dirty || problems.length > 0 || save.isPending.value" @click="onSave">
               <Spinner v-if="save.isPending.value" /> 保存
             </el-button>
           </template>
@@ -79,7 +85,14 @@ const PILL = "rounded-full px-2.5 py-1";
       </section>
       <Callout v-for="w in warnings" :key="`${w.role}-${w.message}`" tone="warn">{{ w.role ? `${w.role}：` : "" }}{{ w.message }}</Callout>
       <Callout v-if="dirty && problems.length > 0" tone="warn">{{ problems.join("；") }}</Callout>
-      <StaffPanel v-if="!yaml" :roles="draft" @add="addStaff" />
+      <StaffPanel v-if="!yaml" :roles="draft" :saved="saved" @add="addStaff" />
+      <ConfirmAction
+        v-model:open="confirmStaff"
+        title="改成员编制"
+        :description="saveImpact(staffChanges, (projects.data.value ?? []).length)"
+        confirm-label="保存"
+        @confirm="save.mutate()"
+      />
       <YamlEditor v-if="yaml" />
       <div v-else class="grid gap-3.5 lg:grid-cols-2">
         <RoleCard v-for="(r, i) in draft" :key="r.id || `new-${i}`" :role="r" :layout="layout" @change="(p) => setRole(i, p)" @remove="removeRole(i)" />

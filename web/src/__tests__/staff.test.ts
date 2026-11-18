@@ -11,7 +11,7 @@ import type { EmployeeBrief, OfficeSnapshot } from "@/api/views";
 import { officeRoster, rosterAfter, staffSummary, staffSummaryText, toOfficeEmployees, toWidgetData } from "@/lib/office";
 import { newRole } from "@/lib/roles";
 import Team from "@/pages/settings/Team.vue";
-import { addEmployee, headcountText, staffGroups, staffRow } from "@/pages/settings/team/staff";
+import { addEmployee, countText, headcountChanges, headcountText, saveImpact, staffGroups, staffRow } from "@/pages/settings/team/staff";
 import { thread } from "./fixtures";
 
 function brief(name: string, tier: EmployeeBrief["tier"], role: string, patch: Partial<EmployeeBrief> = {}): EmployeeBrief & { thread_no: number | null } {
@@ -111,6 +111,17 @@ describe("项目编制 helpers", () => {
     expect(addEmployee(roles(), "lead")).toEqual(roles());
     expect(staffRow(brief("x-1", "member", "x"), []).thread).toBe("");
   });
+
+  it("shows the unsaved 编制 change and what saving it does", () => {
+    const draft = addEmployee(roles(), "dev").filter((r) => r.role !== "review");
+    const dev = staffGroups(snapshot, draft, roles())[0];
+    expect(countText(dev)).toBe("编制 2→3 人（未保存）");
+    expect(countText(staffGroups(snapshot, roles())[0])).toBe("编制 2 人");
+    const changes = headcountChanges(draft, roles());
+    expect(changes).toEqual(["开发 2→3", "审查 1→0"]);
+    expect(headcountChanges(roles(), roles())).toEqual([]);
+    expect(saveImpact(changes, 4)).toContain("会影响 4 个项目");
+  });
 });
 
 type Route = [method: string, path: RegExp, body: unknown];
@@ -152,9 +163,15 @@ describe("Team · 项目编制", () => {
     expect(panel.text()).toContain("t6 · 改 QuestionCard.tsx");
     const dev = panel.find("section[aria-label=开发]");
     expect(dev.text()).toContain("编制 2 人");
-    await dev.findAll("button").find((b) => b.text() === "加一人")!.trigger("click");
-    expect(w.find("section[aria-label=开发]").text()).toContain("编制 3 人");
+    await dev.findAll("button").find((b) => b.text() === "加一人（所有项目）")!.trigger("click");
+    expect(w.find("section[aria-label=开发]").text()).toContain("编制 2→3 人（未保存）");
     await w.findAll("button").find((b) => b.text() === "保存")!.trigger("click");
+    await flushPromises();
+    const dialog = document.querySelector("[role=alertdialog]") as HTMLElement;
+    expect(dialog.textContent).toContain("开发 2→3");
+    expect(dialog.textContent).toContain("会影响 1 个项目");
+    expect(spy.mock.calls.some((c) => (c[0] as Request).method === "PUT")).toBe(false);
+    [...dialog.querySelectorAll("button")].find((b) => b.textContent?.trim() === "保存")!.click();
     await flushPromises();
     const put = spy.mock.calls.map((c) => c[0] as Request).find((r) => r.method === "PUT" && /\/api\/roles$/.test(new URL(r.url).pathname))!;
     const body = (await put.json()) as { roles: { role: string; count: number }[] };
