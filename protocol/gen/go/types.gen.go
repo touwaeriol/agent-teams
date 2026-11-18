@@ -6472,6 +6472,11 @@ func (j *SessionInterrupted) UnmarshalJSON(value []byte) error {
 
 // Open (or resume) a long-lived employee session on the node.
 type SessionOpen struct {
+	// The anchor of the task the employee holds when the session (re)opens without a
+	// first_message anchor (a crash reopen, a reopen after a daemon restart): the new
+	// process starts with it, as if session.send had carried it.
+	Anchor *string `json:"anchor,omitempty,omitzero"`
+
 	// Set when runtime = claude.
 	Claude *ClaudeSessionOptions `json:"claude,omitempty,omitzero"`
 
@@ -6620,6 +6625,9 @@ func (j *SessionOpen) UnmarshalJSON(value []byte) error {
 	var plain Plain
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
+	}
+	if plain.Anchor != nil && utf8.RuneCountInString(string(*plain.Anchor)) > 8000 {
+		return fmt.Errorf("field %s length: must be <= %d", "anchor", 8000)
 	}
 	if len(plain.Plugins) > 16 {
 		return fmt.Errorf("field %s length: must be <= %d", "plugins", 16)

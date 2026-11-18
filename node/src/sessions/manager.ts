@@ -125,6 +125,7 @@ export class SessionManager implements SessionHost {
 
   private async startNew(spec: SessionOpen): Promise<Reply[]> {
     const session = new Session(structuredClone(spec), this);
+    session.taskAnchor = spec.anchor ?? ""; // the task the employee holds; a first_message anchor replaces it
     session.absCwd = resolveInRoot(this.d.root, spec.cwd);
     mkdirSync(session.absCwd, { recursive: true });
     this.sessions.set(spec.session_id, session);

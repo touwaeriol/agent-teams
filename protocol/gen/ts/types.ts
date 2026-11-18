@@ -1326,6 +1326,10 @@ export interface SessionOpen {
    */
   first_message?: FirstMessage | null;
   /**
+   * The anchor of the task the employee holds when the session (re)opens without a first_message anchor (a crash reopen, a reopen after a daemon restart): the new process starts with it, as if session.send had carried it.
+   */
+  anchor?: string;
+  /**
    * Skills of the employee's role. Claude: the daemon writes them as a local plugin outside the worktree and loads it (options.plugins + options.skills). Codex gets them in developer_instructions instead.
    *
    * @maxItems 32

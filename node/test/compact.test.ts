@@ -123,6 +123,15 @@ describe("claude sessions", () => {
     expect(h.log.hooks!.at(-1)).toEqual({ event: "SessionStart", output: { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: ANCHOR } } });
   });
 
+  it("starts a (re)opened session with session.open's anchor", async () => {
+    h = await startHarness();
+    h.console.command("session.open", claudeOpen("s_C9", 2, { anchor: ANCHOR }));
+    await h.console.waitType("session.opened");
+    h.console.command("session.release", { session_id: "s_C9", open_gen: 2 });
+    await say("s_C9", "m_1", "autocompact");
+    expect(h.log.hooks!.at(-1)).toEqual({ event: "SessionStart", output: { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: ANCHOR } } });
+  });
+
   it("clears the anchor when complete_task's tool.result says so", async () => {
     h = await startHarness();
     await open("s_C5");
