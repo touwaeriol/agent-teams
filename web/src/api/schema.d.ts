@@ -2100,7 +2100,7 @@ export interface components {
             };
             /** Format: int64 */
             claimable: number;
-            /** @description The project queue: pending tasks of live threads by thread, priority and age (at most 40) */
+            /** @description The project queue: pending tasks of running and waiting threads, by thread, then in claim order (priority, then readiness); at most 12 per thread and 120 in all */
             queue: components["schemas"]["QueueCard"][] | null;
         };
         CIPatch: {
@@ -3079,7 +3079,7 @@ export interface components {
             thread_no: number | null;
         };
         QueueCard: {
-            /** @description Named member, or empty when anyone of the role may claim it */
+            /** @description Named active member, or empty when anyone of the role may claim it (a role name or a retired member) */
             assignee: string;
             id: string;
             /** @description Some dependency is not done yet */

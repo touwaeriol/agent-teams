@@ -113,9 +113,17 @@ type QueuedTask struct {
 // QueueLimit bounds the claimable tasks of one role a scheduling pass looks at.
 const QueueLimit = 200
 
-// depsDone holds for a task (alias t) whose dependencies are all done.
-const depsDone = `NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(t.depends_on) dep(id)
+// DepsDone holds for a task (alias t) whose dependencies are all done.
+const DepsDone = `NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(t.depends_on) dep(id)
 	LEFT JOIN at_tasks d ON d.conversation_id = t.conversation_id AND d.id = dep.id WHERE d.status IS DISTINCT FROM 'done')`
+
+// ClaimingThread holds for a thread (alias th) whose pending tasks members claim now.
+const ClaimingThread = `th.status IN ('running','waiting')`
+
+// NamedActive holds for a task (alias t, thread alias th) that names an active member of the
+// project (a member of another thread's legacy team or a retired one does not count).
+const NamedActive = `EXISTS (SELECT 1 FROM at_employees n WHERE n.project_id = th.project_id AND n.name = t.assignee AND n.active
+	AND n.tier = 'member' AND (n.thread_id IS NULL OR n.thread_id = t.thread_id))`
 
 // ClaimableTasks lists the project's claimable tasks of the given roles (those of the idle
 // members): pending, dependencies done, in a running or waiting thread; the most urgent first,
@@ -127,13 +135,12 @@ func ClaimableTasks(ctx context.Context, q DB, projectID string, roles []string)
 			(SELECT count(*) FROM at_tasks n WHERE n.conversation_id = t.conversation_id AND jsonb_exists(n.depends_on, t.id)
 				AND n.status NOT IN ('done','failed','cancelled')) AS downstream,
 			(SELECT COALESCE(jsonb_agg(l.name), '[]'::jsonb) FROM at_employees l WHERE l.thread_id = t.thread_id) AS legacy,
-			EXISTS (SELECT 1 FROM at_employees n WHERE n.project_id = th.project_id AND n.name = t.assignee AND n.active
-				AND n.tier = 'member' AND (n.thread_id IS NULL OR n.thread_id = t.thread_id)) AS named_active,
+			`+NamedActive+` AS named_active,
 			COALESCE(t.ready_at, now()) AS ready,
 			row_number() OVER (PARTITION BY t.role ORDER BY t.priority, COALESCE(t.ready_at, now()), t.created_at) AS rank
 		FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
-		WHERE th.project_id = $1 AND th.status IN ('running','waiting') AND t.status = 'pending' AND t.role = ANY($2::text[])
-			AND `+depsDone+`) q
+		WHERE th.project_id = $1 AND `+ClaimingThread+` AND t.status = 'pending' AND t.role = ANY($2::text[])
+			AND `+DepsDone+`) q
 		WHERE rank <= $3 ORDER BY priority, ready, created_at`, projectID, store.TextArray(roles), QueueLimit)
 }
 
@@ -141,7 +148,7 @@ func ClaimableTasks(ctx context.Context, q DB, projectID string, roles []string)
 // have every dependency done (id just finished).
 func MarkReady(ctx context.Context, tx *Tx, conversationID, id string) error {
 	_, err := store.Exec(ctx, tx, `UPDATE at_tasks t SET ready_at = now() WHERE t.conversation_id = $1 AND t.status = 'pending'
-		AND t.ready_at IS NULL AND jsonb_exists(t.depends_on, $2) AND `+depsDone, conversationID, id)
+		AND t.ready_at IS NULL AND jsonb_exists(t.depends_on, $2) AND `+DepsDone, conversationID, id)
 	return err
 }
 

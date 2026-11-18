@@ -21,14 +21,18 @@ const maxReplay = 6 * time.Hour
 // BoardCounts are task counts of one thread by status.
 type BoardCounts map[string]int
 
-// maxQueueCards is how many pending tasks the office board lists.
-const maxQueueCards = 40
+// The office board lists at most queueCardsPerThread pending tasks of each thread (a long
+// backlog of one thread never hides another's) and maxQueueCards in all.
+const (
+	queueCardsPerThread = 12
+	maxQueueCards       = 120
+)
 
 // Board is the task board part of the office.
 type Board struct {
 	Claimable int                    `json:"claimable"`
 	ByThread  map[string]BoardCounts `json:"by_thread" doc:"By thread number"`
-	Queue     []QueueCard            `json:"queue" doc:"The project queue: pending tasks of live threads by thread, priority and age (at most 40)"`
+	Queue     []QueueCard            `json:"queue" doc:"The project queue: pending tasks of running and waiting threads, by thread, then in claim order (priority, then readiness); at most 12 per thread and 120 in all"`
 }
 
 // QueueCard is one pending task on the office board (shared-members.md §9).
@@ -36,7 +40,7 @@ type QueueCard struct {
 	ThreadNo    int    `json:"thread_no"`
 	ID          string `json:"id"`
 	Role        string `json:"role"`
-	Assignee    string `json:"assignee" doc:"Named member, or empty when anyone of the role may claim it"`
+	Assignee    string `json:"assignee" doc:"Named active member, or empty when anyone of the role may claim it (a role name or a retired member)"`
 	Locked      bool   `json:"locked" doc:"Some dependency is not done yet"`
 	ReservedFor string `json:"reserved_for" doc:"Rework kept for this member until the reservation runs out (empty: none or expired)"`
 }
@@ -205,8 +209,8 @@ func (a *API) layoutOf(ctx context.Context, p store.Project) (string, string) {
 
 func board(ctx context.Context, q core.DB, projectID string) (Board, error) {
 	b := Board{ByThread: map[string]BoardCounts{}, Queue: []QueueCard{}}
-	rows, err := store.Query(ctx, q, `SELECT th.no, t.status, count(*) FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
-		WHERE th.project_id = $1 AND th.status IN ('queued','running','waiting','review','paused') GROUP BY th.no, t.status`, projectID)
+	rows, err := store.Query(ctx, q, `SELECT th.no, t.status, count(*), `+core.ClaimingThread+` FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
+		WHERE th.project_id = $1 AND th.status IN ('queued','running','waiting','review','paused') GROUP BY th.no, t.status, th.status`, projectID)
 	if err != nil {
 		return b, err
 	}
@@ -214,7 +218,8 @@ func board(ctx context.Context, q core.DB, projectID string) (Board, error) {
 	for rows.Next() {
 		var no, n int
 		var st string
-		if err := rows.Scan(&no, &st, &n); err != nil {
+		var claiming bool
+		if err := rows.Scan(&no, &st, &n, &claiming); err != nil {
 			return b, err
 		}
 		key := strconv.Itoa(no)
@@ -222,7 +227,7 @@ func board(ctx context.Context, q core.DB, projectID string) (Board, error) {
 			b.ByThread[key] = BoardCounts{}
 		}
 		b.ByThread[key][st] = n
-		if st == "pending" {
+		if st == "pending" && claiming {
 			b.Claimable += n
 		}
 	}
@@ -233,17 +238,19 @@ func board(ctx context.Context, q core.DB, projectID string) (Board, error) {
 	return b, err
 }
 
-// queueCards lists the project's pending tasks for the board: locked while a dependency is not
-// done, reserved_for only while the reservation holds. A named assignee that is a role is not
-// a person, so it is left out.
+// queueCards lists the pending tasks members can claim now (those of running and waiting
+// threads) for the board, per thread in claim order: locked while a dependency is not done,
+// reserved_for only while the reservation holds. A named assignee that is a role or no active
+// member is not a person, so it is left out.
 func queueCards(ctx context.Context, q core.DB, projectID string) ([]QueueCard, error) {
-	rows, err := store.Query(ctx, q, `SELECT th.no, t.id, t.role, CASE WHEN t.assignee = t.role THEN '' ELSE t.assignee END,
-		EXISTS (SELECT 1 FROM jsonb_array_elements_text(t.depends_on) dep(id) LEFT JOIN at_tasks d
-			ON d.conversation_id = t.conversation_id AND d.id = dep.id WHERE d.status IS DISTINCT FROM 'done'),
-		CASE WHEN t.reserved_until > now() THEN t.reserved_for ELSE '' END
-		FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
-		WHERE th.project_id = $1 AND th.status IN ('queued','running','waiting','review','paused') AND t.status = 'pending'
-		ORDER BY th.no, t.priority DESC, t.created_at, t.id LIMIT $2`, projectID, maxQueueCards)
+	rows, err := store.Query(ctx, q, `SELECT no, id, role, assignee, locked, reserved_for FROM (
+			SELECT th.no, t.id, t.role, CASE WHEN `+core.NamedActive+` THEN t.assignee ELSE '' END AS assignee,
+				NOT (`+core.DepsDone+`) AS locked,
+				CASE WHEN t.reserved_until > now() THEN t.reserved_for ELSE '' END AS reserved_for,
+				row_number() OVER (PARTITION BY th.no ORDER BY t.priority, COALESCE(t.ready_at, t.created_at), t.created_at, t.id) AS rank
+			FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
+			WHERE th.project_id = $1 AND `+core.ClaimingThread+` AND t.status = 'pending') q
+		WHERE rank <= $2 ORDER BY no, rank LIMIT $3`, projectID, queueCardsPerThread, maxQueueCards)
 	if err != nil {
 		return nil, err
 	}
