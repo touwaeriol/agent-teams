@@ -30,20 +30,14 @@ type Delivery struct {
 	// in the employee's conversation addressed to it (meta.to).
 	Record *core.NewMessage
 	// Anchor is the task anchor the daemon keeps and re-injects after the runtime compacts
-	// (task briefs; shared-members.md §5.2). Empty: the daemon keeps what it has.
-	Anchor string
+	// (task briefs; shared-members.md §5.2); "" clears it. nil: decided by the member's task
+	// (sendAnchor, withOpenAnchor).
+	Anchor *string
 }
 
 // firstMessage is a delivery that opens (or reopens) a session.
 func firstMessage(msgID, text string, d Delivery) *protocol.FirstMessage {
-	return &protocol.FirstMessage{MsgID: protocol.MsgID(msgID), Text: text, Images: imageRefs(d.Images), Anchor: anchorOf(d)}
-}
-
-func anchorOf(d Delivery) *string {
-	if d.Anchor == "" {
-		return nil
-	}
-	return &d.Anchor
+	return &protocol.FirstMessage{MsgID: protocol.MsgID(msgID), Text: text, Images: imageRefs(d.Images), Anchor: d.Anchor}
 }
 
 // Deliver records the message and sends it to the employee's session, opening one when needed.
@@ -82,6 +76,9 @@ func (o *Orchestrator) Deliver(ctx context.Context, tx *core.Tx, e core.Employee
 		return m, err
 	case sess.State == "crashed":
 		return m, o.reopen(ctx, tx, e, sess, firstMessage(msgID, d.Text, d))
+	}
+	if d.Anchor, err = sendAnchor(ctx, tx, e, d); err != nil {
+		return m, err
 	}
 	return m, o.send(ctx, tx, sess, msgID, d)
 }
@@ -400,7 +397,7 @@ func (o *Orchestrator) send(ctx context.Context, tx *core.Tx, s core.AgentSessio
 	kind := protocol.SessionSendKind(orDefault(d.Kind, "system"))
 	body := protocol.SessionSend{SessionID: protocol.SessionID(s.ID), MsgID: protocol.MsgID(msgID), Text: d.Text,
 		Priority: protocol.SessionSendPriority(prio), Kind: &kind, InterruptFirst: d.Interrupt, Images: imageRefs(d.Images),
-		Anchor: anchorOf(d)}
+		Anchor: d.Anchor}
 	_, err := o.gw.Enqueue(ctx, tx, *s.NodeID, nodegw.Command{Type: protocol.TypeSessionSend, Body: body,
 		SessionID: s.ID, OpenGen: s.OpenGen})
 	return err
@@ -539,10 +536,18 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 	if err != nil {
 		return err
 	}
+	window, err := core.LastContextWindow(ctx, tx, env.emp.ID, env.emp.Runtime)
+	if err != nil {
+		return err
+	}
 	open, err := buildOpen(sessionInput{emp: env.emp, thread: env.thread, project: env.project, node: node, sess: sess,
 		prepare: prepare, first: first, resume: resume, system: system, rules: rules, hasRepo: len(env.repos) > 0,
-		repos: env.slugs(), protRefs: o.protectedRefs(ctx, tx, env), defModel: composer.DefaultModel(ctx, tx, env.project.UserID, env.emp.Runtime)})
+		repos: env.slugs(), protRefs: o.protectedRefs(ctx, tx, env), defModel: composer.DefaultModel(ctx, tx, env.project.UserID, env.emp.Runtime),
+		window: window})
 	if err != nil {
+		return err
+	}
+	if open.Anchor, err = openAnchor(ctx, tx, env.emp, first); err != nil {
 		return err
 	}
 	if err := o.addSkills(ctx, tx, env.project.UserID, env.emp, &open); err != nil {

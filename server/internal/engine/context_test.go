@@ -32,6 +32,7 @@ func contextTeam(t *testing.T, features []string, clearAfter int, tune func(*eng
 	var project struct{ ID string }
 	tm.b.must(201, "POST", "/api/projects", map[string]any{"name": "p"}, &project)
 	tm.projectID = project.ID
+	tm.token = node.Token
 	tm.n = w.connect(node.Token, nodetest.Options{Features: features})
 	return tm
 }
@@ -58,8 +59,13 @@ func firstTask(t *testing.T, tm *team, used int) (*fakeAgent, *fakeAgent, core.T
 	if open.FirstMessage.Anchor == nil || !strings.Contains(*open.FirstMessage.Anchor, "[任务锚点]") || !strings.Contains(*open.FirstMessage.Anchor, "build the api") {
 		t.Fatalf("first brief anchor %v", open.FirstMessage.Anchor)
 	}
+	if open.Anchor != nil || open.Context.WindowTokens != nil {
+		t.Fatalf("first session: anchor %v window %v", open.Anchor, open.Context.WindowTokens)
+	}
 	dev.turnEnded(used, 200000)
-	dev.mustCall("complete_task", map[string]any{"task_id": "t1", "summary": "api done"})
+	if res := dev.mustCall("complete_task", map[string]any{"task_id": "t1", "summary": "api done"}); res.Anchor == nil || *res.Anchor != "" {
+		t.Fatalf("complete_task does not clear the anchor: %v", res.Anchor)
+	}
 	lead.expectSend("[Task t1 · dev-1 · done]")
 	return dev, lead, th
 }
@@ -118,7 +124,8 @@ func TestClaimCompactsFullSession(t *testing.T) {
 	}
 	lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "add rate limits", "main": "做"})
 	c := expectCompact(t, tm, dev)
-	if c.Instructions == nil || !strings.Contains(*c.Instructions, "保留当前任务 id") || !strings.Contains(*c.Instructions, "t2：add rate limits") {
+	if c.Instructions == nil || !strings.Contains(*c.Instructions, "保留当前任务 id") || !strings.Contains(*c.Instructions, "任务 t2（") ||
+		!strings.Contains(*c.Instructions, "原始说明：add rate limits") || !strings.Contains(*c.Instructions, ".agent-notes/t2.md") {
 		t.Fatalf("compact instructions %v", c.Instructions)
 	}
 	noBrief(t, tm)
@@ -171,6 +178,10 @@ func TestClaimClearsWithoutCompact(t *testing.T) {
 	if open.Resume != nil || !strings.Contains(open.FirstMessage.Text, "[新会话]") || open.FirstMessage.Anchor == nil {
 		t.Fatalf("fresh session: resume %+v first %q anchor %v", open.Resume, open.FirstMessage.Text, open.FirstMessage.Anchor)
 	}
+	// the window the last session reported: Codex caps the limit at it, without a limit it is the base
+	if intOf(open.Context.WindowTokens) != 200000 || open.Anchor != nil {
+		t.Fatalf("fresh session: window %v anchor %v", open.Context.WindowTokens, open.Anchor)
+	}
 }
 
 // TestClaimClearsAfterTasks: clear_after_tasks = 1 (a gate role's default) gives every task a
@@ -219,4 +230,111 @@ func TestLongTaskMetrics(t *testing.T) {
 		t.Fatalf("metrics: compactions %d hinted %v end %v progress %q", task.Compactions, task.SplitHinted, task.CtxEnd, task.Progress)
 	}
 	noSendWith(t, tm, "考虑拆小")
+}
+
+// TestCompactedFromAnotherNode: session.compacted only counts from the node that runs the session.
+func TestCompactedFromAnotherNode(t *testing.T) {
+	tm := contextTeam(t, contextFeatures, 8, nil)
+	dev, lead, th := firstTask(t, tm, 70000)
+	lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "add rate limits", "main": "做"})
+	c := expectCompact(t, tm, dev)
+	var other nodeCreated
+	tm.b.must(201, "POST", "/api/nodes", map[string]string{"name": "other"}, &other)
+	n2 := tm.w.connect(other.Token, nodetest.Options{Features: contextFeatures})
+	ctx, cancel := tm.w.waitCtx()
+	defer cancel()
+	seq, err := n2.Send(ctx, protocol.TypeSessionCompacted, protocol.SessionCompacted{SessionID: c.SessionID, OpenGen: c.OpenGen, CompactID: c.CompactID, Ok: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := n2.WaitAck(ctx, seq); err != nil {
+		t.Fatal(err)
+	}
+	noBrief(t, tm)
+	if task := tm.taskRow(t, th.ID, "t2"); task.Status != "claimed" || task.CompactID != c.CompactID {
+		t.Fatalf("t2 after another node's report: %s %q", task.Status, task.CompactID)
+	}
+	dev.send(protocol.TypeSessionCompacted, protocol.SessionCompacted{SessionID: c.SessionID, OpenGen: c.OpenGen, CompactID: c.CompactID, Ok: true})
+	dev.expectSend("[Task t2")
+}
+
+// TestAnchorFollowsTheTask (shared-members.md §5.2): while dev-1 holds a task its mail carries no
+// anchor (the daemon keeps the brief's); complete_task's result clears it, and so does the first
+// message after the task (the finished task never comes back after a compaction). A session that
+// reopens after a daemon restart starts with the anchor of the task the member holds.
+func TestAnchorFollowsTheTask(t *testing.T) {
+	tm := contextTeam(t, contextFeatures, 8, nil)
+	_, lead := tm.openThread(t, "Anchor", nil)
+	lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "build the api", "main": "做"})
+	dev, _ := startTask(t, tm, "dev-1", "build the api")
+	lead.mustCall("send_message", map[string]any{"to": "dev-1", "text": "look at the logs"})
+	if s := dev.expectSend("look at the logs"); s.Anchor != nil {
+		t.Fatalf("mail during the task carries an anchor %q", *s.Anchor)
+	}
+
+	tm.n.Close()
+	n2 := tm.w.connect(tm.token, nodetest.Options{Epoch: "e-restarted", Features: contextFeatures})
+	dev.node, lead.node = n2, n2
+	if _, err := n2.Send(tm.w.ctx, protocol.TypeSessionsReport, protocol.SessionsReport{Sessions: []protocol.SessionReportItem{}}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := tm.w.waitCtx()
+	defer cancel()
+	f, err := n2.Wait(ctx, protocol.TypeSessionOpen, dev.mine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var open protocol.SessionOpen
+	_ = f.Decode(&open)
+	if open.Anchor == nil || !strings.Contains(*open.Anchor, "[任务锚点]") || !strings.Contains(*open.Anchor, "任务 t1") {
+		t.Fatalf("reopened session's anchor %v", open.Anchor)
+	}
+	dev.gen = int(open.OpenGen)
+	dev.opened(open)
+	if f, err = n2.Wait(ctx, protocol.TypeSessionOpen, lead.mine); err != nil {
+		t.Fatal(err)
+	}
+	var leadOpen protocol.SessionOpen
+	_ = f.Decode(&leadOpen)
+	if leadOpen.Anchor != nil {
+		t.Fatalf("the lead holds no task, its session got anchor %q", *leadOpen.Anchor)
+	}
+	lead.gen = int(leadOpen.OpenGen)
+	lead.opened(leadOpen)
+
+	if res := dev.mustCall("complete_task", map[string]any{"task_id": "t1", "summary": "api done"}); res.Anchor == nil || *res.Anchor != "" {
+		t.Fatalf("complete_task result anchor %v", res.Anchor)
+	}
+	lead.expectSend("[Task t1 · dev-1 · done]")
+	lead.mustCall("send_message", map[string]any{"to": "dev-1", "text": "thanks"})
+	if s := dev.expectSend("thanks"); s.Anchor == nil || *s.Anchor != "" {
+		t.Fatalf("the first message after the task does not clear the anchor: %v", s.Anchor)
+	}
+}
+
+// TestRequeueResetsAttempt: a task that goes back to the queue (here a failed attempt) and is
+// claimed again starts its progress and long-task metrics afresh, and its anchor no longer quotes
+// the old progress.
+func TestRequeueResetsAttempt(t *testing.T) {
+	tm := contextTeam(t, contextFeatures, 8, nil)
+	th, lead := tm.openThread(t, "Retry", nil)
+	lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "rewrite everything", "main": "做"})
+	dev, _ := startTask(t, tm, "dev-1", "rewrite everything")
+	dev.mustCall("report_progress", map[string]any{"text": "half of the handlers moved"})
+	off := func(e *protocol.SessionEvent) { on := false; e.On = &on }
+	dev.event("compacting", off)
+	dev.event("compacting", off)
+	lead.expectSend("考虑拆小")
+	dev.turnEnded(20000, 200000)
+	dev.mustCall("complete_task", map[string]any{"task_id": "t1", "status": "failed", "summary": "broke the build"})
+	brief := dev.expectSend("[Task t1")
+	if brief.Anchor == nil || strings.Contains(*brief.Anchor, "half of the handlers moved") {
+		t.Fatalf("the new attempt's anchor %v", brief.Anchor)
+	}
+	eventually(t, "t1 running again", func() bool { return tm.taskRow(t, th.ID, "t1").Status == "running" })
+	task := tm.taskRow(t, th.ID, "t1")
+	if task.Attempt != 1 || task.Progress != "" || task.Compactions != 0 || task.SplitHinted || task.CtxEnd != nil || intOf(task.CtxStart) != 20000 {
+		t.Fatalf("second attempt: attempt %d progress %q compactions %d hinted %v ctx %v/%v", task.Attempt, task.Progress,
+			task.Compactions, task.SplitHinted, task.CtxStart, task.CtxEnd)
+	}
 }

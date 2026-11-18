@@ -4,8 +4,10 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// MinContextLimit is the smallest context limit a role may set (tokens).
-const MinContextLimit = 10000
+// MinContextLimit is the smallest context limit a role may set (tokens): a session starts with
+// 15–25K of prompt and tools, and Claude compacts by itself at most at its window − 33K
+// (shared-members.md §5.2), so a smaller limit leaves no room for work.
+const MinContextLimit = 100000
 
 // MaxFocus is how long compact_focus may be (characters).
 const MaxFocus = 2000
@@ -62,7 +64,7 @@ func normalizeContext(r *store.Role) {
 
 func contextChecks(r *store.Role) []check {
 	return []check{
-		{"context_limit", r.ContextLimit != nil && *r.ContextLimit < MinContextLimit, "上下文上限至少 10000 token"},
+		{"context_limit", r.ContextLimit != nil && *r.ContextLimit < MinContextLimit, "上下文上限至少 100000 token"},
 		{"compact_between_pct", badPct(r.CompactBetweenPct), "领任务时压缩的比例在 1 到 100 之间"},
 		{"compact_in_task_pct", badPct(r.CompactInTaskPct), "任务中自动压缩的比例在 1 到 100 之间"},
 		{"clear_after_tasks", r.ClearAfterTasks != nil && *r.ClearAfterTasks < 0, "连续任务数不能是负数（0 = 不按次数清空）"},
@@ -92,11 +94,10 @@ func contextFromYAML(y *yamlContext, tier, gate string) contextPolicy {
 		ClearAfter: y.ClearAfterTasks, Focus: y.Focus}
 }
 
+// contextToYAML always writes the block: a role without settings gets "context: {}", so reading
+// the YAML back keeps it without settings instead of giving it its kind's defaults.
 func contextToYAML(r store.Role) *yamlContext {
 	p := policyOf(r)
-	if p.unset() {
-		return nil
-	}
 	return &yamlContext{Limit: p.Limit, CompactBetweenPct: p.BetweenPct, CompactInTaskPct: p.InTaskPct,
 		ClearAfterTasks: p.ClearAfter, Focus: p.Focus}
 }

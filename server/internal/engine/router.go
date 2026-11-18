@@ -31,7 +31,7 @@ func (r *router) Handle(ctx context.Context, node store.Node, typ string, body a
 	case *protocol.SessionClosed:
 		return e.Orch.HandleClosed(ctx, m)
 	case *protocol.SessionCompacted:
-		return e.Sched.Compacted(ctx, m)
+		return e.Sched.Compacted(ctx, node.ID, m)
 	case *protocol.SessionEvent:
 		return r.sessionEvent(ctx, m)
 	case *protocol.SessionsReport:

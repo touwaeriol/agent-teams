@@ -45,7 +45,7 @@ func TestContextDefaults(t *testing.T) {
 	}
 }
 
-// TestContextValidation: limit ≥ 10000, percentages 1–100, clear count ≥ 0, focus ≤ 2000 characters.
+// TestContextValidation: limit ≥ 100000 (a session starts with 15–25K, Claude compacts by window − 33K), percentages 1–100, clear count ≥ 0, focus ≤ 2000 characters.
 func TestContextValidation(t *testing.T) {
 	base := Defaults(looks)
 	bad := store.Role{ID: "x", Tier: Member, Role: "qa", Runtime: Claude, Count: 1, ContextLimit: ptr(5000),
@@ -69,12 +69,20 @@ func TestContextValidation(t *testing.T) {
 	if p := Validate(list, Context{Nodes: nodes(), Looks: looks}); len(p) != 0 {
 		t.Fatalf("valid settings refused: %v", p)
 	}
+	small := good
+	small.ContextLimit = ptr(50000)
+	list = append(Defaults(looks), small)
+	Normalize(list, looks)
+	if p := Validate(list, Context{Nodes: nodes(), Looks: looks}); len(p) != 1 || p[0].Path != "roles[3].context_limit" {
+		t.Fatalf("a 50K limit: %v", p)
+	}
 }
 
 // TestContextYAML: the context: block round-trips; a role without one gets its kind's defaults.
 func TestContextYAML(t *testing.T) {
 	list := Defaults(looks)
 	list[2].ContextLimit = ptr(600000)
+	contextPolicy{}.apply(&list[1]) // the lead without any setting
 	text, err := ToYAML(list, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -90,6 +98,9 @@ func TestContextYAML(t *testing.T) {
 	}
 	if got := policyText(p.Roles[2]); got != "600000/60/80/8" {
 		t.Fatalf("round trip %s", got)
+	}
+	if got := policyText(p.Roles[1]); got != "-/-/-/-" || !strings.Contains(text, "context: {}") {
+		t.Fatalf("a role without settings came back as %s:\n%s", got, text)
 	}
 	p, err = FromYAML("lead: {}\nmembers:\n  - role: review\n    gate: review\n  - role: dev\n    context:\n      compact_in_task_pct: 90\n", nil)
 	if err != nil {

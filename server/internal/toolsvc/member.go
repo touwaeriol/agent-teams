@@ -108,7 +108,9 @@ func (s *Service) complete(ctx context.Context, tx *core.Tx, task core.Task, out
 	if out.Pushed != nil {
 		res.Pushed = pushedList(out.Pushed)
 	}
-	return okJSON(fmt.Sprintf("任务 %s 已提交（%s）", task.ID, task.Status), res), nil
+	done := okJSON(fmt.Sprintf("任务 %s 已提交（%s）", task.ID, task.Status), res)
+	done.EndsTask = true
+	return done, nil
 }
 
 // pushBranch pushes the member's worktree HEAD to its member branch.

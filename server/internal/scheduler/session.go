@@ -9,6 +9,7 @@ import (
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -63,12 +64,15 @@ func overBetween(r store.Role, f sessionFacts) bool {
 	return limit > 0 && *f.used*100 >= limit**r.CompactBetweenPct
 }
 
-// limitOf is the role's context limit, else the window the runtime reported (0: unknown).
+// limitOf is the role's context limit capped at the window the runtime reported (a limit above
+// the model's window would never be reached), else that window (0: unknown).
 func limitOf(r store.Role, max *int) int {
-	if r.ContextLimit != nil {
+	switch {
+	case r.ContextLimit != nil && max != nil && *max > 0:
+		return min(*r.ContextLimit, *max)
+	case r.ContextLimit != nil:
 		return *r.ContextLimit
-	}
-	if max != nil {
+	case max != nil:
 		return *max
 	}
 	return 0
@@ -102,7 +106,7 @@ func (s *Scheduler) startTask(ctx context.Context, tx *core.Tx, t core.Thread, t
 	}
 	switch st {
 	case stepCompact:
-		return s.compactFirst(ctx, tx, task, m, sess)
+		return s.compactFirst(ctx, tx, t, task, m, sess)
 	case stepClear:
 		if err := s.orch.ClearSession(ctx, tx, sess); err != nil {
 			return err
@@ -112,25 +116,34 @@ func (s *Scheduler) startTask(ctx context.Context, tx *core.Tx, t core.Thread, t
 }
 
 // compactFirst queues session.compact; the task stays claimed with its compact_id.
-func (s *Scheduler) compactFirst(ctx context.Context, tx *core.Tx, task core.Task, m core.Employee, sess core.AgentSession) error {
-	id := core.NewID("cp")
-	if err := s.orch.Compact(ctx, tx, sess, id, compactInstructions(m.Spec, task)); err != nil {
+func (s *Scheduler) compactFirst(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task, m core.Employee, sess core.AgentSession) error {
+	next, err := orchestrator.NextTaskNote(ctx, tx, t, task)
+	if err != nil {
 		return err
 	}
-	_, err := core.UpdateTask(ctx, tx, task, map[string]any{"compact_id": id, "wait_since": time.Now().UTC()})
+	id := core.NewID("cp")
+	if err := s.orch.Compact(ctx, tx, sess, id, compactInstructions(m.Spec, next)); err != nil {
+		return err
+	}
+	_, err = core.UpdateTask(ctx, tx, task, map[string]any{"compact_id": id, "wait_since": time.Now().UTC()})
 	return err
 }
 
-// compactInstructions: the role's focus and the task that comes next.
-func compactInstructions(r store.Role, task core.Task) string {
-	next := fmt.Sprintf("接下来要做任务 %s：%s", task.ID, clip(task.Instruction, 1000))
-	return strings.TrimSpace(r.CompactFocus + "\n" + next)
+// compactInstructions: the role's focus and the note on the task that comes next (the anchor's
+// content), within session.compact's limit.
+func compactInstructions(r store.Role, next string) string {
+	return clip(strings.TrimSpace(r.CompactFocus+"\n"+next), orchestrator.AnchorMax)
 }
 
-// Compacted handles session.compacted: the context is recorded and the task that waited for it
-// goes on to the pre-task sync and the brief. A failed compaction goes on all the same.
-func (s *Scheduler) Compacted(ctx context.Context, m *protocol.SessionCompacted) error {
+// Compacted handles session.compacted from nodeID: the context is recorded and the task that
+// waited for it goes on to the pre-task sync and the brief. A failed compaction goes on all the
+// same. A report about a session the node does not run (any more) is ignored.
+func (s *Scheduler) Compacted(ctx context.Context, nodeID string, m *protocol.SessionCompacted) error {
 	return s.core.InTx(ctx, func(tx *core.Tx) error {
+		sess, err := core.SessionByID(ctx, tx, string(m.SessionID))
+		if err != nil || sess.NodeID == nil || *sess.NodeID != nodeID {
+			return ignoreMissing(err)
+		}
 		if m.Context != nil {
 			if err := core.RecordContext(ctx, tx, string(m.SessionID), m.Context.UsedTokens, m.Context.MaxTokens); err != nil {
 				return err
@@ -242,34 +255,3 @@ func runningTask(ctx context.Context, tx *core.Tx, sc core.SessionContext) (core
 	}
 	return task, err
 }
-
-// AnchorMax keeps the anchor inside session.send's limit (8000 characters).
-const AnchorMax = 7500
-
-// taskAnchor is the short reminder of the task the daemon puts back after the runtime compacts
-// the session during it (shared-members.md §5.2): id, instruction, branch, hand-off notes of the
-// dependencies, the latest progress and where the working notes are.
-func taskAnchor(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task) (string, error) {
-	var b strings.Builder
-	fmt.Fprintf(&b, "[任务锚点] 你正在做讨论串 #%d 的任务 %s（%s）。上下文刚被压缩过；如果这个任务已经 complete_task，忽略这段。\n",
-		t.No, task.ID, task.Kind)
-	fmt.Fprintf(&b, "原始说明：%s\n你的分支：%s\n", clip(task.Instruction, 3000), task.Branch)
-	for _, dep := range task.DependsOn {
-		d, err := core.TaskByID(ctx, tx, task.ConversationID, dep)
-		if errors.Is(err, core.ErrNotFound) || (err == nil && d.Handoff == "") {
-			continue
-		}
-		if err != nil {
-			return "", err
-		}
-		fmt.Fprintf(&b, "依赖 %s（%s）的交接说明：%s\n", d.ID, d.ClaimedBy, clip(d.Handoff, 800))
-	}
-	if task.Progress != "" {
-		fmt.Fprintf(&b, "最近报告的进度：%s\n", clip(task.Progress, 1000))
-	}
-	fmt.Fprintf(&b, "工作笔记：%s%s.md（先读它，再接着做）", NotesDir, task.ID)
-	return clip(b.String(), AnchorMax), nil
-}
-
-// NotesDir is where members keep the working notes of long tasks (git-ignored by the daemon).
-const NotesDir = ".agent-notes/"

@@ -9,11 +9,10 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// Hello features of daemons that report context use and run session.compact (shared-members.md §5.3).
-const (
-	FeatureContextUsage   = "context_usage"
-	FeatureSessionCompact = "session_compact"
-)
+// FeatureSessionCompact is the hello feature of daemons that run session.compact (shared-members.md
+// §5.3). Their context_usage needs no check: a daemon without it reports no context, so only the
+// task count clears.
+const FeatureSessionCompact = "session_compact"
 
 // CanCompact reports whether the session's node runs session.compact.
 func (o *Orchestrator) CanCompact(ctx context.Context, q core.DB, s core.AgentSession) (bool, error) {
@@ -55,12 +54,14 @@ func wireCloseReason(ctx context.Context, q core.DB, nodeID, reason string) stri
 	return reason
 }
 
-// sessionContext is session.open's context: the role's limit, in-task percentage and focus.
-func sessionContext(r store.Role) *protocol.SessionOpenContext {
+// sessionContext is session.open's context: the role's limit, in-task percentage and focus, and
+// the window the employee's last session of the runtime reported (window_tokens: Codex caps the
+// limit at it, and without a limit both runtimes take the percentage of it).
+func sessionContext(r store.Role, window *int) *protocol.SessionOpenContext {
 	if r.ContextLimit == nil && r.CompactInTaskPct == nil && r.CompactFocus == "" {
 		return nil
 	}
-	c := &protocol.SessionOpenContext{LimitTokens: r.ContextLimit, InTaskPct: r.CompactInTaskPct}
+	c := &protocol.SessionOpenContext{LimitTokens: r.ContextLimit, InTaskPct: r.CompactInTaskPct, WindowTokens: window}
 	if r.CompactFocus != "" {
 		c.Focus = &r.CompactFocus
 	}

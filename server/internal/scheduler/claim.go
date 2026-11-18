@@ -128,9 +128,9 @@ func (s *Scheduler) claim(ctx context.Context, tx *core.Tx, t core.Thread, task 
 	if err != nil {
 		return err
 	}
-	task, err = core.UpdateTask(ctx, tx, task, map[string]any{"status": "claimed", "claimed_by": m.Name,
+	task, err = core.UpdateTask(ctx, tx, task, core.WithAttemptReset(map[string]any{"status": "claimed", "claimed_by": m.Name,
 		"claimed_at": time.Now().UTC(), "branch": orchestrator.MemberBranch(t.No, m.Name), "nudges": 0,
-		"sync": map[string]core.TaskSync{}, "sync_pending": 0, "sync_round": "", "compact_id": "", "wait_since": nil})
+		"sync": map[string]core.TaskSync{}, "sync_pending": 0, "sync_round": "", "compact_id": "", "wait_since": nil}))
 	if err != nil {
 		return err
 	}
@@ -194,11 +194,11 @@ func (s *Scheduler) sendBrief(ctx context.Context, tx *core.Tx, t core.Thread, t
 	if err != nil {
 		return err
 	}
-	anchor, err := taskAnchor(ctx, tx, t, task)
+	anchor, err := orchestrator.TaskAnchor(ctx, tx, t, task)
 	if err != nil {
 		return err
 	}
-	_, err = s.orch.Deliver(ctx, tx, m, orchestrator.Delivery{Text: text, Kind: "task", Priority: "next", Anchor: anchor,
+	_, err = s.orch.Deliver(ctx, tx, m, orchestrator.Delivery{Text: text, Kind: "task", Priority: "next", Anchor: &anchor,
 		Record: &core.NewMessage{ConversationID: t.ID, Role: "system", Author: "platform", Kind: "note", Content: text,
 			Meta: map[string]any{"to": m.Name, "task_id": task.ID}}})
 	return err

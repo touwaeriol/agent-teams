@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"strings"
 
 	"gorm.io/gorm"
@@ -126,9 +127,19 @@ func stampReadyTask(ctx context.Context, tx *Tx, conversationID, id string) erro
 	return err
 }
 
+// WithAttemptReset adds to set the clearing of a task's per-attempt fields: the progress its
+// anchor quotes and the long-task metrics (shared-members.md §5.2). A requeued or (re)claimed
+// task starts them afresh.
+func WithAttemptReset(set map[string]any) map[string]any {
+	out := map[string]any{"progress": "", "compactions": 0, "ctx_start": nil, "ctx_end": nil, "split_hinted": false}
+	maps.Copy(out, set)
+	return out
+}
+
 // RequeueTask puts a task back into the queue (status pending plus set): it is claimable, and
 // waits for the starvation rule, from now on (shared-members.md §4.1).
 func RequeueTask(ctx context.Context, tx *Tx, t Task, set map[string]any) (Task, error) {
+	set = WithAttemptReset(set)
 	set["status"] = "pending"
 	if err := taskRow(ctx, tx, t).Updates(stamped(set)).Error; err != nil {
 		return t, err
