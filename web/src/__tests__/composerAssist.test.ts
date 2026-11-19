@@ -165,7 +165,7 @@ describe("Composer with assist", () => {
     await input.setValue("/design 登录页");
     await input.trigger("keydown", { key: "Enter" });
     await settle();
-    expect(onSend).toHaveBeenCalledWith("/design 登录页", [], []);
+    expect(onSend).toHaveBeenCalledWith("/design 登录页", [], [], []);
   });
 
   it("lists /design first for /de, shows custom commands and leaves hidden platform commands out", async () => {
@@ -193,7 +193,7 @@ describe("Composer with assist", () => {
     await input.trigger("keydown", { key: "Escape" });
     await input.trigger("keydown", { key: "Enter" });
     await settle(10);
-    expect(onSend).toHaveBeenCalledWith("/model", [], []);
+    expect(onSend).toHaveBeenCalledWith("/model", [], [], []);
     expect(w.find("[data-testid=command-panel]").exists()).toBe(false);
     expect(spy.mock.calls.some((c) => (c[0] as Request).method === "PUT")).toBe(false);
   });
@@ -274,6 +274,6 @@ describe("Composer with assist", () => {
     expect(w.text()).toContain("src/app.go");
     await input.trigger("keydown", { key: "Enter" });
     await settle();
-    expect(onSend).toHaveBeenCalledWith("看 @src/app.go", [], [{ kind: "file", repo: "o/r", path: "src/app.go" }]);
+    expect(onSend).toHaveBeenCalledWith("看 @src/app.go", [], [{ kind: "file", repo: "o/r", path: "src/app.go" }], []);
   });
 });
