@@ -35,6 +35,8 @@ type fakeRealtime struct {
 	// failSession answers session.update with an error carrying the key.
 	failSession bool
 	silent      bool // never answers session.update
+	// dialDelay holds the WebSocket upgrade, updateDelay the session.updated answer.
+	dialDelay, updateDelay time.Duration
 }
 
 func (f *fakeRealtime) start(t *testing.T) *httptest.Server {
@@ -53,6 +55,7 @@ func (f *fakeRealtime) start(t *testing.T) *httptest.Server {
 			_, _ = w.Write([]byte(`{"error":{"code":"invalid_api_key","message":"Incorrect API key provided"}}`))
 			return
 		}
+		time.Sleep(f.dialDelay)
 		c, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			return
@@ -87,6 +90,7 @@ func (f *fakeRealtime) serve(ctx context.Context, c *websocket.Conn) {
 			case f.failSession:
 				send(map[string]any{"type": "error", "error": map[string]any{"code": "invalid_value", "message": "bad session for key " + relayKey}})
 			default:
+				time.Sleep(f.updateDelay)
 				send(map[string]any{"type": "session.updated", "session": map[string]any{"id": "sess_relay1", "type": "transcription"}})
 			}
 		case "input_audio_buffer.append":
@@ -380,6 +384,122 @@ func TestVoiceStreamTimeouts(t *testing.T) {
 	if ev := readEvent(t, c); !ev.Fatal || ev.Error.Code != "voice_timeout" || !strings.HasPrefix(ev.Error.Message, "连不上语音服务") || time.Since(start) > 3*time.Second {
 		t.Fatalf("silent upstream %+v after %s", ev, time.Since(start))
 	}
+}
+
+// Dialing and the handshake share one deadline from Accept: each alone fits, together they don't.
+func TestVoiceStreamSharedDeadline(t *testing.T) {
+	old := voiceStreamOptions
+	voiceStreamOptions = voice.RelayOptions{Handshake: 600 * time.Millisecond}
+	t.Cleanup(func() { voiceStreamOptions = old })
+
+	fake := &fakeRealtime{dialDelay: 400 * time.Millisecond, updateDelay: 400 * time.Millisecond}
+	h, user, _ := relayHarness(t, fake)
+	start := time.Now()
+	c, _, err := user.voiceWS(t, "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev := readEvent(t, c)
+	if took := time.Since(start); !ev.Fatal || ev.Error.Code != "voice_timeout" || took > 750*time.Millisecond {
+		t.Fatalf("dial+handshake over the deadline: %+v after %s", ev, took)
+	}
+	drain(t, c)
+	stop := waitAudit(t, h, "voice_stream_stop")
+	if stop["reason"] != "handshake: voice_timeout" || stop["dial_ms"].(float64) < 400 || stop["handshake_ms"].(float64) < 100 {
+		t.Fatalf("stop audit %v", stop)
+	}
+
+	// A dial alone slower than the deadline fails as a timeout too.
+	slow := &fakeRealtime{dialDelay: 900 * time.Millisecond}
+	h2, user2, _ := relayHarness(t, slow)
+	start = time.Now()
+	c, _, _ = user2.voiceWS(t, "", nil, nil)
+	ev = readEvent(t, c)
+	if took := time.Since(start); !ev.Fatal || ev.Error.Code != "voice_timeout" || took > 750*time.Millisecond {
+		t.Fatalf("slow dial: %+v after %s", ev, took)
+	}
+	drain(t, c)
+	if stop := waitAudit(t, h2, "voice_stream_stop"); stop["reason"] != "voice_timeout" || stop["dial_ms"].(float64) < 500 {
+		t.Fatalf("slow dial audit %v", stop)
+	}
+}
+
+// The start audit carries how long dialing and the session handshake took.
+func TestVoiceStreamTimings(t *testing.T) {
+	fake := &fakeRealtime{dialDelay: 60 * time.Millisecond, updateDelay: 80 * time.Millisecond}
+	h, user, _ := relayHarness(t, fake)
+	c, _, _ := user.voiceWS(t, "", nil, nil)
+	if ev := readEvent(t, c); ev.Type != "ready" {
+		t.Fatalf("ready %+v", ev)
+	}
+	start := waitAudit(t, h, "voice_stream_start")
+	if start["dial_ms"].(float64) < 60 || start["handshake_ms"].(float64) < 80 || start["handshake_ms"].(float64) > 2000 {
+		t.Fatalf("start audit %v", start)
+	}
+	_ = c.Write(t.Context(), websocket.MessageText, []byte(`{"type":"stop"}`))
+	drain(t, c)
+}
+
+// Audio the browser recorded while the relay connected arrives in one burst after ready: the rate
+// clock starts at Accept, so that burst is allowed, and the limit still holds beyond it.
+func TestVoiceStreamBufferedBurst(t *testing.T) {
+	fake := &fakeRealtime{dialDelay: time.Second}
+	_, user, _ := relayHarness(t, fake)
+	frame := make([]byte, 4800) // 100 ms
+	c, _, _ := user.voiceWS(t, "", nil, nil)
+	if ev := readEvent(t, c); ev.Type != "ready" {
+		t.Fatalf("ready %+v", ev)
+	}
+	// 1 s of connecting plus up to 8 s buffered, and some slack: 10.5 s at once.
+	for range 105 {
+		if err := c.Write(t.Context(), websocket.MessageBinary, frame); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = c.Write(t.Context(), websocket.MessageText, []byte(`{"type":"commit"}`))
+	if ev := readEvent(t, c); ev.Type != "input_audio_buffer.committed" {
+		t.Fatalf("after the buffered burst %+v", ev)
+	}
+	_ = c.Write(t.Context(), websocket.MessageText, []byte(`{"type":"stop"}`))
+	drain(t, c)
+	time.Sleep(100 * time.Millisecond) // slot released
+
+	// Far more than real time plus the burst allowance is still refused.
+	c, _, _ = user.voiceWS(t, "", nil, nil)
+	readEvent(t, c)
+	for range 130 {
+		if c.Write(t.Context(), websocket.MessageBinary, frame) != nil {
+			break
+		}
+	}
+	for {
+		ev := readEvent(t, c)
+		if ev.Fatal {
+			if ev.Error.Code != "voice_too_fast" {
+				t.Fatalf("flood %+v", ev)
+			}
+			break
+		}
+	}
+}
+
+// waitAudit returns the detail of the newest audit entry with this action (written after the socket closes).
+func waitAudit(t *testing.T, h *harness, action string) map[string]any {
+	t.Helper()
+	for range 50 {
+		entries, err := h.db.ListAudit(t.Context(), store.AuditFilter{Action: action, Limit: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) == 1 {
+			var d map[string]any
+			_ = json.Unmarshal(entries[0].Detail, &d)
+			return d
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("no %s audit", action)
+	return nil
 }
 
 func TestVoiceStreamUpstreamErrors(t *testing.T) {

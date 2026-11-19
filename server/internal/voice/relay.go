@@ -31,6 +31,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -48,11 +49,15 @@ const (
 	MaxStream = 5 * time.Minute
 	// IdleTimeout closes a stream when the browser sends nothing for this long.
 	IdleTimeout = 30 * time.Second
-	// HandshakeTimeout bounds dialing OpenAI and getting the session accepted.
+	// HandshakeTimeout bounds dialing OpenAI and getting the session accepted, together: one
+	// deadline from the browser's WebSocket being accepted to ready (the browser gives up after
+	// the same 10 s).
 	HandshakeTimeout = 10 * time.Second
 	// BytesPerSecond is PCM16 mono at 24 kHz.
 	BytesPerSecond = 48000
-	// burstBytes is how far ahead of real time a browser may send (buffered audio after a stall).
+	// burstBytes is how far ahead of real time a browser may send (buffered audio after a stall,
+	// or the audio it recorded while the relay was still connecting: the clock starts at Accept,
+	// RelayOptions.Started, and the browser buffers at most 8 s before ready).
 	burstBytes = 10 * BytesPerSecond
 )
 
@@ -113,6 +118,13 @@ type RelayOptions struct {
 	MaxDuration time.Duration
 	Idle        time.Duration
 	Handshake   time.Duration
+	// Started is when the browser's WebSocket was accepted (zero = when Relay starts): the
+	// handshake deadline (Started + Handshake, shared with Dial) and the audio rate clock count
+	// from here, because the browser records from the click and sends that audio after ready.
+	Started time.Time
+	// OnReady is called once the browser was told ready, with how long session.update →
+	// session.updated took.
+	OnReady func(sessionID string, handshake time.Duration)
 }
 
 func (o RelayOptions) withDefaults() RelayOptions {
@@ -125,6 +137,9 @@ func (o RelayOptions) withDefaults() RelayOptions {
 	if o.Handshake == 0 {
 		o.Handshake = HandshakeTimeout
 	}
+	if o.Started.IsZero() {
+		o.Started = time.Now()
+	}
 	return o
 }
 
@@ -134,6 +149,8 @@ type RelayResult struct {
 	Duration  time.Duration
 	Bytes     int64
 	Commits   int
+	// Handshake is session.update → session.updated (or until the handshake failed).
+	Handshake time.Duration
 	Reason    string // stopped | closed | idle | max_duration | too_fast | bad_frame | upstream_closed | upstream_error | handshake: …
 }
 
@@ -159,7 +176,7 @@ func SendFatal(ctx context.Context, browser *websocket.Conn, code, message strin
 // Both connections are closed when it returns.
 func Relay(ctx context.Context, browser, upstream *websocket.Conn, o RelayOptions) RelayResult {
 	o = o.withDefaults()
-	r := &relay{browser: browser, upstream: upstream, o: o, start: time.Now(), seen: time.Now()}
+	r := &relay{browser: browser, upstream: upstream, o: o, start: o.Started, seen: time.Now()}
 	defer upstream.CloseNow()
 	defer browser.CloseNow()
 	if err := r.handshake(ctx); err != nil {
@@ -171,6 +188,9 @@ func Relay(ctx context.Context, browser, upstream *websocket.Conn, o RelayOption
 		r.res.Reason = "handshake: " + f.Code
 		return r.result()
 	}
+	if o.OnReady != nil {
+		o.OnReady(r.res.SessionID, r.res.Handshake)
+	}
 	r.pump(ctx)
 	return r.result()
 }
@@ -178,7 +198,7 @@ func Relay(ctx context.Context, browser, upstream *websocket.Conn, o RelayOption
 type relay struct {
 	browser, upstream *websocket.Conn
 	o                 RelayOptions
-	start             time.Time
+	start             time.Time // RelayOptions.Started: rate clock and duration
 	mu                sync.Mutex
 	res               RelayResult
 	seen              time.Time // last message from the browser
@@ -192,10 +212,13 @@ func (r *relay) result() RelayResult {
 	return out
 }
 
-// handshake sends session.update and waits for session.updated (or an error) within Handshake.
+// handshake sends session.update and waits for session.updated (or an error) until
+// Started + Handshake (the deadline Dial shared).
 func (r *relay) handshake(ctx context.Context) error {
-	hctx, cancel := context.WithTimeout(ctx, r.o.Handshake)
+	hctx, cancel := context.WithDeadline(ctx, r.o.Started.Add(r.o.Handshake))
 	defer cancel()
+	sent := time.Now()
+	defer func() { r.res.Handshake = time.Since(sent) }()
 	if err := writeJSON(hctx, r.upstream, SessionUpdate(r.o.Request)); err != nil {
 		return &Fatal{Code: "voice_unreachable", Message: "发不出会话设置"}
 	}
@@ -203,7 +226,7 @@ func (r *relay) handshake(ctx context.Context) error {
 		_, raw, err := r.upstream.Read(hctx)
 		if err != nil {
 			if hctx.Err() != nil {
-				return &Fatal{Code: "voice_timeout", Message: "语音服务 10 秒内没有接受会话"}
+				return &Fatal{Code: "voice_timeout", Message: fmt.Sprintf("语音服务 %d 秒内没有接受会话", int(r.o.Handshake.Seconds()))}
 			}
 			return &Fatal{Code: "voice_unreachable", Message: "语音服务断开了连接"}
 		}

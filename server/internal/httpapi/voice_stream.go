@@ -74,17 +74,20 @@ func (s *Server) voiceStream(c *gin.Context) {
 	if err != nil {
 		return // Accept answered (bad origin, not a WebSocket request)
 	}
+	accepted := time.Now()
 	defer conn.CloseNow()
 	conn.SetReadLimit(voice.MaxFrame)
 	if conn.Subprotocol() != voiceStreamProtocol {
 		voice.SendFatal(ctx, conn, "voice_protocol", "客户端版本不对，请刷新页面")
 		return
 	}
-	s.relayVoice(ctx, conn, p, lang)
+	s.relayVoice(ctx, conn, p, lang, accepted)
 }
 
 // relayVoice checks the settings and limits, dials OpenAI and relays until the recording ends.
-func (s *Server) relayVoice(ctx context.Context, conn *websocket.Conn, p *principal, lang string) {
+// Dialing and the session handshake share one deadline from Accept (voice.HandshakeTimeout,
+// the browser's own connect timeout); dial_ms and handshake_ms go to the audit log.
+func (s *Server) relayVoice(ctx context.Context, conn *websocket.Conn, p *principal, lang string, accepted time.Time) {
 	v, err := s.voiceSettings(ctx)
 	if err != nil || !s.voiceUsable(v) {
 		voice.SendFatal(ctx, conn, "voice_disabled", "管理员没有开启语音输入")
@@ -107,21 +110,41 @@ func (s *Server) relayVoice(ctx context.Context, conn *websocket.Conn, p *princi
 	}
 	req := voice.Request{Model: v.Model, Language: lang, NoiseReduction: v.NoiseReduction, Delay: v.Delay}
 	opts := voiceStreamOptions
-	opts.Request, opts.APIKey = req, key
-	dctx, cancel := context.WithTimeout(ctx, voice.HandshakeTimeout)
+	opts.Request, opts.APIKey, opts.Started = req, key, accepted
+	if opts.Handshake == 0 {
+		opts.Handshake = voice.HandshakeTimeout
+	}
+	dctx, cancel := context.WithDeadline(ctx, accepted.Add(opts.Handshake))
+	dialStart := time.Now()
 	up, err := voice.Dial(dctx, v, key, voice.SafetyID(p.User.ID))
+	dialMS := time.Since(dialStart).Milliseconds()
+	timedOut := dctx.Err() != nil
 	cancel()
 	if err != nil {
 		code, msg := s.voiceDialErr(err)
-		s.audit(ctx, p.User.ID, "voice_stream_stop", "voice", "", map[string]any{"model": v.Model, "language": lang, "ok": false, "reason": code})
+		if timedOut && ctx.Err() == nil {
+			code, msg = "voice_timeout", fmt.Sprintf("%d 秒内没有连上 OpenAI", int(opts.Handshake.Seconds()))
+		}
+		s.log.Warn("voice: relay dial failed", "code", code, "dial_ms", dialMS)
+		s.audit(ctx, p.User.ID, "voice_stream_stop", "voice", "", map[string]any{"model": v.Model, "language": lang, "ok": false, "reason": code, "dial_ms": dialMS})
 		voice.SendFatal(ctx, conn, code, "连不上语音服务："+msg)
 		return
 	}
-	s.audit(ctx, p.User.ID, "voice_stream_start", "voice", "", map[string]any{"model": v.Model, "language": lang})
+	opts.OnReady = func(sessionID string, handshake time.Duration) {
+		s.log.Info("voice: relay ready", "dial_ms", dialMS, "handshake_ms", handshake.Milliseconds(), "setup_ms", time.Since(accepted).Milliseconds())
+		s.audit(ctx, p.User.ID, "voice_stream_start", "voice", sessionID, map[string]any{"model": v.Model, "language": lang,
+			"dial_ms": dialMS, "handshake_ms": handshake.Milliseconds()})
+	}
 	res := voice.Relay(ctx, conn, up, opts)
-	s.audit(context.WithoutCancel(ctx), p.User.ID, "voice_stream_stop", "voice", res.SessionID, map[string]any{"model": v.Model, "language": lang,
+	succeeded := !strings.HasPrefix(res.Reason, "handshake")
+	detail := map[string]any{"model": v.Model, "language": lang,
 		"seconds": res.Duration.Round(time.Second).Seconds(), "audio_seconds": float64(res.Bytes) / voice.BytesPerSecond, "commits": res.Commits,
-		"reason": res.Reason, "ok": !strings.HasPrefix(res.Reason, "handshake")})
+		"reason": res.Reason, "ok": succeeded}
+	if !succeeded {
+		detail["dial_ms"], detail["handshake_ms"] = dialMS, res.Handshake.Milliseconds()
+		s.log.Warn("voice: relay handshake failed", "reason", res.Reason, "dial_ms", dialMS, "handshake_ms", res.Handshake.Milliseconds())
+	}
+	s.audit(context.WithoutCancel(ctx), p.User.ID, "voice_stream_stop", "voice", res.SessionID, detail)
 }
 
 func (s *Server) voiceDialErr(err error) (string, string) {
