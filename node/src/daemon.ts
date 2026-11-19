@@ -229,7 +229,7 @@ export class Daemon {
     return {
       claudeAuth: () => this.claudeRuntime.auth,
       codexAuth: () => this.codexRuntime.auth,
-      claudeUsage: () => readClaudeUsage(this.claudeEnv({}), this.employeeHome),
+      claudeUsage: (signal) => readClaudeUsage(this.claudeEnv({}), this.employeeHome, signal, this.o.queryFn),
       codexAccount: () => this.hub.request("account/read", { refreshToken: false }),
       codexRateLimits: () => this.hub.request("account/rateLimits/read", { excludeResetCreditDetails: true }),
       lastCodexEvent: () => this.hub.lastRateLimits,
