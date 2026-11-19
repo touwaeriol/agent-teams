@@ -113,6 +113,7 @@ class RelayConnection {
       t.clientCommits = hello.client_commits ?? true;
       t.maxSeconds = hello.max_seconds;
     });
+    t.ready.catch(() => {}); // a cancelled transport's ready is nobody's business
     return t;
   }
 

@@ -244,6 +244,26 @@ describe("VoiceController", () => {
     expect(f.state.phase).toBe("idle");
   });
 
+  it("mints while the microphone opens (WebRTC needs the track, so it connects after)", async () => {
+    const f = fake();
+    let micOpen: (s: MediaStream) => void = () => {};
+    const stream = { getTracks: () => [{ stop() {} }], getAudioTracks: () => [] } as unknown as MediaStream;
+    f.deps.openMic = () => new Promise((r) => (micOpen = r));
+    let gotStream: MediaStream | null = null;
+    const connect = f.deps.connect;
+    f.deps.connect = async (s, mic, h) => ((gotStream = await mic), connect(s, mic, h));
+    const c = new VoiceController(f.state, f.deps);
+    const started = c.start(startOpts);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.mints).toEqual(["zh"]);
+    expect(f.state.phase).toBe("connecting");
+    micOpen(stream);
+    await started;
+    expect(gotStream).toBe(stream);
+    expect(f.state.phase).toBe("recording");
+    c.cancel();
+  });
+
   it("ignores empty commits and surfaces other errors as notices", async () => {
     const f = fake();
     const notices: string[] = [];
