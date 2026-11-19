@@ -68,7 +68,7 @@ export interface DaemonOptions {
   toolsDir?: string;
   /** Overrides for the gh download (tests). */
   gh?: Partial<GhInstallOptions>;
-  /** node.usage period (default 5 min; 0 disables) and per-read timeout (default 15 s). */
+  /** node.usage period (default 5 min; 0 disables) and per-runtime read budget (default 12 s). */
   usageIntervalMs?: number;
   usageTimeoutMs?: number;
   /** Replaces the Claude / Codex quota reads (tests). */

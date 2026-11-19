@@ -94,6 +94,19 @@ describe("collectUsage", () => {
     expect(u.runtimes.codex).toMatchObject({ auth: "chatgpt", status: "error", windows: [], error: "timeout" });
   });
 
+  it("gives Codex's two calls one shared budget", async () => {
+    const slow = (ms: number) => new Promise((res) => setTimeout(res, ms));
+    const src = sources({
+      claudeAuth: () => "none",
+      codexAccount: async () => (await slow(60), { account: { type: "chatgpt" }, requiresOpenaiAuth: true }) as never,
+      codexRateLimits: async () => (await slow(60), rateLimits(snapshot(1, 1))),
+    });
+    const t0 = Date.now();
+    const u = await collectUsage(src, 100, now);
+    expect(u.runtimes.codex).toMatchObject({ status: "error", error: "timeout" });
+    expect(Date.now() - t0).toBeLessThan(150);
+  });
+
   it("reports an expired / unfetchable Claude token as an error, keeping the plan", async () => {
     const u = await collectUsage(sources({ claudeUsage: async () => ({ subscription_type: "pro", rate_limits_available: true, rate_limits: null }) }), 1000, now);
     expect(u.runtimes.claude).toMatchObject({ status: "error", plan: "pro", error: "fetch_failed", windows: [] });

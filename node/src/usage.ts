@@ -11,7 +11,8 @@ import { AsyncQueue, withTimeout } from "./util/async.js";
 import type { Logger } from "./util/log.js";
 
 export const USAGE_INTERVAL_MS = 5 * 60_000;
-export const USAGE_TIMEOUT_MS = 15_000;
+/** Budget per runtime for the whole read (the console waits 15 s for the answer to node.usage_refresh). */
+export const USAGE_TIMEOUT_MS = 12_000;
 /** node.usage_refresh answers from a successful read younger than this instead of asking again. */
 export const USAGE_CACHE_MS = 60_000;
 export const USAGE_RUNTIMES = ["claude", "codex"] as const;
@@ -40,7 +41,7 @@ export interface UsageSources {
 
 /** Reads the runtimes in parallel; each read has its own timeout and failures become status "error". */
 export async function collectUsage(src: UsageSources, timeoutMs = USAGE_TIMEOUT_MS, now: () => Date = () => new Date(), which: readonly UsageRuntime[] = USAGE_RUNTIMES): Promise<NodeUsage> {
-  const read = { claude: () => claudeUsage(src, timeoutMs, now), codex: () => codexUsage(src, timeoutMs, now) };
+  const read = { claude: () => claudeUsage(src, timeoutMs, now), codex: () => codexUsage(src, Date.now() + timeoutMs, now) };
   const results = await Promise.all(which.map(async (rt) => [rt, await read[rt]()] as const));
   return { runtimes: Object.fromEntries(results) };
 }
@@ -78,14 +79,16 @@ export function claudeWindows(rl: ClaudeLimits): UsageWindow[] {
   return out.slice(0, MAX_WINDOWS);
 }
 
-async function codexUsage(src: UsageSources, timeoutMs: number, now: () => Date): Promise<RuntimeUsage> {
+/** Codex takes two calls; both share one deadline so the runtime never exceeds its budget. */
+async function codexUsage(src: UsageSources, deadline: number, now: () => Date): Promise<RuntimeUsage> {
+  const left = () => Math.max(0, deadline - Date.now());
   let auth = src.codexAuth() ?? "none";
   if (auth !== "chatgpt") return unsupported(auth, now);
   try {
-    const account = await withTimeout(src.codexAccount(), timeoutMs, () => new Error("timeout"));
+    const account = await withTimeout(src.codexAccount(), left(), () => new Error("timeout"));
     if (account.account?.type === "apiKey") return unsupported((auth = "api_key"), now);
     if (account.account === null && account.requiresOpenaiAuth) return failed(auth, "not_logged_in", now);
-    const r = await withTimeout(src.codexRateLimits(), timeoutMs, () => new Error("timeout"));
+    const r = await withTimeout(src.codexRateLimits(), left(), () => new Error("timeout"));
     return codexResult(r.rateLimitsByLimitId?.codex ?? r.rateLimits, now());
   } catch (err) {
     const ev = src.lastCodexEvent();

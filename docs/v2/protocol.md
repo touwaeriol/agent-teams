@@ -425,7 +425,7 @@
 
 守护进程上报本机 Claude Code、Codex 登录的订阅余量，节点页据此显示每个节点还剩多少额度。数据来源、可靠程度和版本兼容风险见 [usage-probe.md](usage-probe.md)。
 
-- **`node.usage`**（守护进程 → 控制台，不可靠，不进发件箱）：收到 `welcome` 后立即上报一次，之后每 5 分钟一次（节点环境变量 `AGENT_TEAMS_USAGE_INTERVAL_S` 可以调整，设为 `0` 关闭定时上报）；每个运行时的读取有 15 秒超时。读取失败只会让该运行时报 `status:"error"`，不影响守护进程的其他功能。
+- **`node.usage`**（守护进程 → 控制台，不可靠，不进发件箱）：收到 `welcome` 后立即上报一次，之后每 5 分钟一次（节点环境变量 `AGENT_TEAMS_USAGE_INTERVAL_S` 可以调整，设为 `0` 关闭定时上报）；每个运行时的读取总共最多 12 秒（Codex 的两次调用共用这个时间），保证在控制台等待 `node.usage_refresh` 回复的 15 秒内答复。读取失败只会让该运行时报 `status:"error"`，不影响守护进程的其他功能。
   - `runtimes.claude` / `runtimes.codex`：`auth`（Claude 取 `subscription|api_key|none`，Codex 取 `chatgpt|api_key|none`）、`status`（`ok|error|unsupported`）、`plan`（可选，例如 `max`、`pro`、`plus`）、`windows`、`error`（可选，简短原因，不含凭证）、`fetched_at`（读取时间；Codex 的数据如果来自最近一次推送事件，就填事件时间）。
   - `windows[]`：`key`、`used_percent`（0–100）、`window_minutes`（可选）、`resets_at`（ISO 时间或 null），按模型划分的窗口还会带 `label`。`key` 的取值：Claude 有 `five_hour`、`weekly`、`weekly_opus`、`weekly_sonnet`，以及 `weekly_model`（按模型划分的每周窗口，`label` 是服务端给的显示名）；Codex 有 `primary`（通常 5 小时）和 `secondary`（通常每周）。
   - `auth` 为 `api_key` 或 `none` 时，`status` 填 `unsupported`，`windows` 为空，不发任何请求。Codex 的 `auth.json` 里如果是 API Key 登录（app-server `account/read` 返回 `apiKey`），也按 `api_key` 处理。

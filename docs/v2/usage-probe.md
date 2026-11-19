@@ -49,7 +49,7 @@ SDK 0.3.325 的 `Query` 有一个方法 `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RE
 | SDK 没有这个方法，或者调用它报错（升级后改名、CLI 不认识这个控制请求等） | `status:"error"`，`error:"unsupported_sdk"` |
 | `rate_limits_available:false` | `status:"error"`，`error:"rate_limits_unavailable"` |
 | `rate_limits` 为 null（CLI 没取到数据：token 过期且刷新失败、网络错误等） | `status:"error"`，`error:"fetch_failed"`，有套餐名就带上 `plan` |
-| 15 秒没读完 | `status:"error"`，`error:"timeout"` |
+| 12 秒没读完 | `status:"error"`，`error:"timeout"` |
 | CLI 起不来等其他异常 | `status:"error"`，`error` 为脱敏后的简短原因 |
 
 任务简报里提到的 `token_expired`：由于刷新是 CLI 自己做的，守护进程看不到“过期”这一状态，只能看到 CLI 最后有没有拿到数据，所以统一报 `fetch_failed`。
@@ -106,7 +106,7 @@ app-server 协议有版本化的生成类型（`npm run gen:codex` → `node/src
 
 ## 4. 采集时机和缓存
 
-- 收到 `welcome` 后立即采一次，之后每 5 分钟一次（`AGENT_TEAMS_USAGE_INTERVAL_S` 可以调整，`0` 表示关闭定时采集）。每个运行时的读取有 15 秒超时，两个运行时并行读取。
+- 收到 `welcome` 后立即采一次，之后每 5 分钟一次（`AGENT_TEAMS_USAGE_INTERVAL_S` 可以调整，`0` 表示关闭定时采集）。每个运行时的读取总共最多 12 秒（Codex 的 account/read 和 rateLimits/read 共用这个时间，控制台等 `node.usage_refresh` 的回复最多 15 秒），两个运行时并行读取。
 - 控制台发 `node.usage_refresh` 时（鼠标悬停在节点卡片上），请求的运行时如果最近 60 秒内有一次成功的读取，就直接回缓存，`fetched_at` 保持原值；否则立即读取。失败的结果不缓存。同一时间只跑一次读取，正在跑的就等它跑完再复用结果。
 - 采集失败只记 warn 日志，并在消息里报 `status:"error"`，不影响守护进程的其他功能。
 
