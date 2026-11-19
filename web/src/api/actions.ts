@@ -12,7 +12,7 @@ export function idempotencyKey(): string {
   return c?.randomUUID ? c.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-const idem = () => ({ headers: { "Idempotency-Key": idempotencyKey() } });
+const idem = (key = idempotencyKey()) => ({ headers: { "Idempotency-Key": key } });
 
 export const auth = {
   login: (body: S["Credentials"]) => unwrap(client.POST("/auth/login", { body })),
@@ -56,12 +56,13 @@ export const schedules = {
 };
 
 export const conversations = {
-  send: (cid: string, content: string, interrupt = false, attachments: string[] = [], refs: S["MessageRef"][] = []) =>
+  /** key: the Idempotency-Key; a retry of a failed send passes the first attempt's key. */
+  send: (cid: string, content: string, interrupt = false, attachments: string[] = [], refs: S["MessageRef"][] = [], key?: string) =>
     unwrap(
       client.POST("/api/conversations/{cid}/messages", {
         params: { path: { cid } },
         body: { content, interrupt, ...(attachments.length ? { attachments } : {}), ...(refs.length ? { refs } : {}) },
-        ...idem(),
+        ...idem(key),
       }),
     ),
   /** Forward the user's own messages of this project chat to a thread (thread_no) or into a new one (new_thread). */

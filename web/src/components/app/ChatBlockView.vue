@@ -5,9 +5,11 @@
  * round check while selecting); a forwarded copy in a thread chat ends with a grey line that
  * links back to the project chat.
  */
+import { useQueryClient } from "@tanstack/vue-query";
 import { Check, Forward } from "lucide-vue-next";
 import { computed } from "vue";
 import { RouterLink, useRoute } from "vue-router";
+import { dropPending, retryMessage } from "@/api/pending";
 import type { ThreadView } from "@/api/views";
 import Markdown from "@/components/Markdown.vue";
 import type { ChatBlock } from "@/lib/chat";
@@ -38,6 +40,11 @@ const line = computed(() => (props.block.kind === "user" ? forwardLine(props.blo
 const back = computed(() => (line.value ? backLink(route.path, props.pid, line.value.anchor) : null));
 const forwardedTo = computed(() => props.block.message.meta?.forwarded_to);
 const pick = () => props.selecting && emit("toggle", id.value);
+// A message the server has not confirmed yet: 发送中…, or 发送失败 with 重试 / 删除.
+const local = computed(() => props.block.message.local);
+const qc = useQueryClient();
+const retry = () => local.value && retryMessage(qc, local.value.key).catch(() => undefined);
+const remove = () => local.value && dropPending(local.value.key);
 </script>
 
 <template>
@@ -47,6 +54,7 @@ const pick = () => props.selecting && emit("toggle", id.value);
     :id="messageAnchor(block.message.id)"
     :class="cn('group/msg flex items-start gap-3 rounded-2xl transition-colors', selecting ? 'cursor-pointer self-stretch' : 'self-end max-w-[85%]', selected && 'bg-primary/5')"
     :data-selected="selecting ? String(Boolean(selected)) : undefined"
+    :data-pending="local?.status"
     @click="pick"
   >
     <button
@@ -61,7 +69,7 @@ const pick = () => props.selecting && emit("toggle", id.value);
       <Check v-if="selected" class="size-3" :stroke-width="3" />
     </button>
     <button
-      v-else-if="forwardable"
+      v-else-if="forwardable && !local"
       type="button"
       aria-label="转发到讨论串"
       title="转发到讨论串"
@@ -73,7 +81,24 @@ const pick = () => props.selecting && emit("toggle", id.value);
     <div :class="cn('flex min-w-0 flex-col gap-2', selecting && 'ml-auto max-w-[85%]')">
       <MessageImages :items="block.message.meta?.attachments" />
       <MessageRefs :refs="block.message.meta?.refs" />
-      <div v-if="block.message.content" :class="cn('self-end whitespace-pre-wrap rounded-2xl bg-raised px-4 py-2.5', compact ? 'leading-6' : 'leading-[26px]')">{{ block.message.content }}</div>
+      <div
+        v-if="block.message.content"
+        :class="
+          cn(
+            'self-end whitespace-pre-wrap rounded-2xl bg-raised px-4 py-2.5',
+            compact ? 'leading-6' : 'leading-[26px]',
+            local?.status === 'sending' && 'opacity-60',
+            local?.status === 'failed' && 'bg-destructive/10 ring-1 ring-destructive/40',
+          )
+        "
+      >{{ block.message.content }}</div>
+      <p v-if="local?.status === 'sending'" class="self-end text-xs text-muted-foreground delay-500 duration-300 animate-in fade-in fill-mode-both" role="status">发送中…</p>
+      <p v-else-if="local?.status === 'failed'" class="self-end text-right text-xs text-destructive" role="alert" :title="local.error">
+        发送失败 ·
+        <button type="button" class="font-medium underline-offset-2 hover:underline" @click.stop="retry">重试</button>
+        ·
+        <button type="button" class="hover:underline underline-offset-2" @click.stop="remove">删除</button>
+      </p>
       <p v-if="line && back" class="self-end text-right text-xs text-muted-foreground" data-forward-line>
         <RouterLink :to="back" class="hover:text-foreground hover:underline">{{ line.text }}</RouterLink>
         <span v-if="line.note" class="block">附言：{{ line.note }}</span>

@@ -290,6 +290,8 @@ export interface MessageView {
     title?: string;
   };
   created_at: string;
+  /** Client only: a message the user sent that the server has not confirmed yet (api/pending.ts). */
+  local?: { key: string; status: "sending" | "failed"; error?: string };
 }
 
 /** One @ reference of a sent message (meta.refs). */

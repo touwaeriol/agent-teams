@@ -4,6 +4,7 @@
 // where they were asked (`inserts` + the `insert` slot), and scrolling that follows new
 // messages and comes back to where you were. Used by the coordinator chat and the thread panel.
 import { computed, ref } from "vue";
+import { pendingOf, withPending } from "@/api/pending";
 import { flattenMessages, useMessages } from "@/api/queries";
 import type { MessageView, ThreadView } from "@/api/views";
 import Loading from "@/components/common/Loading.vue";
@@ -39,7 +40,8 @@ defineSlots<{ insert(p: { item: I }): unknown; empty(): unknown; before(): unkno
 
 const query = useMessages(() => props.cid);
 const messages = computed(() => {
-  const all = flattenMessages(query.data.value);
+  // The user's own messages show at once, before the server confirms them (api/pending.ts).
+  const all = withPending(flattenMessages(query.data.value), pendingOf(props.cid));
   const shown = props.filter ? all.filter(props.filter) : all;
   return props.select ? props.select(shown) : shown;
 });
@@ -66,7 +68,7 @@ useChatScroll(() => props.cid, end, () => messages.value.length + props.inserts.
         :compact="compact"
         :pid="pid"
         :forwardable="forwardable"
-        :selecting="selecting && it.block.kind === 'user'"
+        :selecting="selecting && it.block.kind === 'user' && !it.block.message.local"
         :selected="selectedIds.includes(Number(it.block.message.id))"
         @open-thread="(no) => emit('openThread', no)"
         @forward="(id) => emit('forward', id)"

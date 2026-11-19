@@ -182,19 +182,37 @@ function page(items) {
 
 const storageBytes = () => state.deliverables.reduce((n, d) => n + (d.detail.size ?? 0), 0);
 
+// Sending a message. Knobs to see the chat with a slow server: MOCK_SEND_MS delays the POST
+// response, MOCK_SSE_MS delays the message frame (both default 0: the frame goes out before the
+// response, like the real server). A message containing "#fail" fails its first attempt (per
+// Idempotency-Key) with a 503, so the retry path can be tried; a repeated key gets the first reply.
+const sent = new Map();
+const failedOnce = new Set();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function sendMessage(res, cid, req) {
   const b = await body(req);
+  const key = req.headers["idempotency-key"] ?? "";
+  await sleep(Number(process.env.MOCK_SEND_MS ?? 0));
+  if (key && sent.has(key)) return json(res, 202, sent.get(key));
+  if ((b.content ?? "").includes("#fail") && !failedOnce.has(key)) {
+    failedOnce.add(key);
+    return fail(res, 503, "mock: 发送失败（#fail 的第一次）", "unavailable");
+  }
   const images = (b.attachments ?? []).map((id) => attachments.get(id)?.ref).filter(Boolean);
   const meta = images.length ? { attachments: images } : {};
   const m = { id: String(Date.now()), role: "user", author: "liu", kind: b.interrupt ? "interrupt" : "chat", content: b.content ?? "", meta, created_at: now() };
+  if (key) sent.set(key, m);
   (state.messages[cid] ??= []).push(m);
-  emit("message", { conversation_id: cid, message: m });
+  const sseMs = Number(process.env.MOCK_SSE_MS ?? 0);
+  if (sseMs > 0) setTimeout(() => emit("message", { conversation_id: cid, message: m }), sseMs);
+  else emit("message", { conversation_id: cid, message: m });
   setTimeout(() => {
     const said = images.length ? `${images.length} 张图片${b.content ? `和「${b.content}」` : ""}` : `「${b.content}」`;
     const reply = { id: String(Date.now() + 1), role: "leader", author: cid === "c0" ? "leader" : threadById(cid)?.members[0]?.name ?? "lead", kind: "chat", content: `收到 ${said}。我来安排。`, meta: {}, created_at: now() };
     state.messages[cid].push(reply);
     emit("message", { conversation_id: cid, message: reply });
-  }, 1200);
+  }, 1200 + sseMs);
   json(res, 202, m);
 }
 
