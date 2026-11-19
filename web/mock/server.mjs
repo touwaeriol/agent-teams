@@ -182,9 +182,9 @@ function page(items) {
 
 const storageBytes = () => state.deliverables.reduce((n, d) => n + (d.detail.size ?? 0), 0);
 
-// Sending a message. Knobs to see the chat with a slow server: MOCK_SEND_MS delays the POST
-// response, MOCK_SSE_MS delays the message frame (both default 0: the frame goes out before the
-// response, like the real server). A message containing "#fail" fails its first attempt (per
+// Sending a message. Knobs to see the chat with a slow server (all default 0): MOCK_SEND_MS
+// delays storing the message (and so the response), MOCK_SSE_MS delays its message frame after
+// that, MOCK_REPLY_MS delays the response after storing (the frame then arrives first). A message containing "#fail" fails its first attempt (per
 // Idempotency-Key) with a 503, so the retry path can be tried; a repeated key gets the first reply.
 const sent = new Map();
 const failedOnce = new Set();
@@ -213,6 +213,7 @@ async function sendMessage(res, cid, req) {
     state.messages[cid].push(reply);
     emit("message", { conversation_id: cid, message: reply });
   }, 1200 + sseMs);
+  await sleep(Number(process.env.MOCK_REPLY_MS ?? 0));
   json(res, 202, m);
 }
 
