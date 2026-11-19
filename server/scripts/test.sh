@@ -4,7 +4,7 @@
 #   server/scripts/test.sh                 # go test ./...
 #   server/scripts/test.sh -run TestRoles  # extra go test args
 # GO_MODCACHE names the module cache volume (it must be writable by the caller:
-# `make go-modcache`); CI uses its own.
+# `make go-modcache`).
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 id="$$-$RANDOM"

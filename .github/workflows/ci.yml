@@ -1,8 +1,7 @@
 name: CI
 
-# Runs on the self-hosted runner (cicd-agent-teams). Push only: the platform
-# and the developers push branches to this repository, and a pull_request
-# trigger would let a fork's pull request run its own code on that machine.
+# Push only: every branch is pushed to this repository, so a pull_request
+# trigger would only run the same commit twice.
 on:
   push:
   workflow_dispatch:
@@ -14,15 +13,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # Docker volumes are shared by every user of the machine; the default
-  # agent-teams-gomod belongs to a developer account.
-  GO_MODCACHE: agent-teams-gomod-ci
-
 jobs:
   server:
     name: server (Go, PostgreSQL, Valkey)
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
@@ -31,7 +25,7 @@ jobs:
 
   protocol:
     name: protocol
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
@@ -42,7 +36,7 @@ jobs:
 
   node:
     name: node daemon
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
       run:
@@ -58,7 +52,7 @@ jobs:
 
   web:
     name: web
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
       run:
