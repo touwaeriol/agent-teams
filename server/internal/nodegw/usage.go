@@ -30,9 +30,8 @@ const (
 
 // usageWait is one in-flight node.usage_refresh; concurrent refreshes of a node share it.
 type usageWait struct {
-	done     chan struct{}
-	deadline time.Time
-	got      bool // a node.usage arrived (set before done is closed)
+	done chan struct{} // closed when a node.usage arrives or the wait times out
+	got  bool          // a node.usage arrived; guarded by Gateway.mu
 }
 
 // recordUsage keeps the node's latest node.usage report (memory only; it survives the link).
@@ -41,12 +40,12 @@ func (g *Gateway) recordUsage(nodeID string, b *protocol.NodeUsage, now time.Tim
 	g.mu.Lock()
 	g.usage[nodeID] = u
 	w := g.usageWaits[nodeID]
-	delete(g.usageWaits, nodeID)
-	g.mu.Unlock()
 	if w != nil {
+		delete(g.usageWaits, nodeID)
 		w.got = true
 		close(w.done)
 	}
+	g.mu.Unlock()
 }
 
 func (g *Gateway) now() time.Time {
@@ -91,29 +90,35 @@ func (g *Gateway) RefreshUsage(ctx context.Context, nodeID string) (*platform.No
 	w := g.usageWaits[nodeID]
 	first := w == nil
 	if first {
-		w = &usageWait{done: make(chan struct{}), deadline: time.Now().Add(wait)}
+		// The wait belongs to the node, not to the request that started it: it ends itself after
+		// `wait`, so a caller that leaves early (ctx cancelled) never leaves a stale entry behind.
+		w = &usageWait{done: make(chan struct{})}
 		g.usageWaits[nodeID] = w
+		time.AfterFunc(wait, func() { g.endWait(nodeID, w) })
 	}
 	g.mu.Unlock()
 	if first {
-		if err := l.sendUnreliable(ctx, protocol.TypeNodeUsageRefresh, protocol.NodeUsageRefresh{}); err != nil {
+		sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), wait)
+		err := l.sendUnreliable(sendCtx, protocol.TypeNodeUsageRefresh, protocol.NodeUsageRefresh{})
+		cancel()
+		if err != nil {
 			g.log.Warn("node.usage_refresh", "node_id", nodeID, "err", err)
 			g.endWait(nodeID, w)
 		}
 	}
-	timer := time.NewTimer(time.Until(w.deadline))
-	defer timer.Stop()
 	select {
 	case <-w.done:
-	case <-timer.C:
-		g.endWait(nodeID, w)
 	case <-ctx.Done():
 		return g.Usage(nodeID), true, nil
 	}
-	return g.Usage(nodeID), !w.got, nil
+	g.mu.Lock()
+	got := w.got
+	g.mu.Unlock()
+	return g.Usage(nodeID), !got, nil
 }
 
-// endWait gives up on w (timeout or send failure) so the next refresh asks the node again.
+// endWait gives up on w (timeout or send failure) so the next refresh asks the node again;
+// a no-op when w already ended.
 func (g *Gateway) endWait(nodeID string, w *usageWait) {
 	g.mu.Lock()
 	defer g.mu.Unlock()

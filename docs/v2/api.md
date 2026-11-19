@@ -290,7 +290,7 @@ PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平�
 | POST | `/api/nodes/{id}/token` | → `{token, install}`；轮换并立即断开 |
 | POST | `/api/nodes/{id}/upgrade` | → 202；发 `node.upgrade`（版本取 `at_settings.node_release`） |
 | POST | `/api/nodes/{id}/drain` | `{deadline_s}` → 202 |
-| POST | `/api/nodes/{id}/usage/refresh` | → `{usage: NodeUsage\|null, stale?: true}`（权限同 `GET /api/nodes`）。最近一次上报的 `received_at` 在 60 s 内直接返回缓存，不打扰节点；否则发 `node.usage_refresh`（protocol.md §9），等下一条 `node.usage`，最多 15 s，同一节点的并发请求合并成一次等待；超时返回已有的 usage 并带 `stale: true`。不在任何数据库事务里等待。节点不在线 → 409 `node_offline`；守护进程不支持（`hello.features` 没有 `usage`）→ 409 `usage_unsupported` |
+| POST | `/api/nodes/{id}/usage/refresh` | → `{usage: NodeUsage\|null, stale?: true}`（权限同 `GET /api/nodes`）。最近一次上报的 `received_at` 在 60 s 内直接返回缓存，不打扰节点；否则发 `node.usage_refresh`（protocol.md §9），等下一条 `node.usage`，最多 15 s，同一节点的并发请求合并成一次等待；超时返回已有的 usage 并带 `stale: true`；`node.usage_refresh` 发送失败、或调用方提前断开时同样返回 200 加 `stale: true`（等待挂在节点上、15 s 后自行结束，不依赖发起请求的连接）。不在任何数据库事务里等待。节点不在线 → 409 `node_offline`；守护进程不支持（`hello.features` 没有 `usage`）→ 409 `usage_unsupported` |
 | DELETE | `/api/nodes/{id}` | → 204；断开链路；该节点上的员工改派：在新节点开新会话并附交接摘要（`architecture.md` §6.2） |
 | GET | `/api/nodes/{id}/sessions` | → `[{session_id, employee, project, thread_no, state, last_active_at}]` |
 | GET | `/api/nodes/{id}/logs?level=&before=` | → 节点回传的 warn/error 日志 |
