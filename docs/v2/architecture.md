@@ -372,6 +372,7 @@ queued ──开工──► running ◄──► waiting（有等你处理的�
 1. 条目进入（组长 `enqueue_merge`，或审查/决策关卡通过后自动进入）：任务推送过的每个仓库一个条目（`at_merge_queue.repo`；`enqueue_merge(repo)` 只合并其中一个）。没有任何改动的任务直接 `done`。任务状态 `merging`；任务在所有仓库都合并后才 `done`。该仓库还没有讨论串分支时先按 §8.1 创建。
 2. 建试合并分支：`mq/<no>/<entry_id>` = 讨论串分支当前 head（`POST /git/refs`），然后 `POST /repos/{o}/{r}/merges {base: mq/…, head: thread/<no>/<name>}`。
    - 409 冲突 → 条目 `conflict`，给该成员生成修复任务“把 thread/<no>-<slug> rebase/merge 进你的分支并解决冲突”（`kind: fix`，直接点名该成员），任务回到 `running`。
+   - 非合并原因的失败（读讨论串分支、建试合并分支失败等，GitHub 5xx 除外，下一轮重试）→ 条目 `cancelled` 并通知组长；任务从 `merging` 回到 `blocked`（任务的其他仓库还在队列里时等它们走完；其他仓库合并完时也不记 done，而是 `blocked`），组长原因解决后可以再 `enqueue_merge(task_id)`。讨论串分支已记为建过（`branch_created`）但 GitHub 上读到 404（被删、或随已合并的 PR 删掉）时，先从基准分支重新切出再继续，切不出来才按上面取消。
 3. 等 CI（§8.3）在试合并分支 head 上的结果。
 4. 绿 → 快进讨论串分支：`PATCH /git/refs/heads/thread/<no>-<slug> {sha, force:false}`。如果讨论串 head 在此期间变了（422 非快进），回到第 2 步重建（最多 3 次）。
 5. 红 → 条目 `ci_failed`，按失败的 check 生成修复任务回池（`kind: fix`，role = 原任务岗位，优先该成员），附上失败 check 的名称、摘要和日志链接（Checks API `output.summary`）。
