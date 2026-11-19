@@ -25,7 +25,7 @@
     },
     "path": {
       "$ref": "common.json#/$defs/SharedPath",
-      "description": "Target path in the shared files. Default: file normalised to a relative path, with a leading .agent-shared/ removed (so a file fetched with read_shared_file goes back to the same path)."
+      "description": "Target path in the shared files. Default: file normalised to a relative path, with a leading .shared/ removed (so a file fetched with read_shared_file goes back to the same path)."
     }
   },
   "$defs": {

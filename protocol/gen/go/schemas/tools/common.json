@@ -295,11 +295,11 @@
     },
     "SharedPath": {
       "title": "SharedPath",
-      "description": "Path of a file in the project's shared files: relative, '/'-separated, 1 to 8 segments, at most 255 characters. No segment may be empty, '.', '..' or start with '.' (so no hidden files and nothing under .agent-*); no backslash, control characters or leading '/'.",
+      "description": "Path of a file in the project's shared files: relative, '/'-separated, 1 to 8 segments, at most 255 bytes in UTF-8 (the schema can only check 255 characters; the server's byte check is authoritative). No segment may be empty, '.', '..', start with '.' (so no hidden files and nothing under .shared or .agent-*) or start or end with a space; no backslash, control characters (C0, DEL, C1), U+2028/U+2029 or leading '/'.",
       "type": "string",
       "minLength": 1,
       "maxLength": 255,
-      "pattern": "^[^./\\\\\\x00-\\x1f\\x7f][^/\\\\\\x00-\\x1f\\x7f]*(/[^./\\\\\\x00-\\x1f\\x7f][^/\\\\\\x00-\\x1f\\x7f]*){0,7}$",
+      "pattern": "^[^. /\\\\\\x00-\\x1f\\x7f-\\x9f  ](?:[^/\\\\\\x00-\\x1f\\x7f-\\x9f  ]*[^ /\\\\\\x00-\\x1f\\x7f-\\x9f  ])?(?:/[^. /\\\\\\x00-\\x1f\\x7f-\\x9f  ](?:[^/\\\\\\x00-\\x1f\\x7f-\\x9f  ]*[^ /\\\\\\x00-\\x1f\\x7f-\\x9f  ])?){0,7}$",
       "examples": [
         "data/sample.csv",
         "notes.md"

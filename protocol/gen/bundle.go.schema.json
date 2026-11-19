@@ -590,7 +590,7 @@
     },
     "FileDownload": {
       "title": "FileDownload",
-      "description": "One piece of the files read_deliverable or read_shared_file sends to the employee's working directory. Chunks are sent before the tool.result that references their download_id (download or shared_download); the daemon keeps them for that call only, checks sizes and checksums, and writes the files under .agent-deliverables/ (read_deliverable) or .agent-shared/ (read_shared_file).",
+      "description": "One piece of the files read_deliverable or read_shared_file sends to the employee's working directory. Chunks are sent before the tool.result that references their download_id (download or shared_download); the daemon keeps them for that call only, checks sizes and checksums, and writes the files under .agent-deliverables/ (read_deliverable) or .shared/ (read_shared_file).",
       "type": "object",
       "required": [
         "session_id",
@@ -2886,7 +2886,7 @@
           "$ref": "#/$defs/ToolDownload"
         },
         "shared_download": {
-          "description": "read_shared_file: the one file whose bytes arrived before as file.download frames; the daemon writes it as .agent-shared/<path> in the session's working directory (the folder holds its own .gitignore).",
+          "description": "read_shared_file: the one file whose bytes arrived before as file.download frames; the daemon writes it as .shared/<path> in the session's working directory (the folder holds its own .gitignore).",
           "$ref": "#/$defs/ToolSharedDownload"
         }
       }
@@ -3474,11 +3474,11 @@
     },
     "SharedPath": {
       "title": "SharedPath",
-      "description": "Path of a file in the project's shared files: relative, '/'-separated, 1 to 8 segments, at most 255 characters. No segment may be empty, '.', '..' or start with '.' (so no hidden files and nothing under .agent-*); no backslash, control characters or leading '/'.",
+      "description": "Path of a file in the project's shared files: relative, '/'-separated, 1 to 8 segments, at most 255 bytes in UTF-8 (the schema can only check 255 characters; the server's byte check is authoritative). No segment may be empty, '.', '..', start with '.' (so no hidden files and nothing under .shared or .agent-*) or start or end with a space; no backslash, control characters (C0, DEL, C1), U+2028/U+2029 or leading '/'.",
       "type": "string",
       "minLength": 1,
       "maxLength": 255,
-      "pattern": "^[^./\\\\\\x00-\\x1f\\x7f][^/\\\\\\x00-\\x1f\\x7f]*(/[^./\\\\\\x00-\\x1f\\x7f][^/\\\\\\x00-\\x1f\\x7f]*){0,7}$",
+      "pattern": "^[^. /\\\\\\x00-\\x1f\\x7f-\\x9f  ](?:[^/\\\\\\x00-\\x1f\\x7f-\\x9f  ]*[^ /\\\\\\x00-\\x1f\\x7f-\\x9f  ])?(?:/[^. /\\\\\\x00-\\x1f\\x7f-\\x9f  ](?:[^/\\\\\\x00-\\x1f\\x7f-\\x9f  ]*[^ /\\\\\\x00-\\x1f\\x7f-\\x9f  ])?){0,7}$",
       "examples": [
         "data/sample.csv",
         "notes.md"
@@ -4763,7 +4763,8 @@
       "required": [
         "path",
         "size",
-        "sha256"
+        "sha256",
+        "local_path"
       ],
       "properties": {
         "path": {
@@ -4778,18 +4779,14 @@
           "pattern": "^[0-9a-f]{64}$"
         },
         "local_path": {
-          "description": "Where the file was written, relative to your working directory (.agent-shared/<path>; the daemon adds the absolute path). Absent when the session has no working directory.",
-          "type": "string"
-        },
-        "content": {
-          "description": "The text, only with inline=true for a UTF-8 text file of at most 64 KB.",
+          "description": "Where the file was written, relative to your working directory: .shared/<path> (the daemon adds the absolute path). Read the file there with your file tools.",
           "type": "string"
         }
       }
     },
     "ReadSharedFileInput": {
       "title": "ReadSharedFileInput",
-      "description": "Fetch one of the project's shared files into your working directory as .agent-shared/<path> (the folder is git-ignored, like .agent-deliverables). With inline=true a UTF-8 text file of at most 64 KB is also returned as content. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 20 MB per file, 500 MB per project. To change it, edit the local copy and call write_shared_file(file=.agent-shared/<path>).",
+      "description": "Download one of the project's shared files to .shared/<path> in your working directory (the folder is git-ignored) and return that local path; the result never contains the file's content, so read it with your file tools. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. An existing local copy at the same path is overwritten. Limits: 20 MB per file, 500 MB per project. To change the shared file, edit the local copy and call write_shared_file(file=.shared/<path>).",
       "type": "object",
       "required": [
         "path"
@@ -4799,10 +4796,6 @@
         "path": {
           "$ref": "#/$defs/SharedPath",
           "description": "Path in the shared files, for example data/sample.csv (see list_shared_files)."
-        },
-        "inline": {
-          "description": "Also return the text in the result (UTF-8 text files up to 64 KB only).",
-          "type": "boolean"
         }
       }
     },
@@ -5132,7 +5125,7 @@
         },
         "path": {
           "$ref": "#/$defs/SharedPath",
-          "description": "Target path in the shared files. Default: file normalised to a relative path, with a leading .agent-shared/ removed (so a file fetched with read_shared_file goes back to the same path)."
+          "description": "Target path in the shared files. Default: file normalised to a relative path, with a leading .shared/ removed (so a file fetched with read_shared_file goes back to the same path)."
         }
       }
     }
