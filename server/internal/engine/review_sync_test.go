@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -124,9 +125,8 @@ func TestReviewFirstClaimChecksOutReviewedCommit(t *testing.T) {
 		t.Fatalf("reviewer opened before its worktree was ready: %s", f.Body)
 	}
 	rw.answer(t, p, reviewedSHA)
-	rev, open := expectOpen(t, rw.w, rw.n, "reviewer-1")
+	_, open := expectOpen(t, rw.w, rw.n, "reviewer-1")
 	answerPrepares(t, rw.w, rw.n)
-	rev.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: protocol.SessionID(rev.session), MsgID: open.FirstMessage.MsgID})
 	brief := open.FirstMessage.Text
 	for _, want := range []string{"审查 dev-1 的任务 t1", "被审提交：o/r " + reviewedSHA, "o/r：平台已检出并核对，HEAD = " + reviewedSHA, "platform_error"} {
 		if !strings.Contains(brief, want) {
@@ -136,13 +136,51 @@ func TestReviewFirstClaimChecksOutReviewedCommit(t *testing.T) {
 	if strings.Contains(brief, "平台没能核对") {
 		t.Errorf("verified review asks the reviewer to check HEAD:\n%s", brief)
 	}
-	// A gate blocked for another reason (turns ended without complete_task) stays the reviewer's:
-	// nudged by the lead, it can still hand in its verdict.
-	rw.sql(t, `UPDATE at_tasks SET status = 'blocked' WHERE thread_id = $1 AND id = 't2'`, rw.thread.ID)
-	rev.mustCall("complete_task", map[string]any{"task_id": "t2", "status": "done", "summary": "看过了，没问题"})
-	rw.lead.expectSend("审查（reviewer-1）：通过")
 	if errs := rw.n.Errors(); len(errs) > 0 {
 		t.Fatalf("protocol errors: %+v", errs)
+	}
+}
+
+// TestReviewBlockedByTurnsTakesVerdict: a gate blocked because the reviewer ended two turns
+// without complete_task (TurnEnded) is not a platform error: it stays the reviewer's, and once
+// the lead nudges it the verdict counts as usual — done passes, failed sends the parent back
+// for rework.
+func TestReviewBlockedByTurnsTakesVerdict(t *testing.T) {
+	ended := func(e *protocol.SessionEvent) {
+		sub, isErr, turns, ms := "success", false, 1, 10
+		usage := json.RawMessage(`{"input_tokens":10,"output_tokens":5}`)
+		cost := 0.01
+		e.ResultSubtype, e.IsError, e.NumTurns, e.DurationMS, e.Usage, e.CostUSD = &sub, &isErr, &turns, &ms, &usage, &cost
+	}
+	for _, verdict := range []string{"done", "failed"} {
+		t.Run(verdict, func(t *testing.T) {
+			rw := newReviewWorld(t, reviewFeatures, nil)
+			rw.answer(t, rw.reviewSync(t), reviewedSHA)
+			rev, open := expectOpen(t, rw.w, rw.n, "reviewer-1")
+			answerPrepares(t, rw.w, rw.n)
+			rev.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: protocol.SessionID(rev.session), MsgID: open.FirstMessage.MsgID})
+			rev.event("turn_ended", ended)
+			rev.expectSend("[平台提醒] 任务 t2 还没有完成")
+			rev.event("turn_ended", ended)
+			rw.lead.expectSend("[Task t2 · reviewer-1 · 需要关注]")
+			if gate := rw.taskRow(t, rw.thread.ID, "t2"); gate.Status != "blocked" || gate.ClaimedBy != "reviewer-1" {
+				t.Fatalf("gate after two ended turns: %s claimed by %q", gate.Status, gate.ClaimedBy)
+			}
+
+			rev.mustCall("complete_task", map[string]any{"task_id": "t2", "status": verdict, "summary": "缺少输入校验"})
+			parent := func() core.Task { return rw.taskRow(t, rw.thread.ID, "t1") }
+			if verdict == "done" {
+				rw.lead.expectSend("审查（reviewer-1）：通过")
+				if p := parent(); p.Status != "review" {
+					t.Fatalf("passed parent: %s", p.Status)
+				}
+				return
+			}
+			rw.lead.expectSend("预留给 dev-1 返工")
+			if p := parent(); p.Status == "review" || p.ReservedFor != "dev-1" {
+				t.Fatalf("rejected parent: %s reserved %q", p.Status, p.ReservedFor)
+			}
+		})
 	}
 }
 
