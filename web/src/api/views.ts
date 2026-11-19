@@ -20,11 +20,13 @@ export type MemoryFileView = S["MemoryFile"];
 /** usage: subscription quota per runtime (server fills it in; null or missing = no data yet). */
 export type NodeView = Omit<S["NodeView"], "usage"> & { usage?: NodeUsage | null };
 
-export type UsageWindowKey = "five_hour" | "weekly" | "weekly_opus" | "weekly_sonnet" | "primary" | "secondary";
+export type UsageWindowKey = "five_hour" | "weekly" | "weekly_opus" | "weekly_sonnet" | "weekly_model" | "primary" | "secondary";
 export interface UsageWindow {
   key: UsageWindowKey;
   used_percent: number;
   window_minutes?: number;
+  /** Display name from the server (e.g. the model of a weekly_model window). */
+  label?: string;
   resets_at: string | null;
 }
 export interface RuntimeUsage {

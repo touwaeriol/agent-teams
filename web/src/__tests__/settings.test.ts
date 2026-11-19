@@ -1,13 +1,13 @@
 // Settings, team, nodes, GitHub, admin and project-settings helpers (ported from the React page
 // tests plus the Vue-side helpers that replaced inline code).
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { RoleView } from "@/api/views";
 import { pickedSkillFiles, toBase64 } from "@/components/app/library/upload";
 import { addRepo, matchesRepo, moveRepo, normalizeRepo, removeRepo, repoOptions, reposPayload, sortRepos } from "@/components/app/repo/repo";
 import { draftValid, emptyDraft, scheduleBody } from "@/components/app/schedules/schedule";
 import { parseSetting } from "@/pages/admin/admin";
 import { connectionKind, usedText } from "@/pages/settings/github/github";
-import { nodeMeta, nodeStats, resetText, runtimeLine, settingsPatch, slotPct, usageLevel, usageView, windowLabel } from "@/pages/settings/nodes/nodes";
+import { hoverIntent, needsUsageRefresh, nodeMeta, nodeStats, resetText, runtimeLine, settingsPatch, slotPct, usageLevel, usageView, windowLabel, withNodeUsage } from "@/pages/settings/nodes/nodes";
 import { isDirty, nodePickerText, ordered, patchAt, removeAt, toggleId, versionText } from "@/pages/settings/team/team";
 import { employeeRows, fromChoice, inlineCommit, leadTimeoutLabel, memoryFileName, memoryWriter, repoRefs, splitMemory, threadRows, toChoice } from "@/pages/projectSettings/logic";
 import { newRole } from "@/lib/roles";
@@ -110,6 +110,11 @@ describe("nodes", () => {
     expect(windowLabel({ key: "secondary", window_minutes: 2880 })).toBe("2 天");
     expect(windowLabel({ key: "primary" })).toBe("短窗口");
     expect(windowLabel({ key: "secondary" })).toBe("长窗口");
+    expect(windowLabel({ key: "weekly_model", label: "Fable" })).toBe("每周 Fable");
+    expect(windowLabel({ key: "weekly_model" })).toBe("每周（模型）");
+    expect(windowLabel({ key: "weekly_model", label: " " })).toBe("每周（模型）");
+    expect(windowLabel({ key: "five_hour", label: "会话" })).toBe("会话");
+    expect(windowLabel({ key: "primary", window_minutes: 300, label: "Fast" })).toBe("Fast");
     expect([0, 79.9, 80, 94, 95, 100].map(usageLevel)).toEqual(["normal", "normal", "warn", "warn", "danger", "danger"]);
     const now = Date.parse("2026-11-19T10:00:00Z");
     const at = (min: number) => new Date(now + min * 60_000).toISOString();
@@ -143,6 +148,51 @@ describe("nodes", () => {
     expect(usageView("claude", { cli: "2.1", auth: "none" }, undefined, true, now)).toBeNull();
     expect(usageView("claude", undefined, { ...ok, windows: [...ok.windows] }, true, now)).toBeNull();
     expect(usageView("claude", sub, { ...ok, windows: null }, true, now)).toBeNull();
+    // hello says logged out / API key now: leftover subscription quota is hidden
+    expect(usageView("claude", { cli: "2.1", auth: "none" }, { ...ok, windows: [...ok.windows] }, true, now)).toBeNull();
+    expect(usageView("claude", { cli: "2.1", auth: "api_key" }, { ...ok, windows: [...ok.windows] }, true, now)).toBeNull();
+    expect(usageView("codex", { cli: "0.1", auth: "api_key" }, { ...ok, auth: "chatgpt", windows: [...ok.windows] }, true, now)).toBeNull();
+  });
+  it("hover refresh: only stale subscription quota on online nodes, after 300 ms, one node's usage replaced", () => {
+    const now = Date.parse("2026-11-19T10:00:00Z");
+    const at = (s: number) => new Date(now - s * 1000).toISOString();
+    const u = (received: string, fetched = received) => ({ auth: "subscription", status: "ok", windows: [], fetched_at: fetched, received_at: received }) as never;
+    const sub = { claude: { cli: "2.1", auth: "subscription" } };
+    expect(needsUsageRefresh({ online: true, runtimes: sub, usage: { claude: u(at(30)) } }, now)).toBe(false);
+    expect(needsUsageRefresh({ online: true, runtimes: sub, usage: { claude: u(at(59)) } }, now)).toBe(false);
+    expect(needsUsageRefresh({ online: true, runtimes: sub, usage: { claude: u(at(60)) } }, now)).toBe(true);
+    expect(needsUsageRefresh({ online: true, runtimes: sub, usage: { claude: u(at(600)) } }, now)).toBe(true);
+    // received_at first, fetched_at when it is missing
+    expect(needsUsageRefresh({ online: true, runtimes: sub, usage: { claude: u(at(10), at(600)) } }, now)).toBe(false);
+    expect(needsUsageRefresh({ online: true, runtimes: sub, usage: { claude: u("", at(10)) } }, now)).toBe(false);
+    expect(needsUsageRefresh({ online: true, runtimes: sub, usage: { claude: u("", at(90)) } }, now)).toBe(true);
+    expect(needsUsageRefresh({ online: true, runtimes: sub, usage: null }, now)).toBe(true);
+    expect(needsUsageRefresh({ online: false, runtimes: sub, usage: null }, now)).toBe(false);
+    expect(needsUsageRefresh({ online: true, runtimes: { claude: { cli: "2.1", auth: "api_key" }, codex: { cli: "0.1", auth: "none" } }, usage: null }, now)).toBe(false);
+    expect(needsUsageRefresh({ online: true, runtimes: { claude: { cli: "2.1", auth: "subscription" }, codex: { cli: "0.1", auth: "chatgpt" } }, usage: { claude: u(at(5)) } }, now)).toBe(true);
+
+    vi.useFakeTimers();
+    try {
+      const fire = vi.fn();
+      const h = hoverIntent(300, fire);
+      h.enter();
+      vi.advanceTimersByTime(299);
+      h.leave();
+      vi.advanceTimersByTime(1000);
+      expect(fire).not.toHaveBeenCalled();
+      h.enter();
+      h.enter();
+      vi.advanceTimersByTime(300);
+      expect(fire).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const list = [{ id: "a", usage: null }, { id: "b", usage: { claude: u(at(1)) } }];
+    const fresh = { claude: u(at(0)) };
+    expect(withNodeUsage(list, "a", fresh)).toEqual([{ id: "a", usage: fresh }, list[1]]);
+    expect(withNodeUsage(list, "a", null)).toBe(list);
+    expect(withNodeUsage(undefined, "a", fresh)).toBeUndefined();
   });
   it("meta line, slot bar, totals and the settings patch", () => {
     expect(nodeMeta(node({}))).toBe("v0.3.1 · 独立系统用户 · 从未连接");

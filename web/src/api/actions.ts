@@ -104,6 +104,7 @@ export const nodes = {
   rotate: (id: string) => unwrap(client.POST("/api/nodes/{id}/token", { params: { path: { id } } })),
   upgrade: (id: string) => unwrap(client.POST("/api/nodes/{id}/upgrade", { params: { path: { id } } })),
   remove: (id: string) => unwrap(client.DELETE("/api/nodes/{id}", { params: { path: { id } } })),
+  refreshUsage: (id: string) => unwrap(client.POST("/api/nodes/{id}/usage/refresh", { params: { path: { id } } })),
 };
 
 export const roles = {
