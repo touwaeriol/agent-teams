@@ -38,8 +38,8 @@ function shared(path: string, body: string | Buffer, size = CHUNK_BYTES) {
 
 describe("shared paths", () => {
   it("follows the SharedPath contract", () => {
-    for (const ok of ["a", "data/sample.csv", "报告/2026 Q4.md", "a/b/c/d/e/f/g/h", "x..y", "run.sh"]) expect(validSharedPath(ok), ok).toBe(true);
-    for (const bad of ["", "/a", "a/", "a//b", ".env", "a/.git/x", "..", "../x", "a/../b", "a\\b", "a\u0000b", "a\nb", "a/b/c/d/e/f/g/h/i", "x".repeat(256)]) {
+    for (const ok of ["a", "data/sample.csv", "报告/2026 Q4.md", "a/b/c/d/e/f/g/h", "x..y", "run.sh", "x".repeat(255), "文".repeat(85)]) expect(validSharedPath(ok), ok).toBe(true);
+    for (const bad of ["", "/a", "a/", "a//b", ".env", "a/.git/x", "..", "../x", "a/../b", "a\\b", "a\u0000b", "a\nb", "a\u0085b", "a\u2028b", " a", "a ", "dir /x", "a/b/c/d/e/f/g/h/i", "x".repeat(256), "文".repeat(86)]) {
       expect(validSharedPath(bad), JSON.stringify(bad)).toBe(false);
     }
   });
@@ -87,9 +87,16 @@ describe("write_shared_file upload", () => {
       await expect(prepareSharedUpload(dir, f, undefined), String(f)).rejects.toBeInstanceOf(UploadError);
     }
     // A hidden file needs an explicit target: ".env" is not a valid shared path.
-    await expect(prepareSharedUpload(dir, ".env", undefined)).rejects.toThrow(/pass path/);
+    await expect(prepareSharedUpload(dir, ".env", undefined)).rejects.toThrow(/default shared path ".env".*pass path/);
+    // So does anything under a hidden folder or with a name that ends in a space.
+    mkdirSync(join(dir, "out", ".cache"), { recursive: true });
+    writeFileSync(join(dir, "out", ".cache", "x"), "x");
+    writeFileSync(join(dir, "trail.txt "), "x");
+    await expect(prepareSharedUpload(dir, "out/.cache/x", undefined)).rejects.toThrow(/default shared path "out\/\.cache\/x".*pass path/);
+    await expect(prepareSharedUpload(dir, "trail.txt ", undefined)).rejects.toThrow(/pass path/);
+    expect((await prepareSharedUpload(dir, "out/.cache/x", "cache/x")).upload.files[0]!.path).toBe("cache/x");
     expect((await prepareSharedUpload(dir, ".env", "env.txt")).upload.files[0]!.path).toBe("env.txt");
-    for (const target of ["../x", "/etc/x", "a/../b", ".git/x", "a\\b", 7]) {
+    for (const target of ["../x", "/etc/x", "a/../b", ".git/x", "a\\b", "a ", "文".repeat(86), 7]) {
       await expect(prepareSharedUpload(dir, "sub/ok.txt", target), String(target)).rejects.toThrow(/not a valid shared path/);
     }
     // A symlink that stays inside the working directory is fine and keeps its own name.
