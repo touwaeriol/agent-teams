@@ -7,7 +7,7 @@ import { addRepo, matchesRepo, moveRepo, normalizeRepo, removeRepo, repoOptions,
 import { draftValid, emptyDraft, scheduleBody } from "@/components/app/schedules/schedule";
 import { parseSetting } from "@/pages/admin/admin";
 import { connectionKind, usedText } from "@/pages/settings/github/github";
-import { nodeMeta, nodeStats, runtimeLine, settingsPatch, slotPct } from "@/pages/settings/nodes/nodes";
+import { nodeMeta, nodeStats, resetText, runtimeLine, settingsPatch, slotPct, usageLevel, usageView, windowLabel } from "@/pages/settings/nodes/nodes";
 import { isDirty, nodePickerText, ordered, patchAt, removeAt, toggleId, versionText } from "@/pages/settings/team/team";
 import { employeeRows, fromChoice, inlineCommit, leadTimeoutLabel, memoryFileName, memoryWriter, repoRefs, splitMemory, threadRows, toChoice } from "@/pages/projectSettings/logic";
 import { newRole } from "@/lib/roles";
@@ -98,6 +98,51 @@ describe("nodes", () => {
     expect(runtimeLine("codex", undefined)).toEqual({ ver: "未安装", login: "安装后登录或设置 CODEX_API_KEY", ok: false });
     expect(runtimeLine("claude", { cli: "2.1", auth: "none" }).login).toBe("未登录");
     expect(runtimeLine("claude", { cli: "2.1", auth: "api_key" })).toEqual({ ver: "2.1", login: "已配置 API Key", ok: true });
+  });
+  it("quota window names, levels and reset text", () => {
+    expect(windowLabel({ key: "five_hour" })).toBe("5 小时");
+    expect(windowLabel({ key: "weekly" })).toBe("每周");
+    expect(windowLabel({ key: "weekly_opus" })).toBe("每周 Opus");
+    expect(windowLabel({ key: "weekly_sonnet" })).toBe("每周 Sonnet");
+    expect(windowLabel({ key: "primary", window_minutes: 300 })).toBe("5 小时");
+    expect(windowLabel({ key: "secondary", window_minutes: 10080 })).toBe("每周");
+    expect(windowLabel({ key: "primary", window_minutes: 120 })).toBe("2 小时");
+    expect(windowLabel({ key: "secondary", window_minutes: 2880 })).toBe("2 天");
+    expect(windowLabel({ key: "primary" })).toBe("短窗口");
+    expect(windowLabel({ key: "secondary" })).toBe("长窗口");
+    expect([0, 79.9, 80, 94, 95, 100].map(usageLevel)).toEqual(["normal", "normal", "warn", "warn", "danger", "danger"]);
+    const now = Date.parse("2026-11-19T10:00:00Z");
+    const at = (min: number) => new Date(now + min * 60_000).toISOString();
+    expect(resetText(null, now)).toBe("");
+    expect(resetText("bad", now)).toBe("");
+    expect(resetText(at(-5), now)).toBe("即将重置");
+    expect(resetText(at(25), now)).toBe("25 分钟后重置");
+    expect(resetText(at(130), now)).toBe("2 小时后重置");
+    const far = new Date(now + 3 * 86400_000);
+    expect(resetText(far.toISOString(), now)).toMatch(new RegExp(`^${far.getMonth() + 1}月${far.getDate()}日 \\d{2}:\\d{2} 重置$`));
+  });
+  it("what shows under each runtime chip", () => {
+    const now = Date.parse("2026-11-19T10:00:00Z");
+    const ok = { auth: "subscription", status: "ok", plan: "Max", fetched_at: new Date().toISOString(), received_at: "", windows: [
+      { key: "five_hour", used_percent: 42.4, resets_at: new Date(now + 90 * 60_000).toISOString() },
+      { key: "weekly", used_percent: 96, resets_at: null },
+    ] } as const;
+    const sub = { cli: "2.1", auth: "subscription" };
+    const v = usageView("claude", sub, { ...ok, windows: [...ok.windows] }, true, now);
+    expect(v).toMatchObject({ kind: "windows", updated: "Max · 更新于 刚刚" });
+    if (v?.kind !== "windows") throw new Error("expected windows");
+    expect(v.rows.map((r) => [r.label, r.pct, r.width, r.reset])).toEqual([["5 小时", 42, "42%", "1 小时后重置"], ["每周", 96, "96%", ""]]);
+    expect(v.rows[1].tone).toBe("hsl(var(--destructive))");
+    // codex signs in with ChatGPT
+    expect(usageView("codex", { cli: "0.1", auth: "chatgpt" }, { ...ok, auth: "chatgpt", windows: [{ key: "primary", used_percent: 81, window_minutes: 300, resets_at: null }] }, true, now)).toMatchObject({ kind: "windows", rows: [{ label: "5 小时", tone: "hsl(var(--warn))" }] });
+    expect(usageView("claude", sub, { ...ok, status: "error", error: "401", windows: [] }, true, now)).toEqual({ kind: "error", error: "401" });
+    expect(usageView("claude", sub, undefined, true, now)).toEqual({ kind: "pending" });
+    expect(usageView("claude", sub, undefined, false, now)).toBeNull();
+    expect(usageView("claude", { cli: "2.1", auth: "api_key" }, undefined, true, now)).toBeNull();
+    expect(usageView("claude", { cli: "2.1", auth: "api_key" }, { ...ok, auth: "api_key", status: "unsupported", windows: [] }, true, now)).toBeNull();
+    expect(usageView("claude", { cli: "2.1", auth: "none" }, undefined, true, now)).toBeNull();
+    expect(usageView("claude", undefined, { ...ok, windows: [...ok.windows] }, true, now)).toBeNull();
+    expect(usageView("claude", sub, { ...ok, windows: null }, true, now)).toBeNull();
   });
   it("meta line, slot bar, totals and the settings patch", () => {
     expect(nodeMeta(node({}))).toBe("v0.3.1 · 独立系统用户 · 从未连接");
