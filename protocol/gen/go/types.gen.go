@@ -3224,7 +3224,7 @@ type Hello struct {
 
 	// Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync,
 	// cred_helper, upgrade, context_usage (turn_ended carries context),
-	// session_compact (session.compact).
+	// session_compact (session.compact), usage (node.usage).
 	Features []string `json:"features,omitempty,omitzero"`
 
 	// Host corresponds to the JSON schema field "host".
@@ -4260,6 +4260,77 @@ func (j *NodeUpgrade) UnmarshalJSON(value []byte) error {
 		return fmt.Errorf("field %s pattern match: must match %s", "Version", `^\d+\.\d+\.\d+$`)
 	}
 	*j = NodeUpgrade(plain)
+	return nil
+}
+
+// Subscription quota of the node's runtimes (Claude Code, Codex), unreliable; sent
+// after hello and then periodically. Never carries credentials. The console keeps
+// only the latest report per node and drops unknown fields.
+type NodeUsage struct {
+	// Runtimes corresponds to the JSON schema field "runtimes".
+	Runtimes NodeUsageRuntimes `json:"runtimes"`
+}
+
+// Fetch the subscription quota now and answer with node.usage (unreliable). Sent
+// only when hello.features contains usage.
+type NodeUsageRefresh struct {
+	// Runtimes to fetch; omitted = all.
+	Runtimes []NodeUsageRefreshRuntimesElem `json:"runtimes,omitempty,omitzero"`
+}
+
+type NodeUsageRefreshRuntimesElem string
+
+const NodeUsageRefreshRuntimesElemClaude NodeUsageRefreshRuntimesElem = "claude"
+const NodeUsageRefreshRuntimesElemCodex NodeUsageRefreshRuntimesElem = "codex"
+
+var enumValues_NodeUsageRefreshRuntimesElem = []interface{}{
+	"claude",
+	"codex",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *NodeUsageRefreshRuntimesElem) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_NodeUsageRefreshRuntimesElem {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_NodeUsageRefreshRuntimesElem, v)
+	}
+	*j = NodeUsageRefreshRuntimesElem(v)
+	return nil
+}
+
+type NodeUsageRuntimes struct {
+	// Claude corresponds to the JSON schema field "claude".
+	Claude *RuntimeUsage `json:"claude,omitempty,omitzero"`
+
+	// Codex corresponds to the JSON schema field "codex".
+	Codex *RuntimeUsage `json:"codex,omitempty,omitzero"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *NodeUsage) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["runtimes"]; raw != nil && !ok {
+		return fmt.Errorf("field runtimes in NodeUsage: required")
+	}
+	type Plain NodeUsage
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = NodeUsage(plain)
 	return nil
 }
 
@@ -5736,6 +5807,115 @@ type Runtime string
 
 const RuntimeClaude Runtime = "claude"
 const RuntimeCodex Runtime = "codex"
+
+type RuntimeUsage struct {
+	// How the runtime is logged in: subscription (Claude), chatgpt (Codex), api_key,
+	// or none.
+	Auth RuntimeUsageAuth `json:"auth"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// When the daemon fetched this data.
+	FetchedAt *time.Time `json:"fetched_at,omitempty,omitzero"`
+
+	// Plan name when known (pro, max, plus, team, ...).
+	Plan *string `json:"plan,omitempty,omitzero"`
+
+	// ok: windows are valid; error: fetching failed (see error); unsupported: no
+	// quota for this login (API key, not logged in, too old CLI).
+	Status RuntimeUsageStatus `json:"status"`
+
+	// At most 8 are kept by the console.
+	Windows []UsageWindow `json:"windows,omitempty,omitzero"`
+}
+
+type RuntimeUsageAuth string
+
+const RuntimeUsageAuthApiKey RuntimeUsageAuth = "api_key"
+const RuntimeUsageAuthChatgpt RuntimeUsageAuth = "chatgpt"
+const RuntimeUsageAuthNone RuntimeUsageAuth = "none"
+const RuntimeUsageAuthSubscription RuntimeUsageAuth = "subscription"
+
+var enumValues_RuntimeUsageAuth = []interface{}{
+	"subscription",
+	"chatgpt",
+	"api_key",
+	"none",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *RuntimeUsageAuth) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_RuntimeUsageAuth {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_RuntimeUsageAuth, v)
+	}
+	*j = RuntimeUsageAuth(v)
+	return nil
+}
+
+type RuntimeUsageStatus string
+
+const RuntimeUsageStatusError RuntimeUsageStatus = "error"
+const RuntimeUsageStatusOk RuntimeUsageStatus = "ok"
+const RuntimeUsageStatusUnsupported RuntimeUsageStatus = "unsupported"
+
+var enumValues_RuntimeUsageStatus = []interface{}{
+	"ok",
+	"error",
+	"unsupported",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *RuntimeUsageStatus) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_RuntimeUsageStatus {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_RuntimeUsageStatus, v)
+	}
+	*j = RuntimeUsageStatus(v)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *RuntimeUsage) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["auth"]; raw != nil && !ok {
+		return fmt.Errorf("field auth in RuntimeUsage: required")
+	}
+	if _, ok := raw["status"]; raw != nil && !ok {
+		return fmt.Errorf("field status in RuntimeUsage: required")
+	}
+	type Plain RuntimeUsage
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = RuntimeUsage(plain)
+	return nil
+}
 
 var enumValues_Runtime = []interface{}{
 	"claude",
@@ -8326,6 +8506,49 @@ func (j *UploadID) UnmarshalJSON(value []byte) error {
 		return fmt.Errorf("field %s pattern match: must match %s", "", `^up_[0-9A-Za-z]{10,40}$`)
 	}
 	*j = UploadID(plain)
+	return nil
+}
+
+type UsageWindow struct {
+	// five_hour, weekly, weekly_opus, weekly_sonnet, weekly_model (per-model weekly
+	// window, see label) (Claude); primary, secondary (Codex).
+	Key string `json:"key"`
+
+	// Display name given by the provider, e.g. the model of a weekly_model window;
+	// the console keeps at most 40 characters.
+	Label *string `json:"label,omitempty,omitzero"`
+
+	// ResetsAt corresponds to the JSON schema field "resets_at".
+	ResetsAt *time.Time `json:"resets_at,omitempty,omitzero"`
+
+	// 0..100; the console clamps values out of range.
+	UsedPercent float64 `json:"used_percent"`
+
+	// WindowMinutes corresponds to the JSON schema field "window_minutes".
+	WindowMinutes *int `json:"window_minutes,omitempty,omitzero"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *UsageWindow) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["key"]; raw != nil && !ok {
+		return fmt.Errorf("field key in UsageWindow: required")
+	}
+	if _, ok := raw["used_percent"]; raw != nil && !ok {
+		return fmt.Errorf("field used_percent in UsageWindow: required")
+	}
+	type Plain UsageWindow
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.WindowMinutes != nil && 0 > *plain.WindowMinutes {
+		return fmt.Errorf("field %s: must be >= %v", "window_minutes", 0)
+	}
+	*j = UsageWindow(plain)
 	return nil
 }
 

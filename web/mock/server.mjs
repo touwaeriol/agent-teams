@@ -484,13 +484,27 @@ const routes = [
   ["GET", /^\/api\/nodes$/, (req, res) => json(res, 200, state.nodes)],
   ["POST", /^\/api\/nodes$/, async (req, res) => {
     const b = await body(req);
-    const n = { ...state.nodes[0], id: `n${Date.now()}`, name: b.name, online: false, since: null, active_sessions: 0, version: "" };
+    const n = { ...state.nodes[0], id: `n${Date.now()}`, name: b.name, online: false, since: null, usage: null, usage_supported: false, active_sessions: 0, version: "" };
     state.nodes.push(n);
     json(res, 201, { node: n, token: "atn_mock", install: `curl -fsSL http://localhost:5173/install-node.sh | sh -s -- --token atn_mock` });
   }],
   ["PATCH", /^\/api\/nodes\/([^/]+)$/, async (req, res, [id]) => json(res, 200, Object.assign(state.nodes.find((n) => n.id === id), await body(req)))],
   ["DELETE", /^\/api\/nodes\/([^/]+)$/, (req, res, [id]) => ((state.nodes = state.nodes.filter((n) => n.id !== id)), json(res, 204))],
   ["POST", /^\/api\/nodes\/([^/]+)\/token$/, (req, res) => json(res, 200, { token: "atn_new", install: "curl -fsSL http://localhost:5173/install-node.sh | sh -s -- --token atn_new" })],
+  // Fresh quota on hover: ~1 s like asking the node, 409 when offline, new fetched_at/received_at.
+  ["POST", /^\/api\/nodes\/([^/]+)\/usage\/refresh$/, async (req, res, [id]) => {
+    const n = state.nodes.find((x) => x.id === id);
+    if (!n) return json(res, 404, { detail: "没有这个节点" });
+    // Same shape as server/internal/httpapi/nodes_routes.go refreshNodeUsage.
+    if (!n.online) return json(res, 409, { detail: "节点不在线", code: "node_offline" });
+    if (!n.usage_supported) return json(res, 409, { detail: "节点的守护进程版本不支持查询余量", code: "usage_unsupported" });
+    const last = Math.max(0, ...Object.values(n.usage ?? {}).map((u) => Date.parse(u?.received_at ?? "") || 0));
+    if (Date.now() - last < 60_000) return json(res, 200, { usage: n.usage ?? null });
+    await new Promise((r) => setTimeout(r, Number(process.env.MOCK_USAGE_MS ?? 1000)));
+    const at = new Date().toISOString();
+    if (n.usage) for (const u of Object.values(n.usage)) if (u) Object.assign(u, { fetched_at: at, received_at: at });
+    json(res, 200, { usage: n.usage ?? null });
+  }],
   ["POST", /^\/api\/nodes\/([^/]+)\/upgrade$/, (req, res) => json(res, 202)],
   ["GET", /^\/api\/nodes\/([^/]+)\/sessions$/, (req, res, [id]) => json(res, 200, state.nodeSessions[id] ?? [])],
   ["GET", /^\/api\/models$/, (req, res) => json(res, 200, { models: state.models })],

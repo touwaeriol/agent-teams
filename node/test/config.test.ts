@@ -20,6 +20,10 @@ describe("config", () => {
       expect(loadConfig([], { HOME: home }).maxActive).toBeUndefined();
       expect(() => loadConfig([], { HOME: join(home, "nowhere") })).toThrow(/AGENT_TEAMS_CONSOLE/);
       expect(() => loadConfig(["--bogus", "1"], env)).toThrow(/unknown option/);
+      expect(loadConfig([], env).usageIntervalMs).toBeUndefined();
+      expect(loadConfig([], { ...env, AGENT_TEAMS_USAGE_INTERVAL_S: "60" }).usageIntervalMs).toBe(60_000);
+      expect(loadConfig([], { ...env, AGENT_TEAMS_USAGE_INTERVAL_S: "0" }).usageIntervalMs).toBe(0);
+      expect(loadConfig([], { ...env, AGENT_TEAMS_USAGE_INTERVAL_S: "soon" }).usageIntervalMs).toBeUndefined();
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

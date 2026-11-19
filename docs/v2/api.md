@@ -111,7 +111,14 @@ DeliverableView = {id, project_id, thread_no, kind: string, title, url, detail, 
 MergeEntryView  = {id, thread_no, task_id, employee, repo, head_branch, status, attempts, error, created_at, updated_at}   // 每个仓库一个条目
 CheckView       = {name, status, conclusion, url, summary}
 NodeView        = {id, name, online, since, last_seen_at, version, protocol, isolation: "agent_user"|"sandbox"|"none", runtimes: {...}, capacity: {...},
-                   active_sessions, parked_sessions, queued, isolated, labels, max_active_sessions, park_after_s, created_at}
+                   active_sessions, parked_sessions, queued, usage: NodeUsage|null, usage_supported, isolated, labels, max_active_sessions, park_after_s, created_at}
+                  // usage_supported：守护进程是否支持余量（在线用当前 hello.features，离线用 at_nodes.last_hello.features，里面有 `usage` 为 true，没有记录为 false）；false 时网页不显示“余量获取中…”、也不发悬停刷新，已有的 usage 照常显示
+NodeUsage       = {claude?: RuntimeUsage, codex?: RuntimeUsage}   // 节点最近一次 node.usage 上报（protocol.md §9），控制台只存内存：重启后为 null 直到下次上报；节点离线后保留最后一次，用 received_at 判断新旧
+RuntimeUsage    = {auth: "subscription"|"chatgpt"|"api_key"|"none", status: "ok"|"error"|"unsupported", plan?, error?,
+                   windows: [{key: "five_hour"|"weekly"|"weekly_opus"|"weekly_sonnet"|"weekly_model"|"primary"|"secondary"|…, label?, used_percent: 0..100, window_minutes?, resets_at: ISO|null}],  // 最多 8 个
+                   fetched_at: ISO|null,   // 守护进程取数的时间
+                   received_at}            // 控制台收到上报的时间
+                   // 只保留这些字段（不含任何凭证）；used_percent 超出 0..100 会被截到边界，字符串截断（plan 64、error 500、key 64 字节，label 40 个字符；label 是服务方给的显示名，如 weekly_model 窗口的模型名）
 RoleView        = {id, tier, role, title, runtime, count, node_ids, description, instructions, model, effort,
                    permission_mode: "bypass"|"ask",  // 省略 = bypass（直接执行，任何节点）；旧值 auto 读作 bypass；非成员岗位总是 bypass（architecture.md §9.1）
                    can_delegate, read_only, allowed_tools, disallowed_tools, sandbox, max_turns, gate, task_kinds, look, sort,
@@ -284,6 +291,7 @@ PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平�
 | POST | `/api/nodes/{id}/token` | → `{token, install}`；轮换并立即断开 |
 | POST | `/api/nodes/{id}/upgrade` | → 202；发 `node.upgrade`（版本取 `at_settings.node_release`） |
 | POST | `/api/nodes/{id}/drain` | `{deadline_s}` → 202 |
+| POST | `/api/nodes/{id}/usage/refresh` | → `{usage: NodeUsage\|null, stale?: true}`（权限同 `GET /api/nodes`）。最近一次上报的 `received_at` 在 60 s 内直接返回缓存，不打扰节点；否则发 `node.usage_refresh`（protocol.md §9），等下一条 `node.usage`，最多 15 s，同一节点的并发请求合并成一次等待；超时返回已有的 usage 并带 `stale: true`；`node.usage_refresh` 发送失败、或调用方提前断开时同样返回 200 加 `stale: true`（等待挂在节点上、15 s 后自行结束，不依赖发起请求的连接）。不在任何数据库事务里等待。节点不在线 → 409 `node_offline`；守护进程不支持（`hello.features` 没有 `usage`）→ 409 `usage_unsupported` |
 | DELETE | `/api/nodes/{id}` | → 204；断开链路；该节点上的员工改派：在新节点开新会话并附交接摘要（`architecture.md` §6.2） |
 | GET | `/api/nodes/{id}/sessions` | → `[{session_id, employee, project, thread_no, state, last_active_at}]` |
 | GET | `/api/nodes/{id}/logs?level=&before=` | → 节点回传的 warn/error 日志 |

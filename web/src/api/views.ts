@@ -17,7 +17,15 @@ export type ProjectUpdate = S["ProjectUpdate"];
 export type DeliverySettings = S["Delivery"];
 export type MemoryBrief = S["MemoryBrief"];
 export type MemoryFileView = S["MemoryFile"];
-export type NodeView = S["NodeView"];
+/** usage: subscription quota per runtime. The openapi does not mark it nullable, but the server
+ * sends null until the node reports (and older servers omit it): both mean "no data yet". */
+export type NodeView = Omit<S["NodeView"], "usage"> & { usage?: NodeUsage | null };
+export type NodeUsage = S["NodeUsage"];
+export type RuntimeUsage = S["RuntimeUsage"];
+/** key: five_hour, weekly, weekly_opus, weekly_sonnet, weekly_model (Claude); primary, secondary (Codex). */
+export type UsageWindow = S["UsageWindow"];
+/** POST /api/nodes/{id}/usage/refresh; usage is null when the node never reported. */
+export type UsageRefresh = Omit<S["UsageRefreshOutputBody"], "usage"> & { usage: NodeUsage | null };
 export type NodeSession = S["NodeSession"];
 export type FeedbackView = S["FeedbackView"];
 export type Enrollment = S["Enrollment"];

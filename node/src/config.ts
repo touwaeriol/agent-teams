@@ -20,6 +20,8 @@ export interface NodeConfig {
   claudeConfigDir: string;
   codexHome: string;
   logLevel: string;
+  /** node.usage period (AGENT_TEAMS_USAGE_INTERVAL_S; 0 disables); unset = default 5 min. */
+  usageIntervalMs?: number;
 }
 
 export class ConfigError extends Error {}
@@ -101,12 +103,18 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
     claudeConfigDir: resolve(env.CLAUDE_CONFIG_DIR ?? join(home, ".claude")),
     codexHome: resolve(env.CODEX_HOME ?? join(home, ".codex")),
     logLevel: get("AGENT_TEAMS_LOG_LEVEL") ?? "info",
+    ...usageInterval(get("AGENT_TEAMS_USAGE_INTERVAL_S")),
   };
 }
 
 function positiveInt(v: string | undefined): number | undefined {
   const n = Number(v);
   return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+function usageInterval(v: string | undefined): { usageIntervalMs?: number } {
+  const n = Number(v);
+  return v !== undefined && v !== "" && Number.isInteger(n) && n >= 0 ? { usageIntervalMs: n * 1000 } : {};
 }
 
 function passList(v: string | undefined): string[] {
