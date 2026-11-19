@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GetAccountRateLimitsResponse } from "../src/codex-protocol/v2/GetAccountRateLimitsResponse.js";
 import type { RateLimitSnapshot } from "../src/codex-protocol/v2/RateLimitSnapshot.js";
-import { collectUsage, errorText, UsageReporter, type ClaudeUsage, type UsageSources } from "../src/usage.js";
+import { collectUsage, errorText, readClaudeUsage, UsageReporter, type ClaudeUsage, type UsageSources } from "../src/usage.js";
 import { silentLogger } from "../src/util/log.js";
 import { startHarness, type Harness } from "./helpers/daemon.js";
 
@@ -90,7 +90,7 @@ describe("collectUsage", () => {
       codexAccount: () => new Promise(() => {}),
     });
     const u = await collectUsage(src, 50, now);
-    expect(u.runtimes.claude).toEqual({ auth: "subscription", status: "error", windows: [], error: "401 Unauthorized: [redacted] for [redacted]", fetched_at: NOW.toISOString() });
+    expect(u.runtimes.claude).toEqual({ auth: "subscription", status: "error", windows: [], error: "fetch_failed: 401 Unauthorized: [redacted] for [redacted]", fetched_at: NOW.toISOString() });
     expect(u.runtimes.codex).toMatchObject({ auth: "chatgpt", status: "error", windows: [], error: "timeout" });
   });
 
@@ -276,5 +276,48 @@ describe("CodexHub rate-limit pushes", () => {
     hub.noteRateLimits(snapshot(10, 5));
     hub.noteRateLimits({ ...snapshot(30, 0), secondary: null, planType: null });
     expect(hub.lastRateLimits!.snapshot).toMatchObject({ primary: { usedPercent: 30 }, secondary: { usedPercent: 5 }, planType: "pro" });
+  });
+});
+
+describe("readClaudeUsage", () => {
+  function fakeQuery(usage: ((o: unknown) => Promise<unknown>) | undefined) {
+    const state = { closed: 0, options: null as unknown };
+    const q: Record<string, unknown> = {
+      initializationResult: async () => ({ account: { subscriptionType: "max" } }),
+      close: () => void state.closed++,
+    };
+    if (usage) q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = usage;
+    const fn = ((p: { options: unknown }) => ((state.options = p.options), q)) as never;
+    return { fn, state };
+  }
+  const read = (fn: never) => (signal: AbortSignal) => readClaudeUsage({}, "/tmp", signal, fn);
+
+  it("closes the query (ending the CLI process) when get_usage never answers and the read times out", async () => {
+    const { fn, state } = fakeQuery(() => new Promise(() => {}));
+    const u = await collectUsage(sources({ codexAuth: () => "none", claudeUsage: read(fn) }), 50, now);
+    expect(u.runtimes.claude).toMatchObject({ status: "error", error: "timeout" });
+    expect(state.closed).toBeGreaterThanOrEqual(1);
+  });
+
+  it("closes the query after a successful read and passes skipBehaviors", async () => {
+    let opts: unknown;
+    const { fn, state } = fakeQuery(async (o) => ((opts = o), { session: {}, behaviors: null, ...claudeOk }));
+    const u = await collectUsage(sources({ codexAuth: () => "none", claudeUsage: read(fn) }), 1000, now);
+    expect(u.runtimes.claude).toMatchObject({ status: "ok", plan: "max" });
+    expect(opts).toEqual({ skipBehaviors: true });
+    expect(state.closed).toBe(1);
+  });
+
+  it("reports unsupported_sdk only when the method is missing", async () => {
+    const { fn, state } = fakeQuery(undefined);
+    const u = await collectUsage(sources({ codexAuth: () => "none", claudeUsage: read(fn) }), 1000, now);
+    expect(u.runtimes.claude).toMatchObject({ status: "error", error: "unsupported_sdk" });
+    expect(state.closed).toBe(1);
+  });
+
+  it("reports a rejected get_usage as fetch_failed with a redacted reason", async () => {
+    const { fn } = fakeQuery(async () => { throw new Error("control request failed: Bearer abc.def for me@example.com"); });
+    const u = await collectUsage(sources({ codexAuth: () => "none", claudeUsage: read(fn) }), 1000, now);
+    expect(u.runtimes.claude).toMatchObject({ status: "error", error: "fetch_failed: control request failed: [redacted] for [redacted]" });
   });
 });

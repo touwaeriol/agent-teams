@@ -7,6 +7,7 @@ import type { GetAccountResponse } from "./codex-protocol/v2/GetAccountResponse.
 import type { RateLimitSnapshot } from "./codex-protocol/v2/RateLimitSnapshot.js";
 import type { RateLimitWindow } from "./codex-protocol/v2/RateLimitWindow.js";
 import type { ClaudeRuntime, CodexRuntime, NodeUsage as GenNodeUsage, NodeUsageRefresh, RuntimeUsage as GenRuntimeUsage, UsageWindow } from "./protocol.js";
+import type { QueryFn } from "./sessions/claude/driver.js";
 import { AsyncQueue, withTimeout } from "./util/async.js";
 import type { Logger } from "./util/log.js";
 
@@ -30,7 +31,8 @@ export interface UsageSources {
   claudeAuth(): ClaudeRuntime["auth"];
   codexAuth(): CodexRuntime["auth"];
   /** The CLI's /usage data (get_usage control request). */
-  claudeUsage(): Promise<ClaudeUsage>;
+  /** Must stop (and free the CLI process) when the signal aborts: that is how a timed-out read ends. */
+  claudeUsage(signal: AbortSignal): Promise<ClaudeUsage>;
   /** codex app-server account/read: refines a chatgpt guess from auth.json (an API key login also writes it). */
   codexAccount(): Promise<GetAccountResponse>;
   /** codex app-server account/rateLimits/read. */
@@ -49,14 +51,17 @@ export async function collectUsage(src: UsageSources, timeoutMs = USAGE_TIMEOUT_
 async function claudeUsage(src: UsageSources, timeoutMs: number, now: () => Date): Promise<RuntimeUsage> {
   const auth = src.claudeAuth() ?? "none";
   if (auth !== "subscription") return unsupported(auth, now);
+  const abort = new AbortController();
   try {
-    const u = await withTimeout(src.claudeUsage(), timeoutMs, () => new Error("timeout"));
+    const u = await withTimeout(src.claudeUsage(abort.signal), timeoutMs, () => (abort.abort(), new Error("timeout")));
     const plan = u.subscription_type ?? undefined;
     if (!u.rate_limits_available) return failed(auth, "rate_limits_unavailable", now, plan);
     if (!u.rate_limits) return failed(auth, "fetch_failed", now, plan);
     return { auth, status: "ok", ...(plan ? { plan: clip(plan, 40) } : {}), windows: claudeWindows(u.rate_limits), fetched_at: now().toISOString() };
   } catch (err) {
-    return failed(auth, errorText(err), now);
+    const msg = (err as Error)?.message;
+    if (msg === "timeout" || msg === "unsupported_sdk") return failed(auth, msg, now);
+    return failed(auth, clip(`fetch_failed: ${errorText(err)}`, 200), now);
   }
 }
 
@@ -152,19 +157,31 @@ export function errorText(err: unknown): string {
  * Asks the Claude CLI for its /usage data through the SDK's get_usage control request. The CLI reads
  * (and, when it must, refreshes) its own OAuth token from CLAUDE_CONFIG_DIR; this process never sees it.
  */
-export async function readClaudeUsage(env: Record<string, string>, cwd: string): Promise<ClaudeUsage> {
+export async function readClaudeUsage(env: Record<string, string>, cwd: string, signal?: AbortSignal, queryFn: QueryFn = query): Promise<ClaudeUsage> {
+  if (signal?.aborted) throw new Error("timeout");
   const prompt = new AsyncQueue<SDKUserMessage>();
-  const q = query({ prompt, options: { cwd, env, settingSources: [], tools: [], permissionMode: "dontAsk", settings: { disableClaudeAiConnectors: true }, strictMcpConfig: true } });
+  const q = queryFn({ prompt, options: { cwd, env, settingSources: [], tools: [], permissionMode: "dontAsk", settings: { disableClaudeAiConnectors: true }, strictMcpConfig: true } });
+  // An abort (the caller's timeout) closes the query at once, which ends the CLI process, and
+  // rejects whatever step is still waiting; otherwise the finally below never runs.
+  let onAbort = () => {};
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => {
+      q.close();
+      reject(new Error("timeout"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+  aborted.catch(() => {});
+  const step = <T>(p: Promise<T>) => Promise.race([p, aborted]);
   try {
-    await q.initializationResult();
+    await step(q.initializationResult());
     const read = (q as unknown as { usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: (o: { skipBehaviors: boolean }) => Promise<SDKControlGetUsageResponse> }).usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
-    // The method is experimental: absent or rejected means this SDK / CLI cannot answer (usage-probe.md).
+    // The method is experimental: absent means this SDK cannot answer (usage-probe.md); a rejection is a failed read.
     if (typeof read !== "function") throw new Error("unsupported_sdk");
-    const u = await read.call(q, { skipBehaviors: true }).catch(() => {
-      throw new Error("unsupported_sdk");
-    });
+    const u = await step(read.call(q, { skipBehaviors: true }));
     return { subscription_type: u.subscription_type, rate_limits_available: u.rate_limits_available, rate_limits: u.rate_limits };
   } finally {
+    signal?.removeEventListener("abort", onAbort);
     prompt.end();
     q.close();
   }

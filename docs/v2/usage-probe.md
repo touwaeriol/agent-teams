@@ -46,11 +46,12 @@ SDK 0.3.325 的 `Query` 有一个方法 `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RE
 | 情况 | 上报 |
 | --- | --- |
 | 启动探测得到 `auth` 是 `api_key` 或 `none` | `status:"unsupported"`，不起 CLI |
-| SDK 没有这个方法，或者调用它报错（升级后改名、CLI 不认识这个控制请求等） | `status:"error"`，`error:"unsupported_sdk"` |
+| SDK 没有这个方法（升级后改名或删除） | `status:"error"`，`error:"unsupported_sdk"` |
+| 调用这个方法报错（CLI 不认识这个控制请求、CLI 内部出错等） | `status:"error"`，`error:"fetch_failed: <脱敏后的简短原因>"` |
 | `rate_limits_available:false` | `status:"error"`，`error:"rate_limits_unavailable"` |
 | `rate_limits` 为 null（CLI 没取到数据：token 过期且刷新失败、网络错误等） | `status:"error"`，`error:"fetch_failed"`，有套餐名就带上 `plan` |
-| 12 秒没读完 | `status:"error"`，`error:"timeout"` |
-| CLI 起不来等其他异常 | `status:"error"`，`error` 为脱敏后的简短原因 |
+| 12 秒没读完（守护进程会立即关闭 query，结束 CLI 子进程） | `status:"error"`，`error:"timeout"` |
+| CLI 起不来等其他异常 | `status:"error"`，`error:"fetch_failed: <脱敏后的简短原因>"` |
 
 任务简报里提到的 `token_expired`：由于刷新是 CLI 自己做的，守护进程看不到“过期”这一状态，只能看到 CLI 最后有没有拿到数据，所以统一报 `fetch_failed`。
 

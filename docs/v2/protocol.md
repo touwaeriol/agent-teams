@@ -429,7 +429,7 @@
   - `runtimes.claude` / `runtimes.codex`：`auth`（Claude 取 `subscription|api_key|none`，Codex 取 `chatgpt|api_key|none`）、`status`（`ok|error|unsupported`）、`plan`（可选，例如 `max`、`pro`、`plus`）、`windows`、`error`（可选，简短原因，不含凭证）、`fetched_at`（读取时间；Codex 的数据如果来自最近一次推送事件，就填事件时间）。
   - `windows[]`：`key`、`used_percent`（0–100）、`window_minutes`（可选）、`resets_at`（ISO 时间或 null），按模型划分的窗口还会带 `label`。`key` 的取值：Claude 有 `five_hour`、`weekly`、`weekly_opus`、`weekly_sonnet`，以及 `weekly_model`（按模型划分的每周窗口，`label` 是服务端给的显示名）；Codex 有 `primary`（通常 5 小时）和 `secondary`（通常每周）。
   - `auth` 为 `api_key` 或 `none` 时，`status` 填 `unsupported`，`windows` 为空，不发任何请求。Codex 的 `auth.json` 里如果是 API Key 登录（app-server `account/read` 返回 `apiKey`），也按 `api_key` 处理。
-  - 常见的 `error`：`timeout`；`unsupported_sdk`（SDK / CLI 没有实验性的 usage 接口，或者调用报错）；`rate_limits_unavailable`（CLI 表示该登录没有订阅余量，例如 token 缺少 profile 权限）；`fetch_failed`（CLI 没取到数据，常见原因是 token 过期而且刷新失败）；`not_logged_in`（Codex 已退出登录）。
+  - 常见的 `error`：`timeout`；`unsupported_sdk`（SDK 没有实验性的 usage 接口）；`fetch_failed: <原因>`（调用 usage 接口报错或 CLI 出错，原因经过脱敏）；`rate_limits_unavailable`（CLI 表示该登录没有订阅余量，例如 token 缺少 profile 权限）；`fetch_failed`（CLI 没取到数据，常见原因是 token 过期而且刷新失败）；`not_logged_in`（Codex 已退出登录）。
   - 消息里永远不带 token、邮箱、组织或账号 id。
 - **`node.usage_refresh`**（控制台 → 守护进程，不可靠，body 可以是空对象，也可以带 `runtimes`，例如 `["claude","codex"]`）：鼠标悬停在节点卡片上时，控制台发这条命令要求现查一次。守护进程回一条 `node.usage`，总是包含两个运行时：请求的运行时如果最近 60 秒内有一次成功（`status:"ok"`）的读取，就直接回缓存的结果，`fetched_at` 保持原值，不再请求 Anthropic 或 OpenAI；否则立即读取。失败的结果不缓存。同一时间只跑一次读取，正在跑的就等它跑完再用它的结果。定时上报不受缓存影响，每次都重新读取。
 
