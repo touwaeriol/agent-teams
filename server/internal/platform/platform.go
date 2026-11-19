@@ -31,6 +31,33 @@ type NodeLive struct {
 	ActiveSessions int            `json:"active_sessions"`
 	ParkedSessions int            `json:"parked_sessions"`
 	Queued         int            `json:"queued"`
+	// Usage is the latest node.usage report; kept after the link drops (nil = never reported).
+	Usage *NodeUsage `json:"usage"`
+}
+
+// NodeUsage is the latest node.usage report of a node (NodeView.usage).
+type NodeUsage struct {
+	Claude *RuntimeUsage `json:"claude,omitempty"`
+	Codex  *RuntimeUsage `json:"codex,omitempty"`
+}
+
+// RuntimeUsage is the subscription quota of one runtime as the daemon reported it.
+type RuntimeUsage struct {
+	Auth       string        `json:"auth" enum:"subscription,chatgpt,api_key,none" doc:"How the runtime is logged in"`
+	Status     string        `json:"status" enum:"ok,error,unsupported"`
+	Plan       string        `json:"plan,omitempty"`
+	Windows    []UsageWindow `json:"windows"`
+	Error      string        `json:"error,omitempty"`
+	FetchedAt  *time.Time    `json:"fetched_at" doc:"When the daemon fetched the data"`
+	ReceivedAt time.Time     `json:"received_at" doc:"When the console received the report"`
+}
+
+// UsageWindow is one rate-limit window (five_hour, weekly, primary, ...).
+type UsageWindow struct {
+	Key           string     `json:"key"`
+	UsedPercent   float64    `json:"used_percent" minimum:"0" maximum:"100"`
+	WindowMinutes *int       `json:"window_minutes,omitempty"`
+	ResetsAt      *time.Time `json:"resets_at"`
 }
 
 // NodeRelease is at_settings.node_release.

@@ -1151,6 +1151,41 @@
   },
   {
     "v": 2,
+    "type": "node.usage",
+    "id": "n_01JD3V000000000000000010U",
+    "ts": "2026-11-14T12:04:05Z",
+    "body": {
+      "runtimes": {
+        "claude": {
+          "auth": "subscription",
+          "status": "ok",
+          "plan": "max",
+          "windows": [
+            {
+              "key": "five_hour",
+              "used_percent": 42,
+              "window_minutes": 300,
+              "resets_at": "2026-11-14T15:00:00Z"
+            },
+            {
+              "key": "weekly",
+              "used_percent": 17.5,
+              "window_minutes": 10080,
+              "resets_at": "2026-11-18T00:00:00Z"
+            }
+          ],
+          "fetched_at": "2026-11-14T12:04:00Z"
+        },
+        "codex": {
+          "auth": "api_key",
+          "status": "unsupported",
+          "fetched_at": "2026-11-14T12:04:00Z"
+        }
+      }
+    }
+  },
+  {
+    "v": 2,
     "type": "log",
     "id": "n_01JD3V0000000000000000011",
     "ts": "2026-11-14T12:04:05Z",
