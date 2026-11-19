@@ -72,9 +72,15 @@ type Gateway struct {
 	log       *slog.Logger
 	cfg       Config
 
-	mu    sync.Mutex
-	links map[string]*link
-	usage map[string]*platform.NodeUsage // latest node.usage per node (memory only)
+	mu         sync.Mutex
+	links      map[string]*link
+	usage      map[string]*platform.NodeUsage // latest node.usage per node (memory only)
+	usageWaits map[string]*usageWait          // in-flight node.usage_refresh per node
+
+	// Now is the clock for the usage cache (tests); nil = time.Now.
+	Now func() time.Time
+	// RefreshWait overrides UsageRefreshWait (tests); 0 = default.
+	RefreshWait time.Duration
 }
 
 // New builds the gateway. handler may be set later with SetHandler (before serving).
@@ -96,7 +102,7 @@ func New(st *store.Store, cs *core.Store, hub *fanout.Hub, log *slog.Logger, cfg
 		cfg.HelloTimeout = 15 * time.Second
 	}
 	return &Gateway{store: st, core: cs, hub: hub, validator: v, log: log, cfg: cfg, links: map[string]*link{},
-		usage: map[string]*platform.NodeUsage{}}, nil
+		usage: map[string]*platform.NodeUsage{}, usageWaits: map[string]*usageWait{}}, nil
 }
 
 // SetHandler installs the message handler.

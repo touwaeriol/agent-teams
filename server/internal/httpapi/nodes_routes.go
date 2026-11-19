@@ -170,6 +170,8 @@ func (s *Server) registerNodes(api huma.API) {
 	huma.Register(api, huma.Operation{OperationID: "drain-node", Method: "POST", Path: "/api/nodes/{id}/drain", Tags: tags, DefaultStatus: 202}, s.drainNode)
 	huma.Register(api, huma.Operation{OperationID: "delete-node", Method: "DELETE", Path: "/api/nodes/{id}", Tags: tags, DefaultStatus: 204}, s.deleteNode)
 	huma.Register(api, huma.Operation{OperationID: "node-sessions", Method: "GET", Path: "/api/nodes/{id}/sessions", Tags: tags}, s.nodeSessions)
+	huma.Register(api, huma.Operation{OperationID: "refresh-node-usage", Method: "POST", Path: "/api/nodes/{id}/usage/refresh", Tags: tags,
+		Summary: "Fetch the node's subscription quota now (cached for 60 s; waits up to 15 s for the node)"}, s.refreshNodeUsage)
 	huma.Register(api, huma.Operation{OperationID: "node-logs", Method: "GET", Path: "/api/nodes/{id}/logs", Tags: tags}, s.nodeLogs)
 }
 
@@ -346,6 +348,35 @@ func (s *Server) drainNode(ctx context.Context, in *drainInput) (*struct{}, erro
 		return nil, storeErr(err, "没有这个节点")
 	}
 	return nil, nodeCommandErr(s.nodes.Drain(ctx, in.ID, time.Duration(in.Body.DeadlineS)*time.Second))
+}
+
+type usageRefreshOutput struct {
+	Body struct {
+		Usage *platform.NodeUsage `json:"usage" doc:"Latest report (same as NodeView.usage); null when the node never sent one"`
+		Stale bool                `json:"stale,omitempty" doc:"The node did not answer in time; usage is the previous report"`
+	}
+}
+
+// refreshNodeUsage is POST /api/nodes/{id}/usage/refresh. It waits for the node without
+// holding a transaction (the ownership check is a plain read).
+func (s *Server) refreshNodeUsage(ctx context.Context, in *nodeIDInput) (*usageRefreshOutput, error) {
+	p, err := requireUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.store.NodeOf(ctx, p.User.ID, in.ID); err != nil {
+		return nil, storeErr(err, "没有这个节点")
+	}
+	usage, stale, err := s.nodes.RefreshUsage(ctx, in.ID)
+	if errors.Is(err, platform.ErrUsageUnsupported) {
+		return nil, fail(http.StatusConflict, "usage_unsupported", "节点的守护进程版本不支持查询余量")
+	}
+	if err != nil {
+		return nil, nodeCommandErr(err)
+	}
+	out := &usageRefreshOutput{}
+	out.Body.Usage, out.Body.Stale = usage, stale
+	return out, nil
 }
 
 func nodeCommandErr(err error) error {
