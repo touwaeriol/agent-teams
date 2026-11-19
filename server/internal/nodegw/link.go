@@ -209,6 +209,9 @@ func (l *link) handleUnreliable(ctx context.Context, env *protocol.Envelope, bod
 		l.stats = *b
 		l.mu.Unlock()
 		return nil
+	case *protocol.NodeUsage:
+		l.g.recordUsage(l.node.ID, b, time.Now())
+		return nil
 	case *protocol.Log:
 		return l.g.storeLog(ctx, l.node.ID, b)
 	case *protocol.ProtocolError:

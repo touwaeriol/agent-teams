@@ -111,7 +111,13 @@ DeliverableView = {id, project_id, thread_no, kind: string, title, url, detail, 
 MergeEntryView  = {id, thread_no, task_id, employee, repo, head_branch, status, attempts, error, created_at, updated_at}   // 每个仓库一个条目
 CheckView       = {name, status, conclusion, url, summary}
 NodeView        = {id, name, online, since, last_seen_at, version, protocol, isolation: "agent_user"|"sandbox"|"none", runtimes: {...}, capacity: {...},
-                   active_sessions, parked_sessions, queued, isolated, labels, max_active_sessions, park_after_s, created_at}
+                   active_sessions, parked_sessions, queued, usage: NodeUsage|null, isolated, labels, max_active_sessions, park_after_s, created_at}
+NodeUsage       = {claude?: RuntimeUsage, codex?: RuntimeUsage}   // 节点最近一次 node.usage 上报（protocol.md §9），控制台只存内存：重启后为 null 直到下次上报；节点离线后保留最后一次，用 received_at 判断新旧
+RuntimeUsage    = {auth: "subscription"|"chatgpt"|"api_key"|"none", status: "ok"|"error"|"unsupported", plan?, error?,
+                   windows: [{key: "five_hour"|"weekly"|"weekly_opus"|"weekly_sonnet"|"primary"|"secondary"|…, used_percent: 0..100, window_minutes?, resets_at: ISO|null}],  // 最多 8 个
+                   fetched_at: ISO|null,   // 守护进程取数的时间
+                   received_at}            // 控制台收到上报的时间
+                   // 只保留这些字段（不含任何凭证）；used_percent 超出 0..100 会被截到边界，字符串截断（plan 64、error 500、key 64 字节）
 RoleView        = {id, tier, role, title, runtime, count, node_ids, description, instructions, model, effort,
                    permission_mode: "bypass"|"ask",  // 省略 = bypass（直接执行，任何节点）；旧值 auto 读作 bypass；非成员岗位总是 bypass（architecture.md §9.1）
                    can_delegate, read_only, allowed_tools, disallowed_tools, sandbox, max_turns, gate, task_kinds, look, sort,

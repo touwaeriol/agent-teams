@@ -22,24 +22,26 @@ var nodeNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$`)
 
 // NodeView is api.md §2 NodeView (a superset of v1's).
 type NodeView struct {
-	ID                string         `json:"id"`
-	Name              string         `json:"name"`
-	Online            bool           `json:"online"`
-	Since             *time.Time     `json:"since"`
-	LastSeenAt        *time.Time     `json:"last_seen_at"`
-	Version           string         `json:"version"`
-	Protocol          int            `json:"protocol"`
-	Isolation         string         `json:"isolation" enum:"agent_user,sandbox,none"`
-	Runtimes          map[string]any `json:"runtimes"`
-	Capacity          map[string]any `json:"capacity"`
-	ActiveSessions    int            `json:"active_sessions"`
-	ParkedSessions    int            `json:"parked_sessions"`
-	Queued            int            `json:"queued"`
-	Isolated          bool           `json:"isolated"`
-	Labels            []string       `json:"labels"`
-	MaxActiveSessions *int           `json:"max_active_sessions"`
-	ParkAfterS        *int           `json:"park_after_s"`
-	CreatedAt         time.Time      `json:"created_at"`
+	ID             string         `json:"id"`
+	Name           string         `json:"name"`
+	Online         bool           `json:"online"`
+	Since          *time.Time     `json:"since"`
+	LastSeenAt     *time.Time     `json:"last_seen_at"`
+	Version        string         `json:"version"`
+	Protocol       int            `json:"protocol"`
+	Isolation      string         `json:"isolation" enum:"agent_user,sandbox,none"`
+	Runtimes       map[string]any `json:"runtimes"`
+	Capacity       map[string]any `json:"capacity"`
+	ActiveSessions int            `json:"active_sessions"`
+	ParkedSessions int            `json:"parked_sessions"`
+	Queued         int            `json:"queued"`
+	// Usage is the latest node.usage report (nil = never reported since the console started).
+	Usage             *platform.NodeUsage `json:"usage" doc:"Latest Claude Code / Codex subscription quota reported by the node; null when none"`
+	Isolated          bool                `json:"isolated"`
+	Labels            []string            `json:"labels"`
+	MaxActiveSessions *int                `json:"max_active_sessions"`
+	ParkAfterS        *int                `json:"park_after_s"`
+	CreatedAt         time.Time           `json:"created_at"`
 }
 
 // lastHello is the part of the stored hello used while a node is offline.
@@ -58,7 +60,7 @@ func (s *Server) nodeView(n store.Node) NodeView {
 		Version: first(live.Version, hello.Version), Protocol: firstInt(live.Protocol, hello.Protocol),
 		Isolation: first(live.Isolation, n.Isolation, "none"), Runtimes: firstMap(live.Runtimes, hello.Runtimes),
 		Capacity: firstMap(live.Capacity, hello.Capacity), ActiveSessions: live.ActiveSessions,
-		ParkedSessions: live.ParkedSessions, Queued: live.Queued, Isolated: n.Isolated, Labels: n.Labels,
+		ParkedSessions: live.ParkedSessions, Queued: live.Queued, Usage: live.Usage, Isolated: n.Isolated, Labels: n.Labels,
 		MaxActiveSessions: n.MaxActiveSessions, ParkAfterS: n.ParkAfterS, CreatedAt: n.CreatedAt}
 	if v.Labels == nil {
 		v.Labels = []string{}

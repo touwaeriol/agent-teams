@@ -3039,6 +3039,18 @@
         ],
         "type": "object"
       },
+      "NodeUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "claude": {
+            "$ref": "#/components/schemas/RuntimeUsage"
+          },
+          "codex": {
+            "$ref": "#/components/schemas/RuntimeUsage"
+          }
+        },
+        "type": "object"
+      },
       "NodeView": {
         "additionalProperties": false,
         "properties": {
@@ -3127,6 +3139,10 @@
               "null"
             ]
           },
+          "usage": {
+            "$ref": "#/components/schemas/NodeUsage",
+            "description": "Latest Claude Code / Codex subscription quota reported by the node; null when none"
+          },
           "version": {
             "type": "string"
           }
@@ -3145,6 +3161,7 @@
           "active_sessions",
           "parked_sessions",
           "queued",
+          "usage",
           "isolated",
           "labels",
           "max_active_sessions",
@@ -4710,6 +4727,65 @@
         ],
         "type": "object"
       },
+      "RuntimeUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "auth": {
+            "description": "How the runtime is logged in",
+            "enum": [
+              "subscription",
+              "chatgpt",
+              "api_key",
+              "none"
+            ],
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "fetched_at": {
+            "description": "When the daemon fetched the data",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "plan": {
+            "type": "string"
+          },
+          "received_at": {
+            "description": "When the console received the report",
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "error",
+              "unsupported"
+            ],
+            "type": "string"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/UsageWindow"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "auth",
+          "status",
+          "windows",
+          "fetched_at",
+          "received_at"
+        ],
+        "type": "object"
+      },
       "Schedule": {
         "additionalProperties": false,
         "properties": {
@@ -6018,6 +6094,37 @@
           "output",
           "cache_read",
           "cache_write"
+        ],
+        "type": "object"
+      },
+      "UsageWindow": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "resets_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "used_percent": {
+            "format": "double",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
+          "window_minutes": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "used_percent",
+          "resets_at"
         ],
         "type": "object"
       },

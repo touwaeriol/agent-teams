@@ -26,6 +26,7 @@ export interface MessageBodies {
   "node.stats": T.NodeStats;
   "node.upgrade": T.NodeUpgrade;
   "node.upgrade_result": T.NodeUpgradeResult;
+  "node.usage": T.NodeUsage;
   "session.close": T.SessionClose;
   "session.closed": T.SessionClosed;
   "session.compact": T.SessionCompact;
@@ -83,6 +84,7 @@ export const MESSAGE_META: { readonly [K in MessageType]: MessageMeta } = {
   "node.stats": { direction: "node_to_console", reliable: false, key: [] },
   "node.upgrade": { direction: "console_to_node", reliable: true, key: ["id"] },
   "node.upgrade_result": { direction: "node_to_console", reliable: true, key: [] },
+  "node.usage": { direction: "node_to_console", reliable: false, key: [] },
   "session.close": { direction: "console_to_node", reliable: true, key: ["session_id","open_gen"] },
   "session.closed": { direction: "node_to_console", reliable: true, key: ["session_id","open_gen"] },
   "session.compact": { direction: "console_to_node", reliable: true, key: ["compact_id"] },
