@@ -3,16 +3,20 @@ import { Square } from "lucide-vue-next";
 import { computed } from "vue";
 import { conversations } from "@/api/actions";
 import { useAction } from "@/api/mutations";
-import { keys } from "@/api/queries";
+import { keys, useMe } from "@/api/queries";
 import type { CoordinatorView } from "@/api/views";
 import { useAttachments } from "@/components/app/attachments";
 import Composer from "@/components/app/Composer.vue";
 import type { MessageRef } from "@/components/app/composer/assist";
+import { draftKey } from "@/lib/persist";
 import { coordinatorBusy } from "./logic";
 
 const props = defineProps<{ pid: string; coordinator?: CoordinatorView }>();
 const cid = computed(() => props.coordinator?.conversation_id ?? "");
-const attachments = useAttachments(() => props.pid);
+const me = useMe();
+// Drafts (text, attachments, @ references) are kept per viewer and conversation across remounts.
+const draft = computed(() => draftKey(me.data.value?.id ?? (me.isError.value ? "anon" : undefined), props.pid, cid.value));
+const attachments = useAttachments(() => props.pid, undefined, draft);
 const send = useAction((v: { text: string; images: string[]; refs: MessageRef[] }) => conversations.send(cid.value, v.text, false, v.images, v.refs), {
   invalidate: () => [keys.messages(cid.value)],
 });
@@ -32,7 +36,7 @@ const name = computed(() => props.coordinator?.employee.name ?? "leader");
       :attachments="attachments"
       :on-send="(text: string, images: string[], refs: MessageRef[]) => send.mutateAsync({ text, images, refs })"
       :assist="{ pid, cid, scope: 'coordinator' }"
-      :draft-key="cid ? `draft:${cid}` : undefined"
+      :draft-key="draft"
     >
       <template #extra>
         <button
