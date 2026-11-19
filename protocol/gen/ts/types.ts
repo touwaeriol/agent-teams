@@ -766,6 +766,83 @@ export interface NodeUpgradeResult {
   error?: string;
 }
 /**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "RuntimeUsage".
+ */
+export interface RuntimeUsage {
+  /**
+   * claude: subscription | api_key | none; codex: chatgpt | api_key | none.
+   */
+  auth: "subscription" | "chatgpt" | "api_key" | "none";
+  /**
+   * unsupported when auth is api_key or none (no request is made).
+   */
+  status: "ok" | "error" | "unsupported";
+  /**
+   * Plan name as the runtime reports it, e.g. max, pro, plus.
+   */
+  plan?: string;
+  /**
+   * @maxItems 8
+   */
+  windows:
+    | []
+    | [UsageWindow]
+    | [UsageWindow, UsageWindow]
+    | [UsageWindow, UsageWindow, UsageWindow]
+    | [UsageWindow, UsageWindow, UsageWindow, UsageWindow]
+    | [UsageWindow, UsageWindow, UsageWindow, UsageWindow, UsageWindow]
+    | [UsageWindow, UsageWindow, UsageWindow, UsageWindow, UsageWindow, UsageWindow]
+    | [UsageWindow, UsageWindow, UsageWindow, UsageWindow, UsageWindow, UsageWindow, UsageWindow]
+    | [
+        UsageWindow,
+        UsageWindow,
+        UsageWindow,
+        UsageWindow,
+        UsageWindow,
+        UsageWindow,
+        UsageWindow,
+        UsageWindow
+      ];
+  /**
+   * Short failure reason (status error), never a credential.
+   */
+  error?: string;
+  /**
+   * When the numbers were read; for a value taken from a rate-limit event, the event time.
+   */
+  fetched_at: string;
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "UsageWindow".
+ */
+export interface UsageWindow {
+  /**
+   * claude: five_hour | weekly | weekly_opus | weekly_sonnet | weekly_model (a per-model weekly window, see label); codex: primary | secondary.
+   */
+  key: string;
+  /**
+   * Display name the server gives a scoped window (weekly_model), e.g. a model name.
+   */
+  label?: string;
+  used_percent: number;
+  window_minutes?: number;
+  resets_at?: string | null;
+}
+/**
+ * Subscription quota of the node's Claude Code / Codex logins (protocol.md 9.1). Unreliable; sent after hello and then every few minutes. Never carries credentials, e-mail addresses or organisation ids.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "NodeUsage".
+ */
+export interface NodeUsage {
+  runtimes: {
+    claude?: RuntimeUsage;
+    codex?: RuntimeUsage;
+  };
+}
+/**
  * Close a session.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
