@@ -81,8 +81,9 @@ func TestModelLists(t *testing.T) {
 	}
 }
 
-// TestModelFallback: a session's model falls back from the employee (/model) to the project, the
-// role, the project owner's default and finally Opus 5.5; another user's default never applies.
+// TestModelFallback: a member's model falls back from the employee (/model) to the project, the
+// role, the project owner's default and finally Opus 5.5; the lead only follows the owner's default
+// and Opus 5.5; another user's default never applies.
 func TestModelFallback(t *testing.T) {
 	tm := startTeam(t)
 	b := tm.b
@@ -122,62 +123,79 @@ func TestModelFallback(t *testing.T) {
 		}
 	}
 
-	b.must(200, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"thread_model": "claude-project-z"}, nil)
-	b.must(200, "GET", conv, nil, &cm)
-	if cm.Model != "claude-project-z" {
-		t.Fatalf("project ahead of the owner default: %+v", cm)
-	}
-	b.must(200, "PUT", conv, map[string]any{"model": "claude-picked"}, nil)
-	b.must(200, "GET", conv, nil, &cm)
-	if cm.Model != "claude-picked" || cm.Inherited != "claude-project-z" {
-		t.Fatalf("/model ahead of the project: %+v", cm)
+	memberModel := func(cm orchapi.ConversationModel) orchapi.MemberModel {
+		t.Helper()
+		for _, m := range cm.Members {
+			if m.Tier == "member" {
+				return m
+			}
+		}
+		t.Fatalf("no member in %+v", cm.Members)
+		return orchapi.MemberModel{}
 	}
 
-	b.must(200, "PUT", conv, map[string]any{"model": ""}, nil)
+	b.must(200, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"thread_model": "claude-project-z"}, nil)
+	b.must(200, "GET", conv, nil, &cm)
+	if m := memberModel(cm); cm.Model != "claude-haiku-y" || m.Model != "claude-project-z" {
+		t.Fatalf("project ahead of the owner default for members only: %+v", cm)
+	}
+	b.must(200, "PUT", conv, map[string]any{"model": "claude-picked", "scope": "thread"}, nil)
+	b.must(200, "GET", conv, nil, &cm)
+	if m := memberModel(cm); cm.Model != "claude-haiku-y" || cm.Override != "" || m.Model != "claude-picked" || m.Override != "claude-picked" {
+		t.Fatalf("/model ahead of the project for members only: %+v", cm)
+	}
+
+	b.must(200, "PUT", conv, map[string]any{"model": "", "scope": "thread"}, nil)
 	b.must(200, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"thread_model": ""}, nil)
 	b.must(200, "PUT", "/api/models/mine", map[string]any{"models": []map[string]any{{"runtime": "claude", "model": "claude-haiku-y"}}}, nil)
 	b.must(200, "GET", conv, nil, &cm)
-	if cm.Model != "claude-opus-5-5" {
+	if m := memberModel(cm); cm.Model != "claude-opus-5-5" || m.Model != "claude-opus-5-5" {
 		t.Fatalf("no default anywhere falls back to Opus 5.5: %+v", cm)
 	}
 }
 
-// TestModelCommand: /model in a thread changes the lead (or every participant of the thread with
-// the lead's runtime) and sends the running sessions session.set_mode; in the coordinator chat it
-// sets the project's coordinator model. A turn_ended model shows as the session's model.
+// TestModelCommand: /model in a thread (scope thread) changes every member of the thread with the
+// lead's runtime and sends their running sessions session.set_mode; the lead keeps the default
+// model and is listed as skipped. The lead scope and the coordinator chat are refused (409): the
+// coordinator and leads cannot switch. A turn_ended model shows as the session's model.
 func TestModelCommand(t *testing.T) {
 	tm := startTeam(t)
 	b := tm.b
 	conv := "/api/conversations/" + tm.thread.ID + "/model"
-	var res orchestrator.ModelResult
-	b.must(200, "PUT", conv, map[string]any{"model": "claude-sonnet-x"}, &res)
-	if len(res.Applied) != 1 || res.Applied[0].Employee != "lead-1" || !res.Applied[0].Live || res.Applied[0].Model != "claude-sonnet-x" {
-		t.Fatalf("lead only: %+v", res)
+	refused := func(path string, body map[string]any) {
+		t.Helper()
+		code, raw := b.do("PUT", path, body)
+		if code != 409 || !strings.Contains(string(raw), "统筹和组长使用默认模型，不能切换") || !strings.Contains(string(raw), "model_fixed") {
+			t.Fatalf("PUT %s %v = %d %s", path, body, code, raw)
+		}
 	}
-	if m := tm.lead.expectSetMode(); m != "claude-sonnet-x" {
-		t.Fatalf("lead set_mode model %q", m)
+	refused(conv, map[string]any{"model": "claude-sonnet-x"})
+	refused(conv, map[string]any{"model": "claude-sonnet-x", "scope": "lead"})
+
+	var res orchestrator.ModelResult
+	b.must(200, "PUT", conv, map[string]any{"model": "claude-haiku-y", "scope": "thread"}, &res)
+	// dev-1 is the project member working here (dev-2 never did); the lead is left alone.
+	if len(res.Applied) != 1 || res.Applied[0].Employee != "dev-1" || !res.Applied[0].Live || res.Applied[0].Model != "claude-haiku-y" ||
+		len(res.Skipped) != 1 || res.Skipped[0] != "lead-1" {
+		t.Fatalf("members only: %+v", res)
+	}
+	if tm.dev.expectSetMode() != "claude-haiku-y" {
+		t.Fatal("member set_mode")
 	}
 	var cm orchapi.ConversationModel
 	b.must(200, "GET", conv, nil, &cm)
-	if cm.Scope != "thread" || cm.Model != "claude-sonnet-x" || cm.Override != "claude-sonnet-x" || cm.Inherited != "claude-opus-5-5" || !cm.Live || len(cm.Members) != 2 {
+	if cm.Scope != "thread" || cm.Model != "claude-opus-5-5" || cm.Override != "" || cm.Inherited != "claude-opus-5-5" || !cm.Live || len(cm.Members) != 2 {
 		t.Fatalf("thread model: %+v", cm)
 	}
 	for _, m := range cm.Members {
-		if m.Name != "lead-1" && m.Model != "claude-opus-5-5" {
-			t.Fatalf("members untouched: %+v", cm.Members)
+		if (m.Name == "lead-1" && (m.Model != "claude-opus-5-5" || m.Override != "")) ||
+			(m.Name == "dev-1" && (m.Model != "claude-haiku-y" || m.Override != "claude-haiku-y")) {
+			t.Fatalf("members: %+v", cm.Members)
 		}
 	}
-
-	b.must(200, "PUT", conv, map[string]any{"model": "claude-haiku-y", "scope": "thread"}, &res)
-	if len(res.Applied) != 2 { // lead-1 and dev-1, the project member working here (dev-2 never did)
-		t.Fatalf("whole thread: %+v", res)
-	}
-	if tm.lead.expectSetMode() != "claude-haiku-y" || tm.dev.expectSetMode() != "claude-haiku-y" {
-		t.Fatal("whole thread set_mode")
-	}
-	b.must(422, "PUT", conv, map[string]any{"model": "bad model"}, nil)
-	b.must(200, "PUT", conv, map[string]any{"model": ""}, &res)
-	if res.Applied[0].Model != "claude-opus-5-5" || tm.lead.expectSetMode() != "claude-opus-5-5" {
+	b.must(422, "PUT", conv, map[string]any{"model": "bad model", "scope": "thread"}, nil)
+	b.must(200, "PUT", conv, map[string]any{"model": "", "scope": "thread"}, &res)
+	if len(res.Applied) != 1 || res.Applied[0].Model != "claude-opus-5-5" || tm.dev.expectSetMode() != "claude-opus-5-5" {
 		t.Fatalf("cleared: %+v", res)
 	}
 
@@ -196,20 +214,15 @@ func TestModelCommand(t *testing.T) {
 		ConversationID string `json:"conversation_id"`
 	}
 	b.must(200, "GET", "/api/projects/"+tm.projectID+"/coordinator", nil, &coord)
-	b.must(200, "PUT", "/api/conversations/"+coord.ConversationID+"/model", map[string]any{"model": "claude-sonnet-x", "scope": "thread"}, &res)
-	if len(res.Applied) != 1 || res.Applied[0].Live {
-		t.Fatalf("coordinator without a session: %+v", res)
-	}
-	var p struct {
-		CoordinatorModel string `json:"coordinator_model"`
-	}
-	b.must(200, "GET", "/api/projects/"+tm.projectID, nil, &p)
-	b.must(200, "GET", "/api/conversations/"+coord.ConversationID+"/model", nil, &cm)
-	if p.CoordinatorModel != "claude-sonnet-x" || cm.Scope != "coordinator" || cm.Override != "claude-sonnet-x" || len(cm.Members) != 0 {
-		t.Fatalf("coordinator model: %q %+v", p.CoordinatorModel, cm)
+	coordConv := "/api/conversations/" + coord.ConversationID + "/model"
+	refused(coordConv, map[string]any{"model": "claude-sonnet-x"})
+	refused(coordConv, map[string]any{"model": "claude-sonnet-x", "scope": "thread"})
+	b.must(200, "GET", coordConv, nil, &cm)
+	if cm.Scope != "coordinator" || cm.Model != "claude-opus-5-5" || cm.Override != "" || cm.Inherited != "claude-opus-5-5" || len(cm.Members) != 0 {
+		t.Fatalf("coordinator model: %+v", cm)
 	}
 	other := tm.w.signUp("other-model@example.com")
-	if code, _ := other.do("PUT", conv, map[string]any{"model": "x"}); code != 404 {
+	if code, _ := other.do("PUT", conv, map[string]any{"model": "x", "scope": "thread"}); code != 404 {
 		t.Fatalf("another user's conversation = %d", code)
 	}
 }

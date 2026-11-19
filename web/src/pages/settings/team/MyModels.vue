@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 模型: the user's own model list (for /model and the role model field), its order and per-type defaults. */
+/** 模型: the user's own model list (for the role and project model fields), its order and per-type defaults. */
 import { computed } from "vue";
 import { models as modelActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
@@ -17,7 +17,7 @@ const save = useAction(modelActions.saveMine, { invalidate: [keys.models], succe
     <div class="flex flex-col gap-1">
       <span class="font-semibold">模型</span>
       <span class="text-xs leading-5 text-muted-foreground">
-        /model 和岗位模型字段按这个顺序列出这里的模型。每种类型可以设一个“我的默认”：岗位和项目都没指定模型时，会话用它。
+        岗位和项目的模型字段按这个顺序列出这里的模型。每种类型可以设一个“我的默认”：项目统筹和讨论串组长固定用它（没设时用内置默认）；成员岗位在岗位和项目都没指定模型时也用它。
       </span>
     </div>
     <ModelListEditor :rows="rows" :busy="save.isPending.value" @save="(l) => save.mutate(l)" />

@@ -6,6 +6,9 @@ import { PLATFORM_COMMANDS, platformCommands, type Scope } from "@/components/ap
 export type CustomCommand = components["schemas"]["CustomCommand"];
 type RoleLike = { tier: "coordinator" | "lead" | "member"; runtime: "claude" | "codex" };
 
+/** Names custom commands may not take: the platform commands, plus "model" (the server keeps it reserved; there is no /model any more). */
+const RESERVED = ["model", ...PLATFORM_COMMANDS.map((p) => p.name)];
+
 export const COMMAND_NAME = /^[a-z][a-z0-9_-]{0,31}(:[a-z0-9][a-z0-9_-]{0,31})?$/;
 export const PROMPT_MAX = 8000;
 
@@ -41,7 +44,7 @@ export function commandProblem(c: CustomCommand, taken: string[], onlyPrompt: bo
   const name = c.name.trim().replace(/^\//, "");
   const prompt = (c.prompt ?? "").trim();
   if (!COMMAND_NAME.test(name)) return "命令名用小写字母开头的小写字母、数字、- 和 _，最多 32 个字符";
-  if (PLATFORM_COMMANDS.some((p) => p.name === name)) return `/${name} 是平台命令，换个名字`;
+  if (RESERVED.includes(name)) return `/${name} 是平台保留的命令名，换个名字`;
   if (taken.includes(name)) return `已经有 /${name} 了`;
   if (onlyPrompt && c.mode === "passthrough") return "这个岗位只能用提示词模板";
   if (c.mode !== "passthrough" && !prompt) return "提示词模板不能为空";

@@ -41,7 +41,6 @@ export interface PlatformCommand {
 }
 
 export const PLATFORM_COMMANDS: PlatformCommand[] = [
-  { name: "model", desc: "选这位员工用的模型", scopes: ["coordinator", "lead"] },
   { name: "effort", desc: "讨论串的思考强度", scopes: ["lead"] },
   { name: "status", desc: "谁在忙、待处理的卡片、节点", scopes: ["coordinator", "lead"] },
   { name: "context", desc: "员工手上的上下文和本次会话的用量", scopes: ["coordinator", "lead"] },
@@ -55,7 +54,7 @@ export const PLATFORM_COMMANDS: PlatformCommand[] = [
 export const platformCommands = (scope: Scope, hidden: readonly string[] = []) =>
   PLATFORM_COMMANDS.filter((c) => c.scopes.includes(scope) && !hidden.includes(c.name));
 
-/** The platform command a whole message names ("/status", "/model  "), if any. */
+/** The platform command a whole message names ("/status", "/skills  "), if any. */
 export function commandOf(text: string, scope: Scope, hidden: readonly string[] = []): string | null {
   const m = /^\/([a-z]+)\s*$/.exec(text.trim());
   return m && platformCommands(scope, hidden).some((c) => c.name === m[1]) ? m[1]! : null;
@@ -112,7 +111,7 @@ const customDetail = (c: CustomCommand) => c.description || (c.mode === "passthr
  * "/" rows in three groups: platform commands (命令, less the hidden ones), the role's and the
  * platform's custom commands (自定义), the session's skills and plugin commands (技能). With a
  * query, exact and prefix name matches come first across the groups (最佳匹配: /de lists
- * /design above /model), then the other matches group by group.
+ * /design above /context), then the other matches group by group.
  */
 export function slashItems(q: string, scope: Scope, skills: ComposerCommand[], cfg: SlashConfig = {}): AssistItem[] {
   const groups: AssistItem[][] = [

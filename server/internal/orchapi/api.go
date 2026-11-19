@@ -141,6 +141,7 @@ var errorMap = []struct {
 	{scheduler.ErrTaskState, 409, "task_state"},
 	{scheduler.ErrDepEnded, 409, "dependency_ended"},
 	{core.ErrTaskDone, 409, "task_state"},
+	{orchestrator.ErrFixedModel, 409, "model_fixed"},
 }
 
 // fail maps an engine error to the API error format.

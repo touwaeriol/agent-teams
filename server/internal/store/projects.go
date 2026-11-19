@@ -26,7 +26,6 @@ type Project struct {
 	Delivery         json.RawMessage
 	OfficeLayout     string
 	Icon             string
-	CoordinatorModel string
 	ThreadModel      string
 	ThreadCodexModel string
 	ThreadEffort     string
@@ -46,8 +45,9 @@ type NewProject struct {
 	AutoApprove                bool
 	MergePolicy                string // '' = pr
 	Delivery                   json.RawMessage
-	// Model overrides ('' = each role's model): the coordinator, Claude leads/members, Codex leads/members.
-	CoordinatorModel, ThreadModel, ThreadCodexModel string
+	// Model overrides for members ('' = each role's model): Claude members, Codex members. The
+	// coordinator and leads always run the default model (orchestrator.Model).
+	ThreadModel, ThreadCodexModel string
 }
 
 // mergePolicy is the policy a new project stores: pr unless one was chosen.
@@ -68,7 +68,7 @@ const projectCols = `p.id, p.user_id, p.name, p.description, p.context,
 	COALESCE((SELECT json_agg(json_build_object('repo', r.repo, 'git_connection_id', r.git_connection_id)
 	  ORDER BY r.position, r.created_at) FROM at_project_repos r WHERE r.project_id = p.id), '[]'::json) AS repos,
 	p.created_at, p.updated_at, p.pinned, p.archived, p.work_mode, p.auto_approve, p.merge_policy,
-	p.delivery, p.office_layout, p.icon, p.coordinator_model, p.thread_model, p.thread_codex_model, p.thread_effort, p.auto_resume,
+	p.delivery, p.office_layout, p.icon, p.thread_model, p.thread_codex_model, p.thread_effort, p.auto_resume,
 	(SELECT count(*) FROM at_questions q WHERE q.project_id = p.id AND q.status = 'open' AND q.audience = 'user')
 	  + (SELECT count(*) FROM at_threads t WHERE t.project_id = p.id AND t.status = 'review'
 	    AND (p.merge_policy = 'manual' OR t.merge_error IS NOT NULL)) AS waiting,
@@ -111,7 +111,7 @@ func (s *Store) CreateProject(ctx context.Context, userID string, n NewProject) 
 		err := tx.g(ctx).Table("at_projects").Create(map[string]any{"id": id, "user_id": userID, "name": n.Name,
 			"description": n.Description, "context": n.Context, "work_mode": n.WorkMode, "auto_approve": n.AutoApprove,
 			"merge_policy": mergePolicy(n.MergePolicy), "delivery": delivery,
-			"coordinator_model": n.CoordinatorModel, "thread_model": n.ThreadModel, "thread_codex_model": n.ThreadCodexModel}).Error
+			"thread_model": n.ThreadModel, "thread_codex_model": n.ThreadCodexModel}).Error
 		if err != nil {
 			return err
 		}

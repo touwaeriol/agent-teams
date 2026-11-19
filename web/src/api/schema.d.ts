@@ -429,7 +429,7 @@ export interface paths {
         };
         /** The model of the conversation's employee (and of the thread's employees) */
         get: operations["conversation-model"];
-        /** Change the model: the project coordinator, or the thread lead / whole thread; running sessions switch from their next turn */
+        /** Change the model of the thread's members (scope thread); the coordinator and leads cannot switch. Running sessions switch from their next turn */
         put: operations["set-conversation-model"];
         post?: never;
         delete?: never;
@@ -2213,7 +2213,7 @@ export interface components {
         };
         ConversationModel: {
             employee: string;
-            /** @description What the employee runs without the override */
+            /** @description What the employee runs without the override (= model) */
             inherited: string;
             /** @description A session is open on a node: a change takes effect from its next turn */
             live: boolean;
@@ -2221,7 +2221,7 @@ export interface components {
             members: components["schemas"]["MemberModel"][] | null;
             /** @description What the employee runs (or opens its next session with) */
             model: string;
-            /** @description Picked with /model: the project coordinator model, or the lead's own ('' = not set) */
+            /** @description Always '': the coordinator and the lead run the default model (/model only changes members) */
             override: string;
             runtime: string;
             /** @enum {string} */
@@ -2607,7 +2607,7 @@ export interface components {
         MemberModel: {
             model: string;
             name: string;
-            /** @description Picked with /model ('' = project or role setting) */
+            /** @description Picked with /model ('' = project or role setting; always '' for the lead) */
             override: string;
             runtime: string;
             tier: string;
@@ -2706,7 +2706,7 @@ export interface components {
         };
         ModelResult: {
             applied: components["schemas"]["ModelApplied"][] | null;
-            /** @description Employees of another runtime (Codex members) that keep their model */
+            /** @description Employees that keep their model: the lead (always the default model) and members of another runtime */
             skipped: string[] | null;
         };
         ModelsBody: {
@@ -2947,7 +2947,7 @@ export interface components {
             auto_approve?: boolean;
             /** @description 项目指令 */
             context?: string;
-            /** @description Claude model of the coordinator; '' = the role's model */
+            /** @description Deprecated and ignored (accepted for older clients): the coordinator runs the default model */
             coordinator_model?: string;
             delivery?: components["schemas"]["DeliveryPatch"];
             description?: string;
@@ -2960,9 +2960,9 @@ export interface components {
             merge_policy?: "pr" | "auto" | "manual";
             name: string;
             repos?: components["schemas"]["RepoRef"][] | null;
-            /** @description Codex model of Codex leads and members; '' = each role's model */
+            /** @description Codex model of the Codex members (tier member only); '' = each role's model */
             thread_codex_model?: string;
-            /** @description Claude model of Claude leads and members; '' = each role's model */
+            /** @description Claude model of the Claude members (tier member only); '' = each role's model */
             thread_model?: string;
             /** @enum {string} */
             work_mode?: "worktree" | "clone";
@@ -2977,7 +2977,7 @@ export interface components {
             auto_resume?: boolean;
             /** @description 项目指令 */
             context?: string;
-            /** @description '' = the role's model */
+            /** @description Deprecated and ignored (accepted for older clients): the coordinator runs the default model */
             coordinator_model?: string;
             delivery?: components["schemas"]["DeliveryPatch"];
             description?: string;
@@ -2991,11 +2991,11 @@ export interface components {
             pinned?: boolean;
             /** @description Replaces the bound repositories (order kept); [] unbinds all */
             repos?: components["schemas"]["RepoRef"][];
-            /** @description Codex leads and members; '' = each role's model */
+            /** @description Codex model of the Codex members (tier member only); '' = each role's model */
             thread_codex_model?: string;
             /** @description '' | low | medium | high | xhigh | max */
             thread_effort?: string;
-            /** @description Claude leads and members; '' = each role's model */
+            /** @description Claude model of the Claude members (tier member only); '' = each role's model */
             thread_model?: string;
             /** @enum {string} */
             work_mode?: "worktree" | "clone";
@@ -3019,7 +3019,7 @@ export interface components {
             auto_resume: boolean;
             /** @description 项目指令: the owner's instructions (like CLAUDE.md), read by every session */
             context: string;
-            /** @description '' = the coordinator role's model */
+            /** @description Deprecated, always '': the coordinator and thread leads run the default model */
             coordinator_model: string;
             /** Format: date-time */
             created_at: string;
@@ -3038,11 +3038,11 @@ export interface components {
             pinned: boolean;
             /** @description Bound repositories in project order; base branches belong in context (the project instructions) */
             repos: components["schemas"]["RepoRef"][] | null;
-            /** @description Codex leads and members; '' = each role's model */
+            /** @description Codex model of the Codex members (tier member only; leads run the default model); '' = each role's model */
             thread_codex_model: string;
             /** @description '' = each role's effort; low | medium | high | xhigh | max */
             thread_effort: string;
-            /** @description Claude leads and members; '' = each role's model */
+            /** @description Claude model of the Claude members (tier member only; leads run the default model); '' = each role's model */
             thread_model: string;
             /** Format: int64 */
             threads_active: number;
@@ -3229,6 +3229,7 @@ export interface components {
             look: components["schemas"]["Look"];
             /** Format: int64 */
             max_turns: number | null;
+            /** @description Member roles only: the model of the role's sessions ('' = the defaults). Always '' for the coordinator and the lead (they run the default model; a value sent is dropped) */
             model: string;
             node_ids: string[] | null;
             /**
@@ -3346,7 +3347,7 @@ export interface components {
             /** @description Model id; '' goes back to the project / role setting */
             model: string;
             /**
-             * @description Thread conversations: only the lead, or every employee of the thread with the lead's runtime
+             * @description thread: every member of the thread with the lead's runtime (the lead keeps the default model). lead, and any change in the coordinator conversation, is refused (409 model_fixed): the coordinator and leads always run the default model
              * @default lead
              * @enum {string}
              */
