@@ -3,6 +3,7 @@
 // screenshot runs: in-memory demo data, cookie session + CSRF check, SSE with
 // Last-Event-ID resume and a looping script of status events for the office.
 // Not shipped: the production build only contains src/.
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -307,6 +308,61 @@ const routes = [
     state.messages.c0.push(m);
     json(res, 202, m);
   }],
+  ["GET", /^\/api\/projects\/([^/]+)\/shared-files$/, (req, res, [pid], url) => {
+    const prefix = url.searchParams.get("prefix") ?? "";
+    const all = sharedOf(pid);
+    json(res, 200, { files: all.filter((f) => f.path.startsWith(prefix)).map(sharedOut), total_bytes: all.reduce((n, f) => n + sharedSize(f), 0), file_count: all.length, limits: SHARED_LIMITS });
+  }],
+  ["POST", /^\/api\/projects\/([^/]+)\/shared-files$/, async (req, res, [pid]) => {
+    const form = parseMultipart(await rawBody(req), req.headers["content-type"] ?? "");
+    if (!form) return fail(res, 422, "参数不正确：不是 multipart/form-data", "validation");
+    const parts = form.files.filter((f) => f.name === "file");
+    if (parts.length === 0) return fail(res, 422, "没有文件：用 file 字段上传", "validation");
+    const paths = form.fields.filter((f) => f.name === "path").map((f) => f.value);
+    if (paths.length > 0 && paths.length !== parts.length) return fail(res, 422, "path 要么不给，要么每个文件给一个（按顺序）", "validation");
+    const dir = (form.fields.find((f) => f.name === "dir")?.value ?? "").replace(/\/+$/, "");
+    const list = sharedOf(pid);
+    const out = [];
+    let total = list.reduce((n, f) => n + sharedSize(f), 0);
+    let count = list.length;
+    const targets = parts.map((p, i) => (dir ? `${dir}/` : "") + (paths[i] ?? p.filename));
+    for (const [i, p] of parts.entries()) {
+      const bad = sharedPathProblem(targets[i]);
+      if (bad) return fail(res, 422, `参数不正确：路径 ${JSON.stringify(targets[i])} ${bad}`, "validation");
+      if (p.data.length > SHARED_LIMITS.file_bytes) return fail(res, 413, `shared file too large：单个文件不能超过 20 MB（这个文件 ${(p.data.length / 1048576).toFixed(1)} MB）`, "file_too_large");
+      const old = list.find((f) => f.path === targets[i]);
+      total += p.data.length - (old ? sharedSize(old) : 0);
+      if (!old) count += 1;
+    }
+    if (total > SHARED_LIMITS.project_bytes) return fail(res, 409, "shared files quota exceeded：项目共享文件合计不能超过 500 MB，先删掉不用的", "quota_exceeded");
+    if (count > SHARED_LIMITS.project_files) return fail(res, 409, "shared files quota exceeded：项目最多 1000 个共享文件，先删掉不用的", "quota_exceeded");
+    for (const [i, p] of parts.entries()) {
+      const at = now();
+      const old = list.find((f) => f.path === targets[i]);
+      const f = { path: targets[i], data: p.data.toString("base64"), uploaded_by: "user", created_at: old?.created_at ?? at, updated_at: at };
+      if (old) list.splice(list.indexOf(old), 1, f);
+      else list.push(f);
+      out.push({ ...sharedOut(f), overwritten: Boolean(old) });
+      emit("shared_file", { op: "write", path: f.path, by: "user" }, pid);
+    }
+    json(res, 201, { files: out, total_bytes: list.reduce((n, f) => n + sharedSize(f), 0) });
+  }],
+  ["GET", /^\/api\/projects\/([^/]+)\/shared-files\/download$/, (req, res, [pid], url) => {
+    const f = sharedOf(pid).find((x) => x.path === url.searchParams.get("path"));
+    if (!f) return fail(res, 404, "没有这个共享文件", "not_found");
+    const name = f.path.split("/").pop();
+    res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Disposition": `attachment; filename*=utf-8''${encodeURIComponent(name)}`,
+      "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store" });
+    res.end(Buffer.from(f.data, "base64"));
+  }],
+  ["DELETE", /^\/api\/projects\/([^/]+)\/shared-files$/, (req, res, [pid], url) => {
+    const list = sharedOf(pid);
+    const i = list.findIndex((x) => x.path === url.searchParams.get("path"));
+    if (i < 0) return fail(res, 404, "没有这个共享文件", "not_found");
+    const [gone] = list.splice(i, 1);
+    emit("shared_file", { op: "delete", path: gone.path, by: "user" }, pid);
+    json(res, 204);
+  }],
   ["GET", /^\/api\/projects\/([^/]+)\/memory$/, (req, res) => json(res, 200, memoryList())],
   ["GET", /^\/api\/projects\/([^/]+)\/memory\/([^/]+)$/, (req, res, [, , name]) => {
     const f = state.memory.find((x) => x.name === decodeURIComponent(name));
@@ -539,6 +595,71 @@ createServer(async (req, res) => {
   }
   fail(res, 404, `mock: no route for ${req.method} ${url.pathname}`, "not_found");
 }).listen(PORT, () => console.log(`mock API on http://127.0.0.1:${PORT}`));
+
+// Shared files (api.md §3.5.1): in memory per project, the server's limits and path rule.
+const SHARED_LIMITS = { file_bytes: 20 << 20, project_bytes: 500 << 20, project_files: 1000 };
+function sharedOf(pid) {
+  return (state.sharedFiles[pid] ??= []);
+}
+function sharedSize(f) {
+  return Buffer.from(f.data, "base64").length;
+}
+function sharedOut(f) {
+  const data = Buffer.from(f.data, "base64");
+  const ext = f.path.includes(".") ? f.path.split(".").pop().toLowerCase() : "";
+  const types = { csv: "text/csv; charset=utf-8", json: "application/json; charset=utf-8", md: "text/markdown; charset=utf-8", txt: "text/plain; charset=utf-8", png: "image/png", html: "text/html; charset=utf-8" };
+  const { data: _data, ...rest } = f;
+  return { ...rest, size: data.length, sha256: createHash("sha256").update(data).digest("hex"), content_type: types[ext] ?? "application/octet-stream" };
+}
+function sharedPathProblem(p) {
+  if (!p) return "是空的";
+  if (Buffer.byteLength(p) > 255) return "超过 255 字节";
+  if (p.startsWith("/")) return "不能是绝对路径";
+  if (p.includes("\\")) return "不能有反斜杠";
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(p)) return "不能有控制字符";
+  const segs = p.split("/");
+  if (segs.length > 8) return "超过 8 层";
+  for (const s of segs) {
+    if (!s) return "有空的路径段";
+    if (s === "." || s === "..") return "不能有 . 或 .. 段";
+    if (s.startsWith(".")) return "路径段不能以 . 开头";
+    if (s.startsWith(" ") || s.endsWith(" ")) return "路径段不能以空格开头或结尾";
+  }
+  return null;
+}
+function rawBody(req) {
+  return new Promise((resolve) => {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+  });
+}
+/** A minimal multipart/form-data parser: fields {name, value} and files {name, filename, data}. */
+function parseMultipart(buf, contentType) {
+  const m = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(contentType);
+  if (!m) return null;
+  const sep = Buffer.from(`--${m[1] ?? m[2]}`);
+  const fields = [];
+  const files = [];
+  let start = buf.indexOf(sep);
+  while (start >= 0) {
+    const next = buf.indexOf(sep, start + sep.length);
+    if (next < 0) break;
+    const part = buf.subarray(start + sep.length + 2, next - 2); // skip CRLF after the boundary and before the next
+    const head = part.indexOf("\r\n\r\n");
+    if (head >= 0) {
+      const headers = part.subarray(0, head).toString("utf8");
+      const data = part.subarray(head + 4);
+      const name = /name="([^"]*)"/i.exec(headers)?.[1] ?? "";
+      const filename = /filename="([^"]*)"/i.exec(headers)?.[1];
+      if (filename !== undefined) files.push({ name, filename, data: Buffer.from(data) });
+      else fields.push({ name, value: data.toString("utf8") });
+    }
+    start = next;
+  }
+  return { fields, files };
+}
 
 /** Memory files without content, MEMORY.md first (GET /memory, the overview box). */
 function memoryList() {

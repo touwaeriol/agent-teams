@@ -97,15 +97,19 @@ function dropped(e: DragEvent) {
   start(e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : null);
 }
 
+// ConfirmAction closes (update:open) before it emits confirm, so the target is kept apart from the open flag.
 const deleting = ref<string | null>(null);
-const deleteOpen = computed({ get: () => deleting.value !== null, set: (v) => !v && (deleting.value = null) });
+const deleteOpen = ref(false);
+function askDelete(path: string) {
+  deleting.value = path;
+  deleteOpen.value = true;
+}
 const remove = useAction((path: string) => sharedActions.remove(pid.value, path), {
   invalidate: () => [keys.sharedFiles(pid.value)],
   success: "已删除",
 });
 function confirmDelete() {
   if (deleting.value) remove.mutate(deleting.value);
-  deleting.value = null;
 }
 </script>
 
@@ -209,7 +213,7 @@ function confirmDelete() {
                   type="button"
                   :aria-label="`删除 ${f.path}`"
                   class="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-bad"
-                  @click="deleting = f.path"
+                  @click="askDelete(f.path)"
                 >
                   <Trash2 class="size-4" />
                 </button>
