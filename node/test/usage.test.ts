@@ -234,3 +234,13 @@ describe("daemon node.usage", () => {
     expect(f.body.runtimes).toMatchObject({ claude: { auth: "none", status: "unsupported" }, codex: { auth: "none", status: "unsupported" } });
   });
 });
+
+describe("CodexHub rate-limit pushes", () => {
+  it("merges sparse account/rateLimits/updated pushes", async () => {
+    const { CodexHub } = await import("../src/sessions/codex/hub.js");
+    const hub = new CodexHub({ env: {}, log: silentLogger, clientVersion: "t" });
+    hub.noteRateLimits(snapshot(10, 5));
+    hub.noteRateLimits({ ...snapshot(30, 0), secondary: null, planType: null });
+    expect(hub.lastRateLimits!.snapshot).toMatchObject({ primary: { usedPercent: 30 }, secondary: { usedPercent: 5 }, planType: "pro" });
+  });
+});

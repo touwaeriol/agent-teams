@@ -52,7 +52,7 @@ export class CodexHub {
   private async spawn(): Promise<AppServer> {
     const server = new AppServer({ env: this.opts.env, log: this.opts.log, clientVersion: this.opts.clientVersion, ...(this.opts.command ? { command: this.opts.command } : {}) });
     server.on("notification", (method, params) => {
-      if (method === "account/rateLimits/updated" && params.rateLimits) this.lastRateLimits = { snapshot: params.rateLimits as RateLimitSnapshot, at: new Date() };
+      if (method === "account/rateLimits/updated" && params.rateLimits) this.noteRateLimits(params.rateLimits as RateLimitSnapshot);
       this.route(params)?.onNotification(method, params);
     });
     server.onRequest(async (method, params, id) => {
@@ -64,6 +64,13 @@ export class CodexHub {
     await server.start();
     this.server = server;
     return server;
+  }
+
+  /** The push is sparse: null fields keep the value seen before. */
+  noteRateLimits(update: RateLimitSnapshot): void {
+    const merged = { ...(this.lastRateLimits?.snapshot ?? {}) } as Record<string, unknown>;
+    for (const [k, v] of Object.entries(update)) if (v !== null && v !== undefined) merged[k] = v;
+    this.lastRateLimits = { snapshot: merged as RateLimitSnapshot, at: new Date() };
   }
 
   private route(params: Record<string, unknown>): ThreadListener | undefined {
