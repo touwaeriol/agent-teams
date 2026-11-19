@@ -212,7 +212,8 @@ func TestThreadEndToEnd(t *testing.T) {
 		t.Fatalf("task brief %+v", devOpen.FirstMessage)
 	}
 	dev.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: protocol.SessionID(dev.session), MsgID: devOpen.FirstMessage.MsgID})
-	events.wait(t, "task", `"id":"t1"`, `"status":"claimed"`, `"claimed_by":"dev-1"`)
+	// Task frames carry the thread's counts after the change (the web list moves on them).
+	events.wait(t, "task", `"id":"t1"`, `"status":"claimed"`, `"claimed_by":"dev-1"`, `"tasks_open":1`)
 	events.wait(t, "task", `"id":"t1"`, `"status":"running"`)
 	events.wait(t, "status", `"name":"dev-1"`, `"state":"claiming"`)
 
@@ -234,7 +235,7 @@ func TestThreadEndToEnd(t *testing.T) {
 	if !strings.Contains(string(*res.Structured), `"status":"done"`) {
 		t.Fatalf("complete_task %s", *res.Structured)
 	}
-	events.wait(t, "task", `"id":"t1"`, `"status":"done"`)
+	events.wait(t, "task", `"id":"t1"`, `"status":"done"`, `"tasks_open":0`, `"tasks_done":1`)
 	events.wait(t, "main_task", `"status":"done"`, `"auto_done":true`)
 	lead.expectSend("[Task t1 · dev-1 · done] 表单写好了")
 
