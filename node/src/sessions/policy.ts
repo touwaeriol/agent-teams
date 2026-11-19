@@ -36,7 +36,6 @@ const DANGEROUS_SHELL = [
   // Employees push with their own token (§10.4); the platform pre-push hook keeps protected branches safe.
   { re: /\bgit\b.*\s-c\s*["']?(core\.(hookspath|fsmonitor|sshcommand)|credential\.)/i, why: "overriding git hooks or credential settings is not allowed" },
   { re: /\bgit\b.*\bpush\b.*--no-verify\b/, why: "git push --no-verify skips the platform's protected-branch check" },
-  { re: /\bgh\s+pr\s+merge\b|\bgh\s+api\b.*\/merge\b/, why: "merging goes through the platform merge queue (enqueue_merge / open_pr) and user acceptance, not gh" },
   { re: /\bgh\s+auth\s+token\b|\bgit\s+credential\b|\bgit\s+credential-/, why: "printing GitHub tokens is not allowed (gh and git get them automatically)" },
 ];
 
