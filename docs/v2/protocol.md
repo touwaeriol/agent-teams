@@ -215,7 +215,7 @@
 
 ### 4.5 `session.set_mode`（键：`id`）
 
-`{"session_id": "s_…", "permission_mode": "default|acceptEdits|bypassPermissions|auto", "model": null}` → Claude `q.setPermissionMode()` / `q.setModel()`；Codex 在下一次 `turn/start` 带 `approvalPolicy` / `model`。只带 `model` 的命令来自 /model（`PUT /api/conversations/{cid}/model`，只发给成员；统筹和组长固定用默认模型，不能切换）：运行中的会话从下一轮起换模型，守护进程同时改掉本机记录里的模型，之后 resume 也用新模型。`bypassPermissions` 只有会话以 `allowDangerouslySkipPermissions` 打开时才允许（守护进程否则回错误）。控制台不再发 `auto`（枚举里保留给旧控制台）。`bypassPermissions` 会话不发 `approval.request`：CLI 仍调到 `canUseTool` 时守护进程就地放行；会话打开时 `permission_mode` 是 `bypassPermissions` 的，守护进程总是带上 `allowDangerouslySkipPermissions`。
+`{"session_id": "s_…", "permission_mode": "default|acceptEdits|bypassPermissions|auto", "model": null}` → Claude `q.setPermissionMode()` / `q.setModel()`；Codex 在下一次 `turn/start` 带 `approvalPolicy` / `model`。只带 `model` 的命令来自 /model（`PUT /api/conversations/{cid}/model`，只发给成员；统筹和组长不能用 /model 切换，模型在岗位配置或项目设置里改）：运行中的会话从下一轮起换模型，守护进程同时改掉本机记录里的模型，之后 resume 也用新模型。`bypassPermissions` 只有会话以 `allowDangerouslySkipPermissions` 打开时才允许（守护进程否则回错误）。控制台不再发 `auto`（枚举里保留给旧控制台）。`bypassPermissions` 会话不发 `approval.request`：CLI 仍调到 `canUseTool` 时守护进程就地放行；会话打开时 `permission_mode` 是 `bypassPermissions` 的，守护进程总是带上 `allowDangerouslySkipPermissions`。
 
 ### 4.6 `session.close`（键：`session_id + open_gen`）
 

@@ -721,40 +721,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/models": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** The user's model list (a new user starts with Opus 5.5, the Claude default) */
-        get: operations["list-models"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/models/mine": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Replace the user's model list (in order, at least one model, at most one default per runtime) */
-        put: operations["save-my-models"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/nodes": {
         parameters: {
             query?: never;
@@ -2236,9 +2202,9 @@ export interface components {
             live: boolean;
             /** @description Thread: every employee of the thread (lead first) */
             members: components["schemas"]["MemberModel"][] | null;
-            /** @description What the employee runs (or opens its next session with) */
+            /** @description What the employee runs (or opens its next session with): project setting → role → built-in default; shown read-only */
             model: string;
-            /** @description Always '': the coordinator and the lead run the default model (/model only changes members) */
+            /** @description Always '': the coordinator and the lead have no /model (their model is set in their role or the project settings) */
             override: string;
             runtime: string;
             /** @enum {string} */
@@ -2624,7 +2590,7 @@ export interface components {
         MemberModel: {
             model: string;
             name: string;
-            /** @description Picked with /model ('' = project or role setting; always '' for the lead) */
+            /** @description Picked with /model ('' = project or role setting; always '' for the lead, whose model is set in its role or the project) */
             override: string;
             runtime: string;
             tier: string;
@@ -2701,19 +2667,6 @@ export interface components {
             };
             role: string;
         };
-        Model: {
-            /** @description What the user's sessions of this runtime open with when no employee, project or role names a model (at most one per runtime) */
-            default?: boolean;
-            readonly id: string;
-            /** @description Display name; empty shows the id */
-            label?: string;
-            /** @description Always true: every entry is the user's own (kept for older clients) */
-            readonly mine: boolean;
-            /** @description The id the runtime is given (claude-…, gpt-…) */
-            model: string;
-            /** @enum {string} */
-            runtime: "claude" | "codex";
-        };
         ModelApplied: {
             employee: string;
             /** @description Sent to the employee's running session (from its next turn); false: the next session opens with it */
@@ -2723,14 +2676,8 @@ export interface components {
         };
         ModelResult: {
             applied: components["schemas"]["ModelApplied"][] | null;
-            /** @description Employees that keep their model: the lead (always the default model) and members of another runtime */
+            /** @description Employees that keep their model: the lead (its model is set in its role or the project) and members of another runtime */
             skipped: string[] | null;
-        };
-        ModelsBody: {
-            models: components["schemas"]["Model"][] | null;
-        };
-        ModelsInputBody: {
-            models: components["schemas"]["Model"][] | null;
         };
         NewCommentInputBody: {
             text: string;
@@ -2972,7 +2919,7 @@ export interface components {
             auto_approve?: boolean;
             /** @description 项目指令 */
             context?: string;
-            /** @description Deprecated and ignored (accepted for older clients): the coordinator runs the default model */
+            /** @description Model of the coordinator; '' = the coordinator role's model */
             coordinator_model?: string;
             delivery?: components["schemas"]["DeliveryPatch"];
             description?: string;
@@ -2985,9 +2932,9 @@ export interface components {
             merge_policy?: "pr" | "auto" | "manual";
             name: string;
             repos?: components["schemas"]["RepoRef"][] | null;
-            /** @description Codex model of the Codex members (tier member only); '' = each role's model */
+            /** @description Codex model of Codex leads and members; '' = each role's model */
             thread_codex_model?: string;
-            /** @description Claude model of the Claude members (tier member only); '' = each role's model */
+            /** @description Claude model of Claude leads and members; '' = each role's model */
             thread_model?: string;
             /** @enum {string} */
             work_mode?: "worktree" | "clone";
@@ -3002,7 +2949,7 @@ export interface components {
             auto_resume?: boolean;
             /** @description 项目指令 */
             context?: string;
-            /** @description Deprecated and ignored (accepted for older clients): the coordinator runs the default model */
+            /** @description Model of the coordinator; '' = the coordinator role's model */
             coordinator_model?: string;
             delivery?: components["schemas"]["DeliveryPatch"];
             description?: string;
@@ -3016,11 +2963,11 @@ export interface components {
             pinned?: boolean;
             /** @description Replaces the bound repositories (order kept); [] unbinds all */
             repos?: components["schemas"]["RepoRef"][];
-            /** @description Codex model of the Codex members (tier member only); '' = each role's model */
+            /** @description Codex model of Codex leads and members; '' = each role's model */
             thread_codex_model?: string;
             /** @description '' | low | medium | high | xhigh | max */
             thread_effort?: string;
-            /** @description Claude model of the Claude members (tier member only); '' = each role's model */
+            /** @description Claude model of Claude leads and members; '' = each role's model */
             thread_model?: string;
             /** @enum {string} */
             work_mode?: "worktree" | "clone";
@@ -3044,7 +2991,7 @@ export interface components {
             auto_resume: boolean;
             /** @description 项目指令: the owner's instructions (like CLAUDE.md), read by every session */
             context: string;
-            /** @description Deprecated, always '': the coordinator and thread leads run the default model */
+            /** @description Model of the coordinator; '' = the coordinator role's model */
             coordinator_model: string;
             /** Format: date-time */
             created_at: string;
@@ -3063,11 +3010,11 @@ export interface components {
             pinned: boolean;
             /** @description Bound repositories in project order; base branches belong in context (the project instructions) */
             repos: components["schemas"]["RepoRef"][] | null;
-            /** @description Codex model of the Codex members (tier member only; leads run the default model); '' = each role's model */
+            /** @description Codex model of Codex leads and members; '' = each role's model */
             thread_codex_model: string;
             /** @description '' = each role's effort; low | medium | high | xhigh | max */
             thread_effort: string;
-            /** @description Claude model of the Claude members (tier member only; leads run the default model); '' = each role's model */
+            /** @description Claude model of Claude leads and members; '' = each role's model */
             thread_model: string;
             /** Format: int64 */
             threads_active: number;
@@ -3254,7 +3201,7 @@ export interface components {
             look: components["schemas"]["Look"];
             /** Format: int64 */
             max_turns: number | null;
-            /** @description Member roles only: the model of the role's sessions ('' = the defaults). Always '' for the coordinator and the lead (they run the default model; a value sent is dropped) */
+            /** @description The model of the role's sessions, typed by hand (any tier; '' = the project setting, then the built-in default). Below the project setting and, for members, /model */
             model: string;
             node_ids: string[] | null;
             /**
@@ -3394,7 +3341,7 @@ export interface components {
             /** @description Model id; '' goes back to the project / role setting */
             model: string;
             /**
-             * @description thread: every member of the thread with the lead's runtime (the lead keeps the default model). lead, and any change in the coordinator conversation, is refused (409 model_fixed): the coordinator and leads always run the default model
+             * @description thread: every member of the thread with the lead's runtime (the lead keeps its model). lead, and any change in the coordinator conversation, is refused (409 model_fixed): the coordinator's and leads' models are set in their role or the project settings
              * @default lead
              * @enum {string}
              */
@@ -5599,68 +5546,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    "list-models": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelsBody"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    "save-my-models": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ModelsInputBody"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelsBody"];
-                };
             };
             /** @description Error */
             default: {

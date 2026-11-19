@@ -121,8 +121,6 @@ p, user, /api/projects/:pid/threads, POST
 p, user, /api/projects/:pid/usage, GET
 p, user, /api/projects/:pid/waiting, GET
 p, user, /api/commands, GET
-p, user, /api/models, GET
-p, user, /api/models/mine, PUT
 p, user, /api/roles, GET
 p, user, /api/roles, PUT
 p, user, /api/roles/look/random, POST

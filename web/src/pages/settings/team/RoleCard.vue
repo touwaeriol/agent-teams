@@ -1,14 +1,12 @@
 <script setup lang="ts">
-// One role template: name and tier, count, menu (编辑详情 / 删除岗位), runtime, model (members; the
-// coordinator and the lead always use the owner's default, shown read-only) and nodes, the rule line,
+// One role template: name and tier, count, menu (编辑详情 / 删除岗位), runtime, model (every tier,
+// typed by hand; "" = the project setting, then the built-in default) and nodes, the rule line,
 // look, skills, plugins and (members) permission mode. Emits patches; the page keeps the draft.
 import { MoreHorizontal } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import type { RoleView } from "@/api/views";
 import DropdownMenu from "@/components/common/DropdownMenu.vue";
 import type { OfficeLayout } from "@/office";
-import { useModels } from "@/api/queries";
-import { modelFits } from "@/lib/models";
 import { canHaveSkills, countText, isReadOnly, LEVEL, roleName, ruleText } from "@/lib/roles";
 import { toast } from "@/lib/toast";
 import CommandEditor from "./CommandEditor.vue";
@@ -20,19 +18,18 @@ import RoleDialog from "./RoleDialog.vue";
 import RoleModelSelect from "./RoleModelSelect.vue";
 import SkillPicker from "./SkillPicker.vue";
 
-const props = defineProps<{ role: RoleView; layout: OfficeLayout }>();
+const props = defineProps<{ role: RoleView; layout: OfficeLayout; roles?: RoleView[] }>();
 const emit = defineEmits<{ change: [patch: Partial<RoleView>]; remove: [] }>();
 const level = computed(() => LEVEL[props.role.tier]);
 const editing = ref(false);
 const COMMANDS: Record<string, () => void> = { edit: () => (editing.value = true), remove: () => emit("remove") };
 const member = computed(() => props.role.tier === "member");
-const models = useModels();
-/** Members only (the type is fixed for the others): a new runtime drops a model that is not one of its models (the role then follows the default). */
+/** Members only (the type is fixed for the others): a new runtime clears the model (an id of the other type cannot run). */
 function setRuntime(runtime: RoleView["runtime"]) {
-  if (!member.value) return;
-  if (modelFits(models.data.value?.models ?? [], runtime, props.role.model ?? "")) return emit("change", { runtime });
+  if (!member.value || runtime === props.role.runtime) return;
+  if (!props.role.model) return emit("change", { runtime });
   emit("change", { runtime, model: "" });
-  toast.info("已改为跟随默认模型");
+  toast.info("类型变了，已清空模型，请重新填写");
 }
 function save(r: RoleView) {
   emit("change", r);
@@ -73,8 +70,7 @@ function save(r: RoleView) {
       </span>
       <span class="flex min-w-0 flex-col gap-1">
         <span class="text-xs text-muted-foreground">模型</span>
-        <RoleModelSelect v-if="member" :runtime="role.runtime" :model-value="role.model ?? ''" @update:model-value="(model: string) => emit('change', { model })" />
-        <span v-else class="flex min-h-9 items-center text-xs leading-[18px] text-muted-foreground" data-testid="role-model-fixed">使用我的默认模型，不能切换</span>
+        <RoleModelSelect :runtime="role.runtime" :roles="roles" :model-value="role.model ?? ''" @update:model-value="(model: string) => emit('change', { model })" />
       </span>
       <span class="flex min-w-0 flex-col gap-1">
         <span class="text-xs text-muted-foreground">可用节点</span>

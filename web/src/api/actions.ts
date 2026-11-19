@@ -115,11 +115,6 @@ export const roles = {
   randomLook: (role: string) => unwrap(client.POST("/api/roles/look/random", { body: { role } })),
 };
 
-export const models = {
-  /** The user's own model entries, in order (replaces the list). */
-  saveMine: (list: S["Model"][]) => unwrap(client.PUT("/api/models/mine", { body: { models: list } })),
-};
-
 export const skills = {
   /** zip: base64 of a zip file; files: a picked folder's text files. */
   create: (body: S["NewSkillInputBody"]) => unwrap(client.POST("/api/skills", { body })),

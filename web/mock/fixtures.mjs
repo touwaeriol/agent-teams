@@ -88,7 +88,7 @@ export const threads = [
     counts: counts({ waiting: 1, questions_open: 1, tasks_total: 6, tasks_done: 3, main_total: 3, main_done: 1 }),
     lead_last: { text: "代码部分已完成并通过测试，剩下要在节点上装好 codex 才能联调。", at: ago(9) },
     // The brief the coordinator handed the lead, from the user's project-chat message 1 (with a screenshot).
-    brief: "## 目标\n\n让 **Codex 员工**能像 Claude 员工一样领任务、汇报和提问。\n\n## 要做\n\n1. 节点上实现 `CodexWorker`：启动、事件流解析、中断与恢复\n2. 员工配置里可以选 `codex`，模型列表跟随用户配置\n3. 提问 / 审批卡片在网页上能点，结果回传给 Codex\n4. 节点安装脚本检测并安装 codex CLI\n\n## 验收\n\n- 在 cvp 节点上用 Codex 员工跑通一个小任务\n- `go test ./...` 与 web 测试全部通过",
+    brief: "## 目标\n\n让 **Codex 员工**能像 Claude 员工一样领任务、汇报和提问。\n\n## 要做\n\n1. 节点上实现 `CodexWorker`：启动、事件流解析、中断与恢复\n2. 员工配置里可以选 `codex`，模型在岗位里手动填写\n3. 提问 / 审批卡片在网页上能点，结果回传给 Codex\n4. 节点安装脚本检测并安装 codex CLI\n\n## 验收\n\n- 在 cvp 节点上用 Codex 员工跑通一个小任务\n- `go test ./...` 与 web 测试全部通过",
     dispatch: {
       opened_by: "coordinator",
       at: ago(66),
@@ -313,16 +313,9 @@ const role = (id, tier, roleKey, title, runtime, count, node_ids, description, l
   can_delegate: false, read_only: null, allowed_tools: [], disallowed_tools: [], sandbox: "", max_turns: null, gate: "", task_kinds: [], skills: [], plugins: [], look: lk, sort: 0, ...extra,
 });
 
-/** GET /api/models: the user's own list, in order (one default per runtime). */
-export const models = [
-  { id: "m1", runtime: "claude", model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: true },
-  { id: "m2", runtime: "claude", model: "claude-sonnet-5-5", label: "Sonnet 5.5", default: false, mine: true },
-  { id: "m3", runtime: "codex", model: "gpt-5.5-codex", label: "", default: true, mine: true },
-];
-
 export const roles = [
-  role("r0", "coordinator", "coordinator", "项目统筹", "claude", 1, ["n1"], "和你对话，判断要做什么，开讨论串、跟进状态、向你汇报。", look("#7A4FD1", "hoodie", "headset", "#3B2A20")),
-  role("r1", "lead", "lead", "组长", "claude", 1, ["n1", "n2"], "列主要任务、拆小任务、审查成员提交并合并，完成后向统筹交总结。", look("#C8622A", "suit", "none", "#3B2A20")),
+  role("r0", "coordinator", "coordinator", "项目统筹", "claude", 1, ["n1"], "和你对话，判断要做什么，开讨论串、跟进状态、向你汇报。", look("#7A4FD1", "hoodie", "headset", "#3B2A20"), { model: "claude-fable-5-2" }),
+  role("r1", "lead", "lead", "组长", "claude", 1, ["n1", "n2"], "列主要任务、拆小任务、审查成员提交并合并，完成后向统筹交总结。", look("#C8622A", "suit", "none", "#3B2A20"), { model: "claude-opus-5-5" }),
   role("r2", "member", "dev", "开发", "claude", 2, ["n1", "n2"], "从任务池领开发类小任务，在自己的 worktree 里改代码、跑测试、提交。", look("#4C7BD0", "tee", "none", "#8A5A36"), { model: "claude-sonnet-5-5", sort: 1, task_kinds: ["dev"], skills: ["docs"], plugins: ["release-notes@2", "pr-review"] }),
   role("r3", "member", "qa", "测试", "codex", 1, ["n2"], "领测试类小任务：补用例、跑全量测试、复现问题并报告。", look("#3F8F6B", "coat", "glasses", "#6B4A2E"), { sort: 2, permission_mode: "ask", sandbox: "workspace-write", task_kinds: ["test"], plugins: ["playwright-kit"] }),
   role("r4", "member", "review", "审查", "claude", 1, ["n1"], "审查合并前的改动，指出问题，不改代码。", look("#4A4843", "suit", "glasses", "#1F1E1C"), { sort: 3, gate: "review", model: "opus" }),
