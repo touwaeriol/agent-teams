@@ -245,6 +245,15 @@ describe("folders", () => {
     expect(picked.files.map((f) => f.path)).toEqual(["exports/a.csv", "exports/q4/b.json", "notes.md"]);
     expect(picked.skipped).toBe(1);
   });
+  it("without webkitGetAsEntry, keeps an empty file without an extension (an empty Makefile)", async () => {
+    const makefile = new File([], "Makefile");
+    expect(makefile.type).toBe("");
+    expect(makefile.size).toBe(0);
+    const got = await droppedFiles({ items: [], files: [makefile] } as unknown as DataTransfer);
+    expect(got.folders).toBe(0);
+    expect(got.files.map((f) => f.file.name)).toEqual(["Makefile"]);
+  });
+
   it("without webkitGetAsEntry, recognises a dropped folder instead of uploading it", async () => {
     const folder = new File([], "exports");
     Object.defineProperty(folder, "slice", { value: () => ({ arrayBuffer: () => Promise.reject(new Error("is a directory")) }) });
@@ -400,7 +409,7 @@ describe("SharedFiles page", () => {
     const folder = { isFile: false, isDirectory: true, name: "d", fullPath: "/d", createReader: () => ({ readEntries: (ok: (e: object[]) => void) => ok([broken]) }) };
     await w.get("[data-testid=shared-drop]").trigger("drop", { dataTransfer: { items: [{ kind: "file", webkitGetAsEntry: () => folder }], files: [] } });
     await flushPromises();
-    expect(error).toHaveBeenCalledWith(expect.stringContaining("有文件读取失败"));
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("读取拖入的文件失败"));
     expect(send).not.toHaveBeenCalled();
   });
 

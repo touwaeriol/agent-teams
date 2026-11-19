@@ -118,7 +118,7 @@ async function dropped(e: DragEvent) {
     dropped = await droppedFiles(e.dataTransfer);
   } catch {
     // An entry of a dropped folder could not be read (permissions, a file removed meanwhile).
-    toast.error("有文件读取失败，这次拖入没有上传；可以改用“上传文件夹”再试");
+    toast.error("读取拖入的文件失败（有文件读不了），这次拖入没有上传；可以改用“上传文件夹”再试");
     return;
   }
   const { files: got, folders } = dropped;

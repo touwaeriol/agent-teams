@@ -147,6 +147,20 @@ async function entryFiles(entry: DropEntry, out: SourceFile[], inFolder: boolean
   }
 }
 
+/** Whether the first byte of a dropped item can be read (a folder in a plain file list cannot). */
+function readable(f: Blob): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      const reader = new FileReader();
+      reader.onload = () => resolve(true);
+      reader.onerror = () => resolve(false);
+      reader.readAsArrayBuffer(f.slice(0, 1));
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
 /**
  * The files of a drop: dropped folders are walked with webkitGetAsEntry and keep their structure.
  * Browsers without it give the plain file list; a folder then shows up as an empty "file" that
@@ -164,9 +178,9 @@ export async function droppedFiles(dt: Pick<DataTransfer, "items" | "files"> | n
   const files: SourceFile[] = [];
   let folders = 0;
   for (const f of Array.from(dt.files ?? [])) {
-    // A folder in a plain file list has no type and size 0 (some systems report its block size,
-    // 4096); reading it fails, which tells it apart from an empty file without an extension.
-    const isFolder = f.type === "" && (f.size === 0 || f.size % 4096 === 0) && (await f.slice(0, 1).arrayBuffer().then(() => false, () => true));
+    // A folder in a plain file list has no type and cannot be read; an empty file without an
+    // extension (an empty Makefile) has no type either but reads fine, so size is not looked at.
+    const isFolder = f.type === "" && !(await readable(f));
     if (isFolder) folders += 1;
     else files.push({ file: f, rel: "" });
   }
