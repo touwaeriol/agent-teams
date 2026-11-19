@@ -683,7 +683,7 @@ export interface Hello {
   capacity?: Capacity;
   runtimes?: Runtimes;
   /**
-   * Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, context_usage (turn_ended carries context), session_compact (session.compact).
+   * Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage).
    */
   features?: string[];
   isolated?: boolean;
@@ -764,6 +764,61 @@ export interface NodeUpgradeResult {
   ok: boolean;
   version?: string;
   error?: string;
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "RuntimeUsage".
+ */
+export interface RuntimeUsage {
+  /**
+   * How the runtime is logged in: subscription (Claude), chatgpt (Codex), api_key, or none.
+   */
+  auth: "subscription" | "chatgpt" | "api_key" | "none";
+  /**
+   * ok: windows are valid; error: fetching failed (see error); unsupported: no quota for this login (API key, not logged in, too old CLI).
+   */
+  status: "ok" | "error" | "unsupported";
+  /**
+   * Plan name when known (pro, max, plus, team, ...).
+   */
+  plan?: string;
+  /**
+   * At most 8 are kept by the console.
+   */
+  windows?: UsageWindow[];
+  error?: string;
+  /**
+   * When the daemon fetched this data.
+   */
+  fetched_at?: string;
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "UsageWindow".
+ */
+export interface UsageWindow {
+  /**
+   * five_hour, weekly, weekly_opus, weekly_sonnet (Claude); primary, secondary (Codex).
+   */
+  key: string;
+  /**
+   * 0..100; the console clamps values out of range.
+   */
+  used_percent: number;
+  window_minutes?: number;
+  resets_at?: string | null;
+}
+/**
+ * Subscription quota of the node's runtimes (Claude Code, Codex), unreliable; sent after hello and then periodically. Never carries credentials. The console keeps only the latest report per node and drops unknown fields.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "NodeUsage".
+ */
+export interface NodeUsage {
+  runtimes: {
+    claude?: RuntimeUsage;
+    codex?: RuntimeUsage;
+  };
 }
 /**
  * Close a session.
