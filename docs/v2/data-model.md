@@ -770,6 +770,8 @@ ALTER TABLE at_employees ADD COLUMN model TEXT NOT NULL DEFAULT '';            -
 - 组长（tier `lead`）：项目指定（`thread_model`；Codex 组长用 `thread_codex_model`）→ 岗位 `model` → 内置兜底。不看 `at_employees.model`（/model 对组长回 409）。
 - 统筹（tier `coordinator`）：项目 `coordinator_model` → 岗位 `model` → 内置兜底。/model 对统筹回 409。
 
+员工开会话用的是自己的岗位快照（`at_employees.spec`）。成员的快照在保存岗位后由 EnsureStaff 整个刷新；统筹和组长的快照创建后不再刷新，只有 `model` 一项会跟着模板走：保存岗位（`PUT /api/roles`、`/api/roles/yaml`）时，`orchestrator.RolesSaved` 把统筹模板和组长模板的 `model` 写进该用户所有统筹、以及未结束讨论串（状态不是 done/failed/archived）的组长的 `spec.model`，再把算出来的模型发给它们的活会话（`session.set_mode`）。
+
 内置兜底：Claude 为 `claude-opus-5-5`（Opus 5.5）；Codex 为空字符串，节点不传 `model`，由 Codex CLI 用自己的默认（Codex 员工不会落到 Claude 模型名）。平台内置命令存在 `at_settings.composer_commands = {commands: [...]}`。`at_usage.model` 记每一轮实际回答的模型（`session.event turn_ended.model`）。
 
 ## 3. 从 v1 表的映射（历史）

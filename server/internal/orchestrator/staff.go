@@ -125,9 +125,13 @@ func (o *Orchestrator) Released(ctx context.Context, e core.Employee) {
 	o.logErr("retire member", err)
 }
 
-// RolesSaved re-staffs the user's projects that have members after the role templates changed;
-// a project without members gets them when its next thread opens.
+// RolesSaved re-staffs the user's projects that have members after the role templates changed
+// (a project without members gets them when its next thread opens), and brings the model of the
+// coordinators and of the leads of unfinished threads in line with their template (syncRoleModels).
 func (o *Orchestrator) RolesSaved(ctx context.Context, userID string) error {
+	if err := o.syncRoleModels(ctx, userID); err != nil {
+		return err
+	}
 	projects, err := core.StaffedProjects(ctx, o.core.Pool, userID)
 	if err != nil {
 		return err
@@ -138,4 +142,41 @@ func (o *Orchestrator) RolesSaved(ctx context.Context, userID string) error {
 		}
 	}
 	return nil
+}
+
+// syncRoleModels copies the coordinator and lead templates' model into the role copy (spec.model)
+// of the user's coordinators and of the leads of unfinished threads, and sends the resulting model
+// to their live sessions (ApplyModel). Members get their whole copy refreshed by EnsureStaff; the
+// coordinator and leads keep the copy they were created with except for the model, which they
+// cannot switch with /model and so must follow the role setting.
+func (o *Orchestrator) syncRoleModels(ctx context.Context, userID string) error {
+	list, err := o.userRoles(ctx, userID)
+	if err != nil {
+		return err
+	}
+	return o.core.InTx(ctx, func(tx *core.Tx) error {
+		for _, r := range list {
+			if !fixedModel(r.Tier) {
+				continue
+			}
+			stale, err := core.StaleRoleModels(ctx, tx, userID, r.Tier, r.Model)
+			if err != nil {
+				return err
+			}
+			for _, e := range stale {
+				if err := core.SetSpecModel(ctx, tx, e.ID, r.Model); err != nil {
+					return err
+				}
+				e.Spec.Model = r.Model
+				p, err := o.project(ctx, tx, e.ProjectID)
+				if err != nil {
+					return err
+				}
+				// The new model is saved either way: a session that misses it picks it up when it reopens.
+				_, err = o.ApplyModel(ctx, tx, e, p)
+				o.logErr("send role model to "+e.Name, err)
+			}
+		}
+		return nil
+	})
 }

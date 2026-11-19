@@ -119,6 +119,66 @@ func TestModelFallback(t *testing.T) {
 	}
 }
 
+// TestRoleModelReachesFixed: saving the coordinator and lead templates' model reaches the
+// existing coordinator and the lead of the open thread (their role copy), the lead's live session
+// gets session.set_mode, and GET /model shows it; clearing it goes back to the built-in default.
+func TestRoleModelReachesFixed(t *testing.T) {
+	tm := startTeam(t)
+	b := tm.b
+	conv := "/api/conversations/" + tm.thread.ID + "/model"
+	var coord struct {
+		ConversationID string `json:"conversation_id"`
+	}
+	b.must(200, "GET", "/api/projects/"+tm.projectID+"/coordinator", nil, &coord)
+	coordConv := "/api/conversations/" + coord.ConversationID + "/model"
+	setModels := func(coordModel, leadModel string) {
+		t.Helper()
+		var roles httpapi.RolesBody
+		b.must(200, "GET", "/api/roles", nil, &roles)
+		for i := range roles.Roles {
+			switch roles.Roles[i].Tier {
+			case "coordinator":
+				roles.Roles[i].Model = coordModel
+			case "lead":
+				roles.Roles[i].Model = leadModel
+			}
+		}
+		b.must(200, "PUT", "/api/roles", map[string]any{"roles": roles.Roles}, nil)
+	}
+	setModels("claude-coord-r", "claude-lead-r")
+	if got := tm.lead.expectSetMode(); got != "claude-lead-r" {
+		t.Fatalf("lead set_mode %q", got)
+	}
+	var cm orchapi.ConversationModel
+	b.must(200, "GET", conv, nil, &cm)
+	if cm.Model != "claude-lead-r" {
+		t.Fatalf("lead model: %+v", cm)
+	}
+	b.must(200, "GET", coordConv, nil, &cm)
+	if cm.Model != "claude-coord-r" {
+		t.Fatalf("coordinator model: %+v", cm)
+	}
+	// The project setting still wins over the role.
+	b.must(200, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"coordinator_model": "claude-coord-p"}, nil)
+	b.must(200, "GET", coordConv, nil, &cm)
+	if cm.Model != "claude-coord-p" {
+		t.Fatalf("project over role: %+v", cm)
+	}
+	b.must(200, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"coordinator_model": ""}, nil)
+	setModels("", "")
+	if got := tm.lead.expectSetMode(); got != "claude-opus-5-5" {
+		t.Fatalf("lead cleared set_mode %q", got)
+	}
+	b.must(200, "GET", conv, nil, &cm)
+	if cm.Model != "claude-opus-5-5" {
+		t.Fatalf("lead cleared: %+v", cm)
+	}
+	b.must(200, "GET", coordConv, nil, &cm)
+	if cm.Model != "claude-opus-5-5" {
+		t.Fatalf("coordinator cleared: %+v", cm)
+	}
+}
+
 // TestModelCommand: /model in a thread (scope thread) changes every member of the thread with the
 // lead's runtime and sends their running sessions session.set_mode; the lead keeps its model and
 // is listed as skipped. The lead scope and the coordinator chat are refused (409 model_fixed):
