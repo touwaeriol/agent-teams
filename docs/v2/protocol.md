@@ -31,8 +31,8 @@
 
 | 方向 | 可靠（有 `seq`，需 ACK，可重放） | 不可靠（无 `seq`，丢了无所谓） |
 | --- | --- | --- |
-| 控制台 → 守护进程 | 所有命令（`session.*`、`approval.resolve`、`tool.result`、`git.*`、`cred.response`、`node.*`、`run.*`） | `ack`、`pong` 类、`node.usage_refresh` |
-| 守护进程 → 控制台 | 会话事件、命令结果、审批请求/取消、工具调用、git 结果 | `ack`、`stream.delta`（逐字输出，可选）、`log` |
+| 控制台 → 守护进程 | 所有命令（`session.*`、`approval.resolve`、`tool.result`、`git.*`、`cred.response`、`node.*`（`node.usage_refresh` 除外）、`run.*`） | `ack`、`pong` 类、`node.usage_refresh` |
+| 守护进程 → 控制台 | 会话事件、命令结果、审批请求/取消、工具调用、git 结果 | `ack`、`stream.delta`（逐字输出，可选）、`log`、`node.stats`、`node.usage` |
 
 - **ACK**：`{type:"ack", body:{seq: N}}` 表示“seq ≤ N 的可靠消息我已持久处理”。接收方至少每 200 ms 或每 50 条发一次累计 ACK。
 - **守护进程发件箱**：可靠消息先追加写入 `state/outbox/<epoch>.jsonl` 再发送；收到 ACK 后推进游标，游标之前的文件可删除。守护进程重启后 `seq` 从文件里的最大值继续（`epoch` 只在状态目录被清空时变化）。
@@ -91,6 +91,8 @@
   "isolation": "agent_user|sandbox|none"     // architecture.md §10.3，守护进程启动时探测
 }
 ```
+
+`features` 含 `usage` 表示守护进程会发 `node.usage`，也能处理 `node.usage_refresh`（§9.1）。
 
 `auth` 由守护进程启动时探测（Claude：`query().accountInfo()` 一次后关闭；Codex：app-server `account/read`），不上报邮箱等个人信息。
 
@@ -418,6 +420,18 @@
 | `node.usage_refresh` | 控制台 → | `runtimes?` | 不可靠；立即采集一次订阅余量并回 `node.usage`（`runtimes` 省略 = 全部）。只在 `hello.features` 含 `usage` 时发；由 `POST /api/nodes/{id}/usage/refresh` 触发（api.md） |
 | `log` | 守护进程 → | `level`, `msg`, `fields` | 不可靠；只发 warn 及以上 |
 | `error` | 双向 | `ref_id`, `code`, `message` | 对某条消息的协议级错误：`bad_schema`、`unsupported`、`unknown_session`、`busy` |
+
+### 9.1 订阅余量（`hello.features` 含 `usage`）
+
+守护进程上报本机 Claude Code、Codex 登录的订阅余量，节点页据此显示每个节点还剩多少额度。数据来源、可靠程度和版本兼容风险见 [usage-probe.md](usage-probe.md)。
+
+- **`node.usage`**（守护进程 → 控制台，不可靠，不进发件箱）：收到 `welcome` 后立即上报一次，之后每 5 分钟一次（节点环境变量 `AGENT_TEAMS_USAGE_INTERVAL_S` 可以调整，设为 `0` 关闭定时上报）；每个运行时的读取总共最多 12 秒（Codex 的两次调用共用这个时间），保证在控制台等待 `node.usage_refresh` 回复的 15 秒内答复。读取失败只会让该运行时报 `status:"error"`，不影响守护进程的其他功能。
+  - `runtimes.claude` / `runtimes.codex`：`auth`（Claude 取 `subscription|api_key|none`，Codex 取 `chatgpt|api_key|none`）、`status`（`ok|error|unsupported`）、`plan`（可选，例如 `max`、`pro`、`plus`）、`windows`、`error`（可选，简短原因，不含凭证）、`fetched_at`（读取时间；Codex 的数据如果来自最近一次推送事件，就填事件时间）。
+  - `windows[]`：`key`、`used_percent`（0–100）、`window_minutes`（可选）、`resets_at`（ISO 时间或 null），按模型划分的窗口还会带 `label`。`key` 的取值：Claude 有 `five_hour`、`weekly`、`weekly_opus`、`weekly_sonnet`，以及 `weekly_model`（按模型划分的每周窗口，`label` 是服务端给的显示名）；Codex 有 `primary`（通常 5 小时）和 `secondary`（通常每周）。
+  - `auth` 为 `api_key` 或 `none` 时，`status` 填 `unsupported`，`windows` 为空，不发任何请求。Codex 的 `auth.json` 里如果是 API Key 登录（app-server `account/read` 返回 `apiKey`），也按 `api_key` 处理。
+  - 常见的 `error`：`timeout`；`unsupported_sdk`（SDK / CLI 没有实验性的 usage 接口，或者调用报错）；`rate_limits_unavailable`（CLI 表示该登录没有订阅余量，例如 token 缺少 profile 权限）；`fetch_failed`（CLI 没取到数据，常见原因是 token 过期而且刷新失败）；`not_logged_in`（Codex 已退出登录）。
+  - 消息里永远不带 token、邮箱、组织或账号 id。
+- **`node.usage_refresh`**（控制台 → 守护进程，不可靠，body 可以是空对象，也可以带 `runtimes`，例如 `["claude","codex"]`）：鼠标悬停在节点卡片上时，控制台发这条命令要求现查一次。守护进程回一条 `node.usage`，总是包含两个运行时：请求的运行时如果最近 60 秒内有一次成功（`status:"ok"`）的读取，就直接回缓存的结果，`fetched_at` 保持原值，不再请求 Anthropic 或 OpenAI；否则立即读取。失败的结果不缓存。同一时间只跑一次读取，正在跑的就等它跑完再用它的结果。定时上报不受缓存影响，每次都重新读取。
 
 ## 10. 关闭码
 
