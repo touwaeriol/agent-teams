@@ -168,10 +168,12 @@ func (e *Engine) doneGrace() time.Duration {
 }
 
 // LeadTurnEnded runs in the transaction of a lead's turn_ended (after its final reply was
-// recorded): a thread whose end waited for the turn ends now.
+// recorded): a thread whose end waited for the turn ends now, and so does one whose lead called
+// finish before (summary) and whose end was held by work added after it (the task's result came
+// back and this turn answered it).
 func (e *Engine) LeadTurnEnded(ctx context.Context, tx *core.Tx, threadID string) error {
 	t, err := core.LockThread(ctx, tx, threadID)
-	if err != nil || t.DonePendingAt == nil {
+	if err != nil || (t.DonePendingAt == nil && t.Summary == "") {
 		return ignoreMissing(err)
 	}
 	_, err = e.endThread(ctx, tx, t, endTurn, false)
