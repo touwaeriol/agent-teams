@@ -115,7 +115,8 @@ the WebRTC transport), `audio.ts` (microphone, device list, level meter), `trans
   relay, recording starts as soon as the microphone is open (button 录音中, level moving), before
   the server's `ready`: `relay.ts` buffers frames in order (at most 8 s, `MAX_BUFFER_BYTES`; beyond
   that the oldest are dropped with one notice) and sends them first once `ready` comes, then live
-  frames. Commits made before `ready` (client VAD, or a stop) wait for `ready` and their audio; a
+  frames. Commits made before `ready` (client VAD, or a stop) wait for `ready` and their audio (and
+  are dropped if `ready` says `client_commits: false`, a server-VAD model); a
   stop before `ready` waits for it (still within the connect timeout) before the final commit and
   `stop`; a cancel before `ready` drops everything. A connection that fails after recording
   started ends in error with the reason and releases the microphone. `max_seconds` is known from
@@ -152,7 +153,9 @@ the WebRTC transport), `audio.ts` (microphone, device list, level meter), `trans
 - Startup, locally (2026-11-19, real server handler + fake OpenAI + Chromium fake microphone),
   click → recording / → first audio at the server: baseline 0.07 / 0.14 s (before: 0.08 /
   0.14 s); session.updated 3 s late 0.09 / 3.04 s, the audio from 0.09 s on delivered (before:
-  3.08 / 3.15 s); microphone 2 s late 2.08 / 2.14 s; microphone 20 s late: error at 15 s with
+  3.08 / 3.15 s); session.updated 4 s late 0.09 / 4.04 s, the fake received 7.73 s of audio for
+  7.70 s from microphone open to stop + tail (before: 4.09 / 4.16 s, 3.76 s received, the first
+  4 s lost); microphone 2 s late 2.08 / 2.14 s; microphone 20 s late: error at 15 s with
   the microphone advice (before: recording at 20 s, unbounded); upstream 12 s late: recording at
   0.09 s, error at 10.0 s (before: error at 10.1 s). First text depends on the client VAD: with
   pauses the first commit came 0.8 s after the first phrase (2.3 s); with continuous sound

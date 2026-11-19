@@ -214,7 +214,9 @@ class RelayConnection {
     // After ready (and the buffered audio), audio still in the frame buffer belongs to this utterance: send it before the commit.
     this.chain = this.chain
       .then(async () => {
-        await this.accepted;
+        const hello = await this.accepted;
+        // Made before ready on the assumption of client commits; a server-VAD model ends utterances itself.
+        if (hello.client_commits === false) return;
         await this.capture?.flush();
         this.sendRaw(JSON.stringify({ type: "commit" }));
       })

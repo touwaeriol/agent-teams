@@ -122,6 +122,7 @@ export class VoiceController {
       if (!(await this.connecting) || run !== this.run) return;
     }
     if (t.clientCommits !== undefined) this.clientCommits = t.clientCommits;
+    if (!this.clientCommits) this.outstanding = 0; // commits made before ready were dropped (server VAD)
     this.logTimings("recording");
     if (this.state.phase === "recording") this.watchLimit();
   }

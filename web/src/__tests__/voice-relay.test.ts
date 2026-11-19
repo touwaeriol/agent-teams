@@ -531,6 +531,20 @@ describe("relay: record before ready", () => {
     expect(notices).toEqual([BUFFER_DROPPED]);
   });
 
+  it("drops commits made before ready when the server's model ends utterances itself", async () => {
+    const f = relayFixture();
+    const t = await f.start();
+    const ws = FakeSocket.last as FakeSocket;
+    ws.open();
+    f.frame(tagged(1));
+    t.send({ type: "input_audio_buffer.commit" });
+    ws.server({ type: "ready", client_commits: false });
+    await t.ready;
+    await flushPromises();
+    expect(t.clientCommits).toBe(false);
+    expect(tags(ws)).toEqual([1]);
+  });
+
   it("closing before ready (cancel) sends nothing and releases the capture", async () => {
     const f = relayFixture();
     const t = await f.start();
@@ -637,6 +651,38 @@ describe("controller with the relay", () => {
     await vi.advanceTimersByTimeAsync(2_000);
     expect(s.micStopped()).toBe(1); // the microphone that opened late is closed
     expect(s.ws().closed).toBe(true);
+  });
+
+  it("a stop before ready that then times out ends in error with microphone and capture released", async () => {
+    const s = setup(async () => ({}) as MediaStream);
+    await vi.advanceTimersByTimeAsync(0);
+    s.ws().open();
+    s.level(0.5);
+    const stopping = s.c.stop();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(s.state.phase).toBe("stopping");
+    expect(s.micStopped()).toBe(1); // the microphone closes at the stop already
+    await vi.advanceTimersByTimeAsync(10_000);
+    await stopping;
+    await s.started;
+    expect(s.state).toMatchObject({ phase: "error", error: "连不上语音服务：10 秒内没有连上" });
+    expect(s.f.capture.stopped).toBe(1);
+    expect(s.ws().closed).toBe(true);
+    expect(s.ws().sent).toEqual([]);
+  });
+
+  it("a microphone that opens after its 15 s timeout is closed again", async () => {
+    const s = setup(() => later(16_000, {} as MediaStream));
+    await vi.advanceTimersByTimeAsync(0);
+    s.ws().open();
+    s.ws().server({ type: "ready", client_commits: true });
+    await vi.advanceTimersByTimeAsync(MIC_TIMEOUT);
+    await s.started;
+    expect(s.state.error).toBe(micTimeoutText(MIC_TIMEOUT));
+    expect(s.micStopped()).toBe(0);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(s.micStopped()).toBe(1);
+    expect(s.f.capture.stopped).toBe(0); // never captured
   });
 
   it("a cancel before ready drops the audio and closes the socket", async () => {
