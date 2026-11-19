@@ -143,7 +143,7 @@
 | --- | --- |
 | WebSocket 升级 | 节点令牌有效、所有者 active；请求的会话属于该节点（同 `owner.go` 的规则）；连接数限额（§5.7） |
 | SSH 认证（公钥认证，证书） | 证书由会话 CA 签、在有效期、无 critical option、serial 存在且未吊销、扩展里的会话/gen/节点与上一行一致；请求的服务器名在 principals 里 |
-| 打开每个 session channel（exec / shell / subsystem）| 会话仍活着且 gen 未变；项目里这台服务器仍存在、启用、凭证有效；岗位限制、只读规则（§9.1）仍允许；需要批准时已批准（§9.2，未批准则在这里等）|
+| 打开每个 session channel（exec / shell / subsystem）| 会话仍活着且 gen 未变；项目里这台服务器仍存在、启用、凭证有效；岗位限制、只读规则（§9.1）仍允许；需要批准时已批准（§9.2：exec、shell 和 subsystem（sftp，以及走 sftp 的新版 scp）都在这里挂起等待；旧式 `scp -O` 本身就是 exec）|
 | 连接存续期间，每 30 秒 | 同上一行的前三项；不再满足就向 channel 写一行原因到 stderr、发 `exit-status 255`、断开 |
 | 目标侧 | host key 必须等于已确认的指纹（§5.3），否则拒绝 |
 
@@ -314,12 +314,14 @@ sequenceDiagram
 
 | 东西 | 位置 | 内容 | 权限 |
 | --- | --- | --- | --- |
-| 会话目录 | `$XDG_RUNTIME_DIR/agent-teams-ssh/<会话>/`（tmpfs；没有 `XDG_RUNTIME_DIR` 时用 `<data>/agent-teams/run-ssh/<会话>/`）。故意**不放在** `runtimeDir`（`$XDG_RUNTIME_DIR/agent-teams`，它在沙箱的 `denyRead` 里，§8.3） | 下面三项 | 目录 0700 |
+| 会话目录 | `$XDG_RUNTIME_DIR/agent-teams-ssh/<会话>/`（tmpfs；没有 `XDG_RUNTIME_DIR` 时用 `<data>/agent-teams/run-ssh/<会话>/`）。故意**不放在** `runtimeDir`（`$XDG_RUNTIME_DIR/agent-teams`，它在沙箱的 `denyRead` 里，§8.3）。路径长度见表下说明 | 下面三项 | 目录 0700 |
 | `ssh_config` | 会话目录 | 每台可用服务器一个 `Host` 块（见下） | 0600 |
 | `known_hosts` | 会话目录 | 一行网关 host key（§5.4） | 0600 |
 | `agent.sock` | 会话目录 | ssh-agent 协议，签名用的私钥在守护进程内存 | 0600 |
 | `ssh.sock` | `<runtimeDir>/ssh.sock`，与现有 `cred.sock` 同目录、同规则（`node/src/cred/server.ts` 的 `credSocketPath`）；沙箱节点见 §8.3 | ProxyCommand 用来让守护进程开 WS；请求带每会话秘密 | 0600 |
 | 平台 bin 包装 | `<data>/agent-teams/platform/bin/`（已有，`node/src/git/platform.ts` 的 `installPlatformFiles` 写 `gh` 包装；员工不可写） | 新增 `ssh`、`scp`、`sftp` | 0755 |
+
+**socket 路径长度**：unix socket 路径有上限（Linux `sun_path` 108 字节，macOS 104 字节）。会话 id 是 `s_` + 26 位 ULID，`<data>/agent-teams/run-ssh/<会话>/agent.sock` 在 HOME 较深时很容易超长。照现有 `node/src/cred/server.ts` 的 `credSocketPath` 的做法处理：它先算 `<runtimeDir>/cred.sock`，字节长度不超过 `MAX_SOCKET_PATH`（100，给两个平台都留了余量）就用；超了就改用系统临时目录下的短路径 `<tmpdir>/agent-teams-<uid>-<sha256(runtimeDir) 前 12 位>/cred.sock`。会话目录同理：先算 `<会话目录>/agent.sock`，超过 100 字节时，会话目录改为 `<tmpdir>/agent-teams-ssh-<uid>-<sha256(父目录) 前 12 位>/<sha256(会话 id) 前 12 位>/`（目录 0700，创建时检查属主是自己，与 `CredServer.start` 检查目录属主的做法相同）。`ssh_config` 里写的都是最终路径，所以 ssh 不关心用的是哪一种。
 
 `ssh_config` 示例（主节点随证书下发服务器列表，守护进程生成）：
 
@@ -347,6 +349,7 @@ Host prod staging
 
 - ProxyCommand 的参数里**没有秘密**：`ssh-proxy` 子命令从自己继承的环境里读 `AT_CRED_SESSION`/`AT_CRED_SECRET`（ssh 会把环境原样传给 ProxyCommand），像 `git-credential` 一样连 socket（`node/src/cred/helper.ts` 的 `askSocket` 同一套格式，`op: "ssh"`），守护进程核对秘密后把这条 unix 连接和新开的 `/nodes/ssh` WS 对接成管道。
 - 不写 `IdentitiesOnly yes`：OpenSSH 在它打开时只用“配置里列出的密钥文件”，会把 agent 提供的证书挡掉；员工的 HOME（`<root>/agent-home/`）下没有 `~/.ssh/id_*`，所以 ssh 实际只会出示 agent 里那张证书。
+- **会话中途服务器列表变化**（推荐方案：主动推送）：`ssh_config` 只有列在里面的 `Host` 才会走 ProxyCommand 和 agent；新加的服务器如果不在配置里，`ssh new-server` 会当作普通主机直连，既不经网关，也不会触发证书重签。所以项目的服务器被新增、删除、改名、启用或停用，或岗位限制、只读规则改变时，控制台对该项目所有存活的组长和成员会话发一条**可靠**命令 `ssh.servers_update {session_id, open_gen, servers: [{name}]}`（§12）。守护进程收到后原子地重写该会话的 `ssh_config`（先写临时文件再 rename），并**丢弃内存里的现有证书**，下次签名时按新列表重签（principals 跟着变）。删除和改名额外走 §4.6 的吊销：旧名字的连接立即断开；改名在会话里等于“删掉旧名、加上新名”。不选“重开会话才生效”，因为组长和成员会话是常驻的，可能一开就是几天，让用户为了加一台服务器去重启员工会话代价太大；而这条消息很便宜，旧守护进程不认识它时（没有 `ssh_gateway` 特性）就不发。
 - `ControlMaster no`：第一期不复用连接，避免主连接进程在会话结束后还活着（ansible 自己的 ControlPersist 见 §7.3）。
 - 只想“零文件”的话也可以全部改用命令行 `-o` 选项加 `KnownHostsCommand`（OpenSSH 8.5+），代价是包装脚本复杂、老版本 ssh 不支持；这些文件不含秘密、在 tmpfs、会话结束删除，推荐保留文件方案。
 
@@ -508,16 +511,19 @@ sequenceDiagram
 
 ### 9.2 讨论串首次连接批准
 
-- 触发：会话第一次在某个讨论串里连一台 `require_approval` 的服务器，且该讨论串对这台服务器还没有有效批准。
-- 卡片：复用现有审批与提问的表和路由（`at_questions`，`server/internal/approvals/approvals.go` 的 `Engine.insertCard`、`Engine.showCard` 那一套），新 `kind = 'server_access'`，`audience = 'user'`，**不经组长判断**（`architecture.md` §9.2 的 `lead_first` 不适用：这是生产权限，不该由 AI 组长放行）。卡片内容：讨论串、员工、服务器名和地址、触发的第一条命令（截断 500 字）；按钮“本讨论串内允许 / 只允许这一次 / 拒绝”。
-- 网关侧：在 `exec`/`shell` 请求处挂起，向 channel 的 stderr 写“agent-teams：等待用户在网页批准使用 prod（讨论串 #29）…”，最多等 10 分钟（可配置）；批准则继续执行，拒绝或超时则写原因、`exit-status 255`。同一讨论串里并发的其他连接等同一张卡片。
+- 触发：会话第一次在某个讨论串里连一台 `require_approval` 的服务器，且该讨论串对这台服务器还没有有效批准。exec、shell、subsystem 三种 channel 请求**都会触发**：首次连接是 `sftp`（或走 sftp 子系统的新版 `scp`）时同样要批准。
+- 卡片：复用现有审批与提问的表和路由（`at_questions`，`server/internal/approvals/approvals.go` 的 `Engine.insertCard`、`Engine.showCard` 那一套），新 `kind = 'server_access'`，`audience = 'user'`，**不经组长判断**（`architecture.md` §9.2 的 `lead_first` 不适用：这是生产权限，不该由 AI 组长放行）。卡片内容：讨论串、员工、服务器名和地址、触发的第一条命令（截断 500 字；exec 写命令本身，旧式 `scp -O` 就是它的 exec 命令如 `scp -t /srv/app`，subsystem 写 `sftp`，交互 shell 写 `shell`）；按钮“本讨论串内允许 / 只允许这一次 / 拒绝”。
+- 网关侧：在 `exec`/`shell`/`subsystem` 请求处挂起，向 channel 的 stderr 写“agent-teams：等待用户在网页批准使用 prod（讨论串 #29）…”，最多等 10 分钟（可配置）；批准则继续执行，拒绝或超时则写原因、`exit-status 255`。同一讨论串里并发的其他连接等同一张卡片。
+- **卡片不随连接消失**：Claude 的 Bash 工具默认约 2 分钟超时，通常比 10 分钟的等待先到，ssh 进程会被杀、前段连接断开。网关这时只结束这一次等待，**卡片保持打开**——卡片按“讨论串 × 服务器”存在（同一讨论串对同一服务器同时最多一张打开的 `server_access` 卡片，新的触发直接复用它），不属于某条连接。用户之后随时批准都有效，员工**重试**同一条命令即通过；“只允许这一次”在连接已断时放行员工的下一次连接。
+- **批准结果通知员工**：用户作答后，控制台除了放行正在等的连接（如果还在），还给触发卡片的员工会话投递一条平台消息（与组长收到 `[Permission request …]` 这类平台消息走同一投递通道），例如“[Server access approved] prod 已允许在本讨论串使用，可以重试刚才的命令”或“[Server access denied] prod：<理由>”，让它知道可以重试或该换计划了。
 - 有效期：“本讨论串内允许”到讨论串结束为止（讨论串结束时写 `at_remote_grants.expires_at`）；“只允许这一次”只放行这一个连接。
 - 与讨论串的“本讨论串内全部放行”（`auto_approve`）**无关**：那个开关只影响工具权限，不放行生产服务器。
 - 预先批准：用户可以在服务器设置里直接给某个讨论串（或“项目内所有讨论串，直到我关掉”）预先批准，用于定时部署这类无人值守场景。
 
 ### 9.3 批准与 AI 的互动
 
-- 员工看到 stderr 的等待提示就知道要等；系统提示词写明“连生产服务器可能要等用户批准，请不要重试或换别的办法绕过”。
+- 系统提示词的写法：“连需要批准的服务器时会看到‘等待用户在网页批准’的提示；如果命令因此超时，不要换别的办法绕过（例如改用别的服务器、别的工具或直连），等收到批准通知后再重试一次。”
+- 批准通知（§9.2）是员工得知“可以重试”的主要途径；它也可以在 Bash 工具里把超时调长后再等，但不应依赖这一点。
 - 用户拒绝时写的理由通过 stderr 原样给员工。
 
 ### 9.4 审计
@@ -631,10 +637,12 @@ sequenceDiagram
 | 方案 | 做法 | 评价 |
 | --- | --- | --- |
 | A. 直接用 `SecretBox` | 和 PAT、App 私钥一样 | 最省事；没有 AAD，挪行攻击只能靠“把 project_id、server_id 塞进明文、解开后核对”来补，容易漏 |
-| **B. 信封加密（推荐）** | 每条凭证随机生成 32 字节 DEK，用 AES-256-GCM 加密明文，**AAD = `at-remote-cred:v1\|<project_id>\|<server_id>\|<credential_id>\|<kind>`**；DEK 再用 KEK 以 AES-256-GCM 包裹（AAD 同上再加 `kek_id`）。KEK 由主密钥派生：对 `AGENT_TEAMS_SECRET_KEYS` 的每一把做 `HKDF-SHA256(…, info="agent-teams/remote-cred-kek/v1")`，`kek_id` = 派生 KEK 指纹的前 8 字节 | 挪行在解密时就失败；轮换主密钥只需重新包裹 DEK（`atctl admin reseal` 扩展一步），不碰明文；以后接 KMS 只换“包裹 DEK”这一步。只用 Go 标准库 `crypto/aes`、`crypto/cipher` 和 `golang.org/x/crypto/hkdf`（已有模块），无新依赖 |
+| **B. 信封加密（推荐）** | 每条凭证随机生成 32 字节 DEK，用 AES-256-GCM 加密明文，**AAD = `at-remote-cred:v1\|<project_id>\|<server_id>\|<credential_id>\|<kind>\|<host>\|<port>\|<username>`**；DEK 再用 KEK 以 AES-256-GCM 包裹（AAD 同上再加 `kek_id`）。KEK 由主密钥派生：对 `AGENT_TEAMS_SECRET_KEYS` 的每一把做 `HKDF-SHA256(…, info="agent-teams/remote-cred-kek/v1")`，`kek_id` = 派生 KEK 指纹的前 8 字节 | 挪行在解密时就失败；轮换主密钥只需重新包裹 DEK（`atctl admin reseal` 扩展一步），不碰明文；以后接 KMS 只换“包裹 DEK”这一步。只用 Go 标准库 `crypto/aes`、`crypto/cipher` 和 `golang.org/x/crypto/hkdf`（已有模块），无新依赖 |
 | C. 云 KMS | KEK 在 KMS，主节点每次请 KMS 解包 DEK | 平台是自托管的，不一定有 KMS；作为 B 的可插拔后续 |
 
 主密钥来源（待拍板 Q5）：推荐**沿用 `AGENT_TEAMS_SECRET_KEYS` 派生 KEK**（不增加运维负担，`reseal` 流程不变）；可选单独的 `AGENT_TEAMS_CRED_KEK`（让远程服务器凭证与会话签名、PAT 用不同的根，泄露面更小，但多一个要备份的秘密）。
+
+**AAD 能防什么、不能防什么**：AAD 只保证“这段密文只能在加密时的那个上下文里解开”。只放项目 id 和服务器 id 时，它防的是**密文挪行**；但一个能写数据库的攻击者不必挪密文，直接把 `at_remote_servers.host` 改成自己的机器、再插一条 `trusted` 的 host key，网关就会照常解开密码、发给他。所以把 **host、port、username 也放进 AAD**：这三项一改，旧密文就解不开（网关把该凭证视为 `missing`、拒绝连接并告警），合法的修改必须同时重新录入凭证（§11.3 的 PATCH）。另外，`trusted` 状态的 host key 行带一个 MAC（HMAC-SHA256，密钥从同一 KEK 用 HKDF 派生，覆盖 `server_id、key_type、public_key、status`），网关只接受 MAC 正确的 host key，直接往表里插行不起作用。剩下防不住的见 §14。
 
 同一方案也用于会话 CA 私钥、网关 host key（AAD = 设置键名）。现有 PAT、App 私钥第一期**不迁移**（不在本需求范围），列为后续收敛项。
 
@@ -648,9 +656,9 @@ CREATE TABLE at_remote_servers (
   id                 TEXT PRIMARY KEY,                 -- srv_…
   project_id         TEXT NOT NULL REFERENCES at_projects(id) ON DELETE CASCADE,
   name               TEXT NOT NULL,                    -- 会话里用的名字：小写字母、数字和 -，1–32 字；ssh_config 的 Host
-  host               TEXT NOT NULL,                    -- 域名或 IP（保存时和每次拨号前都校验，§5.6）
-  port               INT  NOT NULL DEFAULT 22,
-  username           TEXT NOT NULL,
+  host               TEXT NOT NULL,                    -- 域名或 IP（保存时和每次拨号前都校验，§5.6）；进凭证 AAD
+  port               INT  NOT NULL DEFAULT 22,         -- 进凭证 AAD
+  username           TEXT NOT NULL,                    -- 进凭证 AAD（host/port/username 改了凭证必须重录，§11.1）
   auth_kind          TEXT NOT NULL,                    -- password | private_key（第四期加 ca）
   environment        TEXT NOT NULL DEFAULT 'other',    -- production | staging | other（影响默认值和提示）
   require_approval   BOOLEAN NOT NULL DEFAULT false,   -- §9.2
@@ -706,6 +714,7 @@ CREATE TABLE at_remote_host_keys (
   last_seen_at  TIMESTAMPTZ,
   confirmed_by  TEXT REFERENCES at_users(id) ON DELETE SET NULL,
   confirmed_at  TIMESTAMPTZ,
+  mac           BYTEA,                                 -- trusted 行的 HMAC（§11.1），网关只信 MAC 正确的行
   PRIMARY KEY (server_id, fingerprint)
 );
 
@@ -783,7 +792,7 @@ CREATE INDEX at_ssh_audit_thread ON at_ssh_audit (thread_id, created_at DESC) WH
 | --- | --- | --- |
 | GET | `/api/projects/{pid}/servers` | → `ServerView[]` |
 | POST | `/api/projects/{pid}/servers` | `{name, host, port?, username, environment?, auth: {kind:'password', password} \| {kind:'private_key', private_key, passphrase?} \| {kind:'generate'}, host_keys?: string, require_approval?, allowed_roles?, allow_read_only?, rotate_after_days?}` → 201 `ServerView`；`generate` 由平台生成 Ed25519 私钥，响应里只返回**公钥**（让用户加进目标的 `authorized_keys`）；名字重复、host 不允许 422 |
-| PATCH | `/api/servers/{sid}` | 除凭证外的字段；改 host/port 会把 host key 全部置回 `pending` |
+| PATCH | `/api/servers/{sid}` | 除凭证外的字段。改 `host`、`port` 或 `username` 时**必须同时提交 `auth`**（新凭证按新的三项重新加密）；不提交也允许保存，但旧凭证因 AAD 不符失效，状态变为 `missing`，网页提示重新录入。改 `host`/`port` 还会把 host key 全部置回 `pending` |
 | DELETE | `/api/servers/{sid}` | 204；吊销相关证书、断开现有连接；审计保留 |
 | PUT | `/api/servers/{sid}/credential` | 轮换：`{auth: …, activate?: bool}` → `{credential: CredentialView}`；`activate=false` 时新凭证为 `pending`，测试通过后再激活 |
 | POST | `/api/servers/{sid}/credential/activate` | pending → active，旧的 → retired |
@@ -810,7 +819,7 @@ CREATE INDEX at_ssh_audit_thread ON at_ssh_audit (thread_id, created_at DESC) WH
 ### 11.5 到期提醒
 
 - 每条 active 凭证有 `rotate_after`（新建时默认 90 天后，可选 30/60/90/180 天或“不提醒”）。
-- 控制台的定时循环（复用定时任务那种“advisory lock + 定期扫描”的做法，见 `api.md` §3.6 定时任务一节）每天扫一次：到期前 **14 天**和 **3 天**、到期当天、之后每 7 天各提醒一次（`last_reminded_at` 防重复）。
+- 控制台的定时循环（复用定时任务调度的做法：`api.md` §3.6「NewProject 与 ProjectSettings」里讲定时任务调度的那一段写的是，一个进程持有 advisory lock `agent-teams:timers` 每 20 秒检查一次，到期行 `FOR UPDATE SKIP LOCKED` 认领，多副本、重启都不会重复触发）每天扫一次：到期前 **14 天**和 **3 天**、到期当天、之后每 7 天各提醒一次（`last_reminded_at` 防重复）。
 - 提醒出现在：项目设置“远程服务器”分区的状态标签和分区旁的小红点；用户级事件流（`/api/events`）的一条通知；项目首页顶部一条可关闭的横幅。不发给 AI（轮换是人的事）。
 - 到期**不自动停用**（停了部署会突然失败），只持续提醒。
 
@@ -863,6 +872,7 @@ sequenceDiagram
 | `session.open.ssh_servers` | 控制台 → | `[{name}]` | 本会话可能用到的服务器名（守护进程据此生成 ssh_config）；空或缺省 = 不接 SSH。新字段，旧守护进程忽略 |
 | `ssh.cert_request` | 守护进程 → | `{req_id, session_id, open_gen, public_key}` | 不可靠 + `req_id`（同 `cred.request`），先过 `protocol.md` §2.3 归属校验；控制台在 goroutine 里处理 |
 | `ssh.cert_response` | 控制台 → | `{req_id, ok, certificate?, valid_before?, servers?: [{name}], known_hosts?: string[], error?}` | 不可靠，不写日志；`servers` 是签发时过滤后的可用服务器（守护进程据此重写 ssh_config） |
+| `ssh.servers_update` | 控制台 → | `{session_id, open_gen, servers: [{name}]}` | 可靠，`expires_at` 10 分钟，键 `session_id + open_gen + 版本号`；项目服务器列表或授权规则变化时发给该项目所有存活的组长和成员会话。守护进程原子重写会话 `ssh_config`、丢弃现有证书（下次按新列表重签），回 `ack` 即可（§7.2） |
 | `ssh.revoke` | 控制台 → | `{session_id, open_gen?}` | 可靠，`expires_at` 10 分钟；守护进程丢弃证书并断开该会话的 `ssh-proxy` 管道（主节点侧已经吊销，这条只是让节点更快清理） |
 | `hello.ssh_client` | 守护进程 → | `{version}` 或缺省 | 节点上的 OpenSSH 客户端版本 |
 | `hello.features` 新值 | 双向 | `ssh_gateway` | 双方都支持才在 `session.open` 里带 `ssh_servers`（控制台的 `Features` 在 `server/internal/nodegw/gateway.go`，守护进程的 `FEATURES` 在 `node/src/daemon.ts`） |
@@ -894,6 +904,7 @@ sequenceDiagram
 | AI 试图读出凭证 | 凭证从不到节点；没有任何工具或接口返回明文；网关不把密码写进任何 channel | 无（除非主节点被攻破） |
 | **节点被攻破**（用户机器被入侵） | 攻击者拿到节点令牌和守护进程内存后，能在会话存活期内以这些会话的身份连服务器（与 AI 能做的相同）；拿不到密码和私钥；会话结束、节点被删除或令牌轮换后立即失效；所有使用都有审计 | 节点存活期内可以冒用；与 GitHub 令牌的情形相同 |
 | **主节点被攻破** | 主密钥在环境变量、密文在库里，攻破主节点进程就能解开全部凭证——这是“集中保管”的固有代价；信封加密 + AAD 至少防住“只拿到数据库备份”（没有主密钥解不开）；第四期改目标侧证书后，库里不再有长期私钥 | 主节点进程被控制 = 全部目标服务器暴露。主节点自身的加固（最小暴露端口、及时升级、管理员账号保护）比任何节点侧措施都重要 |
+| **数据库被改写**（能写库、但拿不到主密钥） | 凭证 AAD 含 host、port、username，改这三项凭证即失效（§11.1）；`trusted` host key 行带 MAC，插行无效；密文挪行在解密时失败 | 仍能做的事：改授权类字段（`require_approval`、`allowed_roles`、`at_remote_grants` 插批准行），让本来要批准的连接直接放行；删除或篡改审计行；把服务器停用造成部署中断。若攻击者还能劫持目标域名的解析，且该服务器的 host key 也被他通过网页正常流程确认过，才可能中间人——单靠写库做不到。这些需要靠数据库访问控制和备份来防，本设计不额外签名授权字段（代价大、收益有限） |
 | 证书被同 uid 进程偷用 | 私钥不可导出（只在守护进程内存）；签名要经 `agent.sock`，连网关要经 `ssh.sock`（每会话秘密）和节点令牌；证书 10 分钟、绑定节点与会话、会话结束即吊销 | 同账号进程在会话存活期内能借用（§8.2），需 §8.4 的隔离才能根除 |
 | 网关被当**跳板扫内网** | 后段只连配置里的 host:port；保存时和每次拨号前都校验地址（回环、链路本地、云元数据地址、主节点内网段默认禁止，§5.6）；不支持远程转发、agent 转发；本地转发默认关，开了也只允许白名单目的地且由目标 sshd 去连；新连接限速 | 管理员放行内网段后，项目所有者可以配置内网机器——这是有意为之的能力 |
 | **端口转发滥用**（把目标当进入其内网的隧道） | 第一、二期不支持；第三期按服务器开关、目的地白名单、证书要带扩展、每条转发都审计 | 开了之后白名单内的目的地可被访问 |
@@ -919,6 +930,7 @@ sequenceDiagram
 | Q8 | PAT 连接是否继续允许员工会话使用 | 继续允许（现状）；继续允许但显著提示、新项目只能选 App、第二期起默认关闭（项目可显式打开）；立即禁止 | **提示 + 新项目只用 App + 第二期默认关** | 立即禁止会让现有 PAT 项目的员工突然不能 push；但 PAT 长期有效、全仓库权限，与 R5 冲突，应逐步收掉（§10.3 第 1 条） |
 | Q9 | 会话目录和 ssh_config 放在 tmpfs 的文件方案是否可接受 | 可接受（文件不含秘密、会话结束删除）；必须零文件（全部命令行 `-o` + `KnownHostsCommand`，要求 OpenSSH 8.5+） | **可接受** | R4 的本意是“不留凭证和长期配置”；这些文件只有服务器名和网关公钥（§7.2） |
 | Q10 | `sandbox` 级别节点是否第一期支持 | 第一期不支持、项目设置里提示；第一期就做（含实测） | **第一期不支持** | 现在生产节点是 `none`；沙箱里 unix socket 的行为要实测（§8.3），放第三期，与 GitHub 的同一问题一起修 |
+| Q11 | R4 的“宿主机其他进程不能借用”在同一系统账号下做不到（§8.2：同账号进程能读会话进程的环境变量、能连 0600 的 socket，在会话存活期内可以借用这个会话的身份），怎么处理 | **第一期接受这个残余风险**（与现有 GitHub 凭证完全相同；凭证本身拿不走，借用只在会话存活期内、本节点上，且每次都过网关校验和审计）；先做 `agent_user` 隔离（§8.4，约 8～15 人日）再上线远程服务器 | **第一期接受** | 现在生产节点都是 `none`，GitHub 令牌已经是同样的风险等级；先上线能用的部署能力，`agent_user` 作为独立工作并行推进。如果用户认为生产服务器的风险高于 GitHub，可以选后者，第一期上线时间相应顺延 |
 
 ## 16. 需求 → 章节对照
 
@@ -927,7 +939,7 @@ sequenceDiagram
 | R1 节点要能 ssh 到远程服务器做 CI/CD | §1、§3、§5（网关功能：exec、shell、scp、sftp）、§7.3（rsync、git、ansible、docker 等工具） |
 | R2 项目上配置主机/端口/用户名，密码或私钥，后端加密存储 | §11.1（信封加密 + AAD）、§11.2（`at_remote_servers`、`at_remote_credentials`）、§11.3（接口）、§11.4（网页） |
 | R3 经主节点转发，凭证不下发，AI 读不到 | §3（两段 SSH）、§5.1、§6（传输）、§8.1（威胁模型）、§14 |
-| R4 节点不留配置，只给这个会话临时接上，结束即失效，其他进程不能借用 | §4.2（内存密钥 + agent）、§4.5（绑定会话）、§4.6（吊销）、§7.2（节点上只有无秘密的临时文件）、§7.4 / §7.5（只经 SDK env 注入）、§7.7（各种结束方式的清理）、§8.2（同账号的残余风险）、§8.4（彻底隔离路线） |
+| R4 节点不留配置，只给这个会话临时接上，结束即失效，其他进程不能借用 | §4.2（内存密钥 + agent）、§4.5（绑定会话）、§4.6（吊销）、§7.2（节点上只有无秘密的临时文件）、§7.4 / §7.5（只经 SDK env 注入）、§7.7（各种结束方式的清理）、§8.2（同账号的残余风险）、§8.4（彻底隔离路线）。**同一系统账号下“其他进程不能借用”为部分满足**：凭证拿不走、离开会话和节点即失效，但同账号进程能在会话存活期内借用，见 §8.2、Q11 |
 | R5 GitHub 凭证按次领取、不进 env 常量和 remote URL、不落盘 | §10.1（现状与代码位置）、§10.2（已满足）、§10.3（差距与收敛）、§10.4（时序图） |
 | R6 只在主节点轮换，记录创建与计划轮换时间，到期提醒，节点零操作 | §11.2（`created_at`、`rotate_after`、`last_used_at`）、§11.5（提醒）、§11.6（轮换流程）、§4.1（CA 轮换）、§11.8（目标侧证书路线） |
 | R7 平台当 CA，给会话签短期 SSH 用户证书，只用于节点 → 网关 | §4 全章（CA、密钥对、证书内容、有效期、绑定、吊销、与逐次校验的关系、与 bearer 令牌的对比） |
