@@ -24,6 +24,8 @@ import {
   uploaderLabel,
   uploadSharedFiles,
   SHARED_BATCH_BYTES,
+  collectFiles,
+  droppedFiles,
 } from "@/lib/sharedFiles";
 import { ApiError } from "@/api/client";
 import SharedFiles from "@/pages/SharedFiles.vue";
@@ -206,11 +208,58 @@ describe("batched upload", () => {
   });
 });
 
+describe("folders", () => {
+  const inFolder = (name: string, rel: string) => {
+    const f = fake(name, 1);
+    Object.defineProperty(f, "webkitRelativePath", { value: rel });
+    return f;
+  };
+  it("skips hidden files and folders inside a picked folder and counts them; a hidden file picked alone is kept", () => {
+    const got = collectFiles(
+      [inFolder("a.csv", "data/a.csv"), inFolder(".DS_Store", "data/.DS_Store"), inFolder("HEAD", "data/.git/HEAD"), fake(".env", 1)],
+      "up/",
+    );
+    expect(got.files.map((f) => f.path)).toEqual(["up/data/a.csv", "up/.env"]);
+    expect(got.skipped).toBe(2);
+  });
+  it("walks a dropped folder with webkitGetAsEntry, keeping its structure", async () => {
+    const fileEntry = (path: string) => ({ isFile: true, isDirectory: false, name: path.split("/").pop()!, fullPath: `/${path}`, file: (ok: (f: File) => void) => ok(fake(path.split("/").pop()!, 3)) });
+    const dirEntry = (path: string, children: object[]) => {
+      let read = false;
+      return {
+        isFile: false,
+        isDirectory: true,
+        name: path,
+        fullPath: `/${path}`,
+        createReader: () => ({ readEntries: (ok: (e: object[]) => void) => ok(read ? [] : ((read = true), children)) }),
+      };
+    };
+    const tree = dirEntry("exports", [fileEntry("exports/a.csv"), dirEntry("exports/q4", [fileEntry("exports/q4/b.json")]), fileEntry("exports/.DS_Store")]);
+    const loose = fileEntry("notes.md");
+    const items = [tree, loose].map((e) => ({ kind: "file", webkitGetAsEntry: () => e }));
+    const got = await droppedFiles({ items, files: [] } as unknown as DataTransfer);
+    expect(got.folders).toBe(0);
+    expect(got.files.map((f) => f.rel || f.file.name)).toEqual(["exports/a.csv", "exports/q4/b.json", "exports/.DS_Store", "notes.md"]);
+    const picked = collectFiles(got.files, "");
+    expect(picked.files.map((f) => f.path)).toEqual(["exports/a.csv", "exports/q4/b.json", "notes.md"]);
+    expect(picked.skipped).toBe(1);
+  });
+  it("without webkitGetAsEntry, recognises a dropped folder instead of uploading it", async () => {
+    const folder = new File([], "exports");
+    Object.defineProperty(folder, "slice", { value: () => ({ arrayBuffer: () => Promise.reject(new Error("is a directory")) }) });
+    const plain = new File(["x"], "a.txt", { type: "text/plain" });
+    const got = await droppedFiles({ items: [], files: [folder, plain] } as unknown as DataTransfer);
+    expect(got.folders).toBe(1);
+    expect(got.files.map((f) => f.file.name)).toEqual(["a.txt"]);
+  });
+});
+
 describe("labels and lists", () => {
   it("shows the uploader as 你 or name #thread", () => {
     expect(uploaderLabel({ uploaded_by: "user" })).toBe("你");
     expect(uploaderLabel({ uploaded_by: "dev-1", uploaded_by_thread_no: 31 })).toBe("dev-1 #31");
     expect(uploaderLabel({ uploaded_by: "coordinator" })).toBe("coordinator");
+    expect(uploaderLabel({ uploaded_by: "" })).toBe("—");
   });
   it("filters by path text and sorts by path", () => {
     const all = [file("z.txt", 1), file("data/b.csv", 1), file("Data/A.csv", 1), file("notes.md", 1)];
@@ -290,6 +339,26 @@ describe("SharedFiles page", () => {
     await flushPromises();
     expect(w.get("[data-testid=shared-problems]").text()).toContain("超过单个文件 20 MB 的上限");
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("uploads after the overwrite is confirmed, with path fields before the files, in order", async () => {
+    const { w } = await mountPage(listOf([file("data/a.csv", 10)]));
+    const forms: FormData[] = [];
+    vi.spyOn(XMLHttpRequest.prototype, "open").mockImplementation(() => {});
+    vi.spyOn(XMLHttpRequest.prototype, "setRequestHeader").mockImplementation(() => {});
+    vi.spyOn(XMLHttpRequest.prototype, "send").mockImplementation((body) => void forms.push(body as FormData));
+    await w.get("input[aria-label=目录前缀]").setValue("data/");
+    const input = w.get("[data-testid=shared-file-input]");
+    Object.defineProperty(input.element, "files", { value: [fake("a.csv", 4), fake("b.csv", 5)], configurable: true });
+    await input.trigger("change");
+    await flushPromises();
+    expect(forms).toHaveLength(0);
+    const dialog = [...document.body.querySelectorAll("[role=alertdialog]")].find((d) => d.textContent?.includes("覆盖已有的共享文件"))!;
+    [...dialog.querySelectorAll("button")].find((b) => b.textContent?.trim() === "覆盖并上传")!.click();
+    await flushPromises();
+    expect(forms).toHaveLength(1);
+    const entries = [...forms[0].entries()].map(([k, v]) => (typeof v === "string" ? `${k}=${v}` : `${k}:${(v as File).name}`));
+    expect(entries).toEqual(["path=data/a.csv", "path=data/b.csv", "file:a.csv", "file:b.csv"]);
   });
 
   it("deletes after confirming", async () => {
