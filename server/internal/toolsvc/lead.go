@@ -273,6 +273,9 @@ func (s *Service) openPR(ctx context.Context, tx *core.Tx, c *call) (Result, err
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
+	if err := questionsAnswered(ctx, tx, t, "open_pr"); err != nil {
+		return Result{}, err
+	}
 	by := c.emp().Name
 	req := delivery.PRRequest{Title: in.Title, Body: in.Body, By: by, Repo: deref(in.Repo), Base: deref(in.Base)}
 	return Result{Later: func(ctx context.Context) Result {
@@ -362,6 +365,9 @@ const (
 // thread branch, no PR, nothing in the merge queue) ends right away; its plan and tasks must be
 // finished first, which is refused with what is still open.
 func finishMode(ctx context.Context, tx *core.Tx, t core.Thread) (int, error) {
+	if err := questionsAnswered(ctx, tx, t, "finish"); err != nil {
+		return 0, err
+	}
 	repos, err := core.ThreadRepos(ctx, tx, t.ID)
 	if err != nil {
 		return 0, err
@@ -386,6 +392,16 @@ func finishMode(ctx context.Context, tx *core.Tx, t core.Thread) (int, error) {
 		return 0, refuse("合并队列里还有分支在合并，等合并完再开 PR（open_pr）")
 	}
 	return finishNow, openWork(ctx, tx, t)
+}
+
+// questionsAnswered refuses wrapping a thread up (open_pr, finish) while question cards still
+// wait on the user: ending the thread would cancel them and the user's decisions would be lost.
+func questionsAnswered(ctx context.Context, tx *core.Tx, t core.Thread, tool string) error {
+	n, err := core.ThreadQuestionsWaiting(ctx, tx, t.ID)
+	if err != nil || n == 0 {
+		return err
+	}
+	return refuse("还有 %d 个问题在等用户回答：讨论串结束会把它们取消。先等用户回答、按回答处理完，再调用 %s", n, tool)
 }
 
 // openWork refuses finishing a thread whose main tasks or small tasks are still going.

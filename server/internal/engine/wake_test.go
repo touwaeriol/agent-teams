@@ -254,6 +254,38 @@ func TestReconcileClosesEndedThreadSessions(t *testing.T) {
 	expectNone(t, tm.n, protocol.TypeSessionSend, 100*time.Millisecond, nil)
 }
 
+// TestFinishWaitsForUserQuestions: while a question card waits on the user, the lead's finish
+// and open_pr are refused (ending the thread would cancel the card) and the thread stays open;
+// once the user answered, finish ends it.
+func TestFinishWaitsForUserQuestions(t *testing.T) {
+	tm := startTeam(t)
+	tm.dev.mustCall("complete_task", map[string]any{"task_id": "t1", "summary": "设计稿写完了"})
+	tm.lead.expectSend("[Task t1 · dev-1 · done]")
+	tm.lead.mustCall("ask_user", map[string]any{"question": "Q1：证书有效期取 10 分钟吗？", "options": []string{"10 分钟", "5 分钟"}})
+	args := map[string]map[string]string{"finish": {"summary": "设计稿"}, "open_pr": {"title": "设计稿", "body": "设计稿"}}
+	for _, tool := range []string{"finish", "open_pr"} {
+		res := tm.lead.call(tool, args[tool])
+		if res.Ok || !strings.Contains(text(res), "1 个问题在等用户回答") || !strings.Contains(text(res), tool) {
+			t.Fatalf("%s with an open question: %+v", tool, res)
+		}
+	}
+	time.Sleep(300 * time.Millisecond)
+	if st, _ := threadStatus(tm); st == "done" {
+		t.Fatal("thread ended while the user's question was open")
+	}
+	var cards []core.QuestionView
+	tm.b.must(200, "GET", "/api/conversations/"+tm.thread.ID+"/questions?status=open", nil, &cards)
+	if len(cards) != 1 {
+		t.Fatalf("open cards %+v", cards)
+	}
+	tm.b.must(200, "POST", "/api/conversations/"+tm.thread.ID+"/questions/"+cards[0].ID+"/answer", map[string]string{"answer": "10 分钟"}, nil)
+	res := tm.lead.mustCall("finish", map[string]string{"summary": "设计稿，Q1 取 10 分钟"})
+	if !strings.Contains(text(res), "没有代码改动") {
+		t.Fatalf("finish after the answer %q", text(res))
+	}
+	eventually(t, "thread done", func() bool { st, _ := threadStatus(tm); return st == "done" })
+}
+
 // TestReadOnlyFinish: a thread that changed no repository ends with finish alone: done, summary
 // in the thread and project memory, coordinator told, sessions closed. Open work is refused.
 func TestReadOnlyFinish(t *testing.T) {

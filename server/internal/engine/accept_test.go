@@ -330,6 +330,44 @@ func TestMergePolicyPR(t *testing.T) {
 	}
 }
 
+// TestMergePolicyWaitsForQuestions: a thread whose PR passed its checks is neither finished (pr)
+// nor merged (auto) while a question card waits on the user; once it is answered the merge loop
+// goes on as usual.
+func TestMergePolicyWaitsForQuestions(t *testing.T) {
+	for policy, merges := range map[string]int{"pr": 0, "auto": 1} {
+		t.Run(policy, func(t *testing.T) {
+			c := newAcceptCase(t, policy, "running")
+			var q core.Question
+			err := c.w.e.Core.InTx(c.w.ctx, func(tx *core.Tx) error {
+				var err error
+				q, err = core.InsertQuestion(c.w.ctx, tx, core.NewQuestion{ConversationID: c.thread.ID, ProjectID: c.thread.ProjectID,
+					ThreadID: &c.thread.ID, Asker: "lead", Audience: "user", Kind: "question", Text: "Q1：证书有效期取 10 分钟吗？"})
+				if err != nil {
+					return err
+				}
+				return core.UpdateThread(c.w.ctx, tx, c.thread.ID, map[string]any{"status": "review"})
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(600 * time.Millisecond) // a few loop ticks
+			if v := c.view(t); v.Status != "review" || c.mergeCalls() != 0 {
+				t.Fatalf("%s with an open question: status %s merges %d", policy, v.Status, c.mergeCalls())
+			}
+			if err := c.w.e.Core.InTx(c.w.ctx, func(tx *core.Tx) error {
+				return tx.Gorm(c.w.ctx).Table("at_questions").Where("conversation_id = ? AND id = ?", q.ConversationID, q.ID).
+					Update("status", "answered").Error
+			}); err != nil {
+				t.Fatal(err)
+			}
+			c.waitFor(t, "done once answered", func(v core.ThreadView) bool { return v.Status == "done" })
+			if c.mergeCalls() != merges {
+				t.Fatalf("%s: merges %d", policy, c.mergeCalls())
+			}
+		})
+	}
+}
+
 // TestMergePolicyPRChecksPending: while the checks run, a pr thread stays in review without
 // waiting on the user; manual counts the acceptance as waiting.
 func TestMergePolicyPRChecksPending(t *testing.T) {

@@ -459,6 +459,11 @@ func (e *Engine) prStep(ctx context.Context, threadID string) error {
 		return err
 	}
 	v, failed, err := e.prCheck(ctx, t)
+	if err == nil && v == CIPass && t.PRState == "open" {
+		if waiting, err := e.questionsOpen(ctx, t); err != nil || waiting {
+			return err // the user still has to answer: finish or merge on a later tick
+		}
+	}
 	switch {
 	case err != nil:
 		return e.loopFailed(ctx, t, "读取 PR 状态失败", err)
@@ -472,6 +477,15 @@ func (e *Engine) prStep(ctx context.Context, threadID string) error {
 		return e.prFailed(ctx, t, v, failed)
 	}
 	return nil
+}
+
+// questionsOpen reports whether question cards in the thread still wait on the user. A thread
+// whose PRs passed is then neither finished (pr) nor merged (auto) on its own: either would end
+// it and cancel the cards. An acceptance (pr_state accepting) is the user's own decision and
+// goes ahead.
+func (e *Engine) questionsOpen(ctx context.Context, t core.Thread) (bool, error) {
+	n, err := core.ThreadQuestionsWaiting(ctx, e.core.Pool, t.ID)
+	return n > 0, err
 }
 
 // loopFailed reports a merge-loop error the user has to act on (permission, conflict, not

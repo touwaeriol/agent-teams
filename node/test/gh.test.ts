@@ -224,14 +224,14 @@ describe("pre-push hook", () => {
 describe("gh and git push policy", () => {
   const policy: ToolPolicy = { denyNonPlatform: false, readOnly: false, bash: null, readRoots: [], secretPaths: [] };
   const bash = (command: string) => decideTool(policy, "Bash", { command }, "/w");
-  it("blocks hook bypass, merging with gh and printing tokens; allows gh and git push", () => {
+  it("blocks hook bypass and printing tokens; allows gh (merging PRs too) and git push", () => {
     expect(bash("git push --no-verify origin HEAD:main")).toMatchObject({ deny: expect.stringContaining("no-verify") });
     expect(bash("git -c core.hooksPath=/dev/null push origin HEAD:main")).toMatchObject({ deny: expect.stringContaining("hooks") });
-    expect(bash("gh pr merge 12 --squash")).toMatchObject({ deny: expect.stringContaining("merge queue") });
-    expect(bash("gh api -X PUT repos/a/b/pulls/3/merge")).toMatchObject({ deny: expect.stringContaining("merge queue") });
     expect(bash("gh auth token")).toMatchObject({ deny: expect.stringContaining("tokens") });
     expect(bash("printf 'host=github.com\\n' | git credential fill")).toMatchObject({ deny: expect.stringContaining("tokens") });
     expect(bash("gh pr create --title x --body y")).toBeNull();
+    expect(bash("gh pr merge 12 --squash")).toBeNull();
+    expect(bash("gh api -X PUT repos/a/b/pulls/3/merge")).toBeNull();
     expect(bash("git push -u origin HEAD")).toBeNull();
   });
 });
