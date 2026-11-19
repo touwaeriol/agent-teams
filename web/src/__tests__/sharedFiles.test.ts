@@ -29,6 +29,7 @@ import {
 } from "@/lib/sharedFiles";
 import { ApiError } from "@/api/client";
 import SharedFiles from "@/pages/SharedFiles.vue";
+import { toast } from "@/lib/toast";
 
 const MB = 1 << 20;
 const file = (path: string, size: number, extra: Partial<SharedFile> = {}): SharedFile => ({
@@ -359,6 +360,36 @@ describe("SharedFiles page", () => {
     expect(forms).toHaveLength(1);
     const entries = [...forms[0].entries()].map(([k, v]) => (typeof v === "string" ? `${k}=${v}` : `${k}:${(v as File).name}`));
     expect(entries).toEqual(["path=data/a.csv", "path=data/b.csv", "file:a.csv", "file:b.csv"]);
+  });
+
+  it("says so when files are dropped while an upload is running, and uploads a dropped folder without its hidden files", async () => {
+    const { w } = await mountPage(listOf([]));
+    const warn = vi.spyOn(toast, "warning").mockImplementation(() => {});
+    const forms: FormData[] = [];
+    vi.spyOn(XMLHttpRequest.prototype, "open").mockImplementation(() => {});
+    vi.spyOn(XMLHttpRequest.prototype, "setRequestHeader").mockImplementation(() => {});
+    vi.spyOn(XMLHttpRequest.prototype, "send").mockImplementation((body) => void forms.push(body as FormData)); // never answers: stays busy
+    const entry = (path: string) => ({ isFile: true, isDirectory: false, name: path, fullPath: `/${path}`, file: (ok: (f: File) => void) => ok(fake(path.split("/").pop()!, 2)) });
+    let read = false;
+    const folder = {
+      isFile: false,
+      isDirectory: true,
+      name: "reports",
+      fullPath: "/reports",
+      createReader: () => ({ readEntries: (ok: (e: object[]) => void) => ok(read ? [] : ((read = true), [entry("reports/a.csv"), entry("reports/.DS_Store")])) }),
+    };
+    const drop = w.get("[data-testid=shared-drop]");
+    await drop.trigger("drop", { dataTransfer: { items: [{ kind: "file", webkitGetAsEntry: () => folder }], files: [] } });
+    await flushPromises();
+    expect(forms).toHaveLength(1);
+    expect([...forms[0].getAll("path")]).toEqual(["reports/a.csv"]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("跳过了 1 个点开头"));
+    expect(w.find("[role=progressbar]").exists()).toBe(true);
+
+    await drop.trigger("drop", { dataTransfer: { items: [], files: [fake("late.txt", 1)] } });
+    await flushPromises();
+    expect(warn).toHaveBeenLastCalledWith("正在上传，等这一批传完再拖入新的文件");
+    expect(forms).toHaveLength(1);
   });
 
   it("deletes after confirming", async () => {

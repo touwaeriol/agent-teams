@@ -12,9 +12,9 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/testdb"
 )
 
-// TestCleanPath: relative clean paths pass (a leading ./ and surrounding spaces are dropped);
-// absolute paths, traversal, hidden and empty segments, backslashes, control characters and
-// paths over 8 levels or 255 bytes are refused.
+// TestCleanPath: relative clean paths pass (a leading ./ is dropped); absolute paths, traversal,
+// hidden and empty segments, segments starting or ending with a space, backslashes, control
+// characters (C0, DEL, C1), U+2028/U+2029 and paths over 8 levels or 255 bytes of UTF-8 are refused.
 func TestCleanPath(t *testing.T) {
 	ok := map[string]string{
 		"notes.md": "notes.md", "data/sample.csv": "data/sample.csv", "./data/a b.txt": "data/a b.txt",

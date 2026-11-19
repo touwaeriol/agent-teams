@@ -164,8 +164,9 @@ export async function droppedFiles(dt: Pick<DataTransfer, "items" | "files"> | n
   const files: SourceFile[] = [];
   let folders = 0;
   for (const f of Array.from(dt.files ?? [])) {
-    // A folder in a plain file list: no type, size 0 or a block multiple, and reading it fails.
-    const isFolder = f.type === "" && (await f.slice(0, 1).arrayBuffer().then(() => false, () => true));
+    // A folder in a plain file list has no type and size 0 (some systems report its block size,
+    // 4096); reading it fails, which tells it apart from an empty file without an extension.
+    const isFolder = f.type === "" && (f.size === 0 || f.size % 4096 === 0) && (await f.slice(0, 1).arrayBuffer().then(() => false, () => true));
     if (isFolder) folders += 1;
     else files.push({ file: f, rel: "" });
   }

@@ -58,7 +58,11 @@ let busy = false;
 
 /** Checks the picked files; asks once when some would be overwritten, else uploads right away. */
 function start(picked: (File | SourceFile)[] | null | undefined, notes: string[] = []) {
-  if (!picked || busy) return;
+  if (!picked) return;
+  if (busy) {
+    toast.warning(BUSY_DROP);
+    return;
+  }
   const { files: chosen, skipped } = collectFiles(picked, dir.value);
   if (skipped > 0) notes.push(`跳过了 ${skipped} 个点开头的隐藏文件或目录里的文件（如 .DS_Store、.git），它们不能放进共享文件`);
   if (notes.length > 0) toast.warning(notes.join("；"));
@@ -100,8 +104,15 @@ function picked(e: Event) {
   el.value = "";
 }
 
+/** Shown when files are dropped while an upload is running (the drop is not queued). */
+const BUSY_DROP = "正在上传，等这一批传完再拖入新的文件";
+
 async function dropped(e: DragEvent) {
   dragging.value = false;
+  if (busy) {
+    toast.warning(BUSY_DROP);
+    return;
+  }
   const { files: got, folders } = await droppedFiles(e.dataTransfer);
   const notes = folders > 0 ? [`这个浏览器不能直接拖入文件夹（${folders} 个没有上传），请改用“上传文件夹”`] : [];
   start(got, notes);
