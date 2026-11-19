@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
-// The main board's thread panel: list mode keeps its width; an open thread fills the board
-// but a clickable strip of the coordinator chat (made inert while squeezed).
+// The main board's thread panel: one width for the list and an open thread; dragged to the
+// widest it leaves a clickable strip of the coordinator chat (made inert while squeezed).
 import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
 import { flushPromises, mount } from "@vue/test-utils";
 import ElementPlus from "element-plus";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
-import { COORDINATOR_PEEK, PANEL_DEFAULT } from "@/lib/panelWidth";
+import { COORDINATOR_COMPACT, COORDINATOR_PEEK, PANEL_DEFAULT, panelKey } from "@/lib/panelWidth";
 import Main from "@/pages/Main.vue";
 import { thread } from "./fixtures";
 
@@ -58,16 +58,23 @@ afterEach(() => {
 });
 
 describe("Main thread panel", () => {
-  it("list mode: the remembered list width, no strip, nothing inert", async () => {
+  it("keeps one width when a thread opens and closes; no strip at the default", async () => {
     const { w } = await mountMain("/projects/p1", null);
+    expect(aside().style.width).toBe(`${PANEL_DEFAULT}px`);
+    await w.setProps({ openNo: 12 });
+    for (let i = 0; i < 3; i++) await flushPromises();
     expect(aside().style.width).toBe(`${PANEL_DEFAULT}px`);
     expect(w.find("[data-testid=coordinator-peek]").exists()).toBe(false);
     expect(w.find("main [inert]").exists()).toBe(false);
     expect(w.find("main").classes()).not.toContain("overflow-clip");
+    await w.setProps({ openNo: null });
+    for (let i = 0; i < 3; i++) await flushPromises();
+    expect(aside().style.width).toBe(`${PANEL_DEFAULT}px`);
     w.unmount();
   }, 20_000);
 
-  it("an open thread fills the board but the strip; the strip is inert and goes back to the list", async () => {
+  it("a panel dragged to the widest leaves an inert strip that goes back to the chat with room for it", async () => {
+    window.localStorage.setItem(panelKey("u1"), "5000");
     const { w, router } = await mountMain("/projects/p1/threads/12", 12);
     // jsdom has no layout or ResizeObserver: the board falls back to the window width
     expect(aside().style.width).toBe(`${1440 - COORDINATOR_PEEK}px`);
@@ -78,6 +85,8 @@ describe("Main thread panel", () => {
     await peek.trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.fullPath).toBe("/projects/p1");
+    expect(aside().style.width).toBe(`${1440 - COORDINATOR_COMPACT}px`);
+    expect(w.find("[data-testid=coordinator-peek]").exists()).toBe(false);
     w.unmount();
   }, 20_000);
 
@@ -86,7 +95,12 @@ describe("Main thread panel", () => {
     const box = w.get("main textarea").element as HTMLTextAreaElement;
     box.focus();
     expect(document.activeElement).toBe(box);
-    await w.setProps({ openNo: 12 });
+    // drag the handle all the way left (jsdom has no PointerEvent: mouse events with the pointer names)
+    const handle = w.get("[role=separator]").element;
+    const pointer = (type: string, clientX = 0) => handle.dispatchEvent(new MouseEvent(type, { clientX, bubbles: true, cancelable: true }));
+    pointer("pointerdown", 1000);
+    pointer("pointermove", 0);
+    pointer("pointerup");
     for (let i = 0; i < 3; i++) await flushPromises();
     expect(w.find("[data-testid=coordinator-peek]").exists()).toBe(true);
     expect(document.activeElement).toBe(aside());

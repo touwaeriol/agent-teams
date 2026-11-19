@@ -1,27 +1,13 @@
 // @vitest-environment jsdom
-// The thread panel's width: list mode (remembered, clamped to the window) and detail mode
-// (fills the board but the coordinator strip; a dragged width is remembered separately).
+// The thread panel's width: one width for the list and an open thread, clamped to the board
+// (less the coordinator strip) and remembered per user.
 import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 import { defineComponent, h, nextTick, ref } from "vue";
 import ResizeHandle from "@/components/app/ResizeHandle.vue";
 import { markdownTree, wrapTables } from "@/lib/markdown";
-import { useDetailWidth, type DetailWidth } from "@/components/app/usePanelWidth";
-import {
-  COORDINATOR_PEEK,
-  DETAIL_MIN,
-  PANEL_DEFAULT,
-  clampDetail,
-  clampWidth,
-  detailDefault,
-  detailKey,
-  dragWidth,
-  loadDetail,
-  loadWidth,
-  panelKey,
-  saveDetail,
-  saveWidth,
-} from "@/lib/panelWidth";
+import { usePanelWidth, type PanelWidth } from "@/components/app/usePanelWidth";
+import { COORDINATOR_PEEK, PANEL_DEFAULT, PANEL_MIN, clampWidth, dragWidth, loadWidth, panelKey, panelMax, roomForChat, saveWidth } from "@/lib/panelWidth";
 
 function memory(init: Record<string, string> = {}) {
   const data = new Map(Object.entries(init));
@@ -44,77 +30,59 @@ const broken = {
   },
 };
 
-describe("detail width", () => {
-  it("defaults to the board minus the coordinator strip", () => {
+describe("panel width", () => {
+  it("is at most the board less the coordinator strip", () => {
     expect(COORDINATOR_PEEK).toBe(80);
-    expect(detailDefault(1192)).toBe(1112); // 1440 window − 248 sidebar
-    expect(detailDefault(1672)).toBe(1592);
-    expect(detailDefault(50)).toBe(0);
+    expect(panelMax(1192)).toBe(1112); // 1440 window − 248 sidebar
+    expect(panelMax(1672)).toBe(1592);
+    expect(panelMax(50)).toBe(PANEL_MIN);
   });
 
-  it("clamps to [DETAIL_MIN, default]; null and junk follow the default", () => {
-    expect(clampDetail(null, 1192)).toBe(1112);
-    expect(clampDetail(NaN, 1192)).toBe(1112);
-    expect(clampDetail(5000, 1192)).toBe(1112);
-    expect(clampDetail(100, 1192)).toBe(DETAIL_MIN);
-    expect(clampDetail(700.4, 1192)).toBe(700);
-    // a board too small for the minimum: the default wins, the strip stays
-    expect(clampDetail(100, 400)).toBe(320);
-    expect(clampDetail(null, 400)).toBe(320);
+  it("clamps to [PANEL_MIN, max]; null and junk give the default", () => {
+    expect(clampWidth(null, 1192)).toBe(PANEL_DEFAULT);
+    expect(clampWidth(NaN, 1192)).toBe(PANEL_DEFAULT);
+    expect(clampWidth(5000, 1192)).toBe(1112);
+    expect(clampWidth(100, 1192)).toBe(PANEL_MIN);
+    expect(clampWidth(700.4, 1192)).toBe(700);
+    // a board too small for the default
+    expect(clampWidth(null, 450)).toBe(370);
   });
 
-  it("loads and saves per user; the default is stored as nothing", () => {
-    const s = memory();
-    expect(loadDetail("u1", s)).toBeNull();
-    saveDetail("u1", 700, 1192, s);
-    expect(s.data.get(detailKey("u1"))).toBe("700");
-    expect(detailKey("u1")).toBe("at:thread-detail-width:u1");
-    expect(loadDetail("u1", s)).toBe(700);
-    expect(loadDetail("u2", s)).toBeNull();
-    saveDetail("u1", 1112, 1192, s);
-    expect(s.data.has(detailKey("u1"))).toBe(false);
-    saveDetail("u1", 700, 1192, s);
-    saveDetail("u1", null, 1192, s);
-    expect(s.data.has(detailKey("u1"))).toBe(false);
+  it("makes room for the coordinator chat when asked", () => {
+    expect(roomForChat(1112, 1192)).toBe(832); // the chat gets 360
+    expect(roomForChat(500, 1192)).toBe(500); // already enough room
+    expect(roomForChat(1000, 600)).toBe(PANEL_MIN); // can't: the narrowest panel
+  });
+
+  it("loads and saves per user; the default is stored as nothing; the old detail width is dropped", () => {
+    const s = memory({ "at:thread-detail-width:u1": "900" });
+    expect(loadWidth("u1", s)).toBe(PANEL_DEFAULT);
+    saveWidth("u1", 700, s);
+    expect(s.data.get(panelKey("u1"))).toBe("700");
+    expect(panelKey("u1")).toBe("at:thread-panel-width:u1");
+    expect(s.data.has("at:thread-detail-width:u1")).toBe(false);
+    expect(loadWidth("u1", s)).toBe(700);
+    expect(loadWidth("u2", s)).toBe(PANEL_DEFAULT);
+    saveWidth("u1", PANEL_DEFAULT, s);
+    expect(s.data.has(panelKey("u1"))).toBe(false);
   });
 
   it("ignores junk and blocked or missing storage", () => {
-    expect(loadDetail("u1", memory({ [detailKey("u1")]: "wide" }))).toBeNull();
-    expect(loadDetail("u1", memory({ [detailKey("u1")]: "-3" }))).toBeNull();
-    expect(loadDetail("u1", broken)).toBeNull();
-    expect(loadDetail("u1", undefined)).toBeNull();
-    expect(() => saveDetail("u1", 700, 1192, broken)).not.toThrow();
-    expect(() => saveDetail("u1", 700, 1192, undefined)).not.toThrow();
-  });
-
-  it("is kept apart from the list width", () => {
-    const s = memory();
-    saveDetail("u1", 700, 1192, s);
-    saveWidth("u1", 500, s);
-    expect(s.data.get(panelKey("u1"))).toBe("500");
-    expect(loadWidth("u1", s)).toBe(500);
-    expect(loadDetail("u1", s)).toBe(700);
-  });
-});
-
-describe("list width (unchanged)", () => {
-  it("clamps to the window and forgets the default", () => {
-    expect(clampWidth(NaN, 1440)).toBe(PANEL_DEFAULT);
-    expect(clampWidth(100, 1440)).toBe(340);
-    expect(clampWidth(2000, 1440)).toBe(760);
-    const s = memory();
-    saveWidth("u1", PANEL_DEFAULT, s);
-    expect(s.data.size).toBe(0);
+    expect(loadWidth("u1", memory({ [panelKey("u1")]: "wide" }))).toBe(PANEL_DEFAULT);
+    expect(loadWidth("u1", memory({ [panelKey("u1")]: "-3" }))).toBe(PANEL_DEFAULT);
     expect(loadWidth("u1", broken)).toBe(PANEL_DEFAULT);
+    expect(loadWidth("u1", undefined)).toBe(PANEL_DEFAULT);
+    expect(() => saveWidth("u1", 700, broken)).not.toThrow();
+    expect(() => saveWidth("u1", 700, undefined)).not.toThrow();
   });
 });
 
-describe("useDetailWidth", () => {
+describe("usePanelWidth", () => {
   function host(board: ReturnType<typeof ref<number>>, userId = ref("u1")) {
-    let api!: DetailWidth;
+    let api!: PanelWidth;
     const C = defineComponent({
       setup() {
-        api = useDetailWidth(() => userId.value, board as never);
+        api = usePanelWidth(() => userId.value, board as never);
         return () => h("div");
       },
     });
@@ -122,46 +90,41 @@ describe("useDetailWidth", () => {
     return api;
   }
 
-  it("fills the board by default and follows it as it resizes", async () => {
-    localStorage.clear();
-    const board = ref(1192);
-    const w = host(board);
-    expect(w.width.value).toBe(1112);
-    board.value = 1672;
-    await nextTick();
-    expect(w.width.value).toBe(1592);
-  });
-
   it("remembers a dragged width, re-clamps it on a smaller board, and resets on double-click", async () => {
     localStorage.clear();
     const board = ref(1672);
     const w = host(board);
+    expect(w.width.value).toBe(PANEL_DEFAULT);
     w.set(900);
     expect(w.width.value).toBe(900);
-    expect(localStorage.getItem(detailKey("u1"))).toBe("900");
+    expect(localStorage.getItem(panelKey("u1"))).toBe("900");
     w.set(10);
-    expect(w.width.value).toBe(DETAIL_MIN);
+    expect(w.width.value).toBe(PANEL_MIN);
     w.set(900);
     board.value = 800; // window shrinks: max is now 720
     await nextTick();
     expect(w.width.value).toBe(720);
+    expect(w.max.value).toBe(720);
     board.value = 1672; // and grows back: the remembered width returns
     await nextTick();
     expect(w.width.value).toBe(900);
     w.reset();
-    expect(w.width.value).toBe(1592);
-    expect(localStorage.getItem(detailKey("u1"))).toBeNull();
+    expect(w.width.value).toBe(PANEL_DEFAULT);
+    expect(localStorage.getItem(panelKey("u1"))).toBeNull();
     // a new mount picks up what was stored
     w.set(1000);
     expect(host(ref(1672)).width.value).toBe(1000);
   });
 
-  it("dragging to the widest stores nothing, so a bigger screen still fills up", () => {
+  it("follows the signed-in user once known", async () => {
     localStorage.clear();
-    const w = host(ref(1192));
-    w.set(5000);
-    expect(localStorage.getItem(detailKey("u1"))).toBeNull();
-    expect(host(ref(1672)).width.value).toBe(1592);
+    localStorage.setItem(panelKey("u2"), "600");
+    const user = ref("anon");
+    const w = host(ref(1672), user);
+    expect(w.width.value).toBe(PANEL_DEFAULT);
+    user.value = "u2";
+    await nextTick();
+    expect(w.width.value).toBe(600);
   });
 });
 

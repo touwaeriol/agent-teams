@@ -27,8 +27,8 @@ import PanelDetail from "./main/PanelDetail.vue";
 import PanelList from "./main/PanelList.vue";
 import MobileOverview from "./main/MobileOverview.vue";
 import ThreadChips from "./main/ThreadChips.vue";
-import { COORDINATOR_COMPACT, DETAIL_MIN, PANEL_DEFAULT, PANEL_MAX, PANEL_MIN, clampWidth } from "@/lib/panelWidth";
-import { useDetailWidth, useElementWidth, usePanelWidth } from "@/components/app/usePanelWidth";
+import { COORDINATOR_COMPACT, PANEL_DEFAULT, PANEL_MIN, PANEL_WIDE, roomForChat } from "@/lib/panelWidth";
+import { useElementWidth, usePanelWidth } from "@/components/app/usePanelWidth";
 import { overviewTabOf, sidePanelOf, threadPath, type OverviewTab, type SidePanel as Panel } from "./main/logic";
 import { useReminderAlerts } from "@/lib/reminders";
 
@@ -49,27 +49,28 @@ const settings = computed(() => /^\/projects\/[^/]+\/settings(\/|$)/.test(route.
 const section = computed(() => sectionOf(typeof route.params.section === "string" ? route.params.section : undefined));
 const setSection = (s: SettingsSection) => void router.replace(`/projects/${pid.value}/settings/${s}`);
 const setPanel = (p: Panel) => void router.replace({ query: p === "threads" ? {} : { panel: p } });
-// Panel width: the list keeps its remembered width; an open thread fills the board (the area
-// right of the project sidebar, measured live) but a strip of the coordinator chat.
+// Panel width: one remembered width for the list and an open thread (opening or leaving a thread
+// keeps the panel's edge where it is), clamped to the board: the area right of the project
+// sidebar, measured live, less a strip of the coordinator chat.
 const userId = () => me.data.value?.id ?? "anon";
 const boardEl = ref<HTMLElement | null>(null);
 const board = useElementWidth(boardEl);
-const [listWidth, setListWidth] = usePanelWidth(userId);
-const detail = useDetailWidth(userId, board);
-const detailOpen = computed(() => panel.value === "threads" && !!props.openNo);
-const panelWidth = computed(() => (detailOpen.value ? detail.width.value : listWidth.value));
-const setPanelWidth = (w: number) => (detailOpen.value ? detail.set(w) : setListWidth(w));
-const resetPanelWidth = () => (detailOpen.value ? detail.reset() : setListWidth(PANEL_DEFAULT));
+const panelWidth = usePanelWidth(userId, board);
 /** The coordinator chat is squeezed to a strip: clip it at its own width and make it a way back. */
-const peek = computed(() => detailOpen.value && board.value - detail.width.value < COORDINATOR_COMPACT);
+const peek = computed(() => panel.value === "threads" && board.value - panelWidth.width.value < COORDINATOR_COMPACT);
+/** The strip goes back to the coordinator chat: the thread closes and the panel narrows to give the chat room. */
+const backToChat = () => {
+  panelWidth.set(roomForChat(panelWidth.width.value, board.value));
+  if (props.openNo) void router.push(`/projects/${pid.value}`);
+};
 // The strip makes the coordinator chat inert; focus inside it would be dropped, so hand it to the panel.
 const mainEl = ref<HTMLElement | null>(null);
 watch(peek, (on) => {
   if (!on || !mainEl.value?.contains(document.activeElement)) return;
   void nextTick(() => boardEl.value?.querySelector<HTMLElement>("aside[aria-label=讨论串]")?.focus({ preventScroll: true }));
 });
-/** The panel is at its widest for this window (the list's expand button then shrinks it back). */
-const isWide = (w: number) => w >= clampWidth(PANEL_MAX, window.innerWidth) && w > PANEL_DEFAULT;
+/** The panel is expanded (the list's expand button then shrinks it back to the default). */
+const isWide = computed(() => panelWidth.width.value >= Math.min(PANEL_WIDE, panelWidth.max.value) && panelWidth.width.value > PANEL_DEFAULT);
 const openThread = (no: number) => void router.push(threadPath(pid.value, no));
 useReminderAlerts(() => list.value, openThread);
 // Forwarding project-chat messages: the bar replaces the composer while selecting.
@@ -114,7 +115,7 @@ watchEffect(() => {
         aria-label="回到项目统筹会话"
         class="group absolute inset-0 z-[1] flex h-full w-full cursor-pointer flex-col items-center bg-background/70 pt-16 text-muted-foreground transition-colors hover:bg-background/45 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#2F6FDB]"
         data-testid="coordinator-peek"
-        @click="router.push(`/projects/${pid}`)"
+        @click="backToChat"
       >
         <span class="flex flex-col items-center gap-2 rounded-full border bg-panel px-1.5 py-2.5 shadow-sm transition-colors group-hover:border-[#2F6FDB]/50 group-hover:text-[#2F6FDB]">
           <MessagesSquare :size="16" :stroke-width="1.8" />
@@ -124,13 +125,13 @@ watchEffect(() => {
     </main>
     <SidePanel
       v-if="panel === 'threads'"
-      :width="panelWidth"
-      :min="detailOpen ? Math.min(DETAIL_MIN, detail.max.value) : PANEL_MIN"
-      :max="detailOpen ? detail.max.value : undefined"
+      :width="panelWidth.width.value"
+      :min="PANEL_MIN"
+      :max="panelWidth.max.value"
       label="讨论串"
       handle-label="调整讨论串宽度"
-      @change="setPanelWidth"
-      @reset="resetPanelWidth"
+      @change="panelWidth.set"
+      @reset="panelWidth.reset"
     >
       <PanelDetail
         v-if="props.openNo"
@@ -150,9 +151,9 @@ watchEffect(() => {
         :threads="list"
         :loading="threads.isLoading.value"
         :user-id="me.data.value?.id ?? 'anon'"
-        :expanded="isWide(listWidth)"
+        :expanded="isWide"
         @open="openThread"
-        @expand="setListWidth(isWide(listWidth) ? PANEL_DEFAULT : PANEL_MAX)"
+        @expand="panelWidth.set(isWide ? PANEL_DEFAULT : PANEL_WIDE)"
       />
     </SidePanel>
     <aside
