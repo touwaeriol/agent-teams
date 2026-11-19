@@ -37,7 +37,7 @@ func (o *Orchestrator) Reopen(ctx context.Context, tx *core.Tx, t core.Thread, c
 	if err := o.reopenNote(ctx, tx, t, cause); err != nil {
 		return err
 	}
-	if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"summary": "", "finished_at": nil}); err != nil {
+	if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"summary": "", "finished_at": nil, "done_pending_at": nil, "finish_nudged_at": nil}); err != nil {
 		return err
 	}
 	next := "running"
