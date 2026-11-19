@@ -19,6 +19,9 @@ import (
 // ErrNodeOffline is returned for commands to a node without a live link.
 var ErrNodeOffline = errors.New("节点不在线")
 
+// ErrUsageUnsupported: the node's daemon does not report usage (hello.features lacks "usage").
+var ErrUsageUnsupported = errors.New("节点不支持查询余量")
+
 // NodeLive is the live part of NodeView, owned by the node gateway.
 type NodeLive struct {
 	Online         bool           `json:"online"`
@@ -54,7 +57,8 @@ type RuntimeUsage struct {
 
 // UsageWindow is one rate-limit window (five_hour, weekly, primary, ...).
 type UsageWindow struct {
-	Key           string     `json:"key"`
+	Key           string     `json:"key" doc:"five_hour, weekly, weekly_opus, weekly_sonnet, weekly_model (Claude); primary, secondary (Codex)"`
+	Label         string     `json:"label,omitempty" maxLength:"40" doc:"Display name from the provider, e.g. the model of a weekly_model window"`
 	UsedPercent   float64    `json:"used_percent" minimum:"0" maximum:"100"`
 	WindowMinutes *int       `json:"window_minutes,omitempty"`
 	ResetsAt      *time.Time `json:"resets_at"`
@@ -79,6 +83,10 @@ type NodeRegistry interface {
 	Upgrade(ctx context.Context, nodeID string, release NodeRelease) error
 	// Drain sends node.drain; ErrNodeOffline when not connected.
 	Drain(ctx context.Context, nodeID string, deadline time.Duration) error
+	// RefreshUsage returns the node's usage, asking the node (node.usage_refresh) unless the
+	// cached report is fresh; stale = the node did not answer in time. ErrNodeOffline when not
+	// connected, ErrUsageUnsupported when the daemon does not report usage.
+	RefreshUsage(ctx context.Context, nodeID string) (usage *NodeUsage, stale bool, err error)
 }
 
 // Events publishes realtime events (api.md §1). The orchestration side
@@ -113,6 +121,11 @@ type Offline struct{}
 
 // Status implements NodeRegistry.
 func (Offline) Status(string) NodeLive { return NodeLive{} }
+
+// RefreshUsage implements NodeRegistry.
+func (Offline) RefreshUsage(context.Context, string) (*NodeUsage, bool, error) {
+	return nil, false, ErrNodeOffline
+}
 
 // Disconnect implements NodeRegistry.
 func (Offline) Disconnect(context.Context, string, string) {}

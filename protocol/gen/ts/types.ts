@@ -798,9 +798,13 @@ export interface RuntimeUsage {
  */
 export interface UsageWindow {
   /**
-   * five_hour, weekly, weekly_opus, weekly_sonnet (Claude); primary, secondary (Codex).
+   * five_hour, weekly, weekly_opus, weekly_sonnet, weekly_model (per-model weekly window, see label) (Claude); primary, secondary (Codex).
    */
   key: string;
+  /**
+   * Display name given by the provider, e.g. the model of a weekly_model window; the console keeps at most 40 characters.
+   */
+  label?: string;
   /**
    * 0..100; the console clamps values out of range.
    */
@@ -819,6 +823,18 @@ export interface NodeUsage {
     claude?: RuntimeUsage;
     codex?: RuntimeUsage;
   };
+}
+/**
+ * Fetch the subscription quota now and answer with node.usage (unreliable). Sent only when hello.features contains usage.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "NodeUsageRefresh".
+ */
+export interface NodeUsageRefresh {
+  /**
+   * Runtimes to fetch; omitted = all.
+   */
+  runtimes?: ("claude" | "codex")[];
 }
 /**
  * Close a session.

@@ -6069,6 +6069,23 @@
         ],
         "type": "object"
       },
+      "UsageRefreshOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "stale": {
+            "description": "The node did not answer in time; usage is the previous report",
+            "type": "boolean"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/NodeUsage",
+            "description": "Latest report (same as NodeView.usage); null when the node never sent one"
+          }
+        },
+        "required": [
+          "usage"
+        ],
+        "type": "object"
+      },
       "UsageTokens": {
         "additionalProperties": false,
         "properties": {
@@ -6101,6 +6118,12 @@
         "additionalProperties": false,
         "properties": {
           "key": {
+            "description": "five_hour, weekly, weekly_opus, weekly_sonnet, weekly_model (Claude); primary, secondary (Codex)",
+            "type": "string"
+          },
+          "label": {
+            "description": "Display name from the provider, e.g. the model of a weekly_model window",
+            "maxLength": 40,
             "type": "string"
           },
           "resets_at": {
@@ -9464,6 +9487,48 @@
             "description": "Error"
           }
         },
+        "tags": [
+          "nodes"
+        ]
+      }
+    },
+    "/api/nodes/{id}/usage/refresh": {
+      "post": {
+        "operationId": "refresh-node-usage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageRefreshOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Fetch the node's subscription quota now (cached for 60 s; waits up to 15 s for the node)",
         "tags": [
           "nodes"
         ]

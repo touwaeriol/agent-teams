@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/node.usage_refresh.json",
+  "title": "NodeUsageRefresh",
+  "description": "Fetch the subscription quota now and answer with node.usage (unreliable). Sent only when hello.features contains usage.",
+  "x-direction": "console_to_node",
+  "x-reliable": false,
+  "type": "object",
+  "properties": {
+    "runtimes": {
+      "description": "Runtimes to fetch; omitted = all.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "claude",
+          "codex"
+        ]
+      }
+    }
+  }
+}

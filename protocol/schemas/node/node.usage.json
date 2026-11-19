@@ -80,7 +80,11 @@
       ],
       "properties": {
         "key": {
-          "description": "five_hour, weekly, weekly_opus, weekly_sonnet (Claude); primary, secondary (Codex).",
+          "description": "five_hour, weekly, weekly_opus, weekly_sonnet, weekly_model (per-model weekly window, see label) (Claude); primary, secondary (Codex).",
+          "type": "string"
+        },
+        "label": {
+          "description": "Display name given by the provider, e.g. the model of a weekly_model window; the console keeps at most 40 characters.",
           "type": "string"
         },
         "used_percent": {

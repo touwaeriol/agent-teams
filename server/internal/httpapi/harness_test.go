@@ -66,6 +66,10 @@ func (f *fakeNodes) Drain(context.Context, string, time.Duration) error {
 	return platform.ErrNodeOffline
 }
 
+func (f *fakeNodes) RefreshUsage(context.Context, string) (*platform.NodeUsage, bool, error) {
+	return nil, false, platform.ErrNodeOffline
+}
+
 // fakeEvents records published events.
 type fakeEvents struct {
 	mu     sync.Mutex
