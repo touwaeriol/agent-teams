@@ -72,11 +72,15 @@ export type UsageRow = { key: string; label: string; pct: number; width: string;
 /** What goes under a runtime chip: quota rows, a fetch error, a "loading" hint or nothing. */
 export type UsageView = { kind: "windows"; rows: UsageRow[]; updated: string } | { kind: "error"; error: string } | { kind: "pending" } | null;
 
-export function usageView(key: string, info: RuntimeInfo | undefined, usage: RuntimeUsage | undefined, online: boolean, now = Date.now()): UsageView {
+/** The node fields that decide whether missing quota is still coming: online and a daemon that reports usage (usage_supported; absent counts as supported). */
+export type UsageNodeState = { online: boolean; usage_supported?: boolean };
+
+export function usageView(key: string, info: RuntimeInfo | undefined, usage: RuntimeUsage | undefined, node: UsageNodeState, now = Date.now()): UsageView {
   const sub = SUBSCRIPTION[key];
   // hello's login state wins: logged out or switched to an API key hides any leftover quota.
   if (!info?.cli || !sub || info.auth !== sub) return null;
-  if (!usage) return online ? { kind: "pending" } : null;
+  // An old daemon never reports usage: no endless "loading" hint for it.
+  if (!usage) return node.online && node.usage_supported !== false ? { kind: "pending" } : null;
   if (usage.auth !== sub || usage.status === "unsupported") return null;
   if (usage.status === "error") return { kind: "error", error: usage.error || "未知原因" };
   const rows = (usage.windows ?? []).map((w) => {
@@ -90,9 +94,9 @@ export function usageView(key: string, info: RuntimeInfo | undefined, usage: Run
 /** Quota younger than this is shown as is; hovering does not ask the node again. */
 export const USAGE_FRESH_MS = 60_000;
 
-/** Hovering a card asks for fresh quota only when the node is online, has a subscription login and that runtime's quota is missing or older than a minute. */
-export function needsUsageRefresh(n: { online: boolean; runtimes?: unknown; usage?: NodeUsage | null }, now = Date.now(), maxAge = USAGE_FRESH_MS): boolean {
-  if (!n.online) return false;
+/** Hovering a card asks for fresh quota only when the node is online, its daemon reports usage, it has a subscription login and that runtime's quota is missing or older than a minute. */
+export function needsUsageRefresh(n: UsageNodeState & { runtimes?: unknown; usage?: NodeUsage | null }, now = Date.now(), maxAge = USAGE_FRESH_MS): boolean {
+  if (!n.online || n.usage_supported === false) return false;
   const runtimes = (n.runtimes ?? {}) as Record<string, RuntimeInfo | undefined>;
   return Object.entries(SUBSCRIPTION).some(([key, sub]) => {
     const info = runtimes[key];

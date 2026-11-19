@@ -111,7 +111,8 @@ DeliverableView = {id, project_id, thread_no, kind: string, title, url, detail, 
 MergeEntryView  = {id, thread_no, task_id, employee, repo, head_branch, status, attempts, error, created_at, updated_at}   // 每个仓库一个条目
 CheckView       = {name, status, conclusion, url, summary}
 NodeView        = {id, name, online, since, last_seen_at, version, protocol, isolation: "agent_user"|"sandbox"|"none", runtimes: {...}, capacity: {...},
-                   active_sessions, parked_sessions, queued, usage: NodeUsage|null, isolated, labels, max_active_sessions, park_after_s, created_at}
+                   active_sessions, parked_sessions, queued, usage: NodeUsage|null, usage_supported, isolated, labels, max_active_sessions, park_after_s, created_at}
+                  // usage_supported：守护进程是否支持余量（在线用当前 hello.features，离线用 at_nodes.last_hello.features，里面有 `usage` 为 true，没有记录为 false）；false 时网页不显示“余量获取中…”、也不发悬停刷新，已有的 usage 照常显示
 NodeUsage       = {claude?: RuntimeUsage, codex?: RuntimeUsage}   // 节点最近一次 node.usage 上报（protocol.md §9），控制台只存内存：重启后为 null 直到下次上报；节点离线后保留最后一次，用 received_at 判断新旧
 RuntimeUsage    = {auth: "subscription"|"chatgpt"|"api_key"|"none", status: "ok"|"error"|"unsupported", plan?, error?,
                    windows: [{key: "five_hour"|"weekly"|"weekly_opus"|"weekly_sonnet"|"weekly_model"|"primary"|"secondary"|…, label?, used_percent: 0..100, window_minutes?, resets_at: ISO|null}],  // 最多 8 个
