@@ -66,20 +66,41 @@ watch([imageCount, () => assist.panel.value, () => props.attachments?.items.valu
 const overlayStyle = computed(() => (grow.gutter.value ? { paddingRight: `${16 + grow.gutter.value}px` } : undefined));
 const speaking = computed(() => (voice.parts.value ? "text-transparent caret-foreground" : ""));
 
+// One send at a time: busy (the parent's isPending) only shows up a render later, and waiting for
+// the last voice transcripts takes a while, so a second Enter or click would read the same message.
+let sending = false;
 async function send() {
+  if (sending) return;
+  sending = true;
+  try {
+    await sendOnce();
+  } finally {
+    sending = false;
+  }
+}
+
+async function sendOnce() {
   if (voice.active.value) await voice.finish();
   const value = text.value.trim();
   if (assist.intercept(value)) return void (text.value = "");
   if (empty.value || props.busy) return;
   const images = props.attachments ? props.attachments.ids() : [];
   if (images === null) return void toast.info("图片还在上传，稍等一下");
+  // The box empties at once (text, images, references); what is typed or attached meanwhile is new.
+  const refs = assist.takeRefs(value);
+  const picked = assist.picked.value;
+  const taken = props.attachments?.take() ?? [];
   text.value = "";
+  assist.clearRefs();
   try {
-    await props.onSend(value, images, assist.takeRefs(value));
-    props.attachments?.clear();
-    assist.clearRefs();
+    await props.onSend(value, images, refs);
+    props.attachments?.discard(taken);
   } catch {
-    text.value = value;
+    // Failed: the message goes back in front of anything typed or attached while it was sending.
+    const typed = text.value;
+    text.value = typed.trim() ? `${value}\n${typed}` : value;
+    assist.picked.value = [...picked, ...assist.picked.value.filter((r) => !picked.includes(r))];
+    props.attachments?.restore(taken);
   }
 }
 

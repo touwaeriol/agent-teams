@@ -23,6 +23,12 @@ export interface Attachments {
   add: (files: File[]) => void;
   remove: (key: string) => void;
   clear: () => void;
+  /** Takes every item out of the box for a send (previews stay valid until discard). */
+  take: () => PendingImage[];
+  /** A failed send: puts taken items back in front of whatever was attached meanwhile. */
+  restore: (taken: PendingImage[]) => void;
+  /** A successful send: releases the taken items' previews. */
+  discard: (taken: PendingImage[]) => void;
   /** Uploaded ids in order; null while an upload is still running. */
   ids: () => string[] | null;
   uploading: ComputedRef<boolean>;
@@ -103,9 +109,17 @@ export function useAttachments(pid: MaybeRefOrGetter<string>, uploader: Uploader
     revoke(items.value);
     items.value = [];
   };
+  const take = () => {
+    const taken = items.value;
+    items.value = [];
+    return taken;
+  };
+  const restore = (taken: PendingImage[]) => {
+    if (taken.length) items.value = [...taken, ...items.value.filter((x) => !taken.some((t) => t.key === x.key))];
+  };
   const pending = () => items.value.some((x) => !x.id && !x.error);
   const ids = () => (pending() ? null : items.value.filter((x) => x.id).map((x) => x.id!));
-  return { items, add, remove, clear, ids, uploading: computed(pending) };
+  return { items, add, remove, clear, take, restore, discard: revoke, ids, uploading: computed(pending) };
 }
 
 /** Paste and drop handlers for the element that wraps a message box (bind with v-on="..."). */

@@ -73,6 +73,8 @@ export class VoiceController {
   private utteranceStart = 0;
   private run = 0;
   private settled: (() => void) | null = null;
+  /** The stop in progress (phase "stopping"). */
+  private stopping: Promise<void> | null = null;
   private limitTimer: ReturnType<typeof setTimeout> | null = null;
   /** Commits sent whose input_audio_buffer.committed hasn't come back yet. */
   private outstanding = 0;
@@ -251,10 +253,23 @@ export class VoiceController {
     }
   }
 
-  /** Stops recording and waits (up to SETTLE_MS) for the last transcripts. */
-  async stop(): Promise<void> {
-    if (this.state.phase === "connecting") return this.cancel();
-    if (this.state.phase !== "recording") return;
+  /**
+   * Stops recording and waits (up to SETTLE_MS) for the last transcripts. Called again while
+   * already stopping, it waits for that same stop: a send must not go out ahead of the last
+   * words, which would then land in the emptied box.
+   */
+  stop(): Promise<void> {
+    if (this.state.phase === "stopping" && this.stopping) return this.stopping;
+    if (this.state.phase === "connecting") return Promise.resolve(this.cancel());
+    if (this.state.phase !== "recording") return Promise.resolve();
+    const p = this.stopNow().finally(() => {
+      if (this.stopping === p) this.stopping = null;
+    });
+    this.stopping = p;
+    return p;
+  }
+
+  private async stopNow(): Promise<void> {
     this.set({ phase: "stopping", level: 0 });
     this.stopMeter?.();
     this.stopMeter = null;
