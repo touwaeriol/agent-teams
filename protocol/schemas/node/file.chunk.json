@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/node/file.chunk.json",
   "title": "FileChunk",
-  "description": "One piece of a file upload (publish_file). Chunks are sent before the tool.call that references their upload_id; the console keeps them until that call assembles them.",
+  "description": "One piece of a file upload (publish_file, write_shared_file). Chunks are sent before the tool.call that references their upload_id; the console keeps them until that call assembles them.",
   "x-direction": "node_to_console",
   "x-key": [
     "upload_id",

@@ -46,6 +46,10 @@
     "download": {
       "description": "read_deliverable: files whose bytes arrived before as file.download frames; the daemon writes them under .agent-deliverables/<deliverable_id>/v<version>/ in the session's working directory.",
       "$ref": "#/$defs/ToolDownload"
+    },
+    "shared_download": {
+      "description": "read_shared_file: the one file whose bytes arrived before as file.download frames; the daemon writes it as .agent-shared/<path> in the session's working directory (the folder holds its own .gitignore).",
+      "$ref": "#/$defs/ToolSharedDownload"
     }
   },
   "$defs": {
@@ -97,7 +101,7 @@
       ],
       "properties": {
         "path": {
-          "description": "Path inside the deliverable version (index.html, assets/logo.svg …).",
+          "description": "Path inside the deliverable version (index.html, assets/logo.svg …), or the shared-files path for shared_download.",
           "type": "string",
           "minLength": 1,
           "maxLength": 300
@@ -109,6 +113,35 @@
         "sha256": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "ToolSharedDownload": {
+      "title": "ToolSharedDownload",
+      "type": "object",
+      "required": [
+        "download_id",
+        "chunks",
+        "files"
+      ],
+      "properties": {
+        "download_id": {
+          "$ref": "common.json#/$defs/DownloadId"
+        },
+        "chunks": {
+          "description": "Number of file.download frames (0 when the file is empty; at most 20 for the 20 MB limit).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "files": {
+          "description": "Exactly one file; path is its shared-files path (data/sample.csv), same rules as the tools' SharedPath.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "$ref": "#/$defs/DownloadFile"
+          }
         }
       }
     }
