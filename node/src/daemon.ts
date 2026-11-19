@@ -71,7 +71,7 @@ export interface DaemonOptions {
   prefetchGh?: boolean;
 }
 
-const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "upgrade", "file_download", "context_usage", "session_compact"];
+const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "upgrade", "file_download", "shared_files", "context_usage", "session_compact"];
 
 /** Wires the link, command handlers, sessions, tools, git and credentials together. */
 export class Daemon {
