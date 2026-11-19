@@ -165,6 +165,61 @@ describe("git jobs", () => {
     expect((await sync("reviewer-1", "member", "thread/12-comms", "2000-01-01T00:00:00Z")).sync.action).toBe("expired");
   });
 
+  it("review sync with expect_sha: new worktree, fetch retries until the commit arrives, a commit that never does fails", async () => {
+    h = await startHarness({ reviewRetryMs: 100 });
+    makeRemote(h.dir);
+    expect(h.console.ofType("hello")[0]!.body.features).toContain("git_review_sha");
+    const seed = join(h.dir, "seed-app");
+    const commit = (file: string) => {
+      writeFileSync(join(seed, file), `${file}\n`);
+      git(seed, "add", ".");
+      git(seed, "commit", "-m", file);
+      return git(seed, "rev-parse", "HEAD");
+    };
+    const pushDev = (sha: string) => git(seed, "push", "-f", "origin", `${sha}:refs/heads/thread/12/dev-2`);
+    let n = 0;
+    const review = async (expect_sha: string, deadline?: string) => {
+      const job = `g_r${++n}`;
+      h.console.command("git.prepare", { ...prepare(job, "reviewer-1"), sync: { mode: "review", ref: "thread/12/dev-2", expect_sha, ...(deadline ? { deadline } : {}) } });
+      return (await h.console.waitType("git.result", (b) => b.job_id === job)).body;
+    };
+    const rwt = join(h.opts.root, "projects/p1/threads/12/reviewer-1");
+
+    // First review in the thread: no worktree yet. It is created and goes straight to the commit under review.
+    const a = commit("a.txt");
+    pushDev(a);
+    const first = await review(a);
+    expect(first).toMatchObject({ ok: true, created: true, head_sha: a, sync: { action: "checkout", head_sha: a } });
+    expect(git(rwt, "rev-parse", "HEAD")).toBe(a);
+    expect(existsSync(join(rwt, "a.txt"))).toBe(true);
+
+    // The push shows up on the remote only after the first fetch: the daemon fetches again and gets it.
+    const b = commit("b.txt");
+    const late = setTimeout(() => pushDev(b), 150);
+    const retried = await review(b);
+    clearTimeout(late);
+    expect(retried).toMatchObject({ ok: true, created: false, head_sha: b, sync: { action: "checkout", head_sha: b } });
+    expect(git(rwt, "rev-parse", "HEAD")).toBe(b);
+
+    // The branch moved on after the task was completed: the completed commit is still what is reviewed.
+    const c = commit("c.txt");
+    pushDev(c);
+    const moved = await review(b);
+    expect(moved).toMatchObject({ ok: true, head_sha: b, sync: { action: "checkout", head_sha: b } });
+
+    // A commit that never reaches the remote: an explicit failure with the actual HEAD, the tree untouched.
+    const never = commit("never.txt");
+    const failed = await review(never);
+    expect(failed).toMatchObject({ ok: false, error_code: "sha_mismatch", head_sha: b });
+    expect(failed.error).toContain(never);
+    expect(git(rwt, "rev-parse", "HEAD")).toBe(b);
+    // Past the deadline it gives up without waiting through the retries.
+    const t0 = Date.now();
+    expect(await review(never, new Date(Date.now() + 50).toISOString())).toMatchObject({ ok: false, error_code: "sha_mismatch" });
+    expect(Date.now() - t0).toBeLessThan(2000);
+    void c;
+  });
+
   it("re-sends the original git.result for a repeated job instead of running it again", async () => {
     h = await startHarness();
     makeRemote(h.dir);
