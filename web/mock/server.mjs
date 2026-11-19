@@ -407,7 +407,9 @@ const routes = [
   ["POST", /^\/api\/threads\/([^/]+)\/tasks\/([^/]+)\/(cancel|retry)$/, (req, res, [tid, id, op]) => {
     const task = (state.tasks[tid] ?? []).find((t) => t.id === id);
     task.status = op === "cancel" ? "cancelled" : "pending";
-    emit("task", { thread_no: threadById(tid).no, task });
+    const t = threadById(tid);
+    t.counts.tasks_open = (state.tasks[tid] ?? []).filter((x) => !["done", "failed", "cancelled"].includes(x.status)).length;
+    emit("task", { thread_no: t.no, task, counts: t.counts });
     json(res, 200, task);
   }],
   ["GET", /^\/api\/threads\/([^/]+)\/members$/, (req, res, [tid]) => json(res, 200, threadById(tid)?.members ?? [])],
