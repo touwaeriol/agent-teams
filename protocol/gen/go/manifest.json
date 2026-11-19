@@ -205,6 +205,13 @@
       "key": []
     },
     {
+      "type": "node.usage_refresh",
+      "name": "NodeUsageRefresh",
+      "direction": "console_to_node",
+      "reliable": false,
+      "key": []
+    },
+    {
       "type": "session.close",
       "name": "SessionClose",
       "direction": "console_to_node",

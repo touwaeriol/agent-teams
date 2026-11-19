@@ -31,7 +31,7 @@
 
 | 方向 | 可靠（有 `seq`，需 ACK，可重放） | 不可靠（无 `seq`，丢了无所谓） |
 | --- | --- | --- |
-| 控制台 → 守护进程 | 所有命令（`session.*`、`approval.resolve`、`tool.result`、`git.*`、`cred.response`、`node.*`、`run.*`） | `ack`、`pong` 类 |
+| 控制台 → 守护进程 | 所有命令（`session.*`、`approval.resolve`、`tool.result`、`git.*`、`cred.response`、`node.*`、`run.*`） | `ack`、`pong` 类、`node.usage_refresh` |
 | 守护进程 → 控制台 | 会话事件、命令结果、审批请求/取消、工具调用、git 结果 | `ack`、`stream.delta`（逐字输出，可选）、`log` |
 
 - **ACK**：`{type:"ack", body:{seq: N}}` 表示“seq ≤ N 的可靠消息我已持久处理”。接收方至少每 200 ms 或每 50 条发一次累计 ACK。
@@ -414,7 +414,8 @@
 | `node.upgrade` | 控制台 → | `version`, `sha256`, `signature` | 下载地址**不由消息指定**：固定为本链路所连控制台的 `<console>/node/dist/agent-teams-node-<version>.tgz`（`version` 须匹配 `^\d+\.\d+\.\d+$`）。守护进程校验 sha256，再用安装时固化在 `~/.config/agent-teams/release.pub` 的发布公钥（Ed25519，`install-node.sh` 写入，换钥需重新运行安装脚本）验证 tgz 的签名；都通过才解包到 `node-<ver>/`、原子切换 `current` 软链、`exit 75` 由 systemd 重启。失败回 `node.upgrade_result {ok:false, error}`。被攻破的控制台无法让节点运行未经发布密钥签名的代码 |
 | `node.drain` | 控制台 → | `deadline_s` | 不再接受新会话；空闲会话停放；用于节点维护 |
 | `node.stats` | 守护进程 → | `active_sessions`, `parked_sessions`, `queued`, `mem_mb`, `load1`, `disk_free_mb` | 每 30 s，不可靠；机房机柜灯数据 |
-| `node.usage` | 守护进程 → | `runtimes` | 不可靠；hello 后和之后定期上报 Claude Code / Codex 的订阅余量：`runtimes.claude`/`runtimes.codex` 各为 `{auth, status, plan?, windows?: [{key, used_percent, window_minutes?, resets_at?}], error?, fetched_at?}`。不带凭证；控制台只保存每个节点最近一次上报（内存），校验后通过 `NodeView.usage` 返回 |
+| `node.usage` | 守护进程 → | `runtimes` | 不可靠；hello 后和之后定期上报 Claude Code / Codex 的订阅余量：`runtimes.claude`/`runtimes.codex` 各为 `{auth, status, plan?, windows?: [{key, label?, used_percent, window_minutes?, resets_at?}], error?, fetched_at?}`（`key`：`five_hour`/`weekly`/`weekly_opus`/`weekly_sonnet`/`weekly_model`，Codex 为 `primary`/`secondary`；`label` 是服务方给的显示名，如 `weekly_model` 窗口的模型名，最多保留 40 字符）。不带凭证；控制台只保存每个节点最近一次上报（内存），校验后通过 `NodeView.usage` 返回；收到 `node.usage_refresh` 后立即采集并回一条 |
+| `node.usage_refresh` | 控制台 → | `runtimes?` | 不可靠；立即采集一次订阅余量并回 `node.usage`（`runtimes` 省略 = 全部）。只在 `hello.features` 含 `usage` 时发；由 `POST /api/nodes/{id}/usage/refresh` 触发（api.md） |
 | `log` | 守护进程 → | `level`, `msg`, `fields` | 不可靠；只发 warn 及以上 |
 | `error` | 双向 | `ref_id`, `code`, `message` | 对某条消息的协议级错误：`bad_schema`、`unsupported`、`unknown_session`、`busy` |
 

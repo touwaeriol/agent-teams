@@ -4271,6 +4271,43 @@ type NodeUsage struct {
 	Runtimes NodeUsageRuntimes `json:"runtimes"`
 }
 
+// Fetch the subscription quota now and answer with node.usage (unreliable). Sent
+// only when hello.features contains usage.
+type NodeUsageRefresh struct {
+	// Runtimes to fetch; omitted = all.
+	Runtimes []NodeUsageRefreshRuntimesElem `json:"runtimes,omitempty,omitzero"`
+}
+
+type NodeUsageRefreshRuntimesElem string
+
+const NodeUsageRefreshRuntimesElemClaude NodeUsageRefreshRuntimesElem = "claude"
+const NodeUsageRefreshRuntimesElemCodex NodeUsageRefreshRuntimesElem = "codex"
+
+var enumValues_NodeUsageRefreshRuntimesElem = []interface{}{
+	"claude",
+	"codex",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *NodeUsageRefreshRuntimesElem) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_NodeUsageRefreshRuntimesElem {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_NodeUsageRefreshRuntimesElem, v)
+	}
+	*j = NodeUsageRefreshRuntimesElem(v)
+	return nil
+}
+
 type NodeUsageRuntimes struct {
 	// Claude corresponds to the JSON schema field "claude".
 	Claude *RuntimeUsage `json:"claude,omitempty,omitzero"`
@@ -8473,9 +8510,13 @@ func (j *UploadID) UnmarshalJSON(value []byte) error {
 }
 
 type UsageWindow struct {
-	// five_hour, weekly, weekly_opus, weekly_sonnet (Claude); primary, secondary
-	// (Codex).
+	// five_hour, weekly, weekly_opus, weekly_sonnet, weekly_model (per-model weekly
+	// window, see label) (Claude); primary, secondary (Codex).
 	Key string `json:"key"`
+
+	// Display name given by the provider, e.g. the model of a weekly_model window;
+	// the console keeps at most 40 characters.
+	Label *string `json:"label,omitempty,omitzero"`
 
 	// ResetsAt corresponds to the JSON schema field "resets_at".
 	ResetsAt *time.Time `json:"resets_at,omitempty,omitzero"`

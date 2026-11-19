@@ -1137,6 +1137,17 @@
   },
   {
     "v": 2,
+    "type": "node.usage_refresh",
+    "id": "c_01JD3V0000000000000000R01",
+    "ts": "2026-11-14T12:04:06Z",
+    "body": {
+      "runtimes": [
+        "claude"
+      ]
+    }
+  },
+  {
+    "v": 2,
     "type": "node.stats",
     "id": "n_01JD3V0000000000000000010",
     "ts": "2026-11-14T12:04:04Z",
@@ -1152,7 +1163,7 @@
   {
     "v": 2,
     "type": "node.usage",
-    "id": "n_01JD3V000000000000000010U",
+    "id": "n_01JD3V0000000000000000U01",
     "ts": "2026-11-14T12:04:05Z",
     "body": {
       "runtimes": {
@@ -1170,6 +1181,13 @@
             {
               "key": "weekly",
               "used_percent": 17.5,
+              "window_minutes": 10080,
+              "resets_at": "2026-11-18T00:00:00Z"
+            },
+            {
+              "key": "weekly_model",
+              "label": "Fable",
+              "used_percent": 8,
               "window_minutes": 10080,
               "resets_at": "2026-11-18T00:00:00Z"
             }
