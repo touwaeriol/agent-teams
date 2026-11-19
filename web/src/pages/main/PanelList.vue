@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The right panel before a thread is opened: "讨论串" with search, filter, expand and close;
 // the project's newest deliverables; then the thread list in status groups (folds per user):
-// 交付物 → 等你处理 → 进行中 → 空闲 → 已完成 → 已归档. With `sheet` (the phone overview) the
+// 交付物 → 等你处理 → 进行中 → 已暂停 → 已完成 → 已归档. With `sheet` (the phone overview) the
 // header is the caller's: only the search box (opened from there) and the list show.
 import { Filter, Maximize2, Minimize2, Search, X } from "lucide-vue-next";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
