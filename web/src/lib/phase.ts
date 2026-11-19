@@ -47,8 +47,16 @@ export type PhaseId =
   | "queued"
   /** Running and someone works for this thread right now. */
   | "working"
-  /** Running, nobody working here, but small tasks are still open (waiting to be claimed, or the member is busy elsewhere). */
+  /** Running, nobody working here, but small tasks are still open (to be claimed, claimed, in review or merging; or the member is busy elsewhere). */
   | "tasks"
+  /** Running, nothing else going, and the lead has not said anything yet: it is reading the brief. */
+  | "reading"
+  /** Running, nothing else going, the lead's session waits for a free slot on its node. */
+  | "lead_queued"
+  /** Running, nothing else going, the lead waits on someone other than the user (a card to the coordinator, a task in review). */
+  | "lead_waiting"
+  /** Running, nothing else going, the lead's node is offline or its session crashed: nothing moves until the user looks. */
+  | "lead_down"
   /** In review under merge_policy pr / auto: the platform waits on the PR's checks by itself. */
   | "checks"
   | "paused";
@@ -85,7 +93,7 @@ export function pauseLine(reason: string): string {
 
 export type PhaseInput = Pick<
   ThreadView,
-  "no" | "status" | "members" | "counts" | "merge_policy" | "merge_error" | "queue_position" | "pause_reason" | "pr_number" | "reminded_at"
+  "no" | "status" | "members" | "counts" | "merge_policy" | "merge_error" | "queue_position" | "pause_reason" | "pr_number" | "reminded_at" | "lead_last"
 >;
 
 const phase = (id: PhaseId, group: ListGroupId, mark: RowMark, note: string, label: string = MARK_LABEL[mark]): ThreadPhase => ({ id, group, mark, label, note });
@@ -94,8 +102,10 @@ const phase = (id: PhaseId, group: ListGroupId, mark: RowMark, note: string, lab
  * The thread's state. In order: archived; a fired reminder; done / failed; waiting on the user
  * (acceptance, status waiting, an open card, or one the caller knows about in `waiting`); queued;
  * paused; review under pr / auto (进行中, waiting on checks); running with someone working here
- * (进行中); running with small tasks still open (进行中, waiting for members); running with nothing
- * going (the lead replied and stopped: 等你处理).
+ * (进行中); running with small tasks still open (进行中, members handle them); then, with nothing
+ * else going, by the lead's own state: offline or crashed (等你处理: nothing moves until the user
+ * looks at the node), queued for a slot (进行中: it comes up by itself), waiting on someone else
+ * (进行中); it has not spoken yet (进行中: reading the brief); else it replied and stopped (等你处理).
  */
 export function threadPhase(t: PhaseInput, waiting?: Map<number, QuestionView>): ThreadPhase {
   if (t.status === "archived") return phase("archived", "archived", "archived", "");
@@ -108,7 +118,20 @@ export function threadPhase(t: PhaseInput, waiting?: Map<number, QuestionView>):
   if (t.status === "paused") return phase("paused", "idle", "paused", pauseLine(t.pause_reason));
   if (t.status === "review") return phase("checks", "active", "working", REVIEW_LINE[t.merge_policy] ?? REVIEW_LINE.pr);
   if (t.members.some(workingHere)) return phase("working", "active", "working", liveLine(t) || "进行中");
-  if (openTasks(t) > 0) return phase("tasks", "active", "working", "等成员领取任务");
+  if (openTasks(t) > 0) return phase("tasks", "active", "working", "等成员处理任务");
+  const lead = t.members.find((m) => m.tier === "lead");
+  switch (lead?.status?.state) {
+    case "offline":
+      return phase("lead_down", "waiting", "wait", "组长离线：节点不在线，节点上线后才能继续");
+    case "broken":
+      return phase("lead_down", "waiting", "wait", "组长的会话出错了，需要你看一下");
+    case "queued":
+      return phase("lead_queued", "active", "queued", "等组长上线（节点工位已满，排队中）");
+    case "waiting":
+    case "raising_hand":
+      return phase("lead_waiting", "active", "working", "组长在等别人回复");
+  }
+  if (!t.lead_last) return phase("reading", "active", "working", "组长正在阅读任务");
   return phase("replied", "waiting", "wait", "组长已回复，等你回复");
 }
 
@@ -129,7 +152,14 @@ export function phaseLine(t: PhaseInput): { text: string; spin: boolean } | null
     case "working":
       return leadLine() ?? { text: "成员正在干活…", spin: true };
     case "tasks":
+    case "lead_waiting":
       return { text: p.note, spin: true };
+    case "reading":
+      return { text: "组长正在阅读任务…", spin: true };
+    case "lead_queued":
+      return { text: p.note, spin: true };
+    case "lead_down":
+      return { text: p.note, spin: false };
     case "checks":
       return { text: t.pr_number ? `PR #${t.pr_number} ${p.note}` : p.note, spin: true };
     case "replied":

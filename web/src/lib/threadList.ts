@@ -116,14 +116,14 @@ const firstLine = (s: string) => s.split("\n").map((l) => l.trim()).find(Boolean
 
 /**
  * The grey line under a title: what waits on the user; "组长已回复：…" when the lead replied and stopped;
- * 等成员领取任务 while small tasks wait for members; else the lead's latest message (first line), the summary, the brief.
+ * threadPhase's note while small tasks are open or the lead reads / queues / waits / is down; else the lead's latest message (first line), the summary, the brief.
  */
 export function rowLine(t: ThreadView, open?: QuestionView): string {
   if (!open && t.counts.waiting > 0 && t.status !== "review") return liveLine(t) || firstLine(threadLine(t));
   if (!open) {
     const p = threadPhase(t);
     if (p.id === "replied") return t.lead_last?.text ? `组长已回复：${firstLine(t.lead_last.text)}` : p.note;
-    if (p.id === "tasks") return p.note;
+    if (p.id === "tasks" || p.id === "reading" || p.id === "lead_queued" || p.id === "lead_waiting" || p.id === "lead_down") return p.note;
   }
   return firstLine(threadLine(t, open));
 }

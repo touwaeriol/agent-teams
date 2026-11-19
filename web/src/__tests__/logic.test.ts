@@ -137,7 +137,7 @@ describe("events → cache", () => {
   it("live frames move a thread between list groups without a refetch (list item and open thread alike)", () => {
     const qc = new QueryClient();
     const lead = { id: "lead", name: "lead-20", tier: "lead", status: { state: "typing" } } as unknown as ThreadView["members"][number];
-    const t20 = thread(20, { members: [lead], counts: { ...thread(20).counts, tasks_open: 0 } });
+    const t20 = thread(20, { members: [lead], counts: { ...thread(20).counts, tasks_open: 0 }, lead_last: { text: "好了", at: "" } });
     qc.setQueryData(keys.threads("p1"), [t20]);
     qc.setQueryData(keys.thread(t20.id), { ...t20, questions: [] });
     const listed = () => qc.getQueryData<ThreadView[]>(keys.threads("p1"))![0];
@@ -148,7 +148,7 @@ describe("events → cache", () => {
     applyProjectEvent(qc, "p1", "status", { seq: 1, at: "", employee: { id: "lead", thread_no: 20 }, status: { state: "idle" } } satisfies StatusFrame);
     expect(groups()).toEqual(["waiting", "waiting"]);
     expect(typingLine(opened())).toEqual({ text: "组长已回复，等你回复", spin: false });
-    // A task frame carries the thread's counts: a new open task puts it back to 进行中 (等成员领取任务).
+    // A task frame carries the thread's counts: a new open task puts it back to 进行中 (等成员处理任务).
     applyProjectEvent(qc, "p1", "task", { thread_no: 20, task: task("t1"), counts: { ...t20.counts, tasks_total: 1, tasks_open: 1 } });
     expect(groups()).toEqual(["active", "active"]);
     expect(listed().counts.tasks_open).toBe(1);

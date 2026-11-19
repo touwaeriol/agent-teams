@@ -36,9 +36,11 @@ describe("thread panel", () => {
     const open = { counts: { ...thread(1).counts, tasks_open: 2 } };
     expect(typingLine(t("running", "typing"))).toEqual({ text: "组长正在回复…", spin: true });
     // The lead stopped and nothing else is going: the ball is with the user, no spinner.
-    expect(typingLine(t("running", "idle"))).toEqual({ text: "组长已回复，等你回复", spin: false });
+    expect(typingLine(t("running", "idle", { lead_last: { text: "好了", at: "" } }))).toEqual({ text: "组长已回复，等你回复", spin: false });
+    // Before the lead's first word it is reading the brief.
+    expect(typingLine(t("running", "idle"))).toEqual({ text: "组长正在阅读任务…", spin: true });
     // Small tasks still open (queued for members, or a member busy in another thread).
-    expect(typingLine(t("running", "idle", open))).toEqual({ text: "等成员领取任务", spin: true });
+    expect(typingLine(t("running", "idle", open))).toEqual({ text: "等成员处理任务", spin: true });
     expect(typingLine(thread(1, { members: [member("lead-1", "idle"), member("dev-1", "typing")] }))).toEqual({ text: "成员正在干活…", spin: true });
     expect(typingLine(t("paused", "idle"))).toEqual({ text: "讨论串已暂停", spin: false });
     expect(typingLine(t("queued", null))).toEqual({ text: "排队中，等节点空出来", spin: true });

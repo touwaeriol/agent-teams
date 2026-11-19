@@ -43,9 +43,9 @@ describe("listGroupOf", () => {
     expect(listGroupOf(thread(1, { status: "paused", members: [member("typing")] }))).toBe("idle");
   });
   it("running with nobody working and no small task left: the lead replied, 等你处理", () => {
-    expect(listGroupOf(thread(1, { members: [member("idle")] }))).toBe("waiting");
+    expect(listGroupOf(thread(1, { members: [member("idle")], lead_last: { text: "好了", at: "" } }))).toBe("waiting");
     // A shared member typing for another thread does not make this one active.
-    expect(listGroupOf(thread(1, { members: [{ ...member("typing"), busy_elsewhere: true, thread_no: 2 }] }))).toBe("waiting");
+    expect(listGroupOf(thread(1, { members: [{ ...member("typing"), busy_elsewhere: true, thread_no: 2 }], lead_last: { text: "好了", at: "" } }))).toBe("waiting");
     // ... but its task here still waits for it: 进行中.
     expect(listGroupOf(thread(1, { members: [{ ...member("typing"), busy_elsewhere: true, thread_no: 2 }], counts: counts({ tasks_open: 1 }) }))).toBe("active");
     // Older servers without tasks_open: everything not done counts as open.
@@ -100,10 +100,10 @@ describe("rows", () => {
     expect(rowLine(thread(1, { members: [member("typing")], summary: "总结" }))).toBe("总结");
     expect(rowLine(thread(1, { members: [member("typing")] }))).toBe("brief");
     // Nobody working, small tasks open: says so.
-    expect(rowLine(thread(1, { counts: going, lead_last: { text: "派好了", at: "" } }))).toBe("等成员领取任务");
+    expect(rowLine(thread(1, { counts: going, lead_last: { text: "派好了", at: "" } }))).toBe("等成员处理任务");
     // The lead replied and stopped.
     expect(rowLine(thread(1, { lead_last: { text: "\n做完了\n细节", at: "" } }))).toBe("组长已回复：做完了");
-    expect(rowLine(thread(1))).toBe("组长已回复，等你回复");
+    expect(rowLine(thread(1))).toBe("组长正在阅读任务");
   });
   it("shortAgo", () => {
     const now = Date.parse("2026-11-16T12:00:00Z");
@@ -180,7 +180,7 @@ describe("list layout (Claude app style)", () => {
   it("the header mark follows the list: spinner working, orange waiting, dashed paused, ✓ done, ✕ failed", () => {
     expect(threadMark(thread(1, { members: [member("typing")] }))).toBe("working");
     expect(threadMark(thread(1, { status: "review" }))).toBe("wait");
-    expect(threadMark(thread(1, { members: [member("idle")] }))).toBe("wait");
+    expect(threadMark(thread(1, { members: [member("idle")], lead_last: { text: "好了", at: "" } }))).toBe("wait");
     expect(threadMark(thread(1, { status: "paused" }))).toBe("paused");
     expect(threadMark(thread(1, { status: "done" }))).toBe("done");
     expect(threadMark(thread(1, { status: "failed" }))).toBe("failed");

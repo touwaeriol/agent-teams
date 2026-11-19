@@ -41,6 +41,10 @@ const KIND_OF: Record<PhaseId, ThreadKind> = {
   queued: "queued",
   working: "doing",
   tasks: "doing",
+  reading: "doing",
+  lead_queued: "queued",
+  lead_waiting: "doing",
+  lead_down: "wait",
   checks: "doing",
   paused: "paused",
 };

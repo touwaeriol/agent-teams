@@ -12,7 +12,7 @@ export function detailViewOf(value: unknown): ThreadViewId | null {
 /**
  * The quiet line at the bottom of a thread's chat while it is going: from threadPhase, so it says
  * what the list and the header say (组长已回复，等你回复 without a spinner once the lead stopped and
- * nothing else is going; 等成员领取任务 while small tasks wait for members).
+ * nothing else is going; 等成员处理任务 while small tasks are open; 组长正在阅读任务 before its first word).
  */
 export const typingLine = (thread: PhaseInput): { text: string; spin: boolean } | null => phaseLine(thread);
 
