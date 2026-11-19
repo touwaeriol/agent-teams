@@ -84,6 +84,7 @@ p, user, /api/nodes/:id/logs, GET
 p, user, /api/nodes/:id/sessions, GET
 p, user, /api/nodes/:id/token, POST
 p, user, /api/nodes/:id/upgrade, POST
+p, user, /api/nodes/:id/usage/refresh, POST
 p, user, /api/office/layout, GET
 p, user, /api/office/layouts/:id, GET
 p, user, /api/plugins, GET
