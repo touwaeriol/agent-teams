@@ -3,11 +3,11 @@ import { Square } from "lucide-vue-next";
 import { computed } from "vue";
 import { conversations } from "@/api/actions";
 import { useAction } from "@/api/mutations";
-import { keys, useMe } from "@/api/queries";
+import { useSendMessage } from "@/api/pending";
+import { useMe } from "@/api/queries";
 import type { CoordinatorView } from "@/api/views";
 import { useAttachments } from "@/components/app/attachments";
 import Composer from "@/components/app/Composer.vue";
-import type { MessageRef } from "@/components/app/composer/assist";
 import { draftKey } from "@/lib/persist";
 import { coordinatorBusy } from "./logic";
 
@@ -17,9 +17,8 @@ const me = useMe();
 // Drafts (text, attachments, @ references) are kept per viewer and conversation across remounts.
 const draft = computed(() => draftKey(me.data.value?.id ?? (me.isError.value ? "anon" : undefined), props.pid, cid.value));
 const attachments = useAttachments(() => props.pid, undefined, draft);
-const send = useAction((v: { text: string; images: string[]; refs: MessageRef[] }) => conversations.send(cid.value, v.text, false, v.images, v.refs), {
-  invalidate: () => [keys.messages(cid.value)],
-});
+// The message shows in the chat at once (api/pending.ts); the box does not wait for the server.
+const send = useSendMessage(() => cid.value, { draft: () => draft.value, attachments, assist: () => ({ scope: "coordinator", pid: props.pid, cid: cid.value }) });
 const stop = useAction(() => conversations.interrupt(cid.value), { success: "已让统筹停下" });
 const name = computed(() => props.coordinator?.employee.name ?? "leader");
 </script>
@@ -32,9 +31,8 @@ const name = computed(() => props.coordinator?.employee.name ?? "leader");
       :label="`给 ${name} 发消息`"
       :placeholder="`说需求或问进度，${name} 会开讨论串去做；/ 命令，@ 引用文件和讨论串`"
       :hint="`${name} 只分派、不改代码`"
-      :busy="send.isPending.value"
       :attachments="attachments"
-      :on-send="(text: string, images: string[], refs: MessageRef[]) => send.mutateAsync({ text, images, refs })"
+      :on-send="send"
       :assist="{ pid, cid, scope: 'coordinator' }"
       :draft-key="draft"
     >

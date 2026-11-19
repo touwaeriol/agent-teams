@@ -50,7 +50,7 @@ describe("Composer", () => {
     expect(onSend).not.toHaveBeenCalled();
     await box.trigger("keydown", { key: "Enter" });
     await flushPromises();
-    expect(onSend).toHaveBeenCalledWith("hello", [], []);
+    expect(onSend).toHaveBeenCalledWith("hello", [], [], []);
     expect((box.element as HTMLTextAreaElement).value).toBe("");
   });
   it("puts the text back when sending fails", async () => {
