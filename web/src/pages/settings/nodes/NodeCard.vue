@@ -54,14 +54,14 @@ const upgrade = useAction(() => nodeActions.upgrade(props.node.id), { success: "
         <span>槽位（同时运行的会话）</span>
         <span>{{ node.active_sessions }} / {{ slots || "—" }}{{ node.queued ? ` · 排队 ${node.queued}` : "" }}</span>
       </span>
-      <ProgressBar :pct="slotPct(node)" tone="#2F6FDB" :height="6" />
+      <span class="flex"><ProgressBar :pct="slotPct(node)" tone="#2F6FDB" :height="6" /></span>
     </div>
     <div class="flex flex-wrap gap-2 text-[13px]">
-      <div v-for="[key, label] in RUNTIMES" :key="key" class="flex min-w-[260px] flex-1 basis-0 flex-col gap-1.5 rounded-lg border border-[#EFEDE8] bg-background px-2.5 py-1.5" :data-runtime="key">
+      <div v-for="[key, label] in RUNTIMES" :key="key" class="flex min-w-[260px] flex-1 basis-0 flex-col gap-1.5 rounded-lg border border-[#EFEDE8] bg-background px-2.5 dark:border-border py-1.5" :data-runtime="key">
         <span class="flex flex-wrap items-center gap-x-2">
           <span class="font-medium">{{ label }}</span>
-          <span class="font-mono text-xs text-[#4A4843]">{{ runtimeLine(key, runtimes[key]).ver }}</span>
-          <span class="text-xs" :style="{ color: runtimeLine(key, runtimes[key]).ok ? '#2E7D4F' : '#B4530B' }">{{ runtimeLine(key, runtimes[key]).login }}</span>
+          <span class="font-mono text-xs text-[#4A4843] dark:text-foreground/70">{{ runtimeLine(key, runtimes[key]).ver }}</span>
+          <span class="text-xs" :style="{ color: runtimeLine(key, runtimes[key]).ok ? 'hsl(var(--ok))' : 'hsl(var(--warn))' }">{{ runtimeLine(key, runtimes[key]).login }}</span>
         </span>
         <template v-if="usage[key]?.kind === 'windows'">
           <div class="grid grid-cols-[auto_minmax(40px,1fr)_auto_auto] items-center gap-x-2 gap-y-1 text-xs">
