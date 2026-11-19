@@ -17,7 +17,31 @@ export type ProjectUpdate = S["ProjectUpdate"];
 export type DeliverySettings = S["Delivery"];
 export type MemoryBrief = S["MemoryBrief"];
 export type MemoryFileView = S["MemoryFile"];
-export type NodeView = S["NodeView"];
+/** usage: subscription quota per runtime (server fills it in; null or missing = no data yet). */
+export type NodeView = Omit<S["NodeView"], "usage"> & { usage?: NodeUsage | null };
+
+export type UsageWindowKey = "five_hour" | "weekly" | "weekly_opus" | "weekly_sonnet" | "weekly_model" | "primary" | "secondary";
+export interface UsageWindow {
+  key: UsageWindowKey;
+  used_percent: number;
+  window_minutes?: number;
+  /** Display name from the server (e.g. the model of a weekly_model window). */
+  label?: string;
+  resets_at: string | null;
+}
+export interface RuntimeUsage {
+  auth: "subscription" | "chatgpt" | "api_key" | "none";
+  status: "ok" | "error" | "unsupported";
+  plan?: string;
+  windows: UsageWindow[] | null;
+  error?: string;
+  fetched_at: string;
+  received_at: string;
+}
+export interface NodeUsage {
+  claude?: RuntimeUsage;
+  codex?: RuntimeUsage;
+}
 export type NodeSession = S["NodeSession"];
 export type FeedbackView = S["FeedbackView"];
 export type Enrollment = S["Enrollment"];
