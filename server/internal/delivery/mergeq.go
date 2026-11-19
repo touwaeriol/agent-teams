@@ -137,6 +137,7 @@ func (e *Engine) Tick(ctx context.Context) {
 		}
 	}
 	e.prTick(ctx)
+	e.doneTick(ctx)
 }
 
 // step advances the first active entry of each repository of the thread by one state.

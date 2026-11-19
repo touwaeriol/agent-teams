@@ -458,6 +458,9 @@ func (o *Orchestrator) notifyCoordinator(ctx context.Context, tx *core.Tx, t cor
 	if err != nil {
 		return err
 	}
+	if line == "" && next == "done" {
+		line = summaryLine(ctx, tx, t.ID)
+	}
 	if line == "" {
 		line = o.leadLine(ctx, tx, t.ID)
 	}
@@ -468,11 +471,22 @@ func (o *Orchestrator) notifyCoordinator(ctx context.Context, tx *core.Tx, t cor
 	return err
 }
 
+// summaryLine is the first line of the thread's summary (finish), "" when it has none.
+func summaryLine(ctx context.Context, q core.DB, threadID string) string {
+	var summary string
+	_ = q.Gorm(ctx).Table("at_threads").Select("summary").Where("id = ?", threadID).Scan(&summary).Error
+	return firstLine(summary)
+}
+
+// leadLine is the first line of the lead's latest reply.
 func (o *Orchestrator) leadLine(ctx context.Context, q core.DB, threadID string) string {
 	var m core.Message
 	_ = q.Gorm(ctx).Select("content").Where("conversation_id = ? AND role = 'leader'", threadID).Order("id DESC").
 		Take(&m).Error
-	text := m.Content
+	return firstLine(m.Content)
+}
+
+func firstLine(text string) string {
 	line := strings.SplitN(strings.TrimSpace(text), "\n", 2)[0]
 	r := []rune(line)
 	if len(r) > 200 {

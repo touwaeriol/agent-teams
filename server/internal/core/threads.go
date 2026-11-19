@@ -142,7 +142,8 @@ func SetThreadStatus(ctx context.Context, tx *Tx, id, status, pauseReason string
 	var prev string
 	err := store.QueryRow(ctx, tx, `UPDATE at_threads t SET status = $2, pause_reason = $3, updated_at = now(),
 		started_at = CASE WHEN $2 = 'running' AND t.started_at IS NULL THEN now() ELSE t.started_at END,
-		finished_at = CASE WHEN $2 IN ('done','failed','archived') THEN COALESCE(t.finished_at, now()) ELSE t.finished_at END
+		finished_at = CASE WHEN $2 IN ('done','failed','archived') THEN COALESCE(t.finished_at, now()) ELSE t.finished_at END,
+		done_pending_at = CASE WHEN $2 IN ('done','failed','archived') THEN NULL ELSE t.done_pending_at END
 		FROM at_threads old WHERE t.id = $1 AND old.id = t.id RETURNING old.status`, id, status, pauseReason).Scan(&prev)
 	return prev, MapErr(err)
 }
