@@ -335,8 +335,6 @@ Host staging
   ProxyCommand /usr/bin/node /…/agent-teams-node ssh-proxy --server staging
 Host prod staging
   IdentityAgent /run/user/1000/agent-teams-ssh/s_01JD…/agent.sock
-  IdentitiesOnly yes
-  IdentityFile none
   UserKnownHostsFile /run/user/1000/agent-teams-ssh/s_01JD…/known_hosts
   GlobalKnownHostsFile /dev/null
   StrictHostKeyChecking yes
@@ -348,6 +346,7 @@ Host prod staging
 ```
 
 - ProxyCommand 的参数里**没有秘密**：`ssh-proxy` 子命令从自己继承的环境里读 `AT_CRED_SESSION`/`AT_CRED_SECRET`（ssh 会把环境原样传给 ProxyCommand），像 `git-credential` 一样连 socket（`node/src/cred/helper.ts` 的 `askSocket` 同一套格式，`op: "ssh"`），守护进程核对秘密后把这条 unix 连接和新开的 `/nodes/ssh` WS 对接成管道。
+- 不写 `IdentitiesOnly yes`：OpenSSH 在它打开时只用“配置里列出的密钥文件”，会把 agent 提供的证书挡掉；员工的 HOME（`<root>/agent-home/`）下没有 `~/.ssh/id_*`，所以 ssh 实际只会出示 agent 里那张证书。
 - `ControlMaster no`：第一期不复用连接，避免主连接进程在会话结束后还活着（ansible 自己的 ControlPersist 见 §7.3）。
 - 只想“零文件”的话也可以全部改用命令行 `-o` 选项加 `KnownHostsCommand`（OpenSSH 8.5+），代价是包装脚本复杂、老版本 ssh 不支持；这些文件不含秘密、在 tmpfs、会话结束删除，推荐保留文件方案。
 
@@ -639,7 +638,7 @@ sequenceDiagram
 
 同一方案也用于会话 CA 私钥、网关 host key（AAD = 设置键名）。现有 PAT、App 私钥第一期**不迁移**（不在本需求范围），列为后续收敛项。
 
-### 11.2 数据表草案（迁移 `server/migrations/00310_remote_servers.sql`）
+### 11.2 数据表草案（新增迁移 `server/migrations/00310_remote_servers.sql`）
 
 按 `data-model.md` §0 的约定：前缀 `at_`、新表主键是带类型前缀的 ULID、时间 `TIMESTAMPTZ NOT NULL DEFAULT now()`、能经 `project_id` 追到用户并级联删除。当前最新迁移是 `00300_task_downstream.sql`，所以编号用 00310。
 
@@ -934,6 +933,8 @@ sequenceDiagram
 | R7 平台当 CA，给会话签短期 SSH 用户证书，只用于节点 → 网关 | §4 全章（CA、密钥对、证书内容、有效期、绑定、吊销、与逐次校验的关系、与 bearer 令牌的对比） |
 
 ## 附录 A：引用的现有代码位置（均已打开核对）
+
+正文里另有四个路径是本设计**计划新增**的，现在还不存在：`server/internal/sshgw`（及其中的 `redact.go`）、`server/migrations/00310_remote_servers.sql`、`web/src/pages/projectSettings/ServersSection.vue`。下表只列现有的。
 
 | 路径 | 用到的内容 |
 | --- | --- |

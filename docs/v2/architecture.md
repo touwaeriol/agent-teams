@@ -513,6 +513,7 @@ v1 在每次运行开始把 `GH_TOKEN` 放进环境。v2 会话是常驻的，�
 - **能做什么、不能做什么**：员工能 fetch、推送非保护分支、开 PR/评论/审查、看 CI；推送基准/默认/讨论串分支由 pre-push 钩子拒绝（§8.1），合并 PR 由 PreToolUse 拒绝 `gh pr merge` 和 `gh api …/merge`，合并只走合并队列和用户验收。这些是给出清楚报错的软防线，硬防线是 GitHub 规则集（App 是唯一绕过者）。
 - `gh`：员工节点通常没装 gh。守护进程启动时（以及第一次用时）把锁定版本的官方发行包（`git/gh-install.ts`，`gh 2.103.3`，linux amd64/arm64 tar.gz、macOS zip）下到 `<data>/agent-teams/tools/gh-<ver>/`，sha256 必须同时等于代码里锁定的值和该发行版的 `gh_<ver>_checksums.txt`；PATH 上已有 gh 时直接用。会话 PATH 最前面是平台目录 `<data>/agent-teams/platform/bin`（员工不可写），里面的 `gh` 包装脚本执行 `agent-teams-node gh`：通过 cred socket（`op: "gh"`，带每会话秘密）向守护进程要真实 gh 的路径、一个空的每会话 `GH_CONFIG_DIR`（`<data>/agent-teams/gh-config/<session>`，会话结束删除，不在 worktree 里）和令牌，再以 `GH_TOKEN`/`GITHUB_TOKEN`、`GH_HOST=github.com`、`GH_PROMPT_DISABLED=1`、`GH_NO_UPDATE_NOTIFIER=1` 运行真实 gh；令牌只存在于那一次 gh 进程的环境里，不进会话环境、不写任何文件。仓库按 `-R/--repo`、`GH_REPO`、cwd 的 origin、员工目录下唯一的仓库子目录依次确定；确定不了时 gh 照常运行但不带令牌，并在 stderr 说明。系统提示词告诉组长和成员 gh 已安装并自动带令牌、讨论串 PR 用 `open_pr`、不要用 gh 合并。
 - **已知限制**：`sandbox` 隔离级别的节点上，Bash 沙箱的 `denyRead` 包含 `$XDG_RUNTIME_DIR/agent-teams`（cred socket 所在目录），沙箱里的 git/gh 连不上 socket，拿不到令牌（与之前的只读令牌相同，尚未解决）；`none`（目前生产的两台节点）和 `agent_user` 不受影响。
+- 远程服务器（SSH）访问与 GitHub 凭证的后续收敛见 `remote-servers.md`（设计稿）。
 
 ### 10.5 秘密与密钥
 
