@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"sync"
@@ -224,6 +225,40 @@ func TestNodeUsageRefresh(t *testing.T) {
 	}
 	if _, err := n.Wait(ctx, "node.usage_refresh", nil); err != nil {
 		t.Fatal(err)
+	}
+
+	// The caller that started a refresh goes away: it gets stale data at once, and once the wait
+	// has run out the next refresh asks the node again and gets its answer.
+	gone, leave := context.WithCancel(ctx)
+	left := make(chan bool, 1)
+	go func() {
+		_, stale, err := w.e.Gateway.RefreshUsage(gone, node.Node.ID)
+		left <- stale && err == nil
+	}()
+	if _, err := n.Wait(ctx, "node.usage_refresh", nil); err != nil {
+		t.Fatal(err)
+	}
+	leave()
+	if !<-left {
+		t.Fatal("cancelled refresh: want stale, no error")
+	}
+	time.Sleep(1200 * time.Millisecond) // > RefreshWait: the abandoned wait has ended by itself
+	go func() {
+		var r refreshResult
+		code, raw := b.do("POST", path, nil)
+		if code != 200 || json.Unmarshal(raw, &r) != nil {
+			r.Stale = true
+		}
+		results <- r
+	}()
+	if _, err := n.Wait(ctx, "node.usage_refresh", nil); err != nil {
+		t.Fatalf("refresh after a cancelled one: %v", err)
+	}
+	if err := n.SendUnreliable(ctx, "node.usage", report); err != nil {
+		t.Fatal(err)
+	}
+	if r := <-results; r.Stale || r.Usage == nil || r.Usage.Claude == nil {
+		t.Fatalf("refresh after a cancelled one: %+v", r)
 	}
 
 	n.Close()
