@@ -2,7 +2,7 @@
 // Message box. `large`: the coordinator chat (textarea + hint row); `inline`: one-line box for the
 // lead. Enter sends, Shift+Enter breaks; IME composition is respected. With `draftKey` the
 // unsent text survives reloads (localStorage). Slots: `hint` (left of the action row), `extra`.
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useDraft } from "@/lib/persist";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -57,8 +57,10 @@ const onScroll = (e: Event) => {
   scroll.value = { top: el.scrollTop, left: el.scrollLeft };
 };
 // The large box grows with its text (2 lines up to ~40% of the window), then scrolls inside.
-const grow = useAutoGrow(field, text, { onResize: (el) => (scroll.value = { top: el.scrollTop, left: el.scrollLeft }) });
+// It never squeezes the chat above it under 120px (short windows, attachments, the plan card).
+const grow = useAutoGrow(field, text, { keepVisible: 120, onResize: (el) => (scroll.value = { top: el.scrollTop, left: el.scrollLeft }) });
 // With a scrollbar the text wraps narrower; the overlay keeps the same right edge (px-4 = 16px).
+watch([imageCount, () => assist.panel.value, () => props.attachments?.items.value.length], () => grow.update(), { flush: "post" });
 const overlayStyle = computed(() => (grow.gutter.value ? { paddingRight: `${16 + grow.gutter.value}px` } : undefined));
 const speaking = computed(() => (voice.parts.value ? "text-transparent caret-foreground" : ""));
 

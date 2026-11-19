@@ -9,10 +9,30 @@ export const MAX_SHARE = 0.4;
 export const MAX_FLOOR = 160;
 export const defaultMaxHeight = () => Math.max(MAX_FLOOR, Math.round(window.innerHeight * MAX_SHARE));
 
+/**
+ * The scrolling area the box shares a column with (the chat above it): the nearest ancestor
+ * child that scrolls vertically, grows (flex) and does not contain the box.
+ */
+export function neighbourScroller(el: HTMLElement): HTMLElement | null {
+  for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
+    for (const child of Array.from(node.children) as HTMLElement[]) {
+      if (child.contains(el)) continue;
+      const cs = window.getComputedStyle(child);
+      if (/(auto|scroll)/.test(cs.overflowY) && parseFloat(cs.flexGrow) > 0) return child;
+    }
+  }
+  return null;
+}
+
 export interface AutoGrowOptions {
   minRows?: number;
   /** Largest height in px (border box); read on every measure so it follows the window. */
   maxHeight?: () => number;
+  /**
+   * Keep at least this many px of the neighbouring scroll area (the chat) visible: on short
+   * windows, with attachments or a plan card, the cap comes down so the chat is never squeezed out.
+   */
+  keepVisible?: number;
   /** Called after the box was resized (e.g. to re-sync an overlay with the new scroll position). */
   onResize?: (el: HTMLTextAreaElement) => void;
 }
@@ -113,7 +133,12 @@ export function useAutoGrow(field: Ref<Field>, value: MaybeRefOrGetter<string>, 
     const padBottom = px(cs.paddingBottom);
     const line = cs.lineHeight === "normal" || !px(cs.lineHeight) ? px(cs.fontSize) * 1.2 || 20 : px(cs.lineHeight);
     const min = Math.ceil(line * minRows + padTop + padBottom + borderY);
-    const max = Math.max(min, maxHeight());
+    let cap = maxHeight();
+    if (opts.keepVisible) {
+      const sc = neighbourScroller(ta);
+      if (sc) cap = Math.min(cap, ta.offsetHeight + sc.clientHeight - opts.keepVisible);
+    }
+    const max = Math.max(min, Math.floor(cap));
     const text = toValue(value);
     const content = measure(p, text, borderY);
     const next = Math.min(Math.max(content, min), max);

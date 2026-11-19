@@ -128,6 +128,42 @@ describe("useAutoGrow", () => {
     w.unmount();
   });
 
+  it("lowers the cap to keep the neighbouring chat visible", async () => {
+    const text = ref(lines(30));
+    // The chat and the box share a column: the chat gets what the box leaves.
+    let column = 362;
+    const C = defineComponent({
+      setup() {
+        const field = ref<HTMLTextAreaElement | null>(null);
+        useAutoGrow(field, text, { maxHeight: () => 400, keepVisible: 120 });
+        return () =>
+          h("div", { style: "display:flex;flex-direction:column" }, [
+            h("div", { "data-chat": "", style: "overflow-y:auto;flex-grow:1" }),
+            h("div", [h("textarea", { ref: field, value: text.value, style: `line-height:${LINE}px;padding-top:${PAD}px` })]),
+          ]);
+      },
+    });
+    const w = mount(C, { attachTo: document.body });
+    const chat = w.find("[data-chat]").element as HTMLElement;
+    const el = w.find("textarea").element as HTMLTextAreaElement;
+    const box = () => parseFloat(el.style.height) || 62;
+    Object.defineProperty(el, "offsetHeight", { configurable: true, get: box });
+    Object.defineProperty(chat, "clientHeight", { configurable: true, get: () => Math.max(0, column - box()) });
+    await nextTick();
+    expect(el.style.height).toBe("242px"); // 362 - 120 kept for the chat
+    expect(el.style.overflowY).toBe("auto");
+    window.dispatchEvent(new Event("resize"));
+    expect(el.style.height).toBe("242px"); // stable: its own height does not feed back
+    // less room (attachments, a plan card, a shorter window): the box gives space back, never below two lines
+    column = 300;
+    window.dispatchEvent(new Event("resize"));
+    expect(el.style.height).toBe("180px");
+    column = 100;
+    window.dispatchEvent(new Event("resize"));
+    expect(el.style.height).toBe("62px");
+    w.unmount();
+  });
+
   it("ignores a one-line input (the inline composer)", async () => {
     const text = ref(lines(5));
     const C = defineComponent({
