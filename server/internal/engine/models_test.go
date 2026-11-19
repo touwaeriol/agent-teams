@@ -32,95 +32,45 @@ func (a *fakeAgent) expectSetMode() string {
 	return *m.Model
 }
 
-// TestModelLists: every user keeps their own model list. A new user starts with Opus 5.5 (the
-// Claude default); a saved list keeps its order and one default per runtime and needs at least
-// one model; lists never leak between users; the platform list and PUT /api/admin/models are
-// gone (404).
-func TestModelLists(t *testing.T) {
+// TestModelListGone: there is no model list any more (each role and the project settings name
+// their models by hand): GET /api/models, PUT /api/models/mine and PUT /api/admin/models are 404.
+func TestModelListGone(t *testing.T) {
 	tm := startTeam(t) // the first user is the administrator
 	user := tm.w.signUp("plain-models@example.com")
-	var list httpapi.ModelsBody
-	user.must(200, "GET", "/api/models", nil, &list)
-	if len(list.Models) != 1 || list.Models[0].Model != "claude-opus-5-5" || list.Models[0].Label != "Opus 5.5" ||
-		!list.Models[0].Default || !list.Models[0].Mine || list.Models[0].ID == "" {
-		t.Fatalf("starter list: %+v", list.Models)
-	}
-	starter := list.Models[0].ID
-	user.must(200, "GET", "/api/models", nil, &list)
-	if len(list.Models) != 1 || list.Models[0].ID != starter {
-		t.Fatalf("starter list saved once: %+v", list.Models)
-	}
-	mine := []map[string]any{{"runtime": "claude", "model": "claude-sonnet-x", "label": "Sonnet", "default": true},
-		{"runtime": "claude", "model": "claude-opus-5-5"}, {"runtime": "codex", "model": "gpt-x", "default": true}}
-	user.must(200, "PUT", "/api/models/mine", map[string]any{"models": mine}, &list)
-	if len(list.Models) != 3 || list.Models[0].Model != "claude-sonnet-x" || !list.Models[0].Default || list.Models[0].Label != "Sonnet" ||
-		list.Models[1].Default || !list.Models[2].Default || !list.Models[2].Mine {
-		t.Fatalf("own list: %+v", list.Models)
-	}
-	tm.b.must(200, "GET", "/api/models", nil, &list)
-	if len(list.Models) != 1 || list.Models[0].Model != "claude-opus-5-5" {
-		t.Fatalf("another user's entries leaked: %+v", list.Models)
-	}
-	for _, bad := range [][]map[string]any{
-		{{"runtime": "claude", "model": "has space"}},
-		{{"runtime": "gemini", "model": "x"}},
-		{mine[0], mine[0]},
-		{mine[0], {"runtime": "claude", "model": "z", "default": true}},
-		{},
-	} {
-		user.must(422, "PUT", "/api/models/mine", map[string]any{"models": bad}, nil)
-	}
-	user.must(200, "GET", "/api/models", nil, &list)
-	if len(list.Models) != 3 {
-		t.Fatalf("refused saves changed the list: %+v", list.Models)
-	}
 	for _, c := range []*browser{user, tm.b} {
-		if code, _ := c.do("PUT", "/api/admin/models", map[string]any{"models": mine}); code != 404 {
-			t.Fatalf("PUT /api/admin/models = %d, want 404", code)
+		for _, r := range []struct{ method, path string }{{"GET", "/api/models"}, {"PUT", "/api/models/mine"}, {"PUT", "/api/admin/models"}} {
+			if code, _ := c.do(r.method, r.path, map[string]any{"models": []any{}}); code != 404 {
+				t.Fatalf("%s %s = %d, want 404", r.method, r.path, code)
+			}
 		}
 	}
 }
 
 // TestModelFallback: a member's model falls back from the employee (/model) to the project, the
-// role, the project owner's default and finally Opus 5.5; the lead only follows the owner's default
-// and Opus 5.5; another user's default never applies.
+// role and finally Opus 5.5; the lead from the project's thread_model to its role and Opus 5.5;
+// the coordinator from the project's coordinator_model to its role and Opus 5.5.
 func TestModelFallback(t *testing.T) {
 	tm := startTeam(t)
 	b := tm.b
 	conv := "/api/conversations/" + tm.thread.ID + "/model"
-	var cm orchapi.ConversationModel
+	var coord struct {
+		ConversationID string `json:"conversation_id"`
+	}
+	b.must(200, "GET", "/api/projects/"+tm.projectID+"/coordinator", nil, &coord)
+	coordConv := "/api/conversations/" + coord.ConversationID + "/model"
+	var cm, cc orchapi.ConversationModel
 	b.must(200, "GET", conv, nil, &cm)
 	if cm.Model != "claude-opus-5-5" || cm.Inherited != "claude-opus-5-5" || cm.Override != "" {
 		t.Fatalf("nothing configured: %+v", cm)
 	}
-	other := tm.w.signUp("fallback-other@example.com")
-	other.must(200, "PUT", "/api/models/mine", map[string]any{"models": []map[string]any{{"runtime": "claude", "model": "claude-other", "default": true}}}, nil)
-	b.must(200, "GET", conv, nil, &cm)
-	if cm.Model != "claude-opus-5-5" {
-		t.Fatalf("another user's default applied: %+v", cm)
-	}
-
-	b.must(200, "PUT", "/api/models/mine", map[string]any{"models": []map[string]any{
-		{"runtime": "claude", "model": "claude-opus-5-5"}, {"runtime": "claude", "model": "claude-haiku-y", "default": true},
-		{"runtime": "claude", "model": "claude-project-z"}}}, nil)
-	var owner string
-	if err := store.QueryRow(tm.w.ctx, tm.w.e.Core.Pool, `SELECT user_id FROM at_projects WHERE id = $1`, tm.projectID).Scan(&owner); err != nil {
-		t.Fatal(err)
-	}
-	if got := composer.DefaultModel(tm.w.ctx, tm.w.e.Core.Pool, owner, "claude"); got != "claude-haiku-y" {
-		t.Fatalf("owner default = %q", got)
-	}
-	if got := composer.DefaultModel(tm.w.ctx, tm.w.e.Core.Pool, owner, "codex"); got != "" {
-		t.Fatalf("no codex default = %q", got)
-	}
-	b.must(200, "GET", conv, nil, &cm)
-	if cm.Model != "claude-haiku-y" || cm.Inherited != "claude-haiku-y" {
-		t.Fatalf("owner default: %+v", cm)
-	}
 	for _, m := range cm.Members {
-		if m.Model != "claude-haiku-y" {
-			t.Fatalf("members follow the owner default: %+v", cm.Members)
+		if m.Model != "claude-opus-5-5" {
+			t.Fatalf("members built in: %+v", cm.Members)
 		}
+	}
+	b.must(200, "GET", coordConv, nil, &cc)
+	if cc.Model != "claude-opus-5-5" {
+		t.Fatalf("coordinator built in: %+v", cc)
 	}
 
 	memberModel := func(cm orchapi.ConversationModel) orchapi.MemberModel {
@@ -134,30 +84,45 @@ func TestModelFallback(t *testing.T) {
 		return orchapi.MemberModel{}
 	}
 
-	b.must(200, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"thread_model": "claude-project-z"}, nil)
+	// The role's model (the employees' copy of their role).
+	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `UPDATE at_employees SET spec = jsonb_set(spec, '{model}', to_jsonb(tier || '-role-m'))
+		WHERE project_id = $1`, tm.projectID); err != nil {
+		t.Fatal(err)
+	}
 	b.must(200, "GET", conv, nil, &cm)
-	if m := memberModel(cm); cm.Model != "claude-haiku-y" || m.Model != "claude-project-z" {
-		t.Fatalf("project ahead of the owner default for members only: %+v", cm)
+	b.must(200, "GET", coordConv, nil, &cc)
+	if m := memberModel(cm); cm.Model != "lead-role-m" || m.Model != "member-role-m" || cc.Model != "coordinator-role-m" {
+		t.Fatalf("roles ahead of the built-in default: %+v %+v", cm, cc)
+	}
+
+	b.must(200, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"thread_model": "claude-project-z", "coordinator_model": "claude-coord-z"}, nil)
+	b.must(200, "GET", conv, nil, &cm)
+	b.must(200, "GET", coordConv, nil, &cc)
+	if m := memberModel(cm); cm.Model != "claude-project-z" || m.Model != "claude-project-z" || cc.Model != "claude-coord-z" || cc.Inherited != "claude-coord-z" {
+		t.Fatalf("project ahead of the roles: %+v %+v", cm, cc)
 	}
 	b.must(200, "PUT", conv, map[string]any{"model": "claude-picked", "scope": "thread"}, nil)
 	b.must(200, "GET", conv, nil, &cm)
-	if m := memberModel(cm); cm.Model != "claude-haiku-y" || cm.Override != "" || m.Model != "claude-picked" || m.Override != "claude-picked" {
+	if m := memberModel(cm); cm.Model != "claude-project-z" || cm.Override != "" || m.Model != "claude-picked" || m.Override != "claude-picked" {
 		t.Fatalf("/model ahead of the project for members only: %+v", cm)
 	}
 
 	b.must(200, "PUT", conv, map[string]any{"model": "", "scope": "thread"}, nil)
-	b.must(200, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"thread_model": ""}, nil)
-	b.must(200, "PUT", "/api/models/mine", map[string]any{"models": []map[string]any{{"runtime": "claude", "model": "claude-haiku-y"}}}, nil)
+	b.must(200, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"thread_model": "", "coordinator_model": ""}, nil)
+	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `UPDATE at_employees SET spec = jsonb_set(spec, '{model}', '""') WHERE project_id = $1`, tm.projectID); err != nil {
+		t.Fatal(err)
+	}
 	b.must(200, "GET", conv, nil, &cm)
-	if m := memberModel(cm); cm.Model != "claude-opus-5-5" || m.Model != "claude-opus-5-5" {
-		t.Fatalf("no default anywhere falls back to Opus 5.5: %+v", cm)
+	b.must(200, "GET", coordConv, nil, &cc)
+	if m := memberModel(cm); cm.Model != "claude-opus-5-5" || m.Model != "claude-opus-5-5" || cc.Model != "claude-opus-5-5" {
+		t.Fatalf("nothing set falls back to Opus 5.5: %+v %+v", cm, cc)
 	}
 }
 
 // TestModelCommand: /model in a thread (scope thread) changes every member of the thread with the
-// lead's runtime and sends their running sessions session.set_mode; the lead keeps the default
-// model and is listed as skipped. The lead scope and the coordinator chat are refused (409): the
-// coordinator and leads cannot switch. A turn_ended model shows as the session's model.
+// lead's runtime and sends their running sessions session.set_mode; the lead keeps its model and
+// is listed as skipped. The lead scope and the coordinator chat are refused (409 model_fixed):
+// their models are set in the role or the project settings. A turn_ended model shows as the session's model.
 func TestModelCommand(t *testing.T) {
 	tm := startTeam(t)
 	b := tm.b
@@ -165,7 +130,7 @@ func TestModelCommand(t *testing.T) {
 	refused := func(path string, body map[string]any) {
 		t.Helper()
 		code, raw := b.do("PUT", path, body)
-		if code != 409 || !strings.Contains(string(raw), "统筹和组长使用默认模型，不能切换") || !strings.Contains(string(raw), "model_fixed") {
+		if code != 409 || !strings.Contains(string(raw), "统筹和组长不能用 /model 切换模型，请在岗位配置或项目设置里改") || !strings.Contains(string(raw), "model_fixed") {
 			t.Fatalf("PUT %s %v = %d %s", path, body, code, raw)
 		}
 	}

@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 311 {
+	if migrations.Latest() != 320 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -779,7 +779,7 @@ func TestUserModelsMigration(t *testing.T) {
 	if _, err := db.Exec(userModelsSeed); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := migrations.Up(ctx, db); err != nil {
+	if _, err := p.UpTo(ctx, 210); err != nil { // 00320 drops at_models
 		t.Fatal(err)
 	}
 	// 'bad model id' (not a valid id) is left out; the id with : [ ] is kept.
@@ -1330,5 +1330,77 @@ INSERT INTO at_employees (id, project_id, name, tier, role, role_id, runtime, mo
 	}
 	if _, err := p.DownTo(ctx, 300); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestDropUserModelsMigration: 00320 writes each owner's default of a runtime into the roles
+// (templates and project copies, every tier) and the employees' role copies that had no model,
+// matching the runtime, skipping a Claude default equal to the built-in claude-opus-5-5 and
+// leaving set models and other users alone; then drops at_models. Down brings back the empty
+// table (00210's structure), the backfill stays.
+func TestDropUserModelsMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 311); err != nil {
+		t.Fatal(err)
+	}
+	// u1: Claude default claude-haiku-y, Codex default gpt-def. u2: Claude default = the built-in, no Codex default.
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x'), ('u2', 'b@example.com', 'x');
+INSERT INTO at_models (id, user_id, runtime, model, sort, is_default) VALUES
+  ('m1', 'u1', 'claude', 'claude-opus-5-5', 0, FALSE), ('m2', 'u1', 'claude', 'claude-haiku-y', 1, TRUE),
+  ('m3', 'u1', 'codex', 'gpt-def', 2, TRUE), ('m4', 'u2', 'claude', 'claude-opus-5-5', 0, TRUE), ('m5', 'u2', 'codex', 'gpt-other', 1, FALSE);
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A'), ('p2', 'u2', 'B');
+INSERT INTO at_roles (id, user_id, project_id, tier, role, runtime, gate, model) VALUES
+  ('r1', 'u1', NULL, 'coordinator', 'coordinator', 'claude', '', ''), ('r2', 'u1', NULL, 'lead', 'lead', 'claude', '', ''),
+  ('r3', 'u1', NULL, 'member', 'dev', 'claude', '', 'claude-set'), ('r4', 'u1', NULL, 'member', 'cx', 'codex', '', ''),
+  ('r5', 'u1', 'p1', 'lead', 'lead', 'claude', '', ''), ('r6', 'u1', 'p1', 'member', 'qa', 'claude', '', ''),
+  ('r7', 'u2', NULL, 'lead', 'lead', 'claude', '', ''), ('r8', 'u2', NULL, 'member', 'cx', 'codex', '', '');
+INSERT INTO at_employees (id, project_id, name, tier, role, runtime, model, spec) VALUES
+  ('e1', 'p1', 'coordinator', 'coordinator', 'coordinator', 'claude', '', '{"role": "coordinator", "model": ""}'),
+  ('e2', 'p1', 'lead-1', 'lead', 'lead', 'claude', '', '{"role": "lead"}'),
+  ('e3', 'p1', 'dev-1', 'member', 'dev', 'claude', 'claude-picked', '{"role": "dev", "model": "claude-set"}'),
+  ('e4', 'p1', 'cx-1', 'member', 'cx', 'codex', '', '{"role": "cx", "model": ""}'),
+  ('e5', 'p2', 'lead-1', 'lead', 'lead', 'claude', '', '{"role": "lead", "model": ""}'),
+  ('e6', 'p2', 'cx-1', 'member', 'cx', 'codex', '', '{"role": "cx"}');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 320); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.QueryRow(`SELECT string_agg(id || ':' || model, ' ' ORDER BY id) FROM at_roles`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if want := "r1:claude-haiku-y r2:claude-haiku-y r3:claude-set r4:gpt-def r5:claude-haiku-y r6:claude-haiku-y r7: r8:"; got != want {
+		t.Fatalf("roles after 00320:\n got %s\nwant %s", got, want)
+	}
+	if err := db.QueryRow(`SELECT string_agg(id || ':' || model || ':' || COALESCE(spec->>'model', '-') || ':' || (spec->>'role'), ' ' ORDER BY id) FROM at_employees`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if want := "e1::claude-haiku-y:coordinator e2::claude-haiku-y:lead e3:claude-picked:claude-set:dev e4::gpt-def:cx e5:::lead e6::-:cx"; got != want {
+		t.Fatalf("employees after 00320:\n got %s\nwant %s", got, want)
+	}
+	assertNoTable(t, db, "at_models")
+
+	if _, err := p.DownTo(ctx, 311); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM at_models`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("at_models after down: %d %v", n, err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_models (id, runtime, model) VALUES ('mx', 'claude', 'x')`); err == nil {
+		t.Fatal("row without a user accepted after down")
+	}
+	if err := db.QueryRow(`SELECT model FROM at_roles WHERE id = 'r1'`).Scan(&got); err != nil || got != "claude-haiku-y" {
+		t.Fatalf("backfill undone: %q %v", got, err)
+	}
+	if _, err := p.UpTo(ctx, 320); err != nil {
+		t.Fatalf("up again: %v", err)
 	}
 }
