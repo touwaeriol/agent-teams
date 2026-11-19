@@ -49,7 +49,8 @@
         "rejected_non_ff",
         "workflow_permission",
         "auth_failed",
-        "refspec_not_allowed"
+        "refspec_not_allowed",
+        "sha_mismatch"
       ]
     },
     "error": {

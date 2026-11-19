@@ -60,6 +60,8 @@ export interface DaemonOptions {
   /** session.compact: how long to wait for an idle session, and for the compaction (tests). */
   compactWaitMs?: number;
   compactRunMs?: number;
+  /** Review sync with expect_sha: the wait step between fetch retries (tests; default 2 s). */
+  reviewRetryMs?: number;
   onExit?: (code: number) => void;
   /** Where the GitHub CLI is downloaded when the node has none (default <data>/tools). */
   toolsDir?: string;
@@ -69,7 +71,7 @@ export interface DaemonOptions {
   prefetchGh?: boolean;
 }
 
-const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "cred_helper", "upgrade", "file_download", "context_usage", "session_compact"];
+const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "upgrade", "file_download", "context_usage", "session_compact"];
 
 /** Wires the link, command handlers, sessions, tools, git and credentials together. */
 export class Daemon {
@@ -117,7 +119,7 @@ export class Daemon {
     this.credServer = new CredServer(credSocketPath(o.runtimeDir), this.creds, o.log, { gh: () => this.gh.resolve(), ghConfigRoot: join(dataDir, "gh-config") });
     this.toolhost = new LoopbackToolHost(o.log);
     this.hub = new CodexHub({ env: this.codexServerEnv(), log: o.log, clientVersion: DAEMON_VERSION, ...(o.codexCommand ? { command: o.codexCommand } : {}) });
-    this.git = new GitJobs({ root: o.root, platform: this.platform, gitBaseUrl: o.gitBaseUrl, mirrorDir: join(o.stateDir, "mirrors"), log: o.log, credential: (job, repo, purpose) => this.jobCredential(job, repo, purpose), lookup: (id) => this.recordedResult(id) });
+    this.git = new GitJobs({ root: o.root, platform: this.platform, gitBaseUrl: o.gitBaseUrl, mirrorDir: join(o.stateDir, "mirrors"), log: o.log, credential: (job, repo, purpose) => this.jobCredential(job, repo, purpose), lookup: (id) => this.recordedResult(id), ...(o.reviewRetryMs !== undefined ? { reviewRetryMs: o.reviewRetryMs } : {}) });
     this.sessions = new SessionManager({
       root: o.root, stateDir: o.stateDir, send, approvals: this.approvals, tools: this.tools, log: o.log, maxActive: o.maxActive,
       waitForJob: (id, ms) => this.git.waitFor(id, ms),

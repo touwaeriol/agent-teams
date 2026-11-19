@@ -86,7 +86,7 @@
     "claude": {"sdk": "0.3.325", "cli": "2.1.325", "auth": "subscription|api_key|none"},
     "codex":  {"cli": "0.169.0", "auth": "api_key|chatgpt|none", "sandbox_ok": true}
   },
-  "features": ["sessions", "codex_app_server", "git_worktree", "git_sync", "cred_helper", "upgrade", "context_usage", "session_compact"],
+  "features": ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "upgrade", "context_usage", "session_compact"],
   "isolated": false,
   "isolation": "agent_user|sandbox|none"     // architecture.md §10.3，守护进程启动时探测
 }
@@ -357,9 +357,9 @@
 
 一个作业只管一个仓库：项目有几个仓库，员工开会话前就有几个 `git.prepare`（每个仓库一个共享克隆、员工目录下每个仓库一个 worktree）。`base` 是讨论串分支（已在该仓库创建时）或本讨论串在该仓库的基准分支。
 
-**开工前同步**（`hello.features` 含 `git_sync` 的守护进程）：`git.prepare` 带 `sync: {mode, ref}` 时，worktree 已存在也会更新：先 fetch；`member` —— 有未提交的改动（只看已跟踪文件）回 `dirty` 不动；成员分支没有 `origin/<ref>` 以外的提交就 `reset --hard origin/<ref>`（`reset`），有就 `merge origin/<ref>`（`merged`；冲突则 `merge --abort` 回 `conflict` 和冲突文件）；已经包含则 `current`。`review` —— 只读检出 `origin/<ref>`（detached，`checkout`）。`origin/<ref>` 还不存在时回 `current`。结果在 `git.result.sync {action, head_sha, conflicts?}`。merge 用平台身份（Agent Teams）提交。
+**开工前同步**（`hello.features` 含 `git_sync` 的守护进程）：`git.prepare` 带 `sync: {mode, ref}` 时，worktree 已存在也会更新：先 fetch；`member` —— 有未提交的改动（只看已跟踪文件）回 `dirty` 不动；成员分支没有 `origin/<ref>` 以外的提交就 `reset --hard origin/<ref>`（`reset`），有就 `merge origin/<ref>`（`merged`；冲突则 `merge --abort` 回 `conflict` 和冲突文件）；已经包含则 `current`。`review` —— 只读检出 `origin/<ref>`（detached，`checkout`）；worktree 还不存在时先按 `branch`/`base` 新建再检出（审查员在这个讨论串的第一次审查）。`review` 带 `expect_sha`（被审提交的完整 sha，守护进程 feature `git_review_sha`；旧守护进程的 schema 不认这个字段，控制台只发给声明了它的节点）时：共享克隆里还没有这个提交、或 `origin/<ref>` 不指向它，就重新 fetch（有限次数、逐次加长等待，不超过 `deadline`）；拿到后 `checkout --detach <expect_sha>` 并核对 `HEAD`；一直拿不到或核对不上，作业失败，`error_code: sha_mismatch`，`head_sha` 是实际的 HEAD。分支在任务完成后又有新提交时照样检出 `expect_sha`。`origin/<ref>` 还不存在时回 `current`。结果在 `git.result.sync {action, head_sha, conflicts?}`。merge 用平台身份（Agent Teams）提交。
 
-步骤见 `architecture.md` §8.1。结果 `git.result {job_id, ok, head_sha, created: bool, log_tail, error_code?}`，`error_code`：`clone_failed|fetch_failed|not_a_repo|dirty_conflict|path_outside_root|locked_timeout`。
+步骤见 `architecture.md` §8.1。结果 `git.result {job_id, ok, head_sha, created: bool, log_tail, error_code?}`，`error_code`：`clone_failed|fetch_failed|not_a_repo|dirty_conflict|path_outside_root|locked_timeout|sha_mismatch`（review 同步没能检出 `expect_sha`）。
 
 ### 7.2 `git.status`（键：`job_id`）
 
