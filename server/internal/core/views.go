@@ -66,6 +66,7 @@ type ThreadCounts struct {
 	ApprovalsOpen int `json:"approvals_open"`
 	TasksTotal    int `json:"tasks_total"`
 	TasksDone     int `json:"tasks_done"`
+	TasksOpen     int `json:"tasks_open" doc:"Small tasks not finished yet (not done, failed or cancelled): queued for a member, being worked on, or in review"`
 	MainTotal     int `json:"main_total"`
 	MainDone      int `json:"main_done"`
 	Deliverables  int `json:"deliverables" doc:"Deliverables the thread published"`
