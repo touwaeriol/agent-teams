@@ -721,40 +721,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/models": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** The user's model list (a new user starts with Opus 5.5, the Claude default) */
-        get: operations["list-models"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/models/mine": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Replace the user's model list (in order, at least one model, at most one default per runtime) */
-        put: operations["save-my-models"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/nodes": {
         parameters: {
             query?: never;
@@ -863,6 +829,23 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["upgrade-node"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/nodes/{id}/usage/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Fetch the node's subscription quota now (cached for 60 s; waits up to 15 s for the node) */
+        post: operations["refresh-node-usage"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1232,6 +1215,42 @@ export interface paths {
             cookie?: never;
         };
         get: operations["project-search"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/shared-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The project's shared files (no content) with the total and the limits */
+        get: operations["list-shared-files"];
+        put?: never;
+        /** Upload files to the project's shared files (multipart: file… parts; optional dir prefix; optional path… per file, in order); a file with the same path is overwritten */
+        post: operations["upload-shared-files"];
+        /** Delete one shared file */
+        delete: operations["delete-shared-file"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/shared-files/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download one shared file (always as an attachment, never rendered) */
+        get: operations["download-shared-file"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2219,9 +2238,9 @@ export interface components {
             live: boolean;
             /** @description Thread: every employee of the thread (lead first) */
             members: components["schemas"]["MemberModel"][] | null;
-            /** @description What the employee runs (or opens its next session with) */
+            /** @description What the employee runs (or opens its next session with): project setting → role → built-in default; shown read-only */
             model: string;
-            /** @description Always '': the coordinator and the lead run the default model (/model only changes members) */
+            /** @description Always '': the coordinator and the lead have no /model (their model is set in their role or the project settings) */
             override: string;
             runtime: string;
             /** @enum {string} */
@@ -2607,7 +2626,7 @@ export interface components {
         MemberModel: {
             model: string;
             name: string;
-            /** @description Picked with /model ('' = project or role setting; always '' for the lead) */
+            /** @description Picked with /model ('' = project or role setting; always '' for the lead, whose model is set in its role or the project) */
             override: string;
             runtime: string;
             tier: string;
@@ -2684,19 +2703,6 @@ export interface components {
             };
             role: string;
         };
-        Model: {
-            /** @description What the user's sessions of this runtime open with when no employee, project or role names a model (at most one per runtime) */
-            default?: boolean;
-            readonly id: string;
-            /** @description Display name; empty shows the id */
-            label?: string;
-            /** @description Always true: every entry is the user's own (kept for older clients) */
-            readonly mine: boolean;
-            /** @description The id the runtime is given (claude-…, gpt-…) */
-            model: string;
-            /** @enum {string} */
-            runtime: "claude" | "codex";
-        };
         ModelApplied: {
             employee: string;
             /** @description Sent to the employee's running session (from its next turn); false: the next session opens with it */
@@ -2706,14 +2712,8 @@ export interface components {
         };
         ModelResult: {
             applied: components["schemas"]["ModelApplied"][] | null;
-            /** @description Employees that keep their model: the lead (always the default model) and members of another runtime */
+            /** @description Employees that keep their model: the lead (its model is set in its role or the project) and members of another runtime */
             skipped: string[] | null;
-        };
-        ModelsBody: {
-            models: components["schemas"]["Model"][] | null;
-        };
-        ModelsInputBody: {
-            models: components["schemas"]["Model"][] | null;
         };
         NewCommentInputBody: {
             text: string;
@@ -2816,6 +2816,10 @@ export interface components {
             /** Format: int64 */
             thread_no: number | null;
         };
+        NodeUsage: {
+            claude?: components["schemas"]["RuntimeUsage"];
+            codex?: components["schemas"]["RuntimeUsage"];
+        };
         NodeView: {
             /** Format: int64 */
             active_sessions: number;
@@ -2848,6 +2852,10 @@ export interface components {
             };
             /** Format: date-time */
             since: string | null;
+            /** @description Latest Claude Code / Codex subscription quota reported by the node; null when none */
+            usage: components["schemas"]["NodeUsage"];
+            /** @description The daemon reports usage (hello.features has "usage"; the last hello while offline) */
+            usage_supported: boolean;
             version: string;
         };
         OfficeSnapshot: {
@@ -2947,7 +2955,7 @@ export interface components {
             auto_approve?: boolean;
             /** @description 项目指令 */
             context?: string;
-            /** @description Deprecated and ignored (accepted for older clients): the coordinator runs the default model */
+            /** @description Model of the coordinator; '' = the coordinator role's model */
             coordinator_model?: string;
             delivery?: components["schemas"]["DeliveryPatch"];
             description?: string;
@@ -2960,9 +2968,9 @@ export interface components {
             merge_policy?: "pr" | "auto" | "manual";
             name: string;
             repos?: components["schemas"]["RepoRef"][] | null;
-            /** @description Codex model of the Codex members (tier member only); '' = each role's model */
+            /** @description Codex model of Codex leads and members; '' = each role's model */
             thread_codex_model?: string;
-            /** @description Claude model of the Claude members (tier member only); '' = each role's model */
+            /** @description Claude model of Claude leads and members; '' = each role's model */
             thread_model?: string;
             /** @enum {string} */
             work_mode?: "worktree" | "clone";
@@ -2977,7 +2985,7 @@ export interface components {
             auto_resume?: boolean;
             /** @description 项目指令 */
             context?: string;
-            /** @description Deprecated and ignored (accepted for older clients): the coordinator runs the default model */
+            /** @description Model of the coordinator; '' = the coordinator role's model */
             coordinator_model?: string;
             delivery?: components["schemas"]["DeliveryPatch"];
             description?: string;
@@ -2991,11 +2999,11 @@ export interface components {
             pinned?: boolean;
             /** @description Replaces the bound repositories (order kept); [] unbinds all */
             repos?: components["schemas"]["RepoRef"][];
-            /** @description Codex model of the Codex members (tier member only); '' = each role's model */
+            /** @description Codex model of Codex leads and members; '' = each role's model */
             thread_codex_model?: string;
             /** @description '' | low | medium | high | xhigh | max */
             thread_effort?: string;
-            /** @description Claude model of the Claude members (tier member only); '' = each role's model */
+            /** @description Claude model of Claude leads and members; '' = each role's model */
             thread_model?: string;
             /** @enum {string} */
             work_mode?: "worktree" | "clone";
@@ -3019,7 +3027,7 @@ export interface components {
             auto_resume: boolean;
             /** @description 项目指令: the owner's instructions (like CLAUDE.md), read by every session */
             context: string;
-            /** @description Deprecated, always '': the coordinator and thread leads run the default model */
+            /** @description Model of the coordinator; '' = the coordinator role's model */
             coordinator_model: string;
             /** Format: date-time */
             created_at: string;
@@ -3038,11 +3046,11 @@ export interface components {
             pinned: boolean;
             /** @description Bound repositories in project order; base branches belong in context (the project instructions) */
             repos: components["schemas"]["RepoRef"][] | null;
-            /** @description Codex model of the Codex members (tier member only; leads run the default model); '' = each role's model */
+            /** @description Codex model of Codex leads and members; '' = each role's model */
             thread_codex_model: string;
             /** @description '' = each role's effort; low | medium | high | xhigh | max */
             thread_effort: string;
-            /** @description Claude model of the Claude members (tier member only; leads run the default model); '' = each role's model */
+            /** @description Claude model of Claude leads and members; '' = each role's model */
             thread_model: string;
             /** Format: int64 */
             threads_active: number;
@@ -3229,7 +3237,7 @@ export interface components {
             look: components["schemas"]["Look"];
             /** Format: int64 */
             max_turns: number | null;
-            /** @description Member roles only: the model of the role's sessions ('' = the defaults). Always '' for the coordinator and the lead (they run the default model; a value sent is dropped) */
+            /** @description The model of the role's sessions, typed by hand (any tier; '' = the project setting, then the built-in default). Below the project setting and, for members, /model */
             model: string;
             node_ids: string[] | null;
             /**
@@ -3276,6 +3284,28 @@ export interface components {
             recommended: {
                 [key: string]: unknown;
             };
+        };
+        RuntimeUsage: {
+            /**
+             * @description How the runtime is logged in
+             * @enum {string}
+             */
+            auth: "subscription" | "chatgpt" | "api_key" | "none";
+            error?: string;
+            /**
+             * Format: date-time
+             * @description When the daemon fetched the data
+             */
+            fetched_at: string | null;
+            plan?: string;
+            /**
+             * Format: date-time
+             * @description When the console received the report
+             */
+            received_at: string;
+            /** @enum {string} */
+            status: "ok" | "error" | "unsupported";
+            windows: components["schemas"]["UsageWindow"][] | null;
         };
         Schedule: {
             /** Format: date-time */
@@ -3347,7 +3377,7 @@ export interface components {
             /** @description Model id; '' goes back to the project / role setting */
             model: string;
             /**
-             * @description thread: every member of the thread with the lead's runtime (the lead keeps the default model). lead, and any change in the coordinator conversation, is refused (409 model_fixed): the coordinator and leads always run the default model
+             * @description thread: every member of the thread with the lead's runtime (the lead keeps its model). lead, and any change in the coordinator conversation, is refused (409 model_fixed): the coordinator's and leads' models are set in their role or the project settings
              * @default lead
              * @enum {string}
              */
@@ -3355,6 +3385,54 @@ export interface components {
         };
         SetupPROutputBody: {
             pr_url: string;
+        };
+        SharedFile: {
+            content_type: string;
+            /** Format: date-time */
+            created_at: string;
+            path: string;
+            sha256: string;
+            /** Format: int64 */
+            size: number;
+            /** Format: date-time */
+            updated_at: string;
+            /** @description Employee name (dev-1) or user */
+            uploaded_by: string;
+            /**
+             * Format: int64
+             * @description Thread the employee uploaded it from (shown as dev-1 #31)
+             */
+            uploaded_by_thread_no?: number;
+        };
+        SharedFileLimits: {
+            /**
+             * Format: int64
+             * @description Largest single file
+             */
+            file_bytes: number;
+            /**
+             * Format: int64
+             * @description Total of all files of the project
+             */
+            project_bytes: number;
+            /**
+             * Format: int64
+             * @description Number of files of the project
+             */
+            project_files: number;
+        };
+        SharedFileList: {
+            /** Format: int64 */
+            file_count: number;
+            files: components["schemas"]["SharedFile"][] | null;
+            limits: components["schemas"]["SharedFileLimits"];
+            /** Format: int64 */
+            total_bytes: number;
+        };
+        SharedFileUpload: {
+            files: components["schemas"]["UploadedSharedFile"][] | null;
+            /** Format: int64 */
+            total_bytes: number;
         };
         Skill: {
             builtin: boolean;
@@ -3640,6 +3718,26 @@ export interface components {
             /** @description Shown name; default the file name */
             title?: string;
         };
+        UploadedSharedFile: {
+            content_type: string;
+            /** Format: date-time */
+            created_at: string;
+            /** @description A file with this path existed and was replaced */
+            overwritten: boolean;
+            path: string;
+            sha256: string;
+            /** Format: int64 */
+            size: number;
+            /** Format: date-time */
+            updated_at: string;
+            /** @description Employee name (dev-1) or user */
+            uploaded_by: string;
+            /**
+             * Format: int64
+             * @description Thread the employee uploaded it from (shown as dev-1 #31)
+             */
+            uploaded_by_thread_no?: number;
+        };
         Usage: {
             by_employee: components["schemas"]["EmployeeUsage"][] | null;
             /** Format: double */
@@ -3651,6 +3749,12 @@ export interface components {
             /** Format: double */
             cost_usd_est: number;
         };
+        UsageRefreshOutputBody: {
+            /** @description The node did not answer in time; usage is the previous report */
+            stale?: boolean;
+            /** @description Latest report (same as NodeView.usage); null when the node never sent one */
+            usage: components["schemas"]["NodeUsage"];
+        };
         UsageTokens: {
             /** Format: int64 */
             cache_read: number;
@@ -3660,6 +3764,18 @@ export interface components {
             input: number;
             /** Format: int64 */
             output: number;
+        };
+        UsageWindow: {
+            /** @description five_hour, weekly, weekly_opus, weekly_sonnet, weekly_model (Claude); primary, secondary (Codex) */
+            key: string;
+            /** @description Display name from the provider, e.g. the model of a weekly_model window */
+            label?: string;
+            /** Format: date-time */
+            resets_at: string | null;
+            /** Format: double */
+            used_percent: number;
+            /** Format: int64 */
+            window_minutes?: number;
         };
         UserPatchInputBody: {
             active?: boolean;
@@ -5546,68 +5662,6 @@ export interface operations {
             };
         };
     };
-    "list-models": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelsBody"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    "save-my-models": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ModelsInputBody"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelsBody"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
     "list-nodes": {
         parameters: {
             query?: never;
@@ -5881,6 +5935,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "refresh-node-usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageRefreshOutputBody"];
+                };
             };
             /** @description Error */
             default: {
@@ -6921,6 +7006,154 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchResult"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-shared-files": {
+        parameters: {
+            query?: {
+                /** @description Only paths starting with this text */
+                prefix?: string;
+            };
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedFileList"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "upload-shared-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description filename of the file being uploaded
+                     */
+                    filename?: string;
+                    /** @description general purpose name for multipart form value */
+                    name?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedFileUpload"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "delete-shared-file": {
+        parameters: {
+            query: {
+                /** @description Shared-files path, for example data/sample.csv */
+                path: string;
+            };
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "download-shared-file": {
+        parameters: {
+            query: {
+                /** @description Shared-files path, for example data/sample.csv */
+                path: string;
+            };
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    "Content-Disposition"?: string;
+                    "Content-Security-Policy"?: string;
+                    "Content-Type"?: string;
+                    "X-Content-Type-Options"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
                 };
             };
             /** @description Error */

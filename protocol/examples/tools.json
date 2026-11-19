@@ -27,6 +27,10 @@
 "list_deliverables":[{},{"thread":1,"kind":"design"}],
 "read_deliverable":[{"deliverable_id":"dl_01JD3V"},{"deliverable_id":"dl_01JD3V","version":2}],
 "publish_file":[{"path":"design/index.html","kind":"design","title":"Login page"},{"path":"docs/spec.md","kind":"doc","title":"Spec","deliverable_id":"dl_01JD3V"}],
+"list_shared_files":[{},{"prefix":"data/"}],
+"read_shared_file":[{"path":"data/sample.csv"},{"path":"notes.md"},{"path":"a b/c d.txt"},{"path":"a/b/c/d/e/f/g/h.txt"},{"path":"中文 目录/报告 v2.md"}],
+"write_shared_file":[{"file":"out/report.csv"},{"file":".shared/data/sample.csv"},{"file":"x.json","path":"exports/2026-11/x.json"}],
+"delete_shared_file":[{"path":"data/sample.csv"}],
 "publish_deliverable":[{"kind":"doc","title":"Design notes","url":"https://example.com/doc"}],
 "complete_task":[{"task_id":"t8","summary":"Done, tests pass.","artifacts":["web/src/PlanList.tsx"]},{"task_id":"t9","summary":"Cannot reproduce.","status":"failed"}],
 "push_branch":[{}],
@@ -48,6 +52,10 @@
 "complete_task":[{"task_id":"t8","summary":"x","status":"maybe"}],
 "push_branch":[{"force":true}],
 "publish_file":[{"path":"a.html","kind":"design"},{"path":"a.html","kind":"design","title":"x","deliverable_id":"42"},{"path":"a.html","kind":"design","title":"x","url":"https://x"}],"publish_deliverable":[{"kind":"doc","title":"x","url":"not a url"}],"read_deliverable":[{},{"deliverable_id":"42"},{"deliverable_id":"dl_1","version":0}],"list_deliverables":[{"thread":0}],
+"list_shared_files":[{"prefix":"/etc"},{"prefix":"a\\b"},{"other":1}],
+"read_shared_file":[{},{"path":""},{"path":"/etc/passwd"},{"path":"../x"},{"path":"a/../b"},{"path":"a/./b"},{"path":"a//b"},{"path":"a/"},{"path":".shared/x"},{"path":".agent-shared/x"},{"path":" a"},{"path":"a "},{"path":"a/ b"},{"path":"a /b"},{"path":"a\u0085b"},{"path":"a\u009fb"},{"path":"a\u2028b"},{"path":"a\u2029b"},{"path":"x","inline":true},{"path":".env"},{"path":"a\\b"},{"path":"a\u0000b"},{"path":"a\nb"},{"path":"a/b/c/d/e/f/g/h/i.txt"},{"path":"x","extra":1}],
+"write_shared_file":[{},{"path":"x"},{"file":""},{"file":"a.txt","path":"../a.txt"},{"file":"a.txt","path":"C:\\a.txt"}],
+"delete_shared_file":[{},{"path":"../x"},{"path":"x","force":true}],
 "reply_to":[{"question_id":"ap_1","answer":"x"}],
 "review_permission":[{"request_id":"q5","decision":"allow_always","reason":"x"},{"request_id":"q5","decision":"allow"}]
 }

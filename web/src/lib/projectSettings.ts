@@ -1,5 +1,5 @@
 // 项目设置 dialog: sections, the instructions limit, worktree choice, model and effort choices, usage numbers.
-import { modelChoices, modelName, type ModelEntry } from "./models";
+import { modelName } from "./models";
 
 export const SETTINGS_SECTIONS = [
   { id: "general", label: "通用" },
@@ -30,15 +30,10 @@ export function worktreeChoice(mode: string) {
   return WORKTREE_CHOICES.find((c) => c.value === mode) ?? WORKTREE_CHOICES[0];
 }
 
-/** "跟随岗位设置" for an empty model override, else the model's name in the lists. */
-export function modelLabel(id: string, list: ModelEntry[] = []): string {
+/** "跟随岗位设置" for an empty model override, else the model's name. */
+export function modelLabel(id: string): string {
   if (!id) return "跟随岗位设置";
-  return modelName(list, id);
-}
-
-/** Project model choices: follow the role, then the Claude list (and whatever is saved now). */
-export function modelOptions(current: string, list: ModelEntry[]): { value: string; label: string }[] {
-  return [{ value: "", label: modelLabel("") }, ...modelChoices(list, "claude", current).map((c) => ({ value: c.value, label: c.label }))];
+  return modelName(id);
 }
 
 export const EFFORTS = [

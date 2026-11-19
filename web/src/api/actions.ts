@@ -2,7 +2,7 @@
 // Pages wrap them with `useAction` (mutations.ts) for toasts and cache refresh.
 import { client, unwrap } from "./client";
 import type { components } from "./schema";
-import type { AskChoice, MainTaskStatus } from "./views";
+import type { AskChoice, MainTaskStatus, UsageRefresh } from "./views";
 
 type S = components["schemas"];
 
@@ -12,7 +12,7 @@ export function idempotencyKey(): string {
   return c?.randomUUID ? c.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-const idem = () => ({ headers: { "Idempotency-Key": idempotencyKey() } });
+const idem = (key = idempotencyKey()) => ({ headers: { "Idempotency-Key": key } });
 
 export const auth = {
   login: (body: S["Credentials"]) => unwrap(client.POST("/auth/login", { body })),
@@ -48,6 +48,10 @@ export const deliverables = {
     unwrap(client.POST("/api/deliverables/{id}/comments", { params: { path: { id } }, body: { text, version } })),
 };
 
+export const sharedFiles = {
+  remove: (pid: string, path: string) => unwrap(client.DELETE("/api/projects/{pid}/shared-files", { params: { path: { pid }, query: { path } } })),
+};
+
 export const schedules = {
   create: (pid: string, body: S["ScheduleBody"]) => unwrap(client.POST("/api/projects/{pid}/schedules", { params: { path: { pid } }, body })),
   update: (id: string, body: S["ScheduleBody"]) => unwrap(client.PATCH("/api/schedules/{id}", { params: { path: { id } }, body })),
@@ -56,12 +60,13 @@ export const schedules = {
 };
 
 export const conversations = {
-  send: (cid: string, content: string, interrupt = false, attachments: string[] = [], refs: S["MessageRef"][] = []) =>
+  /** key: the Idempotency-Key; a retry of a failed send passes the first attempt's key. */
+  send: (cid: string, content: string, interrupt = false, attachments: string[] = [], refs: S["MessageRef"][] = [], key?: string) =>
     unwrap(
       client.POST("/api/conversations/{cid}/messages", {
         params: { path: { cid } },
         body: { content, interrupt, ...(attachments.length ? { attachments } : {}), ...(refs.length ? { refs } : {}) },
-        ...idem(),
+        ...idem(key),
       }),
     ),
   /** Forward the user's own messages of this project chat to a thread (thread_no) or into a new one (new_thread). */
@@ -104,17 +109,14 @@ export const nodes = {
   rotate: (id: string) => unwrap(client.POST("/api/nodes/{id}/token", { params: { path: { id } } })),
   upgrade: (id: string) => unwrap(client.POST("/api/nodes/{id}/upgrade", { params: { path: { id } } })),
   remove: (id: string) => unwrap(client.DELETE("/api/nodes/{id}", { params: { path: { id } } })),
+  /** 409 node_offline / usage_unsupported; the cards treat any failure as "keep the old numbers". */
+  refreshUsage: (id: string): Promise<UsageRefresh> => unwrap(client.POST("/api/nodes/{id}/usage/refresh", { params: { path: { id } } })),
 };
 
 export const roles = {
   save: (list: S["Role"][]) => unwrap(client.PUT("/api/roles", { body: { roles: list } })),
   saveYaml: (yaml: string) => unwrap(client.PUT("/api/roles/yaml", { body: { yaml } })),
   randomLook: (role: string) => unwrap(client.POST("/api/roles/look/random", { body: { role } })),
-};
-
-export const models = {
-  /** The user's own model entries, in order (replaces the list). */
-  saveMine: (list: S["Model"][]) => unwrap(client.PUT("/api/models/mine", { body: { models: list } })),
 };
 
 export const skills = {

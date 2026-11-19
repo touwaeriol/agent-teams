@@ -23,6 +23,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/fanout"
+	"github.com/touwaeriol/agent-teams/server/internal/platform"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -38,7 +39,7 @@ const (
 const MaxFrame = 4 << 20
 
 // Features the console supports (welcome.features is the intersection with hello.features).
-var Features = []string{"sessions", "codex_app_server", "git_worktree", "git_sync", "cred_helper", "upgrade", "file_download"}
+var Features = []string{"sessions", "codex_app_server", "git_worktree", "git_sync", "cred_helper", "upgrade", "file_download", "usage"}
 
 // Handler receives the messages of authenticated links, one at a time per link.
 type Handler interface {
@@ -71,8 +72,15 @@ type Gateway struct {
 	log       *slog.Logger
 	cfg       Config
 
-	mu    sync.Mutex
-	links map[string]*link
+	mu         sync.Mutex
+	links      map[string]*link
+	usage      map[string]*platform.NodeUsage // latest node.usage per node (memory only)
+	usageWaits map[string]*usageWait          // in-flight node.usage_refresh per node
+
+	// Now is the clock for the usage cache (tests); nil = time.Now.
+	Now func() time.Time
+	// RefreshWait overrides UsageRefreshWait (tests); 0 = default.
+	RefreshWait time.Duration
 }
 
 // New builds the gateway. handler may be set later with SetHandler (before serving).
@@ -93,7 +101,8 @@ func New(st *store.Store, cs *core.Store, hub *fanout.Hub, log *slog.Logger, cfg
 	if cfg.HelloTimeout == 0 {
 		cfg.HelloTimeout = 15 * time.Second
 	}
-	return &Gateway{store: st, core: cs, hub: hub, validator: v, log: log, cfg: cfg, links: map[string]*link{}}, nil
+	return &Gateway{store: st, core: cs, hub: hub, validator: v, log: log, cfg: cfg, links: map[string]*link{},
+		usage: map[string]*platform.NodeUsage{}, usageWaits: map[string]*usageWait{}}, nil
 }
 
 // SetHandler installs the message handler.

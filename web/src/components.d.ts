@@ -12,6 +12,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    ElAutocomplete: typeof import('element-plus/es/components/autocomplete/index.mjs')['ElAutocomplete']
     ElButton: typeof import('element-plus/es/components/button/index.mjs')['ElButton']
     ElCheckbox: typeof import('element-plus/es/components/checkbox/index.mjs')['ElCheckbox']
     ElCheckboxGroup: typeof import('element-plus/es/components/checkbox/index.mjs')['ElCheckboxGroup']
@@ -39,6 +40,7 @@ declare module 'vue' {
 
 // For TSX support
 declare global {
+  const ElAutocomplete: typeof import('element-plus/es/components/autocomplete/index.mjs')['ElAutocomplete']
   const ElButton: typeof import('element-plus/es/components/button/index.mjs')['ElButton']
   const ElCheckbox: typeof import('element-plus/es/components/checkbox/index.mjs')['ElCheckbox']
   const ElCheckboxGroup: typeof import('element-plus/es/components/checkbox/index.mjs')['ElCheckboxGroup']

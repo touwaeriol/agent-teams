@@ -156,7 +156,7 @@ func (s *Server) register(api huma.API, r gin.IRoutes) {
 	s.registerGitHubApp(api, r)
 	s.registerNodes(api)
 	s.registerRoles(api)
-	s.registerModels(api)
+	s.registerCommands(api)
 	s.registerOffice(api)
 	s.registerHealth(api)
 	s.registerVoice(api)

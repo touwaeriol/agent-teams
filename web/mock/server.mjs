@@ -3,6 +3,7 @@
 // screenshot runs: in-memory demo data, cookie session + CSRF check, SSE with
 // Last-Event-ID resume and a looping script of status events for the office.
 // Not shipped: the production build only contains src/.
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -35,22 +36,29 @@ const threadOut = (t) => {
 };
 /** Threads whose merge already failed once in the mock (the next accept merges). */
 const mergeTried = new Set();
-/** The owner's default of a runtime, else the built-in default (what the coordinator and the leads run). */
-const ownerDefault = (runtime) => state.models.find((m) => m.runtime === runtime && m.default)?.model || (runtime === "codex" ? "gpt-5.5-codex" : "claude-opus-5-5");
-/** GET /api/conversations/{cid}/model: the coordinator's or the lead's effective model, no override; members as the roles say. */
+/** The built-in last resort per runtime (orchestrator.DefaultModel / DefaultCodexModel). */
+const builtinModel = (runtime) => (runtime === "codex" ? "" : "claude-opus-5-5");
+const roleOf = (tier, roleKey) => state.roles.find((r) => (roleKey ? r.role === roleKey : r.tier === tier));
+/** orchestrator.Model: member /model → project → role → built in; lead project → role → built in; coordinator coordinator_model → role → built in. */
+function effectiveModel(m, p) {
+  const runtime = m.runtime ?? "claude";
+  const project = m.tier === "coordinator" ? p?.coordinator_model : runtime === "codex" ? p?.thread_codex_model : p?.thread_model;
+  const role = m.tier === "member" ? roleOf("member", m.role) : roleOf(m.tier);
+  return (m.tier === "member" && m.override) || project || role?.model || builtinModel(runtime);
+}
+/** GET /api/conversations/{cid}/model: the coordinator's or the lead's effective model (no /model override); members as above. */
 function conversationModel(cid) {
   const t = threadById(cid);
   if (!t) {
-    const model = ownerDefault("claude");
+    const p = state.projects.find((x) => x.id === "p1");
+    const model = effectiveModel({ tier: "coordinator", runtime: "claude" }, p);
     return { scope: "coordinator", employee: state.coordinator.name, runtime: "claude", model, override: "", inherited: model, session: "", live: false, members: [] };
   }
+  const p = state.projects.find((x) => x.id === t.project_id);
   const lead = t.members.find((m) => m.tier === "lead");
   const runtime = lead?.runtime ?? "claude";
-  const model = ownerDefault(runtime);
-  const members = t.members.map((m) => {
-    const role = state.roles.find((r) => r.role === m.role);
-    return { name: m.name, tier: m.tier, runtime: m.runtime, model: m.tier === "member" ? role?.model || ownerDefault(m.runtime) : ownerDefault(m.runtime), override: "" };
-  });
+  const model = effectiveModel({ tier: "lead", runtime }, p);
+  const members = t.members.map((m) => ({ name: m.name, tier: m.tier, runtime: m.runtime, model: effectiveModel(m, p), override: "" }));
   return { scope: "thread", employee: lead?.name ?? "", runtime, model, override: "", inherited: model, session: "", live: false, members };
 }
 const threadByNo = (no) => state.threads.find((t) => t.no === Number(no));
@@ -182,19 +190,38 @@ function page(items) {
 
 const storageBytes = () => state.deliverables.reduce((n, d) => n + (d.detail.size ?? 0), 0);
 
+// Sending a message. Knobs to see the chat with a slow server (all default 0): MOCK_SEND_MS
+// delays storing the message (and so the response), MOCK_SSE_MS delays its message frame after
+// that, MOCK_REPLY_MS delays the response after storing (the frame then arrives first). A message containing "#fail" fails its first attempt (per
+// Idempotency-Key) with a 503, so the retry path can be tried; a repeated key gets the first reply.
+const sent = new Map();
+const failedOnce = new Set();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function sendMessage(res, cid, req) {
   const b = await body(req);
+  const key = req.headers["idempotency-key"] ?? "";
+  await sleep(Number(process.env.MOCK_SEND_MS ?? 0));
+  if (key && sent.has(key)) return json(res, 202, sent.get(key));
+  if ((b.content ?? "").includes("#fail") && !failedOnce.has(key)) {
+    failedOnce.add(key);
+    return fail(res, 503, "mock: 发送失败（#fail 的第一次）", "unavailable");
+  }
   const images = (b.attachments ?? []).map((id) => attachments.get(id)?.ref).filter(Boolean);
   const meta = images.length ? { attachments: images } : {};
   const m = { id: String(Date.now()), role: "user", author: "liu", kind: b.interrupt ? "interrupt" : "chat", content: b.content ?? "", meta, created_at: now() };
+  if (key) sent.set(key, m);
   (state.messages[cid] ??= []).push(m);
-  emit("message", { conversation_id: cid, message: m });
+  const sseMs = Number(process.env.MOCK_SSE_MS ?? 0);
+  if (sseMs > 0) setTimeout(() => emit("message", { conversation_id: cid, message: m }), sseMs);
+  else emit("message", { conversation_id: cid, message: m });
   setTimeout(() => {
     const said = images.length ? `${images.length} 张图片${b.content ? `和「${b.content}」` : ""}` : `「${b.content}」`;
     const reply = { id: String(Date.now() + 1), role: "leader", author: cid === "c0" ? "leader" : threadById(cid)?.members[0]?.name ?? "lead", kind: "chat", content: `收到 ${said}。我来安排。`, meta: {}, created_at: now() };
     state.messages[cid].push(reply);
     emit("message", { conversation_id: cid, message: reply });
-  }, 1200);
+  }, 1200 + sseMs);
+  await sleep(Number(process.env.MOCK_REPLY_MS ?? 0));
   json(res, 202, m);
 }
 
@@ -231,7 +258,7 @@ const routes = [
   ["GET", /^\/api\/projects$/, (req, res) => json(res, 200, state.projects)],
   ["POST", /^\/api\/projects$/, async (req, res) => {
     const b = await body(req);
-    const p = { ...state.projects[3], id: `p${Date.now()}`, name: b.name, coordinator_model: "", thread_model: b.thread_model ?? "", thread_codex_model: b.thread_codex_model ?? "", repo: b.repo ?? null, branch: b.branch ?? "main", git_connection_id: b.git_connection_id ?? null, pinned: false, archived: false, waiting: 0, created_at: now(), updated_at: now() };
+    const p = { ...state.projects[3], id: `p${Date.now()}`, name: b.name, coordinator_model: b.coordinator_model ?? "", thread_model: b.thread_model ?? "", thread_codex_model: b.thread_codex_model ?? "", repo: b.repo ?? null, branch: b.branch ?? "main", git_connection_id: b.git_connection_id ?? null, pinned: false, archived: false, waiting: 0, created_at: now(), updated_at: now() };
     state.projects.unshift(p);
     json(res, 201, p);
   }],
@@ -243,8 +270,7 @@ const routes = [
     const b = await body(req);
     const p = state.projects.find((x) => x.id === pid);
     if (b.delivery) b.delivery = { ...p.delivery, ...b.delivery };
-    // The coordinator uses the owner's default: coordinator_model is still in the body but never applies.
-    Object.assign(p, b, { coordinator_model: "", updated_at: now() });
+    Object.assign(p, b, { updated_at: now() });
     json(res, 200, p);
   }],
   ["DELETE", /^\/api\/projects\/([^/]+)$/, (req, res, [pid]) => {
@@ -307,6 +333,64 @@ const routes = [
     state.messages.c0.push(m);
     json(res, 202, m);
   }],
+  ["GET", /^\/api\/projects\/([^/]+)\/shared-files$/, (req, res, [pid], url) => {
+    const prefix = url.searchParams.get("prefix") ?? "";
+    const all = sharedOf(pid);
+    json(res, 200, { files: all.filter((f) => f.path.startsWith(prefix)).map(sharedOut), total_bytes: all.reduce((n, f) => n + sharedSize(f), 0), file_count: all.length, limits: SHARED_LIMITS });
+  }],
+  ["POST", /^\/api\/projects\/([^/]+)\/shared-files$/, async (req, res, [pid]) => {
+    const raw = await rawBody(req);
+    // The server's body limit of one upload request (orchapi.maxSharedUpload = 5 × 20 MB + 1 MB).
+    if (raw.length > SHARED_MAX_REQUEST) return fail(res, 413, "请求体太大", "too_large");
+    const form = parseMultipart(raw, req.headers["content-type"] ?? "");
+    if (!form) return fail(res, 422, "参数不正确：不是 multipart/form-data", "validation");
+    const parts = form.files.filter((f) => f.name === "file");
+    if (parts.length === 0) return fail(res, 422, "没有文件：用 file 字段上传", "validation");
+    const paths = form.fields.filter((f) => f.name === "path").map((f) => f.value);
+    if (paths.length > 0 && paths.length !== parts.length) return fail(res, 422, "path 要么不给，要么每个文件给一个（按顺序）", "validation");
+    const dir = (form.fields.find((f) => f.name === "dir")?.value ?? "").replace(/\/+$/, "");
+    const list = sharedOf(pid);
+    const out = [];
+    let total = list.reduce((n, f) => n + sharedSize(f), 0);
+    let count = list.length;
+    const targets = parts.map((p, i) => (dir ? `${dir}/` : "") + (paths[i] ?? p.filename));
+    for (const [i, p] of parts.entries()) {
+      const bad = sharedPathProblem(targets[i]);
+      if (bad) return fail(res, 422, `参数不正确：路径 ${JSON.stringify(targets[i])} ${bad}`, "validation");
+      if (p.data.length > SHARED_LIMITS.file_bytes) return fail(res, 413, `shared file too large：单个文件不能超过 20 MB（这个文件 ${(p.data.length / 1048576).toFixed(1)} MB）`, "file_too_large");
+      const old = list.find((f) => f.path === targets[i]);
+      total += p.data.length - (old ? sharedSize(old) : 0);
+      if (!old) count += 1;
+    }
+    if (total > SHARED_LIMITS.project_bytes) return fail(res, 409, "shared files quota exceeded：项目共享文件合计不能超过 500 MB，先删掉不用的", "quota_exceeded");
+    if (count > SHARED_LIMITS.project_files) return fail(res, 409, "shared files quota exceeded：项目最多 1000 个共享文件，先删掉不用的", "quota_exceeded");
+    for (const [i, p] of parts.entries()) {
+      const at = now();
+      const old = list.find((f) => f.path === targets[i]);
+      const f = { path: targets[i], data: p.data.toString("base64"), uploaded_by: "user", created_at: old?.created_at ?? at, updated_at: at };
+      if (old) list.splice(list.indexOf(old), 1, f);
+      else list.push(f);
+      out.push({ ...sharedOut(f), overwritten: Boolean(old) });
+      emit("shared_file", { op: "write", path: f.path, by: "user" }, pid);
+    }
+    json(res, 201, { files: out, total_bytes: list.reduce((n, f) => n + sharedSize(f), 0) });
+  }],
+  ["GET", /^\/api\/projects\/([^/]+)\/shared-files\/download$/, (req, res, [pid], url) => {
+    const f = sharedOf(pid).find((x) => x.path === url.searchParams.get("path"));
+    if (!f) return fail(res, 404, "没有这个共享文件", "not_found");
+    const name = f.path.split("/").pop();
+    res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Disposition": `attachment; filename*=utf-8''${encodeURIComponent(name)}`,
+      "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store" });
+    res.end(Buffer.from(f.data, "base64"));
+  }],
+  ["DELETE", /^\/api\/projects\/([^/]+)\/shared-files$/, (req, res, [pid], url) => {
+    const list = sharedOf(pid);
+    const i = list.findIndex((x) => x.path === url.searchParams.get("path"));
+    if (i < 0) return fail(res, 404, "没有这个共享文件", "not_found");
+    const [gone] = list.splice(i, 1);
+    emit("shared_file", { op: "delete", path: gone.path, by: "user" }, pid);
+    json(res, 204);
+  }],
   ["GET", /^\/api\/projects\/([^/]+)\/memory$/, (req, res) => json(res, 200, memoryList())],
   ["GET", /^\/api\/projects\/([^/]+)\/memory\/([^/]+)$/, (req, res, [, , name]) => {
     const f = state.memory.find((x) => x.name === decodeURIComponent(name));
@@ -339,7 +423,7 @@ const routes = [
   ["POST", /^\/api\/conversations\/([^/]+)\/messages$/, (req, res, [cid]) => sendMessage(res, cid, req)],
   ["GET", /^\/api\/conversations\/([^/]+)\/model$/, (req, res, [cid]) => json(res, 200, conversationModel(cid))],
   // Same refusal as the server (orchestrator.ErrFixedModel → 409 model_fixed); the mock keeps no member overrides.
-  ["PUT", /^\/api\/conversations\/([^/]+)\/model$/, (req, res) => fail(res, 409, "统筹和组长使用默认模型，不能切换", "model_fixed")],
+  ["PUT", /^\/api\/conversations\/([^/]+)\/model$/, (req, res) => fail(res, 409, "统筹和组长不能用 /model 切换模型，请在岗位配置或项目设置里改", "model_fixed")],
   ["POST", /^\/api\/conversations\/([^/]+)\/interrupt$/, (req, res) => json(res, 202)],
   ["GET", /^\/api\/conversations\/([^/]+)\/questions$/, (req, res, [cid]) => json(res, 200, state.questions[cid] ?? [])],
   ["POST", /^\/api\/conversations\/([^/]+)\/questions\/([^/]+)\/answer$/, (req, res, [cid, qid]) => answer(res, cid, qid, req)],
@@ -465,27 +549,34 @@ const routes = [
   ["GET", /^\/api\/nodes$/, (req, res) => json(res, 200, state.nodes)],
   ["POST", /^\/api\/nodes$/, async (req, res) => {
     const b = await body(req);
-    const n = { ...state.nodes[0], id: `n${Date.now()}`, name: b.name, online: false, since: null, active_sessions: 0, version: "" };
+    const n = { ...state.nodes[0], id: `n${Date.now()}`, name: b.name, online: false, since: null, usage: null, usage_supported: false, active_sessions: 0, version: "" };
     state.nodes.push(n);
     json(res, 201, { node: n, token: "atn_mock", install: `curl -fsSL http://localhost:5173/install-node.sh | sh -s -- --token atn_mock` });
   }],
   ["PATCH", /^\/api\/nodes\/([^/]+)$/, async (req, res, [id]) => json(res, 200, Object.assign(state.nodes.find((n) => n.id === id), await body(req)))],
   ["DELETE", /^\/api\/nodes\/([^/]+)$/, (req, res, [id]) => ((state.nodes = state.nodes.filter((n) => n.id !== id)), json(res, 204))],
   ["POST", /^\/api\/nodes\/([^/]+)\/token$/, (req, res) => json(res, 200, { token: "atn_new", install: "curl -fsSL http://localhost:5173/install-node.sh | sh -s -- --token atn_new" })],
+  // Fresh quota on hover: ~1 s like asking the node, 409 when offline, new fetched_at/received_at.
+  ["POST", /^\/api\/nodes\/([^/]+)\/usage\/refresh$/, async (req, res, [id]) => {
+    const n = state.nodes.find((x) => x.id === id);
+    if (!n) return json(res, 404, { detail: "没有这个节点" });
+    // Same shape as server/internal/httpapi/nodes_routes.go refreshNodeUsage.
+    if (!n.online) return json(res, 409, { detail: "节点不在线", code: "node_offline" });
+    if (!n.usage_supported) return json(res, 409, { detail: "节点的守护进程版本不支持查询余量", code: "usage_unsupported" });
+    const last = Math.max(0, ...Object.values(n.usage ?? {}).map((u) => Date.parse(u?.received_at ?? "") || 0));
+    if (Date.now() - last < 60_000) return json(res, 200, { usage: n.usage ?? null });
+    await new Promise((r) => setTimeout(r, Number(process.env.MOCK_USAGE_MS ?? 1000)));
+    const at = new Date().toISOString();
+    if (n.usage) for (const u of Object.values(n.usage)) if (u) Object.assign(u, { fetched_at: at, received_at: at });
+    json(res, 200, { usage: n.usage ?? null });
+  }],
   ["POST", /^\/api\/nodes\/([^/]+)\/upgrade$/, (req, res) => json(res, 202)],
   ["GET", /^\/api\/nodes\/([^/]+)\/sessions$/, (req, res, [id]) => json(res, 200, state.nodeSessions[id] ?? [])],
-  ["GET", /^\/api\/models$/, (req, res) => json(res, 200, { models: state.models })],
-  ["PUT", /^\/api\/models\/mine$/, async (req, res) => {
-    const b = await body(req);
-    if (!b.models?.length) return fail(res, 422, "至少保留一个模型", "invalid");
-    state.models = b.models.map((m, i) => ({ ...m, id: m.id || `m${Date.now()}${i}`, label: m.label ?? "", default: Boolean(m.default), mine: true }));
-    json(res, 200, { models: state.models });
-  }],
   ["GET", /^\/api\/roles$/, (req, res) => json(res, 200, { roles: state.roles, warnings: [] })],
   ["PUT", /^\/api\/roles$/, async (req, res) => {
     const b = await body(req);
-    // The coordinator and the lead always use the owner's default: their model is cleared.
-    state.roles = b.roles.map((r, i) => ({ ...r, model: r.tier === "member" ? (r.model ?? "") : "", id: r.id || `r${Date.now()}${i}` }));
+    // Every tier keeps its typed model (trimmed), as the server does.
+    state.roles = b.roles.map((r, i) => ({ ...r, model: (r.model ?? "").trim(), id: r.id || `r${Date.now()}${i}` }));
     json(res, 200, { roles: state.roles, warnings: [] });
   }],
   ["POST", /^\/api\/roles\/look\/random$/, (req, res) => {
@@ -539,6 +630,72 @@ createServer(async (req, res) => {
   }
   fail(res, 404, `mock: no route for ${req.method} ${url.pathname}`, "not_found");
 }).listen(PORT, () => console.log(`mock API on http://127.0.0.1:${PORT}`));
+
+// Shared files (api.md §3.5.1): in memory per project, the server's limits and path rule.
+const SHARED_LIMITS = { file_bytes: 20 << 20, project_bytes: 500 << 20, project_files: 1000 };
+const SHARED_MAX_REQUEST = 5 * (20 << 20) + (1 << 20);
+function sharedOf(pid) {
+  return (state.sharedFiles[pid] ??= []);
+}
+function sharedSize(f) {
+  return Buffer.from(f.data, "base64").length;
+}
+function sharedOut(f) {
+  const data = Buffer.from(f.data, "base64");
+  const ext = f.path.includes(".") ? f.path.split(".").pop().toLowerCase() : "";
+  const types = { csv: "text/csv; charset=utf-8", json: "application/json; charset=utf-8", md: "text/markdown; charset=utf-8", txt: "text/plain; charset=utf-8", png: "image/png", html: "text/html; charset=utf-8" };
+  const { data: _data, ...rest } = f;
+  return { ...rest, size: data.length, sha256: createHash("sha256").update(data).digest("hex"), content_type: types[ext] ?? "application/octet-stream" };
+}
+function sharedPathProblem(p) {
+  if (!p) return "是空的";
+  if (Buffer.byteLength(p) > 255) return "超过 255 字节";
+  if (p.startsWith("/")) return "不能是绝对路径";
+  if (p.includes("\\")) return "不能有反斜杠";
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(p)) return "不能有控制字符";
+  const segs = p.split("/");
+  if (segs.length > 8) return "超过 8 层";
+  for (const s of segs) {
+    if (!s) return "有空的路径段";
+    if (s === "." || s === "..") return "不能有 . 或 .. 段";
+    if (s.startsWith(".")) return "路径段不能以 . 开头";
+    if (s.startsWith(" ") || s.endsWith(" ")) return "路径段不能以空格开头或结尾";
+  }
+  return null;
+}
+function rawBody(req) {
+  return new Promise((resolve) => {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+  });
+}
+/** A minimal multipart/form-data parser: fields {name, value} and files {name, filename, data}. */
+function parseMultipart(buf, contentType) {
+  const m = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(contentType);
+  if (!m) return null;
+  const sep = Buffer.from(`--${m[1] ?? m[2]}`);
+  const fields = [];
+  const files = [];
+  let start = buf.indexOf(sep);
+  while (start >= 0) {
+    const next = buf.indexOf(sep, start + sep.length);
+    if (next < 0) break;
+    const part = buf.subarray(start + sep.length + 2, next - 2); // skip CRLF after the boundary and before the next
+    const head = part.indexOf("\r\n\r\n");
+    if (head >= 0) {
+      const headers = part.subarray(0, head).toString("utf8");
+      const data = part.subarray(head + 4);
+      const name = /name="([^"]*)"/i.exec(headers)?.[1] ?? "";
+      const filename = /filename="([^"]*)"/i.exec(headers)?.[1];
+      if (filename !== undefined) files.push({ name, filename, data: Buffer.from(data) });
+      else fields.push({ name, value: data.toString("utf8") });
+    }
+    start = next;
+  }
+  return { fields, files };
+}
 
 /** Memory files without content, MEMORY.md first (GET /memory, the overview box). */
 function memoryList() {
