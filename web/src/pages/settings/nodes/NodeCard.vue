@@ -21,7 +21,7 @@ const emit = defineEmits<{ token: [enrollment: Enrollment] }>();
 const configuring = ref(false);
 const slots = computed(() => nodeSlots(props.node));
 const runtimes = computed(() => (props.node.runtimes ?? {}) as Record<string, RuntimeInfo>);
-const usage = computed(() => Object.fromEntries(RUNTIMES.map(([k]) => [k, usageView(k, runtimes.value[k], props.node.usage?.[k as "claude" | "codex"], props.node.online)])) as Record<string, UsageView>);
+const usage = computed(() => Object.fromEntries(RUNTIMES.map(([k]) => [k, usageView(k, runtimes.value[k], props.node.usage?.[k as "claude" | "codex"], props.node)])) as Record<string, UsageView>);
 const pick = <K extends NonNullable<UsageView>["kind"]>(key: string, kind: K) => {
   const u = usage.value[key];
   return u?.kind === kind ? (u as Extract<NonNullable<UsageView>, { kind: K }>) : undefined;

@@ -465,7 +465,7 @@ const routes = [
   ["GET", /^\/api\/nodes$/, (req, res) => json(res, 200, state.nodes)],
   ["POST", /^\/api\/nodes$/, async (req, res) => {
     const b = await body(req);
-    const n = { ...state.nodes[0], id: `n${Date.now()}`, name: b.name, online: false, since: null, usage: null, active_sessions: 0, version: "" };
+    const n = { ...state.nodes[0], id: `n${Date.now()}`, name: b.name, online: false, since: null, usage: null, usage_supported: false, active_sessions: 0, version: "" };
     state.nodes.push(n);
     json(res, 201, { node: n, token: "atn_mock", install: `curl -fsSL http://localhost:5173/install-node.sh | sh -s -- --token atn_mock` });
   }],
@@ -478,6 +478,7 @@ const routes = [
     if (!n) return json(res, 404, { detail: "没有这个节点" });
     // Same shape as server/internal/httpapi/nodes_routes.go refreshNodeUsage.
     if (!n.online) return json(res, 409, { detail: "节点不在线", code: "node_offline" });
+    if (!n.usage_supported) return json(res, 409, { detail: "节点的守护进程版本不支持查询余量", code: "usage_unsupported" });
     const last = Math.max(0, ...Object.values(n.usage ?? {}).map((u) => Date.parse(u?.received_at ?? "") || 0));
     if (Date.now() - last < 60_000) return json(res, 200, { usage: n.usage ?? null });
     await new Promise((r) => setTimeout(r, Number(process.env.MOCK_USAGE_MS ?? 1000)));

@@ -133,25 +133,30 @@ describe("nodes", () => {
       { key: "weekly", used_percent: 96, resets_at: null },
     ] } as const;
     const sub = { cli: "2.1", auth: "subscription" };
-    const v = usageView("claude", sub, { ...ok, windows: [...ok.windows] }, true, now);
+    const on = { online: true, usage_supported: true }, off = { online: false, usage_supported: true }, old = { online: true, usage_supported: false };
+    const v = usageView("claude", sub, { ...ok, windows: [...ok.windows] }, on, now);
     expect(v).toMatchObject({ kind: "windows", updated: "Max · 更新于 刚刚" });
     if (v?.kind !== "windows") throw new Error("expected windows");
     expect(v.rows.map((r) => [r.label, r.pct, r.width, r.reset])).toEqual([["5 小时", 42, "42%", "1 小时后重置"], ["每周", 96, "96%", ""]]);
     expect(v.rows[1].tone).toBe("hsl(var(--destructive))");
     // codex signs in with ChatGPT
-    expect(usageView("codex", { cli: "0.1", auth: "chatgpt" }, { ...ok, auth: "chatgpt", windows: [{ key: "primary", used_percent: 81, window_minutes: 300, resets_at: null }] }, true, now)).toMatchObject({ kind: "windows", rows: [{ label: "5 小时", tone: "hsl(var(--warn))" }] });
-    expect(usageView("claude", sub, { ...ok, status: "error", error: "401", windows: [] }, true, now)).toEqual({ kind: "error", error: "401" });
-    expect(usageView("claude", sub, undefined, true, now)).toEqual({ kind: "pending" });
-    expect(usageView("claude", sub, undefined, false, now)).toBeNull();
-    expect(usageView("claude", { cli: "2.1", auth: "api_key" }, undefined, true, now)).toBeNull();
-    expect(usageView("claude", { cli: "2.1", auth: "api_key" }, { ...ok, auth: "api_key", status: "unsupported", windows: [] }, true, now)).toBeNull();
-    expect(usageView("claude", { cli: "2.1", auth: "none" }, undefined, true, now)).toBeNull();
-    expect(usageView("claude", undefined, { ...ok, windows: [...ok.windows] }, true, now)).toBeNull();
-    expect(usageView("claude", sub, { ...ok, windows: null }, true, now)).toBeNull();
+    expect(usageView("codex", { cli: "0.1", auth: "chatgpt" }, { ...ok, auth: "chatgpt", windows: [{ key: "primary", used_percent: 81, window_minutes: 300, resets_at: null }] }, on, now)).toMatchObject({ kind: "windows", rows: [{ label: "5 小时", tone: "hsl(var(--warn))" }] });
+    expect(usageView("claude", sub, { ...ok, status: "error", error: "401", windows: [] }, on, now)).toEqual({ kind: "error", error: "401" });
+    expect(usageView("claude", sub, undefined, on, now)).toEqual({ kind: "pending" });
+    expect(usageView("claude", sub, undefined, off, now)).toBeNull();
+    // old daemon without the usage feature: no endless "loading" hint, but a report it did send still shows
+    expect(usageView("claude", sub, undefined, old, now)).toBeNull();
+    expect(usageView("claude", sub, { ...ok, windows: [...ok.windows] }, old, now)).toMatchObject({ kind: "windows" });
+    expect(usageView("claude", sub, undefined, { online: true }, now)).toEqual({ kind: "pending" });
+    expect(usageView("claude", { cli: "2.1", auth: "api_key" }, undefined, on, now)).toBeNull();
+    expect(usageView("claude", { cli: "2.1", auth: "api_key" }, { ...ok, auth: "api_key", status: "unsupported", windows: [] }, on, now)).toBeNull();
+    expect(usageView("claude", { cli: "2.1", auth: "none" }, undefined, on, now)).toBeNull();
+    expect(usageView("claude", undefined, { ...ok, windows: [...ok.windows] }, on, now)).toBeNull();
+    expect(usageView("claude", sub, { ...ok, windows: null }, on, now)).toBeNull();
     // hello says logged out / API key now: leftover subscription quota is hidden
-    expect(usageView("claude", { cli: "2.1", auth: "none" }, { ...ok, windows: [...ok.windows] }, true, now)).toBeNull();
-    expect(usageView("claude", { cli: "2.1", auth: "api_key" }, { ...ok, windows: [...ok.windows] }, true, now)).toBeNull();
-    expect(usageView("codex", { cli: "0.1", auth: "api_key" }, { ...ok, auth: "chatgpt", windows: [...ok.windows] }, true, now)).toBeNull();
+    expect(usageView("claude", { cli: "2.1", auth: "none" }, { ...ok, windows: [...ok.windows] }, on, now)).toBeNull();
+    expect(usageView("claude", { cli: "2.1", auth: "api_key" }, { ...ok, windows: [...ok.windows] }, on, now)).toBeNull();
+    expect(usageView("codex", { cli: "0.1", auth: "api_key" }, { ...ok, auth: "chatgpt", windows: [...ok.windows] }, on, now)).toBeNull();
   });
   it("hover refresh: only stale subscription quota on online nodes, after 300 ms, one node's usage replaced", () => {
     const now = Date.parse("2026-11-19T10:00:00Z");
@@ -168,6 +173,10 @@ describe("nodes", () => {
     expect(needsUsageRefresh({ online: true, runtimes: sub, usage: { claude: u("", at(90)) } }, now)).toBe(true);
     expect(needsUsageRefresh({ online: true, runtimes: sub, usage: null }, now)).toBe(true);
     expect(needsUsageRefresh({ online: false, runtimes: sub, usage: null }, now)).toBe(false);
+    // old daemon: never asked (the server would answer 409 usage_unsupported)
+    expect(needsUsageRefresh({ online: true, usage_supported: false, runtimes: sub, usage: null }, now)).toBe(false);
+    expect(needsUsageRefresh({ online: true, usage_supported: false, runtimes: sub, usage: { claude: u(at(600)) } }, now)).toBe(false);
+    expect(needsUsageRefresh({ online: true, usage_supported: true, runtimes: sub, usage: null }, now)).toBe(true);
     expect(needsUsageRefresh({ online: true, runtimes: { claude: { cli: "2.1", auth: "api_key" }, codex: { cli: "0.1", auth: "none" } }, usage: null }, now)).toBe(false);
     expect(needsUsageRefresh({ online: true, runtimes: { claude: { cli: "2.1", auth: "subscription" }, codex: { cli: "0.1", auth: "chatgpt" } }, usage: { claude: u(at(5)) } }, now)).toBe(true);
 

@@ -2871,6 +2871,8 @@ export interface components {
             since: string | null;
             /** @description Latest Claude Code / Codex subscription quota reported by the node; null when none */
             usage: components["schemas"]["NodeUsage"];
+            /** @description The daemon reports usage (hello.features has "usage"; the last hello while offline) */
+            usage_supported: boolean;
             version: string;
         };
         OfficeSnapshot: {
