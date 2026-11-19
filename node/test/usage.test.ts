@@ -228,6 +228,27 @@ describe("daemon node.usage", () => {
     expect(f.body.runtimes.codex).toMatchObject({ status: "ok", windows: [{ key: "primary" }, { key: "secondary" }] });
   });
 
+  it("answers node.usage_refresh with both runtimes, from the cache within a minute", async () => {
+    let claudeReads = 0;
+    h = await startHarness({
+      usageSources: {
+        claudeAuth: () => "subscription",
+        claudeUsage: async () => (claudeReads++, claudeOk),
+        codexAuth: () => "none",
+      },
+    });
+    const first = await h.console.waitType("node.usage");
+    expect(claudeReads).toBe(1);
+    h.console.unreliable("node.usage_refresh", { runtimes: ["claude"] });
+    await h.console.waitFor((f) => f.type === "node.usage" && f !== first);
+    const answers = h.console.ofType("node.usage");
+    expect(answers).toHaveLength(2);
+    expect(claudeReads).toBe(1);
+    expect(answers[1]!.seq).toBeUndefined();
+    expect(answers[1]!.body).toEqual(first.body);
+    expect(h.console.ofType("error")).toEqual([]);
+  });
+
   it("reports unsupported runtimes without probing when nothing is logged in", async () => {
     h = await startHarness();
     const f = await h.console.waitType("node.usage");

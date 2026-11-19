@@ -6,7 +6,7 @@ import type { GetAccountRateLimitsResponse } from "./codex-protocol/v2/GetAccoun
 import type { GetAccountResponse } from "./codex-protocol/v2/GetAccountResponse.js";
 import type { RateLimitSnapshot } from "./codex-protocol/v2/RateLimitSnapshot.js";
 import type { RateLimitWindow } from "./codex-protocol/v2/RateLimitWindow.js";
-import type { ClaudeRuntime, CodexRuntime, RuntimeUsage as GenRuntimeUsage, UsageWindow as GenUsageWindow } from "./protocol.js";
+import type { ClaudeRuntime, CodexRuntime, NodeUsage as GenNodeUsage, NodeUsageRefresh, RuntimeUsage as GenRuntimeUsage, UsageWindow } from "./protocol.js";
 import { AsyncQueue, withTimeout } from "./util/async.js";
 import type { Logger } from "./util/log.js";
 
@@ -17,11 +17,9 @@ export const USAGE_CACHE_MS = 60_000;
 export const USAGE_RUNTIMES = ["claude", "codex"] as const;
 export type UsageRuntime = (typeof USAGE_RUNTIMES)[number];
 
-// The generated types (protocol/gen) plus fields this node already sends; the console keeps them.
-// TODO(t2): drop these once protocol/ carries weekly_model's label.
-export type UsageWindow = GenUsageWindow & { label?: string };
-export type RuntimeUsage = Omit<GenRuntimeUsage, "windows" | "fetched_at"> & { windows: UsageWindow[]; fetched_at: string };
-export interface NodeUsage { runtimes: Partial<Record<UsageRuntime, RuntimeUsage>> }
+/** The generated types (protocol/gen), narrowed: this node always sends windows and fetched_at, and both runtimes. */
+export type RuntimeUsage = GenRuntimeUsage & { windows: UsageWindow[]; fetched_at: string };
+export type NodeUsage = GenNodeUsage & { runtimes: Partial<Record<UsageRuntime, RuntimeUsage>> };
 const MAX_WINDOWS = 8;
 
 export type ClaudeUsage = Pick<SDKControlGetUsageResponse, "subscription_type" | "rate_limits_available" | "rate_limits">;
@@ -217,7 +215,7 @@ export class UsageReporter {
    * cacheMs come from the cache (their fetched_at unchanged); the rest are read now. A runtime never read
    * yet is read too, so the answer always covers both.
    */
-  async refresh(requested?: readonly string[]): Promise<NodeUsage> {
+  async refresh(requested?: NodeUsageRefresh["runtimes"]): Promise<NodeUsage> {
     if (this.running) {
       await this.running;
       return this.compose();

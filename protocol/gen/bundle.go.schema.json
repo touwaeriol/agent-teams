@@ -1362,7 +1362,11 @@
       ],
       "properties": {
         "key": {
-          "description": "five_hour, weekly, weekly_opus, weekly_sonnet (Claude); primary, secondary (Codex).",
+          "description": "five_hour, weekly, weekly_opus, weekly_sonnet, weekly_model (per-model weekly window, see label) (Claude); primary, secondary (Codex).",
+          "type": "string"
+        },
+        "label": {
+          "description": "Display name given by the provider, e.g. the model of a weekly_model window; the console keeps at most 40 characters.",
           "type": "string"
         },
         "used_percent": {
@@ -1396,6 +1400,24 @@
             "codex": {
               "$ref": "#/$defs/RuntimeUsage"
             }
+          }
+        }
+      }
+    },
+    "NodeUsageRefresh": {
+      "title": "NodeUsageRefresh",
+      "description": "Fetch the subscription quota now and answer with node.usage (unreliable). Sent only when hello.features contains usage.",
+      "type": "object",
+      "properties": {
+        "runtimes": {
+          "description": "Runtimes to fetch; omitted = all.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "claude",
+              "codex"
+            ]
           }
         }
       }

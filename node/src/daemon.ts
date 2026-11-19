@@ -13,7 +13,7 @@ import { Link } from "./link/client.js";
 import { Dispatcher, type CommandHandler } from "./link/dispatcher.js";
 import { Inbox, type Reply } from "./link/inbox.js";
 import { Outbox } from "./link/outbox.js";
-import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, FileDownload, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, SessionClose, SessionCompact, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
+import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, FileDownload, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, NodeUsageRefresh, SessionClose, SessionCompact, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
 import { probeClaude, probeCodex } from "./runtimes.js";
 import { readClaudeUsage, UsageReporter, type UsageSources } from "./usage.js";
 import { ClaudeDriver, type QueryFn } from "./sessions/claude/driver.js";
@@ -269,7 +269,7 @@ export class Daemon {
       "node.config": { run: async (b) => this.nodeConfig(b as NodeConfig) },
       "node.drain": { run: async () => (this.sessions.drain(), []) },
       "node.upgrade": { run: (b) => this.upgrade(b as unknown as NodeUpgrade) },
-      "node.usage_refresh": { run: async (b) => [{ type: "node.usage", body: await this.usage.refresh(Array.isArray(b.runtimes) ? b.runtimes.map(String) : undefined) }] },
+      "node.usage_refresh": { run: async (b) => [{ type: "node.usage", body: await this.usage.refresh((b as NodeUsageRefresh).runtimes) }] },
     };
   }
 
