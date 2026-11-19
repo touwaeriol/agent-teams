@@ -90,6 +90,13 @@ func IsUnique(err error) bool {
 	return errors.As(err, &pg) && pg.Code == "23505"
 }
 
+// IsRetryable reports whether err is a deadlock (40P01) or serialization failure (40001): the
+// transaction was rolled back by PostgreSQL and running it again is expected to succeed.
+func IsRetryable(err error) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && (pg.Code == "40P01" || pg.Code == "40001")
+}
+
 // MapErr turns "no row" into ErrNotFound and unique violations into ErrConflict.
 func MapErr(err error) error {
 	if err == nil {

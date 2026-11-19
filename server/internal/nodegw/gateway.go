@@ -44,7 +44,8 @@ var Features = []string{"sessions", "codex_app_server", "git_worktree", "git_syn
 // Handler receives the messages of authenticated links, one at a time per link.
 type Handler interface {
 	// Handle processes one daemon message that passed the schema and ownership checks.
-	// An error means "not durably processed": the link is closed and the daemon replays it.
+	// An error means "not durably processed": the link is closed and the daemon replays it
+	// (a deadlock or serialization failure is first run again in place, see link.handle).
 	Handle(ctx context.Context, node store.Node, typ string, body any) error
 	// NodeOnline runs after the welcome and the command replay.
 	NodeOnline(ctx context.Context, node store.Node)
