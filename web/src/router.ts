@@ -16,6 +16,7 @@ export const projectRoutes: RouteRecordRaw[] = [
   { path: "/projects/:pid/threads/:no/full", component: () => import("@/pages/ThreadPage.vue") },
   { path: "/projects/:pid/threads/:no/:tab", component: () => import("@/pages/ThreadRoute.vue") },
   { path: "/projects/:pid/deliverables", component: () => import("@/pages/Deliverables.vue") },
+  { path: "/projects/:pid/shared-files", component: () => import("@/pages/SharedFiles.vue") },
   { path: "/projects/:pid/settings", component: () => import("@/pages/Main.vue") },
   { path: "/projects/:pid/settings/:section", component: () => import("@/pages/Main.vue") },
 ];
