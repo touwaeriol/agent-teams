@@ -340,15 +340,22 @@ func (s *Service) finish(ctx context.Context, tx *core.Tx, c *call) (Result, err
 	if err := tx.EmitThread(ctx, t.ID); err != nil {
 		return Result{}, err
 	}
+	// After the commit, in its own transaction: the end waits for this turn (the lead's final
+	// reply after finish is recorded first), so the tool result always goes out.
+	noChanges := end == finishNow
+	tx.AfterCommit(func(ctx context.Context) {
+		if err := s.deliv.FinishCalled(context.WithoutCancel(ctx), t.ID, noChanges); err != nil {
+			s.log.Warn("finish", "thread_id", t.ID, "err", err)
+		}
+	})
 	switch end {
 	case finishNow:
-		// After the commit, so the tool result goes out before the sessions are closed.
-		tx.AfterCommit(func(ctx context.Context) { s.endWithoutPR(context.WithoutCancel(ctx), t.ID) })
-		return okText("总结已记录。这个讨论串没有代码改动，不需要开 PR：讨论串现在结束（done），成员和你的会话随即关闭，不用再做别的。"), nil
+		return okText("总结已记录。这个讨论串没有代码改动，不需要开 PR：现在写给用户的最终汇报作为本回合的最后回复，回合结束后讨论串结束（done），成员和你的会话随即关闭。"), nil
 	case finishNeedsPR:
 		return okText("总结已记录。讨论串有代码改动还没有开 PR：请调用 open_pr(title, body)，之后平台按项目设置收尾（PR 检查通过即结束、自动合并或等用户验收）。"), nil
 	}
-	return okText("总结已记录。平台按项目设置收尾：PR 检查通过即结束、自动合并或等用户验收；检查没过会把失败的检查发给你。"), nil
+	return okText("总结已记录。平台按项目设置收尾（PR 检查通过即结束、自动合并或等用户验收），检查没过会把失败的检查发给你。" +
+		"还有未完成的任务或合并队列没清空时讨论串不会结束；结束条件满足后，等你这一回合结束（最终回复已发出）讨论串才结束（done）。"), nil
 }
 
 // What finish does besides recording the summary.
@@ -413,23 +420,6 @@ func openWork(ctx context.Context, tx *core.Tx, t core.Thread) error {
 		return refuse("还有没完成的工作：%s。先完成（或用 update_plan / cancel_task 收尾）再调用 finish", strings.Join(open, "、"))
 	}
 	return nil
-}
-
-// endWithoutPR moves a thread that changed nothing to done (sessions close, coordinator told).
-func (s *Service) endWithoutPR(ctx context.Context, threadID string) {
-	err := s.core.InTx(ctx, func(tx *core.Tx) error {
-		t, err := core.LockThread(ctx, tx, threadID)
-		if err != nil || (t.Status != "running" && t.Status != "waiting") {
-			return ignoreMissing(err)
-		}
-		if mode, err := finishMode(ctx, tx, t); err != nil || mode != finishNow {
-			return err
-		}
-		return s.orch.SetStatus(ctx, tx, t, "done", "")
-	})
-	if err != nil {
-		s.log.Warn("finish without PR", "thread_id", threadID, "err", err)
-	}
 }
 
 // tellUser posts the lead's short message to the user in the thread conversation right away
