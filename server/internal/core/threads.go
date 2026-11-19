@@ -142,7 +142,8 @@ func SetThreadStatus(ctx context.Context, tx *Tx, id, status, pauseReason string
 	var prev string
 	err := store.QueryRow(ctx, tx, `UPDATE at_threads t SET status = $2, pause_reason = $3, updated_at = now(),
 		started_at = CASE WHEN $2 = 'running' AND t.started_at IS NULL THEN now() ELSE t.started_at END,
-		finished_at = CASE WHEN $2 IN ('done','failed','archived') THEN COALESCE(t.finished_at, now()) ELSE t.finished_at END
+		finished_at = CASE WHEN $2 IN ('done','failed','archived') THEN COALESCE(t.finished_at, now()) ELSE t.finished_at END,
+		done_pending_at = CASE WHEN $2 IN ('done','failed','archived') THEN NULL ELSE t.done_pending_at END
 		FROM at_threads old WHERE t.id = $1 AND old.id = t.id RETURNING old.status`, id, status, pauseReason).Scan(&prev)
 	return prev, MapErr(err)
 }
@@ -163,11 +164,12 @@ func ThreadCountsOf(ctx context.Context, q DB, t Thread) (ThreadCounts, error) {
 		(SELECT count(*) FROM at_questions WHERE thread_id = $1 AND status = 'open' AND audience = 'user' AND kind = 'approval'),
 		(SELECT count(*) FROM at_tasks WHERE thread_id = $1 AND status <> 'cancelled'),
 		(SELECT count(*) FROM at_tasks WHERE thread_id = $1 AND status = 'done'),
+		(SELECT count(*) FROM at_tasks WHERE thread_id = $1 AND status NOT IN ('done', 'failed', 'cancelled')),
 		(SELECT count(*) FROM at_main_tasks WHERE thread_id = $1),
 		(SELECT count(*) FROM at_main_tasks WHERE thread_id = $1 AND status = 'done'),
 		(SELECT count(*) FROM at_deliverables d WHERE d.thread_id = $1 AND `+notImageDeliverable+`),
 		(SELECT merge_policy FROM at_projects WHERE id = $2)`, t.ID, t.ProjectID).
-		Scan(&c.QuestionsOpen, &c.ApprovalsOpen, &c.TasksTotal, &c.TasksDone, &c.MainTotal, &c.MainDone, &c.Deliverables, &c.MergePolicy)
+		Scan(&c.QuestionsOpen, &c.ApprovalsOpen, &c.TasksTotal, &c.TasksDone, &c.TasksOpen, &c.MainTotal, &c.MainDone, &c.Deliverables, &c.MergePolicy)
 	c.Waiting = c.QuestionsOpen + c.ApprovalsOpen
 	if AwaitsUser(t, c.MergePolicy) {
 		c.Waiting++

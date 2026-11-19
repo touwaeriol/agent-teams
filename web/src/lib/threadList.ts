@@ -2,51 +2,34 @@
 // line, search and filters, relative times, and which groups the viewer folded (per user,
 // in localStorage). Pure and unit-tested.
 import type { QuestionView, ThreadView } from "@/api/views";
-import { liveLine, workingHere } from "./live";
+import { liveLine } from "./live";
 import { readLocal, writeLocal } from "./persist";
-import { awaitsAcceptance, threadLine } from "./present";
+import { LIST_GROUPS, threadPhase, type ListGroupId, type RowMark } from "./phase";
+import { threadLine } from "./present";
 
-export type ListGroupId = "waiting" | "active" | "idle" | "done" | "archived";
-
-export const LIST_GROUPS: { id: ListGroupId; label: string }[] = [
-  { id: "waiting", label: "等你处理" },
-  { id: "active", label: "进行中" },
-  { id: "idle", label: "空闲" },
-  { id: "done", label: "已完成" },
-  { id: "archived", label: "已归档" },
-];
+export { LIST_GROUPS, MARK_LABEL, type ListGroupId, type RowMark } from "./phase";
 
 /**
- * Where a thread goes: 等你处理 (an open card or acceptance waits on the user, or a reminder
- * the user set has fired; archived threads stay archived), 进行中
- * (someone is working, or it waits for a node), 空闲 (running or paused, nobody working and
- * nothing waiting), 已完成 (done or failed), 已归档.
+ * Where a thread goes (from threadPhase, like everything else that shows its state): 等你处理
+ * (an open card, an acceptance, a fired reminder, or the lead replied and nothing else is going),
+ * 进行中 (someone is working, small tasks are still open, it waits for a node or for the PR's
+ * checks), 已暂停, 已完成 (done or failed), 已归档.
  */
-export function listGroupOf(t: ThreadView, waiting?: Map<number, QuestionView>): ListGroupId {
-  if (t.status === "archived") return "archived";
-  if (t.reminded_at) return "waiting";
-  if (t.status === "done" || t.status === "failed") return "done";
-  if (awaitsAcceptance(t) || t.status === "waiting" || t.counts.waiting > 0 || waiting?.has(t.no)) return "waiting";
-  if (t.status === "queued") return "active";
-  if (t.status === "running" && t.members.some(workingHere)) return "active";
-  return "idle";
+export const listGroupOf = (t: ThreadView, waiting?: Map<number, QuestionView>): ListGroupId => threadPhase(t, waiting).group;
+
+/** The round mark before a row (the group is the thread's own; kept for the list's call shape). */
+export function rowMark(t: ThreadView, group: ListGroupId, waiting?: Map<number, QuestionView>): RowMark {
+  const p = threadPhase(t, waiting);
+  return p.group === group ? p.mark : MARK_OF_GROUP[group];
 }
 
-/** The round mark before a row. */
-export type RowMark = "wait" | "working" | "queued" | "idle" | "done" | "failed" | "archived";
+const MARK_OF_GROUP: Record<ListGroupId, RowMark> = { waiting: "wait", active: "working", idle: "paused", done: "done", archived: "archived" };
 
-export function rowMark(t: ThreadView, group: ListGroupId): RowMark {
-  if (group === "waiting") return "wait";
-  if (group === "active") return t.status === "queued" ? "queued" : "working";
-  if (group === "done") return t.status === "failed" ? "failed" : "done";
-  return group;
-}
-
-/** 空闲, 已完成 and 已归档 rows are one compact line; 等你处理 and 进行中 keep the two-line row. */
+/** 已暂停, 已完成 and 已归档 rows are one compact line; 等你处理 and 进行中 keep the two-line row. */
 export const isCompactGroup = (g: ListGroupId) => g === "idle" || g === "done" || g === "archived";
 
 /** The status mark of a thread on its own (the open thread's header). */
-export const threadMark = (t: ThreadView, waiting?: Map<number, QuestionView>): RowMark => rowMark(t, listGroupOf(t, waiting));
+export const threadMark = (t: ThreadView, waiting?: Map<number, QuestionView>): RowMark => threadPhase(t, waiting).mark;
 
 export interface StepProgress {
   done: number;
@@ -131,9 +114,17 @@ export function groupThreads(threads: ThreadView[], waiting?: Map<number, Questi
 
 const firstLine = (s: string) => s.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
 
-/** The grey line under a title: what waits on the user, else the lead's latest message (first line), the summary, the brief. */
+/**
+ * The grey line under a title: what waits on the user; "组长已回复：…" when the lead replied and stopped;
+ * threadPhase's note while small tasks are open or the lead reads / queues / waits / is down; else the lead's latest message (first line), the summary, the brief.
+ */
 export function rowLine(t: ThreadView, open?: QuestionView): string {
   if (!open && t.counts.waiting > 0 && t.status !== "review") return liveLine(t) || firstLine(threadLine(t));
+  if (!open) {
+    const p = threadPhase(t);
+    if (p.id === "replied") return t.lead_last?.text ? `组长已回复：${firstLine(t.lead_last.text)}` : p.note;
+    if (p.id === "tasks" || p.id === "reading" || p.id === "lead_queued" || p.id === "lead_waiting" || p.id === "lead_down") return p.note;
+  }
   return firstLine(threadLine(t, open));
 }
 

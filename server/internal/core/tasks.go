@@ -235,13 +235,18 @@ func UpdateTask(ctx context.Context, tx *Tx, t Task, set map[string]any) (Task, 
 	return TaskByID(ctx, tx, t.ConversationID, t.ID)
 }
 
-// EmitTask emits a task event.
+// EmitTask emits a task event with the thread's counts after the change (tasks_open / tasks_done
+// move with it), so lists that only hold ThreadViews stay current without a thread event.
 func (tx *Tx) EmitTask(ctx context.Context, t Task) error {
 	th, err := ThreadByID(ctx, tx, t.ConversationID)
 	if err != nil {
 		return err
 	}
-	_, err = tx.Emit(ctx, th.ProjectID, &th.ID, EvTask, "", map[string]any{"thread_no": th.No, "task": TaskViewOf(t, th.No)})
+	counts, err := ThreadCountsOf(ctx, tx, th)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Emit(ctx, th.ProjectID, &th.ID, EvTask, "", map[string]any{"thread_no": th.No, "task": TaskViewOf(t, th.No), "counts": counts})
 	return err
 }
 

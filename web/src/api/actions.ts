@@ -115,9 +115,6 @@ export const roles = {
 export const models = {
   /** The user's own model entries, in order (replaces the list). */
   saveMine: (list: S["Model"][]) => unwrap(client.PUT("/api/models/mine", { body: { models: list } })),
-  /** /model: the conversation's employee (thread: scope lead or the whole thread). */
-  setConversation: (cid: string, model: string, scope: "lead" | "thread" = "lead") =>
-    unwrap(client.PUT("/api/conversations/{cid}/model", { params: { path: { cid } }, body: { model, scope } })),
 };
 
 export const skills = {

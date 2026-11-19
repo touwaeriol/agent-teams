@@ -68,7 +68,7 @@ describe("selection", () => {
 });
 
 describe("picker", () => {
-  const threads = [thread(1, { title: "登录页" }), thread(2, { title: "暗色模式", status: "done" }), thread(3, { title: "旧需求", status: "archived" })];
+  const threads = [thread(1, { title: "登录页", status: "paused" }), thread(2, { title: "暗色模式", status: "done" }), thread(3, { title: "旧需求", status: "archived" })];
   it("searches by number or title and groups like the thread list", () => {
     expect(pickerGroups(threads, "").map((g) => g.id)).toEqual(["idle", "done", "archived"]);
     expect(pickerGroups(threads, "#2").flatMap((g) => g.items.map((t) => t.no))).toEqual([2]);

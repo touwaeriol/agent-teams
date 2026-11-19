@@ -4,7 +4,7 @@ export function thread(no: number, patch: Partial<ThreadView> = {}): ThreadView 
   return {
     id: `t${no}`, project_id: "p1", no, title: `T${no}`, brief: "brief", status: "running", queue_position: null, pause_reason: "", branch: `thread/${no}`,
     base_branch: "main", pr_number: null, pr_url: null, pr_state: null, merge_error: null, merge_policy: "manual", summary: "", auto_approve: false, opened_by: "coordinator", members: [], main_tasks: [],
-    counts: { waiting: 0, questions_open: 0, approvals_open: 0, tasks_total: 0, tasks_done: 0, main_total: 0, main_done: 0 }, lead_last: null, cost_usd_est: null,
+    counts: { waiting: 0, questions_open: 0, approvals_open: 0, tasks_total: 0, tasks_done: 0, tasks_open: 0, main_total: 0, main_done: 0 }, lead_last: null, cost_usd_est: null,
     created_at: "2026-11-14T10:00:00Z", updated_at: "2026-11-14T10:00:00Z", ...patch,
   };
 }

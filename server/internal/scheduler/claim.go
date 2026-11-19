@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -151,20 +152,8 @@ func (s *Scheduler) claim(ctx context.Context, tx *core.Tx, t core.Thread, task 
 // §4.2): the task waits in claimed with sync_pending until every result is in (SyncDone) or
 // SyncTimeout passed. Otherwise the brief goes out at once, after the old fetch-only refresh.
 func (s *Scheduler) syncThenBrief(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task, m core.Employee) error {
-	sync, err := s.syncFor(ctx, tx, t, task)
-	if err != nil {
-		return err
-	}
-	now := time.Now().UTC()
-	deadline := now.Add(SyncTimeout)
-	sync.Deadline = &deadline
-	round := core.NewID("sr")
-	jobs, err := s.orch.QueueSync(ctx, tx, m, sync, map[string]any{"task_id": task.ID, "thread_id": t.ID, "round": round})
-	if err != nil {
-		return err
-	}
-	if jobs > 0 {
-		_, err = core.UpdateTask(ctx, tx, task, map[string]any{"sync_pending": jobs, "sync_round": round, "wait_since": now})
+	jobs, err := s.queueSync(ctx, tx, t, task, m, 0)
+	if err != nil || jobs > 0 {
 		return err
 	}
 	if err := s.orch.RefreshWorktree(ctx, tx, m); err != nil {
@@ -173,10 +162,48 @@ func (s *Scheduler) syncThenBrief(ctx context.Context, tx *core.Tx, t core.Threa
 	return s.sendBrief(ctx, tx, t, task, m)
 }
 
+// queueSync queues the pre-task sync (attempt try of this claim) and marks the task waiting for
+// it; 0 jobs when the member's worktree cannot be synced (the brief goes out at once).
+func (s *Scheduler) queueSync(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task, m core.Employee, try int) (int, error) {
+	target, err := s.syncFor(ctx, tx, t, task)
+	if err != nil {
+		return 0, err
+	}
+	now := time.Now().UTC()
+	deadline := now.Add(SyncTimeout)
+	target.Sync.Deadline = &deadline
+	round := fmt.Sprintf("%s.%d", core.NewID("sr"), try)
+	jobs, err := s.orch.QueueSync(ctx, tx, m, target.Sync, target.Expect, map[string]any{"task_id": task.ID, "thread_id": t.ID, "round": round})
+	if err != nil || jobs == 0 {
+		return 0, err
+	}
+	_, err = core.UpdateTask(ctx, tx, task, map[string]any{"sync": map[string]core.TaskSync{}, "sync_pending": jobs,
+		"sync_round": round, "wait_since": now})
+	return jobs, err
+}
+
+// syncTry is the attempt a sync round belongs to (its ".N" suffix; 0 for rounds without one).
+func syncTry(round string) int {
+	i := strings.LastIndexByte(round, '.')
+	if i < 0 {
+		return 0
+	}
+	n, _ := strconv.Atoi(round[i+1:])
+	return n
+}
+
+// syncTarget is what the member's worktree is brought to before a task; Expect is, for a review,
+// the commit under review per repository (orchestrator.ExpectedSHA).
+type syncTarget struct {
+	Sync   protocol.GitPrepareSync
+	Expect map[string]string
+}
+
 // syncFor is what the member's worktree is brought to before the task: the thread branch, or for
-// a review / decision of another member's task the branch under review.
-func (s *Scheduler) syncFor(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task) (protocol.GitPrepareSync, error) {
-	member := protocol.GitPrepareSync{Mode: protocol.GitPrepareSyncModeMember, Ref: t.Branch}
+// a review / decision of another member's task the branch under review, at the commits the task
+// was completed with (the repositories it pushed; nothing is expected of the others).
+func (s *Scheduler) syncFor(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task) (syncTarget, error) {
+	member := syncTarget{Sync: protocol.GitPrepareSync{Mode: protocol.GitPrepareSyncModeMember, Ref: t.Branch}}
 	if !isGateTask(task) {
 		return member, nil
 	}
@@ -184,7 +211,20 @@ func (s *Scheduler) syncFor(ctx context.Context, tx *core.Tx, t core.Thread, tas
 	if err != nil || parent.Branch == "" {
 		return member, ignoreMissing(err)
 	}
-	return protocol.GitPrepareSync{Mode: protocol.GitPrepareSyncModeReview, Ref: parent.Branch}, nil
+	return syncTarget{Sync: protocol.GitPrepareSync{Mode: protocol.GitPrepareSyncModeReview, Ref: parent.Branch},
+		Expect: reviewedSHAs(parent)}, nil
+}
+
+// reviewedSHAs is the commit under review per repository: what the task pushed, or (a record
+// without per-repository pushes) its head under the key "" for a single-repository project.
+func reviewedSHAs(parent core.Task) map[string]string {
+	if parent.Pushed != nil {
+		return maps.Clone(parent.Pushed)
+	}
+	if parent.HeadSHA != "" {
+		return map[string]string{"": parent.HeadSHA}
+	}
+	return nil
 }
 
 // sendBrief delivers the task brief to the member (after the pre-task sync, when there was one),
@@ -222,7 +262,8 @@ func awaitingSync(task core.Task, round string) bool {
 	return task.Status == "claimed" && task.SyncPending > 0 && task.SyncRound == round
 }
 
-// finishSync records sync results and sends the brief once nothing is pending.
+// finishSync records sync results and sends the brief once nothing is pending. A review whose
+// worktree is not at the commit under review gets no brief: the platform prepares it again.
 func (s *Scheduler) finishSync(ctx context.Context, tx *core.Tx, task core.Task, results map[string]core.TaskSync, pending int) error {
 	synced := maps.Clone(task.Sync)
 	maps.Copy(synced, results)
@@ -238,7 +279,109 @@ func (s *Scheduler) finishSync(ctx context.Context, tx *core.Tx, task core.Task,
 	if err != nil {
 		return ignoreMissing(err)
 	}
+	if isGateTask(task) {
+		problems, err := s.reviewProblems(ctx, tx, t, task)
+		if err != nil {
+			return err
+		}
+		if len(problems) > 0 {
+			return s.retryReviewSync(ctx, tx, t, task, m, strings.Join(problems, "；"))
+		}
+	}
 	return s.sendBrief(ctx, tx, t, task, m)
+}
+
+// ReviewSyncRetries is how many more times one claim of a review prepares the worktree when it
+// is not at the commit under review, before the claim counts as a platform error.
+const ReviewSyncRetries = 2
+
+// reviewProblems lists the repositories whose worktree is not at the commit under review: the job
+// failed or never reported, or HEAD is another commit. Repositories the task did not push
+// expect nothing.
+func (s *Scheduler) reviewProblems(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task) ([]string, error) {
+	target, err := s.syncFor(ctx, tx, t, task)
+	if err != nil || target.Sync.Mode != protocol.GitPrepareSyncModeReview {
+		return nil, err
+	}
+	var out []string
+	for _, repo := range slices.Sorted(maps.Keys(task.Sync)) {
+		got := task.Sync[repo]
+		want := orchestrator.ExpectedSHA(target.Expect, repo, len(task.Sync))
+		switch {
+		case repo == unreported:
+			out = append(out, fmt.Sprintf("%s：%s", repo, orDefault(got.Error, "超时")))
+		case want == "":
+		case got.Error != "":
+			out = append(out, fmt.Sprintf("%s：%s", repo, got.Error))
+		case got.HeadSHA != want:
+			out = append(out, fmt.Sprintf("%s：HEAD 是 %s，被审提交是 %s（%s）", repo, orDefault(short(got.HeadSHA), "未知"), short(want), orDefault(got.Action, "无同步结果")))
+		}
+	}
+	return out, nil
+}
+
+// retryReviewSync prepares the review worktree again (ReviewSyncRetries times per claim); after
+// that the claim is a platform error (reviewPlatformError).
+func (s *Scheduler) retryReviewSync(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task, m core.Employee, why string) error {
+	try := syncTry(task.SyncRound)
+	s.log.Warn("review worktree not ready", "thread_id", t.ID, "task_id", task.ID, "try", try, "why", why)
+	if try < ReviewSyncRetries {
+		jobs, err := s.queueSync(ctx, tx, t, task, m, try+1)
+		if err != nil || jobs > 0 {
+			return err
+		}
+	}
+	_, err := s.reviewPlatformError(ctx, tx, t, task, "审查工作树没准备好："+why)
+	return err
+}
+
+// reviewPlatformError handles a review / decision the platform could not set up (its worktree
+// never reached the commit under review, or the reviewer reported platform_error). It is not a
+// verdict: the parent task keeps its state and goes back to nobody. The gate returns to the queue
+// for a fresh claim until MaxAttempts; then it is blocked and the lead is told.
+func (s *Scheduler) reviewPlatformError(ctx context.Context, tx *core.Tx, t core.Thread, gate core.Task, why string) (core.Task, error) {
+	clear := map[string]any{"sync": map[string]core.TaskSync{}, "sync_pending": 0, "sync_round": "", "wait_since": nil,
+		"attempt": gate.Attempt + 1}
+	if err := tx.EmitActivity(ctx, t.ProjectID, &t.ID, "platform", fmt.Sprintf("%s %s 平台错误：%s", gateName(gate), gate.ID, clip(why, 200))); err != nil {
+		return gate, err
+	}
+	if gate.Attempt+1 < MaxAttempts {
+		set := maps.Clone(clear)
+		set["claimed_by"], set["claimed_at"] = "", nil
+		gate, err := core.RequeueTask(ctx, tx, gate, set)
+		if err != nil {
+			return gate, err
+		}
+		s.kickAfter(tx, t.ProjectID)
+		return gate, tx.EmitTask(ctx, gate)
+	}
+	gate, err := core.UpdateTask(ctx, tx, gate, clear)
+	if err != nil {
+		return gate, err
+	}
+	if gate, err = s.setStatus(ctx, tx, gate, "blocked"); err != nil {
+		return gate, err
+	}
+	// Nobody holds the blocked gate: blocked is completable, and its reviewer completing it
+	// (status=failed) would turn the platform error back into a rejection of the parent.
+	if gate, err = core.UpdateTask(ctx, tx, gate, map[string]any{"claimed_by": "", "claimed_at": nil}); err != nil {
+		return gate, err
+	}
+	if err := tx.EmitTask(ctx, gate); err != nil {
+		return gate, err
+	}
+	return gate, s.notifyLead(ctx, tx, t, fmt.Sprintf("[%s %s · 平台错误] 审查工作树没准备好，已重试 %d 次仍不行：%s\n"+
+		"这不是驳回：任务 %s 保持原状态，没有退给开发者。排查好节点后，让用户在任务页重试 %s。",
+		gateName(gate), gate.ID, MaxAttempts, why, gate.Parent, gate.ID))
+}
+
+// ReviewPlatformError exposes reviewPlatformError (complete_task status=platform_error).
+func (s *Scheduler) ReviewPlatformError(ctx context.Context, tx *core.Tx, gate core.Task, why string) (core.Task, error) {
+	t, err := core.ThreadByID(ctx, tx, gate.ConversationID)
+	if err != nil {
+		return gate, err
+	}
+	return s.reviewPlatformError(ctx, tx, t, gate, why)
 }
 
 // syncOf turns a git.result into the task's record: a job that succeeded without a sync report
@@ -297,12 +440,14 @@ func (s *Scheduler) taskBrief(ctx context.Context, tx *core.Tx, t core.Thread, t
 	if err := reworkNotes(ctx, tx, &b, t, task, m); err != nil {
 		return "", err
 	}
-	if len(task.Sync) > 0 {
-		sync, err := s.syncFor(ctx, tx, t, task)
-		if err != nil {
-			return "", err
-		}
-		syncNote(&b, sync, task)
+	target, err := s.syncFor(ctx, tx, t, task)
+	if err != nil {
+		return "", err
+	}
+	if target.Sync.Mode == protocol.GitPrepareSyncModeReview {
+		reviewNote(&b, target, task)
+	} else if len(task.Sync) > 0 {
+		syncNote(&b, target.Sync, task)
 	}
 	mail, err := core.PeekUnread(ctx, tx, t.ID, m.Name)
 	if err != nil {
@@ -402,6 +547,44 @@ func gateNotes(ctx context.Context, tx *core.Tx, b *strings.Builder, d core.Task
 	return err
 }
 
+// reviewNote tells a reviewer which commits are under review and whether the platform checked
+// out and verified them. Without a verified checkout (an older daemon, full clones) it asks the
+// reviewer to confirm with Grep / Read that the changes the developer describes are in the tree
+// (a read-only session cannot run git or read HEAD), and to report platform_error, not a
+// rejection, when they are not.
+func reviewNote(b *strings.Builder, target syncTarget, task core.Task) {
+	ref := target.Sync.Ref
+	b.WriteString("\n被审提交（分支 " + ref + "）：\n")
+	if len(target.Expect) == 0 {
+		b.WriteString("- 平台没有记录被审提交的 sha（任务没有推送新提交）\n")
+	}
+	for _, repo := range slices.Sorted(maps.Keys(target.Expect)) {
+		fmt.Fprintf(b, "- %s：%s\n", orDefault(repo, "仓库"), target.Expect[repo])
+	}
+	verified := len(task.Sync) > 0
+	if len(task.Sync) > 0 {
+		b.WriteString("\n工作目录：\n")
+		for _, repo := range slices.Sorted(maps.Keys(task.Sync)) {
+			want := orchestrator.ExpectedSHA(target.Expect, repo, len(task.Sync))
+			got := task.Sync[repo]
+			if want != "" && got.HeadSHA == want {
+				fmt.Fprintf(b, "- %s：平台已检出并核对，HEAD = %s\n", repo, want)
+				continue
+			}
+			if want != "" {
+				verified = false
+			}
+			fmt.Fprintf(b, "- %s：%s\n", repo, reviewLine(ref, got))
+		}
+	}
+	if verified {
+		return
+	}
+	b.WriteString("\n平台没能核对工作目录是不是被审提交（节点版本较旧或 clone 模式）。开工前先确认你看到的是被审的改动：" +
+		"用 Grep / Read 查开发者总结和原任务里提到的改动文件、函数名、新加的标识，看它们在工作目录里是否存在、内容是不是改过的。" +
+		"找不到这些改动，就不要审，也不要用 status=failed 驳回：用 complete_task(status=\"platform_error\", summary=你查了什么、没找到什么) 上报，平台会重新准备审查。\n")
+}
+
 // syncNote tells the member what the pre-task sync did to the worktree.
 func syncNote(b *strings.Builder, sync protocol.GitPrepareSync, task core.Task) {
 	b.WriteString("\n工作目录：\n")
@@ -435,7 +618,7 @@ func syncLine(sync protocol.GitPrepareSync, s core.TaskSync) string {
 func reviewLine(ref string, s core.TaskSync) string {
 	switch s.Action {
 	case "checkout", "created":
-		return fmt.Sprintf("已只读检出被审分支 %s 的最新提交 %s", ref, short(s.HeadSHA))
+		return fmt.Sprintf("已只读检出被审分支 %s 的提交 %s", ref, s.HeadSHA)
 	case "absent":
 		return fmt.Sprintf("被审分支 %s 还没推到 GitHub，看到的可能不是最新提交", ref)
 	case "dirty":

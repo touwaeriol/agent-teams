@@ -4,7 +4,7 @@
 // progress, then small tags: plan "2/7" and "N 个交付物" (opens the thread's deliverables), and
 // the step being worked on (one line). The "2/7" tag is a button that unfolds the whole plan
 // as a checklist card under the row.
-// Compact (空闲 / 已完成 / 已归档): mark, title and time on one short line.
+// Compact (已暂停 / 已完成 / 已归档): mark, title and time on one short line.
 // A pin marks a pinned thread; "提醒" a reminder that fired, "提醒 明天 09:00" one still to come.
 import { Bell, GitPullRequest, ListChecks, Package, Pin } from "lucide-vue-next";
 import { computed, ref } from "vue";

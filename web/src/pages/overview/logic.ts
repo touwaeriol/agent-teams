@@ -1,5 +1,6 @@
 // Pure helpers of the project home (web/src/pages/Overview.tsx).
 import type { QuestionView, RoleView, ThreadView } from "@/api/views";
+import type { PhaseInput } from "@/lib/phase";
 import { questionLine, threadKind, threadLook, type Look, type ThreadKind } from "@/lib/present";
 
 export type Filter = "all" | "doing" | "wait" | "review" | "done";
@@ -30,7 +31,7 @@ export function prText(t: Pick<ThreadView, "pr_number" | "status">): string {
 }
 
 /** A card's pill: finished threads (done or failed) read 已完成. */
-export function cardLook(t: Pick<ThreadView, "status" | "counts" | "merge_policy" | "merge_error">): Look {
+export function cardLook(t: PhaseInput): Look {
   return threadKind(t) === "done" ? { tone: "#2E7D4F", label: "已完成" } : threadLook(t);
 }
 

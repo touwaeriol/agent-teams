@@ -40,6 +40,9 @@ func (s *Scheduler) Complete(ctx context.Context, tx *core.Tx, task core.Task, o
 	return s.completeWork(ctx, tx, task)
 }
 
+// IsGateTask exposes isGateTask.
+func IsGateTask(t core.Task) bool { return isGateTask(t) }
+
 func isGateTask(t core.Task) bool {
 	return (t.Kind == "review" || t.Kind == "decision") && t.CreatedBy == "platform"
 }
@@ -98,8 +101,10 @@ func gateRole(ctx context.Context, q core.DB, th core.Thread, gate string) (stri
 
 func (s *Scheduler) openGate(ctx context.Context, tx *core.Tx, th core.Thread, task core.Task, kind, role string) error {
 	verb := map[string]string{"review": "审查", "decision": "决策"}[kind]
-	text := fmt.Sprintf("%s %s 的任务 %s（分支 %s）。\n原任务：%s\n成员总结：%s\n通过用 complete_task(status=done) 写结论；驳回用 status=failed 写原因。",
-		verb, task.ClaimedBy, task.ID, task.Branch, task.Instruction, task.Summary)
+	text := fmt.Sprintf("%s %s 的任务 %s（分支 %s）。\n原任务：%s\n成员总结：%s\n%s"+
+		"通过用 complete_task(status=done) 写结论；驳回用 status=failed 写原因。"+
+		"工作目录不是被审提交（平台没准备好）时不要审、不要驳回，用 status=platform_error 上报。",
+		verb, task.ClaimedBy, task.ID, task.Branch, task.Instruction, task.Summary, reviewedNote(task))
 	gate, err := core.InsertTask(ctx, tx, core.NewTask{Thread: th, MainTaskID: task.MainTaskID, Assignee: role, Role: role,
 		Kind: kind, Instruction: text, Parent: task.ID, Priority: 50, CreatedBy: "platform"})
 	if err != nil {
@@ -394,4 +399,30 @@ func pushedNote(t core.Task) string {
 	}
 	sort.Strings(repos)
 	return "（改动的仓库：" + strings.Join(repos, "、") + "）"
+}
+
+// reviewedNote names the commits under review (what the task pushed, per repository).
+func reviewedNote(t core.Task) string {
+	shas := reviewedSHAs(t)
+	if len(shas) == 0 {
+		return ""
+	}
+	repos := make([]string, 0, len(shas))
+	for r := range shas {
+		repos = append(repos, r)
+	}
+	sort.Strings(repos)
+	var b strings.Builder
+	b.WriteString("被审提交：")
+	for i, r := range repos {
+		if i > 0 {
+			b.WriteString("、")
+		}
+		if r != "" {
+			b.WriteString(r + " ")
+		}
+		b.WriteString(shas[r])
+	}
+	b.WriteString("\n")
+	return b.String()
 }

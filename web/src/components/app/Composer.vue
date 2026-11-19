@@ -1,8 +1,9 @@
 <script setup lang="ts">
-// Message box. `large`: the coordinator chat (textarea + hint row); `inline`: one-line box for the
-// lead. Enter sends, Shift+Enter breaks; IME composition is respected. With `draftKey` the
-// unsent text survives reloads (localStorage). Slots: `hint` (left of the action row), `extra`.
-import { computed, ref } from "vue";
+// Message box. `large`: the coordinator and lead chats (textarea + hint row, with the employee's
+// model as a read-only tag when `assist` names the conversation); `inline`: one-line box. Enter
+// sends, Shift+Enter breaks; IME composition is respected. With `draftKey` the unsent text survives
+// reloads (localStorage). Slots: `hint` (left of the action row), `extra`.
+import { computed, ref, watch } from "vue";
 import { useDraft } from "@/lib/persist";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -12,9 +13,11 @@ import { attachmentHandlers, type Attachments } from "./attachments";
 import SendButton from "./SendButton.vue";
 import AssistPopup from "./composer/AssistPopup.vue";
 import CommandPanel from "./composer/CommandPanel.vue";
+import ModelTag from "./composer/ModelTag.vue";
 import PlusMenu from "./composer/PlusMenu.vue";
 import RefChips from "./composer/RefChips.vue";
 import type { MessageRef } from "./composer/assist";
+import { useAutoGrow } from "./composer/useAutoGrow";
 import { useComposerAssist, type AssistOptions } from "./composer/useComposerAssist";
 import { useVoiceInput } from "./voice/useVoiceInput";
 import VoiceButton from "./voice/VoiceButton.vue";
@@ -55,22 +58,49 @@ const onScroll = (e: Event) => {
   const el = e.target as HTMLElement;
   scroll.value = { top: el.scrollTop, left: el.scrollLeft };
 };
+// The large box grows with its text (2 lines up to ~40% of the window), then scrolls inside.
+// It never squeezes the chat above it under 120px (short windows, attachments, the plan card).
+const grow = useAutoGrow(field, text, { keepVisible: 120, onResize: (el) => (scroll.value = { top: el.scrollTop, left: el.scrollLeft }) });
+// With a scrollbar the text wraps narrower; the overlay keeps the same right edge (px-4 = 16px).
+watch([imageCount, () => assist.panel.value, () => props.attachments?.items.value.length, () => assist.picked.value.length], () => grow.update(), { flush: "post" });
+const overlayStyle = computed(() => (grow.gutter.value ? { paddingRight: `${16 + grow.gutter.value}px` } : undefined));
 const speaking = computed(() => (voice.parts.value ? "text-transparent caret-foreground" : ""));
 
+// One send at a time: busy (the parent's isPending) only shows up a render later, and waiting for
+// the last voice transcripts takes a while, so a second Enter or click would read the same message.
+let sending = false;
 async function send() {
+  if (sending) return;
+  sending = true;
+  try {
+    await sendOnce();
+  } finally {
+    sending = false;
+  }
+}
+
+async function sendOnce() {
   if (voice.active.value) await voice.finish();
   const value = text.value.trim();
   if (assist.intercept(value)) return void (text.value = "");
   if (empty.value || props.busy) return;
   const images = props.attachments ? props.attachments.ids() : [];
   if (images === null) return void toast.info("图片还在上传，稍等一下");
+  // The box empties at once (text, images, references); what is typed or attached meanwhile is new.
+  const refs = assist.takeRefs(value);
+  const picked = assist.picked.value;
+  const taken = props.attachments?.take() ?? [];
   text.value = "";
+  assist.clearRefs();
   try {
-    await props.onSend(value, images, assist.takeRefs(value));
-    props.attachments?.clear();
-    assist.clearRefs();
+    await props.onSend(value, images, refs);
+    props.attachments?.discard(taken);
   } catch {
-    text.value = value;
+    // Failed: the message goes back in front of anything typed or attached while it was sending.
+    const typed = text.value;
+    text.value = typed.trim() ? `${value}\n${typed}` : value;
+    assist.picked.value = [...picked, ...assist.picked.value.filter((r) => !picked.includes(r))];
+    props.attachments?.restore(taken);
   }
 }
 
@@ -86,7 +116,7 @@ function onKey(e: KeyboardEvent) {
 <template>
   <form v-if="variant === 'inline'" :class="cn('relative flex flex-col gap-2 rounded-xl border border-[#E2DFD8] bg-panel py-1.5 pr-1.5', assist.enabled.value || attachments ? 'pl-1.5' : 'pl-3', ring, props.class)" v-on="drop" @submit.prevent="send">
     <AssistPopup v-if="assist.enabled.value" :assist="assist" />
-    <CommandPanel v-if="assist.panel.value && props.assist" :assist="assist" :panel="assist.panel.value" v-bind="props.assist" class="!mx-0 !mt-1.5 mr-1.5" />
+    <CommandPanel v-if="assist.panel.value && props.assist" :assist="assist" :panel="assist.panel.value" :pid="props.assist.pid" :cid="props.assist.cid" class="!mx-0 !mt-1.5 mr-1.5" />
     <AttachmentStrip v-if="attachments" :a="attachments" class="pl-1.5 pt-1" />
     <RefChips :assist="assist" class="pl-1.5 pt-1" />
     <span class="flex items-center gap-2">
@@ -113,7 +143,7 @@ function onKey(e: KeyboardEvent) {
   </form>
   <form v-else :class="cn('relative rounded-2xl border border-[#E2DFD8] bg-panel shadow-[0_2px_12px_-4px_rgba(0,0,0,0.08)]', ring, props.class)" v-on="drop" @submit.prevent="send">
     <AssistPopup v-if="assist.enabled.value" :assist="assist" />
-    <CommandPanel v-if="assist.panel.value && props.assist" :assist="assist" :panel="assist.panel.value" v-bind="props.assist" />
+    <CommandPanel v-if="assist.panel.value && props.assist" :assist="assist" :panel="assist.panel.value" :pid="props.assist.pid" :cid="props.assist.cid" />
     <AttachmentStrip v-if="attachments" :a="attachments" class="px-4 pt-3" />
     <RefChips :assist="assist" class="px-4 pt-3" />
     <label :for="inputId" class="sr-only">{{ label }}</label>
@@ -135,15 +165,17 @@ function onKey(e: KeyboardEvent) {
         :parts="voice.parts.value"
         :scroll-top="scroll.top"
         :scroll-left="0"
+        :style="overlayStyle"
         class="whitespace-pre-wrap break-words px-4 pt-3.5 text-[15px] leading-6"
       />
     </div>
     <div class="flex items-center justify-between gap-2 px-3 pb-3 pt-1.5">
-      <span class="flex min-w-0 items-center gap-2">
+      <span class="flex min-w-0 flex-1 items-center gap-2">
         <PlusMenu v-if="assist.enabled.value" :assist="assist" :a="attachments" />
-        <span class="text-xs text-muted-foreground"><slot name="hint">{{ hint }}</slot></span>
+        <span class="min-w-0 truncate text-xs text-muted-foreground" data-testid="composer-hint"><slot name="hint">{{ hint }}</slot></span>
+        <ModelTag v-if="props.assist?.cid" :cid="props.assist.cid" />
       </span>
-      <span class="flex items-center gap-2">
+      <span class="flex shrink-0 items-center gap-2">
         <AttachButton v-if="attachments && !assist.enabled.value" :a="attachments" />
         <slot name="extra" />
         <VoiceButton v-if="voice.enabled.value" :v="voice" />

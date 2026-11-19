@@ -24,35 +24,52 @@ type PRRequest struct {
 // OpenPR checks the preconditions (§8.4) and opens one pull request per changed repository
 // (thread branch → that repository's base), then moves the thread to review.
 func (e *Engine) OpenPR(ctx context.Context, threadID string, req PRRequest) (core.Thread, error) {
+	t, _, err := e.OpenOrResubmit(ctx, threadID, req)
+	return t, err
+}
+
+// OpenOrResubmit is OpenPR; a thread back in running whose pull requests are all open already
+// (failed checks, a reject) is resubmitted for review instead of refused with ErrPRExists
+// (resubmitted = true).
+func (e *Engine) OpenOrResubmit(ctx context.Context, threadID string, req PRRequest) (core.Thread, bool, error) {
 	t, err := core.ThreadByID(ctx, e.core.Pool, threadID)
 	if err != nil {
-		return t, err
+		return t, false, err
 	}
 	if err := e.prReady(ctx, t, req.Force); err != nil {
-		return t, err
+		return t, false, err
 	}
 	targets, err := e.prTargets(ctx, t, req)
+	if errors.Is(err, ErrPRExists) {
+		again, rerr := e.resubmit(ctx, t.ID, req.Force)
+		if rerr != nil || !again {
+			return t, false, errors.Join(err, rerr)
+		}
+		t, err = core.ThreadByID(ctx, e.core.Pool, t.ID)
+		return t, true, err
+	}
 	if err != nil {
-		return t, err
+		return t, false, err
 	}
 	title, body, err := e.prText(ctx, t, req)
 	if err != nil {
-		return t, err
+		return t, false, err
 	}
 	opened := 0
 	for _, target := range targets {
 		ok, err := e.openOne(ctx, t, target, req, title, body)
 		if err != nil {
-			return t, err
+			return t, false, err
 		}
 		if ok {
 			opened++
 		}
 	}
 	if opened == 0 {
-		return t, ErrNothingToPR
+		return t, false, ErrNothingToPR
 	}
-	return e.toReview(ctx, t)
+	t, err = e.toReview(ctx, t)
+	return t, false, err
 }
 
 // prTarget is one repository to open a pull request in.
@@ -132,7 +149,11 @@ func (e *Engine) adoptPR(ctx context.Context, t core.Thread, target prTarget, cr
 }
 
 func (e *Engine) prReady(ctx context.Context, t core.Thread, force bool) error {
-	active, err := core.MergeQueue(ctx, e.core.Pool, t.ID, true)
+	return e.prReadyIn(ctx, e.core.Pool, t, force)
+}
+
+func (e *Engine) prReadyIn(ctx context.Context, q core.DB, t core.Thread, force bool) error {
+	active, err := core.MergeQueue(ctx, q, t.ID, true)
 	if err != nil {
 		return err
 	}
@@ -142,7 +163,7 @@ func (e *Engine) prReady(ctx context.Context, t core.Thread, force bool) error {
 	if force {
 		return nil
 	}
-	plan, err := core.MainTasks(ctx, e.core.Pool, t.ID)
+	plan, err := core.MainTasks(ctx, q, t.ID)
 	if err != nil {
 		return err
 	}
@@ -257,7 +278,7 @@ func (e *Engine) Reject(ctx context.Context, userID, threadID, reason string) (c
 	}
 	audit(ctx, e.core, userID, "thread_reject", t.ID)
 	err = e.core.InTx(ctx, func(tx *core.Tx) error {
-		if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"merge_error": nil}); err != nil {
+		if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"merge_error": nil, "done_pending_at": nil}); err != nil {
 			return err
 		}
 		if t.PRState == "accepting" {
@@ -378,9 +399,12 @@ func (e *Engine) mergedMeanwhile(ctx context.Context, repo ghops.Repo, tr core.T
 	return err == nil && pr.Merged
 }
 
-// Merged records that the thread's pull requests are merged: thread done once none is open.
-// Idempotent: SetStatus("done") runs once. A thread already done (merge_policy pr: it finished
-// with its PRs open and a person merged them later) only gets pr_state merged.
+// Merged records that the thread's pull requests are merged (pr_state merged once none is
+// open) and ends the thread through endThread: not while a task is unfinished or the merge queue
+// is busy (the merge loop's doneTick ends it once they clear, or the lead's finish does), and
+// not in the middle of the lead's turn. Idempotent under the thread's row lock. A thread already
+// done (merge_policy pr: it finished with its PRs open and a person merged them later) only gets
+// pr_state merged.
 func (e *Engine) Merged(ctx context.Context, threadID string) error {
 	return e.core.InTx(ctx, func(tx *core.Tx) error {
 		t, err := core.LockThread(ctx, tx, threadID)
@@ -393,10 +417,13 @@ func (e *Engine) Merged(ctx context.Context, threadID string) error {
 		if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"pr_state": "merged", "merge_error": nil}); err != nil {
 			return err
 		}
-		if t.Status == "done" {
-			return tx.EmitThread(ctx, t.ID)
+		t.PRState, t.MergeError = "merged", nil
+		if t.Status != "done" {
+			if done, err := e.endThread(ctx, tx, t, endChecked, false); err != nil || done {
+				return err
+			}
 		}
-		return e.orch.SetStatus(ctx, tx, t, "done", "")
+		return tx.EmitThread(ctx, t.ID)
 	})
 }
 
@@ -411,14 +438,27 @@ func (e *Engine) policy(ctx context.Context, t core.Thread) string {
 }
 
 // finishWithOpenPRs finishes a thread whose pull requests passed their checks under merge_policy pr: the
-// PRs stay open for a person to merge (Merged records it later); nobody has to accept.
+// PRs stay open for a person to merge (Merged records it later); nobody has to accept. The end
+// goes through endThread: it waits for unfinished tasks, the merge queue and the lead's turn.
 func (e *Engine) finishWithOpenPRs(ctx context.Context, threadID string) error {
 	return e.core.InTx(ctx, func(tx *core.Tx) error {
 		t, err := core.LockThread(ctx, tx, threadID)
 		if err != nil || t.Status != "review" || t.PRState != "open" {
 			return ignoreMissing(err)
 		}
-		return e.orch.SetStatus(ctx, tx, t, "done", "")
+		_, err = e.endThread(ctx, tx, t, endChecked, true)
+		return err
+	})
+}
+
+// checksNoLongerPass drops a pending end that relied on passing checks (new commits made them
+// run again): the end waits for the next pass.
+func (e *Engine) checksNoLongerPass(ctx context.Context, t core.Thread) error {
+	if t.DonePendingAt == nil {
+		return nil
+	}
+	return e.core.InTx(ctx, func(tx *core.Tx) error {
+		return core.UpdateThread(ctx, tx, t.ID, map[string]any{"done_pending_at": nil})
 	})
 }
 
@@ -473,8 +513,12 @@ func (e *Engine) prStep(ctx context.Context, threadID string) error {
 		if err := e.mergePRs(ctx, t, t.PRState); !errors.Is(err, errStopped) {
 			return e.loopFailed(ctx, t, "合并失败", err)
 		}
-	case v == CIFail || v == CIMissing:
+	case v == CIMissing:
+		return e.ciMissing(ctx, t.ID)
+	case v == CIFail:
 		return e.prFailed(ctx, t, v, failed)
+	case v == CIPending && t.PRState == "open":
+		return e.checksNoLongerPass(ctx, t)
 	}
 	return nil
 }
@@ -500,6 +544,29 @@ func (e *Engine) loopFailed(ctx context.Context, t core.Thread, label string, er
 	return e.mergeFailed(ctx, t.ID, mergeErrorText(label, err))
 }
 
+// ciMissing keeps a thread whose pull requests never got the checks the project requires
+// (on_missing = block) in review with merge_error saying so: the lead cannot fix a missing CI, so
+// the user decides (it counts as waiting for the user); nothing goes to the lead.
+func (e *Engine) ciMissing(ctx context.Context, threadID string) error {
+	reason := checksText(CIMissing, nil, false)
+	return e.core.InTx(ctx, func(tx *core.Tx) error {
+		t, err := core.LockThread(ctx, tx, threadID)
+		if err != nil || t.Status != "review" {
+			return ignoreMissing(err)
+		}
+		if t.PRState == "open" && deref(t.MergeError) == reason && t.DonePendingAt == nil {
+			return nil // already recorded: no event every tick
+		}
+		if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"pr_state": "open", "merge_error": reason, "done_pending_at": nil}); err != nil {
+			return err
+		}
+		if err := core.SetThreadPRStates(ctx, tx, t.ID, "open"); err != nil {
+			return err
+		}
+		return tx.EmitThread(ctx, t.ID)
+	})
+}
+
 func (e *Engine) prFailed(ctx context.Context, t core.Thread, v Verdict, failed []core.CheckView) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[Thread #%d · CI 失败] PR 的检查没有通过，请安排修复：\n", t.No)
@@ -507,7 +574,8 @@ func (e *Engine) prFailed(ctx context.Context, t core.Thread, v Verdict, failed 
 		fmt.Fprintf(&b, "- %s：%s %s\n", c.Name, orDefault(c.Conclusion, c.Status), c.URL)
 	}
 	return e.core.InTx(ctx, func(tx *core.Tx) error {
-		if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"pr_state": "open", "merge_error": checksText(v, failed, true)}); err != nil {
+		if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"pr_state": "open", "merge_error": checksText(v, failed, true),
+			"done_pending_at": nil}); err != nil {
 			return err
 		}
 		if err := core.SetThreadPRStates(ctx, tx, t.ID, "open"); err != nil {

@@ -642,30 +642,95 @@ func (o *Orchestrator) prepareRepo(ctx context.Context, tx *core.Tx, env session
 // FeatureGitSync is the hello feature of daemons that sync an existing worktree (git.prepare sync).
 const FeatureGitSync = "git_sync"
 
+// FeatureReviewSHA is the hello feature of daemons that check out and verify a review sync's
+// expect_sha (fetching again while the commit is not there yet). Older daemons reject the field.
+const FeatureReviewSHA = "git_review_sha"
+
 // QueueSync queues one git.prepare with sync per repository of the employee's thread, so the
 // task about to start sees the current thread branch (member) or the branch under review
-// (review); meta comes back with each result. It returns how many jobs it queued: 0 when there
-// is nothing to sync yet (no session in this thread so far: it will be opened and prepared
-// anyway), the daemon cannot sync, or the project checks out full clones.
-func (o *Orchestrator) QueueSync(ctx context.Context, tx *core.Tx, e core.Employee, sync protocol.GitPrepareSync, meta map[string]any) (int, error) {
-	if ok, err := o.workedHere(ctx, tx, e); err != nil || !ok {
-		return 0, err
-	}
-	if ok, err := core.NodeHasFeature(ctx, tx, *e.NodeID, FeatureGitSync); err != nil || !ok {
+// (review, at the commits in expect: repository → sha, see ExpectedSHA); meta comes back with
+// each result. It returns how many jobs it queued: 0 when the daemon cannot sync, the project
+// checks out full clones, or (member) there is nothing to sync yet (no session in this thread
+// so far: it will be opened and prepared anyway). A review syncs even then: the job creates
+// the worktree, on the node the session will open on, and checks out the branch under review
+// (a reviewer's first review in a thread must not see the thread branch instead).
+func (o *Orchestrator) QueueSync(ctx context.Context, tx *core.Tx, e core.Employee, sync protocol.GitPrepareSync,
+	expect map[string]string, meta map[string]any) (int, error) {
+	review := sync.Mode == protocol.GitPrepareSyncModeReview
+	worked, err := o.workedHere(ctx, tx, e)
+	if err != nil || (!worked && !review) {
 		return 0, err
 	}
 	env, err := o.loadEnv(ctx, tx, e)
-	if err != nil || env.thread == nil || env.project.WorkMode == "clone" {
+	if err != nil || env.thread == nil || env.project.WorkMode == "clone" || len(env.repos) == 0 {
 		return 0, err
+	}
+	nodeID, err := o.syncNode(ctx, tx, env, worked)
+	if err != nil || nodeID == "" {
+		return 0, err
+	}
+	if ok, err := core.NodeHasFeature(ctx, tx, nodeID, FeatureGitSync); err != nil || !ok {
+		return 0, err
+	}
+	withSHA, err := core.NodeHasFeature(ctx, tx, nodeID, FeatureReviewSHA)
+	if err != nil {
+		return 0, err
+	}
+	if !worked {
+		p := PathsOf(env.emp, env.thread)
+		if err := o.placeEmployee(ctx, tx, env.emp, nodeID, o.checkoutPaths(ctx, tx, p, env)); err != nil {
+			return 0, err
+		}
 	}
 	meta = maps.Clone(meta)
 	meta["purpose"] = "sync"
 	for _, r := range env.repos {
-		if _, err := o.prepareRepo(ctx, tx, env, *e.NodeID, r, prepareOpts{sync: &sync, meta: meta}); err != nil {
+		s := sync
+		if want := ExpectedSHA(expect, r.Slug, len(env.repos)); review && withSHA && fullSHA(want) {
+			s.ExpectSHA = &want
+		}
+		if _, err := o.prepareRepo(ctx, tx, env, nodeID, r, prepareOpts{sync: &s, meta: meta}); err != nil {
 			return 0, err
 		}
 	}
 	return len(env.repos), nil
+}
+
+// syncNode is the node a pre-task sync runs on: the employee's, or for a review in a thread it
+// has no session in yet the node its session will open on ("" when there is none).
+func (o *Orchestrator) syncNode(ctx context.Context, tx *core.Tx, env sessionEnv, worked bool) (string, error) {
+	if worked {
+		return *env.emp.NodeID, nil
+	}
+	node, err := o.pickNode(ctx, tx, env.emp, env.project)
+	if errors.Is(err, ErrNoNode) {
+		return "", nil
+	}
+	return node.ID, err
+}
+
+// ExpectedSHA is the commit expected in repository repo of a review: expect[repo], or for a
+// single-repository project the head recorded without a repository (key "").
+func ExpectedSHA(expect map[string]string, repo string, repos int) string {
+	if sha, ok := expect[repo]; ok {
+		return sha
+	}
+	if repos == 1 {
+		return expect[""]
+	}
+	return ""
+}
+
+func fullSHA(s string) bool {
+	if len(s) != 40 {
+		return false
+	}
+	for _, c := range s {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // workedHere reports whether the employee has a node and opened a session in the thread it

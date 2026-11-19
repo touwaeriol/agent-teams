@@ -63,10 +63,10 @@ type projectModel struct {
 	saved          string
 }
 
-// modelChanges validates and collects the model overrides of a project update.
+// modelChanges validates and collects the member model overrides of a project update.
+// coordinator_model is no longer a setting (the coordinator runs the default model): ignored.
 func (s *Server) modelChanges(ctx context.Context, userID string, cur store.Project, b ProjectUpdate) ([]store.Change, error) {
 	models := []projectModel{
-		{"coordinator_model", "claude", trimmed(b.CoordinatorModel), cur.CoordinatorModel},
 		{"thread_model", "claude", trimmed(b.ThreadModel), cur.ThreadModel},
 		{"thread_codex_model", "codex", trimmed(b.ThreadCodexModel), cur.ThreadCodexModel},
 	}
@@ -92,8 +92,8 @@ func trimmed(p *string) *string {
 
 // checkProjectModels checks the project's model overrides against the owner's model list
 // (composer.ListModels; the owner is the user editing the project): ” follows each role; any
-// other id must be an entry of the field's runtime (coordinator_model and thread_model: Claude,
-// thread_codex_model: Codex). A value equal to the stored one passes even when it has since left
+// other id must be an entry of the field's runtime (thread_model: Claude, thread_codex_model:
+// Codex). A value equal to the stored one passes even when it has since left
 // the list, so deleting a model does not lock the settings page (as roles.modelProblems).
 func (s *Server) checkProjectModels(ctx context.Context, userID string, models []projectModel) error {
 	var list []composer.Model

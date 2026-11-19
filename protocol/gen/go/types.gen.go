@@ -1260,7 +1260,9 @@ type CompleteTaskInput struct {
 	// on. Asked for when other tasks depend on this one.
 	Handoff *string `json:"handoff,omitempty,omitzero"`
 
-	// Status corresponds to the JSON schema field "status".
+	// platform_error: review/decision tasks only, when the platform did not prepare
+	// what you were asked to check (for example the worktree HEAD is not the commit
+	// under review). It is not a verdict: the platform prepares the review again.
 	Status CompleteTaskInputStatus `json:"status,omitempty,omitzero"`
 
 	// Summary corresponds to the JSON schema field "summary".
@@ -1274,10 +1276,12 @@ type CompleteTaskInputStatus string
 
 const CompleteTaskInputStatusDone CompleteTaskInputStatus = "done"
 const CompleteTaskInputStatusFailed CompleteTaskInputStatus = "failed"
+const CompleteTaskInputStatusPlatformError CompleteTaskInputStatus = "platform_error"
 
 var enumValues_CompleteTaskInputStatus = []interface{}{
 	"done",
 	"failed",
+	"platform_error",
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -2701,7 +2705,9 @@ type GitPrepare struct {
 	// then switch to the member branch if needed, fast-forward it to origin/<ref>
 	// when it has no commits outside it and the tree is clean, else merge
 	// origin/<ref> into it (abort on conflict). review: fetch and check out
-	// origin/<ref> detached (read-only review of another member's branch).
+	// origin/<ref> detached (read-only review of another member's branch), or
+	// expect_sha when given. A worktree that does not exist yet is created first,
+	// then synced.
 	Sync *GitPrepareSync `json:"sync,omitempty,omitzero"`
 }
 
@@ -2739,11 +2745,18 @@ func (j *GitPrepareMode) UnmarshalJSON(value []byte) error {
 // then switch to the member branch if needed, fast-forward it to origin/<ref> when
 // it has no commits outside it and the tree is clean, else merge origin/<ref> into
 // it (abort on conflict). review: fetch and check out origin/<ref> detached
-// (read-only review of another member's branch).
+// (read-only review of another member's branch), or expect_sha when given. A
+// worktree that does not exist yet is created first, then synced.
 type GitPrepareSync struct {
 	// Skip the sync (action expired) when the job starts after this time: the console
 	// has already sent the task brief and the member may be working in the tree.
 	Deadline *time.Time `json:"deadline,omitempty,omitzero"`
+
+	// review (daemon feature git_review_sha): the commit under review. The daemon
+	// fetches again (a few times, before the deadline) until it has the commit,
+	// checks it out detached and verifies HEAD; when it cannot, the job fails with
+	// error_code sha_mismatch and head_sha set to the actual HEAD.
+	ExpectSHA *string `json:"expect_sha,omitempty,omitzero"`
 
 	// Mode corresponds to the JSON schema field "mode".
 	Mode GitPrepareSyncMode `json:"mode"`
@@ -2799,6 +2812,11 @@ func (j *GitPrepareSync) UnmarshalJSON(value []byte) error {
 	var plain Plain
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
+	}
+	if plain.ExpectSHA != nil {
+		if matched, _ := regexp.MatchString(`^[0-9a-f]{40}$`, string(*plain.ExpectSHA)); !matched {
+			return fmt.Errorf("field %s pattern match: must match %s", "ExpectSHA", `^[0-9a-f]{40}$`)
+		}
 	}
 	if utf8.RuneCountInString(string(plain.Ref)) < 1 {
 		return fmt.Errorf("field %s length: must be >= %d", "ref", 1)
@@ -3023,6 +3041,7 @@ const GitResultErrorCodeNotARepo GitResultErrorCode = "not_a_repo"
 const GitResultErrorCodePathOutsideRoot GitResultErrorCode = "path_outside_root"
 const GitResultErrorCodeRefspecNotAllowed GitResultErrorCode = "refspec_not_allowed"
 const GitResultErrorCodeRejectedNonFf GitResultErrorCode = "rejected_non_ff"
+const GitResultErrorCodeSHAMismatch GitResultErrorCode = "sha_mismatch"
 const GitResultErrorCodeWorkflowPermission GitResultErrorCode = "workflow_permission"
 
 var enumValues_GitResultErrorCode = []interface{}{
@@ -3036,6 +3055,7 @@ var enumValues_GitResultErrorCode = []interface{}{
 	"workflow_permission",
 	"auth_failed",
 	"refspec_not_allowed",
+	"sha_mismatch",
 }
 
 // UnmarshalJSON implements json.Unmarshaler.

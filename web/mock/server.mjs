@@ -35,6 +35,24 @@ const threadOut = (t) => {
 };
 /** Threads whose merge already failed once in the mock (the next accept merges). */
 const mergeTried = new Set();
+/** The owner's default of a runtime, else the built-in default (what the coordinator and the leads run). */
+const ownerDefault = (runtime) => state.models.find((m) => m.runtime === runtime && m.default)?.model || (runtime === "codex" ? "gpt-5.5-codex" : "claude-opus-5-5");
+/** GET /api/conversations/{cid}/model: the coordinator's or the lead's effective model, no override; members as the roles say. */
+function conversationModel(cid) {
+  const t = threadById(cid);
+  if (!t) {
+    const model = ownerDefault("claude");
+    return { scope: "coordinator", employee: state.coordinator.name, runtime: "claude", model, override: "", inherited: model, session: "", live: false, members: [] };
+  }
+  const lead = t.members.find((m) => m.tier === "lead");
+  const runtime = lead?.runtime ?? "claude";
+  const model = ownerDefault(runtime);
+  const members = t.members.map((m) => {
+    const role = state.roles.find((r) => r.role === m.role);
+    return { name: m.name, tier: m.tier, runtime: m.runtime, model: m.tier === "member" ? role?.model || ownerDefault(m.runtime) : ownerDefault(m.runtime), override: "" };
+  });
+  return { scope: "thread", employee: lead?.name ?? "", runtime, model, override: "", inherited: model, session: "", live: false, members };
+}
 const threadByNo = (no) => state.threads.find((t) => t.no === Number(no));
 
 function body(req) {
@@ -213,7 +231,7 @@ const routes = [
   ["GET", /^\/api\/projects$/, (req, res) => json(res, 200, state.projects)],
   ["POST", /^\/api\/projects$/, async (req, res) => {
     const b = await body(req);
-    const p = { ...state.projects[3], id: `p${Date.now()}`, name: b.name, coordinator_model: b.coordinator_model ?? "", thread_model: b.thread_model ?? "", thread_codex_model: b.thread_codex_model ?? "", repo: b.repo ?? null, branch: b.branch ?? "main", git_connection_id: b.git_connection_id ?? null, pinned: false, archived: false, waiting: 0, created_at: now(), updated_at: now() };
+    const p = { ...state.projects[3], id: `p${Date.now()}`, name: b.name, coordinator_model: "", thread_model: b.thread_model ?? "", thread_codex_model: b.thread_codex_model ?? "", repo: b.repo ?? null, branch: b.branch ?? "main", git_connection_id: b.git_connection_id ?? null, pinned: false, archived: false, waiting: 0, created_at: now(), updated_at: now() };
     state.projects.unshift(p);
     json(res, 201, p);
   }],
@@ -225,7 +243,8 @@ const routes = [
     const b = await body(req);
     const p = state.projects.find((x) => x.id === pid);
     if (b.delivery) b.delivery = { ...p.delivery, ...b.delivery };
-    Object.assign(p, b, { updated_at: now() });
+    // The coordinator uses the owner's default: coordinator_model is still in the body but never applies.
+    Object.assign(p, b, { coordinator_model: "", updated_at: now() });
     json(res, 200, p);
   }],
   ["DELETE", /^\/api\/projects\/([^/]+)$/, (req, res, [pid]) => {
@@ -318,6 +337,9 @@ const routes = [
   }],
   ["GET", /^\/api\/conversations\/([^/]+)\/messages$/, (req, res, [cid]) => json(res, 200, page(state.messages[cid] ?? []))],
   ["POST", /^\/api\/conversations\/([^/]+)\/messages$/, (req, res, [cid]) => sendMessage(res, cid, req)],
+  ["GET", /^\/api\/conversations\/([^/]+)\/model$/, (req, res, [cid]) => json(res, 200, conversationModel(cid))],
+  // Same refusal as the server (orchestrator.ErrFixedModel → 409 model_fixed); the mock keeps no member overrides.
+  ["PUT", /^\/api\/conversations\/([^/]+)\/model$/, (req, res) => fail(res, 409, "统筹和组长使用默认模型，不能切换", "model_fixed")],
   ["POST", /^\/api\/conversations\/([^/]+)\/interrupt$/, (req, res) => json(res, 202)],
   ["GET", /^\/api\/conversations\/([^/]+)\/questions$/, (req, res, [cid]) => json(res, 200, state.questions[cid] ?? [])],
   ["POST", /^\/api\/conversations\/([^/]+)\/questions\/([^/]+)\/answer$/, (req, res, [cid, qid]) => answer(res, cid, qid, req)],
@@ -407,7 +429,9 @@ const routes = [
   ["POST", /^\/api\/threads\/([^/]+)\/tasks\/([^/]+)\/(cancel|retry)$/, (req, res, [tid, id, op]) => {
     const task = (state.tasks[tid] ?? []).find((t) => t.id === id);
     task.status = op === "cancel" ? "cancelled" : "pending";
-    emit("task", { thread_no: threadById(tid).no, task });
+    const t = threadById(tid);
+    t.counts.tasks_open = (state.tasks[tid] ?? []).filter((x) => !["done", "failed", "cancelled"].includes(x.status)).length;
+    emit("task", { thread_no: t.no, task, counts: t.counts });
     json(res, 200, task);
   }],
   ["GET", /^\/api\/threads\/([^/]+)\/members$/, (req, res, [tid]) => json(res, 200, threadById(tid)?.members ?? [])],
@@ -460,7 +484,8 @@ const routes = [
   ["GET", /^\/api\/roles$/, (req, res) => json(res, 200, { roles: state.roles, warnings: [] })],
   ["PUT", /^\/api\/roles$/, async (req, res) => {
     const b = await body(req);
-    state.roles = b.roles.map((r, i) => ({ ...r, id: r.id || `r${Date.now()}${i}` }));
+    // The coordinator and the lead always use the owner's default: their model is cleared.
+    state.roles = b.roles.map((r, i) => ({ ...r, model: r.tier === "member" ? (r.model ?? "") : "", id: r.id || `r${Date.now()}${i}` }));
     json(res, 200, { roles: state.roles, warnings: [] });
   }],
   ["POST", /^\/api\/roles\/look\/random$/, (req, res) => {

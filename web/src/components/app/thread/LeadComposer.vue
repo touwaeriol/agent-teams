@@ -3,8 +3,9 @@
 import { computed } from "vue";
 import { conversations, threads as threadActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
-import { keys } from "@/api/queries";
+import { keys, useMe } from "@/api/queries";
 import type { ThreadView } from "@/api/views";
+import { draftKey, useDraft } from "@/lib/persist";
 import { leadOf } from "@/lib/present";
 import { cn } from "@/lib/utils";
 import { useAttachments } from "../attachments";
@@ -13,9 +14,15 @@ import type { MessageRef } from "../composer/assist";
 import { closedNote, reopenHint } from "./detail";
 
 const props = defineProps<{ pid: string; thread: ThreadView; class?: string }>();
-const attachments = useAttachments(() => props.pid);
+const me = useMe();
+// Drafts (text, attachments, @ references) are kept per viewer and thread across remounts.
+const draft = computed(() => draftKey(me.data.value?.id ?? (me.isError.value ? "anon" : undefined), props.pid, props.thread.id));
+const attachments = useAttachments(() => props.pid, undefined, draft);
 const lead = computed(() => leadOf(props.thread));
 const note = computed(() => closedNote(props.thread));
+// While archived the box is hidden; its unsent text and attachments are kept for when it is back.
+const unsent = useDraft(() => draft.value);
+const keptDraft = computed(() => Boolean(unsent.value.trim()) || attachments.items.value.length > 0);
 const hint = computed(() => reopenHint(props.thread));
 const send = useAction((v: { text: string; images: string[]; refs: MessageRef[] }) => conversations.send(props.thread.id, v.text, false, v.images, v.refs), {
   invalidate: () =>
@@ -31,7 +38,7 @@ const onSend = (text: string, images: string[], refs: MessageRef[]) => send.muta
 <template>
   <div :class="cn('shrink-0', props.class)">
     <div v-if="note" class="flex items-center justify-center gap-3 rounded-xl bg-background px-3 py-2.5 text-xs text-muted-foreground" data-testid="closed-note">
-      <span>{{ note.text }}</span>
+      <span>{{ note.text }}<template v-if="keptDraft">（输入框里未发送的内容会保留，取消归档后还在）</template></span>
       <el-button v-if="note.unarchive" size="small" :loading="unarchive.isPending.value" @click="unarchive.mutate()">取消归档</el-button>
     </div>
     <p v-if="!note && hint" class="px-1 pb-1 text-xs text-muted-foreground" data-testid="reopen-hint">{{ hint }}</p>
@@ -43,7 +50,7 @@ const onSend = (text: string, images: string[], refs: MessageRef[]) => send.muta
       :busy="send.isPending.value"
       :attachments="attachments"
       :on-send="onSend"
-      :draft-key="`draft:${thread.id}`"
+      :draft-key="draft"
       :assist="{ pid, cid: thread.id, scope: 'lead' }"
     />
   </div>

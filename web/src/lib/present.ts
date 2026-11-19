@@ -1,6 +1,9 @@
 // How domain states look on screen (colours and words of the design canvas),
 // plus the small derivations pages share. Pure functions, unit-tested.
 import type { EmployeeBrief, QuestionView, TaskStatus, TaskView, ThreadView } from "@/api/views";
+import { awaitsAcceptance, pauseLine, REVIEW_LINE, threadPhase, type PhaseId, type PhaseInput } from "./phase";
+
+export { awaitsAcceptance, pauseLine } from "./phase";
 
 export const INK = {
   text: "#1F1E1C",
@@ -27,22 +30,34 @@ export interface Look {
 
 export type ThreadKind = "wait" | "doing" | "queued" | "review" | "paused" | "done" | "failed" | "archived";
 
+const KIND_OF: Record<PhaseId, ThreadKind> = {
+  archived: "archived",
+  done: "done",
+  failed: "failed",
+  reminded: "wait",
+  acceptance: "review",
+  asking: "wait",
+  replied: "wait",
+  queued: "queued",
+  working: "doing",
+  tasks: "doing",
+  reading: "doing",
+  lead_queued: "queued",
+  lead_waiting: "doing",
+  lead_down: "wait",
+  checks: "doing",
+  paused: "paused",
+};
+
 /**
- * A thread's state: an open question to the user (or `waiting`) makes it 等你;
- * a pending permission request alone keeps it 进行中 (the work goes on), as on the design.
+ * A thread's state for marks, chips and the overview / coordinator cards: threadPhase's, the same
+ * one the panel list and the open thread use (an open card or approval, a fired reminder, or the
+ * lead having replied with nothing left going all make it 等你处理).
  */
-export function threadKind(t: Pick<ThreadView, "status" | "counts" | "merge_policy" | "merge_error">): ThreadKind {
-  if (awaitsAcceptance(t)) return "review";
-  if (t.status === "review") return "doing"; // pr / auto: the platform waits on the PR's checks
-  if (t.status === "done" || t.status === "failed" || t.status === "archived") return t.status;
-  if (t.counts.questions_open > 0 || t.status === "waiting") return "wait";
-  if (t.status === "paused") return "paused";
-  if (t.status === "queued") return "queued";
-  return "doing";
-}
+export const threadKind = (t: PhaseInput): ThreadKind => KIND_OF[threadPhase(t).id];
 
 export const THREAD_LOOK: Record<ThreadKind, Look> = {
-  wait: { tone: INK.wait, label: "等你" },
+  wait: { tone: INK.wait, label: "等你处理" },
   doing: { tone: INK.doing, label: "进行中", spin: true },
   queued: { tone: INK.gray, label: "排队中" },
   review: { tone: INK.review, label: "待验收" },
@@ -52,47 +67,28 @@ export const THREAD_LOOK: Record<ThreadKind, Look> = {
   archived: { tone: INK.gray, label: "已归档" },
 };
 
-export const threadLook = (t: Pick<ThreadView, "status" | "counts" | "merge_policy" | "merge_error">): Look => THREAD_LOOK[threadKind(t)];
+export const threadLook = (t: PhaseInput): Look => THREAD_LOOK[threadKind(t)];
 
 /** List marks and chips: anything waiting for the user (approvals too) shows in the 等你 colour. */
-export function markTone(t: Pick<ThreadView, "status" | "counts" | "merge_policy" | "merge_error">): string {
+export function markTone(t: PhaseInput): string {
   const kind = threadKind(t);
-  if (kind === "done") return INK.gray;
-  if (kind === "doing" && t.counts.waiting > 0) return INK.wait;
-  return THREAD_LOOK[kind].tone;
+  return kind === "done" ? INK.gray : THREAD_LOOK[kind].tone;
 }
-
-/**
- * A thread in review waits on the user only for an acceptance (merge_policy manual) or after a
- * merge failed; under pr and auto the platform waits on the PR's checks by itself (as the server's
- * counts.waiting does).
- */
-export const awaitsAcceptance = (t: Pick<ThreadView, "status" | "merge_policy" | "merge_error">): boolean =>
-  t.status === "review" && (t.merge_policy === "manual" || Boolean(t.merge_error));
 
 /** The acceptance card shows while the thread waits on the user's acceptance (pr_state accepting keeps it). */
 export const showReviewCard = (t: Pick<ThreadView, "status" | "merge_policy" | "merge_error" | "pr_state">): boolean =>
   awaitsAcceptance(t) || (t.status === "review" && t.pr_state === "accepting");
-
-const REVIEW_LINE: Record<ThreadView["merge_policy"], string> = { pr: "等检查通过", auto: "检查通过后自动合并", manual: "等你验收" };
 
 /** One line under a thread title: what is waiting, else the PR, else what the lead said last. */
 export function threadLine(t: ThreadView, open?: QuestionView): string {
   if (open) return questionLine(open);
   if (t.status === "review" && t.pr_number && t.pr_state === "accepting") return `PR #${t.pr_number} 合并中`;
   if (t.status === "review" && t.pr_number && t.merge_error) return `PR #${t.pr_number} 合并失败，等你处理`;
-  if (t.status === "review" && t.pr_number) return `PR #${t.pr_number} ${REVIEW_LINE[t.merge_policy] ?? REVIEW_LINE.manual}`;
+  if (t.status === "review" && t.pr_number) return `PR #${t.pr_number} ${REVIEW_LINE[t.merge_policy] ?? REVIEW_LINE.pr}`;
   if (t.status === "done" && t.pr_number) return mergedLine(t);
   if (t.status === "queued") return t.queue_position ? `排队中，前面还有 ${t.queue_position} 个` : "排队等节点";
   if (t.status === "paused") return pauseLine(t.pause_reason);
   return t.lead_last?.text || t.summary || t.brief;
-}
-
-const PAUSE_REASONS: Record<string, string> = { user: "已暂停", rate_limit: "Claude 使用限额用完，已暂停" };
-
-export function pauseLine(reason: string): string {
-  if (!reason) return "已暂停";
-  return PAUSE_REASONS[reason] ?? `已暂停：${reason}`;
 }
 
 export function questionLine(q: QuestionView): string {

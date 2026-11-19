@@ -9,10 +9,10 @@ import type { VoiceInput } from "@/components/app/voice/useVoiceInput";
 import VoiceButton from "@/components/app/voice/VoiceButton.vue";
 import VoiceMenu from "@/components/app/voice/VoiceMenu.vue";
 import { normalizeMics, selectedMic } from "@/lib/voice/audio";
-import { VoiceController, type VoiceDeps, type VoiceState } from "@/lib/voice/controller";
+import { MIC_TIMEOUT, micTimeoutText, VoiceController, type VoiceDeps, type VoiceState } from "@/lib/voice/controller";
 import type { Transport, TransportHandlers } from "@/lib/voice/openai";
 import { Framer, OUT_RATE, Resampler, toPcm16, type Capture } from "@/lib/voice/pcm";
-import { makeConnectRelay, RELAY_PROTOCOL, relaySession, relayURL, type RelayDeps } from "@/lib/voice/relay";
+import { BUFFER_DROPPED, MAX_BUFFER_BYTES, makeConnectRelay, RELAY_PROTOCOL, relaySession, relayURL, type RelayDeps } from "@/lib/voice/relay";
 
 describe("PCM", () => {
   it("halves 48 kHz by averaging pairs, the same however the input is split", () => {
@@ -68,6 +68,7 @@ class FakeSocket {
   onmessage: ((m: { data: unknown }) => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
+  onopen: (() => void) | null = null;
   constructor(
     public url: string,
     public protocols: string[],
@@ -84,6 +85,7 @@ class FakeSocket {
   // server side
   open() {
     this.readyState = 1;
+    this.onopen?.();
   }
   server(msg: object) {
     this.onmessage?.({ data: JSON.stringify(msg) });
@@ -120,8 +122,8 @@ function relayFixture(timeoutMs = 10_000) {
   const closes: (string | undefined)[] = [];
   const h: TransportHandlers = { onEvent: (e) => events.push(e), onClose: (m) => closes.push(m) };
   const connect = makeConnectRelay(() => deps);
-  const start = () => connect(relaySession("zh"), {} as MediaStream, h);
-  return { start, events, closes, capture, frame: (b: ArrayBuffer) => onFrame(b) };
+  const start = (stream: Promise<MediaStream> = Promise.resolve({} as MediaStream)) => connect(relaySession("zh"), stream, h);
+  return { start, deps, h, events, closes, capture, frame: (b: ArrayBuffer) => onFrame(b) };
 }
 
 describe("relay transport", () => {
@@ -166,27 +168,36 @@ describe("relay transport", () => {
   });
 
   it("fails with the server's reason, or a clear one, instead of spinning", async () => {
+    // The transport comes back once the microphone is captured; connecting fails through ready.
+    const failure = (p: Promise<Transport>) => p.then((t) => t.ready);
     const busy = relayFixture();
     const p1 = busy.start();
     FakeSocket.last?.server({ type: "error", fatal: true, error: { code: "voice_too_many", message: "同时最多 2 路语音输入" } });
-    await expect(p1).rejects.toThrow("连不上语音服务：同时最多 2 路语音输入");
+    await expect(failure(p1)).rejects.toThrow("连不上语音服务：同时最多 2 路语音输入");
+    expect(busy.capture.stopped).toBe(1);
 
     const refused = relayFixture();
     const p2 = refused.start();
     FakeSocket.last?.drop(); // e.g. 403 on the upgrade
-    await expect(p2).rejects.toThrow(/^连不上语音服务：连接被拒绝或网络不通/);
+    await expect(failure(p2)).rejects.toThrow(/^连不上语音服务：连接被拒绝或网络不通/);
 
     const upstream = relayFixture();
     const p3 = upstream.start();
     FakeSocket.last?.server({ type: "error", fatal: true, error: { code: "voice_key_rejected", message: "连不上语音服务：OpenAI 拒绝了 API Key" } });
-    await expect(p3).rejects.toThrow(/^连不上语音服务：OpenAI 拒绝了 API Key$/);
+    await expect(failure(p3)).rejects.toThrow(/^连不上语音服务：OpenAI 拒绝了 API Key$/);
+
+    // Refused while the microphone is still opening: fails at once, without waiting for it.
+    const early = relayFixture();
+    const p5 = early.start(new Promise<MediaStream>(() => {}));
+    FakeSocket.last?.server({ type: "error", fatal: true, error: { code: "voice_disabled", message: "管理员没有开启语音输入" } });
+    await expect(p5).rejects.toThrow("连不上语音服务：管理员没有开启语音输入");
 
     vi.useFakeTimers();
     const silent = relayFixture(10_000);
     const p4 = silent.start();
     const ws = FakeSocket.last as FakeSocket;
-    const caught = p4.catch((e: Error) => e.message);
-    vi.advanceTimersByTime(10_000);
+    const caught = failure(p4).catch((e: Error) => e.message);
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(await caught).toBe("连不上语音服务：10 秒内没有连上");
     expect(ws.closed).toBe(true);
   });
@@ -427,6 +438,7 @@ describe("mic button", () => {
       prefs: reactive({ deviceId: "", language: "auto", pushToTalk }),
       parts: ref(null),
       active: ref(phase === "connecting" || phase === "recording" || phase === "stopping"),
+      holding: ref(false),
       setPrefs: () => {},
       toggle: () => calls.push("toggle"),
       press: () => calls.push("press"),
@@ -449,15 +461,31 @@ describe("mic button", () => {
     expect(calls).toEqual(["toggle"]);
   });
 
-  it("says 点击停止 while recording; push-to-talk can stop by click too", async () => {
+  it("says 点击结束 while recording (solid blue, no spinner); push-to-talk says 松开结束 and a keyboard click stops", async () => {
     const rec = input("recording");
-    expect(rec.mic().attributes("title")).toBe("点击停止（Esc）");
+    expect(rec.mic().attributes("title")).toBe("正在录音，点击结束（Esc）");
     expect(rec.w.find("[data-testid=voice-spinner]").exists()).toBe(false);
+    expect(rec.mic().classes()).toContain("bg-[#2F6FDB]");
+    expect(rec.mic().classes()).toContain("text-white");
     await rec.mic().trigger("click");
     expect(rec.calls).toEqual(["toggle"]);
     const ptt = input("recording", true);
-    await ptt.mic().trigger("click");
+    expect(ptt.mic().attributes("title")).toBe("正在录音，松开结束");
+    await ptt.mic().trigger("click"); // detail 0: keyboard activation
     expect(ptt.calls).toEqual(["toggle"]);
+  });
+
+  it("push-to-talk while the last words settle offers no click (the modes stay separate)", async () => {
+    const { calls, mic } = input("stopping", true);
+    expect(mic().attributes("title")).toBe("正在整理文字…");
+    await mic().trigger("click");
+    expect(calls).toEqual([]);
+    expect(input("stopping").mic().attributes("title")).toBe("正在整理文字…点击立即结束");
+  });
+
+  it("idle titles describe the mode", () => {
+    expect(input("idle").mic().attributes("title")).toMatch(/^语音输入：点击开始，再点击结束/);
+    expect(input("idle", true).mic().attributes("title")).toMatch(/^按住说话，松开结束/);
   });
 
   it("a push-to-talk press is not also a click", async () => {
@@ -466,5 +494,290 @@ describe("mic button", () => {
     await mic().trigger("pointerup");
     await mic().trigger("click");
     expect(calls).toEqual(["press", "release"]);
+  });
+});
+
+/** A frame whose first sample tells which one it is. */
+const tagged = (n: number, bytes = 4800) => {
+  const b = new ArrayBuffer(bytes);
+  new Int16Array(b)[0] = n;
+  return b;
+};
+const tags = (ws: FakeSocket) => ws.sent.map((d) => (typeof d === "string" ? (JSON.parse(d) as { type: string }).type : new Int16Array(d)[0]));
+
+describe("relay: record before ready", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("opens the socket before the microphone, buffers frames until ready, then sends them in order before live ones and the commit", async () => {
+    const marks: string[] = [];
+    const f = relayFixture();
+    let micOpen: (s: MediaStream) => void = () => {};
+    const connect = makeConnectRelay(() => f.deps);
+    const p = connect(relaySession("zh"), new Promise<MediaStream>((r) => (micOpen = r)), { ...f.h, mark: (n) => marks.push(n) });
+    const ws = FakeSocket.last as FakeSocket;
+    expect(ws.url).toContain("language=zh"); // connecting while the microphone opens
+    ws.open();
+    micOpen({} as MediaStream);
+    const t = await p; // recording starts before the server is ready
+    f.frame(tagged(1));
+    f.frame(tagged(2));
+    t.send({ type: "input_audio_buffer.commit" }); // client VAD before ready: waits for its audio
+    await flushPromises();
+    expect(ws.sent).toEqual([]);
+    ws.server({ type: "ready", client_commits: true, max_seconds: 300 });
+    await t.ready;
+    expect(t.maxSeconds).toBe(300);
+    await flushPromises();
+    f.frame(tagged(3));
+    expect(tags(ws)).toEqual([1, 2, 7, "commit", 3]); // 7: the tail flushed before the commit
+    expect(marks).toEqual(["ws_open", "ready", "first_frame"]);
+  });
+
+  it("keeps at most 8 s while connecting, dropping the oldest once with a notice", async () => {
+    const notices: string[] = [];
+    const f = relayFixture();
+    const t = await makeConnectRelay(() => f.deps)(relaySession("zh"), Promise.resolve({} as MediaStream), { ...f.h, onNotice: (m) => notices.push(m) });
+    const ws = FakeSocket.last as FakeSocket;
+    ws.open();
+    const second = OUT_RATE * 2;
+    for (let i = 1; i <= 10; i++) f.frame(tagged(i, second));
+    expect(MAX_BUFFER_BYTES).toBe(8 * second);
+    ws.server({ type: "ready" });
+    await t.ready;
+    expect(tags(ws)).toEqual([3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(notices).toEqual([BUFFER_DROPPED]);
+  });
+
+  it("drops commits made before ready when the server's model ends utterances itself", async () => {
+    const f = relayFixture();
+    const t = await f.start();
+    const ws = FakeSocket.last as FakeSocket;
+    ws.open();
+    f.frame(tagged(1));
+    t.send({ type: "input_audio_buffer.commit" });
+    ws.server({ type: "ready", client_commits: false });
+    await t.ready;
+    await flushPromises();
+    expect(t.clientCommits).toBe(false);
+    expect(tags(ws)).toEqual([1]);
+  });
+
+  it("a drop after ready but before the microphone opens fails open() at once, without capturing", async () => {
+    const f = relayFixture();
+    let micOpen: (s: MediaStream) => void = () => {};
+    const p = f.start(new Promise<MediaStream>((r) => (micOpen = r)));
+    const ws = FakeSocket.last as FakeSocket;
+    ws.open();
+    ws.server({ type: "ready", client_commits: true });
+    ws.server({ type: "error", fatal: true, error: { code: "voice_upstream_closed", message: "和语音服务的连接断开了" } });
+    ws.drop();
+    await expect(p).rejects.toThrow("连不上语音服务：和语音服务的连接断开了");
+    micOpen({} as MediaStream);
+    await flushPromises();
+    expect(f.capture.stopped).toBe(0); // never captured
+    expect(f.closes).toEqual([]); // not reported as a drop of a transport nobody has
+
+    const plain = relayFixture();
+    const p2 = plain.start(new Promise<MediaStream>(() => {}));
+    const ws2 = FakeSocket.last as FakeSocket;
+    ws2.open();
+    ws2.server({ type: "ready" });
+    ws2.drop();
+    await expect(p2).rejects.toThrow("连不上语音服务：和语音服务的连接断开了");
+  });
+
+  it("closing before ready (cancel) sends nothing and releases the capture", async () => {
+    const f = relayFixture();
+    const t = await f.start();
+    const ws = FakeSocket.last as FakeSocket;
+    ws.open();
+    f.frame(tagged(1));
+    t.send({ type: "input_audio_buffer.commit" });
+    t.close();
+    await flushPromises();
+    expect(ws.sent).toEqual([]);
+    expect(ws.closed).toBe(true);
+    expect(f.capture.stopped).toBe(1);
+    await expect(t.ready).rejects.toThrow();
+  });
+});
+
+describe("controller with the relay", () => {
+  beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }));
+  afterEach(() => vi.useRealTimers());
+
+  const setup = (mic: () => Promise<MediaStream>) => {
+    const f = relayFixture();
+    let level: (l: number) => void = () => {};
+    let micStopped = 0;
+    const logs: Record<string, unknown>[] = [];
+    const state: VoiceState = { phase: "idle", level: 0, error: "" };
+    const deps: VoiceDeps = {
+      mint: async (language) => relaySession(language),
+      openMic: () => mic().then((s) => ({ ...s, getTracks: () => [{ stop: () => micStopped++ }] }) as unknown as MediaStream),
+      connect: makeConnectRelay(() => f.deps),
+      meter: (_s, cb) => ((level = cb), () => {}),
+      now: () => Date.now(),
+      onText: () => {},
+      tailMs: 0,
+      clock: () => Date.now(),
+      log: (_m, data) => logs.push(data),
+    };
+    const c = new VoiceController(state, deps);
+    const started = c.start({ text: "", selStart: 0, selEnd: 0, language: "zh", deviceId: "" });
+    return { f, c, state, started, logs, level: (l: number) => level(l), micStopped: () => micStopped, ws: () => FakeSocket.last as FakeSocket };
+  };
+  const later = <T,>(ms: number, v: T) => new Promise<T>((r) => setTimeout(() => r(v), ms));
+
+  it("connects while a slow microphone opens and records before the server is ready", async () => {
+    FakeSocket.last = null;
+    const s = setup(() => later(2000, {} as MediaStream));
+    await vi.advanceTimersByTimeAsync(0);
+    const ws = s.ws();
+    expect(ws).not.toBeNull(); // the socket is already connecting
+    ws.open();
+    expect(s.state.phase).toBe("connecting");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(s.state.phase).toBe("recording"); // mic open: recording, server not ready yet
+    s.f.frame(tagged(1));
+    await vi.advanceTimersByTimeAsync(1000);
+    ws.server({ type: "ready", client_commits: true, max_seconds: 300 });
+    await s.started;
+    expect(tags(ws)).toEqual([1]);
+    expect(s.logs[0]).toMatchObject({ outcome: "recording", transport: "relay", mic: 2000, ws_open: 0, ready: 3000, first_frame: 3000 });
+    s.c.cancel();
+  });
+
+  it("a stop before ready waits for it, then sends the buffered audio, the commit and stop in order", async () => {
+    const s = setup(async () => ({}) as MediaStream);
+    await vi.advanceTimersByTimeAsync(0);
+    const ws = s.ws();
+    ws.open();
+    expect(s.state.phase).toBe("recording");
+    s.level(0.5);
+    s.f.frame(tagged(1));
+    const stopping = s.c.stop();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(s.state.phase).toBe("stopping");
+    expect(ws.sent).toEqual([]);
+    ws.server({ type: "ready", client_commits: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(tags(ws)).toEqual([1, 7, "commit"]);
+    ws.server({ type: "input_audio_buffer.committed", item_id: "i1" });
+    ws.server({ type: "conversation.item.input_audio_transcription.completed", item_id: "i1", transcript: "你好" });
+    await stopping;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.state.phase).toBe("idle");
+    expect(s.c.transcript.value).toBe("你好");
+    expect(tags(ws).at(-1)).toBe("stop");
+    expect(s.logs.at(-1)).toMatchObject({ outcome: "stopped", first_commit: 0, first_text: 500 });
+  });
+
+  it("fails with the reason when the server refuses after recording started, releasing the microphone", async () => {
+    const s = setup(async () => ({}) as MediaStream);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.state.phase).toBe("recording");
+    s.ws().server({ type: "error", fatal: true, error: { code: "voice_unreachable", message: "连不上语音服务：服务器连不上 OpenAI" } });
+    await s.started;
+    expect(s.state).toMatchObject({ phase: "error", error: "连不上语音服务：服务器连不上 OpenAI" });
+    expect(s.micStopped()).toBe(1);
+    expect(s.logs.at(-1)?.outcome).toBe("error: 连不上语音服务：服务器连不上 OpenAI");
+  });
+
+  it("the connect timeout counts from connecting, not from the microphone, and is not extended by it", async () => {
+    const s = setup(() => later(12_000, {} as MediaStream));
+    await vi.advanceTimersByTimeAsync(10_000);
+    await s.started;
+    expect(s.state).toMatchObject({ phase: "error", error: "连不上语音服务：10 秒内没有连上" });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(s.micStopped()).toBe(1); // the microphone that opened late is closed
+    expect(s.ws().closed).toBe(true);
+  });
+
+  it("a stop before ready that then times out ends in error with microphone and capture released", async () => {
+    const s = setup(async () => ({}) as MediaStream);
+    await vi.advanceTimersByTimeAsync(0);
+    s.ws().open();
+    s.level(0.5);
+    const stopping = s.c.stop();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(s.state.phase).toBe("stopping");
+    expect(s.micStopped()).toBe(1); // the microphone closes at the stop already
+    await vi.advanceTimersByTimeAsync(10_000);
+    await stopping;
+    await s.started;
+    expect(s.state).toMatchObject({ phase: "error", error: "连不上语音服务：10 秒内没有连上" });
+    expect(s.f.capture.stopped).toBe(1);
+    expect(s.ws().closed).toBe(true);
+    expect(s.ws().sent).toEqual([]);
+  });
+
+  it("a microphone that opens after its 15 s timeout is closed again", async () => {
+    const s = setup(() => later(16_000, {} as MediaStream));
+    await vi.advanceTimersByTimeAsync(0);
+    s.ws().open();
+    s.ws().server({ type: "ready", client_commits: true });
+    await vi.advanceTimersByTimeAsync(MIC_TIMEOUT);
+    await s.started;
+    expect(s.state.error).toBe(micTimeoutText(MIC_TIMEOUT));
+    expect(s.micStopped()).toBe(0);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(s.micStopped()).toBe(1);
+    expect(s.f.capture.stopped).toBe(0); // never captured
+  });
+
+  it("a drop after ready while the microphone is still opening stays an error: the late microphone is closed", async () => {
+    const s = setup(() => later(3_000, {} as MediaStream));
+    await vi.advanceTimersByTimeAsync(0);
+    const ws = s.ws();
+    ws.open();
+    ws.server({ type: "ready", client_commits: true });
+    await vi.advanceTimersByTimeAsync(1_000);
+    ws.drop();
+    await vi.advanceTimersByTimeAsync(0);
+    await s.started;
+    expect(s.state).toMatchObject({ phase: "error", error: "连不上语音服务：和语音服务的连接断开了" });
+    s.c.reset(); // the user dismisses the error
+    await vi.advanceTimersByTimeAsync(2_000); // the microphone opens now
+    expect(s.state.phase).toBe("idle"); // not a recording on a dead connection
+    expect(s.micStopped()).toBe(1);
+    expect(s.f.capture.stopped).toBe(0);
+  });
+
+  it("a cancel before ready drops the audio and closes the socket", async () => {
+    const s = setup(async () => ({}) as MediaStream);
+    await vi.advanceTimersByTimeAsync(0);
+    s.f.frame(tagged(1));
+    s.c.cancel();
+    await vi.advanceTimersByTimeAsync(0);
+    await s.started;
+    expect(s.state.phase).toBe("idle");
+    expect(s.ws().sent).toEqual([]);
+    expect(s.ws().closed).toBe(true);
+    expect(s.micStopped()).toBe(1);
+  });
+
+  it("a microphone that does not open in 15 s fails with advice instead of spinning; a slower permission is not cut at 10 s", async () => {
+    const s = setup(() => new Promise<MediaStream>(() => {}));
+    await vi.advanceTimersByTimeAsync(0);
+    const ws = s.ws();
+    ws.open();
+    ws.server({ type: "ready", client_commits: true }); // the server is long ready
+    await vi.advanceTimersByTimeAsync(MIC_TIMEOUT - 1);
+    expect(s.state.phase).toBe("connecting");
+    await vi.advanceTimersByTimeAsync(1);
+    await s.started;
+    expect(s.state).toMatchObject({ phase: "error", error: micTimeoutText(MIC_TIMEOUT) });
+    expect(micTimeoutText(15_000)).toBe("麦克风 15 秒内没有打开，请检查浏览器的权限弹框或麦克风设备");
+    expect(ws.closed).toBe(true);
+
+    const slow = setup(() => later(12_000, {} as MediaStream));
+    await vi.advanceTimersByTimeAsync(0);
+    slow.ws().open();
+    slow.ws().server({ type: "ready", client_commits: true });
+    await vi.advanceTimersByTimeAsync(12_000);
+    await slow.started;
+    expect(slow.state.phase).toBe("recording");
+    slow.c.cancel();
   });
 });

@@ -175,6 +175,9 @@ func deliveryTwoRepos(t *testing.T, webhook bool) {
 		t.Fatalf("o/r PR base %q", api.base)
 	}
 	events.wait(t, "thread", `"status":"review"`)
+	if res := lead.call("finish", map[string]any{"summary": "购物车完成"}); !res.Ok {
+		t.Fatalf("finish %+v", res)
+	}
 	var view core.ThreadView
 	b.must(200, "GET", "/api/threads/"+thread.ID, nil, &view)
 	if len(view.Repos) != 2 || countPRs(view.Repos) != 2 {
