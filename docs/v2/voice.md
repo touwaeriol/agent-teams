@@ -66,15 +66,25 @@ Checked against developers.openai.com (realtime transcription and WebSocket guid
   the browser can show the reason.
 - Limits: 20 streams per user per minute; 2 at the same time (Valkey slot keys, shared by all
   console replicas, expiring after 6 minutes); 5 minutes per recording; 30 s without a message
-  from the browser; 64 KiB per message; audio may not run more than 10 s ahead of real time;
-  10 s to dial OpenAI and get `session.updated`.
+  from the browser; 64 KiB per message; audio may not run more than 10 s ahead of real time,
+  counted from Accept (the browser records while the relay connects and sends that audio, at
+  most 8 s, right after `ready`); one 10 s deadline from Accept for dialing OpenAI and getting
+  `session.updated` together (it used to be 10 s each, up to 20 s, while the browser gives up
+  after 10 s). A dial or handshake over the deadline is a fatal `voice_timeout`.
+- Connecting before ready: the browser opens the socket at the click, in parallel with the
+  microphone, and starts recording once the microphone is open; frames arriving before `ready`
+  are buffered in the browser, not here.
 - Browser → server: binary frames of 24 kHz mono PCM16 little-endian (≈100 ms), `{"type":"commit"}`,
   `{"type":"stop"}`. Server → browser: `{"type":"ready","model","client_commits","max_seconds"}`,
   then OpenAI's transcript events reduced to `type/item_id/delta/transcript/error{code,message}`
   (anything else is dropped; the key is replaced by `***` in messages), and
   `{"type":"error","fatal":true,"error":{"code","message"}}` before it closes.
-- Never logged: audio, transcripts, the key. Audit: `voice_stream_start`, `voice_stream_stop`
-  (`seconds`, `audio_seconds`, `commits`, `reason`, OpenAI session id as the target).
+- Never logged: audio, transcripts, the key. Audit: `voice_stream_start` once the browser got
+  `ready` (`dial_ms`: dialing OpenAI incl. DNS/TCP/TLS/upgrade, `handshake_ms`: session.update →
+  session.updated), `voice_stream_stop` (`seconds` since Accept, `audio_seconds`, `commits`,
+  `reason`, OpenAI session id as the target; on a failed dial or handshake also `dial_ms` /
+  `handshake_ms`). Logs: `voice: relay ready` (info, `dial_ms`, `handshake_ms`, `setup_ms`),
+  `voice: relay dial failed` / `voice: relay handshake failed` (warn).
 
 Settings live in `at_settings["voice"]`. The saved key is only ever sent to the base URL it was
 saved with, so a changed address can't redirect it to another host; an upstream error message is
@@ -100,9 +110,26 @@ the WebRTC transport), `audio.ts` (microphone, device list, level meter), `trans
   commits; stopping commits once more and waits for that commit's transcript. With the relay the
   buffered audio is flushed before each commit and `stop` is sent after it. The controller stops
   by itself 3 s before the server's `max_seconds`.
-- Timeouts: connecting (mint + connect) fails after 10 s with "连不上语音服务：…" instead of
-  spinning; the relay rejects with the server's reason (e.g. "连不上语音服务：OpenAI 拒绝了 API
-  Key"); direct mode aborts the SDP `fetch` and the data-channel wait at the same deadline.
+- Starting: a click opens the microphone and connects at the same time (relay: the WebSocket;
+  direct: the mint, the WebRTC offer needs the track so it follows the microphone). With the
+  relay, recording starts as soon as the microphone is open (button 录音中, level moving), before
+  the server's `ready`: `relay.ts` buffers frames in order (at most 8 s, `MAX_BUFFER_BYTES`; beyond
+  that the oldest are dropped with one notice) and sends them first once `ready` comes, then live
+  frames. Commits made before `ready` (client VAD, or a stop) wait for `ready` and their audio; a
+  stop before `ready` waits for it (still within the connect timeout) before the final commit and
+  `stop`; a cancel before `ready` drops everything. A connection that fails after recording
+  started ends in error with the reason and releases the microphone. `max_seconds` is known from
+  `ready` on.
+- Timeouts: the microphone (permission prompt included) has 15 s (`MIC_TIMEOUT`): "麦克风 15 秒内
+  没有打开，请检查浏览器的权限弹框或麦克风设备". Connecting has 10 s (`CONNECT_TIMEOUT`) counted
+  from when connecting starts, neither eaten nor extended by the microphone wait: the relay's
+  socket must get `ready` within 10 s of being opened ("连不上语音服务：10 秒内没有连上"), or it
+  rejects earlier with the server's reason (e.g. "连不上语音服务：OpenAI 拒绝了 API Key"); direct
+  mode bounds the mint by 10 s and aborts the SDP `fetch` and the data-channel wait 10 s after
+  the offer.
+- Timings: each recording logs `[voice] timings {outcome, transport, mic, ws_open, ready,
+  first_frame, first_commit, first_text}` with `console.debug` (ms since the click) once it is up
+  (or failed) and again when it stops, to see which step is slow.
 - Menu: 麦克风 rows with exactly one checked (Chrome's `default` pseudo device becomes
   "系统默认（<name>）", `communications` is dropped, duplicates merged by group and name; a saved
   microphone that is gone falls back to 系统默认; before permission the rows are "麦克风 N"
@@ -114,9 +141,22 @@ the WebRTC transport), `audio.ts` (microphone, device list, level meter), `trans
 
 - Go: `internal/httpapi/voice_stream_test.go` against a fake OpenAI WebSocket (key, URL,
   safety id, session.update body, audio bytes, events reduced and key-free, CSRF/Origin/auth,
-  limits, idle, max duration, silent upstream, rejected key, audit); `internal/voice/relay_test.go`.
+  limits, idle, max duration, silent upstream, rejected key, audit, the shared dial + handshake
+  deadline, `dial_ms`/`handshake_ms`, a buffered 10.5 s burst after a 1 s dial allowed and a
+  flood still `voice_too_fast`); `internal/voice/relay_test.go`.
 - Web: `src/__tests__/voice-relay.test.ts` (resampling/framing math, relay with a fake socket,
-  timeouts, cancel while connecting, device list, menu, button) and `voice.test.ts`.
+  timeouts, cancel while connecting, the socket opening before the microphone, buffered frames
+  sent in order before live ones and commits, the 8 s cap, stop/cancel before ready, refusal
+  after recording started, the 15 s microphone timeout, device list, menu, button) and
+  `voice.test.ts` (minting while the microphone opens).
+- Startup, locally (2026-11-19, real server handler + fake OpenAI + Chromium fake microphone),
+  click → recording / → first audio at the server: baseline 0.07 / 0.14 s (before: 0.08 /
+  0.14 s); session.updated 3 s late 0.09 / 3.04 s, the audio from 0.09 s on delivered (before:
+  3.08 / 3.15 s); microphone 2 s late 2.08 / 2.14 s; microphone 20 s late: error at 15 s with
+  the microphone advice (before: recording at 20 s, unbounded); upstream 12 s late: recording at
+  0.09 s, error at 10.0 s (before: error at 10.1 s). First text depends on the client VAD: with
+  pauses the first commit came 0.8 s after the first phrase (2.3 s); with continuous sound
+  (level always ≥ `SPEECH_LEVEL`) only after `MAX_UTTERANCE_MS`, 20.1 s.
 - Real browser, locally: Chromium with a fake microphone (440 Hz tone bursts) → Vite → atctl →
   `/api/voice/stream` → fake OpenAI; three utterances committed by the client VAD, the fake
   measured 24 kHz audio at the right pitch and the transcripts landed in the coordinator composer;
