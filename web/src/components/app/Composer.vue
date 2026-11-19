@@ -60,7 +60,7 @@ const onScroll = (e: Event) => {
 // It never squeezes the chat above it under 120px (short windows, attachments, the plan card).
 const grow = useAutoGrow(field, text, { keepVisible: 120, onResize: (el) => (scroll.value = { top: el.scrollTop, left: el.scrollLeft }) });
 // With a scrollbar the text wraps narrower; the overlay keeps the same right edge (px-4 = 16px).
-watch([imageCount, () => assist.panel.value, () => props.attachments?.items.value.length], () => grow.update(), { flush: "post" });
+watch([imageCount, () => assist.panel.value, () => props.attachments?.items.value.length, () => assist.picked.value.length], () => grow.update(), { flush: "post" });
 const overlayStyle = computed(() => (grow.gutter.value ? { paddingRight: `${16 + grow.gutter.value}px` } : undefined));
 const speaking = computed(() => (voice.parts.value ? "text-transparent caret-foreground" : ""));
 

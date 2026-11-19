@@ -2,7 +2,7 @@
 // useAutoGrow: jsdom has no layout, so scrollHeight / offsetWidth are faked from the text
 // (24px lines + 14px top padding, like the composer's textarea).
 import { mount } from "@vue/test-utils";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { defineComponent, h, nextTick, ref } from "vue";
 import { defaultMaxHeight, useAutoGrow } from "@/components/app/composer/useAutoGrow";
 
@@ -44,6 +44,29 @@ function setup(max = 200) {
   };
   return { w, el, set, grow: () => grow, resized };
 }
+
+// jsdom has no ResizeObserver: a fake whose callbacks the tests fire by hand.
+class FakeObserver {
+  static all: FakeObserver[] = [];
+  targets: Element[] = [];
+  constructor(private cb: () => void) {
+    FakeObserver.all.push(this);
+  }
+  observe(el: Element) {
+    this.targets.push(el);
+  }
+  disconnect() {
+    this.targets = [];
+  }
+  static fire(el: Element) {
+    for (const o of FakeObserver.all) if (o.targets.includes(el)) o.cb();
+  }
+}
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  FakeObserver.all = [];
+});
 
 const lines = (n: number) => Array.from({ length: n }, (_, i) => `line ${i + 1}`).join("\n");
 const MIN = 2 * LINE + PAD; // 62
@@ -161,6 +184,94 @@ describe("useAutoGrow", () => {
     column = 100;
     window.dispatchEvent(new Event("resize"));
     expect(el.style.height).toBe("62px");
+    w.unmount();
+  });
+
+  it("re-caps when the chat changes height on its own, without feeding back on itself", async () => {
+    vi.stubGlobal("ResizeObserver", FakeObserver);
+    const text = ref(lines(30));
+    let column = 362; // box + chat
+    let updates = 0;
+    const C = defineComponent({
+      setup() {
+        const field = ref<HTMLTextAreaElement | null>(null);
+        useAutoGrow(field, text, { maxHeight: () => 400, keepVisible: 120, onResize: () => updates++ });
+        return () =>
+          h("div", { style: "display:flex;flex-direction:column" }, [
+            h("div", { "data-chat": "", style: "overflow-y:auto;flex-grow:1" }),
+            h("div", [h("textarea", { ref: field, value: text.value, style: `line-height:${LINE}px;padding-top:${PAD}px` })]),
+          ]);
+      },
+    });
+    const w = mount(C, { attachTo: document.body });
+    const chat = w.find("[data-chat]").element as HTMLElement;
+    const el = w.find("textarea").element as HTMLTextAreaElement;
+    const box = () => parseFloat(el.style.height) || 62;
+    Object.defineProperty(el, "offsetHeight", { configurable: true, get: box });
+    Object.defineProperty(chat, "clientHeight", { configurable: true, get: () => Math.max(0, column - box()) });
+    await nextTick();
+    expect(el.style.height).toBe("242px");
+    // The box growing shrank the chat by as much: box + chat unchanged, nothing is re-measured.
+    const measures = vi.spyOn(window, "getComputedStyle");
+    FakeObserver.fire(chat);
+    expect(measures).not.toHaveBeenCalled();
+    expect(el.style.height).toBe("242px");
+    // A plan card unfolds above: the chat loses 62px, the box gives it back (text unchanged).
+    column = 300;
+    FakeObserver.fire(chat);
+    expect(el.style.height).toBe("180px");
+    // ...which grows the chat again by as much: the follow-up observation is a no-op.
+    const settled = updates;
+    measures.mockClear();
+    FakeObserver.fire(chat);
+    expect(measures).not.toHaveBeenCalled();
+    expect(updates).toBe(settled);
+    expect(el.style.height).toBe("180px");
+    // The card folds away: room comes back, the box takes it up to the cap again.
+    column = 362;
+    FakeObserver.fire(chat);
+    expect(el.style.height).toBe("242px");
+    w.unmount();
+  });
+
+  it("keeps the caret line in view at the cap after text changes, but not when merely re-measured", async () => {
+    const { el, set, grow, w } = setup(200);
+    let top = 0;
+    Object.defineProperty(el, "scrollTop", { configurable: true, get: () => top, set: (v: number) => (top = v) });
+    Object.defineProperty(el, "clientHeight", { configurable: true, get: () => parseFloat(el.style.height) || 0 });
+    // Long text with the caret at its end: the last line sits at the bottom of the box.
+    await set(lines(40));
+    expect(el.style.height).toBe("200px");
+    expect(top).toBe(PAD + 40 * LINE - 200); // 774
+    // The user scrolls up to read; a re-measure without a text change leaves that alone.
+    top = 0;
+    grow().update();
+    await nextTick();
+    expect(top).toBe(0);
+    // Dictation appends and places the caret in its own nextTick (setSelectionRange does not scroll).
+    const more = `${lines(40)}\nline 41`;
+    const done = set(more);
+    void nextTick(() => el.setSelectionRange(more.length, more.length));
+    await done;
+    await nextTick();
+    expect(top).toBe(PAD + 41 * LINE - 200); // 798: the new line is visible
+    // Text inserted near the top with the caret there: scrolled up to that line.
+    const edited = more.replace("line 5", "line 5!");
+    const caret = edited.indexOf("line 5!") + "line 5!".length;
+    const p = set(edited);
+    void nextTick(() => el.setSelectionRange(caret, caret));
+    await p;
+    await nextTick();
+    expect(top).toBe(4 * LINE); // caret line top (14 + 4*24) minus the top padding
+    // Caret already visible: no scrolling at all.
+    top = 50;
+    const again = edited.replace("line 5!", "line 5!!");
+    const c2 = again.indexOf("line 5!!") + "line 5!!".length;
+    const q = set(again);
+    void nextTick(() => el.setSelectionRange(c2, c2));
+    await q;
+    await nextTick();
+    expect(top).toBe(50);
     w.unmount();
   });
 

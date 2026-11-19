@@ -2,7 +2,7 @@
 // the viewport, with a pixel floor), then scrolls inside. The content is measured on a hidden copy
 // of the textarea (same width, font, padding and wrapping), so the real box never collapses to
 // `height: auto` mid-edit: its scroll position, the caret and the page around it stay put.
-import { onBeforeUnmount, onMounted, ref, toValue, watch, type MaybeRefOrGetter, type Ref } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref, toValue, watch, type MaybeRefOrGetter, type Ref } from "vue";
 
 /** Default cap: 40% of the viewport, never under 160px (short windows still get ~6 lines). */
 export const MAX_SHARE = 0.4;
@@ -117,6 +117,12 @@ export function useAutoGrow(field: Ref<Field>, value: MaybeRefOrGetter<string>, 
     return p.scrollHeight + borderY;
   }
 
+  // Box metrics from the last measure (the caret check reuses them).
+  let metrics = { borderY: 0, padTop: 0, padBottom: 0, line: 20 };
+  // The chat this box shares a column with, and the room (box + chat) the cap was computed from.
+  let scroller: HTMLElement | null = null;
+  let room = -1;
+
   function update() {
     const el = field.value;
     if (!el || el.tagName !== "TEXTAREA") return;
@@ -132,11 +138,15 @@ export function useAutoGrow(field: Ref<Field>, value: MaybeRefOrGetter<string>, 
     const padTop = px(cs.paddingTop);
     const padBottom = px(cs.paddingBottom);
     const line = cs.lineHeight === "normal" || !px(cs.lineHeight) ? px(cs.fontSize) * 1.2 || 20 : px(cs.lineHeight);
+    metrics = { borderY, padTop, padBottom, line };
     const min = Math.ceil(line * minRows + padTop + padBottom + borderY);
     let cap = maxHeight();
     if (opts.keepVisible) {
-      const sc = neighbourScroller(ta);
-      if (sc) cap = Math.min(cap, ta.offsetHeight + sc.clientHeight - opts.keepVisible);
+      watchScroller(neighbourScroller(ta));
+      if (scroller) {
+        room = ta.offsetHeight + scroller.clientHeight;
+        cap = Math.min(cap, room - opts.keepVisible);
+      }
     }
     const max = Math.max(min, Math.floor(cap));
     const text = toValue(value);
@@ -153,21 +163,58 @@ export function useAutoGrow(field: Ref<Field>, value: MaybeRefOrGetter<string>, 
     gutter.value = over ? Math.max(0, ta.offsetWidth - ta.clientWidth - px(cs.borderLeftWidth) - px(cs.borderRightWidth)) : 0;
     if (!changed) return;
     // The browser scrolled the caret into view against the old height; redo it for the new one.
-    if (over && document.activeElement === ta) {
-      const end = ta.selectionEnd ?? text.length;
-      const caretBottom = measure(p, text.slice(0, end), borderY) - borderY - padBottom;
-      const caretTop = caretBottom - line;
-      if (caretBottom > ta.scrollTop + ta.clientHeight - padBottom) ta.scrollTop = caretBottom - ta.clientHeight + padBottom;
-      else if (caretTop < ta.scrollTop + padTop) ta.scrollTop = Math.max(0, caretTop - padTop);
-    }
+    if (document.activeElement === ta) followCaret();
     opts.onResize?.(ta);
+  }
+
+  /**
+   * Scrolls the caret's line into view when the box scrolls inside. Runs after the text changed
+   * (typing, paste, dictation: setSelectionRange alone does not scroll in Chromium) and after a
+   * resize of the focused box; never on its own, so reading further up is left alone.
+   */
+  function followCaret() {
+    const ta = field.value as HTMLTextAreaElement | null;
+    if (!ta || ta.tagName !== "TEXTAREA" || !scrolling.value || !probe) return;
+    const { borderY, padTop, padBottom, line } = metrics;
+    const text = toValue(value);
+    const end = Math.min(ta.selectionEnd ?? text.length, text.length);
+    const caretBottom = measure(probe, text.slice(0, end), borderY) - borderY - padBottom;
+    const caretTop = caretBottom - line;
+    const before = ta.scrollTop;
+    if (caretBottom > ta.scrollTop + ta.clientHeight - padBottom) ta.scrollTop = caretBottom - ta.clientHeight + padBottom;
+    else if (caretTop < ta.scrollTop + padTop) ta.scrollTop = Math.max(0, caretTop - padTop);
+    if (ta.scrollTop !== before) opts.onResize?.(ta);
   }
 
   // Width changes re-wrap the text; our own height changes are ignored.
   let observer: ResizeObserver | null = null;
+  // The chat changing height for its own reasons (plan card, chips, a banner) moves the cap. When
+  // the box itself grows the chat shrinks by as much: box + chat stays the same, nothing to redo.
+  let chatObserver: ResizeObserver | null = null;
+  function watchScroller(next: HTMLElement | null) {
+    if (next === scroller) return;
+    chatObserver?.disconnect();
+    scroller = next;
+    room = -1;
+    if (!next || typeof ResizeObserver === "undefined") return;
+    chatObserver = new ResizeObserver(() => {
+      const ta = field.value;
+      if (!ta || !scroller) return;
+      if (ta.offsetHeight + scroller.clientHeight !== room) update();
+    });
+    chatObserver.observe(next);
+  }
   const onWindow = () => update();
 
-  watch(() => toValue(value), update, { flush: "post" });
+  watch(
+    () => toValue(value),
+    () => {
+      update();
+      // After the flush: the caret placed by the writer (e.g. dictation's nextTick) is in by then.
+      void nextTick(followCaret);
+    },
+    { flush: "post" },
+  );
   watch(
     field,
     (el, _, onCleanup) => {
@@ -192,6 +239,7 @@ export function useAutoGrow(field: Ref<Field>, value: MaybeRefOrGetter<string>, 
   onBeforeUnmount(() => {
     window.removeEventListener("resize", onWindow);
     observer?.disconnect();
+    chatObserver?.disconnect();
     probe?.remove();
     probe = null;
   });
