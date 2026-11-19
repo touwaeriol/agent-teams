@@ -15,7 +15,7 @@ import { menuItems } from "@/components/app/threadMenu";
 import IconMenu from "@/components/common/IconMenu.vue";
 import ConfirmAction from "@/components/common/ConfirmAction.vue";
 import Markdown from "@/components/Markdown.vue";
-import { useDraft } from "@/lib/persist";
+import { resetDraftMemory, useDraft } from "@/lib/persist";
 import type { ThreadView } from "@/api/views";
 import { question, thread } from "./fixtures";
 
@@ -26,7 +26,10 @@ function plugins() {
 
 const mountWith = (c: Component, props: Record<string, unknown> = {}) => mount(c, { props, global: { plugins: plugins() }, attachTo: document.body });
 
-beforeEach(() => window.localStorage.clear());
+beforeEach(() => {
+  window.localStorage.clear();
+  resetDraftMemory();
+});
 afterEach(() => {
   vi.restoreAllMocks();
   document.body.innerHTML = "";
@@ -65,16 +68,16 @@ describe("drafts", () => {
   it("survive remounts per key and follow a changing key", async () => {
     vi.useFakeTimers();
     let draft!: ReturnType<typeof useDraft>;
-    const key = { value: "draft:a" };
+    const key = { value: "draft:v2:u1:p1:a" };
     const Host = defineComponent({ setup: () => ((draft = useDraft(() => key.value)), () => h("div")) });
     mount(Host);
     draft.value = "typed";
     vi.advanceTimersByTime(300);
-    expect(window.localStorage.getItem("draft:a")).toBe("typed");
+    expect(JSON.parse(window.localStorage.getItem("draft:v2:u1:p1:a") ?? "{}").t).toBe("typed");
     mount(Host);
     expect(draft.value).toBe("typed");
     draft.value = "";
-    expect(window.localStorage.getItem("draft:a")).toBeNull();
+    expect(window.localStorage.getItem("draft:v2:u1:p1:a")).toBeNull();
     vi.useRealTimers();
   });
 });
