@@ -17,6 +17,7 @@ import type {
   MainTaskView,
   MergeEntryView,
   MessageView,
+  NodeUsage,
   OfficeReplay,
   OfficeSnapshot,
   OverviewView,
@@ -71,6 +72,8 @@ export interface OrchestrationPaths {
   "/api/projects/{pid}/office": { get: Op<Ok<OfficeSnapshot>, Pid> };
   "/api/projects/{pid}/office/replay": { get: Op<Ok<OfficeReplay>, Pid, { from: string; to: string; thread?: number }> };
   "/api/employees/{id}": { get: Op<Ok<EmployeeCard>, { id: string }> };
+  /** Asks the node for fresh quota now (waits up to 15 s; 409 when offline). */
+  "/api/nodes/{id}/usage/refresh": { post: Op<Ok<{ usage: NodeUsage | null; stale?: boolean }>, { id: string }> };
 
   "/api/conversations/{cid}/messages": {
     get: Op<Ok<Page<MessageView>>, Cid, Paged>;

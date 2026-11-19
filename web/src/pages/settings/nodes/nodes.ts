@@ -1,6 +1,6 @@
 // Nodes page helpers (pure): runtime chips, the card's meta line, the slot bar, totals and the
 // settings patch.
-import type { NodeView, RuntimeUsage, UsageWindow } from "@/api/views";
+import type { NodeUsage, NodeView, RuntimeUsage, UsageWindow } from "@/api/views";
 import { summarizeNodes, nodeSlots } from "@/components/shell/nodes";
 import { timeAgo } from "@/lib/utils";
 
@@ -27,8 +27,11 @@ const SUBSCRIPTION: Record<string, string> = { claude: "subscription", codex: "c
 
 const WINDOW_NAMES: Record<string, string> = { five_hour: "5 小时", weekly: "每周", weekly_opus: "每周 Opus", weekly_sonnet: "每周 Sonnet" };
 
-/** Chinese window name; codex's primary/secondary are named by their length when known. */
-export function windowLabel(w: Pick<UsageWindow, "key" | "window_minutes">): string {
+/** Chinese window name: weekly_model is "每周 {label}", a server label wins elsewhere, codex's primary/secondary are named by their length when known. */
+export function windowLabel(w: Pick<UsageWindow, "key" | "window_minutes" | "label">): string {
+  const label = w.label?.trim();
+  if (w.key === "weekly_model") return label ? `每周 ${label}` : "每周（模型）";
+  if (label) return label;
   if (WINDOW_NAMES[w.key]) return WINDOW_NAMES[w.key];
   const m = w.window_minutes;
   if (m) {
@@ -71,8 +74,9 @@ export type UsageView = { kind: "windows"; rows: UsageRow[]; updated: string } |
 
 export function usageView(key: string, info: RuntimeInfo | undefined, usage: RuntimeUsage | undefined, online: boolean, now = Date.now()): UsageView {
   const sub = SUBSCRIPTION[key];
-  if (!info?.cli || !sub) return null;
-  if (!usage) return info.auth === sub && online ? { kind: "pending" } : null;
+  // hello's login state wins: logged out or switched to an API key hides any leftover quota.
+  if (!info?.cli || !sub || info.auth !== sub) return null;
+  if (!usage) return online ? { kind: "pending" } : null;
   if (usage.auth !== sub || usage.status === "unsupported") return null;
   if (usage.status === "error") return { kind: "error", error: usage.error || "未知原因" };
   const rows = (usage.windows ?? []).map((w) => {
@@ -81,6 +85,47 @@ export function usageView(key: string, info: RuntimeInfo | undefined, usage: Run
   });
   if (!rows.length) return null;
   return { kind: "windows", rows, updated: [usage.plan, `更新于 ${timeAgo(usage.fetched_at)}`].filter(Boolean).join(" · ") };
+}
+
+/** Quota younger than this is shown as is; hovering does not ask the node again. */
+export const USAGE_FRESH_MS = 60_000;
+
+/** Hovering a card asks for fresh quota only when the node is online, has a subscription login and that runtime's quota is missing or older than a minute. */
+export function needsUsageRefresh(n: { online: boolean; runtimes?: unknown; usage?: NodeUsage | null }, now = Date.now(), maxAge = USAGE_FRESH_MS): boolean {
+  if (!n.online) return false;
+  const runtimes = (n.runtimes ?? {}) as Record<string, RuntimeInfo | undefined>;
+  return Object.entries(SUBSCRIPTION).some(([key, sub]) => {
+    const info = runtimes[key];
+    if (!info?.cli || info.auth !== sub) return false;
+    const u = n.usage?.[key as keyof NodeUsage];
+    const at = Date.parse(u?.received_at || u?.fetched_at || "");
+    return Number.isNaN(at) || now - at >= maxAge;
+  });
+}
+
+/** Fires `fire` once the pointer has stayed `ms` (hover intent); leaving earlier cancels it. */
+export function hoverIntent(ms: number, fire: () => void): { enter: () => void; leave: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const leave = () => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+  };
+  return {
+    enter: () => {
+      leave();
+      timer = setTimeout(() => {
+        timer = undefined;
+        fire();
+      }, ms);
+    },
+    leave,
+  };
+}
+
+/** Puts one node's refreshed quota into the cached node list (a null answer keeps the old data). */
+export function withNodeUsage<T extends { id: string; usage?: NodeUsage | null }>(list: T[] | undefined, id: string, usage: NodeUsage | null | undefined): T[] | undefined {
+  if (!list || !usage) return list;
+  return list.map((n) => (n.id === id ? { ...n, usage } : n));
 }
 
 const ISOLATION: Record<string, string> = { agent_user: "独立系统用户", sandbox: "沙箱", none: "未隔离" };
