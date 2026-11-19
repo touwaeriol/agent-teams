@@ -61,8 +61,9 @@ export function joinSharedPath(dir: string, name: string): string {
   return d ? `${d}/${name}` : name;
 }
 
-/** “你” for the user's uploads, “dev-1 #31” for an employee's (the thread it uploaded from). */
+/** “你” for the user's uploads, “dev-1 #31” for an employee's (the thread it uploaded from), “—” when unknown. */
 export function uploaderLabel(f: Pick<SharedFile, "uploaded_by" | "uploaded_by_thread_no">): string {
+  if (!f.uploaded_by?.trim()) return "—";
   if (f.uploaded_by === "user") return "你";
   return f.uploaded_by_thread_no ? `${f.uploaded_by} #${f.uploaded_by_thread_no}` : f.uploaded_by;
 }
@@ -91,8 +92,84 @@ export interface UploadPlan {
 }
 
 /** The files picked (or dropped) with their target paths: a folder pick keeps its sub-folders. */
-export function pickedFiles(list: ArrayLike<File>, dir: string): PickedFile[] {
-  return Array.from(list).map((file) => ({ file, path: joinSharedPath(dir.trim(), file.webkitRelativePath || file.name) }));
+export function pickedFiles(list: ArrayLike<File | SourceFile>, dir: string): PickedFile[] {
+  return collectFiles(list, dir).files;
+}
+
+/** A file with the path it has inside a picked or dropped folder ("" = picked on its own). */
+export interface SourceFile {
+  file: File;
+  rel: string;
+}
+
+/**
+ * The files to upload with their target paths. Files that came inside a folder (a folder pick or a
+ * dropped folder) keep their sub-folders, and those under a hidden name (.DS_Store, .git/…) are
+ * skipped and counted; a hidden file picked on its own is kept so the plan explains the refusal.
+ */
+export function collectFiles(list: ArrayLike<File | SourceFile>, dir: string): { files: PickedFile[]; skipped: number } {
+  const files: PickedFile[] = [];
+  let skipped = 0;
+  for (const item of Array.from(list)) {
+    const src = item instanceof File ? { file: item, rel: item.webkitRelativePath } : item;
+    if (src.rel && src.rel.split("/").some((seg) => seg.startsWith("."))) {
+      skipped += 1;
+      continue;
+    }
+    files.push({ file: src.file, path: joinSharedPath(dir.trim(), src.rel || src.file.name) });
+  }
+  return { files, skipped };
+}
+
+// The parts of the File and Directory Entries API a drop needs (DataTransferItem.webkitGetAsEntry).
+interface DropEntry {
+  isFile: boolean;
+  isDirectory: boolean;
+  name: string;
+  fullPath: string;
+  file?: (ok: (f: File) => void, fail: (e: unknown) => void) => void;
+  createReader?: () => { readEntries: (ok: (entries: DropEntry[]) => void, fail: (e: unknown) => void) => void };
+}
+
+async function entryFiles(entry: DropEntry, out: SourceFile[], inFolder: boolean): Promise<void> {
+  if (entry.isFile && entry.file) {
+    const file = await new Promise<File>((ok, fail) => entry.file!(ok, fail));
+    out.push({ file, rel: inFolder ? entry.fullPath.replace(/^\/+/, "") : "" });
+    return;
+  }
+  if (!entry.isDirectory || !entry.createReader) return;
+  const reader = entry.createReader();
+  // readEntries returns at most ~100 entries per call: read until it returns none.
+  for (;;) {
+    const batch = await new Promise<DropEntry[]>((ok, fail) => reader.readEntries(ok, fail));
+    if (batch.length === 0) break;
+    for (const child of batch) await entryFiles(child, out, true);
+  }
+}
+
+/**
+ * The files of a drop: dropped folders are walked with webkitGetAsEntry and keep their structure.
+ * Browsers without it give the plain file list; a folder then shows up as an empty "file" that
+ * cannot be read, which is reported as `folders` (the page asks to use 上传文件夹 instead).
+ */
+export async function droppedFiles(dt: Pick<DataTransfer, "items" | "files"> | null | undefined): Promise<{ files: SourceFile[]; folders: number }> {
+  if (!dt) return { files: [], folders: 0 };
+  const items = Array.from(dt.items ?? []).filter((i) => i.kind === "file");
+  const entries = items.map((i) => (i as DataTransferItem & { webkitGetAsEntry?: () => DropEntry | null }).webkitGetAsEntry?.() ?? null);
+  if (entries.length > 0 && entries.every((e) => e !== null)) {
+    const out: SourceFile[] = [];
+    for (const e of entries as DropEntry[]) await entryFiles(e, out, e.isDirectory);
+    return { files: out, folders: 0 };
+  }
+  const files: SourceFile[] = [];
+  let folders = 0;
+  for (const f of Array.from(dt.files ?? [])) {
+    // A folder in a plain file list: no type, size 0 or a block multiple, and reading it fails.
+    const isFolder = f.type === "" && (await f.slice(0, 1).arrayBuffer().then(() => false, () => true));
+    if (isFolder) folders += 1;
+    else files.push({ file: f, rel: "" });
+  }
+  return { files, folders };
 }
 
 /**

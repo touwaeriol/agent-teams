@@ -343,11 +343,11 @@
 
 守护进程只为仍在等待、且属于同一会话的 `read_deliverable` 调用保存分段（内存里，合计不超过 5 MB 的 base64），其他分段丢弃。收到 `tool.result` 后写到会话 cwd 下的 `.agent-deliverables/<deliverable_id>/v<version>/`，写之前重新校验 id 和版本、每个路径（相对、各段不以点开头、扩展名在白名单内、不重复）、分段是否到齐、合计 ≤ 5 MB、每个文件的大小和 sha256；`.agent-deliverables` 和其下目录必须是真目录，版本目录先整体删掉再写，文件以 `O_CREAT | O_EXCL | O_NOFOLLOW` 创建，顶层写 `.gitignore`（`*`）。成功时在结果文字前加一行本地绝对路径（`structured.abs_dir` 同样），失败（分段不全、校验不符、路径不合法）时把结果改成 `ok:false` 的工具失败。守护进程重启后未完成的调用按 §6.2 取消，分段随之作废；控制台对重复的 `tool.call` 只重发结果、不重发分段，这时结果按“内容不完整”失败，员工重新调用即可。只有 hello 带 `file_download` 特性的守护进程才会收到 `file.download`，否则工具直接失败并提示升级。
 
-`read_shared_file` 也用 `file.download` 下发，只是 `tool.result` 带的是 `shared_download = {download_id, chunks, files: [{path, size, sha256}]}`（恰好一个文件，`path` 是共享区路径，≤ 20 MB 所以最多 20 段），不带 `download`。守护进程为这次调用收分段（上限按 20 MB 计），校验同上，写到会话 cwd 下的 `.shared/<path>`：`.shared` 和其下目录必须是真目录，顶层写 `.gitignore`（`*`），目标文件已存在时整体替换（不跟随符号链接）。成功时把 `structured.local_path`（`.shared/<path>`）补成绝对路径写进结果文字。
+`read_shared_file` 也用 `file.download` 下发，只是 `tool.result` 带的是 `shared_download = {download_id, chunks, files: [{path, size, sha256}]}`（恰好一个文件，`path` 是共享区路径，≤ 20 MB 所以最多 20 段），不带 `download`。守护进程为这次调用收分段（上限按 20 MB 计），校验同上，写到会话 cwd 下的 `.shared/<path>`：`.shared` 和其下目录必须是真目录，顶层写 `.gitignore`（`*`），目标文件已存在时整体替换（不跟随符号链接）。成功时把 `structured.local_path`（`.shared/<path>`）补成绝对路径写进结果文字。只有 `hello.features` 含 `shared_files` 的守护进程才会收到这种下发，否则控制台不发分段、工具直接失败并提示升级；老守护进程调用 `write_shared_file` 时不带 `upload`，同样按“需要升级”失败。
 
 ### 6.5 共享文件工具
 
-项目级共享区：文件存在控制台（PG），不进 git，按项目隔离，项目里所有会话（统筹、各讨论串的组长和成员）和用户都能看到、覆盖和删除。四个工具三层都有（“只读”会话只是不能改仓库，平台级写入它们本来就有，比如 `publish_file`、`memory_write`）。不要放密钥、密码等凭证（凭证以后走远程服务器配置）。同名直接覆盖；单文件 ≤ 20 MB，项目合计 ≤ 500 MB。
+项目级共享区：文件存在控制台（PG），不进 git，按项目隔离，项目里所有会话（统筹、各讨论串的组长和成员）和用户都能看到、覆盖和删除。四个工具三层都有（“只读”会话只是不能改仓库，平台级写入它们本来就有，比如 `publish_file`、`memory_write`）。不要放密钥、密码等凭证（凭证以后走远程服务器配置）。同名直接覆盖；单文件 ≤ 20 MB，项目合计 ≤ 500 MB、最多 1000 个文件（覆盖按新旧大小的差值算）。项目事件 `shared_file`（字段 op、path、by，见 `api.md` §1.1）在每次写入和删除后发出。
 
 - 共享区路径（`SharedPath`）：相对路径、`/` 分隔、1～8 段、UTF-8 总长 ≤ 255 字节（schema 只能按字符数查 ≤ 255，以控制台的字节校验为准）；每段不能为空、不能是 `.` `..`、不能以 `.` 开头（所以也不能是 `.shared`、`.agent-*`）、不能以空格开头或结尾；不能有反斜杠、控制字符（C0、DEL、C1 即 U+0080～U+009F）和 U+2028/U+2029，不能以 `/` 开头。控制台和守护进程都按这条规则再校验一次。
 - `list_shared_files {prefix?} → {files: [{path, size, content_type, sha256, uploaded_by, uploaded_by_thread_no?, updated_at}], total_bytes, limit_bytes}`，按 path 排序；`total_bytes` 是全项目合计。

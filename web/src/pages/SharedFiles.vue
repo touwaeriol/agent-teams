@@ -21,12 +21,14 @@ import {
   downloadUrl,
   filterShared,
   formatSize,
-  pickedFiles,
+  collectFiles,
+  droppedFiles,
   planUpload,
   uploadErrorText,
   uploaderLabel,
   uploadSharedFiles,
   UploadBatchError,
+  type SourceFile,
   type UploadPlan,
 } from "@/lib/sharedFiles";
 import { toast } from "@/lib/toast";
@@ -55,9 +57,13 @@ const progress = ref<number | null>(null);
 let busy = false;
 
 /** Checks the picked files; asks once when some would be overwritten, else uploads right away. */
-function start(picked: FileList | File[] | null | undefined) {
-  if (!picked || picked.length === 0 || busy) return;
-  const plan = planUpload(pickedFiles(picked, dir.value), list.data.value);
+function start(picked: (File | SourceFile)[] | null | undefined, notes: string[] = []) {
+  if (!picked || busy) return;
+  const { files: chosen, skipped } = collectFiles(picked, dir.value);
+  if (skipped > 0) notes.push(`跳过了 ${skipped} 个点开头的隐藏文件或目录里的文件（如 .DS_Store、.git），它们不能放进共享文件`);
+  if (notes.length > 0) toast.warning(notes.join("；"));
+  if (chosen.length === 0) return;
+  const plan = planUpload(chosen, list.data.value);
   problems.value = plan.problems;
   if (plan.problems.length > 0) return;
   if (plan.overwrites.length > 0) {
@@ -94,9 +100,11 @@ function picked(e: Event) {
   el.value = "";
 }
 
-function dropped(e: DragEvent) {
+async function dropped(e: DragEvent) {
   dragging.value = false;
-  start(e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : null);
+  const { files: got, folders } = await droppedFiles(e.dataTransfer);
+  const notes = folders > 0 ? [`这个浏览器不能直接拖入文件夹（${folders} 个没有上传），请改用“上传文件夹”`] : [];
+  start(got, notes);
 }
 
 // ConfirmAction closes (update:open) before it emits confirm, so the target is kept apart from the open flag.
