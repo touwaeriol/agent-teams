@@ -44,6 +44,12 @@ func OpenUserQuestions(ctx context.Context, q DB, projectID string) ([]Question,
 		Order("created_at"))
 }
 
+// ThreadQuestionsWaiting counts the thread's question cards still waiting on the user (approval
+// cards are not counted: they belong to a running turn). Ending the thread would cancel them.
+func ThreadQuestionsWaiting(ctx context.Context, q DB, threadID string) (int, error) {
+	return count(questions(ctx, q).Where("thread_id = ? AND status = 'open' AND audience = 'user' AND kind = 'question'", threadID))
+}
+
 // openApprovals selects open approval cards.
 func openApprovals(ctx context.Context, q DB) *gorm.DB {
 	return questions(ctx, q).Where("kind = 'approval' AND status = 'open'")
