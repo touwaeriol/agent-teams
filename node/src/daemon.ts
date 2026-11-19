@@ -15,6 +15,7 @@ import { Inbox, type Reply } from "./link/inbox.js";
 import { Outbox } from "./link/outbox.js";
 import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, FileDownload, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, SessionClose, SessionCompact, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
 import { probeClaude, probeCodex } from "./runtimes.js";
+import { readClaudeUsage, UsageReporter, type UsageSources } from "./usage.js";
 import { ClaudeDriver, type QueryFn } from "./sessions/claude/driver.js";
 import { CodexDriver } from "./sessions/codex/driver.js";
 import { CodexHub } from "./sessions/codex/hub.js";
@@ -67,11 +68,16 @@ export interface DaemonOptions {
   toolsDir?: string;
   /** Overrides for the gh download (tests). */
   gh?: Partial<GhInstallOptions>;
+  /** node.usage period (default 5 min; 0 disables) and per-read timeout (default 15 s). */
+  usageIntervalMs?: number;
+  usageTimeoutMs?: number;
+  /** Replaces the Claude / Codex quota reads (tests). */
+  usageSources?: Partial<UsageSources>;
   /** Download gh at start instead of on first use (default: when probing runtimes). */
   prefetchGh?: boolean;
 }
 
-const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "upgrade", "file_download", "context_usage", "session_compact"];
+const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "upgrade", "file_download", "context_usage", "session_compact", "usage"];
 
 /** Wires the link, command handlers, sessions, tools, git and credentials together. */
 export class Daemon {
@@ -98,6 +104,7 @@ export class Daemon {
   private claudeRuntime: ClaudeRuntime = { sdk: CLAUDE_SDK_VERSION, auth: "none" };
   private codexRuntime: CodexRuntime = { cli: CODEX_CLI_VERSION, auth: "none", sandbox_ok: false };
   private statsTimer: NodeJS.Timeout | null = null;
+  private readonly usage: UsageReporter;
 
   constructor(private readonly o: DaemonOptions) {
     for (const d of [o.root, o.stateDir]) mkdirSync(d, { recursive: true, mode: 0o700 });
@@ -130,6 +137,12 @@ export class Daemon {
       ...(o.compactWaitMs ? { compactWaitMs: o.compactWaitMs } : {}),
       ...(o.compactRunMs ? { compactRunMs: o.compactRunMs } : {}),
     });
+    this.usage = new UsageReporter({
+      sources: { ...this.usageSources(), ...o.usageSources }, log: o.log,
+      send: (body) => this.link.send("node.usage", body),
+      ...(o.usageIntervalMs !== undefined ? { intervalMs: o.usageIntervalMs } : {}),
+      ...(o.usageTimeoutMs !== undefined ? { timeoutMs: o.usageTimeoutMs } : {}),
+    });
     this.dispatcher = new Dispatcher(this.link, this.inbox, this.handlers(), o.log);
     this.link.on("frame", (f: Frame) => this.dispatcher.handle(f));
     this.link.on("welcome", (w: Welcome) => this.onWelcome(w));
@@ -149,6 +162,7 @@ export class Daemon {
 
   async stop(): Promise<void> {
     if (this.statsTimer) clearInterval(this.statsTimer);
+    this.usage.stop();
     this.link.stop();
     await this.sessions.shutdown();
     this.hub.stop();
@@ -207,6 +221,19 @@ export class Daemon {
     if (w.config?.log_level) this.o.log.level = w.config.log_level;
     this.link.send("sessions.report", this.sessions.report());
     this.statsTimer ??= setInterval(() => this.sendStats(), 30_000);
+    this.usage.kick();
+  }
+
+  /** Where node.usage reads from: the login kinds probed at start, the Claude CLI and the shared codex app-server. */
+  private usageSources(): UsageSources {
+    return {
+      claudeAuth: () => this.claudeRuntime.auth,
+      codexAuth: () => this.codexRuntime.auth,
+      claudeUsage: () => readClaudeUsage(this.claudeEnv({}), this.employeeHome),
+      codexAccount: () => this.hub.request("account/read", { refreshToken: false }),
+      codexRateLimits: () => this.hub.request("account/rateLimits/read", { excludeResetCreditDetails: true }),
+      lastCodexEvent: () => this.hub.lastRateLimits,
+    };
   }
 
   private sendStats(): void {

@@ -1317,8 +1317,8 @@
           "maxLength": 40
         },
         "windows": {
+          "description": "At most 8 windows; the console drops the rest.",
           "type": "array",
-          "maxItems": 8,
           "items": {
             "$ref": "#/$defs/UsageWindow"
           }

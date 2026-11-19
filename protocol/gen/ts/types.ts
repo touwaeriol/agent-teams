@@ -783,27 +783,9 @@ export interface RuntimeUsage {
    */
   plan?: string;
   /**
-   * @maxItems 8
+   * At most 8 windows; the console drops the rest.
    */
-  windows:
-    | []
-    | [UsageWindow]
-    | [UsageWindow, UsageWindow]
-    | [UsageWindow, UsageWindow, UsageWindow]
-    | [UsageWindow, UsageWindow, UsageWindow, UsageWindow]
-    | [UsageWindow, UsageWindow, UsageWindow, UsageWindow, UsageWindow]
-    | [UsageWindow, UsageWindow, UsageWindow, UsageWindow, UsageWindow, UsageWindow]
-    | [UsageWindow, UsageWindow, UsageWindow, UsageWindow, UsageWindow, UsageWindow, UsageWindow]
-    | [
-        UsageWindow,
-        UsageWindow,
-        UsageWindow,
-        UsageWindow,
-        UsageWindow,
-        UsageWindow,
-        UsageWindow,
-        UsageWindow
-      ];
+  windows: UsageWindow[];
   /**
    * Short failure reason (status error), never a credential.
    */

@@ -5788,7 +5788,7 @@ type RuntimeUsage struct {
 	// unsupported when auth is api_key or none (no request is made).
 	Status RuntimeUsageStatus `json:"status"`
 
-	// Windows corresponds to the JSON schema field "windows".
+	// At most 8 windows; the console drops the rest.
 	Windows []UsageWindow `json:"windows"`
 }
 
@@ -5886,9 +5886,6 @@ func (j *RuntimeUsage) UnmarshalJSON(value []byte) error {
 	}
 	if plain.Plan != nil && utf8.RuneCountInString(string(*plain.Plan)) > 40 {
 		return fmt.Errorf("field %s length: must be <= %d", "plan", 40)
-	}
-	if len(plain.Windows) > 8 {
-		return fmt.Errorf("field %s length: must be <= %d", "windows", 8)
 	}
 	*j = RuntimeUsage(plain)
 	return nil
