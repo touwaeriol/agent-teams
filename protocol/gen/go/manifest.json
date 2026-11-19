@@ -697,9 +697,11 @@
             "type": "string",
             "enum": [
               "done",
-              "failed"
+              "failed",
+              "platform_error"
             ],
-            "default": "done"
+            "default": "done",
+            "description": "platform_error: review/decision tasks only, when the platform did not prepare what you were asked to check (for example the worktree HEAD is not the commit under review). It is not a verdict: the platform prepares the review again."
           },
           "artifacts": {
             "description": "Paths, commit SHAs or URLs produced by the task.",

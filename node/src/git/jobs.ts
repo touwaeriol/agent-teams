@@ -33,10 +33,17 @@ export interface GitJobsOptions {
   lookup?: (jobId: string) => GitResult | undefined;
   /** How long git.purge waits for sessions still stopping there (a deleted thread's close frames arrive with it). */
   purgeWaitMs?: number;
+  /**
+   * A review sync with expect_sha fetches again while the commit under review is not there
+   * yet (GitHub may not show a fresh push at once): up to reviewFetchRetries more fetches,
+   * waiting reviewRetryMs × attempt before each, never past the sync's deadline.
+   */
+  reviewFetchRetries?: number;
+  reviewRetryMs?: number;
 }
 
 class JobError extends Error {
-  constructor(readonly code: ErrorCode, message: string, readonly log = "") {
+  constructor(readonly code: ErrorCode, message: string, readonly log = "", readonly extra: Partial<GitResult> = {}) {
     super(message);
   }
 }
@@ -125,12 +132,16 @@ export class GitJobs {
     if (!cloned && b.fetch !== false) await this.fetch(b.job_id, b.repo, shared);
     await this.git(shared, ["config", "core.hooksPath", this.o.platform.hooksDir]);
     await this.excludeNotes(shared);
-    if (isGitDir(cwd)) return { created: false, ...(b.sync ? await this.syncWorktree(cwd, b.branch, b.sync) : { head_sha: await this.head(cwd) }) };
+    const refetch = () => this.fetch(b.job_id, b.repo, shared);
+    if (isGitDir(cwd)) return { created: false, ...(b.sync ? await this.syncWorktree(cwd, b.branch, b.sync, refetch) : { head_sha: await this.head(cwd) }) };
     if (existsSync(cwd) && readdirSync(cwd).length > 0) throw new JobError("dirty_conflict", `${b.cwd} exists and is not a worktree`);
     const start = await this.startPoint(shared, b.branch, b.base);
     const add = await this.git(shared, ["worktree", "add", "-B", b.branch, cwd, start]);
     if (add.code !== 0) throw new JobError("dirty_conflict", "git worktree add failed", add.stderr);
-    return { created: true, head_sha: await this.head(cwd), log_tail: tail(add.stdout + add.stderr) };
+    const log_tail = tail(add.stdout + add.stderr);
+    // A reviewer's first review in a thread: the new worktree goes on to the commit under review.
+    if (b.sync?.mode === "review") return { created: true, log_tail, ...(await this.syncWorktree(cwd, b.branch, b.sync, refetch)) };
+    return { created: true, head_sha: await this.head(cwd), log_tail };
   }
 
   /**
@@ -140,8 +151,9 @@ export class GitJobs {
    * reported, the member branch only fast-forwards, a conflicting merge is aborted and reported.
    * Past the deadline the console has already sent the brief, so the tree is left alone.
    */
-  private async syncWorktree(cwd: string, branch: string, s: GitSyncRequest): Promise<Partial<GitResult>> {
+  private async syncWorktree(cwd: string, branch: string, s: GitSyncRequest, refetch: () => Promise<void>): Promise<Partial<GitResult>> {
     if (s.deadline && Date.now() > Date.parse(s.deadline)) return this.syncDone(cwd, "expired");
+    if (s.mode === "review" && s.expect_sha) return this.syncReviewSHA(cwd, s, s.expect_sha, refetch);
     const target = `origin/${s.ref}`;
     const exists = await this.git(cwd, ["rev-parse", "--verify", "--quiet", `refs/remotes/${target}`]);
     if (exists.code !== 0) return this.syncDone(cwd, "absent");
@@ -154,6 +166,37 @@ export class GitJobs {
   private async syncReview(cwd: string, target: string): Promise<Partial<GitResult>> {
     await this.mustGit(cwd, ["checkout", "--detach", target], `cannot check out ${target}`);
     return this.syncDone(cwd, "checkout");
+  }
+
+  /**
+   * Review of a known commit: fetch again (bounded, before the deadline) until the shared clone
+   * has it, check it out detached and verify HEAD. A commit that
+   * never arrives, or a HEAD that is not it, fails the job (sha_mismatch with the actual HEAD):
+   * the console must not hand the reviewer a tree that is not the work under review.
+   */
+  private async syncReviewSHA(cwd: string, s: GitSyncRequest, want: string, refetch: () => Promise<void>): Promise<Partial<GitResult>> {
+    if (await this.dirty(cwd)) return this.syncDone(cwd, "dirty");
+    const retries = this.o.reviewFetchRetries ?? 4;
+    const step = this.o.reviewRetryMs ?? 2000;
+    for (let i = 0; ; i++) {
+      // The commit is here: review it, even when origin/<ref> moved on after the task was completed.
+      if (await this.hasCommit(cwd, want)) break;
+      const wait = step * (i + 1);
+      const late = s.deadline !== undefined && Date.now() + wait > Date.parse(s.deadline);
+      if (i >= retries || late) {
+        throw new JobError("sha_mismatch", `commit ${want} of ${s.ref} not found after ${i + 1} fetch(es)`, "", { head_sha: await this.head(cwd) });
+      }
+      await new Promise((r) => setTimeout(r, wait));
+      await refetch();
+    }
+    await this.mustGit(cwd, ["checkout", "--detach", want], `cannot check out ${want}`);
+    const head = await this.head(cwd);
+    if (head !== want) throw new JobError("sha_mismatch", `HEAD is ${head}, expected ${want}`, "", { head_sha: head });
+    return this.syncDone(cwd, "checkout");
+  }
+
+  private async hasCommit(cwd: string, sha: string): Promise<boolean> {
+    return (await this.git(cwd, ["cat-file", "-e", `${sha}^{commit}`])).code === 0;
   }
 
   /** A worktree last used for a review sits on a detached HEAD: back to the member's own branch. */
@@ -407,7 +450,8 @@ function pushErrorCode(r: RunResult): ErrorCode {
 function failure(jobId: string, err: unknown): GitResult {
   const e = err as Error & { code?: string; log?: string };
   const code = (err instanceof JobError ? err.code : e.code === "path_outside_root" ? "path_outside_root" : undefined) as ErrorCode | undefined;
-  return { job_id: jobId, ok: false, ...(code ? { error_code: code } : {}), error: e.message, ...(e.log ? { log_tail: tail(e.log) } : {}) };
+  const extra = err instanceof JobError ? err.extra : {};
+  return { ...extra, job_id: jobId, ok: false, ...(code ? { error_code: code } : {}), error: e.message, ...(e.log ? { log_tail: tail(e.log) } : {}) };
 }
 
 function tail(text: string): string {
