@@ -427,6 +427,7 @@ describe("mic button", () => {
       prefs: reactive({ deviceId: "", language: "auto", pushToTalk }),
       parts: ref(null),
       active: ref(phase === "connecting" || phase === "recording" || phase === "stopping"),
+      holding: ref(false),
       setPrefs: () => {},
       toggle: () => calls.push("toggle"),
       press: () => calls.push("press"),
@@ -449,15 +450,31 @@ describe("mic button", () => {
     expect(calls).toEqual(["toggle"]);
   });
 
-  it("says 点击停止 while recording; push-to-talk can stop by click too", async () => {
+  it("says 点击结束 while recording (solid blue, no spinner); push-to-talk says 松开结束 and a keyboard click stops", async () => {
     const rec = input("recording");
-    expect(rec.mic().attributes("title")).toBe("点击停止（Esc）");
+    expect(rec.mic().attributes("title")).toBe("正在录音，点击结束（Esc）");
     expect(rec.w.find("[data-testid=voice-spinner]").exists()).toBe(false);
+    expect(rec.mic().classes()).toContain("bg-[#2F6FDB]");
+    expect(rec.mic().classes()).toContain("text-white");
     await rec.mic().trigger("click");
     expect(rec.calls).toEqual(["toggle"]);
     const ptt = input("recording", true);
-    await ptt.mic().trigger("click");
+    expect(ptt.mic().attributes("title")).toBe("正在录音，松开结束");
+    await ptt.mic().trigger("click"); // detail 0: keyboard activation
     expect(ptt.calls).toEqual(["toggle"]);
+  });
+
+  it("push-to-talk while the last words settle offers no click (the modes stay separate)", async () => {
+    const { calls, mic } = input("stopping", true);
+    expect(mic().attributes("title")).toBe("正在整理文字…");
+    await mic().trigger("click");
+    expect(calls).toEqual([]);
+    expect(input("stopping").mic().attributes("title")).toBe("正在整理文字…点击立即结束");
+  });
+
+  it("idle titles describe the mode", () => {
+    expect(input("idle").mic().attributes("title")).toMatch(/^语音输入：点击开始，再点击结束/);
+    expect(input("idle", true).mic().attributes("title")).toMatch(/^按住说话，松开结束/);
   });
 
   it("a push-to-talk press is not also a click", async () => {
