@@ -110,11 +110,11 @@ func Dir(slug string) string { return strings.Replace(slug, "/", "__", 1) }
 // Default branches are cached: a fresh entry is served as is; an older one is still served at
 // once while one background request refreshes it (stale-while-revalidate), so opening a session
 // (inside a transaction that holds the project row) does not wait for GitHub every ten minutes.
-// A failed lookup is remembered for a short while so a GitHub outage is not asked again on every
+// A failed lookup is remembered for a short while (15 s) so a GitHub outage is not asked again on every
 // session open.
 const (
 	branchTTL     = 10 * time.Minute
-	branchFailTTL = time.Minute
+	branchFailTTL = 15 * time.Second
 	// branchRefreshTimeout bounds a background refresh.
 	branchRefreshTimeout = 30 * time.Second
 )
