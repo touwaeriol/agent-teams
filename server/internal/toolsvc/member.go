@@ -112,6 +112,9 @@ func (s *Service) ownTask(ctx context.Context, tx *core.Tx, t core.Thread, c *ca
 	if !workable[task.Status] {
 		return task, refuse("任务 %s 当前是 %s，不能完成", id, task.Status)
 	}
+	if scheduler.IsGateTask(task) && task.Status == "blocked" {
+		return task, refuse("任务 %s 因平台错误已暂停（blocked），不能再给结论；等用户在任务页重试后重新领取", id)
+	}
 	return task, nil
 }
 
