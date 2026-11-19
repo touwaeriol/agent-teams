@@ -432,7 +432,7 @@ sequenceDiagram
 | 停放（空闲后停驱动）、换代（`open_gen` 前进） | 驱动销毁时同上（会话对象还在，但这一代的密钥和证书作废；再起时新生成） | gen 前进 → 吊销旧 gen 的 serial |
 | 被用户停止 / 讨论串结束 | 同正常关闭 | 同上，另外讨论串结束时把该讨论串的服务器批准（§9.2）一起失效 |
 | 运行时崩溃（自动重启） | `SessionManager.onExit` → 重启前销毁旧驱动的密钥；重启后新密钥 | 崩溃到最终 `crashed` 时吊销 |
-| 守护进程崩溃或重启 | 内存里的私钥随进程消失，**物理上**无法再签名；启动时清空 `agent-teams-ssh/` 下所有会话目录（不论是谁的） | 节点链路断开时不立即吊销（会话可能马上恢复），但旧证书的私钥已经没了，等它自然过期（≤10 分钟）；守护进程重连后 `sessions.report` 里没有的会话按现有逻辑收尾，届时吊销 |
+| 守护进程崩溃或重启 | 内存里的私钥随进程消失，**物理上**无法再签名；启动时清空所有会话目录（不论是谁的），范围包括 §7.2 的三个位置：`$XDG_RUNTIME_DIR/agent-teams-ssh/`、回退位置 `<data>/agent-teams/run-ssh/`，以及路径过长时的短路径 `<tmpdir>/agent-teams-ssh-<uid>-…/` | 节点链路断开时不立即吊销（会话可能马上恢复），但旧证书的私钥已经没了，等它自然过期（≤10 分钟）；守护进程重连后 `sessions.report` 里没有的会话按现有逻辑收尾，届时吊销 |
 | 节点被删除 / 节点令牌轮换 | — | 吊销该节点所有未过期证书，断开其所有 `/nodes/ssh` 连接 |
 
 ```mermaid
@@ -514,9 +514,9 @@ sequenceDiagram
 - 触发：会话第一次在某个讨论串里连一台 `require_approval` 的服务器，且该讨论串对这台服务器还没有有效批准。exec、shell、subsystem 三种 channel 请求**都会触发**：首次连接是 `sftp`（或走 sftp 子系统的新版 `scp`）时同样要批准。
 - 卡片：复用现有审批与提问的表和路由（`at_questions`，`server/internal/approvals/approvals.go` 的 `Engine.insertCard`、`Engine.showCard` 那一套），新 `kind = 'server_access'`，`audience = 'user'`，**不经组长判断**（`architecture.md` §9.2 的 `lead_first` 不适用：这是生产权限，不该由 AI 组长放行）。卡片内容：讨论串、员工、服务器名和地址、触发的第一条命令（截断 500 字；exec 写命令本身，旧式 `scp -O` 就是它的 exec 命令如 `scp -t /srv/app`，subsystem 写 `sftp`，交互 shell 写 `shell`）；按钮“本讨论串内允许 / 只允许这一次 / 拒绝”。
 - 网关侧：在 `exec`/`shell`/`subsystem` 请求处挂起，向 channel 的 stderr 写“agent-teams：等待用户在网页批准使用 prod（讨论串 #29）…”，最多等 10 分钟（可配置）；批准则继续执行，拒绝或超时则写原因、`exit-status 255`。同一讨论串里并发的其他连接等同一张卡片。
-- **卡片不随连接消失**：Claude 的 Bash 工具默认约 2 分钟超时，通常比 10 分钟的等待先到，ssh 进程会被杀、前段连接断开。网关这时只结束这一次等待，**卡片保持打开**——卡片按“讨论串 × 服务器”存在（同一讨论串对同一服务器同时最多一张打开的 `server_access` 卡片，新的触发直接复用它），不属于某条连接。用户之后随时批准都有效，员工**重试**同一条命令即通过；“只允许这一次”在连接已断时放行员工的下一次连接。
-- **批准结果通知员工**：用户作答后，控制台除了放行正在等的连接（如果还在），还给触发卡片的员工会话投递一条平台消息（与组长收到 `[Permission request …]` 这类平台消息走同一投递通道），例如“[Server access approved] prod 已允许在本讨论串使用，可以重试刚才的命令”或“[Server access denied] prod：<理由>”，让它知道可以重试或该换计划了。
-- 有效期：“本讨论串内允许”到讨论串结束为止（讨论串结束时写 `at_remote_grants.expires_at`）；“只允许这一次”只放行这一个连接。
+- **卡片不随连接消失**：Claude 的 Bash 工具默认约 2 分钟超时，通常比 10 分钟的等待先到，ssh 进程会被杀、前段连接断开。网关这时只结束这一次等待，**卡片保持打开**——卡片按“讨论串 × 服务器”存在（同一讨论串对同一服务器同时最多一张打开的 `server_access` 卡片，新的触发直接复用它），不属于某条连接。用户之后随时批准都有效，员工**重试**同一条命令即通过。
+- **批准结果通知员工**：用户作答后，控制台除了放行正在等的连接（如果还在），还给**所有等过这张卡片的会话**投递一条平台消息（同一讨论串里可能有多个会话在等、并且都已超时；卡片记下每个等过它的会话）（与组长收到 `[Permission request …]` 这类平台消息走同一投递通道），例如“[Server access approved] prod 已允许在本讨论串使用，可以重试刚才的命令”或“[Server access denied] prod：<理由>”，让它知道可以重试或该换计划了。
+- 有效期：“本讨论串内允许”到讨论串结束为止（讨论串结束时写 `at_remote_grants.expires_at`）；“只允许这一次”放行触发它的那一个连接；若该连接已因超时断开，则放行该员工在该讨论串对该服务器的下一次连接，用后即失效。
 - 与讨论串的“本讨论串内全部放行”（`auto_approve`）**无关**：那个开关只影响工具权限，不放行生产服务器。
 - 预先批准：用户可以在服务器设置里直接给某个讨论串（或“项目内所有讨论串，直到我关掉”）预先批准，用于定时部署这类无人值守场景。
 
@@ -792,7 +792,7 @@ CREATE INDEX at_ssh_audit_thread ON at_ssh_audit (thread_id, created_at DESC) WH
 | --- | --- | --- |
 | GET | `/api/projects/{pid}/servers` | → `ServerView[]` |
 | POST | `/api/projects/{pid}/servers` | `{name, host, port?, username, environment?, auth: {kind:'password', password} \| {kind:'private_key', private_key, passphrase?} \| {kind:'generate'}, host_keys?: string, require_approval?, allowed_roles?, allow_read_only?, rotate_after_days?}` → 201 `ServerView`；`generate` 由平台生成 Ed25519 私钥，响应里只返回**公钥**（让用户加进目标的 `authorized_keys`）；名字重复、host 不允许 422 |
-| PATCH | `/api/servers/{sid}` | 除凭证外的字段。改 `host`、`port` 或 `username` 时**必须同时提交 `auth`**（新凭证按新的三项重新加密）；不提交也允许保存，但旧凭证因 AAD 不符失效，状态变为 `missing`，网页提示重新录入。改 `host`/`port` 还会把 host key 全部置回 `pending` |
+| PATCH | `/api/servers/{sid}` | 除凭证外的字段。改 `host`、`port` 或 `username` 时应同时提交 `auth`（新凭证按新的三项重新加密）；不提交也能保存，但旧凭证因 AAD 不符失效、状态变为 `missing`，直到重新录入（网页提示）。改 `host`/`port` 还会把 host key 全部置回 `pending` |
 | DELETE | `/api/servers/{sid}` | 204；吊销相关证书、断开现有连接；审计保留 |
 | PUT | `/api/servers/{sid}/credential` | 轮换：`{auth: …, activate?: bool}` → `{credential: CredentialView}`；`activate=false` 时新凭证为 `pending`，测试通过后再激活 |
 | POST | `/api/servers/{sid}/credential/activate` | pending → active，旧的 → retired |
@@ -872,7 +872,7 @@ sequenceDiagram
 | `session.open.ssh_servers` | 控制台 → | `[{name}]` | 本会话可能用到的服务器名（守护进程据此生成 ssh_config）；空或缺省 = 不接 SSH。新字段，旧守护进程忽略 |
 | `ssh.cert_request` | 守护进程 → | `{req_id, session_id, open_gen, public_key}` | 不可靠 + `req_id`（同 `cred.request`），先过 `protocol.md` §2.3 归属校验；控制台在 goroutine 里处理 |
 | `ssh.cert_response` | 控制台 → | `{req_id, ok, certificate?, valid_before?, servers?: [{name}], known_hosts?: string[], error?}` | 不可靠，不写日志；`servers` 是签发时过滤后的可用服务器（守护进程据此重写 ssh_config） |
-| `ssh.servers_update` | 控制台 → | `{session_id, open_gen, servers: [{name}]}` | 可靠，`expires_at` 10 分钟，键 `session_id + open_gen + 版本号`；项目服务器列表或授权规则变化时发给该项目所有存活的组长和成员会话。守护进程原子重写会话 `ssh_config`、丢弃现有证书（下次按新列表重签），回 `ack` 即可（§7.2） |
+| `ssh.servers_update` | 控制台 → | `{session_id, open_gen, servers: [{name}]}` | 可靠，`expires_at` 10 分钟，键 `session_id + open_gen + 版本号`；项目服务器列表或授权规则变化时发给该项目所有存活的组长和成员会话。守护进程原子重写会话 `ssh_config`、丢弃现有证书（下次按新列表重签），回 `ack` 即可（§7.2）。兜底：节点重连后（收到 `hello` 和随后的 `sessions.report` 之后），控制台给该节点上每个存活会话补发一次当前服务器列表，防止断线期间的更新因 10 分钟过期而丢失 |
 | `ssh.revoke` | 控制台 → | `{session_id, open_gen?}` | 可靠，`expires_at` 10 分钟；守护进程丢弃证书并断开该会话的 `ssh-proxy` 管道（主节点侧已经吊销，这条只是让节点更快清理） |
 | `hello.ssh_client` | 守护进程 → | `{version}` 或缺省 | 节点上的 OpenSSH 客户端版本 |
 | `hello.features` 新值 | 双向 | `ssh_gateway` | 双方都支持才在 `session.open` 里带 `ssh_servers`（控制台的 `Features` 在 `server/internal/nodegw/gateway.go`，守护进程的 `FEATURES` 在 `node/src/daemon.ts`） |
