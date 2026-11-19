@@ -465,7 +465,7 @@ const routes = [
   ["GET", /^\/api\/nodes$/, (req, res) => json(res, 200, state.nodes)],
   ["POST", /^\/api\/nodes$/, async (req, res) => {
     const b = await body(req);
-    const n = { ...state.nodes[0], id: `n${Date.now()}`, name: b.name, online: false, since: null, active_sessions: 0, version: "" };
+    const n = { ...state.nodes[0], id: `n${Date.now()}`, name: b.name, online: false, since: null, usage: null, active_sessions: 0, version: "" };
     state.nodes.push(n);
     json(res, 201, { node: n, token: "atn_mock", install: `curl -fsSL http://localhost:5173/install-node.sh | sh -s -- --token atn_mock` });
   }],

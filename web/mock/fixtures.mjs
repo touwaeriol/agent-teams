@@ -283,9 +283,19 @@ export const usage = {
   ],
 };
 
+const later = (min) => new Date(now + min * 60_000).toISOString();
+const usageOf = (auth, windows, extra = {}) => ({ auth, status: "ok", windows, fetched_at: ago(3), received_at: ago(3), ...extra });
+// Four quota states: subscription with windows (cvp), fetch failed (rc-erio claude), API Key (ci-box), not logged in / still fetching (laptop).
 export const nodes = [
-  { id: "n1", name: "rc-erio", online: true, since: ago(120), last_seen_at: ago(0), version: "2.0.3", protocol: 2, isolation: "agent_user", runtimes: { claude: { sdk: "0.3.325", cli: "2.1.322", auth: "subscription" }, codex: {} }, capacity: { max_active_sessions: 4 }, active_sessions: 2, parked_sessions: 1, queued: 0, isolated: true, labels: [], max_active_sessions: 4, park_after_s: null, created_at: ago(9000) },
-  { id: "n2", name: "cvp", online: true, since: ago(120), last_seen_at: ago(0), version: "2.0.3", protocol: 2, isolation: "sandbox", runtimes: { claude: { cli: "2.1.322", auth: "subscription" }, codex: { cli: "0.169.0", auth: "chatgpt" } }, capacity: { max_active_sessions: 4 }, active_sessions: 1, parked_sessions: 0, queued: 0, isolated: false, labels: ["big-disk"], max_active_sessions: 4, park_after_s: null, created_at: ago(9000) },
+  { id: "n1", name: "rc-erio", online: true, since: ago(120), last_seen_at: ago(0), version: "2.0.3", protocol: 2, isolation: "agent_user", runtimes: { claude: { sdk: "0.3.325", cli: "2.1.322", auth: "subscription" }, codex: {} }, usage: { claude: { auth: "subscription", status: "error", windows: [], error: "读取 ~/.claude/.credentials.json 失败：令牌已过期，请在节点上重新运行 claude login", fetched_at: ago(12), received_at: ago(1) } }, capacity: { max_active_sessions: 4 }, active_sessions: 2, parked_sessions: 1, queued: 0, isolated: true, labels: [], max_active_sessions: 4, park_after_s: null, created_at: ago(9000) },
+  { id: "n2", name: "cvp", online: true, since: ago(120), last_seen_at: ago(0), version: "2.0.3", protocol: 2, isolation: "sandbox", runtimes: { claude: { cli: "2.1.322", auth: "subscription" }, codex: { cli: "0.169.0", auth: "chatgpt" } },
+    usage: {
+      claude: usageOf("subscription", [{ key: "five_hour", used_percent: 42, window_minutes: 300, resets_at: later(130) }, { key: "weekly", used_percent: 83.4, window_minutes: 10080, resets_at: later(60 * 24 * 3 + 200) }], { plan: "Max 20x" }),
+      codex: usageOf("chatgpt", [{ key: "primary", used_percent: 96, window_minutes: 300, resets_at: later(25) }, { key: "secondary", used_percent: 37, window_minutes: 10080, resets_at: later(60 * 24 * 5) }], { plan: "Pro" }),
+    },
+    capacity: { max_active_sessions: 4 }, active_sessions: 1, parked_sessions: 0, queued: 0, isolated: false, labels: ["big-disk"], max_active_sessions: 4, park_after_s: null, created_at: ago(9000) },
+  { id: "n3", name: "ci-box", online: true, since: ago(300), last_seen_at: ago(0), version: "2.0.3", protocol: 2, isolation: "sandbox", runtimes: { claude: { cli: "2.1.325", auth: "api_key" }, codex: { cli: "0.169.0", auth: "api_key" } }, usage: { claude: { auth: "api_key", status: "unsupported", windows: [], fetched_at: ago(2), received_at: ago(2) }, codex: { auth: "api_key", status: "unsupported", windows: [], fetched_at: ago(2), received_at: ago(2) } }, capacity: { max_active_sessions: 2 }, active_sessions: 0, parked_sessions: 0, queued: 0, isolated: true, labels: [], max_active_sessions: 2, park_after_s: null, created_at: ago(5000) },
+  { id: "n4", name: "laptop", online: true, since: ago(8), last_seen_at: ago(0), version: "2.0.3", protocol: 2, isolation: "none", runtimes: { claude: { cli: "2.1.325", auth: "none" }, codex: { cli: "0.169.0", auth: "chatgpt" } }, usage: null, capacity: { max_active_sessions: 1 }, active_sessions: 0, parked_sessions: 0, queued: 0, isolated: false, labels: [], max_active_sessions: 1, park_after_s: null, created_at: ago(100) },
 ];
 
 export const nodeSessions = {
