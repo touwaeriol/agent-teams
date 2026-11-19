@@ -314,7 +314,10 @@ const routes = [
     json(res, 200, { files: all.filter((f) => f.path.startsWith(prefix)).map(sharedOut), total_bytes: all.reduce((n, f) => n + sharedSize(f), 0), file_count: all.length, limits: SHARED_LIMITS });
   }],
   ["POST", /^\/api\/projects\/([^/]+)\/shared-files$/, async (req, res, [pid]) => {
-    const form = parseMultipart(await rawBody(req), req.headers["content-type"] ?? "");
+    const raw = await rawBody(req);
+    // The server's body limit of one upload request (orchapi.maxSharedUpload = 5 × 20 MB + 1 MB).
+    if (raw.length > SHARED_MAX_REQUEST) return fail(res, 413, "请求体太大", "too_large");
+    const form = parseMultipart(raw, req.headers["content-type"] ?? "");
     if (!form) return fail(res, 422, "参数不正确：不是 multipart/form-data", "validation");
     const parts = form.files.filter((f) => f.name === "file");
     if (parts.length === 0) return fail(res, 422, "没有文件：用 file 字段上传", "validation");
@@ -598,6 +601,7 @@ createServer(async (req, res) => {
 
 // Shared files (api.md §3.5.1): in memory per project, the server's limits and path rule.
 const SHARED_LIMITS = { file_bytes: 20 << 20, project_bytes: 500 << 20, project_files: 1000 };
+const SHARED_MAX_REQUEST = 5 * (20 << 20) + (1 << 20);
 function sharedOf(pid) {
   return (state.sharedFiles[pid] ??= []);
 }

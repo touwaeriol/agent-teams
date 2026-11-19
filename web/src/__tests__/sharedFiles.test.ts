@@ -18,8 +18,14 @@ import {
   pickedFiles,
   planUpload,
   sharedPathProblem,
+  uploadBatches,
+  UploadBatchError,
+  uploadErrorText,
   uploaderLabel,
+  uploadSharedFiles,
+  SHARED_BATCH_BYTES,
 } from "@/lib/sharedFiles";
+import { ApiError } from "@/api/client";
 import SharedFiles from "@/pages/SharedFiles.vue";
 
 const MB = 1 << 20;
@@ -126,6 +132,77 @@ describe("planUpload", () => {
     expect(planUpload([{ file: fake("old.bin", 15 * MB), path: "old.bin" }], full).problems).toEqual([]);
     const many = listOf([], { file_count: 1000 });
     expect(planUpload([{ file: fake("n.txt", 1), path: "n.txt" }], many).problems[0]).toContain("1000 个的上限");
+  });
+});
+
+describe("batched upload", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  /** A fake XMLHttpRequest: records each request's paths, reports progress, answers per request. */
+  function fakeXhr(answer: (n: number, paths: string[]) => { status: number; body: unknown }) {
+    const sent: string[][] = [];
+    class FakeXhr {
+      upload: { onprogress: ((e: { lengthComputable: boolean; loaded: number; total: number }) => void) | null } = { onprogress: null };
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      status = 0;
+      statusText = "";
+      responseText = "";
+      withCredentials = false;
+      open() {}
+      setRequestHeader() {}
+      send(form: FormData) {
+        const paths = form.getAll("path").map(String);
+        sent.push(paths);
+        const r = answer(sent.length, paths);
+        queueMicrotask(() => {
+          this.upload.onprogress?.({ lengthComputable: true, loaded: 1, total: 2 });
+          this.status = r.status;
+          this.responseText = JSON.stringify(r.body);
+          this.onload?.();
+        });
+      }
+    }
+    vi.stubGlobal("XMLHttpRequest", FakeXhr);
+    return sent;
+  }
+  const up = (path: string) => ({ ...file(path, 1), overwritten: false });
+
+  it("splits into batches of at most 80 MB, in order", () => {
+    const files = [18, 18, 18, 18, 18, 18].map((m, i) => ({ file: fake(`f${i}`, m * MB), path: `f${i}` }));
+    expect(uploadBatches(files).map((b) => b.map((f) => f.path))).toEqual([["f0", "f1", "f2", "f3"], ["f4", "f5"]]);
+    expect(uploadBatches([{ file: fake("a", 1), path: "a" }]).length).toBe(1);
+    expect(SHARED_BATCH_BYTES).toBeLessThanOrEqual(5 * 20 * MB);
+  });
+
+  it("sends a 108 MB folder as two requests under the server's body limit and reports progress over all bytes", async () => {
+    const sent = fakeXhr((_n, paths) => ({ status: 201, body: { files: paths.map(up), total_bytes: 7 } }));
+    const files = [18, 18, 18, 18, 18, 18].map((m, i) => ({ file: fake(`f${i}`, m * MB), path: `dir/f${i}` }));
+    const progress: number[] = [];
+    const res = await uploadSharedFiles("p1", files, (f) => progress.push(f));
+    expect(sent).toEqual([["dir/f0", "dir/f1", "dir/f2", "dir/f3"], ["dir/f4", "dir/f5"]]);
+    expect(res.files?.map((f) => f.path)).toEqual(files.map((f) => f.path));
+    expect(progress.every((p, i) => i === 0 || p >= progress[i - 1])).toBe(true);
+    expect(progress.at(-1)).toBe(1);
+  });
+
+  it("names what was stored when a later batch fails", async () => {
+    fakeXhr((n, paths) =>
+      n === 1 ? { status: 201, body: { files: paths.map(up), total_bytes: 1 } } : { status: 409, body: { detail: "项目共享文件合计不能超过 500 MB", code: "quota_exceeded" } },
+    );
+    const files = [18, 18, 18, 18, 18].map((m, i) => ({ file: fake(`f${i}`, m * MB), path: `f${i}` }));
+    const err = await uploadSharedFiles("p1", files).catch((e) => e);
+    expect(err).toBeInstanceOf(UploadBatchError);
+    expect(uploadErrorText(err)).toBe("已上传 4 个文件，其余 1 个没有上传：项目共享文件合计不能超过 500 MB");
+  });
+
+  it("explains a 413 by what it is", () => {
+    expect(uploadErrorText(new ApiError(413, "单个文件不能超过 20 MB（这个文件 21.0 MB）", "file_too_large"))).toBe("单个文件不能超过 20 MB（这个文件 21.0 MB）");
+    expect(uploadErrorText(new ApiError(413, "请求体太大", "too_large"))).toContain("这次上传的请求太大");
+    expect(uploadErrorText(new ApiError(413, "请求体太大", "too_large"))).not.toContain("单个文件");
   });
 });
 

@@ -26,6 +26,7 @@ import {
   uploadErrorText,
   uploaderLabel,
   uploadSharedFiles,
+  UploadBatchError,
   type UploadPlan,
 } from "@/lib/sharedFiles";
 import { toast } from "@/lib/toast";
@@ -78,6 +79,7 @@ async function send(plan: UploadPlan) {
     problems.value = [];
   } catch (e) {
     problems.value = [uploadErrorText(e)];
+    if (e instanceof UploadBatchError && (e.done?.length ?? 0) > 0) toast.warning(`已上传 ${e.done?.length} 个文件，其余没有上传`);
   } finally {
     busy = false;
     progress.value = null;

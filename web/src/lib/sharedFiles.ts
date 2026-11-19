@@ -135,20 +135,88 @@ export function downloadUrl(pid: string, path: string): string {
   return `/api/projects/${encodeURIComponent(pid)}/shared-files/download?path=${encodeURIComponent(path)}`;
 }
 
+/**
+ * One upload request may carry at most 5 × 20 MB + 1 MB of body (server orchapi.maxSharedUpload);
+ * the page sends batches of at most this many file bytes (leaving room for the multipart framing),
+ * one after another.
+ */
+export const SHARED_BATCH_BYTES = 80 << 20;
+
+/** Splits the files into batches of at most maxBytes (a file over it gets a batch of its own), in order. */
+export function uploadBatches(files: PickedFile[], maxBytes = SHARED_BATCH_BYTES): PickedFile[][] {
+  const out: PickedFile[][] = [];
+  let cur: PickedFile[] = [];
+  let size = 0;
+  for (const f of files) {
+    if (cur.length > 0 && size + f.file.size > maxBytes) {
+      out.push(cur);
+      cur = [];
+      size = 0;
+    }
+    cur.push(f);
+    size += f.file.size;
+  }
+  if (cur.length > 0) out.push(cur);
+  return out;
+}
+
+/** A failed batch: the files of earlier batches are already stored. */
+export class UploadBatchError extends Error {
+  constructor(
+    public cause: unknown,
+    public done: SharedFileUpload["files"],
+    public failed: PickedFile[],
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause));
+  }
+}
+
 /** A readable message for a failed upload (413 / 409 quota / 422 path come with the server's detail). */
 export function uploadErrorText(e: unknown): string {
+  if (e instanceof UploadBatchError) {
+    const done = e.done?.length ?? 0;
+    const reason = uploadErrorText(e.cause);
+    return done > 0 ? `已上传 ${done} 个文件，其余 ${e.failed.length} 个没有上传：${reason}` : reason;
+  }
   if (e instanceof ApiError) {
-    if (e.status === 413) return e.message.includes("MB") ? e.message : `文件太大：单个文件不能超过 ${formatSize(SHARED_LIMITS.file_bytes)}`;
+    if (e.status === 413 && e.code === "file_too_large") return e.message;
+    if (e.status === 413) return `这次上传的请求太大，被服务器拒绝（${e.message}）。请分几次上传`;
     return e.message;
   }
   return e instanceof Error ? e.message : String(e);
 }
 
 /**
- * Uploads the files (multipart: one `file` part and one `path` field per file, in order) with
+ * Uploads the files in batches of at most SHARED_BATCH_BYTES (one request each, sent one after
+ * another; see uploadBatches). onProgress gets 0..1 over all bytes. When a batch fails, the
+ * promise rejects with UploadBatchError naming what was stored and what was not.
+ */
+export async function uploadSharedFiles(pid: string, files: PickedFile[], onProgress?: (fraction: number) => void): Promise<SharedFileUpload> {
+  const all = files.reduce((n, f) => n + f.file.size, 0) || 1;
+  const done: NonNullable<SharedFileUpload["files"]> = [];
+  let sent = 0;
+  let total = 0;
+  const batches = uploadBatches(files);
+  for (const [i, batch] of batches.entries()) {
+    const bytes = batch.reduce((n, f) => n + f.file.size, 0);
+    try {
+      const res = await uploadBatch(pid, batch, (fraction) => onProgress?.(Math.min(1, (sent + fraction * bytes) / all)));
+      done.push(...(res.files ?? []));
+      total = res.total_bytes;
+    } catch (e) {
+      throw new UploadBatchError(e, done, batches.slice(i).flat());
+    }
+    sent += bytes;
+    onProgress?.(Math.min(1, sent / all));
+  }
+  return { files: done, total_bytes: total };
+}
+
+/**
+ * One request (multipart: one `path` field and one `file` part per file, in order) with
  * XMLHttpRequest, which reports upload progress (fetch does not). onProgress gets 0..1.
  */
-export function uploadSharedFiles(pid: string, files: PickedFile[], onProgress?: (fraction: number) => void): Promise<SharedFileUpload> {
+function uploadBatch(pid: string, files: PickedFile[], onProgress?: (fraction: number) => void): Promise<SharedFileUpload> {
   const form = new FormData();
   for (const f of files) form.append("path", f.path);
   for (const f of files) form.append("file", f.file, f.file.name);
