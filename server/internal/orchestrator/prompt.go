@@ -105,19 +105,22 @@ func (o *Orchestrator) projectDocs(ctx context.Context, p store.Project) string 
 
 // repoDoc reads one repository's CLAUDE.md on its default branch ("" on failure; see docsCache).
 func (o *Orchestrator) repoDoc(ctx context.Context, p store.Project, r ghops.Repo) string {
-	return claudeDocs.get(ctx, p.ID+"@"+r.Slug, func(ctx context.Context) string {
+	return claudeDocs.get(ctx, p.ID+"@"+r.Slug, func(ctx context.Context) (string, error) {
 		fctx, cancel := context.WithTimeout(ctx, docTimeout)
 		defer cancel()
 		text, err := o.gh.FileContent(fctx, r, "CLAUDE.md", o.DefaultBranch(fctx, r))
 		if err != nil {
 			o.log.Debug("read CLAUDE.md", "project_id", p.ID, "repo", r.Slug, "err", err)
 		}
-		return text
+		return text, err
 	})
 }
 
-// get serves key, reading it when absent (and in the background when stale).
-func (c *docsCache) get(ctx context.Context, key string, read func(context.Context) string) string {
+// get serves key, reading it when absent (and in the background when stale). A failed first
+// read is cached as "" (asked again after docTTL), unless the caller gave up (its context ended:
+// nothing was learned about GitHub). A failed background refresh keeps the old text and only
+// renews its time, like the default branch cache (ghops).
+func (c *docsCache) get(ctx context.Context, key string, read func(context.Context) (string, error)) string {
 	c.mu.Lock()
 	e, ok := c.items[key]
 	if ok {
@@ -125,21 +128,32 @@ func (c *docsCache) get(ctx context.Context, key string, read func(context.Conte
 			e.refreshing = true
 			c.items[key] = e
 			bg := context.WithoutCancel(ctx)
-			go func() { c.put(key, read(bg)) }()
+			go c.refresh(bg, key, read)
 		}
 		c.mu.Unlock()
 		return e.text
 	}
 	c.mu.Unlock()
-	text := read(ctx)
-	c.put(key, text)
+	text, err := read(ctx)
+	if err == nil || ctx.Err() == nil {
+		c.mu.Lock()
+		c.items[key] = docEntry{text: text, at: time.Now()}
+		c.mu.Unlock()
+	}
 	return text
 }
 
-func (c *docsCache) put(key, text string) {
+// refresh renews a stale entry; on failure the old text stays.
+func (c *docsCache) refresh(ctx context.Context, key string, read func(context.Context) (string, error)) {
+	text, err := read(ctx)
 	c.mu.Lock()
-	c.items[key] = docEntry{text: text, at: time.Now()}
-	c.mu.Unlock()
+	defer c.mu.Unlock()
+	e := c.items[key]
+	e.refreshing, e.at = false, time.Now()
+	if err == nil {
+		e.text = text
+	}
+	c.items[key] = e
 }
 
 // WarmRepos fills the GitHub caches a session open reads (each repository's default branch and
