@@ -81,6 +81,13 @@ export class VoiceController {
       return this.fail(micErrorText(e));
     }
     if (run !== this.run) return this.release();
+    // Show the level from the moment the microphone is open, so the user sees it hears them while
+    // connecting; utterance commits (onLevel) still only happen while recording.
+    try {
+      this.stopMeter = this.deps.meter(this.stream, (level) => this.onLevel(level));
+    } catch {
+      this.stopMeter = null; // no level display (and no auto commits), but recording still works
+    }
     try {
       await this.withTimeout(this.open(opts.language));
     } catch (e) {
@@ -91,7 +98,6 @@ export class VoiceController {
     }
     if (run !== this.run) return this.release();
     this.set({ phase: "recording" });
-    this.stopMeter = this.deps.meter(this.stream, (level) => this.onLevel(level));
     this.watchLimit();
   }
 
@@ -191,6 +197,7 @@ export class VoiceController {
   }
 
   private onLevel(level: number): void {
+    if (this.state.phase !== "connecting" && this.state.phase !== "recording") return;
     this.set({ level });
     if (!this.clientCommits || this.state.phase !== "recording") return;
     const t = this.deps.now();

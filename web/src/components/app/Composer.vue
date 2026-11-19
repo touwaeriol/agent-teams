@@ -3,7 +3,7 @@
 // model as a read-only tag when `assist` names the conversation); `inline`: one-line box. Enter
 // sends, Shift+Enter breaks; IME composition is respected. With `draftKey` the unsent text survives
 // reloads (localStorage). Slots: `hint` (left of the action row), `extra`.
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useDraft } from "@/lib/persist";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -17,6 +17,7 @@ import ModelTag from "./composer/ModelTag.vue";
 import PlusMenu from "./composer/PlusMenu.vue";
 import RefChips from "./composer/RefChips.vue";
 import type { MessageRef } from "./composer/assist";
+import { useAutoGrow } from "./composer/useAutoGrow";
 import { useComposerAssist, type AssistOptions } from "./composer/useComposerAssist";
 import { useVoiceInput } from "./voice/useVoiceInput";
 import VoiceButton from "./voice/VoiceButton.vue";
@@ -57,6 +58,12 @@ const onScroll = (e: Event) => {
   const el = e.target as HTMLElement;
   scroll.value = { top: el.scrollTop, left: el.scrollLeft };
 };
+// The large box grows with its text (2 lines up to ~40% of the window), then scrolls inside.
+// It never squeezes the chat above it under 120px (short windows, attachments, the plan card).
+const grow = useAutoGrow(field, text, { keepVisible: 120, onResize: (el) => (scroll.value = { top: el.scrollTop, left: el.scrollLeft }) });
+// With a scrollbar the text wraps narrower; the overlay keeps the same right edge (px-4 = 16px).
+watch([imageCount, () => assist.panel.value, () => props.attachments?.items.value.length, () => assist.picked.value.length], () => grow.update(), { flush: "post" });
+const overlayStyle = computed(() => (grow.gutter.value ? { paddingRight: `${16 + grow.gutter.value}px` } : undefined));
 const speaking = computed(() => (voice.parts.value ? "text-transparent caret-foreground" : ""));
 
 async function send() {
@@ -137,6 +144,7 @@ function onKey(e: KeyboardEvent) {
         :parts="voice.parts.value"
         :scroll-top="scroll.top"
         :scroll-left="0"
+        :style="overlayStyle"
         class="whitespace-pre-wrap break-words px-4 pt-3.5 text-[15px] leading-6"
       />
     </div>

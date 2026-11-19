@@ -1,6 +1,6 @@
 // Voice input for one composer: wires a VoiceController to the composer's text and input element.
 // Shown only when the admin enabled voice (GET /api/voice/config).
-import { computed, nextTick, onBeforeUnmount, reactive, ref, shallowRef, type Ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, reactive, ref, shallowRef, watch, type Ref } from "vue";
 import { useMe } from "@/api/queries";
 import { useVoiceConfig, voice as voiceApi } from "@/api/voice";
 import { toast } from "@/lib/toast";
@@ -21,9 +21,14 @@ export interface VoiceInput {
   /** Text with grey partial runs while speech is being recognised (null: nothing pending). */
   parts: Readonly<Ref<Part[] | null>>;
   active: Readonly<Ref<boolean>>;
+  /** Push-to-talk: a press (pointer or Alt+M) is currently held. */
+  holding: Readonly<Ref<boolean>>;
   setPrefs(patch: Partial<VoicePrefs>): void;
-  toggle(): void;
-  press(): void;
+  /** Click mode: start, or end whatever is going on. focus=false keeps the soft keyboard down (touch). */
+  toggle(focus?: boolean): void;
+  /** Push-to-talk: held down (starts, or keeps a recording that is still going). */
+  press(focus?: boolean): void;
+  /** Push-to-talk: let go (stops; a press released while connecting stops once connected). */
   release(): void;
   /** Stops and waits for the last transcripts (before sending). */
   finish(): Promise<void>;
@@ -89,14 +94,14 @@ export function useVoiceInput(text: Ref<string>, field: Ref<Field | null>, makeD
     writePrefs(userId.value, { ...prefs });
   }
 
-  function start() {
+  function start(focus = true) {
     syncPrefs();
     ctl.reset();
     const el = field.value;
     const value = text.value;
     const selStart = el?.selectionStart ?? value.length;
     const selEnd = el?.selectionEnd ?? selStart;
-    el?.focus();
+    if (focus) el?.focus();
     const language = languages.value.some((l) => l.code === prefs.language) ? prefs.language : "auto";
     void ctl.start({ text: value, selStart, selEnd, language, deviceId: prefs.deviceId }).then(() => {
       if (state.phase === "error") toast.error(state.error);
@@ -106,20 +111,49 @@ export function useVoiceInput(text: Ref<string>, field: Ref<Field | null>, makeD
   }
 
   /** Start, or end whatever is going on: cancel while connecting, stop while recording, stop waiting while stopping. */
-  function toggle() {
+  function toggle(focus = true) {
     if (state.phase === "stopping") ctl.hurry();
     else if (active.value) void ctl.stop();
-    else start();
+    else start(focus);
   }
 
-  function press() {
+  // While held, losing the window (alt-tab, a permission prompt taking focus, the tab hidden) ends
+  // the press: the key-up or pointer-up that would have ended it will never come.
+  const onHidden = () => document.visibilityState === "hidden" && release();
+  function watchLoss(on: boolean) {
+    if (typeof window === "undefined") return;
+    const method = on ? "addEventListener" : "removeEventListener";
+    window[method]("blur", release);
+    document[method]("visibilitychange", onHidden);
+  }
+
+  /**
+   * Pressed while the previous recording is still settling its last words: start again once it
+   * is done, if still held (rather than dropping the press or cutting the previous text short).
+   */
+  let queued: boolean | null = null;
+  watch(
+    () => state.phase,
+    (phase) => {
+      if (queued === null || phase === "stopping") return;
+      const focus = queued;
+      queued = null;
+      if (holding.value && !active.value) start(focus);
+    },
+  );
+
+  function press(focus = true) {
+    if (!holding.value) watchLoss(true);
     holding.value = true;
-    if (!active.value) start();
+    if (state.phase === "stopping") queued = focus;
+    else if (!active.value) start(focus);
   }
 
   function release() {
     if (!holding.value) return;
     holding.value = false;
+    queued = null;
+    watchLoss(false);
     if (state.phase === "recording") void ctl.stop();
   }
 
@@ -141,7 +175,11 @@ export function useVoiceInput(text: Ref<string>, field: Ref<Field | null>, makeD
     if (prefs.pushToTalk && holding.value && (e.code === "KeyM" || e.key === "Alt")) release();
   }
 
-  onBeforeUnmount(() => ctl.active && ctl.cancel());
+  onBeforeUnmount(() => {
+    if (holding.value) watchLoss(false);
+    holding.value = false;
+    if (ctl.active) ctl.cancel();
+  });
 
   return {
     enabled,
@@ -150,6 +188,7 @@ export function useVoiceInput(text: Ref<string>, field: Ref<Field | null>, makeD
     prefs,
     parts,
     active,
+    holding,
     setPrefs,
     toggle,
     press,
