@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // 团队岗位: role templates (coordinator → lead → members) edited as one draft and saved together,
-// presets, a YAML view, then the user's models and the skill and plugin libraries.
+// presets, a YAML view, then the skill and plugin libraries. Each role names its model by hand.
 import { computed, ref, watch } from "vue";
 import { roles as roleActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
-import { keys, useProjects, useRoles } from "@/api/queries";
+import { useQueryClient } from "@tanstack/vue-query";
+import { conversationModels, keys, useProjects, useRoles } from "@/api/queries";
 import type { RoleView } from "@/api/views";
 import { useOfficeLayout } from "@/components/app/avatar/layout";
 import PluginLibrary from "@/components/app/library/PluginLibrary.vue";
@@ -17,7 +18,6 @@ import NavButton from "@/components/shell/NavButton.vue";
 import { fromPreset, LEVEL, newRole, roleProblems, sortRoles } from "@/lib/roles";
 import PresetMenu from "./team/PresetMenu.vue";
 import RoleCard from "./team/RoleCard.vue";
-import MyModels from "./team/MyModels.vue";
 import { addEmployee, headcountChanges, saveImpact } from "./team/staff";
 import StaffPanel from "./team/StaffPanel.vue";
 import { isDirty, ordered, patchAt, removeAt } from "./team/team";
@@ -28,7 +28,13 @@ const yaml = ref(false);
 const draft = ref<RoleView[] | null>(null);
 const saved = computed(() => sortRoles(roles.data.value?.roles ?? []));
 watch(() => roles.data.value, (d) => d && (draft.value = sortRoles(d.roles ?? [])), { immediate: true });
-const save = useAction(() => roleActions.save(ordered(draft.value ?? [])), { invalidate: [keys.roles], success: "岗位模板已保存" });
+const client = useQueryClient();
+// Saving also brings the coordinators' and the open threads' leads' models in line: refresh what the chat boxes show.
+const save = useAction(() => roleActions.save(ordered(draft.value ?? [])), {
+  invalidate: [keys.roles],
+  success: "岗位模板已保存",
+  onSuccess: () => void client.invalidateQueries(conversationModels),
+});
 const layout = useOfficeLayout();
 const dirty = computed(() => draft.value !== null && isDirty(draft.value, saved.value));
 const problems = computed(() => roleProblems(draft.value ?? []));
@@ -95,9 +101,8 @@ const PILL = "rounded-full px-2.5 py-1";
       />
       <YamlEditor v-if="yaml" />
       <div v-else class="grid gap-3.5 lg:grid-cols-2">
-        <RoleCard v-for="(r, i) in draft" :key="r.id || `new-${i}`" :role="r" :layout="layout" @change="(p) => setRole(i, p)" @remove="removeRole(i)" />
+        <RoleCard v-for="(r, i) in draft" :key="r.id || `new-${i}`" :role="r" :roles="draft" :layout="layout" @change="(p) => setRole(i, p)" @remove="removeRole(i)" />
       </div>
-      <MyModels v-if="!yaml" />
       <SkillLibrary v-if="!yaml" />
       <PluginLibrary v-if="!yaml" />
     </div>

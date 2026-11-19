@@ -35,22 +35,29 @@ const threadOut = (t) => {
 };
 /** Threads whose merge already failed once in the mock (the next accept merges). */
 const mergeTried = new Set();
-/** The owner's default of a runtime, else the built-in default (what the coordinator and the leads run). */
-const ownerDefault = (runtime) => state.models.find((m) => m.runtime === runtime && m.default)?.model || (runtime === "codex" ? "gpt-5.5-codex" : "claude-opus-5-5");
-/** GET /api/conversations/{cid}/model: the coordinator's or the lead's effective model, no override; members as the roles say. */
+/** The built-in last resort per runtime (orchestrator.DefaultModel / DefaultCodexModel). */
+const builtinModel = (runtime) => (runtime === "codex" ? "" : "claude-opus-5-5");
+const roleOf = (tier, roleKey) => state.roles.find((r) => (roleKey ? r.role === roleKey : r.tier === tier));
+/** orchestrator.Model: member /model → project → role → built in; lead project → role → built in; coordinator coordinator_model → role → built in. */
+function effectiveModel(m, p) {
+  const runtime = m.runtime ?? "claude";
+  const project = m.tier === "coordinator" ? p?.coordinator_model : runtime === "codex" ? p?.thread_codex_model : p?.thread_model;
+  const role = m.tier === "member" ? roleOf("member", m.role) : roleOf(m.tier);
+  return (m.tier === "member" && m.override) || project || role?.model || builtinModel(runtime);
+}
+/** GET /api/conversations/{cid}/model: the coordinator's or the lead's effective model (no /model override); members as above. */
 function conversationModel(cid) {
   const t = threadById(cid);
   if (!t) {
-    const model = ownerDefault("claude");
+    const p = state.projects.find((x) => x.id === "p1");
+    const model = effectiveModel({ tier: "coordinator", runtime: "claude" }, p);
     return { scope: "coordinator", employee: state.coordinator.name, runtime: "claude", model, override: "", inherited: model, session: "", live: false, members: [] };
   }
+  const p = state.projects.find((x) => x.id === t.project_id);
   const lead = t.members.find((m) => m.tier === "lead");
   const runtime = lead?.runtime ?? "claude";
-  const model = ownerDefault(runtime);
-  const members = t.members.map((m) => {
-    const role = state.roles.find((r) => r.role === m.role);
-    return { name: m.name, tier: m.tier, runtime: m.runtime, model: m.tier === "member" ? role?.model || ownerDefault(m.runtime) : ownerDefault(m.runtime), override: "" };
-  });
+  const model = effectiveModel({ tier: "lead", runtime }, p);
+  const members = t.members.map((m) => ({ name: m.name, tier: m.tier, runtime: m.runtime, model: effectiveModel(m, p), override: "" }));
   return { scope: "thread", employee: lead?.name ?? "", runtime, model, override: "", inherited: model, session: "", live: false, members };
 }
 const threadByNo = (no) => state.threads.find((t) => t.no === Number(no));
@@ -231,7 +238,7 @@ const routes = [
   ["GET", /^\/api\/projects$/, (req, res) => json(res, 200, state.projects)],
   ["POST", /^\/api\/projects$/, async (req, res) => {
     const b = await body(req);
-    const p = { ...state.projects[3], id: `p${Date.now()}`, name: b.name, coordinator_model: "", thread_model: b.thread_model ?? "", thread_codex_model: b.thread_codex_model ?? "", repo: b.repo ?? null, branch: b.branch ?? "main", git_connection_id: b.git_connection_id ?? null, pinned: false, archived: false, waiting: 0, created_at: now(), updated_at: now() };
+    const p = { ...state.projects[3], id: `p${Date.now()}`, name: b.name, coordinator_model: b.coordinator_model ?? "", thread_model: b.thread_model ?? "", thread_codex_model: b.thread_codex_model ?? "", repo: b.repo ?? null, branch: b.branch ?? "main", git_connection_id: b.git_connection_id ?? null, pinned: false, archived: false, waiting: 0, created_at: now(), updated_at: now() };
     state.projects.unshift(p);
     json(res, 201, p);
   }],
@@ -243,8 +250,7 @@ const routes = [
     const b = await body(req);
     const p = state.projects.find((x) => x.id === pid);
     if (b.delivery) b.delivery = { ...p.delivery, ...b.delivery };
-    // The coordinator uses the owner's default: coordinator_model is still in the body but never applies.
-    Object.assign(p, b, { coordinator_model: "", updated_at: now() });
+    Object.assign(p, b, { updated_at: now() });
     json(res, 200, p);
   }],
   ["DELETE", /^\/api\/projects\/([^/]+)$/, (req, res, [pid]) => {
@@ -339,7 +345,7 @@ const routes = [
   ["POST", /^\/api\/conversations\/([^/]+)\/messages$/, (req, res, [cid]) => sendMessage(res, cid, req)],
   ["GET", /^\/api\/conversations\/([^/]+)\/model$/, (req, res, [cid]) => json(res, 200, conversationModel(cid))],
   // Same refusal as the server (orchestrator.ErrFixedModel → 409 model_fixed); the mock keeps no member overrides.
-  ["PUT", /^\/api\/conversations\/([^/]+)\/model$/, (req, res) => fail(res, 409, "统筹和组长使用默认模型，不能切换", "model_fixed")],
+  ["PUT", /^\/api\/conversations\/([^/]+)\/model$/, (req, res) => fail(res, 409, "统筹和组长不能用 /model 切换模型，请在岗位配置或项目设置里改", "model_fixed")],
   ["POST", /^\/api\/conversations\/([^/]+)\/interrupt$/, (req, res) => json(res, 202)],
   ["GET", /^\/api\/conversations\/([^/]+)\/questions$/, (req, res, [cid]) => json(res, 200, state.questions[cid] ?? [])],
   ["POST", /^\/api\/conversations\/([^/]+)\/questions\/([^/]+)\/answer$/, (req, res, [cid, qid]) => answer(res, cid, qid, req)],
@@ -474,18 +480,11 @@ const routes = [
   ["POST", /^\/api\/nodes\/([^/]+)\/token$/, (req, res) => json(res, 200, { token: "atn_new", install: "curl -fsSL http://localhost:5173/install-node.sh | sh -s -- --token atn_new" })],
   ["POST", /^\/api\/nodes\/([^/]+)\/upgrade$/, (req, res) => json(res, 202)],
   ["GET", /^\/api\/nodes\/([^/]+)\/sessions$/, (req, res, [id]) => json(res, 200, state.nodeSessions[id] ?? [])],
-  ["GET", /^\/api\/models$/, (req, res) => json(res, 200, { models: state.models })],
-  ["PUT", /^\/api\/models\/mine$/, async (req, res) => {
-    const b = await body(req);
-    if (!b.models?.length) return fail(res, 422, "至少保留一个模型", "invalid");
-    state.models = b.models.map((m, i) => ({ ...m, id: m.id || `m${Date.now()}${i}`, label: m.label ?? "", default: Boolean(m.default), mine: true }));
-    json(res, 200, { models: state.models });
-  }],
   ["GET", /^\/api\/roles$/, (req, res) => json(res, 200, { roles: state.roles, warnings: [] })],
   ["PUT", /^\/api\/roles$/, async (req, res) => {
     const b = await body(req);
-    // The coordinator and the lead always use the owner's default: their model is cleared.
-    state.roles = b.roles.map((r, i) => ({ ...r, model: r.tier === "member" ? (r.model ?? "") : "", id: r.id || `r${Date.now()}${i}` }));
+    // Every tier keeps its typed model (trimmed), as the server does.
+    state.roles = b.roles.map((r, i) => ({ ...r, model: (r.model ?? "").trim(), id: r.id || `r${Date.now()}${i}` }));
     json(res, 200, { roles: state.roles, warnings: [] });
   }],
   ["POST", /^\/api\/roles\/look\/random$/, (req, res) => {

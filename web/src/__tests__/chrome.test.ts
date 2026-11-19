@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { DeliverableView } from "@/api/views";
 import { fileIcon, isImageDeliverable, isLibraryDeliverable, LIBRARY_ACCEPT, formatBytes, formatDateTime, libraryColumns, nextSort, ownerLabel, sortLibrary, typeLabel, uploadProblem } from "@/lib/library";
 import { colorIcon, iconLook } from "@/lib/projectIcon";
-import { fillDays, formatTokens, formatUSD, INSTRUCTIONS_MAX, modelLabel, modelOptions, sectionOf, worktreeChoice } from "@/lib/projectSettings";
+import { fillDays, formatTokens, formatUSD, INSTRUCTIONS_MAX, modelLabel, sectionOf, worktreeChoice } from "@/lib/projectSettings";
 import { describeCron, looksLikeCron, presetOf } from "@/lib/schedules";
 
 function item(id: string, patch: Partial<DeliverableView> = {}): DeliverableView {
@@ -76,18 +76,10 @@ describe("project settings", () => {
     expect(worktreeChoice("clone").label).toBe("关闭，直接在检出目录工作");
     expect(worktreeChoice("").label).toBe("开启，使用工作树");
   });
-  it("offers the user's Claude models in order, keeping the current value", () => {
-    const list = [
-      { id: "m1", runtime: "claude" as const, model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: true },
-      { id: "m2", runtime: "codex" as const, model: "gpt-x", label: "", default: false, mine: true },
-      { id: "m3", runtime: "claude" as const, model: "claude-sonnet-x", label: "Sonnet", default: false, mine: true },
-    ];
+  it("labels a project model override: follow the roles, a common name or the typed id", () => {
     expect(modelLabel("")).toBe("跟随岗位设置");
-    expect(modelLabel("claude-opus-5-5", list)).toBe("Opus 5.5");
-    expect(modelLabel("claude-y", list)).toBe("claude-y");
-    expect(modelOptions("", list).map((o) => o.value)).toEqual(["", "claude-opus-5-5", "claude-sonnet-x"]);
-    expect(modelOptions("claude-x", list).map((o) => o.value)).toEqual(["", "claude-opus-5-5", "claude-sonnet-x", "claude-x"]);
-    expect(modelOptions("", []).map((o) => o.value)).toEqual([""]);
+    expect(modelLabel("claude-opus-5-5")).toBe("Opus 5.5");
+    expect(modelLabel("claude-y")).toBe("claude-y");
   });
   it("formats usage", () => {
     expect(formatTokens(950)).toBe("950");

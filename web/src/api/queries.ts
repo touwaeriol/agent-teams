@@ -41,7 +41,6 @@ export const keys = {
   rolesYaml: ["roles", "yaml"] as const,
   rolePresets: ["roles", "presets"] as const,
   skills: ["skills"] as const,
-  models: ["models"] as const,
   builtinCommands: ["commands", "builtin"] as const,
   conversationModel: (cid: string) => ["c", cid, "model"] as const,
   conversationCommands: (cid: string) => ["c", cid, "commands"] as const,
@@ -228,8 +227,9 @@ export const useRoles = () => useQuery({ queryKey: keys.roles, queryFn: () => un
 export const useRolesYaml = (enabled: Arg<boolean>) =>
   useKeyed(() => keys.rolesYaml, () => unwrap(client.GET("/api/roles/yaml")), { enabled: () => toValue(enabled) });
 
-export const useModels = () => useQuery({ queryKey: keys.models, queryFn: () => unwrap(client.GET("/api/models")), staleTime: 60_000 });
 export const useBuiltinCommands = () => useQuery({ queryKey: keys.builtinCommands, queryFn: () => unwrap(client.GET("/api/commands")), staleTime: 60_000 });
+/** Every conversation's /model state (the models shown in the chat boxes): stale after a role or project model change. */
+export const conversationModels = { predicate: (q: { queryKey: readonly unknown[] }) => q.queryKey[0] === "c" && q.queryKey[2] === "model" };
 export const useConversationModel = (cid: Arg) =>
   useKeyed(() => keys.conversationModel(val(cid)), () => unwrap(client.GET("/api/conversations/{cid}/model", path({ cid: val(cid) }))), { enabled: has(cid) });
 export const useRolePresets = () => useQuery({ queryKey: keys.rolePresets, queryFn: () => unwrap(client.GET("/api/roles/presets")), staleTime: 300_000 });
