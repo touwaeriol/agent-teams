@@ -343,7 +343,11 @@ func (a *API) threadRef(ctx context.Context, p store.Project, r MessageRef) (str
 		return "", nil, err
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "### 讨论串 #%d %s\n状态：%s", t.No, t.Title, threadStatus(t.Status))
+	merges, err := core.MergeQueue(ctx, a.e.Core.Pool, t.ID, true)
+	if err != nil {
+		return "", nil, err
+	}
+	fmt.Fprintf(&b, "### 讨论串 #%d %s\n状态：%s", t.No, t.Title, core.PhaseOf(v, len(merges)).Text())
 	if t.Brief != "" {
 		body, _ := clip(t.Brief, 4000)
 		b.WriteString("\n任务说明：" + body)

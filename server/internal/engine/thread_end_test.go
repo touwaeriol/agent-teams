@@ -374,3 +374,66 @@ func TestStalePendingEndDoesNotTimeOut(t *testing.T) {
 		t.Fatalf("final reply %q", r)
 	}
 }
+
+// TestMergedThenTaskDoesNotTimeOut: the PR is merged on GitHub during the lead's turn and the lead
+// adds a task in that turn; past the grace period, while the lead answers the task's result, the
+// thread is not ended under it; it ends after that turn.
+func TestMergedThenTaskDoesNotTimeOut(t *testing.T) {
+	c, lead := newEndCase(t, "总结")
+	c.w.e.Delivery.DoneGrace = 2 * time.Second
+	lead.mustCall("update_plan", map[string]any{"steps": []map[string]string{{"title": "做", "status": "done"}}})
+	turnStarted(lead)
+	c.set(func(gh *fakeGitHub) { gh.pulls["o/r#"+itoa(c.pr)].merged = true })
+	payload, _ := json.Marshal(map[string]any{"action": "closed", "pull_request": map[string]any{"html_url": prURL("o/r", c.pr), "merged": true}})
+	if err := c.w.e.Delivery.GitHubEvent(c.w.ctx, "pull_request", payload); err != nil {
+		t.Fatal(err)
+	}
+	if th := c.row(t); th.Status == "done" || th.DonePendingAt == nil || th.PRState != "merged" {
+		t.Fatalf("merged in the lead's turn: %s pending %v %q", th.Status, th.DonePendingAt, th.PRState)
+	}
+	res := lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "补文档", "main": "做"})
+	var task protocol.AssignTaskResult
+	_ = json.Unmarshal(*res.Structured, &task)
+	finalReply(lead, "PR 合并了，补派了文档任务")
+	eventually(t, "pending dropped", func() bool { return c.row(t).DonePendingAt == nil })
+	time.Sleep(2500 * time.Millisecond)
+	turnStarted(lead)
+	lead.mustCall("cancel_task", map[string]any{"task_id": string(task.TaskID), "reason": "文档写好了"})
+	c.stays(t, "running", 1200*time.Millisecond)
+	finalReply(lead, "最终汇报：都合并了")
+	c.waitFor(t, "done after the report", func(v core.ThreadView) bool { return v.Status == "done" })
+	if r := leadReplies(t, c.w, c.thread.ID); r[len(r)-1] != "最终汇报：都合并了" {
+		t.Fatalf("final reply %q", r)
+	}
+}
+
+// TestReadOnlyFinishThenTask: a thread without changes whose lead calls finish and then assigns a
+// task in the same turn does not end with that turn (the task is open), nor while the lead answers
+// the task's result; it ends when that turn ends.
+func TestReadOnlyFinishThenTask(t *testing.T) {
+	tm := startTeam(t)
+	tm.w.e.Delivery.DoneGrace = 2 * time.Second
+	tm.dev.mustCall("complete_task", map[string]any{"task_id": "t1", "summary": "查完了"})
+	tm.lead.expectSend("[Task t1 · dev-1 · done]")
+	turnStarted(tm.lead)
+	tm.lead.mustCall("finish", map[string]string{"summary": "调研结论"})
+	tm.lead.mustCall("assign_task", map[string]any{"assignee": "dev-1", "instruction": "再核对一个数据", "main": "做"})
+	finalReply(tm.lead, "补派了核对，结果回来后出最终汇报")
+	time.Sleep(2500 * time.Millisecond) // past the grace period
+	if st, _ := threadStatus(tm); st == "done" {
+		t.Fatal("done with a task open")
+	}
+	tm.dev.expectSend("[Task t2")
+	tm.dev.mustCall("complete_task", map[string]any{"task_id": "t2", "summary": "核对过了"})
+	tm.lead.expectSend("[Task t2 · dev-1 · done]")
+	turnStarted(tm.lead)
+	time.Sleep(800 * time.Millisecond)
+	if st, _ := threadStatus(tm); st == "done" {
+		t.Fatal("done in the middle of the lead's turn")
+	}
+	finalReply(tm.lead, "最终汇报：数据核对无误")
+	eventually(t, "thread done", func() bool { st, _ := threadStatus(tm); return st == "done" })
+	if r := leadReplies(t, tm.w, tm.thread.ID); r[len(r)-1] != "最终汇报：数据核对无误" {
+		t.Fatalf("final reply %q", r)
+	}
+}
