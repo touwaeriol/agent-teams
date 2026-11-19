@@ -427,6 +427,7 @@ describe("mic button", () => {
       prefs: reactive({ deviceId: "", language: "auto", pushToTalk }),
       parts: ref(null),
       active: ref(phase === "connecting" || phase === "recording" || phase === "stopping"),
+      holding: ref(false),
       setPrefs: () => {},
       toggle: () => calls.push("toggle"),
       press: () => calls.push("press"),
@@ -461,6 +462,14 @@ describe("mic button", () => {
     expect(ptt.mic().attributes("title")).toBe("正在录音，松开结束");
     await ptt.mic().trigger("click"); // detail 0: keyboard activation
     expect(ptt.calls).toEqual(["toggle"]);
+  });
+
+  it("push-to-talk while the last words settle offers no click (the modes stay separate)", async () => {
+    const { calls, mic } = input("stopping", true);
+    expect(mic().attributes("title")).toBe("正在整理文字…");
+    await mic().trigger("click");
+    expect(calls).toEqual([]);
+    expect(input("stopping").mic().attributes("title")).toBe("正在整理文字…点击立即结束");
   });
 
   it("idle titles describe the mode", () => {

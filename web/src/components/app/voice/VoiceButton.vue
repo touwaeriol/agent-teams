@@ -25,7 +25,7 @@ const ptt = computed(() => props.v.prefs.pushToTalk);
 const active = computed(() => phase.value === "connecting" || phase.value === "recording" || phase.value === "stopping");
 const label = computed(() => {
   if (phase.value === "connecting") return ptt.value ? "正在连接…连上后开始录音，松开结束" : "正在连接…点击取消";
-  if (phase.value === "stopping") return "正在整理文字…点击立即结束";
+  if (phase.value === "stopping") return ptt.value ? "正在整理文字…" : "正在整理文字…点击立即结束";
   if (phase.value === "recording") return ptt.value ? "正在录音，松开结束" : "正在录音，点击结束（Esc）";
   return ptt.value ? `按住说话，松开结束（${shortcut}）` : `语音输入：点击开始，再点击结束（${shortcut}）`;
 });
@@ -61,30 +61,53 @@ function click(e: MouseEvent) {
 
 function down(e: PointerEvent) {
   pointerType = e.pointerType ?? "";
-  if (!ptt.value || (e.button ?? 0) !== 0 || holder !== null) return; // a second finger is ignored
+  if (!ptt.value || (e.button ?? 0) !== 0) return;
+  // A hold whose end we never saw, already released by useVoiceInput (blur, hidden): forget it.
+  if (holder !== null && !props.v.holding.value) endHold();
+  if (holder !== null) return; // a second finger is ignored
   e.preventDefault(); // no text selection or focus change from the press itself
   holder = e.pointerId ?? 0;
   swallowClick = true;
   (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-  window.addEventListener("pointerup", up, true);
-  window.addEventListener("pointercancel", up, true);
+  listen(true);
   props.v.press(pointerType !== "touch" && pointerType !== "pen");
 }
 
 function up(e: PointerEvent) {
   if (holder === null || (e.pointerId ?? 0) !== holder) return;
-  holder = null;
-  window.removeEventListener("pointerup", up, true);
-  window.removeEventListener("pointercancel", up, true);
-  props.v.release();
+  endHold(false);
   // The click (if any) is dispatched right after this pointerup, before the timer runs.
   setTimeout(() => (swallowClick = false));
 }
 
-onBeforeUnmount(() => {
-  window.removeEventListener("pointerup", up, true);
-  window.removeEventListener("pointercancel", up, true);
-});
+/**
+ * Ends the press however it ends: released, cancelled, capture lost, the window losing focus or
+ * the tab hidden. Clears every trace of it so the next press starts fresh.
+ */
+function endHold(lost: unknown = true) {
+  if (holder === null) return;
+  holder = null;
+  if (lost !== false) swallowClick = false; // no click follows a press that ended this way
+  listen(false);
+  props.v.release();
+}
+const onHidden = () => document.visibilityState === "hidden" && endHold();
+
+function listen(on: boolean) {
+  if (on) {
+    window.addEventListener("pointerup", up, true);
+    window.addEventListener("pointercancel", up, true);
+    window.addEventListener("blur", endHold);
+    document.addEventListener("visibilitychange", onHidden);
+  } else {
+    window.removeEventListener("pointerup", up, true);
+    window.removeEventListener("pointercancel", up, true);
+    window.removeEventListener("blur", endHold);
+    document.removeEventListener("visibilitychange", onHidden);
+  }
+}
+
+onBeforeUnmount(() => listen(false));
 </script>
 
 <template>
@@ -111,6 +134,7 @@ onBeforeUnmount(() => {
       @pointerdown="down"
       @pointerup="up"
       @pointercancel="up"
+      @lostpointercapture="endHold"
       @contextmenu.prevent
     >
       <span

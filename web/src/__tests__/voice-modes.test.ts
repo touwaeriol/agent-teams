@@ -228,6 +228,86 @@ describe("push-to-talk mode", () => {
     expect(r.tracksStopped).toBe(2);
   });
 
+  it("after a press whose release never came (window blur), the next press works", async () => {
+    const r = await rig({ pushToTalk: true });
+    pointer(r.mic(), "pointerdown");
+    await settle(500);
+    window.dispatchEvent(new Event("blur")); // e.g. a permission prompt: no pointerup ever arrives
+    await settle(10);
+    expect(r.phase()).toBe("idle");
+    pointer(r.mic(), "pointerdown");
+    await settle(500);
+    expect(r.phase()).toBe("recording");
+    pointer(r.mic(), "pointerup");
+    await settle(10);
+    expect(r.phase()).toBe("idle");
+    expect(r.opened).toBe(2);
+    expect(r.tracksStopped).toBe(2);
+  });
+
+  it("the tab hidden or pointer capture lost also ends the press, and the next press works", async () => {
+    const r = await rig({ pushToTalk: true });
+    pointer(r.mic(), "pointerdown");
+    await settle(500);
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    await settle(10);
+    expect(r.phase()).toBe("idle");
+    pointer(r.mic(), "pointerdown");
+    await settle(500);
+    expect(r.phase()).toBe("recording");
+    pointer(r.mic(), "lostpointercapture");
+    await settle(10);
+    expect(r.phase()).toBe("idle");
+    pointer(r.mic(), "pointerdown");
+    await settle(500);
+    expect(r.phase()).toBe("recording");
+    pointer(r.mic(), "pointerup");
+    await settle(10);
+    expect(r.phase()).toBe("idle");
+    expect(r.opened).toBe(3);
+  });
+
+  it("pressed again while the last words settle: starts once they are in, if still held", async () => {
+    const r = await rig({ pushToTalk: true });
+    pointer(r.mic(), "pointerdown");
+    await settle(500);
+    r.handlers().onEvent({ type: "conversation.item.input_audio_transcription.delta", item_id: "i1", delta: "第一句" });
+    pointer(r.mic(), "pointerup");
+    await settle(10);
+    expect(r.phase()).toBe("stopping"); // waiting for the final text of 第一句
+    pointer(r.mic(), "pointerdown");
+    await settle(10);
+    expect(r.phase()).toBe("stopping");
+    expect(r.opened).toBe(1);
+    r.handlers().onEvent({ type: "conversation.item.input_audio_transcription.completed", item_id: "i1", transcript: "第一句。" });
+    await settle(10);
+    expect(r.text.value).toBe("第一句。"); // not cut short
+    expect(r.phase()).toBe("recording");
+    expect(r.opened).toBe(2);
+    pointer(r.mic(), "pointerup");
+    await settle(10);
+    expect(r.phase()).toBe("idle");
+  });
+
+  it("pressed and released while the last words settle: nothing new starts", async () => {
+    const r = await rig({ pushToTalk: true });
+    pointer(r.mic(), "pointerdown");
+    await settle(500);
+    r.handlers().onEvent({ type: "conversation.item.input_audio_transcription.delta", item_id: "i1", delta: "第一句" });
+    pointer(r.mic(), "pointerup");
+    await settle(10);
+    pointer(r.mic(), "pointerdown");
+    await settle(10);
+    pointer(r.mic(), "pointerup");
+    await settle(10);
+    r.handlers().onEvent({ type: "conversation.item.input_audio_transcription.completed", item_id: "i1", transcript: "第一句。" });
+    await settle(10);
+    expect(r.phase()).toBe("idle");
+    expect(r.opened).toBe(1);
+  });
+
   it("released while connecting: stops as soon as the connection is up", async () => {
     const r = await rig({ pushToTalk: true, gate: true });
     pointer(r.mic(), "pointerdown");

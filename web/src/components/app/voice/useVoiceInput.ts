@@ -1,6 +1,6 @@
 // Voice input for one composer: wires a VoiceController to the composer's text and input element.
 // Shown only when the admin enabled voice (GET /api/voice/config).
-import { computed, nextTick, onBeforeUnmount, reactive, ref, shallowRef, type Ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, reactive, ref, shallowRef, watch, type Ref } from "vue";
 import { useMe } from "@/api/queries";
 import { useVoiceConfig, voice as voiceApi } from "@/api/voice";
 import { toast } from "@/lib/toast";
@@ -21,6 +21,8 @@ export interface VoiceInput {
   /** Text with grey partial runs while speech is being recognised (null: nothing pending). */
   parts: Readonly<Ref<Part[] | null>>;
   active: Readonly<Ref<boolean>>;
+  /** Push-to-talk: a press (pointer or Alt+M) is currently held. */
+  holding: Readonly<Ref<boolean>>;
   setPrefs(patch: Partial<VoicePrefs>): void;
   /** Click mode: start, or end whatever is going on. focus=false keeps the soft keyboard down (touch). */
   toggle(focus?: boolean): void;
@@ -125,15 +127,32 @@ export function useVoiceInput(text: Ref<string>, field: Ref<Field | null>, makeD
     document[method]("visibilitychange", onHidden);
   }
 
+  /**
+   * Pressed while the previous recording is still settling its last words: start again once it
+   * is done, if still held (rather than dropping the press or cutting the previous text short).
+   */
+  let queued: boolean | null = null;
+  watch(
+    () => state.phase,
+    (phase) => {
+      if (queued === null || phase === "stopping") return;
+      const focus = queued;
+      queued = null;
+      if (holding.value && !active.value) start(focus);
+    },
+  );
+
   function press(focus = true) {
     if (!holding.value) watchLoss(true);
     holding.value = true;
-    if (!active.value) start(focus);
+    if (state.phase === "stopping") queued = focus;
+    else if (!active.value) start(focus);
   }
 
   function release() {
     if (!holding.value) return;
     holding.value = false;
+    queued = null;
     watchLoss(false);
     if (state.phase === "recording") void ctl.stop();
   }
@@ -169,6 +188,7 @@ export function useVoiceInput(text: Ref<string>, field: Ref<Field | null>, makeD
     prefs,
     parts,
     active,
+    holding,
     setPrefs,
     toggle,
     press,
