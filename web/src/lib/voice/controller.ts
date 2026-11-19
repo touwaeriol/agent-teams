@@ -375,6 +375,7 @@ export class VoiceController {
     this.deps.onText(this.transcript);
     this.settled?.();
     this.fail(message || "和语音服务的连接断开了");
+    this.run++; // whatever of this recording still arrives (a late microphone, a transport) is closed
   }
 
   private fail(message: string): void {

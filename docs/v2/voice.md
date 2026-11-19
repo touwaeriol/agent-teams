@@ -119,7 +119,9 @@ the WebRTC transport), `audio.ts` (microphone, device list, level meter), `trans
   are dropped if `ready` says `client_commits: false`, a server-VAD model); a
   stop before `ready` waits for it (still within the connect timeout) before the final commit and
   `stop`; a cancel before `ready` drops everything. A connection that fails after recording
-  started ends in error with the reason and releases the microphone. `max_seconds` is known from
+  started ends in error with the reason and releases the microphone; so does a connection that
+  drops after `ready` while the microphone is still opening (a microphone that opens after that,
+  or after any error, is closed, never turned into a recording). `max_seconds` is known from
   `ready` on.
 - Timeouts: the microphone (permission prompt included) has 15 s (`MIC_TIMEOUT`): "麦克风 15 秒内
   没有打开，请检查浏览器的权限弹框或麦克风设备". Connecting has 10 s (`CONNECT_TIMEOUT`) counted

@@ -71,6 +71,10 @@ class RelayConnection {
   private sentFrame = false;
   /** Why connecting failed, once it did. */
   private failure: ConnectError | null = null;
+  /** open() has handed the transport out: from then on a drop is reported through onClose. */
+  private handedOut = false;
+  /** Rejects when the connection drops after ready but before open() returned. */
+  private diedEarly: ((e: ConnectError) => void) | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private ready: ((m: ServerMessage) => void) | null = null;
   private failed: ((e: ConnectError) => void) | null = null;
@@ -89,9 +93,12 @@ class RelayConnection {
     this.accepted.catch(() => {});
     // Connecting may fail before the microphone opens: don't wait for it then.
     const lost = new Promise<never>((_, reject) => void this.accepted.catch(reject));
+    // …or drop after ready while the microphone is still opening (up to MIC_TIMEOUT).
+    const gone = new Promise<never>((_, reject) => (this.diedEarly = reject));
+    gone.catch(() => {});
     let media: MediaStream;
     try {
-      media = await Promise.race([stream, lost]);
+      media = await Promise.race([stream, lost, gone]);
     } catch (e) {
       this.abort();
       throw e;
@@ -114,6 +121,8 @@ class RelayConnection {
       t.maxSeconds = hello.max_seconds;
     });
     t.ready.catch(() => {}); // a cancelled transport's ready is nobody's business
+    this.handedOut = true;
+    this.diedEarly = null;
     return t;
   }
 
@@ -206,6 +215,15 @@ class RelayConnection {
     if (this.closed) return;
     this.closed = true;
     this.capture?.stop();
+    if (!this.handedOut) {
+      // Ready came, but the connection died before the microphone opened (or while the capture
+      // started): open() fails with the reason instead of handing out a dead transport.
+      const reason = this.fatal || "和语音服务的连接断开了";
+      this.failure = new ConnectError(0, reason.startsWith("连不上语音服务") ? reason : `连不上语音服务：${reason}`);
+      this.shut();
+      this.diedEarly?.(this.failure);
+      return;
+    }
     this.h.onClose(this.fatal || undefined);
   }
 

@@ -545,6 +545,30 @@ describe("relay: record before ready", () => {
     expect(tags(ws)).toEqual([1]);
   });
 
+  it("a drop after ready but before the microphone opens fails open() at once, without capturing", async () => {
+    const f = relayFixture();
+    let micOpen: (s: MediaStream) => void = () => {};
+    const p = f.start(new Promise<MediaStream>((r) => (micOpen = r)));
+    const ws = FakeSocket.last as FakeSocket;
+    ws.open();
+    ws.server({ type: "ready", client_commits: true });
+    ws.server({ type: "error", fatal: true, error: { code: "voice_upstream_closed", message: "和语音服务的连接断开了" } });
+    ws.drop();
+    await expect(p).rejects.toThrow("连不上语音服务：和语音服务的连接断开了");
+    micOpen({} as MediaStream);
+    await flushPromises();
+    expect(f.capture.stopped).toBe(0); // never captured
+    expect(f.closes).toEqual([]); // not reported as a drop of a transport nobody has
+
+    const plain = relayFixture();
+    const p2 = plain.start(new Promise<MediaStream>(() => {}));
+    const ws2 = FakeSocket.last as FakeSocket;
+    ws2.open();
+    ws2.server({ type: "ready" });
+    ws2.drop();
+    await expect(p2).rejects.toThrow("连不上语音服务：和语音服务的连接断开了");
+  });
+
   it("closing before ready (cancel) sends nothing and releases the capture", async () => {
     const f = relayFixture();
     const t = await f.start();
@@ -683,6 +707,24 @@ describe("controller with the relay", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(s.micStopped()).toBe(1);
     expect(s.f.capture.stopped).toBe(0); // never captured
+  });
+
+  it("a drop after ready while the microphone is still opening stays an error: the late microphone is closed", async () => {
+    const s = setup(() => later(3_000, {} as MediaStream));
+    await vi.advanceTimersByTimeAsync(0);
+    const ws = s.ws();
+    ws.open();
+    ws.server({ type: "ready", client_commits: true });
+    await vi.advanceTimersByTimeAsync(1_000);
+    ws.drop();
+    await vi.advanceTimersByTimeAsync(0);
+    await s.started;
+    expect(s.state).toMatchObject({ phase: "error", error: "连不上语音服务：和语音服务的连接断开了" });
+    s.c.reset(); // the user dismisses the error
+    await vi.advanceTimersByTimeAsync(2_000); // the microphone opens now
+    expect(s.state.phase).toBe("idle"); // not a recording on a dead connection
+    expect(s.micStopped()).toBe(1);
+    expect(s.f.capture.stopped).toBe(0);
   });
 
   it("a cancel before ready drops the audio and closes the socket", async () => {
