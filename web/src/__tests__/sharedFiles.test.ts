@@ -392,6 +392,18 @@ describe("SharedFiles page", () => {
     expect(forms).toHaveLength(1);
   });
 
+  it("tells the user when an entry of a dropped folder cannot be read, and uploads nothing", async () => {
+    const { w } = await mountPage(listOf([]));
+    const error = vi.spyOn(toast, "error").mockImplementation(() => {});
+    const send = vi.spyOn(XMLHttpRequest.prototype, "send").mockImplementation(() => {});
+    const broken = { isFile: true, isDirectory: false, name: "a.csv", fullPath: "/d/a.csv", file: (_ok: unknown, fail: (e: unknown) => void) => fail(new Error("NotReadableError")) };
+    const folder = { isFile: false, isDirectory: true, name: "d", fullPath: "/d", createReader: () => ({ readEntries: (ok: (e: object[]) => void) => ok([broken]) }) };
+    await w.get("[data-testid=shared-drop]").trigger("drop", { dataTransfer: { items: [{ kind: "file", webkitGetAsEntry: () => folder }], files: [] } });
+    await flushPromises();
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("有文件读取失败"));
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("deletes after confirming", async () => {
     const { w, calls } = await mountPage(listOf([file("notes.md", 20)]));
     await w.get("button[aria-label='删除 notes.md']").trigger("click");
