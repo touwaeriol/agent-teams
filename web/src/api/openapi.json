@@ -954,11 +954,11 @@
             ]
           },
           "model": {
-            "description": "What the employee runs (or opens its next session with)",
+            "description": "What the employee runs (or opens its next session with): project setting → role → built-in default; shown read-only",
             "type": "string"
           },
           "override": {
-            "description": "Always '': the coordinator and the lead run the default model (/model only changes members)",
+            "description": "Always '': the coordinator and the lead have no /model (their model is set in their role or the project settings)",
             "type": "string"
           },
           "runtime": {
@@ -2259,7 +2259,7 @@
             "type": "string"
           },
           "override": {
-            "description": "Picked with /model ('' = project or role setting; always '' for the lead)",
+            "description": "Picked with /model ('' = project or role setting; always '' for the lead, whose model is set in its role or the project)",
             "type": "string"
           },
           "runtime": {
@@ -2524,48 +2524,6 @@
         ],
         "type": "object"
       },
-      "Model": {
-        "additionalProperties": false,
-        "properties": {
-          "default": {
-            "description": "What the user's sessions of this runtime open with when no employee, project or role names a model (at most one per runtime)",
-            "type": "boolean"
-          },
-          "id": {
-            "readOnly": true,
-            "type": "string"
-          },
-          "label": {
-            "description": "Display name; empty shows the id",
-            "maxLength": 40,
-            "type": "string"
-          },
-          "mine": {
-            "description": "Always true: every entry is the user's own (kept for older clients)",
-            "readOnly": true,
-            "type": "boolean"
-          },
-          "model": {
-            "description": "The id the runtime is given (claude-…, gpt-…)",
-            "maxLength": 100,
-            "type": "string"
-          },
-          "runtime": {
-            "enum": [
-              "claude",
-              "codex"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "runtime",
-          "model",
-          "mine"
-        ],
-        "type": "object"
-      },
       "ModelApplied": {
         "additionalProperties": false,
         "properties": {
@@ -2601,7 +2559,7 @@
             ]
           },
           "skipped": {
-            "description": "Employees that keep their model: the lead (always the default model) and members of another runtime",
+            "description": "Employees that keep their model: the lead (its model is set in its role or the project) and members of another runtime",
             "items": {
               "type": "string"
             },
@@ -2614,43 +2572,6 @@
         "required": [
           "applied",
           "skipped"
-        ],
-        "type": "object"
-      },
-      "ModelsBody": {
-        "additionalProperties": false,
-        "properties": {
-          "models": {
-            "items": {
-              "$ref": "#/components/schemas/Model"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "models"
-        ],
-        "type": "object"
-      },
-      "ModelsInputBody": {
-        "additionalProperties": false,
-        "properties": {
-          "models": {
-            "items": {
-              "$ref": "#/components/schemas/Model"
-            },
-            "maxItems": 50,
-            "type": [
-              "array",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "models"
         ],
         "type": "object"
       },
@@ -3570,7 +3491,7 @@
             "type": "string"
           },
           "coordinator_model": {
-            "description": "Deprecated and ignored (accepted for older clients): the coordinator runs the default model",
+            "description": "Model of the coordinator; '' = the coordinator role's model",
             "maxLength": 100,
             "type": "string"
           },
@@ -3610,12 +3531,12 @@
             ]
           },
           "thread_codex_model": {
-            "description": "Codex model of the Codex members (tier member only); '' = each role's model",
+            "description": "Codex model of Codex leads and members; '' = each role's model",
             "maxLength": 100,
             "type": "string"
           },
           "thread_model": {
-            "description": "Claude model of the Claude members (tier member only); '' = each role's model",
+            "description": "Claude model of Claude leads and members; '' = each role's model",
             "maxLength": 100,
             "type": "string"
           },
@@ -3666,7 +3587,7 @@
             "type": "string"
           },
           "coordinator_model": {
-            "description": "Deprecated and ignored (accepted for older clients): the coordinator runs the default model",
+            "description": "Model of the coordinator; '' = the coordinator role's model",
             "maxLength": 100,
             "type": "string"
           },
@@ -3710,7 +3631,7 @@
             "type": "array"
           },
           "thread_codex_model": {
-            "description": "Codex model of the Codex members (tier member only); '' = each role's model",
+            "description": "Codex model of Codex leads and members; '' = each role's model",
             "maxLength": 100,
             "type": "string"
           },
@@ -3720,7 +3641,7 @@
             "type": "string"
           },
           "thread_model": {
-            "description": "Claude model of the Claude members (tier member only); '' = each role's model",
+            "description": "Claude model of Claude leads and members; '' = each role's model",
             "maxLength": 100,
             "type": "string"
           },
@@ -3809,7 +3730,7 @@
             "type": "string"
           },
           "coordinator_model": {
-            "description": "Deprecated, always '': the coordinator and thread leads run the default model",
+            "description": "Model of the coordinator; '' = the coordinator role's model",
             "type": "string"
           },
           "created_at": {
@@ -3858,7 +3779,7 @@
             ]
           },
           "thread_codex_model": {
-            "description": "Codex model of the Codex members (tier member only; leads run the default model); '' = each role's model",
+            "description": "Codex model of Codex leads and members; '' = each role's model",
             "type": "string"
           },
           "thread_effort": {
@@ -3866,7 +3787,7 @@
             "type": "string"
           },
           "thread_model": {
-            "description": "Claude model of the Claude members (tier member only; leads run the default model); '' = each role's model",
+            "description": "Claude model of Claude leads and members; '' = each role's model",
             "type": "string"
           },
           "threads_active": {
@@ -4500,7 +4421,7 @@
             ]
           },
           "model": {
-            "description": "Member roles only: the model of the role's sessions ('' = the defaults). Always '' for the coordinator and the lead (they run the default model; a value sent is dropped)",
+            "description": "The model of the role's sessions, typed by hand (any tier; '' = the project setting, then the built-in default). Below the project setting and, for members, /model",
             "type": "string"
           },
           "node_ids": {
@@ -4975,7 +4896,7 @@
           },
           "scope": {
             "default": "lead",
-            "description": "thread: every member of the thread with the lead's runtime (the lead keeps the default model). lead, and any change in the coordinator conversation, is refused (409 model_fixed): the coordinator and leads always run the default model",
+            "description": "thread: every member of the thread with the lead's runtime (the lead keeps its model). lead, and any change in the coordinator conversation, is refused (409 model_fixed): the coordinator's and leads' models are set in their role or the project settings",
             "enum": [
               "lead",
               "thread"
@@ -8888,78 +8809,6 @@
         "summary": "Sign out one of my sessions",
         "tags": [
           "auth"
-        ]
-      }
-    },
-    "/api/models": {
-      "get": {
-        "operationId": "list-models",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ModelsBody"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/APIError"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "The user's model list (a new user starts with Opus 5.5, the Claude default)",
-        "tags": [
-          "team"
-        ]
-      }
-    },
-    "/api/models/mine": {
-      "put": {
-        "operationId": "save-my-models",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ModelsInputBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ModelsBody"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/APIError"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Replace the user's model list (in order, at least one model, at most one default per runtime)",
-        "tags": [
-          "team"
         ]
       }
     },
