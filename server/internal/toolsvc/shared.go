@@ -112,7 +112,7 @@ func (s *Service) readSharedFile(ctx context.Context, tx *core.Tx, c *call) (Res
 // sendSharedDownload queues the file as file.download chunks for the session's node. Every session
 // (the coordinator too) runs in a working directory on a node; a session without a node, or on a
 // daemon without the shared_files feature, gets an explanation instead of the content.
-func (s *Service) sendSharedDownload(ctx context.Context, tx *core.Tx, c *call, f sharedfiles.File,
+func (s *Service) sendSharedDownload(ctx context.Context, tx *core.Tx, c *call, f sharedfiles.SharedFile,
 	data []byte) (*protocol.ToolSharedDownload, error) {
 	sess, err := core.SessionByID(ctx, tx, c.sc.Session.ID)
 	if err != nil {
@@ -229,7 +229,7 @@ func (s *Service) deleteSharedFile(ctx context.Context, tx *core.Tx, c *call) (R
 	if !deleted {
 		return okJSON(fmt.Sprintf("没有共享文件 %s，什么也没删。", p), out), nil
 	}
-	label := sharedfiles.File{UploadedBy: c.emp().Name}
+	label := sharedfiles.SharedFile{UploadedBy: c.emp().Name}
 	if th := c.thread; th != nil {
 		label.UploaderThreadNo = &th.No
 	}

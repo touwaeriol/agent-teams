@@ -30,15 +30,15 @@ type SharedFileLimits struct {
 
 // SharedFileList is GET /api/projects/{pid}/shared-files.
 type SharedFileList struct {
-	Files      []sharedfiles.File `json:"files"`
-	TotalBytes int64              `json:"total_bytes"`
-	FileCount  int                `json:"file_count"`
-	Limits     SharedFileLimits   `json:"limits"`
+	Files      []sharedfiles.SharedFile `json:"files"`
+	TotalBytes int64                    `json:"total_bytes"`
+	FileCount  int                      `json:"file_count"`
+	Limits     SharedFileLimits         `json:"limits"`
 }
 
 // UploadedSharedFile is one file of an upload.
 type UploadedSharedFile struct {
-	sharedfiles.File
+	sharedfiles.SharedFile
 	Overwritten bool `json:"overwritten" doc:"A file with this path existed and was replaced"`
 }
 
@@ -194,7 +194,7 @@ func (a *API) uploadSharedFiles(ctx context.Context, in *sharedUploadInput) (*sh
 			if err := tx.EmitSharedFile(ctx, p.ID, sharedfiles.UserName, "write", f.Path); err != nil {
 				return err
 			}
-			out.Files = append(out.Files, UploadedSharedFile{File: f, Overwritten: overwritten})
+			out.Files = append(out.Files, UploadedSharedFile{SharedFile: f, Overwritten: overwritten})
 		}
 		u, err := sharedfiles.ProjectUsage(ctx, tx, p.ID)
 		out.TotalBytes = u.Bytes

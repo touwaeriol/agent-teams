@@ -89,9 +89,9 @@ func CleanPath(p string) (string, error) {
 	return p, nil
 }
 
-// Join puts name under the folder dir (both checked); dir "" leaves name as it is.
+// Join puts name under the folder dir (both checked; a trailing "/" of dir is fine); dir "" leaves name as it is.
 func Join(dir, name string) (string, error) {
-	dir = strings.Trim(strings.TrimSpace(dir), "/")
+	dir = strings.TrimRight(strings.TrimSpace(dir), "/")
 	if dir == "" {
 		return CleanPath(name)
 	}
@@ -124,8 +124,8 @@ func ContentType(p string) string {
 	return "application/octet-stream"
 }
 
-// File is one shared file without its bytes.
-type File struct {
+// SharedFile is one shared file without its bytes.
+type SharedFile struct {
 	Path             string    `json:"path"`
 	ContentType      string    `json:"content_type"`
 	Size             int64     `json:"size"`
@@ -138,7 +138,7 @@ type File struct {
 }
 
 // Label is how the uploader is shown: "dev-1 #31", "dev-1" or "user".
-func (f File) Label() string {
+func (f SharedFile) Label() string {
 	if f.UploaderThreadNo != nil {
 		return fmt.Sprintf("%s #%d", f.UploadedBy, *f.UploaderThreadNo)
 	}
@@ -162,8 +162,8 @@ const listColumns = `f.path, f.content_type, f.size, f.sha256, f.uploaded_by, f.
 	f.created_at, f.updated_at`
 
 // List returns the project's files by path; prefix (optional) keeps paths starting with it.
-func List(ctx context.Context, q store.DB, projectID, prefix string) ([]File, error) {
-	out := []File{}
+func List(ctx context.Context, q store.DB, projectID, prefix string) ([]SharedFile, error) {
+	out := []SharedFile{}
 	db := q.Gorm(ctx).Table("at_shared_files f").Select(listColumns).
 		Joins("LEFT JOIN at_threads t ON t.id = f.uploader_thread_id").Where("f.project_id = ?", projectID)
 	if prefix = strings.TrimSpace(prefix); prefix != "" {
@@ -174,22 +174,22 @@ func List(ctx context.Context, q store.DB, projectID, prefix string) ([]File, er
 }
 
 // Stat returns one file without its bytes.
-func Stat(ctx context.Context, q store.DB, projectID, p string) (File, error) {
-	var out []File
+func Stat(ctx context.Context, q store.DB, projectID, p string) (SharedFile, error) {
+	var out []SharedFile
 	err := q.Gorm(ctx).Table("at_shared_files f").Select(listColumns).
 		Joins("LEFT JOIN at_threads t ON t.id = f.uploader_thread_id").
 		Where("f.project_id = ? AND f.path = ?", projectID, p).Limit(1).Scan(&out).Error
 	if err != nil {
-		return File{}, err
+		return SharedFile{}, err
 	}
 	if len(out) == 0 {
-		return File{Path: p}, ErrNotFound
+		return SharedFile{Path: p}, ErrNotFound
 	}
 	return out[0], nil
 }
 
 // Load returns one file with its bytes.
-func Load(ctx context.Context, q store.DB, projectID, p string) (File, []byte, error) {
+func Load(ctx context.Context, q store.DB, projectID, p string) (SharedFile, []byte, error) {
 	f, err := Stat(ctx, q, projectID, p)
 	if err != nil {
 		return f, nil, err
@@ -241,29 +241,29 @@ func Sum(data []byte) string {
 // Put stores data at path (inserted, or overwritten with the new uploader and time) after checking
 // the path and the limits. It takes the project row lock first so concurrent uploads of a project
 // see each other's totals. It returns the stored file and whether it replaced one.
-func Put(ctx context.Context, q store.DB, projectID, rawPath string, data []byte, by Uploader) (File, bool, error) {
+func Put(ctx context.Context, q store.DB, projectID, rawPath string, data []byte, by Uploader) (SharedFile, bool, error) {
 	p, err := CleanPath(rawPath)
 	if err != nil {
-		return File{}, false, err
+		return SharedFile{}, false, err
 	}
 	if len(data) > MaxFileBytes {
-		return File{}, false, Check(Usage{}, int64(len(data)), -1)
+		return SharedFile{}, false, Check(Usage{}, int64(len(data)), -1)
 	}
 	if err := lockProject(ctx, q, projectID); err != nil {
-		return File{}, false, err
+		return SharedFile{}, false, err
 	}
 	u, err := ProjectUsage(ctx, q, projectID)
 	if err != nil {
-		return File{}, false, err
+		return SharedFile{}, false, err
 	}
 	old := int64(-1)
 	if prev, err := Stat(ctx, q, projectID, p); err == nil {
 		old = prev.Size
 	} else if !errors.Is(err, ErrNotFound) {
-		return File{}, false, err
+		return SharedFile{}, false, err
 	}
 	if err := Check(u, int64(len(data)), old); err != nil {
-		return File{}, false, err
+		return SharedFile{}, false, err
 	}
 	var empID *string
 	if by.EmployeeID != "" {
@@ -276,7 +276,7 @@ func Put(ctx context.Context, q store.DB, projectID, rawPath string, data []byte
 		uploader_thread_id = EXCLUDED.uploader_thread_id, updated_at = now()`,
 		projectID, p, ContentType(p), len(data), Sum(data), data, by.Name, empID, by.ThreadID).Error
 	if err != nil {
-		return File{}, false, err
+		return SharedFile{}, false, err
 	}
 	f, err := Stat(ctx, q, projectID, p)
 	return f, old >= 0, err
