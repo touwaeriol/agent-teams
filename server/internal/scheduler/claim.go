@@ -362,6 +362,14 @@ func (s *Scheduler) reviewPlatformError(ctx context.Context, tx *core.Tx, t core
 	if gate, err = s.setStatus(ctx, tx, gate, "blocked"); err != nil {
 		return gate, err
 	}
+	// Nobody holds the blocked gate: blocked is completable, and its reviewer completing it
+	// (status=failed) would turn the platform error back into a rejection of the parent.
+	if gate, err = core.UpdateTask(ctx, tx, gate, map[string]any{"claimed_by": "", "claimed_at": nil}); err != nil {
+		return gate, err
+	}
+	if err := tx.EmitTask(ctx, gate); err != nil {
+		return gate, err
+	}
 	return gate, s.notifyLead(ctx, tx, t, fmt.Sprintf("[%s %s · 平台错误] 审查工作树没准备好，已重试 %d 次仍不行：%s\n"+
 		"这不是驳回：任务 %s 保持原状态，没有退给开发者。排查好节点后，让用户在任务页重试 %s。",
 		gateName(gate), gate.ID, MaxAttempts, why, gate.Parent, gate.ID))
@@ -570,9 +578,9 @@ func reviewNote(b *strings.Builder, target syncTarget, task core.Task) {
 	if verified {
 		return
 	}
-	b.WriteString("\n平台没能核对工作目录是不是被审提交（节点版本较旧或 clone 模式）。开工前先核对 HEAD：能用 git 就 git rev-parse HEAD；" +
-		"不能用 git 时，worktree 的 .git 是个文件，读它里面 gitdir: 指向的目录下的 HEAD 文件（clone 模式直接读 .git/HEAD），内容就是当前提交的 sha。" +
-		"如果不是上面的被审提交，不要审，也不要用 status=failed 驳回：用 complete_task(status=\"platform_error\", summary=你看到的 HEAD) 上报，平台会重新准备审查。\n")
+	b.WriteString("\n平台没能核对工作目录是不是被审提交（节点版本较旧或 clone 模式）。开工前先确认你看到的是被审的改动：" +
+		"用 Grep / Read 查开发者总结和原任务里提到的改动文件、函数名、新加的标识，看它们在工作目录里是否存在、内容是不是改过的。" +
+		"找不到这些改动，就不要审，也不要用 status=failed 驳回：用 complete_task(status=\"platform_error\", summary=你查了什么、没找到什么) 上报，平台会重新准备审查。\n")
 }
 
 // syncNote tells the member what the pre-task sync did to the worktree.

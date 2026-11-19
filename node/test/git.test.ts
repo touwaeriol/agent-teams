@@ -204,8 +204,11 @@ describe("git jobs", () => {
     // The branch moved on after the task was completed: the completed commit is still what is reviewed.
     const c = commit("c.txt");
     pushDev(c);
+    // It is checked out at once: no fetch retries (they would take 100+200+300+400 ms here).
+    const t1 = Date.now();
     const moved = await review(b);
     expect(moved).toMatchObject({ ok: true, head_sha: b, sync: { action: "checkout", head_sha: b } });
+    expect(Date.now() - t1).toBeLessThan(800);
 
     // A commit that never reaches the remote: an explicit failure with the actual HEAD, the tree untouched.
     const never = commit("never.txt");

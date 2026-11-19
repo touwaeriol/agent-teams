@@ -124,8 +124,9 @@ func TestReviewFirstClaimChecksOutReviewedCommit(t *testing.T) {
 		t.Fatalf("reviewer opened before its worktree was ready: %s", f.Body)
 	}
 	rw.answer(t, p, reviewedSHA)
-	_, open := expectOpen(t, rw.w, rw.n, "reviewer-1")
+	rev, open := expectOpen(t, rw.w, rw.n, "reviewer-1")
 	answerPrepares(t, rw.w, rw.n)
+	rev.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: protocol.SessionID(rev.session), MsgID: open.FirstMessage.MsgID})
 	brief := open.FirstMessage.Text
 	for _, want := range []string{"审查 dev-1 的任务 t1", "被审提交：o/r " + reviewedSHA, "o/r：平台已检出并核对，HEAD = " + reviewedSHA, "platform_error"} {
 		if !strings.Contains(brief, want) {
@@ -135,6 +136,11 @@ func TestReviewFirstClaimChecksOutReviewedCommit(t *testing.T) {
 	if strings.Contains(brief, "平台没能核对") {
 		t.Errorf("verified review asks the reviewer to check HEAD:\n%s", brief)
 	}
+	// A gate blocked for another reason (turns ended without complete_task) stays the reviewer's:
+	// nudged by the lead, it can still hand in its verdict.
+	rw.sql(t, `UPDATE at_tasks SET status = 'blocked' WHERE thread_id = $1 AND id = 't2'`, rw.thread.ID)
+	rev.mustCall("complete_task", map[string]any{"task_id": "t2", "status": "done", "summary": "看过了，没问题"})
+	rw.lead.expectSend("审查（reviewer-1）：通过")
 	if errs := rw.n.Errors(); len(errs) > 0 {
 		t.Fatalf("protocol errors: %+v", errs)
 	}
@@ -174,7 +180,7 @@ func TestReviewSyncMismatchIsPlatformError(t *testing.T) {
 	}
 	rw.lead.expectSend("[审查 t2 · 平台错误] 审查工作树没准备好")
 	gate, parent := rw.taskRow(t, rw.thread.ID, "t2"), rw.taskRow(t, rw.thread.ID, "t1")
-	if gate.Status != "blocked" || parent.Status != "review" || parent.ReservedFor != "" || parent.ClaimedBy != "dev-1" {
+	if gate.Status != "blocked" || gate.ClaimedBy != "" || parent.Status != "review" || parent.ReservedFor != "" || parent.ClaimedBy != "dev-1" {
 		t.Fatalf("gate %s, parent %s reserved %q claimed %q", gate.Status, parent.Status, parent.ReservedFor, parent.ClaimedBy)
 	}
 	noSessionSend(t, rw.n, "rejected")
@@ -204,10 +210,13 @@ func TestReviewPlatformErrorReport(t *testing.T) {
 	rev, open := expectOpen(t, rw.w, rw.n, "reviewer-1")
 	answerPrepares(t, rw.w, rw.n)
 	rev.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: protocol.SessionID(rev.session), MsgID: open.FirstMessage.MsgID})
-	for _, want := range []string{"被审提交：o/r " + reviewedSHA, "平台没能核对", `status="platform_error"`} {
+	for _, want := range []string{"被审提交：o/r " + reviewedSHA, "平台没能核对", "用 Grep / Read 查开发者总结", `status="platform_error"`} {
 		if !strings.Contains(open.FirstMessage.Text, want) {
 			t.Errorf("degraded review brief misses %q:\n%s", want, open.FirstMessage.Text)
 		}
+	}
+	if strings.Contains(open.FirstMessage.Text, "gitdir") || strings.Contains(open.FirstMessage.Text, "rev-parse") {
+		t.Errorf("degraded brief asks for a check a read-only session cannot do:\n%s", open.FirstMessage.Text)
 	}
 	res := rev.mustCall("complete_task", map[string]any{"task_id": "t2", "status": "platform_error", "summary": "HEAD 是 develop 的提交"})
 	if !strings.Contains(text(res), "不算驳回") {
@@ -219,8 +228,12 @@ func TestReviewPlatformErrorReport(t *testing.T) {
 	}
 	rev.mustCall("complete_task", map[string]any{"task_id": "t2", "status": "platform_error", "summary": "还是不对"})
 	rw.lead.expectSend("[审查 t2 · 平台错误]")
-	if gate := rw.taskRow(t, rw.thread.ID, "t2"); gate.Status != "blocked" {
-		t.Fatalf("gate after two reports: %s", gate.Status)
+	if gate := rw.taskRow(t, rw.thread.ID, "t2"); gate.Status != "blocked" || gate.ClaimedBy != "" {
+		t.Fatalf("gate after two reports: %s claimed by %q", gate.Status, gate.ClaimedBy)
+	}
+	// The blocked gate is nobody's: a late verdict from the reviewer cannot turn it into a rejection.
+	if res := rev.call("complete_task", map[string]any{"task_id": "t2", "status": "failed", "summary": "缺少输入校验"}); res.Ok || !strings.Contains(text(res), "不是你的") {
+		t.Fatalf("verdict on a blocked gate: ok=%v %s", res.Ok, text(res))
 	}
 	noSessionSend(t, rw.n, "rejected")
 	if parent := rw.taskRow(t, rw.thread.ID, "t1"); parent.Status != "review" {

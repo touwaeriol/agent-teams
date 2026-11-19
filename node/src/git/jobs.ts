@@ -170,22 +170,20 @@ export class GitJobs {
 
   /**
    * Review of a known commit: fetch again (bounded, before the deadline) until the shared clone
-   * has it and origin/<ref> points at it, check it out detached and verify HEAD. A commit that
+   * has it, check it out detached and verify HEAD. A commit that
    * never arrives, or a HEAD that is not it, fails the job (sha_mismatch with the actual HEAD):
    * the console must not hand the reviewer a tree that is not the work under review.
    */
   private async syncReviewSHA(cwd: string, s: GitSyncRequest, want: string, refetch: () => Promise<void>): Promise<Partial<GitResult>> {
     if (await this.dirty(cwd)) return this.syncDone(cwd, "dirty");
-    const target = `refs/remotes/origin/${s.ref}`;
     const retries = this.o.reviewFetchRetries ?? 4;
     const step = this.o.reviewRetryMs ?? 2000;
     for (let i = 0; ; i++) {
-      const has = await this.hasCommit(cwd, want);
-      if (has && (await this.revParse(cwd, target)) === want) break;
+      // The commit is here: review it, even when origin/<ref> moved on after the task was completed.
+      if (await this.hasCommit(cwd, want)) break;
       const wait = step * (i + 1);
       const late = s.deadline !== undefined && Date.now() + wait > Date.parse(s.deadline);
       if (i >= retries || late) {
-        if (has) break; // the branch moved on after the task was completed: still review that commit
         throw new JobError("sha_mismatch", `commit ${want} of ${s.ref} not found after ${i + 1} fetch(es)`, "", { head_sha: await this.head(cwd) });
       }
       await new Promise((r) => setTimeout(r, wait));
@@ -199,10 +197,6 @@ export class GitJobs {
 
   private async hasCommit(cwd: string, sha: string): Promise<boolean> {
     return (await this.git(cwd, ["cat-file", "-e", `${sha}^{commit}`])).code === 0;
-  }
-
-  private async revParse(cwd: string, ref: string): Promise<string> {
-    return (await this.git(cwd, ["rev-parse", "--verify", "--quiet", ref])).stdout.trim();
   }
 
   /** A worktree last used for a review sits on a detached HEAD: back to the member's own branch. */
