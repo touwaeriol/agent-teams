@@ -107,26 +107,81 @@ func Find(repos []Repo, slug string) (Repo, bool) {
 // Dir is the directory name of a repository's checkout inside an employee's directory (owner__name).
 func Dir(slug string) string { return strings.Replace(slug, "/", "__", 1) }
 
-// defaultBranches caches each repository's default branch for a while.
+// Default branches are cached: a fresh entry is served as is; an older one is still served at
+// once while one background request refreshes it (stale-while-revalidate), so opening a session
+// (inside a transaction that holds the project row) does not wait for GitHub every ten minutes.
+// A failed lookup is remembered for a short while so a GitHub outage is not asked again on every
+// session open.
+const (
+	branchTTL     = 10 * time.Minute
+	branchFailTTL = time.Minute
+	// branchRefreshTimeout bounds a background refresh.
+	branchRefreshTimeout = 30 * time.Second
+)
+
 var defaultBranches = struct {
 	sync.Mutex
 	items map[string]cachedBranch
 }{items: map[string]cachedBranch{}}
 
 type cachedBranch struct {
-	name string
-	at   time.Time
+	name       string
+	err        error // the first lookup failed (remembered for branchFailTTL)
+	at         time.Time
+	refreshing bool
 }
 
-// DefaultBranch returns the repository's default branch (cached 10 minutes).
+// branchKey is per git connection, like treeKey: one user's answer is not served to another.
+func branchKey(r Repo) string { return r.conn.ID + "|" + strings.ToLower(r.Slug) }
+
+// DefaultBranch returns the repository's default branch (see branchTTL for the caching).
 func (g *GitHub) DefaultBranch(ctx context.Context, r Repo) (string, error) {
-	key := strings.ToLower(r.Slug)
+	return cachedBranchOf(ctx, branchKey(r), func(ctx context.Context) (string, error) { return g.fetchDefaultBranch(ctx, r) })
+}
+
+// cachedBranchOf serves key from the default branch cache, asking fetch when it must.
+func cachedBranchOf(ctx context.Context, key string, fetch func(context.Context) (string, error)) (string, error) {
 	defaultBranches.Lock()
 	c, ok := defaultBranches.items[key]
-	defaultBranches.Unlock()
-	if ok && time.Since(c.at) < 10*time.Minute {
+	switch {
+	case ok && c.err == nil:
+		if time.Since(c.at) >= branchTTL && !c.refreshing {
+			c.refreshing = true
+			defaultBranches.items[key] = c
+			go refreshBranch(context.WithoutCancel(ctx), key, fetch)
+		}
+		defaultBranches.Unlock()
 		return c.name, nil
+	case ok && time.Since(c.at) < branchFailTTL:
+		defaultBranches.Unlock()
+		return "", c.err
 	}
+	defaultBranches.Unlock()
+	name, err := fetch(ctx)
+	if err == nil || ctx.Err() == nil { // a caller that gave up learned nothing about GitHub
+		defaultBranches.Lock()
+		defaultBranches.items[key] = cachedBranch{name: name, err: err, at: time.Now()}
+		defaultBranches.Unlock()
+	}
+	return name, err
+}
+
+// refreshBranch renews a stale entry; on failure the old name stays (asked again after branchTTL).
+func refreshBranch(ctx context.Context, key string, fetch func(context.Context) (string, error)) {
+	ctx, cancel := context.WithTimeout(ctx, branchRefreshTimeout)
+	defer cancel()
+	name, err := fetch(ctx)
+	defaultBranches.Lock()
+	defer defaultBranches.Unlock()
+	c := defaultBranches.items[key]
+	c.refreshing, c.at = false, time.Now()
+	if err == nil {
+		c.name = name
+	}
+	defaultBranches.items[key] = c
+}
+
+func (g *GitHub) fetchDefaultBranch(ctx context.Context, r Repo) (string, error) {
 	var out struct {
 		DefaultBranch string `json:"default_branch"`
 	}
@@ -136,9 +191,6 @@ func (g *GitHub) DefaultBranch(ctx context.Context, r Repo) (string, error) {
 	if out.DefaultBranch == "" {
 		out.DefaultBranch = "main"
 	}
-	defaultBranches.Lock()
-	defaultBranches.items[key] = cachedBranch{name: out.DefaultBranch, at: time.Now()}
-	defaultBranches.Unlock()
 	return out.DefaultBranch, nil
 }
 

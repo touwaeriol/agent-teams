@@ -64,16 +64,25 @@ const memberGuide = `你在自己的工作目录里工作，每个仓库一个�
 - 截图和图片不是交付物：publish_file 发布单张图片只会作为附件保存在讨论串消息里，不进交付物；要放进报告，就把图片和 index.html 放在同一目录发布成网站，或直接内联进 HTML（SVG 可以直接写进 HTML）；附件只在文字汇报里引用（附件 id 或地址）。SVG 也不能单独发布。
 - 切换工作内容时调用 set_status(text)，用一句中文说明你在干什么。`
 
-// docsCache keeps each repository's CLAUDE.md (read from its default branch) for a while.
+// docsCache keeps each repository's CLAUDE.md (read from its default branch). A fresh entry is
+// served as is; an older one is still served at once while one background read renews it
+// (stale-while-revalidate): opening a session holds the project row and must not wait for GitHub.
 type docsCache struct {
 	mu    sync.Mutex
 	items map[string]docEntry
 }
 
 type docEntry struct {
-	text string
-	at   time.Time
+	text       string
+	at         time.Time
+	refreshing bool
 }
+
+// docTTL is how long a CLAUDE.md is served before it is read again (in the background).
+const docTTL = 10 * time.Minute
+
+// docTimeout bounds one read of a CLAUDE.md.
+const docTimeout = 5 * time.Second
 
 var claudeDocs = &docsCache{items: map[string]docEntry{}}
 
@@ -94,25 +103,61 @@ func (o *Orchestrator) projectDocs(ctx context.Context, p store.Project) string 
 	return strings.Join(parts, "\n\n")
 }
 
-// repoDoc reads one repository's CLAUDE.md on its default branch (cached 10 minutes, "" on failure).
+// repoDoc reads one repository's CLAUDE.md on its default branch ("" on failure; see docsCache).
 func (o *Orchestrator) repoDoc(ctx context.Context, p store.Project, r ghops.Repo) string {
-	key := p.ID + "@" + r.Slug
-	claudeDocs.mu.Lock()
-	e, ok := claudeDocs.items[key]
-	claudeDocs.mu.Unlock()
-	if ok && time.Since(e.at) < 10*time.Minute {
+	return claudeDocs.get(ctx, p.ID+"@"+r.Slug, func(ctx context.Context) string {
+		fctx, cancel := context.WithTimeout(ctx, docTimeout)
+		defer cancel()
+		text, err := o.gh.FileContent(fctx, r, "CLAUDE.md", o.DefaultBranch(fctx, r))
+		if err != nil {
+			o.log.Debug("read CLAUDE.md", "project_id", p.ID, "repo", r.Slug, "err", err)
+		}
+		return text
+	})
+}
+
+// get serves key, reading it when absent (and in the background when stale).
+func (c *docsCache) get(ctx context.Context, key string, read func(context.Context) string) string {
+	c.mu.Lock()
+	e, ok := c.items[key]
+	if ok {
+		if time.Since(e.at) >= docTTL && !e.refreshing {
+			e.refreshing = true
+			c.items[key] = e
+			bg := context.WithoutCancel(ctx)
+			go func() { c.put(key, read(bg)) }()
+		}
+		c.mu.Unlock()
 		return e.text
 	}
-	fctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	text, err := o.gh.FileContent(fctx, r, "CLAUDE.md", o.DefaultBranch(fctx, r))
-	if err != nil {
-		o.log.Debug("read CLAUDE.md", "project_id", p.ID, "repo", r.Slug, "err", err)
-	}
-	claudeDocs.mu.Lock()
-	claudeDocs.items[key] = docEntry{text: text, at: time.Now()}
-	claudeDocs.mu.Unlock()
+	c.mu.Unlock()
+	text := read(ctx)
+	c.put(key, text)
 	return text
+}
+
+func (c *docsCache) put(key, text string) {
+	c.mu.Lock()
+	c.items[key] = docEntry{text: text, at: time.Now()}
+	c.mu.Unlock()
+}
+
+// WarmRepos fills the GitHub caches a session open reads (each repository's default branch and
+// CLAUDE.md) outside any transaction, so the delivery that may open a session right after does not
+// call GitHub while it holds the project row (core.LockProject). Errors are ignored: the open
+// falls back the way it always did.
+func (o *Orchestrator) WarmRepos(ctx context.Context, projectID string) {
+	if o.gh == nil || projectID == "" {
+		return
+	}
+	p, err := o.project(ctx, o.core.Pool, projectID)
+	if err != nil {
+		return
+	}
+	for _, r := range o.Repos(ctx, p) {
+		o.DefaultBranch(ctx, r)
+		o.repoDoc(ctx, p, r)
+	}
 }
 
 // systemAppend builds the prompt appended to the claude_code preset (§6.1).

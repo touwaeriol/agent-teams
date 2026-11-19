@@ -50,9 +50,14 @@ type UserMessage struct {
 	Context string
 }
 
-// PostUserMessageWith stores the user's message (with any images) and delivers it.
+// PostUserMessageWith stores the user's message (with any images) and delivers it. The GitHub
+// reads a session open needs are made first, outside the transaction (WarmRepos): the delivery
+// holds the project row, and every other delivery and event of the project waits for it.
 func (o *Orchestrator) PostUserMessageWith(ctx context.Context, in UserMessage) (core.Message, error) {
 	userID, convID, content, interrupt, meta := in.UserID, in.ConvID, in.Content, in.Interrupt, in.Meta
+	if c, err := core.ConversationOfUser(ctx, o.core.Pool, userID, convID); err == nil {
+		o.WarmRepos(ctx, deref(c.ProjectID))
+	}
 	var m core.Message
 	err := o.core.InTx(ctx, func(tx *core.Tx) error {
 		c, err := core.ConversationOfUser(ctx, tx, userID, convID)
