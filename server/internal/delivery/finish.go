@@ -33,7 +33,7 @@ const finishNudge = "（平台）[Thread #%d · 可以收尾] 讨论串的结束
 // no task is unfinished and no merge queue entry is active, and
 //   - with pull requests: all of them are merged, or (merge_policy pr) they are open with
 //     passing checks (ciPassed, or recorded by an earlier pass in done_pending_at);
-//   - without changes in any repository: the lead called finish (done_pending_at).
+//   - without changes in any repository: the lead called finish (summary, or done_pending_at).
 func (e *Engine) endDue(ctx context.Context, tx *core.Tx, t core.Thread, ciPassed bool) (bool, error) {
 	if t.Status != "running" && t.Status != "waiting" && t.Status != "review" {
 		return false, nil
@@ -59,7 +59,7 @@ func (e *Engine) endDue(ctx context.Context, tx *core.Tx, t core.Thread, ciPasse
 	case branched:
 		return false, nil // changes without a pull request: open_pr first
 	}
-	return t.DonePendingAt != nil, nil
+	return t.DonePendingAt != nil || t.Summary != "", nil // finish was called (it records the summary)
 }
 
 // openTasksOrMerges reports a thread with an unfinished task or an active merge queue entry.
@@ -84,8 +84,17 @@ func openTasksOrMerges(ctx context.Context, q core.DB, threadID string) (bool, e
 // It reports whether the thread is done.
 func (e *Engine) endThread(ctx context.Context, tx *core.Tx, t core.Thread, src endSource, ciPassed bool) (bool, error) {
 	due, err := e.endDue(ctx, tx, t, ciPassed)
-	if err != nil || !due {
+	if err != nil {
 		return false, err
+	}
+	if !due {
+		// The end is no longer due (a task was added, a merge started): drop the pending mark so
+		// its old timestamp cannot run the grace period out later, in the middle of a lead's turn.
+		// It is set afresh once the end is due again.
+		if t.DonePendingAt != nil {
+			return false, core.UpdateThread(ctx, tx, t.ID, map[string]any{"done_pending_at": nil})
+		}
+		return false, nil
 	}
 	if src != endTimeout {
 		wait, err := e.waitForLead(ctx, tx, t, src)

@@ -268,6 +268,8 @@ func TestResubmitAfterCIFail(t *testing.T) {
 	c.update(t, map[string]any{"status": "review"})
 	lead.expectSend("[Thread #1 · CI 失败]")
 	c.waitFor(t, "back to running", func(v core.ThreadView) bool { return v.Status == "running" })
+	c.checks("success") // the lead fixed CI
+	turnStarted(lead)
 	res := lead.mustCall("finish", map[string]string{"summary": "修好了 CI"})
 	if !strings.Contains(text(res), "重新提交验收") || !strings.Contains(text(res), "PR 留给人") {
 		t.Fatalf("finish result %q", text(res))
@@ -276,7 +278,8 @@ func TestResubmitAfterCIFail(t *testing.T) {
 	if v.Status != "review" || v.PRState != "open" || v.MergeError != nil {
 		t.Fatalf("after finish: %s %q %v", v.Status, v.PRState, mergeError(v))
 	}
-	c.checks("success")
+	c.stays(t, "review", 600*time.Millisecond) // checks pass, the lead is still in its turn
+	finalReply(lead, "最终汇报：CI 修好了")
 	c.waitFor(t, "done once the checks pass", func(v core.ThreadView) bool { return v.Status == "done" })
 }
 
@@ -310,12 +313,13 @@ func TestResubmitAfterReject(t *testing.T) {
 	}
 }
 
-// TestCIMissingStaysInReview: no check ever appears and on_missing = block: the thread stays in
+// TestCIMissingStaysInReview: no check ever appears and on_missing = fail (block): the thread stays in
 // review with merge_error for the user (waiting), the lead is not told to fix it.
 func TestCIMissingStaysInReview(t *testing.T) {
 	c, lead := newEndCase(t, "总结")
 	c.b.must(200, "PATCH", "/api/projects/"+c.thread.ProjectID, map[string]any{"delivery": map[string]any{
-		"ci": map[string]any{"mode": "checks", "appear_timeout_s": 1, "on_missing": "block"}}}, nil)
+		"ci": map[string]any{"mode": "checks", "appear_timeout_s": 1, "on_missing": "fail"}}}, nil)
+	c.set(func(gh *fakeGitHub) { gh.checks["sha-thread"] = []map[string]any{} }) // no CI on the repository
 	c.update(t, map[string]any{"status": "review"})
 	v := c.waitFor(t, "missing CI recorded", func(v core.ThreadView) bool { return v.MergeError != nil })
 	if !strings.Contains(mergeError(v), "没有出现项目要求的 CI 检查") || v.Counts.Waiting != 1 {
@@ -339,5 +343,34 @@ func TestResubmitRefusedWithOpenTasks(t *testing.T) {
 	}
 	if v := c.view(t); v.Status != "running" || v.Summary != "" {
 		t.Fatalf("after the refusal: %s %q", v.Status, v.Summary)
+	}
+}
+
+// TestStalePendingEndDoesNotTimeOut: the end became due during a lead's turn, then the lead
+// added a task (the end is no longer due); long after, while the lead writes its final report
+// for that task, the old mark must not run the grace period out under it (review of t1).
+func TestStalePendingEndDoesNotTimeOut(t *testing.T) {
+	c, lead := newEndCase(t, "总结")
+	c.w.e.Delivery.DoneGrace = 2 * time.Second
+	lead.mustCall("update_plan", map[string]any{"steps": []map[string]string{{"title": "做", "status": "done"}}})
+	turnStarted(lead)
+	c.update(t, map[string]any{"status": "review"})
+	eventually(t, "end pending", func() bool { return c.row(t).DonePendingAt != nil })
+	res := lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "再审一遍", "main": "做"})
+	var task protocol.AssignTaskResult
+	_ = json.Unmarshal(*res.Structured, &task)
+	finalReply(lead, "补派了审查，结果回来后出最终汇报")
+	eventually(t, "pending dropped", func() bool { return c.row(t).DonePendingAt == nil })
+	time.Sleep(2500 * time.Millisecond) // longer than the grace period
+	turnStarted(lead)
+	lead.mustCall("cancel_task", map[string]any{"task_id": string(task.TaskID), "reason": "审完了"})
+	v := c.stays(t, "review", 1200*time.Millisecond)
+	if p := c.row(t).DonePendingAt; p == nil || time.Since(*p) > 2*time.Second {
+		t.Fatalf("pending mark %v (want a fresh one) status %s", p, v.Status)
+	}
+	finalReply(lead, "最终汇报：审查通过")
+	c.waitFor(t, "done after the report", func(v core.ThreadView) bool { return v.Status == "done" })
+	if r := leadReplies(t, c.w, c.thread.ID); r[len(r)-1] != "最终汇报：审查通过" {
+		t.Fatalf("final reply %q", r)
 	}
 }
