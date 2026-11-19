@@ -216,7 +216,9 @@ func (e *Engine) startEntry(ctx context.Context, t core.Thread, repo ghops.Repo,
 
 // recreateThreadBranch cuts the thread branch again from the thread's base when GitHub no longer
 // has it although the thread recorded it (deleted by hand, or with a merged pull request while
-// the thread kept working), instead of cancelling the merge.
+// the thread kept working), instead of cancelling the merge. The lead is always told; when the
+// repository's pull request is not merged, the tasks merged into the lost branch are named: their
+// changes may be missing from the new one (lostMergesNote).
 func (e *Engine) recreateThreadBranch(ctx context.Context, t core.Thread, repo ghops.Repo) (string, error) {
 	base := e.orch.BaseFor(ctx, e.core.Pool, t, repo)
 	e.log.Warn("thread branch missing, recreating it", "thread_id", t.ID, "repo", repo.Slug, "branch", t.Branch, "base", base)
@@ -224,7 +226,39 @@ func (e *Engine) recreateThreadBranch(ctx context.Context, t core.Thread, repo g
 	if err != nil {
 		return "", fmt.Errorf("讨论串分支 %s 不存在，从 %s 重新创建也失败了：%w", t.Branch, base, err)
 	}
-	return sha, nil
+	err = e.core.InTx(ctx, func(tx *core.Tx) error {
+		note, err := lostMergesNote(ctx, tx, t, repo.Slug)
+		if err != nil {
+			return err
+		}
+		return e.sched.NotifyLead(ctx, tx, t, fmt.Sprintf("[Merge · %s] 讨论串分支 %s 在仓库 %s 上不存在，已从 %s 重新切出。%s",
+			repo.Slug, t.Branch, repo.Slug, base, note))
+	})
+	return sha, err
+}
+
+// lostMergesNote names the tasks merged into a thread branch that is gone, unless the
+// repository's pull request merged (their changes are in the base the branch was cut from).
+// Done tasks cannot be enqueued again (enqueue_merge takes unfinished tasks only), so the note
+// says how to bring the changes back: a new task for the member that resubmits its branch.
+func lostMergesNote(ctx context.Context, tx *core.Tx, t core.Thread, repo string) (string, error) {
+	if tr, err := core.ThreadRepoOf(ctx, tx, t.ID, repo); err == nil && tr.PRNumber != nil && tr.PRState == "merged" {
+		return "这个仓库的 PR 已经合并，之前合并的改动都在基准分支里，不需要处理。", nil
+	}
+	var rows []struct{ TaskID, HeadBranch, Employee string }
+	err := tx.Gorm(ctx).Table("at_merge_queue").Select("task_id, head_branch, employee").
+		Where("thread_id = ? AND repo = ? AND status = 'merged' AND task_id IS NOT NULL", t.ID, repo).Order("position").Find(&rows).Error
+	if err != nil || len(rows) == 0 {
+		return "此前没有合并进这个仓库讨论串分支的任务。", err
+	}
+	items := make([]string, len(rows))
+	for i, r := range rows {
+		items[i] = fmt.Sprintf("%s（%s，成员分支 %s）", r.TaskID, r.Employee, r.HeadBranch)
+	}
+	return fmt.Sprintf("这个仓库的 PR 还没有合并，之前合并进旧讨论串分支的任务改动可能不在新分支里：%s。请核对新分支；"+
+		"这些任务已经是 done，不能再 enqueue_merge。缺了的改动请给对应成员派一个新任务（assign_task 点名该成员），"+
+		"让他确认成员分支上这些提交还在（本地没有就从远端成员分支取回）后 complete_task，再对新任务 enqueue_merge；"+
+		"成员分支也没有了的，只能重新做。", strings.Join(items, "、")), nil
 }
 
 func (e *Engine) mergeProblem(ctx context.Context, t core.Thread, entry core.MergeEntry, res ghops.MergeResult, err error) error {
@@ -236,7 +270,13 @@ func (e *Engine) mergeProblem(ctx context.Context, t core.Thread, entry core.Mer
 
 // directMerge merges the member branch into the thread branch without a trial (merge_queue gate off).
 func (e *Engine) directMerge(ctx context.Context, t core.Thread, repo ghops.Repo, entry core.MergeEntry) error {
-	entry.BaseSHA, _ = e.gh.RefSHA(ctx, repo, t.Branch) // only for the hand-over range; the merge does not need it
+	base, err := e.gh.RefSHA(ctx, repo, t.Branch) // the hand-over range; a missing branch is cut again first
+	if ghops.Status(err) == 404 {
+		if base, err = e.recreateThreadBranch(ctx, t, repo); err != nil {
+			return e.fail(ctx, t, entry, "读取讨论串分支失败", err)
+		}
+	}
+	entry.BaseSHA = base
 	res, err := e.gh.Merge(ctx, repo, t.Branch, entry.HeadBranch, fmt.Sprintf("Merge %s into thread #%d", entry.HeadBranch, t.No))
 	if err != nil || res.Conflict {
 		return e.mergeProblem(ctx, t, entry, res, err)
