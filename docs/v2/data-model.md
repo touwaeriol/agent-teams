@@ -278,6 +278,8 @@ CREATE TABLE at_threads (
   archived_from  TEXT NOT NULL DEFAULT '',        -- 00095：归档前的状态（取消归档时 done/failed 回原状态，其余回 paused）
   stalled_note_at TIMESTAMPTZ,                    -- 00130：上次给组长发“守护进程重启后无人工作”检查的时间；同一次停滞只发一次（之后有用户消息/回答、任务/计划/合并/CI/PR 变化或恢复运行才再发，且 10 分钟内不重发）
   only_roles     JSONB,                           -- 00270：open_thread(roles) 限定的成员岗位（组长只能往这些岗位派活；平台建的审查 / 修复任务不受限）；NULL = 全部
+  done_pending_at TIMESTAMPTZ,                    -- 00301：结束条件已满足、在等组长这一回合结束（或等它回应“（平台）可以收尾”提示）的时间；组长 turn_ended 时结束讨论串，超过 10 分钟（delivery.DoneGrace）合并循环直接结束；只读讨论串 finish 时也写它
+  finish_nudged_at TIMESTAMPTZ,                   -- 00301：结束条件满足时组长还没调用 finish(summary)，平台给它发“（平台）[Thread #n · 可以收尾]”提示的时间；每个讨论串只发一次
   UNIQUE (project_id, no)
 );
 CREATE INDEX at_threads_project ON at_threads (project_id, status, updated_at DESC);
