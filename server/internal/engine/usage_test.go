@@ -276,3 +276,49 @@ func TestNodeUsageRefresh(t *testing.T) {
 		t.Fatalf("offline: %d %s", code, raw)
 	}
 }
+
+// TestNodeUsageSupported: NodeView.usage_supported follows hello.features while online and
+// the stored last hello while offline.
+func TestNodeUsageSupported(t *testing.T) {
+	w := newWorld(t, nil)
+	b := w.signUp("ops@example.com")
+	var old, node nodeCreated
+	b.must(201, "POST", "/api/nodes", map[string]string{"name": "old"}, &old)
+	b.must(201, "POST", "/api/nodes", map[string]string{"name": "n1"}, &node)
+	type view struct {
+		ID             string `json:"id"`
+		Online         bool   `json:"online"`
+		UsageSupported bool   `json:"usage_supported"`
+	}
+	get := func() map[string]view {
+		var nodes []view
+		b.must(200, "GET", "/api/nodes", nil, &nodes)
+		m := map[string]view{}
+		for _, v := range nodes {
+			m[v.ID] = v
+		}
+		return m
+	}
+	if v := get()[node.Node.ID]; v.UsageSupported {
+		t.Fatalf("never connected: %+v", v)
+	}
+	o := w.connect(old.Token, nodetest.Options{Features: []string{"sessions"}})
+	n := w.connect(node.Token, nodetest.Options{Features: []string{"sessions", "usage"}})
+	m := get()
+	if v := m[old.Node.ID]; !v.Online || v.UsageSupported {
+		t.Fatalf("old daemon: %+v", v)
+	}
+	if v := m[node.Node.ID]; !v.Online || !v.UsageSupported {
+		t.Fatalf("usage daemon: %+v", v)
+	}
+	o.Close()
+	n.Close()
+	eventually(t, "offline", func() bool {
+		m := get()
+		return !m[old.Node.ID].Online && !m[node.Node.ID].Online
+	})
+	m = get()
+	if m[old.Node.ID].UsageSupported || !m[node.Node.ID].UsageSupported {
+		t.Fatalf("offline uses last hello: %+v", m)
+	}
+}

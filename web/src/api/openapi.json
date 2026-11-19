@@ -3143,6 +3143,10 @@
             "$ref": "#/components/schemas/NodeUsage",
             "description": "Latest Claude Code / Codex subscription quota reported by the node; null when none"
           },
+          "usage_supported": {
+            "description": "The daemon reports usage (hello.features has \"usage\"; the last hello while offline)",
+            "type": "boolean"
+          },
           "version": {
             "type": "string"
           }
@@ -3162,6 +3166,7 @@
           "parked_sessions",
           "queued",
           "usage",
+          "usage_supported",
           "isolated",
           "labels",
           "max_active_sessions",

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +38,7 @@ type NodeView struct {
 	Queued         int            `json:"queued"`
 	// Usage is the latest node.usage report (nil = never reported since the console started).
 	Usage             *platform.NodeUsage `json:"usage" doc:"Latest Claude Code / Codex subscription quota reported by the node; null when none"`
+	UsageSupported    bool                `json:"usage_supported" doc:"The daemon reports usage (hello.features has \"usage\"; the last hello while offline)"`
 	Isolated          bool                `json:"isolated"`
 	Labels            []string            `json:"labels"`
 	MaxActiveSessions *int                `json:"max_active_sessions"`
@@ -50,6 +52,7 @@ type lastHello struct {
 	Protocol int            `json:"protocol"`
 	Runtimes map[string]any `json:"runtimes"`
 	Capacity map[string]any `json:"capacity"`
+	Features []string       `json:"features"`
 }
 
 func (s *Server) nodeView(n store.Node) NodeView {
@@ -62,6 +65,11 @@ func (s *Server) nodeView(n store.Node) NodeView {
 		Capacity: firstMap(live.Capacity, hello.Capacity), ActiveSessions: live.ActiveSessions,
 		ParkedSessions: live.ParkedSessions, Queued: live.Queued, Usage: live.Usage, Isolated: n.Isolated, Labels: n.Labels,
 		MaxActiveSessions: n.MaxActiveSessions, ParkAfterS: n.ParkAfterS, CreatedAt: n.CreatedAt}
+	features := hello.Features
+	if live.Online {
+		features = live.Features
+	}
+	v.UsageSupported = slices.Contains(features, "usage")
 	if v.Labels == nil {
 		v.Labels = []string{}
 	}

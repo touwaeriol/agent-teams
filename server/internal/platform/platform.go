@@ -34,6 +34,8 @@ type NodeLive struct {
 	ActiveSessions int            `json:"active_sessions"`
 	ParkedSessions int            `json:"parked_sessions"`
 	Queued         int            `json:"queued"`
+	// Features is hello.features of the live link (nil while offline).
+	Features []string `json:"features,omitempty"`
 	// Usage is the latest node.usage report; kept after the link drops (nil = never reported).
 	Usage *NodeUsage `json:"usage"`
 }
