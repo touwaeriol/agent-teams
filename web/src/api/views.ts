@@ -99,6 +99,8 @@ export interface ThreadCounts {
   approvals_open: number;
   tasks_total: number;
   tasks_done: number;
+  /** Small tasks not finished yet (not done, failed or cancelled); older servers leave it out. */
+  tasks_open?: number;
   main_total: number;
   main_done: number;
   /** Deliverables the thread published (older servers leave it out). */

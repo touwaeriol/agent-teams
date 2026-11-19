@@ -2,7 +2,7 @@
 /**
  * The open thread's top bar in capsules (like the Claude app): a round ‹ back to the list; a
  * centred capsule with the status mark (blue spinner working, pulsing orange dot waiting, dashed
- * ring idle, ✓ done, ✕ failed), "#12 标题" (double-click renames in place) and the plan "2/7";
+ * ring paused, ✓ done, ✕ failed), "#12 标题" (double-click renames in place) and the plan "2/7";
  * a right capsule with the node status and ✓ (archive) and ⋯ (the thread menu, with its
  * shortcuts); then expand and close where they apply.
  */

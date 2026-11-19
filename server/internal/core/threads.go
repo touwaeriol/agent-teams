@@ -164,11 +164,12 @@ func ThreadCountsOf(ctx context.Context, q DB, t Thread) (ThreadCounts, error) {
 		(SELECT count(*) FROM at_questions WHERE thread_id = $1 AND status = 'open' AND audience = 'user' AND kind = 'approval'),
 		(SELECT count(*) FROM at_tasks WHERE thread_id = $1 AND status <> 'cancelled'),
 		(SELECT count(*) FROM at_tasks WHERE thread_id = $1 AND status = 'done'),
+		(SELECT count(*) FROM at_tasks WHERE thread_id = $1 AND status NOT IN ('done', 'failed', 'cancelled')),
 		(SELECT count(*) FROM at_main_tasks WHERE thread_id = $1),
 		(SELECT count(*) FROM at_main_tasks WHERE thread_id = $1 AND status = 'done'),
 		(SELECT count(*) FROM at_deliverables d WHERE d.thread_id = $1 AND `+notImageDeliverable+`),
 		(SELECT merge_policy FROM at_projects WHERE id = $2)`, t.ID, t.ProjectID).
-		Scan(&c.QuestionsOpen, &c.ApprovalsOpen, &c.TasksTotal, &c.TasksDone, &c.MainTotal, &c.MainDone, &c.Deliverables, &c.MergePolicy)
+		Scan(&c.QuestionsOpen, &c.ApprovalsOpen, &c.TasksTotal, &c.TasksDone, &c.TasksOpen, &c.MainTotal, &c.MainDone, &c.Deliverables, &c.MergePolicy)
 	c.Waiting = c.QuestionsOpen + c.ApprovalsOpen
 	if AwaitsUser(t, c.MergePolicy) {
 		c.Waiting++

@@ -26,7 +26,7 @@
 | `message` | `{conversation_id, thread_no?, message: MessageView}` | 用户、统筹、组长、平台说话 |
 | `thread` | `{thread: ThreadView}`，删除时 `{deleted: {id, no}}` | 讨论串新建 / 状态 / PR / 计数变化 / 删除 |
 | `main_task` | `{thread_no, main_tasks: MainTaskView[]}` | 计划变化、自动打勾 |
-| `task` | `{thread_no, task: TaskView}` | 小任务新建、领取、状态变化 |
+| `task` | `{thread_no, task: TaskView, counts: ThreadCounts}` | 小任务新建、领取、状态变化；`counts` 是变化后讨论串的计数（含 `tasks_open`），网页据此更新列表里的讨论串，不用等 `thread` 事件 |
 | `question` | `{thread_no?, question: QuestionView}` | 提问 / 审批新建、答复、取消 |
 | `mail` | `{thread_no, mail: MailView}` | 员工间留言 |
 | `activity` | `{thread_no?, employee, text, at}` | 员工活动摘要（工具开始/结束、进度；**落库**，可回看） |

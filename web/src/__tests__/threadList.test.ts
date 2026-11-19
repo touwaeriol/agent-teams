@@ -33,13 +33,25 @@ describe("listGroupOf", () => {
     expect(listGroupOf(thread(1, { members: [member("typing")], counts: counts({ approvals_open: 1, waiting: 1 }) }))).toBe("waiting");
     expect(listGroupOf(thread(1, { members: [member("typing")] }), new Map([[1, question("q", { thread_no: 1 })]]))).toBe("waiting");
   });
-  it("working or queued is 进行中, running/paused with nobody working is 空闲", () => {
+  it("working, open small tasks, queued or waiting on checks is 进行中; paused is 已暂停 (the old 空闲 group)", () => {
     expect(listGroupOf(thread(1, { members: [member("typing")] }))).toBe("active");
     expect(listGroupOf(thread(1, { status: "queued" }))).toBe("active");
-    expect(listGroupOf(thread(1, { members: [member("idle")] }))).toBe("idle");
+    expect(listGroupOf(thread(1, { members: [member("idle")], counts: counts({ tasks_open: 1 }) }))).toBe("active");
+    expect(listGroupOf(thread(1, { status: "review", merge_policy: "pr" }))).toBe("active");
+    expect(listGroupOf(thread(1, { status: "review", merge_policy: "auto" }))).toBe("active");
+    expect(listGroupOf(thread(1, { status: "review", merge_policy: "auto", merge_error: "冲突" }))).toBe("waiting");
     expect(listGroupOf(thread(1, { status: "paused", members: [member("typing")] }))).toBe("idle");
+  });
+  it("running with nobody working and no small task left: the lead replied, 等你处理", () => {
+    expect(listGroupOf(thread(1, { members: [member("idle")], lead_last: { text: "好了", at: "" } }))).toBe("waiting");
     // A shared member typing for another thread does not make this one active.
-    expect(listGroupOf(thread(1, { members: [{ ...member("typing"), busy_elsewhere: true, thread_no: 2 }] }))).toBe("idle");
+    expect(listGroupOf(thread(1, { members: [{ ...member("typing"), busy_elsewhere: true, thread_no: 2 }], lead_last: { text: "好了", at: "" } }))).toBe("waiting");
+    // ... but its task here still waits for it: 进行中.
+    expect(listGroupOf(thread(1, { members: [{ ...member("typing"), busy_elsewhere: true, thread_no: 2 }], counts: counts({ tasks_open: 1 }) }))).toBe("active");
+    // Older servers without tasks_open: everything not done counts as open.
+    const old = counts({ tasks_total: 2, tasks_done: 1 });
+    delete old.tasks_open;
+    expect(listGroupOf(thread(1, { counts: old }))).toBe("active");
   });
   it("done and failed are 已完成, archived its own", () => {
     expect(listGroupOf(thread(1, { status: "done" }))).toBe("done");
@@ -55,11 +67,11 @@ describe("groupThreads", () => {
       thread(2, { status: "done", updated_at: "2026-11-01T00:00:00Z", last_activity_at: "2026-11-03T00:00:00Z" }),
       thread(3, { status: "archived" }),
       thread(4, { status: "review" }),
-      thread(5, { members: [member("idle")] }),
+      thread(5, { status: "paused" }),
     ]);
     expect(groups.map((g) => [g.id, g.label, g.items.map((t) => t.no)])).toEqual([
       ["waiting", "等你处理", [4]],
-      ["idle", "空闲", [5]],
+      ["idle", "已暂停", [5]],
       ["done", "已完成", [2, 1]],
       ["archived", "已归档", [3]],
     ]);
@@ -70,7 +82,7 @@ describe("groupThreads", () => {
     expect(rowMark(thread(1, { status: "queued" }), "active")).toBe("queued");
     expect(rowMark(thread(1), "active")).toBe("working");
     expect(rowMark(thread(1), "waiting")).toBe("wait");
-    expect(rowMark(thread(1), "idle")).toBe("idle");
+    expect(rowMark(thread(1, { status: "paused" }), "idle")).toBe("paused");
   });
 });
 
@@ -83,9 +95,15 @@ describe("rows", () => {
   it("rowLine: waiting reason, else the lead's first line, the summary, the brief", () => {
     expect(rowLine(thread(1), question("q", { asker: "lead-1", text: "选哪个" }))).toBe("组长问：选哪个");
     expect(rowLine(thread(1, { counts: counts({ approvals_open: 2, waiting: 2 }) }))).toBe("等你审批 2 条命令");
-    expect(rowLine(thread(1, { lead_last: { text: "\n第一行\n第二行", at: "" }, summary: "s" }))).toBe("第一行");
-    expect(rowLine(thread(1, { summary: "总结" }))).toBe("总结");
-    expect(rowLine(thread(1))).toBe("brief");
+    const going = counts({ tasks_open: 1, waiting: 0 });
+    expect(rowLine(thread(1, { members: [member("typing")], lead_last: { text: "\n第一行\n第二行", at: "" }, summary: "s" }))).toBe("第一行");
+    expect(rowLine(thread(1, { members: [member("typing")], summary: "总结" }))).toBe("总结");
+    expect(rowLine(thread(1, { members: [member("typing")] }))).toBe("brief");
+    // Nobody working, small tasks open: says so.
+    expect(rowLine(thread(1, { counts: going, lead_last: { text: "派好了", at: "" } }))).toBe("等成员处理任务");
+    // The lead replied and stopped.
+    expect(rowLine(thread(1, { lead_last: { text: "\n做完了\n细节", at: "" } }))).toBe("组长已回复：做完了");
+    expect(rowLine(thread(1))).toBe("组长正在阅读任务");
   });
   it("shortAgo", () => {
     const now = Date.parse("2026-11-16T12:00:00Z");
@@ -146,23 +164,24 @@ describe("folded sections", () => {
 });
 
 describe("list layout (Claude app style)", () => {
-  it("orders 等你处理 → 进行中 → 空闲 → 已完成 → 已归档 whatever the input order", () => {
+  it("orders 等你处理 → 进行中 → 已暂停 → 已完成 → 已归档 whatever the input order", () => {
     const ids = groupThreads([
       thread(1, { status: "archived" }),
       thread(2, { status: "done" }),
-      thread(3, { members: [member("idle")] }),
+      thread(3, { status: "paused" }),
       thread(4, { members: [member("typing")] }),
       thread(5, { status: "review" }),
     ]).map((g) => g.id);
     expect(ids).toEqual(["waiting", "active", "idle", "done", "archived"]);
   });
-  it("空闲, 已完成 and 已归档 rows are compact; 等你处理 and 进行中 stay rich", () => {
+  it("已暂停, 已完成 and 已归档 rows are compact; 等你处理 and 进行中 stay rich", () => {
     expect((["waiting", "active", "idle", "done", "archived"] as const).map(isCompactGroup)).toEqual([false, false, true, true, true]);
   });
-  it("the header mark follows the list: spinner working, orange waiting, dashed idle, ✓ done, ✕ failed", () => {
+  it("the header mark follows the list: spinner working, orange waiting, dashed paused, ✓ done, ✕ failed", () => {
     expect(threadMark(thread(1, { members: [member("typing")] }))).toBe("working");
     expect(threadMark(thread(1, { status: "review" }))).toBe("wait");
-    expect(threadMark(thread(1, { members: [member("idle")] }))).toBe("idle");
+    expect(threadMark(thread(1, { members: [member("idle")], lead_last: { text: "好了", at: "" } }))).toBe("wait");
+    expect(threadMark(thread(1, { status: "paused" }))).toBe("paused");
     expect(threadMark(thread(1, { status: "done" }))).toBe("done");
     expect(threadMark(thread(1, { status: "failed" }))).toBe("failed");
     expect(threadMark(thread(1, { members: [member("typing")] }), new Map([[1, question("q", { thread_no: 1 })]]))).toBe("wait");

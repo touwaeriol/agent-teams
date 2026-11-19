@@ -146,10 +146,18 @@ export function refreshOffice(qc: QueryClient, pid: string): void {
   );
 }
 
-/** A task changed: its thread's list, and the office (the board shows the project queue). */
-function onTask(qc: QueryClient, pid: string, d: { thread_no: number; task: TaskView }) {
+/**
+ * A task changed: its thread's task list, the thread's counts in the project list and its own
+ * query (the frame carries them; tasks_open decides 进行中 vs 等你处理), and the office (the board
+ * shows the project queue). Older servers send no counts: those stay until the next thread frame.
+ */
+function onTask(qc: QueryClient, pid: string, d: { thread_no: number; task: TaskView; counts?: ThreadView["counts"] }) {
   const t = threadOf(qc, pid, d.thread_no);
   if (t) qc.setQueryData<TaskView[]>(keys.tasks(t.id), (list) => (list ? upsert(list, d.task) : list));
+  if (t && d.counts) {
+    const counts = d.counts;
+    patchThread(qc, pid, t.id, (x) => ({ ...x, counts: { ...x.counts, ...counts } }));
+  }
   refreshOffice(qc, pid);
 }
 
