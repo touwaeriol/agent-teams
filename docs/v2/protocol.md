@@ -198,7 +198,7 @@
  "interrupt_first": false, "images": [{"id": "img_…", "media_type": "image/png", "name": "截图.png", "size": 48213}]}
 ```
 
-- `images`（可选，最多 8 张；`first_message` 也可以带）：用户附的图片。帧里只有引用（帧上限 4 MiB，图片单张可到 5 MB）；守护进程投递前用自己的节点令牌 `GET <控制台>/nodes/attachments/<id>`（`Authorization: Bearer <节点令牌>`，只能取同一用户项目的图片）下载到 `<state>/attachments/<session_id>/`，会话关闭时删掉。Claude：用户消息的 `content` 变成 `[{type:"image", source:{type:"base64", media_type, data}}…, {type:"text", text}]`（Agent SDK 0.3.325 的 `SDKUserMessage.message` 就是 Messages API 的 `MessageParam`，支持图片块）。Codex：在 `turn/start` / `turn/steer` 的 `input` 里追加 `{type:"localImage", path}`。`media_type` 为 `application/pdf` 时 Claude 收到 `{type:"document", source:{type:"base64", media_type:"application/pdf", data}}`，Codex 没有文档输入，文字末尾写明 PDF 存在本机哪个路径。下载失败时照样投递文字，末尾加一行说明图片没取到。
+- `images`（可选，最多 8 张；`first_message` 也可以带）：用户附的图片。帧里只有引用（帧上限 4 MiB，图片单张可到 5 MB）；守护进程投递前用自己的节点令牌 `GET <控制台>/nodes/attachments/<id>`（`Authorization: Bearer <节点令牌>`，只能取同一用户项目的图片）下载到 `<state>/attachments/<session_id>/`，会话关闭时删掉。Claude：用户消息的 `content` 变成 `[{type:"image", source:{type:"base64", media_type, data}}…, {type:"text", text}]`（Agent SDK 0.3.325 的 `SDKUserMessage.message` 就是 Messages API 的 `MessageParam`，支持图片块）。Codex：在 `turn/start` / `turn/steer` 的 `input` 里追加一项 `localImage`（带本机 `path`）。`media_type` 为 `application/pdf` 时 Claude 收到一个 `document` 内容块（`source` 是 base64 的 `application/pdf`），Codex 没有文档输入，文字末尾写明 PDF 存在本机哪个路径。下载失败时照样投递文字，末尾加一行说明图片没取到。
 
 - 会话处于 `parked`：守护进程先用 `resume` 重开进程（不需要控制台再发 open），再投递。
 - 会话还没收到本 `open_gen` 的 `session.release`：消息在守护进程排队，release 后按顺序投递（park 后自动 resume 的同一 gen 不需要再 release，但 init 工具若与上次不同则当作违规上报 `session.event{kind:error, code:'protocol'}`）。
@@ -390,7 +390,7 @@
 
 `git.purge {job_id, path: "projects/<pid>"}`：在确认无活跃会话后删除整个项目目录（v1 删除项目会把检出留在节点上，v2 修正）。
 
-删除讨论串用同一条命令删讨论串目录：`git.purge {job_id, path: "projects/<pid>/threads/<no>"}`，前面先发 `session.close`，再发 `git.cleanup {keep_unpushed: false}`（未推送的改动一并删除）。git 命令不排在会话队列里，所以守护进程收到 `git.purge` 时若目录下还有正在停止的会话，最多等 60 秒，仍未停止才回 `dirty_conflict`。路径只接受这两种形式，其他一律 `path_outside_root`。
+删除讨论串用同一条命令删讨论串目录：`git.purge {job_id, path: "projects/<pid>/threads/12"}`（`12` 是讨论串编号），前面先发 `session.close`，再发 `git.cleanup {keep_unpushed: false}`（未推送的改动一并删除）。git 命令不排在会话队列里，所以守护进程收到 `git.purge` 时若目录下还有正在停止的会话，最多等 60 秒，仍未停止才回 `dirty_conflict`。路径只接受这两种形式，其他一律 `path_outside_root`。
 
 ## 8. 凭证
 

@@ -10,7 +10,7 @@
     "gen": "npm run bundle && npm run gen:ts",
     "check:examples": "node scripts/check-doc-examples.mjs",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --test test/"
+    "test": "node --test \"test/**/*.test.mjs\""
   },
   "devDependencies": {
     "ajv": "^8.20.0",
