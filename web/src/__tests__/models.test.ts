@@ -1,22 +1,39 @@
-// Model lists and custom commands (pure parts): choices per runtime, the user's default, list
-// problems, command validation and the role card hints.
+// Models and custom commands (pure parts): model suggestions and format, project model status,
+// command validation and the role card hints.
 import { describe, expect, it } from "vitest";
 import { chatScope, cleanCommand, commandProblem, commandsHint, promptOnly, toggleHidden, togglable, unfit } from "@/lib/commands";
-import { defaultModel, followLabel, MODEL_ID, modelChoices, modelFits, modelName, modelProblems, offersCodex, projectModelStatus } from "@/lib/models";
+import { BUILTIN_MODEL, emptyRoleModel, MODEL_ID, modelName, modelSuggestions, offersCodex, projectModelStatus, validModel } from "@/lib/models";
 import { newRole, roleProblems } from "@/lib/roles";
 
-const list = [
-  { id: "m1", runtime: "claude" as const, model: "claude-haiku-x", label: "Haiku", default: false, mine: true },
-  { id: "m2", runtime: "codex" as const, model: "gpt-x", label: "", default: true, mine: true },
-  { id: "m3", runtime: "claude" as const, model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: true },
-  { id: "m4", runtime: "claude" as const, model: "claude-opus-5-5", label: "again", default: false, mine: true },
-];
+describe("models (no list: typed ids)", () => {
+  it("suggests the roles' models of the runtime, then the common ids, each once", () => {
+    const roles = [
+      { tier: "coordinator", runtime: "claude", model: "claude-coord-x" },
+      { tier: "lead", runtime: "claude", model: "" },
+      { tier: "member", runtime: "claude", model: "claude-sonnet-5-5" },
+      { tier: "member", runtime: "codex", model: "gpt-x" },
+    ];
+    expect(modelSuggestions(roles, "claude")).toEqual(["claude-coord-x", "claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-2"]);
+    expect(modelSuggestions(roles, "codex")).toEqual(["gpt-x"]);
+    expect(modelSuggestions([], "claude")).toEqual(["claude-opus-5-5", "claude-fable-5-2", "claude-sonnet-5-5"]);
+    expect(modelSuggestions([], "codex", "gpt-typed")).toEqual(["gpt-typed"]);
+  });
 
-describe("model lists", () => {
-  it("names the follow-my-default choice of a role's model per runtime", () => {
-    expect(followLabel(list, "claude")).toBe("跟随我的默认（当前：Opus 5.5）");
-    expect(followLabel(list, "codex")).toBe("跟随我的默认（当前：gpt-x）");
-    expect(followLabel(list.filter((m) => m.runtime === "claude"), "codex")).toBe("跟随我的默认（未设置）");
+  it("accepts '' or any id in the server's format", () => {
+    expect(MODEL_ID.test("us.anthropic.claude-x:0[1m]")).toBe(true);
+    expect(validModel("")).toBe(true);
+    expect(validModel("claude-anything")).toBe(true);
+    expect(validModel("a b")).toBe(false);
+    expect(validModel("-x")).toBe(false);
+    expect(validModel("x".repeat(101))).toBe(false);
+  });
+
+  it("names common ids, keeps others as typed, and explains an empty role model", () => {
+    expect(modelName("claude-opus-5-5")).toBe("Opus 5.5");
+    expect(modelName("claude-fable-5-2")).toBe("Fable 5.2");
+    expect(modelName("gpt-x")).toBe("gpt-x");
+    expect(emptyRoleModel("claude")).toBe(`留空 = 内置默认 ${BUILTIN_MODEL}`);
+    expect(emptyRoleModel("codex")).toContain("Codex");
   });
 
   it("says what a project model field puts in effect", () => {
@@ -26,53 +43,17 @@ describe("model lists", () => {
       { tier: "member", runtime: "claude", model: "" },
       { tier: "member", runtime: "claude", model: "claude-haiku-x" },
     ];
-    // Members only: the lead's own model does not count, the coordinator never does.
-    expect(projectModelStatus("", roles, list, "claude")).toBe("跟随岗位配置（岗位：Opus 5.5、Haiku）");
-    expect(projectModelStatus("", roles.slice(0, 3), list, "claude")).toBe("跟随岗位配置（岗位：Opus 5.5）");
-    expect(projectModelStatus("", roles.slice(0, 2), list, "claude")).toBe("跟随岗位配置（没有这类岗位）");
-    expect(projectModelStatus("", roles, list, "codex")).toBe("跟随岗位配置（没有这类岗位）");
-    expect(projectModelStatus("", [{ tier: "member", runtime: "codex", model: "" }], [], "codex")).toBe("跟随岗位配置（岗位：我的默认（未设置））");
-    expect(projectModelStatus("claude-haiku-x", roles, list, "claude")).toBe("项目指定：Haiku");
-    expect(projectModelStatus("gone", roles, list, "claude")).toBe("项目指定：gone");
-    expect(offersCodex(roles, list.filter((m) => m.runtime === "claude"))).toBe(false);
-    expect(offersCodex(roles, list)).toBe(true);
-    expect(offersCodex([{ tier: "member", runtime: "codex" }], [])).toBe(true);
-    expect(offersCodex([{ tier: "coordinator", runtime: "codex" }], [])).toBe(false);
-    expect(offersCodex([{ tier: "lead", runtime: "codex" }], [])).toBe(false);
-    expect(offersCodex([], [], "gpt-x")).toBe(true);
-  });
-
-  it("keeps a role's model across a type switch only when the new type lists it", () => {
-    expect(modelFits(list, "codex", "")).toBe(true);
-    expect(modelFits(list, "claude", "claude-haiku-x")).toBe(true);
-    expect(modelFits(list, "codex", "claude-haiku-x")).toBe(false);
-    expect(modelFits(list, "codex", "gone-model")).toBe(false);
-  });
-
-  it("lists one runtime's models once, in the user's order, and keeps a typed id", () => {
-    expect(modelChoices(list, "claude").map((c) => [c.value, c.label, c.isDefault, c.custom])).toEqual([
-      ["claude-haiku-x", "Haiku", false, false],
-      ["claude-opus-5-5", "Opus 5.5", true, false],
-    ]);
-    expect(modelChoices(list, "claude", "claude-opus-5-5").map((c) => c.value)).toEqual(["claude-haiku-x", "claude-opus-5-5"]);
-    expect(modelChoices(list, "codex", "gpt-y").map((c) => [c.value, c.custom])).toEqual([["gpt-x", false], ["gpt-y", true]]);
-    expect(modelName(list, "claude-haiku-x")).toBe("Haiku");
-    expect(modelName(list, "gpt-x")).toBe("gpt-x");
-    expect(defaultModel(list, "claude")).toBe("claude-opus-5-5");
-    expect(defaultModel(list, "codex")).toBe("gpt-x");
-    expect(defaultModel([], "claude")).toBe("");
-  });
-
-  it("checks an edited list like the server", () => {
-    expect(MODEL_ID.test("us.anthropic.claude-x:0[1m]")).toBe(true);
-    expect(MODEL_ID.test("a b")).toBe(false);
-    expect(modelProblems([{ runtime: "claude", model: "a", default: true }, { runtime: "claude", model: "a" }, { runtime: "claude", model: "b", default: true }])).toEqual([
-      "a 重复了",
-      "Claude Code 只能有一个默认模型",
-    ]);
-    expect(modelProblems([{ runtime: "claude", model: "a", default: true }, { runtime: "codex", model: "a", default: true }])).toEqual([]);
-    expect(modelProblems([])).toEqual(["至少保留一个模型"]);
-    expect(modelProblems(Array.from({ length: 51 }, (_, i) => ({ runtime: "claude" as const, model: `m${i}` })))).toEqual(["最多 50 个模型"]);
+    // The thread fields cover leads and members of their type; coordinator_model covers the coordinator.
+    expect(projectModelStatus("", roles, "claude")).toBe("跟随岗位配置（岗位：claude-haiku-x、内置默认 Opus 5.5）");
+    expect(projectModelStatus("", roles, "coordinator")).toBe("跟随岗位配置（岗位：内置默认 Opus 5.5）");
+    expect(projectModelStatus("", roles, "codex")).toBe("跟随岗位配置（没有这类岗位）");
+    expect(projectModelStatus("", [{ tier: "member", runtime: "codex", model: "" }], "codex")).toBe("跟随岗位配置（岗位：Codex 默认）");
+    expect(projectModelStatus("claude-sonnet-5-5", roles, "claude")).toBe("项目指定：Sonnet 5.5");
+    expect(projectModelStatus("gone", roles, "coordinator")).toBe("项目指定：gone");
+    expect(offersCodex(roles)).toBe(false);
+    expect(offersCodex([{ tier: "member", runtime: "codex" }])).toBe(true);
+    expect(offersCodex([{ tier: "lead", runtime: "codex" }])).toBe(true);
+    expect(offersCodex([], "gpt-x")).toBe(true);
   });
 });
 

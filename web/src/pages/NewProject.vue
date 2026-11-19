@@ -1,11 +1,11 @@
 <script setup lang="ts">
 // 新建项目: name, 项目指令 (context), repositories, work mode, the per-thread team from the role templates,
-// the project's member models (跟随岗位配置 unless set per type) and an optional first message for the coordinator.
+// the project's models (跟随岗位配置 unless set: the coordinator, the threads per type) and an optional first message for the coordinator.
 import { computed, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
 import { projects } from "@/api/actions";
 import { useAction } from "@/api/mutations";
-import { keys, useModels, useRoles } from "@/api/queries";
+import { keys, useRoles } from "@/api/queries";
 import Card from "@/components/app/Card.vue";
 import CardTitle from "@/components/app/CardTitle.vue";
 import ChoiceCards from "@/components/app/ChoiceCards.vue";
@@ -16,7 +16,7 @@ import { WORK_MODES } from "@/components/app/workModes";
 import ModelPicker from "@/components/app/models/ModelPicker.vue";
 import Field from "@/components/common/Field.vue";
 import Spinner from "@/components/common/Spinner.vue";
-import { offersCodex, projectModelStatus, type Runtime } from "@/lib/models";
+import { offersCodex, projectModelStatus, type ProjectField, type Runtime } from "@/lib/models";
 import { INSTRUCTIONS_MAX } from "@/lib/projectSettings";
 import NavButton from "@/components/shell/NavButton.vue";
 
@@ -27,20 +27,20 @@ const context = ref("");
 const repos = ref<RepoRef[]>([]);
 const mode = ref<"worktree" | "clone">("worktree");
 const first = ref("");
-const models = useModels();
-/** The project's member models per type; "" = 跟随岗位配置. */
-const picked = ref({ thread_model: "", thread_codex_model: "" });
+/** The project's models; "" = 跟随岗位配置. */
+const NONE = { coordinator_model: "", thread_model: "", thread_codex_model: "" };
+const picked = ref({ ...NONE });
 const pickModels = ref(false);
-const MODEL_FIELDS: { key: keyof typeof picked.value; runtime: Runtime; label: string }[] = [
-  { key: "thread_model", runtime: "claude", label: "成员 · Claude Code" },
-  { key: "thread_codex_model", runtime: "codex", label: "成员 · Codex" },
+const MODEL_FIELDS: { key: keyof typeof NONE; runtime: Runtime; field: ProjectField; label: string }[] = [
+  { key: "coordinator_model", runtime: "claude", field: "coordinator", label: "统筹" },
+  { key: "thread_model", runtime: "claude", field: "claude", label: "讨论串 · Claude Code" },
+  { key: "thread_codex_model", runtime: "codex", field: "codex", label: "讨论串 · Codex" },
 ];
 const roleList = computed(() => roles.data.value?.roles ?? []);
-const modelList = computed(() => models.data.value?.models ?? []);
-const modelFields = computed(() => MODEL_FIELDS.filter((f) => f.runtime !== "codex" || offersCodex(roleList.value, modelList.value, picked.value.thread_codex_model)));
-const statusOf = (f: (typeof MODEL_FIELDS)[number]) => projectModelStatus(picked.value[f.key], roleList.value, modelList.value, f.runtime);
+const modelFields = computed(() => MODEL_FIELDS.filter((f) => f.runtime !== "codex" || offersCodex(roleList.value, picked.value.thread_codex_model)));
+const statusOf = (f: (typeof MODEL_FIELDS)[number]) => projectModelStatus(picked.value[f.key], roleList.value, f.field);
 function followRoles() {
-  picked.value = { thread_model: "", thread_codex_model: "" };
+  picked.value = { ...NONE };
   pickModels.value = false;
 }
 const create = useAction(
@@ -107,10 +107,10 @@ const chips = computed(() => teamChips(roles.data.value?.roles ?? []));
             <button v-else type="button" class="text-[13px] underline-offset-2 hover:underline" @click="pickModels = true">按类型指定</button>
           </template>
         </CardTitle>
-        <p class="text-[13px] text-muted-foreground">只对成员岗位生效：默认跟随岗位配置（每个岗位用自己的模型），按类型指定后覆盖这个项目里同类型成员岗位的模型；之后可在项目设置里修改。统筹和组长固定使用「我的默认」（没设时用内置默认），不受这里影响。</p>
+        <p class="text-[13px] text-muted-foreground">默认跟随岗位配置（每个岗位用自己的模型）；指定后覆盖这个项目里统筹、或同类型的组长和成员的模型，可以直接输入模型 ID；之后可在项目设置里修改。</p>
         <div v-if="pickModels" class="grid gap-3 sm:grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
           <Field v-for="f in modelFields" :key="f.key" v-slot="{ id }" :label="f.label" :hint="statusOf(f)">
-            <ModelPicker :id="id" v-model="picked[f.key]" :runtime="f.runtime" :label="f.label" empty-label="跟随岗位配置" class="at-select-36" />
+            <ModelPicker :id="id" v-model="picked[f.key]" :runtime="f.runtime" :label="f.label" placeholder="跟随岗位配置" class="at-select-36" />
           </Field>
         </div>
       </Card>
