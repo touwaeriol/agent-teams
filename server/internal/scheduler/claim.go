@@ -549,7 +549,9 @@ func gateNotes(ctx context.Context, tx *core.Tx, b *strings.Builder, d core.Task
 
 // reviewNote tells a reviewer which commits are under review and whether the platform checked
 // out and verified them. Without a verified checkout (an older daemon, full clones) it asks the
-// reviewer to check HEAD itself and to report platform_error, not a rejection, when it is wrong.
+// reviewer to confirm with Grep / Read that the changes the developer describes are in the tree
+// (a read-only session cannot run git or read HEAD), and to report platform_error, not a
+// rejection, when they are not.
 func reviewNote(b *strings.Builder, target syncTarget, task core.Task) {
 	ref := target.Sync.Ref
 	b.WriteString("\n被审提交（分支 " + ref + "）：\n")

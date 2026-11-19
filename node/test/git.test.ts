@@ -204,11 +204,8 @@ describe("git jobs", () => {
     // The branch moved on after the task was completed: the completed commit is still what is reviewed.
     const c = commit("c.txt");
     pushDev(c);
-    // It is checked out at once: no fetch retries (they would take 100+200+300+400 ms here).
-    const t1 = Date.now();
     const moved = await review(b);
     expect(moved).toMatchObject({ ok: true, head_sha: b, sync: { action: "checkout", head_sha: b } });
-    expect(Date.now() - t1).toBeLessThan(800);
 
     // A commit that never reaches the remote: an explicit failure with the actual HEAD, the tree untouched.
     const never = commit("never.txt");
@@ -221,6 +218,28 @@ describe("git jobs", () => {
     expect(await review(never, new Date(Date.now() + 50).toISOString())).toMatchObject({ ok: false, error_code: "sha_mismatch" });
     expect(Date.now() - t0).toBeLessThan(2000);
     void c;
+  });
+
+  it("review sync with expect_sha does not wait when the commit is here and the branch moved on", async () => {
+    // A retry would wait at least 10 s before its fetch; the check below allows 5 s.
+    h = await startHarness({ reviewRetryMs: 10_000 });
+    makeRemote(h.dir);
+    const seed = join(h.dir, "seed-app");
+    const commit = (file: string) => {
+      writeFileSync(join(seed, file), `${file}\n`);
+      git(seed, "add", ".");
+      git(seed, "commit", "-m", file);
+      return git(seed, "rev-parse", "HEAD");
+    };
+    const reviewed = commit("a.txt");
+    const later = commit("b.txt");
+    git(seed, "push", "origin", `${later}:refs/heads/thread/12/dev-2`); // origin/<ref> is past the reviewed commit
+    const t0 = Date.now();
+    h.console.command("git.prepare", { ...prepare("g_m1", "reviewer-1"), sync: { mode: "review", ref: "thread/12/dev-2", expect_sha: reviewed } });
+    const r = (await h.console.waitType("git.result", (b) => b.job_id === "g_m1")).body;
+    expect(r).toMatchObject({ ok: true, head_sha: reviewed, sync: { action: "checkout", head_sha: reviewed } });
+    expect(Date.now() - t0).toBeLessThan(5_000);
+    expect(git(join(h.opts.root, "projects/p1/threads/12/reviewer-1"), "rev-parse", "HEAD")).toBe(reviewed);
   });
 
   it("re-sends the original git.result for a repeated job instead of running it again", async () => {
