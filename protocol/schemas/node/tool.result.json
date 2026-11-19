@@ -48,7 +48,7 @@
       "$ref": "#/$defs/ToolDownload"
     },
     "shared_download": {
-      "description": "read_shared_file: the one file whose bytes arrived before as file.download frames; the daemon writes it as .agent-shared/<path> in the session's working directory (the folder holds its own .gitignore).",
+      "description": "read_shared_file: the one file whose bytes arrived before as file.download frames; the daemon writes it as .shared/<path> in the session's working directory (the folder holds its own .gitignore).",
       "$ref": "#/$defs/ToolSharedDownload"
     }
   },
