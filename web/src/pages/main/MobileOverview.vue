@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Phones: the project overview over the chat (?sheet=threads|library|schedules). A segmented
 // control 讨论串 / 资料库 / 定时任务 on top with ✕ on the left and search on the right; under
-// it the thread list (交付物, 等你处理, 进行中, then compact 空闲 / 已完成 / 已归档), the library or
+// it the thread list (交付物, 等你处理, 进行中, then compact 已暂停 / 已完成 / 已归档), the library or
 // the scheduled tasks.
 import { Search, X } from "lucide-vue-next";
 import { computed, ref } from "vue";

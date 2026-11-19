@@ -161,7 +161,7 @@ CREATE TABLE at_roles (
   node_ids         TEXT[] NOT NULL DEFAULT '{}',        -- 候选节点（存 id，不存名字，节点改名不失效）
   description      TEXT NOT NULL DEFAULT '',
   instructions     TEXT NOT NULL DEFAULT '',
-  model            TEXT NOT NULL DEFAULT '',            -- 空 = 用户的默认模型（都没有时 claude-opus-5-5），见 §2.12
+  model            TEXT NOT NULL DEFAULT '',            -- 只对成员岗位生效，空 = 用户的默认模型（都没有时 claude-opus-5-5），见 §2.12；统筹和组长恒为 ''（保存时清空）
   effort           TEXT NOT NULL DEFAULT '',
   permission_mode  TEXT NOT NULL DEFAULT 'bypass',      -- bypass | ask（00096 取代 skip_permissions；00097 去掉 auto，auto → bypass，
                                                         -- at_employees.spec 的副本同样改写）；只对可写的 member 生效，只读岗位可以是 bypass（不生效）
@@ -225,9 +225,9 @@ ALTER TABLE at_projects
 
 ALTER TABLE at_projects                                                     -- 00090
   ADD COLUMN IF NOT EXISTS icon TEXT NOT NULL DEFAULT '',                   -- '' = 首字母配稳定底色；表情；或 color:#RRGGBB
-  ADD COLUMN IF NOT EXISTS coordinator_model TEXT NOT NULL DEFAULT '',      -- '' = 统筹岗位的 model
-  ADD COLUMN IF NOT EXISTS thread_model TEXT NOT NULL DEFAULT '',           -- '' = 组长/成员各自岗位的 model（只对 Claude）
-  ADD COLUMN IF NOT EXISTS thread_codex_model TEXT NOT NULL DEFAULT '',     -- 00230：Codex 组长/成员的项目指定，'' = 跟随岗位
+  ADD COLUMN IF NOT EXISTS coordinator_model TEXT NOT NULL DEFAULT '',      -- 已废弃（00310 清空，不再读写）：统筹固定用默认模型
+  ADD COLUMN IF NOT EXISTS thread_model TEXT NOT NULL DEFAULT '',           -- Claude 成员的项目指定，'' = 各自岗位的 model（组长不看）
+  ADD COLUMN IF NOT EXISTS thread_codex_model TEXT NOT NULL DEFAULT '',     -- 00230：Codex 成员的项目指定，'' = 跟随岗位
   ADD COLUMN IF NOT EXISTS thread_effort TEXT NOT NULL DEFAULT '',          -- '' = 岗位的 effort；low | medium | high | xhigh | max
   ADD COLUMN IF NOT EXISTS auto_resume BOOLEAN NOT NULL DEFAULT FALSE;      -- 使用限额重置后自动继续讨论串（§2.10）
 
@@ -278,6 +278,8 @@ CREATE TABLE at_threads (
   archived_from  TEXT NOT NULL DEFAULT '',        -- 00095：归档前的状态（取消归档时 done/failed 回原状态，其余回 paused）
   stalled_note_at TIMESTAMPTZ,                    -- 00130：上次给组长发“守护进程重启后无人工作”检查的时间；同一次停滞只发一次（之后有用户消息/回答、任务/计划/合并/CI/PR 变化或恢复运行才再发，且 10 分钟内不重发）
   only_roles     JSONB,                           -- 00270：open_thread(roles) 限定的成员岗位（组长只能往这些岗位派活；平台建的审查 / 修复任务不受限）；NULL = 全部
+  done_pending_at TIMESTAMPTZ,                    -- 00311：结束条件已满足、在等组长这一回合结束（或等它回应“（平台）可以收尾”提示）的时间；组长 turn_ended 时结束讨论串，超过 10 分钟（delivery.DoneGrace）合并循环直接结束；只读讨论串 finish 时也写它
+  finish_nudged_at TIMESTAMPTZ,                   -- 00311：结束条件满足时组长还没调用 finish(summary)，平台给它发“（平台）[Thread #n · 可以收尾]”提示的时间；每个讨论串只发一次
   UNIQUE (project_id, no)
 );
 CREATE INDEX at_threads_project ON at_threads (project_id, status, updated_at DESC);
@@ -767,12 +769,12 @@ CREATE TABLE at_models (
 );  -- 唯一：(user_id, runtime, model)；(user_id, runtime) WHERE is_default
 ALTER TABLE at_roles ADD COLUMN hidden_commands TEXT[] NOT NULL DEFAULT '{}';  -- 聊天框不显示的平台命令
 ALTER TABLE at_roles ADD COLUMN commands JSONB NOT NULL DEFAULT '[]';          -- [{name, description, mode: prompt|passthrough, prompt}]
-ALTER TABLE at_employees ADD COLUMN model TEXT NOT NULL DEFAULT '';            -- /model 给这位员工选的模型
+ALTER TABLE at_employees ADD COLUMN model TEXT NOT NULL DEFAULT '';            -- /model 给这位成员选的模型（统筹和组长恒为 ''）
 ```
 
 模型列表只由每个用户自己维护（`GET /api/models`、`PUT /api/models/mine`）。用户没有任何一行时（新账号），第一次读列表会写入内置的 `claude-opus-5-5`（Opus 5.5，Claude 默认）；保存时至少保留一个模型。
 
-会话的模型（集中在 `orchestrator.Model`）：`at_employees.model` → 项目指定（按类型：统筹用 `coordinator_model`，Claude 组长/成员用 `thread_model`，Codex 组长/成员用 `thread_codex_model`）→ 岗位 `model` → 项目所有者（`at_projects.user_id`）列表里该类型的默认 → 内置兜底（Claude：`claude-opus-5-5`；Codex：空字符串，节点不传 `model`，由 Codex CLI 用自己的默认，Codex 员工不会落到 Claude 模型名）。平台内置命令存在 `at_settings.composer_commands = {commands: [...]}`。`at_usage.model` 记每一轮实际回答的模型（`session.event turn_ended.model`）。
+会话的模型（集中在 `orchestrator.Model`）：统筹和组长（tier `coordinator` / `lead`）固定为 项目所有者（`at_projects.user_id`）列表里该类型的默认 → 内置兜底（`claude-opus-5-5`，Opus 5.5），不看 `at_employees.model`、项目指定和岗位 `model`（岗位保存时清空，`/model` 对它们回 409）。成员：`at_employees.model` → 项目指定（按类型：Claude 成员用 `thread_model`，Codex 成员用 `thread_codex_model`）→ 岗位 `model` → 项目所有者列表里该类型的默认 → 内置兜底（Claude：`claude-opus-5-5`；Codex：空字符串，节点不传 `model`，由 Codex CLI 用自己的默认，Codex 员工不会落到 Claude 模型名）。平台内置命令存在 `at_settings.composer_commands = {commands: [...]}`。`at_usage.model` 记每一轮实际回答的模型（`session.event turn_ended.model`）。
 
 ## 3. 从 v1 表的映射（历史）
 
@@ -802,7 +804,7 @@ ALTER TABLE at_employees ADD COLUMN model TEXT NOT NULL DEFAULT '';            -
 4. `00010_threads.sql`（P3，**v1 防护补丁上线之前禁止执行**：`atctl migrate` 检查 `at_settings.platform.legacy_guard >= 1`，由补丁后的 Python 启动时写入，不满足则拒绝）：项目/对话/消息/任务/提问的新列，`at_roles`、`at_threads`、`at_main_tasks`、`at_employees`、`at_agent_sessions`、`at_tool_calls`、`at_usage`、`at_permission_rules`、`at_events`（含首批分区）、`at_status_events`、`at_employee_status`。
 5. `00020_delivery.sql`（P4）：`at_merge_queue`、`at_ci_runs`、`at_deliverables`、`at_project_memory`、`at_thread_nodes`。
 6. `00030_office.sql`（P5）：`at_office_layouts`、`at_projects.office_layout`。
-   `00050_node_job_index.sql`：`at_node_commands` 的作业索引。`00060_design_skills.sql`：`at_roles.skills`、`at_skills`、`at_deliverable_files`、`at_upload_chunks`、`at_deliverable_comments`（architecture.md §6.5）。`00180_deliverable_publisher.sql`：`at_deliverable_files.publisher_id`（谁发布了每一版，任何员工都可以发布下一版）。`00190_pr_not_deliverable.sql`：PR 不再是交付物——加 `at_thread_repos.pr_opened_at`，用同讨论串、同链接的 `kind = 'pr'` 交付物的 `created_at` 回填，再删掉所有 `pr` 交付物（文件、批注随外键级联删除）；Down 只删列，删掉的交付物回不来。`00210_user_models.sql`：去掉平台模型列表——把平台列表（`user_id IS NULL` 的行）复制给每个用户（同类型同 ID 已有的跳过，接在用户自己的行后面，保留顺序和显示名），再补上该用户的项目（`coordinator_model` / `thread_model`）、岗位、员工（`model`、`spec.model`）用到但列表里没有的模型 ID（只补符合模型 ID 格式的，不合法的跳过）；每人每种类型没有默认的，设成平台默认；校验每个用户都拿到了全部平台行和默认（不满足就 `RAISE EXCEPTION`，整个迁移回滚），然后删除平台行，`user_id` 改为 NOT NULL，默认改为每人每种类型唯一。不删用户数据；Down 恢复平台预置行（Opus 5.5）和旧索引，用户行保留但默认标记清掉。`00230_thread_codex_model.sql`：加 `at_projects.thread_codex_model`（Codex 组长和成员的项目指定，`''` = 跟随岗位）；组长只能用 Claude，把 `at_roles` 里 `tier = 'lead' AND runtime = 'codex'` 的行改成 `runtime = 'claude'`、`model = ''`（原值是 Codex 模型）；Down 只删列，改过的组长不还原（原值没有记录，Claude 组长在旧结构下也合法）。
+   `00050_node_job_index.sql`：`at_node_commands` 的作业索引。`00060_design_skills.sql`：`at_roles.skills`、`at_skills`、`at_deliverable_files`、`at_upload_chunks`、`at_deliverable_comments`（architecture.md §6.5）。`00180_deliverable_publisher.sql`：`at_deliverable_files.publisher_id`（谁发布了每一版，任何员工都可以发布下一版）。`00190_pr_not_deliverable.sql`：PR 不再是交付物——加 `at_thread_repos.pr_opened_at`，用同讨论串、同链接的 `kind = 'pr'` 交付物的 `created_at` 回填，再删掉所有 `pr` 交付物（文件、批注随外键级联删除）；Down 只删列，删掉的交付物回不来。`00210_user_models.sql`：去掉平台模型列表——把平台列表（`user_id IS NULL` 的行）复制给每个用户（同类型同 ID 已有的跳过，接在用户自己的行后面，保留顺序和显示名），再补上该用户的项目（`coordinator_model` / `thread_model`）、岗位、员工（`model`、`spec.model`）用到但列表里没有的模型 ID（只补符合模型 ID 格式的，不合法的跳过）；每人每种类型没有默认的，设成平台默认；校验每个用户都拿到了全部平台行和默认（不满足就 `RAISE EXCEPTION`，整个迁移回滚），然后删除平台行，`user_id` 改为 NOT NULL，默认改为每人每种类型唯一。不删用户数据；Down 恢复平台预置行（Opus 5.5）和旧索引，用户行保留但默认标记清掉。`00230_thread_codex_model.sql`：加 `at_projects.thread_codex_model`（Codex 组长和成员的项目指定，`''` = 跟随岗位）；组长只能用 Claude，把 `at_roles` 里 `tier = 'lead' AND runtime = 'codex'` 的行改成 `runtime = 'claude'`、`model = ''`（原值是 Codex 模型）；Down 只删列，改过的组长不还原（原值没有记录，Claude 组长在旧结构下也合法）。`00310_fixed_lead_models.sql`：统筹和组长固定用默认模型，清掉旧设置留下的数据——`at_roles` 里 `tier IN ('coordinator','lead')` 的 `model`（模板和项目副本）、`at_projects.coordinator_model`（列保留，API 仍返回 `''`）、`at_employees` 里统筹和组长的 `model`（/model 覆盖）和 `spec.model`（岗位快照）；成员不动。Down 什么也不做（清掉的值没有记录，`''` 在旧结构下也合法）。
 7. `00120_drop_v1.sql`（v1 退役后）：删 v1 的旧对话（`kind` 不是 `coordinator`/`thread` 的 `at_conversations` 行，消息、任务、提问、留言随外键级联删除）；`at_conversations` 删 `history`、`plan`，`kind` 去掉默认值 `'chat'` 并加 `CHECK (kind IN ('coordinator','thread'))`；删 `at_teams`；`at_tasks.output` 并入空的 `summary` 后删除；删 `at_users.platform_version`；删 `at_projects.repo`/`branch`/`git_connection_id`。Down 是空操作（数据回不来，要用备份）。
 
 `00110_casbin_rule.sql`（P6 后）：建 `casbin_rule`，每个用户按 `at_users.role` 写一行 `g, <id>, admin|user`，再删 `at_users.role`；Down 加回该列并按规则回填（§2.1）。

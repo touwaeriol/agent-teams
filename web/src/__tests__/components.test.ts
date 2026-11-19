@@ -10,12 +10,16 @@ import { useAttachments } from "@/components/app/attachments";
 import AskCard from "@/components/app/chatcards/AskCard.vue";
 import Composer from "@/components/app/Composer.vue";
 import ThreadList from "@/components/app/ThreadList.vue";
+import ThreadMark from "@/components/app/ThreadMark.vue";
 import ThreadMenu from "@/components/app/ThreadMenu.vue";
+import TypingLine from "@/components/app/thread/TypingLine.vue";
 import { menuItems } from "@/components/app/threadMenu";
 import IconMenu from "@/components/common/IconMenu.vue";
 import ConfirmAction from "@/components/common/ConfirmAction.vue";
 import Markdown from "@/components/Markdown.vue";
-import { useDraft } from "@/lib/persist";
+import { resetDraftMemory, useDraft } from "@/lib/persist";
+import { threadMark } from "@/lib/threadList";
+import { cardLook } from "@/pages/overview/logic";
 import type { ThreadView } from "@/api/views";
 import { question, thread } from "./fixtures";
 
@@ -26,7 +30,10 @@ function plugins() {
 
 const mountWith = (c: Component, props: Record<string, unknown> = {}) => mount(c, { props, global: { plugins: plugins() }, attachTo: document.body });
 
-beforeEach(() => window.localStorage.clear());
+beforeEach(() => {
+  window.localStorage.clear();
+  resetDraftMemory();
+});
 afterEach(() => {
   vi.restoreAllMocks();
   document.body.innerHTML = "";
@@ -65,16 +72,16 @@ describe("drafts", () => {
   it("survive remounts per key and follow a changing key", async () => {
     vi.useFakeTimers();
     let draft!: ReturnType<typeof useDraft>;
-    const key = { value: "draft:a" };
+    const key = { value: "draft:v2:u1:p1:a" };
     const Host = defineComponent({ setup: () => ((draft = useDraft(() => key.value)), () => h("div")) });
     mount(Host);
     draft.value = "typed";
     vi.advanceTimersByTime(300);
-    expect(window.localStorage.getItem("draft:a")).toBe("typed");
+    expect(JSON.parse(window.localStorage.getItem("draft:v2:u1:p1:a") ?? "{}").t).toBe("typed");
     mount(Host);
     expect(draft.value).toBe("typed");
     draft.value = "";
-    expect(window.localStorage.getItem("draft:a")).toBeNull();
+    expect(window.localStorage.getItem("draft:v2:u1:p1:a")).toBeNull();
     vi.useRealTimers();
   });
 });
@@ -179,13 +186,14 @@ describe("AskCard", () => {
 
 describe("ThreadList", () => {
   const idle = { members: [{ id: "e", name: "lead", tier: "lead", status: { state: "idle" } }] } as unknown as Partial<ThreadView>;
+  const paused = { ...idle, status: "paused" } as Partial<ThreadView>;
   it("groups threads into chips with counts; archived starts folded and folding is reported", async () => {
     const w = mountWith(ThreadList, {
-      threads: [thread(1, idle), thread(2, { status: "done" }), thread(4, { status: "failed" }), thread(3, { status: "archived", summary: "旧的" })],
+      threads: [thread(1, paused), thread(2, { status: "done" }), thread(4, { status: "failed" }), thread(3, { status: "archived", summary: "旧的" })],
     });
     const chips = w.findAll("section[data-group] > button").map((b) => b.text());
-    expect(chips).toEqual(["空闲 · 1", "已完成 · 2", "已归档 · 1"]);
-    expect(w.find("[data-group=idle] [data-mark=idle]").exists()).toBe(true);
+    expect(chips).toEqual(["已暂停 · 1", "已完成 · 2", "已归档 · 1"]);
+    expect(w.find("[data-group=idle] [data-mark=paused]").exists()).toBe(true);
     expect(w.find("[data-group=done] [data-mark=failed]").exists()).toBe(true);
     expect(w.text()).toContain("#1 T1");
     expect(w.text()).not.toContain("#3 T3");
@@ -207,13 +215,13 @@ describe("ThreadList", () => {
     await w.setProps({ filter: { q: "没有", groups: [], withDeliverable: false } });
     expect(w.text()).toContain("没有符合条件的讨论串");
   });
-  it("rich rows (进行中) tag the plan and the deliverables; compact rows (空闲) are one line with the last activity", () => {
+  it("rich rows (进行中) tag the plan and the deliverables; compact rows (已暂停) are one line with the last activity", () => {
     const d = { id: "d1", project_id: "p1", thread_no: 1, kind: "doc", title: "说明", url: "https://x.dev/a", detail: {}, published_by: "dev", created_at: "", updated_at: "" };
     const working = { members: [{ id: "e", name: "lead", tier: "lead", node: { id: "n1", name: "rc", online: true }, status: { state: "typing" } }] } as unknown as Partial<ThreadView>;
     const w = mountWith(ThreadList, {
       threads: [
         thread(2, { ...working, latest_deliverable: d, counts: { ...thread(2).counts, deliverables: 3, main_total: 7, main_done: 2 } }),
-        thread(1, { ...idle, latest_deliverable: d, last_activity_at: new Date(Date.now() - 51 * 60_000).toISOString() }),
+        thread(1, { ...paused, latest_deliverable: d, last_activity_at: new Date(Date.now() - 51 * 60_000).toISOString() }),
       ],
     });
     const rich = w.get("[data-group=active] [data-row]");
@@ -230,6 +238,21 @@ describe("ThreadList", () => {
     expect(compact.find("[data-node]").exists()).toBe(false);
     expect(compact.findAll("button span.truncate").map((s) => s.text())).toEqual(["#1 T1"]);
     expect(compact.get("time").text()).toBe("51分钟");
+  });
+  it("the #20 case (running, lead idle, no task left): list row, header mark, bottom line and card agree on 等你处理", () => {
+    const t20 = thread(20, { ...idle, counts: { ...thread(20).counts, tasks_total: 2, tasks_done: 2, tasks_open: 0 }, lead_last: { text: "改好了，你看看", at: "" } });
+    const list = mountWith(ThreadList, { threads: [t20] });
+    expect(list.findAll("section[data-group] > button").map((b) => b.text())).toEqual(["等你处理 · 1"]);
+    const row = list.get("[data-group=waiting] [data-row]");
+    expect(row.get("[data-mark]").attributes("aria-label")).toBe("等你处理");
+    expect(row.text()).toContain("组长已回复：改好了，你看看");
+    const header = mountWith(ThreadMark, { thread: t20, mark: threadMark(t20) });
+    expect(header.get("[data-mark]").attributes()).toMatchObject({ "data-mark": "wait", "aria-label": "等你处理" });
+    const bottom = mountWith(TypingLine, { thread: t20 });
+    expect(bottom.text()).toBe("组长已回复，等你回复");
+    expect(bottom.text()).not.toContain("讨论串进行中");
+    expect(bottom.find(".at-spin").exists()).toBe(false);
+    expect(cardLook(t20).label).toBe("等你处理");
   });
   it("says what to do when there are none", () => {
     expect(mountWith(ThreadList, { threads: [] }).text()).toContain("还没有讨论串");

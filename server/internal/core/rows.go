@@ -41,6 +41,10 @@ type Thread struct {
 	PinnedAt     *time.Time
 	RemindAt     *time.Time
 	RemindedAt   *time.Time
+	// DonePendingAt: the thread's end is due and waits for the lead's turn to end (nil: not due).
+	DonePendingAt *time.Time
+	// FinishNudgedAt: the lead was prompted once to write its final report and call finish.
+	FinishNudgedAt *time.Time
 }
 
 // TableName maps Thread to at_threads.
@@ -48,7 +52,7 @@ func (Thread) TableName() string { return "at_threads" }
 
 const threadCols = `id, project_id, user_id, no, title, brief, status, pause_reason, branch, base_branch, pr_number,
 	pr_url, pr_state, merge_error, summary, auto_approve, opened_by, source_message_id, forwarded_brief, roles_snapshot, only_roles, waiting_count, created_at, updated_at,
-	started_at, finished_at, pinned_at, remind_at, reminded_at`
+	started_at, finished_at, pinned_at, remind_at, reminded_at, done_pending_at, finish_nudged_at`
 
 // Active reports whether the thread's sessions should be live.
 func (t Thread) Active() bool {

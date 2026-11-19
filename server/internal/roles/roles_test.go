@@ -255,16 +255,23 @@ func TestModelValidation(t *testing.T) {
 		{"old value on another role is checked", member("r9", Claude, "claude-gone"), "模型不在你的模型列表里：claude-gone"},
 		{"old value with the runtime changed is checked", member("r2", Codex, "claude-gone"), "模型不在你的模型列表里：claude-gone"},
 		{"runtime changed to match the model is checked", member("r3", Claude, "claude-opus-5-5"), ""},
-		{"lead model checked too", store.Role{Tier: Lead, Role: "lead", Model: "claude-nope"}, "模型不在你的模型列表里：claude-nope"},
+		{"lead model dropped, not checked", store.Role{Tier: Lead, Role: "lead", Model: "claude-nope"}, ""},
+		{"coordinator model dropped, not checked", store.Role{Tier: Coordinator, Role: "coordinator", Model: "gpt-x"}, ""},
 	}
 	for _, c := range cases {
 		roles := Defaults(looks)
-		if c.role.Tier == Lead {
+		switch c.role.Tier {
+		case Coordinator:
+			roles[0].Model = c.role.Model
+		case Lead:
 			roles[1].Model = c.role.Model
-		} else {
+		default:
 			roles = append(roles, c.role)
 		}
 		Normalize(roles, looks)
+		if roles[0].Model != "" || roles[1].Model != "" {
+			t.Errorf("%s: coordinator/lead model kept: %q %q", c.name, roles[0].Model, roles[1].Model)
+		}
 		var msgs []string
 		for _, p := range Validate(roles, Context{Nodes: nodes(), Looks: looks, Models: models, Saved: saved}) {
 			if strings.HasSuffix(p.Path, ".model") {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// The right panel's list: collapsible status chips (等你处理 / 进行中 / 空闲 / 已完成 / 已归档)
+// The right panel's list: collapsible status chips (等你处理 / 进行中 / 已暂停 / 已完成 / 已归档)
 // with counts; folding is the caller's (remembered per user). Rows have a ⋯ menu. 等你处理 and
-// 进行中 rows are rich (progress line, node, tags); 空闲 / 已完成 / 已归档 are compact single lines.
+// 进行中 rows are rich (progress line, node, tags); 已暂停 / 已完成 / 已归档 are compact single lines.
 import { ChevronDown } from "lucide-vue-next";
 import { computed, onBeforeUnmount, ref } from "vue";
 import type { QuestionView, ThreadView } from "@/api/views";
@@ -41,7 +41,7 @@ onBeforeUnmount(() => clearInterval(tick));
           v-for="t in g.items"
           :key="t.id"
           :thread="t"
-          :mark="rowMark(t, g.id)"
+          :mark="rowMark(t, g.id, waitingByThread)"
           :line="rowLine(t, waitingByThread?.get(t.no))"
           :now="now"
           :menu="menus"

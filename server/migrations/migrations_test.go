@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 300 {
+	if migrations.Latest() != 311 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -975,7 +975,7 @@ INSERT INTO at_roles (id, user_id, tier, role, runtime, model) VALUES ('r2', 'u2
 	if _, err := db.Exec(seed); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := migrations.Up(ctx, db); err != nil {
+	if _, err := p.UpTo(ctx, 230); err != nil {
 		t.Fatal(err)
 	}
 	var codex, thread string
@@ -1278,5 +1278,57 @@ INSERT INTO at_tasks (conversation_id, id, thread_id, assignee, instruction, dep
 	}
 	if _, err := db.Exec(`SELECT downstream FROM at_tasks`); err == nil {
 		t.Fatal("downstream survived down")
+	}
+}
+
+// TestFixedLeadModelsMigration: 00310 clears every model the coordinator and leads could carry
+// (role templates and project copies, the project coordinator model, the /model override and the
+// role snapshot of their employees); members keep theirs. Down changes nothing.
+func TestFixedLeadModelsMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 300); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name, coordinator_model, thread_model, thread_codex_model) VALUES ('p1', 'u1', 'A', 'm-coord', 'm-thread', 'm-codex');
+INSERT INTO at_roles (id, user_id, project_id, tier, role, runtime, gate, model) VALUES
+  ('r1', 'u1', NULL, 'coordinator', 'coordinator', 'claude', '', 'm1'), ('r2', 'u1', NULL, 'lead', 'lead', 'claude', '', 'm2'),
+  ('r3', 'u1', NULL, 'member', 'dev', 'claude', '', 'm3'), ('r4', 'u1', 'p1', 'lead', 'lead', 'claude', '', 'm4');
+INSERT INTO at_employees (id, project_id, name, tier, role, role_id, runtime, model, spec) VALUES
+  ('e1', 'p1', 'coordinator', 'coordinator', 'coordinator', 'r1', 'claude', 'o1', '{"role": "coordinator", "model": "m1"}'),
+  ('e2', 'p1', 'lead-1', 'lead', 'lead', 'r2', 'claude', 'o2', '{"role": "lead", "model": "m2"}'),
+  ('e3', 'p1', 'dev-1', 'member', 'dev', 'r3', 'claude', 'o3', '{"role": "dev", "model": "m3"}');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 310); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.QueryRow(`SELECT string_agg(id || ':' || model, ' ' ORDER BY id) FROM at_roles`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if want := "r1: r2: r3:m3 r4:"; got != want {
+		t.Fatalf("roles after 00310:\n got %s\nwant %s", got, want)
+	}
+	if err := db.QueryRow(`SELECT string_agg(id || ':' || model || ':' || COALESCE(spec->>'model', '-'), ' ' ORDER BY id) FROM at_employees`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if want := "e1:: e2:: e3:o3:m3"; got != want {
+		t.Fatalf("employees after 00310:\n got %s\nwant %s", got, want)
+	}
+	if err := db.QueryRow(`SELECT coordinator_model || '|' || thread_model || '|' || thread_codex_model FROM at_projects`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if want := "|m-thread|m-codex"; got != want {
+		t.Fatalf("project after 00310: got %s want %s", got, want)
+	}
+	if _, err := p.DownTo(ctx, 300); err != nil {
+		t.Fatal(err)
 	}
 }

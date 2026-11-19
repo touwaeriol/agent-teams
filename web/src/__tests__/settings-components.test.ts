@@ -236,8 +236,9 @@ describe("Team · commands and models", () => {
     ]);
     const w = mountWith(Team);
     await flushPromises();
-    expect(w.text()).toContain("/model 和岗位模型字段按这个顺序列出这里的模型");
-    expect(w.text()).toContain("岗位和项目都没指定模型时，会话用它");
+    expect(w.text()).toContain("岗位和项目的模型字段按这个顺序列出这里的模型");
+    expect(w.text()).toContain("项目统筹和讨论串组长固定用它");
+    expect(w.text()).not.toContain("/model");
     expect(w.text()).not.toContain("平台");
     const editor = () => w.get("[data-testid=model-list-editor]");
     const btn = (label: string, i = 0) => editor().findAll(`button[aria-label=${label}]`)[i]!;
@@ -313,31 +314,55 @@ describe("Team · role model field", () => {
     return [...listbox.querySelectorAll<HTMLElement>(".el-select-dropdown__item")];
   }
 
-  it("shows follow-my-default per type, an old value marked 不在列表, and only the type's models", async () => {
+  it("has no model field on the coordinator and lead cards; members keep theirs", async () => {
     const { w } = await mountTeam();
     const [coordinator, lead, dev, rev] = cards(w);
-    expect(coordinator!.text()).toContain("默认（Opus 5.5）");
-    expect(lead!.text()).toContain("old-model（不在列表）");
+    for (const c of [coordinator!, lead!]) {
+      expect(c.find("input[aria-label=模型]").exists()).toBe(false);
+      expect(c.get("[data-testid=role-model-fixed]").text()).toBe("使用我的默认模型，不能切换");
+    }
+    expect(lead!.text()).not.toContain("old-model");
+    for (const c of [dev!, rev!]) {
+      expect(c.find("input[aria-label=模型]").exists()).toBe(true);
+      expect(c.find("[data-testid=role-model-fixed]").exists()).toBe(false);
+    }
+  }, 15000);
+
+  it("shows follow-my-default per type, an old value marked 不在列表, and only the type's models", async () => {
+    const { w } = await mountTeam();
+    const [, , dev, rev] = cards(w);
     expect(dev!.text()).toContain("Sonnet");
     expect(rev!.text()).toContain("默认（未设置）");
     // type label no longer carries the model
     expect(dev!.text()).not.toContain("Claude Code · ");
     expect(options(dev!, "模型").map((o) => o.textContent!.trim())).toEqual(["跟随我的默认（当前：Opus 5.5）", "Opus 5.5默认", "Sonnet"]);
     expect(options(rev!, "模型").map((o) => o.textContent!.trim())).toEqual(["跟随我的默认（未设置）", "gpt-x"]);
-    expect(options(lead!, "模型").map((o) => o.textContent!.trim())).toContain("old-model不在列表");
     const listbox = document.getElementById(dev!.get("input[aria-label=模型]").attributes("aria-controls")!)!;
     expect(listbox.closest(".el-select-dropdown")!.textContent).toContain("管理我的模型");
     expect(document.getElementById("my-models")).not.toBeNull();
   }, 15000);
 
+  it("marks a member's model that is not in the list", async () => {
+    const odd = roles().map((r) => (r.role === "dev" ? { ...r, model: "old-model" } : r));
+    api([
+      ["GET", /\/api\/roles$/, { roles: odd, warnings: [] }],
+      ["GET", /\/api\/models$/, { models }],
+      ["GET", /\/api\/(skills|plugins|nodes|roles\/presets)$/, {}],
+    ]);
+    const w = mountWith(Team);
+    await flushPromises();
+    const dev = cards(w)[2]!;
+    expect(dev.text()).toContain("old-model（不在列表）");
+    expect(options(dev, "模型").map((o) => o.textContent!.trim())).toContain("old-model不在列表");
+  }, 15000);
+
   it("picks a model, follows the default again, and resets the model when the type changes", async () => {
     const info = vi.spyOn(toast, "info").mockImplementation(() => {});
     const { w, spy } = await mountTeam();
-    // coordinator: pick Sonnet
-    options(cards(w)[0]!, "模型").find((o) => o.textContent!.includes("Sonnet"))!.click();
+    // dev: back to following the default, then Sonnet again
+    options(cards(w)[2]!, "模型")[0]!.click();
     await flushPromises();
-    // lead: back to following the default
-    options(cards(w)[1]!, "模型")[0]!.click();
+    options(cards(w)[2]!, "模型").find((o) => o.textContent!.includes("Sonnet"))!.click();
     await flushPromises();
     // dev (claude-sonnet-x) → Codex: the model is dropped
     options(cards(w)[2]!, "类型").find((o) => o.textContent!.includes("Codex"))!.click();
@@ -352,9 +377,7 @@ describe("Team · role model field", () => {
     await w.findAll("button").find((b) => b.text() === "保存")!.trigger("click");
     await flushPromises();
     const body = (await calls(spy, "PUT", /\/api\/roles$/)[0]!.json()) as { roles: { role: string; runtime: string; model: string }[] };
-    expect(body.roles.map((r) => [r.role, r.runtime, r.model])).toEqual([
-      ["coordinator", "claude", "claude-sonnet-x"],
-      ["lead", "claude", ""],
+    expect(body.roles.filter((r) => r.role === "dev" || r.role === "rev").map((r) => [r.role, r.runtime, r.model])).toEqual([
       ["dev", "codex", ""],
       ["rev", "claude", ""],
     ]);
@@ -506,11 +529,12 @@ describe("Project models", () => {
   it("new project: follows the roles by default and sends empty model fields", async () => {
     const { w, spy } = await mountNew(withCodex);
     const card = w.get("[data-testid=new-project-models]");
-    expect(card.text()).toContain("默认跟随岗位配置");
-    expect(card.find("input[aria-label='统筹 · Claude Code']").exists()).toBe(false);
+    expect(card.text()).toContain("只对成员岗位生效");
+    expect(card.text()).toContain("统筹和组长固定使用「我的默认」");
     await submit(w);
     const body = (await calls(spy, "POST", /\/api\/projects$/)[0]!.json()) as Record<string, unknown>;
-    expect([body.coordinator_model, body.thread_model, body.thread_codex_model]).toEqual(["", "", ""]);
+    expect("coordinator_model" in body).toBe(false);
+    expect([body.thread_model, body.thread_codex_model]).toEqual(["", ""]);
   }, 15000);
 
   it("new project: picks models per type from that type's list only and sends them", async () => {
@@ -518,29 +542,32 @@ describe("Project models", () => {
     const card = () => w.get("[data-testid=new-project-models]");
     await card().findAll("button").find((b) => b.text() === "按类型指定")!.trigger("click");
     const el = card().element;
-    expect(optionTexts(el, "统筹 · Claude Code")).toEqual(["跟随岗位配置", "Opus 5.5默认", "Sonnet"]);
-    expect(optionTexts(el, "讨论串 · Codex")).toEqual(["跟随岗位配置", "gpt-x默认"]);
-    expect(listbox(el, "讨论串 · Codex").closest(".el-select-dropdown")!.textContent).toContain("管理我的模型");
-    expect(card().text()).toContain("跟随岗位配置（岗位：Sonnet、Opus 5.5）");
-    pick(el, "讨论串 · Claude Code", "Sonnet");
-    pick(el, "讨论串 · Codex", "gpt-x");
+    expect(el.querySelector("input[aria-label='统筹 · Claude Code']")).toBeNull();
+    expect(optionTexts(el, "成员 · Claude Code")).toEqual(["跟随岗位配置", "Opus 5.5默认", "Sonnet"]);
+    expect(optionTexts(el, "成员 · Codex")).toEqual(["跟随岗位配置", "gpt-x默认"]);
+    expect(listbox(el, "成员 · Codex").closest(".el-select-dropdown")!.textContent).toContain("管理我的模型");
+    // members only: the lead's Sonnet does not count
+    expect(card().text()).toContain("跟随岗位配置（岗位：Opus 5.5）");
+    pick(el, "成员 · Claude Code", "Sonnet");
+    pick(el, "成员 · Codex", "gpt-x");
     await flushPromises();
     expect(card().text()).toContain("项目指定：Sonnet");
     await submit(w);
     const body = (await calls(spy, "POST", /\/api\/projects$/)[0]!.json()) as Record<string, unknown>;
-    expect([body.coordinator_model, body.thread_model, body.thread_codex_model]).toEqual(["", "claude-sonnet-x", "gpt-x"]);
+    expect("coordinator_model" in body).toBe(false);
+    expect([body.thread_model, body.thread_codex_model]).toEqual(["claude-sonnet-x", "gpt-x"]);
   }, 15000);
 
   it("new project: no Codex field without Codex models or roles", async () => {
     const { w } = await mountNew(claudeOnly);
     await w.findAll("button").find((b) => b.text() === "按类型指定")!.trigger("click");
     const card = w.get("[data-testid=new-project-models]");
-    expect(card.find("input[aria-label='讨论串 · Claude Code']").exists()).toBe(true);
-    expect(card.find("input[aria-label='讨论串 · Codex']").exists()).toBe(false);
+    expect(card.find("input[aria-label='成员 · Claude Code']").exists()).toBe(true);
+    expect(card.find("input[aria-label='成员 · Codex']").exists()).toBe(false);
   }, 15000);
 
-  it("project settings: shows what is in effect per row and saves a model per type", async () => {
-    const project = { ...settingsProject, coordinator_model: "claude-opus-5-5", thread_model: "", thread_codex_model: "" } as never;
+  it("project settings: member rows only, shows what is in effect per row and saves a model per type", async () => {
+    const project = { ...settingsProject, coordinator_model: "", thread_model: "", thread_codex_model: "" } as never;
     const spy = api([
       ["GET", /\/api\/roles$/, { roles: teamRoles, warnings: [] }],
       ["GET", /\/api\/models$/, { models: withCodex }],
@@ -548,17 +575,20 @@ describe("Project models", () => {
     ]);
     const w = mountWith(ModelFields, { project });
     await flushPromises();
-    expect(w.get("[data-testid=model-row-coordinator]").text()).toContain("项目指定：Opus 5.5");
-    expect(w.get("[data-testid=model-row-claude]").text()).toContain("跟随岗位配置（岗位：Sonnet、Opus 5.5）");
-    expect(w.get("[data-testid=model-row-codex]").text()).toContain("跟随岗位配置（没有这类岗位）");
-    expect(optionTexts(w.element, "讨论串 Codex 模型")).toEqual(["跟随岗位配置", "gpt-x默认"]);
-    expect(optionTexts(w.element, "统筹模型")).toEqual(["跟随岗位配置", "Opus 5.5默认", "Sonnet"]);
-    pick(w.element, "讨论串 Codex 模型", "gpt-x");
+    expect(w.find("[data-testid=model-row-coordinator]").exists()).toBe(false);
+    expect(w.find("input[aria-label='统筹模型']").exists()).toBe(false);
+    expect(w.text()).toContain("只对成员岗位生效");
+    expect(w.text()).toContain("统筹和组长固定使用「我的默认」");
+    // members only: the lead's Sonnet does not count
+    expect(w.get("[data-testid=model-row-claude]").text()).toContain("成员岗位 · 跟随岗位配置（岗位：Opus 5.5）");
+    expect(w.get("[data-testid=model-row-codex]").text()).toContain("成员岗位 · 跟随岗位配置（没有这类岗位）");
+    expect(optionTexts(w.element, "成员 Codex 模型")).toEqual(["跟随岗位配置", "gpt-x默认"]);
+    pick(w.element, "成员 Codex 模型", "gpt-x");
     await flushPromises();
-    pick(w.element, "统筹模型", "跟随岗位配置");
+    pick(w.element, "成员 Claude Code 模型", "Sonnet");
     await flushPromises();
     const bodies = await Promise.all(calls(spy, "PATCH", /\/api\/projects\/p1$/).map((r) => r.json()));
-    expect(bodies).toEqual([{ thread_codex_model: "gpt-x" }, { coordinator_model: "" }]);
+    expect(bodies).toEqual([{ thread_codex_model: "gpt-x" }, { thread_model: "claude-sonnet-x" }]);
   }, 15000);
 
   it("project settings: hides the Codex row without Codex models or roles", async () => {

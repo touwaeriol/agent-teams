@@ -30,15 +30,31 @@ export interface Transport {
   clientCommits?: boolean;
   /** Longest recording the server allows, in seconds. */
   maxSeconds?: number;
+  /**
+   * Relay: the transport is returned as soon as the microphone is captured, before the server
+   * accepted the session; audio until then is buffered and sent once it did. Resolves then
+   * (clientCommits/maxSeconds are known by that time), rejects with a ConnectError when
+   * connecting fails. Absent: the transport was connected when returned (WebRTC).
+   */
+  ready?: Promise<void>;
 }
 
 export interface TransportHandlers {
   onEvent(e: RealtimeEvent): void;
   /** The connection dropped (not called after close()); message says why when known. */
   onClose(message?: string): void;
+  /** A connection milestone for the timing log ("ws_open", "ready", "first_frame"). */
+  mark?(name: string): void;
+  /** A non-fatal problem worth telling the user. */
+  onNotice?(message: string): void;
 }
 
-export type Connect = (session: VoiceSessionInfo, stream: MediaStream, h: TransportHandlers) => Promise<Transport>;
+/**
+ * Connects while the microphone is still opening: stream settles with the microphone (a
+ * rejection carries the reason in words). The relay opens its socket at once; WebRTC needs the
+ * track for its offer and waits for it.
+ */
+export type Connect = (session: VoiceSessionInfo, stream: Promise<MediaStream>, h: TransportHandlers) => Promise<Transport>;
 
 /** A failed connect; status 401/403 means the client secret was rejected (expired). */
 export class ConnectError extends Error {
@@ -50,7 +66,7 @@ export class ConnectError extends Error {
   }
 }
 
-/** Connecting (signalling plus the data channel) must finish within this. */
+/** Connecting (signalling plus the data channel, or the relay's socket until ready) must finish within this, counted from when connecting starts (not from the click: the microphone has its own MIC_TIMEOUT). */
 export const CONNECT_TIMEOUT = 10_000;
 
 /** Why fetch failed, for "连不上语音服务：…". */
@@ -59,7 +75,8 @@ export function networkReason(e: unknown, timedOut: boolean): string {
   return e instanceof Error && e.message ? `网络不通（${e.message}）` : "网络不通";
 }
 
-export const connectOpenAI: Connect = async (session, stream, h) => {
+export const connectOpenAI: Connect = async (session, micStream, h) => {
+  const stream = await micStream;
   const pc = new RTCPeerConnection();
   let closed = false;
   const close = () => {

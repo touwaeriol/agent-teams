@@ -32,6 +32,9 @@ func (s *Service) completeTask(ctx context.Context, tx *core.Tx, c *call) (Resul
 	if err != nil {
 		return Result{}, err
 	}
+	if in.Status == protocol.CompleteTaskInputStatusPlatformError {
+		return s.platformError(ctx, tx, task, in.Summary)
+	}
 	ok := in.Status != "failed"
 	if ok {
 		if res, stop, err := s.takeHandoff(ctx, tx, task, deref(in.Handoff)); err != nil || stop {
@@ -48,6 +51,22 @@ func (s *Service) completeTask(ctx context.Context, tx *core.Tx, c *call) (Resul
 		return Result{}, err
 	}
 	return Result{Wait: true}, nil
+}
+
+// platformError: a reviewer reports that the platform did not prepare what it was to check
+// (its worktree is not the commit under review). Not a verdict: the review is prepared again.
+func (s *Service) platformError(ctx context.Context, tx *core.Tx, task core.Task, summary string) (Result, error) {
+	if !scheduler.IsGateTask(task) {
+		return Result{}, refuse("status=platform_error 只用于平台派的审查 / 决策任务；做不完请用 status=failed")
+	}
+	task, err := s.sched.ReviewPlatformError(ctx, tx, task, "审查员上报："+summary)
+	if err != nil {
+		return Result{}, err
+	}
+	res := protocol.CompleteTaskResult{TaskID: protocol.TaskID(task.ID), Status: protocol.TaskStatus(task.Status)}
+	done := okJSON(fmt.Sprintf("已上报平台错误，任务 %s 不算驳回，平台会重新准备审查（%s）", task.ID, task.Status), res)
+	done.EndsTask = true
+	return done, nil
 }
 
 // takeHandoff stores the hand-off note for the tasks that build on this one (shared-members.md

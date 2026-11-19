@@ -15,11 +15,13 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/timers"
 )
 
-// TestProjectChromeSettings: icon and model overrides are validated and reach the next session.open.
+// TestProjectChromeSettings: icon, effort and model overrides are validated; the thread effort
+// reaches the lead's next session.open, its model stays the owner's default (leads do not follow
+// thread_model), and coordinator_model is accepted but ignored.
 func TestProjectChromeSettings(t *testing.T) {
 	tm := startTeam(t)
 	path := "/api/projects/" + tm.projectID
-	for _, bad := range []map[string]any{{"icon": "color:#12"}, {"icon": "ab"}, {"thread_effort": "huge"}, {"coordinator_model": "bad model"}} {
+	for _, bad := range []map[string]any{{"icon": "color:#12"}, {"icon": "ab"}, {"thread_effort": "huge"}, {"thread_model": "bad model"}} {
 		if code, raw := tm.b.do("PATCH", path, bad); code != 422 {
 			t.Fatalf("PATCH %v = %d %s", bad, code, raw)
 		}
@@ -27,21 +29,23 @@ func TestProjectChromeSettings(t *testing.T) {
 	tm.b.must(200, "PUT", "/api/models/mine", map[string]any{"models": []map[string]any{
 		{"runtime": "claude", "model": "claude-opus-5-5", "default": true}, {"runtime": "claude", "model": "claude-thread-test"}}}, nil)
 	var p struct {
-		Icon, CoordinatorModel, ThreadModel, ThreadEffort string
-		AutoResume                                        bool `json:"auto_resume"`
+		Icon             string
+		CoordinatorModel string `json:"coordinator_model"`
+		ThreadModel      string `json:"thread_model"`
+		AutoResume       bool   `json:"auto_resume"`
 	}
 	body := map[string]any{"icon": "🚀", "coordinator_model": "claude-opus-5-5", "thread_model": "claude-thread-test",
 		"thread_effort": "high", "auto_resume": true}
 	tm.b.must(200, "PATCH", path, body, &p)
 	tm.b.must(200, "GET", path, nil, &p)
-	if p.Icon != "🚀" || !p.AutoResume {
+	if p.Icon != "🚀" || !p.AutoResume || p.CoordinatorModel != "" || p.ThreadModel != "claude-thread-test" {
 		t.Fatalf("project %+v", p)
 	}
 	tm.b.must(200, "PATCH", path, map[string]any{"icon": "color:#3B82F6"}, nil)
 	var th core.ThreadView
 	tm.b.must(201, "POST", path+"/threads", map[string]any{"title": "Two", "brief": "again"}, &th)
 	_, open := expectOpen(t, tm.w, tm.n, "lead-2")
-	if open.Claude.Model != "claude-thread-test" || open.Claude.Effort == nil || *open.Claude.Effort != "high" {
+	if open.Claude.Model != "claude-opus-5-5" || open.Claude.Effort == nil || *open.Claude.Effort != "high" {
 		t.Fatalf("lead open %q %v", open.Claude.Model, open.Claude.Effort)
 	}
 }
@@ -242,10 +246,11 @@ func TestUsageLimitWaitsForEveryone(t *testing.T) {
 	}
 }
 
-// TestProjectModels: the project's model overrides (coordinator_model and thread_model: Claude,
+// TestProjectModels: the project's member model overrides (thread_model: Claude,
 // thread_codex_model: Codex) are checked against the owner's model list on create and on update:
 // ” follows each role, an id must be in the list with the field's runtime, and a stored value
-// that has since left the list may be sent again unchanged.
+// that has since left the list may be sent again unchanged. coordinator_model is accepted from
+// older clients but ignored: never checked, always ”.
 func TestProjectModels(t *testing.T) {
 	tm := startTeam(t)
 	tm.b.must(200, "PUT", "/api/models/mine", map[string]any{"models": []map[string]any{
@@ -278,11 +283,10 @@ func TestProjectModels(t *testing.T) {
 	}
 	refuse("POST", "/api/projects", map[string]any{"name": "x", "thread_model": "claude-nope"}, "thread_model", "不在你的模型列表里")
 	refuse("POST", "/api/projects", map[string]any{"name": "x", "thread_codex_model": "claude-sonnet-x"}, "thread_codex_model", "只能选 Codex 模型")
-	refuse("POST", "/api/projects", map[string]any{"name": "x", "coordinator_model": "gpt-x"}, "coordinator_model", "只能选 Claude 模型")
 	var made project
-	tm.b.must(201, "POST", "/api/projects", map[string]any{"name": "with models", "coordinator_model": "claude-sonnet-x",
+	tm.b.must(201, "POST", "/api/projects", map[string]any{"name": "with models", "coordinator_model": "gpt-not-listed",
 		"thread_model": " claude-opus-5-5 ", "thread_codex_model": "gpt-y"}, &made)
-	if made.CoordinatorModel != "claude-sonnet-x" || made.ThreadModel != "claude-opus-5-5" || made.ThreadCodexModel != "gpt-y" {
+	if made.CoordinatorModel != "" || made.ThreadModel != "claude-opus-5-5" || made.ThreadCodexModel != "gpt-y" {
 		t.Fatalf("created %+v", made)
 	}
 
@@ -291,14 +295,18 @@ func TestProjectModels(t *testing.T) {
 	refuse("PATCH", path, map[string]any{"thread_codex_model": "gpt-nope"}, "thread_codex_model", "不在你的模型列表里")
 	refuse("PATCH", path, map[string]any{"thread_model": "gpt-x"}, "thread_model", "只能选 Claude 模型")
 	var p project
-	tm.b.must(200, "PATCH", path, map[string]any{"thread_codex_model": "gpt-x"}, &p)
-	if p.ThreadCodexModel != "gpt-x" || p.ThreadModel != "claude-opus-5-5" {
+	tm.b.must(200, "PATCH", path, map[string]any{"thread_codex_model": "gpt-x", "coordinator_model": "claude-sonnet-x"}, &p)
+	if p.ThreadCodexModel != "gpt-x" || p.ThreadModel != "claude-opus-5-5" || p.CoordinatorModel != "" {
 		t.Fatalf("patched %+v", p)
+	}
+	var stored string
+	if err := store.QueryRow(tm.w.ctx, tm.w.e.Core.Pool, `SELECT coordinator_model FROM at_projects WHERE id = $1`, made.ID).Scan(&stored); err != nil || stored != "" {
+		t.Fatalf("stored coordinator_model %q %v", stored, err)
 	}
 	// gpt-x and claude-sonnet-x leave the list: the stored values still save unchanged, new ones do not.
 	tm.b.must(200, "PUT", "/api/models/mine", map[string]any{"models": []map[string]any{
 		{"runtime": "claude", "model": "claude-opus-5-5", "default": true}, {"runtime": "codex", "model": "gpt-y"}}}, nil)
-	tm.b.must(200, "PATCH", path, map[string]any{"coordinator_model": "claude-sonnet-x", "thread_codex_model": "gpt-x", "name": "renamed"}, &p)
+	tm.b.must(200, "PATCH", path, map[string]any{"thread_codex_model": "gpt-x", "name": "renamed"}, &p)
 	refuse("PATCH", "/api/projects/"+plain.ID, map[string]any{"thread_codex_model": "gpt-x"}, "thread_codex_model", "不在你的模型列表里")
 	// '' goes back to the roles.
 	tm.b.must(200, "PATCH", path, map[string]any{"coordinator_model": "", "thread_model": "", "thread_codex_model": ""}, &p)

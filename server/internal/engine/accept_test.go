@@ -15,6 +15,7 @@ import (
 type acceptCase struct {
 	w      *world
 	gh     *fakeGitHub
+	n      *nodetest.Node
 	b      *browser
 	thread core.ThreadView
 	pr     int
@@ -32,13 +33,13 @@ func newAcceptCase(t *testing.T, policy, status string) *acceptCase {
 	b := w.signUp("accept@example.com")
 	var node nodeCreated
 	b.must(201, "POST", "/api/nodes", map[string]string{"name": "fake"}, &node)
-	w.connect(node.Token, nodetest.Options{}) // the lead is told about rejects and failed checks
+	n := w.connect(node.Token, nodetest.Options{}) // the lead is told about rejects and failed checks
 	var conn struct{ ID string }
 	b.must(201, "POST", "/api/git/connections", map[string]string{"name": "gh", "token": "ghp_good"}, &conn)
 	var project struct{ ID string }
 	b.must(201, "POST", "/api/projects", map[string]any{"name": "acc", "merge_policy": policy,
 		"repos": []map[string]any{{"repo": "o/r", "git_connection_id": conn.ID}}}, &project)
-	c := &acceptCase{w: w, gh: gh, b: b}
+	c := &acceptCase{w: w, gh: gh, n: n, b: b}
 	c.events = b.stream("/api/projects/"+project.ID+"/events?topics=thread", "")
 	b.must(201, "POST", "/api/projects/"+project.ID+"/threads", map[string]any{"title": "Acc", "brief": "验收"}, &c.thread)
 	gh.setRef(c.thread.Branch, "sha-thread")
@@ -52,7 +53,7 @@ func newAcceptCase(t *testing.T, policy, status string) *acceptCase {
 			return err
 		}
 		return core.UpdateThread(w.ctx, tx, c.thread.ID, map[string]any{"status": status, "pr_number": c.pr, "pr_url": url,
-			"pr_state": "open"})
+			"pr_state": "open", "summary": "验收完成"}) // the lead called finish: nothing waits on it
 	})
 	if err != nil {
 		t.Fatal(err)

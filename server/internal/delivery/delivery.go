@@ -62,6 +62,8 @@ type Engine struct {
 	PollInterval time.Duration
 	// AcceptTimeout bounds a background merge after accept (merge_policy pr or auto).
 	AcceptTimeout time.Duration
+	// DoneGrace bounds how long a thread whose end is due waits on its lead (DefaultDoneGrace).
+	DoneGrace time.Duration
 	// accepting holds the threads Accept is merging in the background (merge_policy pr or auto).
 	accepting sync.Map
 
@@ -73,7 +75,7 @@ type Engine struct {
 func New(cs *core.Store, orch *orchestrator.Orchestrator, sched *scheduler.Scheduler, gh *ghops.GitHub, gw *nodegw.Gateway,
 	hub *fanout.Hub, log *slog.Logger) *Engine {
 	return &Engine{core: cs, orch: orch, sched: sched, gh: gh, gw: gw, hub: hub, log: log, now: time.Now,
-		PollInterval: 15 * time.Second, AcceptTimeout: defaultAcceptTimeout,
+		PollInterval: 15 * time.Second, AcceptTimeout: defaultAcceptTimeout, DoneGrace: DefaultDoneGrace,
 		PushDone: func(context.Context, *core.Tx, map[string]any, *protocol.GitResult) error { return nil }}
 }
 

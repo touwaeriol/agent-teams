@@ -6,7 +6,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
 import Composer from "@/components/app/Composer.vue";
-import { applyPick, commandOf, findTrigger, mentionItems, moveIndex, refsInText, slashItems } from "@/components/app/composer/assist";
+import { applyPick, commandOf, findTrigger, mentionItems, moveIndex, platformCommands, refsInText, slashItems } from "@/components/app/composer/assist";
 import { contextRows, statusSummary } from "@/components/app/composer/panels";
 import { attachKind, pickImages } from "@/lib/images";
 import { thread } from "./fixtures";
@@ -24,7 +24,7 @@ describe("assist logic", () => {
   it("lists platform commands per scope, then skills, filtered as typed", () => {
     const skills = [{ name: "design", description: "做原型", argument_hint: "", source: "skill" as const }, { name: "review:check", description: "", argument_hint: "", source: "plugin" as const }];
     const all = slashItems("", "lead", skills);
-    expect(all.filter((i) => i.group === "命令").map((i) => i.label)).toEqual(["/model", "/effort", "/status", "/context", "/skills", "/usage", "/memory", "/config"]);
+    expect(all.filter((i) => i.group === "命令").map((i) => i.label)).toEqual(["/effort", "/status", "/context", "/skills", "/usage", "/memory", "/config"]);
     expect(all.filter((i) => i.group === "技能").map((i) => i.insert)).toEqual(["/design ", "/review:check "]);
     expect(slashItems("", "coordinator", []).some((i) => i.label === "/effort")).toBe(false);
     expect(slashItems("des", "lead", skills).map((i) => i.label)).toEqual(["/design"]);
@@ -34,6 +34,14 @@ describe("assist logic", () => {
     expect(commandOf("/design 做", "lead")).toBeNull();
   });
 
+  it("has no /model: the coordinator and the leads always use the owner's default", () => {
+    expect(platformCommands("coordinator").map((c) => c.name)).not.toContain("model");
+    expect(platformCommands("lead").map((c) => c.name)).not.toContain("model");
+    expect(slashItems("model", "coordinator", []).some((i) => i.label === "/model")).toBe(false);
+    expect(commandOf("/model", "coordinator")).toBeNull();
+    expect(commandOf("/model", "lead")).toBeNull();
+  });
+
   it("puts exact and prefix name matches first across groups, then custom commands and skills", () => {
     const skills = [{ name: "design", description: "做原型", argument_hint: "", source: "skill" as const }, { name: "review:deploy", description: "", argument_hint: "", source: "plugin" as const }];
     const custom = [{ name: "plan", description: "先出计划", mode: "prompt" as const, prompt: "x", source: "role" as const }, { name: "compact", mode: "passthrough" as const, source: "platform" as const }];
@@ -41,7 +49,6 @@ describe("assist logic", () => {
     expect(de.map((i) => [i.group, i.label])).toEqual([
       ["最佳匹配", "/design"],
       ["最佳匹配", "/review:deploy"],
-      ["命令", "/model"],
     ]);
     const exact = slashItems("plan", "lead", skills, { custom });
     expect(exact[0]).toMatchObject({ group: "最佳匹配", label: "/plan", insert: "/plan " });
@@ -109,8 +116,7 @@ function stubApi() {
       });
     if (url.includes("/api/models"))
       return json({ models: [{ id: "m1", runtime: "claude", model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: true }, { id: "m2", runtime: "claude", model: "claude-haiku-x", label: "Haiku", default: false, mine: true }] });
-    if (url.includes("/model") && (input as Request).method === "PUT") return json({ applied: [{ employee: "lead-1", model: "claude-haiku-x", live: true }], skipped: ["codex-1"] });
-    if (url.includes("/model"))
+    if (url.endsWith("/model"))
       return json({
         scope: "thread", employee: "lead-1", runtime: "claude", model: "claude-opus-5-5", override: "", inherited: "claude-opus-5-5", session: "claude-opus-5-5", live: true,
         members: [{ name: "lead-1", tier: "lead", runtime: "claude", model: "claude-opus-5-5", override: "" }, { name: "codex-1", tier: "member", runtime: "codex", model: "gpt-x", override: "" }],
@@ -121,10 +127,10 @@ function stubApi() {
   });
 }
 
-function mountComposer(onSend: ReturnType<typeof vi.fn>) {
+function mountComposer(onSend: ReturnType<typeof vi.fn>, variant: "inline" | "large" = "inline", scope: "lead" | "coordinator" = "lead") {
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/:p(.*)*", component: { render: () => null } }] });
   const w = mount(Composer, {
-    props: { label: "发给组长", placeholder: "x", onSend: onSend as never, variant: "inline", assist: { pid: "p1", cid: "c1", scope: "lead" } },
+    props: { label: "发给组长", placeholder: "x", onSend: onSend as never, variant, hint: "提示", assist: { pid: "p1", cid: "c1", scope } },
     global: { plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }], router] as never[] },
     attachTo: document.body,
   });
@@ -170,7 +176,7 @@ describe("Composer with assist", () => {
     await settle();
     const options = w.findAll("[role=option]").map((o) => o.text());
     expect(options[0]).toContain("/design");
-    expect(options.findIndex((o) => o.includes("/design"))).toBeLessThan(options.findIndex((o) => o.includes("/model")));
+    expect(options.some((o) => o.includes("/model"))).toBe(false);
     await input.setValue("/");
     await settle();
     const all = w.findAll("[role=option]").map((o) => o.text());
@@ -178,26 +184,61 @@ describe("Composer with assist", () => {
     expect(all.some((o) => o.includes("/memory"))).toBe(false);
   });
 
-  it("/model lists the runtime's models with the current one and switches the whole thread", async () => {
+  it("sends a typed /model as a plain message: no command, no panel", async () => {
     const spy = stubApi();
-    const { w } = mountComposer(vi.fn());
+    const onSend = vi.fn().mockResolvedValue(undefined);
+    const { w } = mountComposer(onSend);
     const input = w.get("input");
     await input.setValue("/model");
     await input.trigger("keydown", { key: "Escape" });
     await input.trigger("keydown", { key: "Enter" });
     await settle(10);
-    const panel = w.get("[data-testid=model-panel]");
-    expect(panel.text()).toContain("会话运行中，上一轮用的是 Opus 5.5");
-    const rows = panel.findAll("button").filter((b) => b.text().includes("Opus") || b.text().includes("Haiku"));
-    expect(rows.map((b) => b.text())).toEqual([expect.stringMatching(/Opus 5\.5.*默认.*当前/), expect.stringMatching(/Haiku/)]);
-    expect(rows[1]!.text()).not.toMatch(/我的|默认|当前/);
-    await panel.findAll("[role=radio]").find((b) => b.text() === "整个讨论串")!.trigger("click");
-    expect(w.get("[data-testid=model-panel]").text()).toContain("codex-1 不是 Claude Code，不受影响");
-    await rows[1]!.trigger("click");
+    expect(onSend).toHaveBeenCalledWith("/model", [], []);
+    expect(w.find("[data-testid=command-panel]").exists()).toBe(false);
+    expect(spy.mock.calls.some((c) => (c[0] as Request).method === "PUT")).toBe(false);
+  });
+
+  it("shows the employee's model read-only beside the hint, only once it is known", async () => {
+    stubApi();
+    const { w } = mountComposer(vi.fn(), "large");
+    expect(w.find("[data-testid=composer-model]").exists()).toBe(false);
+    await settle(10);
+    const tag = w.get("[data-testid=composer-model]");
+    expect(tag.text()).toBe("Opus 5.5");
+    expect(tag.element.tagName).toBe("SPAN");
+    expect(tag.attributes("title")).toBe("当前模型：Opus 5.5，统筹和组长使用默认模型，不能切换");
+    expect(tag.attributes("aria-label")).toBe(tag.attributes("title"));
+    expect(tag.element.closest("button, [role=combobox], select")).toBeNull();
+  });
+
+  it("has no /model in the coordinator's / menu", async () => {
+    stubApi();
+    const { w } = mountComposer(vi.fn(), "large", "coordinator");
+    const input = w.get("textarea");
+    await input.setValue("/");
     await settle();
-    const put = spy.mock.calls.map((c) => c[0] as Request).find((r) => r.method === "PUT")!;
-    expect(new URL(put.url).pathname).toBe("/api/conversations/c1/model");
-    expect(await put.json()).toEqual({ model: "claude-haiku-x", scope: "thread" });
+    const all = w.findAll("[role=option]").map((o) => o.text());
+    expect(all.length).toBeGreaterThan(0);
+    expect(all.some((o) => o.includes("/model"))).toBe(false);
+  });
+
+  it("keeps the hint on one truncated line and never squeezes the model tag", async () => {
+    stubApi();
+    const { w } = mountComposer(vi.fn(), "large");
+    await settle(10);
+    const hint = w.get("[data-testid=composer-hint]");
+    expect(hint.classes()).toEqual(expect.arrayContaining(["truncate", "min-w-0"]));
+    expect(hint.element.parentElement!.classList).toContain("min-w-0");
+    const tag = w.get("[data-testid=composer-model]").classes();
+    expect(tag).toEqual(expect.arrayContaining(["shrink-0", "whitespace-nowrap"]));
+    expect(tag).not.toContain("truncate");
+  });
+
+  it("shows no model tag when the conversation's model is not known", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => json({}));
+    const { w } = mountComposer(vi.fn(), "large");
+    await settle(10);
+    expect(w.find("[data-testid=composer-model]").exists()).toBe(false);
   });
 
   it("runs a platform command instead of sending it, and opens settings ones", async () => {

@@ -22,7 +22,7 @@ const project = (id, name, extra = {}) => ({
 
 export const projects = [
   project("p1", "agent team", {
-    icon: "color:#2E7D4F", auto_resume: true, coordinator_model: "claude-opus-5-5", thread_effort: "medium",
+    icon: "color:#2E7D4F", auto_resume: true, coordinator_model: "", thread_effort: "medium",
     pinned: true, waiting: 3, threads_active: 2, repo: "touwaeriol/agent-teams", git_connection_id: "g1", updated_at: ago(1),
     description: "多员工协作平台",
     context: "后端 FastAPI + asyncpg，前端 React + Vite（pnpm）。改完跑 ruff、mypy、pytest 和 vite build。提交信息用中文。",
@@ -45,7 +45,7 @@ const CVP = node("n2", "cvp");
 export const coordinator = emp("e0", "leader", "coordinator", "coordinator", "项目统筹", "claude", RC, look("#7A4FD1", "hoodie", "headset", "#3B2A20"), st("idle", ""));
 
 const step = (id, pos, title, status, done = 0, total = 0) => ({ id, pos, title, status, auto_done: status === "done", tasks_total: total, tasks_done: done });
-const counts = (c) => ({ waiting: 0, questions_open: 0, approvals_open: 0, tasks_total: 0, tasks_done: 0, main_total: 0, main_done: 0, ...c });
+const counts = (c) => ({ waiting: 0, questions_open: 0, approvals_open: 0, tasks_total: 0, tasks_done: 0, main_total: 0, main_done: 0, tasks_open: Math.max(0, (c.tasks_total ?? 0) - (c.tasks_done ?? 0)), ...c });
 
 const members12 = [
   emp("e12l", "lead-12", "lead", "lead", "组长", "claude", RC, look("#C8622A", "suit", "none", "#3B2A20"), st("reading", "审查 dev-1 的提交（只读，不改代码）")),
@@ -61,7 +61,7 @@ const members13 = [
 
 const thread = (no, title, status, extra) => ({
   id: `t${no}`, project_id: "p1", no, title, brief: "", status, queue_position: null, pause_reason: "", branch: `thread/${no}`, base_branch: "main",
-  pr_number: null, pr_url: null, pr_state: null, merge_error: null, summary: "", auto_approve: false, opened_by: "coordinator", members: [], main_tasks: [],
+  pr_number: null, pr_url: null, pr_state: null, merge_error: null, merge_policy: "pr", summary: "", auto_approve: false, opened_by: "coordinator", members: [], main_tasks: [],
   counts: counts({}), lead_last: null, cost_usd_est: null, created_at: ago(70), updated_at: ago(10), dispatch: null, ...extra,
 });
 
@@ -310,7 +310,7 @@ export const models = [
 
 export const roles = [
   role("r0", "coordinator", "coordinator", "项目统筹", "claude", 1, ["n1"], "和你对话，判断要做什么，开讨论串、跟进状态、向你汇报。", look("#7A4FD1", "hoodie", "headset", "#3B2A20")),
-  role("r1", "lead", "lead", "组长", "claude", 1, ["n1", "n2"], "列主要任务、拆小任务、审查成员提交并合并，完成后向统筹交总结。", look("#C8622A", "suit", "none", "#3B2A20"), { model: "claude-opus-5-5" }),
+  role("r1", "lead", "lead", "组长", "claude", 1, ["n1", "n2"], "列主要任务、拆小任务、审查成员提交并合并，完成后向统筹交总结。", look("#C8622A", "suit", "none", "#3B2A20")),
   role("r2", "member", "dev", "开发", "claude", 2, ["n1", "n2"], "从任务池领开发类小任务，在自己的 worktree 里改代码、跑测试、提交。", look("#4C7BD0", "tee", "none", "#8A5A36"), { model: "claude-sonnet-5-5", sort: 1, task_kinds: ["dev"], skills: ["docs"], plugins: ["release-notes@2", "pr-review"] }),
   role("r3", "member", "qa", "测试", "codex", 1, ["n2"], "领测试类小任务：补用例、跑全量测试、复现问题并报告。", look("#3F8F6B", "coat", "glasses", "#6B4A2E"), { sort: 2, permission_mode: "ask", sandbox: "workspace-write", task_kinds: ["test"], plugins: ["playwright-kit"] }),
   role("r4", "member", "review", "审查", "claude", 1, ["n1"], "审查合并前的改动，指出问题，不改代码。", look("#4A4843", "suit", "glasses", "#1F1E1C"), { sort: 3, gate: "review", model: "opus" }),

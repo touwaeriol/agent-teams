@@ -462,7 +462,7 @@ export interface GitPrepare {
   base?: string;
   fetch?: boolean;
   /**
-   * Bring an existing worktree up to date (daemon feature git.sync). member: fetch, then switch to the member branch if needed, fast-forward it to origin/<ref> when it has no commits outside it and the tree is clean, else merge origin/<ref> into it (abort on conflict). review: fetch and check out origin/<ref> detached (read-only review of another member's branch).
+   * Bring an existing worktree up to date (daemon feature git.sync). member: fetch, then switch to the member branch if needed, fast-forward it to origin/<ref> when it has no commits outside it and the tree is clean, else merge origin/<ref> into it (abort on conflict). review: fetch and check out origin/<ref> detached (read-only review of another member's branch), or expect_sha when given. A worktree that does not exist yet is created first, then synced.
    */
   sync?: {
     mode: "member" | "review";
@@ -474,6 +474,10 @@ export interface GitPrepare {
      * Skip the sync (action expired) when the job starts after this time: the console has already sent the task brief and the member may be working in the tree.
      */
     deadline?: string;
+    /**
+     * review (daemon feature git_review_sha): the commit under review. The daemon fetches again (a few times, before the deadline) until it has the commit, checks it out detached and verifies HEAD; when it cannot, the job fails with error_code sha_mismatch and head_sha set to the actual HEAD.
+     */
+    expect_sha?: string;
   };
 }
 /**
@@ -562,7 +566,8 @@ export interface GitResult {
     | "rejected_non_ff"
     | "workflow_permission"
     | "auth_failed"
-    | "refspec_not_allowed";
+    | "refspec_not_allowed"
+    | "sha_mismatch";
   error?: string;
   status?: GitCheckoutStatus;
   /**
@@ -2124,7 +2129,10 @@ export interface PushedRepo {
 export interface CompleteTaskInput {
   task_id: TaskId;
   summary: string;
-  status?: "done" | "failed";
+  /**
+   * platform_error: review/decision tasks only, when the platform did not prepare what you were asked to check (for example the worktree HEAD is not the commit under review). It is not a verdict: the platform prepares the review again.
+   */
+  status?: "done" | "failed" | "platform_error";
   /**
    * Paths, commit SHAs or URLs produced by the task.
    */

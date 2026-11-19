@@ -298,6 +298,12 @@ func (r *router) turnEnded(ctx context.Context, tx *core.Tx, sc core.SessionCont
 	if err := recordUsage(ctx, tx, sc, ev); err != nil {
 		return err
 	}
+	if sc.Employee.Tier == "lead" && sc.Employee.WorkThreadID() != nil {
+		// The final reply came in before turn_ended: a thread whose end waited for this turn ends now.
+		if err := r.e.Delivery.LeadTurnEnded(ctx, tx, *sc.Employee.WorkThreadID()); err != nil {
+			return err
+		}
+	}
 	if ev.Context != nil {
 		if err := r.e.Sched.ContextReported(ctx, tx, sc, *ev.Context); err != nil {
 			return err
