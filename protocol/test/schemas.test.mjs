@@ -22,7 +22,7 @@ const EXPECTED_TYPES = {
   node_to_console: [
     "hello", "sessions.report", "session.opened", "session.delivered", "session.compacted", "session.interrupted", "session.closed",
     "session.event", "session.state", "stream.delta", "approval.request", "approval.ack", "approval.cancel",
-    "tool.call", "tool.cancel", "file.chunk", "git.result", "cred.request", "node.stats", "node.usage", "node.upgrade_result", "log",
+    "tool.call", "tool.cancel", "file.chunk", "git.result", "cred.request", "node.stats", "node.upgrade_result", "log",
   ],
   both: ["ack", "error"],
 };
@@ -72,7 +72,7 @@ test("message types and directions match protocol.md", () => {
 });
 
 test("reliability matches protocol.md 2.1", () => {
-  const unreliable = ["hello", "welcome", "ack", "error", "stream.delta", "log", "node.stats", "node.usage", "cred.request", "cred.response"];
+  const unreliable = ["hello", "welcome", "ack", "error", "stream.delta", "log", "node.stats", "cred.request", "cred.response"];
   for (const m of messageSchemas()) assert.equal(m.schema["x-reliable"], !unreliable.includes(m.type), m.type);
 });
 

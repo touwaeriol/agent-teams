@@ -198,13 +198,6 @@
       "key": []
     },
     {
-      "type": "node.usage",
-      "name": "NodeUsage",
-      "direction": "node_to_console",
-      "reliable": false,
-      "key": []
-    },
-    {
       "type": "session.close",
       "name": "SessionClose",
       "direction": "console_to_node",

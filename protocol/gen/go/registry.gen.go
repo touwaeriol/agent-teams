@@ -27,7 +27,6 @@ const (
 	TypeNodeStats          = "node.stats"
 	TypeNodeUpgrade        = "node.upgrade"
 	TypeNodeUpgradeResult  = "node.upgrade_result"
-	TypeNodeUsage          = "node.usage"
 	TypeSessionClose       = "session.close"
 	TypeSessionClosed      = "session.closed"
 	TypeSessionCompact     = "session.compact"
@@ -76,7 +75,6 @@ var Messages = map[string]MessageMeta{
 	TypeNodeStats:          {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(NodeStats) }},
 	TypeNodeUpgrade:        {Direction: ConsoleToNode, Reliable: true, Key: []string{"id"}, New: func() any { return new(NodeUpgrade) }},
 	TypeNodeUpgradeResult:  {Direction: NodeToConsole, Reliable: true, Key: nil, New: func() any { return new(NodeUpgradeResult) }},
-	TypeNodeUsage:          {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(NodeUsage) }},
 	TypeSessionClose:       {Direction: ConsoleToNode, Reliable: true, Key: []string{"session_id", "open_gen"}, New: func() any { return new(SessionClose) }},
 	TypeSessionClosed:      {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "open_gen"}, New: func() any { return new(SessionClosed) }},
 	TypeSessionCompact:     {Direction: ConsoleToNode, Reliable: true, Key: []string{"compact_id"}, New: func() any { return new(SessionCompact) }},

@@ -1151,50 +1151,6 @@
   },
   {
     "v": 2,
-    "type": "node.usage",
-    "id": "n_01JD3V000000000000000001A",
-    "ts": "2026-11-14T12:04:04Z",
-    "body": {
-      "runtimes": {
-        "claude": {
-          "auth": "subscription",
-          "status": "ok",
-          "plan": "max",
-          "windows": [
-            {
-              "key": "five_hour",
-              "used_percent": 16,
-              "window_minutes": 300,
-              "resets_at": "2026-11-14T15:00:00Z"
-            },
-            {
-              "key": "weekly",
-              "used_percent": 11,
-              "window_minutes": 10080,
-              "resets_at": "2026-11-20T15:00:00Z"
-            },
-            {
-              "key": "weekly_model",
-              "label": "Fable",
-              "used_percent": 14,
-              "window_minutes": 10080,
-              "resets_at": "2026-11-20T15:00:00Z"
-            }
-          ],
-          "fetched_at": "2026-11-14T12:04:03Z"
-        },
-        "codex": {
-          "auth": "chatgpt",
-          "status": "error",
-          "windows": [],
-          "error": "codex account authentication required",
-          "fetched_at": "2026-11-14T12:04:03Z"
-        }
-      }
-    }
-  },
-  {
-    "v": 2,
     "type": "log",
     "id": "n_01JD3V0000000000000000011",
     "ts": "2026-11-14T12:04:05Z",

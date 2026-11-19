@@ -472,29 +472,6 @@
     {
       "properties": {
         "type": {
-          "const": "node.usage"
-        },
-        "body": {
-          "$ref": "node.usage.json"
-        },
-        "id": {
-          "type": "string",
-          "pattern": "^n_"
-        }
-      },
-      "required": [
-        "type",
-        "body"
-      ],
-      "not": {
-        "required": [
-          "seq"
-        ]
-      }
-    },
-    {
-      "properties": {
-        "type": {
           "const": "session.close"
         },
         "body": {
