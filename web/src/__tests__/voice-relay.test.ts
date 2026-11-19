@@ -120,7 +120,7 @@ function relayFixture(timeoutMs = 10_000) {
   const closes: (string | undefined)[] = [];
   const h: TransportHandlers = { onEvent: (e) => events.push(e), onClose: (m) => closes.push(m) };
   const connect = makeConnectRelay(() => deps);
-  const start = () => connect(relaySession("zh"), {} as MediaStream, h);
+  const start = (stream: Promise<MediaStream> = Promise.resolve({} as MediaStream)) => connect(relaySession("zh"), stream, h);
   return { start, events, closes, capture, frame: (b: ArrayBuffer) => onFrame(b) };
 }
 
@@ -166,27 +166,36 @@ describe("relay transport", () => {
   });
 
   it("fails with the server's reason, or a clear one, instead of spinning", async () => {
+    // The transport comes back once the microphone is captured; connecting fails through ready.
+    const failure = (p: Promise<Transport>) => p.then((t) => t.ready);
     const busy = relayFixture();
     const p1 = busy.start();
     FakeSocket.last?.server({ type: "error", fatal: true, error: { code: "voice_too_many", message: "同时最多 2 路语音输入" } });
-    await expect(p1).rejects.toThrow("连不上语音服务：同时最多 2 路语音输入");
+    await expect(failure(p1)).rejects.toThrow("连不上语音服务：同时最多 2 路语音输入");
+    expect(busy.capture.stopped).toBe(1);
 
     const refused = relayFixture();
     const p2 = refused.start();
     FakeSocket.last?.drop(); // e.g. 403 on the upgrade
-    await expect(p2).rejects.toThrow(/^连不上语音服务：连接被拒绝或网络不通/);
+    await expect(failure(p2)).rejects.toThrow(/^连不上语音服务：连接被拒绝或网络不通/);
 
     const upstream = relayFixture();
     const p3 = upstream.start();
     FakeSocket.last?.server({ type: "error", fatal: true, error: { code: "voice_key_rejected", message: "连不上语音服务：OpenAI 拒绝了 API Key" } });
-    await expect(p3).rejects.toThrow(/^连不上语音服务：OpenAI 拒绝了 API Key$/);
+    await expect(failure(p3)).rejects.toThrow(/^连不上语音服务：OpenAI 拒绝了 API Key$/);
+
+    // Refused while the microphone is still opening: fails at once, without waiting for it.
+    const early = relayFixture();
+    const p5 = early.start(new Promise<MediaStream>(() => {}));
+    FakeSocket.last?.server({ type: "error", fatal: true, error: { code: "voice_disabled", message: "管理员没有开启语音输入" } });
+    await expect(p5).rejects.toThrow("连不上语音服务：管理员没有开启语音输入");
 
     vi.useFakeTimers();
     const silent = relayFixture(10_000);
     const p4 = silent.start();
     const ws = FakeSocket.last as FakeSocket;
-    const caught = p4.catch((e: Error) => e.message);
-    vi.advanceTimersByTime(10_000);
+    const caught = failure(p4).catch((e: Error) => e.message);
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(await caught).toBe("连不上语音服务：10 秒内没有连上");
     expect(ws.closed).toBe(true);
   });
