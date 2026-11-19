@@ -282,6 +282,30 @@ describe("Team · role model field", () => {
     expect(items.some((t) => t.startsWith("gpt"))).toBe(false);
   }, 15000);
 
+  it("saves what is in the box when 保存 is clicked right after typing (no Enter, no blur)", async () => {
+    const { w, spy } = await mountTeam();
+    await modelInput(cards(w)[0]!).setValue("claude-typed-x");
+    const save = w.findAll("button").find((b) => b.text() === "保存")!;
+    expect(save.attributes("disabled")).toBeUndefined();
+    await save.trigger("click");
+    await flushPromises();
+    const body = (await calls(spy, "PUT", /\/api\/roles$/)[0]!.json()) as { roles: { role: string; model: string }[] };
+    expect(body.roles.find((r) => r.role === "coordinator")!.model).toBe("claude-typed-x");
+  }, 15000);
+
+  it("will not save a role model in the wrong format", async () => {
+    const { w, spy } = await mountTeam();
+    await modelInput(cards(w)[1]!).setValue("bad model");
+    await flushPromises();
+    expect(cards(w)[1]!.find("[data-testid=model-input-error]").exists()).toBe(true);
+    const save = w.findAll("button").find((b) => b.text() === "保存")!;
+    expect(save.attributes("disabled")).toBeDefined();
+    expect(w.text()).toContain("组长 的模型 ID 只能用");
+    await save.trigger("click");
+    await flushPromises();
+    expect(calls(spy, "PUT", /\/api\/roles$/)).toHaveLength(0);
+  }, 15000);
+
   it("saves typed models for the coordinator, the lead and a member, refuses a bad id, and clears on a type change", async () => {
     const info = vi.spyOn(toast, "info").mockImplementation(() => {});
     const { w, spy } = await mountTeam();
@@ -476,6 +500,20 @@ describe("Project models", () => {
     expect([body.coordinator_model, body.thread_model, body.thread_codex_model]).toEqual(["claude-fable-5-2", "claude-anything", "gpt-y"]);
   }, 15000);
 
+  it("new project: creating right after typing sends what is in the boxes; a wrong format is not sent", async () => {
+    const { w, spy } = await mountNew(withCodex);
+    await w.get("[data-testid=new-project-models]").findAll("button").find((b) => b.text() === "按类型指定")!.trigger("click");
+    const err = vi.spyOn(toast, "error").mockImplementation(() => {});
+    await w.get("input[aria-label='统筹']").setValue("bad id");
+    await submit(w);
+    expect(err).toHaveBeenCalled();
+    expect(calls(spy, "POST", /\/api\/projects$/)).toHaveLength(0);
+    await w.get("input[aria-label='统筹']").setValue(" claude-typed-x ");
+    await submit(w);
+    const body = (await calls(spy, "POST", /\/api\/projects$/)[0]!.json()) as Record<string, unknown>;
+    expect(body.coordinator_model).toBe("claude-typed-x");
+  }, 15000);
+
   it("new project: no Codex field without Codex roles", async () => {
     const { w } = await mountNew(teamRoles);
     await w.findAll("button").find((b) => b.text() === "按类型指定")!.trigger("click");
@@ -502,6 +540,24 @@ describe("Project models", () => {
     await typeIn(w, "讨论串 Claude Code 模型", "claude-sonnet-5-5");
     const bodies = await Promise.all(calls(spy, "PATCH", /\/api\/projects\/p1$/).map((r) => r.json()));
     expect(bodies).toEqual([{ coordinator_model: "claude-fable-5-2" }, { thread_codex_model: "gpt-z" }, { thread_model: "claude-sonnet-5-5" }]);
+  }, 15000);
+
+  it("project settings: a typed model is saved even when the field goes away right after blur", async () => {
+    const project = { ...settingsProject, coordinator_model: "", thread_model: "", thread_codex_model: "" } as never;
+    const spy = api([
+      ["GET", /\/api\/roles$/, { roles: teamRoles, warnings: [] }],
+      ["PATCH", /\/api\/projects\/p1$/, project],
+    ]);
+    const w = mountWith(ModelFields, { project });
+    await flushPromises();
+    const input = w.get("input[aria-label='统筹模型']");
+    await input.trigger("focus");
+    await input.setValue("claude-typed-x");
+    await input.trigger("focusout");
+    w.unmount();
+    await flushPromises();
+    const bodies = await Promise.all(calls(spy, "PATCH", /\/api\/projects\/p1$/).map((r) => r.json()));
+    expect(bodies).toEqual([{ coordinator_model: "claude-typed-x" }]);
   }, 15000);
 
   it("project settings: hides the Codex row without Codex roles", async () => {

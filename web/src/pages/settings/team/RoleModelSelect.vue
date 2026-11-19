@@ -8,5 +8,5 @@ const value = defineModel<string>({ required: true });
 </script>
 
 <template>
-  <ModelPicker v-model="value" :runtime="runtime" :roles="roles" label="模型" :placeholder="emptyRoleModel(runtime)" class="at-select-36 at-text-13" />
+  <ModelPicker v-model="value" live :runtime="runtime" :roles="roles" label="模型" :placeholder="emptyRoleModel(runtime)" class="at-select-36 at-text-13" />
 </template>

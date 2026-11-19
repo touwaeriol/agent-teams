@@ -16,8 +16,9 @@ import { WORK_MODES } from "@/components/app/workModes";
 import ModelPicker from "@/components/app/models/ModelPicker.vue";
 import Field from "@/components/common/Field.vue";
 import Spinner from "@/components/common/Spinner.vue";
-import { offersCodex, projectModelStatus, type ProjectField, type Runtime } from "@/lib/models";
+import { MODEL_FORMAT_HINT, offersCodex, projectModelStatus, validModel, type ProjectField, type Runtime } from "@/lib/models";
 import { INSTRUCTIONS_MAX } from "@/lib/projectSettings";
+import { toast } from "@/lib/toast";
 import NavButton from "@/components/shell/NavButton.vue";
 
 const router = useRouter();
@@ -55,7 +56,12 @@ const create = useAction(
     }),
   { invalidate: [keys.projects], success: (p) => `已创建项目「${p.name}」`, onSuccess: (p) => void router.push(`/projects/${p.id}`) },
 );
-const submit = () => name.value.trim() && create.mutate();
+const submit = () => {
+  if (!name.value.trim()) return;
+  // The model boxes update `picked` as you type (live): a wrong format is refused here, not sent.
+  if (!Object.values(picked.value).every(validModel)) return void toast.error(MODEL_FORMAT_HINT);
+  create.mutate();
+};
 const chips = computed(() => teamChips(roles.data.value?.roles ?? []));
 </script>
 
@@ -110,7 +116,7 @@ const chips = computed(() => teamChips(roles.data.value?.roles ?? []));
         <p class="text-[13px] text-muted-foreground">默认跟随岗位配置（每个岗位用自己的模型）；指定后覆盖这个项目里统筹、或同类型的组长和成员的模型，可以直接输入模型 ID；之后可在项目设置里修改。</p>
         <div v-if="pickModels" class="grid gap-3 sm:grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
           <Field v-for="f in modelFields" :key="f.key" v-slot="{ id }" :label="f.label" :hint="statusOf(f)">
-            <ModelPicker :id="id" v-model="picked[f.key]" :runtime="f.runtime" :label="f.label" placeholder="跟随岗位配置" class="at-select-36" />
+            <ModelPicker :id="id" v-model="picked[f.key]" live :runtime="f.runtime" :label="f.label" placeholder="跟随岗位配置" class="at-select-36" />
           </Field>
         </div>
       </Card>
