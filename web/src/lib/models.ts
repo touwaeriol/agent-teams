@@ -37,9 +37,9 @@ export function modelName(id: string): string {
   return id;
 }
 
-/** What a role's empty model falls back to, for the placeholder. */
+/** What a role's empty model falls back to (the built-in default), short enough for the placeholder. */
 export function emptyRoleModel(runtime: Runtime): string {
-  return runtime === "codex" ? "留空 = 使用 Codex 自己的默认模型" : `留空 = 内置默认 ${BUILTIN_MODEL}`;
+  return runtime === "codex" ? "留空 = Codex 默认" : `留空 = ${BUILTIN_MODEL}`;
 }
 
 interface ScopedRole {

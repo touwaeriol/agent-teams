@@ -32,7 +32,7 @@ describe("models (no list: typed ids)", () => {
     expect(modelName("claude-opus-5-5")).toBe("Opus 5.5");
     expect(modelName("claude-fable-5-2")).toBe("Fable 5.2");
     expect(modelName("gpt-x")).toBe("gpt-x");
-    expect(emptyRoleModel("claude")).toBe(`留空 = 内置默认 ${BUILTIN_MODEL}`);
+    expect(emptyRoleModel("claude")).toBe(`留空 = ${BUILTIN_MODEL}`);
     expect(emptyRoleModel("codex")).toContain("Codex");
   });
 

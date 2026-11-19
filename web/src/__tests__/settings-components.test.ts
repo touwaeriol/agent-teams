@@ -261,7 +261,7 @@ describe("Team · role model field", () => {
     const { w } = await mountTeam();
     const [coordinator, lead, dev, rev] = cards(w);
     for (const c of [coordinator!, lead!, dev!]) {
-      expect(modelInput(c).attributes("placeholder")).toBe("留空 = 内置默认 claude-opus-5-5");
+      expect(modelInput(c).attributes("placeholder")).toBe("留空 = claude-opus-5-5");
     }
     expect(modelInput(rev!).attributes("placeholder")).toContain("Codex");
     expect(modelInput(coordinator!).element.value).toBe("");
