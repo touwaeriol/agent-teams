@@ -34,6 +34,10 @@ const PANELS: Panel[] = ["model", "effort", "status", "context", "skills"];
 const ROUTES: Record<string, string> = { usage: "usage", memory: "memory", config: "general" };
 
 type Field = HTMLInputElement | HTMLTextAreaElement | null;
+type Picked = Array<MessageRef & { label: string }>;
+
+/** The @ references of each conversation's box, kept for the page so a remounted box gets them back. */
+const pickedShelf = new Map<string, Ref<Picked>>();
 
 export function useComposerAssist(options: MaybeRefOrGetter<AssistOptions | undefined>, text: Ref<string>, fieldOf: () => Field) {
   const router = useRouter();
@@ -43,7 +47,16 @@ export function useComposerAssist(options: MaybeRefOrGetter<AssistOptions | unde
   const active = ref(0);
   const dismissed = ref<string | null>(null);
   const panel = ref<Panel | null>(null);
-  const picked = ref<Array<MessageRef & { label: string }>>([]);
+  const ownPicked = ref<Picked>([]);
+  const pickedBox = (): Ref<Picked> => {
+    const o = opts.value;
+    if (!o?.pid || !o.cid) return ownPicked;
+    const k = `${o.scope}:${o.pid}:${o.cid}`;
+    let r = pickedShelf.get(k);
+    if (!r) pickedShelf.set(k, (r = ref<Picked>([])));
+    return r;
+  };
+  const picked = computed<Picked>({ get: () => pickedBox().value, set: (v) => (pickedBox().value = v) });
   const query = ref("");
   let debounce: ReturnType<typeof setTimeout> | null = null;
 
