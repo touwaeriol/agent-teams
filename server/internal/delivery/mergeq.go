@@ -13,6 +13,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/scheduler"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // maxFastForwardRetries rebuilds a trial branch when the thread head moved meanwhile (§8.2 step 4).
@@ -194,6 +195,9 @@ func (e *Engine) startEntry(ctx context.Context, t core.Thread, repo ghops.Repo,
 		return e.directMerge(ctx, t, repo, entry)
 	}
 	head, err := e.gh.RefSHA(ctx, repo, t.Branch)
+	if ghops.Status(err) == 404 {
+		head, err = e.recreateThreadBranch(ctx, t, repo)
+	}
 	if err != nil {
 		return e.fail(ctx, t, entry, "读取讨论串分支失败", err)
 	}
@@ -208,6 +212,19 @@ func (e *Engine) startEntry(ctx context.Context, t core.Thread, repo ghops.Repo,
 		return e.mergeProblem(ctx, t, entry, res, err)
 	}
 	return e.toCI(ctx, t, entry, trial, orDefault(res.SHA, head), head)
+}
+
+// recreateThreadBranch cuts the thread branch again from the thread's base when GitHub no longer
+// has it although the thread recorded it (deleted by hand, or with a merged pull request while
+// the thread kept working), instead of cancelling the merge.
+func (e *Engine) recreateThreadBranch(ctx context.Context, t core.Thread, repo ghops.Repo) (string, error) {
+	base := e.orch.BaseFor(ctx, e.core.Pool, t, repo)
+	e.log.Warn("thread branch missing, recreating it", "thread_id", t.ID, "repo", repo.Slug, "branch", t.Branch, "base", base)
+	sha, err := e.gh.EnsureBranch(ctx, repo, t.Branch, base)
+	if err != nil {
+		return "", fmt.Errorf("讨论串分支 %s 不存在，从 %s 重新创建也失败了：%w", t.Branch, base, err)
+	}
+	return sha, nil
 }
 
 func (e *Engine) mergeProblem(ctx context.Context, t core.Thread, entry core.MergeEntry, res ghops.MergeResult, err error) error {
@@ -403,6 +420,14 @@ func (e *Engine) finishTasks(ctx context.Context, tx *core.Tx, entry core.MergeE
 	if open, err := core.TaskMergesOpen(ctx, tx, entry.ThreadID, task.ID, entry.Repo); err != nil || open > 0 {
 		return task, err // other repositories of the task are still on their way
 	}
+	if lost, err := cancelledUnmerged(ctx, tx, entry.ThreadID, task.ID); err != nil || lost {
+		if err != nil || task.Status != "merging" {
+			return task, err
+		}
+		// Another repository's entry was cancelled (fail): the task is not done, it waits to be
+		// enqueued again (releaseTask).
+		return e.sched.SetStatus(ctx, tx, task, "blocked")
+	}
 	if task, err = e.sched.Finish(ctx, tx, task, "done"); err != nil {
 		return task, err
 	}
@@ -499,8 +524,43 @@ func (e *Engine) fail(ctx context.Context, t core.Thread, entry core.MergeEntry,
 		if err := tx.EmitMerge(ctx, t, entry); err != nil {
 			return err
 		}
-		return e.sched.NotifyLead(ctx, tx, t, fmt.Sprintf("[Merge · %s · %s] %s", entry.Employee, entry.Repo, reason))
+		retry, err := e.releaseTask(ctx, tx, entry)
+		if err != nil {
+			return err
+		}
+		return e.sched.NotifyLead(ctx, tx, t, fmt.Sprintf("[Merge · %s · %s] %s%s", entry.Employee, entry.Repo, reason, retry))
 	})
+}
+
+// cancelledUnmerged reports a task with a repository whose last entry was cancelled and that
+// has no merged entry.
+func cancelledUnmerged(ctx context.Context, q core.DB, threadID, taskID string) (bool, error) {
+	var n int
+	err := store.QueryRow(ctx, q, `SELECT count(*) FROM at_merge_queue q WHERE q.thread_id = $1 AND q.task_id = $2
+		AND q.status = 'cancelled' AND NOT EXISTS (SELECT 1 FROM at_merge_queue m WHERE m.thread_id = q.thread_id
+		AND m.task_id = q.task_id AND m.repo = q.repo AND (m.status <> 'cancelled' AND m.position > q.position OR m.status = 'merged'))`,
+		threadID, taskID).Scan(&n)
+	return n > 0, err
+}
+
+// releaseTask puts the task of a cancelled entry back from merging to blocked (as a conflict or
+// failed CI does), so the lead can enqueue_merge it again once the cause is fixed, or cancel it.
+// A task whose other repositories are still in the queue stays merging until they are through.
+func (e *Engine) releaseTask(ctx context.Context, tx *core.Tx, entry core.MergeEntry) (string, error) {
+	if entry.TaskID == nil {
+		return "", nil
+	}
+	task, err := core.LockTask(ctx, tx, entry.ThreadID, *entry.TaskID)
+	if err != nil || task.Status != "merging" {
+		return "", ignoreMissing(err)
+	}
+	if open, err := core.TaskMergesOpen(ctx, tx, entry.ThreadID, task.ID, entry.Repo); err != nil || open > 0 {
+		return "", err
+	}
+	if _, err := e.sched.SetStatus(ctx, tx, task, "blocked"); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("。合并条目已取消，任务 %s 回到 blocked：原因解决后可以再调用 enqueue_merge(task_id=%s) 重新入队，不需要了就 cancel_task", task.ID, task.ID), nil
 }
 
 // Run is the merge/PR loop (advisory-lock leader), woken by hints and every PollInterval.
