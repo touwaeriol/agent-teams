@@ -17,7 +17,18 @@ export type ProjectUpdate = S["ProjectUpdate"];
 export type DeliverySettings = S["Delivery"];
 export type MemoryBrief = S["MemoryBrief"];
 export type MemoryFileView = S["MemoryFile"];
-export type NodeView = S["NodeView"];
+export type SharedFile = S["SharedFile"];
+export type SharedFileList = S["SharedFileList"];
+export type SharedFileUpload = S["SharedFileUpload"];
+/** usage: subscription quota per runtime. The openapi does not mark it nullable, but the server
+ * sends null until the node reports (and older servers omit it): both mean "no data yet". */
+export type NodeView = Omit<S["NodeView"], "usage"> & { usage?: NodeUsage | null };
+export type NodeUsage = S["NodeUsage"];
+export type RuntimeUsage = S["RuntimeUsage"];
+/** key: five_hour, weekly, weekly_opus, weekly_sonnet, weekly_model (Claude); primary, secondary (Codex). */
+export type UsageWindow = S["UsageWindow"];
+/** POST /api/nodes/{id}/usage/refresh; usage is null when the node never reported. */
+export type UsageRefresh = Omit<S["UsageRefreshOutputBody"], "usage"> & { usage: NodeUsage | null };
 export type NodeSession = S["NodeSession"];
 export type FeedbackView = S["FeedbackView"];
 export type Enrollment = S["Enrollment"];
@@ -290,6 +301,8 @@ export interface MessageView {
     title?: string;
   };
   created_at: string;
+  /** Client only: a message the user sent that the server has not confirmed yet (api/pending.ts). */
+  local?: { key: string; status: "sending" | "failed"; error?: string };
 }
 
 /** One @ reference of a sent message (meta.refs). */

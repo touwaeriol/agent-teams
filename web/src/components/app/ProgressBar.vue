@@ -4,7 +4,7 @@ withDefaults(defineProps<{ pct: string; tone: string; height?: number }>(), { he
 </script>
 
 <template>
-  <span class="flex flex-1 rounded-sm bg-[#EFEDE8]" :style="{ height: `${height}px` }">
+  <span class="flex flex-1 rounded-sm bg-[#EFEDE8] dark:bg-raised" :style="{ height: `${height}px` }">
     <span class="rounded-sm" :style="{ width: pct, background: tone }" />
   </span>
 </template>

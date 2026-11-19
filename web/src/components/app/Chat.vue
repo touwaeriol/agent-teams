@@ -3,7 +3,8 @@
 // threads the speaker opened, chat cards (todos, plan, artifact, 会话已恢复), cards inserted
 // where they were asked (`inserts` + the `insert` slot), and scrolling that follows new
 // messages and comes back to where you were. Used by the coordinator chat and the thread panel.
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
+import { pendingOf, prunePending, withPending } from "@/api/pending";
 import { flattenMessages, useMessages } from "@/api/queries";
 import type { MessageView, ThreadView } from "@/api/views";
 import Loading from "@/components/common/Loading.vue";
@@ -39,10 +40,16 @@ defineSlots<{ insert(p: { item: I }): unknown; empty(): unknown; before(): unkno
 
 const query = useMessages(() => props.cid);
 const messages = computed(() => {
-  const all = flattenMessages(query.data.value);
+  // The user's own messages show at once, before the server confirms them (api/pending.ts).
+  const all = withPending(flattenMessages(query.data.value), pendingOf(props.cid));
   const shown = props.filter ? all.filter(props.filter) : all;
   return props.select ? props.select(shown) : shown;
 });
+// A send delivered before the messages had loaded is drawn from api/pending.ts until they hold it.
+watch(
+  () => query.data.value,
+  (data) => prunePending(props.cid, flattenMessages(data)),
+);
 const items = computed(() => interleave(chatBlocks(messages.value), props.inserts.map((i) => ({ key: i.key, at: i.at, node: i }))));
 const end = ref<HTMLElement | null>(null);
 useChatScroll(() => props.cid, end, () => messages.value.length + props.inserts.length, () => !query.isLoading.value);
@@ -66,7 +73,7 @@ useChatScroll(() => props.cid, end, () => messages.value.length + props.inserts.
         :compact="compact"
         :pid="pid"
         :forwardable="forwardable"
-        :selecting="selecting && it.block.kind === 'user'"
+        :selecting="selecting && it.block.kind === 'user' && !it.block.message.local"
         :selected="selectedIds.includes(Number(it.block.message.id))"
         @open-thread="(no) => emit('openThread', no)"
         @forward="(id) => emit('forward', id)"

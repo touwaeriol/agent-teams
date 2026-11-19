@@ -1,14 +1,16 @@
-import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, realpath, rm } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
-import type { ToolDownload } from "../protocol.js";
-import { MAX_BYTES, MAX_FILES, validFilePath } from "./upload.js";
+import { isInside } from "../util/paths.js";
+import type { ToolDownload, ToolSharedDownload } from "../protocol.js";
+import { MAX_BYTES, MAX_FILES, MAX_SHARED_BYTES, SHARED_DIR, validFilePath, validSharedPath } from "./upload.js";
 
 /** Folder (relative to the session's working directory) read_deliverable writes into; git-ignored by its own .gitignore. */
 export const DOWNLOAD_DIR = ".agent-deliverables";
 const DELIVERABLE_ID = /^dl_[A-Za-z0-9]+$/;
 const GITIGNORE = "# Written by agent-teams read_deliverable; never committed.\n*\n";
+const SHARED_GITIGNORE = "*\n";
 
 export class DownloadError extends Error {}
 
@@ -30,7 +32,7 @@ export interface WrittenDownload {
  */
 export async function writeDownload(cwd: string, dl: ToolDownload, chunks: ReadonlyMap<number, string>): Promise<WrittenDownload> {
   checkMeta(dl);
-  const bodies = splitFiles(dl, joinChunks(dl, chunks));
+  const bodies = splitFiles(dl, joinChunks(dl.chunks, chunks, MAX_BYTES, "read_deliverable"));
   const root = await realpath(cwd).catch(() => {
     throw new DownloadError("the working directory is missing");
   });
@@ -50,6 +52,53 @@ export async function writeDownload(cwd: string, dl: ToolDownload, chunks: Reado
   return { abs: verDir, rel, files: dl.files.map((f) => f.path) };
 }
 
+export interface WrittenSharedFile {
+  /** Absolute path of the written file. */
+  abs: string;
+  /** The same path relative to the working directory (.shared/<path>). */
+  rel: string;
+  size: number;
+  sha256: string;
+}
+
+/**
+ * Writes the file of a read_shared_file result to <cwd>/.shared/<path>. The shared path is checked
+ * again (SharedPath: no dot segments, nothing absolute) and must stay inside .shared; size, chunk
+ * count and checksum are verified before anything lands on disk. .shared and the folders under it
+ * must be real directories (never symlinks); .shared holds a .gitignore ("*"). An existing file is
+ * replaced through a temporary file and rename, so a symlink at the name is replaced, not followed.
+ */
+export async function writeSharedDownload(cwd: string, sd: ToolSharedDownload, chunks: ReadonlyMap<number, string>): Promise<WrittenSharedFile> {
+  if (!Array.isArray(sd.files) || sd.files.length !== 1) throw new DownloadError("a shared download has exactly one file");
+  const f = sd.files[0];
+  if (typeof f.path !== "string" || !validSharedPath(f.path)) throw new DownloadError(`refusing shared path ${JSON.stringify(f.path)}`);
+  if (!Number.isInteger(f.size) || f.size < 0 || f.size > MAX_SHARED_BYTES) throw new DownloadError(`bad size of ${f.path}`);
+  const [body] = splitFiles(sd, joinChunks(sd.chunks, chunks, MAX_SHARED_BYTES, "read_shared_file"));
+  if (!cwd) throw new DownloadError("the session has no working directory");
+  const root = await realpath(cwd).catch(() => {
+    throw new DownloadError("the working directory is missing");
+  });
+  const top = await ensureDir(join(root, SHARED_DIR));
+  await writeNew(join(top, ".gitignore"), Buffer.from(SHARED_GITIGNORE), true);
+  const parts = f.path.split("/");
+  const target = join(top, ...parts);
+  if (!isInside(top, target) || target === top) throw new DownloadError(`refusing shared path ${JSON.stringify(f.path)}`);
+  let dir = top;
+  for (const part of parts.slice(0, -1)) dir = await ensureDir(join(dir, part));
+  const tmp = join(dir, `.${parts.at(-1)!.slice(0, 40)}.${randomBytes(6).toString("hex")}.part`);
+  await writeNew(tmp, body!, false);
+  try {
+    const st = await lstat(target).catch(() => null);
+    if (st?.isDirectory()) throw new DownloadError(`${SHARED_DIR}/${f.path} exists and is a directory`);
+    await rename(tmp, target);
+  } catch (err) {
+    await rm(tmp, { force: true });
+    if (err instanceof DownloadError) throw err;
+    throw new DownloadError(`cannot write ${target}: ${(err as NodeJS.ErrnoException).code ?? (err as Error).message}`);
+  }
+  return { abs: target, rel: `${SHARED_DIR}/${f.path}`, size: f.size, sha256: f.sha256 };
+}
+
 function checkMeta(dl: ToolDownload): void {
   if (!DELIVERABLE_ID.test(dl.deliverable_id) || !Number.isInteger(dl.version) || dl.version < 1) throw new DownloadError("bad deliverable id or version");
   if (!dl.files.length || dl.files.length > MAX_FILES) throw new DownloadError(`a deliverable has 1 to ${MAX_FILES} files`);
@@ -61,21 +110,22 @@ function checkMeta(dl: ToolDownload): void {
   }
 }
 
-function joinChunks(dl: ToolDownload, chunks: ReadonlyMap<number, string>): Buffer {
+function joinChunks(count: number, chunks: ReadonlyMap<number, string>, max: number, tool: string): Buffer {
+  if (!Number.isInteger(count) || count < 0) throw new DownloadError("bad chunk count");
   const parts: Buffer[] = [];
   let total = 0;
-  for (let i = 0; i < dl.chunks; i++) {
+  for (let i = 0; i < count; i++) {
     const data = chunks.get(i);
-    if (data === undefined) throw new DownloadError(`file content incomplete (${chunks.size}/${dl.chunks} pieces arrived); call read_deliverable again`);
+    if (data === undefined) throw new DownloadError(`file content incomplete (${chunks.size}/${count} pieces arrived); call ${tool} again`);
     const buf = Buffer.from(data, "base64");
     total += buf.length;
-    if (total > MAX_BYTES) throw new DownloadError(`files exceed ${MAX_BYTES / 1048576} MB`);
+    if (total > max) throw new DownloadError(`files exceed ${max / 1048576} MB`);
     parts.push(buf);
   }
   return Buffer.concat(parts);
 }
 
-function splitFiles(dl: ToolDownload, all: Buffer): Buffer[] {
+function splitFiles(dl: { files: { path: string; size: number; sha256: string }[] }, all: Buffer): Buffer[] {
   const declared = dl.files.reduce((n, f) => n + f.size, 0);
   if (declared !== all.length) throw new DownloadError("file sizes do not match the content");
   let off = 0;

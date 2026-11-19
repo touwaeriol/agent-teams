@@ -1,7 +1,7 @@
 // Package composer holds what the chat composer's "/" offers besides the session's own skills:
 // the platform commands the web runs itself, custom commands (per role, and platform built-ins
-// the administrators keep) with their validation and server-side expansion, and the model lists
-// /model and the role model field choose from.
+// the administrators keep) with their validation and server-side expansion, and the format check
+// of the model ids typed into /model, the roles and the project settings.
 package composer
 
 import (
