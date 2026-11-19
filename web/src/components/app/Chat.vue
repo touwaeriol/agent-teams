@@ -3,8 +3,8 @@
 // threads the speaker opened, chat cards (todos, plan, artifact, 会话已恢复), cards inserted
 // where they were asked (`inserts` + the `insert` slot), and scrolling that follows new
 // messages and comes back to where you were. Used by the coordinator chat and the thread panel.
-import { computed, ref } from "vue";
-import { pendingOf, withPending } from "@/api/pending";
+import { computed, ref, watch } from "vue";
+import { pendingOf, prunePending, withPending } from "@/api/pending";
 import { flattenMessages, useMessages } from "@/api/queries";
 import type { MessageView, ThreadView } from "@/api/views";
 import Loading from "@/components/common/Loading.vue";
@@ -45,6 +45,11 @@ const messages = computed(() => {
   const shown = props.filter ? all.filter(props.filter) : all;
   return props.select ? props.select(shown) : shown;
 });
+// A send delivered before the messages had loaded is drawn from api/pending.ts until they hold it.
+watch(
+  () => query.data.value,
+  (data) => prunePending(props.cid, flattenMessages(data)),
+);
 const items = computed(() => interleave(chatBlocks(messages.value), props.inserts.map((i) => ({ key: i.key, at: i.at, node: i }))));
 const end = ref<HTMLElement | null>(null);
 useChatScroll(() => props.cid, end, () => messages.value.length + props.inserts.length, () => !query.isLoading.value);

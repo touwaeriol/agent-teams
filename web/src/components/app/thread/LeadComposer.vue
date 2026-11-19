@@ -28,6 +28,8 @@ const hint = computed(() => reopenHint(props.thread));
 const onSend = useSendMessage(() => props.thread.id, {
   invalidate: () => (hint.value ? [keys.threads(props.thread.project_id), keys.thread(props.thread.id)] : []),
   draft: () => draft.value,
+  attachments,
+  assist: () => ({ scope: "lead", pid: props.pid, cid: props.thread.id }),
 });
 const unarchive = useAction(() => threadActions.unarchive(props.thread.id), {
   invalidate: () => [keys.threads(props.thread.project_id), keys.thread(props.thread.id), keys.waiting(props.thread.project_id)],

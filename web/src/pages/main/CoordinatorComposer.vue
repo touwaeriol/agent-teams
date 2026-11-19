@@ -18,7 +18,7 @@ const me = useMe();
 const draft = computed(() => draftKey(me.data.value?.id ?? (me.isError.value ? "anon" : undefined), props.pid, cid.value));
 const attachments = useAttachments(() => props.pid, undefined, draft);
 // The message shows in the chat at once (api/pending.ts); the box does not wait for the server.
-const send = useSendMessage(() => cid.value, { draft: () => draft.value });
+const send = useSendMessage(() => cid.value, { draft: () => draft.value, attachments, assist: () => ({ scope: "coordinator", pid: props.pid, cid: cid.value }) });
 const stop = useAction(() => conversations.interrupt(cid.value), { success: "已让统筹停下" });
 const name = computed(() => props.coordinator?.employee.name ?? "leader");
 </script>

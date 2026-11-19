@@ -7,13 +7,15 @@ import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import ElementPlus from "element-plus";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { defineComponent, h } from "vue";
+import { defineComponent, h, type Ref } from "vue";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { applyProjectEvent } from "@/api/events";
-import { confirms, pendingOf, resetPending, retryMessage, sendMessage, withPending, type PendingMessage } from "@/api/pending";
+import { confirms, pendingOf, prunePending, resetPending, retryMessage, sendMessage, withPending, type PendingMessage } from "@/api/pending";
 import { flattenMessages, keys, type MessagePages } from "@/api/queries";
 import type { CoordinatorView, MessageView } from "@/api/views";
 import Chat from "@/components/app/Chat.vue";
+import type { MessageRef } from "@/components/app/composer/assist";
+import { dropPickedRefs, useComposerAssist } from "@/components/app/composer/useComposerAssist";
 import LeadComposer from "@/components/app/thread/LeadComposer.vue";
 import { resetDraftMemory } from "@/lib/persist";
 import CoordinatorComposer from "@/pages/main/CoordinatorComposer.vue";
@@ -37,10 +39,12 @@ interface Post {
 function stubApi(server: MessageView[] = []) {
   const posts: Post[] = [];
   let gets = 0;
+  let uploads = 0;
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const req = input instanceof Request ? input : new Request(String(input));
     const path = new URL(req.url, "http://x").pathname;
     if (path === "/api/me") return json({ id: "u1", email: "u1@x", name: "u1" });
+    if (req.method === "POST" && path.endsWith("/attachments")) return json({ id: `att${++uploads}` });
     if (req.method === "POST" && path.endsWith("/messages")) {
       const body = (await req.clone().json()) as { content: string };
       return new Promise<Response>((resolve) =>
@@ -73,6 +77,8 @@ const cached = (cid: string) => flattenMessages(client.getQueryData<MessagePages
 const shown = (cid: string) => withPending(cached(cid), pendingOf(cid));
 
 beforeEach(() => {
+  URL.createObjectURL = vi.fn((f: Blob) => `blob:${(f as File).name}`);
+  URL.revokeObjectURL = vi.fn();
   window.localStorage.clear();
   resetDraftMemory();
   resetPending();
@@ -180,6 +186,88 @@ describe("sendMessage", () => {
   });
 });
 
+describe("confirming", () => {
+  it("the same text twice: the first one's reply does not confirm the second", async () => {
+    const api = stubApi();
+    seed("c1", []);
+    const a = sendMessage(client, { cid: "c1", content: "好" });
+    void sendMessage(client, { cid: "c1", content: "好" }).catch(() => undefined);
+    await flushPromises();
+    api.posts[0].respond(json(msg("11", "好"), 202));
+    await a;
+    expect(shown("c1").map((m) => [m.id, m.local?.status])).toEqual([["11", undefined], [expect.stringMatching(/^tmp-/), "sending"]]);
+  });
+
+  it("before the chat has loaded, an old message with the same text does not confirm a send", async () => {
+    const api = stubApi();
+    const done = sendMessage(client, { cid: "c1", content: "好" });
+    expect(withPending([msg("5", "好")], pendingOf("c1")).map((m) => m.id)).toEqual(["5", expect.stringMatching(/^tmp-/)]);
+    await flushPromises();
+    api.posts[0].respond(json(msg("11", "好"), 202));
+    await done;
+    // The cache still has nothing: the stored message is drawn from the pending store meanwhile.
+    expect(cached("c1")).toEqual([]);
+    expect(shown("c1").map((m) => [m.id, m.local])).toEqual([["11", undefined]]);
+    seed("c1", [msg("5", "好"), msg("11", "好")]);
+    expect(shown("c1").map((m) => m.id)).toEqual(["5", "11"]);
+    prunePending("c1", cached("c1"));
+    expect(pendingOf("c1")).toEqual([]);
+  });
+
+  it("a failed send goes once the same text sent again from the box is delivered", async () => {
+    const api = stubApi();
+    seed("c1", []);
+    await expect(
+      (async () => {
+        const p = sendMessage(client, { cid: "c1", content: "再说一遍" });
+        await flushPromises();
+        api.posts[0].respond(json({ detail: "down" }, 503));
+        return p;
+      })(),
+    ).rejects.toThrow();
+    const again = sendMessage(client, { cid: "c1", content: "再说一遍" });
+    await flushPromises();
+    api.posts[1].respond(json(msg("12", "再说一遍"), 202));
+    await again;
+    expect(pendingOf("c1")).toEqual([]);
+    expect(shown("c1").map((m) => m.id)).toEqual(["12"]);
+  });
+
+  it("a failed send the server turns out to have (its frame came) goes after the next successful send", async () => {
+    const api = stubApi();
+    seed("c1", []);
+    const lost = sendMessage(client, { cid: "c1", content: "其实到了" });
+    await flushPromises();
+    api.posts[0].respond(json({ detail: "timeout" }, 504));
+    await expect(lost).rejects.toThrow();
+    applyProjectEvent(client, "p1", "message", { conversation_id: "c1", message: msg("20", "其实到了") });
+    expect(shown("c1").map((m) => m.id)).toEqual(["20"]);
+    const next = sendMessage(client, { cid: "c1", content: "下一条" });
+    await flushPromises();
+    api.posts[1].respond(json(msg("21", "下一条"), 202));
+    await next;
+    expect(pendingOf("c1")).toEqual([]);
+  });
+});
+
+describe("dropPickedRefs", () => {
+  it("takes the message's refs out of the box unless the text left still names them", () => {
+    let picked!: Ref<Array<MessageRef & { label: string }>>;
+    const Host = defineComponent({
+      setup() {
+        picked = useComposerAssist({ pid: "p1", cid: "c1", scope: "lead" }, { value: "" } as Ref<string>, () => null).picked;
+        return () => null;
+      },
+    });
+    mount(Host, { global: { plugins: plugins() } });
+    const a = { kind: "file" as const, repo: "o/r", path: "src/a.go", label: "src/a.go" };
+    const b = { kind: "file" as const, repo: "o/r", path: "src/b.go", label: "src/b.go" };
+    picked.value = [a, b];
+    dropPickedRefs({ scope: "lead", pid: "p1", cid: "c1" }, [{ kind: "file", repo: "o/r", path: "src/a.go" }, { kind: "file", repo: "o/r", path: "src/b.go" }], "还在 @src/b.go");
+    expect(picked.value.map((r) => r.path)).toEqual(["src/b.go"]);
+  });
+});
+
 /** The chat and its box side by side, as the coordinator page and the thread panel show them. */
 function mountChat(box: "lead" | "coordinator") {
   const Host = defineComponent({
@@ -196,6 +284,9 @@ function mountChat(box: "lead" | "coordinator") {
 }
 const bubbles = (w: VueWrapper) => w.findAll("div.whitespace-pre-wrap").map((n) => n.text());
 const box = (w: VueWrapper) => w.get<HTMLTextAreaElement>("textarea");
+const thumbs = (w: VueWrapper) => w.findAll("[aria-label=附件] img").map((i) => i.attributes("alt"));
+const paste = (w: VueWrapper, name: string) =>
+  w.get("form").element.dispatchEvent(Object.assign(new Event("paste", { bubbles: true }), { clipboardData: { files: [Object.assign(new File(["x"], name, { type: "image/png" }), { arrayBuffer: async () => new ArrayBuffer(1) })] } }));
 
 describe.each(["coordinator", "lead"] as const)("the %s chat", (which) => {
   it("shows the message before the server answers, then once", async () => {
@@ -252,5 +343,28 @@ describe.each(["coordinator", "lead"] as const)("the %s chat", (which) => {
     await flushPromises();
     expect(bubbles(w)).toEqual([]);
     expect(api.posts).toHaveLength(1);
+  });
+
+  it("a retry from the chat that delivers an image-only message takes the image out of the box", async () => {
+    const api = stubApi([]);
+    const w = mountChat(which);
+    await flushPromises();
+    paste(w, "shot.png");
+    await flushPromises();
+    expect(thumbs(w)).toEqual(["shot.png"]);
+    await box(w).trigger("keydown", { key: "Enter" });
+    await flushPromises();
+    expect(thumbs(w)).toEqual([]);
+    api.posts[0].respond(json({ detail: "down" }, 503));
+    await flushPromises();
+    expect(thumbs(w)).toEqual(["shot.png"]);
+    expect(w.find("[data-pending=failed]").exists()).toBe(true);
+    await w.findAll("[role=alert] button").find((b) => b.text() === "重试")!.trigger("click");
+    await flushPromises();
+    api.posts[1].respond(json(msg("8", "", { meta: { attachments: [{ id: "att1", name: "shot.png", content_type: "image/png", size: 1 }] } }), 202));
+    await flushPromises();
+    expect(w.find("[data-pending]").exists()).toBe(false);
+    expect(thumbs(w)).toEqual([]);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:shot.png");
   });
 });
