@@ -14,7 +14,7 @@ import Spinner from "@/components/common/Spinner.vue";
 import { nodeSlots } from "@/components/shell/nodes";
 import NodeSessions from "./NodeSessions.vue";
 import NodeSettings from "./NodeSettings.vue";
-import { hoverIntent, needsUsageRefresh, nodeMeta, RUNTIMES, runtimeLine, slotPct, usageView, withNodeUsage, type RuntimeInfo, type UsageView } from "./nodes";
+import { hoverIntent, needsUsageRefresh, refreshCooldown, nodeMeta, RUNTIMES, runtimeLine, slotPct, usageView, withNodeUsage, type RuntimeInfo, type UsageView } from "./nodes";
 
 const props = defineProps<{ node: NodeView }>();
 const emit = defineEmits<{ token: [enrollment: Enrollment] }>();
@@ -30,12 +30,13 @@ const usageRows = (key: string) => pick(key, "windows")?.rows ?? [];
 const usageUpdated = (key: string) => pick(key, "windows")?.updated ?? "";
 const usageError = (key: string) => pick(key, "error")?.error ?? "";
 // Hovering the runtime boxes for 300 ms asks the node for fresh quota, unless what we have is
-// under a minute old; one request at a time, failures keep the old data silently.
+// under a minute old or this node was tried in the last minute; one request at a time, failures keep the old data silently.
 const queryClient = useQueryClient();
 const refreshing = ref(false);
 async function refreshUsage() {
-  if (refreshing.value || !needsUsageRefresh(props.node)) return;
+  if (refreshing.value || !needsUsageRefresh(props.node) || !refreshCooldown.ready(props.node.id)) return;
   refreshing.value = true;
+  refreshCooldown.mark(props.node.id);
   try {
     const { usage: fresh } = await nodeActions.refreshUsage(props.node.id);
     queryClient.setQueryData<NodeView[]>(keys.nodes, (list) => withNodeUsage(list, props.node.id, fresh));
@@ -85,7 +86,7 @@ const upgrade = useAction(() => nodeActions.upgrade(props.node.id), { success: "
         </span>
         <template v-if="usage[key]?.kind === 'windows'">
           <div class="grid grid-cols-[auto_minmax(40px,1fr)_auto_auto] items-center gap-x-2 gap-y-1 text-xs">
-            <template v-for="row in usageRows(key)" :key="row.key">
+            <template v-for="(row, i) in usageRows(key)" :key="`${row.key}|${row.label}|${i}`">
               <span class="whitespace-nowrap text-muted-foreground">{{ row.label }}</span>
               <ProgressBar :pct="row.width" :tone="row.tone" :height="5" />
               <span class="text-right font-mono tabular-nums" :style="{ color: row.pct >= 80 ? row.tone : undefined }">{{ row.pct }}%</span>

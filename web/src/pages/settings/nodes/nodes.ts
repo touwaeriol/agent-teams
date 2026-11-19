@@ -84,7 +84,7 @@ export function usageView(key: string, info: RuntimeInfo | undefined, usage: Run
     return { key: w.key, label: windowLabel(w), pct, width: `${pct}%`, tone: USAGE_TONE[usageLevel(pct)], reset: resetText(w.resets_at, now) };
   });
   if (!rows.length) return null;
-  return { kind: "windows", rows, updated: [usage.plan, `更新于 ${timeAgo(usage.fetched_at)}`].filter(Boolean).join(" · ") };
+  return { kind: "windows", rows, updated: [usage.plan, `更新于 ${timeAgo(usage.fetched_at || usage.received_at)}`].filter(Boolean).join(" · ") };
 }
 
 /** Quota younger than this is shown as is; hovering does not ask the node again. */
@@ -102,6 +102,21 @@ export function needsUsageRefresh(n: { online: boolean; runtimes?: unknown; usag
     return Number.isNaN(at) || now - at >= maxAge;
   });
 }
+
+/** Hover refresh cooldown: after any attempt (answered, failed or 409) a node is not asked again for a minute. */
+export function createRefreshCooldown(ms = USAGE_FRESH_MS) {
+  const last = new Map<string, number>();
+  return {
+    ready: (id: string, now = Date.now()) => {
+      const t = last.get(id);
+      return t === undefined || now - t >= ms;
+    },
+    mark: (id: string, now = Date.now()) => void last.set(id, now),
+  };
+}
+
+/** Shared by every card so remounting the page does not reset it. */
+export const refreshCooldown = createRefreshCooldown();
 
 /** Fires `fire` once the pointer has stayed `ms` (hover intent); leaving earlier cancels it. */
 export function hoverIntent(ms: number, fire: () => void): { enter: () => void; leave: () => void } {

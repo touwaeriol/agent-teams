@@ -476,7 +476,10 @@ const routes = [
   ["POST", /^\/api\/nodes\/([^/]+)\/usage\/refresh$/, async (req, res, [id]) => {
     const n = state.nodes.find((x) => x.id === id);
     if (!n) return json(res, 404, { detail: "没有这个节点" });
-    if (!n.online) return json(res, 409, { detail: "节点离线" });
+    // Same shape as server/internal/httpapi/nodes_routes.go refreshNodeUsage.
+    if (!n.online) return json(res, 409, { detail: "节点不在线", code: "node_offline" });
+    const last = Math.max(0, ...Object.values(n.usage ?? {}).map((u) => Date.parse(u?.received_at ?? "") || 0));
+    if (Date.now() - last < 60_000) return json(res, 200, { usage: n.usage ?? null });
     await new Promise((r) => setTimeout(r, Number(process.env.MOCK_USAGE_MS ?? 1000)));
     const at = new Date().toISOString();
     if (n.usage) for (const u of Object.values(n.usage)) if (u) Object.assign(u, { fetched_at: at, received_at: at });
