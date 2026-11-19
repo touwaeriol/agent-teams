@@ -53,6 +53,15 @@ func (s *Store) Tx(ctx context.Context, fn func(tx *Store) error) error {
 	})
 }
 
+// On returns the Store bound to q (a transaction or the pool), so reads made while a
+// transaction is open use its connection instead of taking a second one from the pool.
+func (s *Store) On(q DB) *Store {
+	if q == nil {
+		return s
+	}
+	return &Store{Pool: s.Pool, db: q}
+}
+
 // g is the handle for one call.
 func (s *Store) g(ctx context.Context) *gorm.DB { return s.db.Gorm(ctx) }
 

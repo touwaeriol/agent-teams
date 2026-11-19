@@ -502,7 +502,7 @@ func (o *Orchestrator) loadEnv(ctx context.Context, tx *core.Tx, e core.Employee
 		}
 		env.thread = &t
 	}
-	env.repos = o.Repos(ctx, env.project)
+	env.repos = o.ReposIn(ctx, tx, env.project)
 	return env, nil
 }
 

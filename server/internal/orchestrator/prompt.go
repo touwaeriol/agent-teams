@@ -78,8 +78,8 @@ type docEntry struct {
 var claudeDocs = &docsCache{items: map[string]docEntry{}}
 
 // projectDocs returns the CLAUDE.md of every repository, each under its name ("" when none has one).
-func (o *Orchestrator) projectDocs(ctx context.Context, p store.Project) string {
-	repos := o.Repos(ctx, p)
+func (o *Orchestrator) projectDocs(ctx context.Context, q core.DB, p store.Project) string {
+	repos := o.ReposIn(ctx, q, p)
 	var parts []string
 	for _, r := range repos {
 		text := o.repoDoc(ctx, p, r)
@@ -121,7 +121,7 @@ func (o *Orchestrator) systemAppend(ctx context.Context, q core.DB, e core.Emplo
 	if e.Spec.Instructions != "" {
 		parts = append(parts, "## 岗位说明\n"+e.Spec.Instructions)
 	}
-	if doc := o.projectDocs(ctx, p); doc != "" {
+	if doc := o.projectDocs(ctx, q, p); doc != "" {
 		parts = append(parts, "## 仓库 CLAUDE.md（默认分支）\n"+doc)
 	}
 	if repos := o.reposSection(ctx, q, e, t, p); repos != "" {

@@ -51,6 +51,16 @@ type GitHub struct {
 	Store  *store.Store
 }
 
+// In returns g reading connections through q (a transaction; nil keeps the pool).
+func (g *GitHub) In(q store.DB) *GitHub {
+	if q == nil {
+		return g
+	}
+	c := *g
+	c.Store = g.Store.On(q)
+	return &c
+}
+
 // Repo is one of a project's repositories and how to reach it.
 type Repo struct {
 	Slug    string // owner/name

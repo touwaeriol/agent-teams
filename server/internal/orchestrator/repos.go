@@ -23,10 +23,16 @@ type RepoFocus struct {
 
 // Repos returns the project's reachable repositories (nil without GitHub or repositories).
 func (o *Orchestrator) Repos(ctx context.Context, p store.Project) []ghops.Repo {
+	return o.ReposIn(ctx, nil, p)
+}
+
+// ReposIn is Repos reading through q: inside a transaction pass it, so the lookup uses the
+// transaction's connection instead of waiting on the pool while holding the transaction's locks.
+func (o *Orchestrator) ReposIn(ctx context.Context, q core.DB, p store.Project) []ghops.Repo {
 	if o.gh == nil || !p.HasRepos() {
 		return nil
 	}
-	repos, err := o.gh.ReposOf(ctx, p)
+	repos, err := o.gh.In(q).ReposOf(ctx, p)
 	if err != nil {
 		o.log.Debug("project repositories", "project_id", p.ID, "err", err)
 		return nil
@@ -158,7 +164,7 @@ func (o *Orchestrator) reposSection(ctx context.Context, q core.DB, e core.Emplo
 		return b.String()
 	}
 	paths := PathsOf(e, t)
-	for _, r := range o.Repos(ctx, p) {
+	for _, r := range o.ReposIn(ctx, q, p) {
 		fmt.Fprintf(&b, "- %s：目录 ./%s，基准分支 %s\n", r.Slug, ghops.Dir(r.Slug), o.BaseFor(ctx, q, *t, r))
 	}
 	fmt.Fprintf(&b, "你的工作目录 %s 下每个仓库一个子目录；每个仓库里你的分支都叫 %s。只在需要改动的仓库里提交。", paths.Cwd, paths.Branch)

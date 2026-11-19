@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"gorm.io/gorm/schema"
 
@@ -189,5 +191,63 @@ func TestNestedTxIsSavepoint(t *testing.T) {
 	}
 	if len(keys) != 1 || keys[0] != "outer" {
 		t.Fatalf("keys %v", keys)
+	}
+}
+
+// TestOnReadsThroughTransaction: a Store bound to an open transaction reads on that
+// transaction's connection, so it never waits for a second one (a pool of one would hang).
+func TestOnReadsThroughTransaction(t *testing.T) {
+	ctx := context.Background()
+	url := testdb.Migrated(t)
+	s, err := store.Open(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := s.CreateUser(ctx, "on@example.com", "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.CreateConnection(ctx, u.ID, "gh", "login", "sealed", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	sep := "?"
+	if strings.Contains(url, "?") {
+		sep = "&"
+	}
+	one, err := store.Open(ctx, url+sep+"pool_max_conns=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer one.Close()
+	tctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	err = store.InTx(tctx, one.Pool, func(tx store.DB) error {
+		got, err := one.On(tx).Connection(tctx, u.ID, c.ID)
+		if err == nil && got.ID != c.ID {
+			t.Errorf("connection %q", got.ID)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestPoolDefaults: without pool_max_conns the pool is not the tiny pgx default, and sessions
+// left idle inside a transaction are ended by the server.
+func TestPoolDefaults(t *testing.T) {
+	ctx := context.Background()
+	pool := openPool(t)
+	var timeout string
+	if err := pool.Gorm(ctx).Raw(`SHOW idle_in_transaction_session_timeout`).Scan(&timeout).Error; err != nil {
+		t.Fatal(err)
+	}
+	if timeout != "2min" {
+		t.Fatalf("idle_in_transaction_session_timeout %q", timeout)
+	}
+	if got := pool.MaxConns(); got != 32 {
+		t.Fatalf("max conns %d", got)
 	}
 }
