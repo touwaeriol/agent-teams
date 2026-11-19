@@ -161,9 +161,12 @@ describe("in-progress marks spin", () => {
   });
 
   it("spins the thread mark and status chip only while the thread is in progress", () => {
-    expect(spins(ThreadMark, { thread: thread(1, { status: "running" }) })).toBe(true);
+    const busy = thread(1, { status: "running", counts: { ...thread(1).counts, tasks_open: 1 } });
+    expect(spins(ThreadMark, { thread: busy })).toBe(true);
+    // The lead replied and nothing else is going: 等你处理, not a spinner.
+    expect(spins(ThreadMark, { thread: thread(1, { status: "running" }) })).toBe(false);
     expect(spins(ThreadMark, { thread: thread(2, { status: "queued" }) })).toBe(false);
-    const look = threadLook(thread(1, { status: "running" }));
+    const look = threadLook(busy);
     expect(spins(StatusPill, { tone: look.tone, label: look.label, spin: look.spin })).toBe(true);
     expect(threadLook(thread(3, { status: "done" })).spin).toBeFalsy();
   });

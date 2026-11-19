@@ -32,12 +32,20 @@ describe("thread panel", () => {
     expect(detailViewOf(undefined)).toBeNull();
   });
   it("shows one quiet line while the thread is going", () => {
-    const t = (status: ThreadView["status"], lead: string | null) => ({ status, members: [member("lead-1", lead)] });
+    const t = (status: ThreadView["status"], lead: string | null, patch: Partial<ThreadView> = {}) => thread(1, { status, members: [member("lead-1", lead)], ...patch });
+    const open = { counts: { ...thread(1).counts, tasks_open: 2 } };
     expect(typingLine(t("running", "typing"))).toEqual({ text: "组长正在回复…", spin: true });
-    expect(typingLine(t("running", "idle"))).toEqual({ text: "讨论串进行中", spin: true });
+    // The lead stopped and nothing else is going: the ball is with the user, no spinner.
+    expect(typingLine(t("running", "idle"))).toEqual({ text: "组长已回复，等你回复", spin: false });
+    // Small tasks still open (queued for members, or a member busy in another thread).
+    expect(typingLine(t("running", "idle", open))).toEqual({ text: "等成员领取任务", spin: true });
+    expect(typingLine(thread(1, { members: [member("lead-1", "idle"), member("dev-1", "typing")] }))).toEqual({ text: "成员正在干活…", spin: true });
     expect(typingLine(t("paused", "idle"))).toEqual({ text: "讨论串已暂停", spin: false });
     expect(typingLine(t("queued", null))).toEqual({ text: "排队中，等节点空出来", spin: true });
     expect(typingLine(t("waiting", "idle"))).toBeNull();
+    expect(typingLine(t("review", "idle", { merge_policy: "pr", pr_number: 7 }))).toEqual({ text: "PR #7 等检查通过", spin: true });
+    expect(typingLine(t("review", "idle", { merge_policy: "auto" }))).toEqual({ text: "检查通过后自动合并", spin: true });
+    expect(typingLine(t("review", "idle", { merge_policy: "manual" }))).toBeNull();
     expect(typingLine(t("done", null))).toBeNull();
   });
   it("closes the message box of an archived thread only; done and failed ones reopen with a message", () => {
@@ -52,7 +60,7 @@ describe("thread panel", () => {
   it("shows a lead whose parked session is waking as busy", () => {
     const waking = member("lead-1", "thinking");
     waking.status = { ...waking.status!, substate: "waking" };
-    expect(typingLine({ status: "running", members: [waking] })).toEqual({ text: "正在唤醒组长…", spin: true });
+    expect(typingLine(thread(1, { status: "running", members: [waking] }))).toEqual({ text: "正在唤醒组长…", spin: true });
     expect(stateLabel(waking)).toBe("唤醒中");
     expect(isWorking(waking)).toBe(true);
     expect(memberDoing(waking)).toBe("唤醒中");

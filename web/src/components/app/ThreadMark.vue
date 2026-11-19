@@ -9,17 +9,23 @@ import { Check, X } from "lucide-vue-next";
 import { computed } from "vue";
 import type { ThreadView } from "@/api/views";
 import { INK, markTone, threadLook } from "@/lib/present";
-import { MARK_LABEL as LABEL, type RowMark } from "@/lib/threadList";
+import { threadPhase } from "@/lib/phase";
+import { MARK_LABEL, type RowMark } from "@/lib/threadList";
 import Spin from "./Spin.vue";
 
 const props = defineProps<{ thread: ThreadView; mark?: RowMark }>();
 const tone = computed(() => markTone(props.thread));
 const done = computed(() => props.thread.status === "done");
+/** The state's name from threadPhase (e.g. 待验收), the mark's generic one when the caller's mark differs. */
+const label = computed(() => {
+  const p = threadPhase(props.thread);
+  return props.mark && p.mark === props.mark ? p.label : MARK_LABEL[props.mark ?? "working"];
+});
 </script>
 
 <template>
   <template v-if="mark">
-    <span class="mt-0.5 flex size-4 shrink-0 items-center justify-center" role="img" :aria-label="LABEL[mark]" :data-mark="mark">
+    <span class="mt-0.5 flex size-4 shrink-0 items-center justify-center" role="img" :aria-label="label" :data-mark="mark">
       <Spin v-if="mark === 'working' || mark === 'queued'" :color="mark === 'working' ? INK.doing : INK.gray" :size="14" />
       <span v-else-if="mark === 'wait'" class="at-halo size-2.5 rounded-full" :style="{ background: INK.wait }" />
       <span v-else-if="mark === 'paused'" class="size-[13px] rounded-full border-[1.5px] border-dashed" :style="{ borderColor: INK.faint }" />

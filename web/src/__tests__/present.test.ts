@@ -12,9 +12,9 @@ describe("threadKind / markTone", () => {
     expect(threadKind(thread(1, { status: "review", counts: counts({ questions_open: 2 }) }))).toBe("review");
     expect(threadKind(thread(1, { status: "done" }))).toBe("done");
   });
-  it("an open question makes it 等你, an approval alone does not", () => {
+  it("an open card (question or approval) makes it 等你处理, as in the list", () => {
     expect(threadKind(thread(1, { counts: counts({ questions_open: 1, waiting: 1 }) }))).toBe("wait");
-    expect(threadKind(thread(1, { counts: counts({ approvals_open: 1, waiting: 1 }) }))).toBe("doing");
+    expect(threadKind(thread(1, { counts: counts({ approvals_open: 1, waiting: 1 }) }))).toBe("wait");
     expect(markTone(thread(1, { counts: counts({ approvals_open: 1, waiting: 1 }) }))).toBe(INK.wait);
   });
   it("paused and queued", () => {
