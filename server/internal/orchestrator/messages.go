@@ -53,6 +53,9 @@ type UserMessage struct {
 // PostUserMessageWith stores the user's message (with any images) and delivers it.
 func (o *Orchestrator) PostUserMessageWith(ctx context.Context, in UserMessage) (core.Message, error) {
 	userID, convID, content, interrupt, meta := in.UserID, in.ConvID, in.Content, in.Interrupt, in.Meta
+	if c, err := core.ConversationOfUser(ctx, o.core.Pool, userID, convID); err == nil && c.ProjectID != nil {
+		o.WarmProject(ctx, *c.ProjectID)
+	}
 	var m core.Message
 	err := o.core.InTx(ctx, func(tx *core.Tx) error {
 		c, err := core.ConversationOfUser(ctx, tx, userID, convID)

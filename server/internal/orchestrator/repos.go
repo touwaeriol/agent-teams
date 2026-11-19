@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
@@ -40,9 +41,11 @@ func (o *Orchestrator) ReposIn(ctx context.Context, q core.DB, p store.Project) 
 	return repos
 }
 
-// DefaultBranch is the repository's default branch, "main" when GitHub does not answer.
+// DefaultBranch is the repository's default branch, "main" when GitHub does not answer. It reads
+// the cache (refreshing a stale entry in the background) so that session opening, which runs
+// inside a transaction, does not wait on GitHub; WarmRepos fills the cache beforehand.
 func (o *Orchestrator) DefaultBranch(ctx context.Context, r ghops.Repo) string {
-	b, err := o.gh.DefaultBranch(ctx, r)
+	b, err := o.gh.CachedDefaultBranch(ctx, r)
 	if err != nil || b == "" {
 		o.log.Warn("default branch", "repo", r.Slug, "err", err)
 		return fallbackBase
@@ -187,4 +190,48 @@ func legacyCheckout(ctx context.Context, q core.DB, threadID, cwd string) bool {
 	var n int64
 	err := q.Gorm(ctx).Table("at_thread_nodes").Where("thread_id = ? AND ? = ANY(paths)", threadID, cwd).Limit(1).Count(&n).Error
 	return err == nil && n > 0
+}
+
+// WarmRepos reads from GitHub what opening a session needs (each repository's default branch
+// and CLAUDE.md) when it is missing or stale. Call it before a transaction that may open a
+// session: inside the transaction those values come from the cache only, so the transaction's
+// connection and row locks are never held across a GitHub round trip.
+func (o *Orchestrator) WarmRepos(ctx context.Context, p store.Project) {
+	for _, r := range o.Repos(ctx, p) {
+		if _, err := o.gh.DefaultBranch(ctx, r); err != nil {
+			o.log.Debug("warm default branch", "repo", r.Slug, "err", err)
+		}
+		if e, ok := cachedDoc(docKey(p, r)); !ok || time.Since(e.at) >= docTTL {
+			o.fetchDoc(ctx, p, r)
+		}
+	}
+}
+
+// WarmProject is WarmRepos by project id (errors are only logged: warming is an optimisation).
+func (o *Orchestrator) WarmProject(ctx context.Context, projectID string) {
+	if o.gh == nil || projectID == "" {
+		return
+	}
+	p, err := o.Project(ctx, projectID)
+	if err != nil {
+		o.log.Debug("warm project", "project_id", projectID, "err", err)
+		return
+	}
+	o.WarmRepos(ctx, p)
+}
+
+// WarmAll warms every project that has repositories (server start: the cache is empty).
+func (o *Orchestrator) WarmAll(ctx context.Context) {
+	if o.gh == nil {
+		return
+	}
+	var ids []string
+	err := o.core.Pool.Gorm(ctx).Table("at_project_repos").Distinct("project_id").Pluck("project_id", &ids).Error
+	if err != nil {
+		o.log.Warn("list projects to warm", "err", err)
+		return
+	}
+	for _, id := range ids {
+		o.WarmProject(ctx, id)
+	}
 }

@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -134,7 +135,7 @@ func (g *GitHub) DefaultBranch(ctx context.Context, r Repo) (string, error) {
 	defaultBranches.Lock()
 	c, ok := defaultBranches.items[key]
 	defaultBranches.Unlock()
-	if ok && time.Since(c.at) < 10*time.Minute {
+	if ok && time.Since(c.at) < branchTTL {
 		return c.name, nil
 	}
 	var out struct {
@@ -150,6 +151,56 @@ func (g *GitHub) DefaultBranch(ctx context.Context, r Repo) (string, error) {
 	defaultBranches.items[key] = cachedBranch{name: out.DefaultBranch, at: time.Now()}
 	defaultBranches.Unlock()
 	return out.DefaultBranch, nil
+}
+
+const branchTTL = 10 * time.Minute
+
+// CachedDefaultBranch is DefaultBranch without waiting on GitHub when the repository was seen
+// before: a stale entry is returned as is and refreshed in the background. For code that may
+// run inside a database transaction (session opening); warm the cache beforehand with DefaultBranch.
+func (g *GitHub) CachedDefaultBranch(ctx context.Context, r Repo) (string, error) {
+	key := strings.ToLower(r.Slug)
+	defaultBranches.Lock()
+	c, ok := defaultBranches.items[key]
+	defaultBranches.Unlock()
+	if !ok {
+		return g.DefaultBranch(ctx, r)
+	}
+	if time.Since(c.at) >= branchTTL {
+		Background("branch:"+key, func(ctx context.Context) {
+			if _, err := g.DefaultBranch(ctx, r); err != nil {
+				slog.Debug("refresh default branch", "repo", r.Slug, "err", err)
+			}
+		})
+	}
+	return c.name, nil
+}
+
+var inflight = struct {
+	sync.Mutex
+	keys map[string]bool
+}{keys: map[string]bool{}}
+
+// Background runs fn on its own goroutine (outside any transaction of the caller), at most one
+// run per key at a time, with a 30-second deadline.
+func Background(key string, fn func(ctx context.Context)) {
+	inflight.Lock()
+	if inflight.keys[key] {
+		inflight.Unlock()
+		return
+	}
+	inflight.keys[key] = true
+	inflight.Unlock()
+	go func() {
+		defer func() {
+			inflight.Lock()
+			delete(inflight.keys, key)
+			inflight.Unlock()
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		fn(ctx)
+	}()
 }
 
 // HasChecks reports whether the connection can read check runs.

@@ -57,11 +57,11 @@ func (o *Orchestrator) OpenThread(ctx context.Context, req ThreadRequest) (core.
 // OpenThreadTx creates the thread and its lead inside tx and makes sure the project has its
 // members (EnsureStaff); the caller starts queued threads after the commit (StartQueued).
 func (o *Orchestrator) OpenThreadTx(ctx context.Context, tx *core.Tx, req ThreadRequest) (core.Thread, error) {
-	p, err := o.store.ProjectOf(ctx, req.UserID, req.ProjectID)
+	p, err := o.store.On(tx).ProjectOf(ctx, req.UserID, req.ProjectID)
 	if err != nil {
 		return core.Thread{}, err
 	}
-	roles, err := o.threadRoles(ctx, req)
+	roles, err := o.threadRoles(ctx, tx, req)
 	if err != nil {
 		return core.Thread{}, err
 	}
@@ -95,8 +95,8 @@ func (o *Orchestrator) focusThread(ctx context.Context, tx *core.Tx, p store.Pro
 
 // threadRoles snapshots the user's lead and member templates. Members are project staff now
 // (EnsureStaff): requested counts are ignored, only the role names are checked.
-func (o *Orchestrator) threadRoles(ctx context.Context, req ThreadRequest) ([]store.Role, error) {
-	all, err := o.userRoles(ctx, req.UserID)
+func (o *Orchestrator) threadRoles(ctx context.Context, q core.DB, req ThreadRequest) ([]store.Role, error) {
+	all, err := o.userRoles(ctx, q, req.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -173,15 +173,15 @@ func (o *Orchestrator) hairFor(i int) *string {
 }
 
 // maxRunning is the user's running-thread limit (0 = no limit).
-func (o *Orchestrator) maxRunning(ctx context.Context, userID string) int {
-	u, err := o.store.UserByID(ctx, userID)
+func (o *Orchestrator) maxRunning(ctx context.Context, q core.DB, userID string) int {
+	u, err := o.store.On(q).UserByID(ctx, userID)
 	if err == nil && u.MaxRunningThreads != nil {
 		return *u.MaxRunningThreads
 	}
 	var platform struct {
 		MaxRunningThreads *int `json:"max_running_threads"`
 	}
-	if found, err := o.store.Setting(ctx, "platform", &platform); err == nil && found && platform.MaxRunningThreads != nil {
+	if found, err := o.store.On(q).Setting(ctx, "platform", &platform); err == nil && found && platform.MaxRunningThreads != nil {
 		return *platform.MaxRunningThreads
 	}
 	return DefaultMaxRunningThreads
@@ -189,7 +189,7 @@ func (o *Orchestrator) maxRunning(ctx context.Context, userID string) int {
 
 // threadSlotFree reports whether the user may run one more thread.
 func (o *Orchestrator) threadSlotFree(ctx context.Context, q core.DB, userID string) (bool, error) {
-	limit := o.maxRunning(ctx, userID)
+	limit := o.maxRunning(ctx, q, userID)
 	if limit <= 0 {
 		return true, nil
 	}
@@ -234,6 +234,7 @@ func (o *Orchestrator) start(ctx context.Context, t core.Thread) error {
 	if err != nil {
 		return err
 	}
+	o.WarmRepos(ctx, p)
 	return o.core.InTx(ctx, func(tx *core.Tx) error {
 		cur, err := core.LockThread(ctx, tx, t.ID)
 		if err != nil || cur.Status != "queued" {
@@ -511,6 +512,7 @@ func (o *Orchestrator) EnsureCoordinator(ctx context.Context, userID, projectID 
 // PostToCoordinator delivers a message to the project coordinator as if the user sent it
 // (scheduled tasks); meta marks where it came from.
 func (o *Orchestrator) PostToCoordinator(ctx context.Context, userID, projectID, content string, meta map[string]any) (core.Message, error) {
+	o.WarmProject(ctx, projectID)
 	var m core.Message
 	err := o.core.InTx(ctx, func(tx *core.Tx) error {
 		emp, conv, err := o.ensureCoordinatorTx(ctx, tx, userID, projectID)
@@ -537,7 +539,7 @@ func (o *Orchestrator) ensureCoordinatorTx(ctx context.Context, tx *core.Tx, use
 	if !errors.Is(err, core.ErrNotFound) {
 		return emp, conv, err
 	}
-	role, err := o.coordinatorRole(ctx, userID)
+	role, err := o.coordinatorRole(ctx, tx, userID)
 	if err != nil {
 		return emp, conv, err
 	}
@@ -554,8 +556,8 @@ func (o *Orchestrator) ensureCoordinatorTx(ctx context.Context, tx *core.Tx, use
 }
 
 // userRoles are the user's templates, or the platform defaults when there are none yet.
-func (o *Orchestrator) userRoles(ctx context.Context, userID string) ([]store.Role, error) {
-	all, err := o.store.Roles(ctx, userID)
+func (o *Orchestrator) userRoles(ctx context.Context, q core.DB, userID string) ([]store.Role, error) {
+	all, err := o.store.On(q).Roles(ctx, userID)
 	if err != nil || len(all) > 0 {
 		return all, err
 	}
@@ -568,8 +570,8 @@ func (o *Orchestrator) userRoles(ctx context.Context, userID string) ([]store.Ro
 	return roles.Defaults(looks), nil
 }
 
-func (o *Orchestrator) coordinatorRole(ctx context.Context, userID string) (store.Role, error) {
-	list, err := o.userRoles(ctx, userID)
+func (o *Orchestrator) coordinatorRole(ctx context.Context, q core.DB, userID string) (store.Role, error) {
+	list, err := o.userRoles(ctx, q, userID)
 	if err != nil {
 		return store.Role{}, err
 	}

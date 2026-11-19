@@ -94,15 +94,35 @@ func (o *Orchestrator) projectDocs(ctx context.Context, q core.DB, p store.Proje
 	return strings.Join(parts, "\n\n")
 }
 
-// repoDoc reads one repository's CLAUDE.md on its default branch (cached 10 minutes, "" on failure).
-func (o *Orchestrator) repoDoc(ctx context.Context, p store.Project, r ghops.Repo) string {
-	key := p.ID + "@" + r.Slug
+const docTTL = 10 * time.Minute
+
+func docKey(p store.Project, r ghops.Repo) string { return p.ID + "@" + r.Slug }
+
+func cachedDoc(key string) (docEntry, bool) {
 	claudeDocs.mu.Lock()
+	defer claudeDocs.mu.Unlock()
 	e, ok := claudeDocs.items[key]
-	claudeDocs.mu.Unlock()
-	if ok && time.Since(e.at) < 10*time.Minute {
-		return e.text
+	return e, ok
+}
+
+// repoDoc is one repository's CLAUDE.md on its default branch ("" when it has none). It runs
+// while a session opens, inside a transaction, so it reads the cache: a stale entry is returned
+// and refreshed in the background, and only a repository never read before is fetched now
+// (WarmRepos reads them before the transaction).
+func (o *Orchestrator) repoDoc(ctx context.Context, p store.Project, r ghops.Repo) string {
+	e, ok := cachedDoc(docKey(p, r))
+	if !ok {
+		return o.fetchDoc(ctx, p, r)
 	}
+	if time.Since(e.at) >= docTTL {
+		ghops.Background("doc:"+docKey(p, r), func(ctx context.Context) { o.fetchDoc(ctx, p, r) })
+	}
+	return e.text
+}
+
+// fetchDoc reads CLAUDE.md from GitHub into the cache ("" on failure).
+func (o *Orchestrator) fetchDoc(ctx context.Context, p store.Project, r ghops.Repo) string {
+	key := docKey(p, r)
 	fctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	text, err := o.gh.FileContent(fctx, r, "CLAUDE.md", o.DefaultBranch(fctx, r))
