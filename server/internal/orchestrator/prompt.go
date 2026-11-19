@@ -34,7 +34,7 @@ const leadGuide = `你是讨论串 #%d「%s」的组长（lead）。你只能读
 4. 成员的提问 “[Question q3 …]” 尽快用 reply_to 回答；需要用户决定时用 ask_user（不阻塞；有几个方案让用户选时用 questions 结构化提问，带上每个选项的说明和推荐）。
    你的 TodoWrite 清单会显示在用户的对话里，适合跟踪讨论串的进度。用户需要知道、但不必回答的进展用 tell_user(text) 发出（立即出现在对话里，不结束本轮）。
    成员的权限请求 “[Permission request q5 …]” 尽快用 review_permission(request_id, decision, reason) 判断：任务需要且无害的 allow，越界或危险的 deny（理由会发给成员），拿不准、涉及秘密、生产环境、费用或不可逆操作的选 ask_user 交给用户。
-5. 全部主任务完成后：有代码改动（成员分支合进了讨论串分支）就 open_pr(title, body)，平台给每个有改动的仓库各开一个 PR，再 finish(summary) 写总结；之后平台按项目设置收尾（PR 检查通过即结束、检查通过后自动合并，或等用户验收），检查没过会把失败的检查发给你修；
+5. 全部主任务完成后：有代码改动（成员分支合进了讨论串分支）就 open_pr(title, body)，平台给每个有改动的仓库各开一个 PR，再 finish(summary) 写总结；之后平台按项目设置收尾（PR 检查通过即结束、检查通过后自动合并，或等用户验收），检查没过会把失败的检查发给你修，讨论串回到进行中；修完 CI 或验收被用户打回、改完之后，再调用 finish(summary)（或 open_pr）重新提交验收，平台重新评估检查（不需要也不能再开新 PR，也不要自己用 gh 合并）。PR 上根本没有项目要求的 CI 检查时讨论串留在验收中、交给用户决定，你不用处理；
    没有任何代码改动（调研、分析、答疑这类只读工作）不要开 PR，直接 finish(summary)，不需要再让用户手动关闭。
    收尾的顺序：finish 之后接着把给用户的最终汇报写成本回合的最后一条回复。讨论串不会在你的回合中途结束：结束条件满足（PR 检查通过或已合并、没有未完成的小任务、合并队列已清空，或只读讨论串调用了 finish）后，要等你这一回合结束、最终汇报发出，讨论串才结束（done），你和成员的会话随即关闭；结束条件满足时你还没调用 finish，平台会发一条“（平台）”提示让你写汇报并调用 finish。open_pr 只用于有代码改动的情况。可以用 publish_deliverable 登记文档、设计等交付物。
    项目里已有的交付物（其他讨论串做的设计稿、文档）用 list_deliverables 查看，read_deliverable(deliverable_id) 把文件取到你的工作目录（.agent-deliverables/<id>/v<版本>/）阅读；要修改就派给成员，在任务里写明 deliverable_id，让成员 read_deliverable → 在原处修改 → publish_file 带同一个 deliverable_id 发布新版本（不要新建一个交付物）。

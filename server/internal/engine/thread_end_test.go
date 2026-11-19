@@ -8,6 +8,7 @@ import (
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/nodegw/nodetest"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -247,5 +248,96 @@ func TestCompleteDuringLeadTurn(t *testing.T) {
 	defer cancel()
 	if _, err := tm.n.Wait(ctx, protocol.TypeSessionClose, tm.lead.mine); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A thread back in running (failed checks, a reject) with its PRs open goes back to review when
+// its lead calls finish or open_pr again; a missing CI stays in review for the user.
+
+func (c *acceptCase) checks(conclusion string) {
+	c.set(func(gh *fakeGitHub) {
+		gh.checks["sha-thread"] = []map[string]any{{"name": "verify", "status": "completed", "conclusion": conclusion}}
+	})
+}
+
+// TestResubmitAfterCIFail: review → failed checks → running (lead told) → lead fixes and calls
+// finish → review again → checks pass → done.
+func TestResubmitAfterCIFail(t *testing.T) {
+	c, lead := newEndCase(t, "总结")
+	c.checks("failure")
+	c.update(t, map[string]any{"status": "review"})
+	lead.expectSend("[Thread #1 · CI 失败]")
+	c.waitFor(t, "back to running", func(v core.ThreadView) bool { return v.Status == "running" })
+	res := lead.mustCall("finish", map[string]string{"summary": "修好了 CI"})
+	if !strings.Contains(text(res), "重新提交验收") || !strings.Contains(text(res), "PR 留给人") {
+		t.Fatalf("finish result %q", text(res))
+	}
+	v := c.view(t)
+	if v.Status != "review" || v.PRState != "open" || v.MergeError != nil {
+		t.Fatalf("after finish: %s %q %v", v.Status, v.PRState, mergeError(v))
+	}
+	c.checks("success")
+	c.waitFor(t, "done once the checks pass", func(v core.ThreadView) bool { return v.Status == "done" })
+}
+
+// TestResubmitAfterReject: manual acceptance rejected → running → open_pr again resubmits (no
+// ErrPRExists) → review → the user accepts → merged and done.
+func TestResubmitAfterReject(t *testing.T) {
+	c := newAcceptCase(t, "manual", "review")
+	lead, _ := expectOpen(t, c.w, c.n, "lead-1")
+	c.checks("success")
+	if v := c.reject(t); v.Status != "running" {
+		t.Fatalf("after reject: %s", v.Status)
+	}
+	lead.expectSend("验收未通过")
+	res := lead.mustCall("open_pr", map[string]any{"title": "Acc", "body": "改好了"})
+	if !strings.Contains(text(res), "重新提交验收") {
+		t.Fatalf("open_pr result %q", text(res))
+	}
+	if v := c.view(t); v.Status != "review" || v.Counts.Waiting != 1 {
+		t.Fatalf("after open_pr: %s waiting %d", v.Status, v.Counts.Waiting)
+	}
+	c.reject(t)
+	lead.expectSend("验收未通过")
+	res = lead.mustCall("finish", map[string]string{"summary": "又改好了"})
+	if !strings.Contains(text(res), "等用户在页面上验收") {
+		t.Fatalf("finish result %q", text(res))
+	}
+	c.accept(t)
+	v := c.waitFor(t, "merged", func(v core.ThreadView) bool { return v.Status == "done" })
+	if v.PRState != "merged" {
+		t.Fatalf("pr_state %q", v.PRState)
+	}
+}
+
+// TestCIMissingStaysInReview: no check ever appears and on_missing = block: the thread stays in
+// review with merge_error for the user (waiting), the lead is not told to fix it.
+func TestCIMissingStaysInReview(t *testing.T) {
+	c, lead := newEndCase(t, "总结")
+	c.b.must(200, "PATCH", "/api/projects/"+c.thread.ProjectID, map[string]any{"delivery": map[string]any{
+		"ci": map[string]any{"mode": "checks", "appear_timeout_s": 1, "on_missing": "block"}}}, nil)
+	c.update(t, map[string]any{"status": "review"})
+	v := c.waitFor(t, "missing CI recorded", func(v core.ThreadView) bool { return v.MergeError != nil })
+	if !strings.Contains(mergeError(v), "没有出现项目要求的 CI 检查") || v.Counts.Waiting != 1 {
+		t.Fatalf("merge_error %q waiting %d", mergeError(v), v.Counts.Waiting)
+	}
+	c.stays(t, "review", 800*time.Millisecond)
+	expectNone(t, c.n, protocol.TypeSessionSend, 300*time.Millisecond, func(f nodetest.Frame) bool {
+		return lead.mine(f) && strings.Contains(string(f.Body), "CI 失败")
+	})
+}
+
+// TestResubmitRefusedWithOpenTasks: finish on a thread back in running is refused (nothing
+// recorded) while a small task is unfinished.
+func TestResubmitRefusedWithOpenTasks(t *testing.T) {
+	c, lead := newEndCase(t, "")
+	lead.mustCall("update_plan", map[string]any{"steps": []map[string]string{{"title": "做", "status": "done"}}})
+	lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "修 CI", "main": "做"})
+	res := lead.call("finish", map[string]string{"summary": "提前收尾"})
+	if res.Ok || !strings.Contains(text(res), "还有没完成的小任务") {
+		t.Fatalf("finish with an open task: %+v", res)
+	}
+	if v := c.view(t); v.Status != "running" || v.Summary != "" {
+		t.Fatalf("after the refusal: %s %q", v.Status, v.Summary)
 	}
 }

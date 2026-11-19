@@ -276,7 +276,7 @@ func (s *Service) openPR(ctx context.Context, tx *core.Tx, c *call) (Result, err
 	by := c.emp().Name
 	req := delivery.PRRequest{Title: in.Title, Body: in.Body, By: by, Repo: deref(in.Repo), Base: deref(in.Base)}
 	return Result{Later: func(ctx context.Context) Result {
-		th, err := s.deliv.OpenPR(ctx, t.ID, req)
+		th, again, err := s.deliv.OpenOrResubmit(ctx, t.ID, req)
 		if err != nil {
 			return failure(err)
 		}
@@ -285,6 +285,9 @@ func (s *Service) openPR(ctx context.Context, tx *core.Tx, c *call) (Result, err
 			return failure(err)
 		}
 		out := protocol.OpenPRResult{PRNumber: deref0(th.PRNumber), PRURL: deref(th.PRURL), Prs: repoPRs(repos)}
+		if again {
+			return okJSON("PR 已经开过，讨论串已重新提交验收（review），检查重新评估："+prLinks(out.Prs), out)
+		}
 		return okJSON("PR 已开："+prLinks(out.Prs), out)
 	}}, nil
 }
@@ -330,6 +333,14 @@ func (s *Service) finish(ctx context.Context, tx *core.Tx, c *call) (Result, err
 	if err != nil {
 		return Result{}, err
 	}
+	answer := ""
+	if end == finishWithPR {
+		// A thread back in running with its PRs open (failed checks, a reject) is resubmitted
+		// for review; refused (nothing recorded) while work is still open.
+		if answer, err = s.deliv.FinishWithPR(ctx, tx, t); err != nil {
+			return Result{}, err
+		}
+	}
 	summary := strings.TrimSpace(in.Summary)
 	if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"summary": summary}); err != nil {
 		return Result{}, err
@@ -354,13 +365,12 @@ func (s *Service) finish(ctx context.Context, tx *core.Tx, c *call) (Result, err
 	case finishNeedsPR:
 		return okText("总结已记录。讨论串有代码改动还没有开 PR：请调用 open_pr(title, body)，之后平台按项目设置收尾（PR 检查通过即结束、自动合并或等用户验收）。"), nil
 	}
-	return okText("总结已记录。平台按项目设置收尾（PR 检查通过即结束、自动合并或等用户验收），检查没过会把失败的检查发给你。" +
-		"还有未完成的任务或合并队列没清空时讨论串不会结束；结束条件满足后，等你这一回合结束（最终回复已发出）讨论串才结束（done）。"), nil
+	return okText(answer), nil
 }
 
 // What finish does besides recording the summary.
 const (
-	finishWithPR  = iota // a PR is open: the thread ends when it merges
+	finishWithPR  = iota // the thread has PRs: resubmitted for review when back in running (FinishWithPR)
 	finishNeedsPR        // changes are on a thread branch without a PR yet
 	finishNow            // nothing was changed in any repository: the thread is done now
 )
