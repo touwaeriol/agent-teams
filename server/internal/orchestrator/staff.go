@@ -17,11 +17,11 @@ func (o *Orchestrator) EnsureStaff(ctx context.Context, tx *core.Tx, projectID s
 	if err != nil {
 		return err
 	}
-	roles, err := o.userRoles(ctx, owner)
+	roles, err := o.userRoles(ctx, tx, owner)
 	if err != nil {
 		return err
 	}
-	nodes, err := o.store.ListNodes(ctx, owner)
+	nodes, err := o.store.On(tx).ListNodes(ctx, owner)
 	if err != nil {
 		return err
 	}
@@ -116,7 +116,7 @@ func (o *Orchestrator) Released(ctx context.Context, e core.Employee) {
 		if err != nil {
 			return err
 		}
-		roles, err := o.userRoles(ctx, owner)
+		roles, err := o.userRoles(ctx, tx, owner)
 		if err != nil || !core.Surplus(e, roles) {
 			return err
 		}
@@ -150,7 +150,7 @@ func (o *Orchestrator) RolesSaved(ctx context.Context, userID string) error {
 // coordinator and leads keep the copy they were created with except for the model, which they
 // cannot switch with /model and so must follow the role setting.
 func (o *Orchestrator) syncRoleModels(ctx context.Context, userID string) error {
-	list, err := o.userRoles(ctx, userID)
+	list, err := o.userRoles(ctx, nil, userID) // before the transaction: the pool
 	if err != nil {
 		return err
 	}

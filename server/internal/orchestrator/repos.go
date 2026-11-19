@@ -23,10 +23,16 @@ type RepoFocus struct {
 
 // Repos returns the project's reachable repositories (nil without GitHub or repositories).
 func (o *Orchestrator) Repos(ctx context.Context, p store.Project) []ghops.Repo {
+	return o.ReposIn(ctx, nil, p)
+}
+
+// ReposIn is Repos reading through q: inside a transaction pass it, so the lookup uses the
+// transaction's connection instead of waiting on the pool while holding the transaction's locks.
+func (o *Orchestrator) ReposIn(ctx context.Context, q core.DB, p store.Project) []ghops.Repo {
 	if o.gh == nil || !p.HasRepos() {
 		return nil
 	}
-	repos, err := o.gh.ReposOf(ctx, p)
+	repos, err := o.gh.In(q).ReposOf(ctx, p)
 	if err != nil {
 		o.log.Debug("project repositories", "project_id", p.ID, "err", err)
 		return nil
@@ -34,7 +40,9 @@ func (o *Orchestrator) Repos(ctx context.Context, p store.Project) []ghops.Repo 
 	return repos
 }
 
-// DefaultBranch is the repository's default branch, "main" when GitHub does not answer.
+// DefaultBranch is the repository's default branch, "main" when GitHub does not answer. It reads
+// the cache (refreshing a stale entry in the background) so that session opening, which runs
+// inside a transaction, does not wait on GitHub; WarmRepos fills the cache beforehand.
 func (o *Orchestrator) DefaultBranch(ctx context.Context, r ghops.Repo) string {
 	b, err := o.gh.DefaultBranch(ctx, r)
 	if err != nil || b == "" {
@@ -158,7 +166,7 @@ func (o *Orchestrator) reposSection(ctx context.Context, q core.DB, e core.Emplo
 		return b.String()
 	}
 	paths := PathsOf(e, t)
-	for _, r := range o.Repos(ctx, p) {
+	for _, r := range o.ReposIn(ctx, q, p) {
 		fmt.Fprintf(&b, "- %s：目录 ./%s，基准分支 %s\n", r.Slug, ghops.Dir(r.Slug), o.BaseFor(ctx, q, *t, r))
 	}
 	fmt.Fprintf(&b, "你的工作目录 %s 下每个仓库一个子目录；每个仓库里你的分支都叫 %s。只在需要改动的仓库里提交。", paths.Cwd, paths.Branch)
@@ -181,4 +189,47 @@ func legacyCheckout(ctx context.Context, q core.DB, threadID, cwd string) bool {
 	var n int64
 	err := q.Gorm(ctx).Table("at_thread_nodes").Where("thread_id = ? AND ? = ANY(paths)", threadID, cwd).Limit(1).Count(&n).Error
 	return err == nil && n > 0
+}
+
+// WarmRepos reads from GitHub what opening a session needs (each repository's default branch
+// and CLAUDE.md) when it is missing; a stale entry is renewed in the background (see the caches
+// in ghops and prompt.go). Call it before a transaction that may open a session: inside the
+// transaction those values come from the cache only, so the transaction's connection and row
+// locks are never held across a GitHub round trip.
+func (o *Orchestrator) WarmRepos(ctx context.Context, p store.Project) {
+	for _, r := range o.Repos(ctx, p) {
+		if _, err := o.gh.DefaultBranch(ctx, r); err != nil {
+			o.log.Debug("warm default branch", "repo", r.Slug, "err", err)
+		}
+		o.repoDoc(ctx, p, r)
+	}
+}
+
+// WarmProject is WarmRepos by project id (errors are only logged: warming is an optimisation).
+func (o *Orchestrator) WarmProject(ctx context.Context, projectID string) {
+	if o.gh == nil || projectID == "" {
+		return
+	}
+	p, err := o.Project(ctx, projectID)
+	if err != nil {
+		o.log.Debug("warm project", "project_id", projectID, "err", err)
+		return
+	}
+	o.WarmRepos(ctx, p)
+}
+
+// WarmAll warms every project that has repositories (server start: the cache is empty).
+func (o *Orchestrator) WarmAll(ctx context.Context) {
+	if o.gh == nil {
+		return
+	}
+	var ids []string
+	err := o.core.Pool.Gorm(ctx).Table("at_project_repos").Distinct("project_id").Pluck("project_id", &ids).Error
+	if err != nil {
+		o.log.Warn("list projects to warm", "err", err)
+		return
+	}
+	for _, id := range ids {
+		o.WarmProject(ctx, id)
+	}
 }

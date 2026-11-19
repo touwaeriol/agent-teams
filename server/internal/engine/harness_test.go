@@ -53,6 +53,38 @@ func newWorld(t *testing.T, gh *httptest.Server) *world {
 	return newWorldWith(t, gh, nil)
 }
 
+// warnings collects the engines' warnings and errors and prints them when the test fails (a
+// failure such as "link closed before ack" is explained by the server's log, e.g. why a node
+// message was not processed). Buffered: background goroutines may log after the test returned.
+func warnings(t *testing.T) io.Writer {
+	w := &lockedBuffer{}
+	t.Cleanup(func() {
+		if t.Failed() {
+			if s := w.String(); s != "" {
+				t.Logf("server warnings:\n%s", s)
+			}
+		}
+	})
+	return w
+}
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // newWorldWith is newWorld with a chance to tune the engines before they start.
 func newWorldWith(t *testing.T, gh *httptest.Server, tune func(*engine.Engine)) *world {
 	t.Helper()
@@ -64,7 +96,7 @@ func newWorldWith(t *testing.T, gh *httptest.Server, tune func(*engine.Engine)) 
 		t.Fatal(err)
 	}
 	t.Cleanup(db.Close)
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	log := slog.New(slog.NewTextHandler(warnings(t), &slog.HandlerOptions{Level: slog.LevelWarn}))
 	if os.Getenv("E2E_LOG") != "" {
 		log = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}

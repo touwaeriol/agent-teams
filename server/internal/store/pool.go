@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -28,9 +29,28 @@ type Pool struct {
 	pgxp *pgxpool.Pool
 }
 
+// defaultMaxConns replaces pgxpool's default (max(4, CPUs)) unless the URL sets pool_max_conns.
+// A few connections stay pinned by advisory-lock holders, and code inside a transaction may
+// still take a second connection, so a pool of a handful can run dry and wait forever.
+const defaultMaxConns = 32
+
+// idleInTxTimeout makes PostgreSQL end a session left idle inside a transaction, so a stuck
+// transaction releases its row locks instead of blocking every writer behind it.
+const idleInTxTimeout = "120s"
+
 // OpenPool connects GORM to PostgreSQL and pings.
 func OpenPool(ctx context.Context, url string) (*Pool, error) {
-	pp, err := pgxpool.New(ctx, url)
+	cfg, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		return nil, fmt.Errorf("parse database url: %w", err)
+	}
+	if !strings.Contains(url, "pool_max_conns") {
+		cfg.MaxConns = defaultMaxConns
+	}
+	if _, ok := cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"]; !ok {
+		cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = idleInTxTimeout
+	}
+	pp, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("connect postgres: %w", err)
 	}
@@ -77,6 +97,9 @@ func (p *Pool) Gorm(ctx context.Context) *gorm.DB { return p.gdb.WithContext(ctx
 
 // SQL is the database/sql handle (dedicated connections for advisory locks).
 func (p *Pool) SQL() *sql.DB { return p.sql }
+
+// MaxConns is the pool's connection limit.
+func (p *Pool) MaxConns() int32 { return p.pgxp.Config().MaxConns }
 
 // Close releases every connection.
 func (p *Pool) Close() {

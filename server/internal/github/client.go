@@ -136,6 +136,7 @@ func (c *Client) do(ctx context.Context, cl call, out any) (http.Header, error) 
 }
 
 func (c *Client) request(ctx context.Context, cl call) (*http.Request, error) {
+	guardTx(cl.method, cl.path)
 	base := cl.base
 	if base == "" {
 		base = c.BaseURL

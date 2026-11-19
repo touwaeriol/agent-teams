@@ -97,7 +97,7 @@ func (o *Orchestrator) project(ctx context.Context, q core.DB, id string) (store
 	if err != nil {
 		return store.Project{}, err
 	}
-	return o.store.ProjectOf(ctx, userID, id)
+	return o.store.On(q).ProjectOf(ctx, userID, id)
 }
 
 // Project exposes project loading to the other engines.

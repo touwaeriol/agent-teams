@@ -87,8 +87,8 @@ const docTimeout = 5 * time.Second
 var claudeDocs = &docsCache{items: map[string]docEntry{}}
 
 // projectDocs returns the CLAUDE.md of every repository, each under its name ("" when none has one).
-func (o *Orchestrator) projectDocs(ctx context.Context, p store.Project) string {
-	repos := o.Repos(ctx, p)
+func (o *Orchestrator) projectDocs(ctx context.Context, q core.DB, p store.Project) string {
+	repos := o.ReposIn(ctx, q, p)
 	var parts []string
 	for _, r := range repos {
 		text := o.repoDoc(ctx, p, r)
@@ -103,9 +103,13 @@ func (o *Orchestrator) projectDocs(ctx context.Context, p store.Project) string 
 	return strings.Join(parts, "\n\n")
 }
 
+func docKey(p store.Project, r ghops.Repo) string { return p.ID + "@" + r.Slug }
+
 // repoDoc reads one repository's CLAUDE.md on its default branch ("" on failure; see docsCache).
+// It runs while a session opens, inside a transaction: only a repository never read before waits
+// for GitHub, and WarmRepos reads those before the transaction.
 func (o *Orchestrator) repoDoc(ctx context.Context, p store.Project, r ghops.Repo) string {
-	return claudeDocs.get(ctx, p.ID+"@"+r.Slug, func(ctx context.Context) (string, error) {
+	return claudeDocs.get(ctx, docKey(p, r), func(ctx context.Context) (string, error) {
 		fctx, cancel := context.WithTimeout(ctx, docTimeout)
 		defer cancel()
 		text, err := o.gh.FileContent(fctx, r, "CLAUDE.md", o.DefaultBranch(fctx, r))
@@ -156,31 +160,13 @@ func (c *docsCache) refresh(ctx context.Context, key string, read func(context.C
 	c.items[key] = e
 }
 
-// WarmRepos fills the GitHub caches a session open reads (each repository's default branch and
-// CLAUDE.md) outside any transaction, so the delivery that may open a session right after does not
-// call GitHub while it holds the project row (core.LockProject). Errors are ignored: the open
-// falls back the way it always did.
-func (o *Orchestrator) WarmRepos(ctx context.Context, projectID string) {
-	if o.gh == nil || projectID == "" {
-		return
-	}
-	p, err := o.project(ctx, o.core.Pool, projectID)
-	if err != nil {
-		return
-	}
-	for _, r := range o.Repos(ctx, p) {
-		o.DefaultBranch(ctx, r)
-		o.repoDoc(ctx, p, r)
-	}
-}
-
 // systemAppend builds the prompt appended to the claude_code preset (§6.1).
 func (o *Orchestrator) systemAppend(ctx context.Context, q core.DB, e core.Employee, t *core.Thread, p store.Project) (string, error) {
 	parts := []string{guide(e, t)}
 	if e.Spec.Instructions != "" {
 		parts = append(parts, "## 岗位说明\n"+e.Spec.Instructions)
 	}
-	if doc := o.projectDocs(ctx, p); doc != "" {
+	if doc := o.projectDocs(ctx, q, p); doc != "" {
 		parts = append(parts, "## 仓库 CLAUDE.md（默认分支）\n"+doc)
 	}
 	if repos := o.reposSection(ctx, q, e, t, p); repos != "" {

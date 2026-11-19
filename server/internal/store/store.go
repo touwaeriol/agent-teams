@@ -53,6 +53,15 @@ func (s *Store) Tx(ctx context.Context, fn func(tx *Store) error) error {
 	})
 }
 
+// On returns the Store bound to q (a transaction or the pool), so reads made while a
+// transaction is open use its connection instead of taking a second one from the pool.
+func (s *Store) On(q DB) *Store {
+	if q == nil {
+		return s
+	}
+	return &Store{Pool: s.Pool, db: q}
+}
+
 // g is the handle for one call.
 func (s *Store) g(ctx context.Context) *gorm.DB { return s.db.Gorm(ctx) }
 
@@ -79,6 +88,13 @@ func IsNoRows(err error) bool {
 func IsUnique(err error) bool {
 	var pg *pgconn.PgError
 	return errors.As(err, &pg) && pg.Code == "23505"
+}
+
+// IsRetryable reports whether err is a deadlock (40P01) or serialization failure (40001): the
+// transaction was rolled back by PostgreSQL and running it again is expected to succeed.
+func IsRetryable(err error) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && (pg.Code == "40P01" || pg.Code == "40001")
 }
 
 // MapErr turns "no row" into ErrNotFound and unique violations into ErrConflict.

@@ -178,11 +178,36 @@ func (l *link) handleReliable(ctx context.Context, env *protocol.Envelope, body 
 		return err
 	}
 	if ok && l.g.handler != nil {
-		if err := l.g.handler.Handle(ctx, l.node, env.Type, body); err != nil {
+		if err := l.handle(ctx, env.Type, body); err != nil {
 			return err
 		}
 	}
 	return l.advance(ctx, seq)
+}
+
+// handleAttempts bounds how often a reliable message is run again here after PostgreSQL rolled
+// its transaction back as a deadlock victim or a serialization failure.
+const handleAttempts = 4
+
+// handle runs the handler, again (after a short pause) when the database rolled it back as a
+// deadlock or serialization failure. Running a reliable message again is what the daemon's
+// replay after a closed link would do (handlers are idempotent per seq); doing it here spares the
+// reconnect and the replay of everything unacknowledged behind it.
+func (l *link) handle(ctx context.Context, typ string, body any) error {
+	var err error
+	for attempt := 1; ; attempt++ {
+		err = l.g.handler.Handle(ctx, l.node, typ, body)
+		if err == nil || !store.IsRetryable(err) || attempt == handleAttempts || ctx.Err() != nil {
+			return err
+		}
+		l.g.log.Info("node message rolled back, running it again", "node_id", l.node.ID, "type", typ,
+			"attempt", attempt, "err", err)
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(time.Duration(attempt*20) * time.Millisecond):
+		}
+	}
 }
 
 // advance persists the daemon seq as handled and acknowledges it.

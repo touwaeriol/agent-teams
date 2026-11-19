@@ -501,7 +501,7 @@ func (o *Orchestrator) loadEnv(ctx context.Context, tx *core.Tx, e core.Employee
 		}
 		env.thread = &t
 	}
-	env.repos = o.Repos(ctx, env.project)
+	env.repos = o.ReposIn(ctx, tx, env.project)
 	return env, nil
 }
 
@@ -776,7 +776,7 @@ func (o *Orchestrator) RefreshWorktree(ctx context.Context, tx *core.Tx, e core.
 // pickNode chooses the node for an employee: its current node if still there, else
 // the online candidate with the most free slots, else the first candidate.
 func (o *Orchestrator) pickNode(ctx context.Context, tx *core.Tx, e core.Employee, p store.Project) (store.Node, error) {
-	nodes, err := o.store.ListNodes(ctx, p.UserID)
+	nodes, err := o.store.On(tx).ListNodes(ctx, p.UserID)
 	if err != nil {
 		return store.Node{}, err
 	}
@@ -833,7 +833,7 @@ func (o *Orchestrator) reopen(ctx context.Context, tx *core.Tx, e core.Employee,
 	if err != nil {
 		return err
 	}
-	node, err := o.store.NodeOf(ctx, env.project.UserID, deref(s.NodeID))
+	node, err := o.store.On(tx).NodeOf(ctx, env.project.UserID, deref(s.NodeID))
 	if err != nil {
 		return o.handoff(ctx, tx, e, s, first)
 	}
