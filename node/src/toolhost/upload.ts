@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import bundle from "../../../protocol/gen/bundle.schema.json" with { type: "json" };
 import type { ToolUpload, UploadFile } from "../protocol.js";
 import { newId } from "../util/ids.js";
 import { isInside } from "../util/paths.js";
@@ -14,8 +15,10 @@ export const CHUNK_BYTES = 1024 * 1024;
 export const MAX_SHARED_BYTES = 20 * 1024 * 1024;
 /** Folder (relative to the session's working directory) shared files are fetched into; write_shared_file strips it from a default path. */
 export const SHARED_DIR = ".shared";
-/** SharedPath of the tool contract: 1 to 8 '/'-separated segments, none empty or starting with a dot, no backslash or control characters. */
-const SHARED_PATH = /^[^./\\\x00-\x1f\x7f][^/\\\x00-\x1f\x7f]*(?:\/[^./\\\x00-\x1f\x7f][^/\\\x00-\x1f\x7f]*){0,7}$/;
+/** SharedPath of the tool contract (tools/common.json), taken from the generated bundle so it never drifts. */
+const SHARED_PATH = new RegExp((bundle as unknown as { $defs: { SharedPath: { pattern: string } } }).$defs.SharedPath.pattern);
+const MAX_SHARED_PATH_BYTES = 255;
+const SHARED_PATH_RULES = "relative, '/'-separated, 1 to 8 parts, at most 255 bytes; no part empty, starting with a dot or starting/ending with a space; no backslash or control characters";
 
 /** Allowed extensions and the type they are served with (same list as the console). */
 const TYPES: Record<string, string> = {
@@ -53,7 +56,7 @@ export function validFilePath(path: string): boolean {
 
 /** A stored shared-files path (tools/common.json#SharedPath). */
 export function validSharedPath(path: string): boolean {
-  return path.length > 0 && path.length <= 255 && SHARED_PATH.test(path);
+  return path.length > 0 && Buffer.byteLength(path, "utf8") <= MAX_SHARED_PATH_BYTES && SHARED_PATH.test(path);
 }
 
 /**
@@ -79,7 +82,7 @@ export async function prepareUpload(cwd: string, rawPath: unknown): Promise<Prep
  */
 export async function prepareSharedUpload(cwd: string, rawFile: unknown, rawTarget: unknown): Promise<PreparedUpload> {
   if (rawTarget !== undefined && rawTarget !== null && (typeof rawTarget !== "string" || !validSharedPath(rawTarget))) {
-    throw new UploadError(`path ${JSON.stringify(rawTarget)} is not a valid shared path (relative, '/'-separated, up to 8 parts, no part empty or starting with a dot)`);
+    throw new UploadError(`path ${JSON.stringify(rawTarget)} is not a valid shared path (${SHARED_PATH_RULES})`);
   }
   const { real, rel } = await resolveInside(cwd, rawFile, "write_shared_file only uploads files inside your working directory");
   const st = await lstat(real);
@@ -87,7 +90,9 @@ export async function prepareSharedUpload(cwd: string, rawFile: unknown, rawTarg
   if (!st.isFile()) throw new UploadError(`${String(rawFile)}: not a regular file`);
   checkSize(st.size, MAX_SHARED_BYTES);
   const target = typeof rawTarget === "string" ? rawTarget : defaultSharedPath(rel);
-  if (!validSharedPath(target)) throw new UploadError(`${target} cannot be used as a shared path (no part may start with a dot); pass path`);
+  if (!validSharedPath(target)) {
+    throw new UploadError(`the default shared path ${JSON.stringify(target)} (derived from file) is not valid (${SHARED_PATH_RULES}); pass path to choose a target`);
+  }
   const [body] = await readAll([{ path: String(rawFile), abs: real }], MAX_SHARED_BYTES);
   return buildUpload([{ path: target, body: body!, contentType: contentType(target) ?? "application/octet-stream" }]);
 }
