@@ -21,6 +21,10 @@ const search = ref<HTMLInputElement | null>(null);
 const shown = computed(() => filterLanguages(props.languages, q.value));
 const checkedMic = computed(() => selectedMic(mics.value, props.prefs.deviceId));
 const language = computed(() => languageLabel(props.languages, props.prefs.language));
+/** What the mic button does in the current mode (the switch's explanation). */
+const modeNote = computed(() =>
+  props.prefs.pushToTalk ? `按住麦克风或 ${props.shortcut} 说话，松开结束` : `点一下麦克风开始，再点一下结束（${props.shortcut} 同样）`,
+);
 
 async function refresh() {
   try {
@@ -102,11 +106,12 @@ const label = "px-2.5 pb-1 pt-1.5 text-xs text-muted-foreground";
       </button>
 
       <div class="mx-1 my-1 border-t" />
-      <label :class="cn(row, 'cursor-pointer hover:bg-transparent')" :title="prefs.pushToTalk ? `按住按钮或 ${shortcut} 说话，松开结束` : `点一下开始，再点一下结束（${shortcut}）`">
+      <label :class="cn(row, 'cursor-pointer hover:bg-transparent')" :title="modeNote">
         <span class="flex-1">按住录音</span>
         <span class="text-xs text-muted-foreground">{{ shortcut }}</span>
         <el-switch :model-value="prefs.pushToTalk" size="small" aria-label="按住录音" @change="(v: string | number | boolean) => emit('change', { pushToTalk: Boolean(v) })" />
       </label>
+      <p class="px-2.5 pb-1 text-xs text-muted-foreground" data-testid="voice-mode-note">{{ modeNote }}</p>
     </template>
 
     <template v-else>

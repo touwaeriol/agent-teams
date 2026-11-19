@@ -449,15 +449,23 @@ describe("mic button", () => {
     expect(calls).toEqual(["toggle"]);
   });
 
-  it("says 点击停止 while recording; push-to-talk can stop by click too", async () => {
+  it("says 点击结束 while recording (solid blue, no spinner); push-to-talk says 松开结束 and a keyboard click stops", async () => {
     const rec = input("recording");
-    expect(rec.mic().attributes("title")).toBe("点击停止（Esc）");
+    expect(rec.mic().attributes("title")).toBe("正在录音，点击结束（Esc）");
     expect(rec.w.find("[data-testid=voice-spinner]").exists()).toBe(false);
+    expect(rec.mic().classes()).toContain("bg-[#2F6FDB]");
+    expect(rec.mic().classes()).toContain("text-white");
     await rec.mic().trigger("click");
     expect(rec.calls).toEqual(["toggle"]);
     const ptt = input("recording", true);
-    await ptt.mic().trigger("click");
+    expect(ptt.mic().attributes("title")).toBe("正在录音，松开结束");
+    await ptt.mic().trigger("click"); // detail 0: keyboard activation
     expect(ptt.calls).toEqual(["toggle"]);
+  });
+
+  it("idle titles describe the mode", () => {
+    expect(input("idle").mic().attributes("title")).toMatch(/^语音输入：点击开始，再点击结束/);
+    expect(input("idle", true).mic().attributes("title")).toMatch(/^按住说话，松开结束/);
   });
 
   it("a push-to-talk press is not also a click", async () => {
