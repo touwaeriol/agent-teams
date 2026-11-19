@@ -124,39 +124,50 @@ func (s *Service) threadStatus(ctx context.Context, tx *core.Tx, c *call) (Resul
 	if err != nil {
 		return Result{}, refuse("没有讨论串 #%d", in.No)
 	}
-	out, err := s.statusOf(ctx, tx, t)
+	out, phase, err := s.statusOf(ctx, tx, t)
 	if err != nil {
 		return Result{}, err
 	}
-	return okJSON(statusText(out), out), nil
+	return okJSON(statusText(out, phase), out), nil
 }
 
-func (s *Service) statusOf(ctx context.Context, tx *core.Tx, t core.Thread) (protocol.ThreadStatusResult, error) {
+// statusOf is the thread's status for the coordinator; the phase is the state as the page shows
+// it (core.PhaseOf), told next to the raw status.
+func (s *Service) statusOf(ctx context.Context, tx *core.Tx, t core.Thread) (protocol.ThreadStatusResult, core.ThreadPhase, error) {
 	out := protocol.ThreadStatusResult{No: protocol.ThreadNo(t.No), Title: t.Title, Status: protocol.ThreadStatus(t.Status),
 		Plan: []protocol.PlanStep{}, PRURL: t.PRURL}
 	plan, err := core.MainTasks(ctx, tx, t.ID)
 	if err != nil {
-		return out, err
+		return out, core.ThreadPhase{}, err
 	}
 	for _, m := range plan {
 		out.Plan = append(out.Plan, protocol.PlanStep{Title: m.Title, Status: protocol.PlanStepStatus(m.Status)})
 	}
-	if v, err := s.core.ThreadViewOf(ctx, tx, t); err == nil && v.LeadLast != nil {
+	v, err := s.core.ThreadViewOf(ctx, tx, t)
+	if err != nil {
+		return out, core.ThreadPhase{}, err
+	}
+	if v.LeadLast != nil {
 		out.LeadLastReply = &v.LeadLast.Text
+	}
+	merges, err := core.MergeQueue(ctx, tx, t.ID, true)
+	if err != nil {
+		return out, core.ThreadPhase{}, err
 	}
 	acts, err := core.ThreadActivity(ctx, tx, t.ID, 0, 10)
 	if err != nil {
-		return out, err
+		return out, core.ThreadPhase{}, err
 	}
 	for _, a := range acts {
 		out.Recent = append(out.Recent, a.Employee+"："+a.Text)
 	}
-	return out, nil
+	return out, core.PhaseOf(v, len(merges)), nil
 }
 
-func statusText(r protocol.ThreadStatusResult) string {
+func statusText(r protocol.ThreadStatusResult, phase core.ThreadPhase) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "#%d %s [%s]\n", r.No, r.Title, r.Status)
+	fmt.Fprintf(&b, "状态说明（和页面一致）：%s\n", phase.Text())
 	for _, p := range r.Plan {
 		fmt.Fprintf(&b, "- [%s] %s\n", p.Status, p.Title)
 	}
@@ -182,8 +193,22 @@ func (s *Service) messageThread(ctx context.Context, tx *core.Tx, c *call) (Resu
 	if err != nil {
 		return Result{}, refuse("没有讨论串 #%d", in.No)
 	}
-	if !t.Active() && t.Status != "paused" && t.Status != "queued" {
-		return Result{}, refuse("讨论串 #%d 已经结束（%s）", t.No, t.Status)
+	reopened := ""
+	switch t.Status {
+	case "archived":
+		return Result{}, refuse("讨论串 #%d 已归档，不能发消息：需要时请用户先在页面上取消归档", t.No)
+	case "done", "failed":
+		// As a user's message on the page does: the finished thread is reopened, then the lead gets it.
+		if t, err = core.LockThread(ctx, tx, t.ID); err != nil {
+			return Result{}, err
+		}
+		if err := s.orch.Reopen(ctx, tx, t, orchestrator.ReopenByCoordinator); err != nil {
+			return Result{}, err
+		}
+		if t, err = core.ThreadByID(ctx, tx, t.ID); err != nil {
+			return Result{}, err
+		}
+		reopened = fmt.Sprintf("讨论串 #%d 原来已经结束，已重新打开（现在 %s），", t.No, t.Status)
 	}
 	lead, err := core.Lead(ctx, tx, t.ID)
 	if err != nil {
@@ -194,7 +219,7 @@ func (s *Service) messageThread(ctx context.Context, tx *core.Tx, c *call) (Resu
 	if _, err := s.orch.Deliver(ctx, tx, lead, orchestrator.Delivery{Text: text, Kind: "mail", Priority: "next", Record: rec}); err != nil {
 		return Result{}, err
 	}
-	return okText(fmt.Sprintf("已转给 #%d 的组长", t.No)), nil
+	return okText(fmt.Sprintf("%s已转给 #%d 的组长", reopened, t.No)), nil
 }
 
 // forwardToThread passes the user's own project-chat messages, word for word, to a thread's

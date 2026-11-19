@@ -9,6 +9,9 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 )
 
+// ReopenByCoordinator is Reopen's cause when the coordinator messages a finished thread.
+const ReopenByCoordinator = "coordinator"
+
 // Reopen puts a finished (done or failed) thread back to work. An archived thread is refused
 // (ErrArchived): it is unarchived first, which keeps it finished, then reopened. No session
 // starts here: the lead resumes its old conversation (SDK session id, recap when the node lost
@@ -21,7 +24,8 @@ import (
 // repository whose PR merged also forgets its thread branch, and that branch is deleted on the
 // host after the commit (its work is in the base): new work cuts the thread branch again from
 // the updated base. A closed (unmerged) PR keeps its branch and its commits.
-// The coordinator is told "[Thread #n · 标题 · running] 用户重新打开了讨论串 #n。".
+// The coordinator is told "[Thread #n · 标题 · running] 用户重新打开了讨论串 #n。", unless it
+// reopened the thread itself (ReopenByCoordinator).
 func (o *Orchestrator) Reopen(ctx context.Context, tx *core.Tx, t core.Thread, cause string) error {
 	switch t.Status {
 	case "archived":
@@ -48,6 +52,13 @@ func (o *Orchestrator) Reopen(ctx context.Context, tx *core.Tx, t core.Thread, c
 	}
 	if err := o.setStatus(ctx, tx, t, next, ""); err != nil {
 		return err
+	}
+	if cause == ReopenByCoordinator {
+		// The coordinator reopened it itself (message_thread): telling it again costs it a turn.
+		if len(merged) > 0 {
+			tx.AfterCommit(func(ctx context.Context) { o.deleteThreadBranches(context.WithoutCancel(ctx), t, merged) })
+		}
+		return nil
 	}
 	line := fmt.Sprintf("用户重新打开了讨论串 #%d。", t.No)
 	if err := tx.Savepoint(ctx, func(sub *core.Tx) error { return o.notifyCoordinator(ctx, sub, t, next, line) }); err != nil {
@@ -103,8 +114,11 @@ func (o *Orchestrator) forgetFinishedPRs(ctx context.Context, tx *core.Tx, t cor
 // reopenNote records the reopening in the thread chat, keeping the old summary there.
 func (o *Orchestrator) reopenNote(ctx context.Context, tx *core.Tx, t core.Thread, cause string) error {
 	text := "用户重新打开了讨论串。"
-	if cause == "message" {
+	switch cause {
+	case "message":
 		text = "用户发来新消息，讨论串重新打开。"
+	case ReopenByCoordinator:
+		text = "统筹发来新消息，讨论串重新打开。"
 	}
 	meta := map[string]any{"reopened": true, "from": t.Status}
 	if s := strings.TrimSpace(t.Summary); s != "" {
