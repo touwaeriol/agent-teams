@@ -3,6 +3,8 @@
 # PostgreSQL 17 and Valkey 9 containers, then removes them.
 #   server/scripts/test.sh                 # go test ./...
 #   server/scripts/test.sh -run TestRoles  # extra go test args
+# GO_MODCACHE names the module cache volume (it must be writable by the caller:
+# `make go-modcache`); CI uses its own.
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 id="$$-$RANDOM"
@@ -21,5 +23,5 @@ docker run --rm --network "$net" --user "$(id -u):$(id -g)" \
   -e HOME=/tmp -e GOPATH=/tmp/gopath -e GOCACHE=/go/pkg/mod/.gocache -e GOMODCACHE=/go/pkg/mod -e GOFLAGS=-mod=mod \
   -e "TEST_DATABASE_URL=postgres://postgres:pw@at-pg-$id:5432/postgres?sslmode=disable" \
   -e "TEST_VALKEY_URL=redis://at-vk-$id:6379/0" \
-  -v "$repo:/src" -v agent-teams-gomod:/go/pkg/mod -w /src/server golang:1.26 \
+  -v "$repo:/src" -v "${GO_MODCACHE:-agent-teams-gomod}:/go/pkg/mod" -w /src/server golang:1.26 \
   sh -c 'test -z "$(gofmt -l .)" || { gofmt -l .; echo "gofmt needed" >&2; exit 1; }; go vet ./... && go test -count=1 "$@" ./...' sh "$@"

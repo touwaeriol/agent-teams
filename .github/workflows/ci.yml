@@ -1,0 +1,75 @@
+name: CI
+
+# Runs on the self-hosted runner (cicd-agent-teams). Push only: the platform
+# and the developers push branches to this repository, and a pull_request
+# trigger would let a fork's pull request run its own code on that machine.
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Docker volumes are shared by every user of the machine; the default
+  # agent-teams-gomod belongs to a developer account.
+  GO_MODCACHE: agent-teams-gomod-ci
+
+jobs:
+  server:
+    name: server (Go, PostgreSQL, Valkey)
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - run: make go-modcache
+      - run: server/scripts/test.sh
+
+  protocol:
+    name: protocol
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - run: make test-protocol
+
+  node:
+    name: node daemon
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: node
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - run: npm run typecheck
+
+  web:
+    name: web
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
