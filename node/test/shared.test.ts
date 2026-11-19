@@ -39,7 +39,7 @@ function shared(path: string, body: string | Buffer, size = CHUNK_BYTES) {
 describe("shared paths", () => {
   it("follows the SharedPath contract", () => {
     for (const ok of ["a", "data/sample.csv", "报告/2026 Q4.md", "a/b/c/d/e/f/g/h", "x..y", "run.sh", "x".repeat(255), "文".repeat(85)]) expect(validSharedPath(ok), ok).toBe(true);
-    for (const bad of ["", "/a", "a/", "a//b", ".env", "a/.git/x", "..", "../x", "a/../b", "a\\b", "a\u0000b", "a\nb", "a\u0085b", "a\u2028b", " a", "a ", "dir /x", "a/b/c/d/e/f/g/h/i", "x".repeat(256), "文".repeat(86)]) {
+    for (const bad of ["", "/a", "a/", "a//b", ".env", "a/.git/x", "..", "../x", "a/../b", "a\\b", "a\u0000b", "a\nb", "a\u0085b", "a\u009fb", "a\u2028b", "a\u2029b", " a", "a ", "dir /x", "a/b/c/d/e/f/g/h/i", "x".repeat(256), "文".repeat(86)]) {
       expect(validSharedPath(bad), JSON.stringify(bad)).toBe(false);
     }
   });
@@ -96,7 +96,7 @@ describe("write_shared_file upload", () => {
     await expect(prepareSharedUpload(dir, "trail.txt ", undefined)).rejects.toThrow(/pass path/);
     expect((await prepareSharedUpload(dir, "out/.cache/x", "cache/x")).upload.files[0]!.path).toBe("cache/x");
     expect((await prepareSharedUpload(dir, ".env", "env.txt")).upload.files[0]!.path).toBe("env.txt");
-    for (const target of ["../x", "/etc/x", "a/../b", ".git/x", "a\\b", "a ", "文".repeat(86), 7]) {
+    for (const target of ["../x", "/etc/x", "a/../b", ".git/x", "a\\b", "a ", " a/b", "x\u0085y", "x\u2029y", "文".repeat(86), 7]) {
       await expect(prepareSharedUpload(dir, "sub/ok.txt", target), String(target)).rejects.toThrow(/not a valid shared path/);
     }
     // A symlink that stays inside the working directory is fine and keeps its own name.
@@ -163,7 +163,7 @@ describe("read_shared_file download", () => {
 
   it("refuses paths that would leave .shared and malformed downloads", async () => {
     const dir = workdir();
-    for (const path of ["../x", "/etc/passwd", "a/../../x", "..", ".gitignore", "a/.hidden", "a\\..\\x", "a//b", "x\u0000y"]) {
+    for (const path of ["../x", "/etc/passwd", "a/../../x", "..", ".gitignore", "a/.hidden", "a\\..\\x", "a//b", "x\u0000y", "x\u0085y", "x\u009fy", "x\u2028y", "x\u2029y", " a", "a /b", "a/b ", "文".repeat(86)]) {
       const { sd, chunks } = shared("ok.txt", "a");
       sd.files[0].path = path;
       await expect(writeSharedDownload(dir, sd, chunks), path).rejects.toBeInstanceOf(DownloadError);
