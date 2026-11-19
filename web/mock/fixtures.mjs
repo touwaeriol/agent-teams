@@ -234,6 +234,18 @@ export const checks = { t12: [{ name: "verify", status: "completed", conclusion:
 
 const memoryFile = (name, description, content, updated_by, min) => ({ name, description, content, updated_by, created_at: ago(min + 600), updated_at: ago(min) });
 
+/** Shared files by project (api.md §3.5.1); data is base64 so structuredClone keeps it. */
+const shared = (path, text, uploaded_by, thread, min) => ({
+  path, data: Buffer.from(text).toString("base64"), uploaded_by, ...(thread ? { uploaded_by_thread_no: thread } : {}), created_at: ago(min), updated_at: ago(min),
+});
+export const sharedFiles = {
+  p1: [
+    shared("data/sample-orders.csv", "id,amount\n1,19.9\n2,5\n", "dev-2", 12, 95),
+    shared("exports/2026-11/report.json", '{"threads":12,"merged":9}\n', "lead-12", 12, 30),
+    shared("notes/部署检查清单.md", "# 部署检查清单\n- 备份\n- 迁移\n", "coordinator", null, 600),
+  ],
+};
+
 export const memory = [
   memoryFile("MEMORY.md", "", "# 项目记忆\n- 用户喜欢小 PR，提交信息用中文。\n- 部署走滚动发布，不停渠道。\n- [testing.md](testing.md) — 怎么跑测试、常见失败\n- [github.md](github.md) — GitHub App 授权与令牌\n- [thread-summaries.md](thread-summaries.md) — 已结束讨论串的总结（最近 30 个）\n", "coordinator", 600),
   memoryFile("github.md", "GitHub App 授权与令牌", "# GitHub\n- 用 App 安装授权，令牌每次运行现取，不落盘。\n", "lead-1 · #9", 500),

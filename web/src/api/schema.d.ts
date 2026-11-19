@@ -1223,6 +1223,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{pid}/shared-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The project's shared files (no content) with the total and the limits */
+        get: operations["list-shared-files"];
+        put?: never;
+        /** Upload files to the project's shared files (multipart: file… parts; optional dir prefix; optional path… per file, in order); a file with the same path is overwritten */
+        post: operations["upload-shared-files"];
+        /** Delete one shared file */
+        delete: operations["delete-shared-file"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/shared-files/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download one shared file (always as an attachment, never rendered) */
+        get: operations["download-shared-file"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{pid}/threads": {
         parameters: {
             query?: never;
@@ -3350,6 +3386,54 @@ export interface components {
         SetupPROutputBody: {
             pr_url: string;
         };
+        SharedFile: {
+            content_type: string;
+            /** Format: date-time */
+            created_at: string;
+            path: string;
+            sha256: string;
+            /** Format: int64 */
+            size: number;
+            /** Format: date-time */
+            updated_at: string;
+            /** @description Employee name (dev-1) or user */
+            uploaded_by: string;
+            /**
+             * Format: int64
+             * @description Thread the employee uploaded it from (shown as dev-1 #31)
+             */
+            uploaded_by_thread_no?: number;
+        };
+        SharedFileLimits: {
+            /**
+             * Format: int64
+             * @description Largest single file
+             */
+            file_bytes: number;
+            /**
+             * Format: int64
+             * @description Total of all files of the project
+             */
+            project_bytes: number;
+            /**
+             * Format: int64
+             * @description Number of files of the project
+             */
+            project_files: number;
+        };
+        SharedFileList: {
+            /** Format: int64 */
+            file_count: number;
+            files: components["schemas"]["SharedFile"][] | null;
+            limits: components["schemas"]["SharedFileLimits"];
+            /** Format: int64 */
+            total_bytes: number;
+        };
+        SharedFileUpload: {
+            files: components["schemas"]["UploadedSharedFile"][] | null;
+            /** Format: int64 */
+            total_bytes: number;
+        };
         Skill: {
             builtin: boolean;
             description: string;
@@ -3633,6 +3717,26 @@ export interface components {
             name: string;
             /** @description Shown name; default the file name */
             title?: string;
+        };
+        UploadedSharedFile: {
+            content_type: string;
+            /** Format: date-time */
+            created_at: string;
+            /** @description A file with this path existed and was replaced */
+            overwritten: boolean;
+            path: string;
+            sha256: string;
+            /** Format: int64 */
+            size: number;
+            /** Format: date-time */
+            updated_at: string;
+            /** @description Employee name (dev-1) or user */
+            uploaded_by: string;
+            /**
+             * Format: int64
+             * @description Thread the employee uploaded it from (shown as dev-1 #31)
+             */
+            uploaded_by_thread_no?: number;
         };
         Usage: {
             by_employee: components["schemas"]["EmployeeUsage"][] | null;
@@ -6902,6 +7006,154 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchResult"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-shared-files": {
+        parameters: {
+            query?: {
+                /** @description Only paths starting with this text */
+                prefix?: string;
+            };
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedFileList"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "upload-shared-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description filename of the file being uploaded
+                     */
+                    filename?: string;
+                    /** @description general purpose name for multipart form value */
+                    name?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedFileUpload"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "delete-shared-file": {
+        parameters: {
+            query: {
+                /** @description Shared-files path, for example data/sample.csv */
+                path: string;
+            };
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "download-shared-file": {
+        parameters: {
+            query: {
+                /** @description Shared-files path, for example data/sample.csv */
+                path: string;
+            };
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    "Content-Disposition"?: string;
+                    "Content-Security-Policy"?: string;
+                    "Content-Type"?: string;
+                    "X-Content-Type-Options"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
                 };
             };
             /** @description Error */

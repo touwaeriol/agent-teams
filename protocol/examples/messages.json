@@ -893,6 +893,98 @@
   },
   {
     "v": 2,
+    "type": "file.chunk",
+    "id": "n_01JD3V00000000000000000SH0",
+    "seq": 2005,
+    "ts": "2026-11-14T12:02:05Z",
+    "body": {
+      "session_id": "s_01JD",
+      "open_gen": 1,
+      "upload_id": "up_01JD3V00000000000000SH",
+      "index": 0,
+      "data": "YSxiCjEsMgo="
+    }
+  },
+  {
+    "v": 2,
+    "type": "tool.call",
+    "id": "n_01JD3V00000000000000000SH1",
+    "seq": 2006,
+    "ts": "2026-11-14T12:02:05Z",
+    "body": {
+      "call_id": "tc_01JG",
+      "session_id": "s_01JD",
+      "open_gen": 1,
+      "tool": "write_shared_file",
+      "args": {
+        "file": "out/sample.csv",
+        "path": "data/sample.csv"
+      },
+      "upload": {
+        "upload_id": "up_01JD3V00000000000000SH",
+        "chunks": 1,
+        "files": [
+          {
+            "path": "data/sample.csv",
+            "size": 8,
+            "sha256": "9f0b1e5c0b3c2c0e7d1fa1b7bc7f0b4b8f8a5e3e1c4d1f0e2a3b4c5d6e7f8a9b",
+            "content_type": "text/csv; charset=utf-8"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 2,
+    "type": "file.download",
+    "id": "c_01JD3V00000000000000000SH2",
+    "seq": 996,
+    "ts": "2026-11-14T12:02:06Z",
+    "body": {
+      "session_id": "s_01JD",
+      "call_id": "tc_01JH",
+      "download_id": "dn_01jd3v000000000000000000sh",
+      "index": 0,
+      "data": "YSxiCjEsMgo="
+    }
+  },
+  {
+    "v": 2,
+    "type": "tool.result",
+    "id": "c_01JD3V00000000000000000SH3",
+    "seq": 997,
+    "ts": "2026-11-14T12:02:06Z",
+    "body": {
+      "session_id": "s_01JD",
+      "call_id": "tc_01JH",
+      "ok": true,
+      "content": [
+        {
+          "type": "text",
+          "text": "fetched data/sample.csv"
+        }
+      ],
+      "structured": {
+        "path": "data/sample.csv",
+        "size": 8,
+        "sha256": "9f0b1e5c0b3c2c0e7d1fa1b7bc7f0b4b8f8a5e3e1c4d1f0e2a3b4c5d6e7f8a9b",
+        "local_path": ".shared/data/sample.csv"
+      },
+      "shared_download": {
+        "download_id": "dn_01jd3v000000000000000000sh",
+        "chunks": 1,
+        "files": [
+          {
+            "path": "data/sample.csv",
+            "size": 8,
+            "sha256": "9f0b1e5c0b3c2c0e7d1fa1b7bc7f0b4b8f8a5e3e1c4d1f0e2a3b4c5d6e7f8a9b"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 2,
     "type": "tool.cancel",
     "id": "n_01JD3V000000000000000000T",
     "seq": 2005,

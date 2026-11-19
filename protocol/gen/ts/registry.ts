@@ -119,11 +119,13 @@ export interface ToolInputs {
   broadcast: T.BroadcastInput;
   cancel_task: T.CancelTaskInput;
   complete_task: T.CompleteTaskInput;
+  delete_shared_file: T.DeleteSharedFileInput;
   enqueue_merge: T.EnqueueMergeInput;
   finish: T.FinishInput;
   forward_to_thread: T.ForwardToThreadInput;
   get_task: T.GetTaskInput;
   list_deliverables: T.ListDeliverablesInput;
+  list_shared_files: T.ListSharedFilesInput;
   list_tasks: T.ListTasksInput;
   list_team: T.ListTeamInput;
   list_threads: T.ListThreadsInput;
@@ -139,6 +141,7 @@ export interface ToolInputs {
   push_branch: T.PushBranchInput;
   read_deliverable: T.ReadDeliverableInput;
   read_messages: T.ReadMessagesInput;
+  read_shared_file: T.ReadSharedFileInput;
   remember: T.RememberInput;
   reply_to: T.ReplyToInput;
   report_progress: T.ReportProgressInput;
@@ -150,6 +153,7 @@ export interface ToolInputs {
   thread_status: T.ThreadStatusInput;
   update_plan: T.UpdatePlanInput;
   wait_task: T.WaitTaskInput;
+  write_shared_file: T.WriteSharedFileInput;
 }
 
 /** Structured result type of every platform tool (unknown when it only returns text). */
@@ -161,11 +165,13 @@ export interface ToolResults {
   broadcast: unknown;
   cancel_task: unknown;
   complete_task: T.CompleteTaskResult;
+  delete_shared_file: T.DeleteSharedFileResult;
   enqueue_merge: T.EnqueueMergeResult;
   finish: unknown;
   forward_to_thread: T.ForwardToThreadResult;
   get_task: T.GetTaskResult;
   list_deliverables: T.ListDeliverablesResult;
+  list_shared_files: T.ListSharedFilesResult;
   list_tasks: T.ListTasksResult;
   list_team: T.ListTeamResult;
   list_threads: T.ListThreadsResult;
@@ -181,6 +187,7 @@ export interface ToolResults {
   push_branch: T.PushBranchResult;
   read_deliverable: T.ReadDeliverableResult;
   read_messages: T.ReadMessagesResult;
+  read_shared_file: T.ReadSharedFileResult;
   remember: unknown;
   reply_to: unknown;
   report_progress: unknown;
@@ -192,6 +199,7 @@ export interface ToolResults {
   thread_status: T.ThreadStatusResult;
   update_plan: unknown;
   wait_task: T.WaitTaskResult;
+  write_shared_file: T.WriteSharedFileResult;
 }
 
 export type ToolName = keyof ToolInputs;
@@ -254,6 +262,13 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     description: "Finish your current task explicitly; the platform pushes your branch first. Use status failed when you cannot finish it.",
     input_schema: {"description":"Finish your current task explicitly; the platform pushes your branch first. Use status failed when you cannot finish it.","type":"object","required":["task_id","summary"],"additionalProperties":false,"properties":{"task_id":{"type":"string","pattern":"^t[0-9]+$"},"summary":{"type":"string","minLength":1},"status":{"type":"string","enum":["done","failed","platform_error"],"default":"done","description":"platform_error: review/decision tasks only, when the platform did not prepare what you were asked to check (for example the worktree HEAD is not the commit under review). It is not a verdict: the platform prepares the review again."},"artifacts":{"description":"Paths, commit SHAs or URLs produced by the task.","type":"array","items":{"type":"string"}},"handoff":{"type":"string","maxLength":4000,"description":"Note for whoever builds on this task: what is left, pitfalls, interfaces agreed on. Asked for when other tasks depend on this one."}}},
   },
+  delete_shared_file: {
+    tiers: ["coordinator","lead","member"],
+    blocking: [],
+    requires: null,
+    description: "Delete one of the project's shared files for everyone (copies already fetched into working directories stay). Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 20 MB per file, 500 MB per project.",
+    input_schema: {"description":"Delete one of the project's shared files for everyone (copies already fetched into working directories stay). Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 20 MB per file, 500 MB per project.","type":"object","required":["path"],"additionalProperties":false,"properties":{"path":{"description":"Path of a file in the project's shared files: relative, '/'-separated, 1 to 8 segments, at most 255 bytes in UTF-8 (the schema can only check 255 characters; the server's byte check is authoritative). No segment may be empty, '.', '..', start with '.' (so no hidden files and nothing under .shared or .agent-*) or start or end with a space; no backslash, control characters (C0, DEL, C1), U+2028/U+2029 or leading '/'.","type":"string","minLength":1,"maxLength":255,"pattern":"^[^. /\\\\\\x00-\\x1f\\x7f-\\x9f  ](?:[^/\\\\\\x00-\\x1f\\x7f-\\x9f  ]*[^ /\\\\\\x00-\\x1f\\x7f-\\x9f  ])?(?:/[^. /\\\\\\x00-\\x1f\\x7f-\\x9f  ](?:[^/\\\\\\x00-\\x1f\\x7f-\\x9f  ]*[^ /\\\\\\x00-\\x1f\\x7f-\\x9f  ])?){0,7}$","examples":["data/sample.csv","notes.md"]}}},
+  },
   enqueue_merge: {
     tiers: ["lead"],
     blocking: [],
@@ -288,6 +303,13 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     requires: null,
     description: "List this project's deliverables (designs, documents… from every thread), newest first: id, title, kind, versions, who published the latest version, thread and when it changed. Use read_deliverable to fetch one's files.",
     input_schema: {"description":"List this project's deliverables (designs, documents… from every thread), newest first: id, title, kind, versions, who published the latest version, thread and when it changed. Use read_deliverable to fetch one's files.","type":"object","additionalProperties":false,"properties":{"thread":{"description":"Only deliverables of this thread number.","type":"integer","minimum":1},"kind":{"description":"Only this kind (design, doc, slides, dashboard, board, data).","type":"string","minLength":1,"maxLength":32}}},
+  },
+  list_shared_files: {
+    tiers: ["coordinator","lead","member"],
+    blocking: [],
+    requires: null,
+    description: "List the project's shared files (path, size, type, checksum, who uploaded it and when), sorted by path, with the project's total size and limit. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 20 MB per file, 500 MB per project. Fetch one with read_shared_file, add or replace one with write_shared_file.",
+    input_schema: {"description":"List the project's shared files (path, size, type, checksum, who uploaded it and when), sorted by path, with the project's total size and limit. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 20 MB per file, 500 MB per project. Fetch one with read_shared_file, add or replace one with write_shared_file.","type":"object","required":[],"additionalProperties":false,"properties":{"prefix":{"description":"Only paths starting with this text (for example data/ or data/2026-).","type":"string","maxLength":255,"pattern":"^([^/\\\\\\x00-\\x1f\\x7f][^\\\\\\x00-\\x1f\\x7f]*)?$"}}},
   },
   list_tasks: {
     tiers: ["lead"],
@@ -394,6 +416,13 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     description: "Return your unread messages (including broadcasts) and mark them read.",
     input_schema: {"description":"Return your unread messages (including broadcasts) and mark them read.","type":"object","additionalProperties":false,"properties":{}},
   },
+  read_shared_file: {
+    tiers: ["coordinator","lead","member"],
+    blocking: [],
+    requires: null,
+    description: "Download one of the project's shared files to .shared/<path> in your working directory (the folder is git-ignored) and return that local path; the result never contains the file's content, so read it with your file tools. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. An existing local copy at the same path is overwritten. Limits: 20 MB per file, 500 MB per project. To change the shared file, edit the local copy and call write_shared_file(file=.shared/<path>).",
+    input_schema: {"description":"Download one of the project's shared files to .shared/<path> in your working directory (the folder is git-ignored) and return that local path; the result never contains the file's content, so read it with your file tools. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. An existing local copy at the same path is overwritten. Limits: 20 MB per file, 500 MB per project. To change the shared file, edit the local copy and call write_shared_file(file=.shared/<path>).","type":"object","required":["path"],"additionalProperties":false,"properties":{"path":{"description":"Path in the shared files, for example data/sample.csv (see list_shared_files).","type":"string","minLength":1,"maxLength":255,"pattern":"^[^. /\\\\\\x00-\\x1f\\x7f-\\x9f  ](?:[^/\\\\\\x00-\\x1f\\x7f-\\x9f  ]*[^ /\\\\\\x00-\\x1f\\x7f-\\x9f  ])?(?:/[^. /\\\\\\x00-\\x1f\\x7f-\\x9f  ](?:[^/\\\\\\x00-\\x1f\\x7f-\\x9f  ]*[^ /\\\\\\x00-\\x1f\\x7f-\\x9f  ])?){0,7}$","examples":["data/sample.csv","notes.md"]}}},
+  },
   remember: {
     tiers: ["coordinator"],
     blocking: [],
@@ -470,5 +499,12 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     requires: "can_delegate",
     description: "Wait until one of your subtasks finishes and return its result. Only for roles with can_delegate.",
     input_schema: {"description":"Wait until one of your subtasks finishes and return its result. Only for roles with can_delegate.","type":"object","required":["task_id"],"additionalProperties":false,"properties":{"task_id":{"type":"string","pattern":"^t[0-9]+$"}}},
+  },
+  write_shared_file: {
+    tiers: ["coordinator","lead","member"],
+    blocking: [],
+    requires: null,
+    description: "Upload one file from your working directory to the project's shared files (store data, samples, exports other sessions or users need; not deliverables, use publish_file for those). Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 20 MB per file, 500 MB per project.",
+    input_schema: {"description":"Upload one file from your working directory to the project's shared files (store data, samples, exports other sessions or users need; not deliverables, use publish_file for those). Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 20 MB per file, 500 MB per project.","type":"object","required":["file"],"additionalProperties":false,"properties":{"file":{"description":"A single file inside your working directory, relative to it (directories are refused).","type":"string","minLength":1,"maxLength":500},"path":{"description":"Target path in the shared files. Default: file normalised to a relative path, with a leading .shared/ removed (so a file fetched with read_shared_file goes back to the same path).","type":"string","minLength":1,"maxLength":255,"pattern":"^[^. /\\\\\\x00-\\x1f\\x7f-\\x9f  ](?:[^/\\\\\\x00-\\x1f\\x7f-\\x9f  ]*[^ /\\\\\\x00-\\x1f\\x7f-\\x9f  ])?(?:/[^. /\\\\\\x00-\\x1f\\x7f-\\x9f  ](?:[^/\\\\\\x00-\\x1f\\x7f-\\x9f  ]*[^ /\\\\\\x00-\\x1f\\x7f-\\x9f  ])?){0,7}$","examples":["data/sample.csv","notes.md"]}}},
   },
 };

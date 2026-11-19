@@ -774,6 +774,27 @@ ALTER TABLE at_employees ADD COLUMN model TEXT NOT NULL DEFAULT '';            -
 
 内置兜底：Claude 为 `claude-opus-5-5`（Opus 5.5）；Codex 为空字符串，节点不传 `model`，由 Codex CLI 用自己的默认（Codex 员工不会落到 Claude 模型名）。平台内置命令存在 `at_settings.composer_commands = {commands: [...]}`。`at_usage.model` 记每一轮实际回答的模型（`session.event turn_ended.model`）。
 
+### 2.13 共享文件（00312）
+
+```sql
+CREATE TABLE at_shared_files (          -- 项目共享文件：项目里所有会话和用户都能存取，不进 git（讨论串 #33）
+  project_id         TEXT NOT NULL REFERENCES at_projects(id) ON DELETE CASCADE,
+  path               TEXT NOT NULL,     -- 共享区路径（相对、/ 分隔、≤ 8 层、≤ 255 字节，规则见 sharedfiles.CleanPath）
+  content_type       TEXT NOT NULL,     -- 按扩展名推断，未知为 application/octet-stream
+  size               BIGINT NOT NULL,   -- ≤ 20 MB
+  sha256             TEXT NOT NULL,
+  data               BYTEA NOT NULL,
+  uploaded_by        TEXT NOT NULL,     -- 最后上传者：员工名（dev-1）或 user
+  uploader_id        TEXT REFERENCES at_employees(id) ON DELETE SET NULL,  -- 员工上传时的员工，用户上传为空
+  uploader_thread_id TEXT REFERENCES at_threads(id) ON DELETE SET NULL,    -- 员工会话所在讨论串（列表显示成“dev-1 #31”），统筹和用户为空
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (project_id, path)
+);
+```
+
+同一路径直接覆盖（`INSERT … ON CONFLICT DO UPDATE`，更新内容、上传者和 `updated_at`，`created_at` 保留），不做版本。上限在 `server/internal/sharedfiles`：单文件 20 MB（`MaxFileBytes`）、项目合计 500 MB（`MaxProjectBytes`）、项目文件数 1000（`MaxProjectFiles`）；覆盖时总量按差值算。写入前锁 `at_projects` 行（`SELECT … FOR UPDATE`），同项目的并发上传互相看得到总量。项目删除时级联删除。
+
 ## 3. 从 v1 表的映射（历史）
 
 切换时 v1 的表原地扩展成 v2 的表；下表是当时的处理。`00120_drop_v1` 之后，v1 独有的表和列、v1 的旧对话都已删除。
@@ -808,6 +829,8 @@ ALTER TABLE at_employees ADD COLUMN model TEXT NOT NULL DEFAULT '';            -
 `00110_casbin_rule.sql`（P6 后）：建 `casbin_rule`，每个用户按 `at_users.role` 写一行 `g, <id>, admin|user`，再删 `at_users.role`；Down 加回该列并按规则回填（§2.1）。
 
 `00095_thread_lifecycle_images.sql`：`at_threads.archived_from`、`at_attachments`（§2.11）。
+
+`00312_shared_files.sql`：`at_shared_files`（§2.13，项目共享文件）；Down 删表。
 
 `00080_plugins.sql`：`at_roles.plugins`、`at_plugins`、`at_plugin_versions`，`at_skills.user_id` 可为空（管理员内置技能）及其唯一索引（architecture.md §6.5）。
 

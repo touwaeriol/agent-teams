@@ -111,11 +111,13 @@ const (
 	ToolBroadcast          = "broadcast"
 	ToolCancelTask         = "cancel_task"
 	ToolCompleteTask       = "complete_task"
+	ToolDeleteSharedFile   = "delete_shared_file"
 	ToolEnqueueMerge       = "enqueue_merge"
 	ToolFinish             = "finish"
 	ToolForwardToThread    = "forward_to_thread"
 	ToolGetTask            = "get_task"
 	ToolListDeliverables   = "list_deliverables"
+	ToolListSharedFiles    = "list_shared_files"
 	ToolListTasks          = "list_tasks"
 	ToolListTeam           = "list_team"
 	ToolListThreads        = "list_threads"
@@ -131,6 +133,7 @@ const (
 	ToolPushBranch         = "push_branch"
 	ToolReadDeliverable    = "read_deliverable"
 	ToolReadMessages       = "read_messages"
+	ToolReadSharedFile     = "read_shared_file"
 	ToolRemember           = "remember"
 	ToolReplyTo            = "reply_to"
 	ToolReportProgress     = "report_progress"
@@ -142,6 +145,7 @@ const (
 	ToolThreadStatus       = "thread_status"
 	ToolUpdatePlan         = "update_plan"
 	ToolWaitTask           = "wait_task"
+	ToolWriteSharedFile    = "write_shared_file"
 )
 
 // Tools describes every platform tool.
@@ -174,6 +178,10 @@ var Tools = map[string]ToolMeta{
 		Tiers: []Tier{TierMember}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(CompleteTaskInput) }, NewResult: func() any { return new(CompleteTaskResult) },
 	},
+	ToolDeleteSharedFile: {
+		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(DeleteSharedFileInput) }, NewResult: func() any { return new(DeleteSharedFileResult) },
+	},
 	ToolEnqueueMerge: {
 		Tiers: []Tier{TierLead}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(EnqueueMergeInput) }, NewResult: func() any { return new(EnqueueMergeResult) },
@@ -193,6 +201,10 @@ var Tools = map[string]ToolMeta{
 	ToolListDeliverables: {
 		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(ListDeliverablesInput) }, NewResult: func() any { return new(ListDeliverablesResult) },
+	},
+	ToolListSharedFiles: {
+		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(ListSharedFilesInput) }, NewResult: func() any { return new(ListSharedFilesResult) },
 	},
 	ToolListTasks: {
 		Tiers: []Tier{TierLead}, Blocking: nil, Requires: "",
@@ -254,6 +266,10 @@ var Tools = map[string]ToolMeta{
 		Tiers: []Tier{TierMember}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(ReadMessagesInput) }, NewResult: func() any { return new(ReadMessagesResult) },
 	},
+	ToolReadSharedFile: {
+		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(ReadSharedFileInput) }, NewResult: func() any { return new(ReadSharedFileResult) },
+	},
 	ToolRemember: {
 		Tiers: []Tier{TierCoordinator}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(RememberInput) }, NewResult: nil,
@@ -297,5 +313,9 @@ var Tools = map[string]ToolMeta{
 	ToolWaitTask: {
 		Tiers: []Tier{TierMember}, Blocking: []Tier{TierMember}, Requires: "can_delegate",
 		NewInput: func() any { return new(WaitTaskInput) }, NewResult: func() any { return new(WaitTaskResult) },
+	},
+	ToolWriteSharedFile: {
+		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(WriteSharedFileInput) }, NewResult: func() any { return new(WriteSharedFileResult) },
 	},
 }

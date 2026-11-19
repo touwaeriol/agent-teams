@@ -116,6 +116,10 @@ p, user, /api/projects/:pid/references, GET
 p, user, /api/projects/:pid/schedules, GET
 p, user, /api/projects/:pid/schedules, POST
 p, user, /api/projects/:pid/search, GET
+p, user, /api/projects/:pid/shared-files, DELETE
+p, user, /api/projects/:pid/shared-files, GET
+p, user, /api/projects/:pid/shared-files, POST
+p, user, /api/projects/:pid/shared-files/download, GET
 p, user, /api/projects/:pid/threads, GET
 p, user, /api/projects/:pid/threads, POST
 p, user, /api/projects/:pid/usage, GET

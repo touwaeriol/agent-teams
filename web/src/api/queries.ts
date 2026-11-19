@@ -20,6 +20,7 @@ export const keys = {
   deliverables: (pid: string, kind = "", q = "", noImages = false) => ["p", pid, "deliverables", kind, q, noImages] as const,
   allDeliverables: (pid: string) => ["p", pid, "deliverables"] as const,
   memory: (pid: string) => ["p", pid, "memory"] as const,
+  sharedFiles: (pid: string) => ["p", pid, "shared-files"] as const,
   memoryFile: (pid: string, name: string) => ["p", pid, "memory", name] as const,
   schedules: (pid: string) => ["p", pid, "schedules"] as const,
   usage: (pid: string, days: number) => ["p", pid, "usage", days] as const,
@@ -191,6 +192,10 @@ export const useProjectUsage = (pid: Arg, days: Arg<number>) =>
 
 export const useMemory = (pid: Arg) =>
   useKeyed(() => keys.memory(val(pid)), () => list(client.GET("/api/projects/{pid}/memory", path({ pid: val(pid) }))), { enabled: has(pid) });
+
+/** The project's shared files (no content) with the total and the limits; refetched on shared_file events. */
+export const useSharedFiles = (pid: Arg) =>
+  useKeyed(() => keys.sharedFiles(val(pid)), () => unwrap(client.GET("/api/projects/{pid}/shared-files", path({ pid: val(pid) }))), { enabled: has(pid) });
 
 /** One memory file with its content; `name` empty = nothing to load (a new file). */
 export const useMemoryFile = (pid: Arg, name: Arg) =>

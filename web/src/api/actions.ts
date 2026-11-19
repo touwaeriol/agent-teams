@@ -48,6 +48,10 @@ export const deliverables = {
     unwrap(client.POST("/api/deliverables/{id}/comments", { params: { path: { id } }, body: { text, version } })),
 };
 
+export const sharedFiles = {
+  remove: (pid: string, path: string) => unwrap(client.DELETE("/api/projects/{pid}/shared-files", { params: { path: { pid }, query: { path } } })),
+};
+
 export const schedules = {
   create: (pid: string, body: S["ScheduleBody"]) => unwrap(client.POST("/api/projects/{pid}/schedules", { params: { path: { pid } }, body })),
   update: (id: string, body: S["ScheduleBody"]) => unwrap(client.PATCH("/api/schedules/{id}", { params: { path: { id } }, body })),
