@@ -155,6 +155,10 @@ func TestDeliveryEndToEnd(t *testing.T) {
 		t.Fatalf("pr_opened_at not recorded: %+v %v", tr, err)
 	}
 
+	// The lead writes its summary (finish): the thread ends right after the merge.
+	if res := lead.call("finish", map[string]any{"summary": "登录页完成"}); !res.Ok {
+		t.Fatalf("finish %+v", res)
+	}
 	b.must(200, "POST", "/api/threads/"+thread.ID+"/accept", nil, nil)
 	events.wait(t, "thread", `"status":"done"`, `"pr_state":"merged"`)
 	ctx, cancel := w.waitCtx()
