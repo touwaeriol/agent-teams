@@ -6,12 +6,22 @@ import type { GetAccountRateLimitsResponse } from "./codex-protocol/v2/GetAccoun
 import type { GetAccountResponse } from "./codex-protocol/v2/GetAccountResponse.js";
 import type { RateLimitSnapshot } from "./codex-protocol/v2/RateLimitSnapshot.js";
 import type { RateLimitWindow } from "./codex-protocol/v2/RateLimitWindow.js";
-import type { ClaudeRuntime, CodexRuntime, NodeUsage, RuntimeUsage, UsageWindow } from "./protocol.js";
+import type { ClaudeRuntime, CodexRuntime, RuntimeUsage as GenRuntimeUsage, UsageWindow as GenUsageWindow } from "./protocol.js";
 import { AsyncQueue, withTimeout } from "./util/async.js";
 import type { Logger } from "./util/log.js";
 
 export const USAGE_INTERVAL_MS = 5 * 60_000;
 export const USAGE_TIMEOUT_MS = 15_000;
+/** node.usage_refresh answers from a successful read younger than this instead of asking again. */
+export const USAGE_CACHE_MS = 60_000;
+export const USAGE_RUNTIMES = ["claude", "codex"] as const;
+export type UsageRuntime = (typeof USAGE_RUNTIMES)[number];
+
+// The generated types (protocol/gen) plus fields this node already sends; the console keeps them.
+// TODO(t2): drop these once protocol/ carries weekly_model's label.
+export type UsageWindow = GenUsageWindow & { label?: string };
+export type RuntimeUsage = Omit<GenRuntimeUsage, "windows" | "fetched_at"> & { windows: UsageWindow[]; fetched_at: string };
+export interface NodeUsage { runtimes: Partial<Record<UsageRuntime, RuntimeUsage>> }
 const MAX_WINDOWS = 8;
 
 export type ClaudeUsage = Pick<SDKControlGetUsageResponse, "subscription_type" | "rate_limits_available" | "rate_limits">;
@@ -30,13 +40,11 @@ export interface UsageSources {
   lastCodexEvent(): CodexRateLimitEvent | null;
 }
 
-/** Reads both runtimes in parallel; each read has its own timeout and failures become status "error". */
-export async function collectUsage(src: UsageSources, timeoutMs = USAGE_TIMEOUT_MS, now: () => Date = () => new Date()): Promise<NodeUsage> {
-  const [claude, codex] = await Promise.all([
-    claudeUsage(src, timeoutMs, now),
-    codexUsage(src, timeoutMs, now),
-  ]);
-  return { runtimes: { claude, codex } };
+/** Reads the runtimes in parallel; each read has its own timeout and failures become status "error". */
+export async function collectUsage(src: UsageSources, timeoutMs = USAGE_TIMEOUT_MS, now: () => Date = () => new Date(), which: readonly UsageRuntime[] = USAGE_RUNTIMES): Promise<NodeUsage> {
+  const read = { claude: () => claudeUsage(src, timeoutMs, now), codex: () => codexUsage(src, timeoutMs, now) };
+  const results = await Promise.all(which.map(async (rt) => [rt, await read[rt]()] as const));
+  return { runtimes: Object.fromEntries(results) };
 }
 
 async function claudeUsage(src: UsageSources, timeoutMs: number, now: () => Date): Promise<RuntimeUsage> {
@@ -149,8 +157,11 @@ export async function readClaudeUsage(env: Record<string, string>, cwd: string):
   try {
     await q.initializationResult();
     const read = (q as unknown as { usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: (o: { skipBehaviors: boolean }) => Promise<SDKControlGetUsageResponse> }).usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
-    if (typeof read !== "function") throw new Error("sdk_without_usage");
-    const u = await read.call(q, { skipBehaviors: true });
+    // The method is experimental: absent or rejected means this SDK / CLI cannot answer (usage-probe.md).
+    if (typeof read !== "function") throw new Error("unsupported_sdk");
+    const u = await read.call(q, { skipBehaviors: true }).catch(() => {
+      throw new Error("unsupported_sdk");
+    });
     return { subscription_type: u.subscription_type, rate_limits_available: u.rate_limits_available, rate_limits: u.rate_limits };
   } finally {
     prompt.end();
@@ -158,14 +169,24 @@ export async function readClaudeUsage(env: Record<string, string>, cwd: string):
   }
 }
 
-/** Sends node.usage after each hello (welcome) and then every intervalMs; one read at a time. */
+interface Cached { usage: RuntimeUsage; at: number }
+
+/**
+ * Sends node.usage after each hello (welcome) and then every intervalMs, and answers node.usage_refresh.
+ * One read runs at a time (a refresh during a read waits for it); successful reads are cached for
+ * cacheMs so hovering over a node card does not hit Anthropic / OpenAI each time; failures are not.
+ */
 export class UsageReporter {
   private timer: NodeJS.Timeout | null = null;
   private running: Promise<void> | null = null;
+  private readonly last = new Map<UsageRuntime, Cached>();
 
-  constructor(private readonly o: { sources: UsageSources; send: (body: NodeUsage) => void; log: Logger; intervalMs?: number; timeoutMs?: number }) {}
+  constructor(private readonly o: {
+    sources: UsageSources; send: (body: NodeUsage) => void; log: Logger;
+    intervalMs?: number; timeoutMs?: number; cacheMs?: number; now?: () => number;
+  }) {}
 
-  /** Called on every welcome: report now and (re)arm the interval. intervalMs 0 disables reporting. */
+  /** Called on every welcome: report now and arm the interval. intervalMs 0 disables the periodic report. */
   kick(): void {
     const every = this.o.intervalMs ?? USAGE_INTERVAL_MS;
     if (every <= 0) return;
@@ -181,20 +202,62 @@ export class UsageReporter {
     this.timer = null;
   }
 
-  report(): Promise<void> {
-    this.running ??= this.collect().finally(() => (this.running = null));
-    return this.running;
-  }
-
-  private async collect(): Promise<void> {
+  /** The periodic report: always a fresh read of every runtime (or the one already running). */
+  async report(): Promise<void> {
     try {
-      const body = await collectUsage(this.o.sources, this.o.timeoutMs ?? USAGE_TIMEOUT_MS);
-      for (const [rt, u] of Object.entries(body.runtimes)) {
-        if (u?.status === "error") this.o.log.warn({ runtime: rt, err: u.error }, "usage read failed");
-      }
-      this.o.send(body);
+      await (this.running ?? this.read(USAGE_RUNTIMES));
+      this.o.send(this.compose());
     } catch (err) {
       this.o.log.warn({ err: (err as Error).message }, "usage report failed");
     }
+  }
+
+  /**
+   * node.usage_refresh: the body to answer with. Requested runtimes with a successful read younger than
+   * cacheMs come from the cache (their fetched_at unchanged); the rest are read now. A runtime never read
+   * yet is read too, so the answer always covers both.
+   */
+  async refresh(requested?: readonly string[]): Promise<NodeUsage> {
+    if (this.running) {
+      await this.running;
+      return this.compose();
+    }
+    const want = USAGE_RUNTIMES.filter((rt) => !requested?.length || requested.includes(rt));
+    const ttl = this.o.cacheMs ?? USAGE_CACHE_MS;
+    const now = this.now();
+    const stale = USAGE_RUNTIMES.filter((rt) => {
+      const c = this.last.get(rt);
+      if (!c) return true;
+      if (!want.includes(rt)) return false;
+      return c.usage.status !== "ok" || now - c.at >= ttl;
+    });
+    if (stale.length) await this.read(stale);
+    return this.compose();
+  }
+
+  private read(which: readonly UsageRuntime[]): Promise<void> {
+    this.running ??= collectUsage(this.o.sources, this.o.timeoutMs ?? USAGE_TIMEOUT_MS, () => new Date(this.now()), which)
+      .then((body) => {
+        const at = this.now();
+        for (const [rt, u] of Object.entries(body.runtimes) as [UsageRuntime, RuntimeUsage][]) {
+          if (u.status === "error") this.o.log.warn({ runtime: rt, err: u.error }, "usage read failed");
+          this.last.set(rt, { usage: u, at });
+        }
+      })
+      .finally(() => (this.running = null));
+    return this.running;
+  }
+
+  private compose(): NodeUsage {
+    const runtimes: NodeUsage["runtimes"] = {};
+    for (const rt of USAGE_RUNTIMES) {
+      const c = this.last.get(rt);
+      if (c) runtimes[rt] = c.usage;
+    }
+    return { runtimes };
+  }
+
+  private now(): number {
+    return (this.o.now ?? Date.now)();
   }
 }

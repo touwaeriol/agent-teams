@@ -128,16 +128,70 @@ describe("UsageReporter", () => {
   it("reports on kick and then on the interval, never two reads at once", async () => {
     vi.useFakeTimers();
     const sent: unknown[] = [];
-    const r = new UsageReporter({ sources: sources(), send: (b) => sent.push(b), log: silentLogger, intervalMs: 60_000, timeoutMs: 1000 });
+    const src = sources();
+    const reads = () => src.calls.filter((c) => c === "claude").length;
+    const r = new UsageReporter({ sources: src, send: (b) => sent.push(b), log: silentLogger, intervalMs: 60_000, timeoutMs: 1000 });
     r.kick();
     r.kick();
     await vi.advanceTimersByTimeAsync(0);
-    expect(sent).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(60_000);
+    expect(reads()).toBe(1);
     expect(sent).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(reads()).toBe(2);
+    expect(sent).toHaveLength(3);
     r.stop();
     await vi.advanceTimersByTimeAsync(120_000);
-    expect(sent).toHaveLength(2);
+    expect(reads()).toBe(2);
+  });
+
+  it("answers node.usage_refresh from a successful read younger than a minute, and reads again after", async () => {
+    let t = 1_000_000;
+    const src = sources();
+    const r = new UsageReporter({ sources: src, send: () => {}, log: silentLogger, intervalMs: 0, timeoutMs: 1000, now: () => t });
+    const first = await r.refresh();
+    expect(src.calls.filter((c) => c === "claude")).toHaveLength(1);
+    t += 59_000;
+    const cached = await r.refresh();
+    expect(src.calls.filter((c) => c === "claude")).toHaveLength(1);
+    expect(cached).toEqual(first);
+    expect(cached.runtimes.claude!.fetched_at).toBe(new Date(1_000_000).toISOString());
+    t += 1_000;
+    const fresh = await r.refresh(["claude"]);
+    expect(src.calls.filter((c) => c === "claude")).toHaveLength(2);
+    expect(src.calls.filter((c) => c === "rateLimits")).toHaveLength(1);
+    expect(fresh.runtimes.claude!.fetched_at).toBe(new Date(1_060_000).toISOString());
+    expect(fresh.runtimes.codex).toEqual(first.runtimes.codex);
+  });
+
+  it("does not cache failed reads", async () => {
+    let fail = true;
+    const calls: string[] = [];
+    const src = sources({
+      codexAuth: () => "none",
+      claudeUsage: async () => { calls.push("claude"); if (fail) throw new Error("boom"); return claudeOk; },
+    });
+    const r = new UsageReporter({ sources: src, send: () => {}, log: silentLogger, intervalMs: 0, timeoutMs: 1000 });
+    expect((await r.refresh()).runtimes.claude).toMatchObject({ status: "error" });
+    fail = false;
+    expect((await r.refresh()).runtimes.claude).toMatchObject({ status: "ok" });
+    expect(calls).toHaveLength(2);
+  });
+
+  it("lets a refresh during a read share that read", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((res) => (release = res));
+    const calls: string[] = [];
+    const src = sources({ codexAuth: () => "none", claudeUsage: async () => { calls.push("claude"); await gate; return claudeOk; } });
+    const sent: unknown[] = [];
+    const r = new UsageReporter({ sources: src, send: (b) => sent.push(b), log: silentLogger, intervalMs: 0, timeoutMs: 1000 });
+    const periodic = r.report();
+    const a = r.refresh();
+    const b = r.refresh(["claude"]);
+    release();
+    const [ra, rb] = await Promise.all([a, b, periodic]);
+    expect(calls).toHaveLength(1);
+    expect(ra).toEqual(rb);
+    expect(sent).toEqual([ra]);
   });
 
   it("is off with interval 0", async () => {

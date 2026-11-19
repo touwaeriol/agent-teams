@@ -269,6 +269,7 @@ export class Daemon {
       "node.config": { run: async (b) => this.nodeConfig(b as NodeConfig) },
       "node.drain": { run: async () => (this.sessions.drain(), []) },
       "node.upgrade": { run: (b) => this.upgrade(b as unknown as NodeUpgrade) },
+      "node.usage_refresh": { run: async (b) => [{ type: "node.usage", body: await this.usage.refresh(Array.isArray(b.runtimes) ? b.runtimes.map(String) : undefined) }] },
     };
   }
 
