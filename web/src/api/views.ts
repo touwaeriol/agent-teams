@@ -17,31 +17,15 @@ export type ProjectUpdate = S["ProjectUpdate"];
 export type DeliverySettings = S["Delivery"];
 export type MemoryBrief = S["MemoryBrief"];
 export type MemoryFileView = S["MemoryFile"];
-/** usage: subscription quota per runtime (server fills it in; null or missing = no data yet). */
+/** usage: subscription quota per runtime. The openapi does not mark it nullable, but the server
+ * sends null until the node reports (and older servers omit it): both mean "no data yet". */
 export type NodeView = Omit<S["NodeView"], "usage"> & { usage?: NodeUsage | null };
-
-export type UsageWindowKey = "five_hour" | "weekly" | "weekly_opus" | "weekly_sonnet" | "weekly_model" | "primary" | "secondary";
-export interface UsageWindow {
-  key: UsageWindowKey;
-  used_percent: number;
-  window_minutes?: number;
-  /** Display name from the server (e.g. the model of a weekly_model window). */
-  label?: string;
-  resets_at: string | null;
-}
-export interface RuntimeUsage {
-  auth: "subscription" | "chatgpt" | "api_key" | "none";
-  status: "ok" | "error" | "unsupported";
-  plan?: string;
-  windows: UsageWindow[] | null;
-  error?: string;
-  fetched_at: string;
-  received_at: string;
-}
-export interface NodeUsage {
-  claude?: RuntimeUsage;
-  codex?: RuntimeUsage;
-}
+export type NodeUsage = S["NodeUsage"];
+export type RuntimeUsage = S["RuntimeUsage"];
+/** key: five_hour, weekly, weekly_opus, weekly_sonnet, weekly_model (Claude); primary, secondary (Codex). */
+export type UsageWindow = S["UsageWindow"];
+/** POST /api/nodes/{id}/usage/refresh; usage is null when the node never reported. */
+export type UsageRefresh = Omit<S["UsageRefreshOutputBody"], "usage"> & { usage: NodeUsage | null };
 export type NodeSession = S["NodeSession"];
 export type FeedbackView = S["FeedbackView"];
 export type Enrollment = S["Enrollment"];

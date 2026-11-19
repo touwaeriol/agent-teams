@@ -7,7 +7,7 @@ import { addRepo, matchesRepo, moveRepo, normalizeRepo, removeRepo, repoOptions,
 import { draftValid, emptyDraft, scheduleBody } from "@/components/app/schedules/schedule";
 import { parseSetting } from "@/pages/admin/admin";
 import { connectionKind, usedText } from "@/pages/settings/github/github";
-import { hoverIntent, needsUsageRefresh, nodeMeta, nodeStats, resetText, runtimeLine, settingsPatch, slotPct, usageLevel, usageView, windowLabel, withNodeUsage } from "@/pages/settings/nodes/nodes";
+import { createRefreshCooldown, hoverIntent, needsUsageRefresh, nodeMeta, nodeStats, resetText, runtimeLine, settingsPatch, slotPct, usageLevel, usageView, windowLabel, withNodeUsage } from "@/pages/settings/nodes/nodes";
 import { isDirty, nodePickerText, ordered, patchAt, removeAt, toggleId, versionText } from "@/pages/settings/team/team";
 import { employeeRows, fromChoice, inlineCommit, leadTimeoutLabel, memoryFileName, memoryWriter, repoRefs, splitMemory, threadRows, toChoice } from "@/pages/projectSettings/logic";
 import { newRole } from "@/lib/roles";
@@ -187,6 +187,19 @@ describe("nodes", () => {
     } finally {
       vi.useRealTimers();
     }
+
+    // cooldown: any attempt (ok, failed, 409) blocks that node for 60 s; other nodes are unaffected
+    const cd = createRefreshCooldown();
+    expect(cd.ready("a", now)).toBe(true);
+    cd.mark("a", now);
+    expect(cd.ready("a", now + 59_999)).toBe(false);
+    expect(cd.ready("b", now + 1)).toBe(true);
+    expect(cd.ready("a", now + 60_000)).toBe(true);
+    cd.mark("a", now + 60_000);
+    expect(cd.ready("a", now + 90_000)).toBe(false);
+    const short = createRefreshCooldown(1000);
+    short.mark("a", now);
+    expect([short.ready("a", now + 999), short.ready("a", now + 1000)]).toEqual([false, true]);
 
     const list = [{ id: "a", usage: null }, { id: "b", usage: { claude: u(at(1)) } }];
     const fresh = { claude: u(at(0)) };

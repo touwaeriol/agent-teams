@@ -2,7 +2,7 @@
 // Pages wrap them with `useAction` (mutations.ts) for toasts and cache refresh.
 import { client, unwrap } from "./client";
 import type { components } from "./schema";
-import type { AskChoice, MainTaskStatus } from "./views";
+import type { AskChoice, MainTaskStatus, UsageRefresh } from "./views";
 
 type S = components["schemas"];
 
@@ -104,7 +104,8 @@ export const nodes = {
   rotate: (id: string) => unwrap(client.POST("/api/nodes/{id}/token", { params: { path: { id } } })),
   upgrade: (id: string) => unwrap(client.POST("/api/nodes/{id}/upgrade", { params: { path: { id } } })),
   remove: (id: string) => unwrap(client.DELETE("/api/nodes/{id}", { params: { path: { id } } })),
-  refreshUsage: (id: string) => unwrap(client.POST("/api/nodes/{id}/usage/refresh", { params: { path: { id } } })),
+  /** 409 node_offline / usage_unsupported; the cards treat any failure as "keep the old numbers". */
+  refreshUsage: (id: string): Promise<UsageRefresh> => unwrap(client.POST("/api/nodes/{id}/usage/refresh", { params: { path: { id } } })),
 };
 
 export const roles = {

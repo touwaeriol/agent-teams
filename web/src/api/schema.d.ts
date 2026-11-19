@@ -869,6 +869,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/nodes/{id}/usage/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Fetch the node's subscription quota now (cached for 60 s; waits up to 15 s for the node) */
+        post: operations["refresh-node-usage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/office/layout": {
         parameters: {
             query?: never;
@@ -2816,6 +2833,10 @@ export interface components {
             /** Format: int64 */
             thread_no: number | null;
         };
+        NodeUsage: {
+            claude?: components["schemas"]["RuntimeUsage"];
+            codex?: components["schemas"]["RuntimeUsage"];
+        };
         NodeView: {
             /** Format: int64 */
             active_sessions: number;
@@ -2848,6 +2869,8 @@ export interface components {
             };
             /** Format: date-time */
             since: string | null;
+            /** @description Latest Claude Code / Codex subscription quota reported by the node; null when none */
+            usage: components["schemas"]["NodeUsage"];
             version: string;
         };
         OfficeSnapshot: {
@@ -3277,6 +3300,28 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        RuntimeUsage: {
+            /**
+             * @description How the runtime is logged in
+             * @enum {string}
+             */
+            auth: "subscription" | "chatgpt" | "api_key" | "none";
+            error?: string;
+            /**
+             * Format: date-time
+             * @description When the daemon fetched the data
+             */
+            fetched_at: string | null;
+            plan?: string;
+            /**
+             * Format: date-time
+             * @description When the console received the report
+             */
+            received_at: string;
+            /** @enum {string} */
+            status: "ok" | "error" | "unsupported";
+            windows: components["schemas"]["UsageWindow"][] | null;
+        };
         Schedule: {
             /** Format: date-time */
             created_at: string;
@@ -3651,6 +3696,12 @@ export interface components {
             /** Format: double */
             cost_usd_est: number;
         };
+        UsageRefreshOutputBody: {
+            /** @description The node did not answer in time; usage is the previous report */
+            stale?: boolean;
+            /** @description Latest report (same as NodeView.usage); null when the node never sent one */
+            usage: components["schemas"]["NodeUsage"];
+        };
         UsageTokens: {
             /** Format: int64 */
             cache_read: number;
@@ -3660,6 +3711,18 @@ export interface components {
             input: number;
             /** Format: int64 */
             output: number;
+        };
+        UsageWindow: {
+            /** @description five_hour, weekly, weekly_opus, weekly_sonnet, weekly_model (Claude); primary, secondary (Codex) */
+            key: string;
+            /** @description Display name from the provider, e.g. the model of a weekly_model window */
+            label?: string;
+            /** Format: date-time */
+            resets_at: string | null;
+            /** Format: double */
+            used_percent: number;
+            /** Format: int64 */
+            window_minutes?: number;
         };
         UserPatchInputBody: {
             active?: boolean;
@@ -5881,6 +5944,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "refresh-node-usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageRefreshOutputBody"];
+                };
             };
             /** @description Error */
             default: {
