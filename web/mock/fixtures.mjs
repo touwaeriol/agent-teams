@@ -45,7 +45,7 @@ const CVP = node("n2", "cvp");
 export const coordinator = emp("e0", "leader", "coordinator", "coordinator", "项目统筹", "claude", RC, look("#7A4FD1", "hoodie", "headset", "#3B2A20"), st("idle", ""));
 
 const step = (id, pos, title, status, done = 0, total = 0) => ({ id, pos, title, status, auto_done: status === "done", tasks_total: total, tasks_done: done });
-const counts = (c) => ({ waiting: 0, questions_open: 0, approvals_open: 0, tasks_total: 0, tasks_done: 0, main_total: 0, main_done: 0, ...c });
+const counts = (c) => ({ waiting: 0, questions_open: 0, approvals_open: 0, tasks_total: 0, tasks_done: 0, main_total: 0, main_done: 0, tasks_open: Math.max(0, (c.tasks_total ?? 0) - (c.tasks_done ?? 0)), ...c });
 
 const members12 = [
   emp("e12l", "lead-12", "lead", "lead", "组长", "claude", RC, look("#C8622A", "suit", "none", "#3B2A20"), st("reading", "审查 dev-1 的提交（只读，不改代码）")),
@@ -61,7 +61,7 @@ const members13 = [
 
 const thread = (no, title, status, extra) => ({
   id: `t${no}`, project_id: "p1", no, title, brief: "", status, queue_position: null, pause_reason: "", branch: `thread/${no}`, base_branch: "main",
-  pr_number: null, pr_url: null, pr_state: null, merge_error: null, summary: "", auto_approve: false, opened_by: "coordinator", members: [], main_tasks: [],
+  pr_number: null, pr_url: null, pr_state: null, merge_error: null, merge_policy: "pr", summary: "", auto_approve: false, opened_by: "coordinator", members: [], main_tasks: [],
   counts: counts({}), lead_last: null, cost_usd_est: null, created_at: ago(70), updated_at: ago(10), dispatch: null, ...extra,
 });
 

@@ -5286,6 +5286,11 @@
             "format": "int64",
             "type": "integer"
           },
+          "tasks_open": {
+            "description": "Small tasks not finished yet (not done, failed or cancelled): queued for a member, being worked on, or in review",
+            "format": "int64",
+            "type": "integer"
+          },
           "tasks_total": {
             "format": "int64",
             "type": "integer"
@@ -5301,6 +5306,7 @@
           "approvals_open",
           "tasks_total",
           "tasks_done",
+          "tasks_open",
           "main_total",
           "main_done",
           "deliverables"

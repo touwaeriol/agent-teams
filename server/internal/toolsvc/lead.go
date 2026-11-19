@@ -276,7 +276,7 @@ func (s *Service) openPR(ctx context.Context, tx *core.Tx, c *call) (Result, err
 	by := c.emp().Name
 	req := delivery.PRRequest{Title: in.Title, Body: in.Body, By: by, Repo: deref(in.Repo), Base: deref(in.Base)}
 	return Result{Later: func(ctx context.Context) Result {
-		th, err := s.deliv.OpenPR(ctx, t.ID, req)
+		th, again, err := s.deliv.OpenOrResubmit(ctx, t.ID, req)
 		if err != nil {
 			return failure(err)
 		}
@@ -285,6 +285,9 @@ func (s *Service) openPR(ctx context.Context, tx *core.Tx, c *call) (Result, err
 			return failure(err)
 		}
 		out := protocol.OpenPRResult{PRNumber: deref0(th.PRNumber), PRURL: deref(th.PRURL), Prs: repoPRs(repos)}
+		if again {
+			return okJSON("PR 已经开过，讨论串已重新提交验收（review），检查重新评估："+prLinks(out.Prs), out)
+		}
 		return okJSON("PR 已开："+prLinks(out.Prs), out)
 	}}, nil
 }
@@ -330,6 +333,14 @@ func (s *Service) finish(ctx context.Context, tx *core.Tx, c *call) (Result, err
 	if err != nil {
 		return Result{}, err
 	}
+	answer := ""
+	if end == finishWithPR {
+		// A thread back in running with its PRs open (failed checks, a reject) is resubmitted
+		// for review; refused (nothing recorded) while work is still open.
+		if answer, err = s.deliv.FinishWithPR(ctx, tx, t); err != nil {
+			return Result{}, err
+		}
+	}
 	summary := strings.TrimSpace(in.Summary)
 	if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"summary": summary}); err != nil {
 		return Result{}, err
@@ -340,20 +351,26 @@ func (s *Service) finish(ctx context.Context, tx *core.Tx, c *call) (Result, err
 	if err := tx.EmitThread(ctx, t.ID); err != nil {
 		return Result{}, err
 	}
+	// After the commit, in its own transaction: the end waits for this turn (the lead's final
+	// reply after finish is recorded first), so the tool result always goes out.
+	noChanges := end == finishNow
+	tx.AfterCommit(func(ctx context.Context) {
+		if err := s.deliv.FinishCalled(context.WithoutCancel(ctx), t.ID, noChanges); err != nil {
+			s.log.Warn("finish", "thread_id", t.ID, "err", err)
+		}
+	})
 	switch end {
 	case finishNow:
-		// After the commit, so the tool result goes out before the sessions are closed.
-		tx.AfterCommit(func(ctx context.Context) { s.endWithoutPR(context.WithoutCancel(ctx), t.ID) })
-		return okText("总结已记录。这个讨论串没有代码改动，不需要开 PR：讨论串现在结束（done），成员和你的会话随即关闭，不用再做别的。"), nil
+		return okText("总结已记录。这个讨论串没有代码改动，不需要开 PR：现在写给用户的最终汇报作为本回合的最后回复，回合结束后讨论串结束（done），成员和你的会话随即关闭。"), nil
 	case finishNeedsPR:
 		return okText("总结已记录。讨论串有代码改动还没有开 PR：请调用 open_pr(title, body)，之后平台按项目设置收尾（PR 检查通过即结束、自动合并或等用户验收）。"), nil
 	}
-	return okText("总结已记录。平台按项目设置收尾：PR 检查通过即结束、自动合并或等用户验收；检查没过会把失败的检查发给你。"), nil
+	return okText(answer), nil
 }
 
 // What finish does besides recording the summary.
 const (
-	finishWithPR  = iota // a PR is open: the thread ends when it merges
+	finishWithPR  = iota // the thread has PRs: resubmitted for review when back in running (FinishWithPR)
 	finishNeedsPR        // changes are on a thread branch without a PR yet
 	finishNow            // nothing was changed in any repository: the thread is done now
 )
@@ -413,23 +430,6 @@ func openWork(ctx context.Context, tx *core.Tx, t core.Thread) error {
 		return refuse("还有没完成的工作：%s。先完成（或用 update_plan / cancel_task 收尾）再调用 finish", strings.Join(open, "、"))
 	}
 	return nil
-}
-
-// endWithoutPR moves a thread that changed nothing to done (sessions close, coordinator told).
-func (s *Service) endWithoutPR(ctx context.Context, threadID string) {
-	err := s.core.InTx(ctx, func(tx *core.Tx) error {
-		t, err := core.LockThread(ctx, tx, threadID)
-		if err != nil || (t.Status != "running" && t.Status != "waiting") {
-			return ignoreMissing(err)
-		}
-		if mode, err := finishMode(ctx, tx, t); err != nil || mode != finishNow {
-			return err
-		}
-		return s.orch.SetStatus(ctx, tx, t, "done", "")
-	})
-	if err != nil {
-		s.log.Warn("finish without PR", "thread_id", threadID, "err", err)
-	}
 }
 
 // tellUser posts the lead's short message to the user in the thread conversation right away

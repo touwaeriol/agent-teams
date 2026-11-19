@@ -3430,6 +3430,11 @@ export interface components {
             questions_open: number;
             /** Format: int64 */
             tasks_done: number;
+            /**
+             * Format: int64
+             * @description Small tasks not finished yet (not done, failed or cancelled): queued for a member, being worked on, or in review
+             */
+            tasks_open: number;
             /** Format: int64 */
             tasks_total: number;
             /** Format: int64 */
