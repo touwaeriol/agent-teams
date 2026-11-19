@@ -346,6 +346,9 @@ html.dark .el-message--warning { --el-message-bg-color: hsl(64 100% 6%); --el-me
 .at-dialog-flush { padding: 0; }
 .at-dialog-flush .el-dialog__header { padding: 0; }
 .at-dialog-flush .el-dialog__body { display: flex; flex: 1; min-height: 0; padding: 0; }
+/* The body is a row flex box: its children must be allowed to shrink below their content width,
+   or one long unbreakable line (a truncated name, a path, a URL) widens the dialog past its edge. */
+.at-dialog-flush .el-dialog__body > * { min-width: 0; }
 
 /* Menu extras: a grey shortcut or time at the right end of an item, and a submenu row. */
 .at-kbd {
