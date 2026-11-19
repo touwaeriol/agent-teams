@@ -24,20 +24,26 @@ type ModelChange struct {
 	UserID, ConvID string
 	// Model is the id to use; "" goes back to what the employee would run without it.
 	Model string
-	// WholeThread (thread conversations): every employee of the thread with the lead's runtime, not only the lead.
+	// WholeThread (thread conversations, scope thread): the thread's members with the lead's
+	// runtime. Without it the change would be the lead's own, which ErrFixedModel refuses.
 	WholeThread bool
 }
 
-// ModelResult lists the employees changed and the ones left alone (another runtime).
+// ErrFixedModel refuses /model for the coordinator and thread leads: they always run the default
+// model (Model).
+var ErrFixedModel = errors.New("统筹和组长使用默认模型，不能切换")
+
+// ModelResult lists the employees changed and the ones left alone.
 type ModelResult struct {
 	Applied []ModelApplied `json:"applied"`
-	Skipped []string       `json:"skipped" doc:"Employees of another runtime (Codex members) that keep their model"`
+	Skipped []string       `json:"skipped" doc:"Employees that keep their model: the lead (always the default model) and members of another runtime"`
 }
 
-// SetConversationModel changes the model of the conversation's employee: the project coordinator
-// model in the coordinator conversation, the lead's (or the whole thread's) in a thread. Running
-// sessions switch from their next turn (session.set_mode; Claude: Query.setModel, Codex: the
-// next turn's model).
+// SetConversationModel changes the model of a thread's members (scope thread): every member
+// (tier member) with the lead's runtime. The coordinator and the lead always run the default
+// model, so the coordinator conversation and the lead scope are refused (ErrFixedModel). Running
+// sessions switch from their next turn (session.set_mode; Claude: Query.setModel, Codex: the next
+// turn's model).
 func (o *Orchestrator) SetConversationModel(ctx context.Context, in ModelChange) (ModelResult, error) {
 	out := ModelResult{Applied: []ModelApplied{}, Skipped: []string{}}
 	err := o.core.InTx(ctx, func(tx *core.Tx) error {
@@ -45,50 +51,36 @@ func (o *Orchestrator) SetConversationModel(ctx context.Context, in ModelChange)
 		if err != nil {
 			return err
 		}
-		emp, err := o.targetOf(ctx, tx, c)
+		if c.Kind == "coordinator" || !in.WholeThread {
+			return ErrFixedModel
+		}
+		lead, err := o.targetOf(ctx, tx, c)
 		if err != nil {
 			return err
 		}
-		p, err := o.project(ctx, tx, emp.ProjectID)
+		p, err := o.project(ctx, tx, lead.ProjectID)
 		if err != nil {
 			return err
 		}
-		if c.Kind == "coordinator" {
-			return o.setCoordinatorModel(ctx, tx, emp, p, in.Model, &out)
-		}
-		return o.setThreadModel(ctx, tx, c.ID, emp, p, in, &out)
+		return o.setThreadModel(ctx, tx, c.ID, lead, p, in.Model, &out)
 	})
 	return out, err
 }
 
-func (o *Orchestrator) setCoordinatorModel(ctx context.Context, tx *core.Tx, emp core.Employee, p store.Project, model string, out *ModelResult) error {
-	if err := tx.Gorm(ctx).Table("at_projects").Where("id = ?", p.ID).Update("coordinator_model", model).Error; err != nil {
+func (o *Orchestrator) setThreadModel(ctx context.Context, tx *core.Tx, threadID string, lead core.Employee, p store.Project, model string, out *ModelResult) error {
+	all, err := core.ThreadParticipants(ctx, tx, threadID)
+	if err != nil {
 		return err
 	}
-	p.CoordinatorModel = model
-	a, err := o.ApplyModel(ctx, tx, emp, p)
-	out.Applied = append(out.Applied, a)
-	return err
-}
-
-func (o *Orchestrator) setThreadModel(ctx context.Context, tx *core.Tx, threadID string, lead core.Employee, p store.Project, in ModelChange, out *ModelResult) error {
-	targets := []core.Employee{lead}
-	if in.WholeThread {
-		all, err := core.ThreadParticipants(ctx, tx, threadID)
-		if err != nil {
-			return err
-		}
-		targets = all
-	}
-	for _, e := range targets {
-		if e.Runtime != lead.Runtime {
+	for _, e := range all {
+		if fixedModel(e.Tier) || e.Runtime != lead.Runtime {
 			out.Skipped = append(out.Skipped, e.Name)
 			continue
 		}
-		if err := tx.Gorm(ctx).Table("at_employees").Where("id = ?", e.ID).Update("model", in.Model).Error; err != nil {
+		if err := tx.Gorm(ctx).Table("at_employees").Where("id = ?", e.ID).Update("model", model).Error; err != nil {
 			return err
 		}
-		e.Model = in.Model
+		e.Model = model
 		a, err := o.ApplyModel(ctx, tx, e, p)
 		if err != nil {
 			return err

@@ -61,18 +61,3 @@ export function contextRows(c: ComposerContext): Array<[string, string]> {
     ["本次会话合计", `输入 ${formatTokens(s.total.input + s.total.cache_read + s.total.cache_write)} · 输出 ${formatTokens(s.total.output)} tokens`],
   ];
 }
-
-type ModelResult = components["schemas"]["ModelResult"];
-
-/** The toast after /model: who switched, to what, and whether it is live or waits for the next session. */
-export function modelAppliedText(r: ModelResult, name: (id: string) => string): string {
-  const applied = r.applied ?? [];
-  const skipped = (r.skipped ?? []).length ? `；${(r.skipped ?? []).join("、")} 是另一种类型，模型没变` : "";
-  if (applied.length === 0) return `没有员工需要切换${skipped}`;
-  const who = applied.length === 1 ? applied[0]!.employee : `${applied.length} 位员工`;
-  const model = name(applied[0]!.model);
-  const live = applied.filter((a) => a.live).length;
-  if (live === applied.length) return `${who} 已切换到 ${model}，正在运行的会话从下一轮起生效${skipped}`;
-  if (live === 0) return `${who} 改用 ${model}，下次打开会话时生效${skipped}`;
-  return `${who} 改用 ${model}：${live} 个运行中的会话从下一轮起生效，其余下次打开会话时生效${skipped}`;
-}

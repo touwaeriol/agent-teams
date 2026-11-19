@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** The answer to a platform command, shown at the top of the message box: /model, /effort, /status, /context, /skills. */
+/** The answer to a platform command, shown at the top of the message box: /effort, /status, /context, /skills. */
 import { useQuery } from "@tanstack/vue-query";
 import { X } from "lucide-vue-next";
 import { computed } from "vue";
@@ -11,12 +11,10 @@ import type { OverviewView } from "@/api/views";
 import Spinner from "@/components/common/Spinner.vue";
 import { EFFORTS } from "@/lib/projectSettings";
 import { cn } from "@/lib/utils";
-import type { Scope } from "./assist";
-import ModelPanel from "./ModelPanel.vue";
 import { contextRows, statusSummary } from "./panels";
 import type { ComposerAssist, Panel } from "./useComposerAssist";
 
-const props = defineProps<{ assist: ComposerAssist; panel: Panel; pid: string; cid: string; scope: Scope }>();
+const props = defineProps<{ assist: ComposerAssist; panel: Panel; pid: string; cid: string }>();
 const project = useProject(() => props.pid);
 const overview = useOverview(() => (props.panel === "status" ? props.pid : ""));
 const coordinator = useCoordinator(() => (props.panel === "status" ? props.pid : ""));
@@ -30,7 +28,7 @@ const update = useAction((body: Parameters<typeof projects.update>[1]) => projec
   success: "已保存，之后打开的会话生效",
 });
 
-const TITLES: Record<Panel, string> = { model: "模型", effort: "思考强度", status: "状态", context: "上下文", skills: "技能和插件" };
+const TITLES: Record<Panel, string> = { effort: "思考强度", status: "状态", context: "上下文", skills: "技能和插件" };
 const effort = computed(() => project.data.value?.thread_effort ?? "");
 const status = computed(() => (overview.data.value ? statusSummary(overview.data.value as unknown as OverviewView, coordinator.data.value) : null));
 const rows = computed(() => (context.data.value ? contextRows(context.data.value) : []));
@@ -39,7 +37,7 @@ const skills = computed(() => {
   return d ? { ...d, commands: d.commands ?? [] } : undefined;
 });
 const loading = computed(
-  () => ({ model: { value: false }, effort: project.isLoading, status: overview.isLoading, context: context.isLoading, skills: props.assist.commands.isLoading })[props.panel].value,
+  () => ({ effort: project.isLoading, status: overview.isLoading, context: context.isLoading, skills: props.assist.commands.isLoading })[props.panel].value,
 );
 </script>
 
@@ -52,7 +50,6 @@ const loading = computed(
       </button>
     </header>
     <Spinner v-if="loading" class="size-4" />
-    <ModelPanel v-else-if="panel === 'model'" :pid="pid" :cid="cid" :scope="scope" />
     <template v-else-if="panel === 'effort'">
       <p class="mb-2 text-xs text-muted-foreground">这个项目所有讨论串的思考强度，对之后打开的会话生效。</p>
       <div class="flex flex-wrap gap-1.5">

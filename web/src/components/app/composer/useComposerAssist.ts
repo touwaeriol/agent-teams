@@ -1,5 +1,5 @@
 // Composer assist: the "/" and "@" popups of a message box, the @ references a message carries,
-// and the platform commands (/model, /status, …) the web runs itself. Composer.vue creates one
+// and the platform commands (/status, /context, …) the web runs itself. Composer.vue creates one
 // per box from its text and input element; options null switch everything off.
 import { useQuery } from "@tanstack/vue-query";
 import { computed, nextTick, ref, toValue, watch, type MaybeRefOrGetter, type Ref } from "vue";
@@ -28,9 +28,9 @@ export interface AssistOptions {
 }
 
 /** A platform command's answer shown above the box. */
-export type Panel = "model" | "effort" | "status" | "context" | "skills";
+export type Panel = "effort" | "status" | "context" | "skills";
 
-const PANELS: Panel[] = ["model", "effort", "status", "context", "skills"];
+const PANELS: Panel[] = ["effort", "status", "context", "skills"];
 const ROUTES: Record<string, string> = { usage: "usage", memory: "memory", config: "general" };
 
 type Field = HTMLInputElement | HTMLTextAreaElement | null;

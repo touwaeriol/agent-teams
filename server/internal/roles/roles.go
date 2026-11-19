@@ -74,6 +74,9 @@ func normalizeOne(r *store.Role, looks office.Looks) {
 	}
 	if r.Tier != Member {
 		r.Count = 1
+		// The coordinator and leads always run the default model (orchestrator.Model): a model
+		// sent by an older client is dropped, not refused.
+		r.Model = ""
 	}
 	if r.Count == 0 {
 		r.Count = 1
