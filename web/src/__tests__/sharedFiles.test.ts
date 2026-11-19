@@ -245,6 +245,15 @@ describe("folders", () => {
     expect(picked.files.map((f) => f.path)).toEqual(["exports/a.csv", "exports/q4/b.json", "notes.md"]);
     expect(picked.skipped).toBe(1);
   });
+  it("without webkitGetAsEntry, keeps an empty file without an extension (an empty Makefile)", async () => {
+    const makefile = new File([], "Makefile");
+    expect(makefile.type).toBe("");
+    expect(makefile.size).toBe(0);
+    const got = await droppedFiles({ items: [], files: [makefile] } as unknown as DataTransfer);
+    expect(got.folders).toBe(0);
+    expect(got.files.map((f) => f.file.name)).toEqual(["Makefile"]);
+  });
+
   it("without webkitGetAsEntry, recognises a dropped folder instead of uploading it", async () => {
     const folder = new File([], "exports");
     Object.defineProperty(folder, "slice", { value: () => ({ arrayBuffer: () => Promise.reject(new Error("is a directory")) }) });
@@ -390,6 +399,18 @@ describe("SharedFiles page", () => {
     await flushPromises();
     expect(warn).toHaveBeenLastCalledWith("正在上传，等这一批传完再拖入新的文件");
     expect(forms).toHaveLength(1);
+  });
+
+  it("tells the user when an entry of a dropped folder cannot be read, and uploads nothing", async () => {
+    const { w } = await mountPage(listOf([]));
+    const error = vi.spyOn(toast, "error").mockImplementation(() => {});
+    const send = vi.spyOn(XMLHttpRequest.prototype, "send").mockImplementation(() => {});
+    const broken = { isFile: true, isDirectory: false, name: "a.csv", fullPath: "/d/a.csv", file: (_ok: unknown, fail: (e: unknown) => void) => fail(new Error("NotReadableError")) };
+    const folder = { isFile: false, isDirectory: true, name: "d", fullPath: "/d", createReader: () => ({ readEntries: (ok: (e: object[]) => void) => ok([broken]) }) };
+    await w.get("[data-testid=shared-drop]").trigger("drop", { dataTransfer: { items: [{ kind: "file", webkitGetAsEntry: () => folder }], files: [] } });
+    await flushPromises();
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("读取拖入的文件失败"));
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("deletes after confirming", async () => {

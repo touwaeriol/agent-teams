@@ -113,7 +113,15 @@ async function dropped(e: DragEvent) {
     toast.warning(BUSY_DROP);
     return;
   }
-  const { files: got, folders } = await droppedFiles(e.dataTransfer);
+  let dropped: Awaited<ReturnType<typeof droppedFiles>>;
+  try {
+    dropped = await droppedFiles(e.dataTransfer);
+  } catch {
+    // An entry of a dropped folder could not be read (permissions, a file removed meanwhile).
+    toast.error("读取拖入的文件失败（有文件读不了），这次拖入没有上传；可以改用“上传文件夹”再试");
+    return;
+  }
+  const { files: got, folders } = dropped;
   const notes = folders > 0 ? [`这个浏览器不能直接拖入文件夹（${folders} 个没有上传），请改用“上传文件夹”`] : [];
   start(got, notes);
 }
