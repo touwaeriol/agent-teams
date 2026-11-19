@@ -1,8 +1,8 @@
 import type { ContentBlock, FileDownload, ToolCancel, ToolResult } from "../protocol.js";
 import { deferred, type Deferred } from "../util/async.js";
 import { newId } from "../util/ids.js";
-import { DownloadError, writeDownload } from "./download.js";
-import { MAX_BYTES, MAX_FILES, prepareUpload, type PreparedUpload } from "./upload.js";
+import { DownloadError, writeDownload, writeSharedDownload } from "./download.js";
+import { MAX_BYTES, MAX_FILES, MAX_SHARED_BYTES, prepareSharedUpload, prepareUpload, type PreparedUpload } from "./upload.js";
 
 export type SendFn = (type: string, body: object) => void;
 
@@ -17,7 +17,10 @@ export interface ToolCallRequest {
 }
 
 /** Tools whose files the daemon uploads (file.chunk frames) before forwarding the call. */
-export const UPLOAD_TOOLS = new Set(["publish_file"]);
+export const UPLOAD_TOOLS = new Set(["publish_file", "write_shared_file"]);
+
+/** Tools whose result is preceded by file.download frames the daemon writes into the working directory. */
+const DOWNLOAD_TOOLS = new Set(["read_deliverable", "read_shared_file"]);
 
 export interface McpToolResult {
   [k: string]: unknown;
@@ -31,13 +34,16 @@ interface Pending {
   cwd?: string;
   tool: string;
   wait: Deferred<ToolResult>;
-  /** read_deliverable: file.download chunks (base64 by index) that arrived for this call. */
+  /** read_deliverable / read_shared_file: file.download chunks (base64 by index) that arrived for this call. */
   chunks?: Map<number, string>;
   chunkBytes?: number;
 }
 
 /** Base64 a download may take in memory before its tool.result (4/3 of the size limit plus slack). */
 const MAX_DOWNLOAD_B64 = Math.ceil((MAX_BYTES * 4) / 3) + 4 * MAX_FILES;
+/** Most file.download chunks kept for one call. */
+const MAX_DOWNLOAD_CHUNKS = 64;
+const MAX_SHARED_B64 = Math.ceil((MAX_SHARED_BYTES * 4) / 3) + 4 * MAX_DOWNLOAD_CHUNKS;
 
 /**
  * Forwards platform tool calls to the console (protocol.md §6): tool.call (reliable,
@@ -53,9 +59,12 @@ export class ToolBroker {
     let upload: PreparedUpload | undefined;
     if (UPLOAD_TOOLS.has(req.tool)) {
       try {
-        upload = await prepareUpload(req.cwd ?? "", req.args.path);
+        upload =
+          req.tool === "write_shared_file"
+            ? await prepareSharedUpload(req.cwd ?? "", req.args.file, req.args.path)
+            : await prepareUpload(req.cwd ?? "", req.args.path);
       } catch (err) {
-        return { content: [{ type: "text", text: `publish_file: ${(err as Error).message}` }], isError: true };
+        return { content: [{ type: "text", text: `${req.tool}: ${(err as Error).message}` }], isError: true };
       }
     }
     const callId = newId("tc_");
@@ -94,11 +103,11 @@ export class ToolBroker {
    */
   chunk(body: FileDownload): void {
     const p = this.pending.get(body.call_id);
-    if (!p || p.sessionId !== body.session_id || p.tool !== "read_deliverable") return;
+    if (!p || p.sessionId !== body.session_id || !DOWNLOAD_TOOLS.has(p.tool)) return;
     p.chunks ??= new Map();
     if (p.chunks.has(body.index)) return;
     const bytes = (p.chunkBytes ?? 0) + body.data.length;
-    if (bytes > MAX_DOWNLOAD_B64 || p.chunks.size >= MAX_FILES) return;
+    if (bytes > (p.tool === "read_shared_file" ? MAX_SHARED_B64 : MAX_DOWNLOAD_B64) || p.chunks.size >= MAX_DOWNLOAD_CHUNKS) return;
     p.chunkBytes = bytes;
     p.chunks.set(body.index, body.data);
   }
@@ -108,6 +117,11 @@ export class ToolBroker {
     const p = this.pending.get(body.call_id);
     if (!p || p.sessionId !== body.session_id) return false;
     this.pending.delete(body.call_id);
+    if (p.tool === "read_shared_file") {
+      if (body.ok && body.shared_download) void this.saveShared(p, body).then((r) => p.wait.resolve(r));
+      else p.wait.resolve(withoutContent(body));
+      return true;
+    }
     if (body.ok && body.download) {
       void this.saveDownload(p, body).then((r) => p.wait.resolve(r));
       return true;
@@ -130,6 +144,27 @@ export class ToolBroker {
     }
   }
 
+  /**
+   * Writes read_shared_file's file to <cwd>/.shared/<path>. The result names the local copy (absolute
+   * path), its size and sha256 and tells the employee to read it with the file tools; whatever the
+   * console sent as text or content is dropped, so file contents never enter the tool result.
+   */
+  private async saveShared(p: Pending, body: ToolResult): Promise<ToolResult> {
+    try {
+      const out = await writeSharedDownload(p.cwd ?? "", body.shared_download!, p.chunks ?? new Map());
+      const path = body.shared_download!.files[0].path;
+      const note =
+        `Saved shared file ${path} to ${out.abs} (relative: ${out.rel}; git-ignored), ${out.size} bytes, sha256 ${out.sha256}. ` +
+        `Read it with your file tools; to change it, edit that copy and call write_shared_file(file="${out.rel}").`;
+      const { content: _drop, ...rest } = body.structured ?? {};
+      const structured = { ...rest, path, size: out.size, sha256: out.sha256, local_path: out.abs };
+      return { session_id: body.session_id, call_id: body.call_id, ok: true, content: [{ type: "text", text: note }], structured };
+    } catch (err) {
+      const msg = err instanceof DownloadError ? err.message : `could not write the file: ${(err as Error).message}`;
+      return { session_id: body.session_id, call_id: body.call_id, ok: false, content: [{ type: "text", text: `read_shared_file: ${msg}` }] };
+    }
+  }
+
   cancelSession(sessionId: string, reason: ToolCancel["reason"]): void {
     for (const id of this.pendingFor(sessionId)) {
       const p = this.pending.get(id)!;
@@ -142,6 +177,13 @@ export class ToolBroker {
   pendingFor(sessionId: string): string[] {
     return [...this.pending].filter(([, p]) => p.sessionId === sessionId).map(([id]) => id);
   }
+}
+
+/** read_shared_file results without a download never carry the file's content either. */
+function withoutContent(body: ToolResult): ToolResult {
+  if (!body.structured || !("content" in body.structured)) return body;
+  const { content: _drop, ...structured } = body.structured;
+  return { ...body, structured };
 }
 
 function toMcp(r: ToolResult): McpToolResult {

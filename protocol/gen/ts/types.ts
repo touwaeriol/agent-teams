@@ -173,18 +173,18 @@ export type PlanStepStatus = "todo" | "doing" | "done";
  */
 export type BubbleKind = "plain" | "ask" | "error" | "done";
 /**
- * Path of a file in the project's shared files: relative, '/'-separated, 1 to 8 segments, at most 255 characters. No segment may be empty, '.', '..' or start with '.' (so no hidden files and nothing under .agent-*); no backslash, control characters or leading '/'.
+ * Path of a file in the project's shared files: relative, '/'-separated, 1 to 8 segments, at most 255 bytes in UTF-8 (the schema can only check 255 characters; the server's byte check is authoritative). No segment may be empty, '.', '..', start with '.' (so no hidden files and nothing under .shared or .agent-*) or start or end with a space; no backslash, control characters (C0, DEL, C1), U+2028/U+2029 or leading '/'.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "SharedPath".
  */
 export type SharedPath = string;
 /**
- * Path of a file in the project's shared files: relative, '/'-separated, 1 to 8 segments, at most 255 characters. No segment may be empty, '.', '..' or start with '.' (so no hidden files and nothing under .agent-*); no backslash, control characters or leading '/'.
+ * Path of a file in the project's shared files: relative, '/'-separated, 1 to 8 segments, at most 255 bytes in UTF-8 (the schema can only check 255 characters; the server's byte check is authoritative). No segment may be empty, '.', '..', start with '.' (so no hidden files and nothing under .shared or .agent-*) or start or end with a space; no backslash, control characters (C0, DEL, C1), U+2028/U+2029 or leading '/'.
  */
 export type SharedPath1 = string;
 /**
- * Path of a file in the project's shared files: relative, '/'-separated, 1 to 8 segments, at most 255 characters. No segment may be empty, '.', '..' or start with '.' (so no hidden files and nothing under .agent-*); no backslash, control characters or leading '/'.
+ * Path of a file in the project's shared files: relative, '/'-separated, 1 to 8 segments, at most 255 bytes in UTF-8 (the schema can only check 255 characters; the server's byte check is authoritative). No segment may be empty, '.', '..', start with '.' (so no hidden files and nothing under .shared or .agent-*) or start or end with a space; no backslash, control characters (C0, DEL, C1), U+2028/U+2029 or leading '/'.
  */
 export type SharedPath2 = string;
 
@@ -425,7 +425,7 @@ export interface FileChunk {
   data: string;
 }
 /**
- * One piece of the files read_deliverable or read_shared_file sends to the employee's working directory. Chunks are sent before the tool.result that references their download_id (download or shared_download); the daemon keeps them for that call only, checks sizes and checksums, and writes the files under .agent-deliverables/ (read_deliverable) or .agent-shared/ (read_shared_file).
+ * One piece of the files read_deliverable or read_shared_file sends to the employee's working directory. Chunks are sent before the tool.result that references their download_id (download or shared_download); the daemon keeps them for that call only, checks sizes and checksums, and writes the files under .agent-deliverables/ (read_deliverable) or .shared/ (read_shared_file).
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "FileDownload".
@@ -698,7 +698,7 @@ export interface Hello {
   capacity?: Capacity;
   runtimes?: Runtimes;
   /**
-   * Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, context_usage (turn_ended carries context), session_compact (session.compact).
+   * Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact).
    */
   features?: string[];
   isolated?: boolean;
@@ -1831,7 +1831,7 @@ export interface ToolDownload1 {
   files: [DownloadFile, ...DownloadFile[]];
 }
 /**
- * read_shared_file: the one file whose bytes arrived before as file.download frames; the daemon writes it as .agent-shared/<path> in the session's working directory (the folder holds its own .gitignore).
+ * read_shared_file: the one file whose bytes arrived before as file.download frames; the daemon writes it as .shared/<path> in the session's working directory (the folder holds its own .gitignore).
  */
 export interface ToolSharedDownload1 {
   download_id: DownloadId;
@@ -3174,26 +3174,18 @@ export interface ReadSharedFileResult {
   size: number;
   sha256: string;
   /**
-   * Where the file was written, relative to your working directory (.agent-shared/<path>; the daemon adds the absolute path). Absent when the session has no working directory.
+   * Where the file was written, relative to your working directory: .shared/<path> (the daemon adds the absolute path). Read the file there with your file tools.
    */
-  local_path?: string;
-  /**
-   * The text, only with inline=true for a UTF-8 text file of at most 64 KB.
-   */
-  content?: string;
+  local_path: string;
 }
 /**
- * Fetch one of the project's shared files into your working directory as .agent-shared/<path> (the folder is git-ignored, like .agent-deliverables). With inline=true a UTF-8 text file of at most 64 KB is also returned as content. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 20 MB per file, 500 MB per project. To change it, edit the local copy and call write_shared_file(file=.agent-shared/<path>).
+ * Download one of the project's shared files to .shared/<path> in your working directory (the folder is git-ignored) and return that local path; the result never contains the file's content, so read it with your file tools. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. An existing local copy at the same path is overwritten. Limits: 20 MB per file, 500 MB per project. To change the shared file, edit the local copy and call write_shared_file(file=.shared/<path>).
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "ReadSharedFileInput".
  */
 export interface ReadSharedFileInput {
   path: SharedPath1;
-  /**
-   * Also return the text in the result (UTF-8 text files up to 64 KB only).
-   */
-  inline?: boolean;
 }
 /**
  * Append a one-line note to the project memory index MEMORY.md (shortcut for small facts).

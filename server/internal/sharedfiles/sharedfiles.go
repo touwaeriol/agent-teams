@@ -44,13 +44,13 @@ var (
 	ErrNotFound = errors.New("shared file not found")
 )
 
-// CleanPath checks a shared-files path and returns it normalised (surrounding spaces of the whole
-// path trimmed, a leading "./" removed). It refuses absolute paths, '..' and '.' segments, empty
-// segments ("a//b", a trailing '/'), segments starting with '.', backslashes, control characters,
-// invalid UTF-8, more than MaxDepth segments and more than MaxPathBytes bytes — the SharedPath rule
-// of protocol/schemas/tools/common.json.
+// CleanPath checks a shared-files path and returns it normalised (a leading "./" removed). It
+// refuses absolute paths, '..' and '.' segments, empty segments ("a//b", a trailing '/'), segments
+// starting with '.' or starting or ending with a space, backslashes, control characters (C0, DEL,
+// C1), U+2028/U+2029, invalid UTF-8, more than MaxDepth segments and more than MaxPathBytes bytes
+// of UTF-8 — the SharedPath rule of protocol/schemas/tools/common.json (whose maxLength can only
+// count characters; this byte check is the authoritative one).
 func CleanPath(p string) (string, error) {
-	p = strings.TrimSpace(p)
 	for strings.HasPrefix(p, "./") {
 		p = p[2:]
 	}
@@ -59,7 +59,7 @@ func CleanPath(p string) (string, error) {
 	case p == "":
 		return bad("是空的")
 	case len(p) > MaxPathBytes:
-		return bad(fmt.Sprintf("超过 %d 字节", MaxPathBytes))
+		return bad(fmt.Sprintf("超过 %d 字节（UTF-8）", MaxPathBytes))
 	case !utf8.ValidString(p):
 		return bad("不是合法的 UTF-8")
 	case strings.HasPrefix(p, "/"):
@@ -68,8 +68,8 @@ func CleanPath(p string) (string, error) {
 		return bad("不能有反斜杠")
 	}
 	for _, r := range p {
-		if r < 0x20 || r == 0x7f {
-			return bad("不能有控制字符")
+		if r < 0x20 || (r >= 0x7f && r <= 0x9f) || r == 0x2028 || r == 0x2029 {
+			return bad("不能有控制字符或行分隔符")
 		}
 	}
 	segs := strings.Split(p, "/")
@@ -84,6 +84,8 @@ func CleanPath(p string) (string, error) {
 			return bad("不能有 . 或 .. 段")
 		case strings.HasPrefix(s, "."):
 			return bad("路径段不能以 . 开头")
+		case strings.HasPrefix(s, " ") || strings.HasSuffix(s, " "):
+			return bad("路径段不能以空格开头或结尾")
 		}
 	}
 	return p, nil
@@ -91,14 +93,14 @@ func CleanPath(p string) (string, error) {
 
 // Join puts name under the folder dir (both checked; a trailing "/" of dir is fine); dir "" leaves name as it is.
 func Join(dir, name string) (string, error) {
-	dir = strings.TrimRight(strings.TrimSpace(dir), "/")
+	dir = strings.TrimRight(dir, "/")
 	if dir == "" {
 		return CleanPath(name)
 	}
 	if _, err := CleanPath(dir); err != nil {
 		return "", err
 	}
-	return CleanPath(dir + "/" + strings.TrimSpace(name))
+	return CleanPath(dir + "/" + name)
 }
 
 // extraTypes are content types of common data files the deliverable table does not list.

@@ -968,7 +968,7 @@
         "path": "data/sample.csv",
         "size": 8,
         "sha256": "9f0b1e5c0b3c2c0e7d1fa1b7bc7f0b4b8f8a5e3e1c4d1f0e2a3b4c5d6e7f8a9b",
-        "local_path": ".agent-shared/data/sample.csv"
+        "local_path": ".shared/data/sample.csv"
       },
       "shared_download": {
         "download_id": "dn_01jd3v000000000000000000sh",

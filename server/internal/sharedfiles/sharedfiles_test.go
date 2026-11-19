@@ -18,7 +18,7 @@ import (
 func TestCleanPath(t *testing.T) {
 	ok := map[string]string{
 		"notes.md": "notes.md", "data/sample.csv": "data/sample.csv", "./data/a b.txt": "data/a b.txt",
-		" 报告/2026-11.xlsx ": "报告/2026-11.xlsx", "a/b/c/d/e/f/g/h": "a/b/c/d/e/f/g/h", "no-ext": "no-ext",
+		"报告/2026-11.xlsx": "报告/2026-11.xlsx", "a b/c d.txt": "a b/c d.txt", strings.Repeat("中", 85): strings.Repeat("中", 85), "a/b/c/d/e/f/g/h": "a/b/c/d/e/f/g/h", "no-ext": "no-ext",
 		"a..b/c": "a..b/c", strings.Repeat("x", 255): strings.Repeat("x", 255),
 	}
 	for in, want := range ok {
@@ -30,7 +30,9 @@ func TestCleanPath(t *testing.T) {
 	bad := []string{
 		"", " ", "/etc/passwd", "../secret", "a/../../b", "a/..", "..", ".", "./", "a/./b", "a//b", "a/", "/",
 		".env", "a/.git/config", ".shared/x", `a\b`, `..\..\windows`, "a\x00b", "a\nb", "a\tb", "a\x7fb",
-		"a/b/c/d/e/f/g/h/i", strings.Repeat("x", 256), "\xff\xfe",
+		"a/b/c/d/e/f/g/h/i", strings.Repeat("x", 256), "\xff\xfe", " a", "a ", "a/ b", "a /b", " 报告/x.csv",
+		"a\u0085b", "a\u009fb", "a\u2028b", "a\u2029b", strings.Repeat("中", 86), // 86 characters but 258 bytes
+		".shared/x/y",
 	}
 	for _, in := range bad {
 		if got, err := sharedfiles.CleanPath(in); !errors.Is(err, sharedfiles.ErrInvalidPath) {
