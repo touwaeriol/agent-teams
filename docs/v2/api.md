@@ -35,6 +35,7 @@
 | `merge` | `{thread_no, entry: MergeEntryView}` | 合并队列变化 |
 | `ci` | `{thread_no, sha, checks: CheckView[]}` | CI 结果变化 |
 | `memory` | `{op: "write"|"delete", name}` | 记忆文件变了（网页重新拉列表和打开的文件） |
+| `shared_file` | `{op: "write"|"delete", path, by}` | 共享文件写入（新建或覆盖）/ 删除；`by` 是 `user` 或 `dev-1 #31` 这样的员工名加讨论串号（网页重新拉共享文件列表） |
 | `node` | `{node: NodeBrief}` | 该项目用到的节点上下线、槽位变化 |
 | `layout` | `{layout_id, version}` | 办公室布局更新（前端重新拉布局并重画） |
 | `reset` | `{}` | 补发窗口不够，前端需整体重新拉取 |
@@ -229,6 +230,17 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 网页里“资料库”就是这个列表：主界面右侧的面板（`/projects/:pid?panel=library`）和全屏页 `/projects/:pid/deliverables`，表格列 名称 / 所有者（`published_by`，`user` 显示为“你”）/ 修改日期 / 大小（`detail.size`）/ 类型（托管文件按扩展名，其余按 kind），可按类型筛选、搜索、切换网格。
 
 PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平台轮询 / webhook 更新。设计类和托管交付物（员工用 `publish_file` 发布）在查看器 DesignViewer（`/projects/:pid/deliverables/:id`）里打开：HTML 在 sandbox iframe 里，Markdown 安全渲染，图片内联（只有截图不再算交付物之前发布的旧数据），可切换版本，批注发回给员工。
+
+### 3.5.1 共享文件
+
+项目级共享区（讨论串 #33，`architecture.md` §6.3、`protocol.md` §6.5）：文件存在控制台（`at_shared_files`，`data-model.md` §2.13），不进 git，项目里所有会话和用户都能看到、覆盖、删除；同名直接覆盖，不做版本。上限：单文件 20 MB、项目合计 500 MB、项目最多 1000 个文件（覆盖按差值算总量）。路径规则：相对、`/` 分隔、1～8 段、≤ 255 字节，每段不能为空、不能是 `.` `..`、不能以 `.` 开头，不能有反斜杠和控制字符——控制台对浏览器和节点送来的路径都再校验一次。任何类型都能上传，`content_type` 按扩展名推断（未知为 `application/octet-stream`）。不要放密钥等凭证。别人的项目一律 404。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/projects/{pid}/shared-files?prefix=` | → `{files: SharedFile[], total_bytes, file_count, limits: {file_bytes, project_bytes, project_files}}`，按路径排序（不含内容）；`SharedFile = {path, content_type, size, sha256, uploaded_by, uploaded_by_thread_no?, created_at, updated_at}`，`uploaded_by` 是员工名或 `user`（网页显示为“你”），员工上传的带 `uploaded_by_thread_no`（显示成“dev-1 #31”，统筹没有） |
+| POST | `/api/projects/{pid}/shared-files` | `multipart/form-data`：一个或多个 `file` 部分；可选 `dir`（目录前缀，例如 `data/`）；可选 `path`（要么不给、用文件名，要么每个文件给一个、按顺序对应，可带子目录）→ 201 `{files: [SharedFile + overwritten], total_bytes}`。一次请求整体成功或整体失败（一个事务）；路径不合法或一次里有重名 422 `validation`，单个文件超 20 MB 413 `file_too_large`，超出项目合计或文件数 409 `quota_exceeded`；请求体上限 101 MB。上传者记为 `user`，每个文件发一条 `shared_file` 事件 |
+| GET | `/api/projects/{pid}/shared-files/download?path=` | 文件内容：总是 `Content-Disposition: attachment`（文件名取路径最后一段，非 ASCII 按 RFC 2231 编码）、`X-Content-Type-Options: nosniff`、`Content-Security-Policy: default-src 'none'; sandbox`、`Cache-Control: private, no-store`；HTML、SVG、XML、JS 一律以 `application/octet-stream` 发送，绝不内联渲染。路径不合法 422，没有 404 |
+| DELETE | `/api/projects/{pid}/shared-files?path=` | 204，发 `shared_file` 事件（`op: delete`）；没有 404。已经取到各会话工作目录里的副本不动 |
 
 ### 3.6 NewProject 与 ProjectSettings
 
