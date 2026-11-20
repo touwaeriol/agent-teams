@@ -391,6 +391,8 @@ ProjectServersView = {
 }
 ```
 
+`roles` 是本项目的岗位（项目里的岗位副本优先，否则用模板），能否授权和 `PUT` 的校验用同一个函数（`store.ProjectServerRoles`），所以网页上可勾的岗位保存时一定被接受、置灰的一定被拒。
+
 `PUT` 时：列表外的服务器从项目移除；`roles` 里有统筹、组长、只读岗位或不存在的岗位 → 422 `role_not_grantable`（`detail` 写明哪个岗位）；不是自己的服务器 → 404；同一台出现两次 → 422 `validation`。授权变化后，失去授权的会话证书立即吊销，控制台给本项目存活的会话发 `ssh.servers_update`（protocol.md §8.1）。改服务器名字、删除服务器也会通知用到它的项目。
 
 ```

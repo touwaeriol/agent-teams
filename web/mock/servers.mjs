@@ -44,6 +44,10 @@ export function serverState() {
         node_id: "n1", server_id, server_name, cert_serial: 40 + i, conn_id: `sc_${i}`, kind, command, command_truncated: false, exit_code, duration_ms,
         bytes_in: kind === "exec" ? 320 : 0, bytes_out: kind === "exec" ? 18_200 : 0, reason, detail: {},
       })),
+      // Written when the command started, not completed yet (still running, or the console restarted mid-command).
+      { id: 901, created_at: ago(3), project_id: "p1", thread_id: "t12", session_id: "s_run", employee_id: "e_dev-1", employee: "dev-1", role: "dev",
+        node_id: "n1", server_id: "srv_prod", server_name: "prod", cert_serial: 39, conn_id: "sc_run", kind: "exec", command: "journalctl -u agent-teams -f",
+        command_truncated: false, exit_code: null, duration_ms: null, bytes_in: 0, bytes_out: 0, reason: "", detail: { state: "running" } },
       { id: 800, created_at: ago(60 * 24 * 2), project_id: "", thread_id: "", session_id: "", employee_id: "", employee: "user", role: "", node_id: "",
         server_id: "srv_staging", server_name: "staging", cert_serial: null, conn_id: "", kind: "test", command: "", command_truncated: false, exit_code: 0,
         duration_ms: 210, bytes_in: 0, bytes_out: 0, reason: "", detail: { host_key_fp: FP.staging, pinned: true } },

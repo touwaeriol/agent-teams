@@ -196,12 +196,21 @@ export const AUDIT_KINDS: { value: string; label: string }[] = [
 
 export const auditKindLabel = (kind: string): string => AUDIT_KINDS.find((k) => k.value === kind)?.label ?? kind;
 
-/** The result column of an access log row. */
-export function auditResult(a: Pick<SshAuditView, "kind" | "exit_code" | "duration_ms" | "reason">): { text: string; tone: Tone | "muted" } {
+/** The result column of an access log row. An exec / shell / sftp row is written when it starts
+ * (detail.state = "running") and completed when it ends; still running with no exit code means the
+ * command is running now, or the console restarted before it could complete the row. */
+export function auditResult(
+  a: Pick<SshAuditView, "kind" | "exit_code" | "duration_ms" | "reason"> & { detail?: SshAuditView["detail"] },
+): { text: string; tone: Tone | "muted" } {
+  if (a.detail?.state === "running" && a.exit_code == null) return { text: "进行中 / 未结束", tone: "muted" };
+  const signal = typeof a.detail?.signal === "string" && a.detail.signal ? a.detail.signal : "";
   const took = a.duration_ms != null ? ` · ${a.duration_ms < 1000 ? `${a.duration_ms} ms` : `${(a.duration_ms / 1000).toFixed(1)} s`}` : "";
   if (["denied", "auth_fail", "host_key_mismatch"].includes(a.kind)) return { text: a.reason || auditKindLabel(a.kind), tone: "danger" };
   if (a.kind === "test") return a.exit_code === 0 ? { text: `成功${took}`, tone: "ok" } : { text: `失败${a.reason ? `（${a.reason}）` : ""}${took}`, tone: "warn" };
-  if (a.exit_code == null) return { text: took ? took.slice(3) : "—", tone: "muted" };
+  if (a.exit_code == null) {
+    if (signal) return { text: `被信号 ${signal} 中断${took}`, tone: "warn" };
+    return { text: took ? took.slice(3) : "—", tone: "muted" };
+  }
   return { text: `退出码 ${a.exit_code}${took}`, tone: a.exit_code === 0 ? "ok" : "warn" };
 }
 

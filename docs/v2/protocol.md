@@ -448,7 +448,7 @@
  "known_hosts": ["agent-teams-gateway ssh-ed25519 AAAA…"], "servers": [{"name": "prod"}, {"name": "staging"}]}
 ```
 
-或 `{"req_id", "ok": false, "error": "not_granted"}`，`error`：`session_not_found|stale_open_gen|no_servers|not_granted|bad_public_key|unavailable`。`servers` 是此刻可用的服务器（也是证书的 principals），守护进程据此重写 ssh_config；`known_hosts` 是网关 host key 的行，写进会话的 known_hosts。和 `cred.*` 一样**不进发件箱、不写日志**。
+或 `{"req_id", "ok": false, "error": "not_granted"}`，`error`：`session_not_found|stale_open_gen|no_servers|not_granted|bad_public_key|rate_limited|unavailable`（`rate_limited`：同一会话每分钟最多签 20 张，超出就拒，守护进程稍后按需再要）。`servers` 是此刻可用的服务器（也是证书的 principals），守护进程据此重写 ssh_config；`known_hosts` 是网关 host key 的行，写进会话的 known_hosts。和 `cred.*` 一样**不进发件箱、不写日志**。
 
 #### `ssh.servers_update`（控制台 → 守护进程，可靠，键：`session_id + open_gen + version`）
 
