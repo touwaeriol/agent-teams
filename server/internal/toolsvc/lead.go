@@ -332,6 +332,10 @@ func (s *Service) finish(ctx context.Context, tx *core.Tx, c *call) (Result, err
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
+	dropped, err := s.dropIdleTasks(ctx, tx, t)
+	if err != nil {
+		return Result{}, err
+	}
 	end, err := finishMode(ctx, tx, t)
 	if err != nil {
 		return Result{}, err
@@ -362,13 +366,43 @@ func (s *Service) finish(ctx context.Context, tx *core.Tx, c *call) (Result, err
 			s.log.Warn("finish", "thread_id", t.ID, "err", err)
 		}
 	})
+	note := ""
+	if len(dropped) > 0 {
+		note = "\n已取消没人在做的任务：" + strings.Join(dropped, "、") + "。"
+	}
 	switch end {
 	case finishNow:
-		return okText("总结已记录。这个讨论串没有代码改动，不需要开 PR：现在写给用户的最终汇报作为本回合的最后回复，回合结束后讨论串结束（done），成员和你的会话随即关闭。"), nil
+		return okText(note + "总结已记录。这个讨论串没有代码改动，不需要开 PR：现在写给用户的最终汇报作为本回合的最后回复，回合结束后讨论串结束（done），成员和你的会话随即关闭。"), nil
 	case finishNeedsPR:
-		return okText("总结已记录。讨论串有代码改动还没有开 PR：请调用 open_pr(title, body)，之后平台按项目设置收尾（PR 检查通过即结束、自动合并或等用户验收）。"), nil
+		return okText(note + "总结已记录。讨论串有代码改动还没有开 PR：请调用 open_pr(title, body)，之后平台按项目设置收尾（PR 检查通过即结束、自动合并或等用户验收）。"), nil
 	}
-	return okText(answer), nil
+	return okText(strings.TrimPrefix(note+"\n"+answer, "\n")), nil
+}
+
+// idleStatus are the unfinished task states nobody is working in: finish cancels them, since
+// the lead calling finish decides the thread is done and they would only hold its end. Claimed
+// and running tasks (a member is on them) and tasks in review or decision (work done, waiting
+// for its gate or the merge queue) are left alone.
+var idleStatus = map[string]bool{"pending": true, "blocked": true}
+
+// dropIdleTasks cancels the thread's idle tasks (idleStatus) and names them.
+func (s *Service) dropIdleTasks(ctx context.Context, tx *core.Tx, t core.Thread) ([]string, error) {
+	tasks, err := core.ThreadTasks(ctx, tx, t.ID, core.TaskFilter{Status: []string{"pending", "blocked"}})
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, task := range tasks {
+		task, err := core.LockTask(ctx, tx, t.ID, task.ID)
+		if err != nil || !idleStatus[task.Status] {
+			continue // gone, or cancelled with an earlier one (a gate of a cancelled task)
+		}
+		if _, err := s.sched.Cancel(ctx, tx, task, "组长已调用 finish 结束讨论串"); err != nil {
+			return nil, err
+		}
+		out = append(out, task.ID)
+	}
+	return out, nil
 }
 
 // What finish does besides recording the summary.
