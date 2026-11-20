@@ -267,6 +267,8 @@ func TestProjectServerGrants(t *testing.T) {
 	lead := f.session(t, f.project, "lead-1", "lead", "sx-dev", `{}`) // a lead never, whatever its role name
 	ro := f.session(t, f.project, "dev-ro", "member", "sx-dev", `{"read_only": true}`)
 	gate := f.session(t, f.project, "dev-gate", "member", "sx-dev", `{"gate": "review"}`)
+	// An explicit read_only:false does not open a review/decision role (same rule as GrantableRoles).
+	gateRW := f.session(t, f.project, "dev-gate-rw", "member", "sx-dev", `{"gate": "decision", "read_only": false}`)
 	other := f.session(t, f.project2, "dev-2", "member", "sx-dev", `{}`)
 
 	x, list, err := f.s.SessionServers(ctx, dev)
@@ -277,7 +279,7 @@ func TestProjectServerGrants(t *testing.T) {
 	if _, list, _ := f.s.SessionServers(ctx, ops); !slices.Equal(names(list), []string{"prod"}) {
 		t.Fatalf("ops servers %v", names(list))
 	}
-	for _, sid := range []string{lead, ro, gate, other} {
+	for _, sid := range []string{lead, ro, gate, gateRW, other} {
 		if _, list, err := f.s.SessionServers(ctx, sid); err != nil || len(list) != 0 {
 			t.Errorf("session %s servers %v %v", sid, names(list), err)
 		}

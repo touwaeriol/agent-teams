@@ -50,6 +50,8 @@ func (r *router) Handle(ctx context.Context, node store.Node, typ string, body a
 		return e.Delivery.JobResult(ctx, node, m)
 	case *protocol.CredRequest:
 		return e.Delivery.Credential(ctx, node, m)
+	case *protocol.SshCertRequest:
+		return e.SSH.CertRequest(ctx, node, m)
 	case *protocol.StreamDelta:
 		e.Events.Delta(string(m.SessionID), m.Text)
 		return nil
@@ -77,6 +79,9 @@ func (r *router) other(ctx context.Context, node store.Node, typ string, body an
 // queued work get a scheduling pass (shared-members.md §4).
 func (r *router) NodeOnline(ctx context.Context, node store.Node) {
 	r.nodeChanged(ctx, node, true)
+	if err := r.e.SSH.NodeOnline(ctx, node); err != nil {
+		r.e.log.Warn("ssh servers update after reconnect", "node_id", node.ID, "err", err)
+	}
 	ids, err := core.UserProjectsWithWork(ctx, r.e.Core.Pool, node.UserID)
 	if err != nil {
 		r.e.log.Warn("projects with work", "node_id", node.ID, "err", err)

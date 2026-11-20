@@ -44,6 +44,7 @@ p, public, /readyz, GET
 p, node-token, /nodes/attachments/:id, GET
 p, node-token, /nodes/connect, GET
 p, node-token, /nodes/v2/connect, GET
+p, node-token, /nodes/ssh, GET
 
 # Signed-in users: their own account, projects, threads, libraries and nodes.
 p, user, /api/attachments/:id, GET

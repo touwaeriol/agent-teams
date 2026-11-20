@@ -76,6 +76,11 @@ func (a *API) registerNodeLinks(r gin.IRoutes) {
 	}
 	r.GET("/nodes/connect", h)
 	r.GET("/nodes/v2/connect", h)
+	ssh := offline
+	if a.e != nil {
+		ssh = gin.WrapF(a.e.SSH.ServeWS)
+	}
+	r.GET("/nodes/ssh", ssh) // the SSH gateway (remote-servers.md §6.4)
 }
 
 // offline answers raw routes registered without an engine.

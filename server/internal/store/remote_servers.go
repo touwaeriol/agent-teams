@@ -497,11 +497,12 @@ func (x SSHSession) MayUseSSH() bool {
 	return x.State != "closed" && x.Tier == "member" && !x.ReadOnly
 }
 
-// sshSessionSelect reads an employee's read-only flag from its spec (store.Role JSON): read_only
-// when present, else the gate default (review/decision).
+// sshSessionSelect reads an employee's read-only flag from its spec (store.Role JSON): read-only
+// when read_only is true or the gate is review/decision, whatever read_only says (the same rule as
+// GrantableRoles: a review or decision role never gets a server, #38).
 const sshSessionSelect = `SELECT a.id, a.state, a.open_gen, COALESCE(a.node_id, ''), e.id, e.name, e.tier, e.role,
-	CASE WHEN jsonb_typeof(e.spec->'read_only') = 'boolean' THEN (e.spec->>'read_only')::boolean
-	     ELSE COALESCE(e.spec->>'gate', '') IN ('review', 'decision') END,
+	(CASE WHEN jsonb_typeof(e.spec->'read_only') = 'boolean' THEN (e.spec->>'read_only')::boolean ELSE false END
+	 OR COALESCE(e.spec->>'gate', '') IN ('review', 'decision')),
 	e.project_id, COALESCE(a.thread_id, e.thread_id, ''), p.user_id
 	FROM at_agent_sessions a JOIN at_employees e ON e.id = a.employee_id JOIN at_projects p ON p.id = e.project_id`
 
