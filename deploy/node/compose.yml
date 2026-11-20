@@ -1,12 +1,12 @@
 # agent-teams node in a container. From this directory:
 #   cp node.env.example node.env      # fill in AGENT_TEAMS_NODE_TOKEN (+ Claude auth)
-#   docker compose up -d --build
+#   docker compose up -d              # pulls ghcr.io/touwaeriol/agent-teams-node (or --build to build here)
 #   docker compose exec node claude login     # only if node.env has no Claude token/key; then:
 #   docker compose restart node
 # One container = one node token. Run a second node as a second compose project with its own token.
 services:
   node:
-    image: ${AGENT_TEAMS_NODE_IMAGE:-agent-teams-node:latest}
+    image: ${AGENT_TEAMS_NODE_IMAGE:-ghcr.io/touwaeriol/agent-teams-node:latest}
     build:
       context: ../..
       dockerfile: deploy/node/Dockerfile

@@ -13,8 +13,13 @@ Claude Code 的 bypassPermissions 模式不能在 root 下运行，入口脚本�
 ```bash
 cd deploy/node
 cp node.env.example node.env        # 填 AGENT_TEAMS_NODE_TOKEN（控制面板“节点”页 → 添加节点）
-docker compose up -d --build        # 在仓库里就地构建；之后看日志：docker compose logs -f node
+docker compose up -d                # 拉取 ghcr.io/touwaeriol/agent-teams-node:latest；看日志：docker compose logs -f node
 ```
+
+镜像由 `.github/workflows/node-image.yml` 发布：develop 上改到守护进程或镜像时自动构建 amd64 + arm64，
+推送 `:latest`、`:develop`、`:sha-<短哈希>`。想用自己改过的代码，就在仓库里 `docker compose up -d --build` 就地构建
+（同一个标签会被本地镜像覆盖），或用 `AGENT_TEAMS_NODE_IMAGE` 指定别的镜像。GHCR 新建的包默认私有：
+要么在包设置里改成公开，要么先 `docker login ghcr.io`（用有 `read:packages` 权限的令牌）。
 
 `node.env` 里的变量：
 
@@ -58,19 +63,18 @@ git 走 ssh 的话，在 `compose.yml` 里打开 `~/.ssh:/home/agent/.ssh:ro` �
 ## 不用 compose
 
 ```bash
-docker build -f deploy/node/Dockerfile -t agent-teams-node .     # 在仓库根目录
 docker run -d --name agent-teams-node --restart unless-stopped --env-file deploy/node/node.env \
   -v at-claude:/home/agent/.claude -v at-codex:/home/agent/.codex \
   -v at-workspace:/home/agent/.agents_team -v at-state:/home/agent/.local/state/agent-teams \
-  agent-teams-node
+  ghcr.io/touwaeriol/agent-teams-node:latest
 docker exec -it agent-teams-node claude login
 ```
 
-除 `run`（默认）以外的命令会代替守护进程执行，例如 `docker run --rm -it agent-teams-node bash`。
+除 `run`（默认）以外的命令会代替守护进程执行，例如 `docker run --rm -it ghcr.io/touwaeriol/agent-teams-node bash`。自己构建：在仓库根目录 `docker build -f deploy/node/Dockerfile -t agent-teams-node .`。
 
 ## 其他说明
 
-- **升级**：重新构建（或拉取）镜像再 `docker compose up -d`。控制面板的在线升级（`node.upgrade`）面向 systemd 安装，
+- **升级**：`docker compose pull && docker compose up -d`（自己构建的就 `up -d --build`）。控制面板的在线升级（`node.upgrade`）面向 systemd 安装，
   镜像里没有发布公钥，所以容器节点会拒绝在线升级，以镜像版本为准。
 - **构建参数**：`GH_VERSION`、`TINI_VERSION`、`NODE_IMAGE`。在 TLS 拦截代理后面构建时，可以把代理的 CA 作为
   BuildKit secret 传入（`--secret id=build_ca,src=ca.crt`），只在下载步骤里挂载，不会留在镜像里。
