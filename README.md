@@ -58,7 +58,7 @@ deploy/compose.sh up -d --wait                  # postgres、valkey → migrate 
 curl -fsS http://127.0.0.1:$PORT/healthz
 ```
 
-- `POSTGRES_PASSWORD`、`VALKEY_PASSWORD`、`AGENT_TEAMS_SECRET_KEY` 生成后不要改：数据目录用前两个初始化，第三个解开所有加密保存的 Git 令牌和 GitHub App 密钥（轮换用 `AGENT_TEAMS_SECRET_KEYS=new,old` + `atctl admin reseal`）。
+- `POSTGRES_PASSWORD`、`VALKEY_PASSWORD`、`AGENT_TEAMS_SECRET_KEY` 生成后不要改：数据目录用前两个初始化，第三个解开所有加密保存的 Git 令牌、GitHub App 密钥和远程服务器凭证（轮换用 `AGENT_TEAMS_SECRET_KEYS=new,old` + `atctl admin reseal`；reseal 在一个事务里做完，只要有一条凭证解不开（比如数据被绕过接口改过）就整体回滚、什么都不改，并报出是哪台服务器，先在网页上重新填写那台服务器的凭证或删掉它再重跑）。
 - 服务默认只监听 `127.0.0.1:$PORT`，由宿主机的 Caddy 提供 HTTPS：`agent.example.com { reverse_proxy 127.0.0.1:3001 { flush_interval -1 } }`（SSE 不能缓冲；WebSocket 自动转发）。
 - “连接 GitHub”需要一个 GitHub App：部署后用管理员账号打开 `/admin/github-app`（管理后台 → GitHub App），一键创建（GitHub 的 manifest 流程，只做一次）。
 - 镜像里带网页和节点守护进程的发布包（`/node/dist/`），办公室布局从 `./office` 挂载并热加载。

@@ -324,6 +324,86 @@ PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平�
 | POST | `/api/git/github-app/webhook` | 新；`X-Hub-Signature-256` 校验；处理 `check_run`、`check_suite`、`pull_request`、`installation`（权限变化时刷新 `permissions`） |
 | POST | `/api/git/connections/{id}/refresh` | 新；重新读取安装权限 |
 
+### 3.9.1 远程服务器（讨论串 #38，remote-servers.md）
+
+服务器在**用户设置**里配置，属于用户；项目在设置里选用其中几台，并按岗位授权。任何接口都**不返回**密码、私钥、口令和密文，凭证只能替换。所有接口只对本人生效，别人的服务器和项目一律 404。实现：`server/internal/httpapi/servers_routes.go`。
+
+```
+ServerView = {
+  id: "srv_…", name: "prod",                 // name：会话 ssh_config 里的 Host 别名，^[a-z0-9][a-z0-9-]{0,62}$，用户内唯一
+  host: "203.0.113.10", port: 22, username: "deploy",
+  auth_kind: "password"|"private_key",
+  has_passphrase: false,                     // 私钥带口令
+  key_fingerprint: "SHA256:…"|"",            // 私钥对应公钥的指纹；密码认证为 ""
+  host_key_fp: "SHA256:…"|"",                // 已固定的目标主机公钥指纹；"" = 还没测试成功过
+  host_key_confirmed_at: "…"|null,
+  cred_updated_at: "…", created_at: "…", updated_at: "…",
+  projects: [{id, name}]                     // 选用了这台服务器的项目
+}
+ServerAuth = {kind: "password", password} | {kind: "private_key", private_key: "-----BEGIN OPENSSH PRIVATE KEY-----…", passphrase?}
+```
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/servers` | → `ServerView[]`（按名字排序） |
+| POST | `/api/servers` | `{name, host, port?: 22, username, auth: ServerAuth}` → 201 `ServerView` |
+| GET | `/api/servers/{id}` | → `ServerView` |
+| PATCH | `/api/servers/{id}` | `{name?, host?, port?, username?, auth?: ServerAuth}` → `ServerView`。改 `host`、`port`、`username` 或认证方式（`auth.kind`）时**必须**同时提交 `auth`，否则 422 `credential_required`；只带 `auth` 就是替换凭证。改 `host`/`port` 会清掉已固定的主机公钥 |
+| DELETE | `/api/servers/{id}` | 204；从所有项目移除，吊销相关会话证书（网关断开现有连接），审计保留 |
+| POST | `/api/servers/{id}/test` | 主节点直接连一次目标 → `ServerTestResult`（见下） |
+| POST | `/api/servers/{id}/host-key/reset` | 清掉已固定的主机公钥，下一次测试重新固定 → `ServerView` |
+| GET | `/api/servers/{id}/audit?kind=&employee=&cursor=&limit=` | 这台服务器的访问记录 → `SshAuditPage` |
+| GET | `/api/projects/{pid}/servers` | → `ProjectServersView` |
+| PUT | `/api/projects/{pid}/servers` | `{servers: [{server_id, roles: ["dev"]}]}` 整体替换本项目选用的服务器和授权 → `ProjectServersView` |
+| GET | `/api/projects/{pid}/server-audit?server_id=&thread_id=&kind=&employee=&cursor=&limit=` | 本项目所有服务器的访问记录 → `SshAuditPage` |
+
+**校验**（422，`code` 如下）：名字、用户名格式 → `validation`（`fields` 指出字段）；凭证不合法（密码为空、私钥解析不了、私钥有口令没填或填错）→ `validation`（`fields[0].path = "body.auth"`）；主机名解析不到 → `resolve_failed`；解析到回环、链路本地（含云元数据 169.254.169.254）、未指定、组播地址或主节点所在的内网 → `address_blocked`（管理员可在 `at_settings.ssh_allowed_private_cidrs = {"cidrs": ["10.0.0.0/8"]}` 放行）；同名 → 409 `server_name_taken`。服务端没配 `AGENT_TEAMS_SECRET_KEYS` → 503 `no_secret_key`。
+
+**测试连接** `POST /api/servers/{id}/test`：限速每台服务器每分钟 10 次、每个用户每分钟 30 次（429）。连接结果总是 200：
+
+```
+ServerTestResult = {
+  ok: true,                         // 主机公钥符合（或这次刚固定）且用保存的凭证登录成功
+  error?: "host_key_mismatch"|"host_key_invalid"|"auth_failed"|"address_blocked"|"resolve_failed"
+        |"connect_failed"|"timeout"|"handshake_failed"|"credential_unreadable",
+  message?: "认证失败：密码或私钥不对，或用户不存在",   // 给人看的说明
+  host_key_fp?: "SHA256:…", host_key_type?: "ssh-ed25519",   // 目标这次出示的主机公钥
+  host_key_pinned: true,            // 这次测试把它固定成了 host_key（第一次测试；认证失败也会固定）
+  expected_host_key_fp?: "SHA256:…",   // host_key_mismatch：已固定的指纹
+  latency_ms: 120
+}
+```
+
+- 第一次测试（`host_key_fp` 为空）：把目标出示的主机公钥固定下来，再用凭证登录；网页显示指纹，提示用户到服务器上核对（`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`）。
+- 之后：主机公钥不符 → `host_key_mismatch`，**不发送凭证**；用户核实后点“重置主机密钥”（`POST …/host-key/reset`）再测试。`host_key_invalid` 表示库里的主机公钥校验码不对（被直接改过库），同样重置后再测。
+- `credential_unreadable`：保存的凭证解不开（主密钥变过，或主机等字段被绕过接口改过），请重新填写凭证。
+- 每次测试写一行访问记录（`kind: "test"`，`employee: "user"`）。
+
+```
+ProjectServersView = {
+  servers: [{server: ServerView, roles: ["dev", "ops"]}],   // 本项目选用的服务器（按名字），roles 为空 = 选了但谁都不能用
+  available: ServerView[],                                  // 用户的全部服务器（供勾选）
+  roles: [{role: "dev", title: "工程师", tier: "member", grantable: true},
+          {role: "lead", title: "组长", tier: "lead", grantable: false, reason: "lead"},
+          {role: "reviewer", title: "审查员", tier: "member", grantable: false, reason: "read_only"}]
+          // reason：coordinator | lead | read_only（read_only 或 gate 为 review/decision）
+}
+```
+
+`PUT` 时：列表外的服务器从项目移除；`roles` 里有统筹、组长、只读岗位或不存在的岗位 → 422 `role_not_grantable`（`detail` 写明哪个岗位）；不是自己的服务器 → 404；同一台出现两次 → 422 `validation`。授权变化后，失去授权的会话证书立即吊销，控制台给本项目存活的会话发 `ssh.servers_update`（protocol.md §8.1）。改服务器名字、删除服务器也会通知用到它的项目。
+
+```
+SshAuditPage = {items: SshAuditView[], next_cursor: string|null}   // 新的在前；limit 默认 50，最多 200；cursor 不对 → 400 bad_cursor
+SshAuditView = {id, created_at, project_id, thread_id, session_id, employee_id, employee, role, node_id,
+                server_id, server_name, cert_serial: number|null, conn_id,
+                kind: "connect"|"disconnect"|"exec"|"shell"|"subsystem"|"denied"|"auth_fail"|"host_key_mismatch"|"test",
+                command,                 // 脱敏后，最多 8 KB
+                command_truncated, exit_code: number|null, duration_ms: number|null, bytes_in, bytes_out,
+                reason, detail: {}}
+```
+
+写操作记入 `at_audit_log`：`server_create`、`server_update`（含 `credential_replaced`）、`server_delete`、`server_host_key_pin`、`server_host_key_reset`、`project_servers_set`。
+
 ### 3.10 Admin（管理）
 
 | 方法 | 路径 | 说明 |
