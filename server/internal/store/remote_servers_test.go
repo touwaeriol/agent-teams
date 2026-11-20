@@ -365,6 +365,49 @@ func TestProjectServerGrants(t *testing.T) {
 	}
 }
 
+// The settings page (ProjectServerRoles) and the save check (GrantableRoles) read roles the same
+// way: the project's copy first, else the template.
+func TestProjectServerRoles(t *testing.T) {
+	ctx := context.Background()
+	f := newSSHFixture(t)
+	reasons := func(project string) map[string]string {
+		t.Helper()
+		roles, err := f.s.ProjectServerRoles(ctx, f.user, project)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, r := range roles {
+			if _, dup := out[r.Role]; dup {
+				t.Fatalf("role %s listed twice", r.Role)
+			}
+			out[r.Role] = r.Reason
+		}
+		return out
+	}
+	p1, p2 := reasons(f.project), reasons(f.project2)
+	for role, want := range map[string]string{"sx-dev": "", "sx-ops": "", "sx-review": "read_only", "sx-qa": "read_only"} {
+		if p1[role] != want {
+			t.Errorf("p1 %s: reason %q, want %q", role, p1[role], want)
+		}
+	}
+	if r, ok := p2["sx-qa"]; !ok || r != "" {
+		t.Errorf("p2 sx-qa (template): %q %v", r, ok)
+	}
+	if roles, _ := f.s.ProjectServerRoles(ctx, f.other, f.project); len(roles) != 0 {
+		t.Errorf("other user sees roles %+v", roles)
+	}
+	// Whatever the page offers is accepted, whatever it greys out is refused.
+	for _, project := range []string{f.project, f.project2} {
+		for role, reason := range reasons(project) {
+			err := f.s.GrantableRoles(ctx, f.user, project, []string{role})
+			if (reason == "") != (err == nil) {
+				t.Errorf("%s %s: reason %q but GrantableRoles %v", project, role, reason, err)
+			}
+		}
+	}
+}
+
 func TestSSHAudit(t *testing.T) {
 	ctx := context.Background()
 	f := newSSHFixture(t)
