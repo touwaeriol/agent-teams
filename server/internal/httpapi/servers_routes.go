@@ -538,18 +538,6 @@ type setProjectServersInput struct {
 	}
 }
 
-func roleReason(r store.Role) string {
-	switch {
-	case r.Tier == "coordinator":
-		return "coordinator"
-	case r.Tier == "lead":
-		return "lead"
-	case (r.ReadOnly != nil && *r.ReadOnly) || r.Gate == "review" || r.Gate == "decision":
-		return "read_only"
-	}
-	return ""
-}
-
 func (s *Server) projectServersView(ctx context.Context, userID, projectID string) (ProjectServersView, error) {
 	var v ProjectServersView
 	list, err := s.store.ProjectServers(ctx, userID, projectID)
@@ -564,7 +552,7 @@ func (s *Server) projectServersView(ctx context.Context, userID, projectID strin
 	if err != nil {
 		return v, err
 	}
-	roles, err := s.store.Roles(ctx, userID)
+	roles, err := s.store.ProjectServerRoles(ctx, userID, projectID)
 	if err != nil {
 		return v, err
 	}
@@ -578,8 +566,7 @@ func (s *Server) projectServersView(ctx context.Context, userID, projectID strin
 	}
 	v.Roles = make([]GrantableRoleView, len(roles))
 	for i, r := range roles {
-		reason := roleReason(r)
-		v.Roles[i] = GrantableRoleView{Role: r.Role, Title: r.Title, Tier: r.Tier, Grantable: reason == "", Reason: reason}
+		v.Roles[i] = GrantableRoleView{Role: r.Role, Title: r.Title, Tier: r.Tier, Grantable: r.Reason == "", Reason: r.Reason}
 	}
 	return v, nil
 }

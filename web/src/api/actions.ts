@@ -2,7 +2,7 @@
 // Pages wrap them with `useAction` (mutations.ts) for toasts and cache refresh.
 import { client, unwrap } from "./client";
 import type { components } from "./schema";
-import type { AskChoice, MainTaskStatus, UsageRefresh } from "./views";
+import type { AskChoice, MainTaskStatus, ProjectServersView, ServerView, UsageRefresh } from "./views";
 
 type S = components["schemas"];
 
@@ -111,6 +111,17 @@ export const nodes = {
   remove: (id: string) => unwrap(client.DELETE("/api/nodes/{id}", { params: { path: { id } } })),
   /** 409 node_offline / usage_unsupported; the cards treat any failure as "keep the old numbers". */
   refreshUsage: (id: string): Promise<UsageRefresh> => unwrap(client.POST("/api/nodes/{id}/usage/refresh", { params: { path: { id } } })),
+};
+
+/** Remote servers (api.md §3.9.1). A credential is only ever sent, never read back. */
+export const servers = {
+  create: (body: S["CreateServerInputBody"]) => unwrap(client.POST("/api/servers", { body })) as Promise<ServerView>,
+  update: (id: string, body: S["UpdateServerInputBody"]) => unwrap(client.PATCH("/api/servers/{id}", { params: { path: { id } }, body })) as Promise<ServerView>,
+  remove: (id: string) => unwrap(client.DELETE("/api/servers/{id}", { params: { path: { id } } })),
+  test: (id: string) => unwrap(client.POST("/api/servers/{id}/test", { params: { path: { id } } })),
+  resetHostKey: (id: string) => unwrap(client.POST("/api/servers/{id}/host-key/reset", { params: { path: { id } } })),
+  setProjectServers: (pid: string, list: { server_id: string; roles: string[] }[]) =>
+    unwrap(client.PUT("/api/projects/{pid}/servers", { params: { path: { pid } }, body: { servers: list } })) as Promise<ProjectServersView>,
 };
 
 export const roles = {

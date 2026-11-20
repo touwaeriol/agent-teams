@@ -472,28 +472,68 @@ func (s *Store) RemoveProjectServer(ctx context.Context, userID, projectID, serv
 	return revoked, err
 }
 
-// GrantableRoles checks roles may be granted a server in the project: each must be a member role
-// of the user (the project's copy, else the template) that is not read-only. The first that is not
-// is reported in an ErrRoleNotGrantable error.
-func (s *Store) GrantableRoles(ctx context.Context, userID, projectID string, roles []string) error {
-	if len(roles) == 0 {
-		return nil
+// ServerRole is one of a project's roles as far as server grants go: Reason is "" when it may be
+// granted servers, else coordinator, lead or read_only.
+type ServerRole struct {
+	Role   string
+	Title  string
+	Tier   string
+	Reason string
+}
+
+// serverGrantReason is why a role cannot be granted servers ("" = it can): the coordinator holds no
+// credentials, and the lead and read-only roles (gate review / decision) cannot run ssh.
+func serverGrantReason(tier string, readOnly bool, gate string) string {
+	switch {
+	case tier == "coordinator":
+		return "coordinator"
+	case tier != "member":
+		return "lead"
+	case readOnly || gate == "review" || gate == "decision":
+		return "read_only"
 	}
-	type info struct {
+	return ""
+}
+
+// ProjectServerRoles lists the project's roles (each the project's copy, else the user's template)
+// in display order, with whether they may be granted servers. The settings page and the checks
+// when saving (GrantableRoles) both use it, so they never disagree.
+func (s *Store) ProjectServerRoles(ctx context.Context, userID, projectID string) ([]ServerRole, error) {
+	var rows []struct {
 		Role     string
+		Title    string
 		Tier     string
 		ReadOnly bool
 		Gate     string
 	}
-	var rows []info
-	err := Raw(ctx, s.db, `SELECT DISTINCT ON (role) role, tier, read_only, gate FROM at_roles
-		 WHERE user_id = $1 AND (project_id = $2 OR project_id IS NULL) AND role = ANY($3)
-		 ORDER BY role, project_id NULLS LAST`, userID, projectID, TextArray(roles)).Scan(&rows).Error
+	err := Raw(ctx, s.db, `SELECT role, title, tier, read_only, gate FROM (
+		SELECT DISTINCT ON (role) role, title, tier, COALESCE(read_only, false) AS read_only, gate, sort, created_at FROM at_roles
+		 WHERE user_id = $1 AND (project_id = $2 OR project_id IS NULL)
+		 ORDER BY role, project_id NULLS LAST) r
+		ORDER BY CASE tier WHEN 'coordinator' THEN 0 WHEN 'lead' THEN 1 ELSE 2 END, sort, created_at`, userID, projectID).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ServerRole, len(rows))
+	for i, r := range rows {
+		out[i] = ServerRole{Role: r.Role, Title: r.Title, Tier: r.Tier, Reason: serverGrantReason(r.Tier, r.ReadOnly, r.Gate)}
+	}
+	return out, nil
+}
+
+// GrantableRoles checks roles may be granted a server in the project (ProjectServerRoles): each must
+// be a member role of the user (the project's copy, else the template) that is not read-only. The
+// first that is not is reported in an ErrRoleNotGrantable error.
+func (s *Store) GrantableRoles(ctx context.Context, userID, projectID string, roles []string) error {
+	if len(roles) == 0 {
+		return nil
+	}
+	all, err := s.ProjectServerRoles(ctx, userID, projectID)
 	if err != nil {
 		return err
 	}
-	byRole := map[string]info{}
-	for _, r := range rows {
+	byRole := map[string]ServerRole{}
+	for _, r := range all {
 		byRole[r.Role] = r
 	}
 	for _, role := range roles {
@@ -501,9 +541,9 @@ func (s *Store) GrantableRoles(ctx context.Context, userID, projectID string, ro
 		switch {
 		case !ok:
 			return fmt.Errorf("%w：没有岗位 %q", ErrRoleNotGrantable, role)
-		case r.Tier != "member":
+		case r.Reason == "coordinator" || r.Reason == "lead":
 			return fmt.Errorf("%w：%q 是统筹或组长", ErrRoleNotGrantable, role)
-		case r.ReadOnly || r.Gate == "review" || r.Gate == "decision":
+		case r.Reason != "":
 			return fmt.Errorf("%w：%q 是只读岗位", ErrRoleNotGrantable, role)
 		}
 	}
