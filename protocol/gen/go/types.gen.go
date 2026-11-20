@@ -2761,6 +2761,12 @@ type GitPrepare struct {
 	// ProjectID corresponds to the JSON schema field "project_id".
 	ProjectID string `json:"project_id"`
 
+	// Clone and push URL for a repository the daemon does not reach at
+	// git_base_url/<repo>.git: a standalone Git repository served by the console's
+	// Git relay (git-repos.md 5). Credentials for it come from cred.request with the
+	// URL's host and path. Absent: git_base_url/<repo>.git.
+	RemoteURL *string `json:"remote_url,omitempty,omitzero"`
+
 	// Repo corresponds to the JSON schema field "repo".
 	Repo Repo `json:"repo"`
 
@@ -2929,6 +2935,11 @@ func (j *GitPrepare) UnmarshalJSON(value []byte) error {
 	if utf8.RuneCountInString(string(plain.ProjectID)) < 1 {
 		return fmt.Errorf("field %s length: must be >= %d", "project_id", 1)
 	}
+	if plain.RemoteURL != nil {
+		if matched, _ := regexp.MatchString(`^https?://[^/@\s]+/git/gr_[a-z0-9]+\.git$`, string(*plain.RemoteURL)); !matched {
+			return fmt.Errorf("field %s pattern match: must match %s", "RemoteURL", `^https?://[^/@\s]+/git/gr_[a-z0-9]+\.git$`)
+		}
+	}
 	*j = GitPrepare(plain)
 	return nil
 }
@@ -2988,6 +2999,12 @@ type GitPush struct {
 	// No leading +.
 	Refspec string `json:"refspec"`
 
+	// Clone and push URL for a repository the daemon does not reach at
+	// git_base_url/<repo>.git: a standalone Git repository served by the console's
+	// Git relay (git-repos.md 5). Credentials for it come from cred.request with the
+	// URL's host and path. Absent: git_base_url/<repo>.git.
+	RemoteURL *string `json:"remote_url,omitempty,omitzero"`
+
 	// Repo corresponds to the JSON schema field "repo".
 	Repo Repo `json:"repo"`
 
@@ -3045,6 +3062,11 @@ func (j *GitPush) UnmarshalJSON(value []byte) error {
 	}
 	if matched, _ := regexp.MatchString(`^[^+][^:]*:refs/heads/thread/[0-9]+/[^/]+$`, string(plain.Refspec)); !matched {
 		return fmt.Errorf("field %s pattern match: must match %s", "Refspec", `^[^+][^:]*:refs/heads/thread/[0-9]+/[^/]+$`)
+	}
+	if plain.RemoteURL != nil {
+		if matched, _ := regexp.MatchString(`^https?://[^/@\s]+/git/gr_[a-z0-9]+\.git$`, string(*plain.RemoteURL)); !matched {
+			return fmt.Errorf("field %s pattern match: must match %s", "RemoteURL", `^https?://[^/@\s]+/git/gr_[a-z0-9]+\.git$`)
+		}
 	}
 	if 1 > plain.ThreadNo {
 		return fmt.Errorf("field %s: must be >= %v", "thread_no", 1)
@@ -5756,7 +5778,8 @@ func (j *ReplyToInput) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// GitHub repository as owner/name.
+// GitHub repository as owner/name, or git/<id> for a standalone Git repository
+// (with remote_url).
 type Repo string
 
 type RepoFocus struct {

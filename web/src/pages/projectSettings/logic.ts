@@ -40,7 +40,7 @@ export const fromChoice = (v: string): string => (v === ROLE ? "" : v);
 export const toChoice = (v: string): string => v || ROLE;
 
 export function repoRefs(project: Pick<ProjectView, "repos">): RepoRef[] {
-  return (project.repos ?? []).map((r) => ({ repo: r.repo, git_connection_id: r.git_connection_id ?? null }));
+  return (project.repos ?? []).map((r) => ({ repo: r.repo, git_connection_id: r.git_connection_id ?? null, ...(r.git_repo_id ? { git_repo_id: r.git_repo_id } : {}) }));
 }
 
 /** Text-box commit rule: unchanged → nothing; a required field left empty → put the saved value back. */

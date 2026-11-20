@@ -31,6 +31,9 @@ type Config struct {
 	// ArtifactOrigin (AGENT_TEAMS_ARTIFACT_ORIGIN) is a separate origin, e.g. https://files.example.net,
 	// that serves published deliverable files; empty = /files/ on the console with a CSP sandbox.
 	ArtifactOrigin string
+	// GitMirrorDir (GIT_MIRROR_DIR) holds the relay's bare mirrors of standalone Git repositories
+	// (git-repos.md §5); empty disables the relay.
+	GitMirrorDir string
 }
 
 // Getenv looks a variable up; os.Getenv in production, a map in tests.
@@ -54,6 +57,7 @@ func Load(getenv Getenv) (Config, error) {
 		GitHubAPI:      strings.TrimRight(getenv("GITHUB_API_URL"), "/"),
 		GitHubWeb:      strings.TrimRight(getenv("GITHUB_WEB_URL"), "/"),
 		ArtifactOrigin: strings.TrimRight(getenv("AGENT_TEAMS_ARTIFACT_ORIGIN"), "/"),
+		GitMirrorDir:   getenv("GIT_MIRROR_DIR"),
 	}
 	return cfg, cfg.check()
 }

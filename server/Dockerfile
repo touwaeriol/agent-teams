@@ -34,7 +34,8 @@ FROM debian:bookworm-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates git tzdata \
  && rm -rf /var/lib/apt/lists/* \
- && useradd --system --uid 65532 --home-dir /nonexistent --shell /usr/sbin/nologin atctl
+ && useradd --system --uid 65532 --home-dir /nonexistent --shell /usr/sbin/nologin atctl \
+ && mkdir -p /var/lib/agent-teams/git-mirrors && chown -R atctl /var/lib/agent-teams
 COPY --from=go /out/atctl /atctl
 COPY --from=web /out/web /srv/web
 COPY --from=node /out/node-dist /srv/node-dist
@@ -42,7 +43,8 @@ COPY office/ /srv/office/
 ENV PORT=3001 \
     WEB_DIR=/srv/web \
     OFFICE_DIR=/srv/office \
-    NODE_DIST_DIR=/srv/node-dist
+    NODE_DIST_DIR=/srv/node-dist \
+    GIT_MIRROR_DIR=/var/lib/agent-teams/git-mirrors
 USER atctl
 EXPOSE 3001
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=6 CMD ["/atctl", "healthcheck"]

@@ -190,6 +190,7 @@ func (g Git) Run(ctx context.Context, r Remote, dir string, args ...string) ([]b
 type RunErr struct {
 	Kind   error
 	Stderr string
+	Code   int // git's exit status (-1 when it did not run)
 }
 
 func (e *RunErr) Error() string {
@@ -225,7 +226,15 @@ func classify(stderr string, err error) error {
 	if stderr == "" {
 		stderr = err.Error()
 	}
-	return &RunErr{Kind: kind, Stderr: stderr}
+	return &RunErr{Kind: kind, Stderr: stderr, Code: exitCode(err)}
+}
+
+func exitCode(err error) int {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	return -1
 }
 
 // Refs is what ls-remote saw.
@@ -288,4 +297,36 @@ func dialer(p sshdial.Policy) func(ctx context.Context, network, addr string) (n
 		var d net.Dialer
 		return d.DialContext(ctx, network, net.JoinHostPort(addrs[0].Unmap().String(), port))
 	}
+}
+
+// Local runs git in dir without any upstream (mirror maintenance, merges): the same locked-down
+// environment, plus extra (e.g. a receive-pack quarantine's object directories).
+func (g Git) Local(ctx context.Context, dir string, extra []string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, g.bin(), args...)
+	cmd.Dir = dir
+	cfg := gitConfig{{"core.hooksPath", "/dev/null"}, {"core.fsmonitor", "false"}}
+	cmd.Env = append(append(append(baseEnv(), g.Env...), extra...), cfg.env()...)
+	cmd.WaitDelay = 5 * time.Second
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return stdout.Bytes(), &RunErr{Stderr: firstNonEmpty(stderr.String(), err.Error()), Code: exitCode(err)}
+	}
+	return stdout.Bytes(), nil
+}
+
+// ExitCode is the exit status of a failed Local or Run command (-1 when it did not run).
+func ExitCode(err error) int {
+	var re *RunErr
+	if errors.As(err, &re) {
+		return re.Code
+	}
+	return -1
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }

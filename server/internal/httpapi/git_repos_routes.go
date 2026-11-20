@@ -12,6 +12,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/touwaeriol/agent-teams/server/internal/credvault"
+	"github.com/touwaeriol/agent-teams/server/internal/gitrelay"
 	"github.com/touwaeriol/agent-teams/server/internal/gitremote"
 	"github.com/touwaeriol/agent-teams/server/internal/sshdial"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -575,6 +576,9 @@ func (s *Server) deleteGitRepo(ctx context.Context, in *gitIDInput) (*struct{}, 
 		return nil, gitStoreErr(err, "仓库")
 	}
 	s.audit(ctx, p.User.ID, "git_repo_delete", "git_repo", in.ID, nil)
+	if err := s.relay.Remove(in.ID); err != nil {
+		s.log.Warn("remove git mirror", "repo", in.ID, "err", err)
+	}
 	return nil, nil
 }
 
@@ -664,27 +668,9 @@ func (s *Server) GitRemote(ctx context.Context, userID string, r store.GitRepo) 
 	return OpenGitRemote(ctx, s.store, s.vault, s.sshPolicy(ctx), userID, r)
 }
 
-// OpenGitRemote is GitRemote for callers outside the HTTP server (relay, delivery).
+// OpenGitRemote is GitRemote for callers outside the HTTP server.
 func OpenGitRemote(ctx context.Context, st *store.Store, v *credvault.Vault, policy sshdial.Policy, userID string, r store.GitRepo) (gitremote.Remote, error) {
-	remote := gitremote.Remote{URL: r.URL, Transport: r.Transport, HostKey: r.HostKey, Policy: policy}
-	if r.HostKey != "" {
-		if ok, _ := v.VerifyMAC(credvault.GitHostKeyMACData(r.ID, r.Host, r.HostKey), r.HostKeyMAC); !ok {
-			return remote, errors.New("已固定的主机密钥校验不通过（可能被直接改过数据库），请重置主机密钥后重新测试")
-		}
-	}
-	if r.CredentialID == nil {
-		return remote, nil
-	}
-	sec, err := st.GitCredentialSecret(ctx, userID, *r.CredentialID)
-	if err != nil {
-		return remote, err
-	}
-	cred, err := v.OpenCredential(credvault.GitCredAAD(userID, sec.ID, sec.Kind, sec.Host, sec.Username), sec.Sealed)
-	if err != nil {
-		return remote, errors.New("保存的凭据解不开（主密钥变过，或数据被改动过），请重新填写凭据")
-	}
-	remote.Kind, remote.Username, remote.Cred = sec.Kind, sec.Username, cred
-	return remote, nil
+	return gitrelay.OpenRemote(ctx, st, v, policy, userID, r)
 }
 
 func (s *Server) testGitRepoDraft(ctx context.Context, in *testGitRepoInput) (*gitTestOutput, error) {

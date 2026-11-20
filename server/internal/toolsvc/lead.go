@@ -360,7 +360,7 @@ func (s *Service) finish(ctx context.Context, tx *core.Tx, c *call) (Result, err
 	}
 	// After the commit, in its own transaction: the end waits for this turn (the lead's final
 	// reply after finish is recorded first), so the tool result always goes out.
-	noChanges := end == finishNow
+	noChanges := end == finishNow || end == finishDelivered
 	tx.AfterCommit(func(ctx context.Context) {
 		if err := s.deliv.FinishCalled(context.WithoutCancel(ctx), t.ID, noChanges); err != nil {
 			s.log.Warn("finish", "thread_id", t.ID, "err", err)
@@ -373,6 +373,8 @@ func (s *Service) finish(ctx context.Context, tx *core.Tx, c *call) (Result, err
 	switch end {
 	case finishNow:
 		return okText(note + "总结已记录。这个讨论串没有代码改动，不需要开 PR：现在写给用户的最终汇报作为本回合的最后回复，回合结束后讨论串结束（done），成员和你的会话随即关闭。"), nil
+	case finishDelivered:
+		return okText(note + "总结已记录。改动在独立 Git 仓库的讨论串分支 " + t.Branch + " 上（独立仓库没有 PR，推送讨论串分支即完成）：现在写给用户的最终汇报（分支名、改了什么、测试结果），回合结束后讨论串结束（done）。"), nil
 	case finishNeedsPR:
 		return okText(note + "总结已记录。讨论串有代码改动还没有开 PR：请调用 open_pr(title, body)，之后平台按项目设置收尾（PR 检查通过即结束、自动合并或等用户验收）。"), nil
 	}
@@ -407,9 +409,10 @@ func (s *Service) dropIdleTasks(ctx context.Context, tx *core.Tx, t core.Thread)
 
 // What finish does besides recording the summary.
 const (
-	finishWithPR  = iota // the thread has PRs: resubmitted for review when back in running (FinishWithPR)
-	finishNeedsPR        // changes are on a thread branch without a PR yet
-	finishNow            // nothing was changed in any repository: the thread is done now
+	finishWithPR    = iota // the thread has PRs: resubmitted for review when back in running (FinishWithPR)
+	finishNeedsPR          // changes are on a thread branch without a PR yet
+	finishNow              // nothing was changed in any repository: the thread is done now
+	finishDelivered        // changes only in standalone repositories (no PRs): done now, on their thread branches
 )
 
 // finishMode decides how finish ends the thread. A thread without repository changes (no
@@ -428,10 +431,16 @@ func finishMode(ctx context.Context, tx *core.Tx, t core.Thread) (int, error) {
 			return finishWithPR, nil
 		}
 	}
+	standalone, err := core.StandaloneRepos(ctx, tx, t.ProjectID)
+	if err != nil {
+		return 0, err
+	}
+	delivered := false
 	for _, r := range repos {
-		if r.BranchCreated {
+		if r.NeedsPR(standalone) {
 			return finishNeedsPR, nil
 		}
+		delivered = delivered || r.Delivered(standalone)
 	}
 	if t.Status != "running" && t.Status != "waiting" {
 		return 0, refuse("讨论串现在是 %s，不能结束", t.Status)
@@ -441,6 +450,9 @@ func finishMode(ctx context.Context, tx *core.Tx, t core.Thread) (int, error) {
 			return 0, err
 		}
 		return 0, refuse("合并队列里还有分支在合并，等合并完再开 PR（open_pr）")
+	}
+	if delivered {
+		return finishDelivered, openWork(ctx, tx, t)
 	}
 	return finishNow, openWork(ctx, tx, t)
 }

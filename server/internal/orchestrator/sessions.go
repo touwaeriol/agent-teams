@@ -632,8 +632,8 @@ func (o *Orchestrator) prepareRepo(ctx context.Context, tx *core.Tx, env session
 	mode := protocol.GitPrepareMode(orDefault(env.project.WorkMode, "worktree"))
 	job := core.NewID("g")
 	cwd := o.CheckoutCwd(ctx, tx, env.emp, *env.thread, r.Slug, len(env.repos))
-	body := protocol.GitPrepare{JobID: protocol.JobID(job), ProjectID: env.project.ID, Repo: protocol.Repo(r.Slug),
-		Mode: mode, Cwd: protocol.RelPath(cwd), Branch: p.Branch, Base: &base, Fetch: true, Sync: opts.sync}
+	body := protocol.GitPrepare{JobID: protocol.JobID(job), ProjectID: env.project.ID, Repo: protocol.Repo(r.NodeRepo()),
+		RemoteURL: o.gh.NodeRemote(r), Mode: mode, Cwd: protocol.RelPath(cwd), Branch: p.Branch, Base: &base, Fetch: true, Sync: opts.sync}
 	if mode == "worktree" {
 		shared := protocol.RelPath(sharedFor(env.project.ID, r.Slug, cwd == p.Cwd))
 		body.Shared = &shared

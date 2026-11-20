@@ -6,22 +6,25 @@ import { ghOnPath } from "../git/gh-install.js";
 import type { CredSocketRequest } from "./server.js";
 import { shellQuote } from "../git/platform.js";
 
-/** GIT_CONFIG_* variables that make git ask this daemon for credentials (architecture.md §10.4). */
-export function gitCredentialEnv(nodeCmd: string[], socket: string, session: string, secret: string): Record<string, string> {
+/**
+ * GIT_CONFIG_* variables that make git ask this daemon for credentials (architecture.md §10.4):
+ * for github.com, and for the console's Git relay (relayBase, e.g. https://console/git/) that
+ * serves standalone Git repositories (git-repos.md §5).
+ */
+export function gitCredentialEnv(nodeCmd: string[], socket: string, session: string, secret: string, relayBase?: string): Record<string, string> {
   const helper = `!${[...nodeCmd, "git-credential", "--socket", socket, "--session", session, "--secret", secret].map(shellQuote).join(" ")}`;
-  return {
-    GIT_TERMINAL_PROMPT: "0",
-    GIT_CONFIG_COUNT: "3",
-    GIT_CONFIG_KEY_0: "credential.https://github.com.helper",
-    GIT_CONFIG_VALUE_0: "",
-    GIT_CONFIG_KEY_1: "credential.https://github.com.helper",
-    GIT_CONFIG_VALUE_1: helper,
-    GIT_CONFIG_KEY_2: "credential.https://github.com.useHttpPath",
-    GIT_CONFIG_VALUE_2: "true",
-    AT_CRED_SOCK: socket,
-    AT_CRED_SESSION: session,
-    AT_CRED_SECRET: secret,
-  };
+  const prefixes = ["https://github.com", ...(relayBase ? [relayBase] : [])];
+  const env: Record<string, string> = { GIT_TERMINAL_PROMPT: "0", AT_CRED_SOCK: socket, AT_CRED_SESSION: session, AT_CRED_SECRET: secret };
+  let n = 0;
+  for (const prefix of prefixes) {
+    for (const [key, value] of [["helper", ""], ["helper", helper], ["useHttpPath", "true"]] as const) {
+      env[`GIT_CONFIG_KEY_${n}`] = `credential.${prefix}.${key}`;
+      env[`GIT_CONFIG_VALUE_${n}`] = value;
+      n++;
+    }
+  }
+  env.GIT_CONFIG_COUNT = String(n);
+  return env;
 }
 
 export function askSocket(socket: string, req: CredSocketRequest, timeoutMs = 11 * 60_000): Promise<SocketReply> {
@@ -73,7 +76,9 @@ export function parseCredentialInput(text: string): Record<string, string> {
 export async function gitCredentialMain(args: Record<string, string>, op: string, stdin: string): Promise<{ out: string; code: number }> {
   if (op !== "get" && op !== "erase") return { out: "", code: 0 };
   const input = parseCredentialInput(stdin);
-  if (input.protocol !== "https" || !input.host) return { out: "", code: 0 };
+  // git asks only for the URL prefixes gitCredentialEnv configured (github.com, the console's relay,
+  // which may be plain http on a private network).
+  if ((input.protocol !== "https" && input.protocol !== "http") || !input.host) return { out: "", code: 0 };
   if (op === "erase") {
     await askSocket(args.socket!, { op: "erase", session: args.session!, secret: args.secret!, host: input.host, path: input.path ?? "" }, 10_000);
     return { out: "", code: 0 };

@@ -19,6 +19,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/fanout"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 	"github.com/touwaeriol/agent-teams/server/internal/github"
+	"github.com/touwaeriol/agent-teams/server/internal/gitrelay"
 	"github.com/touwaeriol/agent-teams/server/internal/kv"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/office"
@@ -44,6 +45,8 @@ type Deps struct {
 	// Vault opens remote server credentials and the SSH gateway's keys (nil or not Ready: the SSH
 	// gateway answers "unavailable").
 	Vault *credvault.Vault
+	// Relay serves standalone Git repositories (nil: projects cannot use them).
+	Relay *gitrelay.Relay
 	// SSH tunes the SSH gateway (zero values: the defaults of remote-servers.md §5.7).
 	SSH sshgw.Config
 }
@@ -77,7 +80,7 @@ func New(d Deps) (*Engine, error) {
 		return nil, err
 	}
 	cs.Online = gw.Online
-	gh := &ghops.GitHub{Client: d.GitHub, Tokens: d.Tokens, Box: d.Box, Store: d.Store}
+	gh := &ghops.GitHub{Client: d.GitHub, Tokens: d.Tokens, Box: d.Box, Store: d.Store, Relay: d.Relay}
 	e := &Engine{Store: d.Store, KV: d.KV, Core: cs, Fan: fan, Events: events.New(cs, fan, d.Log), Gateway: gw, GH: gh, log: d.Log}
 	vault := d.Vault
 	if vault == nil {

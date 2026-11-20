@@ -233,8 +233,9 @@ func nodeCannotFetchOthersImage(t *testing.T, tm *team, intruder *browser, o own
 	}
 }
 
-// csrfExempt are the writes a signed-in browser may send without X-CSRF-Token.
-var csrfExempt = map[string]bool{"/auth/login": true, "/auth/register": true, "/api/git/github-app/webhook": true}
+// csrfExempt are the writes a signed-in browser may send without X-CSRF-Token (the Git relay
+// ignores cookies: it only takes relay tokens).
+var csrfExempt = map[string]bool{"/auth/login": true, "/auth/register": true, "/api/git/github-app/webhook": true, "/git/*path": true}
 
 // TestCSRFOnEveryWrite: every non-GET route refuses a cookie session without X-CSRF-Token
 // (403 csrf) before its handler runs; the same session with the header writes.

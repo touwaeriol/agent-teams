@@ -50,11 +50,15 @@ func (e *Engine) endDue(ctx context.Context, tx *core.Tx, t core.Thread, ciPasse
 	if err != nil {
 		return false, err
 	}
+	standalone, err := core.StandaloneRepos(ctx, tx, t.ProjectID)
+	if err != nil {
+		return false, err
+	}
 	hasPR, open, branched := false, false, false
 	for _, r := range repos {
 		hasPR = hasPR || r.PRNumber != nil
 		open = open || r.HasOpenPR()
-		branched = branched || r.BranchCreated
+		branched = branched || r.NeedsPR(standalone) // standalone repositories end on their thread branch
 	}
 	switch {
 	case open:
@@ -190,6 +194,7 @@ func (e *Engine) LeadTurnEnded(ctx context.Context, tx *core.Tx, threadID string
 // the lead's turn does, so the final reply written after finish is kept; a thread whose pull
 // requests are merged (it waited for its tasks or for finish) ends the same way.
 func (e *Engine) FinishCalled(ctx context.Context, threadID string, noChanges bool) error {
+	e.recordDelivered(ctx, threadID)
 	return e.core.InTx(ctx, func(tx *core.Tx) error {
 		t, err := core.LockThread(ctx, tx, threadID)
 		if err != nil {
@@ -249,4 +254,37 @@ func (e *Engine) mergedHeld(ctx context.Context, threadID string) error {
 		return ignoreMissing(err)
 	}
 	return e.endHeld(ctx, threadID, "PR 已合并")
+}
+
+// recordDelivered notes the thread branch head of every standalone repository the thread changed
+// (delivered_sha): that branch is the thread's result there (git-repos.md §7). Best effort.
+func (e *Engine) recordDelivered(ctx context.Context, threadID string) {
+	t, err := core.ThreadByID(ctx, e.core.Pool, threadID)
+	if err != nil {
+		return
+	}
+	rows, err := core.ThreadRepos(ctx, e.core.Pool, t.ID)
+	if err != nil {
+		return
+	}
+	standalone, err := core.StandaloneRepos(ctx, e.core.Pool, t.ProjectID)
+	if err != nil || len(standalone) == 0 {
+		return
+	}
+	for _, tr := range rows {
+		if !tr.Delivered(standalone) {
+			continue
+		}
+		repo, err := e.repoIn(ctx, t.ProjectID, tr.Repo)
+		if err != nil {
+			continue
+		}
+		sha, err := e.gh.RefSHA(ctx, repo, t.Branch)
+		if err != nil {
+			e.log.Warn("delivered sha", "thread_id", t.ID, "repo", tr.Repo, "err", err)
+			continue
+		}
+		_ = e.core.Pool.Gorm(ctx).Model(&core.ThreadRepo{}).Where("thread_id = ? AND repo = ?", t.ID, tr.Repo).
+			Update("delivered_sha", sha).Error
+	}
 }

@@ -84,9 +84,16 @@ func (e *Engine) prTargets(ctx context.Context, t core.Thread, req PRRequest) ([
 	if err != nil {
 		return nil, err
 	}
-	pending, withPR := branchedWithoutPR(rows, req.Repo)
+	standalone, err := core.StandaloneRepos(ctx, e.core.Pool, t.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	pending, withPR, delivered := branchedWithoutPR(rows, req.Repo, standalone)
 	if len(pending) == 0 && withPR {
 		return nil, ErrPRExists
+	}
+	if len(pending) == 0 && delivered {
+		return nil, ErrStandaloneNoPR
 	}
 	if len(pending) == 0 {
 		return nil, ErrNothingToPR
@@ -105,19 +112,22 @@ func (e *Engine) prTargets(ctx context.Context, t core.Thread, req PRRequest) ([
 	return out, nil
 }
 
-func branchedWithoutPR(rows []core.ThreadRepo, only string) ([]core.ThreadRepo, bool) {
+// branchedWithoutPR: the rows that wait for a pull request, whether any has one, and whether a
+// standalone repository (no pull requests) has changes.
+func branchedWithoutPR(rows []core.ThreadRepo, only string, standalone map[string]bool) ([]core.ThreadRepo, bool, bool) {
 	var pending []core.ThreadRepo
-	withPR := false
+	withPR, delivered := false, false
 	for _, tr := range rows {
 		if only != "" && !strings.EqualFold(tr.Repo, only) {
 			continue
 		}
 		withPR = withPR || tr.PRNumber != nil
-		if tr.BranchCreated && tr.PRNumber == nil {
+		delivered = delivered || tr.Delivered(standalone)
+		if tr.NeedsPR(standalone) {
 			pending = append(pending, tr)
 		}
 	}
-	return pending, withPR
+	return pending, withPR, delivered
 }
 
 // openOne opens a repository's pull request; false when GitHub finds nothing to merge there.

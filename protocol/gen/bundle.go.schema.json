@@ -334,7 +334,7 @@
     },
     "Repo": {
       "title": "Repo",
-      "description": "GitHub repository as owner/name.",
+      "description": "GitHub repository as owner/name, or git/<id> for a standalone Git repository (with remote_url).",
       "type": "string",
       "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
     },
@@ -709,6 +709,11 @@
         "repo": {
           "$ref": "#/$defs/Repo"
         },
+        "remote_url": {
+          "description": "Clone and push URL for a repository the daemon does not reach at git_base_url/<repo>.git: a standalone Git repository served by the console's Git relay (git-repos.md 5). Credentials for it come from cred.request with the URL's host and path. Absent: git_base_url/<repo>.git.",
+          "type": "string",
+          "pattern": "^https?://[^/@\\s]+/git/gr_[a-z0-9]+\\.git$"
+        },
         "mode": {
           "type": "string",
           "enum": [
@@ -811,6 +816,11 @@
         },
         "repo": {
           "$ref": "#/$defs/Repo"
+        },
+        "remote_url": {
+          "description": "Clone and push URL for a repository the daemon does not reach at git_base_url/<repo>.git: a standalone Git repository served by the console's Git relay (git-repos.md 5). Credentials for it come from cred.request with the URL's host and path. Absent: git_base_url/<repo>.git.",
+          "type": "string",
+          "pattern": "^https?://[^/@\\s]+/git/gr_[a-z0-9]+\\.git$"
         },
         "cwd": {
           "$ref": "#/$defs/RelPath"

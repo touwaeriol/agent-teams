@@ -2,7 +2,7 @@
 // Pages wrap them with `useAction` (mutations.ts) for toasts and cache refresh.
 import { client, unwrap } from "./client";
 import type { components } from "./schema";
-import type { AskChoice, MainTaskStatus, ProjectServersView, ServerView, UsageRefresh } from "./views";
+import type { AskChoice, GitCredentialView, GitRepoView, GitTestResult, MainTaskStatus, ProjectServersView, ServerView, UsageRefresh } from "./views";
 
 type S = components["schemas"];
 
@@ -141,6 +141,22 @@ export const plugins = {
   upload: (zip: string) => unwrap(client.POST("/api/plugins", { body: { zip } })),
   setEnabled: (id: string, enabled: boolean) => unwrap(client.PATCH("/api/plugins/{id}", { params: { path: { id } }, body: { enabled } })),
   remove: (id: string) => unwrap(client.DELETE("/api/plugins/{id}", { params: { path: { id } } })),
+};
+
+/** Standalone Git repositories and credentials (git-repos.md §6). Secrets are only ever sent. */
+export const gitRepos = {
+  create: (body: S["CreateGitRepoInputBody"]) => unwrap(client.POST("/api/git/repos", { body })) as Promise<GitRepoView>,
+  update: (id: string, body: S["UpdateGitRepoInputBody"]) => unwrap(client.PATCH("/api/git/repos/{id}", { params: { path: { id } }, body })) as Promise<GitRepoView>,
+  remove: (id: string) => unwrap(client.DELETE("/api/git/repos/{id}", { params: { path: { id } } })),
+  test: (id: string) => unwrap(client.POST("/api/git/repos/{id}/test", { params: { path: { id } } })) as Promise<GitTestResult>,
+  testDraft: (body: S["TestGitRepoInputBody"]) => unwrap(client.POST("/api/git/repos/test", { body })) as Promise<GitTestResult>,
+  resetHostKey: (id: string) => unwrap(client.POST("/api/git/repos/{id}/host-key/reset", { params: { path: { id } } })) as Promise<GitRepoView>,
+};
+
+export const gitCredentials = {
+  create: (body: S["GitCredentialInput"]) => unwrap(client.POST("/api/git/credentials", { body })) as Promise<GitCredentialView>,
+  update: (id: string, body: S["UpdateGitCredInputBody"]) => unwrap(client.PATCH("/api/git/credentials/{id}", { params: { path: { id } }, body })) as Promise<GitCredentialView>,
+  remove: (id: string) => unwrap(client.DELETE("/api/git/credentials/{id}", { params: { path: { id } } })),
 };
 
 export const git = {

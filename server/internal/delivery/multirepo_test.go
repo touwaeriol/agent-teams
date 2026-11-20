@@ -33,12 +33,18 @@ func TestBranchedWithoutPR(t *testing.T) {
 	n := 3
 	rows := []core.ThreadRepo{{Repo: "o/a", BranchCreated: true}, {Repo: "o/b", BranchCreated: true, PRNumber: &n},
 		{Repo: "o/c", BaseBranch: "dev"}}
-	pending, withPR := branchedWithoutPR(rows, "")
-	if len(pending) != 1 || pending[0].Repo != "o/a" || !withPR {
-		t.Fatalf("pending %+v withPR %v", pending, withPR)
+	pending, withPR, delivered := branchedWithoutPR(rows, "", nil)
+	if len(pending) != 1 || pending[0].Repo != "o/a" || !withPR || delivered {
+		t.Fatalf("pending %+v withPR %v delivered %v", pending, withPR, delivered)
 	}
-	if pending, withPR = branchedWithoutPR(rows, "O/B"); len(pending) != 0 || !withPR {
+	if pending, withPR, _ = branchedWithoutPR(rows, "O/B", nil); len(pending) != 0 || !withPR {
 		t.Fatalf("only o/b: %+v %v", pending, withPR)
+	}
+	// A standalone repository's thread branch needs no PR: it is delivered as it is.
+	rows = append(rows, core.ThreadRepo{Repo: "git.example.com/o/d", BranchCreated: true})
+	pending, _, delivered = branchedWithoutPR(rows, "", map[string]bool{"git.example.com/o/d": true})
+	if len(pending) != 1 || !delivered {
+		t.Fatalf("standalone: pending %+v delivered %v", pending, delivered)
 	}
 }
 

@@ -10,7 +10,7 @@ import { LockTimeout, withLock } from "./lock.js";
 import type { PlatformFiles } from "./platform.js";
 import { untrustedRepoArgs } from "./safe.js";
 
-export type JobCredential = (jobId: string, repo: string, purpose: "read" | "push") => Promise<{ username: string; password: string } | null>;
+export type JobCredential = (jobId: string, repo: string, purpose: "read" | "push", host: string) => Promise<{ username: string; password: string } | null>;
 type ErrorCode = NonNullable<GitResult["error_code"]>;
 
 /** Where members keep the working notes of long tasks (git-ignored through info/exclude). */
@@ -59,10 +59,13 @@ const SYNC_IDENTITY = ["-c", "user.name=Agent Teams", "-c", "user.email=platform
 export class GitJobs {
   private readonly results = new Map<string, GitResult>();
   private readonly waiters = new Map<string, Deferred<GitResult>>();
+  /** remote_url of repositories not at gitBaseUrl (standalone repositories, git/<id>), from their jobs. */
+  private readonly remotes = new Map<string, string>();
 
   constructor(private readonly o: GitJobsOptions) {}
 
   prepare(b: GitPrepare): Promise<GitResult> {
+    this.remember(b.repo, b.remote_url);
     return this.job(b.job_id, () => (b.mode === "clone" ? this.prepareClone(b) : this.prepareWorktree(b)));
   }
 
@@ -71,6 +74,7 @@ export class GitJobs {
   }
 
   push(b: GitPush): Promise<GitResult> {
+    this.remember(b.repo, b.remote_url);
     return this.job(b.job_id, () => this.doPush(b));
   }
 
@@ -420,13 +424,20 @@ export class GitJobs {
   }
 
   private url(repo: string): string {
-    return `${this.o.gitBaseUrl.replace(/\/$/, "")}/${repo}.git`;
+    return this.remotes.get(repo) ?? `${this.o.gitBaseUrl.replace(/\/$/, "")}/${repo}.git`;
+  }
+
+  private remember(repo: string, remote: string | undefined): void {
+    if (remote) this.remotes.set(repo, remote);
   }
 
   /** The job token goes only into this one git child (GIT_ASKPASS), never to disk. */
   private async credEnv(jobId: string, repo: string, purpose: "read" | "push"): Promise<NodeJS.ProcessEnv> {
-    if (!this.url(repo).startsWith("https://")) return gitEnv();
-    const cred = await this.o.credential(jobId, repo, purpose).catch(() => null);
+    const url = this.url(repo);
+    if (!/^https?:\/\//.test(url) || (url.startsWith("http://") && !this.remotes.has(repo))) return gitEnv();
+    // GitHub tokens are asked for github.com whatever gitBaseUrl is (a GitHub emulator in tests).
+    const host = this.remotes.has(repo) ? new URL(url).host : "github.com";
+    const cred = await this.o.credential(jobId, repo, purpose, host).catch(() => null);
     if (!cred) return gitEnv();
     return gitEnv({
       GIT_ASKPASS: this.o.platform.askpass, AT_GIT_USERNAME: cred.username, AT_GIT_PASSWORD: cred.password,

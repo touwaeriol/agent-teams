@@ -1,6 +1,6 @@
-# 通用 Git 仓库接入（设计稿）
+# 通用 Git 仓库接入
 
-状态：**设计稿，等用户确认**（2026-11-20）。本文只做设计，不改实现；用户确认后按 §13 分期开发。界面原型在 `web/src/prototype/gitRepos/`（只在 `npm run dev` 下有，地址 `/settings/git-prototype`），截图见 PR。
+状态：**第一期已实现**（2026-11-20，用户确认按 §12 的推荐做）。实现与设计的出入见 §14；原型目录已删除，正式页面是设置 → “Git 仓库”（`web/src/pages/settings/GitRepos.vue`）。
 
 和 `remote-servers.md`（凭据只在主节点、信封加密、主机密钥固定）、`architecture.md` §8（分支、合并队列、CI、PR）和 §10.4（GitHub 凭证不落盘）一起读。
 
@@ -404,6 +404,15 @@ type Repo interface {
 | 第一期 | 表和迁移、凭据信封加密、设置页“Git 仓库”（添加 / 测试 / 编辑 / 删除，平台生成密钥对）、Git 中转（HTTPS + SSH 上游，pre-receive 检查）、节点 `remote_url` 与凭证助手、`forge.Repo` 抽象和 Git 引擎合并队列、`merge_policy` 三档的降级、项目和新建项目里选仓库、验收 diff 接口 |
 | 第二期 | PAT 连接转换、令牌到期提醒、上游人工合并检测优化、镜像配额管理界面、浅克隆 |
 | 第三期 | GitLab / Gitea / GitHub 令牌的 PR 与 CI 适配（§8.4）、多副本中转、LFS |
+
+## 14. 第一期实现说明
+
+- **中转**：`server/internal/gitrelay`。每个仓库一份裸镜像 `GIT_MIRROR_DIR/<gr_id>.git`（镜像只是缓存，丢了从上游重建；compose 用命名卷 `git-mirrors`，镜像里默认 `/var/lib/agent-teams/git-mirrors`，没配置时中转关闭，独立仓库的会话和推送会直接报错）。节点走 `<PUBLIC_URL>/git/<gr_id>.git`（`git http-backend`，Basic 认证，用户名 `x-relay-token`），镜像超过 10 秒没同步就先从上游 fetch。`PUBLIC_URL` 不能带路径前缀。
+- **中转令牌**：`atgr1.<claims>.<mac>`，主密钥派生的 MAC，有效 1 小时，只认一个仓库。三种模式：`read`；`push`（git 作业，只能推作业的那个分支）；`employee`（员工会话，可推 `refs/heads/*`，但默认分支和平台分支 `thread/N-…`、`mq/…` 除外）。推送由 pre-receive 钩子（`atctl git-hook pre-receive`，经控制面内部 unix socket）检查后用 `--force-with-lease` 转推上游，上游拒绝则整个推送失败。
+- **控制面自己的 Git 操作**（合并队列、建/删讨论串分支）都在镜像上做，再推上游；合并用 `merge-tree --write-tree` + `commit-tree`，冲突照常回到组长。
+- **交付**：独立仓库没有 PR / CI / 验收合并。`open_pr` 会告诉组长直接 `finish`；`finish` 把讨论串分支当前的提交记为 `delivered_sha`，讨论串结束在分支上，用户自己去托管平台合并。合并队列的 CI 一律按“没有 CI”处理。§8 里的 `merge_policy` 三档降级和验收 diff 接口留到后面。
+- **节点**：`git.prepare` / `git.push` 多了可选的 `remote_url`。节点要升级到带这个字段的版本才能用独立仓库，旧节点仍可用 GitHub 仓库。
+- **还没做**：PAT 连接转换、令牌到期提醒、镜像配额界面（第二期）；GitLab/Gitea 的 MR 与流水线（第三期）；独立仓库的“CI 配置 PR”。
 
 ## 附录 A：引用的现有代码
 

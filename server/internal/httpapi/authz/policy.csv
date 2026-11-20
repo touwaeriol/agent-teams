@@ -19,7 +19,7 @@ g, node, node-token
 
 # Public: health, API description, sign-in, installer, release files, office layouts
 # and assets, published files (signed URLs, file origin), GitHub App callbacks and webhook
-# (signed state / HMAC checked by the handlers).
+# (signed state / HMAC checked by the handlers), the Git relay (relay tokens checked by gitrelay).
 p, public, /api/docs, GET
 p, public, /api/git/github-app/created, GET
 p, public, /api/git/github-app/install, GET
@@ -34,6 +34,8 @@ p, public, /auth/logout, POST
 p, public, /auth/register, POST
 p, public, /files/*path, GET
 p, public, /files/*path, HEAD
+p, public, /git/*path, GET
+p, public, /git/*path, POST
 p, public, /healthz, GET
 p, public, /install-node.sh, GET
 p, public, /node/dist/:file, GET

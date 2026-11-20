@@ -24,8 +24,11 @@ type ThreadRepo struct {
 	PRURL         *string    `gorm:"column:pr_url"`
 	PRState       string     `gorm:"column:pr_state"`
 	PROpenedAt    *time.Time `gorm:"column:pr_opened_at"`
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// DeliveredSHA is the thread branch head handed over in a standalone Git repository, which
+	// has no pull requests: the thread's work there ends on its branch (git-repos.md §7).
+	DeliveredSHA *string `gorm:"column:delivered_sha"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // TableName maps ThreadRepo to at_thread_repos.
@@ -53,6 +56,29 @@ func (t ThreadRepo) HasOpenPR() bool {
 }
 
 func threadRepos(ctx context.Context, q DB) *gorm.DB { return q.Gorm(ctx).Model(&ThreadRepo{}) }
+
+// StandaloneRepos are the slugs (lower case) of a project's standalone Git repositories: they
+// have no pull requests, so a thread's changes there need none.
+func StandaloneRepos(ctx context.Context, q DB, projectID string) (map[string]bool, error) {
+	var slugs []string
+	err := q.Gorm(ctx).Table("at_project_repos").Where("project_id = ? AND git_repo_id IS NOT NULL", projectID).Pluck("repo", &slugs).Error
+	out := make(map[string]bool, len(slugs))
+	for _, s := range slugs {
+		out[strings.ToLower(s)] = true
+	}
+	return out, err
+}
+
+// NeedsPR reports a repository row with changes that wait for a pull request: a thread branch
+// without one, outside the standalone repositories.
+func (t ThreadRepo) NeedsPR(standalone map[string]bool) bool {
+	return t.BranchCreated && t.PRNumber == nil && !standalone[strings.ToLower(t.Repo)]
+}
+
+// Delivered reports changes on a standalone repository's thread branch.
+func (t ThreadRepo) Delivered(standalone map[string]bool) bool {
+	return t.BranchCreated && standalone[strings.ToLower(t.Repo)]
+}
 
 // ThreadRepos lists a thread's repository rows (created order).
 func ThreadRepos(ctx context.Context, q DB, threadID string) ([]ThreadRepo, error) {

@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/touwaeriol/agent-teams/server/internal/gitrelay"
 	"github.com/touwaeriol/agent-teams/server/internal/gitremote"
 )
 
@@ -36,6 +37,9 @@ func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
+	}
+	if os.Args[1] == "git-hook" {
+		os.Exit(gitrelay.RunHook(os.Args[2:]))
 	}
 	if os.Args[1] == "git-ssh" { // git's ssh for upstream commands of standalone repositories (internal)
 		os.Exit(gitremote.RunHelper(os.Args[2:]))

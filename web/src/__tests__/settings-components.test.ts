@@ -66,11 +66,22 @@ describe("RepoList", () => {
     expect(value.value.map((r) => r.repo)).toEqual(["o/api"]);
     expect(w.text()).toContain("再加一个仓库");
   });
-  it("asks to connect GitHub when there is no connection", async () => {
-    api([["GET", /\/api\/git\/connections$/, []]]);
+  it("asks to connect GitHub or add a Git repository when there is neither", async () => {
+    api([["GET", /\/api\/git\/connections$/, []], ["GET", /\/api\/git\/repos$/, []]]);
     const w = mountWith(RepoList, { modelValue: [] });
     await flushPromises();
-    expect(w.text()).toContain("还没有连接 GitHub。先去连接");
+    expect(w.text()).toContain("还没有可用的仓库。先去连接 GitHub 或添加 Git 仓库");
+  });
+  it("lists a standalone repository with its source and the push-branch tag", async () => {
+    api([
+      ["GET", /\/api\/git\/connections$/, []],
+      ["GET", /\/api\/git\/repos$/, [{ id: "gr_1", slug: "gitlab.com/acme/web", name: "web", provider: "gitlab", url: "https://gitlab.com/acme/web.git", access: "write", projects: [] }]],
+    ]);
+    const value = ref<RepoRef[]>([{ repo: "gitlab.com/acme/web", git_connection_id: null, git_repo_id: "gr_1" }]);
+    const w = mountWith(RepoList, { modelValue: value.value });
+    await flushPromises();
+    expect(w.get("li").text()).toBe("1gitlab.com/acme/web推送分支交付GitLab · 单独添加");
+    expect(w.text()).toContain("再加一个仓库");
   });
 });
 

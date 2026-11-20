@@ -9,6 +9,7 @@ import (
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
+	"github.com/touwaeriol/agent-teams/server/internal/gitrelay"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -61,11 +62,15 @@ func (e *Engine) credential(ctx context.Context, node store.Node, r *protocol.Cr
 	if err != nil {
 		return refuse(err.Error())
 	}
-	_, repos, err := e.reposOf(ctx, cs.projectID)
+	p, repos, err := e.reposOf(ctx, cs.projectID)
 	if err != nil {
 		return refuse("no_repo")
 	}
+	cs.userID = p.UserID
 	repo, ok := ghops.Find(repos, r.Path)
+	if ok && repo.Standalone() {
+		return e.relayCredential(ctx, cs, repo, r)
+	}
 	if !ok || !samePath(repo.Slug, r.Path) || r.Host != "github.com" || (cs.repo != "" && !samePath(cs.repo, r.Path)) {
 		return refuse("repo_not_in_project")
 	}
@@ -105,11 +110,46 @@ func samePath(slug, path string) bool {
 	return strings.EqualFold(p, slug)
 }
 
+// relayCredential answers for a standalone repository: a relay token for the console's Git relay
+// (git-repos.md §5.2), never the upstream credential. Read jobs fetch; a push job may update only
+// its own branch; lead and member sessions push branches other than the default branch, the
+// thread branches and merge queue trials (gitrelay.Claims.allows).
+func (e *Engine) relayCredential(ctx context.Context, cs callerScope, repo ghops.Repo, r *protocol.CredRequest) protocol.CredResponse {
+	relay := e.gh.Relay
+	if !relay.Enabled() {
+		return refuse("relay_disabled")
+	}
+	if !strings.EqualFold(r.Host, relay.Host()) || (cs.repo != "" && cs.repo != repo.NodeRepo()) {
+		return refuse("repo_not_in_project")
+	}
+	c := gitrelay.Claims{Repo: repo.GitRepoID(), User: cs.userID, Mode: gitrelay.ModeRead}
+	switch cs.scope {
+	case ghops.ScopePush, ghops.ScopePushFlows:
+		c.Mode, c.Ref = gitrelay.ModePush, cs.ref
+	case ghops.ScopeEmployee, ghops.ScopeEmployeeFlows:
+		c.Mode = gitrelay.ModeEmployee
+		if b, err := e.gh.DefaultBranch(ctx, repo); err == nil {
+			c.Deny = []string{"refs/heads/" + b}
+		}
+	}
+	if c.Mode == gitrelay.ModePush && c.Ref == "" {
+		return refuse("no_ref")
+	}
+	tok, exp, err := relay.Sign(c)
+	if err != nil {
+		return refuse("token_unavailable")
+	}
+	user := "x-relay-token"
+	return protocol.CredResponse{Ok: true, Username: &user, Password: &tok, ExpiresAt: &exp}
+}
+
 // callerScope is the project, permission set and (for git jobs) the one repository a caller may get a token for.
 type callerScope struct {
 	projectID string
+	userID    string // the project's owner (relay tokens name it)
 	scope     ghops.Scope
-	repo      string // "" = any repository of the project
+	repo      string // "" = any repository of the project (as git jobs name it: owner/name or git/<id>)
+	ref       string // push jobs: the ref they update (refs/heads/thread/<n>/<employee>)
 }
 
 // credScope decides the project and permission set for the caller. A session may read every
@@ -148,8 +188,10 @@ func (e *Engine) sessionScope(ctx context.Context, sessionID string, _ protocol.
 func (e *Engine) jobScope(ctx context.Context, node store.Node, jobID string) (callerScope, error) {
 	var typ string
 	cs := callerScope{}
-	err := store.QueryRow(ctx, e.core.Pool, `SELECT type, COALESCE(body->>'project_id', ''), COALESCE(body->>'repo', '') FROM at_node_commands
-		WHERE node_id = $1 AND type LIKE 'git.%' AND body->>'job_id' = $2`, node.ID, jobID).Scan(&typ, &cs.projectID, &cs.repo)
+	var refspec string
+	err := store.QueryRow(ctx, e.core.Pool, `SELECT type, COALESCE(body->>'project_id', ''), COALESCE(body->>'repo', ''),
+		COALESCE(body->>'refspec', '') FROM at_node_commands
+		WHERE node_id = $1 AND type LIKE 'git.%' AND body->>'job_id' = $2`, node.ID, jobID).Scan(&typ, &cs.projectID, &cs.repo, &refspec)
 	if err != nil || cs.projectID == "" {
 		return cs, errors.New("unknown_job")
 	}
@@ -158,6 +200,7 @@ func (e *Engine) jobScope(ctx context.Context, node store.Node, jobID string) (c
 		return cs, nil
 	}
 	cs.scope = ghops.ScopePush
+	_, cs.ref, _ = strings.Cut(refspec, ":")
 	if d, err := core.DeliveryOf(ctx, e.core.Pool, cs.projectID); err == nil && d.AllowWorkflowEdits {
 		cs.scope = ghops.ScopePushFlows
 	}

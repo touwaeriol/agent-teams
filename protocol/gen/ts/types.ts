@@ -83,7 +83,7 @@ export type TurnId = string;
  */
 export type RelPath = string;
 /**
- * GitHub repository as owner/name.
+ * GitHub repository as owner/name, or git/<id> for a standalone Git repository (with remote_url).
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "Repo".
@@ -487,6 +487,10 @@ export interface GitPrepare {
   job_id: JobId;
   project_id: string;
   repo: Repo;
+  /**
+   * Clone and push URL for a repository the daemon does not reach at git_base_url/<repo>.git: a standalone Git repository served by the console's Git relay (git-repos.md 5). Credentials for it come from cred.request with the URL's host and path. Absent: git_base_url/<repo>.git.
+   */
+  remote_url?: string;
   mode: "worktree" | "clone";
   shared?: RelPath1;
   cwd: RelPath;
@@ -535,6 +539,10 @@ export interface GitPush {
   job_id: JobId;
   project_id: string;
   repo: Repo;
+  /**
+   * Clone and push URL for a repository the daemon does not reach at git_base_url/<repo>.git: a standalone Git repository served by the console's Git relay (git-repos.md 5). Credentials for it come from cred.request with the URL's host and path. Absent: git_base_url/<repo>.git.
+   */
+  remote_url?: string;
   cwd: RelPath;
   /**
    * No leading +.

@@ -17,6 +17,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/gin-gonic/gin"
 
+	"github.com/touwaeriol/agent-teams/server/internal/gitrelay"
 	"github.com/touwaeriol/agent-teams/server/internal/platform"
 )
 
@@ -31,7 +32,7 @@ var (
 )
 
 // reservedPrefixes never fall back to the web app.
-var reservedPrefixes = []string{"api", "auth", "nodes", "node", "mcp", "office", "install-node.sh", "healthz", "readyz"}
+var reservedPrefixes = []string{"api", "auth", "nodes", "node", "mcp", "office", "install-node.sh", "healthz", "readyz", "git"}
 
 // mountPublic adds the routes that need no session, and the web app for everything else.
 func (s *Server) mountPublic(e *gin.Engine) {
@@ -39,6 +40,8 @@ func (s *Server) mountPublic(e *gin.Engine) {
 	r.GET("/install-node.sh", gin.WrapF(s.installNode))
 	r.GET("/node/dist/:file", s.nodeDist)
 	r.GET("/office/*path", s.serveOfficeFile)
+	r.GET(gitrelay.Route, gin.WrapH(s.relay))
+	r.POST(gitrelay.Route, gin.WrapH(s.relay))
 	e.NoRoute(s.fallback)
 }
 

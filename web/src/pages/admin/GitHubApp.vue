@@ -14,7 +14,7 @@ useFlash({ github_app: (slug) => `GitHub App ${slug} 已创建，用户现在可
 </script>
 
 <template>
-  <AdminPage title="GitHub App" description="用户“连接 GitHub”时安装的平台 App，部署后创建一次。之后用户只在“GitHub 连接”页点“连接 GitHub”。">
+  <AdminPage title="GitHub App" description="用户“连接 GitHub”时安装的平台 App，部署后创建一次。之后用户只在“Git 仓库”页点“连接 GitHub”。">
     <AppPanel v-if="app.data.value" :status="app.data.value" />
     <Loading v-else />
   </AdminPage>
