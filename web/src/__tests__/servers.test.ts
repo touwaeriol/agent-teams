@@ -105,6 +105,9 @@ describe("access log", () => {
     expect(auditResult({ kind: "exec", exit_code: 7, duration_ms: 300, reason: "" })).toEqual({ text: "退出码 7 · 300 ms", tone: "warn" });
     expect(auditResult({ kind: "denied", exit_code: null, duration_ms: null, reason: "岗位没有授权" }).tone).toBe("danger");
     expect(auditResult({ kind: "test", exit_code: 1, duration_ms: null, reason: "auth_failed" }).text).toBe("失败（auth_failed）");
+    expect(auditResult({ kind: "exec", exit_code: null, duration_ms: null, reason: "", detail: { state: "running" } })).toEqual({ text: "进行中 / 未结束", tone: "muted" });
+    expect(auditResult({ kind: "shell", exit_code: null, duration_ms: 1500, reason: "", detail: { signal: "TERM" } })).toEqual({ text: "被信号 TERM 中断 · 1.5 s", tone: "warn" });
+    expect(auditResult({ kind: "exec", exit_code: 0, duration_ms: 10, reason: "", detail: { state: "running" } }).text).toBe("退出码 0 · 10 ms");
     expect(auditWho({ employee: "user", role: "" })).toBe("你");
     expect(auditWho({ employee: "dev-1", role: "dev" })).toBe("dev-1（dev）");
   });
