@@ -28,6 +28,13 @@ export const settingsRoutes: RouteRecordRaw[] = [
   { path: "/settings/git", component: () => import("@/pages/settings/GitHub.vue") },
   { path: "/settings/servers", component: () => import("@/pages/settings/Servers.vue") },
   { path: "/settings/appearance", component: () => import("@/pages/settings/Appearance.vue") },
+  // Design prototype of docs/v2/git-repos.md (dev only, static data; not in production builds).
+  ...(import.meta.env.DEV
+    ? [
+        { path: "/settings/git-prototype", component: () => import("@/prototype/gitRepos/GitReposPage.vue") },
+        { path: "/settings/git-prototype/picker", component: () => import("@/prototype/gitRepos/ProjectRepoPicker.vue") },
+      ]
+    : []),
 ];
 
 /** The admin console (/admin/*). Admin-only: the guard shows non-admins the 404 page instead. */
