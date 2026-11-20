@@ -22,6 +22,8 @@ export interface OptionInputs {
   plugins?: MaterializedPlugin[];
   /** The role's context management (session.open context): sets the autocompact window and threshold. */
   context?: SessionOpen["context"];
+  /** Platform text appended after system_append (DriverContext.systemExtra). */
+  systemExtra?: string;
 }
 
 const WRITE_TOOLS = ["Edit", "Write", "NotebookEdit"];
@@ -45,7 +47,7 @@ export function buildClaudeOptions(i: OptionInputs): Options {
     ...(i.resume ? { resume: i.sessionId } : { sessionId: i.sessionId }),
     ...(c.max_turns ? { maxTurns: c.max_turns } : {}),
     ...(c.max_budget_usd ? { maxBudgetUsd: c.max_budget_usd } : {}),
-    systemPrompt: { type: "preset", preset: "claude_code", append: c.system_append ?? "" },
+    systemPrompt: { type: "preset", preset: "claude_code", append: [c.system_append, i.systemExtra].filter(Boolean).join("\n\n") },
     env: { ...i.env, ...claudeCompactEnv(i.context) },
     settings: buildSettings(c, i.root, i.cwd, i.secretPaths),
     canUseTool: i.canUseTool,

@@ -7,13 +7,16 @@ import { gitCredentialEnv } from "./cred/helper.js";
 import { CredServer, credSocketPath } from "./cred/server.js";
 import { GitJobs } from "./git/jobs.js";
 import { GhInstaller, type GhInstallOptions } from "./git/gh-install.js";
-import { installPlatformFiles, type PlatformFiles } from "./git/platform.js";
+import { installPlatformFiles, installSshWrappers, sshClientVersion, type PlatformFiles } from "./git/platform.js";
+import { sshBaseDir, sshSocketPath } from "./ssh/config.js";
+import { gatewayUrl, SshHub } from "./ssh/hub.js";
+import { sshPrompt } from "./ssh/prompt.js";
 import { probeIsolation, type Isolation } from "./isolation.js";
 import { Link } from "./link/client.js";
 import { Dispatcher, type CommandHandler } from "./link/dispatcher.js";
 import { Inbox, type Reply } from "./link/inbox.js";
 import { Outbox } from "./link/outbox.js";
-import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, FileDownload, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, NodeUsageRefresh, SessionClose, SessionCompact, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
+import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, FileDownload, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, NodeUsageRefresh, SessionClose, SshCertResponse, SshServersUpdate, SessionCompact, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
 import { probeClaude, probeCodex } from "./runtimes.js";
 import { readClaudeUsage, UsageReporter, type UsageSources } from "./usage.js";
 import { ClaudeDriver, type QueryFn } from "./sessions/claude/driver.js";
@@ -75,9 +78,13 @@ export interface DaemonOptions {
   usageSources?: Partial<UsageSources>;
   /** Download gh at start instead of on first use (default: when probing runtimes). */
   prefetchGh?: boolean;
+  /** Parent of the per-session SSH directories (default $XDG_RUNTIME_DIR/agent-teams-ssh or <data>/run-ssh). */
+  sshBaseDir?: string;
+  /** PATH searched for the real ssh / scp / sftp (default the daemon's PATH). */
+  sshPath?: string;
 }
 
-const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "upgrade", "file_download", "shared_files", "context_usage", "session_compact", "usage"];
+const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "upgrade", "file_download", "shared_files", "context_usage", "session_compact", "usage", "ssh_gateway"];
 
 /** Wires the link, command handlers, sessions, tools, git and credentials together. */
 export class Daemon {
@@ -105,6 +112,9 @@ export class Daemon {
   private codexRuntime: CodexRuntime = { cli: CODEX_CLI_VERSION, auth: "none", sandbox_ok: false };
   private statsTimer: NodeJS.Timeout | null = null;
   private readonly usage: UsageReporter;
+  private readonly ssh: SshHub;
+  /** Real OpenSSH client found at start (null: remote servers cannot be used on this node). */
+  private readonly sshClient: string | null;
 
   constructor(private readonly o: DaemonOptions) {
     for (const d of [o.root, o.stateDir]) mkdirSync(d, { recursive: true, mode: 0o700 });
@@ -123,6 +133,13 @@ export class Daemon {
     this.platform = installPlatformFiles(o.platformDir, o.nodeCmd);
     const dataDir = dirname(o.platformDir);
     this.gh = new GhInstaller({ toolsDir: o.toolsDir ?? join(dataDir, "tools"), path: process.env.PATH ?? "", skip: [this.platform.binDir], ...o.gh });
+    const realSsh = installSshWrappers(this.platform.binDir, o.sshPath ?? process.env.PATH ?? "");
+    this.sshClient = sshClientVersion(realSsh.ssh);
+    this.ssh = new SshHub({
+      baseDir: o.sshBaseDir ?? sshBaseDir(dataDir), proxySocket: sshSocketPath(o.runtimeDir), nodeCmd: o.nodeCmd,
+      gatewayUrl: gatewayUrl(o.url), token: o.token, send, log: o.log,
+      verify: (id, secret) => this.credServer.verify(id, secret),
+    });
     this.credServer = new CredServer(credSocketPath(o.runtimeDir), this.creds, o.log, { gh: () => this.gh.resolve(), ghConfigRoot: join(dataDir, "gh-config") });
     this.toolhost = new LoopbackToolHost(o.log);
     this.hub = new CodexHub({ env: this.codexServerEnv(), log: o.log, clientVersion: DAEMON_VERSION, ...(o.codexCommand ? { command: o.codexCommand } : {}) });
@@ -132,6 +149,7 @@ export class Daemon {
       waitForJob: (id, ms) => this.git.waitFor(id, ms),
       createDriver: (spec, cwd, sink) => this.createDriver(spec, cwd, sink),
       onSessionGone: (id) => this.forgetSession(id),
+      onDriverGone: (id) => this.ssh.drop(id),
       fetchImage: consoleImageFetcher(o.url, o.token),
       ...(o.crashDelaysMs ? { crashDelaysMs: o.crashDelaysMs } : {}),
       ...(o.compactWaitMs ? { compactWaitMs: o.compactWaitMs } : {}),
@@ -151,6 +169,7 @@ export class Daemon {
 
   async start(): Promise<void> {
     await this.credServer.start();
+    await this.ssh.start();
     await this.toolhost.start();
     if (this.o.probeRuntimes !== false) await this.probe();
     if (this.o.prefetchGh ?? this.o.probeRuntimes !== false) this.prefetchGh();
@@ -167,6 +186,7 @@ export class Daemon {
     await this.sessions.shutdown();
     this.hub.stop();
     await this.toolhost.stop();
+    await this.ssh.stop();
     await this.credServer.stop();
   }
 
@@ -195,6 +215,7 @@ export class Daemon {
       capacity: { ...(this.o.maxActive ? { max_active_sessions: this.o.maxActive } : {}), cpus: cpus().length, mem_mb: Math.round(totalmem() / 1048576) },
       runtimes: { claude: this.claudeRuntime, codex: this.codexRuntime },
       features: existsSync(join(this.o.configDir, "release.pub")) ? FEATURES : FEATURES.filter((f) => f !== "upgrade"),
+      ...(this.sshClient ? { ssh_client: { version: this.sshClient } } : {}),
       isolated: false,
       isolation: this.isolation,
     };
@@ -261,6 +282,8 @@ export class Daemon {
       "tool.result": { run: async (b) => (this.toolResult(b as unknown as ToolResult), []) },
       "file.download": { run: async (b) => (this.tools.chunk(b as unknown as FileDownload), []) },
       "cred.response": { run: async (b) => (this.creds.resolve(b as unknown as CredResponse), []) },
+      "ssh.cert_response": { run: async (b) => (this.ssh.resolve(b as unknown as SshCertResponse), []) },
+      "ssh.servers_update": { lane: session, run: async (b) => (this.sshServersUpdate(b as unknown as SshServersUpdate), []) },
       "git.prepare": { run: (b) => this.gitReply(this.git.prepare(b as unknown as GitPrepare)) },
       "git.status": { run: (b) => this.gitReply(this.git.status(b as unknown as GitStatus)) },
       "git.push": { run: (b) => this.gitReply(this.git.push(b as unknown as GitPush)) },
@@ -275,6 +298,12 @@ export class Daemon {
 
   private async gitReply(p: Promise<GitResult>): Promise<Reply[]> {
     return [{ type: "git.result", body: await p }];
+  }
+
+  /** ssh.servers_update: the spec keeps the list for later drivers; a live driver's ssh_config is rewritten now. */
+  private sshServersUpdate(u: SshServersUpdate): void {
+    if (!this.ssh.updateServers(u.session_id, u.open_gen, u.version, u.servers)) return;
+    this.sessions.setSshServers(u.session_id, u.open_gen, u.servers);
   }
 
   private nodeConfig(c: NodeConfig): Reply[] {
@@ -310,7 +339,8 @@ export class Daemon {
     const skills = spec.runtime === "claude" ? materializeSkills(this.skillsRoot, spec) : null;
     const plugins = materializePlugins(this.pluginsRoot, spec);
     const readable = [...(skills ? [skills.pluginDir] : []), ...plugins.map((p) => p.dir)];
-    const ctx: DriverContext = { spec, absCwd, env: this.sessionEnv(spec), policy: this.policy(spec, absCwd, readable), sink, log: this.o.log.child({ session: spec.session_id }) };
+    const env = this.sessionEnv(spec);
+    const ctx: DriverContext = { spec, absCwd, env, ...(env.AT_SSH_CONFIG ? { systemExtra: sshPrompt((spec.ssh_servers ?? []).map((s) => s.name)) } : {}), policy: this.policy(spec, absCwd, readable), sink, log: this.o.log.child({ session: spec.session_id }) };
     const driver = spec.runtime === "codex"
       ? new CodexDriver(ctx, { hub: this.hub, toolhost: this.toolhost, pluginServers: codexMcpServers(plugins) })
       : new ClaudeDriver(ctx, { root: this.o.root, claudeConfigDir: this.o.claudeConfigDir, secretPaths: this.secretPaths(), skills, plugins, ...(this.o.queryFn ? { queryFn: this.o.queryFn } : {}) });
@@ -334,13 +364,38 @@ export class Daemon {
   }
 
   private sessionEnv(spec: SessionOpen): Record<string, string> {
-    const cred = this.credEnv(spec);
+    const ssh = this.sshEnabled(spec);
+    const cred = this.credEnv(spec, ssh);
+    if (!ssh) this.ssh.drop(spec.session_id);
+    const sshEnv: Record<string, string> = ssh ? { AT_SSH_CONFIG: this.ssh.open(spec.session_id, spec.open_gen, spec.ssh_servers ?? []) } : {};
     const fixed = spec.runtime === "claude" ? this.claudeFixed() : {};
+    const extra: Record<string, string> = { ...gitIdentity(spec.employee.name), ...(spec.env ?? {}) };
+    // The session's own SSH plumbing is the platform's: spec.env cannot point ssh elsewhere.
+    for (const k of ["AT_SSH_CONFIG", "SSH_AUTH_SOCK"]) delete extra[k];
     return buildEnv({
-      base: process.env, home: this.employeeHome, extra: { ...gitIdentity(spec.employee.name), ...(spec.env ?? {}) },
+      base: process.env, home: this.employeeHome, extra,
       passList: spec.runtime === "codex" ? [...this.o.passEnv, ...CODEX_PASS_ENV] : this.o.passEnv,
-      fixed: { ...fixed, ...cred }, pathPrefix: cred.AT_CRED_SOCK ? [this.platform.binDir] : [],
+      fixed: { ...fixed, ...cred, ...sshEnv }, pathPrefix: cred.AT_CRED_SOCK || sshEnv.AT_SSH_CONFIG ? [this.platform.binDir] : [],
     });
+  }
+
+  /**
+   * Remote servers for this session (remote-servers.md §7.4): the console granted some, the
+   * employee is not the coordinator, the node has an OpenSSH client, and the session does not
+   * run in the Claude Bash sandbox (its network isolation and denyRead keep ssh from reaching
+   * the daemon's sockets; not offered there, §8.3).
+   */
+  private sshEnabled(spec: SessionOpen): boolean {
+    if (!spec.ssh_servers?.length || spec.employee.tier === "coordinator") return false;
+    if (!this.sshClient) {
+      this.o.log.warn({ session: spec.session_id }, "remote servers granted but no OpenSSH client on this node");
+      return false;
+    }
+    if (spec.runtime === "claude" && spec.claude?.sandbox?.enabled) {
+      this.o.log.warn({ session: spec.session_id }, "remote servers are not offered to sandboxed Claude sessions");
+      return false;
+    }
+    return true;
   }
 
   private claudeEnv(extra: Record<string, string>): Record<string, string> {
@@ -355,13 +410,17 @@ export class Daemon {
     return buildEnv({ base: process.env, home: this.employeeHome, passList: [...this.o.passEnv, ...CODEX_PASS_ENV], fixed: { CODEX_HOME: this.o.codexHome } });
   }
 
-  private credEnv(spec: SessionOpen): Record<string, string> {
-    if (!spec.git_credentials || spec.employee.tier === "coordinator") return {};
+  /** The per-session secret (new on every driver) for git/gh and, with remote servers, ssh-proxy. */
+  private credEnv(spec: SessionOpen, ssh: boolean): Record<string, string> {
+    const git = spec.git_credentials === true && spec.employee.tier !== "coordinator";
+    if (!git && !ssh) return {};
     const secret = this.credServer.register(spec.session_id, spec.open_gen);
+    if (!git) return { AT_CRED_SESSION: spec.session_id, AT_CRED_SECRET: secret };
     return { ...gitCredentialEnv(this.o.nodeCmd, this.credServer.socketPath, spec.session_id, secret), AT_GH_WRAPPER_DIR: this.platform.binDir };
   }
 
   private forgetSession(id: string): void {
+    this.ssh.forget(id);
     this.credServer.unregister(id);
     this.toolhost.remove(id);
   }

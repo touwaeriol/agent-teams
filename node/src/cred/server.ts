@@ -92,6 +92,12 @@ export class CredServer {
     return secret;
   }
 
+  /** The session's open_gen when the secret is right (ssh.sock uses the same per-session secret), else null. */
+  verify(sessionId: string, secret: string): number | null {
+    const entry = this.sessions.get(sessionId);
+    return entry && safeEqual(entry.secret, secret) ? entry.openGen : null;
+  }
+
   unregister(sessionId: string): void {
     this.sessions.delete(sessionId);
     this.broker.forget((s) => "session_id" in s && s.session_id === sessionId);
