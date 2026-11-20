@@ -45,6 +45,7 @@ type conn struct {
 	secrets []string // the server's password / passphrase, for redaction by value (under bmu)
 
 	in, out atomic.Int64 // bytes node → target, target → node
+	open    atomic.Int32 // session channels open now
 	last    atomic.Int64 // unix nanos of the last data either way
 
 	cmu      sync.Mutex
@@ -162,7 +163,7 @@ func (c *conn) checkCert(ctx context.Context, meta ssh.ConnMetadata, key ssh.Pub
 		return fail("certificate_mismatch")
 	}
 	x, err := c.g.store.SSHSession(ctx, c.sess.SessionID)
-	if err != nil || x.State == "closed" || x.OpenGen != c.gen || x.NodeID != c.node.ID {
+	if err != nil || x.Ended() || x.OpenGen != c.gen || x.NodeID != c.node.ID {
 		return fail("session_gone")
 	}
 	return &ssh.Permissions{Extensions: map[string]string{"serial": strconv.FormatUint(cert.Serial, 10)}}, nil
@@ -198,7 +199,7 @@ func (c *conn) stillAllowed(ctx context.Context) string {
 	case err != nil && !errors.Is(err, store.ErrNotGranted):
 		c.g.log.Warn("ssh: recheck grant", "session_id", c.sess.SessionID, "err", err)
 		return ""
-	case x.State == "closed" || x.OpenGen != c.gen || x.NodeID != c.node.ID:
+	case x.Ended() || x.OpenGen != c.gen || x.NodeID != c.node.ID:
 		return "会话已结束或已重新打开"
 	case err != nil:
 		return "这个会话已无权使用 " + c.server.Name
@@ -332,6 +333,13 @@ func (c *conn) channel(ctx context.Context, nch ssh.NewChannel) {
 		_ = nch.Reject(ssh.Prohibited, "agent-teams: only exec, shell and sftp are allowed (no port or agent forwarding)")
 		return
 	}
+	if n := c.open.Add(1); int(n) > c.g.cfg.PerConnChans {
+		c.open.Add(-1)
+		c.g.audit(ctx, c.base(), store.SSHAuditDenied, "too_many_channels", nil)
+		_ = nch.Reject(ssh.ResourceShortage, fmt.Sprintf("agent-teams: at most %d channels per connection", c.g.cfg.PerConnChans))
+		return
+	}
+	defer c.open.Add(-1)
 	if reason := c.stillAllowed(ctx); reason != "" {
 		c.g.audit(ctx, c.base(), store.SSHAuditDenied, reason, nil)
 		_ = nch.Reject(ssh.Prohibited, "agent-teams: "+reason)
@@ -454,6 +462,7 @@ type channel struct {
 	pty     string
 	exit    *int
 	signal  string
+	auditID int64 // the row written when it started (0: none, write one at the end)
 	in, out atomic.Int64
 }
 
@@ -625,12 +634,14 @@ func (c *conn) fromNode(ctx context.Context, ch *channel, b ssh.Channel, r *ssh.
 			reply(false)
 			return
 		}
+		c.auditStart(ctx, ch)
 		forward()
 	case "shell":
 		if !ch.start("shell", "") {
 			reply(false)
 			return
 		}
+		c.auditStart(ctx, ch)
 		forward()
 	case "subsystem":
 		var s struct{ Name string }
@@ -643,6 +654,7 @@ func (c *conn) fromNode(ctx context.Context, ch *channel, b ssh.Channel, r *ssh.
 			reply(false)
 			return
 		}
+		c.auditStart(ctx, ch)
 		forward()
 	default:
 		if r.Type == "x11-req" || strings.HasPrefix(r.Type, "auth-agent-req") {
@@ -652,10 +664,30 @@ func (c *conn) fromNode(ctx context.Context, ch *channel, b ssh.Channel, r *ssh.
 	}
 }
 
-// channelDone writes the audit row of what ran in the channel.
+var auditKinds = map[string]string{"exec": store.SSHAuditExec, "shell": store.SSHAuditShell, "subsystem": store.SSHAuditSubsystem}
+
+// auditStart writes the channel's audit row before the command reaches the target (a console crash
+// mid-command still leaves it in the audit); channelDone completes it.
+func (c *conn) auditStart(ctx context.Context, ch *channel) {
+	ch.mu.Lock()
+	kind, command, pty := ch.kind, ch.command, ch.pty
+	ch.mu.Unlock()
+	a := c.base()
+	a.Command = Redact(command, c.secretsCopy()...)
+	detail := map[string]any{"state": "running"}
+	if pty != "" {
+		detail["pty"] = pty
+	}
+	id := c.g.audit(ctx, a, auditKinds[kind], "", detail)
+	ch.mu.Lock()
+	ch.auditID = id
+	ch.mu.Unlock()
+}
+
+// channelDone completes (or writes) the audit row of what ran in the channel.
 func (c *conn) channelDone(ctx context.Context, ch *channel) {
 	ch.mu.Lock()
-	kind, command, pty, exit, signal := ch.kind, ch.command, ch.pty, ch.exit, ch.signal
+	kind, command, pty, exit, signal, auditID := ch.kind, ch.command, ch.pty, ch.exit, ch.signal, ch.auditID
 	ch.mu.Unlock()
 	if kind == "" {
 		return
@@ -671,8 +703,19 @@ func (c *conn) channelDone(ctx context.Context, ch *channel) {
 	if signal != "" {
 		detail["signal"] = signal
 	}
-	auditKind := map[string]string{"exec": store.SSHAuditExec, "shell": store.SSHAuditShell, "subsystem": store.SSHAuditSubsystem}[kind]
-	c.g.audit(ctx, a, auditKind, "", detail)
+	finished := false
+	if auditID != 0 {
+		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		err := c.g.store.FinishSSHAudit(fctx, auditID, exit, dur, a.BytesIn, a.BytesOut, detail)
+		cancel()
+		if err != nil {
+			c.g.log.Warn("ssh audit finish", "id", auditID, "err", err)
+		}
+		finished = err == nil
+	}
+	if !finished {
+		c.g.audit(ctx, a, auditKinds[kind], "", detail)
+	}
 	c.cmu.Lock()
 	c.execs++
 	switch kind {

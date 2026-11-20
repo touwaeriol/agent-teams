@@ -50,6 +50,8 @@ type Config struct {
 	PerSession     int           // simultaneous connections per session (4)
 	PerServer      int           // per server (8)
 	PerProject     int           // per project (16)
+	PerConnChans   int           // simultaneous channels per connection (16)
+	CertsPerMinute int           // certificates signed per session per minute (20)
 	FrontHandshake time.Duration // node ssh client → gateway: SSH handshake and authentication (15 s)
 	BackHandshake  time.Duration // gateway → target: dial, handshake and login (20 s)
 	Idle           time.Duration // no data either way (30 min)
@@ -78,6 +80,8 @@ func (c Config) withDefaults() Config {
 	defInt(&c.PerSession, 4)
 	defInt(&c.PerServer, 8)
 	defInt(&c.PerProject, 16)
+	defInt(&c.PerConnChans, 16)
+	defInt(&c.CertsPerMinute, 20)
 	def(&c.FrontHandshake, 15*time.Second)
 	def(&c.BackHandshake, 20*time.Second)
 	def(&c.Idle, 30*time.Minute)
@@ -120,12 +124,16 @@ type Gateway struct {
 	counts map[string]int // "s:<session>", "v:<server>", "p:<project>"
 
 	version atomic.Int64 // last ssh.servers_update version handed out
+
+	rateMu sync.Mutex
+	signed map[string][]time.Time // session → signing times in the last minute
 }
 
 // New builds the gateway; keys are loaded (and generated the first time) on first use.
 func New(d Deps) *Gateway {
 	return &Gateway{store: d.Store, core: d.Core, nodes: d.Nodes, fan: d.Fan, vault: d.Vault, log: d.Log,
-		cfg: d.Cfg.withDefaults(), now: time.Now, conns: map[*conn]struct{}{}, counts: map[string]int{}}
+		cfg: d.Cfg.withDefaults(), now: time.Now, conns: map[*conn]struct{}{}, counts: map[string]int{},
+		signed: map[string][]time.Time{}}
 }
 
 // ErrUnavailable: the console has no secret key (AGENT_TEAMS_SECRET_KEYS), so it cannot open the
@@ -157,6 +165,32 @@ func (g *Gateway) keys(ctx context.Context) (ca, host ssh.Signer, caKey, hostKey
 // KnownHosts is the known_hosts line of the gateway host key (ssh.cert_response.known_hosts).
 func KnownHosts(hostKey credvault.SealedKey) string {
 	return KnownHostsAlias + " " + strings.TrimSpace(hostKey.PublicKey)
+}
+
+// allowSign records a signing for the session unless it already had CertsPerMinute in the last
+// minute (per replica: a session's cert_requests come over its node's one link).
+func (g *Gateway) allowSign(sessionID string) bool {
+	now := g.now()
+	g.rateMu.Lock()
+	defer g.rateMu.Unlock()
+	for id, times := range g.signed { // drop what left the window
+		kept := times[:0]
+		for _, t := range times {
+			if now.Sub(t) < time.Minute {
+				kept = append(kept, t)
+			}
+		}
+		if len(kept) == 0 {
+			delete(g.signed, id)
+		} else {
+			g.signed[id] = kept
+		}
+	}
+	if len(g.signed[sessionID]) >= g.cfg.CertsPerMinute {
+		return false
+	}
+	g.signed[sessionID] = append(g.signed[sessionID], now)
+	return true
 }
 
 // ---- connection registry and limits ---------------------------------------------------------
