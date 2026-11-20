@@ -184,15 +184,15 @@ func TestMatchRepo(t *testing.T) {
 	}
 }
 
-// TestProjectModelOverrides: the project's thread model and effort override members' roles; ”
-// keeps the role's. The coordinator and leads run the default model whatever the project sets
-// (the coordinator keeps its role's effort).
+// TestProjectModelOverrides: the project's models and thread effort override the roles; ”
+// keeps the role's. The coordinator follows coordinator_model (and keeps its role's effort), leads
+// and members thread_model.
 func TestProjectModelOverrides(t *testing.T) {
-	p := store.Project{ThreadModel: "claude-thread-y", ThreadEffort: "high"}
+	p := store.Project{CoordinatorModel: "claude-coord-y", ThreadModel: "claude-thread-y", ThreadEffort: "high"}
 	in := open(t, emp("coordinator", "coordinator", store.Role{Model: "role-model", Effort: "low"}), store.Node{})
 	in.project = p
 	c := claudeOptions(in)
-	if c.Model != DefaultModel || c.Effort == nil || *c.Effort != "low" {
+	if c.Model != "claude-coord-y" || c.Effort == nil || *c.Effort != "low" {
 		t.Fatalf("coordinator %q %v", c.Model, c.Effort)
 	}
 	in = open(t, emp("member", "dev", store.Role{Model: "role-model", Effort: "low"}), store.Node{})
@@ -208,30 +208,36 @@ func TestProjectModelOverrides(t *testing.T) {
 	}
 	in = open(t, emp("lead", "lead", store.Role{Model: "role-model"}), store.Node{})
 	in.project = p
-	in.defModel = "def"
-	if l := claudeOptions(in); l.Model != "def" {
+	if l := claudeOptions(in); l.Model != "claude-thread-y" {
 		t.Fatalf("lead %q", l.Model)
 	}
 }
 
 // TestFixedModels: the coordinator and leads (Claude, and a Codex lead as far as Model goes) run
-// the owner's default, then the built-in one, whatever /model, the project and the role set.
+// project → role → built in; /model (at_employees.model) never reaches them.
 func TestFixedModels(t *testing.T) {
-	everything := store.Project{ThreadModel: "thread-m", ThreadCodexModel: "gpt-project"}
+	full := store.Project{CoordinatorModel: "coord-m", ThreadModel: "thread-m", ThreadCodexModel: "gpt-project"}
 	cases := []struct {
-		name, tier, runtime, def, want string
+		name, tier, runtime, roleModel string
+		p                              store.Project
+		want                           string
 	}{
-		{"coordinator owner default", "coordinator", "claude", "def", "def"},
-		{"coordinator built in", "coordinator", "claude", "", DefaultModel},
-		{"lead owner default", "lead", "claude", "def", "def"},
-		{"lead built in", "lead", "claude", "", DefaultModel},
-		{"codex lead owner default", "lead", "codex", "gpt-def", "gpt-def"},
-		{"codex lead built in", "lead", "codex", "", DefaultCodexModel},
+		{"coordinator project", "coordinator", "claude", "role-m", full, "coord-m"},
+		{"coordinator ignores thread_model", "coordinator", "claude", "role-m", store.Project{ThreadModel: "thread-m"}, "role-m"},
+		{"coordinator role", "coordinator", "claude", "role-m", store.Project{}, "role-m"},
+		{"coordinator built in", "coordinator", "claude", "", store.Project{}, DefaultModel},
+		{"lead project", "lead", "claude", "role-m", full, "thread-m"},
+		{"lead ignores coordinator_model", "lead", "claude", "role-m", store.Project{CoordinatorModel: "coord-m"}, "role-m"},
+		{"lead role", "lead", "claude", "role-m", store.Project{}, "role-m"},
+		{"lead built in", "lead", "claude", "", store.Project{}, DefaultModel},
+		{"codex lead project", "lead", "codex", "gpt-role", full, "gpt-project"},
+		{"codex lead role", "lead", "codex", "gpt-role", store.Project{ThreadModel: "thread-m"}, "gpt-role"},
+		{"codex lead built in", "lead", "codex", "", store.Project{ThreadModel: "thread-m"}, DefaultCodexModel},
 	}
 	for _, c := range cases {
-		e := emp(c.tier, c.tier, store.Role{Model: "role-m"})
+		e := emp(c.tier, c.tier, store.Role{Model: c.roleModel})
 		e.Runtime, e.Model = c.runtime, "picked"
-		if got := Model(e, everything, c.def); got != c.want {
+		if got := Model(e, c.p); got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)
 		}
 	}
@@ -239,8 +245,8 @@ func TestFixedModels(t *testing.T) {
 	lead := emp("lead", "lead", store.Role{Model: "role-m"})
 	lead.Model = "picked"
 	in := open(t, lead, store.Node{})
-	in.project, in.defModel = everything, "def"
-	if o, _ := buildOpen(in); o.Claude.Model != "def" {
+	in.project = store.Project{}
+	if o, _ := buildOpen(in); o.Claude.Model != "role-m" {
 		t.Fatalf("lead session.open model %q", o.Claude.Model)
 	}
 }
@@ -264,47 +270,45 @@ func TestProjectModelOverride(t *testing.T) {
 		{"back to ''", store.Project{}, "claude-role", "gpt-role"},
 	}
 	for _, s := range steps {
-		if got := Model(claudeDev, s.p, "def"); got != s.wantClaude {
+		if got := Model(claudeDev, s.p); got != s.wantClaude {
 			t.Errorf("%s: claude %q, want %q", s.name, got, s.wantClaude)
 		}
-		if got := Model(codexDev, s.p, "gpt-def"); got != s.wantCx {
+		if got := Model(codexDev, s.p); got != s.wantCx {
 			t.Errorf("%s: codex %q, want %q", s.name, got, s.wantCx)
 		}
 	}
 }
 
-// TestModelSteps: every level of a member's fallback order (/model → project → role → owner
-// default → built in), one step at a time from the top, for each runtime; a Codex member never
-// ends on a Claude id.
+// TestModelSteps: every level of a member's fallback order (/model → project → role → built in),
+// one step at a time from the top, for each runtime; a Codex member never ends on a Claude id.
 func TestModelSteps(t *testing.T) {
 	member := func(runtime, picked, roleModel string) core.Employee {
 		e := emp("member", "dev", store.Role{Model: roleModel})
 		e.Runtime, e.Model = runtime, picked
 		return e
 	}
-	full := store.Project{ThreadModel: "thread-m", ThreadCodexModel: "gpt-project"}
+	full := store.Project{CoordinatorModel: "coord-m", ThreadModel: "thread-m", ThreadCodexModel: "gpt-project"}
 	claudeOnly := store.Project{ThreadModel: "thread-m"}
 	cases := []struct {
 		name                string
 		runtime, picked, rm string
 		p                   store.Project
-		def, want           string
+		want                string
 	}{
-		{"claude /model", "claude", "picked", "role-m", full, "def", "picked"},
-		{"claude project", "claude", "", "role-m", full, "def", "thread-m"},
-		{"claude role", "claude", "", "role-m", store.Project{}, "def", "role-m"},
-		{"claude owner default", "claude", "", "", store.Project{}, "def", "def"},
-		{"claude built in", "claude", "", "", store.Project{}, "", DefaultModel},
-		{"claude ignores thread_codex_model", "claude", "", "role-m", store.Project{ThreadCodexModel: "gpt-project"}, "def", "role-m"},
-		{"codex /model", "codex", "gpt-picked", "gpt-role", full, "gpt-def", "gpt-picked"},
-		{"codex project", "codex", "", "gpt-role", full, "gpt-def", "gpt-project"},
-		{"codex role", "codex", "", "gpt-role", store.Project{}, "gpt-def", "gpt-role"},
-		{"codex ignores thread_model", "codex", "", "gpt-role", claudeOnly, "gpt-def", "gpt-role"},
-		{"codex owner default", "codex", "", "", claudeOnly, "gpt-def", "gpt-def"},
-		{"codex built in is empty", "codex", "", "", claudeOnly, "", DefaultCodexModel},
+		{"claude /model", "claude", "picked", "role-m", full, "picked"},
+		{"claude project", "claude", "", "role-m", full, "thread-m"},
+		{"claude role", "claude", "", "role-m", store.Project{}, "role-m"},
+		{"claude built in", "claude", "", "", store.Project{}, DefaultModel},
+		{"claude ignores coordinator_model", "claude", "", "", store.Project{CoordinatorModel: "coord-m"}, DefaultModel},
+		{"claude ignores thread_codex_model", "claude", "", "role-m", store.Project{ThreadCodexModel: "gpt-project"}, "role-m"},
+		{"codex /model", "codex", "gpt-picked", "gpt-role", full, "gpt-picked"},
+		{"codex project", "codex", "", "gpt-role", full, "gpt-project"},
+		{"codex role", "codex", "", "gpt-role", store.Project{}, "gpt-role"},
+		{"codex ignores thread_model", "codex", "", "gpt-role", claudeOnly, "gpt-role"},
+		{"codex built in is empty", "codex", "", "", claudeOnly, DefaultCodexModel},
 	}
 	for _, c := range cases {
-		got := Model(member(c.runtime, c.picked, c.rm), c.p, c.def)
+		got := Model(member(c.runtime, c.picked, c.rm), c.p)
 		if got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)
 		}

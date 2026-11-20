@@ -213,9 +213,14 @@ describe("git jobs", () => {
     expect(failed).toMatchObject({ ok: false, error_code: "sha_mismatch", head_sha: b });
     expect(failed.error).toContain(never);
     expect(git(rwt, "rev-parse", "HEAD")).toBe(b);
-    // Past the deadline it gives up without waiting through the retries.
+    // A deadline that the retries would pass: it gives up early instead of waiting through all of
+    // them (retries wait 100+200+300+400 ms here; the deadline stops it before the 4th wait). The
+    // deadline must not be over before the job starts (a slow CI machine), or the sync is simply
+    // "expired" (ok, tree untouched) and never looks for the commit.
     const t0 = Date.now();
-    expect(await review(never, new Date(Date.now() + 50).toISOString())).toMatchObject({ ok: false, error_code: "sha_mismatch" });
+    const early = await review(never, new Date(Date.now() + 1000).toISOString());
+    expect(early).toMatchObject({ ok: false, error_code: "sha_mismatch" });
+    expect(early.error).not.toContain("after 5 fetch");
     expect(Date.now() - t0).toBeLessThan(2000);
     void c;
   });

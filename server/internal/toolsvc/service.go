@@ -40,6 +40,8 @@ type Result struct {
 	Later func(ctx context.Context) Result
 	// Download lists the files read_deliverable queued as file.download frames before this result.
 	Download *protocol.ToolDownload
+	// SharedDownload is the file read_shared_file queued as file.download frames before this result.
+	SharedDownload *protocol.ToolSharedDownload
 	// EndsTask: the call ended the caller's task (complete_task); the daemon drops its task anchor
 	// so a compaction later in the turn does not bring the finished task back (shared-members.md §5.2).
 	EndsTask bool
@@ -58,7 +60,7 @@ type call struct {
 	callID string
 	tool   string
 	args   json.RawMessage
-	upload *protocol.ToolUpload // publish_file: files the daemon sent as file.chunk
+	upload *protocol.ToolUpload // publish_file, write_shared_file: files the daemon sent as file.chunk
 }
 
 func (c *call) emp() core.Employee { return c.sc.Employee }
@@ -117,6 +119,8 @@ func (s *Service) table() map[string]handler {
 		protocol.ToolMemoryList: s.memoryList, protocol.ToolMemoryRead: s.memoryRead, protocol.ToolMemoryWrite: s.memoryWrite,
 		protocol.ToolMemoryDelete: s.memoryDelete, protocol.ToolListDeliverables: s.listDeliverables,
 		protocol.ToolReadDeliverable: s.readDeliverable, protocol.ToolTellUser: s.tellUser,
+		protocol.ToolListSharedFiles: s.listSharedFiles, protocol.ToolReadSharedFile: s.readSharedFile,
+		protocol.ToolWriteSharedFile: s.writeSharedFile, protocol.ToolDeleteSharedFile: s.deleteSharedFile,
 	}
 }
 
@@ -346,7 +350,8 @@ func (s *Service) sendResult(ctx context.Context, tx *core.Tx, sessionID, callID
 		text = "ok"
 	}
 	body := protocol.ToolResult{SessionID: protocol.SessionID(sessionID), CallID: protocol.CallID(callID), Ok: res.OK,
-		Content: []protocol.ContentBlock{{Type: "text", Text: text}}, Download: res.Download}
+		Content: []protocol.ContentBlock{{Type: "text", Text: text}}, Download: res.Download,
+		SharedDownload: res.SharedDownload}
 	if res.EndsTask {
 		none := ""
 		body.Anchor = &none

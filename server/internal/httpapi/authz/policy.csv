@@ -84,6 +84,7 @@ p, user, /api/nodes/:id/logs, GET
 p, user, /api/nodes/:id/sessions, GET
 p, user, /api/nodes/:id/token, POST
 p, user, /api/nodes/:id/upgrade, POST
+p, user, /api/nodes/:id/usage/refresh, POST
 p, user, /api/office/layout, GET
 p, user, /api/office/layouts/:id, GET
 p, user, /api/plugins, GET
@@ -115,13 +116,15 @@ p, user, /api/projects/:pid/references, GET
 p, user, /api/projects/:pid/schedules, GET
 p, user, /api/projects/:pid/schedules, POST
 p, user, /api/projects/:pid/search, GET
+p, user, /api/projects/:pid/shared-files, DELETE
+p, user, /api/projects/:pid/shared-files, GET
+p, user, /api/projects/:pid/shared-files, POST
+p, user, /api/projects/:pid/shared-files/download, GET
 p, user, /api/projects/:pid/threads, GET
 p, user, /api/projects/:pid/threads, POST
 p, user, /api/projects/:pid/usage, GET
 p, user, /api/projects/:pid/waiting, GET
 p, user, /api/commands, GET
-p, user, /api/models, GET
-p, user, /api/models/mine, PUT
 p, user, /api/roles, GET
 p, user, /api/roles, PUT
 p, user, /api/roles/look/random, POST

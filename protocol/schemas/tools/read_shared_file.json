@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/read_shared_file.json",
+  "title": "ReadSharedFileInput",
+  "description": "Download one of the project's shared files to .shared/<path> in your working directory (the folder is git-ignored) and return that local path; the result never contains the file's content, so read it with your file tools. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. An existing local copy at the same path is overwritten. Limits: 20 MB per file, 500 MB per project. To change the shared file, edit the local copy and call write_shared_file(file=.shared/<path>).",
+  "x-tool": {
+    "tiers": [
+      "coordinator",
+      "lead",
+      "member"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "path"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "$ref": "common.json#/$defs/SharedPath",
+      "description": "Path in the shared files, for example data/sample.csv (see list_shared_files)."
+    }
+  },
+  "$defs": {
+    "ReadSharedFileResult": {
+      "title": "ReadSharedFileResult",
+      "type": "object",
+      "required": [
+        "path",
+        "size",
+        "sha256",
+        "local_path"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "common.json#/$defs/SharedPath"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "local_path": {
+          "description": "Where the file was written, relative to your working directory: .shared/<path> (the daemon adds the absolute path). Read the file there with your file tools.",
+          "type": "string"
+        }
+      }
+    }
+  }
+}

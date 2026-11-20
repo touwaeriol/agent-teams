@@ -18,7 +18,7 @@ type MemberModel struct {
 	Tier     string `json:"tier"`
 	Runtime  string `json:"runtime"`
 	Model    string `json:"model"`
-	Override string `json:"override" doc:"Picked with /model ('' = project or role setting; always '' for the lead)"`
+	Override string `json:"override" doc:"Picked with /model ('' = project or role setting; always '' for the lead, whose model is set in its role or the project)"`
 }
 
 // ConversationModel is GET /api/conversations/{cid}/model: what /model shows.
@@ -26,8 +26,8 @@ type ConversationModel struct {
 	Scope     string        `json:"scope" enum:"coordinator,thread"`
 	Employee  string        `json:"employee"`
 	Runtime   string        `json:"runtime"`
-	Model     string        `json:"model" doc:"What the employee runs (or opens its next session with)"`
-	Override  string        `json:"override" doc:"Always '': the coordinator and the lead run the default model (/model only changes members)"`
+	Model     string        `json:"model" doc:"What the employee runs (or opens its next session with): project setting → role → built-in default; shown read-only"`
+	Override  string        `json:"override" doc:"Always '': the coordinator and the lead have no /model (their model is set in their role or the project settings)"`
 	Inherited string        `json:"inherited" doc:"What the employee runs without the override (= model)"`
 	Session   string        `json:"session" doc:"The model the live session reported for its last turn ('' = no live session or no turn yet)"`
 	Live      bool          `json:"live" doc:"A session is open on a node: a change takes effect from its next turn"`
@@ -40,7 +40,7 @@ type setModelInput struct {
 	CID  string `path:"cid" maxLength:"64"`
 	Body struct {
 		Model string `json:"model" maxLength:"100" doc:"Model id; '' goes back to the project / role setting"`
-		Scope string `json:"scope,omitempty" enum:"lead,thread" default:"lead" doc:"thread: every member of the thread with the lead's runtime (the lead keeps the default model). lead, and any change in the coordinator conversation, is refused (409 model_fixed): the coordinator and leads always run the default model"`
+		Scope string `json:"scope,omitempty" enum:"lead,thread" default:"lead" doc:"thread: every member of the thread with the lead's runtime (the lead keeps its model). lead, and any change in the coordinator conversation, is refused (409 model_fixed): the coordinator's and leads' models are set in their role or the project settings"`
 	}
 }
 
@@ -65,8 +65,8 @@ func (a *API) getModel(ctx context.Context, in *cidInput) (*conversationModelOut
 	}
 	q := a.e.Core.Pool
 	out := ConversationModel{Scope: "thread", Employee: e.Name, Runtime: e.Runtime, Members: []MemberModel{}}
-	out.Model = orchestrator.Model(e, p, composer.DefaultModel(ctx, q, p.UserID, e.Runtime))
-	out.Inherited = out.Model // the coordinator and the lead have no override (orchestrator.Model)
+	out.Model = orchestrator.Model(e, p)
+	out.Inherited = out.Model // the coordinator and the lead have no /model override (orchestrator.Model)
 	if s, err := core.LiveSession(ctx, q, e.ID); err == nil && s.NodeID != nil {
 		out.Live = true
 		if usage, err := sessionUsage(ctx, q, e.ID); err == nil && usage != nil {
@@ -90,7 +90,7 @@ func (a *API) memberModels(ctx context.Context, threadID string, p store.Project
 	out := make([]MemberModel, 0, len(list))
 	for _, e := range list {
 		out = append(out, MemberModel{Name: e.Name, Tier: e.Tier, Runtime: e.Runtime, Override: e.Model,
-			Model: orchestrator.Model(e, p, composer.DefaultModel(ctx, q, p.UserID, e.Runtime))})
+			Model: orchestrator.Model(e, p)})
 	}
 	return out, nil
 }
@@ -101,7 +101,7 @@ func (a *API) setModel(ctx context.Context, in *setModelInput) (*setModelOutput,
 		return nil, err
 	}
 	if in.Body.Model != "" && !composer.ValidModel(in.Body.Model) {
-		return nil, httpapi.Invalid("model", "模型 ID 只能用字母、数字和 . _ - : / @ [ ]，最多 100 个字符")
+		return nil, httpapi.Invalid("model", composer.ModelFormatProblem)
 	}
 	res, err := a.e.Orch.SetConversationModel(ctx, orchestrator.ModelChange{UserID: u.ID, ConvID: c.ID, Model: in.Body.Model,
 		WholeThread: in.Body.Scope == "thread"})

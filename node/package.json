@@ -13,6 +13,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "node scripts/protocol-deps.mjs",
     "test": "vitest run",
     "pack": "npm run build && node scripts/pack.mjs",
     "gen:codex": "node scripts/gen-codex-protocol.mjs",

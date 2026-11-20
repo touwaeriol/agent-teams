@@ -20,6 +20,7 @@ export const keys = {
   deliverables: (pid: string, kind = "", q = "", noImages = false) => ["p", pid, "deliverables", kind, q, noImages] as const,
   allDeliverables: (pid: string) => ["p", pid, "deliverables"] as const,
   memory: (pid: string) => ["p", pid, "memory"] as const,
+  sharedFiles: (pid: string) => ["p", pid, "shared-files"] as const,
   memoryFile: (pid: string, name: string) => ["p", pid, "memory", name] as const,
   schedules: (pid: string) => ["p", pid, "schedules"] as const,
   usage: (pid: string, days: number) => ["p", pid, "usage", days] as const,
@@ -41,7 +42,6 @@ export const keys = {
   rolesYaml: ["roles", "yaml"] as const,
   rolePresets: ["roles", "presets"] as const,
   skills: ["skills"] as const,
-  models: ["models"] as const,
   builtinCommands: ["commands", "builtin"] as const,
   conversationModel: (cid: string) => ["c", cid, "model"] as const,
   conversationCommands: (cid: string) => ["c", cid, "commands"] as const,
@@ -193,6 +193,10 @@ export const useProjectUsage = (pid: Arg, days: Arg<number>) =>
 export const useMemory = (pid: Arg) =>
   useKeyed(() => keys.memory(val(pid)), () => list(client.GET("/api/projects/{pid}/memory", path({ pid: val(pid) }))), { enabled: has(pid) });
 
+/** The project's shared files (no content) with the total and the limits; refetched on shared_file events. */
+export const useSharedFiles = (pid: Arg) =>
+  useKeyed(() => keys.sharedFiles(val(pid)), () => unwrap(client.GET("/api/projects/{pid}/shared-files", path({ pid: val(pid) }))), { enabled: has(pid) });
+
 /** One memory file with its content; `name` empty = nothing to load (a new file). */
 export const useMemoryFile = (pid: Arg, name: Arg) =>
   useKeyed(
@@ -228,8 +232,9 @@ export const useRoles = () => useQuery({ queryKey: keys.roles, queryFn: () => un
 export const useRolesYaml = (enabled: Arg<boolean>) =>
   useKeyed(() => keys.rolesYaml, () => unwrap(client.GET("/api/roles/yaml")), { enabled: () => toValue(enabled) });
 
-export const useModels = () => useQuery({ queryKey: keys.models, queryFn: () => unwrap(client.GET("/api/models")), staleTime: 60_000 });
 export const useBuiltinCommands = () => useQuery({ queryKey: keys.builtinCommands, queryFn: () => unwrap(client.GET("/api/commands")), staleTime: 60_000 });
+/** Every conversation's /model state (the models shown in the chat boxes): stale after a role or project model change. */
+export const conversationModels = { predicate: (q: { queryKey: readonly unknown[] }) => q.queryKey[0] === "c" && q.queryKey[2] === "model" };
 export const useConversationModel = (cid: Arg) =>
   useKeyed(() => keys.conversationModel(val(cid)), () => unwrap(client.GET("/api/conversations/{cid}/model", path({ cid: val(cid) }))), { enabled: has(cid) });
 export const useRolePresets = () => useQuery({ queryKey: keys.rolePresets, queryFn: () => unwrap(client.GET("/api/roles/presets")), staleTime: 300_000 });
