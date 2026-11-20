@@ -14,6 +14,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
 	"github.com/touwaeriol/agent-teams/server/internal/config"
+	"github.com/touwaeriol/agent-teams/server/internal/credvault"
 	"github.com/touwaeriol/agent-teams/server/internal/github"
 	"github.com/touwaeriol/agent-teams/server/internal/kv"
 	"github.com/touwaeriol/agent-teams/server/internal/office"
@@ -35,6 +36,7 @@ type Deps struct {
 	Nodes   platform.NodeRegistry
 	Events  platform.Events
 	Hooks   platform.Hooks
+	SSH     platform.SSHHooks // remote servers → SSH gateway / node gateway; nil = platform.NoSSHHooks
 	Log     *slog.Logger
 	Version func() (expected int64) // goose version this binary ships (readyz)
 	// Extensions register more operations/routes (node gateway, threads, SSE…)
@@ -58,6 +60,8 @@ type Server struct {
 	nodes   platform.NodeRegistry
 	events  platform.Events
 	hooks   platform.Hooks
+	ssh     platform.SSHHooks
+	vault   *credvault.Vault
 	log     *slog.Logger
 	expect  func() int64
 	repos   *repoCache
@@ -73,7 +77,7 @@ func New(d Deps) *Server {
 	box := auth.NewSecretBox(d.Config.SecretKeys...)
 	s := &Server{cfg: d.Config, store: d.Store, kv: d.KV, limiter: kv.NewLimiter(d.KV), box: box,
 		states: auth.NewStateSigner(box), gh: d.GitHub, office: d.Office, nodes: d.Nodes, events: d.Events,
-		hooks: d.Hooks, log: d.Log, expect: d.Version, repos: newRepoCache(), authz: mustAuthorizer(d.Store)}
+		hooks: d.Hooks, ssh: d.SSH, vault: mustVault(d.Config.SecretKeys), log: d.Log, expect: d.Version, repos: newRepoCache(), authz: mustAuthorizer(d.Store)}
 	if d.Store != nil {
 		s.apps = github.NewApps(d.Store, box)
 		s.tokens = d.Tokens
@@ -127,6 +131,9 @@ func withDefaults(d Deps) Deps {
 	if d.Hooks == nil {
 		d.Hooks = platform.NoHooks{}
 	}
+	if d.SSH == nil {
+		d.SSH = platform.NoSSHHooks{}
+	}
 	if d.Version == nil {
 		d.Version = func() int64 { return 0 }
 	}
@@ -153,6 +160,7 @@ func (s *Server) register(api huma.API, r gin.IRoutes) {
 	s.registerProjects(api)
 	s.registerMemory(api)
 	s.registerGit(api)
+	s.registerServers(api)
 	s.registerGitHubApp(api, r)
 	s.registerNodes(api)
 	s.registerRoles(api)

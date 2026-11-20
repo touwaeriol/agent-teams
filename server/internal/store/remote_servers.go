@@ -188,11 +188,18 @@ type RemoteServerPatch struct {
 	AuthKind *string
 }
 
-// UpdateRemoteServer changes a server and, with cred, replaces its credential. A change of host,
-// port, username or auth kind needs cred, sealed by the caller for the new values (ServerAAD); a
-// change of host or port also drops the confirmed host key. Renaming revokes the certificates that
-// name the old name (returned, for the gateway to cut their connections).
-func (s *Store) UpdateRemoteServer(ctx context.Context, userID, id string, p RemoteServerPatch, cred *ServerCredential) (RemoteServer, []int64, error) {
+// SealFunc seals a new credential for the server as it will be after the update (merged: the
+// current row with the patch applied, so ServerAAD gets the final user, id, kind, host, port and
+// username). It returns nil to keep the current credential.
+type SealFunc func(merged RemoteServer) (*ServerCredential, error)
+
+// UpdateRemoteServer changes a server and, when seal returns a credential, replaces it. The row is
+// locked and seal runs inside the same transaction, so a concurrent update cannot leave a
+// credential sealed for values the row no longer has. A change of host, port, username or auth kind
+// without a new credential is ErrCredentialRequired; a change of host or port also drops the
+// confirmed host key. Renaming revokes the certificates that name the old name (returned, for the
+// gateway to cut their connections). seal may be nil.
+func (s *Store) UpdateRemoteServer(ctx context.Context, userID, id string, p RemoteServerPatch, seal SealFunc) (RemoteServer, []int64, error) {
 	var (
 		out     RemoteServer
 		revoked []int64
@@ -203,30 +210,34 @@ func (s *Store) UpdateRemoteServer(ctx context.Context, userID, id string, p Rem
 			Where("id = ? AND user_id = ?", id, userID).Take(&cur).Error; err != nil {
 			return mapErr(err)
 		}
+		merged := cur
 		row := map[string]any{"updated_at": gorm.Expr("now()")}
-		changed := func(name string, old, new any) bool {
-			if new == old {
-				return false
+		bound, hostMoved := false, false // bound: a value the credential's AAD names changed
+		if p.Name != nil && *p.Name != cur.Name {
+			merged.Name, row["name"] = *p.Name, *p.Name
+		}
+		if p.Host != nil && *p.Host != cur.Host {
+			merged.Host, row["host"] = *p.Host, *p.Host
+			bound, hostMoved = true, true
+		}
+		if p.Port != nil && *p.Port != cur.Port {
+			merged.Port, row["port"] = *p.Port, *p.Port
+			bound, hostMoved = true, true
+		}
+		if p.Username != nil && *p.Username != cur.Username {
+			merged.Username, row["username"] = *p.Username, *p.Username
+			bound = true
+		}
+		if p.AuthKind != nil && *p.AuthKind != cur.AuthKind {
+			merged.AuthKind, row["auth_kind"] = *p.AuthKind, *p.AuthKind
+			bound = true
+		}
+		var cred *ServerCredential
+		if seal != nil {
+			var err error
+			if cred, err = seal(merged); err != nil {
+				return err
 			}
-			row[name] = new
-			return true
-		}
-		bound := false // a value the credential's AAD names
-		if p.Name != nil {
-			changed("name", cur.Name, *p.Name)
-		}
-		hostMoved := false
-		if p.Host != nil && changed("host", cur.Host, *p.Host) {
-			bound, hostMoved = true, true
-		}
-		if p.Port != nil && changed("port", cur.Port, *p.Port) {
-			bound, hostMoved = true, true
-		}
-		if p.Username != nil && changed("username", cur.Username, *p.Username) {
-			bound = true
-		}
-		if p.AuthKind != nil && changed("auth_kind", cur.AuthKind, *p.AuthKind) {
-			bound = true
 		}
 		if bound && cred == nil {
 			return ErrCredentialRequired
@@ -242,7 +253,7 @@ func (s *Store) UpdateRemoteServer(ctx context.Context, userID, id string, p Rem
 		if err := tx.g(ctx).Table("at_remote_servers").Where("id = ?", id).Updates(row).Error; err != nil {
 			return mapErr(err)
 		}
-		if p.Name != nil && *p.Name != cur.Name {
+		if merged.Name != cur.Name {
 			var err error
 			if revoked, err = tx.RevokeServerCerts(ctx, userID, "", cur.Name, "server_renamed"); err != nil {
 				return err
@@ -253,6 +264,17 @@ func (s *Store) UpdateRemoteServer(ctx context.Context, userID, id string, p Rem
 		return err
 	})
 	return out, revoked, err
+}
+
+// PinRemoteServerHostKey stores the host key a test connection saw, only while the server still
+// has no host key and still points at host:port (a concurrent edit or another pin wins). pinned
+// reports whether this call stored it.
+func (s *Store) PinRemoteServerHostKey(ctx context.Context, userID, id, host string, port int, key, fp string, mac []byte) (bool, error) {
+	res := s.g(ctx).Table("at_remote_servers").
+		Where("id = ? AND user_id = ? AND host = ? AND port = ? AND host_key = ''", id, userID, host, port).
+		Updates(map[string]any{"host_key": key, "host_key_fp": fp, "host_key_mac": mac, "host_key_confirmed_at": gorm.Expr("now()"),
+			"updated_at": gorm.Expr("now()")})
+	return res.RowsAffected == 1, mapErr(res.Error)
 }
 
 // SetRemoteServerHostKey records the host key the user confirmed (key = authorized_keys line,
@@ -340,6 +362,71 @@ func (s *Store) ServerProjectIDs(ctx context.Context, userID, serverID string) (
 		out = []string{}
 	}
 	return out, err
+}
+
+// ServerProjects maps each of the user's servers to the projects using it (by project name).
+func (s *Store) ServerProjects(ctx context.Context, userID string) (map[string][]ProjectRef, error) {
+	var rows []struct{ ServerID, ID, Name string }
+	err := s.g(ctx).Table("at_project_servers ps").Select("ps.server_id, p.id, p.name").
+		Joins("JOIN at_projects p ON p.id = ps.project_id").Where("ps.user_id = ?", userID).
+		Order("p.name").Find(&rows).Error
+	out := map[string][]ProjectRef{}
+	for _, r := range rows {
+		out[r.ServerID] = append(out[r.ServerID], ProjectRef{ID: r.ID, Name: r.Name})
+	}
+	return out, err
+}
+
+// ProjectServerSetting is one server of a project with the roles it is granted to.
+type ProjectServerSetting struct {
+	ServerID string
+	Roles    []string
+}
+
+// SetProjectServers makes list the project's servers and grants, in one transaction: servers not
+// in list leave the project, new ones join, and every listed server gets exactly its roles
+// (GrantableRoles). The certificates revoked on the way are returned. A server or project that is
+// not the user's is ErrNotFound; a role that cannot be granted is ErrRoleNotGrantable.
+func (s *Store) SetProjectServers(ctx context.Context, userID, projectID string, list []ProjectServerSetting) ([]int64, error) {
+	var revoked []int64
+	err := s.Tx(ctx, func(tx *Store) error {
+		var n int64
+		if err := tx.g(ctx).Table("at_projects").Where("id = ? AND user_id = ?", projectID, userID).Count(&n).Error; err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrNotFound
+		}
+		current, err := tx.ProjectServers(ctx, userID, projectID)
+		if err != nil {
+			return err
+		}
+		want := map[string]bool{}
+		for _, ps := range list {
+			want[ps.ServerID] = true
+		}
+		for _, ps := range current {
+			if !want[ps.Server.ID] {
+				r, err := tx.RemoveProjectServer(ctx, userID, projectID, ps.Server.ID)
+				if err != nil {
+					return err
+				}
+				revoked = append(revoked, r...)
+			}
+		}
+		for _, ps := range list {
+			if err := tx.AddProjectServer(ctx, userID, projectID, ps.ServerID); err != nil {
+				return err
+			}
+			r, err := tx.SetProjectServerGrants(ctx, userID, projectID, ps.ServerID, ps.Roles)
+			if err != nil {
+				return err
+			}
+			revoked = append(revoked, r...)
+		}
+		return nil
+	})
+	return revoked, err
 }
 
 // AddProjectServer lets a project use one of the user's servers (no role yet). Both must be the

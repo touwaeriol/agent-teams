@@ -171,7 +171,12 @@ func TestRemoteServerCRUD(t *testing.T) {
 		"password", credvault.Credential{Password: "new"})
 	host, port, name := "new.example.com", 2222, "prod2"
 	got, _, err := f.s.UpdateRemoteServer(ctx, f.user, prod.ID, store.RemoteServerPatch{Host: &host, Port: &port, Name: &name},
-		&store.ServerCredential{Sealed: sealed})
+		func(m store.RemoteServer) (*store.ServerCredential, error) {
+			if m.Host != host || m.Port != port || m.Name != name || m.Username != "deploy" {
+				t.Errorf("merged %+v", m)
+			}
+			return &store.ServerCredential{Sealed: sealed}, nil
+		})
 	if err != nil || got.Host != host || got.Port != port || got.Name != name || got.HostKey != "" || got.HostKeyConfirmedAt != nil ||
 		!got.CredUpdatedAt.After(prod.CredUpdatedAt) {
 		t.Fatalf("update %+v %v", got, err)
