@@ -231,3 +231,33 @@ func TestTokensNarrowToGrantedPermissions(t *testing.T) {
 		t.Fatalf("asked %v", asked)
 	}
 }
+
+// TestInstallationTokenRealExpiry: the expiry handed to cred.response is the token's own, also
+// when it comes from the memory or the shared cache (remote-servers.md §10.3 #2).
+func TestInstallationTokenRealExpiry(t *testing.T) {
+	expires := time.Now().Add(37 * time.Minute).UTC().Truncate(time.Second)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"token": "ghs_x", "expires_at": expires.Format(time.RFC3339)})
+	}))
+	defer srv.Close()
+	_, pemText := testKey(t)
+	box := auth.NewSecretBox("k")
+	apps := NewApps(memSettings{}, box)
+	if _, err := apps.Save(context.Background(), map[string]any{
+		"id": float64(7), "slug": "at", "client_id": "cid", "client_secret": "cs", "pem": pemText,
+		"webhook_secret": "wh", "owner": map[string]any{"login": "me"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	client := &Client{BaseURL: srv.URL, WebURL: srv.URL, HTTP: srv.Client()}
+	store := kv.NewMemory()
+	ctx := context.Background()
+	req := TokenRequest{Repositories: []string{"r"}}
+	for i, tokens := range []*Tokens{NewTokens(client, apps, store, box), NewTokens(client, apps, store, box)} {
+		for j := 0; j < 2; j++ { // minted (or shared), then from memory
+			tok, err := tokens.InstallationToken(ctx, 9, req)
+			if err != nil || tok.Value != "ghs_x" || !tok.ExpiresAt.Equal(expires) {
+				t.Fatalf("process %d call %d: %+v %v, want expiry %s", i, j, tok, err, expires)
+			}
+		}
+	}
+}
