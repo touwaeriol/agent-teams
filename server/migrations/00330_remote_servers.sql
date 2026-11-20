@@ -1,5 +1,5 @@
 -- +goose Up
--- Remote server access (讨论串 #38, remote-servers.md; data-model.md §2.18). The user keeps servers in
+-- Remote server access (讨论串 #38, remote-servers.md; data-model.md §2.14). The user keeps servers in
 -- their settings (owned by at_users, not by a project); a project picks some of them and grants each
 -- to roles. Sessions never see a credential: the console's SSH gateway logs in for them.
 --

@@ -15,7 +15,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/credvault"
 )
 
-// Remote servers (讨论串 #38, remote-servers.md, data-model.md §2.18): the user's servers
+// Remote servers (讨论串 #38, remote-servers.md, data-model.md §2.14): the user's servers
 // (at_remote_servers), the servers a project uses (at_project_servers), the roles they are granted to
 // (at_project_server_grants), the session certificates the console signed (at_ssh_certs) and the
 // gateway's audit trail (at_ssh_audit). Nothing here returns a credential except
