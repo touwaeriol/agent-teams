@@ -172,6 +172,13 @@ func (tg *target) exec(ch ssh.Channel, cmd string) {
 	case cmd == "cat":
 		_, _ = io.Copy(ch, ch)
 		exitStatus(ch, 0)
+	case cmd == "flood": // like `yes`: writes until the channel is closed
+		line := []byte(strings.Repeat("y", 1023) + "\n")
+		for {
+			if _, err := ch.Write(line); err != nil {
+				return
+			}
+		}
 	case cmd == "sleep":
 		_, _ = io.Copy(io.Discard, ch)
 		exitStatus(ch, 0)

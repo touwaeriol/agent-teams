@@ -39,9 +39,10 @@ type conn struct {
 	serial     int64
 	sc         *ssh.ServerConn
 
-	bmu     sync.Mutex
-	backend *ssh.Client
-	secrets []string // the server's password / passphrase, for redaction by value
+	bmu     sync.Mutex                 // serializes the back half's dial (kill never takes it)
+	backend atomic.Pointer[ssh.Client] // the back half once logged in
+	killed  atomic.Bool
+	secrets []string // the server's password / passphrase, for redaction by value (under bmu)
 
 	in, out atomic.Int64 // bytes node → target, target → node
 	last    atomic.Int64 // unix nanos of the last data either way
@@ -207,9 +208,16 @@ func (c *conn) stillAllowed(ctx context.Context) string {
 	return ""
 }
 
-// kill cuts the connection: every open channel gets the reason on stderr and exit-status 255.
+// noticeTimeout bounds how long kill waits for the reason to reach the node's channels: a client
+// that does not read (a full window) must not hold the connection open.
+const noticeTimeout = 2 * time.Second
+
+// kill cuts the connection: every open channel gets the reason on stderr and exit-status 255 (best
+// effort, at most noticeTimeout), then both halves are closed whatever the client does. It never
+// blocks on the peer for longer than noticeTimeout, nor on a back half still dialling.
 func (c *conn) kill(reason string) {
 	c.killOnce.Do(func() {
+		c.killed.Store(true)
 		c.cmu.Lock()
 		if c.reason == "" {
 			c.reason = reason
@@ -219,18 +227,30 @@ func (c *conn) kill(reason string) {
 			chans = append(chans, ch)
 		}
 		c.cmu.Unlock()
-		for _, ch := range chans {
-			if reason != "" {
-				_, _ = fmt.Fprintf(ch.f.Stderr(), "agent-teams: %s，连接已断开\r\n", reason)
-				_, _ = ch.f.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{255}))
+		if reason != "" && len(chans) > 0 {
+			noticed := make(chan struct{})
+			var wg sync.WaitGroup
+			for _, ch := range chans {
+				wg.Add(1)
+				go func() { // a write blocks while the peer's window is 0; closing the transport ends it
+					defer wg.Done()
+					_, _ = fmt.Fprintf(ch.f.Stderr(), "agent-teams: %s，连接已断开\r\n", reason)
+					_, _ = ch.f.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{255}))
+					_ = ch.f.Close()
+				}()
 			}
-			_ = ch.f.Close()
+			go func() {
+				wg.Wait()
+				close(noticed)
+			}()
+			select {
+			case <-noticed:
+			case <-time.After(noticeTimeout):
+			}
 		}
-		c.bmu.Lock()
-		if c.backend != nil {
-			_ = c.backend.Close()
+		if b := c.backend.Load(); b != nil {
+			_ = b.Close()
 		}
-		c.bmu.Unlock()
 		if c.sc != nil {
 			_ = c.sc.Close()
 		}
@@ -261,10 +281,7 @@ func (c *conn) watch(ctx context.Context) {
 			return
 		}
 		go c.keepalive(c.sc, "节点 ssh 客户端没有响应")
-		c.bmu.Lock()
-		b := c.backend
-		c.bmu.Unlock()
-		if b != nil {
+		if b := c.backend.Load(); b != nil {
 			go c.keepalive(b, "目标服务器没有响应")
 		}
 	}
@@ -344,8 +361,11 @@ func (c *conn) channel(ctx context.Context, nch ssh.NewChannel) {
 func (c *conn) backendClient(ctx context.Context) (*ssh.Client, error) {
 	c.bmu.Lock()
 	defer c.bmu.Unlock()
-	if c.backend != nil {
-		return c.backend, nil
+	if b := c.backend.Load(); b != nil {
+		return b, nil
+	}
+	if c.killed.Load() {
+		return nil, errors.New("connection closed")
 	}
 	deny := func(kind, reason, msg string, detail map[string]any) (*ssh.Client, error) {
 		c.g.audit(ctx, c.base(), kind, reason, detail)
@@ -400,8 +420,12 @@ func (c *conn) backendClient(ctx context.Context) (*ssh.Client, error) {
 		return deny(store.SSHAuditDenied, "dial_failed", "连不上服务器 "+srv.Name,
 			map[string]any{"error": Redact(err.Error(), secrets...)})
 	}
-	c.backend = res.Client // its channel opens from the target (forwarding, agent) are rejected
-	return c.backend, nil
+	c.backend.Store(res.Client) // its channel opens from the target (forwarding, agent) are rejected
+	if c.killed.Load() {        // cut while dialling: kill may have missed the client
+		_ = res.Client.Close()
+		return nil, errors.New("connection closed")
+	}
+	return res.Client, nil
 }
 
 // policy is the dialing policy with the administrator's allowed private networks (sshdial.SettingKey).

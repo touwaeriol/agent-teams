@@ -376,6 +376,41 @@ func TestGatewayRevocation(t *testing.T) {
 	}
 }
 
+// TestGatewayKillDoesNotWaitForAStuckClient: a channel flooding output to a client that never
+// reads (full window) is still cut promptly when its grant goes, and does not hold up the
+// re-check of the other connections.
+func TestGatewayKillDoesNotWaitForAStuckClient(t *testing.T) {
+	f := newFixture(t)
+	dev := f.session("dev-1", "member", "dev", `{}`)
+	stuck, _, err := f.connect(dev, "prod", "prod", f.identity(dev))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, _ := stuck.NewSession()
+	_, _ = sess.StdinPipe()
+	_, _ = sess.StdoutPipe() // never read: the window fills up
+	if err := sess.Start("flood"); err != nil {
+		t.Fatal(err)
+	}
+	other := f.session("dev-2", "member", "dev", `{}`)
+	second, _, err := f.connect(other, "prod", "prod", f.identity(other))
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond) // let the flood fill every window
+	f.exec(`UPDATE at_agent_sessions SET state = 'closed' WHERE id IN ($1, $2)`, dev, other)
+	start := time.Now()
+	f.g.RecheckAll(context.Background())
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("RecheckAll took %s", d)
+	}
+	waitClosed(t, second)
+	waitClosed(t, stuck)
+	if d := time.Since(start); d > noticeTimeout+3*time.Second {
+		t.Fatalf("cutting a stuck client took %s", d)
+	}
+}
+
 func waitClosed(t *testing.T, client *ssh.Client) {
 	t.Helper()
 	done := make(chan struct{})

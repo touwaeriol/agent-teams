@@ -253,17 +253,24 @@ func (g *Gateway) Run(ctx context.Context) {
 }
 
 // RecheckAll re-checks every connection of this replica against the database and cuts the ones
-// that may no longer run.
+// that may no longer run. Cutting happens in the background: one connection whose client does not
+// read cannot hold up the others (kill is bounded anyway).
 func (g *Gateway) RecheckAll(ctx context.Context) {
 	for _, c := range g.live() {
 		if reason := c.stillAllowed(ctx); reason != "" {
-			c.kill(reason)
+			go c.kill(reason)
 		}
 	}
 }
 
 func (g *Gateway) closeAll(reason string) {
+	var wg sync.WaitGroup
 	for _, c := range g.live() {
-		c.kill(reason)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c.kill(reason)
+		}()
 	}
+	wg.Wait()
 }
