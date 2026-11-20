@@ -5,10 +5,11 @@
 import { computed } from "vue";
 import { RouterLink } from "vue-router";
 import { servers as serverActions } from "@/api/actions";
+import { useQueryClient } from "@tanstack/vue-query";
 import { useAction } from "@/api/mutations";
 import { keys, useProjectServers } from "@/api/queries";
 import Loading from "@/components/common/Loading.vue";
-import { endpoint, roleReason, toggleRole, toggleServer, type Grant } from "@/lib/servers";
+import { endpoint, grantableOnly, roleReason, toggleRole, toggleServer, type Grant } from "@/lib/servers";
 import Heading from "./Heading.vue";
 import ServerAuditSection from "./ServerAuditSection.vue";
 
@@ -17,10 +18,16 @@ const view = useProjectServers(() => props.projectId);
 const grants = computed<Grant[]>(() => (view.data.value?.servers ?? []).map((x) => ({ server_id: x.server.id, roles: [...x.roles] })));
 const grantOf = (id: string) => grants.value.find((g) => g.server_id === id);
 const roles = computed(() => view.data.value?.roles ?? []);
+// The PUT answers with the new view: it goes straight into the cache, so the next tick builds on
+// it rather than on a stale GET (two quick ticks must not undo each other). Ticking is disabled
+// while a save or a refetch is in flight.
+const queryClient = useQueryClient();
 const put = useAction((list: Grant[]) => serverActions.setProjectServers(props.projectId, list), {
-  invalidate: () => [keys.projectServers(props.projectId), keys.servers],
+  invalidate: [keys.servers],
+  onSuccess: (data) => queryClient.setQueryData(keys.projectServers(props.projectId), data),
 });
-const save = (list: Grant[]) => !put.isPending.value && put.mutate(list);
+const busy = computed(() => put.isPending.value || view.isFetching.value);
+const save = (list: Grant[]) => !busy.value && put.mutate(grantableOnly(list, roles.value));
 </script>
 
 <template>
@@ -36,7 +43,7 @@ const save = (list: Grant[]) => !put.isPending.value && put.mutate(list);
     </p>
     <div v-for="s in view.data.value?.available ?? []" :key="s.id" class="flex flex-col gap-2.5 rounded-xl border px-4 py-3" :data-project-server="s.name">
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <el-checkbox :model-value="Boolean(grantOf(s.id))" :disabled="put.isPending.value" @update:model-value="(v) => save(toggleServer(grants, s.id, Boolean(v)))">
+        <el-checkbox :model-value="Boolean(grantOf(s.id))" :disabled="busy" @update:model-value="(v) => save(toggleServer(grants, s.id, Boolean(v)))">
           <span class="font-mono font-semibold">{{ s.name }}</span>
         </el-checkbox>
         <span class="font-mono text-xs text-muted-foreground">{{ endpoint(s) }}</span>
@@ -49,7 +56,7 @@ const save = (list: Grant[]) => !put.isPending.value && put.mutate(list);
             <span :data-role="r.role" :data-grantable="r.grantable">
               <el-checkbox
                 :model-value="grantOf(s.id)?.roles.includes(r.role)"
-                :disabled="!r.grantable || put.isPending.value"
+                :disabled="!r.grantable || busy"
                 @update:model-value="(v) => save(toggleRole(grants, s.id, r.role, Boolean(v)))"
               >
                 {{ r.title || r.role }}<span class="ml-1 font-mono text-xs text-muted-foreground">{{ r.role }}</span>

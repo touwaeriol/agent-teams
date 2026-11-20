@@ -52,6 +52,8 @@ export function serverFormProblem(saved: ServerView | null, f: ServerForm): stri
     if (!saved) return f.kind === "password" ? "请填写密码" : "请粘贴私钥";
     return "改了主机、端口、用户或认证方式，要重新填写凭证";
   }
+  // The passphrase is sealed together with the key: a new one alone cannot be saved.
+  if (f.kind === "private_key" && f.passphrase !== "" && !credentialFilled(f)) return "要改口令需同时重新粘贴私钥";
   return "";
 }
 
@@ -168,6 +170,14 @@ export function toggleRole(list: Grant[], serverId: string, role: string, on: bo
     const roles = g.roles.filter((r) => r !== role);
     return { ...g, roles: on ? [...roles, role].sort() : roles };
   });
+}
+
+/** The PUT body without roles the server would refuse (grantable=false, or no longer a role at
+ * all, e.g. removed from the roles since it was granted), so one stale grant does not make every
+ * save fail with 422 role_not_grantable. */
+export function grantableOnly(list: Grant[], roles: Pick<GrantableRoleView, "role" | "grantable">[]): Grant[] {
+  const ok = new Set(roles.filter((r) => r.grantable).map((r) => r.role));
+  return list.map((g) => ({ ...g, roles: g.roles.filter((r) => ok.has(r)) }));
 }
 
 // ---- access log -------------------------------------------------------------------------

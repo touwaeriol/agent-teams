@@ -120,6 +120,22 @@ describe("ServerDialog", () => {
     await submit();
     expect(await bodyOf(calls(spy, "PATCH", /srv_1$/)[1])).toEqual({ host: "198.51.100.1", auth: { kind: "password", password: "new" } });
   });
+
+  it("asks for the key again when only the passphrase is typed", async () => {
+    const keyed: ServerView = { ...prod, auth_kind: "private_key", has_passphrase: true, key_fingerprint: "SHA256:key" };
+    const spy = api([["PATCH", /\/api\/servers\/srv_1$/, keyed]]);
+    mountWith(ServerDialog, { open: true, server: keyed });
+    await flushPromises();
+    expect(input("私钥口令（可选）").getAttribute("placeholder")).toBe("已保存，留空不修改");
+    await type("私钥口令（可选）", "new-pp");
+    await submit();
+    expect(calls(spy, "PATCH", /srv_1$/)).toHaveLength(0);
+    expect(document.body.textContent).toContain("要改口令需同时重新粘贴私钥");
+    await type("私钥", "KEY");
+    expect(input("私钥口令（可选）").getAttribute("placeholder")).toBe("");
+    await submit();
+    expect((await bodyOf(calls(spy, "PATCH", /srv_1$/)[0])).auth).toEqual({ kind: "private_key", private_key: "KEY", passphrase: "new-pp" });
+  });
 });
 
 describe("ServerTestPanel", () => {
@@ -190,5 +206,47 @@ describe("ServersSection", () => {
     await w.get("[data-project-server='staging'] .el-checkbox input").setValue(true);
     await flushPromises();
     expect(await bodyOf(calls(spy, "PUT", /servers$/)[1])).toEqual({ servers: [{ server_id: "srv_1", roles: ["dev"] }, { server_id: "srv_2", roles: [] }] });
+  });
+
+  it("builds each tick on the saved answer, not a stale GET, and drops refused roles", async () => {
+    // GET keeps answering the first state (as if the refetch were slow / stale); PUT echoes the body.
+    const stale: ProjectServersView = { ...view, servers: [{ server: prod, roles: ["dev", "gone"] }] };
+    const puts: unknown[] = [];
+    let release: (() => void) | null = null;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const req = input as Request;
+      const path = new URL(req.url).pathname;
+      const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (req.method === "PUT") {
+        const body = await req.clone().json();
+        puts.push(body);
+        await new Promise<void>((r) => (release = r));
+        const byId = new Map(view.available.map((s) => [s.id, s]));
+        return json({ ...view, servers: body.servers.map((g: { server_id: string; roles: string[] }) => ({ server: byId.get(g.server_id), roles: g.roles })) });
+      }
+      if (/\/servers$/.test(path) && path.includes("/projects/")) return json(stale);
+      if (/server-audit$/.test(path)) return json({ items: [], next_cursor: null });
+      return json([]);
+    });
+    const w = mountWith(ServersSection, { projectId: "p1" });
+    await flushPromises();
+    const box = (role: string) => w.get(`[data-project-server='prod'] [data-role='${role}'] input`);
+    await box("qa").setValue(true);
+    await flushPromises();
+    // While the PUT is in flight every tick is disabled.
+    expect(box("dev").attributes("disabled")).toBeDefined();
+    expect(w.get("[data-project-server='staging'] .el-checkbox input").attributes("disabled")).toBeDefined();
+    release!();
+    await flushPromises();
+    expect(box("dev").attributes("disabled")).toBeUndefined();
+    expect((box("qa").element as HTMLInputElement).checked).toBe(true);
+    await w.get("[data-project-server='staging'] .el-checkbox input").setValue(true);
+    await flushPromises();
+    release!();
+    await flushPromises();
+    expect(puts).toEqual([
+      { servers: [{ server_id: "srv_1", roles: ["dev", "qa"] }] },
+      { servers: [{ server_id: "srv_1", roles: ["dev", "qa"] }, { server_id: "srv_2", roles: [] }] },
+    ]);
   });
 });

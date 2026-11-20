@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ServerView } from "@/api/views";
 import {
   auditResult, auditWho, createBody, credentialRequired, emptyServerForm, endpoint, fingerprintCommand, patchBody, roleReason,
-  serverForm, serverFormProblem, testView, toggleRole, toggleServer,
+  grantableOnly, serverForm, serverFormProblem, testView, toggleRole, toggleServer,
 } from "@/lib/servers";
 
 const saved: ServerView = {
@@ -79,6 +79,23 @@ describe("grants", () => {
     expect(roleReason({ grantable: false, reason: "lead" })).toContain("只读");
     expect(roleReason({ grantable: false, reason: "coordinator" })).toContain("凭证");
     expect(roleReason({ grantable: true })).toBe("");
+  });
+  it("drops roles the server would refuse from the PUT body", () => {
+    const roles = [{ role: "dev", grantable: true }, { role: "lead", grantable: false }];
+    expect(grantableOnly([{ server_id: "a", roles: ["dev", "lead", "gone"] }, { server_id: "b", roles: [] }], roles)).toEqual([
+      { server_id: "a", roles: ["dev"] },
+      { server_id: "b", roles: [] },
+    ]);
+  });
+});
+
+describe("passphrase", () => {
+  it("cannot be changed without pasting the key again", () => {
+    const keyed = { ...saved, auth_kind: "private_key" as const, has_passphrase: true };
+    const f = { ...serverForm(keyed), passphrase: "new" };
+    expect(serverFormProblem(keyed, f)).toBe("要改口令需同时重新粘贴私钥");
+    expect(serverFormProblem(keyed, { ...f, privateKey: "KEY" })).toBe("");
+    expect(serverFormProblem(keyed, serverForm(keyed))).toBe("");
   });
 });
 

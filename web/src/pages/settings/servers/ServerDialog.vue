@@ -85,7 +85,7 @@ function submit() {
         <el-input :id="id" v-model="form.privateKey" type="textarea" :rows="5" class="at-mono" spellcheck="false" :placeholder="placeholder || '-----BEGIN OPENSSH PRIVATE KEY-----'" />
       </Field>
       <Field v-slot="{ id }" label="私钥口令（可选）" hint="私钥加了 passphrase 才需要填">
-        <el-input :id="id" v-model="form.passphrase" type="password" show-password autocomplete="new-password" :placeholder="keep && saved?.has_passphrase ? '已保存，留空不修改' : ''" />
+        <el-input :id="id" v-model="form.passphrase" type="password" show-password autocomplete="new-password" :placeholder="keep && saved?.has_passphrase && !form.privateKey.trim() ? '已保存，留空不修改' : ''" />
       </Field>
     </template>
     <p v-if="touched && problem" class="text-[13px] text-bad" role="alert">{{ problem }}</p>
