@@ -3,6 +3,7 @@ package engine_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 
@@ -234,6 +235,10 @@ func assertCredentials(t *testing.T, w *world, n *nodetest.Node, dev *fakeAgent,
 	sess := credential(t, w, n, protocol.CredRequest{ReqID: "r2", SessionID: &sid, Host: "github.com", Path: "o/r.git", Purpose: "read"})
 	if !sess.Ok || sess.Password == nil || *sess.Password != "ghp_good" {
 		t.Fatalf("session credential with a PAT %+v", sess)
+	}
+	// A PAT has no expiry of its own: the daemon is told to ask again after patTTL (30 min).
+	if left := time.Until(*sess.ExpiresAt); left < 25*time.Minute || left > 31*time.Minute {
+		t.Fatalf("PAT credential expiry %v (%v left)", *sess.ExpiresAt, left)
 	}
 	foreign := credential(t, w, n, protocol.CredRequest{ReqID: "r4", SessionID: &sid, Host: "github.com", Path: "evil/repo.git", Purpose: "push"})
 	if foreign.Ok || foreign.Error == nil || *foreign.Error != "repo_not_in_project" {

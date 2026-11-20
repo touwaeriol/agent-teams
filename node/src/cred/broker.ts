@@ -31,19 +31,40 @@ const REFRESH_MARGIN_MS = 5 * 60_000;
  */
 export class CredBroker {
   private readonly waiting = new Map<string, Waiting>();
-  private readonly cache = new Map<string, Credential>();
+  private readonly cache = new Map<string, { scope: CredScope; host: string; path: string; cred: Credential }>();
 
   constructor(private readonly send: SendFn, private readonly retryMs = RETRY_MS) {}
 
   async get(scope: CredScope, host: string, path: string, purpose: "read" | "push"): Promise<Credential> {
     const key = `${JSON.stringify(scope)}|${host}|${path}|${purpose}`;
-    const hit = this.cache.get(key);
+    const hit = this.cache.get(key)?.cred;
     if (hit && hit.expiresAt - REFRESH_MARGIN_MS > Date.now()) return hit;
     const res = await this.request({ req_id: newId("cr_"), ...scope, host, path, purpose });
     if (!res.ok || !res.password) throw new CredDenied(res.error ?? "credential refused");
     const cred = { username: res.username ?? "x-access-token", password: res.password, expiresAt: res.expires_at ? Date.parse(res.expires_at) : Date.now() + 30 * 60_000 };
-    if (purpose === "read") this.cache.set(key, cred);
+    if (purpose === "read") this.cache.set(key, { scope, host, path, cred });
+    this.sweep();
     return cred;
+  }
+
+  /**
+   * Drops cached tokens whose scope matches (and, when given, of that host and repository):
+   * git erased a rejected token, or the session ended. Returns how many were dropped.
+   */
+  forget(match: (scope: CredScope) => boolean, host?: string, path?: string): number {
+    let n = 0;
+    for (const [key, e] of this.cache) {
+      if (!match(e.scope) || (host !== undefined && e.host !== host) || (path !== undefined && e.path !== path)) continue;
+      this.cache.delete(key);
+      n++;
+    }
+    return n;
+  }
+
+  /** Drops expired entries (sessions that never ended cleanly). */
+  private sweep(): void {
+    const now = Date.now();
+    for (const [key, e] of this.cache) if (e.cred.expiresAt <= now) this.cache.delete(key);
   }
 
   /** Handles cred.response. */

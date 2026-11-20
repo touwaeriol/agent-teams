@@ -41,19 +41,26 @@ func NewTokens(client *Client, apps *Apps, store kv.KV, box *auth.SecretBox) *To
 
 // Installation returns a token for the installation, narrowed by req.
 func (t *Tokens) Installation(ctx context.Context, installationID int64, req TokenRequest) (string, error) {
+	tok, err := t.InstallationToken(ctx, installationID, req)
+	return tok.Value, err
+}
+
+// InstallationToken is Installation with the token's real expiry: a cached token may have
+// anywhere between RefreshMargin and one hour left (cred.response reports it, §10.3 #2).
+func (t *Tokens) InstallationToken(ctx context.Context, installationID int64, req TokenRequest) (Token, error) {
 	key, err := t.cacheKey(ctx, installationID, req)
 	if err != nil {
-		return "", err
+		return Token{}, err
 	}
 	if tok, ok := t.cached(ctx, key); ok {
-		return tok.Value, nil
+		return tok, nil
 	}
 	tok, err := t.mint(ctx, installationID, req)
 	if err != nil {
-		return "", err
+		return Token{}, err
 	}
 	t.remember(ctx, key, tok)
-	return tok.Value, nil
+	return tok, nil
 }
 
 func (t *Tokens) mint(ctx context.Context, installationID int64, req TokenRequest) (Token, error) {

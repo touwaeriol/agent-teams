@@ -64,11 +64,20 @@ export function parseCredentialInput(text: string): Record<string, string> {
   return out;
 }
 
-/** `agent-teams-node git-credential --socket S --session ID --secret X get` */
+/**
+ * `agent-teams-node git-credential --socket S --session ID --secret X get|store|erase`.
+ * get asks the daemon for a token; erase (git rejected the token) makes the daemon drop its
+ * cached token for this session and repository, so the next get asks the console again;
+ * store is ignored (nothing is ever written).
+ */
 export async function gitCredentialMain(args: Record<string, string>, op: string, stdin: string): Promise<{ out: string; code: number }> {
-  if (op !== "get") return { out: "", code: 0 };
+  if (op !== "get" && op !== "erase") return { out: "", code: 0 };
   const input = parseCredentialInput(stdin);
   if (input.protocol !== "https" || !input.host) return { out: "", code: 0 };
+  if (op === "erase") {
+    await askSocket(args.socket!, { op: "erase", session: args.session!, secret: args.secret!, host: input.host, path: input.path ?? "" }, 10_000);
+    return { out: "", code: 0 };
+  }
   const reply = await askSocket(args.socket!, { session: args.session!, secret: args.secret!, host: input.host, path: input.path ?? "" }, 40_000);
   if (!reply.ok) return { out: "quit=1\n", code: 0 };
   return { out: `username=${reply.username}\npassword=${reply.password}\n`, code: 0 };
@@ -121,14 +130,21 @@ export async function ghPlan(argv: string[], env: NodeJS.ProcessEnv, cwd: string
 /** gh commands that never need a token: no note about a missing one. */
 const NO_AUTH_COMMANDS = new Set(["--version", "version", "help", "--help", "-h", "completion"]);
 
-/** The child's environment: never written anywhere, and without the socket secret. */
+/** Token variables gh reads; an inherited one is dropped so gh only ever sees the narrowed token. */
+const GH_TOKEN_VARS = ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"];
+
+/**
+ * The child's environment: never written anywhere, and without the socket secret. The token
+ * (minted for github.com) goes only into GH_TOKEN/GITHUB_TOKEN, which gh sends to github.com
+ * only; never into the enterprise variables, whatever GH_HOST says.
+ */
 export function ghChildEnv(env: NodeJS.ProcessEnv, reply: SocketReply): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = { ...env, GH_HOST: env.GH_HOST ?? "github.com", GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", GH_NO_EXTENSION_UPDATE_NOTIFIER: "1" };
+  for (const k of GH_TOKEN_VARS) delete out[k];
   if (reply.config_dir) out.GH_CONFIG_DIR = reply.config_dir;
   if (reply.password) {
     out.GH_TOKEN = reply.password;
     out.GITHUB_TOKEN = reply.password;
-    if (out.GH_HOST !== "github.com") out.GH_ENTERPRISE_TOKEN = reply.password;
   }
   delete out.AT_CRED_SECRET;
   return out;

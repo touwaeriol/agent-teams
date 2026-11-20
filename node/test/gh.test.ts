@@ -128,12 +128,25 @@ describe("gh wrapper", () => {
     try {
       const secret = server.register("s_1", 2);
       const out = join(dir, "gh.out");
-      const env = { PATH: process.env.PATH, GH_OUT: out, AT_CRED_SOCK: server.socketPath, AT_CRED_SESSION: "s_1", AT_CRED_SECRET: secret };
+      const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, GH_OUT: out, AT_CRED_SOCK: server.socketPath, AT_CRED_SESSION: "s_1", AT_CRED_SECRET: secret };
+      const before = { ...env };
       // From the employee directory: the only checkout is picked.
       expect(await ghMain(["pr", "list"], env, work)).toBe(0);
       const cfg = join(configRoot, "s_1");
       expect(readFileSync(out, "utf8").trim()).toBe(`TOKEN=ghs_SECRET_42 GITHUB=ghs_SECRET_42 CFG=${cfg} HOST=github.com SECRET=none ARGS=pr list`);
       expect(requests[0]).toMatchObject({ session_id: "s_1", open_gen: 2, path: "acme/app.git", purpose: "read" });
+      // The token went only into that child: the session's environment is untouched, and gh
+      // (authenticated by GH_TOKEN) wrote no hosts.yml into the per-session config dir.
+      expect(env).toEqual(before);
+      expect(existsSync(join(cfg, "hosts.yml"))).toBe(false);
+      // An inherited token never reaches gh, and the github.com token never goes to another host.
+      const inherited = await ghPlan(["pr", "list"], { ...env, GH_TOKEN: "ghp_LONG", GH_ENTERPRISE_TOKEN: "ghp_ENT", GH_HOST: "ghe.example" }, work);
+      const ienv = (inherited as { env: NodeJS.ProcessEnv }).env;
+      expect(ienv.GH_TOKEN).toBe("ghs_SECRET_42");
+      expect(ienv.GH_ENTERPRISE_TOKEN).toBeUndefined();
+      expect(Object.values(ienv).filter((v) => v === "ghp_LONG" || v === "ghp_ENT")).toEqual([]);
+      const refused = await ghPlan(["issue", "list", "-R", "evil/repo"], { ...env, GH_TOKEN: "ghp_LONG" }, work);
+      expect((refused as { env: NodeJS.ProcessEnv }).env.GH_TOKEN).toBeUndefined();
       // Another repository: no token, gh still runs.
       const plan = await ghPlan(["issue", "list", "-R", "evil/repo"], env, work);
       expect(plan).toMatchObject({ bin: realGh, note: expect.stringContaining("repo_not_in_project") });
@@ -249,6 +262,7 @@ describe("session environment", () => {
     expect(env.AT_PROTECTED_REFS).toBe("thread/12-comms main");
     expect(env.AT_CRED_SOCK).toBeTruthy();
     expect(Object.values(env).some((v) => /gh[sp]_/.test(v ?? ""))).toBe(false);
+    for (const k of ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "AT_GIT_PASSWORD"]) expect(env[k]).toBeUndefined();
     expect(readFileSync(join(h.opts.platformDir, "bin", "gh"), "utf8")).toContain(" gh \"$@\"");
   });
 

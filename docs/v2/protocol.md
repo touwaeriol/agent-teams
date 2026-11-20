@@ -31,8 +31,8 @@
 
 | 方向 | 可靠（有 `seq`，需 ACK，可重放） | 不可靠（无 `seq`，丢了无所谓） |
 | --- | --- | --- |
-| 控制台 → 守护进程 | 所有命令（`session.*`、`approval.resolve`、`tool.result`、`git.*`、`cred.response`、`node.*`（`node.usage_refresh` 除外）、`run.*`） | `ack`、`pong` 类、`node.usage_refresh` |
-| 守护进程 → 控制台 | 会话事件、命令结果、审批请求/取消、工具调用、git 结果 | `ack`、`stream.delta`（逐字输出，可选）、`log`、`node.stats`、`node.usage` |
+| 控制台 → 守护进程 | 所有命令（`session.*`、`approval.resolve`、`tool.result`、`git.*`、`node.*`（`node.usage_refresh` 除外）、`run.*`） | `ack`、`pong` 类、`node.usage_refresh`、`cred.response`（§8：带令牌，不进发件箱，靠 `req_id` 配对，丢了守护进程会重试 `cred.request`） |
+| 守护进程 → 控制台 | 会话事件、命令结果、审批请求/取消、工具调用、git 结果 | `ack`、`stream.delta`（逐字输出，可选）、`log`、`node.stats`、`node.usage`、`cred.request`（§8） |
 
 - **ACK**：`{type:"ack", body:{seq: N}}` 表示“seq ≤ N 的可靠消息我已持久处理”。接收方至少每 200 ms 或每 50 条发一次累计 ACK。
 - **守护进程发件箱**：可靠消息先追加写入 `state/outbox/<epoch>.jsonl` 再发送；收到 ACK 后推进游标，游标之前的文件可删除。守护进程重启后 `seq` 从文件里的最大值继续（`epoch` 只在状态目录被清空时变化）。
@@ -418,7 +418,9 @@
 
 `{"req_id", "ok": true, "username": "x-access-token", "password": "ghs_…", "expires_at": "…"}` 或 `{"req_id", "ok": false, "error": "repo_not_in_project"}`。
 
-此类消息**不进发件箱、不写日志**（守护进程和控制台都对 `cred.*` 关闭消息体日志）。
+`expires_at` 是令牌**真实的**到期时间：控制台的令牌缓存可能交出只剩 10～60 分钟的安装令牌，照实上报；PAT 没有到期时间，上报“现在 + 30 分钟”，让守护进程定期重新确认项目是否仍允许。守护进程只在内存里缓存到 `expires_at` 前 5 分钟；git 认证失败调凭证助手的 `erase` 时，守护进程丢掉这个“会话 + 仓库”的缓存，下一次 `get` 重新发 `cred.request`。
+
+此类消息**不进发件箱、不写日志**（守护进程和控制台都对 `cred.*` 关闭消息体日志）。控制台在节点链路读循环之外（单独的 goroutine，全局最多 32 个同时进行）处理 `cred.request`，慢的 GitHub 请求不会挡住这条链路上的其他消息；两者都是不可靠消息、靠 `req_id` 配对，先后顺序无关。
 
 ## 9. 节点管理
 
