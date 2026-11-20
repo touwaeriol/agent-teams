@@ -28,6 +28,8 @@ export interface DriverContext {
   policy: ToolPolicy;
   sink: SessionSink;
   log: Logger;
+  /** Platform text appended to the system prompt / developer instructions (e.g. remote servers). */
+  systemExtra?: string;
 }
 
 export interface StartResult {

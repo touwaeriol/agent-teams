@@ -120,7 +120,7 @@
 
 - 有效期 **10 分钟**（待拍板 Q7，可选 5～15 分钟）。证书只在 SSH **认证那一刻**被检查，已经建好的连接（例如 30 分钟的部署）不受证书过期影响；它们由 §4.7 的周期复查和吊销来管。
 - 续签：守护进程在证书剩余 < 3 分钟或下一次 agent 签名请求到来时剩余 < 3 分钟，就用**同一把公钥**发 `ssh.cert_request` 换一张新证书（同一驱动生命周期内密钥对不变）；空闲会话不主动续签，下次用时按需签。签发是主连接上的一次往返（几毫秒），失败（主节点不可达）时 ssh 认证失败并在 stderr 说明，不重试死循环。
-- 签发时机：会话打开时**不预签**，第一次需要（agent 收到 `REQUEST_IDENTITIES`）时才签。好处：从不用 ssh 的会话不产生证书和审计行。
+- 签发时机：会话打开时**不预签**，第一次需要时才签。好处：从不用 ssh 的会话不产生证书和审计行。实现上（#38 t5）"第一次需要"是 `ssh-proxy` 连上 `ssh.sock` 的那一刻：ssh 先校验网关 host key、后问 agent 要身份，而 `known_hosts` 随 `ssh.cert_response` 下发，所以守护进程在对接 WebSocket **之前**先拿到证书并写好 `known_hosts`；拿不到时 `ssh-proxy` 在 stderr 写 `no session certificate: <error>` 并非零退出，而不是让 ssh 报含糊的 `Permission denied (publickey)`。agent 收到 `REQUEST_IDENTITIES` 时证书已在内存，剩余不到 3 分钟则用同一把公钥续签。
 
 ### 4.5 绑定会话
 
@@ -355,6 +355,8 @@ Host prod staging
 - `ControlMaster no`：第一期不复用连接，避免主连接进程在会话结束后还活着（ansible 自己的 ControlPersist 见 §7.3）。
 - 只想“零文件”的话也可以全部改用命令行 `-o` 选项加 `KnownHostsCommand`（OpenSSH 8.5+），代价是包装脚本复杂、老版本 ssh 不支持；这些文件不含秘密、在 tmpfs、会话结束删除，推荐保留文件方案。
 
+**节点侧实现（#38 t5，`node/src/ssh/`）**：`agent.ts`（ssh-agent 协议，只回 `REQUEST_IDENTITIES`/`SIGN_REQUEST`）、`config.ts`（会话目录、短路径回退、`ssh_config` 渲染、启动清理）、`proxy.ts`（`ssh.sock` 服务端和 `agent-teams-node ssh-proxy` 子命令；请求是一行 JSON `{"op":"ssh","session","secret","server"}`，回 `{"ok":true}` 后这条 unix 连接就是 SSH 字节流，用的是 `cred.sock` 同一个每会话秘密，`CredServer.verify` 用 `timingSafeEqual` 核对）、`hub.ts`（每会话状态、证书请求与重试、`/nodes/ssh` 拨号与管道）、`prompt.ts`（系统提示词里的一段说明）。状态按**驱动**生命周期：`Daemon.createDriver` 建（新密钥、新目录），`SessionManager` 的 `onDriverGone`（关闭、停放、崩溃、启动失败）丢，`onSessionGone` 再清掉 `servers_update` 版本号。停放中的会话收到 `ssh.servers_update` 时只更新并持久化 `spec.ssh_servers`，下次起驱动按新列表生成。会话中途从“没有服务器”变成“有”的，正在跑的进程环境改不了，要等下一个驱动（停放后再起或重开）才有 `AT_SSH_CONFIG`。ProxyCommand 里写的是 `--socket <ssh.sock>`（不是秘密），`--server <名>`。
+
 ### 7.3 包装与间接调用 ssh 的工具
 
 ssh **不从环境变量读配置文件位置**（没有 `SSH_CONFIG` 这种变量），所以必须包装：
@@ -490,6 +492,7 @@ sequenceDiagram
   2. Claude Code 沙箱的网络隔离会限制 unix socket 连接，需要在 `settings.sandbox.network.allowUnixSockets` 里列出上述 socket 的路径（**需实测**：SDK 0.3.325 内置的 Claude Code 版本对这个设置的支持、以及 bwrap 下“父目录拒绝 + 子目录放行”是否生效，要在开发前写一个 smoke 脚本验证）。
   3. ssh 本身在沙箱里运行没问题（ProxyCommand 只连本地 socket，不需要网络出口）。
 - 如果第 2 点实测不可行，退路是在 `sandbox` 级别的节点上不提供远程服务器（项目设置里提示），与现在 Codex 不派到这类节点的做法一致。
+- **现状（#38 t5）**：开发节点上没有 bubblewrap，没能实测第 2 点，所以先走退路：`claude.sandbox.enabled` 的 Claude 会话**不注入**（没有 `AT_SSH_CONFIG`、不建会话目录，守护进程记一条 WARN），`ssh.sock` 仍放在 `runtimeDir`。在有 bwrap 的节点上实测通过后，再按第 1、2 点把 socket 挪进会话目录并加 `allowUnixSockets`。
 
 ### 8.4 彻底隔离的路线
 

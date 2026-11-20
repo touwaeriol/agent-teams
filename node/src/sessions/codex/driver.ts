@@ -91,8 +91,12 @@ export class CodexDriver implements Driver, ThreadListener {
       // An empty model is left out so Codex uses its own default: app-server rejects model "".
       ...(this.codex.model ? { model: this.codex.model } : {}),
       cwd: this.ctx.absCwd, approvalPolicy: this.codex.approval_policy, sandbox: this.codex.sandbox, config,
-      ...(this.codex.developer_instructions ? { developerInstructions: this.codex.developer_instructions } : {}),
+      ...(this.developerInstructions() ? { developerInstructions: this.developerInstructions() } : {}),
     };
+  }
+
+  private developerInstructions(): string {
+    return [this.codex.developer_instructions, this.ctx.systemExtra].filter(Boolean).join("\n\n");
   }
 
   private async init(server: AppServer): Promise<StartResult["init"]> {
