@@ -129,10 +129,13 @@ export class CredServer {
     return req.op === "gh" ? this.ghReply(req, entry) : this.credReply(req, entry);
   }
 
-  /** git erase: the next get for this session and repository asks the console again. */
+  /**
+   * git erase: the next get for this session and repository asks the console again, with
+   * force_refresh so the console mints a new token rather than returning its cached one.
+   */
   private eraseReply(req: CredSocketRequest, entry: SessionEntry): Record<string, unknown> {
-    const n = this.broker.forget((s) => "session_id" in s && s.session_id === req.session && s.open_gen === entry.openGen, req.host, req.path);
-    this.log.info({ session: req.session, dropped: n }, "credential erased by git");
+    const dropped = this.broker.invalidate({ session_id: req.session, open_gen: entry.openGen }, req.host, req.path);
+    this.log.info({ session: req.session, dropped }, "credential erased by git");
     return { ok: true };
   }
 

@@ -373,6 +373,10 @@ export interface CredRequest {
    */
   path: string;
   purpose: "read" | "push";
+  /**
+   * Git rejected the token handed out last (credential erase): the console skips its token cache and mints a new one (at most once a minute per token scope).
+   */
+  force_refresh?: boolean;
 }
 /**
  * Token for a cred.request, or a refusal. Unreliable; never logged.
