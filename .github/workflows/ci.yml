@@ -46,6 +46,9 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
+      # The daemon's tests validate frames against /protocol/schemas with protocol's own ajv.
+      - run: npm ci --no-audit --no-fund
+        working-directory: protocol
       - run: npm ci --no-audit --no-fund
       - run: npm test
       - run: npm run typecheck
