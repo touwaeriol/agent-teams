@@ -524,13 +524,30 @@ v1 在每次运行开始把 `GH_TOKEN` 放进环境。v2 会话是常驻的，�
 - **能做什么、不能做什么**：员工能 fetch、推送非保护分支、开 PR/评论/审查、看 CI；推送基准/默认/讨论串分支由 pre-push 钩子拒绝（§8.1）。2026-11-19 起（用户：“成员可以进行 gh 合并，去掉限制”）成员可以用 `gh pr merge`、`gh api …/merge` 合并 PR（可批量），PreToolUse 不再拒绝；组长是只读会话，argv 白名单里没有 `gh pr merge`，要直接合并时派给成员。平台照常识别在别处合并的 PR（检查时 PR 已合并按通过算，webhook 记 `Merged`）。这些是给出清楚报错的软防线，硬防线是 GitHub 规则集（App 是唯一绕过者；规则集要求的审批或检查没满足时，成员的 gh 合并会被 GitHub 拒绝）。
 - `gh`：员工节点通常没装 gh。守护进程启动时（以及第一次用时）把锁定版本的官方发行包（`git/gh-install.ts`，`gh 2.103.3`，linux amd64/arm64 tar.gz、macOS zip）下到 `<data>/agent-teams/tools/gh-<ver>/`，sha256 必须同时等于代码里锁定的值和该发行版的 `gh_<ver>_checksums.txt`；PATH 上已有 gh 时直接用。会话 PATH 最前面是平台目录 `<data>/agent-teams/platform/bin`（员工不可写），里面的 `gh` 包装脚本执行 `agent-teams-node gh`：通过 cred socket（`op: "gh"`，带每会话秘密）向守护进程要真实 gh 的路径、一个空的每会话 `GH_CONFIG_DIR`（`<data>/agent-teams/gh-config/<session>`，会话结束删除，不在 worktree 里）和令牌，再以 `GH_TOKEN`/`GITHUB_TOKEN`、`GH_HOST=github.com`（会话没设时）、`GH_PROMPT_DISABLED=1`、`GH_NO_UPDATE_NOTIFIER=1` 运行真实 gh；继承来的 `GH_TOKEN`/`GITHUB_TOKEN`/`GH_ENTERPRISE_TOKEN`/`GITHUB_ENTERPRISE_TOKEN` 先删掉，github.com 的令牌不放进企业版变量，子进程环境里也删掉 `AT_CRED_SECRET`。令牌只存在于那一次 gh 进程的环境里，不进会话环境、不写任何文件（gh 用 `GH_TOKEN` 时不写 `hosts.yml`，`gh auth login` 在 `GH_TOKEN` 存在时拒绝保存）；残余风险：gh 运行期间，同账号的进程能读 `/proc/<pid>/environ`。仓库按 `-R/--repo`、`GH_REPO`、cwd 的 origin、员工目录下唯一的仓库子目录依次确定；确定不了时 gh 照常运行但不带令牌，并在 stderr 说明。系统提示词告诉组长和成员 gh 已安装并自动带令牌、讨论串 PR 用 `open_pr`；成员按任务要求可以用 `gh pr merge` 合并，组长要合并时派给成员。
 - **已知限制**：`sandbox` 隔离级别的节点上，Bash 沙箱的 `denyRead` 包含 `$XDG_RUNTIME_DIR/agent-teams`（cred socket 所在目录），沙箱里的 git/gh 连不上 socket，拿不到令牌（与之前的只读令牌相同，尚未解决）；`none`（目前生产的两台节点）和 `agent_user` 不受影响。
-- 远程服务器（SSH）访问与 GitHub 凭证的后续收敛见 `remote-servers.md`（设计稿）。
+- 远程服务器（SSH）访问见 §10.6 与 `remote-servers.md`；GitHub 凭证的后续收敛见 `remote-servers.md` §10。
 
 ### 10.5 秘密与密钥
 
 - `AGENT_TEAMS_SECRET_KEY` 沿用；Go 实现与 v1 相同的派生（`derive(label) = sha256("label:secret")`），OAuth state 签名格式完全一致，迁移期两边签发的 state 互认。
 - 平台级第三方密钥（语音输入的 OpenAI Key）同样用 SecretBox 密封存在 `at_settings`，接口只回末四位；只在控制台向 OpenAI 签临时密钥时解开，不下发给浏览器或节点，日志和审计里不出现；改接口地址必须重填 Key。
 - 新增密钥轮换：`AGENT_TEAMS_SECRET_KEYS=new,old`（第一个加密，全部可解密）+ `atctl admin reseal` 重新加密全部密封值（v1 问题 14）；远程服务器凭证和 SSH 网关密钥用信封加密（`server/internal/credvault`，data-model.md §2.14），reseal 只重新包裹它们的 DEK。
+
+### 10.6 远程服务器：主节点 SSH 网关
+
+员工会话经主节点的 SSH 网关（`server/internal/sshgw`，`golang.org/x/crypto/ssh`）连用户在设置里配置、项目选用并按岗位授权的服务器（`remote-servers.md` §4、§5、§6.4、§7.7、§9.4，`protocol.md` §8.1，表见 `data-model.md` §2.14）。服务器的密码和私钥**只在控制台进程内存里解开**，节点上没有任何服务器凭证。
+
+- **两把平台密钥**：会话 CA（`ssh_session_ca`）和网关 host key（`ssh_gateway_host_key`），存 `at_settings`、按信封加密密封，第一次用时由 `credvault.EnsureKey` 生成（多副本只会留一把），网关进程内缓存。
+- **会话证书**：守护进程在内存里生成临时 Ed25519 密钥，发 `ssh.cert_request`；网关的归属校验（`nodegw/owner.go` 的 `checkSession`）之后，`sshgw.Gateway.CertRequest` 在 goroutine 里处理（最多 16 个同时进行，占满时丢弃并记 WARN，守护进程会重发），再查一遍会话（本节点、未关闭、`open_gen` 是当前值、项目所有者 = 节点所有者）。principals = 会话岗位此刻被授权的服务器名，没有就回 `no_servers`。证书有效期 10 分钟（`ValidAfter` 提前 60 秒），扩展带 `permit-pty` 和 `session@` / `gen@` / `node@agent-teams.dev`，不带 critical option；签发前先写 `at_ssh_certs` 行，serial 就是证书序号。`ssh.cert_response` 带 known_hosts 行 `agent-teams-gateway <host key>`。
+- **`GET /nodes/ssh`**：WebSocket 升级，二进制帧，每条连接一个 WebSocket。节点令牌认证同 `Gateway.Authenticate`（`policy.csv` 的 `node-token` 行）；请求头 `X-AT-Session` / `X-AT-Open-Gen` / `X-AT-Server` 在升级前就要满足：会话属于该节点、未关闭、gen 是当前值（否则 404），服务器此刻授权给它（`store.SessionServerGrant`，否则 403 并记 `denied`），连接数没超限（否则 429）。
+- **前段 SSH**：只开公钥认证，只认会话 CA 签的用户证书（`ssh.CertChecker`：有效期、principal = 用户名 = 服务器名、无 critical option），再核对扩展里的会话 / gen / 节点、库里 serial 存在且未吊销、行里的会话 / gen / 节点 / 公钥指纹一致、会话仍活着且 gen 未变。失败一律记一行 `auth_fail`。
+- **逐次授权**：每个 channel 打开时、每 30 秒、每次收到 `ssh:revoke` 提示都重新查库（证书未吊销 + `SessionServerGrant`：会话活着、gen 未变、岗位仍被授权、不是统筹 / 组长 / 只读岗位，只读的口径是 `read_only = true` 或 gate 为 review / decision）。不满足就拒绝新 channel，并向已开的 channel 的 stderr 写原因、发 `exit-status 255`、断开整条连接。
+- **后段 SSH**：第一个 channel 打开时，按库里**最新**的配置拨号（一个前段连接对应一个后段连接）。host key 必须等于用户确认过的 `host_key`，而且它的 MAC（`credvault.HostKeyMACData`）要能验过，否则不拨号，提示用户先在设置里“测试连接”；拨通后看到的 host key 不一致，就在发送凭证之前断开，记 `host_key_mismatch`（含新旧指纹）。登录用解开的密码（同时作为 keyboard-interactive 唯一一个不回显问题的回答）或私钥（加口令）。
+- **转发的范围**：`exec`、`shell` + `pty-req`、`window-change`、`signal`，`env` 只放行 `LANG` / `LC_*`，子系统只放行 `sftp`（scp / rsync 都能用）。端口转发（`direct-tcpip`、`tcpip-forward`）、agent 转发、X11 和其他子系统一律拒绝，记 `denied`。目标发来的 `exit-status` / `exit-signal` 原样转回。
+- **限额与超时**（`sshgw.Config`，§5.7 的简化版，按副本计数）：每会话 4 条、每台服务器 8 条、每项目 16 条；前段握手 15 秒，后段拨号加登录 20 秒；空闲 30 分钟断开，单条最长 6 小时；两段都每 30 秒发一次 `keepalive@openssh.com`，WebSocket 每 30 秒 ping 一次。
+- **吊销**：`core.CloseSession`、`core.BumpOpenGen`（吊销旧 gen 的证书）和 `core.SetSessionState(crashed)` 在同一个事务里把证书标 `revoked_at`，提交后在 `ssh:revoke` 频道发提示（`fanout.Patterns` 含 `ssh:*`，经 Valkey 跨副本）。服务器被删除或改名、从项目里移除、岗位授权被撤销时，由 store 函数返回被吊销的 serial，调用方再调 `Engine.SSH.Revoked(ctx, serials)` 广播。提示本身只是“马上复查”，网关以库为准；广播丢了，也会在 30 秒的周期复查里断开。项目被删除时证书行随之级联删除，复查时就会断开。
+- **授权变化通知**：`Engine.SSH.ServersChanged(ctx, projectID)` 给项目里所有可用服务器的存活会话发可靠的 `ssh.servers_update`。`version` 取毫秒时间戳，在进程内严格递增。节点重连时（`router.NodeOnline`）给它的每个存活会话补发一次。`session.open` 的 `ssh_servers` 由 `sshgw.SessionServers` 在 `Orchestrator.queueOpen` 的事务里算出；只有节点 hello 带 `ssh_gateway` 时才填。
+- **审计**：`connect` / `disconnect`（时长、两个方向的字节数、断开原因）、`exec` / `shell` / `subsystem`（每个 channel 一行：命令、退出码或信号、时长、字节数、pty）、`denied`、`auth_fail`、`host_key_mismatch` 都写 `at_ssh_audit`。命令先过 `sshgw.Redact`：`node/src/util/redact.ts` 的规则，加上 URL 里的 `user:pass@`、`--password=` / `--token` 这类参数、`*PASSWORD*=` 这类环境变量、`mysql -p…`、`sshpass -p`，最后把服务器自己的密码和口令按值替换成 `***`。连接结束时再写一行 `at_events`（`type = server`，`core.EvServer`），payload 带 `summary`，例如“dev-1 在 prod 上执行了 docker compose up -d（退出码 0，12s）”，讨论串动态里能看到。
+- **第一期不做**：人工批准卡片、端口转发、agent / X11 转发、录屏、按 sftp 操作逐条审计、拨号前的目标地址检查（`Config.Dial` 留了接口）。另外连接数是按副本计数的，没有放进 Valkey。
 
 ## 11. 状态监控、事件落库与回放
 

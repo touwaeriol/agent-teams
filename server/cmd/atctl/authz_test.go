@@ -19,7 +19,7 @@ var (
 		"GET /api/git/github-app/installed": true, "POST /api/git/github-app/webhook": true,
 	}
 	nodeRoutes = map[string]bool{
-		"GET /nodes/connect": true, "GET /nodes/v2/connect": true, "GET /nodes/attachments/:id": true,
+		"GET /nodes/connect": true, "GET /nodes/v2/connect": true, "GET /nodes/attachments/:id": true, "GET /nodes/ssh": true,
 	}
 	subjects = []string{httpapi.SubjectAnonymous, httpapi.SubjectNode, httpapi.SubjectUser, httpapi.SubjectAdmin}
 )

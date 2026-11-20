@@ -28,7 +28,7 @@ func TestGatewayEndToEnd(t *testing.T) {
 		t.Fatalf("servers %+v", names)
 	}
 	cert := id.signer.PublicKey().(*ssh.Certificate)
-	if cert.ValidBefore-cert.ValidAfter != uint64((10*time.Minute + time.Minute).Seconds()) ||
+	if cert.ValidBefore-cert.ValidAfter != uint64((10*time.Minute+time.Minute).Seconds()) ||
 		cert.Permissions.Extensions[extSession] != dev || cert.Permissions.Extensions[extNode] != f.node.ID ||
 		len(cert.Permissions.CriticalOptions) != 0 || cert.ValidPrincipals[0] != "prod" {
 		t.Fatalf("certificate %+v", cert)

@@ -35,6 +35,7 @@
 | `merge` | `{thread_no, entry: MergeEntryView}` | 合并队列变化 |
 | `ci` | `{thread_no, sha, checks: CheckView[]}` | CI 结果变化 |
 | `memory` | `{op: "write"|"delete", name}` | 记忆文件变了（网页重新拉列表和打开的文件） |
+| `server` | `{server, server_id, employee, session_id, conn_id, duration_ms, commands, bytes_in, bytes_out, reason, last_command?, exit_code?, summary}` | 员工一条到远程服务器的 SSH 连接结束（architecture.md §10.6）；`last_command` 已脱敏、最多 200 字；`summary` 是给讨论串动态的一句话 |
 | `shared_file` | `{op: "write"|"delete", path, by}` | 共享文件写入（新建或覆盖）/ 删除；`by` 是 `user` 或 `dev-1 #31` 这样的员工名加讨论串号（网页重新拉共享文件列表） |
 | `node` | `{node: NodeBrief}` | 该项目用到的节点上下线、槽位变化 |
 | `layout` | `{layout_id, version}` | 办公室布局更新（前端重新拉布局并重画） |
