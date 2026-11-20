@@ -16,6 +16,7 @@ import { barHeight, WAVE_MIN, WAVE_TICK_MS } from "@/components/app/voice/wave";
 import { startMeter } from "@/lib/voice/audio";
 import type { VoiceDeps } from "@/lib/voice/controller";
 import type { Transport, TransportHandlers } from "@/lib/voice/openai";
+import { legacyPrefsKey, prefsKey } from "@/lib/voice/prefs";
 import { relaySession } from "@/lib/voice/relay";
 import type { Transcript } from "@/lib/voice/transcript";
 
@@ -40,12 +41,16 @@ interface Rig {
 
 const prefs = (pushToTalk: boolean) => {
   const v = JSON.stringify({ deviceId: "", language: "auto", pushToTalk });
-  localStorage.setItem("voice-prefs:me", v);
-  localStorage.setItem("voice-prefs:u1", v);
+  localStorage.clear();
+  localStorage.setItem(prefsKey("me"), v);
+  localStorage.setItem(prefsKey("u1"), v);
 };
 
-async function rig(opts: { pushToTalk?: boolean; gate?: boolean } = {}): Promise<Rig> {
-  prefs(Boolean(opts.pushToTalk));
+async function rig(opts: { pushToTalk?: boolean; gate?: boolean; storage?: Record<string, string> } = {}): Promise<Rig> {
+  if (opts.storage) {
+    localStorage.clear();
+    for (const [k, v] of Object.entries(opts.storage)) localStorage.setItem(k, v);
+  } else prefs(Boolean(opts.pushToTalk));
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input instanceof Request ? input.url : input);
     const body = url.includes("/api/voice/config")
@@ -186,6 +191,71 @@ describe("click mode (default)", () => {
     r.v.onKeyDown(key("keydown"));
     await settle(10);
     expect(r.phase()).toBe("idle");
+  });
+});
+
+describe("which mode", () => {
+  /** What a real mouse click sends: pointerdown, pointerup, then click. */
+  const realClick = (el: HTMLElement) => {
+    pointer(el, "pointerdown");
+    pointer(el, "pointerup");
+    click(el);
+  };
+
+  it("nothing saved: click mode, one click starts and the next one stops", async () => {
+    const r = await rig({ storage: {} });
+    expect(r.mic().dataset.mode).toBe("click");
+    realClick(r.mic());
+    await settle(500);
+    expect(r.phase()).toBe("recording");
+    realClick(r.mic());
+    await settle(10);
+    expect(r.phase()).toBe("idle");
+    expect(r.opened).toBe(1);
+  });
+
+  it("an old saved 按住录音 (v1 key) comes back as click mode", async () => {
+    const old = JSON.stringify({ deviceId: "", language: "auto", pushToTalk: true });
+    const r = await rig({ storage: { [legacyPrefsKey("u1")]: old, [legacyPrefsKey("me")]: old } });
+    expect(r.mic().dataset.mode).toBe("click");
+    expect(r.v.prefs.pushToTalk).toBe(false);
+    realClick(r.mic());
+    await settle(500);
+    expect(r.phase()).toBe("recording");
+    realClick(r.mic());
+    await settle(10);
+    expect(r.phase()).toBe("idle");
+  });
+
+  it("an invalid saved value is click mode", async () => {
+    const r = await rig({ storage: { [prefsKey("u1")]: '{"pushToTalk":"true"}', [prefsKey("me")]: "{broken" } });
+    expect(r.mic().dataset.mode).toBe("click");
+  });
+
+  it("the signed-in user's prefs apply before the first click, and follow changes made elsewhere", async () => {
+    // Before /api/me answers the composer reads the "me" key; the user's own key wins once known.
+    const r = await rig({ storage: { [prefsKey("u1")]: JSON.stringify({ deviceId: "", language: "auto", pushToTalk: true }) } });
+    expect(r.mic().dataset.mode).toBe("hold");
+    // Another composer (or tab) turns 按住录音 off: this one follows without a reload.
+    r.v.setPrefs({ pushToTalk: false });
+    await settle();
+    expect(r.mic().dataset.mode).toBe("click");
+    localStorage.setItem(prefsKey("u1"), JSON.stringify({ deviceId: "", language: "auto", pushToTalk: true }));
+    window.dispatchEvent(new StorageEvent("storage", { key: prefsKey("u1") }));
+    await settle();
+    expect(r.mic().dataset.mode).toBe("hold");
+  });
+
+  it("push-to-talk: a real press (down, up, click) is one short recording, not a toggle", async () => {
+    const r = await rig({ pushToTalk: true });
+    pointer(r.mic(), "pointerdown");
+    await settle(500);
+    expect(r.phase()).toBe("recording");
+    pointer(r.mic(), "pointerup");
+    click(r.mic());
+    await settle(10);
+    expect(r.phase()).toBe("idle");
+    expect(r.opened).toBe(1);
   });
 });
 

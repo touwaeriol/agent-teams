@@ -106,11 +106,18 @@ const label = "px-2.5 pb-1 pt-1.5 text-xs text-muted-foreground";
       </button>
 
       <div class="mx-1 my-1 border-t" />
-      <label :class="cn(row, 'cursor-pointer hover:bg-transparent')" :title="modeNote">
+      <!-- Only the switch itself changes the mode (a click anywhere on the row used to flip it unnoticed). -->
+      <div :class="cn(row, 'cursor-default hover:bg-transparent')" :title="modeNote" data-testid="voice-ptt-row">
         <span class="flex-1">按住录音</span>
         <span class="text-xs text-muted-foreground">{{ shortcut }}</span>
-        <el-switch :model-value="prefs.pushToTalk" size="small" aria-label="按住录音" @change="(v: string | number | boolean) => emit('change', { pushToTalk: Boolean(v) })" />
-      </label>
+        <el-switch
+          :model-value="prefs.pushToTalk"
+          size="small"
+          aria-label="按住录音"
+          data-testid="voice-ptt-switch"
+          @change="(v: string | number | boolean) => emit('change', { pushToTalk: v === true })"
+        />
+      </div>
       <p class="px-2.5 pb-1 text-xs text-muted-foreground" data-testid="voice-mode-note">{{ modeNote }}</p>
     </template>
 

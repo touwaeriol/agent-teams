@@ -8,7 +8,7 @@ import { openMic, startMeter } from "@/lib/voice/audio";
 import { VoiceController, type VoiceDeps, type VoiceState } from "@/lib/voice/controller";
 import { connectOpenAI } from "@/lib/voice/openai";
 import { connectRelay, relaySession } from "@/lib/voice/relay";
-import { readPrefs, writePrefs, type LanguageOption, type VoicePrefs } from "@/lib/voice/prefs";
+import { onPrefsChange, readPrefs, writePrefs, type LanguageOption, type VoicePrefs } from "@/lib/voice/prefs";
 import type { Part, Transcript } from "@/lib/voice/transcript";
 
 type Field = HTMLInputElement | HTMLTextAreaElement;
@@ -87,11 +87,16 @@ export function useVoiceInput(text: Ref<string>, field: Ref<Field | null>, makeD
     loadedFor = userId.value;
     Object.assign(prefs, readPrefs(loadedFor));
   }
+  // The button shows and follows the signed-in user's prefs from the start (not only once a
+  // recording starts: the mode must not change between the press and the release), and every
+  // composer follows a change made in another one (or another tab).
+  watch(userId, syncPrefs);
+  const unsubscribe = onPrefsChange(() => Object.assign(prefs, readPrefs(userId.value)));
 
   function setPrefs(patch: Partial<VoicePrefs>) {
     syncPrefs();
+    writePrefs(userId.value, { ...prefs, ...patch }); // every composer (this one too) reloads
     Object.assign(prefs, patch);
-    writePrefs(userId.value, { ...prefs });
   }
 
   function start(focus = true) {
@@ -176,6 +181,7 @@ export function useVoiceInput(text: Ref<string>, field: Ref<Field | null>, makeD
   }
 
   onBeforeUnmount(() => {
+    unsubscribe();
     if (holding.value) watchLoss(false);
     holding.value = false;
     if (ctl.active) ctl.cancel();
