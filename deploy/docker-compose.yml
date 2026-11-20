@@ -76,6 +76,8 @@ services:
     environment: *cp-env
     volumes:
       - ${OFFICE_HOST_DIR:-./office}:/srv/office:ro
+      # Mirrors of standalone Git repositories (git-repos.md §5): a cache, rebuilt from the upstream when lost.
+      - git-mirrors:/var/lib/agent-teams/git-mirrors
     ports:
       - "${BIND:-127.0.0.1}:${PORT}:${PORT}"
     depends_on:
@@ -83,3 +85,6 @@ services:
         condition: service_completed_successfully
       valkey:
         condition: service_healthy
+
+volumes:
+  git-mirrors:

@@ -25,7 +25,7 @@ export const settingsRoutes: RouteRecordRaw[] = [
   { path: "/settings", redirect: "/settings/team" },
   { path: "/settings/team", component: () => import("@/pages/settings/Team.vue") },
   { path: "/settings/nodes", component: () => import("@/pages/settings/Nodes.vue") },
-  { path: "/settings/git", component: () => import("@/pages/settings/GitHub.vue") },
+  { path: "/settings/git", component: () => import("@/pages/settings/GitRepos.vue") },
   { path: "/settings/servers", component: () => import("@/pages/settings/Servers.vue") },
   { path: "/settings/appearance", component: () => import("@/pages/settings/Appearance.vue") },
 ];

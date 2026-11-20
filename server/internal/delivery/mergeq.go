@@ -325,7 +325,7 @@ func (e *Engine) ciVerdict(ctx context.Context, t core.Thread, repo ghops.Repo, 
 	}
 	checks, err := e.gh.CheckRuns(ctx, repo, sha)
 	if errors.Is(err, ghops.ErrNoChecks) {
-		return CIPass, nil, e.degraded(ctx, t)
+		return CIPass, nil, e.degraded(ctx, t, repo)
 	}
 	if err != nil {
 		return CIPending, nil, err
@@ -353,7 +353,14 @@ func (e *Engine) recordChecks(ctx context.Context, t core.Thread, queueID *strin
 // degradedNote is posted once per thread when CI cannot be read.
 const degradedNote = "CI 关卡已降级为 off：平台的 GitHub App 没有 checks:read 权限（请管理员在 GitHub 上给 App 加权限并批准），合并不等待检查。"
 
-func (e *Engine) degraded(ctx context.Context, t core.Thread) error {
+// standaloneCINote is degradedNote for a standalone Git repository (plain git has no check runs).
+const standaloneCINote = "CI 关卡已降级为 off：%s 是独立 Git 仓库，平台读不到它的 CI 结果，合并不等待检查（需要时让成员在任务里自己跑测试）。"
+
+func (e *Engine) degraded(ctx context.Context, t core.Thread, repo ghops.Repo) error {
+	note := degradedNote
+	if repo.Standalone() {
+		note = fmt.Sprintf(standaloneCINote, repo.Slug)
+	}
 	var n int64
 	err := e.core.Pool.Gorm(ctx).Model(&core.Message{}).Where("conversation_id = ? AND meta->>'notice' = 'ci_degraded'", t.ID).
 		Count(&n).Error
@@ -362,7 +369,7 @@ func (e *Engine) degraded(ctx context.Context, t core.Thread) error {
 	}
 	return e.core.InTx(ctx, func(tx *core.Tx) error {
 		m, err := core.InsertMessage(ctx, tx, core.NewMessage{ConversationID: t.ID, Role: "system", Author: "platform", Kind: "note",
-			Content: degradedNote, Meta: map[string]any{"notice": "ci_degraded", "thread_no": t.No}})
+			Content: note, Meta: map[string]any{"notice": "ci_degraded", "thread_no": t.No}})
 		if err != nil {
 			return err
 		}

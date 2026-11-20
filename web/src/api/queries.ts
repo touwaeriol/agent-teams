@@ -4,7 +4,7 @@
 import { useInfiniteQuery, useQuery, type InfiniteData } from "@tanstack/vue-query";
 import { computed, toValue, type MaybeRefOrGetter } from "vue";
 import { client, list, unwrap } from "./client";
-import type { MessageView, Page, ProjectServersView, ServerView, SshAuditPage, ThreadView } from "./views";
+import type { GitCredentialView, GitRepoView, MessageView, Page, ProjectServersView, ServerView, SshAuditPage, ThreadView } from "./views";
 
 type Arg<T = string> = MaybeRefOrGetter<T>;
 
@@ -58,6 +58,8 @@ export const keys = {
   deliverableFiles: (id: string, version = 0) => ["deliverable", id, "files", version] as const,
   deliverableComments: (id: string) => ["deliverable", id, "comments"] as const,
   connections: ["git"] as const,
+  gitRepos: ["git-repos"] as const,
+  gitCredentials: ["git-credentials"] as const,
   servers: ["servers"] as const,
   serverAudit: (id: string, f: AuditFilter = {}) => ["servers", id, "audit", f] as const,
   projectServers: (pid: string) => ["p", pid, "servers"] as const,
@@ -307,6 +309,11 @@ export const useProjectServerAudit = (pid: Arg, filter: Arg<AuditFilter> = {}) =
   });
 
 export const useConnections = () => useQuery({ queryKey: keys.connections, queryFn: () => list(client.GET("/api/git/connections")) });
+
+/** Standalone Git repositories and their credentials (git-repos.md). */
+export const useGitRepos = () =>
+  useQuery({ queryKey: keys.gitRepos, queryFn: async () => ((await list(client.GET("/api/git/repos"))) as GitRepoView[]).map((r) => ({ ...r, projects: r.projects ?? [] })) });
+export const useGitCredentials = () => useQuery({ queryKey: keys.gitCredentials, queryFn: () => list(client.GET("/api/git/credentials")) as Promise<GitCredentialView[]> });
 
 export const useRepos = (id: Arg, q: Arg = "") =>
   useKeyed(

@@ -268,7 +268,7 @@ func refuse(format string, a ...any) error { return userError{fmt.Sprintf(format
 var knownErrors = []error{core.ErrNotFound, scheduler.ErrUnknownAssignee, scheduler.ErrRoleExcluded, scheduler.ErrUnknownMain, scheduler.ErrUnknownDep,
 	scheduler.ErrDepEnded, scheduler.ErrTaskState, delivery.ErrPRExists, delivery.ErrMergeInProgress, delivery.ErrPlanOpen, delivery.ErrNoRepo,
 	delivery.ErrTaskNotReady, delivery.ErrBadURL, delivery.ErrPRKind, orchestrator.ErrNoNode, orchestrator.ErrRoleNotFound, orchestrator.ErrNoEmployee,
-	delivery.ErrNothingToPR, delivery.ErrBaseNeedsRepo, delivery.ErrTasksOpen, delivery.ErrNotPushed, orchestrator.ErrUnknownRepo, core.ErrBaseFixed}
+	delivery.ErrNothingToPR, delivery.ErrStandaloneNoPR, delivery.ErrBaseNeedsRepo, delivery.ErrTasksOpen, delivery.ErrNotPushed, orchestrator.ErrUnknownRepo, core.ErrBaseFixed}
 
 func (s *Service) ignoreUserErrors(err error) error {
 	var ue userError

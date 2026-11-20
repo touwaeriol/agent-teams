@@ -33,6 +33,7 @@ var (
 	ErrNoRepo          = ghops.ErrNoRepo
 	ErrPRExists        = errors.New("这个讨论串已经开过 PR 了")
 	ErrNothingToPR     = errors.New("讨论串还没有把改动合并进任何仓库的讨论串分支")
+	ErrStandaloneNoPR  = errors.New("改动所在的是独立 Git 仓库，没有 PR：改动已经在讨论串分支上，直接调用 finish(summary) 结束讨论串")
 	ErrBaseNeedsRepo   = errors.New("项目有多个仓库要开 PR，指定 base 时请同时写 repo")
 	ErrMergeInProgress = errors.New("合并队列里还有正在合并的条目，等它们处理完再开 PR")
 	ErrPlanOpen        = errors.New("还有主任务没有完成")
@@ -133,7 +134,7 @@ func (e *Engine) pushRepo(ctx context.Context, tx *core.Tx, p store.Project, emp
 	nRepos int, meta map[string]any) error {
 	paths := orchestrator.PathsOf(emp, &t)
 	cwd := e.orch.CheckoutCwd(ctx, tx, emp, t, r.Slug, nRepos)
-	body := protocol.GitPush{JobID: protocol.JobID(core.NewID("g")), ProjectID: p.ID, Repo: protocol.Repo(r.Slug),
+	body := protocol.GitPush{JobID: protocol.JobID(core.NewID("g")), ProjectID: p.ID, Repo: protocol.Repo(r.NodeRepo()), RemoteURL: e.gh.NodeRemote(r),
 		Cwd: protocol.RelPath(cwd), Refspec: "HEAD:refs/heads/" + paths.Branch, Employee: emp.Name, ThreadNo: t.No,
 		UnchangedAgainst: e.unchangedRefs(ctx, tx, t, r)}
 	_, err := e.gw.Enqueue(ctx, tx, *emp.NodeID, nodegw.Command{Type: protocol.TypeGitPush, Body: body, Meta: meta})

@@ -2,7 +2,7 @@
 // Settings screens on Vue: the repo list and picker, schedules, tag input, number settings, the
 // team draft saved in display order and project settings switches, asserted through the API client.
 import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
-import { flushPromises, mount } from "@vue/test-utils";
+import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import ElementPlus from "element-plus";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h, nextTick, ref, type Component } from "vue";
@@ -48,6 +48,9 @@ afterEach(() => {
   vi.restoreAllMocks();
   document.body.innerHTML = "";
 });
+// Registered after the cleanup above so it runs first: unmount every wrapper (Element Plus selects
+// keep listeners that would otherwise fire after the environment is torn down).
+enableAutoUnmount(afterEach);
 
 const connection = { id: "g1", kind: "app", login: "touwaeriol", name: "touwaeriol", installation_settings_url: null, needs_permission_approval: false, created_at: "2026-01-01T00:00:00Z" };
 
@@ -66,11 +69,22 @@ describe("RepoList", () => {
     expect(value.value.map((r) => r.repo)).toEqual(["o/api"]);
     expect(w.text()).toContain("再加一个仓库");
   });
-  it("asks to connect GitHub when there is no connection", async () => {
-    api([["GET", /\/api\/git\/connections$/, []]]);
+  it("asks to connect GitHub or add a Git repository when there is neither", async () => {
+    api([["GET", /\/api\/git\/connections$/, []], ["GET", /\/api\/git\/repos$/, []]]);
     const w = mountWith(RepoList, { modelValue: [] });
     await flushPromises();
-    expect(w.text()).toContain("还没有连接 GitHub。先去连接");
+    expect(w.text()).toContain("还没有可用的仓库。先去连接 GitHub 或添加 Git 仓库");
+  });
+  it("lists a standalone repository with its source and the push-branch tag", async () => {
+    api([
+      ["GET", /\/api\/git\/connections$/, []],
+      ["GET", /\/api\/git\/repos$/, [{ id: "gr_1", slug: "gitlab.com/acme/web", name: "web", provider: "gitlab", url: "https://gitlab.com/acme/web.git", access: "write", projects: [] }]],
+    ]);
+    const value = ref<RepoRef[]>([{ repo: "gitlab.com/acme/web", git_connection_id: null, git_repo_id: "gr_1" }]);
+    const w = mountWith(RepoList, { modelValue: value.value });
+    await flushPromises();
+    expect(w.get("li").text()).toBe("1gitlab.com/acme/web推送分支交付GitLab · 单独添加");
+    expect(w.text()).toContain("再加一个仓库");
   });
 });
 

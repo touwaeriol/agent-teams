@@ -2,12 +2,18 @@ package delivery
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/credvault"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -61,9 +67,13 @@ func (e *Engine) credential(ctx context.Context, node store.Node, r *protocol.Cr
 	if err != nil {
 		return refuse(err.Error())
 	}
-	_, repos, err := e.reposOf(ctx, cs.projectID)
+	p, repos, err := e.reposOf(ctx, cs.projectID)
 	if err != nil {
 		return refuse("no_repo")
+	}
+	cs.userID = p.UserID
+	if up, ok := ghops.FindUpstream(repos, r.Host, r.Path); ok {
+		return e.upstreamCredential(ctx, cs, up)
 	}
 	repo, ok := ghops.Find(repos, r.Path)
 	if !ok || !samePath(repo.Slug, r.Path) || r.Host != "github.com" || (cs.repo != "" && !samePath(cs.repo, r.Path)) {
@@ -105,11 +115,87 @@ func samePath(slug, path string) bool {
 	return strings.EqualFold(p, slug)
 }
 
+// upstreamCredential answers for a standalone repository with its own credential (git-repos.md
+// §5): the user chose to configure it into the employee's environment, where the daemon keeps
+// it in memory and hands it only to the session's (or job's) git through the per-session secret.
+// HTTPS gets the token; SSH the private key as unencrypted PKCS#8 (Node can load it) with the
+// pinned host key. The expiry makes the daemon ask again, so a replaced or removed credential
+// stops being handed out. Protected branches are refused by the node's pre-push hook, as for GitHub.
+func (e *Engine) upstreamCredential(ctx context.Context, cs callerScope, repo ghops.Repo) protocol.CredResponse {
+	if cs.repo != "" && cs.repo != repo.NodeRepo() {
+		return refuse("repo_not_in_project")
+	}
+	g := repo.GitRepo()
+	if g.CredentialID == nil {
+		return refuse("no_credential") // a public repository: git needs nothing
+	}
+	if g.Transport == "ssh" && g.HostKey == "" {
+		return refuse("host_key_not_pinned")
+	}
+	relay := e.gh.Relay
+	if relay == nil || relay.Store == nil || g.UserID != cs.userID {
+		return refuse("credential_unavailable")
+	}
+	rem, err := relay.Open(ctx, *g)
+	if err != nil {
+		e.log.Warn("open standalone credential", "repo", g.ID, "err", err)
+		return refuse("credential_unavailable")
+	}
+	user := rem.Username
+	exp := e.now().Add(patTTL).UTC()
+	if g.Transport != "ssh" {
+		pw := rem.Cred.Password
+		return protocol.CredResponse{Ok: true, Username: &user, Password: &pw, ExpiresAt: &exp}
+	}
+	key, err := nodeSSHKey(rem.Cred, g.Host, g.HostKey)
+	if err != nil {
+		e.log.Warn("convert standalone ssh key", "repo", g.ID, "err", err)
+		return refuse("credential_unavailable")
+	}
+	return protocol.CredResponse{Ok: true, Username: &user, SshKey: key, ExpiresAt: &exp}
+}
+
+// nodeSSHKey is the private key as unencrypted PKCS#8 PEM (passphrase removed), its
+// authorized_keys line and the known_hosts line pinning host (host[:port]) to hostKey.
+func nodeSSHKey(c credvault.Credential, host, hostKey string) (*protocol.CredResponseSshKey, error) {
+	var raw any
+	var err error
+	if c.Passphrase != "" {
+		raw, err = ssh.ParseRawPrivateKeyWithPassphrase([]byte(c.PrivateKey), []byte(c.Passphrase))
+	} else {
+		raw, err = ssh.ParseRawPrivateKey([]byte(c.PrivateKey))
+	}
+	if err != nil {
+		return nil, err
+	}
+	if k, ok := raw.(*ed25519.PrivateKey); ok {
+		raw = *k // x509 wants the value
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(raw)
+	if err != nil {
+		return nil, err
+	}
+	signer, err := ssh.NewSignerFromKey(raw)
+	if err != nil {
+		return nil, err
+	}
+	pattern := host
+	if h, port, ok := strings.Cut(host, ":"); ok {
+		pattern = "[" + h + "]:" + port
+	}
+	return &protocol.CredResponseSshKey{
+		PrivateKey: string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
+		PublicKey:  strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey()))),
+		KnownHosts: pattern + " " + strings.TrimSpace(hostKey),
+	}, nil
+}
+
 // callerScope is the project, permission set and (for git jobs) the one repository a caller may get a token for.
 type callerScope struct {
 	projectID string
+	userID    string // the project's owner (standalone credentials belong to them)
 	scope     ghops.Scope
-	repo      string // "" = any repository of the project
+	repo      string // "" = any repository of the project (as git jobs name it: owner/name or git/<id>)
 }
 
 // credScope decides the project and permission set for the caller. A session may read every

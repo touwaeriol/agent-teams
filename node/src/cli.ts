@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { ConfigError, loadConfig } from "./config.js";
+import { gitSshMain } from "./cred/gitssh.js";
 import { ghMain, gitCredentialMain } from "./cred/helper.js";
 import { Daemon } from "./daemon.js";
 import { sshProxyMain } from "./ssh/proxy.js";
@@ -14,7 +15,7 @@ usage:
   agent-teams-node version
 
 Defaults come from ~/.config/agent-teams/node.env (AGENT_TEAMS_CONSOLE, AGENT_TEAMS_NODE_TOKEN,
-AGENT_TEAMS_ROOT, AGENT_TEAMS_MAX_SESSIONS, AGENT_TEAMS_PASS_ENV). Internal helpers: git-credential, gh, ssh-proxy.
+AGENT_TEAMS_ROOT, AGENT_TEAMS_MAX_SESSIONS, AGENT_TEAMS_PASS_ENV). Internal helpers: git-credential, git-ssh, gh, ssh-proxy.
 `;
 
 async function main(argv: string[]): Promise<number> {
@@ -26,6 +27,8 @@ async function main(argv: string[]): Promise<number> {
       return gitCredential(rest);
     case "gh":
       return ghMain(rest, process.env);
+    case "git-ssh":
+      return gitSshMain(rest, process.env);
     case "ssh-proxy":
       return sshProxyMain(rest, process.env);
     case "version":

@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RoleView } from "@/api/views";
 import { pickedSkillFiles, toBase64 } from "@/components/app/library/upload";
-import { addRepo, matchesRepo, moveRepo, normalizeRepo, removeRepo, repoOptions, reposPayload, sortRepos } from "@/components/app/repo/repo";
+import { addRepo, matchesRepo, moveRepo, normalizeRepo, removeRepo, repoOptions, reposPayload, sortRepos, sourceLabel, standaloneOptions } from "@/components/app/repo/repo";
 import { draftValid, emptyDraft, scheduleBody } from "@/components/app/schedules/schedule";
 import { parseSetting } from "@/pages/admin/admin";
 import { connectionKind, usedText } from "@/pages/settings/github/github";
@@ -27,6 +27,21 @@ describe("repositories", () => {
     expect(moveRepo(two, 1, -1).map((r) => r.repo)).toEqual(["o/web", "o/api"]);
     expect(moveRepo(two, 1, 1)).toBe(two);
     expect(removeRepo(two, 0).map((r) => r.repo)).toEqual(["o/web"]);
+  });
+
+  it("mixes standalone Git repositories into a project's list", () => {
+    const g = { id: "gr_1", slug: "github.com/x/y", name: "y", provider: "gitlab", url: "https://github.com/x/y.git", access: "read", projects: [{ id: "p2", name: "other" }] } as never;
+    const one = addRepo([], { repo: "github.com/x/y", git_connection_id: null, git_repo_id: "gr_1" });
+    expect(one).toEqual([{ repo: "github.com/x/y", git_connection_id: null, git_repo_id: "gr_1" }]); // the slug is kept as is
+    expect(addRepo(one, { repo: "github.com/x/y", git_connection_id: null, git_repo_id: "gr_1" })).toBe(one);
+    expect(reposPayload([...one, { repo: "o/a", git_connection_id: "g" }])).toEqual([
+      { repo: "github.com/x/y", git_connection_id: null, git_repo_id: "gr_1" },
+      { repo: "o/a", git_connection_id: "g" },
+    ]);
+    expect(sourceLabel(one[0], [], [g])).toBe("GitLab · 单独添加");
+    expect(sourceLabel({ repo: "a", git_connection_id: null, git_repo_id: "gone" }, [], [g])).toBe("仓库已删除");
+    expect(standaloneOptions([g], [], "p1")).toEqual([{ value: "github.com/x/y", usedBy: "已被 other 使用", private: false, keywords: "y https://github.com/x/y.git" }]);
+    expect(standaloneOptions([g], one)).toEqual([]);
   });
   it("picker rows leave out listed repos and name other projects using one", () => {
     const items = [repo("o/api", [{ id: "p1", name: "本项目" }]), repo("o/web", [{ id: "p2", name: "官网" }, { id: "p3", name: "后台" }]), repo("o/sec", [], { private: true, description: "Secrets vault" })];

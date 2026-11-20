@@ -473,6 +473,22 @@ func (env sessionEnv) slugs() []string {
 	return out
 }
 
+// gitHosts are the standalone repositories' hosts (deduplicated, with their transport) the
+// session's git may get credentials for (git-repos.md §5).
+func (env sessionEnv) gitHosts() []protocol.SessionOpenGitHostsElem {
+	var out []protocol.SessionOpenGitHostsElem
+	seen := map[string]bool{}
+	for _, r := range env.repos {
+		g := r.GitRepo()
+		if g == nil || g.CredentialID == nil || seen[g.Transport+"|"+g.Host] {
+			continue
+		}
+		seen[g.Transport+"|"+g.Host] = true
+		out = append(out, protocol.SessionOpenGitHostsElem{Transport: protocol.SessionOpenGitHostsElemTransport(g.Transport), Host: g.Host})
+	}
+	return out
+}
+
 // checkoutPaths are the per-repository checkouts of an employee (cleanup removes them).
 func (o *Orchestrator) checkoutPaths(ctx context.Context, q core.DB, p Paths, env sessionEnv) []string {
 	slugs := env.slugs()
@@ -542,7 +558,7 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 	}
 	open, err := buildOpen(sessionInput{emp: env.emp, thread: env.thread, project: env.project, node: node, sess: sess,
 		prepare: prepare, first: first, resume: resume, system: system, rules: rules, hasRepo: len(env.repos) > 0,
-		repos: env.slugs(), protRefs: o.protectedRefs(ctx, tx, env),
+		repos: env.slugs(), protRefs: o.protectedRefs(ctx, tx, env), gitHosts: env.gitHosts(),
 		window: window})
 	if err != nil {
 		return err
@@ -632,8 +648,8 @@ func (o *Orchestrator) prepareRepo(ctx context.Context, tx *core.Tx, env session
 	mode := protocol.GitPrepareMode(orDefault(env.project.WorkMode, "worktree"))
 	job := core.NewID("g")
 	cwd := o.CheckoutCwd(ctx, tx, env.emp, *env.thread, r.Slug, len(env.repos))
-	body := protocol.GitPrepare{JobID: protocol.JobID(job), ProjectID: env.project.ID, Repo: protocol.Repo(r.Slug),
-		Mode: mode, Cwd: protocol.RelPath(cwd), Branch: p.Branch, Base: &base, Fetch: true, Sync: opts.sync}
+	body := protocol.GitPrepare{JobID: protocol.JobID(job), ProjectID: env.project.ID, Repo: protocol.Repo(r.NodeRepo()),
+		RemoteURL: o.gh.NodeRemote(r), Mode: mode, Cwd: protocol.RelPath(cwd), Branch: p.Branch, Base: &base, Fetch: true, Sync: opts.sync}
 	if mode == "worktree" {
 		shared := protocol.RelPath(sharedFor(env.project.ID, r.Slug, cwd == p.Cwd))
 		body.Shared = &shared

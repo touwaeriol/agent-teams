@@ -7,7 +7,10 @@ export type CredScope = { session_id: string; open_gen?: number } | { job_id: st
 
 export interface Credential {
   username: string;
+  /** Token or password ("" with an SSH key). */
   password: string;
+  /** A standalone SSH repository's key (git-repos.md §5), kept in memory only. */
+  sshKey?: NonNullable<CredResponse["ssh_key"]>;
   expiresAt: number;
 }
 
@@ -25,7 +28,7 @@ const MAX_TRIES = 3;
 const REFRESH_MARGIN_MS = 5 * 60_000;
 
 /**
- * Short-lived GitHub tokens on demand (protocol.md §8): cred.request is unreliable and
+ * Short-lived GitHub tokens (and standalone repositories' credentials) on demand (protocol.md §8): cred.request is unreliable and
  * retried every 10 s with the same req_id; tokens live only in memory until 5 minutes
  * before they expire. Bodies are never logged.
  */
@@ -47,9 +50,12 @@ export class CredBroker {
     if (hit && hit.expiresAt - REFRESH_MARGIN_MS > Date.now()) return hit;
     const force = this.stale.has(key);
     const res = await this.request({ req_id: newId("cr_"), ...scope, host, path, purpose, ...(force ? { force_refresh: true } : {}) });
-    if (!res.ok || !res.password) throw new CredDenied(res.error ?? "credential refused");
+    if (!res.ok || (!res.password && !res.ssh_key)) throw new CredDenied(res.error ?? "credential refused");
     if (force) this.stale.delete(key);
-    const cred = { username: res.username ?? "x-access-token", password: res.password, expiresAt: res.expires_at ? Date.parse(res.expires_at) : Date.now() + 30 * 60_000 };
+    const cred: Credential = {
+      username: res.username ?? "x-access-token", password: res.password ?? "", ...(res.ssh_key ? { sshKey: res.ssh_key } : {}),
+      expiresAt: res.expires_at ? Date.parse(res.expires_at) : Date.now() + 30 * 60_000,
+    };
     if (purpose === "read") this.cache.set(key, { scope, host, path, cred });
     this.sweep();
     return cred;

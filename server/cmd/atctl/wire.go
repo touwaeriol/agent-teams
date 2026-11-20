@@ -7,6 +7,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/config"
 	"github.com/touwaeriol/agent-teams/server/internal/credvault"
 	"github.com/touwaeriol/agent-teams/server/internal/engine"
+	"github.com/touwaeriol/agent-teams/server/internal/gitrelay"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/orchapi"
@@ -27,9 +28,12 @@ func wire(d httpapi.Deps) (httpapi.Deps, func(context.Context), error) {
 	if err != nil {
 		return d, nil, err
 	}
+	if d.Relay == nil {
+		d.Relay = &gitrelay.Relay{Store: d.Store, Vault: vault, Dir: d.Config.GitMirrorDir, Log: d.Log}
+	}
 	e, err := engine.New(engine.Deps{Store: d.Store, KV: d.KV, GitHub: d.GitHub, Tokens: d.Tokens,
 		Box: auth.NewSecretBox(d.Config.SecretKeys...), Office: d.Office, Log: d.Log, Gateway: nodegw.Config{Validate: true},
-		Vault: vault})
+		Vault: vault, Relay: d.Relay})
 	if err != nil {
 		return d, nil, err
 	}

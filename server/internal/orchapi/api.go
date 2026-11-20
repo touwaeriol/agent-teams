@@ -128,6 +128,7 @@ var errorMap = []struct {
 	{orchestrator.ErrForwardFiles, 422, "validation"},
 	{delivery.ErrPRExists, 409, "pr_exists"},
 	{delivery.ErrNothingToPR, 409, "nothing_to_pr"},
+	{delivery.ErrStandaloneNoPR, 409, "standalone_no_pr"},
 	{delivery.ErrBaseNeedsRepo, 422, "validation"},
 	{orchestrator.ErrUnknownRepo, 422, "unknown_repo"},
 	{core.ErrBaseFixed, 409, "base_fixed"},

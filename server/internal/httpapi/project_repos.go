@@ -13,14 +13,15 @@ import (
 // project context, which every employee reads.
 type RepoRef struct {
 	Repo            string  `json:"repo" maxLength:"300" doc:"GitHub URL, git@ URL or owner/repo"`
-	GitConnectionID *string `json:"git_connection_id" nullable:"true"`
+	GitConnectionID *string `json:"git_connection_id" nullable:"true" required:"false"`
+	GitRepoID       *string `json:"git_repo_id" nullable:"true" required:"false" doc:"A standalone repository (git-repos.md); then repo is its slug and git_connection_id is null"`
 }
 
 // RepoRefs renders a project's repositories.
 func RepoRefs(repos []store.ProjectRepo) []RepoRef {
 	out := make([]RepoRef, len(repos))
 	for i, r := range repos {
-		out[i] = RepoRef{Repo: r.Repo, GitConnectionID: r.GitConnectionID}
+		out[i] = RepoRef{Repo: r.Repo, GitConnectionID: r.GitConnectionID, GitRepoID: r.GitRepoID}
 	}
 	return out
 }
@@ -48,6 +49,9 @@ func (s *Server) checkRepos(ctx context.Context, userID string, in []RepoRef, kn
 }
 
 func (s *Server) checkOneRepo(ctx context.Context, userID string, r RepoRef, known []store.ProjectRepo) (store.ProjectRepo, error) {
+	if id := deref(r.GitRepoID); id != "" {
+		return s.checkStandaloneRepo(ctx, userID, id)
+	}
 	if deref(r.GitConnectionID) == "" {
 		return store.ProjectRepo{}, invalid([]FieldError{{"git_connection_id", "关联仓库需要先选择一个 Git 连接"}}, "关联仓库需要先选择一个 Git 连接")
 	}
@@ -87,4 +91,13 @@ func (s *Server) patchRepos(ctx context.Context, userID string, cur store.Projec
 		return nil, nil
 	}
 	return s.checkRepos(ctx, userID, *in, cur.Repos)
+}
+
+// checkStandaloneRepo: one of the user's standalone repositories, named by its slug.
+func (s *Server) checkStandaloneRepo(ctx context.Context, userID, id string) (store.ProjectRepo, error) {
+	g, err := s.store.GitRepo(ctx, userID, id)
+	if err != nil {
+		return store.ProjectRepo{}, gitStoreErr(err, "仓库")
+	}
+	return store.ProjectRepo{Repo: g.Slug, GitRepoID: &g.ID}, nil
 }

@@ -83,7 +83,7 @@ export type TurnId = string;
  */
 export type RelPath = string;
 /**
- * GitHub repository as owner/name.
+ * GitHub repository as owner/name, or git/<id> for a standalone Git repository (with remote_url).
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "Repo".
@@ -373,7 +373,7 @@ export interface SshServer {
   name: string;
 }
 /**
- * Credential helper asks for a short-lived token. Unreliable, retried after 10 s with the same req_id; never logged.
+ * Credential helper (or git-ssh wrapper) asks for a short-lived token or a standalone repository's credential. Unreliable, retried after 10 s with the same req_id; never logged.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "CredRequest".
@@ -383,9 +383,12 @@ export interface CredRequest {
   session_id?: SessionId;
   job_id?: JobId;
   open_gen?: OpenGen;
+  /**
+   * github.com, or a standalone repository's host[:port].
+   */
   host: string;
   /**
-   * owner/name.git
+   * owner/name.git (a standalone repository: its path on the host, with .git).
    */
   path: string;
   purpose: "read" | "push";
@@ -395,7 +398,7 @@ export interface CredRequest {
   force_refresh?: boolean;
 }
 /**
- * Token for a cred.request, or a refusal. Unreliable; never logged.
+ * Token (or, for an SSH repository, a private key) for a cred.request, or a refusal. Unreliable; never logged.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "CredResponse".
@@ -405,6 +408,14 @@ export interface CredResponse {
   ok: boolean;
   username?: string;
   password?: string;
+  /**
+   * SSH repositories (git-repos.md §5): the private key as unencrypted PKCS#8 PEM, its authorized_keys line and the pinned known_hosts line. Kept in memory by the git-ssh wrapper only.
+   */
+  ssh_key?: {
+    private_key: string;
+    public_key: string;
+    known_hosts: string;
+  };
   expires_at?: Timestamp;
   /**
    * e.g. repo_not_in_project.
@@ -487,6 +498,10 @@ export interface GitPrepare {
   job_id: JobId;
   project_id: string;
   repo: Repo;
+  /**
+   * Clone and push URL for a repository the daemon does not reach at git_base_url/<repo>.git: a standalone Git repository's upstream (git-repos.md §5), HTTPS without credentials, ssh:// or scp-like. Credentials come from cred.request with the URL's host and path (SSH: through the git-ssh wrapper). Absent: git_base_url/<repo>.git.
+   */
+  remote_url?: string;
   mode: "worktree" | "clone";
   shared?: RelPath1;
   cwd: RelPath;
@@ -535,6 +550,10 @@ export interface GitPush {
   job_id: JobId;
   project_id: string;
   repo: Repo;
+  /**
+   * Clone and push URL for a repository the daemon does not reach at git_base_url/<repo>.git: a standalone Git repository's upstream (git-repos.md §5), HTTPS without credentials, ssh:// or scp-like. Credentials come from cred.request with the URL's host and path (SSH: through the git-ssh wrapper). Absent: git_base_url/<repo>.git.
+   */
+  remote_url?: string;
   cwd: RelPath;
   /**
    * No leading +.
@@ -1441,6 +1460,18 @@ export interface SessionOpen {
    * Install the credential helper and gh wrapper.
    */
   git_credentials?: boolean;
+  /**
+   * Standalone Git repositories' hosts this session may get credentials for (git-repos.md §5): HTTPS hosts get the credential helper, SSH hosts the git-ssh wrapper. Only with git_credentials.
+   *
+   * @maxItems 64
+   */
+  git_hosts?: {
+    transport: "https" | "ssh";
+    /**
+     * host[:port], the port only when not the default.
+     */
+    host: string;
+  }[];
   ssh_servers?: SshServers;
   /**
    * Held back until session.release.

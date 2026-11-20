@@ -114,7 +114,8 @@ type sessionInput struct {
 	hasRepo  bool
 	repos    []string // repository slugs checked out under the employee's directory
 	protRefs []string
-	window   *int // the context window the employee's last session of the runtime reported
+	gitHosts []protocol.SessionOpenGitHostsElem // standalone repositories' hosts (git-repos.md §5)
+	window   *int                               // the context window the employee's last session of the runtime reported
 }
 
 // buildOpen renders session.open for an employee.
@@ -132,6 +133,9 @@ func buildOpen(in sessionInput) (protocol.SessionOpen, error) {
 		Employee: employeeRef(in.emp, in.thread), Runtime: protocol.Runtime(in.emp.Runtime), Cwd: protocol.RelPath(in.sess.Cwd),
 		PlatformTools: tools, Env: protocol.SessionOpenEnv{"LANG": "C.UTF-8"}, GitCredentials: &gitCreds,
 		FirstMessage: in.first, Resume: in.resume, Context: sessionContext(in.emp.Spec, in.window)}
+	if gitCreds {
+		open.GitHosts = in.gitHosts
+	}
 	if gitCreds && len(in.protRefs) > 0 {
 		// The platform pre-push hook refuses these (architecture.md §8.1), whatever the runtime.
 		open.Env[ProtectedRefsEnv] = strings.Join(in.protRefs, " ")

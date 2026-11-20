@@ -277,3 +277,15 @@ func SettingAAD(key string) []byte { return fields("at-setting:v1", key) }
 func HostKeyMACData(serverID, host string, port int, hostKey string) []byte {
 	return fields("at-remote-hostkey:v1", serverID, host, strconv.Itoa(port), hostKey)
 }
+
+// GitCredAAD is the AAD of a standalone Git repository credential (git-repos.md §4.1): user,
+// credential id, kind, host and username. Changing any of them means entering it again, so a
+// database edit that points the credential at another host cannot make the console send it there.
+func GitCredAAD(userID, credID, kind, host, username string) []byte {
+	return fields("at-git-cred:v1", userID, credID, kind, host, username)
+}
+
+// GitHostKeyMACData is what the MAC of a Git repository's pinned SSH host key covers.
+func GitHostKeyMACData(repoID, host, hostKey string) []byte {
+	return fields("at-git-hostkey:v1", repoID, host, hostKey)
+}

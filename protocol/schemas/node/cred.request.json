@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/node/cred.request.json",
   "title": "CredRequest",
-  "description": "Credential helper asks for a short-lived token. Unreliable, retried after 10 s with the same req_id; never logged.",
+  "description": "Credential helper (or git-ssh wrapper) asks for a short-lived token or a standalone repository's credential. Unreliable, retried after 10 s with the same req_id; never logged.",
   "x-direction": "node_to_console",
   "x-key": [
     "req_id"
@@ -30,10 +30,11 @@
       "$ref": "common.json#/$defs/OpenGen"
     },
     "host": {
-      "type": "string"
+      "type": "string",
+      "description": "github.com, or a standalone repository's host[:port]."
     },
     "path": {
-      "description": "owner/name.git",
+      "description": "owner/name.git (a standalone repository: its path on the host, with .git).",
       "type": "string"
     },
     "purpose": {

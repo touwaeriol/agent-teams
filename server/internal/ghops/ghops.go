@@ -18,6 +18,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/github"
+	"github.com/touwaeriol/agent-teams/server/internal/gitrelay"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -49,6 +50,8 @@ type GitHub struct {
 	Tokens *github.Tokens
 	Box    *auth.SecretBox
 	Store  *store.Store
+	// Relay reaches standalone Git repositories through their mirrors (git-repos.md §5).
+	Relay *gitrelay.Relay
 }
 
 // In returns g reading connections through q (a transaction; nil keeps the pool).
@@ -61,11 +64,68 @@ func (g *GitHub) In(q store.DB) *GitHub {
 	return &c
 }
 
+// ErrUnsupported is what hosting features (pull requests, file API, workflows) answer for a
+// standalone Git repository: plain git has none (git-repos.md §7).
+var ErrUnsupported = errors.New("独立 Git 仓库没有拉取请求等托管平台功能")
+
+// errNoCI is ErrNoChecks for a standalone repository: the merge queue's CI gate degrades to off.
+var errNoCI = fmt.Errorf("%w（独立 Git 仓库读不到 CI 检查）", ErrNoChecks)
+
 // Repo is one of a project's repositories and how to reach it.
 type Repo struct {
-	Slug    string // owner/name
+	Slug    string // owner/name, or host/path for a standalone repository
 	conn    store.GitConnection
+	git     *store.GitRepo // standalone repository (reached through the relay), else nil
 	project store.Project
+}
+
+// Standalone reports a standalone Git repository (no GitHub connection).
+func (r Repo) Standalone() bool { return r.git != nil }
+
+// GitRepoID is the standalone repository's id ("" for a GitHub repository).
+func (r Repo) GitRepoID() string {
+	if r.git == nil {
+		return ""
+	}
+	return r.git.ID
+}
+
+// NodeRepo is the repository as git jobs name it: owner/name, or git/<id> for a standalone
+// repository (whose daemon mirror and credential path follow from it; see RemoteURL).
+func (r Repo) NodeRepo() string {
+	if r.git != nil {
+		return "git/" + r.git.ID
+	}
+	return r.Slug
+}
+
+// NodeRemote is RemoteURL as the optional field of git.prepare / git.push.
+func (g *GitHub) NodeRemote(r Repo) *string {
+	if u := g.RemoteURL(r); u != "" {
+		return &u
+	}
+	return nil
+}
+
+// RemoteURL is where nodes clone a standalone repository from: its upstream, with the
+// credential handed to the employee's git on demand (git-repos.md §5); "" for GitHub, whose URL
+// the daemon builds from the slug.
+func (g *GitHub) RemoteURL(r Repo) string {
+	if r.git == nil {
+		return ""
+	}
+	return r.git.URL
+}
+
+// GitRepo is the standalone repository's saved row (nil for a GitHub repository).
+func (r Repo) GitRepo() *store.GitRepo { return r.git }
+
+// WebURL is the repository's page ("" when unknown).
+func (r Repo) WebURL() string {
+	if r.git != nil {
+		return r.git.WebURL
+	}
+	return "https://github.com/" + r.Slug
 }
 
 // ReposOf resolves a project's repositories (project order) with their connections;
@@ -73,6 +133,14 @@ type Repo struct {
 func (g *GitHub) ReposOf(ctx context.Context, p store.Project) ([]Repo, error) {
 	out := make([]Repo, 0, len(p.Repos))
 	for _, pr := range p.Repos {
+		if pr.GitRepoID != nil {
+			gr, err := g.Store.GitRepo(ctx, p.UserID, *pr.GitRepoID)
+			if err != nil {
+				return nil, fmt.Errorf("git repository %s: %w", pr.Repo, err)
+			}
+			out = append(out, Repo{Slug: gr.Slug, git: &gr, project: p})
+			continue
+		}
 		if pr.GitConnectionID == nil || pr.Repo == "" {
 			continue
 		}
@@ -100,22 +168,38 @@ func (g *GitHub) repo(ctx context.Context, p store.Project, pr store.ProjectRepo
 	return Repo{Slug: slug, conn: conn, project: p}, nil
 }
 
-// Find picks the repository named slug from a list (case-insensitive, ".git" and URLs allowed).
+// Find picks the repository named slug from a list (case-insensitive, ".git" and URLs allowed;
+// a standalone repository also by its relay path git/<id>.git).
 func Find(repos []Repo, slug string) (Repo, bool) {
 	want := strings.TrimSuffix(strings.Trim(strings.TrimSpace(slug), "/"), ".git")
 	if parsed, err := github.ParseRepo(want); err == nil {
 		want = parsed
 	}
 	for _, r := range repos {
-		if strings.EqualFold(r.Slug, want) {
+		if strings.EqualFold(r.Slug, want) || (r.git != nil && "git/"+r.git.ID == want) {
 			return r, true
 		}
 	}
 	return Repo{}, false
 }
 
-// Dir is the directory name of a repository's checkout inside an employee's directory (owner__name).
-func Dir(slug string) string { return strings.Replace(slug, "/", "__", 1) }
+// FindUpstream is the standalone repository at host (host[:port]) and path ("group/name.git"),
+// as git's credential helper and the git-ssh wrapper name it.
+func FindUpstream(repos []Repo, host, path string) (Repo, bool) {
+	want := strings.TrimSuffix(strings.Trim(strings.TrimSpace(path), "/"), ".git")
+	for _, r := range repos {
+		if r.git != nil && strings.EqualFold(r.git.Host, host) && strings.EqualFold(r.Slug, r.git.Host+"/"+want) {
+			return r, true
+		}
+	}
+	return Repo{}, false
+}
+
+// Dir is the directory name of a repository's checkout inside an employee's directory: owner__name,
+// or host__path__name for a standalone repository (every "/" becomes "__", ":" of a port "_").
+func Dir(slug string) string {
+	return strings.NewReplacer("/", "__", ":", "_").Replace(slug)
+}
 
 // Default branches are cached: a fresh entry is served as is; an older one is still served at
 // once while one background request refreshes it (stale-while-revalidate), so opening a session
@@ -142,7 +226,12 @@ type cachedBranch struct {
 }
 
 // branchKey is per git connection, like treeKey: one user's answer is not served to another.
-func branchKey(r Repo) string { return r.conn.ID + "|" + strings.ToLower(r.Slug) }
+func branchKey(r Repo) string {
+	if r.git != nil {
+		return "git|" + r.git.ID
+	}
+	return r.conn.ID + "|" + strings.ToLower(r.Slug)
+}
 
 // DefaultBranch returns the repository's default branch (see branchTTL for the caching).
 func (g *GitHub) DefaultBranch(ctx context.Context, r Repo) (string, error) {
@@ -192,6 +281,9 @@ func refreshBranch(ctx context.Context, key string, fetch func(context.Context) 
 }
 
 func (g *GitHub) fetchDefaultBranch(ctx context.Context, r Repo) (string, error) {
+	if r.git != nil {
+		return g.relay().DefaultBranch(ctx, *r.git)
+	}
 	var out struct {
 		DefaultBranch string `json:"default_branch"`
 	}
@@ -206,6 +298,9 @@ func (g *GitHub) fetchDefaultBranch(ctx context.Context, r Repo) (string, error)
 
 // HasChecks reports whether the connection can read check runs.
 func (r Repo) HasChecks() bool {
+	if r.git != nil {
+		return false
+	}
 	if r.conn.Kind != "app" {
 		return true
 	}
@@ -227,6 +322,9 @@ func (g *GitHub) Token(ctx context.Context, r Repo, scope Scope) (string, error)
 // refresh skips the token cache (the caller saw the cached token rejected), rate-limited by
 // Tokens.RefreshInstallationToken; it changes nothing for a PAT.
 func (g *GitHub) Credential(ctx context.Context, r Repo, scope Scope, refresh bool) (string, time.Time, error) {
+	if r.git != nil {
+		return "", time.Time{}, ErrUnsupported // nodes get relay tokens instead (delivery/cred.go)
+	}
 	if r.conn.Kind == "app" && r.conn.InstallationID != nil {
 		get := g.Tokens.InstallationToken
 		if refresh {
@@ -272,6 +370,9 @@ func request(r Repo, scope Scope) github.TokenRequest {
 }
 
 func (g *GitHub) call(ctx context.Context, r Repo, method, path string, body, out any) (int, error) {
+	if r.git != nil {
+		return 0, ErrUnsupported
+	}
 	tok, err := g.Token(ctx, r, ScopeFull)
 	if err != nil {
 		return 0, err
@@ -290,6 +391,10 @@ func Status(err error) int {
 
 // RefSHA returns the head sha of a branch.
 func (g *GitHub) RefSHA(ctx context.Context, r Repo, branch string) (string, error) {
+	if r.git != nil {
+		sha, err := g.relay().RefSHA(ctx, *r.git, branch)
+		return sha, relayErr(err)
+	}
 	var out struct {
 		Object struct {
 			SHA string `json:"sha"`
@@ -305,6 +410,10 @@ const MaxCompareFiles = 200
 // Compare lists the files changed between two commits (GitHub compare, base...head), at most
 // MaxCompareFiles of them.
 func (g *GitHub) Compare(ctx context.Context, r Repo, base, head string) ([]string, error) {
+	if r.git != nil {
+		files, err := g.relay().Compare(ctx, *r.git, base, head, MaxCompareFiles)
+		return files, relayErr(err)
+	}
 	var out struct {
 		Files []struct {
 			Filename string `json:"filename"`
@@ -322,6 +431,9 @@ func (g *GitHub) Compare(ctx context.Context, r Repo, base, head string) ([]stri
 
 // CreateRef creates refs/heads/<branch> at sha; an existing ref is not an error.
 func (g *GitHub) CreateRef(ctx context.Context, r Repo, branch, sha string) error {
+	if r.git != nil {
+		return relayErr(g.relay().CreateRef(ctx, *r.git, branch, sha))
+	}
 	body := map[string]string{"ref": "refs/heads/" + branch, "sha": sha}
 	_, err := g.call(ctx, r, http.MethodPost, "/git/refs", body, nil)
 	if Status(err) == http.StatusUnprocessableEntity && strings.Contains(err.Error(), "already exists") {
@@ -344,12 +456,18 @@ func (g *GitHub) EnsureBranch(ctx context.Context, r Repo, branch, base string) 
 
 // UpdateRef moves a branch to sha (force=false: fast-forward only; 422 when not).
 func (g *GitHub) UpdateRef(ctx context.Context, r Repo, branch, sha string, force bool) error {
+	if r.git != nil {
+		return relayErr(g.relay().UpdateRef(ctx, *r.git, branch, sha, force))
+	}
 	_, err := g.call(ctx, r, http.MethodPatch, "/git/refs/heads/"+escapeRef(branch), map[string]any{"sha": sha, "force": force}, nil)
 	return err
 }
 
 // DeleteRef deletes a branch; a missing branch is not an error.
 func (g *GitHub) DeleteRef(ctx context.Context, r Repo, branch string) error {
+	if r.git != nil {
+		return relayErr(g.relay().DeleteRef(ctx, *r.git, branch))
+	}
 	_, err := g.call(ctx, r, http.MethodDelete, "/git/refs/heads/"+escapeRef(branch), nil, nil)
 	if s := Status(err); s == http.StatusNotFound || s == http.StatusUnprocessableEntity {
 		return nil
@@ -365,6 +483,10 @@ type MergeResult struct {
 
 // Merge merges head into base on GitHub (409 → Conflict; 204 → nothing to merge, SHA = "").
 func (g *GitHub) Merge(ctx context.Context, r Repo, base, head, message string) (MergeResult, error) {
+	if r.git != nil {
+		res, err := g.relay().Merge(ctx, *r.git, base, head, message)
+		return MergeResult{SHA: res.SHA, Conflict: res.Conflict}, relayErr(err)
+	}
 	var out struct {
 		SHA string `json:"sha"`
 	}
@@ -428,6 +550,9 @@ func (g *GitHub) MergePR(ctx context.Context, r Repo, number int, method, sha st
 
 // CheckRuns lists the check runs on a commit; ErrNoChecks when the App may not read them.
 func (g *GitHub) CheckRuns(ctx context.Context, r Repo, sha string) ([]core.CheckView, error) {
+	if r.git != nil {
+		return nil, errNoCI
+	}
 	if !r.HasChecks() {
 		return nil, ErrNoChecks
 	}
@@ -463,6 +588,9 @@ func deref(p *string) string {
 
 // FileContent reads a file at ref ("" when it does not exist).
 func (g *GitHub) FileContent(ctx context.Context, r Repo, path, ref string) (string, error) {
+	if r.git != nil {
+		return g.relay().FileContent(ctx, *r.git, path, ref)
+	}
 	var out struct {
 		Content  string `json:"content"`
 		Encoding string `json:"encoding"`
@@ -480,6 +608,9 @@ func (g *GitHub) FileContent(ctx context.Context, r Repo, path, ref string) (str
 
 // Workflows lists .github/workflows files with their content (CI detection).
 func (g *GitHub) Workflows(ctx context.Context, r Repo, ref string) (map[string]string, error) {
+	if r.git != nil {
+		return map[string]string{}, nil
+	}
 	var list []struct {
 		Path string `json:"path"`
 		Type string `json:"type"`
@@ -529,6 +660,9 @@ func (g *GitHub) FileSHA(ctx context.Context, r Repo, path, ref string) (string,
 
 // Rulesets reports whether the repository has any ruleset.
 func (g *GitHub) Rulesets(ctx context.Context, r Repo) (bool, error) {
+	if r.git != nil {
+		return false, nil
+	}
 	var out []map[string]any
 	_, err := g.call(ctx, r, http.MethodGet, "/rulesets", nil, &out)
 	if s := Status(err); s == http.StatusNotFound || s == http.StatusForbidden {
@@ -543,4 +677,26 @@ func escapeRef(branch string) string {
 		parts[i] = url.PathEscape(p)
 	}
 	return strings.Join(parts, "/")
+}
+
+// relay is the Git relay (a disabled one when none is wired: its calls fail with ErrDisabled).
+func (g *GitHub) relay() *gitrelay.Relay {
+	if g.Relay == nil {
+		return &gitrelay.Relay{}
+	}
+	return g.Relay
+}
+
+// relayErr maps relay outcomes to the GitHub statuses the engines already handle (404 for a
+// missing branch, 422 for a refused update).
+func relayErr(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, gitrelay.ErrNoRef):
+		return &github.Error{Status: http.StatusNotFound, Message: err.Error()}
+	case errors.Is(err, gitrelay.ErrNotFF), errors.Is(err, gitrelay.ErrStale):
+		return &github.Error{Status: http.StatusUnprocessableEntity, Message: err.Error()}
+	}
+	return err
 }

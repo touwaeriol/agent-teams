@@ -5,23 +5,35 @@ import { existsSync, readdirSync } from "node:fs";
 import { ghOnPath } from "../git/gh-install.js";
 import type { CredSocketRequest } from "./server.js";
 import { shellQuote } from "../git/platform.js";
+import { gitSshCommand, type GitSshKey } from "./gitssh.js";
 
-/** GIT_CONFIG_* variables that make git ask this daemon for credentials (architecture.md §10.4). */
-export function gitCredentialEnv(nodeCmd: string[], socket: string, session: string, secret: string): Record<string, string> {
+/** A standalone Git repository's host the session may get credentials for (session.open git_hosts). */
+export interface GitHost {
+  transport: "https" | "ssh";
+  host: string;
+}
+
+/**
+ * GIT_CONFIG_* variables that make git ask this daemon for credentials (architecture.md §10.4):
+ * for github.com and the HTTPS hosts of the project's standalone Git repositories; with an SSH
+ * one, GIT_SSH_COMMAND runs the git-ssh wrapper (git-repos.md §5). The secret proves the session.
+ */
+export function gitCredentialEnv(nodeCmd: string[], socket: string, session: string, secret: string, hosts: GitHost[] = []): Record<string, string> {
   const helper = `!${[...nodeCmd, "git-credential", "--socket", socket, "--session", session, "--secret", secret].map(shellQuote).join(" ")}`;
-  return {
-    GIT_TERMINAL_PROMPT: "0",
-    GIT_CONFIG_COUNT: "3",
-    GIT_CONFIG_KEY_0: "credential.https://github.com.helper",
-    GIT_CONFIG_VALUE_0: "",
-    GIT_CONFIG_KEY_1: "credential.https://github.com.helper",
-    GIT_CONFIG_VALUE_1: helper,
-    GIT_CONFIG_KEY_2: "credential.https://github.com.useHttpPath",
-    GIT_CONFIG_VALUE_2: "true",
-    AT_CRED_SOCK: socket,
-    AT_CRED_SESSION: session,
-    AT_CRED_SECRET: secret,
-  };
+  const https = hosts.filter((h) => h.transport === "https" && /^[A-Za-z0-9.-]+(:\d+)?$/.test(h.host)).map((h) => `https://${h.host}`);
+  const prefixes = [...new Set(["https://github.com", ...https])];
+  const env: Record<string, string> = { GIT_TERMINAL_PROMPT: "0", AT_CRED_SOCK: socket, AT_CRED_SESSION: session, AT_CRED_SECRET: secret };
+  if (hosts.some((h) => h.transport === "ssh")) env.GIT_SSH_COMMAND = gitSshCommand(nodeCmd);
+  let n = 0;
+  for (const prefix of prefixes) {
+    for (const [key, value] of [["helper", ""], ["helper", helper], ["useHttpPath", "true"]] as const) {
+      env[`GIT_CONFIG_KEY_${n}`] = `credential.${prefix}.${key}`;
+      env[`GIT_CONFIG_VALUE_${n}`] = value;
+      n++;
+    }
+  }
+  env.GIT_CONFIG_COUNT = String(n);
+  return env;
 }
 
 export function askSocket(socket: string, req: CredSocketRequest, timeoutMs = 11 * 60_000): Promise<SocketReply> {
@@ -73,6 +85,7 @@ export function parseCredentialInput(text: string): Record<string, string> {
 export async function gitCredentialMain(args: Record<string, string>, op: string, stdin: string): Promise<{ out: string; code: number }> {
   if (op !== "get" && op !== "erase") return { out: "", code: 0 };
   const input = parseCredentialInput(stdin);
+  // git asks only for the URL prefixes gitCredentialEnv configured (github.com, standalone repositories' HTTPS hosts).
   if (input.protocol !== "https" || !input.host) return { out: "", code: 0 };
   if (op === "erase") {
     await askSocket(args.socket!, { op: "erase", session: args.session!, secret: args.secret!, host: input.host, path: input.path ?? "" }, 10_000);
@@ -88,6 +101,7 @@ export interface SocketReply {
   username?: string;
   password?: string;
   error?: string;
+  ssh_key?: GitSshKey;
   gh?: string;
   config_dir?: string;
   token_error?: string;

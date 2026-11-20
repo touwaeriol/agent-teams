@@ -1465,14 +1465,15 @@ func (j *ContextUsage) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// Credential helper asks for a short-lived token. Unreliable, retried after 10 s
-// with the same req_id; never logged.
+// Credential helper (or git-ssh wrapper) asks for a short-lived token or a
+// standalone repository's credential. Unreliable, retried after 10 s with the same
+// req_id; never logged.
 type CredRequest struct {
 	// Git rejected the token handed out last (credential erase): the console skips
 	// its token cache and mints a new one (at most once a minute per token scope).
 	ForceRefresh *bool `json:"force_refresh,omitempty,omitzero"`
 
-	// Host corresponds to the JSON schema field "host".
+	// github.com, or a standalone repository's host[:port].
 	Host string `json:"host"`
 
 	// JobID corresponds to the JSON schema field "job_id".
@@ -1481,7 +1482,7 @@ type CredRequest struct {
 	// OpenGen corresponds to the JSON schema field "open_gen".
 	OpenGen *OpenGen `json:"open_gen,omitempty,omitzero"`
 
-	// owner/name.git
+	// owner/name.git (a standalone repository: its path on the host, with .git).
 	Path string `json:"path"`
 
 	// Purpose corresponds to the JSON schema field "purpose".
@@ -1554,7 +1555,8 @@ func (j *CredRequest) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// Token for a cred.request, or a refusal. Unreliable; never logged.
+// Token (or, for an SSH repository, a private key) for a cred.request, or a
+// refusal. Unreliable; never logged.
 type CredResponse struct {
 	// e.g. repo_not_in_project.
 	Error *string `json:"error,omitempty,omitzero"`
@@ -1571,8 +1573,51 @@ type CredResponse struct {
 	// ReqID corresponds to the JSON schema field "req_id".
 	ReqID string `json:"req_id"`
 
+	// SSH repositories (git-repos.md §5): the private key as unencrypted PKCS#8 PEM,
+	// its authorized_keys line and the pinned known_hosts line. Kept in memory by the
+	// git-ssh wrapper only.
+	SshKey *CredResponseSshKey `json:"ssh_key,omitempty,omitzero"`
+
 	// Username corresponds to the JSON schema field "username".
 	Username *string `json:"username,omitempty,omitzero"`
+}
+
+// SSH repositories (git-repos.md §5): the private key as unencrypted PKCS#8 PEM,
+// its authorized_keys line and the pinned known_hosts line. Kept in memory by the
+// git-ssh wrapper only.
+type CredResponseSshKey struct {
+	// KnownHosts corresponds to the JSON schema field "known_hosts".
+	KnownHosts string `json:"known_hosts"`
+
+	// PrivateKey corresponds to the JSON schema field "private_key".
+	PrivateKey string `json:"private_key"`
+
+	// PublicKey corresponds to the JSON schema field "public_key".
+	PublicKey string `json:"public_key"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *CredResponseSshKey) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["known_hosts"]; raw != nil && !ok {
+		return fmt.Errorf("field known_hosts in CredResponseSshKey: required")
+	}
+	if _, ok := raw["private_key"]; raw != nil && !ok {
+		return fmt.Errorf("field private_key in CredResponseSshKey: required")
+	}
+	if _, ok := raw["public_key"]; raw != nil && !ok {
+		return fmt.Errorf("field public_key in CredResponseSshKey: required")
+	}
+	type Plain CredResponseSshKey
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = CredResponseSshKey(plain)
+	return nil
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -2761,6 +2806,13 @@ type GitPrepare struct {
 	// ProjectID corresponds to the JSON schema field "project_id".
 	ProjectID string `json:"project_id"`
 
+	// Clone and push URL for a repository the daemon does not reach at
+	// git_base_url/<repo>.git: a standalone Git repository's upstream (git-repos.md
+	// §5), HTTPS without credentials, ssh:// or scp-like. Credentials come from
+	// cred.request with the URL's host and path (SSH: through the git-ssh wrapper).
+	// Absent: git_base_url/<repo>.git.
+	RemoteURL *string `json:"remote_url,omitempty,omitzero"`
+
 	// Repo corresponds to the JSON schema field "repo".
 	Repo Repo `json:"repo"`
 
@@ -2929,6 +2981,11 @@ func (j *GitPrepare) UnmarshalJSON(value []byte) error {
 	if utf8.RuneCountInString(string(plain.ProjectID)) < 1 {
 		return fmt.Errorf("field %s length: must be >= %d", "project_id", 1)
 	}
+	if plain.RemoteURL != nil {
+		if matched, _ := regexp.MatchString(`^(https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/[^\s@]+|ssh://([A-Za-z0-9_.-]+@)?[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/[^\s]+|[A-Za-z0-9_.-]+@[A-Za-z0-9][A-Za-z0-9.-]*:[^\s/-][^\s]*)$`, string(*plain.RemoteURL)); !matched {
+			return fmt.Errorf("field %s pattern match: must match %s", "RemoteURL", `^(https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/[^\s@]+|ssh://([A-Za-z0-9_.-]+@)?[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/[^\s]+|[A-Za-z0-9_.-]+@[A-Za-z0-9][A-Za-z0-9.-]*:[^\s/-][^\s]*)$`)
+		}
+	}
 	*j = GitPrepare(plain)
 	return nil
 }
@@ -2988,6 +3045,13 @@ type GitPush struct {
 	// No leading +.
 	Refspec string `json:"refspec"`
 
+	// Clone and push URL for a repository the daemon does not reach at
+	// git_base_url/<repo>.git: a standalone Git repository's upstream (git-repos.md
+	// §5), HTTPS without credentials, ssh:// or scp-like. Credentials come from
+	// cred.request with the URL's host and path (SSH: through the git-ssh wrapper).
+	// Absent: git_base_url/<repo>.git.
+	RemoteURL *string `json:"remote_url,omitempty,omitzero"`
+
 	// Repo corresponds to the JSON schema field "repo".
 	Repo Repo `json:"repo"`
 
@@ -3045,6 +3109,11 @@ func (j *GitPush) UnmarshalJSON(value []byte) error {
 	}
 	if matched, _ := regexp.MatchString(`^[^+][^:]*:refs/heads/thread/[0-9]+/[^/]+$`, string(plain.Refspec)); !matched {
 		return fmt.Errorf("field %s pattern match: must match %s", "Refspec", `^[^+][^:]*:refs/heads/thread/[0-9]+/[^/]+$`)
+	}
+	if plain.RemoteURL != nil {
+		if matched, _ := regexp.MatchString(`^(https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/[^\s@]+|ssh://([A-Za-z0-9_.-]+@)?[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/[^\s]+|[A-Za-z0-9_.-]+@[A-Za-z0-9][A-Za-z0-9.-]*:[^\s/-][^\s]*)$`, string(*plain.RemoteURL)); !matched {
+			return fmt.Errorf("field %s pattern match: must match %s", "RemoteURL", `^(https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/[^\s@]+|ssh://([A-Za-z0-9_.-]+@)?[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/[^\s]+|[A-Za-z0-9_.-]+@[A-Za-z0-9][A-Za-z0-9.-]*:[^\s/-][^\s]*)$`)
+		}
 	}
 	if 1 > plain.ThreadNo {
 		return fmt.Errorf("field %s: must be >= %v", "thread_no", 1)
@@ -5756,7 +5825,8 @@ func (j *ReplyToInput) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// GitHub repository as owner/name.
+// GitHub repository as owner/name, or git/<id> for a standalone Git repository
+// (with remote_url).
 type Repo string
 
 type RepoFocus struct {
@@ -6963,6 +7033,11 @@ type SessionOpen struct {
 	// Install the credential helper and gh wrapper.
 	GitCredentials *bool `json:"git_credentials,omitempty,omitzero"`
 
+	// Standalone Git repositories' hosts this session may get credentials for
+	// (git-repos.md §5): HTTPS hosts get the credential helper, SSH hosts the git-ssh
+	// wrapper. Only with git_credentials.
+	GitHosts []SessionOpenGitHostsElem `json:"git_hosts,omitempty,omitzero"`
+
 	// OpenGen corresponds to the JSON schema field "open_gen".
 	OpenGen OpenGen `json:"open_gen"`
 
@@ -7055,6 +7130,68 @@ func (j *SessionOpenContext) UnmarshalJSON(value []byte) error {
 // credential variables itself.
 type SessionOpenEnv map[string]string
 
+type SessionOpenGitHostsElem struct {
+	// host[:port], the port only when not the default.
+	Host string `json:"host"`
+
+	// Transport corresponds to the JSON schema field "transport".
+	Transport SessionOpenGitHostsElemTransport `json:"transport"`
+}
+
+type SessionOpenGitHostsElemTransport string
+
+const SessionOpenGitHostsElemTransportHttps SessionOpenGitHostsElemTransport = "https"
+const SessionOpenGitHostsElemTransportSsh SessionOpenGitHostsElemTransport = "ssh"
+
+var enumValues_SessionOpenGitHostsElemTransport = []interface{}{
+	"https",
+	"ssh",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SessionOpenGitHostsElemTransport) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_SessionOpenGitHostsElemTransport {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_SessionOpenGitHostsElemTransport, v)
+	}
+	*j = SessionOpenGitHostsElemTransport(v)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SessionOpenGitHostsElem) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["host"]; raw != nil && !ok {
+		return fmt.Errorf("field host in SessionOpenGitHostsElem: required")
+	}
+	if _, ok := raw["transport"]; raw != nil && !ok {
+		return fmt.Errorf("field transport in SessionOpenGitHostsElem: required")
+	}
+	type Plain SessionOpenGitHostsElem
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if matched, _ := regexp.MatchString(`^[A-Za-z0-9.-]+(:[0-9]{1,5})?$`, string(plain.Host)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "Host", `^[A-Za-z0-9.-]+(:[0-9]{1,5})?$`)
+	}
+	*j = SessionOpenGitHostsElem(plain)
+	return nil
+}
+
 // UnmarshalJSON implements json.Unmarshaler.
 func (j *SessionOpen) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
@@ -7086,6 +7223,9 @@ func (j *SessionOpen) UnmarshalJSON(value []byte) error {
 	}
 	if plain.Anchor != nil && utf8.RuneCountInString(string(*plain.Anchor)) > 8000 {
 		return fmt.Errorf("field %s length: must be <= %d", "anchor", 8000)
+	}
+	if len(plain.GitHosts) > 64 {
+		return fmt.Errorf("field %s length: must be <= %d", "git_hosts", 64)
 	}
 	if len(plain.Plugins) > 16 {
 		return fmt.Errorf("field %s length: must be <= %d", "plugins", 16)

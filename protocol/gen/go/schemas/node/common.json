@@ -107,7 +107,7 @@
     },
     "Repo": {
       "title": "Repo",
-      "description": "GitHub repository as owner/name.",
+      "description": "GitHub repository as owner/name, or git/<id> for a standalone Git repository (with remote_url).",
       "type": "string",
       "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
     },
