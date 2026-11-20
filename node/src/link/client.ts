@@ -4,6 +4,7 @@ import { newId } from "../util/ids.js";
 import type { Logger } from "../util/log.js";
 import { ProtocolValidator, isMessageType, isReliable, type Frame, type Hello, type Welcome } from "../protocol.js";
 import type { Outbox } from "./outbox.js";
+import { proxyAgentFor } from "./proxy.js";
 
 export const CLOSE = { normal: 1000, unauthorized: 4401, replaced: 4409, upgrade: 4426, tooFast: 4429 } as const;
 
@@ -108,6 +109,7 @@ export class Link extends EventEmitter<LinkEvents> {
       perMessageDeflate: true,
       maxPayload: this.opts.maxPayload ?? MAX_FRAME,
       handshakeTimeout: 15_000,
+      agent: proxyAgentFor(this.opts.url),
     });
     this.ws = ws;
     ws.on("open", () => this.onOpen(ws));
