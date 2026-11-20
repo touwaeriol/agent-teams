@@ -337,6 +337,12 @@ func TestResubmitRefusedWithOpenTasks(t *testing.T) {
 	c, lead := newEndCase(t, "")
 	lead.mustCall("update_plan", map[string]any{"steps": []map[string]string{{"title": "做", "status": "done"}}})
 	lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "修 CI", "main": "做"})
+	// A member is on it (finish cancels tasks nobody has picked up yet).
+	eventually(t, "task claimed", func() bool {
+		var n int
+		_ = store.QueryRow(c.w.ctx, c.w.e.Core.Pool, `SELECT count(*) FROM at_tasks WHERE status NOT IN ('pending', 'blocked') AND status <> 'cancelled'`).Scan(&n)
+		return n > 0
+	})
 	res := lead.call("finish", map[string]string{"summary": "提前收尾"})
 	if res.Ok || !strings.Contains(text(res), "还有没完成的小任务") {
 		t.Fatalf("finish with an open task: %+v", res)
