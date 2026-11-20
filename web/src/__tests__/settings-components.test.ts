@@ -2,7 +2,7 @@
 // Settings screens on Vue: the repo list and picker, schedules, tag input, number settings, the
 // team draft saved in display order and project settings switches, asserted through the API client.
 import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
-import { flushPromises, mount } from "@vue/test-utils";
+import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import ElementPlus from "element-plus";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h, nextTick, ref, type Component } from "vue";
@@ -48,6 +48,9 @@ afterEach(() => {
   vi.restoreAllMocks();
   document.body.innerHTML = "";
 });
+// Registered after the cleanup above so it runs first: unmount every wrapper (Element Plus selects
+// keep listeners that would otherwise fire after the environment is torn down).
+enableAutoUnmount(afterEach);
 
 const connection = { id: "g1", kind: "app", login: "touwaeriol", name: "touwaeriol", installation_settings_url: null, needs_permission_approval: false, created_at: "2026-01-01T00:00:00Z" };
 
