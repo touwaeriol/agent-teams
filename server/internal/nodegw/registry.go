@@ -22,7 +22,7 @@ func (g *Gateway) Online(nodeID string) bool { return g.link(nodeID) != nil }
 func (g *Gateway) Status(nodeID string) platform.NodeLive {
 	l := g.link(nodeID)
 	if l == nil {
-		return platform.NodeLive{}
+		return platform.NodeLive{Usage: g.Usage(nodeID)}
 	}
 	l.mu.Lock()
 	stats := l.stats
@@ -30,7 +30,7 @@ func (g *Gateway) Status(nodeID string) platform.NodeLive {
 	since := l.since
 	live := platform.NodeLive{Online: true, Since: &since, Version: l.hello.Daemon.Version, Protocol: 2,
 		Runtimes: toMap(l.hello.Runtimes), Capacity: toMap(l.hello.Capacity), ActiveSessions: stats.ActiveSessions,
-		ParkedSessions: stats.ParkedSessions, Queued: stats.Queued}
+		ParkedSessions: stats.ParkedSessions, Queued: stats.Queued, Features: l.hello.Features, Usage: g.Usage(nodeID)}
 	if l.hello.Isolation != nil {
 		live.Isolation = string(*l.hello.Isolation)
 	}

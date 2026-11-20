@@ -9,7 +9,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -118,26 +117,81 @@ func Find(repos []Repo, slug string) (Repo, bool) {
 // Dir is the directory name of a repository's checkout inside an employee's directory (owner__name).
 func Dir(slug string) string { return strings.Replace(slug, "/", "__", 1) }
 
-// defaultBranches caches each repository's default branch for a while.
+// Default branches are cached: a fresh entry is served as is; an older one is still served at
+// once while one background request refreshes it (stale-while-revalidate), so opening a session
+// (inside a transaction that holds the project row) does not wait for GitHub every ten minutes.
+// A failed lookup is remembered for a short while (15 s) so a GitHub outage is not asked again on every
+// session open.
+const (
+	branchTTL     = 10 * time.Minute
+	branchFailTTL = 15 * time.Second
+	// branchRefreshTimeout bounds a background refresh.
+	branchRefreshTimeout = 30 * time.Second
+)
+
 var defaultBranches = struct {
 	sync.Mutex
 	items map[string]cachedBranch
 }{items: map[string]cachedBranch{}}
 
 type cachedBranch struct {
-	name string
-	at   time.Time
+	name       string
+	err        error // the first lookup failed (remembered for branchFailTTL)
+	at         time.Time
+	refreshing bool
 }
 
-// DefaultBranch returns the repository's default branch (cached 10 minutes).
+// branchKey is per git connection, like treeKey: one user's answer is not served to another.
+func branchKey(r Repo) string { return r.conn.ID + "|" + strings.ToLower(r.Slug) }
+
+// DefaultBranch returns the repository's default branch (see branchTTL for the caching).
 func (g *GitHub) DefaultBranch(ctx context.Context, r Repo) (string, error) {
-	key := strings.ToLower(r.Slug)
+	return cachedBranchOf(ctx, branchKey(r), func(ctx context.Context) (string, error) { return g.fetchDefaultBranch(ctx, r) })
+}
+
+// cachedBranchOf serves key from the default branch cache, asking fetch when it must.
+func cachedBranchOf(ctx context.Context, key string, fetch func(context.Context) (string, error)) (string, error) {
 	defaultBranches.Lock()
 	c, ok := defaultBranches.items[key]
-	defaultBranches.Unlock()
-	if ok && time.Since(c.at) < branchTTL {
+	switch {
+	case ok && c.err == nil:
+		if time.Since(c.at) >= branchTTL && !c.refreshing {
+			c.refreshing = true
+			defaultBranches.items[key] = c
+			go refreshBranch(context.WithoutCancel(ctx), key, fetch)
+		}
+		defaultBranches.Unlock()
 		return c.name, nil
+	case ok && time.Since(c.at) < branchFailTTL:
+		defaultBranches.Unlock()
+		return "", c.err
 	}
+	defaultBranches.Unlock()
+	name, err := fetch(ctx)
+	if err == nil || ctx.Err() == nil { // a caller that gave up learned nothing about GitHub
+		defaultBranches.Lock()
+		defaultBranches.items[key] = cachedBranch{name: name, err: err, at: time.Now()}
+		defaultBranches.Unlock()
+	}
+	return name, err
+}
+
+// refreshBranch renews a stale entry; on failure the old name stays (asked again after branchTTL).
+func refreshBranch(ctx context.Context, key string, fetch func(context.Context) (string, error)) {
+	ctx, cancel := context.WithTimeout(ctx, branchRefreshTimeout)
+	defer cancel()
+	name, err := fetch(ctx)
+	defaultBranches.Lock()
+	defer defaultBranches.Unlock()
+	c := defaultBranches.items[key]
+	c.refreshing, c.at = false, time.Now()
+	if err == nil {
+		c.name = name
+	}
+	defaultBranches.items[key] = c
+}
+
+func (g *GitHub) fetchDefaultBranch(ctx context.Context, r Repo) (string, error) {
 	var out struct {
 		DefaultBranch string `json:"default_branch"`
 	}
@@ -147,60 +201,7 @@ func (g *GitHub) DefaultBranch(ctx context.Context, r Repo) (string, error) {
 	if out.DefaultBranch == "" {
 		out.DefaultBranch = "main"
 	}
-	defaultBranches.Lock()
-	defaultBranches.items[key] = cachedBranch{name: out.DefaultBranch, at: time.Now()}
-	defaultBranches.Unlock()
 	return out.DefaultBranch, nil
-}
-
-const branchTTL = 10 * time.Minute
-
-// CachedDefaultBranch is DefaultBranch without waiting on GitHub when the repository was seen
-// before: a stale entry is returned as is and refreshed in the background. For code that may
-// run inside a database transaction (session opening); warm the cache beforehand with DefaultBranch.
-func (g *GitHub) CachedDefaultBranch(ctx context.Context, r Repo) (string, error) {
-	key := strings.ToLower(r.Slug)
-	defaultBranches.Lock()
-	c, ok := defaultBranches.items[key]
-	defaultBranches.Unlock()
-	if !ok {
-		return g.DefaultBranch(ctx, r)
-	}
-	if time.Since(c.at) >= branchTTL {
-		Background("branch:"+key, func(ctx context.Context) {
-			if _, err := g.DefaultBranch(ctx, r); err != nil {
-				slog.Debug("refresh default branch", "repo", r.Slug, "err", err)
-			}
-		})
-	}
-	return c.name, nil
-}
-
-var inflight = struct {
-	sync.Mutex
-	keys map[string]bool
-}{keys: map[string]bool{}}
-
-// Background runs fn on its own goroutine (outside any transaction of the caller), at most one
-// run per key at a time, with a 30-second deadline.
-func Background(key string, fn func(ctx context.Context)) {
-	inflight.Lock()
-	if inflight.keys[key] {
-		inflight.Unlock()
-		return
-	}
-	inflight.keys[key] = true
-	inflight.Unlock()
-	go func() {
-		defer func() {
-			inflight.Lock()
-			delete(inflight.keys, key)
-			inflight.Unlock()
-		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		fn(ctx)
-	}()
 }
 
 // HasChecks reports whether the connection can read check runs.

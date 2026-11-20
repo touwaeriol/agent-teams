@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Real-Claude run for /model and custom commands (deploy/e2e/up.sh first):
-//   1. the lead runs on haiku (the role's model); /model (PUT /conversations/{tid}/model) switches
-//      the running lead to sonnet: session.set_mode reaches the live session (live: true, no new
-//      session) and the next turn reports the sonnet model (turn_ended.model → /model, /context)
+//   1. the lead runs on haiku (the role's model). The lead has no /model (PUT /model scope lead is
+//      409 model_fixed); saving the lead role with sonnet (PUT /api/roles) switches the running lead:
+//      session.set_mode reaches the live session (no new session) and the next turn reports the
+//      sonnet model (turn_ended.model → /model, /context). There is no model list: ids are typed.
 //   2. a prompt-template command of the lead's role ("/codeword falcon") is expanded by the
 //      server; the lead follows the expanded instruction while the stored message keeps the words
 //   node deploy/e2e/run_model.mjs <scratch-dir> [--from haiku] [--to sonnet] [--pause]
@@ -31,7 +32,6 @@ const ROLES = [
 
 async function setup(c) {
   await c.put("/api/roles", { roles: ROLES.map((r, i) => roleBody({ ...r, permission_mode: "bypass" }, i, from)) });
-  await c.put("/api/models/mine", { models: [{ runtime: "claude", model: "haiku", label: "Haiku（别名）" }, { runtime: "claude", model: "sonnet", label: "Sonnet（别名）" }] });
   const nodes = await c.get("/api/nodes");
   // Earlier nodes of this run (even one whose link has not timed out yet) must not get the lead.
   for (const n of (nodes.nodes ?? nodes).filter((x) => x.name.startsWith("rc-e2e-model-") || (x.name.startsWith("rc-e2e-") && !x.online))) await c.call("DELETE", `/api/nodes/${n.id}`);
@@ -58,8 +58,15 @@ async function switchModel(c, st) {
   }, { timeoutMs: 60_000 });
   check(before.live && before.session.includes(from), `before: live session answered with ${before.session} (role model ${before.model})`);
   const opened = sessions(t.id);
-  const res = await c.put(`/api/conversations/${t.id}/model`, { model: to, scope: "lead" });
-  check(res.applied.length === 1 && res.applied[0].live && res.applied[0].model === to, `PUT /model: ${JSON.stringify(res.applied)}`);
+  const refused = await c.raw("PUT", `/api/conversations/${t.id}/model`, { model: to, scope: "lead" });
+  check(refused.status === 409, `PUT /model scope lead refused: ${refused.status}`);
+  const saved = await c.get("/api/roles");
+  await c.put("/api/roles", { roles: saved.roles.map((r) => (r.tier === "lead" ? { ...r, model: to } : r)) });
+  const switched = await waitFor("lead role model", async () => {
+    const m = await c.get(`/api/conversations/${t.id}/model`);
+    return m.model === to && m;
+  }, { timeoutMs: 30_000 });
+  check(switched.override === "", `role save: lead model ${switched.model}`);
   const after = await lastId(c, t.id);
   await c.post(`/api/conversations/${t.id}/messages`, { content: "再回复一句“好”。" });
   await reply(c, t.id, after, "lead reply after /model");
@@ -67,7 +74,7 @@ async function switchModel(c, st) {
     const m = await c.get(`/api/conversations/${t.id}/model`);
     return m.session.includes(to) && m;
   }, { timeoutMs: 60_000 });
-  check(now.model === to && now.override === to, `after: the next turn answered with ${now.session}; model ${now.model}`);
+  check(now.model === to && now.override === "", `after: the next turn answered with ${now.session}; model ${now.model}`);
   check(sessions(t.id) === opened, `the same session switched (sessions: ${opened})`);
   check(true, `at_usage models per turn: ${turnModels(t.id)}`);
   const ctx = await c.get(`/api/conversations/${t.id}/context`);

@@ -21,8 +21,12 @@ import (
 var ErrBadChunk = errors.New("bad file.chunk data")
 
 // MaxPending is how much unclaimed chunk data one session may leave in the database
-// (two full uploads), so a daemon cannot fill it with chunks no tool.call ever claims.
-const MaxPending = 2 * MaxBytes
+// (two full uploads of the largest kind, a 20 MB shared file — sharedfiles.MaxFileBytes), so a
+// daemon cannot fill it with chunks no tool.call ever claims.
+const MaxPending = 2 * MaxUploadBytes
+
+// MaxUploadBytes is the largest single upload any tool accepts (write_shared_file).
+const MaxUploadBytes = 20 << 20
 
 // SaveChunk stores one file.chunk (idempotent by upload_id + index) and drops chunks
 // of uploads that were never claimed by a tool.call within a day.
@@ -60,6 +64,16 @@ func chunks(ctx context.Context, q store.DB) *gorm.DB { return q.Gorm(ctx).Model
 
 // LoadUpload reads an upload's chunks (of this session only) and splits them into files.
 func LoadUpload(ctx context.Context, q store.DB, sessionID string, up *protocol.ToolUpload) ([]ArtifactFile, error) {
+	all, err := LoadChunks(ctx, q, sessionID, up)
+	if err != nil {
+		return nil, err
+	}
+	return Split(all, up.Files)
+}
+
+// LoadChunks reads an upload's chunks (of this session only) joined in order, checking that all
+// up.Chunks of them arrived; the caller checks the files' sizes and checksums.
+func LoadChunks(ctx context.Context, q store.DB, sessionID string, up *protocol.ToolUpload) ([]byte, error) {
 	var parts [][]byte
 	err := chunks(ctx, q).Where("upload_id = ? AND session_id = ?", up.UploadID, sessionID).Order("idx").
 		Pluck("data", &parts).Error
@@ -71,7 +85,7 @@ func LoadUpload(ctx context.Context, q store.DB, sessionID string, up *protocol.
 	if n != up.Chunks {
 		return nil, fmt.Errorf("文件内容不完整：收到 %d/%d 段", n, up.Chunks)
 	}
-	return Split(all, up.Files)
+	return all, nil
 }
 
 // DeleteUpload removes an upload's chunks once its files are stored.

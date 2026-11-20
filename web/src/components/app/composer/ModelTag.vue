@@ -1,22 +1,18 @@
 <script setup lang="ts">
 /**
  * The model the box's employee (project coordinator or thread lead) runs with, read-only: they
- * always use the owner's default, so there is nothing to switch here. Hidden until both the
- * conversation's model and the model list are loaded (no placeholder, no id-then-label flicker).
+ * have no /model; their model is set in the role or the project settings (the server works out
+ * project → role → built-in default). Hidden until the conversation's model is loaded.
  */
 import { computed } from "vue";
-import { useConversationModel, useModels } from "@/api/queries";
+import { useConversationModel } from "@/api/queries";
 import { modelName } from "@/lib/models";
 
 const props = defineProps<{ cid: string }>();
 const state = useConversationModel(() => props.cid);
-const models = useModels();
-const name = computed(() => {
-  const id = state.data.value?.model;
-  if (!id || models.isLoading.value) return "";
-  return modelName(models.data.value?.models ?? [], id);
-});
-const tip = computed(() => `当前模型：${name.value}，统筹和组长使用默认模型，不能切换`);
+const id = computed(() => state.data.value?.model ?? "");
+const name = computed(() => (id.value ? modelName(id.value) : ""));
+const tip = computed(() => `当前模型：${id.value}。统筹和组长不能用 /model 切换，请在岗位配置或项目设置里改`);
 </script>
 
 <template>

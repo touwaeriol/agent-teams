@@ -6,7 +6,6 @@ import (
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 
-	"github.com/touwaeriol/agent-teams/server/internal/composer"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -29,19 +28,20 @@ type ModelChange struct {
 	WholeThread bool
 }
 
-// ErrFixedModel refuses /model for the coordinator and thread leads: they always run the default
-// model (Model).
-var ErrFixedModel = errors.New("统筹和组长使用默认模型，不能切换")
+// ErrFixedModel refuses /model for the coordinator and thread leads: their model is set in their
+// role or in the project (Model).
+var ErrFixedModel = errors.New("统筹和组长不能用 /model 切换模型，请在岗位配置或项目设置里改")
 
 // ModelResult lists the employees changed and the ones left alone.
 type ModelResult struct {
 	Applied []ModelApplied `json:"applied"`
-	Skipped []string       `json:"skipped" doc:"Employees that keep their model: the lead (always the default model) and members of another runtime"`
+	Skipped []string       `json:"skipped" doc:"Employees that keep their model: the lead (its model is set in its role or the project) and members of another runtime"`
 }
 
 // SetConversationModel changes the model of a thread's members (scope thread): every member
-// (tier member) with the lead's runtime. The coordinator and the lead always run the default
-// model, so the coordinator conversation and the lead scope are refused (ErrFixedModel). Running
+// (tier member) with the lead's runtime. The coordinator's and the lead's models are set in their
+// role or in the project, so the coordinator conversation and the lead scope are refused
+// (ErrFixedModel). Running
 // sessions switch from their next turn (session.set_mode; Claude: Query.setModel, Codex: the next
 // turn's model).
 func (o *Orchestrator) SetConversationModel(ctx context.Context, in ModelChange) (ModelResult, error) {
@@ -97,7 +97,7 @@ func (o *Orchestrator) setThreadModel(ctx context.Context, tx *core.Tx, threadID
 // the running Codex session keeps what it runs; the next session opens without a model, on the
 // Codex CLI's own default.
 func (o *Orchestrator) ApplyModel(ctx context.Context, tx *core.Tx, e core.Employee, p store.Project) (ModelApplied, error) {
-	m := Model(e, p, composer.DefaultModel(ctx, tx, p.UserID, e.Runtime))
+	m := Model(e, p)
 	out := ModelApplied{Employee: e.Name, Model: m}
 	if m == "" {
 		return out, nil

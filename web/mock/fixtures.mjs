@@ -88,7 +88,7 @@ export const threads = [
     counts: counts({ waiting: 1, questions_open: 1, tasks_total: 6, tasks_done: 3, main_total: 3, main_done: 1 }),
     lead_last: { text: "代码部分已完成并通过测试，剩下要在节点上装好 codex 才能联调。", at: ago(9) },
     // The brief the coordinator handed the lead, from the user's project-chat message 1 (with a screenshot).
-    brief: "## 目标\n\n让 **Codex 员工**能像 Claude 员工一样领任务、汇报和提问。\n\n## 要做\n\n1. 节点上实现 `CodexWorker`：启动、事件流解析、中断与恢复\n2. 员工配置里可以选 `codex`，模型列表跟随用户配置\n3. 提问 / 审批卡片在网页上能点，结果回传给 Codex\n4. 节点安装脚本检测并安装 codex CLI\n\n## 验收\n\n- 在 cvp 节点上用 Codex 员工跑通一个小任务\n- `go test ./...` 与 web 测试全部通过",
+    brief: "## 目标\n\n让 **Codex 员工**能像 Claude 员工一样领任务、汇报和提问。\n\n## 要做\n\n1. 节点上实现 `CodexWorker`：启动、事件流解析、中断与恢复\n2. 员工配置里可以选 `codex`，模型在岗位里手动填写\n3. 提问 / 审批卡片在网页上能点，结果回传给 Codex\n4. 节点安装脚本检测并安装 codex CLI\n\n## 验收\n\n- 在 cvp 节点上用 Codex 员工跑通一个小任务\n- `go test ./...` 与 web 测试全部通过",
     dispatch: {
       opened_by: "coordinator",
       at: ago(66),
@@ -234,6 +234,18 @@ export const checks = { t12: [{ name: "verify", status: "completed", conclusion:
 
 const memoryFile = (name, description, content, updated_by, min) => ({ name, description, content, updated_by, created_at: ago(min + 600), updated_at: ago(min) });
 
+/** Shared files by project (api.md §3.5.1); data is base64 so structuredClone keeps it. */
+const shared = (path, text, uploaded_by, thread, min) => ({
+  path, data: Buffer.from(text).toString("base64"), uploaded_by, ...(thread ? { uploaded_by_thread_no: thread } : {}), created_at: ago(min), updated_at: ago(min),
+});
+export const sharedFiles = {
+  p1: [
+    shared("data/sample-orders.csv", "id,amount\n1,19.9\n2,5\n", "dev-2", 12, 95),
+    shared("exports/2026-11/report.json", '{"threads":12,"merged":9}\n', "lead-12", 12, 30),
+    shared("notes/部署检查清单.md", "# 部署检查清单\n- 备份\n- 迁移\n", "coordinator", null, 600),
+  ],
+};
+
 export const memory = [
   memoryFile("MEMORY.md", "", "# 项目记忆\n- 用户喜欢小 PR，提交信息用中文。\n- 部署走滚动发布，不停渠道。\n- [testing.md](testing.md) — 怎么跑测试、常见失败\n- [github.md](github.md) — GitHub App 授权与令牌\n- [thread-summaries.md](thread-summaries.md) — 已结束讨论串的总结（最近 30 个）\n", "coordinator", 600),
   memoryFile("github.md", "GitHub App 授权与令牌", "# GitHub\n- 用 App 安装授权，令牌每次运行现取，不落盘。\n", "lead-1 · #9", 500),
@@ -283,9 +295,21 @@ export const usage = {
   ],
 };
 
+const later = (min) => new Date(now + min * 60_000).toISOString();
+const usageOf = (auth, windows, extra = {}) => ({ auth, status: "ok", windows, fetched_at: ago(3), received_at: ago(3), ...extra });
+// Four quota states: subscription with windows (cvp), fetch failed (rc-erio claude), API Key (ci-box), not logged in / still fetching (laptop).
 export const nodes = [
-  { id: "n1", name: "rc-erio", online: true, since: ago(120), last_seen_at: ago(0), version: "2.0.3", protocol: 2, isolation: "agent_user", runtimes: { claude: { sdk: "0.3.325", cli: "2.1.322", auth: "subscription" }, codex: {} }, capacity: { max_active_sessions: 4 }, active_sessions: 2, parked_sessions: 1, queued: 0, isolated: true, labels: [], max_active_sessions: 4, park_after_s: null, created_at: ago(9000) },
-  { id: "n2", name: "cvp", online: true, since: ago(120), last_seen_at: ago(0), version: "2.0.3", protocol: 2, isolation: "sandbox", runtimes: { claude: { cli: "2.1.322", auth: "subscription" }, codex: { cli: "0.169.0", auth: "chatgpt" } }, capacity: { max_active_sessions: 4 }, active_sessions: 1, parked_sessions: 0, queued: 0, isolated: false, labels: ["big-disk"], max_active_sessions: 4, park_after_s: null, created_at: ago(9000) },
+  { id: "n1", name: "rc-erio", online: true, usage_supported: true, since: ago(120), last_seen_at: ago(0), version: "2.0.3", protocol: 2, isolation: "agent_user", runtimes: { claude: { sdk: "0.3.325", cli: "2.1.322", auth: "subscription" }, codex: {} }, usage: { claude: { auth: "subscription", status: "error", windows: [], error: "读取 ~/.claude/.credentials.json 失败：令牌已过期，请在节点上重新运行 claude login", fetched_at: ago(12), received_at: ago(1) } }, capacity: { max_active_sessions: 4 }, active_sessions: 2, parked_sessions: 1, queued: 0, isolated: true, labels: [], max_active_sessions: 4, park_after_s: null, created_at: ago(9000) },
+  { id: "n2", name: "cvp", online: true, usage_supported: true, since: ago(120), last_seen_at: ago(0), version: "2.0.3", protocol: 2, isolation: "sandbox", runtimes: { claude: { cli: "2.1.322", auth: "subscription" }, codex: { cli: "0.169.0", auth: "chatgpt" } },
+    usage: {
+      claude: usageOf("subscription", [{ key: "five_hour", used_percent: 42, window_minutes: 300, resets_at: later(130) }, { key: "weekly", used_percent: 83.4, window_minutes: 10080, resets_at: later(60 * 24 * 3 + 200) }, { key: "weekly_model", label: "Fable", used_percent: 61, window_minutes: 10080, resets_at: later(60 * 24 * 3 + 200) }], { plan: "Max 20x" }),
+      codex: usageOf("chatgpt", [{ key: "primary", used_percent: 96, window_minutes: 300, resets_at: later(25) }, { key: "secondary", used_percent: 37, window_minutes: 10080, resets_at: later(60 * 24 * 5) }], { plan: "Pro" }),
+    },
+    capacity: { max_active_sessions: 4 }, active_sessions: 1, parked_sessions: 0, queued: 0, isolated: false, labels: ["big-disk"], max_active_sessions: 4, park_after_s: null, created_at: ago(9000) },
+  { id: "n3", name: "ci-box", online: true, usage_supported: true, since: ago(300), last_seen_at: ago(0), version: "2.0.3", protocol: 2, isolation: "sandbox", runtimes: { claude: { cli: "2.1.325", auth: "api_key" }, codex: { cli: "0.169.0", auth: "api_key" } }, usage: { claude: { auth: "api_key", status: "unsupported", windows: [], fetched_at: ago(2), received_at: ago(2) }, codex: { auth: "api_key", status: "unsupported", windows: [], fetched_at: ago(2), received_at: ago(2) } }, capacity: { max_active_sessions: 2 }, active_sessions: 0, parked_sessions: 0, queued: 0, isolated: true, labels: [], max_active_sessions: 2, park_after_s: null, created_at: ago(5000) },
+  { id: "n4", name: "laptop", online: true, usage_supported: true, since: ago(8), last_seen_at: ago(0), version: "2.0.3", protocol: 2, isolation: "none", runtimes: { claude: { cli: "2.1.325", auth: "none" }, codex: { cli: "0.169.0", auth: "chatgpt" } }, usage: null, capacity: { max_active_sessions: 1 }, active_sessions: 0, parked_sessions: 0, queued: 0, isolated: false, labels: [], max_active_sessions: 1, park_after_s: null, created_at: ago(100) },
+  // Old daemon (no "usage" feature): subscription login but never any quota, and no "loading" hint.
+  { id: "n5", name: "old-box", online: true, usage_supported: false, since: ago(40), last_seen_at: ago(0), version: "2.0.1", protocol: 2, isolation: "none", runtimes: { claude: { cli: "2.1.300", auth: "subscription" }, codex: { cli: "0.160.0", auth: "chatgpt" } }, usage: null, capacity: { max_active_sessions: 1 }, active_sessions: 0, parked_sessions: 0, queued: 0, isolated: false, labels: [], max_active_sessions: 1, park_after_s: null, created_at: ago(60) },
 ];
 
 export const nodeSessions = {
@@ -301,16 +325,9 @@ const role = (id, tier, roleKey, title, runtime, count, node_ids, description, l
   can_delegate: false, read_only: null, allowed_tools: [], disallowed_tools: [], sandbox: "", max_turns: null, gate: "", task_kinds: [], skills: [], plugins: [], look: lk, sort: 0, ...extra,
 });
 
-/** GET /api/models: the user's own list, in order (one default per runtime). */
-export const models = [
-  { id: "m1", runtime: "claude", model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: true },
-  { id: "m2", runtime: "claude", model: "claude-sonnet-5-5", label: "Sonnet 5.5", default: false, mine: true },
-  { id: "m3", runtime: "codex", model: "gpt-5.5-codex", label: "", default: true, mine: true },
-];
-
 export const roles = [
-  role("r0", "coordinator", "coordinator", "项目统筹", "claude", 1, ["n1"], "和你对话，判断要做什么，开讨论串、跟进状态、向你汇报。", look("#7A4FD1", "hoodie", "headset", "#3B2A20")),
-  role("r1", "lead", "lead", "组长", "claude", 1, ["n1", "n2"], "列主要任务、拆小任务、审查成员提交并合并，完成后向统筹交总结。", look("#C8622A", "suit", "none", "#3B2A20")),
+  role("r0", "coordinator", "coordinator", "项目统筹", "claude", 1, ["n1"], "和你对话，判断要做什么，开讨论串、跟进状态、向你汇报。", look("#7A4FD1", "hoodie", "headset", "#3B2A20"), { model: "claude-fable-5-2" }),
+  role("r1", "lead", "lead", "组长", "claude", 1, ["n1", "n2"], "列主要任务、拆小任务、审查成员提交并合并，完成后向统筹交总结。", look("#C8622A", "suit", "none", "#3B2A20"), { model: "claude-opus-5-5" }),
   role("r2", "member", "dev", "开发", "claude", 2, ["n1", "n2"], "从任务池领开发类小任务，在自己的 worktree 里改代码、跑测试、提交。", look("#4C7BD0", "tee", "none", "#8A5A36"), { model: "claude-sonnet-5-5", sort: 1, task_kinds: ["dev"], skills: ["docs"], plugins: ["release-notes@2", "pr-review"] }),
   role("r3", "member", "qa", "测试", "codex", 1, ["n2"], "领测试类小任务：补用例、跑全量测试、复现问题并报告。", look("#3F8F6B", "coat", "glasses", "#6B4A2E"), { sort: 2, permission_mode: "ask", sandbox: "workspace-write", task_kinds: ["test"], plugins: ["playwright-kit"] }),
   role("r4", "member", "review", "审查", "claude", 1, ["n1"], "审查合并前的改动，指出问题，不改代码。", look("#4A4843", "suit", "glasses", "#1F1E1C"), { sort: 3, gate: "review", model: "opus" }),

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /** The message box to the thread's lead: a done or failed thread reopens with the next message (quiet hint above), an archived one shows a note with 取消归档. */
 import { computed } from "vue";
-import { conversations, threads as threadActions } from "@/api/actions";
+import { threads as threadActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
+import { useSendMessage } from "@/api/pending";
 import { keys, useMe } from "@/api/queries";
 import type { ThreadView } from "@/api/views";
 import { draftKey, useDraft } from "@/lib/persist";
@@ -10,7 +11,6 @@ import { leadOf } from "@/lib/present";
 import { cn } from "@/lib/utils";
 import { useAttachments } from "../attachments";
 import Composer from "../Composer.vue";
-import type { MessageRef } from "../composer/assist";
 import { closedNote, reopenHint } from "./detail";
 
 const props = defineProps<{ pid: string; thread: ThreadView; class?: string }>();
@@ -24,15 +24,17 @@ const note = computed(() => closedNote(props.thread));
 const unsent = useDraft(() => draft.value);
 const keptDraft = computed(() => Boolean(unsent.value.trim()) || attachments.items.value.length > 0);
 const hint = computed(() => reopenHint(props.thread));
-const send = useAction((v: { text: string; images: string[]; refs: MessageRef[] }) => conversations.send(props.thread.id, v.text, false, v.images, v.refs), {
-  invalidate: () =>
-    hint.value ? [keys.messages(props.thread.id), keys.threads(props.thread.project_id), keys.thread(props.thread.id)] : [keys.messages(props.thread.id)],
+// The message shows in the chat at once (api/pending.ts); the box does not wait for the server.
+const onSend = useSendMessage(() => props.thread.id, {
+  invalidate: () => (hint.value ? [keys.threads(props.thread.project_id), keys.thread(props.thread.id)] : []),
+  draft: () => draft.value,
+  attachments,
+  assist: () => ({ scope: "lead", pid: props.pid, cid: props.thread.id }),
 });
 const unarchive = useAction(() => threadActions.unarchive(props.thread.id), {
   invalidate: () => [keys.threads(props.thread.project_id), keys.thread(props.thread.id), keys.waiting(props.thread.project_id)],
   success: `#${props.thread.no} 已取消归档`,
 });
-const onSend = (text: string, images: string[], refs: MessageRef[]) => send.mutateAsync({ text, images, refs });
 </script>
 
 <template>
@@ -47,7 +49,6 @@ const onSend = (text: string, images: string[], refs: MessageRef[]) => send.muta
       :id="`lead-${thread.id}`"
       label="发给组长"
       :placeholder="`回复组长 ${lead?.name ?? ''}；/ 命令和技能，@ 引用文件`"
-      :busy="send.isPending.value"
       :attachments="attachments"
       :on-send="onSend"
       :draft-key="draft"

@@ -114,8 +114,7 @@ type sessionInput struct {
 	hasRepo  bool
 	repos    []string // repository slugs checked out under the employee's directory
 	protRefs []string
-	defModel string // the project owner's default model for the employee's runtime ("" = builtinModel)
-	window   *int   // the context window the employee's last session of the runtime reported
+	window   *int // the context window the employee's last session of the runtime reported
 }
 
 // buildOpen renders session.open for an employee.
@@ -176,50 +175,53 @@ func employeeRef(e core.Employee, t *core.Thread) protocol.EmployeeRef {
 }
 
 // Model is what the employee's sessions run: the first non-empty step of the fallback order
-// below (modelSteps). The whole order lives there, one line per step.
+// below (modelSteps). The whole order lives there, one line per step:
 //
-// The coordinator and thread leads always run the platform default: the owner's default for
-// their runtime, then the built-in one. /model, the project's model settings and the role's model
-// only reach members (tier member):
+//	member:      /model (e.Model) → project (thread_model / thread_codex_model) → role (Spec.Model) → builtin
+//	lead:        project (thread_model / thread_codex_model) → role (Spec.Model) → builtin
+//	coordinator: project (coordinator_model) → role (Spec.Model) → builtin
 //
-//	coordinator / lead: def → builtin
-//	member:             /model (e.Model) → project (thread_model / thread_codex_model) → role (Spec.Model) → def → builtin
-//
-// def is the default of the employee's runtime in the project owner's model list
-// (composer.DefaultModel). A Codex employee never falls through to a Claude id: its built-in last
-// resort is DefaultCodexModel (""), which leaves the choice to the Codex CLI.
-func Model(e core.Employee, p store.Project, def string) string {
-	return firstNonEmpty(modelSteps(e, p, def)...)
+// The coordinator and leads have no /model (fixedModel): their model is set in their role or in
+// the project. A Codex employee never falls through to a Claude id: its built-in last resort is
+// DefaultCodexModel (""), which leaves the choice to the Codex CLI.
+func Model(e core.Employee, p store.Project) string {
+	return firstNonEmpty(modelSteps(e, p)...)
 }
 
-// fixedModel reports whether the employee's tier always runs the default model (coordinator, lead).
+// fixedModel reports whether the employee's tier cannot switch models with /model (coordinator,
+// lead): their model comes from the project and the role only.
 func fixedModel(tier string) bool { return tier == "coordinator" || tier == "lead" }
 
 // modelSteps is Model's fallback order, highest precedence first.
-func modelSteps(e core.Employee, p store.Project, def string) []string {
+func modelSteps(e core.Employee, p store.Project) []string {
 	if fixedModel(e.Tier) {
 		return []string{
-			def,                     // 1. the owner's default for the runtime
-			builtinModel(e.Runtime), // 2. built in: DefaultModel / DefaultCodexModel
+			projectModel(e, p),      // 1. the project override for the coordinator / the lead's runtime
+			e.Spec.Model,            // 2. the role's model (the employee's spec)
+			builtinModel(e.Runtime), // 3. built in: DefaultModel / DefaultCodexModel
 		}
 	}
 	return []string{
 		e.Model,                 // 1. picked for the employee with /model (at_employees.model)
 		projectModel(e, p),      // 2. the project override for the employee's runtime
 		e.Spec.Model,            // 3. the role's model (the employee's spec)
-		def,                     // 4. the owner's default for the runtime
-		builtinModel(e.Runtime), // 5. built in: DefaultModel / DefaultCodexModel
+		builtinModel(e.Runtime), // 4. built in: DefaultModel / DefaultCodexModel
 	}
 }
 
-// projectModel is the project's model override for a member, by runtime so an override only
-// reaches roles of its own runtime: thread_codex_model for Codex members (never thread_model, a
-// Claude id), thread_model for Claude members. "" falls through to the role's model.
+// projectModel is the project's model override for the employee: coordinator_model for the
+// coordinator; by runtime for leads and members so an override only reaches roles of its own
+// runtime: thread_codex_model for Codex (never thread_model, a Claude id), thread_model for
+// Claude. "" falls through to the role's model.
 func projectModel(e core.Employee, p store.Project) string {
-	if e.Runtime == "codex" {
+	switch {
+	case e.Tier == "coordinator":
+		return p.CoordinatorModel
+	case e.Runtime == "codex":
 		return p.ThreadCodexModel
+	default:
+		return p.ThreadModel
 	}
-	return p.ThreadModel
 }
 
 // effort is the project's thread effort for leads and members, else the role's.
@@ -242,7 +244,7 @@ func firstNonEmpty(vals ...string) string {
 func claudeOptions(in sessionInput) protocol.ClaudeSessionOptions {
 	e := in.emp
 	system := in.system
-	c := protocol.ClaudeSessionOptions{Model: Model(e, in.project, in.defModel), SystemAppend: &system, SettingSources: []string{},
+	c := protocol.ClaudeSessionOptions{Model: Model(e, in.project), SystemAppend: &system, SettingSources: []string{},
 		AllowedTools: []string{"mcp__platform__*"}}
 	if eff := effort(e, in.project); eff != "" {
 		c.Effort = &eff
@@ -303,7 +305,7 @@ func memberClaude(c *protocol.ClaudeSessionOptions, in sessionInput) {
 func codexOptions(in sessionInput) protocol.CodexSessionOptions {
 	e := in.emp
 	dev := in.system
-	c := protocol.CodexSessionOptions{Model: Model(e, in.project, in.defModel), DeveloperInstructions: &dev, Sandbox: "read-only", ApprovalPolicy: "never"}
+	c := protocol.CodexSessionOptions{Model: Model(e, in.project), DeveloperInstructions: &dev, Sandbox: "read-only", ApprovalPolicy: "never"}
 	switch {
 	case readOnly(e):
 	case Bypass(e):
