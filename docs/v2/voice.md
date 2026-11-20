@@ -137,7 +137,11 @@ the WebRTC transport), `audio.ts` (microphone, device list, level meter), `trans
   "系统默认（<name>）", `communications` is dropped, duplicates merged by group and name; a saved
   microphone that is gone falls back to 系统默认; before permission the rows are "麦克风 N"
   placeholders with 允许; refreshed on `devicechange`), a 语言 row that opens a searchable list
-  in place, and 按住录音 with a switch. Preferences: `localStorage["voice-prefs:<user id>"]`.
+  in place, and 按住录音 with a switch (only the switch toggles it, not a click elsewhere on the
+  row). Default (nothing saved, or an invalid value) is click mode. Preferences:
+  `localStorage["voice-prefs:v2:<user id>"]`; the old `voice-prefs:<user id>` entry is migrated
+  once, keeping microphone and language but back to click mode. Every composer on the page (and
+  other tabs) follows a change at once, and the signed-in user's prefs apply from the first render.
 - Dev: the Vite proxy forwards WebSockets (`ws: true`), so the relay works under `npm run dev`.
 
 ## Verification

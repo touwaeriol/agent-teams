@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Composer from "@/components/app/Composer.vue";
 import { MAX_UTTERANCE_MS, SETTLE_MS, SILENCE_MS, VoiceController, type VoiceDeps, type VoiceState } from "@/lib/voice/controller";
 import { ConnectError, type RealtimeEvent, type TransportHandlers, type VoiceSessionInfo } from "@/lib/voice/openai";
-import { filterLanguages, languageLabel, prefsKey, readPrefs, writePrefs } from "@/lib/voice/prefs";
+import { DEFAULT_PREFS, filterLanguages, languageLabel, legacyPrefsKey, onPrefsChange, prefsKey, readPrefs, writePrefs } from "@/lib/voice/prefs";
 import { joiner, Transcript } from "@/lib/voice/transcript";
 
 describe("Transcript", () => {
@@ -296,6 +296,49 @@ describe("voice prefs", () => {
     });
     expect(readPrefs("u1").language).toBe("auto");
     expect(() => writePrefs("u1", { deviceId: "", language: "en", pushToTalk: false })).not.toThrow();
+  });
+  it("default (nothing saved) is click mode", () => {
+    expect(DEFAULT_PREFS.pushToTalk).toBe(false);
+    expect(readPrefs("u1").pushToTalk).toBe(false);
+    expect(readPrefs("").pushToTalk).toBe(false);
+  });
+  it("only a real true turns push-to-talk on; odd values are click mode", () => {
+    for (const bad of ['"true"', "1", "null", '"yes"', "{}"]) {
+      window.localStorage.setItem(prefsKey("u1"), `{"deviceId":"","language":"auto","pushToTalk":${bad}}`);
+      expect(readPrefs("u1").pushToTalk).toBe(false);
+    }
+    for (const junk of ["null", "42", '"x"', "[]"]) {
+      window.localStorage.setItem(prefsKey("u1"), junk);
+      expect(readPrefs("u1")).toEqual(DEFAULT_PREFS);
+    }
+  });
+  it("migrates the old key: keeps mic and language, back to click mode, old key removed", () => {
+    window.localStorage.setItem(legacyPrefsKey("u1"), JSON.stringify({ deviceId: "mic-2", language: "ja", pushToTalk: true }));
+    expect(readPrefs("u1")).toEqual({ deviceId: "mic-2", language: "ja", pushToTalk: false });
+    expect(window.localStorage.getItem(legacyPrefsKey("u1"))).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem(prefsKey("u1"))!)).toEqual({ deviceId: "mic-2", language: "ja", pushToTalk: false });
+    // Turned on again after the migration, it stays on.
+    writePrefs("u1", { deviceId: "mic-2", language: "ja", pushToTalk: true });
+    expect(readPrefs("u1").pushToTalk).toBe(true);
+    // A broken old entry is just the default.
+    window.localStorage.setItem(legacyPrefsKey("u2"), "{not json");
+    expect(readPrefs("u2")).toEqual(DEFAULT_PREFS);
+  });
+  it("tells listeners when prefs are written", () => {
+    const f = vi.fn();
+    const off = onPrefsChange(f);
+    writePrefs("u1", { ...DEFAULT_PREFS, pushToTalk: true });
+    expect(f).toHaveBeenCalledTimes(1);
+    expect(f).toHaveBeenLastCalledWith({ userId: "u1", prefs: { ...DEFAULT_PREFS, pushToTalk: true } });
+    // Another tab: no value, the listener reads storage again.
+    window.dispatchEvent(new StorageEvent("storage", { key: prefsKey("u1") }));
+    window.dispatchEvent(new StorageEvent("storage", { key: "draft:v2:x" }));
+    expect(f).toHaveBeenCalledTimes(2);
+    expect(f).toHaveBeenLastCalledWith(null);
+    off();
+    writePrefs("u1", DEFAULT_PREFS);
+    window.dispatchEvent(new StorageEvent("storage", { key: prefsKey("u1") }));
+    expect(f).toHaveBeenCalledTimes(2);
   });
   it("searches languages by code, own name and Chinese name", () => {
     const list = [

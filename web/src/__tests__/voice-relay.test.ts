@@ -412,6 +412,18 @@ describe("mic menu", () => {
     expect(noPermission.listeners).toHaveLength(1); // refreshes on devicechange
   });
 
+  it("按住录音 changes only from its switch, not from a click elsewhere on the row", async () => {
+    const { w } = mountMenu(chrome, "");
+    await flushPromises();
+    const row = w.find("[data-testid=voice-ptt-row]");
+    expect(row.element.tagName).not.toBe("LABEL");
+    await row.find("span").trigger("click");
+    await row.trigger("click");
+    expect(w.emitted("change")).toBeUndefined();
+    await w.find("[data-testid=voice-ptt-switch]").trigger("click");
+    expect(w.emitted("change")).toEqual([[{ pushToTalk: true }]]);
+  });
+
   it("opens languages as a submenu and picks one", async () => {
     const { w } = mountMenu(chrome, "");
     await flushPromises();
