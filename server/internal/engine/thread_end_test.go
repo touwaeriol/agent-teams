@@ -469,3 +469,28 @@ func TestMergedWithoutWebhook(t *testing.T) {
 	lead.mustCall("cancel_task", map[string]any{"task_id": string(task.TaskID), "reason": "不需要了"})
 	c.waitFor(t, "done once the task is", func(v core.ThreadView) bool { return v.Status == "done" })
 }
+
+// TestFinishDropsIdleTasks: the lead calling finish decides the thread is done: tasks nobody
+// works on (a blocked one here) are cancelled instead of holding the end, and the thread ends.
+func TestFinishDropsIdleTasks(t *testing.T) {
+	c, lead := newEndCase(t, "")
+	lead.mustCall("update_plan", map[string]any{"steps": []map[string]string{{"title": "做", "status": "done"}}})
+	res := lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "补一个测试", "main": "做"})
+	var task protocol.AssignTaskResult
+	_ = json.Unmarshal(*res.Structured, &task)
+	if _, err := store.Exec(c.w.ctx, c.w.e.Core.Pool, `UPDATE at_tasks SET status = 'blocked', claimed_by = '' WHERE conversation_id = $1 AND id = $2`,
+		c.thread.ID, string(task.TaskID)); err != nil {
+		t.Fatal(err)
+	}
+	c.update(t, map[string]any{"status": "review"})
+	c.stays(t, "review", 600*time.Millisecond) // the blocked task holds the end
+	out := lead.mustCall("finish", map[string]any{"summary": "做完了"})
+	if got := text(out); !strings.Contains(got, "已取消没人在做的任务："+string(task.TaskID)) {
+		t.Fatalf("finish result: %s", got)
+	}
+	c.waitFor(t, "done after finish", func(v core.ThreadView) bool { return v.Status == "done" })
+	got, err := core.TaskByID(c.w.ctx, c.w.e.Core.Pool, c.thread.ID, string(task.TaskID))
+	if err != nil || got.Status != "cancelled" {
+		t.Fatalf("task %+v %v", got, err)
+	}
+}

@@ -402,6 +402,7 @@ queued ──开工──► running ◄──► waiting（有等你处理的�
   - 还有未完成的小任务，或合并队列里还有活动条目时不结束；PR 的 `merged` 照常记录并推送，讨论串留在原状态。合并循环每一轮（`doneTick`）检查 `pr_state = merged` 但还没结束的讨论串，条件消失后自动结束；组长调用 `finish` 时也会再检查一次。
   - 组长正在回合中（会话 `in_turn`）时不立即结束，记 `at_threads.done_pending_at`；组长 `turn_ended`（最终回复的 `text final` 在它之前入库）时结束。
   - 组长空闲但从没调用过 `finish(summary)`（summary 为空）时，给组长发一次“（平台）[Thread #n · 可以收尾]”提示（`finish_nudged_at`，每个讨论串只发一次），它回应提示的那一回合结束后结束。
+  - 收尾被任务挡住时（PR 检查已通过或已合并，但还有未完成的小任务），平台给组长发一次“[Thread #n · 收尾被挡住]”，列出这些任务（同一组任务只发一次），讨论串页面的状态也写明“还有 N 个小任务没结束”。任务失败或取消时，挂在它下面的平台审查/决策任务一并取消。组长调用 `finish(summary)` 就是认定讨论串做完了：没人在做的任务（`pending`、`blocked`）由平台取消，不再挡收尾；成员正在做（`claimed`、`running`）或等合并（`review`、`decision`）的任务保留。原因（2026-11-20，讨论串 #31）：被取消任务的审查任务停在 blocked，组长早已 finish，讨论串却在 review 卡了 16 小时，界面只写“等检查通过”。轮询发现 PR 已在 GitHub 上合并也记为 `merged` 并收尾，不依赖 webhook。
   - 兜底：`done_pending_at` 超过 10 分钟（`delivery.DoneGrace`）合并循环直接结束讨论串，不再等组长。
   - check 重新变成进行中、check 失败或 reject 时清掉 `done_pending_at`，等下一次通过。
   - 通知统筹的 `[Thread #n · … · done]` 那一行：有 summary 用 summary 的第一行，否则用组长最新的回复。
