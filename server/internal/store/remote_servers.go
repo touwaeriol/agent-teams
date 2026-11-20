@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -578,10 +579,14 @@ type SSHSession struct {
 	UserID     string // the project's owner
 }
 
+// Ended reports whether the session is over: closed, or crashed (terminal; a restart opens a new
+// generation).
+func (x SSHSession) Ended() bool { return x.State == "closed" || x.State == "crashed" }
+
 // MayUseSSH reports whether the session may have servers at all: a live member session of a role
 // that is not read-only. The coordinator and the lead never may.
 func (x SSHSession) MayUseSSH() bool {
-	return x.State != "closed" && x.Tier == "member" && !x.ReadOnly
+	return !x.Ended() && x.Tier == "member" && !x.ReadOnly
 }
 
 // sshSessionSelect reads an employee's read-only flag from its spec (store.Role JSON): read-only
@@ -848,6 +853,20 @@ func (s *Store) InsertSSHAudit(ctx context.Context, a SSHAudit) (SSHAudit, error
 	}
 	err := s.g(ctx).Omit("id").Create(&a).Error
 	return a, mapErr(err)
+}
+
+// FinishSSHAudit completes a row written when an exec, shell or subsystem started (so a console
+// crash still leaves the command in the audit): exit code, duration, bytes and detail.
+func (s *Store) FinishSSHAudit(ctx context.Context, id int64, exitCode *int, durationMS, bytesIn, bytesOut int64, detail map[string]any) error {
+	if detail == nil {
+		detail = map[string]any{}
+	}
+	raw, err := json.Marshal(detail)
+	if err != nil {
+		return err
+	}
+	return Changed(s.g(ctx).Table("at_ssh_audit").Where("id = ?", id).Updates(map[string]any{
+		"exit_code": exitCode, "duration_ms": durationMS, "bytes_in": bytesIn, "bytes_out": bytesOut, "detail": raw}))
 }
 
 // SSHAuditFilter selects audit rows of one user; empty fields do not filter.

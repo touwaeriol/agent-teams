@@ -65,7 +65,7 @@ func (g *Gateway) Sign(ctx context.Context, node store.Node, r *protocol.SshCert
 	case err != nil:
 		g.log.Warn("ssh cert: session servers", "session_id", r.SessionID, "err", err)
 		return certRefuse("unavailable")
-	case x.NodeID != node.ID || x.UserID != node.UserID || x.State == "closed":
+	case x.NodeID != node.ID || x.UserID != node.UserID || x.Ended():
 		return certRefuse("session_not_found")
 	case x.OpenGen != int(r.OpenGen):
 		return certRefuse("stale_open_gen")
@@ -73,6 +73,9 @@ func (g *Gateway) Sign(ctx context.Context, node store.Node, r *protocol.SshCert
 		return certRefuse("not_granted")
 	case len(servers) == 0:
 		return certRefuse("no_servers")
+	case !g.allowSign(x.SessionID):
+		g.log.Warn("ssh cert: rate limited", "session_id", x.SessionID)
+		return certRefuse("rate_limited")
 	}
 	ca, _, caKey, hostKey, err := g.keys(ctx)
 	if err != nil {
