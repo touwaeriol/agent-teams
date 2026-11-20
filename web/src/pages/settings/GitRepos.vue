@@ -53,7 +53,7 @@ function openCredential(c: GitCredentialView) {
           <div class="flex flex-col gap-1.5">
             <h1 class="text-2xl font-semibold">Git 仓库</h1>
             <p class="max-w-[640px] text-[13px] leading-[22px] text-muted-foreground">
-              项目和讨论串能用的仓库。GitHub 用 App 连接，PR 和 CI 都能用；其他仓库（GitLab、Gitea、自建 Git）在这里单独添加，用 HTTPS 令牌或 SSH 私钥验证。凭据只保存在平台上，节点上的 git 经平台中转读写，拿不到凭据。
+              项目和讨论串能用的仓库。GitHub 用 App 连接，PR 和 CI 都能用；其他仓库（GitLab、Gitea、自建 Git）在这里单独添加，用 HTTPS 令牌或 SSH 私钥验证。凭据加密保存在平台上，员工的 git 用到时才交给节点，只放在内存里，只给这个项目员工会话里的 git 用。
             </p>
           </div>
         </div>

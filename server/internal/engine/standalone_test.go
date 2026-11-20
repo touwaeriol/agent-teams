@@ -18,10 +18,12 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// TestStandaloneRepoEndToEnd: a project on a standalone Git repository (no GitHub). Nodes get the
-// relay URL and relay tokens (never the upstream token); the merge queue merges the member's
-// branch into the thread branch on the real upstream through the mirror; CI degrades to off;
-// open_pr says there are no PRs and finish ends the thread on its branch (delivered_sha).
+// TestStandaloneRepoEndToEnd: a project on a standalone Git repository (no GitHub). Nodes clone
+// the upstream itself and get its credential for the employee's git (sessions and git jobs of
+// the project only, by host and path; the session lists the host in git_hosts); the merge queue
+// merges the member's branch into the thread branch on the real upstream through the console's
+// mirror; CI degrades to off; open_pr says there are no PRs and finish ends the thread on its
+// branch (delivered_sha).
 func TestStandaloneRepoEndToEnd(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "acme"), 0o755); err != nil {
@@ -29,7 +31,7 @@ func TestStandaloneRepoEndToEnd(t *testing.T) {
 	}
 	bare := gittest.Bare(t, filepath.Join(root, "acme"), "web")
 	up := gittest.HTTPS(t, root, "oauth2", "upstream-secret")
-	relay := &gitrelay.Relay{Git: up.Runner, Dir: filepath.Join(t.TempDir(), "mirrors"), PublicURL: "http://console.test"}
+	relay := &gitrelay.Relay{Git: up.Runner, Dir: filepath.Join(t.TempDir(), "mirrors")}
 	w := newWorldWith(t, nil, func(e *engine.Engine) {
 		relay.Store, relay.Vault = e.Store, testVault(t)
 		e.GH.Relay = relay
@@ -54,11 +56,15 @@ func TestStandaloneRepoEndToEnd(t *testing.T) {
 
 	var thread core.ThreadView
 	b.must(201, "POST", "/api/projects/"+project.ID+"/threads", map[string]any{"title": "Login", "brief": "登录页"}, &thread)
-	lead, _ := expectOpen(t, w, n, "lead-1")
-	relayURL := "http://console.test/git/" + repo.ID + ".git"
+	lead, leadOpen := expectOpen(t, w, n, "lead-1")
+	host := strings.TrimPrefix(up.URL, "https://")
+	if len(leadOpen.GitHosts) != 1 || leadOpen.GitHosts[0].Host != host || leadOpen.GitHosts[0].Transport != "https" {
+		t.Fatalf("session git_hosts %+v", leadOpen.GitHosts)
+	}
+	upstreamURL := up.URL + "/acme/web.git"
 	prep := takePrepare(t, w, n)
-	if string(prep.Repo) != "git/"+repo.ID || prep.RemoteURL == nil || *prep.RemoteURL != relayURL {
-		t.Fatalf("prepare names the relay: repo %s remote %v", prep.Repo, prep.RemoteURL)
+	if string(prep.Repo) != "git/"+repo.ID || prep.RemoteURL == nil || *prep.RemoteURL != upstreamURL {
+		t.Fatalf("prepare names the upstream: repo %s remote %v", prep.Repo, prep.RemoteURL)
 	}
 	answerPrepares(t, w, n)
 	lead.mustCall("update_plan", map[string]any{"steps": []map[string]string{{"title": "页面", "status": "doing"}}})
@@ -67,33 +73,31 @@ func TestStandaloneRepoEndToEnd(t *testing.T) {
 	answerPrepares(t, w, n)
 	dev.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: protocol.SessionID(dev.session), MsgID: devOpen.FirstMessage.MsgID})
 
-	// The member's session gets a relay token for the console's host, not the upstream token.
+	// The member's session gets the upstream credential for this repository only.
 	sid := protocol.SessionID(dev.session)
-	sess := credential(t, w, n, protocol.CredRequest{ReqID: "r1", SessionID: &sid, Host: "console.test", Path: "git/" + repo.ID + ".git", Purpose: "read"})
-	if !sess.Ok || sess.Password == nil || strings.Contains(*sess.Password, "upstream-secret") {
+	sess := credential(t, w, n, protocol.CredRequest{ReqID: "r1", SessionID: &sid, Host: host, Path: "acme/web.git", Purpose: "read"})
+	if !sess.Ok || strOf(sess.Password) != "upstream-secret" || strOf(sess.Username) != "oauth2" || sess.ExpiresAt == nil {
 		t.Fatalf("session credential %+v", sess)
 	}
-	claims, err := relay.Verify(*sess.Password)
-	if err != nil || claims.Mode != gitrelay.ModeEmployee || claims.Repo != repo.ID || len(claims.Deny) != 1 || claims.Deny[0] != "refs/heads/main" {
-		t.Fatalf("session token %+v %v", claims, err)
+	if wrong := credential(t, w, n, protocol.CredRequest{ReqID: "r2", SessionID: &sid, Host: "evil.test", Path: "acme/web.git", Purpose: "read"}); wrong.Ok {
+		t.Fatalf("credential for another host %+v", wrong)
 	}
-	if wrong := credential(t, w, n, protocol.CredRequest{ReqID: "r2", SessionID: &sid, Host: "evil.test", Path: "git/" + repo.ID + ".git", Purpose: "read"}); wrong.Ok {
-		t.Fatalf("token for another host %+v", wrong)
+	if other := credential(t, w, n, protocol.CredRequest{ReqID: "r2b", SessionID: &sid, Host: host, Path: "acme/other.git", Purpose: "read"}); other.Ok {
+		t.Fatalf("credential for another repository %+v", other)
 	}
 
-	// complete_task → git.push through the relay: simulated by pushing to the upstream directly.
+	// complete_task → git.push: the node's push is simulated by pushing to the upstream directly.
 	callID := "tc_complete_1"
 	gen := protocol.OpenGen(dev.gen)
 	dev.send(protocol.TypeToolCall, protocol.ToolCall{CallID: protocol.CallID(callID), SessionID: sid, OpenGen: &gen,
 		Tool: "complete_task", Args: []byte(`{"task_id":"t1","summary":"表单写好了"}`)})
 	pushed := takePush(t, w, n)
-	if string(pushed.Repo) != "git/"+repo.ID || pushed.RemoteURL == nil || *pushed.RemoteURL != relayURL {
-		t.Fatalf("push names the relay: %+v", pushed)
+	if string(pushed.Repo) != "git/"+repo.ID || pushed.RemoteURL == nil || *pushed.RemoteURL != upstreamURL {
+		t.Fatalf("push names the upstream: %+v", pushed)
 	}
 	job := protocol.JobID(pushed.JobID)
-	jobCred := credential(t, w, n, protocol.CredRequest{ReqID: "r3", JobID: &job, Host: "console.test", Path: "git/" + repo.ID + ".git", Purpose: "push"})
-	if c, err := relay.Verify(strOf(jobCred.Password)); err != nil || c.Mode != gitrelay.ModePush || c.Ref != "refs/heads/thread/1/dev-1" {
-		t.Fatalf("push job token %+v %v", c, err)
+	if jobCred := credential(t, w, n, protocol.CredRequest{ReqID: "r3", JobID: &job, Host: host, Path: "acme/web.git", Purpose: "push"}); strOf(jobCred.Password) != "upstream-secret" {
+		t.Fatalf("push job credential %+v", jobCred)
 	}
 	sha := memberCommit(t, bare, "thread/1/dev-1")
 	ctxW, cancel := w.waitCtx()
@@ -183,7 +187,7 @@ func takePush(t *testing.T, w *world, n *nodetest.Node) protocol.GitPush {
 	return p
 }
 
-// memberCommit puts one commit on branch in the upstream (what the relay push would have done).
+// memberCommit puts one commit on branch in the upstream (what the node's push would have done).
 func memberCommit(t *testing.T, bare, branch string) string {
 	t.Helper()
 	work := t.TempDir()

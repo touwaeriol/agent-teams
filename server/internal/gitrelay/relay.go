@@ -1,8 +1,8 @@
-// Package gitrelay is the control plane's Git relay for standalone repositories (git-repos.md §5):
-// one bare mirror per repository, served to nodes over smart HTTP (git http-backend) with
-// short-lived relay tokens; pushes go through a pre-receive hook that forwards them to the
-// upstream with the credential only the console holds. The merge queue and thread branches use
-// the same mirrors (Merge, UpdateRef…), so the upstream needs nothing beyond plain git.
+// Package gitrelay is the console's own Git access to standalone repositories (git-repos.md §5):
+// one bare mirror per repository, fetched from the upstream with the saved credential, where the
+// merge queue and thread branches do their work (Merge, UpdateRef…) before pushing to the
+// upstream, so the upstream needs nothing beyond plain git. Nodes do not go through it: they
+// reach the upstream directly with the credential handed to the employee's git (delivery/cred.go).
 package gitrelay
 
 import (
@@ -10,11 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -24,14 +21,13 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// Relay serves and maintains the mirrors.
+// Relay maintains the mirrors.
 type Relay struct {
-	Store     *store.Store
-	Vault     *credvault.Vault
-	Git       gitremote.Git
-	Dir       string // mirrors root (GIT_MIRROR_DIR); one <repo_id>.git per repository
-	PublicURL string // the console's public base, e.g. https://agent.example.com
-	Log       *slog.Logger
+	Store *store.Store
+	Vault *credvault.Vault
+	Git   gitremote.Git
+	Dir   string // mirrors root (GIT_MIRROR_DIR); one <repo_id>.git per repository
+	Log   *slog.Logger
 	// Fresh is how long a fetched mirror is served without asking the upstream again (10 s).
 	Fresh time.Duration
 	Now   func() time.Time
@@ -63,35 +59,8 @@ func (r *Relay) log() *slog.Logger {
 	return slog.Default()
 }
 
-// Enabled reports whether the relay can serve (a mirror directory and a vault).
+// Enabled reports whether the mirrors can be used (a mirror directory and a vault).
 func (r *Relay) Enabled() bool { return r != nil && r.Dir != "" && r.Vault.Ready() }
-
-// URL is the relay URL nodes clone a repository from.
-func (r *Relay) URL(repoID string) string {
-	return strings.TrimRight(r.PublicURL, "/") + "/git/" + repoID + ".git"
-}
-
-// Host is the host (with port when not default) of the relay URLs, as git's credential
-// protocol names it.
-func (r *Relay) Host() string {
-	u, err := url.Parse(r.PublicURL)
-	if err != nil {
-		return ""
-	}
-	return u.Host
-}
-
-var repoPath = regexp.MustCompile(`^/?git/(gr_[a-z0-9]+)(\.git)?/?$`)
-
-// RepoOfPath is the repository id of a relay path as git's credential helper sends it
-// ("git/gr_x.git"); ok=false for anything else.
-func RepoOfPath(path string) (string, bool) {
-	m := repoPath.FindStringSubmatch(path)
-	if m == nil {
-		return "", false
-	}
-	return m[1], true
-}
 
 // Policy is the address policy for upstream hosts: the admin's allowed private networks.
 func Policy(ctx context.Context, st *store.Store) sshdial.Policy {
@@ -128,14 +97,20 @@ func OpenRemote(ctx context.Context, st *store.Store, v *credvault.Vault, policy
 	return remote, nil
 }
 
+// Open is a repository's upstream with its credential opened (OpenRemote): for the console's
+// own git and for the credential handed to the project's employees (git-repos.md §5).
+func (r *Relay) Open(ctx context.Context, repo store.GitRepo) (gitremote.Remote, error) {
+	return OpenRemote(ctx, r.Store, r.Vault, Policy(ctx, r.Store), repo.UserID, repo)
+}
+
 func (r *Relay) remote(ctx context.Context, repo store.GitRepo) (gitremote.Remote, error) {
 	if repo.Transport == "ssh" && repo.HostKey == "" {
 		return gitremote.Remote{}, errors.New("SSH 仓库还没有固定主机密钥：请先在设置里测试连接")
 	}
-	return OpenRemote(ctx, r.Store, r.Vault, Policy(ctx, r.Store), repo.UserID, repo)
+	return r.Open(ctx, repo)
 }
 
-// lock serialises everything that changes one mirror (sync, receive-pack, console pushes).
+// lock serialises everything that changes one mirror (sync, console pushes).
 func (r *Relay) lock(id string) func() {
 	r.mu.Lock()
 	if r.locks == nil {

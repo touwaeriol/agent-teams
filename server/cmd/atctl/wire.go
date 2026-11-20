@@ -29,7 +29,7 @@ func wire(d httpapi.Deps) (httpapi.Deps, func(context.Context), error) {
 		return d, nil, err
 	}
 	if d.Relay == nil {
-		d.Relay = &gitrelay.Relay{Store: d.Store, Vault: vault, Dir: d.Config.GitMirrorDir, PublicURL: d.Config.PublicURL, Log: d.Log}
+		d.Relay = &gitrelay.Relay{Store: d.Store, Vault: vault, Dir: d.Config.GitMirrorDir, Log: d.Log}
 	}
 	e, err := engine.New(engine.Deps{Store: d.Store, KV: d.KV, GitHub: d.GitHub, Tokens: d.Tokens,
 		Box: auth.NewSecretBox(d.Config.SecretKeys...), Office: d.Office, Log: d.Log, Gateway: nodegw.Config{Validate: true},

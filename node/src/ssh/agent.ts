@@ -152,8 +152,12 @@ export async function handleAgentMessage(msg: Buffer, backend: AgentBackend): Pr
 export class AgentServer {
   private server: Server | null = null;
   private readonly conns = new Set<Socket>();
+  private readonly handle: (msg: Buffer) => Promise<Buffer>;
 
-  constructor(readonly socketPath: string, private readonly backend: AgentBackend) {}
+  /** backend: the session key and certificate, or any handler (the git-ssh wrapper's held key). */
+  constructor(readonly socketPath: string, backend: AgentBackend | ((msg: Buffer) => Promise<Buffer>)) {
+    this.handle = typeof backend === "function" ? backend : (m) => handleAgentMessage(m, backend);
+  }
 
   async start(): Promise<void> {
     rmSync(this.socketPath, { force: true });
@@ -191,7 +195,7 @@ export class AgentServer {
       }
       for (const m of msgs) {
         chain = chain.then(async () => {
-          const reply = await handleAgentMessage(m, this.backend);
+          const reply = await this.handle(m);
           if (!sock.destroyed) sock.write(frame(reply));
         });
       }

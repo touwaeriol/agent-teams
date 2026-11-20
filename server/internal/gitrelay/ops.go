@@ -105,9 +105,8 @@ func (r *Relay) FileContent(ctx context.Context, repo store.GitRepo, path, ref s
 }
 
 // push sends updates to the upstream (atomic when several) with a lease on each ref's old value,
-// then mirrors them locally. extra is added to git's environment (a quarantine's object dirs).
 // The caller holds the repository's lock.
-func (r *Relay) push(ctx context.Context, repo store.GitRepo, dir string, extra []string, updates []Update) error {
+func (r *Relay) push(ctx context.Context, repo store.GitRepo, dir string, updates []Update) error {
 	rem, err := r.remote(ctx, repo)
 	if err != nil {
 		return err
@@ -128,7 +127,6 @@ func (r *Relay) push(ctx context.Context, repo store.GitRepo, dir string, extra 
 		return err
 	}
 	defer cleanup()
-	cmd.Env = append(cmd.Env, extra...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		r.forget(repo.ID)
@@ -144,7 +142,7 @@ func (r *Relay) push(ctx context.Context, repo store.GitRepo, dir string, extra 
 // apply pushes updates and records them in the mirror (console-made changes: the mirror has
 // every object already).
 func (r *Relay) apply(ctx context.Context, repo store.GitRepo, dir string, updates []Update) error {
-	if err := r.push(ctx, repo, dir, nil, updates); err != nil {
+	if err := r.push(ctx, repo, dir, updates); err != nil {
 		return err
 	}
 	for _, u := range updates {

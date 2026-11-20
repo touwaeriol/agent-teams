@@ -130,7 +130,7 @@ function submit() {
   <FormDialog
     v-model:open="open"
     :title="editing ? `编辑仓库 ${repoTitle(editing)}` : '添加仓库'"
-    description="凭据只保存在平台上，节点和员工都拿不到：节点上的 git 经平台中转读写，每次只带 1 小时有效的中转令牌。保存后凭据不能再查看，只能替换。"
+    description="凭据加密保存在平台上。员工用到时平台把它交给节点，只留在内存里，只有这个项目员工会话里的 git 能用，不写到磁盘或配置文件。保存后凭据不能再查看，只能替换。"
     :submit-label="editing ? '保存' : '添加'"
     :busy="save.isPending.value"
     width="38rem"

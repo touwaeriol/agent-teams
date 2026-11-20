@@ -464,7 +464,7 @@
     },
     "CredRequest": {
       "title": "CredRequest",
-      "description": "Credential helper asks for a short-lived token. Unreliable, retried after 10 s with the same req_id; never logged.",
+      "description": "Credential helper (or git-ssh wrapper) asks for a short-lived token or a standalone repository's credential. Unreliable, retried after 10 s with the same req_id; never logged.",
       "type": "object",
       "required": [
         "req_id",
@@ -487,10 +487,11 @@
           "$ref": "#/$defs/OpenGen"
         },
         "host": {
-          "type": "string"
+          "type": "string",
+          "description": "github.com, or a standalone repository's host[:port]."
         },
         "path": {
-          "description": "owner/name.git",
+          "description": "owner/name.git (a standalone repository: its path on the host, with .git).",
           "type": "string"
         },
         "purpose": {
@@ -508,7 +509,7 @@
     },
     "CredResponse": {
       "title": "CredResponse",
-      "description": "Token for a cred.request, or a refusal. Unreliable; never logged.",
+      "description": "Token (or, for an SSH repository, a private key) for a cred.request, or a refusal. Unreliable; never logged.",
       "type": "object",
       "required": [
         "req_id",
@@ -527,6 +528,27 @@
         },
         "password": {
           "type": "string"
+        },
+        "ssh_key": {
+          "description": "SSH repositories (git-repos.md §5): the private key as unencrypted PKCS#8 PEM, its authorized_keys line and the pinned known_hosts line. Kept in memory by the git-ssh wrapper only.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "private_key",
+            "public_key",
+            "known_hosts"
+          ],
+          "properties": {
+            "private_key": {
+              "type": "string"
+            },
+            "public_key": {
+              "type": "string"
+            },
+            "known_hosts": {
+              "type": "string"
+            }
+          }
         },
         "expires_at": {
           "$ref": "#/$defs/Timestamp"
@@ -693,9 +715,9 @@
           "$ref": "#/$defs/Repo"
         },
         "remote_url": {
-          "description": "Clone and push URL for a repository the daemon does not reach at git_base_url/<repo>.git: a standalone Git repository served by the console's Git relay (git-repos.md 5). Credentials for it come from cred.request with the URL's host and path. Absent: git_base_url/<repo>.git.",
+          "description": "Clone and push URL for a repository the daemon does not reach at git_base_url/<repo>.git: a standalone Git repository's upstream (git-repos.md §5), HTTPS without credentials, ssh:// or scp-like. Credentials come from cred.request with the URL's host and path (SSH: through the git-ssh wrapper). Absent: git_base_url/<repo>.git.",
           "type": "string",
-          "pattern": "^https?://[^/@\\s]+/git/gr_[a-z0-9]+\\.git$"
+          "pattern": "^(https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/[^\\s@]+|ssh://([A-Za-z0-9_.-]+@)?[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/[^\\s]+|[A-Za-z0-9_.-]+@[A-Za-z0-9][A-Za-z0-9.-]*:[^\\s/-][^\\s]*)$"
         },
         "mode": {
           "type": "string",
@@ -801,9 +823,9 @@
           "$ref": "#/$defs/Repo"
         },
         "remote_url": {
-          "description": "Clone and push URL for a repository the daemon does not reach at git_base_url/<repo>.git: a standalone Git repository served by the console's Git relay (git-repos.md 5). Credentials for it come from cred.request with the URL's host and path. Absent: git_base_url/<repo>.git.",
+          "description": "Clone and push URL for a repository the daemon does not reach at git_base_url/<repo>.git: a standalone Git repository's upstream (git-repos.md §5), HTTPS without credentials, ssh:// or scp-like. Credentials come from cred.request with the URL's host and path (SSH: through the git-ssh wrapper). Absent: git_base_url/<repo>.git.",
           "type": "string",
-          "pattern": "^https?://[^/@\\s]+/git/gr_[a-z0-9]+\\.git$"
+          "pattern": "^(https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/[^\\s@]+|ssh://([A-Za-z0-9_.-]+@)?[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/[^\\s]+|[A-Za-z0-9_.-]+@[A-Za-z0-9][A-Za-z0-9.-]*:[^\\s/-][^\\s]*)$"
         },
         "cwd": {
           "$ref": "#/$defs/RelPath"
@@ -2421,6 +2443,33 @@
         "git_credentials": {
           "description": "Install the credential helper and gh wrapper.",
           "type": "boolean"
+        },
+        "git_hosts": {
+          "description": "Standalone Git repositories' hosts this session may get credentials for (git-repos.md §5): HTTPS hosts get the credential helper, SSH hosts the git-ssh wrapper. Only with git_credentials.",
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "transport",
+              "host"
+            ],
+            "properties": {
+              "transport": {
+                "type": "string",
+                "enum": [
+                  "https",
+                  "ssh"
+                ]
+              },
+              "host": {
+                "description": "host[:port], the port only when not the default.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9.-]+(:[0-9]{1,5})?$"
+              }
+            }
+          }
         },
         "ssh_servers": {
           "$ref": "#/$defs/SshServers"

@@ -129,6 +129,33 @@
       "description": "Install the credential helper and gh wrapper.",
       "type": "boolean"
     },
+    "git_hosts": {
+      "description": "Standalone Git repositories' hosts this session may get credentials for (git-repos.md §5): HTTPS hosts get the credential helper, SSH hosts the git-ssh wrapper. Only with git_credentials.",
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transport",
+          "host"
+        ],
+        "properties": {
+          "transport": {
+            "type": "string",
+            "enum": [
+              "https",
+              "ssh"
+            ]
+          },
+          "host": {
+            "description": "host[:port], the port only when not the default.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9.-]+(:[0-9]{1,5})?$"
+          }
+        }
+      }
+    },
     "ssh_servers": {
       "$ref": "common.json#/$defs/SshServers"
     },

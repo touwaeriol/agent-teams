@@ -30,9 +30,9 @@
       "$ref": "common.json#/$defs/Repo"
     },
     "remote_url": {
-      "description": "Clone and push URL for a repository the daemon does not reach at git_base_url/<repo>.git: a standalone Git repository served by the console's Git relay (git-repos.md 5). Credentials for it come from cred.request with the URL's host and path. Absent: git_base_url/<repo>.git.",
+      "description": "Clone and push URL for a repository the daemon does not reach at git_base_url/<repo>.git: a standalone Git repository's upstream (git-repos.md §5), HTTPS without credentials, ssh:// or scp-like. Credentials come from cred.request with the URL's host and path (SSH: through the git-ssh wrapper). Absent: git_base_url/<repo>.git.",
       "type": "string",
-      "pattern": "^https?://[^/@\\s]+/git/gr_[a-z0-9]+\\.git$"
+      "pattern": "^(https://[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/[^\\s@]+|ssh://([A-Za-z0-9_.-]+@)?[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?/[^\\s]+|[A-Za-z0-9_.-]+@[A-Za-z0-9][A-Za-z0-9.-]*:[^\\s/-][^\\s]*)$"
     },
     "cwd": {
       "$ref": "common.json#/$defs/RelPath"

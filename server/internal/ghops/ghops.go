@@ -107,14 +107,18 @@ func (g *GitHub) NodeRemote(r Repo) *string {
 	return nil
 }
 
-// RemoteURL is where nodes clone a standalone repository from (the relay); "" for GitHub, whose
-// URL the daemon builds from the slug.
+// RemoteURL is where nodes clone a standalone repository from: its upstream, with the
+// credential handed to the employee's git on demand (git-repos.md §5); "" for GitHub, whose URL
+// the daemon builds from the slug.
 func (g *GitHub) RemoteURL(r Repo) string {
-	if r.git == nil || g.Relay == nil {
+	if r.git == nil {
 		return ""
 	}
-	return g.Relay.URL(r.git.ID)
+	return r.git.URL
 }
+
+// GitRepo is the standalone repository's saved row (nil for a GitHub repository).
+func (r Repo) GitRepo() *store.GitRepo { return r.git }
 
 // WebURL is the repository's page ("" when unknown).
 func (r Repo) WebURL() string {
@@ -171,9 +175,20 @@ func Find(repos []Repo, slug string) (Repo, bool) {
 	if parsed, err := github.ParseRepo(want); err == nil {
 		want = parsed
 	}
-	id, byID := gitrelay.RepoOfPath(strings.TrimSpace(slug))
 	for _, r := range repos {
-		if strings.EqualFold(r.Slug, want) || (byID && r.GitRepoID() == id) {
+		if strings.EqualFold(r.Slug, want) || (r.git != nil && "git/"+r.git.ID == want) {
+			return r, true
+		}
+	}
+	return Repo{}, false
+}
+
+// FindUpstream is the standalone repository at host (host[:port]) and path ("group/name.git"),
+// as git's credential helper and the git-ssh wrapper name it.
+func FindUpstream(repos []Repo, host, path string) (Repo, bool) {
+	want := strings.TrimSuffix(strings.Trim(strings.TrimSpace(path), "/"), ".git")
+	for _, r := range repos {
+		if r.git != nil && strings.EqualFold(r.git.Host, host) && strings.EqualFold(r.Slug, r.git.Host+"/"+want) {
 			return r, true
 		}
 	}

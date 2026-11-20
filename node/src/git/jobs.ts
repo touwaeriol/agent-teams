@@ -9,8 +9,10 @@ import { gitEnv, run, type RunResult } from "./exec.js";
 import { LockTimeout, withLock } from "./lock.js";
 import type { PlatformFiles } from "./platform.js";
 import { untrustedRepoArgs } from "./safe.js";
+import { upstreamOf, type GitSshKey } from "../cred/gitssh.js";
 
-export type JobCredential = (jobId: string, repo: string, purpose: "read" | "push", host: string) => Promise<{ username: string; password: string } | null>;
+/** A job's credential for host and path: a token, or a standalone SSH repository's key. */
+export type JobCredential = (jobId: string, repo: string, purpose: "read" | "push", host: string, path: string) => Promise<{ username: string; password: string; sshKey?: GitSshKey } | null>;
 type ErrorCode = NonNullable<GitResult["error_code"]>;
 
 /** Where members keep the working notes of long tasks (git-ignored through info/exclude). */
@@ -28,6 +30,8 @@ export interface GitJobsOptions {
    */
   mirrorDir: string;
   credential: JobCredential;
+  /** GIT_SSH_COMMAND running the git-ssh wrapper (standalone repositories over SSH). */
+  gitSsh?: string;
   log: Logger;
   /** git.result already recorded by an earlier process (done.jsonl), for prepare waits. */
   lookup?: (jobId: string) => GitResult | undefined;
@@ -431,18 +435,28 @@ export class GitJobs {
     if (remote) this.remotes.set(repo, remote);
   }
 
-  /** The job token goes only into this one git child (GIT_ASKPASS), never to disk. */
+  /**
+   * The job's credential goes only into this one git child, never to disk: a token through
+   * GIT_ASKPASS, a standalone SSH repository's key through the git-ssh wrapper (git-repos.md §5).
+   */
   private async credEnv(jobId: string, repo: string, purpose: "read" | "push"): Promise<NodeJS.ProcessEnv> {
     const url = this.url(repo);
-    if (!/^https?:\/\//.test(url) || (url.startsWith("http://") && !this.remotes.has(repo))) return gitEnv();
+    const up = this.remotes.has(repo) ? upstreamOf(url) : null;
+    if (up?.transport === "ssh") return this.sshEnv(jobId, repo, purpose, up);
+    if (!/^https?:\/\//.test(url) || (url.startsWith("http://") && !up)) return gitEnv();
     // GitHub tokens are asked for github.com whatever gitBaseUrl is (a GitHub emulator in tests).
-    const host = this.remotes.has(repo) ? new URL(url).host : "github.com";
-    const cred = await this.o.credential(jobId, repo, purpose, host).catch(() => null);
-    if (!cred) return gitEnv();
+    const cred = await this.o.credential(jobId, repo, purpose, up?.host ?? "github.com", up?.path ?? `${repo}.git`).catch(() => null);
+    if (!cred?.password) return gitEnv();
     return gitEnv({
       GIT_ASKPASS: this.o.platform.askpass, AT_GIT_USERNAME: cred.username, AT_GIT_PASSWORD: cred.password,
       GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "credential.helper", GIT_CONFIG_VALUE_0: "",
     });
+  }
+
+  private async sshEnv(jobId: string, repo: string, purpose: "read" | "push", up: { host: string; path: string }): Promise<NodeJS.ProcessEnv> {
+    const cred = await this.o.credential(jobId, repo, purpose, up.host, up.path).catch(() => null);
+    if (!cred?.sshKey || !this.o.gitSsh) return gitEnv();
+    return gitEnv({ GIT_SSH_COMMAND: this.o.gitSsh, AT_GIT_SSH_KEY: cred.sshKey.private_key, AT_GIT_SSH_PUB: cred.sshKey.public_key, AT_GIT_SSH_KNOWN_HOSTS: cred.sshKey.known_hosts });
   }
 }
 

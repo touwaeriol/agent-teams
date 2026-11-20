@@ -427,6 +427,12 @@
 
 此类消息**不进发件箱、不写日志**（守护进程和控制台都对 `cred.*` 关闭消息体日志）。控制台在节点链路读循环之外（单独的 goroutine，全局最多 32 个同时进行；占满时这次请求直接丢弃并记 WARN，靠守护进程 10 秒后重试，读循环从不等待）处理 `cred.request`，慢的 GitHub 请求不会挡住这条链路上的其他消息；两者都是不可靠消息、靠 `req_id` 配对，先后顺序无关。
 
+### 8.0 单独添加的 Git 仓库（git-repos.md §5）
+
+- `git.prepare` / `git.push` 的 `remote_url`：独立仓库的上游地址（HTTPS 不带凭据、`ssh://…` 或 `git@host:path`），`repo` 是 `git/<repo_id>`（守护进程目录名）。没有这个字段就按 `git_base_url/<repo>.git`。
+- `session.open` 的 `git_hosts: [{transport: "https"|"ssh", host: "host[:port]"}]`（只随 `git_credentials`）：HTTPS 主机配凭证助手，有 SSH 主机时配 `GIT_SSH_COMMAND = agent-teams-node git-ssh`。
+- `cred.request` 的 `host` / `path` 是上游的主机和路径（`group/name.git`）。控制台按主机 + 路径找项目里的独立仓库，回保存的凭据：HTTPS 是 `username` + `password`；SSH 是 `username` + `ssh_key`（含 `private_key`、`public_key`、`known_hosts`；私钥为不加密的 PKCS#8 PEM，`known_hosts` 是设置里固定的主机密钥；没固定就拒绝 `host_key_not_pinned`）。`expires_at` 报“现在 + 30 分钟”，到期重新校验。git-ssh 包装经 `cred.sock` 的 `op: "ssh"`（同样要会话密钥）取私钥，只放在自己进程里，用一次性 agent 套接字交给 ssh。
+
 ### 8.1 远程服务器（`hello.features` 含 `ssh_gateway`，remote-servers.md）
 
 员工会话经主节点的 SSH 网关（`GET /nodes/ssh`，字节流不是协议消息）连用户在设置里配置、并在项目里授权给其岗位的服务器。节点上没有任何服务器凭证：会话的 ssh-agent 在守护进程内存里持有一把临时 Ed25519 密钥，向控制台换一张 10 分钟的会话证书，只用来向网关证明身份；能不能连由网关每次查库决定。下面几条只在双方 `features` 都含 `ssh_gateway` 时发。

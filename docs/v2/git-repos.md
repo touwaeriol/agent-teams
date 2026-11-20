@@ -1,12 +1,12 @@
 # 通用 Git 仓库接入
 
-状态：**第一期已实现**（2026-11-20，用户确认按 §12 的推荐做）。实现与设计的出入见 §14；原型目录已删除，正式页面是设置 → “Git 仓库”（`web/src/pages/settings/GitRepos.vue`）。
+状态：**第一期已实现**（2026-11-20，用户确认按 §12 的推荐做；节点怎么拿凭据后来改为 §5 的“直接交给员工的 git、隔离”）。实现与设计的出入见 §14；原型目录已删除，正式页面是设置 → “Git 仓库”（`web/src/pages/settings/GitRepos.vue`）。
 
 和 `remote-servers.md`（凭据只在主节点、信封加密、主机密钥固定）、`architecture.md` §8（分支、合并队列、CI、PR）和 §10.4（GitHub 凭证不落盘）一起读。
 
 ## 1. 一句话
 
-“设置 → GitHub 连接”改名为 **“设置 → Git 仓库”**：除了现在的 GitHub App 连接，还能**单独添加任意一个 Git 仓库**（GitLab、Gitea、Bitbucket、自建 Git 服务器，或者用个人令牌的 GitHub 仓库），用 **HTTPS 令牌**或 **SSH 私钥**验证。仓库属于用户，项目和讨论串像选 GitHub 仓库一样选它。凭据只存在主节点（信封加密），**节点和员工会话永远拿不到它**：节点上的 git 经主节点的 **Git 中转**（主节点上每个仓库一份裸镜像 + `git http-backend`）读写，只带 1 小时有效、绑定会话和仓库的中转令牌。PR、CI、webhook 这类 GitHub 独有的能力，在通用仓库上按 §8 降级：“提交 PR 即完成”变成“推送讨论串分支即完成”，“我来验收”在平台里看提交和改动再由平台合并，CI 关卡关闭。
+“设置 → GitHub 连接”改名为 **“设置 → Git 仓库”**：除了现在的 GitHub App 连接，还能**单独添加任意一个 Git 仓库**（GitLab、Gitea、Bitbucket、自建 Git 服务器，或者用个人令牌的 GitHub 仓库），用 **HTTPS 令牌**或 **SSH 私钥**验证。仓库属于用户，项目和讨论串像选 GitHub 仓库一样选它。凭据加密存在主节点；员工的 git 用到时按需交给节点（只在内存、按会话密钥隔离，§5），节点直连上游读写。PR、CI、webhook 这类 GitHub 独有的能力，在通用仓库上按 §8 降级：“提交 PR 即完成”变成“推送讨论串分支即完成”，“我来验收”在平台里看提交和改动再由平台合并，CI 关卡关闭。
 
 ## 2. 需求与边界
 
@@ -25,7 +25,7 @@
 ### 2.2 不做什么（第一期）
 
 - 不做 GitLab / Gitea 的 MR、流水线 API 适配（以后，§8.4）。第一期通用仓库**只用 Git 协议**，不调任何托管平台的 API。
-- 不做 Git LFS（中转先不支持，克隆时 `GIT_LFS_SKIP_SMUDGE=1`，提示里说明）。
+- 不做 Git LFS（先不支持，提示里说明）。
 - 不做“列出某个 GitLab 账号下所有仓库”：一次添加一个仓库，用户贴地址（需求就是“单独的仓库”）。
 - 不把长期凭据下发到节点，也不提供“直接下发”的开关（§5.4 说明为什么）。
 - 不做 SSH 证书（CA 签发）登录托管平台：托管平台基本只认公钥或令牌。界面上的“证书”统一叫“SSH 私钥”，并提供“平台生成密钥对、你把公钥填成部署密钥”。
@@ -65,7 +65,7 @@
 
 | 列 | 类型 | 说明 |
 | --- | --- | --- |
-| `id` | TEXT PK | `gr_…`，也出现在中转地址里（§5.2） |
+| `id` | TEXT PK | `gr_…`，节点上的目录名 `git/<id>` 用它 |
 | `user_id` | TEXT NOT NULL FK | |
 | `slug` | TEXT NOT NULL | 仓库在平台里的名字：`<host>/<path>`，例如 `gitlab.com/acme/web`、`git.example.com/team/sub/app`（去掉 `.git`，小写主机）。同一用户内唯一。它就是 `at_project_repos.repo`、`at_thread_repos.repo`、工具参数 `repo` 里写的那个值（§3.6） |
 | `name` | TEXT NOT NULL DEFAULT '' | 可选的短名，界面显示用；空时显示 slug 最后一段 |
@@ -77,7 +77,7 @@
 | `default_branch` | TEXT NOT NULL DEFAULT '' | 测试连接时 `ls-remote --symref HEAD` 读到的 |
 | `access` | TEXT NOT NULL DEFAULT '' | `''`（没测过）\| `read` \| `write`，最近一次测试的结果 |
 | `host_key`、`host_key_fp`、`host_key_mac`、`host_key_confirmed_at` | | 只有 SSH：第一次测试连接时固定的主机密钥，和服务器完全同一套做法（`remote-servers.md` §5.3） |
-| `last_checked_at`、`last_error` | | 最近一次测试 / 中转同步的时间和错误 |
+| `last_checked_at`、`last_error` | | 最近一次测试 / 同步的时间和错误 |
 | `created_at`、`updated_at` | | |
 
 约束：`(user_id, slug)` 唯一；`credential_id` 的凭据必须属于同一用户、`host` 与 url 的主机相同（应用层检查 + 外键带 `user_id` 的复合外键，做法同 `at_project_servers`）。
@@ -106,7 +106,7 @@ ALTER TABLE at_project_repos
 | `https://gitea.example.com/team/app` | https | gitea.example.com | team/app | generic（可手选 gitea） | 空（必填） |
 | `https://github.com/acme/web` | https | github.com | acme/web | github | `x-access-token`，并提示“GitHub 仓库建议用 GitHub App 连接，能用 PR 和 CI” |
 
-拒绝：带内嵌凭据的地址（`https://user:token@…`，提示把令牌填到下面的框里）、`file://`、`git://`（不加密）、本机和内网地址（复用 `remote-servers.md` §5.6 的地址限制和 `ssh_allowed_private_cidrs` 放行表，防止中转被当跳板扫内网）。
+拒绝：带内嵌凭据的地址（`https://user:token@…`，提示把令牌填到下面的框里）、`file://`、`git://`（不加密）、本机和内网地址（复用 `remote-servers.md` §5.6 的地址限制和 `ssh_allowed_private_cidrs` 放行表，防止主节点被当跳板扫内网）。
 
 ### 3.6 slug 与工作目录
 
@@ -122,7 +122,7 @@ ALTER TABLE at_project_repos
 credvault.GitCredAAD = "at-git-cred:v1 | <user_id> | <credential_id> | <kind> | <host> | <username>"
 ```
 
-- 改主机、凭据类型或用户名，旧密文就解不开，接口要求同时提交新凭据（422 `credential_required`，和服务器一样）。所以数据库被人改了 `host`，中转也不会把令牌发到别的主机。
+- 改主机、凭据类型或用户名，旧密文就解不开，接口要求同时提交新凭据（422 `credential_required`，和服务器一样）。所以数据库被人改了 `host`，凭据也解不开、不会发到别的主机。
 - 仓库的 SSH 主机密钥行带 MAC（HMAC-SHA256，密钥从 KEK 用 HKDF 派生，覆盖 `repo_id、host、key_type、public_key`），直接往表里写主机密钥不起作用。
 - `atctl admin reseal` 增加一步：重新包裹全部 `at_git_credentials`，和服务器凭据在同一个事务里。
 
@@ -137,84 +137,48 @@ credvault.GitCredAAD = "at-git-cred:v1 | <user_id> | <credential_id> | <kind> | 
 只有主节点上的三处代码会解开凭据，解开后只在内存里用完即弃：
 
 1. **测试连接**（§11.2）。
-2. **Git 中转**同步上游、把推送转给上游（§5）。
+2. 员工会话或节点作业按需领取（§5.2），以及主节点镜像同步上游、合并队列推送（§5.3）。
 3. **主节点 Git 引擎**做合并队列、建分支、合并讨论串（§8.2）。
 
 都写审计（`at_audit_log`：`git_credential_create/update/delete`、`git_repo_create/update/delete/test`、`git_repo_host_key_pin/reset`）。
 
-## 5. 节点怎么 clone / push：主节点 Git 中转
+## 5. 节点怎么 clone / push：凭据按需交给员工的 git（隔离）
 
-### 5.1 方案比较
+> 2026-11-20 用户改定：不走主节点中转，“把仓库配置到节点 cc 的环境里让它能用，但要隔离，仅限 cc worker 进程能用”。最初的中转方案（镜像 + `git http-backend` + 中转令牌 + pre-receive）已删除；主节点的镜像只留给合并队列自己用（§8.2）。
 
-| 方案 | 做法 | 评价 |
-| --- | --- | --- |
-| A. 长期凭据下发到节点 | 像现在的 PAT：`cred.request` 直接回令牌，SSH 私钥写进会话 | 违反 G5；令牌长期有效、覆盖账号能访问的全部仓库，节点上任何同账号进程都能拿走。**否** |
-| B. 只给 HTTPS 做反向代理 | 主节点 `/git/<id>/…` 用 `httputil.ReverseProxy` 转到上游，加上 `Authorization` | 简单；但 SSH 仓库走不了（HTTP 智能协议无状态，SSH 是有状态的，桥接很别扭），推送内容也只能透传、不好检查 |
-| C. 复用 SSH 网关 | 节点 ssh 经网关，网关拿私钥登录 `git@gitlab.com`，只放行 `git-upload-pack`/`git-receive-pack` | SSH 仓库可行；HTTPS 仓库还得再做一套；两套入口、两套权限检查 |
-| **D. 主节点镜像中转（推荐）** | 主节点为每个通用仓库维护一份裸镜像；节点一律用 **HTTPS 智能协议**连主节点（`git http-backend` 服务这个镜像）；主节点用自己保管的凭据，按 HTTPS 或 SSH 和上游同步 | 一个入口同时覆盖 HTTPS 和 SSH 上游；凭据只在主节点；推送在主节点的 `pre-receive` 里**逐条检查 ref**（通用仓库没有 GitHub 规则集，这里正好补上，§5.5）；镜像同时就是 §8.2 合并引擎的工作区 |
-
-**结论：D。** 代价是主节点要磁盘（每个仓库一份裸镜像）和带宽（节点的 clone/fetch/push 都经过主节点），§5.6 给出限制和缓解。
-
-### 5.2 结构
+### 5.1 结构
 
 ```
- 节点（守护进程 + 员工会话）                         主节点 atctl                                     上游（GitLab / Gitea / 自建）
-┌──────────────────────────────────┐            ┌────────────────────────────────────────────┐      ┌───────────────┐
-│ 会话里的 git / 平台 git 作业       │   HTTPS    │ /git/<repo_id>.git/…  （新路由）             │      │               │
-│  remote = https://<控制台>/git/   │  智能协议   │  ① Basic 认证 = 中转令牌（1 小时，绑定会话  │      │               │
-│           gr_xxx.git             ├───────────►│     或作业 + 仓库 + 读/写）                   │      │               │
-│  凭证助手 → cred.sock → 守护进程  │            │  ② fetch 前：距上次同步 > 10 s 就先同步上游 ├─────►│ fetch（令牌或  │
-│   → cred.request(host=控制台,     │            │  ③ git http-backend 服务裸镜像              │      │  SSH 私钥）    │
-│     path=git/gr_xxx.git)         │            │  ④ push：pre-receive 检查 ref → 同步推给上游 ├─────►│ push          │
-│   ← 中转令牌（不是上游凭据）       │            │     上游成功才接受，失败原样回给 git         │      │               │
-└──────────────────────────────────┘            │ 镜像：$DATA/git-mirrors/<user>/<repo_id>.git │      └───────────────┘
-                                                └────────────────────────────────────────────┘
+ 节点（守护进程 + 员工会话）                                         主节点 atctl                上游（GitLab / Gitea / 自建）
+┌──────────────────────────────────────────────────────┐        ┌──────────────────────┐    ┌──────────────┐
+│ 员工会话里的 git（Claude Code / Codex 的子进程）        │        │ cred.request 归属校验 │    │              │
+│  remote = 上游地址（https://… 或 git@…:…），不含凭据    │        │ 解开凭据 → 回给节点   │    │              │
+│  HTTPS：凭证助手 ─┐                                   │        └──────────▲───────────┘    │              │
+│  SSH：GIT_SSH_COMMAND = agent-teams-node git-ssh ─┤   │                   │                │              │
+│                   ▼                               │   │                   │                │              │
+│  cred.sock（0700 目录，按会话密钥校验）→ 守护进程 CredBroker ── cred.request ┘                │              │
+│  ← 令牌 / 私钥（只在内存）                                                                   │              │
+│  git ────────────────────────────── 直连上游 ─────────────────────────────────────────────►│              │
+└──────────────────────────────────────────────────────┘                                    └──────────────┘
 ```
 
-- 节点上的 remote URL 是 `https://<控制台域名>/git/gr_xxx.git`，**不含任何凭据**；仓库在节点上的样子和现在的 GitHub 仓库一样（守护进程自己的镜像 `state/mirrors/…`、共享克隆、worktree 都照旧，`architecture.md` §8.1）。
-- 节点只需要能访问控制台（它本来就连着 `/nodes/connect`），**不需要能访问上游**。内网的自建 Git 只要主节点能到就行。
+- 节点上的 remote URL 就是上游地址，**不含凭据**；`git.prepare` / `git.push` 用 `remote_url` 告诉守护进程（守护进程自己的镜像、共享克隆、worktree 都照旧，`architecture.md` §8.1）。节点要能访问上游。
+- 会话的 `session.open` 带 `git_hosts`（项目里有凭据的独立仓库的主机和传输方式）。守护进程据此给员工进程配：
+  - HTTPS 主机：`credential.https://<host>.helper` 指向平台的凭证助手（和 GitHub 同一套，`useHttpPath=true`）；
+  - SSH 主机：`GIT_SSH_COMMAND` 指向 `agent-teams-node git-ssh` 包装。
 
-### 5.3 中转令牌（节点拿到的唯一东西）
+### 5.2 隔离：谁能拿到凭据
 
-- 沿用现有的按次领取链路（`architecture.md` §10.4、`remote-servers.md` §10.1）：git 凭证助手 → `cred.sock` → 守护进程 `CredBroker` → `cred.request {host: <控制台>, path: "git/gr_xxx.git", purpose}`。`cred.request` 本来就带 `host` 和 `path`，协议结构不用改，只是 `host` 不再固定是 `github.com`。
-- 控制台按现有规则做归属校验（会话属于本节点、`open_gen` 当前、项目里有这个仓库；统筹拒绝；作业只能拿自己那个仓库），然后签一个**中转令牌**：
+- **只有员工会话的进程树**：凭证助手和 git-ssh 包装都要带会话密钥（每次打开会话新生成，只在员工进程的环境变量里）去问守护进程的 `cred.sock`（目录 0700、属于守护进程用户），守护进程再用 `cred.request` 问主节点。统筹会话拿不到；别的会话的密钥对不上。
+- **主节点逐次判断**：会话属于本节点、`open_gen` 当前、项目里有这个仓库（按主机 + 路径匹配）；作业只能拿自己那个仓库。凭据有效期报 30 分钟，到期守护进程重新问，所以在设置里替换或删除凭据、把仓库移出项目，最晚 30 分钟后就不再下发。
+- **不落盘**：令牌只在守护进程内存和这一次 git 子进程里（`GIT_ASKPASS` / 凭证助手的输出）；SSH 私钥只在 git-ssh 包装进程的内存里，经一次性的 ssh-agent 套接字（私有临时目录，连接结束即删）交给 ssh，私钥文件、`~/.ssh`、仓库配置里都没有它。主节点把私钥解成不加密的 PKCS#8 只为让 Node 能加载，口令不下发。
+- **主机密钥固定**：SSH 连接用设置里测试连接时固定的主机密钥（`StrictHostKeyChecking=yes`，只信这一把），`IdentitiesOnly=yes` 只提供这把私钥。
+- **受保护分支**：和 GitHub 仓库一样由节点的 pre-push 钩子拒绝（`AT_PROTECTED_REFS`：讨论串分支、默认分支等）。注意这是客户端检查，`--no-verify` 能绕过；需要更严时请在上游平台设分支保护。
+- **边界**：同一个系统用户下的其他进程理论上能读到员工进程的环境变量或内存（GitHub 令牌也是如此）；要完全隔离请让节点单独用一个系统用户或容器（`deploy/node`）。
 
-  ```
-  agt_git.<base64url(payload)>.<HMAC-SHA256>
-  payload = {repo_id, user_id, project_id, session_id | job_id, open_gen, purpose: read|push|employee, role, exp: now+1h, jti}
-  ```
+### 5.3 主节点自己的镜像
 
-  HMAC 密钥从 `AGENT_TEAMS_SECRET_KEYS` 用 HKDF 派生（`info = "agent-teams/git-proxy/v1"`）。令牌是无状态的，但中转每次请求都**重新查库**：会话还活着、`open_gen` 没变、项目仍包含这个仓库、仓库仍属于这个用户——和 SSH 网关“证书只证明身份、授权逐次判断”同一个思路（`remote-servers.md` §4.7）。会话结束、讨论串结束、仓库从项目移除，令牌立即失效。
-- 回给守护进程：`username = "agent-teams"`、`password = 中转令牌`、`expires_at = exp`。守护进程照旧只缓存在内存、按过期前 5 分钟刷新、`erase` 时丢弃。
-- 守护进程会话环境里的凭证助手配置从固定的 `credential.https://github.com.helper` 改为**也覆盖控制台的 `/git/` 前缀**：`credential.https://<控制台>/git/.helper`（`useHttpPath=true`）。员工照常 `git fetch`、`git push origin HEAD`，不需要知道中转的存在。
-- `gh` 包装只对 GitHub 仓库有效；通用仓库的员工提示词里写明“这个仓库没有 gh / PR，交付走 push_branch 和合并队列”（§8.3）。
-
-### 5.4 为什么不提供“直接下发凭据”的开关
-
-有人会想要“大仓库直连上游，快一点”。不提供，理由：一旦令牌到了节点，就和现在 PAT 的差距一样（`remote-servers.md` §10.3 第 1 条：长期、全仓库），而且用户很难意识到他打开了什么。真遇到大仓库，靠 §5.6 的缓存、浅克隆和节点镜像解决。
-
-### 5.5 推送检查（pre-receive）
-
-中转收到推送时，`git http-backend` 在镜像里运行平台装好的 `pre-receive` 钩子（钩子目录员工碰不到，镜像在主节点上）。钩子通过环境变量拿到令牌里的身份，逐条检查 `<old> <new> <ref>`：
-
-| 令牌用途 | 允许 |
-| --- | --- |
-| `push`（平台推送作业，`architecture.md` §8.1） | 只有作业给定的那一个 `refs/heads/thread/<no>/<员工>` |
-| `employee`（组长和成员的会话） | 任何 `refs/heads/*`，**除了**：本讨论串分支、各仓库的基准分支和默认分支、别人的 `thread/*`；不允许标签、不允许删除受保护分支、不允许非快进更新受保护分支 |
-| `read` | 拒绝一切推送 |
-
-这和现在节点上的 `pre-push` 钩子是同一张表（`AT_PROTECTED_REFS`），区别是**在主节点执行、不能被 `--no-verify` 绕过**。所以通用仓库在这一点上比 GitHub 仓库还严（GitHub 仓库靠用户自己建规则集）。
-
-检查通过后，钩子在同一个请求里把这些 ref 推给上游（`git push --atomic <上游> <ref>…`，用主节点的凭据）；上游拒绝（权限不够、上游自己的保护分支）就让本次推送失败，把上游的错误原样写回 git 的输出，镜像不更新。所以镜像永远不会领先上游。
-
-### 5.6 容量、并发和多副本
-
-- **磁盘**：镜像放 `$DATA/git-mirrors/`（生产是 compose 的数据卷）。每个用户的镜像总量设上限（默认 20 GB，`at_settings.git_proxy`），超了新仓库测试连接时报错；仓库从所有项目移除 30 天后删除镜像。
-- **带宽**：节点自己的镜像（`state/mirrors`）还在，所以每台节点每个仓库只完整克隆一次，之后都是增量 fetch。超大仓库可以在仓库设置里开“浅克隆”（`--depth`，以后）。
-- **同步频率**：fetch 请求到来时，距上次同步超过 10 秒才先同步上游（每个仓库一把锁，同时到的请求等同一次同步）。另外合并循环需要时主动同步。
-- **并发与超时**：每个仓库同一时刻一个上游同步；单次请求最长 10 分钟；每个节点到中转的并发请求数有上限（默认 8），超出排队。
-- **多副本**：镜像在本地磁盘，多副本时用 Valkey 锁 `gitmirror:<repo_id>` 保证同一时刻只有一个副本动一个镜像，其他副本把 `/git/<id>` 请求反代给持锁副本（以后要多副本时再做；生产现在是单副本，第一期按单副本实现，但锁先加上）。
-- **LFS**：第一期不支持，克隆设 `GIT_LFS_SKIP_SMUDGE=1`；仓库里有 `.gitattributes` 的 `filter=lfs` 时，测试连接结果里提示。
+合并队列、建/删讨论串分支在主节点上做（§8.2）：每个仓库一份裸镜像 `GIT_MIRROR_DIR/<repo_id>.git`，用保存的凭据和上游同步，合并后推回上游。镜像只是缓存，丢了从上游重建。
 
 ## 6. 和现有 GitHub App 怎么共存
 
@@ -263,7 +227,7 @@ type Repo interface {
 - 列表里每行仓库带来源图标和能力标签：GitHub 仓库不变；单独仓库显示“Git · 推送分支交付”（没有 PR），鼠标悬停说明 §8 的降级。
 - **讨论串**：`open_thread(repos=[{repo, base}])`、`assign_task(repo)`、`enqueue_merge(repo)`、`open_pr(repo)` 的 `repo` 参数写 slug（`gitlab.com/acme/web`）。员工提示词的“## 仓库”一节给每个仓库加一行能力说明，例如“gitlab.com/acme/web：没有 PR 和 CI，完成后平台把讨论串分支推送到上游，由用户在平台里验收”。
 - 一个项目可以混用 GitHub 仓库和单独仓库；PR、CI 按仓库各自判断（§8.2 的“全部仓库”规则照旧，只是每个仓库的“完成”条件不同）。
-- 删除单独仓库前必须先从所有项目里移除（§3.4）；从项目移除时，进行中的讨论串里该仓库的 worktree 照常清理，中转令牌立即失效（§5.3）。
+- 删除单独仓库前必须先从所有项目里移除（§3.4）；从项目移除时，进行中的讨论串里该仓库的 worktree 照常清理，节点最晚 30 分钟后不再拿到凭据（§5.2）。
 
 ## 8. PR / CI 怎么降级
 
@@ -271,7 +235,7 @@ type Repo interface {
 
 | 能力 `Caps` | GitHub App | 单独仓库（第一期） | 没有时怎么办 |
 | --- | --- | --- | --- |
-| `short_token`（节点拿短时上游令牌） | ✓ | — | 不需要：节点只拿中转令牌 |
+| `short_token`（节点拿短时上游令牌） | ✓ | — | 通用仓库下发保存的凭据本身（30 分钟后重新校验，§5.2） |
 | `repo_list`（列出可选仓库） | ✓ | ✗ | 一次添加一个，贴地址 |
 | `default_branch` | API | `ls-remote --symref` | 等价 |
 | `branches`（分支下拉） | API | 镜像里 `for-each-ref` | 等价 |
@@ -283,7 +247,7 @@ type Repo interface {
 
 ### 8.2 合并与交付
 
-合并队列（成员分支 → 讨论串分支）在通用仓库上由**主节点 Git 引擎**在中转镜像里做，流程和 `architecture.md` §8.2 一一对应：
+合并队列（成员分支 → 讨论串分支）在通用仓库上由**主节点 Git 引擎**在主节点镜像里做，流程和 `architecture.md` §8.2 一一对应：
 
 | 步骤 | GitHub（现状） | 单独仓库 |
 | --- | --- | --- |
@@ -321,14 +285,12 @@ type Repo interface {
 
 ## 9. 协议改动
 
-很小，因为 `cred.request` 本来就带 `host` + `path`：
-
 | 消息 | 改动 |
 | --- | --- |
-| `cred.request` | 不改结构；`host` 可以是控制台主机，`path` 为 `git/<repo_id>.git` |
-| `cred.response` | 不改结构；`username = agent-teams`，`password` = 中转令牌 |
-| `git.prepare` / `git.push` | 加 `remote_url`（可选）：有就用它，没有就沿用 `gitBaseUrl + /<owner>/<name>.git`（兼容旧守护进程与 GitHub 仓库）；加 `dir`（§3.6 的目录名，可选，缺省按旧规则） |
-| `session.open` | `git_credentials` 的会话额外拿到控制台主机，守护进程据此多配一条 `credential.https://<控制台>/git/.helper` |
+| `cred.request` | 不改结构；`host` 可以是独立仓库的主机（`host[:port]`），`path` 为它在主机上的路径（带 `.git`） |
+| `cred.response` | HTTPS：`username` + `password`（上游令牌）；SSH：`username` + `ssh_key {private_key (PKCS#8 PEM), public_key, known_hosts}` |
+| `git.prepare` / `git.push` | 加 `remote_url`（可选）：独立仓库的上游地址（HTTPS 不带凭据、`ssh://` 或 `git@host:path`）；没有就沿用 `gitBaseUrl + /<owner>/<name>.git` |
+| `session.open` | 加 `git_hosts [{transport, host}]`：守护进程据此给 HTTPS 主机配凭证助手、有 SSH 主机时配 `GIT_SSH_COMMAND` |
 
 旧守护进程收到带 `remote_url` 的作业会忽略字段、按 GitHub 地址克隆而失败：控制台按守护进程上报的版本，不把通用仓库的作业派给不支持的节点（节点卡片提示“升级后才能用单独添加的仓库”）。
 
@@ -336,11 +298,11 @@ type Repo interface {
 
 | 威胁 | 结果 |
 | --- | --- |
-| 节点被攻破 / 员工会话想拿凭据 | 只能拿到中转令牌：1 小时、绑定会话和仓库、会话结束即失效，且推送受 pre-receive 限制。上游令牌和私钥从不离开主节点 |
-| 中转令牌被拷到别的机器 | 令牌不绑定 IP（节点可能在 NAT 后），但每次请求都查会话存活；最坏情况是会话存活期内、按该会话权限读写这一个仓库。比现在 GitHub 会话令牌（1 小时、不随会话结束失效）更窄 |
+| 员工会话拿到凭据 | 用户选择的做法：员工的 git 能用上游令牌 / 私钥（§5.2），但只经会话密钥按需领取、不落盘、30 分钟后重新校验；令牌被员工主动打印出来就等于泄露，和 GitHub PAT 一样，请给令牌最小权限（只这个仓库、能推送即可） |
+| 节点被攻破 | 能拿到项目里独立仓库的上游凭据（守护进程内存里有）。凭据按主机共用，所以影响该凭据能访问的所有仓库；建议每个仓库或每个项目单独建令牌 / 部署密钥 |
 | 有人改数据库把 `host` 指向自己的机器 | AAD 含主机，凭据解不开；SSH 主机密钥带 MAC |
-| 用中转扫内网 | 地址限制（§3.5），只能连测试通过、用户添加过的上游 |
-| 员工推到受保护分支 | 主节点 pre-receive 拒绝，`--no-verify` 无效 |
+| 用主节点扫内网 | 主节点只为测试连接和合并队列连上游，受地址限制（§3.5） |
+| 员工推到受保护分支 | 节点 pre-push 钩子拒绝（可被 `--no-verify` 绕过，需要时在上游设分支保护） |
 | 恶意仓库内容攻击主节点（钩子、过滤器、`fsmonitor`） | 镜像是裸仓库，主节点的 git 一律 `-c core.hooksPath=<平台钩子目录> -c core.fsmonitor= -c protocol.file.allow=never`，不跑仓库里的任何东西；合并用的临时 worktree 同样设置，且不做 checkout 以外的操作（`merge` 不执行仓库里的钩子） |
 | 主节点被攻破 | 所有凭据都暴露，和服务器凭据、GitHub App 私钥相同（`remote-servers.md` §14），不在本设计范围 |
 
@@ -359,7 +321,6 @@ type Repo interface {
 | POST | `/api/git/repos/{id}/host-key/reset` | 清掉已固定的主机密钥 |
 | GET | `/api/git/repos/{id}/branches?q=` | 分支下拉（镜像里读） |
 | GET | `/api/threads/{tid}/repos/{repo}/diff` | 验收用的提交和改动（§8.2） |
-| GET / POST | `/git/{repo_id}.git/info/refs`、`/git-upload-pack`、`/git-receive-pack` | 中转，只认中转令牌，不走网页会话和 CSRF；不在 OpenAPI 里，但 `policy.csv` 照样列出 |
 
 `POST/PATCH /api/projects` 的 `repos[]` 元素加 `git_repo_id`（和 `git_connection_id` 二选一）。测试连接的错误码沿用服务器的那套，加 `repo_not_found`、`no_write_access`、`lfs_unsupported`（提示性）。
 
@@ -391,7 +352,7 @@ type Repo interface {
 
 | # | 问题 | 推荐 |
 | --- | --- | --- |
-| Q1 | 节点读写经主节点中转（§5），主节点要多占磁盘和带宽，可以吗？ | 可以。凭据不出主节点只能这样做；生产磁盘够（每个仓库一份裸镜像） |
+| Q1 | 节点读写经主节点中转（§5），主节点要多占磁盘和带宽，可以吗？ | 已改：用户选择把凭据隔离地交给员工的 git，节点直连上游（§5） |
 | Q2 | 凭据和仓库分开（一个令牌给同主机多个仓库用），还是每个仓库各填各的？ | 分开，表单里是下拉框，用户基本感觉不到 |
 | Q3 | 单独仓库的“提交 PR 即完成”改成“推送讨论串分支即完成”，可以吗？ | 可以，并给“去 GitLab 创建合并请求”链接 |
 | Q4 | 个人令牌（PAT）GitHub 连接第二期转成单独仓库（令牌不再下发会话，但失去 PR/CI，直到 §8.4） | 转，同时推荐 GitHub App |
@@ -401,17 +362,16 @@ type Repo interface {
 
 | 期 | 内容 |
 | --- | --- |
-| 第一期 | 表和迁移、凭据信封加密、设置页“Git 仓库”（添加 / 测试 / 编辑 / 删除，平台生成密钥对）、Git 中转（HTTPS + SSH 上游，pre-receive 检查）、节点 `remote_url` 与凭证助手、`forge.Repo` 抽象和 Git 引擎合并队列、`merge_policy` 三档的降级、项目和新建项目里选仓库、验收 diff 接口 |
+| 第一期 | 表和迁移、凭据信封加密、设置页“Git 仓库”（添加 / 测试 / 编辑 / 删除，平台生成密钥对）、节点直连上游（凭证助手 + git-ssh 包装）、主节点合并镜像、节点 `remote_url`、`forge.Repo` 抽象和 Git 引擎合并队列、`merge_policy` 三档的降级、项目和新建项目里选仓库、验收 diff 接口 |
 | 第二期 | PAT 连接转换、令牌到期提醒、上游人工合并检测优化、镜像配额管理界面、浅克隆 |
-| 第三期 | GitLab / Gitea / GitHub 令牌的 PR 与 CI 适配（§8.4）、多副本中转、LFS |
+| 第三期 | GitLab / Gitea / GitHub 令牌的 PR 与 CI 适配（§8.4）、多副本、LFS |
 
 ## 14. 第一期实现说明
 
-- **中转**：`server/internal/gitrelay`。每个仓库一份裸镜像 `GIT_MIRROR_DIR/<gr_id>.git`（镜像只是缓存，丢了从上游重建；compose 用命名卷 `git-mirrors`，镜像里默认 `/var/lib/agent-teams/git-mirrors`，没配置时中转关闭，独立仓库的会话和推送会直接报错）。节点走 `<PUBLIC_URL>/git/<gr_id>.git`（`git http-backend`，Basic 认证，用户名 `x-relay-token`），镜像超过 10 秒没同步就先从上游 fetch。`PUBLIC_URL` 不能带路径前缀。
-- **中转令牌**：`atgr1.<claims>.<mac>`，主密钥派生的 MAC，有效 1 小时，只认一个仓库。三种模式：`read`；`push`（git 作业，只能推作业的那个分支）；`employee`（员工会话，可推 `refs/heads/*`，但默认分支和平台分支 `thread/N-…`、`mq/…` 除外）。推送由 pre-receive 钩子（`atctl git-hook pre-receive`，经控制面内部 unix socket）检查后用 `--force-with-lease` 转推上游，上游拒绝则整个推送失败。
-- **控制面自己的 Git 操作**（合并队列、建/删讨论串分支）都在镜像上做，再推上游；合并用 `merge-tree --write-tree` + `commit-tree`，冲突照常回到组长。
-- **交付**：独立仓库没有 PR / CI / 验收合并。`open_pr` 会告诉组长直接 `finish`；`finish` 把讨论串分支当前的提交记为 `delivered_sha`，讨论串结束在分支上，用户自己去托管平台合并。合并队列的 CI 一律按“没有 CI”处理。§8 里的 `merge_policy` 三档降级和验收 diff 接口留到后面。
-- **节点**：`git.prepare` / `git.push` 多了可选的 `remote_url`。节点要升级到带这个字段的版本才能用独立仓库，旧节点仍可用 GitHub 仓库。
+- **节点直连上游**（§5，2026-11-20 用户改定，取代最初的中转）：`delivery/cred.go` 的 `upstreamCredential` 按会话 / 作业下发上游令牌或私钥（30 分钟有效）；节点 `cred/helper.ts`（HTTPS 主机的凭证助手）、`cred/gitssh.ts`（git-ssh 包装 + 一次性 agent）、`git/jobs.ts`（作业的 askpass / git-ssh）。SSH 仓库必须先在设置里测试连接、固定主机密钥，否则不下发私钥。
+- **主节点镜像**：`server/internal/gitrelay`，只给合并队列和讨论串分支用。`GIT_MIRROR_DIR`（compose 命名卷 `git-mirrors`，镜像里默认 `/var/lib/agent-teams/git-mirrors`）；没配置时独立仓库的合并会失败。合并用 `merge-tree --write-tree` + `commit-tree`，冲突照常回到组长。
+- **交付**：独立仓库没有 PR / CI / 验收合并。`open_pr` 告诉组长直接 `finish`；`finish` 把讨论串分支当前的提交记为 `delivered_sha`，讨论串结束在分支上，用户自己去托管平台合并。合并队列的 CI 一律按“没有 CI”处理。§8 的 `merge_policy` 三档降级和验收 diff 接口留到后面。
+- **节点要升级**：`git.prepare` / `git.push` 的 `remote_url`、`session.open` 的 `git_hosts`、`cred.response` 的 `ssh_key` 都是新字段，节点要升级到这个版本才能用独立仓库；GitHub 仓库不受影响。SSH 仓库要求节点装有 OpenSSH 客户端（节点镜像里有）。
 - **还没做**：PAT 连接转换、令牌到期提醒、镜像配额界面（第二期）；GitLab/Gitea 的 MR 与流水线（第三期）；独立仓库的“CI 配置 PR”。
 
 ## 附录 A：引用的现有代码
@@ -421,7 +381,7 @@ type Repo interface {
 | `server/internal/ghops/ghops.go` | 现在的仓库操作（`Repo`、`Token`、`Credential`、`Merge`、`CreatePR`、`CheckRuns`…），改成 `forge.Repo` 的 GitHub 实现 |
 | `server/internal/delivery/{mergeq,pr,accept,ci,cred}.go` | 合并队列、PR、验收、CI、`cred.request` 处理，按 `Caps()` 分岔 |
 | `server/internal/credvault` | 信封加密，加 `GitCredAAD` |
-| `server/internal/sshdial` | SSH 拨号与主机密钥固定，测试连接和中转同步上游时复用 |
+| `server/internal/sshdial` | SSH 拨号与主机密钥固定，测试连接和主节点镜像同步上游时复用 |
 | `node/src/cred/helper.ts` 的 `gitCredentialEnv` | 凭证助手配置，加控制台 `/git/` 前缀 |
 | `node/src/git/jobs.ts` 的 `GitJobs`（`gitBaseUrl`） | 作业的 remote 地址，改为优先用 `remote_url` |
 | `protocol/schemas/node/cred.request.json`、`git.prepare.json`、`git.push.json` | §9 |

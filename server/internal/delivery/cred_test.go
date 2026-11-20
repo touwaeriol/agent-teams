@@ -2,12 +2,20 @@ package delivery
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	protocol "github.com/touwaeriol/agent-teams/protocol"
+	"github.com/touwaeriol/agent-teams/server/internal/credvault"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -49,5 +57,37 @@ func TestCredentialFullSlotsDoNotBlock(t *testing.T) {
 	}
 	if len(credSlots) != credInflight {
 		t.Fatalf("a dropped request took a slot: %d", len(credSlots))
+	}
+}
+
+// TestNodeSSHKey: a passphrase-protected OpenSSH key reaches the node as unencrypted PKCS#8 with
+// its public line, and the known_hosts line uses [host]:port for a non-default port.
+func TestNodeSSHKey(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKeyWithPassphrase(priv, "k", []byte("pw"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, _ := ssh.NewPublicKey(priv.Public())
+	want := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pub)))
+	k, err := nodeSSHKey(credvault.Credential{PrivateKey: string(pem.EncodeToMemory(block)), Passphrase: "pw"}, "git.example.com:2222", "ssh-ed25519 AAAAHOST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k.PublicKey != want || k.KnownHosts != "[git.example.com]:2222 ssh-ed25519 AAAAHOST" || !strings.HasPrefix(k.PrivateKey, "-----BEGIN PRIVATE KEY-----") {
+		t.Fatalf("key %+v", k)
+	}
+	p, _ := pem.Decode([]byte(k.PrivateKey))
+	if back, err := x509.ParsePKCS8PrivateKey(p.Bytes); err != nil || !back.(ed25519.PrivateKey).Equal(priv) {
+		t.Fatalf("pkcs8: %v", err)
+	}
+	if k2, _ := nodeSSHKey(credvault.Credential{PrivateKey: string(pem.EncodeToMemory(block)), Passphrase: "pw"}, "gitlab.com", "ssh-rsa AAAA"); k2.KnownHosts != "gitlab.com ssh-rsa AAAA" {
+		t.Fatalf("default port %q", k2.KnownHosts)
+	}
+	if _, err := nodeSSHKey(credvault.Credential{PrivateKey: string(pem.EncodeToMemory(block)), Passphrase: "wrong"}, "h", "k"); err == nil {
+		t.Fatal("wrong passphrase accepted")
 	}
 }

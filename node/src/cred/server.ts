@@ -25,9 +25,10 @@ export function credSocketPath(runtimeDir: string, tmp = tmpdir()): string {
 export interface CredSocketRequest {
   /**
    * "cred" (default): a token for git; "gh": the real gh binary, its config dir and a token;
-   * "erase": git rejected the token, drop the cached one for this session and repository.
+   * "erase": git rejected the token, drop the cached one for this session and repository;
+   * "ssh": a standalone repository's SSH key for the git-ssh wrapper (git-repos.md §5).
    */
-  op?: "cred" | "gh" | "erase";
+  op?: "cred" | "gh" | "erase" | "ssh";
   session: string;
   secret: string;
   host: string;
@@ -132,6 +133,7 @@ export class CredServer {
     const entry = req ? this.sessions.get(req.session) : undefined;
     if (!req || !entry || !safeEqual(entry.secret, req.secret)) return { ok: false, error: "unknown session" };
     if (req.op === "erase") return this.eraseReply(req, entry);
+    if (req.op === "ssh") return this.sshReply(req, entry);
     return req.op === "gh" ? this.ghReply(req, entry) : this.credReply(req, entry);
   }
 
@@ -149,9 +151,20 @@ export class CredServer {
   private async credReply(req: CredSocketRequest, entry: SessionEntry): Promise<Record<string, unknown>> {
     try {
       const cred = await this.broker.get({ session_id: req.session, open_gen: entry.openGen }, req.host, req.path, "read");
+      if (!cred.password) return { ok: false, error: "no token for this repository" };
       return { ok: true, username: cred.username, password: cred.password };
     } catch (err) {
       this.log.info({ session: req.session, err: (err as Error).message }, "credential request refused");
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+
+  /** git-ssh wrapper: the repository's key when the console hands one to this session (else plain ssh). */
+  private async sshReply(req: CredSocketRequest, entry: SessionEntry): Promise<Record<string, unknown>> {
+    try {
+      const cred = await this.broker.get({ session_id: req.session, open_gen: entry.openGen }, req.host, req.path, "read");
+      return cred.sshKey ? { ok: true, username: cred.username, ssh_key: cred.sshKey } : { ok: false, error: "no ssh key" };
+    } catch (err) {
       return { ok: false, error: (err as Error).message };
     }
   }

@@ -100,7 +100,7 @@ const TONE = { ok: "text-ok", warn: "text-warn", bad: "text-bad" } as const;
       </div>
       <div class="flex gap-2 sm:col-span-2">
         <dt class="w-20 shrink-0 text-muted-foreground">能力</dt>
-        <dd class="text-muted-foreground">Git 读写经平台中转 · 没有 PR 和 CI：讨论串的改动留在讨论串分支上，完成即交付</dd>
+        <dd class="text-muted-foreground">节点直连仓库，凭据只给员工的 git 用 · 没有 PR 和 CI：讨论串的改动留在讨论串分支上，完成即交付</dd>
       </div>
     </dl>
     <TestResult v-if="result" :result="result" />

@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { ApprovalBroker } from "./approvals.js";
 import { CredBroker } from "./cred/broker.js";
 import { gitCredentialEnv } from "./cred/helper.js";
+import { gitSshCommand } from "./cred/gitssh.js";
 import { CredServer, credSocketPath } from "./cred/server.js";
 import { GitJobs } from "./git/jobs.js";
 import { GhInstaller, type GhInstallOptions } from "./git/gh-install.js";
@@ -145,7 +146,7 @@ export class Daemon {
     this.credServer = new CredServer(credSocketPath(o.runtimeDir), this.creds, o.log, { gh: () => this.gh.resolve(), ghConfigRoot: join(dataDir, "gh-config") });
     this.toolhost = new LoopbackToolHost(o.log);
     this.hub = new CodexHub({ env: this.codexServerEnv(), log: o.log, clientVersion: DAEMON_VERSION, ...(o.codexCommand ? { command: o.codexCommand } : {}) });
-    this.git = new GitJobs({ root: o.root, platform: this.platform, gitBaseUrl: o.gitBaseUrl, mirrorDir: join(o.stateDir, "mirrors"), log: o.log, credential: (job, repo, purpose, host) => this.jobCredential(job, repo, purpose, host), lookup: (id) => this.recordedResult(id), ...(o.reviewRetryMs !== undefined ? { reviewRetryMs: o.reviewRetryMs } : {}) });
+    this.git = new GitJobs({ root: o.root, platform: this.platform, gitBaseUrl: o.gitBaseUrl, mirrorDir: join(o.stateDir, "mirrors"), log: o.log, credential: (job, repo, purpose, host, path) => this.jobCredential(job, repo, purpose, host, path), gitSsh: gitSshCommand(o.nodeCmd), lookup: (id) => this.recordedResult(id), ...(o.reviewRetryMs !== undefined ? { reviewRetryMs: o.reviewRetryMs } : {}) });
     this.sessions = new SessionManager({
       root: o.root, stateDir: o.stateDir, send, approvals: this.approvals, tools: this.tools, log: o.log, maxActive: o.maxActive,
       waitForJob: (id, ms) => this.git.waitFor(id, ms),
@@ -330,9 +331,9 @@ export class Daemon {
     return replies?.find((r) => r.type === "git.result")?.body as GitResult | undefined;
   }
 
-  private async jobCredential(jobId: string, repo: string, purpose: "read" | "push", host: string) {
-    const cred = await this.creds.get({ job_id: jobId }, host, `${repo}.git`, purpose);
-    return { username: cred.username, password: cred.password };
+  private async jobCredential(jobId: string, _repo: string, purpose: "read" | "push", host: string, path: string) {
+    const cred = await this.creds.get({ job_id: jobId }, host, path, purpose);
+    return { username: cred.username, password: cred.password, ...(cred.sshKey ? { sshKey: cred.sshKey } : {}) };
   }
 
   // ---- session runtime construction ----
@@ -418,12 +419,7 @@ export class Daemon {
     if (!git && !ssh) return {};
     const secret = this.credServer.register(spec.session_id, spec.open_gen);
     if (!git) return { AT_CRED_SESSION: spec.session_id, AT_CRED_SECRET: secret };
-    return { ...gitCredentialEnv(this.o.nodeCmd, this.credServer.socketPath, spec.session_id, secret, this.relayBase()), AT_GH_WRAPPER_DIR: this.platform.binDir };
-  }
-
-  /** The console's Git relay prefix (standalone repositories are cloned from <console>/git/<id>.git). */
-  private relayBase(): string {
-    return `${this.o.url.replace(/^ws/, "http").replace(/\/nodes(\/v2)?\/connect$/, "")}/git/`;
+    return { ...gitCredentialEnv(this.o.nodeCmd, this.credServer.socketPath, spec.session_id, secret, spec.git_hosts ?? []), AT_GH_WRAPPER_DIR: this.platform.binDir };
   }
 
   private forgetSession(id: string): void {

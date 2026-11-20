@@ -3,7 +3,6 @@ package gitrelay_test
 import (
 	"context"
 	"errors"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,19 +17,10 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/testdb"
 )
 
-// The test binary doubles as "atctl git-hook".
-func TestMain(m *testing.M) {
-	if len(os.Args) > 1 && os.Args[1] == "git-hook" {
-		os.Exit(gitrelay.RunHook(os.Args[2:]))
-	}
-	os.Exit(m.Run())
-}
-
 type fixture struct {
 	relay    *gitrelay.Relay
 	repo     store.GitRepo
 	upstream string // bare repository on disk
-	base     string // relay base URL (http://127.0.0.1:port)
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -79,22 +69,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	r := &gitrelay.Relay{Store: s, Vault: v, Git: srv.Runner, Dir: filepath.Join(t.TempDir(), "mirrors")}
-	exe, _ := os.Executable()
-	r.Git.Exe = exe
-	hs := httptest.NewServer(r)
-	t.Cleanup(hs.Close)
-	r.PublicURL = hs.URL
-	return &fixture{relay: r, repo: repo, upstream: up, base: hs.URL}
-}
-
-func (f *fixture) url(t *testing.T, c gitrelay.Claims) string {
-	t.Helper()
-	c.Repo, c.User = f.repo.ID, f.repo.UserID
-	tok, _, err := f.relay.Sign(c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return strings.Replace(f.relay.URL(f.repo.ID), "http://", "http://x:"+tok+"@", 1)
+	return &fixture{relay: r, repo: repo, upstream: up}
 }
 
 func gitTry(dir string, args ...string) (string, error) {
@@ -115,52 +90,6 @@ func commit(t *testing.T, dir, file, text string) {
 	gittest.Git(t, dir, "commit", "-qm", "edit "+file)
 }
 
-// TestRelayCloneAndPush: a node clones through the relay with a read token; an employee token
-// pushes its branch to the upstream through the pre-receive hook but not a platform branch; a
-// read token cannot push; a push job token only its ref.
-func TestRelayCloneAndPush(t *testing.T) {
-	f := newFixture(t)
-	work := filepath.Join(t.TempDir(), "w")
-	if out, err := gitTry(".", "clone", "-q", f.url(t, gitrelay.Claims{Mode: gitrelay.ModeRead}), work); err != nil {
-		t.Fatalf("clone: %v\n%s", err, out)
-	}
-	gittest.Git(t, work, "checkout", "-qb", "feature")
-	commit(t, work, "b.txt", "b\n")
-	if out, err := gitTry(work, "push", f.url(t, gitrelay.Claims{Mode: gitrelay.ModeRead}), "feature"); err == nil {
-		t.Fatalf("read token pushed:\n%s", out)
-	}
-	emp := f.url(t, gitrelay.Claims{Mode: gitrelay.ModeEmployee, Deny: []string{"refs/heads/main"}})
-	if out, err := gitTry(work, "push", emp, "feature"); err != nil {
-		t.Fatalf("employee push: %v\n%s", err, out)
-	}
-	want := gittest.Git(t, work, "rev-parse", "HEAD")
-	if got := gittest.Git(t, f.upstream, "rev-parse", "refs/heads/feature"); got != want {
-		t.Fatalf("upstream feature = %s, want %s", got, want)
-	}
-	for _, ref := range []string{"main", "thread/1-x", "mq/1/x"} {
-		out, err := gitTry(work, "push", emp, "+feature:refs/heads/"+ref) // forced: the client would refuse main itself
-		if err == nil || !strings.Contains(out, "不允许推送") {
-			t.Fatalf("pushed %s: %v\n%s", ref, err, out)
-		}
-		if _, err := gitTry(f.upstream, "rev-parse", "--verify", "refs/heads/"+ref); err == nil && ref != "main" {
-			t.Fatalf("upstream got %s", ref)
-		}
-	}
-	job := f.url(t, gitrelay.Claims{Mode: gitrelay.ModePush, Ref: "refs/heads/thread/1/dev"})
-	if out, err := gitTry(work, "push", job, "feature:refs/heads/other"); err == nil {
-		t.Fatalf("job token pushed another ref:\n%s", out)
-	}
-	if out, err := gitTry(work, "push", job, "feature:refs/heads/thread/1/dev"); err != nil {
-		t.Fatalf("job push: %v\n%s", err, out)
-	}
-	// Another repository's token is refused.
-	c := gitrelay.Claims{Repo: "gr_other", User: f.repo.UserID, Mode: gitrelay.ModeRead}
-	tok, _, _ := f.relay.Sign(c)
-	if out, err := gitTry(".", "ls-remote", strings.Replace(f.relay.URL(f.repo.ID), "http://", "http://x:"+tok+"@", 1)); err == nil {
-		t.Fatalf("foreign token listed:\n%s", out)
-	}
-}
-
 // TestRelayOps: the console-side operations the merge queue uses work on the upstream.
 func TestRelayOps(t *testing.T) {
 	ctx := context.Background()
@@ -176,7 +105,7 @@ func TestRelayOps(t *testing.T) {
 	if err := r.CreateRef(ctx, f.repo, "thread/1-x", main); err != nil {
 		t.Fatal(err)
 	}
-	// A member pushes work to the upstream directly (as through the relay).
+	// A member pushes work to the upstream directly (as employees do with the handed-out credential).
 	work := t.TempDir()
 	gittest.Git(t, work, "clone", "-q", f.upstream, ".")
 	gittest.Git(t, work, "checkout", "-qb", "thread/1/dev")
@@ -224,32 +153,5 @@ func TestRelayOps(t *testing.T) {
 	text, err := r.FileContent(ctx, f.repo, "b.txt", "main")
 	if err != nil || text != "b\n" {
 		t.Fatalf("file: %q %v", text, err)
-	}
-}
-
-// TestRelayToken: tampered and expired tokens are refused.
-func TestRelayToken(t *testing.T) {
-	v, _ := credvault.New("k")
-	r := &gitrelay.Relay{Vault: v}
-	tok, _, err := r.Sign(gitrelay.Claims{Repo: "gr_a", User: "u", Mode: gitrelay.ModeRead})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c, err := r.Verify(tok); err != nil || c.Repo != "gr_a" {
-		t.Fatalf("verify: %+v %v", c, err)
-	}
-	if _, err := r.Verify(tok[:len(tok)-2] + "AA"); err == nil {
-		t.Fatal("tampered token accepted")
-	}
-	old, _, _ := r.Sign(gitrelay.Claims{Repo: "gr_a", User: "u", Mode: gitrelay.ModeRead, Exp: 1})
-	if _, err := r.Verify(old); err == nil {
-		t.Fatal("expired token accepted")
-	}
-	other, _ := credvault.New("other")
-	if _, err := (&gitrelay.Relay{Vault: other}).Verify(tok); err == nil {
-		t.Fatal("token of another key accepted")
-	}
-	if id, ok := gitrelay.RepoOfPath("git/gr_abc.git"); !ok || id != "gr_abc" {
-		t.Fatalf("path: %q %v", id, ok)
 	}
 }
