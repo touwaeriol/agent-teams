@@ -31,6 +31,8 @@ export interface ManagerDeps {
   fetchImage?: ImageFetcher;
   /** Called when a session stops for good (unregister cred secrets, loopback routes). */
   onSessionGone?: (sessionId: string) => void;
+  /** Called whenever a session's driver stops (closed, parked, crashed): per-driver secrets such as the SSH key are dropped. */
+  onDriverGone?: (sessionId: string) => void;
   log: Logger;
   parkAfterMs?: number;
   maxActive?: number;
@@ -231,8 +233,11 @@ export class SessionManager implements SessionHost {
   private async alreadyDelivered(s: Session, msgId: string): Promise<boolean> {
     if (!s.checkTranscript) return false;
     s.checkTranscript = false;
+    const scratch = !s.driver;
     const driver = s.driver ?? this.d.createDriver(s.spec, s.absCwd, s).driver;
     const found = await driver.deliveredMsgIds?.([msgId]).catch(() => new Set<string>());
+    // A driver built only to read the transcript never starts: drop what it set up (SSH agent).
+    if (scratch && !s.driver) this.d.onDriverGone?.(s.id);
     return found?.has(msgId) ?? false;
   }
 
@@ -330,6 +335,18 @@ export class SessionManager implements SessionHost {
     return [reply];
   }
 
+  /**
+   * ssh.servers_update for this session and open_gen: the spec keeps the new list (persisted), so a
+   * parked or restarted session reopens with it. False when there is no such session or gen.
+   */
+  setSshServers(sessionId: string, openGen: number, servers: SessionOpen["ssh_servers"]): boolean {
+    const s = this.sessions.get(sessionId);
+    if (!s || s.gen !== openGen || s.state === "closed") return false;
+    s.spec.ssh_servers = servers;
+    this.persist(s);
+    return true;
+  }
+
   watch(body: SessionWatch): Reply[] {
     const s = this.sessions.get(body.session_id);
     if (s) s.watching = body.on;
@@ -365,6 +382,7 @@ export class SessionManager implements SessionHost {
       this.persist(s);
     } catch (err) {
       s.driver = null;
+      this.d.onDriverGone?.(s.id);
       this.freeSlot(s);
       throw err;
     }
@@ -434,6 +452,7 @@ export class SessionManager implements SessionHost {
     s.driver = null;
     s.cancelPending(reason, reason === "session_closed" ? "session_closed" : "process_restarted");
     if (driver) await driver.close().catch(() => undefined);
+    this.d.onDriverGone?.(s.id);
     this.freeSlot(s);
   }
 
@@ -449,6 +468,7 @@ export class SessionManager implements SessionHost {
     this.d.log.warn({ session: s.id, err: err.message }, "session process exited");
     s.driver = null;
     void driver.close().catch(() => undefined); // settles a session.compact in progress (ok=false)
+    this.d.onDriverGone?.(s.id);
     s.cancelPending("process_restarted", "process_restarted");
     this.freeSlot(s);
     void this.restartAfterCrash(s, err);

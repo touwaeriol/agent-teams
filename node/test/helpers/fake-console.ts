@@ -1,4 +1,4 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
 // The protocol package's own ajv setup: every frame the daemon sends must validate.
@@ -27,6 +27,11 @@ export class FakeConsole {
   token = "test-token";
   /** Images served at GET /nodes/attachments/{id} (node token required). */
   readonly images = new Map<string, Buffer>();
+  /** GET /nodes/ssh (remote-servers.md §6.4): upgrade headers seen, and the handler for accepted ones. */
+  readonly sshUpgrades: Array<Record<string, string | string[] | undefined>> = [];
+  onSsh: ((ws: WebSocket, req: IncomingMessage) => void) | null = null;
+  /** Refuse /nodes/ssh with this HTTP status (instead of upgrading). */
+  sshRefuse: number | null = null;
   private seq = 0;
   private ws: WebSocket | null = null;
   private http: Server | null = null;
@@ -38,11 +43,19 @@ export class FakeConsole {
     this.http = createServer((req, res) => this.serveImage(req.url ?? "", req.headers.authorization, res));
     this.wss = new WebSocketServer({ noServer: true });
     this.http.on("upgrade", (req, socket, head) => {
+      if (req.url === "/nodes/ssh") return this.sshUpgrade(req, socket, head);
       if (req.url !== "/nodes/connect" || req.headers.authorization !== `Bearer ${this.token}`) return socket.destroy();
       this.wss!.handleUpgrade(req, socket, head, (ws) => this.onConnection(ws));
     });
     await new Promise<void>((r) => this.http!.listen(0, "127.0.0.1", r));
     return `ws://127.0.0.1:${(this.http.address() as AddressInfo).port}/nodes/connect`;
+  }
+
+  private sshUpgrade(req: IncomingMessage, socket: import("node:stream").Duplex, head: Buffer): void {
+    this.sshUpgrades.push({ ...req.headers });
+    if (req.headers.authorization !== `Bearer ${this.token}`) return void socket.end("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n");
+    if (this.sshRefuse || !this.onSsh) return void socket.end(`HTTP/1.1 ${this.sshRefuse ?? 404} Refused\r\nContent-Length: 11\r\n\r\nnot granted`);
+    this.wss!.handleUpgrade(req, socket, head, (ws) => this.onSsh!(ws, req));
   }
 
   private serveImage(url: string, auth: string | undefined, res: import("node:http").ServerResponse): void {

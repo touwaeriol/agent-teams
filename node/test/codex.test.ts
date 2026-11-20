@@ -47,6 +47,20 @@ describe("codex sessions over app-server", () => {
     expect(servers.platform.url).toMatch(/^http:/);
   });
 
+  it("gives a thread with remote servers AT_SSH_CONFIG and the platform bin through shell_environment_policy.set", async () => {
+    const calls = await startCodex();
+    h!.console.command("session.open", { ...codexOpen("s_S1"), git_credentials: true, ssh_servers: [{ name: "prod" }] });
+    await h!.console.waitType("session.opened");
+    const p = calls().find((c) => c.method === "thread/start")!.params;
+    const set = p.config.shell_environment_policy.set as Record<string, string>;
+    if (!h!.console.ofType("hello")[0]!.body.ssh_client) return expect(set.AT_SSH_CONFIG).toBeUndefined();
+    expect(set.AT_SSH_CONFIG).toMatch(/s_S1\/ssh_config$/);
+    expect(set.PATH.split(":")[0]).toBe(join(h!.opts.platformDir, "bin"));
+    expect(set.SSH_AUTH_SOCK).toBeUndefined();
+    for (const v of Object.values(set)) expect(v).not.toMatch(/PRIVATE KEY|cert-v01|test-token/);
+    expect(p.developerInstructions).toMatch(/^be careful\n\n## Remote servers\n.*: prod\./);
+  });
+
   it("starts a thread with the loopback platform MCP config and runs a turn", async () => {
     const calls = await startCodex();
     h!.console.command("session.open", codexOpen("s_X1"));
