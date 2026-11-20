@@ -228,52 +228,42 @@ func TestLeadRuntimeIsClaude(t *testing.T) {
 	}
 }
 
-// TestModelValidation: role.model empty follows the defaults; otherwise it must be in the user's
-// list with the role's runtime, unless it is the value the saved role already had.
+// TestModelValidation: role.model is typed by hand for every tier: empty follows the project and
+// the built-in default; otherwise only the format is checked (no list).
 func TestModelValidation(t *testing.T) {
-	models := []composer.Model{{Runtime: Claude, Model: "claude-opus-5-5"}, {Runtime: Codex, Model: "gpt-x"}}
-	member := func(id, runtime, model string) store.Role {
-		return store.Role{ID: id, Tier: Member, Role: "m" + id, Runtime: runtime, Model: model, NodeIDs: []string{"n1"}}
-	}
-	saved := map[string]store.Role{
-		"r1": member("r1", Claude, "claude-gone"),
-		"r2": member("r2", Claude, "claude-gone"),
-		"r3": member("r3", Codex, "claude-opus-5-5"),
+	member := func(model, runtime string) store.Role {
+		return store.Role{Tier: Member, Role: "m", Runtime: runtime, Model: model, NodeIDs: []string{"n1"}}
 	}
 	cases := []struct {
 		name string
 		role store.Role
 		want string // the problem message, "" = valid
 	}{
-		{"empty follows the defaults", member("", Claude, ""), ""},
-		{"claude in list", member("", Claude, "claude-opus-5-5"), ""},
-		{"codex in list", member("", Codex, "gpt-x"), ""},
-		{"not in list", member("", Claude, "claude-nope"), "模型不在你的模型列表里：claude-nope"},
-		{"codex role with a claude model", member("", Codex, "claude-opus-5-5"), "Codex 岗位不能用 Claude 模型：claude-opus-5-5"},
-		{"claude role with a codex model", member("", Claude, "gpt-x"), "Claude 岗位不能用 Codex 模型：gpt-x"},
-		{"unchanged old value passes", member("r1", Claude, "claude-gone"), ""},
-		{"old value on another role is checked", member("r9", Claude, "claude-gone"), "模型不在你的模型列表里：claude-gone"},
-		{"old value with the runtime changed is checked", member("r2", Codex, "claude-gone"), "模型不在你的模型列表里：claude-gone"},
-		{"runtime changed to match the model is checked", member("r3", Claude, "claude-opus-5-5"), ""},
-		{"lead model dropped, not checked", store.Role{Tier: Lead, Role: "lead", Model: "claude-nope"}, ""},
-		{"coordinator model dropped, not checked", store.Role{Tier: Coordinator, Role: "coordinator", Model: "gpt-x"}, ""},
+		{"empty follows the defaults", member("", Claude), ""},
+		{"any claude id", member("claude-sonnet-x", Claude), ""},
+		{"any codex id", member("gpt-x", Codex), ""},
+		{"bad format", member("a b", Claude), composer.ModelFormatProblem},
+		{"lead model kept and checked", store.Role{Tier: Lead, Role: "lead", Model: "claude-lead-x"}, ""},
+		{"lead bad format", store.Role{Tier: Lead, Role: "lead", Model: "bad model"}, composer.ModelFormatProblem},
+		{"coordinator model kept", store.Role{Tier: Coordinator, Role: "coordinator", Model: "claude-coord-x"}, ""},
 	}
 	for _, c := range cases {
 		roles := Defaults(looks)
+		var at int
 		switch c.role.Tier {
 		case Coordinator:
-			roles[0].Model = c.role.Model
+			roles[0].Model, at = c.role.Model, 0
 		case Lead:
-			roles[1].Model = c.role.Model
+			roles[1].Model, at = c.role.Model, 1
 		default:
-			roles = append(roles, c.role)
+			roles, at = append(roles, c.role), len(roles)
 		}
 		Normalize(roles, looks)
-		if roles[0].Model != "" || roles[1].Model != "" {
-			t.Errorf("%s: coordinator/lead model kept: %q %q", c.name, roles[0].Model, roles[1].Model)
+		if roles[at].Model != strings.TrimSpace(c.role.Model) {
+			t.Errorf("%s: model not kept: %q", c.name, roles[at].Model)
 		}
 		var msgs []string
-		for _, p := range Validate(roles, Context{Nodes: nodes(), Looks: looks, Models: models, Saved: saved}) {
+		for _, p := range Validate(roles, Context{Nodes: nodes(), Looks: looks}) {
 			if strings.HasSuffix(p.Path, ".model") {
 				msgs = append(msgs, p.Message)
 			}
@@ -281,11 +271,5 @@ func TestModelValidation(t *testing.T) {
 		if got := strings.Join(msgs, "; "); got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)
 		}
-	}
-	// No model list (nil) skips the check.
-	roles := append(Defaults(looks), member("", Claude, "anything"))
-	Normalize(roles, looks)
-	if p := Validate(roles, Context{Nodes: nodes(), Looks: looks}); len(p) != 0 {
-		t.Fatalf("nil models: %v", p)
 	}
 }

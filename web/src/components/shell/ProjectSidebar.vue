@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// The project sidebar of the design (Sidebar board): projects only, plus 新建项目 / 搜索 / 资料库,
+// The project sidebar of the design (Sidebar board): projects only, plus 新建项目 / 搜索 / 资料库 / 共享文件,
 // archived projects folded, nodes and the user at the bottom.
-import { ChevronRight, LayoutGrid, Plus, Search } from "lucide-vue-next";
+import { ChevronRight, FolderOpen, LayoutGrid, Plus, Search } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import { useProjects } from "@/api/queries";
@@ -43,6 +43,10 @@ const nav = () => emit("navigate");
       <SideLink v-if="current" :to="`/projects/${current.id}/deliverables`" @navigate="nav">
         <template #icon><LayoutGrid /></template>
         资料库
+      </SideLink>
+      <SideLink v-if="current" :to="`/projects/${current.id}/shared-files`" @navigate="nav">
+        <template #icon><FolderOpen /></template>
+        共享文件
       </SideLink>
     </div>
     <div class="scroll-thin flex-1 overflow-y-auto px-3 py-4">

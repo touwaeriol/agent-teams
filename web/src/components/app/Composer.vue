@@ -9,7 +9,7 @@ import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import AttachButton from "./AttachButton.vue";
 import AttachmentStrip from "./AttachmentStrip.vue";
-import { attachmentHandlers, type Attachments } from "./attachments";
+import { attachmentHandlers, type Attachments, type PendingImage } from "./attachments";
 import SendButton from "./SendButton.vue";
 import AssistPopup from "./composer/AssistPopup.vue";
 import CommandPanel from "./composer/CommandPanel.vue";
@@ -27,7 +27,8 @@ const props = withDefaults(
   defineProps<{
     label: string;
     placeholder: string;
-    onSend: (text: string, images: string[], refs: MessageRef[]) => Promise<unknown> | void;
+    /** taken: the attachments that went with the message (to draw them before the server confirms). */
+    onSend: (text: string, images: string[], refs: MessageRef[], taken: PendingImage[]) => Promise<unknown> | void;
     busy?: boolean;
     attachments?: Attachments;
     hint?: string;
@@ -66,20 +67,23 @@ watch([imageCount, () => assist.panel.value, () => props.attachments?.items.valu
 const overlayStyle = computed(() => (grow.gutter.value ? { paddingRight: `${16 + grow.gutter.value}px` } : undefined));
 const speaking = computed(() => (voice.parts.value ? "text-transparent caret-foreground" : ""));
 
-// One send at a time: busy (the parent's isPending) only shows up a render later, and waiting for
-// the last voice transcripts takes a while, so a second Enter or click would read the same message.
+// One send at a time: waiting for the last voice transcripts takes a while, so a second Enter or
+// click would read the same message. The lock holds until the box is emptied; the request itself
+// runs on its own, so the next message can be written and sent while it is on its way.
 let sending = false;
 async function send() {
   if (sending) return;
   sending = true;
+  let sent: { done: Promise<void> } | undefined;
   try {
-    await sendOnce();
+    sent = await sendOnce();
   } finally {
     sending = false;
   }
+  await sent?.done;
 }
 
-async function sendOnce() {
+async function sendOnce(): Promise<{ done: Promise<void> } | undefined> {
   if (voice.active.value) await voice.finish();
   const value = text.value.trim();
   if (assist.intercept(value)) return void (text.value = "");
@@ -92,11 +96,16 @@ async function sendOnce() {
   const taken = props.attachments?.take() ?? [];
   text.value = "";
   assist.clearRefs();
+  return { done: deliver(value, images, refs, picked, taken) };
+}
+
+async function deliver(value: string, images: string[], refs: MessageRef[], picked: typeof assist.picked.value, taken: PendingImage[]) {
   try {
-    await props.onSend(value, images, refs);
+    await props.onSend(value, images, refs, taken);
     props.attachments?.discard(taken);
   } catch {
-    // Failed: the message goes back in front of anything typed or attached while it was sending.
+    // Failed: the message goes back in front of anything typed or attached while it was sending
+    // (the chat also keeps it, marked failed, with 重试).
     const typed = text.value;
     text.value = typed.trim() ? `${value}\n${typed}` : value;
     assist.picked.value = [...picked, ...assist.picked.value.filter((r) => !picked.includes(r))];

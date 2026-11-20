@@ -64,16 +64,25 @@ const memberGuide = `你在自己的工作目录里工作，每个仓库一个�
 - 截图和图片不是交付物：publish_file 发布单张图片只会作为附件保存在讨论串消息里，不进交付物；要放进报告，就把图片和 index.html 放在同一目录发布成网站，或直接内联进 HTML（SVG 可以直接写进 HTML）；附件只在文字汇报里引用（附件 id 或地址）。SVG 也不能单独发布。
 - 切换工作内容时调用 set_status(text)，用一句中文说明你在干什么。`
 
-// docsCache keeps each repository's CLAUDE.md (read from its default branch) for a while.
+// docsCache keeps each repository's CLAUDE.md (read from its default branch). A fresh entry is
+// served as is; an older one is still served at once while one background read renews it
+// (stale-while-revalidate): opening a session holds the project row and must not wait for GitHub.
 type docsCache struct {
 	mu    sync.Mutex
 	items map[string]docEntry
 }
 
 type docEntry struct {
-	text string
-	at   time.Time
+	text       string
+	at         time.Time
+	refreshing bool
 }
+
+// docTTL is how long a CLAUDE.md is served before it is read again (in the background).
+const docTTL = 10 * time.Minute
+
+// docTimeout bounds one read of a CLAUDE.md.
+const docTimeout = 5 * time.Second
 
 var claudeDocs = &docsCache{items: map[string]docEntry{}}
 
@@ -94,45 +103,61 @@ func (o *Orchestrator) projectDocs(ctx context.Context, q core.DB, p store.Proje
 	return strings.Join(parts, "\n\n")
 }
 
-const docTTL = 10 * time.Minute
-
 func docKey(p store.Project, r ghops.Repo) string { return p.ID + "@" + r.Slug }
 
-func cachedDoc(key string) (docEntry, bool) {
-	claudeDocs.mu.Lock()
-	defer claudeDocs.mu.Unlock()
-	e, ok := claudeDocs.items[key]
-	return e, ok
-}
-
-// repoDoc is one repository's CLAUDE.md on its default branch ("" when it has none). It runs
-// while a session opens, inside a transaction, so it reads the cache: a stale entry is returned
-// and refreshed in the background, and only a repository never read before is fetched now
-// (WarmRepos reads them before the transaction).
+// repoDoc reads one repository's CLAUDE.md on its default branch ("" on failure; see docsCache).
+// It runs while a session opens, inside a transaction: only a repository never read before waits
+// for GitHub, and WarmRepos reads those before the transaction.
 func (o *Orchestrator) repoDoc(ctx context.Context, p store.Project, r ghops.Repo) string {
-	e, ok := cachedDoc(docKey(p, r))
-	if !ok {
-		return o.fetchDoc(ctx, p, r)
-	}
-	if time.Since(e.at) >= docTTL {
-		ghops.Background("doc:"+docKey(p, r), func(ctx context.Context) { o.fetchDoc(ctx, p, r) })
-	}
-	return e.text
+	return claudeDocs.get(ctx, docKey(p, r), func(ctx context.Context) (string, error) {
+		fctx, cancel := context.WithTimeout(ctx, docTimeout)
+		defer cancel()
+		text, err := o.gh.FileContent(fctx, r, "CLAUDE.md", o.DefaultBranch(fctx, r))
+		if err != nil {
+			o.log.Debug("read CLAUDE.md", "project_id", p.ID, "repo", r.Slug, "err", err)
+		}
+		return text, err
+	})
 }
 
-// fetchDoc reads CLAUDE.md from GitHub into the cache ("" on failure).
-func (o *Orchestrator) fetchDoc(ctx context.Context, p store.Project, r ghops.Repo) string {
-	key := docKey(p, r)
-	fctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	text, err := o.gh.FileContent(fctx, r, "CLAUDE.md", o.DefaultBranch(fctx, r))
-	if err != nil {
-		o.log.Debug("read CLAUDE.md", "project_id", p.ID, "repo", r.Slug, "err", err)
+// get serves key, reading it when absent (and in the background when stale). A failed first
+// read is cached as "" (asked again after docTTL), unless the caller gave up (its context ended:
+// nothing was learned about GitHub). A failed background refresh keeps the old text and only
+// renews its time, like the default branch cache (ghops).
+func (c *docsCache) get(ctx context.Context, key string, read func(context.Context) (string, error)) string {
+	c.mu.Lock()
+	e, ok := c.items[key]
+	if ok {
+		if time.Since(e.at) >= docTTL && !e.refreshing {
+			e.refreshing = true
+			c.items[key] = e
+			bg := context.WithoutCancel(ctx)
+			go c.refresh(bg, key, read)
+		}
+		c.mu.Unlock()
+		return e.text
 	}
-	claudeDocs.mu.Lock()
-	claudeDocs.items[key] = docEntry{text: text, at: time.Now()}
-	claudeDocs.mu.Unlock()
+	c.mu.Unlock()
+	text, err := read(ctx)
+	if err == nil || ctx.Err() == nil {
+		c.mu.Lock()
+		c.items[key] = docEntry{text: text, at: time.Now()}
+		c.mu.Unlock()
+	}
 	return text
+}
+
+// refresh renews a stale entry; on failure the old text stays.
+func (c *docsCache) refresh(ctx context.Context, key string, read func(context.Context) (string, error)) {
+	text, err := read(ctx)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e := c.items[key]
+	e.refreshing, e.at = false, time.Now()
+	if err == nil {
+		e.text = text
+	}
+	c.items[key] = e
 }
 
 // systemAppend builds the prompt appended to the claude_code preset (§6.1).

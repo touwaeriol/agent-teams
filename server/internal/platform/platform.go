@@ -19,6 +19,9 @@ import (
 // ErrNodeOffline is returned for commands to a node without a live link.
 var ErrNodeOffline = errors.New("节点不在线")
 
+// ErrUsageUnsupported: the node's daemon does not report usage (hello.features lacks "usage").
+var ErrUsageUnsupported = errors.New("节点不支持查询余量")
+
 // NodeLive is the live part of NodeView, owned by the node gateway.
 type NodeLive struct {
 	Online         bool           `json:"online"`
@@ -31,6 +34,36 @@ type NodeLive struct {
 	ActiveSessions int            `json:"active_sessions"`
 	ParkedSessions int            `json:"parked_sessions"`
 	Queued         int            `json:"queued"`
+	// Features is hello.features of the live link (nil while offline).
+	Features []string `json:"features,omitempty"`
+	// Usage is the latest node.usage report; kept after the link drops (nil = never reported).
+	Usage *NodeUsage `json:"usage"`
+}
+
+// NodeUsage is the latest node.usage report of a node (NodeView.usage).
+type NodeUsage struct {
+	Claude *RuntimeUsage `json:"claude,omitempty"`
+	Codex  *RuntimeUsage `json:"codex,omitempty"`
+}
+
+// RuntimeUsage is the subscription quota of one runtime as the daemon reported it.
+type RuntimeUsage struct {
+	Auth       string        `json:"auth" enum:"subscription,chatgpt,api_key,none" doc:"How the runtime is logged in"`
+	Status     string        `json:"status" enum:"ok,error,unsupported"`
+	Plan       string        `json:"plan,omitempty"`
+	Windows    []UsageWindow `json:"windows"`
+	Error      string        `json:"error,omitempty"`
+	FetchedAt  *time.Time    `json:"fetched_at" doc:"When the daemon fetched the data"`
+	ReceivedAt time.Time     `json:"received_at" doc:"When the console received the report"`
+}
+
+// UsageWindow is one rate-limit window (five_hour, weekly, primary, ...).
+type UsageWindow struct {
+	Key           string     `json:"key" doc:"five_hour, weekly, weekly_opus, weekly_sonnet, weekly_model (Claude); primary, secondary (Codex)"`
+	Label         string     `json:"label,omitempty" maxLength:"40" doc:"Display name from the provider, e.g. the model of a weekly_model window"`
+	UsedPercent   float64    `json:"used_percent" minimum:"0" maximum:"100"`
+	WindowMinutes *int       `json:"window_minutes,omitempty"`
+	ResetsAt      *time.Time `json:"resets_at"`
 }
 
 // NodeRelease is at_settings.node_release.
@@ -52,6 +85,10 @@ type NodeRegistry interface {
 	Upgrade(ctx context.Context, nodeID string, release NodeRelease) error
 	// Drain sends node.drain; ErrNodeOffline when not connected.
 	Drain(ctx context.Context, nodeID string, deadline time.Duration) error
+	// RefreshUsage returns the node's usage, asking the node (node.usage_refresh) unless the
+	// cached report is fresh; stale = the node did not answer in time. ErrNodeOffline when not
+	// connected, ErrUsageUnsupported when the daemon does not report usage.
+	RefreshUsage(ctx context.Context, nodeID string) (usage *NodeUsage, stale bool, err error)
 }
 
 // Events publishes realtime events (api.md §1). The orchestration side
@@ -86,6 +123,11 @@ type Offline struct{}
 
 // Status implements NodeRegistry.
 func (Offline) Status(string) NodeLive { return NodeLive{} }
+
+// RefreshUsage implements NodeRegistry.
+func (Offline) RefreshUsage(context.Context, string) (*NodeUsage, bool, error) {
+	return nil, false, ErrNodeOffline
+}
 
 // Disconnect implements NodeRegistry.
 func (Offline) Disconnect(context.Context, string, string) {}

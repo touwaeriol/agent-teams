@@ -247,3 +247,23 @@ func NodeCandidates(e Employee, nodes []store.Node) []store.Node {
 	}
 	return picked
 }
+
+// StaleRoleModels are the user's coordinators and the leads of unfinished threads whose role copy
+// (spec.model) differs from model, the model of their tier's template (tier: coordinator or
+// lead), rows locked. Unlike members (keepMember), their copy is otherwise not refreshed after
+// creation; only the model follows the template (orchestrator.RolesSaved).
+func StaleRoleModels(ctx context.Context, tx *Tx, userID, tier, model string) ([]Employee, error) {
+	var out []Employee
+	err := employees(ctx, tx).Clauses(ForUpdate).
+		Where("tier = ? AND COALESCE(spec->>'model', '') <> ?", tier, model).
+		Where("project_id IN (SELECT id FROM at_projects WHERE user_id = ?)", userID).
+		Where("thread_id IS NULL OR thread_id IN (SELECT id FROM at_threads WHERE status NOT IN ('done', 'failed', 'archived'))").
+		Order("id").Find(&out).Error
+	return out, err
+}
+
+// SetSpecModel writes model into the employee's role copy (spec.model).
+func SetSpecModel(ctx context.Context, tx *Tx, employeeID, model string) error {
+	return tx.Gorm(ctx).Exec(`UPDATE at_employees SET spec = jsonb_set(spec, '{model}', to_jsonb(?::text)) WHERE id = ?`,
+		model, employeeID).Error
+}

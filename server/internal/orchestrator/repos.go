@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
@@ -45,7 +44,7 @@ func (o *Orchestrator) ReposIn(ctx context.Context, q core.DB, p store.Project) 
 // the cache (refreshing a stale entry in the background) so that session opening, which runs
 // inside a transaction, does not wait on GitHub; WarmRepos fills the cache beforehand.
 func (o *Orchestrator) DefaultBranch(ctx context.Context, r ghops.Repo) string {
-	b, err := o.gh.CachedDefaultBranch(ctx, r)
+	b, err := o.gh.DefaultBranch(ctx, r)
 	if err != nil || b == "" {
 		o.log.Warn("default branch", "repo", r.Slug, "err", err)
 		return fallbackBase
@@ -193,17 +192,16 @@ func legacyCheckout(ctx context.Context, q core.DB, threadID, cwd string) bool {
 }
 
 // WarmRepos reads from GitHub what opening a session needs (each repository's default branch
-// and CLAUDE.md) when it is missing or stale. Call it before a transaction that may open a
-// session: inside the transaction those values come from the cache only, so the transaction's
-// connection and row locks are never held across a GitHub round trip.
+// and CLAUDE.md) when it is missing; a stale entry is renewed in the background (see the caches
+// in ghops and prompt.go). Call it before a transaction that may open a session: inside the
+// transaction those values come from the cache only, so the transaction's connection and row
+// locks are never held across a GitHub round trip.
 func (o *Orchestrator) WarmRepos(ctx context.Context, p store.Project) {
 	for _, r := range o.Repos(ctx, p) {
 		if _, err := o.gh.DefaultBranch(ctx, r); err != nil {
 			o.log.Debug("warm default branch", "repo", r.Slug, "err", err)
 		}
-		if e, ok := cachedDoc(docKey(p, r)); !ok || time.Since(e.at) >= docTTL {
-			o.fetchDoc(ctx, p, r)
-		}
+		o.repoDoc(ctx, p, r)
 	}
 }
 

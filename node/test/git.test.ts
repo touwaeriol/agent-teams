@@ -178,9 +178,9 @@ describe("git jobs", () => {
     };
     const pushDev = (sha: string) => git(seed, "push", "-f", "origin", `${sha}:refs/heads/thread/12/dev-2`);
     let n = 0;
-    const review = async (expect_sha: string, deadline?: string, fetch = true) => {
+    const review = async (expect_sha: string, deadline?: string) => {
       const job = `g_r${++n}`;
-      h.console.command("git.prepare", { ...prepare(job, "reviewer-1"), fetch, sync: { mode: "review", ref: "thread/12/dev-2", expect_sha, ...(deadline ? { deadline } : {}) } });
+      h.console.command("git.prepare", { ...prepare(job, "reviewer-1"), sync: { mode: "review", ref: "thread/12/dev-2", expect_sha, ...(deadline ? { deadline } : {}) } });
       return (await h.console.waitType("git.result", (b) => b.job_id === job)).body;
     };
     const rwt = join(h.opts.root, "projects/p1/threads/12/reviewer-1");
@@ -213,10 +213,14 @@ describe("git jobs", () => {
     expect(failed).toMatchObject({ ok: false, error_code: "sha_mismatch", head_sha: b });
     expect(failed.error).toContain(never);
     expect(git(rwt, "rev-parse", "HEAD")).toBe(b);
-    // A deadline that lands before the first retry: it gives up without waiting through the retries.
-    // No fetch here: a fetch that outlasts the deadline would report the sync as "expired" instead.
+    // A deadline that the retries would pass: it gives up early instead of waiting through all of
+    // them (retries wait 100+200+300+400 ms here; the deadline stops it before the 4th wait). The
+    // deadline must not be over before the job starts (a slow CI machine), or the sync is simply
+    // "expired" (ok, tree untouched) and never looks for the commit.
     const t0 = Date.now();
-    expect(await review(never, new Date(Date.now() + 90).toISOString(), false)).toMatchObject({ ok: false, error_code: "sha_mismatch" });
+    const early = await review(never, new Date(Date.now() + 1000).toISOString());
+    expect(early).toMatchObject({ ok: false, error_code: "sha_mismatch" });
+    expect(early.error).not.toContain("after 5 fetch");
     expect(Date.now() - t0).toBeLessThan(2000);
     void c;
   });

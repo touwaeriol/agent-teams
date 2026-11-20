@@ -34,7 +34,7 @@ describe("assist logic", () => {
     expect(commandOf("/design 做", "lead")).toBeNull();
   });
 
-  it("has no /model: the coordinator and the leads always use the owner's default", () => {
+  it("has no /model: the coordinator's and the leads' models are set in the role or the project", () => {
     expect(platformCommands("coordinator").map((c) => c.name)).not.toContain("model");
     expect(platformCommands("lead").map((c) => c.name)).not.toContain("model");
     expect(slashItems("model", "coordinator", []).some((i) => i.label === "/model")).toBe(false);
@@ -114,8 +114,6 @@ function stubApi() {
         employee: "lead-1", tier: "lead", runtime: "claude", from: "session", commands: [{ name: "design", description: "做原型", argument_hint: "", source: "skill" }],
         hidden: ["memory"], custom: [{ name: "plan", description: "先出计划", mode: "prompt", prompt: "x", source: "role" }],
       });
-    if (url.includes("/api/models"))
-      return json({ models: [{ id: "m1", runtime: "claude", model: "claude-opus-5-5", label: "Opus 5.5", default: true, mine: true }, { id: "m2", runtime: "claude", model: "claude-haiku-x", label: "Haiku", default: false, mine: true }] });
     if (url.endsWith("/model"))
       return json({
         scope: "thread", employee: "lead-1", runtime: "claude", model: "claude-opus-5-5", override: "", inherited: "claude-opus-5-5", session: "claude-opus-5-5", live: true,
@@ -165,7 +163,7 @@ describe("Composer with assist", () => {
     await input.setValue("/design 登录页");
     await input.trigger("keydown", { key: "Enter" });
     await settle();
-    expect(onSend).toHaveBeenCalledWith("/design 登录页", [], []);
+    expect(onSend).toHaveBeenCalledWith("/design 登录页", [], [], []);
   });
 
   it("lists /design first for /de, shows custom commands and leaves hidden platform commands out", async () => {
@@ -193,7 +191,7 @@ describe("Composer with assist", () => {
     await input.trigger("keydown", { key: "Escape" });
     await input.trigger("keydown", { key: "Enter" });
     await settle(10);
-    expect(onSend).toHaveBeenCalledWith("/model", [], []);
+    expect(onSend).toHaveBeenCalledWith("/model", [], [], []);
     expect(w.find("[data-testid=command-panel]").exists()).toBe(false);
     expect(spy.mock.calls.some((c) => (c[0] as Request).method === "PUT")).toBe(false);
   });
@@ -206,9 +204,21 @@ describe("Composer with assist", () => {
     const tag = w.get("[data-testid=composer-model]");
     expect(tag.text()).toBe("Opus 5.5");
     expect(tag.element.tagName).toBe("SPAN");
-    expect(tag.attributes("title")).toBe("当前模型：Opus 5.5，统筹和组长使用默认模型，不能切换");
+    expect(tag.attributes("title")).toBe("当前模型：claude-opus-5-5。统筹和组长不能用 /model 切换，请在岗位配置或项目设置里改");
+    expect(tag.attributes("title")).not.toContain("我的默认");
     expect(tag.attributes("aria-label")).toBe(tag.attributes("title"));
     expect(tag.element.closest("button, [role=combobox], select")).toBeNull();
+  });
+
+  it("shows a typed model id as is (the server works out project → role → built-in default)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      (input as Request).url.endsWith("/model")
+        ? json({ scope: "coordinator", employee: "coordinator", runtime: "claude", model: "claude-role-typed", override: "", inherited: "claude-role-typed", session: "", live: false, members: [] })
+        : json({}),
+    );
+    const { w } = mountComposer(vi.fn(), "large", "coordinator");
+    await settle(10);
+    expect(w.get("[data-testid=composer-model]").text()).toBe("claude-role-typed");
   });
 
   it("has no /model in the coordinator's / menu", async () => {
@@ -274,6 +284,6 @@ describe("Composer with assist", () => {
     expect(w.text()).toContain("src/app.go");
     await input.trigger("keydown", { key: "Enter" });
     await settle();
-    expect(onSend).toHaveBeenCalledWith("看 @src/app.go", [], [{ kind: "file", repo: "o/r", path: "src/app.go" }]);
+    expect(onSend).toHaveBeenCalledWith("看 @src/app.go", [], [{ kind: "file", repo: "o/r", path: "src/app.go" }], []);
   });
 });

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/delete_shared_file.json",
+  "title": "DeleteSharedFileInput",
+  "description": "Delete one of the project's shared files for everyone (copies already fetched into working directories stay). Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 20 MB per file, 500 MB per project.",
+  "x-tool": {
+    "tiers": [
+      "coordinator",
+      "lead",
+      "member"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "path"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "$ref": "common.json#/$defs/SharedPath"
+    }
+  },
+  "$defs": {
+    "DeleteSharedFileResult": {
+      "title": "DeleteSharedFileResult",
+      "type": "object",
+      "required": [
+        "path",
+        "deleted"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "common.json#/$defs/SharedPath"
+        },
+        "deleted": {
+          "description": "False when no file had this path.",
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // One machine: name, online pill, meta, actions (设置 / 升级 / 重新生成令牌 / 移除), the slot bar,
-// runtime chips and the sessions running there.
-import { computed, ref } from "vue";
+// runtime chips (with subscription quota under each) and the sessions running there.
+import { useQueryClient } from "@tanstack/vue-query";
+import { computed, onBeforeUnmount, ref } from "vue";
 import { nodes as nodeActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import { keys } from "@/api/queries";
@@ -9,16 +10,44 @@ import type { Enrollment, NodeView } from "@/api/views";
 import ProgressBar from "@/components/app/ProgressBar.vue";
 import StatusPill from "@/components/app/StatusPill.vue";
 import ConfirmAction from "@/components/common/ConfirmAction.vue";
+import Spinner from "@/components/common/Spinner.vue";
 import { nodeSlots } from "@/components/shell/nodes";
 import NodeSessions from "./NodeSessions.vue";
 import NodeSettings from "./NodeSettings.vue";
-import { nodeMeta, RUNTIMES, runtimeLine, slotPct, type RuntimeInfo } from "./nodes";
+import { hoverIntent, needsUsageRefresh, refreshCooldown, nodeMeta, RUNTIMES, runtimeLine, slotPct, usageView, withNodeUsage, type RuntimeInfo, type UsageView } from "./nodes";
 
 const props = defineProps<{ node: NodeView }>();
 const emit = defineEmits<{ token: [enrollment: Enrollment] }>();
 const configuring = ref(false);
 const slots = computed(() => nodeSlots(props.node));
 const runtimes = computed(() => (props.node.runtimes ?? {}) as Record<string, RuntimeInfo>);
+const usage = computed(() => Object.fromEntries(RUNTIMES.map(([k]) => [k, usageView(k, runtimes.value[k], props.node.usage?.[k as "claude" | "codex"], props.node)])) as Record<string, UsageView>);
+const pick = <K extends NonNullable<UsageView>["kind"]>(key: string, kind: K) => {
+  const u = usage.value[key];
+  return u?.kind === kind ? (u as Extract<NonNullable<UsageView>, { kind: K }>) : undefined;
+};
+const usageRows = (key: string) => pick(key, "windows")?.rows ?? [];
+const usageUpdated = (key: string) => pick(key, "windows")?.updated ?? "";
+const usageError = (key: string) => pick(key, "error")?.error ?? "";
+// Hovering the runtime boxes for 300 ms asks the node for fresh quota, unless what we have is
+// under a minute old or this node was tried in the last minute; one request at a time, failures keep the old data silently.
+const queryClient = useQueryClient();
+const refreshing = ref(false);
+async function refreshUsage() {
+  if (refreshing.value || !needsUsageRefresh(props.node) || !refreshCooldown.ready(props.node.id)) return;
+  refreshing.value = true;
+  refreshCooldown.mark(props.node.id);
+  try {
+    const { usage: fresh } = await nodeActions.refreshUsage(props.node.id);
+    queryClient.setQueryData<NodeView[]>(keys.nodes, (list) => withNodeUsage(list, props.node.id, fresh));
+  } catch {
+    // keep the old numbers
+  } finally {
+    refreshing.value = false;
+  }
+}
+const hover = hoverIntent(300, () => void refreshUsage());
+onBeforeUnmount(hover.leave);
 const rotate = useAction(() => nodeActions.rotate(props.node.id), { invalidate: [keys.nodes], onSuccess: (e) => emit("token", e) });
 const remove = useAction(() => nodeActions.remove(props.node.id), { invalidate: [keys.nodes], success: "节点已移除" });
 const upgrade = useAction(() => nodeActions.upgrade(props.node.id), { success: "已让节点升级" });
@@ -46,14 +75,32 @@ const upgrade = useAction(() => nodeActions.upgrade(props.node.id), { success: "
         <span>槽位（同时运行的会话）</span>
         <span>{{ node.active_sessions }} / {{ slots || "—" }}{{ node.queued ? ` · 排队 ${node.queued}` : "" }}</span>
       </span>
-      <ProgressBar :pct="slotPct(node)" tone="#2F6FDB" :height="6" />
+      <span class="flex"><ProgressBar :pct="slotPct(node)" tone="#2F6FDB" :height="6" /></span>
     </div>
-    <div class="flex flex-wrap gap-2 text-[13px]">
-      <span v-for="[key, label] in RUNTIMES" :key="key" class="flex items-center gap-2 rounded-lg border border-[#EFEDE8] bg-background px-2.5 py-1.5">
-        <span class="font-medium">{{ label }}</span>
-        <span class="font-mono text-xs text-[#4A4843]">{{ runtimeLine(key, runtimes[key]).ver }}</span>
-        <span class="text-xs" :style="{ color: runtimeLine(key, runtimes[key]).ok ? '#2E7D4F' : '#B4530B' }">{{ runtimeLine(key, runtimes[key]).login }}</span>
-      </span>
+    <div class="flex flex-wrap gap-2 text-[13px]" @mouseenter="hover.enter" @mouseleave="hover.leave">
+      <div v-for="[key, label] in RUNTIMES" :key="key" class="flex min-w-[260px] flex-1 basis-0 flex-col gap-1.5 rounded-lg border border-[#EFEDE8] bg-background px-2.5 dark:border-border py-1.5" :data-runtime="key">
+        <span class="flex flex-wrap items-center gap-x-2">
+          <span class="font-medium">{{ label }}</span>
+          <span class="font-mono text-xs text-[#4A4843] dark:text-foreground/70">{{ runtimeLine(key, runtimes[key]).ver }}</span>
+          <span class="text-xs" :style="{ color: runtimeLine(key, runtimes[key]).ok ? 'hsl(var(--ok))' : 'hsl(var(--warn))' }">{{ runtimeLine(key, runtimes[key]).login }}</span>
+        </span>
+        <template v-if="usage[key]?.kind === 'windows'">
+          <div class="grid grid-cols-[auto_minmax(40px,1fr)_auto_auto] items-center gap-x-2 gap-y-1 text-xs">
+            <template v-for="(row, i) in usageRows(key)" :key="`${row.key}|${row.label}|${i}`">
+              <span class="whitespace-nowrap text-muted-foreground">{{ row.label }}</span>
+              <ProgressBar :pct="row.width" :tone="row.tone" :height="5" />
+              <span class="text-right font-mono tabular-nums" :style="{ color: row.pct >= 80 ? row.tone : undefined }">{{ row.pct }}%</span>
+              <span class="whitespace-nowrap text-[11px] text-muted-foreground">{{ row.reset }}</span>
+            </template>
+          </div>
+          <span v-if="refreshing" class="flex items-center gap-1 text-[11px] text-muted-foreground" data-refreshing><Spinner class="size-2.5 border" />刷新中…</span>
+          <span v-else class="text-[11px] text-muted-foreground">{{ usageUpdated(key) }}</span>
+        </template>
+        <el-tooltip v-else-if="usage[key]?.kind === 'error'" :content="usageError(key)" placement="bottom-start" :show-after="200">
+          <span class="flex w-fit cursor-help items-center gap-1.5 text-xs text-destructive">获取失败<Spinner v-if="refreshing" class="size-2.5 border text-muted-foreground" /></span>
+        </el-tooltip>
+        <span v-else-if="usage[key]?.kind === 'pending'" class="text-[11px] text-muted-foreground">余量获取中…</span>
+      </div>
     </div>
     <NodeSessions v-if="node.online" :node-id="node.id" />
     <NodeSettings v-model:open="configuring" :node="node" />
