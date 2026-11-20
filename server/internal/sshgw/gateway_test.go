@@ -178,6 +178,15 @@ func TestGatewayRefusesUngrantedSessions(t *testing.T) {
 			t.Errorf("%s websocket status %d", sid, status)
 		}
 	}
+	// crashed is terminal: no certificate, no WebSocket.
+	crashed := f.session("dev-crashed", "member", "dev", `{}`)
+	f.exec(`UPDATE at_agent_sessions SET state = 'crashed' WHERE id = $1`, crashed)
+	if resp := f.certify(crashed, 1, pub); resp.Ok || *resp.Error != "session_not_found" {
+		t.Errorf("crashed session certificate: %+v", resp)
+	}
+	if _, status, _ := f.dialWS(crashed, 1, "prod", f.token); status != http.StatusNotFound {
+		t.Errorf("crashed session websocket: %d", status)
+	}
 	if resp := f.certify(dev, 2, pub); resp.Ok || *resp.Error != "stale_open_gen" {
 		t.Errorf("stale gen: %+v", resp)
 	}
@@ -563,5 +572,92 @@ func TestNextVersionGrows(t *testing.T) {
 			t.Fatalf("version %d after %d", v, last)
 		}
 		last = v
+	}
+}
+
+// TestGatewayCertRateLimit: a session gets at most CertsPerMinute certificates a minute.
+func TestGatewayCertRateLimit(t *testing.T) {
+	f := newFixture(t)
+	dev := f.session("dev-1", "member", "dev", `{}`)
+	other := f.session("dev-2", "member", "dev", `{}`)
+	_, pub := sessionKey(t)
+	for i := 0; i < 20; i++ {
+		if resp := f.certify(dev, 1, pub); !resp.Ok {
+			t.Fatalf("certificate %d refused: %v", i, *resp.Error)
+		}
+	}
+	if resp := f.certify(dev, 1, pub); resp.Ok || *resp.Error != "rate_limited" {
+		t.Fatalf("21st certificate: %+v", resp)
+	}
+	if resp := f.certify(other, 1, pub); !resp.Ok {
+		t.Fatal("another session was limited too")
+	}
+	f.g.now = func() time.Time { return time.Now().Add(61 * time.Second) }
+	if resp := f.certify(dev, 1, pub); !resp.Ok {
+		t.Fatalf("after a minute: %v", *resp.Error)
+	}
+}
+
+// TestGatewayChannelCapAndAuditAtStart: a connection holds at most PerConnChans channels; an exec
+// is in the audit while it runs (no exit code yet) and completed when it ends.
+func TestGatewayChannelCapAndAuditAtStart(t *testing.T) {
+	f := newFixture(t)
+	dev := f.session("dev-1", "member", "dev", `{}`)
+	client, _, err := f.connect(dev, "prod", "prod", f.identity(dev))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	type running struct {
+		s  *ssh.Session
+		in interface{ Close() error }
+	}
+	var open []running
+	for i := 0; i < 16; i++ {
+		sess, err := client.NewSession()
+		if err != nil {
+			t.Fatalf("channel %d: %v", i, err)
+		}
+		in, _ := sess.StdinPipe()
+		if err := sess.Start("sleep"); err != nil {
+			t.Fatal(err)
+		}
+		open = append(open, running{sess, in})
+	}
+	if _, err := client.NewSession(); err == nil {
+		t.Fatal("17th channel opened")
+	}
+	f.waitAudit(store.SSHAuditDenied, "too_many_channels")
+	// The running execs are already audited, without an exit code.
+	rows := f.audit(store.SSHAuditExec)
+	if len(rows) != 16 || rows[0].ExitCode != nil || rows[0].Detail["state"] != "running" || rows[0].Command != "sleep" {
+		t.Fatalf("audit while running: %d rows, first %+v", len(rows), rows[0])
+	}
+	for _, r := range open {
+		_ = r.in.Close()
+		_ = r.s.Wait()
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		rows = f.audit(store.SSHAuditExec)
+		done := 0
+		for _, r := range rows {
+			if r.ExitCode != nil && *r.ExitCode == 0 && r.Detail["state"] == nil && r.DurationMS != nil {
+				done++
+			}
+		}
+		if len(rows) == 16 && done == 16 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("audit after the end: %d rows, %d completed", len(rows), done)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	// A slot is free again.
+	if sess, err := client.NewSession(); err != nil {
+		t.Fatalf("channel after others closed: %v", err)
+	} else {
+		_ = sess.Close()
 	}
 }

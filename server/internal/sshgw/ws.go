@@ -53,7 +53,7 @@ func (g *Gateway) ServeWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
 	}
-	if x.NodeID != node.ID || x.UserID != node.UserID || x.State == "closed" || x.OpenGen != gen {
+	if x.NodeID != node.ID || x.UserID != node.UserID || x.Ended() || x.OpenGen != gen {
 		// Not this node's session (or not its current generation): say nothing more.
 		g.log.Info("ssh: session refused", "node_id", node.ID, "session_id", sid)
 		http.Error(w, "unknown session", http.StatusNotFound)
@@ -115,13 +115,16 @@ func auditBase(x store.SSHSession, nodeID string, serial *int64, serverID, serve
 }
 
 // audit writes one at_ssh_audit row (command already redacted); a failure is only logged.
-func (g *Gateway) audit(ctx context.Context, a store.SSHAudit, kind, reason string, detail map[string]any) {
+func (g *Gateway) audit(ctx context.Context, a store.SSHAudit, kind, reason string, detail map[string]any) int64 {
 	a.Kind, a.Reason, a.Detail = kind, reason, detail
 	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	if _, err := g.store.InsertSSHAudit(actx, a); err != nil {
+	row, err := g.store.InsertSSHAudit(actx, a)
+	if err != nil {
 		g.log.Warn("ssh audit", "kind", kind, "session_id", a.SessionID, "err", err)
+		return 0
 	}
+	return row.ID
 }
 
 // emitServerEvent writes the thread-visible summary of a finished connection (at_events, type server).
