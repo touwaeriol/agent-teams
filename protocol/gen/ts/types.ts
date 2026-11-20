@@ -1796,7 +1796,7 @@ export interface SshCertResponse {
     | [string, string, string, string, string, string, string, string];
   servers?: SshServers;
   /**
-   * e.g. session_not_found, stale_open_gen, no_servers, not_granted, bad_public_key, unavailable.
+   * e.g. session_not_found, stale_open_gen, no_servers, not_granted, bad_public_key, rate_limited (more than 20 certificates a minute for the session), unavailable.
    */
   error?: string;
 }

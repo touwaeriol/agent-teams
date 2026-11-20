@@ -7896,7 +7896,8 @@ type SshCertResponse struct {
 	Certificate *string `json:"certificate,omitempty,omitzero"`
 
 	// e.g. session_not_found, stale_open_gen, no_servers, not_granted,
-	// bad_public_key, unavailable.
+	// bad_public_key, rate_limited (more than 20 certificates a minute for the
+	// session), unavailable.
 	Error *string `json:"error,omitempty,omitzero"`
 
 	// known_hosts lines for the gateway host key, written to the session's

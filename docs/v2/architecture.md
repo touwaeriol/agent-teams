@@ -547,7 +547,7 @@ v1 在每次运行开始把 `GH_TOKEN` 放进环境。v2 会话是常驻的，�
 - **吊销**：`core.CloseSession`、`core.BumpOpenGen`（吊销旧 gen 的证书）和 `core.SetSessionState(crashed)` 在同一个事务里把证书标 `revoked_at`，提交后在 `ssh:revoke` 频道发提示（`fanout.Patterns` 含 `ssh:*`，经 Valkey 跨副本）。服务器被删除或改名、从项目里移除、岗位授权被撤销时，由 store 函数返回被吊销的 serial，接口层经 `platform.SSHHooks.CertsRevoked`（`httpapi.Deps.SSH` = `Engine.SSHHooks()`）调 `Engine.SSH.Revoked` 广播。提示本身只是“马上复查”，网关以库为准；广播丢了，也会在 30 秒的周期复查里断开。项目被删除时证书行随之级联删除，复查时就会断开。
 - **授权变化通知**：`Engine.SSH.ServersChanged(ctx, projectID)` 给项目里所有可用服务器的存活会话发可靠的 `ssh.servers_update`。`version` 取毫秒时间戳，在进程内严格递增。节点重连时（`router.NodeOnline`）给它的每个存活会话补发一次。`session.open` 的 `ssh_servers` 由 `sshgw.SessionServers` 在 `Orchestrator.queueOpen` 的事务里算出；只有节点 hello 带 `ssh_gateway` 时才填。
 - **审计**：`connect` / `disconnect`（时长、两个方向的字节数、断开原因）、`exec` / `shell` / `subsystem`（每个 channel 一行，命令开始转发前就写入（`detail.state = running`），结束时补退出码或信号、时长、字节数，主节点中途崩溃也留得下命令）、`denied`、`auth_fail`、`host_key_mismatch` 都写 `at_ssh_audit`。命令先过 `sshgw.Redact`：`node/src/util/redact.ts` 的规则，加上 URL 里的 `user:pass@`、`--password=` / `--token` 这类参数、`*PASSWORD*=` 这类环境变量、`mysql -p…`、`sshpass -p`，最后把服务器自己的密码和口令按值替换成 `***`。连接结束时再写一行 `at_events`（`type = server`，`core.EvServer`），payload 带 `summary`，例如“dev-1 在 prod 上执行了 docker compose up -d（退出码 0，12s）”，讨论串动态里能看到。
-- **第一期不做**：人工批准卡片、端口转发、agent / X11 转发、录屏、按 sftp 操作逐条审计。另外连接数是按副本计数的，没有放进 Valkey。
+- **第一期不做**：首次连接人工批准卡片、端口转发、agent / X11 转发、交互 shell 录屏、按 sftp 操作逐条审计、测试连接多次失败后暂停、`sandbox` 级节点上的 Claude 会话注入 SSH（这类会话不给服务器）、PAT 连接收紧（员工会话仍直接拿 PAT）、凭证到期提醒与两阶段轮换。另外连接数是按副本计数的，没有放进 Valkey。端到端和安全验证见 `remote-servers-verification.md`。
 
 ## 11. 状态监控、事件落库与回放
 
