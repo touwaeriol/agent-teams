@@ -24,8 +24,8 @@ const TEXT = { ok: "text-ok", warn: "text-warn", danger: "text-bad" };
     </span>
     <p v-if="v.detail" class="text-[13px] leading-5 text-foreground/85">{{ v.detail }}</p>
     <template v-if="v.expected">
-      <HostKeyBox :type="v.hostKey?.type ?? ''" :fingerprint="v.expected" label="已固定的主机密钥" tone="bad" />
-      <HostKeyBox v-if="v.hostKey" :type="v.hostKey.type" :fingerprint="v.hostKey.fingerprint" label="这次服务器出示的主机密钥" />
+      <HostKeyBox :type="v.hostKey?.type ?? ''" :fingerprint="v.expected" label="已固定的主机密钥" :command="false" />
+      <HostKeyBox v-if="v.hostKey" :type="v.hostKey.type" :fingerprint="v.hostKey.fingerprint" label="这次服务器出示的主机密钥（不一致）" tone="bad" />
     </template>
     <HostKeyBox v-else-if="v.hostKey && (v.hostKey.pinnedNow || v.tone !== 'ok')" :type="v.hostKey.type" :fingerprint="v.hostKey.fingerprint" :label="v.hostKey.pinnedNow ? '已固定的主机密钥（本次）' : '服务器出示的主机密钥'" />
     <div v-if="v.canReset" class="flex flex-wrap items-center gap-2">

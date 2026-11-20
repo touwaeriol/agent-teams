@@ -54,17 +54,20 @@ const remove = useAction(() => serverActions.remove(props.server.id), { invalida
         <dd class="flex items-center gap-1.5">
           <KeyRound v-if="server.auth_kind === 'private_key'" class="size-3.5" /><Lock v-else class="size-3.5" />
           {{ AUTH_LABEL[server.auth_kind] }}<template v-if="server.has_passphrase">（有口令）</template>
-          <span v-if="server.key_fingerprint" class="truncate font-mono text-xs text-muted-foreground" :title="server.key_fingerprint">{{ server.key_fingerprint }}</span>
         </dd>
       </div>
       <div class="flex gap-2">
         <dt class="w-20 shrink-0 text-muted-foreground">凭证更新</dt>
         <dd>{{ timeAgo(server.cred_updated_at) }}</dd>
       </div>
+      <div v-if="server.key_fingerprint" class="flex min-w-0 gap-2 sm:col-span-2">
+        <dt class="w-20 shrink-0 text-muted-foreground">私钥指纹</dt>
+        <dd class="min-w-0 break-all font-mono text-xs leading-5">{{ server.key_fingerprint }}</dd>
+      </div>
       <div class="flex min-w-0 gap-2 sm:col-span-2">
         <dt class="w-20 shrink-0 text-muted-foreground">主机指纹</dt>
         <dd class="min-w-0">
-          <span v-if="server.host_key_fp" class="break-all font-mono text-xs">{{ server.host_key_fp }}</span>
+          <span v-if="server.host_key_fp" class="break-all font-mono text-xs leading-5">{{ server.host_key_fp }}</span>
           <span v-else class="text-warn">还没固定：点“测试连接”，第一次连接时固定</span>
         </dd>
       </div>
