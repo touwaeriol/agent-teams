@@ -178,9 +178,9 @@ describe("git jobs", () => {
     };
     const pushDev = (sha: string) => git(seed, "push", "-f", "origin", `${sha}:refs/heads/thread/12/dev-2`);
     let n = 0;
-    const review = async (expect_sha: string, deadline?: string) => {
+    const review = async (expect_sha: string, deadline?: string, fetch = true) => {
       const job = `g_r${++n}`;
-      h.console.command("git.prepare", { ...prepare(job, "reviewer-1"), sync: { mode: "review", ref: "thread/12/dev-2", expect_sha, ...(deadline ? { deadline } : {}) } });
+      h.console.command("git.prepare", { ...prepare(job, "reviewer-1"), fetch, sync: { mode: "review", ref: "thread/12/dev-2", expect_sha, ...(deadline ? { deadline } : {}) } });
       return (await h.console.waitType("git.result", (b) => b.job_id === job)).body;
     };
     const rwt = join(h.opts.root, "projects/p1/threads/12/reviewer-1");
@@ -213,9 +213,10 @@ describe("git jobs", () => {
     expect(failed).toMatchObject({ ok: false, error_code: "sha_mismatch", head_sha: b });
     expect(failed.error).toContain(never);
     expect(git(rwt, "rev-parse", "HEAD")).toBe(b);
-    // Past the deadline it gives up without waiting through the retries.
+    // A deadline that lands before the first retry: it gives up without waiting through the retries.
+    // No fetch here: a fetch that outlasts the deadline would report the sync as "expired" instead.
     const t0 = Date.now();
-    expect(await review(never, new Date(Date.now() + 50).toISOString())).toMatchObject({ ok: false, error_code: "sha_mismatch" });
+    expect(await review(never, new Date(Date.now() + 90).toISOString(), false)).toMatchObject({ ok: false, error_code: "sha_mismatch" });
     expect(Date.now() - t0).toBeLessThan(2000);
     void c;
   });
