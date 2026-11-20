@@ -24,6 +24,9 @@ Defaults come from `~/.config/agent-teams/node.env` (written by `install-node.sh
 process environment, which beats `node.env`. Exit code 75 after a successful `node.upgrade`
 (systemd restarts into the new `current` symlink).
 
+In a container: `deploy/node/` (Dockerfile, compose example, README) builds an image with this daemon as
+the entry process, Claude Code, Codex, git and gh, running as a non-root user.
+
 `npm run pack` writes `dist/agent-teams-node-<version>.tgz` (node.mjs + package.json with the
 exact external versions + npm-shrinkwrap.json); nodes install it with `npm ci --omit=dev`.
 

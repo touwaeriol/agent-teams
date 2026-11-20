@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildClaudeOptions, buildSettings } from "../src/sessions/claude/options.js";
 import { sessionScoped, toPermissionResult } from "../src/sessions/claude/permissions.js";
-import { buildEnv, gitIdentity } from "../src/sessions/env.js";
+import { buildEnv, DEFAULT_PASS_ENV, gitIdentity, pickPassEnv } from "../src/sessions/env.js";
 import { mapClaudeMessage, describeTool } from "../src/sessions/claude/mapper.js";
 import type { ClaudeSessionOptions } from "../src/protocol.js";
 
@@ -53,6 +53,11 @@ describe("session env", () => {
       passList: ["ANTHROPIC_API_KEY", "AWS_*", "AGENT_TEAMS_NODE_TOKEN"], home: "/r/agent-home", extra: { LANG: "C.UTF-8", AGENT_TEAMS_X: "y" }, fixed: { MCP_TOOL_TIMEOUT: "86400000" }, pathPrefix: ["/p/bin"],
     });
     expect(env).toEqual({ PATH: "/p/bin:/usr/bin", HOME: "/r/agent-home", LANG: "C.UTF-8", ANTHROPIC_API_KEY: "k", AWS_REGION: "x", MCP_TOOL_TIMEOUT: "86400000" });
+  });
+
+  it("passes the Claude auth variables by default (env-only logins, e.g. the node image)", () => {
+    const base = { CLAUDE_CODE_OAUTH_TOKEN: "o", ANTHROPIC_API_KEY: "k", AGENT_TEAMS_NODE_TOKEN: "secret", RANDOM: "no" };
+    expect(pickPassEnv(base, DEFAULT_PASS_ENV)).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "o", ANTHROPIC_API_KEY: "k" });
   });
 });
 

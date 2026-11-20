@@ -1,0 +1,32 @@
+# agent-teams node in a container. From this directory:
+#   cp node.env.example node.env      # fill in AGENT_TEAMS_NODE_TOKEN (+ Claude auth)
+#   docker compose up -d --build
+#   docker compose exec node claude login     # only if node.env has no Claude token/key; then:
+#   docker compose restart node
+# One container = one node token. Run a second node as a second compose project with its own token.
+services:
+  node:
+    image: ${AGENT_TEAMS_NODE_IMAGE:-agent-teams-node:latest}
+    build:
+      context: ../..
+      dockerfile: deploy/node/Dockerfile
+    env_file: node.env
+    restart: unless-stopped
+    # Stable hostname: Claude Code and the logs show it.
+    hostname: agent-teams-node
+    volumes:
+      - claude:/home/agent/.claude                     # Claude login (claude login) and session transcripts
+      - codex:/home/agent/.codex                       # Codex login (codex login) and threads
+      - workspace:/home/agent/.agents_team             # workspace: repositories, worktrees, employee home
+      - state:/home/agent/.local/state/agent-teams     # daemon state: outbox/inbox, session records (resume)
+      # Optional: SSH keys / known_hosts for git over ssh (read-only).
+      # - ~/.ssh:/home/agent/.ssh:ro
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+volumes:
+  claude:
+  codex:
+  workspace:
+  state:
