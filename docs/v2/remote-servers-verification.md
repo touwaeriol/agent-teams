@@ -2,7 +2,7 @@
 
 本文记录讨论串 #38 收口时对远程服务器访问（`remote-servers.md`）做的端到端验证和安全红线专项：每一条都给出命令（或测试）和输出摘要。复现方法见 §1，结果汇总见 §2，残余风险见 §5。
 
-验证时间 2026-11-20，分支 `thread/38-ssh-github`（含 t1～t6），机器是开发节点（Debian，OpenSSH 10 客户端与 sshd、rsync 3，非 root 账号，节点隔离级别 `none`，与生产节点一致）。
+验证时间 2026-11-20，分支 `thread/38-ssh-github`（含 t1～t6；t22 补了“会话结束后重用证书”并重跑了一次，`Tests 1 passed`，约 27 秒），机器是开发节点（Debian，OpenSSH 10 客户端与 sshd、rsync 3，非 root 账号，节点隔离级别 `none`，与生产节点一致）。
 
 ## 1. 环境与复现
 
@@ -42,7 +42,7 @@ server/scripts/e2e-ssh/run.sh        # 需要 go、node（已 npm ci）、Postgr
 | E5 | 审计有对应行 | ✅ 37 行，全是 dev-1；exec 带完整命令和退出码，sftp、rsync、`auth_fail`、吊销断开都有 |
 | R1 | 会话 env 里没有密码、私钥、口令、GitHub 令牌、证书 | ✅ 三个会话 `env` 都没命中 |
 | R2 | 会话目录、平台 bin、节点数据目录里没有秘密 | ✅ 会话目录只有 `ssh_config`、`known_hosts`（和 socket）；数据目录 20 个文件搜不到 |
-| R3 | 会话结束：目录删掉、`agent.sock` 不在、正在跑的连接被断、旧环境不能再用 | ✅ |
+| R3 | 会话结束：目录删掉、`agent.sock` 不在、正在跑的连接被断、旧环境不能再用；会话活着时取出的私钥 + 证书在会话结束后直连网关被拒 | ✅（对照组在会话活着时成功） |
 | R4 | 证书换到别的会话 / 别的 `open_gen` | ✅ 网关 404 拒绝（对照组同证书同会话成功） |
 | R5 | 宿主机其他进程不带每会话秘密连 socket | ✅ `ssh.sock`、`cred.sock` 都拒；⚠️ `agent.sock` 同账号可用（§5） |
 | R6 | git 凭证助手领令牌后，env、git 配置、磁盘上都没有令牌；会话 env 无 `GH_TOKEN` | ✅ |
@@ -170,9 +170,12 @@ dev-1 正在 ssh pwbox 'sleep 60' 时撤销 pwbox 授权：0.0 秒后断开，ex
 归档讨论串后：会话目录存在=false，agent.sock 存在=false
 会话结束后用旧环境 $ ssh pwbox → exit 255 · err: ssh: Could not resolve hostname pwbox
 会话结束后连 agent.sock：connect ENOENT …/agent.sock
+
+会话活着：取出的私钥 + 证书 + dev-1 会话头直连网关（对照组） → exit 0 · out: ok
+会话结束后：同一私钥 + 证书 + 旧会话头直连网关 → exit 255 · err: gateway refused: 404
 ```
 
-“0.0 秒”是从 `PUT` / 归档请求返回开始计时：连接在请求返回之前就已经断了（吊销在事务提交后立即广播）。会话结束后私钥随 agent 一起消失，抓到的证书没有私钥签名、而且已吊销，网关拒绝已吊销证书见 `TestGatewayCertificateChecks/revoked`、`TestGatewayRevocation`。
+“0.0 秒”是从 `PUT` / 归档请求返回开始计时：连接在请求返回之前就已经断了（吊销在事务提交后立即广播）。**会话结束后重用证书**（t22 补）：按最坏情况做——会话活着时，测试从 `agent.sock` 用 `ssh-add -L` 取下证书，并直接从守护进程内存里导出这个会话的私钥（测试和守护进程在同一个进程里；真实攻击者要做内存转储才拿得到），写成 `stolen_key` / `stolen_key-cert.pub`，再用节点令牌、dev-1 的会话头和 `open_gen` 经 WebSocket 直连 `/nodes/ssh`（`ssh -F /dev/null -i stolen_key -o CertificateFile=… -o IdentityAgent=none -o ProxyCommand=<wsproxy …>`）。会话活着时这条对照组成功（`ok`）；归档后同样的私钥、证书和请求头被网关在升级阶段拒绝（404：会话已关闭）。就算请求头这一关过了，证书在库里已吊销，SSH 认证也会失败（`TestGatewayCertificateChecks/revoked`、`TestGatewayRevocation`）。所以会话结束后，抓到的证书（连同私钥）拿不到任何能用的东西。
 
 ### 3.8 审计（E5）
 

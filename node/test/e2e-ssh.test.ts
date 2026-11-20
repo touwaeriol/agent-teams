@@ -3,6 +3,7 @@
 // and two real targets. Skipped unless server/scripts/e2e-ssh/run.sh sets AT_E2E_URL.
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import type { KeyObject } from "node:crypto";
 import { connect } from "node:net";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -327,6 +328,24 @@ describe.skipIf(!BASE)("e2e: remote servers through a real console", () => {
     expect(audit.some((a) => a.employee !== "dev-1")).toBe(false);
 
     // 11. the session ends: directory and agent.sock gone, the old environment no longer works.
+    // Worst case for reuse after the end: while the session is alive, take its certificate (ssh-add -L on
+    // agent.sock) and even its private key out of the daemon's memory (this test runs the daemon
+    // in-process; a real attacker would need a memory dump). The control connects with them straight to
+    // the gateway (node token, the session's own headers); after the session ends the same must fail.
+    const stolenKey = join(WORK, "stolen_key");
+    const certLine = (await run("ssh-add", ["-L"], { ...A, SSH_AUTH_SOCK: join(sdir, "agent.sock") })).out.split("\n").find((l) => l.includes("-cert-v01@openssh.com"))!;
+    const hub = (daemon as unknown as { ssh: { sessions: Map<string, { key: { priv: KeyObject } }> } }).ssh;
+    writeFileSync(stolenKey, hub.sessions.get(A.AT_CRED_SESSION!)!.key.priv.export({ type: "pkcs8", format: "pem" }) as string, { mode: 0o600 });
+    writeFileSync(`${stolenKey}-cert.pub`, certLine + "\n");
+    writeFileSync(join(WORK, "stolen_known_hosts"), readFileSync(join(sdir, "known_hosts")));
+    const stolen = (label: string) =>
+      run("ssh", ["-F", "/dev/null", "-i", stolenKey, "-o", `CertificateFile=${stolenKey}-cert.pub`, "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
+        "-o", `UserKnownHostsFile=${join(WORK, "stolen_known_hosts")}`, "-o", "GlobalKnownHostsFile=/dev/null", "-o", "HostKeyAlias=agent-teams-gateway",
+        "-o", "StrictHostKeyChecking=yes", "-o", "BatchMode=yes", "-o", `ProxyCommand=${process.execPath} ${proxyJs} ${gw} ${node.token} ${A.AT_CRED_SESSION} ${aGen} %n`,
+        "-l", "pwbox", "pwbox", "echo ok"], { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: WORK }, 20_000).then((r) => (note(`${label} → ${short(r)}`), r));
+    const before = await stolen("会话活着：取出的私钥 + 证书 + dev-1 会话头直连网关（对照组）");
+    expect(before.out).toBe("ok\n");
+
     const held = run("ssh", ["keybox", "sleep 60; echo late"], A, 90_000);
     await new Promise((r) => setTimeout(r, 1500));
     const t1 = Date.now();
@@ -348,6 +367,9 @@ describe.skipIf(!BASE)("e2e: remote servers through a real console", () => {
       });
       note(`会话结束后连 agent.sock：${sock}`);
       expect(sock).not.toBe("connected");
+      const reuse = await stolen("会话结束后：同一私钥 + 证书 + 旧会话头直连网关");
+      expect(reuse.code).not.toBe(0);
+      expect(reuse.out).not.toContain("ok");
     }
     const tail = (await api<{ items: Array<{ employee: string; server_name: string; kind: string; command: string; exit_code: number | null; duration_ms: number | null; reason: string; detail: Record<string, unknown> }> }>(
       "GET", `/api/projects/${project.id}/server-audit?limit=3`, undefined, 200)).body.items;
