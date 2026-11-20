@@ -37,7 +37,7 @@ func TestPolicy(t *testing.T) {
 	for host, want := range map[string]error{
 		"127.0.0.1": sshdial.ErrBlockedAddress, "::1": sshdial.ErrBlockedAddress, "0.0.0.0": sshdial.ErrBlockedAddress,
 		"169.254.169.254": sshdial.ErrBlockedAddress, "fe80::1": sshdial.ErrBlockedAddress, "fd00:ec2::254": sshdial.ErrBlockedAddress,
-		"100.100.100.200": sshdial.ErrBlockedAddress, "224.0.0.1": sshdial.ErrBlockedAddress, "172.18.0.5": sshdial.ErrBlockedAddress,
+		"100.100.100.200": sshdial.ErrBlockedAddress, "100.64.0.1": sshdial.ErrBlockedAddress, "100.101.2.3": sshdial.ErrBlockedAddress, "224.0.0.1": sshdial.ErrBlockedAddress, "172.18.0.5": sshdial.ErrBlockedAddress,
 		"::ffff:127.0.0.1": sshdial.ErrBlockedAddress, "mixed.example": sshdial.ErrBlockedAddress, "meta.example": sshdial.ErrBlockedAddress,
 		"nowhere.example": sshdial.ErrResolve, "-oProxyCommand=x": sshdial.ErrInvalidHost, "a b": sshdial.ErrInvalidHost,
 		"fe80::1%eth0": sshdial.ErrInvalidHost, "": sshdial.ErrInvalidHost,
