@@ -64,12 +64,34 @@ func InsertSession(ctx context.Context, tx *Tx, n NewSession) (AgentSession, err
 	return SessionByID(ctx, tx, id)
 }
 
-// BumpOpenGen starts a new open generation (resume) and returns it.
+// BumpOpenGen starts a new open generation (resume) and returns it. The SSH certificates of older
+// generations are revoked (remote-servers.md §7.7).
 func BumpOpenGen(ctx context.Context, tx *Tx, id string) (int, error) {
 	var gen int
 	err := store.QueryRow(ctx, tx, `UPDATE at_agent_sessions SET open_gen = open_gen + 1, state = 'opening', in_turn = false WHERE id = $1
 		RETURNING open_gen`, id).Scan(&gen)
-	return gen, MapErr(err)
+	if err != nil {
+		return gen, MapErr(err)
+	}
+	return gen, tx.revokeSSHCerts(ctx, id, gen, "open_gen_advanced")
+}
+
+// SSHRevokeChannel is the pub/sub channel (relayed through Valkey) that tells every replica's SSH
+// gateway to re-check its connections now; the message is informative only (sshgw re-reads PG).
+const SSHRevokeChannel = "ssh:revoke"
+
+// revokeSSHCerts revokes a session's live SSH certificates (of generations before gen when gen > 0)
+// and, after the commit, tells the gateways to re-check their connections.
+func (tx *Tx) revokeSSHCerts(ctx context.Context, sessionID string, gen int, reason string) error {
+	res, err := store.Exec(ctx, tx, `UPDATE at_ssh_certs SET revoked_at = now(), revoke_reason = $3
+		 WHERE session_id = $1 AND revoked_at IS NULL AND ($2 = 0 OR open_gen < $2)`, sessionID, gen, reason)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() > 0 {
+		tx.hint(SSHRevokeChannel, `{"session_id":"`+sessionID+`"}`)
+	}
+	return nil
 }
 
 // openSession selects a session that is not closed.
@@ -84,7 +106,13 @@ func SetSessionState(ctx context.Context, tx *Tx, id, state string) error {
 	if state != "active" {
 		set["in_turn"] = false
 	}
-	return Changed(openSession(ctx, tx, id).Updates(set))
+	if err := Changed(openSession(ctx, tx, id).Updates(set)); err != nil {
+		return err
+	}
+	if state == "crashed" {
+		return tx.revokeSSHCerts(ctx, id, 0, "session_crashed")
+	}
+	return nil
 }
 
 // SetInTurn records whether a turn runs in the session (turn_started / turn_ended): a project
@@ -115,6 +143,9 @@ func CloseSession(ctx context.Context, tx *Tx, id, reason string) error {
 	err := openSession(ctx, tx, id).Updates(map[string]any{"state": "closed", "closed_at": gorm.Expr("now()"),
 		"close_reason": reason}).Error
 	if err != nil {
+		return err
+	}
+	if err := tx.revokeSSHCerts(ctx, id, 0, "session_closed"); err != nil {
 		return err
 	}
 	return unackedCommands(ctx, tx, id).Where("type NOT IN ('session.close','tool.result')").Update("status", "superseded").Error

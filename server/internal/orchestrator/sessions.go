@@ -13,6 +13,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
+	"github.com/touwaeriol/agent-teams/server/internal/sshgw"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -547,6 +548,11 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 		return err
 	}
 	if open.Anchor, err = openAnchor(ctx, tx, env.emp, first); err != nil {
+		return err
+	}
+	// The servers the role is granted in the project (remote-servers.md §7.1); none for the
+	// coordinator, the lead, read-only roles and daemons without ssh_gateway.
+	if open.SshServers, err = sshgw.SessionServers(ctx, o.store, tx, node.ID, sess.ID); err != nil {
 		return err
 	}
 	if err := o.addSkills(ctx, tx, env.project.UserID, env.emp, &open); err != nil {

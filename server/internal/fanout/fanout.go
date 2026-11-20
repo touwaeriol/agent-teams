@@ -18,7 +18,7 @@ import (
 )
 
 // Patterns are the channel families relayed through Valkey.
-var Patterns = []string{"project:*", "user:*", "node:*", "sched:*", "merge:*"}
+var Patterns = []string{"project:*", "user:*", "node:*", "sched:*", "merge:*", "ssh:*"}
 
 // Hub is the process-local subscriber registry plus the Valkey relay.
 type Hub struct {

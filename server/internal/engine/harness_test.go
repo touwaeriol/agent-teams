@@ -24,6 +24,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
 	"github.com/touwaeriol/agent-teams/server/internal/config"
+	"github.com/touwaeriol/agent-teams/server/internal/credvault"
 	"github.com/touwaeriol/agent-teams/server/internal/engine"
 	"github.com/touwaeriol/agent-teams/server/internal/github"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
@@ -109,7 +110,7 @@ func newWorldWith(t *testing.T, gh *httptest.Server, tune func(*engine.Engine)) 
 	box := auth.NewSecretBox(secret)
 	tokens := github.NewTokens(client, github.NewApps(db, box), cache, box)
 	e, err := engine.New(engine.Deps{Store: db, KV: cache, GitHub: client, Tokens: tokens, Box: box, Office: reg, Log: log,
-		Gateway: nodegw.Config{Validate: true, PingInterval: time.Hour}})
+		Gateway: nodegw.Config{Validate: true, PingInterval: time.Hour}, Vault: testVault(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +122,7 @@ func newWorldWith(t *testing.T, gh *httptest.Server, tune func(*engine.Engine)) 
 	cfg := config.Config{PublicURL: "http://console.test", SecretKeys: []string{secret}, WebDir: t.TempDir(),
 		NodeDistDir: t.TempDir(), OfficeDir: t.TempDir()}
 	h := httpapi.New(httpapi.Deps{Config: cfg, Store: db, KV: cache, GitHub: client, Tokens: tokens, Office: reg, Log: log,
-		Nodes: e.Gateway, Events: e.Events, Hooks: e.Hooks(), Extensions: []func(api huma.API, r gin.IRoutes){orchapi.New(e, reg).Register}})
+		Nodes: e.Gateway, Events: e.Events, Hooks: e.Hooks(), SSH: e.SSHHooks(), Extensions: []func(api huma.API, r gin.IRoutes){orchapi.New(e, reg).Register}})
 	srv := httptest.NewServer(h.Handler())
 	t.Cleanup(func() {
 		cancel()
@@ -131,6 +132,16 @@ func newWorldWith(t *testing.T, gh *httptest.Server, tune func(*engine.Engine)) 
 	})
 	e.Start(ctx)
 	return &world{t: t, ctx: ctx, srv: srv, e: e, db: db, h: h}
+}
+
+// testVault opens remote server credentials and the SSH gateway keys with the harness secret.
+func testVault(t *testing.T) *credvault.Vault {
+	t.Helper()
+	v, err := credvault.New(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
 }
 
 func testKV(t *testing.T) kv.KV {
