@@ -39,6 +39,20 @@ type Picked = Array<MessageRef & { label: string }>;
 /** The @ references of each conversation's box, kept for the page so a remounted box gets them back. */
 const pickedShelf = new Map<string, Ref<Picked>>();
 
+const refKey = (r: MessageRef) => `${r.kind}:${r.repo ?? ""}:${r.path ?? r.no ?? r.id ?? r.name}`;
+
+/**
+ * A message that carried refs was delivered by a retry from the chat after its failure put them
+ * back in the box: takes them out of that box's picked list, unless the box's text (what is left
+ * of the draft) still has their token.
+ */
+export function dropPickedRefs(box: { scope: string; pid: string; cid: string }, refs: MessageRef[], text: string): void {
+  const r = pickedShelf.get(`${box.scope}:${box.pid}:${box.cid}`);
+  if (!r || refs.length === 0) return;
+  const gone = new Set(refs.map(refKey));
+  r.value = r.value.filter((x) => !gone.has(refKey(x)) || text.includes(refToken(x)));
+}
+
 export function useComposerAssist(options: MaybeRefOrGetter<AssistOptions | undefined>, text: Ref<string>, fieldOf: () => Field) {
   const router = useRouter();
   const opts = computed(() => toValue(options));

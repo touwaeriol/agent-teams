@@ -31,8 +31,8 @@
 
 | 方向 | 可靠（有 `seq`，需 ACK，可重放） | 不可靠（无 `seq`，丢了无所谓） |
 | --- | --- | --- |
-| 控制台 → 守护进程 | 所有命令（`session.*`、`approval.resolve`、`tool.result`、`git.*`、`cred.response`、`node.*`、`run.*`） | `ack`、`pong` 类 |
-| 守护进程 → 控制台 | 会话事件、命令结果、审批请求/取消、工具调用、git 结果 | `ack`、`stream.delta`（逐字输出，可选）、`log` |
+| 控制台 → 守护进程 | 所有命令（`session.*`、`approval.resolve`、`tool.result`、`git.*`、`cred.response`、`node.*`（`node.usage_refresh` 除外）、`run.*`） | `ack`、`pong` 类、`node.usage_refresh` |
+| 守护进程 → 控制台 | 会话事件、命令结果、审批请求/取消、工具调用、git 结果 | `ack`、`stream.delta`（逐字输出，可选）、`log`、`node.stats`、`node.usage` |
 
 - **ACK**：`{type:"ack", body:{seq: N}}` 表示“seq ≤ N 的可靠消息我已持久处理”。接收方至少每 200 ms 或每 50 条发一次累计 ACK。
 - **守护进程发件箱**：可靠消息先追加写入 `state/outbox/<epoch>.jsonl` 再发送；收到 ACK 后推进游标，游标之前的文件可删除。守护进程重启后 `seq` 从文件里的最大值继续（`epoch` 只在状态目录被清空时变化）。
@@ -91,6 +91,8 @@
   "isolation": "agent_user|sandbox|none"     // architecture.md §10.3，守护进程启动时探测
 }
 ```
+
+`features` 含 `usage` 表示守护进程会发 `node.usage`，也能处理 `node.usage_refresh`（§9.1）。
 
 `auth` 由守护进程启动时探测（Claude：`query().accountInfo()` 一次后关闭；Codex：app-server `account/read`），不上报邮箱等个人信息。
 
@@ -213,7 +215,7 @@
 
 ### 4.5 `session.set_mode`（键：`id`）
 
-`{"session_id": "s_…", "permission_mode": "default|acceptEdits|bypassPermissions|auto", "model": null}` → Claude `q.setPermissionMode()` / `q.setModel()`；Codex 在下一次 `turn/start` 带 `approvalPolicy` / `model`。只带 `model` 的命令来自 /model（`PUT /api/conversations/{cid}/model`，只发给成员；统筹和组长固定用默认模型，不能切换）：运行中的会话从下一轮起换模型，守护进程同时改掉本机记录里的模型，之后 resume 也用新模型。`bypassPermissions` 只有会话以 `allowDangerouslySkipPermissions` 打开时才允许（守护进程否则回错误）。控制台不再发 `auto`（枚举里保留给旧控制台）。`bypassPermissions` 会话不发 `approval.request`：CLI 仍调到 `canUseTool` 时守护进程就地放行；会话打开时 `permission_mode` 是 `bypassPermissions` 的，守护进程总是带上 `allowDangerouslySkipPermissions`。
+`{"session_id": "s_…", "permission_mode": "default|acceptEdits|bypassPermissions|auto", "model": null}` → Claude `q.setPermissionMode()` / `q.setModel()`；Codex 在下一次 `turn/start` 带 `approvalPolicy` / `model`。只带 `model` 的命令来自 /model（`PUT /api/conversations/{cid}/model`，只发给成员；统筹和组长不能用 /model 切换，模型在岗位配置或项目设置里改）：运行中的会话从下一轮起换模型，守护进程同时改掉本机记录里的模型，之后 resume 也用新模型。`bypassPermissions` 只有会话以 `allowDangerouslySkipPermissions` 打开时才允许（守护进程否则回错误）。控制台不再发 `auto`（枚举里保留给旧控制台）。`bypassPermissions` 会话不发 `approval.request`：CLI 仍调到 `canUseTool` 时守护进程就地放行；会话打开时 `permission_mode` 是 `bypassPermissions` 的，守护进程总是带上 `allowDangerouslySkipPermissions`。
 
 ### 4.6 `session.close`（键：`session_id + open_gen`）
 
@@ -329,9 +331,9 @@
 {"session_id": "s_…", "open_gen": 3, "upload_id": "up_01JD3V0000000000000000", "index": 0, "data": "PGh0bWw+PC9odG1sPg=="}
 ```
 
-`publish_file` 的文件内容：守护进程读完文件（必须在会话 cwd 内，合计 ≤ 5 MB），把所有文件按 `upload.files` 的顺序拼起来，切成每段 ≤ 1 MiB 的 base64，先按序发 `file.chunk`，再发带 `upload` 的 `tool.call {call_id, session_id, tool, args, upload}`，其中 `upload = {upload_id, chunks, files: [{path, size, sha256, content_type}]}`（`path` 是交付物里的路径：单个文件就是文件名，网站目录则相对目录，入口为 `index.html`）。
+`publish_file` 的文件内容：守护进程读完文件（必须在会话 cwd 内，合计 ≤ 5 MB），把所有文件按 `upload.files` 的顺序拼起来，切成每段 ≤ 1 MiB 的 base64，先按序发 `file.chunk`，再发带 `upload` 的 `tool.call {call_id, session_id, tool, args, upload}`，其中 `upload = {upload_id, chunks, files: [{path, size, sha256, content_type}]}`（`path` 是交付物里的路径：单个文件就是文件名，网站目录则相对目录，入口为 `index.html`）。`write_shared_file` 走同一条路，只是 `upload.files` 恰好一个文件，`path` 是共享区里的目标路径（`args.path`，没给时由守护进程按 §6.5 的规则从 `args.file` 推出），单文件 ≤ 20 MB。
 
-可靠消息按序处理，所以控制台处理 `tool.call` 时分段都已到齐；分段数不对、大小或 sha256 不符、扩展名不允许都作为工具失败返回。分段只属于发它的会话；一天没被认领的分段会被清掉；一个会话未认领的分段合计超过 10 MB（两次满额上传）时，新分段直接丢弃，随后的 `tool.call` 按“分段不完整”失败。路径不合法等本机就能判断的错误不发到控制台，守护进程直接回 `isError`。
+可靠消息按序处理，所以控制台处理 `tool.call` 时分段都已到齐；分段数不对、大小或 sha256 不符、扩展名不允许都作为工具失败返回。分段只属于发它的会话；一天没被认领的分段会被清掉；一个会话未认领的分段合计超过 40 MB（两次满额的 `write_shared_file` 上传）时，新分段直接丢弃，随后的 `tool.call` 按“分段不完整”失败。路径不合法等本机就能判断的错误不发到控制台，守护进程直接回 `isError`。
 
 ### 6.4 `file.download`（控制台 → 守护进程，可靠，键：`download_id + index`）
 
@@ -342,6 +344,18 @@
 `read_deliverable` 的文件内容，方向与 `file.chunk` 相反：控制台把那一版的文件按 `download.files` 的顺序拼起来，切成每段 ≤ 1 MiB 的 base64，先按序发 `file.download`，再发带 `download` 的 `tool.result`（`download = {download_id, deliverable_id, version, chunks, files: [{path, size, sha256}]}`，与 `tool.call.upload` 对称，`examples/messages.json` 里有完整的一对帧）。
 
 守护进程只为仍在等待、且属于同一会话的 `read_deliverable` 调用保存分段（内存里，合计不超过 5 MB 的 base64），其他分段丢弃。收到 `tool.result` 后写到会话 cwd 下的 `.agent-deliverables/<deliverable_id>/v<version>/`，写之前重新校验 id 和版本、每个路径（相对、各段不以点开头、扩展名在白名单内、不重复）、分段是否到齐、合计 ≤ 5 MB、每个文件的大小和 sha256；`.agent-deliverables` 和其下目录必须是真目录，版本目录先整体删掉再写，文件以 `O_CREAT | O_EXCL | O_NOFOLLOW` 创建，顶层写 `.gitignore`（`*`）。成功时在结果文字前加一行本地绝对路径（`structured.abs_dir` 同样），失败（分段不全、校验不符、路径不合法）时把结果改成 `ok:false` 的工具失败。守护进程重启后未完成的调用按 §6.2 取消，分段随之作废；控制台对重复的 `tool.call` 只重发结果、不重发分段，这时结果按“内容不完整”失败，员工重新调用即可。只有 hello 带 `file_download` 特性的守护进程才会收到 `file.download`，否则工具直接失败并提示升级。
+
+`read_shared_file` 也用 `file.download` 下发，只是 `tool.result` 带的是 `shared_download = {download_id, chunks, files: [{path, size, sha256}]}`（恰好一个文件，`path` 是共享区路径，≤ 20 MB 所以最多 20 段），不带 `download`。守护进程为这次调用收分段（上限按 20 MB 计），校验同上，写到会话 cwd 下的 `.shared/<path>`：`.shared` 和其下目录必须是真目录，顶层写 `.gitignore`（`*`），目标文件已存在时整体替换（不跟随符号链接）。成功时把 `structured.local_path`（`.shared/<path>`）补成绝对路径写进结果文字。只有 `hello.features` 含 `shared_files` 的守护进程才会收到这种下发，否则控制台不发分段、工具直接失败并提示升级；老守护进程调用 `write_shared_file` 时不带 `upload`，同样按“需要升级”失败。
+
+### 6.5 共享文件工具
+
+项目级共享区：文件存在控制台（PG），不进 git，按项目隔离，项目里所有会话（统筹、各讨论串的组长和成员）和用户都能看到、覆盖和删除。四个工具三层都有（“只读”会话只是不能改仓库，平台级写入它们本来就有，比如 `publish_file`、`memory_write`）。不要放密钥、密码等凭证（凭证以后走远程服务器配置）。同名直接覆盖；单文件 ≤ 20 MB，项目合计 ≤ 500 MB、最多 1000 个文件（覆盖按新旧大小的差值算）。项目事件 `shared_file`（字段 op、path、by，见 `api.md` §1.1）在每次写入和删除后发出。
+
+- 共享区路径（`SharedPath`）：相对路径、`/` 分隔、1～8 段、UTF-8 总长 ≤ 255 字节（schema 只能按字符数查 ≤ 255，以控制台的字节校验为准）；每段不能为空、不能是 `.` `..`、不能以 `.` 开头（所以也不能是 `.shared`、`.agent-*`）、不能以空格开头或结尾；不能有反斜杠、控制字符（C0、DEL、C1 即 U+0080～U+009F）和 U+2028/U+2029，不能以 `/` 开头。控制台和守护进程都按这条规则再校验一次。
+- `list_shared_files {prefix?} → {files: [{path, size, content_type, sha256, uploaded_by, uploaded_by_thread_no?, updated_at}], total_bytes, limit_bytes}`，按 path 排序；`total_bytes` 是全项目合计。
+- `read_shared_file {path} → {path, size, sha256, local_path}`：文件按 §6.4 下发到 `.shared/<path>`，结果只给本地路径（控制台填相对路径 `.shared/<path>`，守护进程补成绝对路径），**绝不返回文件内容**，员工之后用自己的文件工具读。会话没有工作目录时工具直接失败。
+- `write_shared_file {file, path?} → {path, size, sha256, overwritten}`：守护进程按 `publish_file` 的规则读 cwd 内的单个普通文件（目录拒绝），按 §6.3 上传。`path` 缺省为 `file` 规范化后的相对路径，若位于 `.shared/` 下则去掉这个前缀（取回、修改、写回落在同一路径）。
+- `delete_shared_file {path} → {path, deleted}`：不存在时 `deleted: false`；已经取到各工作目录里的副本不动。
 
 ## 7. Git 作业
 
@@ -414,8 +428,22 @@
 | `node.upgrade` | 控制台 → | `version`, `sha256`, `signature` | 下载地址**不由消息指定**：固定为本链路所连控制台的 `<console>/node/dist/agent-teams-node-<version>.tgz`（`version` 须匹配 `^\d+\.\d+\.\d+$`）。守护进程校验 sha256，再用安装时固化在 `~/.config/agent-teams/release.pub` 的发布公钥（Ed25519，`install-node.sh` 写入，换钥需重新运行安装脚本）验证 tgz 的签名；都通过才解包到 `node-<ver>/`、原子切换 `current` 软链、`exit 75` 由 systemd 重启。失败回 `node.upgrade_result {ok:false, error}`。被攻破的控制台无法让节点运行未经发布密钥签名的代码 |
 | `node.drain` | 控制台 → | `deadline_s` | 不再接受新会话；空闲会话停放；用于节点维护 |
 | `node.stats` | 守护进程 → | `active_sessions`, `parked_sessions`, `queued`, `mem_mb`, `load1`, `disk_free_mb` | 每 30 s，不可靠；机房机柜灯数据 |
+| `node.usage` | 守护进程 → | `runtimes` | 不可靠；hello 后和之后定期上报 Claude Code / Codex 的订阅余量：`runtimes.claude`/`runtimes.codex` 各为 `{auth, status, plan?, windows?: [{key, label?, used_percent, window_minutes?, resets_at?}], error?, fetched_at?}`（`key`：`five_hour`/`weekly`/`weekly_opus`/`weekly_sonnet`/`weekly_model`，Codex 为 `primary`/`secondary`；`label` 是服务方给的显示名，如 `weekly_model` 窗口的模型名，最多保留 40 字符）。不带凭证；控制台只保存每个节点最近一次上报（内存），校验后通过 `NodeView.usage` 返回；收到 `node.usage_refresh` 后立即采集并回一条 |
+| `node.usage_refresh` | 控制台 → | `runtimes?` | 不可靠；立即采集一次订阅余量并回 `node.usage`（`runtimes` 省略 = 全部）。只在 `hello.features` 含 `usage` 时发；由 `POST /api/nodes/{id}/usage/refresh` 触发（api.md） |
 | `log` | 守护进程 → | `level`, `msg`, `fields` | 不可靠；只发 warn 及以上 |
 | `error` | 双向 | `ref_id`, `code`, `message` | 对某条消息的协议级错误：`bad_schema`、`unsupported`、`unknown_session`、`busy` |
+
+### 9.1 订阅余量（`hello.features` 含 `usage`）
+
+守护进程上报本机 Claude Code、Codex 登录的订阅余量，节点页据此显示每个节点还剩多少额度。数据来源、可靠程度和版本兼容风险见 [usage-probe.md](usage-probe.md)。
+
+- **`node.usage`**（守护进程 → 控制台，不可靠，不进发件箱）：收到 `welcome` 后立即上报一次，之后每 5 分钟一次（节点环境变量 `AGENT_TEAMS_USAGE_INTERVAL_S` 可以调整，设为 `0` 关闭定时上报）；每个运行时的读取总共最多 12 秒（Codex 的两次调用共用这个时间），保证在控制台等待 `node.usage_refresh` 回复的 15 秒内答复。读取失败只会让该运行时报 `status:"error"`，不影响守护进程的其他功能。
+  - `runtimes.claude` / `runtimes.codex`：`auth`（Claude 取 `subscription|api_key|none`，Codex 取 `chatgpt|api_key|none`）、`status`（`ok|error|unsupported`）、`plan`（可选，例如 `max`、`pro`、`plus`）、`windows`、`error`（可选，简短原因，不含凭证）、`fetched_at`（读取时间；Codex 的数据如果来自最近一次推送事件，就填事件时间）。
+  - `windows[]`：`key`、`used_percent`（0–100）、`window_minutes`（可选）、`resets_at`（ISO 时间或 null），按模型划分的窗口还会带 `label`。`key` 的取值：Claude 有 `five_hour`、`weekly`、`weekly_opus`、`weekly_sonnet`，以及 `weekly_model`（按模型划分的每周窗口，`label` 是服务端给的显示名）；Codex 有 `primary`（通常 5 小时）和 `secondary`（通常每周）。
+  - `auth` 为 `api_key` 或 `none` 时，`status` 填 `unsupported`，`windows` 为空，不发任何请求。Codex 的 `auth.json` 里如果是 API Key 登录（app-server `account/read` 返回 `apiKey`），也按 `api_key` 处理。
+  - 常见的 `error`：`timeout`；`unsupported_sdk`（SDK 没有实验性的 usage 接口）；`fetch_failed: <原因>`（调用 usage 接口报错或 CLI 出错，原因经过脱敏）；`rate_limits_unavailable`（CLI 表示该登录没有订阅余量，例如 token 缺少 profile 权限）；`fetch_failed`（CLI 没取到数据，常见原因是 token 过期而且刷新失败）；`not_logged_in`（Codex 已退出登录）。
+  - 消息里永远不带 token、邮箱、组织或账号 id。
+- **`node.usage_refresh`**（控制台 → 守护进程，不可靠，body 可以是空对象，也可以带 `runtimes`，例如 `["claude","codex"]`）：鼠标悬停在节点卡片上时，控制台发这条命令要求现查一次。守护进程回一条 `node.usage`，总是包含两个运行时：请求的运行时如果最近 60 秒内有一次成功（`status:"ok"`）的读取，就直接回缓存的结果，`fetched_at` 保持原值，不再请求 Anthropic 或 OpenAI；否则立即读取。失败的结果不缓存。同一时间只跑一次读取，正在跑的就等它跑完再用它的结果。定时上报不受缓存影响，每次都重新读取。
 
 ## 10. 关闭码
 
