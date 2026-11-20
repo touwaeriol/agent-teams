@@ -232,18 +232,70 @@ describe("which mode", () => {
     expect(r.mic().dataset.mode).toBe("click");
   });
 
-  it("the signed-in user's prefs apply before the first click, and follow changes made elsewhere", async () => {
-    // Before /api/me answers the composer reads the "me" key; the user's own key wins once known.
+  it("the signed-in user's prefs apply before the first click, and follow another tab", async () => {
+    // Only the user's own key holds 按住录音 (the "me" key read before /api/me answers has nothing):
+    // the button is already in hold mode before any click or setting change.
     const r = await rig({ storage: { [prefsKey("u1")]: JSON.stringify({ deviceId: "", language: "auto", pushToTalk: true }) } });
     expect(r.mic().dataset.mode).toBe("hold");
-    // Another composer (or tab) turns 按住录音 off: this one follows without a reload.
+    // Changed from this composer's own menu.
     r.v.setPrefs({ pushToTalk: false });
     await settle();
     expect(r.mic().dataset.mode).toBe("click");
+    // Changed in another tab (storage event): read again from storage.
     localStorage.setItem(prefsKey("u1"), JSON.stringify({ deviceId: "", language: "auto", pushToTalk: true }));
     window.dispatchEvent(new StorageEvent("storage", { key: prefsKey("u1") }));
     await settle();
     expect(r.mic().dataset.mode).toBe("hold");
+  });
+
+  it("two composers on one page: a change in one shows in the other at once", async () => {
+    const a = await rig();
+    const b = await rig({ storage: { ...localStorage } as Record<string, string> });
+    expect([a.mic().dataset.mode, b.mic().dataset.mode]).toEqual(["click", "click"]);
+    a.v.setPrefs({ pushToTalk: true });
+    await settle();
+    expect([a.mic().dataset.mode, b.mic().dataset.mode]).toEqual(["hold", "hold"]);
+    b.v.setPrefs({ language: "zh" });
+    await settle();
+    expect(a.v.prefs).toEqual({ deviceId: "", language: "zh", pushToTalk: true });
+    b.v.setPrefs({ pushToTalk: false });
+    await settle();
+    expect([a.mic().dataset.mode, b.mic().dataset.mode]).toEqual(["click", "click"]);
+    a.unmount();
+    b.unmount();
+  });
+
+  it("storage unavailable: settings changed this session stay (one after another, in every composer)", async () => {
+    const a = await rig({ storage: {} });
+    const b = await rig({ storage: {} });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    a.v.setPrefs({ language: "ja" });
+    a.v.setPrefs({ pushToTalk: true });
+    await settle();
+    expect(a.v.prefs).toEqual({ deviceId: "", language: "ja", pushToTalk: true });
+    expect(b.v.prefs).toEqual({ deviceId: "", language: "ja", pushToTalk: true });
+    expect(a.mic().dataset.mode).toBe("hold");
+    a.unmount();
+    b.unmount();
+  });
+
+  it("a held Alt+M ends on key up even if 按住录音 was turned off while holding", async () => {
+    const r = await rig({ pushToTalk: true });
+    const key = (type: string) => new KeyboardEvent(type, { code: "KeyM", key: "µ", altKey: true, cancelable: true });
+    r.v.onKeyDown(key("keydown"));
+    await settle(300);
+    expect(r.phase()).toBe("recording");
+    r.v.setPrefs({ pushToTalk: false });
+    await settle();
+    r.v.onKeyUp(key("keyup"));
+    await settle(10);
+    expect(r.phase()).toBe("idle");
+    expect(r.v.holding.value).toBe(false);
   });
 
   it("push-to-talk: a real press (down, up, click) is one short recording, not a toggle", async () => {

@@ -47,19 +47,29 @@ export function readPrefs(userId: string): VoicePrefs {
   return migrated;
 }
 
+/**
+ * A prefs change: on this page the written value comes along (userId + prefs), so it holds even
+ * when storage is unavailable and the write silently failed; from another tab (storage event)
+ * only that something changed, and the listener reads storage again.
+ */
+export type PrefsChange = { userId: string; prefs: VoicePrefs } | null;
+
 /** Listeners told when prefs are written (every composer on the page follows the same prefs). */
-const listeners = new Set<() => void>();
+const listeners = new Set<(c: PrefsChange) => void>();
+
+const clean = (p: VoicePrefs): VoicePrefs => ({ deviceId: p.deviceId, language: p.language, pushToTalk: p.pushToTalk === true });
 
 export function writePrefs(userId: string, prefs: VoicePrefs): void {
-  writeLocal(prefsKey(userId), JSON.stringify({ deviceId: prefs.deviceId, language: prefs.language, pushToTalk: prefs.pushToTalk === true }));
-  listeners.forEach((f) => f());
+  const value = clean(prefs);
+  writeLocal(prefsKey(userId), JSON.stringify(value));
+  listeners.forEach((f) => f({ userId, prefs: { ...value } }));
 }
 
 /** Calls f whenever prefs change: written on this page or in another tab. Returns the unsubscribe. */
-export function onPrefsChange(f: () => void): () => void {
+export function onPrefsChange(f: (c: PrefsChange) => void): () => void {
   listeners.add(f);
   const onStorage = (e: StorageEvent) => {
-    if (e.key === null || e.key.startsWith("voice-prefs:")) f();
+    if (e.key === null || e.key.startsWith("voice-prefs:")) f(null);
   };
   if (typeof window !== "undefined") window.addEventListener("storage", onStorage);
   return () => {
