@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/node/session.open.json",
   "title": "SessionOpen",
-  "description": "Open (or resume) a long-lived employee session on the node.",
+  "description": "Open (or resume) a long-lived employee session on the node. ssh_servers: remote servers granted to the employee's role in this project (remote-servers.md §7), sent only when both sides have the ssh_gateway feature; omitted or empty means no SSH access.",
   "x-direction": "console_to_node",
   "x-key": [
     "session_id",
@@ -128,6 +128,9 @@
     "git_credentials": {
       "description": "Install the credential helper and gh wrapper.",
       "type": "boolean"
+    },
+    "ssh_servers": {
+      "$ref": "common.json#/$defs/SshServers"
     },
     "first_message": {
       "description": "Held back until session.release.",

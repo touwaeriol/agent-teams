@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/ssh.cert_response.json",
+  "title": "SshCertResponse",
+  "description": "Answer to ssh.cert_request: a user certificate signed by the session CA, or a refusal. Unreliable; never logged. servers: the servers the session may use now (granted to its role); the daemon rewrites ssh_config with them and they are the certificate's principals.",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "req_id"
+  ],
+  "x-reliable": false,
+  "type": "object",
+  "required": [
+    "req_id",
+    "ok"
+  ],
+  "properties": {
+    "req_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "certificate": {
+      "description": "OpenSSH certificate, one line (ssh-ed25519-cert-v01@openssh.com AAAA…); principals are the server names in servers.",
+      "type": "string"
+    },
+    "valid_before": {
+      "$ref": "common.json#/$defs/Timestamp"
+    },
+    "known_hosts": {
+      "description": "known_hosts lines for the gateway host key, written to the session's known_hosts.",
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "string"
+      }
+    },
+    "servers": {
+      "$ref": "common.json#/$defs/SshServers"
+    },
+    "error": {
+      "description": "e.g. session_not_found, stale_open_gen, no_servers, not_granted, bad_public_key, unavailable.",
+      "type": "string"
+    }
+  },
+  "if": {
+    "properties": {
+      "ok": {
+        "const": true
+      }
+    }
+  },
+  "then": {
+    "required": [
+      "certificate",
+      "valid_before",
+      "known_hosts",
+      "servers"
+    ]
+  },
+  "else": {
+    "required": [
+      "error"
+    ]
+  }
+}

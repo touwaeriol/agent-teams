@@ -1182,6 +1182,69 @@
   },
   {
     "v": 2,
+    "type": "ssh.cert_request",
+    "id": "n_01JD3V0000000000000000S01",
+    "ts": "2026-11-14T12:03:02Z",
+    "body": {
+      "req_id": "k1",
+      "session_id": "s_01JD3T0000000000000000000A",
+      "open_gen": 1,
+      "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleNotARealKeyExampleNotARealKey00"
+    }
+  },
+  {
+    "v": 2,
+    "type": "ssh.cert_response",
+    "id": "c_01JD3V0000000000000000S02",
+    "ts": "2026-11-14T12:03:02Z",
+    "body": {
+      "req_id": "k1",
+      "ok": true,
+      "certificate": "ssh-ed25519-cert-v01@openssh.com AAAAIHNzaC1lZDI1NTE5LWNlcnQtdjAxQG9wZW5zc2guY29tExample",
+      "valid_before": "2026-11-14T12:13:02Z",
+      "known_hosts": [
+        "agent-teams-gateway ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGatewayHostKeyExampleExampleExample00"
+      ],
+      "servers": [
+        {
+          "name": "prod"
+        },
+        {
+          "name": "staging"
+        }
+      ]
+    }
+  },
+  {
+    "v": 2,
+    "type": "ssh.cert_response",
+    "id": "c_01JD3V0000000000000000S03",
+    "ts": "2026-11-14T12:03:02Z",
+    "body": {
+      "req_id": "k2",
+      "ok": false,
+      "error": "not_granted"
+    }
+  },
+  {
+    "v": 2,
+    "type": "ssh.servers_update",
+    "id": "c_01JD3V0000000000000000S04",
+    "seq": 995,
+    "ts": "2026-11-14T12:03:30Z",
+    "body": {
+      "session_id": "s_01JD3T0000000000000000000A",
+      "open_gen": 1,
+      "version": 2,
+      "servers": [
+        {
+          "name": "prod"
+        }
+      ]
+    }
+  },
+  {
+    "v": 2,
     "type": "node.config",
     "id": "c_01JD3V000000000000000000M",
     "seq": 996,

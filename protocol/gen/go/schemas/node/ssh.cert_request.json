@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/ssh.cert_request.json",
+  "title": "SshCertRequest",
+  "description": "The session's ssh-agent needs a certificate for its in-memory key (remote-servers.md §4.2–4.5). Unreliable, req_id; the console checks the session belongs to this node with this open_gen (§2.3) and answers ssh.cert_response. Never logged.",
+  "x-direction": "node_to_console",
+  "x-key": [
+    "req_id"
+  ],
+  "x-reliable": false,
+  "type": "object",
+  "required": [
+    "req_id",
+    "session_id",
+    "open_gen",
+    "public_key"
+  ],
+  "properties": {
+    "req_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "open_gen": {
+      "$ref": "common.json#/$defs/OpenGen"
+    },
+    "public_key": {
+      "description": "The session's ephemeral public key, one OpenSSH authorized_keys line (ssh-ed25519 AAAA…).",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8192
+    }
+  }
+}

@@ -18,11 +18,13 @@ const EXPECTED_TYPES = {
     "welcome", "session.open", "session.release", "session.send", "session.compact", "session.interrupt", "session.set_mode",
     "session.close", "session.watch", "approval.resolve", "tool.result", "file.download", "git.prepare", "git.status", "git.push",
     "git.cleanup", "git.purge", "cred.response", "node.config", "node.upgrade", "node.drain", "node.usage_refresh",
+    "ssh.cert_response", "ssh.servers_update",
   ],
   node_to_console: [
     "hello", "sessions.report", "session.opened", "session.delivered", "session.compacted", "session.interrupted", "session.closed",
     "session.event", "session.state", "stream.delta", "approval.request", "approval.ack", "approval.cancel",
     "tool.call", "tool.cancel", "file.chunk", "git.result", "cred.request", "node.stats", "node.usage", "node.upgrade_result", "log",
+    "ssh.cert_request",
   ],
   both: ["ack", "error"],
 };
@@ -75,7 +77,8 @@ test("message types and directions match protocol.md", () => {
 });
 
 test("reliability matches protocol.md 2.1", () => {
-  const unreliable = ["hello", "welcome", "ack", "error", "stream.delta", "log", "node.stats", "node.usage", "node.usage_refresh", "cred.request", "cred.response"];
+  const unreliable = ["hello", "welcome", "ack", "error", "stream.delta", "log", "node.stats", "node.usage", "node.usage_refresh", "cred.request", "cred.response",
+    "ssh.cert_request", "ssh.cert_response"];
   for (const m of messageSchemas()) assert.equal(m.schema["x-reliable"], !unreliable.includes(m.type), m.type);
 });
 
