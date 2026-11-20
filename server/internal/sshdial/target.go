@@ -40,6 +40,10 @@ var metadata = []netip.Prefix{
 	netip.MustParsePrefix("100.100.100.200/32"), // Alibaba Cloud
 }
 
+// cgnat is the shared address space (RFC 6598): carrier-grade NAT and Tailscale / other overlay
+// networks the console host may be on, so it is blocked unless an administrator allows it.
+var cgnat = netip.MustParsePrefix("100.64.0.0/10")
+
 var hostName = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,62})(\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}))*\.?$`)
 
 // ValidHost reports whether host is an IP literal or a DNS name (no ports, brackets, spaces or a
@@ -137,6 +141,8 @@ func (p Policy) Blocked(a netip.Addr) string {
 		return "链路本地地址（含云元数据 169.254.169.254）"
 	case contains(metadata, a):
 		return "云元数据地址"
+	case cgnat.Contains(a):
+		return "运营商级 NAT / Tailscale 地址（100.64.0.0/10）"
 	case a.IsMulticast(), a.IsInterfaceLocalMulticast():
 		return "组播地址"
 	case contains(local, a):

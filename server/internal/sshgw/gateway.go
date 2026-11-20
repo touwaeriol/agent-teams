@@ -11,7 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"net"
+	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -56,8 +56,10 @@ type Config struct {
 	MaxConn        time.Duration // longest connection (6 h)
 	Keepalive      time.Duration // keepalive@openssh.com on both sides and WebSocket ping (30 s)
 	Recheck        time.Duration // periodic re-check of every connection's grant (30 s)
-	// Dial reaches a target (tests; address checks). Default: net.Dialer.
-	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
+	// Resolver resolves target names for sshdial (nil: net.DefaultResolver).
+	Resolver interface {
+		LookupNetIP(ctx context.Context, network, host string) ([]netip.Addr, error)
+	}
 }
 
 func (c Config) withDefaults() Config {
@@ -82,10 +84,6 @@ func (c Config) withDefaults() Config {
 	def(&c.MaxConn, 6*time.Hour)
 	def(&c.Keepalive, 30*time.Second)
 	def(&c.Recheck, 30*time.Second)
-	if c.Dial == nil {
-		d := &net.Dialer{}
-		c.Dial = d.DialContext
-	}
 	return c
 }
 

@@ -119,5 +119,24 @@ func (e *Engine) Start(ctx context.Context) {
 	}()
 }
 
+// SSHHooks returns the platform.SSHHooks implementation: the remote server API's callbacks into
+// the SSH gateway (cut revoked connections on every replica, push ssh.servers_update).
+func (e *Engine) SSHHooks() *SSHHooks { return &SSHHooks{e: e} }
+
+// SSHHooks implements platform.SSHHooks with the SSH gateway.
+type SSHHooks struct{ e *Engine }
+
+// CertsRevoked implements platform.SSHHooks.
+func (h *SSHHooks) CertsRevoked(ctx context.Context, serials []int64) { h.e.SSH.Revoked(ctx, serials) }
+
+// ServersChanged implements platform.SSHHooks.
+func (h *SSHHooks) ServersChanged(ctx context.Context, _ string, projectIDs []string) {
+	for _, id := range projectIDs {
+		if err := h.e.SSH.ServersChanged(ctx, id); err != nil {
+			h.e.log.Warn("ssh servers update", "project_id", id, "err", err)
+		}
+	}
+}
+
 // Hooks returns the platform.Hooks implementation.
 func (e *Engine) Hooks() *Hooks { return &Hooks{e: e} }

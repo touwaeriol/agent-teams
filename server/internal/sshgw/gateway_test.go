@@ -15,6 +15,7 @@ import (
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/sshdial"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -426,6 +427,28 @@ func TestGatewayHostKeyPinning(t *testing.T) {
 	_ = client.Close()
 	if n := f.tg.logins.Load(); n != 0 {
 		t.Fatalf("dialed the target with an untrusted host key (%d attempts)", n)
+	}
+
+	// The target's address is checked again at every dial: without the administrator's allowance
+	// loopback is refused before any connection.
+	f.pinHostKey(f.server, f.tg.hostKeyLine())
+	if err := f.s.DeleteSetting(f.ctx, sshdial.SettingKey); err != nil {
+		t.Fatal(err)
+	}
+	client, _, err = f.connect(dev, "prod", "prod", f.identity(dev))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.NewSession(); err == nil || !strings.Contains(err.Error(), "地址不允许连接") {
+		t.Fatalf("loopback target: %v", err)
+	}
+	f.waitAudit(store.SSHAuditDenied, "address_refused")
+	_ = client.Close()
+	if n := f.tg.logins.Load(); n != 0 {
+		t.Fatalf("dialed a refused address (%d attempts)", n)
+	}
+	if err := f.s.SaveSetting(f.ctx, sshdial.SettingKey, sshdial.AllowedSetting{CIDRs: []string{"127.0.0.1/32"}}); err != nil {
+		t.Fatal(err)
 	}
 
 	// Confirmed again: works, also through keyboard-interactive.

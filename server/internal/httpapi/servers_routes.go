@@ -16,7 +16,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// Remote servers (讨论串 #38, api.md §3.14, remote-servers.md): the user keeps servers in their
+// Remote servers (讨论串 #38, api.md §3.9.1, remote-servers.md): the user keeps servers in their
 // settings, a project picks some and grants each to roles. No response ever carries a password,
 // private key, passphrase or ciphertext; a credential can only be replaced.
 

@@ -27,6 +27,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/fanout"
 	"github.com/touwaeriol/agent-teams/server/internal/kv"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
+	"github.com/touwaeriol/agent-teams/server/internal/sshdial"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 	"github.com/touwaeriol/agent-teams/server/internal/testdb"
 )
@@ -95,6 +96,10 @@ func newFixture(t *testing.T) *fixture {
 	}
 	f.exec(`INSERT INTO at_roles (id, user_id, project_id, tier, role, read_only, gate) VALUES
 		('ro_gw1', $1, NULL, 'member', 'dev', false, ''), ('ro_gw2', $1, NULL, 'member', 'ops', false, '')`, u.ID)
+	// The test targets live on loopback, which sshdial blocks unless an administrator allows it.
+	if err := s.SaveSetting(ctx, sshdial.SettingKey, sshdial.AllowedSetting{CIDRs: []string{"127.0.0.1/32"}}); err != nil {
+		t.Fatal(err)
+	}
 	f.server = f.addServer("prod", f.tg)
 	if err := s.AddProjectServer(ctx, u.ID, prj.ID, f.server.ID); err != nil {
 		t.Fatal(err)

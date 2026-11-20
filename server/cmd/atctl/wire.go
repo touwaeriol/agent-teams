@@ -33,7 +33,7 @@ func wire(d httpapi.Deps) (httpapi.Deps, func(context.Context), error) {
 	if err != nil {
 		return d, nil, err
 	}
-	d.Nodes, d.Events, d.Hooks = e.Gateway, e.Events, e.Hooks()
+	d.Nodes, d.Events, d.Hooks, d.SSH = e.Gateway, e.Events, e.Hooks(), e.SSHHooks()
 	d.Extensions = append(d.Extensions, orchapi.New(e, d.Office).WithOrigins(d.Config.ArtifactOrigin, d.Config.PublicURL).Register)
 	return d, e.Start, nil
 }

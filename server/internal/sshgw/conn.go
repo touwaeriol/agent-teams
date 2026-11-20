@@ -18,6 +18,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/credvault"
+	"github.com/touwaeriol/agent-teams/server/internal/sshdial"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -338,9 +339,6 @@ func (c *conn) channel(ctx context.Context, nch ssh.NewChannel) {
 	c.bridge(ctx, &channel{f: fch, started: c.g.now()}, freqs, bch, breqs)
 }
 
-// errHostKey makes the back half's handshake fail without sending the credential.
-var errHostKey = errors.New("host key mismatch")
-
 // backendClient returns the back half, dialing and logging in on first use. The host key must
 // equal the one the user confirmed (with a valid MAC); there is no way around it.
 func (c *conn) backendClient(ctx context.Context) (*ssh.Client, error) {
@@ -364,93 +362,59 @@ func (c *conn) backendClient(ctx context.Context) (*ssh.Client, error) {
 	if ok, _ := c.g.vault.VerifyMAC(credvault.HostKeyMACData(srv.ID, srv.Host, srv.Port, srv.HostKey), srv.HostKeyMAC); !ok {
 		return deny(store.SSHAuditDenied, "host_key_mac_invalid", unconfirmed, nil)
 	}
-	pinned, _, _, _, err := ssh.ParseAuthorizedKey([]byte(srv.HostKey))
-	if err != nil {
+	if _, err := sshdial.ParseHostKey(srv.HostKey); err != nil {
 		return deny(store.SSHAuditDenied, "host_key_unparsable", unconfirmed, nil)
 	}
 	cred, err := c.g.vault.OpenCredential(credvault.ServerAAD(srv.UserID, srv.ID, srv.AuthKind, srv.Host, srv.Port, srv.Username), srv.Sealed)
 	if err != nil {
 		return deny(store.SSHAuditDenied, "credential_unreadable", "服务器 "+srv.Name+" 的凭证无法解开，请用户在设置里重新填写", nil)
 	}
-	auth, secrets, err := authMethods(srv.AuthKind, cred)
-	if err != nil {
-		return deny(store.SSHAuditDenied, "credential_invalid", "服务器 "+srv.Name+" 的凭证无效，请用户在设置里重新填写", nil)
+	secrets := []string{}
+	for _, v := range []string{cred.Password, cred.Passphrase} {
+		if v != "" {
+			secrets = append(secrets, v)
+		}
 	}
 	c.secrets = secrets
-	var seen ssh.PublicKey
-	cfg := &ssh.ClientConfig{
-		User:              srv.Username,
-		Auth:              auth,
-		HostKeyAlgorithms: hostKeyAlgorithms(pinned),
-		ClientVersion:     "SSH-2.0-agent-teams-gateway",
-		Timeout:           c.g.cfg.BackHandshake,
-		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
-			if bytes.Equal(key.Marshal(), pinned.Marshal()) {
-				return nil
-			}
-			seen = key
-			return errHostKey
-		},
-	}
-	addr := net.JoinHostPort(srv.Host, strconv.Itoa(srv.Port))
-	dctx, cancel := context.WithTimeout(ctx, c.g.cfg.BackHandshake)
-	defer cancel()
-	raw, err := c.g.cfg.Dial(dctx, "tcp", addr)
-	if err != nil {
-		return deny(store.SSHAuditDenied, "dial_failed", "连不上服务器 "+srv.Name, map[string]any{"error": err.Error()})
-	}
-	_ = raw.SetDeadline(c.g.now().Add(c.g.cfg.BackHandshake))
-	cc, chans, reqs, err := ssh.NewClientConn(raw, addr, cfg)
-	if err != nil {
-		_ = raw.Close()
-		if seen != nil {
-			return deny(store.SSHAuditHostKeyMismatch, "host_key_mismatch",
-				"目标服务器 "+srv.Name+" 的主机密钥变了，已拒绝连接（没有发送凭证），请用户在设置里核实",
-				map[string]any{"expected": ssh.FingerprintSHA256(pinned), "got": ssh.FingerprintSHA256(seen), "got_type": seen.Type()})
+	// sshdial resolves the host again and checks every address (DNS rebinding, internal networks),
+	// dials the checked address and verifies the pinned host key before any credential is sent.
+	res, err := c.g.policy(ctx).Dial(ctx, sshdial.Target{Host: srv.Host, Port: srv.Port, Username: srv.Username,
+		AuthKind: srv.AuthKind, Cred: cred, HostKey: srv.HostKey}, c.g.cfg.BackHandshake)
+	switch {
+	case err == nil:
+	case errors.Is(err, sshdial.ErrHostKeyMismatch):
+		detail := map[string]any{"expected": srv.HostKeyFP}
+		if res.Seen != nil {
+			detail["got"], detail["got_type"] = res.Seen.Fingerprint, res.Seen.Type
 		}
+		return deny(store.SSHAuditHostKeyMismatch, "host_key_mismatch",
+			"目标服务器 "+srv.Name+" 的主机密钥变了，已拒绝连接（没有发送凭证），请用户在设置里核实", detail)
+	case errors.Is(err, sshdial.ErrBlockedAddress), errors.Is(err, sshdial.ErrInvalidHost), errors.Is(err, sshdial.ErrResolve):
+		return deny(store.SSHAuditDenied, "address_refused", "服务器 "+srv.Name+" 的地址不允许连接："+err.Error(), nil)
+	case errors.Is(err, sshdial.ErrAuth):
 		return deny(store.SSHAuditDenied, "target_login_failed", "登录服务器 "+srv.Name+" 失败",
 			map[string]any{"error": Redact(err.Error(), secrets...)})
+	case errors.Is(err, credvault.ErrInvalidCredential):
+		return deny(store.SSHAuditDenied, "credential_invalid", "服务器 "+srv.Name+" 的凭证无效，请用户在设置里重新填写", nil)
+	default:
+		return deny(store.SSHAuditDenied, "dial_failed", "连不上服务器 "+srv.Name,
+			map[string]any{"error": Redact(err.Error(), secrets...)})
 	}
-	_ = raw.SetDeadline(time.Time{})
-	c.backend = ssh.NewClient(cc, chans, reqs) // the target's channel opens (forwarding, agent) are rejected
+	c.backend = res.Client // its channel opens from the target (forwarding, agent) are rejected
 	return c.backend, nil
 }
 
-// authMethods: a password (also as the answer to a single hidden keyboard-interactive question) or
-// a private key; the plaintext secrets are returned for redaction.
-func authMethods(kind string, cred credvault.Credential) ([]ssh.AuthMethod, []string, error) {
-	switch kind {
-	case credvault.AuthPassword:
-		pw := cred.Password
-		ki := ssh.KeyboardInteractive(func(_, _ string, questions []string, echos []bool) ([]string, error) {
-			if len(questions) == 0 {
-				return nil, nil
-			}
-			if len(questions) == 1 && !echos[0] {
-				return []string{pw}, nil
-			}
-			return nil, errors.New("unsupported keyboard-interactive prompt")
-		})
-		return []ssh.AuthMethod{ssh.Password(pw), ki}, []string{pw}, nil
-	case credvault.AuthPrivateKey:
-		signer, err := cred.Signer()
-		if err != nil {
-			return nil, nil, err
-		}
-		secrets := []string{}
-		if cred.Passphrase != "" {
-			secrets = append(secrets, cred.Passphrase)
-		}
-		return []ssh.AuthMethod{ssh.PublicKeys(signer)}, secrets, nil
+// policy is the dialing policy with the administrator's allowed private networks (sshdial.SettingKey).
+func (g *Gateway) policy(ctx context.Context) sshdial.Policy {
+	var set sshdial.AllowedSetting
+	if _, err := g.store.Setting(ctx, sshdial.SettingKey, &set); err != nil {
+		g.log.Warn("ssh: allowed networks", "err", err)
 	}
-	return nil, nil, fmt.Errorf("unknown auth kind %q", kind)
-}
-
-func hostKeyAlgorithms(k ssh.PublicKey) []string {
-	if k.Type() == ssh.KeyAlgoRSA {
-		return []string{ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256, ssh.KeyAlgoRSA}
+	allowed, err := sshdial.ParseAllowed(set)
+	if err != nil {
+		g.log.Warn("ssh: allowed networks", "err", err)
 	}
-	return []string{k.Type()}
+	return sshdial.Policy{Allowed: allowed, Resolver: g.cfg.Resolver}
 }
 
 // ---- channels -------------------------------------------------------------------------------
