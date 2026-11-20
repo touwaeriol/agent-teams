@@ -66,6 +66,8 @@ type Engine struct {
 	DoneGrace time.Duration
 	// accepting holds the threads Accept is merging in the background (merge_policy pr or auto).
 	accepting sync.Map
+	// held is the unfinished tasks the lead was last told hold each thread's end (endHeld).
+	held sync.Map
 
 	// PushDone runs inside the transaction that recorded a push job's git.result.
 	PushDone func(ctx context.Context, tx *core.Tx, meta map[string]any, r *protocol.GitResult) error

@@ -33,6 +33,7 @@ describe("merge_policy", () => {
   it("lines say what the thread waits for, and a finished pr thread's PR is still open", () => {
     expect(threadLine(review("pr"))).toBe("PR #7 等检查通过");
     expect(threadLine(review("auto"))).toBe("PR #7 检查通过后自动合并");
+    expect(threadLine(review("pr", { pr_state: "merged" }))).toBe("PR #7 已合并，等收尾");
     expect(threadLine(review("manual"))).toBe("PR #7 等你验收");
     expect(threadLine(thread(1, { status: "done", merge_policy: "pr", pr_number: 7, pr_state: "open" }))).toBe("PR #7 已提交，等合并");
   });

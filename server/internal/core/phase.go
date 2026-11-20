@@ -72,6 +72,12 @@ func PhaseOf(v ThreadView, mergesActive int) ThreadPhase {
 		if !ok {
 			note = reviewNotes["pr"]
 		}
+		if v.PRState == "merged" {
+			note = "PR 已合并，等收尾"
+		}
+		if v.Counts.TasksOpen > 0 {
+			note += fmt.Sprintf("；还有 %d 个小任务没结束，结束后才会收尾", v.Counts.TasksOpen)
+		}
 		return ph("checks", "进行中", note)
 	}
 	if v.PRState == "merged" {

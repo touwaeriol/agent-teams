@@ -232,8 +232,21 @@ func (e *Engine) doneTick(ctx context.Context) {
 			_, err = e.endThread(ctx, tx, t, src, false)
 			return err
 		})
+		if err == nil {
+			err = e.mergedHeld(ctx, id)
+		}
 		if err != nil {
 			e.log.Warn("done step", "thread_id", id, "err", err)
 		}
 	}
+}
+
+// mergedHeld tells the lead when a thread whose pull requests are merged is still held by
+// unfinished tasks (endHeld).
+func (e *Engine) mergedHeld(ctx context.Context, threadID string) error {
+	t, err := core.ThreadByID(ctx, e.core.Pool, threadID)
+	if err != nil || t.PRState != "merged" {
+		return ignoreMissing(err)
+	}
+	return e.endHeld(ctx, threadID, "PR 已合并")
 }

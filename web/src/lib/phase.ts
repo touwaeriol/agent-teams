@@ -81,6 +81,13 @@ export const awaitsAcceptance = (t: Pick<ThreadView, "status" | "merge_policy" |
 
 export const REVIEW_LINE: Record<ThreadView["merge_policy"], string> = { pr: "等检查通过", auto: "检查通过后自动合并", manual: "等你验收" };
 
+/** The review line, plus the small tasks that still hold the thread's end (they keep it in review after the checks pass). */
+export function reviewLine(t: Pick<ThreadView, "merge_policy" | "counts"> & { pr_state?: string | null }): string {
+  const line = t.pr_state === "merged" ? "已合并，等收尾" : (REVIEW_LINE[t.merge_policy] ?? REVIEW_LINE.pr);
+  const open = openTasks(t);
+  return open > 0 ? `${line}，还有 ${open} 个小任务没结束` : line;
+}
+
 /** Small tasks not finished yet (older servers without tasks_open: everything not done). */
 export const openTasks = (t: Pick<ThreadView, "counts">): number => t.counts.tasks_open ?? Math.max(0, t.counts.tasks_total - t.counts.tasks_done);
 
@@ -94,7 +101,7 @@ export function pauseLine(reason: string): string {
 export type PhaseInput = Pick<
   ThreadView,
   "no" | "status" | "members" | "counts" | "merge_policy" | "merge_error" | "queue_position" | "pause_reason" | "pr_number" | "reminded_at" | "lead_last"
->;
+> & { pr_state?: string | null };
 
 const phase = (id: PhaseId, group: ListGroupId, mark: RowMark, note: string, label: string = MARK_LABEL[mark]): ThreadPhase => ({ id, group, mark, label, note });
 
@@ -116,7 +123,7 @@ export function threadPhase(t: PhaseInput, waiting?: Map<number, QuestionView>):
   if (t.status === "waiting" || t.counts.waiting > 0 || waiting?.has(t.no)) return phase("asking", "waiting", "wait", liveLine(t) || "等你处理");
   if (t.status === "queued") return phase("queued", "active", "queued", t.queue_position ? `排队中，前面还有 ${t.queue_position} 个` : "排队等节点");
   if (t.status === "paused") return phase("paused", "idle", "paused", pauseLine(t.pause_reason));
-  if (t.status === "review") return phase("checks", "active", "working", REVIEW_LINE[t.merge_policy] ?? REVIEW_LINE.pr);
+  if (t.status === "review") return phase("checks", "active", "working", reviewLine(t));
   if (t.members.some(workingHere)) return phase("working", "active", "working", liveLine(t) || "进行中");
   if (openTasks(t) > 0) return phase("tasks", "active", "working", "等成员处理任务");
   const lead = t.members.find((m) => m.tier === "lead");

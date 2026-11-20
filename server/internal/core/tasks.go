@@ -264,6 +264,13 @@ func GateVerdicts(ctx context.Context, q DB, conversationID, taskID string) ([]T
 		conversationID, taskID).Order("finished_at"))
 }
 
+// OpenGates lists the unfinished review / decision tasks the platform opened on a task, locked.
+func OpenGates(ctx context.Context, tx *Tx, conversationID, taskID string) ([]Task, error) {
+	return find[Task](tasks(ctx, tx).Clauses(ForUpdate).
+		Where("conversation_id = ? AND parent = ? AND kind IN ('review','decision') AND created_by = 'platform' AND status NOT IN ('done','failed','cancelled')",
+			conversationID, taskID).Order("created_at, substring(id from 2)::int"))
+}
+
 // OpenDependents lists the unfinished tasks of the same thread that depend on task id.
 func OpenDependents(ctx context.Context, q DB, conversationID, id string) ([]string, error) {
 	dep, _ := json.Marshal([]string{id})

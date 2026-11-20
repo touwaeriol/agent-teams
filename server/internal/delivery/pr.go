@@ -337,7 +337,7 @@ func (e *Engine) prCheckOne(ctx context.Context, t core.Thread, repo ghops.Repo,
 		return CIPending, nil, err
 	}
 	if pr.Merged {
-		return CIPass, nil, nil
+		return CIPass, nil, e.recordMerged(ctx, t.ID, tr.Repo)
 	}
 	since := tr.UpdatedAt
 	if tr.PROpenedAt != nil {
@@ -349,6 +349,17 @@ func (e *Engine) prCheckOne(ctx context.Context, t core.Thread, repo ghops.Repo,
 			Summary: "PR 与基准分支有冲突"}}, nil
 	}
 	return v, failed, err
+}
+
+// recordMerged records a pull request found merged on GitHub (a person merged it; the webhook
+// may be missing or late): the poll alone must be enough to end the thread.
+func (e *Engine) recordMerged(ctx context.Context, threadID, repo string) error {
+	return e.core.InTx(ctx, func(tx *core.Tx) error {
+		if err := core.SetThreadRepoPRState(ctx, tx, threadID, repo, "merged"); err != nil {
+			return err
+		}
+		return tx.EmitThread(ctx, threadID)
+	})
 }
 
 // mergePRs merges every open pull request with the project's merge method, then finishes the
@@ -441,7 +452,7 @@ func (e *Engine) policy(ctx context.Context, t core.Thread) string {
 // PRs stay open for a person to merge (Merged records it later); nobody has to accept. The end
 // goes through endThread: it waits for unfinished tasks, the merge queue and the lead's turn.
 func (e *Engine) finishWithOpenPRs(ctx context.Context, threadID string) error {
-	return e.core.InTx(ctx, func(tx *core.Tx) error {
+	err := e.core.InTx(ctx, func(tx *core.Tx) error {
 		t, err := core.LockThread(ctx, tx, threadID)
 		if err != nil || t.Status != "review" || t.PRState != "open" {
 			return ignoreMissing(err)
@@ -449,6 +460,10 @@ func (e *Engine) finishWithOpenPRs(ctx context.Context, threadID string) error {
 		_, err = e.endThread(ctx, tx, t, endChecked, true)
 		return err
 	})
+	if err != nil {
+		return err
+	}
+	return e.endHeld(ctx, threadID, "PR 检查已通过")
 }
 
 // checksNoLongerPass drops a pending end that relied on passing checks (new commits made them
@@ -499,6 +514,12 @@ func (e *Engine) prStep(ctx context.Context, threadID string) error {
 		return err
 	}
 	v, failed, err := e.prCheck(ctx, t)
+	if err == nil && v == CIPass {
+		open, err := anyOpenPR(ctx, e.core.Pool, t.ID)
+		if err != nil || !open {
+			return errors.Join(err, e.mergedOnGitHub(ctx, t, open || err != nil))
+		}
+	}
 	if err == nil && v == CIPass && t.PRState == "open" {
 		if waiting, err := e.questionsOpen(ctx, t); err != nil || waiting {
 			return err // the user still has to answer: finish or merge on a later tick
@@ -521,6 +542,15 @@ func (e *Engine) prStep(ctx context.Context, threadID string) error {
 		return e.checksNoLongerPass(ctx, t)
 	}
 	return nil
+}
+
+// mergedOnGitHub finishes a thread whose pull requests were all merged outside the platform
+// (Merged: nothing is left to merge); skip when that could not be told.
+func (e *Engine) mergedOnGitHub(ctx context.Context, t core.Thread, skip bool) error {
+	if skip {
+		return nil
+	}
+	return e.Merged(ctx, t.ID)
 }
 
 // questionsOpen reports whether question cards in the thread still wait on the user. A thread
