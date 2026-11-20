@@ -478,7 +478,7 @@ sequenceDiagram
 | 会话结束后继续用 | **能** | 证书吊销 + 私钥丢弃 + 网关查库 |
 | 别的节点、别的用户用 | **能** | 节点令牌 + 证书节点绑定 + 项目所有者 = 节点所有者 |
 
-`SO_PEERCRED`（内核告诉 socket 服务端“对端进程是哪个 uid”的机制）的现状：`architecture.md` §10.4 写着 cred socket 会“核对对端 uid（`SO_PEERCRED`）”，但核对过代码，`node/src/cred/server.ts` 里**没有**这项检查（Node 的 `net` 模块不提供读取对端凭证的接口），实际保护是“目录 0700 + socket 0600 + 每会话秘密”。在同账号的 `none`/`sandbox` 级别里，`SO_PEERCRED` 本来也区分不了（对端 uid 就是自己）；到 `agent_user` 级别（员工是另一个账号）才有意义，那时用“socket 属组 = 员工账号组、0660”或一个读取 `SO_PEERCRED` 的小原生模块即可。本设计的 `ssh.sock` 与 `cred.sock` 同样处理；`architecture.md` §10.4 的那句描述应改成实际做法（§10.3 差距第 3 条）。
+`SO_PEERCRED`（内核告诉 socket 服务端“对端进程是哪个 uid”的机制）的现状：`architecture.md` §10.4 写着 cred socket 会“核对对端 uid（`SO_PEERCRED`）”，但核对过代码，`node/src/cred/server.ts` 里**没有**这项检查（Node 的 `net` 模块不提供读取对端凭证的接口），实际保护是“目录 0700 + socket 0600 + 每会话秘密”。在同账号的 `none`/`sandbox` 级别里，`SO_PEERCRED` 本来也区分不了（对端 uid 就是自己）；到 `agent_user` 级别（员工是另一个账号）才有意义，那时用“socket 属组 = 员工账号组、0660”或一个读取 `SO_PEERCRED` 的小原生模块即可。本设计的 `ssh.sock` 与 `cred.sock` 同样处理；`architecture.md` §10.4 的那句描述已改成实际做法（§10.3 差距第 3 条，#38）。
 
 ### 8.3 `sandbox` 级别：`denyRead` 挡住 socket 的已知限制
 
@@ -564,13 +564,13 @@ v2 已经是“按次领取、不落盘”的设计并已实现（`architecture.
 | 会话环境 | `node/src/cred/helper.ts` 的 `gitCredentialEnv`；`node/src/daemon.ts` 的 `Daemon.credEnv` | `GIT_CONFIG_COUNT/KEY/VALUE` 先清空再设 `credential.https://github.com.helper = !<node> git-credential --socket … --session … --secret …`、`useHttpPath=true`，`GIT_TERMINAL_PROMPT=0`；另设 `AT_CRED_SOCK/SESSION/SECRET`。统筹或没有 `git_credentials` 的会话不设 |
 | 每会话秘密 | `node/src/cred/server.ts` 的 `CredServer.register`、`unregister` | 每次打开换一个 24 字节随机秘密，只在守护进程内存；`Daemon.forgetSession` 时删除 |
 | 本地 socket | `CredServer.start`、`credSocketPath` | `<runtimeDir>/cred.sock`，目录 0700（且必须属于自己），socket 0600；比较秘密用 `timingSafeEqual` |
-| 节点缓存 | `node/src/cred/broker.ts` 的 `CredBroker.get` | 只在内存，按“调用方 + 仓库 + 用途”缓存到上报的过期时间前 5 分钟；`push` 用途不缓存 |
-| 协议 | `protocol.md` §8 的 `cred.request` / `cred.response` | 不可靠消息（不进发件箱、不写日志）；控制台用 `Gateway.SendNow` 直接写在链路上（`server/internal/nodegw/outbox.go`）；守护进程的 `Dispatcher`（`node/src/link/dispatcher.ts`）只把**可靠**命令的回复记进 `done.jsonl`，所以令牌不会进节点上的任何文件 |
+| 节点缓存 | `node/src/cred/broker.ts` 的 `CredBroker.get`、`forget` | 只在内存，按“调用方 + 仓库 + 用途”缓存到上报的过期时间前 5 分钟；`push` 用途不缓存；git `erase` 时丢掉该“会话 + 仓库”的缓存（`CredServer` 的 `op: "erase"`），会话结束（`unregister`）时丢掉该会话的全部缓存 |
+| 协议 | `protocol.md` §8 的 `cred.request` / `cred.response` | 不可靠消息（不进发件箱、不写日志）；控制台在读循环之外的 goroutine 里处理 `cred.request`（`delivery.Engine.Credential`，全局最多 32 个并发），用 `Gateway.SendNow` 直接写在链路上（`server/internal/nodegw/outbox.go`）；守护进程的 `Dispatcher`（`node/src/link/dispatcher.ts`）只把**可靠**命令的回复记进 `done.jsonl`，所以令牌不会进节点上的任何文件 |
 | 控制台判断范围 | `server/internal/delivery/cred.go` 的 `Engine.credential`、`credScope`、`sessionScope`、`jobScope` | 归属校验后：会话只能拿本项目仓库的令牌，组长和成员 `ScopeEmployee`（项目允许改 workflow 时 `ScopeEmployeeFlows`），统筹拒绝；作业只能拿自己那一个仓库，准备作业只读、推送作业 `contents: write` |
-| 铸造 | `server/internal/ghops/ghops.go` 的 `GitHub.Token`、`request`；`server/internal/github/tokens.go` 的 `Tokens.Installation`、`mint`；`server/internal/github/jwt.go` 的 `AppJWT`；`server/internal/github/client.go` | App 连接：用 App 私钥签 JWT → `POST /app/installations/{id}/access_tokens`，**只含一个仓库**、按范围缩小权限；安装缺权限时退回“已授予的子集” |
+| 铸造 | `server/internal/ghops/ghops.go` 的 `GitHub.Token`、`Credential`、`request`；`server/internal/github/tokens.go` 的 `Tokens.Installation`、`InstallationToken`、`mint`；`server/internal/github/jwt.go` 的 `AppJWT`；`server/internal/github/client.go` | App 连接：用 App 私钥签 JWT → `POST /app/installations/{id}/access_tokens`，**只含一个仓库**、按范围缩小权限；安装缺权限时退回“已授予的子集” |
 | 控制台缓存 | `Tokens.cached`、`shared`、`remember`、`cacheKey`、`scopeHash` | 进程内存 + Valkey（值用 `SecretBox` 密封，TTL = 令牌剩余时间），键 `ghtok:<代>:<安装>:<仓库与权限的哈希>`，所以缩小过的令牌不会被更宽的用途复用；`Tokens.Reset` 换代作废全部 |
 | App 私钥 | `server/internal/github/app.go` 的 `Apps.Load`、`Save`、`Reseal` | 存 `at_settings` 的 `github_app` 行，`pem`、`client_secret`、`webhook_secret` 各自用 `SecretBox`（Fernet）密封；每次铸造时 `Load` 解开，只在内存 |
-| gh | `node/src/cred/helper.ts` 的 `ghMain`、`ghPlan`、`ghChildEnv`、`repoForGh`；`node/src/git/platform.ts` 的 gh 包装；`node/src/git/gh-install.ts` | 包装脚本经 cred socket（`op: "gh"`）要真实 gh 路径、空的每会话 `GH_CONFIG_DIR` 和令牌，只放进**那一次 gh 子进程**的 `GH_TOKEN`/`GITHUB_TOKEN`，并删掉 `AT_CRED_SECRET` |
+| gh | `node/src/cred/helper.ts` 的 `ghMain`、`ghPlan`、`ghChildEnv`、`repoForGh`；`node/src/git/platform.ts` 的 gh 包装；`node/src/git/gh-install.ts` | 包装脚本经 cred socket（`op: "gh"`）要真实 gh 路径、空的每会话 `GH_CONFIG_DIR` 和令牌，只放进**那一次 gh 子进程**的 `GH_TOKEN`/`GITHUB_TOKEN`，并删掉 `AT_CRED_SECRET` 和继承来的 `GH_TOKEN`/`GITHUB_TOKEN`/`GH_ENTERPRISE_TOKEN`/`GITHUB_ENTERPRISE_TOKEN`（github.com 的令牌不放进企业版变量） |
 | 平台 git 作业 | `node/src/git/jobs.ts` 的 `GitJobs.credEnv`、`url`、`fetch`；`node/src/git/platform.ts` 的 `ASKPASS` | remote URL 是 `https://github.com/<owner>/<name>.git`，**不带令牌**；作业令牌经 `GIT_ASKPASS` 脚本从 `AT_GIT_PASSWORD` 环境变量读出，只传给那一个 git 子进程；拉取先进守护进程自己的裸镜像（`state/mirrors`），worktree 从镜像克隆、不经令牌 |
 
 ### 10.2 已满足 R5 的部分
@@ -585,13 +585,13 @@ v2 已经是“按次领取、不落盘”的设计并已实现（`architecture.
 | # | 差距 | 影响 | 收敛方案 |
 | --- | --- | --- | --- |
 | 1 | **PAT 连接**：`GitHub.Token` 对 PAT 连接的 `ScopeEmployee` 直接返回 PAT（只有 `ScopeRead` 会返回 `ErrPATNarrow`），2026-11-17 起员工会话也拿 PAT | PAT 长期有效、权限覆盖用户账号能访问的全部仓库，泄露一次的后果远大于 1 小时单仓库令牌；不满足 R5 | 待拍板 Q8。推荐：不突然断掉现有项目，但在项目设置和 GitHub 页显示醒目提示“这个项目用的是个人令牌，员工会话拿到的是长期、全仓库的令牌”，提供一键“改用 GitHub App”；新项目默认只能选 App 连接；第二期起 PAT 连接对员工会话默认关闭（项目可显式打开，写审计） |
-| 2 | **上报的过期时间不准**：`delivery/cred.go` 的 `Engine.credential` 一律回 `expires_at = now + credTTL`（50 分钟），而 `Tokens.Installation` 可能返回缓存里只剩 10～60 分钟的令牌（`RefreshMargin` 10 分钟） | 节点 `CredBroker` 按 50 分钟缓存，最坏情况令牌已过期 30 多分钟仍在用，git 报认证失败 | `Tokens.Installation` 同时返回 `ExpiresAt`，`credential` 照实上报；PAT 上报一个人为的短期限（例如 30 分钟），让节点定期重新确认项目是否仍允许 |
-| 3 | **凭证助手忽略 `erase`**：`gitCredentialMain` 对 `get` 以外的操作直接返回；**文档写了 `SO_PEERCRED` 但代码没有**（§8.2） | git 认证失败后会调 `erase`，但节点缓存不会被清，失败会持续到缓存过期；文档与实现不符 | `erase` 时经 socket 通知守护进程丢弃这个“会话 + 仓库”的缓存；`architecture.md` §10.4 改成实际做法 |
+| 2 | **（已修，#38）** **上报的过期时间不准**：`delivery/cred.go` 的 `Engine.credential` 一律回 `expires_at = now + credTTL`（50 分钟），而 `Tokens.Installation` 可能返回缓存里只剩 10～60 分钟的令牌（`RefreshMargin` 10 分钟） | 节点 `CredBroker` 按 50 分钟缓存，最坏情况令牌已过期 30 多分钟仍在用，git 报认证失败 | 已改：`Tokens.InstallationToken`/`GitHub.Credential` 返回真实 `ExpiresAt`，`credential` 照实上报；PAT 上报“现在 + 30 分钟”（`patTTL`） |
+| 3 | **（已修，#38）** **凭证助手忽略 `erase`**：`gitCredentialMain` 对 `get` 以外的操作直接返回；**文档写了 `SO_PEERCRED` 但代码没有**（§8.2） | git 认证失败后会调 `erase`，但节点缓存不会被清，失败会持续到缓存过期；文档与实现不符 | 已改：`erase` 经 socket（`op: "erase"`，同样核对每会话秘密）让守护进程丢弃这个“会话 + 仓库”的缓存；`architecture.md` §10.4 已改成实际做法（不核对 `SO_PEERCRED`） |
 | 4 | **gh 子进程环境里的 `GH_TOKEN`**、**作业 git 子进程环境里的 `AT_GIT_PASSWORD`** | 进程运行期间，同账号进程可以读它的环境变量 | 同账号下任何方案都有这个残余风险（gh 只认环境变量或配置文件，配置文件更糟）；保持现状，寄望 §8.4 的隔离 |
 | 5 | **会话环境里的 `AT_CRED_SECRET`**（`GIT_CONFIG_VALUE_1` 里也有同一秘密） | 同账号进程读到后，可在会话存活期内冒充该会话领令牌 | 与 SSH 相同的残余风险（§8.2），保持；`agent_user` 后不再能被守护进程以外的账号读到，每会话账号后完全消失 |
 | 6 | `sandbox` 节点上沙箱命令连不上 `cred.sock` | 沙箱节点的 git/gh 没有令牌 | 随 §8.3 一起修（socket 挪到会话目录 + `allowUnixSockets`） |
-| 7 | 控制台读循环里同步铸令牌（§6.1） | 一次慢的 GitHub 请求阻塞整条节点链路 | `cred.request` 改到 goroutine 里处理（它本来就是不可靠消息、靠 `req_id` 配对，顺序无关）；与 `ssh.cert_request` 一起改 |
-| 8 | `protocol.md` §2.1 的表把 `cred.response` 列为可靠命令，而 §8 正文和实现（`SendNow`）都是不可靠 | 文档自相矛盾 | 改文档 |
+| 7 | **（已修，#38）** 控制台读循环里同步铸令牌（§6.1） | 一次慢的 GitHub 请求阻塞整条节点链路 | 已改：`delivery.Engine.Credential` 把请求放进 goroutine（全局信号量 32、单次 1 分钟超时）；归属校验仍在读循环里同步做。`ssh.cert_request` 照同样做法 |
+| 8 | **（已修，#38）** `protocol.md` §2.1 的表把 `cred.response` 列为可靠命令，而 §8 正文和实现（`SendNow`）都是不可靠 | 文档自相矛盾 | 改文档 |
 
 以下**不是差距**，保持：节点内存缓存（只在内存、按会话隔离、有过期）；Valkey 里的令牌缓存（已用 `SecretBox` 密封、TTL 等于剩余时间、键含范围）；App 私钥的存储方式（以后随 §11.1 的信封加密一起迁，不单独改）。
 
