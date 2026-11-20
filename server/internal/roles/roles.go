@@ -53,11 +53,6 @@ type Context struct {
 	Skills map[string]bool
 	// Plugins maps the plugin names the user may tick to their versions; nil skips the check.
 	Plugins map[string]map[int]bool
-	// Models is the user's model list (composer.ListModels); nil skips the model check.
-	Models []composer.Model
-	// Saved are the roles as stored before this save, by id: a model kept unchanged is not
-	// rechecked (see modelProblems).
-	Saved map[string]store.Role
 }
 
 // Normalize fills defaults in place: fixed counts, read_only from gate, look from the layout.
@@ -72,11 +67,9 @@ func normalizeOne(r *store.Role, looks office.Looks) {
 	if r.Runtime == "" {
 		r.Runtime = Claude
 	}
+	r.Model = strings.TrimSpace(r.Model)
 	if r.Tier != Member {
 		r.Count = 1
-		// The coordinator and leads always run the default model (orchestrator.Model): a model
-		// sent by an older client is dropped, not refused.
-		r.Model = ""
 	}
 	if r.Count == 0 {
 		r.Count = 1
@@ -185,38 +178,18 @@ func validateOne(path string, r *store.Role, c Context) []Problem {
 	out = append(out, skillProblems(path, r, c.Skills)...)
 	out = append(out, pluginProblems(path, r, c.Plugins)...)
 	out = append(out, commandProblems(path, r)...)
-	out = append(out, modelProblems(path, r, c)...)
+	out = append(out, modelProblems(path, r)...)
 	return append(out, nodeProblems(path, r, c.Nodes)...)
 }
 
-var runtimeLabel = map[string]string{Claude: "Claude", Codex: "Codex"}
-
-// modelProblems checks role.model against the user's model list: empty follows the defaults;
-// otherwise it must be an entry of the role's runtime. A value equal to what the role already
-// had (same id, same runtime) passes even when it has since left the list, so deleting a model
-// does not lock the whole Team page; only new or changed values are checked. Sessions of such a
-// role still run the stored id.
-func modelProblems(path string, r *store.Role, c Context) []Problem {
-	if r.Model == "" || c.Models == nil {
+// modelProblems checks role.model, typed by hand for every tier (coordinator and lead too): empty
+// follows the project setting and then the built-in default (orchestrator.Model); otherwise only
+// the id's format is checked (composer.ValidModel), there is no list to check it against.
+func modelProblems(path string, r *store.Role) []Problem {
+	if r.Model == "" || composer.ValidModel(r.Model) {
 		return nil
 	}
-	if old, ok := c.Saved[r.ID]; ok && r.ID != "" && old.Model == r.Model && old.Runtime == r.Runtime {
-		return nil
-	}
-	var other string
-	for _, m := range c.Models {
-		if m.Model != r.Model {
-			continue
-		}
-		if m.Runtime == r.Runtime {
-			return nil
-		}
-		other = m.Runtime
-	}
-	if other != "" {
-		return []Problem{{path + ".model", fmt.Sprintf("%s 岗位不能用 %s 模型：%s", runtimeLabel[r.Runtime], runtimeLabel[other], r.Model)}}
-	}
-	return []Problem{{path + ".model", "模型不在你的模型列表里：" + r.Model}}
+	return []Problem{{path + ".model", composer.ModelFormatProblem}}
 }
 
 func commandProblems(path string, r *store.Role) []Problem {

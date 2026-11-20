@@ -1,4 +1,5 @@
 // Role template helpers for the Team page (pure, unit-tested).
+import { MODEL_FORMAT_HINT, validModel } from "./models";
 import { unfit } from "./commands";
 import type { RoleView } from "@/api/views";
 
@@ -230,5 +231,6 @@ export function roleProblems(list: RoleView[]): string[] {
   list.filter((r) => !canHaveSkills(r) && (r.plugins ?? []).length > 0).forEach((r) => problems.push(`${roleName(r)} 不能加载插件`));
   list.filter((r) => unfit(r).length > 0).forEach((r) => problems.push(`${roleName(r)} 只能用提示词模板命令`));
   list.forEach((r) => problems.push(...contextProblems(r)));
+  list.filter((r) => !validModel(r.model ?? "")).forEach((r) => problems.push(`${roleName(r)} 的${MODEL_FORMAT_HINT}`));
   return problems;
 }

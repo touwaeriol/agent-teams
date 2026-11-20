@@ -36,7 +36,7 @@ type Role struct {
 	NodeIDs         []string        `json:"node_ids" gorm:"column:node_ids;serializer:pgtext"`
 	Description     string          `json:"description"`
 	Instructions    string          `json:"instructions"`
-	Model           string          `json:"model" doc:"Member roles only: the model of the role's sessions ('' = the defaults). Always '' for the coordinator and the lead (they run the default model; a value sent is dropped)"`
+	Model           string          `json:"model" doc:"The model of the role's sessions, typed by hand (any tier; '' = the project setting, then the built-in default). Below the project setting and, for members, /model"`
 	Effort          string          `json:"effort"`
 	PermissionMode  string          `json:"permission_mode,omitempty" enum:"bypass,ask" doc:"bypass (default): members run without permission prompts on any node; ask: every non-read tool asks (lead or user, per the project's approval routing). Ignored for the coordinator, the lead and read-only roles"`
 	CanDelegate     bool            `json:"can_delegate"`

@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/node.usage.json",
+  "title": "NodeUsage",
+  "description": "Subscription quota of the node's runtimes (Claude Code, Codex), unreliable; sent after hello and then periodically. Never carries credentials. The console keeps only the latest report per node and drops unknown fields.",
+  "x-direction": "node_to_console",
+  "x-reliable": false,
+  "type": "object",
+  "required": [
+    "runtimes"
+  ],
+  "properties": {
+    "runtimes": {
+      "type": "object",
+      "properties": {
+        "claude": {
+          "$ref": "#/$defs/RuntimeUsage"
+        },
+        "codex": {
+          "$ref": "#/$defs/RuntimeUsage"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "RuntimeUsage": {
+      "title": "RuntimeUsage",
+      "type": "object",
+      "required": [
+        "auth",
+        "status"
+      ],
+      "properties": {
+        "auth": {
+          "description": "How the runtime is logged in: subscription (Claude), chatgpt (Codex), api_key, or none.",
+          "type": "string",
+          "enum": [
+            "subscription",
+            "chatgpt",
+            "api_key",
+            "none"
+          ]
+        },
+        "status": {
+          "description": "ok: windows are valid; error: fetching failed (see error); unsupported: no quota for this login (API key, not logged in, too old CLI).",
+          "type": "string",
+          "enum": [
+            "ok",
+            "error",
+            "unsupported"
+          ]
+        },
+        "plan": {
+          "description": "Plan name when known (pro, max, plus, team, ...).",
+          "type": "string"
+        },
+        "windows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UsageWindow"
+          },
+          "description": "At most 8 are kept by the console."
+        },
+        "error": {
+          "type": "string"
+        },
+        "fetched_at": {
+          "description": "When the daemon fetched this data.",
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "UsageWindow": {
+      "title": "UsageWindow",
+      "type": "object",
+      "required": [
+        "key",
+        "used_percent"
+      ],
+      "properties": {
+        "key": {
+          "description": "five_hour, weekly, weekly_opus, weekly_sonnet, weekly_model (per-model weekly window, see label) (Claude); primary, secondary (Codex).",
+          "type": "string"
+        },
+        "label": {
+          "description": "Display name given by the provider, e.g. the model of a weekly_model window; the console keeps at most 40 characters.",
+          "type": "string"
+        },
+        "used_percent": {
+          "description": "0..100; the console clamps values out of range.",
+          "type": "number"
+        },
+        "window_minutes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resets_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

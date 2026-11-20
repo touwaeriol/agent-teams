@@ -148,6 +148,17 @@ function listen(): void {
   document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && flushDrafts());
 }
 
+/**
+ * Clears the draft under k when it is exactly v (a failed send put v back; a retry from the chat
+ * delivered it). Returns the draft's text afterwards.
+ */
+export function clearDraftIf(k: string, v: string): string {
+  const now = loadDraft(k);
+  if (now.trim() !== v.trim()) return now;
+  setDraft(k, "");
+  return "";
+}
+
 /** Forgets the in-memory drafts (tests: a fresh page that only has localStorage). */
 export function resetDraftMemory(): void {
   pending.forEach((t) => clearTimeout(t));

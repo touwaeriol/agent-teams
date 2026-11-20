@@ -21,7 +21,7 @@ import (
 )
 
 // DefaultModel is the last resort of a Claude session when neither the employee, the project,
-// the role nor the owner's model list names a model (CLAUDE.md: claude-opus-5-5).
+// nor the role names a model (CLAUDE.md: claude-opus-5-5).
 const DefaultModel = "claude-opus-5-5"
 
 // DefaultCodexModel is the last resort of a Codex session: empty, i.e. the Codex CLI picks its

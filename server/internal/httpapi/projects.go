@@ -28,9 +28,9 @@ type ProjectView struct {
 	Delivery         Delivery  `json:"delivery"`
 	OfficeLayout     string    `json:"office_layout"`
 	Icon             string    `json:"icon" doc:"'' = initial on the default color; an emoji; or color:#RRGGBB"`
-	CoordinatorModel string    `json:"coordinator_model" doc:"Deprecated, always '': the coordinator and thread leads run the default model"`
-	ThreadModel      string    `json:"thread_model" doc:"Claude model of the Claude members (tier member only; leads run the default model); '' = each role's model"`
-	ThreadCodexModel string    `json:"thread_codex_model" doc:"Codex model of the Codex members (tier member only; leads run the default model); '' = each role's model"`
+	CoordinatorModel string    `json:"coordinator_model" doc:"Model of the coordinator; '' = the coordinator role's model"`
+	ThreadModel      string    `json:"thread_model" doc:"Claude model of Claude leads and members; '' = each role's model"`
+	ThreadCodexModel string    `json:"thread_codex_model" doc:"Codex model of Codex leads and members; '' = each role's model"`
 	ThreadEffort     string    `json:"thread_effort" doc:"'' = each role's effort; low | medium | high | xhigh | max"`
 	AutoResume       bool      `json:"auto_resume" doc:"Continue threads paused by a usage limit once it resets"`
 	Waiting          int       `json:"waiting"`
@@ -48,7 +48,7 @@ func ProjectViewOf(p store.Project, d Delivery) ProjectView {
 	return ProjectView{ID: p.ID, Name: p.Name, Description: p.Description, Context: p.Context, Repos: RepoRefs(p.Repos),
 		Pinned: p.Pinned, Archived: p.Archived,
 		WorkMode: p.WorkMode, AutoApprove: p.AutoApprove, MergePolicy: p.MergePolicy,
-		Delivery: d, OfficeLayout: p.OfficeLayout, Icon: p.Icon,
+		Delivery: d, OfficeLayout: p.OfficeLayout, Icon: p.Icon, CoordinatorModel: p.CoordinatorModel,
 		ThreadModel: p.ThreadModel, ThreadCodexModel: p.ThreadCodexModel, ThreadEffort: p.ThreadEffort, AutoResume: p.AutoResume, Waiting: p.Waiting,
 		ThreadsActive: p.ThreadsActive, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
 }
@@ -64,9 +64,9 @@ type ProjectInput struct {
 	MergePolicy      string         `json:"merge_policy,omitempty" enum:"pr,auto,manual" doc:"Default pr"`
 	Delivery         *DeliveryPatch `json:"delivery,omitempty"`
 	FirstMessage     string         `json:"first_message,omitempty" maxLength:"50000" doc:"Delivered to the project coordinator"`
-	CoordinatorModel string         `json:"coordinator_model,omitempty" maxLength:"100" doc:"Deprecated and ignored (accepted for older clients): the coordinator runs the default model"`
-	ThreadModel      string         `json:"thread_model,omitempty" maxLength:"100" doc:"Claude model of the Claude members (tier member only); '' = each role's model"`
-	ThreadCodexModel string         `json:"thread_codex_model,omitempty" maxLength:"100" doc:"Codex model of the Codex members (tier member only); '' = each role's model"`
+	CoordinatorModel string         `json:"coordinator_model,omitempty" maxLength:"100" doc:"Model of the coordinator; '' = the coordinator role's model"`
+	ThreadModel      string         `json:"thread_model,omitempty" maxLength:"100" doc:"Claude model of Claude leads and members; '' = each role's model"`
+	ThreadCodexModel string         `json:"thread_codex_model,omitempty" maxLength:"100" doc:"Codex model of Codex leads and members; '' = each role's model"`
 }
 
 // ProjectUpdate is PATCH /api/projects/{pid}.
@@ -83,9 +83,9 @@ type ProjectUpdate struct {
 	Delivery         *DeliveryPatch `json:"delivery,omitempty"`
 	OfficeLayout     *string        `json:"office_layout,omitempty" doc:"'' = global default"`
 	Icon             *string        `json:"icon,omitempty" maxLength:"32" doc:"'' = initial; an emoji; or color:#RRGGBB"`
-	CoordinatorModel *string        `json:"coordinator_model,omitempty" maxLength:"100" doc:"Deprecated and ignored (accepted for older clients): the coordinator runs the default model"`
-	ThreadModel      *string        `json:"thread_model,omitempty" maxLength:"100" doc:"Claude model of the Claude members (tier member only); '' = each role's model"`
-	ThreadCodexModel *string        `json:"thread_codex_model,omitempty" maxLength:"100" doc:"Codex model of the Codex members (tier member only); '' = each role's model"`
+	CoordinatorModel *string        `json:"coordinator_model,omitempty" maxLength:"100" doc:"Model of the coordinator; '' = the coordinator role's model"`
+	ThreadModel      *string        `json:"thread_model,omitempty" maxLength:"100" doc:"Claude model of Claude leads and members; '' = each role's model"`
+	ThreadCodexModel *string        `json:"thread_codex_model,omitempty" maxLength:"100" doc:"Codex model of Codex leads and members; '' = each role's model"`
 	ThreadEffort     *string        `json:"thread_effort,omitempty" maxLength:"16" doc:"'' | low | medium | high | xhigh | max"`
 	AutoResume       *bool          `json:"auto_resume,omitempty"`
 }
@@ -166,9 +166,8 @@ func (s *Server) createProject(ctx context.Context, in *createProjectInput) (*pr
 		return nil, err
 	}
 	np := newProject(b, name, repos, s.deliveryDefault(ctx))
-	if err := s.checkProjectModels(ctx, p.User.ID, []projectModel{
-		{"thread_model", "claude", &np.ThreadModel, ""},
-		{"thread_codex_model", "codex", &np.ThreadCodexModel, ""}}); err != nil {
+	if err := checkProjectModels([]projectModel{{"coordinator_model", &np.CoordinatorModel},
+		{"thread_model", &np.ThreadModel}, {"thread_codex_model", &np.ThreadCodexModel}}); err != nil {
 		return nil, err
 	}
 	row, err := s.store.CreateProject(ctx, p.User.ID, np)
@@ -193,7 +192,7 @@ func newProject(b ProjectInput, name string, repos []store.ProjectRepo, defaults
 	}
 	return store.NewProject{Name: name, Description: b.Description, Context: b.Context, Repos: repos,
 		WorkMode: workMode, AutoApprove: b.AutoApprove,
-		MergePolicy: b.MergePolicy, Delivery: raw,
+		MergePolicy: b.MergePolicy, Delivery: raw, CoordinatorModel: strings.TrimSpace(b.CoordinatorModel),
 		ThreadModel: strings.TrimSpace(b.ThreadModel), ThreadCodexModel: strings.TrimSpace(b.ThreadCodexModel)}
 }
 
@@ -255,7 +254,7 @@ func (s *Server) projectChanges(ctx context.Context, userID string, cur store.Pr
 	if err != nil {
 		return nil, err
 	}
-	modelCh, err := s.modelChanges(ctx, userID, cur, b)
+	modelCh, err := modelChanges(b)
 	if err != nil {
 		return nil, err
 	}
