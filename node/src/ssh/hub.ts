@@ -250,24 +250,29 @@ export class SshHub {
     // "Permission denied (publickey)".
     if (!(await s.identity())) return { error: `no session certificate: ${s.lastError || "the session ended"}` };
     if (!s.servers.includes(req.server)) return { error: notAvailable(req.server, s.servers) };
-    const ws = await this.dialGateway(s, req.server);
-    if ("error" in ws) return ws;
+    const dialed = await this.dialGateway(s, req.server);
+    if ("error" in dialed) return dialed;
+    const stream = dialed.stream;
     if (s.closed) {
-      ws.close();
+      stream.destroy();
       return { error: "session ended" };
     }
-    const stream = createWebSocketStream(ws);
     s.pipes.add(stream);
     return { stream, done: () => s.pipes.delete(stream) };
   }
 
-  private dialGateway(s: SshSession, server: string): Promise<WebSocket | { error: string }> {
+  /**
+   * Opens /nodes/ssh and wraps it in a stream inside the open callback: the gateway speaks first
+   * (SSH version banner) and its first frame can arrive in the same read as the 101, emitted
+   * before an awaiting caller would attach a listener. The stream buffers it (paused) until piped.
+   */
+  private dialGateway(s: SshSession, server: string): Promise<{ stream: Duplex } | { error: string }> {
     return new Promise((resolve) => {
       const ws = new WebSocket(this.o.gatewayUrl, "agent-teams-ssh.v1", {
         headers: { Authorization: `Bearer ${this.o.token}`, "X-AT-Session": s.id, "X-AT-Open-Gen": String(s.openGen), "X-AT-Server": server },
         perMessageDeflate: false, handshakeTimeout: GATEWAY_TIMEOUT_MS,
       });
-      ws.once("open", () => resolve(ws));
+      ws.once("open", () => resolve({ stream: createWebSocketStream(ws) }));
       ws.once("unexpected-response", (_req, res) => {
         let body = "";
         res.setEncoding("utf8");

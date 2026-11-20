@@ -294,11 +294,22 @@ describe("daemon integration", () => {
     const up = h.console.sshUpgrades.at(-1)!;
     expect(up).toMatchObject({ authorization: "Bearer test-token", "x-at-session": "s_px", "x-at-open-gen": "1", "x-at-server": "prod", "sec-websocket-protocol": "agent-teams-ssh.v1" });
 
-    // A pipe still open when the session closes is cut (the gateway side sees the WebSocket close).
+    // The gateway speaks first (an SSH server's version banner right after the upgrade): nothing may be lost.
+    for (let i = 0; i < 20; i++) {
+      h.console.onSsh = (ws: WebSocket) => {
+        ws.send(Buffer.from("SSH-2.0-gateway\r\n"));
+        ws.close();
+      };
+      const first = await runProxy(["--socket", socket, "--server", "prod"], env, "", 3000);
+      expect(first.out).toBe("SSH-2.0-gateway\r\n");
+    }
+    const upgradesSoFar = h.console.sshUpgrades.length;
+
+        // A pipe still open when the session closes is cut (the gateway side sees the WebSocket close).
     let closed = false;
     h.console.onSsh = (ws: WebSocket) => ws.on("close", () => (closed = true));
     const hold = runProxy(["--socket", socket, "--server", "prod"], env, "SSH-2.0-hold\r\n");
-    await waitUntil(() => h.console.sshUpgrades.length === 3);
+    await waitUntil(() => h.console.sshUpgrades.length === upgradesSoFar + 1);
     await new Promise((r) => setTimeout(r, 100));
     h.console.command("session.close", { session_id: "s_px", open_gen: 1 });
     await waitUntil(() => closed);
@@ -378,7 +389,7 @@ async function waitUntil(pred: () => boolean, ms = 5000): Promise<void> {
   }
 }
 
-async function runProxy(argv: string[], env: Record<string, string>, input?: string): Promise<{ code: number; out: string; err: string }> {
+async function runProxy(argv: string[], env: Record<string, string>, input?: string, timeoutMs = 10_000): Promise<{ code: number; out: string; err: string }> {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   const stderr = new PassThrough();
@@ -390,8 +401,9 @@ async function runProxy(argv: string[], env: Record<string, string>, input?: str
   });
   stderr.on("data", (d) => (err += d));
   if (input) stdin.write(input);
-  else stdin.end();
-  const code = await sshProxyMain(argv, env, { stdin, stdout, stderr });
+  else if (input === undefined) stdin.end();
+  const code = await Promise.race([sshProxyMain(argv, env, { stdin, stdout, stderr }), new Promise<number>((r) => setTimeout(() => r(-1), timeoutMs))]);
+  stdin.end();
   return { code, out, err };
 }
 
