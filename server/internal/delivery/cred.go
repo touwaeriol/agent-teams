@@ -34,8 +34,10 @@ func (e *Engine) Credential(ctx context.Context, node store.Node, r *protocol.Cr
 	req := *r
 	select {
 	case credSlots <- struct{}{}:
-	case <-ctx.Done():
-		return ctx.Err()
+	default:
+		// Never wait on the read loop: the daemon asks again after 10 s with the same req_id.
+		e.log.Warn("cred.request dropped: too many in flight", "node_id", node.ID, "req_id", req.ReqID, "limit", credInflight)
+		return nil
 	}
 	go func() {
 		defer func() { <-credSlots }()
@@ -68,9 +70,10 @@ func (e *Engine) credential(ctx context.Context, node store.Node, r *protocol.Cr
 		return refuse("repo_not_in_project")
 	}
 	scope := cs.scope
-	tok, exp, err := e.gh.Credential(ctx, repo, scope)
+	refresh := r.ForceRefresh != nil && *r.ForceRefresh // git rejected the last token (credential erase)
+	tok, exp, err := e.gh.Credential(ctx, repo, scope, refresh)
 	if errors.Is(err, ghops.ErrPATNarrow) && r.JobID != nil {
-		tok, exp, err = e.gh.Credential(ctx, repo, ghops.ScopeFull) // platform jobs may use the PAT (§10.4)
+		tok, exp, err = e.gh.Credential(ctx, repo, ghops.ScopeFull, refresh) // platform jobs may use the PAT (§10.4)
 	}
 	if errors.Is(err, ghops.ErrPATNarrow) {
 		return refuse("pat_not_narrowable")

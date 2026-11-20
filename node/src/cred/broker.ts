@@ -29,18 +29,26 @@ const REFRESH_MARGIN_MS = 5 * 60_000;
  * retried every 10 s with the same req_id; tokens live only in memory until 5 minutes
  * before they expire. Bodies are never logged.
  */
+function credKey(scope: CredScope, host: string, path: string, purpose: string): string {
+  return `${JSON.stringify(scope)}|${host}|${path}|${purpose}`;
+}
+
 export class CredBroker {
   private readonly waiting = new Map<string, Waiting>();
   private readonly cache = new Map<string, { scope: CredScope; host: string; path: string; cred: Credential }>();
+  /** Keys whose last token git rejected: the next request asks the console to skip its cache. */
+  private readonly stale = new Map<string, CredScope>();
 
   constructor(private readonly send: SendFn, private readonly retryMs = RETRY_MS) {}
 
   async get(scope: CredScope, host: string, path: string, purpose: "read" | "push"): Promise<Credential> {
-    const key = `${JSON.stringify(scope)}|${host}|${path}|${purpose}`;
+    const key = credKey(scope, host, path, purpose);
     const hit = this.cache.get(key)?.cred;
     if (hit && hit.expiresAt - REFRESH_MARGIN_MS > Date.now()) return hit;
-    const res = await this.request({ req_id: newId("cr_"), ...scope, host, path, purpose });
+    const force = this.stale.has(key);
+    const res = await this.request({ req_id: newId("cr_"), ...scope, host, path, purpose, ...(force ? { force_refresh: true } : {}) });
     if (!res.ok || !res.password) throw new CredDenied(res.error ?? "credential refused");
+    if (force) this.stale.delete(key);
     const cred = { username: res.username ?? "x-access-token", password: res.password, expiresAt: res.expires_at ? Date.parse(res.expires_at) : Date.now() + 30 * 60_000 };
     if (purpose === "read") this.cache.set(key, { scope, host, path, cred });
     this.sweep();
@@ -52,6 +60,7 @@ export class CredBroker {
    * git erased a rejected token, or the session ended. Returns how many were dropped.
    */
   forget(match: (scope: CredScope) => boolean, host?: string, path?: string): number {
+    for (const [key, s] of this.stale) if (match(s) && host === undefined) this.stale.delete(key);
     let n = 0;
     for (const [key, e] of this.cache) {
       if (!match(e.scope) || (host !== undefined && e.host !== host) || (path !== undefined && e.path !== path)) continue;
@@ -59,6 +68,17 @@ export class CredBroker {
       n++;
     }
     return n;
+  }
+
+  /**
+   * git erased the token for this caller and repository (it was rejected): drop the cached one
+   * and make the next request carry force_refresh, so the console mints a new token instead of
+   * handing back the same one from its own cache.
+   */
+  invalidate(scope: CredScope, host: string, path: string): boolean {
+    const key = credKey(scope, host, path, "read");
+    this.stale.set(key, scope);
+    return this.cache.delete(key);
   }
 
   /** Drops expired entries (sessions that never ended cleanly). */

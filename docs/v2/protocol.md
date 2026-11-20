@@ -410,7 +410,9 @@
 
 ### `cred.request`（守护进程 → 控制台，不可靠但带 `req_id`，超时 10 s 重试）
 
-`{"req_id", "session_id"|"job_id", "open_gen"?, "host": "github.com", "path": "owner/name.git", "purpose": "read|push"}`
+`{"req_id", "session_id"|"job_id", "open_gen"?, "host": "github.com", "path": "owner/name.git", "purpose": "read|push", "force_refresh"?: true}`
+
+`force_refresh`：git 拒绝了上一次给的令牌（凭证助手收到 `erase`）。控制台跳过自己的令牌缓存重新铸造，并替换缓存；同一令牌范围每个控制台进程每分钟最多强制铸一次，超出时交回刚铸的那个。PAT 连接忽略这个字段。
 
 控制台先做 §2.3 的归属校验，再按调用方决定令牌范围（architecture.md §10.4）：组长和成员的会话只给本项目仓库、按仓库缩小的员工令牌（`contents: write, pull_requests: write, issues: write, checks: read`，项目允许时加 `workflows: write`；PAT 连接直接给 PAT），`purpose` 对会话不起作用（git 的 credential helper 分不清 fetch 和 push），受保护分支由平台 pre-push 钩子拒绝；`git.prepare`/`git.status` 作业给只读令牌；`git.push` 作业给 `contents: write`（项目允许时加 `workflows: write`）；作业的令牌只发给作业自己的仓库（`body.repo`），用该仓库绑定的 Git 连接铸造；统筹会话一律拒绝。
 
@@ -418,9 +420,9 @@
 
 `{"req_id", "ok": true, "username": "x-access-token", "password": "ghs_…", "expires_at": "…"}` 或 `{"req_id", "ok": false, "error": "repo_not_in_project"}`。
 
-`expires_at` 是令牌**真实的**到期时间：控制台的令牌缓存可能交出只剩 10～60 分钟的安装令牌，照实上报；PAT 没有到期时间，上报“现在 + 30 分钟”，让守护进程定期重新确认项目是否仍允许。守护进程只在内存里缓存到 `expires_at` 前 5 分钟；git 认证失败调凭证助手的 `erase` 时，守护进程丢掉这个“会话 + 仓库”的缓存，下一次 `get` 重新发 `cred.request`。
+`expires_at` 是令牌**真实的**到期时间：控制台的令牌缓存可能交出只剩 10～60 分钟的安装令牌，照实上报；PAT 没有到期时间，上报“现在 + 30 分钟”，让守护进程定期重新确认项目是否仍允许。守护进程只在内存里缓存到 `expires_at` 前 5 分钟；git 认证失败调凭证助手的 `erase` 时，守护进程丢掉这个“会话 + 仓库”的缓存，下一次 `get` 重新发 `cred.request`，并带上 `force_refresh: true`。
 
-此类消息**不进发件箱、不写日志**（守护进程和控制台都对 `cred.*` 关闭消息体日志）。控制台在节点链路读循环之外（单独的 goroutine，全局最多 32 个同时进行）处理 `cred.request`，慢的 GitHub 请求不会挡住这条链路上的其他消息；两者都是不可靠消息、靠 `req_id` 配对，先后顺序无关。
+此类消息**不进发件箱、不写日志**（守护进程和控制台都对 `cred.*` 关闭消息体日志）。控制台在节点链路读循环之外（单独的 goroutine，全局最多 32 个同时进行；占满时这次请求直接丢弃并记 WARN，靠守护进程 10 秒后重试，读循环从不等待）处理 `cred.request`，慢的 GitHub 请求不会挡住这条链路上的其他消息；两者都是不可靠消息、靠 `req_id` 配对，先后顺序无关。
 
 ## 9. 节点管理
 

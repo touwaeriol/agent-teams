@@ -247,7 +247,7 @@
 - 节点只有一条长连接：`wss://<console>/nodes/connect`（`protocol.md` §1）。服务端 `server/internal/nodegw/gateway.go`（`Gateway.ServeWS`，`github.com/coder/websocket`，`SetReadLimit(MaxFrame)`，4 MiB）、`server/internal/nodegw/link.go`（`link.reader` **逐帧串行**处理，`link.write` 一把发送锁、**文本帧** JSON）、`server/internal/nodegw/registry.go`（命令经 Valkey 频道 `node:<id>:cmd` 转到持有链路的副本）。可靠命令先写 `at_node_commands`（`server/internal/nodegw/outbox.go` 的 `Gateway.Enqueue`、`Gateway.flush`）。
 - 节点端：`node/src/link/client.ts`（`Link`，`ws` 库，`JSON.stringify` 文本帧）、`node/src/link/dispatcher.ts`（按 lane 串行执行命令）、`node/src/link/outbox.ts`（可靠消息先写 `state/outbox/*.jsonl`）。
 - 已有“守护进程走普通 HTTP 路由、用节点令牌认证”的先例：`server/internal/orchapi/attachments.go` 的 `API.nodeAttachment`（`GET /nodes/attachments/{id}`，调用 `Gateway.Authenticate`），路由挂在 `server/internal/orchapi/api.go`（`API.registerNodeLinks` 挂 `/nodes/connect`），授权行在 `server/internal/httpapi/authz/policy.csv`（`node-token` 主体）。
-- 值得注意：主连接的读循环里，`cred.request` 是**同步**处理的（`link.handleUnreliableOwned` → `delivery.Engine.Credential` 去 GitHub 铸令牌），一次慢请求就会让这条链路上后面的所有帧排队。这对“在主连接上跑大流量数据”是个直接的反证。
+- 值得注意：（**已在 #38 修复**）原先主连接的读循环里，`cred.request` 是**同步**处理的（`link.handleUnreliableOwned` → `delivery.Engine.Credential` 去 GitHub 铸令牌），一次慢请求就会让这条链路上后面的所有帧排队。这对“在主连接上跑大流量数据”是个直接的反证。现在 `Credential` 只占一个槽位就返回，铸令牌在 goroutine 里做；32 个槽位占满时直接丢弃这次请求并记 WARN（不可靠消息，守护进程 10 秒后重试），读循环从不等待。
 
 ### 6.2 三个方案
 
@@ -564,7 +564,7 @@ v2 已经是“按次领取、不落盘”的设计并已实现（`architecture.
 | 会话环境 | `node/src/cred/helper.ts` 的 `gitCredentialEnv`；`node/src/daemon.ts` 的 `Daemon.credEnv` | `GIT_CONFIG_COUNT/KEY/VALUE` 先清空再设 `credential.https://github.com.helper = !<node> git-credential --socket … --session … --secret …`、`useHttpPath=true`，`GIT_TERMINAL_PROMPT=0`；另设 `AT_CRED_SOCK/SESSION/SECRET`。统筹或没有 `git_credentials` 的会话不设 |
 | 每会话秘密 | `node/src/cred/server.ts` 的 `CredServer.register`、`unregister` | 每次打开换一个 24 字节随机秘密，只在守护进程内存；`Daemon.forgetSession` 时删除 |
 | 本地 socket | `CredServer.start`、`credSocketPath` | `<runtimeDir>/cred.sock`，目录 0700（且必须属于自己），socket 0600；比较秘密用 `timingSafeEqual` |
-| 节点缓存 | `node/src/cred/broker.ts` 的 `CredBroker.get`、`forget` | 只在内存，按“调用方 + 仓库 + 用途”缓存到上报的过期时间前 5 分钟；`push` 用途不缓存；git `erase` 时丢掉该“会话 + 仓库”的缓存（`CredServer` 的 `op: "erase"`），会话结束（`unregister`）时丢掉该会话的全部缓存 |
+| 节点缓存 | `node/src/cred/broker.ts` 的 `CredBroker.get`、`invalidate`、`forget` | 只在内存，按“调用方 + 仓库 + 用途”缓存到上报的过期时间前 5 分钟；`push` 用途不缓存；git `erase` 时丢掉该“会话 + 仓库”的缓存（`CredServer` 的 `op: "erase"`），并让下一次 `cred.request` 带 `force_refresh: true`；会话结束（`unregister`）时丢掉该会话的全部缓存和待刷新标记 |
 | 协议 | `protocol.md` §8 的 `cred.request` / `cred.response` | 不可靠消息（不进发件箱、不写日志）；控制台在读循环之外的 goroutine 里处理 `cred.request`（`delivery.Engine.Credential`，全局最多 32 个并发），用 `Gateway.SendNow` 直接写在链路上（`server/internal/nodegw/outbox.go`）；守护进程的 `Dispatcher`（`node/src/link/dispatcher.ts`）只把**可靠**命令的回复记进 `done.jsonl`，所以令牌不会进节点上的任何文件 |
 | 控制台判断范围 | `server/internal/delivery/cred.go` 的 `Engine.credential`、`credScope`、`sessionScope`、`jobScope` | 归属校验后：会话只能拿本项目仓库的令牌，组长和成员 `ScopeEmployee`（项目允许改 workflow 时 `ScopeEmployeeFlows`），统筹拒绝；作业只能拿自己那一个仓库，准备作业只读、推送作业 `contents: write` |
 | 铸造 | `server/internal/ghops/ghops.go` 的 `GitHub.Token`、`Credential`、`request`；`server/internal/github/tokens.go` 的 `Tokens.Installation`、`InstallationToken`、`mint`；`server/internal/github/jwt.go` 的 `AppJWT`；`server/internal/github/client.go` | App 连接：用 App 私钥签 JWT → `POST /app/installations/{id}/access_tokens`，**只含一个仓库**、按范围缩小权限；安装缺权限时退回“已授予的子集” |
@@ -586,11 +586,11 @@ v2 已经是“按次领取、不落盘”的设计并已实现（`architecture.
 | --- | --- | --- | --- |
 | 1 | **PAT 连接**：`GitHub.Token` 对 PAT 连接的 `ScopeEmployee` 直接返回 PAT（只有 `ScopeRead` 会返回 `ErrPATNarrow`），2026-11-17 起员工会话也拿 PAT | PAT 长期有效、权限覆盖用户账号能访问的全部仓库，泄露一次的后果远大于 1 小时单仓库令牌；不满足 R5 | 待拍板 Q8。推荐：不突然断掉现有项目，但在项目设置和 GitHub 页显示醒目提示“这个项目用的是个人令牌，员工会话拿到的是长期、全仓库的令牌”，提供一键“改用 GitHub App”；新项目默认只能选 App 连接；第二期起 PAT 连接对员工会话默认关闭（项目可显式打开，写审计） |
 | 2 | **（已修，#38）** **上报的过期时间不准**：`delivery/cred.go` 的 `Engine.credential` 一律回 `expires_at = now + credTTL`（50 分钟），而 `Tokens.Installation` 可能返回缓存里只剩 10～60 分钟的令牌（`RefreshMargin` 10 分钟） | 节点 `CredBroker` 按 50 分钟缓存，最坏情况令牌已过期 30 多分钟仍在用，git 报认证失败 | 已改：`Tokens.InstallationToken`/`GitHub.Credential` 返回真实 `ExpiresAt`，`credential` 照实上报；PAT 上报“现在 + 30 分钟”（`patTTL`） |
-| 3 | **（已修，#38）** **凭证助手忽略 `erase`**：`gitCredentialMain` 对 `get` 以外的操作直接返回；**文档写了 `SO_PEERCRED` 但代码没有**（§8.2） | git 认证失败后会调 `erase`，但节点缓存不会被清，失败会持续到缓存过期；文档与实现不符 | 已改：`erase` 经 socket（`op: "erase"`，同样核对每会话秘密）让守护进程丢弃这个“会话 + 仓库”的缓存；`architecture.md` §10.4 已改成实际做法（不核对 `SO_PEERCRED`） |
+| 3 | **（已修，#38）** **凭证助手忽略 `erase`**：`gitCredentialMain` 对 `get` 以外的操作直接返回；**文档写了 `SO_PEERCRED` 但代码没有**（§8.2） | git 认证失败后会调 `erase`，但节点缓存不会被清，失败会持续到缓存过期；文档与实现不符 | 已改：`erase` 经 socket（`op: "erase"`，同样核对每会话秘密）让守护进程丢弃这个“会话 + 仓库”的缓存，下一次 `cred.request` 带 `force_refresh: true`，控制台跳过自己的令牌缓存（内存和 Valkey）重新铸造并替换缓存（`Tokens.RefreshInstallationToken`；同一令牌范围每个控制台进程每分钟最多强制铸一次，超出时交回刚铸的那个）；PAT 没有可刷新的，原样返回；`architecture.md` §10.4 已改成实际做法（不核对 `SO_PEERCRED`） |
 | 4 | **gh 子进程环境里的 `GH_TOKEN`**、**作业 git 子进程环境里的 `AT_GIT_PASSWORD`** | 进程运行期间，同账号进程可以读它的环境变量 | 同账号下任何方案都有这个残余风险（gh 只认环境变量或配置文件，配置文件更糟）；保持现状，寄望 §8.4 的隔离 |
 | 5 | **会话环境里的 `AT_CRED_SECRET`**（`GIT_CONFIG_VALUE_1` 里也有同一秘密） | 同账号进程读到后，可在会话存活期内冒充该会话领令牌 | 与 SSH 相同的残余风险（§8.2），保持；`agent_user` 后不再能被守护进程以外的账号读到，每会话账号后完全消失 |
 | 6 | `sandbox` 节点上沙箱命令连不上 `cred.sock` | 沙箱节点的 git/gh 没有令牌 | 随 §8.3 一起修（socket 挪到会话目录 + `allowUnixSockets`） |
-| 7 | **（已修，#38）** 控制台读循环里同步铸令牌（§6.1） | 一次慢的 GitHub 请求阻塞整条节点链路 | 已改：`delivery.Engine.Credential` 把请求放进 goroutine（全局信号量 32、单次 1 分钟超时）；归属校验仍在读循环里同步做。`ssh.cert_request` 照同样做法 |
+| 7 | **（已修，#38）** 控制台读循环里同步铸令牌（§6.1） | 一次慢的 GitHub 请求阻塞整条节点链路 | 已改：`delivery.Engine.Credential` 把请求放进 goroutine（全局信号量 32、单次 1 分钟超时；槽位占满时不等待，直接丢弃并记 WARN，守护进程 10 秒后重试）；归属校验仍在读循环里同步做。`ssh.cert_request` 照同样做法 |
 | 8 | **（已修，#38）** `protocol.md` §2.1 的表把 `cred.response` 列为可靠命令，而 §8 正文和实现（`SendNow`）都是不可靠 | 文档自相矛盾 | 改文档 |
 
 以下**不是差距**，保持：节点内存缓存（只在内存、按会话隔离、有过期）；Valkey 里的令牌缓存（已用 `SecretBox` 密封、TTL 等于剩余时间、键含范围）；App 私钥的存储方式（以后随 §11.1 的信封加密一起迁，不单独改）。
@@ -625,7 +625,7 @@ sequenceDiagram
         D-->>H: username 与 password
     end
     H-->>G: 输出给 git，或只放进那一次 gh 子进程的 GH_TOKEN
-    Note over G,H: 认证失败时 git 调 erase，改动点：通知守护进程清缓存
+    Note over G,H: 认证失败时 git 调 erase：守护进程清缓存，下一次 cred.request 带 force_refresh，控制台跳过缓存重新铸造
 ```
 
 ## 11. 凭证存储和轮换

@@ -75,18 +75,31 @@ describe("credentials", () => {
       expect((await erase("s_1", "wrong", "acme/app.git")).out).toBe("");
       await get("s_1", a, "acme/app.git");
       expect(sent.length).toBe(3);
-      // erase drops s_1's token for acme/app only: the next get asks the console again.
+      expect(sent.every((m) => m.force_refresh === undefined)).toBe(true);
+      // erase drops s_1's token for acme/app only: the next get asks the console again, telling
+      // it to skip its own token cache (force_refresh), once.
       expect((await erase("s_1", a, "acme/app.git")).out).toBe("");
       expect((await get("s_1", a, "acme/app.git")).out).toContain("password=ghs_4");
+      expect(sent[3]).toMatchObject({ session_id: "s_1", path: "acme/app.git", force_refresh: true });
       await get("s_1", a, "acme/lib.git");
       await get("s_2", b, "acme/app.git");
       expect(sent.length).toBe(4);
+      // erase of a token no longer cached still makes the next request force a refresh.
+      await erase("s_2", b, "acme/lib.git");
+      await get("s_2", b, "acme/lib.git");
+      expect(sent[4]).toMatchObject({ session_id: "s_2", path: "acme/lib.git", force_refresh: true });
+      await erase("s_2", b, "acme/lib.git");
+      sent.splice(4, 1);
+      server.unregister("s_2");
       // The session ends: its tokens leave the cache; the other session keeps its own.
       server.unregister("s_1");
       const again = server.register("s_1", 2);
+      const b2 = server.register("s_2", 1);
       await get("s_1", again, "acme/lib.git");
-      await get("s_2", b, "acme/app.git");
       expect(sent.length).toBe(5);
+      // The session's pending force_refresh ended with it.
+      await get("s_2", b2, "acme/lib.git");
+      expect(sent[5]!.force_refresh).toBeUndefined();
     } finally {
       await server.stop();
     }

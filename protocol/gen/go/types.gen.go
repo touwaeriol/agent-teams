@@ -1468,6 +1468,10 @@ func (j *ContextUsage) UnmarshalJSON(value []byte) error {
 // Credential helper asks for a short-lived token. Unreliable, retried after 10 s
 // with the same req_id; never logged.
 type CredRequest struct {
+	// Git rejected the token handed out last (credential erase): the console skips
+	// its token cache and mints a new one (at most once a minute per token scope).
+	ForceRefresh *bool `json:"force_refresh,omitempty,omitzero"`
+
 	// Host corresponds to the JSON schema field "host".
 	Host string `json:"host"`
 

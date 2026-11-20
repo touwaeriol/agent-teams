@@ -476,6 +476,10 @@
             "read",
             "push"
           ]
+        },
+        "force_refresh": {
+          "description": "Git rejected the token handed out last (credential erase): the console skips its token cache and mints a new one (at most once a minute per token scope).",
+          "type": "boolean"
         }
       }
     },
