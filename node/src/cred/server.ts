@@ -23,8 +23,11 @@ export function credSocketPath(runtimeDir: string, tmp = tmpdir()): string {
 }
 
 export interface CredSocketRequest {
-  /** "cred" (default): a token for git; "gh": the real gh binary, its config dir and a token. */
-  op?: "cred" | "gh";
+  /**
+   * "cred" (default): a token for git; "gh": the real gh binary, its config dir and a token;
+   * "erase": git rejected the token, drop the cached one for this session and repository.
+   */
+  op?: "cred" | "gh" | "erase";
   session: string;
   secret: string;
   host: string;
@@ -89,8 +92,15 @@ export class CredServer {
     return secret;
   }
 
+  /** The session's open_gen when the secret is right (ssh.sock uses the same per-session secret), else null. */
+  verify(sessionId: string, secret: string): number | null {
+    const entry = this.sessions.get(sessionId);
+    return entry && safeEqual(entry.secret, secret) ? entry.openGen : null;
+  }
+
   unregister(sessionId: string): void {
     this.sessions.delete(sessionId);
+    this.broker.forget((s) => "session_id" in s && s.session_id === sessionId);
     const dir = this.ghConfigDir(sessionId);
     if (dir) rmSync(dir, { recursive: true, force: true });
   }
@@ -121,7 +131,18 @@ export class CredServer {
     const req = parse(line);
     const entry = req ? this.sessions.get(req.session) : undefined;
     if (!req || !entry || !safeEqual(entry.secret, req.secret)) return { ok: false, error: "unknown session" };
+    if (req.op === "erase") return this.eraseReply(req, entry);
     return req.op === "gh" ? this.ghReply(req, entry) : this.credReply(req, entry);
+  }
+
+  /**
+   * git erase: the next get for this session and repository asks the console again, with
+   * force_refresh so the console mints a new token rather than returning its cached one.
+   */
+  private eraseReply(req: CredSocketRequest, entry: SessionEntry): Record<string, unknown> {
+    const dropped = this.broker.invalidate({ session_id: req.session, open_gen: entry.openGen }, req.host, req.path);
+    this.log.info({ session: req.session, dropped }, "credential erased by git");
+    return { ok: true };
   }
 
   /** The broker's token for one repository (the console decides the scope by the session's role, §10.4). */

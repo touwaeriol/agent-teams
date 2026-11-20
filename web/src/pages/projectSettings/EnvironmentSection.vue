@@ -1,10 +1,12 @@
 <script setup lang="ts">
-// 环境: the repositories every thread includes and whether employees work in git worktrees.
-// Employees always run on your own nodes (设置 → 节点); there are no cloud or remote environments.
+// 环境: the repositories every thread includes, whether employees work in git worktrees, and the
+// remote servers (设置 → 服务器) employees of which roles may reach over SSH. Employees always run on
+// your own nodes (设置 → 节点).
 import type { ProjectView } from "@/api/views";
 import { WORKTREE_CHOICES, worktreeChoice, type WorkMode } from "@/lib/projectSettings";
 import Heading from "./Heading.vue";
 import RepoSection from "./RepoSection.vue";
+import ServersSection from "./ServersSection.vue";
 import { useUpdate } from "./useUpdate";
 
 const props = defineProps<{ project: ProjectView }>();
@@ -27,5 +29,6 @@ const update = useUpdate(() => props.project.id);
       </el-select>
     </div>
     <p class="text-[13px] leading-5 text-muted-foreground">{{ worktreeChoice(project.work_mode).desc }} 已有检出的员工在下次准备工作目录时按新方式；最好在没有进行中的讨论串时修改。</p>
+    <ServersSection :project-id="project.id" />
   </div>
 </template>

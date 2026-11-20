@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { ConfigError, loadConfig } from "./config.js";
 import { ghMain, gitCredentialMain } from "./cred/helper.js";
 import { Daemon } from "./daemon.js";
+import { sshProxyMain } from "./ssh/proxy.js";
 import { createLogger } from "./util/log.js";
 import { DAEMON_VERSION } from "./version.js";
 
@@ -13,7 +14,7 @@ usage:
   agent-teams-node version
 
 Defaults come from ~/.config/agent-teams/node.env (AGENT_TEAMS_CONSOLE, AGENT_TEAMS_NODE_TOKEN,
-AGENT_TEAMS_ROOT, AGENT_TEAMS_MAX_SESSIONS, AGENT_TEAMS_PASS_ENV). Internal helpers: git-credential, gh.
+AGENT_TEAMS_ROOT, AGENT_TEAMS_MAX_SESSIONS, AGENT_TEAMS_PASS_ENV). Internal helpers: git-credential, gh, ssh-proxy.
 `;
 
 async function main(argv: string[]): Promise<number> {
@@ -25,6 +26,8 @@ async function main(argv: string[]): Promise<number> {
       return gitCredential(rest);
     case "gh":
       return ghMain(rest, process.env);
+    case "ssh-proxy":
+      return sshProxyMain(rest, process.env);
     case "version":
     case "--version":
       process.stdout.write(`${DAEMON_VERSION}\n`);

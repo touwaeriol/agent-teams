@@ -4,9 +4,17 @@
 import { useInfiniteQuery, useQuery, type InfiniteData } from "@tanstack/vue-query";
 import { computed, toValue, type MaybeRefOrGetter } from "vue";
 import { client, list, unwrap } from "./client";
-import type { MessageView, Page, ThreadView } from "./views";
+import type { MessageView, Page, ProjectServersView, ServerView, SshAuditPage, ThreadView } from "./views";
 
 type Arg<T = string> = MaybeRefOrGetter<T>;
+
+/** Filters of the SSH access log (api.md §3.9.1); empty values do not filter. */
+export interface AuditFilter {
+  kind?: string;
+  employee?: string;
+  server_id?: string;
+  thread_id?: string;
+}
 
 export const keys = {
   me: ["me"] as const,
@@ -50,6 +58,10 @@ export const keys = {
   deliverableFiles: (id: string, version = 0) => ["deliverable", id, "files", version] as const,
   deliverableComments: (id: string) => ["deliverable", id, "comments"] as const,
   connections: ["git"] as const,
+  servers: ["servers"] as const,
+  serverAudit: (id: string, f: AuditFilter = {}) => ["servers", id, "audit", f] as const,
+  projectServers: (pid: string) => ["p", pid, "servers"] as const,
+  projectServerAudit: (pid: string, f: AuditFilter = {}) => ["p", pid, "server-audit", f] as const,
   repos: (id: string, q = "") => ["git", id, "repos", q] as const,
   branches: (id: string, repo: string) => ["git", id, "branches", repo] as const,
   githubApp: ["github-app"] as const,
@@ -255,6 +267,44 @@ export const useDeliverableFiles = (id: Arg, version: Arg<number> = 0, enabled: 
 
 export const useDeliverableComments = (id: Arg) =>
   useKeyed(() => keys.deliverableComments(val(id)), () => unwrap(client.GET("/api/deliverables/{id}/comments", path({ id: val(id) }))), { enabled: has(id) });
+
+export const useServers = () => useQuery({ queryKey: keys.servers, queryFn: () => list(client.GET("/api/servers")) as Promise<ServerView[]> });
+
+export const useProjectServers = (pid: Arg) =>
+  useKeyed(() => keys.projectServers(val(pid)), () => unwrap(client.GET("/api/projects/{pid}/servers", path({ pid: val(pid) }))) as Promise<ProjectServersView>, { enabled: has(pid) });
+
+const AUDIT_PAGE = 50;
+const clean = (f: AuditFilter) => Object.fromEntries(Object.entries(f).filter(([, v]) => v)) as AuditFilter;
+
+/** The access log of one server, newest first, paged by cursor. */
+export const useServerAudit = (id: Arg, filter: Arg<AuditFilter> = {}) =>
+  useInfiniteQuery({
+    queryKey: computed(() => keys.serverAudit(val(id), clean(toValue(filter)))),
+    queryFn: ({ pageParam }: { pageParam: string | undefined }) => {
+      const f = clean(toValue(filter));
+      return unwrap(client.GET("/api/servers/{id}/audit", { params: { path: { id: val(id) }, query: { kind: f.kind, employee: f.employee, cursor: pageParam, limit: AUDIT_PAGE } } })) as Promise<SshAuditPage>;
+    },
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page: SshAuditPage) => page.next_cursor ?? undefined,
+    enabled: computed(() => Boolean(toValue(id))),
+  });
+
+/** The access log of a project's servers, newest first, paged by cursor. */
+export const useProjectServerAudit = (pid: Arg, filter: Arg<AuditFilter> = {}) =>
+  useInfiniteQuery({
+    queryKey: computed(() => keys.projectServerAudit(val(pid), clean(toValue(filter)))),
+    queryFn: ({ pageParam }: { pageParam: string | undefined }) => {
+      const f = clean(toValue(filter));
+      return unwrap(
+        client.GET("/api/projects/{pid}/server-audit", {
+          params: { path: { pid: val(pid) }, query: { kind: f.kind, employee: f.employee, server_id: f.server_id, thread_id: f.thread_id, cursor: pageParam, limit: AUDIT_PAGE } },
+        }),
+      ) as Promise<SshAuditPage>;
+    },
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page: SshAuditPage) => page.next_cursor ?? undefined,
+    enabled: computed(() => Boolean(toValue(pid))),
+  });
 
 export const useConnections = () => useQuery({ queryKey: keys.connections, queryFn: () => list(client.GET("/api/git/connections")) });
 

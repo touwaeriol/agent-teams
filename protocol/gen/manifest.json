@@ -356,6 +356,35 @@
       "key": []
     },
     {
+      "type": "ssh.cert_request",
+      "name": "SshCertRequest",
+      "direction": "node_to_console",
+      "reliable": false,
+      "key": [
+        "req_id"
+      ]
+    },
+    {
+      "type": "ssh.cert_response",
+      "name": "SshCertResponse",
+      "direction": "console_to_node",
+      "reliable": false,
+      "key": [
+        "req_id"
+      ]
+    },
+    {
+      "type": "ssh.servers_update",
+      "name": "SshServersUpdate",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "session_id",
+        "open_gen",
+        "version"
+      ]
+    },
+    {
       "type": "stream.delta",
       "name": "StreamDelta",
       "direction": "node_to_console",

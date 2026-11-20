@@ -107,7 +107,35 @@ type harness struct {
 	gh     *httptest.Server
 	nodes  *fakeNodes
 	events *fakeEvents
+	ssh    *fakeSSH
 	cfg    config.Config
+}
+
+// fakeSSH records the remote server hooks.
+type fakeSSH struct {
+	mu      sync.Mutex
+	revoked []int64
+	changed []string // project ids
+}
+
+func (f *fakeSSH) CertsRevoked(_ context.Context, serials []int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.revoked = append(f.revoked, serials...)
+}
+
+func (f *fakeSSH) ServersChanged(_ context.Context, _ string, projectIDs []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.changed = append(f.changed, projectIDs...)
+}
+
+func (f *fakeSSH) take() (revoked []int64, changed []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	revoked, changed = f.revoked, f.changed
+	f.revoked, f.changed = nil, nil
+	return revoked, changed
 }
 
 const testSecret = "test-secret-key"
@@ -121,7 +149,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(db.Close)
-	h := &harness{t: t, db: db, nodes: &fakeNodes{online: map[string]bool{}}, events: &fakeEvents{}}
+	h := &harness{t: t, db: db, nodes: &fakeNodes{online: map[string]bool{}}, events: &fakeEvents{}, ssh: &fakeSSH{}}
 	h.gh = httptest.NewServer(fakeGitHub(t))
 	t.Cleanup(h.gh.Close)
 	h.cfg = config.Config{PublicURL: "http://console.test", SecretKeys: []string{testSecret}, AdminEmails: map[string]bool{"boss@example.com": true},
@@ -135,7 +163,7 @@ func newHarness(t *testing.T) *harness {
 	if err := reg.Load(ctx); err != nil {
 		t.Fatal(err)
 	}
-	h.server = New(Deps{Config: h.cfg, Store: db, KV: testKV(t), Office: reg, Nodes: h.nodes, Events: h.events, Log: log,
+	h.server = New(Deps{Config: h.cfg, Store: db, KV: testKV(t), Office: reg, Nodes: h.nodes, Events: h.events, SSH: h.ssh, Log: log,
 		GitHub: &github.Client{BaseURL: h.gh.URL, WebURL: h.gh.URL, HTTP: h.gh.Client()}, Version: func() int64 { return 30 }})
 	h.srv = httptest.NewServer(h.server.Handler())
 	t.Cleanup(h.srv.Close)

@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import * as F from "./fixtures.mjs";
+import { serverRoutes } from "./servers.mjs";
 
 const PORT = Number(process.env.MOCK_PORT ?? 3001);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -611,6 +612,9 @@ const routes = [
   ["PUT", /^\/api\/admin\/settings$/, async (req, res) => json(res, 200, Object.assign(state.adminSettings, await body(req)))],
   ["GET", /^\/api\/admin\/audit$/, (req, res) => json(res, 200, { items: [{ id: 1, action: "login", actor: "admin@prophey.ai", created_at: F.ago(5), detail: {}, ip: "127.0.0.1", target_id: "u1", target_type: "user", user_id: "u1" }], next_cursor: null })],
 ];
+
+// Remote servers (api.md §3.9.1): mock/servers.mjs.
+routes.push(...serverRoutes(state, { json, fail, body, roles: () => state.roles, projects: () => state.projects }));
 
 function waiting() {
   return { questions: [...state.questions.t12, ...state.questions.t13].filter((q) => q.status === "open"), reviews: state.threads.filter((t) => t.status === "review") };

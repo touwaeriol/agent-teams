@@ -218,17 +218,32 @@ func (r Repo) IsApp() bool { return r.conn.Kind == "app" }
 
 // Token returns a credential for the repo with the given scope.
 func (g *GitHub) Token(ctx context.Context, r Repo, scope Scope) (string, error) {
+	tok, _, err := g.Credential(ctx, r, scope, false)
+	return tok, err
+}
+
+// Credential is Token with the credential's expiry: the installation token's real expiry, or
+// a zero time for a PAT (it does not expire on its own; callers pick a re-check interval).
+// refresh skips the token cache (the caller saw the cached token rejected), rate-limited by
+// Tokens.RefreshInstallationToken; it changes nothing for a PAT.
+func (g *GitHub) Credential(ctx context.Context, r Repo, scope Scope, refresh bool) (string, time.Time, error) {
 	if r.conn.Kind == "app" && r.conn.InstallationID != nil {
-		return g.Tokens.Installation(ctx, *r.conn.InstallationID, request(r, scope))
+		get := g.Tokens.InstallationToken
+		if refresh {
+			get = g.Tokens.RefreshInstallationToken
+		}
+		tok, err := get(ctx, *r.conn.InstallationID, request(r, scope))
+		return tok.Value, tok.ExpiresAt, err
 	}
 	if scope == ScopeRead {
-		return "", ErrPATNarrow
+		return "", time.Time{}, ErrPATNarrow
 	}
 	sealed, err := g.Store.ConnectionSecret(ctx, r.project.UserID, r.conn.ID)
 	if err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
-	return g.Box.Open(sealed)
+	tok, err := g.Box.Open(sealed)
+	return tok, time.Time{}, err
 }
 
 func request(r Repo, scope Scope) github.TokenRequest {

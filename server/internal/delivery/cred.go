@@ -12,13 +12,45 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// credTTL is the lifetime reported for minted tokens (installation tokens live 1 h; the
-// daemon refreshes 5 minutes before this).
-const credTTL = 50 * time.Minute
+// patTTL is the lifetime reported for a PAT, which does not expire on its own: the daemon
+// asks again after it, so a project that stopped allowing the PAT stops handing it out.
+// Installation tokens report their real expiry (remote-servers.md §10.3 #2).
+const patTTL = 30 * time.Minute
+
+// credTimeout bounds one cred.request (ownership checks plus, on a cache miss, a GitHub call).
+const credTimeout = time.Minute
+
+// credInflight bounds the cred.requests minted at the same time across all node links.
+const credInflight = 32
+
+// credSlots is the semaphore for credInflight (package-level: the engine is built once per process).
+var credSlots = make(chan struct{}, credInflight)
 
 // Credential answers cred.request with a token narrowed to the caller (protocol.md §8,
 // architecture.md §10.4). Ownership of the session or job was checked by the gateway.
+// The answer is worked out off the link's read loop (a slow GitHub call must not stall the
+// node's other messages); cred.request is unreliable and paired by req_id, so order does not matter.
 func (e *Engine) Credential(ctx context.Context, node store.Node, r *protocol.CredRequest) error {
+	req := *r
+	select {
+	case credSlots <- struct{}{}:
+	default:
+		// Never wait on the read loop: the daemon asks again after 10 s with the same req_id.
+		e.log.Warn("cred.request dropped: too many in flight", "node_id", node.ID, "req_id", req.ReqID, "limit", credInflight)
+		return nil
+	}
+	go func() {
+		defer func() { <-credSlots }()
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), credTimeout)
+		defer cancel()
+		if err := e.answerCredential(cctx, node, &req); err != nil {
+			e.log.Warn("cred.response not sent", "node_id", node.ID, "req_id", req.ReqID, "err", err)
+		}
+	}()
+	return nil
+}
+
+func (e *Engine) answerCredential(ctx context.Context, node store.Node, r *protocol.CredRequest) error {
 	resp := e.credential(ctx, node, r)
 	resp.ReqID = r.ReqID
 	return e.gw.SendNow(ctx, node.ID, protocol.TypeCredResponse, resp)
@@ -38,9 +70,10 @@ func (e *Engine) credential(ctx context.Context, node store.Node, r *protocol.Cr
 		return refuse("repo_not_in_project")
 	}
 	scope := cs.scope
-	tok, err := e.gh.Token(ctx, repo, scope)
+	refresh := r.ForceRefresh != nil && *r.ForceRefresh // git rejected the last token (credential erase)
+	tok, exp, err := e.gh.Credential(ctx, repo, scope, refresh)
 	if errors.Is(err, ghops.ErrPATNarrow) && r.JobID != nil {
-		tok, err = e.gh.Token(ctx, repo, ghops.ScopeFull) // platform jobs may use the PAT (§10.4)
+		tok, exp, err = e.gh.Credential(ctx, repo, ghops.ScopeFull, refresh) // platform jobs may use the PAT (§10.4)
 	}
 	if errors.Is(err, ghops.ErrPATNarrow) {
 		return refuse("pat_not_narrowable")
@@ -49,8 +82,18 @@ func (e *Engine) credential(ctx context.Context, node store.Node, r *protocol.Cr
 		e.log.Warn("mint credential", "node_id", node.ID, "err", err)
 		return refuse("token_unavailable")
 	}
-	user, exp := "x-access-token", e.now().Add(credTTL).UTC()
+	user := "x-access-token"
+	exp = credExpiry(exp, e.now())
 	return protocol.CredResponse{Ok: true, Username: &user, Password: &tok, ExpiresAt: &exp}
+}
+
+// credExpiry is the expiry reported to the daemon: the token's own, or patTTL from now for a
+// credential without one (a PAT).
+func credExpiry(exp, now time.Time) time.Time {
+	if exp.IsZero() {
+		return now.Add(patTTL).UTC()
+	}
+	return exp.UTC()
 }
 
 func refuse(reason string) protocol.CredResponse {

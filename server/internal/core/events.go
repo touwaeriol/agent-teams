@@ -27,6 +27,7 @@ const (
 	EvLayout      = "layout"
 	EvSession     = "session"
 	EvSharedFile  = "shared_file"
+	EvServer      = "server" // an SSH connection to a remote server ended (remote-servers.md §9.4)
 )
 
 // ProjectChannel is the pub/sub channel of a project's events.

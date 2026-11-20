@@ -53,6 +53,16 @@ export type ScheduleView = S["Schedule"];
 export type ScheduleBody = S["ScheduleBody"];
 export type ProjectUsage = S["ProjectUsage"];
 export type ForwardView = S["ForwardView"];
+/** Remote servers (api.md §3.9.1): never carry a credential. */
+/** The server always sends arrays (Go nil slices are filled), though openapi marks them nullable. */
+export type ServerView = Omit<S["ServerView"], "projects"> & { projects: S["ProjectRef"][] };
+export type ServerAuth = S["ServerAuth"];
+export type ServerTestResult = S["ServerTestResult"];
+export type GrantableRoleView = S["GrantableRoleView"];
+export type ProjectServerView = { server: ServerView; roles: string[] };
+export type ProjectServersView = { servers: ProjectServerView[]; available: ServerView[]; roles: GrantableRoleView[] };
+export type SshAuditView = S["SSHAudit"];
+export type SshAuditPage = { items: SshAuditView[]; next_cursor: string | null };
 
 export type ThreadStatus = "queued" | "running" | "waiting" | "review" | "done" | "failed" | "paused" | "archived";
 export type MainTaskStatus = "todo" | "doing" | "done";

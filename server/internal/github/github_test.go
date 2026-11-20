@@ -231,3 +231,75 @@ func TestTokensNarrowToGrantedPermissions(t *testing.T) {
 		t.Fatalf("asked %v", asked)
 	}
 }
+
+// TestInstallationTokenRealExpiry: the expiry handed to cred.response is the token's own, also
+// when it comes from the memory or the shared cache (remote-servers.md §10.3 #2).
+func TestInstallationTokenRealExpiry(t *testing.T) {
+	expires := time.Now().Add(37 * time.Minute).UTC().Truncate(time.Second)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"token": "ghs_x", "expires_at": expires.Format(time.RFC3339)})
+	}))
+	defer srv.Close()
+	_, pemText := testKey(t)
+	box := auth.NewSecretBox("k")
+	apps := NewApps(memSettings{}, box)
+	if _, err := apps.Save(context.Background(), map[string]any{
+		"id": float64(7), "slug": "at", "client_id": "cid", "client_secret": "cs", "pem": pemText,
+		"webhook_secret": "wh", "owner": map[string]any{"login": "me"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	client := &Client{BaseURL: srv.URL, WebURL: srv.URL, HTTP: srv.Client()}
+	store := kv.NewMemory()
+	ctx := context.Background()
+	req := TokenRequest{Repositories: []string{"r"}}
+	for i, tokens := range []*Tokens{NewTokens(client, apps, store, box), NewTokens(client, apps, store, box)} {
+		for j := 0; j < 2; j++ { // minted (or shared), then from memory
+			tok, err := tokens.InstallationToken(ctx, 9, req)
+			if err != nil || tok.Value != "ghs_x" || !tok.ExpiresAt.Equal(expires) {
+				t.Fatalf("process %d call %d: %+v %v, want expiry %s", i, j, tok, err, expires)
+			}
+		}
+	}
+}
+
+// TestRefreshInstallationToken: a forced refresh skips the cache and replaces the cached token,
+// at most once per ForceRefreshEvery per cache key (git credential erase, remote-servers.md §10.3 #3).
+func TestRefreshInstallationToken(t *testing.T) {
+	var mints int32
+	srv := fakeGitHub(t, &mints)
+	defer srv.Close()
+	_, pemText := testKey(t)
+	box := auth.NewSecretBox("k")
+	apps := NewApps(memSettings{}, box)
+	if _, err := apps.Save(context.Background(), map[string]any{
+		"id": float64(7), "slug": "at", "client_id": "cid", "client_secret": "cs", "pem": pemText,
+		"webhook_secret": "wh", "owner": map[string]any{"login": "me"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	client := &Client{BaseURL: srv.URL, WebURL: srv.URL, HTTP: srv.Client()}
+	tokens := NewTokens(client, apps, kv.NewMemory(), box)
+	now := time.Now()
+	tokens.now = func() time.Time { return now }
+	ctx := context.Background()
+	req := TokenRequest{Repositories: []string{"r"}}
+	a, _ := tokens.InstallationToken(ctx, 9, req)
+	b, err := tokens.RefreshInstallationToken(ctx, 9, req)
+	if err != nil || b.Value == a.Value || mints != 2 {
+		t.Fatalf("forced refresh did not mint: %q %q mints=%d err=%v", a.Value, b.Value, mints, err)
+	}
+	if c, _ := tokens.InstallationToken(ctx, 9, req); c.Value != b.Value {
+		t.Fatal("the refreshed token did not replace the cached one")
+	}
+	// A second forced refresh within ForceRefreshEvery hands back the token just minted.
+	if d, _ := tokens.RefreshInstallationToken(ctx, 9, req); d.Value != b.Value || mints != 2 {
+		t.Fatalf("forced refresh not rate-limited: mints=%d", mints)
+	}
+	// Another scope has its own allowance.
+	if _, _ = tokens.RefreshInstallationToken(ctx, 9, TokenRequest{Repositories: []string{"other"}}); mints != 3 {
+		t.Fatalf("other scope: mints=%d", mints)
+	}
+	now = now.Add(ForceRefreshEvery)
+	if e, _ := tokens.RefreshInstallationToken(ctx, 9, req); e.Value == b.Value || mints != 4 {
+		t.Fatalf("forced refresh after the interval: mints=%d", mints)
+	}
+}

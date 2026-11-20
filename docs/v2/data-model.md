@@ -17,6 +17,8 @@
 at_users ─┬─ at_sessions
           ├─ at_nodes ─────────── at_node_commands, at_node_logs
           ├─ at_git_connections
+          ├─ at_remote_servers（远程服务器，用户设置里配置，§2.14）
+          ├─ at_ssh_audit（SSH 网关审计，§2.14）
           ├─ at_roles（岗位模板；替代 at_teams）
           └─ at_projects ─┬─ at_conversations（kind: coordinator | thread）   ─┬─ at_messages
                           │                                                        ├─ at_tasks（小任务）
@@ -32,6 +34,8 @@ at_users ─┬─ at_sessions
                           ├─ at_memory_files（MEMORY.md + 主题记忆文件）
                           ├─ at_permission_rules
                           └─ at_office_layouts（项目覆盖布局，可选）
+                          ├─ at_project_servers ── at_project_server_grants（项目选用的服务器、按岗位授权，§2.14）
+                          ├─ at_ssh_certs（会话证书，§2.14）
                           ├─ at_rate_limit_waits（碰到使用限额的员工，§2.10）
                           └─ at_schedules（定时任务，§2.10）
 at_settings（全局键值）  at_audit_log  casbin_rule（用户 → 角色）  goose_db_version
@@ -795,6 +799,80 @@ CREATE TABLE at_shared_files (          -- 项目共享文件：项目里所有�
 
 同一路径直接覆盖（`INSERT … ON CONFLICT DO UPDATE`，更新内容、上传者和 `updated_at`，`created_at` 保留），不做版本。上限在 `server/internal/sharedfiles`：单文件 20 MB（`MaxFileBytes`）、项目合计 500 MB（`MaxProjectBytes`）、项目文件数 1000（`MaxProjectFiles`）；覆盖时总量按差值算。写入前锁 `at_projects` 行（`SELECT … FOR UPDATE`），同项目的并发上传互相看得到总量。项目删除时级联删除。
 
+### 2.14 远程服务器（00330，讨论串 #38，remote-servers.md）
+
+服务器在**用户设置**里全局配置，属于用户（不属于某个项目）；项目从中选用，并按岗位授权。员工会话拿不到任何凭证：会话的 ssh 经主节点 SSH 网关登录，网关每次查库判断能不能连。
+
+```sql
+CREATE TABLE at_remote_servers (            -- 用户的服务器
+  id                    TEXT PRIMARY KEY,   -- srv_…
+  user_id               TEXT NOT NULL REFERENCES at_users(id) ON DELETE CASCADE,
+  name                  TEXT NOT NULL CHECK (name ~ '^[a-z0-9][a-z0-9-]{0,62}$'),  -- 会话 ssh_config 里的 Host 别名，用户内唯一
+  host                  TEXT NOT NULL,      -- 进凭证 AAD
+  port                  INT  NOT NULL DEFAULT 22 CHECK (port BETWEEN 1 AND 65535),  -- 进凭证 AAD
+  username              TEXT NOT NULL,      -- 进凭证 AAD
+  auth_kind             TEXT NOT NULL CHECK (auth_kind IN ('password','private_key')),  -- 进凭证 AAD
+  cred_ciphertext       BYTEA NOT NULL,     -- AES-256-GCM(DEK, JSON {password} | {private_key, passphrase?})
+  cred_nonce            BYTEA NOT NULL,
+  wrapped_dek           BYTEA NOT NULL,     -- AES-256-GCM(KEK, DEK)，AAD 同上再加 kek_id
+  dek_nonce             BYTEA NOT NULL,
+  kek_id                TEXT  NOT NULL,     -- 哪把 KEK 包的（派生 KEK 的 sha256 前 8 字节，hex）
+  has_passphrase        BOOLEAN NOT NULL DEFAULT FALSE,
+  key_fingerprint       TEXT NOT NULL DEFAULT '',   -- 私钥对应公钥的 SHA256:…（显示用）
+  host_key              TEXT NOT NULL DEFAULT '',   -- 用户确认过的目标 host key（authorized_keys 一行），'' = 未确认
+  host_key_fp           TEXT NOT NULL DEFAULT '',
+  host_key_mac          BYTEA,              -- HMAC(KEK 派生的 MAC 密钥, id|host|port|host_key)；网关只信 MAC 正确的 host key
+  host_key_confirmed_at TIMESTAMPTZ,
+  created_at, updated_at, cred_updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, name), UNIQUE (id, user_id)
+);
+CREATE UNIQUE INDEX at_projects_id_user ON at_projects (id, user_id);   -- 供下面的同属主外键
+
+CREATE TABLE at_project_servers (           -- 项目选用的服务器；项目和服务器必须同一用户（两条复合外键保证）
+  project_id, server_id, user_id TEXT NOT NULL, created_at,
+  PRIMARY KEY (project_id, server_id),
+  FOREIGN KEY (project_id, user_id) REFERENCES at_projects (id, user_id) ON DELETE CASCADE,
+  FOREIGN KEY (server_id, user_id) REFERENCES at_remote_servers (id, user_id) ON DELETE CASCADE
+);
+
+CREATE TABLE at_project_server_grants (     -- 能用这台服务器的岗位；没有行 = 谁都不能用
+  project_id, server_id, role TEXT NOT NULL, created_at,
+  PRIMARY KEY (project_id, server_id, role),
+  FOREIGN KEY (project_id, server_id) REFERENCES at_project_servers ON DELETE CASCADE
+);
+
+CREATE TABLE at_ssh_certs (                 -- 签发过的会话证书（吊销与追溯）
+  serial BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,   -- 证书序列号
+  session_id TEXT NOT NULL, open_gen INT NOT NULL, node_id TEXT NOT NULL,   -- 不设外键，会话删了也能追溯
+  project_id TEXT NOT NULL REFERENCES at_projects(id) ON DELETE CASCADE,
+  thread_id TEXT, employee_id TEXT NOT NULL DEFAULT '', role TEXT NOT NULL,
+  pubkey_fp TEXT NOT NULL,                  -- 会话临时公钥的 SHA256:…
+  principals TEXT[] NOT NULL,               -- 证书里的服务器名
+  ca_id TEXT NOT NULL DEFAULT '',           -- 哪把会话 CA 签的（CA 轮换用）
+  valid_after, valid_before TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ, revoke_reason TEXT NOT NULL DEFAULT '',   -- session_closed | gen_advanced | server_removed | server_renamed | grant_removed …
+  created_at
+);  -- 索引：(session_id)、(project_id) WHERE revoked_at IS NULL；(valid_before)
+
+CREATE TABLE at_ssh_audit (                 -- 网关审计，一行一个事件，保留 365 天
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY, created_at,
+  user_id TEXT NOT NULL REFERENCES at_users(id) ON DELETE CASCADE,
+  project_id, thread_id, session_id, employee_id, employee（名字快照）, role, node_id,
+  server_id, server_name（名字快照）TEXT NOT NULL DEFAULT '',   -- 不设外键：项目、服务器、会话删了审计还在
+  cert_serial BIGINT, conn_id TEXT NOT NULL DEFAULT '',          -- 同一连接的多行共用 conn_id
+  kind TEXT NOT NULL CHECK (kind IN ('connect','disconnect','exec','shell','subsystem','denied','auth_fail','host_key_mismatch','test')),
+  command TEXT NOT NULL DEFAULT '', command_truncated BOOLEAN NOT NULL DEFAULT FALSE,   -- 脱敏后，最多 8 KB
+  exit_code INT, duration_ms BIGINT, bytes_in BIGINT NOT NULL DEFAULT 0, bytes_out BIGINT NOT NULL DEFAULT 0,
+  reason TEXT NOT NULL DEFAULT '', detail JSONB NOT NULL DEFAULT '{}'
+);  -- 索引：(project_id, created_at DESC)、(server_id, created_at DESC)、(user_id, created_at DESC)、(created_at)
+```
+
+- **凭证**（`server/internal/credvault`，remote-servers.md §11.1 方案 B）：每条凭证一把随机 32 字节 DEK，AES-256-GCM 加密明文；DEK 再用 KEK 以 AES-256-GCM 包裹。KEK = `HKDF-SHA256(AGENT_TEAMS_SECRET_KEYS 的每一把, info="agent-teams/remote-cred-kek/v1")`，第一把加密、全部可解。AAD = `credvault.ServerAAD(user_id, id, auth_kind, host, port, username)`（各字段带长度前缀），所以密文挪到别的行、或这几项被改过（哪怕直接改库）就解不开；改这几项必须同时重新录入凭证（`store.UpdateRemoteServer` 不带新凭证时返回 `ErrCredentialRequired`），改 host 或 port 还会清掉已确认的 host key。没有接口能读回明文，只能替换。`atctl admin reseal` 只重新包裹 DEK（`credvault.Vault.Rewrap`，密文不动），并用新 KEK 重算 host key MAC。
+- **网关自己的密钥**：`at_settings.ssh_session_ca`（会话 CA，给会话签用户证书）和 `at_settings.ssh_gateway_host_key`（网关 host key），值是 `credvault.SealedKey = {id, public_key, fingerprint, sealed, created_at}`，私钥（OpenSSH PEM）按同一方案密封，AAD = `credvault.SettingAAD(键名)`。第一次用到时 `credvault.EnsureKey` 自动生成（Ed25519，`INSERT … ON CONFLICT DO NOTHING`，多副本并发也只留一把），reseal 一并重新包裹。
+- **授权**：统筹、组长、只读岗位（`read_only` 或 gate 为 review/decision）不能被授权——`store.GrantableRoles` 按项目的岗位副本（没有就用模板）拒绝写入；查授权时（`store.SessionServers`、`store.SessionServerGrant`）再按会话员工自己的 tier 和 `spec.read_only` 判断一次，关闭的会话一律没有。授权按岗位名，换了名字的岗位要重新授权。
+- **吊销**：服务器删除或改名、从项目移除、岗位授权取消时，store 在同一事务里把相关证书标 `revoked_at` 并返回序列号（网关据此断开连接）；会话关闭、`open_gen` 前进由会话生命周期调 `RevokeSessionCerts` / `RevokeOldGenCerts`。
+- **清理**：每日清理（`atctl serve` 的 `maintain` → `store.PruneSSH`）删 365 天前的审计行和过期超过 30 天的证书。审计不分区（量小）；删除用户时级联删除。
+
 ## 3. 从 v1 表的映射（历史）
 
 切换时 v1 的表原地扩展成 v2 的表；下表是当时的处理。`00120_drop_v1` 之后，v1 独有的表和列、v1 的旧对话都已删除。
@@ -831,6 +909,8 @@ CREATE TABLE at_shared_files (          -- 项目共享文件：项目里所有�
 `00095_thread_lifecycle_images.sql`：`at_threads.archived_from`、`at_attachments`（§2.11）。
 
 `00312_shared_files.sql`：`at_shared_files`（§2.13，项目共享文件）；Down 删表。
+
+`00330_remote_servers.sql`：`at_remote_servers`、`at_project_servers`、`at_project_server_grants`、`at_ssh_certs`、`at_ssh_audit` 和唯一索引 `at_projects_id_user`（§2.14，远程服务器）；Down 删表、删索引，并删掉 `at_settings` 的 `ssh_session_ca`、`ssh_gateway_host_key`。
 
 `00080_plugins.sql`：`at_roles.plugins`、`at_plugins`、`at_plugin_versions`，`at_skills.user_id` 可为空（管理员内置技能）及其唯一索引（architecture.md §6.5）。
 

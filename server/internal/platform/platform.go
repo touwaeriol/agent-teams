@@ -154,6 +154,27 @@ func (e LogEvents) User(_ context.Context, userID, typ string, _ any) {
 	e.Log.Debug("user event", "user_id", userID, "type", typ)
 }
 
+// SSHHooks are callbacks from the remote server API (讨论串 #38) into the SSH gateway and the
+// node gateway. The REST handlers call them after their transaction committed.
+type SSHHooks interface {
+	// CertsRevoked runs after session certificates were revoked in the database (a server deleted
+	// or renamed, removed from a project, a role's grant taken away): cut the connections made with
+	// them on every console replica (remote-servers.md §4.6).
+	CertsRevoked(ctx context.Context, serials []int64)
+	// ServersChanged runs when the servers live sessions of these projects may use changed: send
+	// ssh.servers_update to each (protocol.md §8.1).
+	ServersChanged(ctx context.Context, userID string, projectIDs []string)
+}
+
+// NoSSHHooks is the default SSHHooks: nothing to do (no gateway wired yet).
+type NoSSHHooks struct{}
+
+// CertsRevoked implements SSHHooks.
+func (NoSSHHooks) CertsRevoked(context.Context, []int64) {}
+
+// ServersChanged implements SSHHooks.
+func (NoSSHHooks) ServersChanged(context.Context, string, []string) {}
+
 // NoHooks is the default Hooks: nothing to do.
 type NoHooks struct{}
 

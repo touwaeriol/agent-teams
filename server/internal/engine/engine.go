@@ -13,6 +13,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/approvals"
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/credvault"
 	"github.com/touwaeriol/agent-teams/server/internal/delivery"
 	"github.com/touwaeriol/agent-teams/server/internal/events"
 	"github.com/touwaeriol/agent-teams/server/internal/fanout"
@@ -23,6 +24,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/office"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/scheduler"
+	"github.com/touwaeriol/agent-teams/server/internal/sshgw"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 	"github.com/touwaeriol/agent-teams/server/internal/timers"
@@ -39,6 +41,11 @@ type Deps struct {
 	Office  *office.Registry
 	Log     *slog.Logger
 	Gateway nodegw.Config
+	// Vault opens remote server credentials and the SSH gateway's keys (nil or not Ready: the SSH
+	// gateway answers "unavailable").
+	Vault *credvault.Vault
+	// SSH tunes the SSH gateway (zero values: the defaults of remote-servers.md §5.7).
+	SSH sshgw.Config
 }
 
 // Engine holds every orchestration component.
@@ -57,6 +64,7 @@ type Engine struct {
 	Tools     *toolsvc.Service
 	Timers    *timers.Runner
 	GH        *ghops.GitHub
+	SSH       *sshgw.Gateway
 	log       *slog.Logger
 }
 
@@ -71,6 +79,11 @@ func New(d Deps) (*Engine, error) {
 	cs.Online = gw.Online
 	gh := &ghops.GitHub{Client: d.GitHub, Tokens: d.Tokens, Box: d.Box, Store: d.Store}
 	e := &Engine{Store: d.Store, KV: d.KV, Core: cs, Fan: fan, Events: events.New(cs, fan, d.Log), Gateway: gw, GH: gh, log: d.Log}
+	vault := d.Vault
+	if vault == nil {
+		vault, _ = credvault.New()
+	}
+	e.SSH = sshgw.New(sshgw.Deps{Store: d.Store, Core: cs, Nodes: gw, Fan: fan, Vault: vault, Log: d.Log, Cfg: d.SSH})
 	e.Status = status.New(cs, gw.Online, d.Log)
 	e.Orch = orchestrator.New(cs, d.Store, gw, e.Status, gh, d.Office, d.Log)
 	e.Sched = scheduler.New(cs, e.Orch, e.Status, fan, d.Log)
@@ -99,10 +112,30 @@ func (e *Engine) Start(ctx context.Context) {
 	go e.Delivery.Run(ctx)
 	go e.Approvals.RunSweeper(ctx, 15*time.Second)
 	go e.Timers.Run(ctx)
+	go e.SSH.Run(ctx)
 	go func() {
 		e.Orch.WarmAll(ctx)
 		e.Orch.StartAllQueued(ctx)
 	}()
+}
+
+// SSHHooks returns the platform.SSHHooks implementation: the remote server API's callbacks into
+// the SSH gateway (cut revoked connections on every replica, push ssh.servers_update).
+func (e *Engine) SSHHooks() *SSHHooks { return &SSHHooks{e: e} }
+
+// SSHHooks implements platform.SSHHooks with the SSH gateway.
+type SSHHooks struct{ e *Engine }
+
+// CertsRevoked implements platform.SSHHooks.
+func (h *SSHHooks) CertsRevoked(ctx context.Context, serials []int64) { h.e.SSH.Revoked(ctx, serials) }
+
+// ServersChanged implements platform.SSHHooks.
+func (h *SSHHooks) ServersChanged(ctx context.Context, _ string, projectIDs []string) {
+	for _, id := range projectIDs {
+		if err := h.e.SSH.ServersChanged(ctx, id); err != nil {
+			h.e.log.Warn("ssh servers update", "project_id", id, "err", err)
+		}
+	}
 }
 
 // Hooks returns the platform.Hooks implementation.

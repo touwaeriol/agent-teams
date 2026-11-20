@@ -20,6 +20,10 @@ import (
 // RefreshMargin: a cached token with less time left than this is replaced (v1: 600 s).
 const RefreshMargin = 10 * time.Minute
 
+// ForceRefreshEvery: a forced re-mint (RefreshInstallationToken) of one cache key happens at most
+// this often per process; within it the token minted last is handed out again.
+const ForceRefreshEvery = time.Minute
+
 // Tokens mints installation tokens and caches them in memory and, sealed, in
 // Valkey (shared by replicas). Cache keys include the repositories and the
 // permission set, so narrowed tokens never leak into wider uses.
@@ -30,30 +34,77 @@ type Tokens struct {
 	box    *auth.SecretBox
 	now    func() time.Time
 
-	mu  sync.Mutex
-	mem map[string]Token
+	mu     sync.Mutex
+	mem    map[string]Token
+	forced map[string]time.Time // cache key -> last forced re-mint
 }
 
 // NewTokens builds the token cache.
 func NewTokens(client *Client, apps *Apps, store kv.KV, box *auth.SecretBox) *Tokens {
-	return &Tokens{client: client, apps: apps, kv: store, box: box, now: time.Now, mem: map[string]Token{}}
+	return &Tokens{client: client, apps: apps, kv: store, box: box, now: time.Now, mem: map[string]Token{}, forced: map[string]time.Time{}}
 }
 
 // Installation returns a token for the installation, narrowed by req.
 func (t *Tokens) Installation(ctx context.Context, installationID int64, req TokenRequest) (string, error) {
+	tok, err := t.InstallationToken(ctx, installationID, req)
+	return tok.Value, err
+}
+
+// InstallationToken is Installation with the token's real expiry: a cached token may have
+// anywhere between RefreshMargin and one hour left (cred.response reports it, §10.3 #2).
+func (t *Tokens) InstallationToken(ctx context.Context, installationID int64, req TokenRequest) (Token, error) {
 	key, err := t.cacheKey(ctx, installationID, req)
 	if err != nil {
-		return "", err
+		return Token{}, err
 	}
 	if tok, ok := t.cached(ctx, key); ok {
-		return tok.Value, nil
+		return tok, nil
 	}
 	tok, err := t.mint(ctx, installationID, req)
 	if err != nil {
-		return "", err
+		return Token{}, err
 	}
 	t.remember(ctx, key, tok)
-	return tok.Value, nil
+	return tok, nil
+}
+
+// RefreshInstallationToken is InstallationToken without the cache: a caller saw the cached
+// token rejected (git credential erase: revoked on GitHub, or the installation's permissions
+// changed). The new token replaces the cached one. Forced re-mints of one cache key are limited
+// to one per ForceRefreshEvery, so a caller looping on erase cannot hammer GitHub.
+func (t *Tokens) RefreshInstallationToken(ctx context.Context, installationID int64, req TokenRequest) (Token, error) {
+	key, err := t.cacheKey(ctx, installationID, req)
+	if err != nil {
+		return Token{}, err
+	}
+	if !t.allowForce(key) {
+		if tok, ok := t.cached(ctx, key); ok {
+			return tok, nil
+		}
+	}
+	tok, err := t.mint(ctx, installationID, req)
+	if err != nil {
+		return Token{}, err
+	}
+	t.remember(ctx, key, tok)
+	return tok, nil
+}
+
+// allowForce records a forced re-mint of key unless one happened within ForceRefreshEvery.
+func (t *Tokens) allowForce(key string) bool {
+	now := t.now()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if last, ok := t.forced[key]; ok && now.Sub(last) < ForceRefreshEvery {
+		return false
+	}
+	for k, at := range t.forced {
+		if now.Sub(at) >= ForceRefreshEvery {
+			delete(t.forced, k)
+		}
+	}
+	t.forced[key] = now
+	return true
 }
 
 func (t *Tokens) mint(ctx context.Context, installationID int64, req TokenRequest) (Token, error) {

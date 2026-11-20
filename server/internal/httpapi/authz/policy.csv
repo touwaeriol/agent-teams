@@ -44,6 +44,7 @@ p, public, /readyz, GET
 p, node-token, /nodes/attachments/:id, GET
 p, node-token, /nodes/connect, GET
 p, node-token, /nodes/v2/connect, GET
+p, node-token, /nodes/ssh, GET
 
 # Signed-in users: their own account, projects, threads, libraries and nodes.
 p, user, /api/attachments/:id, GET
@@ -116,6 +117,9 @@ p, user, /api/projects/:pid/references, GET
 p, user, /api/projects/:pid/schedules, GET
 p, user, /api/projects/:pid/schedules, POST
 p, user, /api/projects/:pid/search, GET
+p, user, /api/projects/:pid/server-audit, GET
+p, user, /api/projects/:pid/servers, GET
+p, user, /api/projects/:pid/servers, PUT
 p, user, /api/projects/:pid/shared-files, DELETE
 p, user, /api/projects/:pid/shared-files, GET
 p, user, /api/projects/:pid/shared-files, POST
@@ -134,6 +138,14 @@ p, user, /api/roles/yaml, PUT
 p, user, /api/schedules/:id, DELETE
 p, user, /api/schedules/:id, PATCH
 p, user, /api/schedules/:id/run, POST
+p, user, /api/servers, GET
+p, user, /api/servers, POST
+p, user, /api/servers/:id, DELETE
+p, user, /api/servers/:id, GET
+p, user, /api/servers/:id, PATCH
+p, user, /api/servers/:id/audit, GET
+p, user, /api/servers/:id/host-key/reset, POST
+p, user, /api/servers/:id/test, POST
 p, user, /api/sessions/:sid/stream, GET
 p, user, /api/skills, GET
 p, user, /api/skills, POST
