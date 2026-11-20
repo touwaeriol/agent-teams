@@ -255,6 +255,9 @@ func (s *Scheduler) finish(ctx context.Context, tx *core.Tx, task core.Task, fin
 		return task, err
 	}
 	if final == "failed" || final == "cancelled" {
+		if err := s.cancelGates(ctx, tx, task); err != nil {
+			return task, err
+		}
 		if err := s.blockDependents(ctx, tx, task); err != nil {
 			return task, err
 		}
@@ -263,6 +266,22 @@ func (s *Scheduler) finish(ctx context.Context, tx *core.Tx, task core.Task, fin
 }
 
 var finalWord = map[string]string{"failed": "失败了", "cancelled": "被取消了"}
+
+// cancelGates cancels the review / decision tasks still open on a task that failed or was
+// cancelled: there is nothing left to review, and an open gate would hold the thread's end
+// (every task must be finished) with nobody to close it.
+func (s *Scheduler) cancelGates(ctx context.Context, tx *core.Tx, task core.Task) error {
+	gates, err := core.OpenGates(ctx, tx, task.ConversationID, task.ID)
+	if err != nil {
+		return err
+	}
+	for _, g := range gates {
+		if _, err := s.Cancel(ctx, tx, g, fmt.Sprintf("所%s的任务 %s %s。", gateName(g), task.ID, finalWord[task.Status])); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // blockDependents marks blocked the pending tasks that wait on a failed or cancelled task, and
 // the ones waiting on those: they could never start (a dependency must be done), so instead of

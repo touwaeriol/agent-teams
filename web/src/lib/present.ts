@@ -1,7 +1,7 @@
 // How domain states look on screen (colours and words of the design canvas),
 // plus the small derivations pages share. Pure functions, unit-tested.
 import type { EmployeeBrief, QuestionView, TaskStatus, TaskView, ThreadView } from "@/api/views";
-import { awaitsAcceptance, pauseLine, REVIEW_LINE, threadPhase, type PhaseId, type PhaseInput } from "./phase";
+import { awaitsAcceptance, pauseLine, reviewLine, threadPhase, type PhaseId, type PhaseInput } from "./phase";
 
 export { awaitsAcceptance, pauseLine } from "./phase";
 
@@ -84,7 +84,7 @@ export function threadLine(t: ThreadView, open?: QuestionView): string {
   if (open) return questionLine(open);
   if (t.status === "review" && t.pr_number && t.pr_state === "accepting") return `PR #${t.pr_number} 合并中`;
   if (t.status === "review" && t.pr_number && t.merge_error) return `PR #${t.pr_number} 合并失败，等你处理`;
-  if (t.status === "review" && t.pr_number) return `PR #${t.pr_number} ${REVIEW_LINE[t.merge_policy] ?? REVIEW_LINE.pr}`;
+  if (t.status === "review" && t.pr_number) return `PR #${t.pr_number} ${reviewLine(t)}`;
   if (t.status === "done" && t.pr_number) return mergedLine(t);
   if (t.status === "queued") return t.queue_position ? `排队中，前面还有 ${t.queue_position} 个` : "排队等节点";
   if (t.status === "paused") return pauseLine(t.pause_reason);

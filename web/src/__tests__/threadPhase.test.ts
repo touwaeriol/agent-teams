@@ -139,6 +139,8 @@ describe("threadPhase", () => {
   it("notes say what it waits on", () => {
     expect(threadPhase(thread(1, { status: "review", merge_policy: "pr" })).note).toBe("等检查通过");
     expect(threadPhase(thread(1, { status: "review", merge_policy: "auto" })).note).toBe("检查通过后自动合并");
+    expect(threadPhase(thread(1, { status: "review", merge_policy: "pr", counts: counts({ tasks_open: 1 }) })).note).toBe("等检查通过，还有 1 个小任务没结束");
+    expect(threadPhase(thread(1, { status: "review", merge_policy: "pr", pr_state: "merged" })).note).toBe("已合并，等收尾");
     expect(threadPhase(thread(1, { counts: counts({ tasks_open: 1 }) })).note).toBe("等成员处理任务");
     expect(threadPhase(thread(1, { lead_last: { text: "好了", at: "" } })).note).toBe("组长已回复，等你回复");
     expect(threadPhase(thread(1)).note).toBe("组长正在阅读任务");

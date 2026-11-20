@@ -437,3 +437,35 @@ func TestReadOnlyFinishThenTask(t *testing.T) {
 		t.Fatalf("final reply %q", r)
 	}
 }
+
+// TestMergedWithoutWebhook: a PR a person merged on GitHub is noticed by the poll alone (no
+// webhook): pr_state becomes merged, an unfinished task holding the end is reported to the lead
+// once, and the thread ends when the lead cancels it.
+func TestMergedWithoutWebhook(t *testing.T) {
+	c, lead := newEndCase(t, "总结")
+	lead.mustCall("update_plan", map[string]any{"steps": []map[string]string{{"title": "做", "status": "done"}}})
+	res := lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "补一个测试", "main": "做"})
+	var task protocol.AssignTaskResult
+	_ = json.Unmarshal(*res.Structured, &task)
+	c.update(t, map[string]any{"status": "review"})
+	c.set(func(gh *fakeGitHub) { gh.pulls["o/r#"+itoa(c.pr)].merged = true })
+	v := c.waitFor(t, "merged recorded", func(v core.ThreadView) bool { return v.PRState == "merged" })
+	if v.Status != "review" || v.Repos[0].PRState != "merged" {
+		t.Fatalf("after the merge: status %s repos %+v", v.Status, v.Repos)
+	}
+	held := func() []string {
+		var out []string
+		if err := c.w.e.Core.Pool.Gorm(c.w.ctx).Table("at_messages").Where("conversation_id = ? AND content LIKE ?",
+			c.thread.ID, "%收尾被挡住%").Pluck("content", &out).Error; err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	eventually(t, "lead told what holds the end", func() bool { return len(held()) > 0 })
+	c.stays(t, "review", 600*time.Millisecond)
+	if h := held(); len(h) != 1 || !strings.Contains(h[0], string(task.TaskID)) || !strings.Contains(h[0], "PR 已合并") {
+		t.Fatalf("held notes: %q", h)
+	}
+	lead.mustCall("cancel_task", map[string]any{"task_id": string(task.TaskID), "reason": "不需要了"})
+	c.waitFor(t, "done once the task is", func(v core.ThreadView) bool { return v.Status == "done" })
+}

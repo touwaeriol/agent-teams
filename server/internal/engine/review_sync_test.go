@@ -285,3 +285,16 @@ func TestReviewPlatformErrorReport(t *testing.T) {
 		t.Fatalf("platform_error accepted on a work task: %s", text(res))
 	}
 }
+
+// TestCancelClosesOpenGate: cancelling a task under review cancels its open review gate. A gate
+// left behind (blocked, nobody holding it) used to keep the thread from ever ending, since every
+// task must be finished first.
+func TestCancelClosesOpenGate(t *testing.T) {
+	rw := newReviewWorld(t, reviewFeatures, nil)
+	rw.reviewSync(t) // t2, the review gate, is being claimed
+	rw.lead.mustCall("cancel_task", map[string]any{"task_id": "t1", "reason": "换个做法"})
+	eventually(t, "gate cancelled", func() bool {
+		gate, err := core.TaskByID(rw.w.ctx, rw.w.e.Core.Pool, rw.thread.ID, "t2")
+		return err == nil && gate.Status == "cancelled" && gate.FinishedAt != nil
+	})
+}
