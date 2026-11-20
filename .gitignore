@@ -2,3 +2,6 @@ dist/
 .env
 node_modules/
 *.tsbuildinfo
+
+# Redis/Valkey snapshots from local test runs
+dump.rdb
