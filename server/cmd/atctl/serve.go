@@ -107,7 +107,8 @@ func openOffice(ctx context.Context, cfg config.Config, db *store.Store, log *sl
 	return reg, nil
 }
 
-// maintain runs the daily housekeeping: expired sessions and event partitions.
+// maintain runs the daily housekeeping: expired sessions, event partitions, and SSH audit rows
+// (365 days) and certificates (30 days after expiry).
 func maintain(ctx context.Context, db *store.Store, log *slog.Logger) {
 	tick := time.NewTicker(24 * time.Hour)
 	defer tick.Stop()
@@ -119,6 +120,11 @@ func maintain(ctx context.Context, db *store.Store, log *slog.Logger) {
 		}
 		if err := db.EnsurePartitions(ctx, partitionsAhead); err != nil {
 			log.Warn("event partitions", "err", err)
+		}
+		if audit, certs, err := db.PruneSSH(ctx, time.Now()); err != nil {
+			log.Warn("ssh audit cleanup failed", "err", err)
+		} else if audit+certs > 0 {
+			log.Info("old ssh audit rows and certificates removed", "audit", audit, "certs", certs)
 		}
 		select {
 		case <-ctx.Done():

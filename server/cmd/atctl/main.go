@@ -19,7 +19,7 @@ commands:
   openapi                       print the OpenAPI 3.1 document (JSON)
   admin reset-password EMAIL [PASSWORD]   set a password (random temporary one if omitted)
   admin set-role EMAIL admin|user         change a user's role (Casbin grouping rule)
-  admin reseal                  re-encrypt sealed secrets with the first AGENT_TEAMS_SECRET_KEYS key
+  admin reseal                  re-encrypt sealed secrets (and re-wrap remote server credentials) with the first AGENT_TEAMS_SECRET_KEYS key
 `
 
 var commands = map[string]func(ctx context.Context, args []string) error{

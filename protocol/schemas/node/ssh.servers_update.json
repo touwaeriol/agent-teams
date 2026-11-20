@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/ssh.servers_update.json",
+  "title": "SshServersUpdate",
+  "description": "The servers a live session may use changed (a server added, removed or renamed in the project, a role grant changed). The daemon rewrites the session's ssh_config atomically and drops its current certificate (the next use asks for a new one). Also sent once per live session after a node reconnects. version grows per session; an older version than the last applied is ignored. An empty servers list: the session has no server any more (remove ssh_config).",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "session_id",
+    "open_gen",
+    "version"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "session_id",
+    "open_gen",
+    "version",
+    "servers"
+  ],
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "open_gen": {
+      "$ref": "common.json#/$defs/OpenGen"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "servers": {
+      "$ref": "common.json#/$defs/SshServers"
+    }
+  }
+}

@@ -33,6 +33,7 @@ var models = []any{
 	&store.MemoryFile{}, &store.Node{}, &store.NodeLog{}, &store.Session{}, &store.AuditEntry{},
 	&core.Thread{}, &core.Employee{}, &core.AgentSession{}, &core.Task{}, &core.MainTask{}, &core.Question{},
 	&core.Message{}, &core.Mail{}, &core.Deliverable{}, &core.MergeEntry{}, &timers.Schedule{},
+	&store.RemoteServer{}, &store.SSHAudit{},
 }
 
 // TestModelsMatchTables checks every stored model field is a column of its table (the

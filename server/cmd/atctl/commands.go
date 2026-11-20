@@ -10,6 +10,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
 	"github.com/touwaeriol/agent-teams/server/internal/config"
+	"github.com/touwaeriol/agent-teams/server/internal/credvault"
 	"github.com/touwaeriol/agent-teams/server/internal/github"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -176,7 +177,67 @@ func reseal(ctx context.Context, db *store.Store) error {
 			}
 		}
 		app, err := github.NewApps(tx, box).Reseal(ctx)
+		if err != nil {
+			return err
+		}
 		fmt.Printf("resealed %d git connections, github app: %v\n", len(secrets), app)
+		vault, err := credvault.New(cfg.SecretKeys...)
+		if err != nil {
+			return err
+		}
+		servers, keys, err := resealRemote(ctx, tx, vault)
+		fmt.Printf("rewrapped %d remote server credentials, %d ssh keys\n", servers, keys)
 		return err
 	})
+}
+
+// resealRemote re-wraps the DEKs of remote server credentials and of the SSH keys in at_settings
+// with the first key (envelope encryption: the ciphertexts stay), and recomputes host key MACs that
+// were made with an older key. Nothing is written for values already under the first key.
+func resealRemote(ctx context.Context, tx *store.Store, vault *credvault.Vault) (servers, keys int, err error) {
+	if !vault.Ready() {
+		return 0, 0, nil
+	}
+	list, err := tx.SealedRemoteServers(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, srv := range list {
+		aad := credvault.ServerAAD(srv.UserID, srv.ID, srv.AuthKind, srv.Host, srv.Port, srv.Username)
+		sealed, changed, err := vault.Rewrap(aad, srv.Sealed)
+		if err != nil {
+			return servers, keys, fmt.Errorf("remote server %s (%s): %w", srv.ID, srv.Name, err)
+		}
+		mac := srv.HostKeyMAC
+		if srv.HostKey != "" {
+			data := credvault.HostKeyMACData(srv.ID, srv.Host, srv.Port, srv.HostKey)
+			ok, current := vault.VerifyMAC(data, mac)
+			if !ok {
+				return servers, keys, fmt.Errorf("remote server %s (%s): host key MAC does not verify", srv.ID, srv.Name)
+			}
+			if !current {
+				if mac, err = vault.MAC(data); err != nil {
+					return servers, keys, err
+				}
+				changed = true
+			}
+		}
+		if !changed {
+			continue
+		}
+		if err := tx.ResealRemoteServer(ctx, srv.ID, sealed, mac); err != nil {
+			return servers, keys, err
+		}
+		servers++
+	}
+	for _, name := range []string{credvault.SessionCAKey, credvault.GatewayHostKeyKey} {
+		changed, err := credvault.ResealKey(ctx, tx, vault, name)
+		if err != nil {
+			return servers, keys, err
+		}
+		if changed {
+			keys++
+		}
+	}
+	return servers, keys, nil
 }

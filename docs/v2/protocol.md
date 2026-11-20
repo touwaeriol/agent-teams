@@ -94,6 +94,8 @@
 
 `features` 含 `usage` 表示守护进程会发 `node.usage`，也能处理 `node.usage_refresh`（§9.1）。
 
+`features` 含 `ssh_gateway` 表示守护进程能接远程服务器（§8.1）：认得 `session.open` 的 `ssh_servers`，会发 `ssh.cert_request`，能处理 `ssh.servers_update`。这样的守护进程还可以带 `"ssh_client": {"version": "OpenSSH_9.6p1"}`（`ssh -V` 的结果，找不到 ssh 就不带）。
+
 `auth` 由守护进程启动时探测（Claude：`query().accountInfo()` 一次后关闭；Codex：app-server `account/read`），不上报邮箱等个人信息。
 
 ### `welcome`（控制台 → 守护进程，不可靠）
@@ -165,6 +167,7 @@
   "platform_tools": [ {"name": "complete_task", "description": "…", "input_schema": {…}, "blocking": false}, … ],
   "env": {"LANG": "C.UTF-8"},                      // 额外的非秘密环境；守护进程自己加 PATH/HOME/MCP_TOOL_TIMEOUT/git 凭证变量
   "git_credentials": true,                         // 是否装 credential helper 与 gh 包装
+  "ssh_servers": [{"name": "prod"}],               // 岗位被授权的远程服务器（§8.1，双方都有 ssh_gateway 时才带）
   "skills": [{"name": "design", "files": [{"path": "SKILL.md", "content": "…"}]}],  // 可选：岗位的技能（architecture.md §6.5）
   "plugins": [{"name": "tinyplug", "version": 2, "files": [{"path": ".claude-plugin/plugin.json", "content": "…"}], "skills": ["tinyplug:greet"], "mcp_servers": {}}],  // 可选：岗位的插件，确切版本（architecture.md §6.5）
   "first_message": {"msg_id": "m_…", "text": "…"}, // 可选：工具核对通过、收到 session.release 后才发送
@@ -423,6 +426,37 @@
 `expires_at` 是令牌**真实的**到期时间：控制台的令牌缓存可能交出只剩 10～60 分钟的安装令牌，照实上报；PAT 没有到期时间，上报“现在 + 30 分钟”，让守护进程定期重新确认项目是否仍允许。守护进程只在内存里缓存到 `expires_at` 前 5 分钟；git 认证失败调凭证助手的 `erase` 时，守护进程丢掉这个“会话 + 仓库”的缓存，下一次 `get` 重新发 `cred.request`，并带上 `force_refresh: true`。
 
 此类消息**不进发件箱、不写日志**（守护进程和控制台都对 `cred.*` 关闭消息体日志）。控制台在节点链路读循环之外（单独的 goroutine，全局最多 32 个同时进行；占满时这次请求直接丢弃并记 WARN，靠守护进程 10 秒后重试，读循环从不等待）处理 `cred.request`，慢的 GitHub 请求不会挡住这条链路上的其他消息；两者都是不可靠消息、靠 `req_id` 配对，先后顺序无关。
+
+### 8.1 远程服务器（`hello.features` 含 `ssh_gateway`，remote-servers.md）
+
+员工会话经主节点的 SSH 网关（`GET /nodes/ssh`，字节流不是协议消息）连用户在设置里配置、并在项目里授权给其岗位的服务器。节点上没有任何服务器凭证：会话的 ssh-agent 在守护进程内存里持有一把临时 Ed25519 密钥，向控制台换一张 10 分钟的会话证书，只用来向网关证明身份；能不能连由网关每次查库决定。下面几条只在双方 `features` 都含 `ssh_gateway` 时发。
+
+- `session.open` 的 `ssh_servers: [{name}]`：这个员工的岗位在本项目里被授权的服务器（名字即会话 ssh_config 里的 Host 别名，`^[a-z0-9][a-z0-9-]{0,62}$`）。统筹、组长和只读岗位永远不带；缺省或空 = 不接 SSH。
+
+#### `ssh.cert_request`（守护进程 → 控制台，不可靠但带 `req_id`）
+
+```json
+{"req_id": "k1", "session_id": "s_01JD…", "open_gen": 3, "public_key": "ssh-ed25519 AAAA…"}
+```
+
+会话 agent 第一次需要身份、或证书剩余不到 3 分钟时发；`public_key` 是 authorized_keys 格式的一行。控制台先做 §2.3 的归属校验（会话属于本节点、未关闭、`open_gen` 是当前值），再按会话的项目和岗位查授权，写 `at_ssh_certs` 并签发。
+
+#### `ssh.cert_response`（控制台 → 守护进程，不可靠）
+
+```json
+{"req_id": "k1", "ok": true, "certificate": "ssh-ed25519-cert-v01@openssh.com AAAA…", "valid_before": "2026-11-20T12:10:00Z",
+ "known_hosts": ["agent-teams-gateway ssh-ed25519 AAAA…"], "servers": [{"name": "prod"}, {"name": "staging"}]}
+```
+
+或 `{"req_id", "ok": false, "error": "not_granted"}`，`error`：`session_not_found|stale_open_gen|no_servers|not_granted|bad_public_key|unavailable`。`servers` 是此刻可用的服务器（也是证书的 principals），守护进程据此重写 ssh_config；`known_hosts` 是网关 host key 的行，写进会话的 known_hosts。和 `cred.*` 一样**不进发件箱、不写日志**。
+
+#### `ssh.servers_update`（控制台 → 守护进程，可靠，键：`session_id + open_gen + version`）
+
+```json
+{"session_id": "s_01JD…", "open_gen": 3, "version": 2, "servers": [{"name": "prod"}]}
+```
+
+项目选用的服务器或岗位授权变了，控制台给受影响的存活会话发；节点重连后也给每个存活会话补发一次。`version` 按会话递增，守护进程忽略比已应用的旧的版本。守护进程原子重写 ssh_config、丢弃当前证书（下次用时按新列表重签），`servers` 为空就删掉 ssh_config。控制台侧吊销证书（会话关闭、`open_gen` 前进、服务器删除、授权撤销）是唯一依据，这条只是让节点更快跟上。
 
 ## 9. 节点管理
 

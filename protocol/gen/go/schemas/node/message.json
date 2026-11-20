@@ -822,6 +822,71 @@
     {
       "properties": {
         "type": {
+          "const": "ssh.cert_request"
+        },
+        "body": {
+          "$ref": "ssh.cert_request.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^n_"
+        }
+      },
+      "required": [
+        "type",
+        "body"
+      ],
+      "not": {
+        "required": [
+          "seq"
+        ]
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "ssh.cert_response"
+        },
+        "body": {
+          "$ref": "ssh.cert_response.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^c_"
+        }
+      },
+      "required": [
+        "type",
+        "body"
+      ],
+      "not": {
+        "required": [
+          "seq"
+        ]
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "ssh.servers_update"
+        },
+        "body": {
+          "$ref": "ssh.servers_update.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^c_"
+        }
+      },
+      "required": [
+        "type",
+        "body",
+        "seq"
+      ]
+    },
+    {
+      "properties": {
+        "type": {
           "const": "stream.delta"
         },
         "body": {

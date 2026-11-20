@@ -224,6 +224,29 @@
           "minimum": 0
         }
       }
+    },
+    "SshServer": {
+      "title": "SshServer",
+      "description": "A remote server a session may reach through the console's SSH gateway (remote-servers.md §7). name is the server's name in the owner's settings and the Host alias in the session's ssh_config.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+        }
+      }
+    },
+    "SshServers": {
+      "title": "SshServers",
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/SshServer"
+      }
     }
   }
 }

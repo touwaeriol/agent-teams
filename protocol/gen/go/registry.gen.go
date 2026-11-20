@@ -45,6 +45,9 @@ const (
 	TypeSessionState       = "session.state"
 	TypeSessionWatch       = "session.watch"
 	TypeSessionsReport     = "sessions.report"
+	TypeSshCertRequest     = "ssh.cert_request"
+	TypeSshCertResponse    = "ssh.cert_response"
+	TypeSshServersUpdate   = "ssh.servers_update"
 	TypeStreamDelta        = "stream.delta"
 	TypeToolCall           = "tool.call"
 	TypeToolCancel         = "tool.cancel"
@@ -95,6 +98,9 @@ var Messages = map[string]MessageMeta{
 	TypeSessionState:       {Direction: NodeToConsole, Reliable: true, Key: nil, New: func() any { return new(SessionState) }},
 	TypeSessionWatch:       {Direction: ConsoleToNode, Reliable: true, Key: []string{"id"}, New: func() any { return new(SessionWatch) }},
 	TypeSessionsReport:     {Direction: NodeToConsole, Reliable: true, Key: nil, New: func() any { return new(SessionsReport) }},
+	TypeSshCertRequest:     {Direction: NodeToConsole, Reliable: false, Key: []string{"req_id"}, New: func() any { return new(SshCertRequest) }},
+	TypeSshCertResponse:    {Direction: ConsoleToNode, Reliable: false, Key: []string{"req_id"}, New: func() any { return new(SshCertResponse) }},
+	TypeSshServersUpdate:   {Direction: ConsoleToNode, Reliable: true, Key: []string{"session_id", "open_gen", "version"}, New: func() any { return new(SshServersUpdate) }},
 	TypeStreamDelta:        {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(StreamDelta) }},
 	TypeToolCall:           {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "call_id"}, New: func() any { return new(ToolCall) }},
 	TypeToolCancel:         {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "call_id"}, New: func() any { return new(ToolCancel) }},

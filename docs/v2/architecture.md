@@ -530,7 +530,7 @@ v1 在每次运行开始把 `GH_TOKEN` 放进环境。v2 会话是常驻的，�
 
 - `AGENT_TEAMS_SECRET_KEY` 沿用；Go 实现与 v1 相同的派生（`derive(label) = sha256("label:secret")`），OAuth state 签名格式完全一致，迁移期两边签发的 state 互认。
 - 平台级第三方密钥（语音输入的 OpenAI Key）同样用 SecretBox 密封存在 `at_settings`，接口只回末四位；只在控制台向 OpenAI 签临时密钥时解开，不下发给浏览器或节点，日志和审计里不出现；改接口地址必须重填 Key。
-- 新增密钥轮换：`AGENT_TEAMS_SECRET_KEYS=new,old`（第一个加密，全部可解密）+ `atctl admin reseal` 重新加密全部密封值（v1 问题 14）。
+- 新增密钥轮换：`AGENT_TEAMS_SECRET_KEYS=new,old`（第一个加密，全部可解密）+ `atctl admin reseal` 重新加密全部密封值（v1 问题 14）；远程服务器凭证和 SSH 网关密钥用信封加密（`server/internal/credvault`，data-model.md §2.14），reseal 只重新包裹它们的 DEK。
 
 ## 11. 状态监控、事件落库与回放
 

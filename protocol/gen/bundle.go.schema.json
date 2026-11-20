@@ -455,6 +455,29 @@
         }
       }
     },
+    "SshServer": {
+      "title": "SshServer",
+      "description": "A remote server a session may reach through the console's SSH gateway (remote-servers.md §7). name is the server's name in the owner's settings and the Host alias in the session's ssh_config.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+        }
+      }
+    },
+    "SshServers": {
+      "title": "SshServers",
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/SshServer"
+      }
+    },
     "CredRequest": {
       "title": "CredRequest",
       "description": "Credential helper asks for a short-lived token. Unreliable, retried after 10 s with the same req_id; never logged.",
@@ -1143,10 +1166,25 @@
           "$ref": "#/$defs/Runtimes"
         },
         "features": {
-          "description": "Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage).",
+          "description": "Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh).",
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "ssh_client": {
+          "description": "OpenSSH client on the node (ssh -V), when found.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version"
+          ],
+          "properties": {
+            "version": {
+              "description": "e.g. OpenSSH_9.6p1.",
+              "type": "string",
+              "maxLength": 200
+            }
           }
         },
         "isolated": {
@@ -2277,7 +2315,7 @@
     },
     "SessionOpen": {
       "title": "SessionOpen",
-      "description": "Open (or resume) a long-lived employee session on the node.",
+      "description": "Open (or resume) a long-lived employee session on the node. ssh_servers: remote servers granted to the employee's role in this project (remote-servers.md §7), sent only when both sides have the ssh_gateway feature; omitted or empty means no SSH access.",
       "type": "object",
       "required": [
         "session_id",
@@ -2369,6 +2407,9 @@
         "git_credentials": {
           "description": "Install the credential helper and gh wrapper.",
           "type": "boolean"
+        },
+        "ssh_servers": {
+          "$ref": "#/$defs/SshServers"
         },
         "first_message": {
           "description": "Held back until session.release.",
@@ -2715,6 +2756,102 @@
           "items": {
             "$ref": "#/$defs/SessionReportItem"
           }
+        }
+      }
+    },
+    "SshCertRequest": {
+      "title": "SshCertRequest",
+      "description": "The session's ssh-agent needs a certificate for its in-memory key (remote-servers.md §4.2–4.5). Unreliable, req_id; the console checks the session belongs to this node with this open_gen (§2.3) and answers ssh.cert_response. Never logged.",
+      "type": "object",
+      "required": [
+        "req_id",
+        "session_id",
+        "open_gen",
+        "public_key"
+      ],
+      "properties": {
+        "req_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "session_id": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "open_gen": {
+          "$ref": "#/$defs/OpenGen"
+        },
+        "public_key": {
+          "description": "The session's ephemeral public key, one OpenSSH authorized_keys line (ssh-ed25519 AAAA…).",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        }
+      }
+    },
+    "SshCertResponse": {
+      "title": "SshCertResponse",
+      "description": "Answer to ssh.cert_request: a user certificate signed by the session CA, or a refusal. Unreliable; never logged. servers: the servers the session may use now (granted to its role); the daemon rewrites ssh_config with them and they are the certificate's principals.",
+      "type": "object",
+      "required": [
+        "req_id",
+        "ok"
+      ],
+      "properties": {
+        "req_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "certificate": {
+          "description": "OpenSSH certificate, one line (ssh-ed25519-cert-v01@openssh.com AAAA…); principals are the server names in servers.",
+          "type": "string"
+        },
+        "valid_before": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "known_hosts": {
+          "description": "known_hosts lines for the gateway host key, written to the session's known_hosts.",
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string"
+          }
+        },
+        "servers": {
+          "$ref": "#/$defs/SshServers"
+        },
+        "error": {
+          "description": "e.g. session_not_found, stale_open_gen, no_servers, not_granted, bad_public_key, unavailable.",
+          "type": "string"
+        }
+      }
+    },
+    "SshServersUpdate": {
+      "title": "SshServersUpdate",
+      "description": "The servers a live session may use changed (a server added, removed or renamed in the project, a role grant changed). The daemon rewrites the session's ssh_config atomically and drops its current certificate (the next use asks for a new one). Also sent once per live session after a node reconnects. version grows per session; an older version than the last applied is ignored. An empty servers list: the session has no server any more (remove ssh_config).",
+      "type": "object",
+      "required": [
+        "session_id",
+        "open_gen",
+        "version",
+        "servers"
+      ],
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "open_gen": {
+          "$ref": "#/$defs/OpenGen"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "servers": {
+          "$ref": "#/$defs/SshServers"
         }
       }
     },

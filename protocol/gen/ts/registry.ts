@@ -44,6 +44,9 @@ export interface MessageBodies {
   "session.state": T.SessionState;
   "session.watch": T.SessionWatch;
   "sessions.report": T.SessionsReport;
+  "ssh.cert_request": T.SshCertRequest;
+  "ssh.cert_response": T.SshCertResponse;
+  "ssh.servers_update": T.SshServersUpdate;
   "stream.delta": T.StreamDelta;
   "tool.call": T.ToolCall;
   "tool.cancel": T.ToolCancel;
@@ -103,6 +106,9 @@ export const MESSAGE_META: { readonly [K in MessageType]: MessageMeta } = {
   "session.state": { direction: "node_to_console", reliable: true, key: [] },
   "session.watch": { direction: "console_to_node", reliable: true, key: ["id"] },
   "sessions.report": { direction: "node_to_console", reliable: true, key: [] },
+  "ssh.cert_request": { direction: "node_to_console", reliable: false, key: ["req_id"] },
+  "ssh.cert_response": { direction: "console_to_node", reliable: false, key: ["req_id"] },
+  "ssh.servers_update": { direction: "console_to_node", reliable: true, key: ["session_id","open_gen","version"] },
   "stream.delta": { direction: "node_to_console", reliable: false, key: [] },
   "tool.call": { direction: "node_to_console", reliable: true, key: ["session_id","call_id"] },
   "tool.cancel": { direction: "node_to_console", reliable: true, key: ["session_id","call_id"] },

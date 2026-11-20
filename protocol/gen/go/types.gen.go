@@ -3292,7 +3292,8 @@ type Hello struct {
 	// cred_helper, upgrade, file_download (read_deliverable file.download),
 	// shared_files (write_shared_file upload and read_shared_file shared_download
 	// into .shared/), context_usage (turn_ended carries context), session_compact
-	// (session.compact), usage (node.usage).
+	// (session.compact), usage (node.usage), ssh_gateway (session.open ssh_servers,
+	// ssh.cert_request, ssh.servers_update, /nodes/ssh).
 	Features []string `json:"features,omitempty,omitzero"`
 
 	// Host corresponds to the JSON schema field "host".
@@ -3315,6 +3316,9 @@ type Hello struct {
 
 	// Runtimes corresponds to the JSON schema field "runtimes".
 	Runtimes *Runtimes `json:"runtimes,omitempty,omitzero"`
+
+	// OpenSSH client on the node (ssh -V), when found.
+	SshClient *HelloSshClient `json:"ssh_client,omitempty,omitzero"`
 }
 
 type HelloIsolation string
@@ -3346,6 +3350,33 @@ func (j *HelloIsolation) UnmarshalJSON(value []byte) error {
 		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_HelloIsolation, v)
 	}
 	*j = HelloIsolation(v)
+	return nil
+}
+
+// OpenSSH client on the node (ssh -V), when found.
+type HelloSshClient struct {
+	// e.g. OpenSSH_9.6p1.
+	Version string `json:"version"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *HelloSshClient) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["version"]; raw != nil && !ok {
+		return fmt.Errorf("field version in HelloSshClient: required")
+	}
+	type Plain HelloSshClient
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Version)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "version", 200)
+	}
+	*j = HelloSshClient(plain)
 	return nil
 }
 
@@ -6891,7 +6922,10 @@ func (j *SessionInterrupted) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// Open (or resume) a long-lived employee session on the node.
+// Open (or resume) a long-lived employee session on the node. ssh_servers: remote
+// servers granted to the employee's role in this project (remote-servers.md §7),
+// sent only when both sides have the ssh_gateway feature; omitted or empty means
+// no SSH access.
 type SessionOpen struct {
 	// The anchor of the task the employee holds when the session (re)opens without a
 	// first_message anchor (a crash reopen, a reopen after a daemon restart): the new
@@ -6963,6 +6997,9 @@ type SessionOpen struct {
 	// outside the worktree and loads it (options.plugins + options.skills). Codex
 	// gets them in developer_instructions instead.
 	Skills []SkillBundle `json:"skills,omitempty,omitzero"`
+
+	// SshServers corresponds to the JSON schema field "ssh_servers".
+	SshServers SshServers `json:"ssh_servers,omitempty,omitzero"`
 }
 
 // Context management of the role (shared-members.md §5.1): the runtime compacts by
@@ -7791,6 +7828,199 @@ func (j *SlashCommand) UnmarshalJSON(value []byte) error {
 		return fmt.Errorf("field %s length: must be <= %d", "name", 200)
 	}
 	*j = SlashCommand(plain)
+	return nil
+}
+
+// The session's ssh-agent needs a certificate for its in-memory key
+// (remote-servers.md §4.2–4.5). Unreliable, req_id; the console checks the session
+// belongs to this node with this open_gen (§2.3) and answers ssh.cert_response.
+// Never logged.
+type SshCertRequest struct {
+	// OpenGen corresponds to the JSON schema field "open_gen".
+	OpenGen OpenGen `json:"open_gen"`
+
+	// The session's ephemeral public key, one OpenSSH authorized_keys line
+	// (ssh-ed25519 AAAA…).
+	PublicKey string `json:"public_key"`
+
+	// ReqID corresponds to the JSON schema field "req_id".
+	ReqID string `json:"req_id"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID SessionID `json:"session_id"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SshCertRequest) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["open_gen"]; raw != nil && !ok {
+		return fmt.Errorf("field open_gen in SshCertRequest: required")
+	}
+	if _, ok := raw["public_key"]; raw != nil && !ok {
+		return fmt.Errorf("field public_key in SshCertRequest: required")
+	}
+	if _, ok := raw["req_id"]; raw != nil && !ok {
+		return fmt.Errorf("field req_id in SshCertRequest: required")
+	}
+	if _, ok := raw["session_id"]; raw != nil && !ok {
+		return fmt.Errorf("field session_id in SshCertRequest: required")
+	}
+	type Plain SshCertRequest
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.PublicKey)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "public_key", 1)
+	}
+	if utf8.RuneCountInString(string(plain.PublicKey)) > 8192 {
+		return fmt.Errorf("field %s length: must be <= %d", "public_key", 8192)
+	}
+	if utf8.RuneCountInString(string(plain.ReqID)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "req_id", 1)
+	}
+	*j = SshCertRequest(plain)
+	return nil
+}
+
+// Answer to ssh.cert_request: a user certificate signed by the session CA, or a
+// refusal. Unreliable; never logged. servers: the servers the session may use now
+// (granted to its role); the daemon rewrites ssh_config with them and they are the
+// certificate's principals.
+type SshCertResponse struct {
+	// OpenSSH certificate, one line (ssh-ed25519-cert-v01@openssh.com AAAA…);
+	// principals are the server names in servers.
+	Certificate *string `json:"certificate,omitempty,omitzero"`
+
+	// e.g. session_not_found, stale_open_gen, no_servers, not_granted,
+	// bad_public_key, unavailable.
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// known_hosts lines for the gateway host key, written to the session's
+	// known_hosts.
+	KnownHosts []string `json:"known_hosts,omitempty,omitzero"`
+
+	// Ok corresponds to the JSON schema field "ok".
+	Ok bool `json:"ok"`
+
+	// ReqID corresponds to the JSON schema field "req_id".
+	ReqID string `json:"req_id"`
+
+	// Servers corresponds to the JSON schema field "servers".
+	Servers SshServers `json:"servers,omitempty,omitzero"`
+
+	// ValidBefore corresponds to the JSON schema field "valid_before".
+	ValidBefore *time.Time `json:"valid_before,omitempty,omitzero"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SshCertResponse) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["ok"]; raw != nil && !ok {
+		return fmt.Errorf("field ok in SshCertResponse: required")
+	}
+	if _, ok := raw["req_id"]; raw != nil && !ok {
+		return fmt.Errorf("field req_id in SshCertResponse: required")
+	}
+	type Plain SshCertResponse
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if len(plain.KnownHosts) > 8 {
+		return fmt.Errorf("field %s length: must be <= %d", "known_hosts", 8)
+	}
+	if utf8.RuneCountInString(string(plain.ReqID)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "req_id", 1)
+	}
+	*j = SshCertResponse(plain)
+	return nil
+}
+
+// A remote server a session may reach through the console's SSH gateway
+// (remote-servers.md §7). name is the server's name in the owner's settings and
+// the Host alias in the session's ssh_config.
+type SshServer struct {
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SshServer) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["name"]; raw != nil && !ok {
+		return fmt.Errorf("field name in SshServer: required")
+	}
+	type Plain SshServer
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if matched, _ := regexp.MatchString(`^[a-z0-9][a-z0-9-]{0,62}$`, string(plain.Name)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "Name", `^[a-z0-9][a-z0-9-]{0,62}$`)
+	}
+	*j = SshServer(plain)
+	return nil
+}
+
+type SshServers []SshServer
+
+// The servers a live session may use changed (a server added, removed or renamed
+// in the project, a role grant changed). The daemon rewrites the session's
+// ssh_config atomically and drops its current certificate (the next use asks for a
+// new one). Also sent once per live session after a node reconnects. version grows
+// per session; an older version than the last applied is ignored. An empty servers
+// list: the session has no server any more (remove ssh_config).
+type SshServersUpdate struct {
+	// OpenGen corresponds to the JSON schema field "open_gen".
+	OpenGen OpenGen `json:"open_gen"`
+
+	// Servers corresponds to the JSON schema field "servers".
+	Servers SshServers `json:"servers"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID SessionID `json:"session_id"`
+
+	// Version corresponds to the JSON schema field "version".
+	Version int `json:"version"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SshServersUpdate) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["open_gen"]; raw != nil && !ok {
+		return fmt.Errorf("field open_gen in SshServersUpdate: required")
+	}
+	if _, ok := raw["servers"]; raw != nil && !ok {
+		return fmt.Errorf("field servers in SshServersUpdate: required")
+	}
+	if _, ok := raw["session_id"]; raw != nil && !ok {
+		return fmt.Errorf("field session_id in SshServersUpdate: required")
+	}
+	if _, ok := raw["version"]; raw != nil && !ok {
+		return fmt.Errorf("field version in SshServersUpdate: required")
+	}
+	type Plain SshServersUpdate
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if 1 > plain.Version {
+		return fmt.Errorf("field %s: must be >= %v", "version", 1)
+	}
+	*j = SshServersUpdate(plain)
 	return nil
 }
 

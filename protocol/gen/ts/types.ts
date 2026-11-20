@@ -112,6 +112,13 @@ export type PermissionMode = "default" | "acceptEdits" | "bypassPermissions" | "
  */
 export type LogLevel = "debug" | "info" | "warn" | "error";
 /**
+ * @maxItems 256
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "SshServers".
+ */
+export type SshServers = SshServer[];
+/**
  * Path relative to the daemon root; never absolute.
  */
 export type RelPath1 = string;
@@ -355,6 +362,15 @@ export interface ContextUsage {
    * The window the runtime measures against (Claude: the autocompact window; Codex: the model's context window); 0 when unknown.
    */
   max_tokens: number;
+}
+/**
+ * A remote server a session may reach through the console's SSH gateway (remote-servers.md §7). name is the server's name in the owner's settings and the Host alias in the session's ssh_config.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "SshServer".
+ */
+export interface SshServer {
+  name: string;
 }
 /**
  * Credential helper asks for a short-lived token. Unreliable, retried after 10 s with the same req_id; never logged.
@@ -702,9 +718,18 @@ export interface Hello {
   capacity?: Capacity;
   runtimes?: Runtimes;
   /**
-   * Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage).
+   * Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh).
    */
   features?: string[];
+  /**
+   * OpenSSH client on the node (ssh -V), when found.
+   */
+  ssh_client?: {
+    /**
+     * e.g. OpenSSH_9.6p1.
+     */
+    version: string;
+  };
   isolated?: boolean;
   /**
    * Isolation level probed at startup (architecture.md 10.3).
@@ -1356,7 +1381,7 @@ export interface PluginMcpServer {
   };
 }
 /**
- * Open (or resume) a long-lived employee session on the node.
+ * Open (or resume) a long-lived employee session on the node. ssh_servers: remote servers granted to the employee's role in this project (remote-servers.md §7), sent only when both sides have the ssh_gateway feature; omitted or empty means no SSH access.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "SessionOpen".
@@ -1416,6 +1441,7 @@ export interface SessionOpen {
    * Install the credential helper and gh wrapper.
    */
   git_credentials?: boolean;
+  ssh_servers?: SshServers;
   /**
    * Held back until session.release.
    */
@@ -1723,6 +1749,68 @@ export interface SessionReportItem {
  */
 export interface SessionsReport {
   sessions: SessionReportItem[];
+}
+/**
+ * The session's ssh-agent needs a certificate for its in-memory key (remote-servers.md §4.2–4.5). Unreliable, req_id; the console checks the session belongs to this node with this open_gen (§2.3) and answers ssh.cert_response. Never logged.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "SshCertRequest".
+ */
+export interface SshCertRequest {
+  req_id: string;
+  session_id: SessionId;
+  open_gen: OpenGen;
+  /**
+   * The session's ephemeral public key, one OpenSSH authorized_keys line (ssh-ed25519 AAAA…).
+   */
+  public_key: string;
+}
+/**
+ * Answer to ssh.cert_request: a user certificate signed by the session CA, or a refusal. Unreliable; never logged. servers: the servers the session may use now (granted to its role); the daemon rewrites ssh_config with them and they are the certificate's principals.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "SshCertResponse".
+ */
+export interface SshCertResponse {
+  req_id: string;
+  ok: boolean;
+  /**
+   * OpenSSH certificate, one line (ssh-ed25519-cert-v01@openssh.com AAAA…); principals are the server names in servers.
+   */
+  certificate?: string;
+  valid_before?: Timestamp;
+  /**
+   * known_hosts lines for the gateway host key, written to the session's known_hosts.
+   *
+   * @maxItems 8
+   */
+  known_hosts?:
+    | []
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string]
+    | [string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string];
+  servers?: SshServers;
+  /**
+   * e.g. session_not_found, stale_open_gen, no_servers, not_granted, bad_public_key, unavailable.
+   */
+  error?: string;
+}
+/**
+ * The servers a live session may use changed (a server added, removed or renamed in the project, a role grant changed). The daemon rewrites the session's ssh_config atomically and drops its current certificate (the next use asks for a new one). Also sent once per live session after a node reconnects. version grows per session; an older version than the last applied is ignored. An empty servers list: the session has no server any more (remove ssh_config).
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "SshServersUpdate".
+ */
+export interface SshServersUpdate {
+  session_id: SessionId;
+  open_gen: OpenGen;
+  version: number;
+  servers: SshServers;
 }
 /**
  * Unreliable token stream, only while session.watch is on; not stored.
