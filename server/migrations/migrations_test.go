@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 330 {
+	if migrations.Latest() != 340 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -1402,5 +1402,55 @@ INSERT INTO at_employees (id, project_id, name, tier, role, runtime, model, spec
 	}
 	if _, err := p.UpTo(ctx, 320); err != nil {
 		t.Fatalf("up again: %v", err)
+	}
+}
+
+// TestGitReposMigration: 00340 adds standalone repositories and their credentials. A project
+// repository names a GitHub connection or a standalone repository, never both; a credential or
+// repository still in use cannot be deleted; a slug must look like host/path. Down removes the
+// project rows that named a standalone repository, then the tables.
+func TestGitReposMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 340); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x'), ('u2', 'b@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
+INSERT INTO at_git_connections (id, user_id, name, provider, login, token_secret, kind) VALUES ('g1', 'u1', 'gh', 'github', 'me', '', 'app');
+INSERT INTO at_git_credentials (id, user_id, name, host, kind, cred_ciphertext, cred_nonce, wrapped_dek, dek_nonce, kek_id)
+  VALUES ('gc1', 'u1', 'token', 'gitlab.com', 'https_token', '\x00', '\x00', '\x00', '\x00', 'k');
+INSERT INTO at_git_repos (id, user_id, slug, url, transport, host, credential_id)
+  VALUES ('gr1', 'u1', 'gitlab.com/acme/web', 'https://gitlab.com/acme/web.git', 'https', 'gitlab.com', 'gc1');
+INSERT INTO at_project_repos (project_id, repo, git_repo_id) VALUES ('p1', 'gitlab.com/acme/web', 'gr1');
+INSERT INTO at_project_repos (project_id, repo, git_connection_id) VALUES ('p1', 'acme/api', 'g1');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	bad := map[string]string{
+		"both sources":      `INSERT INTO at_project_repos (project_id, repo, git_connection_id, git_repo_id) VALUES ('p1', 'x/y', 'g1', 'gr1')`,
+		"credential in use": `DELETE FROM at_git_credentials WHERE id = 'gc1'`,
+		"repo in use":       `DELETE FROM at_git_repos WHERE id = 'gr1'`,
+		"bad slug":          `INSERT INTO at_git_repos (id, user_id, slug, url, transport, host) VALUES ('gr2', 'u1', 'no-path', 'https://x/y', 'https', 'x')`,
+		"other user's cred": `INSERT INTO at_git_repos (id, user_id, slug, url, transport, host, credential_id) VALUES ('gr3', 'u2', 'gitlab.com/b/c', 'https://gitlab.com/b/c', 'https', 'gitlab.com', 'gc1')`,
+	}
+	for name, q := range bad {
+		if _, err := db.Exec(q); err == nil {
+			t.Fatalf("%s: accepted", name)
+		}
+	}
+	if _, err := p.DownTo(ctx, 330); err != nil {
+		t.Fatal(err)
+	}
+	var repos string
+	if err := db.QueryRow(`SELECT string_agg(repo, ',') FROM at_project_repos`).Scan(&repos); err != nil {
+		t.Fatal(err)
+	}
+	if repos != "acme/api" {
+		t.Fatalf("project repos after down: %s", repos)
 	}
 }

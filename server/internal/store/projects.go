@@ -63,10 +63,16 @@ func mergePolicy(p string) string {
 type ProjectRepo struct {
 	Repo            string  `json:"repo"`
 	GitConnectionID *string `json:"git_connection_id"`
+	// GitRepoID names a standalone repository (at_git_repos, git-repos.md §3.4); then Repo is its
+	// slug and GitConnectionID is nil.
+	GitRepoID *string `json:"git_repo_id"`
 }
 
+// Standalone reports whether the repository is a standalone Git repository (no GitHub API).
+func (r ProjectRepo) Standalone() bool { return r.GitRepoID != nil && *r.GitRepoID != "" }
+
 const projectCols = `p.id, p.user_id, p.name, p.description, p.context,
-	COALESCE((SELECT json_agg(json_build_object('repo', r.repo, 'git_connection_id', r.git_connection_id)
+	COALESCE((SELECT json_agg(json_build_object('repo', r.repo, 'git_connection_id', r.git_connection_id, 'git_repo_id', r.git_repo_id)
 	  ORDER BY r.position, r.created_at) FROM at_project_repos r WHERE r.project_id = p.id), '[]'::json) AS repos,
 	p.created_at, p.updated_at, p.pinned, p.archived, p.work_mode, p.auto_approve, p.merge_policy,
 	p.delivery, p.office_layout, p.icon, p.coordinator_model, p.thread_model, p.thread_codex_model, p.thread_effort, p.auto_resume,
@@ -147,6 +153,7 @@ type projectRepoRow struct {
 	ProjectID       string
 	Repo            string
 	GitConnectionID *string
+	GitRepoID       *string
 	Position        int
 }
 
@@ -158,7 +165,7 @@ func (s *Store) writeRepos(ctx context.Context, projectID string, repos []Projec
 	}
 	rows := make([]projectRepoRow, len(repos))
 	for i, r := range repos {
-		rows[i] = projectRepoRow{ProjectID: projectID, Repo: r.Repo, GitConnectionID: r.GitConnectionID, Position: i}
+		rows[i] = projectRepoRow{ProjectID: projectID, Repo: r.Repo, GitConnectionID: r.GitConnectionID, GitRepoID: r.GitRepoID, Position: i}
 	}
 	return s.g(ctx).Create(&rows).Error
 }

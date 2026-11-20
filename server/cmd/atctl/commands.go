@@ -187,8 +187,61 @@ func reseal(ctx context.Context, db *store.Store) error {
 		}
 		servers, keys, err := resealRemote(ctx, tx, vault)
 		fmt.Printf("rewrapped %d remote server credentials, %d ssh keys\n", servers, keys)
+		if err != nil {
+			return err
+		}
+		creds, hostKeys, err := resealGit(ctx, tx, vault)
+		fmt.Printf("rewrapped %d git credentials, %d git host key MACs\n", creds, hostKeys)
 		return err
 	})
+}
+
+// resealGit re-wraps standalone Git repository credentials and recomputes their repositories'
+// host key MACs made with an older key (git-repos.md §4.1).
+func resealGit(ctx context.Context, tx *store.Store, vault *credvault.Vault) (creds, hostKeys int, err error) {
+	if !vault.Ready() {
+		return 0, 0, nil
+	}
+	list, err := tx.SealedGitCredentials(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, c := range list {
+		sealed, changed, err := vault.Rewrap(credvault.GitCredAAD(c.UserID, c.ID, c.Kind, c.Host, c.Username), c.Sealed)
+		if err != nil {
+			return creds, hostKeys, fmt.Errorf("git credential %s (%s): %w", c.ID, c.Name, err)
+		}
+		if !changed {
+			continue
+		}
+		if err := tx.ResealGitCredential(ctx, c.ID, sealed); err != nil {
+			return creds, hostKeys, err
+		}
+		creds++
+	}
+	repos, err := tx.AllGitReposWithHostKeys(ctx)
+	if err != nil {
+		return creds, hostKeys, err
+	}
+	for _, r := range repos {
+		data := credvault.GitHostKeyMACData(r.ID, r.Host, r.HostKey)
+		ok, current := vault.VerifyMAC(data, r.HostKeyMAC)
+		if !ok {
+			return creds, hostKeys, fmt.Errorf("git repo %s (%s): host key MAC does not verify", r.ID, r.Slug)
+		}
+		if current {
+			continue
+		}
+		mac, err := vault.MAC(data)
+		if err != nil {
+			return creds, hostKeys, err
+		}
+		if err := tx.ResealGitRepoHostKey(ctx, r.ID, mac); err != nil {
+			return creds, hostKeys, err
+		}
+		hostKeys++
+	}
+	return creds, hostKeys, nil
 }
 
 // resealRemote re-wraps the DEKs of remote server credentials and of the SSH keys in at_settings

@@ -637,6 +637,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/git/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My Git credentials */
+        get: operations["list-git-credentials"];
+        put?: never;
+        /** Add a Git credential (token or SSH key, sealed, never returned) */
+        post: operations["create-git-credential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/git/credentials/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["delete-git-credential"];
+        options?: never;
+        head?: never;
+        /** Rename a Git credential or replace its value */
+        patch: operations["update-git-credential"];
+        trace?: never;
+    };
     "/api/git/github-app": {
         parameters: {
             query?: never;
@@ -647,6 +682,108 @@ export interface paths {
         get: operations["github-app-status"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/git/repos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My standalone Git repositories */
+        get: operations["list-git-repos"];
+        put?: never;
+        /** Add a standalone Git repository (tested once on the way) */
+        post: operations["create-git-repo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/git/repos/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test a URL and credential before saving (nothing stored, no host key pinned) */
+        post: operations["test-git-repo-draft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/git/repos/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get-git-repo"];
+        put?: never;
+        post?: never;
+        delete: operations["delete-git-repo"];
+        options?: never;
+        head?: never;
+        patch: operations["update-git-repo"];
+        trace?: never;
+    };
+    "/api/git/repos/{id}/branches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Branches of a standalone repository */
+        get: operations["git-repo-branches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/git/repos/{id}/host-key/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Forget the pinned SSH host key */
+        post: operations["reset-git-repo-host-key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/git/repos/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test a saved repository; the first SSH test pins the host key */
+        post: operations["test-git-repo"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2375,6 +2512,17 @@ export interface components {
             /** @description '' until the first message opens a session */
             session_state: string;
         };
+        CreateGitRepoInputBody: {
+            /** @description Or a new one (host taken from the URL) */
+            credential?: components["schemas"]["GitCredentialInput"];
+            /** @description An existing credential of the same host */
+            credential_id?: string;
+            name?: string;
+            /** @enum {string} */
+            provider?: "" | "github" | "gitlab" | "gitea" | "bitbucket" | "generic";
+            url: string;
+            web_url?: string;
+        };
         CreateServerInputBody: {
             auth: components["schemas"]["ServerAuth"];
             host: string;
@@ -2694,6 +2842,108 @@ export interface components {
                 [key: string]: string;
             };
             provider: string;
+        };
+        GitCredentialInput: {
+            /** Format: date-time */
+            expires_at?: string;
+            /** @description ssh_key: let the platform generate the key pair (only the public key is ever shown) */
+            generate?: boolean;
+            /** @description host[:port], as in the repository URL (taken from the URL when created with a repository) */
+            host?: string;
+            /**
+             * @description Required, except with a repository (follows the URL)
+             * @enum {string}
+             */
+            kind?: "" | "https_token" | "ssh_key";
+            /** @description Default: the host */
+            name?: string;
+            passphrase?: string;
+            /** @description ssh_key: OpenSSH or PEM private key */
+            private_key?: string;
+            /** @description https_token */
+            token?: string;
+            username?: string;
+        };
+        GitCredentialView: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            cred_updated_at: string;
+            /** Format: date-time */
+            expires_at: string | null;
+            /** @description ssh_key generated by the platform (the private key was never shown) */
+            generated: boolean;
+            has_passphrase: boolean;
+            /** @description host[:port] the credential may be used on */
+            host: string;
+            id: string;
+            key_fingerprint: string;
+            /** @enum {string} */
+            kind: "https_token" | "ssh_key";
+            name: string;
+            /** @description ssh_key: public key to add as a deploy key */
+            public_key: string;
+            /**
+             * Format: int64
+             * @description Repositories using it
+             */
+            repos: number;
+            username: string;
+        };
+        GitRepoView: {
+            /**
+             * @description Last test: '' = not tested
+             * @enum {string}
+             */
+            access: "" | "read" | "write";
+            /** Format: date-time */
+            created_at: string;
+            /** @description null = public, read only */
+            credential_id: string | null;
+            default_branch: string;
+            host: string;
+            /** Format: date-time */
+            host_key_confirmed_at: string | null;
+            host_key_fp: string;
+            id: string;
+            /** Format: date-time */
+            last_checked_at: string | null;
+            last_error: string;
+            name: string;
+            projects: components["schemas"]["ProjectRef"][] | null;
+            /** @enum {string} */
+            provider: "github" | "gitlab" | "gitea" | "bitbucket" | "generic";
+            /** @description host[:port]/path: the repository's name in projects, threads and tools */
+            slug: string;
+            /** @enum {string} */
+            transport: "https" | "ssh";
+            url: string;
+            web_url: string;
+        };
+        GitSecretInput: {
+            /** @description ssh_key: let the platform generate the key pair (only the public key is ever shown) */
+            generate?: boolean;
+            passphrase?: string;
+            /** @description ssh_key: OpenSSH or PEM private key */
+            private_key?: string;
+            /** @description https_token */
+            token?: string;
+        };
+        GitTestResult: {
+            /** @enum {string} */
+            access?: "" | "read" | "write";
+            /** Format: int64 */
+            branches: number;
+            default_branch?: string;
+            /** @enum {string} */
+            error?: "auth_failed" | "repo_not_found" | "host_key_mismatch" | "host_key_invalid" | "address_blocked" | "resolve_failed" | "connect_failed" | "timeout" | "credential_unreadable" | "failed";
+            host_key_fp?: string;
+            host_key_pinned: boolean;
+            host_key_type?: string;
+            /** Format: int64 */
+            latency_ms: number;
+            message?: string;
+            ok: boolean;
         };
         GrantableRoleView: {
             grantable: boolean;
@@ -3327,7 +3577,9 @@ export interface components {
             used_by_projects: components["schemas"]["ProjectRef"][] | null;
         };
         RepoRef: {
-            git_connection_id: string | null;
+            git_connection_id?: string | null;
+            /** @description A standalone repository (git-repos.md); then repo is its slug and git_connection_id is null */
+            git_repo_id?: string | null;
             /** @description GitHub URL, git@ URL or owner/repo */
             repo: string;
         };
@@ -3741,6 +3993,12 @@ export interface components {
             /** @description Shown once; the user must change it after signing in */
             temp_password: string;
         };
+        TestGitRepoInputBody: {
+            /** @description Unsaved credential to try (generate is not allowed) */
+            credential?: components["schemas"]["GitCredentialInput"];
+            credential_id?: string;
+            url: string;
+        };
         ThreadCounts: {
             /** Format: int64 */
             approvals_open: number;
@@ -3958,6 +4216,24 @@ export interface components {
             input: number;
             /** Format: int64 */
             output: number;
+        };
+        UpdateGitCredInputBody: {
+            /** Format: date-time */
+            expires_at?: string;
+            name?: string;
+            /** @description Clear expires_at */
+            no_expiry?: boolean;
+            /** @description Replaces the value; required when the username changes */
+            secret?: components["schemas"]["GitSecretInput"];
+            username?: string;
+        };
+        UpdateGitRepoInputBody: {
+            /** @description '' = public */
+            credential_id?: string;
+            name?: string;
+            /** @enum {string} */
+            provider?: "github" | "gitlab" | "gitea" | "bitbucket" | "generic";
+            web_url?: string;
         };
         UpdateServerInputBody: {
             /** @description Replaces the credential; required when host, port, username or the auth kind changes */
@@ -5773,6 +6049,132 @@ export interface operations {
             };
         };
     };
+    "list-git-credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitCredentialView"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "create-git-credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GitCredentialInput"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitCredentialView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "delete-git-credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "update-git-credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateGitCredInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitCredentialView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     "github-app-status": {
         parameters: {
             query?: never;
@@ -5789,6 +6191,291 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AppStatusOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-git-repos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitRepoView"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "create-git-repo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateGitRepoInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitRepoView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "test-git-repo-draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestGitRepoInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitTestResult"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "get-git-repo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitRepoView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "delete-git-repo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "update-git-repo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateGitRepoInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitRepoView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "git-repo-branches": {
+        parameters: {
+            query?: {
+                q?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "reset-git-repo-host-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitRepoView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "test-git-repo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitTestResult"];
                 };
             };
             /** @description Error */

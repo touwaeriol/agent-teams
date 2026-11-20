@@ -16,6 +16,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/config"
 	"github.com/touwaeriol/agent-teams/server/internal/credvault"
 	"github.com/touwaeriol/agent-teams/server/internal/github"
+	"github.com/touwaeriol/agent-teams/server/internal/gitremote"
 	"github.com/touwaeriol/agent-teams/server/internal/kv"
 	"github.com/touwaeriol/agent-teams/server/internal/office"
 	"github.com/touwaeriol/agent-teams/server/internal/platform"
@@ -62,6 +63,7 @@ type Server struct {
 	hooks   platform.Hooks
 	ssh     platform.SSHHooks
 	vault   *credvault.Vault
+	git     gitremote.Git
 	log     *slog.Logger
 	expect  func() int64
 	repos   *repoCache
@@ -161,6 +163,7 @@ func (s *Server) register(api huma.API, r gin.IRoutes) {
 	s.registerMemory(api)
 	s.registerGit(api)
 	s.registerServers(api)
+	s.registerGitRepos(api)
 	s.registerGitHubApp(api, r)
 	s.registerNodes(api)
 	s.registerRoles(api)

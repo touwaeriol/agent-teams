@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/touwaeriol/agent-teams/server/internal/gitremote"
 )
 
 const usage = `usage: atctl <command> [args]
@@ -34,6 +36,9 @@ func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
+	}
+	if os.Args[1] == "git-ssh" { // git's ssh for upstream commands of standalone repositories (internal)
+		os.Exit(gitremote.RunHelper(os.Args[2:]))
 	}
 	run, ok := commands[os.Args[1]]
 	if !ok {
