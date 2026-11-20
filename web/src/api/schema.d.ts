@@ -1223,6 +1223,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{pid}/server-audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Access log of the project's servers */
+        get: operations["project-server-audit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Servers the project uses, their roles, and the roles that can be granted */
+        get: operations["get-project-servers"];
+        /** Replace the project's servers and role grants */
+        put: operations["set-project-servers"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{pid}/shared-files": {
         parameters: {
             query?: never;
@@ -1404,6 +1439,92 @@ export interface paths {
         put?: never;
         /** Send the schedule's message to the coordinator now */
         post: operations["run-schedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My remote servers */
+        get: operations["list-servers"];
+        put?: never;
+        /** Add a remote server (credential sealed, never returned) */
+        post: operations["create-server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/servers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get-server"];
+        put?: never;
+        post?: never;
+        delete: operations["delete-server"];
+        options?: never;
+        head?: never;
+        /** Change a server or replace its credential */
+        patch: operations["update-server"];
+        trace?: never;
+    };
+    "/api/servers/{id}/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Access log of a server */
+        get: operations["server-audit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/servers/{id}/host-key/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Forget the pinned host key (the next test pins the new one) */
+        post: operations["reset-server-host-key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/servers/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Log in from the console; the first test pins the host key */
+        post: operations["test-server"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2254,6 +2375,17 @@ export interface components {
             /** @description '' until the first message opens a session */
             session_state: string;
         };
+        CreateServerInputBody: {
+            auth: components["schemas"]["ServerAuth"];
+            host: string;
+            name: string;
+            /**
+             * Format: int64
+             * @description Default 22
+             */
+            port?: number;
+            username: string;
+        };
         Credentials: {
             email: string;
             password: string;
@@ -2563,9 +2695,25 @@ export interface components {
             };
             provider: string;
         };
+        GrantableRoleView: {
+            grantable: boolean;
+            /**
+             * @description Why it cannot be granted
+             * @enum {string}
+             */
+            reason?: "coordinator" | "lead" | "read_only";
+            role: string;
+            /** @enum {string} */
+            tier: "coordinator" | "lead" | "member";
+            title: string;
+        };
         HealthOutputBody: {
             ok: boolean;
             version: string;
+        };
+        Item: {
+            roles: string[] | null;
+            server_id: string;
         };
         Language: {
             code: string;
@@ -2979,6 +3127,17 @@ export interface components {
             id: string;
             name: string;
         };
+        ProjectServerView: {
+            roles: string[] | null;
+            server: components["schemas"]["ServerView"];
+        };
+        ProjectServersView: {
+            /** @description All of the user's servers (to pick from) */
+            available: components["schemas"]["ServerView"][] | null;
+            roles: components["schemas"]["GrantableRoleView"][] | null;
+            /** @description Servers the project uses, by name */
+            servers: components["schemas"]["ProjectServerView"][] | null;
+        };
         ProjectUpdate: {
             archived?: boolean;
             auto_approve?: boolean;
@@ -3307,6 +3466,39 @@ export interface components {
             status: "ok" | "error" | "unsupported";
             windows: components["schemas"]["UsageWindow"][] | null;
         };
+        SSHAudit: {
+            /** Format: int64 */
+            bytes_in: number;
+            /** Format: int64 */
+            bytes_out: number;
+            /** Format: int64 */
+            cert_serial: number | null;
+            command: string;
+            command_truncated: boolean;
+            conn_id: string;
+            /** Format: date-time */
+            created_at: string;
+            detail: {
+                [key: string]: unknown;
+            };
+            /** Format: int64 */
+            duration_ms: number | null;
+            employee: string;
+            employee_id: string;
+            /** Format: int64 */
+            exit_code: number | null;
+            /** Format: int64 */
+            id: number;
+            kind: string;
+            node_id: string;
+            project_id: string;
+            reason: string;
+            role: string;
+            server_id: string;
+            server_name: string;
+            session_id: string;
+            thread_id: string;
+        };
         Schedule: {
             /** Format: date-time */
             created_at: string;
@@ -3347,6 +3539,56 @@ export interface components {
             tasks: components["schemas"]["TaskView"][] | null;
             threads: components["schemas"]["ThreadView"][] | null;
         };
+        ServerAuth: {
+            /** @enum {string} */
+            kind: "password" | "private_key";
+            passphrase?: string;
+            password?: string;
+            /** @description OpenSSH or PEM private key */
+            private_key?: string;
+        };
+        ServerTestResult: {
+            /** @enum {string} */
+            error?: "host_key_mismatch" | "host_key_invalid" | "auth_failed" | "address_blocked" | "resolve_failed" | "connect_failed" | "timeout" | "handshake_failed" | "credential_unreadable";
+            /** @description host_key_mismatch: the pinned fingerprint */
+            expected_host_key_fp?: string;
+            /** @description Fingerprint the target showed */
+            host_key_fp?: string;
+            /** @description This test pinned the host key (first test) */
+            host_key_pinned: boolean;
+            host_key_type?: string;
+            /** Format: int64 */
+            latency_ms: number;
+            message?: string;
+            /** @description The host key matched (or was pinned now) and the credential logged in */
+            ok: boolean;
+        };
+        ServerView: {
+            /** @enum {string} */
+            auth_kind: "password" | "private_key";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            cred_updated_at: string;
+            has_passphrase: boolean;
+            host: string;
+            /** Format: date-time */
+            host_key_confirmed_at: string | null;
+            /** @description Pinned host key fingerprint; '' until the first successful test connection */
+            host_key_fp: string;
+            id: string;
+            /** @description private_key: SHA256 fingerprint of its public key; '' for password */
+            key_fingerprint: string;
+            /** @description ssh Host alias in sessions: lowercase letters, digits and - */
+            name: string;
+            /** Format: int64 */
+            port: number;
+            /** @description Projects using the server */
+            projects: components["schemas"]["ProjectRef"][] | null;
+            /** Format: date-time */
+            updated_at: string;
+            username: string;
+        };
         SessionBrief: {
             node: components["schemas"]["NodeRef"];
             state: string;
@@ -3382,6 +3624,9 @@ export interface components {
              * @enum {string}
              */
             scope: "lead" | "thread";
+        };
+        SetProjectServersInputBody: {
+            servers: components["schemas"]["Item"][] | null;
         };
         SetupPROutputBody: {
             pr_url: string;
@@ -3444,6 +3689,10 @@ export interface components {
         };
         SkillsBody: {
             skills: components["schemas"]["Skill"][] | null;
+        };
+        SshAuditPage: {
+            items: components["schemas"]["SSHAudit"][] | null;
+            next_cursor: string | null;
         };
         Status: {
             errors?: components["schemas"]["Problem"][] | null;
@@ -3709,6 +3958,15 @@ export interface components {
             input: number;
             /** Format: int64 */
             output: number;
+        };
+        UpdateServerInputBody: {
+            /** @description Replaces the credential; required when host, port, username or the auth kind changes */
+            auth?: components["schemas"]["ServerAuth"];
+            host?: string;
+            name?: string;
+            /** Format: int64 */
+            port?: number;
+            username?: string;
         };
         UploadBody: {
             /** @description Base64 of the file, at most 5 MB */
@@ -7019,6 +7277,112 @@ export interface operations {
             };
         };
     };
+    "project-server-audit": {
+        parameters: {
+            query?: {
+                server_id?: string;
+                thread_id?: string;
+                /** @description connect, disconnect, exec, shell, subsystem, denied, auth_fail, host_key_mismatch or test */
+                kind?: string;
+                /** @description Employee name (dev-1); user for the user's test connections */
+                employee?: string;
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SshAuditPage"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "get-project-servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectServersView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "set-project-servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetProjectServersInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectServersView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     "list-shared-files": {
         parameters: {
             query?: {
@@ -7571,6 +7935,263 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerView"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "create-server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateServerInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "get-server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "delete-server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "update-server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateServerInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "server-audit": {
+        parameters: {
+            query?: {
+                /** @description connect, disconnect, exec, shell, subsystem, denied, auth_fail, host_key_mismatch or test */
+                kind?: string;
+                /** @description Employee name (dev-1); user for the user's test connections */
+                employee?: string;
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SshAuditPage"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "reset-server-host-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "test-server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerTestResult"];
+                };
             };
             /** @description Error */
             default: {

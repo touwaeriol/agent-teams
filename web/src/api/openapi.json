@@ -1010,6 +1010,40 @@
         ],
         "type": "object"
       },
+      "CreateServerInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "auth": {
+            "$ref": "#/components/schemas/ServerAuth"
+          },
+          "host": {
+            "maxLength": 253,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 63,
+            "type": "string"
+          },
+          "port": {
+            "description": "Default 22",
+            "format": "int64",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "username": {
+            "maxLength": 64,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "host",
+          "username",
+          "auth"
+        ],
+        "type": "object"
+      },
       "Credentials": {
         "additionalProperties": false,
         "properties": {
@@ -2026,6 +2060,44 @@
         ],
         "type": "object"
       },
+      "GrantableRoleView": {
+        "additionalProperties": false,
+        "properties": {
+          "grantable": {
+            "type": "boolean"
+          },
+          "reason": {
+            "description": "Why it cannot be granted",
+            "enum": [
+              "coordinator",
+              "lead",
+              "read_only"
+            ],
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "tier": {
+            "enum": [
+              "coordinator",
+              "lead",
+              "member"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "title",
+          "tier",
+          "grantable"
+        ],
+        "type": "object"
+      },
       "HealthOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -2039,6 +2111,30 @@
         "required": [
           "ok",
           "version"
+        ],
+        "type": "object"
+      },
+      "Item": {
+        "additionalProperties": false,
+        "properties": {
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "server_id": {
+            "maxLength": 64,
+            "type": "string"
+          }
+        },
+        "required": [
+          "server_id",
+          "roles"
         ],
         "type": "object"
       },
@@ -3591,6 +3687,68 @@
         ],
         "type": "object"
       },
+      "ProjectServerView": {
+        "additionalProperties": false,
+        "properties": {
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "server": {
+            "$ref": "#/components/schemas/ServerView"
+          }
+        },
+        "required": [
+          "server",
+          "roles"
+        ],
+        "type": "object"
+      },
+      "ProjectServersView": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "description": "All of the user's servers (to pick from)",
+            "items": {
+              "$ref": "#/components/schemas/ServerView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/GrantableRoleView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "servers": {
+            "description": "Servers the project uses, by name",
+            "items": {
+              "$ref": "#/components/schemas/ProjectServerView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "servers",
+          "available",
+          "roles"
+        ],
+        "type": "object"
+      },
       "ProjectUpdate": {
         "additionalProperties": false,
         "properties": {
@@ -4712,6 +4870,119 @@
         ],
         "type": "object"
       },
+      "SSHAudit": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes_in": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "bytes_out": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "cert_serial": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "command": {
+            "type": "string"
+          },
+          "command_truncated": {
+            "type": "boolean"
+          },
+          "conn_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "detail": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "duration_ms": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "employee": {
+            "type": "string"
+          },
+          "employee_id": {
+            "type": "string"
+          },
+          "exit_code": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "server_id": {
+            "type": "string"
+          },
+          "server_name": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "thread_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "project_id",
+          "thread_id",
+          "session_id",
+          "employee_id",
+          "employee",
+          "role",
+          "node_id",
+          "server_id",
+          "server_name",
+          "cert_serial",
+          "conn_id",
+          "kind",
+          "command",
+          "command_truncated",
+          "exit_code",
+          "duration_ms",
+          "bytes_in",
+          "bytes_out",
+          "reason",
+          "detail"
+        ],
+        "type": "object"
+      },
       "Schedule": {
         "additionalProperties": false,
         "properties": {
@@ -4878,6 +5149,172 @@
         ],
         "type": "object"
       },
+      "ServerAuth": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "password",
+              "private_key"
+            ],
+            "type": "string"
+          },
+          "passphrase": {
+            "maxLength": 1024,
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 1024,
+            "type": "string"
+          },
+          "private_key": {
+            "description": "OpenSSH or PEM private key",
+            "maxLength": 16384,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "ServerTestResult": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "enum": [
+              "host_key_mismatch",
+              "host_key_invalid",
+              "auth_failed",
+              "address_blocked",
+              "resolve_failed",
+              "connect_failed",
+              "timeout",
+              "handshake_failed",
+              "credential_unreadable"
+            ],
+            "type": "string"
+          },
+          "expected_host_key_fp": {
+            "description": "host_key_mismatch: the pinned fingerprint",
+            "type": "string"
+          },
+          "host_key_fp": {
+            "description": "Fingerprint the target showed",
+            "type": "string"
+          },
+          "host_key_pinned": {
+            "description": "This test pinned the host key (first test)",
+            "type": "boolean"
+          },
+          "host_key_type": {
+            "type": "string"
+          },
+          "latency_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "ok": {
+            "description": "The host key matched (or was pinned now) and the credential logged in",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "host_key_pinned",
+          "latency_ms"
+        ],
+        "type": "object"
+      },
+      "ServerView": {
+        "additionalProperties": false,
+        "properties": {
+          "auth_kind": {
+            "enum": [
+              "password",
+              "private_key"
+            ],
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "cred_updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "has_passphrase": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "host_key_confirmed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "host_key_fp": {
+            "description": "Pinned host key fingerprint; '' until the first successful test connection",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "key_fingerprint": {
+            "description": "private_key: SHA256 fingerprint of its public key; '' for password",
+            "type": "string"
+          },
+          "name": {
+            "description": "ssh Host alias in sessions: lowercase letters, digits and -",
+            "type": "string"
+          },
+          "port": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "projects": {
+            "description": "Projects using the server",
+            "items": {
+              "$ref": "#/components/schemas/ProjectRef"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "host",
+          "port",
+          "username",
+          "auth_kind",
+          "has_passphrase",
+          "key_fingerprint",
+          "host_key_fp",
+          "host_key_confirmed_at",
+          "cred_updated_at",
+          "created_at",
+          "updated_at",
+          "projects"
+        ],
+        "type": "object"
+      },
       "SessionBrief": {
         "additionalProperties": false,
         "properties": {
@@ -4987,6 +5424,25 @@
         },
         "required": [
           "model"
+        ],
+        "type": "object"
+      },
+      "SetProjectServersInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "servers": {
+            "items": {
+              "$ref": "#/components/schemas/Item"
+            },
+            "maxItems": 200,
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "servers"
         ],
         "type": "object"
       },
@@ -5172,6 +5628,31 @@
         },
         "required": [
           "skills"
+        ],
+        "type": "object"
+      },
+      "SshAuditPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SSHAudit"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
         ],
         "type": "object"
       },
@@ -6039,6 +6520,34 @@
           "cache_read",
           "cache_write"
         ],
+        "type": "object"
+      },
+      "UpdateServerInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "auth": {
+            "$ref": "#/components/schemas/ServerAuth",
+            "description": "Replaces the credential; required when host, port, username or the auth kind changes"
+          },
+          "host": {
+            "maxLength": 253,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 63,
+            "type": "string"
+          },
+          "port": {
+            "format": "int64",
+            "maximum": 65535,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "username": {
+            "maxLength": 64,
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "UploadBody": {
@@ -11181,6 +11690,200 @@
         ]
       }
     },
+    "/api/projects/{pid}/server-audit": {
+      "get": {
+        "operationId": "project-server-audit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "server_id",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "thread_id",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "connect, disconnect, exec, shell, subsystem, denied, auth_fail, host_key_mismatch or test",
+            "explode": false,
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "description": "connect, disconnect, exec, shell, subsystem, denied, auth_fail, host_key_mismatch or test",
+              "maxLength": 32,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Employee name (dev-1); user for the user's test connections",
+            "explode": false,
+            "in": "query",
+            "name": "employee",
+            "schema": {
+              "description": "Employee name (dev-1); user for the user's test connections",
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SshAuditPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Access log of the project's servers",
+        "tags": [
+          "servers"
+        ]
+      }
+    },
+    "/api/projects/{pid}/servers": {
+      "get": {
+        "operationId": "get-project-servers",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectServersView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Servers the project uses, their roles, and the roles that can be granted",
+        "tags": [
+          "servers"
+        ]
+      },
+      "put": {
+        "operationId": "set-project-servers",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetProjectServersInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectServersView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Replace the project's servers and role grants",
+        "tags": [
+          "servers"
+        ]
+      }
+    },
     "/api/projects/{pid}/shared-files": {
       "delete": {
         "operationId": "delete-shared-file",
@@ -11970,6 +12673,373 @@
         "summary": "Send the schedule's message to the coordinator now",
         "tags": [
           "schedules"
+        ]
+      }
+    },
+    "/api/servers": {
+      "get": {
+        "operationId": "list-servers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ServerView"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "My remote servers",
+        "tags": [
+          "servers"
+        ]
+      },
+      "post": {
+        "operationId": "create-server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateServerInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Add a remote server (credential sealed, never returned)",
+        "tags": [
+          "servers"
+        ]
+      }
+    },
+    "/api/servers/{id}": {
+      "delete": {
+        "operationId": "delete-server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "servers"
+        ]
+      },
+      "get": {
+        "operationId": "get-server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "servers"
+        ]
+      },
+      "patch": {
+        "operationId": "update-server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateServerInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Change a server or replace its credential",
+        "tags": [
+          "servers"
+        ]
+      }
+    },
+    "/api/servers/{id}/audit": {
+      "get": {
+        "operationId": "server-audit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "connect, disconnect, exec, shell, subsystem, denied, auth_fail, host_key_mismatch or test",
+            "explode": false,
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "description": "connect, disconnect, exec, shell, subsystem, denied, auth_fail, host_key_mismatch or test",
+              "maxLength": 32,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Employee name (dev-1); user for the user's test connections",
+            "explode": false,
+            "in": "query",
+            "name": "employee",
+            "schema": {
+              "description": "Employee name (dev-1); user for the user's test connections",
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SshAuditPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Access log of a server",
+        "tags": [
+          "servers"
+        ]
+      }
+    },
+    "/api/servers/{id}/host-key/reset": {
+      "post": {
+        "operationId": "reset-server-host-key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Forget the pinned host key (the next test pins the new one)",
+        "tags": [
+          "servers"
+        ]
+      }
+    },
+    "/api/servers/{id}/test": {
+      "post": {
+        "operationId": "test-server",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerTestResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Log in from the console; the first test pins the host key",
+        "tags": [
+          "servers"
         ]
       }
     },
