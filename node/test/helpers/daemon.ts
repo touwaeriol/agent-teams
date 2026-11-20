@@ -27,7 +27,7 @@ export async function startHarness(overrides: Partial<DaemonOptions> = {}): Prom
     platformDir: join(dir, "platform"), runtimeDir: join(dir, "run"), installDir: join(dir, "install"),
     maxActive: 4, passEnv: [], gitBaseUrl: `file://${join(dir, "remotes")}`, claudeConfigDir: join(dir, "claude"),
     codexHome: join(dir, "codex"), nodeCmd: [process.execPath, "agent-teams-node"], log: silentLogger,
-    probeRuntimes: false, isolation: "none", queryFn: fakeQueryFactory(log),
+    sshBaseDir: join(dir, "ssh"), sshTmpDir: join(dir, "tmp"), probeRuntimes: false, isolation: "none", queryFn: fakeQueryFactory(log),
     link: { pingMs: 1000, deadMs: 5000, backoff: { minMs: 50, maxMs: 200 } }, ...overrides,
   };
   const h: Harness = {

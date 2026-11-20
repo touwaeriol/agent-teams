@@ -47,6 +47,8 @@ class SshSession implements AgentIdentityProvider {
   readonly pipes = new Set<Duplex>();
   private pending: Promise<AgentIdentity | null> | null = null;
   closed = false;
+  /** Why the last certificate request failed (shown by ssh-proxy). */
+  lastError = "";
 
   constructor(readonly id: string, readonly openGen: number, readonly dir: string, servers: string[], private readonly hub: SshHub) {
     this.servers = servers;
@@ -185,14 +187,17 @@ export class SshHub {
     const res = await this.ask({ req_id: newId("sc_"), session_id: s.id, open_gen: s.openGen, public_key: s.key.authorizedKey });
     if (s.closed || this.sessions.get(s.id) !== s) return null;
     if (!res.ok || !res.certificate) {
+      s.lastError = res.error ?? "refused";
       this.o.log.info({ session: s.id, err: res.error }, "ssh certificate refused");
       return null;
     }
     const blob = keyLineBlob(res.certificate);
     if (!blob) {
+      s.lastError = "unreadable certificate";
       this.o.log.warn({ session: s.id }, "ssh certificate unreadable");
       return null;
     }
+    s.lastError = "";
     const validBefore = res.valid_before ? Date.parse(res.valid_before) : Date.now() + 10 * 60_000;
     s.cert = { blob, validBefore };
     writePrivateFileAtomic(s.knownHostsPath, (res.known_hosts ?? []).filter((l) => !/[\r\n]/.test(l)).join("\n") + "\n");
@@ -239,7 +244,12 @@ export class SshHub {
     const s = this.sessions.get(req.session);
     if (gen === null || !s) return { error: "unknown session (the session ended or has no remote servers)" };
     if (s.openGen !== gen) return { error: "stale session" };
-    if (!s.servers.includes(req.server)) return { error: `server ${req.server} is not available to this session; use one of: ${s.servers.join(", ") || "(none)"}` };
+    if (!s.servers.includes(req.server)) return { error: notAvailable(req.server, s.servers) };
+    // ssh checks the gateway's host key before it asks the agent for an identity: get the
+    // certificate (and with it known_hosts) now, and explain a refusal here rather than as
+    // "Permission denied (publickey)".
+    if (!(await s.identity())) return { error: `no session certificate: ${s.lastError || "the session ended"}` };
+    if (!s.servers.includes(req.server)) return { error: notAvailable(req.server, s.servers) };
     const ws = await this.dialGateway(s, req.server);
     if ("error" in ws) return ws;
     if (s.closed) {
@@ -268,6 +278,10 @@ export class SshHub {
       ws.once("error", (err) => resolve({ error: `cannot reach the console SSH gateway: ${err.message}` }));
     });
   }
+}
+
+function notAvailable(server: string, servers: string[]): string {
+  return `server ${server} is not available to this session; use one of: ${servers.join(", ") || "(none)"}`;
 }
 
 /** ws(s)://<console>/nodes/ssh from the daemon's link URL (…/nodes/connect or …/nodes/v2/connect). */

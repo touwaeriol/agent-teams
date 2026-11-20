@@ -82,6 +82,8 @@ export interface DaemonOptions {
   sshBaseDir?: string;
   /** PATH searched for the real ssh / scp / sftp (default the daemon's PATH). */
   sshPath?: string;
+  /** Temp directory for over-long session directory paths (tests; default os.tmpdir()). */
+  sshTmpDir?: string;
 }
 
 const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "upgrade", "file_download", "shared_files", "context_usage", "session_compact", "usage", "ssh_gateway"];
@@ -138,7 +140,7 @@ export class Daemon {
     this.ssh = new SshHub({
       baseDir: o.sshBaseDir ?? sshBaseDir(dataDir), proxySocket: sshSocketPath(o.runtimeDir), nodeCmd: o.nodeCmd,
       gatewayUrl: gatewayUrl(o.url), token: o.token, send, log: o.log,
-      verify: (id, secret) => this.credServer.verify(id, secret),
+      verify: (id, secret) => this.credServer.verify(id, secret), ...(o.sshTmpDir ? { tmpDir: o.sshTmpDir } : {}),
     });
     this.credServer = new CredServer(credSocketPath(o.runtimeDir), this.creds, o.log, { gh: () => this.gh.resolve(), ghConfigRoot: join(dataDir, "gh-config") });
     this.toolhost = new LoopbackToolHost(o.log);
