@@ -91,12 +91,16 @@ export function useVoiceInput(text: Ref<string>, field: Ref<Field | null>, makeD
   // recording starts: the mode must not change between the press and the release), and every
   // composer follows a change made in another one (or another tab).
   watch(userId, syncPrefs);
-  const unsubscribe = onPrefsChange(() => Object.assign(prefs, readPrefs(userId.value)));
+  // Same page: take the written value as is (storage may be unavailable, so reading it back could
+  // lose this session's changes). Another tab: read storage again.
+  const unsubscribe = onPrefsChange((c) => {
+    if (!c) Object.assign(prefs, readPrefs(userId.value));
+    else if (c.userId === userId.value) Object.assign(prefs, c.prefs);
+  });
 
   function setPrefs(patch: Partial<VoicePrefs>) {
     syncPrefs();
-    writePrefs(userId.value, { ...prefs, ...patch }); // every composer (this one too) reloads
-    Object.assign(prefs, patch);
+    writePrefs(userId.value, { ...prefs, ...patch }); // every composer on the page (this one too) takes it
   }
 
   function start(focus = true) {
@@ -177,7 +181,8 @@ export function useVoiceInput(text: Ref<string>, field: Ref<Field | null>, makeD
   }
 
   function onKeyUp(e: KeyboardEvent) {
-    if (prefs.pushToTalk && holding.value && (e.code === "KeyM" || e.key === "Alt")) release();
+    // A hold ends on release whatever the mode is now (the switch may have changed while held).
+    if (holding.value && (e.code === "KeyM" || e.key === "Alt")) release();
   }
 
   onBeforeUnmount(() => {

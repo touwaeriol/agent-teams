@@ -329,9 +329,16 @@ describe("voice prefs", () => {
     const off = onPrefsChange(f);
     writePrefs("u1", { ...DEFAULT_PREFS, pushToTalk: true });
     expect(f).toHaveBeenCalledTimes(1);
+    expect(f).toHaveBeenLastCalledWith({ userId: "u1", prefs: { ...DEFAULT_PREFS, pushToTalk: true } });
+    // Another tab: no value, the listener reads storage again.
+    window.dispatchEvent(new StorageEvent("storage", { key: prefsKey("u1") }));
+    window.dispatchEvent(new StorageEvent("storage", { key: "draft:v2:x" }));
+    expect(f).toHaveBeenCalledTimes(2);
+    expect(f).toHaveBeenLastCalledWith(null);
     off();
     writePrefs("u1", DEFAULT_PREFS);
-    expect(f).toHaveBeenCalledTimes(1);
+    window.dispatchEvent(new StorageEvent("storage", { key: prefsKey("u1") }));
+    expect(f).toHaveBeenCalledTimes(2);
   });
   it("searches languages by code, own name and Chinese name", () => {
     const list = [
