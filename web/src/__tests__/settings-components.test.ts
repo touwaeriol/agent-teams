@@ -320,7 +320,7 @@ describe("Team · role model field", () => {
     expect(calls(spy, "PUT", /\/api\/roles$/)).toHaveLength(0);
   }, 15000);
 
-  it("saves typed models for the coordinator, the lead and a member, refuses a bad id, and clears on a type change", async () => {
+  it("saves typed models for the coordinator, the lead and a member, refuses a bad id, and keeps each agent's model", async () => {
     const info = vi.spyOn(toast, "info").mockImplementation(() => {});
     const { w, spy } = await mountTeam();
     await type(cards(w)[0]!, " claude-fable-5-2 ");
@@ -329,22 +329,29 @@ describe("Team · role model field", () => {
     expect(cards(w)[2]!.find("[data-testid=model-input-error]").exists()).toBe(true);
     await type(cards(w)[2]!, "us.anthropic.claude-x:0[1m]");
     expect(cards(w)[2]!.find("[data-testid=model-input-error]").exists()).toBe(false);
-    // rev (codex, "") → Claude Code: nothing to clear, no toast; then dev → Codex clears its model
-    options(cards(w)[3]!, "类型").find((o) => o.textContent!.includes("Claude Code"))!.click();
+    // rev (codex, ""): add Claude Code → a model box per agent; type the Claude one, then drop Codex
+    options(cards(w)[3]!, "agent").find((o) => o.textContent!.includes("Claude Code"))!.click();
+    await flushPromises();
+    const boxes = cards(w)[3]!.findAll<HTMLInputElement>("input[aria-label=模型]");
+    expect(boxes).toHaveLength(2);
+    expect(cards(w)[3]!.text()).toContain("每次开新会话用剩余额度最多的");
+    await boxes[1]!.setValue("claude-sonnet-5-5");
+    await boxes[1]!.trigger("keyup", { key: "Enter" });
+    await flushPromises();
+    options(cards(w)[3]!, "agent").find((o) => o.textContent!.includes("Codex"))!.click();
+    await flushPromises();
+    // dev: add Codex next to Claude Code
+    options(cards(w)[2]!, "agent").find((o) => o.textContent!.includes("Codex"))!.click();
     await flushPromises();
     expect(info).not.toHaveBeenCalled();
-    await type(cards(w)[3]!, "claude-sonnet-5-5");
-    options(cards(w)[3]!, "类型").find((o) => o.textContent!.includes("Codex"))!.click();
-    await flushPromises();
-    expect(info).toHaveBeenCalledWith("类型变了，已清空模型，请重新填写");
     await w.findAll("button").find((b) => b.text() === "保存")!.trigger("click");
     await flushPromises();
-    const body = (await calls(spy, "PUT", /\/api\/roles$/)[0]!.json()) as { roles: { role: string; runtime: string; model: string }[] };
-    expect(body.roles.map((r) => [r.role, r.runtime, r.model])).toEqual([
-      ["coordinator", "claude", "claude-fable-5-2"],
-      ["lead", "claude", ""],
-      ["dev", "claude", "us.anthropic.claude-x:0[1m]"],
-      ["rev", "codex", ""],
+    const body = (await calls(spy, "PUT", /\/api\/roles$/)[0]!.json()) as { roles: { role: string; runtime: string; runtimes?: string[]; model: string }[] };
+    expect(body.roles.map((r) => [r.role, r.runtime, (r.runtimes ?? []).join(","), r.model])).toEqual([
+      ["coordinator", "claude", "claude", "claude-fable-5-2"],
+      ["lead", "claude", "claude", ""],
+      ["dev", "claude", "claude,codex", "us.anthropic.claude-x:0[1m]"],
+      ["rev", "claude", "claude", "claude-sonnet-5-5"],
     ]);
   }, 15000);
 });

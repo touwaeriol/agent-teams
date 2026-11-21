@@ -92,8 +92,9 @@ func staffByName(ctx context.Context, q DB, projectID string) (map[string]Employ
 }
 
 // keepMember creates <role>-<n>, or refreshes an existing one from the template and activates
-// it (only when something changed: no row lock for an unchanged member); a member whose
-// runtime changes loses its node so it gets a fitting one.
+// it (only when something changed: no row lock for an unchanged member); a member whose runtime
+// is no longer one of the role's goes to the role's first runtime and loses its node (so it gets
+// a fitting one) and its /model pick (an id of the old runtime).
 func keepMember(ctx context.Context, tx *Tx, projectID string, e Employee, r store.Role, n int, hair func(int) *string) error {
 	if e.ID == "" {
 		_, err := InsertEmployee(ctx, tx, NewEmployee{ProjectID: projectID, Name: fmt.Sprintf("%s-%d", r.Role, n), Role: r,
@@ -103,17 +104,17 @@ func keepMember(ctx context.Context, tx *Tx, projectID string, e Employee, r sto
 	if upToDate(e, r) {
 		return nil
 	}
-	set := map[string]any{"active": true, "spec": jsonOf(r), "runtime": runtimeOf(r),
+	set := map[string]any{"active": true, "spec": jsonOf(r),
 		"role_id": gorm.Expr("(SELECT id FROM at_roles WHERE id = ?)", nilIfEmpty(r.ID))}
-	if runtimeOf(r) != e.Runtime {
-		set["node_id"] = nil
+	if !slices.Contains(r.RuntimeList(), e.Runtime) {
+		set["runtime"], set["node_id"], set["model"] = runtimeOf(r), nil, ""
 	}
 	return tx.Gorm(ctx).Table("at_employees").Where("id = ?", e.ID).Updates(set).Error
 }
 
 // upToDate reports whether a member already is active with the template's snapshot.
 func upToDate(e Employee, r store.Role) bool {
-	return e.Active && e.Runtime == runtimeOf(r) && deref(e.RoleID) == r.ID && bytes.Equal(jsonOf(e.Spec), jsonOf(r))
+	return e.Active && slices.Contains(r.RuntimeList(), e.Runtime) && deref(e.RoleID) == r.ID && bytes.Equal(jsonOf(e.Spec), jsonOf(r))
 }
 
 // retireSurplus deactivates active members the templates no longer count, except busy ones

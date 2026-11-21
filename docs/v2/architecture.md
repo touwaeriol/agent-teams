@@ -222,6 +222,8 @@ Codex 对应：组长和 `read_only` 岗位 `sandbox: read-only, approvalPolicy:
 - 守护进程 `node/src/sessions/registry.ts`：每种运行时一个 `RuntimeAdapter`（登录探测、hello 上报、透传/固定环境变量、是否原生加载技能、`createDriver`）。会话管理器只认 `Driver` 接口（start / push / interrupt / setMode / compact / close）。
 - 网页 `web/src/lib/runtimes.ts`：同一张表的展示部分（名称、斜杠命令、内置模型、订阅登录类型）。
 
+岗位可以配多种运行时（`at_roles.runtimes`），每次开新会话在这些运行时的候选节点里按剩余额度挑（shared-members.md §4.3；节点用量的读取在 `orchestrator.usageOf`）。
+
 加一种运行时：写它的 `Driver` 和 adapter，协议 `Runtime` 枚举加 id 并加它的 `session.open` 选项块（以及 `hello.runtimes` 的信息结构），三张注册表各加一行。用量上报（`node/src/usage.ts`）目前仍按 Claude / Codex 各写一份读取，加运行时时一并补上。
 
 ### 6.3 平台工具：守护进程本地 MCP + WS 转发

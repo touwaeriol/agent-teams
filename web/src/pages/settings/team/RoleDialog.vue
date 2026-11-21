@@ -7,6 +7,7 @@ import Field from "@/components/common/Field.vue";
 import FormDialog from "@/components/common/FormDialog.vue";
 import TagInput from "@/components/common/TagInput.vue";
 import { roleName } from "@/lib/roles";
+import { roleRuntimes } from "@/lib/runtimes";
 import ContextFields from "./ContextFields.vue";
 import { GATES } from "./team";
 
@@ -47,7 +48,7 @@ const num = (v: string) => (v === "" ? null : Number(v));
           <el-option v-for="g in GATES" :key="g.value" :value="g.value" :label="g.label" />
         </el-select>
       </Field>
-      <Field v-if="d.runtime === 'codex'" v-slot="{ id }" label="Codex 沙箱">
+      <Field v-if="roleRuntimes(d).includes('codex')" v-slot="{ id }" label="Codex 沙箱">
         <el-select :id="id" :model-value="d.sandbox || 'workspace-write'" @update:model-value="(v: string) => (d.sandbox = v)">
           <el-option v-for="s in ['read-only', 'workspace-write', 'danger-full-access']" :key="s" :value="s" :label="s" />
         </el-select>

@@ -407,3 +407,29 @@ func TestEmployeeBriefsProjectWide(t *testing.T) {
 		t.Fatalf("project-wide briefs: %v", got)
 	}
 }
+
+// TestEnsureStaffSeveralRuntimes: a member on one of its role's runtimes keeps it (and its node
+// and /model pick) when the role gains another; dropping the member's runtime from the role moves
+// it to the role's first runtime without a node or /model pick.
+func TestEnsureStaffSeveralRuntimes(t *testing.T) {
+	w := newStaffWorld(t)
+	dev := member("dev", 1)
+	dev.Runtime, dev.Runtimes = "codex", []string{"codex"}
+	w.ensure(dev)
+	if err := w.s.Pool.Gorm(w.ctx).Exec(`UPDATE at_employees SET model = 'gpt-x' WHERE name = 'dev-1'`).Error; err != nil {
+		t.Fatal(err)
+	}
+	dev.Runtimes = []string{"claude", "codex"}
+	dev.Runtime = "claude"
+	w.ensure(dev)
+	e, err := ProjectMemberByName(w.ctx, w.s.Pool, "p1", "dev-1")
+	if err != nil || e.Runtime != "codex" || e.NodeID == nil || e.Model != "gpt-x" || len(e.Spec.Runtimes) != 2 {
+		t.Fatalf("kept runtime: %+v %v", e, err)
+	}
+	dev.Runtimes = []string{"claude"}
+	w.ensure(dev)
+	e, err = ProjectMemberByName(w.ctx, w.s.Pool, "p1", "dev-1")
+	if err != nil || e.Runtime != "claude" || e.Model != "" {
+		t.Fatalf("dropped runtime: %+v %v", e, err)
+	}
+}

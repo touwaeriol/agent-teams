@@ -4974,6 +4974,16 @@
             "description": "The model of the role's sessions, typed by hand (any tier; '' = the project setting, then the built-in default). Below the project setting and, for members, /model",
             "type": "string"
           },
+          "models": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The model of each further runtime (runtimes[1:]), by runtime id; model is the first runtime's",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "node_ids": {
             "items": {
               "type": "string"
@@ -5012,11 +5022,26 @@
             "type": "string"
           },
           "runtime": {
+            "description": "The role's first runtime (runtimes[0])",
             "enum": [
               "claude",
               "codex"
             ],
             "type": "string"
+          },
+          "runtimes": {
+            "description": "Every runtime the role's employees may run on, in display order; each new session takes the one with the most quota left. Empty: [runtime]",
+            "items": {
+              "enum": [
+                "claude",
+                "codex"
+              ],
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "sandbox": {
             "type": "string"

@@ -3650,6 +3650,10 @@ export interface components {
             max_turns: number | null;
             /** @description The model of the role's sessions, typed by hand (any tier; '' = the project setting, then the built-in default). Below the project setting and, for members, /model */
             model: string;
+            /** @description The model of each further runtime (runtimes[1:]), by runtime id; model is the first runtime's */
+            models?: {
+                [key: string]: string;
+            } | null;
             node_ids: string[] | null;
             /**
              * @description bypass (default): members run without permission prompts on any node; ask: every non-read tool asks (lead or user, per the project's approval routing). Ignored for the coordinator, the lead and read-only roles
@@ -3661,8 +3665,13 @@ export interface components {
             /** @description Omitted: defaults to true for gate review/decision */
             read_only?: boolean | null;
             role: string;
-            /** @enum {string} */
+            /**
+             * @description The role's first runtime (runtimes[0])
+             * @enum {string}
+             */
             runtime: "claude" | "codex";
+            /** @description Every runtime the role's employees may run on, in display order; each new session takes the one with the most quota left. Empty: [runtime] */
+            runtimes?: ("claude" | "codex")[] | null;
             sandbox: string;
             /** @description Skill names (built-in or uploaded) the role's sessions load */
             skills: string[] | null;

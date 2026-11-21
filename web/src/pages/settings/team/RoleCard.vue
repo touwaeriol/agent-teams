@@ -8,7 +8,7 @@ import type { RoleView } from "@/api/views";
 import DropdownMenu from "@/components/common/DropdownMenu.vue";
 import type { OfficeLayout } from "@/office";
 import { canHaveSkills, countText, isReadOnly, LEVEL, roleName, ruleText } from "@/lib/roles";
-import { RUNTIME_SPECS } from "@/lib/runtimes";
+import { modelOf, modelPatch, roleRuntimes, RUNTIME_SPECS, runtimeLabel, runtimesPatch, type Runtime } from "@/lib/runtimes";
 import { toast } from "@/lib/toast";
 import CommandEditor from "./CommandEditor.vue";
 import LookEditor from "./LookEditor.vue";
@@ -25,12 +25,13 @@ const level = computed(() => LEVEL[props.role.tier]);
 const editing = ref(false);
 const COMMANDS: Record<string, () => void> = { edit: () => (editing.value = true), remove: () => emit("remove") };
 const member = computed(() => props.role.tier === "member");
-/** Members only (the type is fixed for the others): a new runtime clears the model (an id of the other type cannot run). */
-function setRuntime(runtime: RoleView["runtime"]) {
-  if (!member.value || runtime === props.role.runtime) return;
-  if (!props.role.model) return emit("change", { runtime });
-  emit("change", { runtime, model: "" });
-  toast.info("类型变了，已清空模型，请重新填写");
+const runtimeList = computed(() => roleRuntimes(props.role));
+/** Members only (the others run on Claude Code): several agents, each new session takes the one with the most quota left; each keeps its own model. */
+function setRuntimes(list: Runtime[]) {
+  if (!member.value) return;
+  const patch = runtimesPatch(props.role, list);
+  if (!patch) return toast.info("至少选一种 agent");
+  emit("change", patch);
 }
 function save(r: RoleView) {
   emit("change", r);
@@ -63,14 +64,18 @@ function save(r: RoleView) {
     </div>
     <div class="grid grid-cols-1 gap-2.5 text-[13px] min-[480px]:grid-cols-[8rem_minmax(0,1.25fr)_minmax(0,1fr)]">
       <span class="flex min-w-0 flex-col gap-1">
-        <span class="text-xs text-muted-foreground">类型</span>
-        <el-select :model-value="role.runtime" :disabled="!member" class="at-select-36 at-text-13" aria-label="类型" @update:model-value="setRuntime">
+        <span class="text-xs text-muted-foreground">agent</span>
+        <el-select :model-value="runtimeList" multiple :disabled="!member" class="at-select-36 at-text-13" aria-label="agent" @update:model-value="setRuntimes">
           <el-option v-for="r in RUNTIME_SPECS" :key="r.id" :value="r.id" :label="r.label" />
         </el-select>
+        <span v-if="runtimeList.length > 1" class="text-[11px] leading-4 text-muted-foreground">每次开新会话用剩余额度最多的</span>
       </span>
       <span class="flex min-w-0 flex-col gap-1">
         <span class="text-xs text-muted-foreground">模型</span>
-        <RoleModelSelect :runtime="role.runtime" :roles="roles" :model-value="role.model ?? ''" @update:model-value="(model: string) => emit('change', { model })" />
+        <span v-for="rt in runtimeList" :key="rt" class="flex min-w-0 flex-col gap-0.5">
+          <span v-if="runtimeList.length > 1" class="text-[11px] text-muted-foreground">{{ runtimeLabel(rt) }}</span>
+          <RoleModelSelect :runtime="rt" :roles="roles" :model-value="modelOf(role, rt)" @update:model-value="(model: string) => emit('change', modelPatch(role, rt, model))" />
+        </span>
       </span>
       <span class="flex min-w-0 flex-col gap-1">
         <span class="text-xs text-muted-foreground">可用节点</span>

@@ -27,3 +27,45 @@ export function runtimeSpec(id: string | null | undefined): RuntimeSpec {
 }
 
 export const runtimeLabel = (id: string | null | undefined) => runtimeSpec(id).label;
+
+type RuntimesOf = { runtime: Runtime; runtimes?: Runtime[] | null };
+
+/**
+ * A role's runtimes: runtimes, or just runtime for a role saved before roles had several or one
+ * whose runtime was changed next to a single-entry list (the server's rule, roles.normalizeRuntimes).
+ */
+export function roleRuntimes(r: RuntimesOf): Runtime[] {
+  const list = r.runtimes ?? [];
+  if (list.length === 0 || (list.length === 1 && list[0] !== r.runtime)) return [r.runtime];
+  return list;
+}
+
+/** The first runtime of the role without slash commands (undefined: all have them). */
+export const promptRuntime = (r: RuntimesOf) => roleRuntimes(r).find((id) => !runtimeSpec(id).slashCommands);
+
+/** Whether every runtime of the role runs slash commands. */
+export const allSlash = (r: RuntimesOf) => roleRuntimes(r).every((id) => runtimeSpec(id).slashCommands);
+
+type ModelsOf = RuntimesOf & { model?: string | null; models?: Record<string, string> | null };
+
+/** The role's model for one of its runtimes: model for the first, models[rt] for the others. */
+export function modelOf(r: ModelsOf, rt: Runtime): string {
+  return (rt === roleRuntimes(r)[0] ? r.model : r.models?.[rt]) ?? "";
+}
+
+/** The patch that sets a role's runtimes (at least one, in this order); each runtime keeps its model. */
+export function runtimesPatch(r: ModelsOf, list: Runtime[]): { runtime: Runtime; runtimes: Runtime[]; model: string; models: Record<string, string> } | null {
+  if (list.length === 0) return null;
+  const models: Record<string, string> = {};
+  for (const rt of list.slice(1)) {
+    const m = modelOf(r, rt);
+    if (m) models[rt] = m;
+  }
+  return { runtime: list[0]!, runtimes: list, model: modelOf(r, list[0]!), models };
+}
+
+/** The patch that sets the role's model for one runtime. */
+export function modelPatch(r: ModelsOf, rt: Runtime, model: string): { model: string } | { models: Record<string, string> } {
+  if (rt === roleRuntimes(r)[0]) return { model };
+  return { models: { ...(r.models ?? {}), [rt]: model } };
+}

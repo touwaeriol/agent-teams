@@ -46,6 +46,8 @@ export function emptyRoleModel(runtime: Runtime): string {
 interface ScopedRole {
   tier: string;
   runtime: string;
+  runtimes?: string[] | null;
+  models?: Record<string, string> | null;
   model?: string;
   title?: string;
   role?: string;
@@ -61,7 +63,7 @@ export function modelSuggestions(roles: ScopedRole[], runtime: Runtime, current 
     const v = (id ?? "").trim();
     if (v && !out.includes(v)) out.push(v);
   };
-  for (const r of roles) if ((r.runtime || "claude") === runtime) add(r.model);
+  for (const r of roles) if (runtimesOf(r).includes(runtime)) add(scopedModel(r, runtime));
   for (const m of COMMON_MODELS[runtime]) add(m.id);
   add(current);
   return out;
@@ -73,7 +75,7 @@ export type ProjectField = "coordinator" | Runtime;
 /** The roles a project model field covers: the coordinator; or the leads and members of one runtime. */
 export function scopeRoles<R extends ScopedRole>(roles: R[], field: ProjectField): R[] {
   if (field === "coordinator") return roles.filter((r) => r.tier === "coordinator");
-  return roles.filter((r) => r.tier !== "coordinator" && (r.runtime || "claude") === field);
+  return roles.filter((r) => r.tier !== "coordinator" && runtimesOf(r).includes(field));
 }
 
 /** The model names the covered roles run with (each role's model, else the built-in default), once each. */
@@ -81,10 +83,23 @@ export function roleModelNames(roles: ScopedRole[], field: ProjectField): string
   const out: string[] = [];
   for (const r of scopeRoles(roles, field)) {
     const runtime = field === "coordinator" ? (r.runtime as Runtime) || "claude" : field;
-    const name = r.model ? modelName(r.model) : builtinName(runtime);
+    const m = scopedModel(r, runtime);
+    const name = m ? modelName(m) : builtinName(runtime);
     if (!out.includes(name)) out.push(name);
   }
   return out;
+}
+
+/** A role's runtimes (the old single runtime when it has no list). */
+function runtimesOf(r: ScopedRole): string[] {
+  const one = r.runtime || "claude";
+  const list = r.runtimes ?? [];
+  return list.length === 0 || (list.length === 1 && list[0] !== one) ? [one] : list;
+}
+
+/** A role's model for one of its runtimes: model for the first, models[rt] for the others. */
+function scopedModel(r: ScopedRole, runtime: string): string | undefined {
+  return runtime === runtimesOf(r)[0] ? r.model : (r.models?.[runtime] ?? undefined);
 }
 
 /** The name of a runtime's built-in model, for the role lists. */
