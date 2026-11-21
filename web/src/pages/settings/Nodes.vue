@@ -29,7 +29,7 @@ const shown = computed({ get: () => Boolean(enrollment.value), set: (v: boolean)
           <NavButton />
           <div class="flex flex-col gap-1.5">
             <h1 class="text-2xl font-semibold">节点</h1>
-            <p class="text-[13px] text-muted-foreground">每台机器跑一个守护进程主动连上来。统筹、组长和成员都运行在这里，用的是机器上 Claude Code / Codex 的登录。</p>
+            <p class="text-[13px] text-muted-foreground">每台机器跑一个守护进程主动连上来。统筹、组长和成员都运行在这里，用的是机器上 Claude Code / Codex / Antigravity 的登录。</p>
           </div>
         </div>
         <el-button type="primary" class="h-[38px]" @click="adding = true">添加节点</el-button>

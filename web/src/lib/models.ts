@@ -19,7 +19,15 @@ export const COMMON_MODELS: Record<Runtime, { id: string; label: string }[]> = {
     { id: "claude-sonnet-5-5", label: "Sonnet 5.5" },
   ],
   codex: [],
-  antigravity: [],
+  // agy's model slugs (its docs, `agy models`); "" leaves the choice to agy.
+  antigravity: [
+    { id: "gemini-4-neon-high", label: "Gemini 4 Neon (high)" },
+    { id: "gemini-4-neon-xhigh", label: "Gemini 4 Neon (xhigh)" },
+    { id: "gemini-4-carbon-high", label: "Gemini 4 Carbon (high)" },
+    { id: "gemini-4-argon-high", label: "Gemini 4 Argon (high)" },
+    { id: "gemini-4-hydrogen-high", label: "Gemini 4 Hydrogen (high)" },
+    { id: "gemini-3.8-flash-high", label: "Gemini 3.8 Flash (high)" },
+  ],
 };
 
 /** Whether `id` may be saved as a model: "" (not set) or the server's format. */
