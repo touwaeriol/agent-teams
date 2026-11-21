@@ -1493,3 +1493,47 @@ INSERT INTO at_employees (id, project_id, name, tier, role, role_id, runtime, sp
 		t.Fatalf("spec after down: %q %v", got, err)
 	}
 }
+
+// TestNodeRuntimesMigration: 00360 adds at_node_runtimes (one row per node and runtime, removed
+// with the node) and at_session_holds (one per employee); Down drops both.
+func TestNodeRuntimesMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 360); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_nodes (id, user_id, name, token_hash) VALUES ('n1', 'u1', 'n1', 'h');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
+INSERT INTO at_employees (id, project_id, name, tier, role, runtime) VALUES ('e1', 'p1', 'lead-1', 'lead', 'lead', 'claude');
+INSERT INTO at_node_runtimes (node_id, runtime, installed, auth, checked_at) VALUES ('n1', 'claude', true, 'subscription', now());
+INSERT INTO at_session_holds (employee_id, project_id, reason, first) VALUES ('e1', 'p1', 'r', '{"msg_id": "m1", "text": "x"}');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_node_runtimes (node_id, runtime, checked_at) VALUES ('n1', 'claude', now())`); err == nil {
+		t.Fatal("duplicate (node, runtime) accepted")
+	}
+	var more string
+	if err := db.QueryRow(`SELECT more::text FROM at_session_holds`).Scan(&more); err != nil || more != "[]" {
+		t.Fatalf("more default %q %v", more, err)
+	}
+	if _, err := db.Exec(`DELETE FROM at_nodes WHERE id = 'n1'; DELETE FROM at_employees WHERE id = 'e1'`); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT (SELECT count(*) FROM at_node_runtimes) + (SELECT count(*) FROM at_session_holds)`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("rows left after delete: %d %v", n, err)
+	}
+	if _, err := p.DownTo(ctx, 350); err != nil {
+		t.Fatal(err)
+	}
+	var reg *string
+	if err := db.QueryRow(`SELECT to_regclass('at_node_runtimes')::text`).Scan(&reg); err != nil || reg != nil {
+		t.Fatalf("table after down: %v %v", reg, err)
+	}
+}
