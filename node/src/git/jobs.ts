@@ -476,7 +476,16 @@ function failure(jobId: string, err: unknown): GitResult {
   const e = err as Error & { code?: string; log?: string };
   const code = (err instanceof JobError ? err.code : e.code === "path_outside_root" ? "path_outside_root" : undefined) as ErrorCode | undefined;
   const extra = err instanceof JobError ? err.extra : {};
-  return { ...extra, job_id: jobId, ok: false, ...(code ? { error_code: code } : {}), error: e.message, ...(e.log ? { log_tail: tail(e.log) } : {}) };
+  const reason = e.log ? lastLine(e.log) : "";
+  const error = reason ? `${e.message}: ${reason}` : e.message;
+  return { ...extra, job_id: jobId, ok: false, ...(code ? { error_code: code } : {}), error, ...(e.log ? { log_tail: tail(e.log) } : {}) };
+}
+
+/** git's own reason (its last fatal:/error: line, e.g. "fatal: unable to access …"), redacted and clipped. */
+function lastLine(log: string): string {
+  const lines = log.split("\n").map((l) => l.trim()).filter(Boolean);
+  const line = lines.filter((l) => /^(fatal|error):/.test(l)).pop() ?? lines.pop() ?? "";
+  return redact(line.length > 300 ? `${line.slice(0, 300)}…` : line);
 }
 
 function tail(text: string): string {
