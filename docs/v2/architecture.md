@@ -219,12 +219,12 @@ Codex 对应：组长和 `read_only` 岗位 `sandbox: read-only, approvalPolicy:
 运行时只在两张注册表里登记，其余代码按能力判断，不比较 id：
 
 - 控制台 `server/internal/runtimes`：每种运行时一行（名称、YAML `type`、`list_team` 类型、内置默认模型、能力：`SlashCommands` 斜杠命令、`LiveModeSwitch` 运行中切权限模式、`NeedsIsolation` 只能派到隔离节点、`CanLead` 能当统筹/组长）。`orchestrator.runtimeOptions` 和 `threadModels` 按运行时填 `session.open` 的选项块和项目的讨论串模型，测试保证覆盖注册表里的每一种。
-- 守护进程 `node/src/sessions/registry.ts`：每种运行时一个 `RuntimeAdapter`（登录探测、hello 上报、透传/固定环境变量、是否原生加载技能、`createDriver`）。会话管理器只认 `Driver` 接口（start / push / interrupt / setMode / compact / close）。
+- 守护进程 `node/src/sessions/registry.ts`：每种运行时一个 `RuntimeAdapter`（安装和登录检测 `detect()` 与要监听的凭证文件 `watchPaths()`、hello 上报、透传/固定环境变量、是否原生加载技能、`createDriver`）。会话管理器只认 `Driver` 接口（start / push / interrupt / setMode / compact / close）。
 - 网页 `web/src/lib/runtimes.ts`：同一张表的展示部分（名称、斜杠命令、内置模型、订阅登录类型）。
 
 岗位可以配多种运行时（`at_roles.runtimes`），每次开新会话在这些运行时的候选节点里按剩余额度挑（shared-members.md §4.3；节点用量的读取在 `orchestrator.usageOf`）。
 
-加一种运行时：写它的 `Driver` 和 adapter，协议 `Runtime` 枚举加 id 并加它的 `session.open` 选项块（以及 `hello.runtimes` 的信息结构），三张注册表各加一行。用量上报（`node/src/usage.ts`）目前仍按 Claude / Codex 各写一份读取，加运行时时一并补上。
+加一种运行时：写它的 `Driver` 和 adapter（adapter 的 `detect()` 返回统一的 `RuntimeStatus` 字段，注册后 `node/src/runtime-monitor.ts` 的 `RuntimeMonitor` 就会定时、按文件变化检测它并在 `node.runtimes` 里上报，protocol.md §9.2），协议 `Runtime` 枚举加 id 并加它的 `session.open` 选项块（以及 `hello.runtimes` 的信息结构），三张注册表各加一行。用量上报（`node/src/usage.ts`）目前仍按 Claude / Codex 各写一份读取，加运行时时一并补上。
 
 ### 6.3 平台工具：守护进程本地 MCP + WS 转发
 

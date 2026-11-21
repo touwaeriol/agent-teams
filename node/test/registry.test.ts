@@ -6,7 +6,8 @@ function fake(id: "claude" | "codex", nativeSkills: boolean): RuntimeAdapter & {
   return {
     id, nativeSkills, passEnv: id === "codex" ? ["OPENAI_API_KEY"] : [], probed: 0,
     info: () => (id === "claude" ? { sdk: "1", auth: "subscription" } : { cli: "2", auth: "none", sandbox_ok: true }),
-    async probe() { this.probed++; },
+    async detect() { this.probed++; return { installed: true, auth: "none" as const }; },
+    watchPaths: () => [],
     fixedEnv: () => ({ RUNTIME: id }),
     createDriver: () => ({ id } as unknown as Driver),
   };
@@ -20,7 +21,7 @@ describe("RuntimeRegistry", () => {
     expect(reg.get("codex")).toBe(codex);
     expect(reg.has("claude")).toBe(true);
     expect(reg.has("gemini")).toBe(false);
-    await reg.probeAll();
+    await reg.detectAll({ force: true });
     expect([claude.probed, codex.probed]).toEqual([1, 1]);
     expect(reg.hello()).toEqual({ claude: { sdk: "1", auth: "subscription" }, codex: { cli: "2", auth: "none", sandbox_ok: true } });
   });

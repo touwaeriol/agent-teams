@@ -81,7 +81,7 @@ CLI 内部用的是未公开的 `GET https://api.anthropic.com/api/oauth/usage`�
 
 ### 2.2 先确认登录方式
 
-启动探测（`probeCodex`）只看 `$CODEX_HOME/auth.json` 存不存在，但用 API Key 执行 `codex login` 也会写这个文件。所以每次采集前先调 `account/read {refreshToken:false}`（只读本地状态）：
+登录检测（`probeCodex`）按 `$CODEX_HOME/auth.json` 的结构区分 API Key 和 ChatGPT 登录（protocol.md §9.2），但文件结构随 Codex 版本可能变化，所以每次采集前仍先调 `account/read {refreshToken:false}`（只读本地状态）：
 
 - `account.type == "apiKey"` → 按 `auth:"api_key"` 上报 `unsupported`，不读额度。
 - `account == null` 而且 `requiresOpenaiAuth` → `status:"error"`，`error:"not_logged_in"`。
@@ -93,7 +93,7 @@ CLI 内部用的是未公开的 `GET https://api.anthropic.com/api/oauth/usage`�
 
 ### 2.4 凭证
 
-ChatGPT 的 token 在 `$CODEX_HOME/auth.json`，由 app-server 自己读取和刷新；守护进程不读这个文件（它也在 `secretPaths()` 里）。
+ChatGPT 的 token 在 `$CODEX_HOME/auth.json`，由 app-server 自己读取和刷新；守护进程只看它的结构来区分登录方式（API Key / ChatGPT），不读取、不保留其中的值（它也在 `secretPaths()` 里）。
 
 ### 2.5 版本兼容风险
 
@@ -102,8 +102,8 @@ app-server 协议有版本化的生成类型（`npm run gen:codex` → `node/src
 ## 3. 判断订阅还是 API Key
 
 - Claude：沿用 `probeClaude`（启动时 `initializationResult().account.subscriptionType` 有值就是 `subscription`；否则环境变量里有 `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` 就是 `api_key`，都没有就是 `none`）。采集时如果 CLI 返回 `rate_limits_available:false`，说明登录方式已经变了，报 `rate_limits_unavailable`。
-- Codex：沿用 `probeCodex`（`OPENAI_API_KEY` → `api_key`，有 `auth.json` → `chatgpt`，否则 `none`），每次采集前再用 `account/read` 确认（见 2.2）。
-- 登录方式只在守护进程启动时探测，节点上重新登录后要重启守护进程才会更新（和 hello 里的 `runtimes.*.auth` 一样）。
+- Codex：沿用 `probeCodex`（`OPENAI_API_KEY` → `api_key`；否则看 `$CODEX_HOME/auth.json` 的结构：`auth_mode` 是 `apikey`，或 `OPENAI_API_KEY` 非空而没有 `tokens` → `api_key`，其余（有 `tokens`、结构不认识、读不了）→ `chatgpt`；没有文件或文件为空 → `none`。只判断字段在不在、空不空，解析出的对象立刻丢弃，不记录、不上报任何值），每次采集前再用 `account/read` 确认（见 2.2）。
+- 登录方式由 `RuntimeMonitor` 持续检测（protocol.md §9.2）：节点上重新登录、退出或改了 API Key 后，最多一分钟（监听到凭证文件变化时约 2 秒）就会更新 `auth`，不用重启守护进程；`auth` 变化时守护进程会立即再采集并上报一次 `node.usage`。
 
 ## 4. 采集时机和缓存
 
