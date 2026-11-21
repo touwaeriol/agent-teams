@@ -66,6 +66,8 @@ export class AcpClient extends EventEmitter<AcpEvents> {
     const [cmd, ...pre] = this.opts.command;
     const child = spawn(cmd!, [...pre, ...this.opts.args], { env: this.opts.env, cwd: this.opts.cwd, stdio: ["pipe", "pipe", "pipe"] });
     this.child = child;
+    // A write racing the child's exit fails with EPIPE; the exit event reports it.
+    child.stdin?.on("error", (err) => this.opts.log.debug({ err: err.message }, "agy stdin"));
     createInterface({ input: child.stdout! }).on("line", (line) => this.onLine(line));
     createInterface({ input: child.stderr! }).on("line", (line) => this.opts.log.debug({ agy: line.slice(0, 2000) }, "agy stderr"));
     child.on("exit", (code, signal) => this.onExit(child, new Error(`agy acp exited (${code ?? signal})`)));

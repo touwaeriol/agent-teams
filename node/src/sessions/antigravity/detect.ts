@@ -145,13 +145,16 @@ export function agySettingsFile(home: string): string {
  * modelProvider gemini when an API key is used. Key names come from the docs (not yet verified
  * against a logged-in agy).
  */
-export function writeAgySettings(home: string, env: Record<string, string | undefined>): void {
+export function writeAgySettings(home: string, env: Record<string, string | undefined>, log?: Logger): boolean {
   const file = agySettingsFile(home);
   let cur: Record<string, unknown> = {};
   try {
     if (existsSync(file)) cur = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
-  } catch {
-    cur = {};
+    if (!cur || typeof cur !== "object" || Array.isArray(cur)) throw new Error("not a JSON object");
+  } catch (err) {
+    // Not ours to fix (comments, hand edits): left alone rather than replaced.
+    log?.warn({ file, err: (err as Error).message }, "agy settings.json not rewritten: cannot parse it");
+    return false;
   }
   const perms = (cur.permissions && typeof cur.permissions === "object" ? cur.permissions : {}) as Record<string, unknown>;
   const allow = Array.isArray(perms.allow) ? (perms.allow as unknown[]).filter((x) => typeof x === "string") as string[] : [];
@@ -166,4 +169,5 @@ export function writeAgySettings(home: string, env: Record<string, string | unde
   };
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   writeFileSync(file, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
+  return true;
 }

@@ -130,7 +130,7 @@ export class AntigravityAdapter implements RuntimeAdapter {
   async probe(): Promise<void> {
     const env = { ...(this.d.agyEnv?.() ?? {}), ...this.fixedEnv() };
     this.current = await probeAntigravity({ home: this.home, env, command: this.resolveCommand(), log: this.d.log ?? silentLogger });
-    if (this.current.installed) writeAgySettings(this.home, env);
+    if (this.current.installed) writeAgySettings(this.home, env, this.d.log);
   }
 
   /** Token files whose change means a login or logout (for thread #42's file watcher). */

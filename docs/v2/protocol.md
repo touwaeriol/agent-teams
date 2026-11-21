@@ -306,10 +306,10 @@
 | decision | Claude `PermissionResult` | Codex 回应 | Antigravity（ACP `session/request_permission` 的回应） |
 | --- | --- | --- | --- |
 | allow | `{behavior:'allow', updatedInput: updated_input ?? input}` | `accept`（elicitation：`{action:'accept'}`） | 选 `allow_once` 的 option |
-| allow_always | 上式 + `updatedPermissions: suggestions`（守护进程把每条 `destination` 改写为 `session`） | `acceptForSession` | 选 `allow_always` 的 option（没有就 `allow_once`） |
+| allow_always | 上式 + `updatedPermissions: suggestions`（守护进程把每条 `destination` 改写为 `session`） | `acceptForSession` | 也选 `allow_once`：agy 自己的“始终允许”作用范围未实测，而节点上所有 agy 会话共用一个 HOME，可能波及其他（只读）会话；卡片的 `available` 也只给 `allow`/`deny` |
 | deny | `{behavior:'deny', message}` | `decline`（elicitation：`{action:'decline'}`） | 选 `reject_once` 的 option（没有就 `{outcome:'cancelled'}`） |
 
-Antigravity（`source: "antigravity_permission"`）：`tool_name` 是按 ACP 工具 `kind` 换成的名字（`edit`→`Edit`、`execute`→`Bash` 等，见 node/src/sessions/antigravity/permissions.ts），`input` 是 agy 给的 `rawInput`（取不到时带 `title`）。只读会话（`antigravity.read_only`）的写类请求（edit/delete/move/其他未知类、bash_policy 不允许的命令）守护进程直接拒绝，不发卡片；`approval: "auto"` 的会话就地放行；平台 MCP 工具总是放行。
+Antigravity（`source: "antigravity_permission"`）：`tool_name` 是按 ACP 工具 `kind` 换成的名字（`edit`→`Edit`、`execute`→`Bash` 等，见 node/src/sessions/antigravity/permissions.ts），`input` 是 agy 给的 `rawInput`（取不到时带 `title`）。只读会话（`antigravity.read_only`）的写类请求（edit/delete/move/其他未知类、bash_policy 不允许的命令）守护进程直接拒绝，不发卡片；`approval: "auto"` 的会话就地放行；平台 MCP 工具（kind 为空、`other` 或 `think`，且标题整体是 `platform/<本会话的平台工具名>` 这类格式）总是放行；execute/edit/read 等类的调用不论标题是什么都不算平台工具。只读会话的 read/search 取不到路径时拒绝。
 
 守护进程处理后回 `approval.ack {approval_id}`（可靠）。若对应的 Promise / JSON-RPC 请求已不存在（已取消），回 `approval.ack {approval_id, stale: true}`。
 

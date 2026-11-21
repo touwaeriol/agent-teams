@@ -34,13 +34,19 @@ export function policyTool(kind: string | undefined): string {
  * and, given the session's platform tool names, <tool> is one of them. A title that merely
  * mentions "platform" ("Edit platform.go") is not one: these calls are allowed without asking.
  */
-export function platformToolOf(t: Pick<AcpToolCall, "title">, names?: readonly string[]): string | null {
+export function platformToolOf(t: Pick<AcpToolCall, "title" | "kind">, names?: readonly string[]): string | null {
+  // Only calls of no particular kind can be MCP tools: an execute call titled
+  // "platform/send_message" is a command (maybe a file of that name), never a platform tool.
+  if (t.kind && !PLATFORM_KINDS.has(t.kind)) return null;
   const m = /^\s*(?:mcp[_:(/]\s*)?platform[/_:]([a-z][a-z0-9_]*)\s*\)?\s*$/i.exec(String(t.title ?? ""));
   if (!m) return null;
   return !names || names.includes(m[1]!) ? m[1]! : null;
 }
 
-export function isPlatformTool(t: Pick<AcpToolCall, "title">, names?: readonly string[]): boolean {
+/** ACP kinds an MCP tool call may carry (no kind at all is accepted too). */
+const PLATFORM_KINDS = new Set(["other", "think"]);
+
+export function isPlatformTool(t: Pick<AcpToolCall, "title" | "kind">, names?: readonly string[]): boolean {
   return platformToolOf(t, names) !== null;
 }
 

@@ -29,6 +29,9 @@ export function decidePermission(policy: ToolPolicy, approval: "ask" | "auto", t
   } else {
     const path = pathOf(t);
     if (path) input = { file_path: path, path };
+    // Unverified field names: a read-only read/search whose path cannot be found is refused rather
+    // than checked against the worktree root (it could be outside it, or a secret path).
+    else if (policy.readOnly && (kind === "read" || kind === "search")) return { action: "deny", reason: "read-only session: path not recognised" };
   }
   if (policy.readOnly && kind !== "execute" && !READ_ONLY_KINDS.has(kind)) return { action: "deny", reason: `read-only session: ${kind} is not allowed` };
   const d = decideTool(policy, tool, input, cwd);
@@ -46,6 +49,6 @@ export function outcome(options: PermissionOption[], kinds: string[]): { outcome
   return { outcome: { outcome: "cancelled" } };
 }
 
-export const ALLOW_ONCE = ["allow_once", "allow_always"];
-export const ALLOW_ALWAYS = ["allow_always", "allow_once"];
+/** Local allows (platform tools, auto, read-only reads) pick allow_once; never agy's allow_always (its scope is unverified). */
+export const ALLOW_ONCE = ["allow_once"];
 export const REJECT = ["reject_once", "reject_always"];

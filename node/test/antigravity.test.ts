@@ -101,6 +101,26 @@ describe("antigravity sessions over ACP", () => {
     expect(h!.daemon.runtimes.get("antigravity").info()).toMatchObject({ installed: true, auth: "oauth" });
   });
 
+  it("gives agy remote servers: AT_SSH_CONFIG in its environment and the remote-server prompt", async () => {
+    const calls = await startAgy();
+    await openAndRelease("s_S1", {}, { git_credentials: true, ssh_servers: [{ name: "prod" }] });
+    const start = calls().find((c) => c.method === "__start")!;
+    if (!h!.console.ofType("hello")[0]!.body.ssh_client) return expect(start.env!.AT_SSH_CONFIG).toBeUndefined(); // no OpenSSH on this machine
+    expect(start.env!.AT_SSH_CONFIG).toMatch(/s_S1\/ssh_config$/);
+    const append = calls().find((c) => c.method === "session/new")!.params._meta.antigravity.systemPrompt.append as string;
+    expect(append).toMatch(/^be careful\n\n## Remote servers\n.*: prod\./);
+  });
+
+  it("reports spawn_failed at once when the agy executable cannot be started", async () => {
+    logFile = join(tmpdir(), `fake-agy-none-${process.pid}.jsonl`);
+    h = await startHarness({ agyCommand: ["/nonexistent/agy"] });
+    const t0 = Date.now();
+    h.console.command("session.open", agyOpen("s_N2"));
+    const fatal = await h.console.waitType("session.event", (b) => b.kind === "error" && b.code === "spawn_failed");
+    expect(fatal.body.message).toMatch(/cannot start agy/);
+    expect(Date.now() - t0).toBeLessThan(5000);
+  });
+
   it("maps a turn: thinking, streamed text, plan as todos, final text and turn_ended", async () => {
     await startAgy();
     await openAndRelease("s_A2");
@@ -134,10 +154,11 @@ describe("antigravity sessions over ACP", () => {
     await openAndRelease("s_A4");
     await say("s_A4", "m_1", "please write");
     const req = await h!.console.waitType("approval.request");
-    expect(req.body).toMatchObject({ source: "antigravity_permission", tool_name: "Edit", tool_use_id: "call_w", available: ["allow", "allow_always", "deny"], description: "Write notes.txt" });
+    expect(req.body).toMatchObject({ source: "antigravity_permission", tool_name: "Edit", tool_use_id: "call_w", available: ["allow", "deny"], description: "Write notes.txt" });
     expect(req.body.input.file_path).toMatch(/notes\.txt$/);
     h!.console.command("approval.resolve", { approval_id: req.body.approval_id, decision: "allow_always", decided_by: "user:1" });
-    expect((await finalText("s_A4")).body.text).toBe("permission: allow-always");
+    // agy's own "always" is never picked: its scope is unverified and agy's HOME is shared by the node
+    expect((await finalText("s_A4")).body.text).toBe("permission: allow-once");
     const ended = h!.console.ofType("session.event").find((f) => f.body.kind === "tool_ended")!.body;
     expect(ended).toMatchObject({ tool_use_id: "call_w", ok: true });
   });
@@ -331,6 +352,16 @@ describe("antigravity permissions", () => {
   it("always allows platform tools", () => {
     expect(decidePermission(policy({ readOnly: true }), "ask", { toolCallId: "c", kind: "other", title: "platform/send_message" }, "/w", NAMES)).toEqual({ action: "allow" });
     expect(decidePermission(policy({ readOnly: true }), "ask", { toolCallId: "c", kind: "edit", title: "platform/unknown_tool" }, "/w", NAMES).action).toBe("deny");
+    expect(decidePermission(policy({ readOnly: true }), "ask", { toolCallId: "c", title: "mcp_platform_complete_task" }, "/w", NAMES)).toEqual({ action: "allow" });
+  });
+  it("never takes a call of a writing or reading kind for a platform tool, whatever its title", () => {
+    const cmd = { toolCallId: "c", kind: "execute", title: "platform/send_message", rawInput: { command: "platform/send_message" } };
+    expect(decidePermission(policy({ readOnly: true, bash: RO_BASH }), "ask", cmd, "/w", NAMES).action).toBe("deny");
+    expect(decidePermission(policy(), "ask", cmd, "/w", NAMES)).toEqual({ action: "ask" });
+    for (const kind of ["edit", "delete", "move", "fetch", "read", "search"]) expect(isPlatformTool({ title: "platform/send_message", kind }, NAMES)).toBe(false);
+  });
+  it("refuses a read-only read whose path is not recognised", () => {
+    expect(decidePermission(policy({ readOnly: true }), "ask", { toolCallId: "c", kind: "read", title: "Read", rawInput: { target: "/etc/passwd" } }, "/w", NAMES).action).toBe("deny");
   });
   it("picks options by kind, cancelled when there is none", () => {
     const opts = [{ optionId: "a", kind: "allow_once" }, { optionId: "r", kind: "reject_once" }];
@@ -442,5 +473,14 @@ describe("antigravity detection", () => {
     });
     writeAgySettings(home, {});
     expect(JSON.parse(readFileSync(agySettingsFile(home), "utf8")).permissions.allow).toEqual(["command(ls)", "mcp(platform/*)"]);
+  });
+
+  it("leaves a settings.json it cannot parse alone", () => {
+    const home = scratch();
+    mkdirSync(join(home, ".gemini", "antigravity-cli"), { recursive: true });
+    const text = '{ // admin notes\n "theme": "dark" }';
+    writeFileSync(agySettingsFile(home), text);
+    expect(writeAgySettings(home, {})).toBe(false);
+    expect(readFileSync(agySettingsFile(home), "utf8")).toBe(text);
   });
 });

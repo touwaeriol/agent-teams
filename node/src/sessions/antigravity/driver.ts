@@ -15,7 +15,7 @@ import type { LoadedImage } from "../images.js";
 import { ResumeFailed, type CompactResult, type Driver, type DriverContext, type EventFields, type OutgoingMessage, type StartResult } from "../types.js";
 import { AcpClient, AcpFailure, ACP_AUTH_REQUIRED } from "./acp.js";
 import { isPlatformTool, planEvent, promptError, READ_ONLY_KINDS, toolEnded, toolStarted, turnEnded, WRITE_KINDS, type AcpToolCall } from "./mapper.js";
-import { ALLOW_ALWAYS, ALLOW_ONCE, decidePermission, outcome, REJECT, type PermissionOption } from "./permissions.js";
+import { ALLOW_ONCE, decidePermission, outcome, REJECT, type PermissionOption } from "./permissions.js";
 
 /** An MCP server in ACP session/new form (stdio servers have no type field). */
 export type AcpMcpServer =
@@ -437,10 +437,12 @@ export class AntigravityDriver implements Driver {
       const input = call.rawInput && typeof call.rawInput === "object" && !Array.isArray(call.rawInput) ? (call.rawInput as Record<string, unknown>) : { title: call.title ?? null };
       this.ctx.sink.requestApproval({
         approval_id: id, source: "antigravity_permission", tool_name: toolNameOf(call), input,
-        available: options.some((o) => o.kind === "allow_always") ? ["allow", "allow_always", "deny"] : ["allow", "deny"],
+        // No "always allow": agy's own allow_always scope is unverified and every agy session on
+        // the node shares one HOME, so it could reach other (read-only) sessions. Once only.
+        available: ["allow", "deny"],
         tool_use_id: call.toolCallId, ...(call.title ? { description: call.title } : {}),
       }).then(
-        (res: ApprovalResolve) => this.settle(entry, outcome(options, res.decision === "allow_always" ? ALLOW_ALWAYS : res.decision === "allow" ? ALLOW_ONCE : REJECT)),
+        (res: ApprovalResolve) => this.settle(entry, outcome(options, res.decision === "deny" ? REJECT : ALLOW_ONCE_ONLY)),
         () => this.settle(entry, outcome(options, REJECT)),
       );
     });
@@ -463,6 +465,9 @@ export class AntigravityDriver implements Driver {
     this.ctx.sink.event(this.turnId ? { turn_id: this.turnId, ...ev } : ev);
   }
 }
+
+/** allow_once only (never agy's allow_always, see ask()); cancelled when agy offers no such option. */
+const ALLOW_ONCE_ONLY = ["allow_once"];
 
 type Caps = { loadSession?: boolean; sessionCapabilities?: { resume?: unknown } };
 
