@@ -4,15 +4,19 @@
 // Adding a runtime = a Driver (sessions/<id>/driver.ts), an adapter below, its id in the protocol
 // Runtime enum plus its session.open options block, and its entry in the control plane's registry
 // (server/internal/runtimes).
-import type { ClaudeRuntime, CodexRuntime, Runtime, Runtimes } from "../protocol.js";
+import { join } from "node:path";
+import type { AntigravityRuntime, ClaudeRuntime, CodexRuntime, Runtime, Runtimes } from "../protocol.js";
 import { probeClaude, probeCodex } from "../runtimes.js";
 import type { LoopbackToolHost } from "../toolhost/http-server.js";
+import { silentLogger, type Logger } from "../util/log.js";
 import { CLAUDE_SDK_VERSION, CODEX_CLI_VERSION } from "../version.js";
 import { ClaudeDriver, type QueryFn } from "./claude/driver.js";
 import { CodexDriver } from "./codex/driver.js";
 import type { CodexHub } from "./codex/hub.js";
+import { AntigravityDriver } from "./antigravity/driver.js";
+import { AGY_PASS_ENV, AGY_TOKEN_FILES, detectInstalled, probeAntigravity, writeAgySettings } from "./antigravity/detect.js";
 import { CODEX_PASS_ENV } from "./env.js";
-import { codexMcpServers, type MaterializedPlugin } from "./plugins.js";
+import { acpMcpServers, codexMcpServers, type MaterializedPlugin } from "./plugins.js";
 import type { MaterializedSkills } from "./skills.js";
 import type { Driver, DriverContext } from "./types.js";
 
@@ -53,6 +57,13 @@ export interface RuntimeDeps {
   hub: CodexHub;
   toolhost: LoopbackToolHost;
   queryFn?: QueryFn;
+  /** HOME of every agy process on this node (its login, settings and conversations live there). */
+  agyHome?: string;
+  /** The agy command (tests: a fake ACP agent); default: detectInstalled (AGENT_TEAMS_AGY_BIN, PATH, ~/.local/bin). */
+  agyCommand?: string[];
+  /** Environment agy itself runs with for the probe (the node's pass list plus AGY_PASS_ENV). */
+  agyEnv?: () => Record<string, string>;
+  log?: Logger;
 }
 
 export class ClaudeAdapter implements RuntimeAdapter {
@@ -89,6 +100,51 @@ export class CodexAdapter implements RuntimeAdapter {
   }
 }
 
+/**
+ * Google Antigravity CLI (agy) over ACP, one process per session (sessions/antigravity). agy has
+ * no CODEX_HOME-like variable, so all its processes get one node-level HOME (agyHome) where an
+ * admin logs in once (`HOME=<agyHome> agy acp --login`); auto update is turned off. No usage report.
+ */
+export class AntigravityAdapter implements RuntimeAdapter {
+  readonly id = "antigravity" as const;
+  readonly nativeSkills = false;
+  readonly passEnv: readonly string[] = AGY_PASS_ENV;
+  private current: AntigravityRuntime = { cli: "", auth: "none", installed: false };
+  private command: string[] | null = null;
+
+  constructor(private readonly d: RuntimeDeps) {}
+
+  get home(): string { return this.d.agyHome ?? join(this.d.root, "agy-home"); }
+
+  info(): AntigravityRuntime { return this.current; }
+
+  /** The agy command, looked up again when the last probe did not find it. */
+  resolveCommand(): string[] | null {
+    if (this.d.agyCommand) return this.d.agyCommand;
+    if (this.command) return this.command;
+    const bin = detectInstalled({ explicit: process.env.AGENT_TEAMS_AGY_BIN, homes: [this.home, ...(process.env.HOME ? [process.env.HOME] : [])] });
+    this.command = bin ? [bin] : null;
+    return this.command;
+  }
+
+  async probe(): Promise<void> {
+    const env = { ...(this.d.agyEnv?.() ?? {}), ...this.fixedEnv() };
+    this.current = await probeAntigravity({ home: this.home, env, command: this.resolveCommand(), log: this.d.log ?? silentLogger });
+    if (this.current.installed) writeAgySettings(this.home, env);
+  }
+
+  /** Token files whose change means a login or logout (for thread #42's file watcher). */
+  watchPaths(): string[] { return AGY_TOKEN_FILES.map((f) => join(this.home, f)); }
+
+  fixedEnv(): Record<string, string> {
+    return { HOME: this.home, AGY_CLI_DISABLE_AUTO_UPDATE: "true" };
+  }
+
+  createDriver(ctx: DriverContext, a: SessionAssets): Driver {
+    return new AntigravityDriver(ctx, { toolhost: this.d.toolhost, command: () => this.resolveCommand(), pluginServers: acpMcpServers(a.plugins) });
+  }
+}
+
 /** The runtimes of this daemon, by id. */
 export class RuntimeRegistry {
   private readonly byId: Map<Runtime, RuntimeAdapter>;
@@ -98,7 +154,7 @@ export class RuntimeRegistry {
   }
 
   static builtin(d: RuntimeDeps): RuntimeRegistry {
-    return new RuntimeRegistry([new ClaudeAdapter(d), new CodexAdapter(d)]);
+    return new RuntimeRegistry([new ClaudeAdapter(d), new CodexAdapter(d), new AntigravityAdapter(d)]);
   }
 
   /** The adapter of a session's runtime; an id this daemon does not know is an error the session reports. */
