@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"gorm.io/gorm/clause"
@@ -101,8 +102,18 @@ func UserHolds(ctx context.Context, q DB, userID string) ([]SessionHold, error) 
 	return out, err
 }
 
-// SaveHold writes a hold back as it is (a release that found no node yet).
+// SaveHold writes a hold's fields back to its row (a release that had to hold again restores
+// the merged msg ids and the original created_at).
 func SaveHold(ctx context.Context, tx *Tx, h SessionHold) error {
-	h.UpdatedAt = time.Now().UTC()
-	return tx.Gorm(ctx).Clauses(clause.OnConflict{UpdateAll: true}).Create(&h).Error
+	first, err := json.Marshal(h.First)
+	if err != nil {
+		return err
+	}
+	more, err := json.Marshal(nonNilStrings(h.More))
+	if err != nil {
+		return err
+	}
+	return tx.Gorm(ctx).Table("at_session_holds").Where("employee_id = ?", h.EmployeeID).Updates(map[string]any{
+		"thread_id": h.ThreadID, "reason": h.Reason, "first": string(first), "more": string(more),
+		"created_at": h.CreatedAt, "updated_at": time.Now().UTC()}).Error
 }

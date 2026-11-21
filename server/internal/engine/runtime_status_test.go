@@ -128,6 +128,26 @@ func TestRuntimeStatusHoldsUntilLoggedIn(t *testing.T) {
 		h, err := holdOf(w, lead)
 		return err == nil && strings.Contains(h.First.Text, "顺便加个测试") && len(h.More) == 1
 	})
+	held, _ := holdOf(w, lead)
+	delivered := func(msgID string) bool {
+		var n int64
+		_ = w.e.Core.Pool.Gorm(w.ctx).Table("at_messages").Where("meta->>'msg_id' = ? AND delivered_at IS NOT NULL", msgID).Count(&n).Error
+		return n > 0
+	}
+	// A release while still not logged in holds again: the merged msg ids are kept and not
+	// stamped delivered.
+	var userID string
+	_ = w.e.Core.Pool.Gorm(w.ctx).Table("at_projects").Select("user_id").Where("id = ?", project.ID).Scan(&userID).Error
+	w.e.Orch.ReleaseHolds(w.ctx, userID)
+	again, err := holdOf(w, lead)
+	if err != nil || len(again.More) != 1 || again.More[0] != held.More[0] || !again.CreatedAt.Equal(held.CreatedAt) ||
+		again.First.Text != held.First.Text {
+		t.Fatalf("hold after a release that held again: %+v %v (was %+v)", again, err, held)
+	}
+	if delivered(held.More[0]) {
+		t.Fatal("held message stamped delivered before any session got it")
+	}
+	expectNone(t, n, protocol.TypeSessionOpen, 200*time.Millisecond, nil)
 
 	// Logged in: the held session opens with the brief and the later message.
 	if err := n.SendUnreliable(ctx, protocol.TypeNodeRuntimes, cliReport("fs_event", map[string]string{"claude": "subscription", "codex": ""})); err != nil {
@@ -139,6 +159,9 @@ func TestRuntimeStatusHoldsUntilLoggedIn(t *testing.T) {
 	}
 	if _, err := holdOf(w, lead); err != core.ErrNotFound {
 		t.Fatalf("hold after release: %v", err)
+	}
+	if !delivered(held.More[0]) {
+		t.Fatal("merged message not stamped delivered with the first message")
 	}
 	view = b.nodeCLIs(t, node.Node.ID)
 	if len(view.CLIs) != 2 || !view.CLIs[0].Ready || view.CLIs[0].Auth != "subscription" {
