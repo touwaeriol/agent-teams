@@ -284,7 +284,7 @@
 {
   "approval_id": "ap_<sha256(session_id + ':' + tool_use_id)[:24]>",
   "session_id": "s_…",
-  "source": "claude_can_use_tool|codex_command|codex_file_change|codex_permissions|codex_mcp_elicitation",
+  "source": "claude_can_use_tool|codex_command|codex_file_change|codex_permissions|codex_mcp_elicitation|antigravity_permission",
   "tool_name": "Bash",
   "input": {"command": "pnpm add -D @tanstack/react-virtual"},
   "title": "…", "description": "…", "decision_reason": "…", "blocked_path": null,   // SDK 提供的现成文案
@@ -303,11 +303,13 @@
 
 守护进程映射：
 
-| decision | Claude `PermissionResult` | Codex 回应 |
-| --- | --- | --- |
-| allow | `{behavior:'allow', updatedInput: updated_input ?? input}` | `accept`（elicitation：`{action:'accept'}`） |
-| allow_always | 上式 + `updatedPermissions: suggestions`（守护进程把每条 `destination` 改写为 `session`） | `acceptForSession` |
-| deny | `{behavior:'deny', message}` | `decline`（elicitation：`{action:'decline'}`） |
+| decision | Claude `PermissionResult` | Codex 回应 | Antigravity（ACP `session/request_permission` 的回应） |
+| --- | --- | --- | --- |
+| allow | `{behavior:'allow', updatedInput: updated_input ?? input}` | `accept`（elicitation：`{action:'accept'}`） | 选 `allow_once` 的 option |
+| allow_always | 上式 + `updatedPermissions: suggestions`（守护进程把每条 `destination` 改写为 `session`） | `acceptForSession` | 也选 `allow_once`：agy 自己的“始终允许”作用范围未实测，而节点上所有 agy 会话共用一个 HOME，可能波及其他（只读）会话；卡片的 `available` 也只给 `allow`/`deny` |
+| deny | `{behavior:'deny', message}` | `decline`（elicitation：`{action:'decline'}`） | 选 `reject_once` 的 option（没有就 `{outcome:'cancelled'}`） |
+
+Antigravity（`source: "antigravity_permission"`）：`tool_name` 是按 ACP 工具 `kind` 换成的名字（`edit`→`Edit`、`execute`→`Bash` 等，见 node/src/sessions/antigravity/permissions.ts），`input` 是 agy 给的 `rawInput`（取不到时带 `title`）。只读会话（`antigravity.read_only`）的写类请求（edit/delete/move/其他未知类、bash_policy 不允许的命令）守护进程直接拒绝，不发卡片；`approval: "auto"` 的会话就地放行；平台 MCP 工具（kind 为空、`other` 或 `think`，且标题整体是 `platform/<本会话的平台工具名>` 这类格式）总是放行；execute/edit/read 等类的调用不论标题是什么都不算平台工具。只读会话的 read/search 取不到路径时拒绝。
 
 守护进程处理后回 `approval.ack {approval_id}`（可靠）。若对应的 Promise / JSON-RPC 请求已不存在（已取消），回 `approval.ack {approval_id, stale: true}`。
 
