@@ -3,7 +3,7 @@
 // overview cards (threadKind in present.ts) all read threadPhase, so they never disagree.
 // Pure and unit-tested.
 import type { QuestionView, ThreadView } from "@/api/views";
-import { isWaking, isWorking, liveLine, workingHere } from "./live";
+import { isWaking, isWorking, liveLine, queueReason, workingHere } from "./live";
 
 export type ListGroupId = "waiting" | "active" | "idle" | "done" | "archived";
 
@@ -133,7 +133,7 @@ export function threadPhase(t: PhaseInput, waiting?: Map<number, QuestionView>):
     case "broken":
       return phase("lead_down", "waiting", "wait", "组长的会话出错了，需要你看一下");
     case "queued":
-      return phase("lead_queued", "active", "queued", "等组长上线（节点工位已满，排队中）");
+      return phase("lead_queued", "active", "queued", lead && queueReason(lead) ? `等组长上线：${queueReason(lead)}` : "等组长上线（节点工位已满，排队中）");
     case "waiting":
     case "raising_hand":
       return phase("lead_waiting", "active", "working", "组长在等别人回复");

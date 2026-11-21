@@ -2,6 +2,16 @@
 // how far its tasks are, and how long it has been running.
 import type { EmployeeBrief, TaskView, ThreadView } from "@/api/views";
 
+/**
+ * Why a queued employee is waiting when the server says it is not a free slot (substate
+ * no_runtime: no online node has the runtime installed and logged in, or it is still being checked);
+ * the reason is the status bubble. "" otherwise.
+ */
+export function queueReason(m: Pick<EmployeeBrief, "status">): string {
+  const s = m.status;
+  return s?.state === "queued" && s.substate === "no_runtime" ? (s.bubble ?? "") : "";
+}
+
 /** States in which an employee is actively working (spinner / pulse). */
 const WORKING = new Set(["typing", "reading", "running", "thinking", "claiming", "walking_to_board", "returning"]);
 
@@ -39,6 +49,7 @@ const VERB: Record<string, string> = {
 /** Short state label shown before the activity line. */
 export function stateLabel(m: Pick<EmployeeBrief, "status">): string {
   if (isWaking(m)) return "唤醒中";
+  if (m.status?.state === "queued" && m.status.substate === "no_runtime") return "排队等节点";
   const s = m.status?.state ?? "idle";
   return VERB[s] ?? s;
 }

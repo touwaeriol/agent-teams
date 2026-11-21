@@ -24,6 +24,10 @@ export type SharedFileUpload = S["SharedFileUpload"];
  * sends null until the node reports (and older servers omit it): both mean "no data yet". */
 export type NodeView = Omit<S["NodeView"], "usage"> & { usage?: NodeUsage | null };
 export type NodeUsage = S["NodeUsage"];
+/** One runtime CLI as the daemon last reported it (node.runtimes); ready: sessions of it may be scheduled there. */
+export type NodeRuntime = S["NodeRuntime"];
+/** POST /api/nodes/{id}/recheck; stale: the node did not answer in time and clis are the previous report. */
+export type NodeRecheck = Omit<S["RecheckOutputBody"], "node"> & { node: NodeView };
 export type RuntimeUsage = S["RuntimeUsage"];
 /** key: five_hour, weekly, weekly_opus, weekly_sonnet, weekly_model (Claude); primary, secondary (Codex). */
 export type UsageWindow = S["UsageWindow"];
