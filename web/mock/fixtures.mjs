@@ -57,6 +57,8 @@ const members13 = [
   emp("e13l", "lead-13", "lead", "lead", "组长", "claude", RC, look("#C8622A", "suit", "none", "#3B2A20"), st("thinking", "")),
   emp("e13d", "dev-1", "member", "dev", "开发", "claude", RC, look("#4C7BD0", "tee", "none"), st("idle", "")),
   emp("e13q", "qa-1", "member", "qa", "测试", "codex", CVP, look("#3F8F6B", "coat", "glasses"), st("raising_hand", "等你的回答")),
+  // An Antigravity member with no node that has agy logged in (#41/#42): queued · no_runtime, the reason in its bubble.
+  emp("e13g", "rev-1", "member", "reviewer", "审查", "antigravity", null, look("#2F6FB0", "coat", "none"), st("queued", "没有已登录 Antigravity 的在线节点", { substate: "no_runtime" })),
 ];
 
 const thread = (no, title, status, extra) => ({
