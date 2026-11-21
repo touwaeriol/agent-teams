@@ -1,4 +1,4 @@
-import { statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ClaudeRuntime, CodexRuntime } from "./protocol.js";
@@ -64,9 +64,32 @@ export async function probeClaude(env: Record<string, string>, cwd: string, opts
   }
 }
 
-/** Codex auth from $CODEX_HOME/auth.json or OPENAI_API_KEY (no network call, the file is only stat'ed). */
+/**
+ * Which kind of login Codex's auth.json holds, from its structure only: an `auth_mode` naming an API key,
+ * or a non-empty OPENAI_API_KEY without ChatGPT `tokens`, is an API key login; anything else (tokens,
+ * unknown shape, unreadable or oversized file) counts as ChatGPT. The parsed object is dropped at once:
+ * no value is kept, logged or reported. null: no (non-empty) file.
+ */
+export function codexFileAuth(file: string): "api_key" | "chatgpt" | null {
+  if (!fileStamp(file)) return null;
+  try {
+    if (statSync(file).size > 1 << 20) return "chatgpt";
+    const j = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown> | null;
+    if (!j || typeof j !== "object") return "chatgpt";
+    const mode = typeof j.auth_mode === "string" ? j.auth_mode.toLowerCase().replace(/[_-]/g, "") : "";
+    if (mode === "apikey") return "api_key";
+    if (mode.startsWith("chatgpt")) return "chatgpt";
+    const hasKey = typeof j.OPENAI_API_KEY === "string" && j.OPENAI_API_KEY.length > 0;
+    const hasTokens = j.tokens !== null && typeof j.tokens === "object";
+    return hasKey && !hasTokens ? "api_key" : "chatgpt";
+  } catch {
+    return "chatgpt";
+  }
+}
+
+/** Codex auth from OPENAI_API_KEY or the shape of $CODEX_HOME/auth.json (no network call, no process). */
 export function probeCodex(codexHome: string, env: NodeJS.ProcessEnv, sandboxOk: boolean): CodexRuntime {
-  const auth = env.OPENAI_API_KEY ? "api_key" : fileStamp(codexAuthFile(codexHome)) ? "chatgpt" : "none";
+  const auth = env.OPENAI_API_KEY ? "api_key" : codexFileAuth(codexAuthFile(codexHome)) ?? "none";
   return { cli: CODEX_CLI_VERSION, auth, sandbox_ok: sandboxOk };
 }
 

@@ -33,6 +33,11 @@ export interface DetectOptions {
   force: boolean;
   /** Budget of a check that has to spawn something (the Claude SDK probe). */
   timeoutMs?: number;
+  /**
+   * A detector that put off part of an unforced check (e.g. a probe too soon after the last one) asks
+   * for another unforced check in `ms`, so the change it saw is not lost.
+   */
+  recheckIn?: (ms: number) => void;
 }
 
 /**
@@ -90,8 +95,15 @@ export class ClaudeAdapter implements RuntimeAdapter {
   /** Credentials file + key env as of the last SDK probe; the probe re-runs only when this changes. */
   private stamp = "";
   private retryAt = 0;
+  /** When the last SDK probe ended (0: never). */
+  private probedAt = 0;
+  private readonly now: () => number;
+  private readonly minProbeIntervalMs: number;
 
-  constructor(private readonly d: RuntimeDeps, private readonly now: () => number = Date.now) {}
+  constructor(private readonly d: RuntimeDeps, o: { now?: () => number; minProbeIntervalMs?: number } = {}) {
+    this.now = o.now ?? Date.now;
+    this.minProbeIntervalMs = o.minProbeIntervalMs ?? 30_000;
+  }
 
   info(): ClaudeRuntime { return this.current; }
 
@@ -99,16 +111,28 @@ export class ClaudeAdapter implements RuntimeAdapter {
 
   /**
    * The SDK probe spawns the CLI, so it runs only when forced, when the credentials file or the key env
-   * changed since the last probe, or (after a failed probe) every 5 minutes.
+   * changed since the last probe, or (after a failed probe) every 5 minutes. An unforced probe also waits
+   * at least minProbeIntervalMs after the previous one (the CLI may rewrite its credentials file while
+   * starting, which must not turn into a probe loop): until then the last result stands and a recheck is
+   * asked for. The baseline is the stamp after the probe, so the probe's own writes do not count.
    */
   async detect(o: DetectOptions): Promise<RuntimeState> {
     const env = this.d.claudeEnv();
     const credentialsFile = claudeCredentialsFile(this.d.claudeConfigDir);
-    const stamp = `${fileStamp(credentialsFile) ?? "-"}|${claudeKeyEnv(env) ? "key" : "-"}`;
-    if (!o.force && this.last && stamp === this.stamp && (!this.last.error || this.now() < this.retryAt)) return this.last;
+    const stampNow = () => `${fileStamp(credentialsFile) ?? "-"}|${claudeKeyEnv(env) ? "key" : "-"}`;
+    if (!o.force && this.last) {
+      const due = stampNow() !== this.stamp || (this.last.error !== undefined && this.now() >= this.retryAt);
+      if (!due) return this.last;
+      const wait = this.probedAt + this.minProbeIntervalMs - this.now();
+      if (wait > 0) {
+        o.recheckIn?.(wait);
+        return this.last;
+      }
+    }
     const p = await probeClaude(env, this.d.employeeHome, { credentialsFile, timeoutMs: o.timeoutMs ?? 12_000, ...(this.d.queryFn ? { queryFn: this.d.queryFn } : {}) });
-    this.stamp = stamp;
-    this.retryAt = this.now() + 5 * 60_000;
+    this.stamp = stampNow();
+    this.probedAt = this.now();
+    this.retryAt = this.probedAt + 5 * 60_000;
     const cli = p.cli ?? this.current.cli;
     this.current = { sdk: CLAUDE_SDK_VERSION, ...(cli ? { cli } : {}), auth: p.auth };
     this.last = { installed: true, ...(cli ? { version: cli } : {}), auth: p.auth, ...(p.error ? { error: p.error } : {}) };

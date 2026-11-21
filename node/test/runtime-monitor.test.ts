@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { NodeRuntimes } from "../src/protocol.js";
 import { FileWatch, RuntimeMonitor } from "../src/runtime-monitor.js";
 import { ClaudeAdapter, type DetectOptions, type RuntimeDeps, type RuntimeDetector, type RuntimeState } from "../src/sessions/registry.js";
-import { fileStamp } from "../src/runtimes.js";
+import { codexFileAuth, fileStamp } from "../src/runtimes.js";
 import { silentLogger } from "../src/util/log.js";
 import { startHarness, type Harness } from "./helpers/daemon.js";
 import { fakeQueryFactory, type FakeQueryLog } from "./helpers/fake-query.js";
@@ -172,23 +172,131 @@ describe("RuntimeMonitor", () => {
 });
 
 describe("ClaudeAdapter.detect", () => {
-  it("re-runs the SDK probe only when forced or when the credentials file or key env changed", async () => {
+  function setup(queryFn?: unknown) {
     const root = tmp();
     const log: FakeQueryLog = { options: [], prompts: [], closed: 0, interrupts: 0, modes: [] };
-    const deps = { root, employeeHome: root, claudeConfigDir: join(root, "claude"), codexHome: join(root, "codex"), claudeEnv: () => ({}), queryFn: fakeQueryFactory(log) } as unknown as RuntimeDeps;
-    const a = new ClaudeAdapter(deps);
+    const env: Record<string, string> = {};
+    let t = 1_000_000;
+    const deps = { root, employeeHome: root, claudeConfigDir: join(root, "claude"), codexHome: join(root, "codex"), claudeEnv: () => ({ ...env }), queryFn: queryFn ?? fakeQueryFactory(log) } as unknown as RuntimeDeps;
+    const a = new ClaudeAdapter(deps, { now: () => t });
+    const cred = join(root, "claude", ".credentials.json");
+    const writeCred = (body: string) => (mkdirSync(join(root, "claude"), { recursive: true }), writeFileSync(cred, body));
+    return { a, log, env, writeCred, tick: (ms: number) => (t += ms) };
+  }
+
+  it("re-runs the SDK probe only when forced or when the credentials file changed", async () => {
+    const { a, log, writeCred, tick } = setup();
     expect(await a.detect({ force: false })).toEqual({ installed: true, version: "2.1.325-fake", auth: "none" });
     expect(log.options).toHaveLength(1);
     await a.detect({ force: false });
     expect(log.options).toHaveLength(1);
-    mkdirSync(join(root, "claude"));
-    writeFileSync(join(root, "claude", ".credentials.json"), "{}");
+    tick(31_000);
+    writeCred("{}");
     await a.detect({ force: false });
     expect(log.options).toHaveLength(2);
     await a.detect({ force: true });
     expect(log.options).toHaveLength(3);
-    expect(a.watchPaths()).toEqual([join(root, "claude", ".credentials.json")]);
+    expect(a.watchPaths()).toEqual([join(a["d"].claudeConfigDir, ".credentials.json")]);
     expect(a.info()).toMatchObject({ cli: "2.1.325-fake", auth: "none" });
+  });
+
+  it("re-probes when ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN appears or goes away", async () => {
+    const { a, log, env, tick } = setup();
+    await a.detect({ force: false });
+    tick(31_000);
+    env.ANTHROPIC_API_KEY = "sk-test";
+    expect(await a.detect({ force: false })).toMatchObject({ auth: "api_key" });
+    expect(log.options).toHaveLength(2);
+    tick(31_000);
+    delete env.ANTHROPIC_API_KEY;
+    env.ANTHROPIC_AUTH_TOKEN = "tok";
+    await a.detect({ force: false });
+    expect(log.options).toHaveLength(2); // still "a key is set": same stamp
+    tick(31_000);
+    delete env.ANTHROPIC_AUTH_TOKEN;
+    expect(await a.detect({ force: false })).toMatchObject({ auth: "none" });
+    expect(log.options).toHaveLength(3);
+    expect(JSON.stringify(a.info())).not.toContain("sk-test");
+  });
+
+  it("guesses from the files when the probe fails and retries after 5 minutes", async () => {
+    let probes = 0;
+    let fail = true;
+    const ok = fakeQueryFactory({ options: [], prompts: [], closed: 0, interrupts: 0, modes: [] });
+    const queryFn = (p: Parameters<typeof ok>[0]) => {
+      probes++;
+      if (!fail) return ok(p);
+      return { initializationResult: () => Promise.reject(new Error("spawn failed")), close: () => {} } as unknown as ReturnType<typeof ok>;
+    };
+    const { a, writeCred, tick } = setup(queryFn);
+    writeCred("{}");
+    expect(await a.detect({ force: false })).toMatchObject({ installed: true, auth: "subscription", error: "probe_failed: spawn failed" });
+    tick(60_000);
+    await a.detect({ force: false });
+    expect(probes).toBe(1);
+    fail = false;
+    tick(4 * 60_000);
+    expect(await a.detect({ force: false })).toEqual({ installed: true, version: "2.1.325-fake", auth: "none" });
+    expect(probes).toBe(2);
+  });
+
+  it("waits 30 s between unforced probes and asks for a recheck instead of dropping the change", async () => {
+    const { a, log, writeCred, tick } = setup();
+    await a.detect({ force: false });
+    tick(10_000);
+    writeCred("{}");
+    const asked: number[] = [];
+    await a.detect({ force: false, recheckIn: (ms) => asked.push(ms) });
+    expect(log.options).toHaveLength(1);
+    expect(asked).toEqual([20_000]);
+    await a.detect({ force: true });
+    expect(log.options).toHaveLength(2); // forced probes are not held back
+    tick(5_000);
+    writeCred('{"x":1}');
+    await a.detect({ force: false, recheckIn: (ms) => asked.push(ms) });
+    expect(asked).toEqual([20_000, 25_000]);
+    tick(25_000);
+    await a.detect({ force: false });
+    expect(log.options).toHaveLength(3);
+    await a.detect({ force: false });
+    expect(log.options).toHaveLength(3);
+  });
+});
+
+describe("codexFileAuth", () => {
+  it("tells an API key login from a ChatGPT login by the file's shape only", () => {
+    const d = tmp();
+    const f = join(d, "auth.json");
+    const at = (body: string) => (writeFileSync(f, body), codexFileAuth(f));
+    expect(codexFileAuth(f)).toBeNull();
+    expect(at("")).toBeNull();
+    expect(at(JSON.stringify({ OPENAI_API_KEY: "sk-x", tokens: null }))).toBe("api_key");
+    expect(at(JSON.stringify({ OPENAI_API_KEY: "sk-x", tokens: { id_token: "a" } }))).toBe("chatgpt");
+    expect(at(JSON.stringify({ OPENAI_API_KEY: null, tokens: { id_token: "a" }, last_refresh: "x" }))).toBe("chatgpt");
+    expect(at(JSON.stringify({ auth_mode: "apikey", OPENAI_API_KEY: "sk-x" }))).toBe("api_key");
+    expect(at(JSON.stringify({ auth_mode: "chatgpt", OPENAI_API_KEY: "sk-x" }))).toBe("chatgpt");
+    expect(at("{}")).toBe("chatgpt");
+    expect(at("not json")).toBe("chatgpt");
+  });
+});
+
+describe("RuntimeMonitor recheck", () => {
+  it("runs the check a detector put off", async () => {
+    const d = new Fake("claude", { installed: true, auth: "none" });
+    let asked = false;
+    d.detect = async function (this: Fake, o: DetectOptions) {
+      this.calls.push(o);
+      if (!asked && this.calls.length === 2) (asked = true, o.recheckIn?.(50));
+      return this.state;
+    };
+    const { m, sent } = monitor([d]);
+    mon = m;
+    await m.hello();
+    await m.poll("fs_event");
+    d.state = { installed: true, auth: "subscription" };
+    await until(() => sent.length === 2);
+    expect(sent[1]).toMatchObject({ reason: "fs_event", runtimes: { claude: { auth: "subscription" } } });
+    expect(d.calls).toHaveLength(3);
   });
 });
 
