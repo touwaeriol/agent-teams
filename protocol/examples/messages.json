@@ -1263,9 +1263,10 @@
     "seq": 997,
     "ts": "2026-11-14T12:04:01Z",
     "body": {
-      "version": "2.0.4",
+      "version": "2.0.4+1babdc2e",
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "signature": "c2lnbmF0dXJl"
+      "mode": "wait_idle",
+      "deadline_s": 1800
     }
   },
   {
@@ -1276,8 +1277,9 @@
     "ts": "2026-11-14T12:04:02Z",
     "body": {
       "ok": false,
-      "version": "2.0.4",
-      "error": "signature mismatch"
+      "phase": "failed",
+      "version": "2.0.4+1babdc2e",
+      "error": "sha256 mismatch"
     }
   },
   {

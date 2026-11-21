@@ -68,7 +68,9 @@ func (r *router) other(ctx context.Context, node store.Node, typ string, body an
 	case *protocol.SessionInterrupted:
 		r.e.log.Debug("session interrupted", "session_id", m.SessionID)
 	case *protocol.NodeUpgradeResult:
-		r.e.log.Warn("node upgrade result", "node_id", node.ID, "ok", m.Ok, "error", m.Error)
+		r.e.log.Info("node upgrade progress", "node_id", node.ID, "ok", m.Ok, "phase", m.Phase, "version", m.Version, "error", m.Error)
+		r.e.Gateway.RecordUpgrade(node.ID, m)
+		r.e.Events.User(ctx, node.UserID, core.EvNode, map[string]any{"node": map[string]any{"id": node.ID, "name": node.Name, "upgrade": m.Phase}})
 	default:
 		r.e.log.Debug("unhandled node message", "type", typ)
 	}

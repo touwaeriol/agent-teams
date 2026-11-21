@@ -177,3 +177,43 @@ export function settingsPatch(max: string, park: string, isolated: boolean, labe
     labels,
   };
 }
+
+/** What the card shows about daemon updates (architecture.md §14.3). */
+export interface UpdateView {
+  /** Offer the 更新 button (a release the node is not on, and the node can update itself). */
+  offer: boolean;
+  /** An update is under way: the status line and its 立即 / 取消 buttons. */
+  busy: boolean;
+  /** The drain is waiting on running turns: offer 立即更新. */
+  canNow: boolean;
+  /** Before the switch: offer 取消. */
+  canCancel: boolean;
+  line: string;
+  tone: "muted" | "ok" | "warn" | "error";
+}
+
+const BUSY = new Set(["requested", "staging", "draining", "drain_timeout", "restarting", "confirming"]);
+
+export function updateView(n: Pick<NodeView, "online" | "version" | "latest_version" | "update_available" | "self_update" | "upgrade">): UpdateView {
+  const u = n.upgrade;
+  const none: UpdateView = { offer: false, busy: false, canNow: false, canCancel: false, line: "", tone: "muted" };
+  if (u && BUSY.has(u.phase) && n.online !== false) {
+    const turns = u.active_turns;
+    const line: Record<string, string> = {
+      requested: `准备更新到 ${u.target}…`,
+      staging: `正在下载并安装 ${u.target}…`,
+      draining: turns ? `等 ${turns} 个正在跑的回合结束后切换到 ${u.target}` : `正在切换到 ${u.target}…`,
+      drain_timeout: `已等待较久，还有 ${turns} 个回合在跑；可以立即更新（会中断它们）`,
+      restarting: `正在重启到 ${u.target}…`,
+      confirming: `${u.target} 已启动，确认运行正常中…`,
+    };
+    const waiting = u.phase === "draining" || u.phase === "drain_timeout";
+    return { offer: false, busy: true, canNow: waiting && u.mode !== "now", canCancel: u.phase === "staging" || waiting, line: line[u.phase] ?? "", tone: u.phase === "drain_timeout" ? "warn" : "muted" };
+  }
+  if (u?.phase === "done" && u.target === n.version) return { ...none, line: `已更新到 ${u.target}`, tone: "ok" };
+  const failed = u && (u.phase === "failed" || u.phase === "rolled_back") && u.target === n.latest_version;
+  const failLine = failed ? (u.phase === "rolled_back" ? `更新到 ${u.target} 失败，已自动回到原版本：${u.error ?? ""}` : `更新失败：${u.error ?? ""}`) : "";
+  if (!n.update_available) return failed ? { ...none, line: failLine, tone: "error" } : none;
+  if (!n.self_update) return { ...none, line: `有新版本 ${n.latest_version}；这台节点要先在机器上重新运行一次安装命令（容器节点按新的 compose.yml 重建）才能一键更新`, tone: "warn" };
+  return { ...none, offer: true, line: failLine, tone: failed ? "error" : "muted" };
+}

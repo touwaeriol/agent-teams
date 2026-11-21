@@ -22,15 +22,16 @@ func (g *Gateway) Online(nodeID string) bool { return g.link(nodeID) != nil }
 func (g *Gateway) Status(nodeID string) platform.NodeLive {
 	l := g.link(nodeID)
 	if l == nil {
-		return platform.NodeLive{Usage: g.Usage(nodeID)}
+		return platform.NodeLive{Usage: g.Usage(nodeID), Upgrade: g.upgradeView(nodeID, "")}
 	}
 	l.mu.Lock()
 	stats := l.stats
 	l.mu.Unlock()
 	since := l.since
-	live := platform.NodeLive{Online: true, Since: &since, Version: l.hello.Daemon.Version, Protocol: 2,
+	live := platform.NodeLive{Online: true, Since: &since, Version: releaseOf(l.hello.Daemon), Protocol: 2,
 		Runtimes: toMap(l.hello.Runtimes), Capacity: toMap(l.hello.Capacity), ActiveSessions: stats.ActiveSessions,
-		ParkedSessions: stats.ParkedSessions, Queued: stats.Queued, Features: l.hello.Features, Usage: g.Usage(nodeID)}
+		ParkedSessions: stats.ParkedSessions, Queued: stats.Queued, Features: l.hello.Features, Usage: g.Usage(nodeID),
+		Upgrade: g.upgradeView(nodeID, releaseOf(l.hello.Daemon))}
 	if l.hello.Isolation != nil {
 		live.Isolation = string(*l.hello.Isolation)
 	}
@@ -68,15 +69,6 @@ func (g *Gateway) Configure(ctx context.Context, node store.Node) {
 	if err := g.send(ctx, node.ID, Command{Type: protocol.TypeNodeConfig, Body: body}); err != nil {
 		g.log.Warn("node.config", "node_id", node.ID, "err", err)
 	}
-}
-
-// Upgrade implements platform.NodeRegistry.
-func (g *Gateway) Upgrade(ctx context.Context, nodeID string, r platform.NodeRelease) error {
-	if !g.Online(nodeID) {
-		return platform.ErrNodeOffline
-	}
-	return g.send(ctx, nodeID, Command{Type: protocol.TypeNodeUpgrade,
-		Body: map[string]string{"version": r.Version, "sha256": r.SHA256, "signature": r.Signature}})
 }
 
 // Drain implements platform.NodeRegistry.

@@ -56,6 +56,7 @@ docker compose up -d                # 拉取 ghcr.io/touwaeriol/agent-teams-node
 | `/home/agent/.codex` | `codex` | Codex 登录和线程 |
 | `/home/agent/.agents_team` | `workspace` | 工作区：仓库、worktree、员工的 HOME |
 | `/home/agent/.local/state/agent-teams` | `state` | 守护进程状态：消息收发队列、会话记录 |
+| `/home/agent/.local/share/agent-teams` | `data` | 守护进程版本（`releases/`、`current`、`previous`），控制面板“更新”切换的就是这里 |
 
 想用宿主目录代替命名 volume 时，先 `chown -R 1000:1000` 这些目录，否则入口脚本会提示不可写并退出。
 git 走 ssh 的话，在 `compose.yml` 里打开 `~/.ssh:/home/agent/.ssh:ro` 那一行。
@@ -66,6 +67,7 @@ git 走 ssh 的话，在 `compose.yml` 里打开 `~/.ssh:/home/agent/.ssh:ro` �
 docker run -d --name agent-teams-node --restart unless-stopped --env-file deploy/node/node.env \
   -v at-claude:/home/agent/.claude -v at-codex:/home/agent/.codex \
   -v at-workspace:/home/agent/.agents_team -v at-state:/home/agent/.local/state/agent-teams \
+  -v at-data:/home/agent/.local/share/agent-teams \
   ghcr.io/touwaeriol/agent-teams-node:latest
 docker exec -it agent-teams-node claude login
 ```
@@ -74,8 +76,10 @@ docker exec -it agent-teams-node claude login
 
 ## 其他说明
 
-- **升级**：`docker compose pull && docker compose up -d`（自己构建的就 `up -d --build`）。控制面板的在线升级（`node.upgrade`）面向 systemd 安装，
-  镜像里没有发布公钥，所以容器节点会拒绝在线升级，以镜像版本为准。
+- **更新守护进程**：控制面板“节点”页点“更新”即可。入口脚本跑的是更新启动器：守护进程在容器里下载新版本到 `data`
+  volume、等员工手上的回合结束、切换后由启动器重启，新版本 5 分钟内没确认正常就自动切回旧版，容器本身不重建，也不需要 docker.sock。
+- **更新镜像**（git、gh、Node 等系统工具变了时）：`docker compose pull && docker compose up -d`（自己构建的就 `up -d --build`）。
+  镜像带的版本比 `data` volume 里的新时，启动器以镜像为准。旧的 compose（没有 `data` volume）按新的 `compose.yml` 重建一次后才能一键更新。
 - **构建参数**：`GH_VERSION`、`TINI_VERSION`、`NODE_IMAGE`。在 TLS 拦截代理后面构建时，可以把代理的 CA 作为
   BuildKit secret 传入（`--secret id=build_ca,src=ca.crt`），只在下载步骤里挂载，不会留在镜像里。
 - **隔离**：容器里没有 bubblewrap，节点报告的隔离级别是 `none`；容器本身就是隔离边界。

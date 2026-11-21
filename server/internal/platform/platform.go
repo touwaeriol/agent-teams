@@ -22,6 +22,9 @@ var ErrNodeOffline = errors.New("节点不在线")
 // ErrUsageUnsupported: the node's daemon does not report usage (hello.features lacks "usage").
 var ErrUsageUnsupported = errors.New("节点不支持查询余量")
 
+// ErrUpgradeUnsupported: the daemon predates the update launcher (no self_update feature).
+var ErrUpgradeUnsupported = errors.New("这个节点还不支持一键更新：在节点机器上重新运行一次安装命令（容器节点按新的 compose.yml 重建）")
+
 // NodeLive is the live part of NodeView, owned by the node gateway.
 type NodeLive struct {
 	Online         bool           `json:"online"`
@@ -38,6 +41,25 @@ type NodeLive struct {
 	Features []string `json:"features,omitempty"`
 	// Usage is the latest node.usage report; kept after the link drops (nil = never reported).
 	Usage *NodeUsage `json:"usage"`
+	// Upgrade is the last update asked of the node (memory only; nil = none since the console started).
+	Upgrade *NodeUpgradeState `json:"upgrade,omitempty"`
+}
+
+// NodeUpgradeState is the progress of the last node.upgrade (NodeView.upgrade).
+type NodeUpgradeState struct {
+	Target      string    `json:"target" doc:"Release id being installed, <version>+<build>"`
+	Phase       string    `json:"phase" enum:"requested,staging,draining,drain_timeout,restarting,done,failed,rolled_back,cancelled"`
+	Mode        string    `json:"mode" enum:"wait_idle,now"`
+	ActiveTurns int       `json:"active_turns" doc:"Turns still running while draining"`
+	Error       string    `json:"error,omitempty"`
+	StartedAt   time.Time `json:"started_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// UpgradeOptions are the choices of POST /api/nodes/{id}/upgrade.
+type UpgradeOptions struct {
+	Mode      string // wait_idle | now | cancel
+	DeadlineS int
 }
 
 // NodeUsage is the latest node.usage report of a node (NodeView.usage).
@@ -82,7 +104,8 @@ type NodeRegistry interface {
 	// Configure pushes node.config after PATCH /api/nodes/{id}.
 	Configure(ctx context.Context, node store.Node)
 	// Upgrade sends node.upgrade; ErrNodeOffline when not connected.
-	Upgrade(ctx context.Context, nodeID string, release NodeRelease) error
+	// ErrUpgradeUnsupported when the daemon does not run under the update launcher.
+	Upgrade(ctx context.Context, nodeID string, release NodeRelease, opts UpgradeOptions) error
 	// Drain sends node.drain; ErrNodeOffline when not connected.
 	Drain(ctx context.Context, nodeID string, deadline time.Duration) error
 	// RefreshUsage returns the node's usage, asking the node (node.usage_refresh) unless the
@@ -136,7 +159,9 @@ func (Offline) Disconnect(context.Context, string, string) {}
 func (Offline) Configure(context.Context, store.Node) {}
 
 // Upgrade implements NodeRegistry.
-func (Offline) Upgrade(context.Context, string, NodeRelease) error { return ErrNodeOffline }
+func (Offline) Upgrade(context.Context, string, NodeRelease, UpgradeOptions) error {
+	return ErrNodeOffline
+}
 
 // Drain implements NodeRegistry.
 func (Offline) Drain(context.Context, string, time.Duration) error { return ErrNodeOffline }

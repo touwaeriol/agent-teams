@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/node/node.upgrade_result.json",
   "title": "NodeUpgradeResult",
-  "description": "Upgrade failure report (success shows up as a reconnect with the new version).",
+  "description": "Update progress and outcome (one per phase change; a rolled-back update is reported by the old version after its restart).",
   "x-direction": "node_to_console",
   "x-reliable": true,
   "type": "object",
@@ -14,10 +14,29 @@
       "type": "boolean"
     },
     "version": {
-      "type": "string"
+      "type": "string",
+      "description": "The release the update is about."
     },
     "error": {
       "type": "string"
+    },
+    "phase": {
+      "type": "string",
+      "enum": [
+        "staging",
+        "draining",
+        "drain_timeout",
+        "restarting",
+        "done",
+        "failed",
+        "rolled_back",
+        "cancelled"
+      ]
+    },
+    "active_turns": {
+      "description": "draining / drain_timeout: turns still running.",
+      "type": "integer",
+      "minimum": 0
     }
   }
 }

@@ -5,7 +5,7 @@ import { ghMain, gitCredentialMain } from "./cred/helper.js";
 import { Daemon } from "./daemon.js";
 import { sshProxyMain } from "./ssh/proxy.js";
 import { createLogger } from "./util/log.js";
-import { DAEMON_VERSION } from "./version.js";
+import { DAEMON_RELEASE, DAEMON_VERSION } from "./version.js";
 
 const USAGE = `agent-teams-node ${DAEMON_VERSION}
 
@@ -33,7 +33,7 @@ async function main(argv: string[]): Promise<number> {
       return sshProxyMain(rest, process.env);
     case "version":
     case "--version":
-      process.stdout.write(`${DAEMON_VERSION}\n`);
+      process.stdout.write(`${DAEMON_RELEASE}\n`);
       return 0;
     default:
       process.stderr.write(USAGE);

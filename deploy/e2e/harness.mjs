@@ -36,9 +36,13 @@ export function installDaemon(base, nodeDir) {
   const pkg = join(nodeDir, "pkg");
   if (existsSync(join(pkg, "node_modules"))) return pkg;
   mkdirSync(pkg, { recursive: true });
-  const tgz = join(nodeDir, "agent-teams-node-2.0.0.tgz");
-  execFileSync("curl", ["-fsS", "-o", tgz, `${base}/node/dist/agent-teams-node-2.0.0.tgz`]);
-  const want = execFileSync("curl", ["-fsS", `${base}/node/dist/agent-teams-node-2.0.0.tgz.sha256`]).toString().trim();
+  // The release the console serves (<version>+<build>) is the one its install script names.
+  const script = execFileSync("curl", ["-fsS", `${base}/install-node.sh`]).toString();
+  const release = /^release_version="([^"]+)"/m.exec(script)?.[1];
+  check(Boolean(release), `the console serves a daemon release (${release})`);
+  const tgz = join(nodeDir, `agent-teams-node-${release}.tgz`);
+  execFileSync("curl", ["-fsS", "-o", tgz, `${base}/node/dist/agent-teams-node-${encodeURIComponent(release)}.tgz`]);
+  const want = execFileSync("curl", ["-fsS", `${base}/node/dist/agent-teams-node-${encodeURIComponent(release)}.tgz.sha256`]).toString().trim();
   const got = execFileSync("sha256sum", [tgz]).toString().split(" ")[0];
   check(want === got, "daemon tarball from /node/dist/ matches its sha256");
   execFileSync("tar", ["-xzf", tgz, "-C", pkg, "--strip-components=1"]);

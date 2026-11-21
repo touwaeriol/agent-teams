@@ -89,7 +89,22 @@ func TestNodeQuotaAndOnlineStatus(t *testing.T) {
 	}
 	var s AdminSettings
 	admin.must(200, "GET", "/api/admin/settings", nil, &s)
-	s.NodeRelease = &platform.NodeRelease{Version: "2.0.1", SHA256: strings.Repeat("a", 64)}
+	s.NodeRelease = &platform.NodeRelease{Version: "2.0.1+abcdef12", SHA256: strings.Repeat("a", 64)}
 	admin.must(200, "PUT", "/api/admin/settings", s, nil)
+	c.must(200, "GET", "/api/nodes", nil, &list)
+	if list[0].LatestVersion != "2.0.1+abcdef12" || !list[0].UpdateAvailable {
+		t.Fatalf("release in view %+v", list[0])
+	}
 	c.must(202, "POST", "/api/nodes/"+n.Node.ID+"/upgrade", nil, nil)
+	c.must(202, "POST", "/api/nodes/"+n.Node.ID+"/upgrade", map[string]any{"mode": "now"}, nil)
+	if got := strings.Join(h.nodes.upgrades, ","); got != "2.0.1+abcdef12:,2.0.1+abcdef12:now" {
+		t.Fatalf("upgrades sent: %s", got)
+	}
+	if r := c.do("POST", "/api/nodes/"+n.Node.ID+"/upgrade", map[string]any{"mode": "later"}); r.Status != 422 {
+		t.Fatalf("bad mode = %d", r.Status)
+	}
+	h.nodes.noSelfUpdate = true
+	if r := c.do("POST", "/api/nodes/"+n.Node.ID+"/upgrade", nil); r.Status != 409 || r.apiError(t).Code != "upgrade_unsupported" {
+		t.Fatalf("upgrade without launcher = %d %s", r.Status, r.Body)
+	}
 }

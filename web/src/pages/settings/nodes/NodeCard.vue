@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// One machine: name, online pill, meta, actions (设置 / 升级 / 重新生成令牌 / 移除), the slot bar,
+// One machine: name, online pill, meta, actions (设置 / 更新 / 重新生成令牌 / 移除), the update line, the slot bar,
 // runtime chips (with subscription quota under each) and the sessions running there.
 import { useQueryClient } from "@tanstack/vue-query";
 import { computed, onBeforeUnmount, ref } from "vue";
@@ -14,7 +14,7 @@ import Spinner from "@/components/common/Spinner.vue";
 import { nodeSlots } from "@/components/shell/nodes";
 import NodeSessions from "./NodeSessions.vue";
 import NodeSettings from "./NodeSettings.vue";
-import { hoverIntent, needsUsageRefresh, refreshCooldown, nodeMeta, RUNTIMES, runtimeLine, slotPct, usageView, withNodeUsage, type RuntimeInfo, type UsageView } from "./nodes";
+import { hoverIntent, needsUsageRefresh, refreshCooldown, nodeMeta, RUNTIMES, runtimeLine, slotPct, updateView, usageView, withNodeUsage, type RuntimeInfo, type UsageView } from "./nodes";
 
 const props = defineProps<{ node: NodeView }>();
 const emit = defineEmits<{ token: [enrollment: Enrollment] }>();
@@ -50,7 +50,9 @@ const hover = hoverIntent(300, () => void refreshUsage());
 onBeforeUnmount(hover.leave);
 const rotate = useAction(() => nodeActions.rotate(props.node.id), { invalidate: [keys.nodes], onSuccess: (e) => emit("token", e) });
 const remove = useAction(() => nodeActions.remove(props.node.id), { invalidate: [keys.nodes], success: "节点已移除" });
-const upgrade = useAction(() => nodeActions.upgrade(props.node.id), { success: "已让节点升级" });
+const update = computed(() => updateView(props.node));
+const UPDATE_TONE = { muted: "text-muted-foreground", ok: "text-[hsl(var(--ok))]", warn: "text-[hsl(var(--warn))]", error: "text-destructive" } as const;
+const upgrade = useAction((mode: "wait_idle" | "now" | "cancel") => nodeActions.upgrade(props.node.id, mode), { invalidate: [keys.nodes] });
 </script>
 
 <template>
@@ -63,12 +65,35 @@ const upgrade = useAction(() => nodeActions.upgrade(props.node.id), { success: "
       </span>
       <span class="flex flex-wrap gap-2 [&>.el-button]:!ml-0">
         <el-button size="small" @click="configuring = true">设置</el-button>
-        <el-button v-if="node.online" size="small" :disabled="upgrade.isPending.value" @click="upgrade.mutate()">升级</el-button>
+        <el-dropdown
+          v-if="node.online && update.offer"
+          split-button
+          size="small"
+          type="primary"
+          :disabled="upgrade.isPending.value"
+          data-update
+          @click="upgrade.mutate('wait_idle')"
+          @command="(m: 'wait_idle' | 'now') => upgrade.mutate(m)"
+        >
+          更新
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="wait_idle">等正在跑的回合结束后更新</el-dropdown-item>
+              <el-dropdown-item command="now">立即更新（中断正在跑的回合）</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <ConfirmAction title="重新生成令牌？" description="旧令牌立即失效，节点会断开，需要用新命令重新安装。" confirm-label="重新生成" variant="default" size="small" @confirm="rotate.mutate()">
           重新生成令牌
         </ConfirmAction>
         <ConfirmAction :title="`移除节点 ${node.name}？`" description="会断开连接；在它上面的员工改派到其他节点继续。" confirm-label="移除" size="small" @confirm="remove.mutate()">移除</ConfirmAction>
       </span>
+    </div>
+    <div v-if="update.line" class="flex flex-wrap items-center gap-2 text-[13px]" data-update-line>
+      <Spinner v-if="update.busy" class="size-3 border" />
+      <span :class="UPDATE_TONE[update.tone]">{{ update.line }}</span>
+      <el-button v-if="update.canNow" size="small" link type="primary" :disabled="upgrade.isPending.value" @click="upgrade.mutate('now')">立即更新</el-button>
+      <el-button v-if="update.canCancel" size="small" link :disabled="upgrade.isPending.value" @click="upgrade.mutate('cancel')">取消</el-button>
     </div>
     <div class="flex flex-col gap-1.5">
       <span class="flex justify-between text-xs text-muted-foreground">

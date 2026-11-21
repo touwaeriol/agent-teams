@@ -39,7 +39,7 @@ const (
 const MaxFrame = 4 << 20
 
 // Features the console supports (welcome.features is the intersection with hello.features).
-var Features = []string{"sessions", "codex_app_server", "git_worktree", "git_sync", "cred_helper", "upgrade", "file_download", "usage", "ssh_gateway"}
+var Features = []string{"sessions", "codex_app_server", "git_worktree", "git_sync", "cred_helper", "upgrade", "file_download", "usage", "ssh_gateway", "self_update"}
 
 // Handler receives the messages of authenticated links, one at a time per link.
 type Handler interface {
@@ -75,8 +75,9 @@ type Gateway struct {
 
 	mu         sync.Mutex
 	links      map[string]*link
-	usage      map[string]*platform.NodeUsage // latest node.usage per node (memory only)
-	usageWaits map[string]*usageWait          // in-flight node.usage_refresh per node
+	usage      map[string]*platform.NodeUsage        // latest node.usage per node (memory only)
+	usageWaits map[string]*usageWait                 // in-flight node.usage_refresh per node
+	upgrades   map[string]*platform.NodeUpgradeState // last node.upgrade per node (memory only)
 
 	// Now is the clock for the usage cache (tests); nil = time.Now.
 	Now func() time.Time
@@ -103,7 +104,8 @@ func New(st *store.Store, cs *core.Store, hub *fanout.Hub, log *slog.Logger, cfg
 		cfg.HelloTimeout = 15 * time.Second
 	}
 	return &Gateway{store: st, core: cs, hub: hub, validator: v, log: log, cfg: cfg, links: map[string]*link{},
-		usage: map[string]*platform.NodeUsage{}, usageWaits: map[string]*usageWait{}}, nil
+		usage: map[string]*platform.NodeUsage{}, usageWaits: map[string]*usageWait{},
+		upgrades: map[string]*platform.NodeUpgradeState{}}, nil
 }
 
 // SetHandler installs the message handler.
@@ -275,7 +277,7 @@ func nodeRow(ctx context.Context, q core.DB, nodeID string) *gorm.DB {
 
 // helloSummary is the part of hello kept in at_nodes.last_hello (NodeView while offline).
 func helloSummary(h *protocol.Hello) map[string]any {
-	return map[string]any{"version": h.Daemon.Version, "protocol": 2, "runtimes": h.Runtimes, "capacity": h.Capacity,
+	return map[string]any{"version": releaseOf(h.Daemon), "protocol": 2, "runtimes": h.Runtimes, "capacity": h.Capacity,
 		"features": h.Features, "host": h.Host, "root": h.Root, "isolation": h.Isolation}
 }
 

@@ -23,3 +23,16 @@ await build({
   logLevel: "info",
 });
 chmodSync(join(root, "dist/node.mjs"), 0o755);
+
+// The update launcher (src/launcher.ts): node builtins only, no external packages.
+await build({
+  entryPoints: [join(root, "src/launcher.ts")],
+  outfile: join(root, "dist/launch.mjs"),
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node22",
+  banner: { js: "#!/usr/bin/env node" },
+  logLevel: "info",
+});
+chmodSync(join(root, "dist/launch.mjs"), 0o755);

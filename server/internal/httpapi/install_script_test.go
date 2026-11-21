@@ -112,7 +112,7 @@ func TestInstallScriptFreshInstall(t *testing.T) {
 		t.Errorf("node.env mode %v", info.Mode().Perm())
 	}
 	link, _ := os.Readlink(filepath.Join(e.home, ".local/share/agent-teams/current"))
-	if link != "node-2.0.3" {
+	if link != "releases/2.0.3" {
 		t.Fatalf("current -> %q", link)
 	}
 	unit := e.read(".config/systemd/user/agent-teams-node.service")
@@ -190,8 +190,76 @@ func TestInstallScriptRollback(t *testing.T) {
 		t.Fatalf("rollback: %v\n%s", err, out)
 	}
 	link, _ := os.Readlink(filepath.Join(e.home, ".local/share/agent-teams/current"))
-	if link != "node-2.0.3" {
+	if link != "releases/2.0.3" {
 		t.Fatalf("after rollback current -> %q", link)
+	}
+}
+
+// TestInstallScriptLauncherLayout: a release with launch.mjs installs the launcher, starts
+// through it, keeps the running release when the same id is reinstalled, and keeps node.env
+// lines it does not manage.
+func TestInstallScriptLauncherLayout(t *testing.T) {
+	e := newInstallEnv(t)
+	files := map[string]string{"package/package.json": `{}`, "package/npm-shrinkwrap.json": `{"v":1}`, "package/node.mjs": "a", "package/launch.mjs": "launcher"}
+	e.writeTarballFiles(files)
+	_ = os.MkdirAll(filepath.Join(e.home, ".config/agent-teams"), 0o700)
+	_ = os.WriteFile(filepath.Join(e.home, ".config/agent-teams/node.env"), []byte("AGENT_TEAMS_NODE_TOKEN=t\nAGENT_TEAMS_NODE=n\nAGENT_TEAMS_PASS_ENV=HTTPS_PROXY\n"), 0o600)
+	data := filepath.Join(e.home, ".local/share/agent-teams")
+	// an old-style install the first run migrates from
+	_ = os.MkdirAll(filepath.Join(data, "node-2.0.0", "node_modules", "dep"), 0o755)
+	_ = os.WriteFile(filepath.Join(data, "node-2.0.0", "npm-shrinkwrap.json"), []byte(`{"v":1}`), 0o644)
+	_ = os.Symlink("node-2.0.0", filepath.Join(data, "current"))
+	install := func(v string) {
+		t.Helper()
+		script := renderInstallScript("https://console.test", platform.NodeRelease{Version: v, SHA256: e.sha})
+		if out, err := e.run(script, nil); err != nil {
+			t.Fatalf("install %s: %v\n%s", v, err, out)
+		}
+	}
+	install("2.0.0+aaaaaaaa")
+	if l, _ := os.Readlink(filepath.Join(data, "current")); l != "releases/2.0.0+aaaaaaaa" {
+		t.Fatalf("current -> %q", l)
+	}
+	if l, _ := os.Readlink(filepath.Join(data, "previous")); l != "node-2.0.0" {
+		t.Fatalf("previous -> %q", l)
+	}
+	if _, err := os.Stat(filepath.Join(data, "releases/2.0.0+aaaaaaaa/node_modules/dep")); err != nil {
+		t.Fatalf("node_modules not reused: %v", err)
+	}
+	calls, _ := os.ReadFile(e.log)
+	if strings.Contains(string(calls), "npm ci") {
+		t.Fatalf("npm ran although the lock file did not change:\n%s", calls)
+	}
+	if e.read(".local/share/agent-teams/bin/launch.mjs") != "launcher" {
+		t.Fatal("launcher not installed")
+	}
+	unit := e.read(".config/systemd/user/agent-teams-node.service")
+	if !strings.Contains(unit, data+"/bin/launch.mjs run\n") || !strings.Contains(unit, "TimeoutStopSec=120") {
+		t.Fatalf("unit:\n%s", unit)
+	}
+	if !strings.Contains(e.read(".config/agent-teams/node.env"), "AGENT_TEAMS_PASS_ENV=HTTPS_PROXY") {
+		t.Fatalf("node.env lost a line:\n%s", e.read(".config/agent-teams/node.env"))
+	}
+	if !strings.Contains(e.read(".local/share/agent-teams/upgrade.json"), `"state":"confirmed"`) {
+		t.Fatal("upgrade.json not reset")
+	}
+	// the same release again: nothing downloaded, nothing removed
+	install("2.0.0+aaaaaaaa")
+	if c, _ := os.ReadFile(e.log); strings.Count(string(c), "curl ") != 1 {
+		t.Fatalf("downloaded again:\n%s", c)
+	}
+	// a third release: the old-style dir goes, current and previous stay
+	files["package/node.mjs"] = "b"
+	files["package/npm-shrinkwrap.json"] = `{"v":2}`
+	e.writeTarballFiles(files)
+	install("2.0.0+bbbbbbbb")
+	if _, err := os.Stat(filepath.Join(data, "node-2.0.0")); !os.IsNotExist(err) {
+		t.Fatal("old release kept")
+	}
+	for _, v := range []string{"2.0.0+aaaaaaaa", "2.0.0+bbbbbbbb"} {
+		if _, err := os.Stat(filepath.Join(data, "releases", v, ".installed")); err != nil {
+			t.Fatalf("%s missing", v)
+		}
 	}
 }
 
@@ -215,7 +283,7 @@ func TestInstallScriptReinstallsWhenPackageChanges(t *testing.T) {
 	if out, err := e.run(script, nil, "--name", "rc-erio"); err != nil || count() != 1 {
 		t.Fatalf("same package was downloaded again (%d): %v\n%s", count(), err, out)
 	}
-	_ = os.WriteFile(filepath.Join(e.home, ".local/share/agent-teams/node-2.0.3/.installed"), []byte("old-sha\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(e.home, ".local/share/agent-teams/releases/2.0.3/.installed"), []byte("old-sha\n"), 0o644)
 	if out, err := e.run(script, nil, "--name", "rc-erio"); err != nil || count() != 2 {
 		t.Fatalf("rebuilt package with the same version was not reinstalled (%d): %v\n%s", count(), err, out)
 	}

@@ -107,7 +107,9 @@ export const nodes = {
   create: (name: string) => unwrap(client.POST("/api/nodes", { body: { name } })),
   update: (id: string, body: S["NodePatchInputBody"]) => unwrap(client.PATCH("/api/nodes/{id}", { params: { path: { id } }, body })),
   rotate: (id: string) => unwrap(client.POST("/api/nodes/{id}/token", { params: { path: { id } } })),
-  upgrade: (id: string) => unwrap(client.POST("/api/nodes/{id}/upgrade", { params: { path: { id } } })),
+  /** 409 node_offline / no_release / upgrade_unsupported. */
+  upgrade: (id: string, mode: "wait_idle" | "now" | "cancel" = "wait_idle") =>
+    unwrap(client.POST("/api/nodes/{id}/upgrade", { params: { path: { id } }, body: { mode } })),
   remove: (id: string) => unwrap(client.DELETE("/api/nodes/{id}", { params: { path: { id } } })),
   /** 409 node_offline / usage_unsupported; the cards treat any failure as "keep the old numbers". */
   refreshUsage: (id: string): Promise<UsageRefresh> => unwrap(client.POST("/api/nodes/{id}/usage/refresh", { params: { path: { id } } })),

@@ -1043,7 +1043,8 @@
           "type": "string"
         },
         "build": {
-          "type": "string"
+          "type": "string",
+          "description": "First 8 hex of sha256(node.mjs); the release id is <version>+<build>."
         },
         "node": {
           "type": "string"
@@ -1181,7 +1182,7 @@
           "$ref": "#/$defs/Runtimes"
         },
         "features": {
-          "description": "Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh).",
+          "description": "Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh), self_update (runs under the update launcher: node.upgrade with mode, drain, rollback).",
           "type": "array",
           "items": {
             "type": "string"
@@ -1314,32 +1315,50 @@
     },
     "NodeUpgrade": {
       "title": "NodeUpgrade",
-      "description": "Upgrade the daemon. The download URL is fixed: <console>/node/dist/agent-teams-node-<version>.tgz; sha256 and the Ed25519 release signature are verified.",
+      "description": "Update the daemon (architecture.md §14.3). The download URL is fixed: <console>/node/dist/agent-teams-node-<version>.tgz. The daemon checks sha256 (and the Ed25519 release signature when it has release.pub), installs the release next to the running one, drains its sessions, switches the current symlink and exits 75 for its launcher; progress comes back as node.upgrade_result.",
       "type": "object",
       "required": [
         "version",
-        "sha256",
-        "signature"
+        "sha256"
       ],
       "properties": {
         "version": {
+          "description": "Release id: <package version>+<build>, build = first 8 hex of sha256(node.mjs).",
           "type": "string",
-          "pattern": "^\\d+\\.\\d+\\.\\d+$"
+          "pattern": "^\\d+\\.\\d+\\.\\d+(\\+[0-9a-f]{8,16})?$"
         },
         "sha256": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
         },
         "signature": {
-          "description": "Base64 Ed25519 signature of the tgz.",
+          "description": "Base64 Ed25519 signature of the tgz; required only by daemons that have release.pub.",
+          "type": "string"
+        },
+        "mode": {
+          "description": "wait_idle (default): switch once no turn is running; now: interrupt running turns; cancel: stop an update that has not switched yet.",
           "type": "string",
-          "minLength": 1
+          "enum": [
+            "wait_idle",
+            "now",
+            "cancel"
+          ]
+        },
+        "deadline_s": {
+          "description": "wait_idle: report drain_timeout after this many seconds (keeps waiting). Default 1800.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "min_node": {
+          "description": "Lowest Node.js major version the release runs on.",
+          "type": "integer",
+          "minimum": 1
         }
       }
     },
     "NodeUpgradeResult": {
       "title": "NodeUpgradeResult",
-      "description": "Upgrade failure report (success shows up as a reconnect with the new version).",
+      "description": "Update progress and outcome (one per phase change; a rolled-back update is reported by the old version after its restart).",
       "type": "object",
       "required": [
         "ok"
@@ -1349,10 +1368,29 @@
           "type": "boolean"
         },
         "version": {
-          "type": "string"
+          "type": "string",
+          "description": "The release the update is about."
         },
         "error": {
           "type": "string"
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "staging",
+            "draining",
+            "drain_timeout",
+            "restarting",
+            "done",
+            "failed",
+            "rolled_back",
+            "cancelled"
+          ]
+        },
+        "active_turns": {
+          "description": "draining / drain_timeout: turns still running.",
+          "type": "integer",
+          "minimum": 0
         }
       }
     },

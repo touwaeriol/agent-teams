@@ -358,6 +358,16 @@ export class SessionManager implements SessionHost {
     void this.parkIdle(true);
   }
 
+  /** Ends a drain (a cancelled or failed update): sessions open again. */
+  undrain(): void {
+    this.draining = false;
+  }
+
+  /** Turns running now; a turn waiting on the user (approval or question card) does not count (it survives a restart). */
+  busyTurns(): number {
+    return [...this.sessions.values()].filter((s) => s.driver?.busy && this.approvals.pendingFor(s.id).length === 0).length;
+  }
+
   report(): { sessions: SessionReportItem[] } {
     return { sessions: [...this.sessions.values()].map((s) => reportItem(s, this.approvals, this.tools)) };
   }

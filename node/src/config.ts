@@ -90,12 +90,12 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
   const token = get("AGENT_TEAMS_NODE_TOKEN");
   if (!consoleUrl) throw new ConfigError("set --console or AGENT_TEAMS_CONSOLE");
   if (!token) throw new ConfigError("set AGENT_TEAMS_NODE_TOKEN (shown when you add the node in the console)");
-  const dataDir = join(env.XDG_DATA_HOME ?? join(home, ".local", "share"), "agent-teams");
+  const dataDir = env.AGENT_TEAMS_DATA ?? join(env.XDG_DATA_HOME ?? join(home, ".local", "share"), "agent-teams");
   return {
     consoleUrl, wsUrl: toWsUrl(consoleUrl), token,
     root: resolve(get("AGENT_TEAMS_ROOT") ?? join(home, ".agents_team")),
     stateDir: resolve(get("AGENT_TEAMS_STATE") ?? join(env.XDG_STATE_HOME ?? join(home, ".local", "state"), "agent-teams")),
-    configDir, platformDir: join(dataDir, "platform"), installDir: join(dataDir, "node"),
+    configDir, platformDir: join(dataDir, "platform"), installDir: dataDir,
     runtimeDir: join(env.XDG_RUNTIME_DIR ?? join(dataDir, "run"), "agent-teams"),
     maxActive: positiveInt(get("AGENT_TEAMS_MAX_SESSIONS")),
     passEnv: passList(get("AGENT_TEAMS_PASS_ENV")),

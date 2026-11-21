@@ -1,5 +1,5 @@
 import { cpus, hostname, loadavg, totalmem } from "node:os";
-import { existsSync, mkdirSync, statfsSync } from "node:fs";
+import { mkdirSync, statfsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { ApprovalBroker } from "./approvals.js";
 import { CredBroker } from "./cred/broker.js";
@@ -31,11 +31,11 @@ import type { Session } from "./sessions/session.js";
 import type { Driver, DriverContext } from "./sessions/types.js";
 import { LoopbackToolHost } from "./toolhost/http-server.js";
 import { ToolBroker } from "./toolhost/broker.js";
-import { applyUpgrade } from "./upgrade.js";
+import { Updater, type UpdaterOptions } from "./upgrade.js";
 import type { Logger } from "./util/log.js";
 import { absPath } from "./sessions/claude/options.js";
 import { consoleImageFetcher } from "./sessions/images.js";
-import { DAEMON_VERSION, PROTOCOLS } from "./version.js";
+import { DAEMON_BUILD, DAEMON_RELEASE, DAEMON_VERSION, PROTOCOLS } from "./version.js";
 
 export interface DaemonOptions {
   /** ws(s)://<console>/nodes/connect */
@@ -84,9 +84,15 @@ export interface DaemonOptions {
   sshPath?: string;
   /** Temp directory for over-long session directory paths (tests; default os.tmpdir()). */
   sshTmpDir?: string;
+  /** This process's release id (tests; default <version>+<build of node.mjs>). */
+  release?: string;
+  /** Advertise self_update (tests; default: started by the launcher, AGENT_TEAMS_LAUNCHER=1). */
+  selfUpdate?: boolean;
+  /** Updater overrides (tests): poll and confirm delays, fetch, npm. */
+  updater?: Partial<Pick<UpdaterOptions, "pollMs" | "confirmAfterMs" | "fetchFn" | "npm" | "now">>;
 }
 
-const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "upgrade", "file_download", "shared_files", "context_usage", "session_compact", "usage", "ssh_gateway"];
+const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "file_download", "shared_files", "context_usage", "session_compact", "usage", "ssh_gateway"];
 
 /** Wires the link, command handlers, sessions, tools, git and credentials together. */
 export class Daemon {
@@ -114,6 +120,7 @@ export class Daemon {
   readonly runtimes: RuntimeRegistry;
   private statsTimer: NodeJS.Timeout | null = null;
   private readonly usage: UsageReporter;
+  private readonly updater: Updater;
   private readonly ssh: SshHub;
   /** Real OpenSSH client found at start (null: remote servers cannot be used on this node). */
   private readonly sshClient: string | null;
@@ -168,9 +175,16 @@ export class Daemon {
       ...(o.usageIntervalMs !== undefined ? { intervalMs: o.usageIntervalMs } : {}),
       ...(o.usageTimeoutMs !== undefined ? { timeoutMs: o.usageTimeoutMs } : {}),
     });
+    this.updater = new Updater({
+      data: o.installDir, self: o.release ?? DAEMON_RELEASE, releaseKeyPath: join(o.configDir, "release.pub"), sessions: this.sessions, log: o.log,
+      consoleHttpBase: () => o.url.replace(/^ws/, "http").replace(/\/nodes(\/v2)?\/connect$/, ""),
+      send: (body) => this.link.send("node.upgrade_result", body), exit: (code) => o.onExit?.(code),
+      ...(o.updater ?? {}),
+    });
     this.dispatcher = new Dispatcher(this.link, this.inbox, this.handlers(), o.log);
     this.link.on("frame", (f: Frame) => this.dispatcher.handle(f));
     this.link.on("welcome", (w: Welcome) => this.onWelcome(w));
+    this.link.on("closed", () => this.updater.onDisconnected());
     this.link.on("stopped", (why: string) => o.onExit?.(why === "replaced" ? 3 : 0));
   }
 
@@ -212,7 +226,7 @@ export class Daemon {
   hello(): Hello {
     return {
       protocols: [...PROTOCOLS],
-      daemon: { version: DAEMON_VERSION, node: process.versions.node, os: process.platform, arch: process.arch },
+      daemon: { version: DAEMON_VERSION, ...(DAEMON_BUILD ? { build: DAEMON_BUILD } : {}), node: process.versions.node, os: process.platform, arch: process.arch },
       epoch: this.outbox.epoch,
       last_seq: this.outbox.lastSentSeq,
       acked_cmd_seq: this.inbox.acked,
@@ -220,7 +234,7 @@ export class Daemon {
       root: resolve(this.o.root),
       capacity: { ...(this.o.maxActive ? { max_active_sessions: this.o.maxActive } : {}), cpus: cpus().length, mem_mb: Math.round(totalmem() / 1048576) },
       runtimes: this.runtimes.hello(),
-      features: existsSync(join(this.o.configDir, "release.pub")) ? FEATURES : FEATURES.filter((f) => f !== "upgrade"),
+      features: this.o.selfUpdate ?? process.env.AGENT_TEAMS_LAUNCHER === "1" ? [...FEATURES, "self_update"] : FEATURES,
       ...(this.sshClient ? { ssh_client: { version: this.sshClient } } : {}),
       isolated: false,
       isolation: this.isolation,
@@ -249,6 +263,7 @@ export class Daemon {
     this.link.send("sessions.report", this.sessions.report());
     this.statsTimer ??= setInterval(() => this.sendStats(), 30_000);
     this.usage.kick();
+    this.updater.onConnected();
   }
 
   /** Where node.usage reads from: the login kinds probed at start, the Claude CLI and the shared codex app-server. */
@@ -297,7 +312,7 @@ export class Daemon {
       "git.purge": { run: (b) => this.gitReply(this.git.purge(b as unknown as GitPurge, (abs) => this.sessions.busyUnder(abs))) },
       "node.config": { run: async (b) => this.nodeConfig(b as NodeConfig) },
       "node.drain": { run: async () => (this.sessions.drain(), []) },
-      "node.upgrade": { run: (b) => this.upgrade(b as unknown as NodeUpgrade) },
+      "node.upgrade": { run: async (b) => (this.updater.handle(b as unknown as NodeUpgrade), []) },
       "node.usage_refresh": { run: async (b) => [{ type: "node.usage", body: await this.usage.refresh((b as NodeUsageRefresh).runtimes) }] },
     };
   }
@@ -315,17 +330,6 @@ export class Daemon {
   private nodeConfig(c: NodeConfig): Reply[] {
     this.sessions.configure(c);
     if (c.log_level) this.o.log.level = c.log_level;
-    return [];
-  }
-
-  private async upgrade(msg: NodeUpgrade): Promise<Reply[]> {
-    const consoleHttpBase = this.o.url.replace(/^ws/, "http").replace(/\/nodes(\/v2)?\/connect$/, "");
-    try {
-      await applyUpgrade(msg, { consoleHttpBase, installDir: this.o.installDir, releaseKeyPath: join(this.o.configDir, "release.pub") });
-    } catch (err) {
-      return [{ type: "node.upgrade_result", body: { ok: false, version: msg.version, error: (err as Error).message } }];
-    }
-    setTimeout(() => this.o.onExit?.(75), 500);
     return [];
   }
 
