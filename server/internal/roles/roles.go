@@ -65,10 +65,7 @@ func Normalize(roles []store.Role, looks office.Looks) {
 
 func normalizeOne(r *store.Role, looks office.Looks) {
 	r.Role = strings.TrimSpace(r.Role)
-	if r.Runtime == "" {
-		r.Runtime = Claude
-	}
-	r.Model = strings.TrimSpace(r.Model)
+	normalizeRuntimes(r)
 	if r.Tier != Member {
 		r.Count = 1
 	}
@@ -89,6 +86,26 @@ func normalizeOne(r *store.Role, looks office.Looks) {
 	r.HiddenCommands = dedupe(r.HiddenCommands)
 	r.Commands = composer.NormalizeCommands(r.Commands)
 	normalizeContext(r)
+}
+
+// normalizeRuntimes makes runtimes the role's list (one entry each, runtime first) and runtime its
+// first entry; a client that only knows runtime (or sends a single-entry list next to a changed
+// runtime) gets [runtime]. models keeps the further runtimes' models only, and model is the first
+// runtime's.
+func normalizeRuntimes(r *store.Role) {
+	list := dedupe(r.Runtimes)
+	if len(list) == 0 || (len(list) == 1 && r.Runtime != "" && r.Runtime != list[0]) {
+		list = []string{first(r.Runtime, Claude)}
+	}
+	r.Runtimes, r.Runtime = list, list[0]
+	r.Model = strings.TrimSpace(first(r.Model, r.Models[r.Runtime]))
+	models := map[string]string{}
+	for _, rt := range list[1:] {
+		if m := strings.TrimSpace(r.Models[rt]); m != "" {
+			models[rt] = m
+		}
+	}
+	r.Models = models
 }
 
 func defaultLook(looks office.Looks, role, tier string) office.LookDefault {
@@ -158,9 +175,9 @@ func validateOne(path string, r *store.Role, c Context) []Problem {
 	checks := []check{
 		{"tier", !slices.Contains([]string{Coordinator, Lead, Member}, r.Tier), "tier 只能是 coordinator、lead 或 member"},
 		{"role", !keyPattern.MatchString(r.Role), "岗位键只能用小写字母开头的小写字母、数字和 -，最多 24 个字符"},
-		{"runtime", !runtimes.Valid(r.Runtime), "runtime 只能是 " + strings.Join(runtimes.IDs(), " 或 ")},
-		{"runtime", r.Tier == Coordinator && !runtimes.Of(r.Runtime).CanLead, "统筹只能用 " + leaders},
-		{"runtime", r.Tier == Lead && !runtimes.Of(r.Runtime).CanLead, "组长只能用 " + leaders},
+		{"runtime", !all(r.RuntimeList(), runtimes.Valid), "runtime 只能是 " + strings.Join(runtimes.IDs(), " 或 ")},
+		{"runtime", r.Tier == Coordinator && !all(r.RuntimeList(), canLead), "统筹只能用 " + leaders},
+		{"runtime", r.Tier == Lead && !all(r.RuntimeList(), canLead), "组长只能用 " + leaders},
 		{"count", r.Count < 1 || r.Count > MaxCount, fmt.Sprintf("人数在 1 到 %d 之间", MaxCount)},
 		{"gate", !slices.Contains(gates, r.Gate), "gate 只能是空、review 或 decision"},
 		{"sandbox", !slices.Contains(sandboxes, r.Sandbox), "sandbox 只能是 read-only、workspace-write 或 danger-full-access"},
@@ -194,12 +211,34 @@ func modelProblems(path string, r *store.Role) []Problem {
 	return []Problem{{path + ".model", composer.ModelFormatProblem}}
 }
 
+func all(list []string, ok func(string) bool) bool {
+	for _, v := range list {
+		if !ok(v) {
+			return false
+		}
+	}
+	return true
+}
+
+func canLead(rt string) bool { return runtimes.Of(rt).CanLead }
+
+// promptRuntime is the runtime the role's commands are checked against: one without slash
+// commands if the role has one (its passthrough commands would not run there), else the first.
+func promptRuntime(list []string) string {
+	for _, rt := range list {
+		if !runtimes.Of(rt).SlashCommands {
+			return rt
+		}
+	}
+	return list[0]
+}
+
 func commandProblems(path string, r *store.Role) []Problem {
 	var out []Problem
 	for _, p := range composer.HiddenProblems(path+".hidden_commands", r.HiddenCommands) {
 		out = append(out, Problem(p))
 	}
-	for _, p := range composer.ValidateCommands(path+".commands", r.Commands, composer.For(r.Runtime, r.Tier)) {
+	for _, p := range composer.ValidateCommands(path+".commands", r.Commands, composer.For(promptRuntime(r.RuntimeList()), r.Tier)) {
 		out = append(out, Problem(p))
 	}
 	return out
@@ -244,10 +283,38 @@ func nodeProblems(path string, r *store.Role, nodes map[string]store.Node) []Pro
 			return []Problem{{path + ".node_ids", "候选节点不存在或不属于你：" + id}}
 		}
 	}
-	if rt := runtimes.Of(r.Runtime); rt.NeedsIsolation && !candidatesQualify(r.NodeIDs, nodes) {
+	if rt, ok := unplaceable(r.RuntimeList(), r.NodeIDs, nodes); ok && !anyPlaceable(r.RuntimeList(), r.NodeIDs, nodes) {
 		return []Problem{{path + ".node_ids", rt.Title + " 岗位不能派到 sandbox 或 none 隔离级别的节点（需要 agent_user 或 isolated）"}}
 	}
 	return nil
+}
+
+// unplaceable is the first of the role's runtimes that needs isolation while no candidate node
+// isolates it.
+func unplaceable(list, nodeIDs []string, nodes map[string]store.Node) (runtimes.Runtime, bool) {
+	for _, id := range list {
+		if rt := runtimes.Of(id); rt.NeedsIsolation && !candidatesQualify(nodeIDs, nodes) {
+			return rt, true
+		}
+	}
+	return runtimes.Runtime{}, false
+}
+
+// anyPlaceable reports whether some runtime of the role can run on its candidate nodes.
+func anyPlaceable(list, nodeIDs []string, nodes map[string]store.Node) bool {
+	for _, id := range list {
+		if !runtimes.Of(id).NeedsIsolation || candidatesQualify(nodeIDs, nodes) {
+			return true
+		}
+	}
+	return false
+}
+
+func otherRuntimesNote(list []string) string {
+	if len(list) > 1 {
+		return "，这个岗位只会用其他 agent"
+	}
+	return ""
 }
 
 // Isolated reports whether a node may run runtimes that need isolation (Codex, architecture.md §10.3).
@@ -291,8 +358,8 @@ func roleWarnings(r store.Role, nodes map[string]store.Node) []Warning {
 	if len(live) < len(r.NodeIDs) {
 		out = append(out, Warning{r.Role, "候选节点已删除"})
 	}
-	if rt := runtimes.Of(r.Runtime); rt.NeedsIsolation && !candidatesQualify(live, nodes) {
-		out = append(out, Warning{r.Role, rt.Title + " 岗位没有 agent_user 或 isolated 节点"})
+	if rt, ok := unplaceable(r.RuntimeList(), live, nodes); ok {
+		out = append(out, Warning{r.Role, rt.Title + " 没有 agent_user 或 isolated 节点" + otherRuntimesNote(r.RuntimeList())})
 	}
 	return out
 }

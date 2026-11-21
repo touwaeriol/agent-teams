@@ -201,16 +201,16 @@ func fixedModel(tier string) bool { return tier == "coordinator" || tier == "lea
 func modelSteps(e core.Employee, p store.Project) []string {
 	if fixedModel(e.Tier) {
 		return []string{
-			projectModel(e, p),      // 1. the project override for the coordinator / the lead's runtime
-			e.Spec.Model,            // 2. the role's model (the employee's spec)
-			builtinModel(e.Runtime), // 3. built in: DefaultModel / DefaultCodexModel
+			projectModel(e, p),         // 1. the project override for the coordinator / the lead's runtime
+			e.Spec.ModelFor(e.Runtime), // 2. the role's model for the runtime (the employee's spec)
+			builtinModel(e.Runtime),    // 3. built in: DefaultModel / DefaultCodexModel
 		}
 	}
 	return []string{
-		e.Model,                 // 1. picked for the employee with /model (at_employees.model)
-		projectModel(e, p),      // 2. the project override for the employee's runtime
-		e.Spec.Model,            // 3. the role's model (the employee's spec)
-		builtinModel(e.Runtime), // 4. built in: DefaultModel / DefaultCodexModel
+		e.Model,                    // 1. picked for the employee with /model (at_employees.model)
+		projectModel(e, p),         // 2. the project override for the employee's runtime
+		e.Spec.ModelFor(e.Runtime), // 3. the role's model for the runtime (the employee's spec)
+		builtinModel(e.Runtime),    // 4. built in: DefaultModel / DefaultCodexModel
 	}
 }
 

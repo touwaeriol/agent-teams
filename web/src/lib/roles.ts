@@ -2,6 +2,7 @@
 import { MODEL_FORMAT_HINT, validModel } from "./models";
 import { unfit } from "./commands";
 import type { RoleView } from "@/api/views";
+import { roleRuntimes, runtimeLabel } from "./runtimes";
 
 export const LEVEL: Record<RoleView["tier"], { label: string; bg: string; fg: string }> = {
   coordinator: { label: "项目级", bg: "#F4E3D7", fg: "#8A3D14" },
@@ -32,11 +33,11 @@ export function isReadOnly(r: Pick<RoleView, "read_only" | "gate">): boolean {
   return r.read_only ?? (r.gate === "review" || r.gate === "decision");
 }
 
-export function ruleText(r: Pick<RoleView, "tier" | "runtime" | "sandbox" | "read_only" | "gate">): string {
+export function ruleText(r: Pick<RoleView, "tier" | "runtime" | "sandbox" | "read_only" | "gate"> & Partial<Pick<RoleView, "runtimes">>): string {
   if (r.tier === "coordinator") return "只能用：开讨论串、看讨论串、给讨论串发话、问你。没有仓库、不能读写文件或执行命令（平台强制）。";
   if (r.tier === "lead") return "可以只读查看代码来拆任务，不能修改文件；合并成员分支、开 PR 由平台代为执行。";
   if (isReadOnly(r)) return "只读：git diff / log / show、gh pr view，不改代码。";
-  if (r.runtime === "codex") return `沙箱：${r.sandbox || "workspace-write"}；权限设成“直接执行”时沙箱完全放开。`;
+  if (roleRuntimes(r).includes("codex")) return `${roleRuntimes(r).length > 1 ? "Codex " : ""}沙箱：${r.sandbox || "workspace-write"}；权限设成“直接执行”时沙箱完全放开。`;
   return "可以给其他成员发消息、问组长、问你；不能直接推送基准分支。";
 }
 
@@ -64,8 +65,10 @@ const MODE_HINT: Record<"claude" | "codex", Record<PermissionMode, string>> = {
 };
 
 /** One line on what the role's permission mode does. */
-export function permissionHint(r: Pick<RoleView, "permission_mode" | "runtime">): string {
-  return MODE_HINT[r.runtime][permissionMode(r)];
+export function permissionHint(r: Pick<RoleView, "permission_mode" | "runtime"> & Partial<Pick<RoleView, "runtimes">>): string {
+  const list = roleRuntimes(r);
+  if (list.length === 1) return MODE_HINT[list[0]!][permissionMode(r)];
+  return list.map((rt) => `${runtimeLabel(rt)}：${MODE_HINT[rt][permissionMode(r)]}`).join(" ");
 }
 
 /** Whether any writing member role asks for permission (only then approval routing matters). */
@@ -173,6 +176,8 @@ export function newRole(list: RoleView[], color: string): RoleView {
     role: nextRoleKey(list),
     title: "新岗位",
     runtime: "claude",
+    runtimes: ["claude"],
+    models: {},
     count: 1,
     node_ids: [],
     description: "",

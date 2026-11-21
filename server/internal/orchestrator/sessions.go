@@ -426,13 +426,17 @@ func (o *Orchestrator) openSession(ctx context.Context, tx *core.Tx, e core.Empl
 	if err != nil {
 		return core.AgentSession{}, err
 	}
-	node, err := o.pickNode(ctx, tx, e, env.project, resume != nil || worked)
+	node, rt, err := o.pickNode(ctx, tx, e, env.project, resume != nil || worked)
 	if err != nil {
 		return core.AgentSession{}, err
 	}
-	if first, resume, err = o.moveResume(ctx, tx, e, node.ID, first, resume); err != nil {
+	if first, resume, err = o.moveResume(ctx, tx, e, node.ID, rt, first, resume); err != nil {
 		return core.AgentSession{}, err
 	}
+	if e, err = switchRuntime(ctx, tx, e, rt); err != nil {
+		return core.AgentSession{}, err
+	}
+	env.emp = e
 	paths := PathsOf(e, env.thread)
 	sess, err := core.InsertSession(ctx, tx, core.NewSession{EmployeeID: e.ID, NodeID: node.ID, Runtime: e.Runtime,
 		Cwd: paths.Cwd, Branch: paths.Branch, PermissionMode: "default", ThreadID: env.threadID()})
@@ -731,7 +735,7 @@ func (o *Orchestrator) syncNode(ctx context.Context, tx *core.Tx, env sessionEnv
 	if worked {
 		return *env.emp.NodeID, nil
 	}
-	node, err := o.pickNode(ctx, tx, env.emp, env.project, false)
+	node, _, err := o.pickNode(ctx, tx, env.emp, env.project, false)
 	if errors.Is(err, ErrNoNode) {
 		return "", nil
 	}
@@ -803,11 +807,23 @@ func (o *Orchestrator) RefreshWorktree(ctx context.Context, tx *core.Tx, e core.
 	return err
 }
 
+// switchRuntime records the runtime the employee's new session runs on (a role with several
+// runtimes, pickNode). The /model pick goes with the old runtime: its id would not run on the
+// new one.
+func switchRuntime(ctx context.Context, tx *core.Tx, e core.Employee, rt string) (core.Employee, error) {
+	if rt == "" || rt == e.Runtime {
+		return e, nil
+	}
+	err := tx.Gorm(ctx).Table("at_employees").Where("id = ?", e.ID).Updates(map[string]any{"runtime": rt, "model": ""}).Error
+	e.Runtime, e.Model = rt, ""
+	return e, err
+}
+
 // moveResume turns a resume into a recap when the session opens on another node than the one
-// that holds the old conversation's transcript.
-func (o *Orchestrator) moveResume(ctx context.Context, tx *core.Tx, e core.Employee, nodeID string,
+// that holds the old conversation's transcript, or on another runtime.
+func (o *Orchestrator) moveResume(ctx context.Context, tx *core.Tx, e core.Employee, nodeID, runtime string,
 	first *protocol.FirstMessage, resume *protocol.ResumeRef) (*protocol.FirstMessage, *protocol.ResumeRef, error) {
-	if resume == nil || e.NodeID == nil || *e.NodeID == nodeID {
+	if resume == nil || ((e.NodeID == nil || *e.NodeID == nodeID) && runtime == e.Runtime) {
 		return first, resume, nil
 	}
 	summary, err := o.handoffSummary(ctx, tx, e)

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"gorm.io/gorm"
@@ -29,32 +30,34 @@ const (
 
 // Role is a role template (at_roles, user level). JSON tags are the RoleView of api.md.
 type Role struct {
-	ID              string          `json:"id"`
-	Tier            string          `json:"tier" enum:"coordinator,lead,member"`
-	Role            string          `json:"role"`
-	Title           string          `json:"title"`
-	Runtime         string          `json:"runtime" enum:"claude,codex"`
-	Count           int             `json:"count"`
-	NodeIDs         []string        `json:"node_ids" gorm:"column:node_ids;serializer:pgtext"`
-	Description     string          `json:"description"`
-	Instructions    string          `json:"instructions"`
-	Model           string          `json:"model" doc:"The model of the role's sessions, typed by hand (any tier; '' = the project setting, then the built-in default). Below the project setting and, for members, /model"`
-	Effort          string          `json:"effort"`
-	PermissionMode  string          `json:"permission_mode,omitempty" enum:"bypass,ask" doc:"bypass (default): members run without permission prompts on any node; ask: every non-read tool asks (lead or user, per the project's approval routing). Ignored for the coordinator, the lead and read-only roles"`
-	CanDelegate     bool            `json:"can_delegate"`
-	ReadOnly        *bool           `json:"read_only,omitempty" nullable:"true" doc:"Omitted: defaults to true for gate review/decision"`
-	AllowedTools    []string        `json:"allowed_tools" gorm:"serializer:pgtext"`
-	DisallowedTools []string        `json:"disallowed_tools" gorm:"serializer:pgtext"`
-	Sandbox         string          `json:"sandbox"`
-	MaxTurns        *int            `json:"max_turns" nullable:"true"`
-	Gate            string          `json:"gate"`
-	TaskKinds       []string        `json:"task_kinds" gorm:"serializer:pgtext"`
-	Look            Look            `json:"look" gorm:"serializer:jsonb"`
-	Skills          []string        `json:"skills" gorm:"serializer:pgtext" doc:"Skill names (built-in or uploaded) the role's sessions load"`
-	Plugins         []string        `json:"plugins" gorm:"serializer:pgtext" doc:"Plugins the role's sessions load: name (latest version) or name@N (pinned)"`
-	HiddenCommands  []string        `json:"hidden_commands,omitempty" gorm:"serializer:pgtext" doc:"Platform commands (model, status…) the role's chats do not offer"`
-	Commands        []CustomCommand `json:"commands,omitempty" gorm:"serializer:jsonb" doc:"The role's own slash commands"`
-	Sort            int             `json:"sort" doc:"Display order; PUT uses the position in the list"`
+	ID              string            `json:"id"`
+	Tier            string            `json:"tier" enum:"coordinator,lead,member"`
+	Role            string            `json:"role"`
+	Title           string            `json:"title"`
+	Runtime         string            `json:"runtime" enum:"claude,codex" doc:"The role's first runtime (runtimes[0])"`
+	Runtimes        []string          `json:"runtimes,omitempty" enum:"claude,codex" gorm:"serializer:pgtext" doc:"Every runtime the role's employees may run on, in display order; each new session takes the one with the most quota left. Empty: [runtime]"`
+	Models          map[string]string `json:"models,omitempty" nullable:"true" gorm:"serializer:jsonb" doc:"The model of each further runtime (runtimes[1:]), by runtime id; model is the first runtime's"`
+	Count           int               `json:"count"`
+	NodeIDs         []string          `json:"node_ids" gorm:"column:node_ids;serializer:pgtext"`
+	Description     string            `json:"description"`
+	Instructions    string            `json:"instructions"`
+	Model           string            `json:"model" doc:"The model of the role's sessions, typed by hand (any tier; '' = the project setting, then the built-in default). Below the project setting and, for members, /model"`
+	Effort          string            `json:"effort"`
+	PermissionMode  string            `json:"permission_mode,omitempty" enum:"bypass,ask" doc:"bypass (default): members run without permission prompts on any node; ask: every non-read tool asks (lead or user, per the project's approval routing). Ignored for the coordinator, the lead and read-only roles"`
+	CanDelegate     bool              `json:"can_delegate"`
+	ReadOnly        *bool             `json:"read_only,omitempty" nullable:"true" doc:"Omitted: defaults to true for gate review/decision"`
+	AllowedTools    []string          `json:"allowed_tools" gorm:"serializer:pgtext"`
+	DisallowedTools []string          `json:"disallowed_tools" gorm:"serializer:pgtext"`
+	Sandbox         string            `json:"sandbox"`
+	MaxTurns        *int              `json:"max_turns" nullable:"true"`
+	Gate            string            `json:"gate"`
+	TaskKinds       []string          `json:"task_kinds" gorm:"serializer:pgtext"`
+	Look            Look              `json:"look" gorm:"serializer:jsonb"`
+	Skills          []string          `json:"skills" gorm:"serializer:pgtext" doc:"Skill names (built-in or uploaded) the role's sessions load"`
+	Plugins         []string          `json:"plugins" gorm:"serializer:pgtext" doc:"Plugins the role's sessions load: name (latest version) or name@N (pinned)"`
+	HiddenCommands  []string          `json:"hidden_commands,omitempty" gorm:"serializer:pgtext" doc:"Platform commands (model, status…) the role's chats do not offer"`
+	Commands        []CustomCommand   `json:"commands,omitempty" gorm:"serializer:jsonb" doc:"The role's own slash commands"`
+	Sort            int               `json:"sort" doc:"Display order; PUT uses the position in the list"`
 	// Session management (shared-members.md §5.1): percentages are of ContextLimit, not of the model's window.
 	ContextLimit      *int   `json:"context_limit" nullable:"true" doc:"The role's context limit in tokens (e.g. 600000); the percentages below are of it. Null: the model's window"`
 	CompactBetweenPct *int   `json:"compact_between_pct" nullable:"true" doc:"Members: claiming the next task with context ≥ limit × pct compacts the session first. Null: never"`
@@ -122,7 +125,7 @@ func (s *Store) ReplaceRoles(ctx context.Context, userID string, roles []Role) e
 }
 
 func roleColumns(r *Role) map[string]any {
-	return map[string]any{"tier": r.Tier, "role": r.Role, "title": r.Title, "runtime": r.Runtime, "count": r.Count,
+	return map[string]any{"tier": r.Tier, "role": r.Role, "title": r.Title, "runtime": r.Runtime, "runtimes": TextArray(r.Runtimes), "models": modelsJSON(r.Models), "count": r.Count,
 		"node_ids": TextArray(r.NodeIDs), "description": r.Description, "instructions": r.Instructions,
 		"model": r.Model, "effort": r.Effort, "permission_mode": r.PermissionMode, "can_delegate": r.CanDelegate,
 		"read_only": r.ReadOnly != nil && *r.ReadOnly, "allowed_tools": TextArray(r.AllowedTools),
@@ -131,6 +134,33 @@ func roleColumns(r *Role) map[string]any {
 		"plugins": TextArray(r.Plugins), "hidden_commands": TextArray(r.HiddenCommands), "commands": commandsJSON(r.Commands),
 		"context_limit": r.ContextLimit, "compact_between_pct": r.CompactBetweenPct, "compact_in_task_pct": r.CompactInTaskPct,
 		"clear_after_tasks": r.ClearAfterTasks, "compact_focus": r.CompactFocus}
+}
+
+func modelsJSON(m map[string]string) any {
+	if m == nil {
+		m = map[string]string{}
+	}
+	return Param(m)
+}
+
+// RuntimeList is the role's runtimes: Runtimes, or just Runtime for a role saved before roles had several.
+func (r Role) RuntimeList() []string {
+	if len(r.Runtimes) > 0 {
+		return r.Runtimes
+	}
+	if r.Runtime == "" {
+		return []string{runtimes.Default().ID}
+	}
+	return []string{r.Runtime}
+}
+
+// ModelFor is the role's model for one of its runtimes: Models[rt] for a further runtime, else
+// Model (the first runtime's, and the only one of a snapshot taken before roles had several).
+func (r Role) ModelFor(rt string) string {
+	if list := r.RuntimeList(); rt != list[0] && slices.Contains(list, rt) {
+		return r.Models[rt]
+	}
+	return r.Model
 }
 
 func commandsJSON(list []CustomCommand) any {

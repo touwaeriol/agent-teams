@@ -35,7 +35,7 @@ func TestChooseNode(t *testing.T) {
 		{"nothing usable, no current node: the first candidate", "", []nodeState{{id: "a"}, {id: "b"}}, false, "a"},
 	}
 	for _, c := range cases {
-		if got := chooseNode(c.current, c.cands, c.stay); got != c.want {
+		if got := chooseNode(nodeState{id: c.current}, c.cands, c.stay).id; got != c.want {
 			t.Errorf("%s: got %s, want %s", c.name, got, c.want)
 		}
 	}
@@ -71,5 +71,40 @@ func TestQuotaUsed(t *testing.T) {
 	}
 	if loggedIn(&platform.RuntimeUsage{Auth: "none"}) || !loggedIn(nil) || !loggedIn(claude) {
 		t.Error("loggedIn")
+	}
+}
+
+// TestChooseRuntime: a role with several runtimes balances them by quota left, over every
+// runtime's candidate nodes; stay keeps the current runtime too.
+func TestChooseRuntime(t *testing.T) {
+	pair := func(rt, id string, used float64) nodeState {
+		s := roomy(id, used)
+		s.rt = rt
+		return s
+	}
+	cases := []struct {
+		name    string
+		current nodeState
+		cands   []nodeState
+		stay    bool
+		want    nodeState
+	}{
+		{"Claude busier than Codex: Codex", nodeState{id: "a", rt: "claude"},
+			[]nodeState{pair("claude", "a", 70), pair("codex", "b", 20)}, false, nodeState{id: "b", rt: "codex"}},
+		{"same node, both runtimes: the one with quota left", nodeState{},
+			[]nodeState{pair("claude", "a", 96), pair("codex", "a", 90)}, false, nodeState{id: "a", rt: "codex"}},
+		{"tie keeps the current runtime on its node", nodeState{id: "a", rt: "codex"},
+			[]nodeState{pair("claude", "a", 30), pair("codex", "a", 30)}, false, nodeState{id: "a", rt: "codex"}},
+		{"stay keeps the runtime even when the other has more left", nodeState{id: "a", rt: "claude"},
+			[]nodeState{pair("claude", "a", 60), pair("codex", "a", 0)}, true, nodeState{id: "a", rt: "claude"}},
+		{"stay on an exhausted runtime moves", nodeState{id: "a", rt: "claude"},
+			[]nodeState{pair("claude", "a", 99), pair("codex", "a", 40)}, true, nodeState{id: "a", rt: "codex"}},
+		{"a runtime not logged in is skipped", nodeState{},
+			[]nodeState{{id: "a", rt: "codex", free: 1 << 20}, pair("claude", "a", 80)}, false, nodeState{id: "a", rt: "claude"}},
+	}
+	for _, c := range cases {
+		if got := chooseNode(c.current, c.cands, c.stay); !got.same(c.want) {
+			t.Errorf("%s: got %s/%s, want %s/%s", c.name, got.rt, got.id, c.want.rt, c.want.id)
+		}
 	}
 }

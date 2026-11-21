@@ -5,6 +5,7 @@ import { Check, Pencil, Plus, X } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import type { RoleView } from "@/api/views";
 import { commandsHint, modeLabel, promptOnly, toggleHidden, togglable, unfit, type CustomCommand } from "@/lib/commands";
+import { allSlash } from "@/lib/runtimes";
 import CommandDialog from "./CommandDialog.vue";
 import ToggleChip from "./ToggleChip.vue";
 
@@ -60,6 +61,6 @@ const remove = (i: number) => emit("change", { commands: list.value.filter((_, j
     </div>
     <p class="text-xs leading-[19px] text-muted-foreground">{{ commandsHint(role) }}</p>
     <p v-if="bad.length" class="text-xs text-destructive">{{ bad.join("、") }} 是透传命令，这个岗位只能用提示词模板，请编辑或删除。</p>
-    <CommandDialog v-model:open="open" :command="current" :taken="taken" :prompt-only="onlyPrompt" :codex="role.runtime === 'codex'" @save="save" />
+    <CommandDialog v-model:open="open" :command="current" :taken="taken" :prompt-only="onlyPrompt" :codex="!allSlash(role)" @save="save" />
   </div>
 </template>

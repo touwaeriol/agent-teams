@@ -1,6 +1,7 @@
 // Plugin library helpers (pure): role entries are "name" (follows the latest version) or
 // "name@3" (pinned), mirroring server/internal/plugins.ParseRef.
 import type { PluginContents, PluginView, RoleView } from "@/api/views";
+import { roleRuntimes } from "@/lib/runtimes";
 
 export interface PluginRef {
   name: string;
@@ -63,8 +64,8 @@ export function missingRefs(refs: string[] | null | undefined, library: PluginVi
 }
 
 /** What a Codex role gets from its plugins: only skills, commands and MCP servers. */
-export function runtimeNote(role: Pick<RoleView, "runtime">): string {
-  return role.runtime === "codex" ? "Codex 员工只用插件里的技能、命令（作为说明文字）和 MCP 服务器；子代理和 hooks 只在 Claude Code 下生效。" : "";
+export function runtimeNote(role: Pick<RoleView, "runtime"> & Partial<Pick<RoleView, "runtimes">>): string {
+  return roleRuntimes(role).includes("codex") ? "Codex 员工只用插件里的技能、命令（作为说明文字）和 MCP 服务器；子代理和 hooks 只在 Claude Code 下生效。" : "";
 }
 
 /** My plugins first, then the built-ins, each by name. */

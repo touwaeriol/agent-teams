@@ -13,32 +13,34 @@ import (
 
 // yamlRole is one role in the threads.md YAML format (type: claude_code | codex).
 type yamlRole struct {
-	Role            string        `yaml:"role,omitempty"`
-	Title           string        `yaml:"title,omitempty"`
-	Type            string        `yaml:"type,omitempty"`
-	Count           int           `yaml:"count,omitempty"`
-	Node            string        `yaml:"node,omitempty"`
-	Nodes           []string      `yaml:"nodes,omitempty"`
-	Description     string        `yaml:"description,omitempty"`
-	Instructions    string        `yaml:"instructions,omitempty"`
-	Model           string        `yaml:"model,omitempty"`
-	Effort          string        `yaml:"effort,omitempty"`
-	PermissionMode  string        `yaml:"permission_mode,omitempty"`
-	SkipPermissions bool          `yaml:"skip_permissions,omitempty"` // legacy: true reads as permission_mode: bypass
-	CanDelegate     bool          `yaml:"can_delegate,omitempty"`
-	ReadOnly        *bool         `yaml:"read_only,omitempty"`
-	AllowedTools    []string      `yaml:"allowed_tools,omitempty"`
-	DisallowedTools []string      `yaml:"disallowed_tools,omitempty"`
-	Sandbox         string        `yaml:"sandbox,omitempty"`
-	MaxTurns        *int          `yaml:"max_turns,omitempty"`
-	Gate            string        `yaml:"gate,omitempty"`
-	TaskKinds       []string      `yaml:"task_kinds,omitempty"`
-	Skills          []string      `yaml:"skills,omitempty"`
-	Plugins         []string      `yaml:"plugins,omitempty"`
-	HiddenCommands  []string      `yaml:"hidden_commands,omitempty"`
-	Commands        []yamlCommand `yaml:"commands,omitempty"`
-	Look            *yamlLook     `yaml:"look,omitempty"`
-	Context         *yamlContext  `yaml:"context,omitempty"`
+	Role            string            `yaml:"role,omitempty"`
+	Title           string            `yaml:"title,omitempty"`
+	Type            string            `yaml:"type,omitempty"`
+	Types           []string          `yaml:"types,omitempty"`  // several runtimes (claude_code, codex…); replaces type
+	Models          map[string]string `yaml:"models,omitempty"` // the model of each further type, by type
+	Count           int               `yaml:"count,omitempty"`
+	Node            string            `yaml:"node,omitempty"`
+	Nodes           []string          `yaml:"nodes,omitempty"`
+	Description     string            `yaml:"description,omitempty"`
+	Instructions    string            `yaml:"instructions,omitempty"`
+	Model           string            `yaml:"model,omitempty"`
+	Effort          string            `yaml:"effort,omitempty"`
+	PermissionMode  string            `yaml:"permission_mode,omitempty"`
+	SkipPermissions bool              `yaml:"skip_permissions,omitempty"` // legacy: true reads as permission_mode: bypass
+	CanDelegate     bool              `yaml:"can_delegate,omitempty"`
+	ReadOnly        *bool             `yaml:"read_only,omitempty"`
+	AllowedTools    []string          `yaml:"allowed_tools,omitempty"`
+	DisallowedTools []string          `yaml:"disallowed_tools,omitempty"`
+	Sandbox         string            `yaml:"sandbox,omitempty"`
+	MaxTurns        *int              `yaml:"max_turns,omitempty"`
+	Gate            string            `yaml:"gate,omitempty"`
+	TaskKinds       []string          `yaml:"task_kinds,omitempty"`
+	Skills          []string          `yaml:"skills,omitempty"`
+	Plugins         []string          `yaml:"plugins,omitempty"`
+	HiddenCommands  []string          `yaml:"hidden_commands,omitempty"`
+	Commands        []yamlCommand     `yaml:"commands,omitempty"`
+	Look            *yamlLook         `yaml:"look,omitempty"`
+	Context         *yamlContext      `yaml:"context,omitempty"`
 }
 
 type yamlCommand struct {
@@ -132,6 +134,7 @@ func yamlMode(y yamlRole) string {
 
 func fromYAMLRole(y yamlRole, tier, key string, nodeIDs map[string]string, report *[]string) store.Role {
 	r := store.Role{Tier: tier, Role: first(y.Role, key), Title: y.Title, Runtime: runtimeOf(y.Type), Count: y.Count,
+		Runtimes: runtimesOf(y.Types), Models: modelsFromYAML(y.Models),
 		Description: y.Description, Instructions: y.Instructions, Model: y.Model, Effort: y.Effort,
 		PermissionMode: yamlMode(y), CanDelegate: y.CanDelegate, ReadOnly: y.ReadOnly,
 		AllowedTools: y.AllowedTools, DisallowedTools: y.DisallowedTools, Sandbox: y.Sandbox, MaxTurns: y.MaxTurns,
@@ -146,6 +149,22 @@ func fromYAMLRole(y yamlRole, tier, key string, nodeIDs map[string]string, repor
 }
 
 func runtimeOf(t string) string { return runtimes.FromYAMLType(t) }
+
+func runtimesOf(types []string) []string {
+	var out []string
+	for _, t := range types {
+		out = append(out, runtimeOf(t))
+	}
+	return out
+}
+
+func modelsFromYAML(m map[string]string) map[string]string {
+	out := map[string]string{}
+	for t, model := range m {
+		out[runtimeOf(t)] = model
+	}
+	return out
+}
 
 func resolveNodes(names []string, nodeIDs map[string]string, role string, report *[]string) []string {
 	ids := []string{}
@@ -207,6 +226,18 @@ func toYAMLRole(r store.Role, nodeNames map[string]string) yamlRole {
 		HiddenCommands: r.HiddenCommands, Commands: commandsToYAML(r.Commands),
 		Look:    &yamlLook{Color: r.Look.Color, Outfit: r.Look.Outfit, Accessory: r.Look.Accessory, Hair: r.Look.Hair},
 		Context: contextToYAML(r)}
+	if list := r.RuntimeList(); len(list) > 1 {
+		y.Type = ""
+		for _, rt := range list {
+			y.Types = append(y.Types, runtimes.Of(rt).YAMLType)
+		}
+		for rt, m := range r.Models {
+			if y.Models == nil {
+				y.Models = map[string]string{}
+			}
+			y.Models[runtimes.Of(rt).YAMLType] = m
+		}
+	}
 	if r.ReadOnly != nil && *r.ReadOnly != (r.Gate == "review" || r.Gate == "decision") {
 		y.ReadOnly = r.ReadOnly
 	}

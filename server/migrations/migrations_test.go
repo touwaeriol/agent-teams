@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 340 {
+	if migrations.Latest() != 350 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -1452,5 +1452,44 @@ INSERT INTO at_project_repos (project_id, repo, git_connection_id) VALUES ('p1',
 	}
 	if repos != "acme/api" {
 		t.Fatalf("project repos after down: %s", repos)
+	}
+}
+
+// TestRoleRuntimesMigration: 00350 gives every role and role snapshot its single runtime as the
+// runtimes list and empty further models; Down drops them again.
+func TestRoleRuntimesMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 340); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
+INSERT INTO at_roles (id, user_id, tier, role, runtime) VALUES ('r1', 'u1', 'member', 'dev', 'claude'), ('r2', 'u1', 'member', 'qa', 'codex');
+INSERT INTO at_employees (id, project_id, name, tier, role, role_id, runtime, spec) VALUES
+  ('e1', 'p1', 'qa-1', 'member', 'qa', 'r2', 'codex', '{"role": "qa", "runtime": "codex"}');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 350); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.QueryRow(`SELECT string_agg(role || ':' || array_to_string(runtimes, ',') || ':' || models::text, ' ' ORDER BY id) FROM at_roles`).Scan(&got); err != nil ||
+		got != "dev:claude:{} qa:codex:{}" {
+		t.Fatalf("roles after 00350: %q %v", got, err)
+	}
+	if err := db.QueryRow(`SELECT (spec->'runtimes')::text || ' ' || (spec->'models')::text FROM at_employees WHERE id = 'e1'`).Scan(&got); err != nil || got != `["codex"] {}` {
+		t.Fatalf("spec after 00350: %q %v", got, err)
+	}
+	if _, err := p.DownTo(ctx, 340); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT spec::text FROM at_employees WHERE id = 'e1'`).Scan(&got); err != nil || got != `{"role": "qa", "runtime": "codex"}` {
+		t.Fatalf("spec after down: %q %v", got, err)
 	}
 }

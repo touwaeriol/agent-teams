@@ -8,6 +8,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/platform"
+	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -19,37 +20,55 @@ const QuotaFull = 95.0
 // daemon, an API key): between a fresh account and a busy one.
 const unknownUsage = 50.0
 
-// pickNode chooses the node for an employee's new session. An employee is not tied to a node:
-// each new session goes where its runtime has the most quota left (pickRank), and the employee
-// stays on its current node only while it must (stay: it resumes a conversation or has a
-// worktree in its thread) and that node is online, still a candidate and not out of quota.
-// With no usable candidate online it is the current node (the session waits for it), else the
-// first candidate.
-func (o *Orchestrator) pickNode(ctx context.Context, tx *core.Tx, e core.Employee, p store.Project, stay bool) (store.Node, error) {
+// pickNode chooses the node and the runtime for an employee's new session. An employee is not
+// tied to a node, and a role with several runtimes not to one of them: each new session goes to
+// the (runtime, node) pair with the most quota left (pickRank) over every runtime of the role and
+// its candidate nodes, and the employee stays on its current node and runtime only while it must
+// (stay: it resumes a conversation or has a worktree in its thread) and that node is online,
+// still a candidate and not out of quota. With no usable pair online it is the current node and
+// runtime (the session waits for it), else the first candidate.
+func (o *Orchestrator) pickNode(ctx context.Context, tx *core.Tx, e core.Employee, p store.Project, stay bool) (store.Node, string, error) {
 	nodes, err := o.store.On(tx).ListNodes(ctx, p.UserID)
 	if err != nil {
-		return store.Node{}, err
+		return store.Node{}, "", err
 	}
-	cands := core.NodeCandidates(e, nodes)
-	current := ""
+	current := nodeState{rt: e.Runtime}
 	if e.NodeID != nil && slices.ContainsFunc(nodes, func(n store.Node) bool { return n.ID == *e.NodeID }) {
-		current = *e.NodeID
+		current.id = *e.NodeID
 	}
-	if current == "" && len(cands) == 0 {
-		return store.Node{}, ErrNoNode
+	var states []nodeState
+	for _, rt := range employeeRuntimes(e) {
+		as := e
+		as.Runtime = rt
+		states = append(states, o.nodeStates(ctx, tx, core.NodeCandidates(as, nodes), rt, Model(as, p))...)
 	}
-	id := chooseNode(current, o.nodeStates(ctx, tx, cands, e.Runtime, Model(e, p)), stay)
-	i := slices.IndexFunc(nodes, func(n store.Node) bool { return n.ID == id })
-	return nodes[i], nil
+	if current.id == "" && len(states) == 0 {
+		return store.Node{}, "", ErrNoNode
+	}
+	got := chooseNode(current, states, stay)
+	i := slices.IndexFunc(nodes, func(n store.Node) bool { return n.ID == got.id })
+	return nodes[i], got.rt, nil
 }
 
-// nodeState is what chooseNode knows about a candidate node.
+// employeeRuntimes are the runtimes a session of the employee may run on: its role's, else the
+// one it has. The coordinator and leads have one (CanLead runtimes only).
+func employeeRuntimes(e core.Employee) []string {
+	if len(e.Spec.Runtimes) > 0 {
+		return e.Spec.Runtimes
+	}
+	return []string{e.Runtime}
+}
+
+// nodeState is what chooseNode knows about a candidate (runtime, node) pair.
 type nodeState struct {
 	id     string
-	usable bool    // online and the employee's runtime is logged in there
+	rt     string  // the runtime the session would run on ("" in tests of a single runtime)
+	usable bool    // online and the runtime is logged in there
 	free   int     // freeSlots
-	used   float64 // quotaUsed of the employee's runtime
+	used   float64 // quotaUsed of the runtime
 }
+
+func (s nodeState) same(o nodeState) bool { return s.id == o.id && s.rt == o.rt }
 
 func (s nodeState) full() bool { return s.free <= 0 || s.used >= QuotaFull }
 
@@ -57,7 +76,7 @@ func (o *Orchestrator) nodeStates(ctx context.Context, tx *core.Tx, cands []stor
 	now := time.Now()
 	out := make([]nodeState, 0, len(cands))
 	for _, n := range cands {
-		st := nodeState{id: n.ID}
+		st := nodeState{id: n.ID, rt: runtime}
 		active, err := core.ActiveSessionCount(ctx, tx, n.ID)
 		if o.gw.Online(n.ID) && err == nil {
 			ru := runtimeUsage(o.gw.Usage(n.ID), runtime)
@@ -70,12 +89,12 @@ func (o *Orchestrator) nodeStates(ctx context.Context, tx *core.Tx, cands []stor
 	return out
 }
 
-// chooseNode is pickNode's rule over the candidates' states; current is the employee's node
-// ("" when it has none or it was deleted), which may not be a candidate any more.
-func chooseNode(current string, cands []nodeState, stay bool) string {
-	cur := slices.IndexFunc(cands, func(c nodeState) bool { return c.id == current })
+// chooseNode is pickNode's rule over the candidate pairs' states; current is the employee's node
+// (id "" when it has none or it was deleted) and runtime, which may not be a candidate any more.
+func chooseNode(current nodeState, cands []nodeState, stay bool) nodeState {
+	cur := slices.IndexFunc(cands, func(c nodeState) bool { return c.same(current) })
 	if stay && cur >= 0 && cands[cur].usable && !cands[cur].full() {
-		return current
+		return cands[cur]
 	}
 	best := -1
 	for i, c := range cands {
@@ -85,17 +104,18 @@ func chooseNode(current string, cands []nodeState, stay bool) string {
 	}
 	switch {
 	case best >= 0:
-		return cands[best].id
-	case current != "":
+		return cands[best]
+	case current.id != "":
 		return current
 	default:
-		return cands[0].id
+		return cands[0]
 	}
 }
 
-// pickRank orders two usable nodes, negative when a goes first: one with quota and a free slot
-// before a full one, then the least used quota (5 h, weekly, the model's weekly window), then the
-// employee's current node (it keeps its clones), then the most free slots.
+// pickRank orders two usable pairs, negative when a goes first: one with quota and a free slot
+// before a full one, then the least used quota (5 h, weekly, the model's weekly window; Codex:
+// every window), then the employee's current node and runtime (it keeps its clones), then the
+// most free slots.
 func pickRank(a nodeState, aCur bool, b nodeState, bCur bool) int {
 	switch {
 	case a.full() != b.full():
@@ -126,13 +146,16 @@ func freeSlots(capacity, active int) int {
 }
 
 func runtimeUsage(u *platform.NodeUsage, runtime string) *platform.RuntimeUsage {
-	switch {
-	case u == nil:
+	if u == nil {
 		return nil
-	case runtime == "codex":
-		return u.Codex
 	}
-	return u.Claude
+	return usageOf[runtimes.Of(runtime).ID](u)
+}
+
+// usageOf is where node.usage reports each runtime (TestRuntimeOptionsCoverRegistry).
+var usageOf = map[string]func(*platform.NodeUsage) *platform.RuntimeUsage{
+	runtimes.Claude: func(u *platform.NodeUsage) *platform.RuntimeUsage { return u.Claude },
+	runtimes.Codex:  func(u *platform.NodeUsage) *platform.RuntimeUsage { return u.Codex },
 }
 
 // loggedIn: a node whose daemon reported the runtime as not logged in cannot run it; without a

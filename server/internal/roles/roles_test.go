@@ -273,3 +273,63 @@ func TestModelValidation(t *testing.T) {
 		}
 	}
 }
+
+// TestSeveralRuntimes: runtimes is the list (runtime its first entry), models keeps the further
+// runtimes' models; a role may name Codex next to Claude even where no node isolates Codex (it
+// then only runs Claude: a warning, not a problem); passthrough commands need every runtime to
+// have slash commands; leads stay on runtimes that can lead.
+func TestSeveralRuntimes(t *testing.T) {
+	roles := Defaults(looks)
+	roles[2].Runtimes = []string{Claude, Codex, Claude}
+	roles[2].Models = map[string]string{Claude: "ignored", Codex: " gpt-x ", "gemini": "nope"}
+	roles[2].NodeIDs = []string{"n1"}
+	roles[1].Runtimes = []string{Claude, Codex}
+	Normalize(roles, looks)
+	dev := roles[2]
+	if strings.Join(dev.Runtimes, ",") != "claude,codex" || dev.Runtime != Claude || len(dev.Models) != 1 || dev.Models[Codex] != "gpt-x" {
+		t.Fatalf("normalized %v %s %v", dev.Runtimes, dev.Runtime, dev.Models)
+	}
+	if dev.ModelFor(Codex) != "gpt-x" || dev.ModelFor(Claude) != dev.Model {
+		t.Fatalf("ModelFor %q %q", dev.ModelFor(Codex), dev.ModelFor(Claude))
+	}
+	got := Validate(roles, Context{Nodes: nodes(), Looks: looks})
+	if problemPaths(got) != "roles[1].runtime" {
+		t.Fatalf("problems %v", got)
+	}
+	if w := Warnings([]store.Role{dev}, nodes()); len(w) != 1 || !strings.Contains(w[0].Message, "只会用其他 agent") {
+		t.Fatalf("warnings %v", w)
+	}
+	dev.Commands = []store.CustomCommand{{Name: "ship", Mode: store.CommandPassthrough}}
+	if p := commandProblems("r", &dev); len(p) != 1 || p[0].Path != "r.commands[0].mode" {
+		t.Fatalf("passthrough on a role with Codex: %v", p)
+	}
+}
+
+// TestRuntimeOnlyClients: a client that only sets runtime (or changes it next to the old
+// single-entry list) gets that runtime.
+func TestRuntimeOnlyClients(t *testing.T) {
+	roles := []store.Role{{Tier: Member, Role: "a", Runtime: Codex}, {Tier: Member, Role: "b", Runtime: Codex, Runtimes: []string{Claude}},
+		{Tier: Member, Role: "c", Runtime: Claude, Runtimes: []string{Codex, Claude}}}
+	Normalize(roles, looks)
+	if strings.Join(roles[0].Runtimes, ",") != "codex" || strings.Join(roles[1].Runtimes, ",") != "codex" ||
+		strings.Join(roles[2].Runtimes, ",") != "codex,claude" || roles[2].Runtime != Codex {
+		t.Fatalf("runtimes %v %v %v", roles[0].Runtimes, roles[1].Runtimes, roles[2].Runtimes)
+	}
+}
+
+func TestYAMLSeveralRuntimes(t *testing.T) {
+	text := "members:\n  - role: dev\n    types: [claude_code, codex]\n    model: claude-fable-5-2\n    models: {codex: gpt-x}\n"
+	p, err := FromYAML(text, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	Normalize(p.Roles, looks)
+	r := p.Roles[0]
+	if strings.Join(r.Runtimes, ",") != "claude,codex" || r.Model != "claude-fable-5-2" || r.Models[Codex] != "gpt-x" {
+		t.Fatalf("from yaml %+v", r)
+	}
+	out, err := ToYAML(p.Roles, nil)
+	if err != nil || !strings.Contains(out, "types:") || !strings.Contains(out, "- codex") || !strings.Contains(out, "codex: gpt-x") || strings.Contains(out, "type: claude_code") {
+		t.Fatalf("to yaml %v:\n%s", err, out)
+	}
+}

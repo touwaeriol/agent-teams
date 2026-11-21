@@ -22,7 +22,7 @@ type Server struct {
 	User     string
 	Password string        // "" = password login off
 	UserKey  ssh.PublicKey // nil = public key login off
-	Logins   atomic.Int32  // successful logins
+	Logins   atomic.Int32  // accepted logins (counted when the credential is accepted, before the client's handshake returns)
 
 	mu      sync.Mutex
 	hostKey ssh.Signer
@@ -88,6 +88,7 @@ func (s *Server) config() *ssh.ServerConfig {
 	if s.Password != "" {
 		cfg.PasswordCallback = func(c ssh.ConnMetadata, pw []byte) (*ssh.Permissions, error) {
 			if c.User() == s.User && string(pw) == s.Password {
+				s.Logins.Add(1)
 				return nil, nil
 			}
 			return nil, ssh.ErrNoAuth
@@ -96,6 +97,7 @@ func (s *Server) config() *ssh.ServerConfig {
 	if s.UserKey != nil {
 		cfg.PublicKeyCallback = func(c ssh.ConnMetadata, k ssh.PublicKey) (*ssh.Permissions, error) {
 			if c.User() == s.User && bytes.Equal(k.Marshal(), s.UserKey.Marshal()) {
+				s.Logins.Add(1)
 				return nil, nil
 			}
 			return nil, ssh.ErrNoAuth
@@ -124,7 +126,6 @@ func (s *Server) handle(conn net.Conn) {
 		return
 	}
 	defer sc.Close()
-	s.Logins.Add(1)
 	go ssh.DiscardRequests(reqs)
 	for nc := range chans {
 		if nc.ChannelType() != "session" {

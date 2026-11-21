@@ -13,11 +13,14 @@ func TestRuntimeOptionsCoverRegistry(t *testing.T) {
 		if runtimeOptions[id] == nil {
 			t.Errorf("runtimeOptions has no entry for %s", id)
 		}
+		if usageOf[id] == nil {
+			t.Errorf("usageOf has no entry for %s", id)
+		}
 		if threadModels[id] == nil {
 			t.Errorf("threadModels has no entry for %s", id)
 		}
 	}
-	if len(runtimeOptions) != len(runtimes.IDs()) || len(threadModels) != len(runtimes.IDs()) {
+	if len(runtimeOptions) != len(runtimes.IDs()) || len(threadModels) != len(runtimes.IDs()) || len(usageOf) != len(runtimes.IDs()) {
 		t.Error("an entry names a runtime the registry does not have")
 	}
 }
