@@ -29,12 +29,19 @@ export function policyTool(kind: string | undefined): string {
 }
 
 /**
- * A platform MCP tool call: agy shows MCP tools as "<server>/<tool>" or "mcp_<server>_<tool>"
- * (guessed from its permission rule syntax mcp(server/tool); to verify once logged in).
+ * The platform tool a call names, when its whole title is "platform/<tool>", "mcp_platform_<tool>"
+ * or "mcp(platform/<tool>)" (guessed from agy's permission rule syntax; to verify once logged in)
+ * and, given the session's platform tool names, <tool> is one of them. A title that merely
+ * mentions "platform" ("Edit platform.go") is not one: these calls are allowed without asking.
  */
-export function isPlatformTool(t: Pick<AcpToolCall, "title" | "rawInput">): boolean {
-  const title = String(t.title ?? "");
-  return /(^|[\s(`])(mcp[_:/])?platform[/_:.][a-z][a-z0-9_]*/i.test(title);
+export function platformToolOf(t: Pick<AcpToolCall, "title">, names?: readonly string[]): string | null {
+  const m = /^\s*(?:mcp[_:(/]\s*)?platform[/_:]([a-z][a-z0-9_]*)\s*\)?\s*$/i.exec(String(t.title ?? ""));
+  if (!m) return null;
+  return !names || names.includes(m[1]!) ? m[1]! : null;
+}
+
+export function isPlatformTool(t: Pick<AcpToolCall, "title">, names?: readonly string[]): boolean {
+  return platformToolOf(t, names) !== null;
 }
 
 /** The shell command of an execute tool call (rawInput.command as a string or argv). */
@@ -55,10 +62,10 @@ export function pathOf(t: AcpToolCall): string | null {
   return null;
 }
 
-export function toolStarted(t: AcpToolCall): EventFields {
-  const platform = isPlatformTool(t);
+export function toolStarted(t: AcpToolCall, names?: readonly string[]): EventFields {
+  const platform = isPlatformTool(t, names);
   const summary = t.kind === "execute" ? (commandOf(t) ?? t.title ?? "") : (t.title ?? pathOf(t) ?? "");
-  return { kind: "tool_started", tool: toolName(t), category: platform ? "platform" : (CATEGORY[t.kind ?? "other"] ?? "other"), tool_use_id: t.toolCallId, summary: summarize(summary) };
+  return { kind: "tool_started", tool: toolName(t, names), category: platform ? "platform" : (CATEGORY[t.kind ?? "other"] ?? "other"), tool_use_id: t.toolCallId, summary: summarize(summary) };
 }
 
 export function toolEnded(t: AcpToolCall, startedAt: number | undefined): EventFields {
@@ -66,10 +73,9 @@ export function toolEnded(t: AcpToolCall, startedAt: number | undefined): EventF
 }
 
 /** A readable tool name: the platform tool as mcp__platform__<name>, else the ACP kind. */
-export function toolName(t: Pick<AcpToolCall, "title" | "kind" | "rawInput">): string {
-  const m = /platform[/_:.]([a-z][a-z0-9_]*)/i.exec(String(t.title ?? ""));
-  if (m && isPlatformTool(t)) return `mcp__platform__${m[1]}`;
-  return t.kind ?? "other";
+export function toolName(t: Pick<AcpToolCall, "title" | "kind">, names?: readonly string[]): string {
+  const p = platformToolOf(t, names);
+  return p ? `mcp__platform__${p}` : (t.kind ?? "other");
 }
 
 /** ACP plan entries → the "todos" event (the employee's checklist). */

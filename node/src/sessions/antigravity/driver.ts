@@ -79,6 +79,10 @@ export class AntigravityDriver implements Driver {
     return this.opts.read_only || this.ctx.policy.readOnly;
   }
 
+  private get platformNames(): string[] {
+    return this.ctx.spec.platform_tools.map((t) => t.name);
+  }
+
   private get compacting(): boolean {
     return this.compactDone !== null;
   }
@@ -355,7 +359,7 @@ export class AntigravityDriver implements Driver {
     this.thinking = false;
     const call: Call = { ...stripNull(t), toolCallId: t.toolCallId, startedAt: Date.now() };
     this.tools.set(t.toolCallId, call);
-    this.emit(toolStarted(call));
+    this.emit(toolStarted(call, this.platformNames));
     this.guard(call);
     if (call.status === "completed" || call.status === "failed") this.finishTool(call);
   }
@@ -379,7 +383,7 @@ export class AntigravityDriver implements Driver {
    * runs anyway (agy did not ask) cancels the turn with an error instead of going on.
    */
   private guard(call: AcpToolCall): void {
-    if (!this.readOnly || this.violated || isPlatformTool(call)) return;
+    if (!this.readOnly || this.violated || isPlatformTool(call, this.platformNames)) return;
     const kind = call.kind ?? "other";
     const running = call.status === "in_progress" || call.status === "completed";
     // Only the kinds that surely write or run something: "other" is also how MCP tools (the
@@ -400,7 +404,7 @@ export class AntigravityDriver implements Driver {
     const tc = (p.toolCall ?? {}) as AcpToolCall;
     const known = tc.toolCallId ? this.tools.get(tc.toolCallId) : undefined;
     const call: AcpToolCall = { ...(known ?? {}), ...stripNull(tc), toolCallId: tc.toolCallId ?? known?.toolCallId ?? newId("tc_") };
-    const d = decidePermission(this.ctx.policy, this.approval, call, this.ctx.absCwd);
+    const d = decidePermission(this.ctx.policy, this.approval, call, this.ctx.absCwd, this.platformNames);
     if (d.action === "deny") {
       this.ctx.log.info({ session: this.ctx.spec.session_id, kind: call.kind, reason: d.reason }, "agy permission refused");
       return outcome(options, REJECT);

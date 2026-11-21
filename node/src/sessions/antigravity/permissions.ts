@@ -17,8 +17,8 @@ export interface PermissionOption {
  * ToolPolicy.readOnly) refuse every kind but read/search/think, and run a command only when
  * bash_policy allows it; nothing of a read-only session ever reaches the user as a card.
  */
-export function decidePermission(policy: ToolPolicy, approval: "ask" | "auto", t: AcpToolCall, cwd: string): PermissionAction {
-  if (isPlatformTool(t)) return { action: "allow" };
+export function decidePermission(policy: ToolPolicy, approval: "ask" | "auto", t: AcpToolCall, cwd: string, platformTools: readonly string[]): PermissionAction {
+  if (isPlatformTool(t, platformTools)) return { action: "allow" };
   const kind = t.kind ?? "other";
   const tool = policyTool(kind);
   let input: Record<string, unknown> = {};
