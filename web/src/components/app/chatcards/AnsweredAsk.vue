@@ -31,6 +31,6 @@ const optionIndex = (item: AskItem, label: string) => item.options.findIndex((o)
       <ChosenRow v-if="rowOf(i, item).other" :badge="letter(item.options.length)" :label="rowOf(i, item).other!" />
       <p v-if="question.status === 'cancelled'" class="text-xs text-muted-foreground">问题已取消</p>
     </div>
-    <p v-if="inChat" class="text-xs text-muted-foreground">已关闭 · 你在对话里直接回复了</p>
+    <p v-if="inChat" class="text-xs text-muted-foreground">已关闭 · 已在对话里回答<template v-if="question.answer">：{{ question.answer }}</template></p>
   </section>
 </template>

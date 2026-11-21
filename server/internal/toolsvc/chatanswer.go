@@ -5,82 +5,48 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 )
 
-// A question card the user answers by typing in the chat instead (like Claude Code, where a
-// typed message dismisses the open AskUserQuestion): the card closes as answered with
-// detail.answered_in_chat, a waiting call (blocking ask_user, Claude's AskUserQuestion) returns
-// at once telling the asker the reply is the next message, and the message itself is delivered
-// as usual with a note naming the cards it closed.
+// The user types in the chat while a question card of the coordinator or lead is still open.
+// The agent decides whether that message answers the card: the message is delivered with a note
+// naming the open cards, and the agent closes the ones it answers with close_question. A
+// blocking call (Claude's AskUserQuestion) cannot read the message while it waits, so it returns
+// at once saying a message came; the card stays open, and an answer on the card later arrives as
+// "[Answer to qN] …".
 
-// chatAnswerNote is the waiting call's answer: the user's words arrive as the next message.
-const chatAnswerNote = "用户没有在卡片上作答，而是直接发来了一条消息（紧接着送到），请按那条消息理解。"
+// chatReleaseNote is what a waiting call returns when the user writes in the chat instead.
+const chatReleaseNote = "用户还没在卡片上作答，但在对话里发来了一条消息（紧接着送到）。卡片 %s 仍然开着：" +
+	"如果那条消息已经回答了问题，用 close_question 关掉它；否则继续等，用户在卡片上的回答会以 “[Answer to %s] …” 的消息送达。"
 
-// maxChatAnswer is how much of the typed message the closed card keeps as its answer.
-const maxChatAnswer = 2000
-
-// AnswerByChat closes the cards emp left open for the user in conversation c and returns the
-// note the delivered message gets ("" when there were none).
-func (s *Service) AnswerByChat(ctx context.Context, tx *core.Tx, c core.Conversation, emp core.Employee, userID, content string) (string, error) {
+// NoteChatReply runs before a user message reaches emp: it releases emp's waiting question
+// calls in conversation c and returns the note the delivered message gets ("" = no open cards).
+func (s *Service) NoteChatReply(ctx context.Context, tx *core.Tx, c core.Conversation, emp core.Employee, _, _ string) (string, error) {
 	open, err := core.OpenQuestionsFor(ctx, tx, c.ID, emp.Name)
-	if err != nil {
+	if err != nil || len(open) == 0 {
 		return "", err
 	}
-	var ids []string
+	ids := make([]string, 0, len(open))
 	for _, q := range open {
-		closed, err := s.closeByChat(ctx, tx, q, userID, content)
-		if err != nil {
+		if err := s.releaseCall(ctx, tx, q, fmt.Sprintf(chatReleaseNote, q.ID, q.ID)); err != nil {
 			return "", err
 		}
-		if closed {
-			ids = append(ids, q.ID)
-		}
+		ids = append(ids, q.ID)
 	}
-	if len(ids) == 0 {
-		return "", nil
-	}
-	return fmt.Sprintf("\n\n[这条消息回复了你的提问 %s，提问卡片已关闭]", strings.Join(ids, "、")), nil
+	list := strings.Join(ids, "、")
+	return fmt.Sprintf("\n\n[你给用户的提问卡片 %s 还开着。如果这条消息已经回答了其中的问题，用 close_question(question_id, answer) 关掉对应卡片，"+
+		"不用再等；没回答的就继续开着等用户]", list), nil
 }
 
-// closeByChat closes one card; false when someone else closed it first.
-func (s *Service) closeByChat(ctx context.Context, tx *core.Tx, q core.Question, userID, content string) (bool, error) {
-	if err := core.MergeQuestionDetail(ctx, tx, q, map[string]any{"answered_in_chat": true}); err != nil {
-		return false, err
-	}
-	answer := clipAnswer(strings.TrimSpace(content))
-	closed, err := core.CloseQuestion(ctx, tx, q, "answered", &answer, "user:"+userID)
-	if errors.Is(err, core.ErrConflict) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if err := tx.EmitQuestion(ctx, closed); err != nil {
-		return false, err
-	}
-	if err := s.refreshThread(ctx, tx, closed.ThreadID); err != nil {
-		return false, err
-	}
-	asker, err := core.EmployeeByName(ctx, tx, deref(closed.ProjectID), closed.ThreadID, closed.Asker)
-	if err != nil {
-		return true, ignoreMissing(err)
-	}
-	s.orch.Touch(tx, asker.ID, "question.answered:"+closed.ID)
-	return true, s.releaseCall(ctx, tx, closed)
-}
-
-// releaseCall returns a still waiting call with chatAnswerNote (as 其他 on every structured
-// question, so Claude's AskUserQuestion gets one answer per question).
-func (s *Service) releaseCall(ctx context.Context, tx *core.Tx, q core.Question) error {
+// releaseCall returns a still waiting call with note (as 其他 on every structured question, so
+// Claude's AskUserQuestion gets one answer per question).
+func (s *Service) releaseCall(ctx context.Context, tx *core.Tx, q core.Question, note string) error {
 	if waiting, err := callWaiting(ctx, tx, q); err != nil || !waiting {
 		return err
 	}
-	note := chatAnswerNote
 	var items []protocol.QuestionAnswerItem
 	for _, sq := range structuredQuestions(q) {
 		header := sq.Header
@@ -90,13 +56,41 @@ func (s *Service) releaseCall(ctx context.Context, tx *core.Tx, q core.Question)
 	return s.Complete(ctx, tx, *q.SessionID, *q.CallID, res)
 }
 
-func clipAnswer(s string) string {
-	if len(s) <= maxChatAnswer {
-		return s
+// closeQuestion is the coordinator or lead closing its own open card because the user answered
+// it in the chat: the card closes as answered with detail.answered_in_chat.
+func (s *Service) closeQuestion(ctx context.Context, tx *core.Tx, c *call) (Result, error) {
+	var in protocol.CloseQuestionInput
+	if err := c.decode(&in); err != nil {
+		return Result{}, err
 	}
-	n := maxChatAnswer
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
+	e := c.emp()
+	conv, err := s.orch.ConversationOf(ctx, tx, e)
+	if err != nil {
+		return Result{}, err
 	}
-	return s[:n] + "…"
+	q, err := core.LockQuestion(ctx, tx, conv, string(in.QuestionID))
+	if err != nil || q.Asker != e.Name || q.Audience != "user" || q.Kind != "question" {
+		return Result{}, refuse("没有你给用户的提问 %s", in.QuestionID)
+	}
+	if q.Status != "open" {
+		return Result{}, refuse("提问 %s 已经关了", q.ID)
+	}
+	if err := core.MergeQuestionDetail(ctx, tx, q, map[string]any{"answered_in_chat": true}); err != nil {
+		return Result{}, err
+	}
+	answer := strings.TrimSpace(deref(in.Answer))
+	closed, err := core.CloseQuestion(ctx, tx, q, "answered", &answer, "employee:"+e.Name)
+	if errors.Is(err, core.ErrConflict) {
+		return Result{}, refuse("提问 %s 已经关了", q.ID)
+	}
+	if err != nil {
+		return Result{}, err
+	}
+	if err := tx.EmitQuestion(ctx, closed); err != nil {
+		return Result{}, err
+	}
+	if err := s.refreshThread(ctx, tx, closed.ThreadID); err != nil {
+		return Result{}, err
+	}
+	return okText("已关闭 " + q.ID), s.releaseCall(ctx, tx, closed, "卡片已关闭："+answer)
 }

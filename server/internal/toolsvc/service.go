@@ -119,6 +119,7 @@ func (s *Service) table() map[string]handler {
 		protocol.ToolMemoryList: s.memoryList, protocol.ToolMemoryRead: s.memoryRead, protocol.ToolMemoryWrite: s.memoryWrite,
 		protocol.ToolMemoryDelete: s.memoryDelete, protocol.ToolListDeliverables: s.listDeliverables,
 		protocol.ToolReadDeliverable: s.readDeliverable, protocol.ToolTellUser: s.tellUser,
+		protocol.ToolCloseQuestion:   s.closeQuestion,
 		protocol.ToolListSharedFiles: s.listSharedFiles, protocol.ToolReadSharedFile: s.readSharedFile,
 		protocol.ToolWriteSharedFile: s.writeSharedFile, protocol.ToolDeleteSharedFile: s.deleteSharedFile,
 	}

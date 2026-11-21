@@ -70,9 +70,10 @@ type Orchestrator struct {
 	// RefContext resolves @ reference chips (meta.refs) again into the context block a
 	// forwarded message carries to the lead (set by the REST layer, which owns the lookups).
 	RefContext func(ctx context.Context, userID, projectID string, chips []map[string]any) string
-	// ChatAnswers closes the question cards the employee left open for the user in this
-	// conversation when the user types a message instead of answering on the card (set by the
-	// engine: toolsvc owns answering). It returns what the delivered text gets appended ("" = none).
+	// ChatAnswers runs when the user types a message while the employee still has question cards
+	// open for the user in this conversation (set by the engine: toolsvc owns questions): waiting
+	// calls are released and the returned note ("" = none) tells the employee to close the cards
+	// the message answers (close_question).
 	ChatAnswers func(ctx context.Context, tx *core.Tx, c core.Conversation, emp core.Employee, userID, content string) (string, error)
 }
 

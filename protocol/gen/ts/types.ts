@@ -2284,6 +2284,19 @@ export interface CancelTaskInput {
   reason?: string;
 }
 /**
+ * Close one of your open question cards for the user (ask_user / AskUserQuestion) because the user already answered it in the chat instead of on the card. Use it only when the user's message really answers the question; otherwise leave the card open and wait.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "CloseQuestionInput".
+ */
+export interface CloseQuestionInput {
+  question_id: QuestionId;
+  /**
+   * The user's answer as you understood it from the chat (shown on the closed card).
+   */
+  answer?: string;
+}
+/**
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "PlanStep".
  */

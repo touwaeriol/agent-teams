@@ -48,7 +48,7 @@ export function answerBody(q: Pick<QuestionView, "detail">, choices: AskChoice[]
   return { answer: c.other ?? c.selected[0] ?? "" };
 }
 
-/** The card was closed by a message the user typed in the chat (the message itself is the answer). */
+/** The asker closed the card because the user answered in the chat (close_question; answer = its summary). */
 export function answeredInChat(q: Pick<QuestionView, "detail">): boolean {
   return q.detail?.answered_in_chat === true;
 }
