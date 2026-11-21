@@ -205,8 +205,21 @@ export class AntigravityAdapter implements RuntimeAdapter {
   private last: RuntimeState | null = null;
   /** Binary + token files + login env as of the last probe; an unforced check re-probes only when this changes. */
   private stamp = "";
+  /**
+   * When an unforced check probes again although nothing it watches changed: the login is not seen in
+   * the env or a token file (logged out, or logged in where we do not look, e.g. a token path not yet
+   * verified or the keyring), so only the ACP check can tell; Infinity otherwise.
+   */
+  private retryAt = Infinity;
+  private readonly now: () => number;
+  private readonly retryMs: number;
+  private readonly maxProbeMs: number;
 
-  constructor(private readonly d: RuntimeDeps) {}
+  constructor(private readonly d: RuntimeDeps, o: { now?: () => number; retryMs?: number; maxProbeMs?: number } = {}) {
+    this.now = o.now ?? Date.now;
+    this.retryMs = o.retryMs ?? 5 * 60_000;
+    this.maxProbeMs = o.maxProbeMs ?? AGY_PROBE_MAX_MS;
+  }
 
   get home(): string { return this.d.agyHome ?? join(this.d.root, "agy-home"); }
 
@@ -233,10 +246,13 @@ export class AntigravityAdapter implements RuntimeAdapter {
   async detect(o: DetectOptions): Promise<RuntimeState> {
     const env = this.env();
     const command = this.resolveCommand();
-    if (!o.force && this.last && this.stampOf(command, env) === this.stamp) return this.last;
-    this.current = await probeAntigravity({ home: this.home, env, command, log: this.d.log ?? silentLogger, ...(o.timeoutMs ? { timeoutMs: o.timeoutMs } : {}) });
+    if (!o.force && this.last && this.stampOf(command, env) === this.stamp && this.now() < this.retryAt) return this.last;
+    // At most AGY_PROBE_MAX_MS even when the caller allows more (the daemon's start check), so agy never holds up hello.
+    const timeoutMs = Math.min(o.timeoutMs ?? this.maxProbeMs, this.maxProbeMs);
+    this.current = await probeAntigravity({ home: this.home, env, command, log: this.d.log ?? silentLogger, timeoutMs });
     if (this.current.installed) writeAgySettings(this.home, env, this.d.log);
     this.stamp = this.stampOf(command, env);
+    this.retryAt = this.current.installed !== false && (this.current.auth === "none" || !detectLogin(this.home, env)) ? this.now() + this.retryMs : Infinity;
     this.last = antigravityState(this.current, command);
     return this.last;
   }
@@ -272,6 +288,9 @@ export class AntigravityAdapter implements RuntimeAdapter {
     this.d.recheck?.();
   }
 }
+
+/** Budget of one agy check (version + ACP login check), whatever the caller allows. */
+export const AGY_PROBE_MAX_MS = 15_000;
 
 /**
  * node.runtimes' view of hello.runtimes.antigravity. The protocol's auth has no Google-specific

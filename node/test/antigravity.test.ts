@@ -455,6 +455,14 @@ describe("antigravity detection", () => {
     expect(await detectLoginAcp(AGY, { FAKE_AGY_AUTH: "none", PATH: process.env.PATH ?? "" }, cwd, silentLogger)).toBe("none");
   });
 
+  it("gives the whole ACP handshake one deadline", async () => {
+    const t0 = Date.now();
+    // initialize and session/new take 700 ms each: within 1000 ms each, but not 1000 ms together.
+    expect(await detectLoginAcp(AGY, { FAKE_AGY_SLOW_MS: "700", PATH: process.env.PATH ?? "" }, scratch(), silentLogger, 1000)).toBe("none");
+    expect(Date.now() - t0).toBeLessThan(2500);
+    expect(await detectLoginAcp(AGY, { FAKE_AGY_SLOW_MS: "300", PATH: process.env.PATH ?? "" }, scratch(), silentLogger, 3000)).toBe("oauth");
+  });
+
   it("reports installed, version and login for hello, also when agy is missing", async () => {
     const home = scratch();
     expect(await probeAntigravity({ home, env: {}, command: null, log: silentLogger })).toEqual({ cli: "", auth: "none", installed: false });
@@ -487,8 +495,38 @@ describe("antigravity detection", () => {
 });
 
 describe("antigravity detector (RuntimeMonitor adapter)", () => {
-  const adapter = (home: string, env: Record<string, string>, recheck?: () => void) =>
-    new AntigravityAdapter({ root: home, agyHome: home, agyCommand: AGY, agyEnv: () => ({ PATH: process.env.PATH ?? "", ...env }), log: silentLogger, ...(recheck ? { recheck } : {}) } as unknown as RuntimeDeps);
+  const adapter = (home: string, env: Record<string, string>, recheck?: () => void, o: ConstructorParameters<typeof AntigravityAdapter>[1] = {}) =>
+    new AntigravityAdapter({ root: home, agyHome: home, agyCommand: AGY, agyEnv: () => ({ PATH: process.env.PATH ?? "", ...env }), log: silentLogger, ...(recheck ? { recheck } : {}) } as unknown as RuntimeDeps, o);
+  const starts = (log: string) => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter((l) => l.includes('"__start"')).length : 0);
+
+  it("re-runs the ACP login check every retryMs while the login is not seen in env or token files", async () => {
+    const home = scratch();
+    const log = join(scratch(), "log.jsonl");
+    let now = 1_000_000;
+    const a = adapter(home, { FAKE_AGY_AUTH: "none", FAKE_AGY_LOG: log }, undefined, { now: () => now });
+    expect((await a.detect({ force: true })).auth).toBe("none");
+    const n = starts(log);
+    now += 60_000;
+    await a.detect({ force: false });
+    expect(starts(log)).toBe(n); // within 5 minutes: the last result
+    now += 5 * 60_000;
+    await a.detect({ force: false });
+    expect(starts(log)).toBe(n + 1); // due: the ACP check runs again although no watched file changed
+    // A login seen in the env needs no retry.
+    const k = adapter(scratch(), { GEMINI_API_KEY: "k", FAKE_AGY_LOG: log }, undefined, { now: () => now });
+    expect((await k.detect({ force: true })).auth).toBe("api_key");
+    const m = starts(log);
+    now += 60 * 60_000;
+    await k.detect({ force: false });
+    expect(starts(log)).toBe(m);
+  });
+
+  it("caps one check at maxProbeMs whatever budget the caller gives", async () => {
+    const a = adapter(scratch(), { FAKE_AGY_SLOW_MS: "1200" }, undefined, { maxProbeMs: 1500 });
+    const t0 = Date.now();
+    expect((await a.detect({ force: true, timeoutMs: 60_000 })).auth).toBe("none");
+    expect(Date.now() - t0).toBeLessThan(4000);
+  });
 
   it("detects version and login, and re-probes unforced only when a token file changes", async () => {
     const home = scratch();

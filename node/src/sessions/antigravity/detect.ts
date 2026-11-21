@@ -89,13 +89,16 @@ function nonEmpty(p: string): boolean {
  * not logged in; a session that opens is closed again (session/close) before agy exits.
  */
 export async function detectLoginAcp(command: string[], env: Record<string, string>, cwd: string, log: Logger, timeoutMs = 15_000): Promise<AgyAuth> {
+  // One deadline for the whole handshake (initialize, session/new, session/close): never more than timeoutMs.
+  const deadline = Date.now() + timeoutMs;
+  const left = () => Math.max(1, deadline - Date.now());
   const client = new AcpClient({ command, args: ["acp", "--process-per-session"], env, cwd, log });
   client.on("exit", () => undefined);
   try {
     await client.start();
-    await client.request("initialize", { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } }, timeoutMs);
-    const s = await client.request<{ sessionId?: string }>("session/new", { cwd, mcpServers: [] }, timeoutMs);
-    if (s?.sessionId) await client.request("session/close", { sessionId: s.sessionId }, 3000).catch(() => undefined);
+    await client.request("initialize", { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } }, left());
+    const s = await client.request<{ sessionId?: string }>("session/new", { cwd, mcpServers: [] }, left());
+    if (s?.sessionId) await client.request("session/close", { sessionId: s.sessionId }, Math.min(3000, left())).catch(() => undefined);
     return "oauth";
   } catch (err) {
     if (err instanceof AcpFailure && err.error.code === ACP_AUTH_REQUIRED) return "none";

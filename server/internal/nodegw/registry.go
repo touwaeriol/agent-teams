@@ -42,8 +42,8 @@ func (g *Gateway) Status(nodeID string) platform.NodeLive {
 // RuntimeReady reports whether the node's hello lets it run the runtime: always for runtimes
 // whose login node.usage tells (runtimes.NeedsHelloReady false); otherwise the hello must report
 // the runtime installed and logged in (auth other than none). False when the node is offline.
-// The one place that decides it: once thread #42's node.runtimes detection framework is merged,
-// read at_node_runtimes here instead of the hello.
+// Only for daemons without runtime_status (orchestrator nodeStates' old path): a daemon that
+// reports node.runtimes is judged by at_node_runtimes instead, Antigravity included.
 func (g *Gateway) RuntimeReady(nodeID, runtime string) bool {
 	if !runtimes.Of(runtime).NeedsHelloReady {
 		return true
