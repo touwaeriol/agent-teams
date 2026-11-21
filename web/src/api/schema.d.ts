@@ -3694,9 +3694,9 @@ export interface components {
              * @description The role's first runtime (runtimes[0])
              * @enum {string}
              */
-            runtime: "claude" | "codex";
+            runtime: "claude" | "codex" | "antigravity";
             /** @description Every runtime the role's employees may run on, in display order; each new session takes the one with the most quota left. Empty: [runtime] */
-            runtimes?: ("claude" | "codex")[] | null;
+            runtimes?: ("claude" | "codex" | "antigravity")[] | null;
             sandbox: string;
             /** @description Skill names (built-in or uploaded) the role's sessions load */
             skills: string[] | null;

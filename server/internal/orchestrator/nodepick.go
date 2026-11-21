@@ -80,7 +80,7 @@ func (o *Orchestrator) nodeStates(ctx context.Context, tx *core.Tx, cands []stor
 		active, err := core.ActiveSessionCount(ctx, tx, n.ID)
 		if o.gw.Online(n.ID) && err == nil {
 			ru := runtimeUsage(o.gw.Usage(n.ID), runtime)
-			st.usable = loggedIn(ru)
+			st.usable = loggedIn(ru) && o.gw.RuntimeReady(n.ID, runtime)
 			st.free = freeSlots(o.gw.Capacity(n), active)
 			st.used = quotaUsed(ru, model, now)
 		}
@@ -156,6 +156,9 @@ func runtimeUsage(u *platform.NodeUsage, runtime string) *platform.RuntimeUsage 
 var usageOf = map[string]func(*platform.NodeUsage) *platform.RuntimeUsage{
 	runtimes.Claude: func(u *platform.NodeUsage) *platform.RuntimeUsage { return u.Claude },
 	runtimes.Codex:  func(u *platform.NodeUsage) *platform.RuntimeUsage { return u.Codex },
+	// Antigravity has no usage API: its login comes from hello (Gateway.RuntimeReady) and its
+	// quota is unknown (unknownUsage).
+	runtimes.Antigravity: func(*platform.NodeUsage) *platform.RuntimeUsage { return nil },
 }
 
 // loggedIn: a node whose daemon reported the runtime as not logged in cannot run it; without a
