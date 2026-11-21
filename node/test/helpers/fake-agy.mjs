@@ -105,8 +105,11 @@ async function prompt(p) {
 
 const authError = () => Object.assign(new Error("Authentication required"), { code: -32000 });
 
+// $FAKE_AGY_SLOW_MS: initialize and session/new each answer this late (timeouts of the login check).
+const slow = () => new Promise((r) => setTimeout(r, Number(process.env.FAKE_AGY_SLOW_MS ?? 0)));
+
 const handlers = {
-  initialize: () => ({
+  initialize: async () => (await slow(), {
     protocolVersion: 1,
     agentCapabilities: {
       loadSession: true, promptCapabilities: { image: true, audio: false, embeddedContext: true },
@@ -117,7 +120,8 @@ const handlers = {
     agentInfo: { name: "Antigravity ACP Server", version: "1.5.14" },
     authMethods: [{ id: "oauth-personal", name: "Google" }],
   }),
-  "session/new": (p) => {
+  "session/new": async (p) => {
+    await slow();
     if (process.env.FAKE_AGY_AUTH === "none") throw authError();
     const sessionId = `agy-sess-${sessions.size + 1}`;
     sessions.set(sessionId, p);

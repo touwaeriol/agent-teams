@@ -256,8 +256,8 @@ func runtimeUsage(u *platform.NodeUsage, runtime string) *platform.RuntimeUsage 
 var usageOf = map[string]func(*platform.NodeUsage) *platform.RuntimeUsage{
 	runtimes.Claude: func(u *platform.NodeUsage) *platform.RuntimeUsage { return u.Claude },
 	runtimes.Codex:  func(u *platform.NodeUsage) *platform.RuntimeUsage { return u.Codex },
-	// Antigravity has no usage API: its login comes from hello (Gateway.RuntimeReady) and its
-	// quota is unknown (unknownUsage).
+	// Antigravity has no usage API: its quota is unknown (unknownUsage) and its login comes from
+	// node.runtimes (at_node_runtimes), or from hello (Gateway.RuntimeReady) on an old daemon.
 	runtimes.Antigravity: func(*platform.NodeUsage) *platform.RuntimeUsage { return nil },
 }
 

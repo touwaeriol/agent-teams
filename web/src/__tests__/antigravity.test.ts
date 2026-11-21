@@ -49,8 +49,8 @@ describe("antigravity runtime", () => {
     expect(runtimeLine("antigravity", { cli: "", auth: "none", installed: false })).toEqual({ ver: "未安装", login: "安装 agy 后运行 agy acp --login 登录", ok: false });
     expect(runtimeLine("antigravity", { cli: "1.5.14", auth: "oauth", installed: true }).ok).toBe(true);
     expect(runtimeLine("antigravity", { cli: "1.5.14", auth: "oauth" })).toEqual({ ver: "1.5.14", login: "已登录", ok: true });
-    expect(runtimeLine("antigravity", { cli: "1.5.14", auth: "none" })).toEqual({ ver: "1.5.14", login: "未登录 · 用节点的 agy HOME 运行 agy acp --login", ok: false });
-    expect(runtimeLine("antigravity", { cli: "1.5.14" }).login).toBe("未登录 · 用节点的 agy HOME 运行 agy acp --login");
+    expect(runtimeLine("antigravity", { cli: "1.5.14", auth: "none" })).toEqual({ ver: "1.5.14", login: "未登录 · 用节点的 agy HOME 运行 agy acp --login，登录后点重新检测", ok: false });
+    expect(runtimeLine("antigravity", { cli: "1.5.14" }).login).toBe("未登录 · 用节点的 agy HOME 运行 agy acp --login，登录后点重新检测");
     expect(runtimeLine("codex", { cli: "0.1", auth: "none" }).login).toBe("未登录");
     expect(runtimeLine("antigravity", { cli: "1.5.14", auth: "api_key" }).login).toBe("已配置 API Key");
     expect(runtimeLine("antigravity", { cli: "1.5.14", auth: "adc" }).login).toBe("已配置 ADC 凭证");

@@ -27,8 +27,9 @@ export const RUNTIME_SPECS: RuntimeSpec[] = [
   { id: "codex", label: "Codex", slashCommands: false, builtinModel: "", subscriptionAuth: "chatgpt", installHint: "安装后登录或设置 CODEX_API_KEY", canLead: false, loginHint: "未登录", readOnlyCaveat: "" },
   // Google Antigravity CLI (agy over ACP): no usage API, so no subscription quota to show.
   { id: "antigravity", label: "Antigravity", slashCommands: false, builtinModel: "", subscriptionAuth: "", installHint: "安装 agy 后运行 agy acp --login 登录",
-    // The daemon re-checks agy's login when its token files change (node.runtimes), no restart needed.
-    canLead: false, loginHint: "未登录 · 用节点的 agy HOME 运行 agy acp --login", readOnlyCaveat: "Antigravity 的只读靠禁用写类工具和拒绝写权限实现，不是沙箱级保证" },
+    // The daemon re-checks agy's login when its token files change and every 5 minutes while not logged in
+    // (node.runtimes); 重新检测 checks at once. No restart needed.
+    canLead: false, loginHint: "未登录 · 用节点的 agy HOME 运行 agy acp --login，登录后点重新检测", readOnlyCaveat: "Antigravity 的只读靠禁用写类工具和拒绝写权限实现，不是沙箱级保证" },
 ];
 
 /** The spec of a runtime id; "" or an unknown id is the default runtime (the first). */
