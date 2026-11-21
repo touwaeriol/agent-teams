@@ -9,15 +9,19 @@ export interface RuntimeInfo {
   cli?: string;
   sdk?: string;
   auth?: string;
+  /** false: the daemon looked and the runtime is not there (Antigravity); absent counts as installed when cli is set. */
+  installed?: boolean;
 }
+
+const AUTH_TEXT: Record<string, string> = { api_key: "已配置 API Key", adc: "已配置 ADC 凭证" };
 
 export const RUNTIMES: [string, string][] = RUNTIME_SPECS.map((r) => [r.id, r.label]);
 
 /** One runtime chip: version and login state (protocol.md hello.runtimes). */
 export function runtimeLine(key: string, info: RuntimeInfo | undefined): { ver: string; login: string; ok: boolean } {
-  if (!info || !info.cli) return { ver: "未安装", login: runtimeSpec(key).installHint, ok: false };
-  if (!info.auth || info.auth === "none") return { ver: info.cli, login: "未登录", ok: false };
-  return { ver: info.cli, login: info.auth === "api_key" ? "已配置 API Key" : "已登录", ok: true };
+  if (!info || !info.cli || info.installed === false) return { ver: "未安装", login: runtimeSpec(key).installHint, ok: false };
+  if (!info.auth || info.auth === "none") return { ver: info.cli, login: runtimeSpec(key).loginHint, ok: false };
+  return { ver: info.cli, login: AUTH_TEXT[info.auth] ?? "已登录", ok: true };
 }
 
 /** Subscription logins that have a quota to show (claude.ai / ChatGPT accounts). */

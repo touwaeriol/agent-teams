@@ -40,7 +40,7 @@ const save = useAction(() => nodeActions.update(props.node.id, settingsPatch(max
     <label class="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-[13px]">
       <span class="flex flex-col gap-0.5">
         <span class="font-medium">这台机器是隔离的</span>
-        <span class="text-xs text-muted-foreground">整台机器只给员工用、没有其他秘密时打开；Codex 岗位只派到隔离的节点。</span>
+        <span class="text-xs text-muted-foreground">整台机器只给员工用、没有其他秘密时打开；Codex 和 Antigravity 岗位只派到隔离的节点。</span>
       </span>
       <el-switch v-model="isolated" />
     </label>

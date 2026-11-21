@@ -14,13 +14,21 @@ export interface RuntimeSpec {
   subscriptionAuth: string;
   /** What to do on the nodes page when the runtime is not installed. */
   installHint: string;
+  /** May be a coordinator or a thread lead (server runtimes.CanLead). */
+  canLead: boolean;
+  /** The nodes page's text when the runtime is installed but not logged in. */
+  loginHint: string;
+  /** Shown on a read-only role of this runtime when its read-only is not a sandbox. */
+  readOnlyCaveat: string;
 }
 
 export const RUNTIME_SPECS: RuntimeSpec[] = [
-  { id: "claude", label: "Claude Code", slashCommands: true, builtinModel: "claude-opus-5-5", subscriptionAuth: "subscription", installHint: "安装后登录" },
-  { id: "codex", label: "Codex", slashCommands: false, builtinModel: "", subscriptionAuth: "chatgpt", installHint: "安装后登录或设置 CODEX_API_KEY" },
+  { id: "claude", label: "Claude Code", slashCommands: true, builtinModel: "claude-opus-5-5", subscriptionAuth: "subscription", installHint: "安装后登录", canLead: true, loginHint: "未登录", readOnlyCaveat: "" },
+  { id: "codex", label: "Codex", slashCommands: false, builtinModel: "", subscriptionAuth: "chatgpt", installHint: "安装后登录或设置 CODEX_API_KEY", canLead: false, loginHint: "未登录", readOnlyCaveat: "" },
   // Google Antigravity CLI (agy over ACP): no usage API, so no subscription quota to show.
-  { id: "antigravity", label: "Antigravity", slashCommands: false, builtinModel: "", subscriptionAuth: "", installHint: "安装 agy 后运行 agy acp --login 登录" },
+  { id: "antigravity", label: "Antigravity", slashCommands: false, builtinModel: "", subscriptionAuth: "", installHint: "安装 agy 后运行 agy acp --login 登录",
+    // The daemon probes agy's login when it starts and reports it in the next hello.
+    canLead: false, loginHint: "未登录 · 登录 agy 后需重启节点守护进程", readOnlyCaveat: "Antigravity 的只读靠禁用写类工具和拒绝写权限实现，不是沙箱级保证" },
 ];
 
 /** The spec of a runtime id; "" or an unknown id is the default runtime (the first). */
@@ -40,6 +48,11 @@ export function roleRuntimes(r: RuntimesOf): Runtime[] {
   const list = r.runtimes ?? [];
   if (list.length === 0 || (list.length === 1 && list[0] !== r.runtime)) return [r.runtime];
   return list;
+}
+
+/** The runtimes a role of this tier may pick: members any, the coordinator and the lead only those that can lead. */
+export function runtimesFor(tier: string): RuntimeSpec[] {
+  return tier === "member" ? RUNTIME_SPECS : RUNTIME_SPECS.filter((r) => r.canLead);
 }
 
 /** The first runtime of the role without slash commands (undefined: all have them). */

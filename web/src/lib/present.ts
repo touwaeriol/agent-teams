@@ -2,6 +2,7 @@
 // plus the small derivations pages share. Pure functions, unit-tested.
 import type { EmployeeBrief, QuestionView, TaskStatus, TaskView, ThreadView } from "@/api/views";
 import { awaitsAcceptance, pauseLine, reviewLine, threadPhase, type PhaseId, type PhaseInput } from "./phase";
+import { RUNTIME_SPECS } from "./runtimes";
 
 export { awaitsAcceptance, pauseLine } from "./phase";
 
@@ -199,7 +200,7 @@ export function memberDoing(m: Pick<EmployeeBrief, "status">): string {
   return s.bubble || STATE_TEXT[s.state] || s.state;
 }
 
-export const RUNTIME_LABEL: Record<string, string> = { claude: "Claude Code", codex: "Codex" };
+export const RUNTIME_LABEL: Record<string, string> = Object.fromEntries(RUNTIME_SPECS.map((r) => [r.id, r.label]));
 
 export const TIER_LABEL: Record<string, string> = { coordinator: "统筹", lead: "组长", member: "成员" };
 

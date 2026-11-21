@@ -14,7 +14,7 @@ describe("runtime registry", () => {
   it("drives capabilities instead of id checks", () => {
     expect(promptOnly({ tier: "lead", runtime: "claude" })).toBe(false);
     expect(promptOnly({ tier: "lead", runtime: "codex" })).toBe(true);
-    expect(emptyRoleModel("codex")).toBe("留空 = Codex 默认");
+    expect(emptyRoleModel("codex")).toBe("留空 = 默认");
     expect(emptyRoleModel("claude")).toBe("留空 = claude-opus-5-5");
     expect(roleModelNames([{ tier: "member", runtime: "codex" }], "codex")).toEqual(["Codex 默认"]);
   });
