@@ -36,5 +36,18 @@ export function run(cmd: string, args: string[], opts: RunOptions = {}): Promise
 export function gitEnv(extra: Record<string, string> = {}, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(base)) if (!k.startsWith("AGENT_TEAMS_") && !k.startsWith("GIT_CONFIG")) env[k] = v;
-  return { ...env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", ...extra };
+  return { ...env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", ...proxyAuth(env), ...extra };
+}
+
+const PROXY_VARS = ["https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"];
+
+/**
+ * A proxy URL with credentials gets them on the first CONNECT. git otherwise sends none, waits for
+ * the 407 and retries on the same connection, which proxies that close after a 407 reset
+ * ("Send failure: Connection reset by peer"). An explicit GIT_HTTP_PROXY_AUTHMETHOD wins.
+ */
+function proxyAuth(env: NodeJS.ProcessEnv): Record<string, string> {
+  if (env.GIT_HTTP_PROXY_AUTHMETHOD) return {};
+  const withCreds = PROXY_VARS.some((k) => /^[a-z][a-z0-9+.-]*:\/\/[^/@]+@/i.test(env[k] ?? ""));
+  return withCreds ? { GIT_HTTP_PROXY_AUTHMETHOD: "basic" } : {};
 }

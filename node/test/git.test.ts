@@ -357,6 +357,16 @@ describe("git jobs", () => {
   });
 });
 
+describe("git failure reasons", () => {
+  it("puts git's own reason into a failed fetch's error", async () => {
+    h = await startHarness();
+    h.console.command("git.prepare", prepare("g_f1", "dev-9")); // no remote acme/app exists
+    const res = await h.console.waitType("git.result", (b) => b.job_id === "g_f1");
+    expect(res.body).toMatchObject({ ok: false, error_code: "fetch_failed" });
+    expect(res.body.error).toMatch(/^git fetch failed: fatal: /);
+  });
+});
+
 describe("git hardening helpers", () => {
   it("finds filter driver names and disables them", () => {
     expect(driverOf("filter.lfs.clean\ngit-lfs clean -- %f")).toBe("lfs");
@@ -370,6 +380,12 @@ describe("git hardening helpers", () => {
     expect(env.AGENT_TEAMS_NODE_TOKEN).toBeUndefined();
     expect(env.GIT_CONFIG_COUNT).toBeUndefined();
     expect(env.PATH).toBe("/bin");
+  });
+
+  it("sends a proxy's credentials on the first CONNECT only when the proxy URL has them", () => {
+    expect(gitEnv({}, { HTTPS_PROXY: "http://u:p@proxy:8080" }).GIT_HTTP_PROXY_AUTHMETHOD).toBe("basic");
+    expect(gitEnv({}, { https_proxy: "http://proxy:8080" }).GIT_HTTP_PROXY_AUTHMETHOD).toBeUndefined();
+    expect(gitEnv({}, { HTTPS_PROXY: "http://u:p@proxy:8080", GIT_HTTP_PROXY_AUTHMETHOD: "ntlm" }).GIT_HTTP_PROXY_AUTHMETHOD).toBe("ntlm");
   });
 });
 
