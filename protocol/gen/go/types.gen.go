@@ -364,6 +364,7 @@ type ApprovalRequest struct {
 
 type ApprovalRequestSource string
 
+const ApprovalRequestSourceAntigravityPermission ApprovalRequestSource = "antigravity_permission"
 const ApprovalRequestSourceClaudeCanUseTool ApprovalRequestSource = "claude_can_use_tool"
 const ApprovalRequestSourceCodexCommand ApprovalRequestSource = "codex_command"
 const ApprovalRequestSourceCodexFileChange ApprovalRequestSource = "codex_file_change"
@@ -376,6 +377,7 @@ var enumValues_ApprovalRequestSource = []interface{}{
 	"codex_file_change",
 	"codex_permissions",
 	"codex_mcp_elicitation",
+	"antigravity_permission",
 }
 
 // UnmarshalJSON implements json.Unmarshaler.

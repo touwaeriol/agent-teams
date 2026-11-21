@@ -273,7 +273,8 @@ export interface ApprovalRequest {
     | "codex_command"
     | "codex_file_change"
     | "codex_permissions"
-    | "codex_mcp_elicitation";
+    | "codex_mcp_elicitation"
+    | "antigravity_permission";
   tool_name: string;
   tool_use_id?: string;
   input: {
