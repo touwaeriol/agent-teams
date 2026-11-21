@@ -230,6 +230,14 @@ describe("nodes", () => {
     expect(needsUsageRefresh({ online: true, usage_supported: true, runtimes: sub, usage: null }, now)).toBe(true);
     expect(needsUsageRefresh({ online: true, runtimes: { claude: { cli: "2.1", auth: "api_key" }, codex: { cli: "0.1", auth: "none" } }, usage: null }, now)).toBe(false);
     expect(needsUsageRefresh({ online: true, runtimes: { claude: { cli: "2.1", auth: "subscription" }, codex: { cli: "0.1", auth: "chatgpt" } }, usage: { claude: u(at(5)) } }, now)).toBe(true);
+    // Reported CLIs win over hello (#42): logged in after the daemon connected (hello still says none) refreshes;
+    // logged out or expired since hello does not.
+    const none = { claude: { cli: "2.1", auth: "none" } };
+    const rep = (auth: string, ready: boolean) => [{ runtime: "claude", installed: true, version: "2.1", auth, expired: !ready && auth !== "none", checked_at: at(1), updated_at: at(1), ready }] as never;
+    expect(needsUsageRefresh({ online: true, runtimes: none, clis: rep("subscription", true), usage: null }, now)).toBe(true);
+    expect(needsUsageRefresh({ online: true, runtimes: sub, clis: rep("none", false), usage: null }, now)).toBe(false);
+    expect(needsUsageRefresh({ online: true, runtimes: sub, clis: rep("subscription", false), usage: null }, now)).toBe(false);
+    expect(needsUsageRefresh({ online: true, runtimes: none, clis: [], usage: null }, now)).toBe(false);
 
     vi.useFakeTimers();
     try {

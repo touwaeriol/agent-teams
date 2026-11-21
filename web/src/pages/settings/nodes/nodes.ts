@@ -183,10 +183,11 @@ export function usageView(key: string, info: RuntimeInfo | undefined, usage: Run
 /** Quota younger than this is shown as is; hovering does not ask the node again. */
 export const USAGE_FRESH_MS = 60_000;
 
-/** Hovering a card asks for fresh quota only when the node is online, its daemon reports usage, it has a subscription login and that runtime's quota is missing or older than a minute. */
-export function needsUsageRefresh(n: UsageNodeState & { runtimes?: unknown; usage?: NodeUsage | null }, now = Date.now(), maxAge = USAGE_FRESH_MS): boolean {
+/** Hovering a card asks for fresh quota only when the node is online, its daemon reports usage, it has a subscription login (per the reported CLIs when there are any) and that runtime's quota is missing or older than a minute. */
+export function needsUsageRefresh(n: UsageNodeState & { runtimes?: unknown; clis?: NodeRuntime[] | null; usage?: NodeUsage | null }, now = Date.now(), maxAge = USAGE_FRESH_MS): boolean {
   if (!n.online || n.usage_supported === false) return false;
-  const runtimes = (n.runtimes ?? {}) as Record<string, RuntimeInfo | undefined>;
+  // Same source as the card's quota (runtimeInfos): the reported CLIs, hello only for an old daemon.
+  const runtimes = runtimeInfos(n as Pick<NodeView, "clis" | "runtimes">) as Record<string, RuntimeInfo | undefined>;
   return Object.entries(SUBSCRIPTION).some(([key, sub]) => {
     const info = runtimes[key];
     if (!info?.cli || info.auth !== sub) return false;
