@@ -119,6 +119,12 @@
         "codex"
       ]
     },
+    "RuntimeID": {
+      "title": "RuntimeID",
+      "description": "Runtime id as an open lower-case string (the values of Runtime plus any runtime a newer daemon knows); used as map key and in lists where a new runtime should need no protocol change.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+    },
     "Tier": {
       "title": "Tier",
       "type": "string",

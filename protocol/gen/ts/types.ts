@@ -95,6 +95,13 @@ export type Repo = string;
  */
 export type Runtime = "claude" | "codex";
 /**
+ * Runtime id as an open lower-case string (the values of Runtime plus any runtime a newer daemon knows); used as map key and in lists where a new runtime should need no protocol change.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "RuntimeID".
+ */
+export type RuntimeID = string;
+/**
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "Tier".
  */
@@ -740,7 +747,7 @@ export interface Hello {
   capacity?: Capacity;
   runtimes?: Runtimes;
   /**
-   * Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh), self_update (runs under the update launcher: node.upgrade with mode, drain, rollback).
+   * Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), runtime_status (node.runtimes, node.runtimes_refresh), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh), self_update (runs under the update launcher: node.upgrade with mode, drain, rollback).
    */
   features?: string[];
   /**
@@ -791,6 +798,78 @@ export interface NodeConfig {
  */
 export interface NodeDrain {
   deadline_s: number;
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "RuntimeStatus".
+ */
+export interface RuntimeStatus {
+  /**
+   * The CLI (or SDK) was found and runs.
+   */
+  installed: boolean;
+  /**
+   * CLI version as reported by the CLI, when known.
+   */
+  version?: string;
+  /**
+   * Absolute path of the executable that was found.
+   */
+  path?: string;
+  /**
+   * How the runtime is logged in: subscription (provider account login, e.g. Claude subscription), chatgpt (Codex ChatGPT login), api_key, none (not logged in), unknown (could not tell, e.g. not installed or the check failed).
+   */
+  auth: "subscription" | "chatgpt" | "api_key" | "none" | "unknown";
+  /**
+   * When the login expires, only when it can be read from file metadata or non-secret fields.
+   */
+  auth_expires_at?: string;
+  /**
+   * The login is known to be expired (the console treats it like auth none for scheduling).
+   */
+  expired?: boolean;
+  /**
+   * When the daemon ran this check.
+   */
+  checked_at: string;
+  /**
+   * Why the check failed or the CLI did not run; never contains credential content.
+   */
+  error?: string;
+}
+/**
+ * Install and login state of every runtime CLI the daemon knows (unreliable). Sent after welcome (reason hello), then only when something changed (periodic check or a watched credential file changed), and always as the answer to node.runtimes_refresh. Always carries the full set of known runtimes, so the console replaces its stored state. Sent only when hello.features contains runtime_status. Never carries credentials: only file metadata and non-secret fields are read.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "NodeRuntimes".
+ */
+export interface NodeRuntimes {
+  /**
+   * Keyed by runtime id (claude, codex, and any runtime added later; same ids as common.json Runtime). Receivers ignore ids they do not know.
+   */
+  runtimes: {
+    [k: string]: RuntimeStatus;
+  };
+  /**
+   * hello: first report after welcome; periodic: the timed check found a change; fs_event: a watched CLI or credential file changed; refresh: answer to node.runtimes_refresh (sent even without changes).
+   */
+  reason: "hello" | "periodic" | "fs_event" | "refresh";
+  /**
+   * Envelope id of the node.runtimes_refresh this answers; only with reason refresh.
+   */
+  in_reply_to?: string;
+}
+/**
+ * Check the runtime CLIs now and answer with node.runtimes (reason refresh, in_reply_to = this envelope id), even when nothing changed (unreliable). Sent only when hello.features contains runtime_status.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "NodeRuntimesRefresh".
+ */
+export interface NodeRuntimesRefresh {
+  /**
+   * Runtime ids to re-check; omitted = all. The answer still carries every known runtime.
+   */
+  runtimes?: RuntimeID[];
 }
 /**
  * Every 30 s, unreliable; drives the server-room rack lights.

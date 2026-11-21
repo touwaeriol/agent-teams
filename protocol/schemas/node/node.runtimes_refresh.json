@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/node.runtimes_refresh.json",
+  "title": "NodeRuntimesRefresh",
+  "description": "Check the runtime CLIs now and answer with node.runtimes (reason refresh, in_reply_to = this envelope id), even when nothing changed (unreliable). Sent only when hello.features contains runtime_status.",
+  "x-direction": "console_to_node",
+  "x-reliable": false,
+  "type": "object",
+  "properties": {
+    "runtimes": {
+      "description": "Runtime ids to re-check; omitted = all. The answer still carries every known runtime.",
+      "type": "array",
+      "items": {
+        "$ref": "common.json#/$defs/RuntimeID"
+      }
+    }
+  }
+}

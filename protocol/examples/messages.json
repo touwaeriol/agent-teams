@@ -1361,6 +1361,51 @@
   },
   {
     "v": 2,
+    "type": "node.runtimes_refresh",
+    "id": "c_01JD3V0000000000000000RR1",
+    "ts": "2026-11-14T12:04:07Z",
+    "body": {
+      "runtimes": [
+        "claude",
+        "gemini"
+      ]
+    }
+  },
+  {
+    "v": 2,
+    "type": "node.runtimes",
+    "id": "n_01JD3V0000000000000000RT1",
+    "ts": "2026-11-14T12:04:08Z",
+    "body": {
+      "reason": "refresh",
+      "in_reply_to": "c_01JD3V0000000000000000RR1",
+      "runtimes": {
+        "claude": {
+          "installed": true,
+          "version": "2.1.3",
+          "path": "/usr/local/bin/claude",
+          "auth": "subscription",
+          "auth_expires_at": "2026-12-14T12:00:00Z",
+          "checked_at": "2026-11-14T12:04:08Z"
+        },
+        "codex": {
+          "installed": true,
+          "version": "0.80.0",
+          "path": "/usr/local/bin/codex",
+          "auth": "none",
+          "checked_at": "2026-11-14T12:04:08Z"
+        },
+        "gemini": {
+          "installed": false,
+          "auth": "unknown",
+          "checked_at": "2026-11-14T12:04:08Z",
+          "error": "gemini not found in PATH"
+        }
+      }
+    }
+  },
+  {
+    "v": 2,
     "type": "log",
     "id": "n_01JD3V0000000000000000011",
     "ts": "2026-11-14T12:04:05Z",
