@@ -67,6 +67,9 @@ func (o *Orchestrator) Deliver(ctx context.Context, tx *core.Tx, e core.Employee
 	sess, err := core.LiveSession(ctx, tx, e.ID)
 	switch {
 	case errors.Is(err, core.ErrNotFound):
+		if held, err := o.appendHeld(ctx, tx, e, firstMessage(msgID, d.Text, d)); held || err != nil {
+			return m, err
+		}
 		text, resume, err := o.continuation(ctx, tx, e, d.Text)
 		if err != nil {
 			return m, err
@@ -426,10 +429,14 @@ func (o *Orchestrator) openSession(ctx context.Context, tx *core.Tx, e core.Empl
 	if err != nil {
 		return core.AgentSession{}, err
 	}
-	node, rt, err := o.pickNode(ctx, tx, e, env.project, resume != nil || worked)
+	pick, err := o.pickNode(ctx, tx, e, env.project, resume != nil || worked)
 	if err != nil {
 		return core.AgentSession{}, err
 	}
+	if pick.hold != "" {
+		return core.AgentSession{}, o.hold(ctx, tx, e, first, resume, pick.hold)
+	}
+	node, rt := pick.node, pick.rt
 	if first, resume, err = o.moveResume(ctx, tx, e, node.ID, rt, first, resume); err != nil {
 		return core.AgentSession{}, err
 	}
@@ -735,11 +742,11 @@ func (o *Orchestrator) syncNode(ctx context.Context, tx *core.Tx, env sessionEnv
 	if worked {
 		return *env.emp.NodeID, nil
 	}
-	node, _, err := o.pickNode(ctx, tx, env.emp, env.project, false)
-	if errors.Is(err, ErrNoNode) {
+	pick, err := o.pickNode(ctx, tx, env.emp, env.project, false)
+	if errors.Is(err, ErrNoNode) || (err == nil && pick.hold != "") {
 		return "", nil
 	}
-	return node.ID, err
+	return pick.node.ID, err
 }
 
 // ExpectedSHA is the commit expected in repository repo of a review: expect[repo], or for a
