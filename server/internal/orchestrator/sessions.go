@@ -67,6 +67,9 @@ func (o *Orchestrator) Deliver(ctx context.Context, tx *core.Tx, e core.Employee
 	sess, err := core.LiveSession(ctx, tx, e.ID)
 	switch {
 	case errors.Is(err, core.ErrNotFound):
+		if held, err := o.appendHeld(ctx, tx, e, firstMessage(msgID, d.Text, d)); held || err != nil {
+			return m, err
+		}
 		text, resume, err := o.continuation(ctx, tx, e, d.Text)
 		if err != nil {
 			return m, err
@@ -312,6 +315,9 @@ func (o *Orchestrator) MoveToThread(ctx context.Context, tx *core.Tx, e core.Emp
 		return e, err
 	}
 	e.CurrentThreadID = &threadID
+	if err := o.dropOtherThreadHold(ctx, tx, e, threadID); err != nil {
+		return e, err
+	}
 	s, err := core.LiveSession(ctx, tx, e.ID)
 	if errors.Is(err, core.ErrNotFound) || (err == nil && sameThread(s.ThreadID, &threadID)) {
 		return e, nil
@@ -411,7 +417,8 @@ func orDefault(v, d string) string {
 	return v
 }
 
-// openSession creates a logical session on a node and queues git.prepare + session.open.
+// openSession creates a logical session on a node and queues git.prepare + session.open. When no
+// node can run it (pickNode hold) the messages are held instead and the session is the zero value.
 func (o *Orchestrator) openSession(ctx context.Context, tx *core.Tx, e core.Employee, first *protocol.FirstMessage,
 	resume *protocol.ResumeRef) (core.AgentSession, error) {
 	env, err := o.loadEnv(ctx, tx, e)
@@ -426,10 +433,14 @@ func (o *Orchestrator) openSession(ctx context.Context, tx *core.Tx, e core.Empl
 	if err != nil {
 		return core.AgentSession{}, err
 	}
-	node, rt, err := o.pickNode(ctx, tx, e, env.project, resume != nil || worked)
+	pick, err := o.pickNode(ctx, tx, e, env.project, resume != nil || worked)
 	if err != nil {
 		return core.AgentSession{}, err
 	}
+	if pick.hold != "" {
+		return core.AgentSession{}, o.hold(ctx, tx, e, first, resume, pick.hold)
+	}
+	node, rt := pick.node, pick.rt
 	if first, resume, err = o.moveResume(ctx, tx, e, node.ID, rt, first, resume); err != nil {
 		return core.AgentSession{}, err
 	}
@@ -735,11 +746,11 @@ func (o *Orchestrator) syncNode(ctx context.Context, tx *core.Tx, env sessionEnv
 	if worked {
 		return *env.emp.NodeID, nil
 	}
-	node, _, err := o.pickNode(ctx, tx, env.emp, env.project, false)
-	if errors.Is(err, ErrNoNode) {
+	pick, err := o.pickNode(ctx, tx, env.emp, env.project, false)
+	if errors.Is(err, ErrNoNode) || (err == nil && pick.hold != "") {
 		return "", nil
 	}
-	return node.ID, err
+	return pick.node.ID, err
 }
 
 // ExpectedSHA is the commit expected in repository repo of a review: expect[repo], or for a

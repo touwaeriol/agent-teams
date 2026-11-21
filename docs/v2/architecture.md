@@ -607,7 +607,7 @@ SSE event: status → 网页办公室
 | `offline` | 员工所在节点离线 |
 | `broken` | 会话错误未恢复（`session.error`、认证失败、连续崩溃） |
 | `raising_hand` | 该员工有 open 的审批或阻塞型提问（user 或 lead） |
-| `queued` | 有消息或任务要处理，但节点活跃会话数已满，守护进程把它排在队里（`session.state queued`，办公室显示“排队等工位”） |
+| `queued` | 有消息或任务要处理，但节点活跃会话数已满，守护进程把它排在队里（`session.state queued`，办公室显示“排队等工位”）；子状态 `no_runtime`：没有候选节点装好并登录了它的运行时（CLI），会话暂存在控制台，气泡写原因，节点登录后自动开出（data-model.md §2.7） |
 | `walking_to_board` → `claiming` → `returning` | `task.claimed` 之后的固定动画序列（时长由布局 JSON 的路径长度决定，控制台只发一次 `claimed`，动画在前端播放；状态表里记 `claiming`） |
 | `typing` / `reading` / `running` | 最近一个 `tool_started` 的类别为 edit / read / shell（`running` 带子类：测试、提交、看 CI） |
 | `thinking` | 回合进行中、没有工具在跑 |

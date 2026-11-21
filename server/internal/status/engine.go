@@ -191,7 +191,7 @@ func (e *Engine) row(emp core.Employee, d Decision, a activity, task core.Task) 
 		row.TaskID, row.TaskKind = a.claimTask, a.claimKind
 	}
 	row.Bubble, row.BubbleKind = defaultBubble(d, a.summary, row.TaskID)
-	if a.bubble != "" && time.Now().Before(a.bubbleUntil) && d.State != "raising_hand" {
+	if a.bubble != "" && time.Now().Before(a.bubbleUntil) && d.State != "raising_hand" && d.Substate != SubstateNoRuntime {
 		until := a.bubbleUntil
 		row.Bubble, row.BubbleKind, row.BubbleUntil = a.bubble, first(a.bubbleKind, "plain"), &until
 	}

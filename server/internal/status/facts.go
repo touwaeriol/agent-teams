@@ -21,6 +21,15 @@ func (e *Engine) facts(ctx context.Context, tx *core.Tx, emp core.Employee, a ac
 		f.NodeOffline = sess.NodeID != nil && !e.online(*sess.NodeID)
 	case err != core.ErrNotFound:
 		return f, core.Task{}, err
+	default:
+		h, err := core.HoldOf(ctx, tx, emp.ID)
+		if err != nil && err != core.ErrNotFound {
+			return f, core.Task{}, err
+		}
+		f.Held = h.Reason
+		if err == nil && f.Held == "" {
+			f.Held = "没有能运行它的节点"
+		}
 	}
 	hands, err := core.RaisedHands(ctx, tx, emp.ProjectID, emp.WorkThreadID(), emp.Name)
 	if err != nil {

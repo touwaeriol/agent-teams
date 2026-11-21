@@ -505,6 +505,7 @@
   - Claude：SDK 自带 CLI，`installed` 恒为 true，`version` 是 CLI 报告的版本。登录方式靠 SDK 探测（起一次 CLI 读 `initializationResult().account`，不调模型），只在强制检测（启动、`node.runtimes_refresh`）、凭证文件的大小/修改时间或 API Key 环境变量变了时重跑；非强制的重探距上次探测结束不足 30 秒时先沿用上次结果，到点再补一次检测（CLI 启动时可能改写凭证文件，避免反复起 CLI；局限：探测进行中凭证文件又被改写时，这次变化会被当作 CLI 自己的写入，需等文件再次变化或手动重新检测才会更新）；比较基准取探测结束时的文件状态。探测失败或超时（重新检测时 12 秒）按文件猜测（有凭证文件 → `subscription`，有 `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` → `api_key`）并填 `error: "probe_failed: …"`，5 分钟后再试。Claude 凭证里的 `expiresAt` 是会自动刷新的访问令牌的过期时间，不代表登录过期，所以不填 `auth_expires_at`/`expired`。
   - Codex：不起进程，`OPENAI_API_KEY` → `api_key`；否则看 `$CODEX_HOME/auth.json` 的结构：`auth_mode` 是 `apikey`，或 `OPENAI_API_KEY` 非空而没有 `tokens` → `api_key`，其余（有 `tokens`、结构不认识、读不了）→ `chatgpt`；没有文件或文件为空 → `none`。只判断字段在不在、空不空，解析出的对象立刻丢弃，不记录、不上报任何值；`path` 是固定版本的 `codex.js`，找不到时 `installed:false, auth:"unknown"`。
   - 单个检测器抛错或超过 14 秒，该运行时报 `auth:"unknown"` 和 `error: "detect_failed: …"`；`error` 经过脱敏、最长 200 字符。检测结果同时更新 `hello.runtimes`、`node.usage` 用的登录方式和新会话。
+- **控制台怎么用**：报告存进 `at_node_runtimes`（data-model.md §2.2），节点页 `NodeView.clis` 显示；在线且带 `runtime_status` 的节点，某运行时没装或没登录就不往这里派该运行时的会话，所有候选节点都不行时会话暂存并显示原因，报告变为可用后自动开出（data-model.md §2.7）。
 - **`node.runtimes_refresh`**（控制台 → 守护进程，不可靠，body 可以是空对象，也可以带 `runtimes`，例如 `["claude"]`）：节点页点“重新检测”时发。守护进程立即重新检测请求的运行时（省略 = 全部），回一条 `node.runtimes`，其中仍带全部运行时。
 
 ## 10. 关闭码

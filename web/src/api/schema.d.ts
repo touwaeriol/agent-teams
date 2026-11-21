@@ -923,6 +923,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/nodes/{id}/recheck": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check the node's runtime CLIs (install, login) and quota now; waits up to 15 s and returns the node */
+        post: operations["recheck-node"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/nodes/{id}/sessions": {
         parameters: {
             query?: never;
@@ -3204,6 +3221,41 @@ export interface components {
             signature: string;
             version: string;
         };
+        NodeRuntime: {
+            /**
+             * @description How the runtime is logged in
+             * @enum {string}
+             */
+            auth: "subscription" | "chatgpt" | "api_key" | "none" | "unknown";
+            /**
+             * Format: date-time
+             * @description When the login expires, when the daemon can tell
+             */
+            auth_expires_at?: string;
+            /**
+             * Format: date-time
+             * @description When the daemon checked
+             */
+            checked_at: string;
+            /** @description Why the check failed (no credentials) */
+            error?: string;
+            /** @description The login is known to be expired */
+            expired: boolean;
+            /** @description The CLI was found and runs */
+            installed: boolean;
+            /** @description Executable the daemon found */
+            path?: string;
+            /** @description Installed, logged in and not expired: sessions of this runtime may be scheduled on the node */
+            ready: boolean;
+            /** @description Runtime id (claude, codex, …) */
+            runtime: string;
+            /**
+             * Format: date-time
+             * @description When the console last stored a change
+             */
+            updated_at: string;
+            version?: string;
+        };
         NodeSession: {
             employee: string;
             /** Format: date-time */
@@ -3242,6 +3294,8 @@ export interface components {
             capacity: {
                 [key: string]: unknown;
             };
+            /** @description Install and login state of each runtime CLI as last reported (node.runtimes), ordered by runtime; empty when the daemon never reported */
+            clis: components["schemas"]["NodeRuntime"][] | null;
             /** Format: date-time */
             created_at: string;
             id: string;
@@ -3265,6 +3319,8 @@ export interface components {
             protocol: number;
             /** Format: int64 */
             queued: number;
+            /** @description hello.features has runtime_status (the last hello while offline): the daemon reports its CLIs and POST /api/nodes/{id}/recheck works */
+            runtime_status: boolean;
             runtimes: {
                 [key: string]: unknown;
             };
@@ -3544,6 +3600,12 @@ export interface components {
                 [key: string]: string;
             };
             ok: boolean;
+        };
+        RecheckOutputBody: {
+            /** @description The node with the CLI states the answer stored (same as GET /api/nodes) */
+            node: components["schemas"]["NodeView"];
+            /** @description The node did not answer in time; clis are the previous report */
+            stale?: boolean;
         };
         RefCandidate: {
             detail: string;
@@ -6834,6 +6896,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NodeLogsOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "recheck-node": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecheckOutputBody"];
                 };
             };
             /** @description Error */
