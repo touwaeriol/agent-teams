@@ -10,6 +10,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -150,7 +151,7 @@ func nilIfEmpty(s string) *string {
 
 func runtimeOf(r store.Role) string {
 	if r.Runtime == "" {
-		return "claude"
+		return runtimes.Default().ID
 	}
 	return r.Runtime
 }

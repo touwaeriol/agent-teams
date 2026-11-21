@@ -223,7 +223,7 @@ func TestLeadRuntimeIsClaude(t *testing.T) {
 	roles[1].Runtime = Codex
 	Normalize(roles, looks)
 	got := Validate(roles, Context{Nodes: nodes(), Looks: looks})
-	if problemPaths(got) != "roles[1].runtime" || got[0].Message != "组长只能用 Claude" {
+	if problemPaths(got) != "roles[1].runtime" || got[0].Message != "组长只能用 Claude Code" {
 		t.Fatalf("problems %v", got)
 	}
 }

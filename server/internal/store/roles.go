@@ -6,6 +6,8 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+
+	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
 )
 
 // Look is an employee's appearance; outfit/accessory are keys of the layout's looks.
@@ -107,7 +109,7 @@ func (s *Store) ReplaceRoles(ctx context.Context, userID string, roles []Role) e
 		return err
 	}
 	// Park kept rows on unique placeholder keys so renames and tier swaps cannot collide mid-way.
-	park := map[string]any{"role": gorm.Expr("'~' || id"), "tier": "member", "runtime": "claude", "read_only": false}
+	park := map[string]any{"role": gorm.Expr("'~' || id"), "tier": "member", "runtime": runtimes.Claude, "read_only": false}
 	if err := templates().Where("id = ANY(?)", keep).Updates(park).Error; err != nil {
 		return err
 	}

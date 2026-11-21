@@ -10,6 +10,7 @@ import { keys, useCoordinator, useOverview, useProject } from "@/api/queries";
 import type { OverviewView } from "@/api/views";
 import Spinner from "@/components/common/Spinner.vue";
 import { EFFORTS } from "@/lib/projectSettings";
+import { runtimeSpec } from "@/lib/runtimes";
 import { cn } from "@/lib/utils";
 import { contextRows, statusSummary } from "./panels";
 import type { ComposerAssist, Panel } from "./useComposerAssist";
@@ -94,7 +95,7 @@ const loading = computed(
           </li>
         </ul>
       </template>
-      <p v-if="skills.runtime === 'codex'" class="text-muted-foreground">Codex 员工没有斜杠技能。</p>
+      <p v-if="!runtimeSpec(skills.runtime).slashCommands" class="text-muted-foreground">{{ runtimeSpec(skills.runtime).label }} 员工没有斜杠技能。</p>
       <p v-else-if="skills.commands.length === 0" class="text-muted-foreground">
         {{ skills.tier === "coordinator" ? "项目统筹不带技能和插件。" : `${skills.employee} 的岗位没有配置技能或插件。` }}
       </p>

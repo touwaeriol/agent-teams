@@ -18,13 +18,12 @@ import { Dispatcher, type CommandHandler } from "./link/dispatcher.js";
 import { Inbox, type Reply } from "./link/inbox.js";
 import { Outbox } from "./link/outbox.js";
 import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, FileDownload, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, NodeUsageRefresh, SessionClose, SshCertResponse, SshServersUpdate, SessionCompact, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
-import { probeClaude, probeCodex } from "./runtimes.js";
 import { readClaudeUsage, UsageReporter, type UsageSources } from "./usage.js";
-import { ClaudeDriver, type QueryFn } from "./sessions/claude/driver.js";
-import { CodexDriver } from "./sessions/codex/driver.js";
+import type { QueryFn } from "./sessions/claude/driver.js";
+import { RuntimeRegistry } from "./sessions/registry.js";
 import { CodexHub } from "./sessions/codex/hub.js";
 import { materializeSkills } from "./sessions/skills.js";
-import { codexMcpServers, materializePlugins } from "./sessions/plugins.js";
+import { materializePlugins } from "./sessions/plugins.js";
 import { buildEnv, CODEX_PASS_ENV, gitIdentity } from "./sessions/env.js";
 import { SessionManager } from "./sessions/manager.js";
 import type { ToolPolicy } from "./sessions/policy.js";
@@ -36,7 +35,7 @@ import { applyUpgrade } from "./upgrade.js";
 import type { Logger } from "./util/log.js";
 import { absPath } from "./sessions/claude/options.js";
 import { consoleImageFetcher } from "./sessions/images.js";
-import { DAEMON_VERSION, PROTOCOLS, CLAUDE_SDK_VERSION, CODEX_CLI_VERSION } from "./version.js";
+import { DAEMON_VERSION, PROTOCOLS } from "./version.js";
 
 export interface DaemonOptions {
   /** ws(s)://<console>/nodes/connect */
@@ -111,8 +110,8 @@ export class Daemon {
   /** Per-employee plugin copies at exact versions (sessions/plugins.ts), outside every worktree. */
   private readonly pluginsRoot: string;
   private readonly isolation: Isolation;
-  private claudeRuntime: ClaudeRuntime = { sdk: CLAUDE_SDK_VERSION, auth: "none" };
-  private codexRuntime: CodexRuntime = { cli: CODEX_CLI_VERSION, auth: "none", sandbox_ok: false };
+  /** The agent runtimes this node runs (sessions/registry.ts). */
+  readonly runtimes: RuntimeRegistry;
   private statsTimer: NodeJS.Timeout | null = null;
   private readonly usage: UsageReporter;
   private readonly ssh: SshHub;
@@ -146,6 +145,11 @@ export class Daemon {
     this.credServer = new CredServer(credSocketPath(o.runtimeDir), this.creds, o.log, { gh: () => this.gh.resolve(), ghConfigRoot: join(dataDir, "gh-config") });
     this.toolhost = new LoopbackToolHost(o.log);
     this.hub = new CodexHub({ env: this.codexServerEnv(), log: o.log, clientVersion: DAEMON_VERSION, ...(o.codexCommand ? { command: o.codexCommand } : {}) });
+    this.runtimes = RuntimeRegistry.builtin({
+      root: o.root, employeeHome: this.employeeHome, claudeConfigDir: o.claudeConfigDir, codexHome: o.codexHome,
+      sandboxOk: () => this.isolation !== "none", claudeEnv: () => this.claudeEnv({}), claudeFixed: () => this.claudeFixed(),
+      secretPaths: () => this.secretPaths(), hub: this.hub, toolhost: this.toolhost, ...(o.queryFn ? { queryFn: o.queryFn } : {}),
+    });
     this.git = new GitJobs({ root: o.root, platform: this.platform, gitBaseUrl: o.gitBaseUrl, mirrorDir: join(o.stateDir, "mirrors"), log: o.log, credential: (job, repo, purpose, host, path) => this.jobCredential(job, repo, purpose, host, path), gitSsh: gitSshCommand(o.nodeCmd), lookup: (id) => this.recordedResult(id), ...(o.reviewRetryMs !== undefined ? { reviewRetryMs: o.reviewRetryMs } : {}) });
     this.sessions = new SessionManager({
       root: o.root, stateDir: o.stateDir, send, approvals: this.approvals, tools: this.tools, log: o.log, maxActive: o.maxActive,
@@ -202,8 +206,7 @@ export class Daemon {
   }
 
   private async probe(): Promise<void> {
-    this.claudeRuntime = await probeClaude(this.claudeEnv({}), this.employeeHome);
-    this.codexRuntime = probeCodex(this.o.codexHome, process.env, this.isolation !== "none");
+    await this.runtimes.probeAll();
   }
 
   hello(): Hello {
@@ -216,7 +219,7 @@ export class Daemon {
       host: hostname(),
       root: resolve(this.o.root),
       capacity: { ...(this.o.maxActive ? { max_active_sessions: this.o.maxActive } : {}), cpus: cpus().length, mem_mb: Math.round(totalmem() / 1048576) },
-      runtimes: { claude: this.claudeRuntime, codex: this.codexRuntime },
+      runtimes: this.runtimes.hello(),
       features: existsSync(join(this.o.configDir, "release.pub")) ? FEATURES : FEATURES.filter((f) => f !== "upgrade"),
       ...(this.sshClient ? { ssh_client: { version: this.sshClient } } : {}),
       isolated: false,
@@ -251,8 +254,8 @@ export class Daemon {
   /** Where node.usage reads from: the login kinds probed at start, the Claude CLI and the shared codex app-server. */
   private usageSources(): UsageSources {
     return {
-      claudeAuth: () => this.claudeRuntime.auth,
-      codexAuth: () => this.codexRuntime.auth,
+      claudeAuth: () => (this.runtimes.get("claude").info() as ClaudeRuntime).auth,
+      codexAuth: () => (this.runtimes.get("codex").info() as CodexRuntime).auth,
       claudeUsage: (signal) => readClaudeUsage(this.claudeEnv({}), this.employeeHome, signal, this.o.queryFn),
       codexAccount: () => this.hub.request("account/read", { refreshToken: false }),
       codexRateLimits: () => this.hub.request("account/rateLimits/read", { excludeResetCreditDetails: true }),
@@ -339,15 +342,13 @@ export class Daemon {
   // ---- session runtime construction ----
 
   private createDriver(spec: SessionOpen, absCwd: string, sink: Session): { driver: Driver; ctx: DriverContext } {
-    const skills = spec.runtime === "claude" ? materializeSkills(this.skillsRoot, spec) : null;
+    const runtime = this.runtimes.get(spec.runtime);
+    const skills = runtime.nativeSkills ? materializeSkills(this.skillsRoot, spec) : null;
     const plugins = materializePlugins(this.pluginsRoot, spec);
     const readable = [...(skills ? [skills.pluginDir] : []), ...plugins.map((p) => p.dir)];
     const env = this.sessionEnv(spec);
     const ctx: DriverContext = { spec, absCwd, env, ...(env.AT_SSH_CONFIG ? { systemExtra: sshPrompt((spec.ssh_servers ?? []).map((s) => s.name)) } : {}), policy: this.policy(spec, absCwd, readable), sink, log: this.o.log.child({ session: spec.session_id }) };
-    const driver = spec.runtime === "codex"
-      ? new CodexDriver(ctx, { hub: this.hub, toolhost: this.toolhost, pluginServers: codexMcpServers(plugins) })
-      : new ClaudeDriver(ctx, { root: this.o.root, claudeConfigDir: this.o.claudeConfigDir, secretPaths: this.secretPaths(), skills, plugins, ...(this.o.queryFn ? { queryFn: this.o.queryFn } : {}) });
-    return { driver, ctx };
+    return { driver: runtime.createDriver(ctx, { skills, plugins }), ctx };
   }
 
   private policy(spec: SessionOpen, absCwd: string, readable: string[]): ToolPolicy {
@@ -371,14 +372,14 @@ export class Daemon {
     const cred = this.credEnv(spec, ssh);
     if (!ssh) this.ssh.drop(spec.session_id);
     const sshEnv: Record<string, string> = ssh ? { AT_SSH_CONFIG: this.ssh.open(spec.session_id, spec.open_gen, spec.ssh_servers ?? []) } : {};
-    const fixed = spec.runtime === "claude" ? this.claudeFixed() : {};
+    const runtime = this.runtimes.get(spec.runtime);
     const extra: Record<string, string> = { ...gitIdentity(spec.employee.name), ...(spec.env ?? {}) };
     // The session's own SSH plumbing is the platform's: spec.env cannot point ssh elsewhere.
     for (const k of ["AT_SSH_CONFIG", "SSH_AUTH_SOCK"]) delete extra[k];
     return buildEnv({
       base: process.env, home: this.employeeHome, extra,
-      passList: spec.runtime === "codex" ? [...this.o.passEnv, ...CODEX_PASS_ENV] : this.o.passEnv,
-      fixed: { ...fixed, ...cred, ...sshEnv }, pathPrefix: cred.AT_CRED_SOCK || sshEnv.AT_SSH_CONFIG ? [this.platform.binDir] : [],
+      passList: [...this.o.passEnv, ...runtime.passEnv],
+      fixed: { ...runtime.fixedEnv(), ...cred, ...sshEnv }, pathPrefix: cred.AT_CRED_SOCK || sshEnv.AT_SSH_CONFIG ? [this.platform.binDir] : [],
     });
   }
 

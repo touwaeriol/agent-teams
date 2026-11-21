@@ -8,6 +8,7 @@ import type { RoleView } from "@/api/views";
 import DropdownMenu from "@/components/common/DropdownMenu.vue";
 import type { OfficeLayout } from "@/office";
 import { canHaveSkills, countText, isReadOnly, LEVEL, roleName, ruleText } from "@/lib/roles";
+import { RUNTIME_SPECS } from "@/lib/runtimes";
 import { toast } from "@/lib/toast";
 import CommandEditor from "./CommandEditor.vue";
 import LookEditor from "./LookEditor.vue";
@@ -64,8 +65,7 @@ function save(r: RoleView) {
       <span class="flex min-w-0 flex-col gap-1">
         <span class="text-xs text-muted-foreground">类型</span>
         <el-select :model-value="role.runtime" :disabled="!member" class="at-select-36 at-text-13" aria-label="类型" @update:model-value="setRuntime">
-          <el-option value="claude" label="Claude Code" />
-          <el-option value="codex" label="Codex" />
+          <el-option v-for="r in RUNTIME_SPECS" :key="r.id" :value="r.id" :label="r.label" />
         </el-select>
       </span>
       <span class="flex min-w-0 flex-col gap-1">

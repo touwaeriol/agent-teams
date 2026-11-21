@@ -1,13 +1,15 @@
 // Models (pure). There is no model list: every role (coordinator and lead too) and the project
 // settings name their model by hand. The fields suggest the models the roles already use plus a
 // few common ids, and accept any id in the server's format (composer.ValidModel).
-export type Runtime = "claude" | "codex";
+import { runtimeLabel, runtimeSpec, type Runtime } from "@/lib/runtimes";
+
+export { runtimeLabel, type Runtime };
 
 /** Same rule as the server (composer.ValidModel). */
 export const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]{0,99}$/;
 
 /** What a Claude session runs when neither the project nor the role names a model (orchestrator.DefaultModel). */
-export const BUILTIN_MODEL = "claude-opus-5-5";
+export const BUILTIN_MODEL = runtimeSpec("claude").builtinModel;
 
 /** Common ids offered first, per runtime, with their display names. */
 export const COMMON_MODELS: Record<Runtime, { id: string; label: string }[]> = {
@@ -18,8 +20,6 @@ export const COMMON_MODELS: Record<Runtime, { id: string; label: string }[]> = {
   ],
   codex: [],
 };
-
-export const runtimeLabel = (r: string) => (r === "codex" ? "Codex" : "Claude Code");
 
 /** Whether `id` may be saved as a model: "" (not set) or the server's format. */
 export function validModel(id: string): boolean {
@@ -39,7 +39,8 @@ export function modelName(id: string): string {
 
 /** What a role's empty model falls back to (the built-in default), short enough for the placeholder. */
 export function emptyRoleModel(runtime: Runtime): string {
-  return runtime === "codex" ? "留空 = Codex 默认" : `留空 = ${BUILTIN_MODEL}`;
+  const s = runtimeSpec(runtime);
+  return s.builtinModel ? `留空 = ${s.builtinModel}` : `留空 = ${s.label} 默认`;
 }
 
 interface ScopedRole {
@@ -80,10 +81,16 @@ export function roleModelNames(roles: ScopedRole[], field: ProjectField): string
   const out: string[] = [];
   for (const r of scopeRoles(roles, field)) {
     const runtime = field === "coordinator" ? (r.runtime as Runtime) || "claude" : field;
-    const name = r.model ? modelName(r.model) : runtime === "codex" ? "Codex 默认" : `内置默认 ${modelName(BUILTIN_MODEL)}`;
+    const name = r.model ? modelName(r.model) : builtinName(runtime);
     if (!out.includes(name)) out.push(name);
   }
   return out;
+}
+
+/** The name of a runtime's built-in model, for the role lists. */
+function builtinName(runtime: Runtime): string {
+  const s = runtimeSpec(runtime);
+  return s.builtinModel ? `内置默认 ${modelName(s.builtinModel)}` : `${s.label} 默认`;
 }
 
 /** The effective state of a project model field: 项目指定：X, or 跟随岗位配置（岗位：…）. */

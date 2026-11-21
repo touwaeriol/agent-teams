@@ -7,6 +7,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -144,12 +145,7 @@ func fromYAMLRole(y yamlRole, tier, key string, nodeIDs map[string]string, repor
 	return r
 }
 
-func runtimeOf(t string) string {
-	if t == "codex" {
-		return Codex
-	}
-	return Claude
-}
+func runtimeOf(t string) string { return runtimes.FromYAMLType(t) }
 
 func resolveNodes(names []string, nodeIDs map[string]string, role string, report *[]string) []string {
 	ids := []string{}
@@ -204,16 +200,13 @@ func yamlModeOf(r store.Role) string {
 }
 
 func toYAMLRole(r store.Role, nodeNames map[string]string) yamlRole {
-	y := yamlRole{Role: r.Role, Title: r.Title, Type: "claude_code", Count: r.Count, Description: r.Description,
+	y := yamlRole{Role: r.Role, Title: r.Title, Type: runtimes.Of(r.Runtime).YAMLType, Count: r.Count, Description: r.Description,
 		Instructions: r.Instructions, Model: r.Model, Effort: r.Effort, PermissionMode: yamlModeOf(r),
 		CanDelegate: r.CanDelegate, AllowedTools: r.AllowedTools, DisallowedTools: r.DisallowedTools,
 		Sandbox: r.Sandbox, MaxTurns: r.MaxTurns, Gate: r.Gate, TaskKinds: r.TaskKinds, Skills: r.Skills, Plugins: r.Plugins,
 		HiddenCommands: r.HiddenCommands, Commands: commandsToYAML(r.Commands),
 		Look:    &yamlLook{Color: r.Look.Color, Outfit: r.Look.Outfit, Accessory: r.Look.Accessory, Hair: r.Look.Hair},
 		Context: contextToYAML(r)}
-	if r.Runtime == Codex {
-		y.Type = "codex"
-	}
 	if r.ReadOnly != nil && *r.ReadOnly != (r.Gate == "review" || r.Gate == "decision") {
 		y.ReadOnly = r.ReadOnly
 	}

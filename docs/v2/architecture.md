@@ -214,6 +214,16 @@ Codex 对应：组长和 `read_only` 岗位 `sandbox: read-only, approvalPolicy:
 - **员工的会话关掉后再开**：讨论串结束（`thread_done`）后又被重新打开、用户被停用后恢复（`employee_removed`）、节点报告关闭（`node_closed`）的员工，下一条消息开的新逻辑会话带 `resume: {sdk_session_id: 上一个会话的}`，接着原来的对话；转录不在了就是上面的 resume 失败流程。策略违规（`policy_violation`）关掉的会话不续接。
 - 各种中断的结果：空闲停放 → 下一条消息按 SDK session id resume；守护进程 SIGTERM（停放全部会话）或 SIGKILL / 节点重启（本机记录按 `parked` 读回，首条投递前查转录去重）→ 重连对账后按需 resume，被打断的回合收到“守护进程重启”系统消息；会话进程崩溃 → 自动 resume 最多 3 次，转录丢了直接走 resume 失败；控制台重启 → 状态全在 PostgreSQL，阻塞调用照常等待；转录丢失 → 恢复摘要。`deploy/e2e/run_resume.mjs` 用真实 Claude 逐个验证（每次中断后问统筹之前说过的暗号）。
 
+### 6.2a 运行时注册表（Claude Code、Codex 以及以后的 agent）
+
+运行时只在两张注册表里登记，其余代码按能力判断，不比较 id：
+
+- 控制台 `server/internal/runtimes`：每种运行时一行（名称、YAML `type`、`list_team` 类型、内置默认模型、能力：`SlashCommands` 斜杠命令、`LiveModeSwitch` 运行中切权限模式、`NeedsIsolation` 只能派到隔离节点、`CanLead` 能当统筹/组长）。`orchestrator.runtimeOptions` 和 `threadModels` 按运行时填 `session.open` 的选项块和项目的讨论串模型，测试保证覆盖注册表里的每一种。
+- 守护进程 `node/src/sessions/registry.ts`：每种运行时一个 `RuntimeAdapter`（登录探测、hello 上报、透传/固定环境变量、是否原生加载技能、`createDriver`）。会话管理器只认 `Driver` 接口（start / push / interrupt / setMode / compact / close）。
+- 网页 `web/src/lib/runtimes.ts`：同一张表的展示部分（名称、斜杠命令、内置模型、订阅登录类型）。
+
+加一种运行时：写它的 `Driver` 和 adapter，协议 `Runtime` 枚举加 id 并加它的 `session.open` 选项块（以及 `hello.runtimes` 的信息结构），三张注册表各加一行。用量上报（`node/src/usage.ts`）目前仍按 Claude / Codex 各写一份读取，加运行时时一并补上。
+
 ### 6.3 平台工具：守护进程本地 MCP + WS 转发
 
 v1 的 `/mcp` 每任务一个 bearer 令牌，存在内存里，重启全失效，令牌还出现在命令行里（v1 问题 2、12）。v2 改为：

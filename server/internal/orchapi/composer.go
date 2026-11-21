@@ -12,6 +12,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/composer"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/plugins"
+	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
 	"github.com/touwaeriol/agent-teams/server/internal/skills"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -115,7 +116,7 @@ func (a *API) commands(ctx context.Context, in *cidInput) (*commandsOutput, erro
 	if out.Custom, err = composer.EmployeeCommands(ctx, a.e.Core.Pool, e, role); err != nil {
 		return nil, err
 	}
-	if e.Runtime == "codex" {
+	if !runtimes.Of(e.Runtime).SlashCommands {
 		return &commandsOutput{Body: out}, nil
 	}
 	if init, ok := latestInit(ctx, a.e.Core.Pool, e.ID); ok && init.Commands != nil {

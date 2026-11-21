@@ -2,6 +2,7 @@
 // settings patch.
 import type { NodeUsage, NodeView, RuntimeUsage, UsageWindow } from "@/api/views";
 import { summarizeNodes, nodeSlots } from "@/components/shell/nodes";
+import { RUNTIME_SPECS, runtimeSpec } from "@/lib/runtimes";
 import { timeAgo } from "@/lib/utils";
 
 export interface RuntimeInfo {
@@ -10,20 +11,17 @@ export interface RuntimeInfo {
   auth?: string;
 }
 
-export const RUNTIMES: [string, string][] = [
-  ["claude", "Claude Code"],
-  ["codex", "Codex"],
-];
+export const RUNTIMES: [string, string][] = RUNTIME_SPECS.map((r) => [r.id, r.label]);
 
 /** One runtime chip: version and login state (protocol.md hello.runtimes). */
 export function runtimeLine(key: string, info: RuntimeInfo | undefined): { ver: string; login: string; ok: boolean } {
-  if (!info || !info.cli) return { ver: "未安装", login: key === "codex" ? "安装后登录或设置 CODEX_API_KEY" : "安装后登录", ok: false };
+  if (!info || !info.cli) return { ver: "未安装", login: runtimeSpec(key).installHint, ok: false };
   if (!info.auth || info.auth === "none") return { ver: info.cli, login: "未登录", ok: false };
   return { ver: info.cli, login: info.auth === "api_key" ? "已配置 API Key" : "已登录", ok: true };
 }
 
 /** Subscription logins that have a quota to show (claude.ai / ChatGPT accounts). */
-const SUBSCRIPTION: Record<string, string> = { claude: "subscription", codex: "chatgpt" };
+const SUBSCRIPTION: Record<string, string> = Object.fromEntries(RUNTIME_SPECS.map((r) => [r.id, r.subscriptionAuth]));
 
 const WINDOW_NAMES: Record<string, string> = { five_hour: "5 小时", weekly: "每周", weekly_opus: "每周 Opus", weekly_sonnet: "每周 Sonnet" };
 

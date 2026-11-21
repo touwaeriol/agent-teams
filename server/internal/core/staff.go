@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -237,12 +238,12 @@ func NodeCandidates(e Employee, nodes []store.Node) []store.Node {
 		if len(e.Spec.NodeIDs) > 0 && !slices.Contains(e.Spec.NodeIDs, n.ID) {
 			continue
 		}
-		if e.Runtime == "codex" && !(n.Isolated || n.Isolation == "agent_user") {
+		if !runtimes.RunsOn(e.Runtime, n.Isolated, n.Isolation) {
 			continue
 		}
 		picked = append(picked, n)
 	}
-	if len(picked) == 0 && len(e.Spec.NodeIDs) > 0 && e.Runtime != "codex" {
+	if len(picked) == 0 && len(e.Spec.NodeIDs) > 0 && !runtimes.Of(e.Runtime).NeedsIsolation {
 		return nodes // configured nodes were deleted: fall back to any of the user's nodes
 	}
 	return picked

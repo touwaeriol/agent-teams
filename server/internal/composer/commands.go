@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -61,22 +62,24 @@ func NormalizeCommands(list []store.CustomCommand) []store.CustomCommand {
 
 // Where a command list belongs, for the passthrough rule.
 const (
-	ForBuiltin = ""       // platform built-ins: both modes (passthrough ones skip prompt-only employees)
-	ForClaude  = "claude" // a Claude Code coordinator or lead: both modes
-	ForCodex   = "codex"  // Codex has no slash commands over app-server: prompt only
-	ForMember  = "member" // members get commands inside platform messages: prompt only
+	ForBuiltin       = ""               // platform built-ins: both modes (passthrough ones skip prompt-only employees)
+	ForClaude        = "claude"         // a Claude Code coordinator or lead: both modes
+	ForPromptRuntime = "prompt_runtime" // a runtime without slash commands (Codex over app-server): prompt only
+	ForMember        = "member"         // members get commands inside platform messages: prompt only
 )
 
-// PromptOnly reports whether an employee can run prompt commands only: Codex (no slash commands
-// over app-server) and members (their messages arrive wrapped by the platform, so "/name"
+// PromptOnly reports whether an employee can run prompt commands only: a runtime without slash
+// commands (Codex over app-server) and members (their messages arrive wrapped by the platform, so "/name"
 // would not start the text Claude Code sees).
-func PromptOnly(runtime, tier string) bool { return runtime == "codex" || tier == "member" }
+func PromptOnly(runtime, tier string) bool {
+	return !runtimes.Of(runtime).SlashCommands || tier == "member"
+}
 
 // For is the list kind of a role.
 func For(runtime, tier string) string {
 	switch {
-	case runtime == "codex":
-		return ForCodex
+	case !runtimes.Of(runtime).SlashCommands:
+		return ForPromptRuntime
 	case tier == "member":
 		return ForMember
 	}
@@ -110,7 +113,7 @@ func commandProblems(p string, c store.CustomCommand, kind string) []Problem {
 		{"name", !namePattern.MatchString(c.Name), "命令名用小写字母开头的小写字母、数字、- 和 _，最多 32 个字符（插件命令可写 插件:命令）"},
 		{"name", slices.Contains(PlatformCommands, c.Name), "/" + c.Name + " 是平台命令，换个名字"},
 		{"mode", c.Mode != store.CommandPrompt && c.Mode != store.CommandPassthrough, "方式只能是 prompt（提示词模板）或 passthrough（透传给 Claude Code）"},
-		{"mode", kind == ForCodex && c.Mode == store.CommandPassthrough, "Codex 没有斜杠命令，只能用提示词模板"},
+		{"mode", kind == ForPromptRuntime && c.Mode == store.CommandPassthrough, "Codex 等没有斜杠命令的 agent 只能用提示词模板"},
 		{"mode", kind == ForMember && c.Mode == store.CommandPassthrough, "成员收到的是平台转达的消息，只能用提示词模板"},
 		{"prompt", c.Mode == store.CommandPrompt && c.Prompt == "", "提示词模板不能为空"},
 		{"prompt", c.Mode == store.CommandPrompt && strings.HasPrefix(c.Prompt, "/"), "提示词模板不能以 / 开头（要运行斜杠命令请用透传）"},
