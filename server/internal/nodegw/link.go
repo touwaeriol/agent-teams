@@ -29,8 +29,10 @@ type link struct {
 	mu      sync.Mutex
 	sentSeq int64 // highest command seq written on this link
 	stats   protocol.NodeStats
-	rejects []time.Time
-	sendMu  sync.Mutex
+	// reported: a node.runtimes arrived on this link (rows from an earlier link may be stale)
+	reported bool
+	rejects  []time.Time
+	sendMu   sync.Mutex
 }
 
 func newLink(g *Gateway, conn *websocket.Conn, node store.Node, hello *protocol.Hello, ackSeq int64) *link {
@@ -241,7 +243,7 @@ func (l *link) handleUnreliable(ctx context.Context, env *protocol.Envelope, bod
 		if !hasFeature(l.hello.Features, FeatureRuntimeStatus) {
 			return nil // only a daemon that announced runtime_status reports its CLIs
 		}
-		if err := l.g.recordRuntimes(ctx, l.node, b); err != nil {
+		if err := l.g.recordRuntimes(ctx, l, b); err != nil {
 			l.g.log.Warn("node.runtimes", "node_id", l.node.ID, "err", err)
 		}
 		return nil

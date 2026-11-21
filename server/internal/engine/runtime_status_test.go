@@ -390,3 +390,43 @@ func TestHoldFollowsThread(t *testing.T) {
 	eventually(t, "lead of A's hold dropped", func() bool { _, err := holdOf(w, leadA); return err == core.ErrNotFound })
 	expectNone(t, n, protocol.TypeSessionOpen, 200*time.Millisecond, nil)
 }
+
+// TestRuntimeStatusReconnect: rows an earlier connection left in at_node_runtimes do not count
+// after the node reconnects: even when they say logged in, held sessions wait until the new
+// connection's first node.runtimes, and open once it says logged in.
+func TestRuntimeStatusReconnect(t *testing.T) {
+	w := newWorld(t, nil)
+	b := w.signUp("again@example.com")
+	var node nodeCreated
+	b.must(201, "POST", "/api/nodes", map[string]string{"name": "n1"}, &node)
+	b.must(200, "GET", "/api/roles", nil, nil)
+	var project struct{ ID string }
+	b.must(201, "POST", "/api/projects", map[string]any{"name": "p"}, &project)
+	n := w.connect(node.Token, nodetest.Options{Features: statusFeatures})
+	ctx, cancel := w.waitCtx()
+	defer cancel()
+	if err := n.SendUnreliable(ctx, protocol.TypeNodeRuntimes, cliReport("hello", map[string]string{"claude": "none"})); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "report stored", func() bool { return len(b.nodeCLIs(t, node.Node.ID).CLIs) == 1 })
+	b.must(201, "POST", "/api/projects/"+project.ID+"/threads", map[string]any{"title": "Work", "brief": "do it"}, nil)
+	lead := employeeID(t, w, project.ID, "lead-1")
+	eventually(t, "lead held", func() bool { _, err := holdOf(w, lead); return err == nil })
+	n.Close()
+	eventually(t, "offline", func() bool { return !w.e.Gateway.Online(node.Node.ID) })
+
+	// The stored row now says logged in (as a report from the earlier connection could).
+	if err := w.e.Core.Pool.Gorm(w.ctx).Exec(`UPDATE at_node_runtimes SET auth = 'subscription' WHERE node_id = ?`, node.Node.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	n2 := w.connect(node.Token, nodetest.Options{Features: statusFeatures})
+	eventually(t, "held while the reconnected node is checked", func() bool {
+		h, err := holdOf(w, lead)
+		return err == nil && strings.Contains(h.Reason, "正在检测节点上 Claude Code")
+	})
+	expectNone(t, n2, protocol.TypeSessionOpen, 500*time.Millisecond, nil)
+	if err := n2.SendUnreliable(ctx, protocol.TypeNodeRuntimes, cliReport("hello", map[string]string{"claude": "subscription"})); err != nil {
+		t.Fatal(err)
+	}
+	expectOpen(t, w, n2, "lead-1")
+}
