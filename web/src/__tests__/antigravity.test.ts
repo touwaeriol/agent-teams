@@ -5,7 +5,7 @@ import { runtimeNote } from "@/lib/plugins";
 import { RUNTIME_LABEL } from "@/lib/present";
 import { newRole, readOnlyCaveat, roleProblems } from "@/lib/roles";
 import { runtimesFor } from "@/lib/runtimes";
-import { runtimeLine } from "@/pages/settings/nodes/nodes";
+import { cliRows, runtimeLine, usageView } from "@/pages/settings/nodes/nodes";
 import type { RoleView } from "@/api/views";
 
 const CAVEAT = "Antigravity 的只读靠禁用写类工具和拒绝写权限实现，不是沙箱级保证";
@@ -61,5 +61,29 @@ describe("antigravity runtime", () => {
     expect(promptOnly({ tier: "member", runtime: "antigravity" })).toBe(true);
     expect(runtimeNote({ runtime: "antigravity" })).toContain("Antigravity 员工只用插件里的技能");
     expect(runtimeNote({ runtime: "claude", runtimes: ["claude", "codex", "antigravity"] })).toContain("Codex / Antigravity 员工");
+  });
+});
+
+describe("antigravity on the node card", () => {
+  const at = new Date().toISOString();
+  const cli = (runtime: string, auth: string, installed = true) => ({ runtime, installed, auth, expired: false, checked_at: at, updated_at: at, ready: installed && auth !== "none" && auth !== "unknown", ...(installed ? { version: "1.5.14" } : {}) });
+
+  it("shows a new daemon's report once, with the Google login wording", () => {
+    const rows = cliRows({ runtimes: { antigravity: { cli: "1.5.14", auth: "oauth" } }, clis: [cli("claude", "subscription"), cli("antigravity", "subscription")], runtime_status: true, online: true } as never);
+    expect(rows.map((r) => [r.key, r.label, r.login, r.tone])).toEqual([["claude", "Claude Code", "已登录（订阅）", "ok"], ["antigravity", "Antigravity", "已登录（Google 账号）", "ok"]]);
+    const off = cliRows({ runtimes: {}, clis: [cli("antigravity", "none")], runtime_status: true, online: true } as never);
+    expect(off.map((r) => [r.login, r.tone])).toEqual([["未登录", "warn"]]);
+    const missing = cliRows({ runtimes: {}, clis: [cli("antigravity", "unknown", false)], runtime_status: true, online: true } as never);
+    expect(missing.map((r) => [r.ver, r.login])).toEqual([["未安装", "安装 agy 后运行 agy acp --login 登录"]]);
+  });
+
+  it("keeps hello for a daemon without reports, and no Antigravity box when hello lacks it", () => {
+    const keys = (runtimes: object) => cliRows({ runtimes, clis: [], runtime_status: false, online: true } as never).map((r) => r.key);
+    expect(keys({ claude: { cli: "2.1", auth: "subscription" } })).toEqual(["claude", "codex"]);
+    expect(keys({ claude: { cli: "2.1", auth: "subscription" }, antigravity: { cli: "1.5.14", auth: "oauth" } })).toEqual(["claude", "codex", "antigravity"]);
+  });
+
+  it("has no quota to show", () => {
+    expect(usageView("antigravity", { cli: "1.5.14", auth: "subscription" }, undefined, { online: true })).toBeNull();
   });
 });

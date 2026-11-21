@@ -70,6 +70,8 @@ export function cliLogin(c: Pick<NodeCli, "runtime" | "installed" | "auth" | "ex
   return c.ready ? { login, tone: "ok" } : { login: "登录已过期", tone: "bad" };
 }
 
+const HELLO_ALWAYS = new Set(["claude", "codex"]);
+
 /**
  * The runtime boxes of a card: the CLIs the daemon reported (node.runtimes, in its order, any runtime
  * id) or, for a daemon that never reported (old version), the hello runtimes as before.
@@ -91,7 +93,9 @@ export function cliRows(n: Pick<NodeView, "clis" | "runtimes"> & { runtime_statu
     });
   }
   const hello = (n.runtimes ?? {}) as Record<string, RuntimeInfo>;
-  return RUNTIMES.map(([key, label]) => {
+  // Every v2 daemon reports Claude Code and Codex in hello; a later runtime (Antigravity) only shows when the hello has it,
+  // so a daemon too old to know it gets no "未安装" box for it.
+  return RUNTIMES.filter(([key]) => HELLO_ALWAYS.has(key) || hello[key] !== undefined).map(([key, label]) => {
     const r = runtimeLine(key, hello[key]);
     // A daemon that reports but has not yet (just upgraded or connected): hello data until the first report.
     const checked = n.runtime_status && n.online ? "等待首次检测" : "";
