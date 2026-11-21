@@ -97,6 +97,8 @@ describe("antigravity sessions over ACP", () => {
     expect(p.mcpServers[1]).toEqual({ name: "plugin_tinyplug_calc", command: "node", args: [join(dir, "s.mjs")], env: [{ name: "K", value: "v" }] });
     expect(p._meta).toEqual({ antigravity: { systemPrompt: { append: "be careful" } } });
     expect(h!.console.ofType("hello")[0]!.body.runtimes.antigravity).toEqual({ cli: "", auth: "none", installed: false });
+    // the session that opened re-checks the state the next hello reports (no timer)
+    expect(h!.daemon.runtimes.get("antigravity").info()).toMatchObject({ installed: true, auth: "oauth" });
   });
 
   it("maps a turn: thinking, streamed text, plan as todos, final text and turn_ended", async () => {
@@ -146,6 +148,16 @@ describe("antigravity sessions over ACP", () => {
     await say("s_A5", "m_1", "please write");
     expect((await finalText("s_A5")).body.text).toBe("permission: allow-once");
     expect(h!.console.ofType("approval.request")).toEqual([]);
+  });
+
+  it("names command permissions Bash, so the console's shell denylist applies", async () => {
+    await startAgy();
+    await openAndRelease("s_A0");
+    await say("s_A0", "m_1", "run make test");
+    const req = await h!.console.waitType("approval.request");
+    expect(req.body).toMatchObject({ source: "antigravity_permission", tool_name: "Bash", input: { command: "make test" } });
+    h!.console.command("approval.resolve", { approval_id: req.body.approval_id, decision: "deny", decided_by: "user:1" });
+    expect((await finalText("s_A0")).body.text).toBe("permission: reject-once");
   });
 
   it("refuses writes and commands outside bash_policy in read-only sessions, without cards", async () => {
@@ -234,6 +246,7 @@ describe("antigravity sessions over ACP", () => {
     expect(auth.body.message).toMatch(/agy acp --login/);
     const fatal = await h!.console.waitType("session.event", (b) => b.kind === "error" && b.code === "spawn_failed");
     expect(fatal.body.message).toMatch(/not logged in/);
+    expect(h!.daemon.runtimes.get("antigravity").info()).toMatchObject({ auth: "none" });
   });
 
   it("sets the role's model with session/set_model and reports a refused one", async () => {
@@ -281,7 +294,13 @@ describe("antigravity driver without agy", () => {
   it("fails to start with a clear message when agy is not installed", async () => {
     const ctx = { spec: agyOpen("s_N1"), absCwd: scratch(), env: {}, policy: policy(), sink: {} as never, log: silentLogger } as unknown as DriverContext;
     const d = new AntigravityDriver(ctx, { toolhost: {} as never, command: () => null });
+    const seen: string[] = [];
+    const d2 = new AntigravityDriver(ctx, { toolhost: {} as never, command: () => null, onStatus: (s) => seen.push(s) });
+    const t0 = Date.now();
     await expect(d.start()).rejects.toThrow(AGY_NOT_INSTALLED);
+    await expect(d2.start()).rejects.toThrow(AGY_NOT_INSTALLED);
+    expect(Date.now() - t0).toBeLessThan(500); // fails at once, nothing is spawned
+    expect(seen).toEqual(["not_installed"]);
   });
 });
 

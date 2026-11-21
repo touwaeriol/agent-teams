@@ -30,6 +30,11 @@ export interface AntigravityDriverDeps {
   pluginServers?: AcpMcpServer[];
   /** Request timeout of the setup calls (initialize, session/new…); default 60 s. */
   setupTimeoutMs?: number;
+  /**
+   * What a session start learned about the node's agy (on-demand re-check, no timer): opened
+   * (logged in), not_logged_in (-32000) or not_installed. The adapter updates hello.runtimes.
+   */
+  onStatus?: (s: "opened" | "not_logged_in" | "not_installed") => void;
 }
 
 export const AGY_NOT_INSTALLED = "Antigravity CLI (agy) is not installed on this node: install it with the official script (https://antigravity.google/cli/install.sh) and log in with `agy acp --login`";
@@ -89,7 +94,10 @@ export class AntigravityDriver implements Driver {
 
   async start(): Promise<StartResult> {
     const command = this.deps.command();
-    if (!command) throw new Error(AGY_NOT_INSTALLED);
+    if (!command) {
+      this.deps.onStatus?.("not_installed");
+      throw new Error(AGY_NOT_INSTALLED);
+    }
     this.closed = false;
     const client = new AcpClient({ command, args: ["acp", "--process-per-session"], env: this.ctx.env, cwd: this.ctx.absCwd, log: this.ctx.log });
     client.on("notification", (method, p) => this.onNotification(method, p));
@@ -115,6 +123,7 @@ export class AntigravityDriver implements Driver {
       if (!resp.sessionId) throw new Error("agy did not return a session id");
       this.sessionId = resp.sessionId;
       await this.applyModel(resp);
+      this.deps.onStatus?.("opened");
       return { sdk_session_id: this.sessionId, init: this.init() };
     } catch (err) {
       this.client = null;
@@ -141,6 +150,7 @@ export class AntigravityDriver implements Driver {
       return (await client.request<SessionResp | null>("session/new", params, t)) ?? {};
     } catch (err) {
       if (err instanceof AcpFailure && err.error.code === ACP_AUTH_REQUIRED) {
+        this.deps.onStatus?.("not_logged_in");
         this.ctx.sink.event({ kind: "error", code: "auth_failed", message: AGY_NOT_LOGGED_IN, fatal: false });
         throw new Error(AGY_NOT_LOGGED_IN);
       }
@@ -161,7 +171,10 @@ export class AntigravityDriver implements Driver {
       const r = await client.request<SessionResp | null>(method, { ...params, sessionId: this.sessionId }, t);
       return { ...(r ?? {}), sessionId: this.sessionId! };
     } catch (err) {
-      if (err instanceof AcpFailure && err.error.code === ACP_AUTH_REQUIRED) throw new Error(AGY_NOT_LOGGED_IN);
+      if (err instanceof AcpFailure && err.error.code === ACP_AUTH_REQUIRED) {
+        this.deps.onStatus?.("not_logged_in");
+        throw new Error(AGY_NOT_LOGGED_IN);
+      }
       throw new ResumeFailed((err as Error).message);
     } finally {
       this.replaying = false;

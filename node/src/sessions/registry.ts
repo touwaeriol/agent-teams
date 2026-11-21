@@ -14,7 +14,7 @@ import { ClaudeDriver, type QueryFn } from "./claude/driver.js";
 import { CodexDriver } from "./codex/driver.js";
 import type { CodexHub } from "./codex/hub.js";
 import { AntigravityDriver } from "./antigravity/driver.js";
-import { AGY_PASS_ENV, AGY_TOKEN_FILES, detectInstalled, probeAntigravity, writeAgySettings } from "./antigravity/detect.js";
+import { AGY_PASS_ENV, AGY_TOKEN_FILES, detectInstalled, detectLogin, probeAntigravity, writeAgySettings } from "./antigravity/detect.js";
 import { CODEX_PASS_ENV } from "./env.js";
 import { acpMcpServers, codexMcpServers, type MaterializedPlugin } from "./plugins.js";
 import type { MaterializedSkills } from "./skills.js";
@@ -141,7 +141,24 @@ export class AntigravityAdapter implements RuntimeAdapter {
   }
 
   createDriver(ctx: DriverContext, a: SessionAssets): Driver {
-    return new AntigravityDriver(ctx, { toolhost: this.d.toolhost, command: () => this.resolveCommand(), pluginServers: acpMcpServers(a.plugins) });
+    return new AntigravityDriver(ctx, { toolhost: this.d.toolhost, command: () => this.resolveCommand(), pluginServers: acpMcpServers(a.plugins), onStatus: (s) => this.noteStatus(s) });
+  }
+
+  /**
+   * On-demand re-check from a session start (the login is otherwise probed only at daemon start):
+   * a session that opened means agy is installed and logged in, -32000 means logged out, a missing
+   * binary means not installed. The next hello carries the new state; nothing is reported on a timer.
+   */
+  noteStatus(s: "opened" | "not_logged_in" | "not_installed"): void {
+    if (s === "not_installed") {
+      this.command = null;
+      this.current = { cli: "", auth: "none", installed: false };
+    } else if (s === "not_logged_in") {
+      this.current = { ...this.current, installed: true, auth: "none" };
+    } else if (this.current.auth === "none" || this.current.installed === false) {
+      const env = { ...(this.d.agyEnv?.() ?? {}), ...this.fixedEnv() };
+      this.current = { ...this.current, installed: true, auth: detectLogin(this.home, env) ?? "oauth" };
+    }
   }
 }
 
