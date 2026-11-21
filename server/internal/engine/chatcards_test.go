@@ -220,3 +220,61 @@ func TestCoordinatorRecapAndResume(t *testing.T) {
 		t.Fatalf("lead must resume its old conversation: %+v", leadOpen.Resume)
 	}
 }
+
+// TestTypedReplyLetsTheAgentClose: the user types in the chat instead of answering the lead's
+// cards. Nothing closes by itself: the waiting AskUserQuestion call returns at once saying a
+// message came, the message reaches the lead naming the open cards, and the lead closes the one
+// the message answers with close_question. A card it leaves open still takes the user's answer
+// later ("[Answer to qN]"); a member's card is not the lead's to close.
+func TestTypedReplyLetsTheAgentClose(t *testing.T) {
+	tm := startTeam(t)
+	via := tm.lead.startCall("ask_user", `{"via":"AskUserQuestion","questions":[{"question":"现在发布吗？","header":"发布","options":[{"label":"发布"},{"label":"等等"}]}]}`)
+	tm.lead.noResult(via)
+	tm.lead.mustCall("ask_user", map[string]any{"question": "用哪个分支？"})
+	member := tm.dev.startCall("ask_user", `{"question":"测试库用哪个？"}`)
+	tm.dev.noResult(member)
+	cards := map[string]core.QuestionView{}
+	openCards := func() {
+		var list []core.QuestionView
+		tm.b.must(200, "GET", "/api/conversations/"+tm.thread.ID+"/questions?status=all", nil, &list)
+		for _, q := range list {
+			cards[q.Text] = q
+		}
+	}
+	openCards()
+	release, plain, dev := cards["现在发布吗？"], cards["用哪个分支？"], cards["测试库用哪个？"]
+
+	tm.b.must(202, "POST", "/api/conversations/"+tm.thread.ID+"/messages", map[string]any{"content": "先别发布"}, nil)
+	res := tm.lead.result(via)
+	var out protocol.AskUserResult
+	_ = json.Unmarshal(*res.Structured, &out)
+	if !res.Ok || !strings.Contains(text(res), "close_question") || len(out.Answers) != 1 || out.Answers[0].Other == nil {
+		t.Fatalf("released call %+v %+v", res, out)
+	}
+	send := tm.lead.expectSend("先别发布")
+	if !strings.Contains(send.Text, release.ID) || !strings.Contains(send.Text, plain.ID) || strings.Contains(send.Text, dev.ID) ||
+		!strings.Contains(send.Text, "close_question") {
+		t.Fatalf("delivered %q", send.Text)
+	}
+	openCards()
+	for _, q := range cards {
+		if q.Status != "open" {
+			t.Fatalf("nothing closes by itself: %+v", q)
+		}
+	}
+
+	if r := tm.lead.call("close_question", map[string]any{"question_id": dev.ID}); r.Ok {
+		t.Fatal("lead closed a member's card")
+	}
+	tm.lead.mustCall("close_question", map[string]any{"question_id": release.ID, "answer": "先不发布"})
+	if r := tm.lead.call("close_question", map[string]any{"question_id": release.ID}); r.Ok {
+		t.Fatal("closed twice")
+	}
+	openCards()
+	if q := cards["现在发布吗？"]; q.Status != "answered" || q.Detail["answered_in_chat"] != true || *q.Answer != "先不发布" || q.DecidedBy != "employee:lead-1" {
+		t.Fatalf("closed card %+v", q)
+	}
+	tm.b.must(200, "POST", "/api/conversations/"+tm.thread.ID+"/questions/"+plain.ID+"/answer", map[string]any{"answer": "develop"}, nil)
+	tm.lead.expectSend("[Answer to " + plain.ID + "] develop")
+	tm.dev.noResult(member)
+}

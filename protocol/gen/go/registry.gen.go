@@ -116,6 +116,7 @@ const (
 	ToolAssignTask         = "assign_task"
 	ToolBroadcast          = "broadcast"
 	ToolCancelTask         = "cancel_task"
+	ToolCloseQuestion      = "close_question"
 	ToolCompleteTask       = "complete_task"
 	ToolDeleteSharedFile   = "delete_shared_file"
 	ToolEnqueueMerge       = "enqueue_merge"
@@ -179,6 +180,10 @@ var Tools = map[string]ToolMeta{
 	ToolCancelTask: {
 		Tiers: []Tier{TierLead}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(CancelTaskInput) }, NewResult: nil,
+	},
+	ToolCloseQuestion: {
+		Tiers: []Tier{TierCoordinator, TierLead}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(CloseQuestionInput) }, NewResult: nil,
 	},
 	ToolCompleteTask: {
 		Tiers: []Tier{TierMember}, Blocking: nil, Requires: "",

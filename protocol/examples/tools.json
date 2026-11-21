@@ -23,6 +23,7 @@
 "enqueue_merge":[{"member":"dev-1"},{"task_id":"t7"}],
 "open_pr":[{"title":"Employee comms","body":"Closes #12"}],
 "finish":[{"summary":"Mail and questions shipped."}],
+"close_question":[{"question_id":"q3","answer":"先别发布，用 develop"},{"question_id":"q4"}],
 "tell_user":[{"text":"收到：我理解要做的是……，打算拆成 server 和 web 两块，需要你决定……"}],
 "list_deliverables":[{},{"thread":1,"kind":"design"}],
 "read_deliverable":[{"deliverable_id":"dl_01JD3V"},{"deliverable_id":"dl_01JD3V","version":2}],

@@ -124,6 +124,7 @@ export interface ToolInputs {
   assign_task: T.AssignTaskInput;
   broadcast: T.BroadcastInput;
   cancel_task: T.CancelTaskInput;
+  close_question: T.CloseQuestionInput;
   complete_task: T.CompleteTaskInput;
   delete_shared_file: T.DeleteSharedFileInput;
   enqueue_merge: T.EnqueueMergeInput;
@@ -170,6 +171,7 @@ export interface ToolResults {
   assign_task: T.AssignTaskResult;
   broadcast: unknown;
   cancel_task: unknown;
+  close_question: unknown;
   complete_task: T.CompleteTaskResult;
   delete_shared_file: T.DeleteSharedFileResult;
   enqueue_merge: T.EnqueueMergeResult;
@@ -260,6 +262,13 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     requires: null,
     description: "Cancel a task that has not finished.",
     input_schema: {"description":"Cancel a task that has not finished.","type":"object","required":["task_id"],"additionalProperties":false,"properties":{"task_id":{"type":"string","pattern":"^t[0-9]+$"},"reason":{"type":"string"}}},
+  },
+  close_question: {
+    tiers: ["coordinator","lead"],
+    blocking: [],
+    requires: null,
+    description: "Close one of your open question cards for the user (ask_user / AskUserQuestion) because the user already answered it in the chat instead of on the card. Use it only when the user's message really answers the question; otherwise leave the card open and wait.",
+    input_schema: {"description":"Close one of your open question cards for the user (ask_user / AskUserQuestion) because the user already answered it in the chat instead of on the card. Use it only when the user's message really answers the question; otherwise leave the card open and wait.","type":"object","required":["question_id"],"additionalProperties":false,"properties":{"question_id":{"type":"string","pattern":"^q[0-9]+$"},"answer":{"type":"string","maxLength":2000,"description":"The user's answer as you understood it from the chat (shown on the closed card)."}}},
   },
   complete_task: {
     tiers: ["member"],

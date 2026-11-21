@@ -22,7 +22,7 @@ import LiveDot from "@/components/app/LiveDot.vue";
 import StateMark from "@/components/app/StateMark.vue";
 import StatusPill from "@/components/app/StatusPill.vue";
 import ThreadMark from "@/components/app/ThreadMark.vue";
-import { answerBody, answeredRows, askItems, chatQuestions, complete, emptyChoices, letter, oneClick, toggle, typeOther } from "@/lib/ask";
+import { answerBody, answeredInChat, answeredRows, askItems, chatQuestions, complete, emptyChoices, letter, oneClick, toggle, typeOther } from "@/lib/ask";
 import { chatBlocks, threadChat, threadTalk } from "@/lib/chat";
 import { readScroll, restoredTop, scrollMarkOf, writeScroll } from "@/lib/persist";
 import { checkLook, taskLook, threadLook } from "@/lib/present";
@@ -80,6 +80,13 @@ describe("question cards", () => {
     expect(answeredRows(answered)).toEqual([{ question: "会话也直接切吗？", selected: ["也直接切"] }]);
     expect(answeredRows({ ...plain, answer: "B" })[0].selected).toEqual(["B"]);
     expect(answeredRows({ ...plain, answer: "都不要" })[0]).toMatchObject({ selected: [], other: "都不要" });
+  });
+
+  it("shows no chosen rows for a card closed by a message typed in the chat", () => {
+    const closed = { ...plain, status: "answered" as const, answer: "先别发布", detail: { answered_in_chat: true } };
+    expect(answeredInChat(closed)).toBe(true);
+    expect(answeredInChat(plain)).toBe(false);
+    expect(answeredRows(closed)).toEqual([{ question: plain.text, header: "", selected: [] }]);
   });
 
   it("keeps the user's questions in the chat after answering, approvals only while open", () => {

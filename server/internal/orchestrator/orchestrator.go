@@ -70,6 +70,11 @@ type Orchestrator struct {
 	// RefContext resolves @ reference chips (meta.refs) again into the context block a
 	// forwarded message carries to the lead (set by the REST layer, which owns the lookups).
 	RefContext func(ctx context.Context, userID, projectID string, chips []map[string]any) string
+	// ChatAnswers runs when the user types a message while the employee still has question cards
+	// open for the user in this conversation (set by the engine: toolsvc owns questions): waiting
+	// calls are released and the returned note ("" = none) tells the employee to close the cards
+	// the message answers (close_question).
+	ChatAnswers func(ctx context.Context, tx *core.Tx, c core.Conversation, emp core.Employee, userID, content string) (string, error)
 }
 
 // New builds the orchestrator.
@@ -78,7 +83,10 @@ func New(cs *core.Store, st *store.Store, gw *nodegw.Gateway, se *status.Engine,
 	return &Orchestrator{core: cs, store: st, gw: gw, status: se, gh: gh, office: reg, log: log,
 		Kick:        func(context.Context, string) {},
 		ThreadEnded: func(context.Context, string) {},
-		Rules:       func(context.Context, core.DB, string, *string, string) ([]string, error) { return nil, nil }}
+		Rules:       func(context.Context, core.DB, string, *string, string) ([]string, error) { return nil, nil },
+		ChatAnswers: func(context.Context, *core.Tx, core.Conversation, core.Employee, string, string) (string, error) {
+			return "", nil
+		}}
 }
 
 // Core exposes the data layer.

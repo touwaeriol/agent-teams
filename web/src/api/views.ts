@@ -234,6 +234,8 @@ export interface QuestionDetail {
   /** The user's choices, one per structured question (after answering). */
   answers?: AskAnswer[];
   via?: string;
+  /** The user answered in the chat instead of on the card, and the asker closed the card (close_question). */
+  answered_in_chat?: boolean;
 }
 
 export interface AskOption {

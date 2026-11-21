@@ -1098,6 +1098,40 @@ func (j *ClaudeSessionOptions) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+// Close one of your open question cards for the user (ask_user / AskUserQuestion)
+// because the user already answered it in the chat instead of on the card. Use it
+// only when the user's message really answers the question; otherwise leave the
+// card open and wait.
+type CloseQuestionInput struct {
+	// The user's answer as you understood it from the chat (shown on the closed
+	// card).
+	Answer *string `json:"answer,omitempty,omitzero"`
+
+	// QuestionID corresponds to the JSON schema field "question_id".
+	QuestionID QuestionID `json:"question_id"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *CloseQuestionInput) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["question_id"]; raw != nil && !ok {
+		return fmt.Errorf("field question_id in CloseQuestionInput: required")
+	}
+	type Plain CloseQuestionInput
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.Answer != nil && utf8.RuneCountInString(string(*plain.Answer)) > 2000 {
+		return fmt.Errorf("field %s length: must be <= %d", "answer", 2000)
+	}
+	*j = CloseQuestionInput(plain)
+	return nil
+}
+
 type CodexRuntime struct {
 	// Auth corresponds to the JSON schema field "auth".
 	Auth *CodexRuntimeAuth `json:"auth,omitempty,omitzero"`

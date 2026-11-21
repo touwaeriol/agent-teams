@@ -103,6 +103,7 @@ func New(d Deps) (*Engine, error) {
 	}
 	e.Orch.ThreadEnded = e.Delivery.ThreadEnded
 	e.Orch.Rules = e.Approvals.Rules
+	e.Orch.ChatAnswers = e.Tools.NoteChatReply
 	e.Tools.Reviews = e.Approvals
 	gw.SetHandler(&router{e: e})
 	return e, nil
