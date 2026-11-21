@@ -9,11 +9,14 @@ import (
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 	"github.com/touwaeriol/agent-teams/server/internal/timers"
 )
+
+var _ nodegw.RuntimesHandler = (*router)(nil)
 
 // router dispatches daemon messages to the engines (nodegw.Handler).
 type router struct{ e *Engine }
@@ -84,6 +87,12 @@ func (r *router) NodeOnline(ctx context.Context, node store.Node) {
 	if err := r.e.SSH.NodeOnline(ctx, node); err != nil {
 		r.e.log.Warn("ssh servers update after reconnect", "node_id", node.ID, "err", err)
 	}
+	r.e.Orch.ReleaseHolds(ctx, node.UserID)
+	r.kickProjects(ctx, node)
+}
+
+// kickProjects gives the owner's projects with queued work a scheduling pass.
+func (r *router) kickProjects(ctx context.Context, node store.Node) {
 	ids, err := core.UserProjectsWithWork(ctx, r.e.Core.Pool, node.UserID)
 	if err != nil {
 		r.e.log.Warn("projects with work", "node_id", node.ID, "err", err)
@@ -92,6 +101,22 @@ func (r *router) NodeOnline(ctx context.Context, node store.Node) {
 	for _, id := range ids {
 		r.e.Sched.Kick(ctx, id)
 	}
+}
+
+// RuntimesChanged implements nodegw.RuntimesHandler: the node's runtime CLIs changed (installed,
+// logged in or out). The node pages refresh, held sessions are placed again (they open when a
+// runtime became ready, else their reason is updated) and, when one became ready, the owner's
+// projects get a scheduling pass. It runs off the link's reader so the link keeps reading.
+func (r *router) RuntimesChanged(ctx context.Context, node store.Node, ready []string) {
+	r.e.Events.User(ctx, node.UserID, core.EvNode, map[string]any{"node": map[string]any{"id": node.ID, "name": node.Name,
+		"runtimes": true}})
+	ctx = context.WithoutCancel(ctx)
+	go func() {
+		r.e.Orch.ReleaseHolds(ctx, node.UserID)
+		if len(ready) > 0 {
+			r.kickProjects(ctx, node)
+		}
+	}()
 }
 
 // NodeOffline implements nodegw.Handler.

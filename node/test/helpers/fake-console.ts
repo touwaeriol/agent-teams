@@ -103,8 +103,10 @@ export class FakeConsole {
     return f;
   }
 
-  unreliable(type: string, body: Record<string, unknown>): void {
-    this.ws?.send(JSON.stringify(this.envelope(type, body)));
+  unreliable(type: string, body: Record<string, unknown>): Frame {
+    const f = this.envelope(type, body);
+    this.ws?.send(JSON.stringify(f));
+    return f;
   }
 
   dropConnection(): void {

@@ -29,8 +29,10 @@ type link struct {
 	mu      sync.Mutex
 	sentSeq int64 // highest command seq written on this link
 	stats   protocol.NodeStats
-	rejects []time.Time
-	sendMu  sync.Mutex
+	// reported: a node.runtimes arrived on this link (rows from an earlier link may be stale)
+	reported bool
+	rejects  []time.Time
+	sendMu   sync.Mutex
 }
 
 func newLink(g *Gateway, conn *websocket.Conn, node store.Node, hello *protocol.Hello, ackSeq int64) *link {
@@ -237,6 +239,14 @@ func (l *link) handleUnreliable(ctx context.Context, env *protocol.Envelope, bod
 	case *protocol.NodeUsage:
 		l.g.recordUsage(l.node.ID, b, l.g.now())
 		return nil
+	case *protocol.NodeRuntimes:
+		if !hasFeature(l.hello.Features, FeatureRuntimeStatus) {
+			return nil // only a daemon that announced runtime_status reports its CLIs
+		}
+		if err := l.g.recordRuntimes(ctx, l, b); err != nil {
+			l.g.log.Warn("node.runtimes", "node_id", l.node.ID, "err", err)
+		}
+		return nil
 	case *protocol.Log:
 		return l.g.storeLog(ctx, l.node.ID, b)
 	case *protocol.ProtocolError:
@@ -260,7 +270,12 @@ func (l *link) handleUnreliableOwned(ctx context.Context, env *protocol.Envelope
 }
 
 func (l *link) sendUnreliable(ctx context.Context, typ string, body any) error {
-	env, err := protocol.NewEnvelope(typ, core.NewID("c"), 0, body)
+	return l.sendUnreliableID(ctx, core.NewID("c"), typ, body)
+}
+
+// sendUnreliableID sends an unreliable frame with the given envelope id (a reply refers to it).
+func (l *link) sendUnreliableID(ctx context.Context, id, typ string, body any) error {
+	env, err := protocol.NewEnvelope(typ, id, 0, body)
 	if err != nil {
 		return err
 	}

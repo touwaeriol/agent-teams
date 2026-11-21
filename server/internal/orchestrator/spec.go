@@ -150,6 +150,10 @@ func buildOpen(in sessionInput) (protocol.SessionOpen, error) {
 var runtimeOptions = map[string]func(*protocol.SessionOpen, sessionInput){
 	runtimes.Claude: func(open *protocol.SessionOpen, in sessionInput) { c := claudeOptions(in); open.Claude = &c },
 	runtimes.Codex:  func(open *protocol.SessionOpen, in sessionInput) { c := codexOptions(in); open.Codex = &c },
+	runtimes.Antigravity: func(open *protocol.SessionOpen, in sessionInput) {
+		a := antigravityOptions(in)
+		open.Antigravity = &a
+	},
 }
 
 // setPrepare names the git.prepare jobs session.open waits for (first one in prepare for older daemons).
@@ -229,6 +233,8 @@ func projectModel(e core.Employee, p store.Project) string {
 var threadModels = map[string]func(store.Project) string{
 	runtimes.Claude: func(p store.Project) string { return p.ThreadModel },
 	runtimes.Codex:  func(p store.Project) string { return p.ThreadCodexModel },
+	// No project override for Antigravity yet: the role's model, else agy's own choice.
+	runtimes.Antigravity: func(store.Project) string { return "" },
 }
 
 // effort is the project's thread effort for leads and members, else the role's.
@@ -325,6 +331,47 @@ func codexOptions(in sessionInput) protocol.CodexSessionOptions {
 		c.Config = &raw
 	}
 	return c
+}
+
+// antigravityOptions: read-only roles get read_only (the daemon disables agy's writing tools and
+// rejects writing permission requests) with the read-only shell allow list; bypass members have
+// permission requests allowed by the daemon; ask members forward them as approval.request.
+func antigravityOptions(in sessionInput) protocol.AntigravitySessionOptions {
+	e := in.emp
+	system := in.system
+	a := protocol.AntigravitySessionOptions{Model: Model(e, in.project), SystemAppend: &system,
+		Approval: protocol.AntigravitySessionOptionsApprovalAsk}
+	switch {
+	case readOnly(e):
+		t := true
+		a.ReadOnly = true
+		a.BashPolicy = &protocol.BashPolicy{Mode: "argv", Allow: readOnlyBashAllow, DenyFlags: readOnlyDenyFlags, DenyMetachar: &t}
+	case Bypass(e):
+		a.Approval = protocol.AntigravitySessionOptionsApprovalAuto
+	}
+	return a
+}
+
+// textInstructions is the instructions field of a runtime without skill or plugin loading
+// (Codex developer_instructions, Antigravity system_append): skills and plugin commands are
+// appended there as text. nil for Claude.
+func textInstructions(open *protocol.SessionOpen) **string {
+	switch {
+	case open.Codex != nil:
+		return &open.Codex.DeveloperInstructions
+	case open.Antigravity != nil:
+		return &open.Antigravity.SystemAppend
+	}
+	return nil
+}
+
+func appendInstructions(field **string, text string) {
+	cur := ""
+	if *field != nil {
+		cur = **field
+	}
+	cur += text
+	*field = &cur
 }
 
 func mergeLists(lists ...[]string) []string {

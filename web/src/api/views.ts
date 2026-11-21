@@ -6,6 +6,7 @@
 // api.md until the orchestration routes land in openapi.json; when they do,
 // replace each hand-written type with the generated one in this file only.
 import type { ForwardedFrom } from "@/lib/forward";
+import type { Runtime } from "@/lib/runtimes";
 import type { components } from "./schema";
 
 type S = components["schemas"];
@@ -24,6 +25,10 @@ export type SharedFileUpload = S["SharedFileUpload"];
  * sends null until the node reports (and older servers omit it): both mean "no data yet". */
 export type NodeView = Omit<S["NodeView"], "usage"> & { usage?: NodeUsage | null };
 export type NodeUsage = S["NodeUsage"];
+/** One runtime CLI as the daemon last reported it (node.runtimes); ready: sessions of it may be scheduled there. */
+export type NodeRuntime = S["NodeRuntime"];
+/** POST /api/nodes/{id}/recheck; stale: the node did not answer in time and clis are the previous report. */
+export type NodeRecheck = Omit<S["RecheckOutputBody"], "node"> & { node: NodeView };
 export type RuntimeUsage = S["RuntimeUsage"];
 /** key: five_hour, weekly, weekly_opus, weekly_sonnet, weekly_model (Claude); primary, secondary (Codex). */
 export type UsageWindow = S["UsageWindow"];
@@ -92,7 +97,7 @@ export interface EmployeeBrief {
   tier: "coordinator" | "lead" | "member";
   role: string;
   title: string;
-  runtime: "claude" | "codex";
+  runtime: Runtime;
   node: { id: string; name: string; online: boolean } | null;
   look: Look;
   status: EmployeeStatusView | null;

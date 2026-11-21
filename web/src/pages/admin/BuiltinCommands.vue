@@ -35,7 +35,7 @@ function put(c: CustomCommand) {
   <Card class="gap-3">
     <div class="flex flex-col gap-1">
       <span class="font-semibold">内置命令</span>
-      <span class="text-xs leading-5 text-muted-foreground">每个岗位的聊天框都会列出这些自定义命令；岗位自己有同名命令时用岗位的。透传命令不会给 Codex 岗位和成员。</span>
+      <span class="text-xs leading-5 text-muted-foreground">每个岗位的聊天框都会列出这些自定义命令；岗位自己有同名命令时用岗位的。透传命令不会给 Codex、Antigravity 岗位和成员。</span>
     </div>
     <div class="flex flex-wrap items-center gap-1.5 text-[13px]">
       <span v-for="(c, i) in draft" :key="c.name" class="inline-flex h-6 items-center gap-1 rounded-md border border-input bg-card pl-2 pr-0.5 text-xs" :title="c.description || c.prompt">
@@ -46,6 +46,6 @@ function put(c: CustomCommand) {
       <button type="button" class="inline-flex h-6 items-center gap-0.5 rounded-md border border-dashed border-input px-2 text-xs text-muted-foreground hover:bg-raised" @click="edit(null)"><Plus class="size-3" />添加命令</button>
     </div>
     <div><el-button size="small" type="primary" :disabled="!dirty || save.isPending.value" @click="save.mutate()"><Spinner v-if="save.isPending.value" />保存</el-button></div>
-    <CommandDialog v-model:open="open" :command="current" :taken="taken" :prompt-only="false" :codex="false" @save="put" />
+    <CommandDialog v-model:open="open" :command="current" :taken="taken" :prompt-only="false" :no-slash="''" @save="put" />
   </Card>
 </template>

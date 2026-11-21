@@ -3380,6 +3380,74 @@
         ],
         "type": "object"
       },
+      "NodeRuntime": {
+        "additionalProperties": false,
+        "properties": {
+          "auth": {
+            "description": "How the runtime is logged in",
+            "enum": [
+              "subscription",
+              "chatgpt",
+              "api_key",
+              "none",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "auth_expires_at": {
+            "description": "When the login expires, when the daemon can tell",
+            "format": "date-time",
+            "type": "string"
+          },
+          "checked_at": {
+            "description": "When the daemon checked",
+            "format": "date-time",
+            "type": "string"
+          },
+          "error": {
+            "description": "Why the check failed (no credentials)",
+            "type": "string"
+          },
+          "expired": {
+            "description": "The login is known to be expired",
+            "type": "boolean"
+          },
+          "installed": {
+            "description": "The CLI was found and runs",
+            "type": "boolean"
+          },
+          "path": {
+            "description": "Executable the daemon found",
+            "type": "string"
+          },
+          "ready": {
+            "description": "Installed, logged in and not expired: sessions of this runtime may be scheduled on the node",
+            "type": "boolean"
+          },
+          "runtime": {
+            "description": "Runtime id (claude, codex, …)",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When the console last stored a change",
+            "format": "date-time",
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runtime",
+          "installed",
+          "auth",
+          "expired",
+          "checked_at",
+          "updated_at",
+          "ready"
+        ],
+        "type": "object"
+      },
       "NodeSession": {
         "additionalProperties": false,
         "properties": {
@@ -3498,6 +3566,16 @@
             "additionalProperties": {},
             "type": "object"
           },
+          "clis": {
+            "description": "Install and login state of each runtime CLI as last reported (node.runtimes), ordered by runtime; empty when the daemon never reported",
+            "items": {
+              "$ref": "#/components/schemas/NodeRuntime"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
@@ -3568,6 +3646,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "runtime_status": {
+            "description": "hello.features has runtime_status (the last hello while offline): the daemon reports its CLIs and POST /api/nodes/{id}/recheck works",
+            "type": "boolean"
+          },
           "runtimes": {
             "additionalProperties": {},
             "type": "object"
@@ -3625,7 +3707,9 @@
           "created_at",
           "latest_version",
           "update_available",
-          "self_update"
+          "self_update",
+          "runtime_status",
+          "clis"
         ],
         "type": "object"
       },
@@ -4632,6 +4716,23 @@
         ],
         "type": "object"
       },
+      "RecheckOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "node": {
+            "$ref": "#/components/schemas/NodeView",
+            "description": "The node with the CLI states the answer stored (same as GET /api/nodes)"
+          },
+          "stale": {
+            "description": "The node did not answer in time; clis are the previous report",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "node"
+        ],
+        "type": "object"
+      },
       "RefCandidate": {
         "additionalProperties": false,
         "properties": {
@@ -5098,7 +5199,8 @@
             "description": "The role's first runtime (runtimes[0])",
             "enum": [
               "claude",
-              "codex"
+              "codex",
+              "antigravity"
             ],
             "type": "string"
           },
@@ -5107,7 +5209,8 @@
             "items": {
               "enum": [
                 "claude",
-                "codex"
+                "codex",
+                "antigravity"
               ],
               "type": "string"
             },
@@ -11007,6 +11110,48 @@
             "description": "Error"
           }
         },
+        "tags": [
+          "nodes"
+        ]
+      }
+    },
+    "/api/nodes/{id}/recheck": {
+      "post": {
+        "operationId": "recheck-node",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecheckOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Check the node's runtime CLIs (install, login) and quota now; waits up to 15 s and returns the node",
         "tags": [
           "nodes"
         ]

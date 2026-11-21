@@ -31,8 +31,8 @@
 
 | 方向 | 可靠（有 `seq`，需 ACK，可重放） | 不可靠（无 `seq`，丢了无所谓） |
 | --- | --- | --- |
-| 控制台 → 守护进程 | 所有命令（`session.*`、`approval.resolve`、`tool.result`、`git.*`、`node.*`（`node.usage_refresh` 除外）、`run.*`） | `ack`、`pong` 类、`node.usage_refresh`、`cred.response`（§8：带令牌，不进发件箱，靠 `req_id` 配对，丢了守护进程会重试 `cred.request`） |
-| 守护进程 → 控制台 | 会话事件、命令结果、审批请求/取消、工具调用、git 结果 | `ack`、`stream.delta`（逐字输出，可选）、`log`、`node.stats`、`node.usage`、`cred.request`（§8） |
+| 控制台 → 守护进程 | 所有命令（`session.*`、`approval.resolve`、`tool.result`、`git.*`、`node.*`（`node.usage_refresh`、`node.runtimes_refresh` 除外）、`run.*`） | `ack`、`pong` 类、`node.usage_refresh`、`node.runtimes_refresh`、`cred.response`（§8：带令牌，不进发件箱，靠 `req_id` 配对，丢了守护进程会重试 `cred.request`） |
+| 守护进程 → 控制台 | 会话事件、命令结果、审批请求/取消、工具调用、git 结果 | `ack`、`stream.delta`（逐字输出，可选）、`log`、`node.stats`、`node.usage`、`node.runtimes`、`cred.request`（§8） |
 
 - **ACK**：`{type:"ack", body:{seq: N}}` 表示“seq ≤ N 的可靠消息我已持久处理”。接收方至少每 200 ms 或每 50 条发一次累计 ACK。
 - **守护进程发件箱**：可靠消息先追加写入 `state/outbox/<epoch>.jsonl` 再发送；收到 ACK 后推进游标，游标之前的文件可删除。守护进程重启后 `seq` 从文件里的最大值继续（`epoch` 只在状态目录被清空时变化）。
@@ -84,7 +84,8 @@
   "capacity": {"max_active_sessions": 4, "cpus": 16, "mem_mb": 64000},
   "runtimes": {
     "claude": {"sdk": "0.3.325", "cli": "2.1.325", "auth": "subscription|api_key|none"},
-    "codex":  {"cli": "0.169.0", "auth": "api_key|chatgpt|none", "sandbox_ok": true}
+    "codex":  {"cli": "0.169.0", "auth": "api_key|chatgpt|none", "sandbox_ok": true},
+    "antigravity": {"cli": "1.5.14", "auth": "oauth|api_key|adc|none", "installed": true}
   },
   "features": ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "upgrade", "context_usage", "session_compact"],
   "isolated": false,
@@ -94,9 +95,13 @@
 
 `features` 含 `usage` 表示守护进程会发 `node.usage`，也能处理 `node.usage_refresh`（§9.1）。
 
+`features` 含 `runtime_status` 表示守护进程会持续检测各 CLI 的安装和登录状态并发 `node.runtimes`，也能处理 `node.runtimes_refresh`（§9.2）；控制台以 `node.runtimes` 为准，`hello.runtimes` 只作为没有这个特性的旧守护进程的兜底。
+
 `features` 含 `ssh_gateway` 表示守护进程能接远程服务器（§8.1）：认得 `session.open` 的 `ssh_servers`，会发 `ssh.cert_request`，能处理 `ssh.servers_update`。这样的守护进程还可以带 `"ssh_client": {"version": "OpenSSH_9.6p1"}`（`ssh -V` 的结果，找不到 ssh 就不带）。
 
-`auth` 由守护进程启动时探测（Claude：`query().accountInfo()` 一次后关闭；Codex：app-server `account/read`），不上报邮箱等个人信息。
+`hello.runtimes` 里的 `auth` 是守护进程最近一次检测的结果（启动时探测，之后的变化走 §9.2 的 `node.runtimes`，重连时的 hello 也带最新结果）（Claude：起一次 SDK `query()` 读 `initializationResult().account` 后关闭；Codex：不起进程，看 `OPENAI_API_KEY` 和 `$CODEX_HOME/auth.json` 的结构，见 §9.2；Antigravity：先看环境变量（`GEMINI_API_KEY` + `modelProvider:"gemini"` 为 `api_key`，`AGY_ADC_AUTH` 为 `adc`），再看 token 文件，必要时 `agy acp` 握手——`session/new` 返回 -32000 为 `none`；绝不用 `agy -p` 探测，未登录时它会挂 60 秒等 OAuth），不上报邮箱等个人信息。
+
+`runtimes.antigravity`（Google Antigravity CLI `agy`，经 ACP 驱动）没装 agy 时也上报（`installed` 为 false，`auth` 为 none，`cli` 为空），节点页据此显示“Antigravity x.y.z 已登录 / 未登录 / 未安装”；`installed` 不带表示已安装。Antigravity 没有用量接口，不进 `node.usage`；带 `runtime_status` 的守护进程同时在 `node.runtimes` 里报 antigravity（`auth` 映射：`oauth` → `subscription`，`api_key`/`adc` → `api_key`），控制台按它调度；没有这个特性的旧守护进程才按 hello：只把 antigravity 会话派给 hello 里报了 antigravity、已安装且 `auth` 不是 `none` 的节点。
 
 ### `welcome`（控制台 → 守护进程，不可靠）
 
@@ -138,11 +143,11 @@
   "session_id": "s_01JD…",
   "open_gen": 3,                                  // 第几次打开（每次 resume 加 1）
   "employee": {"name": "dev-2", "role": "dev", "tier": "member", "project_id": "…", "thread_no": 12, "scope": "project"},
-  "runtime": "claude",                             // claude | codex
+  "runtime": "claude",                             // claude | codex | antigravity
   "cwd": "projects/7a1c…/threads/12/dev-2",       // 相对 root
   "prepare": "g_01JD…",                            // 可选：依赖的 git.prepare 命令键，守护进程先确保它已成功
   "prepare_jobs": ["g_01JD…", "g_01JE…"],           // 可选：每个仓库一个 git.prepare，全部成功才开会话（prepare = 第一个，给旧守护进程）
-  "resume": {"sdk_session_id": "8d2f…"},           // 或 {"codex_thread_id": "…"}；首次打开为 null
+  "resume": {"sdk_session_id": "8d2f…"},           // 或 {"codex_thread_id": "…"}；antigravity 的 ACP sessionId 也放 sdk_session_id；首次打开为 null
   "claude": {                                      // runtime=claude 时
     "model": "claude-opus-5-5", "effort": null,
     "system_append": "…",
@@ -164,6 +169,11 @@
   "codex": null,                                   // runtime=codex 时：{"model","sandbox","approval_policy","developer_instructions","config":{…}}（model 可为 ""：节点不传给 thread/start，用 Codex 自己的默认，init.model 报实际解析出的模型）；
                                                    // 成员 config 含 sandbox_workspace_write.writable_roots=[<shared>/.git]、network_access=true；
                                                    // mcp_servers.platform 由守护进程每次 start/resume 自己填（URL 路径秘密，architecture.md §6.3）
+  "antigravity": null,                             // runtime=antigravity 时：{"model","read_only","approval","system_append","bash_policy"}；
+                                                   // 每个会话一个 `agy acp --process-per-session`，平台工具以 http MCP 挂进 session/new；ACP sessionId 作 sdk_session_id 上报（session.opened）
+                                                   // model 可为 ""（交给 agy 自己选）；approval：ask = session/request_permission 转成 approval.request，auto = 守护进程就地放行（bypass 岗位）；
+                                                   // read_only = true（只读岗位，如审查员）：守护进程禁用写类工具（文件写入/编辑的 deny 规则）、拒绝一切写类权限请求，命令只放行 bash_policy 允许的；
+                                                   // system_append 追加到 agy 的系统提示（session/new 的 _meta.antigravity.systemPrompt.append），技能内联在里面。Antigravity 不能当统筹或组长。
   "platform_tools": [ {"name": "complete_task", "description": "…", "input_schema": {…}, "blocking": false}, … ],
   "env": {"LANG": "C.UTF-8"},                      // 额外的非秘密环境；守护进程自己加 PATH/HOME/MCP_TOOL_TIMEOUT/git 凭证变量
   "git_credentials": true,                         // 是否装 credential helper 与 gh 包装
@@ -276,7 +286,7 @@
 {
   "approval_id": "ap_<sha256(session_id + ':' + tool_use_id)[:24]>",
   "session_id": "s_…",
-  "source": "claude_can_use_tool|codex_command|codex_file_change|codex_permissions|codex_mcp_elicitation",
+  "source": "claude_can_use_tool|codex_command|codex_file_change|codex_permissions|codex_mcp_elicitation|antigravity_permission",
   "tool_name": "Bash",
   "input": {"command": "pnpm add -D @tanstack/react-virtual"},
   "title": "…", "description": "…", "decision_reason": "…", "blocked_path": null,   // SDK 提供的现成文案
@@ -295,11 +305,13 @@
 
 守护进程映射：
 
-| decision | Claude `PermissionResult` | Codex 回应 |
-| --- | --- | --- |
-| allow | `{behavior:'allow', updatedInput: updated_input ?? input}` | `accept`（elicitation：`{action:'accept'}`） |
-| allow_always | 上式 + `updatedPermissions: suggestions`（守护进程把每条 `destination` 改写为 `session`） | `acceptForSession` |
-| deny | `{behavior:'deny', message}` | `decline`（elicitation：`{action:'decline'}`） |
+| decision | Claude `PermissionResult` | Codex 回应 | Antigravity（ACP `session/request_permission` 的回应） |
+| --- | --- | --- | --- |
+| allow | `{behavior:'allow', updatedInput: updated_input ?? input}` | `accept`（elicitation：`{action:'accept'}`） | 选 `allow_once` 的 option |
+| allow_always | 上式 + `updatedPermissions: suggestions`（守护进程把每条 `destination` 改写为 `session`） | `acceptForSession` | 也选 `allow_once`：agy 自己的“始终允许”作用范围未实测，而节点上所有 agy 会话共用一个 HOME，可能波及其他（只读）会话；卡片的 `available` 也只给 `allow`/`deny` |
+| deny | `{behavior:'deny', message}` | `decline`（elicitation：`{action:'decline'}`） | 选 `reject_once` 的 option（没有就 `{outcome:'cancelled'}`） |
+
+Antigravity（`source: "antigravity_permission"`）：`tool_name` 是按 ACP 工具 `kind` 换成的名字（`edit`→`Edit`、`execute`→`Bash` 等，见 node/src/sessions/antigravity/permissions.ts），`input` 是 agy 给的 `rawInput`（取不到时带 `title`）。只读会话（`antigravity.read_only`）的写类请求（edit/delete/move/其他未知类、bash_policy 不允许的命令）守护进程直接拒绝，不发卡片；`approval: "auto"` 的会话就地放行；平台 MCP 工具（kind 为空、`other` 或 `think`，且标题整体是 `platform/<本会话的平台工具名>` 这类格式）总是放行；execute/edit/read 等类的调用不论标题是什么都不算平台工具。只读会话的 read/search 取不到路径时拒绝。
 
 守护进程处理后回 `approval.ack {approval_id}`（可靠）。若对应的 Promise / JSON-RPC 请求已不存在（已取消），回 `approval.ack {approval_id, stale: true}`。
 
@@ -474,6 +486,8 @@
 | `node.stats` | 守护进程 → | `active_sessions`, `parked_sessions`, `queued`, `mem_mb`, `load1`, `disk_free_mb` | 每 30 s，不可靠；机房机柜灯数据 |
 | `node.usage` | 守护进程 → | `runtimes` | 不可靠；hello 后和之后定期上报 Claude Code / Codex 的订阅余量：`runtimes.claude`/`runtimes.codex` 各为 `{auth, status, plan?, windows?: [{key, label?, used_percent, window_minutes?, resets_at?}], error?, fetched_at?}`（`key`：`five_hour`/`weekly`/`weekly_opus`/`weekly_sonnet`/`weekly_model`，Codex 为 `primary`/`secondary`；`label` 是服务方给的显示名，如 `weekly_model` 窗口的模型名，最多保留 40 字符）。不带凭证；控制台只保存每个节点最近一次上报（内存），校验后通过 `NodeView.usage` 返回；收到 `node.usage_refresh` 后立即采集并回一条 |
 | `node.usage_refresh` | 控制台 → | `runtimes?` | 不可靠；立即采集一次订阅余量并回 `node.usage`（`runtimes` 省略 = 全部）。只在 `hello.features` 含 `usage` 时发；由 `POST /api/nodes/{id}/usage/refresh` 触发（api.md） |
+| `node.runtimes` | 守护进程 → | `runtimes`, `reason`, `in_reply_to?` | 不可靠；各运行时 CLI 的安装和登录状态（§9.2）。`runtimes` 以运行时 id 为键（`claude`、`codex` 和以后新增的运行时，开放字符串），值为 `{installed, version?, path?, auth, auth_expires_at?, expired?, checked_at, error?}`，每次都带守护进程认识的全部运行时；`reason`：`hello`/`periodic`/`fs_event`/`refresh`。只在 `hello.features` 含 `runtime_status` 时发；不带凭证 |
+| `node.runtimes_refresh` | 控制台 → | `runtimes?` | 不可靠；立即重新检测（`runtimes` 省略 = 全部）并回 `node.runtimes`（`reason:"refresh"`，`in_reply_to` = 本命令的信封 id），没有变化也回。只在 `hello.features` 含 `runtime_status` 时发；由节点页的“重新检测”触发 |
 | `log` | 守护进程 → | `level`, `msg`, `fields` | 不可靠；只发 warn 及以上 |
 | `error` | 双向 | `ref_id`, `code`, `message` | 对某条消息的协议级错误：`bad_schema`、`unsupported`、`unknown_session`、`busy` |
 
@@ -488,6 +502,21 @@
   - 常见的 `error`：`timeout`；`unsupported_sdk`（SDK 没有实验性的 usage 接口）；`fetch_failed: <原因>`（调用 usage 接口报错或 CLI 出错，原因经过脱敏）；`rate_limits_unavailable`（CLI 表示该登录没有订阅余量，例如 token 缺少 profile 权限）；`fetch_failed`（CLI 没取到数据，常见原因是 token 过期而且刷新失败）；`not_logged_in`（Codex 已退出登录）。
   - 消息里永远不带 token、邮箱、组织或账号 id。
 - **`node.usage_refresh`**（控制台 → 守护进程，不可靠，body 可以是空对象，也可以带 `runtimes`，例如 `["claude","codex"]`）：鼠标悬停在节点卡片上时，控制台发这条命令要求现查一次。守护进程回一条 `node.usage`，总是包含两个运行时：请求的运行时如果最近 60 秒内有一次成功（`status:"ok"`）的读取，就直接回缓存的结果，`fetched_at` 保持原值，不再请求 Anthropic 或 OpenAI；否则立即读取。失败的结果不缓存。同一时间只跑一次读取，正在跑的就等它跑完再用它的结果。定时上报不受缓存影响，每次都重新读取。
+
+### 9.2 运行时 CLI 状态（`hello.features` 含 `runtime_status`）
+
+守护进程持续检测本机各运行时 CLI 是否安装、是否登录，节点上后来装好或登录的 CLI 不用重启守护进程就能被控制台发现并参与调度。
+
+- **`node.runtimes`**（守护进程 → 控制台，不可靠，不进发件箱）：收到 `welcome` 后立即上报一次（`reason:"hello"`）；之后定时检测（`reason:"periodic"`）和监听 CLI 可执行文件、凭证文件的变化（`reason:"fs_event"`），**只有结果变了才上报**（比较时忽略 `checked_at`）；收到 `node.runtimes_refresh` 后一定回一条（`reason:"refresh"`，`in_reply_to` 为该命令的信封 id）。每条都带守护进程认识的全部运行时，控制台整体替换保存的状态，忽略不认识的运行时 id。
+  - `runtimes.<id>`：`installed`（找到并能运行 CLI/SDK）、`version`（可选，CLI 报告的版本）、`path`（可选，找到的可执行文件绝对路径）、`auth`（`subscription|chatgpt|api_key|none|unknown`：`subscription` 为服务方账号登录，如 Claude 订阅；`chatgpt` 为 Codex 的 ChatGPT 登录；`unknown` 为没装或检测失败、无法判断）、`auth_expires_at`（可选，只在能从凭证文件元数据或非秘密字段读出时填）、`expired`（可选，确知登录已过期，控制台调度时按未登录处理）、`checked_at`（本次检测时间）、`error`（可选，简短原因，不含凭证）。
+  - 运行时 id 是开放的小写字符串（`^[a-z][a-z0-9_-]{0,31}$`，与 `common.json` 的 `Runtime` 取值一致），新增运行时不需要改这条消息。
+  - 检测只读文件元数据和非秘密字段，消息里永远不带 token、API Key、邮箱、组织或账号 id。
+  - 守护进程的实现（`node/src/runtime-monitor.ts`，检测器是各运行时 adapter 的 `detect()`/`watchPaths()`，`node/src/sessions/registry.ts`）：启动时强制检测一次（Claude 的 SDK 探测最多等 60 秒），之后每 60 秒检测一次，并用 `fs.watch` 监听各运行时的凭证文件（Claude：`$CLAUDE_CONFIG_DIR/.credentials.json`，默认 `~/.claude`；Codex：`$CODEX_HOME/auth.json`，默认 `~/.codex`），文件变化后防抖 2 秒再检测。文件所在目录还不存在时监听路径上最近一个存在的上级目录（只看通往目标的那个名字），目录建出来后自动换到更深一层；监听失败就只靠定时检测。同一时间只跑一次检测，期间来的请求合并成紧接着的下一次。
+  - Claude：SDK 自带 CLI，`installed` 恒为 true，`version` 是 CLI 报告的版本。登录方式靠 SDK 探测（起一次 CLI 读 `initializationResult().account`，不调模型），只在强制检测（启动、`node.runtimes_refresh`）、凭证文件的大小/修改时间或 API Key 环境变量变了时重跑；非强制的重探距上次探测结束不足 30 秒时先沿用上次结果，到点再补一次检测（CLI 启动时可能改写凭证文件，避免反复起 CLI；局限：探测进行中凭证文件又被改写时，这次变化会被当作 CLI 自己的写入，需等文件再次变化或手动重新检测才会更新）；比较基准取探测结束时的文件状态。探测失败或超时（重新检测时 12 秒）按文件猜测（有凭证文件 → `subscription`，有 `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` → `api_key`）并填 `error: "probe_failed: …"`，5 分钟后再试。Claude 凭证里的 `expiresAt` 是会自动刷新的访问令牌的过期时间，不代表登录过期，所以不填 `auth_expires_at`/`expired`。
+  - Codex：不起进程，`OPENAI_API_KEY` → `api_key`；否则看 `$CODEX_HOME/auth.json` 的结构：`auth_mode` 是 `apikey`，或 `OPENAI_API_KEY` 非空而没有 `tokens` → `api_key`，其余（有 `tokens`、结构不认识、读不了）→ `chatgpt`；没有文件或文件为空 → `none`。只判断字段在不在、空不空，解析出的对象立刻丢弃，不记录、不上报任何值；`path` 是固定版本的 `codex.js`，找不到时 `installed:false, auth:"unknown"`。
+  - 单个检测器抛错或超过 14 秒，该运行时报 `auth:"unknown"` 和 `error: "detect_failed: …"`；`error` 经过脱敏、最长 200 字符。检测结果同时更新 `hello.runtimes`、`node.usage` 用的登录方式和新会话。
+- **控制台怎么用**：报告存进 `at_node_runtimes`（data-model.md §2.2），节点页 `NodeView.clis` 显示；在线且带 `runtime_status` 的节点，某运行时没装或没登录就不往这里派该运行时的会话，所有候选节点都不行时会话暂存并显示原因，报告变为可用后自动开出（data-model.md §2.7）。
+- **`node.runtimes_refresh`**（控制台 → 守护进程，不可靠，body 可以是空对象，也可以带 `runtimes`，例如 `["claude"]`）：节点页点“重新检测”时发。守护进程立即重新检测请求的运行时（省略 = 全部），回一条 `node.runtimes`，其中仍带全部运行时。
 
 ## 10. 关闭码
 

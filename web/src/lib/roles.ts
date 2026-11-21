@@ -2,7 +2,7 @@
 import { MODEL_FORMAT_HINT, validModel } from "./models";
 import { unfit } from "./commands";
 import type { RoleView } from "@/api/views";
-import { roleRuntimes, runtimeLabel } from "./runtimes";
+import { roleRuntimes, runtimeLabel, runtimeSpec, type Runtime } from "./runtimes";
 
 export const LEVEL: Record<RoleView["tier"], { label: string; bg: string; fg: string }> = {
   coordinator: { label: "项目级", bg: "#F4E3D7", fg: "#8A3D14" },
@@ -41,6 +41,12 @@ export function ruleText(r: Pick<RoleView, "tier" | "runtime" | "sandbox" | "rea
   return "可以给其他成员发消息、问组长、问你；不能直接推送基准分支。";
 }
 
+/** The caveat of a read-only member whose runtime's read-only is no sandbox (Antigravity), "" otherwise. */
+export function readOnlyCaveat(r: Pick<RoleView, "tier" | "runtime" | "read_only" | "gate"> & Partial<Pick<RoleView, "runtimes">>): string {
+  if (r.tier !== "member" || !isReadOnly(r)) return "";
+  return roleRuntimes(r).map((rt) => runtimeSpec(rt).readOnlyCaveat).filter(Boolean).join("；");
+}
+
 export type PermissionMode = "bypass" | "ask";
 
 export const PERMISSION_MODES: { id: PermissionMode; label: string }[] = [
@@ -53,7 +59,7 @@ export function permissionMode(r: Pick<RoleView, "permission_mode">): Permission
   return r.permission_mode === "ask" ? "ask" : "bypass";
 }
 
-const MODE_HINT: Record<"claude" | "codex", Record<PermissionMode, string>> = {
+const MODE_HINT: Record<Runtime, Record<PermissionMode, string>> = {
   claude: {
     bypass: "员工直接执行，不弹权限确认。",
     ask: "除了读文件，每个操作都先问（组长或你，看项目的审批方式）。",
@@ -61,6 +67,10 @@ const MODE_HINT: Record<"claude" | "codex", Record<PermissionMode, string>> = {
   codex: {
     bypass: "员工直接执行，不弹权限确认（沙箱完全放开）。",
     ask: "除了它信任的只读命令，每个命令都先申请（untrusted）。",
+  },
+  antigravity: {
+    bypass: "员工直接执行，Antigravity 的权限请求由节点自动放行。",
+    ask: "Antigravity 每次申请权限都先问（组长或你，看项目的审批方式）。",
   },
 };
 
@@ -234,6 +244,8 @@ export function roleProblems(list: RoleView[]): string[] {
   list.filter((r) => r.tier === "member" && (r.count < 1 || r.count > 8)).forEach((r) => problems.push(`${roleName(r)} 的数量要在 1–8 之间`));
   list.filter((r) => !canHaveSkills(r) && (r.skills ?? []).length > 0).forEach((r) => problems.push(`${roleName(r)} 不能加载技能`));
   list.filter((r) => !canHaveSkills(r) && (r.plugins ?? []).length > 0).forEach((r) => problems.push(`${roleName(r)} 不能加载插件`));
+  list.filter((r) => r.tier !== "member").forEach((r) =>
+    roleRuntimes(r).filter((rt) => !runtimeSpec(rt).canLead).forEach((rt) => problems.push(`${roleName(r)} 不能用 ${runtimeLabel(rt)}`)));
   list.filter((r) => unfit(r).length > 0).forEach((r) => problems.push(`${roleName(r)} 只能用提示词模板命令`));
   list.forEach((r) => problems.push(...contextProblems(r)));
   list.filter((r) => !validModel(r.model ?? "")).forEach((r) => problems.push(`${roleName(r)} 的${MODEL_FORMAT_HINT}`));
