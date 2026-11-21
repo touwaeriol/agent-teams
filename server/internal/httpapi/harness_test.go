@@ -78,6 +78,10 @@ func (f *fakeNodes) RefreshUsage(context.Context, string) (*platform.NodeUsage, 
 	return nil, false, platform.ErrNodeOffline
 }
 
+func (f *fakeNodes) RecheckRuntimes(context.Context, string) (bool, error) {
+	return false, platform.ErrNodeOffline
+}
+
 // fakeEvents records published events.
 type fakeEvents struct {
 	mu     sync.Mutex
