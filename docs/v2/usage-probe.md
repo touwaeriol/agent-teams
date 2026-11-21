@@ -93,7 +93,7 @@ CLI 内部用的是未公开的 `GET https://api.anthropic.com/api/oauth/usage`�
 
 ### 2.4 凭证
 
-ChatGPT 的 token 在 `$CODEX_HOME/auth.json`，由 app-server 自己读取和刷新；守护进程不读这个文件（它也在 `secretPaths()` 里）。
+ChatGPT 的 token 在 `$CODEX_HOME/auth.json`，由 app-server 自己读取和刷新；守护进程只看它的结构来区分登录方式（API Key / ChatGPT），不读取、不保留其中的值（它也在 `secretPaths()` 里）。
 
 ### 2.5 版本兼容风险
 
