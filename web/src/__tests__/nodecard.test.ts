@@ -125,6 +125,13 @@ describe("NodeCard 重新检测", () => {
     expect(button(w).text()).toBe("重新检测");
     expect(button(w).attributes("disabled")).toBeUndefined();
     expect(w.find("[data-checking]").exists()).toBe(false);
+    // The lock is released: a second press after it finished sends another request.
+    await button(w).trigger("click");
+    await flushPromises();
+    expect(rechecks(spy)).toHaveLength(2);
+    answer({ status: 200, body: { node: fresh } });
+    await flushPromises();
+    expect(button(w).text()).toBe("重新检测");
   });
 
   it("a stale answer warns that these are the previous results", async () => {

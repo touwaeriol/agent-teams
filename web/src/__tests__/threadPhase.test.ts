@@ -118,9 +118,10 @@ describe("threadPhase", () => {
       expect(JSON.stringify(v)).not.toContain("组长已回复");
     };
     expectAll(at("queued"), "active", "等组长上线（节点工位已满，排队中）", true);
-    // No node has the lead's runtime logged in (#42): the server's reason instead of "slots full".
+    // No node has the lead's runtime logged in (#42): waits on the user with the server's reason, like core/phase.go.
     const noRuntime = thread(1, { members: [person("lead-1", "queued", { status: { state: "queued", substate: "no_runtime", bubble: "没有已登录 Codex 的节点", since: "" } as never })], lead_last: replied });
-    expectAll(noRuntime, "active", "等组长上线：没有已登录 Codex 的节点", true);
+    expectAll(noRuntime, "waiting", "组长排队中：没有已登录 Codex 的节点", false);
+    expect(threadPhase(noRuntime)).toMatchObject({ id: "lead_down", mark: "wait" });
     expectAll(at("offline"), "waiting", "组长离线：节点不在线，节点上线后才能继续", false);
     expectAll(at("broken"), "waiting", "组长的会话出错了，需要你看一下", false);
     expectAll(at("waiting"), "active", "组长在等别人回复", true);
