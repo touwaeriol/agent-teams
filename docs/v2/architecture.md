@@ -219,12 +219,12 @@ Codex 对应：组长和 `read_only` 岗位 `sandbox: read-only, approvalPolicy:
 运行时只在两张注册表里登记，其余代码按能力判断，不比较 id：
 
 - 控制台 `server/internal/runtimes`：每种运行时一行（名称、YAML `type`、`list_team` 类型、内置默认模型、能力：`SlashCommands` 斜杠命令、`LiveModeSwitch` 运行中切权限模式、`NeedsIsolation` 只能派到隔离节点、`CanLead` 能当统筹/组长）。`orchestrator.runtimeOptions` 和 `threadModels` 按运行时填 `session.open` 的选项块和项目的讨论串模型，测试保证覆盖注册表里的每一种。
-- 守护进程 `node/src/sessions/registry.ts`：每种运行时一个 `RuntimeAdapter`（登录探测、hello 上报、透传/固定环境变量、是否原生加载技能、`createDriver`）。会话管理器只认 `Driver` 接口（start / push / interrupt / setMode / compact / close）。
+- 守护进程 `node/src/sessions/registry.ts`：每种运行时一个 `RuntimeAdapter`（安装和登录检测 `detect()` 与要监听的凭证文件 `watchPaths()`、hello 上报、透传/固定环境变量、是否原生加载技能、`createDriver`）。会话管理器只认 `Driver` 接口（start / push / interrupt / setMode / compact / close）。
 - 网页 `web/src/lib/runtimes.ts`：同一张表的展示部分（名称、斜杠命令、内置模型、订阅登录类型）。
 
 岗位可以配多种运行时（`at_roles.runtimes`），每次开新会话在这些运行时的候选节点里按剩余额度挑（shared-members.md §4.3；节点用量的读取在 `orchestrator.usageOf`）。
 
-加一种运行时：写它的 `Driver` 和 adapter，协议 `Runtime` 枚举加 id 并加它的 `session.open` 选项块（以及 `hello.runtimes` 的信息结构），三张注册表各加一行。用量上报（`node/src/usage.ts`）目前仍按 Claude / Codex 各写一份读取，加运行时时一并补上。
+加一种运行时：写它的 `Driver` 和 adapter（adapter 的 `detect()` 返回统一的 `RuntimeStatus` 字段，注册后 `node/src/runtime-monitor.ts` 的 `RuntimeMonitor` 就会定时、按文件变化检测它并在 `node.runtimes` 里上报，protocol.md §9.2），协议 `Runtime` 枚举加 id 并加它的 `session.open` 选项块（以及 `hello.runtimes` 的信息结构），三张注册表各加一行。用量上报（`node/src/usage.ts`）目前仍按 Claude / Codex 各写一份读取，加运行时时一并补上。
 
 ### 6.3 平台工具：守护进程本地 MCP + WS 转发
 
@@ -607,7 +607,7 @@ SSE event: status → 网页办公室
 | `offline` | 员工所在节点离线 |
 | `broken` | 会话错误未恢复（`session.error`、认证失败、连续崩溃） |
 | `raising_hand` | 该员工有 open 的审批或阻塞型提问（user 或 lead） |
-| `queued` | 有消息或任务要处理，但节点活跃会话数已满，守护进程把它排在队里（`session.state queued`，办公室显示“排队等工位”） |
+| `queued` | 有消息或任务要处理，但节点活跃会话数已满，守护进程把它排在队里（`session.state queued`，办公室显示“排队等工位”）；子状态 `no_runtime`：没有候选节点装好并登录了它的运行时（CLI），会话暂存在控制台，气泡写原因，节点登录后自动开出（data-model.md §2.7） |
 | `walking_to_board` → `claiming` → `returning` | `task.claimed` 之后的固定动画序列（时长由布局 JSON 的路径长度决定，控制台只发一次 `claimed`，动画在前端播放；状态表里记 `claiming`） |
 | `typing` / `reading` / `running` | 最近一个 `tool_started` 的类别为 edit / read / shell（`running` 带子类：测试、提交、看 CI） |
 | `thinking` | 回合进行中、没有工具在跑 |

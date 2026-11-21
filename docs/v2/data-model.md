@@ -138,7 +138,25 @@ CREATE TABLE at_node_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX at_node_logs_node ON at_node_logs (node_id, created_at DESC);   -- 保留 7 天
+
+-- 00360：各节点每种运行时 CLI 的最新安装 / 登录状态（protocol.md §9.2 node.runtimes），不含凭证
+CREATE TABLE at_node_runtimes (
+  node_id         TEXT NOT NULL REFERENCES at_nodes(id) ON DELETE CASCADE,
+  runtime         TEXT NOT NULL,                  -- 运行时 id：claude、codex、以后新增的
+  installed       BOOLEAN NOT NULL DEFAULT false,
+  version         TEXT NOT NULL DEFAULT '',
+  path            TEXT NOT NULL DEFAULT '',       -- 守护进程找到的可执行文件
+  auth            TEXT NOT NULL DEFAULT 'unknown',-- subscription | chatgpt | api_key | none | unknown
+  auth_expires_at TIMESTAMPTZ,                    -- 守护进程能判断时才有
+  expired         BOOLEAN NOT NULL DEFAULT false,
+  error           TEXT NOT NULL DEFAULT '',
+  checked_at      TIMESTAMPTZ NOT NULL,           -- 守护进程检测时间
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(), -- 内容最近一次变化（只更新 checked_at 不算）
+  PRIMARY KEY (node_id, runtime)
+);
 ```
+
+收到 `node.runtimes` 就整体替换该节点的行（报告里没有的运行时删掉）；不带 `runtime_status` 的守护进程发来的 `node.runtimes` 直接忽略。调度对**在线且 hello.features 含 `runtime_status`** 的节点只看这张表：运行时 `installed`、`auth` 不是 `none`/`unknown`、没有 `expired`、`auth_expires_at` 未过，才算可用（`store.NodeRuntime.Ready`）；本次连接的首次上报还没到时也算不可用（不管这张表里有没有上次连接留下的行，`nodegw.Gateway.RuntimesReported`），原因是“正在检测节点上 X 的安装和登录状态”，首次上报（`reason: hello`）一到就重新放行。其他节点照旧（`node.usage` 的 auth，没有上报就当可用）。暂存的会话见 §2.7 `at_session_holds`。
 
 ### 2.3 GitHub
 
@@ -487,7 +505,24 @@ CREATE TABLE at_permission_rules (                 -- “总是允许”记住�
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX at_permission_rules_lookup ON at_permission_rules (project_id, thread_id, tool_name);
+
+-- 00360：没有节点能跑的会话先暂存在这里（每个员工最多一行），不开会话、不发 session.open
+CREATE TABLE at_session_holds (
+  employee_id TEXT PRIMARY KEY REFERENCES at_employees(id) ON DELETE CASCADE,
+  project_id  TEXT NOT NULL REFERENCES at_projects(id) ON DELETE CASCADE,
+  thread_id   TEXT REFERENCES at_threads(id) ON DELETE CASCADE,  -- 暂存时员工所在的讨论串（统筹为 NULL）
+  reason      TEXT NOT NULL DEFAULT '',     -- 给用户看的原因，如“没有已登录 Codex 的在线节点”
+  first       JSONB NOT NULL,               -- 会话开出来时的 first_message；之后的消息追加进来（图片最多 8 张）
+  resume      JSONB,                        -- 要续接的会话（ResumeRef），没有为 NULL
+  more        JSONB NOT NULL DEFAULT '[]',  -- 合并进 first 的后续消息 msg_id（开会话时一起标为已送达）
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX at_session_holds_project ON at_session_holds (project_id);
+CREATE INDEX at_session_holds_thread ON at_session_holds (thread_id);
 ```
+
+`orchestrator.pickNode` 选出的节点在线、报告了 CLI 状态（`runtime_status`），但该运行时在所有候选节点上都没装或没登录时，会话不开，消息写进 `at_session_holds`；员工状态是 `queued`、子状态 `no_runtime`，气泡是 `reason`（`bubble_kind = ask`，不会被 set_status 覆盖）。节点上线、或 `node.runtimes` 报告有变化时（`ReleaseHolds`），对用户所有暂存的会话重新选节点：能开就开（暂存的消息作为第一条消息），还不行就只更新 `reason`。暂存属于 `thread_id` 那个讨论串：项目成员换到别的讨论串（`MoveToThread`）、或者发给它的消息所在讨论串和暂存的不一样时，旧暂存丢掉（旧消息留在原讨论串的对话里），讨论串结束（done/failed/archived）时它的暂存一起丢掉。所选节点离线时照旧把会话开在它上面等它上线，这种情况不暂存、也没有 `no_runtime` 原因（员工状态是 `offline`），之后别的节点登录也不会把它接走；不带 `runtime_status` 的旧守护进程照旧可调度。
 
 ### 2.8 交付
 
@@ -909,6 +944,8 @@ CREATE TABLE at_ssh_audit (                 -- 网关审计，一行一个事件
 `00095_thread_lifecycle_images.sql`：`at_threads.archived_from`、`at_attachments`（§2.11）。
 
 `00312_shared_files.sql`：`at_shared_files`（§2.13，项目共享文件）；Down 删表。
+
+`00360_node_runtimes.sql`：`at_node_runtimes`（§2.2，节点 CLI 状态）和 `at_session_holds`（§2.7，暂存的会话）；Down 删两张表。
 
 `00330_remote_servers.sql`：`at_remote_servers`、`at_project_servers`、`at_project_server_grants`、`at_ssh_certs`、`at_ssh_audit` 和唯一索引 `at_projects_id_user`（§2.14，远程服务器）；Down 删表、删索引，并删掉 `at_settings` 的 `ssh_session_ca`、`ssh_gateway_host_key`。
 

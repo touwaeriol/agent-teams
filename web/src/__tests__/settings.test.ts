@@ -7,7 +7,7 @@ import { addRepo, matchesRepo, moveRepo, normalizeRepo, removeRepo, repoOptions,
 import { draftValid, emptyDraft, scheduleBody } from "@/components/app/schedules/schedule";
 import { parseSetting } from "@/pages/admin/admin";
 import { connectionKind, usedText } from "@/pages/settings/github/github";
-import { createRefreshCooldown, hoverIntent, needsUsageRefresh, nodeMeta, nodeStats, resetText, runtimeLine, settingsPatch, slotPct, updateView, usageLevel, usageView, windowLabel, withNodeUsage } from "@/pages/settings/nodes/nodes";
+import { cliLabel, cliLogin, cliRows, createRefreshCooldown, hoverIntent, recheckState, runtimeInfos, withNode, needsUsageRefresh, nodeMeta, nodeStats, resetText, runtimeLine, settingsPatch, slotPct, updateView, usageLevel, usageView, windowLabel, withNodeUsage } from "@/pages/settings/nodes/nodes";
 import { isDirty, nodePickerText, ordered, patchAt, removeAt, toggleId, versionText } from "@/pages/settings/team/team";
 import { employeeRows, fromChoice, inlineCommit, leadTimeoutLabel, memoryFileName, memoryWriter, repoRefs, splitMemory, threadRows, toChoice } from "@/pages/projectSettings/logic";
 import { newRole } from "@/lib/roles";
@@ -114,6 +114,42 @@ describe("nodes", () => {
     expect(runtimeLine("claude", { cli: "2.1", auth: "none" }).login).toBe("未登录");
     expect(runtimeLine("claude", { cli: "2.1", auth: "api_key" })).toEqual({ ver: "2.1", login: "已配置 API Key", ok: true });
   });
+  it("CLI boxes from node.runtimes (#42): any runtime id, install, login, expiry and check time", () => {
+    const now = Date.parse("2026-11-21T10:00:00Z");
+    const c = (patch: object) => ({ runtime: "claude", installed: true, version: "2.1.3", auth: "subscription", expired: false, checked_at: "2026-11-21T09:57:00Z", updated_at: "", ready: true, ...patch }) as never;
+    const rows = cliRows({ runtimes: {}, clis: [c({}), c({ runtime: "codex", installed: false, version: undefined, auth: "none", ready: false }), c({ runtime: "gemini", auth: "api_key" }), c({ runtime: "newcli", auth: "unknown", ready: false, error: "no creds" })] } as never, now);
+    expect(rows.map((r) => r.key)).toEqual(["claude", "codex", "gemini", "newcli"]);
+    expect(rows[0]).toMatchObject({ label: "Claude Code", ver: "2.1.3", login: "已登录（订阅）", tone: "ok", checked: "检测于 3 分钟前" });
+    expect(rows[0]!.checkedTitle).toMatch(/^2026年11月21日 /);
+    expect(rows[1]).toMatchObject({ label: "Codex", ver: "未安装", login: "安装后登录或设置 CODEX_API_KEY", tone: "warn" });
+    expect(rows[2]).toMatchObject({ label: "Gemini CLI", login: "已配置 API Key", tone: "ok" });
+    expect(rows[3]).toMatchObject({ label: "newcli", login: "登录状态未知", tone: "muted", error: "no creds" });
+    expect(cliLabel("antigravity")).toBe("Antigravity");
+    expect(cliLogin(c({ runtime: "codex", auth: "chatgpt" }))).toEqual({ login: "已登录（ChatGPT）", tone: "ok" });
+    expect(cliLogin(c({ auth: "none", ready: false }))).toEqual({ login: "未登录", tone: "warn" });
+    expect(cliLogin(c({ expired: true, ready: false }))).toEqual({ login: "登录已过期", tone: "bad" });
+    // auth_expires_at passed: the server says not ready before the daemon says expired.
+    expect(cliLogin(c({ ready: false }))).toEqual({ login: "登录已过期", tone: "bad" });
+    expect(cliRows({ runtimes: {}, clis: [c({ installed: true, version: "" })] } as never, now)[0]!.ver).toBe("已安装");
+  });
+  it("an old daemon keeps the hello runtimes; a new one shows them until its first report", () => {
+    const hello = { claude: { cli: "2.1", auth: "subscription" } };
+    const old = cliRows({ runtimes: hello, clis: [], runtime_status: false, online: true } as never);
+    expect(old.map((r) => [r.key, r.ver, r.login, r.tone, r.checked])).toEqual([["claude", "2.1", "已登录", "ok", ""], ["codex", "未安装", "安装后登录或设置 CODEX_API_KEY", "warn", ""]]);
+    expect(cliRows({ runtimes: hello, clis: null, runtime_status: true, online: true } as never)[0]!.checked).toBe("等待首次检测");
+    expect(runtimeInfos({ runtimes: hello, clis: [] } as never)).toBe(hello);
+    // Reported CLIs win for the quota: an expired login hides it, a missing CLI too.
+    const infos = runtimeInfos({ runtimes: hello, clis: [{ runtime: "claude", installed: true, version: "2.2", auth: "subscription", ready: false }, { runtime: "codex", installed: false, auth: "none", ready: false }] } as never);
+    expect(infos).toEqual({ claude: { cli: "2.2", auth: "expired" }, codex: {} });
+    expect(usageView("claude", infos.claude, { auth: "subscription", status: "ok", windows: [{ key: "weekly", used_percent: 3 }] } as never, { online: true })).toBeNull();
+  });
+  it("重新检测: old daemon and offline nodes cannot, the answer replaces the node", () => {
+    expect(recheckState({ online: true, runtime_status: false })).toEqual({ enabled: false, hint: "守护进程版本过旧，需要升级后才能重新检测" });
+    expect(recheckState({ online: false, runtime_status: true })).toEqual({ enabled: false, hint: "节点不在线" });
+    expect(recheckState({ online: true, runtime_status: true }).enabled).toBe(true);
+    expect(withNode([{ id: "a", v: 1 }, { id: "b", v: 1 }], { id: "b", v: 2 })).toEqual([{ id: "a", v: 1 }, { id: "b", v: 2 }]);
+    expect(withNode(undefined, { id: "b" })).toBeUndefined();
+  });
   it("quota window names, levels and reset text", () => {
     expect(windowLabel({ key: "five_hour" })).toBe("5 小时");
     expect(windowLabel({ key: "weekly" })).toBe("每周");
@@ -194,6 +230,14 @@ describe("nodes", () => {
     expect(needsUsageRefresh({ online: true, usage_supported: true, runtimes: sub, usage: null }, now)).toBe(true);
     expect(needsUsageRefresh({ online: true, runtimes: { claude: { cli: "2.1", auth: "api_key" }, codex: { cli: "0.1", auth: "none" } }, usage: null }, now)).toBe(false);
     expect(needsUsageRefresh({ online: true, runtimes: { claude: { cli: "2.1", auth: "subscription" }, codex: { cli: "0.1", auth: "chatgpt" } }, usage: { claude: u(at(5)) } }, now)).toBe(true);
+    // Reported CLIs win over hello (#42): logged in after the daemon connected (hello still says none) refreshes;
+    // logged out or expired since hello does not.
+    const none = { claude: { cli: "2.1", auth: "none" } };
+    const rep = (auth: string, ready: boolean) => [{ runtime: "claude", installed: true, version: "2.1", auth, expired: !ready && auth !== "none", checked_at: at(1), updated_at: at(1), ready }] as never;
+    expect(needsUsageRefresh({ online: true, runtimes: none, clis: rep("subscription", true), usage: null }, now)).toBe(true);
+    expect(needsUsageRefresh({ online: true, runtimes: sub, clis: rep("none", false), usage: null }, now)).toBe(false);
+    expect(needsUsageRefresh({ online: true, runtimes: sub, clis: rep("subscription", false), usage: null }, now)).toBe(false);
+    expect(needsUsageRefresh({ online: true, runtimes: none, clis: [], usage: null }, now)).toBe(false);
 
     vi.useFakeTimers();
     try {

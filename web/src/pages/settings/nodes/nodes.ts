@@ -1,6 +1,7 @@
 // Nodes page helpers (pure): runtime chips, the card's meta line, the slot bar, totals and the
 // settings patch.
-import type { NodeUsage, NodeView, RuntimeUsage, UsageWindow } from "@/api/views";
+import type { NodeRuntime, NodeUsage, NodeView, RuntimeUsage, UsageWindow } from "@/api/views";
+import { formatDateTime } from "@/lib/library";
 import { summarizeNodes, nodeSlots } from "@/components/shell/nodes";
 import { RUNTIME_SPECS, runtimeSpec } from "@/lib/runtimes";
 import { timeAgo } from "@/lib/utils";
@@ -18,6 +19,96 @@ export function runtimeLine(key: string, info: RuntimeInfo | undefined): { ver: 
   if (!info || !info.cli) return { ver: "未安装", login: runtimeSpec(key).installHint, ok: false };
   if (!info.auth || info.auth === "none") return { ver: info.cli, login: "未登录", ok: false };
   return { ver: info.cli, login: info.auth === "api_key" ? "已配置 API Key" : "已登录", ok: true };
+}
+
+export type NodeCli = NodeRuntime;
+
+/** Runtimes the daemon may report before this console has a spec for them (#41). */
+const EXTRA_LABELS: Record<string, string> = { gemini: "Gemini CLI", antigravity: "Antigravity" };
+
+/** Display name of a runtime id: the spec's label, a known newcomer's, else the id itself. */
+export function cliLabel(id: string): string {
+  return RUNTIME_SPECS.find((r) => r.id === id)?.label ?? EXTRA_LABELS[id] ?? id;
+}
+
+const LOGIN_TEXT: Record<string, string> = { subscription: "已登录（订阅）", chatgpt: "已登录（ChatGPT）", api_key: "已配置 API Key", none: "未登录", unknown: "登录状态未知" };
+
+/** ok: sessions may run there; warn: something to do on the node; bad: was logged in, now expired; muted: unknown. */
+export type CliTone = "ok" | "warn" | "bad" | "muted";
+
+/** One runtime box on a node card. */
+export interface CliRow {
+  key: string;
+  label: string;
+  /** Version, "已安装" without one, or "未安装". */
+  ver: string;
+  login: string;
+  tone: CliTone;
+  /** "检测于 3 分钟前" ("" for an old daemon's hello data). */
+  checked: string;
+  /** Absolute time for the tooltip. */
+  checkedTitle: string;
+  /** Why the check failed, shown on hover. */
+  error: string;
+}
+
+/** The login half of a reported CLI (data-model §2.2): not installed, expired, then by auth. */
+export function cliLogin(c: Pick<NodeCli, "runtime" | "installed" | "auth" | "expired" | "ready">): { login: string; tone: CliTone } {
+  if (!c.installed) return { login: RUNTIME_SPECS.find((r) => r.id === c.runtime)?.installHint ?? "安装后登录", tone: "warn" };
+  if (c.expired) return { login: "登录已过期", tone: "bad" };
+  const login = LOGIN_TEXT[c.auth] ?? c.auth;
+  if (c.auth === "unknown") return { login, tone: "muted" };
+  if (c.auth === "none") return { login, tone: "warn" };
+  // A login whose auth_expires_at has passed is not ready even when the daemon has not said expired yet.
+  return c.ready ? { login, tone: "ok" } : { login: "登录已过期", tone: "bad" };
+}
+
+/**
+ * The runtime boxes of a card: the CLIs the daemon reported (node.runtimes, in its order, any runtime
+ * id) or, for a daemon that never reported (old version), the hello runtimes as before.
+ */
+export function cliRows(n: Pick<NodeView, "clis" | "runtimes"> & { runtime_status?: boolean; online?: boolean }, now = Date.now()): CliRow[] {
+  const clis = n.clis ?? [];
+  if (clis.length) {
+    return clis.map((c) => {
+      const t = Date.parse(c.checked_at);
+      return {
+        key: c.runtime,
+        label: cliLabel(c.runtime),
+        ver: c.installed ? c.version || "已安装" : "未安装",
+        ...cliLogin(c),
+        checked: Number.isNaN(t) ? "" : `检测于 ${timeAgo((Date.now() - Math.max(0, now - t)) / 1000)}`,
+        checkedTitle: Number.isNaN(t) ? "" : formatDateTime(c.checked_at),
+        error: c.error ?? "",
+      };
+    });
+  }
+  const hello = (n.runtimes ?? {}) as Record<string, RuntimeInfo>;
+  return RUNTIMES.map(([key, label]) => {
+    const r = runtimeLine(key, hello[key]);
+    // A daemon that reports but has not yet (just upgraded or connected): hello data until the first report.
+    const checked = n.runtime_status && n.online ? "等待首次检测" : "";
+    return { key, label, ver: r.ver, login: r.login, tone: r.ok ? "ok" : "warn", checked, checkedTitle: checked ? "守护进程连上后会立即检测并上报" : "", error: "" };
+  });
+}
+
+/** What usageView reads per runtime: the reported CLIs when there are any (an expired login has no quota to show), else hello. */
+export function runtimeInfos(n: Pick<NodeView, "clis" | "runtimes">): Record<string, RuntimeInfo> {
+  const clis = n.clis ?? [];
+  if (!clis.length) return (n.runtimes ?? {}) as Record<string, RuntimeInfo>;
+  return Object.fromEntries(clis.map((c) => [c.runtime, c.installed ? { cli: c.version || "?", auth: c.ready ? c.auth : "expired" } : {}]));
+}
+
+/** The 重新检测 button: whether it can be pressed and, when not, why (tooltip). */
+export function recheckState(n: Pick<NodeView, "online" | "runtime_status">): { enabled: boolean; hint: string } {
+  if (!n.runtime_status) return { enabled: false, hint: "守护进程版本过旧，需要升级后才能重新检测" };
+  if (!n.online) return { enabled: false, hint: "节点不在线" };
+  return { enabled: true, hint: "立即检测各 CLI 的安装和登录状态，并刷新余量" };
+}
+
+/** Puts the node a recheck returned into the cached list. */
+export function withNode<T extends { id: string }>(list: T[] | undefined, node: T): T[] | undefined {
+  return list?.map((n) => (n.id === node.id ? node : n));
 }
 
 /** Subscription logins that have a quota to show (claude.ai / ChatGPT accounts). */
@@ -92,10 +183,11 @@ export function usageView(key: string, info: RuntimeInfo | undefined, usage: Run
 /** Quota younger than this is shown as is; hovering does not ask the node again. */
 export const USAGE_FRESH_MS = 60_000;
 
-/** Hovering a card asks for fresh quota only when the node is online, its daemon reports usage, it has a subscription login and that runtime's quota is missing or older than a minute. */
-export function needsUsageRefresh(n: UsageNodeState & { runtimes?: unknown; usage?: NodeUsage | null }, now = Date.now(), maxAge = USAGE_FRESH_MS): boolean {
+/** Hovering a card asks for fresh quota only when the node is online, its daemon reports usage, it has a subscription login (per the reported CLIs when there are any) and that runtime's quota is missing or older than a minute. */
+export function needsUsageRefresh(n: UsageNodeState & { runtimes?: unknown; clis?: NodeRuntime[] | null; usage?: NodeUsage | null }, now = Date.now(), maxAge = USAGE_FRESH_MS): boolean {
   if (!n.online || n.usage_supported === false) return false;
-  const runtimes = (n.runtimes ?? {}) as Record<string, RuntimeInfo | undefined>;
+  // Same source as the card's quota (runtimeInfos): the reported CLIs, hello only for an old daemon.
+  const runtimes = runtimeInfos(n as Pick<NodeView, "clis" | "runtimes">) as Record<string, RuntimeInfo | undefined>;
   return Object.entries(SUBSCRIPTION).some(([key, sub]) => {
     const info = runtimes[key];
     if (!info?.cli || info.auth !== sub) return false;

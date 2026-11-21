@@ -22,6 +22,10 @@ var ErrNodeOffline = errors.New("节点不在线")
 // ErrUsageUnsupported: the node's daemon does not report usage (hello.features lacks "usage").
 var ErrUsageUnsupported = errors.New("节点不支持查询余量")
 
+// ErrRuntimeStatusUnsupported: the node's daemon does not report its runtime CLIs (hello.features
+// lacks "runtime_status"), so it cannot be asked to check them again.
+var ErrRuntimeStatusUnsupported = errors.New("节点的守护进程版本太旧，不支持重新检测 CLI：请先更新守护进程")
+
 // ErrUpgradeUnsupported: the daemon predates the update launcher (no self_update feature).
 var ErrUpgradeUnsupported = errors.New("这个节点还不支持一键更新：在节点机器上重新运行一次安装命令（容器节点按新的 compose.yml 重建）")
 
@@ -112,6 +116,11 @@ type NodeRegistry interface {
 	// cached report is fresh; stale = the node did not answer in time. ErrNodeOffline when not
 	// connected, ErrUsageUnsupported when the daemon does not report usage.
 	RefreshUsage(ctx context.Context, nodeID string) (usage *NodeUsage, stale bool, err error)
+	// RecheckRuntimes asks the node to check its runtime CLIs now (node.runtimes_refresh, plus
+	// node.usage_refresh when it reports usage) and waits for the answer, which is stored before
+	// it returns; stale = no answer in time. ErrNodeOffline when not connected,
+	// ErrRuntimeStatusUnsupported when the daemon does not report runtime_status.
+	RecheckRuntimes(ctx context.Context, nodeID string) (stale bool, err error)
 }
 
 // Events publishes realtime events (api.md §1). The orchestration side
@@ -151,6 +160,9 @@ func (Offline) Status(string) NodeLive { return NodeLive{} }
 func (Offline) RefreshUsage(context.Context, string) (*NodeUsage, bool, error) {
 	return nil, false, ErrNodeOffline
 }
+
+// RecheckRuntimes implements NodeRegistry.
+func (Offline) RecheckRuntimes(context.Context, string) (bool, error) { return false, ErrNodeOffline }
 
 // Disconnect implements NodeRegistry.
 func (Offline) Disconnect(context.Context, string, string) {}

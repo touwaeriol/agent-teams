@@ -2,7 +2,7 @@
 // Pages wrap them with `useAction` (mutations.ts) for toasts and cache refresh.
 import { client, unwrap } from "./client";
 import type { components } from "./schema";
-import type { AskChoice, GitCredentialView, GitRepoView, GitTestResult, MainTaskStatus, ProjectServersView, ServerView, UsageRefresh } from "./views";
+import type { AskChoice, GitCredentialView, GitRepoView, GitTestResult, MainTaskStatus, NodeRecheck, ProjectServersView, ServerView, UsageRefresh } from "./views";
 
 type S = components["schemas"];
 
@@ -112,6 +112,8 @@ export const nodes = {
     unwrap(client.POST("/api/nodes/{id}/upgrade", { params: { path: { id } }, body: { mode } })),
   remove: (id: string) => unwrap(client.DELETE("/api/nodes/{id}", { params: { path: { id } } })),
   /** 409 node_offline / usage_unsupported; the cards treat any failure as "keep the old numbers". */
+  /** Asks the node to check its CLIs (and quota) now, up to 15 s; 409 unsupported_daemon / node_offline. */
+  recheck: (id: string): Promise<NodeRecheck> => unwrap(client.POST("/api/nodes/{id}/recheck", { params: { path: { id } } })) as Promise<NodeRecheck>,
   refreshUsage: (id: string): Promise<UsageRefresh> => unwrap(client.POST("/api/nodes/{id}/usage/refresh", { params: { path: { id } } })),
 };
 
