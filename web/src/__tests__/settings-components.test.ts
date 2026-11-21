@@ -277,7 +277,7 @@ describe("Team · role model field", () => {
     for (const c of [coordinator!, lead!, dev!]) {
       expect(modelInput(c).attributes("placeholder")).toBe("留空 = claude-opus-5-5");
     }
-    expect(modelInput(rev!).attributes("placeholder")).toContain("Codex");
+    expect(modelInput(rev!).attributes("placeholder")).toBe("留空 = 默认");
     expect(modelInput(coordinator!).element.value).toBe("");
     expect(modelInput(lead!).element.value).toBe("claude-lead-x");
     expect(modelInput(dev!).element.value).toBe("claude-sonnet-5-5");

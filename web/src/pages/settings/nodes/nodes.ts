@@ -20,7 +20,7 @@ export const RUNTIMES: [string, string][] = RUNTIME_SPECS.map((r) => [r.id, r.la
 /** One runtime chip: version and login state (protocol.md hello.runtimes). */
 export function runtimeLine(key: string, info: RuntimeInfo | undefined): { ver: string; login: string; ok: boolean } {
   if (!info || !info.cli || info.installed === false) return { ver: "未安装", login: runtimeSpec(key).installHint, ok: false };
-  if (!info.auth || info.auth === "none") return { ver: info.cli, login: "未登录", ok: false };
+  if (!info.auth || info.auth === "none") return { ver: info.cli, login: runtimeSpec(key).loginHint, ok: false };
   return { ver: info.cli, login: AUTH_TEXT[info.auth] ?? "已登录", ok: true };
 }
 

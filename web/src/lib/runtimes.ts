@@ -16,16 +16,19 @@ export interface RuntimeSpec {
   installHint: string;
   /** May be a coordinator or a thread lead (server runtimes.CanLead). */
   canLead: boolean;
+  /** The nodes page's text when the runtime is installed but not logged in. */
+  loginHint: string;
   /** Shown on a read-only role of this runtime when its read-only is not a sandbox. */
   readOnlyCaveat: string;
 }
 
 export const RUNTIME_SPECS: RuntimeSpec[] = [
-  { id: "claude", label: "Claude Code", slashCommands: true, builtinModel: "claude-opus-5-5", subscriptionAuth: "subscription", installHint: "安装后登录", canLead: true, readOnlyCaveat: "" },
-  { id: "codex", label: "Codex", slashCommands: false, builtinModel: "", subscriptionAuth: "chatgpt", installHint: "安装后登录或设置 CODEX_API_KEY", canLead: false, readOnlyCaveat: "" },
+  { id: "claude", label: "Claude Code", slashCommands: true, builtinModel: "claude-opus-5-5", subscriptionAuth: "subscription", installHint: "安装后登录", canLead: true, loginHint: "未登录", readOnlyCaveat: "" },
+  { id: "codex", label: "Codex", slashCommands: false, builtinModel: "", subscriptionAuth: "chatgpt", installHint: "安装后登录或设置 CODEX_API_KEY", canLead: false, loginHint: "未登录", readOnlyCaveat: "" },
   // Google Antigravity CLI (agy over ACP): no usage API, so no subscription quota to show.
   { id: "antigravity", label: "Antigravity", slashCommands: false, builtinModel: "", subscriptionAuth: "", installHint: "安装 agy 后运行 agy acp --login 登录",
-    canLead: false, readOnlyCaveat: "Antigravity 的只读靠禁用写类工具和拒绝写权限实现，不是沙箱级保证" },
+    // The daemon probes agy's login when it starts and reports it in the next hello.
+    canLead: false, loginHint: "未登录 · 登录 agy 后需重启节点守护进程", readOnlyCaveat: "Antigravity 的只读靠禁用写类工具和拒绝写权限实现，不是沙箱级保证" },
 ];
 
 /** The spec of a runtime id; "" or an unknown id is the default runtime (the first). */

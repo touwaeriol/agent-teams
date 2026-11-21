@@ -42,14 +42,16 @@ describe("antigravity runtime", () => {
     expect(modelSuggestions([{ tier: "member", runtime: "antigravity", model: "my-model" }], "antigravity")[0]).toBe("my-model");
     expect(modelSuggestions([], "claude")).not.toContain("gemini-4-neon-high");
     expect(modelName("gemini-4-neon-high")).toBe("Gemini 4 Neon (high)");
-    expect(emptyRoleModel("antigravity")).toBe("留空 = Antigravity 默认");
+    expect(emptyRoleModel("antigravity")).toBe("留空 = 默认");
   });
 
   it("shows its node state", () => {
     expect(runtimeLine("antigravity", { cli: "", auth: "none", installed: false })).toEqual({ ver: "未安装", login: "安装 agy 后运行 agy acp --login 登录", ok: false });
     expect(runtimeLine("antigravity", { cli: "1.5.14", auth: "oauth", installed: true }).ok).toBe(true);
     expect(runtimeLine("antigravity", { cli: "1.5.14", auth: "oauth" })).toEqual({ ver: "1.5.14", login: "已登录", ok: true });
-    expect(runtimeLine("antigravity", { cli: "1.5.14", auth: "none" })).toEqual({ ver: "1.5.14", login: "未登录", ok: false });
+    expect(runtimeLine("antigravity", { cli: "1.5.14", auth: "none" })).toEqual({ ver: "1.5.14", login: "未登录 · 登录 agy 后需重启节点守护进程", ok: false });
+    expect(runtimeLine("antigravity", { cli: "1.5.14" }).login).toBe("未登录 · 登录 agy 后需重启节点守护进程");
+    expect(runtimeLine("codex", { cli: "0.1", auth: "none" }).login).toBe("未登录");
     expect(runtimeLine("antigravity", { cli: "1.5.14", auth: "api_key" }).login).toBe("已配置 API Key");
     expect(runtimeLine("antigravity", { cli: "1.5.14", auth: "adc" }).login).toBe("已配置 ADC 凭证");
   });
