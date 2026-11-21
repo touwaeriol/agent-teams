@@ -98,10 +98,10 @@ func employeeRuntimes(e core.Employee) []string {
 // nodeState is what chooseNode knows about a candidate (runtime, node) pair.
 type nodeState struct {
 	id     string
-	rt     string  // the runtime the session would run on ("" in tests of a single runtime)
-	usable bool    // online and the runtime is logged in there
-	online bool    // the node has a live link
-	gated  bool    // online and reports its runtime CLIs: usable only when the runtime is ready (rs)
+	rt     string // the runtime the session would run on ("" in tests of a single runtime)
+	usable bool   // online and the runtime is logged in there
+	online bool   // the node has a live link
+	gated  bool   // online and reports its runtime CLIs: usable only when the runtime is ready (rs)
 	rs     *store.NodeRuntime
 	free   int     // freeSlots
 	used   float64 // quotaUsed of the runtime

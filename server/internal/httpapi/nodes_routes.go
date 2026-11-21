@@ -49,8 +49,13 @@ type NodeView struct {
 	// UpdateAvailable: online, on another release than LatestVersion.
 	UpdateAvailable bool `json:"update_available"`
 	// SelfUpdate: the daemon runs under the update launcher, so POST .../upgrade works.
-	SelfUpdate bool                       `json:"self_update" doc:"hello.features has self_update (the last hello while offline)"`
-	Upgrade    *platform.NodeUpgradeState `json:"upgrade,omitempty" doc:"Last update asked of the node since the console started"`
+	SelfUpdate bool `json:"self_update" doc:"hello.features has self_update (the last hello while offline)"`
+	// RuntimeStatus: the daemon reports its runtime CLIs (node.runtimes), so POST .../recheck works
+	// and only runtimes that are ready there are scheduled on it.
+	RuntimeStatus bool `json:"runtime_status" doc:"hello.features has runtime_status (the last hello while offline): the daemon reports its CLIs and POST /api/nodes/{id}/recheck works"`
+	// CLIs are the runtime CLIs as the daemon last reported them (empty for an older daemon).
+	CLIs    []store.NodeRuntime        `json:"clis" doc:"Install and login state of each runtime CLI as last reported (node.runtimes), ordered by runtime; empty when the daemon never reported"`
+	Upgrade *platform.NodeUpgradeState `json:"upgrade,omitempty" doc:"Last update asked of the node since the console started"`
 }
 
 // lastHello is the part of the stored hello used while a node is offline.
@@ -62,7 +67,7 @@ type lastHello struct {
 	Features []string       `json:"features"`
 }
 
-func (s *Server) nodeView(n store.Node, latest string) NodeView {
+func (s *Server) nodeView(n store.Node, latest string, clis []store.NodeRuntime) NodeView {
 	live := s.nodes.Status(n.ID)
 	var hello lastHello
 	_ = json.Unmarshal(n.LastHello, &hello)
@@ -78,6 +83,8 @@ func (s *Server) nodeView(n store.Node, latest string) NodeView {
 	}
 	v.UsageSupported = slices.Contains(features, "usage")
 	v.SelfUpdate = slices.Contains(features, "self_update")
+	v.RuntimeStatus = slices.Contains(features, "runtime_status")
+	v.CLIs = withReady(clis, time.Now())
 	v.LatestVersion, v.Upgrade = latest, live.Upgrade
 	v.UpdateAvailable = live.Online && latest != "" && v.Version != latest
 	if v.Labels == nil {
@@ -198,6 +205,8 @@ func (s *Server) registerNodes(api huma.API) {
 	huma.Register(api, huma.Operation{OperationID: "node-sessions", Method: "GET", Path: "/api/nodes/{id}/sessions", Tags: tags}, s.nodeSessions)
 	huma.Register(api, huma.Operation{OperationID: "refresh-node-usage", Method: "POST", Path: "/api/nodes/{id}/usage/refresh", Tags: tags,
 		Summary: "Fetch the node's subscription quota now (cached for 60 s; waits up to 15 s for the node)"}, s.refreshNodeUsage)
+	huma.Register(api, huma.Operation{OperationID: "recheck-node", Method: "POST", Path: "/api/nodes/{id}/recheck", Tags: tags,
+		Summary: "Check the node's runtime CLIs (install, login) and quota now; waits up to 15 s and returns the node"}, s.recheckNode)
 	huma.Register(api, huma.Operation{OperationID: "node-logs", Method: "GET", Path: "/api/nodes/{id}/logs", Tags: tags}, s.nodeLogs)
 }
 
@@ -212,8 +221,16 @@ func (s *Server) listNodes(ctx context.Context, _ *struct{}) (*nodesOutput, erro
 	}
 	out := make([]NodeView, len(rows))
 	latest := s.currentRelease(ctx).Version
+	ids := make([]string, len(rows))
 	for i, n := range rows {
-		out[i] = s.nodeView(n, latest)
+		ids[i] = n.ID
+	}
+	clis, err := s.store.NodeRuntimes(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i, n := range rows {
+		out[i] = s.nodeView(n, latest, clis[n.ID])
 	}
 	return &nodesOutput{Body: out}, nil
 }
@@ -243,7 +260,7 @@ func (s *Server) addNode(ctx context.Context, in *newNodeInput) (*newNodeOutput,
 	}
 	s.audit(ctx, p.User.ID, "node_create", "node", node.ID, map[string]string{"name": name})
 	out := &newNodeOutput{}
-	out.Body.Node = s.nodeView(node, s.currentRelease(ctx).Version)
+	out.Body.Node = s.nodeView(node, s.currentRelease(ctx).Version, nil)
 	out.Body.Enrollment = s.enrollment(name, token)
 	return out, nil
 }
@@ -299,7 +316,7 @@ func (s *Server) updateNode(ctx context.Context, in *nodePatchInput) (*nodeOutpu
 		s.audit(ctx, p.User.ID, "node_isolated", "node", node.ID, map[string]bool{"isolated": *in.Body.Isolated})
 	}
 	s.nodes.Configure(ctx, node)
-	return &nodeOutput{Body: s.nodeView(node, s.currentRelease(ctx).Version)}, nil
+	return s.nodeOutput(ctx, node)
 }
 
 func nodeChanges(in *nodePatchInput) []store.Change {
@@ -409,6 +426,66 @@ func (s *Server) refreshNodeUsage(ctx context.Context, in *nodeIDInput) (*usageR
 	}
 	out := &usageRefreshOutput{}
 	out.Body.Usage, out.Body.Stale = usage, stale
+	return out, nil
+}
+
+// nodeOutput is the node as GET /api/nodes lists it, with its stored CLI states.
+func (s *Server) nodeOutput(ctx context.Context, node store.Node) (*nodeOutput, error) {
+	clis, err := s.store.NodeRuntimes(ctx, []string{node.ID})
+	if err != nil {
+		return nil, err
+	}
+	return &nodeOutput{Body: s.nodeView(node, s.currentRelease(ctx).Version, clis[node.ID])}, nil
+}
+
+// withReady fills NodeRuntime.Ready (never nil, for the JSON array).
+func withReady(rows []store.NodeRuntime, now time.Time) []store.NodeRuntime {
+	out := make([]store.NodeRuntime, len(rows))
+	for i, r := range rows {
+		r.ReadyNow = r.Ready(now)
+		out[i] = r
+	}
+	return out
+}
+
+type recheckOutput struct {
+	Body struct {
+		Node  NodeView `json:"node" doc:"The node with the CLI states the answer stored (same as GET /api/nodes)"`
+		Stale bool     `json:"stale,omitempty" doc:"The node did not answer in time; clis are the previous report"`
+	}
+}
+
+// recheckNode is POST /api/nodes/{id}/recheck: node.runtimes_refresh (and node.usage_refresh) to a
+// daemon with runtime_status, waiting for its answer without holding a transaction. A runtime that
+// became ready releases the sessions held for it (engine router RuntimesChanged).
+func (s *Server) recheckNode(ctx context.Context, in *nodeIDInput) (*recheckOutput, error) {
+	p, err := requireUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.store.NodeOf(ctx, p.User.ID, in.ID); err != nil {
+		return nil, storeErr(err, "没有这个节点")
+	}
+	if err := s.rateLimit(ctx, "node-recheck:"+in.ID, 20, time.Minute); err != nil {
+		return nil, err
+	}
+	stale, err := s.nodes.RecheckRuntimes(ctx, in.ID)
+	if errors.Is(err, platform.ErrRuntimeStatusUnsupported) {
+		return nil, fail(http.StatusConflict, "unsupported_daemon", err.Error())
+	}
+	if err != nil {
+		return nil, nodeCommandErr(err)
+	}
+	node, err := s.store.NodeOf(ctx, p.User.ID, in.ID)
+	if err != nil {
+		return nil, storeErr(err, "没有这个节点")
+	}
+	view, err := s.nodeOutput(ctx, node)
+	if err != nil {
+		return nil, err
+	}
+	out := &recheckOutput{}
+	out.Body.Node, out.Body.Stale = view.Body, stale
 	return out, nil
 }
 

@@ -21,6 +21,8 @@ type NodeRuntime struct {
 	Error         string     `json:"error,omitempty" doc:"Why the check failed (no credentials)"`
 	CheckedAt     time.Time  `json:"checked_at" doc:"When the daemon checked"`
 	UpdatedAt     time.Time  `json:"updated_at" doc:"When the console last stored a change"`
+	// ReadyNow is Ready at the time of the API call (not stored).
+	ReadyNow bool `json:"ready" gorm:"-" doc:"Installed, logged in and not expired: sessions of this runtime may be scheduled on the node"`
 }
 
 // TableName maps NodeRuntime to at_node_runtimes.
