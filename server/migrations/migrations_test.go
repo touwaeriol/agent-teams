@@ -1522,6 +1522,18 @@ INSERT INTO at_session_holds (employee_id, project_id, reason, first) VALUES ('e
 	if err := db.QueryRow(`SELECT more::text FROM at_session_holds`).Scan(&more); err != nil || more != "[]" {
 		t.Fatalf("more default %q %v", more, err)
 	}
+	// A hold made in a thread goes with the thread (thread_id ON DELETE CASCADE).
+	if _, err := db.Exec(`INSERT INTO at_conversations (id, user_id, title, project_id, kind) VALUES ('th1', 'u1', 't', 'p1', 'thread');
+INSERT INTO at_threads (id, project_id, user_id, no, title, branch, base_branch) VALUES ('th1', 'p1', 'u1', 1, 't', 'thread/1-t', 'main');
+INSERT INTO at_employees (id, project_id, name, tier, role, runtime) VALUES ('e2', 'p1', 'dev-1', 'member', 'dev', 'claude');
+INSERT INTO at_session_holds (employee_id, project_id, thread_id, reason, first) VALUES ('e2', 'p1', 'th1', 'r', '{"msg_id": "m2", "text": "y"}');
+DELETE FROM at_threads WHERE id = 'th1'`); err != nil {
+		t.Fatal(err)
+	}
+	var left int
+	if err := db.QueryRow(`SELECT count(*) FROM at_session_holds WHERE employee_id = 'e2'`).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("hold left after its thread was deleted: %d %v", left, err)
+	}
 	if _, err := db.Exec(`DELETE FROM at_nodes WHERE id = 'n1'; DELETE FROM at_employees WHERE id = 'e1'`); err != nil {
 		t.Fatal(err)
 	}

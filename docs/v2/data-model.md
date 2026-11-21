@@ -156,7 +156,7 @@ CREATE TABLE at_node_runtimes (
 );
 ```
 
-收到 `node.runtimes` 就整体替换该节点的行（报告里没有的运行时删掉）；不带 `runtime_status` 的守护进程发来的 `node.runtimes` 直接忽略。调度对**在线且 hello.features 含 `runtime_status`** 的节点只看这张表：运行时 `installed`、`auth` 不是 `none`/`unknown`、没有 `expired`、`auth_expires_at` 未过，才算可用（`store.NodeRuntime.Ready`）；这张表里还没有该节点的行（首次上报还没到）时也算不可用，原因是“正在检测节点上 X 的安装和登录状态”，首次上报（`reason: hello`）一到就重新放行。其他节点照旧（`node.usage` 的 auth，没有上报就当可用）。暂存的会话见 §2.7 `at_session_holds`。
+收到 `node.runtimes` 就整体替换该节点的行（报告里没有的运行时删掉）；不带 `runtime_status` 的守护进程发来的 `node.runtimes` 直接忽略。调度对**在线且 hello.features 含 `runtime_status`** 的节点只看这张表：运行时 `installed`、`auth` 不是 `none`/`unknown`、没有 `expired`、`auth_expires_at` 未过，才算可用（`store.NodeRuntime.Ready`）；本次连接的首次上报还没到时也算不可用（不管这张表里有没有上次连接留下的行，`nodegw.Gateway.RuntimesReported`），原因是“正在检测节点上 X 的安装和登录状态”，首次上报（`reason: hello`）一到就重新放行。其他节点照旧（`node.usage` 的 auth，没有上报就当可用）。暂存的会话见 §2.7 `at_session_holds`。
 
 ### 2.3 GitHub
 

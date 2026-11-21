@@ -124,9 +124,13 @@ func (o *Orchestrator) nodeStates(ctx context.Context, tx *core.Tx, cands []stor
 			st.online = true
 			st.usable = loggedIn(ru)
 			if o.gw.SupportsRuntimeStatus(n.ID) {
-				// A daemon with runtime_status decides by its report only; until the first one
-				// arrives (right after welcome) the runtime counts as not ready.
-				st.gated, st.unseen, st.rs = true, len(reports[n.ID]) == 0, runtimeReport(reports[n.ID], runtime)
+				// A daemon with runtime_status decides by its report only; until the first one of
+				// this connection arrives (right after welcome) the runtime counts as not ready,
+				// whatever an earlier connection left in at_node_runtimes.
+				st.gated, st.unseen = true, !o.gw.RuntimesReported(n.ID) || len(reports[n.ID]) == 0
+				if !st.unseen {
+					st.rs = runtimeReport(reports[n.ID], runtime)
+				}
 				st.usable = st.rs != nil && st.rs.Ready(now)
 			}
 			st.free = freeSlots(o.gw.Capacity(n), active)
