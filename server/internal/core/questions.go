@@ -44,6 +44,13 @@ func OpenUserQuestions(ctx context.Context, q DB, projectID string) ([]Question,
 		Order("created_at"))
 }
 
+// OpenQuestionsFor lists the open question cards (not approvals) an employee asked the user in
+// a conversation.
+func OpenQuestionsFor(ctx context.Context, q DB, conversationID, asker string) ([]Question, error) {
+	return find[Question](questions(ctx, q).Where(`conversation_id = ? AND asker = ? AND status = 'open'
+		AND audience = 'user' AND kind = 'question'`, conversationID, asker).Order("created_at, id"))
+}
+
 // ThreadQuestionsWaiting counts the thread's question cards still waiting on the user (approval
 // cards are not counted: they belong to a running turn). Ending the thread would cancel them.
 func ThreadQuestionsWaiting(ctx context.Context, q DB, threadID string) (int, error) {

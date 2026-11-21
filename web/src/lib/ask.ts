@@ -48,9 +48,15 @@ export function answerBody(q: Pick<QuestionView, "detail">, choices: AskChoice[]
   return { answer: c.other ?? c.selected[0] ?? "" };
 }
 
-/** What the user chose, per question, for the collapsed card. */
+/** The card was closed by a message the user typed in the chat (the message itself is the answer). */
+export function answeredInChat(q: Pick<QuestionView, "detail">): boolean {
+  return q.detail?.answered_in_chat === true;
+}
+
+/** What the user chose, per question, for the collapsed card (nothing when answered in the chat). */
 export function answeredRows(q: Pick<QuestionView, "text" | "options" | "detail" | "answer">): AskAnswer[] {
   const items = askItems(q);
+  if (answeredInChat(q)) return items.map((i) => ({ question: i.question, header: i.header, selected: [] }));
   if (q.detail?.answers?.length) return q.detail.answers;
   const text = q.answer ?? "";
   const picked = items[0].options.some((o) => o.label === text);

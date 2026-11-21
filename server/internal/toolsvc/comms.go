@@ -246,6 +246,15 @@ func answerRecord(q core.Question, asker core.Employee, text string) *core.NewMe
 }
 
 func (s *Service) answerCall(ctx context.Context, tx *core.Tx, q core.Question, answer string) (bool, error) {
+	if waiting, err := callWaiting(ctx, tx, q); err != nil || !waiting {
+		return false, err
+	}
+	res := okJSON(answer, protocol.AskUserResult{QuestionID: protocol.QuestionID(q.ID), Answer: &answer, Answers: storedAnswers(q)})
+	return true, s.Complete(ctx, tx, *q.SessionID, *q.CallID, res)
+}
+
+// callWaiting tells whether the blocking call that asked q still waits for its answer.
+func callWaiting(ctx context.Context, tx *core.Tx, q core.Question) (bool, error) {
 	if q.CallID == nil || q.SessionID == nil {
 		return false, nil
 	}
@@ -254,8 +263,7 @@ func (s *Service) answerCall(ctx context.Context, tx *core.Tx, q core.Question, 
 	if err != nil || call.Status != "waiting" {
 		return false, ignoreMissing(err)
 	}
-	res := okJSON(answer, protocol.AskUserResult{QuestionID: protocol.QuestionID(q.ID), Answer: &answer, Answers: storedAnswers(q)})
-	return true, s.Complete(ctx, tx, *q.SessionID, *q.CallID, res)
+	return true, nil
 }
 
 func deref(p *string) string {

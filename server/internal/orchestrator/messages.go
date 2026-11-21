@@ -95,7 +95,11 @@ func (o *Orchestrator) PostUserMessageWith(ctx context.Context, in UserMessage) 
 		if err != nil {
 			return err
 		}
-		m, err = o.Deliver(ctx, tx, emp, Delivery{Text: text + in.Context + tag, Kind: "user", Priority: prio, Interrupt: interrupt, Record: rec, Images: files})
+		answered, err := o.ChatAnswers(ctx, tx, c, emp, userID, content)
+		if err != nil {
+			return err
+		}
+		m, err = o.Deliver(ctx, tx, emp, Delivery{Text: text + in.Context + answered + tag, Kind: "user", Priority: prio, Interrupt: interrupt, Record: rec, Images: files})
 		return err
 	})
 	return m, err

@@ -220,3 +220,55 @@ func TestCoordinatorRecapAndResume(t *testing.T) {
 		t.Fatalf("lead must resume its old conversation: %+v", leadOpen.Resume)
 	}
 }
+
+// TestTypedReplyClosesCards: the user types in the chat instead of answering the lead's cards.
+// Both the lead's open cards close as answered in chat (a member's card stays open), the waiting
+// AskUserQuestion call returns at once saying the reply is the next message, and the message
+// reaches the lead naming the cards it closed.
+func TestTypedReplyClosesCards(t *testing.T) {
+	tm := startTeam(t)
+	via := tm.lead.startCall("ask_user", `{"via":"AskUserQuestion","questions":[{"question":"现在发布吗？","header":"发布","options":[{"label":"发布"},{"label":"等等"}]}]}`)
+	tm.lead.noResult(via)
+	plain := tm.lead.mustCall("ask_user", map[string]any{"question": "用哪个分支？"})
+	member := tm.dev.startCall("ask_user", `{"question":"测试库用哪个？"}`)
+	tm.dev.noResult(member)
+	var cards []core.QuestionView
+	tm.b.must(200, "GET", "/api/conversations/"+tm.thread.ID+"/questions?status=open", nil, &cards)
+	if len(cards) != 3 {
+		t.Fatalf("open cards %+v (plain: %+v)", cards, plain)
+	}
+
+	tm.b.must(202, "POST", "/api/conversations/"+tm.thread.ID+"/messages", map[string]any{"content": "先别发布，用 develop"}, nil)
+	res := tm.lead.result(via)
+	var out protocol.AskUserResult
+	_ = json.Unmarshal(*res.Structured, &out)
+	if !res.Ok || !strings.Contains(text(res), "直接发来了一条消息") || len(out.Answers) != 1 || out.Answers[0].Question != "现在发布吗？" ||
+		out.Answers[0].Other == nil || len(out.Answers[0].Selected) != 0 {
+		t.Fatalf("released call %+v %+v", res, out)
+	}
+	send := tm.lead.expectSend("先别发布，用 develop")
+	if !strings.Contains(send.Text, "[这条消息回复了你的提问 ") || !strings.Contains(send.Text, "提问卡片已关闭]") {
+		t.Fatalf("delivered %q", send.Text)
+	}
+
+	var all []core.QuestionView
+	tm.b.must(200, "GET", "/api/conversations/"+tm.thread.ID+"/questions?status=all", nil, &all)
+	closed := 0
+	for _, q := range all {
+		switch q.Asker {
+		case "lead-1":
+			if q.Status != "answered" || q.Detail["answered_in_chat"] != true || q.Answer == nil || *q.Answer != "先别发布，用 develop" {
+				t.Fatalf("lead card %+v", q)
+			}
+			closed++
+		case "dev-1":
+			if q.Status != "open" {
+				t.Fatalf("member card must stay open: %+v", q)
+			}
+		}
+	}
+	if closed != 2 {
+		t.Fatalf("closed %d lead cards: %+v", closed, all)
+	}
+	tm.dev.noResult(member)
+}
