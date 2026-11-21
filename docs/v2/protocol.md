@@ -98,7 +98,7 @@
 
 `features` 含 `ssh_gateway` 表示守护进程能接远程服务器（§8.1）：认得 `session.open` 的 `ssh_servers`，会发 `ssh.cert_request`，能处理 `ssh.servers_update`。这样的守护进程还可以带 `"ssh_client": {"version": "OpenSSH_9.6p1"}`（`ssh -V` 的结果，找不到 ssh 就不带）。
 
-`hello.runtimes` 里的 `auth` 由守护进程启动时探测（之后的变化走 §9.2 的 `node.runtimes`）（Claude：`query().accountInfo()` 一次后关闭；Codex：app-server `account/read`），不上报邮箱等个人信息。
+`hello.runtimes` 里的 `auth` 是守护进程最近一次检测的结果（启动时探测，之后的变化走 §9.2 的 `node.runtimes`，重连时的 hello 也带最新结果）（Claude：`query().accountInfo()` 一次后关闭；Codex：app-server `account/read`），不上报邮箱等个人信息。
 
 ### `welcome`（控制台 → 守护进程，不可靠）
 
@@ -501,6 +501,10 @@
   - `runtimes.<id>`：`installed`（找到并能运行 CLI/SDK）、`version`（可选，CLI 报告的版本）、`path`（可选，找到的可执行文件绝对路径）、`auth`（`subscription|chatgpt|api_key|none|unknown`：`subscription` 为服务方账号登录，如 Claude 订阅；`chatgpt` 为 Codex 的 ChatGPT 登录；`unknown` 为没装或检测失败、无法判断）、`auth_expires_at`（可选，只在能从凭证文件元数据或非秘密字段读出时填）、`expired`（可选，确知登录已过期，控制台调度时按未登录处理）、`checked_at`（本次检测时间）、`error`（可选，简短原因，不含凭证）。
   - 运行时 id 是开放的小写字符串（`^[a-z][a-z0-9_-]{0,31}$`，与 `common.json` 的 `Runtime` 取值一致），新增运行时不需要改这条消息。
   - 检测只读文件元数据和非秘密字段，消息里永远不带 token、API Key、邮箱、组织或账号 id。
+  - 守护进程的实现（`node/src/runtime-monitor.ts`，检测器是各运行时 adapter 的 `detect()`/`watchPaths()`，`node/src/sessions/registry.ts`）：启动时强制检测一次（Claude 的 SDK 探测最多等 60 秒），之后每 60 秒检测一次，并用 `fs.watch` 监听各运行时的凭证文件（Claude：`$CLAUDE_CONFIG_DIR/.credentials.json`，默认 `~/.claude`；Codex：`$CODEX_HOME/auth.json`，默认 `~/.codex`），文件变化后防抖 2 秒再检测。文件所在目录还不存在时监听路径上最近一个存在的上级目录（只看通往目标的那个名字），目录建出来后自动换到更深一层；监听失败就只靠定时检测。同一时间只跑一次检测，期间来的请求合并成紧接着的下一次。
+  - Claude：SDK 自带 CLI，`installed` 恒为 true，`version` 是 CLI 报告的版本。登录方式靠 SDK 探测（起一次 CLI 读 `initializationResult().account`，不调模型），只在强制检测（启动、`node.runtimes_refresh`）、凭证文件的大小/修改时间或 API Key 环境变量变了时重跑；探测失败或超时（重新检测时 12 秒）按文件猜测（有凭证文件 → `subscription`，有 `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` → `api_key`）并填 `error: "probe_failed: …"`，5 分钟后再试。Claude 凭证里的 `expiresAt` 是会自动刷新的访问令牌的过期时间，不代表登录过期，所以不填 `auth_expires_at`/`expired`。
+  - Codex：不起进程，`OPENAI_API_KEY` → `api_key`，`auth.json` 存在且非空 → `chatgpt`，否则 `none`；`path` 是固定版本的 `codex.js`，找不到时 `installed:false, auth:"unknown"`。
+  - 单个检测器抛错或超过 14 秒，该运行时报 `auth:"unknown"` 和 `error: "detect_failed: …"`；`error` 经过脱敏、最长 200 字符。检测结果同时更新 `hello.runtimes`、`node.usage` 用的登录方式和新会话。
 - **`node.runtimes_refresh`**（控制台 → 守护进程，不可靠，body 可以是空对象，也可以带 `runtimes`，例如 `["claude"]`）：节点页点“重新检测”时发。守护进程立即重新检测请求的运行时（省略 = 全部），回一条 `node.runtimes`，其中仍带全部运行时。
 
 ## 10. 关闭码
