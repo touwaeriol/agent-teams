@@ -12,7 +12,7 @@ import { approvalText, pickedVersion, versionLabel, viewerSubtitle } from "@/pag
 import { threadPath } from "@/pages/main/logic";
 import { actionTarget, boardItems, hhmmss, lastHour, liveThreads, recentEvents, scopes, whoColor } from "@/pages/office/logic";
 import { cardLook, filterThreads, prText, reviewText, teamSummary, waitingFrom, waitingText } from "@/pages/overview/logic";
-import { isWorking, stateLabel } from "@/lib/live";
+import { isWorking, queueReason, stateLabel } from "@/lib/live";
 import { memberDoing } from "@/lib/present";
 import { question, thread } from "./fixtures";
 
@@ -66,6 +66,15 @@ describe("thread panel", () => {
     expect(stateLabel(waking)).toBe("唤醒中");
     expect(isWorking(waking)).toBe(true);
     expect(memberDoing(waking)).toBe("唤醒中");
+  });
+  it("a member queued for a logged-in node shows the server's reason (#42)", () => {
+    const q = member("dev-1", "queued");
+    expect(stateLabel(q)).toBe("排队等工位");
+    expect(queueReason(q)).toBe("");
+    q.status = { ...q.status!, substate: "no_runtime", bubble: "没有已登录 Codex 的节点" };
+    expect(stateLabel(q)).toBe("排队等节点");
+    expect(queueReason(q)).toBe("没有已登录 Codex 的节点");
+    expect(memberDoing(q)).toBe("没有已登录 Codex 的节点");
   });
 });
 
