@@ -13,8 +13,8 @@ import (
 const skillTool = "Skill"
 
 // addSkills puts the role's skills into session.open (architecture.md §6.5): Claude gets
-// the bundles (the daemon loads them as a local plugin) plus the Skill tool; Codex has no
-// skill loading, so the skill text is appended to its developer instructions.
+// the bundles (the daemon loads them as a local plugin) plus the Skill tool; Codex and
+// Antigravity have no skill loading, so the skill text is appended to their instructions.
 func (o *Orchestrator) addSkills(ctx context.Context, q core.DB, userID string, e core.Employee, open *protocol.SessionOpen) error {
 	if e.Tier == "coordinator" || len(e.Spec.Skills) == 0 {
 		return nil
@@ -28,13 +28,8 @@ func (o *Orchestrator) addSkills(ctx context.Context, q core.DB, userID string, 
 }
 
 func applySkills(open *protocol.SessionOpen, bundles []protocol.SkillBundle) {
-	if open.Codex != nil {
-		dev := ""
-		if open.Codex.DeveloperInstructions != nil {
-			dev = *open.Codex.DeveloperInstructions
-		}
-		dev += skills.Instructions(bundles)
-		open.Codex.DeveloperInstructions = &dev
+	if field := textInstructions(open); field != nil {
+		appendInstructions(field, skills.Instructions(bundles))
 		return
 	}
 	if open.Claude == nil {

@@ -34,8 +34,8 @@ type Role struct {
 	Tier            string            `json:"tier" enum:"coordinator,lead,member"`
 	Role            string            `json:"role"`
 	Title           string            `json:"title"`
-	Runtime         string            `json:"runtime" enum:"claude,codex" doc:"The role's first runtime (runtimes[0])"`
-	Runtimes        []string          `json:"runtimes,omitempty" enum:"claude,codex" gorm:"serializer:pgtext" doc:"Every runtime the role's employees may run on, in display order; each new session takes the one with the most quota left. Empty: [runtime]"`
+	Runtime         string            `json:"runtime" enum:"claude,codex,antigravity" doc:"The role's first runtime (runtimes[0])"`
+	Runtimes        []string          `json:"runtimes,omitempty" enum:"claude,codex,antigravity" gorm:"serializer:pgtext" doc:"Every runtime the role's employees may run on, in display order; each new session takes the one with the most quota left. Empty: [runtime]"`
 	Models          map[string]string `json:"models,omitempty" nullable:"true" gorm:"serializer:jsonb" doc:"The model of each further runtime (runtimes[1:]), by runtime id; model is the first runtime's"`
 	Count           int               `json:"count"`
 	NodeIDs         []string          `json:"node_ids" gorm:"column:node_ids;serializer:pgtext"`

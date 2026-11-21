@@ -19,6 +19,7 @@ export const COMMON_MODELS: Record<Runtime, { id: string; label: string }[]> = {
     { id: "claude-sonnet-5-5", label: "Sonnet 5.5" },
   ],
   codex: [],
+  antigravity: [],
 };
 
 /** Whether `id` may be saved as a model: "" (not set) or the server's format. */

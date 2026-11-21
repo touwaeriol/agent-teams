@@ -35,6 +35,11 @@
           "cli": "0.169.0",
           "auth": "none",
           "sandbox_ok": true
+        },
+        "antigravity": {
+          "cli": "1.5.14",
+          "auth": "oauth",
+          "installed": true
         }
       },
       "features": [
@@ -269,6 +274,49 @@
             ],
             "network_access": true
           }
+        }
+      },
+      "platform_tools": []
+    }
+  },
+  {
+    "v": 2,
+    "type": "session.open",
+    "id": "c_01JD3V0000000000000000014",
+    "seq": 983,
+    "ts": "2026-11-14T12:00:01Z",
+    "body": {
+      "session_id": "s_01JG",
+      "open_gen": 1,
+      "employee": {
+        "name": "reviewer-1",
+        "role": "reviewer",
+        "tier": "member",
+        "project_id": "7a1c",
+        "thread_no": 12
+      },
+      "runtime": "antigravity",
+      "cwd": "projects/7a1c/threads/12/reviewer-1",
+      "resume": {
+        "sdk_session_id": "agy-sess-1"
+      },
+      "antigravity": {
+        "model": "gemini-4-neon-high",
+        "read_only": true,
+        "approval": "ask",
+        "system_append": "You are reviewer-1.",
+        "bash_policy": {
+          "mode": "argv",
+          "allow": [
+            "git",
+            "ls",
+            "cat",
+            "rg"
+          ],
+          "deny_flags": [
+            "--output"
+          ],
+          "deny_metachar": true
         }
       },
       "platform_tools": []

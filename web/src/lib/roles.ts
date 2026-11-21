@@ -2,7 +2,7 @@
 import { MODEL_FORMAT_HINT, validModel } from "./models";
 import { unfit } from "./commands";
 import type { RoleView } from "@/api/views";
-import { roleRuntimes, runtimeLabel } from "./runtimes";
+import { roleRuntimes, runtimeLabel, type Runtime } from "./runtimes";
 
 export const LEVEL: Record<RoleView["tier"], { label: string; bg: string; fg: string }> = {
   coordinator: { label: "项目级", bg: "#F4E3D7", fg: "#8A3D14" },
@@ -53,7 +53,7 @@ export function permissionMode(r: Pick<RoleView, "permission_mode">): Permission
   return r.permission_mode === "ask" ? "ask" : "bypass";
 }
 
-const MODE_HINT: Record<"claude" | "codex", Record<PermissionMode, string>> = {
+const MODE_HINT: Record<Runtime, Record<PermissionMode, string>> = {
   claude: {
     bypass: "员工直接执行，不弹权限确认。",
     ask: "除了读文件，每个操作都先问（组长或你，看项目的审批方式）。",
@@ -61,6 +61,10 @@ const MODE_HINT: Record<"claude" | "codex", Record<PermissionMode, string>> = {
   codex: {
     bypass: "员工直接执行，不弹权限确认（沙箱完全放开）。",
     ask: "除了它信任的只读命令，每个命令都先申请（untrusted）。",
+  },
+  antigravity: {
+    bypass: "员工直接执行，Antigravity 的权限请求由节点自动放行。",
+    ask: "Antigravity 每次申请权限都先问（组长或你，看项目的审批方式）。",
   },
 };
 

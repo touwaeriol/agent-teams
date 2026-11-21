@@ -11,8 +11,9 @@ const ClaudeDefaultModel = "claude-opus-5-5"
 
 // Runtime ids (protocol Runtime, at_roles.runtime, at_employees.runtime).
 const (
-	Claude = "claude"
-	Codex  = "codex"
+	Claude      = "claude"
+	Codex       = "codex"
+	Antigravity = "antigravity"
 )
 
 // Runtime is what the control plane knows about one runtime.
@@ -35,6 +36,9 @@ type Runtime struct {
 	NeedsIsolation bool
 	// CanLead: may be a coordinator or a thread lead.
 	CanLead bool
+	// NeedsHelloReady: may only run on nodes whose hello reports the runtime installed and logged
+	// in (it has no node.usage report to tell whether it is logged in).
+	NeedsHelloReady bool
 }
 
 // order is the registry's display order; the first entry is the default runtime.
@@ -42,6 +46,10 @@ var order = []Runtime{
 	{ID: Claude, Title: "Claude Code", YAMLType: "claude_code", TeamType: "claude_code", DefaultModel: ClaudeDefaultModel,
 		SlashCommands: true, LiveModeSwitch: true, CanLead: true},
 	{ID: Codex, Title: "Codex", YAMLType: "codex", TeamType: "codex", NeedsIsolation: true},
+	// Google Antigravity CLI (agy) over ACP; agy picks the model when none is set, and it has no
+	// usage API. v1 cannot lead.
+	{ID: Antigravity, Title: "Antigravity", YAMLType: "antigravity", TeamType: "antigravity", NeedsIsolation: true,
+		NeedsHelloReady: true},
 }
 
 var byID = func() map[string]Runtime {

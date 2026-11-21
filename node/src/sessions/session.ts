@@ -9,7 +9,7 @@ export type SendFn = (type: string, body: object) => void;
 export interface SessionRecord {
   session_id: string;
   open_gen: number;
-  kind: "claude" | "codex";
+  kind: SessionOpen["runtime"];
   state: State;
   released: boolean;
   sdk_session_id: string | null;
