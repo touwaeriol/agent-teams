@@ -411,6 +411,52 @@
     {
       "properties": {
         "type": {
+          "const": "node.runtimes"
+        },
+        "body": {
+          "$ref": "node.runtimes.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^n_"
+        }
+      },
+      "required": [
+        "type",
+        "body"
+      ],
+      "not": {
+        "required": [
+          "seq"
+        ]
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "node.runtimes_refresh"
+        },
+        "body": {
+          "$ref": "node.runtimes_refresh.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^c_"
+        }
+      },
+      "required": [
+        "type",
+        "body"
+      ],
+      "not": {
+        "required": [
+          "seq"
+        ]
+      }
+    },
+    {
+      "properties": {
+        "type": {
           "const": "node.stats"
         },
         "body": {

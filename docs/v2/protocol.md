@@ -31,8 +31,8 @@
 
 | 方向 | 可靠（有 `seq`，需 ACK，可重放） | 不可靠（无 `seq`，丢了无所谓） |
 | --- | --- | --- |
-| 控制台 → 守护进程 | 所有命令（`session.*`、`approval.resolve`、`tool.result`、`git.*`、`node.*`（`node.usage_refresh` 除外）、`run.*`） | `ack`、`pong` 类、`node.usage_refresh`、`cred.response`（§8：带令牌，不进发件箱，靠 `req_id` 配对，丢了守护进程会重试 `cred.request`） |
-| 守护进程 → 控制台 | 会话事件、命令结果、审批请求/取消、工具调用、git 结果 | `ack`、`stream.delta`（逐字输出，可选）、`log`、`node.stats`、`node.usage`、`cred.request`（§8） |
+| 控制台 → 守护进程 | 所有命令（`session.*`、`approval.resolve`、`tool.result`、`git.*`、`node.*`（`node.usage_refresh`、`node.runtimes_refresh` 除外）、`run.*`） | `ack`、`pong` 类、`node.usage_refresh`、`node.runtimes_refresh`、`cred.response`（§8：带令牌，不进发件箱，靠 `req_id` 配对，丢了守护进程会重试 `cred.request`） |
+| 守护进程 → 控制台 | 会话事件、命令结果、审批请求/取消、工具调用、git 结果 | `ack`、`stream.delta`（逐字输出，可选）、`log`、`node.stats`、`node.usage`、`node.runtimes`、`cred.request`（§8） |
 
 - **ACK**：`{type:"ack", body:{seq: N}}` 表示“seq ≤ N 的可靠消息我已持久处理”。接收方至少每 200 ms 或每 50 条发一次累计 ACK。
 - **守护进程发件箱**：可靠消息先追加写入 `state/outbox/<epoch>.jsonl` 再发送；收到 ACK 后推进游标，游标之前的文件可删除。守护进程重启后 `seq` 从文件里的最大值继续（`epoch` 只在状态目录被清空时变化）。
@@ -94,9 +94,11 @@
 
 `features` 含 `usage` 表示守护进程会发 `node.usage`，也能处理 `node.usage_refresh`（§9.1）。
 
+`features` 含 `runtime_status` 表示守护进程会持续检测各 CLI 的安装和登录状态并发 `node.runtimes`，也能处理 `node.runtimes_refresh`（§9.2）；控制台以 `node.runtimes` 为准，`hello.runtimes` 只作为没有这个特性的旧守护进程的兜底。
+
 `features` 含 `ssh_gateway` 表示守护进程能接远程服务器（§8.1）：认得 `session.open` 的 `ssh_servers`，会发 `ssh.cert_request`，能处理 `ssh.servers_update`。这样的守护进程还可以带 `"ssh_client": {"version": "OpenSSH_9.6p1"}`（`ssh -V` 的结果，找不到 ssh 就不带）。
 
-`auth` 由守护进程启动时探测（Claude：`query().accountInfo()` 一次后关闭；Codex：app-server `account/read`），不上报邮箱等个人信息。
+`hello.runtimes` 里的 `auth` 由守护进程启动时探测（之后的变化走 §9.2 的 `node.runtimes`）（Claude：`query().accountInfo()` 一次后关闭；Codex：app-server `account/read`），不上报邮箱等个人信息。
 
 ### `welcome`（控制台 → 守护进程，不可靠）
 
@@ -474,6 +476,8 @@
 | `node.stats` | 守护进程 → | `active_sessions`, `parked_sessions`, `queued`, `mem_mb`, `load1`, `disk_free_mb` | 每 30 s，不可靠；机房机柜灯数据 |
 | `node.usage` | 守护进程 → | `runtimes` | 不可靠；hello 后和之后定期上报 Claude Code / Codex 的订阅余量：`runtimes.claude`/`runtimes.codex` 各为 `{auth, status, plan?, windows?: [{key, label?, used_percent, window_minutes?, resets_at?}], error?, fetched_at?}`（`key`：`five_hour`/`weekly`/`weekly_opus`/`weekly_sonnet`/`weekly_model`，Codex 为 `primary`/`secondary`；`label` 是服务方给的显示名，如 `weekly_model` 窗口的模型名，最多保留 40 字符）。不带凭证；控制台只保存每个节点最近一次上报（内存），校验后通过 `NodeView.usage` 返回；收到 `node.usage_refresh` 后立即采集并回一条 |
 | `node.usage_refresh` | 控制台 → | `runtimes?` | 不可靠；立即采集一次订阅余量并回 `node.usage`（`runtimes` 省略 = 全部）。只在 `hello.features` 含 `usage` 时发；由 `POST /api/nodes/{id}/usage/refresh` 触发（api.md） |
+| `node.runtimes` | 守护进程 → | `runtimes`, `reason`, `in_reply_to?` | 不可靠；各运行时 CLI 的安装和登录状态（§9.2）。`runtimes` 以运行时 id 为键（`claude`、`codex` 和以后新增的运行时，开放字符串），值为 `{installed, version?, path?, auth, auth_expires_at?, expired?, checked_at, error?}`，每次都带守护进程认识的全部运行时；`reason`：`hello`/`periodic`/`fs_event`/`refresh`。只在 `hello.features` 含 `runtime_status` 时发；不带凭证 |
+| `node.runtimes_refresh` | 控制台 → | `runtimes?` | 不可靠；立即重新检测（`runtimes` 省略 = 全部）并回 `node.runtimes`（`reason:"refresh"`，`in_reply_to` = 本命令的信封 id），没有变化也回。只在 `hello.features` 含 `runtime_status` 时发；由节点页的“重新检测”触发 |
 | `log` | 守护进程 → | `level`, `msg`, `fields` | 不可靠；只发 warn 及以上 |
 | `error` | 双向 | `ref_id`, `code`, `message` | 对某条消息的协议级错误：`bad_schema`、`unsupported`、`unknown_session`、`busy` |
 
@@ -488,6 +492,16 @@
   - 常见的 `error`：`timeout`；`unsupported_sdk`（SDK 没有实验性的 usage 接口）；`fetch_failed: <原因>`（调用 usage 接口报错或 CLI 出错，原因经过脱敏）；`rate_limits_unavailable`（CLI 表示该登录没有订阅余量，例如 token 缺少 profile 权限）；`fetch_failed`（CLI 没取到数据，常见原因是 token 过期而且刷新失败）；`not_logged_in`（Codex 已退出登录）。
   - 消息里永远不带 token、邮箱、组织或账号 id。
 - **`node.usage_refresh`**（控制台 → 守护进程，不可靠，body 可以是空对象，也可以带 `runtimes`，例如 `["claude","codex"]`）：鼠标悬停在节点卡片上时，控制台发这条命令要求现查一次。守护进程回一条 `node.usage`，总是包含两个运行时：请求的运行时如果最近 60 秒内有一次成功（`status:"ok"`）的读取，就直接回缓存的结果，`fetched_at` 保持原值，不再请求 Anthropic 或 OpenAI；否则立即读取。失败的结果不缓存。同一时间只跑一次读取，正在跑的就等它跑完再用它的结果。定时上报不受缓存影响，每次都重新读取。
+
+### 9.2 运行时 CLI 状态（`hello.features` 含 `runtime_status`）
+
+守护进程持续检测本机各运行时 CLI 是否安装、是否登录，节点上后来装好或登录的 CLI 不用重启守护进程就能被控制台发现并参与调度。
+
+- **`node.runtimes`**（守护进程 → 控制台，不可靠，不进发件箱）：收到 `welcome` 后立即上报一次（`reason:"hello"`）；之后定时检测（`reason:"periodic"`）和监听 CLI 可执行文件、凭证文件的变化（`reason:"fs_event"`），**只有结果变了才上报**（比较时忽略 `checked_at`）；收到 `node.runtimes_refresh` 后一定回一条（`reason:"refresh"`，`in_reply_to` 为该命令的信封 id）。每条都带守护进程认识的全部运行时，控制台整体替换保存的状态，忽略不认识的运行时 id。
+  - `runtimes.<id>`：`installed`（找到并能运行 CLI/SDK）、`version`（可选，CLI 报告的版本）、`path`（可选，找到的可执行文件绝对路径）、`auth`（`subscription|chatgpt|api_key|none|unknown`：`subscription` 为服务方账号登录，如 Claude 订阅；`chatgpt` 为 Codex 的 ChatGPT 登录；`unknown` 为没装或检测失败、无法判断）、`auth_expires_at`（可选，只在能从凭证文件元数据或非秘密字段读出时填）、`expired`（可选，确知登录已过期，控制台调度时按未登录处理）、`checked_at`（本次检测时间）、`error`（可选，简短原因，不含凭证）。
+  - 运行时 id 是开放的小写字符串（`^[a-z][a-z0-9_-]{0,31}$`，与 `common.json` 的 `Runtime` 取值一致），新增运行时不需要改这条消息。
+  - 检测只读文件元数据和非秘密字段，消息里永远不带 token、API Key、邮箱、组织或账号 id。
+- **`node.runtimes_refresh`**（控制台 → 守护进程，不可靠，body 可以是空对象，也可以带 `runtimes`，例如 `["claude"]`）：节点页点“重新检测”时发。守护进程立即重新检测请求的运行时（省略 = 全部），回一条 `node.runtimes`，其中仍带全部运行时。
 
 ## 10. 关闭码
 

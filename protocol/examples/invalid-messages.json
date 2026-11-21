@@ -19,5 +19,8 @@
 {"why":"plugin file with an absolute path","frame":{"v":2,"type":"session.open","id":"c_1","seq":1,"ts":"2026-11-14T12:00:00Z","body":{"session_id":"s_1","open_gen":1,"employee":{"name":"dev-1","tier":"member","project_id":"p"},"runtime":"codex","cwd":"projects/p","codex":{"model":"m","sandbox":"read-only","approval_policy":"never"},"platform_tools":[],"plugins":[{"name":"p","version":1,"files":[{"path":"/etc/passwd","content":"x"}]}]}}},
 {"why":"ok ssh.cert_response without certificate","frame":{"v":2,"type":"ssh.cert_response","id":"c_1","ts":"2026-11-14T12:00:00Z","body":{"req_id":"r","ok":true,"servers":[]}}},
 {"why":"ssh.servers_update with an invalid server name","frame":{"v":2,"type":"ssh.servers_update","id":"c_1","seq":1,"ts":"2026-11-14T12:00:00Z","body":{"session_id":"s_1","open_gen":1,"version":1,"servers":[{"name":"Prod Box"}]}}},
-{"why":"ssh.cert_request without public_key","frame":{"v":2,"type":"ssh.cert_request","id":"n_1","ts":"2026-11-14T12:00:00Z","body":{"req_id":"r","session_id":"s_1","open_gen":1}}}
+{"why":"ssh.cert_request without public_key","frame":{"v":2,"type":"ssh.cert_request","id":"n_1","ts":"2026-11-14T12:00:00Z","body":{"req_id":"r","session_id":"s_1","open_gen":1}}},
+{"why":"node.runtimes key is not a runtime id","frame":{"v":2,"type":"node.runtimes","id":"n_1","ts":"2026-11-14T12:00:00Z","body":{"reason":"periodic","runtimes":{"Claude Code":{"installed":true,"auth":"none","checked_at":"2026-11-14T12:00:00Z"}}}}},
+{"why":"node.runtimes status without checked_at","frame":{"v":2,"type":"node.runtimes","id":"n_1","ts":"2026-11-14T12:00:00Z","body":{"reason":"hello","runtimes":{"claude":{"installed":true,"auth":"subscription"}}}}},
+{"why":"node.runtimes unknown reason","frame":{"v":2,"type":"node.runtimes","id":"n_1","ts":"2026-11-14T12:00:00Z","body":{"reason":"boot","runtimes":{}}}}
 ]
