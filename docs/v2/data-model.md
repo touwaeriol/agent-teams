@@ -156,7 +156,7 @@ CREATE TABLE at_node_runtimes (
 );
 ```
 
-收到 `node.runtimes` 就整体替换该节点的行（报告里没有的运行时删掉）。调度只对**在线且 hello.features 含 `runtime_status`、并且已经有上报**的节点看这张表：运行时 `installed`、`auth` 不是 `none`/`unknown`、没有 `expired`、`auth_expires_at` 未过，才算可用（`store.NodeRuntime.Ready`）；其他节点照旧（`node.usage` 的 auth，没有上报就当可用）。暂存的会话见 §2.7 `at_session_holds`。
+收到 `node.runtimes` 就整体替换该节点的行（报告里没有的运行时删掉）；不带 `runtime_status` 的守护进程发来的 `node.runtimes` 直接忽略。调度对**在线且 hello.features 含 `runtime_status`** 的节点只看这张表：运行时 `installed`、`auth` 不是 `none`/`unknown`、没有 `expired`、`auth_expires_at` 未过，才算可用（`store.NodeRuntime.Ready`）；这张表里还没有该节点的行（首次上报还没到）时也算不可用，原因是“正在检测节点上 X 的安装和登录状态”，首次上报（`reason: hello`）一到就重新放行。其他节点照旧（`node.usage` 的 auth，没有上报就当可用）。暂存的会话见 §2.7 `at_session_holds`。
 
 ### 2.3 GitHub
 
@@ -510,6 +510,7 @@ CREATE INDEX at_permission_rules_lookup ON at_permission_rules (project_id, thre
 CREATE TABLE at_session_holds (
   employee_id TEXT PRIMARY KEY REFERENCES at_employees(id) ON DELETE CASCADE,
   project_id  TEXT NOT NULL REFERENCES at_projects(id) ON DELETE CASCADE,
+  thread_id   TEXT REFERENCES at_threads(id) ON DELETE CASCADE,  -- 暂存时员工所在的讨论串（统筹为 NULL）
   reason      TEXT NOT NULL DEFAULT '',     -- 给用户看的原因，如“没有已登录 Codex 的在线节点”
   first       JSONB NOT NULL,               -- 会话开出来时的 first_message；之后的消息追加进来（图片最多 8 张）
   resume      JSONB,                        -- 要续接的会话（ResumeRef），没有为 NULL
@@ -518,9 +519,10 @@ CREATE TABLE at_session_holds (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX at_session_holds_project ON at_session_holds (project_id);
+CREATE INDEX at_session_holds_thread ON at_session_holds (thread_id);
 ```
 
-`orchestrator.pickNode` 选出的节点在线、报告了 CLI 状态（`runtime_status`），但该运行时在所有候选节点上都没装或没登录时，会话不开，消息写进 `at_session_holds`；员工状态是 `queued`、子状态 `no_runtime`，气泡是 `reason`（`bubble_kind = ask`，不会被 set_status 覆盖）。节点上线、或 `node.runtimes` 报告有变化时（`ReleaseHolds`），对用户所有暂存的会话重新选节点：能开就开（暂存的消息作为第一条消息），还不行就只更新 `reason`。所选节点离线时照旧把会话开在它上面等它上线；不带 `runtime_status` 的旧守护进程照旧可调度。
+`orchestrator.pickNode` 选出的节点在线、报告了 CLI 状态（`runtime_status`），但该运行时在所有候选节点上都没装或没登录时，会话不开，消息写进 `at_session_holds`；员工状态是 `queued`、子状态 `no_runtime`，气泡是 `reason`（`bubble_kind = ask`，不会被 set_status 覆盖）。节点上线、或 `node.runtimes` 报告有变化时（`ReleaseHolds`），对用户所有暂存的会话重新选节点：能开就开（暂存的消息作为第一条消息），还不行就只更新 `reason`。暂存属于 `thread_id` 那个讨论串：项目成员换到别的讨论串（`MoveToThread`）、或者发给它的消息所在讨论串和暂存的不一样时，旧暂存丢掉（旧消息留在原讨论串的对话里），讨论串结束（done/failed/archived）时它的暂存一起丢掉。所选节点离线时照旧把会话开在它上面等它上线，这种情况不暂存、也没有 `no_runtime` 原因（员工状态是 `offline`），之后别的节点登录也不会把它接走；不带 `runtime_status` 的旧守护进程照旧可调度。
 
 ### 2.8 交付
 

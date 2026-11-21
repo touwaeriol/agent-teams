@@ -35,7 +35,22 @@ func (o *Orchestrator) appendHeld(ctx context.Context, tx *core.Tx, e core.Emplo
 	if err != nil {
 		return false, err
 	}
+	if !h.InThread(e.WorkThreadID()) {
+		// Held in a thread the employee left: those messages stay there, this one opens afresh.
+		o.touch(tx, e.ID, "session.hold_dropped")
+		return false, core.DropHold(ctx, tx, e.ID)
+	}
 	return true, o.hold(ctx, tx, e, first, nil, h.Reason)
+}
+
+// dropOtherThreadHold drops an employee's hold made in another thread than threadID (it moved).
+func (o *Orchestrator) dropOtherThreadHold(ctx context.Context, tx *core.Tx, e core.Employee, threadID string) error {
+	h, err := core.LockHold(ctx, tx, e.ID)
+	if err != nil || h.InThread(&threadID) {
+		return ignoreMissing(err)
+	}
+	o.touch(tx, e.ID, "session.hold_dropped")
+	return core.DropHold(ctx, tx, e.ID)
 }
 
 // releaseMu serializes ReleaseHolds runs of this replica (node reports arrive per link).
@@ -45,10 +60,8 @@ var releaseMu sync.Mutex
 // online or reported a runtime change): each one that a node can take now opens there with its
 // held messages; the others keep waiting with an updated reason.
 func (o *Orchestrator) ReleaseHolds(ctx context.Context, userID string) {
-	releaseMu.Lock()
-	defer releaseMu.Unlock()
 	holds, err := core.UserHolds(ctx, o.core.Pool, userID)
-	if err != nil {
+	if err != nil || len(holds) == 0 {
 		o.logErr("list held sessions", err)
 		return
 	}
@@ -56,8 +69,12 @@ func (o *Orchestrator) ReleaseHolds(ctx context.Context, userID string) {
 	for _, h := range holds {
 		if !warmed[h.ProjectID] {
 			warmed[h.ProjectID] = true
-			o.WarmProject(ctx, h.ProjectID) // no GitHub call inside the transaction
+			o.WarmProject(ctx, h.ProjectID) // GitHub caches: no network call inside the transactions below
 		}
+	}
+	releaseMu.Lock()
+	defer releaseMu.Unlock()
+	for _, h := range holds {
 		if err := o.core.InTx(ctx, func(tx *core.Tx) error { return o.releaseHold(ctx, tx, h.ProjectID, h.EmployeeID) }); err != nil {
 			o.log.Warn("release held session", "employee_id", h.EmployeeID, "err", err)
 		}
@@ -85,31 +102,37 @@ func (o *Orchestrator) releaseHold(ctx context.Context, tx *core.Tx, projectID, 
 	if done, err := o.releaseElsewhere(ctx, tx, e, h); done || err != nil {
 		return err
 	}
-	env, err := o.loadEnv(ctx, tx, e)
+	sess, err := o.openSession(ctx, tx, e, &h.First, h.Resume)
 	if err != nil {
 		return err
 	}
-	worked, err := o.workedHere(ctx, tx, env.emp)
-	if err != nil {
-		return err
-	}
-	pick, err := o.pickNode(ctx, tx, env.emp, env.project, h.Resume != nil || worked)
-	if err != nil {
-		return err
-	}
-	if pick.hold != "" {
-		h.Reason = pick.hold
-		return core.SaveHold(ctx, tx, h)
-	}
-	if _, err := o.openSession(ctx, tx, e, &h.First, h.Resume); err != nil {
-		return err
+	if sess.ID == "" {
+		return o.keepHold(ctx, tx, h) // still no node: openSession held it again
 	}
 	return markHeldDelivered(ctx, tx, h.More)
+}
+
+// keepHold restores what a hold had besides the first message and the new reason after
+// openSession held its messages again (the merged msg ids, when it was made).
+func (o *Orchestrator) keepHold(ctx context.Context, tx *core.Tx, old core.SessionHold) error {
+	h, err := core.LockHold(ctx, tx, old.EmployeeID)
+	if err != nil {
+		return ignoreMissing(err)
+	}
+	h.More, h.CreatedAt = old.More, old.CreatedAt
+	return core.SaveHold(ctx, tx, h)
 }
 
 // releaseElsewhere handles a hold whose employee no longer needs a new session: its thread ended
 // (the messages stay in the conversation) or it got a live session meanwhile (they go to it).
 func (o *Orchestrator) releaseElsewhere(ctx context.Context, tx *core.Tx, e core.Employee, h core.SessionHold) (bool, error) {
+	e, err := atWork(ctx, tx, e)
+	if err != nil {
+		return true, err
+	}
+	if !h.InThread(e.WorkThreadID()) {
+		return true, nil // the employee works in another thread now: the old messages stay in theirs
+	}
 	awake, err := o.awake(ctx, tx, e)
 	if err != nil || !awake {
 		return true, err

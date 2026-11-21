@@ -117,7 +117,7 @@ NodeView        = {id, name, online, since, last_seen_at, version, protocol, iso
                    active_sessions, parked_sessions, queued, usage: NodeUsage|null, usage_supported, isolated, labels, max_active_sessions, park_after_s, created_at,
                    runtime_status, clis: NodeCLI[]}
                   // runtime_status：守护进程支持 CLI 状态上报（hello.features 含 `runtime_status`，离线时看 last_hello），为 true 时 POST /api/nodes/{id}/recheck 可用，且调度只派该节点上已登录的运行时
-                  // clis：最近一次 node.runtimes 上报（at_node_runtimes，按 runtime 排序），旧守护进程为空数组
+                  // clis：最近一次 node.runtimes 上报（at_node_runtimes，按 runtime 排序），旧守护进程为空数组（它发来的 node.runtimes 会被忽略）
                   // usage_supported：守护进程是否支持余量（在线用当前 hello.features，离线用 at_nodes.last_hello.features，里面有 `usage` 为 true，没有记录为 false）；false 时网页不显示“余量获取中…”、也不发悬停刷新，已有的 usage 照常显示
 NodeCLI         = {runtime, installed, version?, path?, auth: "subscription"|"chatgpt"|"api_key"|"none"|"unknown", auth_expires_at?, expired, error?,
                    checked_at,   // 守护进程检测时间

@@ -19,6 +19,7 @@ func TestHeld(t *testing.T) {
 	}{
 		{"usable", nodeState{id: "a", usable: true, online: true, gated: true}, false},
 		{"gated, not ready", nodeState{id: "a", online: true, gated: true}, true},
+		{"gated, first report not in yet", nodeState{id: "a", online: true, gated: true, unseen: true}, true},
 		{"offline: waits for the node as before", nodeState{id: "a"}, false},
 		{"old daemon said not logged in: as before", nodeState{id: "a", online: true}, false},
 	}
@@ -70,6 +71,8 @@ func TestHoldReason(t *testing.T) {
 			{id: "b", rt: "codex", online: true, gated: true}}, []string{"Codex 没有安装在任何在线的候选节点上"}},
 		{"expired", []string{"claude"}, []nodeState{{id: "a", rt: "claude", online: true, gated: true, rs: expired}},
 			[]string{"Claude Code 在在线节点上的登录已过期"}},
+		{"first report not in yet", []string{"claude"}, []nodeState{{id: "a", rt: "claude", online: true, gated: true, unseen: true}},
+			[]string{"正在检测节点上 Claude Code 的安装和登录状态"}},
 		{"two runtimes", []string{"claude", "codex"}, []nodeState{{id: "a", rt: "claude", online: true, gated: true, rs: loggedOut},
 			{id: "a", rt: "codex"}}, []string{"没有已登录 Claude Code 的在线节点；没有能运行 Codex 的在线节点"}},
 	}

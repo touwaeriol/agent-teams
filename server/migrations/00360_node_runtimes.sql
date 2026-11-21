@@ -20,10 +20,13 @@ CREATE TABLE IF NOT EXISTS at_node_runtimes (
 -- A session an employee could not open because no candidate node has its runtime installed and
 -- logged in (orchestrator.pickNode): the messages wait here, with the reason shown to the user,
 -- until a node reports the runtime ready (node.runtimes) or comes online; then the session opens
--- with the first message and the rest follow as session.send. One row per employee.
+-- with the held messages as its first message. One row per employee; thread_id is the thread the
+-- employee worked in when it was held (NULL: coordinator): the hold is dropped when the employee
+-- moves to another thread or the thread ends.
 CREATE TABLE IF NOT EXISTS at_session_holds (
     employee_id TEXT PRIMARY KEY REFERENCES at_employees(id) ON DELETE CASCADE,
     project_id  TEXT NOT NULL REFERENCES at_projects(id) ON DELETE CASCADE,
+    thread_id   TEXT REFERENCES at_threads(id) ON DELETE CASCADE,
     reason      TEXT NOT NULL DEFAULT '',
     first       JSONB NOT NULL,
     resume      JSONB,
@@ -32,6 +35,7 @@ CREATE TABLE IF NOT EXISTS at_session_holds (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS at_session_holds_project ON at_session_holds (project_id);
+CREATE INDEX IF NOT EXISTS at_session_holds_thread ON at_session_holds (thread_id);
 
 -- +goose Down
 DROP TABLE IF EXISTS at_session_holds;

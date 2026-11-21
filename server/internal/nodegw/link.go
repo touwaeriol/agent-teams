@@ -238,6 +238,9 @@ func (l *link) handleUnreliable(ctx context.Context, env *protocol.Envelope, bod
 		l.g.recordUsage(l.node.ID, b, l.g.now())
 		return nil
 	case *protocol.NodeRuntimes:
+		if !hasFeature(l.hello.Features, FeatureRuntimeStatus) {
+			return nil // only a daemon that announced runtime_status reports its CLIs
+		}
 		if err := l.g.recordRuntimes(ctx, l.node, b); err != nil {
 			l.g.log.Warn("node.runtimes", "node_id", l.node.ID, "err", err)
 		}

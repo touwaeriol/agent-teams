@@ -16,6 +16,7 @@ import (
 type SessionHold struct {
 	EmployeeID string `gorm:"primaryKey"`
 	ProjectID  string
+	ThreadID   *string // the thread the employee worked in when held (nil: the coordinator)
 	Reason     string
 	First      protocol.FirstMessage `gorm:"serializer:jsonb"`
 	Resume     *protocol.ResumeRef   `gorm:"serializer:json"`
@@ -40,13 +41,18 @@ func LockHold(ctx context.Context, tx *Tx, employeeID string) (SessionHold, erro
 	return take[SessionHold](tx.Gorm(ctx).Clauses(ForUpdate).Where("employee_id = ?", employeeID))
 }
 
-// HoldSession records first as the employee's held session, or appends it to the hold it has;
-// the reason is replaced either way.
+// HoldSession records first as the employee's held session, or appends it to the hold it has in
+// the thread it works in now (e pinned with its work thread); a hold from another thread is
+// replaced. The reason is replaced either way.
 func HoldSession(ctx context.Context, tx *Tx, e Employee, first protocol.FirstMessage, resume *protocol.ResumeRef, reason string) error {
 	h, err := LockHold(ctx, tx, e.ID)
+	if err == nil && !h.InThread(e.WorkThreadID()) {
+		err = ErrNotFound
+	}
 	switch {
 	case err == ErrNotFound:
-		h = SessionHold{EmployeeID: e.ID, ProjectID: e.ProjectID, First: first, Resume: resume, More: []string{}}
+		h = SessionHold{EmployeeID: e.ID, ProjectID: e.ProjectID, ThreadID: e.WorkThreadID(), First: first, Resume: resume,
+			More: []string{}, CreatedAt: time.Now().UTC()}
 	case err != nil:
 		return err
 	default:
@@ -65,6 +71,21 @@ func HoldSession(ctx context.Context, tx *Tx, e Employee, first protocol.FirstMe
 func SetHoldReason(ctx context.Context, tx *Tx, employeeID, reason string) error {
 	return tx.Gorm(ctx).Table("at_session_holds").Where("employee_id = ? AND reason <> ?", employeeID, reason).
 		Updates(map[string]any{"reason": reason, "updated_at": time.Now().UTC()}).Error
+}
+
+// InThread reports whether the hold belongs to the thread (nil: the coordinator's scope).
+func (h SessionHold) InThread(threadID *string) bool {
+	if h.ThreadID == nil || threadID == nil {
+		return h.ThreadID == nil && threadID == nil
+	}
+	return *h.ThreadID == *threadID
+}
+
+// DropThreadHolds deletes the holds of a thread (it ended) and returns their employees.
+func DropThreadHolds(ctx context.Context, tx *Tx, threadID string) ([]string, error) {
+	var ids []string
+	err := tx.Gorm(ctx).Raw(`DELETE FROM at_session_holds WHERE thread_id = ? RETURNING employee_id`, threadID).Scan(&ids).Error
+	return ids, err
 }
 
 // DropHold deletes an employee's hold.

@@ -315,6 +315,9 @@ func (o *Orchestrator) MoveToThread(ctx context.Context, tx *core.Tx, e core.Emp
 		return e, err
 	}
 	e.CurrentThreadID = &threadID
+	if err := o.dropOtherThreadHold(ctx, tx, e, threadID); err != nil {
+		return e, err
+	}
 	s, err := core.LiveSession(ctx, tx, e.ID)
 	if errors.Is(err, core.ErrNotFound) || (err == nil && sameThread(s.ThreadID, &threadID)) {
 		return e, nil
@@ -414,7 +417,8 @@ func orDefault(v, d string) string {
 	return v
 }
 
-// openSession creates a logical session on a node and queues git.prepare + session.open.
+// openSession creates a logical session on a node and queues git.prepare + session.open. When no
+// node can run it (pickNode hold) the messages are held instead and the session is the zero value.
 func (o *Orchestrator) openSession(ctx context.Context, tx *core.Tx, e core.Employee, first *protocol.FirstMessage,
 	resume *protocol.ResumeRef) (core.AgentSession, error) {
 	env, err := o.loadEnv(ctx, tx, e)

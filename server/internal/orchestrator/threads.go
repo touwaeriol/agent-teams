@@ -365,6 +365,13 @@ func (o *Orchestrator) EndThreadWork(ctx context.Context, tx *core.Tx, threadID 
 	if err := o.closeAll(ctx, tx, sessions, "thread_done"); err != nil {
 		return err
 	}
+	held, err := core.DropThreadHolds(ctx, tx, threadID)
+	if err != nil {
+		return err
+	}
+	for _, id := range held {
+		o.touch(tx, id, "session.hold_dropped")
+	}
 	if err := core.LeaveThread(ctx, tx, threadID); err != nil {
 		return err
 	}

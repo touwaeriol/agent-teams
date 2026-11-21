@@ -10,6 +10,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/engine"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw/nodetest"
+	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 )
 
 // statusFeatures is a daemon that reports its runtime CLIs (hello.features runtime_status).
@@ -146,8 +147,8 @@ func TestRuntimeStatusHoldsUntilLoggedIn(t *testing.T) {
 	eventually(t, "lead no longer queued", func() bool { st, _ := statusOf(w, lead); return st != "queued" })
 }
 
-// TestRuntimeStatusOldDaemon: a daemon without runtime_status is scheduled as before, even when
-// it (or anything claiming to be it) sent node.runtimes saying the CLI is not logged in.
+// TestRuntimeStatusOldDaemon: a daemon without runtime_status is scheduled as before; a
+// node.runtimes it sends anyway is ignored (not stored, no effect on scheduling).
 func TestRuntimeStatusOldDaemon(t *testing.T) {
 	w := newWorld(t, nil)
 	b := w.signUp("old@example.com")
@@ -162,17 +163,17 @@ func TestRuntimeStatusOldDaemon(t *testing.T) {
 	if err := n.SendUnreliable(ctx, protocol.TypeNodeRuntimes, cliReport("hello", map[string]string{"claude": "none"})); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "report stored", func() bool { return len(b.nodeCLIs(t, node.Node.ID).CLIs) == 1 })
-	if b.nodeCLIs(t, node.Node.ID).RuntimeStatus {
-		t.Fatal("old daemon shown with runtime_status")
+	time.Sleep(300 * time.Millisecond)
+	if v := b.nodeCLIs(t, node.Node.ID); v.RuntimeStatus || len(v.CLIs) != 0 {
+		t.Fatalf("old daemon's node.runtimes kept: %+v", v)
 	}
 	b.must(201, "POST", "/api/projects/"+project.ID+"/threads", map[string]any{"title": "Work", "brief": "do it"}, nil)
 	expectOpen(t, w, n, "lead-1")
 }
 
-// TestRuntimeStatusNodeComesOnline: with the only node offline the session waits for it as
-// before; a second node that reports the runtime ready takes the held session of an employee
-// whose candidate node said it is not logged in.
+// TestRuntimeStatusSecondNode: a node that reports its CLIs gets nothing until its first report
+// arrives (the hold says it is being checked), nor while that report says not logged in; once a
+// node reports the runtime ready it takes the held session.
 func TestRuntimeStatusSecondNode(t *testing.T) {
 	w := newWorld(t, nil)
 	b := w.signUp("two@example.com")
@@ -196,7 +197,20 @@ func TestRuntimeStatusSecondNode(t *testing.T) {
 		return err == nil && strings.Contains(h.Reason, "Claude Code 没有安装在任何在线的候选节点上")
 	})
 	nc := w.connect(c.Token, nodetest.Options{Features: statusFeatures})
-	if err := nc.SendUnreliable(ctx, protocol.TypeNodeRuntimes, cliReport("hello", map[string]string{"claude": "api_key"})); err != nil {
+	eventually(t, "held while c is checked", func() bool {
+		h, err := holdOf(w, lead)
+		return err == nil && strings.Contains(h.Reason, "正在检测节点上 Claude Code 的安装和登录状态")
+	})
+	expectNone(t, nc, protocol.TypeSessionOpen, 500*time.Millisecond, nil)
+	if err := nc.SendUnreliable(ctx, protocol.TypeNodeRuntimes, cliReport("hello", map[string]string{"claude": "none"})); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "held: c not logged in", func() bool {
+		h, err := holdOf(w, lead)
+		return err == nil && strings.Contains(h.Reason, "没有已登录 Claude Code 的在线节点")
+	})
+	expectNone(t, nc, protocol.TypeSessionOpen, 300*time.Millisecond, nil)
+	if err := nc.SendUnreliable(ctx, protocol.TypeNodeRuntimes, cliReport("fs_event", map[string]string{"claude": "api_key"})); err != nil {
 		t.Fatal(err)
 	}
 	_, open := expectOpen(t, w, nc, "lead-1")
@@ -274,4 +288,82 @@ func TestNodeRecheck(t *testing.T) {
 	if !stale.Stale || len(stale.Node.CLIs) != 2 || time.Since(start) < 900*time.Millisecond {
 		t.Fatalf("no answer: %+v after %s", stale, time.Since(start))
 	}
+}
+
+// TestHoldFollowsThread: a hold belongs to the thread the employee worked in. A project member
+// that moves to another thread drops it (MoveToThread); a message for a member whose current
+// thread differs from its hold's starts a new hold with only that message; an ended thread drops
+// the holds made in it.
+func TestHoldFollowsThread(t *testing.T) {
+	w := newWorld(t, nil)
+	b := w.signUp("move@example.com")
+	var node nodeCreated
+	b.must(201, "POST", "/api/nodes", map[string]string{"name": "n1"}, &node)
+	b.must(200, "GET", "/api/roles", nil, nil)
+	var project struct{ ID string }
+	b.must(201, "POST", "/api/projects", map[string]any{"name": "p"}, &project)
+	n := w.connect(node.Token, nodetest.Options{Features: statusFeatures})
+	ctx, cancel := w.waitCtx()
+	defer cancel()
+	if err := n.SendUnreliable(ctx, protocol.TypeNodeRuntimes, cliReport("hello", map[string]string{"claude": "none"})); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "report stored", func() bool { return len(b.nodeCLIs(t, node.Node.ID).CLIs) == 1 })
+	var ta, tb core.ThreadView
+	b.must(201, "POST", "/api/projects/"+project.ID+"/threads", map[string]any{"title": "A", "brief": "task of A"}, &ta)
+	b.must(201, "POST", "/api/projects/"+project.ID+"/threads", map[string]any{"title": "B", "brief": "task of B"}, &tb)
+	leadA := employeeID(t, w, project.ID, "lead-1")
+	eventually(t, "lead of A held", func() bool { _, err := holdOf(w, leadA); return err == nil })
+	dev := employeeID(t, w, project.ID, "dev-1")
+	pool := w.e.Core.Pool
+	inTx := func(f func(tx *core.Tx) error) {
+		t.Helper()
+		if err := w.e.Core.InTx(w.ctx, f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	holdDevIn := func(threadID, text string) {
+		inTx(func(tx *core.Tx) error {
+			if err := core.SetCurrentThread(w.ctx, tx, dev, &threadID); err != nil {
+				return err
+			}
+			e, err := core.EmployeeByID(w.ctx, tx, dev)
+			if err != nil {
+				return err
+			}
+			_, err = w.e.Orch.Deliver(w.ctx, tx, e, orchestrator.Delivery{Text: text, Kind: "system"})
+			return err
+		})
+	}
+
+	// Held in A, then a message while its current thread is B: a new hold in B with only that message.
+	holdDevIn(ta.ID, "brief from A")
+	h, err := holdOf(w, dev)
+	if err != nil || h.ThreadID == nil || *h.ThreadID != ta.ID || !strings.Contains(h.First.Text, "brief from A") {
+		t.Fatalf("hold in A: %+v %v", h, err)
+	}
+	holdDevIn(tb.ID, "brief from B")
+	h, err = holdOf(w, dev)
+	if err != nil || h.ThreadID == nil || *h.ThreadID != tb.ID || strings.Contains(h.First.Text, "brief from A") ||
+		!strings.Contains(h.First.Text, "brief from B") || len(h.More) != 0 {
+		t.Fatalf("hold after the thread changed: %+v %v", h, err)
+	}
+
+	// Moving to A drops the hold made in B.
+	inTx(func(tx *core.Tx) error {
+		e, err := core.EmployeeByID(w.ctx, tx, dev)
+		if err != nil {
+			return err
+		}
+		_, err = w.e.Orch.MoveToThread(w.ctx, tx, e, ta.ID)
+		return err
+	})
+	if _, err := core.HoldOf(w.ctx, pool, dev); err != core.ErrNotFound {
+		t.Fatalf("hold after MoveToThread: %v", err)
+	}
+
+	// Archiving A drops its lead's hold.
+	b.must(200, "POST", "/api/threads/"+ta.ID+"/archive", nil, nil)
+	eventually(t, "lead of A's hold dropped", func() bool { _, err := holdOf(w, leadA); return err == core.ErrNotFound })
+	expectNone(t, n, protocol.TypeSessionOpen, 200*time.Millisecond, nil)
 }

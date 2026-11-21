@@ -101,7 +101,8 @@ type nodeState struct {
 	rt     string // the runtime the session would run on ("" in tests of a single runtime)
 	usable bool   // online and the runtime is logged in there
 	online bool   // the node has a live link
-	gated  bool   // online and reports its runtime CLIs: usable only when the runtime is ready (rs)
+	gated  bool   // online with runtime_status: usable only when the runtime is ready (rs)
+	unseen bool   // gated, but the node's first node.runtimes has not arrived yet (no rows)
 	rs     *store.NodeRuntime
 	free   int     // freeSlots
 	used   float64 // quotaUsed of the runtime
@@ -122,8 +123,10 @@ func (o *Orchestrator) nodeStates(ctx context.Context, tx *core.Tx, cands []stor
 			ru := runtimeUsage(o.gw.Usage(n.ID), runtime)
 			st.online = true
 			st.usable = loggedIn(ru)
-			if o.gw.SupportsRuntimeStatus(n.ID) && len(reports[n.ID]) > 0 {
-				st.gated, st.rs = true, runtimeReport(reports[n.ID], runtime)
+			if o.gw.SupportsRuntimeStatus(n.ID) {
+				// A daemon with runtime_status decides by its report only; until the first one
+				// arrives (right after welcome) the runtime counts as not ready.
+				st.gated, st.unseen, st.rs = true, len(reports[n.ID]) == 0, runtimeReport(reports[n.ID], runtime)
 				st.usable = st.rs != nil && st.rs.Ready(now)
 			}
 			st.free = freeSlots(o.gw.Capacity(n), active)
@@ -157,7 +160,7 @@ func holdReason(rts []string, states []nodeState) string {
 
 func runtimeHoldReason(rt string, states []nodeState) string {
 	title := runtimes.Of(rt).Title
-	var online, installed, expired bool
+	var online, installed, expired, unseen bool
 	for _, s := range states {
 		if s.rt != rt || !s.online {
 			continue
@@ -165,10 +168,13 @@ func runtimeHoldReason(rt string, states []nodeState) string {
 		online = true
 		installed = installed || !s.gated || (s.rs != nil && s.rs.Installed)
 		expired = expired || (s.rs != nil && s.rs.Installed && s.rs.Expired)
+		unseen = unseen || s.unseen
 	}
 	switch {
 	case !online:
 		return "没有能运行 " + title + " 的在线节点"
+	case unseen:
+		return "正在检测节点上 " + title + " 的安装和登录状态"
 	case !installed:
 		return title + " 没有安装在任何在线的候选节点上"
 	case expired:

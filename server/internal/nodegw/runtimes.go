@@ -69,6 +69,9 @@ func (g *Gateway) recordRuntimes(ctx context.Context, node store.Node, b *protoc
 		return err
 	}
 	changed, ready := diffRuntimes(before, rows, g.now())
+	// The first report after a (re)connect always counts: sessions held while the node was being
+	// checked are placed again even when nothing differs from what was stored.
+	changed = changed || b.Reason == protocol.NodeRuntimesReasonHello
 	if h, ok := g.handler.(RuntimesHandler); ok && changed {
 		h.RuntimesChanged(ctx, node, ready)
 	}
