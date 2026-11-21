@@ -501,6 +501,7 @@
   - `runtimes.<id>`：`installed`（找到并能运行 CLI/SDK）、`version`（可选，CLI 报告的版本）、`path`（可选，找到的可执行文件绝对路径）、`auth`（`subscription|chatgpt|api_key|none|unknown`：`subscription` 为服务方账号登录，如 Claude 订阅；`chatgpt` 为 Codex 的 ChatGPT 登录；`unknown` 为没装或检测失败、无法判断）、`auth_expires_at`（可选，只在能从凭证文件元数据或非秘密字段读出时填）、`expired`（可选，确知登录已过期，控制台调度时按未登录处理）、`checked_at`（本次检测时间）、`error`（可选，简短原因，不含凭证）。
   - 运行时 id 是开放的小写字符串（`^[a-z][a-z0-9_-]{0,31}$`，与 `common.json` 的 `Runtime` 取值一致），新增运行时不需要改这条消息。
   - 检测只读文件元数据和非秘密字段，消息里永远不带 token、API Key、邮箱、组织或账号 id。
+- **控制台怎么用**：报告存进 `at_node_runtimes`（data-model.md §2.2），节点页 `NodeView.clis` 显示；在线且带 `runtime_status` 的节点，某运行时没装或没登录就不往这里派该运行时的会话，所有候选节点都不行时会话暂存并显示原因，报告变为可用后自动开出（data-model.md §2.7）。
 - **`node.runtimes_refresh`**（控制台 → 守护进程，不可靠，body 可以是空对象，也可以带 `runtimes`，例如 `["claude"]`）：节点页点“重新检测”时发。守护进程立即重新检测请求的运行时（省略 = 全部），回一条 `node.runtimes`，其中仍带全部运行时。
 
 ## 10. 关闭码
