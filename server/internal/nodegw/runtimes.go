@@ -45,6 +45,18 @@ type runtimesWait struct {
 	got    bool // guarded by Gateway.mu
 }
 
+// RuntimesReported reports whether the node's live link has delivered its first node.runtimes:
+// until then its stored states (maybe from an earlier connection) do not count.
+func (g *Gateway) RuntimesReported(nodeID string) bool {
+	l := g.link(nodeID)
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.reported
+}
+
 // SupportsRuntimeStatus reports whether the node's live link announced runtime_status: only then
 // do its stored runtime states decide where sessions go.
 func (g *Gateway) SupportsRuntimeStatus(nodeID string) bool {
@@ -54,7 +66,8 @@ func (g *Gateway) SupportsRuntimeStatus(nodeID string) bool {
 
 // recordRuntimes stores a node.runtimes report, ends the refresh it answers and tells the
 // handler when something changed.
-func (g *Gateway) recordRuntimes(ctx context.Context, node store.Node, b *protocol.NodeRuntimes) error {
+func (g *Gateway) recordRuntimes(ctx context.Context, l *link, b *protocol.NodeRuntimes) error {
+	node := l.node
 	rows := sanitizeRuntimes(b)
 	var before []store.NodeRuntime
 	err := g.core.InTx(ctx, func(tx *core.Tx) error {
@@ -68,10 +81,17 @@ func (g *Gateway) recordRuntimes(ctx context.Context, node store.Node, b *protoc
 	if err != nil {
 		return err
 	}
+	l.mu.Lock()
+	first := !l.reported
+	l.reported = true
+	l.mu.Unlock()
 	changed, ready := diffRuntimes(before, rows, g.now())
+	if first {
+		ready = readyNow(rows, g.now()) // the rows stored before this link did not count
+	}
 	// The first report after a (re)connect always counts: sessions held while the node was being
 	// checked are placed again even when nothing differs from what was stored.
-	changed = changed || b.Reason == protocol.NodeRuntimesReasonHello
+	changed = changed || first || b.Reason == protocol.NodeRuntimesReasonHello
 	if h, ok := g.handler.(RuntimesHandler); ok && changed {
 		h.RuntimesChanged(ctx, node, ready)
 	}
@@ -93,6 +113,17 @@ func diffRuntimes(before, after []store.NodeRuntime, now time.Time) (bool, []str
 		}
 	}
 	return changed, ready
+}
+
+// readyNow lists the runtimes of a report that are ready.
+func readyNow(rows []store.NodeRuntime, now time.Time) []string {
+	var out []string
+	for _, r := range rows {
+		if r.Ready(now) {
+			out = append(out, r.Runtime)
+		}
+	}
+	return out
 }
 
 func findStored(rows []store.NodeRuntime, runtime string) (store.NodeRuntime, bool) {

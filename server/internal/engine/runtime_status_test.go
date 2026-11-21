@@ -128,6 +128,26 @@ func TestRuntimeStatusHoldsUntilLoggedIn(t *testing.T) {
 		h, err := holdOf(w, lead)
 		return err == nil && strings.Contains(h.First.Text, "顺便加个测试") && len(h.More) == 1
 	})
+	held, _ := holdOf(w, lead)
+	delivered := func(msgID string) bool {
+		var n int64
+		_ = w.e.Core.Pool.Gorm(w.ctx).Table("at_messages").Where("meta->>'msg_id' = ? AND delivered_at IS NOT NULL", msgID).Count(&n).Error
+		return n > 0
+	}
+	// A release while still not logged in holds again: the merged msg ids are kept and not
+	// stamped delivered.
+	var userID string
+	_ = w.e.Core.Pool.Gorm(w.ctx).Table("at_projects").Select("user_id").Where("id = ?", project.ID).Scan(&userID).Error
+	w.e.Orch.ReleaseHolds(w.ctx, userID)
+	again, err := holdOf(w, lead)
+	if err != nil || len(again.More) != 1 || again.More[0] != held.More[0] || !again.CreatedAt.Equal(held.CreatedAt) ||
+		again.First.Text != held.First.Text {
+		t.Fatalf("hold after a release that held again: %+v %v (was %+v)", again, err, held)
+	}
+	if delivered(held.More[0]) {
+		t.Fatal("held message stamped delivered before any session got it")
+	}
+	expectNone(t, n, protocol.TypeSessionOpen, 200*time.Millisecond, nil)
 
 	// Logged in: the held session opens with the brief and the later message.
 	if err := n.SendUnreliable(ctx, protocol.TypeNodeRuntimes, cliReport("fs_event", map[string]string{"claude": "subscription", "codex": ""})); err != nil {
@@ -139,6 +159,9 @@ func TestRuntimeStatusHoldsUntilLoggedIn(t *testing.T) {
 	}
 	if _, err := holdOf(w, lead); err != core.ErrNotFound {
 		t.Fatalf("hold after release: %v", err)
+	}
+	if !delivered(held.More[0]) {
+		t.Fatal("merged message not stamped delivered with the first message")
 	}
 	view = b.nodeCLIs(t, node.Node.ID)
 	if len(view.CLIs) != 2 || !view.CLIs[0].Ready || view.CLIs[0].Auth != "subscription" {
@@ -366,4 +389,44 @@ func TestHoldFollowsThread(t *testing.T) {
 	b.must(200, "POST", "/api/threads/"+ta.ID+"/archive", nil, nil)
 	eventually(t, "lead of A's hold dropped", func() bool { _, err := holdOf(w, leadA); return err == core.ErrNotFound })
 	expectNone(t, n, protocol.TypeSessionOpen, 200*time.Millisecond, nil)
+}
+
+// TestRuntimeStatusReconnect: rows an earlier connection left in at_node_runtimes do not count
+// after the node reconnects: even when they say logged in, held sessions wait until the new
+// connection's first node.runtimes, and open once it says logged in.
+func TestRuntimeStatusReconnect(t *testing.T) {
+	w := newWorld(t, nil)
+	b := w.signUp("again@example.com")
+	var node nodeCreated
+	b.must(201, "POST", "/api/nodes", map[string]string{"name": "n1"}, &node)
+	b.must(200, "GET", "/api/roles", nil, nil)
+	var project struct{ ID string }
+	b.must(201, "POST", "/api/projects", map[string]any{"name": "p"}, &project)
+	n := w.connect(node.Token, nodetest.Options{Features: statusFeatures})
+	ctx, cancel := w.waitCtx()
+	defer cancel()
+	if err := n.SendUnreliable(ctx, protocol.TypeNodeRuntimes, cliReport("hello", map[string]string{"claude": "none"})); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "report stored", func() bool { return len(b.nodeCLIs(t, node.Node.ID).CLIs) == 1 })
+	b.must(201, "POST", "/api/projects/"+project.ID+"/threads", map[string]any{"title": "Work", "brief": "do it"}, nil)
+	lead := employeeID(t, w, project.ID, "lead-1")
+	eventually(t, "lead held", func() bool { _, err := holdOf(w, lead); return err == nil })
+	n.Close()
+	eventually(t, "offline", func() bool { return !w.e.Gateway.Online(node.Node.ID) })
+
+	// The stored row now says logged in (as a report from the earlier connection could).
+	if err := w.e.Core.Pool.Gorm(w.ctx).Exec(`UPDATE at_node_runtimes SET auth = 'subscription' WHERE node_id = ?`, node.Node.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	n2 := w.connect(node.Token, nodetest.Options{Features: statusFeatures})
+	eventually(t, "held while the reconnected node is checked", func() bool {
+		h, err := holdOf(w, lead)
+		return err == nil && strings.Contains(h.Reason, "正在检测节点上 Claude Code")
+	})
+	expectNone(t, n2, protocol.TypeSessionOpen, 500*time.Millisecond, nil)
+	if err := n2.SendUnreliable(ctx, protocol.TypeNodeRuntimes, cliReport("hello", map[string]string{"claude": "subscription"})); err != nil {
+		t.Fatal(err)
+	}
+	expectOpen(t, w, n2, "lead-1")
 }
