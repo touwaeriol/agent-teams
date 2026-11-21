@@ -315,7 +315,7 @@ queued ──开工──► running ◄──► waiting（有等你处理的�
 开工（`queued → running`）由 orchestrator 做。同一用户（跨项目）同时处于 `running` 或 `waiting` 的讨论串数（Admin 页“每人最多同时运行的讨论串”）可用 `max_running_threads` 限制（全局在 `at_settings.platform.max_running_threads`，默认 0 = 不限；`at_users.max_running_threads` 可单独覆盖，NULL = 用全局，0 = 不限），设了上限时超出的新串停在 `queued`，有串结束或暂停时按创建顺序开工；Thread 页对排队的串显示“排队中（前面还有 n 个）”。
 
 1. 分配编号与分支名 `thread/<no>-<slug>`；GitHub API 从基准分支建 ref（已存在跳过）。
-2. 按岗位模板实例化员工 `<role>-<n>`（写 `at_employees`），节点在岗位 `nodes` 里按“当前活跃会话最少”挑，不再是纯轮转。
+2. 按岗位模板实例化员工 `<role>-<n>`（写 `at_employees`），节点在岗位 `nodes` 里挑：每次开新会话按该运行时的订阅用量（5 小时 / 每周 / 模型每周窗口）最低、有空槽的在线节点挑，员工不绑定节点（`shared-members.md` §4.3）。
 3. 给组长发 `git.prepare`（worktree）+ `session.open`，第一条消息 = 统筹的 brief。
 4. 成员**懒启动**：任务池里有该岗位可领的任务时才开会话（省进程、省额度）。
 

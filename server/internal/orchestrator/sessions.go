@@ -421,8 +421,15 @@ func (o *Orchestrator) openSession(ctx context.Context, tx *core.Tx, e core.Empl
 	if err := o.pinThread(ctx, tx, e); err != nil {
 		return core.AgentSession{}, err
 	}
-	node, err := o.pickNode(ctx, tx, e, env.project)
+	worked, err := o.workedHere(ctx, tx, e)
 	if err != nil {
+		return core.AgentSession{}, err
+	}
+	node, err := o.pickNode(ctx, tx, e, env.project, resume != nil || worked)
+	if err != nil {
+		return core.AgentSession{}, err
+	}
+	if first, resume, err = o.moveResume(ctx, tx, e, node.ID, first, resume); err != nil {
 		return core.AgentSession{}, err
 	}
 	paths := PathsOf(e, env.thread)
@@ -723,7 +730,7 @@ func (o *Orchestrator) syncNode(ctx context.Context, tx *core.Tx, env sessionEnv
 	if worked {
 		return *env.emp.NodeID, nil
 	}
-	node, err := o.pickNode(ctx, tx, env.emp, env.project)
+	node, err := o.pickNode(ctx, tx, env.emp, env.project, false)
 	if errors.Is(err, ErrNoNode) {
 		return "", nil
 	}
@@ -795,50 +802,23 @@ func (o *Orchestrator) RefreshWorktree(ctx context.Context, tx *core.Tx, e core.
 	return err
 }
 
-// pickNode chooses the node for an employee: its current node if still there, else
-// the online candidate with the most free slots, else the first candidate.
-func (o *Orchestrator) pickNode(ctx context.Context, tx *core.Tx, e core.Employee, p store.Project) (store.Node, error) {
-	nodes, err := o.store.On(tx).ListNodes(ctx, p.UserID)
+// moveResume turns a resume into a recap when the session opens on another node than the one
+// that holds the old conversation's transcript.
+func (o *Orchestrator) moveResume(ctx context.Context, tx *core.Tx, e core.Employee, nodeID string,
+	first *protocol.FirstMessage, resume *protocol.ResumeRef) (*protocol.FirstMessage, *protocol.ResumeRef, error) {
+	if resume == nil || e.NodeID == nil || *e.NodeID == nodeID {
+		return first, resume, nil
+	}
+	summary, err := o.handoffSummary(ctx, tx, e)
 	if err != nil {
-		return store.Node{}, err
+		return first, resume, err
 	}
-	if e.NodeID != nil {
-		for _, n := range nodes {
-			if n.ID == *e.NodeID {
-				return n, nil
-			}
-		}
+	moved := protocol.FirstMessage{MsgID: protocol.MsgID(core.NewID("m")), Text: summary}
+	if first != nil {
+		moved = *first
+		moved.Text = summary + "\n\n---\n" + strings.TrimPrefix(first.Text, reopenedPrefix)
 	}
-	cands := core.NodeCandidates(e, nodes)
-	if len(cands) == 0 {
-		return store.Node{}, ErrNoNode
-	}
-	return o.leastLoaded(ctx, tx, cands), nil
-}
-
-func (o *Orchestrator) leastLoaded(ctx context.Context, tx *core.Tx, cands []store.Node) store.Node {
-	best, bestFree := cands[0], -1<<30
-	for _, n := range cands {
-		if !o.gw.Online(n.ID) {
-			continue
-		}
-		active, err := core.ActiveSessionCount(ctx, tx, n.ID)
-		if err != nil {
-			continue
-		}
-		if free := freeSlots(o.gw.Capacity(n), active); free > bestFree {
-			best, bestFree = n, free
-		}
-	}
-	return best
-}
-
-// freeSlots ranks a node: an unlimited node (capacity 0) counts as far roomier than any capped one.
-func freeSlots(capacity, active int) int {
-	if capacity <= 0 {
-		capacity = 1 << 20
-	}
-	return capacity - active
+	return &moved, nil, o.resumedNote(ctx, tx, e)
 }
 
 // reopen starts a new open generation of the same logical session with resume.
