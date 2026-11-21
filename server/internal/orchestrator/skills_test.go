@@ -52,3 +52,17 @@ func TestAddSkillsSkipsCoordinatorAndEmpty(t *testing.T) {
 		t.Fatalf("empty role got skills: %v", err)
 	}
 }
+
+func TestApplySkillsAntigravity(t *testing.T) {
+	e := emp("member", "dev", store.Role{})
+	e.Runtime = "antigravity"
+	o, err := buildOpen(open(t, e, store.Node{Isolation: "agent_user"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	applySkills(&o, designBundle)
+	if len(o.Skills) != 0 || !strings.Contains(*o.Antigravity.SystemAppend, "# Design rules") ||
+		!strings.HasPrefix(*o.Antigravity.SystemAppend, "sys") {
+		t.Fatalf("antigravity %+v", o.Antigravity)
+	}
+}

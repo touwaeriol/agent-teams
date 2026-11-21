@@ -23,7 +23,7 @@ const configuring = ref(false);
 const slots = computed(() => nodeSlots(props.node));
 const rows = computed(() => cliRows(props.node));
 const infos = computed(() => runtimeInfos(props.node));
-const usage = computed(() => Object.fromEntries(rows.value.map(({ key: k }) => [k, usageView(k, infos.value[k], props.node.usage?.[k as "claude" | "codex"], props.node)])) as Record<string, UsageView>);
+const usage = computed(() => Object.fromEntries(rows.value.map(({ key: k }) => [k, usageView(k, infos.value[k], props.node.usage?.[k as keyof NonNullable<NodeView["usage"]>], props.node)])) as Record<string, UsageView>);
 const CLI_TONE: Record<CliTone, string> = { ok: "hsl(var(--ok))", warn: "hsl(var(--warn))", bad: "hsl(var(--destructive))", muted: "hsl(var(--muted-foreground))" };
 const pick = <K extends NonNullable<UsageView>["kind"]>(key: string, kind: K) => {
   const u = usage.value[key];

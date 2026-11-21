@@ -178,7 +178,7 @@ CREATE TABLE at_roles (
   tier             TEXT NOT NULL,                       -- coordinator | lead | member
   role             TEXT NOT NULL,                       -- 岗位键：coordinator、lead、dev、qa、review、decision…
   title            TEXT NOT NULL DEFAULT '',            -- 显示名：开发、测试…
-  runtime          TEXT NOT NULL DEFAULT 'claude',      -- claude | codex（coordinator 只能 claude）
+  runtime          TEXT NOT NULL DEFAULT 'claude',      -- claude | codex | antigravity（coordinator 只能 claude；antigravity 不能当组长）
   count            INT  NOT NULL DEFAULT 1,             -- member 每讨论串实例数；coordinator/lead 固定 1
   node_ids         TEXT[] NOT NULL DEFAULT '{}',        -- 候选节点（存 id，不存名字，节点改名不失效）
   description      TEXT NOT NULL DEFAULT '',
@@ -211,7 +211,7 @@ CREATE TABLE at_roles (
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   CHECK (tier IN ('coordinator','lead','member')),
-  CHECK (runtime IN ('claude','codex')),
+  CHECK (runtime IN ('claude','codex','antigravity')),   -- 00370 加 antigravity（约束名 at_roles_runtime_check）
   CHECK (NOT (tier = 'coordinator' AND runtime <> 'claude')),
   CHECK (permission_mode IN ('bypass','ask'))
 );
@@ -948,6 +948,8 @@ CREATE TABLE at_ssh_audit (                 -- 网关审计，一行一个事件
 `00360_node_runtimes.sql`：`at_node_runtimes`（§2.2，节点 CLI 状态）和 `at_session_holds`（§2.7，暂存的会话）；Down 删两张表。
 
 `00330_remote_servers.sql`：`at_remote_servers`、`at_project_servers`、`at_project_server_grants`、`at_ssh_certs`、`at_ssh_audit` 和唯一索引 `at_projects_id_user`（§2.14，远程服务器）；Down 删表、删索引，并删掉 `at_settings` 的 `ssh_session_ca`、`ssh_gateway_host_key`。
+
+`00370_antigravity_runtime.sql`：第三种 agent 运行时 `antigravity`（Google Antigravity CLI，经 ACP 驱动，讨论串 #41）。只有 `at_roles` 还用 CHECK 限制 `runtime`（00010；`at_models` 的同类约束随 00320 删表消失），把 `at_roles_runtime_check` 放宽为 `claude`、`codex`、`antigravity`；`at_employees`、`at_agent_sessions`、`at_roles.runtimes` 本来不限。Down：岗位的 `runtimes` / `models` 去掉 antigravity，首个运行时是 antigravity 的岗位改用剩下的下一个（带上它在 `models` 里的模型，没有剩下的就是 Claude、`model = ''`），再还原旧约束；员工的 `runtime` 不动（旧代码把未知运行时当默认的 Claude）。
 
 `00080_plugins.sql`：`at_roles.plugins`、`at_plugins`、`at_plugin_versions`，`at_skills.user_id` 可为空（管理员内置技能）及其唯一索引（architecture.md §6.5）。
 

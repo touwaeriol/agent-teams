@@ -93,7 +93,7 @@ export type Repo = string;
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "Runtime".
  */
-export type Runtime = "claude" | "codex";
+export type Runtime = "claude" | "codex" | "antigravity";
 /**
  * Runtime id as an open lower-case string (the values of Runtime plus any runtime a newer daemon knows); used as map key and in lists where a new runtime should need no protocol change.
  *
@@ -280,7 +280,8 @@ export interface ApprovalRequest {
     | "codex_command"
     | "codex_file_change"
     | "codex_permissions"
-    | "codex_mcp_elicitation";
+    | "codex_mcp_elicitation"
+    | "antigravity_permission";
   tool_name: string;
   tool_use_id?: string;
   input: {
@@ -694,6 +695,7 @@ export interface Capacity {
 export interface Runtimes {
   claude?: ClaudeRuntime;
   codex?: CodexRuntime;
+  antigravity?: AntigravityRuntime;
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -712,6 +714,26 @@ export interface CodexRuntime {
   cli?: string;
   auth?: "api_key" | "chatgpt" | "none";
   sandbox_ok?: boolean;
+}
+/**
+ * Google Antigravity CLI (agy, driven over ACP). Reported even when agy is not installed (installed false, auth none) so the node page can say so; the console schedules antigravity sessions only on nodes that report it installed and logged in.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "AntigravityRuntime".
+ */
+export interface AntigravityRuntime {
+  /**
+   * agy --version, e.g. 1.5.14; empty when not installed.
+   */
+  cli?: string;
+  /**
+   * oauth: a Google account login (agy acp --login); api_key: GEMINI_API_KEY with modelProvider gemini; adc: AGY_ADC_AUTH application default credentials; none: not logged in.
+   */
+  auth?: "oauth" | "api_key" | "adc" | "none";
+  /**
+   * false when the agy binary was not found; absent means installed.
+   */
+  installed?: boolean;
 }
 /**
  * First frame from the daemon after connecting.
@@ -1376,6 +1398,34 @@ export interface CodexSessionOptions {
   };
 }
 /**
+ * agy acp --process-per-session, one process per session. The ACP sessionId is kept as sdk_session_id (session.opened, ResumeRef, sessions.report).
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "AntigravitySessionOptions".
+ */
+export interface AntigravitySessionOptions {
+  /**
+   * Model slug (e.g. gemini-4-neon-high); empty leaves the choice to agy.
+   */
+  model: string;
+  /**
+   * Read-only roles (reviewer…): the daemon disables agy's writing tools (deny rules for file writes and edits) and rejects every writing permission request; commands run only when bash_policy allows them.
+   */
+  read_only: boolean;
+  /**
+   * How ACP session/request_permission is answered when read_only does not already reject it. ask: forwarded to the console as approval.request; auto: the daemon allows it (bypass roles).
+   */
+  approval: "ask" | "auto";
+  /**
+   * Appended to agy's system prompt (session/new _meta.antigravity.systemPrompt.append): platform rules, role instructions and skills inlined.
+   */
+  system_append?: string;
+  /**
+   * read_only: argv allow list for shell commands, as in claude.bash_policy.
+   */
+  bash_policy?: BashPolicy | null;
+}
+/**
  * One platform tool, from /protocol/schemas/tools.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -1537,6 +1587,10 @@ export interface SessionOpen {
    * Set when runtime = codex.
    */
   codex?: CodexSessionOptions | null;
+  /**
+   * Set when runtime = antigravity.
+   */
+  antigravity?: AntigravitySessionOptions | null;
   platform_tools: PlatformToolSpec[];
   /**
    * Extra non-secret environment; the daemon adds PATH/HOME/MCP_TOOL_TIMEOUT/git credential variables itself.
@@ -2911,7 +2965,7 @@ export interface TeamMember {
   name: string;
   role: string;
   title?: string;
-  type?: "claude_code" | "codex";
+  type?: "claude_code" | "codex" | "antigravity";
   node?: string;
   status?: string;
   task_id?: string | null;

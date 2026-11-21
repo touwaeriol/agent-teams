@@ -7,8 +7,8 @@ import { computed, ref } from "vue";
 import type { RoleView } from "@/api/views";
 import DropdownMenu from "@/components/common/DropdownMenu.vue";
 import type { OfficeLayout } from "@/office";
-import { canHaveSkills, countText, isReadOnly, LEVEL, roleName, ruleText } from "@/lib/roles";
-import { modelOf, modelPatch, roleRuntimes, RUNTIME_SPECS, runtimeLabel, runtimesPatch, type Runtime } from "@/lib/runtimes";
+import { canHaveSkills, countText, isReadOnly, LEVEL, readOnlyCaveat, roleName, ruleText } from "@/lib/roles";
+import { modelOf, modelPatch, roleRuntimes, runtimeLabel, runtimesFor, runtimesPatch, type Runtime } from "@/lib/runtimes";
 import { toast } from "@/lib/toast";
 import CommandEditor from "./CommandEditor.vue";
 import LookEditor from "./LookEditor.vue";
@@ -66,7 +66,7 @@ function save(r: RoleView) {
       <span class="flex min-w-0 flex-col gap-1">
         <span class="text-xs text-muted-foreground">agent</span>
         <el-select :model-value="runtimeList" multiple :disabled="!member" class="at-select-36 at-text-13" aria-label="agent" @update:model-value="setRuntimes">
-          <el-option v-for="r in RUNTIME_SPECS" :key="r.id" :value="r.id" :label="r.label" />
+          <el-option v-for="r in runtimesFor(role.tier)" :key="r.id" :value="r.id" :label="r.label" />
         </el-select>
         <span v-if="runtimeList.length > 1" class="text-[11px] leading-4 text-muted-foreground">每次开新会话用剩余额度最多的</span>
       </span>
@@ -83,6 +83,7 @@ function save(r: RoleView) {
       </span>
     </div>
     <span class="rounded-lg bg-background px-2.5 py-2 text-xs leading-[19px] text-[#4A4843]">{{ ruleText(role) }}</span>
+    <span v-if="readOnlyCaveat(role)" class="rounded-lg bg-[hsl(var(--warn)/0.12)] px-2.5 py-2 text-xs leading-[19px] text-[hsl(var(--warn))]" data-readonly-caveat>{{ readOnlyCaveat(role) }}</span>
     <LookEditor :role="role" :layout="layout" @change="(look) => emit('change', { look })" />
     <SkillPicker v-if="canHaveSkills(role)" :model-value="role.skills ?? []" @update:model-value="(skills: string[]) => emit('change', { skills })" />
     <PluginPicker v-if="canHaveSkills(role)" :role="role" @change="(plugins: string[]) => emit('change', { plugins })" />

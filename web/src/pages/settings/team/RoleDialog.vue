@@ -6,7 +6,7 @@ import type { RoleView } from "@/api/views";
 import Field from "@/components/common/Field.vue";
 import FormDialog from "@/components/common/FormDialog.vue";
 import TagInput from "@/components/common/TagInput.vue";
-import { roleName } from "@/lib/roles";
+import { readOnlyCaveat, roleName } from "@/lib/roles";
 import { roleRuntimes } from "@/lib/runtimes";
 import ContextFields from "./ContextFields.vue";
 import { GATES } from "./team";
@@ -70,6 +70,7 @@ const num = (v: string) => (v === "" ? null : Number(v));
         可以给别人派活
         <el-switch v-model="d.can_delegate" />
       </label>
+      <p v-if="readOnlyCaveat(d)" class="text-xs leading-[19px] text-[hsl(var(--warn))] sm:col-span-2" data-readonly-caveat>{{ readOnlyCaveat(d) }}</p>
     </div>
   </FormDialog>
 </template>

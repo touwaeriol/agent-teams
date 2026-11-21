@@ -133,7 +133,8 @@
             "codex_command",
             "codex_file_change",
             "codex_permissions",
-            "codex_mcp_elicitation"
+            "codex_mcp_elicitation",
+            "antigravity_permission"
           ]
         },
         "tool_name": {
@@ -330,7 +331,8 @@
       "type": "string",
       "enum": [
         "claude",
-        "codex"
+        "codex",
+        "antigravity"
       ]
     },
     "RuntimeID": {
@@ -1090,6 +1092,9 @@
         },
         "codex": {
           "$ref": "#/$defs/CodexRuntime"
+        },
+        "antigravity": {
+          "$ref": "#/$defs/AntigravityRuntime"
         }
       }
     },
@@ -1129,6 +1134,31 @@
           ]
         },
         "sandbox_ok": {
+          "type": "boolean"
+        }
+      }
+    },
+    "AntigravityRuntime": {
+      "title": "AntigravityRuntime",
+      "description": "Google Antigravity CLI (agy, driven over ACP). Reported even when agy is not installed (installed false, auth none) so the node page can say so; the console schedules antigravity sessions only on nodes that report it installed and logged in.",
+      "type": "object",
+      "properties": {
+        "cli": {
+          "description": "agy --version, e.g. 1.5.14; empty when not installed.",
+          "type": "string"
+        },
+        "auth": {
+          "description": "oauth: a Google account login (agy acp --login); api_key: GEMINI_API_KEY with modelProvider gemini; adc: AGY_ADC_AUTH application default credentials; none: not logged in.",
+          "type": "string",
+          "enum": [
+            "oauth",
+            "api_key",
+            "adc",
+            "none"
+          ]
+        },
+        "installed": {
+          "description": "false when the agy binary was not found; absent means installed.",
           "type": "boolean"
         }
       }
@@ -2249,6 +2279,49 @@
         }
       }
     },
+    "AntigravitySessionOptions": {
+      "title": "AntigravitySessionOptions",
+      "description": "agy acp --process-per-session, one process per session. The ACP sessionId is kept as sdk_session_id (session.opened, ResumeRef, sessions.report).",
+      "type": "object",
+      "required": [
+        "model",
+        "read_only",
+        "approval"
+      ],
+      "properties": {
+        "model": {
+          "description": "Model slug (e.g. gemini-4-neon-high); empty leaves the choice to agy.",
+          "type": "string"
+        },
+        "read_only": {
+          "description": "Read-only roles (reviewer…): the daemon disables agy's writing tools (deny rules for file writes and edits) and rejects every writing permission request; commands run only when bash_policy allows them.",
+          "type": "boolean"
+        },
+        "approval": {
+          "description": "How ACP session/request_permission is answered when read_only does not already reject it. ask: forwarded to the console as approval.request; auto: the daemon allows it (bypass roles).",
+          "type": "string",
+          "enum": [
+            "ask",
+            "auto"
+          ]
+        },
+        "system_append": {
+          "description": "Appended to agy's system prompt (session/new _meta.antigravity.systemPrompt.append): platform rules, role instructions and skills inlined.",
+          "type": "string"
+        },
+        "bash_policy": {
+          "description": "read_only: argv allow list for shell commands, as in claude.bash_policy.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BashPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
     "PlatformToolSpec": {
       "title": "PlatformToolSpec",
       "description": "One platform tool, from /protocol/schemas/tools.",
@@ -2543,6 +2616,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/CodexSessionOptions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "antigravity": {
+          "description": "Set when runtime = antigravity.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AntigravitySessionOptions"
             },
             {
               "type": "null"
@@ -4481,7 +4565,8 @@
           "type": "string",
           "enum": [
             "claude_code",
-            "codex"
+            "codex",
+            "antigravity"
           ]
         },
         "node": {

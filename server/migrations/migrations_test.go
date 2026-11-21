@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 360 {
+	if migrations.Latest() != 370 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -1547,5 +1547,50 @@ DELETE FROM at_threads WHERE id = 'th1'`); err != nil {
 	var reg *string
 	if err := db.QueryRow(`SELECT to_regclass('at_node_runtimes')::text`).Scan(&reg); err != nil || reg != nil {
 		t.Fatalf("table after down: %v %v", reg, err)
+	}
+}
+
+// TestAntigravityRuntimeMigration: 00370 lets at_roles.runtime be antigravity; Down moves roles
+// off it (the next runtime with its model, else Claude) and restores the old CHECK.
+func TestAntigravityRuntimeMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 360); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_roles (id, user_id, tier, role, runtime) VALUES ('r0', 'u1', 'member', 'x', 'antigravity')`); err == nil {
+		t.Fatal("antigravity accepted before 00370")
+	}
+	if _, err := p.UpTo(ctx, 370); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_roles (id, user_id, tier, role, runtime, runtimes, model, models) VALUES
+  ('r1', 'u1', 'member', 'rev', 'antigravity', '{antigravity,codex}', 'gemini-4-neon-high', '{"codex": "gpt-5"}'),
+  ('r2', 'u1', 'member', 'solo', 'antigravity', '{antigravity}', 'gemini-4-neon-high', '{}'),
+  ('r3', 'u1', 'member', 'dev', 'claude', '{claude,antigravity}', 'claude-opus-5-5', '{"antigravity": "gemini-4-carbon-high"}'),
+  ('r4', 'u1', 'member', 'qa', 'codex', '{codex}', 'gpt-5', '{}')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_roles (id, user_id, tier, role, runtime) VALUES ('r5', 'u1', 'member', 'y', 'gemini')`); err == nil {
+		t.Fatal("unknown runtime accepted after 00370")
+	}
+	if _, err := p.DownTo(ctx, 360); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.QueryRow(`SELECT string_agg(role || ':' || runtime || ':' || array_to_string(runtimes, ',') || ':' || model || ':' || models::text, ' ' ORDER BY id) FROM at_roles`).Scan(&got); err != nil ||
+		got != "rev:codex:codex:gpt-5:{} solo:claude:claude::{} dev:claude:claude:claude-opus-5-5:{} qa:codex:codex:gpt-5:{}" {
+		t.Fatalf("roles after down: %q %v", got, err)
+	}
+	if _, err := db.Exec(`UPDATE at_roles SET runtime = 'antigravity' WHERE id = 'r4'`); err == nil {
+		t.Fatal("antigravity accepted after down")
 	}
 }

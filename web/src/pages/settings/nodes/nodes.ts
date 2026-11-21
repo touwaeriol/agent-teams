@@ -10,15 +10,19 @@ export interface RuntimeInfo {
   cli?: string;
   sdk?: string;
   auth?: string;
+  /** false: the daemon looked and the runtime is not there (Antigravity); absent counts as installed when cli is set. */
+  installed?: boolean;
 }
+
+const AUTH_TEXT: Record<string, string> = { api_key: "已配置 API Key", adc: "已配置 ADC 凭证" };
 
 export const RUNTIMES: [string, string][] = RUNTIME_SPECS.map((r) => [r.id, r.label]);
 
 /** One runtime chip: version and login state (protocol.md hello.runtimes). */
 export function runtimeLine(key: string, info: RuntimeInfo | undefined): { ver: string; login: string; ok: boolean } {
-  if (!info || !info.cli) return { ver: "未安装", login: runtimeSpec(key).installHint, ok: false };
-  if (!info.auth || info.auth === "none") return { ver: info.cli, login: "未登录", ok: false };
-  return { ver: info.cli, login: info.auth === "api_key" ? "已配置 API Key" : "已登录", ok: true };
+  if (!info || !info.cli || info.installed === false) return { ver: "未安装", login: runtimeSpec(key).installHint, ok: false };
+  if (!info.auth || info.auth === "none") return { ver: info.cli, login: runtimeSpec(key).loginHint, ok: false };
+  return { ver: info.cli, login: AUTH_TEXT[info.auth] ?? "已登录", ok: true };
 }
 
 export type NodeCli = NodeRuntime;
@@ -32,6 +36,9 @@ export function cliLabel(id: string): string {
 }
 
 const LOGIN_TEXT: Record<string, string> = { subscription: "已登录（订阅）", chatgpt: "已登录（ChatGPT）", api_key: "已配置 API Key", none: "未登录", unknown: "登录状态未知" };
+
+/** Runtime-specific wording: Antigravity's subscription is a Google account login (the daemon maps agy's oauth to it). */
+const RUNTIME_LOGIN_TEXT: Record<string, Record<string, string>> = { antigravity: { subscription: "已登录（Google 账号）", api_key: "已配置 API Key / ADC" } };
 
 /** ok: sessions may run there; warn: something to do on the node; bad: was logged in, now expired; muted: unknown. */
 export type CliTone = "ok" | "warn" | "bad" | "muted";
@@ -56,7 +63,7 @@ export interface CliRow {
 export function cliLogin(c: Pick<NodeCli, "runtime" | "installed" | "auth" | "expired" | "ready">): { login: string; tone: CliTone } {
   if (!c.installed) return { login: RUNTIME_SPECS.find((r) => r.id === c.runtime)?.installHint ?? "安装后登录", tone: "warn" };
   if (c.expired) return { login: "登录已过期", tone: "bad" };
-  const login = LOGIN_TEXT[c.auth] ?? c.auth;
+  const login = RUNTIME_LOGIN_TEXT[c.runtime]?.[c.auth] ?? LOGIN_TEXT[c.auth] ?? c.auth;
   if (c.auth === "unknown") return { login, tone: "muted" };
   if (c.auth === "none") return { login, tone: "warn" };
   // A login whose auth_expires_at has passed is not ready even when the daemon has not said expired yet.

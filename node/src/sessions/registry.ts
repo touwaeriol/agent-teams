@@ -6,16 +6,20 @@
 // in the protocol Runtime enum plus its session.open options block, and its entry in the control
 // plane's registry (server/internal/runtimes).
 import { existsSync } from "node:fs";
-import type { ClaudeRuntime, CodexRuntime, Runtime, Runtimes, RuntimeStatus } from "../protocol.js";
+import { join } from "node:path";
+import type { AntigravityRuntime, ClaudeRuntime, CodexRuntime, Runtime, Runtimes, RuntimeStatus } from "../protocol.js";
 import { claudeCredentialsFile, claudeKeyEnv, codexAuthFile, fileStamp, probeClaude, probeCodex } from "../runtimes.js";
 import { codexCommand } from "./codex/appserver.js";
 import type { LoopbackToolHost } from "../toolhost/http-server.js";
+import { silentLogger, type Logger } from "../util/log.js";
 import { CLAUDE_SDK_VERSION, CODEX_CLI_VERSION } from "../version.js";
 import { ClaudeDriver, type QueryFn } from "./claude/driver.js";
 import { CodexDriver } from "./codex/driver.js";
 import type { CodexHub } from "./codex/hub.js";
+import { AntigravityDriver } from "./antigravity/driver.js";
+import { AGY_PASS_ENV, AGY_TOKEN_FILES, detectInstalled, detectLogin, probeAntigravity, writeAgySettings } from "./antigravity/detect.js";
 import { CODEX_PASS_ENV } from "./env.js";
-import { codexMcpServers, type MaterializedPlugin } from "./plugins.js";
+import { acpMcpServers, codexMcpServers, type MaterializedPlugin } from "./plugins.js";
 import type { MaterializedSkills } from "./skills.js";
 import type { Driver, DriverContext } from "./types.js";
 
@@ -84,6 +88,15 @@ export interface RuntimeDeps {
   codexCommand?: string[];
   toolhost: LoopbackToolHost;
   queryFn?: QueryFn;
+  /** HOME of every agy process on this node (its login, settings and conversations live there). */
+  agyHome?: string;
+  /** The agy command (tests: a fake ACP agent); default: detectInstalled (AGENT_TEAMS_AGY_BIN, PATH, ~/.local/bin). */
+  agyCommand?: string[];
+  /** Environment agy itself runs with for the probe (the node's pass list plus AGY_PASS_ENV). */
+  agyEnv?: () => Record<string, string>;
+  log?: Logger;
+  /** Asks RuntimeMonitor for a check now (a session saw a runtime's state change). */
+  recheck?: () => void;
 }
 
 export class ClaudeAdapter implements RuntimeAdapter {
@@ -176,6 +189,102 @@ export class CodexAdapter implements RuntimeAdapter {
   }
 }
 
+/**
+ * Google Antigravity CLI (agy) over ACP, one process per session (sessions/antigravity). agy has
+ * no CODEX_HOME-like variable, so all its processes get one node-level HOME (agyHome) where an
+ * admin logs in once (`HOME=<agyHome> agy acp --login`); auto update is turned off. No usage report.
+ * Detection (detectAntigravity): agy is looked up and `agy --version` / the login check run again
+ * only when forced or when the binary, a token file under agyHome or the login env changed.
+ */
+export class AntigravityAdapter implements RuntimeAdapter {
+  readonly id = "antigravity" as const;
+  readonly nativeSkills = false;
+  readonly passEnv: readonly string[] = AGY_PASS_ENV;
+  private current: AntigravityRuntime = { cli: "", auth: "none", installed: false };
+  private command: string[] | null = null;
+  private last: RuntimeState | null = null;
+  /** Binary + token files + login env as of the last probe; an unforced check re-probes only when this changes. */
+  private stamp = "";
+
+  constructor(private readonly d: RuntimeDeps) {}
+
+  get home(): string { return this.d.agyHome ?? join(this.d.root, "agy-home"); }
+
+  info(): AntigravityRuntime { return this.current; }
+
+  /** The agy command, looked up again when the last probe did not find it or the binary went away. */
+  resolveCommand(): string[] | null {
+    if (this.d.agyCommand) return this.d.agyCommand;
+    if (this.command && !existsSync(this.command[0]!)) this.command = null;
+    if (this.command) return this.command;
+    const bin = detectInstalled({ explicit: process.env.AGENT_TEAMS_AGY_BIN, homes: [this.home, ...(process.env.HOME ? [process.env.HOME] : [])] });
+    this.command = bin ? [bin] : null;
+    return this.command;
+  }
+
+  private env(): Record<string, string> { return { ...(this.d.agyEnv?.() ?? {}), ...this.fixedEnv() }; }
+
+  private stampOf(command: string[] | null, env: Record<string, string>): string {
+    const bin = command?.at(-1) ?? "";
+    return [bin, bin ? fileStamp(bin) ?? "-" : "-", ...this.watchPaths().map((f) => fileStamp(f) ?? "-"), env.GEMINI_API_KEY ? "key" : "-", env.AGY_ADC_AUTH ?? "-"].join("|");
+  }
+
+  /** RuntimeDetector: installed/version/login of agy (detectInstalled, detectVersion, detectLogin with the ACP fallback). */
+  async detect(o: DetectOptions): Promise<RuntimeState> {
+    const env = this.env();
+    const command = this.resolveCommand();
+    if (!o.force && this.last && this.stampOf(command, env) === this.stamp) return this.last;
+    this.current = await probeAntigravity({ home: this.home, env, command, log: this.d.log ?? silentLogger, ...(o.timeoutMs ? { timeoutMs: o.timeoutMs } : {}) });
+    if (this.current.installed) writeAgySettings(this.home, env, this.d.log);
+    this.stamp = this.stampOf(command, env);
+    this.last = antigravityState(this.current, command);
+    return this.last;
+  }
+
+  /** Token files whose change means a login or logout (RuntimeMonitor watches them). */
+  watchPaths(): string[] { return AGY_TOKEN_FILES.map((f) => join(this.home, f)); }
+
+  fixedEnv(): Record<string, string> {
+    return { HOME: this.home, AGY_CLI_DISABLE_AUTO_UPDATE: "true" };
+  }
+
+  createDriver(ctx: DriverContext, a: SessionAssets): Driver {
+    return new AntigravityDriver(ctx, { toolhost: this.d.toolhost, command: () => this.resolveCommand(), pluginServers: acpMcpServers(a.plugins), onStatus: (s) => this.noteStatus(s) });
+  }
+
+  /**
+   * What a session start saw: a session that opened means agy is installed and logged in, -32000
+   * means logged out, a missing binary means not installed. Taken as the current state and handed
+   * to RuntimeMonitor at once (d.recheck), without spawning agy again.
+   */
+  noteStatus(s: "opened" | "not_logged_in" | "not_installed"): void {
+    const before = JSON.stringify(this.current);
+    if (s === "not_installed") {
+      this.command = null;
+      this.current = { cli: "", auth: "none", installed: false };
+    } else if (s === "not_logged_in") {
+      this.current = { ...this.current, installed: true, auth: "none" };
+    } else if (this.current.auth === "none" || this.current.installed === false) {
+      this.current = { ...this.current, installed: true, auth: detectLogin(this.home, this.env()) ?? "oauth" };
+    }
+    if (JSON.stringify(this.current) === before) return;
+    this.last = antigravityState(this.current, this.command);
+    this.d.recheck?.();
+  }
+}
+
+/**
+ * node.runtimes' view of hello.runtimes.antigravity. The protocol's auth has no Google-specific
+ * kinds: an OAuth (Google account) login is a provider account login (subscription), ADC a
+ * configured credential like an API key.
+ */
+export function antigravityState(r: AntigravityRuntime, command: string[] | null): RuntimeState {
+  if (r.installed === false) return { installed: false, auth: "unknown", error: "agy not found" };
+  const auth = r.auth === "oauth" ? "subscription" : r.auth === "api_key" || r.auth === "adc" ? "api_key" : "none";
+  const path = command?.at(-1);
+  return { installed: true, ...(r.cli ? { version: r.cli } : {}), ...(path && path.startsWith("/") ? { path } : {}), auth };
+}
+
 /** The runtimes of this daemon, by id. */
 export class RuntimeRegistry {
   private readonly byId: Map<Runtime, RuntimeAdapter>;
@@ -185,7 +294,7 @@ export class RuntimeRegistry {
   }
 
   static builtin(d: RuntimeDeps): RuntimeRegistry {
-    return new RuntimeRegistry([new ClaudeAdapter(d), new CodexAdapter(d)]);
+    return new RuntimeRegistry([new ClaudeAdapter(d), new CodexAdapter(d), new AntigravityAdapter(d)]);
   }
 
   /** The adapter of a session's runtime; an id this daemon does not know is an error the session reports. */

@@ -26,6 +26,7 @@ import { CodexHub } from "./sessions/codex/hub.js";
 import { materializeSkills } from "./sessions/skills.js";
 import { materializePlugins } from "./sessions/plugins.js";
 import { buildEnv, CODEX_PASS_ENV, gitIdentity } from "./sessions/env.js";
+import { AGY_PASS_ENV } from "./sessions/antigravity/detect.js";
 import { SessionManager } from "./sessions/manager.js";
 import type { ToolPolicy } from "./sessions/policy.js";
 import type { Session } from "./sessions/session.js";
@@ -52,6 +53,8 @@ export interface DaemonOptions {
   gitBaseUrl: string;
   claudeConfigDir: string;
   codexHome: string;
+  /** HOME of the agy processes (default <data>/agy-home): log in there once with `HOME=<agyHome> agy acp --login`. */
+  agyHome?: string;
   installDir: string;
   /** How to invoke this daemon for helper subcommands (git-credential, gh). */
   nodeCmd: string[];
@@ -60,6 +63,8 @@ export interface DaemonOptions {
   isolation?: Isolation;
   queryFn?: QueryFn;
   codexCommand?: string[];
+  /** The agy command (tests: a fake ACP agent); default: found on PATH / ~/.local/bin. */
+  agyCommand?: string[];
   link?: { pingMs?: number; deadMs?: number; backoff?: { minMs: number; maxMs: number } };
   crashDelaysMs?: number[];
   /** session.compact: how long to wait for an idle session, and for the compaction (tests). */
@@ -114,6 +119,8 @@ export class Daemon {
   private readonly platform: PlatformFiles;
   private readonly gh: GhInstaller;
   private readonly employeeHome: string;
+  /** HOME of the agy processes (Antigravity login and settings); its .gemini and .config are secret. */
+  private readonly agyHome: string;
   /** Per-employee skill plugins (sessions/skills.ts), outside every worktree. */
   private readonly skillsRoot: string;
   /** Per-employee plugin copies at exact versions (sessions/plugins.ts), outside every worktree. */
@@ -134,6 +141,8 @@ export class Daemon {
     for (const d of [o.root, o.stateDir]) mkdirSync(d, { recursive: true, mode: 0o700 });
     this.employeeHome = join(o.root, "agent-home");
     mkdirSync(this.employeeHome, { recursive: true, mode: 0o700 });
+    this.agyHome = resolve(o.agyHome ?? join(dirname(o.platformDir), "agy-home"));
+    mkdirSync(this.agyHome, { recursive: true, mode: 0o700 });
     this.skillsRoot = join(o.root, "agent-skills");
     this.pluginsRoot = join(o.root, "agent-plugins");
     this.isolation = o.isolation ?? probeIsolation();
@@ -162,6 +171,10 @@ export class Daemon {
       sandboxOk: () => this.isolation !== "none", claudeEnv: () => this.claudeEnv({}), claudeFixed: () => this.claudeFixed(),
       secretPaths: () => this.secretPaths(), hub: this.hub, toolhost: this.toolhost, ...(o.queryFn ? { queryFn: o.queryFn } : {}),
       ...(o.codexCommand ? { codexCommand: o.codexCommand } : {}),
+      agyHome: this.agyHome, ...(o.agyCommand ? { agyCommand: o.agyCommand } : {}), log: o.log,
+      agyEnv: () => buildEnv({ base: process.env, home: this.agyHome, passList: [...this.o.passEnv, ...AGY_PASS_ENV] }),
+      // A session saw a runtime's state change (agy logged out, binary gone): report it without waiting for the timer.
+      recheck: () => { if (this.monitorOn) void this.runtimeMonitor.poll("periodic"); },
     });
     this.runtimeMonitor = new RuntimeMonitor({
       detectors: () => this.runtimes.all(), log: o.log, ...o.runtimeMonitor,
@@ -383,18 +396,20 @@ export class Daemon {
 
   private policy(spec: SessionOpen, absCwd: string, readable: string[]): ToolPolicy {
     const c = spec.claude;
+    const a = spec.antigravity;
     const extra = (c?.sandbox?.extra_write_paths ?? []).map((p) => absPath(p, this.o.root, absCwd)).filter(Boolean);
     return {
       denyNonPlatform: c?.deny_non_platform_tools === true || spec.employee.tier === "coordinator",
-      readOnly: c?.read_only === true,
-      bash: c?.bash_policy ?? null,
+      readOnly: c?.read_only === true || a?.read_only === true,
+      bash: c?.bash_policy ?? a?.bash_policy ?? null,
       readRoots: [absCwd, ...extra, ...readable],
       secretPaths: this.secretPaths(),
     };
   }
 
   secretPaths(): string[] {
-    return [this.o.configDir, this.o.stateDir, this.o.runtimeDir, join(this.o.claudeConfigDir, ".credentials.json"), this.o.codexHome].map((p) => resolve(p));
+    return [this.o.configDir, this.o.stateDir, this.o.runtimeDir, join(this.o.claudeConfigDir, ".credentials.json"), this.o.codexHome,
+      join(this.agyHome, ".gemini"), join(this.agyHome, ".config")].map((p) => resolve(p));
   }
 
   private sessionEnv(spec: SessionOpen): Record<string, string> {

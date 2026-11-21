@@ -37,6 +37,136 @@ func (j *Ack) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+// Google Antigravity CLI (agy, driven over ACP). Reported even when agy is not
+// installed (installed false, auth none) so the node page can say so; the console
+// schedules antigravity sessions only on nodes that report it installed and logged
+// in.
+type AntigravityRuntime struct {
+	// oauth: a Google account login (agy acp --login); api_key: GEMINI_API_KEY with
+	// modelProvider gemini; adc: AGY_ADC_AUTH application default credentials; none:
+	// not logged in.
+	Auth *AntigravityRuntimeAuth `json:"auth,omitempty,omitzero"`
+
+	// agy --version, e.g. 1.5.14; empty when not installed.
+	CLI *string `json:"cli,omitempty,omitzero"`
+
+	// false when the agy binary was not found; absent means installed.
+	Installed *bool `json:"installed,omitempty,omitzero"`
+}
+
+type AntigravityRuntimeAuth string
+
+const AntigravityRuntimeAuthAdc AntigravityRuntimeAuth = "adc"
+const AntigravityRuntimeAuthApiKey AntigravityRuntimeAuth = "api_key"
+const AntigravityRuntimeAuthNone AntigravityRuntimeAuth = "none"
+const AntigravityRuntimeAuthOauth AntigravityRuntimeAuth = "oauth"
+
+var enumValues_AntigravityRuntimeAuth = []interface{}{
+	"oauth",
+	"api_key",
+	"adc",
+	"none",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *AntigravityRuntimeAuth) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_AntigravityRuntimeAuth {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_AntigravityRuntimeAuth, v)
+	}
+	*j = AntigravityRuntimeAuth(v)
+	return nil
+}
+
+// agy acp --process-per-session, one process per session. The ACP sessionId is
+// kept as sdk_session_id (session.opened, ResumeRef, sessions.report).
+type AntigravitySessionOptions struct {
+	// How ACP session/request_permission is answered when read_only does not already
+	// reject it. ask: forwarded to the console as approval.request; auto: the daemon
+	// allows it (bypass roles).
+	Approval AntigravitySessionOptionsApproval `json:"approval"`
+
+	// read_only: argv allow list for shell commands, as in claude.bash_policy.
+	BashPolicy *BashPolicy `json:"bash_policy,omitempty,omitzero"`
+
+	// Model slug (e.g. gemini-4-neon-high); empty leaves the choice to agy.
+	Model string `json:"model"`
+
+	// Read-only roles (reviewer…): the daemon disables agy's writing tools (deny
+	// rules for file writes and edits) and rejects every writing permission request;
+	// commands run only when bash_policy allows them.
+	ReadOnly bool `json:"read_only"`
+
+	// Appended to agy's system prompt (session/new
+	// _meta.antigravity.systemPrompt.append): platform rules, role instructions and
+	// skills inlined.
+	SystemAppend *string `json:"system_append,omitempty,omitzero"`
+}
+
+type AntigravitySessionOptionsApproval string
+
+const AntigravitySessionOptionsApprovalAsk AntigravitySessionOptionsApproval = "ask"
+const AntigravitySessionOptionsApprovalAuto AntigravitySessionOptionsApproval = "auto"
+
+var enumValues_AntigravitySessionOptionsApproval = []interface{}{
+	"ask",
+	"auto",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *AntigravitySessionOptionsApproval) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_AntigravitySessionOptionsApproval {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_AntigravitySessionOptionsApproval, v)
+	}
+	*j = AntigravitySessionOptionsApproval(v)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *AntigravitySessionOptions) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["approval"]; raw != nil && !ok {
+		return fmt.Errorf("field approval in AntigravitySessionOptions: required")
+	}
+	if _, ok := raw["model"]; raw != nil && !ok {
+		return fmt.Errorf("field model in AntigravitySessionOptions: required")
+	}
+	if _, ok := raw["read_only"]; raw != nil && !ok {
+		return fmt.Errorf("field read_only in AntigravitySessionOptions: required")
+	}
+	type Plain AntigravitySessionOptions
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = AntigravitySessionOptions(plain)
+	return nil
+}
+
 // The daemon applied approval.resolve (stale = the pending request no longer
 // existed).
 type ApprovalAck struct {
@@ -234,6 +364,7 @@ type ApprovalRequest struct {
 
 type ApprovalRequestSource string
 
+const ApprovalRequestSourceAntigravityPermission ApprovalRequestSource = "antigravity_permission"
 const ApprovalRequestSourceClaudeCanUseTool ApprovalRequestSource = "claude_can_use_tool"
 const ApprovalRequestSourceCodexCommand ApprovalRequestSource = "codex_command"
 const ApprovalRequestSourceCodexFileChange ApprovalRequestSource = "codex_file_change"
@@ -246,6 +377,7 @@ var enumValues_ApprovalRequestSource = []interface{}{
 	"codex_file_change",
 	"codex_permissions",
 	"codex_mcp_elicitation",
+	"antigravity_permission",
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -6357,6 +6489,7 @@ func (j *ReviewPermissionInput) UnmarshalJSON(value []byte) error {
 
 type Runtime string
 
+const RuntimeAntigravity Runtime = "antigravity"
 const RuntimeClaude Runtime = "claude"
 const RuntimeCodex Runtime = "codex"
 
@@ -6590,6 +6723,7 @@ func (j *RuntimeUsage) UnmarshalJSON(value []byte) error {
 var enumValues_Runtime = []interface{}{
 	"claude",
 	"codex",
+	"antigravity",
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -6613,6 +6747,9 @@ func (j *Runtime) UnmarshalJSON(value []byte) error {
 }
 
 type Runtimes struct {
+	// Antigravity corresponds to the JSON schema field "antigravity".
+	Antigravity *AntigravityRuntime `json:"antigravity,omitempty,omitzero"`
+
 	// Claude corresponds to the JSON schema field "claude".
 	Claude *ClaudeRuntime `json:"claude,omitempty,omitzero"`
 
@@ -7349,6 +7486,9 @@ type SessionOpen struct {
 	// first_message anchor (a crash reopen, a reopen after a daemon restart): the new
 	// process starts with it, as if session.send had carried it.
 	Anchor *string `json:"anchor,omitempty,omitzero"`
+
+	// Set when runtime = antigravity.
+	Antigravity *AntigravitySessionOptions `json:"antigravity,omitempty,omitzero"`
 
 	// Set when runtime = claude.
 	Claude *ClaudeSessionOptions `json:"claude,omitempty,omitzero"`
@@ -8752,12 +8892,14 @@ type TeamMember struct {
 
 type TeamMemberType string
 
+const TeamMemberTypeAntigravity TeamMemberType = "antigravity"
 const TeamMemberTypeClaudeCode TeamMemberType = "claude_code"
 const TeamMemberTypeCodex TeamMemberType = "codex"
 
 var enumValues_TeamMemberType = []interface{}{
 	"claude_code",
 	"codex",
+	"antigravity",
 }
 
 // UnmarshalJSON implements json.Unmarshaler.

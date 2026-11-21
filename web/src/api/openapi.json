@@ -5199,7 +5199,8 @@
             "description": "The role's first runtime (runtimes[0])",
             "enum": [
               "claude",
-              "codex"
+              "codex",
+              "antigravity"
             ],
             "type": "string"
           },
@@ -5208,7 +5209,8 @@
             "items": {
               "enum": [
                 "claude",
-                "codex"
+                "codex",
+                "antigravity"
               ],
               "type": "string"
             },

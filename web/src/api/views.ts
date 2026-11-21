@@ -6,6 +6,7 @@
 // api.md until the orchestration routes land in openapi.json; when they do,
 // replace each hand-written type with the generated one in this file only.
 import type { ForwardedFrom } from "@/lib/forward";
+import type { Runtime } from "@/lib/runtimes";
 import type { components } from "./schema";
 
 type S = components["schemas"];
@@ -96,7 +97,7 @@ export interface EmployeeBrief {
   tier: "coordinator" | "lead" | "member";
   role: string;
   title: string;
-  runtime: "claude" | "codex";
+  runtime: Runtime;
   node: { id: string; name: string; online: boolean } | null;
   look: Look;
   status: EmployeeStatusView | null;

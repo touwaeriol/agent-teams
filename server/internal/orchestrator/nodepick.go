@@ -122,7 +122,9 @@ func (o *Orchestrator) nodeStates(ctx context.Context, tx *core.Tx, cands []stor
 		if o.gw.Online(n.ID) && err == nil {
 			ru := runtimeUsage(o.gw.Usage(n.ID), runtime)
 			st.online = true
-			st.usable = loggedIn(ru)
+			// Old daemons (no runtime_status): login from usage, plus the hello's runtimes entry for
+			// runtimes without a usage API (Antigravity).
+			st.usable = loggedIn(ru) && o.gw.RuntimeReady(n.ID, runtime)
 			if o.gw.SupportsRuntimeStatus(n.ID) {
 				// A daemon with runtime_status decides by its report only; until the first one of
 				// this connection arrives (right after welcome) the runtime counts as not ready,
@@ -254,6 +256,9 @@ func runtimeUsage(u *platform.NodeUsage, runtime string) *platform.RuntimeUsage 
 var usageOf = map[string]func(*platform.NodeUsage) *platform.RuntimeUsage{
 	runtimes.Claude: func(u *platform.NodeUsage) *platform.RuntimeUsage { return u.Claude },
 	runtimes.Codex:  func(u *platform.NodeUsage) *platform.RuntimeUsage { return u.Codex },
+	// Antigravity has no usage API: its login comes from hello (Gateway.RuntimeReady) and its
+	// quota is unknown (unknownUsage).
+	runtimes.Antigravity: func(*platform.NodeUsage) *platform.RuntimeUsage { return nil },
 }
 
 // loggedIn: a node whose daemon reported the runtime as not logged in cannot run it; without a

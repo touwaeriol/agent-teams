@@ -84,7 +84,8 @@
   "capacity": {"max_active_sessions": 4, "cpus": 16, "mem_mb": 64000},
   "runtimes": {
     "claude": {"sdk": "0.3.325", "cli": "2.1.325", "auth": "subscription|api_key|none"},
-    "codex":  {"cli": "0.169.0", "auth": "api_key|chatgpt|none", "sandbox_ok": true}
+    "codex":  {"cli": "0.169.0", "auth": "api_key|chatgpt|none", "sandbox_ok": true},
+    "antigravity": {"cli": "1.5.14", "auth": "oauth|api_key|adc|none", "installed": true}
   },
   "features": ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "upgrade", "context_usage", "session_compact"],
   "isolated": false,
@@ -98,7 +99,9 @@
 
 `features` 含 `ssh_gateway` 表示守护进程能接远程服务器（§8.1）：认得 `session.open` 的 `ssh_servers`，会发 `ssh.cert_request`，能处理 `ssh.servers_update`。这样的守护进程还可以带 `"ssh_client": {"version": "OpenSSH_9.6p1"}`（`ssh -V` 的结果，找不到 ssh 就不带）。
 
-`hello.runtimes` 里的 `auth` 是守护进程最近一次检测的结果（启动时探测，之后的变化走 §9.2 的 `node.runtimes`，重连时的 hello 也带最新结果）（Claude：起一次 SDK `query()` 读 `initializationResult().account` 后关闭；Codex：不起进程，看 `OPENAI_API_KEY` 和 `$CODEX_HOME/auth.json` 的结构，见 §9.2），不上报邮箱等个人信息。
+`hello.runtimes` 里的 `auth` 是守护进程最近一次检测的结果（启动时探测，之后的变化走 §9.2 的 `node.runtimes`，重连时的 hello 也带最新结果）（Claude：起一次 SDK `query()` 读 `initializationResult().account` 后关闭；Codex：不起进程，看 `OPENAI_API_KEY` 和 `$CODEX_HOME/auth.json` 的结构，见 §9.2；Antigravity：先看环境变量（`GEMINI_API_KEY` + `modelProvider:"gemini"` 为 `api_key`，`AGY_ADC_AUTH` 为 `adc`），再看 token 文件，必要时 `agy acp` 握手——`session/new` 返回 -32000 为 `none`；绝不用 `agy -p` 探测，未登录时它会挂 60 秒等 OAuth），不上报邮箱等个人信息。
+
+`runtimes.antigravity`（Google Antigravity CLI `agy`，经 ACP 驱动）没装 agy 时也上报（`installed` 为 false，`auth` 为 none，`cli` 为空），节点页据此显示“Antigravity x.y.z 已登录 / 未登录 / 未安装”；`installed` 不带表示已安装。Antigravity 没有用量接口，不进 `node.usage`；带 `runtime_status` 的守护进程同时在 `node.runtimes` 里报 antigravity（`auth` 映射：`oauth` → `subscription`，`api_key`/`adc` → `api_key`），控制台按它调度；没有这个特性的旧守护进程才按 hello：只把 antigravity 会话派给 hello 里报了 antigravity、已安装且 `auth` 不是 `none` 的节点。
 
 ### `welcome`（控制台 → 守护进程，不可靠）
 
@@ -140,11 +143,11 @@
   "session_id": "s_01JD…",
   "open_gen": 3,                                  // 第几次打开（每次 resume 加 1）
   "employee": {"name": "dev-2", "role": "dev", "tier": "member", "project_id": "…", "thread_no": 12, "scope": "project"},
-  "runtime": "claude",                             // claude | codex
+  "runtime": "claude",                             // claude | codex | antigravity
   "cwd": "projects/7a1c…/threads/12/dev-2",       // 相对 root
   "prepare": "g_01JD…",                            // 可选：依赖的 git.prepare 命令键，守护进程先确保它已成功
   "prepare_jobs": ["g_01JD…", "g_01JE…"],           // 可选：每个仓库一个 git.prepare，全部成功才开会话（prepare = 第一个，给旧守护进程）
-  "resume": {"sdk_session_id": "8d2f…"},           // 或 {"codex_thread_id": "…"}；首次打开为 null
+  "resume": {"sdk_session_id": "8d2f…"},           // 或 {"codex_thread_id": "…"}；antigravity 的 ACP sessionId 也放 sdk_session_id；首次打开为 null
   "claude": {                                      // runtime=claude 时
     "model": "claude-opus-5-5", "effort": null,
     "system_append": "…",
@@ -166,6 +169,11 @@
   "codex": null,                                   // runtime=codex 时：{"model","sandbox","approval_policy","developer_instructions","config":{…}}（model 可为 ""：节点不传给 thread/start，用 Codex 自己的默认，init.model 报实际解析出的模型）；
                                                    // 成员 config 含 sandbox_workspace_write.writable_roots=[<shared>/.git]、network_access=true；
                                                    // mcp_servers.platform 由守护进程每次 start/resume 自己填（URL 路径秘密，architecture.md §6.3）
+  "antigravity": null,                             // runtime=antigravity 时：{"model","read_only","approval","system_append","bash_policy"}；
+                                                   // 每个会话一个 `agy acp --process-per-session`，平台工具以 http MCP 挂进 session/new；ACP sessionId 作 sdk_session_id 上报（session.opened）
+                                                   // model 可为 ""（交给 agy 自己选）；approval：ask = session/request_permission 转成 approval.request，auto = 守护进程就地放行（bypass 岗位）；
+                                                   // read_only = true（只读岗位，如审查员）：守护进程禁用写类工具（文件写入/编辑的 deny 规则）、拒绝一切写类权限请求，命令只放行 bash_policy 允许的；
+                                                   // system_append 追加到 agy 的系统提示（session/new 的 _meta.antigravity.systemPrompt.append），技能内联在里面。Antigravity 不能当统筹或组长。
   "platform_tools": [ {"name": "complete_task", "description": "…", "input_schema": {…}, "blocking": false}, … ],
   "env": {"LANG": "C.UTF-8"},                      // 额外的非秘密环境；守护进程自己加 PATH/HOME/MCP_TOOL_TIMEOUT/git 凭证变量
   "git_credentials": true,                         // 是否装 credential helper 与 gh 包装
@@ -278,7 +286,7 @@
 {
   "approval_id": "ap_<sha256(session_id + ':' + tool_use_id)[:24]>",
   "session_id": "s_…",
-  "source": "claude_can_use_tool|codex_command|codex_file_change|codex_permissions|codex_mcp_elicitation",
+  "source": "claude_can_use_tool|codex_command|codex_file_change|codex_permissions|codex_mcp_elicitation|antigravity_permission",
   "tool_name": "Bash",
   "input": {"command": "pnpm add -D @tanstack/react-virtual"},
   "title": "…", "description": "…", "decision_reason": "…", "blocked_path": null,   // SDK 提供的现成文案
@@ -297,11 +305,13 @@
 
 守护进程映射：
 
-| decision | Claude `PermissionResult` | Codex 回应 |
-| --- | --- | --- |
-| allow | `{behavior:'allow', updatedInput: updated_input ?? input}` | `accept`（elicitation：`{action:'accept'}`） |
-| allow_always | 上式 + `updatedPermissions: suggestions`（守护进程把每条 `destination` 改写为 `session`） | `acceptForSession` |
-| deny | `{behavior:'deny', message}` | `decline`（elicitation：`{action:'decline'}`） |
+| decision | Claude `PermissionResult` | Codex 回应 | Antigravity（ACP `session/request_permission` 的回应） |
+| --- | --- | --- | --- |
+| allow | `{behavior:'allow', updatedInput: updated_input ?? input}` | `accept`（elicitation：`{action:'accept'}`） | 选 `allow_once` 的 option |
+| allow_always | 上式 + `updatedPermissions: suggestions`（守护进程把每条 `destination` 改写为 `session`） | `acceptForSession` | 也选 `allow_once`：agy 自己的“始终允许”作用范围未实测，而节点上所有 agy 会话共用一个 HOME，可能波及其他（只读）会话；卡片的 `available` 也只给 `allow`/`deny` |
+| deny | `{behavior:'deny', message}` | `decline`（elicitation：`{action:'decline'}`） | 选 `reject_once` 的 option（没有就 `{outcome:'cancelled'}`） |
+
+Antigravity（`source: "antigravity_permission"`）：`tool_name` 是按 ACP 工具 `kind` 换成的名字（`edit`→`Edit`、`execute`→`Bash` 等，见 node/src/sessions/antigravity/permissions.ts），`input` 是 agy 给的 `rawInput`（取不到时带 `title`）。只读会话（`antigravity.read_only`）的写类请求（edit/delete/move/其他未知类、bash_policy 不允许的命令）守护进程直接拒绝，不发卡片；`approval: "auto"` 的会话就地放行；平台 MCP 工具（kind 为空、`other` 或 `think`，且标题整体是 `platform/<本会话的平台工具名>` 这类格式）总是放行；execute/edit/read 等类的调用不论标题是什么都不算平台工具。只读会话的 read/search 取不到路径时拒绝。
 
 守护进程处理后回 `approval.ack {approval_id}`（可靠）。若对应的 Promise / JSON-RPC 请求已不存在（已取消），回 `approval.ack {approval_id, stale: true}`。
 
