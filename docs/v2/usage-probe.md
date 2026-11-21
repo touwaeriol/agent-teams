@@ -103,7 +103,7 @@ app-server 协议有版本化的生成类型（`npm run gen:codex` → `node/src
 
 - Claude：沿用 `probeClaude`（启动时 `initializationResult().account.subscriptionType` 有值就是 `subscription`；否则环境变量里有 `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` 就是 `api_key`，都没有就是 `none`）。采集时如果 CLI 返回 `rate_limits_available:false`，说明登录方式已经变了，报 `rate_limits_unavailable`。
 - Codex：沿用 `probeCodex`（`OPENAI_API_KEY` → `api_key`，有 `auth.json` → `chatgpt`，否则 `none`），每次采集前再用 `account/read` 确认（见 2.2）。
-- 登录方式只在守护进程启动时探测，节点上重新登录后要重启守护进程才会更新（和 hello 里的 `runtimes.*.auth` 一样）。
+- 登录方式由 `RuntimeMonitor` 持续检测（protocol.md §9.2）：节点上重新登录、退出或改了 API Key 后，最多一分钟（监听到凭证文件变化时约 2 秒）就会更新 `auth`，不用重启守护进程；`auth` 变化时守护进程会立即再采集并上报一次 `node.usage`。
 
 ## 4. 采集时机和缓存
 
