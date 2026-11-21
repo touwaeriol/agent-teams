@@ -14,7 +14,7 @@ import (
 // will open with (later messages are appended to it), Resume the conversation it resumes, More
 // the msg ids merged into First after the first one, Reason what the user is told.
 type SessionHold struct {
-	EmployeeID string
+	EmployeeID string `gorm:"primaryKey"`
 	ProjectID  string
 	Reason     string
 	First      protocol.FirstMessage `gorm:"serializer:jsonb"`

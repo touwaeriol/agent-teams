@@ -10,8 +10,8 @@ import (
 // NodeRuntime is one at_node_runtimes row: the install and login state of a runtime CLI on a
 // node as the daemon last reported it (node.runtimes, protocol.md §9.2). Never holds credentials.
 type NodeRuntime struct {
-	NodeID        string     `json:"-"`
-	Runtime       string     `json:"runtime" doc:"Runtime id (claude, codex, …)"`
+	NodeID        string     `json:"-" gorm:"primaryKey"`
+	Runtime       string     `json:"runtime" gorm:"primaryKey" doc:"Runtime id (claude, codex, …)"`
 	Installed     bool       `json:"installed" doc:"The CLI was found and runs"`
 	Version       string     `json:"version,omitempty"`
 	Path          string     `json:"path,omitempty" doc:"Executable the daemon found"`
