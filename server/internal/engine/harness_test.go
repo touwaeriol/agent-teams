@@ -47,6 +47,8 @@ type world struct {
 	e   *engine.Engine
 	db  *store.Store
 	h   *httpapi.Server
+	// dist is NODE_DIST_DIR (daemon release tarballs).
+	dist string
 }
 
 func newWorld(t *testing.T, gh *httptest.Server) *world {
@@ -119,8 +121,9 @@ func newWorldWith(t *testing.T, gh *httptest.Server, tune func(*engine.Engine)) 
 	if tune != nil {
 		tune(e)
 	}
+	dist := t.TempDir()
 	cfg := config.Config{PublicURL: "http://console.test", SecretKeys: []string{secret}, WebDir: t.TempDir(),
-		NodeDistDir: t.TempDir(), OfficeDir: t.TempDir()}
+		NodeDistDir: dist, OfficeDir: t.TempDir()}
 	h := httpapi.New(httpapi.Deps{Config: cfg, Store: db, KV: cache, GitHub: client, Tokens: tokens, Office: reg, Log: log,
 		Nodes: e.Gateway, Events: e.Events, Hooks: e.Hooks(), SSH: e.SSHHooks(), Extensions: []func(api huma.API, r gin.IRoutes){orchapi.New(e, reg).Register}})
 	srv := httptest.NewServer(h.Handler())
@@ -131,7 +134,7 @@ func newWorldWith(t *testing.T, gh *httptest.Server, tune func(*engine.Engine)) 
 		srv.Close()
 	})
 	e.Start(ctx)
-	return &world{t: t, ctx: ctx, srv: srv, e: e, db: db, h: h}
+	return &world{t: t, ctx: ctx, srv: srv, e: e, db: db, h: h, dist: dist}
 }
 
 // testVault opens remote server credentials and the SSH gateway keys with the harness secret.

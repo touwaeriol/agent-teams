@@ -663,6 +663,9 @@ export interface GitStatus {
  */
 export interface DaemonInfo {
   version: string;
+  /**
+   * First 8 hex of sha256(node.mjs); the release id is <version>+<build>.
+   */
   build?: string;
   node?: string;
   os?: string;
@@ -737,7 +740,7 @@ export interface Hello {
   capacity?: Capacity;
   runtimes?: Runtimes;
   /**
-   * Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh).
+   * Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh), self_update (runs under the update launcher: node.upgrade with mode, drain, rollback).
    */
   features?: string[];
   /**
@@ -804,29 +807,53 @@ export interface NodeStats {
   disk_free_mb: number;
 }
 /**
- * Upgrade the daemon. The download URL is fixed: <console>/node/dist/agent-teams-node-<version>.tgz; sha256 and the Ed25519 release signature are verified.
+ * Update the daemon (architecture.md §14.3). The download URL is fixed: <console>/node/dist/agent-teams-node-<version>.tgz. The daemon checks sha256 (and the Ed25519 release signature when it has release.pub), installs the release next to the running one, drains its sessions, switches the current symlink and exits 75 for its launcher; progress comes back as node.upgrade_result.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "NodeUpgrade".
  */
 export interface NodeUpgrade {
+  /**
+   * Release id: <package version>+<build>, build = first 8 hex of sha256(node.mjs).
+   */
   version: string;
   sha256: string;
   /**
-   * Base64 Ed25519 signature of the tgz.
+   * Base64 Ed25519 signature of the tgz; required only by daemons that have release.pub.
    */
-  signature: string;
+  signature?: string;
+  /**
+   * wait_idle (default): switch once no turn is running; now: interrupt running turns; cancel: stop an update that has not switched yet.
+   */
+  mode?: "wait_idle" | "now" | "cancel";
+  /**
+   * wait_idle: report drain_timeout after this many seconds (keeps waiting). Default 1800.
+   */
+  deadline_s?: number;
+  /**
+   * Lowest Node.js major version the release runs on.
+   */
+  min_node?: number;
 }
 /**
- * Upgrade failure report (success shows up as a reconnect with the new version).
+ * Update progress and outcome (one per phase change; a rolled-back update is reported by the old version after its restart).
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "NodeUpgradeResult".
  */
 export interface NodeUpgradeResult {
   ok: boolean;
+  /**
+   * The release the update is about.
+   */
   version?: string;
   error?: string;
+  phase?:
+    "staging" | "draining" | "drain_timeout" | "restarting" | "done" | "failed" | "rolled_back" | "cancelled";
+  /**
+   * draining / drain_timeout: turns still running.
+   */
+  active_turns?: number;
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema

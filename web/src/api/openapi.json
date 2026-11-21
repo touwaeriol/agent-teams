@@ -3420,6 +3420,61 @@
         ],
         "type": "object"
       },
+      "NodeUpgradeState": {
+        "additionalProperties": false,
+        "properties": {
+          "active_turns": {
+            "description": "Turns still running while draining",
+            "format": "int64",
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "wait_idle",
+              "now"
+            ],
+            "type": "string"
+          },
+          "phase": {
+            "enum": [
+              "requested",
+              "staging",
+              "draining",
+              "drain_timeout",
+              "restarting",
+              "done",
+              "failed",
+              "rolled_back",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "target": {
+            "description": "Release id being installed, \u003cversion\u003e+\u003cbuild\u003e",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "phase",
+          "mode",
+          "active_turns",
+          "started_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "NodeUsage": {
         "additionalProperties": false,
         "properties": {
@@ -3477,6 +3532,10 @@
               "null"
             ]
           },
+          "latest_version": {
+            "description": "Release id the console serves (\u003cversion\u003e+\u003cbuild\u003e); empty when none",
+            "type": "string"
+          },
           "max_active_sessions": {
             "format": "int64",
             "type": [
@@ -3513,12 +3572,23 @@
             "additionalProperties": {},
             "type": "object"
           },
+          "self_update": {
+            "description": "hello.features has self_update (the last hello while offline)",
+            "type": "boolean"
+          },
           "since": {
             "format": "date-time",
             "type": [
               "string",
               "null"
             ]
+          },
+          "update_available": {
+            "type": "boolean"
+          },
+          "upgrade": {
+            "$ref": "#/components/schemas/NodeUpgradeState",
+            "description": "Last update asked of the node since the console started"
           },
           "usage": {
             "$ref": "#/components/schemas/NodeUsage",
@@ -3552,7 +3622,10 @@
           "labels",
           "max_active_sessions",
           "park_after_s",
-          "created_at"
+          "created_at",
+          "latest_version",
+          "update_available",
+          "self_update"
         ],
         "type": "object"
       },
@@ -7014,6 +7087,28 @@
           },
           "username": {
             "maxLength": 64,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UpgradeInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "deadline_s": {
+            "description": "wait_idle: report drain_timeout after this many seconds (default 1800)",
+            "format": "int64",
+            "maximum": 86400,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mode": {
+            "description": "wait_idle (default): switch once no turn runs; now: interrupt running turns; cancel: stop an update that has not switched",
+            "enum": [
+              "wait_idle",
+              "now",
+              "cancel"
+            ],
             "type": "string"
           }
         },
@@ -11020,6 +11115,15 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpgradeInputBody"
+              }
+            }
+          }
+        },
         "responses": {
           "202": {
             "description": "Accepted"

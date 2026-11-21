@@ -1682,7 +1682,7 @@ type DaemonInfo struct {
 	// Arch corresponds to the JSON schema field "arch".
 	Arch *string `json:"arch,omitempty,omitzero"`
 
-	// Build corresponds to the JSON schema field "build".
+	// First 8 hex of sha256(node.mjs); the release id is <version>+<build>.
 	Build *string `json:"build,omitempty,omitzero"`
 
 	// Node corresponds to the JSON schema field "node".
@@ -3396,7 +3396,8 @@ type Hello struct {
 	// shared_files (write_shared_file upload and read_shared_file shared_download
 	// into .shared/), context_usage (turn_ended carries context), session_compact
 	// (session.compact), usage (node.usage), ssh_gateway (session.open ssh_servers,
-	// ssh.cert_request, ssh.servers_update, /nodes/ssh).
+	// ssh.cert_request, ssh.servers_update, /nodes/ssh), self_update (runs under the
+	// update launcher: node.upgrade with mode, drain, rollback).
 	Features []string `json:"features,omitempty,omitzero"`
 
 	// Host corresponds to the JSON schema field "host".
@@ -4461,30 +4462,126 @@ func (j *NodeStats) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// Upgrade the daemon. The download URL is fixed:
-// <console>/node/dist/agent-teams-node-<version>.tgz; sha256 and the Ed25519
-// release signature are verified.
+// Update the daemon (architecture.md §14.3). The download URL is fixed:
+// <console>/node/dist/agent-teams-node-<version>.tgz. The daemon checks sha256
+// (and the Ed25519 release signature when it has release.pub), installs the
+// release next to the running one, drains its sessions, switches the current
+// symlink and exits 75 for its launcher; progress comes back as
+// node.upgrade_result.
 type NodeUpgrade struct {
+	// wait_idle: report drain_timeout after this many seconds (keeps waiting).
+	// Default 1800.
+	DeadlineS *int `json:"deadline_s,omitempty,omitzero"`
+
+	// Lowest Node.js major version the release runs on.
+	MinNode *int `json:"min_node,omitempty,omitzero"`
+
+	// wait_idle (default): switch once no turn is running; now: interrupt running
+	// turns; cancel: stop an update that has not switched yet.
+	Mode *NodeUpgradeMode `json:"mode,omitempty,omitzero"`
+
 	// SHA256 corresponds to the JSON schema field "sha256".
 	SHA256 string `json:"sha256"`
 
-	// Base64 Ed25519 signature of the tgz.
-	Signature string `json:"signature"`
+	// Base64 Ed25519 signature of the tgz; required only by daemons that have
+	// release.pub.
+	Signature *string `json:"signature,omitempty,omitzero"`
 
-	// Version corresponds to the JSON schema field "version".
+	// Release id: <package version>+<build>, build = first 8 hex of sha256(node.mjs).
 	Version string `json:"version"`
 }
 
-// Upgrade failure report (success shows up as a reconnect with the new version).
+type NodeUpgradeMode string
+
+const NodeUpgradeModeCancel NodeUpgradeMode = "cancel"
+const NodeUpgradeModeNow NodeUpgradeMode = "now"
+const NodeUpgradeModeWaitIdle NodeUpgradeMode = "wait_idle"
+
+var enumValues_NodeUpgradeMode = []interface{}{
+	"wait_idle",
+	"now",
+	"cancel",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *NodeUpgradeMode) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_NodeUpgradeMode {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_NodeUpgradeMode, v)
+	}
+	*j = NodeUpgradeMode(v)
+	return nil
+}
+
+// Update progress and outcome (one per phase change; a rolled-back update is
+// reported by the old version after its restart).
 type NodeUpgradeResult struct {
+	// draining / drain_timeout: turns still running.
+	ActiveTurns *int `json:"active_turns,omitempty,omitzero"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
 
 	// Ok corresponds to the JSON schema field "ok".
 	Ok bool `json:"ok"`
 
-	// Version corresponds to the JSON schema field "version".
+	// Phase corresponds to the JSON schema field "phase".
+	Phase *NodeUpgradeResultPhase `json:"phase,omitempty,omitzero"`
+
+	// The release the update is about.
 	Version *string `json:"version,omitempty,omitzero"`
+}
+
+type NodeUpgradeResultPhase string
+
+const NodeUpgradeResultPhaseCancelled NodeUpgradeResultPhase = "cancelled"
+const NodeUpgradeResultPhaseDone NodeUpgradeResultPhase = "done"
+const NodeUpgradeResultPhaseDrainTimeout NodeUpgradeResultPhase = "drain_timeout"
+const NodeUpgradeResultPhaseDraining NodeUpgradeResultPhase = "draining"
+const NodeUpgradeResultPhaseFailed NodeUpgradeResultPhase = "failed"
+const NodeUpgradeResultPhaseRestarting NodeUpgradeResultPhase = "restarting"
+const NodeUpgradeResultPhaseRolledBack NodeUpgradeResultPhase = "rolled_back"
+const NodeUpgradeResultPhaseStaging NodeUpgradeResultPhase = "staging"
+
+var enumValues_NodeUpgradeResultPhase = []interface{}{
+	"staging",
+	"draining",
+	"drain_timeout",
+	"restarting",
+	"done",
+	"failed",
+	"rolled_back",
+	"cancelled",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *NodeUpgradeResultPhase) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_NodeUpgradeResultPhase {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_NodeUpgradeResultPhase, v)
+	}
+	*j = NodeUpgradeResultPhase(v)
+	return nil
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -4501,6 +4598,9 @@ func (j *NodeUpgradeResult) UnmarshalJSON(value []byte) error {
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
 	}
+	if plain.ActiveTurns != nil && 0 > *plain.ActiveTurns {
+		return fmt.Errorf("field %s: must be >= %v", "active_turns", 0)
+	}
 	*j = NodeUpgradeResult(plain)
 	return nil
 }
@@ -4514,9 +4614,6 @@ func (j *NodeUpgrade) UnmarshalJSON(value []byte) error {
 	if _, ok := raw["sha256"]; raw != nil && !ok {
 		return fmt.Errorf("field sha256 in NodeUpgrade: required")
 	}
-	if _, ok := raw["signature"]; raw != nil && !ok {
-		return fmt.Errorf("field signature in NodeUpgrade: required")
-	}
 	if _, ok := raw["version"]; raw != nil && !ok {
 		return fmt.Errorf("field version in NodeUpgrade: required")
 	}
@@ -4525,14 +4622,17 @@ func (j *NodeUpgrade) UnmarshalJSON(value []byte) error {
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
 	}
+	if plain.DeadlineS != nil && 1 > *plain.DeadlineS {
+		return fmt.Errorf("field %s: must be >= %v", "deadline_s", 1)
+	}
+	if plain.MinNode != nil && 1 > *plain.MinNode {
+		return fmt.Errorf("field %s: must be >= %v", "min_node", 1)
+	}
 	if matched, _ := regexp.MatchString(`^[0-9a-f]{64}$`, string(plain.SHA256)); !matched {
 		return fmt.Errorf("field %s pattern match: must match %s", "SHA256", `^[0-9a-f]{64}$`)
 	}
-	if utf8.RuneCountInString(string(plain.Signature)) < 1 {
-		return fmt.Errorf("field %s length: must be >= %d", "signature", 1)
-	}
-	if matched, _ := regexp.MatchString(`^\d+\.\d+\.\d+$`, string(plain.Version)); !matched {
-		return fmt.Errorf("field %s pattern match: must match %s", "Version", `^\d+\.\d+\.\d+$`)
+	if matched, _ := regexp.MatchString(`^\d+\.\d+\.\d+(\+[0-9a-f]{8,16})?$`, string(plain.Version)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "Version", `^\d+\.\d+\.\d+(\+[0-9a-f]{8,16})?$`)
 	}
 	*j = NodeUpgrade(plain)
 	return nil

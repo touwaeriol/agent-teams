@@ -7,7 +7,7 @@ import { addRepo, matchesRepo, moveRepo, normalizeRepo, removeRepo, repoOptions,
 import { draftValid, emptyDraft, scheduleBody } from "@/components/app/schedules/schedule";
 import { parseSetting } from "@/pages/admin/admin";
 import { connectionKind, usedText } from "@/pages/settings/github/github";
-import { createRefreshCooldown, hoverIntent, needsUsageRefresh, nodeMeta, nodeStats, resetText, runtimeLine, settingsPatch, slotPct, usageLevel, usageView, windowLabel, withNodeUsage } from "@/pages/settings/nodes/nodes";
+import { createRefreshCooldown, hoverIntent, needsUsageRefresh, nodeMeta, nodeStats, resetText, runtimeLine, settingsPatch, slotPct, updateView, usageLevel, usageView, windowLabel, withNodeUsage } from "@/pages/settings/nodes/nodes";
 import { isDirty, nodePickerText, ordered, patchAt, removeAt, toggleId, versionText } from "@/pages/settings/team/team";
 import { employeeRows, fromChoice, inlineCommit, leadTimeoutLabel, memoryFileName, memoryWriter, repoRefs, splitMemory, threadRows, toChoice } from "@/pages/projectSettings/logic";
 import { newRole } from "@/lib/roles";
@@ -286,5 +286,36 @@ describe("project settings", () => {
     const u = { by_thread: [{ thread_no: null, title: "", cost_usd: 1, tokens: t }, { thread_no: 12, title: "置顶", cost_usd: 2, tokens: t }], by_employee: [{ thread_no: 12, employee: "dev-1", cost_usd: 1, tokens: t }, { thread_no: null, employee: "leader", cost_usd: 1, tokens: t }] } as never;
     expect(threadRows(u).map((r) => [r.key, r.name])).toEqual([["c", "项目统筹"], ["12", "#12 置顶"]]);
     expect(employeeRows(u).map((r) => [r.key, r.name])).toEqual([["12-dev-1", "dev-1 · #12"], ["c-leader", "leader"]]);
+  });
+});
+
+describe("node updates", () => {
+  const base = { online: true, version: "2.0.0+aaaaaaaa", latest_version: "2.0.0+bbbbbbbb", update_available: true, self_update: true };
+  const up = (phase: string, extra: Record<string, unknown> = {}) =>
+    ({ target: "2.0.0+bbbbbbbb", phase, mode: "wait_idle", active_turns: 0, started_at: "", updated_at: "", ...extra }) as never;
+
+  it("offers the update only to nodes that can update themselves", () => {
+    expect(updateView(base)).toMatchObject({ offer: true, busy: false, line: "" });
+    expect(updateView({ ...base, self_update: false })).toMatchObject({ offer: false, tone: "warn" });
+    expect(updateView({ ...base, self_update: false }).line).toContain("重新运行一次安装命令");
+    expect(updateView({ ...base, update_available: false })).toMatchObject({ offer: false, line: "" });
+  });
+
+  it("shows the progress with 立即 / 取消 while it drains", () => {
+    expect(updateView({ ...base, upgrade: up("staging") })).toMatchObject({ busy: true, offer: false, canNow: false, canCancel: true });
+    const draining = updateView({ ...base, upgrade: up("draining", { active_turns: 2 }) });
+    expect(draining).toMatchObject({ busy: true, canNow: true, canCancel: true });
+    expect(draining.line).toContain("等 2 个");
+    expect(updateView({ ...base, upgrade: up("draining", { active_turns: 2, mode: "now" }) }).canNow).toBe(false);
+    expect(updateView({ ...base, upgrade: up("drain_timeout", { active_turns: 1 }) }).tone).toBe("warn");
+    expect(updateView({ ...base, upgrade: up("restarting") })).toMatchObject({ busy: true, canNow: false, canCancel: false });
+  });
+
+  it("reports the outcome", () => {
+    expect(updateView({ ...base, version: "2.0.0+bbbbbbbb", update_available: false, upgrade: up("done") })).toMatchObject({ line: "已更新到 2.0.0+bbbbbbbb", tone: "ok" });
+    const back = updateView({ ...base, upgrade: up("rolled_back", { error: "boom" }) });
+    expect(back).toMatchObject({ offer: true, tone: "error" });
+    expect(back.line).toContain("已自动回到原版本：boom");
+    expect(updateView({ ...base, upgrade: up("failed", { error: "sha256 mismatch" }) }).line).toBe("更新失败：sha256 mismatch");
   });
 });

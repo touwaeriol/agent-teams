@@ -23,6 +23,7 @@ export interface LinkOptions {
 
 export interface LinkEvents {
   welcome: [Welcome];
+  closed: [];
   frame: [Frame];
   stopped: [string];
 }
@@ -174,6 +175,7 @@ export class Link extends EventEmitter<LinkEvents> {
     this.ready = false;
     this.ws = null;
     this.clearTimers();
+    this.emit("closed");
     if (this.stopped) return;
     this.opts.log.info({ code, reason }, "link closed");
     this.handleCloseCode(code);

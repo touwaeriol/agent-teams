@@ -44,6 +44,13 @@ type NodeView struct {
 	MaxActiveSessions *int                `json:"max_active_sessions"`
 	ParkAfterS        *int                `json:"park_after_s"`
 	CreatedAt         time.Time           `json:"created_at"`
+	// LatestVersion is the daemon release the console serves; "" when it has none.
+	LatestVersion string `json:"latest_version" doc:"Release id the console serves (<version>+<build>); empty when none"`
+	// UpdateAvailable: online, on another release than LatestVersion.
+	UpdateAvailable bool `json:"update_available"`
+	// SelfUpdate: the daemon runs under the update launcher, so POST .../upgrade works.
+	SelfUpdate bool                       `json:"self_update" doc:"hello.features has self_update (the last hello while offline)"`
+	Upgrade    *platform.NodeUpgradeState `json:"upgrade,omitempty" doc:"Last update asked of the node since the console started"`
 }
 
 // lastHello is the part of the stored hello used while a node is offline.
@@ -55,7 +62,7 @@ type lastHello struct {
 	Features []string       `json:"features"`
 }
 
-func (s *Server) nodeView(n store.Node) NodeView {
+func (s *Server) nodeView(n store.Node, latest string) NodeView {
 	live := s.nodes.Status(n.ID)
 	var hello lastHello
 	_ = json.Unmarshal(n.LastHello, &hello)
@@ -70,6 +77,9 @@ func (s *Server) nodeView(n store.Node) NodeView {
 		features = live.Features
 	}
 	v.UsageSupported = slices.Contains(features, "usage")
+	v.SelfUpdate = slices.Contains(features, "self_update")
+	v.LatestVersion, v.Upgrade = latest, live.Upgrade
+	v.UpdateAvailable = live.Online && latest != "" && v.Version != latest
 	if v.Labels == nil {
 		v.Labels = []string{}
 	}
@@ -143,6 +153,14 @@ type nodePatchInput struct {
 	}
 }
 
+type upgradeInput struct {
+	ID   string `path:"id" maxLength:"64"`
+	Body *struct {
+		Mode      string `json:"mode,omitempty" enum:"wait_idle,now,cancel" doc:"wait_idle (default): switch once no turn runs; now: interrupt running turns; cancel: stop an update that has not switched"`
+		DeadlineS int    `json:"deadline_s,omitempty" minimum:"0" maximum:"86400" doc:"wait_idle: report drain_timeout after this many seconds (default 1800)"`
+	}
+}
+
 type drainInput struct {
 	ID   string `path:"id" maxLength:"64"`
 	Body struct {
@@ -193,8 +211,9 @@ func (s *Server) listNodes(ctx context.Context, _ *struct{}) (*nodesOutput, erro
 		return nil, err
 	}
 	out := make([]NodeView, len(rows))
+	latest := s.currentRelease(ctx).Version
 	for i, n := range rows {
-		out[i] = s.nodeView(n)
+		out[i] = s.nodeView(n, latest)
 	}
 	return &nodesOutput{Body: out}, nil
 }
@@ -224,7 +243,7 @@ func (s *Server) addNode(ctx context.Context, in *newNodeInput) (*newNodeOutput,
 	}
 	s.audit(ctx, p.User.ID, "node_create", "node", node.ID, map[string]string{"name": name})
 	out := &newNodeOutput{}
-	out.Body.Node = s.nodeView(node)
+	out.Body.Node = s.nodeView(node, s.currentRelease(ctx).Version)
 	out.Body.Enrollment = s.enrollment(name, token)
 	return out, nil
 }
@@ -280,7 +299,7 @@ func (s *Server) updateNode(ctx context.Context, in *nodePatchInput) (*nodeOutpu
 		s.audit(ctx, p.User.ID, "node_isolated", "node", node.ID, map[string]bool{"isolated": *in.Body.Isolated})
 	}
 	s.nodes.Configure(ctx, node)
-	return &nodeOutput{Body: s.nodeView(node)}, nil
+	return &nodeOutput{Body: s.nodeView(node, s.currentRelease(ctx).Version)}, nil
 }
 
 func nodeChanges(in *nodePatchInput) []store.Change {
@@ -328,23 +347,29 @@ func (s *Server) rotateNodeToken(ctx context.Context, in *nodeIDInput) (*enrollm
 	return &enrollmentOutput{Body: s.enrollment(node.Name, token)}, nil
 }
 
-func (s *Server) upgradeNode(ctx context.Context, in *nodeIDInput) (*struct{}, error) {
+// upgradeNode sends node.upgrade with the release the console serves (architecture.md §14.3).
+func (s *Server) upgradeNode(ctx context.Context, in *upgradeInput) (*struct{}, error) {
 	p, err := requireUser(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.store.NodeOf(ctx, p.User.ID, in.ID); err != nil {
+	node, err := s.store.NodeOf(ctx, p.User.ID, in.ID)
+	if err != nil {
 		return nil, storeErr(err, "没有这个节点")
 	}
-	var release platform.NodeRelease
-	found, err := s.store.Setting(ctx, "node_release", &release)
-	if err != nil {
-		return nil, err
+	release := s.currentRelease(ctx)
+	if release.Version == "" {
+		return nil, fail(http.StatusConflict, "no_release", "控制面板还没有守护进程发布包")
 	}
-	if !found || release.Version == "" {
-		return nil, fail(http.StatusConflict, "no_release", "管理员还没有发布守护进程版本")
+	var opts platform.UpgradeOptions
+	if in.Body != nil {
+		opts = platform.UpgradeOptions{Mode: in.Body.Mode, DeadlineS: in.Body.DeadlineS}
 	}
-	return nil, nodeCommandErr(s.nodes.Upgrade(ctx, in.ID, release))
+	if err := s.nodes.Upgrade(ctx, in.ID, release, opts); err != nil {
+		return nil, nodeCommandErr(err)
+	}
+	s.audit(ctx, p.User.ID, "node_upgrade", "node", node.ID, map[string]any{"version": release.Version, "mode": opts.Mode})
+	return nil, nil
 }
 
 func (s *Server) drainNode(ctx context.Context, in *drainInput) (*struct{}, error) {
@@ -390,6 +415,9 @@ func (s *Server) refreshNodeUsage(ctx context.Context, in *nodeIDInput) (*usageR
 func nodeCommandErr(err error) error {
 	if errors.Is(err, platform.ErrNodeOffline) {
 		return fail(http.StatusConflict, "node_offline", "节点不在线")
+	}
+	if errors.Is(err, platform.ErrUpgradeUnsupported) {
+		return fail(http.StatusConflict, "upgrade_unsupported", err.Error())
 	}
 	return err
 }

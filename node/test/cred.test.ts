@@ -155,5 +155,7 @@ describe("upgrade verification", () => {
     expect(() => verifyRelease(tgz, { ...msg, signature: sign(null, Buffer.from("x"), privateKey).toString("base64") }, pem)).toThrow(/signature/);
     const der = publicKey.export({ type: "spki", format: "der" }).toString("base64");
     expect(() => verifyRelease(tgz, msg, der)).not.toThrow();
+    expect(() => verifyRelease(tgz, { sha256: msg.sha256 }, pem)).toThrow(/not signed/);
+    expect(() => verifyRelease(tgz, { sha256: msg.sha256 }, null)).not.toThrow();
   });
 });

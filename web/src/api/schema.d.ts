@@ -3214,6 +3214,24 @@ export interface components {
             /** Format: int64 */
             thread_no: number | null;
         };
+        NodeUpgradeState: {
+            /**
+             * Format: int64
+             * @description Turns still running while draining
+             */
+            active_turns: number;
+            error?: string;
+            /** @enum {string} */
+            mode: "wait_idle" | "now";
+            /** @enum {string} */
+            phase: "requested" | "staging" | "draining" | "drain_timeout" | "restarting" | "done" | "failed" | "rolled_back" | "cancelled";
+            /** Format: date-time */
+            started_at: string;
+            /** @description Release id being installed, <version>+<build> */
+            target: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
         NodeUsage: {
             claude?: components["schemas"]["RuntimeUsage"];
             codex?: components["schemas"]["RuntimeUsage"];
@@ -3233,6 +3251,8 @@ export interface components {
             labels: string[] | null;
             /** Format: date-time */
             last_seen_at: string | null;
+            /** @description Release id the console serves (<version>+<build>); empty when none */
+            latest_version: string;
             /** Format: int64 */
             max_active_sessions: number | null;
             name: string;
@@ -3248,8 +3268,13 @@ export interface components {
             runtimes: {
                 [key: string]: unknown;
             };
+            /** @description hello.features has self_update (the last hello while offline) */
+            self_update: boolean;
             /** Format: date-time */
             since: string | null;
+            update_available: boolean;
+            /** @description Last update asked of the node since the console started */
+            upgrade?: components["schemas"]["NodeUpgradeState"];
             /** @description Latest Claude Code / Codex subscription quota reported by the node; null when none */
             usage: components["schemas"]["NodeUsage"];
             /** @description The daemon reports usage (hello.features has "usage"; the last hello while offline) */
@@ -4252,6 +4277,18 @@ export interface components {
             /** Format: int64 */
             port?: number;
             username?: string;
+        };
+        UpgradeInputBody: {
+            /**
+             * Format: int64
+             * @description wait_idle: report drain_timeout after this many seconds (default 1800)
+             */
+            deadline_s?: number;
+            /**
+             * @description wait_idle (default): switch once no turn runs; now: interrupt running turns; cancel: stop an update that has not switched
+             * @enum {string}
+             */
+            mode?: "wait_idle" | "now" | "cancel";
         };
         UploadBody: {
             /** @description Base64 of the file, at most 5 MB */
@@ -6881,7 +6918,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["UpgradeInputBody"];
+            };
+        };
         responses: {
             /** @description Accepted */
             202: {

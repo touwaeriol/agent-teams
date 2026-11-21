@@ -51,11 +51,16 @@ RUN --mount=type=secret,id=build_ca,required=false \
 
 COPY --from=build /out/agent-teams-node /opt/agent-teams-node
 COPY deploy/node/entrypoint.sh /usr/local/bin/agent-teams-entrypoint
-# claude / codex on PATH are the exact CLIs the daemon drives (the Agent SDK's bundled Claude Code
-# and the daemon's own @openai/codex dependency), so `claude login` / `codex login` match them.
-RUN ln -s /opt/agent-teams-node/node_modules/@anthropic-ai/claude-agent-sdk-linux-*/claude /usr/local/bin/claude \
- && ln -s /opt/agent-teams-node/node_modules/.bin/codex /usr/local/bin/codex \
- && printf '#!/bin/sh\nexec node /opt/agent-teams-node/node.mjs "$@"\n' > /usr/local/bin/agent-teams-node \
+# /opt/agent-teams-node is the image's release: the launcher seeds it into the data volume
+# (~/.local/share/agent-teams/releases/) and runs current/node.mjs from there, so the console's
+# "更新" button can switch releases without a new image (architecture.md §14.3).
+# claude / codex on PATH are the exact CLIs the running release drives (the Agent SDK's bundled
+# Claude Code and the daemon's own @openai/codex dependency), so `claude login` / `codex login` match them.
+ARG DATA=/home/agent/.local/share/agent-teams
+RUN sdk="$(basename /opt/agent-teams-node/node_modules/@anthropic-ai/claude-agent-sdk-linux-*)" \
+ && ln -s "$DATA/current/node_modules/@anthropic-ai/$sdk/claude" /usr/local/bin/claude \
+ && ln -s "$DATA/current/node_modules/.bin/codex" /usr/local/bin/codex \
+ && printf '#!/bin/sh\nexec node %s/current/node.mjs "$@"\n' "$DATA" > /usr/local/bin/agent-teams-node \
  && chmod 0755 /usr/local/bin/agent-teams-node /usr/local/bin/agent-teams-entrypoint \
  && groupmod -n agent node && usermod -l agent -d /home/agent -m node \
  && install -d -o agent -g agent -m 0700 \
@@ -73,9 +78,10 @@ ENV HOME=/home/agent \
     CODEX_HOME=/home/agent/.codex \
     AGENT_TEAMS_ROOT=/home/agent/.agents_team \
     AGENT_TEAMS_STATE=/home/agent/.local/state/agent-teams \
+    AGENT_TEAMS_SEED=/opt/agent-teams-node \
     DISABLE_AUTOUPDATER=1 \
     LANG=C.UTF-8
-VOLUME ["/home/agent/.claude", "/home/agent/.codex", "/home/agent/.agents_team", "/home/agent/.local/state/agent-teams"]
+VOLUME ["/home/agent/.claude", "/home/agent/.codex", "/home/agent/.agents_team", "/home/agent/.local/state/agent-teams", "/home/agent/.local/share/agent-teams"]
 ENTRYPOINT ["/usr/local/bin/tini", "--", "/usr/local/bin/agent-teams-entrypoint"]
 # Needs AGENT_TEAMS_CONSOLE and AGENT_TEAMS_NODE_TOKEN. Any other command (claude login,
 # codex login, bash) runs instead of the daemon.

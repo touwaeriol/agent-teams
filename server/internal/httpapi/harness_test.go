@@ -35,6 +35,8 @@ type fakeNodes struct {
 	disconnected []string
 	configured   []string
 	online       map[string]bool
+	upgrades     []string
+	noSelfUpdate bool
 }
 
 func (f *fakeNodes) Status(id string) platform.NodeLive {
@@ -55,10 +57,16 @@ func (f *fakeNodes) Configure(_ context.Context, n store.Node) {
 	f.configured = append(f.configured, n.ID)
 }
 
-func (f *fakeNodes) Upgrade(_ context.Context, id string, _ platform.NodeRelease) error {
+func (f *fakeNodes) Upgrade(_ context.Context, id string, r platform.NodeRelease, o platform.UpgradeOptions) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if !f.online[id] {
 		return platform.ErrNodeOffline
 	}
+	if f.noSelfUpdate {
+		return platform.ErrUpgradeUnsupported
+	}
+	f.upgrades = append(f.upgrades, r.Version+":"+o.Mode)
 	return nil
 }
 

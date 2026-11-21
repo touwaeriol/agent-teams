@@ -469,7 +469,7 @@
 | 消息 | 方向 | 字段 | 说明 |
 | --- | --- | --- | --- |
 | `node.config` | 控制台 → | `max_active_sessions`, `park_after_s`, `log_level`, `isolated` | 节点页修改后即时下发 |
-| `node.upgrade` | 控制台 → | `version`, `sha256`, `signature` | 下载地址**不由消息指定**：固定为本链路所连控制台的 `<console>/node/dist/agent-teams-node-<version>.tgz`（`version` 须匹配 `^\d+\.\d+\.\d+$`）。守护进程校验 sha256，再用安装时固化在 `~/.config/agent-teams/release.pub` 的发布公钥（Ed25519，`install-node.sh` 写入，换钥需重新运行安装脚本）验证 tgz 的签名；都通过才解包到 `node-<ver>/`、原子切换 `current` 软链、`exit 75` 由 systemd 重启。失败回 `node.upgrade_result {ok:false, error}`。被攻破的控制台无法让节点运行未经发布密钥签名的代码 |
+| `node.upgrade` | 控制台 → | `version`, `sha256`, `signature?`, `mode?`, `deadline_s?`, `min_node?` | 只发给 `features` 含 `self_update` 的守护进程（在更新启动器下运行，architecture.md §14.3）。下载地址**不由消息指定**：固定为本链路所连控制台的 `<console>/node/dist/agent-teams-node-<version>.tgz`，`version` 是版本 id `<x.y.z>+<build>`。守护进程校验 sha256（有 `~/.config/agent-teams/release.pub` 时再验 Ed25519 签名），装到 `releases/<id>/`，按 `mode` 排空（`wait_idle` 等正在跑的回合结束，超过 `deadline_s` 报 `drain_timeout` 后继续等；`now` 不等；`cancel` 取消尚未切换的更新），切换 `current` 软链后 `exit 75` 由启动器重启；新版本连上 60 秒后自我确认，未确认的由启动器回滚。每个阶段回 `node.upgrade_result` |
 | `node.drain` | 控制台 → | `deadline_s` | 不再接受新会话；空闲会话停放；用于节点维护 |
 | `node.stats` | 守护进程 → | `active_sessions`, `parked_sessions`, `queued`, `mem_mb`, `load1`, `disk_free_mb` | 每 30 s，不可靠；机房机柜灯数据 |
 | `node.usage` | 守护进程 → | `runtimes` | 不可靠；hello 后和之后定期上报 Claude Code / Codex 的订阅余量：`runtimes.claude`/`runtimes.codex` 各为 `{auth, status, plan?, windows?: [{key, label?, used_percent, window_minutes?, resets_at?}], error?, fetched_at?}`（`key`：`five_hour`/`weekly`/`weekly_opus`/`weekly_sonnet`/`weekly_model`，Codex 为 `primary`/`secondary`；`label` 是服务方给的显示名，如 `weekly_model` 窗口的模型名，最多保留 40 字符）。不带凭证；控制台只保存每个节点最近一次上报（内存），校验后通过 `NodeView.usage` 返回；收到 `node.usage_refresh` 后立即采集并回一条 |
@@ -496,7 +496,7 @@
 | 1000 | 正常（控制台停机） | 重连 |
 | 4401 | 令牌无效 / 所有者停用 | 停止重连，每 10 分钟重试一次并记日志 |
 | 4409 | 被同节点的新链路替换 | 若本进程才是新的则忽略；否则退出（防双开） |
-| 4426 | 需要升级 | 按 `welcome.min_daemon` 提示；若支持 `upgrade` 等待 `node.upgrade` |
+| 4426 | 需要升级 | 按 `welcome.min_daemon` 提示；若支持 `self_update` 等待 `node.upgrade` |
 | 4429 | 握手过于频繁 | 退避到 60 s |
 | 1008 | 第一帧不是合法的 hello | 重连 |
 

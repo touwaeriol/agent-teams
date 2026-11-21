@@ -12,6 +12,8 @@ services:
       dockerfile: deploy/node/Dockerfile
     env_file: node.env
     restart: unless-stopped
+    # Time for the daemon to park its sessions on docker stop / compose down.
+    stop_grace_period: 60s
     # Stable hostname: Claude Code and the logs show it.
     hostname: agent-teams-node
     volumes:
@@ -19,6 +21,7 @@ services:
       - codex:/home/agent/.codex                       # Codex login (codex login) and threads
       - workspace:/home/agent/.agents_team             # workspace: repositories, worktrees, employee home
       - state:/home/agent/.local/state/agent-teams     # daemon state: outbox/inbox, session records (resume)
+      - data:/home/agent/.local/share/agent-teams      # daemon releases (console updates), gh, platform files
       # Optional: SSH keys / known_hosts for git over ssh (read-only).
       # - ~/.ssh:/home/agent/.ssh:ro
     logging:
@@ -30,3 +33,4 @@ volumes:
   codex:
   workspace:
   state:
+  data:

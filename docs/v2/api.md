@@ -300,7 +300,7 @@ PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平�
 | POST | `/api/nodes` | `{name}` → 201 `{node, token, install}`（规则同 v1：名字正则、配额、409；`install` 指向 v2 `install-node.sh`） |
 | PATCH | `/api/nodes/{id}` | `{max_active_sessions?, park_after_s?, isolated?, labels?}` → `NodeView`（即时下发 `node.config`） |
 | POST | `/api/nodes/{id}/token` | → `{token, install}`；轮换并立即断开 |
-| POST | `/api/nodes/{id}/upgrade` | → 202；发 `node.upgrade`（版本取 `at_settings.node_release`） |
+| POST | `/api/nodes/{id}/upgrade` | `{mode?: wait_idle\|now\|cancel, deadline_s?}` → 202；发 `node.upgrade`，版本取当前发布（`at_settings.node_release`，没有时取 `NODE_DIST_DIR` 最新的 tgz）。409 `no_release` / `node_offline` / `upgrade_unsupported`（守护进程不在更新启动器下，要先重新运行安装命令）。进度在 `NodeView.upgrade {target, phase, mode, active_turns, error?}`，另有 `latest_version`、`update_available`、`self_update` |
 | POST | `/api/nodes/{id}/drain` | `{deadline_s}` → 202 |
 | POST | `/api/nodes/{id}/usage/refresh` | → `{usage: NodeUsage\|null, stale?: true}`（权限同 `GET /api/nodes`）。最近一次上报的 `received_at` 在 60 s 内直接返回缓存，不打扰节点；否则发 `node.usage_refresh`（protocol.md §9），等下一条 `node.usage`，最多 15 s，同一节点的并发请求合并成一次等待；超时返回已有的 usage 并带 `stale: true`；`node.usage_refresh` 发送失败、或调用方提前断开时同样返回 200 加 `stale: true`（等待挂在节点上、15 s 后自行结束，不依赖发起请求的连接）。不在任何数据库事务里等待。节点不在线 → 409 `node_offline`；守护进程不支持（`hello.features` 没有 `usage`）→ 409 `usage_unsupported` |
 | DELETE | `/api/nodes/{id}` | → 204；断开链路；该节点上的员工改派：在新节点开新会话并附交接摘要（`architecture.md` §6.2） |
