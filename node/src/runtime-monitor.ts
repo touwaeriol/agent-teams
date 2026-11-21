@@ -43,6 +43,8 @@ export class RuntimeMonitor {
   private queued: { p: Promise<RuntimeStatuses>; force: Force } | null = null;
   private timer: NodeJS.Timeout | null = null;
   private debounce: NodeJS.Timeout | null = null;
+  /** A check a detector asked for later (recheckIn), and when it is due. */
+  private recheck: { t: NodeJS.Timeout; at: number } | null = null;
   private readonly watches = new Map<string, FileWatch>();
   private stopped = false;
 
@@ -66,7 +68,8 @@ export class RuntimeMonitor {
     this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     if (this.debounce) clearTimeout(this.debounce);
-    this.timer = this.debounce = null;
+    if (this.recheck) clearTimeout(this.recheck.t);
+    this.timer = this.debounce = this.recheck = null;
     for (const w of this.watches.values()) w.close();
     this.watches.clear();
   }
@@ -122,6 +125,20 @@ export class RuntimeMonitor {
     }
   }
 
+  /** A detector put off part of a check (its recheckIn): one more unforced check then, the earliest asked for. */
+  private scheduleRecheck(ms: number): void {
+    if (this.stopped) return;
+    const at = Date.now() + ms;
+    if (this.recheck && this.recheck.at <= at) return;
+    if (this.recheck) clearTimeout(this.recheck.t);
+    const t = setTimeout(() => {
+      this.recheck = null;
+      void this.poll("fs_event");
+    }, ms);
+    t.unref?.();
+    this.recheck = { t, at };
+  }
+
   private fileChanged(): void {
     if (this.stopped) return;
     if (this.debounce) clearTimeout(this.debounce);
@@ -172,7 +189,7 @@ export class RuntimeMonitor {
     await Promise.all(detectors.map(async (d) => {
       let s: RuntimeState;
       try {
-        s = await withTimeout(Promise.resolve().then(() => d.detect({ force: force === "all" || force.has(d.id), timeoutMs: budget })), budget + 2_000, () => new Error("timeout"));
+        s = await withTimeout(Promise.resolve().then(() => d.detect({ force: force === "all" || force.has(d.id), timeoutMs: budget, recheckIn: (ms) => this.scheduleRecheck(ms) })), budget + 2_000, () => new Error("timeout"));
         if (s.error) s = { ...s, error: errorText(s.error) };
       } catch (err) {
         s = { installed: this.latest[d.id]?.installed ?? false, auth: "unknown", error: `detect_failed: ${errorText(err)}` };
