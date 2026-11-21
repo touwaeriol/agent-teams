@@ -2,9 +2,10 @@
 // server (composer.ValidateCommands), the platform command toggles and the editor's texts.
 import type { components } from "@/api/schema";
 import { PLATFORM_COMMANDS, platformCommands, type Scope } from "@/components/app/composer/assist";
+import { runtimeSpec, type Runtime } from "@/lib/runtimes";
 
 export type CustomCommand = components["schemas"]["CustomCommand"];
-type RoleLike = { tier: "coordinator" | "lead" | "member"; runtime: "claude" | "codex" };
+type RoleLike = { tier: "coordinator" | "lead" | "member"; runtime: Runtime };
 
 /** Names custom commands may not take: the platform commands, plus "model" (the server keeps it reserved; there is no /model any more). */
 const RESERVED = ["model", ...PLATFORM_COMMANDS.map((p) => p.name)];
@@ -12,8 +13,8 @@ const RESERVED = ["model", ...PLATFORM_COMMANDS.map((p) => p.name)];
 export const COMMAND_NAME = /^[a-z][a-z0-9_-]{0,31}(:[a-z0-9][a-z0-9_-]{0,31})?$/;
 export const PROMPT_MAX = 8000;
 
-/** Codex (no slash commands over app-server) and members (their messages arrive wrapped) get prompt templates only. */
-export const promptOnly = (r: RoleLike) => r.runtime === "codex" || r.tier === "member";
+/** Runtimes without slash commands (Codex over app-server) and members (their messages arrive wrapped) get prompt templates only. */
+export const promptOnly = (r: RoleLike) => !runtimeSpec(r.runtime).slashCommands || r.tier === "member";
 
 /** The chat scope of a role's employee; members have no chat box (no platform commands). */
 export const chatScope = (r: Pick<RoleLike, "tier">): Scope | null => (r.tier === "coordinator" ? "coordinator" : r.tier === "lead" ? "lead" : null);
@@ -33,8 +34,8 @@ export const modeLabel = (c: Pick<CustomCommand, "mode">) => (c.mode === "passth
 
 /** Where the role's commands take effect, shown under the editor. */
 export function commandsHint(r: RoleLike): string {
-  if (r.tier === "member" && r.runtime === "codex")
-    return "Codex 没有斜杠命令，成员也没有聊天框：组长 send_message 或你直接发给这位成员的消息以 /名字 开头时，平台把提示词模板（{{args}} 换成后面的文字）展开后转给它。";
+  if (r.tier === "member" && !runtimeSpec(r.runtime).slashCommands)
+    return `${runtimeSpec(r.runtime).label} 没有斜杠命令，成员也没有聊天框：组长 send_message 或你直接发给这位成员的消息以 /名字 开头时，平台把提示词模板（{{args}} 换成后面的文字）展开后转给它。`;
   if (r.tier === "member") return "成员没有聊天框：组长 send_message 或你直接发给这位成员的消息以 /名字 开头时，平台把提示词模板展开后转给它。";
   return "在聊天框输入 / 时列出。提示词模板由平台展开后发送；透传把 /名字 原样交给 Claude Code（技能、插件命令或无界面可用的内置命令）。";
 }

@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
-
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
+	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -141,14 +141,15 @@ func buildOpen(in sessionInput) (protocol.SessionOpen, error) {
 		open.Env[ProtectedRefsEnv] = strings.Join(in.protRefs, " ")
 	}
 	setPrepare(&open, in.prepare)
-	if in.emp.Runtime == "codex" {
-		c := codexOptions(in)
-		open.Codex = &c
-		return open, nil
-	}
-	c := claudeOptions(in)
-	open.Claude = &c
+	runtimeOptions[runtimes.Of(in.emp.Runtime).ID](&open, in)
 	return open, nil
+}
+
+// runtimeOptions fills session.open's options block of each runtime (one entry per runtime in
+// the registry; TestRuntimeOptionsCoverRegistry).
+var runtimeOptions = map[string]func(*protocol.SessionOpen, sessionInput){
+	runtimes.Claude: func(open *protocol.SessionOpen, in sessionInput) { c := claudeOptions(in); open.Claude = &c },
+	runtimes.Codex:  func(open *protocol.SessionOpen, in sessionInput) { c := codexOptions(in); open.Codex = &c },
 }
 
 // setPrepare names the git.prepare jobs session.open waits for (first one in prepare for older daemons).
@@ -218,14 +219,16 @@ func modelSteps(e core.Employee, p store.Project) []string {
 // runtime: thread_codex_model for Codex (never thread_model, a Claude id), thread_model for
 // Claude. "" falls through to the role's model.
 func projectModel(e core.Employee, p store.Project) string {
-	switch {
-	case e.Tier == "coordinator":
+	if e.Tier == "coordinator" {
 		return p.CoordinatorModel
-	case e.Runtime == "codex":
-		return p.ThreadCodexModel
-	default:
-		return p.ThreadModel
 	}
+	return threadModels[runtimes.Of(e.Runtime).ID](p)
+}
+
+// threadModels is the project's thread model override of each runtime (TestRuntimeOptionsCoverRegistry).
+var threadModels = map[string]func(store.Project) string{
+	runtimes.Claude: func(p store.Project) string { return p.ThreadModel },
+	runtimes.Codex:  func(p store.Project) string { return p.ThreadCodexModel },
 }
 
 // effort is the project's thread effort for leads and members, else the role's.

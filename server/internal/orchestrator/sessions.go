@@ -13,6 +13,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
+	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
 	"github.com/touwaeriol/agent-teams/server/internal/sshgw"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -1023,9 +1024,9 @@ func (o *Orchestrator) Interrupt(ctx context.Context, tx *core.Tx, e core.Employ
 	return err
 }
 
-// SetMode changes a live Claude session's permission mode (thread auto-approve).
+// SetMode changes a live session (runtimes with LiveModeSwitch)'s permission mode (thread auto-approve).
 func (o *Orchestrator) SetMode(ctx context.Context, tx *core.Tx, s core.AgentSession, mode string) error {
-	if s.NodeID == nil || s.Runtime != "claude" || s.PermissionMode == mode {
+	if s.NodeID == nil || !runtimes.Of(s.Runtime).LiveModeSwitch || s.PermissionMode == mode {
 		return nil
 	}
 	m := protocol.SessionSetModePermissionMode(mode)

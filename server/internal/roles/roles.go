@@ -12,6 +12,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/composer"
 	"github.com/touwaeriol/agent-teams/server/internal/office"
 	"github.com/touwaeriol/agent-teams/server/internal/plugins"
+	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -20,8 +21,8 @@ const (
 	Coordinator = "coordinator"
 	Lead        = "lead"
 	Member      = "member"
-	Claude      = "claude"
-	Codex       = "codex"
+	Claude      = runtimes.Claude
+	Codex       = runtimes.Codex
 	MaxCount    = 8
 )
 
@@ -153,12 +154,13 @@ type check struct {
 }
 
 func validateOne(path string, r *store.Role, c Context) []Problem {
+	leaders := runtimes.LeaderTitles()
 	checks := []check{
 		{"tier", !slices.Contains([]string{Coordinator, Lead, Member}, r.Tier), "tier 只能是 coordinator、lead 或 member"},
 		{"role", !keyPattern.MatchString(r.Role), "岗位键只能用小写字母开头的小写字母、数字和 -，最多 24 个字符"},
-		{"runtime", r.Runtime != Claude && r.Runtime != Codex, "runtime 只能是 claude 或 codex"},
-		{"runtime", r.Tier == Coordinator && r.Runtime != Claude, "统筹只能用 Claude"},
-		{"runtime", r.Tier == Lead && r.Runtime != Claude, "组长只能用 Claude"},
+		{"runtime", !runtimes.Valid(r.Runtime), "runtime 只能是 " + strings.Join(runtimes.IDs(), " 或 ")},
+		{"runtime", r.Tier == Coordinator && !runtimes.Of(r.Runtime).CanLead, "统筹只能用 " + leaders},
+		{"runtime", r.Tier == Lead && !runtimes.Of(r.Runtime).CanLead, "组长只能用 " + leaders},
 		{"count", r.Count < 1 || r.Count > MaxCount, fmt.Sprintf("人数在 1 到 %d 之间", MaxCount)},
 		{"gate", !slices.Contains(gates, r.Gate), "gate 只能是空、review 或 decision"},
 		{"sandbox", !slices.Contains(sandboxes, r.Sandbox), "sandbox 只能是 read-only、workspace-write 或 danger-full-access"},
@@ -242,14 +244,14 @@ func nodeProblems(path string, r *store.Role, nodes map[string]store.Node) []Pro
 			return []Problem{{path + ".node_ids", "候选节点不存在或不属于你：" + id}}
 		}
 	}
-	if r.Runtime == Codex && !candidatesQualify(r.NodeIDs, nodes) {
-		return []Problem{{path + ".node_ids", "Codex 岗位不能派到 sandbox 或 none 隔离级别的节点（需要 agent_user 或 isolated）"}}
+	if rt := runtimes.Of(r.Runtime); rt.NeedsIsolation && !candidatesQualify(r.NodeIDs, nodes) {
+		return []Problem{{path + ".node_ids", rt.Title + " 岗位不能派到 sandbox 或 none 隔离级别的节点（需要 agent_user 或 isolated）"}}
 	}
 	return nil
 }
 
-// Isolated reports whether a node may run Codex employees (architecture.md §10.3).
-func Isolated(n store.Node) bool { return n.Isolated || n.Isolation == "agent_user" }
+// Isolated reports whether a node may run runtimes that need isolation (Codex, architecture.md §10.3).
+func Isolated(n store.Node) bool { return runtimes.Isolated(n.Isolated, n.Isolation) }
 
 // candidatesQualify: an explicit list must all qualify; an empty list (any node) needs at least one.
 func candidatesQualify(ids []string, nodes map[string]store.Node) bool {
@@ -289,8 +291,8 @@ func roleWarnings(r store.Role, nodes map[string]store.Node) []Warning {
 	if len(live) < len(r.NodeIDs) {
 		out = append(out, Warning{r.Role, "候选节点已删除"})
 	}
-	if r.Runtime == Codex && !candidatesQualify(live, nodes) {
-		out = append(out, Warning{r.Role, "Codex 岗位没有 agent_user 或 isolated 节点"})
+	if rt := runtimes.Of(r.Runtime); rt.NeedsIsolation && !candidatesQualify(live, nodes) {
+		out = append(out, Warning{r.Role, rt.Title + " 岗位没有 agent_user 或 isolated 节点"})
 	}
 	return out
 }

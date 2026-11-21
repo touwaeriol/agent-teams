@@ -11,6 +11,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/delivery"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
+	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
 	"github.com/touwaeriol/agent-teams/server/internal/scheduler"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -343,10 +344,7 @@ func memberCommands(ctx context.Context, tx *core.Tx, e core.Employee) string {
 
 func (s *Service) member(ctx context.Context, tx *core.Tx, t core.Thread, e core.Employee) protocol.TeamMember {
 	title := e.Spec.Title
-	typ := protocol.TeamMemberType("claude_code")
-	if e.Runtime == "codex" {
-		typ = "codex"
-	}
+	typ := protocol.TeamMemberType(runtimes.Of(e.Runtime).TeamType)
 	m := protocol.TeamMember{Name: e.Name, Role: e.Role, Title: &title, Type: &typ}
 	if task, err := core.CurrentTaskOf(ctx, tx, e); err == nil && task.ConversationID != t.ID {
 		busy := "在别的讨论串忙"

@@ -12,6 +12,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/office"
 	"github.com/touwaeriol/agent-teams/server/internal/roles"
+	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -153,11 +154,11 @@ func contains(list []string, v string) bool {
 }
 
 func defaultLead() store.Role {
-	return store.Role{Tier: "lead", Role: "lead", Title: "组长", Runtime: "claude", Count: 1, NodeIDs: []string{}}
+	return store.Role{Tier: "lead", Role: "lead", Title: "组长", Runtime: runtimes.Claude, Count: 1, NodeIDs: []string{}}
 }
 
 func defaultCoordinator() store.Role {
-	return store.Role{Tier: "coordinator", Role: "coordinator", Title: "项目统筹", Runtime: "claude", Count: 1, NodeIDs: []string{}}
+	return store.Role{Tier: "coordinator", Role: "coordinator", Title: "项目统筹", Runtime: runtimes.Claude, Count: 1, NodeIDs: []string{}}
 }
 
 func (o *Orchestrator) hairFor(i int) *string {
