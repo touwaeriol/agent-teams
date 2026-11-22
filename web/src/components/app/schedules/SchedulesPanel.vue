@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // The 定时任务 list with 新建 / 编辑 in place: the body of the dialog and of the phone overview's 定时任务 tab.
+// Active schedules come first, then the ones that ended in the last 7 days.
 import { Plus } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 import { useSchedules } from "@/api/queries";

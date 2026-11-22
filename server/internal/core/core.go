@@ -9,6 +9,7 @@ package core
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -112,6 +113,15 @@ func (tx *Tx) settleAfter(conversationID string) {
 			slog.WarnContext(ctx, "settle tasks", "thread", conversationID, "err", err)
 		}
 	})
+}
+
+// SQLTx is the database/sql transaction under the GORM handle, for libraries that write in the
+// same transaction (River's InsertTx).
+func (tx *Tx) SQLTx() (*sql.Tx, error) {
+	if t, ok := tx.g.Statement.ConnPool.(*sql.Tx); ok {
+		return t, nil
+	}
+	return nil, errors.New("not in a database/sql transaction")
 }
 
 // Store returns the Store the transaction belongs to.

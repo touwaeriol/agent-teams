@@ -53,7 +53,7 @@ export const sharedFiles = {
 };
 
 export const schedules = {
-  create: (pid: string, body: S["ScheduleBody"]) => unwrap(client.POST("/api/projects/{pid}/schedules", { params: { path: { pid } }, body })),
+  create: (pid: string, body: S["NewScheduleBody"]) => unwrap(client.POST("/api/projects/{pid}/schedules", { params: { path: { pid } }, body })),
   update: (id: string, body: S["ScheduleBody"]) => unwrap(client.PATCH("/api/schedules/{id}", { params: { path: { id } }, body })),
   remove: (id: string) => unwrap(client.DELETE("/api/schedules/{id}", { params: { path: { id } } })),
   run: (id: string) => unwrap(client.POST("/api/schedules/{id}/run", { params: { path: { id } } })),

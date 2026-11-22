@@ -6789,6 +6789,261 @@ func (j *SandboxPolicy) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+// Cancel one of the schedules you set (it no longer fires; the user still sees it
+// as cancelled for a while).
+type ScheduleCancelInput struct {
+	// The schedule's id (sc_…), from schedule_create or schedule_list.
+	ScheduleID string `json:"schedule_id"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ScheduleCancelInput) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["schedule_id"]; raw != nil && !ok {
+		return fmt.Errorf("field schedule_id in ScheduleCancelInput: required")
+	}
+	type Plain ScheduleCancelInput
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if matched, _ := regexp.MatchString(`^sc_[A-Za-z0-9]+$`, string(plain.ScheduleID)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "ScheduleID", `^sc_[A-Za-z0-9]+$`)
+	}
+	*j = ScheduleCancelInput(plain)
+	return nil
+}
+
+// Schedule a wake-up: at the time you set, the platform sends you (or, for the
+// coordinator, a thread's lead) the message, even if your session is idle or
+// parked. Use it instead of sleeping or polling when you must wait for something
+// outside (CI, a deploy, a time the user named), and for recurring work the user
+// asks for ("every morning at 9 report…"). Give exactly one of at, in_minutes or
+// cron. After creating it, end your turn; the message arrives as "【定时唤醒：name】…".
+// The user sees every schedule on the page and can pause or delete it. A member
+// may only set one-off wake-ups (at or in_minutes) within 24 hours, bound to its
+// current task: they are cancelled when the task ends.
+type ScheduleCreateInput struct {
+	// One-off: fire once at this time (ISO 8601 with an offset, e.g.
+	// 2026-11-23T09:00:00+08:00), 1 minute to 30 days from now (members: within 24
+	// hours).
+	At *time.Time `json:"at,omitempty,omitzero"`
+
+	// Recurring (not for members): five cron fields (minute hour day-of-month month
+	// day-of-week, e.g. "0 9 * * 1-5") or a descriptor (@daily, @every 2h), read in
+	// timezone; at least 5 minutes between runs.
+	Cron *string `json:"cron,omitempty,omitzero"`
+
+	// Recurring: stop after this time.
+	EndsAt *time.Time `json:"ends_at,omitempty,omitzero"`
+
+	// One-off: fire once this many minutes from now.
+	InMinutes *int `json:"in_minutes,omitempty,omitzero"`
+
+	// Recurring: stop after this many runs.
+	MaxRuns *int `json:"max_runs,omitempty,omitzero"`
+
+	// What to tell the target when it fires: enough context to act without
+	// remembering (PR, task, what to check, what to do next).
+	Message string `json:"message"`
+
+	// Short name shown to the user, e.g. 检查 CI.
+	Name string `json:"name"`
+
+	// Coordinator only: wake this thread's lead instead of yourself (a finished
+	// thread is reopened when it fires).
+	Thread *int `json:"thread,omitempty,omitzero"`
+
+	// IANA zone the cron is read in (e.g. Asia/Shanghai, the user's zone when you
+	// know it); default UTC.
+	Timezone *string `json:"timezone,omitempty,omitzero"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ScheduleCreateInput) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["message"]; raw != nil && !ok {
+		return fmt.Errorf("field message in ScheduleCreateInput: required")
+	}
+	if _, ok := raw["name"]; raw != nil && !ok {
+		return fmt.Errorf("field name in ScheduleCreateInput: required")
+	}
+	type Plain ScheduleCreateInput
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.Cron != nil && utf8.RuneCountInString(string(*plain.Cron)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "cron", 1)
+	}
+	if plain.Cron != nil && utf8.RuneCountInString(string(*plain.Cron)) > 100 {
+		return fmt.Errorf("field %s length: must be <= %d", "cron", 100)
+	}
+	if plain.InMinutes != nil && 43200 < *plain.InMinutes {
+		return fmt.Errorf("field %s: must be <= %v", "in_minutes", 43200)
+	}
+	if plain.InMinutes != nil && 1 > *plain.InMinutes {
+		return fmt.Errorf("field %s: must be >= %v", "in_minutes", 1)
+	}
+	if plain.MaxRuns != nil && 1 > *plain.MaxRuns {
+		return fmt.Errorf("field %s: must be >= %v", "max_runs", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Message)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "message", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Message)) > 20000 {
+		return fmt.Errorf("field %s length: must be <= %d", "message", 20000)
+	}
+	if utf8.RuneCountInString(string(plain.Name)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "name", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Name)) > 100 {
+		return fmt.Errorf("field %s length: must be <= %d", "name", 100)
+	}
+	if plain.Thread != nil && 1 > *plain.Thread {
+		return fmt.Errorf("field %s: must be >= %v", "thread", 1)
+	}
+	if plain.Timezone != nil && utf8.RuneCountInString(string(*plain.Timezone)) > 64 {
+		return fmt.Errorf("field %s length: must be <= %d", "timezone", 64)
+	}
+	*j = ScheduleCreateInput(plain)
+	return nil
+}
+
+// List scheduled tasks with their id, kind, target, next run and who set them.
+// scope mine (default): the ones you set; project: all of the project's (the
+// user's too).
+type ScheduleListInput struct {
+	// Scope corresponds to the JSON schema field "scope".
+	Scope *ScheduleListInputScope `json:"scope,omitempty,omitzero"`
+}
+
+type ScheduleListInputScope string
+
+const ScheduleListInputScopeMine ScheduleListInputScope = "mine"
+const ScheduleListInputScopeProject ScheduleListInputScope = "project"
+
+var enumValues_ScheduleListInputScope = []interface{}{
+	"mine",
+	"project",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ScheduleListInputScope) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_ScheduleListInputScope {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_ScheduleListInputScope, v)
+	}
+	*j = ScheduleListInputScope(v)
+	return nil
+}
+
+// Change one of the schedules you set: only the fields given change, and the next
+// run is worked out again from now. enabled=false pauses it, true resumes it.
+// Switching between one-off and recurring: give at / in_minutes or cron.
+type ScheduleUpdateInput struct {
+	// One-off: fire once at this time (ISO 8601 with an offset, e.g.
+	// 2026-11-23T09:00:00+08:00), 1 minute to 30 days from now.
+	At *time.Time `json:"at,omitempty,omitzero"`
+
+	// Recurring: five cron fields (minute hour day-of-month month day-of-week, e.g.
+	// "0 9 * * 1-5") or a descriptor (@daily, @every 2h), read in timezone; at least
+	// 5 minutes between runs.
+	Cron *string `json:"cron,omitempty,omitzero"`
+
+	// Enabled corresponds to the JSON schema field "enabled".
+	Enabled *bool `json:"enabled,omitempty,omitzero"`
+
+	// Recurring: stop after this time.
+	EndsAt *time.Time `json:"ends_at,omitempty,omitzero"`
+
+	// One-off: fire once this many minutes from now.
+	InMinutes *int `json:"in_minutes,omitempty,omitzero"`
+
+	// Recurring: stop after this many runs.
+	MaxRuns *int `json:"max_runs,omitempty,omitzero"`
+
+	// Message corresponds to the JSON schema field "message".
+	Message *string `json:"message,omitempty,omitzero"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name *string `json:"name,omitempty,omitzero"`
+
+	// The schedule's id (sc_…), from schedule_create or schedule_list.
+	ScheduleID string `json:"schedule_id"`
+
+	// IANA zone the cron is read in (e.g. Asia/Shanghai, the user's zone when you
+	// know it); default UTC.
+	Timezone *string `json:"timezone,omitempty,omitzero"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ScheduleUpdateInput) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["schedule_id"]; raw != nil && !ok {
+		return fmt.Errorf("field schedule_id in ScheduleUpdateInput: required")
+	}
+	type Plain ScheduleUpdateInput
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.Cron != nil && utf8.RuneCountInString(string(*plain.Cron)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "cron", 1)
+	}
+	if plain.Cron != nil && utf8.RuneCountInString(string(*plain.Cron)) > 100 {
+		return fmt.Errorf("field %s length: must be <= %d", "cron", 100)
+	}
+	if plain.InMinutes != nil && 43200 < *plain.InMinutes {
+		return fmt.Errorf("field %s: must be <= %v", "in_minutes", 43200)
+	}
+	if plain.InMinutes != nil && 1 > *plain.InMinutes {
+		return fmt.Errorf("field %s: must be >= %v", "in_minutes", 1)
+	}
+	if plain.MaxRuns != nil && 1 > *plain.MaxRuns {
+		return fmt.Errorf("field %s: must be >= %v", "max_runs", 1)
+	}
+	if plain.Message != nil && utf8.RuneCountInString(string(*plain.Message)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "message", 1)
+	}
+	if plain.Message != nil && utf8.RuneCountInString(string(*plain.Message)) > 20000 {
+		return fmt.Errorf("field %s length: must be <= %d", "message", 20000)
+	}
+	if plain.Name != nil && utf8.RuneCountInString(string(*plain.Name)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "name", 1)
+	}
+	if plain.Name != nil && utf8.RuneCountInString(string(*plain.Name)) > 100 {
+		return fmt.Errorf("field %s length: must be <= %d", "name", 100)
+	}
+	if matched, _ := regexp.MatchString(`^sc_[A-Za-z0-9]+$`, string(plain.ScheduleID)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "ScheduleID", `^sc_[A-Za-z0-9]+$`)
+	}
+	if plain.Timezone != nil && utf8.RuneCountInString(string(*plain.Timezone)) > 64 {
+		return fmt.Errorf("field %s length: must be <= %d", "timezone", 64)
+	}
+	*j = ScheduleUpdateInput(plain)
+	return nil
+}
+
 // Leave a message for a teammate (instance name) or for the lead ("lead"). Busy
 // recipients get it after their current turn.
 type SendMessageInput struct {

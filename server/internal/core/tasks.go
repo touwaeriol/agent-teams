@@ -155,6 +155,9 @@ func RequeueTask(ctx context.Context, tx *Tx, t Task, set map[string]any) (Task,
 	if err := stampReadyTask(ctx, tx, t.ConversationID, t.ID); err != nil {
 		return t, err
 	}
+	if err := EndTaskSchedules(ctx, tx, t); err != nil {
+		return t, err
+	}
 	tx.settleAfter(t.ConversationID) // a dependency done meanwhile; it may have left a final state
 	return TaskByID(ctx, tx, t.ConversationID, t.ID)
 }
@@ -221,6 +224,11 @@ func SetTaskStatus(ctx context.Context, tx *Tx, t Task, status string) (Task, er
 	}
 	if err := statusMoved(ctx, tx, t, old, status); err != nil {
 		return t, err
+	}
+	if finalStatus(status) {
+		if err := EndTaskSchedules(ctx, tx, t); err != nil {
+			return t, err
+		}
 	}
 	return TaskByID(ctx, tx, t.ConversationID, t.ID)
 }

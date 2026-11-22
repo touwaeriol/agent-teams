@@ -60,6 +60,7 @@ export type SessionView = S["SessionView"];
 export type APIErrorBody = S["APIError"];
 export type ScheduleView = S["Schedule"];
 export type ScheduleBody = S["ScheduleBody"];
+export type ScheduleRunView = S["Run"];
 export type ProjectUsage = S["ProjectUsage"];
 export type ForwardView = S["ForwardView"];
 /** Remote servers (api.md §3.9.1): never carry a credential. */
@@ -320,6 +321,11 @@ export interface MessageView {
     forwarded_to?: { no: number; count: number; created: boolean; by: "user" | "coordinator"; message_ids: number[] };
     /** kind=image: the title the employee gave the screenshots. */
     title?: string;
+    /** A platform line about a schedule an agent set or cancelled (schedule_* tools). */
+    schedule_note?: boolean;
+    schedule_id?: string;
+    /** The line of a schedule just set: the user can undo it from there. */
+    schedule_undo?: boolean;
   };
   created_at: string;
   /** Client only: a message the user sent that the server has not confirmed yet (api/pending.ts). */

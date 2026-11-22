@@ -10,6 +10,10 @@ import { createMemoryHistory, createRouter } from "vue-router";
 import RepoList from "@/components/app/repo/RepoList.vue";
 import type { RepoRef } from "@/components/app/repo/repo";
 import ScheduleForm from "@/components/app/schedules/ScheduleForm.vue";
+import ScheduleRow from "@/components/app/schedules/ScheduleRow.vue";
+import { emptyDraft } from "@/components/app/schedules/schedule";
+import ScheduleNoteLine from "@/components/app/ScheduleNoteLine.vue";
+import ThreadWakeups from "@/components/app/thread/ThreadWakeups.vue";
 import TagInput from "@/components/common/TagInput.vue";
 import { newRole } from "@/lib/roles";
 import { toast } from "@/lib/toast";
@@ -90,8 +94,11 @@ describe("RepoList", () => {
 
 describe("ScheduleForm", () => {
   it("saves a new schedule with the browser time zone, enabled", async () => {
-    const spy = api([["POST", /\/api\/projects\/p1\/schedules$/, { id: "s1" }]]);
-    const draft = ref({ name: "", cron: "0 9 * * *", message: "" });
+    const spy = api([
+      ["POST", /\/api\/projects\/p1\/schedules$/, { id: "s1" }],
+      ["GET", /\/api\/projects\/p1\/threads$/, []],
+    ]);
+    const draft = ref(emptyDraft());
     const Host = defineComponent(() => () => h(ScheduleForm, { pid: "p1", modelValue: draft.value, "onUpdate:modelValue": (v: typeof draft.value) => (draft.value = v), onDone: () => (draft.value.name = "done") }));
     const w = mountWith(Host);
     const submit = () => w.get("button[type=submit]");
@@ -99,12 +106,69 @@ describe("ScheduleForm", () => {
     await w.get("input").setValue("日报");
     await w.get("textarea").setValue("汇总进展");
     await w.get(".at-mono input").setValue("0 9 * * 1-5");
-    expect(w.get(".el-select").text()).toContain("工作日 9:00");
+    expect(w.findAll(".el-select")[1].text()).toContain("工作日 9:00");
     await w.get("form").trigger("submit");
     await flushPromises();
     const [req] = calls(spy, "POST", /schedules$/);
-    expect(await req.json()).toMatchObject({ name: "日报", cron: "0 9 * * 1-5", message: "汇总进展", enabled: true, timezone: expect.any(String) });
+    const body = await req.json();
+    expect(body).toMatchObject({ name: "日报", kind: "cron", cron: "0 9 * * 1-5", message: "汇总进展", enabled: true, timezone: expect.any(String) });
+    expect(body.thread_no).toBeUndefined();
     expect(draft.value.name).toBe("done");
+  });
+});
+
+const schedule = {
+  id: "sc_1", project_id: "p1", name: "看 CI", kind: "once", cron: "", run_at: "2026-11-23T07:00:00Z", timezone: "UTC", message: "看结果",
+  target: "member", thread_id: "th1", thread_no: 3, thread_title: "发版", employee_id: "e1", employee: "dev-1", task_id: "t2",
+  created_by: "member", ends_at: null, max_runs: null, run_count: 0, enabled: true, status: "active", next_run_at: "2026-11-23T07:00:00Z",
+  last_run_at: null, last_error: "", ended_at: null, created_at: "2026-11-22T07:00:00Z", updated_at: "2026-11-22T07:00:00Z",
+};
+
+describe("schedule wake-ups", () => {
+  it("lists a schedule's runs from the row", async () => {
+    api([["GET", /\/api\/schedules\/sc_1\/runs$/, [
+      { id: 2, schedule_id: "sc_1", planned_at: "2026-11-23T07:00:00Z", fired_at: "2026-11-23T07:00:01Z", manual: false, outcome: "skipped", message_id: null, error: "上一次的消息还没送到，这次合并跳过" },
+      { id: 1, schedule_id: "sc_1", planned_at: null, fired_at: "2026-11-22T08:00:00Z", manual: true, outcome: "delivered", message_id: 9, error: "" },
+    ]]]);
+    const w = mountWith(ScheduleRow, { pid: "p1", item: schedule });
+    expect(w.text()).toContain("发给dev-1（#3 任务 t2）");
+    expect(w.text()).toContain("员工设置");
+    await w.get("button[aria-label=运行记录]").trigger("click");
+    await flushPromises();
+    const runs = w.get("[data-schedule-runs]").text();
+    expect(runs).toContain("跳过");
+    expect(runs).toContain("还没送到");
+    expect(runs).toContain("手动运行");
+  });
+
+  it("shows the thread's pending wake-ups and deletes one", async () => {
+    const spy = api([
+      ["GET", /\/api\/projects\/p1\/schedules$/, [schedule, { ...schedule, id: "sc_2", name: "别的", thread_id: "th9" }, { ...schedule, id: "sc_3", name: "完了", status: "done" }]],
+      ["DELETE", /\/api\/schedules\/sc_1$/, {}],
+    ]);
+    const w = mountWith(ThreadWakeups, { pid: "p1", threadId: "th1" });
+    await flushPromises();
+    const box = w.get("[data-thread-wakeups]");
+    expect(box.text()).toContain("看 CI");
+    expect(box.text()).not.toContain("别的");
+    expect(box.text()).not.toContain("完了");
+    await w.get("button[aria-label='取消 看 CI']").trigger("click");
+    await flushPromises();
+    expect(calls(spy, "DELETE", /schedules\/sc_1$/)).toHaveLength(1);
+  });
+
+  it("undoes a schedule an agent just set from its line", async () => {
+    const spy = api([["GET", /\/api\/projects\/p1\/schedules$/, [schedule]], ["DELETE", /\/api\/schedules\/sc_1$/, {}]]);
+    const message = { id: "5", role: "system", author: "platform", kind: "note", content: "dev-1设置了定时任务「看 CI」", created_at: "2026-11-22T07:00:00Z",
+      meta: { schedule_note: true, schedule_id: "sc_1", schedule_undo: true } };
+    const w = mountWith(ScheduleNoteLine, { pid: "p1", message });
+    await flushPromises();
+    await w.get("[data-schedule-note] button").trigger("click");
+    await flushPromises();
+    expect(calls(spy, "DELETE", /schedules\/sc_1$/)).toHaveLength(1);
+    const cancelled = mountWith(ScheduleNoteLine, { pid: "p1", message: { ...message, meta: { schedule_note: true, schedule_id: "sc_1", schedule_undo: false } } });
+    await flushPromises();
+    expect(cancelled.find("[data-schedule-note] button").exists()).toBe(false);
   });
 });
 

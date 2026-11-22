@@ -77,7 +77,12 @@ describe("schedules", () => {
     const ok = { ...d, name: " 日报 ", message: " 汇总 ", cron: " 0 9 * * 1-5 " };
     expect(draftValid(ok)).toBe(true);
     expect(draftValid({ ...ok, cron: "every day" })).toBe(false);
-    expect(scheduleBody(ok, "Asia/Shanghai")).toEqual({ name: "日报", cron: "0 9 * * 1-5", message: "汇总", timezone: "Asia/Shanghai" });
+    expect(scheduleBody(ok, "Asia/Shanghai")).toEqual({ name: "日报", kind: "cron", cron: "0 9 * * 1-5", message: "汇总", timezone: "Asia/Shanghai" });
+    const at = new Date("2026-11-23T07:00:00Z");
+    const once = { ...ok, kind: "once" as const, runAt: at };
+    expect(draftValid(once, at.getTime() - 1000)).toBe(true);
+    expect(draftValid(once, at.getTime() + 1000)).toBe(false);
+    expect(scheduleBody(once, "UTC")).toEqual({ name: "日报", kind: "once", run_at: "2026-11-23T07:00:00.000Z", message: "汇总", timezone: "UTC" });
   });
 });
 
