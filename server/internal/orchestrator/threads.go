@@ -338,8 +338,10 @@ func (o *Orchestrator) setStatusLine(ctx context.Context, tx *core.Tx, t core.Th
 }
 
 // notifyAfterCommit is notifyCoordinator in a transaction of its own, run again (up to 3 tries)
-// while it is a deadlock victim or a serialization failure.
+// while it is a deadlock victim or a serialization failure. It does not end with the caller's
+// context (an HTTP request or a node message that is already done).
 func (o *Orchestrator) notifyAfterCommit(ctx context.Context, t core.Thread, next, line string) {
+	ctx = context.WithoutCancel(ctx)
 	var err error
 	for range 3 {
 		if err = o.core.InTx(ctx, func(tx *core.Tx) error { return o.notifyCoordinator(ctx, tx, t, next, line) }); !store.IsRetryable(err) {
