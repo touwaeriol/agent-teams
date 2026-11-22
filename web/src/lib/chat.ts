@@ -36,9 +36,9 @@ export function chatBlocks(messages: MessageView[]): ChatBlock[] {
   return blocks;
 }
 
-/** What a thread's chat shows: the user and the lead talking, errors and the chat cards; task briefs and platform notes stay out. */
+/** What a thread's chat shows: the user and the lead talking, errors, the chat cards and the lines about wake-ups agents set; task briefs and other platform notes stay out. */
 export function threadTalk(m: MessageView): boolean {
-  return m.role === "user" || m.role === "leader" || m.role === "error" || isCard(m);
+  return m.role === "user" || m.role === "leader" || m.role === "error" || isCard(m) || Boolean(m.meta?.schedule_note);
 }
 
 /** A lead reply up to this long that answers a platform check is a mere acknowledgement. */

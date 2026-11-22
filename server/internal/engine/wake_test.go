@@ -227,7 +227,7 @@ func TestProjectArchiveStopsSessions(t *testing.T) {
 	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `UPDATE at_schedules SET next_run_at = now() - interval '1 minute' WHERE id = $1`, s.ID); err != nil {
 		t.Fatal(err)
 	}
-	tm.w.e.Timers.Tick(tm.w.ctx)
+	fireDue(t, tm)
 	expectNone(t, tm.n, protocol.TypeSessionOpen, 500*time.Millisecond, nil)
 }
 

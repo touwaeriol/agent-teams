@@ -95,7 +95,10 @@ func New(d Deps) (*Engine, error) {
 	if e.Tools, err = toolsvc.New(cs, d.Store, e.Orch, e.Sched, e.Delivery, e.Status, gw, d.Log); err != nil {
 		return nil, err
 	}
-	e.Timers = timers.New(cs, e.Orch, d.Log)
+	if e.Timers, err = timers.New(cs, e.Orch, d.Log); err != nil {
+		return nil, err
+	}
+	e.Tools.Schedules = e.Timers
 	e.Orch.Kick = e.Sched.Kick
 	e.Sched.PushWork = func(ctx context.Context, tx *core.Tx, emp core.Employee, t core.Thread) error {
 		_, err := e.Delivery.Push(ctx, tx, emp, t, map[string]any{"auto": true})

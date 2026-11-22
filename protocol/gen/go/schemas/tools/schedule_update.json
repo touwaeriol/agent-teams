@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/schedule_update.json",
+  "title": "ScheduleUpdateInput",
+  "description": "Change one of the schedules you set: only the fields given change, and the next run is worked out again from now. enabled=false pauses it, true resumes it. Switching between one-off and recurring: give at / in_minutes or cron.",
+  "x-tool": {
+    "tiers": [
+      "coordinator",
+      "lead",
+      "member"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "schedule_id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schedule_id": {
+      "type": "string",
+      "pattern": "^sc_[A-Za-z0-9]+$",
+      "description": "The schedule's id (sc_…), from schedule_create or schedule_list."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 20000
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "One-off: fire once at this time (ISO 8601 with an offset, e.g. 2026-11-23T09:00:00+08:00), 1 minute to 30 days from now."
+    },
+    "in_minutes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 43200,
+      "description": "One-off: fire once this many minutes from now."
+    },
+    "cron": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "description": "Recurring: five cron fields (minute hour day-of-month month day-of-week, e.g. \"0 9 * * 1-5\") or a descriptor (@daily, @every 2h), read in timezone; at least 5 minutes between runs."
+    },
+    "timezone": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "IANA zone the cron is read in (e.g. Asia/Shanghai, the user's zone when you know it); default UTC."
+    },
+    "ends_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Recurring: stop after this time."
+    },
+    "max_runs": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Recurring: stop after this many runs."
+    },
+    "enabled": {
+      "type": "boolean"
+    }
+  }
+}

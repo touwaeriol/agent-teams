@@ -83,6 +83,8 @@ type Service struct {
 	handlers  map[string]handler
 	// Reviews settles permission requests the lead decides (review_permission).
 	Reviews Reviewer
+	// Schedules creates and changes scheduled tasks (schedule_* tools; the timers runner).
+	Schedules ScheduleRunner
 }
 
 // Reviewer is the approvals engine as review_permission needs it.
@@ -119,7 +121,9 @@ func (s *Service) table() map[string]handler {
 		protocol.ToolMemoryList: s.memoryList, protocol.ToolMemoryRead: s.memoryRead, protocol.ToolMemoryWrite: s.memoryWrite,
 		protocol.ToolMemoryDelete: s.memoryDelete, protocol.ToolListDeliverables: s.listDeliverables,
 		protocol.ToolReadDeliverable: s.readDeliverable, protocol.ToolTellUser: s.tellUser,
-		protocol.ToolCloseQuestion:   s.closeQuestion,
+		protocol.ToolCloseQuestion:  s.closeQuestion,
+		protocol.ToolScheduleCreate: s.scheduleCreate, protocol.ToolScheduleList: s.scheduleList,
+		protocol.ToolScheduleUpdate: s.scheduleUpdate, protocol.ToolScheduleCancel: s.scheduleCancel,
 		protocol.ToolListSharedFiles: s.listSharedFiles, protocol.ToolReadSharedFile: s.readSharedFile,
 		protocol.ToolWriteSharedFile: s.writeSharedFile, protocol.ToolDeleteSharedFile: s.deleteSharedFile,
 	}

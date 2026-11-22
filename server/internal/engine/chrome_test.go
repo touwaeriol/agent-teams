@@ -191,8 +191,8 @@ func TestSchedulesFireOnce(t *testing.T) {
 	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `UPDATE at_schedules SET next_run_at = now() - interval '1 minute' WHERE id = $1`, s.ID); err != nil {
 		t.Fatal(err)
 	}
-	tm.w.e.Timers.Tick(tm.w.ctx)
-	tm.w.e.Timers.Tick(tm.w.ctx)
+	fireDue(t, tm)
+	fireDue(t, tm)
 	_, open := expectOpen(t, tm.w, tm.n, "coordinator")
 	if open.FirstMessage == nil || !strings.Contains(open.FirstMessage.Text, "【定时任务：早报】") {
 		t.Fatalf("coordinator first message %+v", open.FirstMessage)
@@ -298,5 +298,12 @@ func TestProjectModels(t *testing.T) {
 	tm.b.must(200, "PATCH", path, map[string]any{"coordinator_model": "", "thread_model": "", "thread_codex_model": ""}, &p)
 	if p.CoordinatorModel != "" || p.ThreadModel != "" || p.ThreadCodexModel != "" {
 		t.Fatalf("cleared %+v", p)
+	}
+}
+
+func fireDue(t *testing.T, tm *team) {
+	t.Helper()
+	if err := tm.w.e.Timers.FireDue(tm.w.ctx); err != nil {
+		t.Fatal(err)
 	}
 }
