@@ -699,6 +699,13 @@ func (o *Orchestrator) handoffSummary(ctx context.Context, tx *core.Tx, e core.E
 	if err := recentDigest(ctx, tx, &b, e, conv); err != nil {
 		return "", err
 	}
+	digest, err := core.LatestSessionDigest(ctx, tx, e.ID)
+	if err != nil {
+		return "", err
+	}
+	if digest != "" {
+		b.WriteString("\n下面是节点从你上一个会话的记录里整理出的工作现场（文件路径相对工作目录）：\n" + digest + "\n")
+	}
 	return b.String(), nil
 }
 

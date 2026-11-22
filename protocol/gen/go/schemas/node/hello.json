@@ -57,7 +57,7 @@
       "$ref": "#/$defs/Runtimes"
     },
     "features": {
-      "description": "Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), runtime_status (node.runtimes, node.runtimes_refresh), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh), self_update (runs under the update launcher: node.upgrade with mode, drain, rollback).",
+      "description": "Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), runtime_status (node.runtimes, node.runtimes_refresh), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh), session_move (session.export, session.open.import, /nodes/moves), self_update (runs under the update launcher: node.upgrade with mode, drain, rollback).",
       "type": "array",
       "items": {
         "type": "string"

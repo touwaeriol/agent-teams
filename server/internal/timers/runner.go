@@ -56,13 +56,16 @@ func (r *Runner) loop(ctx context.Context) {
 	}
 }
 
-// Tick does one round: usage-limit resumes first, then thread reminders.
+// Tick does one round: usage-limit resumes first, then thread reminders, then stale session moves.
 func (r *Runner) Tick(ctx context.Context) {
 	if err := r.resumeWaits(ctx); err != nil && ctx.Err() == nil {
 		r.log.Warn("resume after usage limit", "err", err)
 	}
 	if err := r.FireReminders(ctx); err != nil && ctx.Err() == nil {
 		r.log.Warn("thread reminders", "err", err)
+	}
+	if err := r.orch.SweepMoves(ctx, r.Now()); err != nil && ctx.Err() == nil {
+		r.log.Warn("session moves", "err", err)
 	}
 }
 

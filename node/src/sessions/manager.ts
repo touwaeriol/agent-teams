@@ -25,12 +25,16 @@ export interface ManagerDeps {
   approvals: ApprovalBroker;
   tools: ToolBroker;
   waitForJob: (jobId: string, timeoutMs: number) => Promise<GitResult>;
+  /** session.open.import: puts a session moved from another node in place (move/mover.ts); throws when it cannot. */
+  importMove?: (spec: SessionOpen, absCwd: string) => Promise<void>;
   /** Builds env/policy and the runtime driver for a session. */
   createDriver: (spec: SessionOpen, absCwd: string, sink: Session) => { driver: Driver; ctx: DriverContext };
   /** Downloads an attached image from the console (session.send images). */
   fetchImage?: ImageFetcher;
   /** Called when a session stops for good (unregister cred secrets, loopback routes). */
   onSessionGone?: (sessionId: string) => void;
+  /** A session's turn ended (session.digest, move/live.ts). */
+  onTurnEnd?: (s: { id: string; gen: number; spec: SessionOpen; absCwd: string }) => void;
   /** Called whenever a session's driver stops (closed, parked, crashed): per-driver secrets such as the SSH key are dropped. */
   onDriverGone?: (sessionId: string) => void;
   log: Logger;
@@ -109,7 +113,25 @@ export class SessionManager implements SessionHost {
     if (existing) await this.stop(existing, "process_restarted");
     const failure = await this.preflight(spec);
     if (failure) return this.openFailed(new Session(spec, this), failure);
+    const moved = await this.importMoved(spec);
+    if (moved) return this.resumeFailed(new Session(spec, this), moved);
     return this.startNew(spec);
+  }
+
+  /**
+   * A session moved from another node (protocol.md §4.11): its transcript and checkout snapshots
+   * go in place before the driver resumes it. A failure is a resume failure: the console hands off
+   * with a recap instead.
+   */
+  private async importMoved(spec: SessionOpen): Promise<ResumeFailed | null> {
+    if (!spec.import) return null;
+    if (!this.d.importMove) return new ResumeFailed("this daemon cannot import moved sessions");
+    try {
+      await this.d.importMove(spec, resolveInRoot(this.d.root, spec.cwd));
+      return null;
+    } catch (err) {
+      return new ResumeFailed(`import of moved session failed: ${(err as Error).message}`);
+    }
   }
 
   private async preflight(spec: SessionOpen): Promise<string | null> {
@@ -470,6 +492,7 @@ export class SessionManager implements SessionHost {
     if (!s.driver) return;
     if (!running) s.crashes = 0;
     s.setState(running ? "turn_running" : "active");
+    if (!running) this.d.onTurnEnd?.(s);
   }
 
   onExit(s: Session, err: Error): void {

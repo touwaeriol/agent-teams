@@ -273,6 +273,13 @@
       ]
     },
     {
+      "type": "session.digest",
+      "name": "SessionDigest",
+      "direction": "node_to_console",
+      "reliable": false,
+      "key": []
+    },
+    {
       "type": "session.event",
       "name": "SessionEvent",
       "direction": "node_to_console",
@@ -280,6 +287,24 @@
       "key": [
         "session_id",
         "event_no"
+      ]
+    },
+    {
+      "type": "session.export",
+      "name": "SessionExport",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "export_id"
+      ]
+    },
+    {
+      "type": "session.exported",
+      "name": "SessionExported",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": [
+        "export_id"
       ]
     },
     {

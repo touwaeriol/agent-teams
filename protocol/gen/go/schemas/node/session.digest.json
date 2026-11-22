@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/session.digest.json",
+  "title": "SessionDigest",
+  "description": "Live handoff digest of a session, read by the daemon from the runtime's transcript without the model after each turn (when it changed): the last plan / todo list, files changed, recent commands and the recent exchange. Unreliable, latest wins; the console quotes the newest one when a conversation cannot be resumed (another node, lost transcript). Accepted for a session that was closed meanwhile.",
+  "x-direction": "node_to_console",
+  "x-reliable": false,
+  "type": "object",
+  "required": [
+    "session_id",
+    "open_gen",
+    "digest"
+  ],
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "open_gen": {
+      "$ref": "common.json#/$defs/OpenGen"
+    },
+    "digest": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 24000
+    }
+  },
+  "additionalProperties": false
+}

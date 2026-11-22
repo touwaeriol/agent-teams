@@ -659,10 +659,71 @@
     {
       "properties": {
         "type": {
+          "const": "session.digest"
+        },
+        "body": {
+          "$ref": "session.digest.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^n_"
+        }
+      },
+      "required": [
+        "type",
+        "body"
+      ],
+      "not": {
+        "required": [
+          "seq"
+        ]
+      }
+    },
+    {
+      "properties": {
+        "type": {
           "const": "session.event"
         },
         "body": {
           "$ref": "session.event.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^n_"
+        }
+      },
+      "required": [
+        "type",
+        "body",
+        "seq"
+      ]
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "session.export"
+        },
+        "body": {
+          "$ref": "session.export.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^c_"
+        }
+      },
+      "required": [
+        "type",
+        "body",
+        "seq"
+      ]
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "session.exported"
+        },
+        "body": {
+          "$ref": "session.exported.json"
         },
         "id": {
           "type": "string",

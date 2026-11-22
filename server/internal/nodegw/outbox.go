@@ -43,7 +43,7 @@ func expiry(typ string) time.Duration {
 		return 10 * time.Minute
 	case typ == protocol.TypeApprovalResolve || typ == protocol.TypeToolResult:
 		return 24 * time.Hour
-	case typ == protocol.TypeSessionOpen || strings.HasPrefix(typ, "git."):
+	case typ == protocol.TypeSessionOpen || typ == protocol.TypeSessionExport || strings.HasPrefix(typ, "git."):
 		return 30 * time.Minute
 	}
 	return time.Hour

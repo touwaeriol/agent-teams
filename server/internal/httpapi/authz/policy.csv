@@ -43,6 +43,8 @@ p, public, /readyz, GET
 # Daemons (node token): the node WebSocket and attachment fetches.
 p, node-token, /nodes/attachments/:id, GET
 p, node-token, /nodes/connect, GET
+p, node-token, /nodes/moves/:id, GET
+p, node-token, /nodes/moves/:id, PUT
 p, node-token, /nodes/v2/connect, GET
 p, node-token, /nodes/ssh, GET
 

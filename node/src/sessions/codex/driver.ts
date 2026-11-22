@@ -13,6 +13,8 @@ export interface CodexDriverDeps {
   toolhost: LoopbackToolHost;
   /** Plugin MCP servers in Codex config form (sessions/plugins.ts codexMcpServers). */
   pluginServers?: Record<string, Record<string, unknown>>;
+  /** The rollout file of a thread on this node (a thread moved here from another node, move/transcripts.ts). */
+  findRollout?: (threadId: string) => string | null;
 }
 
 type Approval = Pick<ApprovalRequest, "source" | "tool_name" | "input"> & Partial<ApprovalRequest>;
@@ -72,11 +74,22 @@ export class CodexDriver implements Driver, ThreadListener {
     return { codex_thread_id: this.threadId, init: await this.init(server) };
   }
 
+  /**
+   * thread/resume by id; when app-server does not know the id (a rollout copied here by a session
+   * move is not in its index yet) and the rollout is on disk, again by its path.
+   */
   private async resume(server: AppServer, params: Record<string, unknown>): Promise<{ thread: { id: string }; model?: string }> {
+    const base = { ...params, threadId: this.threadId, excludeTurns: true };
     try {
-      return await server.request("thread/resume", { ...params, threadId: this.threadId, excludeTurns: true });
+      return await server.request("thread/resume", base);
     } catch (err) {
-      throw new ResumeFailed((err as Error).message);
+      const path = this.deps.findRollout?.(this.threadId!);
+      if (!path) throw new ResumeFailed((err as Error).message);
+      try {
+        return await server.request("thread/resume", { ...base, path });
+      } catch (err2) {
+        throw new ResumeFailed((err2 as Error).message);
+      }
     }
   }
 

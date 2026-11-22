@@ -87,7 +87,7 @@ const handlers = {
     return { thread: { id }, model: p.model ?? "fake-codex-default" };
   },
   "thread/resume": (p) => {
-    if (p.threadId === "th_missing") throw new Error("thread not found");
+    if (p.threadId === "th_missing" && !p.path) throw new Error("thread not found"); // known only by its rollout path (a moved thread)
     threads.set(p.threadId, p);
     return { thread: { id: p.threadId }, model: p.model ?? "fake-codex-default" };
   },

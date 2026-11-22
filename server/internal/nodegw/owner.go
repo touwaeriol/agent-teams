@@ -13,6 +13,10 @@ import (
 // maxRejectsPerMinute closes a link that keeps naming foreign sessions (protocol.md §2.3).
 const maxRejectsPerMinute = 20
 
+// afterClose messages are still taken for a session closed meanwhile (same open_gen): the live
+// digest of its last turn arrives after a close the turn itself caused (a usage limit, a move).
+var afterClose = map[string]bool{protocol.TypeSessionDigest: true}
+
 // terminal messages about a session that is already closed are dropped quietly.
 var terminal = map[string]bool{
 	protocol.TypeSessionClosed: true, protocol.TypeSessionState: true, protocol.TypeApprovalCancel: true,
@@ -25,6 +29,7 @@ type refs struct {
 	SessionID *string `json:"session_id"`
 	JobID     *string `json:"job_id"`
 	OpenGen   *int    `json:"open_gen"`
+	ExportID  *string `json:"export_id"`
 }
 
 type verdict int
@@ -57,6 +62,10 @@ func (g *Gateway) authorize(ctx context.Context, l *link, env *protocol.Envelope
 }
 
 func (g *Gateway) check(ctx context.Context, node store.Node, typ string, r refs) (verdict, string, error) {
+	if typ == protocol.TypeSessionExported {
+		// About a session the console already closed (it is being moved): the export must be this node's.
+		return g.checkExport(ctx, node, deref(r.ExportID), deref(r.SessionID))
+	}
 	if r.SessionID != nil {
 		return g.checkSession(ctx, node, typ, *r.SessionID, r.OpenGen)
 	}
@@ -86,6 +95,9 @@ func (g *Gateway) checkSession(ctx context.Context, node store.Node, typ, sessio
 	if nodeID == nil || *nodeID != node.ID || owner != node.UserID {
 		return rejected, "unknown_session", nil
 	}
+	if state == "closed" && afterClose[typ] && (gen == nil || *gen == openGen) {
+		return allowed, "", nil
+	}
 	if state == "closed" || (gen != nil && *gen < openGen) {
 		if terminal[typ] {
 			return dropped, "", nil
@@ -96,6 +108,27 @@ func (g *Gateway) checkSession(ctx context.Context, node store.Node, typ, sessio
 		return rejected, "unknown_session", nil
 	}
 	return allowed, "", nil
+}
+
+// checkExport: session.exported answers a session.export the console sent this node for that session.
+func (g *Gateway) checkExport(ctx context.Context, node store.Node, exportID, sessionID string) (verdict, string, error) {
+	var n int64
+	err := g.core.Pool.Gorm(ctx).Table("at_session_moves").
+		Where("id = ? AND from_node_id = ? AND from_session_id = ?", exportID, node.ID, sessionID).Count(&n).Error
+	if err != nil {
+		return rejected, "", err
+	}
+	if n == 0 {
+		return rejected, "unknown_session", nil
+	}
+	return allowed, "", nil
+}
+
+func deref(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 func (g *Gateway) checkJob(ctx context.Context, node store.Node, jobID string) (verdict, string, error) {

@@ -63,6 +63,17 @@
         }
       ]
     },
+    "import": {
+      "description": "A session moved from another node (protocol.md §4.11): after prepare_jobs the daemon downloads GET /nodes/moves/{export_id}, checks size and sha256, writes the transcript under its own paths and restores the worktree snapshots, then resumes. Any failure answers session.opened {resume_failed}. Only sent to daemons with the session_move feature.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SessionImport"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "claude": {
       "description": "Set when runtime = claude.",
       "anyOf": [
@@ -786,6 +797,30 @@
           "additionalProperties": {
             "type": "string"
           }
+        }
+      }
+    },
+    "SessionImport": {
+      "title": "SessionImport",
+      "type": "object",
+      "required": [
+        "export_id",
+        "size",
+        "sha256"
+      ],
+      "properties": {
+        "export_id": {
+          "$ref": "common.json#/$defs/ExportId"
+        },
+        "size": {
+          "description": "Archive bytes.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "description": "Hex sha256 of the archive.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
         }
       }
     }

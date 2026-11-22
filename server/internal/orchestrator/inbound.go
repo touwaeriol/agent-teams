@@ -24,7 +24,11 @@ func (o *Orchestrator) HandleOpened(ctx context.Context, m *protocol.SessionOpen
 		if err != nil {
 			return err
 		}
-		if m.ResumeFailed != nil && *m.ResumeFailed {
+		failed := m.ResumeFailed != nil && *m.ResumeFailed
+		if err := settleMove(ctx, tx, s.ID, failed, deref(m.Error)); err != nil {
+			return err
+		}
+		if failed {
 			return o.handoff(ctx, tx, e, s, nil)
 		}
 		return o.checkOpened(ctx, tx, e, s, m)

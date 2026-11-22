@@ -91,6 +91,9 @@ func (o *Orchestrator) releaseHold(ctx context.Context, tx *core.Tx, projectID, 
 	if err != nil {
 		return ignoreMissing(err)
 	}
+	if moving, err := movedPending(ctx, tx, employeeID); err != nil || moving {
+		return err // the move releases it (HandleExported, SweepMoves)
+	}
 	e, err := core.EmployeeByID(ctx, tx, employeeID)
 	if err != nil {
 		return ignoreMissing(err)
