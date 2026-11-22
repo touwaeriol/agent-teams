@@ -37,6 +37,11 @@
     "error": {
       "type": "string",
       "maxLength": 2000
+    },
+    "digest": {
+      "description": "Handoff digest of the conversation read from the transcript (plan / todos, files changed, recent commands, recent exchange); the console quotes it when the conversation cannot be resumed.",
+      "type": "string",
+      "maxLength": 24000
     }
   },
   "if": {

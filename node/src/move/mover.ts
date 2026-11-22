@@ -10,6 +10,7 @@ import type { Logger } from "../util/log.js";
 import { isInside, resolveInRoot } from "../util/paths.js";
 import { findTranscript } from "../sessions/claude/transcript.js";
 import { ArchiveError, checkName, pack, unpack, type Entry } from "./archive.js";
+import { conversationDigest } from "./digest.js";
 import { restoreRepo, snapshotRepo } from "./snapshot.js";
 import { claudeProjectDirName, findRollout, listFiles, rewritePaths } from "./transcripts.js";
 import type { MoveTransfer } from "./transfer.js";
@@ -51,15 +52,31 @@ export class Mover {
 
   /** session.export: never throws; a failure is session.exported {ok:false, error}. */
   async export(b: SessionExport): Promise<SessionExported> {
+    const digest = this.digest(b);
+    const withDigest = digest ? { digest } : {};
     try {
       const archive = await this.pack(b);
       const sha256 = createHash("sha256").update(archive).digest("hex");
       await this.d.transfer.upload(b.export_id, archive, sha256);
       this.d.log.info({ session: b.session_id, export: b.export_id, bytes: archive.length }, "session exported");
-      return { export_id: b.export_id, session_id: b.session_id, ok: true, size: archive.length, sha256 };
+      return { export_id: b.export_id, session_id: b.session_id, ok: true, size: archive.length, sha256, ...withDigest };
     } catch (err) {
       this.d.log.warn({ session: b.session_id, export: b.export_id, err: (err as Error).message }, "session export failed");
-      return { export_id: b.export_id, session_id: b.session_id, ok: false, error: (err as Error).message.slice(0, 2000) };
+      return { export_id: b.export_id, session_id: b.session_id, ok: false, error: (err as Error).message.slice(0, 2000), ...withDigest };
+    }
+  }
+
+  /** The handoff digest of the conversation (digest.ts), paths relative to the checkouts; "" when unreadable. */
+  private digest(b: SessionExport): string {
+    try {
+      const file = b.runtime === "claude" ? b.resume.sdk_session_id && findTranscript(this.d.claudeConfigDir, b.resume.sdk_session_id) : b.resume.codex_thread_id && findRollout(this.d.codexHome, b.resume.codex_thread_id);
+      if (!file) return "";
+      const repos = (b.repos ?? []).map((rel): [string, string] => [`${resolveInRoot(this.d.root, rel)}/`, ""]);
+      const text = rewritePaths(readFileSync(file, "utf8"), [...repos, [`${resolve(this.d.root)}/`, ""]]);
+      return conversationDigest(b.runtime, text);
+    } catch (err) {
+      this.d.log.warn({ session: b.session_id, err: (err as Error).message }, "conversation digest failed");
+      return "";
     }
   }
 

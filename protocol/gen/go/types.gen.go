@@ -7857,6 +7857,11 @@ func (j *SessionExport) UnmarshalJSON(value []byte) error {
 
 // Result of session.export: the archive is uploaded (ok) or why not (error).
 type SessionExported struct {
+	// Handoff digest of the conversation read from the transcript (plan / todos,
+	// files changed, recent commands, recent exchange); the console quotes it when
+	// the conversation cannot be resumed.
+	Digest *string `json:"digest,omitempty,omitzero"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
 
@@ -7895,6 +7900,9 @@ func (j *SessionExported) UnmarshalJSON(value []byte) error {
 	var plain Plain
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
+	}
+	if plain.Digest != nil && utf8.RuneCountInString(string(*plain.Digest)) > 24000 {
+		return fmt.Errorf("field %s length: must be <= %d", "digest", 24000)
 	}
 	if plain.Error != nil && utf8.RuneCountInString(string(*plain.Error)) > 2000 {
 		return fmt.Errorf("field %s length: must be <= %d", "error", 2000)

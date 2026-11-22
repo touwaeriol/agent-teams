@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS at_session_moves (
     archive         BYTEA,
     size            BIGINT,
     sha256          TEXT,
+    digest          TEXT NOT NULL DEFAULT '',        -- session.exported.digest: quoted by the recap when the conversation cannot be resumed
     reset_at        TIMESTAMPTZ,                     -- when the source node's limit resets: no move goes back there before
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()

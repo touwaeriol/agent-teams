@@ -1332,6 +1332,10 @@ export interface SessionExported {
    */
   sha256?: string;
   error?: string;
+  /**
+   * Handoff digest of the conversation read from the transcript (plan / todos, files changed, recent commands, recent exchange); the console quotes it when the conversation cannot be resumed.
+   */
+  digest?: string;
 }
 /**
  * Interrupt the running turn.

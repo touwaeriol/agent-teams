@@ -293,7 +293,7 @@
 
 #### `session.exported`（守护进程 → 控制台，可靠，键：`export_id`）
 
-成功 `session.exported {export_id, session_id, ok: true, size, sha256}`，失败 `session.exported {export_id, session_id, ok: false, error}`（转录找不到、档案太大、上传失败……）。它说的是已经关闭的会话，控制台按 `export_id` 核对归属（§2.3）。
+成功 `session.exported {export_id, session_id, ok: true, size, sha256}`，失败 `session.exported {export_id, session_id, ok: false, error}`（转录找不到、档案太大、上传失败……）。两种情况都可以带 `session.exported {digest}`：守护进程不调用模型（额度已经用完），直接从转录里抽出的交接摘要（最后一次的待办 / 计划、改过的文件、最近的命令、最近的往来，路径相对检出，≤ 24000 字符）。对话没能 resume、走交接摘要时，控制台把它附在摘要后面。它说的是已经关闭的会话，控制台按 `export_id` 核对归属（§2.3）。
 
 #### 导入（`session.open.import`）
 

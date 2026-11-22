@@ -186,7 +186,8 @@ func TestSessionMoveImportFails(t *testing.T) {
 	}
 	sum := sha256.Sum256(archive)
 	digest, size := hex.EncodeToString(sum[:]), len(archive)
-	tm.dev.send(protocol.TypeSessionExported, protocol.SessionExported{ExportID: exp.ExportID, SessionID: exp.SessionID, Ok: true, Size: &size, SHA256: &digest})
+	handoff := "待办 / 计划（最后一次更新）：\n- [in_progress] 写迁移测试"
+	tm.dev.send(protocol.TypeSessionExported, protocol.SessionExported{ExportID: exp.ExportID, SessionID: exp.SessionID, Ok: true, Size: &size, SHA256: &digest, Digest: &handoff})
 	ctx, cancel := tm.w.waitCtx()
 	defer cancel()
 	f, err := nb.Wait(ctx, protocol.TypeSessionOpen, func(f nodetest.Frame) bool { return strings.Contains(string(f.Body), `"name":"dev-1"`) })
@@ -210,7 +211,8 @@ func TestSessionMoveImportFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recap.Import != nil || recap.Resume != nil || recap.FirstMessage == nil || !strings.Contains(recap.FirstMessage.Text, "[会话恢复]") {
+	if recap.Import != nil || recap.Resume != nil || recap.FirstMessage == nil || !strings.Contains(recap.FirstMessage.Text, "[会话恢复]") ||
+		!strings.Contains(recap.FirstMessage.Text, "[in_progress] 写迁移测试") {
 		t.Fatalf("recap open %+v", recap.FirstMessage)
 	}
 }
