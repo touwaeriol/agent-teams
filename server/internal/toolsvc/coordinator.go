@@ -103,10 +103,19 @@ func (s *Service) listThreads(ctx context.Context, tx *core.Tx, c *call) (Result
 		if err != nil {
 			return Result{}, err
 		}
+		parent := parentNo(ctx, tx, t)
 		out.Threads = append(out.Threads, protocol.ThreadSummary{No: protocol.ThreadNo(t.No), Title: t.Title,
-			Status: protocol.ThreadStatus(t.Status), PlanDone: counts.MainDone, PlanTotal: counts.MainTotal, Waiting: counts.Waiting})
-		lines = append(lines, fmt.Sprintf("#%d %s [%s] 计划 %d/%d，等你处理 %d", t.No, t.Title, t.Status, counts.MainDone,
-			counts.MainTotal, counts.Waiting))
+			Status: protocol.ThreadStatus(t.Status), PlanDone: counts.MainDone, PlanTotal: counts.MainTotal, Waiting: counts.Waiting,
+			ParentNo: parent})
+		line := fmt.Sprintf("#%d %s [%s] 计划 %d/%d，等你处理 %d", t.No, t.Title, t.Status, counts.MainDone,
+			counts.MainTotal, counts.Waiting)
+		if parent != nil {
+			line += fmt.Sprintf("（#%d 的子讨论串）", *parent)
+		}
+		if c.thread != nil && t.ID == c.thread.ID {
+			line += "（你的讨论串）"
+		}
+		lines = append(lines, line)
 	}
 	if len(lines) == 0 {
 		return okJSON("还没有讨论串", out), nil
@@ -135,7 +144,15 @@ func (s *Service) threadStatus(ctx context.Context, tx *core.Tx, c *call) (Resul
 // it (core.PhaseOf), told next to the raw status.
 func (s *Service) statusOf(ctx context.Context, tx *core.Tx, t core.Thread) (protocol.ThreadStatusResult, core.ThreadPhase, error) {
 	out := protocol.ThreadStatusResult{No: protocol.ThreadNo(t.No), Title: t.Title, Status: protocol.ThreadStatus(t.Status),
-		Plan: []protocol.PlanStep{}, PRURL: t.PRURL}
+		Plan: []protocol.PlanStep{}, PRURL: t.PRURL, ParentNo: parentNo(ctx, tx, t)}
+	subs, err := core.Subthreads(ctx, tx, t.ID, false)
+	if err != nil {
+		return out, core.ThreadPhase{}, err
+	}
+	for _, sub := range subs {
+		out.Subthreads = append(out.Subthreads, protocol.ThreadSummary{No: protocol.ThreadNo(sub.No), Title: sub.Title,
+			Status: protocol.ThreadStatus(sub.Status)})
+	}
 	plan, err := core.MainTasks(ctx, tx, t.ID)
 	if err != nil {
 		return out, core.ThreadPhase{}, err
@@ -168,6 +185,12 @@ func statusText(r protocol.ThreadStatusResult, phase core.ThreadPhase) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "#%d %s [%s]\n", r.No, r.Title, r.Status)
 	fmt.Fprintf(&b, "状态说明（和页面一致）：%s\n", phase.Text())
+	if r.ParentNo != nil {
+		fmt.Fprintf(&b, "父讨论串：#%d\n", *r.ParentNo)
+	}
+	for _, sub := range r.Subthreads {
+		fmt.Fprintf(&b, "子讨论串 #%d %s [%s]\n", sub.No, sub.Title, sub.Status)
+	}
 	for _, p := range r.Plan {
 		fmt.Fprintf(&b, "- [%s] %s\n", p.Status, p.Title)
 	}
@@ -188,6 +211,9 @@ func (s *Service) messageThread(ctx context.Context, tx *core.Tx, c *call) (Resu
 	var in protocol.MessageThreadInput
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
+	}
+	if c.emp().Tier == "lead" {
+		return s.leadMessageThread(ctx, tx, c, in)
 	}
 	t, err := core.ThreadByNo(ctx, tx, c.emp().ProjectID, int(in.No))
 	if err != nil {
@@ -215,8 +241,16 @@ func (s *Service) messageThread(ctx context.Context, tx *core.Tx, c *call) (Resu
 		return Result{}, err
 	}
 	text := "[Message from coordinator]\n" + in.Text
-	rec := &core.NewMessage{ConversationID: t.ID, Role: "system", Author: c.emp().Name, Kind: "chat", Content: in.Text}
+	rec := &core.NewMessage{ConversationID: t.ID, Role: "system", Author: c.emp().Name, Kind: "relay", Content: in.Text,
+		Meta: relayMeta("in", "message", coordinatorPeer, nil)}
 	if _, err := s.orch.Deliver(ctx, tx, lead, orchestrator.Delivery{Text: text, Kind: "mail", Priority: "next", Record: rec}); err != nil {
+		return Result{}, err
+	}
+	conv, err := s.orch.ConversationOf(ctx, tx, c.emp())
+	if err != nil {
+		return Result{}, err
+	}
+	if err := s.recordRelay(ctx, tx, t.ProjectID, conv, nil, c.emp().Name, in.Text, relayMeta("out", "message", threadPeer(t), nil)); err != nil {
 		return Result{}, err
 	}
 	return okText(fmt.Sprintf("%s已转给 #%d 的组长", reopened, t.No)), nil

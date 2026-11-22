@@ -332,6 +332,9 @@ func (s *Service) finish(ctx context.Context, tx *core.Tx, c *call) (Result, err
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
+	if err := openSubthreadsRefusal(ctx, tx, t); err != nil {
+		return Result{}, err
+	}
 	dropped, err := s.dropIdleTasks(ctx, tx, t)
 	if err != nil {
 		return Result{}, err

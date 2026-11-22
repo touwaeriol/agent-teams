@@ -121,6 +121,7 @@ const (
 	ToolBroadcast          = "broadcast"
 	ToolCancelTask         = "cancel_task"
 	ToolCloseQuestion      = "close_question"
+	ToolCloseSubthread     = "close_subthread"
 	ToolCompleteTask       = "complete_task"
 	ToolDeleteSharedFile   = "delete_shared_file"
 	ToolEnqueueMerge       = "enqueue_merge"
@@ -136,8 +137,10 @@ const (
 	ToolMemoryList         = "memory_list"
 	ToolMemoryRead         = "memory_read"
 	ToolMemoryWrite        = "memory_write"
+	ToolMessageCoordinator = "message_coordinator"
 	ToolMessageThread      = "message_thread"
 	ToolOpenPr             = "open_pr"
+	ToolOpenSubthread      = "open_subthread"
 	ToolOpenThread         = "open_thread"
 	ToolPublishDeliverable = "publish_deliverable"
 	ToolPublishFile        = "publish_file"
@@ -193,6 +196,10 @@ var Tools = map[string]ToolMeta{
 		Tiers: []Tier{TierCoordinator, TierLead}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(CloseQuestionInput) }, NewResult: nil,
 	},
+	ToolCloseSubthread: {
+		Tiers: []Tier{TierLead}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(CloseSubthreadInput) }, NewResult: nil,
+	},
 	ToolCompleteTask: {
 		Tiers: []Tier{TierMember}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(CompleteTaskInput) }, NewResult: func() any { return new(CompleteTaskResult) },
@@ -234,7 +241,7 @@ var Tools = map[string]ToolMeta{
 		NewInput: func() any { return new(ListTeamInput) }, NewResult: func() any { return new(ListTeamResult) },
 	},
 	ToolListThreads: {
-		Tiers: []Tier{TierCoordinator}, Blocking: nil, Requires: "",
+		Tiers: []Tier{TierCoordinator, TierLead}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(ListThreadsInput) }, NewResult: func() any { return new(ListThreadsResult) },
 	},
 	ToolMemoryDelete: {
@@ -253,13 +260,21 @@ var Tools = map[string]ToolMeta{
 		Tiers: []Tier{TierCoordinator, TierLead}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(MemoryWriteInput) }, NewResult: func() any { return new(MemoryWriteResult) },
 	},
+	ToolMessageCoordinator: {
+		Tiers: []Tier{TierLead}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(MessageCoordinatorInput) }, NewResult: nil,
+	},
 	ToolMessageThread: {
-		Tiers: []Tier{TierCoordinator}, Blocking: nil, Requires: "",
+		Tiers: []Tier{TierCoordinator, TierLead}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(MessageThreadInput) }, NewResult: nil,
 	},
 	ToolOpenPr: {
 		Tiers: []Tier{TierLead}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(OpenPRInput) }, NewResult: func() any { return new(OpenPRResult) },
+	},
+	ToolOpenSubthread: {
+		Tiers: []Tier{TierLead}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(OpenSubthreadInput) }, NewResult: func() any { return new(OpenSubthreadResult) },
 	},
 	ToolOpenThread: {
 		Tiers: []Tier{TierCoordinator}, Blocking: nil, Requires: "",
@@ -338,7 +353,7 @@ var Tools = map[string]ToolMeta{
 		NewInput: func() any { return new(TellUserInput) }, NewResult: nil,
 	},
 	ToolThreadStatus: {
-		Tiers: []Tier{TierCoordinator}, Blocking: nil, Requires: "",
+		Tiers: []Tier{TierCoordinator, TierLead}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(ThreadStatusInput) }, NewResult: func() any { return new(ThreadStatusResult) },
 	},
 	ToolUpdatePlan: {

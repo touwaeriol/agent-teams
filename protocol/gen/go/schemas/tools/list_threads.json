@@ -2,10 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/tools/list_threads.json",
   "title": "ListThreadsInput",
-  "description": "List threads, one line each: number, title, status, main-task progress and how many items wait for the user.",
+  "description": "List the project's threads, one line each: number, title, status, main-task progress, how many items wait for the user and the parent thread of a subthread.",
   "x-tool": {
     "tiers": [
-      "coordinator"
+      "coordinator",
+      "lead"
     ],
     "blocking": []
   },
@@ -64,6 +65,10 @@
         "waiting": {
           "type": "integer",
           "minimum": 0
+        },
+        "parent_no": {
+          "description": "The parent thread of a subthread.",
+          "$ref": "common.json#/$defs/ThreadNo"
         }
       }
     }

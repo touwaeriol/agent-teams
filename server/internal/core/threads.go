@@ -61,6 +61,23 @@ func RunningThreadCount(ctx context.Context, q DB, userID string) (int, error) {
 	return count(threads(ctx, q).Where("user_id = ? AND status IN ('running','waiting')", userID))
 }
 
+// openStatuses are the statuses of a thread that has not ended.
+var openStatuses = []string{"queued", "running", "waiting", "paused", "review"}
+
+// ThreadEnded reports whether a status is an end (done, failed, archived).
+func ThreadEnded(status string) bool {
+	return status == "done" || status == "failed" || status == "archived"
+}
+
+// Subthreads lists a thread's subthreads in number order; open=true keeps the unfinished ones.
+func Subthreads(ctx context.Context, q DB, parentID string, open bool) ([]Thread, error) {
+	g := threads(ctx, q).Where("parent_id = ?", parentID)
+	if open {
+		g = g.Where("status IN ?", openStatuses)
+	}
+	return find[Thread](g.Order("no"))
+}
+
 // NewThread is what CreateThread stores.
 type NewThread struct {
 	ProjectID   string
@@ -77,6 +94,8 @@ type NewThread struct {
 	SourceMessageID *int64
 	// ForwardedBrief: the brief is the user's forwarded messages (forward into a new thread).
 	ForwardedBrief bool
+	// ParentID is the opening thread of a subthread (nil: top level).
+	ParentID *string
 }
 
 // CreateThread inserts the thread's conversation (kind thread) and the thread row (status queued).
@@ -97,7 +116,7 @@ func CreateThread(ctx context.Context, tx *Tx, n NewThread) (Thread, error) {
 		"user_id": n.UserID, "no": no, "title": n.Title, "brief": n.Brief,
 		"branch": fmt.Sprintf("thread/%d-%s", no, Slug(n.Title)), "base_branch": n.BaseBranch,
 		"auto_approve": n.AutoApprove, "opened_by": n.OpenedBy, "roles_snapshot": roles,
-		"source_message_id": n.SourceMessageID, "forwarded_brief": n.ForwardedBrief, "only_roles": onlyRolesValue(n.OnlyRoles)}).Error
+		"source_message_id": n.SourceMessageID, "forwarded_brief": n.ForwardedBrief, "parent_id": n.ParentID, "only_roles": onlyRolesValue(n.OnlyRoles)}).Error
 	if err != nil {
 		return Thread{}, err
 	}
@@ -200,6 +219,9 @@ func (s *Store) ThreadViewOf(ctx context.Context, q DB, t Thread) (ThreadView, e
 		CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt, StartedAt: t.StartedAt, FinishedAt: t.FinishedAt,
 		PinnedAt: t.PinnedAt, RemindAt: t.RemindAt, RemindedAt: t.RemindedAt}
 	var err error
+	if v.ParentNo, err = ThreadNoOf(ctx, q, t.ParentID); err != nil {
+		return v, err
+	}
 	if v.Members, err = s.EmployeeBriefs(ctx, q, t.ProjectID, &t.ID); err != nil {
 		return v, err
 	}

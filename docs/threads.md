@@ -83,6 +83,14 @@ members:
 
 **成员**新增：`publish_deliverable(kind, title, url)`。
 
+## 子讨论串与讨论串之间的对话（用户 2026-11-22）
+
+- 组长 `open_subthread(title, brief, roles?, repos?)` 开自己讨论串的子讨论串：`at_threads.parent_id` 指向父讨论串（00400），`opened_by = lead`；子讨论串有自己的组长、分支和 PR，默认基于各仓库默认分支，要接着父讨论串的改动做时 repos 写 `{repo, base: 父讨论串分支}`，PR 就合回父讨论串分支。只套一层（子讨论串不能再开），一个讨论串最多 5 个没结束的子讨论串（`toolsvc.MaxOpenSubthreads`）。
+- 不阻塞：父组长开完继续干活。子讨论串的状态通知（waiting / review / done / failed，原来发给统筹的 `[Thread #n …]`）改发给父讨论串的组长：`[Subthread #n · 标题 · 状态] …`；父讨论串已经结束时才退回发给统筹。统筹只在项目对话里看到“#3 开了子讨论串 #7”的卡片，不占它的回合。
+- 父讨论串还有没结束的子讨论串时 `finish` 被拒绝；`close_subthread(no, reason?)` 按用户“标记完成”的同一套检查把子讨论串置为 done（PR 等用户验收或正在合并时拒绝）。归档父讨论串时子讨论串一起归档，取消归档不连带。
+- 讨论串之间的对话（用户拍板：项目内任意讨论串）：组长也有 `list_threads`、`thread_status`（带父讨论串和子讨论串）、`message_thread(no, text)`（不能发给自己；已结束的只有自己的子讨论串会被重新打开，`Reopen(cause "parent")`，其余拒绝并提示找统筹）；`message_coordinator(text)` 给统筹发话。对方收到 `[Message from thread #n · 标题 · lead-n] …`。两个讨论串之间每小时最多来回 20 条，组长给统筹每小时最多 20 条（`toolsvc.MaxRelaysPerHour`）。
+- 页面：这些消息在两边对话里都是 `kind = relay` 的卡片（`meta.relay {dir in|out, kind message|report|opened, peer coordinator|thread, no, title, status?}`），折叠成一行：“已向 #7 标题 发送 1 条消息”/“来自 #3 标题 的 1 条消息”，展开看正文和“查看讨论串”；统筹 `message_thread` 的消息也改成这种卡片。讨论串列表里同一状态组内子讨论串缩进挂在父讨论串下，父讨论串行有“n 个子讨论串”折叠开关；父讨论串在别的组时显示“#n 的子讨论串”。打开的讨论串标题栏下显示父讨论串链接和子讨论串列表。
+
 ## 接口
 
 - `GET /api/projects/{pid}/coordinator` → 统筹对话（conversation，不存在就创建），之后消息、SSE 复用现有 `/api/conversations/{id}/...`。

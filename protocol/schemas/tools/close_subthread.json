@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/close_subthread.json",
+  "title": "CloseSubthreadInput",
+  "description": "End one of your subthreads as done (its sessions close; the reason is kept as its summary). Refused while its PR waits for the user's review or is being merged.",
+  "x-tool": {
+    "tiers": [
+      "lead"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "no"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "no": {
+      "$ref": "common.json#/$defs/ThreadNo"
+    },
+    "reason": {
+      "description": "Why it is closed (no longer needed, result received...).",
+      "type": "string",
+      "maxLength": 2000
+    }
+  }
+}

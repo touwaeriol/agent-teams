@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/message_coordinator.json",
+  "title": "MessageCoordinatorInput",
+  "description": "Send a message to the project coordinator (e.g. something another thread or the user's other work should know, or a question about scope). Status changes of your thread already reach it automatically: do not send those, and do not reply just to acknowledge. At most 20 messages an hour.",
+  "x-tool": {
+    "tiers": [
+      "lead"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "text"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8000
+    }
+  }
+}

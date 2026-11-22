@@ -194,9 +194,17 @@ export type BubbleKind = "plain" | "ask" | "error" | "done";
  */
 export type SharedPath = string;
 /**
+ * Thread number inside the project (#12).
+ */
+export type ThreadNo1 = number;
+/**
  * Path of a file in the project's shared files: relative, '/'-separated, 1 to 8 segments, at most 255 bytes in UTF-8 (the schema can only check 255 characters; the server's byte check is authoritative). No segment may be empty, '.', '..', start with '.' (so no hidden files and nothing under .shared or .agent-*) or start or end with a space; no backslash, control characters (C0, DEL, C1), U+2028/U+2029 or leading '/'.
  */
 export type SharedPath1 = string;
+/**
+ * Thread number inside the project (#12).
+ */
+export type ThreadNo2 = number;
 /**
  * Path of a file in the project's shared files: relative, '/'-separated, 1 to 8 segments, at most 255 bytes in UTF-8 (the schema can only check 255 characters; the server's byte check is authoritative). No segment may be empty, '.', '..', start with '.' (so no hidden files and nothing under .shared or .agent-*) or start or end with a space; no backslash, control characters (C0, DEL, C1), U+2028/U+2029 or leading '/'.
  */
@@ -2457,6 +2465,19 @@ export interface CloseQuestionInput {
   answer?: string;
 }
 /**
+ * End one of your subthreads as done (its sessions close; the reason is kept as its summary). Refused while its PR waits for the user's review or is being merged.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "CloseSubthreadInput".
+ */
+export interface CloseSubthreadInput {
+  no: ThreadNo;
+  /**
+   * Why it is closed (no longer needed, result received...).
+   */
+  reason?: string;
+}
+/**
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "PlanStep".
  */
@@ -2995,9 +3016,10 @@ export interface ThreadSummary {
   plan_done: number;
   plan_total: number;
   waiting: number;
+  parent_no?: ThreadNo1;
 }
 /**
- * List threads, one line each: number, title, status, main-task progress and how many items wait for the user.
+ * List the project's threads, one line each: number, title, status, main-task progress, how many items wait for the user and the parent thread of a subthread.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "ListThreadsInput".
@@ -3079,7 +3101,16 @@ export interface MemoryWriteInput {
   content: string;
 }
 /**
- * Send a message to a thread's lead as the project coordinator.
+ * Send a message to the project coordinator (e.g. something another thread or the user's other work should know, or a question about scope). Status changes of your thread already reach it automatically: do not send those, and do not reply just to acknowledge. At most 20 messages an hour.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "MessageCoordinatorInput".
+ */
+export interface MessageCoordinatorInput {
+  text: string;
+}
+/**
+ * Send a message to another thread's lead. As the coordinator: a finished thread is reopened, an archived one refuses. As a lead: any thread of the project except your own; a finished thread is reopened only when it is your subthread; the reply comes back as "[Message from thread #n ...]". Write only what the other lead needs; do not reply just to acknowledge. At most 20 messages an hour between two threads.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "MessageThreadInput".
@@ -3133,12 +3164,232 @@ export interface OpenPrInput {
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
- * via the `definition` "OpenThreadResult".
+ * via the `definition` "OpenSubthreadResult".
  */
-export interface OpenThreadResult {
+export interface OpenSubthreadResult {
   no: ThreadNo;
   thread_id: string;
   branch: string;
+}
+/**
+ * Open a subthread of your thread for a separate piece of work or discussion: it gets its own number, lead, branch and members; the brief becomes its lead's first message. You do not wait for it: keep working; when it needs the user, goes to review, ends or fails you receive "[Subthread #n · title · status] ...". A subthread cannot open subthreads of its own, and a thread has at most 5 unfinished subthreads. To build on your own changes, give repos [{repo, base: <your thread branch>}] (push your work first): its PR then targets your branch. Your thread cannot finish while a subthread is unfinished (close_subthread ends one).
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "OpenSubthreadInput".
+ */
+export interface OpenSubthreadInput {
+  title: string;
+  /**
+   * Instructions for the subthread's lead: the goal, what to report back and when it is done.
+   */
+  brief: string;
+  /**
+   * Member roles the subthread's lead may assign to; default = all member roles of the team.
+   */
+  roles?: string[];
+  /**
+   * Repositories the subthread should work in, with an optional base branch each (e.g. your thread branch).
+   *
+   * @maxItems 20
+   */
+  repos?:
+    | []
+    | [RepoFocus]
+    | [RepoFocus, RepoFocus]
+    | [RepoFocus, RepoFocus, RepoFocus]
+    | [RepoFocus, RepoFocus, RepoFocus, RepoFocus]
+    | [RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus]
+    | [RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus]
+    | [RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus]
+    | [RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus]
+    | [RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus, RepoFocus]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ]
+    | [
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus,
+        RepoFocus
+      ];
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -3153,6 +3404,15 @@ export interface RepoFocus {
    * Base branch for this repository; default its default branch.
    */
   base?: string;
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "OpenThreadResult".
+ */
+export interface OpenThreadResult {
+  no: ThreadNo;
+  thread_id: string;
+  branch: string;
 }
 /**
  * Open a new thread (number, branch, member instances) for a piece of work; the brief becomes the lead's first message. Returns #no immediately.
@@ -3768,6 +4028,11 @@ export interface ThreadStatusResult {
   recent?: string[];
   lead_last_reply?: string | null;
   pr_url?: string | null;
+  parent_no?: ThreadNo2;
+  /**
+   * The thread's subthreads.
+   */
+  subthreads?: ThreadSummary[];
 }
 /**
  * Show one thread: plan, recent activity, the lead's latest reply and the PR.

@@ -16,6 +16,7 @@ import ThreadViewDialog from "../threadviews/ThreadViewDialog.vue";
 import DetailHeader from "./DetailHeader.vue";
 import type { ExpandLink, ThreadNav } from "./detail";
 import LeadComposer from "./LeadComposer.vue";
+import SubthreadStrip from "./SubthreadStrip.vue";
 import ThreadChat from "./ThreadChat.vue";
 import ThreadWakeups from "./ThreadWakeups.vue";
 
@@ -64,6 +65,7 @@ function setPlanOpen(open: boolean) {
 
 <template>
   <DetailHeader :thread="thread" :expand="expand" :full-href="fullHref" :nav="nav" :closable="closable" @back="emit('back')" @close="emit('close')" @view="(v) => emit('view', v)" />
+  <SubthreadStrip :pid="pid" :thread="thread" />
   <div class="scroll-thin min-h-0 flex-1 overflow-y-auto">
     <div :class="cn('at-reading flex min-w-0 flex-col px-5 pb-6 pt-5', layout === 'page' && 'sm:px-6 sm:pt-8')">
       <ThreadChat :pid="pid" :thread="thread" :compact="layout !== 'page'" />

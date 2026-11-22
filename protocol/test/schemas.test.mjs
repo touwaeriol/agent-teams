@@ -41,6 +41,7 @@ const EXPECTED_TOOLS = {
     "enqueue_merge", "open_pr", "finish", "publish_deliverable", "publish_file", "set_status", "tell_user",
     "memory_list", "memory_read", "memory_write", "memory_delete", "list_deliverables", "read_deliverable",
     "list_shared_files", "read_shared_file", "write_shared_file", "delete_shared_file",
+    "open_subthread", "close_subthread", "list_threads", "thread_status", "message_thread", "message_coordinator",
   ],
   member: [
     "complete_task", "push_branch", "report_progress", "ask_lead", "ask_user", "send_message", "read_messages",

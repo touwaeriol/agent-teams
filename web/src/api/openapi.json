@@ -6884,7 +6884,16 @@
             "type": "integer"
           },
           "opened_by": {
+            "description": "coordinator | user | lead (a subthread opened with open_subthread)",
             "type": "string"
+          },
+          "parent_no": {
+            "description": "The parent thread of a subthread (null: top level)",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "pause_reason": {
             "type": "string"
@@ -7010,6 +7019,7 @@
           "summary",
           "auto_approve",
           "opened_by",
+          "parent_no",
           "members",
           "main_tasks",
           "counts",
@@ -7216,7 +7226,16 @@
             "type": "integer"
           },
           "opened_by": {
+            "description": "coordinator | user | lead (a subthread opened with open_subthread)",
             "type": "string"
+          },
+          "parent_no": {
+            "description": "The parent thread of a subthread (null: top level)",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "pause_reason": {
             "type": "string"
@@ -7333,6 +7352,7 @@
           "summary",
           "auto_approve",
           "opened_by",
+          "parent_no",
           "members",
           "main_tasks",
           "counts",

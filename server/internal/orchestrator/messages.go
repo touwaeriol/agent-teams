@@ -344,7 +344,31 @@ func (o *Orchestrator) Archive(ctx context.Context, tx *core.Tx, t core.Thread) 
 	if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"archived_from": t.Status}); err != nil {
 		return err
 	}
-	return o.setStatus(ctx, tx, t, "archived", "")
+	if err := o.setStatus(ctx, tx, t, "archived", ""); err != nil {
+		return err
+	}
+	return o.archiveSubthreads(ctx, tx, t)
+}
+
+// archiveSubthreads archives a thread's subthreads with it (unarchiving the parent leaves them archived).
+func (o *Orchestrator) archiveSubthreads(ctx context.Context, tx *core.Tx, parent core.Thread) error {
+	subs, err := core.Subthreads(ctx, tx, parent.ID, false)
+	if err != nil {
+		return err
+	}
+	for _, sub := range subs {
+		if sub.Status == "archived" {
+			continue
+		}
+		cur, err := core.LockThread(ctx, tx, sub.ID)
+		if err != nil {
+			return err
+		}
+		if err := o.Archive(ctx, tx, cur); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Complete is the user closing a thread as done from the page (a finished thread its lead did
@@ -354,6 +378,16 @@ func (o *Orchestrator) Archive(ctx context.Context, tx *core.Tx, t core.Thread) 
 // refused: the user accepts or rejects it. After a reject the PR is back with the lead, and
 // the user may still close the thread (the PR stays open on the host).
 func (o *Orchestrator) Complete(ctx context.Context, tx *core.Tx, t core.Thread, summary string) error {
+	return o.completeAs(ctx, tx, t, summary, "用户在页面上把讨论串标记为完成。")
+}
+
+// CloseByParent is the parent's lead ending a subthread as done (close_subthread): the same
+// checks as Complete, the reason kept as the summary.
+func (o *Orchestrator) CloseByParent(ctx context.Context, tx *core.Tx, t core.Thread, parentNo int, reason string) error {
+	return o.completeAs(ctx, tx, t, reason, fmt.Sprintf("父讨论串 #%d 的组长关闭了这个子讨论串。", parentNo))
+}
+
+func (o *Orchestrator) completeAs(ctx context.Context, tx *core.Tx, t core.Thread, summary, line string) error {
 	switch t.Status {
 	case "done":
 		return nil
@@ -376,7 +410,6 @@ func (o *Orchestrator) Complete(ctx context.Context, tx *core.Tx, t core.Thread,
 		}
 		return ErrMerging
 	}
-	line := "用户在页面上把讨论串标记为完成。"
 	if summary = strings.TrimSpace(summary); summary != "" {
 		if err := core.UpdateThread(ctx, tx, t.ID, map[string]any{"summary": summary}); err != nil {
 			return err
