@@ -321,10 +321,34 @@ func (o *Orchestrator) setStatusLine(ctx context.Context, tx *core.Tx, t core.Th
 		return nil
 	}
 	// Reporting upward must never block the status change itself (e.g. no node for the coordinator).
-	if err := tx.Savepoint(ctx, func(sub *core.Tx) error { return o.notifyCoordinator(ctx, sub, t, next, line) }); err != nil {
+	err := tx.Savepoint(ctx, func(sub *core.Tx) error { return o.notifyCoordinator(ctx, sub, t, next, line) })
+	switch {
+	case err == nil:
+	case store.IsRetryable(err):
+		// A deadlock victim (40P01): this transaction already holds the project row (its events) and
+		// the thread's rows, and the other side (e.g. a node message updating the coordinator's
+		// session, then emitting) waits for one of them, so trying again here would close the same
+		// cycle. The note is sent once this transaction has committed, in a transaction of its own.
+		o.log.Info("notify coordinator after commit", "thread_id", t.ID, "status", next, "err", err)
+		tx.AfterCommit(func(ctx context.Context) { o.notifyAfterCommit(ctx, t, next, line) })
+	default:
 		o.log.Warn("notify coordinator", "thread_id", t.ID, "status", next, "err", err)
 	}
 	return nil
+}
+
+// notifyAfterCommit is notifyCoordinator in a transaction of its own, run again (up to 3 tries)
+// while it is a deadlock victim or a serialization failure.
+func (o *Orchestrator) notifyAfterCommit(ctx context.Context, t core.Thread, next, line string) {
+	var err error
+	for range 3 {
+		if err = o.core.InTx(ctx, func(tx *core.Tx) error { return o.notifyCoordinator(ctx, tx, t, next, line) }); !store.IsRetryable(err) {
+			break
+		}
+	}
+	if err != nil {
+		o.log.Warn("notify coordinator", "thread_id", t.ID, "status", next, "err", err)
+	}
 }
 
 // SetStatus exposes setStatus to the other engines.
