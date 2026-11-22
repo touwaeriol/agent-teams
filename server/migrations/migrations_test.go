@@ -1646,3 +1646,50 @@ INSERT INTO at_schedules (id, project_id, name, cron, message) VALUES ('sc1', 'p
 		t.Fatalf("schedule after down: %q %v", got, err)
 	}
 }
+
+// TestUpgradeFrom370: production ran 00360_node_runtimes and 00370_antigravity_runtime before
+// PR #46's River and schedule migrations were renumbered to 00380 and 00390; a database at 370
+// with data from both sides goes up to the latest and back down to 370 keeping its 370 state.
+func TestUpgradeFrom370(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 370); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_nodes (id, user_id, name, token_hash) VALUES ('n1', 'u1', 'n1', 'h');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
+INSERT INTO at_node_runtimes (node_id, runtime, installed, auth, checked_at) VALUES ('n1', 'antigravity', true, 'subscription', now());
+INSERT INTO at_roles (id, user_id, tier, role, runtime, runtimes) VALUES ('r1', 'u1', 'member', 'rev', 'antigravity', '{antigravity}');
+INSERT INTO at_schedules (id, project_id, name, cron, message) VALUES ('sc1', 'p1', '日报', '0 9 * * *', '汇报');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Up(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := p.GetDBVersion(ctx); err != nil || v != migrations.Latest() || v != 390 {
+		t.Fatalf("version %d %v", v, err)
+	}
+	var got string
+	if err := db.QueryRow(`SELECT (SELECT kind || ' ' || target || ' ' || status FROM at_schedules) || ' ' ||
+		(SELECT runtime FROM at_roles) || ' ' || (SELECT auth FROM at_node_runtimes) || ' ' ||
+		(SELECT count(*) FROM river_migration WHERE line = 'main')`).Scan(&got); err != nil || got != "cron coordinator active antigravity subscription 8" {
+		t.Fatalf("after up: %q %v", got, err)
+	}
+	if _, err := p.DownTo(ctx, 370); err != nil {
+		t.Fatal(err)
+	}
+	var river *string
+	if err := db.QueryRow(`SELECT to_regclass('river_job')::text`).Scan(&river); err != nil || river != nil {
+		t.Fatalf("river_job after down: %v %v", river, err)
+	}
+	if err := db.QueryRow(`SELECT (SELECT runtime FROM at_roles) || ' ' || (SELECT auth FROM at_node_runtimes) || ' ' ||
+		(SELECT name FROM at_schedules)`).Scan(&got); err != nil || got != "antigravity subscription 日报" {
+		t.Fatalf("after down to 370: %q %v", got, err)
+	}
+}
