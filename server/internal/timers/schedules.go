@@ -14,43 +14,104 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 )
 
-// Schedule is a row of at_schedules.
+// Schedule kinds, targets, creators and statuses (00370).
+const (
+	KindCron = "cron"
+	KindOnce = "once"
+
+	TargetCoordinator = "coordinator"
+	TargetLead        = "lead"
+
+	ByUser        = "user"
+	ByCoordinator = "coordinator"
+	ByLead        = "lead"
+
+	StatusActive    = "active"
+	StatusDone      = "done"
+	StatusCancelled = "cancelled"
+	StatusMissed    = "missed"
+)
+
+// Schedule is a row of at_schedules (with its thread's number and title when it targets a lead).
 type Schedule struct {
-	ID        string     `json:"id"`
-	ProjectID string     `json:"project_id"`
-	Name      string     `json:"name"`
-	Cron      string     `json:"cron"`
-	Timezone  string     `json:"timezone"`
-	Message   string     `json:"message"`
-	Enabled   bool       `json:"enabled"`
-	NextRunAt *time.Time `json:"next_run_at"`
-	LastRunAt *time.Time `json:"last_run_at"`
-	LastError string     `json:"last_error"`
-	CreatedAt time.Time  `json:"created_at" gorm:"autoCreateTime:false;default:now()"`
-	UpdatedAt time.Time  `json:"updated_at" gorm:"autoUpdateTime:false;default:now()"`
+	ID          string     `json:"id"`
+	ProjectID   string     `json:"project_id"`
+	Name        string     `json:"name"`
+	Kind        string     `json:"kind" enum:"cron,once"`
+	Cron        string     `json:"cron" doc:"Recurring schedules: five fields or a descriptor (@daily); empty for once"`
+	RunAt       *time.Time `json:"run_at" doc:"Once schedules: when it fires"`
+	Timezone    string     `json:"timezone"`
+	Message     string     `json:"message"`
+	Target      string     `json:"target" enum:"coordinator,lead" doc:"Who is woken: the project coordinator or a thread's lead"`
+	ThreadID    *string    `json:"thread_id"`
+	ThreadNo    *int       `json:"thread_no" gorm:"->"`
+	ThreadTitle *string    `json:"thread_title" gorm:"->"`
+	CreatedBy   string     `json:"created_by" enum:"user,coordinator,lead" doc:"Who made it: the user on the page or an agent with schedule_create"`
+	EndsAt      *time.Time `json:"ends_at" doc:"Recurring schedules end after this time"`
+	MaxRuns     *int       `json:"max_runs" doc:"Recurring schedules end after this many runs"`
+	RunCount    int        `json:"run_count"`
+	Enabled     bool       `json:"enabled"`
+	Status      string     `json:"status" enum:"active,done,cancelled,missed"`
+	NextRunAt   *time.Time `json:"next_run_at"`
+	LastRunAt   *time.Time `json:"last_run_at"`
+	LastError   string     `json:"last_error"`
+	EndedAt     *time.Time `json:"ended_at"`
+	CreatedAt   time.Time  `json:"created_at" gorm:"autoCreateTime:false;default:now()"`
+	UpdatedAt   time.Time  `json:"updated_at" gorm:"autoUpdateTime:false;default:now()"`
 }
 
 // TableName maps Schedule to at_schedules.
 func (Schedule) TableName() string { return "at_schedules" }
 
-// ScheduleInput is what a create or update sets (nil = keep on update).
+// ScheduleInput is what a create or update sets (nil = keep on update). Kind switches between
+// a recurring (Cron) and a one-off (RunAt) schedule; a zero EndsAt or MaxRuns clears it.
 type ScheduleInput struct {
 	Name     *string
+	Kind     *string
 	Cron     *string
+	RunAt    *time.Time
 	Timezone *string
 	Message  *string
 	Enabled  *bool
+	EndsAt   *time.Time
+	MaxRuns  *int
 }
 
-// ErrInvalid is a schedule the user has to fix; its message is shown as is.
+// Owner says who creates a schedule and whom it wakes.
+type Owner struct {
+	ProjectID string
+	Target    string  // TargetCoordinator | TargetLead
+	ThreadID  *string // the lead's thread
+	CreatedBy string  // ByUser | ByCoordinator | ByLead
+}
+
+// ErrInvalid is a schedule the user (or agent) has to fix; its message is shown as is.
 type ErrInvalid struct{ Field, Message string }
 
 func (e ErrInvalid) Error() string { return e.Message }
 
-// MaxPerProject caps how many schedules one project may have.
-const MaxPerProject = 20
+// Limits.
+const (
+	// MaxPerProject caps a project's active recurring schedules.
+	MaxPerProject = 20
+	// MaxOncePerProject caps a project's pending one-off schedules.
+	MaxOncePerProject = 50
+	// MinAgentInterval is the shortest gap between two runs of a recurring schedule an agent sets.
+	MinAgentInterval = 5 * time.Minute
+	// MinAgentDelay and MaxAgentDelay bound when an agent's one-off schedule may fire.
+	MinAgentDelay = time.Minute
+	MaxAgentDelay = 30 * 24 * time.Hour
+	// MissedAfter: a one-off schedule this late (the control plane was down) is marked missed.
+	MissedAfter = 24 * time.Hour
+	// KeepEnded is how long ended schedules stay in the list.
+	KeepEnded = 7 * 24 * time.Hour
+)
 
-func schedules(ctx context.Context, q core.DB) *gorm.DB { return q.Gorm(ctx).Model(&Schedule{}) }
+// withThread selects schedules with their thread's number and title.
+func withThread(ctx context.Context, q core.DB) *gorm.DB {
+	return q.Gorm(ctx).Table("at_schedules s").Select("s.*, t.no AS thread_no, t.title AS thread_title").
+		Joins("LEFT JOIN at_threads t ON t.id = s.thread_id")
+}
 
 func takeSchedule(g *gorm.DB) (Schedule, error) {
 	var s Schedule
@@ -58,44 +119,119 @@ func takeSchedule(g *gorm.DB) (Schedule, error) {
 	return s, core.MapErr(err)
 }
 
-// Schedules lists a project's schedules, oldest first.
+// ScheduleByID loads a schedule.
+func ScheduleByID(ctx context.Context, q core.DB, id string) (Schedule, error) {
+	return takeSchedule(withThread(ctx, q).Where("s.id = ?", id))
+}
+
+// Schedules lists a project's schedules: active first (by creation), then ended ones, newest first.
 func Schedules(ctx context.Context, q core.DB, projectID string) ([]Schedule, error) {
 	out := []Schedule{}
-	err := schedules(ctx, q).Where("project_id = ?", projectID).Order("created_at, id").Find(&out).Error
+	err := withThread(ctx, q).Where("s.project_id = ?", projectID).
+		Order("s.status <> 'active', CASE WHEN s.status = 'active' THEN s.created_at END, s.ended_at DESC, s.id").Find(&out).Error
+	return out, err
+}
+
+// ThreadSchedules lists the schedules that wake a thread's lead.
+func ThreadSchedules(ctx context.Context, q core.DB, threadID string) ([]Schedule, error) {
+	out := []Schedule{}
+	err := withThread(ctx, q).Where("s.thread_id = ?", threadID).Order("s.status <> 'active', s.created_at, s.id").Find(&out).Error
 	return out, err
 }
 
 // ScheduleOf loads a schedule of one of the user's projects.
 func ScheduleOf(ctx context.Context, q core.DB, userID, id string) (Schedule, error) {
-	return takeSchedule(q.Gorm(ctx).Table("at_schedules s").Select("s.*").Joins("JOIN at_projects p ON p.id = s.project_id").
+	return takeSchedule(withThread(ctx, q).Joins("JOIN at_projects p ON p.id = s.project_id").
 		Where("s.id = ? AND p.user_id = ?", id, userID))
 }
 
-// Normalize trims and validates a complete schedule (after applying an update).
-func Normalize(s Schedule) (Schedule, error) {
+// lockSchedule loads a schedule FOR UPDATE.
+func lockSchedule(ctx context.Context, tx *core.Tx, id string) (Schedule, error) {
+	return takeSchedule(tx.Gorm(ctx).Model(&Schedule{}).Clauses(core.ForUpdate).Where("id = ?", id))
+}
+
+// Normalize trims and validates a complete schedule (after applying an update). byAgent adds the
+// limits agents work within; runAtChanged checks a one-off time only when it was just set.
+func Normalize(s Schedule, now time.Time, byAgent, runAtChanged bool) (Schedule, error) {
 	s.Name, s.Message, s.Cron, s.Timezone = strings.TrimSpace(s.Name), strings.TrimSpace(s.Message),
 		strings.Join(strings.Fields(s.Cron), " "), strings.TrimSpace(s.Timezone)
 	if s.Timezone == "" {
 		s.Timezone = "UTC"
 	}
+	if s.Kind == "" {
+		s.Kind = KindCron
+	}
 	switch {
 	case s.Name == "":
 		return s, ErrInvalid{"name", "请填写名称"}
 	case s.Message == "":
-		return s, ErrInvalid{"message", "请填写要发给统筹的消息"}
+		return s, ErrInvalid{"message", "请填写到点要发的消息"}
 	}
-	if _, err := ParseCron(s.Cron); err != nil {
-		return s, ErrInvalid{"cron", "时间表达式不对（分 时 日 月 周，例如 0 9 * * *）"}
-	}
-	if _, err := time.LoadLocation(s.Timezone); err != nil {
+	loc, err := time.LoadLocation(s.Timezone)
+	if err != nil {
 		return s, ErrInvalid{"timezone", "没有这个时区：" + s.Timezone}
+	}
+	switch s.Kind {
+	case KindCron:
+		return normalizeCron(s, now, loc, byAgent)
+	case KindOnce:
+		return normalizeOnce(s, now, byAgent, runAtChanged)
+	}
+	return s, ErrInvalid{"kind", "kind 只能是 cron 或 once"}
+}
+
+func normalizeCron(s Schedule, now time.Time, loc *time.Location, byAgent bool) (Schedule, error) {
+	s.RunAt = nil
+	c, err := ParseCron(s.Cron)
+	if err != nil {
+		return s, ErrInvalid{"cron", "时间表达式不对（分 时 日 月 周，例如 0 9 * * *，或 @daily）"}
+	}
+	if c.Next(now, loc).IsZero() {
+		return s, ErrInvalid{"cron", "这个时间表达式不会触发"}
+	}
+	if byAgent && c.MinGap(now, loc, 6) < MinAgentInterval {
+		return s, ErrInvalid{"cron", fmt.Sprintf("定时任务两次之间至少隔 %d 分钟", int(MinAgentInterval/time.Minute))}
+	}
+	if s.EndsAt != nil && !s.EndsAt.After(now) {
+		return s, ErrInvalid{"ends_at", "结束时间要在现在之后"}
 	}
 	return s, nil
 }
 
-// NextRun is when an enabled schedule fires next after now; nil when disabled or never.
+func normalizeOnce(s Schedule, now time.Time, byAgent, runAtChanged bool) (Schedule, error) {
+	s.Cron, s.EndsAt, s.MaxRuns = "", nil, nil
+	if s.RunAt == nil {
+		return s, ErrInvalid{"run_at", "请填写触发时间"}
+	}
+	at := s.RunAt.UTC().Truncate(time.Second)
+	s.RunAt = &at
+	if !runAtChanged {
+		return s, nil
+	}
+	switch {
+	case byAgent && at.Before(now.Add(MinAgentDelay-time.Second)):
+		return s, ErrInvalid{"at", "触发时间至少在 1 分钟之后"}
+	case byAgent && at.After(now.Add(MaxAgentDelay)):
+		return s, ErrInvalid{"at", "触发时间最多在 30 天之内"}
+	case !at.After(now):
+		return s, ErrInvalid{"run_at", "触发时间要在现在之后"}
+	}
+	return s, nil
+}
+
+// NextRun is when an active, enabled schedule fires next after now (whole seconds, UTC); nil
+// when it is paused, ended or will not fire again.
 func NextRun(s Schedule, now time.Time) *time.Time {
-	if !s.Enabled {
+	if !s.Enabled || (s.Status != "" && s.Status != StatusActive) {
+		return nil
+	}
+	if s.Kind == KindOnce {
+		if s.RunCount > 0 {
+			return nil
+		}
+		return s.RunAt
+	}
+	if s.MaxRuns != nil && s.RunCount >= *s.MaxRuns {
 		return nil
 	}
 	c, err := ParseCron(s.Cron)
@@ -104,9 +240,10 @@ func NextRun(s Schedule, now time.Time) *time.Time {
 		return nil
 	}
 	next := c.Next(now, loc)
-	if next.IsZero() {
+	if next.IsZero() || (s.EndsAt != nil && next.After(*s.EndsAt)) {
 		return nil
 	}
+	next = next.UTC().Truncate(time.Second)
 	return &next
 }
 
@@ -118,46 +255,104 @@ func apply(s Schedule, in ScheduleInput) Schedule {
 		}
 	}
 	set(&s.Name, in.Name)
+	set(&s.Kind, in.Kind)
 	set(&s.Cron, in.Cron)
 	set(&s.Timezone, in.Timezone)
 	set(&s.Message, in.Message)
+	if in.RunAt != nil {
+		s.RunAt = in.RunAt
+	}
 	if in.Enabled != nil {
 		s.Enabled = *in.Enabled
+	}
+	if in.EndsAt != nil {
+		s.EndsAt = nonZeroTime(*in.EndsAt)
+	}
+	if in.MaxRuns != nil {
+		s.MaxRuns = nil
+		if *in.MaxRuns > 0 {
+			s.MaxRuns = in.MaxRuns
+		}
 	}
 	return s
 }
 
-// CreateSchedule validates and stores a new schedule.
-func CreateSchedule(ctx context.Context, q core.DB, projectID string, in ScheduleInput, now time.Time) (Schedule, error) {
-	s, err := Normalize(apply(Schedule{ProjectID: projectID, Enabled: true}, in))
-	if err != nil {
-		return s, err
+func nonZeroTime(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
 	}
-	var n int64
-	if err := schedules(ctx, q).Where("project_id = ?", projectID).Count(&n).Error; err != nil {
-		return s, err
-	}
-	if n >= MaxPerProject {
-		return s, ErrInvalid{"name", fmt.Sprintf("一个项目最多 %d 个定时任务", MaxPerProject)}
-	}
-	s.ID, s.NextRunAt = core.NewID("sc"), NextRun(s, now)
-	err = q.Gorm(ctx).Clauses(clause.Returning{}).Create(&s).Error
-	return s, err
+	return &t
 }
 
-// UpdateSchedule changes a schedule; the next run is recomputed from now.
-func UpdateSchedule(ctx context.Context, q core.DB, cur Schedule, in ScheduleInput, now time.Time) (Schedule, error) {
-	s, err := Normalize(apply(cur, in))
+// createSchedule validates and stores a new schedule (the caller enqueues its first run).
+func createSchedule(ctx context.Context, tx *core.Tx, o Owner, in ScheduleInput, now time.Time) (Schedule, error) {
+	byAgent := o.CreatedBy != ByUser
+	s, err := Normalize(apply(Schedule{ProjectID: o.ProjectID, Target: o.Target, ThreadID: o.ThreadID, CreatedBy: o.CreatedBy,
+		Enabled: true, Status: StatusActive}, in), now, byAgent, true)
 	if err != nil {
 		return s, err
 	}
-	err = core.Changed(q.Gorm(ctx).Table("at_schedules").Where("id = ?", s.ID).Updates(map[string]any{"name": s.Name,
-		"cron": s.Cron, "timezone": s.Timezone, "message": s.Message, "enabled": s.Enabled, "next_run_at": NextRun(s, now),
-		"updated_at": gorm.Expr("now()")}))
+	if err := checkLimit(ctx, tx, o.ProjectID, s.Kind); err != nil {
+		return s, err
+	}
+	s.ID, s.NextRunAt = core.NewID("sc"), NextRun(s, now)
+	if err := tx.Gorm(ctx).Omit("ThreadNo", "ThreadTitle").Clauses(clause.Returning{}).Create(&s).Error; err != nil {
+		return s, err
+	}
+	return ScheduleByID(ctx, tx, s.ID)
+}
+
+// checkLimit refuses a schedule past the project's caps (locking the project so two creates
+// cannot both slip under).
+func checkLimit(ctx context.Context, tx *core.Tx, projectID, kind string) error {
+	if err := core.LockProject(ctx, tx, projectID); err != nil {
+		return err
+	}
+	var n int64
+	err := tx.Gorm(ctx).Model(&Schedule{}).Where("project_id = ? AND kind = ? AND status = ?", projectID, kind, StatusActive).Count(&n).Error
+	switch {
+	case err != nil:
+		return err
+	case kind == KindCron && n >= MaxPerProject:
+		return ErrInvalid{"name", fmt.Sprintf("一个项目最多 %d 个周期定时任务", MaxPerProject)}
+	case kind == KindOnce && n >= MaxOncePerProject:
+		return ErrInvalid{"name", fmt.Sprintf("一个项目最多 %d 个待触发的一次性定时任务", MaxOncePerProject)}
+	}
+	return nil
+}
+
+// updateSchedule changes a schedule; the next run is recomputed from now (the caller enqueues it).
+func updateSchedule(ctx context.Context, tx *core.Tx, cur Schedule, in ScheduleInput, now time.Time, byAgent bool) (Schedule, error) {
+	if cur.Status != StatusActive {
+		return cur, ErrInvalid{"status", "这个定时任务已经结束，不能再改"}
+	}
+	runAtChanged := in.RunAt != nil || (in.Kind != nil && *in.Kind != cur.Kind)
+	s, err := Normalize(apply(cur, in), now, byAgent, runAtChanged)
 	if err != nil {
 		return s, err
 	}
-	return takeSchedule(schedules(ctx, q).Where("id = ?", s.ID))
+	if s.Kind != cur.Kind {
+		if err := checkLimit(ctx, tx, s.ProjectID, s.Kind); err != nil {
+			return s, err
+		}
+	}
+	next := NextRun(s, now)
+	if next == nil && s.Enabled {
+		return s, ErrInvalid{"cron", "按这个设置定时任务不会再触发"}
+	}
+	err = core.Changed(tx.Gorm(ctx).Table("at_schedules").Where("id = ?", s.ID).Updates(map[string]any{"name": s.Name,
+		"kind": s.Kind, "cron": s.Cron, "run_at": s.RunAt, "timezone": s.Timezone, "message": s.Message, "enabled": s.Enabled,
+		"ends_at": s.EndsAt, "max_runs": s.MaxRuns, "next_run_at": next, "updated_at": gorm.Expr("now()")}))
+	if err != nil {
+		return s, err
+	}
+	return ScheduleByID(ctx, tx, s.ID)
+}
+
+// endSchedule ends an active schedule with status (done / cancelled / missed).
+func endSchedule(ctx context.Context, tx *core.Tx, id, status string, now time.Time) error {
+	return tx.Gorm(ctx).Table("at_schedules").Where("id = ? AND status = ?", id, StatusActive).
+		Updates(map[string]any{"status": status, "next_run_at": nil, "ended_at": now, "updated_at": gorm.Expr("now()")}).Error
 }
 
 // DeleteSchedule removes a schedule.

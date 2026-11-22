@@ -4,7 +4,7 @@ import type { DeliverableView } from "@/api/views";
 import { fileIcon, isImageDeliverable, isLibraryDeliverable, LIBRARY_ACCEPT, formatBytes, formatDateTime, libraryColumns, nextSort, ownerLabel, sortLibrary, typeLabel, uploadProblem } from "@/lib/library";
 import { colorIcon, iconLook } from "@/lib/projectIcon";
 import { fillDays, formatTokens, formatUSD, INSTRUCTIONS_MAX, modelLabel, sectionOf, worktreeChoice } from "@/lib/projectSettings";
-import { describeCron, looksLikeCron, presetOf } from "@/lib/schedules";
+import { describeCron, describeSchedule, looksLikeCron, presetOf, scheduleCreator, scheduleTarget } from "@/lib/schedules";
 
 function item(id: string, patch: Partial<DeliverableView> = {}): DeliverableView {
   return { id, project_id: "p1", thread_no: null, kind: "doc", title: id, url: "", detail: {}, published_by: "dev-1", created_at: "2026-11-14T10:00:00Z", updated_at: "2026-11-14T10:00:00Z", ...patch };
@@ -105,6 +105,20 @@ describe("schedules", () => {
     expect(looksLikeCron("0 9 * * 1-5")).toBe(true);
     expect(looksLikeCron("0 9 * *")).toBe(false);
     expect(looksLikeCron("0 9 * * mon")).toBe(false);
+    expect(looksLikeCron("@daily")).toBe(true);
+    expect(looksLikeCron("@every 1h30m")).toBe(true);
+    expect(looksLikeCron("@sometimes")).toBe(false);
+    expect(describeCron("@every 2h")).toBe("每 2 小时");
+    expect(describeCron("@hourly")).toBe("每小时");
+  });
+
+  it("describes targets, creators and one-off times", () => {
+    const at = new Date(2026, 10, 23, 15, 5);
+    expect(describeSchedule({ kind: "once", cron: "", run_at: at.toISOString() })).toBe("一次 · 11-23 15:05");
+    expect(describeSchedule({ kind: "cron", cron: "0 9 * * *" })).toBe("每天 9:00");
+    expect(scheduleTarget({ target: "coordinator" })).toBe("统筹");
+    expect(scheduleTarget({ target: "lead", thread_no: 12, thread_title: "发版" })).toBe("#12 发版 的组长");
+    expect(scheduleCreator({ created_by: "lead" })).toBe("组长");
   });
 });
 

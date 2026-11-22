@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/schedule_list.json",
+  "title": "ScheduleListInput",
+  "description": "List scheduled tasks with their id, kind, target, next run and who set them. scope mine (default): the ones you set; project: all of the project's (the user's too).",
+  "x-tool": {
+    "tiers": [
+      "coordinator",
+      "lead"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "scope": {
+      "type": "string",
+      "enum": [
+        "mine",
+        "project"
+      ]
+    }
+  }
+}

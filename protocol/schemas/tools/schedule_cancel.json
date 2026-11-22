@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/schedule_cancel.json",
+  "title": "ScheduleCancelInput",
+  "description": "Cancel one of the schedules you set (it no longer fires; the user still sees it as cancelled for a while).",
+  "x-tool": {
+    "tiers": [
+      "coordinator",
+      "lead"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "schedule_id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schedule_id": {
+      "type": "string",
+      "pattern": "^sc_[A-Za-z0-9]+$",
+      "description": "The schedule's id (sc_…), from schedule_create or schedule_list."
+    }
+  }
+}

@@ -146,6 +146,10 @@ const (
 	ToolReportProgress     = "report_progress"
 	ToolRequestReview      = "request_review"
 	ToolReviewPermission   = "review_permission"
+	ToolScheduleCancel     = "schedule_cancel"
+	ToolScheduleCreate     = "schedule_create"
+	ToolScheduleList       = "schedule_list"
+	ToolScheduleUpdate     = "schedule_update"
 	ToolSendMessage        = "send_message"
 	ToolSetStatus          = "set_status"
 	ToolTellUser           = "tell_user"
@@ -300,6 +304,22 @@ var Tools = map[string]ToolMeta{
 	ToolReviewPermission: {
 		Tiers: []Tier{TierLead}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(ReviewPermissionInput) }, NewResult: nil,
+	},
+	ToolScheduleCancel: {
+		Tiers: []Tier{TierCoordinator, TierLead}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(ScheduleCancelInput) }, NewResult: nil,
+	},
+	ToolScheduleCreate: {
+		Tiers: []Tier{TierCoordinator, TierLead}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(ScheduleCreateInput) }, NewResult: nil,
+	},
+	ToolScheduleList: {
+		Tiers: []Tier{TierCoordinator, TierLead}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(ScheduleListInput) }, NewResult: nil,
+	},
+	ToolScheduleUpdate: {
+		Tiers: []Tier{TierCoordinator, TierLead}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(ScheduleUpdateInput) }, NewResult: nil,
 	},
 	ToolSendMessage: {
 		Tiers: []Tier{TierLead, TierMember}, Blocking: nil, Requires: "",

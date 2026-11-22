@@ -10,6 +10,7 @@ import { createMemoryHistory, createRouter } from "vue-router";
 import RepoList from "@/components/app/repo/RepoList.vue";
 import type { RepoRef } from "@/components/app/repo/repo";
 import ScheduleForm from "@/components/app/schedules/ScheduleForm.vue";
+import { emptyDraft } from "@/components/app/schedules/schedule";
 import TagInput from "@/components/common/TagInput.vue";
 import { newRole } from "@/lib/roles";
 import { toast } from "@/lib/toast";
@@ -90,8 +91,11 @@ describe("RepoList", () => {
 
 describe("ScheduleForm", () => {
   it("saves a new schedule with the browser time zone, enabled", async () => {
-    const spy = api([["POST", /\/api\/projects\/p1\/schedules$/, { id: "s1" }]]);
-    const draft = ref({ name: "", cron: "0 9 * * *", message: "" });
+    const spy = api([
+      ["POST", /\/api\/projects\/p1\/schedules$/, { id: "s1" }],
+      ["GET", /\/api\/projects\/p1\/threads$/, []],
+    ]);
+    const draft = ref(emptyDraft());
     const Host = defineComponent(() => () => h(ScheduleForm, { pid: "p1", modelValue: draft.value, "onUpdate:modelValue": (v: typeof draft.value) => (draft.value = v), onDone: () => (draft.value.name = "done") }));
     const w = mountWith(Host);
     const submit = () => w.get("button[type=submit]");
@@ -99,11 +103,13 @@ describe("ScheduleForm", () => {
     await w.get("input").setValue("日报");
     await w.get("textarea").setValue("汇总进展");
     await w.get(".at-mono input").setValue("0 9 * * 1-5");
-    expect(w.get(".el-select").text()).toContain("工作日 9:00");
+    expect(w.findAll(".el-select")[1].text()).toContain("工作日 9:00");
     await w.get("form").trigger("submit");
     await flushPromises();
     const [req] = calls(spy, "POST", /schedules$/);
-    expect(await req.json()).toMatchObject({ name: "日报", cron: "0 9 * * 1-5", message: "汇总进展", enabled: true, timezone: expect.any(String) });
+    const body = await req.json();
+    expect(body).toMatchObject({ name: "日报", kind: "cron", cron: "0 9 * * 1-5", message: "汇总进展", enabled: true, timezone: expect.any(String) });
+    expect(body.thread_no).toBeUndefined();
     expect(draft.value.name).toBe("done");
   });
 });

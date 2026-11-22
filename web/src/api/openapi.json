@@ -3157,6 +3157,64 @@
         ],
         "type": "object"
       },
+      "NewScheduleBody": {
+        "additionalProperties": false,
+        "properties": {
+          "cron": {
+            "description": "minute hour day-of-month month day-of-week, or a descriptor such as @daily",
+            "maxLength": 100,
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "ends_at": {
+            "description": "Recurring schedules end after this time",
+            "format": "date-time",
+            "type": "string"
+          },
+          "kind": {
+            "description": "cron: recurring (cron + timezone); once: fires at run_at (default cron)",
+            "enum": [
+              "cron",
+              "once"
+            ],
+            "type": "string"
+          },
+          "max_runs": {
+            "description": "Recurring schedules end after this many runs (0 clears)",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "message": {
+            "description": "Sent to the target when it fires",
+            "maxLength": 20000,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "type": "string"
+          },
+          "run_at": {
+            "description": "Once schedules: when it fires",
+            "format": "date-time",
+            "type": "string"
+          },
+          "thread_no": {
+            "description": "Wake this thread's lead instead of the project coordinator",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "timezone": {
+            "description": "IANA zone the cron is read in (default UTC)",
+            "maxLength": 64,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "NewSkillInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -5458,13 +5516,45 @@
             "format": "date-time",
             "type": "string"
           },
+          "created_by": {
+            "description": "Who made it: the user on the page or an agent with schedule_create",
+            "enum": [
+              "user",
+              "coordinator",
+              "lead"
+            ],
+            "type": "string"
+          },
           "cron": {
+            "description": "Recurring schedules: five fields or a descriptor (@daily); empty for once",
             "type": "string"
           },
           "enabled": {
             "type": "boolean"
           },
+          "ended_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ends_at": {
+            "description": "Recurring schedules end after this time",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "cron",
+              "once"
+            ],
             "type": "string"
           },
           "last_error": {
@@ -5474,6 +5564,14 @@
             "format": "date-time",
             "type": [
               "string",
+              "null"
+            ]
+          },
+          "max_runs": {
+            "description": "Recurring schedules end after this many runs",
+            "format": "int64",
+            "type": [
+              "integer",
               "null"
             ]
           },
@@ -5493,6 +5591,54 @@
           "project_id": {
             "type": "string"
           },
+          "run_at": {
+            "description": "Once schedules: when it fires",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "run_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "done",
+              "cancelled",
+              "missed"
+            ],
+            "type": "string"
+          },
+          "target": {
+            "description": "Who is woken: the project coordinator or a thread's lead",
+            "enum": [
+              "coordinator",
+              "lead"
+            ],
+            "type": "string"
+          },
+          "thread_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "thread_no": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "thread_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "timezone": {
             "type": "string"
           },
@@ -5505,13 +5651,25 @@
           "id",
           "project_id",
           "name",
+          "kind",
           "cron",
+          "run_at",
           "timezone",
           "message",
+          "target",
+          "thread_id",
+          "thread_no",
+          "thread_title",
+          "created_by",
+          "ends_at",
+          "max_runs",
+          "run_count",
           "enabled",
+          "status",
           "next_run_at",
           "last_run_at",
           "last_error",
+          "ended_at",
           "created_at",
           "updated_at"
         ],
@@ -5521,20 +5679,44 @@
         "additionalProperties": false,
         "properties": {
           "cron": {
-            "description": "minute hour day-of-month month day-of-week",
+            "description": "minute hour day-of-month month day-of-week, or a descriptor such as @daily",
             "maxLength": 100,
             "type": "string"
           },
           "enabled": {
             "type": "boolean"
           },
+          "ends_at": {
+            "description": "Recurring schedules end after this time",
+            "format": "date-time",
+            "type": "string"
+          },
+          "kind": {
+            "description": "cron: recurring (cron + timezone); once: fires at run_at (default cron)",
+            "enum": [
+              "cron",
+              "once"
+            ],
+            "type": "string"
+          },
+          "max_runs": {
+            "description": "Recurring schedules end after this many runs (0 clears)",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "message": {
-            "description": "Sent to the project coordinator when it fires",
+            "description": "Sent to the target when it fires",
             "maxLength": 20000,
             "type": "string"
           },
           "name": {
             "maxLength": 100,
+            "type": "string"
+          },
+          "run_at": {
+            "description": "Once schedules: when it fires",
+            "format": "date-time",
             "type": "string"
           },
           "timezone": {
@@ -12719,7 +12901,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ScheduleBody"
+                "$ref": "#/components/schemas/NewScheduleBody"
               }
             }
           },
@@ -13783,7 +13965,7 @@
             "description": "Error"
           }
         },
-        "summary": "Send the schedule's message to the coordinator now",
+        "summary": "Send the schedule's message to its target now",
         "tags": [
           "schedules"
         ]

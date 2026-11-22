@@ -32,10 +32,12 @@ const EXPECTED_TYPES = {
 // Platform tool sets per tier (architecture.md 6.3).
 const EXPECTED_TOOLS = {
   coordinator: ["open_thread", "list_threads", "thread_status", "message_thread", "forward_to_thread", "ask_user", "close_question", "remember", "set_status",
+    "schedule_create", "schedule_list", "schedule_update", "schedule_cancel",
     "memory_list", "memory_read", "memory_write", "memory_delete", "list_deliverables",
     "list_shared_files", "read_shared_file", "write_shared_file", "delete_shared_file"],
   lead: [
     "update_plan", "assign_task", "list_tasks", "cancel_task", "reply_to", "review_permission", "broadcast", "send_message", "ask_user", "close_question",
+    "schedule_create", "schedule_list", "schedule_update", "schedule_cancel",
     "enqueue_merge", "open_pr", "finish", "publish_deliverable", "publish_file", "set_status", "tell_user",
     "memory_list", "memory_read", "memory_write", "memory_delete", "list_deliverables", "read_deliverable",
     "list_shared_files", "read_shared_file", "write_shared_file", "delete_shared_file",

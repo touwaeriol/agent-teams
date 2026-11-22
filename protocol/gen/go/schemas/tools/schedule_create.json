@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/schedule_create.json",
+  "title": "ScheduleCreateInput",
+  "description": "Schedule a wake-up: at the time you set, the platform sends you (or, for the coordinator, a thread's lead) the message, even if your session is idle or parked. Use it instead of sleeping or polling when you must wait for something outside (CI, a deploy, a time the user named), and for recurring work the user asks for (\"every morning at 9 report…\"). Give exactly one of at, in_minutes or cron. After creating it, end your turn; the message arrives as \"【定时唤醒：name】…\". The user sees every schedule on the page and can pause or delete it.",
+  "x-tool": {
+    "tiers": [
+      "coordinator",
+      "lead"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "name",
+    "message"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "description": "Short name shown to the user, e.g. 检查 CI."
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 20000,
+      "description": "What to tell the target when it fires: enough context to act without remembering (PR, task, what to check, what to do next)."
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "One-off: fire once at this time (ISO 8601 with an offset, e.g. 2026-11-23T09:00:00+08:00), 1 minute to 30 days from now."
+    },
+    "in_minutes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 43200,
+      "description": "One-off: fire once this many minutes from now."
+    },
+    "cron": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "description": "Recurring: five cron fields (minute hour day-of-month month day-of-week, e.g. \"0 9 * * 1-5\") or a descriptor (@daily, @every 2h), read in timezone; at least 5 minutes between runs."
+    },
+    "timezone": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "IANA zone the cron is read in (e.g. Asia/Shanghai, the user's zone when you know it); default UTC."
+    },
+    "ends_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Recurring: stop after this time."
+    },
+    "max_runs": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Recurring: stop after this many runs."
+    },
+    "thread": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Coordinator only: wake this thread's lead instead of yourself (a finished thread is reopened when it fires)."
+    }
+  }
+}

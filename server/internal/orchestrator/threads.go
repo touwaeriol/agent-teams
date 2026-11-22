@@ -342,6 +342,9 @@ func (o *Orchestrator) afterStatus(ctx context.Context, tx *core.Tx, t core.Thre
 		if err := o.EndThreadWork(ctx, tx, t.ID); err != nil {
 			return err
 		}
+		if err := core.EndLeadSchedules(ctx, tx, t.ID); err != nil {
+			return err
+		}
 		tx.AfterCommit(func(ctx context.Context) { o.ThreadEnded(ctx, t.ID) })
 	case "running":
 		// A resumed (or answered) thread starts a new stall episode: re-arm the stalled note.
@@ -513,22 +516,45 @@ func (o *Orchestrator) EnsureCoordinator(ctx context.Context, userID, projectID 
 // PostToCoordinator delivers a message to the project coordinator as if the user sent it
 // (scheduled tasks); meta marks where it came from.
 func (o *Orchestrator) PostToCoordinator(ctx context.Context, userID, projectID, content string, meta map[string]any) (core.Message, error) {
-	o.WarmProject(ctx, projectID)
 	var m core.Message
 	err := o.core.InTx(ctx, func(tx *core.Tx) error {
-		emp, conv, err := o.ensureCoordinatorTx(ctx, tx, userID, projectID)
-		if err != nil {
-			return err
-		}
-		marked := map[string]any{core.SystemPostMeta: true}
-		for k, v := range meta {
-			marked[k] = v
-		}
-		rec := &core.NewMessage{ConversationID: conv, Role: "user", Author: "user", Kind: "chat", Content: content, Meta: marked}
-		m, err = o.Deliver(ctx, tx, emp, Delivery{Text: content, Kind: "user", Priority: "next", Record: rec})
+		var err error
+		m, err = o.PostToCoordinatorTx(ctx, tx, userID, projectID, content, "next", meta)
 		return err
 	})
 	return m, err
+}
+
+// PostToCoordinatorTx is PostToCoordinator inside the caller's transaction, at the given
+// delivery priority (next joins a running turn, later waits for it to end).
+func (o *Orchestrator) PostToCoordinatorTx(ctx context.Context, tx *core.Tx, userID, projectID, content, priority string,
+	meta map[string]any) (core.Message, error) {
+	tx.AfterCommit(func(ctx context.Context) { o.WarmProject(ctx, projectID) })
+	emp, conv, err := o.ensureCoordinatorTx(ctx, tx, userID, projectID)
+	if err != nil {
+		return core.Message{}, err
+	}
+	rec := &core.NewMessage{ConversationID: conv, Role: "user", Author: "user", Kind: "chat", Content: content, Meta: systemPost(meta)}
+	return o.Deliver(ctx, tx, emp, Delivery{Text: content, Kind: "user", Priority: priority, Record: rec})
+}
+
+// PostToLead delivers a platform-written message (a scheduled task) to a thread's lead, shown in
+// the thread chat as the user's line with meta.system_post.
+func (o *Orchestrator) PostToLead(ctx context.Context, tx *core.Tx, t core.Thread, content, priority string, meta map[string]any) (core.Message, error) {
+	lead, err := core.Lead(ctx, tx, t.ID)
+	if err != nil {
+		return core.Message{}, err
+	}
+	rec := &core.NewMessage{ConversationID: t.ID, Role: "user", Author: "user", Kind: "chat", Content: content, Meta: systemPost(meta)}
+	return o.Deliver(ctx, tx, lead, Delivery{Text: content, Kind: "user", Priority: priority, Record: rec})
+}
+
+func systemPost(meta map[string]any) map[string]any {
+	marked := map[string]any{core.SystemPostMeta: true}
+	for k, v := range meta {
+		marked[k] = v
+	}
+	return marked
 }
 
 func (o *Orchestrator) ensureCoordinatorTx(ctx context.Context, tx *core.Tx, userID, projectID string) (core.Employee, string, error) {
