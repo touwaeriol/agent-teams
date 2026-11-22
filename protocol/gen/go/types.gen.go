@@ -6472,15 +6472,18 @@ func (j *ScheduleCancelInput) UnmarshalJSON(value []byte) error {
 // outside (CI, a deploy, a time the user named), and for recurring work the user
 // asks for ("every morning at 9 report…"). Give exactly one of at, in_minutes or
 // cron. After creating it, end your turn; the message arrives as "【定时唤醒：name】…".
-// The user sees every schedule on the page and can pause or delete it.
+// The user sees every schedule on the page and can pause or delete it. A member
+// may only set one-off wake-ups (at or in_minutes) within 24 hours, bound to its
+// current task: they are cancelled when the task ends.
 type ScheduleCreateInput struct {
 	// One-off: fire once at this time (ISO 8601 with an offset, e.g.
-	// 2026-11-23T09:00:00+08:00), 1 minute to 30 days from now.
+	// 2026-11-23T09:00:00+08:00), 1 minute to 30 days from now (members: within 24
+	// hours).
 	At *time.Time `json:"at,omitempty,omitzero"`
 
-	// Recurring: five cron fields (minute hour day-of-month month day-of-week, e.g.
-	// "0 9 * * 1-5") or a descriptor (@daily, @every 2h), read in timezone; at least
-	// 5 minutes between runs.
+	// Recurring (not for members): five cron fields (minute hour day-of-month month
+	// day-of-week, e.g. "0 9 * * 1-5") or a descriptor (@daily, @every 2h), read in
+	// timezone; at least 5 minutes between runs.
 	Cron *string `json:"cron,omitempty,omitzero"`
 
 	// Recurring: stop after this time.

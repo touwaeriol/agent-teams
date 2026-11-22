@@ -306,19 +306,19 @@ var Tools = map[string]ToolMeta{
 		NewInput: func() any { return new(ReviewPermissionInput) }, NewResult: nil,
 	},
 	ToolScheduleCancel: {
-		Tiers: []Tier{TierCoordinator, TierLead}, Blocking: nil, Requires: "",
+		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(ScheduleCancelInput) }, NewResult: nil,
 	},
 	ToolScheduleCreate: {
-		Tiers: []Tier{TierCoordinator, TierLead}, Blocking: nil, Requires: "",
+		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(ScheduleCreateInput) }, NewResult: nil,
 	},
 	ToolScheduleList: {
-		Tiers: []Tier{TierCoordinator, TierLead}, Blocking: nil, Requires: "",
+		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(ScheduleListInput) }, NewResult: nil,
 	},
 	ToolScheduleUpdate: {
-		Tiers: []Tier{TierCoordinator, TierLead}, Blocking: nil, Requires: "",
+		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(ScheduleUpdateInput) }, NewResult: nil,
 	},
 	ToolSendMessage: {

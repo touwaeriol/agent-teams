@@ -119,6 +119,8 @@ describe("schedules", () => {
     expect(scheduleTarget({ target: "coordinator" })).toBe("统筹");
     expect(scheduleTarget({ target: "lead", thread_no: 12, thread_title: "发版" })).toBe("#12 发版 的组长");
     expect(scheduleCreator({ created_by: "lead" })).toBe("组长");
+    expect(scheduleTarget({ target: "member", thread_no: 3, employee: "dev-1", task_id: "t2" })).toBe("dev-1（#3 任务 t2）");
+    expect(scheduleCreator({ created_by: "member" })).toBe("员工");
   });
 });
 

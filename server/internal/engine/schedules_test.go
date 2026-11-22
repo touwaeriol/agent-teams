@@ -162,3 +162,106 @@ func TestRiverFiresSchedules(t *testing.T) {
 		return n == 1
 	})
 }
+
+func runsOf(t *testing.T, tm *team, id string) []timers.Run {
+	t.Helper()
+	var runs []timers.Run
+	tm.b.must(200, "GET", "/api/schedules/"+id+"/runs", nil, &runs)
+	return runs
+}
+
+// TestMemberWakeUp: a member sets only one-off wake-ups within a day, bound to its current task;
+// it wakes the member and is recorded as a run; the next one is cancelled when the task ends.
+func TestMemberWakeUp(t *testing.T) {
+	tm := startTeam(t)
+	for _, bad := range []map[string]any{
+		{"name": "x", "message": "y", "cron": "0 9 * * *"},
+		{"name": "x", "message": "y", "in_minutes": 25 * 60},
+		{"name": "x", "message": "y", "in_minutes": 5, "thread": tm.thread.No},
+	} {
+		if r := tm.dev.call("schedule_create", bad); r.Ok {
+			t.Fatalf("member set %v: %s", bad, text(r))
+		}
+	}
+	res := tm.dev.mustCall("schedule_create", map[string]any{"name": "看 CI", "in_minutes": 20, "message": "看 CI 结果"})
+	id := scheduleID.FindString(text(res))
+	s := scheduleOf(t, tm, id)
+	if s.Target != timers.TargetMember || s.CreatedBy != timers.ByMember || s.TaskID == nil || *s.TaskID != "t1" ||
+		s.Employee == nil || *s.Employee != "dev-1" || s.ThreadNo == nil {
+		t.Fatalf("member schedule %+v", s)
+	}
+	var note map[string]any
+	if err := store.QueryRow(tm.w.ctx, tm.w.e.Core.Pool, `SELECT meta FROM at_messages WHERE meta->>'schedule_id' = $1 AND kind = 'note'`, id).
+		Scan(&note); err != nil || note["schedule_undo"] != true {
+		t.Fatalf("schedule note %v %v", note, err)
+	}
+	if list := text(tm.lead.mustCall("schedule_list", map[string]any{})); strings.Contains(list, id) {
+		t.Fatalf("the lead lists the member's wake-up as its own: %q", list)
+	}
+	if r := tm.lead.call("schedule_cancel", map[string]any{"schedule_id": id}); r.Ok {
+		t.Fatal("the lead cancelled the member's wake-up")
+	}
+
+	dueNow(t, tm, id)
+	fireDue(t, tm)
+	if send := tm.dev.expectSend("【定时唤醒：看 CI】"); !strings.Contains(send.Text, "任务 t1") || !strings.Contains(send.Text, "看 CI 结果") {
+		t.Fatalf("member wake-up %q", send.Text)
+	}
+	if runs := runsOf(t, tm, id); len(runs) != 1 || runs[0].Outcome != timers.RunDelivered || runs[0].MessageID == nil || runs[0].Manual {
+		t.Fatalf("runs %+v", runs)
+	}
+
+	res = tm.dev.mustCall("schedule_create", map[string]any{"name": "再看", "in_minutes": 60, "message": "再看一次"})
+	next := scheduleID.FindString(text(res))
+	tm.dev.mustCall("complete_task", map[string]any{"task_id": "t1", "summary": "done"})
+	if s = scheduleOf(t, tm, next); s.Status != timers.StatusCancelled {
+		t.Fatalf("after the task ended %+v", s)
+	}
+	if r := tm.dev.call("schedule_create", map[string]any{"name": "x", "in_minutes": 5, "message": "y"}); r.Ok {
+		t.Fatal("a member without a task set a wake-up")
+	}
+}
+
+// TestScheduleRunsMerge: a run whose previous message has not reached the target yet is skipped
+// (recorded, no second message); once it has, the next run delivers again; run-now is recorded as
+// manual.
+func TestScheduleRunsMerge(t *testing.T) {
+	tm := startTeam(t)
+	res := tm.lead.mustCall("schedule_create", map[string]any{"name": "巡检", "cron": "0 * * * *", "message": "看看"})
+	id := scheduleID.FindString(text(res))
+	dueNow(t, tm, id)
+	fireDue(t, tm)
+	tm.lead.expectSend("【定时唤醒：巡检】")
+	msg := *runsOf(t, tm, id)[0].MessageID
+	eventually(t, "delivered", func() bool {
+		var ok bool
+		_ = store.QueryRow(tm.w.ctx, tm.w.e.Core.Pool, `SELECT delivered_at IS NOT NULL FROM at_messages WHERE id = $1`, msg).Scan(&ok)
+		return ok
+	})
+	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `UPDATE at_messages SET delivered_at = NULL WHERE id = $1`, msg); err != nil {
+		t.Fatal(err)
+	}
+	dueNow(t, tm, id)
+	fireDue(t, tm)
+	runs := runsOf(t, tm, id)
+	if len(runs) != 2 || runs[0].Outcome != timers.RunSkipped || !strings.Contains(runs[0].Error, "还没送到") || runs[0].MessageID != nil {
+		t.Fatalf("runs after the merge %+v", runs)
+	}
+	if s := scheduleOf(t, tm, id); s.RunCount != 2 || s.NextRunAt == nil || s.Status != timers.StatusActive {
+		t.Fatalf("schedule after the merge %+v", s)
+	}
+	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `UPDATE at_messages SET delivered_at = now() WHERE id = $1`, msg); err != nil {
+		t.Fatal(err)
+	}
+	dueNow(t, tm, id)
+	fireDue(t, tm)
+	tm.lead.expectSend("【定时唤醒：巡检】")
+	tm.b.must(202, "POST", "/api/schedules/"+id+"/run", nil, nil)
+	eventually(t, "manual run", func() bool {
+		runs = runsOf(t, tm, id)
+		return len(runs) == 4
+	})
+	if runs[0].Outcome != timers.RunDelivered || !runs[0].Manual || runs[0].PlannedAt != nil || runs[1].Outcome != timers.RunDelivered {
+		t.Fatalf("runs %+v", runs)
+	}
+}

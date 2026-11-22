@@ -102,6 +102,7 @@ describe("chat cards", () => {
     expect(chatBlocks([todos, note]).map((b) => b.kind)).toEqual(["card", "line"]);
     expect(threadTalk(todos)).toBe(true);
     expect(threadTalk(note)).toBe(false);
+    expect(threadTalk(msg("3", { role: "system", kind: "note", content: "组长设置了定时任务", meta: { schedule_note: true, schedule_id: "sc_1" } }))).toBe(true);
   });
 
   it("draws the checklist with a spinner on the item in progress, the plan as Markdown, the artifact and the resumed note", () => {

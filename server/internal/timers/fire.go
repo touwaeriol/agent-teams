@@ -45,7 +45,15 @@ func (r *Runner) Fire(ctx context.Context, s Schedule, owner string) error {
 		if err != nil {
 			return err
 		}
-		if _, err := r.deliver(ctx, tx, cur, owner, r.Now(), false); err != nil {
+		p, err := r.deliver(ctx, tx, cur, owner, r.Now(), false)
+		var skip skipped
+		if errors.As(err, &skip) {
+			return ErrInvalid{"id", skip.Error()}
+		}
+		if err != nil {
+			return err
+		}
+		if err := recordRun(ctx, tx, Run{ScheduleID: s.ID, Manual: true, Outcome: RunDelivered, MessageID: p.msgID}); err != nil {
 			return err
 		}
 		return tx.Gorm(ctx).Table("at_schedules").Where("id = ?", s.ID).Updates(map[string]any{"last_run_at": r.Now(), "last_error": ""}).Error
@@ -68,9 +76,10 @@ func (r *Runner) FireDue(ctx context.Context) error {
 	return nil
 }
 
-// fire is a schedule_fire job: when the schedule still plans this run, deliver its message, move
-// it on and enqueue the next run, in one transaction. A failed delivery returns the error (River
-// tries again later) and is kept in last_error; on the last try the schedule moves on anyway.
+// fire is a schedule_fire job: when the schedule still plans this run, deliver its message, record
+// the run, move it on and enqueue the next run, in one transaction. A failed delivery returns the
+// error (River tries again later) and is kept in last_error; on the last try the schedule moves
+// on anyway. A run whose previous message has not reached the target yet is skipped.
 func (r *Runner) fire(ctx context.Context, args FireArgs, lastTry bool) error {
 	var deliverErr error
 	err := r.core.InTx(ctx, func(tx *core.Tx) error {
@@ -85,28 +94,25 @@ func (r *Runner) fire(ctx context.Context, args FireArgs, lastTry bool) error {
 			return nil // paused, ended or moved on since this job was enqueued
 		}
 		now := r.Now()
+		run := Run{ScheduleID: s.ID, PlannedAt: &args.RunAt}
 		if s.Kind == KindOnce && now.Sub(args.RunAt) > MissedAfter {
+			run.Outcome = RunMissed
+			if err := recordRun(ctx, tx, run); err != nil {
+				return err
+			}
 			return endSchedule(ctx, tx, s.ID, StatusMissed, now)
 		}
-		var owner string
-		var archived bool
-		if err := store.QueryRow(ctx, tx, `SELECT user_id, archived FROM at_projects WHERE id = $1`, s.ProjectID).Scan(&owner, &archived); err != nil {
-			return err
-		}
-		ended := false
-		if !archived { // an archived project's schedules move on without waking anyone
-			err = tx.Savepoint(ctx, func(sub *core.Tx) error {
-				var derr error
-				ended, derr = r.deliver(ctx, sub, s, owner, args.RunAt, true)
-				return derr
-			})
-		}
+		p, err := r.tryDeliver(ctx, tx, s, args.RunAt, now)
 		var skip skipped
 		if err != nil && !lastTry && !errors.As(err, &skip) {
 			deliverErr = err
 			return r.noteError(ctx, tx, s.ID, err)
 		}
-		if ended {
+		run.Outcome, run.MessageID, run.Error = outcomeOf(err), p.msgID, errText(err)
+		if err := recordRun(ctx, tx, run); err != nil {
+			return err
+		}
+		if p.ended {
 			return endSchedule(ctx, tx, s.ID, StatusCancelled, now)
 		}
 		return r.advance(ctx, tx, s, now, args.RunAt, err)
@@ -115,6 +121,45 @@ func (r *Runner) fire(ctx context.Context, args FireArgs, lastTry bool) error {
 		return err
 	}
 	return deliverErr
+}
+
+// tryDeliver delivers a due run unless the project is archived (its schedules move on without
+// waking anyone) or the previous run's message is still on its way; the delivery runs in a
+// savepoint so a failed one leaves the transaction usable.
+func (r *Runner) tryDeliver(ctx context.Context, tx *core.Tx, s Schedule, planned, now time.Time) (posted, error) {
+	var owner string
+	var archived bool
+	if err := store.QueryRow(ctx, tx, `SELECT user_id, archived FROM at_projects WHERE id = $1`, s.ProjectID).Scan(&owner, &archived); err != nil {
+		return posted{}, err
+	}
+	if archived {
+		return posted{}, skipped("项目已归档，没有发出")
+	}
+	pending, err := previousPending(ctx, tx, s.ID, now)
+	if err != nil {
+		return posted{}, err
+	}
+	if pending {
+		return posted{}, skipped("上一次的消息还没送到，这次合并跳过")
+	}
+	var p posted
+	err = tx.Savepoint(ctx, func(sub *core.Tx) error {
+		var derr error
+		p, derr = r.deliver(ctx, sub, s, owner, planned, true)
+		return derr
+	})
+	return p, err
+}
+
+func outcomeOf(err error) string {
+	var skip skipped
+	switch {
+	case err == nil:
+		return RunDelivered
+	case errors.As(err, &skip):
+		return RunSkipped
+	}
+	return RunFailed
 }
 
 // advance records a run and moves the schedule to its next one (from now, so runs missed while
@@ -155,38 +200,79 @@ func errText(err error) string {
 	return msg
 }
 
-// deliver posts the schedule's message to its target. It reports ended when the target is gone
-// for good: the thread of a lead's own schedule finished. planned is the run's planned time
-// (a late run says so).
-func (r *Runner) deliver(ctx context.Context, tx *core.Tx, s Schedule, owner string, planned time.Time, scheduled bool) (bool, error) {
+// posted is what a delivery did: the message it posted, or ended when the target is gone for
+// good (the thread of a lead's own schedule finished, a member's task ended).
+type posted struct {
+	msgID *int64
+	ended bool
+}
+
+func postedMsg(m core.Message) posted {
+	if m.ID == 0 {
+		return posted{}
+	}
+	return posted{msgID: &m.ID}
+}
+
+// deliver posts the schedule's message to its target. planned is the run's planned time (a late
+// run says so).
+func (r *Runner) deliver(ctx context.Context, tx *core.Tx, s Schedule, owner string, planned time.Time, scheduled bool) (posted, error) {
 	text := ScheduledText(s, r.Now(), planned, scheduled)
 	meta := map[string]any{"schedule_id": s.ID, "schedule_name": s.Name}
 	priority := "later"
 	if s.CreatedBy == ByUser {
 		priority = "next"
 	}
-	if s.Target != TargetLead {
-		_, err := r.orch.PostToCoordinatorTx(ctx, tx, owner, s.ProjectID, text, priority, meta)
-		return false, err
+	switch s.Target {
+	case TargetLead:
+		return r.deliverLead(ctx, tx, s, text, priority, meta)
+	case TargetMember:
+		return r.deliverMember(ctx, tx, s, text)
 	}
+	m, err := r.orch.PostToCoordinatorTx(ctx, tx, owner, s.ProjectID, text, priority, meta)
+	return postedMsg(m), err
+}
+
+func (r *Runner) deliverLead(ctx context.Context, tx *core.Tx, s Schedule, text, priority string, meta map[string]any) (posted, error) {
 	t, err := core.LockThread(ctx, tx, *s.ThreadID)
 	if err != nil {
-		return false, err
+		return posted{}, err
 	}
 	switch {
 	case t.Status == "archived":
-		return s.CreatedBy == ByLead, skipped("讨论串已归档，没有唤醒组长")
+		return posted{ended: s.CreatedBy == ByLead}, skipped("讨论串已归档，没有唤醒组长")
 	case (t.Status == "done" || t.Status == "failed") && s.CreatedBy == ByLead:
-		return true, nil
+		return posted{ended: true}, skipped("讨论串已结束，组长自己设的唤醒取消")
 	}
 	if err := r.orch.Reopen(ctx, tx, t, orchestrator.ReopenBySchedule); err != nil {
-		return false, err
+		return posted{}, err
 	}
 	if t, err = core.ThreadByID(ctx, tx, t.ID); err != nil {
-		return false, err
+		return posted{}, err
 	}
-	_, err = r.orch.PostToLead(ctx, tx, t, text, priority, meta)
-	return false, err
+	m, err := r.orch.PostToLead(ctx, tx, t, text, priority, meta)
+	return postedMsg(m), err
+}
+
+// deliverMember wakes a member while it still holds the task the wake-up is bound to.
+func (r *Runner) deliverMember(ctx context.Context, tx *core.Tx, s Schedule, text string) (posted, error) {
+	e, err := core.EmployeeByID(ctx, tx, *s.EmployeeID)
+	if err != nil {
+		return posted{}, err
+	}
+	task, err := core.TaskByID(ctx, tx, *s.ThreadID, *s.TaskID)
+	if errors.Is(err, core.ErrNotFound) || (err == nil && !holds(task, e)) {
+		return posted{ended: true}, skipped(fmt.Sprintf("任务 %s 已不在 %s 手上，唤醒取消", *s.TaskID, e.Name))
+	}
+	if err != nil {
+		return posted{}, err
+	}
+	m, err := r.orch.Deliver(ctx, tx, e, orchestrator.Delivery{Text: text, Kind: "system", Priority: "later"})
+	return postedMsg(m), err
+}
+
+func holds(t core.Task, e core.Employee) bool {
+	return t.ClaimedBy == e.Name && (t.Status == "claimed" || t.Status == "running")
 }
 
 // ScheduledText is the message the target receives: the user's schedules read as before
@@ -198,6 +284,9 @@ func ScheduledText(s Schedule, now, planned time.Time, scheduled bool) string {
 		head += "（统筹设置的定时任务）"
 	case s.CreatedBy != ByUser:
 		head = "【定时唤醒：" + s.Name + "】（你用 schedule_create 设置的，id " + s.ID + "）"
+	}
+	if s.Target == TargetMember && s.TaskID != nil {
+		head += "（任务 " + *s.TaskID + "）"
 	}
 	if late := now.Sub(planned); scheduled && late >= 2*time.Minute {
 		head += fmt.Sprintf("（原定 %s，晚了 %d 分钟）", planned.In(zone(s.Timezone)).Format("01-02 15:04"), int(late/time.Minute))

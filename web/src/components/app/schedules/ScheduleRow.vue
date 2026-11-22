@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Pencil, Play, Trash2 } from "lucide-vue-next";
-import { computed } from "vue";
+import { History, Pencil, Play, Trash2 } from "lucide-vue-next";
+import { computed, ref } from "vue";
 import { schedules as scheduleActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import { keys } from "@/api/queries";
@@ -8,10 +8,12 @@ import type { ScheduleView } from "@/api/views";
 import IconButton from "@/components/common/IconButton.vue";
 import { formatDateTime } from "@/lib/library";
 import { describeSchedule, scheduleCreator, scheduleStatus, scheduleTarget } from "@/lib/schedules";
+import ScheduleRuns from "./ScheduleRuns.vue";
 
 const props = defineProps<{ pid: string; item: ScheduleView }>();
 const emit = defineEmits<{ edit: [] }>();
 const invalidate = () => [keys.schedules(props.pid)];
+const history = ref(false);
 const toggle = useAction((enabled: boolean) => scheduleActions.update(props.item.id, { enabled }), { invalidate });
 const run = useAction(() => scheduleActions.run(props.item.id), { invalidate, success: "已发出" });
 const remove = useAction(() => scheduleActions.remove(props.item.id), { invalidate, success: "已删除" });
@@ -35,8 +37,10 @@ const when = computed(() => {
       <span class="line-clamp-2 text-[13px] text-muted-foreground">{{ item.message }}</span>
       <span class="text-xs text-muted-foreground">{{ when }}</span>
       <span v-if="item.last_error" class="text-xs text-destructive">上次没发出去：{{ item.last_error }}</span>
+      <ScheduleRuns v-if="history" :pid="pid" :id="item.id" />
     </span>
     <span class="flex shrink-0 items-center gap-0.5">
+      <IconButton :label="history ? '收起运行记录' : '运行记录'" :active="history" @click="history = !history"><History :stroke-width="1.8" /></IconButton>
       <template v-if="active">
         <IconButton label="现在运行一次" :disabled="run.isPending.value" @click="run.mutate()"><Play :stroke-width="1.8" /></IconButton>
         <IconButton label="编辑" @click="emit('edit')"><Pencil :stroke-width="1.8" /></IconButton>

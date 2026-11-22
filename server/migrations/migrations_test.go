@@ -1495,8 +1495,8 @@ INSERT INTO at_employees (id, project_id, name, tier, role, role_id, runtime, sp
 }
 
 // TestScheduleTargetsMigration: 00360 adds River's tables (recorded in river_migration), 00370
-// gives existing schedules their defaults (the user's recurring messages to the coordinator), and
-// both go down again.
+// gives existing schedules their defaults (the user's recurring messages to the coordinator) and
+// adds at_schedule_runs, and both go down again.
 func TestScheduleTargetsMigration(t *testing.T) {
 	db := open(t, testdb.URL(t))
 	ctx := context.Background()
@@ -1527,6 +1527,12 @@ INSERT INTO at_schedules (id, project_id, name, cron, message) VALUES ('sc1', 'p
 	}
 	if _, err := db.Exec(`INSERT INTO at_schedules (id, project_id, name, cron, message, kind) VALUES ('sc2', 'p1', 'x', '', 'y', 'once')`); err == nil {
 		t.Fatal("once schedule without run_at accepted")
+	}
+	if _, err := db.Exec(`INSERT INTO at_schedules (id, project_id, name, cron, message, kind, run_at, target) VALUES ('sc3', 'p1', 'x', '', 'y', 'once', now(), 'member')`); err == nil {
+		t.Fatal("member schedule without employee and task accepted")
+	}
+	if _, err := db.Exec(`INSERT INTO at_schedule_runs (schedule_id, planned_at, outcome) VALUES ('sc1', now(), 'delivered')`); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := p.DownTo(ctx, 350); err != nil {
 		t.Fatal(err)

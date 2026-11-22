@@ -1582,6 +1582,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/schedules/{id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The schedule's last 100 runs, newest first */
+        get: operations["list-schedule-runs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/servers": {
         parameters: {
             query?: never;
@@ -3765,6 +3782,25 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        Run: {
+            error: string;
+            /** Format: date-time */
+            fired_at: string;
+            /** Format: int64 */
+            id: number;
+            /** @description Started with the run-now button */
+            manual: boolean;
+            /** Format: int64 */
+            message_id: number | null;
+            /** @enum {string} */
+            outcome: "delivered" | "skipped" | "failed" | "missed";
+            /**
+             * Format: date-time
+             * @description The run's planned time; null for a manual run
+             */
+            planned_at: string | null;
+            schedule_id: string;
+        };
         RuntimeUsage: {
             /**
              * @description How the runtime is logged in
@@ -3827,9 +3863,13 @@ export interface components {
              * @description Who made it: the user on the page or an agent with schedule_create
              * @enum {string}
              */
-            created_by: "user" | "coordinator" | "lead";
+            created_by: "user" | "coordinator" | "lead" | "member";
             /** @description Recurring schedules: five fields or a descriptor (@daily); empty for once */
             cron: string;
+            /** @description Member schedules: the member's name */
+            employee: string | null;
+            /** @description Member schedules: the member woken */
+            employee_id: string | null;
             enabled: boolean;
             /** Format: date-time */
             ended_at: string | null;
@@ -3864,10 +3904,12 @@ export interface components {
             /** @enum {string} */
             status: "active" | "done" | "cancelled" | "missed";
             /**
-             * @description Who is woken: the project coordinator or a thread's lead
+             * @description Who is woken: the project coordinator, a thread's lead or a member (bound to its task)
              * @enum {string}
              */
-            target: "coordinator" | "lead";
+            target: "coordinator" | "lead" | "member";
+            /** @description Member schedules: the task it is bound to (it ends with the task) */
+            task_id: string | null;
             thread_id: string | null;
             /** Format: int64 */
             thread_no: number | null;
@@ -8765,6 +8807,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-schedule-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"][] | null;
+                };
             };
             /** @description Error */
             default: {

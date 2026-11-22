@@ -12,8 +12,9 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/timers"
 )
 
-// The schedule_* tools let the coordinator and a lead set wake-ups for themselves (a lead only
-// for itself; the coordinator also for a thread's lead). They change only schedules an agent set
+// The schedule_* tools let the coordinator, a lead and a member set wake-ups for themselves (the
+// coordinator also for a thread's lead; a member only one-off ones within a day, bound to its
+// current task). They change only schedules an agent set
 // (the user's own stay read-only to agents); the user sees and manages all of them on the page.
 
 // ScheduleRunner is the timers runner as the schedule tools need it.
@@ -57,27 +58,37 @@ func scheduleErr(err error) error {
 }
 
 // scheduleOwner is who the caller is as a schedule creator.
-func scheduleOwner(c *call) (timers.Owner, error) {
+func scheduleOwner(ctx context.Context, tx *core.Tx, c *call) (timers.Owner, error) {
 	e := c.emp()
 	switch {
+	case e.Tier == "member":
+		task, err := core.CurrentTaskOf(ctx, tx, e)
+		if err != nil {
+			return timers.Owner{}, refuse("你手上没有任务；员工的唤醒要绑定当前任务，任务结束就取消")
+		}
+		return timers.Owner{ProjectID: e.ProjectID, Target: timers.TargetMember, ThreadID: &task.ConversationID, EmployeeID: &e.ID,
+			TaskID: &task.ID, CreatedBy: timers.ByMember}, nil
 	case e.Tier == "coordinator":
 		return timers.Owner{ProjectID: e.ProjectID, Target: timers.TargetCoordinator, CreatedBy: timers.ByCoordinator}, nil
 	case e.Tier == "lead" && c.thread != nil:
 		id := c.thread.ID
 		return timers.Owner{ProjectID: e.ProjectID, Target: timers.TargetLead, ThreadID: &id, CreatedBy: timers.ByLead}, nil
 	}
-	return timers.Owner{}, refuse("只有统筹和组长能设置定时任务")
+	return timers.Owner{}, refuse("你不能设置定时任务")
 }
 
 // mine reports whether the caller may change s: the coordinator any schedule an agent set in its
-// project, a lead the ones it set in its thread.
+// project, a lead the ones it set in its thread, a member its own.
 func mine(c *call, s timers.Schedule) bool {
 	e := c.emp()
 	if s.ProjectID != e.ProjectID || s.CreatedBy == timers.ByUser {
 		return false
 	}
-	if e.Tier == "coordinator" {
+	switch e.Tier {
+	case "coordinator":
 		return true
+	case "member":
+		return s.CreatedBy == timers.ByMember && s.EmployeeID != nil && *s.EmployeeID == e.ID
 	}
 	return s.CreatedBy == timers.ByLead && c.thread != nil && s.ThreadID != nil && *s.ThreadID == c.thread.ID
 }
@@ -87,7 +98,7 @@ func (s *Service) scheduleCreate(ctx context.Context, tx *core.Tx, c *call) (Res
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
-	o, err := scheduleOwner(c)
+	o, err := scheduleOwner(ctx, tx, c)
 	if err != nil {
 		return Result{}, err
 	}
@@ -100,7 +111,7 @@ func (s *Service) scheduleCreate(ctx context.Context, tx *core.Tx, c *call) (Res
 	}
 	if in.Thread != nil {
 		if o.CreatedBy != timers.ByCoordinator {
-			return Result{}, refuse("只有统筹能给别的讨论串设置定时任务；组长的定时任务只唤醒自己")
+			return Result{}, refuse("只有统筹能给别的讨论串设置定时任务，你的定时任务只唤醒你自己")
 		}
 		t, err := core.ThreadByNo(ctx, tx, o.ProjectID, *in.Thread)
 		if err != nil {
@@ -116,7 +127,7 @@ func (s *Service) scheduleCreate(ctx context.Context, tx *core.Tx, c *call) (Res
 	if err != nil {
 		return Result{}, scheduleErr(err)
 	}
-	if err := s.scheduleNote(ctx, tx, c, fmt.Sprintf("%s设置了定时任务「%s」：%s，%s。", speaker(c), sc.Name, when(sc), wakes(sc))); err != nil {
+	if err := s.scheduleNote(ctx, tx, c, sc.ID, true, fmt.Sprintf("%s设置了定时任务「%s」：%s，%s。", speaker(c), sc.Name, when(sc), wakes(sc))); err != nil {
 		return Result{}, err
 	}
 	return okText(fmt.Sprintf("已创建定时任务 %s「%s」：%s，下次 %s，%s。到点平台会发消息过来，现在可以结束本轮。",
@@ -135,7 +146,7 @@ func (s *Service) scheduleList(ctx context.Context, tx *core.Tx, c *call) (Resul
 	all := in.Scope != nil && *in.Scope == protocol.ScheduleListInputScopeProject
 	var lines []string
 	for _, sc := range list {
-		if all || (mine(c, sc) && (c.emp().Tier == "lead" || sc.CreatedBy == timers.ByCoordinator)) {
+		if all || (mine(c, sc) && (c.emp().Tier != "coordinator" || sc.CreatedBy == timers.ByCoordinator)) {
 			lines = append(lines, scheduleLine(sc))
 		}
 	}
@@ -182,7 +193,7 @@ func (s *Service) scheduleCancel(ctx context.Context, tx *core.Tx, c *call) (Res
 	if err := s.Schedules.Cancel(ctx, tx, cur); err != nil {
 		return Result{}, scheduleErr(err)
 	}
-	if err := s.scheduleNote(ctx, tx, c, fmt.Sprintf("%s取消了定时任务「%s」。", speaker(c), cur.Name)); err != nil {
+	if err := s.scheduleNote(ctx, tx, c, cur.ID, false, fmt.Sprintf("%s取消了定时任务「%s」。", speaker(c), cur.Name)); err != nil {
 		return Result{}, err
 	}
 	return okText(fmt.Sprintf("已取消定时任务 %s「%s」", cur.ID, cur.Name)), nil
@@ -203,14 +214,15 @@ func (s *Service) ownSchedule(ctx context.Context, tx *core.Tx, c *call, id stri
 }
 
 // scheduleNote records a schedule change as a platform line in the caller's conversation, so the
-// user sees it where the agent talks.
-func (s *Service) scheduleNote(ctx context.Context, tx *core.Tx, c *call, text string) error {
+// user sees it where the agent talks; a created one carries schedule_id, so the user can undo it
+// from the line (meta.schedule_undo).
+func (s *Service) scheduleNote(ctx context.Context, tx *core.Tx, c *call, id string, created bool, text string) error {
 	conv, err := s.orch.ConversationOf(ctx, tx, c.emp())
 	if err != nil {
 		return err
 	}
 	m, err := core.InsertMessage(ctx, tx, core.NewMessage{ConversationID: conv, Role: "system", Author: "platform", Kind: "note",
-		Content: text, Meta: map[string]any{"schedule_note": true}})
+		Content: text, Meta: map[string]any{"schedule_note": true, "schedule_id": id, "schedule_undo": created}})
 	if err != nil {
 		return err
 	}
@@ -222,8 +234,11 @@ func (s *Service) scheduleNote(ctx context.Context, tx *core.Tx, c *call, text s
 }
 
 func speaker(c *call) string {
-	if c.emp().Tier == "coordinator" {
+	switch c.emp().Tier {
+	case "coordinator":
 		return "统筹"
+	case "member":
+		return c.emp().Name
 	}
 	return "组长"
 }
@@ -236,7 +251,10 @@ func when(sc timers.Schedule) string {
 }
 
 func wakes(sc timers.Schedule) string {
-	if sc.Target == timers.TargetLead && sc.ThreadNo != nil {
+	switch {
+	case sc.Target == timers.TargetMember && sc.Employee != nil && sc.TaskID != nil:
+		return fmt.Sprintf("唤醒 %s（任务 %s，任务结束即取消）", *sc.Employee, *sc.TaskID)
+	case sc.Target == timers.TargetLead && sc.ThreadNo != nil:
 		return fmt.Sprintf("唤醒 #%d 的组长", *sc.ThreadNo)
 	}
 	return "唤醒统筹"
@@ -263,7 +281,7 @@ func localTime(t *time.Time, zone string) string {
 var scheduleStatusText = map[string]string{timers.StatusActive: "进行中", timers.StatusDone: "已完成", timers.StatusCancelled: "已取消",
 	timers.StatusMissed: "已错过"}
 
-var creatorText = map[string]string{timers.ByUser: "用户", timers.ByCoordinator: "统筹", timers.ByLead: "组长"}
+var creatorText = map[string]string{timers.ByUser: "用户", timers.ByCoordinator: "统筹", timers.ByLead: "组长", timers.ByMember: "员工"}
 
 func scheduleLine(sc timers.Schedule) string {
 	state := scheduleStatusText[sc.Status]

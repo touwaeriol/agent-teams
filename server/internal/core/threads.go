@@ -434,10 +434,19 @@ func FireDueReminders(ctx context.Context, tx *Tx, now time.Time) ([]string, err
 	return ids, rows.Err()
 }
 
-// EndLeadSchedules cancels the scheduled wake-ups a thread's lead set for itself (schedule_create)
-// when the thread finishes or is archived; schedules the user or the coordinator aimed at the
-// thread stay (they reopen a finished thread when they fire).
+// EndLeadSchedules cancels the scheduled wake-ups a thread's lead or its members set for
+// themselves (schedule_create) when the thread finishes or is archived; schedules the user or the
+// coordinator aimed at the thread stay (they reopen a finished thread when they fire).
 func EndLeadSchedules(ctx context.Context, tx *Tx, threadID string) error {
-	return tx.Gorm(ctx).Table("at_schedules").Where("thread_id = ? AND created_by = 'lead' AND status = 'active'", threadID).
-		Updates(map[string]any{"status": "cancelled", "next_run_at": nil, "ended_at": gorm.Expr("now()"), "updated_at": gorm.Expr("now()")}).Error
+	return endSchedules(tx.Gorm(ctx).Table("at_schedules").Where("thread_id = ? AND created_by IN ('lead', 'member') AND status = 'active'", threadID))
+}
+
+// EndTaskSchedules cancels a member's wake-ups bound to a task when the task ends or goes back to
+// the queue.
+func EndTaskSchedules(ctx context.Context, tx *Tx, t Task) error {
+	return endSchedules(tx.Gorm(ctx).Table("at_schedules").Where("thread_id = ? AND task_id = ? AND status = 'active'", t.ConversationID, t.ID))
+}
+
+func endSchedules(g *gorm.DB) error {
+	return g.Updates(map[string]any{"status": "cancelled", "next_run_at": nil, "ended_at": gorm.Expr("now()"), "updated_at": gorm.Expr("now()")}).Error
 }

@@ -6,7 +6,8 @@
   "x-tool": {
     "tiers": [
       "coordinator",
-      "lead"
+      "lead",
+      "member"
     ],
     "blocking": []
   },

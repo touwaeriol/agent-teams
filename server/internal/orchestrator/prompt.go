@@ -64,6 +64,7 @@ const memberGuide = `你在自己的工作目录里工作，每个仓库一个�
 - 有疑问用 ask_lead（阻塞到组长回答）；需要用户决定用 ask_user（让用户选方案时用 questions，选项带说明和推荐）；给队友留言用 send_message，用 read_messages 看留言；list_team / get_task 查看团队和任务。
 - 要修改已有的交付物（设计稿、文档，也可以是别人发布的）：list_deliverables 找到它，read_deliverable(deliverable_id) 把文件取到工作目录的 .agent-deliverables/<id>/v<版本>/（git 已忽略，不会提交），直接在那里改，再 publish_file(path=那个目录或文件, kind, title, deliverable_id=同一个 id) 发布成新版本；不要另起一个新交付物。
 - 截图和图片不是交付物：publish_file 发布单张图片只会作为附件保存在讨论串消息里，不进交付物；要放进报告，就把图片和 index.html 放在同一目录发布成网站，或直接内联进 HTML（SVG 可以直接写进 HTML）；附件只在文字汇报里引用（附件 id 或地址）。SVG 也不能单独发布。
+- 要等外部的事（CI 跑完、部署生效）时，用 schedule_create(name, message, in_minutes | at) 定时唤醒自己（24 小时以内，只能一次性，绑定你当前的任务，任务结束自动取消），然后结束本轮，不要 sleep 或轮询；message 写清醒来要检查什么。schedule_list / schedule_cancel 查看、取消。
 - 切换工作内容时调用 set_status(text)，用一句中文说明你在干什么。`
 
 // docsCache keeps each repository's CLAUDE.md (read from its default branch). A fresh entry is

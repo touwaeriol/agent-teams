@@ -5337,6 +5337,64 @@
         ],
         "type": "object"
       },
+      "Run": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "fired_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "manual": {
+            "description": "Started with the run-now button",
+            "type": "boolean"
+          },
+          "message_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "delivered",
+              "skipped",
+              "failed",
+              "missed"
+            ],
+            "type": "string"
+          },
+          "planned_at": {
+            "description": "The run's planned time; null for a manual run",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "schedule_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "schedule_id",
+          "planned_at",
+          "fired_at",
+          "manual",
+          "outcome",
+          "message_id",
+          "error"
+        ],
+        "type": "object"
+      },
       "RuntimeUsage": {
         "additionalProperties": false,
         "properties": {
@@ -5521,13 +5579,28 @@
             "enum": [
               "user",
               "coordinator",
-              "lead"
+              "lead",
+              "member"
             ],
             "type": "string"
           },
           "cron": {
             "description": "Recurring schedules: five fields or a descriptor (@daily); empty for once",
             "type": "string"
+          },
+          "employee": {
+            "description": "Member schedules: the member's name",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "employee_id": {
+            "description": "Member schedules: the member woken",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "enabled": {
             "type": "boolean"
@@ -5613,12 +5686,20 @@
             "type": "string"
           },
           "target": {
-            "description": "Who is woken: the project coordinator or a thread's lead",
+            "description": "Who is woken: the project coordinator, a thread's lead or a member (bound to its task)",
             "enum": [
               "coordinator",
-              "lead"
+              "lead",
+              "member"
             ],
             "type": "string"
+          },
+          "task_id": {
+            "description": "Member schedules: the task it is bound to (it ends with the task)",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "thread_id": {
             "type": [
@@ -5660,6 +5741,9 @@
           "thread_id",
           "thread_no",
           "thread_title",
+          "employee_id",
+          "employee",
+          "task_id",
           "created_by",
           "ends_at",
           "max_runs",
@@ -13966,6 +14050,54 @@
           }
         },
         "summary": "Send the schedule's message to its target now",
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/api/schedules/{id}/runs": {
+      "get": {
+        "operationId": "list-schedule-runs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Run"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "The schedule's last 100 runs, newest first",
         "tags": [
           "schedules"
         ]

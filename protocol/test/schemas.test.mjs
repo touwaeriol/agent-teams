@@ -47,6 +47,7 @@ const EXPECTED_TOOLS = {
     "list_team", "get_task", "request_review", "publish_deliverable", "publish_file", "set_status", "assign_subtask", "wait_task",
     "memory_list", "memory_read", "list_deliverables", "read_deliverable",
     "list_shared_files", "read_shared_file", "write_shared_file", "delete_shared_file",
+    "schedule_create", "schedule_list", "schedule_update", "schedule_cancel",
   ],
 };
 const BLOCKING = { member: ["ask_lead", "ask_user", "request_review", "wait_task"], lead: [], coordinator: [] };

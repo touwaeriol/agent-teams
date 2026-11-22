@@ -21,10 +21,12 @@ const (
 
 	TargetCoordinator = "coordinator"
 	TargetLead        = "lead"
+	TargetMember      = "member"
 
 	ByUser        = "user"
 	ByCoordinator = "coordinator"
 	ByLead        = "lead"
+	ByMember      = "member"
 
 	StatusActive    = "active"
 	StatusDone      = "done"
@@ -32,7 +34,8 @@ const (
 	StatusMissed    = "missed"
 )
 
-// Schedule is a row of at_schedules (with its thread's number and title when it targets a lead).
+// Schedule is a row of at_schedules (with its thread's number and title when it targets a lead or
+// a member, and the member's name).
 type Schedule struct {
 	ID          string     `json:"id"`
 	ProjectID   string     `json:"project_id"`
@@ -42,11 +45,14 @@ type Schedule struct {
 	RunAt       *time.Time `json:"run_at" doc:"Once schedules: when it fires"`
 	Timezone    string     `json:"timezone"`
 	Message     string     `json:"message"`
-	Target      string     `json:"target" enum:"coordinator,lead" doc:"Who is woken: the project coordinator or a thread's lead"`
+	Target      string     `json:"target" enum:"coordinator,lead,member" doc:"Who is woken: the project coordinator, a thread's lead or a member (bound to its task)"`
 	ThreadID    *string    `json:"thread_id"`
 	ThreadNo    *int       `json:"thread_no" gorm:"->"`
 	ThreadTitle *string    `json:"thread_title" gorm:"->"`
-	CreatedBy   string     `json:"created_by" enum:"user,coordinator,lead" doc:"Who made it: the user on the page or an agent with schedule_create"`
+	EmployeeID  *string    `json:"employee_id" doc:"Member schedules: the member woken"`
+	Employee    *string    `json:"employee" gorm:"->" doc:"Member schedules: the member's name"`
+	TaskID      *string    `json:"task_id" doc:"Member schedules: the task it is bound to (it ends with the task)"`
+	CreatedBy   string     `json:"created_by" enum:"user,coordinator,lead,member" doc:"Who made it: the user on the page or an agent with schedule_create"`
 	EndsAt      *time.Time `json:"ends_at" doc:"Recurring schedules end after this time"`
 	MaxRuns     *int       `json:"max_runs" doc:"Recurring schedules end after this many runs"`
 	RunCount    int        `json:"run_count"`
@@ -79,10 +85,12 @@ type ScheduleInput struct {
 
 // Owner says who creates a schedule and whom it wakes.
 type Owner struct {
-	ProjectID string
-	Target    string  // TargetCoordinator | TargetLead
-	ThreadID  *string // the lead's thread
-	CreatedBy string  // ByUser | ByCoordinator | ByLead
+	ProjectID  string
+	Target     string  // TargetCoordinator | TargetLead | TargetMember
+	ThreadID   *string // the lead's thread, the member's task's thread
+	EmployeeID *string // the member
+	TaskID     *string // the member's task
+	CreatedBy  string  // ByUser | ByCoordinator | ByLead | ByMember
 }
 
 // ErrInvalid is a schedule the user (or agent) has to fix; its message is shown as is.
@@ -101,6 +109,9 @@ const (
 	// MinAgentDelay and MaxAgentDelay bound when an agent's one-off schedule may fire.
 	MinAgentDelay = time.Minute
 	MaxAgentDelay = 30 * 24 * time.Hour
+	// MaxMemberDelay bounds a member's wake-up; MaxPerMember caps a member's pending ones.
+	MaxMemberDelay = 24 * time.Hour
+	MaxPerMember   = 3
 	// MissedAfter: a one-off schedule this late (the control plane was down) is marked missed.
 	MissedAfter = 24 * time.Hour
 	// KeepEnded is how long ended schedules stay in the list.
@@ -109,8 +120,8 @@ const (
 
 // withThread selects schedules with their thread's number and title.
 func withThread(ctx context.Context, q core.DB) *gorm.DB {
-	return q.Gorm(ctx).Table("at_schedules s").Select("s.*, t.no AS thread_no, t.title AS thread_title").
-		Joins("LEFT JOIN at_threads t ON t.id = s.thread_id")
+	return q.Gorm(ctx).Table("at_schedules s").Select("s.*, t.no AS thread_no, t.title AS thread_title, e.name AS employee").
+		Joins("LEFT JOIN at_threads t ON t.id = s.thread_id").Joins("LEFT JOIN at_employees e ON e.id = s.employee_id")
 }
 
 func takeSchedule(g *gorm.DB) (Schedule, error) {
@@ -132,7 +143,7 @@ func Schedules(ctx context.Context, q core.DB, projectID string) ([]Schedule, er
 	return out, err
 }
 
-// ThreadSchedules lists the schedules that wake a thread's lead.
+// ThreadSchedules lists the schedules that wake a thread's lead or a member on one of its tasks.
 func ThreadSchedules(ctx context.Context, q core.DB, threadID string) ([]Schedule, error) {
 	out := []Schedule{}
 	err := withThread(ctx, q).Where("s.thread_id = ?", threadID).Order("s.status <> 'active', s.created_at, s.id").Find(&out).Error
@@ -173,6 +184,9 @@ func Normalize(s Schedule, now time.Time, byAgent, runAtChanged bool) (Schedule,
 	}
 	switch s.Kind {
 	case KindCron:
+		if s.CreatedBy == ByMember {
+			return s, ErrInvalid{"cron", "员工只能设置一次性的唤醒（at 或 in_minutes）"}
+		}
 		return normalizeCron(s, now, loc, byAgent)
 	case KindOnce:
 		return normalizeOnce(s, now, byAgent, runAtChanged)
@@ -211,6 +225,8 @@ func normalizeOnce(s Schedule, now time.Time, byAgent, runAtChanged bool) (Sched
 	switch {
 	case byAgent && at.Before(now.Add(MinAgentDelay-time.Second)):
 		return s, ErrInvalid{"at", "触发时间至少在 1 分钟之后"}
+	case s.CreatedBy == ByMember && at.After(now.Add(MaxMemberDelay+time.Second)):
+		return s, ErrInvalid{"at", "员工的唤醒最多在 24 小时之内"}
 	case byAgent && at.After(now.Add(MaxAgentDelay)):
 		return s, ErrInvalid{"at", "触发时间最多在 30 天之内"}
 	case !at.After(now):
@@ -287,16 +303,19 @@ func nonZeroTime(t time.Time) *time.Time {
 // createSchedule validates and stores a new schedule (the caller enqueues its first run).
 func createSchedule(ctx context.Context, tx *core.Tx, o Owner, in ScheduleInput, now time.Time) (Schedule, error) {
 	byAgent := o.CreatedBy != ByUser
-	s, err := Normalize(apply(Schedule{ProjectID: o.ProjectID, Target: o.Target, ThreadID: o.ThreadID, CreatedBy: o.CreatedBy,
-		Enabled: true, Status: StatusActive}, in), now, byAgent, true)
+	s, err := Normalize(apply(Schedule{ProjectID: o.ProjectID, Target: o.Target, ThreadID: o.ThreadID, EmployeeID: o.EmployeeID,
+		TaskID: o.TaskID, CreatedBy: o.CreatedBy, Enabled: true, Status: StatusActive}, in), now, byAgent, true)
 	if err != nil {
 		return s, err
 	}
 	if err := checkLimit(ctx, tx, o.ProjectID, s.Kind); err != nil {
 		return s, err
 	}
+	if err := checkMemberLimit(ctx, tx, o); err != nil {
+		return s, err
+	}
 	s.ID, s.NextRunAt = core.NewID("sc"), NextRun(s, now)
-	if err := tx.Gorm(ctx).Omit("ThreadNo", "ThreadTitle").Clauses(clause.Returning{}).Create(&s).Error; err != nil {
+	if err := tx.Gorm(ctx).Omit("ThreadNo", "ThreadTitle", "Employee").Clauses(clause.Returning{}).Create(&s).Error; err != nil {
 		return s, err
 	}
 	return ScheduleByID(ctx, tx, s.ID)
@@ -319,6 +338,20 @@ func checkLimit(ctx context.Context, tx *core.Tx, projectID, kind string) error 
 		return ErrInvalid{"name", fmt.Sprintf("一个项目最多 %d 个待触发的一次性定时任务", MaxOncePerProject)}
 	}
 	return nil
+}
+
+// checkMemberLimit refuses a member's wake-up past MaxPerMember pending ones (checkLimit holds
+// the project lock).
+func checkMemberLimit(ctx context.Context, tx *core.Tx, o Owner) error {
+	if o.EmployeeID == nil {
+		return nil
+	}
+	var n int64
+	err := tx.Gorm(ctx).Model(&Schedule{}).Where("employee_id = ? AND status = ?", *o.EmployeeID, StatusActive).Count(&n).Error
+	if err == nil && n >= MaxPerMember {
+		return ErrInvalid{"name", fmt.Sprintf("每个员工最多 %d 个待触发的唤醒", MaxPerMember)}
+	}
+	return err
 }
 
 // updateSchedule changes a schedule; the next run is recomputed from now (the caller enqueues it).

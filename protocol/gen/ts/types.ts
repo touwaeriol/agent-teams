@@ -3503,7 +3503,7 @@ export interface ScheduleCancelInput {
   schedule_id: string;
 }
 /**
- * Schedule a wake-up: at the time you set, the platform sends you (or, for the coordinator, a thread's lead) the message, even if your session is idle or parked. Use it instead of sleeping or polling when you must wait for something outside (CI, a deploy, a time the user named), and for recurring work the user asks for ("every morning at 9 report…"). Give exactly one of at, in_minutes or cron. After creating it, end your turn; the message arrives as "【定时唤醒：name】…". The user sees every schedule on the page and can pause or delete it.
+ * Schedule a wake-up: at the time you set, the platform sends you (or, for the coordinator, a thread's lead) the message, even if your session is idle or parked. Use it instead of sleeping or polling when you must wait for something outside (CI, a deploy, a time the user named), and for recurring work the user asks for ("every morning at 9 report…"). Give exactly one of at, in_minutes or cron. After creating it, end your turn; the message arrives as "【定时唤醒：name】…". The user sees every schedule on the page and can pause or delete it. A member may only set one-off wake-ups (at or in_minutes) within 24 hours, bound to its current task: they are cancelled when the task ends.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "ScheduleCreateInput".
@@ -3518,7 +3518,7 @@ export interface ScheduleCreateInput {
    */
   message: string;
   /**
-   * One-off: fire once at this time (ISO 8601 with an offset, e.g. 2026-11-23T09:00:00+08:00), 1 minute to 30 days from now.
+   * One-off: fire once at this time (ISO 8601 with an offset, e.g. 2026-11-23T09:00:00+08:00), 1 minute to 30 days from now (members: within 24 hours).
    */
   at?: string;
   /**
@@ -3526,7 +3526,7 @@ export interface ScheduleCreateInput {
    */
   in_minutes?: number;
   /**
-   * Recurring: five cron fields (minute hour day-of-month month day-of-week, e.g. "0 9 * * 1-5") or a descriptor (@daily, @every 2h), read in timezone; at least 5 minutes between runs.
+   * Recurring (not for members): five cron fields (minute hour day-of-month month day-of-week, e.g. "0 9 * * 1-5") or a descriptor (@daily, @every 2h), read in timezone; at least 5 minutes between runs.
    */
   cron?: string;
   /**

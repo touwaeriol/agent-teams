@@ -61,6 +61,8 @@ func (a *API) registerSchedules(api huma.API) {
 	huma.Register(api, op("delete-schedule", "DELETE", "/api/schedules/{id}", t, status(204)), a.deleteSchedule)
 	huma.Register(api, op("run-schedule", "POST", "/api/schedules/{id}/run", t, status(202),
 		summary("Send the schedule's message to its target now")), a.runSchedule)
+	huma.Register(api, op("list-schedule-runs", "GET", "/api/schedules/{id}/runs", t,
+		summary("The schedule's last 100 runs, newest first")), a.listScheduleRuns)
 }
 
 // scheduleErr shows a validation error on its field.
@@ -144,5 +146,16 @@ func (a *API) runSchedule(ctx context.Context, in *scheduleIDInput) (*struct{}, 
 	if err != nil {
 		return nil, err
 	}
-	return nil, fail(a.e.Timers.Fire(ctx, s, owner), "没有这个项目")
+	return nil, scheduleErr(a.e.Timers.Fire(ctx, s, owner))
+}
+
+type runsOutput struct{ Body []timers.Run }
+
+func (a *API) listScheduleRuns(ctx context.Context, in *scheduleIDInput) (*runsOutput, error) {
+	s, _, err := a.ownSchedule(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	list, err := timers.Runs(ctx, a.e.Core.Pool, s.ID)
+	return &runsOutput{Body: list}, err
 }

@@ -62,10 +62,12 @@ type ScheduleLike = {
   kind: "cron" | "once";
   cron: string;
   run_at?: string | null;
-  target: "coordinator" | "lead";
+  target: "coordinator" | "lead" | "member";
   thread_no?: number | null;
   thread_title?: string | null;
-  created_by: "user" | "coordinator" | "lead";
+  employee?: string | null;
+  task_id?: string | null;
+  created_by: "user" | "coordinator" | "lead" | "member";
 };
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -78,13 +80,17 @@ export function describeSchedule(s: Pick<ScheduleLike, "kind" | "cron" | "run_at
   return `一次 · ${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-export function scheduleTarget(s: Pick<ScheduleLike, "target" | "thread_no" | "thread_title">): string {
+export function scheduleTarget(s: Pick<ScheduleLike, "target" | "thread_no" | "thread_title" | "employee" | "task_id">): string {
+  if (s.target === "member") return `${s.employee ?? "员工"}（${s.thread_no ? `#${s.thread_no} ` : ""}任务 ${s.task_id ?? ""}）`;
   if (s.target !== "lead") return "统筹";
   return s.thread_no ? `#${s.thread_no} ${s.thread_title ?? ""} 的组长`.replace(/\s+的/, " 的") : "讨论串组长";
 }
 
-const CREATORS = { user: "你", coordinator: "统筹", lead: "组长" } as const;
+const CREATORS = { user: "你", coordinator: "统筹", lead: "组长", member: "员工" } as const;
 export const scheduleCreator = (s: Pick<ScheduleLike, "created_by">) => CREATORS[s.created_by] ?? s.created_by;
 
 const STATUSES: Record<string, string> = { active: "进行中", done: "已完成", cancelled: "已取消", missed: "已错过" };
 export const scheduleStatus = (status: string) => STATUSES[status] ?? status;
+
+const OUTCOMES: Record<string, string> = { delivered: "已发出", skipped: "跳过", failed: "失败", missed: "错过" };
+export const runOutcome = (outcome: string) => OUTCOMES[outcome] ?? outcome;
