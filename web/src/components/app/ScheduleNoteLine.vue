@@ -10,7 +10,7 @@ import type { MessageView } from "@/api/views";
 const props = defineProps<{ pid: string; message: MessageView }>();
 const id = computed(() => (props.message.meta?.schedule_undo ? props.message.meta.schedule_id : undefined));
 const list = useSchedules(() => props.pid, () => Boolean(id.value));
-const pending = computed(() => (list.data.value ?? []).some((s) => s.id === id.value && s.status === "active"));
+const pending = computed(() => (Array.isArray(list.data.value) ? list.data.value : []).some((s) => s.id === id.value && s.status === "active"));
 const undo = useAction(() => scheduleActions.remove(id.value ?? ""), { invalidate: () => [keys.schedules(props.pid)], success: "已撤销" });
 </script>
 

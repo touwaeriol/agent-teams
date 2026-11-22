@@ -12,7 +12,7 @@ import { describeSchedule, scheduleCreator, scheduleTarget } from "@/lib/schedul
 
 const props = defineProps<{ pid: string; threadId: string }>();
 const list = useSchedules(() => props.pid);
-const items = computed(() => (list.data.value ?? []).filter((s) => s.thread_id === props.threadId && s.status === "active" && s.enabled));
+const items = computed(() => (Array.isArray(list.data.value) ? list.data.value : []).filter((s) => s.thread_id === props.threadId && s.status === "active" && s.enabled));
 const remove = useAction((id: string) => scheduleActions.remove(id), { invalidate: () => [keys.schedules(props.pid)], success: "已取消" });
 </script>
 
