@@ -57,7 +57,7 @@
       "$ref": "#/$defs/Runtimes"
     },
     "features": {
-      "description": "Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh), self_update (runs under the update launcher: node.upgrade with mode, drain, rollback).",
+      "description": "Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), runtime_status (node.runtimes, node.runtimes_refresh), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh), self_update (runs under the update launcher: node.upgrade with mode, drain, rollback).",
       "type": "array",
       "items": {
         "type": "string"
@@ -144,6 +144,9 @@
         },
         "codex": {
           "$ref": "#/$defs/CodexRuntime"
+        },
+        "antigravity": {
+          "$ref": "#/$defs/AntigravityRuntime"
         }
       }
     },
@@ -183,6 +186,31 @@
           ]
         },
         "sandbox_ok": {
+          "type": "boolean"
+        }
+      }
+    },
+    "AntigravityRuntime": {
+      "title": "AntigravityRuntime",
+      "description": "Google Antigravity CLI (agy, driven over ACP). Reported even when agy is not installed (installed false, auth none) so the node page can say so; the console schedules antigravity sessions only on nodes that report it installed and logged in.",
+      "type": "object",
+      "properties": {
+        "cli": {
+          "description": "agy --version, e.g. 1.5.14; empty when not installed.",
+          "type": "string"
+        },
+        "auth": {
+          "description": "oauth: a Google account login (agy acp --login); api_key: GEMINI_API_KEY with modelProvider gemini; adc: AGY_ADC_AUTH application default credentials; none: not logged in.",
+          "type": "string",
+          "enum": [
+            "oauth",
+            "api_key",
+            "adc",
+            "none"
+          ]
+        },
+        "installed": {
+          "description": "false when the agy binary was not found; absent means installed.",
           "type": "boolean"
         }
       }

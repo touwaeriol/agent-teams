@@ -7,7 +7,7 @@ import (
 	"github.com/riverqueue/river/rivermigrate"
 )
 
-// riverSchemaVersion is the last River migration copied into goose (00360_river_queue.sql).
+// riverSchemaVersion is the last River migration copied into goose (00380_river_queue.sql).
 const riverSchemaVersion = 8
 
 // TestRiverMigrationsCurrent fails when a River upgrade ships a migration the goose migrations

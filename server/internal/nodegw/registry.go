@@ -10,6 +10,7 @@ import (
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/platform"
+	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -36,6 +37,36 @@ func (g *Gateway) Status(nodeID string) platform.NodeLive {
 		live.Isolation = string(*l.hello.Isolation)
 	}
 	return live
+}
+
+// RuntimeReady reports whether the node's hello lets it run the runtime: always for runtimes
+// whose login node.usage tells (runtimes.NeedsHelloReady false); otherwise the hello must report
+// the runtime installed and logged in (auth other than none). False when the node is offline.
+// Only for daemons without runtime_status (orchestrator nodeStates' old path): a daemon that
+// reports node.runtimes is judged by at_node_runtimes instead, Antigravity included.
+func (g *Gateway) RuntimeReady(nodeID, runtime string) bool {
+	if !runtimes.Of(runtime).NeedsHelloReady {
+		return true
+	}
+	l := g.link(nodeID)
+	if l == nil {
+		return false
+	}
+	return helloReady(toMap(l.hello.Runtimes), runtimes.Of(runtime).ID)
+}
+
+// helloReady: the hello's entry for the runtime exists, is not installed:false and has an auth
+// other than "" or none.
+func helloReady(rts map[string]any, id string) bool {
+	entry, ok := rts[id].(map[string]any)
+	if !ok {
+		return false
+	}
+	if installed, ok := entry["installed"].(bool); ok && !installed {
+		return false
+	}
+	auth, _ := entry["auth"].(string)
+	return auth != "" && auth != "none"
 }
 
 // Capacity is the node's max_active_sessions (setting, else hello); 0 means no limit.

@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import type { PluginBundle, PluginFile, PluginMcpServer, SessionOpen } from "../protocol.js";
 import { isInside, resolveInRoot } from "../util/paths.js";
 import { isMarkdown, stripToolGrants } from "./frontmatter.js";
+import type { AcpMcpServer } from "./antigravity/driver.js";
 import { employeeDir } from "./skills.js";
 
 const SAFE_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -100,6 +101,19 @@ export function codexMcpServers(plugins: MaterializedPlugin[]): Record<string, R
     for (const [k, s] of Object.entries(p.mcpServers)) {
       if (s.type === "stdio") out[k] = { command: s.command, ...(s.args ? { args: s.args } : {}), ...(s.env ? { env: s.env } : {}) };
       if (s.type === "http") out[k] = { url: s.url, ...(s.headers ? { http_headers: s.headers } : {}) };
+    }
+  }
+  return out;
+}
+
+/** Plugin MCP servers in ACP session/new form (Antigravity): stdio, http and sse. */
+export function acpMcpServers(plugins: MaterializedPlugin[]): AcpMcpServer[] {
+  const out: AcpMcpServer[] = [];
+  const pairs = (m?: Record<string, string>) => Object.entries(m ?? {}).map(([name, value]) => ({ name, value }));
+  for (const p of plugins) {
+    for (const [name, s] of Object.entries(p.mcpServers)) {
+      if (s.type === "stdio") out.push({ name, command: s.command ?? "", args: s.args ?? [], env: pairs(s.env) });
+      else out.push({ type: s.type, name, url: s.url ?? "", headers: pairs(s.headers) });
     }
   }
   return out;

@@ -35,6 +35,11 @@
           "cli": "0.169.0",
           "auth": "none",
           "sandbox_ok": true
+        },
+        "antigravity": {
+          "cli": "1.5.14",
+          "auth": "oauth",
+          "installed": true
         }
       },
       "features": [
@@ -269,6 +274,49 @@
             ],
             "network_access": true
           }
+        }
+      },
+      "platform_tools": []
+    }
+  },
+  {
+    "v": 2,
+    "type": "session.open",
+    "id": "c_01JD3V0000000000000000014",
+    "seq": 983,
+    "ts": "2026-11-14T12:00:01Z",
+    "body": {
+      "session_id": "s_01JG",
+      "open_gen": 1,
+      "employee": {
+        "name": "reviewer-1",
+        "role": "reviewer",
+        "tier": "member",
+        "project_id": "7a1c",
+        "thread_no": 12
+      },
+      "runtime": "antigravity",
+      "cwd": "projects/7a1c/threads/12/reviewer-1",
+      "resume": {
+        "sdk_session_id": "agy-sess-1"
+      },
+      "antigravity": {
+        "model": "gemini-4-neon-high",
+        "read_only": true,
+        "approval": "ask",
+        "system_append": "You are reviewer-1.",
+        "bash_policy": {
+          "mode": "argv",
+          "allow": [
+            "git",
+            "ls",
+            "cat",
+            "rg"
+          ],
+          "deny_flags": [
+            "--output"
+          ],
+          "deny_metachar": true
         }
       },
       "platform_tools": []
@@ -1355,6 +1403,51 @@
           "auth": "api_key",
           "status": "unsupported",
           "fetched_at": "2026-11-14T12:04:00Z"
+        }
+      }
+    }
+  },
+  {
+    "v": 2,
+    "type": "node.runtimes_refresh",
+    "id": "c_01JD3V0000000000000000RR1",
+    "ts": "2026-11-14T12:04:07Z",
+    "body": {
+      "runtimes": [
+        "claude",
+        "gemini"
+      ]
+    }
+  },
+  {
+    "v": 2,
+    "type": "node.runtimes",
+    "id": "n_01JD3V0000000000000000RT1",
+    "ts": "2026-11-14T12:04:08Z",
+    "body": {
+      "reason": "refresh",
+      "in_reply_to": "c_01JD3V0000000000000000RR1",
+      "runtimes": {
+        "claude": {
+          "installed": true,
+          "version": "2.1.3",
+          "path": "/usr/local/bin/claude",
+          "auth": "subscription",
+          "auth_expires_at": "2026-12-14T12:00:00Z",
+          "checked_at": "2026-11-14T12:04:08Z"
+        },
+        "codex": {
+          "installed": true,
+          "version": "0.80.0",
+          "path": "/usr/local/bin/codex",
+          "auth": "none",
+          "checked_at": "2026-11-14T12:04:08Z"
+        },
+        "gemini": {
+          "installed": false,
+          "auth": "unknown",
+          "checked_at": "2026-11-14T12:04:08Z",
+          "error": "gemini not found in PATH"
         }
       }
     }

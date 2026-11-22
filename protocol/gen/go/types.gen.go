@@ -37,6 +37,136 @@ func (j *Ack) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+// Google Antigravity CLI (agy, driven over ACP). Reported even when agy is not
+// installed (installed false, auth none) so the node page can say so; the console
+// schedules antigravity sessions only on nodes that report it installed and logged
+// in.
+type AntigravityRuntime struct {
+	// oauth: a Google account login (agy acp --login); api_key: GEMINI_API_KEY with
+	// modelProvider gemini; adc: AGY_ADC_AUTH application default credentials; none:
+	// not logged in.
+	Auth *AntigravityRuntimeAuth `json:"auth,omitempty,omitzero"`
+
+	// agy --version, e.g. 1.5.14; empty when not installed.
+	CLI *string `json:"cli,omitempty,omitzero"`
+
+	// false when the agy binary was not found; absent means installed.
+	Installed *bool `json:"installed,omitempty,omitzero"`
+}
+
+type AntigravityRuntimeAuth string
+
+const AntigravityRuntimeAuthAdc AntigravityRuntimeAuth = "adc"
+const AntigravityRuntimeAuthApiKey AntigravityRuntimeAuth = "api_key"
+const AntigravityRuntimeAuthNone AntigravityRuntimeAuth = "none"
+const AntigravityRuntimeAuthOauth AntigravityRuntimeAuth = "oauth"
+
+var enumValues_AntigravityRuntimeAuth = []interface{}{
+	"oauth",
+	"api_key",
+	"adc",
+	"none",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *AntigravityRuntimeAuth) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_AntigravityRuntimeAuth {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_AntigravityRuntimeAuth, v)
+	}
+	*j = AntigravityRuntimeAuth(v)
+	return nil
+}
+
+// agy acp --process-per-session, one process per session. The ACP sessionId is
+// kept as sdk_session_id (session.opened, ResumeRef, sessions.report).
+type AntigravitySessionOptions struct {
+	// How ACP session/request_permission is answered when read_only does not already
+	// reject it. ask: forwarded to the console as approval.request; auto: the daemon
+	// allows it (bypass roles).
+	Approval AntigravitySessionOptionsApproval `json:"approval"`
+
+	// read_only: argv allow list for shell commands, as in claude.bash_policy.
+	BashPolicy *BashPolicy `json:"bash_policy,omitempty,omitzero"`
+
+	// Model slug (e.g. gemini-4-neon-high); empty leaves the choice to agy.
+	Model string `json:"model"`
+
+	// Read-only roles (reviewer…): the daemon disables agy's writing tools (deny
+	// rules for file writes and edits) and rejects every writing permission request;
+	// commands run only when bash_policy allows them.
+	ReadOnly bool `json:"read_only"`
+
+	// Appended to agy's system prompt (session/new
+	// _meta.antigravity.systemPrompt.append): platform rules, role instructions and
+	// skills inlined.
+	SystemAppend *string `json:"system_append,omitempty,omitzero"`
+}
+
+type AntigravitySessionOptionsApproval string
+
+const AntigravitySessionOptionsApprovalAsk AntigravitySessionOptionsApproval = "ask"
+const AntigravitySessionOptionsApprovalAuto AntigravitySessionOptionsApproval = "auto"
+
+var enumValues_AntigravitySessionOptionsApproval = []interface{}{
+	"ask",
+	"auto",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *AntigravitySessionOptionsApproval) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_AntigravitySessionOptionsApproval {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_AntigravitySessionOptionsApproval, v)
+	}
+	*j = AntigravitySessionOptionsApproval(v)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *AntigravitySessionOptions) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["approval"]; raw != nil && !ok {
+		return fmt.Errorf("field approval in AntigravitySessionOptions: required")
+	}
+	if _, ok := raw["model"]; raw != nil && !ok {
+		return fmt.Errorf("field model in AntigravitySessionOptions: required")
+	}
+	if _, ok := raw["read_only"]; raw != nil && !ok {
+		return fmt.Errorf("field read_only in AntigravitySessionOptions: required")
+	}
+	type Plain AntigravitySessionOptions
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = AntigravitySessionOptions(plain)
+	return nil
+}
+
 // The daemon applied approval.resolve (stale = the pending request no longer
 // existed).
 type ApprovalAck struct {
@@ -234,6 +364,7 @@ type ApprovalRequest struct {
 
 type ApprovalRequestSource string
 
+const ApprovalRequestSourceAntigravityPermission ApprovalRequestSource = "antigravity_permission"
 const ApprovalRequestSourceClaudeCanUseTool ApprovalRequestSource = "claude_can_use_tool"
 const ApprovalRequestSourceCodexCommand ApprovalRequestSource = "codex_command"
 const ApprovalRequestSourceCodexFileChange ApprovalRequestSource = "codex_file_change"
@@ -246,6 +377,7 @@ var enumValues_ApprovalRequestSource = []interface{}{
 	"codex_file_change",
 	"codex_permissions",
 	"codex_mcp_elicitation",
+	"antigravity_permission",
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -3395,7 +3527,8 @@ type Hello struct {
 	// cred_helper, upgrade, file_download (read_deliverable file.download),
 	// shared_files (write_shared_file upload and read_shared_file shared_download
 	// into .shared/), context_usage (turn_ended carries context), session_compact
-	// (session.compact), usage (node.usage), ssh_gateway (session.open ssh_servers,
+	// (session.compact), usage (node.usage), runtime_status (node.runtimes,
+	// node.runtimes_refresh), ssh_gateway (session.open ssh_servers,
 	// ssh.cert_request, ssh.servers_update, /nodes/ssh), self_update (runs under the
 	// update launcher: node.upgrade with mode, drain, rollback).
 	Features []string `json:"features,omitempty,omitzero"`
@@ -4387,6 +4520,101 @@ func (j *NodeDrain) UnmarshalJSON(value []byte) error {
 		return fmt.Errorf("field %s: must be >= %v", "deadline_s", 0)
 	}
 	*j = NodeDrain(plain)
+	return nil
+}
+
+// Install and login state of every runtime CLI the daemon knows (unreliable). Sent
+// after welcome (reason hello), then only when something changed (periodic check
+// or a watched credential file changed), and always as the answer to
+// node.runtimes_refresh. Always carries the full set of known runtimes, so the
+// console replaces its stored state. Sent only when hello.features contains
+// runtime_status. Never carries credentials: only file metadata and non-secret
+// fields are read.
+type NodeRuntimes struct {
+	// Envelope id of the node.runtimes_refresh this answers; only with reason
+	// refresh.
+	InReplyTo *string `json:"in_reply_to,omitempty,omitzero"`
+
+	// hello: first report after welcome; periodic: the timed check found a change;
+	// fs_event: a watched CLI or credential file changed; refresh: answer to
+	// node.runtimes_refresh (sent even without changes).
+	Reason NodeRuntimesReason `json:"reason"`
+
+	// Keyed by runtime id (claude, codex, and any runtime added later; same ids as
+	// common.json Runtime). Receivers ignore ids they do not know.
+	Runtimes NodeRuntimesRuntimes `json:"runtimes"`
+}
+
+type NodeRuntimesReason string
+
+const NodeRuntimesReasonFsEvent NodeRuntimesReason = "fs_event"
+const NodeRuntimesReasonHello NodeRuntimesReason = "hello"
+const NodeRuntimesReasonPeriodic NodeRuntimesReason = "periodic"
+const NodeRuntimesReasonRefresh NodeRuntimesReason = "refresh"
+
+var enumValues_NodeRuntimesReason = []interface{}{
+	"hello",
+	"periodic",
+	"fs_event",
+	"refresh",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *NodeRuntimesReason) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_NodeRuntimesReason {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_NodeRuntimesReason, v)
+	}
+	*j = NodeRuntimesReason(v)
+	return nil
+}
+
+// Check the runtime CLIs now and answer with node.runtimes (reason refresh,
+// in_reply_to = this envelope id), even when nothing changed (unreliable). Sent
+// only when hello.features contains runtime_status.
+type NodeRuntimesRefresh struct {
+	// Runtime ids to re-check; omitted = all. The answer still carries every known
+	// runtime.
+	Runtimes []RuntimeID `json:"runtimes,omitempty,omitzero"`
+}
+
+// Keyed by runtime id (claude, codex, and any runtime added later; same ids as
+// common.json Runtime). Receivers ignore ids they do not know.
+type NodeRuntimesRuntimes map[string]RuntimeStatus
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *NodeRuntimes) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["reason"]; raw != nil && !ok {
+		return fmt.Errorf("field reason in NodeRuntimes: required")
+	}
+	if _, ok := raw["runtimes"]; raw != nil && !ok {
+		return fmt.Errorf("field runtimes in NodeRuntimes: required")
+	}
+	type Plain NodeRuntimes
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.InReplyTo != nil {
+		if matched, _ := regexp.MatchString(`^c_`, string(*plain.InReplyTo)); !matched {
+			return fmt.Errorf("field %s pattern match: must match %s", "InReplyTo", `^c_`)
+		}
+	}
+	*j = NodeRuntimes(plain)
 	return nil
 }
 
@@ -6261,8 +6489,127 @@ func (j *ReviewPermissionInput) UnmarshalJSON(value []byte) error {
 
 type Runtime string
 
+const RuntimeAntigravity Runtime = "antigravity"
 const RuntimeClaude Runtime = "claude"
 const RuntimeCodex Runtime = "codex"
+
+// Runtime id as an open lower-case string (the values of Runtime plus any runtime
+// a newer daemon knows); used as map key and in lists where a new runtime should
+// need no protocol change.
+type RuntimeID string
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *RuntimeID) UnmarshalJSON(value []byte) error {
+	type Plain RuntimeID
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if matched, _ := regexp.MatchString(`^[a-z][a-z0-9_-]{0,31}$`, string(plain)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "", `^[a-z][a-z0-9_-]{0,31}$`)
+	}
+	*j = RuntimeID(plain)
+	return nil
+}
+
+type RuntimeStatus struct {
+	// How the runtime is logged in: subscription (provider account login, e.g. Claude
+	// subscription), chatgpt (Codex ChatGPT login), api_key, none (not logged in),
+	// unknown (could not tell, e.g. not installed or the check failed).
+	Auth RuntimeStatusAuth `json:"auth"`
+
+	// When the login expires, only when it can be read from file metadata or
+	// non-secret fields.
+	AuthExpiresAt *time.Time `json:"auth_expires_at,omitempty,omitzero"`
+
+	// When the daemon ran this check.
+	CheckedAt time.Time `json:"checked_at"`
+
+	// Why the check failed or the CLI did not run; never contains credential content.
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// The login is known to be expired (the console treats it like auth none for
+	// scheduling).
+	Expired *bool `json:"expired,omitempty,omitzero"`
+
+	// The CLI (or SDK) was found and runs.
+	Installed bool `json:"installed"`
+
+	// Absolute path of the executable that was found.
+	Path *string `json:"path,omitempty,omitzero"`
+
+	// CLI version as reported by the CLI, when known.
+	Version *string `json:"version,omitempty,omitzero"`
+}
+
+type RuntimeStatusAuth string
+
+const RuntimeStatusAuthApiKey RuntimeStatusAuth = "api_key"
+const RuntimeStatusAuthChatgpt RuntimeStatusAuth = "chatgpt"
+const RuntimeStatusAuthNone RuntimeStatusAuth = "none"
+const RuntimeStatusAuthSubscription RuntimeStatusAuth = "subscription"
+const RuntimeStatusAuthUnknown RuntimeStatusAuth = "unknown"
+
+var enumValues_RuntimeStatusAuth = []interface{}{
+	"subscription",
+	"chatgpt",
+	"api_key",
+	"none",
+	"unknown",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *RuntimeStatusAuth) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_RuntimeStatusAuth {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_RuntimeStatusAuth, v)
+	}
+	*j = RuntimeStatusAuth(v)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *RuntimeStatus) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["auth"]; raw != nil && !ok {
+		return fmt.Errorf("field auth in RuntimeStatus: required")
+	}
+	if _, ok := raw["checked_at"]; raw != nil && !ok {
+		return fmt.Errorf("field checked_at in RuntimeStatus: required")
+	}
+	if _, ok := raw["installed"]; raw != nil && !ok {
+		return fmt.Errorf("field installed in RuntimeStatus: required")
+	}
+	type Plain RuntimeStatus
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.Error != nil && utf8.RuneCountInString(string(*plain.Error)) > 1000 {
+		return fmt.Errorf("field %s length: must be <= %d", "error", 1000)
+	}
+	if plain.Path != nil && utf8.RuneCountInString(string(*plain.Path)) > 1024 {
+		return fmt.Errorf("field %s length: must be <= %d", "path", 1024)
+	}
+	if plain.Version != nil && utf8.RuneCountInString(string(*plain.Version)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "version", 200)
+	}
+	*j = RuntimeStatus(plain)
+	return nil
+}
 
 type RuntimeUsage struct {
 	// How the runtime is logged in: subscription (Claude), chatgpt (Codex), api_key,
@@ -6376,6 +6723,7 @@ func (j *RuntimeUsage) UnmarshalJSON(value []byte) error {
 var enumValues_Runtime = []interface{}{
 	"claude",
 	"codex",
+	"antigravity",
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -6399,6 +6747,9 @@ func (j *Runtime) UnmarshalJSON(value []byte) error {
 }
 
 type Runtimes struct {
+	// Antigravity corresponds to the JSON schema field "antigravity".
+	Antigravity *AntigravityRuntime `json:"antigravity,omitempty,omitzero"`
+
 	// Claude corresponds to the JSON schema field "claude".
 	Claude *ClaudeRuntime `json:"claude,omitempty,omitzero"`
 
@@ -7390,6 +7741,9 @@ type SessionOpen struct {
 	// first_message anchor (a crash reopen, a reopen after a daemon restart): the new
 	// process starts with it, as if session.send had carried it.
 	Anchor *string `json:"anchor,omitempty,omitzero"`
+
+	// Set when runtime = antigravity.
+	Antigravity *AntigravitySessionOptions `json:"antigravity,omitempty,omitzero"`
 
 	// Set when runtime = claude.
 	Claude *ClaudeSessionOptions `json:"claude,omitempty,omitzero"`
@@ -8793,12 +9147,14 @@ type TeamMember struct {
 
 type TeamMemberType string
 
+const TeamMemberTypeAntigravity TeamMemberType = "antigravity"
 const TeamMemberTypeClaudeCode TeamMemberType = "claude_code"
 const TeamMemberTypeCodex TeamMemberType = "codex"
 
 var enumValues_TeamMemberType = []interface{}{
 	"claude_code",
 	"codex",
+	"antigravity",
 }
 
 // UnmarshalJSON implements json.Unmarshaler.

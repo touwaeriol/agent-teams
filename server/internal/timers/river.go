@@ -13,7 +13,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// Scheduled tasks run on River (riverqueue/river, tables from migration 00360). at_schedules is
+// Scheduled tasks run on River (riverqueue/river, tables from migration 00380). at_schedules is
 // the source of truth; every active, enabled schedule has one pending schedule_fire job for its
 // next_run_at, inserted in the same transaction that sets next_run_at. The job locks the row,
 // fires only when next_run_at still equals the job's run_at (so a job left over from an edit, a

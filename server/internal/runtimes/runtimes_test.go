@@ -25,3 +25,25 @@ func TestRegistry(t *testing.T) {
 		t.Fatal("IDs")
 	}
 }
+
+func TestAntigravity(t *testing.T) {
+	a, ok := Get(Antigravity)
+	if !ok || !Valid("antigravity") || a.Title != "Antigravity" || a.YAMLType != "antigravity" || a.TeamType != "antigravity" {
+		t.Fatalf("antigravity entry: %+v", a)
+	}
+	if a.DefaultModel != "" || a.SlashCommands || a.LiveModeSwitch || !a.NeedsIsolation || a.CanLead || !a.NeedsHelloReady {
+		t.Fatalf("antigravity capabilities: %+v", a)
+	}
+	if FromYAMLType("antigravity") != Antigravity {
+		t.Fatal("FromYAMLType(antigravity)")
+	}
+	if RunsOn(Antigravity, false, "sandbox") || !RunsOn(Antigravity, false, "agent_user") || !RunsOn(Antigravity, true, "") {
+		t.Fatal("RunsOn(antigravity)")
+	}
+	if LeaderTitles() != "Claude Code" {
+		t.Fatalf("LeaderTitles = %q", LeaderTitles())
+	}
+	if Of(Claude).NeedsHelloReady || Of(Codex).NeedsHelloReady {
+		t.Fatal("only antigravity needs a ready hello")
+	}
+}

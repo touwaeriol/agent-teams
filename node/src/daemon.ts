@@ -17,14 +17,16 @@ import { Link } from "./link/client.js";
 import { Dispatcher, type CommandHandler } from "./link/dispatcher.js";
 import { Inbox, type Reply } from "./link/inbox.js";
 import { Outbox } from "./link/outbox.js";
-import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, FileDownload, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, NodeUsageRefresh, SessionClose, SshCertResponse, SshServersUpdate, SessionCompact, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
+import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, FileDownload, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, NodeRuntimesRefresh, NodeUsageRefresh, SessionClose, SshCertResponse, SshServersUpdate, SessionCompact, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
 import { readClaudeUsage, UsageReporter, type UsageSources } from "./usage.js";
 import type { QueryFn } from "./sessions/claude/driver.js";
 import { RuntimeRegistry } from "./sessions/registry.js";
+import { RuntimeMonitor, type RuntimeStatuses } from "./runtime-monitor.js";
 import { CodexHub } from "./sessions/codex/hub.js";
 import { materializeSkills } from "./sessions/skills.js";
 import { materializePlugins } from "./sessions/plugins.js";
 import { buildEnv, CODEX_PASS_ENV, gitIdentity } from "./sessions/env.js";
+import { AGY_PASS_ENV } from "./sessions/antigravity/detect.js";
 import { SessionManager } from "./sessions/manager.js";
 import type { ToolPolicy } from "./sessions/policy.js";
 import type { Session } from "./sessions/session.js";
@@ -51,6 +53,8 @@ export interface DaemonOptions {
   gitBaseUrl: string;
   claudeConfigDir: string;
   codexHome: string;
+  /** HOME of the agy processes (default <data>/agy-home): log in there once with `HOME=<agyHome> agy acp --login`. */
+  agyHome?: string;
   installDir: string;
   /** How to invoke this daemon for helper subcommands (git-credential, gh). */
   nodeCmd: string[];
@@ -59,6 +63,8 @@ export interface DaemonOptions {
   isolation?: Isolation;
   queryFn?: QueryFn;
   codexCommand?: string[];
+  /** The agy command (tests: a fake ACP agent); default: found on PATH / ~/.local/bin. */
+  agyCommand?: string[];
   link?: { pingMs?: number; deadMs?: number; backoff?: { minMs: number; maxMs: number } };
   crashDelaysMs?: number[];
   /** session.compact: how long to wait for an idle session, and for the compaction (tests). */
@@ -76,6 +82,8 @@ export interface DaemonOptions {
   usageTimeoutMs?: number;
   /** Replaces the Claude / Codex quota reads (tests). */
   usageSources?: Partial<UsageSources>;
+  /** node.runtimes checks: period (default 60 s; 0 disables the timer), file-event debounce (default 2 s), probe budget (default 12 s). */
+  runtimeMonitor?: { intervalMs?: number; debounceMs?: number; probeTimeoutMs?: number };
   /** Download gh at start instead of on first use (default: when probing runtimes). */
   prefetchGh?: boolean;
   /** Parent of the per-session SSH directories (default $XDG_RUNTIME_DIR/agent-teams-ssh or <data>/run-ssh). */
@@ -92,7 +100,7 @@ export interface DaemonOptions {
   updater?: Partial<Pick<UpdaterOptions, "pollMs" | "confirmAfterMs" | "fetchFn" | "npm" | "now">>;
 }
 
-const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "file_download", "shared_files", "context_usage", "session_compact", "usage", "ssh_gateway"];
+const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "file_download", "shared_files", "context_usage", "session_compact", "usage", "ssh_gateway", "runtime_status"];
 
 /** Wires the link, command handlers, sessions, tools, git and credentials together. */
 export class Daemon {
@@ -111,6 +119,8 @@ export class Daemon {
   private readonly platform: PlatformFiles;
   private readonly gh: GhInstaller;
   private readonly employeeHome: string;
+  /** HOME of the agy processes (Antigravity login and settings); its .gemini and .config are secret. */
+  private readonly agyHome: string;
   /** Per-employee skill plugins (sessions/skills.ts), outside every worktree. */
   private readonly skillsRoot: string;
   /** Per-employee plugin copies at exact versions (sessions/plugins.ts), outside every worktree. */
@@ -120,6 +130,8 @@ export class Daemon {
   readonly runtimes: RuntimeRegistry;
   private statsTimer: NodeJS.Timeout | null = null;
   private readonly usage: UsageReporter;
+  /** Re-detects the runtimes' install/login state and reports changes in node.runtimes (protocol.md §9.2). */
+  readonly runtimeMonitor: RuntimeMonitor;
   private readonly updater: Updater;
   private readonly ssh: SshHub;
   /** Real OpenSSH client found at start (null: remote servers cannot be used on this node). */
@@ -129,6 +141,8 @@ export class Daemon {
     for (const d of [o.root, o.stateDir]) mkdirSync(d, { recursive: true, mode: 0o700 });
     this.employeeHome = join(o.root, "agent-home");
     mkdirSync(this.employeeHome, { recursive: true, mode: 0o700 });
+    this.agyHome = resolve(o.agyHome ?? join(dirname(o.platformDir), "agy-home"));
+    mkdirSync(this.agyHome, { recursive: true, mode: 0o700 });
     this.skillsRoot = join(o.root, "agent-skills");
     this.pluginsRoot = join(o.root, "agent-plugins");
     this.isolation = o.isolation ?? probeIsolation();
@@ -156,6 +170,16 @@ export class Daemon {
       root: o.root, employeeHome: this.employeeHome, claudeConfigDir: o.claudeConfigDir, codexHome: o.codexHome,
       sandboxOk: () => this.isolation !== "none", claudeEnv: () => this.claudeEnv({}), claudeFixed: () => this.claudeFixed(),
       secretPaths: () => this.secretPaths(), hub: this.hub, toolhost: this.toolhost, ...(o.queryFn ? { queryFn: o.queryFn } : {}),
+      ...(o.codexCommand ? { codexCommand: o.codexCommand } : {}),
+      agyHome: this.agyHome, ...(o.agyCommand ? { agyCommand: o.agyCommand } : {}), log: o.log,
+      agyEnv: () => buildEnv({ base: process.env, home: this.agyHome, passList: [...this.o.passEnv, ...AGY_PASS_ENV] }),
+      // A session saw a runtime's state change (agy logged out, binary gone): report it without waiting for the timer.
+      recheck: () => { if (this.monitorOn) void this.runtimeMonitor.poll("periodic"); },
+    });
+    this.runtimeMonitor = new RuntimeMonitor({
+      detectors: () => this.runtimes.all(), log: o.log, ...o.runtimeMonitor,
+      send: (body) => this.link.send("node.runtimes", body),
+      onChange: (prev, next) => this.runtimesChanged(prev, next),
     });
     this.git = new GitJobs({ root: o.root, platform: this.platform, gitBaseUrl: o.gitBaseUrl, mirrorDir: join(o.stateDir, "mirrors"), log: o.log, credential: (job, repo, purpose, host, path) => this.jobCredential(job, repo, purpose, host, path), gitSsh: gitSshCommand(o.nodeCmd), lookup: (id) => this.recordedResult(id), ...(o.reviewRetryMs !== undefined ? { reviewRetryMs: o.reviewRetryMs } : {}) });
     this.sessions = new SessionManager({
@@ -197,12 +221,14 @@ export class Daemon {
     this.cancelOrphans();
     this.dispatcher.resumeUnfinished();
     this.sessions.startTimers();
+    if (this.monitorOn) this.runtimeMonitor.start();
     this.link.start();
   }
 
   async stop(): Promise<void> {
     if (this.statsTimer) clearInterval(this.statsTimer);
     this.usage.stop();
+    this.runtimeMonitor.stop();
     this.link.stop();
     await this.sessions.shutdown();
     this.hub.stop();
@@ -220,7 +246,7 @@ export class Daemon {
   }
 
   private async probe(): Promise<void> {
-    await this.runtimes.probeAll();
+    await this.runtimes.detectAll({ force: true, timeoutMs: 60_000 });
   }
 
   hello(): Hello {
@@ -262,11 +288,23 @@ export class Daemon {
     if (w.config?.log_level) this.o.log.level = w.config.log_level;
     this.link.send("sessions.report", this.sessions.report());
     this.statsTimer ??= setInterval(() => this.sendStats(), 30_000);
+    if (this.monitorOn) void this.runtimeMonitor.hello();
     this.usage.kick();
     this.updater.onConnected();
   }
 
-  /** Where node.usage reads from: the login kinds probed at start, the Claude CLI and the shared codex app-server. */
+  /** Periodic, file-event and hello checks (off in tests that skip runtime probes, unless asked for); refresh always works. */
+  private get monitorOn(): boolean {
+    return this.o.runtimeMonitor !== undefined || this.o.probeRuntimes !== false;
+  }
+
+  /** A login that appeared, changed or went away: the subscription quota on the node page follows at once. */
+  private runtimesChanged(prev: RuntimeStatuses, next: RuntimeStatuses): void {
+    const auth = (r: RuntimeStatuses) => JSON.stringify(Object.keys(r).sort().map((id) => [id, r[id]!.auth, r[id]!.expired ?? false]));
+    if (Object.keys(prev).length > 0 && auth(prev) !== auth(next)) void this.usage.report();
+  }
+
+  /** Where node.usage reads from: the login kinds last detected (RuntimeMonitor), the Claude CLI and the shared codex app-server. */
   private usageSources(): UsageSources {
     return {
       claudeAuth: () => (this.runtimes.get("claude").info() as ClaudeRuntime).auth,
@@ -313,6 +351,7 @@ export class Daemon {
       "node.config": { run: async (b) => this.nodeConfig(b as NodeConfig) },
       "node.drain": { run: async () => (this.sessions.drain(), []) },
       "node.upgrade": { run: async (b) => (this.updater.handle(b as unknown as NodeUpgrade), []) },
+      "node.runtimes_refresh": { run: async (b, f) => [{ type: "node.runtimes", body: await this.runtimeMonitor.refresh((b as NodeRuntimesRefresh).runtimes, f.id) }] },
       "node.usage_refresh": { run: async (b) => [{ type: "node.usage", body: await this.usage.refresh((b as NodeUsageRefresh).runtimes) }] },
     };
   }
@@ -357,18 +396,20 @@ export class Daemon {
 
   private policy(spec: SessionOpen, absCwd: string, readable: string[]): ToolPolicy {
     const c = spec.claude;
+    const a = spec.antigravity;
     const extra = (c?.sandbox?.extra_write_paths ?? []).map((p) => absPath(p, this.o.root, absCwd)).filter(Boolean);
     return {
       denyNonPlatform: c?.deny_non_platform_tools === true || spec.employee.tier === "coordinator",
-      readOnly: c?.read_only === true,
-      bash: c?.bash_policy ?? null,
+      readOnly: c?.read_only === true || a?.read_only === true,
+      bash: c?.bash_policy ?? a?.bash_policy ?? null,
       readRoots: [absCwd, ...extra, ...readable],
       secretPaths: this.secretPaths(),
     };
   }
 
   secretPaths(): string[] {
-    return [this.o.configDir, this.o.stateDir, this.o.runtimeDir, join(this.o.claudeConfigDir, ".credentials.json"), this.o.codexHome].map((p) => resolve(p));
+    return [this.o.configDir, this.o.stateDir, this.o.runtimeDir, join(this.o.claudeConfigDir, ".credentials.json"), this.o.codexHome,
+      join(this.agyHome, ".gemini"), join(this.agyHome, ".config")].map((p) => resolve(p));
   }
 
   private sessionEnv(spec: SessionOpen): Record<string, string> {

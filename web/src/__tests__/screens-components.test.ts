@@ -140,6 +140,22 @@ describe("MembersView", () => {
     expect(rows[1].text()).not.toContain("t5");
     expect(rows[1].find("button").exists()).toBe(false);
   });
+
+  it("says why a member waits for a node (queued · no_runtime)", async () => {
+    stubApi({ "/roles": { roles: [] }, "/questions": [] });
+    const base = { tier: "member", role: "reviewer", title: "审查", runtime: "antigravity", node: null, look: {} };
+    const members = [
+      { ...base, id: "a", name: "rev-1", thread_no: 3, status: { state: "queued", substate: "no_runtime", bubble: "没有已登录 Antigravity 的在线节点", since: "2026-11-14T10:00:00Z" } },
+      { ...base, id: "b", name: "rev-2", thread_no: 3, status: { state: "queued", substate: "", bubble: "", since: "2026-11-14T10:00:00Z" } },
+    ];
+    const w = mountWith(MembersView, { thread: thread(3, { members } as never) });
+    await flushPromises();
+    const rows = w.findAll(".rounded-lg.border");
+    expect(rows[0].text()).toContain("Antigravity · 未分配节点");
+    expect(rows[0].text()).toContain("排队等节点");
+    expect(rows[0].find("[data-queue-reason]").text()).toBe("没有已登录 Antigravity 的在线节点");
+    expect(rows[1].find("[data-queue-reason]").exists()).toBe(false);
+  });
 });
 
 describe("AutoApproveToggle", () => {

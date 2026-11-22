@@ -1,7 +1,7 @@
 -- +goose Up
 -- Scheduled tasks that agents create (schedule_* tools) and that wake a thread's lead or a
 -- member, besides the user's recurring messages to the coordinator (data-model.md §2.10). River
--- runs them now (00360): every active schedule has one pending schedule_fire job for its
+-- runs them now (00380): every active schedule has one pending schedule_fire job for its
 -- next_run_at.
 --   kind        cron (recurring, cron + timezone) | once (run_at, cron stays '')
 --   target      coordinator | lead (thread_id names the thread) | member (employee_id, bound to

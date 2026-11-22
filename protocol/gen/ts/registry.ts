@@ -23,6 +23,8 @@ export interface MessageBodies {
   "log": T.Log;
   "node.config": T.NodeConfig;
   "node.drain": T.NodeDrain;
+  "node.runtimes": T.NodeRuntimes;
+  "node.runtimes_refresh": T.NodeRuntimesRefresh;
   "node.stats": T.NodeStats;
   "node.upgrade": T.NodeUpgrade;
   "node.upgrade_result": T.NodeUpgradeResult;
@@ -85,6 +87,8 @@ export const MESSAGE_META: { readonly [K in MessageType]: MessageMeta } = {
   "log": { direction: "node_to_console", reliable: false, key: [] },
   "node.config": { direction: "console_to_node", reliable: true, key: ["id"] },
   "node.drain": { direction: "console_to_node", reliable: true, key: ["id"] },
+  "node.runtimes": { direction: "node_to_console", reliable: false, key: [] },
+  "node.runtimes_refresh": { direction: "console_to_node", reliable: false, key: [] },
   "node.stats": { direction: "node_to_console", reliable: false, key: [] },
   "node.upgrade": { direction: "console_to_node", reliable: true, key: ["id"] },
   "node.upgrade_result": { direction: "node_to_console", reliable: true, key: [] },

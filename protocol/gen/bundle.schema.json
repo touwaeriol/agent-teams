@@ -133,7 +133,8 @@
             "codex_command",
             "codex_file_change",
             "codex_permissions",
-            "codex_mcp_elicitation"
+            "codex_mcp_elicitation",
+            "antigravity_permission"
           ]
         },
         "tool_name": {
@@ -330,8 +331,15 @@
       "type": "string",
       "enum": [
         "claude",
-        "codex"
+        "codex",
+        "antigravity"
       ]
+    },
+    "RuntimeID": {
+      "title": "RuntimeID",
+      "description": "Runtime id as an open lower-case string (the values of Runtime plus any runtime a newer daemon knows); used as map key and in lists where a new runtime should need no protocol change.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,31}$"
     },
     "Tier": {
       "title": "Tier",
@@ -1084,6 +1092,9 @@
         },
         "codex": {
           "$ref": "#/$defs/CodexRuntime"
+        },
+        "antigravity": {
+          "$ref": "#/$defs/AntigravityRuntime"
         }
       }
     },
@@ -1123,6 +1134,31 @@
           ]
         },
         "sandbox_ok": {
+          "type": "boolean"
+        }
+      }
+    },
+    "AntigravityRuntime": {
+      "title": "AntigravityRuntime",
+      "description": "Google Antigravity CLI (agy, driven over ACP). Reported even when agy is not installed (installed false, auth none) so the node page can say so; the console schedules antigravity sessions only on nodes that report it installed and logged in.",
+      "type": "object",
+      "properties": {
+        "cli": {
+          "description": "agy --version, e.g. 1.5.14; empty when not installed.",
+          "type": "string"
+        },
+        "auth": {
+          "description": "oauth: a Google account login (agy acp --login); api_key: GEMINI_API_KEY with modelProvider gemini; adc: AGY_ADC_AUTH application default credentials; none: not logged in.",
+          "type": "string",
+          "enum": [
+            "oauth",
+            "api_key",
+            "adc",
+            "none"
+          ]
+        },
+        "installed": {
+          "description": "false when the agy binary was not found; absent means installed.",
           "type": "boolean"
         }
       }
@@ -1182,7 +1218,7 @@
           "$ref": "#/$defs/Runtimes"
         },
         "features": {
-          "description": "Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh), self_update (runs under the update launcher: node.upgrade with mode, drain, rollback).",
+          "description": "Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), runtime_status (node.runtimes, node.runtimes_refresh), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh), self_update (runs under the update launcher: node.upgrade with mode, drain, rollback).",
           "type": "array",
           "items": {
             "type": "string"
@@ -1271,6 +1307,111 @@
         "deadline_s": {
           "type": "integer",
           "minimum": 0
+        }
+      }
+    },
+    "RuntimeStatus": {
+      "title": "RuntimeStatus",
+      "type": "object",
+      "required": [
+        "installed",
+        "auth",
+        "checked_at"
+      ],
+      "properties": {
+        "installed": {
+          "description": "The CLI (or SDK) was found and runs.",
+          "type": "boolean"
+        },
+        "version": {
+          "description": "CLI version as reported by the CLI, when known.",
+          "type": "string",
+          "maxLength": 200
+        },
+        "path": {
+          "description": "Absolute path of the executable that was found.",
+          "type": "string",
+          "maxLength": 1024
+        },
+        "auth": {
+          "description": "How the runtime is logged in: subscription (provider account login, e.g. Claude subscription), chatgpt (Codex ChatGPT login), api_key, none (not logged in), unknown (could not tell, e.g. not installed or the check failed).",
+          "type": "string",
+          "enum": [
+            "subscription",
+            "chatgpt",
+            "api_key",
+            "none",
+            "unknown"
+          ]
+        },
+        "auth_expires_at": {
+          "description": "When the login expires, only when it can be read from file metadata or non-secret fields.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "expired": {
+          "description": "The login is known to be expired (the console treats it like auth none for scheduling).",
+          "type": "boolean"
+        },
+        "checked_at": {
+          "description": "When the daemon ran this check.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "error": {
+          "description": "Why the check failed or the CLI did not run; never contains credential content.",
+          "type": "string",
+          "maxLength": 1000
+        }
+      }
+    },
+    "NodeRuntimes": {
+      "title": "NodeRuntimes",
+      "description": "Install and login state of every runtime CLI the daemon knows (unreliable). Sent after welcome (reason hello), then only when something changed (periodic check or a watched credential file changed), and always as the answer to node.runtimes_refresh. Always carries the full set of known runtimes, so the console replaces its stored state. Sent only when hello.features contains runtime_status. Never carries credentials: only file metadata and non-secret fields are read.",
+      "type": "object",
+      "required": [
+        "runtimes",
+        "reason"
+      ],
+      "properties": {
+        "runtimes": {
+          "description": "Keyed by runtime id (claude, codex, and any runtime added later; same ids as common.json Runtime). Receivers ignore ids they do not know.",
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/RuntimeID"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/RuntimeStatus"
+          }
+        },
+        "reason": {
+          "description": "hello: first report after welcome; periodic: the timed check found a change; fs_event: a watched CLI or credential file changed; refresh: answer to node.runtimes_refresh (sent even without changes).",
+          "type": "string",
+          "enum": [
+            "hello",
+            "periodic",
+            "fs_event",
+            "refresh"
+          ]
+        },
+        "in_reply_to": {
+          "description": "Envelope id of the node.runtimes_refresh this answers; only with reason refresh.",
+          "type": "string",
+          "pattern": "^c_"
+        }
+      }
+    },
+    "NodeRuntimesRefresh": {
+      "title": "NodeRuntimesRefresh",
+      "description": "Check the runtime CLIs now and answer with node.runtimes (reason refresh, in_reply_to = this envelope id), even when nothing changed (unreliable). Sent only when hello.features contains runtime_status.",
+      "type": "object",
+      "properties": {
+        "runtimes": {
+          "description": "Runtime ids to re-check; omitted = all. The answer still carries every known runtime.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RuntimeID"
+          }
         }
       }
     },
@@ -2138,6 +2279,49 @@
         }
       }
     },
+    "AntigravitySessionOptions": {
+      "title": "AntigravitySessionOptions",
+      "description": "agy acp --process-per-session, one process per session. The ACP sessionId is kept as sdk_session_id (session.opened, ResumeRef, sessions.report).",
+      "type": "object",
+      "required": [
+        "model",
+        "read_only",
+        "approval"
+      ],
+      "properties": {
+        "model": {
+          "description": "Model slug (e.g. gemini-4-neon-high); empty leaves the choice to agy.",
+          "type": "string"
+        },
+        "read_only": {
+          "description": "Read-only roles (reviewer…): the daemon disables agy's writing tools (deny rules for file writes and edits) and rejects every writing permission request; commands run only when bash_policy allows them.",
+          "type": "boolean"
+        },
+        "approval": {
+          "description": "How ACP session/request_permission is answered when read_only does not already reject it. ask: forwarded to the console as approval.request; auto: the daemon allows it (bypass roles).",
+          "type": "string",
+          "enum": [
+            "ask",
+            "auto"
+          ]
+        },
+        "system_append": {
+          "description": "Appended to agy's system prompt (session/new _meta.antigravity.systemPrompt.append): platform rules, role instructions and skills inlined.",
+          "type": "string"
+        },
+        "bash_policy": {
+          "description": "read_only: argv allow list for shell commands, as in claude.bash_policy.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BashPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
     "PlatformToolSpec": {
       "title": "PlatformToolSpec",
       "description": "One platform tool, from /protocol/schemas/tools.",
@@ -2432,6 +2616,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/CodexSessionOptions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "antigravity": {
+          "description": "Set when runtime = antigravity.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AntigravitySessionOptions"
             },
             {
               "type": "null"
@@ -4370,7 +4565,8 @@
           "type": "string",
           "enum": [
             "claude_code",
-            "codex"
+            "codex",
+            "antigravity"
           ]
         },
         "node": {

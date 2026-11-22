@@ -110,6 +110,9 @@ func PhaseOf(v ThreadView, mergesActive int) ThreadPhase {
 		case "broken":
 			return ph("lead_down", "等你处理", "组长的会话出错了，需要用户看一下")
 		case "queued":
+			if lead.Status.Substate == "no_runtime" {
+				return ph("lead_down", "等你处理", "组长排队中："+lead.Status.Bubble)
+			}
 			return ph("lead_queued", "进行中", "等组长上线（节点工位已满，排队中）")
 		case "waiting", "raising_hand":
 			return ph("lead_waiting", "进行中", "组长在等别人回复")

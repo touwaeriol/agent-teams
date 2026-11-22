@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/node.runtimes.json",
+  "title": "NodeRuntimes",
+  "description": "Install and login state of every runtime CLI the daemon knows (unreliable). Sent after welcome (reason hello), then only when something changed (periodic check or a watched credential file changed), and always as the answer to node.runtimes_refresh. Always carries the full set of known runtimes, so the console replaces its stored state. Sent only when hello.features contains runtime_status. Never carries credentials: only file metadata and non-secret fields are read.",
+  "x-direction": "node_to_console",
+  "x-reliable": false,
+  "type": "object",
+  "required": [
+    "runtimes",
+    "reason"
+  ],
+  "properties": {
+    "runtimes": {
+      "description": "Keyed by runtime id (claude, codex, and any runtime added later; same ids as common.json Runtime). Receivers ignore ids they do not know.",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "common.json#/$defs/RuntimeID"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/RuntimeStatus"
+      }
+    },
+    "reason": {
+      "description": "hello: first report after welcome; periodic: the timed check found a change; fs_event: a watched CLI or credential file changed; refresh: answer to node.runtimes_refresh (sent even without changes).",
+      "type": "string",
+      "enum": [
+        "hello",
+        "periodic",
+        "fs_event",
+        "refresh"
+      ]
+    },
+    "in_reply_to": {
+      "description": "Envelope id of the node.runtimes_refresh this answers; only with reason refresh.",
+      "type": "string",
+      "pattern": "^c_"
+    }
+  },
+  "$defs": {
+    "RuntimeStatus": {
+      "title": "RuntimeStatus",
+      "type": "object",
+      "required": [
+        "installed",
+        "auth",
+        "checked_at"
+      ],
+      "properties": {
+        "installed": {
+          "description": "The CLI (or SDK) was found and runs.",
+          "type": "boolean"
+        },
+        "version": {
+          "description": "CLI version as reported by the CLI, when known.",
+          "type": "string",
+          "maxLength": 200
+        },
+        "path": {
+          "description": "Absolute path of the executable that was found.",
+          "type": "string",
+          "maxLength": 1024
+        },
+        "auth": {
+          "description": "How the runtime is logged in: subscription (provider account login, e.g. Claude subscription), chatgpt (Codex ChatGPT login), api_key, none (not logged in), unknown (could not tell, e.g. not installed or the check failed).",
+          "type": "string",
+          "enum": [
+            "subscription",
+            "chatgpt",
+            "api_key",
+            "none",
+            "unknown"
+          ]
+        },
+        "auth_expires_at": {
+          "description": "When the login expires, only when it can be read from file metadata or non-secret fields.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "expired": {
+          "description": "The login is known to be expired (the console treats it like auth none for scheduling).",
+          "type": "boolean"
+        },
+        "checked_at": {
+          "description": "When the daemon ran this check.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "error": {
+          "description": "Why the check failed or the CLI did not run; never contains credential content.",
+          "type": "string",
+          "maxLength": 1000
+        }
+      }
+    }
+  }
+}

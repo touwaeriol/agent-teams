@@ -3,7 +3,7 @@
 // overview cards (threadKind in present.ts) all read threadPhase, so they never disagree.
 // Pure and unit-tested.
 import type { QuestionView, ThreadView } from "@/api/views";
-import { isWaking, isWorking, liveLine, workingHere } from "./live";
+import { isWaking, isWorking, liveLine, queueReason, workingHere } from "./live";
 
 export type ListGroupId = "waiting" | "active" | "idle" | "done" | "archived";
 
@@ -133,6 +133,9 @@ export function threadPhase(t: PhaseInput, waiting?: Map<number, QuestionView>):
     case "broken":
       return phase("lead_down", "waiting", "wait", "组长的会话出错了，需要你看一下");
     case "queued":
+      // No online node has the lead's runtime logged in (no_runtime): nothing moves until the user
+      // logs in somewhere, so it waits on the user like an offline lead (server core/phase.go).
+      if (lead && queueReason(lead)) return phase("lead_down", "waiting", "wait", `组长排队中：${queueReason(lead)}`);
       return phase("lead_queued", "active", "queued", "等组长上线（节点工位已满，排队中）");
     case "waiting":
     case "raising_hand":
