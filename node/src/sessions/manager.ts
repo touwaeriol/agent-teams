@@ -25,6 +25,8 @@ export interface ManagerDeps {
   approvals: ApprovalBroker;
   tools: ToolBroker;
   waitForJob: (jobId: string, timeoutMs: number) => Promise<GitResult>;
+  /** session.open.import: puts a session moved from another node in place (move/mover.ts); throws when it cannot. */
+  importMove?: (spec: SessionOpen, absCwd: string) => Promise<void>;
   /** Builds env/policy and the runtime driver for a session. */
   createDriver: (spec: SessionOpen, absCwd: string, sink: Session) => { driver: Driver; ctx: DriverContext };
   /** Downloads an attached image from the console (session.send images). */
@@ -109,7 +111,25 @@ export class SessionManager implements SessionHost {
     if (existing) await this.stop(existing, "process_restarted");
     const failure = await this.preflight(spec);
     if (failure) return this.openFailed(new Session(spec, this), failure);
+    const moved = await this.importMoved(spec);
+    if (moved) return this.resumeFailed(new Session(spec, this), moved);
     return this.startNew(spec);
+  }
+
+  /**
+   * A session moved from another node (protocol.md §4.11): its transcript and checkout snapshots
+   * go in place before the driver resumes it. A failure is a resume failure: the console hands off
+   * with a recap instead.
+   */
+  private async importMoved(spec: SessionOpen): Promise<ResumeFailed | null> {
+    if (!spec.import) return null;
+    if (!this.d.importMove) return new ResumeFailed("this daemon cannot import moved sessions");
+    try {
+      await this.d.importMove(spec, resolveInRoot(this.d.root, spec.cwd));
+      return null;
+    } catch (err) {
+      return new ResumeFailed(`import of moved session failed: ${(err as Error).message}`);
+    }
   }
 
   private async preflight(spec: SessionOpen): Promise<string | null> {

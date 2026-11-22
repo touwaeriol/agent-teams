@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 400 {
+	if migrations.Latest() != 410 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -1672,7 +1672,7 @@ INSERT INTO at_schedules (id, project_id, name, cron, message) VALUES ('sc1', 'p
 	if _, err := p.Up(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if v, err := p.GetDBVersion(ctx); err != nil || v != migrations.Latest() || v != 400 {
+	if v, err := p.GetDBVersion(ctx); err != nil || v != migrations.Latest() || v != 410 {
 		t.Fatalf("version %d %v", v, err)
 	}
 	var got string
@@ -1727,5 +1727,48 @@ INSERT INTO at_threads (id, project_id, user_id, no, title, branch, parent_id, o
 	var col *string
 	if err := db.QueryRow(`SELECT column_name FROM information_schema.columns WHERE table_name = 'at_threads' AND column_name = 'parent_id'`).Scan(&col); err == nil {
 		t.Fatalf("parent_id after down: %v", col)
+	}
+}
+
+// TestSessionMovesMigration: 00410 adds at_session_moves (statuses checked, rows go with their
+// employee), and the table goes down again.
+func TestSessionMovesMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 410); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
+INSERT INTO at_nodes (id, user_id, name, token_hash, max_active_sessions) VALUES ('n1', 'u1', 'a', 'h1', 4), ('n2', 'u1', 'b', 'h2', 4);
+INSERT INTO at_employees (id, project_id, name, tier, role, runtime, spec) VALUES ('e1', 'p1', 'dev-1', 'member', 'dev', 'claude', '{}');
+INSERT INTO at_session_moves (id, employee_id, project_id, from_session_id, from_node_id, to_node_id, runtime)
+VALUES ('mv_1', 'e1', 'p1', 's1', 'n1', 'n2', 'claude');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	if err := db.QueryRow(`SELECT status FROM at_session_moves WHERE id = 'mv_1'`).Scan(&status); err != nil || status != "exporting" {
+		t.Fatalf("status %q %v", status, err)
+	}
+	if _, err := db.Exec(`UPDATE at_session_moves SET status = 'lost' WHERE id = 'mv_1'`); err == nil {
+		t.Fatal("unknown status accepted")
+	}
+	if _, err := db.Exec(`DELETE FROM at_employees WHERE id = 'e1'`); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM at_session_moves`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("moves after employee delete: %d %v", n, err)
+	}
+	if _, err := p.DownTo(ctx, 400); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM at_session_moves`).Scan(&n); err == nil {
+		t.Fatal("at_session_moves after down")
 	}
 }

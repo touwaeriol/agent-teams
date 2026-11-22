@@ -283,6 +283,24 @@
       ]
     },
     {
+      "type": "session.export",
+      "name": "SessionExport",
+      "direction": "console_to_node",
+      "reliable": true,
+      "key": [
+        "export_id"
+      ]
+    },
+    {
+      "type": "session.exported",
+      "name": "SessionExported",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": [
+        "export_id"
+      ]
+    },
+    {
       "type": "session.interrupt",
       "name": "SessionInterrupt",
       "direction": "console_to_node",

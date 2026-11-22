@@ -389,6 +389,52 @@
   },
   {
     "v": 2,
+    "type": "session.export",
+    "id": "c_01JD3V0000000000000000061",
+    "seq": 995,
+    "ts": "2026-11-14T12:31:00Z",
+    "body": {
+      "export_id": "mv_01JD3V0000000000000000",
+      "session_id": "s_01JD",
+      "runtime": "claude",
+      "resume": {
+        "sdk_session_id": "8d2f6c1e-0d6a-4f7e-9a11-5b2f3c4d5e6f"
+      },
+      "cwd": "projects/7a1c/threads/12/dev-2",
+      "repos": [
+        "projects/7a1c/threads/12/dev-2/owner__name"
+      ]
+    }
+  },
+  {
+    "v": 2,
+    "type": "session.exported",
+    "id": "n_01JD3V0000000000000000061",
+    "seq": 5600,
+    "ts": "2026-11-14T12:31:05Z",
+    "body": {
+      "export_id": "mv_01JD3V0000000000000000",
+      "session_id": "s_01JD",
+      "ok": true,
+      "size": 184320,
+      "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+    }
+  },
+  {
+    "v": 2,
+    "type": "session.exported",
+    "id": "n_01JD3V0000000000000000062",
+    "seq": 5601,
+    "ts": "2026-11-14T12:31:06Z",
+    "body": {
+      "export_id": "mv_01JD3V0000000000000001",
+      "session_id": "s_01JE",
+      "ok": false,
+      "error": "transcript 8d2f… not found"
+    }
+  },
+  {
+    "v": 2,
     "type": "session.send",
     "id": "c_01JD3V0000000000000000006",
     "seq": 984,

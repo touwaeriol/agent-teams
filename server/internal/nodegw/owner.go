@@ -25,6 +25,7 @@ type refs struct {
 	SessionID *string `json:"session_id"`
 	JobID     *string `json:"job_id"`
 	OpenGen   *int    `json:"open_gen"`
+	ExportID  *string `json:"export_id"`
 }
 
 type verdict int
@@ -57,6 +58,10 @@ func (g *Gateway) authorize(ctx context.Context, l *link, env *protocol.Envelope
 }
 
 func (g *Gateway) check(ctx context.Context, node store.Node, typ string, r refs) (verdict, string, error) {
+	if typ == protocol.TypeSessionExported {
+		// About a session the console already closed (it is being moved): the export must be this node's.
+		return g.checkExport(ctx, node, deref(r.ExportID), deref(r.SessionID))
+	}
 	if r.SessionID != nil {
 		return g.checkSession(ctx, node, typ, *r.SessionID, r.OpenGen)
 	}
@@ -96,6 +101,27 @@ func (g *Gateway) checkSession(ctx context.Context, node store.Node, typ, sessio
 		return rejected, "unknown_session", nil
 	}
 	return allowed, "", nil
+}
+
+// checkExport: session.exported answers a session.export the console sent this node for that session.
+func (g *Gateway) checkExport(ctx context.Context, node store.Node, exportID, sessionID string) (verdict, string, error) {
+	var n int64
+	err := g.core.Pool.Gorm(ctx).Table("at_session_moves").
+		Where("id = ? AND from_node_id = ? AND from_session_id = ?", exportID, node.ID, sessionID).Count(&n).Error
+	if err != nil {
+		return rejected, "", err
+	}
+	if n == 0 {
+		return rejected, "unknown_session", nil
+	}
+	return allowed, "", nil
+}
+
+func deref(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 func (g *Gateway) checkJob(ctx context.Context, node store.Node, jobID string) (verdict, string, error) {

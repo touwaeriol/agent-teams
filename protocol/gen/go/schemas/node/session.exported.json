@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/session.exported.json",
+  "title": "SessionExported",
+  "description": "Result of session.export: the archive is uploaded (ok) or why not (error).",
+  "x-direction": "node_to_console",
+  "x-key": [
+    "export_id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "export_id",
+    "session_id",
+    "ok"
+  ],
+  "properties": {
+    "export_id": {
+      "$ref": "common.json#/$defs/ExportId"
+    },
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "size": {
+      "description": "Archive bytes (ok).",
+      "type": "integer",
+      "minimum": 1
+    },
+    "sha256": {
+      "description": "Hex sha256 of the archive (ok).",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "error": {
+      "type": "string",
+      "maxLength": 2000
+    }
+  },
+  "if": {
+    "properties": {
+      "ok": {
+        "const": true
+      }
+    }
+  },
+  "then": {
+    "required": [
+      "size",
+      "sha256"
+    ]
+  },
+  "else": {
+    "required": [
+      "error"
+    ]
+  }
+}

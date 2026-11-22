@@ -62,6 +62,7 @@ func (a *API) Register(api huma.API, r gin.IRoutes) {
 	a.registerSchedules(api)
 	a.registerLibrary(api)
 	a.registerAttachments(api, r)
+	a.registerMoves(r)
 	a.registerSharedFiles(api)
 	a.registerComposer(api)
 	a.registerModel(api)

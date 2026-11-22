@@ -35,6 +35,8 @@ func (r *router) Handle(ctx context.Context, node store.Node, typ string, body a
 		return e.Orch.HandleClosed(ctx, m)
 	case *protocol.SessionCompacted:
 		return e.Sched.Compacted(ctx, node.ID, m)
+	case *protocol.SessionExported:
+		return e.Orch.HandleExported(ctx, node, m)
 	case *protocol.SessionEvent:
 		return r.sessionEvent(ctx, m)
 	case *protocol.SessionsReport:
@@ -370,6 +372,10 @@ func (r *router) rateLimited(ctx context.Context, tx *core.Tx, sc core.SessionCo
 	}
 	if !timers.IsUsageLimit(ev.RetryAt, time.Now()) {
 		return nil
+	}
+	// Another node with quota takes the session over (move.go); otherwise wait for the reset.
+	if moved, err := r.e.Orch.MoveOnLimit(ctx, tx, sc, *ev.RetryAt); err != nil || moved {
+		return err
 	}
 	return timers.RecordLimit(ctx, tx, r.e.Orch, e, *ev.RetryAt, val(ev.Detail))
 }

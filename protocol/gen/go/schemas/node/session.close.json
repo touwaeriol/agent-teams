@@ -28,7 +28,8 @@
         "policy_violation",
         "node_drain",
         "switch_thread",
-        "context_clear"
+        "context_clear",
+        "node_move"
       ]
     },
     "forget": {

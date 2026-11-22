@@ -1,4 +1,4 @@
-import { readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startHarness, type Harness } from "./helpers/daemon.js";
@@ -130,6 +130,19 @@ describe("codex sessions over app-server", () => {
     h!.console.command("session.open", codexOpen("s_X3", { codex_thread_id: "th_missing" }));
     const opened = await h!.console.waitType("session.opened");
     expect(opened.body).toMatchObject({ resume_failed: true });
+  });
+
+  it("resumes a thread app-server does not know by its rollout path when the file is here (a moved session)", async () => {
+    const calls = await startCodex();
+    const dir = join(h!.opts.codexHome, "sessions", "2026", "11", "22");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "rollout-2026-11-22T10-00-00-th_missing.jsonl"), "{}\n");
+    h!.console.command("session.open", codexOpen("s_X4", { codex_thread_id: "th_missing" }));
+    const opened = await h!.console.waitType("session.opened");
+    expect(opened.body).toMatchObject({ codex_thread_id: "th_missing" });
+    expect(opened.body.resume_failed).toBeUndefined();
+    const resumes = calls().filter((c) => c.method === "thread/resume");
+    expect(resumes.map((c) => c.params.path ?? null)).toEqual([null, join(dir, "rollout-2026-11-22T10-00-00-th_missing.jsonl")]);
   });
 
   it("rotates the loopback URL on resume and rejects the old one", async () => {

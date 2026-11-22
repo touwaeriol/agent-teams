@@ -161,7 +161,7 @@ function splitTopLevel(inner) {
 }
 
 function parseField(part) {
-  const m = part.match(/^["']?([A-Za-z_]+)["']?(\?)?(\[\])?\s*(?::\s*(.*))?$/s);
+  const m = part.match(/^["']?([A-Za-z_][A-Za-z0-9_]*)["']?(\?)?(\[\])?\s*(?::\s*(.*))?$/s);
   if (!m) return null;
   return { key: m[1], value: m[4]?.trim() };
 }

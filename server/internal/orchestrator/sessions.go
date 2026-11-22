@@ -239,7 +239,7 @@ func (o *Orchestrator) wake(tx *core.Tx, employeeID string) {
 // conversation by its SDK session id (thread finished and reopened, user cut off and back, a
 // project member back in the thread it left before its next session opened elsewhere).
 // A policy violation starts clean; a removed node cannot resume and gets the recap instead.
-var resumableClose = []string{"thread_done", "employee_removed", "node_closed", "switch_thread"}
+var resumableClose = []string{"thread_done", "employee_removed", "node_closed", "switch_thread", CloseNodeMove}
 
 // reopenedPrefix starts the first message of a session that resumes after its thread ended
 // (the user reopened it, or unarchived and resumed it): the employee goes on from where it was.
@@ -448,6 +448,14 @@ func (o *Orchestrator) openSession(ctx context.Context, tx *core.Tx, e core.Empl
 		return core.AgentSession{}, err
 	}
 	env.emp = e
+	return o.openOn(ctx, tx, env, node, first, resume, nil)
+}
+
+// openOn creates the session row on the chosen node, records the employee there and queues
+// git.prepare + session.open (imp: a session moved from another node, move.go).
+func (o *Orchestrator) openOn(ctx context.Context, tx *core.Tx, env sessionEnv, node store.Node, first *protocol.FirstMessage,
+	resume *protocol.ResumeRef, imp *protocol.SessionImport) (core.AgentSession, error) {
+	e := env.emp
 	paths := PathsOf(e, env.thread)
 	sess, err := core.InsertSession(ctx, tx, core.NewSession{EmployeeID: e.ID, NodeID: node.ID, Runtime: e.Runtime,
 		Cwd: paths.Cwd, Branch: paths.Branch, PermissionMode: "default", ThreadID: env.threadID()})
@@ -457,7 +465,7 @@ func (o *Orchestrator) openSession(ctx context.Context, tx *core.Tx, e core.Empl
 	if err := o.placeEmployee(ctx, tx, e, node.ID, o.checkoutPaths(ctx, tx, paths, env)); err != nil {
 		return sess, err
 	}
-	return sess, o.queueOpen(ctx, tx, env, node, sess, first, resume)
+	return sess, o.queueOpen(ctx, tx, env, node, sess, first, resume, imp)
 }
 
 // pinThread records the thread a project member opens a session in as its current thread.
@@ -562,7 +570,7 @@ func (o *Orchestrator) placeEmployee(ctx context.Context, tx *core.Tx, e core.Em
 
 // queueOpen enqueues git.prepare (when the employee works in the repository) and session.open.
 func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEnv, node store.Node, sess core.AgentSession,
-	first *protocol.FirstMessage, resume *protocol.ResumeRef) error {
+	first *protocol.FirstMessage, resume *protocol.ResumeRef, imp *protocol.SessionImport) error {
 	prepare, err := o.queuePrepare(ctx, tx, env, node.ID, false)
 	if err != nil {
 		return err
@@ -589,6 +597,7 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 	if open.Anchor, err = openAnchor(ctx, tx, env.emp, first); err != nil {
 		return err
 	}
+	open.Import = imp
 	// The servers the role is granted in the project (remote-servers.md §7.1); none for the
 	// coordinator, the lead, read-only roles and daemons without ssh_gateway.
 	if open.SshServers, err = sshgw.SessionServers(ctx, o.store, tx, node.ID, sess.ID); err != nil {
@@ -867,7 +876,7 @@ func (o *Orchestrator) reopen(ctx context.Context, tx *core.Tx, e core.Employee,
 	if err != nil {
 		return o.handoff(ctx, tx, e, s, first)
 	}
-	return o.queueOpen(ctx, tx, env, node, s, first, resumeRef(s))
+	return o.queueOpen(ctx, tx, env, node, s, first, resumeRef(s), nil)
 }
 
 func resumeRef(s core.AgentSession) *protocol.ResumeRef {

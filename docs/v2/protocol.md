@@ -278,6 +278,27 @@
 - **平台主动压缩** `session.compact {session_id, open_gen, compact_id, instructions?}`（可靠，键 `compact_id`）：守护进程清掉保存的锚点，等当前回合结束后压缩——Claude 往提示队列推 `/compact <instructions>`，以 `compact_boundary` 之后的 `result` 为完成；Codex 调 `thread/compact/start`（没有指令参数），以 `contextCompaction` 条目完成（或 `thread/compacted`）之后的 `turn/completed` 为完成。Codex 只把压缩那个回合（`thread/compact/start` 之后第一个不是我们消息触发的回合）或报过压缩的回合的结束算作完成，期间来的消息自己的回合不算。完成后回 `session.compacted {session_id, open_gen, compact_id, ok, context?, error?}`（可靠，键 `compact_id`）。会话停放时先 resume 再压缩；会话不在本机回 `ok: false`。失败也一定回：等空闲最多 2 分钟，期间一直在跑回合或来了新的 `session.send` 就放弃（`error: "busy: …"`，简报直接发，不压缩）；压缩本身最多 7 分钟（`timed out: …`）；压缩中运行时退出回 `exited: …`；守护进程把进行中的 `compact_id` 记在本机会话记录里，重启后对每个回 `restarted: …`。控制台只认跑这个会话的节点发来的 `session.compacted`。
 - **压缩后补锚点**：运行时自己压缩（不是 `session.compact`）后，守护进程把 `session.send.anchor` 存下的锚点补给模型。Claude：SessionStart 钩子（`source: "compact"`）返回 `additionalContext`；自动压缩的 PreCompact 钩子返回 `systemMessage = focus + 锚点`，CLI 把它拼进压缩指令。Codex：压缩完成后如果回合还在跑，用 `turn/steer` 把锚点插进当前回合；回合已经结束（或 steer 被拒）就丢掉，绝不为锚点单开一个回合（下一条任务消息自带简报）。
 
+### 4.11 迁移会话（`hello.features` 含 `session_move`）
+
+员工的会话撞上节点的订阅用量上限、另一台同运行时的节点还有额度时，控制台把会话连同对话搬过去（architecture.md §6.2）。两台节点都要有 `session_move`。控制台先发旧会话的 `session.close {reason: "node_move"}`，再在同一会话通道上发 `session.export`。
+
+#### `session.export`（控制台 → 守护进程，可靠，键：`export_id`）
+
+```json
+{"export_id": "mv_01JD3V0000000000000000", "session_id": "s_01JD", "runtime": "claude", "resume": {"sdk_session_id": "8d2f6c1e"},
+ "cwd": "projects/7a1c/threads/12/dev-2", "repos": ["projects/7a1c/threads/12/dev-2/owner__name"]}
+```
+
+旧节点打包一个档案（gzip，内含 `manifest.json`：旧节点的 root、Claude 配置目录、`CODEX_HOME`，会话 id，每个检出的 HEAD 和快照提交）：Claude 是 `<配置目录>/projects/*/<id>.jsonl` 和旁边的 `<id>/` 目录（子代理转录、长工具结果），Codex 是 `$CODEX_HOME/sessions/**/rollout-…-<thread id>.jsonl`；`repos` 里每个是 git 仓库的检出做一个快照：临时索引 = HEAD + `git add -A`（不含忽略的文件），树作为 HEAD 之上的一个提交，`git bundle create … --not --remotes`（只带别的节点 fetch 不到的东西），临时 ref 随即删掉，旧检出不动。档案压缩后 ≤ 128 MB、解开 ≤ 512 MB。守护进程用节点令牌 `PUT <控制台>/nodes/moves/<export_id>` 上传（`X-Content-SHA256` 头 = 档案的 sha256；只有这个迁移的源节点、在导出中时能传），再回 `session.exported`。
+
+#### `session.exported`（守护进程 → 控制台，可靠，键：`export_id`）
+
+成功 `session.exported {export_id, session_id, ok: true, size, sha256}`，失败 `session.exported {export_id, session_id, ok: false, error}`（转录找不到、档案太大、上传失败……）。它说的是已经关闭的会话，控制台按 `export_id` 核对归属（§2.3）。
+
+#### 导入（`session.open.import`）
+
+控制台在新节点开会话：`session.open` 带 `resume`（同一个 SDK session id / Codex thread id）和 `import: {export_id, size, sha256}`。守护进程等 `prepare_jobs` 成功后 `GET <控制台>/nodes/moves/<export_id>`（只有目标节点能取），核对大小和 sha256，按 manifest 恢复每个检出（`bundle verify` → `bundle unbundle` → `reset --hard <快照>` → `reset --mixed <HEAD>`：分支在旧节点的 HEAD，工作区是快照，什么都不暂存），把转录里旧节点的三个路径换成自己的（一次替换，长的优先），Claude 转录写到 `<配置目录>/projects/<新 cwd 编码>/<id>.jsonl`（非字母数字换成 `-`，超过 200 字符截断加哈希，和 CLI 一样），Codex rollout 写到自己 `CODEX_HOME` 下同样的相对路径（`thread/resume` 按 id 找不到时再按路径恢复），然后照常 resume。任何一步失败都回 `session.opened {resume_failed: true, error}`，控制台走交接摘要（§4.1 第 5 条）。新会话的 `session.opened`（成功或 resume_failed）到达后控制台删掉档案；`session.export` 10 分钟没有答复就放弃，员工暂扣的消息照常开会话。
+
 ## 5. 审批
 
 ### 5.1 `approval.request`（守护进程 → 控制台，可靠，键：`approval_id`）

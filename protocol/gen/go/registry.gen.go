@@ -37,6 +37,8 @@ const (
 	TypeSessionCompacted    = "session.compacted"
 	TypeSessionDelivered    = "session.delivered"
 	TypeSessionEvent        = "session.event"
+	TypeSessionExport       = "session.export"
+	TypeSessionExported     = "session.exported"
 	TypeSessionInterrupt    = "session.interrupt"
 	TypeSessionInterrupted  = "session.interrupted"
 	TypeSessionOpen         = "session.open"
@@ -92,6 +94,8 @@ var Messages = map[string]MessageMeta{
 	TypeSessionCompacted:    {Direction: NodeToConsole, Reliable: true, Key: []string{"compact_id"}, New: func() any { return new(SessionCompacted) }},
 	TypeSessionDelivered:    {Direction: NodeToConsole, Reliable: true, Key: []string{"msg_id"}, New: func() any { return new(SessionDelivered) }},
 	TypeSessionEvent:        {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "event_no"}, New: func() any { return new(SessionEvent) }},
+	TypeSessionExport:       {Direction: ConsoleToNode, Reliable: true, Key: []string{"export_id"}, New: func() any { return new(SessionExport) }},
+	TypeSessionExported:     {Direction: NodeToConsole, Reliable: true, Key: []string{"export_id"}, New: func() any { return new(SessionExported) }},
 	TypeSessionInterrupt:    {Direction: ConsoleToNode, Reliable: true, Key: []string{"id"}, New: func() any { return new(SessionInterrupt) }},
 	TypeSessionInterrupted:  {Direction: NodeToConsole, Reliable: true, Key: nil, New: func() any { return new(SessionInterrupted) }},
 	TypeSessionOpen:         {Direction: ConsoleToNode, Reliable: true, Key: []string{"session_id", "open_gen"}, New: func() any { return new(SessionOpen) }},

@@ -17,7 +17,9 @@ import { Link } from "./link/client.js";
 import { Dispatcher, type CommandHandler } from "./link/dispatcher.js";
 import { Inbox, type Reply } from "./link/inbox.js";
 import { Outbox } from "./link/outbox.js";
-import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, FileDownload, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, NodeRuntimesRefresh, NodeUsageRefresh, SessionClose, SshCertResponse, SshServersUpdate, SessionCompact, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
+import { Mover } from "./move/mover.js";
+import { consoleTransfer, type MoveTransfer } from "./move/transfer.js";
+import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, FileDownload, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, NodeRuntimesRefresh, NodeUsageRefresh, SessionClose, SshCertResponse, SshServersUpdate, SessionCompact, SessionExport, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
 import { readClaudeUsage, UsageReporter, type UsageSources } from "./usage.js";
 import type { QueryFn } from "./sessions/claude/driver.js";
 import { RuntimeRegistry } from "./sessions/registry.js";
@@ -96,11 +98,13 @@ export interface DaemonOptions {
   release?: string;
   /** Advertise self_update (tests; default: started by the launcher, AGENT_TEAMS_LAUNCHER=1). */
   selfUpdate?: boolean;
+  /** Where session-move archives are uploaded and downloaded (tests; default PUT / GET /nodes/moves/{id}). */
+  moveTransfer?: MoveTransfer;
   /** Updater overrides (tests): poll and confirm delays, fetch, npm. */
   updater?: Partial<Pick<UpdaterOptions, "pollMs" | "confirmAfterMs" | "fetchFn" | "npm" | "now">>;
 }
 
-const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "file_download", "shared_files", "context_usage", "session_compact", "usage", "ssh_gateway", "runtime_status"];
+const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "file_download", "shared_files", "context_usage", "session_compact", "usage", "ssh_gateway", "runtime_status", "session_move"];
 
 /** Wires the link, command handlers, sessions, tools, git and credentials together. */
 export class Daemon {
@@ -133,6 +137,8 @@ export class Daemon {
   /** Re-detects the runtimes' install/login state and reports changes in node.runtimes (protocol.md §9.2). */
   readonly runtimeMonitor: RuntimeMonitor;
   private readonly updater: Updater;
+  /** Session moves between nodes (protocol.md §4.11). */
+  private readonly mover: Mover;
   private readonly ssh: SshHub;
   /** Real OpenSSH client found at start (null: remote servers cannot be used on this node). */
   private readonly sshClient: string | null;
@@ -182,9 +188,14 @@ export class Daemon {
       onChange: (prev, next) => this.runtimesChanged(prev, next),
     });
     this.git = new GitJobs({ root: o.root, platform: this.platform, gitBaseUrl: o.gitBaseUrl, mirrorDir: join(o.stateDir, "mirrors"), log: o.log, credential: (job, repo, purpose, host, path) => this.jobCredential(job, repo, purpose, host, path), gitSsh: gitSshCommand(o.nodeCmd), lookup: (id) => this.recordedResult(id), ...(o.reviewRetryMs !== undefined ? { reviewRetryMs: o.reviewRetryMs } : {}) });
+    this.mover = new Mover({
+      root: o.root, claudeConfigDir: o.claudeConfigDir, codexHome: o.codexHome, tmpDir: o.stateDir, hooksDir: this.platform.hooksDir,
+      transfer: o.moveTransfer ?? consoleTransfer(o.url, o.token), log: o.log,
+    });
     this.sessions = new SessionManager({
       root: o.root, stateDir: o.stateDir, send, approvals: this.approvals, tools: this.tools, log: o.log, maxActive: o.maxActive,
       waitForJob: (id, ms) => this.git.waitFor(id, ms),
+      importMove: (spec, absCwd) => this.mover.import(spec, absCwd),
       createDriver: (spec, cwd, sink) => this.createDriver(spec, cwd, sink),
       onSessionGone: (id) => this.forgetSession(id),
       onDriverGone: (id) => this.ssh.drop(id),
@@ -336,6 +347,7 @@ export class Daemon {
       "session.set_mode": { lane: session, run: (b) => s.setMode(b as unknown as SessionSetMode) },
       "session.compact": { lane: session, run: async (b) => s.compact(b as unknown as SessionCompact) },
       "session.close": { lane: session, run: (b) => s.close(b as unknown as SessionClose) },
+      "session.export": { lane: session, run: async (b) => [{ type: "session.exported", body: await this.mover.export(b as unknown as SessionExport) }] },
       "session.watch": { run: async (b) => s.watch(b as unknown as SessionWatch) },
       "approval.resolve": { run: async (b) => [{ type: "approval.ack", body: this.approvals.resolve(b as unknown as ApprovalResolve) }] },
       "tool.result": { run: async (b) => (this.toolResult(b as unknown as ToolResult), []) },

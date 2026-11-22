@@ -15,6 +15,7 @@ import { silentLogger, type Logger } from "../util/log.js";
 import { CLAUDE_SDK_VERSION, CODEX_CLI_VERSION } from "../version.js";
 import { ClaudeDriver, type QueryFn } from "./claude/driver.js";
 import { CodexDriver } from "./codex/driver.js";
+import { findRollout } from "../move/transcripts.js";
 import type { CodexHub } from "./codex/hub.js";
 import { AntigravityDriver } from "./antigravity/driver.js";
 import { AGY_PASS_ENV, AGY_TOKEN_FILES, detectInstalled, detectLogin, probeAntigravity, writeAgySettings } from "./antigravity/detect.js";
@@ -185,7 +186,7 @@ export class CodexAdapter implements RuntimeAdapter {
   fixedEnv(): Record<string, string> { return {}; }
 
   createDriver(ctx: DriverContext, a: SessionAssets): Driver {
-    return new CodexDriver(ctx, { hub: this.d.hub, toolhost: this.d.toolhost, pluginServers: codexMcpServers(a.plugins) });
+    return new CodexDriver(ctx, { hub: this.d.hub, toolhost: this.d.toolhost, pluginServers: codexMcpServers(a.plugins), findRollout: (id) => findRollout(this.d.codexHome, id) });
   }
 }
 
