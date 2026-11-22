@@ -13,6 +13,10 @@ import (
 // maxRejectsPerMinute closes a link that keeps naming foreign sessions (protocol.md §2.3).
 const maxRejectsPerMinute = 20
 
+// afterClose messages are still taken for a session closed meanwhile (same open_gen): the live
+// digest of its last turn arrives after a close the turn itself caused (a usage limit, a move).
+var afterClose = map[string]bool{protocol.TypeSessionDigest: true}
+
 // terminal messages about a session that is already closed are dropped quietly.
 var terminal = map[string]bool{
 	protocol.TypeSessionClosed: true, protocol.TypeSessionState: true, protocol.TypeApprovalCancel: true,
@@ -90,6 +94,9 @@ func (g *Gateway) checkSession(ctx context.Context, node store.Node, typ, sessio
 	}
 	if nodeID == nil || *nodeID != node.ID || owner != node.UserID {
 		return rejected, "unknown_session", nil
+	}
+	if state == "closed" && afterClose[typ] && (gen == nil || *gen == openGen) {
+		return allowed, "", nil
 	}
 	if state == "closed" || (gen != nil && *gen < openGen) {
 		if terminal[typ] {

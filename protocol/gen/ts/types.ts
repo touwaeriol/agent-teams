@@ -1133,6 +1133,17 @@ export interface SessionDelivered {
   turn_id?: TurnId;
 }
 /**
+ * Live handoff digest of a session, read by the daemon from the runtime's transcript without the model after each turn (when it changed): the last plan / todo list, files changed, recent commands and the recent exchange. Unreliable, latest wins; the console quotes the newest one when a conversation cannot be resumed (another node, lost transcript). Accepted for a session that was closed meanwhile.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "SessionDigest".
+ */
+export interface SessionDigest {
+  session_id: SessionId;
+  open_gen: OpenGen;
+  digest: string;
+}
+/**
  * Session activity event; which fields are present depends on kind (protocol.md 4.8).
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -1332,10 +1343,6 @@ export interface SessionExported {
    */
   sha256?: string;
   error?: string;
-  /**
-   * Handoff digest of the conversation read from the transcript (plan / todos, files changed, recent commands, recent exchange); the console quotes it when the conversation cannot be resumed.
-   */
-  digest?: string;
 }
 /**
  * Interrupt the running turn.

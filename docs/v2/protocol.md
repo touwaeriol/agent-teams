@@ -32,7 +32,7 @@
 | 方向 | 可靠（有 `seq`，需 ACK，可重放） | 不可靠（无 `seq`，丢了无所谓） |
 | --- | --- | --- |
 | 控制台 → 守护进程 | 所有命令（`session.*`、`approval.resolve`、`tool.result`、`git.*`、`node.*`（`node.usage_refresh`、`node.runtimes_refresh` 除外）、`run.*`） | `ack`、`pong` 类、`node.usage_refresh`、`node.runtimes_refresh`、`cred.response`（§8：带令牌，不进发件箱，靠 `req_id` 配对，丢了守护进程会重试 `cred.request`） |
-| 守护进程 → 控制台 | 会话事件、命令结果、审批请求/取消、工具调用、git 结果 | `ack`、`stream.delta`（逐字输出，可选）、`log`、`node.stats`、`node.usage`、`node.runtimes`、`cred.request`（§8） |
+| 守护进程 → 控制台 | 会话事件、命令结果、审批请求/取消、工具调用、git 结果 | `ack`、`stream.delta`（逐字输出，可选）、`session.digest`（§4.11）、`log`、`node.stats`、`node.usage`、`node.runtimes`、`cred.request`（§8） |
 
 - **ACK**：`{type:"ack", body:{seq: N}}` 表示“seq ≤ N 的可靠消息我已持久处理”。接收方至少每 200 ms 或每 50 条发一次累计 ACK。
 - **守护进程发件箱**：可靠消息先追加写入 `state/outbox/<epoch>.jsonl` 再发送；收到 ACK 后推进游标，游标之前的文件可删除。守护进程重启后 `seq` 从文件里的最大值继续（`epoch` 只在状态目录被清空时变化）。
@@ -293,11 +293,15 @@
 
 #### `session.exported`（守护进程 → 控制台，可靠，键：`export_id`）
 
-成功 `session.exported {export_id, session_id, ok: true, size, sha256}`，失败 `session.exported {export_id, session_id, ok: false, error}`（转录找不到、档案太大、上传失败……）。两种情况都可以带 `session.exported {digest}`：守护进程不调用模型（额度已经用完），直接从转录里抽出的交接摘要（最后一次的待办 / 计划、改过的文件、最近的命令、最近的往来，路径相对检出，≤ 24000 字符）。对话没能 resume、走交接摘要时，控制台把它附在摘要后面。它说的是已经关闭的会话，控制台按 `export_id` 核对归属（§2.3）。
+成功 `session.exported {export_id, session_id, ok: true, size, sha256}`，失败 `session.exported {export_id, session_id, ok: false, error}`（转录找不到、档案太大、上传失败……）。它说的是已经关闭的会话，控制台按 `export_id` 核对归属（§2.3）。
 
 #### 导入（`session.open.import`）
 
 控制台在新节点开会话：`session.open` 带 `resume`（同一个 SDK session id / Codex thread id）和 `import: {export_id, size, sha256}`。守护进程等 `prepare_jobs` 成功后 `GET <控制台>/nodes/moves/<export_id>`（只有目标节点能取），核对大小和 sha256，按 manifest 恢复每个检出（`bundle verify` → `bundle unbundle` → `reset --hard <快照>` → `reset --mixed <HEAD>`：分支在旧节点的 HEAD，工作区是快照，什么都不暂存），把转录里旧节点的三个路径换成自己的（一次替换，长的优先），Claude 转录写到 `<配置目录>/projects/<新 cwd 编码>/<id>.jsonl`（非字母数字换成 `-`，超过 200 字符截断加哈希，和 CLI 一样），Codex rollout 写到自己 `CODEX_HOME` 下同样的相对路径（`thread/resume` 按 id 找不到时再按路径恢复），然后照常 resume。任何一步失败都回 `session.opened {resume_failed: true, error}`，控制台走交接摘要（§4.1 第 5 条）。新会话的 `session.opened`（成功或 resume_failed）到达后控制台删掉档案；`session.export` 10 分钟没有答复就放弃，员工暂扣的消息照常开会话。
+
+#### `session.digest`（守护进程 → 控制台，不可靠，最新的为准）
+
+每个会话每轮结束约 3 秒后，守护进程重新读一遍它的转录（不调用模型，不耗额度），整理出交接用的工作现场：最后一次的待办 / 计划、改过的文件、最近的命令、最近的往来（路径相对会话 cwd，≤ 24000 字符）。内容变了才发 `session.digest {session_id, open_gen, digest}`。控制台存到这个会话上（会话刚关闭也收）。以后对话没法 resume（完整迁移失败、换了节点、节点上的转录丢了）、走交接摘要时，控制台附上这个员工最新的一份，原节点离线也能用。
 
 ## 5. 审批
 

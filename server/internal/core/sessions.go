@@ -260,3 +260,23 @@ func LastContextWindow(ctx context.Context, q DB, employeeID, runtime string) (*
 	}
 	return &max[0], nil
 }
+
+// SetSessionDigest stores a session's live handoff digest (session.digest).
+func SetSessionDigest(ctx context.Context, q DB, sessionID, digest string) error {
+	return q.Gorm(ctx).Table("at_agent_sessions").Where("id = ?", sessionID).Update("digest", digest).Error
+}
+
+// LatestSessionDigest is the newest live handoff digest of the employee's sessions in the same
+// working directory as its latest session (a member that changed threads starts without one);
+// "" when there is none.
+func LatestSessionDigest(ctx context.Context, q DB, employeeID string) (string, error) {
+	var digests []string
+	err := q.Gorm(ctx).Raw(`SELECT s.digest FROM at_agent_sessions s
+		WHERE s.employee_id = ? AND s.digest <> ''
+		AND s.cwd = (SELECT l.cwd FROM at_agent_sessions l WHERE l.employee_id = s.employee_id ORDER BY l.opened_at DESC LIMIT 1)
+		ORDER BY s.opened_at DESC LIMIT 1`, employeeID).Scan(&digests).Error
+	if err != nil || len(digests) == 0 {
+		return "", err
+	}
+	return digests[0], nil
+}

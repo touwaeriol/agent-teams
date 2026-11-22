@@ -659,6 +659,29 @@
     {
       "properties": {
         "type": {
+          "const": "session.digest"
+        },
+        "body": {
+          "$ref": "session.digest.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^n_"
+        }
+      },
+      "required": [
+        "type",
+        "body"
+      ],
+      "not": {
+        "required": [
+          "seq"
+        ]
+      }
+    },
+    {
+      "properties": {
+        "type": {
           "const": "session.event"
         },
         "body": {

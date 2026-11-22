@@ -36,6 +36,7 @@ const (
 	TypeSessionCompact      = "session.compact"
 	TypeSessionCompacted    = "session.compacted"
 	TypeSessionDelivered    = "session.delivered"
+	TypeSessionDigest       = "session.digest"
 	TypeSessionEvent        = "session.event"
 	TypeSessionExport       = "session.export"
 	TypeSessionExported     = "session.exported"
@@ -93,6 +94,7 @@ var Messages = map[string]MessageMeta{
 	TypeSessionCompact:      {Direction: ConsoleToNode, Reliable: true, Key: []string{"compact_id"}, New: func() any { return new(SessionCompact) }},
 	TypeSessionCompacted:    {Direction: NodeToConsole, Reliable: true, Key: []string{"compact_id"}, New: func() any { return new(SessionCompacted) }},
 	TypeSessionDelivered:    {Direction: NodeToConsole, Reliable: true, Key: []string{"msg_id"}, New: func() any { return new(SessionDelivered) }},
+	TypeSessionDigest:       {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(SessionDigest) }},
 	TypeSessionEvent:        {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "event_no"}, New: func() any { return new(SessionEvent) }},
 	TypeSessionExport:       {Direction: ConsoleToNode, Reliable: true, Key: []string{"export_id"}, New: func() any { return new(SessionExport) }},
 	TypeSessionExported:     {Direction: NodeToConsole, Reliable: true, Key: []string{"export_id"}, New: func() any { return new(SessionExported) }},

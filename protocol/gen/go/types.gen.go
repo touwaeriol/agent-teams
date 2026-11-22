@@ -7517,6 +7517,53 @@ func (j *SessionDelivered) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+// Live handoff digest of a session, read by the daemon from the runtime's
+// transcript without the model after each turn (when it changed): the last plan /
+// todo list, files changed, recent commands and the recent exchange. Unreliable,
+// latest wins; the console quotes the newest one when a conversation cannot be
+// resumed (another node, lost transcript). Accepted for a session that was closed
+// meanwhile.
+type SessionDigest struct {
+	// Digest corresponds to the JSON schema field "digest".
+	Digest string `json:"digest"`
+
+	// OpenGen corresponds to the JSON schema field "open_gen".
+	OpenGen OpenGen `json:"open_gen"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID SessionID `json:"session_id"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SessionDigest) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["digest"]; raw != nil && !ok {
+		return fmt.Errorf("field digest in SessionDigest: required")
+	}
+	if _, ok := raw["open_gen"]; raw != nil && !ok {
+		return fmt.Errorf("field open_gen in SessionDigest: required")
+	}
+	if _, ok := raw["session_id"]; raw != nil && !ok {
+		return fmt.Errorf("field session_id in SessionDigest: required")
+	}
+	type Plain SessionDigest
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Digest)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "digest", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Digest)) > 24000 {
+		return fmt.Errorf("field %s length: must be <= %d", "digest", 24000)
+	}
+	*j = SessionDigest(plain)
+	return nil
+}
+
 // Session activity event; which fields are present depends on kind (protocol.md
 // 4.8).
 type SessionEvent struct {
@@ -7857,11 +7904,6 @@ func (j *SessionExport) UnmarshalJSON(value []byte) error {
 
 // Result of session.export: the archive is uploaded (ok) or why not (error).
 type SessionExported struct {
-	// Handoff digest of the conversation read from the transcript (plan / todos,
-	// files changed, recent commands, recent exchange); the console quotes it when
-	// the conversation cannot be resumed.
-	Digest *string `json:"digest,omitempty,omitzero"`
-
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
 
@@ -7900,9 +7942,6 @@ func (j *SessionExported) UnmarshalJSON(value []byte) error {
 	var plain Plain
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
-	}
-	if plain.Digest != nil && utf8.RuneCountInString(string(*plain.Digest)) > 24000 {
-		return fmt.Errorf("field %s length: must be <= %d", "digest", 24000)
 	}
 	if plain.Error != nil && utf8.RuneCountInString(string(*plain.Error)) > 2000 {
 		return fmt.Errorf("field %s length: must be <= %d", "error", 2000)

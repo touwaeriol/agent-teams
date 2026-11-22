@@ -33,6 +33,8 @@ export interface ManagerDeps {
   fetchImage?: ImageFetcher;
   /** Called when a session stops for good (unregister cred secrets, loopback routes). */
   onSessionGone?: (sessionId: string) => void;
+  /** A session's turn ended (session.digest, move/live.ts). */
+  onTurnEnd?: (s: { id: string; gen: number; spec: SessionOpen; absCwd: string }) => void;
   /** Called whenever a session's driver stops (closed, parked, crashed): per-driver secrets such as the SSH key are dropped. */
   onDriverGone?: (sessionId: string) => void;
   log: Logger;
@@ -490,6 +492,7 @@ export class SessionManager implements SessionHost {
     if (!s.driver) return;
     if (!running) s.crashes = 0;
     s.setState(running ? "turn_running" : "active");
+    if (!running) this.d.onTurnEnd?.(s);
   }
 
   onExit(s: Session, err: Error): void {

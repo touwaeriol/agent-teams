@@ -48,13 +48,18 @@ func moveTeam(t *testing.T) (*team, *nodetest.Node, string) {
 // expectExport waits for the old node's session.close (node_move) and session.export.
 func expectExport(t *testing.T, tm *team, sessionID string) protocol.SessionExport {
 	t.Helper()
-	ctx, cancel := tm.w.waitCtx()
+	return waitExport(t, tm.w, tm.n, sessionID)
+}
+
+func waitExport(t *testing.T, w *world, n *nodetest.Node, sessionID string) protocol.SessionExport {
+	t.Helper()
+	ctx, cancel := w.waitCtx()
 	defer cancel()
-	f, err := tm.n.Wait(ctx, protocol.TypeSessionClose, func(f nodetest.Frame) bool { return strings.Contains(string(f.Body), sessionID) })
+	f, err := n.Wait(ctx, protocol.TypeSessionClose, func(f nodetest.Frame) bool { return strings.Contains(string(f.Body), sessionID) })
 	if err != nil || !strings.Contains(string(f.Body), `"node_move"`) {
 		t.Fatalf("close %v %s", err, f.Body)
 	}
-	f, err = tm.n.Wait(ctx, protocol.TypeSessionExport, nil)
+	f, err = n.Wait(ctx, protocol.TypeSessionExport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,8 +191,18 @@ func TestSessionMoveImportFails(t *testing.T) {
 	}
 	sum := sha256.Sum256(archive)
 	digest, size := hex.EncodeToString(sum[:]), len(archive)
-	handoff := "待办 / 计划（最后一次更新）：\n- [in_progress] 写迁移测试"
-	tm.dev.send(protocol.TypeSessionExported, protocol.SessionExported{ExportID: exp.ExportID, SessionID: exp.SessionID, Ok: true, Size: &size, SHA256: &digest, Digest: &handoff})
+	// The live digest of the turn that hit the limit arrives after the session closed for the move.
+	dctx, dcancel := tm.w.waitCtx()
+	defer dcancel()
+	if err := tm.n.SendUnreliable(dctx, protocol.TypeSessionDigest, protocol.SessionDigest{SessionID: exp.SessionID, OpenGen: protocol.OpenGen(tm.dev.gen), Digest: "待办 / 计划（最后一次更新）：\n- [in_progress] 写迁移测试"}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "digest stored", func() bool {
+		var d string
+		_ = store.QueryRow(tm.w.ctx, tm.w.e.Core.Pool, `SELECT digest FROM at_agent_sessions WHERE id = $1`, exp.SessionID).Scan(&d)
+		return strings.Contains(d, "写迁移测试")
+	})
+	tm.dev.send(protocol.TypeSessionExported, protocol.SessionExported{ExportID: exp.ExportID, SessionID: exp.SessionID, Ok: true, Size: &size, SHA256: &digest})
 	ctx, cancel := tm.w.waitCtx()
 	defer cancel()
 	f, err := nb.Wait(ctx, protocol.TypeSessionOpen, func(f nodetest.Frame) bool { return strings.Contains(string(f.Body), `"name":"dev-1"`) })
@@ -255,4 +270,76 @@ func waitOpenAnywhere(tm *team, nodes []*nodetest.Node, name, skip string) (prot
 		}
 	}
 	return protocol.SessionOpen{}, context.DeadlineExceeded
+}
+
+// TestSessionMoveLeadAndCoordinator: a thread's lead and the project's coordinator move like any
+// member: same conversation id, session.open.import on the other node.
+func TestSessionMoveLeadAndCoordinator(t *testing.T) {
+	for _, name := range []string{"lead-1", "coordinator"} {
+		t.Run(name, func(t *testing.T) { moveOne(t, name) })
+	}
+}
+
+func moveOne(t *testing.T, name string) {
+	tm, nb, tokenB := moveTeam(t)
+	agent := tm.lead
+	if name == "coordinator" {
+		agent = openCoordinator(t, tm, nb)
+	}
+	from, to, token := tm.n, nb, tm.token
+	if agent.node == nb {
+		from, to, token = nb, tm.n, tokenB
+	}
+	old := agent.session
+	rateLimited(agent, time.Hour)
+	exp := waitExport(t, tm.w, from, old)
+	if exp.Resume.SDKSessionID == nil || *exp.Resume.SDKSessionID != "sdk-"+old {
+		t.Fatalf("export %+v", exp)
+	}
+	archive := []byte("archive of " + name)
+	if code, _ := moveRequest(t, tm, "PUT", string(exp.ExportID), token, archive); code != 204 {
+		t.Fatalf("upload = %d", code)
+	}
+	sum := sha256.Sum256(archive)
+	digest, size := hex.EncodeToString(sum[:]), len(archive)
+	agent.send(protocol.TypeSessionExported, protocol.SessionExported{ExportID: exp.ExportID, SessionID: exp.SessionID, Ok: true, Size: &size, SHA256: &digest})
+	ctx, cancel := tm.w.waitCtx()
+	defer cancel()
+	f, err := to.Wait(ctx, protocol.TypeSessionOpen, func(f nodetest.Frame) bool { return strings.Contains(string(f.Body), `"name":"`+name+`"`) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var moved protocol.SessionOpen
+	_ = f.Decode(&moved)
+	if moved.Import == nil || moved.Import.ExportID != exp.ExportID || moved.Resume == nil || moved.Resume.SDKSessionID == nil || *moved.Resume.SDKSessionID != "sdk-"+old {
+		t.Fatalf("open %+v %+v", moved.Import, moved.Resume)
+	}
+}
+
+// openCoordinator starts the coordinator's session with a project chat message (on either node).
+func openCoordinator(t *testing.T, tm *team, nb *nodetest.Node) *fakeAgent {
+	t.Helper()
+	var coord struct {
+		ConversationID string `json:"conversation_id"`
+	}
+	tm.b.must(200, "GET", "/api/projects/"+tm.projectID+"/coordinator", nil, &coord)
+	tm.b.must(202, "POST", "/api/conversations/"+coord.ConversationID+"/messages", map[string]any{"content": "进度怎么样"}, nil)
+	var open protocol.SessionOpen
+	var node *nodetest.Node
+	eventually(t, "coordinator opens", func() bool {
+		for _, n := range []*nodetest.Node{tm.n, nb} {
+			ctx, cancel := context.WithTimeout(tm.w.ctx, 100*time.Millisecond)
+			f, err := n.Wait(ctx, protocol.TypeSessionOpen, func(f nodetest.Frame) bool { return strings.Contains(string(f.Body), `"name":"coordinator"`) })
+			cancel()
+			if err == nil {
+				node = n
+				return f.Decode(&open) == nil
+			}
+		}
+		return false
+	})
+	c := &fakeAgent{t: t, w: tm.w, node: node, session: string(open.SessionID), gen: int(open.OpenGen)}
+	c.opened(open)
+	c.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: open.SessionID, MsgID: open.FirstMessage.MsgID})
+	return c
 }

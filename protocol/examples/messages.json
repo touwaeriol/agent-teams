@@ -435,6 +435,17 @@
   },
   {
     "v": 2,
+    "type": "session.digest",
+    "id": "n_01JD3V0000000000000000063",
+    "ts": "2026-11-14T12:31:07Z",
+    "body": {
+      "session_id": "s_01JD",
+      "open_gen": 1,
+      "digest": "待办 / 计划（最后一次更新）：\n- [in_progress] 加测试\n改过的文件（1 个）：\n- src/login.vue"
+    }
+  },
+  {
+    "v": 2,
     "type": "session.send",
     "id": "c_01JD3V0000000000000000006",
     "seq": 984,

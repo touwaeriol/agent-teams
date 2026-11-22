@@ -1820,6 +1820,30 @@
         }
       }
     },
+    "SessionDigest": {
+      "title": "SessionDigest",
+      "description": "Live handoff digest of a session, read by the daemon from the runtime's transcript without the model after each turn (when it changed): the last plan / todo list, files changed, recent commands and the recent exchange. Unreliable, latest wins; the console quotes the newest one when a conversation cannot be resumed (another node, lost transcript). Accepted for a session that was closed meanwhile.",
+      "type": "object",
+      "required": [
+        "session_id",
+        "open_gen",
+        "digest"
+      ],
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "open_gen": {
+          "$ref": "#/$defs/OpenGen"
+        },
+        "digest": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 24000
+        }
+      },
+      "additionalProperties": false
+    },
     "SessionEvent": {
       "title": "SessionEvent",
       "description": "Session activity event; which fields are present depends on kind (protocol.md 4.8).",
@@ -2088,11 +2112,6 @@
         "error": {
           "type": "string",
           "maxLength": 2000
-        },
-        "digest": {
-          "description": "Handoff digest of the conversation read from the transcript (plan / todos, files changed, recent commands, recent exchange); the console quotes it when the conversation cannot be resumed.",
-          "type": "string",
-          "maxLength": 24000
         }
       }
     },

@@ -260,11 +260,6 @@ func (o *Orchestrator) HandleExported(ctx context.Context, node store.Node, m *p
 		if err != nil || mv.FromNodeID != node.ID || mv.Status != "exporting" {
 			return ignoreMissing(err)
 		}
-		if m.Digest != nil && *m.Digest != "" {
-			if err := setMove(ctx, tx, mv.ID, map[string]any{"digest": strings.ToValidUTF8(*m.Digest, "")}); err != nil {
-				return err
-			}
-		}
 		if why := exportProblem(mv, m); why != "" {
 			o.log.Warn("session export failed", "move_id", mv.ID, "err", why)
 			if err := failMove(ctx, tx, mv.ID, why); err != nil {
@@ -422,23 +417,4 @@ func (o *Orchestrator) SweepMoves(ctx context.Context, now time.Time) error {
 		return tx.Gorm(ctx).Exec(`DELETE FROM at_session_moves WHERE status IN ('done', 'failed') AND updated_at < ?
 			AND (reset_at IS NULL OR reset_at < ?)`, now.Add(-moveKeep), now).Error
 	})
-}
-
-// moveDigestMaxAge bounds how old a move's digest may be to stand in for a lost conversation.
-const moveDigestMaxAge = 24 * time.Hour
-
-// lastMoveDigest is the conversation digest the old node sent with the employee's newest move
-// (session.exported.digest), while that move is still about the conversation being replaced: no
-// session of the employee opened after it except the move's own. "" otherwise.
-func lastMoveDigest(ctx context.Context, q core.DB, employeeID string) (string, error) {
-	var digests []string
-	err := q.Gorm(ctx).Raw(`SELECT m.digest FROM at_session_moves m
-		WHERE m.employee_id = ? AND m.created_at > ?
-		AND NOT EXISTS (SELECT 1 FROM at_agent_sessions s WHERE s.employee_id = m.employee_id
-			AND s.opened_at > m.created_at AND s.id IS DISTINCT FROM m.to_session_id)
-		ORDER BY m.created_at DESC LIMIT 1`, employeeID, time.Now().Add(-moveDigestMaxAge)).Scan(&digests).Error
-	if err != nil || len(digests) == 0 {
-		return "", err
-	}
-	return digests[0], nil
 }

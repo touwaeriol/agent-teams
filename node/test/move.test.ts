@@ -120,7 +120,6 @@ describe("session moves between daemons", () => {
     a.console.command("session.export", { export_id: "mv_01JD3V0000000000000000", session_id: "s_old", runtime: "claude", resume: { sdk_session_id: sid }, cwd, repos: [repo] });
     const exported = (await a.console.waitType("session.exported")).body;
     expect(exported).toMatchObject({ export_id: "mv_01JD3V0000000000000000", session_id: "s_old", ok: true });
-    expect(exported.digest).toContain("- 收到：read README.md"); // the checkout's absolute path dropped
     expect(t.store.get("mv_01JD3V0000000000000000")?.length).toBe(exported.size);
     // the source checkout is untouched (no ref left behind, staged file still staged)
     expect(git(wtA, "for-each-ref", "refs/agent-teams")).toBe("");

@@ -35,6 +35,7 @@ export interface MessageBodies {
   "session.compact": T.SessionCompact;
   "session.compacted": T.SessionCompacted;
   "session.delivered": T.SessionDelivered;
+  "session.digest": T.SessionDigest;
   "session.event": T.SessionEvent;
   "session.export": T.SessionExport;
   "session.exported": T.SessionExported;
@@ -101,6 +102,7 @@ export const MESSAGE_META: { readonly [K in MessageType]: MessageMeta } = {
   "session.compact": { direction: "console_to_node", reliable: true, key: ["compact_id"] },
   "session.compacted": { direction: "node_to_console", reliable: true, key: ["compact_id"] },
   "session.delivered": { direction: "node_to_console", reliable: true, key: ["msg_id"] },
+  "session.digest": { direction: "node_to_console", reliable: false, key: [] },
   "session.event": { direction: "node_to_console", reliable: true, key: ["session_id","event_no"] },
   "session.export": { direction: "console_to_node", reliable: true, key: ["export_id"] },
   "session.exported": { direction: "node_to_console", reliable: true, key: ["export_id"] },

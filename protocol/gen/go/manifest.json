@@ -273,6 +273,13 @@
       ]
     },
     {
+      "type": "session.digest",
+      "name": "SessionDigest",
+      "direction": "node_to_console",
+      "reliable": false,
+      "key": []
+    },
+    {
       "type": "session.event",
       "name": "SessionEvent",
       "direction": "node_to_console",

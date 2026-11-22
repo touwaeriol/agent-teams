@@ -52,32 +52,29 @@ export class Mover {
 
   /** session.export: never throws; a failure is session.exported {ok:false, error}. */
   async export(b: SessionExport): Promise<SessionExported> {
-    const digest = this.digest(b);
-    const withDigest = digest ? { digest } : {};
     try {
       const archive = await this.pack(b);
       const sha256 = createHash("sha256").update(archive).digest("hex");
       await this.d.transfer.upload(b.export_id, archive, sha256);
       this.d.log.info({ session: b.session_id, export: b.export_id, bytes: archive.length }, "session exported");
-      return { export_id: b.export_id, session_id: b.session_id, ok: true, size: archive.length, sha256, ...withDigest };
+      return { export_id: b.export_id, session_id: b.session_id, ok: true, size: archive.length, sha256 };
     } catch (err) {
       this.d.log.warn({ session: b.session_id, export: b.export_id, err: (err as Error).message }, "session export failed");
-      return { export_id: b.export_id, session_id: b.session_id, ok: false, error: (err as Error).message.slice(0, 2000), ...withDigest };
+      return { export_id: b.export_id, session_id: b.session_id, ok: false, error: (err as Error).message.slice(0, 2000) };
     }
   }
 
-  /** The handoff digest of the conversation (digest.ts), paths relative to the checkouts; "" when unreadable. */
-  private digest(b: SessionExport): string {
-    try {
-      const file = b.runtime === "claude" ? b.resume.sdk_session_id && findTranscript(this.d.claudeConfigDir, b.resume.sdk_session_id) : b.resume.codex_thread_id && findRollout(this.d.codexHome, b.resume.codex_thread_id);
-      if (!file) return "";
-      const repos = (b.repos ?? []).map((rel): [string, string] => [`${resolveInRoot(this.d.root, rel)}/`, ""]);
-      const text = rewritePaths(readFileSync(file, "utf8"), [...repos, [`${resolve(this.d.root)}/`, ""]]);
-      return conversationDigest(b.runtime, text);
-    } catch (err) {
-      this.d.log.warn({ session: b.session_id, err: (err as Error).message }, "conversation digest failed");
-      return "";
-    }
+  /**
+   * The live handoff digest of a session's conversation (digest.ts), paths relative to its cwd;
+   * "" when the transcript is not there (yet).
+   */
+  digestOf(runtime: "claude" | "codex", resume: { sdk_session_id?: string | null; codex_thread_id?: string | null } | undefined, absCwd: string): string {
+    const file = runtime === "claude"
+      ? resume?.sdk_session_id && findTranscript(this.d.claudeConfigDir, resume.sdk_session_id)
+      : resume?.codex_thread_id && findRollout(this.d.codexHome, resume.codex_thread_id);
+    if (!file) return "";
+    const text = rewritePaths(readFileSync(file, "utf8"), [[`${resolve(absCwd)}/`, ""], [`${resolve(this.d.root)}/`, ""]]);
+    return conversationDigest(runtime, text);
   }
 
   private async pack(b: SessionExport): Promise<Buffer> {

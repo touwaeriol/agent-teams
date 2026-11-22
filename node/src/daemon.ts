@@ -17,6 +17,7 @@ import { Link } from "./link/client.js";
 import { Dispatcher, type CommandHandler } from "./link/dispatcher.js";
 import { Inbox, type Reply } from "./link/inbox.js";
 import { Outbox } from "./link/outbox.js";
+import { LiveDigest } from "./move/live.js";
 import { Mover } from "./move/mover.js";
 import { consoleTransfer, type MoveTransfer } from "./move/transfer.js";
 import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, FileDownload, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, NodeRuntimesRefresh, NodeUsageRefresh, SessionClose, SshCertResponse, SshServersUpdate, SessionCompact, SessionExport, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
@@ -100,6 +101,8 @@ export interface DaemonOptions {
   selfUpdate?: boolean;
   /** Where session-move archives are uploaded and downloaded (tests; default PUT / GET /nodes/moves/{id}). */
   moveTransfer?: MoveTransfer;
+  /** Tests: wait after a turn before the session.digest read (default 3 s). */
+  liveDigestDelayMs?: number;
   /** Updater overrides (tests): poll and confirm delays, fetch, npm. */
   updater?: Partial<Pick<UpdaterOptions, "pollMs" | "confirmAfterMs" | "fetchFn" | "npm" | "now">>;
 }
@@ -139,6 +142,8 @@ export class Daemon {
   private readonly updater: Updater;
   /** Session moves between nodes (protocol.md §4.11). */
   private readonly mover: Mover;
+  /** session.digest after each turn: the console's handoff fallback (move/live.ts). */
+  private readonly live: LiveDigest;
   private readonly ssh: SshHub;
   /** Real OpenSSH client found at start (null: remote servers cannot be used on this node). */
   private readonly sshClient: string | null;
@@ -192,12 +197,17 @@ export class Daemon {
       root: o.root, claudeConfigDir: o.claudeConfigDir, codexHome: o.codexHome, tmpDir: o.stateDir, hooksDir: this.platform.hooksDir,
       transfer: o.moveTransfer ?? consoleTransfer(o.url, o.token), log: o.log,
     });
+    this.live = new LiveDigest({
+      digestOf: (runtime, resume, absCwd) => this.mover.digestOf(runtime as "claude" | "codex", resume ?? undefined, absCwd), send, log: o.log,
+      ...(o.liveDigestDelayMs !== undefined ? { delayMs: o.liveDigestDelayMs } : {}),
+    });
     this.sessions = new SessionManager({
       root: o.root, stateDir: o.stateDir, send, approvals: this.approvals, tools: this.tools, log: o.log, maxActive: o.maxActive,
       waitForJob: (id, ms) => this.git.waitFor(id, ms),
       importMove: (spec, absCwd) => this.mover.import(spec, absCwd),
       createDriver: (spec, cwd, sink) => this.createDriver(spec, cwd, sink),
       onSessionGone: (id) => this.forgetSession(id),
+      onTurnEnd: (s) => this.live.turnEnded(s),
       onDriverGone: (id) => this.ssh.drop(id),
       fetchImage: consoleImageFetcher(o.url, o.token),
       ...(o.crashDelaysMs ? { crashDelaysMs: o.crashDelaysMs } : {}),
@@ -239,6 +249,7 @@ export class Daemon {
   async stop(): Promise<void> {
     if (this.statsTimer) clearInterval(this.statsTimer);
     this.usage.stop();
+    this.live.stop();
     this.runtimeMonitor.stop();
     this.link.stop();
     await this.sessions.shutdown();
@@ -484,5 +495,6 @@ export class Daemon {
     this.ssh.forget(id);
     this.credServer.unregister(id);
     this.toolhost.remove(id);
+    this.live.forget(id);
   }
 }

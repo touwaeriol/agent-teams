@@ -18,7 +18,6 @@ CREATE TABLE IF NOT EXISTS at_session_moves (
     archive         BYTEA,
     size            BIGINT,
     sha256          TEXT,
-    digest          TEXT NOT NULL DEFAULT '',        -- session.exported.digest: quoted by the recap when the conversation cannot be resumed
     reset_at        TIMESTAMPTZ,                     -- when the source node's limit resets: no move goes back there before
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -27,5 +26,10 @@ CREATE INDEX IF NOT EXISTS at_session_moves_employee ON at_session_moves (employ
 CREATE INDEX IF NOT EXISTS at_session_moves_pending ON at_session_moves (updated_at) WHERE status IN ('exporting', 'importing');
 CREATE INDEX IF NOT EXISTS at_session_moves_to_session ON at_session_moves (to_session_id) WHERE to_session_id IS NOT NULL;
 
+-- The live handoff digest of a session (session.digest, sent by the daemon after each turn): the
+-- recap quotes the employee's newest one when a conversation cannot be resumed.
+ALTER TABLE at_agent_sessions ADD COLUMN IF NOT EXISTS digest TEXT NOT NULL DEFAULT '';
+
 -- +goose Down
+ALTER TABLE at_agent_sessions DROP COLUMN IF EXISTS digest;
 DROP TABLE IF EXISTS at_session_moves;
