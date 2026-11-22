@@ -2,7 +2,7 @@
 // One thread, chat only (like Claude Code's thread panel): the capsule header, the
 // conversation between you and the lead — question cards (answered ones collapsed to your
 // choice), the lead's checklist, plans, published files and the acceptance card sit where they
-// happened — and the message box. 任务 / 交付物 / 成员 open in a dialog over the chat.
+// happened — the wake-ups waiting to fire and the message box. 任务 / 交付物 / 成员 open in a dialog over the chat.
 import { ref, watch } from "vue";
 import { threads as threadActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
@@ -17,6 +17,7 @@ import DetailHeader from "./DetailHeader.vue";
 import type { ExpandLink, ThreadNav } from "./detail";
 import LeadComposer from "./LeadComposer.vue";
 import ThreadChat from "./ThreadChat.vue";
+import ThreadWakeups from "./ThreadWakeups.vue";
 
 const props = withDefaults(
   defineProps<{
@@ -68,6 +69,7 @@ function setPlanOpen(open: boolean) {
       <ThreadChat :pid="pid" :thread="thread" :compact="layout !== 'page'" />
     </div>
   </div>
+  <ThreadWakeups :pid="pid" :thread-id="thread.id" :class="cn('at-reading shrink-0 mb-2', layout === 'page' ? 'mx-3 sm:mx-6' : 'mx-4')" />
   <div v-if="thread.main_tasks.length" :class="cn('at-reading shrink-0 pb-2', layout === 'page' ? 'px-3 sm:px-6' : 'px-4')" data-plan-dock>
     <PlanChecklist :steps="thread.main_tasks" :open="planOpen" list-class="max-h-[min(40vh,280px)]" @update:open="setPlanOpen" />
   </div>

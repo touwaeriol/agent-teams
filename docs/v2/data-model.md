@@ -732,9 +732,21 @@ CREATE TABLE at_schedules (          -- 定时发给项目统筹的消息
 );
 CREATE INDEX at_schedules_project ON at_schedules (project_id, created_at);
 CREATE INDEX at_schedules_due ON at_schedules (next_run_at) WHERE enabled;
--- 触发：认领 enabled AND next_run_at <= now() 的一行（FOR UPDATE SKIP LOCKED），同一事务写 last_run_at、
---   从现在算出下一次 next_run_at，提交后把 “【定时任务：name】\nmessage” 作为用户消息投给统筹；
---   停机错过的只补一次，不会重复触发。
+-- 00370 加列（agent 设置的定时唤醒、唤醒讨论串组长或员工）：
+--   kind       cron | once（run_at；cron 为 ''）
+--   target     coordinator | lead（thread_id）| member（employee_id + 任务 thread_id/task_id，只能是 once）
+--   created_by user | coordinator | lead | member（agent 只能改自己设置的）
+--   ends_at / max_runs / run_count（周期任务的结束条件）
+--   status     active | done | cancelled | missed，ended_at（结束的行留 7 天）
+-- 触发：River 作业 schedule_fire{schedule_id, run_at}（00360 的 river_* 表），见 api.md 定时任务一节。
+CREATE TABLE at_schedule_runs (     -- 00370：每次触发一行，每个定时任务留最近 100 条
+  id BIGSERIAL PRIMARY KEY, schedule_id TEXT NOT NULL REFERENCES at_schedules(id) ON DELETE CASCADE,
+  planned_at TIMESTAMPTZ,           -- 原定时间；“立即运行”为 NULL（manual = true）
+  fired_at TIMESTAMPTZ NOT NULL DEFAULT now(), manual BOOLEAN NOT NULL DEFAULT false,
+  outcome TEXT NOT NULL,            -- delivered | skipped | failed | missed
+  message_id BIGINT,                -- 发出的 at_messages 行（合并判断用它的 delivered_at）
+  error TEXT NOT NULL DEFAULT ''
+);
 ```
 
 ### 2.11 讨论串生命周期与消息图片（00095）
@@ -915,6 +927,8 @@ CREATE TABLE at_ssh_audit (                 -- 网关审计，一行一个事件
 `00080_plugins.sql`：`at_roles.plugins`、`at_plugins`、`at_plugin_versions`，`at_skills.user_id` 可为空（管理员内置技能）及其唯一索引（architecture.md §6.5）。
 
 `00090_project_chrome.sql`：`at_projects.icon / coordinator_model / thread_model / thread_effort / auto_resume`、`at_rate_limit_waits`、`at_schedules`（§2.10）。
+
+`00360_river_queue.sql`：River（riverqueue/river v0.51.2）自己的迁移 1–8 原样拷进来（每个版本单独执行，不在一个事务里），并写入 `river_migration`；升级 River 带来新迁移时要加新的 goose 迁移（`TestRiverMigrationsCurrent`）。`00370_schedule_targets.sql`：`at_schedules` 的 kind / run_at / target / thread_id / employee_id / task_id / created_by / ends_at / max_runs / run_count / status / ended_at，以及 `at_schedule_runs`（§2.10）。
 
 `00070_project_repos.sql`：`at_project_repos`、`at_thread_repos`、`at_merge_queue.repo`、`at_tasks.pushed`；把每个项目的 repo/branch/git_connection_id 迁进去（基准分支写进 context），给已有讨论串和队列条目补上仓库（architecture.md §8.1）。
 

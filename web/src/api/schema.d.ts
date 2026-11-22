@@ -1574,8 +1574,25 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Send the schedule's message to the coordinator now */
+        /** Send the schedule's message to its target now */
         post: operations["run-schedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/schedules/{id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The schedule's last 100 runs, newest first */
+        get: operations["list-schedule-runs"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3145,6 +3162,41 @@ export interface components {
             /** @description Base64 of a zip of the plugin folder (.claude-plugin/plugin.json at the root or in one top folder); the same name again uploads a new version */
             zip: string;
         };
+        NewScheduleBody: {
+            /** @description minute hour day-of-month month day-of-week, or a descriptor such as @daily */
+            cron?: string;
+            enabled?: boolean;
+            /**
+             * Format: date-time
+             * @description Recurring schedules end after this time
+             */
+            ends_at?: string;
+            /**
+             * @description cron: recurring (cron + timezone); once: fires at run_at (default cron)
+             * @enum {string}
+             */
+            kind?: "cron" | "once";
+            /**
+             * Format: int64
+             * @description Recurring schedules end after this many runs (0 clears)
+             */
+            max_runs?: number;
+            /** @description Sent to the target when it fires */
+            message?: string;
+            name?: string;
+            /**
+             * Format: date-time
+             * @description Once schedules: when it fires
+             */
+            run_at?: string;
+            /**
+             * Format: int64
+             * @description Wake this thread's lead instead of the project coordinator
+             */
+            thread_no?: number;
+            /** @description IANA zone the cron is read in (default UTC) */
+            timezone?: string;
+        };
         NewSkillInputBody: {
             /** @description The skill's text files (a picked folder); used when zip is empty */
             files?: components["schemas"]["File"][] | null;
@@ -3730,6 +3782,25 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        Run: {
+            error: string;
+            /** Format: date-time */
+            fired_at: string;
+            /** Format: int64 */
+            id: number;
+            /** @description Started with the run-now button */
+            manual: boolean;
+            /** Format: int64 */
+            message_id: number | null;
+            /** @enum {string} */
+            outcome: "delivered" | "skipped" | "failed" | "missed";
+            /**
+             * Format: date-time
+             * @description The run's planned time; null for a manual run
+             */
+            planned_at: string | null;
+            schedule_id: string;
+        };
         RuntimeUsage: {
             /**
              * @description How the runtime is logged in
@@ -3788,28 +3859,92 @@ export interface components {
         Schedule: {
             /** Format: date-time */
             created_at: string;
+            /**
+             * @description Who made it: the user on the page or an agent with schedule_create
+             * @enum {string}
+             */
+            created_by: "user" | "coordinator" | "lead" | "member";
+            /** @description Recurring schedules: five fields or a descriptor (@daily); empty for once */
             cron: string;
+            /** @description Member schedules: the member's name */
+            employee: string | null;
+            /** @description Member schedules: the member woken */
+            employee_id: string | null;
             enabled: boolean;
+            /** Format: date-time */
+            ended_at: string | null;
+            /**
+             * Format: date-time
+             * @description Recurring schedules end after this time
+             */
+            ends_at: string | null;
             id: string;
+            /** @enum {string} */
+            kind: "cron" | "once";
             last_error: string;
             /** Format: date-time */
             last_run_at: string | null;
+            /**
+             * Format: int64
+             * @description Recurring schedules end after this many runs
+             */
+            max_runs: number | null;
             message: string;
             name: string;
             /** Format: date-time */
             next_run_at: string | null;
             project_id: string;
+            /**
+             * Format: date-time
+             * @description Once schedules: when it fires
+             */
+            run_at: string | null;
+            /** Format: int64 */
+            run_count: number;
+            /** @enum {string} */
+            status: "active" | "done" | "cancelled" | "missed";
+            /**
+             * @description Who is woken: the project coordinator, a thread's lead or a member (bound to its task)
+             * @enum {string}
+             */
+            target: "coordinator" | "lead" | "member";
+            /** @description Member schedules: the task it is bound to (it ends with the task) */
+            task_id: string | null;
+            thread_id: string | null;
+            /** Format: int64 */
+            thread_no: number | null;
+            thread_title: string | null;
             timezone: string;
             /** Format: date-time */
             updated_at: string;
         };
         ScheduleBody: {
-            /** @description minute hour day-of-month month day-of-week */
+            /** @description minute hour day-of-month month day-of-week, or a descriptor such as @daily */
             cron?: string;
             enabled?: boolean;
-            /** @description Sent to the project coordinator when it fires */
+            /**
+             * Format: date-time
+             * @description Recurring schedules end after this time
+             */
+            ends_at?: string;
+            /**
+             * @description cron: recurring (cron + timezone); once: fires at run_at (default cron)
+             * @enum {string}
+             */
+            kind?: "cron" | "once";
+            /**
+             * Format: int64
+             * @description Recurring schedules end after this many runs (0 clears)
+             */
+            max_runs?: number;
+            /** @description Sent to the target when it fires */
             message?: string;
             name?: string;
+            /**
+             * Format: date-time
+             * @description Once schedules: when it fires
+             */
+            run_at?: string;
             /** @description IANA zone the cron is read in (default UTC) */
             timezone?: string;
         };
@@ -7957,7 +8092,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ScheduleBody"];
+                "application/json": components["schemas"]["NewScheduleBody"];
             };
         };
         responses: {
@@ -8672,6 +8807,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-schedule-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"][] | null;
+                };
             };
             /** @description Error */
             default: {

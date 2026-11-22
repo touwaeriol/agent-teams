@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// 定时任务 dialog: messages the project coordinator gets on a schedule. `v-model:open`.
+// 定时任务 dialog: messages the coordinator or a thread's lead gets on a schedule, the user's and
+// the ones agents set with schedule_create. `v-model:open`.
 import { browserTimeZone } from "@/lib/schedules";
 import SchedulesPanel from "./SchedulesPanel.vue";
 
@@ -12,7 +13,7 @@ const open = defineModel<boolean>("open", { required: true });
     <template #header>
       <div class="flex flex-col gap-1.5 pr-6">
         <h2 class="text-base font-semibold">定时任务</h2>
-        <p class="text-[13px] leading-5 text-muted-foreground">到点后把消息发给项目统筹，由它开讨论串去做。按你的时区（{{ browserTimeZone() }}）计算。</p>
+        <p class="text-[13px] leading-5 text-muted-foreground">到点后把消息发给项目统筹或某个讨论串的组长。统筹和组长自己设置的定时唤醒也在这里，可以停用或删除。按你的时区（{{ browserTimeZone() }}）计算。</p>
       </div>
     </template>
     <SchedulesPanel :pid="pid" :active="open" />

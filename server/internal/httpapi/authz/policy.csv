@@ -151,6 +151,7 @@ p, user, /api/roles/yaml, PUT
 p, user, /api/schedules/:id, DELETE
 p, user, /api/schedules/:id, PATCH
 p, user, /api/schedules/:id/run, POST
+p, user, /api/schedules/:id/runs, GET
 p, user, /api/servers, GET
 p, user, /api/servers, POST
 p, user, /api/servers/:id, DELETE

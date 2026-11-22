@@ -19,6 +19,7 @@ import ChatCard from "./chatcards/ChatCard.vue";
 import Dot from "./Dot.vue";
 import MessageImages from "./MessageImages.vue";
 import MessageRefs from "./composer/MessageRefs.vue";
+import ScheduleNoteLine from "./ScheduleNoteLine.vue";
 import ThreadChip from "./ThreadChip.vue";
 
 const props = defineProps<{
@@ -108,6 +109,7 @@ const remove = () => local.value && dropPending(local.value.key);
   <p v-else-if="block.kind === 'line' && forwardedTo" class="text-center text-xs text-muted-foreground">
     <button type="button" class="hover:text-foreground hover:underline" @click="emit('openThread', forwardedTo.no)">{{ block.message.content }}</button>
   </p>
+  <ScheduleNoteLine v-else-if="block.kind === 'line' && block.message.meta?.schedule_note" :pid="pid" :message="block.message" />
   <p v-else-if="block.kind === 'line'" :class="cn('text-center text-xs', block.message.role === 'error' ? 'text-destructive' : 'text-muted-foreground')">{{ block.message.content }}</p>
   <article v-else class="flex flex-col gap-2.5">
     <span class="flex items-center gap-1.5 text-xs text-muted-foreground">

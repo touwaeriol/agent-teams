@@ -31,6 +31,7 @@ export const keys = {
   sharedFiles: (pid: string) => ["p", pid, "shared-files"] as const,
   memoryFile: (pid: string, name: string) => ["p", pid, "memory", name] as const,
   schedules: (pid: string) => ["p", pid, "schedules"] as const,
+  scheduleRuns: (pid: string, id: string) => ["p", pid, "schedules", id, "runs"] as const,
   usage: (pid: string, days: number) => ["p", pid, "usage", days] as const,
   office: (pid: string) => ["p", pid, "office"] as const,
   search: (pid: string, q: string) => ["p", pid, "search", q] as const,
@@ -195,6 +196,11 @@ export const useDeliverables = (pid: Arg, kind: Arg, q: Arg, noImages = false) =
 export const useSchedules = (pid: Arg, enabled: Arg<boolean> = true) =>
   useKeyed(() => keys.schedules(val(pid)), () => unwrap(client.GET("/api/projects/{pid}/schedules", path({ pid: val(pid) }))), {
     enabled: () => Boolean(toValue(pid)) && toValue(enabled),
+  });
+
+export const useScheduleRuns = (pid: Arg, id: Arg, enabled: Arg<boolean> = true) =>
+  useKeyed(() => keys.scheduleRuns(val(pid), val(id)), () => unwrap(client.GET("/api/schedules/{id}/runs", path({ id: val(id) }))), {
+    enabled: () => Boolean(toValue(id)) && toValue(enabled),
   });
 
 export const useProjectUsage = (pid: Arg, days: Arg<number>) =>
