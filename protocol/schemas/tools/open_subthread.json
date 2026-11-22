@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/open_subthread.json",
+  "title": "OpenSubthreadInput",
+  "description": "Open a subthread of your thread for a separate piece of work or discussion: it gets its own number, lead, branch and members; the brief becomes its lead's first message. You do not wait for it: keep working; when it needs the user, goes to review, ends or fails you receive \"[Subthread #n · title · status] ...\". A subthread cannot open subthreads of its own, and a thread has at most 5 unfinished subthreads. To build on your own changes, give repos [{repo, base: <your thread branch>}] (push your work first): its PR then targets your branch. Your thread cannot finish while a subthread is unfinished (close_subthread ends one).",
+  "x-tool": {
+    "tiers": [
+      "lead"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "title",
+    "brief"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "brief": {
+      "description": "Instructions for the subthread's lead: the goal, what to report back and when it is done.",
+      "type": "string",
+      "minLength": 1
+    },
+    "roles": {
+      "description": "Member roles the subthread's lead may assign to; default = all member roles of the team.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "repos": {
+      "description": "Repositories the subthread should work in, with an optional base branch each (e.g. your thread branch).",
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "$ref": "open_thread.json#/$defs/RepoFocus"
+      }
+    }
+  },
+  "$defs": {
+    "OpenSubthreadResult": {
+      "title": "OpenSubthreadResult",
+      "type": "object",
+      "required": [
+        "no",
+        "thread_id",
+        "branch"
+      ],
+      "properties": {
+        "no": {
+          "$ref": "common.json#/$defs/ThreadNo"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

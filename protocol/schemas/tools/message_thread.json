@@ -2,10 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/tools/message_thread.json",
   "title": "MessageThreadInput",
-  "description": "Send a message to a thread's lead as the project coordinator.",
+  "description": "Send a message to another thread's lead. As the coordinator: a finished thread is reopened, an archived one refuses. As a lead: any thread of the project except your own; a finished thread is reopened only when it is your subthread; the reply comes back as \"[Message from thread #n ...]\". Write only what the other lead needs; do not reply just to acknowledge. At most 20 messages an hour between two threads.",
   "x-tool": {
     "tiers": [
-      "coordinator"
+      "coordinator",
+      "lead"
     ],
     "blocking": []
   },

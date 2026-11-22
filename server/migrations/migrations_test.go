@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 390 {
+	if migrations.Latest() != 400 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -1672,7 +1672,7 @@ INSERT INTO at_schedules (id, project_id, name, cron, message) VALUES ('sc1', 'p
 	if _, err := p.Up(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if v, err := p.GetDBVersion(ctx); err != nil || v != migrations.Latest() || v != 390 {
+	if v, err := p.GetDBVersion(ctx); err != nil || v != migrations.Latest() || v != 400 {
 		t.Fatalf("version %d %v", v, err)
 	}
 	var got string
@@ -1691,5 +1691,41 @@ INSERT INTO at_schedules (id, project_id, name, cron, message) VALUES ('sc1', 'p
 	if err := db.QueryRow(`SELECT (SELECT runtime FROM at_roles) || ' ' || (SELECT auth FROM at_node_runtimes) || ' ' ||
 		(SELECT name FROM at_schedules)`).Scan(&got); err != nil || got != "antigravity subscription 日报" {
 		t.Fatalf("after down to 370: %q %v", got, err)
+	}
+}
+
+// TestThreadParentMigration: 00400 adds at_threads.parent_id; deleting the parent keeps the
+// subthread as a top-level thread, and the column goes down again.
+func TestThreadParentMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 400); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
+INSERT INTO at_conversations (id, user_id, title, project_id, kind) VALUES ('t1', 'u1', 'a', 'p1', 'thread'), ('t2', 'u1', 'b', 'p1', 'thread');
+INSERT INTO at_threads (id, project_id, user_id, no, title, branch) VALUES ('t1', 'p1', 'u1', 1, 'a', 'thread/1-a');
+INSERT INTO at_threads (id, project_id, user_id, no, title, branch, parent_id, opened_by) VALUES ('t2', 'p1', 'u1', 2, 'b', 'thread/2-b', 't1', 'lead');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM at_threads WHERE id = 't1'`); err != nil {
+		t.Fatal(err)
+	}
+	var parent *string
+	if err := db.QueryRow(`SELECT parent_id FROM at_threads WHERE id = 't2'`).Scan(&parent); err != nil || parent != nil {
+		t.Fatalf("parent after delete: %v %v", parent, err)
+	}
+	if _, err := p.DownTo(ctx, 390); err != nil {
+		t.Fatal(err)
+	}
+	var col *string
+	if err := db.QueryRow(`SELECT column_name FROM information_schema.columns WHERE table_name = 'at_threads' AND column_name = 'parent_id'`).Scan(&col); err == nil {
+		t.Fatalf("parent_id after down: %v", col)
 	}
 }

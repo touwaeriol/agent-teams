@@ -12,6 +12,9 @@ import (
 // ReopenByCoordinator is Reopen's cause when the coordinator messages a finished thread.
 const ReopenByCoordinator = "coordinator"
 
+// ReopenByParent is Reopen's cause when the parent thread's lead messages its finished subthread.
+const ReopenByParent = "parent"
+
 // ReopenBySchedule is Reopen's cause when a scheduled task wakes a finished thread's lead.
 const ReopenBySchedule = "schedule"
 
@@ -56,7 +59,7 @@ func (o *Orchestrator) Reopen(ctx context.Context, tx *core.Tx, t core.Thread, c
 	if err := o.setStatus(ctx, tx, t, next, ""); err != nil {
 		return err
 	}
-	if cause == ReopenByCoordinator || cause == ReopenBySchedule {
+	if cause == ReopenByCoordinator || cause == ReopenBySchedule || cause == ReopenByParent {
 		// The coordinator reopened it itself (message_thread), or the coordinator's or user's own
 		// scheduled task did: telling the coordinator again costs it a turn.
 		if len(merged) > 0 {
@@ -125,6 +128,8 @@ func (o *Orchestrator) reopenNote(ctx context.Context, tx *core.Tx, t core.Threa
 		text = "统筹发来新消息，讨论串重新打开。"
 	case ReopenBySchedule:
 		text = "定时任务到点，讨论串重新打开。"
+	case ReopenByParent:
+		text = "父讨论串的组长发来新消息，讨论串重新打开。"
 	}
 	meta := map[string]any{"reopened": true, "from": t.Status}
 	if s := strings.TrimSpace(t.Summary); s != "" {

@@ -13,7 +13,7 @@ function opensOf(m: MessageView): number[] {
 }
 
 /** Message kinds drawn as cards in the chat (tool calls the user should see; the rest stay hidden). */
-export const CARD_KINDS = new Set(["todos", "plan", "artifact", "resumed", "image"]);
+export const CARD_KINDS = new Set(["todos", "plan", "artifact", "resumed", "image", "relay"]);
 
 export function isCard(m: Pick<MessageView, "kind">): boolean {
   return CARD_KINDS.has(m.kind);

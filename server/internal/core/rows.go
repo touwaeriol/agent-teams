@@ -26,6 +26,8 @@ type Thread struct {
 	Summary     string
 	AutoApprove bool
 	OpenedBy    string
+	// ParentID is the thread whose lead opened this one with open_subthread (nil: top level).
+	ParentID *string `gorm:"column:parent_id"`
 	// SourceMessageID is the user's project-chat message the thread was opened for (nil: none).
 	SourceMessageID *int64 `gorm:"column:source_message_id"`
 	// ForwardedBrief: the brief is forwarded user messages (their copies are in the conversation).
@@ -51,7 +53,7 @@ type Thread struct {
 func (Thread) TableName() string { return "at_threads" }
 
 const threadCols = `id, project_id, user_id, no, title, brief, status, pause_reason, branch, base_branch, pr_number,
-	pr_url, pr_state, merge_error, summary, auto_approve, opened_by, source_message_id, forwarded_brief, roles_snapshot, only_roles, waiting_count, created_at, updated_at,
+	pr_url, pr_state, merge_error, summary, auto_approve, opened_by, parent_id, source_message_id, forwarded_brief, roles_snapshot, only_roles, waiting_count, created_at, updated_at,
 	started_at, finished_at, pinned_at, remind_at, reminded_at, done_pending_at, finish_nudged_at`
 
 // Active reports whether the thread's sessions should be live.

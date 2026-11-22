@@ -1264,6 +1264,38 @@ func (j *CloseQuestionInput) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+// End one of your subthreads as done (its sessions close; the reason is kept as
+// its summary). Refused while its PR waits for the user's review or is being
+// merged.
+type CloseSubthreadInput struct {
+	// No corresponds to the JSON schema field "no".
+	No ThreadNo `json:"no"`
+
+	// Why it is closed (no longer needed, result received...).
+	Reason *string `json:"reason,omitempty,omitzero"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *CloseSubthreadInput) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["no"]; raw != nil && !ok {
+		return fmt.Errorf("field no in CloseSubthreadInput: required")
+	}
+	type Plain CloseSubthreadInput
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.Reason != nil && utf8.RuneCountInString(string(*plain.Reason)) > 2000 {
+		return fmt.Errorf("field %s length: must be <= %d", "reason", 2000)
+	}
+	*j = CloseSubthreadInput(plain)
+	return nil
+}
+
 type CodexRuntime struct {
 	// Auth corresponds to the JSON schema field "auth".
 	Auth *CodexRuntimeAuth `json:"auth,omitempty,omitzero"`
@@ -3951,8 +3983,8 @@ func (j *ListTeamResult) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// List threads, one line each: number, title, status, main-task progress and how
-// many items wait for the user.
+// List the project's threads, one line each: number, title, status, main-task
+// progress, how many items wait for the user and the parent thread of a subthread.
 type ListThreadsInput struct {
 	// Status corresponds to the JSON schema field "status".
 	Status *ThreadStatus `json:"status,omitempty,omitzero"`
@@ -4414,7 +4446,45 @@ func (j *MergeEntryRef) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// Send a message to a thread's lead as the project coordinator.
+// Send a message to the project coordinator (e.g. something another thread or the
+// user's other work should know, or a question about scope). Status changes of
+// your thread already reach it automatically: do not send those, and do not reply
+// just to acknowledge. At most 20 messages an hour.
+type MessageCoordinatorInput struct {
+	// Text corresponds to the JSON schema field "text".
+	Text string `json:"text"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *MessageCoordinatorInput) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["text"]; raw != nil && !ok {
+		return fmt.Errorf("field text in MessageCoordinatorInput: required")
+	}
+	type Plain MessageCoordinatorInput
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Text)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "text", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Text)) > 8000 {
+		return fmt.Errorf("field %s length: must be <= %d", "text", 8000)
+	}
+	*j = MessageCoordinatorInput(plain)
+	return nil
+}
+
+// Send a message to another thread's lead. As the coordinator: a finished thread
+// is reopened, an archived one refuses. As a lead: any thread of the project
+// except your own; a finished thread is reopened only when it is your subthread;
+// the reply comes back as "[Message from thread #n ...]". Write only what the
+// other lead needs; do not reply just to acknowledge. At most 20 messages an hour
+// between two threads.
 type MessageThreadInput struct {
 	// No corresponds to the JSON schema field "no".
 	No ThreadNo `json:"no"`
@@ -5044,6 +5114,100 @@ func (j *OpenPRResult) UnmarshalJSON(value []byte) error {
 		return fmt.Errorf("field %s: must be >= %v", "pr_number", 1)
 	}
 	*j = OpenPRResult(plain)
+	return nil
+}
+
+// Open a subthread of your thread for a separate piece of work or discussion: it
+// gets its own number, lead, branch and members; the brief becomes its lead's
+// first message. You do not wait for it: keep working; when it needs the user,
+// goes to review, ends or fails you receive "[Subthread #n · title · status] ...".
+// A subthread cannot open subthreads of its own, and a thread has at most 5
+// unfinished subthreads. To build on your own changes, give repos [{repo, base:
+// <your thread branch>}] (push your work first): its PR then targets your branch.
+// Your thread cannot finish while a subthread is unfinished (close_subthread ends
+// one).
+type OpenSubthreadInput struct {
+	// Instructions for the subthread's lead: the goal, what to report back and when
+	// it is done.
+	Brief string `json:"brief"`
+
+	// Repositories the subthread should work in, with an optional base branch each
+	// (e.g. your thread branch).
+	Repos []RepoFocus `json:"repos,omitempty,omitzero"`
+
+	// Member roles the subthread's lead may assign to; default = all member roles of
+	// the team.
+	Roles []string `json:"roles,omitempty,omitzero"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *OpenSubthreadInput) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["brief"]; raw != nil && !ok {
+		return fmt.Errorf("field brief in OpenSubthreadInput: required")
+	}
+	if _, ok := raw["title"]; raw != nil && !ok {
+		return fmt.Errorf("field title in OpenSubthreadInput: required")
+	}
+	type Plain OpenSubthreadInput
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Brief)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "brief", 1)
+	}
+	if len(plain.Repos) > 20 {
+		return fmt.Errorf("field %s length: must be <= %d", "repos", 20)
+	}
+	if utf8.RuneCountInString(string(plain.Title)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "title", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Title)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "title", 200)
+	}
+	*j = OpenSubthreadInput(plain)
+	return nil
+}
+
+type OpenSubthreadResult struct {
+	// Branch corresponds to the JSON schema field "branch".
+	Branch string `json:"branch"`
+
+	// No corresponds to the JSON schema field "no".
+	No ThreadNo `json:"no"`
+
+	// ThreadID corresponds to the JSON schema field "thread_id".
+	ThreadID string `json:"thread_id"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *OpenSubthreadResult) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["branch"]; raw != nil && !ok {
+		return fmt.Errorf("field branch in OpenSubthreadResult: required")
+	}
+	if _, ok := raw["no"]; raw != nil && !ok {
+		return fmt.Errorf("field no in OpenSubthreadResult: required")
+	}
+	if _, ok := raw["thread_id"]; raw != nil && !ok {
+		return fmt.Errorf("field thread_id in OpenSubthreadResult: required")
+	}
+	type Plain OpenSubthreadResult
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = OpenSubthreadResult(plain)
 	return nil
 }
 
@@ -9288,6 +9452,9 @@ type ThreadStatusResult struct {
 	// No corresponds to the JSON schema field "no".
 	No ThreadNo `json:"no"`
 
+	// The parent thread of a subthread.
+	ParentNo *ThreadNo `json:"parent_no,omitempty,omitzero"`
+
 	// Plan corresponds to the JSON schema field "plan".
 	Plan []PlanStep `json:"plan"`
 
@@ -9299,6 +9466,9 @@ type ThreadStatusResult struct {
 
 	// Status corresponds to the JSON schema field "status".
 	Status ThreadStatus `json:"status"`
+
+	// The thread's subthreads.
+	Subthreads []ThreadSummary `json:"subthreads,omitempty,omitzero"`
 
 	// Title corresponds to the JSON schema field "title".
 	Title string `json:"title"`
@@ -9369,6 +9539,9 @@ func (j *ThreadStatus) UnmarshalJSON(value []byte) error {
 type ThreadSummary struct {
 	// No corresponds to the JSON schema field "no".
 	No ThreadNo `json:"no"`
+
+	// The parent thread of a subthread.
+	ParentNo *ThreadNo `json:"parent_no,omitempty,omitzero"`
 
 	// PlanDone corresponds to the JSON schema field "plan_done".
 	PlanDone int `json:"plan_done"`

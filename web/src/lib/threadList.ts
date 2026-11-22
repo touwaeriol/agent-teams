@@ -102,15 +102,54 @@ export interface ListGroup {
   items: ThreadView[];
 }
 
-/** Every thread in exactly one group, pinned ones first, then newest activity first; empty groups are left out. */
+/**
+ * Every thread in exactly one group, pinned ones first, then newest activity first; a subthread
+ * whose parent is in the same group comes right after its parent (in number order); empty groups
+ * are left out.
+ */
 export function groupThreads(threads: ThreadView[], waiting?: Map<number, QuestionView>): ListGroup[] {
   const by = new Map<ListGroupId, ThreadView[]>();
   for (const t of threads) {
     const g = listGroupOf(t, waiting);
     by.set(g, [...(by.get(g) ?? []), t]);
   }
-  return LIST_GROUPS.filter((g) => by.has(g.id)).map((g) => ({ ...g, items: by.get(g.id)!.sort(byPinThenActivity) }));
+  return LIST_GROUPS.filter((g) => by.has(g.id)).map((g) => ({ ...g, items: nestSubthreads(by.get(g.id)!.sort(byPinThenActivity)) }));
 }
+
+/** Puts each subthread right after its parent when the parent is in the list (keeping the list's order otherwise). */
+export function nestSubthreads(items: ThreadView[]): ThreadView[] {
+  const present = new Set(items.map((t) => t.no));
+  const children = new Map<number, ThreadView[]>();
+  for (const t of items) {
+    if (t.parent_no != null && present.has(t.parent_no)) children.set(t.parent_no, [...(children.get(t.parent_no) ?? []), t]);
+  }
+  const out: ThreadView[] = [];
+  for (const t of items) {
+    if (t.parent_no != null && present.has(t.parent_no)) continue;
+    out.push(t, ...(children.get(t.no) ?? []).sort((a, b) => a.no - b.no));
+  }
+  return out;
+}
+
+/** How a row sits in its group: a subthread under its parent (nested), one whose parent is elsewhere (shows "#n 的子讨论串"), or a parent with n subthreads right under it. */
+export interface RowNest {
+  nested: boolean;
+  parentElsewhere: number | null;
+  children: number;
+}
+
+export function rowNest(t: ThreadView, items: ThreadView[]): RowNest {
+  const parentHere = t.parent_no != null && items.some((x) => x.no === t.parent_no);
+  return {
+    nested: parentHere,
+    parentElsewhere: t.parent_no != null && !parentHere ? t.parent_no : null,
+    children: items.filter((x) => x.parent_no === t.no).length,
+  };
+}
+
+/** A thread's subthreads in number order. */
+export const subthreadsOf = (threads: ThreadView[], no: number): ThreadView[] =>
+  threads.filter((t) => t.parent_no === no).sort((a, b) => a.no - b.no);
 
 const firstLine = (s: string) => s.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
 

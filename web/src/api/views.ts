@@ -162,6 +162,8 @@ export interface ThreadView {
   summary: string;
   auto_approve: boolean;
   opened_by: string;
+  /** The parent thread of a subthread (opened by its lead with open_subthread); null or absent: top level. */
+  parent_no?: number | null;
   members: EmployeeBrief[];
   main_tasks: MainTaskView[];
   counts: ThreadCounts;
@@ -294,15 +296,31 @@ export interface QuestionView {
   answered_at: string | null;
 }
 
+/** meta.relay: the other side is the coordinator (no number) or thread #no. */
+export interface RelayMeta {
+  dir: "in" | "out";
+  kind: "message" | "report" | "opened";
+  peer: "coordinator" | "thread";
+  no?: number;
+  title?: string;
+  /** report: the subthread's new status. */
+  status?: string;
+  /** opened, in the project chat: the new subthread. */
+  sub_no?: number;
+  sub_title?: string;
+}
+
 export interface MessageView {
   id: string;
   role: "user" | "leader" | "employee" | "system" | "error";
   author: string;
-  /** chat / note / interrupt, or a chat card: todos, plan, artifact, resumed, image (screenshots an employee uploaded). */
-  kind: "chat" | "note" | "interrupt" | "todos" | "plan" | "artifact" | "resumed" | "image";
+  /** chat / note / interrupt, or a chat card: todos, plan, artifact, resumed, image (screenshots an employee uploaded), relay (a message between threads or with the coordinator). */
+  kind: "chat" | "note" | "interrupt" | "todos" | "plan" | "artifact" | "resumed" | "image" | "relay";
   content: string;
   meta: {
     thread_no?: number;
+    /** A relay card: a message sent to (out) or received from (in) another thread or the coordinator, a subthread report, or an opened subthread. */
+    relay?: RelayMeta;
     task_id?: string;
     opens_thread?: number;
     request_kind?: string;

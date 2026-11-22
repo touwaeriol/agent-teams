@@ -100,7 +100,8 @@ type ThreadView struct {
 	MergePolicy   string           `json:"merge_policy" enum:"pr,auto,manual" doc:"The project's: how the thread ends once its PRs are open (architecture.md §8.4)"`
 	Summary       string           `json:"summary"`
 	AutoApprove   bool             `json:"auto_approve"`
-	OpenedBy      string           `json:"opened_by"`
+	OpenedBy      string           `json:"opened_by" doc:"coordinator | user | lead (a subthread opened with open_subthread)"`
+	ParentNo      *int             `json:"parent_no" doc:"The parent thread of a subthread (null: top level)"`
 	Members       []EmployeeBrief  `json:"members"`
 	MainTasks     []MainTaskView   `json:"main_tasks"`
 	Counts        ThreadCounts     `json:"counts"`

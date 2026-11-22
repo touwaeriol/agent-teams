@@ -2,10 +2,12 @@
 // The right panel's list: collapsible status chips (等你处理 / 进行中 / 已暂停 / 已完成 / 已归档)
 // with counts; folding is the caller's (remembered per user). Rows have a ⋯ menu. 等你处理 and
 // 进行中 rows are rich (progress line, node, tags); 已暂停 / 已完成 / 已归档 are compact single lines.
+// Subthreads sit indented under their parent when it is in the same group (the parent's
+// "n 个子讨论串" toggle folds them); elsewhere they carry "#n 的子讨论串".
 import { ChevronDown } from "lucide-vue-next";
 import { computed, onBeforeUnmount, ref } from "vue";
 import type { QuestionView, ThreadView } from "@/api/views";
-import { filterThreads, groupThreads, isCompactGroup, NO_FILTER, rowLine, rowMark, type Folded, type ListFilter, type ListGroupId } from "@/lib/threadList";
+import { filterThreads, groupThreads, isCompactGroup, NO_FILTER, rowLine, rowMark, rowNest, type Folded, type ListFilter, type ListGroupId } from "@/lib/threadList";
 import ThreadRow from "./ThreadRow.vue";
 
 const props = withDefaults(
@@ -17,6 +19,13 @@ const shown = computed(() => filterThreads(props.threads, props.filter, props.wa
 const groups = computed(() => groupThreads(shown.value, props.waitingByThread));
 /** While searching every group is open, so matches are not hidden. */
 const isFolded = (id: ListGroupId) => !props.filter.q.trim() && Boolean(props.folded[id]);
+/** Parents whose subthreads are folded (this page view only). */
+const foldedSubs = ref(new Set<number>());
+function toggleSubs(no: number) {
+  const next = new Set(foldedSubs.value);
+  if (!next.delete(no)) next.add(no);
+  foldedSubs.value = next;
+}
 const now = ref(Date.now());
 const tick = setInterval(() => (now.value = Date.now()), 60_000);
 onBeforeUnmount(() => clearInterval(tick));
@@ -37,17 +46,21 @@ onBeforeUnmount(() => clearInterval(tick));
         <ChevronDown class="size-3.5 transition-transform" :class="isFolded(g.id) && '-rotate-90'" :stroke-width="1.8" />
       </button>
       <template v-if="!isFolded(g.id)">
-        <ThreadRow
-          v-for="t in g.items"
-          :key="t.id"
-          :thread="t"
-          :mark="rowMark(t, g.id, waitingByThread)"
-          :line="rowLine(t, waitingByThread?.get(t.no))"
-          :now="now"
-          :menu="menus"
-          :compact="isCompactGroup(g.id)"
-          @open="(no) => emit('open', no)"
-        />
+        <template v-for="t in g.items" :key="t.id">
+          <ThreadRow
+            v-if="!(t.parent_no != null && rowNest(t, g.items).nested && foldedSubs.has(t.parent_no))"
+            :thread="t"
+            :mark="rowMark(t, g.id, waitingByThread)"
+            :line="rowLine(t, waitingByThread?.get(t.no))"
+            :now="now"
+            :menu="menus"
+            :compact="isCompactGroup(g.id)"
+            :nest="rowNest(t, g.items)"
+            :subs-folded="foldedSubs.has(t.no)"
+            @open="(no) => emit('open', no)"
+            @toggle-subs="toggleSubs(t.no)"
+          />
+        </template>
       </template>
     </section>
   </div>

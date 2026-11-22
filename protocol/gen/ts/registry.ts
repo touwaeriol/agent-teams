@@ -129,6 +129,7 @@ export interface ToolInputs {
   broadcast: T.BroadcastInput;
   cancel_task: T.CancelTaskInput;
   close_question: T.CloseQuestionInput;
+  close_subthread: T.CloseSubthreadInput;
   complete_task: T.CompleteTaskInput;
   delete_shared_file: T.DeleteSharedFileInput;
   enqueue_merge: T.EnqueueMergeInput;
@@ -144,8 +145,10 @@ export interface ToolInputs {
   memory_list: T.MemoryListInput;
   memory_read: T.MemoryReadInput;
   memory_write: T.MemoryWriteInput;
+  message_coordinator: T.MessageCoordinatorInput;
   message_thread: T.MessageThreadInput;
   open_pr: T.OpenPrInput;
+  open_subthread: T.OpenSubthreadInput;
   open_thread: T.OpenThreadInput;
   publish_deliverable: T.PublishDeliverableInput;
   publish_file: T.PublishFileInput;
@@ -180,6 +183,7 @@ export interface ToolResults {
   broadcast: unknown;
   cancel_task: unknown;
   close_question: unknown;
+  close_subthread: unknown;
   complete_task: T.CompleteTaskResult;
   delete_shared_file: T.DeleteSharedFileResult;
   enqueue_merge: T.EnqueueMergeResult;
@@ -195,8 +199,10 @@ export interface ToolResults {
   memory_list: T.MemoryListResult;
   memory_read: T.MemoryReadResult;
   memory_write: T.MemoryWriteResult;
+  message_coordinator: unknown;
   message_thread: unknown;
   open_pr: T.OpenPrResult;
+  open_subthread: T.OpenSubthreadResult;
   open_thread: T.OpenThreadResult;
   publish_deliverable: T.PublishDeliverableResult;
   publish_file: T.PublishFileResult;
@@ -282,6 +288,13 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     description: "Close one of your open question cards for the user (ask_user / AskUserQuestion) because the user already answered it in the chat instead of on the card. Use it only when the user's message really answers the question; otherwise leave the card open and wait.",
     input_schema: {"description":"Close one of your open question cards for the user (ask_user / AskUserQuestion) because the user already answered it in the chat instead of on the card. Use it only when the user's message really answers the question; otherwise leave the card open and wait.","type":"object","required":["question_id"],"additionalProperties":false,"properties":{"question_id":{"type":"string","pattern":"^q[0-9]+$"},"answer":{"type":"string","maxLength":2000,"description":"The user's answer as you understood it from the chat (shown on the closed card)."}}},
   },
+  close_subthread: {
+    tiers: ["lead"],
+    blocking: [],
+    requires: null,
+    description: "End one of your subthreads as done (its sessions close; the reason is kept as its summary). Refused while its PR waits for the user's review or is being merged.",
+    input_schema: {"description":"End one of your subthreads as done (its sessions close; the reason is kept as its summary). Refused while its PR waits for the user's review or is being merged.","type":"object","required":["no"],"additionalProperties":false,"properties":{"no":{"description":"Thread number inside the project (#12).","type":"integer","minimum":1},"reason":{"description":"Why it is closed (no longer needed, result received...).","type":"string","maxLength":2000}}},
+  },
   complete_task: {
     tiers: ["member"],
     blocking: [],
@@ -353,11 +366,11 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     input_schema: {"description":"List the thread team: name, role, type, node and current task of each member.","type":"object","additionalProperties":false,"properties":{}},
   },
   list_threads: {
-    tiers: ["coordinator"],
+    tiers: ["coordinator","lead"],
     blocking: [],
     requires: null,
-    description: "List threads, one line each: number, title, status, main-task progress and how many items wait for the user.",
-    input_schema: {"description":"List threads, one line each: number, title, status, main-task progress and how many items wait for the user.","type":"object","additionalProperties":false,"properties":{"status":{"type":"string","enum":["queued","running","waiting","review","done","failed","paused","archived"]}}},
+    description: "List the project's threads, one line each: number, title, status, main-task progress, how many items wait for the user and the parent thread of a subthread.",
+    input_schema: {"description":"List the project's threads, one line each: number, title, status, main-task progress, how many items wait for the user and the parent thread of a subthread.","type":"object","additionalProperties":false,"properties":{"status":{"type":"string","enum":["queued","running","waiting","review","done","failed","paused","archived"]}}},
   },
   memory_delete: {
     tiers: ["coordinator","lead"],
@@ -387,12 +400,19 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     description: "Create or replace a project memory file. A topic file (e.g. testing.md) needs a one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md rewrites the index itself.",
     input_schema: {"description":"Create or replace a project memory file. A topic file (e.g. testing.md) needs a one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md rewrites the index itself.","type":"object","required":["name","content"],"additionalProperties":false,"properties":{"name":{"type":"string","minLength":1,"maxLength":100},"description":{"type":"string","maxLength":300},"content":{"type":"string","maxLength":32000}}},
   },
-  message_thread: {
-    tiers: ["coordinator"],
+  message_coordinator: {
+    tiers: ["lead"],
     blocking: [],
     requires: null,
-    description: "Send a message to a thread's lead as the project coordinator.",
-    input_schema: {"description":"Send a message to a thread's lead as the project coordinator.","type":"object","required":["no","text"],"additionalProperties":false,"properties":{"no":{"description":"Thread number inside the project (#12).","type":"integer","minimum":1},"text":{"type":"string","minLength":1}}},
+    description: "Send a message to the project coordinator (e.g. something another thread or the user's other work should know, or a question about scope). Status changes of your thread already reach it automatically: do not send those, and do not reply just to acknowledge. At most 20 messages an hour.",
+    input_schema: {"description":"Send a message to the project coordinator (e.g. something another thread or the user's other work should know, or a question about scope). Status changes of your thread already reach it automatically: do not send those, and do not reply just to acknowledge. At most 20 messages an hour.","type":"object","required":["text"],"additionalProperties":false,"properties":{"text":{"type":"string","minLength":1,"maxLength":8000}}},
+  },
+  message_thread: {
+    tiers: ["coordinator","lead"],
+    blocking: [],
+    requires: null,
+    description: "Send a message to another thread's lead. As the coordinator: a finished thread is reopened, an archived one refuses. As a lead: any thread of the project except your own; a finished thread is reopened only when it is your subthread; the reply comes back as \"[Message from thread #n ...]\". Write only what the other lead needs; do not reply just to acknowledge. At most 20 messages an hour between two threads.",
+    input_schema: {"description":"Send a message to another thread's lead. As the coordinator: a finished thread is reopened, an archived one refuses. As a lead: any thread of the project except your own; a finished thread is reopened only when it is your subthread; the reply comes back as \"[Message from thread #n ...]\". Write only what the other lead needs; do not reply just to acknowledge. At most 20 messages an hour between two threads.","type":"object","required":["no","text"],"additionalProperties":false,"properties":{"no":{"description":"Thread number inside the project (#12).","type":"integer","minimum":1},"text":{"type":"string","minLength":1}}},
   },
   open_pr: {
     tiers: ["lead"],
@@ -400,6 +420,13 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     requires: null,
     description: "Open one pull request per repository the thread changed (thread branch to that repository's base branch); the thread moves to review. Only for code changes: a thread that changed nothing ends with finish alone.",
     input_schema: {"description":"Open one pull request per repository the thread changed (thread branch to that repository's base branch); the thread moves to review. Only for code changes: a thread that changed nothing ends with finish alone.","type":"object","required":["title","body"],"additionalProperties":false,"properties":{"title":{"type":"string","minLength":1,"maxLength":256},"body":{"type":"string"},"repo":{"description":"Open only this repository's pull request (default: every changed repository without one).","type":"string","minLength":1,"maxLength":300},"base":{"description":"PR base branch for repo (or for the only repository to open); default the thread's base there.","type":"string","minLength":1,"maxLength":255}}},
+  },
+  open_subthread: {
+    tiers: ["lead"],
+    blocking: [],
+    requires: null,
+    description: "Open a subthread of your thread for a separate piece of work or discussion: it gets its own number, lead, branch and members; the brief becomes its lead's first message. You do not wait for it: keep working; when it needs the user, goes to review, ends or fails you receive \"[Subthread #n · title · status] ...\". A subthread cannot open subthreads of its own, and a thread has at most 5 unfinished subthreads. To build on your own changes, give repos [{repo, base: <your thread branch>}] (push your work first): its PR then targets your branch. Your thread cannot finish while a subthread is unfinished (close_subthread ends one).",
+    input_schema: {"description":"Open a subthread of your thread for a separate piece of work or discussion: it gets its own number, lead, branch and members; the brief becomes its lead's first message. You do not wait for it: keep working; when it needs the user, goes to review, ends or fails you receive \"[Subthread #n · title · status] ...\". A subthread cannot open subthreads of its own, and a thread has at most 5 unfinished subthreads. To build on your own changes, give repos [{repo, base: <your thread branch>}] (push your work first): its PR then targets your branch. Your thread cannot finish while a subthread is unfinished (close_subthread ends one).","type":"object","required":["title","brief"],"additionalProperties":false,"properties":{"title":{"type":"string","minLength":1,"maxLength":200},"brief":{"description":"Instructions for the subthread's lead: the goal, what to report back and when it is done.","type":"string","minLength":1},"roles":{"description":"Member roles the subthread's lead may assign to; default = all member roles of the team.","type":"array","items":{"type":"string"}},"repos":{"description":"Repositories the subthread should work in, with an optional base branch each (e.g. your thread branch).","type":"array","maxItems":20,"items":{"type":"object","required":["repo"],"additionalProperties":false,"properties":{"repo":{"description":"Repository of the project (owner/name).","type":"string","minLength":1,"maxLength":300},"base":{"description":"Base branch for this repository; default its default branch.","type":"string","minLength":1,"maxLength":255}}}}}},
   },
   open_thread: {
     tiers: ["coordinator"],
@@ -535,7 +562,7 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     input_schema: {"description":"Post a short message to the user in the thread conversation right away (shown as the lead's own message), without ending the turn. Use it for the receipt after the brief and for updates the user should see; it is not a question (use ask_user to ask).","type":"object","required":["text"],"additionalProperties":false,"properties":{"text":{"type":"string","minLength":1,"maxLength":2000}}},
   },
   thread_status: {
-    tiers: ["coordinator"],
+    tiers: ["coordinator","lead"],
     blocking: [],
     requires: null,
     description: "Show one thread: plan, recent activity, the lead's latest reply and the PR.",

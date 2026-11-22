@@ -3729,6 +3729,25 @@
         }
       }
     },
+    "CloseSubthreadInput": {
+      "title": "CloseSubthreadInput",
+      "description": "End one of your subthreads as done (its sessions close; the reason is kept as its summary). Refused while its PR waits for the user's review or is being merged.",
+      "type": "object",
+      "required": [
+        "no"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "no": {
+          "$ref": "#/$defs/ThreadNo"
+        },
+        "reason": {
+          "description": "Why it is closed (no longer needed, result received...).",
+          "type": "string",
+          "maxLength": 2000
+        }
+      }
+    },
     "TaskId": {
       "title": "TaskId",
       "type": "string",
@@ -4637,12 +4656,16 @@
         "waiting": {
           "type": "integer",
           "minimum": 0
+        },
+        "parent_no": {
+          "description": "The parent thread of a subthread.",
+          "$ref": "#/$defs/ThreadNo"
         }
       }
     },
     "ListThreadsInput": {
       "title": "ListThreadsInput",
-      "description": "List threads, one line each: number, title, status, main-task progress and how many items wait for the user.",
+      "description": "List the project's threads, one line each: number, title, status, main-task progress, how many items wait for the user and the parent thread of a subthread.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -4803,9 +4826,25 @@
         }
       }
     },
+    "MessageCoordinatorInput": {
+      "title": "MessageCoordinatorInput",
+      "description": "Send a message to the project coordinator (e.g. something another thread or the user's other work should know, or a question about scope). Status changes of your thread already reach it automatically: do not send those, and do not reply just to acknowledge. At most 20 messages an hour.",
+      "type": "object",
+      "required": [
+        "text"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000
+        }
+      }
+    },
     "MessageThreadInput": {
       "title": "MessageThreadInput",
-      "description": "Send a message to a thread's lead as the project coordinator.",
+      "description": "Send a message to another thread's lead. As the coordinator: a finished thread is reopened, an archived one refuses. As a lead: any thread of the project except your own; a finished thread is reopened only when it is your subthread; the reply comes back as \"[Message from thread #n ...]\". Write only what the other lead needs; do not reply just to acknowledge. At most 20 messages an hour between two threads.",
       "type": "object",
       "required": [
         "no",
@@ -4902,6 +4941,63 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 255
+        }
+      }
+    },
+    "OpenSubthreadResult": {
+      "title": "OpenSubthreadResult",
+      "type": "object",
+      "required": [
+        "no",
+        "thread_id",
+        "branch"
+      ],
+      "properties": {
+        "no": {
+          "$ref": "#/$defs/ThreadNo"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        }
+      }
+    },
+    "OpenSubthreadInput": {
+      "title": "OpenSubthreadInput",
+      "description": "Open a subthread of your thread for a separate piece of work or discussion: it gets its own number, lead, branch and members; the brief becomes its lead's first message. You do not wait for it: keep working; when it needs the user, goes to review, ends or fails you receive \"[Subthread #n · title · status] ...\". A subthread cannot open subthreads of its own, and a thread has at most 5 unfinished subthreads. To build on your own changes, give repos [{repo, base: <your thread branch>}] (push your work first): its PR then targets your branch. Your thread cannot finish while a subthread is unfinished (close_subthread ends one).",
+      "type": "object",
+      "required": [
+        "title",
+        "brief"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "brief": {
+          "description": "Instructions for the subthread's lead: the goal, what to report back and when it is done.",
+          "type": "string",
+          "minLength": 1
+        },
+        "roles": {
+          "description": "Member roles the subthread's lead may assign to; default = all member roles of the team.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "repos": {
+          "description": "Repositories the subthread should work in, with an optional base branch each (e.g. your thread branch).",
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/RepoFocus"
+          }
         }
       }
     },
@@ -5704,6 +5800,17 @@
             "string",
             "null"
           ]
+        },
+        "parent_no": {
+          "description": "The parent thread of a subthread.",
+          "$ref": "#/$defs/ThreadNo"
+        },
+        "subthreads": {
+          "description": "The thread's subthreads.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ThreadSummary"
+          }
         }
       }
     },

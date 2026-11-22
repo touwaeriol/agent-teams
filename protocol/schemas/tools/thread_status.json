@@ -5,7 +5,8 @@
   "description": "Show one thread: plan, recent activity, the lead's latest reply and the PR.",
   "x-tool": {
     "tiers": [
-      "coordinator"
+      "coordinator",
+      "lead"
     ],
     "blocking": []
   },
@@ -62,6 +63,17 @@
             "string",
             "null"
           ]
+        },
+        "parent_no": {
+          "description": "The parent thread of a subthread.",
+          "$ref": "common.json#/$defs/ThreadNo"
+        },
+        "subthreads": {
+          "description": "The thread's subthreads.",
+          "type": "array",
+          "items": {
+            "$ref": "list_threads.json#/$defs/ThreadSummary"
+          }
         }
       }
     }

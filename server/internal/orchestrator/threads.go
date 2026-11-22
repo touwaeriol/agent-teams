@@ -34,10 +34,12 @@ type ThreadRequest struct {
 	Roles     []RoleCount // REST: member roles the thread uses (counts ignored; nil = all)
 	OnlyRoles []string    // open_thread(roles): member roles the lead may assign to (nil = all)
 	Repos     []RepoFocus // open_thread(repos): repositories to work in, with optional explicit bases
-	OpenedBy  string      // coordinator | user
+	OpenedBy  string      // coordinator | user | lead (open_subthread)
 	// SourceMessageID is the user's project-chat message the thread is opened for (nil: none).
 	SourceMessageID *int64
 	ForwardedBrief  bool // the brief is the user's forwarded messages
+	// ParentID makes the thread a subthread of that thread (open_subthread; nil: top level).
+	ParentID *string
 }
 
 // OpenThread creates a thread (queued), its employees, then starts queued threads within the limit.
@@ -68,7 +70,7 @@ func (o *Orchestrator) OpenThreadTx(ctx context.Context, tx *core.Tx, req Thread
 	}
 	t, err := core.CreateThread(ctx, tx, core.NewThread{ProjectID: p.ID, UserID: p.UserID, Title: req.Title,
 		Brief: req.Brief, AutoApprove: p.AutoApprove, OpenedBy: req.OpenedBy, Roles: roles, OnlyRoles: onlyRoles(req),
-		SourceMessageID: req.SourceMessageID, ForwardedBrief: req.ForwardedBrief})
+		SourceMessageID: req.SourceMessageID, ForwardedBrief: req.ForwardedBrief, ParentID: req.ParentID})
 	if err != nil {
 		return t, err
 	}
@@ -490,23 +492,52 @@ func (o *Orchestrator) ProjectDeleting(ctx context.Context, tx *core.Tx, project
 	return o.closeProjectSessions(ctx, tx, projectID, "employee_removed")
 }
 
-// notifyCoordinator posts "[Thread #12 · title · review] <lead's latest>" to the coordinator.
+// notifyCoordinator posts "[Thread #12 · title · review] <lead's latest>" to the coordinator; a
+// subthread's report goes to its parent's lead instead while the parent has not ended.
 func (o *Orchestrator) notifyCoordinator(ctx context.Context, tx *core.Tx, t core.Thread, next, line string) error {
-	coord, conv, err := o.ensureCoordinatorTx(ctx, tx, t.UserID, t.ProjectID)
-	if err != nil {
-		return err
-	}
 	if line == "" && next == "done" {
 		line = summaryLine(ctx, tx, t.ID)
 	}
 	if line == "" {
 		line = o.leadLine(ctx, tx, t.ID)
 	}
+	if sent, err := o.notifyParent(ctx, tx, t, next, line); err != nil || sent {
+		return err
+	}
+	coord, conv, err := o.ensureCoordinatorTx(ctx, tx, t.UserID, t.ProjectID)
+	if err != nil {
+		return err
+	}
 	text := fmt.Sprintf("[Thread #%d · %s · %s] %s", t.No, t.Title, next, line)
 	rec := &core.NewMessage{ConversationID: conv, Role: "system", Author: "platform", Kind: "note", Content: text,
 		Meta: map[string]any{"thread_no": t.No}}
 	_, err = o.Deliver(ctx, tx, coord, Delivery{Text: text, Kind: "system", Priority: "later", Record: rec})
 	return err
+}
+
+// notifyParent posts "[Subthread #13 · title · done] <line>" to the parent thread's lead (in the
+// parent's conversation too); sent=false for a top-level thread or a parent that has ended.
+func (o *Orchestrator) notifyParent(ctx context.Context, tx *core.Tx, t core.Thread, next, line string) (bool, error) {
+	if t.ParentID == nil {
+		return false, nil
+	}
+	parent, err := core.ThreadByID(ctx, tx, *t.ParentID)
+	if errors.Is(err, core.ErrNotFound) || (err == nil && core.ThreadEnded(parent.Status)) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	lead, err := core.Lead(ctx, tx, parent.ID)
+	if err != nil {
+		return false, err
+	}
+	text := fmt.Sprintf("[Subthread #%d · %s · %s] %s", t.No, t.Title, next, line)
+	relay := map[string]any{"dir": "in", "kind": "report", "peer": "thread", "no": t.No, "title": t.Title, "status": next}
+	rec := &core.NewMessage{ConversationID: parent.ID, Role: "system", Author: "platform", Kind: "relay", Content: line,
+		Meta: map[string]any{"relay": relay}}
+	_, err = o.Deliver(ctx, tx, lead, Delivery{Text: text, Kind: "system", Priority: "later", Record: rec})
+	return err == nil, err
 }
 
 // summaryLine is the first line of the thread's summary (finish), "" when it has none.
@@ -588,6 +619,11 @@ func systemPost(meta map[string]any) map[string]any {
 		marked[k] = v
 	}
 	return marked
+}
+
+// EnsureCoordinatorTx is ensureCoordinatorTx for the other engines.
+func (o *Orchestrator) EnsureCoordinatorTx(ctx context.Context, tx *core.Tx, userID, projectID string) (core.Employee, string, error) {
+	return o.ensureCoordinatorTx(ctx, tx, userID, projectID)
 }
 
 func (o *Orchestrator) ensureCoordinatorTx(ctx context.Context, tx *core.Tx, userID, projectID string) (core.Employee, string, error) {

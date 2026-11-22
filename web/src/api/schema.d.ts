@@ -4295,7 +4295,13 @@ export interface components {
             messages?: components["schemas"]["MessageView"][] | null;
             /** Format: int64 */
             no: number;
+            /** @description coordinator | user | lead (a subthread opened with open_subthread) */
             opened_by: string;
+            /**
+             * Format: int64
+             * @description The parent thread of a subthread (null: top level)
+             */
+            parent_no: number | null;
             pause_reason: string;
             /**
              * Format: date-time
@@ -4400,7 +4406,13 @@ export interface components {
             merge_policy: "pr" | "auto" | "manual";
             /** Format: int64 */
             no: number;
+            /** @description coordinator | user | lead (a subthread opened with open_subthread) */
             opened_by: string;
+            /**
+             * Format: int64
+             * @description The parent thread of a subthread (null: top level)
+             */
+            parent_no: number | null;
             pause_reason: string;
             /**
              * Format: date-time
