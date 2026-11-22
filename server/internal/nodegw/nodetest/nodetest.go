@@ -60,7 +60,8 @@ type Options struct {
 	SkipWelcome bool     // return right after hello (rejection tests)
 	Features    []string // hello.features (nil = sessions, git_worktree, cred_helper, file_download)
 	Protocols   []int
-	Build       string // hello.daemon.build ("" = none)
+	Build       string             // hello.daemon.build ("" = none)
+	Runtimes    *protocol.Runtimes // hello.runtimes (nil = none reported)
 }
 
 // Dial connects to ws(s)://…/nodes/connect with the token and completes the handshake.
@@ -107,6 +108,9 @@ func (n *Node) hello(ctx context.Context, o Options) error {
 	}
 	if o.Build != "" {
 		body.Daemon.Build = &o.Build
+	}
+	if o.Runtimes != nil {
+		body.Runtimes = o.Runtimes
 	}
 	env, err := protocol.NewEnvelope(protocol.TypeHello, "n_"+ulid.Make().String(), 0, body)
 	if err != nil {

@@ -12,6 +12,7 @@ type Facts struct {
 	Broken      bool
 	RaisedHand  bool
 	Queued      bool
+	Held        string // why the employee's session waits for a node (no candidate has its runtime ready)
 	Claiming    bool
 	ToolCat     string // edit | read | web | shell | platform | other | "" (no tool running)
 	ToolSub     string // shell: test | git_commit | git_push | ci | install
@@ -24,7 +25,12 @@ type Facts struct {
 type Decision struct {
 	State    string
 	Substate string
+	Note     string // the bubble of a held session: why it waits
 }
+
+// SubstateNoRuntime is the queued substate of an employee whose session waits because no
+// candidate node has its runtime (CLI) installed and logged in; the bubble says why.
+const SubstateNoRuntime = "no_runtime"
 
 // Decide applies the priority table: the first condition that holds wins.
 func Decide(f Facts) Decision {
@@ -35,6 +41,8 @@ func Decide(f Facts) Decision {
 		return Decision{State: "broken"}
 	case f.RaisedHand:
 		return Decision{State: "raising_hand"}
+	case f.Held != "":
+		return Decision{State: "queued", Substate: SubstateNoRuntime, Note: f.Held}
 	case f.Queued:
 		return Decision{State: "queued"}
 	case f.Claiming:
@@ -89,6 +97,9 @@ func defaultBubble(d Decision, summary, taskID string) (string, string) {
 	case "broken":
 		return "出错了", "error"
 	case "queued":
+		if d.Substate == SubstateNoRuntime {
+			return d.Note, "ask"
+		}
 		return "排队等工位", "plain"
 	case "claiming":
 		return "领取 " + taskID, "plain"

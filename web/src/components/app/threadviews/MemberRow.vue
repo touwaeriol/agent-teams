@@ -4,7 +4,7 @@ import { computed } from "vue";
 import { threads as threadActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import type { EmployeeBrief, ThreadView } from "@/api/views";
-import { askingLabel, elapsed, workingHere } from "@/lib/live";
+import { askingLabel, elapsed, queueReason, workingHere } from "@/lib/live";
 import { busyElsewhereText, memberTone, RUNTIME_LABEL, TIER_LABEL } from "@/lib/present";
 import LiveDot from "../LiveDot.vue";
 import { memberStatusLine } from "./members";
@@ -17,6 +17,8 @@ const where = computed(() => {
   const n = props.member.node;
   return `${RUNTIME_LABEL[props.member.runtime] ?? props.member.runtime} · ${n ? `${n.name}${n.online ? "" : "（离线）"}` : "未分配节点"}`;
 });
+// Queued for want of a node with its CLI logged in (no_runtime): say why, e.g. 没有已登录 Antigravity 的在线节点.
+const reason = computed(() => (elsewhere.value ? "" : queueReason(props.member)));
 const status = computed(() =>
   elsewhere.value || memberStatusLine(askingLabel(props.member, props.asking), props.member.status, (since) => elapsed(since, props.now)),
 );
@@ -41,5 +43,6 @@ const status = computed(() =>
     </span>
     <span class="text-xs text-muted-foreground">{{ where }}</span>
     <span class="text-xs text-[#4A4843]">{{ status }}</span>
+    <span v-if="reason" class="text-xs text-[hsl(var(--warn))]" data-queue-reason>{{ reason }}</span>
   </div>
 </template>

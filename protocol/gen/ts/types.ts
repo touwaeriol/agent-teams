@@ -93,7 +93,14 @@ export type Repo = string;
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "Runtime".
  */
-export type Runtime = "claude" | "codex";
+export type Runtime = "claude" | "codex" | "antigravity";
+/**
+ * Runtime id as an open lower-case string (the values of Runtime plus any runtime a newer daemon knows); used as map key and in lists where a new runtime should need no protocol change.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "RuntimeID".
+ */
+export type RuntimeID = string;
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "Tier".
@@ -273,7 +280,8 @@ export interface ApprovalRequest {
     | "codex_command"
     | "codex_file_change"
     | "codex_permissions"
-    | "codex_mcp_elicitation";
+    | "codex_mcp_elicitation"
+    | "antigravity_permission";
   tool_name: string;
   tool_use_id?: string;
   input: {
@@ -687,6 +695,7 @@ export interface Capacity {
 export interface Runtimes {
   claude?: ClaudeRuntime;
   codex?: CodexRuntime;
+  antigravity?: AntigravityRuntime;
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -705,6 +714,26 @@ export interface CodexRuntime {
   cli?: string;
   auth?: "api_key" | "chatgpt" | "none";
   sandbox_ok?: boolean;
+}
+/**
+ * Google Antigravity CLI (agy, driven over ACP). Reported even when agy is not installed (installed false, auth none) so the node page can say so; the console schedules antigravity sessions only on nodes that report it installed and logged in.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "AntigravityRuntime".
+ */
+export interface AntigravityRuntime {
+  /**
+   * agy --version, e.g. 1.5.14; empty when not installed.
+   */
+  cli?: string;
+  /**
+   * oauth: a Google account login (agy acp --login); api_key: GEMINI_API_KEY with modelProvider gemini; adc: AGY_ADC_AUTH application default credentials; none: not logged in.
+   */
+  auth?: "oauth" | "api_key" | "adc" | "none";
+  /**
+   * false when the agy binary was not found; absent means installed.
+   */
+  installed?: boolean;
 }
 /**
  * First frame from the daemon after connecting.
@@ -740,7 +769,7 @@ export interface Hello {
   capacity?: Capacity;
   runtimes?: Runtimes;
   /**
-   * Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh), self_update (runs under the update launcher: node.upgrade with mode, drain, rollback).
+   * Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), runtime_status (node.runtimes, node.runtimes_refresh), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh), self_update (runs under the update launcher: node.upgrade with mode, drain, rollback).
    */
   features?: string[];
   /**
@@ -791,6 +820,78 @@ export interface NodeConfig {
  */
 export interface NodeDrain {
   deadline_s: number;
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "RuntimeStatus".
+ */
+export interface RuntimeStatus {
+  /**
+   * The CLI (or SDK) was found and runs.
+   */
+  installed: boolean;
+  /**
+   * CLI version as reported by the CLI, when known.
+   */
+  version?: string;
+  /**
+   * Absolute path of the executable that was found.
+   */
+  path?: string;
+  /**
+   * How the runtime is logged in: subscription (provider account login, e.g. Claude subscription), chatgpt (Codex ChatGPT login), api_key, none (not logged in), unknown (could not tell, e.g. not installed or the check failed).
+   */
+  auth: "subscription" | "chatgpt" | "api_key" | "none" | "unknown";
+  /**
+   * When the login expires, only when it can be read from file metadata or non-secret fields.
+   */
+  auth_expires_at?: string;
+  /**
+   * The login is known to be expired (the console treats it like auth none for scheduling).
+   */
+  expired?: boolean;
+  /**
+   * When the daemon ran this check.
+   */
+  checked_at: string;
+  /**
+   * Why the check failed or the CLI did not run; never contains credential content.
+   */
+  error?: string;
+}
+/**
+ * Install and login state of every runtime CLI the daemon knows (unreliable). Sent after welcome (reason hello), then only when something changed (periodic check or a watched credential file changed), and always as the answer to node.runtimes_refresh. Always carries the full set of known runtimes, so the console replaces its stored state. Sent only when hello.features contains runtime_status. Never carries credentials: only file metadata and non-secret fields are read.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "NodeRuntimes".
+ */
+export interface NodeRuntimes {
+  /**
+   * Keyed by runtime id (claude, codex, and any runtime added later; same ids as common.json Runtime). Receivers ignore ids they do not know.
+   */
+  runtimes: {
+    [k: string]: RuntimeStatus;
+  };
+  /**
+   * hello: first report after welcome; periodic: the timed check found a change; fs_event: a watched CLI or credential file changed; refresh: answer to node.runtimes_refresh (sent even without changes).
+   */
+  reason: "hello" | "periodic" | "fs_event" | "refresh";
+  /**
+   * Envelope id of the node.runtimes_refresh this answers; only with reason refresh.
+   */
+  in_reply_to?: string;
+}
+/**
+ * Check the runtime CLIs now and answer with node.runtimes (reason refresh, in_reply_to = this envelope id), even when nothing changed (unreliable). Sent only when hello.features contains runtime_status.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "NodeRuntimesRefresh".
+ */
+export interface NodeRuntimesRefresh {
+  /**
+   * Runtime ids to re-check; omitted = all. The answer still carries every known runtime.
+   */
+  runtimes?: RuntimeID[];
 }
 /**
  * Every 30 s, unreliable; drives the server-room rack lights.
@@ -1297,6 +1398,34 @@ export interface CodexSessionOptions {
   };
 }
 /**
+ * agy acp --process-per-session, one process per session. The ACP sessionId is kept as sdk_session_id (session.opened, ResumeRef, sessions.report).
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "AntigravitySessionOptions".
+ */
+export interface AntigravitySessionOptions {
+  /**
+   * Model slug (e.g. gemini-4-neon-high); empty leaves the choice to agy.
+   */
+  model: string;
+  /**
+   * Read-only roles (reviewer…): the daemon disables agy's writing tools (deny rules for file writes and edits) and rejects every writing permission request; commands run only when bash_policy allows them.
+   */
+  read_only: boolean;
+  /**
+   * How ACP session/request_permission is answered when read_only does not already reject it. ask: forwarded to the console as approval.request; auto: the daemon allows it (bypass roles).
+   */
+  approval: "ask" | "auto";
+  /**
+   * Appended to agy's system prompt (session/new _meta.antigravity.systemPrompt.append): platform rules, role instructions and skills inlined.
+   */
+  system_append?: string;
+  /**
+   * read_only: argv allow list for shell commands, as in claude.bash_policy.
+   */
+  bash_policy?: BashPolicy | null;
+}
+/**
  * One platform tool, from /protocol/schemas/tools.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -1458,6 +1587,10 @@ export interface SessionOpen {
    * Set when runtime = codex.
    */
   codex?: CodexSessionOptions | null;
+  /**
+   * Set when runtime = antigravity.
+   */
+  antigravity?: AntigravitySessionOptions | null;
   platform_tools: PlatformToolSpec[];
   /**
    * Extra non-secret environment; the daemon adds PATH/HOME/MCP_TOOL_TIMEOUT/git credential variables itself.
@@ -2832,7 +2965,7 @@ export interface TeamMember {
   name: string;
   role: string;
   title?: string;
-  type?: "claude_code" | "codex";
+  type?: "claude_code" | "codex" | "antigravity";
   node?: string;
   status?: string;
   task_id?: string | null;

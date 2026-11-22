@@ -105,6 +105,7 @@ EmployeeBrief   = {id, name, tier, role, title, runtime, node: {id, name, online
                    instance: number,          // 同岗位里的实例编号（dev-2 → 2）
                    busy_elsewhere: boolean}   // 讨论串成员列表里：这个项目成员当前的任务在别的讨论串（thread_no 是哪个），网页显示“在 #12 忙”；其他地方恒为 false
 EmployeeStatusView = {state, substate, bubble, bubble_kind, task_id, task_kind, tier, role, since, seq}
+                  // state = "queued" 且 substate = "no_runtime"：没有候选节点装好并登录了它的运行时，会话暂存在控制台（data-model.md §2.7），bubble 是原因（如“没有已登录 Codex 的在线节点（在节点上安装并登录后会自动开始）”），bubble_kind = "ask"
 Look            = {color, outfit: string, accessory: string, hair: string|null}
                   // outfit/accessory 是字符串，不是枚举：取值 = 当前全局布局 looks.outfits / looks.accessories 的键
                   // （内置 tee|hoodie|suit|coat、none|glasses|headset|cap 必有），服务端保存时按布局校验，422 带 fields
@@ -113,8 +114,15 @@ DeliverableView = {id, project_id, thread_no, kind: string, title, url, detail, 
 MergeEntryView  = {id, thread_no, task_id, employee, repo, head_branch, status, attempts, error, created_at, updated_at}   // 每个仓库一个条目
 CheckView       = {name, status, conclusion, url, summary}
 NodeView        = {id, name, online, since, last_seen_at, version, protocol, isolation: "agent_user"|"sandbox"|"none", runtimes: {...}, capacity: {...},
-                   active_sessions, parked_sessions, queued, usage: NodeUsage|null, usage_supported, isolated, labels, max_active_sessions, park_after_s, created_at}
+                   active_sessions, parked_sessions, queued, usage: NodeUsage|null, usage_supported, isolated, labels, max_active_sessions, park_after_s, created_at,
+                   runtime_status, clis: NodeCLI[]}
+                  // runtime_status：守护进程支持 CLI 状态上报（hello.features 含 `runtime_status`，离线时看 last_hello），为 true 时 POST /api/nodes/{id}/recheck 可用，且调度只派该节点上已登录的运行时
+                  // clis：最近一次 node.runtimes 上报（at_node_runtimes，按 runtime 排序），旧守护进程为空数组（它发来的 node.runtimes 会被忽略）
                   // usage_supported：守护进程是否支持余量（在线用当前 hello.features，离线用 at_nodes.last_hello.features，里面有 `usage` 为 true，没有记录为 false）；false 时网页不显示“余量获取中…”、也不发悬停刷新，已有的 usage 照常显示
+NodeCLI         = {runtime, installed, version?, path?, auth: "subscription"|"chatgpt"|"api_key"|"none"|"unknown", auth_expires_at?, expired, error?,
+                   checked_at,   // 守护进程检测时间
+                   updated_at,   // 控制台最近一次存到变化的时间
+                   ready}        // 已安装、已登录、未过期：可以往这个节点派该运行时的会话
 NodeUsage       = {claude?: RuntimeUsage, codex?: RuntimeUsage}   // 节点最近一次 node.usage 上报（protocol.md §9），控制台只存内存：重启后为 null 直到下次上报；节点离线后保留最后一次，用 received_at 判断新旧
 RuntimeUsage    = {auth: "subscription"|"chatgpt"|"api_key"|"none", status: "ok"|"error"|"unsupported", plan?, error?,
                    windows: [{key: "five_hour"|"weekly"|"weekly_opus"|"weekly_sonnet"|"weekly_model"|"primary"|"secondary"|…, label?, used_percent: 0..100, window_minutes?, resets_at: ISO|null}],  // 最多 8 个
@@ -267,7 +275,7 @@ PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平�
 
 每次到点记一行 `at_schedule_runs`（重试中的失败不记，只写 `last_error`）。重叠合并：上一次发出的消息（`message_id`）3 天内还没送达目标（`delivered_at` 为空，例如会话离线），这次记 `skipped`（“上一次的消息还没送到，这次合并跳过”）并照常推进，目标回来只收到一条。agent 设置或取消定时任务时，平台在它所在的对话里写一条 `meta = {schedule_note, schedule_id, schedule_undo}` 的系统行（讨论串对话也显示）；设置的那条在任务还待触发时带“撤销”按钮（删除这个定时任务）。讨论串面板在输入框上方列出这个讨论串待触发的唤醒，可以取消。
 
-调度跑在 River 上（riverqueue/river，表来自 00360，`riverdatabasesql` 驱动、poll 模式）：每个进行中、启用的定时任务恰有一个 `schedule_fire{schedule_id, run_at}` 作业（`ScheduledAt = run_at`，按参数唯一），和设置 `next_run_at` 的写入在同一事务里插入。作业锁住这一行，只有 `next_run_at` 仍等于作业的 `run_at` 时才触发（编辑后留下的旧作业、提交后的重试、别的副本都什么也不做），投递、推进 `next_run_at`（从现在和原定时间较晚者算起，停机错过的多次只补一次）、插入下一次作业都在同一事务。投递失败由 River 退避重试（共 5 次），期间写 `last_error`，最后一次仍失败就照常推进。一次性任务晚了 24 小时以上（控制台停机）标为 `missed` 不再投递。周期作业 `schedule_reconcile` 每 5 分钟（启动时先跑一次）给缺作业的定时任务补上作业，并删掉结束超过 7 天的行。agent 用 `schedule_*` 工具管理定时任务，见 `architecture.md` §6.3。
+调度跑在 River 上（riverqueue/river，表来自 00380，`riverdatabasesql` 驱动、poll 模式）：每个进行中、启用的定时任务恰有一个 `schedule_fire{schedule_id, run_at}` 作业（`ScheduledAt = run_at`，按参数唯一），和设置 `next_run_at` 的写入在同一事务里插入。作业锁住这一行，只有 `next_run_at` 仍等于作业的 `run_at` 时才触发（编辑后留下的旧作业、提交后的重试、别的副本都什么也不做），投递、推进 `next_run_at`（从现在和原定时间较晚者算起，停机错过的多次只补一次）、插入下一次作业都在同一事务。投递失败由 River 退避重试（共 5 次），期间写 `last_error`，最后一次仍失败就照常推进。一次性任务晚了 24 小时以上（控制台停机）标为 `missed` 不再投递。周期作业 `schedule_reconcile` 每 5 分钟（启动时先跑一次）给缺作业的定时任务补上作业，并删掉结束超过 7 天的行。agent 用 `schedule_*` 工具管理定时任务，见 `architecture.md` §6.3。
 | GET | `/api/projects/{pid}/memory` | → `MemoryBrief[]`（`{name, description, size, updated_by, updated_at}`，MEMORY.md 在前，不含内容） |
 | GET | `/api/projects/{pid}/memory/{name}` | → `MemoryFile`（`{name, description, content, updated_by, created_at, updated_at}`）；没有 404 |
 | PUT | `/api/projects/{pid}/memory/{name}` | `{description?, content}` → `MemoryFile`（新建或替换，`updated_by = user`；名字不带 `.md` 会补上；主题文件必须有描述，平台同步 MEMORY.md 的索引行；名字不合法、太长、超过 200 个文件 422） |
@@ -307,6 +315,7 @@ PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平�
 | POST | `/api/nodes/{id}/token` | → `{token, install}`；轮换并立即断开 |
 | POST | `/api/nodes/{id}/upgrade` | `{mode?: wait_idle\|now\|cancel, deadline_s?}` → 202；发 `node.upgrade`，版本取当前发布（`at_settings.node_release`，没有时取 `NODE_DIST_DIR` 最新的 tgz）。409 `no_release` / `node_offline` / `upgrade_unsupported`（守护进程不在更新启动器下，要先重新运行安装命令）。进度在 `NodeView.upgrade {target, phase, mode, active_turns, error?}`，另有 `latest_version`、`update_available`、`self_update` |
 | POST | `/api/nodes/{id}/drain` | `{deadline_s}` → 202 |
+| POST | `/api/nodes/{id}/recheck` | → `{node: NodeView, stale?: true}`（权限同 `GET /api/nodes`；每个节点每分钟最多 20 次）。给守护进程发 `node.runtimes_refresh`（守护进程支持 `usage` 时同时发 `node.usage_refresh`，余量照 `usage/refresh` 的规则更新），等回复 `in_reply_to` 是这条命令的 `node.runtimes`，最多 15 s；回复存库后返回节点（`clis` 是新状态），超时返回已有状态并带 `stale: true`。不在任何数据库事务里等待。有运行时变为可用时，暂存的会话会自动开出（data-model.md §2.7）。节点不在线 → 409 `node_offline`；守护进程不支持（`hello.features` 没有 `runtime_status`）→ 409 `unsupported_daemon` |
 | POST | `/api/nodes/{id}/usage/refresh` | → `{usage: NodeUsage\|null, stale?: true}`（权限同 `GET /api/nodes`）。最近一次上报的 `received_at` 在 60 s 内直接返回缓存，不打扰节点；否则发 `node.usage_refresh`（protocol.md §9），等下一条 `node.usage`，最多 15 s，同一节点的并发请求合并成一次等待；超时返回已有的 usage 并带 `stale: true`；`node.usage_refresh` 发送失败、或调用方提前断开时同样返回 200 加 `stale: true`（等待挂在节点上、15 s 后自行结束，不依赖发起请求的连接）。不在任何数据库事务里等待。节点不在线 → 409 `node_offline`；守护进程不支持（`hello.features` 没有 `usage`）→ 409 `usage_unsupported` |
 | DELETE | `/api/nodes/{id}` | → 204；断开链路；该节点上的员工改派：在新节点开新会话并附交接摘要（`architecture.md` §6.2） |
 | GET | `/api/nodes/{id}/sessions` | → `[{session_id, employee, project, thread_no, state, last_active_at}]` |

@@ -86,3 +86,23 @@ func TestAddPluginsSkipsCoordinatorAndEmpty(t *testing.T) {
 		t.Fatalf("empty role got plugins: %v", err)
 	}
 }
+
+func TestApplyPluginsAntigravity(t *testing.T) {
+	e := emp("member", "dev", store.Role{})
+	e.Runtime = "antigravity"
+	o, err := buildOpen(open(t, e, store.Node{Isolation: "agent_user"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyPlugins(&o, []protocol.PluginBundle{pluginBundle(true, false), func() protocol.PluginBundle {
+		b := pluginBundle(false, true)
+		b.Name = "withmcp"
+		return b
+	}()})
+	if !strings.Contains(*o.Antigravity.SystemAppend, "PINEAPPLE-42") || !strings.HasPrefix(*o.Antigravity.SystemAppend, "sys") {
+		t.Fatalf("antigravity instructions %q", *o.Antigravity.SystemAppend)
+	}
+	if len(o.Plugins) != 1 || o.Plugins[0].Name != "withmcp" {
+		t.Fatalf("antigravity gets only plugins with MCP servers: %+v", o.Plugins)
+	}
+}

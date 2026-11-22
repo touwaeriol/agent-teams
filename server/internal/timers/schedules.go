@@ -14,7 +14,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 )
 
-// Schedule kinds, targets, creators and statuses (00370).
+// Schedule kinds, targets, creators and statuses (00390).
 const (
 	KindCron = "cron"
 	KindOnce = "once"

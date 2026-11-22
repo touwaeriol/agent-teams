@@ -500,3 +500,51 @@ func TestFinishDropsIdleTasks(t *testing.T) {
 		t.Fatalf("task %+v %v", got, err)
 	}
 }
+
+// TestEndNoteSurvivesDeadlock: the thread's end reports to the coordinator inside the ending
+// transaction (a savepoint); when that report is picked as a deadlock victim (40P01) — another
+// transaction holds the coordinator's row and waits for the project row the ending transaction
+// already holds — the thread still ends and the coordinator still gets its note, sent after the
+// commit in a transaction of its own.
+func TestEndNoteSurvivesDeadlock(t *testing.T) {
+	c, lead := newEndCase(t, "购物车做完了")
+	turnStarted(lead)
+	c.update(t, map[string]any{"status": "review"})
+	eventually(t, "end pending", func() bool { return c.row(t).DonePendingAt != nil })
+	coord, _, err := c.w.e.Orch.EnsureCoordinator(c.w.ctx, c.row(t).UserID, c.thread.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := c.w.e.Core.Pool.SQL()
+	other, err := db.BeginTx(c.w.ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = other.Rollback() }()
+	var pid int
+	if err := other.QueryRow(`SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := other.Exec(`SELECT 1 FROM at_employees WHERE id = $1 FOR UPDATE`, coord.ID); err != nil {
+		t.Fatal(err)
+	}
+	replied := make(chan struct{})
+	go func() { defer close(replied); finalReply(lead, "最终汇报：购物车做完了") }()
+	// The ending transaction (project row held since its first event) now waits on the coordinator's row.
+	eventually(t, "end waits on the coordinator row", func() bool {
+		var n int
+		_ = db.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`, pid).Scan(&n)
+		return n > 0
+	})
+	// Close the cycle: the other side now waits for the project row. The ending transaction waited
+	// first, so its report is the deadlock victim; the other side gets the row once it commits.
+	if _, err := other.Exec(`SELECT 1 FROM at_projects WHERE id = $1 FOR UPDATE`, c.thread.ProjectID); err != nil {
+		t.Fatalf("other side: %v", err)
+	}
+	if err := other.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	c.waitFor(t, "done", func(v core.ThreadView) bool { return v.Status == "done" })
+	eventually(t, "coordinator note after the deadlock", func() bool { return strings.HasSuffix(doneNote(t, c.w, c.thread.ProjectID), "] 购物车做完了") })
+	<-replied
+}

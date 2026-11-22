@@ -1,27 +1,30 @@
 <script setup lang="ts">
-// One machine: name, online pill, meta, actions (设置 / 更新 / 重新生成令牌 / 移除), the update line, the slot bar,
-// runtime chips (with subscription quota under each) and the sessions running there.
+// One machine: name, online pill, meta, actions (重新检测 / 设置 / 更新 / 重新生成令牌 / 移除), the update line, the slot bar,
+// runtime boxes (install and login state as the daemon reported, subscription quota under each) and the sessions running there.
 import { useQueryClient } from "@tanstack/vue-query";
 import { computed, onBeforeUnmount, ref } from "vue";
 import { nodes as nodeActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import { keys } from "@/api/queries";
-import type { Enrollment, NodeView } from "@/api/views";
+import type { Enrollment, NodeRecheck, NodeView } from "@/api/views";
 import ProgressBar from "@/components/app/ProgressBar.vue";
 import StatusPill from "@/components/app/StatusPill.vue";
 import ConfirmAction from "@/components/common/ConfirmAction.vue";
 import Spinner from "@/components/common/Spinner.vue";
 import { nodeSlots } from "@/components/shell/nodes";
+import { toast } from "@/lib/toast";
 import NodeSessions from "./NodeSessions.vue";
 import NodeSettings from "./NodeSettings.vue";
-import { hoverIntent, needsUsageRefresh, refreshCooldown, nodeMeta, RUNTIMES, runtimeLine, slotPct, updateView, usageView, withNodeUsage, type RuntimeInfo, type UsageView } from "./nodes";
+import { cliRows, hoverIntent, needsUsageRefresh, recheckState, refreshCooldown, nodeMeta, runtimeInfos, slotPct, updateView, usageView, withNode, withNodeUsage, type CliTone, type UsageView } from "./nodes";
 
 const props = defineProps<{ node: NodeView }>();
 const emit = defineEmits<{ token: [enrollment: Enrollment] }>();
 const configuring = ref(false);
 const slots = computed(() => nodeSlots(props.node));
-const runtimes = computed(() => (props.node.runtimes ?? {}) as Record<string, RuntimeInfo>);
-const usage = computed(() => Object.fromEntries(RUNTIMES.map(([k]) => [k, usageView(k, runtimes.value[k], props.node.usage?.[k as "claude" | "codex"], props.node)])) as Record<string, UsageView>);
+const rows = computed(() => cliRows(props.node));
+const infos = computed(() => runtimeInfos(props.node));
+const usage = computed(() => Object.fromEntries(rows.value.map(({ key: k }) => [k, usageView(k, infos.value[k], props.node.usage?.[k as keyof NonNullable<NodeView["usage"]>], props.node)])) as Record<string, UsageView>);
+const CLI_TONE: Record<CliTone, string> = { ok: "hsl(var(--ok))", warn: "hsl(var(--warn))", bad: "hsl(var(--destructive))", muted: "hsl(var(--muted-foreground))" };
 const pick = <K extends NonNullable<UsageView>["kind"]>(key: string, kind: K) => {
   const u = usage.value[key];
   return u?.kind === kind ? (u as Extract<NonNullable<UsageView>, { kind: K }>) : undefined;
@@ -47,6 +50,23 @@ async function refreshUsage() {
   }
 }
 const hover = hoverIntent(300, () => void refreshUsage());
+// 重新检测: the node checks its CLIs and quota now (up to 15 s); the answer replaces this node in the
+// list, then the list is fetched again. The lock is taken synchronously so a double click sends one request.
+const recheckable = computed(() => recheckState(props.node));
+let rechecking = false;
+const recheck = useAction(() => nodeActions.recheck(props.node.id), {
+  invalidate: [keys.nodes],
+  onSuccess: (r: NodeRecheck) => {
+    queryClient.setQueryData<NodeView[]>(keys.nodes, (list) => withNode(list, r.node));
+    if (r.stale) toast.warning("节点没有及时回应，显示的是上次的检测结果");
+    else toast.success("检测完成");
+  },
+});
+function startRecheck() {
+  if (rechecking || !recheckable.value.enabled) return;
+  rechecking = true;
+  recheck.mutate(undefined, { onSettled: () => void (rechecking = false) });
+}
 onBeforeUnmount(hover.leave);
 const rotate = useAction(() => nodeActions.rotate(props.node.id), { invalidate: [keys.nodes], onSuccess: (e) => emit("token", e) });
 const remove = useAction(() => nodeActions.remove(props.node.id), { invalidate: [keys.nodes], success: "节点已移除" });
@@ -64,6 +84,13 @@ const upgrade = useAction((mode: "wait_idle" | "now" | "cancel") => nodeActions.
         <span class="text-[13px] text-muted-foreground">{{ nodeMeta(node) }}</span>
       </span>
       <span class="flex flex-wrap gap-2 [&>.el-button]:!ml-0">
+        <el-tooltip :content="recheckable.hint" placement="top" :show-after="200">
+          <span class="inline-flex" data-recheck-wrap>
+            <el-button size="small" :loading="recheck.isPending.value" :disabled="!recheckable.enabled || recheck.isPending.value" data-recheck @click="startRecheck">
+              {{ recheck.isPending.value ? "检测中" : "重新检测" }}
+            </el-button>
+          </span>
+        </el-tooltip>
         <el-button size="small" @click="configuring = true">设置</el-button>
         <el-dropdown
           v-if="node.online && update.offer"
@@ -103,28 +130,35 @@ const upgrade = useAction((mode: "wait_idle" | "now" | "cancel") => nodeActions.
       <span class="flex"><ProgressBar :pct="slotPct(node)" tone="#2F6FDB" :height="6" /></span>
     </div>
     <div class="flex flex-wrap gap-2 text-[13px]" @mouseenter="hover.enter" @mouseleave="hover.leave">
-      <div v-for="[key, label] in RUNTIMES" :key="key" class="flex min-w-[260px] flex-1 basis-0 flex-col gap-1.5 rounded-lg border border-[#EFEDE8] bg-background px-2.5 dark:border-border py-1.5" :data-runtime="key">
+      <div v-for="row in rows" :key="row.key" class="flex min-w-[260px] flex-1 basis-0 flex-col gap-1.5 rounded-lg border border-[#EFEDE8] bg-background px-2.5 dark:border-border py-1.5" :data-runtime="row.key" :data-tone="row.tone">
         <span class="flex flex-wrap items-center gap-x-2">
-          <span class="font-medium">{{ label }}</span>
-          <span class="font-mono text-xs text-[#4A4843] dark:text-foreground/70">{{ runtimeLine(key, runtimes[key]).ver }}</span>
-          <span class="text-xs" :style="{ color: runtimeLine(key, runtimes[key]).ok ? 'hsl(var(--ok))' : 'hsl(var(--warn))' }">{{ runtimeLine(key, runtimes[key]).login }}</span>
+          <span class="font-medium">{{ row.label }}</span>
+          <span class="font-mono text-xs text-[#4A4843] dark:text-foreground/70" data-ver>{{ row.ver }}</span>
+          <el-tooltip v-if="row.error" :content="row.error" placement="bottom-start" :show-after="200">
+            <span class="cursor-help text-xs underline decoration-dotted" :style="{ color: CLI_TONE[row.tone] }" data-login>{{ row.login }}</span>
+          </el-tooltip>
+          <span v-else class="text-xs" :style="{ color: CLI_TONE[row.tone] }" data-login>{{ row.login }}</span>
+          <span v-if="recheck.isPending.value" class="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground" data-checking><Spinner class="size-2.5 border" />检测中…</span>
+          <el-tooltip v-else-if="row.checked" :content="row.checkedTitle" placement="top" :show-after="200">
+            <span class="ml-auto cursor-default text-[11px] text-muted-foreground" data-checked>{{ row.checked }}</span>
+          </el-tooltip>
         </span>
-        <template v-if="usage[key]?.kind === 'windows'">
+        <template v-if="usage[row.key]?.kind === 'windows'">
           <div class="grid grid-cols-[auto_minmax(40px,1fr)_auto_auto] items-center gap-x-2 gap-y-1 text-xs">
-            <template v-for="(row, i) in usageRows(key)" :key="`${row.key}|${row.label}|${i}`">
-              <span class="whitespace-nowrap text-muted-foreground">{{ row.label }}</span>
-              <ProgressBar :pct="row.width" :tone="row.tone" :height="5" />
-              <span class="text-right font-mono tabular-nums" :style="{ color: row.pct >= 80 ? row.tone : undefined }">{{ row.pct }}%</span>
-              <span class="whitespace-nowrap text-[11px] text-muted-foreground">{{ row.reset }}</span>
+            <template v-for="(win, i) in usageRows(row.key)" :key="`${win.key}|${win.label}|${i}`">
+              <span class="whitespace-nowrap text-muted-foreground">{{ win.label }}</span>
+              <ProgressBar :pct="win.width" :tone="win.tone" :height="5" />
+              <span class="text-right font-mono tabular-nums" :style="{ color: win.pct >= 80 ? win.tone : undefined }">{{ win.pct }}%</span>
+              <span class="whitespace-nowrap text-[11px] text-muted-foreground">{{ win.reset }}</span>
             </template>
           </div>
           <span v-if="refreshing" class="flex items-center gap-1 text-[11px] text-muted-foreground" data-refreshing><Spinner class="size-2.5 border" />刷新中…</span>
-          <span v-else class="text-[11px] text-muted-foreground">{{ usageUpdated(key) }}</span>
+          <span v-else class="text-[11px] text-muted-foreground">{{ usageUpdated(row.key) }}</span>
         </template>
-        <el-tooltip v-else-if="usage[key]?.kind === 'error'" :content="usageError(key)" placement="bottom-start" :show-after="200">
+        <el-tooltip v-else-if="usage[row.key]?.kind === 'error'" :content="usageError(row.key)" placement="bottom-start" :show-after="200">
           <span class="flex w-fit cursor-help items-center gap-1.5 text-xs text-destructive">获取失败<Spinner v-if="refreshing" class="size-2.5 border text-muted-foreground" /></span>
         </el-tooltip>
-        <span v-else-if="usage[key]?.kind === 'pending'" class="text-[11px] text-muted-foreground">余量获取中…</span>
+        <span v-else-if="usage[row.key]?.kind === 'pending'" class="text-[11px] text-muted-foreground">余量获取中…</span>
       </div>
     </div>
     <NodeSessions v-if="node.online" :node-id="node.id" />

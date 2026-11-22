@@ -349,3 +349,38 @@ func TestProtectedRefsEnv(t *testing.T) {
 		t.Fatalf("lead gh allow list %v", allow)
 	}
 }
+
+// TestAntigravityOptions: ask members forward permission requests, bypass members have them
+// allowed by the daemon, read-only roles get read_only with the read-only shell allow list; agy
+// picks the model when no level names one, and the project's Claude/Codex overrides never apply.
+func TestAntigravityOptions(t *testing.T) {
+	e := emp("member", "qa", store.Role{PermissionMode: store.PermAsk})
+	e.Runtime = "antigravity"
+	o, err := buildOpen(open(t, e, store.Node{Isolation: "agent_user"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := o.Antigravity
+	if a == nil || o.Claude != nil || o.Codex != nil || a.Approval != "ask" || a.ReadOnly || a.BashPolicy != nil ||
+		a.Model != "" || a.SystemAppend == nil || *a.SystemAppend != "sys" || string(o.Runtime) != "antigravity" {
+		t.Fatalf("ask antigravity %+v", a)
+	}
+	e.Spec.PermissionMode = store.PermBypass
+	if o, _ = buildOpen(open(t, e, store.Node{Isolation: "agent_user"})); o.Antigravity.Approval != "auto" || o.Antigravity.ReadOnly {
+		t.Fatalf("bypass antigravity %+v", o.Antigravity)
+	}
+	ro := true
+	e.Spec.ReadOnly = &ro
+	o, _ = buildOpen(open(t, e, store.Node{Isolation: "agent_user"}))
+	if a := o.Antigravity; !a.ReadOnly || a.Approval != "ask" || a.BashPolicy == nil || !contains(a.BashPolicy.Allow, "git diff") {
+		t.Fatalf("read-only antigravity %+v", a)
+	}
+	e.Spec.Model = "gemini-4-neon-high"
+	if got := Model(e, store.Project{ThreadModel: "claude-x", ThreadCodexModel: "gpt-x"}); got != "gemini-4-neon-high" {
+		t.Fatalf("antigravity model %q", got)
+	}
+	e.Spec.Model = ""
+	if got := Model(e, store.Project{ThreadModel: "claude-x", ThreadCodexModel: "gpt-x"}); got != "" {
+		t.Fatalf("antigravity built-in model %q", got)
+	}
+}

@@ -175,6 +175,20 @@
       ]
     },
     {
+      "type": "node.runtimes",
+      "name": "NodeRuntimes",
+      "direction": "node_to_console",
+      "reliable": false,
+      "key": []
+    },
+    {
+      "type": "node.runtimes_refresh",
+      "name": "NodeRuntimesRefresh",
+      "direction": "console_to_node",
+      "reliable": false,
+      "key": []
+    },
+    {
       "type": "node.stats",
       "name": "NodeStats",
       "direction": "node_to_console",

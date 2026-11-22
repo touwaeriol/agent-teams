@@ -208,6 +208,7 @@ Codex 对应：组长和 `read_only` 岗位 `sandbox: read-only, approvalPolicy:
 - **逻辑会话**（`at_agent_sessions` 一行）：属于某个员工实例，记录 SDK `session_id` 或 Codex `thread.id`、节点、cwd、分支、状态。员工存在多久它就存在多久（统筹跟项目一样久，组长和成员跟讨论串一样久）。
 - **进程**：Claude 会话对应一个 `query()` 子进程（约 250 MB）。空闲超过 `park_after`（默认 15 分钟，无运行中的回合、无待审批）就 `close()` 掉进程，会话标为 `parked`；下一条消息到来时用 `resume: <session_id>` 重开。这样一台节点可以挂几十个逻辑会话，同时活跃的进程默认不限；节点页或守护进程 `--max-sessions` 设了 `max_active_sessions` 时才按它限制（满了先停放最久空闲的会话，还在启动中的会话不算空闲）。
 - Codex：一个 `codex app-server` 托管该节点所有 Codex 会话（同一 `CODEX_HOME`）；空闲 thread 不占额外进程，app-server 重启后 `thread/resume {excludeTurns:true}`。
+- Antigravity（#41，node/src/sessions/antigravity）：每个会话一个 `agy acp --process-per-session` 子进程（ACP，stdio JSON-RPC），停放时和 Claude 一样关进程。agy 没有类似 `CODEX_HOME` 的变量，所有 agy 进程共用节点级 HOME（`AGENT_TEAMS_AGY_HOME`，默认 `<data>/agy-home`；管理员在那里 `HOME=<agy-home> agy acp --login` 登录一次），并设 `AGY_CLI_DISABLE_AUTO_UPDATE=true`；它的 `.gemini`、`.config` 算节点秘密路径。agy 可执行文件按 `AGENT_TEAMS_AGY_BIN` → `PATH` → `~/.local/bin/agy` 查找，找不到时 hello 报 `installed:false`、会话打开报 spawn_failed。安装和登录检测走 #42 的 RuntimeMonitor（`AntigravityAdapter.detect()`）：监听 agy HOME 下的 token 文件，可执行文件、token 文件或登录环境变量变了才重新跑 `agy --version` 和登录检查（环境变量和 token 文件都看不出登录时，比如未登录或 token 路径还没核实，每 5 分钟再跑一次 ACP 登录检查；一次检查最多 15 秒，ACP 握手共用一个截止时间），结果进 `node.runtimes`（`oauth` 记作 `subscription`，`adc` 记作 `api_key`）和 `hello.runtimes.antigravity`；会话打开时发现已登出或找不到 agy 也会立即上报，登录后不用重启守护进程。平台工具走回环 HTTP MCP（`session/new.mcpServers`，每次 new/resume 换新 URL），系统提示经 `_meta.antigravity.systemPrompt.append` 注入；ACP sessionId 记作 `sdk_session_id`，恢复用 `session/resume`（没有就 `session/load`，丢弃回放的历史）。守护进程把 agy 的 settings.json 固定为每次写入/执行都发权限请求（`toolPermission: request-review`），由守护进程按 §9、§10 应答。登录后未实测的部分见代码注释（unverified）。
 - 守护进程重启：从 `state/sessions/*.json` 知道本机有哪些逻辑会话，但**不主动恢复**；等控制台在重连后按需重新 `session.open {resume}`（控制台是唯一的真相）。控制台记录为 `turn_running`、之后却变成 `parked`（关机时停放的 `session.state`，或重启后的报告）或重新 `starting`（会话进程崩溃后自动重启）的会话，说明回合被打断了；丢了待审批请求的会话同样如此。控制台给这个员工（成员或组长）发一条系统消息（“守护进程重启打断了你上一个回合，请继续”，并列出失效的审批请求和仍在等待回答的提问），会话随之按 SDK session id resume 接着干，不会卡在进行中的任务上；同一次中断只发一次。重连对账后，若某个运行中的讨论串没有任何员工在工作、没有未处理的卡片或提问、也没有在途消息，组长收到一条提醒（这条提醒已是最新消息时不重复）。
 - **会话钉在节点上**：Claude 转录（员工 HOME 下的 `.claude/projects`）和 Codex rollout（`$CODEX_HOME/sessions`）只存在于跑过它的节点，所以 `resume` 只发给 `at_agent_sessions.node_id` 那台节点。必须换节点时（节点被删、离线超过 `rehome_after`（默认 30 分钟）且员工有待办任务、节点 drain），orchestrator 关闭旧逻辑会话，在新节点开一个**全新**会话（`resume: null`），第一条消息是平台生成的**会话恢复摘要**（`handoffSummary`）：员工身份、主任务计划、（组长）全部任务及状态、（成员）当前任务和分支、还没回答的提问、这个员工对话里最近 20 条已送达的消息和它自己的回复（用户 / 你 / 平台，统筹按自己的对话取，不再是空的）。不做转录同步（SDK `sessionStore` 以后可作为改进）。
 - **resume 失败**（守护进程回 `session.opened {resume_failed: true, error}`：转录被删、`~/.claude` 被清、换了节点、文件损坏）时自动走同一个交接流程，不需要人处理。守护进程在三处识别：`session.open {resume}`、停放的会话被下一条消息唤醒（unpark）、崩溃后的自动重启；它只回 `session.opened {resume_failed}`、删掉本机记录，**不先发 `session.state closed`**（否则控制台会先把行关掉，看不到 resume_failed）。控制台关闭旧逻辑会话、开新会话，第一条消息 = 恢复摘要 + `---` + 旧会话**没送到的消息**（它最后一次 `session.open` 的 `first_message` 和未确认送达的 `session.send`，按发出顺序，用第一条的 `msg_id`，其余标为已送达），所以触发恢复的那条用户消息不会丢；统筹和组长的对话里插一条 `kind = resumed` 的系统消息，网页显示成一行淡色的“会话已恢复”。
@@ -219,12 +220,12 @@ Codex 对应：组长和 `read_only` 岗位 `sandbox: read-only, approvalPolicy:
 运行时只在两张注册表里登记，其余代码按能力判断，不比较 id：
 
 - 控制台 `server/internal/runtimes`：每种运行时一行（名称、YAML `type`、`list_team` 类型、内置默认模型、能力：`SlashCommands` 斜杠命令、`LiveModeSwitch` 运行中切权限模式、`NeedsIsolation` 只能派到隔离节点、`CanLead` 能当统筹/组长）。`orchestrator.runtimeOptions` 和 `threadModels` 按运行时填 `session.open` 的选项块和项目的讨论串模型，测试保证覆盖注册表里的每一种。
-- 守护进程 `node/src/sessions/registry.ts`：每种运行时一个 `RuntimeAdapter`（登录探测、hello 上报、透传/固定环境变量、是否原生加载技能、`createDriver`）。会话管理器只认 `Driver` 接口（start / push / interrupt / setMode / compact / close）。
+- 守护进程 `node/src/sessions/registry.ts`：每种运行时一个 `RuntimeAdapter`（安装和登录检测 `detect()` 与要监听的凭证文件 `watchPaths()`、hello 上报、透传/固定环境变量、是否原生加载技能、`createDriver`）。会话管理器只认 `Driver` 接口（start / push / interrupt / setMode / compact / close）。
 - 网页 `web/src/lib/runtimes.ts`：同一张表的展示部分（名称、斜杠命令、内置模型、订阅登录类型）。
 
 岗位可以配多种运行时（`at_roles.runtimes`），每次开新会话在这些运行时的候选节点里按剩余额度挑（shared-members.md §4.3；节点用量的读取在 `orchestrator.usageOf`）。
 
-加一种运行时：写它的 `Driver` 和 adapter，协议 `Runtime` 枚举加 id 并加它的 `session.open` 选项块（以及 `hello.runtimes` 的信息结构），三张注册表各加一行。用量上报（`node/src/usage.ts`）目前仍按 Claude / Codex 各写一份读取，加运行时时一并补上。
+加一种运行时：写它的 `Driver` 和 adapter（adapter 的 `detect()` 返回统一的 `RuntimeStatus` 字段，注册后 `node/src/runtime-monitor.ts` 的 `RuntimeMonitor` 就会定时、按文件变化检测它并在 `node.runtimes` 里上报，protocol.md §9.2），协议 `Runtime` 枚举加 id 并加它的 `session.open` 选项块（以及 `hello.runtimes` 的信息结构），三张注册表各加一行。用量上报（`node/src/usage.ts`）目前仍按 Claude / Codex 各写一份读取，加运行时时一并补上。
 
 ### 6.3 平台工具：守护进程本地 MCP + WS 转发
 
@@ -607,7 +608,7 @@ SSE event: status → 网页办公室
 | `offline` | 员工所在节点离线 |
 | `broken` | 会话错误未恢复（`session.error`、认证失败、连续崩溃） |
 | `raising_hand` | 该员工有 open 的审批或阻塞型提问（user 或 lead） |
-| `queued` | 有消息或任务要处理，但节点活跃会话数已满，守护进程把它排在队里（`session.state queued`，办公室显示“排队等工位”） |
+| `queued` | 有消息或任务要处理，但节点活跃会话数已满，守护进程把它排在队里（`session.state queued`，办公室显示“排队等工位”）；子状态 `no_runtime`：没有候选节点装好并登录了它的运行时（CLI），会话暂存在控制台，气泡写原因，节点登录后自动开出（data-model.md §2.7） |
 | `walking_to_board` → `claiming` → `returning` | `task.claimed` 之后的固定动画序列（时长由布局 JSON 的路径长度决定，控制台只发一次 `claimed`，动画在前端播放；状态表里记 `claiming`） |
 | `typing` / `reading` / `running` | 最近一个 `tool_started` 的类别为 edit / read / shell（`running` 带子类：测试、提交、看 CI） |
 | `thinking` | 回合进行中、没有工具在跑 |

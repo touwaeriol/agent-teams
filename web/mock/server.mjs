@@ -571,6 +571,18 @@ const routes = [
     if (n.usage) for (const u of Object.values(n.usage)) if (u) Object.assign(u, { fetched_at: at, received_at: at });
     json(res, 200, { usage: n.usage ?? null });
   }],
+  // 重新检测 (#42): ~1.5 s like waiting on the node, 409 for an old daemon or an offline node, fresh checked_at.
+  ["POST", /^\/api\/nodes\/([^/]+)\/recheck$/, async (req, res, [id]) => {
+    const n = state.nodes.find((x) => x.id === id);
+    if (!n) return json(res, 404, { detail: "没有这个节点" });
+    // Same shape as server/internal/httpapi/nodes_routes.go recheckNode.
+    if (!n.runtime_status) return json(res, 409, { detail: "节点的守护进程版本过旧，不支持重新检测，请先更新", code: "unsupported_daemon" });
+    if (!n.online) return json(res, 409, { detail: "节点不在线", code: "node_offline" });
+    await new Promise((r) => setTimeout(r, Number(process.env.MOCK_RECHECK_MS ?? 1500)));
+    const at = new Date().toISOString();
+    for (const c of n.clis ?? []) c.checked_at = at;
+    json(res, 200, { node: n });
+  }],
   ["POST", /^\/api\/nodes\/([^/]+)\/upgrade$/, (req, res) => json(res, 202)],
   ["GET", /^\/api\/nodes\/([^/]+)\/sessions$/, (req, res, [id]) => json(res, 200, state.nodeSessions[id] ?? [])],
   ["GET", /^\/api\/roles$/, (req, res) => json(res, 200, { roles: state.roles, warnings: [] })],

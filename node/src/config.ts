@@ -19,6 +19,8 @@ export interface NodeConfig {
   gitBaseUrl: string;
   claudeConfigDir: string;
   codexHome: string;
+  /** HOME of the node's agy (Antigravity CLI) processes: its login and settings (AGENT_TEAMS_AGY_HOME). */
+  agyHome: string;
   logLevel: string;
   /** node.usage period (AGENT_TEAMS_USAGE_INTERVAL_S; 0 disables); unset = default 5 min. */
   usageIntervalMs?: number;
@@ -102,6 +104,7 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
     gitBaseUrl: get("AGENT_TEAMS_GIT_BASE_URL") ?? "https://github.com",
     claudeConfigDir: resolve(env.CLAUDE_CONFIG_DIR ?? join(home, ".claude")),
     codexHome: resolve(env.CODEX_HOME ?? join(home, ".codex")),
+    agyHome: resolve(get("AGENT_TEAMS_AGY_HOME") ?? join(dataDir, "agy-home")),
     logLevel: get("AGENT_TEAMS_LOG_LEVEL") ?? "info",
     ...usageInterval(get("AGENT_TEAMS_USAGE_INTERVAL_S")),
   };

@@ -17,8 +17,8 @@ const agentTool = "Agent"
 const payloadBudget = 3 << 20
 
 // addPlugins puts the role's plugins into session.open at their exact versions (architecture.md
-// §6.5). The coordinator never gets plugins. Claude loads them as local plugins; Codex gets the
-// skill and command text in its developer instructions plus the plugins' MCP servers.
+// §6.5). The coordinator never gets plugins. Claude loads them as local plugins; Codex and
+// Antigravity get the skill and command text in their instructions plus the plugins' MCP servers.
 func (o *Orchestrator) addPlugins(ctx context.Context, q core.DB, userID string, e core.Employee, open *protocol.SessionOpen) error {
 	if e.Tier == "coordinator" || len(e.Spec.Plugins) == 0 {
 		return nil
@@ -36,8 +36,8 @@ func (o *Orchestrator) addPlugins(ctx context.Context, q core.DB, userID string,
 }
 
 func applyPlugins(open *protocol.SessionOpen, bundles []protocol.PluginBundle) {
-	if open.Codex != nil {
-		applyCodexPlugins(open, bundles)
+	if field := textInstructions(open); field != nil {
+		applyTextPlugins(open, field, bundles)
 		return
 	}
 	if open.Claude == nil {
@@ -55,15 +55,11 @@ func applyPlugins(open *protocol.SessionOpen, bundles []protocol.PluginBundle) {
 	}
 }
 
-// applyCodexPlugins: skills and commands as text; only bundles with MCP servers are sent, since
-// the daemon needs their files for the server commands. Subagents and hooks are Claude-only.
-func applyCodexPlugins(open *protocol.SessionOpen, bundles []protocol.PluginBundle) {
-	dev := ""
-	if open.Codex.DeveloperInstructions != nil {
-		dev = *open.Codex.DeveloperInstructions
-	}
-	dev += plugins.Instructions(bundles)
-	open.Codex.DeveloperInstructions = &dev
+// applyTextPlugins (Codex, Antigravity): skills and commands as text in the instructions; only
+// bundles with MCP servers are sent, since the daemon needs their files for the server commands.
+// Subagents and hooks are Claude-only.
+func applyTextPlugins(open *protocol.SessionOpen, field **string, bundles []protocol.PluginBundle) {
+	appendInstructions(field, plugins.Instructions(bundles))
 	for _, b := range bundles {
 		if len(b.McpServers) > 0 {
 			open.Plugins = append(open.Plugins, b)

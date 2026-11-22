@@ -85,6 +85,17 @@
         }
       ]
     },
+    "antigravity": {
+      "description": "Set when runtime = antigravity.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AntigravitySessionOptions"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "platform_tools": {
       "type": "array",
       "items": {
@@ -232,6 +243,28 @@
         ],
         "properties": {
           "codex": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "runtime": {
+            "const": "antigravity"
+          }
+        },
+        "required": [
+          "runtime"
+        ]
+      },
+      "then": {
+        "required": [
+          "antigravity"
+        ],
+        "properties": {
+          "antigravity": {
             "type": "object"
           }
         }
@@ -490,6 +523,49 @@
         "config": {
           "description": "Extra thread/start config (e.g. sandbox_workspace_write.writable_roots); mcp_servers.platform is filled in by the daemon.",
           "type": "object"
+        }
+      }
+    },
+    "AntigravitySessionOptions": {
+      "title": "AntigravitySessionOptions",
+      "description": "agy acp --process-per-session, one process per session. The ACP sessionId is kept as sdk_session_id (session.opened, ResumeRef, sessions.report).",
+      "type": "object",
+      "required": [
+        "model",
+        "read_only",
+        "approval"
+      ],
+      "properties": {
+        "model": {
+          "description": "Model slug (e.g. gemini-4-neon-high); empty leaves the choice to agy.",
+          "type": "string"
+        },
+        "read_only": {
+          "description": "Read-only roles (reviewer…): the daemon disables agy's writing tools (deny rules for file writes and edits) and rejects every writing permission request; commands run only when bash_policy allows them.",
+          "type": "boolean"
+        },
+        "approval": {
+          "description": "How ACP session/request_permission is answered when read_only does not already reject it. ask: forwarded to the console as approval.request; auto: the daemon allows it (bypass roles).",
+          "type": "string",
+          "enum": [
+            "ask",
+            "auto"
+          ]
+        },
+        "system_append": {
+          "description": "Appended to agy's system prompt (session/new _meta.antigravity.systemPrompt.append): platform rules, role instructions and skills inlined.",
+          "type": "string"
+        },
+        "bash_policy": {
+          "description": "read_only: argv allow list for shell commands, as in claude.bash_policy.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BashPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },

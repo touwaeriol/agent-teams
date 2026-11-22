@@ -6,7 +6,7 @@ import Field from "@/components/common/Field.vue";
 import FormDialog from "@/components/common/FormDialog.vue";
 import { cleanCommand, commandProblem, type CustomCommand } from "@/lib/commands";
 
-const props = defineProps<{ command: CustomCommand | null; taken: string[]; promptOnly: boolean; codex: boolean }>();
+const props = defineProps<{ command: CustomCommand | null; taken: string[]; promptOnly: boolean; /** The role's runtime without slash commands ("" = all have them). */ noSlash: string }>();
 const open = defineModel<boolean>("open", { required: true });
 const emit = defineEmits<{ save: [command: CustomCommand] }>();
 const blank = (): CustomCommand => ({ name: "", description: "", mode: "prompt", prompt: "" });
@@ -33,7 +33,7 @@ const touched = computed(() => d.value.name.trim() !== "");
       </el-radio-group>
       <template #hint>
         <template v-if="d.mode === 'passthrough'">把 “/名称 后面的文字” 原样发给会话，由 Claude Code 自己运行：适合技能、插件命令和无界面可用的内置命令（如 /compact）。</template>
-        <template v-else-if="codex">Codex 没有斜杠命令，只能用提示词模板。</template>
+        <template v-else-if="noSlash">{{ noSlash }} 没有斜杠命令，只能用提示词模板。</template>
         <template v-else-if="promptOnly">成员收到的是平台转达的消息，只能用提示词模板。</template>
         <template v-else>平台把模板展开成一段指令再发给员工。</template>
       </template>

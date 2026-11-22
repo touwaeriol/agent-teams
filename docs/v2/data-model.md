@@ -138,7 +138,25 @@ CREATE TABLE at_node_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX at_node_logs_node ON at_node_logs (node_id, created_at DESC);   -- 保留 7 天
+
+-- 00360：各节点每种运行时 CLI 的最新安装 / 登录状态（protocol.md §9.2 node.runtimes），不含凭证
+CREATE TABLE at_node_runtimes (
+  node_id         TEXT NOT NULL REFERENCES at_nodes(id) ON DELETE CASCADE,
+  runtime         TEXT NOT NULL,                  -- 运行时 id：claude、codex、以后新增的
+  installed       BOOLEAN NOT NULL DEFAULT false,
+  version         TEXT NOT NULL DEFAULT '',
+  path            TEXT NOT NULL DEFAULT '',       -- 守护进程找到的可执行文件
+  auth            TEXT NOT NULL DEFAULT 'unknown',-- subscription | chatgpt | api_key | none | unknown
+  auth_expires_at TIMESTAMPTZ,                    -- 守护进程能判断时才有
+  expired         BOOLEAN NOT NULL DEFAULT false,
+  error           TEXT NOT NULL DEFAULT '',
+  checked_at      TIMESTAMPTZ NOT NULL,           -- 守护进程检测时间
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(), -- 内容最近一次变化（只更新 checked_at 不算）
+  PRIMARY KEY (node_id, runtime)
+);
 ```
+
+收到 `node.runtimes` 就整体替换该节点的行（报告里没有的运行时删掉）；不带 `runtime_status` 的守护进程发来的 `node.runtimes` 直接忽略。调度对**在线且 hello.features 含 `runtime_status`** 的节点只看这张表：运行时 `installed`、`auth` 不是 `none`/`unknown`、没有 `expired`、`auth_expires_at` 未过，才算可用（`store.NodeRuntime.Ready`）；本次连接的首次上报还没到时也算不可用（不管这张表里有没有上次连接留下的行，`nodegw.Gateway.RuntimesReported`），原因是“正在检测节点上 X 的安装和登录状态”，首次上报（`reason: hello`）一到就重新放行。其他节点照旧（`node.usage` 的 auth，没有上报就当可用）。暂存的会话见 §2.7 `at_session_holds`。
 
 ### 2.3 GitHub
 
@@ -160,7 +178,7 @@ CREATE TABLE at_roles (
   tier             TEXT NOT NULL,                       -- coordinator | lead | member
   role             TEXT NOT NULL,                       -- 岗位键：coordinator、lead、dev、qa、review、decision…
   title            TEXT NOT NULL DEFAULT '',            -- 显示名：开发、测试…
-  runtime          TEXT NOT NULL DEFAULT 'claude',      -- claude | codex（coordinator 只能 claude）
+  runtime          TEXT NOT NULL DEFAULT 'claude',      -- claude | codex | antigravity（coordinator 只能 claude；antigravity 不能当组长）
   count            INT  NOT NULL DEFAULT 1,             -- member 每讨论串实例数；coordinator/lead 固定 1
   node_ids         TEXT[] NOT NULL DEFAULT '{}',        -- 候选节点（存 id，不存名字，节点改名不失效）
   description      TEXT NOT NULL DEFAULT '',
@@ -193,7 +211,7 @@ CREATE TABLE at_roles (
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   CHECK (tier IN ('coordinator','lead','member')),
-  CHECK (runtime IN ('claude','codex')),
+  CHECK (runtime IN ('claude','codex','antigravity')),   -- 00370 加 antigravity（约束名 at_roles_runtime_check）
   CHECK (NOT (tier = 'coordinator' AND runtime <> 'claude')),
   CHECK (permission_mode IN ('bypass','ask'))
 );
@@ -487,7 +505,24 @@ CREATE TABLE at_permission_rules (                 -- “总是允许”记住�
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX at_permission_rules_lookup ON at_permission_rules (project_id, thread_id, tool_name);
+
+-- 00360：没有节点能跑的会话先暂存在这里（每个员工最多一行），不开会话、不发 session.open
+CREATE TABLE at_session_holds (
+  employee_id TEXT PRIMARY KEY REFERENCES at_employees(id) ON DELETE CASCADE,
+  project_id  TEXT NOT NULL REFERENCES at_projects(id) ON DELETE CASCADE,
+  thread_id   TEXT REFERENCES at_threads(id) ON DELETE CASCADE,  -- 暂存时员工所在的讨论串（统筹为 NULL）
+  reason      TEXT NOT NULL DEFAULT '',     -- 给用户看的原因，如“没有已登录 Codex 的在线节点”
+  first       JSONB NOT NULL,               -- 会话开出来时的 first_message；之后的消息追加进来（图片最多 8 张）
+  resume      JSONB,                        -- 要续接的会话（ResumeRef），没有为 NULL
+  more        JSONB NOT NULL DEFAULT '[]',  -- 合并进 first 的后续消息 msg_id（开会话时一起标为已送达）
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX at_session_holds_project ON at_session_holds (project_id);
+CREATE INDEX at_session_holds_thread ON at_session_holds (thread_id);
 ```
+
+`orchestrator.pickNode` 选出的节点在线、报告了 CLI 状态（`runtime_status`），但该运行时在所有候选节点上都没装或没登录时，会话不开，消息写进 `at_session_holds`；员工状态是 `queued`、子状态 `no_runtime`，气泡是 `reason`（`bubble_kind = ask`，不会被 set_status 覆盖）。节点上线、或 `node.runtimes` 报告有变化时（`ReleaseHolds`），对用户所有暂存的会话重新选节点：能开就开（暂存的消息作为第一条消息），还不行就只更新 `reason`。暂存属于 `thread_id` 那个讨论串：项目成员换到别的讨论串（`MoveToThread`）、或者发给它的消息所在讨论串和暂存的不一样时，旧暂存丢掉（旧消息留在原讨论串的对话里），讨论串结束（done/failed/archived）时它的暂存一起丢掉。所选节点离线时照旧把会话开在它上面等它上线，这种情况不暂存、也没有 `no_runtime` 原因（员工状态是 `offline`），之后别的节点登录也不会把它接走；不带 `runtime_status` 的旧守护进程照旧可调度。
 
 ### 2.8 交付
 
@@ -732,14 +767,14 @@ CREATE TABLE at_schedules (          -- 定时发给项目统筹的消息
 );
 CREATE INDEX at_schedules_project ON at_schedules (project_id, created_at);
 CREATE INDEX at_schedules_due ON at_schedules (next_run_at) WHERE enabled;
--- 00370 加列（agent 设置的定时唤醒、唤醒讨论串组长或员工）：
+-- 00390 加列（agent 设置的定时唤醒、唤醒讨论串组长或员工）：
 --   kind       cron | once（run_at；cron 为 ''）
 --   target     coordinator | lead（thread_id）| member（employee_id + 任务 thread_id/task_id，只能是 once）
 --   created_by user | coordinator | lead | member（agent 只能改自己设置的）
 --   ends_at / max_runs / run_count（周期任务的结束条件）
 --   status     active | done | cancelled | missed，ended_at（结束的行留 7 天）
--- 触发：River 作业 schedule_fire{schedule_id, run_at}（00360 的 river_* 表），见 api.md 定时任务一节。
-CREATE TABLE at_schedule_runs (     -- 00370：每次触发一行，每个定时任务留最近 100 条
+-- 触发：River 作业 schedule_fire{schedule_id, run_at}（00380 的 river_* 表），见 api.md 定时任务一节。
+CREATE TABLE at_schedule_runs (     -- 00390：每次触发一行，每个定时任务留最近 100 条
   id BIGSERIAL PRIMARY KEY, schedule_id TEXT NOT NULL REFERENCES at_schedules(id) ON DELETE CASCADE,
   planned_at TIMESTAMPTZ,           -- 原定时间；“立即运行”为 NULL（manual = true）
   fired_at TIMESTAMPTZ NOT NULL DEFAULT now(), manual BOOLEAN NOT NULL DEFAULT false,
@@ -922,13 +957,17 @@ CREATE TABLE at_ssh_audit (                 -- 网关审计，一行一个事件
 
 `00312_shared_files.sql`：`at_shared_files`（§2.13，项目共享文件）；Down 删表。
 
+`00360_node_runtimes.sql`：`at_node_runtimes`（§2.2，节点 CLI 状态）和 `at_session_holds`（§2.7，暂存的会话）；Down 删两张表。
+
 `00330_remote_servers.sql`：`at_remote_servers`、`at_project_servers`、`at_project_server_grants`、`at_ssh_certs`、`at_ssh_audit` 和唯一索引 `at_projects_id_user`（§2.14，远程服务器）；Down 删表、删索引，并删掉 `at_settings` 的 `ssh_session_ca`、`ssh_gateway_host_key`。
+
+`00370_antigravity_runtime.sql`：第三种 agent 运行时 `antigravity`（Google Antigravity CLI，经 ACP 驱动，讨论串 #41）。只有 `at_roles` 还用 CHECK 限制 `runtime`（00010；`at_models` 的同类约束随 00320 删表消失），把 `at_roles_runtime_check` 放宽为 `claude`、`codex`、`antigravity`；`at_employees`、`at_agent_sessions`、`at_roles.runtimes` 本来不限。Down：岗位的 `runtimes` / `models` 去掉 antigravity，首个运行时是 antigravity 的岗位改用剩下的下一个（带上它在 `models` 里的模型，没有剩下的就是 Claude、`model = ''`），再还原旧约束；员工的 `runtime` 不动（旧代码把未知运行时当默认的 Claude）。
 
 `00080_plugins.sql`：`at_roles.plugins`、`at_plugins`、`at_plugin_versions`，`at_skills.user_id` 可为空（管理员内置技能）及其唯一索引（architecture.md §6.5）。
 
 `00090_project_chrome.sql`：`at_projects.icon / coordinator_model / thread_model / thread_effort / auto_resume`、`at_rate_limit_waits`、`at_schedules`（§2.10）。
 
-`00360_river_queue.sql`：River（riverqueue/river v0.51.2）自己的迁移 1–8 原样拷进来（每个版本单独执行，不在一个事务里），并写入 `river_migration`；升级 River 带来新迁移时要加新的 goose 迁移（`TestRiverMigrationsCurrent`）。`00370_schedule_targets.sql`：`at_schedules` 的 kind / run_at / target / thread_id / employee_id / task_id / created_by / ends_at / max_runs / run_count / status / ended_at，以及 `at_schedule_runs`（§2.10）。
+`00380_river_queue.sql`：River（riverqueue/river v0.51.2）自己的迁移 1–8 原样拷进来（每个版本单独执行，不在一个事务里），并写入 `river_migration`；升级 River 带来新迁移时要加新的 goose 迁移（`TestRiverMigrationsCurrent`）。`00390_schedule_targets.sql`：`at_schedules` 的 kind / run_at / target / thread_id / employee_id / task_id / created_by / ends_at / max_runs / run_count / status / ended_at，以及 `at_schedule_runs`（§2.10）。
 
 `00070_project_repos.sql`：`at_project_repos`、`at_thread_repos`、`at_merge_queue.repo`、`at_tasks.pushed`；把每个项目的 repo/branch/git_connection_id 迁进去（基准分支写进 context），给已有讨论串和队列条目补上仓库（architecture.md §8.1）。
 
