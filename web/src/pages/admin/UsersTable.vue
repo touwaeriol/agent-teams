@@ -15,7 +15,7 @@ const shown = computed({ get: () => Boolean(temp.value), set: (v: boolean) => !v
 
 <template>
   <div class="overflow-x-auto rounded-[14px] border bg-panel">
-    <table class="w-full min-w-[720px] border-collapse text-[13px]">
+    <table class="w-full min-w-[820px] border-collapse text-[13px]">
       <thead>
         <tr class="bg-background text-left text-muted-foreground">
           <th v-for="h in USER_COLUMNS" :key="h" class="px-4 py-3 font-medium">{{ h }}</th>

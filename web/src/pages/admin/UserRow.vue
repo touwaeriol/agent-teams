@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** One account: role, nodes, running tasks, active, last login, joined; menu for everyone but you. */
+/** One account: display name, role, nodes, running tasks, active, last login, joined; menu for everyone but you. */
 import { MoreHorizontal } from "lucide-vue-next";
 import { ref } from "vue";
 import { admin } from "@/api/actions";
@@ -32,6 +32,7 @@ const TD = "px-4 py-3";
     <td :class="TD">
       {{ user.email }}{{ self ? "（你）" : "" }}<span v-if="user.must_change_password" class="ml-1.5 text-xs text-warn">待改密码</span>
     </td>
+    <td :class="[TD, user.display_name ? '' : 'text-muted-foreground']">{{ user.display_name || "—" }}</td>
     <td :class="TD">{{ user.role === "admin" ? "管理员" : "成员" }}</td>
     <td :class="TD">{{ user.nodes }}</td>
     <td :class="TD">{{ user.running_tasks }}</td>
