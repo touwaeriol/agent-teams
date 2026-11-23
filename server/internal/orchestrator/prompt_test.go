@@ -46,3 +46,40 @@ func TestMemberNotesPrompt(t *testing.T) {
 		t.Fatal("lead guide asks for notes")
 	}
 }
+
+// TestReplyLanguagePrompt: every tier gets the platform's reply-language rule; the project
+// instructions come right after the guide (before the role spec), the rule right after them,
+// and without instructions the rule still sets the default language. Leads and coordinators are
+// told that their end-of-turn text is shown to the user.
+func TestReplyLanguagePrompt(t *testing.T) {
+	th := core.Thread{No: 3, Title: "登录", Branch: "thread/3-x"}
+	spec := store.Role{Instructions: "你是工程师。"}
+	cases := []struct {
+		name string
+		e    core.Employee
+		t    *core.Thread
+	}{
+		{"coordinator", core.Employee{Tier: "coordinator", Spec: spec}, nil},
+		{"lead", core.Employee{Tier: "lead", Spec: spec}, &th},
+		{"member", core.Employee{Tier: "member", Name: "dev-1", Role: "dev", Spec: spec}, &th},
+	}
+	for _, c := range cases {
+		with := strings.Join(leadingSections(c.e, c.t, "使用中文进行沟通"), "\n\n")
+		ins, lang, role := strings.Index(with, "## 项目指令"), strings.Index(with, "## 回复语言"), strings.Index(with, "## 岗位说明")
+		if ins < 0 || lang < ins || role < lang {
+			t.Fatalf("%s: order 项目指令=%d 回复语言=%d 岗位说明=%d:\n%s", c.name, ins, lang, role, with)
+		}
+		without := strings.Join(leadingSections(c.e, c.t, ""), "\n\n")
+		if strings.Contains(without, "## 项目指令") || !strings.Contains(without, "## 回复语言") || !strings.Contains(without, "平台默认中文") {
+			t.Fatalf("%s: no default language rule:\n%s", c.name, without)
+		}
+		for _, want := range []string{"回合结尾", "tell_user", "complete_task", "send_message", "ask_lead", "不代表要用英文回复"} {
+			if !strings.Contains(without, want) {
+				t.Fatalf("%s: language rule lacks %q", c.name, want)
+			}
+		}
+		if lead := strings.Contains(without, "不是控制台日志"); lead != (c.e.Tier != "member") {
+			t.Fatalf("%s: end-of-turn emphasis %v", c.name, lead)
+		}
+	}
+}

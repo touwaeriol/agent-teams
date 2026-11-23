@@ -58,6 +58,10 @@ func TestMemoryTools(t *testing.T) {
 			t.Fatalf("new lead prompt misses %q:\n%s", want, sys)
 		}
 	}
+	ins, lang, mem := strings.Index(sys, "## 项目指令"), strings.Index(sys, "## 回复语言"), strings.Index(sys, "## 项目记忆")
+	if lang < ins || mem < lang || ins < 0 {
+		t.Fatalf("project instructions are not ahead of the rest: 项目指令=%d 回复语言=%d 项目记忆=%d", ins, lang, mem)
+	}
 	if strings.Contains(sys, "deploy.md") {
 		t.Fatal("deleted file still in the prompt")
 	}
