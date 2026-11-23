@@ -24,6 +24,17 @@ func work(th string) job {
 	return job{Thread: th, Role: "dev", Priority: 100, Ready: ago(time.Minute), Created: ago(time.Minute)}
 }
 
+// rev builds a project member of role reviewer working in thread th.
+func rev(name, th string) seat {
+	return seat{Name: name, Role: "reviewer", Thread: th}
+}
+
+// gate builds a platform review gate of thread th on work by notBy (ClaimableTasks sets NotBy
+// only while a peer of the role exists).
+func gate(th, notBy string) job {
+	return job{Thread: th, Role: "reviewer", Gate: true, NotBy: notBy, Priority: 50, Ready: ago(time.Minute), Created: ago(time.Minute)}
+}
+
 // inTurn marks a member as mid-turn in thread th.
 func inTurn(s seat, th string) seat {
 	s.TurnThread = th
@@ -58,6 +69,14 @@ func TestPick(t *testing.T) {
 		{name: "reserved for it", seats: []seat{dev("dev-1", "B"), dev("dev-2", "A")},
 			jobs: []job{work("A"), with(work("B"), func(j *job) { j.ReservedFor, j.ReservedUntil = "dev-2", until(time.Minute) })},
 			seat: 1, job: 1},
+		{name: "gate goes to one of three reviewers", seats: []seat{rev("reviewer-1", ""), rev("reviewer-2", ""), rev("reviewer-3", "")},
+			jobs: []job{gate("A", "")}, seat: 0, job: 0},
+		{name: "gate skips the author of the checked work", seats: []seat{rev("reviewer-1", "A"), rev("reviewer-2", "")},
+			jobs: []job{gate("A", "reviewer-1")}, seat: 1, job: 0},
+		{name: "gate waits for a peer rather than the author", seats: []seat{rev("reviewer-1", "A")},
+			jobs: []job{gate("A", "reviewer-1")}, none: true},
+		{name: "starving gate still skips the author", seats: []seat{rev("reviewer-1", "A"), rev("reviewer-2", "")},
+			jobs: []job{with(gate("A", "reviewer-1"), func(j *job) { j.Ready = ago(time.Hour) })}, seat: 1, job: 0},
 		{name: "reserved for someone else is skipped", seats: []seat{dev("dev-1", "A")},
 			jobs: []job{with(work("A"), func(j *job) { j.ReservedFor, j.ReservedUntil = "dev-2", until(time.Minute) })}, none: true},
 		{name: "expired reservation is open", seats: []seat{dev("dev-1", "A")},

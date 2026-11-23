@@ -180,3 +180,49 @@ func TestQueueInputs(t *testing.T) {
 		t.Fatalf("requeued %+v", back)
 	}
 }
+
+// TestClaimableGateNotBy: a platform review gate names the author of the work it checks (NotBy)
+// while another active reviewer with a node exists, so a reviewer's own work goes to a peer; with
+// no such peer it names nobody (a reviewer of one still reviews its own work).
+func TestClaimableGateNotBy(t *testing.T) {
+	w := newStaffWorld(t)
+	reviewer := member("reviewer", 3)
+	reviewer.Gate = "review"
+	w.ensure(lead(), member("dev", 1), reviewer)
+	a := w.thread("A")
+	w.exec(`UPDATE at_threads SET status = 'running' WHERE id = $1`, a.ID)
+	own := w.task(a, "reviewer-2", "review")
+	other := w.task(a, "dev-1", "review")
+	var g1, g2 Task
+	w.tx(func(tx *Tx) error {
+		var err error
+		if g1, err = InsertTask(w.ctx, tx, NewTask{Thread: a, Assignee: "reviewer", Role: "reviewer", Kind: "review", Parent: own.ID, CreatedBy: "platform"}); err != nil {
+			return err
+		}
+		g2, err = InsertTask(w.ctx, tx, NewTask{Thread: a, Assignee: "reviewer", Role: "reviewer", Kind: "review", Parent: other.ID, CreatedBy: "platform"})
+		return err
+	})
+	notBy := func() map[string]string {
+		q, err := ClaimableTasks(w.ctx, w.s.Pool, "p1", []string{"reviewer"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, x := range q {
+			out[x.ID] = x.NotBy
+		}
+		return out
+	}
+	if got := notBy(); len(got) != 2 || got[g1.ID] != "reviewer-2" || got[g2.ID] != "dev-1" {
+		t.Fatalf("not_by with three reviewers %v", got)
+	}
+	reviewer.Count = 2
+	w.ensure(lead(), member("dev", 1), reviewer) // retires reviewer-3
+	if got := notBy(); got[g1.ID] != "reviewer-2" {
+		t.Fatalf("not_by with two reviewers %v", got)
+	}
+	w.exec(`UPDATE at_employees SET node_id = NULL WHERE project_id = 'p1' AND name = 'reviewer-1'`)
+	if got := notBy(); got[g1.ID] != "" || got[g2.ID] != "dev-1" {
+		t.Fatalf("not_by when the only peer has no node %v", got)
+	}
+}
