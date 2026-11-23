@@ -41,11 +41,17 @@ func startTeam(t *testing.T) *team {
 	tm.projectID = project.ID
 	tm.n = w.connect(node.Token, nodetest.Options{})
 	tm.b.must(201, "POST", "/api/projects/"+project.ID+"/threads", map[string]any{"title": "Work", "brief": "do it"}, &tm.thread)
-	tm.lead, _ = expectOpen(t, w, tm.n, "lead-1")
+	var leadOpen protocol.SessionOpen
+	tm.lead, leadOpen = expectOpen(t, w, tm.n, "lead-1")
 	tm.lead.mustCall("update_plan", map[string]any{"steps": []map[string]string{{"title": "做", "status": "todo"}}})
 	tm.lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "do t1", "main": "做"})
 	var open protocol.SessionOpen
 	tm.dev, open = expectOpen(t, w, tm.n, "dev-1")
+	for _, o := range []protocol.SessionOpen{leadOpen, open} {
+		if o.Claude == nil || o.Claude.SystemAppend == nil || !strings.Contains(*o.Claude.SystemAppend, "## 回复语言") {
+			t.Fatal("session prompt lacks the reply-language rule")
+		}
+	}
 	tm.dev.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: protocol.SessionID(tm.dev.session), MsgID: open.FirstMessage.MsgID})
 	return tm
 }
