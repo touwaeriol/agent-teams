@@ -388,6 +388,17 @@ func Presets(looks office.Looks) []store.Role {
 				"做完用 publish_file 发布，收到批注后改稿并用同一个 deliverable_id 发布新版本；改已有的稿（包括别人做的）先 read_deliverable 取回文件，在原处修改后再发布。不要改产品代码，除非任务明确要求。",
 			TaskKinds: []string{"design", "doc"}, Skills: []string{"design", "docs"},
 			Look: store.Look{Accessory: "glasses"}},
+		{Tier: Member, Role: "reviewer", Title: "审查员", Runtime: Claude, Count: 3, Gate: "review",
+			Description: "只读审查每个开发任务的改动，不改代码",
+			Instructions: "你是审查员，只读，不改代码。按任务说明审查被审分支的改动（diff）：核对是否满足原任务和验收方式，有没有补上相应的测试，" +
+				"有没有明显的 bug、遗漏或越界改动。通过用 complete_task(status=done) 写结论；驳回用 status=failed 写清原因和要改的点。" +
+				"工作目录不是被审提交（平台没准备好）时不要审、不要驳回，用 status=platform_error 上报。",
+			Look: store.Look{Accessory: "headset"}},
+		{Tier: Member, Role: "helper", Title: "助手", Runtime: Claude, Count: 3,
+			Description: "做简单、机械的杂活：跑命令收集信息、批量改文案或配置、格式化、更新文档",
+			Instructions: "你是助手，只做明确、机械的事：跑命令收集信息、批量改文案或配置、格式化、更新文档。" +
+				"不做设计决定，不扩大改动范围；拿不准就用 ask_lead 问组长。做完写清改了什么、结果如何。",
+			Look: store.Look{Accessory: "cap"}},
 	}
 	Normalize(presets, looks)
 	return presets
