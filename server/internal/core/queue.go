@@ -109,6 +109,10 @@ type QueuedTask struct {
 	NamedActive bool
 	// Ready is ReadyAt (always set on a claimable task).
 	Ready time.Time
+	// NotBy is, for a platform review / decision gate, the member whose task it checks, when
+	// another active member of the gate's role with a node exists ("" otherwise): that member does not
+	// check its own work while a peer can (a role of one still reviews its own).
+	NotBy string
 }
 
 // QueueLimit bounds the claimable tasks of one role a scheduling pass looks at.
@@ -146,6 +150,11 @@ func ClaimableTasks(ctx context.Context, q DB, projectID string, roles []string)
 				WHERE l.project_id = th.project_id AND l.thread_id = t.thread_id) AS legacy,
 			CASE WHEN t.assignee = t.role THEN false ELSE `+NamedActive+` END AS named_active,
 			t.ready_at AS ready,
+			CASE WHEN t.created_by = 'platform' AND t.kind IN ('review','decision') THEN COALESCE((SELECT p.claimed_by
+				FROM at_tasks p WHERE p.conversation_id = t.conversation_id AND p.id = t.parent AND p.claimed_by <> ''
+				AND EXISTS (SELECT 1 FROM at_employees o WHERE o.project_id = th.project_id AND o.active AND o.tier = 'member'
+					AND o.role = t.role AND o.name <> p.claimed_by AND o.node_id IS NOT NULL AND (o.thread_id IS NULL OR o.thread_id = t.thread_id))), '')
+				ELSE '' END AS not_by,
 			row_number() OVER (PARTITION BY t.role ORDER BY t.priority, t.downstream DESC, t.ready_at, t.created_at) AS rank
 		FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id
 		WHERE th.project_id = $1 AND `+ClaimingThread+` AND t.status = 'pending' AND `+TaskReady+`
