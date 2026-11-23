@@ -120,10 +120,16 @@ tarball (`node/ npm run pack`) → `atctl` → debian-slim with git.
   request of sessions created by v1). Bearer requests, `/auth/login`, `/auth/register` and the
   signed GitHub webhook are exempt. (One-shot cut-over → the P6 rule from §10.1 applies now.)
 - Rate limits: login/register 10/min/IP, node creation 10/hour/user (429 + Retry-After).
-- Audit (`at_audit_log`): login, register, password change/reset, role change, user delete,
+- Audit (`at_audit_log`): login, register, password change/reset, role change, user create/delete,
   node create/rotate/delete/isolated, Git connection add/delete, GitHub App create/delete,
   auto-approve toggle, skip-permissions on, settings, office layout save/delete.
-- `must_change_password` (admin reset) blocks `/api/*` except `/api/me`, `/api/me/password`.
+- `must_change_password` (admin reset, or an account an admin created with it — the default)
+  blocks `/api/*` except `/api/me`, `/api/me/password`.
+- `POST /api/admin/users` (admin only, ignores `registration_open`): creates an account with
+  an optional display name and role; without `password` the server generates one and answers
+  it once as `temp_password`. The audit entry `user_create` records email, role,
+  `generated_password` and `must_change_password`, never the password. The access log line
+  holds only method, path, status, duration and IP — no request bodies.
 
 ## Extension points (for the orchestration engines)
 
@@ -179,7 +185,8 @@ it), no trigger and no second copy.
   also need the embedded lines merged in and drags every SQL driver along).
 - Every change goes through the enforcer API in the same request: registration
   (`AddGroupingPolicy`: first user and `AGENT_TEAMS_ADMIN_EMAILS` → admin, else user; if that
-  fails the new account row is removed again), `PATCH /api/admin/users/{id}` with `role`
+  fails the new account row is removed again), `POST /api/admin/users` (same, with the role
+  the administrator picked), `PATCH /api/admin/users/{id}` with `role`
   (`UpdateGroupingPolicy`), `DELETE /api/admin/users/{id}` (`RemoveFilteredGroupingPolicy`,
   before the account row is deleted), and `atctl admin set-role EMAIL admin|user`. The cache
   of decisions is cleared after each change, so the user's next request already sees it.

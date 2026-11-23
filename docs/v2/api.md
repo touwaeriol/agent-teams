@@ -426,7 +426,8 @@ SshAuditView = {id, created_at, project_id, thread_id, session_id, employee_id, 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/admin/users` | 加 `nodes`、`running_tasks`（进行中的任务数） |
-| PATCH | `/api/admin/users/{id}` | `active`、`max_nodes`、`role`、`display_name` + `max_running_threads: number|null`（覆盖全局默认） |
+| POST | `/api/admin/users` | 新；管理员创建账号，不受 `registration_open` 影响。`{email, display_name?（≤100，去首尾空格）, role?: "admin"\|"user"（默认 user）, password?, must_change_password?（默认 true）}` → 201 `{user: AdminUserView, temp_password?}`。`password` 留空 = 服务器生成临时密码，只在这时回 `temp_password`（一次性显示）；填了就按注册规则校验（不合格 422 `weak_password`），不回显。邮箱先 trim + 小写，格式不对 422 `invalid_email`，已存在 409 `email_taken`。`must_change_password=true` 时新用户登录后只能访问 `/api/me`、`/api/me/password`，改密后才能用。审计 `user_create`（`{email, role, generated_password, must_change_password}`，不含密码） |
+| PATCH | `/api/admin/users/{id}` | `active`、`max_nodes`、`role`、`display_name` + `max_running_threads: number|null`（覆盖全局默认）。不能停用自己或取消自己的管理员身份（400 `self_demote`）；停用后立刻踢掉该用户的所有会话和节点链路，之后登录 403 `inactive` |
 | DELETE | `/api/admin/users/{id}` | 删除用户（关闭其节点链路） |
 | POST | `/api/admin/users/{id}/password-reset` | 新；→ `{temp_password}`（一次性显示，用户登录后必须修改） |
 | PUT | `/api/admin/commands` | `{commands}` 整体替换平台内置命令（`at_settings.composer_commands`，校验同岗位命令，两种方式都可以）。审计 `builtin_commands_change` |
