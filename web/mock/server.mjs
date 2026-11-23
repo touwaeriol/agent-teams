@@ -617,6 +617,18 @@ const routes = [
   ["GET", /^\/api\/admin\/plugins$/, (req, res) => json(res, 200, { plugins: state.adminPlugins })],
   ["PATCH", /^\/api\/admin\/plugins\/([^/]+)$/, async (req, res, [id]) => json(res, 200, Object.assign(state.adminPlugins.find((p) => p.id === id), await body(req)))],
   ["GET", /^\/api\/admin\/users$/, (req, res) => json(res, 200, state.adminUsers)],
+  ["POST", /^\/api\/admin\/users$/, async (req, res) => {
+    // Like the server: normalised unique email, optional typed password, temp_password only when generated.
+    const b = await body(req);
+    const email = String(b.email ?? "").trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail(res, 422, "请输入有效的邮箱地址", "invalid_email");
+    if (b.password && [...b.password].length < 8) return fail(res, 422, "密码至少 8 位", "weak_password");
+    if (state.adminUsers.some((u) => u.email === email)) return fail(res, 409, "这个邮箱已经注册过了", "email_taken");
+    const user = { id: `u${Date.now()}`, email, display_name: String(b.display_name ?? "").trim(), role: b.role ?? "user", active: true, max_nodes: null,
+      must_change_password: b.must_change_password ?? true, created_at: now(), nodes: 0, running_tasks: 0, last_login_at: null, max_running_threads: null };
+    state.adminUsers.push(user);
+    json(res, 201, b.password ? { user } : { user, temp_password: `init-${Math.random().toString(36).slice(2, 6)}-${Math.random().toString(36).slice(2, 6)}` });
+  }],
   ["PATCH", /^\/api\/admin\/users\/([^/]+)$/, async (req, res, [id]) => json(res, 200, Object.assign(state.adminUsers.find((u) => u.id === id), await body(req)))],
   ["DELETE", /^\/api\/admin\/users\/([^/]+)$/, (req, res, [id]) => ((state.adminUsers = state.adminUsers.filter((u) => u.id !== id)), json(res, 204))],
   ["POST", /^\/api\/admin\/users\/([^/]+)\/password-reset$/, (req, res) => json(res, 200, { temp_password: "tmp-7f3k-9q2m" })],

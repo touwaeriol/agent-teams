@@ -352,7 +352,7 @@ export const repos = [
 
 export const adminUsers = [
   { ...me, email: "admin@prophey.ai", nodes: 2, running_tasks: 0, last_login_at: ago(5), max_running_threads: null },
-  { id: "u2", email: "dev@example.com", display_name: "", role: "user", active: true, max_nodes: null, must_change_password: false, created_at: ago(60 * 24), nodes: 1, running_tasks: 0, last_login_at: ago(600), max_running_threads: null },
+  { id: "u2", email: "dev@example.com", display_name: "小王", role: "user", active: true, max_nodes: null, must_change_password: false, created_at: ago(60 * 24), nodes: 1, running_tasks: 0, last_login_at: ago(600), max_running_threads: null },
   { id: "u3", email: "old@example.com", display_name: "", role: "user", active: false, max_nodes: null, must_change_password: false, created_at: ago(60 * 24 * 5), nodes: 0, running_tasks: 0, last_login_at: null, max_running_threads: null },
 ];
 
