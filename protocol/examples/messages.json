@@ -1433,6 +1433,8 @@
           "auth": "subscription",
           "status": "ok",
           "plan": "max",
+          "plan_tier": "max_20x",
+          "email": "dev@example.com",
           "windows": [
             {
               "key": "five_hour",
