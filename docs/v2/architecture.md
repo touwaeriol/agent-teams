@@ -347,7 +347,7 @@ queued ──开工──► running ◄──► waiting（有等你处理的�
 任务进**项目级任务队列**，由项目的空闲成员领取（细节见 [shared-members.md](shared-members.md) §4）：
 
 - 触发：任务新建 / 状态变化、成员回合结束且手里没任务、节点上线（节点主人有待领任务的项目）、定时（每 10 s 兜底）。触发写 Valkey 频道 `sched:<project>`，调度循环（advisory lock 选主）按项目消费。
-- 领取：可领取 = `pending`、依赖都 `done`（`ready_at` 非空）、讨论串 `running` / `waiting`、岗位匹配；空闲 = 全项目没有 claimed / running 任务。每一轮取空闲成员和最多 200 个可领取任务，纯函数 `pick`（`scheduler/score.go`）按档位挑最好的一对：点名 > 返工预留（审查打回、CI / 冲突修复留给原成员 10 分钟）> 饿死（可领取超过 5 分钟）> 依赖粘性 > 讨论串粘性 > 同仓库 > 其他；锁住成员和任务再核对一次后改成 `claimed`。
+- 领取：可领取 = `pending`、依赖都 `done`（`ready_at` 非空）、讨论串 `running` / `waiting`、岗位匹配；空闲 = 全项目没有 claimed / running 任务。每一轮取空闲成员和最多 200 个可领取任务，纯函数 `pick`（`scheduler/score.go`）按档位挑最好的一对：点名 > 返工预留（审查打回、CI / 冲突修复留给原成员 10 分钟）> 饿死（可领取超过 5 分钟）> 依赖粘性 > 讨论串粘性 > 同仓库 > 其他；平台开的审查 / 决策任务在同岗位另有可领的同事时不给被审任务的作者，过了饿死时限才放给作者（最低档，见 shared-members.md §4.1）；锁住成员和任务再核对一次后改成 `claimed`。
 - 领取后发事件 `task.claimed`（办公室里那人“走到任务板 → 领取 → 回工位”就由它驱动），再给该成员 `session.send`（必要时先 `git.prepare` + `session.open`）。消息正文 = 任务说明 + 依赖任务的交接内容 + 工作目录同步结果 + 简报（名单、未读留言）。
 - **开工前同步**（shared-members.md §4.2）：员工已有节点、节点支持 `git_sync` 时，领取后先按仓库发 `git.prepare {sync}`（普通任务 `member` 模式同步到讨论串分支；审查 / 决策任务 `review` 模式检出被审的成员分支），任务停在 `claimed`（`sync_pending`），结果都回来才发任务简报；2 分钟没回来照发，并注明没同步。
 - **交接内容**：每个依赖任务给出做的人、总结（≤ 3000 字）、`complete_task` 的 `handoff`（有下游依赖时第一次不写会被提醒一次）、合并进讨论串分支的范围和改动文件（`at_merge_queue.base_sha` 到合并后的 sha，GitHub compare 取文件，记在 `at_tasks.merged`）和审查 / 决策结论。

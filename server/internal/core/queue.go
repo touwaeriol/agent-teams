@@ -110,8 +110,11 @@ type QueuedTask struct {
 	// Ready is ReadyAt (always set on a claimable task).
 	Ready time.Time
 	// NotBy is, for a platform review / decision gate, the member whose task it checks, when
-	// another active member of the gate's role with a node exists ("" otherwise): that member does not
-	// check its own work while a peer can (a role of one still reviews its own).
+	// another member of the gate's role could take the gate: active, with a node, of another name,
+	// and (a project member) not hidden in the thread by a legacy member of its name, as the
+	// scheduler's eligibility rules it ("" otherwise). The author does not check its own work
+	// while such a peer exists, until the gate starves (scheduler.StarveAfter); a role of one
+	// still reviews its own.
 	NotBy string
 }
 
@@ -153,7 +156,9 @@ func ClaimableTasks(ctx context.Context, q DB, projectID string, roles []string)
 			CASE WHEN t.created_by = 'platform' AND t.kind IN ('review','decision') THEN COALESCE((SELECT p.claimed_by
 				FROM at_tasks p WHERE p.conversation_id = t.conversation_id AND p.id = t.parent AND p.claimed_by <> ''
 				AND EXISTS (SELECT 1 FROM at_employees o WHERE o.project_id = th.project_id AND o.active AND o.tier = 'member'
-					AND o.role = t.role AND o.name <> p.claimed_by AND o.node_id IS NOT NULL AND (o.thread_id IS NULL OR o.thread_id = t.thread_id))), '')
+					AND o.role = t.role AND o.name <> p.claimed_by AND o.node_id IS NOT NULL
+					AND (o.thread_id = t.thread_id OR (o.thread_id IS NULL AND NOT EXISTS (SELECT 1 FROM at_employees l
+						WHERE l.project_id = th.project_id AND l.thread_id = t.thread_id AND l.name = o.name))))), '')
 				ELSE '' END AS not_by,
 			row_number() OVER (PARTITION BY t.role ORDER BY t.priority, t.downstream DESC, t.ready_at, t.created_at) AS rank
 		FROM at_tasks t JOIN at_threads th ON th.id = t.thread_id

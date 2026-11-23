@@ -226,3 +226,41 @@ func TestClaimableGateNotBy(t *testing.T) {
 		t.Fatalf("not_by when the only peer has no node %v", got)
 	}
 }
+
+// TestClaimableGateNotByLegacyName: a project reviewer hidden in the thread by a legacy member of
+// its name (even a retired one) cannot take the thread's gates, so it does not count as the
+// author's peer: not_by stays empty and the author may review rather than nobody.
+func TestClaimableGateNotByLegacyName(t *testing.T) {
+	w := newStaffWorld(t)
+	reviewer := member("reviewer", 2)
+	reviewer.Gate = "review"
+	w.ensure(lead(), reviewer)
+	a := w.thread("A")
+	w.exec(`UPDATE at_threads SET status = 'running' WHERE id = $1`, a.ID)
+	own := w.task(a, "reviewer-1", "review")
+	var g Task
+	w.tx(func(tx *Tx) error {
+		var err error
+		g, err = InsertTask(w.ctx, tx, NewTask{Thread: a, Assignee: "reviewer", Role: "reviewer", Kind: "review", Parent: own.ID, CreatedBy: "platform"})
+		return err
+	})
+	notBy := func() string {
+		q, err := ClaimableTasks(w.ctx, w.s.Pool, "p1", []string{"reviewer"})
+		if err != nil || len(q) != 1 || q[0].ID != g.ID {
+			t.Fatalf("queue %+v %v", q, err)
+		}
+		return q[0].NotBy
+	}
+	if got := notBy(); got != "reviewer-1" {
+		t.Fatalf("not_by with a free peer %q", got)
+	}
+	shadow := w.legacy(a, "reviewer-2")
+	w.exec(`UPDATE at_employees SET active = false WHERE id = $1`, shadow.ID)
+	if got := notBy(); got != "" {
+		t.Fatalf("not_by with the peer hidden by a retired legacy reviewer-2 %q", got)
+	}
+	w.exec(`UPDATE at_employees SET active = true, role = 'reviewer', node_id = 'n1' WHERE id = $1`, shadow.ID)
+	if got := notBy(); got != "reviewer-1" {
+		t.Fatalf("not_by with an active legacy reviewer-2 in the thread %q", got)
+	}
+}
