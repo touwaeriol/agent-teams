@@ -77,7 +77,7 @@ func TestPick(t *testing.T) {
 			jobs: []job{gate("A", "reviewer-1")}, none: true},
 		{name: "starving gate still skips the author", seats: []seat{rev("reviewer-1", "A"), rev("reviewer-2", "")},
 			jobs: []job{with(gate("A", "reviewer-1"), func(j *job) { j.Ready = ago(time.Hour) })}, seat: 1, job: 0},
-		{name: "reserved for someone else is skipped",seats: []seat{dev("dev-1", "A")},
+		{name: "reserved for someone else is skipped", seats: []seat{dev("dev-1", "A")},
 			jobs: []job{with(work("A"), func(j *job) { j.ReservedFor, j.ReservedUntil = "dev-2", until(time.Minute) })}, none: true},
 		{name: "expired reservation is open", seats: []seat{dev("dev-1", "A")},
 			jobs: []job{with(work("A"), func(j *job) { j.ReservedFor, j.ReservedUntil = "dev-2", until(-time.Second) })}, seat: 0, job: 0},
