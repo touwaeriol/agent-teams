@@ -7,6 +7,20 @@
   /* Reading column of a thread (wide panel and full page): centered, one max width everywhere. */
   .at-table-scroll { max-width: 100%; overflow-x: auto; scrollbar-width: thin; }
   .at-reading { width: 100%; max-width: var(--at-reading-width, 860px); margin-inline: auto; }
+  /* Long text that may hold unbreakable runs (URLs, paths, tokens, inline code): wrap them
+     visually anywhere. Only CSS soft wraps: nothing is inserted into the text, so a copied link
+     stays one line. `anywhere` (unlike `break-word`) also lowers the min-content width, so a
+     flex or grid item with min-width:auto no longer stretches to the URL's length.
+     word-break:break-word is the same thing for browsers without overflow-wrap:anywhere. */
+  .at-wrap { word-break: break-word; overflow-wrap: anywhere; }
+  /* Code blocks keep their lines and indentation and scroll sideways inside their own box. */
+  .at-wrap pre { max-width: 100%; overflow-x: auto; white-space: pre; overflow-wrap: normal; word-break: normal; }
+  /* Table cells keep words whole (the table scrolls in .at-table-scroll); only links and inline
+     code in them break anywhere, so one long URL does not make the table huge. The min width
+     keeps a short column (a two-character CJK header) from being squeezed to one character a
+     line next to a column holding a long link. */
+  .at-wrap :is(th, td) { word-break: normal; overflow-wrap: break-word; min-width: 4em; }
+  .at-wrap :is(th, td) :is(a, code) { word-break: break-word; overflow-wrap: anywhere; }
 }
 
 /* In-progress marks rotate; with reduced motion they breathe gently instead. */
