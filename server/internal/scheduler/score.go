@@ -25,6 +25,7 @@ const (
 	tierRepo            // a repository its thread works in
 	tierOther
 	tierLegacy // a legacy member's pooled work: only what no project member takes (shared-members.md §8)
+	tierAuthor // a starving gate for the author of the work it checks: only when no peer takes it
 )
 
 // seat is an idle member.
@@ -42,7 +43,7 @@ type job struct {
 	Named         string // the instance it is assigned to ("" = the role's pool)
 	Gate          bool   // a platform gate or fix task: the thread's role limit does not apply
 	OnlyRoles     []string
-	NotBy         string // a gate's author while a peer of the gate role exists: it does not check its own work
+	NotBy         string // a gate's author while a peer of the gate role exists: it does not check its own work until the gate starves
 	ReservedFor   string
 	ReservedUntil *time.Time
 	DepWorkers    []string // who did each dependency
@@ -103,6 +104,9 @@ func tier(s seat, j job, now time.Time) (int, bool) {
 	if !eligible(s, j, now) {
 		return 0, false
 	}
+	if j.NotBy != "" && j.NotBy == s.Name {
+		return tierAuthor, true // eligible only once the gate starves
+	}
 	t := stickiness(s, j, now)
 	if s.Legacy != "" && t > tierReserved {
 		return tierLegacy, true
@@ -131,13 +135,14 @@ func stickiness(s seat, j job, now time.Time) int {
 // eligible: the named instance or a member of the role; a legacy member only in its own thread
 // and a project member only where no legacy member has its name; not mid-turn in another thread
 // (switching would close the session under the running turn: it claims once the turn ended);
-// not reserved for someone else; not the author of the work a gate checks (while a peer can);
+// not reserved for someone else; not the author of the work a gate checks (while a peer can,
+// until the gate starves);
 // a role the thread uses.
 func eligible(s seat, j job, now time.Time) bool {
 	switch {
 	case j.Named != "" && j.Named != s.Name, j.Named == "" && j.Role != s.Role:
 		return false
-	case j.NotBy != "" && j.NotBy == s.Name:
+	case j.NotBy != "" && j.NotBy == s.Name && now.Sub(j.Ready) < StarveAfter:
 		return false
 	case s.Legacy != "" && s.Legacy != j.Thread, s.Legacy == "" && slices.Contains(j.Legacy, s.Name):
 		return false
