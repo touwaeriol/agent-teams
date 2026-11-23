@@ -39,7 +39,7 @@ SDK 0.3.325 的 `Query` 有一个方法 `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RE
 
 - Linux 上 CLI 的 OAuth 凭证在 `$CLAUDE_CONFIG_DIR/.credentials.json`（`claudeAiOauth.accessToken`、`refreshToken`、`expiresAt`），macOS 上在钥匙串。守护进程把这个文件列为员工会话不能读的路径（`Daemon.secretPaths()`）。
 - 用 get_usage 时，读 token、token 过期后刷新、把新 token 写回凭证文件，都是 CLI 自己做的，和员工会话平时的行为完全一样。守护进程不读凭证文件，不自己刷新，也不写凭证文件。
-- 消息里只有百分比、重置时间和套餐名，没有 token、邮箱、组织 id。失败原因会先经过 `errorText()` 脱敏（遮掉 `sk-…`、`eyJ…`、`Bearer …` 和邮箱，最多 200 个字符）。
+- 消息里只有百分比、重置时间、套餐名和登录账号的邮箱、档位（§1.6），没有 token、组织 id/名称、用户名。失败原因会先经过 `errorText()` 脱敏（遮掉 `sk-…`、`eyJ…`、`Bearer …` 和邮箱，最多 200 个字符）。
 
 ### 1.3 失败和降级
 
@@ -65,6 +65,16 @@ CLI 内部用的是未公开的 `GET https://api.anthropic.com/api/oauth/usage`�
 - 升级 SDK 时要检查：方法是否还在（或者改成了什么名字），以及 `rate_limits` 里 `five_hour`、`seven_day*`、`model_scoped` 的结构有没有变。`node/test/usage.test.ts` 按当前结构写了映射测试。
 - SDK 还有一个 `SDKUsageReport.rate_limits.limits[]`（服务端原样给出的计量行：`kind`、`group`、`percent`、`scope`），这是 `/usage` 结果里附带的结构化数据，只有真正执行 `/usage` 时才会出现，所以不适合拿来定时采集。如果以后 get_usage 也开始返回 `limits[]`，可以改用它，新增的计量类型就不需要改代码。
 
+### 1.6 登录账号和套餐档位：`claude auth status`
+
+get_usage 只给 `subscription_type`（max/team…），分不出 Max 5x 和 20x，所以每次采集时再并行跑一次 `<claude> auth status`（#48 实测，CLI 2.1.325/2.1.327）：
+
+- 默认输出 JSON，只读本地状态，不发请求，约 0.12 秒。守护进程只取 `email`、`subscriptionType`、`planTier` 三个字段，`orgName`、`orgId` 等其他字段一律丢弃。
+- 可执行文件和会话用的是同一个：SDK 的平台包 `@anthropic-ai/claude-agent-sdk-linux-x64`（musl 主机先找 `-musl`），解析方式与 SDK 相同（`claudeExecutable()`）；env 用会话的 Claude env（`HOME`、`CLAUDE_CONFIG_DIR`）。
+- `planTier` 是 CLI 自己算的：`subscriptionType` 为 `pro` → `pro`；为 `max` 时按 rateLimitTier，`default_claude_max_5x` → `max_5x`、`default_claude_max_20x` → `max_20x`、其他 → `max_other`；team/enterprise 一律 `other`（Team 的普通/高级席位看不出来，本期不做）。
+- 上报为 `plan_tier` 和 `email`；`get_usage` 没给 `plan` 时用 `subscriptionType` 补。只在 `auth:"subscription"` 时跑；`loggedIn` 不是 true、`authMethod` 不是 `claude.ai`、输出不是 JSON（老 CLI）、退出码非 0、5 秒超时（或整体 12 秒预算用完）时静默不报这两个字段，余量照常上报。
+- 控制台只把 `email` 返回给节点所有者（节点的所有接口都按所有者过滤）。
+
 ## 2. Codex
 
 ### 2.1 选用的方法：app-server 的 account/rateLimits/read
@@ -74,6 +84,7 @@ CLI 内部用的是未公开的 `GET https://api.anthropic.com/api/oauth/usage`�
 - `rateLimits`：兼容旧版本的单桶视图；`rateLimitsByLimitId`：按 `limit_id` 分桶（比如 `codex`）。优先用 `rateLimitsByLimitId.codex`，没有再用 `rateLimits`。
 - 每个快照（`RateLimitSnapshot`）有 `primary`、`secondary` 两个窗口，各为 `{usedPercent, windowDurationMins, resetsAt}`（`resetsAt` 是 Unix 秒），还有 `planType`（`plus`、`pro`、`team` 等）。
 - 响应里还有 `accountId` 和 `rateLimitUpsell`，我们不上报。
+- 登录邮箱和套餐来自 2.2 已经在调的 `account/read`：`account.type == "chatgpt"` 时上报 `account.email`（为 null 不报）；快照里没有 `planType`（或为 `unknown`）时用 `account.planType` 补 `plan`。Codex 不报 `plan_tier`；`prolite`/`promax` 等是 PlanType 枚举的原值，对应哪个用量倍数本地数据确认不了，网页只显示 “Pro Lite”/“Pro Max”，不写倍数。不读 `auth.json` 里的 id_token，`codex login status` 也没有这些信息。
 
 映射：`primary` → key `primary`（通常 300 分钟），`secondary` → key `secondary`（通常 10080 分钟）；`window_minutes` 取 `windowDurationMins`，`resets_at` 由 `resetsAt` 转成 ISO 时间；`planType` 为 `unknown` 时不填 `plan`。
 

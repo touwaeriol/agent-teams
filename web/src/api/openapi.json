@@ -5511,6 +5511,10 @@
             ],
             "type": "string"
           },
+          "email": {
+            "description": "Email of the logged-in subscription account. Only the node's owner can read nodes, so only the owner sees it",
+            "type": "string"
+          },
           "error": {
             "type": "string"
           },
@@ -5523,6 +5527,11 @@
             ]
           },
           "plan": {
+            "description": "Claude: subscription type (pro, max, team, enterprise); Codex: plan type (plus, pro, prolite, promax, ...)",
+            "type": "string"
+          },
+          "plan_tier": {
+            "description": "Claude: the CLI's plan tier (pro, max_5x, max_20x, max_other, other)",
             "type": "string"
           },
           "received_at": {

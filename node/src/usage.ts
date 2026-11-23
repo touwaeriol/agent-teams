@@ -1,7 +1,9 @@
 // Subscription quota of the node's Claude Code / Codex logins (protocol.md §9.1, docs/v2/usage-probe.md).
 // Credentials never leave the runtimes: Claude's numbers come from the CLI's own get_usage control
-// request, Codex's from its app-server; neither the token nor the account's identity is reported.
+// request, Codex's from its app-server; the token is never reported. The only identity reported is the
+// subscription account's email (and plan tier), which the console shows to the node's owner only.
 import { query, type SDKControlGetUsageResponse, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { ClaudeAccount } from "./claude-account.js";
 import type { GetAccountRateLimitsResponse } from "./codex-protocol/v2/GetAccountRateLimitsResponse.js";
 import type { GetAccountResponse } from "./codex-protocol/v2/GetAccountResponse.js";
 import type { RateLimitSnapshot } from "./codex-protocol/v2/RateLimitSnapshot.js";
@@ -33,6 +35,8 @@ export interface UsageSources {
   /** The CLI's /usage data (get_usage control request). */
   /** Must stop (and free the CLI process) when the signal aborts: that is how a timed-out read ends. */
   claudeUsage(signal: AbortSignal): Promise<ClaudeUsage>;
+  /** `claude auth status`: email and plan tier of the claude.ai login; null when unknown. Must not throw. */
+  claudeAccount?(signal: AbortSignal): Promise<ClaudeAccount | null>;
   /** codex app-server account/read: refines a chatgpt guess from auth.json (an API key login also writes it). */
   codexAccount(): Promise<GetAccountResponse>;
   /** codex app-server account/rateLimits/read. */
@@ -52,17 +56,35 @@ async function claudeUsage(src: UsageSources, timeoutMs: number, now: () => Date
   const auth = src.claudeAuth() ?? "none";
   if (auth !== "subscription") return unsupported(auth, now);
   const abort = new AbortController();
-  try {
-    const u = await withTimeout(src.claudeUsage(abort.signal), timeoutMs, () => (abort.abort(), new Error("timeout")));
-    const plan = u.subscription_type ?? undefined;
-    if (!u.rate_limits_available) return failed(auth, "rate_limits_unavailable", now, plan);
-    if (!u.rate_limits) return failed(auth, "fetch_failed", now, plan);
-    return { auth, status: "ok", ...(plan ? { plan: clip(plan, 40) } : {}), windows: claudeWindows(u.rate_limits), fetched_at: now().toISOString() };
-  } catch (err) {
-    const msg = (err as Error)?.message;
-    if (msg === "timeout" || msg === "unsupported_sdk") return failed(auth, msg, now);
-    return failed(auth, clip(`fetch_failed: ${errorText(err)}`, 200), now);
-  }
+  const deadline = Date.now() + timeoutMs;
+  // The account read runs beside the quota read and never fails it; it shares the abort (timeout).
+  const account = src.claudeAccount ? src.claudeAccount(abort.signal).catch(() => null) : Promise.resolve(null);
+  const quota = await (async (): Promise<RuntimeUsage> => {
+    try {
+      const u = await withTimeout(src.claudeUsage(abort.signal), timeoutMs, () => (abort.abort(), new Error("timeout")));
+      const plan = u.subscription_type ?? undefined;
+      if (!u.rate_limits_available) return failed(auth, "rate_limits_unavailable", now, plan);
+      if (!u.rate_limits) return failed(auth, "fetch_failed", now, plan);
+      return { auth, status: "ok", ...(plan ? { plan: clip(plan, 40) } : {}), windows: claudeWindows(u.rate_limits), fetched_at: now().toISOString() };
+    } catch (err) {
+      const msg = (err as Error)?.message;
+      if (msg === "timeout" || msg === "unsupported_sdk") return failed(auth, msg, now);
+      return failed(auth, clip(`fetch_failed: ${errorText(err)}`, 200), now);
+    }
+  })();
+  const a = await withTimeout(account, Math.max(0, deadline - Date.now()), () => (abort.abort(), new Error("timeout"))).catch(() => null);
+  return withAccount(quota, a?.email, a?.plan_tier, a?.subscription_type);
+}
+
+/** Adds the login's email and tier (only for a subscription login; a plan the quota read did not give comes from the account). */
+function withAccount(u: RuntimeUsage, email: string | null | undefined, tier?: string, plan?: string): RuntimeUsage {
+  if (u.auth !== "subscription" && u.auth !== "chatgpt") return u;
+  return {
+    ...u,
+    ...(!u.plan && plan ? { plan: clip(plan, 40) } : {}),
+    ...(tier ? { plan_tier: clip(tier, 64) } : {}),
+    ...(email ? { email: clip(email, 320) } : {}),
+  };
 }
 
 type ClaudeLimits = NonNullable<ClaudeUsage["rate_limits"]>;
@@ -89,17 +111,27 @@ async function codexUsage(src: UsageSources, deadline: number, now: () => Date):
   const left = () => Math.max(0, deadline - Date.now());
   let auth = src.codexAuth() ?? "none";
   if (auth !== "chatgpt") return unsupported(auth, now);
+  let email: string | undefined;
+  let plan: string | undefined;
   try {
     const account = await withTimeout(src.codexAccount(), left(), () => new Error("timeout"));
     if (account.account?.type === "apiKey") return unsupported((auth = "api_key"), now);
     if (account.account === null && account.requiresOpenaiAuth) return failed(auth, "not_logged_in", now);
+    if (account.account?.type === "chatgpt") {
+      email = typeof account.account.email === "string" ? account.account.email.trim() || undefined : undefined;
+      plan = knownPlan(account.account.planType);
+    }
     const r = await withTimeout(src.codexRateLimits(), left(), () => new Error("timeout"));
-    return codexResult(r.rateLimitsByLimitId?.codex ?? r.rateLimits, now());
+    return withAccount(codexResult(r.rateLimitsByLimitId?.codex ?? r.rateLimits, now()), email, undefined, plan);
   } catch (err) {
     const ev = src.lastCodexEvent();
-    if (ev) return codexResult(ev.snapshot, ev.at);
-    return failed(auth, errorText(err), now);
+    if (ev) return withAccount(codexResult(ev.snapshot, ev.at), email, undefined, plan);
+    return withAccount(failed(auth, errorText(err), now), email, undefined, plan);
   }
+}
+
+function knownPlan(p: unknown): string | undefined {
+  return typeof p === "string" && p && p !== "unknown" ? p : undefined;
 }
 
 function codexResult(s: RateLimitSnapshot, at: Date): RuntimeUsage {
@@ -115,7 +147,7 @@ function codexResult(s: RateLimitSnapshot, at: Date): RuntimeUsage {
   };
   add("primary", s.primary);
   add("secondary", s.secondary);
-  const plan = s.planType && s.planType !== "unknown" ? s.planType : undefined;
+  const plan = knownPlan(s.planType);
   return { auth: "chatgpt", status: "ok", ...(plan ? { plan } : {}), windows, fetched_at: at.toISOString() };
 }
 
