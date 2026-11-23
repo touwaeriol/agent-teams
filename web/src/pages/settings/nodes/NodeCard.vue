@@ -15,7 +15,7 @@ import { nodeSlots } from "@/components/shell/nodes";
 import { toast } from "@/lib/toast";
 import NodeSessions from "./NodeSessions.vue";
 import NodeSettings from "./NodeSettings.vue";
-import { cliRows, hoverIntent, needsUsageRefresh, recheckState, refreshCooldown, nodeMeta, runtimeInfos, slotPct, updateView, usageView, withNode, withNodeUsage, type CliTone, type UsageView } from "./nodes";
+import { accountView, cliRows, hoverIntent, needsUsageRefresh, recheckState, refreshCooldown, nodeMeta, runtimeInfos, slotPct, updateView, usageView, withNode, withNodeUsage, type CliTone, type UsageView } from "./nodes";
 
 const props = defineProps<{ node: NodeView }>();
 const emit = defineEmits<{ token: [enrollment: Enrollment] }>();
@@ -24,6 +24,7 @@ const slots = computed(() => nodeSlots(props.node));
 const rows = computed(() => cliRows(props.node));
 const infos = computed(() => runtimeInfos(props.node));
 const usage = computed(() => Object.fromEntries(rows.value.map(({ key: k }) => [k, usageView(k, infos.value[k], props.node.usage?.[k as keyof NonNullable<NodeView["usage"]>], props.node)])) as Record<string, UsageView>);
+const accounts = computed(() => Object.fromEntries(rows.value.map(({ key: k }) => [k, accountView(k, infos.value[k], props.node.usage?.[k as keyof NonNullable<NodeView["usage"]>])])));
 const CLI_TONE: Record<CliTone, string> = { ok: "hsl(var(--ok))", warn: "hsl(var(--warn))", bad: "hsl(var(--destructive))", muted: "hsl(var(--muted-foreground))" };
 const pick = <K extends NonNullable<UsageView>["kind"]>(key: string, kind: K) => {
   const u = usage.value[key];
@@ -143,6 +144,10 @@ const upgrade = useAction((mode: "wait_idle" | "now" | "cancel") => nodeActions.
             <span class="ml-auto cursor-default text-[11px] text-muted-foreground" data-checked>{{ row.checked }}</span>
           </el-tooltip>
         </span>
+        <div v-if="accounts[row.key]" class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs" data-account>
+          <span v-if="accounts[row.key]!.email" class="min-w-0 break-all text-[#4A4843] dark:text-foreground/70" data-email>{{ accounts[row.key]!.email }}</span>
+          <span v-if="accounts[row.key]!.plan" class="shrink-0 rounded border px-1.5 text-[11px] leading-[18px] text-muted-foreground" data-plan>{{ accounts[row.key]!.plan }}</span>
+        </div>
         <template v-if="usage[row.key]?.kind === 'windows'">
           <div class="grid grid-cols-[auto_minmax(40px,1fr)_auto_auto] items-center gap-x-2 gap-y-1 text-xs">
             <template v-for="(win, i) in usageRows(row.key)" :key="`${win.key}|${win.label}|${i}`">
