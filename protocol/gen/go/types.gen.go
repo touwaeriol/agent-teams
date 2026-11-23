@@ -4956,7 +4956,8 @@ func (j *NodeUpgrade) UnmarshalJSON(value []byte) error {
 }
 
 // Subscription quota of the node's runtimes (Claude Code, Codex), unreliable; sent
-// after hello and then periodically. Never carries credentials. The console keeps
+// after hello and then periodically. Never carries credentials; the account email
+// (owner-only on the console) is the only identity it carries. The console keeps
 // only the latest report per node and drops unknown fields.
 type NodeUsage struct {
 	// Runtimes corresponds to the JSON schema field "runtimes".
@@ -6799,14 +6800,24 @@ type RuntimeUsage struct {
 	// or none.
 	Auth RuntimeUsageAuth `json:"auth"`
 
+	// Email of the logged-in subscription account (Claude: `claude auth status`;
+	// Codex: app-server account/read). Absent for API key logins or when unknown. The
+	// console shows it to the node's owner only.
+	Email *string `json:"email,omitempty,omitzero"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
 
 	// When the daemon fetched this data.
 	FetchedAt *time.Time `json:"fetched_at,omitempty,omitzero"`
 
-	// Plan name when known (pro, max, plus, team, ...).
+	// Plan name when known: Claude's subscription type (pro, max, team, enterprise),
+	// Codex's plan type (plus, pro, prolite, promax, team, ...).
 	Plan *string `json:"plan,omitempty,omitzero"`
+
+	// Claude only: the CLI's plan tier from `claude auth status` (pro, max_5x,
+	// max_20x, max_other, other); absent when unknown.
+	PlanTier *string `json:"plan_tier,omitempty,omitzero"`
 
 	// ok: windows are valid; error: fetching failed (see error); unsupported: no
 	// quota for this login (API key, not logged in, too old CLI).
