@@ -19,7 +19,7 @@ const onSend = (text: string) => add.mutateAsync(text);
 </script>
 
 <template>
-  <aside aria-label="批注" class="flex min-w-0 max-w-full flex-[1_1_300px] flex-col gap-3.5 border-l bg-panel px-[18px] py-4 sm:max-w-[360px]">
+  <aside aria-label="批注" class="at-wrap flex min-w-0 max-w-full flex-[1_1_300px] flex-col gap-3.5 border-l bg-panel px-[18px] py-4 sm:max-w-[360px]">
     <span class="flex items-center justify-between">
       <span class="font-semibold">批注 · {{ items.length }}</span>
       <span class="text-xs text-muted-foreground">批注会转给 {{ to }}</span>
