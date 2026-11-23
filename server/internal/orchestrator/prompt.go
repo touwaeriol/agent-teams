@@ -167,18 +167,12 @@ func (c *docsCache) refresh(ctx context.Context, key string, read func(context.C
 
 // systemAppend builds the prompt appended to the claude_code preset (§6.1).
 func (o *Orchestrator) systemAppend(ctx context.Context, q core.DB, e core.Employee, t *core.Thread, p store.Project) (string, error) {
-	parts := []string{guide(e, t)}
-	if e.Spec.Instructions != "" {
-		parts = append(parts, "## 岗位说明\n"+e.Spec.Instructions)
-	}
+	parts := leadingSections(e, t, p.Context)
 	if doc := o.projectDocs(ctx, q, p); doc != "" {
 		parts = append(parts, "## 仓库 CLAUDE.md（默认分支）\n"+doc)
 	}
 	if repos := o.reposSection(ctx, q, e, t, p); repos != "" {
 		parts = append(parts, repos)
-	}
-	if p.Context != "" {
-		parts = append(parts, "## 项目指令（用户编写，基准分支、约定等以这里为准，必须遵守）\n"+p.Context)
 	}
 	mem, err := store.MemoryPrompt(ctx, q, p.ID)
 	if err != nil {
@@ -193,6 +187,39 @@ func (o *Orchestrator) systemAppend(ctx context.Context, q core.DB, e core.Emplo
 		parts = append(parts, "## 团队（成员是项目共用的，谁正在哪个讨论串忙用 list_team 查看）\n"+roster)
 	}
 	return strings.Join(parts, "\n\n"), nil
+}
+
+// leadingSections are the first parts of systemAppend: the platform guide, the user's project
+// instructions (early, so they are not buried under docs and memory), the reply-language rule
+// right after them (it refers to the language the instructions ask for) and the role spec.
+func leadingSections(e core.Employee, t *core.Thread, projectContext string) []string {
+	parts := []string{guide(e, t)}
+	if projectContext != "" {
+		parts = append(parts, "## 项目指令（用户编写，基准分支、约定等以这里为准，必须遵守）\n"+projectContext)
+	}
+	parts = append(parts, languageSection(e, t))
+	if e.Spec.Instructions != "" {
+		parts = append(parts, "## 岗位说明\n"+e.Spec.Instructions)
+	}
+	return parts
+}
+
+const languageRule = `## 回复语言
+所有给人看的文字都用项目指令要求的语言写；项目指令没提语言时，跟用户最近一条消息用同一种语言（平台默认中文）。
+给人看的文字包括：每个回合结尾的回复、tell_user、ask_user（问题和选项）、finish 的总结、complete_task 的总结和 handoff、send_message、ask_lead、reply_to、message_thread、set_status、report_progress。
+工具描述、工具结果、系统提示和平台消息头（如 “[Task t7 · …]”）是英文，不代表要用英文回复；代码、命令、文件路径、标识符和引用的原文保持原样。`
+
+const languageLeadRule = `
+特别注意回合结尾：你每个回合最后写的文字会原样作为一条消息显示在用户的对话里，不是控制台日志或自言自语；它和你通过工具发给用户的消息一样是写给用户的，必须用上面要求的语言，不要工具里写中文、回合结尾却换成英文。没什么要对用户说时就简短写一句，也用这个语言。`
+
+const languageMemberRule = `
+你的回合结尾文字和工具里的总结会被组长和用户读到，同样用上面要求的语言。`
+
+func languageSection(e core.Employee, t *core.Thread) string {
+	if e.Tier == "member" && t != nil {
+		return languageRule + languageMemberRule
+	}
+	return languageRule + languageLeadRule
 }
 
 func guide(e core.Employee, t *core.Thread) string {
