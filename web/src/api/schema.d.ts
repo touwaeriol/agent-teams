@@ -3869,13 +3869,18 @@ export interface components {
              * @enum {string}
              */
             auth: "subscription" | "chatgpt" | "api_key" | "none";
+            /** @description Email of the logged-in subscription account. Only the node's owner can read nodes, so only the owner sees it */
+            email?: string;
             error?: string;
             /**
              * Format: date-time
              * @description When the daemon fetched the data
              */
             fetched_at: string | null;
+            /** @description Claude: subscription type (pro, max, team, enterprise); Codex: plan type (plus, pro, prolite, promax, ...) */
             plan?: string;
+            /** @description Claude: the CLI's plan tier (pro, max_5x, max_20x, max_other, other) */
+            plan_tier?: string;
             /**
              * Format: date-time
              * @description When the console received the report

@@ -76,7 +76,9 @@ type NodeUsage struct {
 type RuntimeUsage struct {
 	Auth       string        `json:"auth" enum:"subscription,chatgpt,api_key,none" doc:"How the runtime is logged in"`
 	Status     string        `json:"status" enum:"ok,error,unsupported"`
-	Plan       string        `json:"plan,omitempty"`
+	Plan       string        `json:"plan,omitempty" doc:"Claude: subscription type (pro, max, team, enterprise); Codex: plan type (plus, pro, prolite, promax, ...)"`
+	PlanTier   string        `json:"plan_tier,omitempty" doc:"Claude: the CLI's plan tier (pro, max_5x, max_20x, max_other, other)"`
+	Email      string        `json:"email,omitempty" doc:"Email of the logged-in subscription account. Only the node's owner can read nodes, so only the owner sees it"`
 	Windows    []UsageWindow `json:"windows"`
 	Error      string        `json:"error,omitempty"`
 	FetchedAt  *time.Time    `json:"fetched_at" doc:"When the daemon fetched the data"`
