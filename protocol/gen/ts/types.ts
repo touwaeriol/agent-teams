@@ -985,9 +985,17 @@ export interface RuntimeUsage {
    */
   status: "ok" | "error" | "unsupported";
   /**
-   * Plan name when known (pro, max, plus, team, ...).
+   * Plan name when known: Claude's subscription type (pro, max, team, enterprise), Codex's plan type (plus, pro, prolite, promax, team, ...).
    */
   plan?: string;
+  /**
+   * Claude only: the CLI's plan tier from `claude auth status` (pro, max_5x, max_20x, max_other, other); absent when unknown.
+   */
+  plan_tier?: string;
+  /**
+   * Email of the logged-in subscription account (Claude: `claude auth status`; Codex: app-server account/read). Absent for API key logins or when unknown. The console shows it to the node's owner only.
+   */
+  email?: string;
   /**
    * At most 8 are kept by the console.
    */
@@ -1019,7 +1027,7 @@ export interface UsageWindow {
   resets_at?: string | null;
 }
 /**
- * Subscription quota of the node's runtimes (Claude Code, Codex), unreliable; sent after hello and then periodically. Never carries credentials. The console keeps only the latest report per node and drops unknown fields.
+ * Subscription quota of the node's runtimes (Claude Code, Codex), unreliable; sent after hello and then periodically. Never carries credentials; the account email (owner-only on the console) is the only identity it carries. The console keeps only the latest report per node and drops unknown fields.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "NodeUsage".

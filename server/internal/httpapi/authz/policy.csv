@@ -216,6 +216,7 @@ p, admin, /api/admin/settings, PUT
 p, admin, /api/admin/skills, POST
 p, admin, /api/admin/skills/:id, DELETE
 p, admin, /api/admin/users, GET
+p, admin, /api/admin/users, POST
 p, admin, /api/admin/users/:id, DELETE
 p, admin, /api/admin/users/:id, PATCH
 p, admin, /api/admin/users/:id/password-reset, POST

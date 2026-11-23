@@ -37,3 +37,30 @@ func TestSanitizeUsageLabel(t *testing.T) {
 		t.Fatalf("labels %+v", w)
 	}
 }
+
+func TestSanitizeUsageAccount(t *testing.T) {
+	s := func(v string) *string { return &v }
+	long := strings.Repeat("a", 400) + "@example.com"
+	b := &protocol.NodeUsage{Runtimes: protocol.NodeUsageRuntimes{
+		Claude: &protocol.RuntimeUsage{Auth: "subscription", Status: "ok", Plan: s("max"), PlanTier: s(" max_20x\n"), Email: s(" me@example.com ")},
+		Codex:  &protocol.RuntimeUsage{Auth: "chatgpt", Status: "ok", Email: s(long)},
+	}}
+	u := sanitizeUsage(b, time.Now())
+	if c := u.Claude; c.Email != "me@example.com" || c.PlanTier != "max_20x" || c.Plan != "max" {
+		t.Fatalf("claude %+v", c)
+	}
+	if e := u.Codex.Email; len(e) > maxUsageEmail {
+		t.Fatalf("codex email %d bytes", len(e))
+	}
+	for _, r := range []*protocol.RuntimeUsage{
+		{Auth: "api_key", Status: "unsupported", PlanTier: s("max_5x"), Email: s("me@example.com")},
+		{Auth: "none", Status: "unsupported", Email: s("me@example.com")},
+		{Auth: "subscription", Status: "ok", Email: s("no-at-sign")},
+		{Auth: "subscription", Status: "ok", Email: s("a b@example.com")},
+	} {
+		got := sanitizeUsage(&protocol.NodeUsage{Runtimes: protocol.NodeUsageRuntimes{Claude: r}}, time.Now()).Claude
+		if got.Email != "" || (r.Auth != "subscription" && got.PlanTier != "") {
+			t.Fatalf("%s %+v kept %+v", r.Auth, ptrValue(r.Email), got)
+		}
+	}
+}

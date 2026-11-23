@@ -57,7 +57,7 @@ useChatScroll(() => props.cid, end, () => messages.value.length + props.inserts.
 
 <template>
   <Loading v-if="query.isLoading.value" class="py-16" />
-  <div v-else :class="cn('flex flex-col', compact ? 'gap-[18px]' : 'gap-7')">
+  <div v-else :class="cn('at-wrap flex min-w-0 flex-col', compact ? 'gap-[18px]' : 'gap-7')">
     <button v-if="query.hasNextPage.value" type="button" class="self-center text-xs text-muted-foreground hover:text-foreground" @click="query.fetchNextPage()">
       {{ query.isFetchingNextPage.value ? "加载中…" : "更早的消息" }}
     </button>

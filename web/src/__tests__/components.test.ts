@@ -182,6 +182,15 @@ describe("AskCard", () => {
     expect(w.text()).toContain("B 方案");
     expect(w.findAll("button[role=radio]")).toHaveLength(0);
   });
+  it("lets long links wrap (at-wrap) in open and answered cards without touching the text", () => {
+    const url = `https://claude.com/cai/oauth/authorize?state=${"a1".repeat(80)}`;
+    for (const extra of [{}, { status: "answered", answer: url }] as const) {
+      const w = mountWith(AskCard, { cid: "c1", pid: "p1", question: question("q1", { text: `打开 ${url}`, options: [url, "B"], ...extra }) });
+      expect(w.get("section").classes()).toContain("at-wrap");
+      expect(w.text()).toContain(url);
+      expect(w.html()).not.toMatch(/<wbr|\u200b|\u00ad/);
+    }
+  });
 });
 
 describe("ThreadList", () => {
@@ -267,5 +276,13 @@ describe("Markdown", () => {
     expect(w.classes()).toContain("prose");
     expect(w.classes()).toContain("leading-7");
     expect(w.classes()).not.toContain("leading-6");
+  });
+  it("wraps long links only through CSS: the text and href stay exactly the link", () => {
+    const url = "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9&redirect_uri=https%3A%2F%2Fconsole.anthropic.com%2Foauth%2Fcode%2Fcallback&state=f3a9c1e7b5d2a8c4e6f0";
+    const w = mount(Markdown, { props: { source: `看 ${url}\n\n\`${"x".repeat(120)}\`` } });
+    expect(w.classes()).toContain("at-wrap");
+    expect(w.find("a").text()).toBe(url);
+    expect(w.find("a").attributes("href")).toBe(url);
+    expect(w.html()).not.toMatch(/<wbr|\u200b|\u00ad|\u2060/);
   });
 });

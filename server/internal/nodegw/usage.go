@@ -16,6 +16,7 @@ const (
 	maxUsageWindows = 8
 	maxUsageKey     = 64
 	maxUsagePlan    = 64
+	maxUsageEmail   = 320
 	maxUsageError   = 500
 	maxUsageLabel   = 40 // characters
 )
@@ -161,6 +162,17 @@ func sanitizeRuntimeUsage(r *protocol.RuntimeUsage, now time.Time) *platform.Run
 	}
 	if r.Error != nil {
 		out.Error = cleanString(*r.Error, maxUsageError)
+	}
+	// The account fields only describe a subscription login (an API key login has none).
+	if out.Auth == "subscription" || out.Auth == "chatgpt" {
+		if r.PlanTier != nil {
+			out.PlanTier = cleanString(*r.PlanTier, maxUsagePlan)
+		}
+		if r.Email != nil {
+			if e := cleanString(*r.Email, maxUsageEmail); strings.Contains(e, "@") && !strings.ContainsAny(e, " \t") {
+				out.Email = e
+			}
+		}
 	}
 	for _, w := range r.Windows {
 		if len(out.Windows) == maxUsageWindows {

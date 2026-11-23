@@ -102,6 +102,40 @@ describe("NodeCard CLI boxes", () => {
   });
 });
 
+describe("NodeCard account line", () => {
+  const win = [{ key: "five_hour", used_percent: 10, resets_at: null }];
+  const usage = (claude: object, codex: object) => ({
+    claude: { auth: "subscription", status: "ok", windows: win, fetched_at: ago(1), received_at: ago(1), ...claude },
+    codex: { auth: "chatgpt", status: "ok", windows: win, fetched_at: ago(1), received_at: ago(1), ...codex },
+  });
+
+  it("shows each login's email and plan; the plan leaves the updated line", () => {
+    api(() => ({ status: 200, body: {} }));
+    const long = `${"very.long.address.".repeat(6)}@corp.example.com`;
+    const { w } = mountCard(node({ usage: usage({ plan: "max", plan_tier: "max_20x", email: "me@example.com" }, { plan: "prolite", email: long }) as never }));
+    expect(box(w, "claude").find("[data-email]").text()).toBe("me@example.com");
+    expect(box(w, "claude").find("[data-plan]").text()).toBe("Max 20x");
+    expect(box(w, "claude").text()).not.toMatch(/max ·/);
+    expect(box(w, "codex").find("[data-email]").text()).toBe(long);
+    expect(box(w, "codex").find("[data-email]").classes()).toContain("break-all");
+    expect(box(w, "codex").find("[data-plan]").text()).toBe("Pro Lite");
+  });
+
+  it("an older daemon's report (no email, no tier): no account line, the card as before", () => {
+    api(() => ({ status: 200, body: {} }));
+    const { w } = mountCard(node({ usage: usage({ plan: "max" }, { plan: "prolite" }) as never }));
+    expect(w.find("[data-account]").exists()).toBe(false);
+    expect(box(w, "claude").text()).toContain("max · 更新于");
+    expect(box(w, "codex").text()).toContain("prolite · 更新于");
+  });
+
+  it("hides the account when the CLI is not logged in with the subscription any more", () => {
+    api(() => ({ status: 200, body: {} }));
+    const { w } = mountCard(node({ clis: [cli("claude", "api_key", "2.1.322"), cli("codex", "none", "0.169.0")] as never, usage: usage({ email: "me@example.com", plan_tier: "max_5x" }, { email: "c@example.com" }) as never }));
+    expect(w.find("[data-account]").exists()).toBe(false);
+  });
+});
+
 describe("NodeCard 重新检测", () => {
   it("shows 检测中 and disables the button while waiting, then puts the answer in the list", async () => {
     let answer!: (a: { status: number; body: unknown }) => void;

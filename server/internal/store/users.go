@@ -48,8 +48,23 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 // CreateUser inserts an account; ErrConflict if the email is taken. The caller assigns its
 // role through the Casbin enforcer.
 func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (User, error) {
+	return s.CreateUserWithOptions(ctx, NewUser{Email: email, PasswordHash: passwordHash})
+}
+
+// NewUser is an account to insert (CreateUserWithOptions).
+type NewUser struct {
+	Email              string
+	PasswordHash       string
+	DisplayName        string
+	MustChangePassword bool
+}
+
+// CreateUserWithOptions inserts an account with a display name and the forced password
+// change flag; ErrConflict if the email is taken. The caller assigns its role.
+func (s *Store) CreateUserWithOptions(ctx context.Context, n NewUser) (User, error) {
 	id := NewHexID()
-	err := s.g(ctx).Table("at_users").Create(map[string]any{"id": id, "email": email, "password_hash": passwordHash,
+	err := s.g(ctx).Table("at_users").Create(map[string]any{"id": id, "email": n.Email, "password_hash": n.PasswordHash,
+		"display_name": n.DisplayName, "must_change_password": n.MustChangePassword,
 		"password_changed_at": gorm.Expr("now()")}).Error
 	if err != nil {
 		return User{}, mapErr(err)
