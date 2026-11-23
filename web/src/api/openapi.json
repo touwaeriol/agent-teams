@@ -78,6 +78,56 @@
         ],
         "type": "object"
       },
+      "AdminCreateUserInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "maxLength": 100,
+            "type": "string"
+          },
+          "email": {
+            "maxLength": 320,
+            "type": "string"
+          },
+          "must_change_password": {
+            "description": "Default true: the user must change the password after signing in",
+            "type": "boolean"
+          },
+          "password": {
+            "description": "Empty: the server generates a temporary password and returns it once",
+            "maxLength": 1024,
+            "type": "string"
+          },
+          "role": {
+            "default": "user",
+            "enum": [
+              "admin",
+              "user"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "type": "object"
+      },
+      "AdminCreatedUser": {
+        "additionalProperties": false,
+        "properties": {
+          "temp_password": {
+            "description": "Only when the server generated the password; shown once",
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/AdminUserView"
+          }
+        },
+        "required": [
+          "user"
+        ],
+        "type": "object"
+      },
       "AdminSettings": {
         "additionalProperties": false,
         "properties": {
@@ -5511,6 +5561,10 @@
             ],
             "type": "string"
           },
+          "email": {
+            "description": "Email of the logged-in subscription account. Only the node's owner can read nodes, so only the owner sees it",
+            "type": "string"
+          },
           "error": {
             "type": "string"
           },
@@ -5523,6 +5577,11 @@
             ]
           },
           "plan": {
+            "description": "Claude: subscription type (pro, max, team, enterprise); Codex: plan type (plus, pro, prolite, promax, ...)",
+            "type": "string"
+          },
+          "plan_tier": {
+            "description": "Claude: the CLI's plan tier (pro, max_5x, max_20x, max_other, other)",
             "type": "string"
           },
           "received_at": {
@@ -8955,6 +9014,45 @@
             "description": "Error"
           }
         },
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "operationId": "admin-create-user",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminCreateUserInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminCreatedUser"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Create an account (works with registration closed)",
         "tags": [
           "admin"
         ]

@@ -60,13 +60,61 @@ describe("collectUsage", () => {
       ],
     });
     expect(u.runtimes.codex).toEqual({
-      auth: "chatgpt", status: "ok", plan: "pro", fetched_at: "2026-11-19T12:00:00.000Z",
+      auth: "chatgpt", status: "ok", plan: "pro", email: "a@b.c", fetched_at: "2026-11-19T12:00:00.000Z",
       windows: [
         { key: "primary", used_percent: 42, window_minutes: 300, resets_at: new Date(1795608000 * 1000).toISOString() },
         { key: "secondary", used_percent: 7, window_minutes: 10080, resets_at: null },
       ],
     });
-    expect(JSON.stringify(u)).not.toMatch(/acct-secret|a@b\.c/);
+    expect(JSON.stringify(u)).not.toMatch(/acct-secret/);
+  });
+
+  it("adds the Claude account's email and plan tier from claude auth status", async () => {
+    const src = sources({ claudeAccount: async () => ({ email: "me@example.com", subscription_type: "max", plan_tier: "max_20x" }) });
+    const u = await collectUsage(src, 1000, now);
+    expect(u.runtimes.claude).toMatchObject({ auth: "subscription", status: "ok", plan: "max", plan_tier: "max_20x", email: "me@example.com" });
+  });
+
+  it("keeps the account on a failed quota read and takes the plan from it", async () => {
+    const src = sources({ claudeUsage: async () => { throw new Error("boom"); }, claudeAccount: async () => ({ email: "me@example.com", subscription_type: "team", plan_tier: "other" }) });
+    const u = await collectUsage(src, 1000, now);
+    expect(u.runtimes.claude).toMatchObject({ status: "error", plan: "team", plan_tier: "other", email: "me@example.com" });
+  });
+
+  it("reports no account when claude auth status gives nothing, fails or hangs", async () => {
+    for (const claudeAccount of [async () => null, async () => { throw new Error("x"); }, () => new Promise<null>(() => {})]) {
+      const u = await collectUsage(sources({ claudeAccount }), 50, now);
+      expect(u.runtimes.claude).toMatchObject({ status: "ok", plan: "max" });
+      expect(u.runtimes.claude).not.toHaveProperty("email");
+      expect(u.runtimes.claude).not.toHaveProperty("plan_tier");
+    }
+  });
+
+  it("never asks for the account of an API-key Claude login", async () => {
+    const claudeAccount = vi.fn(async () => ({ email: "me@example.com" }));
+    const u = await collectUsage(sources({ claudeAuth: () => "api_key", claudeAccount }), 1000, now);
+    expect(claudeAccount).not.toHaveBeenCalled();
+    expect(u.runtimes.claude).not.toHaveProperty("email");
+  });
+
+  it("reports the Codex email and the account's plan when the rate-limit snapshot has none; unknown is dropped", async () => {
+    const snap = { ...snapshot(1, 2), planType: "unknown" } as RateLimitSnapshot;
+    const u = await collectUsage(sources({
+      codexAccount: async () => ({ account: { type: "chatgpt", email: " l@example.com ", planType: "prolite" }, requiresOpenaiAuth: true }) as never,
+      codexRateLimits: async () => rateLimits(snap),
+    }), 1000, now);
+    expect(u.runtimes.codex).toMatchObject({ plan: "prolite", email: "l@example.com" });
+    const v = await collectUsage(sources({
+      codexAccount: async () => ({ account: { type: "chatgpt", email: null, planType: "unknown" }, requiresOpenaiAuth: true }) as never,
+      codexRateLimits: async () => rateLimits(snap),
+    }), 1000, now);
+    expect(v.runtimes.codex).not.toHaveProperty("plan");
+    expect(v.runtimes.codex).not.toHaveProperty("email");
+  });
+
+  it("keeps the Codex email when the rate-limit read fails", async () => {
+    const u = await collectUsage(sources({ codexRateLimits: async () => { throw new Error("down"); } }), 1000, now);
+    expect(u.runtimes.codex).toMatchObject({ status: "error", plan: "pro", email: "a@b.c" });
   });
 
   it("does not call anything for API-key or missing logins", async () => {
@@ -229,16 +277,17 @@ describe("daemon node.usage", () => {
       usageSources: {
         claudeAuth: () => "subscription",
         claudeUsage: async () => claudeOk,
+        claudeAccount: async () => ({ email: "me@example.com", subscription_type: "max", plan_tier: "max_5x" }),
         codexAuth: () => "chatgpt",
-        codexAccount: async () => ({ account: { type: "chatgpt" }, requiresOpenaiAuth: true }) as never,
+        codexAccount: async () => ({ account: { type: "chatgpt", email: "c@example.com", planType: "plus" }, requiresOpenaiAuth: true }) as never,
         codexRateLimits: async () => rateLimits(snapshot(42, 7)),
       },
     });
     expect(h.console.ofType("hello")[0]!.body.features).toContain("usage");
     const f = await h.console.waitType("node.usage");
     expect(f.seq).toBeUndefined();
-    expect(f.body.runtimes.claude).toMatchObject({ status: "ok", windows: [{ key: "five_hour", used_percent: 16 }, { key: "weekly" }, { key: "weekly_sonnet" }, { key: "weekly_model", label: "Fable" }] });
-    expect(f.body.runtimes.codex).toMatchObject({ status: "ok", windows: [{ key: "primary" }, { key: "secondary" }] });
+    expect(f.body.runtimes.claude).toMatchObject({ status: "ok", plan_tier: "max_5x", email: "me@example.com", windows: [{ key: "five_hour", used_percent: 16 }, { key: "weekly" }, { key: "weekly_sonnet" }, { key: "weekly_model", label: "Fable" }] });
+    expect(f.body.runtimes.codex).toMatchObject({ status: "ok", email: "c@example.com", windows: [{ key: "primary" }, { key: "secondary" }] });
   });
 
   it("answers node.usage_refresh with both runtimes, from the cache within a minute", async () => {
@@ -247,6 +296,7 @@ describe("daemon node.usage", () => {
       usageSources: {
         claudeAuth: () => "subscription",
         claudeUsage: async () => (claudeReads++, claudeOk),
+        claudeAccount: async () => null,
         codexAuth: () => "none",
       },
     });
