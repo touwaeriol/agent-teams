@@ -7,7 +7,7 @@ import { addRepo, matchesRepo, moveRepo, normalizeRepo, removeRepo, repoOptions,
 import { draftValid, emptyDraft, scheduleBody } from "@/components/app/schedules/schedule";
 import { parseSetting } from "@/pages/admin/admin";
 import { connectionKind, usedText } from "@/pages/settings/github/github";
-import { cliLabel, cliLogin, cliRows, createRefreshCooldown, hoverIntent, recheckState, runtimeInfos, withNode, needsUsageRefresh, nodeMeta, nodeStats, resetText, runtimeLine, settingsPatch, slotPct, updateView, usageLevel, usageView, windowLabel, withNodeUsage } from "@/pages/settings/nodes/nodes";
+import { accountView, cliLabel, cliLogin, cliRows, createRefreshCooldown, hoverIntent, recheckState, runtimeInfos, withNode, needsUsageRefresh, nodeMeta, nodeStats, planLabel, resetText, runtimeLine, settingsPatch, slotPct, updateView, usageLevel, usageView, windowLabel, withNodeUsage } from "@/pages/settings/nodes/nodes";
 import { isDirty, nodePickerText, ordered, patchAt, removeAt, toggleId, versionText } from "@/pages/settings/team/team";
 import { employeeRows, fromChoice, inlineCommit, leadTimeoutLabel, memoryFileName, memoryWriter, repoRefs, splitMemory, threadRows, toChoice } from "@/pages/projectSettings/logic";
 import { newRole } from "@/lib/roles";
@@ -213,6 +213,34 @@ describe("nodes", () => {
     expect(usageView("claude", { cli: "2.1", auth: "none" }, { ...ok, windows: [...ok.windows] }, on, now)).toBeNull();
     expect(usageView("claude", { cli: "2.1", auth: "api_key" }, { ...ok, windows: [...ok.windows] }, on, now)).toBeNull();
     expect(usageView("codex", { cli: "0.1", auth: "api_key" }, { ...ok, auth: "chatgpt", windows: [...ok.windows] }, on, now)).toBeNull();
+  });
+  it("plan labels: Claude tier first, then the subscription type; Codex plan types without multiples", () => {
+    const c = (plan?: string, plan_tier?: string) => planLabel("claude", { plan, plan_tier });
+    expect([c("max", "max_5x"), c("max", "max_20x"), c("pro", "pro"), c("max", "max_other"), c("team", "other"), c("enterprise", "other"), c("max"), c(undefined, "max_other"), c()]).toEqual(["Max 5x", "Max 20x", "Pro", "Max", "Team", "Enterprise", "Max", "", ""]);
+    expect(c("newplan", "newtier")).toBe("newplan");
+    const x = (plan?: string) => planLabel("codex", { plan });
+    expect(["plus", "pro", "prolite", "promax", "team", "free", "go", "business", "enterprise", "edu"].map(x)).toEqual(["Plus", "Pro", "Pro Lite", "Pro Max", "Team", "Free", "Go", "Business", "Enterprise", "Edu"]);
+    expect([x("edu_plus"), x("self_serve_business_prolite"), x("unknown"), x(undefined), x("")]).toEqual(["edu_plus", "self_serve_business_prolite", "", "", ""]);
+    expect(["plus", "pro", "prolite", "promax"].map(x).join(" ")).not.toMatch(/\dx/);
+  });
+  it("account line: only for a subscription login whose daemon reports the account", () => {
+    const sub = { cli: "2.1", auth: "subscription" };
+    const u = (p: object) => ({ auth: "subscription", status: "ok", windows: [], fetched_at: null, received_at: "", ...p }) as never;
+    expect(accountView("claude", sub, u({ email: "me@example.com", plan: "max", plan_tier: "max_20x" }))).toEqual({ email: "me@example.com", plan: "Max 20x" });
+    expect(accountView("claude", sub, u({ status: "error", email: "me@example.com", plan: "team", plan_tier: "other" }))).toEqual({ email: "me@example.com", plan: "Team" });
+    expect(accountView("claude", sub, u({ plan_tier: "max_5x" }))).toEqual({ email: "", plan: "Max 5x" });
+    // an older daemon: plan only, no account line
+    expect(accountView("claude", sub, u({ plan: "max" }))).toBeNull();
+    expect(accountView("claude", sub, undefined)).toBeNull();
+    expect(accountView("claude", { cli: "2.1", auth: "api_key" }, u({ email: "me@example.com" }))).toBeNull();
+    expect(accountView("claude", sub, u({ auth: "api_key", status: "unsupported", email: "me@example.com" }))).toBeNull();
+    expect(accountView("codex", { cli: "0.1", auth: "chatgpt" }, u({ auth: "chatgpt", email: "c@example.com", plan: "prolite" }))).toEqual({ email: "c@example.com", plan: "Pro Lite" });
+    expect(accountView("codex", { cli: "0.1", auth: "chatgpt" }, u({ auth: "chatgpt", email: "c@example.com", plan: "unknown" }))).toEqual({ email: "c@example.com", plan: "" });
+    expect(accountView("antigravity", { cli: "1", auth: "subscription" }, u({ email: "g@example.com" }))).toBeNull();
+    // the plan moves from the updated line to the account line
+    const ok = { auth: "subscription", status: "ok", plan: "max", fetched_at: new Date().toISOString(), received_at: "", windows: [{ key: "weekly", used_percent: 3, resets_at: null }] };
+    expect(usageView("claude", sub, { ...ok, plan_tier: "max_20x" } as never, { online: true })).toMatchObject({ updated: "更新于 刚刚" });
+    expect(usageView("claude", sub, ok as never, { online: true })).toMatchObject({ updated: "max · 更新于 刚刚" });
   });
   it("hover refresh: only stale subscription quota on online nodes, after 300 ms, one node's usage replaced", () => {
     const now = Date.parse("2026-11-19T10:00:00Z");

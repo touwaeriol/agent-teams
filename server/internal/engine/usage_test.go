@@ -322,3 +322,109 @@ func TestNodeUsageSupported(t *testing.T) {
 		t.Fatalf("offline uses last hello: %+v", m)
 	}
 }
+
+// TestNodeUsageAccountOwnerOnly: the login email and plan tier of node.usage reach the node's owner
+// (GET /api/nodes, usage/refresh, recheck) and nobody else: another user's node list does not
+// have the node and every per-node route answers 404. An API key login or a malformed email keeps
+// no account fields.
+func TestNodeUsageAccountOwnerOnly(t *testing.T) {
+	w := newWorld(t, nil)
+	owner := w.signUp("owner@example.com")
+	other := w.signUp("other@example.com")
+	var node, mine nodeCreated
+	owner.must(201, "POST", "/api/nodes", map[string]string{"name": "n1"}, &node)
+	other.must(201, "POST", "/api/nodes", map[string]string{"name": "n1"}, &mine)
+	n := w.connect(node.Token, nodetest.Options{Features: []string{"sessions", "usage", "runtime_status"}})
+	ctx, cancel := w.waitCtx()
+	defer cancel()
+	const claudeEmail, codexEmail = "claude.login@corp.example", "codex.login@corp.example"
+	report := map[string]any{"runtimes": map[string]any{
+		"claude": map[string]any{"auth": "subscription", "status": "ok", "plan": "max", "plan_tier": "max_20x", "email": " " + claudeEmail + " ", "windows": []any{}},
+		"codex":  map[string]any{"auth": "chatgpt", "status": "error", "error": "down", "plan": "prolite", "email": codexEmail},
+	}}
+	if err := n.SendUnreliable(ctx, "node.usage", report); err != nil {
+		t.Fatal(err)
+	}
+	type runtime struct {
+		Plan     string `json:"plan"`
+		PlanTier string `json:"plan_tier"`
+		Email    string `json:"email"`
+	}
+	type view struct {
+		ID    string `json:"id"`
+		Usage *struct {
+			Claude *runtime `json:"claude"`
+			Codex  *runtime `json:"codex"`
+		} `json:"usage"`
+	}
+	ownerView := func() view {
+		var nodes []view
+		owner.must(200, "GET", "/api/nodes", nil, &nodes)
+		if len(nodes) != 1 {
+			t.Fatalf("owner nodes %+v", nodes)
+		}
+		return nodes[0]
+	}
+	eventually(t, "usage stored", func() bool { return ownerView().Usage != nil })
+	v := ownerView()
+	if c := v.Usage.Claude; c == nil || c.Email != claudeEmail || c.PlanTier != "max_20x" || c.Plan != "max" {
+		t.Fatalf("owner claude %+v", c)
+	}
+	if c := v.Usage.Codex; c == nil || c.Email != codexEmail || c.Plan != "prolite" || c.PlanTier != "" {
+		t.Fatalf("owner codex %+v", c)
+	}
+	if code, raw := owner.do("POST", "/api/nodes/"+node.Node.ID+"/usage/refresh", nil); code != 200 || !strings.Contains(string(raw), claudeEmail) {
+		t.Fatalf("owner refresh: %d %s", code, raw)
+	}
+
+	// The other user: their own list has only their node; every route on the owner's node is a 404
+	// and nothing they get back carries the emails.
+	leaks := func(what string, raw []byte) {
+		t.Helper()
+		for _, e := range []string{claudeEmail, codexEmail, "max_20x"} {
+			if strings.Contains(string(raw), e) {
+				t.Fatalf("%s leaks %q: %s", what, e, raw)
+			}
+		}
+	}
+	code, raw := other.do("GET", "/api/nodes", nil)
+	if code != 200 || strings.Contains(string(raw), node.Node.ID) {
+		t.Fatalf("other list: %d %s", code, raw)
+	}
+	leaks("other list", raw)
+	id := node.Node.ID
+	for _, r := range []struct{ method, path string }{
+		{"POST", "/api/nodes/" + id + "/usage/refresh"}, {"POST", "/api/nodes/" + id + "/recheck"},
+		{"PATCH", "/api/nodes/" + id}, {"GET", "/api/nodes/" + id + "/sessions"}, {"GET", "/api/nodes/" + id + "/logs"},
+	} {
+		var body any
+		if r.method == "PATCH" {
+			body = map[string]any{"labels": []string{"x"}}
+		}
+		code, raw := other.do(r.method, r.path, body)
+		if code != 404 {
+			t.Fatalf("other %s %s: %d %s", r.method, r.path, code, raw)
+		}
+		leaks(r.method+" "+r.path, raw)
+	}
+
+	// An API key login keeps no account fields; neither does an email without @.
+	bad := map[string]any{"runtimes": map[string]any{
+		"claude": map[string]any{"auth": "api_key", "status": "unsupported", "plan_tier": "max_5x", "email": claudeEmail},
+		"codex":  map[string]any{"auth": "chatgpt", "status": "ok", "email": "not-an-email"},
+	}}
+	if err := n.SendUnreliable(ctx, "node.usage", bad); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "second report", func() bool {
+		u := ownerView().Usage
+		return u != nil && u.Codex != nil && u.Codex.Plan == ""
+	})
+	v = ownerView()
+	if c := v.Usage.Claude; c == nil || c.Email != "" || c.PlanTier != "" {
+		t.Fatalf("api key claude %+v", c)
+	}
+	if c := v.Usage.Codex; c == nil || c.Email != "" {
+		t.Fatalf("bad email codex %+v", c)
+	}
+}

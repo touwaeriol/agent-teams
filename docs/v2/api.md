@@ -125,6 +125,8 @@ NodeCLI         = {runtime, installed, version?, path?, auth: "subscription"|"ch
                    ready}        // 已安装、已登录、未过期：可以往这个节点派该运行时的会话
 NodeUsage       = {claude?: RuntimeUsage, codex?: RuntimeUsage}   // 节点最近一次 node.usage 上报（protocol.md §9），控制台只存内存：重启后为 null 直到下次上报；节点离线后保留最后一次，用 received_at 判断新旧
 RuntimeUsage    = {auth: "subscription"|"chatgpt"|"api_key"|"none", status: "ok"|"error"|"unsupported", plan?, error?,
+                   plan_tier?,             // 只有 Claude：pro|max_5x|max_20x|max_other|other（claude auth status 的 planTier）
+                   email?,                 // 订阅登录的账号邮箱（API Key 登录没有）；节点接口都只对所有者开放，所以只有所有者看得到
                    windows: [{key: "five_hour"|"weekly"|"weekly_opus"|"weekly_sonnet"|"weekly_model"|"primary"|"secondary"|…, label?, used_percent: 0..100, window_minutes?, resets_at: ISO|null}],  // 最多 8 个
                    fetched_at: ISO|null,   // 守护进程取数的时间
                    received_at}            // 控制台收到上报的时间

@@ -43,8 +43,9 @@ export function fileStamp(path: string): string | null {
 }
 
 /**
- * Probes the Claude login (protocol.md §3: accountInfo, then close). Only the auth kind is reported, never the
- * account's email or organisation. A probe that fails or times out falls back to what the files say: a
+ * Probes the Claude login (protocol.md §3: accountInfo, then close). node.runtimes carries only the auth kind;
+ * the account's email and plan tier go in node.usage (usage.ts, from `claude auth status`), which the console
+ * shows to the node's owner only. The organisation is never reported. A probe that fails or times out falls back to what the files say: a
  * credentials file means a subscription login, an API key env means api_key.
  */
 export async function probeClaude(env: Record<string, string>, cwd: string, opts: { queryFn?: QueryFn; timeoutMs?: number; credentialsFile?: string } = {}): Promise<ClaudeProbe> {
