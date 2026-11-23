@@ -188,7 +188,44 @@ export function usageView(key: string, info: RuntimeInfo | undefined, usage: Run
     return { key: w.key, label: windowLabel(w), pct, width: `${pct}%`, tone: USAGE_TONE[usageLevel(pct)], reset: resetText(w.resets_at, now) };
   });
   if (!rows.length) return null;
-  return { kind: "windows", rows, updated: [usage.plan, `更新于 ${timeAgo(usage.fetched_at || usage.received_at)}`].filter(Boolean).join(" · ") };
+  // The plan moves to the account line when there is one (accountView); an older daemon keeps it here.
+  const plan = hasAccount(usage) ? "" : usage.plan;
+  return { kind: "windows", rows, updated: [plan, `更新于 ${timeAgo(usage.fetched_at || usage.received_at)}`].filter(Boolean).join(" · ") };
+}
+
+/** Claude's plan tier from `claude auth status`; max_other / other fall back to the subscription type. */
+const CLAUDE_TIER: Record<string, string> = { pro: "Pro", max_5x: "Max 5x", max_20x: "Max 20x" };
+const CLAUDE_PLAN: Record<string, string> = { pro: "Pro", max: "Max", team: "Team", enterprise: "Enterprise" };
+/** Codex's planType (account/read). No usage multiples: they cannot be confirmed from the node's data. */
+const CODEX_PLAN: Record<string, string> = {
+  free: "Free", go: "Go", plus: "Plus", pro: "Pro", prolite: "Pro Lite", promax: "Pro Max", team: "Team", business: "Business", enterprise: "Enterprise", edu: "Edu",
+};
+
+/** The plan as shown on a card: a known tier or plan in its display form, any other reported value as is, "" when unknown. */
+export function planLabel(key: string, u: Pick<RuntimeUsage, "plan" | "plan_tier"> | undefined): string {
+  const plan = u?.plan?.trim() ?? "";
+  const tier = u?.plan_tier?.trim() ?? "";
+  if (key === "claude") return CLAUDE_TIER[tier] ?? (plan ? CLAUDE_PLAN[plan] ?? plan : "");
+  if (key === "codex") return !plan || plan === "unknown" ? "" : CODEX_PLAN[plan] ?? plan;
+  return plan;
+}
+
+/** A daemon that reports the login's account (email or tier); older ones never do. */
+function hasAccount(u: RuntimeUsage): boolean {
+  return Boolean(u.email || u.plan_tier);
+}
+
+/** The account line under a runtime: the login's email and plan. null when the daemon does not report them (the card stays as before). */
+export type AccountView = { email: string; plan: string } | null;
+
+export function accountView(key: string, info: RuntimeInfo | undefined, usage: RuntimeUsage | undefined): AccountView {
+  const sub = SUBSCRIPTION[key];
+  // Same login gate as the quota: logged out or switched to an API key hides a leftover account.
+  if (!info?.cli || !sub || info.auth !== sub) return null;
+  if (!usage || usage.auth !== sub || usage.status === "unsupported" || !hasAccount(usage)) return null;
+  const email = usage.email?.trim() ?? "";
+  const plan = planLabel(key, usage);
+  return email || plan ? { email, plan } : null;
 }
 
 /** Quota younger than this is shown as is; hovering does not ask the node again. */

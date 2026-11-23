@@ -21,6 +21,7 @@ import { LiveDigest } from "./move/live.js";
 import { Mover } from "./move/mover.js";
 import { consoleTransfer, type MoveTransfer } from "./move/transfer.js";
 import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, FileDownload, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, NodeRuntimesRefresh, NodeUsageRefresh, SessionClose, SshCertResponse, SshServersUpdate, SessionCompact, SessionExport, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
+import { readClaudeAccount } from "./claude-account.js";
 import { readClaudeUsage, UsageReporter, type UsageSources } from "./usage.js";
 import type { QueryFn } from "./sessions/claude/driver.js";
 import { RuntimeRegistry } from "./sessions/registry.js";
@@ -332,6 +333,7 @@ export class Daemon {
       claudeAuth: () => (this.runtimes.get("claude").info() as ClaudeRuntime).auth,
       codexAuth: () => (this.runtimes.get("codex").info() as CodexRuntime).auth,
       claudeUsage: (signal) => readClaudeUsage(this.claudeEnv({}), this.employeeHome, signal, this.o.queryFn),
+      claudeAccount: (signal) => readClaudeAccount(this.claudeEnv({}), this.employeeHome, { signal }),
       codexAccount: () => this.hub.request("account/read", { refreshToken: false }),
       codexRateLimits: () => this.hub.request("account/rateLimits/read", { excludeResetCreditDetails: true }),
       lastCodexEvent: () => this.hub.lastRateLimits,

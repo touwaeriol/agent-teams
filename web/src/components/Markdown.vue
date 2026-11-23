@@ -8,7 +8,7 @@ const props = defineProps<{ source: string; class?: string; urlTransform?: UrlTr
 const Rendered = computed(() => () => renderMarkdown(props.source, props.urlTransform, { preview: props.preview, breaks: props.breaks }));
 const classes = computed(() =>
   cn(
-    "prose prose-sm dark:prose-invert max-w-none break-words leading-6",
+    "prose prose-sm dark:prose-invert max-w-none at-wrap leading-6",
     "prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-headings:mb-2 prose-headings:mt-4 prose-headings:text-foreground",
     "prose-a:text-brand prose-strong:text-foreground prose-code:rounded prose-code:bg-raised prose-code:px-1 prose-code:py-0.5 prose-code:font-mono prose-code:text-[12px] prose-code:before:content-none prose-code:after:content-none",
     "prose-pre:scroll-thin prose-pre:rounded-lg prose-pre:border prose-pre:border-border prose-pre:bg-raised prose-pre:text-foreground prose-pre:text-[12.5px] prose-pre:leading-5 prose-pre:px-3 prose-pre:py-2.5",

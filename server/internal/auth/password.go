@@ -75,10 +75,18 @@ func NormalizeEmail(email string) string { return strings.ToLower(strings.TrimSp
 
 // CheckCredentials returns why the credentials are unacceptable, or "".
 func CheckCredentials(email, password string) string {
+	if reason := CheckEmail(email); reason != "" {
+		return reason
+	}
+	return CheckPassword(password)
+}
+
+// CheckEmail returns why a (normalized) email address is unacceptable, or "".
+func CheckEmail(email string) string {
 	if !emailPattern.MatchString(email) {
 		return "请输入有效的邮箱地址"
 	}
-	return CheckPassword(password)
+	return ""
 }
 
 // CheckPassword returns why a new password is unacceptable, or "".

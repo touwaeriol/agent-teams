@@ -172,6 +172,7 @@ export const git = {
 };
 
 export const admin = {
+  createUser: (body: S["AdminCreateUserInputBody"]) => unwrap(client.POST("/api/admin/users", { body })),
   updateUser: (id: string, body: S["UserPatchInputBody"]) => unwrap(client.PATCH("/api/admin/users/{id}", { params: { path: { id } }, body })),
   removeUser: (id: string) => unwrap(client.DELETE("/api/admin/users/{id}", { params: { path: { id } } })),
   resetPassword: (id: string) => unwrap(client.POST("/api/admin/users/{id}/password-reset", { params: { path: { id } } })),

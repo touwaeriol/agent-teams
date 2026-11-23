@@ -2,8 +2,10 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -31,6 +33,24 @@ type userPatchInput struct {
 		DisplayName            *string `json:"display_name,omitempty" maxLength:"100"`
 	}
 }
+
+type adminCreateUserInput struct {
+	Body struct {
+		Email              string `json:"email" maxLength:"320"`
+		DisplayName        string `json:"display_name,omitempty" maxLength:"100"`
+		Role               string `json:"role,omitempty" enum:"admin,user" default:"user"`
+		Password           string `json:"password,omitempty" maxLength:"1024" doc:"Empty: the server generates a temporary password and returns it once"`
+		MustChangePassword *bool  `json:"must_change_password,omitempty" doc:"Default true: the user must change the password after signing in"`
+	}
+}
+
+// AdminCreatedUser is the answer to POST /api/admin/users.
+type AdminCreatedUser struct {
+	User         AdminUserView `json:"user"`
+	TempPassword string        `json:"temp_password,omitempty" doc:"Only when the server generated the password; shown once"`
+}
+
+type adminCreateUserOutput struct{ Body AdminCreatedUser }
 
 type tempPasswordOutput struct {
 	Body struct {
@@ -69,6 +89,8 @@ type auditOutput struct {
 func (s *Server) registerAdmin(api huma.API) {
 	tags := []string{"admin"}
 	huma.Register(api, huma.Operation{OperationID: "admin-list-users", Method: "GET", Path: "/api/admin/users", Tags: tags}, s.adminUsers)
+	huma.Register(api, huma.Operation{OperationID: "admin-create-user", Method: "POST", Path: "/api/admin/users",
+		Summary: "Create an account (works with registration closed)", Tags: tags, DefaultStatus: 201}, s.adminCreateUser)
 	huma.Register(api, huma.Operation{OperationID: "admin-update-user", Method: "PATCH", Path: "/api/admin/users/{id}", Tags: tags}, s.adminUpdateUser)
 	huma.Register(api, huma.Operation{OperationID: "admin-delete-user", Method: "DELETE", Path: "/api/admin/users/{id}", Tags: tags, DefaultStatus: 204}, s.adminDeleteUser)
 	huma.Register(api, huma.Operation{OperationID: "admin-reset-password", Method: "POST", Path: "/api/admin/users/{id}/password-reset", Tags: tags}, s.adminResetPassword)
@@ -90,6 +112,59 @@ func (s *Server) adminUsers(ctx context.Context, _ *struct{}) (*adminUsersOutput
 		out[i] = adminUserView(u, s.authz.role(u.ID))
 	}
 	return &adminUsersOutput{Body: out}, nil
+}
+
+// adminCreateUser creates an account for someone else. Without a password the server makes
+// up a temporary one and answers it once; the password itself is never audited or logged.
+func (s *Server) adminCreateUser(ctx context.Context, in *adminCreateUserInput) (*adminCreateUserOutput, error) {
+	admin, err := requireAdmin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	b := in.Body
+	email := auth.NormalizeEmail(b.Email)
+	if reason := auth.CheckEmail(email); reason != "" {
+		return nil, fail(http.StatusUnprocessableEntity, "invalid_email", reason)
+	}
+	role := b.Role
+	if role == "" {
+		role = roleUser
+	}
+	password, generated := b.Password, b.Password == ""
+	if generated {
+		password = auth.RandomPassword()
+	} else if reason := auth.CheckPassword(password); reason != "" {
+		return nil, fail(http.StatusUnprocessableEntity, "weak_password", reason)
+	}
+	mustChange := b.MustChangePassword == nil || *b.MustChangePassword
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return nil, err
+	}
+	user, err := s.store.CreateUserWithOptions(ctx, store.NewUser{Email: email, PasswordHash: hash,
+		DisplayName: strings.TrimSpace(b.DisplayName), MustChangePassword: mustChange})
+	if errors.Is(err, store.ErrConflict) {
+		return nil, fail(http.StatusConflict, "email_taken", "这个邮箱已经注册过了")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := s.authz.setRole(user.ID, role); err != nil {
+		// No account without a role: take the row back so the address can be used again.
+		if derr := s.store.DeleteUser(ctx, user.ID); derr != nil {
+			s.log.Error("admin create user: remove account without role", "user_id", user.ID, "err", derr)
+		}
+		return nil, err
+	}
+	s.audit(ctx, admin.User.ID, "user_create", "user", user.ID, map[string]any{"email": email, "role": role,
+		"generated_password": generated, "must_change_password": mustChange})
+	out := &adminCreateUserOutput{}
+	out.Body.User = AdminUserView{UserView: userView(user, s.authz.role(user.ID)), MaxRunningThreads: user.MaxRunningThreads,
+		LastLoginAt: user.LastLoginAt}
+	if generated {
+		out.Body.TempPassword = password
+	}
+	return out, nil
 }
 
 func (s *Server) adminUpdateUser(ctx context.Context, in *userPatchInput) (*userOutput, error) {

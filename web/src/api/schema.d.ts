@@ -231,7 +231,8 @@ export interface paths {
         };
         get: operations["admin-list-users"];
         put?: never;
-        post?: never;
+        /** Create an account (works with registration closed) */
+        post: operations["admin-create-user"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2272,6 +2273,24 @@ export interface components {
             items: components["schemas"]["Activity"][] | null;
             next_cursor: string | null;
         };
+        AdminCreateUserInputBody: {
+            display_name?: string;
+            email: string;
+            /** @description Default true: the user must change the password after signing in */
+            must_change_password?: boolean;
+            /** @description Empty: the server generates a temporary password and returns it once */
+            password?: string;
+            /**
+             * @default user
+             * @enum {string}
+             */
+            role: "admin" | "user";
+        };
+        AdminCreatedUser: {
+            /** @description Only when the server generated the password; shown once */
+            temp_password?: string;
+            user: components["schemas"]["AdminUserView"];
+        };
         AdminSettings: {
             /** Format: int64 */
             default_max_nodes: number;
@@ -3869,13 +3888,18 @@ export interface components {
              * @enum {string}
              */
             auth: "subscription" | "chatgpt" | "api_key" | "none";
+            /** @description Email of the logged-in subscription account. Only the node's owner can read nodes, so only the owner sees it */
+            email?: string;
             error?: string;
             /**
              * Format: date-time
              * @description When the daemon fetched the data
              */
             fetched_at: string | null;
+            /** @description Claude: subscription type (pro, max, team, enterprise); Codex: plan type (plus, pro, prolite, promax, ...) */
             plan?: string;
+            /** @description Claude: the CLI's plan tier (pro, max_5x, max_20x, max_other, other) */
+            plan_tier?: string;
             /**
              * Format: date-time
              * @description When the console received the report
@@ -5274,6 +5298,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminUserView"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "admin-create-user": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminCreateUserInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminCreatedUser"];
                 };
             };
             /** @description Error */
