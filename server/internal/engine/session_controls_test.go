@@ -192,6 +192,44 @@ func TestSessionControls(t *testing.T) {
 	b.must(404, "GET", "/api/projects/nope/session-controls", nil, nil)
 	other := w.signUp("other-controls@example.com")
 	other.must(404, "GET", base, nil, nil)
+
+	// The new-session page: options from the user's latest Claude session, picks kept on the new
+	// session's employee and opened with.
+	var opts struct {
+		Runtime     string
+		DefaultMode string `json:"default_mode"`
+		Model       string
+		Modes       []struct{ ID string }
+		Models      []struct{ ID string }
+		Efforts     []string
+	}
+	b.must(200, "GET", "/api/session-options?role=dev", nil, &opts)
+	if opts.Runtime != "claude" || opts.DefaultMode != "auto" || len(opts.Models) != 2 || len(opts.Modes) != 5 || len(opts.Efforts) == 0 {
+		t.Fatalf("session options %+v", opts)
+	}
+	b.must(200, "GET", "/api/session-options?role=dev&model=claude-haiku-4-5", nil, &opts)
+	if opts.DefaultMode != "default" || len(opts.Modes) != 4 || len(opts.Efforts) != 0 {
+		t.Fatalf("session options for a model without auto %+v", opts)
+	}
+	b.must(422, "GET", "/api/session-options?role=nope", nil, nil)
+	b.must(422, "POST", "/api/sessions", map[string]any{"message": "x", "role": "dev", "permission_mode": "nope",
+		"repos": []map[string]any{{"repo": "o/r", "git_connection_id": conn.ID}}}, nil)
+	var second struct{ Project struct{ ID string } }
+	b.must(201, "POST", "/api/sessions", map[string]any{"message": "第二个会话", "role": "dev", "node_id": node.Node.ID,
+		"permission_mode": "plan", "effort": "high", "repos": []map[string]any{{"repo": "o/r", "git_connection_id": conn.ID}}}, &second)
+	ctx, cancel = w.waitCtx()
+	f, err = n.Wait(ctx, protocol.TypeSessionOpen, func(f nodetest.Frame) bool {
+		return strings.Contains(string(f.Body), `"project_id":"`+second.Project.ID+`"`)
+	})
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var open2 protocol.SessionOpen
+	_ = f.Decode(&open2)
+	if open2.Claude.PermissionMode != "plan" || open2.Claude.PreferAuto != nil || open2.Claude.Effort == nil || *open2.Claude.Effort != "high" {
+		t.Fatalf("a session opens with the picks of the new-session page: %+v", open2.Claude)
+	}
 }
 
 func expectSetModeBody(t *testing.T, a *fakeAgent) protocol.SessionSetMode {

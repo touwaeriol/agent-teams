@@ -2,7 +2,8 @@
 // Message box. `large`: the coordinator and lead chats (textarea + hint row, with the employee's
 // model as a read-only tag when `assist` names the conversation); `inline`: one-line box. Enter
 // sends, Shift+Enter breaks; IME composition is respected. With `draftKey` the unsent text survives
-// reloads (localStorage). Slots: `hint` (left of the action row), `extra`.
+// reloads (localStorage). Slots: `hint` (left of the action row), `controls` (in place of the
+// model tag: a session's model / mode chips), `extra`.
 import { computed, ref, watch } from "vue";
 import { useDraft } from "@/lib/persist";
 import { toast } from "@/lib/toast";
@@ -182,7 +183,8 @@ function onKey(e: KeyboardEvent) {
       <span class="flex min-w-0 flex-1 items-center gap-2">
         <PlusMenu v-if="assist.enabled.value" :assist="assist" :a="attachments" />
         <span class="min-w-0 truncate text-xs text-muted-foreground" data-testid="composer-hint"><slot name="hint">{{ hint }}</slot></span>
-        <ModelTag v-if="props.assist?.cid" :cid="props.assist.cid" />
+        <slot v-if="$slots.controls" name="controls" />
+        <ModelTag v-else-if="props.assist?.cid" :cid="props.assist.cid" />
       </span>
       <span class="flex shrink-0 items-center gap-2">
         <AttachButton v-if="attachments && !assist.enabled.value" :a="attachments" />

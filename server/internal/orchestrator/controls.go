@@ -691,3 +691,46 @@ func jsonOf(v any) []byte {
 	b, _ := json.Marshal(v)
 	return b
 }
+
+// SessionOptions is GET /api/session-options: the permission modes, models and efforts a new
+// session made from a role can start with (the new-session page).
+type SessionOptions struct {
+	Runtime     string        `json:"runtime"`
+	DefaultMode string        `json:"default_mode" doc:"What the session opens in without a pick: Claude auto (when the model supports it, else default), Codex/Antigravity the role's"`
+	Model       string        `json:"model" doc:"The model the session would run without a pick"`
+	Modes       []ModeOption  `json:"modes"`
+	Models      []ModelChoice `json:"models" doc:"From the user's latest session on this runtime ([] = none reported yet: type a model id)"`
+	Efforts     []string      `json:"efforts" doc:"Effort levels of the model ([] = none to pick or not known yet)"`
+}
+
+// SessionOptionsFor computes SessionOptions for a role template and an optional model pick.
+func (o *Orchestrator) SessionOptionsFor(ctx context.Context, userID string, role store.Role, model string) (SessionOptions, error) {
+	e := core.Employee{Tier: "lead", Runtime: runtimes.Of(role.Runtime).ID, Spec: SessionRole(role, model, "")}
+	e.Spec.Solo = true
+	out := SessionOptions{Runtime: e.Runtime, Modes: []ModeOption{}, Models: []ModelChoice{}, Efforts: []string{}}
+	var raw []json.RawMessage
+	err := o.core.Pool.Gorm(ctx).Raw(`SELECT s.init FROM at_agent_sessions s
+		JOIN at_employees e ON e.id = s.employee_id JOIN at_projects p ON p.id = e.project_id
+		WHERE p.user_id = ? AND s.runtime = ? AND s.init->'models' IS NOT NULL ORDER BY s.opened_at DESC LIMIT 1`, userID, e.Runtime).Scan(&raw).Error
+	if err != nil {
+		return out, err
+	}
+	if len(raw) > 0 {
+		out.Models = initModels(raw[0])
+	}
+	out.Model = firstNonEmpty(model, e.Spec.ModelFor(e.Runtime), builtinModel(e.Runtime))
+	if out.Model == "" {
+		if i := slices.IndexFunc(out.Models, func(m ModelChoice) bool { return m.Default }); i >= 0 {
+			out.Model = out.Models[i].ID
+		}
+	}
+	out.Modes = modesFor(e.Runtime, out.Models, out.Model, Bypass(e) && !readOnly(e))
+	out.DefaultMode = soloMode(e)
+	if !slices.ContainsFunc(out.Modes, func(m ModeOption) bool { return m.ID == out.DefaultMode }) {
+		out.DefaultMode = "default"
+	}
+	if runtimes.Of(e.Runtime).Efforts {
+		out.Efforts = effortsOf(out.Models, out.Model)
+	}
+	return out, nil
+}
