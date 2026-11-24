@@ -266,10 +266,16 @@ export interface ContextEvent {
   updated_at?: string;
 }
 
-function onContext(qc: QueryClient, _pid: string, d: ContextEvent) {
+function onContext(qc: QueryClient, pid: string, d: ContextEvent) {
   if (!d?.conversation_id) return;
   qc.setQueryData<ContextEvent>(keys.contextEvent(d.conversation_id), d);
   qc.invalidateQueries({ queryKey: keys.contextDetail(d.conversation_id) });
+  // A stored breakdown also rewrote the session's totals (context_used/max): the bar above the
+  // categories reads them from the thread, which a refresh between turns does not otherwise refetch.
+  if (d.updated_at) {
+    qc.invalidateQueries({ queryKey: keys.threads(pid), exact: true });
+    qc.invalidateQueries({ queryKey: keys.thread(d.conversation_id), exact: true });
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

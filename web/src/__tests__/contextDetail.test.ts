@@ -236,4 +236,18 @@ describe("SessionContextPanel", () => {
     expect(calls(spy, "/context/detail")).toHaveLength(2);
     expect(queryClient.getQueryData(keys.contextEvent("t1"))).toMatchObject({ reason: "turn" });
   });
+
+  it("a stored breakdown refetches the thread too (its totals feed the bar); an error or stale answer does not", async () => {
+    api(() => ({ status: 200, body: contextDetail() }));
+    const { queryClient } = mountPanel({ id: "t1", session: session() });
+    await flushPromises();
+    const spy = vi.spyOn(queryClient, "invalidateQueries");
+    const invalidated = () => spy.mock.calls.map((c) => JSON.stringify((c[0] as { queryKey: unknown }).queryKey));
+    applyProjectEvent(queryClient, "p1", "context", { thread_no: 1, conversation_id: "t1", session_id: "s_1", reason: "refresh", refresh_id: "cr_1", error: "x" });
+    applyProjectEvent(queryClient, "p1", "context", { thread_no: 1, conversation_id: "t1", session_id: "s_1", reason: "refresh", refresh_id: "cr_2" });
+    expect(invalidated()).not.toContain(JSON.stringify(keys.threads("p1")));
+    applyProjectEvent(queryClient, "p1", "context", { thread_no: 1, conversation_id: "t1", session_id: "s_1", reason: "refresh", refresh_id: "cr_3", updated_at: "y" });
+    expect(invalidated()).toContain(JSON.stringify(keys.threads("p1")));
+    expect(invalidated()).toContain(JSON.stringify(keys.thread("t1")));
+  });
 });
