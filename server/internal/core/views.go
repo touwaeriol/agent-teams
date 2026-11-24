@@ -127,7 +127,7 @@ type ThreadSession struct {
 	NodeID      *string `json:"node_id" doc:"Node the session runs (ran) on"`
 	Runtime     string  `json:"runtime"`
 	State       string  `json:"state" doc:"The agent session's state (opening, idle, busy, parked, closed…)"`
-	Cwd         string  `json:"cwd" doc:"The employee's working directory on the node (every repository is a subdirectory)"`
+	Cwd         string  `json:"cwd" doc:"The employee's working directory on the node (every repository is a subdirectory): absolute when the node reported its root, else relative to the daemon root"`
 	ContextUsed *int    `json:"context_used" doc:"Tokens of context the session used at its last turn end (null: the runtime reports none, e.g. Antigravity, or no turn ended yet)"`
 	ContextMax  *int    `json:"context_max" doc:"The context window ContextUsed is measured against (tokens, as the runtime reports it)"`
 }

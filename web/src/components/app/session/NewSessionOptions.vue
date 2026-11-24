@@ -21,7 +21,7 @@ const pickedNode = computed(() => props.nodes.find((n) => n.id === node.value));
 const nodeLabel = computed(() => (node.value === props.auto || !pickedNode.value ? "自动选择节点" : pickedNode.value.name));
 const pickedRole = computed(() => props.roles.find((r) => r.role === role.value));
 const roleLabel = computed(() => pickedRole.value?.title || pickedRole.value?.role || "选择岗位");
-const modelLabel = computed(() => model.value.trim() || "跟随岗位");
+const modelLabel = computed(() => model.value.trim() || "跟随岗位模型");
 const chip = "inline-flex h-7 max-w-[240px] items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground data-[open=true]:bg-accent";
 const item = "flex w-full min-w-[220px] items-start gap-2 py-0.5";
 </script>

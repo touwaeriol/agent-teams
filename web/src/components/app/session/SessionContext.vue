@@ -28,7 +28,7 @@ defineExpose({ total });
       <slot name="actions" :total="total" />
     </div>
     <span class="text-[13px]" data-testid="context-total">{{ total.text }}</span>
-    <ProgressBar :pct="`${total.pct}%`" :tone="tone" :height="6" />
+    <div class="flex" data-testid="context-bar"><ProgressBar :pct="`${total.pct}%`" :tone="tone" :height="6" /></div>
     <slot :total="total" />
   </section>
 </template>

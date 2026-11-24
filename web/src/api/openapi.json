@@ -7308,7 +7308,7 @@
             ]
           },
           "cwd": {
-            "description": "The employee's working directory on the node (every repository is a subdirectory)",
+            "description": "The employee's working directory on the node (every repository is a subdirectory): absolute when the node reported its root, else relative to the daemon root",
             "type": "string"
           },
           "node_id": {

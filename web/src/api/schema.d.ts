@@ -4469,7 +4469,7 @@ export interface components {
              * @description Tokens of context the session used at its last turn end (null: the runtime reports none, e.g. Antigravity, or no turn ended yet)
              */
             context_used: number | null;
-            /** @description The employee's working directory on the node (every repository is a subdirectory) */
+            /** @description The employee's working directory on the node (every repository is a subdirectory): absolute when the node reported its root, else relative to the daemon root */
             cwd: string;
             /** @description Node the session runs (ran) on */
             node_id: string | null;

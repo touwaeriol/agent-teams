@@ -110,7 +110,7 @@ const projectCols = `p.id, p.user_id, p.name, p.description, p.context,
 // (done: the user confirmed 已解决), working (running and its employee is in a turn, or the user
 // spoke last), finished (running, the employee replied last and is not in a turn: 已完成, waiting
 // for the user to confirm), else the thread's status (queued, waiting, review, paused, failed).
-// Open cards are counted in waiting. '' for a project.
+// Open cards are counted in waiting. Empty for a project.
 const sessionStatusCol = `CASE WHEN p.kind <> 'session' THEN '' ELSE COALESCE((SELECT CASE
 	  WHEN t.status = 'done' THEN 'resolved'
 	  WHEN t.status <> 'running' THEN t.status

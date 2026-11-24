@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 
@@ -275,10 +276,28 @@ func threadSession(ctx context.Context, q DB, members []EmployeeBrief) (*ThreadS
 		if err != nil {
 			return nil, err
 		}
-		return &ThreadSession{NodeID: s.NodeID, Runtime: s.Runtime, State: s.State, Cwd: s.Cwd,
+		cwd, err := nodePath(ctx, q, s.NodeID, s.Cwd)
+		if err != nil {
+			return nil, err
+		}
+		return &ThreadSession{NodeID: s.NodeID, Runtime: s.Runtime, State: s.State, Cwd: cwd,
 			ContextUsed: s.ContextUsed, ContextMax: s.ContextMax}, nil
 	}
 	return nil, nil
+}
+
+// nodePath is rel (relative to the daemon root) as an absolute path on the node, when the node
+// reported its root (hello.root); rel as is otherwise.
+func nodePath(ctx context.Context, q DB, nodeID *string, rel string) (string, error) {
+	if nodeID == nil || rel == "" || strings.HasPrefix(rel, "/") {
+		return rel, nil
+	}
+	var roots []string
+	err := q.Gorm(ctx).Table("at_nodes").Where("id = ?", *nodeID).Pluck("COALESCE(last_hello->>'root', '')", &roots).Error
+	if err != nil || len(roots) == 0 || !strings.HasPrefix(roots[0], "/") {
+		return rel, err
+	}
+	return path.Join(roots[0], rel), nil
 }
 
 // DispatchOf is the thread's hand-over: who opened it, when, and the user's message it was opened
