@@ -55,6 +55,13 @@ describe("selection", () => {
     await picking.get("[role=checkbox]").trigger("click");
     expect(picking.emitted("toggle")).toEqual([[12], [12]]);
   });
+  it("names a session's employee by its role instead of its handle", () => {
+    const [block] = chatBlocks([message("13", { role: "assistant", author: "lead-1", content: "好了" })]);
+    expect(mountWith(ChatBlockView, { block, threads: [], speakerColor: "#000", pid: "p1" }).text()).toContain("lead-1");
+    const named = mountWith(ChatBlockView, { block, threads: [], speakerColor: "#000", pid: "p1", speakerName: "工程师" });
+    expect(named.text()).toContain("工程师");
+    expect(named.text()).not.toContain("lead-1");
+  });
   it("the bar counts, forwards and cancels (also with Esc)", async () => {
     const w = mountWith(ForwardBar, { count: 2 });
     expect(w.text()).toContain("已选 2 条");

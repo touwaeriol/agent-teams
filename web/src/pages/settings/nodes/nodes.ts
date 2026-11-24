@@ -302,7 +302,7 @@ export function nodeStats(list: NodeView[]): { k: string; v: string }[] {
   const s = summarizeNodes(list);
   return [
     { k: "节点", v: `${s.total}（在线 ${s.online}）` },
-    { k: "运行中 / 总槽位", v: `${s.active} / ${s.slots}` },
+    { k: s.unlimited ? "运行中（有节点不限槽位）" : "运行中 / 总槽位", v: s.unlimited ? String(s.active) : `${s.active} / ${s.slots}` },
     { k: "排队中", v: String(s.queued) },
     { k: "停放的会话", v: String(list.reduce((n, x) => n + x.parked_sessions, 0)) },
   ];

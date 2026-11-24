@@ -6,7 +6,7 @@ import { useNodes } from "@/api/queries";
 import type { UserView } from "@/api/views";
 import Dot from "@/components/app/Dot.vue";
 import Initial from "@/components/app/Initial.vue";
-import { summarizeNodes } from "./nodes";
+import { runningText, summarizeNodes } from "./nodes";
 
 const props = defineProps<{ me: UserView }>();
 const emit = defineEmits<{ navigate: [] }>();
@@ -25,7 +25,7 @@ const name = computed(() => props.me.display_name || props.me.email.split("@")[0
   <div class="border-t p-3">
     <RouterLink to="/settings/nodes" class="flex items-center gap-2 px-2.5 pb-2.5 pt-1 text-xs text-muted-foreground hover:text-foreground" @click="emit('navigate')">
       <Dot :color="tone" />
-      {{ s.total === 0 ? "还没有节点，去添加" : `节点 ${s.online} / ${s.total} 在线 · 槽位 ${s.active} / ${s.slots}` }}
+      {{ s.total === 0 ? "还没有节点，去添加" : `节点 ${s.online} / ${s.total} 在线 · ${runningText(s)}` }}
     </RouterLink>
     <div class="flex items-center gap-2.5 px-1">
       <Initial :name="name" bg="#F4E3D7" fg="#A24E1E" :size="32" round />

@@ -21,6 +21,8 @@ import TypingLine from "./TypingLine.vue";
 
 const props = defineProps<{ pid: string; thread: ThreadView; compact: boolean; session?: boolean }>();
 const who = computed(() => (props.session ? "员工" : "组长"));
+/** A session's employee is named by its role (工程师), not its internal handle (lead-1). */
+const speaker = computed(() => (props.session ? leadOf(props.thread)?.title || "员工" : undefined));
 const questions = useQuestions(() => props.thread.id);
 const lead = computed(() => leadOf(props.thread)?.name);
 const inserts = computed(() => chatQuestions(questions.data.value).map((q: QuestionView) => ({ key: q.id, at: q.created_at, question: q })));
@@ -40,9 +42,9 @@ const dispatched = computed(() => (props.thread.dispatch && props.thread.brief.t
 </script>
 
 <template>
-  <Chat :cid="thread.id" :pid="pid" :select="threadChat" :inserts="inserts" :compact="compact" speaker-color="#2F6FDB">
+  <Chat :cid="thread.id" :pid="pid" :select="threadChat" :inserts="inserts" :compact="compact" speaker-color="#2F6FDB" :speaker-name="speaker">
     <template #before><DispatchMessage v-if="dispatched" :brief="thread.brief" :dispatch="dispatched" :pid="pid" :compact="compact" /></template>
-    <template #insert="{ item }"><WaitingCard :cid="thread.id" :pid="pid" :question="item.question" variant="soft" :lead-name="lead" /></template>
+    <template #insert="{ item }"><WaitingCard :cid="thread.id" :pid="pid" :question="item.question" variant="soft" :lead-name="speaker ?? lead" /></template>
     <template #empty>
       <p v-if="!dispatched && !reading" class="py-10 text-center text-[13px] leading-6 text-muted-foreground">还没有对话。{{ who }}的回复会出现在这里，你也可以直接给{{ who }}发消息。</p>
     </template>

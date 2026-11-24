@@ -8,7 +8,7 @@ import { flattenMessages, keys, type MessagePages } from "@/api/queries";
 import { backoff, streamUrl } from "@/api/sse";
 import type { OfficeSnapshot, QuestionView, TaskView, ThreadView } from "@/api/views";
 import { typingLine } from "@/components/app/thread/detail";
-import { summarizeNodes } from "@/components/shell/nodes";
+import { runningText, summarizeNodes } from "@/components/shell/nodes";
 import { matchesProject } from "@/components/shell/projects";
 import { chatBlocks, interleave, threadChat, threadTalk } from "@/lib/chat";
 import { listGroupOf } from "@/lib/threadList";
@@ -222,6 +222,11 @@ describe("shell", () => {
   });
   it("nodes", () => {
     const n = (online: boolean, active: number, max: number | null, cap?: number) => ({ online, active_sessions: active, max_active_sessions: max, capacity: { max_active_sessions: cap }, queued: 1 }) as never;
-    expect(summarizeNodes([n(true, 2, 4), n(true, 1, null, 3), n(false, 0, 4)])).toEqual({ total: 3, online: 2, active: 3, slots: 7, queued: 2 });
+    expect(summarizeNodes([n(true, 2, 4), n(true, 1, null, 3), n(false, 0, 4)])).toEqual({ total: 3, online: 2, active: 3, slots: 7, unlimited: false, queued: 2 });
+    // A node with no limit set (neither configured nor reported) has no total: "运行中 5", not "5 / 0".
+    const open = summarizeNodes([n(true, 5, null), n(true, 0, 2)]);
+    expect(open).toMatchObject({ active: 5, unlimited: true });
+    expect(runningText(open)).toBe("运行中 5");
+    expect(runningText(summarizeNodes([n(true, 2, 4)]))).toBe("运行中 2 / 4");
   });
 });

@@ -12,7 +12,14 @@ export interface NodeSummary {
   online: number;
   active: number;
   slots: number;
+  /** Some online node has no limit on running sessions: there is no total to show. */
+  unlimited: boolean;
   queued: number;
+}
+
+/** "运行中 5 / 8", or "运行中 5" when some online node has no limit (slots 0 means none set). */
+export function runningText(s: Pick<NodeSummary, "active" | "slots" | "unlimited">): string {
+  return s.unlimited ? `运行中 ${s.active}` : `运行中 ${s.active} / ${s.slots}`;
 }
 
 export function summarizeNodes(list: NodeView[]): NodeSummary {
@@ -22,6 +29,7 @@ export function summarizeNodes(list: NodeView[]): NodeSummary {
     online: online.length,
     active: online.reduce((s, n) => s + n.active_sessions, 0),
     slots: online.reduce((s, n) => s + nodeSlots(n), 0),
+    unlimited: online.some((n) => nodeSlots(n) === 0),
     queued: online.reduce((s, n) => s + n.queued, 0),
   };
 }
