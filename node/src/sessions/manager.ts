@@ -10,7 +10,7 @@ import type { Logger } from "../util/log.js";
 import { isInside, resolveInRoot } from "../util/paths.js";
 import { loadImages, removeImages, type ImageFetcher, type LoadedImage } from "./images.js";
 import { Session, type SendFn, type SessionHost, type SessionRecord } from "./session.js";
-import { ResumeFailed, type CompactResult, type Driver, type DriverContext, type ModeApplied, type ModeChange } from "./types.js";
+import { ResumeFailed, type CompactResult, type Driver, type DriverContext, type ModeApplied, type ModeChange, type ModelOption } from "./types.js";
 import { codexMode } from "./codex/mode.js";
 
 export class CommandError extends Error {
@@ -357,6 +357,9 @@ export class SessionManager implements SessionHost {
     if (change.mode === "bypassPermissions" && spec.antigravity?.read_only) throw new CommandError("unsupported", "a read-only session cannot skip permission prompts");
     if (change.mode && !spec.claude && (change.mode === "plan" || change.mode === "acceptEdits")) throw new CommandError("unsupported", `${spec.runtime} has no ${change.mode} mode`);
     if (change.mode === "auto" && spec.antigravity) throw new CommandError("unsupported", "antigravity has no auto mode");
+    change.dropEffort = dropsEffort(s.init?.models, change, currentMode(spec).effort);
+    const fallback = change.dropEffort ? s.init?.models?.find((o) => o.id === change.model)?.default_effort : undefined;
+    if (fallback) change.defaultEffort = fallback;
     const applied = s.driver ? await s.driver.setMode(change) : undefined;
     rememberMode(spec, change);
     this.persist(s);
@@ -633,6 +636,16 @@ export function prepareJobs(spec: Pick<SessionOpen, "prepare" | "prepare_jobs">)
   return spec.prepare ? [spec.prepare] : [];
 }
 
+/**
+ * Whether a model switch leaves the effort in force behind: the new model (per the session's
+ * init models) has no such level and the change picks none. Unknown models keep it.
+ */
+export function dropsEffort(models: ModelOption[] | undefined, change: ModeChange, effort: string | undefined): boolean {
+  if (!change.model || change.effort || !effort) return false;
+  const m = models?.find((o) => o.id === change.model);
+  return !!m && !(m.efforts ?? []).includes(effort);
+}
+
 /** Keeps a set_mode change in the session's open spec (resumes after parking or a daemon restart use it). */
 export function rememberMode(spec: SessionOpen, change: ModeChange): void {
   const { mode, model, effort } = change;
@@ -642,11 +655,13 @@ export function rememberMode(spec: SessionOpen, change: ModeChange): void {
       spec.claude.prefer_auto = false;
     }
     if (model) spec.claude.model = model;
+    if (change.dropEffort) delete spec.claude.effort;
     if (effort) spec.claude.effort = effort;
   }
   if (spec.codex) {
     if (mode) Object.assign(spec.codex, codexMode(mode, spec.codex));
     if (model) spec.codex.model = model;
+    if (change.dropEffort) delete spec.codex.effort;
     if (effort) spec.codex.effort = effort;
   }
   if (spec.antigravity) {

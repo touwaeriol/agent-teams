@@ -182,6 +182,7 @@ export class ClaudeDriver implements Driver {
     if (model) {
       await this.q.setModel(model);
       this.claude.model = model;
+      if (change.dropEffort) delete this.claude.effort; // the new model has no such level: its default
     }
     if (effort) {
       await this.q.applyFlagSettings({ effortLevel: effort as "low" });
