@@ -9,6 +9,7 @@ import { keys } from "@/api/queries";
 import ModeMenuBody from "@/components/app/session/controls/ModeMenuBody.vue";
 import ModelMenuBody from "@/components/app/session/controls/ModelMenuBody.vue";
 import SessionControlsBar from "@/components/app/session/controls/SessionControlsBar.vue";
+import { toast } from "@/lib/toast";
 import { appliesNote, effortFor, effortLabel, modeRows, modelChipText, noAutoNote, rowForKey, type ModeOption, type SessionControls } from "@/lib/sessionControls";
 
 const mode = (id: ModeOption["id"], label: string, applies: ModeOption["applies"] = "now"): ModeOption => ({ id, label, hint: `${label}说明`, applies });
@@ -78,6 +79,12 @@ describe("menu components", () => {
     expect(w.find('[data-mode="plan"]').attributes("disabled")).toBeDefined();
     expect(w.find('[data-mode="auto"]').attributes("aria-checked")).toBe("false");
     expect(w.text()).toContain("等节点确认");
+    // a model or effort switch waiting: every row disabled, the current one still marked
+    const off = mount(ModeMenuBody, { props: { rows: modeRows(CLAUDE.modes), current: "auto", runtimeLabel: "x", notes: [], disabled: true } });
+    expect(off.findAll("[data-mode]").every((b) => b.attributes("disabled") !== undefined)).toBe(true);
+    expect(off.find('[data-testid="mode-current"]').exists()).toBe(true);
+    await off.find('[data-mode="plan"]').trigger("click");
+    expect(off.emitted("pick")).toBeUndefined();
     const touch = mount(ModeMenuBody, { props: { rows: modeRows(CLAUDE.modes), current: "auto", runtimeLabel: "x", notes: [], touch: true } });
     expect(touch.find('[data-mode="plan"]').text()).not.toContain("4");
   });
@@ -143,5 +150,87 @@ describe("session controls bar", () => {
     const req = fetch.mock.calls.map(([r]) => r as Request).find((r) => r.method === "PUT")!;
     expect(req).toBeDefined();
     expect(w.find('[data-testid="mode-control"]').text()).toContain("修改前询问");
+  });
+});
+
+describe("session controls bar: how a switch ends", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = "";
+  });
+  const since = "2026-11-24T10:00:00Z";
+  function mountBar(data: SessionControls, put: (body: unknown) => SessionControls = () => data) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    qc.setQueryData(keys.sessionControls("p1"), data);
+    const fetch = vi.fn(async (req: Request) => {
+      const body = req.method === "PUT" ? put(await req.json()) : qc.getQueryData(keys.sessionControls("p1"));
+      return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetch);
+    const w = mount(SessionControlsBar, { props: { pid: "p1" }, global: { plugins: [[VueQueryPlugin, { queryClient: qc }]] as never[] }, attachTo: document.body });
+    return { w, qc, fetch };
+  }
+  const open = async (w: ReturnType<typeof mount>, id: string) => {
+    await w.find(`[data-testid="${id}"]`).trigger("click");
+    await new Promise((r) => setTimeout(r, 50)); // the popover opens on a timer
+    await flushPromises();
+  };
+
+  it("keeps an old failure out of a toast on load and shows it in the menu", async () => {
+    const err = vi.spyOn(toast, "error").mockImplementation(() => undefined as never);
+    const { w } = mountBar({ ...CLAUDE, error: "节点拒绝了这次切换" });
+    await flushPromises();
+    expect(err).not.toHaveBeenCalled();
+    await open(w, "mode-control");
+    expect(document.body.textContent).toContain("上次切换没有成功：节点拒绝了这次切换");
+  });
+
+  it("says when a switch failed, and when it was dropped without an answer", async () => {
+    const err = vi.spyOn(toast, "error").mockImplementation(() => undefined as never);
+    // loaded while a switch waits; the node answers with an error
+    const { qc } = mountBar({ ...CLAUDE, pending: { permission_mode: "plan", since } } as SessionControls);
+    await flushPromises();
+    qc.setQueryData(keys.sessionControls("p1"), { ...CLAUDE, error: "节点拒绝了这次切换" });
+    await flushPromises();
+    expect(err).toHaveBeenCalledWith("切换没有成功：节点拒绝了这次切换");
+    err.mockClear();
+    // the next one times out: pending is dropped and the old values stay
+    qc.setQueryData(keys.sessionControls("p1"), { ...CLAUDE, pending: { effort: "max", since } });
+    await flushPromises();
+    qc.setQueryData(keys.sessionControls("p1"), { ...CLAUDE });
+    await flushPromises();
+    expect(err).toHaveBeenCalledWith("节点没有回应，切换未生效");
+    err.mockClear();
+    // one that went through says nothing
+    qc.setQueryData(keys.sessionControls("p1"), { ...CLAUDE, pending: { permission_mode: "plan", since } });
+    await flushPromises();
+    qc.setQueryData(keys.sessionControls("p1"), { ...CLAUDE, permission_mode: "plan" });
+    await flushPromises();
+    expect(err).not.toHaveBeenCalled();
+  });
+
+  it("disables the mode rows while a model or effort switch waits", async () => {
+    const { w } = mountBar({ ...CLAUDE, pending: { model: "claude-haiku-4-5", since } } as SessionControls);
+    await open(w, "mode-control");
+    const rows = [...document.querySelectorAll<HTMLButtonElement>("[data-testid=mode-menu] [data-mode], [data-mode]")].filter((b) => b.tagName === "BUTTON" && b.closest("[data-testid=session-controls]") === null);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((b) => b.disabled)).toBe(true);
+  });
+
+  it("sends only the model when no effort is picked, and keeps a picked effort the new model has", async () => {
+    const two = { ...CODEX, effort: "", models: [...CODEX.models!, { id: "gpt-5.5-mini", name: "GPT-5.5 mini", efforts: ["low", "medium"], default_effort: "low", supports_auto: false }] } as SessionControls;
+    const bodies: unknown[] = [];
+    const { w, qc } = mountBar(two, (b) => (bodies.push(b), { ...two, model: (b as { model: string }).model }));
+    await open(w, "model-control");
+    (document.querySelector('[data-model="gpt-5.5-mini"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(bodies).toEqual([{ model: "gpt-5.5-mini" }]);
+    // with an effort picked that the new model lacks: its default goes with it
+    qc.setQueryData(keys.sessionControls("p1"), { ...two, effort: "high" });
+    await flushPromises();
+    await open(w, "model-control");
+    (document.querySelector('[data-model="gpt-5.5-mini"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(bodies[1]).toEqual({ model: "gpt-5.5-mini", effort: "low" });
   });
 });

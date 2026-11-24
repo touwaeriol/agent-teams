@@ -10,11 +10,12 @@ import { computed } from "vue";
 import type { ModeRow } from "@/lib/sessionControls";
 import ModeIcon from "./ModeIcon.vue";
 
-const props = defineProps<{ rows: ModeRow[]; current: string; pending?: string; runtimeLabel: string; notes: string[]; touch?: boolean }>();
+const props = defineProps<{ rows: ModeRow[]; current: string; pending?: string; runtimeLabel: string; notes: string[]; touch?: boolean; disabled?: boolean }>();
 const emit = defineEmits<{ pick: [id: string] }>();
 const normal = computed(() => props.rows.filter((r) => !r.danger));
 const danger = computed(() => props.rows.filter((r) => r.danger));
-const busy = computed(() => Boolean(props.pending));
+/** Rows are disabled while any switch waits (a mode pick, or a model or effort pick: disabled). */
+const busy = computed(() => Boolean(props.pending) || Boolean(props.disabled));
 </script>
 
 <template>
@@ -41,7 +42,7 @@ const busy = computed(() => Boolean(props.pending));
           <span class="text-xs text-muted-foreground">{{ r.hint }}</span>
         </span>
         <Loader2 v-if="pending === r.id" class="mt-0.5 size-3.5 shrink-0 animate-spin text-[#2F6FDB]" />
-        <Check v-else-if="r.id === current && !busy" class="mt-0.5 size-3.5 shrink-0" data-testid="mode-current" />
+        <Check v-else-if="r.id === current && !pending" class="mt-0.5 size-3.5 shrink-0" data-testid="mode-current" />
         <span v-if="!touch" class="mt-0.5 shrink-0 rounded-[5px] border bg-background px-[5px] font-mono text-[11px] leading-4 text-muted-foreground">{{ r.key }}</span>
       </button>
     </template>
