@@ -216,6 +216,12 @@ func (s *Scheduler) ContextReported(ctx context.Context, tx *core.Tx, sc core.Se
 	if err := core.RecordContext(ctx, tx, sc.Session.ID, c.UsedTokens, c.MaxTokens); err != nil {
 		return err
 	}
+	if sc.Employee.Spec.Solo && sc.Session.ThreadID != nil {
+		// A session's page shows the context bar (ThreadView.session).
+		if err := tx.EmitThread(ctx, *sc.Session.ThreadID); err != nil {
+			return err
+		}
+	}
 	task, err := runningTask(ctx, tx, sc)
 	if err != nil {
 		return ignoreMissing(err)

@@ -34,6 +34,12 @@ type SessionRequest struct {
 // SessionRole turns a member role template into a session employee's role: a writing lead
 // (Solo) on the role's runtimes, pinned to nodeID when given. A model picked for the session
 // applies to the role's first runtime, which the session then keeps to.
+//
+// The role is only a template (prompt, runtimes, model, permissions): the employee is not one of
+// the role's staff (Count, project members) and does not take the nodes the role's members are
+// placed on: the role's own node_ids are dropped, so a session runs on the node the user picked or
+// on any of the user's nodes (nodepick). Only the node's physical cap (max_active_sessions) and
+// quota still apply, as for every live session.
 func SessionRole(r store.Role, model, nodeID string) store.Role {
 	r.ID, r.Tier, r.Solo, r.Count = "", "lead", true, 1
 	r.ReadOnly, r.Gate, r.TaskKinds, r.CanDelegate = nil, "", nil, false
@@ -41,11 +47,9 @@ func SessionRole(r store.Role, model, nodeID string) store.Role {
 	if model = strings.TrimSpace(model); model != "" {
 		r.Model, r.Runtimes, r.Models = model, nil, nil
 	}
+	r.NodeIDs = []string{}
 	if nodeID != "" {
 		r.NodeIDs = []string{nodeID}
-	}
-	if r.NodeIDs == nil {
-		r.NodeIDs = []string{}
 	}
 	return r
 }

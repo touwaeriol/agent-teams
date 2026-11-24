@@ -1,15 +1,17 @@
 <script setup lang="ts">
-// 新建 (a session), like Claude Code's new session: an empty page with one box at the bottom for
-// what to do; under it, chips for where (repositories, each from a branch) and who (role, model)
-// on which node. Enter sends (Shift+Enter: new line). The chips remember the last choice.
-import { Bot, ChevronDown, FolderGit2, Server } from "lucide-vue-next";
+// 新建 (a session), like Claude Code's new session: a clean page with one line in the middle and the
+// box at the bottom. In the box: what to do and, folded into a chip, the repositories (each from a
+// branch) and the work branch's name. Under it one row (NewSessionOptions): node (自动选择 or one of
+// the user's nodes), role (a template only) and model, with room for more controls at its end.
+// Enter sends (Shift+Enter: new line). The choices are remembered for the next session.
+import { ChevronDown, FolderGit2 } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { sessions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import { keys, useNodes, useRoles } from "@/api/queries";
-import ModelPicker from "@/components/app/models/ModelPicker.vue";
 import SendButton from "@/components/app/SendButton.vue";
+import NewSessionOptions from "@/components/app/session/NewSessionOptions.vue";
 import SessionRepos from "@/components/app/session/SessionRepos.vue";
 import { DEFAULTS_KEY, parseDefaults, reposLabel, sessionReposPayload, type SessionRepo } from "@/components/app/session/session";
 import Field from "@/components/common/Field.vue";
@@ -30,7 +32,6 @@ const model = ref("");
 const node = ref(saved?.node || AUTO);
 const branch = ref("");
 const reposOpen = ref(false);
-const whoOpen = ref(false);
 
 const members = computed(() => (roles.data.value?.roles ?? []).filter((r) => r.tier === "member"));
 watch(
@@ -43,8 +44,6 @@ watch(
 const picked = computed(() => members.value.find((r) => r.role === role.value));
 const runtime = computed<Runtime>(() => (picked.value?.runtime === "codex" ? "codex" : "claude"));
 const nodeList = computed(() => nodes.data.value ?? []);
-const nodeLabel = computed(() => (node.value === AUTO ? "自动分配节点" : (nodeList.value.find((n) => n.id === node.value)?.name ?? "自动分配节点")));
-const whoLabel = computed(() => `${picked.value?.title || picked.value?.role || "岗位"}${model.value.trim() ? ` · ${model.value.trim()}` : ""}`);
 const ready = computed(() => message.value.trim() !== "" && repos.value.length > 0 && role.value !== "");
 
 const create = useAction(
@@ -82,55 +81,47 @@ function onKey(ev: Event | KeyboardEvent) {
   e.preventDefault();
   submit();
 }
-const chip = "inline-flex h-7 max-w-[260px] items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground";
+// A remembered node that was deleted falls back to 自动选择.
+watch(nodeList, (list) => {
+  if (node.value !== AUTO && list.length && !list.some((n) => n.id === node.value)) node.value = AUTO;
+});
+const reposText = computed(() => (branch.value.trim() ? `${reposLabel(repos.value)} · ${branch.value.trim()}` : reposLabel(repos.value)));
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col">
-    <header class="flex h-12 shrink-0 items-center px-5 text-[13px] text-muted-foreground">新会话</header>
-    <div class="flex flex-1 items-center justify-center px-6 text-center text-[13px] leading-6 text-muted-foreground">
-      <p class="max-w-md">选好仓库，说要做什么。仓库会并排拉到同一个文件夹里，一个员工直接在里面干活，你直接和它对话。</p>
+  <div class="flex h-full min-h-0 flex-col bg-panel">
+    <div class="flex flex-1 items-center justify-center px-6 text-center">
+      <p class="text-[15px] text-muted-foreground" data-testid="new-session-hint">要做点什么？员工会在你选的仓库里直接动手。</p>
     </div>
-    <form class="mx-auto w-full max-w-[780px] shrink-0 px-4 pb-5" data-testid="new-session" @submit.prevent="submit">
-      <div class="flex items-end gap-2 rounded-2xl border bg-background px-4 py-3 shadow-sm focus-within:border-foreground/30">
+    <form class="mx-auto w-full max-w-[780px] shrink-0 px-4 pb-6" data-testid="new-session" @submit.prevent="submit">
+      <div class="flex flex-col rounded-2xl border bg-background px-3 pb-2 pt-3 shadow-sm focus-within:border-foreground/30">
         <el-input
           v-model="message"
           type="textarea"
-          :autosize="{ minRows: 1, maxRows: 10 }"
+          :autosize="{ minRows: 2, maxRows: 10 }"
           resize="none"
           autofocus
           placeholder="描述任务或提出问题"
           aria-label="要做什么"
-          class="at-bare-textarea flex-1"
+          class="at-bare-textarea px-1"
           @keydown="onKey"
         />
-        <SendButton label="开始会话" :busy="create.isPending.value" :disabled="!ready" />
-      </div>
-      <div class="mt-1.5 flex flex-wrap items-center gap-1 px-1">
-        <button type="button" :class="chip" data-testid="repos-chip" @click="reposOpen = true">
-          <FolderGit2 class="size-3.5 shrink-0" />
-          <span class="truncate">{{ reposLabel(repos) }}</span>
-          <ChevronDown class="size-3 shrink-0" />
-        </button>
-        <el-dropdown trigger="click" placement="top-start" @command="(v: string) => (node = v)">
-          <button type="button" :class="chip" data-testid="node-chip">
-            <Server class="size-3.5 shrink-0" />
-            <span class="truncate">{{ nodeLabel }}</span>
+        <div class="mt-1 flex items-center gap-2">
+          <button
+            type="button"
+            class="inline-flex h-7 min-w-0 max-w-[60%] items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+            data-testid="repos-chip"
+            :title="`仓库：${reposText}`"
+            @click="reposOpen = true"
+          >
+            <FolderGit2 class="size-3.5 shrink-0" />
+            <span class="truncate">{{ reposText }}</span>
             <ChevronDown class="size-3 shrink-0" />
           </button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item :command="AUTO">自动分配（剩余用量最多的在线节点）</el-dropdown-item>
-              <el-dropdown-item v-for="n in nodeList" :key="n.id" :command="n.id" :disabled="!n.online">{{ n.online ? n.name : `${n.name}（离线）` }}</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-        <button type="button" :class="chip" data-testid="who-chip" @click="whoOpen = true">
-          <Bot class="size-3.5 shrink-0" />
-          <span class="truncate">{{ whoLabel }}</span>
-          <ChevronDown class="size-3 shrink-0" />
-        </button>
+          <SendButton label="开始会话" class="ml-auto" :busy="create.isPending.value" :disabled="!ready" />
+        </div>
       </div>
+      <NewSessionOptions v-model:node="node" v-model:role="role" v-model:model="model" :nodes="nodeList" :roles="members" :runtime="runtime" :auto="AUTO" class="mt-1.5 px-1" />
     </form>
     <el-dialog v-model="reposOpen" title="仓库" width="600px" class="at-dialog w-[calc(100%-2rem)] max-w-[600px]" append-to-body>
       <div class="flex flex-col gap-4">
@@ -141,19 +132,6 @@ const chip = "inline-flex h-7 max-w-[260px] items-center gap-1.5 rounded-md px-2
         </Field>
       </div>
       <template #footer><el-button type="primary" @click="reposOpen = false">完成</el-button></template>
-    </el-dialog>
-    <el-dialog v-model="whoOpen" title="谁来做" width="420px" class="at-dialog w-[calc(100%-2rem)] max-w-[420px]" append-to-body>
-      <div class="flex flex-col gap-4">
-        <Field v-slot="{ id }" label="岗位" hint="按这个成员岗位的配置起员工">
-          <el-select :id="id" v-model="role" placeholder="选择岗位">
-            <el-option v-for="r in members" :key="r.role" :value="r.role" :label="r.title || r.role" />
-          </el-select>
-        </Field>
-        <Field v-slot="{ id }" label="模型">
-          <ModelPicker :id="id" v-model="model" live :runtime="runtime" label="模型" placeholder="跟随岗位配置" />
-        </Field>
-      </div>
-      <template #footer><el-button type="primary" @click="whoOpen = false">完成</el-button></template>
     </el-dialog>
   </div>
 </template>

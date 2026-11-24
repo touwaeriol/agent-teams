@@ -3821,6 +3821,8 @@ export interface components {
             pinned: boolean;
             /** @description Bound repositories in project order; base branches belong in context (the project instructions) */
             repos: components["schemas"]["RepoRef"][] | null;
+            /** @description A session's state for the sidebar ('' for a project): working, finished (the employee replied and stopped: 已完成), resolved (the user confirmed: 已解决), or the thread's status (queued, waiting, review, paused, failed). Open cards are in waiting */
+            session_status: string;
             /** @description Codex model of Codex leads and members; '' = each role's model */
             thread_codex_model: string;
             /** @description '' = each role's effort; low | medium | high | xhigh | max */
@@ -4629,6 +4631,10 @@ export interface components {
             reminded_at: string | null;
             /** @description Repositories the thread set a base for, branched or opened a PR in */
             repos: components["schemas"]["ThreadRepoView"][] | null;
+            /** @description A session's (solo) employee's latest agent session on its node: working directory and context use. Null for other threads and before the employee's first session */
+            session: components["schemas"]["ThreadSession"];
+            /** @description The thread is a session's (多仓库会话): its lead is the one employee the user talks to directly */
+            solo: boolean;
             /**
              * Format: date-time
              * @description When the thread first ran (null while queued)
@@ -4660,6 +4666,25 @@ export interface components {
             pr_state: string;
             pr_url: string | null;
             repo: string;
+        };
+        ThreadSession: {
+            /**
+             * Format: int64
+             * @description The context window ContextUsed is measured against (tokens, as the runtime reports it)
+             */
+            context_max: number | null;
+            /**
+             * Format: int64
+             * @description Tokens of context the session used at its last turn end (null: the runtime reports none, e.g. Antigravity, or no turn ended yet)
+             */
+            context_used: number | null;
+            /** @description The employee's working directory on the node (every repository is a subdirectory): absolute when the node reported its root, else relative to the daemon root */
+            cwd: string;
+            /** @description Node the session runs (ran) on */
+            node_id: string | null;
+            runtime: string;
+            /** @description The agent session's state (opening, idle, busy, parked, closed…) */
+            state: string;
         };
         ThreadUsage: {
             /** Format: double */
@@ -4739,6 +4764,10 @@ export interface components {
             reminded_at: string | null;
             /** @description Repositories the thread set a base for, branched or opened a PR in */
             repos: components["schemas"]["ThreadRepoView"][] | null;
+            /** @description A session's (solo) employee's latest agent session on its node: working directory and context use. Null for other threads and before the employee's first session */
+            session: components["schemas"]["ThreadSession"];
+            /** @description The thread is a session's (多仓库会话): its lead is the one employee the user talks to directly */
+            solo: boolean;
             /**
              * Format: date-time
              * @description When the thread first ran (null while queued)

@@ -4965,6 +4965,10 @@
               "null"
             ]
           },
+          "session_status": {
+            "description": "A session's state for the sidebar ('' for a project): working, finished (the employee replied and stopped: 已完成), resolved (the user confirmed: 已解决), or the thread's status (queued, waiting, review, paused, failed). Open cards are in waiting",
+            "type": "string"
+          },
           "thread_codex_model": {
             "description": "Codex model of Codex leads and members; '' = each role's model",
             "type": "string"
@@ -5019,6 +5023,7 @@
           "kind",
           "waiting",
           "threads_active",
+          "session_status",
           "created_at",
           "updated_at"
         ],
@@ -7618,6 +7623,14 @@
               "null"
             ]
           },
+          "session": {
+            "$ref": "#/components/schemas/ThreadSession",
+            "description": "A session's (solo) employee's latest agent session on its node: working directory and context use. Null for other threads and before the employee's first session"
+          },
+          "solo": {
+            "description": "The thread is a session's (多仓库会话): its lead is the one employee the user talks to directly",
+            "type": "boolean"
+          },
           "started_at": {
             "description": "When the thread first ran (null while queued)",
             "format": "date-time",
@@ -7685,7 +7698,9 @@
           "reminded_at",
           "last_activity_at",
           "latest_deliverable",
-          "dispatch"
+          "dispatch",
+          "solo",
+          "session"
         ],
         "type": "object"
       },
@@ -7749,6 +7764,54 @@
           "pr_number",
           "pr_url",
           "pr_state"
+        ],
+        "type": "object"
+      },
+      "ThreadSession": {
+        "additionalProperties": false,
+        "properties": {
+          "context_max": {
+            "description": "The context window ContextUsed is measured against (tokens, as the runtime reports it)",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "context_used": {
+            "description": "Tokens of context the session used at its last turn end (null: the runtime reports none, e.g. Antigravity, or no turn ended yet)",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cwd": {
+            "description": "The employee's working directory on the node (every repository is a subdirectory): absolute when the node reported its root, else relative to the daemon root",
+            "type": "string"
+          },
+          "node_id": {
+            "description": "Node the session runs (ran) on",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "state": {
+            "description": "The agent session's state (opening, idle, busy, parked, closed…)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "runtime",
+          "state",
+          "cwd",
+          "context_used",
+          "context_max"
         ],
         "type": "object"
       },
@@ -7951,6 +8014,14 @@
               "null"
             ]
           },
+          "session": {
+            "$ref": "#/components/schemas/ThreadSession",
+            "description": "A session's (solo) employee's latest agent session on its node: working directory and context use. Null for other threads and before the employee's first session"
+          },
+          "solo": {
+            "description": "The thread is a session's (多仓库会话): its lead is the one employee the user talks to directly",
+            "type": "boolean"
+          },
           "started_at": {
             "description": "When the thread first ran (null while queued)",
             "format": "date-time",
@@ -8018,7 +8089,9 @@
           "reminded_at",
           "last_activity_at",
           "latest_deliverable",
-          "dispatch"
+          "dispatch",
+          "solo",
+          "session"
         ],
         "type": "object"
       },

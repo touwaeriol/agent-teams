@@ -25,6 +25,8 @@ const GROUP_OF_KIND: Record<ThreadKind, ListGroupId> = {
   done: "done",
   failed: "done",
   archived: "archived",
+  finished: "done",
+  resolved: "done",
 };
 
 /** Every screen's verdict on one thread. */
@@ -78,6 +80,11 @@ const CASES: [string, ThreadView, { phase: string; group: ListGroupId; label: st
     thread(20, { members: [leadIdle, person("dev-1", "idle")], counts: counts({ tasks_total: 3, tasks_done: 2, tasks_open: 0 }), lead_last: { text: "改好了，你看看", at: "" } }),
     { phase: "replied", group: "waiting", label: "等你处理" },
   ],
+  // Sessions (#53): a finished round is 已完成, not 等你处理; the user's 已解决 (done) reads 已解决.
+  ["session replied and stopped", thread(1, { solo: true, members: [leadIdle], lead_last: replied }), { phase: "finished", group: "done", label: "已完成" }],
+  ["session done (the user confirmed)", thread(1, { solo: true, status: "done" }), { phase: "resolved", group: "done", label: "已解决" }],
+  ["session with an open card", thread(1, { solo: true, members: [leadIdle], lead_last: replied, counts: counts({ questions_open: 1, waiting: 1 }) }), { phase: "asking", group: "waiting", label: "等你处理" }],
+  ["session still working", thread(1, { solo: true, members: [person("lead-1", "typing")], lead_last: replied }), { phase: "working", group: "active", label: "进行中" }],
 ];
 
 describe("threadPhase", () => {
@@ -91,6 +98,18 @@ describe("threadPhase", () => {
     expect(v.look).toBe(want.label);
     // The card / chip kind lands in the same list group.
     expect(v.kindGroup).toBe(v.group);
+  });
+
+  it("a session's 已完成 and 已解决 look different (check vs double check, green vs grey) and have no bottom line", () => {
+    const fin = thread(1, { solo: true, members: [leadIdle], lead_last: replied });
+    const res = thread(1, { solo: true, status: "done" });
+    expect(threadLook(fin)).toMatchObject({ label: "已完成", icon: "check", tone: INK.done });
+    expect(threadLook(res)).toMatchObject({ label: "已解决", icon: "resolved", tone: INK.gray });
+    expect(threadMark(fin)).toBe("finished");
+    expect(threadMark(res)).toBe("resolved");
+    expect(everywhere(fin).typing).toBeNull();
+    // A thread (not a session) keeps 已完成 for done.
+    expect(threadLook(thread(1, { status: "done" })).label).toBe("已完成");
   });
 
   it("the #20 screenshot: running, lead idle, nothing left — list, bottom line and cards all say 等你处理", () => {

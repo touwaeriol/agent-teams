@@ -20,7 +20,7 @@ export const LIST_GROUPS: { id: ListGroupId; label: string }[] = [
 ];
 
 /** The round mark before a row and in the open thread's header. */
-export type RowMark = "wait" | "working" | "queued" | "paused" | "done" | "failed" | "archived";
+export type RowMark = "wait" | "working" | "queued" | "paused" | "done" | "failed" | "archived" | "finished" | "resolved";
 
 export const MARK_LABEL: Record<RowMark, string> = {
   wait: "等你处理",
@@ -30,6 +30,8 @@ export const MARK_LABEL: Record<RowMark, string> = {
   done: "已完成",
   failed: "失败",
   archived: "已归档",
+  finished: "已完成",
+  resolved: "已解决",
 };
 
 export type PhaseId =
@@ -44,6 +46,10 @@ export type PhaseId =
   | "asking"
   /** Running, nobody working and no small task left: the lead spoke and stopped, the ball is with the user. */
   | "replied"
+  /** A session (solo): its employee finished a round and stopped, no card open: 已完成, waiting for the user to confirm it is solved (or to go on). */
+  | "finished"
+  /** A session (solo) the user confirmed solved (status done): 已解决. */
+  | "resolved"
   | "queued"
   /** Running and someone works for this thread right now. */
   | "working"
@@ -101,7 +107,7 @@ export function pauseLine(reason: string): string {
 export type PhaseInput = Pick<
   ThreadView,
   "no" | "status" | "members" | "counts" | "merge_policy" | "merge_error" | "queue_position" | "pause_reason" | "pr_number" | "reminded_at" | "lead_last"
-> & { pr_state?: string | null };
+> & { pr_state?: string | null; solo?: boolean };
 
 const phase = (id: PhaseId, group: ListGroupId, mark: RowMark, note: string, label: string = MARK_LABEL[mark]): ThreadPhase => ({ id, group, mark, label, note });
 
@@ -113,11 +119,12 @@ const phase = (id: PhaseId, group: ListGroupId, mark: RowMark, note: string, lab
  * else going, by the lead's own state: offline or crashed (等你处理: nothing moves until the user
  * looks at the node), queued for a slot (进行中: it comes up by itself), waiting on someone else
  * (进行中); it has not spoken yet (进行中: reading the brief); else it replied and stopped (等你处理).
+ * A session (solo) reads 已完成 instead when it replied and stopped, and 已解决 when done.
  */
 export function threadPhase(t: PhaseInput, waiting?: Map<number, QuestionView>): ThreadPhase {
   if (t.status === "archived") return phase("archived", "archived", "archived", "");
   if (t.reminded_at) return phase("reminded", "waiting", "wait", "提醒时间到了，等你处理");
-  if (t.status === "done") return phase("done", "done", "done", "");
+  if (t.status === "done") return t.solo ? phase("resolved", "done", "resolved", "") : phase("done", "done", "done", "");
   if (t.status === "failed") return phase("failed", "done", "failed", "");
   if (awaitsAcceptance(t)) return phase("acceptance", "waiting", "wait", t.merge_error ? "合并失败，等你处理" : "等你验收", "待验收");
   if (t.status === "waiting" || t.counts.waiting > 0 || waiting?.has(t.no)) return phase("asking", "waiting", "wait", liveLine(t) || "等你处理");
@@ -142,6 +149,8 @@ export function threadPhase(t: PhaseInput, waiting?: Map<number, QuestionView>):
       return phase("lead_waiting", "active", "working", "组长在等别人回复");
   }
   if (!t.lead_last) return phase("reading", "active", "working", "组长正在阅读任务");
+  // A session's round is over: 已完成 (not 等你处理); the user confirms it solved or goes on.
+  if (t.solo) return phase("finished", "done", "finished", "做完了，等你确认是否解决");
   return phase("replied", "waiting", "wait", "组长已回复，等你回复");
 }
 
