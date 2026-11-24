@@ -29,8 +29,19 @@ type Runtime struct {
 	// SlashCommands: the runtime runs "/name" text as a command (passthrough commands, session
 	// init command list). Without it only prompt templates work.
 	SlashCommands bool
-	// LiveModeSwitch: a live session can change its permission mode (session.set_mode).
+	// LiveModeSwitch: a live session can change its permission mode, model and effort
+	// (session.set_mode; a session's controls, #53).
 	LiveModeSwitch bool
+	// ModeSwitchNow: set_mode is in force at once (Claude: setPermissionMode); without it the
+	// change applies from the next turn (Codex turn/start, Antigravity's permission answers).
+	// The thread auto-approve switch only goes to these runtimes.
+	ModeSwitchNow bool
+	// Modes are the session.set_mode permission modes a session's user may pick, in menu order
+	// ("auto" is shown only when the model supports it; "bypassPermissions" only when the role
+	// lets the employee skip permission prompts).
+	Modes []string
+	// Efforts: the runtime has a thinking effort apart from the model id.
+	Efforts bool
 	// NeedsIsolation: may only run on nodes that isolate it (agent_user or isolated,
 	// architecture.md §10.3), because the runtime cannot be held to the platform's tool policy.
 	NeedsIsolation bool
@@ -44,12 +55,16 @@ type Runtime struct {
 // order is the registry's display order; the first entry is the default runtime.
 var order = []Runtime{
 	{ID: Claude, Title: "Claude Code", YAMLType: "claude_code", TeamType: "claude_code", DefaultModel: ClaudeDefaultModel,
-		SlashCommands: true, LiveModeSwitch: true, CanLead: true},
-	{ID: Codex, Title: "Codex", YAMLType: "codex", TeamType: "codex", NeedsIsolation: true},
+		SlashCommands: true, LiveModeSwitch: true, ModeSwitchNow: true, CanLead: true, Efforts: true,
+		Modes: []string{"auto", "default", "acceptEdits", "plan", "bypassPermissions"}},
+	// Codex: auto = workspace-write + on-request with approvals reviewed by its auto_review subagent.
+	{ID: Codex, Title: "Codex", YAMLType: "codex", TeamType: "codex", NeedsIsolation: true, LiveModeSwitch: true, Efforts: true,
+		Modes: []string{"auto", "default", "bypassPermissions"}},
 	// Google Antigravity CLI (agy) over ACP; agy picks the model when none is set, and it has no
 	// usage API. v1 cannot lead.
+	// Its effort is part of the model id (switching effort = switching model).
 	{ID: Antigravity, Title: "Antigravity", YAMLType: "antigravity", TeamType: "antigravity", NeedsIsolation: true,
-		NeedsHelloReady: true},
+		NeedsHelloReady: true, LiveModeSwitch: true, Modes: []string{"default", "bypassPermissions"}},
 }
 
 var byID = func() map[string]Runtime {

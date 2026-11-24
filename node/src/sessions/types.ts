@@ -1,4 +1,4 @@
-import type { ApprovalCancel, ApprovalRequest, ApprovalResolve, ContextDetail, ContextUsage, SessionEvent, SessionInit, SessionOpen } from "../protocol.js";
+import type { ApprovalCancel, ApprovalRequest, ApprovalResolve, ContextDetail, ContextUsage, ModelOption, SessionEvent, SessionInit, SessionOpen } from "../protocol.js";
 import type { McpToolResult } from "../toolhost/broker.js";
 import type { Logger } from "../util/log.js";
 import type { LoadedImage } from "./images.js";
@@ -53,7 +53,8 @@ export interface Driver {
   start(): Promise<StartResult>;
   push(msg: OutgoingMessage): Promise<{ turn_id?: string }>;
   interrupt(): Promise<string[]>;
-  setMode(mode?: string, model?: string | null): Promise<void>;
+  /** session.set_mode: what the session runs in afterwards and when that applies; throws when nothing of it applies. */
+  setMode(change: ModeChange): Promise<ModeApplied>;
   close(): Promise<void>;
   readonly busy: boolean;
   /** msg_ids already present in the runtime's transcript (dedup after a daemon restart). */
@@ -70,5 +71,22 @@ export interface CompactResult {
   context?: ContextUsage;
   error?: string;
 }
+
+/** A session.set_mode change (absent / null fields stay). */
+export interface ModeChange {
+  mode?: string;
+  model?: string | null;
+  effort?: string | null;
+}
+
+/** What the session runs in after a set_mode (session.mode_set). */
+export interface ModeApplied {
+  permission_mode?: string;
+  model?: string;
+  effort?: string;
+  applies: "now" | "next_turn";
+}
+
+export type { ModelOption };
 
 export class ResumeFailed extends Error {}

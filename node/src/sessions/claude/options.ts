@@ -38,7 +38,8 @@ export function buildClaudeOptions(i: OptionInputs): Options {
     tools: c.tools,
     allowedTools: c.allowed_tools,
     disallowedTools: disallowed(c),
-    permissionMode: c.permission_mode as PermissionMode,
+    // auto opens as default: the driver switches once the model says it supports it (ClaudeDriver.preferAuto).
+    permissionMode: (c.permission_mode === "auto" ? "default" : c.permission_mode) as PermissionMode,
     allowDangerouslySkipPermissions: c.allow_dangerously_skip_permissions === true || c.permission_mode === "bypassPermissions",
     settingSources: [] as SettingSource[],
     strictMcpConfig: true,

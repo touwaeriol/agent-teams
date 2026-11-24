@@ -107,6 +107,31 @@ describe("codex sessions over app-server", () => {
     expect(turns.map((t) => t.params.model)).toEqual([undefined, "gpt-mini-x"]);
   });
 
+  it("lists the models and runs the next turn with the mode and effort set by session.set_mode", async () => {
+    const calls = await startCodex();
+    const xc = codexOpen("s_XC");
+    h!.console.command("session.open", { ...xc, codex: { ...xc.codex, config: { sandbox_workspace_write: { network_access: true, writable_roots: ["projects/p1/repos/o__r/.git"] } } } });
+    const opened = await h!.console.waitType("session.opened");
+    expect(opened.body.init.models).toEqual([{ id: "gpt-5.5-codex", name: "GPT-5.5 Codex", efforts: ["low", "medium", "high"], default_effort: "medium", default: true }]);
+    h!.console.command("session.release", { session_id: "s_XC", open_gen: 1 });
+    h!.console.command("session.set_mode", { session_id: "s_XC", permission_mode: "auto", effort: "high", request_id: "rc1" });
+    expect((await h!.console.waitType("session.mode_set")).body).toMatchObject({ ok: true, permission_mode: "auto", effort: "high", applies: "next_turn" });
+    h!.console.command("session.send", { session_id: "s_XC", msg_id: "m_xc1", text: "one" });
+    await h!.console.waitType("session.event", (b) => b.kind === "turn_ended");
+    h!.console.command("session.set_mode", { session_id: "s_XC", permission_mode: "bypassPermissions", request_id: "rc2" });
+    await h!.console.waitType("session.mode_set", (b) => b.request_id === "rc2");
+    h!.console.command("session.send", { session_id: "s_XC", msg_id: "m_xc2", text: "two" });
+    await h!.console.waitFor(() => h!.console.ofType("session.event").filter((e) => e.body.kind === "turn_ended").length >= 2, 5000, "second turn");
+    const turns = calls().filter((c) => c.method === "turn/start").map((t) => t.params);
+    expect(turns[0]).toMatchObject({ approvalPolicy: "on-request", approvalsReviewer: "auto_review", effort: "high", sandboxPolicy: { type: "workspaceWrite", networkAccess: true } });
+    const roots = turns[0].sandboxPolicy.writableRoots as string[];
+    expect(roots).toHaveLength(1);
+    expect(roots[0]).toMatch(/^\/.*\/projects\/p1\/repos\/o__r\/\.git$/);
+    expect(roots[0].includes("/threads/3/")).toBe(false);
+    expect("sandbox" in turns[0]).toBe(false);
+    expect(turns[1]).toMatchObject({ approvalPolicy: "never", approvalsReviewer: "user", effort: "high", sandboxPolicy: { type: "dangerFullAccess" } });
+  });
+
   it("forwards command approvals and platform tool calls", async () => {
     await startCodex();
     h!.console.command("session.open", codexOpen("s_X2"));

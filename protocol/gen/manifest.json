@@ -338,6 +338,16 @@
       "key": []
     },
     {
+      "type": "session.mode_set",
+      "name": "SessionModeSet",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": [
+        "session_id",
+        "request_id"
+      ]
+    },
+    {
       "type": "session.open",
       "name": "SessionOpen",
       "direction": "console_to_node",

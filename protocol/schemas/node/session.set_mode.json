@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/node/session.set_mode.json",
   "title": "SessionSetMode",
-  "description": "Change permission mode and/or model of a session.",
+  "description": "Change the permission mode, model and/or effort of a session. Claude applies them at once; Codex and Antigravity from the next turn. Daemons with the session_controls feature answer with session.mode_set.",
   "x-direction": "console_to_node",
   "x-key": [
     "id"
@@ -22,14 +22,30 @@
         "default",
         "acceptEdits",
         "bypassPermissions",
+        "plan",
         "auto"
-      ]
+      ],
+      "description": "Claude: the SDK permission mode. Codex: auto = workspace-write + on-request with approvals reviewed by Codex's auto_review, default = workspace-write + untrusted, bypassPermissions = danger-full-access + never. Antigravity: default = ask, bypassPermissions = auto."
     },
     "model": {
       "type": [
         "string",
         "null"
       ]
+    },
+    "effort": {
+      "description": "Thinking effort (Claude effortLevel, Codex reasoning effort); null leaves it. Antigravity has none (the effort is part of the model id).",
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 32
+    },
+    "request_id": {
+      "description": "Echoed in session.mode_set.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
     }
   }
 }

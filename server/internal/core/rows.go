@@ -76,8 +76,13 @@ type Employee struct {
 	Look       store.Look `gorm:"serializer:jsonb"`
 	Spec       store.Role `gorm:"serializer:jsonb"`
 	Model      string     // picked with /model; ahead of the project and role models
-	Active     bool
-	CreatedAt  time.Time
+	// SessionMode / SessionEffort: picked by the user of a session (Spec.Solo) for its employee
+	// (a session.set_mode permission mode; an effort level); '' = the initial mode / the project
+	// or role effort. A reopened session keeps them; the role is left alone.
+	SessionMode   string
+	SessionEffort string
+	Active        bool
+	CreatedAt     time.Time
 	// CurrentThreadID is where a project member works: its current task's thread, or the thread
 	// of its latest session (shared-members.md §2). Nil for the coordinator, leads, legacy members.
 	CurrentThreadID *string
@@ -110,7 +115,7 @@ func (e Employee) WorkThreadID() *string {
 func (Employee) TableName() string { return "at_employees" }
 
 const employeeCols = `id, project_id, thread_id, name, tier, role, role_id, runtime, node_id, instance_no, look, spec,
-	model, active, created_at, current_thread_id`
+	model, session_mode, session_effort, active, created_at, current_thread_id`
 
 // AgentSession is a row of at_agent_sessions (one logical session).
 type AgentSession struct {
@@ -141,6 +146,28 @@ type AgentSession struct {
 	ContextMax  *int
 	// TasksDone counts the task briefs that reached the session (clear_after_tasks, §5).
 	TasksDone int
+	// Controls: what a session's employee runs in besides PermissionMode, and the switch on its way.
+	Controls SessionControls `gorm:"serializer:jsonb"`
+}
+
+// SessionControls is at_agent_sessions.controls (sessions, #53): the model and effort the live
+// session runs (as its node last reported them), the switch sent and not answered yet, and the
+// last switch that failed.
+type SessionControls struct {
+	Model   string          `json:"model,omitempty"`
+	Effort  string          `json:"effort,omitempty"`
+	Pending *ControlsSwitch `json:"pending,omitempty"`
+	Error   string          `json:"error,omitempty"`
+}
+
+// ControlsSwitch is a session.set_mode sent with a request_id (” fields: unchanged).
+type ControlsSwitch struct {
+	RequestID      string    `json:"request_id"`
+	PermissionMode string    `json:"permission_mode,omitempty"`
+	Model          string    `json:"model,omitempty"`
+	Effort         string    `json:"effort,omitempty"`
+	ClearEffort    bool      `json:"clear_effort,omitempty"` // the new model dropped the effort picked before
+	At             time.Time `json:"at"`
 }
 
 // TableName maps AgentSession to at_agent_sessions.
@@ -148,7 +175,7 @@ func (AgentSession) TableName() string { return "at_agent_sessions" }
 
 const sessionCols = `id, employee_id, node_id, runtime, sdk_session_id, codex_thread_id, cwd, branch, state, open_gen,
 	permission_mode, init, last_event_no, opened_at, last_active_at, closed_at, close_reason, thread_id, in_turn,
-	context_used, context_max, tasks_done`
+	context_used, context_max, tasks_done, controls`
 
 // Task is a row of at_tasks.
 type Task struct {

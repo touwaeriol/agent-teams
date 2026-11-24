@@ -437,6 +437,10 @@
           "items": {
             "type": "string"
           }
+        },
+        "prefer_auto": {
+          "description": "A session's employee: open in permission_mode, then switch to auto once the session's model reports supportsAutoMode (init.permission_mode says which it runs in).",
+          "type": "boolean"
         }
       }
     },
@@ -534,6 +538,22 @@
         "config": {
           "description": "Extra thread/start config (e.g. sandbox_workspace_write.writable_roots); mcp_servers.platform is filled in by the daemon.",
           "type": "object"
+        },
+        "effort": {
+          "description": "Reasoning effort for thread/start; null or absent: the model's default.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 32
+        },
+        "approvals_reviewer": {
+          "description": "Who reviews approval requests: auto_review lets Codex's reviewer subagent decide (a session's 自动 mode); absent: the user.",
+          "type": "string",
+          "enum": [
+            "user",
+            "auto_review"
+          ]
         }
       }
     },

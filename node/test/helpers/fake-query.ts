@@ -11,6 +11,8 @@ export interface FakeQueryLog {
   interrupts: number;
   modes: string[];
   models?: string[];
+  /** applyFlagSettings calls. */
+  flags?: Array<Record<string, unknown>>;
   /** What PreCompact / SessionStart hooks returned (compaction tests). */
   hooks?: Array<{ event: string; output: unknown }>;
   /** getContextUsage calls by detail (context breakdown tests). */
@@ -30,6 +32,14 @@ export function fakeQueryFactory(log: FakeQueryLog) {
   };
 }
 
+/** initialize's models, shaped like SDK 0.3.325's (an alias row, a default row, a model without auto). */
+export const FAKE_MODELS = [
+  { value: "default", resolvedModel: "claude-opus-5-5", displayName: "Default (recommended)", description: "Opus 5.5", supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"], supportsAutoMode: true },
+  { value: "opus", resolvedModel: "claude-opus-5-5", displayName: "Opus 5.5", description: "For complex work", supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"], supportsAutoMode: true },
+  { value: "claude-haiku-x", resolvedModel: "claude-haiku-x", displayName: "Haiku X", description: "", supportedEffortLevels: ["low", "medium", "high"], supportsAutoMode: true },
+  { value: "claude-haiku-4-5-20251001", resolvedModel: "claude-haiku-4-5-20251001", displayName: "Haiku 4.5", description: "" },
+];
+
 class FakeQuery {
   private out: SDKMessage[] = [];
   private wake: (() => void) | null = null;
@@ -44,7 +54,7 @@ class FakeQuery {
 
   async initializationResult() {
     return {
-      claude_code_version: "2.1.325-fake", account: {}, agents: [], models: [],
+      claude_code_version: "2.1.325-fake", account: {}, agents: [], models: FAKE_MODELS,
       commands: [{ name: "design", description: "Claude Design access", argumentHint: "", builtin: true }, { name: "agent-teams-skills:design", description: "Make HTML prototypes", argumentHint: "" }],
     };
   }
@@ -60,7 +70,14 @@ class FakeQuery {
   }
 
   async setPermissionMode(m: string) {
+    // Like SDK 0.3.325: auto only for a model with supportsAutoMode.
+    const model = this.model ?? this.options.model;
+    if (m === "auto" && !FAKE_MODELS.some((x) => (x.value === model || x.resolvedModel === model) && x.supportsAutoMode)) throw new Error("Cannot set permission mode to auto: auto mode unavailable for this model");
     this.log.modes.push(m);
+  }
+
+  async applyFlagSettings(s: Record<string, unknown>) {
+    (this.log.flags ??= []).push(s);
   }
 
   private model: string | undefined;

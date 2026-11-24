@@ -587,10 +587,16 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 	if err != nil {
 		return err
 	}
+	controls := false
+	if env.emp.Spec.Solo {
+		if controls, err = core.NodeHasFeature(ctx, tx, node.ID, FeatureSessionControls); err != nil {
+			return err
+		}
+	}
 	open, err := buildOpen(sessionInput{emp: env.emp, thread: env.thread, project: env.project, node: node, sess: sess,
 		prepare: prepare, first: first, resume: resume, system: system, rules: rules, hasRepo: len(env.repos) > 0,
 		repos: env.slugs(), protRefs: o.protectedRefs(ctx, tx, env), gitHosts: env.gitHosts(),
-		window: window})
+		window: window, controls: controls})
 	if err != nil {
 		return err
 	}
@@ -618,12 +624,10 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 	return err
 }
 
-// recordMode keeps the Claude mode the session opens in, so SetMode knows what it runs in.
+// recordMode keeps the mode, model and effort the session opens in, so SetMode and the session's
+// controls know what it runs in (Codex and Antigravity: as set_mode values, openMode).
 func recordMode(ctx context.Context, tx *core.Tx, sessionID string, open protocol.SessionOpen) error {
-	if open.Claude == nil {
-		return nil
-	}
-	return setPermissionMode(ctx, tx, sessionID, string(open.Claude.PermissionMode))
+	return recordOpenControls(ctx, tx, sessionID, open)
 }
 
 // setPermissionMode records the permission mode a session runs in.
@@ -1043,9 +1047,10 @@ func (o *Orchestrator) Interrupt(ctx context.Context, tx *core.Tx, e core.Employ
 	return err
 }
 
-// SetMode changes a live session (runtimes with LiveModeSwitch)'s permission mode (thread auto-approve).
+// SetMode changes a live session's permission mode for the thread auto-approve switch: Claude
+// only (runtimes with ModeSwitchNow), as before sessions could switch Codex and Antigravity too.
 func (o *Orchestrator) SetMode(ctx context.Context, tx *core.Tx, s core.AgentSession, mode string) error {
-	if s.NodeID == nil || !runtimes.Of(s.Runtime).LiveModeSwitch || s.PermissionMode == mode {
+	if s.NodeID == nil || !runtimes.Of(s.Runtime).ModeSwitchNow || s.PermissionMode == mode {
 		return nil
 	}
 	m := protocol.SessionSetModePermissionMode(mode)

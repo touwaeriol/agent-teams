@@ -172,6 +172,20 @@ describe("antigravity sessions over ACP", () => {
     expect(h!.console.ofType("approval.request")).toEqual([]);
   });
 
+  it("lists the session's models and switches approval and model with session.set_mode", async () => {
+    const calls = await startAgy();
+    const opened = await openAndRelease("s_AM");
+    expect(opened.body.init.models).toEqual([{ id: "gemini-default", name: "Default", efforts: [], default: true }, { id: "gemini-4-neon-high", name: "Neon", efforts: [] }]);
+    h!.console.command("session.set_mode", { session_id: "s_AM", permission_mode: "bypassPermissions", model: "gemini-4-neon-high", request_id: "ra1" });
+    expect((await h!.console.waitType("session.mode_set")).body).toMatchObject({ ok: true, permission_mode: "bypassPermissions", model: "gemini-4-neon-high", applies: "next_turn" });
+    expect(calls().filter((c) => c.method === "session/set_model").map((c) => c.params.modelId)).toEqual(["gemini-4-neon-high"]);
+    await say("s_AM", "m_1", "please write");
+    expect((await finalText("s_AM")).body.text).toBe("permission: allow-once");
+    expect(h!.console.ofType("approval.request")).toEqual([]);
+    h!.console.command("session.set_mode", { session_id: "s_AM", permission_mode: "plan", request_id: "ra2" });
+    expect((await h!.console.waitType("session.mode_set", (b) => b.request_id === "ra2")).body).toMatchObject({ ok: false, permission_mode: "bypassPermissions", error: expect.stringMatching(/no plan mode/) });
+  });
+
   it("names command permissions Bash, so the console's shell denylist applies", async () => {
     await startAgy();
     await openAndRelease("s_A0");
