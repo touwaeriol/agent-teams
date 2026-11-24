@@ -146,7 +146,9 @@ func TestSessionControls(t *testing.T) {
 	}
 	b.must(200, "PUT", base, map[string]any{"model": "claude-haiku-4-5"}, &c)
 	set = expectSetModeBody(t, a)
-	modeSet(a, *set.RequestID, true, "plan", "claude-haiku-4-5", "", "")
+	// Older daemons keep the old level on a model switch and report it (t45): the effort the switch
+	// dropped stays dropped on the session and the employee.
+	modeSet(a, *set.RequestID, true, "plan", "claude-haiku-4-5", "low", "")
 	eventually(t, "haiku in force", func() bool {
 		c = controlsView{}
 		b.must(200, "GET", base, nil, &c)

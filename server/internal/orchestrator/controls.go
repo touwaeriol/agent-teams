@@ -542,8 +542,14 @@ func (o *Orchestrator) HandleModeSet(ctx context.Context, nodeID string, m *prot
 		if c.Pending != nil && c.Pending.RequestID == deref(m.RequestID) {
 			sent, c.Pending = c.Pending, nil
 		}
+		reported := deref(m.Effort)
+		if sent != nil && m.Ok && sent.ClearEffort && sent.Effort == "" {
+			// The model switch dropped the effort: older daemons still report the old level (the new
+			// model does not take it), so the session and the employee stay on the model's default.
+			reported, m.Effort = "", nil
+		}
 		set := map[string]any{}
-		applyControls(&c, set, deref(m.PermissionMode), deref(m.Model), deref(m.Effort))
+		applyControls(&c, set, deref(m.PermissionMode), deref(m.Model), reported)
 		c.Error = ""
 		if !m.Ok {
 			c.Error = deref(m.Error)

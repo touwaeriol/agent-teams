@@ -57,7 +57,9 @@ team and no task pool.
   before (no `prefer_auto`), the menu keeps Claude's `default` / `acceptEdits` /
   `bypassPermissions` (none for Codex and Antigravity), there is no effort, and `set_mode` goes out
   without `plan`, `effort` and `request_id` (`node_outdated: true` in the view).
-- Switching to a model without the picked effort level drops the pick (the model's default).
+- Switching to a model without the picked effort level drops the pick (the model's default). The
+  daemon leaves the old level out of `session.mode_set` and the session record (it knows the levels
+  from the session's init models); the server ignores a level an older daemon still reports there.
 - On a failed switch only the picks that switch changed go back.
 - A switch with no answer within 2 minutes (a daemon that restarted meanwhile) ends the same way: the
   picks it changed go back to what the session runs and the view carries the error
