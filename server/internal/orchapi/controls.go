@@ -3,6 +3,7 @@ package orchapi
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -89,4 +90,36 @@ func (a *API) setControls(ctx context.Context, in *setControlsInput) (*controlsO
 		"action": "session_controls", "target_type": "project", "target_id": p.ID,
 		"detail": store.Param(map[string]any{"permission_mode": b.PermissionMode, "model": b.Model, "effort": b.Effort})}).Error
 	return &controlsOutput{Body: out}, nil
+}
+
+type sessionOptionsInput struct {
+	Role  string `query:"role" maxLength:"64" doc:"Member role template ('' = the first member role)"`
+	Model string `query:"model" maxLength:"100" doc:"The model picked on the page ('' = the role's)"`
+}
+
+type sessionOptionsOutput struct{ Body orchestrator.SessionOptions }
+
+func (a *API) registerSessionOptions(api huma.API) {
+	huma.Register(api, op("session-options", "GET", "/api/session-options", "sessions",
+		summary("The permission modes, models and efforts a new session made from a role can start with")), a.sessionOptions)
+}
+
+func (a *API) sessionOptions(ctx context.Context, in *sessionOptionsInput) (*sessionOptionsOutput, error) {
+	u, err := a.user(ctx)
+	if err != nil {
+		return nil, err
+	}
+	roles, err := a.e.Store.Roles(ctx, u.ID)
+	if err != nil {
+		return nil, err
+	}
+	i := slices.IndexFunc(roles, func(r store.Role) bool { return r.Tier == "member" && (in.Role == "" || r.Role == in.Role) })
+	if i < 0 {
+		return nil, httpapi.Invalid("role", "没有这个岗位："+in.Role)
+	}
+	out, err := a.e.Orch.SessionOptionsFor(ctx, u.ID, roles[i], strings.TrimSpace(in.Model))
+	if err != nil {
+		return nil, err
+	}
+	return &sessionOptionsOutput{Body: out}, nil
 }

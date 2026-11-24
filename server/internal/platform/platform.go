@@ -162,6 +162,8 @@ type SessionStart struct {
 	Title, Message string
 	Role           store.Role // the member role template the employee is made from
 	Model          string     // '' = the role's
+	PermissionMode string     // '' = the session's initial mode (session controls, #53)
+	Effort         string     // '' = project / role setting
 	NodeID         string     // '' = scheduled
 	Branch         string     // the work branch's name after session/<id>-; '' = from the title or the repositories
 	Repos          []SessionRepo

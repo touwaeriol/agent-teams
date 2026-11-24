@@ -68,6 +68,7 @@ func (a *API) Register(api huma.API, r gin.IRoutes) {
 	a.registerContextDetail(api)
 	a.registerModel(api)
 	a.registerControls(api)
+	a.registerSessionOptions(api)
 }
 
 // registerNodeLinks mounts the daemon WebSocket (and its v2 alias). Without an engine

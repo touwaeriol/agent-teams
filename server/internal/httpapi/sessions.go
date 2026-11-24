@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/touwaeriol/agent-teams/server/internal/platform"
+	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -31,8 +33,11 @@ type SessionInput struct {
 	Repos   []SessionRepoRef `json:"repos" maxItems:"20" doc:"Repositories, all checked out side by side in the employee's directory"`
 	Role    string           `json:"role,omitempty" maxLength:"64" doc:"Member role template the employee is made from; '' = the first member role"`
 	Model   string           `json:"model,omitempty" maxLength:"100" doc:"'' = the role's model"`
-	NodeID  string           `json:"node_id,omitempty" maxLength:"64" doc:"Run on this node; '' = picked automatically (most quota left)"`
-	Branch  string           `json:"branch,omitempty" maxLength:"60" doc:"Name of the work branch (after session/<id>-); '' = from the title, or the repositories when the title has no Latin letters"`
+	// Session controls (#53): picked on the new-session page; GET /api/session-options lists them.
+	PermissionMode string `json:"permission_mode,omitempty" enum:"auto,default,acceptEdits,plan,bypassPermissions" doc:"'' = the initial mode (Claude: auto when the model supports it, else default; Codex/Antigravity: the role's)"`
+	Effort         string `json:"effort,omitempty" maxLength:"32" doc:"Thinking effort; '' = project / role setting"`
+	NodeID         string `json:"node_id,omitempty" maxLength:"64" doc:"Run on this node; '' = picked automatically (most quota left)"`
+	Branch         string `json:"branch,omitempty" maxLength:"60" doc:"Name of the work branch (after session/<id>-); '' = from the title, or the repositories when the title has no Latin letters"`
 }
 
 // WorkSessionView is the 多仓库会话 just created (SessionView is the login session).
@@ -115,7 +120,24 @@ func (s *Server) sessionStart(ctx context.Context, userID string, b SessionInput
 	if title == "" {
 		title = titleOf(b.Message)
 	}
-	return platform.SessionStart{Title: title, Role: role, Model: strings.TrimSpace(b.Model), NodeID: b.NodeID, Branch: strings.TrimSpace(b.Branch)}, nil
+	if err := checkSessionControls(role, b.PermissionMode, b.Effort); err != nil {
+		return platform.SessionStart{}, err
+	}
+	return platform.SessionStart{Title: title, Role: role, Model: strings.TrimSpace(b.Model), PermissionMode: b.PermissionMode,
+		Effort: strings.TrimSpace(b.Effort), NodeID: b.NodeID, Branch: strings.TrimSpace(b.Branch)}, nil
+}
+
+// checkSessionControls refuses a mode the role's runtime does not have, bypass on an ask role and
+// an effort on a runtime without one (the effort level itself is the model's: the daemon checks).
+func checkSessionControls(role store.Role, mode, effort string) error {
+	rt := runtimes.Of(role.Runtime)
+	if mode != "" && (!slices.Contains(rt.Modes, mode) || (mode == "bypassPermissions" && role.PermissionMode == store.PermAsk)) {
+		return invalid([]FieldError{{"permission_mode", "这个岗位的会话不能用这个权限模式"}}, "这个岗位的会话不能用这个权限模式")
+	}
+	if strings.TrimSpace(effort) != "" && !rt.Efforts {
+		return invalid([]FieldError{{"effort", "这个运行时的思考强度写在模型里"}}, "这个运行时的思考强度写在模型里")
+	}
+	return nil
 }
 
 // sessionRole is the user's member role template named name (the first member role for ”).

@@ -6701,6 +6701,11 @@
             "maxLength": 60,
             "type": "string"
           },
+          "effort": {
+            "description": "Thinking effort; '' = project / role setting",
+            "maxLength": 32,
+            "type": "string"
+          },
           "message": {
             "description": "The task: the employee's first message",
             "maxLength": 50000,
@@ -6715,6 +6720,17 @@
           "node_id": {
             "description": "Run on this node; '' = picked automatically (most quota left)",
             "maxLength": 64,
+            "type": "string"
+          },
+          "permission_mode": {
+            "description": "'' = the initial mode (Claude: auto when the model supports it, else default; Codex/Antigravity: the role's)",
+            "enum": [
+              "auto",
+              "default",
+              "acceptEdits",
+              "plan",
+              "bypassPermissions"
+            ],
             "type": "string"
           },
           "repos": {
@@ -6742,6 +6758,60 @@
         "required": [
           "message",
           "repos"
+        ],
+        "type": "object"
+      },
+      "SessionOptions": {
+        "additionalProperties": false,
+        "properties": {
+          "default_mode": {
+            "description": "What the session opens in without a pick: Claude auto (when the model supports it, else default), Codex/Antigravity the role's",
+            "type": "string"
+          },
+          "efforts": {
+            "description": "Effort levels of the model ([] = none to pick or not known yet)",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "model": {
+            "description": "The model the session would run without a pick",
+            "type": "string"
+          },
+          "models": {
+            "description": "From the user's latest session on this runtime ([] = none reported yet: type a model id)",
+            "items": {
+              "$ref": "#/components/schemas/ModelChoice"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "modes": {
+            "items": {
+              "$ref": "#/components/schemas/ModeOption"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "runtime": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runtime",
+          "default_mode",
+          "model",
+          "modes",
+          "models",
+          "efforts"
         ],
         "type": "object"
       },
@@ -15592,6 +15662,61 @@
         "summary": "Log in from the console; the first test pins the host key",
         "tags": [
           "servers"
+        ]
+      }
+    },
+    "/api/session-options": {
+      "get": {
+        "operationId": "session-options",
+        "parameters": [
+          {
+            "description": "Member role template ('' = the first member role)",
+            "explode": false,
+            "in": "query",
+            "name": "role",
+            "schema": {
+              "description": "Member role template ('' = the first member role)",
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "The model picked on the page ('' = the role's)",
+            "explode": false,
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "description": "The model picked on the page ('' = the role's)",
+              "maxLength": 100,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionOptions"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "The permission modes, models and efforts a new session made from a role can start with",
+        "tags": [
+          "sessions"
         ]
       }
     },

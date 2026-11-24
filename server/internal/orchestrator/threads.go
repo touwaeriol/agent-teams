@@ -43,6 +43,9 @@ type ThreadRequest struct {
 	// Solo opens a session's thread (OpenSession): its only employee is this role as a writing
 	// lead (Solo set); the project gets no members.
 	Solo *store.Role
+	// SoloMode / SoloEffort: the permission mode and effort picked on the new-session page, kept
+	// on the session's employee like a pick made in the session.
+	SoloMode, SoloEffort string
 	// Branch overrides the thread branch name ("" = thread/<no>-<slug>).
 	Branch string
 }
@@ -94,6 +97,12 @@ func (o *Orchestrator) OpenThreadTx(ctx context.Context, tx *core.Tx, req Thread
 	}
 	if _, err := core.InstantiateThread(ctx, tx, t, o.hairFor); err != nil {
 		return t, err
+	}
+	if req.Solo != nil && (req.SoloMode != "" || req.SoloEffort != "") {
+		if err := tx.Gorm(ctx).Table("at_employees").Where("thread_id = ? AND tier = 'lead'", t.ID).
+			Updates(map[string]any{"session_mode": req.SoloMode, "session_effort": req.SoloEffort}).Error; err != nil {
+			return t, err
+		}
 	}
 	return t, tx.EmitThread(ctx, t.ID)
 }

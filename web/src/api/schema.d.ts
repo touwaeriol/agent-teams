@@ -1755,6 +1755,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/session-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The permission modes, models and efforts a new session made from a role can start with */
+        get: operations["session-options"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions": {
         parameters: {
             query?: never;
@@ -4342,18 +4359,37 @@ export interface components {
         SessionInput: {
             /** @description Name of the work branch (after session/<id>-); '' = from the title, or the repositories when the title has no Latin letters */
             branch?: string;
+            /** @description Thinking effort; '' = project / role setting */
+            effort?: string;
             /** @description The task: the employee's first message */
             message: string;
             /** @description '' = the role's model */
             model?: string;
             /** @description Run on this node; '' = picked automatically (most quota left) */
             node_id?: string;
+            /**
+             * @description '' = the initial mode (Claude: auto when the model supports it, else default; Codex/Antigravity: the role's)
+             * @enum {string}
+             */
+            permission_mode?: "auto" | "default" | "acceptEdits" | "plan" | "bypassPermissions";
             /** @description Repositories, all checked out side by side in the employee's directory */
             repos: components["schemas"]["SessionRepoRef"][] | null;
             /** @description Member role template the employee is made from; '' = the first member role */
             role?: string;
             /** @description '' = the first line of message */
             title?: string;
+        };
+        SessionOptions: {
+            /** @description What the session opens in without a pick: Claude auto (when the model supports it, else default), Codex/Antigravity the role's */
+            default_mode: string;
+            /** @description Effort levels of the model ([] = none to pick or not known yet) */
+            efforts: string[] | null;
+            /** @description The model the session would run without a pick */
+            model: string;
+            /** @description From the user's latest session on this runtime ([] = none reported yet: type a model id) */
+            models: components["schemas"]["ModelChoice"][] | null;
+            modes: components["schemas"]["ModeOption"][] | null;
+            runtime: string;
         };
         SessionRepoRef: {
             /** @description Branch the employee's work branch is cut from; '' = the repository's default branch */
@@ -9696,6 +9732,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ServerTestResult"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "session-options": {
+        parameters: {
+            query?: {
+                /** @description Member role template ('' = the first member role) */
+                role?: string;
+                /** @description The model picked on the page ('' = the role's) */
+                model?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionOptions"];
                 };
             };
             /** @description Error */

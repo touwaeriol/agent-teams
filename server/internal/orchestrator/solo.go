@@ -26,6 +26,8 @@ type SessionRequest struct {
 	Message           string      // the user's first message, delivered once the thread starts
 	Role              store.Role  // the member role template the employee is made from
 	Model             string      // '' = the role's model
+	PermissionMode    string      // '' = the initial mode (soloMode); kept as the employee's session_mode
+	Effort            string      // '' = project / role effort; kept as the employee's session_effort
 	NodeID            string      // '' = scheduled like any employee (most quota left)
 	Branch            string      // the work branch's name the user typed ('' = from the title or the repositories)
 	Repos             []RepoFocus // every repository with the branch picked for it ('' = default)
@@ -86,7 +88,7 @@ func repoWords(repos []RepoFocus) string {
 func (o *Orchestrator) OpenSession(ctx context.Context, req SessionRequest) (core.Thread, error) {
 	role := SessionRole(req.Role, req.Model, req.NodeID)
 	return o.OpenThread(ctx, ThreadRequest{UserID: req.UserID, ProjectID: req.ProjectID, Title: req.Title,
-		Brief: req.Message, OpenedBy: "user", Repos: req.Repos, Solo: &role, Branch: SessionBranch(req.ProjectID, req.Branch, req.Title, req.Repos)})
+		Brief: req.Message, OpenedBy: "user", Repos: req.Repos, Solo: &role, SoloMode: req.PermissionMode, SoloEffort: req.Effort, Branch: SessionBranch(req.ProjectID, req.Branch, req.Title, req.Repos)})
 }
 
 // startSolo delivers a session's first message: the brief is the user's own words, shown in the
