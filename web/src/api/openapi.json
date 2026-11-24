@@ -1249,6 +1249,28 @@
         ],
         "type": "object"
       },
+      "ControlsPending": {
+        "additionalProperties": false,
+        "properties": {
+          "effort": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "permission_mode": {
+            "type": "string"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since"
+        ],
+        "type": "object"
+      },
       "ConversationModel": {
         "additionalProperties": false,
         "properties": {
@@ -3304,6 +3326,43 @@
         ],
         "type": "object"
       },
+      "ModeOption": {
+        "additionalProperties": false,
+        "properties": {
+          "applies": {
+            "description": "now: Claude switches at once; next_turn: Codex/Antigravity from the next turn",
+            "enum": [
+              "now",
+              "next_turn"
+            ],
+            "type": "string"
+          },
+          "hint": {
+            "type": "string"
+          },
+          "id": {
+            "description": "session.set_mode value",
+            "enum": [
+              "auto",
+              "default",
+              "acceptEdits",
+              "plan",
+              "bypassPermissions"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "hint",
+          "applies"
+        ],
+        "type": "object"
+      },
       "ModelApplied": {
         "additionalProperties": false,
         "properties": {
@@ -3323,6 +3382,47 @@
           "employee",
           "model",
           "live"
+        ],
+        "type": "object"
+      },
+      "ModelChoice": {
+        "additionalProperties": false,
+        "properties": {
+          "default": {
+            "description": "The runtime's default model",
+            "type": "boolean"
+          },
+          "default_effort": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "efforts": {
+            "description": "Thinking effort levels of the model; [] = none to pick (Antigravity: the effort is part of the model id)",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "supports_auto": {
+            "description": "Claude: the model supports the auto permission mode",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "efforts",
+          "supports_auto"
         ],
         "type": "object"
       },
@@ -6506,6 +6606,88 @@
         ],
         "type": "object"
       },
+      "SessionControls": {
+        "additionalProperties": false,
+        "properties": {
+          "effort": {
+            "description": "'' = the model's default",
+            "type": "string"
+          },
+          "efforts": {
+            "description": "Effort levels of the current model ([] = none to pick)",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "error": {
+            "description": "Why the last switch failed (the fields show what still runs)",
+            "type": "string"
+          },
+          "live": {
+            "description": "A session is open on a node: a switch goes to it now; false: the next session opens with it",
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "models": {
+            "description": "Models reported by the session's runtime ([] until a session opened on a daemon with session_controls)",
+            "items": {
+              "$ref": "#/components/schemas/ModelChoice"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "modes": {
+            "description": "Permission menu in order: auto only when the model supports it, bypassPermissions only when the role allows skipping permission prompts",
+            "items": {
+              "$ref": "#/components/schemas/ModeOption"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "node_outdated": {
+            "description": "The session's node runs a daemon without session_controls: only the model and Claude's default / acceptEdits / bypassPermissions can be switched, no effort (upgrade the node for the rest)",
+            "type": "boolean"
+          },
+          "pending": {
+            "$ref": "#/components/schemas/ControlsPending",
+            "description": "A switch on its way to the node (null: none); a session_controls event follows its answer"
+          },
+          "permission_mode": {
+            "description": "The mode in force (set_mode value), as the node wrote it back; without a live session the one the next session opens in",
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "thread_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id",
+          "runtime",
+          "live",
+          "permission_mode",
+          "model",
+          "effort",
+          "pending",
+          "modes",
+          "models",
+          "efforts",
+          "node_outdated"
+        ],
+        "type": "object"
+      },
       "SessionInput": {
         "additionalProperties": false,
         "properties": {
@@ -6681,6 +6863,33 @@
           "last_seen_at",
           "expires_at"
         ],
+        "type": "object"
+      },
+      "SetControlsInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "effort": {
+            "description": "One of the model's efforts; absent = unchanged",
+            "maxLength": 32,
+            "type": "string"
+          },
+          "model": {
+            "description": "One of the models GET lists (any valid id while it lists none); absent = unchanged",
+            "maxLength": 100,
+            "type": "string"
+          },
+          "permission_mode": {
+            "description": "One of the modes GET lists; absent = unchanged",
+            "enum": [
+              "auto",
+              "default",
+              "acceptEdits",
+              "plan",
+              "bypassPermissions"
+            ],
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "SetModelInputBody": {
@@ -14011,6 +14220,98 @@
         "summary": "Replace the project's servers and role grants",
         "tags": [
           "servers"
+        ]
+      }
+    },
+    "/api/projects/{pid}/session-controls": {
+      "get": {
+        "operationId": "session-controls",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionControls"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "The permission mode, model and thinking effort of a session, and what it may switch to",
+        "tags": [
+          "sessions"
+        ]
+      },
+      "put": {
+        "operationId": "set-session-controls",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetControlsInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionControls"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Switch a session's permission mode, model and/or thinking effort: Claude at once, Codex and Antigravity from the next turn; the answer comes as a session_controls event",
+        "tags": [
+          "sessions"
         ]
       }
     },

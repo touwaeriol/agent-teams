@@ -346,7 +346,24 @@
             "name": "platform",
             "status": "connected"
           }
-        ]
+        ],
+        "models": [
+          {
+            "id": "claude-opus-5-5",
+            "name": "Opus 5.5",
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "default_effort": "high",
+            "supports_auto": true,
+            "default": true
+          }
+        ],
+        "effort": "high"
       }
     }
   },
@@ -685,6 +702,37 @@
       "session_id": "s_01JD",
       "permission_mode": "acceptEdits",
       "model": null
+    }
+  },
+  {
+    "v": 2,
+    "type": "session.set_mode",
+    "id": "c_01JD3V0000000000000000009",
+    "seq": 987,
+    "ts": "2026-11-14T12:00:06Z",
+    "body": {
+      "session_id": "s_01JD",
+      "permission_mode": "plan",
+      "model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "request_id": "ms_01JD"
+    }
+  },
+  {
+    "v": 2,
+    "type": "session.mode_set",
+    "id": "n_01JD3V0000000000000000043",
+    "seq": 1891,
+    "ts": "2026-11-14T12:00:06.200Z",
+    "body": {
+      "session_id": "s_01JD",
+      "open_gen": 1,
+      "request_id": "ms_01JD",
+      "ok": true,
+      "permission_mode": "plan",
+      "model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "applies": "now"
     }
   },
   {

@@ -12,7 +12,7 @@ import { approvalId, newId } from "../../util/ids.js";
 import { DAEMON_VERSION } from "../../version.js";
 import { textEvent } from "../claude/mapper.js";
 import type { LoadedImage } from "../images.js";
-import { ResumeFailed, type CompactResult, type Driver, type DriverContext, type EventFields, type OutgoingMessage, type StartResult } from "../types.js";
+import { ResumeFailed, type CompactResult, type Driver, type DriverContext, type ModeApplied, type ModeChange, type ModelOption, type EventFields, type OutgoingMessage, type StartResult } from "../types.js";
 import { AcpClient, AcpFailure, ACP_AUTH_REQUIRED } from "./acp.js";
 import { isPlatformTool, planEvent, promptError, READ_ONLY_KINDS, toolEnded, toolStarted, turnEnded, WRITE_KINDS, type AcpToolCall } from "./mapper.js";
 import { ALLOW_ONCE, decidePermission, outcome, REJECT, type PermissionOption } from "./permissions.js";
@@ -43,7 +43,7 @@ export const AGY_NOT_LOGGED_IN = "agy is not logged in on this node: run `agy ac
 const PDF = "application/pdf";
 
 type Pending = { approvalId: string; resolve: (v: unknown) => void };
-type SessionResp = { sessionId?: string; models?: { currentModelId?: string } | null };
+type SessionResp = { sessionId?: string; models?: { currentModelId?: string; availableModels?: Array<{ modelId?: string; name?: string; description?: string | null }> } | null };
 type Call = AcpToolCall & { startedAt: number; ended?: boolean };
 
 export class AntigravityDriver implements Driver {
@@ -66,6 +66,8 @@ export class AntigravityDriver implements Driver {
   private violated = false;
   private closed = false;
   private model: string | undefined;
+  /** The session's availableModels (ACP unstable session model state), for session.opened. */
+  private models: ModelOption[] = [];
   private approval: "ask" | "auto";
   private readonly opts: AntigravitySessionOptions;
 
@@ -187,6 +189,7 @@ export class AntigravityDriver implements Driver {
    */
   private async applyModel(resp: SessionResp): Promise<void> {
     const current = resp.models?.currentModelId;
+    this.models = acpModels(resp.models?.availableModels, current);
     if (!this.opts.model || this.opts.model === current) {
       this.model = this.opts.model || current || undefined;
       return;
@@ -207,6 +210,7 @@ export class AntigravityDriver implements Driver {
       tools: this.ctx.spec.platform_tools.map((t) => `mcp__platform__${t.name}`),
       permission_mode: `acp/${this.approval}${this.readOnly ? "/read_only" : ""}`,
       mcp_servers: [{ name: "platform", status: "connected" }],
+      ...(this.models.length ? { models: this.models } : {}),
     };
   }
 
@@ -280,14 +284,23 @@ export class AntigravityDriver implements Driver {
     return this.queue.map((m) => m.msg_id);
   }
 
-  /** set_mode: bypassPermissions → permission requests allowed here, default → asked; a model goes through session/set_model. */
-  async setMode(mode?: string, model?: string | null): Promise<void> {
-    if (mode === "bypassPermissions" && !this.readOnly) this.approval = "auto";
-    if (mode === "default" || mode === "acceptEdits") this.approval = "ask";
+  /**
+   * set_mode: bypassPermissions → permission requests allowed here, default → asked (from the next
+   * permission request, so in effect from the next turn); a model goes through session/set_model.
+   * agy has no separate effort: it is part of the model id.
+   */
+  async setMode(change: ModeChange): Promise<ModeApplied> {
+    const { mode, model } = change;
+    if (mode === "bypassPermissions" && this.readOnly) throw new Error("a read-only session cannot skip permission prompts");
     if (model && this.client && this.sessionId) {
       await this.client.request("session/set_model", { sessionId: this.sessionId, modelId: model }, 15_000);
       this.model = model;
+      this.opts.model = model;
     }
+    if (mode === "bypassPermissions") this.approval = "auto";
+    if (mode === "default" || mode === "acceptEdits") this.approval = "ask";
+    this.opts.approval = this.approval;
+    return { permission_mode: this.approval === "auto" ? "bypassPermissions" : "default", ...(this.model ? { model: this.model } : {}), applies: "next_turn" };
   }
 
   /** session.compact: "/compact <instructions>" sent as a prompt (unverified: agy's /compact over ACP). */
@@ -486,4 +499,14 @@ export function promptBlocks(text: string, images: LoadedImage[] | undefined): A
   const note = pdfs.length ? `\n\n[附件 PDF 已保存在本机，可以直接读取：${pdfs.map((p) => p.path).join("、")}]` : "";
   const imgs = (images ?? []).filter((i) => i.media_type !== PDF).map((i) => ({ type: "image", mimeType: i.media_type, data: i.data.toString("base64") }));
   return [{ type: "text", text: text + note }, ...imgs];
+}
+
+/** ACP availableModels as session.opened model options (no efforts: agy writes the effort into the model id). */
+export function acpModels(list: Array<{ modelId?: string; name?: string; description?: string | null }> | undefined, current?: string): ModelOption[] {
+  const out: ModelOption[] = [];
+  for (const m of list ?? []) {
+    if (!m.modelId || out.some((o) => o.id === m.modelId)) continue;
+    out.push({ id: m.modelId.slice(0, 200), ...(m.name ? { name: m.name.slice(0, 200) } : {}), ...(m.description ? { description: m.description.slice(0, 1000) } : {}), efforts: [], ...(m.modelId === current ? { default: true } : {}) });
+  }
+  return out.slice(0, 100);
 }

@@ -15,7 +15,7 @@ func TestRegistry(t *testing.T) {
 	if c := Of(Codex); c.SlashCommands || c.CanLead || !c.NeedsIsolation || c.DefaultModel != "" {
 		t.Fatalf("codex capabilities: %+v", c)
 	}
-	if c := Of(Claude); !c.SlashCommands || !c.CanLead || c.NeedsIsolation || !c.LiveModeSwitch {
+	if c := Of(Claude); !c.SlashCommands || !c.CanLead || c.NeedsIsolation || !c.LiveModeSwitch || !c.ModeSwitchNow {
 		t.Fatalf("claude capabilities: %+v", c)
 	}
 	if RunsOn(Codex, false, "sandbox") || !RunsOn(Codex, false, "agent_user") || !RunsOn(Codex, true, "") || !RunsOn(Claude, false, "none") {
@@ -31,7 +31,7 @@ func TestAntigravity(t *testing.T) {
 	if !ok || !Valid("antigravity") || a.Title != "Antigravity" || a.YAMLType != "antigravity" || a.TeamType != "antigravity" {
 		t.Fatalf("antigravity entry: %+v", a)
 	}
-	if a.DefaultModel != "" || a.SlashCommands || a.LiveModeSwitch || !a.NeedsIsolation || a.CanLead || !a.NeedsHelloReady {
+	if a.DefaultModel != "" || a.SlashCommands || !a.LiveModeSwitch || a.ModeSwitchNow || !a.NeedsIsolation || a.CanLead || !a.NeedsHelloReady {
 		t.Fatalf("antigravity capabilities: %+v", a)
 	}
 	if FromYAMLType("antigravity") != Antigravity {

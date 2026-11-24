@@ -171,6 +171,8 @@ p, user, /api/skills, POST
 p, user, /api/skills/:id, DELETE
 p, user, /api/sessions, POST
 p, user, /api/sessions/:pid/repos, PUT
+p, user, /api/projects/:pid/session-controls, GET
+p, user, /api/projects/:pid/session-controls, PUT
 p, user, /api/threads/:tid, DELETE
 p, user, /api/threads/:tid, GET
 p, user, /api/threads/:tid, PATCH

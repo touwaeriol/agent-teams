@@ -114,7 +114,7 @@ export type RuntimeID = string;
  */
 export type Tier = "coordinator" | "lead" | "member";
 /**
- * Claude permission mode; always explicit. The console opens writing members in bypassPermissions (with allow_dangerously_skip_permissions) or default (ask roles), and the coordinator, lead and read-only roles in dontAsk. auto is kept for old consoles only.
+ * Claude permission mode; always explicit. The console opens writing members in bypassPermissions (with allow_dangerously_skip_permissions) or default (ask roles), and the coordinator, lead and read-only roles in dontAsk. A session's employee (多仓库会话) may run in any of default, acceptEdits, plan, auto (the SDK's classifier, when the model supports it) and bypassPermissions.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "PermissionMode".
@@ -1510,6 +1510,29 @@ export interface SessionInterrupted {
   queued_msg_ids?: MsgId[];
 }
 /**
+ * Result of session.set_mode (daemons with session_controls): what the session runs in now. ok=false: the change failed (error says why); Codex and Antigravity apply nothing then, Claude may have applied the parts before the failing one (mode, then model, then effort). The fields are always what the session runs in after it.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "SessionModeSet".
+ */
+export interface SessionModeSet {
+  session_id: SessionId;
+  open_gen: OpenGen;
+  request_id?: string;
+  ok: boolean;
+  /**
+   * Claude: the SDK mode; Codex and Antigravity: the set_mode value they map from.
+   */
+  permission_mode?: string;
+  model?: string;
+  effort?: string;
+  /**
+   * now: in force already; next_turn: from the session's next turn; next_open: the session is not running, it opens with it.
+   */
+  applies?: "now" | "next_turn" | "next_open";
+  error?: string;
+}
+/**
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "EmployeeRef".
  */
@@ -1565,6 +1588,10 @@ export interface ClaudeSessionOptions {
    */
   deny_non_platform_tools?: boolean;
   protected_refs?: string[];
+  /**
+   * A session's employee: open in permission_mode, then switch to auto once the session's model reports supportsAutoMode (init.permission_mode says which it runs in).
+   */
+  prefer_auto?: boolean;
 }
 /**
  * argv-parsed allow list for read-only sessions (not regex).
@@ -1603,6 +1630,14 @@ export interface CodexSessionOptions {
   config?: {
     [k: string]: unknown;
   };
+  /**
+   * Reasoning effort for thread/start; null or absent: the model's default.
+   */
+  effort?: string | null;
+  /**
+   * Who reviews approval requests: auto_review lets Codex's reviewer subagent decide (a session's 自动 mode); absent: the user.
+   */
+  approvals_reviewer?: "user" | "auto_review";
 }
 /**
  * agy acp --process-per-session, one process per session. The ACP sessionId is kept as sdk_session_id (session.opened, ResumeRef, sessions.report).
@@ -2032,6 +2067,16 @@ export interface SessionInit {
    * @maxItems 200
    */
   commands?: SlashCommand[];
+  /**
+   * The thinking effort the session runs with ('' or absent: the model's default).
+   */
+  effort?: string;
+  /**
+   * Models the session can switch to (Claude: initialize models; Codex: model/list; Antigravity: the session's availableModels). Absent when the runtime did not say.
+   *
+   * @maxItems 100
+   */
+  models?: ModelOption[];
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -2049,6 +2094,37 @@ export interface SlashCommand {
   name: string;
   description?: string;
   argument_hint?: string;
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "ModelOption".
+ */
+export interface ModelOption {
+  /**
+   * The value session.set_mode takes.
+   */
+  id: string;
+  /**
+   * Claude: the wire model id an alias resolves to.
+   */
+  resolved?: string;
+  name?: string;
+  description?: string;
+  /**
+   * Thinking effort levels the model takes; empty: none to choose.
+   *
+   * @maxItems 32
+   */
+  efforts?: string[];
+  default_effort?: string;
+  /**
+   * Claude: the model supports the auto permission mode.
+   */
+  supports_auto?: boolean;
+  /**
+   * The runtime's default model.
+   */
+  default?: boolean;
 }
 /**
  * Result of session.open.
@@ -2112,15 +2188,26 @@ export interface SessionSend {
   anchor?: string;
 }
 /**
- * Change permission mode and/or model of a session.
+ * Change the permission mode, model and/or effort of a session. Claude applies them at once; Codex and Antigravity from the next turn. Daemons with the session_controls feature answer with session.mode_set.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "SessionSetMode".
  */
 export interface SessionSetMode {
   session_id: SessionId;
-  permission_mode?: "default" | "acceptEdits" | "bypassPermissions" | "auto";
+  /**
+   * Claude: the SDK permission mode. Codex: auto = workspace-write + on-request with approvals reviewed by Codex's auto_review, default = workspace-write + untrusted, bypassPermissions = danger-full-access + never. Antigravity: default = ask, bypassPermissions = auto.
+   */
+  permission_mode?: "default" | "acceptEdits" | "bypassPermissions" | "plan" | "auto";
   model?: string | null;
+  /**
+   * Thinking effort (Claude effortLevel, Codex reasoning effort); null leaves it. Antigravity has none (the effort is part of the model id).
+   */
+  effort?: string | null;
+  /**
+   * Echoed in session.mode_set.
+   */
+  request_id?: string;
 }
 /**
  * Session lifecycle state.

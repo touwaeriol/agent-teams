@@ -44,6 +44,7 @@ const (
 	TypeSessionExported       = "session.exported"
 	TypeSessionInterrupt      = "session.interrupt"
 	TypeSessionInterrupted    = "session.interrupted"
+	TypeSessionModeSet        = "session.mode_set"
 	TypeSessionOpen           = "session.open"
 	TypeSessionOpened         = "session.opened"
 	TypeSessionRelease        = "session.release"
@@ -104,6 +105,7 @@ var Messages = map[string]MessageMeta{
 	TypeSessionExported:       {Direction: NodeToConsole, Reliable: true, Key: []string{"export_id"}, New: func() any { return new(SessionExported) }},
 	TypeSessionInterrupt:      {Direction: ConsoleToNode, Reliable: true, Key: []string{"id"}, New: func() any { return new(SessionInterrupt) }},
 	TypeSessionInterrupted:    {Direction: NodeToConsole, Reliable: true, Key: nil, New: func() any { return new(SessionInterrupted) }},
+	TypeSessionModeSet:        {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "request_id"}, New: func() any { return new(SessionModeSet) }},
 	TypeSessionOpen:           {Direction: ConsoleToNode, Reliable: true, Key: []string{"session_id", "open_gen"}, New: func() any { return new(SessionOpen) }},
 	TypeSessionOpened:         {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "open_gen"}, New: func() any { return new(SessionOpened) }},
 	TypeSessionRelease:        {Direction: ConsoleToNode, Reliable: true, Key: []string{"session_id", "open_gen"}, New: func() any { return new(SessionRelease) }},

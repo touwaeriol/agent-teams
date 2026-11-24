@@ -10,7 +10,8 @@ import type { Logger } from "../util/log.js";
 import { isInside, resolveInRoot } from "../util/paths.js";
 import { loadImages, removeImages, type ImageFetcher, type LoadedImage } from "./images.js";
 import { Session, type SendFn, type SessionHost, type SessionRecord } from "./session.js";
-import { ResumeFailed, type CompactResult, type Driver, type DriverContext } from "./types.js";
+import { ResumeFailed, type CompactResult, type Driver, type DriverContext, type ModeApplied, type ModeChange } from "./types.js";
+import { codexMode } from "./codex/mode.js";
 
 export class CommandError extends Error {
   constructor(readonly code: "unknown_session" | "busy" | "bad_schema" | "unsupported", message: string) {
@@ -333,16 +334,33 @@ export class SessionManager implements SessionHost {
     return [{ type: "session.interrupted", body: { session_id: s.id, open_gen: s.gen, queued_msg_ids: queued } }];
   }
 
+  /**
+   * session.set_mode: the running driver applies it (Claude at once, Codex/Antigravity from the next
+   * turn) and the session record keeps it for resumes. With a request_id (session_controls) the
+   * outcome goes back as session.mode_set, failures included; without one a failure is a command error.
+   */
   async setMode(body: SessionSetMode): Promise<Reply[]> {
     const s = this.require(body.session_id);
-    const claude = s.spec.claude;
-    if (body.permission_mode === "bypassPermissions" && claude && !claude.allow_dangerously_skip_permissions) throw new CommandError("unsupported", "bypassPermissions requires allow_dangerously_skip_permissions");
-    if (s.driver) await s.driver.setMode(body.permission_mode, body.model);
-    if (claude && body.permission_mode) claude.permission_mode = body.permission_mode;
-    if (claude && body.model) claude.model = body.model;
-    if (s.spec.codex && body.model) s.spec.codex.model = body.model;
+    const change: ModeChange = { ...(body.permission_mode ? { mode: body.permission_mode } : {}), model: body.model ?? null, effort: body.effort ?? null };
+    try {
+      const applied = await this.applyMode(s, change);
+      return body.request_id ? [modeSet(s, body.request_id, true, applied)] : [];
+    } catch (err) {
+      if (!body.request_id) throw err;
+      return [modeSet(s, body.request_id, false, { ...currentMode(s.spec), applies: "now" }, (err as Error).message)];
+    }
+  }
+
+  private async applyMode(s: Session, change: ModeChange): Promise<ModeApplied> {
+    const spec = s.spec;
+    if (change.mode === "bypassPermissions" && spec.claude && !spec.claude.allow_dangerously_skip_permissions) throw new CommandError("unsupported", "bypassPermissions requires allow_dangerously_skip_permissions");
+    if (change.mode === "bypassPermissions" && spec.antigravity?.read_only) throw new CommandError("unsupported", "a read-only session cannot skip permission prompts");
+    if (change.mode && !spec.claude && (change.mode === "plan" || change.mode === "acceptEdits")) throw new CommandError("unsupported", `${spec.runtime} has no ${change.mode} mode`);
+    if (change.mode === "auto" && spec.antigravity) throw new CommandError("unsupported", "antigravity has no auto mode");
+    const applied = s.driver ? await s.driver.setMode(change) : undefined;
+    rememberMode(spec, change);
     this.persist(s);
-    return [];
+    return applied ?? { ...currentMode(spec), applies: "next_open" as ModeApplied["applies"] };
   }
 
   async close(body: SessionClose): Promise<Reply[]> {
@@ -613,4 +631,51 @@ function reportItem(s: Session, approvals: ApprovalBroker, tools: ToolBroker): S
 export function prepareJobs(spec: Pick<SessionOpen, "prepare" | "prepare_jobs">): string[] {
   if (spec.prepare_jobs?.length) return [...spec.prepare_jobs];
   return spec.prepare ? [spec.prepare] : [];
+}
+
+/** Keeps a set_mode change in the session's open spec (resumes after parking or a daemon restart use it). */
+export function rememberMode(spec: SessionOpen, change: ModeChange): void {
+  const { mode, model, effort } = change;
+  if (spec.claude) {
+    if (mode) {
+      spec.claude.permission_mode = mode as NonNullable<SessionOpen["claude"]>["permission_mode"];
+      spec.claude.prefer_auto = false;
+    }
+    if (model) spec.claude.model = model;
+    if (effort) spec.claude.effort = effort;
+  }
+  if (spec.codex) {
+    if (mode) Object.assign(spec.codex, codexMode(mode, spec.codex));
+    if (model) spec.codex.model = model;
+    if (effort) spec.codex.effort = effort;
+  }
+  if (spec.antigravity) {
+    if (mode === "bypassPermissions" && !spec.antigravity.read_only) spec.antigravity.approval = "auto";
+    if (mode === "default") spec.antigravity.approval = "ask";
+    if (model) spec.antigravity.model = model;
+  }
+}
+
+/** What the open spec says the session runs in. */
+export function currentMode(spec: SessionOpen): Omit<ModeApplied, "applies"> {
+  const c = spec.claude, x = spec.codex, a = spec.antigravity;
+  const out: Omit<ModeApplied, "applies"> = {};
+  if (c) Object.assign(out, { permission_mode: c.permission_mode, model: c.model, ...(c.effort ? { effort: c.effort } : {}) });
+  if (x) Object.assign(out, { permission_mode: codexModeName(x), ...(x.model ? { model: x.model } : {}), ...(x.effort ? { effort: x.effort } : {}) });
+  if (a) Object.assign(out, { permission_mode: a.approval === "auto" ? "bypassPermissions" : "default", ...(a.model ? { model: a.model } : {}) });
+  return out;
+}
+
+/** The set_mode value a Codex sandbox/approval pair stands for. */
+function codexModeName(x: NonNullable<SessionOpen["codex"]>): string {
+  if (x.sandbox === "danger-full-access") return "bypassPermissions";
+  if (x.approvals_reviewer === "auto_review") return "auto";
+  return "default";
+}
+
+function modeSet(s: Session, requestId: string, ok: boolean, a: Partial<ModeApplied>, error?: string): Reply {
+  const body: Record<string, unknown> = { session_id: s.id, open_gen: s.gen, request_id: requestId, ok };
+  for (const k of ["permission_mode", "model", "effort", "applies"] as const) if (a[k]) body[k] = a[k];
+  if (error) body.error = error.slice(0, 1000);
+  return { type: "session.mode_set", body };
 }

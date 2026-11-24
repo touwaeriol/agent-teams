@@ -1447,6 +1447,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{pid}/session-controls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The permission mode, model and thinking effort of a session, and what it may switch to */
+        get: operations["session-controls"];
+        /** Switch a session's permission mode, model and/or thinking effort: Claude at once, Codex and Antigravity from the next turn; the answer comes as a session_controls event */
+        put: operations["set-session-controls"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{pid}/shared-files": {
         parameters: {
             query?: never;
@@ -2699,6 +2717,13 @@ export interface components {
             /** Format: int64 */
             tokens: number;
         };
+        ControlsPending: {
+            effort?: string;
+            model?: string;
+            permission_mode?: string;
+            /** Format: date-time */
+            since: string;
+        };
         ConversationModel: {
             employee: string;
             /** @description What the employee runs without the override (= model) */
@@ -3312,12 +3337,38 @@ export interface components {
             };
             role: string;
         };
+        ModeOption: {
+            /**
+             * @description now: Claude switches at once; next_turn: Codex/Antigravity from the next turn
+             * @enum {string}
+             */
+            applies: "now" | "next_turn";
+            hint: string;
+            /**
+             * @description session.set_mode value
+             * @enum {string}
+             */
+            id: "auto" | "default" | "acceptEdits" | "plan" | "bypassPermissions";
+            label: string;
+        };
         ModelApplied: {
             employee: string;
             /** @description Sent to the employee's running session (from its next turn); false: the next session opens with it */
             live: boolean;
             /** @description What the employee runs from now on */
             model: string;
+        };
+        ModelChoice: {
+            /** @description The runtime's default model */
+            default?: boolean;
+            default_effort?: string;
+            description?: string;
+            /** @description Thinking effort levels of the model; [] = none to pick (Antigravity: the effort is part of the model id) */
+            efforts: string[] | null;
+            id: string;
+            name?: string;
+            /** @description Claude: the model supports the auto permission mode */
+            supports_auto: boolean;
         };
         ModelResult: {
             applied: components["schemas"]["ModelApplied"][] | null;
@@ -4263,6 +4314,29 @@ export interface components {
             node: components["schemas"]["NodeRef"];
             state: string;
         };
+        SessionControls: {
+            /** @description '' = the model's default */
+            effort: string;
+            /** @description Effort levels of the current model ([] = none to pick) */
+            efforts: string[] | null;
+            /** @description Why the last switch failed (the fields show what still runs) */
+            error?: string;
+            /** @description A session is open on a node: a switch goes to it now; false: the next session opens with it */
+            live: boolean;
+            model: string;
+            /** @description Models reported by the session's runtime ([] until a session opened on a daemon with session_controls) */
+            models: components["schemas"]["ModelChoice"][] | null;
+            /** @description Permission menu in order: auto only when the model supports it, bypassPermissions only when the role allows skipping permission prompts */
+            modes: components["schemas"]["ModeOption"][] | null;
+            /** @description The session's node runs a daemon without session_controls: only the model and Claude's default / acceptEdits / bypassPermissions can be switched, no effort (upgrade the node for the rest) */
+            node_outdated: boolean;
+            /** @description A switch on its way to the node (null: none); a session_controls event follows its answer */
+            pending: components["schemas"]["ControlsPending"];
+            /** @description The mode in force (set_mode value), as the node wrote it back; without a live session the one the next session opens in */
+            permission_mode: string;
+            runtime: string;
+            thread_id: string;
+        };
         SessionInput: {
             /** @description Name of the work branch (after session/<id>-); '' = from the title, or the repositories when the title has no Latin letters */
             branch?: string;
@@ -4313,6 +4387,17 @@ export interface components {
             /** Format: date-time */
             last_seen_at: string | null;
             user_agent: string;
+        };
+        SetControlsInputBody: {
+            /** @description One of the model's efforts; absent = unchanged */
+            effort?: string;
+            /** @description One of the models GET lists (any valid id while it lists none); absent = unchanged */
+            model?: string;
+            /**
+             * @description One of the modes GET lists; absent = unchanged
+             * @enum {string}
+             */
+            permission_mode?: "auto" | "default" | "acceptEdits" | "plan" | "bypassPermissions";
         };
         SetModelInputBody: {
             /** @description Model id; '' goes back to the project / role setting */
@@ -8664,6 +8749,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectServersView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "session-controls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionControls"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "set-session-controls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetControlsInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionControls"];
                 };
             };
             /** @description Error */

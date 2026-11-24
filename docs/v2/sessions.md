@@ -31,6 +31,37 @@ team and no task pool.
   on that node (unpushed commits are kept). The employee gets a note either way.
 - 结束会话 completes the thread. The conversation stays, and the next message reopens it.
 
+## Permission mode, model and effort (#53, migration 00440)
+
+- The user switches them in the session (`/api/projects/{pid}/session-controls`). The pick is the
+  session's own: it is kept on the employee (`at_employees.session_mode`, `model`,
+  `session_effort`), a reopened session opens with it, and the role is left alone. Unlike a
+  thread lead, the session's employee runs the model picked in the session (`modelSteps`).
+- Initial mode: Claude opens for `auto` (sent as `default` + `prefer_auto`; the daemon switches to
+  `auto` when the model reports `supportsAutoMode`, else stays in `default`, and `session.opened`
+  says which). Codex and Antigravity keep the role's mode (bypass or ask).
+- Menus by runtime: Claude 自动 `auto` (hidden when the model does not support it) / 手动 `default`
+  / 接受编辑 `acceptEdits` / 计划 `plan` / 跳过权限确认 `bypassPermissions`; Codex 自动 (`auto`:
+  workspace-write + on-request + `approvalsReviewer: auto_review`) / 手动 / 跳过权限确认;
+  Antigravity 手动 (ask) / 跳过权限确认 (auto). 跳过权限确认 shows only when the role lets the
+  employee skip permission prompts (not an ask role). Claude switches at once; Codex and
+  Antigravity from the next turn. Effort levels come from the model (`init.models[].efforts`);
+  Antigravity's effort is part of the model id.
+- A switch goes to the live session as `session.set_mode` with a `request_id`; it is shown
+  pending until `session.mode_set` comes back (protocol.md §4.5) and the web shows what the
+  server wrote back (`at_agent_sessions.permission_mode` and `controls`). A failed switch is
+  shown with its error and the employee's picks go back to what still runs. Daemons without the
+  `session_controls` feature never answer: the switch counts as in force at once.
+- A daemon without `session_controls` (older nodes): the session opens in the role's mode as
+  before (no `prefer_auto`), the menu keeps Claude's `default` / `acceptEdits` /
+  `bypassPermissions` (none for Codex and Antigravity), there is no effort, and `set_mode` goes out
+  without `plan`, `effort` and `request_id` (`node_outdated: true` in the view).
+- Switching to a model without the picked effort level drops the pick (the model's default).
+- On a failed switch only the picks that switch changed go back.
+- Approvals of a session go to its user directly (no lead review) and never time out
+  (`approval_timeout_s` does not apply to projects of kind session). The platform allows a request
+  without a card only while the session runs in `bypassPermissions` (`SkipsApprovals`).
+
 ## Layout on the node
 
 ```
@@ -44,3 +75,12 @@ projects/<pid>/repos/<owner>__<repo>    ← shared clone
 - `POST /api/sessions` `{message, title?, repos: [{repo, git_connection_id | git_repo_id, branch?}], role?, model?, node_id?}`
   → `201 {project, thread_id, thread_no}`.
 - `PUT /api/sessions/{pid}/repos` `{repos}` → the project view.
+- `GET /api/projects/{pid}/session-controls` → `SessionControls {thread_id, runtime, live,
+  permission_mode, model, effort, pending: {permission_mode?, model?, effort?, since} | null,
+  error?, modes: [{id, label, hint, applies: now|next_turn}], models: [{id, name?, description?,
+  efforts, default_effort?, supports_auto, default?}], efforts}`; 409 `not_session` for a project.
+- `PUT /api/projects/{pid}/session-controls` `{permission_mode?, model?, effort?}` → the same view
+  with `pending` set (live session on a `session_controls` daemon). 422 for a value the session
+  cannot take, 409 `switch_pending` while the previous switch has no answer (at most 2 minutes).
+  The answer comes as a `session_controls` project event `{thread_id, applied, error?}`: refetch.
+  (Not under `/api/sessions/{pid}`: gin's GET tree has `/api/sessions/:sid/stream` there.)

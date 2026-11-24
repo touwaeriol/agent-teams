@@ -823,6 +823,25 @@
     {
       "properties": {
         "type": {
+          "const": "session.mode_set"
+        },
+        "body": {
+          "$ref": "session.mode_set.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^n_"
+        }
+      },
+      "required": [
+        "type",
+        "body",
+        "seq"
+      ]
+    },
+    {
+      "properties": {
+        "type": {
           "const": "session.open"
         },
         "body": {

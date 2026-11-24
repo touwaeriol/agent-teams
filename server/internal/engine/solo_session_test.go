@@ -57,8 +57,10 @@ func TestSessionMultiRepo(t *testing.T) {
 		!strings.HasSuffix(string(preps["o/web"].Cwd), "/threads/1/lead/o__web") {
 		t.Fatalf("checkouts %+v %+v", preps["o/r"], preps["o/web"])
 	}
-	if open.Claude == nil || open.Claude.PermissionMode != "bypassPermissions" || !slices.Contains(open.Claude.Tools, "Edit") ||
-		open.Claude.ReadOnly != nil {
+	// A daemon without session_controls gets the role's mode as before (#53; TestSessionControls
+	// covers the auto opening on newer daemons).
+	if open.Claude == nil || open.Claude.PermissionMode != "bypassPermissions" || open.Claude.PreferAuto != nil ||
+		!slices.Contains(open.Claude.Tools, "Edit") || open.Claude.ReadOnly != nil {
 		t.Fatalf("the session employee writes: %+v", open.Claude)
 	}
 	var tools []string
