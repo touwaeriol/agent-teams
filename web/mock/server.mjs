@@ -676,9 +676,11 @@ routes.push(...serverRoutes(state, { json, fail, body, roles: () => state.roles,
 
 // Sessions (多仓库会话, #53; sessions.md, api.md): session-controls, session-options, POST
 // /api/sessions and the context breakdown. A switch answers after MOCK_SWITCH_MS (default 1500);
-// MOCK_SWITCH=fail answers with an error, MOCK_SWITCH=timeout never answers and the pending pick
-// is dropped after MOCK_SWITCH_TIMEOUT_MS (default 120000, the server's 2 minutes) with the old
-// values kept. MOCK_NODE_OUTDATED=1 serves the old daemon's menus.
+// MOCK_SWITCH=fail answers with an error (session_controls applied:false + error, as the server),
+// MOCK_SWITCH=timeout never answers and after MOCK_SWITCH_TIMEOUT_MS (default 120000, the server's
+// 2 minutes) the pending pick is dropped with the old values kept and the error 节点没有回应，切换未生效.
+// MOCK_NODE_OUTDATED=1 serves the old daemon's menus. An old daemon never answers and a parked
+// session has nothing to answer: their switches are in force at once (no pending), as on the server.
 const sessionThread = (pid) => state.sessionThreads.find((t) => t.project_id === pid);
 const sessionPending = {};
 const sessionErrors = {};
@@ -729,14 +731,23 @@ routes.push(
     }
     const how = process.env.MOCK_SWITCH ?? "";
     delete sessionErrors[pid];
+    if (process.env.MOCK_NODE_OUTDATED === "1" || t.session?.state !== "active") {
+      state.sessionPicks[t.id] = next;
+      emit("session_controls", { thread_id: t.id, applied: true }, pid);
+      return json(res, 200, controlsView(pid));
+    }
     const answer = (error) => {
       delete sessionPending[pid];
       if (error) sessionErrors[pid] = error;
       else state.sessionPicks[t.id] = next;
-      emit("session_controls", { thread_id: t.id, applied: true, ...(error ? { error } : {}) }, pid);
+      emit("session_controls", { thread_id: t.id, applied: !error, ...(error ? { error } : {}) }, pid);
+    };
+    const expire = () => {
+      delete sessionPending[pid];
+      sessionErrors[pid] = "节点没有回应，切换未生效";
     };
     const timer = how === "timeout"
-      ? setTimeout(() => delete sessionPending[pid], Number(process.env.MOCK_SWITCH_TIMEOUT_MS ?? 120000))
+      ? setTimeout(expire, Number(process.env.MOCK_SWITCH_TIMEOUT_MS ?? 120000))
       : setTimeout(() => answer(how === "fail" ? "mock: 节点拒绝了这次切换" : ""), Number(process.env.MOCK_SWITCH_MS ?? 1500));
     sessionPending[pid] = { body: b, since: now(), timer };
     emit("session_controls", { thread_id: t.id, applied: false }, pid);

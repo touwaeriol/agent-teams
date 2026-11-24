@@ -28,6 +28,9 @@ const FeatureSessionControls = "session_controls"
 // showing it as on its way (a daemon that restarted in between never answers).
 const controlsPendingFor = 2 * time.Minute
 
+// errNoAnswer is the session's controls error once a switch got no session.mode_set in time.
+const errNoAnswer = "节点没有回应，切换未生效"
+
 // modeLabels are the menu labels of the set_mode values.
 var modeLabels = map[string]string{
 	"auto":              "自动",
@@ -263,6 +266,9 @@ func (o *Orchestrator) SessionControlsOf(ctx context.Context, projectID string) 
 		if err != nil {
 			return err
 		}
+		if lead, err = expireSwitch(ctx, tx, lead); err != nil {
+			return err
+		}
 		p, err := o.project(ctx, tx, projectID)
 		if err != nil {
 			return err
@@ -271,6 +277,52 @@ func (o *Orchestrator) SessionControlsOf(ctx context.Context, projectID string) 
 		return err
 	})
 	return out, err
+}
+
+// expireSwitch ends a switch that got no session.mode_set within controlsPendingFor (a daemon that
+// restarted in between never answers): the employee's picks that switch changed go back to what
+// the session still runs, and the session records errNoAnswer so the view says so instead of
+// showing picks that never took effect. Locks the session before the employee, as HandleModeSet.
+func expireSwitch(ctx context.Context, tx *core.Tx, e core.Employee) (core.Employee, error) {
+	latest, err := core.LatestSession(ctx, tx, e.ID)
+	if errors.Is(err, core.ErrNotFound) {
+		return e, nil
+	}
+	if err != nil {
+		return e, err
+	}
+	if pd := latest.Controls.Pending; pd == nil || time.Since(pd.At) < controlsPendingFor {
+		return e, nil
+	}
+	s, err := core.LockSession(ctx, tx, latest.ID)
+	if err != nil {
+		return e, err
+	}
+	sent := s.Controls.Pending
+	if sent == nil || time.Since(sent.At) < controlsPendingFor {
+		return e, nil // answered meanwhile
+	}
+	set := map[string]any{}
+	if sent.PermissionMode != "" && s.PermissionMode != "" {
+		set["session_mode"] = s.PermissionMode
+	}
+	if sent.Model != "" && s.Controls.Model != "" {
+		set["model"] = s.Controls.Model
+	}
+	if sent.Effort != "" || sent.ClearEffort {
+		set["session_effort"] = s.Controls.Effort
+	}
+	c := s.Controls
+	c.Pending, c.Error = nil, errNoAnswer
+	if err := tx.Gorm(ctx).Table("at_agent_sessions").Where("id = ?", s.ID).Update("controls", jsonOf(c)).Error; err != nil {
+		return e, err
+	}
+	if len(set) > 0 {
+		if err := tx.Gorm(ctx).Table("at_employees").Where("id = ?", e.ID).Updates(set).Error; err != nil {
+			return e, err
+		}
+	}
+	return core.EmployeeByID(ctx, tx, e.ID)
 }
 
 // SetSessionControls switches a session's permission mode, model and/or effort: the pick is kept
@@ -282,6 +334,9 @@ func (o *Orchestrator) SetSessionControls(ctx context.Context, in ControlsChange
 	err := o.core.InTx(ctx, func(tx *core.Tx) error {
 		lead, t, err := soloLead(ctx, tx, in.ProjectID)
 		if err != nil {
+			return err
+		}
+		if lead, err = expireSwitch(ctx, tx, lead); err != nil {
 			return err
 		}
 		if err := tx.Gorm(ctx).Exec(`SELECT 1 FROM at_employees WHERE id = ? FOR UPDATE`, lead.ID).Error; err != nil {

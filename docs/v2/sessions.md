@@ -58,6 +58,9 @@ team and no task pool.
   without `plan`, `effort` and `request_id` (`node_outdated: true` in the view).
 - Switching to a model without the picked effort level drops the pick (the model's default).
 - On a failed switch only the picks that switch changed go back.
+- A switch with no answer within 2 minutes (a daemon that restarted meanwhile) ends the same way: the
+  picks it changed go back to what the session runs and the view carries the error
+  `节点没有回应，切换未生效` (done on the next GET or PUT).
 - Approvals of a session go to its user directly (no lead review) and never time out
   (`approval_timeout_s` does not apply to projects of kind session). The platform allows a request
   without a card only while the session runs in `bypassPermissions` (`SkipsApprovals`).
