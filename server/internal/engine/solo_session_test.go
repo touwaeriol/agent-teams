@@ -41,7 +41,8 @@ func TestSessionMultiRepo(t *testing.T) {
 			Name  string
 			Repos []struct{ Repo string }
 		}
-		ThreadNo int `json:"thread_no"`
+		ThreadNo int    `json:"thread_no"`
+		ThreadID string `json:"thread_id"`
 	}
 	msg := "修复登录后的跳转\n前端在 o/web，接口在 o/r"
 	b.must(201, "POST", "/api/sessions", map[string]any{"message": msg, "role": "dev", "node_id": node.Node.ID,
@@ -122,8 +123,20 @@ func TestSessionMultiRepo(t *testing.T) {
 	if st := sessionStatus(); st != "working" {
 		t.Fatalf("the user spoke last: %q", st)
 	}
-	// The employee replies and its turn ends: 已完成 (finished), with the context it used.
+	// A turn runs: working. The user stops it before any reply: the turn ends without one and the
+	// session is 已完成 all the same (not stuck on 进行中 because the user spoke last).
 	emp.event("turn_started", func(ev *protocol.SessionEvent) { ev.TriggerMsgIds = []protocol.MsgID{open.FirstMessage.MsgID} })
+	eventually(t, "working session", func() bool { return sessionStatus() == "working" })
+	b.must(202, "POST", "/api/conversations/"+created.ThreadID+"/interrupt", nil, nil)
+	ictx, icancel := w.waitCtx()
+	if _, err := n.Wait(ictx, protocol.TypeSessionInterrupt, nil); err != nil {
+		t.Fatal(err)
+	}
+	icancel()
+	emp.turnEnded(12000, 1000000)
+	eventually(t, "finished after the user stopped it", func() bool { return sessionStatus() == "finished" })
+	// The employee replies in a later turn: 已完成 (finished), with the context it used.
+	emp.event("turn_started", func(ev *protocol.SessionEvent) {})
 	emp.event("text", func(ev *protocol.SessionEvent) { s, f := "改好了", true; ev.Text, ev.Final = &s, &f })
 	emp.turnEnded(77000, 1000000)
 	eventually(t, "finished session", func() bool { return sessionStatus() == "finished" })
