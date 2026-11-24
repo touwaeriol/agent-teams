@@ -398,7 +398,7 @@ describe("Team · role model field", () => {
     await flushPromises();
     const boxes = cards(w)[3]!.findAll<HTMLInputElement>("input[aria-label=模型]");
     expect(boxes).toHaveLength(2);
-    expect(cards(w)[3]!.text()).toContain("每次开新会话用剩余额度最多的");
+    expect(cards(w)[3]!.text()).toContain("新会话按用量和会话数在几种 agent 间分摊");
     await boxes[1]!.setValue("claude-sonnet-5-5");
     await boxes[1]!.trigger("keyup", { key: "Enter" });
     await flushPromises();

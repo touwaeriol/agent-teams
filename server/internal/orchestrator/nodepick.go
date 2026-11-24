@@ -14,6 +14,12 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
+// QuotaHardFull is the used percent (of any window that applies) at which a node's quota counts as
+// used up whatever the user's thresholds: a session that must stay (stay) or is being moved
+// (moveTarget) leaves or skips such a node, while the user's lower thresholds (quotaTight) only
+// keep new sessions off a node.
+const QuotaHardFull = 95.0
+
 // shortWindowMinutes: a usage window up to this long counts as a 5-hour window for the thresholds
 // (store.QuotaLimits.FiveHourPct), a longer one as a weekly window (WeeklyPct).
 const shortWindowMinutes = 24 * 60
@@ -34,11 +40,14 @@ const SessionWeight = 10.0
 // live session on the node, so sessions spread over the nodes and the less used ones get more)
 // over every runtime of the role and its candidate nodes, and the employee stays on its current node and runtime only while it must
 // (stay: it resumes a conversation or has a worktree in its thread) and that node is online,
-// still a candidate and not full (a free slot, quota not tight). With no usable pair online it is the current node and
+// still a candidate and not hardFull (a free slot, every window under QuotaHardFull: the user's
+// thresholds do not move it). With no usable pair online it is the current node and
 // runtime (the session waits for it), else the first candidate; when that node is online and
 // reports its runtime CLIs (runtime_status) but the runtime is not ready there, the pick is held
 // instead (hold = why no node can take the session, see holdReason).
-func (o *Orchestrator) pickNode(ctx context.Context, tx *core.Tx, e core.Employee, p store.Project, stay bool) (nodePick, error) {
+// purpose names the caller in the "pick node" log: pickOpen (a new session) or pickSync (the
+// pre-task sync of a review).
+func (o *Orchestrator) pickNode(ctx context.Context, tx *core.Tx, e core.Employee, p store.Project, stay bool, purpose string) (nodePick, error) {
 	nodes, err := o.store.On(tx).ListNodes(ctx, p.UserID)
 	if err != nil {
 		return nodePick{}, err
@@ -71,7 +80,7 @@ func (o *Orchestrator) pickNode(ctx context.Context, tx *core.Tx, e core.Employe
 	if held(got, states) {
 		pick.hold = holdReason(rts, states)
 	}
-	o.logPick(e, p, stay, nodes, states, pick)
+	o.logPick(e, p, stay, purpose, nodes, states, pick)
 	return pick, nil
 }
 
@@ -83,6 +92,12 @@ func (o *Orchestrator) quotaLimits(ctx context.Context, tx *core.Tx, userID stri
 	}
 	return l, err
 }
+
+// pickNode purposes (the "purpose" field of the "pick node" log).
+const (
+	pickOpen = "open"
+	pickSync = "sync"
+)
 
 // pickCandidate is one candidate pair in the "pick node" log line.
 type pickCandidate struct {
@@ -100,7 +115,7 @@ type pickCandidate struct {
 
 // logPick records why pickNode chose the node: every candidate pair with its load score (no
 // account details: no email, no token).
-func (o *Orchestrator) logPick(e core.Employee, p store.Project, stay bool, nodes []store.Node, states []nodeState, pick nodePick) {
+func (o *Orchestrator) logPick(e core.Employee, p store.Project, stay bool, purpose string, nodes []store.Node, states []nodeState, pick nodePick) {
 	if o.log == nil {
 		return
 	}
@@ -120,7 +135,7 @@ func (o *Orchestrator) logPick(e core.Employee, p store.Project, stay bool, node
 		thread = *e.ThreadID
 	}
 	o.log.Info("pick node", "employee", e.Name, "employee_id", e.ID, "project_id", p.ID, "thread_id", thread,
-		"stay", stay, "candidates", cands, "picked", pick.node.Name, "picked_id", pick.node.ID, "picked_rt", pick.rt,
+		"purpose", purpose, "stay", stay, "candidates", cands, "picked", pick.node.Name, "picked_id", pick.node.ID, "picked_rt", pick.rt,
 		"hold", pick.hold != "", "hold_reason", pick.hold)
 }
 
@@ -181,6 +196,10 @@ func (s nodeState) same(o nodeState) bool { return s.id == o.id && s.rt == o.rt 
 // full: no free slot, or the quota is tight (a window over the user's threshold). A full pair is
 // only picked when every usable pair is full.
 func (s nodeState) full() bool { return s.free <= 0 || s.tight != "" }
+
+// hardFull: no free slot, or a window at QuotaHardFull. A session that must stay keeps its node
+// until then, whatever the user's thresholds (they only steer new sessions).
+func (s nodeState) hardFull() bool { return s.free <= 0 || s.used >= QuotaHardFull }
 
 func (o *Orchestrator) nodeStates(ctx context.Context, tx *core.Tx, cands []store.Node, runtime, model string,
 	reports map[string][]store.NodeRuntime, limits store.QuotaLimits) []nodeState {
@@ -265,7 +284,7 @@ func runtimeHoldReason(rt string, states []nodeState) string {
 // (id "" when it has none or it was deleted) and runtime, which may not be a candidate any more.
 func chooseNode(current nodeState, cands []nodeState, stay bool) nodeState {
 	cur := slices.IndexFunc(cands, func(c nodeState) bool { return c.same(current) })
-	if stay && cur >= 0 && cands[cur].usable && !cands[cur].full() {
+	if stay && cur >= 0 && cands[cur].usable && !cands[cur].hardFull() {
 		return cands[cur]
 	}
 	best := -1

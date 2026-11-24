@@ -18,8 +18,10 @@ func roomy(id string, used float64) nodeState {
 	return s
 }
 
-// TestChooseNode: a new session goes to the usable node with the least used quota, wherever the
-// employee was before; it stays only when it must and its node is still usable with quota.
+// TestChooseNode: a new session goes to the usable pair with the lowest load score (used quota
+// plus SessionWeight per live session), passing over nodes whose quota is tight while another is
+// not, wherever the employee was before; it stays only when it must and its node is still usable
+// with a free slot and quota under QuotaHardFull.
 func TestChooseNode(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -129,7 +131,7 @@ func TestQuotaUsed(t *testing.T) {
 	}
 }
 
-// TestChooseRuntime: a role with several runtimes balances them by quota left, over every
+// TestChooseRuntime: a role with several runtimes balances them by load score, over every
 // runtime's candidate nodes; stay keeps the current runtime too.
 func TestChooseRuntime(t *testing.T) {
 	pair := func(rt, id string, used float64) nodeState {
@@ -232,6 +234,32 @@ func TestChooseNodeTight(t *testing.T) {
 	}
 	for _, c := range cases {
 		if got := chooseNode(nodeState{}, c.cands, false).id; got != c.want {
+			t.Errorf("%s: got %s, want %s", c.name, got, c.want)
+		}
+	}
+}
+
+// TestStayIgnoresThresholds: the user's thresholds only keep new sessions off a node; a session
+// that must stay keeps its node until a window reaches QuotaHardFull or no slot is free.
+func TestStayIgnoresThresholds(t *testing.T) {
+	at := func(id string, used float64, tight string) nodeState {
+		s := roomy(id, used)
+		s.tight = tight
+		return s
+	}
+	cases := []struct {
+		name  string
+		cands []nodeState
+		stay  bool
+		want  string
+	}{
+		{"5 h 88% (over the default 85) with an idle node: stay keeps it", []nodeState{at("a", 88, "five_hour 88% ≥ 85%"), roomy("b", 0)}, true, "a"},
+		{"the same without stay: the idle node", []nodeState{at("a", 88, "five_hour 88% ≥ 85%"), roomy("b", 0)}, false, "b"},
+		{"96% (hard full): stay moves", []nodeState{at("a", 96, "five_hour 96% ≥ 85%"), roomy("b", 0)}, true, "b"},
+		{"no free slot: stay moves", []nodeState{{id: "a", usable: true, free: 0, used: 10}, roomy("b", 50)}, true, "b"},
+	}
+	for _, c := range cases {
+		if got := chooseNode(nodeState{id: "a"}, c.cands, c.stay).id; got != c.want {
 			t.Errorf("%s: got %s, want %s", c.name, got, c.want)
 		}
 	}

@@ -3897,7 +3897,7 @@ export interface components {
              * @enum {string}
              */
             runtime: "claude" | "codex" | "antigravity";
-            /** @description Every runtime the role's employees may run on, in display order; each new session takes the one with the most quota left. Empty: [runtime] */
+            /** @description Every runtime the role's employees may run on, in display order; each new session takes the (runtime, node) pair with the lowest load score (used quota plus live sessions), so sessions spread over them; a runtime whose quota is tight on a node is only used when every pair is. Empty: [runtime] */
             runtimes?: ("claude" | "codex" | "antigravity")[] | null;
             sandbox: string;
             /** @description Skill names (built-in or uploaded) the role's sessions load */
@@ -4190,7 +4190,7 @@ export interface components {
             message: string;
             /** @description '' = the role's model */
             model?: string;
-            /** @description Run on this node; '' = picked automatically (most quota left) */
+            /** @description Run on this node; '' = picked automatically (spread over the nodes by load score; nodes whose quota is tight only when all are) */
             node_id?: string;
             /** @description Repositories, all checked out side by side in the employee's directory */
             repos: components["schemas"]["SessionRepoRef"][] | null;
