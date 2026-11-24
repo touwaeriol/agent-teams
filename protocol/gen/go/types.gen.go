@@ -4627,8 +4627,8 @@ func (j *ModelOption) UnmarshalJSON(value []byte) error {
 	if plain.Description != nil && utf8.RuneCountInString(string(*plain.Description)) > 1000 {
 		return fmt.Errorf("field %s length: must be <= %d", "description", 1000)
 	}
-	if len(plain.Efforts) > 20 {
-		return fmt.Errorf("field %s length: must be <= %d", "efforts", 20)
+	if len(plain.Efforts) > 32 {
+		return fmt.Errorf("field %s length: must be <= %d", "efforts", 32)
 	}
 	if utf8.RuneCountInString(string(plain.ID)) < 1 {
 		return fmt.Errorf("field %s length: must be >= %d", "id", 1)
