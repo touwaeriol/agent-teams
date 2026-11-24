@@ -96,7 +96,8 @@ func moveState(ctx context.Context, q core.DB, employeeID string) (pending, bloc
 }
 
 // moveTarget is the best other candidate node for the employee's runtime (pickRank): online, the
-// runtime logged in there, quota and a free slot left, a session_move daemon, and not a node a
+// runtime logged in there, a free slot and quota under QuotaHardFull (not the user's thresholds:
+// those only steer new sessions; pickRank still prefers a node under them), a session_move daemon, and not a node a
 // move left because of a limit that has not reset yet.
 func (o *Orchestrator) moveTarget(ctx context.Context, tx *core.Tx, env sessionEnv, from string) (store.Node, bool, error) {
 	e := env.emp
@@ -112,10 +113,16 @@ func (o *Orchestrator) moveTarget(ctx context.Context, tx *core.Tx, env sessionE
 	if err != nil {
 		return store.Node{}, false, err
 	}
-	states := o.nodeStates(ctx, tx, core.NodeCandidates(e, nodes), e.Runtime, Model(e, env.project), reports)
+	limits, err := o.quotaLimits(ctx, tx, env.project.UserID)
+	if err != nil {
+		return store.Node{}, false, err
+	}
+	states := o.nodeStates(ctx, tx, core.NodeCandidates(e, nodes), e.Runtime, Model(e, env.project), reports, limits)
 	best := -1
 	for i, c := range states {
-		if c.id == from || !c.usable || c.full() || limited[c.id] {
+		// The hard limit, not the user's thresholds: the session is moved because its node ran out,
+		// so any node with quota left beats pausing; pickRank still prefers one that is not tight.
+		if c.id == from || !c.usable || c.hardFull() || limited[c.id] {
 			continue
 		}
 		if ok, err := core.NodeHasFeature(ctx, tx, c.id, FeatureSessionMove); err != nil || !ok {

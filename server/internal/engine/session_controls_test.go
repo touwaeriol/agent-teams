@@ -195,6 +195,55 @@ func TestSessionControls(t *testing.T) {
 		b.must(200, "GET", base, nil, &c)
 		return c.Pending == nil && c.Effort == "medium" && c.Error == ""
 	})
+	expire := func() {
+		t.Helper()
+		if _, err := store.Exec(w.ctx, w.db.Pool, `UPDATE at_agent_sessions SET controls = jsonb_set(controls, '{pending,at}', to_jsonb(now() - interval '3 minutes'))
+			WHERE employee_id = (SELECT id FROM at_employees WHERE project_id = $1)`, pid); err != nil {
+			t.Fatal(err)
+		}
+		c = controlsView{}
+		b.must(200, "GET", base, nil, &c)
+	}
+	readPick := func() {
+		t.Helper()
+		if err := w.db.Pool.Gorm(w.ctx).Table("at_employees").Select("session_mode, session_effort, model").Where("project_id = ?", pid).Scan(&pick).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A permission mode switch that times out: the mode goes back on the view and the employee.
+	b.must(200, "PUT", base, map[string]any{"permission_mode": "default"}, &c)
+	expectSetModeBody(t, a)
+	expire()
+	readPick()
+	if c.PermissionMode != "plan" || c.Error != "节点没有回应，切换未生效" || pick.SessionMode != "plan" {
+		t.Fatalf("unanswered mode switch: %+v %+v", c, pick)
+	}
+	// opus + 高 → haiku (which drops the effort at once), no answer: model and effort come back.
+	b.must(200, "PUT", base, map[string]any{"effort": "high"}, &c)
+	set = expectSetModeBody(t, a)
+	modeSet(a, *set.RequestID, true, "plan", "claude-opus-5-5", "high", "")
+	eventually(t, "high in force", func() bool {
+		c = controlsView{}
+		b.must(200, "GET", base, nil, &c)
+		return c.Pending == nil && c.Effort == "high"
+	})
+	b.must(200, "PUT", base, map[string]any{"model": "claude-haiku-4-5"}, &c)
+	late := expectSetModeBody(t, a)
+	expire()
+	readPick()
+	if c.Pending != nil || c.Model != "claude-opus-5-5" || c.Effort != "high" || c.Error != "节点没有回应，切换未生效" ||
+		pick.Model != "claude-opus-5-5" || pick.SessionEffort != "high" || pick.SessionMode != "plan" {
+		t.Fatalf("unanswered model switch: model and the dropped effort come back: %+v %+v", c, pick)
+	}
+	// The node answers after all: the session runs haiku, and the employee's picks follow it.
+	modeSet(a, *late.RequestID, true, "plan", "claude-haiku-4-5", "", "")
+	eventually(t, "late answer followed", func() bool {
+		c = controlsView{}
+		b.must(200, "GET", base, nil, &c)
+		readPick()
+		return c.Model == "claude-haiku-4-5" && c.Error == "" && pick.Model == "claude-haiku-4-5" && pick.SessionEffort == ""
+	})
+
 
 	var events int64
 	if err := w.db.Pool.Gorm(w.ctx).Table("at_events").Where("project_id = ? AND type = 'session_controls'", pid).Count(&events).Error; err != nil || events < 6 {

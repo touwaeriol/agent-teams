@@ -28,7 +28,7 @@ type SessionRequest struct {
 	Model             string      // '' = the role's model
 	PermissionMode    string      // '' = the initial mode (soloMode); kept as the employee's session_mode
 	Effort            string      // '' = project / role effort; kept as the employee's session_effort
-	NodeID            string      // '' = scheduled like any employee (most quota left)
+	NodeID            string      // '' = scheduled like any employee (lowest load score, pickNode)
 	Branch            string      // the work branch's name the user typed ('' = from the title or the repositories)
 	Repos             []RepoFocus // every repository with the branch picked for it ('' = default)
 }

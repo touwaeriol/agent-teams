@@ -12,7 +12,8 @@ team and no task pool.
 - It has exactly one thread (no. 1). The thread's role snapshot holds one entry: a `lead` with
   `solo = true`, made from the member role the user picked (`orchestrator.SessionRole`). A chosen
   model replaces the role's model. A chosen node becomes the employee's only candidate
-  (`spec.node_ids`); without one the employee is scheduled like any other (most quota left).
+  (`spec.node_ids`); without one the employee is scheduled like any other (lowest load
+  score: used quota plus 10 points per live session on the node, see shared-members.md §4.3).
 - The branch picked for each repository is the thread's base there (`at_thread_repos.base_branch`).
   The employee works on `session/<project id[:8]>-<slug>` in every repository.
 
@@ -60,7 +61,8 @@ team and no task pool.
 - On a failed switch only the picks that switch changed go back.
 - A switch with no answer within 2 minutes (a daemon that restarted meanwhile) ends the same way: the
   picks it changed go back to what the session runs and the view carries the error
-  `节点没有回应，切换未生效` (done on the next GET or PUT).
+  `节点没有回应，切换未生效` (done on the next GET or PUT); an effort a model switch dropped comes
+  back too. If the node answers after all, the session and the employee's picks follow its answer.
 - Approvals of a session go to its user directly (no lead review) and never time out
   (`approval_timeout_s` does not apply to projects of kind session). The platform allows a request
   without a card only while the session runs in `bypassPermissions` (`SkipsApprovals`).

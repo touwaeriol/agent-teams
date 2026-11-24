@@ -109,7 +109,7 @@ func jobsOf(queue []core.QueuedTask, repos map[string][]string) []job {
 	for i, q := range queue {
 		th := q.ConversationID
 		j := job{Thread: th, Role: q.Role, Gate: q.CreatedBy == "platform", OnlyRoles: q.OnlyRoles,
-			ReservedFor: q.ReservedFor, ReservedUntil: q.ReservedUntil, DepWorkers: q.DepWorkers, Repos: repos[th],
+			ReservedFor: q.ReservedFor, ReservedUntil: q.ReservedUntil, DepWorkers: q.DepWorkers, Repos: repos[th], NotBy: q.NotBy,
 			Legacy: q.Legacy, Priority: q.Priority, Downstream: q.Downstream, Ready: q.Ready, Created: q.CreatedAt}
 		if Named(q.Task) && q.NamedActive {
 			j.Named = q.Assignee // a task named to a retired member goes to the role's pool

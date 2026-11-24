@@ -166,6 +166,7 @@ func apiConfig() huma.Config {
 
 func (s *Server) register(api huma.API, r gin.IRoutes) {
 	s.registerAuth(api)
+	s.registerScheduling(api)
 	s.registerAdmin(api)
 	s.registerProjects(api)
 	s.registerSessions(api)

@@ -36,7 +36,7 @@ type SessionInput struct {
 	// Session controls (#53): picked on the new-session page; GET /api/session-options lists them.
 	PermissionMode string `json:"permission_mode,omitempty" enum:"auto,default,acceptEdits,plan,bypassPermissions" doc:"'' = the initial mode (Claude: auto when the model supports it, else default; Codex/Antigravity: the role's)"`
 	Effort         string `json:"effort,omitempty" maxLength:"32" doc:"Thinking effort; '' = project / role setting"`
-	NodeID         string `json:"node_id,omitempty" maxLength:"64" doc:"Run on this node; '' = picked automatically (most quota left)"`
+	NodeID         string `json:"node_id,omitempty" maxLength:"64" doc:"Run on this node; '' = picked automatically (spread over the nodes by load score; nodes whose quota is tight only when all are)"`
 	Branch         string `json:"branch,omitempty" maxLength:"60" doc:"Name of the work branch (after session/<id>-); '' = from the title, or the repositories when the title has no Latin letters"`
 }
 
