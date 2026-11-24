@@ -587,10 +587,16 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 	if err != nil {
 		return err
 	}
+	controls := false
+	if env.emp.Spec.Solo {
+		if controls, err = core.NodeHasFeature(ctx, tx, node.ID, FeatureSessionControls); err != nil {
+			return err
+		}
+	}
 	open, err := buildOpen(sessionInput{emp: env.emp, thread: env.thread, project: env.project, node: node, sess: sess,
 		prepare: prepare, first: first, resume: resume, system: system, rules: rules, hasRepo: len(env.repos) > 0,
 		repos: env.slugs(), protRefs: o.protectedRefs(ctx, tx, env), gitHosts: env.gitHosts(),
-		window: window})
+		window: window, controls: controls})
 	if err != nil {
 		return err
 	}

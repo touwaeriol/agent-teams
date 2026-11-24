@@ -29,7 +29,8 @@ type controlsView struct {
 		Efforts      []string
 		SupportsAuto bool `json:"supports_auto"`
 	}
-	Efforts []string
+	Efforts      []string
+	NodeOutdated bool `json:"node_outdated"`
 }
 
 func (c controlsView) modeIDs() string {
@@ -208,4 +209,43 @@ func modeSet(a *fakeAgent, requestID string, ok bool, mode, model, effort, errTe
 		m.Error = &errText
 	}
 	a.send(protocol.TypeSessionModeSet, m)
+}
+
+// TestSessionControlsOldDaemon: on a daemon without session_controls a session opens in its
+// role's mode as before (no prefer_auto), the menu keeps the old set_mode values, there is no
+// effort, and a switch goes out without the new fields and counts at once (no answer comes).
+func TestSessionControlsOldDaemon(t *testing.T) {
+	_, ghSrv := newFakeGitHub(t)
+	w := newWorld(t, ghSrv)
+	b := w.signUp("controls-old@example.com")
+	var node nodeCreated
+	b.must(201, "POST", "/api/nodes", map[string]string{"name": "old"}, &node)
+	b.must(200, "GET", "/api/roles", nil, nil)
+	var conn struct{ ID string }
+	b.must(201, "POST", "/api/git/connections", map[string]string{"name": "gh", "token": "ghp_good"}, &conn)
+	n := w.connect(node.Token, nodetest.Options{})
+	var created struct{ Project struct{ ID string } }
+	b.must(201, "POST", "/api/sessions", map[string]any{"message": "看看日志", "role": "dev", "node_id": node.Node.ID,
+		"repos": []map[string]any{{"repo": "o/r", "git_connection_id": conn.ID}}}, &created)
+	base := "/api/projects/" + created.Project.ID + "/session-controls"
+	a, open := expectOpen(t, w, n, "lead-1")
+	if open.Claude.PermissionMode != "bypassPermissions" || open.Claude.PreferAuto != nil {
+		t.Fatalf("an old daemon gets the role's mode: %+v", open.Claude)
+	}
+	var c controlsView
+	b.must(200, "GET", base, nil, &c)
+	if c.PermissionMode != "bypassPermissions" || c.modeIDs() != "default,acceptEdits,bypassPermissions" || len(c.Efforts) != 0 || !c.NodeOutdated {
+		t.Fatalf("old daemon controls %+v", c)
+	}
+	b.must(422, "PUT", base, map[string]any{"effort": "low"}, nil)
+	b.must(422, "PUT", base, map[string]any{"permission_mode": "plan"}, nil)
+	c = controlsView{}
+	b.must(200, "PUT", base, map[string]any{"permission_mode": "default", "model": "claude-sonnet-5-5"}, &c)
+	if c.Pending != nil || c.PermissionMode != "default" || c.Model != "claude-sonnet-5-5" {
+		t.Fatalf("in force at once on an old daemon: %+v", c)
+	}
+	set := expectSetModeBody(t, a)
+	if set.RequestID != nil || set.Effort != nil || set.PermissionMode == nil || *set.PermissionMode != "default" || set.Model == nil {
+		t.Fatalf("old daemon set_mode %+v", set)
+	}
 }

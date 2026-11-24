@@ -4319,7 +4319,7 @@ export interface components {
             effort: string;
             /** @description Effort levels of the current model ([] = none to pick) */
             efforts: string[] | null;
-            /** @description Why the last switch failed (nothing of it applied) */
+            /** @description Why the last switch failed (the fields show what still runs) */
             error?: string;
             /** @description A session is open on a node: a switch goes to it now; false: the next session opens with it */
             live: boolean;
@@ -4328,6 +4328,8 @@ export interface components {
             models: components["schemas"]["ModelChoice"][] | null;
             /** @description Permission menu in order: auto only when the model supports it, bypassPermissions only when the role allows skipping permission prompts */
             modes: components["schemas"]["ModeOption"][] | null;
+            /** @description The session's node runs a daemon without session_controls: only the model and Claude's default / acceptEdits / bypassPermissions can be switched, no effort (upgrade the node for the rest) */
+            node_outdated: boolean;
             /** @description A switch on its way to the node (null: none); a session_controls event follows its answer */
             pending: components["schemas"]["ControlsPending"];
             /** @description The mode in force (set_mode value), as the node wrote it back; without a live session the one the next session opens in */

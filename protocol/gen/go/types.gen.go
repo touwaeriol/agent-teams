@@ -8798,8 +8798,10 @@ func (j *SessionInterrupted) UnmarshalJSON(value []byte) error {
 }
 
 // Result of session.set_mode (daemons with session_controls): what the session
-// runs in now. ok=false: nothing of the change applied (error says why); the
-// fields then are what it still runs in.
+// runs in now. ok=false: the change failed (error says why); Codex and Antigravity
+// apply nothing then, Claude may have applied the parts before the failing one
+// (mode, then model, then effort). The fields are always what the session runs in
+// after it.
 type SessionModeSet struct {
 	// now: in force already; next_turn: from the session's next turn; next_open: the
 	// session is not running, it opens with it.

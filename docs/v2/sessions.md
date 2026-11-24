@@ -52,6 +52,12 @@ team and no task pool.
   server wrote back (`at_agent_sessions.permission_mode` and `controls`). A failed switch is
   shown with its error and the employee's picks go back to what still runs. Daemons without the
   `session_controls` feature never answer: the switch counts as in force at once.
+- A daemon without `session_controls` (older nodes): the session opens in the role's mode as
+  before (no `prefer_auto`), the menu keeps Claude's `default` / `acceptEdits` /
+  `bypassPermissions` (none for Codex and Antigravity), there is no effort, and `set_mode` goes out
+  without `plan`, `effort` and `request_id` (`node_outdated: true` in the view).
+- Switching to a model without the picked effort level drops the pick (the model's default).
+- On a failed switch only the picks that switch changed go back.
 - Approvals of a session go to its user directly (no lead review) and never time out
   (`approval_timeout_s` does not apply to projects of kind session). The platform allows a request
   without a card only while the session runs in `bypassPermissions` (`SkipsApprovals`).

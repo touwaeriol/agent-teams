@@ -10,6 +10,13 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
+// soloOpen is open() on a node whose daemon has session_controls.
+func soloOpen(t *testing.T, e core.Employee, n store.Node) sessionInput {
+	in := open(t, e, n)
+	in.controls = true
+	return in
+}
+
 func soloEmp(runtime, perm string) core.Employee {
 	e := emp("lead", "dev", store.Role{Solo: true, PermissionMode: perm})
 	e.Runtime = runtime
@@ -21,7 +28,7 @@ func soloEmp(runtime, perm string) core.Employee {
 // allows; Codex and Antigravity keep the role's mode. A mode picked in the session wins, except
 // bypass on an ask role.
 func TestSoloInitialModes(t *testing.T) {
-	o, _ := buildOpen(open(t, soloEmp("claude", store.PermBypass), store.Node{Isolation: "none"}))
+	o, _ := buildOpen(soloOpen(t, soloEmp("claude", store.PermBypass), store.Node{Isolation: "none"}))
 	c := o.Claude
 	if c.PermissionMode != "default" || c.PreferAuto == nil || !*c.PreferAuto || c.AllowDangerouslySkipPermissions == nil || !*c.AllowDangerouslySkipPermissions {
 		t.Fatalf("claude session opens for auto: %+v", c)
@@ -30,17 +37,17 @@ func TestSoloInitialModes(t *testing.T) {
 		t.Fatalf("recorded as default until session.opened says auto: %q", openMode(o))
 	}
 	ask := soloEmp("claude", store.PermAsk)
-	if o, _ = buildOpen(open(t, ask, store.Node{Isolation: "none"})); o.Claude.PreferAuto == nil || o.Claude.AllowDangerouslySkipPermissions != nil {
+	if o, _ = buildOpen(soloOpen(t, ask, store.Node{Isolation: "none"})); o.Claude.PreferAuto == nil || o.Claude.AllowDangerouslySkipPermissions != nil {
 		t.Fatalf("ask role: auto, no bypass: %+v", o.Claude)
 	}
 	ask.SessionMode = "bypassPermissions"
-	if o, _ = buildOpen(open(t, ask, store.Node{Isolation: "none"})); o.Claude.PermissionMode != "default" || o.Claude.PreferAuto == nil {
+	if o, _ = buildOpen(soloOpen(t, ask, store.Node{Isolation: "none"})); o.Claude.PermissionMode != "default" || o.Claude.PreferAuto == nil {
 		t.Fatalf("a bypass pick on an ask role is ignored: %+v", o.Claude)
 	}
 	for _, m := range []string{"plan", "acceptEdits", "default", "bypassPermissions"} {
 		e := soloEmp("claude", store.PermBypass)
 		e.SessionMode = m
-		o, _ = buildOpen(open(t, e, store.Node{Isolation: "none"}))
+		o, _ = buildOpen(soloOpen(t, e, store.Node{Isolation: "none"}))
 		if string(o.Claude.PermissionMode) != m || o.Claude.PreferAuto != nil {
 			t.Fatalf("picked %s: %+v", m, o.Claude)
 		}
@@ -51,28 +58,33 @@ func TestSoloInitialModes(t *testing.T) {
 	}
 
 	cx := soloEmp("codex", store.PermAsk)
-	o, _ = buildOpen(open(t, cx, store.Node{Isolation: "agent_user"}))
+	o, _ = buildOpen(soloOpen(t, cx, store.Node{Isolation: "agent_user"}))
 	if o.Codex.Sandbox != "workspace-write" || o.Codex.ApprovalPolicy != "untrusted" || o.Codex.ApprovalsReviewer != nil || openMode(o) != "default" {
 		t.Fatalf("codex session keeps the ask role: %+v", o.Codex)
 	}
 	cx.SessionMode, cx.SessionEffort = "auto", "high"
-	o, _ = buildOpen(open(t, cx, store.Node{Isolation: "agent_user"}))
+	o, _ = buildOpen(soloOpen(t, cx, store.Node{Isolation: "agent_user"}))
 	if o.Codex.Sandbox != "workspace-write" || o.Codex.ApprovalPolicy != "on-request" || o.Codex.ApprovalsReviewer == nil ||
 		*o.Codex.ApprovalsReviewer != "auto_review" || o.Codex.Effort == nil || *o.Codex.Effort != "high" ||
 		!strings.Contains(string(*o.Codex.Config), "o__web/.git") || openMode(o) != "auto" || openControls(o).Effort != "high" {
 		t.Fatalf("codex auto: %+v", o.Codex)
 	}
 	byp := soloEmp("codex", store.PermBypass)
-	if o, _ = buildOpen(open(t, byp, store.Node{Isolation: "agent_user"})); o.Codex.Sandbox != "danger-full-access" || openMode(o) != "bypassPermissions" {
-		t.Fatalf("codex session keeps the bypass role: %+v", o.Codex)
+	if o, _ = buildOpen(soloOpen(t, byp, store.Node{Isolation: "agent_user"})); o.Codex.Sandbox != "danger-full-access" || openMode(o) != "bypassPermissions" ||
+		o.Codex.Config == nil || !strings.Contains(string(*o.Codex.Config), "o__web/.git") {
+		t.Fatalf("codex session keeps the bypass role, and its writable roots for a later switch: %+v", o.Codex)
 	}
 
+	old, _ := buildOpen(open(t, soloEmp("claude", store.PermBypass), store.Node{Isolation: "none"}))
+	if old.Claude.PermissionMode != "bypassPermissions" || old.Claude.PreferAuto != nil {
+		t.Fatalf("a daemon without session_controls gets the role's mode: %+v", old.Claude)
+	}
 	ag := soloEmp("antigravity", store.PermBypass)
-	if o, _ = buildOpen(open(t, ag, store.Node{Isolation: "agent_user"})); o.Antigravity.Approval != "auto" {
+	if o, _ = buildOpen(soloOpen(t, ag, store.Node{Isolation: "agent_user"})); o.Antigravity.Approval != "auto" {
 		t.Fatalf("antigravity keeps the role: %+v", o.Antigravity)
 	}
 	ag.SessionMode = "default"
-	if o, _ = buildOpen(open(t, ag, store.Node{Isolation: "agent_user"})); o.Antigravity.Approval != "ask" || openMode(o) != "default" {
+	if o, _ = buildOpen(soloOpen(t, ag, store.Node{Isolation: "agent_user"})); o.Antigravity.Approval != "ask" || openMode(o) != "default" {
 		t.Fatalf("antigravity picked default: %+v", o.Antigravity)
 	}
 }
@@ -144,6 +156,14 @@ func TestModesFor(t *testing.T) {
 	}
 	if _, err := checkChange(SessionControls{Runtime: "antigravity", Models: []ModelChoice{}}, ControlsChange{Effort: str("high")}); err == nil {
 		t.Fatal("antigravity has no effort apart from the model")
+	}
+	ch, err = checkChange(SessionControls{Runtime: "claude", PermissionMode: "default", Model: "claude-a", Effort: "high", Models: models,
+		Modes: modesFor("claude", models, "claude-a", false)}, ControlsChange{Model: str("claude-old")})
+	if err != nil || ch.Model != "claude-old" || !ch.clearEffort {
+		t.Fatalf("a model without the effort drops it: %+v %v", ch, err)
+	}
+	if _, err := checkChange(SessionControls{Runtime: "claude", NodeOutdated: true}, ControlsChange{Effort: str("low")}); err == nil {
+		t.Fatal("no effort on an outdated daemon")
 	}
 	cur.Pending = &ControlsPending{Effort: "low"}
 	if _, err := checkChange(cur, ControlsChange{Effort: str("low")}); err != ErrControlsBusy {

@@ -1,5 +1,6 @@
 // Permission modes of a Codex session (session.set_mode, protocol.md §4.5): the set_mode values map
 // to a sandbox × approval policy × approvals reviewer, sent with the next turn/start.
+import { isAbsolute, join } from "node:path";
 import type { CodexSessionOptions } from "../../protocol.js";
 
 type ModeFields = Pick<CodexSessionOptions, "sandbox" | "approval_policy" | "approvals_reviewer">;
@@ -24,9 +25,11 @@ export function codexMode(mode: string, current: CodexSessionOptions): ModeField
 /**
  * turn/start's sandboxPolicy for a sandbox mode (thread/start takes the mode name `sandbox`,
  * turn/start only the full policy object). workspace-write keeps the session's extra writable
- * roots and network access from config.sandbox_workspace_write.
+ * roots and network access from config.sandbox_workspace_write. The console names those roots
+ * relative to the node root; turn/start takes absolute paths (AbsolutePathBuf), so a relative
+ * one is joined onto root.
  */
-export function sandboxPolicy(sandbox: CodexSessionOptions["sandbox"], config: CodexSessionOptions["config"]): Record<string, unknown> {
+export function sandboxPolicy(sandbox: CodexSessionOptions["sandbox"], config: CodexSessionOptions["config"], root: string): Record<string, unknown> {
   switch (sandbox) {
     case "danger-full-access":
       return { type: "dangerFullAccess" };
@@ -34,7 +37,7 @@ export function sandboxPolicy(sandbox: CodexSessionOptions["sandbox"], config: C
       return { type: "readOnly", networkAccess: false };
     default: {
       const ws = ((config ?? {}) as { sandbox_workspace_write?: { writable_roots?: string[]; network_access?: boolean } }).sandbox_workspace_write ?? {};
-      return { type: "workspaceWrite", writableRoots: ws.writable_roots ?? [], networkAccess: ws.network_access ?? true, excludeTmpdirEnvVar: false, excludeSlashTmp: false };
+      return { type: "workspaceWrite", writableRoots: (ws.writable_roots ?? []).map((p) => (isAbsolute(p) ? p : join(root, p))), networkAccess: ws.network_access ?? true, excludeTmpdirEnvVar: false, excludeSlashTmp: false };
     }
   }
 }

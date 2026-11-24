@@ -72,6 +72,8 @@ type ControlsPending struct {
 	Model          string    `json:"model,omitempty"`
 	Effort         string    `json:"effort,omitempty"`
 	Since          time.Time `json:"since"`
+	// clearEffort: the new model does not take the effort picked before (checkChange).
+	clearEffort bool
 }
 
 // SessionControls is GET /api/projects/{pid}/session-controls: what the session's employee runs in and
@@ -84,11 +86,16 @@ type SessionControls struct {
 	Model          string           `json:"model"`
 	Effort         string           `json:"effort" doc:"'' = the model's default"`
 	Pending        *ControlsPending `json:"pending" doc:"A switch on its way to the node (null: none); a session_controls event follows its answer"`
-	Error          string           `json:"error,omitempty" doc:"Why the last switch failed (nothing of it applied)"`
+	Error          string           `json:"error,omitempty" doc:"Why the last switch failed (the fields show what still runs)"`
 	Modes          []ModeOption     `json:"modes" doc:"Permission menu in order: auto only when the model supports it, bypassPermissions only when the role allows skipping permission prompts"`
 	Models         []ModelChoice    `json:"models" doc:"Models reported by the session's runtime ([] until a session opened on a daemon with session_controls)"`
 	Efforts        []string         `json:"efforts" doc:"Effort levels of the current model ([] = none to pick)"`
+	NodeOutdated   bool             `json:"node_outdated" doc:"The session's node runs a daemon without session_controls: only the model and Claude's default / acceptEdits / bypassPermissions can be switched, no effort (upgrade the node for the rest)"`
 }
+
+// legacyModes are the set_mode values a daemon without session_controls takes (Claude only:
+// the old enum, without plan; its Codex and Antigravity drivers did not switch reliably).
+var legacyModes = []string{"default", "acceptEdits", "bypassPermissions"}
 
 // Errors of SetSessionControls.
 var (
@@ -152,7 +159,8 @@ func soloClaude(c *protocol.ClaudeSessionOptions, e core.Employee) {
 func soloCodex(c *protocol.CodexSessionOptions, e core.Employee, writable json.RawMessage) {
 	switch soloMode(e) {
 	case "bypassPermissions":
-		c.Sandbox, c.ApprovalPolicy, c.Config = "danger-full-access", "never", nil
+		// The writable roots stay: a switch to 手动/自动 later builds its sandbox policy from them.
+		c.Sandbox, c.ApprovalPolicy, c.Config = "danger-full-access", "never", &writable
 	case "auto":
 		c.Sandbox, c.ApprovalPolicy = "workspace-write", "on-request"
 		r := protocol.CodexSessionOptionsApprovalsReviewerAutoReview
@@ -359,6 +367,9 @@ func checkChange(cur SessionControls, in ControlsChange) (ControlsPending, error
 		return ch, &ControlError{"model", fmt.Sprintf("模型 %s 不支持当前的%s模式，请先换一个权限模式", model, modeLabels[cur.PermissionMode])}
 	}
 	if in.Effort != nil && *in.Effort != "" && (*in.Effort != cur.Effort || ch.Model != "") {
+		if cur.NodeOutdated {
+			return ch, &ControlError{"effort", "会话所在节点的守护进程太旧，不能切换思考强度，请先升级节点"}
+		}
 		if !runtimes.Of(cur.Runtime).Efforts {
 			return ch, &ControlError{"effort", "这个运行时的思考强度写在模型里，请切换模型"}
 		}
@@ -366,6 +377,9 @@ func checkChange(cur SessionControls, in ControlsChange) (ControlsPending, error
 			return ch, &ControlError{"effort", fmt.Sprintf("模型 %s 没有 %s 这一档思考强度", model, *in.Effort)}
 		}
 		ch.Effort = *in.Effort
+	}
+	if ch.Model != "" && ch.Effort == "" && cur.Effort != "" && len(cur.Models) > 0 && !slices.Contains(effortsOf(cur.Models, model), cur.Effort) {
+		ch.clearEffort = true // the new model has no such level: back to its default
 	}
 	return ch, nil
 }
@@ -381,6 +395,9 @@ func saveChoice(ctx context.Context, tx *core.Tx, employeeID string, ch Controls
 	}
 	if ch.Effort != "" {
 		set["session_effort"] = ch.Effort
+	}
+	if ch.clearEffort {
+		set["session_effort"] = ""
 	}
 	return tx.Gorm(ctx).Table("at_employees").Where("id = ?", employeeID).Updates(set).Error
 }
@@ -402,12 +419,12 @@ func (o *Orchestrator) sendControls(ctx context.Context, tx *core.Tx, e core.Emp
 	if ch.Model != "" {
 		body.Model = &ch.Model
 	}
-	if ch.Effort != "" {
-		body.Effort = &ch.Effort
-	}
 	answers, err := core.NodeHasFeature(ctx, tx, *s.NodeID, FeatureSessionControls)
 	if err != nil {
 		return err
+	}
+	if ch.Effort != "" && answers { // older daemons refuse the field (checkChange keeps it out)
+		body.Effort = &ch.Effort
 	}
 	c := s.Controls
 	c.Error = ""
@@ -450,8 +467,9 @@ func (o *Orchestrator) HandleModeSet(ctx context.Context, nodeID string, m *prot
 			return ignoreMissing(err)
 		}
 		c := s.Controls
+		var sent *core.ControlsSwitch
 		if c.Pending != nil && c.Pending.RequestID == deref(m.RequestID) {
-			c.Pending = nil
+			sent, c.Pending = c.Pending, nil
 		}
 		set := map[string]any{}
 		applyControls(&c, set, deref(m.PermissionMode), deref(m.Model), deref(m.Effort))
@@ -461,7 +479,7 @@ func (o *Orchestrator) HandleModeSet(ctx context.Context, nodeID string, m *prot
 			if c.Error == "" {
 				c.Error = "节点没有接受这次切换"
 			}
-			if err := revertChoice(ctx, tx, s.EmployeeID, m); err != nil {
+			if err := revertChoice(ctx, tx, s.EmployeeID, sent, m); err != nil {
 				return err
 			}
 		}
@@ -480,17 +498,21 @@ func (o *Orchestrator) HandleModeSet(ctx context.Context, nodeID string, m *prot
 	})
 }
 
-// revertChoice puts the employee's picks back to what the session still runs after a failed switch.
-func revertChoice(ctx context.Context, tx *core.Tx, employeeID string, m *protocol.SessionModeSet) error {
-	set := map[string]any{}
-	if v := deref(m.PermissionMode); v != "" {
-		set["session_mode"] = v
+// revertChoice puts the picks the failed switch made back to what the session still runs (only the
+// fields that switch changed; an answer to no pending switch changes nothing).
+func revertChoice(ctx context.Context, tx *core.Tx, employeeID string, sent *core.ControlsSwitch, m *protocol.SessionModeSet) error {
+	if sent == nil {
+		return nil
 	}
-	if v := deref(m.Model); v != "" {
+	set := map[string]any{}
+	if sent.PermissionMode != "" {
+		set["session_mode"] = deref(m.PermissionMode)
+	}
+	if v := deref(m.Model); sent.Model != "" && v != "" {
 		set["model"] = v
 	}
-	if v := deref(m.Effort); v != "" {
-		set["session_effort"] = v
+	if sent.Effort != "" {
+		set["session_effort"] = deref(m.Effort)
 	}
 	if len(set) == 0 {
 		return nil
@@ -535,12 +557,48 @@ func controlsView(ctx context.Context, q core.DB, t core.Thread, e core.Employee
 			out.Pending = &ControlsPending{PermissionMode: pd.PermissionMode, Model: pd.Model, Effort: pd.Effort, Since: pd.At}
 		}
 	}
-	out.Modes = modesFor(out.Runtime, out.Models, out.Model, Bypass(e) && !readOnly(e))
+	bypass := Bypass(e) && !readOnly(e)
+	out.Modes = modesFor(out.Runtime, out.Models, out.Model, bypass)
 	out.Efforts = effortsOf(out.Models, out.Model)
 	if !runtimes.Of(out.Runtime).Efforts {
 		out.Efforts = []string{}
 	}
+	if out.NodeOutdated, err = nodeOutdated(ctx, q, e, latest); err != nil || !out.NodeOutdated {
+		return out, err
+	}
+	// A daemon without session_controls: the session runs in the role's mode, switches only to
+	// the old set_mode values (Claude) and has no effort to pick.
+	if !out.Live {
+		out.PermissionMode = legacyMode(e)
+	}
+	out.Efforts = []string{}
+	out.Modes = slices.DeleteFunc(out.Modes, func(m ModeOption) bool {
+		return runtimes.Of(out.Runtime).ID != runtimes.Claude || !slices.Contains(legacyModes, m.ID)
+	})
 	return out, nil
+}
+
+// nodeOutdated reports whether the node of the employee's latest session (else its own node)
+// runs a daemon without session_controls; false when there is no node yet.
+func nodeOutdated(ctx context.Context, q core.DB, e core.Employee, latest core.AgentSession) (bool, error) {
+	node := latest.NodeID
+	if node == nil {
+		node = e.NodeID
+	}
+	if node == nil {
+		return false, nil
+	}
+	ok, err := core.NodeHasFeature(ctx, q, *node, FeatureSessionControls)
+	return !ok, err
+}
+
+// legacyMode is the mode a session's employee opens in on a daemon without session_controls: the
+// role's, as before session controls.
+func legacyMode(e core.Employee) string {
+	if Bypass(e) {
+		return "bypassPermissions"
+	}
+	return "default"
 }
 
 // soloEffort is the effort a session's employee runs with: the user's pick, else (Claude) the

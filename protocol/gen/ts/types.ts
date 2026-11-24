@@ -1505,7 +1505,7 @@ export interface SessionInterrupted {
   queued_msg_ids?: MsgId[];
 }
 /**
- * Result of session.set_mode (daemons with session_controls): what the session runs in now. ok=false: nothing of the change applied (error says why); the fields then are what it still runs in.
+ * Result of session.set_mode (daemons with session_controls): what the session runs in now. ok=false: the change failed (error says why); Codex and Antigravity apply nothing then, Claude may have applied the parts before the failing one (mode, then model, then effort). The fields are always what the session runs in after it.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "SessionModeSet".

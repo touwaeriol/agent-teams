@@ -139,6 +139,9 @@ type sessionInput struct {
 	protRefs []string
 	gitHosts []protocol.SessionOpenGitHostsElem // standalone repositories' hosts (git-repos.md §5)
 	window   *int                               // the context window the employee's last session of the runtime reported
+	// controls: the node's daemon has session_controls (#53), so a session's employee opens in the
+	// mode picked in the session (Claude: auto). Older daemons get the role's mode as before.
+	controls bool
 }
 
 // buildOpen renders session.open for an employee.
@@ -333,7 +336,7 @@ func memberClaude(c *protocol.ClaudeSessionOptions, in sessionInput) {
 		t := true
 		c.AllowDangerouslySkipPermissions = &t
 	}
-	if e.Spec.Solo {
+	if e.Spec.Solo && in.controls {
 		soloClaude(c, e)
 	}
 	if in.node.Isolation == "sandbox" {
@@ -357,7 +360,7 @@ func codexOptions(in sessionInput) protocol.CodexSessionOptions {
 		raw := json.RawMessage(cfg)
 		c.Config = &raw
 	}
-	if e.Spec.Solo && !readOnly(e) {
+	if e.Spec.Solo && !readOnly(e) && in.controls {
 		soloCodex(&c, e, writableRoots(e, in.repos))
 	}
 	return c
@@ -387,7 +390,7 @@ func antigravityOptions(in sessionInput) protocol.AntigravitySessionOptions {
 	case Bypass(e):
 		a.Approval = protocol.AntigravitySessionOptionsApprovalAuto
 	}
-	if e.Spec.Solo && !readOnly(e) {
+	if e.Spec.Solo && !readOnly(e) && in.controls {
 		soloAntigravity(&a, e)
 	}
 	return a

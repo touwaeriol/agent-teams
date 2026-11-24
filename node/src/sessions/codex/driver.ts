@@ -192,7 +192,7 @@ export class CodexDriver implements Driver, ThreadListener {
       const m = codexMode(change.mode, this.codex);
       Object.assign(this.codex, m);
       this.turnOverride.approvalPolicy = m.approval_policy;
-      this.turnOverride.sandboxPolicy = sandboxPolicy(m.sandbox, this.codex.config);
+      this.turnOverride.sandboxPolicy = sandboxPolicy(m.sandbox, this.codex.config, nodeRoot(this.ctx.absCwd, this.ctx.spec.cwd));
       this.turnOverride.approvalsReviewer = m.approvals_reviewer ?? "user";
     }
     if (change.model) {
@@ -420,6 +420,12 @@ export function autoCompactConfig(context: SessionOpen["context"]): Record<strin
 function effectiveLimit(limit?: number, window?: number): number {
   if (limit && window) return Math.min(limit, window);
   return limit ?? window ?? 0;
+}
+
+/** The node root: absCwd is root + the spec's relative cwd. */
+export function nodeRoot(absCwd: string, cwd: string): string {
+  const rel = cwd.replace(/^\.?\/+/, "").replace(/\/+$/, "");
+  return rel && absCwd.endsWith(`/${rel}`) ? absCwd.slice(0, absCwd.length - rel.length - 1) : absCwd;
 }
 
 /** Protocol turn ids start with t_; Codex turn ids are UUIDv7. */

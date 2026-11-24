@@ -109,7 +109,8 @@ describe("codex sessions over app-server", () => {
 
   it("lists the models and runs the next turn with the mode and effort set by session.set_mode", async () => {
     const calls = await startCodex();
-    h!.console.command("session.open", codexOpen("s_XC"));
+    const xc = codexOpen("s_XC");
+    h!.console.command("session.open", { ...xc, codex: { ...xc.codex, config: { sandbox_workspace_write: { network_access: true, writable_roots: ["projects/p1/repos/o__r/.git"] } } } });
     const opened = await h!.console.waitType("session.opened");
     expect(opened.body.init.models).toEqual([{ id: "gpt-5.5-codex", name: "GPT-5.5 Codex", efforts: ["low", "medium", "high"], default_effort: "medium", default: true }]);
     h!.console.command("session.release", { session_id: "s_XC", open_gen: 1 });
@@ -123,6 +124,10 @@ describe("codex sessions over app-server", () => {
     await h!.console.waitFor(() => h!.console.ofType("session.event").filter((e) => e.body.kind === "turn_ended").length >= 2, 5000, "second turn");
     const turns = calls().filter((c) => c.method === "turn/start").map((t) => t.params);
     expect(turns[0]).toMatchObject({ approvalPolicy: "on-request", approvalsReviewer: "auto_review", effort: "high", sandboxPolicy: { type: "workspaceWrite", networkAccess: true } });
+    const roots = turns[0].sandboxPolicy.writableRoots as string[];
+    expect(roots).toHaveLength(1);
+    expect(roots[0]).toMatch(/^\/.*\/projects\/p1\/repos\/o__r\/\.git$/);
+    expect(roots[0].includes("/threads/3/")).toBe(false);
     expect("sandbox" in turns[0]).toBe(false);
     expect(turns[1]).toMatchObject({ approvalPolicy: "never", approvalsReviewer: "user", effort: "high", sandboxPolicy: { type: "dangerFullAccess" } });
   });

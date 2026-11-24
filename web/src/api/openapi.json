@@ -6624,7 +6624,7 @@
             ]
           },
           "error": {
-            "description": "Why the last switch failed (nothing of it applied)",
+            "description": "Why the last switch failed (the fields show what still runs)",
             "type": "string"
           },
           "live": {
@@ -6654,6 +6654,10 @@
               "null"
             ]
           },
+          "node_outdated": {
+            "description": "The session's node runs a daemon without session_controls: only the model and Claude's default / acceptEdits / bypassPermissions can be switched, no effort (upgrade the node for the rest)",
+            "type": "boolean"
+          },
           "pending": {
             "$ref": "#/components/schemas/ControlsPending",
             "description": "A switch on its way to the node (null: none); a session_controls event follows its answer"
@@ -6679,7 +6683,8 @@
           "pending",
           "modes",
           "models",
-          "efforts"
+          "efforts",
+          "node_outdated"
         ],
         "type": "object"
       },
