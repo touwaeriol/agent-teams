@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -12,9 +14,9 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// QuotaFull is the used percent at which a node's subscription window counts as exhausted: the
-// node is passed over while another candidate still has quota.
-const QuotaFull = 95.0
+// shortWindowMinutes: a usage window up to this long counts as a 5-hour window for the thresholds
+// (store.QuotaLimits.FiveHourPct), a longer one as a weekly window (WeeklyPct).
+const shortWindowMinutes = 24 * 60
 
 // unknownUsage ranks a node whose runtime reported no quota numbers (no report yet, an older
 // daemon, an API key): between a fresh account and a busy one.
@@ -32,7 +34,7 @@ const SessionWeight = 10.0
 // live session on the node, so sessions spread over the nodes and the less used ones get more)
 // over every runtime of the role and its candidate nodes, and the employee stays on its current node and runtime only while it must
 // (stay: it resumes a conversation or has a worktree in its thread) and that node is online,
-// still a candidate and not out of quota. With no usable pair online it is the current node and
+// still a candidate and not full (a free slot, quota not tight). With no usable pair online it is the current node and
 // runtime (the session waits for it), else the first candidate; when that node is online and
 // reports its runtime CLIs (runtime_status) but the runtime is not ready there, the pick is held
 // instead (hold = why no node can take the session, see holdReason).
@@ -49,12 +51,16 @@ func (o *Orchestrator) pickNode(ctx context.Context, tx *core.Tx, e core.Employe
 	if err != nil {
 		return nodePick{}, err
 	}
+	limits, err := o.quotaLimits(ctx, tx, p.UserID)
+	if err != nil {
+		return nodePick{}, err
+	}
 	var states []nodeState
 	rts := employeeRuntimes(e)
 	for _, rt := range rts {
 		as := e
 		as.Runtime = rt
-		states = append(states, o.nodeStates(ctx, tx, core.NodeCandidates(as, nodes), rt, Model(as, p), reports)...)
+		states = append(states, o.nodeStates(ctx, tx, core.NodeCandidates(as, nodes), rt, Model(as, p), reports, limits)...)
 	}
 	if current.id == "" && len(states) == 0 {
 		return nodePick{}, ErrNoNode
@@ -69,6 +75,15 @@ func (o *Orchestrator) pickNode(ctx context.Context, tx *core.Tx, e core.Employe
 	return pick, nil
 }
 
+// quotaLimits are the user's scheduling thresholds (defaults when the user row is gone).
+func (o *Orchestrator) quotaLimits(ctx context.Context, tx *core.Tx, userID string) (store.QuotaLimits, error) {
+	l, err := o.store.On(tx).UserQuotaLimits(ctx, userID)
+	if errors.Is(err, store.ErrNotFound) {
+		return store.DefaultQuotaLimits(), nil
+	}
+	return l, err
+}
+
 // pickCandidate is one candidate pair in the "pick node" log line.
 type pickCandidate struct {
 	Node   string  `json:"node"`
@@ -80,6 +95,7 @@ type pickCandidate struct {
 	Active int     `json:"active"`
 	Free   int     `json:"free"`
 	Score  float64 `json:"score"`
+	Tight  string  `json:"tight,omitempty"`
 }
 
 // logPick records why pickNode chose the node: every candidate pair with its load score (no
@@ -95,7 +111,7 @@ func (o *Orchestrator) logPick(e core.Employee, p store.Project, stay bool, node
 	cands := make([]pickCandidate, len(states))
 	for i, s := range states {
 		cands[i] = pickCandidate{Node: names[s.id], NodeID: s.id, RT: s.rt, Usable: s.usable, Online: s.online,
-			Used: s.used, Active: s.active, Free: s.free, Score: s.score()}
+			Used: s.used, Active: s.active, Free: s.free, Score: s.score(), Tight: s.tight}
 	}
 	thread := ""
 	if e.CurrentThreadID != nil {
@@ -154,6 +170,7 @@ type nodeState struct {
 	free   int     // freeSlots
 	active int     // live sessions on the node (core.ActiveSessionCount)
 	used   float64 // quotaUsed of the runtime
+	tight  string  // quotaTight: which window is over the user's threshold ("" = none)
 }
 
 // score is the pair's load score, lower first: used quota plus SessionWeight per live session.
@@ -161,10 +178,12 @@ func (s nodeState) score() float64 { return s.used + SessionWeight*float64(s.act
 
 func (s nodeState) same(o nodeState) bool { return s.id == o.id && s.rt == o.rt }
 
-func (s nodeState) full() bool { return s.free <= 0 || s.used >= QuotaFull }
+// full: no free slot, or the quota is tight (a window over the user's threshold). A full pair is
+// only picked when every usable pair is full.
+func (s nodeState) full() bool { return s.free <= 0 || s.tight != "" }
 
 func (o *Orchestrator) nodeStates(ctx context.Context, tx *core.Tx, cands []store.Node, runtime, model string,
-	reports map[string][]store.NodeRuntime) []nodeState {
+	reports map[string][]store.NodeRuntime, limits store.QuotaLimits) []nodeState {
 	now := time.Now()
 	out := make([]nodeState, 0, len(cands))
 	for _, n := range cands {
@@ -189,6 +208,7 @@ func (o *Orchestrator) nodeStates(ctx context.Context, tx *core.Tx, cands []stor
 			st.free = freeSlots(o.gw.Capacity(n), active)
 			st.active = active
 			st.used = quotaUsed(ru, model, now)
+			st.tight = quotaTight(ru, model, now, limits)
 		}
 		out = append(out, st)
 	}
@@ -264,8 +284,8 @@ func chooseNode(current nodeState, cands []nodeState, stay bool) nodeState {
 	}
 }
 
-// pickRank orders two usable pairs, negative when a goes first: one with quota and a free slot
-// before a full one, then the lowest load score (score: the used quota — 5 h, weekly, the model's
+// pickRank orders two usable pairs, negative when a goes first: one with a free slot and quota
+// that is not tight (quotaTight: under the user's 5-hour and weekly thresholds) before a full one, then the lowest load score (score: the used quota — 5 h, weekly, the model's
 // weekly window; Codex: every window — plus SessionWeight per live session on the node, so a
 // lightly used node gets more new sessions without taking all of them), then the employee's
 // current node and runtime (it keeps its clones), then the most free slots. Equal pairs keep
@@ -336,6 +356,37 @@ func quotaUsed(ru *platform.RuntimeUsage, model string, now time.Time) float64 {
 		used = max(used, w.UsedPercent)
 	}
 	return used
+}
+
+// quotaTight tells which of the runtime's windows that apply to the model and have not reset is
+// at or over the user's threshold, e.g. "five_hour 86% ≥ 85%" ("" when none is): windows up to a
+// day long (Claude five_hour, Codex primary) against FiveHourPct, longer ones (weekly, the
+// per-model weekly windows, Codex secondary) against WeeklyPct.
+func quotaTight(ru *platform.RuntimeUsage, model string, now time.Time, limits store.QuotaLimits) string {
+	if ru == nil || ru.Status != "ok" {
+		return ""
+	}
+	for _, w := range ru.Windows {
+		if (w.ResetsAt != nil && !w.ResetsAt.After(now)) || !windowApplies(w, model) {
+			continue
+		}
+		limit := limits.WeeklyPct
+		if shortWindow(w) {
+			limit = limits.FiveHourPct
+		}
+		if w.UsedPercent >= float64(limit) {
+			return fmt.Sprintf("%s %g%% ≥ %d%%", w.Key, w.UsedPercent, limit)
+		}
+	}
+	return ""
+}
+
+// shortWindow: the window counts as a 5-hour one (its length when reported, else its key).
+func shortWindow(w platform.UsageWindow) bool {
+	if w.WindowMinutes != nil && *w.WindowMinutes > 0 {
+		return *w.WindowMinutes <= shortWindowMinutes
+	}
+	return w.Key == "five_hour" || w.Key == "primary"
 }
 
 // windowApplies: the per-model weekly windows (weekly_opus, weekly_sonnet, weekly_model with the

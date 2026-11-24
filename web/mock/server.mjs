@@ -254,6 +254,14 @@ const routes = [
   ["GET", /^\/api\/me$/, (req, res) => json(res, 200, state.me)],
   ["GET", /^\/api\/me\/sessions$/, (req, res) => json(res, 200, [{ id: "s1", created_at: F.ago(600), current: true, expires_at: F.ago(-60000), last_seen_at: F.ago(0), user_agent: "Chrome · Linux" }, { id: "s2", created_at: F.ago(6000), current: false, expires_at: F.ago(-6000), last_seen_at: F.ago(3000), user_agent: "Safari · iPhone" }])],
   ["POST", /^\/api\/me\/password$/, (req, res) => json(res, 204)],
+  ["GET", /^\/api\/me\/scheduling$/, (req, res) => json(res, 200, { ...(state.scheduling ?? { five_hour_pct: 85, weekly_pct: 95 }), defaults: { five_hour_pct: 85, weekly_pct: 95 } })],
+  ["PUT", /^\/api\/me\/scheduling$/, async (req, res) => {
+    const b = await body(req);
+    const ok = (v) => Number.isInteger(v) && v >= 1 && v <= 100;
+    if (!ok(b.five_hour_pct) || !ok(b.weekly_pct)) return json(res, 422, { detail: "阈值要在 1～100 之间", code: "validation" });
+    state.scheduling = { five_hour_pct: b.five_hour_pct, weekly_pct: b.weekly_pct };
+    json(res, 200, { ...state.scheduling, defaults: { five_hour_pct: 85, weekly_pct: 95 } });
+  }],
   ["DELETE", /^\/api\/me\/sessions\/[^/]+$/, (req, res) => json(res, 204)],
   ["GET", /^\/api\/events$/, (req, res) => openStream(req, res, "user")],
   ["GET", /^\/api\/projects$/, (req, res) => json(res, 200, state.projects)],

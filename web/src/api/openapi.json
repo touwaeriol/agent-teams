@@ -4804,6 +4804,30 @@
         ],
         "type": "object"
       },
+      "QuotaLimits": {
+        "additionalProperties": false,
+        "properties": {
+          "five_hour_pct": {
+            "description": "A node whose 5-hour window (Codex: windows up to a day) has used this many percent gets no new session while another candidate node is under the thresholds",
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "weekly_pct": {
+            "description": "The same for any weekly window (Claude weekly and per-model weekly; Codex: windows longer than a day)",
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "five_hour_pct",
+          "weekly_pct"
+        ],
+        "type": "object"
+      },
       "RandomLookInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -5980,6 +6004,35 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "SchedulingSettings": {
+        "additionalProperties": false,
+        "properties": {
+          "defaults": {
+            "$ref": "#/components/schemas/QuotaLimits",
+            "description": "The built-in thresholds (used until the user sets their own)"
+          },
+          "five_hour_pct": {
+            "description": "A node whose 5-hour window (Codex: windows up to a day) has used this many percent gets no new session while another candidate node is under the thresholds",
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "weekly_pct": {
+            "description": "The same for any weekly window (Claude weekly and per-model weekly; Codex: windows longer than a day)",
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "defaults",
+          "five_hour_pct",
+          "weekly_pct"
+        ],
         "type": "object"
       },
       "SearchMessage": {
@@ -11279,6 +11332,76 @@
           }
         },
         "summary": "Change password and sign out other sessions",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/me/scheduling": {
+      "get": {
+        "operationId": "get-my-scheduling",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulingSettings"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "My node scheduling thresholds",
+        "tags": [
+          "auth"
+        ]
+      },
+      "put": {
+        "operationId": "put-my-scheduling",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuotaLimits"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulingSettings"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Set my node scheduling thresholds (percent, 1–100)",
         "tags": [
           "auth"
         ]

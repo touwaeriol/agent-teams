@@ -156,6 +156,8 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | GET | `/api/me` | → `UserView` |
 | POST | `/api/me/password` | `{current, new}` → 204（新：v1 没有改密码），同时注销其他会话 |
 | GET | `/api/me/sessions` / DELETE `/api/me/sessions/{id}` | 查看 / 注销自己的登录会话（新） |
+| GET | `/api/me/scheduling` | → `{five_hour_pct, weekly_pct, defaults: {five_hour_pct, weekly_pct}}`：自己的调度阈值（没设过 = 默认 85 / 95），shared-members.md §4.3 |
+| PUT | `/api/me/scheduling` | `{five_hour_pct, weekly_pct}`（整数 1～100，两项都要）→ 同 GET；越界或缺项 422。存 `at_users.quota_five_hour_pct` / `quota_weekly_pct`（00430），下一次选节点就生效 |
 
 `/auth/*` 路径与 v1 相同（v1 网页兼容）。
 
