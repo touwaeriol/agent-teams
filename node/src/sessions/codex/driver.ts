@@ -7,7 +7,7 @@ import type { AppServer } from "./appserver.js";
 import type { CodexHub, ThreadListener } from "./hub.js";
 import { errorNotification, itemCompleted, itemStarted, turnCompleted } from "./mapper.js";
 import { codexFileNote, codexImages } from "../images.js";
-import { codexMode, sandboxPolicy } from "./mode.js";
+import { askForApproval, codexMode, modeTurnParams } from "./mode.js";
 
 export interface CodexDriverDeps {
   hub: CodexHub;
@@ -106,7 +106,7 @@ export class CodexDriver implements Driver, ThreadListener {
     return {
       // An empty model is left out so Codex uses its own default: app-server rejects model "".
       ...(this.codex.model ? { model: this.codex.model } : {}),
-      cwd: this.ctx.absCwd, approvalPolicy: this.codex.approval_policy, sandbox: this.codex.sandbox, config,
+      cwd: this.ctx.absCwd, approvalPolicy: askForApproval(this.codex.approval_policy), sandbox: this.codex.sandbox, config,
       ...(this.codex.approvals_reviewer ? { approvalsReviewer: this.codex.approvals_reviewer } : {}),
       ...(this.developerInstructions() ? { developerInstructions: this.developerInstructions() } : {}),
     };
@@ -191,9 +191,7 @@ export class CodexDriver implements Driver, ThreadListener {
     if (change.mode) {
       const m = codexMode(change.mode, this.codex);
       Object.assign(this.codex, m);
-      this.turnOverride.approvalPolicy = m.approval_policy;
-      this.turnOverride.sandboxPolicy = sandboxPolicy(m.sandbox, this.codex.config, nodeRoot(this.ctx.absCwd, this.ctx.spec.cwd));
-      this.turnOverride.approvalsReviewer = m.approvals_reviewer ?? "user";
+      Object.assign(this.turnOverride, modeTurnParams(m, this.codex.config, nodeRoot(this.ctx.absCwd, this.ctx.spec.cwd)));
     }
     if (change.model) {
       this.codex.model = change.model;

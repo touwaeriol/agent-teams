@@ -1,6 +1,9 @@
 // Permission modes of a Codex session (session.set_mode, protocol.md §4.5): the set_mode values map
 // to a sandbox × approval policy × approvals reviewer, sent with the next turn/start.
 import { isAbsolute, join } from "node:path";
+import type { AskForApproval } from "../../codex-protocol/v2/AskForApproval.js";
+import type { SandboxPolicy } from "../../codex-protocol/v2/SandboxPolicy.js";
+import type { TurnStartParams } from "../../codex-protocol/v2/TurnStartParams.js";
 import type { CodexSessionOptions } from "../../protocol.js";
 
 type ModeFields = Pick<CodexSessionOptions, "sandbox" | "approval_policy" | "approvals_reviewer">;
@@ -29,7 +32,7 @@ export function codexMode(mode: string, current: CodexSessionOptions): ModeField
  * relative to the node root; turn/start takes absolute paths (AbsolutePathBuf), so a relative
  * one is joined onto root.
  */
-export function sandboxPolicy(sandbox: CodexSessionOptions["sandbox"], config: CodexSessionOptions["config"], root: string): Record<string, unknown> {
+export function sandboxPolicy(sandbox: CodexSessionOptions["sandbox"], config: CodexSessionOptions["config"], root: string): SandboxPolicy {
   switch (sandbox) {
     case "danger-full-access":
       return { type: "dangerFullAccess" };
@@ -40,4 +43,21 @@ export function sandboxPolicy(sandbox: CodexSessionOptions["sandbox"], config: C
       return { type: "workspaceWrite", writableRoots: (ws.writable_roots ?? []).map((p) => (isAbsolute(p) ? p : join(root, p))), networkAccess: ws.network_access ?? true, excludeTmpdirEnvVar: false, excludeSlashTmp: false };
     }
   }
+}
+
+/**
+ * app-server's approvalPolicy for the session's approval_policy. The node protocol still lists
+ * "on-failure" (the console never sends it), which current Codex no longer takes (AskForApproval):
+ * it goes out as "on-request", Codex's replacement for it.
+ */
+export function askForApproval(p: CodexSessionOptions["approval_policy"]): AskForApproval {
+  return p === "on-failure" ? "on-request" : p;
+}
+
+/** The turn/start fields a mode sets, typed by app-server's own TurnStartParams (codex-protocol, generated from the CLI). */
+export type ModeTurnParams = Required<Pick<TurnStartParams, "approvalPolicy" | "sandboxPolicy" | "approvalsReviewer">>;
+
+/** turn/start's approvalPolicy + sandboxPolicy + approvalsReviewer for a set_mode value (session.set_mode). */
+export function modeTurnParams(m: ModeFields, config: CodexSessionOptions["config"], root: string): ModeTurnParams {
+  return { approvalPolicy: askForApproval(m.approval_policy), sandboxPolicy: sandboxPolicy(m.sandbox, config, root), approvalsReviewer: m.approvals_reviewer ?? "user" };
 }

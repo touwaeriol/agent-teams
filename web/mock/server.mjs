@@ -199,7 +199,21 @@ const sent = new Map();
 const failedOnce = new Set();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// A session's sidebar status (ProjectView.session_status, server sessionStatusCol): done → resolved,
+// its employee at work → working, else finished (replied and stopped).
+const WORKING = new Set(["typing", "reading", "running", "thinking", "claiming", "walking_to_board", "returning", "waiting", "raising_hand"]);
+function syncSession(t) {
+  const p = state.projects.find((x) => x.id === t.project_id);
+  if (!t.solo || !p) return;
+  p.session_status = t.status === "done" ? "resolved" : WORKING.has(t.members[0]?.status?.state) ? "working" : "finished";
+  p.updated_at = now();
+  emit("thread", { thread: threadOut(t) }, t.project_id);
+}
+const setLead = (t, state, bubble = "") => t.members[0] && (t.members[0].status = { ...t.members[0].status, state, bubble, since: now() });
+
 async function sendMessage(res, cid, req) {
+  const pid = threadById(cid)?.project_id ?? "p1";
+  const solo = threadById(cid)?.solo ? threadById(cid) : null;
   const b = await body(req);
   const key = req.headers["idempotency-key"] ?? "";
   await sleep(Number(process.env.MOCK_SEND_MS ?? 0));
@@ -214,13 +228,24 @@ async function sendMessage(res, cid, req) {
   if (key) sent.set(key, m);
   (state.messages[cid] ??= []).push(m);
   const sseMs = Number(process.env.MOCK_SSE_MS ?? 0);
-  if (sseMs > 0) setTimeout(() => emit("message", { conversation_id: cid, message: m }), sseMs);
-  else emit("message", { conversation_id: cid, message: m });
+  if (sseMs > 0) setTimeout(() => emit("message", { conversation_id: cid, message: m }, pid), sseMs);
+  else emit("message", { conversation_id: cid, message: m }, pid);
+  // A session: a message reopens a resolved one and starts a round (进行中 until the reply).
+  if (solo) {
+    if (solo.status === "done") Object.assign(solo, { status: "running", finished_at: null, summary: "" });
+    setLead(solo, "typing", "回复中");
+    syncSession(solo);
+  }
   setTimeout(() => {
     const said = images.length ? `${images.length} 张图片${b.content ? `和「${b.content}」` : ""}` : `「${b.content}」`;
     const reply = { id: String(Date.now() + 1), role: "leader", author: cid === "c0" ? "leader" : threadById(cid)?.members[0]?.name ?? "lead", kind: "chat", content: `收到 ${said}。我来安排。`, meta: {}, created_at: now() };
     state.messages[cid].push(reply);
-    emit("message", { conversation_id: cid, message: reply });
+    emit("message", { conversation_id: cid, message: reply }, pid);
+    if (solo) {
+      solo.lead_last = { text: reply.content, at: reply.created_at };
+      setLead(solo, "idle");
+      syncSession(solo);
+    }
   }, 1200 + sseMs);
   await sleep(Number(process.env.MOCK_REPLY_MS ?? 0));
   json(res, 202, m);
@@ -429,6 +454,15 @@ const routes = [
   ["GET", /^\/api\/conversations\/([^/]+)\/questions$/, (req, res, [cid]) => json(res, 200, state.questions[cid] ?? [])],
   ["POST", /^\/api\/conversations\/([^/]+)\/questions\/([^/]+)\/answer$/, (req, res, [cid, qid]) => answer(res, cid, qid, req)],
   ["GET", /^\/api\/threads\/([^/]+)$/, (req, res, [tid]) => json(res, 200, threadById(tid))],
+  // 已解决 (api.md: POST /api/threads/{tid}/complete); the next message reopens a session.
+  ["POST", /^\/api\/threads\/([^/]+)\/complete$/, (req, res, [tid]) => {
+    const t = threadById(tid);
+    if (!t) return fail(res, 404, "找不到讨论串", "thread_not_found");
+    Object.assign(t, { status: "done", finished_at: now(), updated_at: now() });
+    if (t.solo) syncSession(t);
+    else emit("thread", { thread: threadOut(t) }, t.project_id);
+    json(res, 200, threadOut(t));
+  }],
   ["POST", /^\/api\/threads\/([^/]+)\/(archive|unarchive)$/, (req, res, [tid, op]) => {
     const t = threadById(tid);
     if (op === "archive") Object.assign(t, { archived_from: t.status, status: "archived" });
@@ -730,7 +764,7 @@ routes.push(
     const pid = `s${Date.now()}`;
     const title = (b.title || b.message || "新会话").slice(0, 40);
     const repos = (b.repos ?? []).map((x) => ({ repo: x.repo, git_connection_id: x.git_connection_id ?? null }));
-    const p = { ...structuredClone(state.projects.find((x) => x.id === "s1")), id: pid, name: title, session_status: "running", repos, repo: repos[0]?.repo ?? null, created_at: now(), updated_at: now() };
+    const p = { ...structuredClone(state.projects.find((x) => x.id === "s1")), id: pid, name: title, session_status: "working", repos, repo: repos[0]?.repo ?? null, created_at: now(), updated_at: now() };
     state.projects.unshift(p);
     const base = state.sessionThreads.find((x) => x.session?.runtime === runtime) ?? state.sessionThreads[0];
     const t = { ...structuredClone(base), id: `t${pid}`, project_id: pid, title, status: "running", branch: b.branch || `session/${pid}`, created_at: now(), updated_at: now() };
@@ -760,7 +794,12 @@ routes.push(
     const sessionId = `as_${t.project_id}`;
     setTimeout(() => {
       const updated = now();
-      (state.contextFor ??= {})[cid] = { detail: "full", updated_at: updated };
+      // The precise count comes out a little higher (the last turn's messages): total, rows and the session's bar follow.
+      const prev = { ...state.contextDetail, ...state.contextFor?.[cid] };
+      const grow = 5200;
+      const categories = prev.categories.map((c) => (c.id === "messages" ? { ...c, tokens: c.tokens + grow } : c.id === "free_space" ? { ...c, tokens: c.tokens - grow } : c));
+      (state.contextFor ??= {})[cid] = { detail: "full", updated_at: updated, total_tokens: prev.total_tokens + grow, categories };
+      t.session = { ...t.session, context_used: prev.total_tokens + grow, context_max: prev.max_tokens };
       emit("context", { thread_no: 1, conversation_id: cid, session_id: sessionId, reason: "refresh", refresh_id: refreshId, updated_at: updated }, t.project_id);
     }, Number(process.env.MOCK_REFRESH_MS ?? 1200));
     json(res, 202, { refresh_id: refreshId, session_id: sessionId });
