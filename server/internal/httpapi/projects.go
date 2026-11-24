@@ -36,6 +36,7 @@ type ProjectView struct {
 	Kind             string    `json:"kind" enum:"project,session" doc:"project, or session (多仓库会话: one employee the user talks to directly in thread 1; no coordinator)"`
 	Waiting          int       `json:"waiting"`
 	ThreadsActive    int       `json:"threads_active"`
+	SessionStatus    string    `json:"session_status" doc:"A session's state for the sidebar ('' for a project): working, finished (the employee replied and stopped: 已完成), resolved (the user confirmed: 已解决), or the thread's status (queued, waiting, review, paused, failed). Open cards are in waiting"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
@@ -51,7 +52,7 @@ func ProjectViewOf(p store.Project, d Delivery) ProjectView {
 		WorkMode: p.WorkMode, AutoApprove: p.AutoApprove, MergePolicy: p.MergePolicy,
 		Delivery: d, OfficeLayout: p.OfficeLayout, Icon: p.Icon, CoordinatorModel: p.CoordinatorModel,
 		ThreadModel: p.ThreadModel, ThreadCodexModel: p.ThreadCodexModel, ThreadEffort: p.ThreadEffort, AutoResume: p.AutoResume, Kind: p.Kind, Waiting: p.Waiting,
-		ThreadsActive: p.ThreadsActive, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
+		ThreadsActive: p.ThreadsActive, SessionStatus: p.SessionStatus, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
 }
 
 // ProjectInput is POST /api/projects.

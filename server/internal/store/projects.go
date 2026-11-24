@@ -36,6 +36,8 @@ type Project struct {
 	Kind          string
 	Waiting       int `gorm:"->"`
 	ThreadsActive int `gorm:"->"`
+	// SessionStatus is a session's state for the sidebar ('' for a project): see sessionStatusCol.
+	SessionStatus string `gorm:"->"`
 }
 
 // TableName maps Project to at_projects.
@@ -101,7 +103,23 @@ const projectCols = `p.id, p.user_id, p.name, p.description, p.context,
 	  + (SELECT count(*) FROM at_threads t WHERE t.project_id = p.id AND t.status = 'review'
 	    AND (p.merge_policy = 'manual' OR t.merge_error IS NOT NULL)) AS waiting,
 	(SELECT count(*) FROM at_threads t WHERE t.project_id = p.id
-	  AND t.status IN ('queued','running','waiting','review')) AS threads_active`
+	  AND t.status IN ('queued','running','waiting','review')) AS threads_active,
+	` + sessionStatusCol
+
+// sessionStatusCol is a session's (kind session) state for the sidebar, from its thread: resolved
+// (done: the user confirmed 已解决), working (running and its employee is in a turn, or the user
+// spoke last), finished (running, the employee replied last and is not in a turn: 已完成, waiting
+// for the user to confirm), else the thread's status (queued, waiting, review, paused, failed).
+// Open cards are counted in waiting. '' for a project.
+const sessionStatusCol = `CASE WHEN p.kind <> 'session' THEN '' ELSE COALESCE((SELECT CASE
+	  WHEN t.status = 'done' THEN 'resolved'
+	  WHEN t.status <> 'running' THEN t.status
+	  WHEN EXISTS (SELECT 1 FROM at_employees e JOIN at_agent_sessions s ON s.employee_id = e.id
+	    WHERE e.thread_id = t.id AND e.tier = 'lead' AND s.state <> 'closed' AND s.in_turn) THEN 'working'
+	  WHEN (SELECT m.role FROM at_messages m WHERE m.conversation_id = t.id AND m.role IN ('user', 'leader')
+	    ORDER BY m.id DESC LIMIT 1) = 'leader' THEN 'finished'
+	  ELSE 'working' END
+	FROM at_threads t WHERE t.project_id = p.id ORDER BY t.no LIMIT 1), '') END AS session_status`
 
 func (s *Store) projects(ctx context.Context, userID string) *gorm.DB {
 	return s.g(ctx).Table("at_projects p").Select(projectCols).Where("p.user_id = ?", userID)
