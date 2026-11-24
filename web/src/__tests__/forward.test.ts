@@ -56,7 +56,7 @@ describe("selection", () => {
     expect(picking.emitted("toggle")).toEqual([[12], [12]]);
   });
   it("names a session's employee by its role instead of its handle", () => {
-    const [block] = chatBlocks([message("13", { role: "assistant", author: "lead-1", content: "好了" })]);
+    const [block] = chatBlocks([message("13", { role: "employee", author: "lead-1", content: "好了" })]);
     expect(mountWith(ChatBlockView, { block, threads: [], speakerColor: "#000", pid: "p1" }).text()).toContain("lead-1");
     const named = mountWith(ChatBlockView, { block, threads: [], speakerColor: "#000", pid: "p1", speakerName: "工程师" });
     expect(named.text()).toContain("工程师");
