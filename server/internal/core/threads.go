@@ -253,8 +253,32 @@ func (s *Store) ThreadViewOf(ctx context.Context, q DB, t Thread) (ThreadView, e
 	if v.Dispatch, err = DispatchOf(ctx, q, t); err != nil {
 		return v, err
 	}
+	if v.Solo = t.Solo(); v.Solo {
+		if v.Session, err = threadSession(ctx, q, v.Members); err != nil {
+			return v, err
+		}
+	}
 	v.QueuePosition, err = queuePosition(ctx, q, t)
 	return v, err
+}
+
+// threadSession is a session's employee's (its lead's) latest agent session (nil: none yet).
+func threadSession(ctx context.Context, q DB, members []EmployeeBrief) (*ThreadSession, error) {
+	for _, m := range members {
+		if m.Tier != "lead" {
+			continue
+		}
+		s, err := LatestSession(ctx, q, m.ID)
+		if err == ErrNotFound {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return &ThreadSession{NodeID: s.NodeID, Runtime: s.Runtime, State: s.State, Cwd: s.Cwd,
+			ContextUsed: s.ContextUsed, ContextMax: s.ContextMax}, nil
+	}
+	return nil, nil
 }
 
 // DispatchOf is the thread's hand-over: who opened it, when, and the user's message it was opened

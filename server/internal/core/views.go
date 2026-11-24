@@ -118,6 +118,18 @@ type ThreadView struct {
 	LastActivityAt    time.Time        `json:"last_activity_at" doc:"Latest state change, message or deliverable of the thread"`
 	LatestDeliverable *DeliverableView `json:"latest_deliverable" doc:"The newest deliverable the thread published (null: none)"`
 	Dispatch          *ThreadDispatch  `json:"dispatch" doc:"How the thread was handed over (the text itself is brief): who opened it, when, and the user's message it was opened for. Null when the brief is empty or is forwarded user messages (their copies are in the conversation)"`
+	Solo              bool             `json:"solo" doc:"The thread is a session's (多仓库会话): its lead is the one employee the user talks to directly"`
+	Session           *ThreadSession   `json:"session" doc:"A session's (solo) employee's latest agent session on its node: working directory and context use. Null for other threads and before the employee's first session"`
+}
+
+// ThreadSession is the live side of a session's employee (ThreadView.session).
+type ThreadSession struct {
+	NodeID      *string `json:"node_id" doc:"Node the session runs (ran) on"`
+	Runtime     string  `json:"runtime"`
+	State       string  `json:"state" doc:"The agent session's state (opening, idle, busy, parked, closed…)"`
+	Cwd         string  `json:"cwd" doc:"The employee's working directory on the node (every repository is a subdirectory)"`
+	ContextUsed *int    `json:"context_used" doc:"Tokens of context the session used at its last turn end (null: the runtime reports none, e.g. Antigravity, or no turn ended yet)"`
+	ContextMax  *int    `json:"context_max" doc:"The context window ContextUsed is measured against (tokens, as the runtime reports it)"`
 }
 
 // ThreadDispatch is the hand-over that opened a thread (coordinator or user → lead).

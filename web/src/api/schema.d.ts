@@ -4420,6 +4420,10 @@ export interface components {
             reminded_at: string | null;
             /** @description Repositories the thread set a base for, branched or opened a PR in */
             repos: components["schemas"]["ThreadRepoView"][] | null;
+            /** @description A session's (solo) employee's latest agent session on its node: working directory and context use. Null for other threads and before the employee's first session */
+            session: components["schemas"]["ThreadSession"];
+            /** @description The thread is a session's (多仓库会话): its lead is the one employee the user talks to directly */
+            solo: boolean;
             /**
              * Format: date-time
              * @description When the thread first ran (null while queued)
@@ -4451,6 +4455,25 @@ export interface components {
             pr_state: string;
             pr_url: string | null;
             repo: string;
+        };
+        ThreadSession: {
+            /**
+             * Format: int64
+             * @description The context window ContextUsed is measured against (tokens, as the runtime reports it)
+             */
+            context_max: number | null;
+            /**
+             * Format: int64
+             * @description Tokens of context the session used at its last turn end (null: the runtime reports none, e.g. Antigravity, or no turn ended yet)
+             */
+            context_used: number | null;
+            /** @description The employee's working directory on the node (every repository is a subdirectory) */
+            cwd: string;
+            /** @description Node the session runs (ran) on */
+            node_id: string | null;
+            runtime: string;
+            /** @description The agent session's state (opening, idle, busy, parked, closed…) */
+            state: string;
         };
         ThreadUsage: {
             /** Format: double */
@@ -4530,6 +4553,10 @@ export interface components {
             reminded_at: string | null;
             /** @description Repositories the thread set a base for, branched or opened a PR in */
             repos: components["schemas"]["ThreadRepoView"][] | null;
+            /** @description A session's (solo) employee's latest agent session on its node: working directory and context use. Null for other threads and before the employee's first session */
+            session: components["schemas"]["ThreadSession"];
+            /** @description The thread is a session's (多仓库会话): its lead is the one employee the user talks to directly */
+            solo: boolean;
             /**
              * Format: date-time
              * @description When the thread first ran (null while queued)
