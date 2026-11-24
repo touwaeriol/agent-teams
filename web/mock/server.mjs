@@ -27,7 +27,7 @@ const json = (res, status, body, headers = {}) => {
 const fail = (res, status, detail, code = "") => json(res, status, { detail, code });
 const cookies = (req) => Object.fromEntries((req.headers.cookie ?? "").split(";").map((c) => c.trim().split("=")).filter((p) => p[0]));
 const now = () => new Date().toISOString();
-const threadById = (tid) => state.threads.find((t) => t.id === tid);
+const threadById = (tid) => state.threads.find((t) => t.id === tid) ?? state.sessionThreads.find((t) => t.id === tid);
 /** What the server adds to a thread in lists: its deliverable count, newest deliverable and when anything last happened. */
 const threadOut = (t) => {
   const own = state.deliverables.filter((d) => d.thread_no === t.no);
@@ -280,7 +280,7 @@ const routes = [
   }],
   ["GET", /^\/api\/projects\/([^/]+)\/events$/, (req, res, [pid]) => openStream(req, res, pid)],
   ["GET", /^\/api\/projects\/([^/]+)\/coordinator$/, (req, res) => json(res, 200, { conversation_id: "c0", employee: state.coordinator, session_state: "active" })],
-  ["GET", /^\/api\/projects\/([^/]+)\/threads$/, (req, res, [pid]) => json(res, 200, pid === "p1" ? state.threads.map(threadOut) : [])],
+  ["GET", /^\/api\/projects\/([^/]+)\/threads$/, (req, res, [pid]) => json(res, 200, pid === "p1" ? state.threads.map(threadOut) : state.sessionThreads.filter((t) => t.project_id === pid).map(threadOut))],
   ["GET", /^\/api\/projects\/([^/]+)\/waiting$/, (req, res, [pid]) => json(res, 200, pid === "p1" ? waiting() : { questions: [], reviews: [] })],
   ["GET", /^\/api\/projects\/([^/]+)\/overview$/, (req, res, [pid]) => {
     const p = state.projects.find((x) => x.id === pid);
@@ -639,6 +639,133 @@ const routes = [
 
 // Remote servers (api.md §3.9.1): mock/servers.mjs.
 routes.push(...serverRoutes(state, { json, fail, body, roles: () => state.roles, projects: () => state.projects }));
+
+// Sessions (多仓库会话, #53; sessions.md, api.md): session-controls, session-options, POST
+// /api/sessions and the context breakdown. A switch answers after MOCK_SWITCH_MS (default 1500);
+// MOCK_SWITCH=fail answers with an error, MOCK_SWITCH=timeout never answers and the pending pick
+// is dropped after MOCK_SWITCH_TIMEOUT_MS (default 120000, the server's 2 minutes) with the old
+// values kept. MOCK_NODE_OUTDATED=1 serves the old daemon's menus.
+const sessionThread = (pid) => state.sessionThreads.find((t) => t.project_id === pid);
+const sessionPending = {};
+const sessionErrors = {};
+function controlsMenus(runtime, model) {
+  const rt = state.sessionRuntimes[runtime] ?? state.sessionRuntimes.claude;
+  const m = rt.models.find((x) => x.id === model);
+  let modes = rt.modes.filter((x) => x.id !== "auto" || runtime !== "claude" || !m || m.supports_auto);
+  const outdated = process.env.MOCK_NODE_OUTDATED === "1";
+  if (outdated) modes = runtime === "claude" ? modes.filter((x) => ["default", "acceptEdits", "bypassPermissions"].includes(x.id)) : [];
+  return { modes, models: rt.models, efforts: outdated ? [] : (m?.efforts ?? []), node_outdated: outdated };
+}
+function controlsView(pid) {
+  const t = sessionThread(pid);
+  const runtime = t.session?.runtime ?? "claude";
+  const picks = state.sessionPicks[t.id];
+  const p = sessionPending[pid];
+  return {
+    thread_id: t.id, runtime, live: t.session?.state === "active", ...picks,
+    pending: p ? { ...p.body, since: p.since } : null, ...(sessionErrors[pid] ? { error: sessionErrors[pid] } : {}),
+    ...controlsMenus(runtime, picks.model),
+  };
+}
+function checkControls(runtime, model, b) {
+  const menus = controlsMenus(runtime, b.model ?? model);
+  if (b.permission_mode !== undefined && !menus.modes.some((x) => x.id === b.permission_mode)) return ["permission_mode", "这个会话不能用这个权限模式"];
+  if (b.model !== undefined && b.model !== "" && !menus.models.some((x) => x.id === b.model)) return ["model", "这个会话没有这个模型"];
+  if (b.effort !== undefined && b.effort !== "" && !menus.efforts.includes(b.effort)) return ["effort", "这个模型没有这个思考强度"];
+  return null;
+}
+routes.push(
+  ["GET", /^\/api\/projects\/([^/]+)\/session-controls$/, (req, res, [pid]) => {
+    if (!sessionThread(pid)) return fail(res, 409, "这个项目不是会话", "not_session");
+    json(res, 200, controlsView(pid));
+  }],
+  ["PUT", /^\/api\/projects\/([^/]+)\/session-controls$/, async (req, res, [pid]) => {
+    const t = sessionThread(pid);
+    if (!t) return fail(res, 409, "这个项目不是会话", "not_session");
+    if (sessionPending[pid]) return fail(res, 409, "上一次切换还在等节点回音", "switch_pending");
+    const b = await body(req);
+    const picks = state.sessionPicks[t.id];
+    const bad = checkControls(t.session?.runtime ?? "claude", picks.model, b);
+    if (bad) return json(res, 422, { detail: bad[1], code: "invalid", field: bad[0] });
+    // Switching to a model without the picked effort drops it (sessions.md).
+    const next = { ...picks, ...b };
+    if (b.model !== undefined && b.effort === undefined) {
+      const m = controlsMenus(t.session?.runtime ?? "claude", next.model);
+      if (next.effort && !m.efforts.includes(next.effort)) next.effort = "";
+    }
+    const how = process.env.MOCK_SWITCH ?? "";
+    delete sessionErrors[pid];
+    const answer = (error) => {
+      delete sessionPending[pid];
+      if (error) sessionErrors[pid] = error;
+      else state.sessionPicks[t.id] = next;
+      emit("session_controls", { thread_id: t.id, applied: true, ...(error ? { error } : {}) }, pid);
+    };
+    const timer = how === "timeout"
+      ? setTimeout(() => delete sessionPending[pid], Number(process.env.MOCK_SWITCH_TIMEOUT_MS ?? 120000))
+      : setTimeout(() => answer(how === "fail" ? "mock: 节点拒绝了这次切换" : ""), Number(process.env.MOCK_SWITCH_MS ?? 1500));
+    sessionPending[pid] = { body: b, since: now(), timer };
+    emit("session_controls", { thread_id: t.id, applied: false }, pid);
+    json(res, 200, controlsView(pid));
+  }],
+  ["GET", /^\/api\/session-options$/, (req, res, _m, url) => {
+    const r = state.roles.find((x) => x.role === url.searchParams.get("role") && x.tier === "member");
+    if (!r) return fail(res, 404, "没有这个岗位", "not_found");
+    const runtime = r.runtime ?? "claude";
+    const rt = state.sessionRuntimes[runtime] ?? state.sessionRuntimes.claude;
+    const model = url.searchParams.get("model") || r.model || (rt.models.find((x) => x.default)?.id ?? "");
+    const menus = controlsMenus(runtime, model);
+    const m = rt.models.find((x) => x.id === model);
+    const defaultMode = runtime === "claude" ? (m && !m.supports_auto ? "default" : "auto") : r.permission_mode === "ask" ? "default" : "bypassPermissions";
+    json(res, 200, { runtime, default_mode: defaultMode, model, modes: menus.modes, models: menus.models, efforts: menus.efforts });
+  }],
+  ["POST", /^\/api\/sessions$/, async (req, res) => {
+    const b = await body(req);
+    const r = state.roles.find((x) => x.role === b.role && x.tier === "member") ?? state.roles.find((x) => x.tier === "member");
+    const runtime = r.runtime ?? "claude";
+    const rt = state.sessionRuntimes[runtime] ?? state.sessionRuntimes.claude;
+    const model = b.model || r.model || (rt.models.find((x) => x.default)?.id ?? "");
+    const bad = checkControls(runtime, model, { permission_mode: b.permission_mode, effort: b.effort });
+    if (bad) return json(res, 422, { detail: bad[1], code: "invalid", field: bad[0] });
+    const pid = `s${Date.now()}`;
+    const title = (b.title || b.message || "新会话").slice(0, 40);
+    const repos = (b.repos ?? []).map((x) => ({ repo: x.repo, git_connection_id: x.git_connection_id ?? null }));
+    const p = { ...structuredClone(state.projects.find((x) => x.id === "s1")), id: pid, name: title, session_status: "running", repos, repo: repos[0]?.repo ?? null, created_at: now(), updated_at: now() };
+    state.projects.unshift(p);
+    const base = state.sessionThreads.find((x) => x.session?.runtime === runtime) ?? state.sessionThreads[0];
+    const t = { ...structuredClone(base), id: `t${pid}`, project_id: pid, title, status: "running", branch: b.branch || `session/${pid}`, created_at: now(), updated_at: now() };
+    t.session = { ...t.session, state: "active", context_used: null, context_max: null };
+    state.sessionThreads.push(t);
+    const m = rt.models.find((x) => x.id === model);
+    const mode = b.permission_mode || (runtime === "claude" ? (m && !m.supports_auto ? "default" : "auto") : r.permission_mode === "ask" ? "default" : "bypassPermissions");
+    state.sessionPicks[t.id] = { permission_mode: mode, model, effort: b.effort ?? "" };
+    state.messages[t.id] = [{ id: String(Date.now()), role: "user", author: "liu", kind: "chat", content: b.message ?? "", meta: {}, created_at: now() }];
+    json(res, 201, { project: p, thread_id: t.id, thread_no: 1 });
+  }],
+  ["GET", /^\/api\/conversations\/([^/]+)\/context\/detail$/, (req, res, [cid]) => {
+    const t = state.sessionThreads.find((x) => x.id === cid);
+    if (!t) return fail(res, 404, "只有会话有上下文细分", "not_found");
+    const runtime = t.session?.runtime ?? "claude";
+    if (runtime !== "claude") return json(res, 200, { ...state.contextDetail, supported: false, runtime, detail: "", updated_at: null, total_tokens: 0, max_tokens: 0, raw_max_tokens: 0, categories: [], mcp_tools: [], mcp_servers: [], memory_files: [], skills: [] });
+    const fresh = state.contextFor?.[cid];
+    const base = cid === "ts1" ? state.contextDetail : { ...state.contextDetail, detail: "", updated_at: null, categories: [], mcp_tools: [], mcp_servers: [], memory_files: [], skills: [] };
+    json(res, 200, { ...base, ...fresh, session_id: `as_${t.project_id}`, state: t.session.state, can_refresh: t.session.state === "active" });
+  }],
+  ["POST", /^\/api\/conversations\/([^/]+)\/context\/refresh$/, (req, res, [cid]) => {
+    const t = state.sessionThreads.find((x) => x.id === cid);
+    if (!t) return fail(res, 404, "只有会话有上下文细分", "not_found");
+    if ((t.session?.runtime ?? "claude") !== "claude") return fail(res, 409, "只有 Claude 会话能刷新上下文", "unsupported");
+    if (t.session.state !== "active") return fail(res, 409, "会话没有在运行", "session_not_running");
+    const refreshId = `rf_${Date.now()}`;
+    const sessionId = `as_${t.project_id}`;
+    setTimeout(() => {
+      const updated = now();
+      (state.contextFor ??= {})[cid] = { detail: "full", updated_at: updated };
+      emit("context", { thread_no: 1, conversation_id: cid, session_id: sessionId, reason: "refresh", refresh_id: refreshId, updated_at: updated }, t.project_id);
+    }, Number(process.env.MOCK_REFRESH_MS ?? 1200));
+    json(res, 202, { refresh_id: refreshId, session_id: sessionId });
+  }],
+);
 
 function waiting() {
   return { questions: [...state.questions.t12, ...state.questions.t13].filter((q) => q.status === "open"), reviews: state.threads.filter((t) => t.status === "review") };

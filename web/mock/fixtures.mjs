@@ -392,3 +392,101 @@ export const adminPlugins = [
     pversion(4, "0.9.4", "旧的部署脚本封装，已被 CI 取代。", contents([], ["deploy"], [], true, []), 60 * 24 * 30, 9_800),
   ] },
 ];
+
+// ── Sessions (多仓库会话, #53; sessions.md): three sessions, one per CLI, each a project of kind
+// session with its thread 1. session-controls, session-options and the context breakdown
+// (api.md) come from the templates below; server.mjs keeps the live state.
+const sessionProject = (id, name, status, min) =>
+  project(id, name, { kind: "session", session_status: status, repo: "touwaeriol/agent-teams", git_connection_id: "g1", repos: [{ repo: "touwaeriol/agent-teams", git_connection_id: "g1" }], updated_at: ago(min) });
+projects.push(
+  sessionProject("s1", "修复登录后的跳转", "running", 2),
+  sessionProject("s2", "补齐 Codex 回归用例", "running", 25),
+  sessionProject("s3", "整理 README", "done", 120),
+);
+const soloEmp = (id, name, runtime, nodeRef) => emp(id, name, "lead", "dev", "开发", runtime, nodeRef, look("#4C7BD0", "tee", "none"), st("idle", ""));
+const solo = (pid, title, status, runtime, empl, session) => ({
+  ...thread(1, title, status, { members: [empl], opened_by: "user", dispatch: { opened_by: "user", at: ago(30), source: null } }),
+  id: `t${pid}`, project_id: pid, branch: `session/${pid}`, solo: true,
+  session: { node_id: "n1", runtime, state: "active", cwd: `/srv/agent/projects/${pid}/threads/1/lead`, context_used: null, context_max: null, ...session },
+});
+export const sessionThreads = [
+  solo("s1", "修复登录后的跳转", "running", "claude", soloEmp("es1", "dev-1", "claude", RC), { context_used: 77000, context_max: 1000000 }),
+  solo("s2", "补齐 Codex 回归用例", "running", "codex", soloEmp("es2", "qa-1", "codex", CVP), { node_id: "n2", context_used: 41000, context_max: 272000 }),
+  solo("s3", "整理 README", "done", "antigravity", soloEmp("es3", "rev-1", "antigravity", RC), { state: "parked" }),
+];
+Object.assign(messages, {
+  ts1: [msg("s1a", "user", "liu", "登录后应该回到原来的页面，现在总是跳到首页。", 30), msg("s1b", "leader", "dev-1", "找到了：`/login` 没带 `redirect` 参数。我改成登录前记下原地址，登录后跳回去，再补一个测试。", 28)],
+  ts2: [msg("s2a", "user", "liu", "把 approvals 包的回归用例补齐。", 26), msg("s2b", "leader", "qa-1", "好，先跑一遍现有用例看哪些分支没覆盖。", 25)],
+  ts3: [msg("s3a", "user", "liu", "README 的安装步骤过时了，整理一下。", 130), msg("s3b", "leader", "rev-1", "改好了：安装、登录、开会话三段，PR 已开。", 121)],
+});
+
+const modeOpt = (id, label, hint, applies = "now") => ({ id, label, hint, applies });
+const HINT = {
+  auto: "模型自动判断哪些操作可以直接做，有风险的才拦下",
+  default: "需要权限的操作逐条请你确认，不会超时",
+  acceptEdits: "文件编辑直接通过，其他需要权限的操作请你确认",
+  plan: "只读代码、给出计划，不改文件",
+  bypassPermissions: "所有操作直接执行，不再确认",
+};
+const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+/** Per runtime: every mode it has (the server filters by model and role), its models and the session's starting values. */
+export const sessionRuntimes = {
+  claude: {
+    modes: [modeOpt("auto", "自动", HINT.auto), modeOpt("default", "手动", HINT.default), modeOpt("acceptEdits", "接受编辑", HINT.acceptEdits), modeOpt("plan", "计划", HINT.plan), modeOpt("bypassPermissions", "跳过权限确认", HINT.bypassPermissions)],
+    models: [
+      { id: "claude-opus-5-5", name: "Opus 5.5", description: "复杂任务", efforts: CLAUDE_EFFORTS, supports_auto: true, default: true },
+      { id: "claude-fable-5-2", name: "Fable 5.2", efforts: CLAUDE_EFFORTS, supports_auto: true },
+      { id: "claude-sonnet-5-5", name: "Sonnet 5.5", description: "日常任务", efforts: CLAUDE_EFFORTS, supports_auto: true },
+      { id: "claude-haiku-4-5-20251001", name: "Haiku 4.5", description: "最快", efforts: [], supports_auto: false },
+    ],
+  },
+  codex: {
+    modes: [modeOpt("auto", "自动", "Codex 的审核子代理判断哪些请求可以放行", "next_turn"), modeOpt("default", "手动", HINT.default, "next_turn"), modeOpt("bypassPermissions", "跳过权限确认", HINT.bypassPermissions, "next_turn")],
+    models: [
+      { id: "gpt-5.5-codex", name: "GPT-5.5 Codex", efforts: ["low", "medium", "high", "xhigh"], default_effort: "medium", supports_auto: false, default: true },
+      { id: "gpt-5.5-mini", name: "GPT-5.5 mini", efforts: ["low", "medium", "high"], default_effort: "medium", supports_auto: false },
+    ],
+  },
+  antigravity: {
+    modes: [modeOpt("default", "手动", HINT.default, "next_turn"), modeOpt("bypassPermissions", "跳过权限确认", HINT.bypassPermissions, "next_turn")],
+    models: [
+      { id: "gemini-4-neon-high", name: "Gemini 4 Neon (high)", efforts: [], supports_auto: false, default: true },
+      { id: "gemini-4-neon-xhigh", name: "Gemini 4 Neon (xhigh)", efforts: [], supports_auto: false },
+    ],
+  },
+};
+/** What each session runs (thread id → picks); the menus come from sessionRuntimes. */
+export const sessionPicks = {
+  ts1: { permission_mode: "auto", model: "claude-opus-5-5", effort: "high" },
+  ts2: { permission_mode: "bypassPermissions", model: "gpt-5.5-codex", effort: "medium" },
+  ts3: { permission_mode: "bypassPermissions", model: "gemini-4-neon-high", effort: "" },
+};
+
+/** GET /api/conversations/{cid}/context/detail of a Claude session (protocol.md §4.10). */
+export const contextDetail = {
+  supported: true, runtime: "claude", session_id: "as_s1", state: "active", can_refresh: true, detail: "summary", updated_at: ago(3),
+  model: "claude-opus-5-5", total_tokens: 77000, max_tokens: 1000000, raw_max_tokens: 1000000, auto_compact: true, auto_compact_threshold: 967000,
+  categories: [
+    { id: "system_prompt", name: "System prompt", tokens: 3200, kind: "used" },
+    { id: "system_tools", name: "System tools", tokens: 16800, kind: "used" },
+    { id: "mcp_tools", name: "MCP tools", tokens: 9600, kind: "used" },
+    { id: "mcp_instructions", name: "MCP server instructions", tokens: 1100, kind: "used" },
+    { id: "memory_files", name: "Memory files", tokens: 2400, kind: "used" },
+    { id: "skills", name: "Skills", tokens: 1900, kind: "used" },
+    { id: "messages", name: "Messages", tokens: 42000, kind: "used" },
+    { id: "autocompact_buffer", name: "Autocompact buffer", tokens: 33000, kind: "buffer" },
+    { id: "free_space", name: "Free space", tokens: 890000, kind: "free" },
+    { id: "mcp_tools_deferred", name: "MCP tools (deferred)", tokens: 12400, kind: "deferred" },
+    { id: "system_tools_deferred", name: "System tools (deferred)", tokens: 8700, kind: "deferred" },
+  ],
+  mcp_tools: [
+    { name: "mcp__platform__publish_file", server: "platform", tokens: 1380, loaded: true },
+    { name: "mcp__platform__ask_user", server: "platform", tokens: 1240, loaded: true },
+    { name: "mcp__platform__set_status", server: "platform", tokens: 410, loaded: true },
+    { name: "mcp__plugin_github_github__create_pull_request", server: "plugin_github_github", tokens: 1580, loaded: true },
+    { name: "mcp__plugin_github_github__search_code", server: "plugin_github_github", tokens: 1000, loaded: false },
+  ],
+  mcp_servers: [{ server: "platform", tokens: 1100 }],
+  memory_files: [{ path: "/srv/agent/projects/s1/threads/1/lead/CLAUDE.md", type: "Project", tokens: 2400 }],
+  skills: [{ name: "docs", source: "plugin", tokens: 1900 }],
+};
