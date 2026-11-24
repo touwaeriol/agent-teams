@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 会话信息 of a session: 环境 (the node and whether it is online, the CLI, every repository with the
 // branch it started from, the work branch, the working directory on the node) and 上下文 (the
-// total; hidden when the runtime reports none). Repositories can be added or removed while it runs.
+// total and its breakdown, Claude only; hidden for runtimes without a breakdown). Repositories can be added or removed while it runs.
 import { FolderGit2 } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import { sessions } from "@/api/actions";
@@ -11,7 +11,7 @@ import type { ProjectView, ThreadView } from "@/api/views";
 import { INK, leadOf } from "@/lib/present";
 import { runtimeLabel } from "@/lib/runtimes";
 import SectionLabel from "../SectionLabel.vue";
-import SessionContext from "./SessionContext.vue";
+import SessionContextPanel from "./SessionContextPanel.vue";
 import SessionRepos from "./SessionRepos.vue";
 import { repoDir, sessionReposPayload, type SessionRepo } from "./session";
 
@@ -89,6 +89,6 @@ const save = useAction(() => sessions.setRepos(props.project.id, sessionReposPay
         </dd>
       </dl>
     </section>
-    <SessionContext :session="thread.session" />
+    <SessionContextPanel :thread="thread" />
   </div>
 </template>

@@ -78,6 +78,8 @@ export const conversations = {
   forward: (cid: string, body: S["ForwardInputBody"]) =>
     unwrap(client.POST("/api/conversations/{cid}/forward", { params: { path: { cid } }, body, ...idem() })),
   interrupt: (cid: string) => unwrap(client.POST("/api/conversations/{cid}/interrupt", { params: { path: { cid } } })),
+  /** 202 {refresh_id}: the result comes as the project event context with the same refresh_id. */
+  refreshContext: (cid: string) => unwrap(client.POST("/api/conversations/{cid}/context/refresh", { params: { path: { cid } } })),
   answer: (cid: string, qid: string, answer: string, reason?: string, answers?: AskChoice[]) =>
     unwrap(client.POST("/api/conversations/{cid}/questions/{qid}/answer", { params: { path: { cid, qid } }, body: { answer, reason, ...(answers ? { answers } : {}) }, ...idem() })),
 };
