@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/platform"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -75,4 +76,24 @@ func (h *Hooks) RolesSaved(ctx context.Context, userID string) error {
 // GitHubEvent forwards verified webhooks to delivery.
 func (h *Hooks) GitHubEvent(ctx context.Context, event string, payload json.RawMessage) error {
 	return h.e.Delivery.GitHubEvent(ctx, event, payload)
+}
+
+// SessionCreated opens the session's thread: its employee gets the first message once it starts.
+func (h *Hooks) SessionCreated(ctx context.Context, p store.Project, s platform.SessionStart) (platform.SessionThread, error) {
+	t, err := h.e.Orch.OpenSession(ctx, orchestrator.SessionRequest{UserID: p.UserID, ProjectID: p.ID, Title: s.Title,
+		Message: s.Message, Role: s.Role, Model: s.Model, NodeID: s.NodeID, Repos: focusOf(s.Repos)})
+	return platform.SessionThread{ID: t.ID, No: t.No}, err
+}
+
+// SessionReposChanged checks out added repositories, drops removed ones and tells the employee.
+func (h *Hooks) SessionReposChanged(ctx context.Context, projectID string, added []platform.SessionRepo, removed []string) error {
+	return h.e.Orch.SessionReposChanged(ctx, projectID, focusOf(added), removed)
+}
+
+func focusOf(repos []platform.SessionRepo) []orchestrator.RepoFocus {
+	out := make([]orchestrator.RepoFocus, len(repos))
+	for i, r := range repos {
+		out[i] = orchestrator.RepoFocus{Repo: r.Repo, Base: r.Branch}
+	}
+	return out
 }

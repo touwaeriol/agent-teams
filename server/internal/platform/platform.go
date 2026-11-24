@@ -150,6 +150,31 @@ type Hooks interface {
 	RolesSaved(ctx context.Context, userID string) error
 	// GitHubEvent receives verified webhook deliveries (check_run, pull_request, …).
 	GitHubEvent(ctx context.Context, event string, payload json.RawMessage) error
+	// SessionCreated runs after POST /api/sessions stored the session (a project of kind
+	// session): it opens its thread with the employee, which gets the first message.
+	SessionCreated(ctx context.Context, p store.Project, s SessionStart) (SessionThread, error)
+	// SessionReposChanged runs after PUT /api/sessions/{pid}/repos saved the repositories.
+	SessionReposChanged(ctx context.Context, projectID string, added []SessionRepo, removed []string) error
+}
+
+// SessionStart is what POST /api/sessions asks for besides the project.
+type SessionStart struct {
+	Title, Message string
+	Role           store.Role // the member role template the employee is made from
+	Model          string     // '' = the role's
+	NodeID         string     // '' = scheduled
+	Repos          []SessionRepo
+}
+
+// SessionRepo is a session repository (the project's spelling) with the branch picked for it.
+type SessionRepo struct {
+	Repo, Branch string
+}
+
+// SessionThread names a session's thread.
+type SessionThread struct {
+	ID string
+	No int
 }
 
 // Offline is the default NodeRegistry: every node is offline.
@@ -216,6 +241,16 @@ func (NoSSHHooks) ServersChanged(context.Context, string, []string) {}
 
 // NoHooks is the default Hooks: nothing to do.
 type NoHooks struct{}
+
+// SessionCreated implements Hooks.
+func (NoHooks) SessionCreated(context.Context, store.Project, SessionStart) (SessionThread, error) {
+	return SessionThread{}, nil
+}
+
+// SessionReposChanged implements Hooks.
+func (NoHooks) SessionReposChanged(context.Context, string, []SessionRepo, []string) error {
+	return nil
+}
 
 // ProjectCreated implements Hooks.
 func (NoHooks) ProjectCreated(context.Context, store.Project, string) error { return nil }

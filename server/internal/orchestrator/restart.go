@@ -171,6 +171,9 @@ func (o *Orchestrator) wakeStalledThreads(ctx context.Context, tx *core.Tx, node
 	}
 	rows.Close()
 	for _, id := range ids {
+		if t, err := core.ThreadByID(ctx, tx, id); err != nil || t.Solo() {
+			continue // a session's employee idles while it waits for the user: not a stall
+		}
 		lead, err := core.Lead(ctx, tx, id)
 		if err != nil {
 			continue

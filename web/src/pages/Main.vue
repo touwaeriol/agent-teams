@@ -37,6 +37,12 @@ const route = useRoute();
 const router = useRouter();
 const pid = computed(() => String(route.params.pid ?? ""));
 const project = useProject(pid);
+// A session has no coordinator board: its address is its own page.
+watch(
+  () => project.data.value?.kind,
+  (kind) => kind === "session" && void router.replace(`/sessions/${pid.value}`),
+  { immediate: true },
+);
 const coordinator = useCoordinator(pid);
 const threads = useThreads(pid);
 const me = useMe();

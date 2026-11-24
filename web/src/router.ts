@@ -19,6 +19,8 @@ export const projectRoutes: RouteRecordRaw[] = [
   { path: "/projects/:pid/shared-files", component: () => import("@/pages/SharedFiles.vue") },
   { path: "/projects/:pid/settings", component: () => import("@/pages/Main.vue") },
   { path: "/projects/:pid/settings/:section", component: () => import("@/pages/Main.vue") },
+  { path: "/sessions/new", component: () => import("@/pages/NewSession.vue") },
+  { path: "/sessions/:pid", component: () => import("@/pages/SessionPage.vue") },
 ];
 
 export const settingsRoutes: RouteRecordRaw[] = [

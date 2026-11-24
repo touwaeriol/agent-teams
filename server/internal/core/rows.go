@@ -83,6 +83,17 @@ type Employee struct {
 	CurrentThreadID *string
 }
 
+// Solo reports whether the thread is a session's (多仓库会话): its lead is the one writing
+// employee the user talks to directly (store.Role.Solo in the role snapshot).
+func (t Thread) Solo() bool {
+	for _, r := range t.RolesSnapshot {
+		if r.Tier == "lead" && r.Solo {
+			return true
+		}
+	}
+	return false
+}
+
 // ProjectMember reports whether the employee is project staff (a member shared by every thread).
 func (e Employee) ProjectMember() bool { return e.ThreadID == nil && e.Tier == "member" }
 

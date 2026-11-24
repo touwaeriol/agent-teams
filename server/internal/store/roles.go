@@ -64,6 +64,10 @@ type Role struct {
 	CompactInTaskPct  *int   `json:"compact_in_task_pct" nullable:"true" doc:"The runtime compacts by itself at limit × pct during a turn. Null: the runtime's default"`
 	ClearAfterTasks   *int   `json:"clear_after_tasks" nullable:"true" doc:"Members: a session that did this many tasks in a row is closed and the next task starts a fresh one (0: never). Null: not applicable"`
 	CompactFocus      string `json:"compact_focus" doc:"What a compaction must keep, added to its instructions"`
+	// Solo marks the employee of a 多仓库会话 (kind session): a thread's lead that writes code and
+	// talks to the user directly (no members, no task pool). Only in employee specs and thread
+	// role snapshots, never in at_roles nor the API.
+	Solo bool `json:"solo,omitempty" gorm:"-" hidden:"true"`
 }
 
 // Custom command modes: prompt expands the template on the server before delivery; passthrough

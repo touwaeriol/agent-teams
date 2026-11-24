@@ -40,6 +40,11 @@ type ThreadRequest struct {
 	ForwardedBrief  bool // the brief is the user's forwarded messages
 	// ParentID makes the thread a subthread of that thread (open_subthread; nil: top level).
 	ParentID *string
+	// Solo opens a session's thread (OpenSession): its only employee is this role as a writing
+	// lead (Solo set); the project gets no members.
+	Solo *store.Role
+	// Branch overrides the thread branch name ("" = thread/<no>-<slug>).
+	Branch string
 }
 
 // OpenThread creates a thread (queued), its employees, then starts queued threads within the limit.
@@ -70,14 +75,21 @@ func (o *Orchestrator) OpenThreadTx(ctx context.Context, tx *core.Tx, req Thread
 	}
 	t, err := core.CreateThread(ctx, tx, core.NewThread{ProjectID: p.ID, UserID: p.UserID, Title: req.Title,
 		Brief: req.Brief, AutoApprove: p.AutoApprove, OpenedBy: req.OpenedBy, Roles: roles, OnlyRoles: onlyRoles(req),
-		SourceMessageID: req.SourceMessageID, ForwardedBrief: req.ForwardedBrief, ParentID: req.ParentID})
+		SourceMessageID: req.SourceMessageID, ForwardedBrief: req.ForwardedBrief, ParentID: req.ParentID, Branch: req.Branch})
 	if err != nil {
 		return t, err
 	}
-	if err := o.EnsureStaff(ctx, tx, p.ID); err != nil {
-		return t, err
+	if req.Solo == nil {
+		if err := o.EnsureStaff(ctx, tx, p.ID); err != nil {
+			return t, err
+		}
 	}
-	if t, err = o.focusThread(ctx, tx, p, t, req.Repos); err != nil {
+	if req.Solo != nil {
+		// A session's brief is the user's first message, kept as written.
+		if _, err := applyFocus(ctx, tx, p, t.ID, req.Repos); err != nil {
+			return t, err
+		}
+	} else if t, err = o.focusThread(ctx, tx, p, t, req.Repos); err != nil {
 		return t, err
 	}
 	if _, err := core.InstantiateThread(ctx, tx, t, o.hairFor); err != nil {
@@ -99,6 +111,9 @@ func (o *Orchestrator) focusThread(ctx context.Context, tx *core.Tx, p store.Pro
 // threadRoles snapshots the user's lead and member templates. Members are project staff now
 // (EnsureStaff): requested counts are ignored, only the role names are checked.
 func (o *Orchestrator) threadRoles(ctx context.Context, q core.DB, req ThreadRequest) ([]store.Role, error) {
+	if req.Solo != nil {
+		return []store.Role{*req.Solo}, nil
+	}
 	all, err := o.userRoles(ctx, q, req.UserID)
 	if err != nil {
 		return nil, err
@@ -250,6 +265,9 @@ func (o *Orchestrator) start(ctx context.Context, t core.Thread) error {
 		if err != nil {
 			return err
 		}
+		if cur.Solo() {
+			return o.startSolo(ctx, tx, cur, lead)
+		}
 		files, err := briefFiles(ctx, tx, cur)
 		if err != nil {
 			return err
@@ -319,7 +337,8 @@ func (o *Orchestrator) setStatusLine(ctx context.Context, tx *core.Tx, t core.Th
 	if err := o.afterStatus(ctx, tx, t, next); err != nil {
 		return err
 	}
-	if !o.shouldNotify(ctx, tx, t, next) {
+	if t.Solo() || !o.shouldNotify(ctx, tx, t, next) {
+		// A session has no coordinator to report to: the user watches it directly.
 		return nil
 	}
 	// Reporting upward must never block the status change itself (e.g. no node for the coordinator).

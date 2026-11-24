@@ -335,6 +335,14 @@ export const useBranches = (id: Arg, repo: Arg) =>
     { enabled: () => Boolean(toValue(id) && toValue(repo)), retry: false },
   );
 
+/** Branches of a standalone Git repository (git-repos.md), asked of its host. */
+export const useGitRepoBranches = (id: Arg) =>
+  useKeyed(
+    () => ["git", "repo", val(id), "branches"] as const,
+    () => list(client.GET("/api/git/repos/{id}/branches", { params: { path: { id: val(id) } } })),
+    { enabled: () => Boolean(toValue(id)), retry: false },
+  );
+
 export const useGitHubApp = () => useQuery({ queryKey: keys.githubApp, queryFn: () => unwrap(client.GET("/api/git/github-app")) });
 
 export const useAdminUsers = () => useQuery({ queryKey: keys.adminUsers, queryFn: () => list(client.GET("/api/admin/users")) });
