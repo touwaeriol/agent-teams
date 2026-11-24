@@ -15,13 +15,13 @@ import { useQueryClient } from "@tanstack/vue-query";
 import { conversations } from "@/api/actions";
 import { ApiError } from "@/api/client";
 import type { ContextEvent } from "@/api/events";
-import { useContextDetail } from "@/api/queries";
+import { keys, useContextDetail } from "@/api/queries";
 import type { ThreadView } from "@/api/views";
 import { toast } from "@/lib/toast";
 import { cn, timeAgo } from "@/lib/utils";
 import SessionContext from "./SessionContext.vue";
 import SessionContextDetail from "./SessionContextDetail.vue";
-import { updatedText } from "./contextDetail";
+import { refreshErrorText, updatedText } from "./contextDetail";
 
 /** How long 刷新 waits for its answer before giving up (the node itself waits 30 s for the count). */
 const REFRESH_TIMEOUT_MS = 45_000;
@@ -54,43 +54,66 @@ watch(
 
 const qc = useQueryClient();
 const pending = ref<string | null>(null);
+/** The last failed refresh: Chinese text shown under the bar, the runtime's own words in its tooltip. */
+const failure = ref<{ text: string; raw: string } | null>(null);
 let timer: ReturnType<typeof setTimeout> | undefined;
 function settle() {
   pending.value = null;
   if (timer) clearTimeout(timer);
   timer = undefined;
 }
+function fail(raw: string, text = refreshErrorText(raw) ?? "刷新失败") {
+  failure.value = { text, raw };
+  toast.error(`刷新失败：${text}`);
+}
+/** The context event answering the pending refresh: ends it (with the reason when it failed). */
+function answered(ev: ContextEvent | undefined): boolean {
+  if (!ev || !pending.value || ev.refresh_id !== pending.value) return false;
+  settle();
+  if (ev.error) fail(ev.error);
+  return true;
+}
 // The answer to 刷新 is the context event with its refresh_id (events.ts keeps the latest one per conversation).
 const unsub = ref<(() => void) | null>(null);
 onMounted(() => {
   unsub.value = qc.getQueryCache().subscribe((e) => {
     if (e.query.queryKey[0] !== "c" || e.query.queryKey[1] !== cid.value || e.query.queryKey[2] !== "context-event") return;
-    const ev = e.query.state.data as ContextEvent | undefined;
-    if (!ev || !pending.value || ev.refresh_id !== pending.value) return;
-    settle();
-    if (ev.error) toast.error(`刷新失败：${ev.error}`);
+    answered(e.query.state.data as ContextEvent | undefined);
   });
 });
 onBeforeUnmount(() => {
   unsub.value?.();
   settle();
 });
+// SessionPage keeps this component when another session opens: nothing of this one carries over.
+watch(cid, () => {
+  settle();
+  failure.value = null;
+});
 
 async function refresh() {
   if (pending.value) return;
   pending.value = "…"; // locked at once (a double click sends one request)
+  failure.value = null;
+  const asked = cid.value;
+  const before = qc.getQueryData<ContextEvent>(keys.contextEvent(asked));
   try {
-    const r = await conversations.refreshContext(cid.value);
+    const r = await conversations.refreshContext(asked);
+    if (asked !== cid.value || pending.value !== "…") return; // another session opened meanwhile
     pending.value = r.refresh_id;
+    // The answer may have come before the POST returned (an event newer than the one held before asking).
+    const early = qc.getQueryData<ContextEvent>(keys.contextEvent(asked));
+    if (early !== before && answered(early)) return;
     timer = setTimeout(() => {
       if (!pending.value) return;
       settle();
-      toast.error("刷新超时，稍后再试");
+      fail("timeout", "节点没能及时统计完，稍后再试");
       void q.refetch();
     }, REFRESH_TIMEOUT_MS);
   } catch (e) {
+    if (asked !== cid.value) return;
     settle();
-    toast.error(e instanceof ApiError ? e.message : "刷新失败");
+    fail(e instanceof ApiError ? e.message : String(e), e instanceof ApiError ? e.message : "刷新失败");
     void q.refetch(); // 409: the session parked, the node went away…
   }
 }
@@ -106,7 +129,7 @@ const updated = computed(() => {
 const refreshTitle = computed(() =>
   detail.value?.can_refresh ? "立刻重新统计（精确值，调用 token 计数接口，不跑模型）" : "会话没有在运行（已停放或节点离线），发一条消息后再刷新",
 );
-defineExpose({ refresh, pending });
+defineExpose({ refresh, pending, failure });
 </script>
 
 <template>
@@ -124,6 +147,7 @@ defineExpose({ refresh, pending });
         {{ pending !== null ? "刷新中…" : "刷新" }}
       </button>
     </template>
+    <p v-if="failure" class="text-xs text-destructive" :title="failure.raw" data-testid="context-refresh-error">刷新失败：{{ failure.text }}</p>
     <SessionContextDetail v-if="hasRows" :detail="detail" />
     <p class="text-[11.5px] leading-5 text-muted-foreground" data-testid="context-updated">
       <template v-if="updated">{{ updated }}。</template>每轮结束自动更新，“刷新”取精确值；延迟加载的工具用到时才载入，不计入已使用。
