@@ -165,6 +165,26 @@ func TestModesFor(t *testing.T) {
 	if _, err := checkChange(SessionControls{Runtime: "claude", NodeOutdated: true}, ControlsChange{Effort: str("low")}); err == nil {
 		t.Fatal("no effort on an outdated daemon")
 	}
+	old := SessionControls{Runtime: "claude", PermissionMode: "default", Model: "claude-a", Models: models, NodeOutdated: true,
+		Modes: legacyMenu("claude", modesFor("claude", models, "claude-a", true))}
+	if _, err := checkChange(old, ControlsChange{Model: str("claude-old"), PermissionMode: str("plan")}); err == nil {
+		t.Fatal("an outdated daemon: model + plan must not get past the legacy menu")
+	}
+	if ch, err := checkChange(old, ControlsChange{Model: str("claude-old"), PermissionMode: str("acceptEdits")}); err != nil || ch.PermissionMode != "acceptEdits" {
+		t.Fatalf("an outdated daemon: model + a legacy mode %+v %v", ch, err)
+	}
+	for _, rt := range []string{"codex", "antigravity"} {
+		oc := SessionControls{Runtime: rt, PermissionMode: "bypassPermissions", Model: "m1", NodeOutdated: true, Models: []ModelChoice{},
+			Modes: legacyMenu(rt, modesFor(rt, nil, "m1", true))}
+		for _, mode := range []string{"default", "auto", "plan"} {
+			if _, err := checkChange(oc, ControlsChange{Model: str("m2"), PermissionMode: str(mode)}); err == nil {
+				t.Fatalf("%s on an outdated daemon: model + %s must be refused", rt, mode)
+			}
+		}
+		if ch, err := checkChange(oc, ControlsChange{Model: str("m2")}); err != nil || ch.Model != "m2" {
+			t.Fatalf("%s on an outdated daemon: a model switch alone %+v %v", rt, ch, err)
+		}
+	}
 	cur.Pending = &ControlsPending{Effort: "low"}
 	if _, err := checkChange(cur, ControlsChange{Effort: str("low")}); err != ErrControlsBusy {
 		t.Fatalf("one switch at a time: %v", err)
