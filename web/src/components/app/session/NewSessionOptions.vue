@@ -42,7 +42,7 @@ const item = "flex w-full min-w-[220px] items-start gap-2 py-0.5";
               <Sparkles class="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
               <span class="flex min-w-0 flex-1 flex-col leading-5">
                 <span>自动选择</span>
-                <span class="text-xs text-muted-foreground">在线节点里按剩余用量分配</span>
+                <span class="text-xs text-muted-foreground">按用量和会话数在在线节点间分摊</span>
               </span>
               <Check v-if="node === auto || !pickedNode" class="mt-0.5 size-3.5 shrink-0" />
             </span>

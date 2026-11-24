@@ -54,6 +54,11 @@ ALTER TABLE at_users
   ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT '',
   ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+-- 00430：调度阈值（shared-members.md §4.3）。节点 5 小时窗口 / 任一周窗口用量达到它就不再主动派新会话
+-- （还有别的节点没到时）；NULL = 默认 85 / 95
+ALTER TABLE at_users
+  ADD COLUMN IF NOT EXISTS quota_five_hour_pct SMALLINT CHECK (quota_five_hour_pct BETWEEN 1 AND 100),
+  ADD COLUMN IF NOT EXISTS quota_weekly_pct SMALLINT CHECK (quota_weekly_pct BETWEEN 1 AND 100);
 
 -- v1: token_hash PK, user_id, expires_at
 ALTER TABLE at_sessions

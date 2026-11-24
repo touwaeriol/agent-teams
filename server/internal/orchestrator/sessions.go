@@ -433,7 +433,7 @@ func (o *Orchestrator) openSession(ctx context.Context, tx *core.Tx, e core.Empl
 	if err != nil {
 		return core.AgentSession{}, err
 	}
-	pick, err := o.pickNode(ctx, tx, e, env.project, resume != nil || worked)
+	pick, err := o.pickNode(ctx, tx, e, env.project, resume != nil || worked, pickOpen)
 	if err != nil {
 		return core.AgentSession{}, err
 	}
@@ -762,7 +762,7 @@ func (o *Orchestrator) syncNode(ctx context.Context, tx *core.Tx, env sessionEnv
 	if worked {
 		return *env.emp.NodeID, nil
 	}
-	pick, err := o.pickNode(ctx, tx, env.emp, env.project, false)
+	pick, err := o.pickNode(ctx, tx, env.emp, env.project, false, pickSync)
 	if errors.Is(err, ErrNoNode) || (err == nil && pick.hold != "") {
 		return "", nil
 	}

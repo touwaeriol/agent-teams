@@ -124,6 +124,8 @@ export const nodes = {
   /** Asks the node to check its CLIs (and quota) now, up to 15 s; 409 unsupported_daemon / node_offline. */
   recheck: (id: string): Promise<NodeRecheck> => unwrap(client.POST("/api/nodes/{id}/recheck", { params: { path: { id } } })) as Promise<NodeRecheck>,
   refreshUsage: (id: string): Promise<UsageRefresh> => unwrap(client.POST("/api/nodes/{id}/usage/refresh", { params: { path: { id } } })),
+  /** The user's scheduling thresholds (percent, 1–100); 422 out of range. */
+  saveScheduling: (body: S["QuotaLimits"]) => unwrap(client.PUT("/api/me/scheduling", { body })),
 };
 
 /** Remote servers (api.md §3.9.1). A credential is only ever sent, never read back. */

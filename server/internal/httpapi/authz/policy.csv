@@ -91,6 +91,8 @@ p, user, /api/git/repos/:id/test, POST
 p, user, /api/git/repos/test, POST
 p, user, /api/me, GET
 p, user, /api/me/password, POST
+p, user, /api/me/scheduling, GET
+p, user, /api/me/scheduling, PUT
 p, user, /api/me/sessions, GET
 p, user, /api/me/sessions/:id, DELETE
 p, user, /api/nodes, GET

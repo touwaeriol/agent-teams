@@ -12,7 +12,8 @@ team and no task pool.
 - It has exactly one thread (no. 1). The thread's role snapshot holds one entry: a `lead` with
   `solo = true`, made from the member role the user picked (`orchestrator.SessionRole`). A chosen
   model replaces the role's model. A chosen node becomes the employee's only candidate
-  (`spec.node_ids`); without one the employee is scheduled like any other (most quota left).
+  (`spec.node_ids`); without one the employee is scheduled like any other (lowest load
+  score: used quota plus 10 points per live session on the node, see shared-members.md §4.3).
 - The branch picked for each repository is the thread's base there (`at_thread_repos.base_branch`).
   The employee works on `session/<project id[:8]>-<slug>` in every repository.
 

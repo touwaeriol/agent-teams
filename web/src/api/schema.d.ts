@@ -859,6 +859,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/scheduling": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My node scheduling thresholds */
+        get: operations["get-my-scheduling"];
+        /** Set my node scheduling thresholds (percent, 1–100) */
+        put: operations["put-my-scheduling"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/sessions": {
         parameters: {
             query?: never;
@@ -3896,6 +3914,18 @@ export interface components {
             /** Format: int64 */
             thread_no: number;
         };
+        QuotaLimits: {
+            /**
+             * Format: int64
+             * @description A node whose 5-hour window (Codex: windows up to a day) has used this many percent gets no new session while another candidate node is under the thresholds
+             */
+            five_hour_pct: number;
+            /**
+             * Format: int64
+             * @description The same for any weekly window (Claude weekly and per-model weekly; Codex: windows longer than a day)
+             */
+            weekly_pct: number;
+        };
         RandomLookInputBody: {
             role?: string;
         };
@@ -4061,7 +4091,7 @@ export interface components {
              * @enum {string}
              */
             runtime: "claude" | "codex" | "antigravity";
-            /** @description Every runtime the role's employees may run on, in display order; each new session takes the one with the most quota left. Empty: [runtime] */
+            /** @description Every runtime the role's employees may run on, in display order; each new session takes the (runtime, node) pair with the lowest load score (used quota plus live sessions), so sessions spread over them; a runtime whose quota is tight on a node is only used when every pair is. Empty: [runtime] */
             runtimes?: ("claude" | "codex" | "antigravity")[] | null;
             sandbox: string;
             /** @description Skill names (built-in or uploaded) the role's sessions load */
@@ -4267,6 +4297,20 @@ export interface components {
             /** @description IANA zone the cron is read in (default UTC) */
             timezone?: string;
         };
+        SchedulingSettings: {
+            /** @description The built-in thresholds (used until the user sets their own) */
+            defaults: components["schemas"]["QuotaLimits"];
+            /**
+             * Format: int64
+             * @description A node whose 5-hour window (Codex: windows up to a day) has used this many percent gets no new session while another candidate node is under the thresholds
+             */
+            five_hour_pct: number;
+            /**
+             * Format: int64
+             * @description The same for any weekly window (Claude weekly and per-model weekly; Codex: windows longer than a day)
+             */
+            weekly_pct: number;
+        };
         SearchMessage: {
             conversation_id: string;
             message: components["schemas"]["MessageView"];
@@ -4365,7 +4409,7 @@ export interface components {
             message: string;
             /** @description '' = the role's model */
             model?: string;
-            /** @description Run on this node; '' = picked automatically (most quota left) */
+            /** @description Run on this node; '' = picked automatically (spread over the nodes by load score; nodes whose quota is tight only when all are) */
             node_id?: string;
             /**
              * @description '' = the initial mode (Claude: auto when the model supports it, else default; Codex/Antigravity: the role's)
@@ -7259,6 +7303,68 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "get-my-scheduling": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulingSettings"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "put-my-scheduling": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuotaLimits"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulingSettings"];
+                };
             };
             /** @description Error */
             default: {
