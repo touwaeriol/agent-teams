@@ -825,6 +825,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/scheduling": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My node scheduling thresholds */
+        get: operations["get-my-scheduling"];
+        /** Set my node scheduling thresholds (percent, 1–100) */
+        put: operations["put-my-scheduling"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/sessions": {
         parameters: {
             query?: never;
@@ -3702,6 +3720,18 @@ export interface components {
             /** Format: int64 */
             thread_no: number;
         };
+        QuotaLimits: {
+            /**
+             * Format: int64
+             * @description A node whose 5-hour window (Codex: windows up to a day) has used this many percent gets no new session while another candidate node is under the thresholds
+             */
+            five_hour_pct: number;
+            /**
+             * Format: int64
+             * @description The same for any weekly window (Claude weekly and per-model weekly; Codex: windows longer than a day)
+             */
+            weekly_pct: number;
+        };
         RandomLookInputBody: {
             role?: string;
         };
@@ -4072,6 +4102,20 @@ export interface components {
             run_at?: string;
             /** @description IANA zone the cron is read in (default UTC) */
             timezone?: string;
+        };
+        SchedulingSettings: {
+            /** @description The built-in thresholds (used until the user sets their own) */
+            defaults: components["schemas"]["QuotaLimits"];
+            /**
+             * Format: int64
+             * @description A node whose 5-hour window (Codex: windows up to a day) has used this many percent gets no new session while another candidate node is under the thresholds
+             */
+            five_hour_pct: number;
+            /**
+             * Format: int64
+             * @description The same for any weekly window (Claude weekly and per-model weekly; Codex: windows longer than a day)
+             */
+            weekly_pct: number;
         };
         SearchMessage: {
             conversation_id: string;
@@ -6923,6 +6967,68 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "get-my-scheduling": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulingSettings"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "put-my-scheduling": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuotaLimits"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulingSettings"];
+                };
             };
             /** @description Error */
             default: {

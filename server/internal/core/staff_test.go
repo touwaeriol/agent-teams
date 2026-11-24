@@ -433,3 +433,60 @@ func TestEnsureStaffSeveralRuntimes(t *testing.T) {
 		t.Fatalf("dropped runtime: %+v %v", e, err)
 	}
 }
+
+// TestEnsureStaffGrowReviewersAndHelpers: raising the reviewer (review gate, read-only) and helper
+// counts of an already staffed project from 1 to 3 adds <role>-2 and <role>-3 next to the
+// untouched <role>-1, each with its own instance number and palette hair, the template's gate and
+// read-only flag, and the role's members on different nodes; lowering them back to 1 retires
+// <role>-2 and <role>-3 (a busy one after its task) and keeps <role>-1.
+func TestEnsureStaffGrowReviewersAndHelpers(t *testing.T) {
+	w := newStaffWorld(t)
+	ro := true
+	reviewer := func(n int) store.Role {
+		r := member("reviewer", n)
+		r.Gate, r.ReadOnly = "review", &ro
+		return r
+	}
+	w.ensure(lead(), member("dev", 1), reviewer(1), member("helper", 1))
+	rev1, _ := ProjectMemberByName(w.ctx, w.s.Pool, "p1", "reviewer-1")
+	w.ensure(lead(), member("dev", 1), reviewer(3), member("helper", 3))
+	for _, role := range []string{"reviewer", "helper"} {
+		nodes := map[string]bool{}
+		for n := 1; n <= 3; n++ {
+			name := fmt.Sprintf("%s-%d", role, n)
+			e, err := ProjectMemberByName(w.ctx, w.s.Pool, "p1", name)
+			if err != nil || !e.Active || e.InstanceNo != n || e.Look.Hair == nil || *e.Look.Hair != fmt.Sprintf("hair-%d", n-1) || e.NodeID == nil {
+				t.Fatalf("%s %+v %v", name, e, err)
+			}
+			if role == "reviewer" && (e.Spec.Gate != "review" || e.Spec.ReadOnly == nil || !*e.Spec.ReadOnly) {
+				t.Fatalf("%s lost the reviewer template: %+v", name, e.Spec)
+			}
+			nodes[*e.NodeID] = true
+		}
+		if len(nodes) != 3 {
+			t.Fatalf("%s members share nodes: %v (%s)", role, nodes, w.staff())
+		}
+	}
+	if again, _ := ProjectMemberByName(w.ctx, w.s.Pool, "p1", "reviewer-1"); again.ID != rev1.ID || deref(again.NodeID) != deref(rev1.NodeID) {
+		t.Fatalf("reviewer-1 was replaced or moved: %+v → %+v", rev1, again)
+	}
+	th := w.thread("x")
+	busy := w.task(th, "reviewer-3", "running")
+	w.ensure(lead(), member("dev", 1), reviewer(1), member("helper", 1))
+	active := func() string {
+		var names []string
+		if err := w.s.Pool.Gorm(w.ctx).Raw(`SELECT name FROM at_employees WHERE project_id = 'p1' AND thread_id IS NULL
+			AND tier = 'member' AND active ORDER BY name`).Scan(&names).Error; err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(names, " ")
+	}
+	if got := active(); got != "dev-1 helper-1 reviewer-1 reviewer-3" {
+		t.Fatalf("after shrink: %s", got)
+	}
+	w.tx(func(tx *Tx) error { _, err := SetTaskStatus(w.ctx, tx, busy, "done"); return err })
+	w.ensure(lead(), member("dev", 1), reviewer(1), member("helper", 1))
+	if got := active(); got != "dev-1 helper-1 reviewer-1" {
+		t.Fatalf("after the busy reviewer's task: %s", got)
+	}
+}

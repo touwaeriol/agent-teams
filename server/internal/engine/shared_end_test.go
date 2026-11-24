@@ -195,6 +195,11 @@ func TestNodeOnlineKicksScheduling(t *testing.T) {
 	}
 	var other nodeCreated
 	tm.b.must(201, "POST", "/api/nodes", map[string]string{"name": "second"}, &other)
-	tm.w.connect(other.Token, nodetest.Options{})
-	startTask(t, tm, "dev-1", "queued work")
+	second := tm.w.connect(other.Token, nodetest.Options{})
+	// The first node already runs lead-1's session: by load score (pickRank) the idle new node
+	// takes dev-1's.
+	_, open := expectOpen(t, tm.w, second, "dev-1")
+	if open.FirstMessage == nil || !strings.Contains(open.FirstMessage.Text, "queued work") {
+		t.Fatalf("dev-1 first message %+v", open.FirstMessage)
+	}
 }

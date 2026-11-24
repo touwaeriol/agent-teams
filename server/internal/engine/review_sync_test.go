@@ -34,6 +34,12 @@ type reviewWorld struct {
 
 func newReviewWorld(t *testing.T, features []string, tune func(*engine.Engine)) *reviewWorld {
 	t.Helper()
+	return newReviewWorldN(t, features, tune, 1)
+}
+
+// newReviewWorldN is newReviewWorld with reviewers members of the reviewer role.
+func newReviewWorldN(t *testing.T, features []string, tune func(*engine.Engine), reviewers int) *reviewWorld {
+	t.Helper()
 	gh, ghSrv := newFakeGitHub(t)
 	w := newWorldWith(t, ghSrv, tune)
 	tm := &team{w: w, b: w.signUp("review-sync@example.com")}
@@ -42,7 +48,7 @@ func newReviewWorld(t *testing.T, features []string, tune func(*engine.Engine)) 
 	var roles struct{ Roles []store.Role }
 	tm.b.must(200, "GET", "/api/roles", nil, &roles)
 	reviewer := roles.Roles[2]
-	reviewer.ID, reviewer.Role, reviewer.Title, reviewer.Count, reviewer.Gate = "", "reviewer", "审查", 1, "review"
+	reviewer.ID, reviewer.Role, reviewer.Title, reviewer.Count, reviewer.Gate = "", "reviewer", "审查", reviewers, "review"
 	tm.b.must(200, "PUT", "/api/roles", map[string]any{"roles": append(roles.Roles, reviewer)}, nil)
 	var conn struct{ ID string }
 	tm.b.must(201, "POST", "/api/git/connections", map[string]string{"name": "gh", "token": "ghp_good"}, &conn)
@@ -297,4 +303,49 @@ func TestCancelClosesOpenGate(t *testing.T) {
 		gate, err := core.TaskByID(rw.w.ctx, rw.w.e.Core.Pool, rw.thread.ID, "t2")
 		return err == nil && gate.Status == "cancelled" && gate.FinishedAt != nil
 	})
+}
+
+// TestThreeReviewersOneGate: with three reviewers a completed task gets one review gate, claimed
+// by one reviewer (the others get no session); its verdict reaches the lead once and no second
+// gate opens.
+func TestThreeReviewersOneGate(t *testing.T) {
+	rw := newReviewWorldN(t, reviewFeatures, nil, 3)
+	reviewers := func(where string) int {
+		return rw.count(t, `SELECT count(*) FROM at_employees WHERE project_id = ? AND thread_id IS NULL AND role = 'reviewer' AND active `+where, rw.projectID)
+	}
+	if n := reviewers(""); n != 3 {
+		t.Fatalf("%d active reviewers", n)
+	}
+	rw.answer(t, rw.reviewSync(t), reviewedSHA)
+	rev, open := expectOpen(t, rw.w, rw.n, "reviewer-1")
+	answerPrepares(t, rw.w, rw.n)
+	rev.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: protocol.SessionID(rev.session), MsgID: open.FirstMessage.MsgID})
+	gates := func() int {
+		return rw.count(t, `SELECT count(*) FROM at_tasks WHERE thread_id = ? AND kind = 'review' AND parent = 't1'`, rw.thread.ID)
+	}
+	if n := gates(); n != 1 {
+		t.Fatalf("%d review gates for t1", n)
+	}
+	if g := rw.taskRow(t, rw.thread.ID, "t2"); g.Kind != "review" || g.ClaimedBy != "reviewer-1" || g.Assignee != "reviewer" {
+		t.Fatalf("gate %+v", g)
+	}
+	rw.kick()
+	noOpen(t, rw.n, "reviewer-2")
+	noOpen(t, rw.n, "reviewer-3")
+	rev.mustCall("complete_task", map[string]any{"task_id": "t2", "status": "done", "summary": "没问题"})
+	rw.lead.expectSend("审查（reviewer-1）：通过")
+	if n := gates(); n != 1 {
+		t.Fatalf("%d review gates for t1 after the verdict", n)
+	}
+	if p := rw.taskRow(t, rw.thread.ID, "t1"); p.Status != "review" {
+		t.Fatalf("parent after review: %s", p.Status)
+	}
+
+	// The existing project follows later count changes (RolesSaved → EnsureStaff).
+	rw.setRoleCount(t, "reviewer", 1)
+	eventually(t, "reviewers 2 and 3 retired", func() bool { return reviewers("") == 1 && reviewers("AND name = 'reviewer-1'") == 1 })
+	rw.setRoleCount(t, "reviewer", 3)
+	if n := reviewers("AND instance_no IN (2, 3) AND node_id IS NOT NULL"); n != 2 {
+		t.Fatalf("raising the count again: %d of reviewer-2/3 back with a node", n)
+	}
 }

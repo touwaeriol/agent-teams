@@ -112,7 +112,11 @@ func (o *Orchestrator) moveTarget(ctx context.Context, tx *core.Tx, env sessionE
 	if err != nil {
 		return store.Node{}, false, err
 	}
-	states := o.nodeStates(ctx, tx, core.NodeCandidates(e, nodes), e.Runtime, Model(e, env.project), reports)
+	limits, err := o.quotaLimits(ctx, tx, env.project.UserID)
+	if err != nil {
+		return store.Node{}, false, err
+	}
+	states := o.nodeStates(ctx, tx, core.NodeCandidates(e, nodes), e.Runtime, Model(e, env.project), reports, limits)
 	best := -1
 	for i, c := range states {
 		if c.id == from || !c.usable || c.full() || limited[c.id] {

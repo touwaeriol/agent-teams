@@ -11,6 +11,7 @@ import Loading from "@/components/common/Loading.vue";
 import NavButton from "@/components/shell/NavButton.vue";
 import AddNode from "./nodes/AddNode.vue";
 import NodeCard from "./nodes/NodeCard.vue";
+import Scheduling from "./nodes/Scheduling.vue";
 import { nodeStats } from "./nodes/nodes";
 
 const nodes = useNodes();
@@ -40,6 +41,7 @@ const shown = computed({ get: () => Boolean(enrollment.value), set: (v: boolean)
           <span class="text-xl font-semibold">{{ x.v }}</span>
         </div>
       </div>
+      <Scheduling />
       <Loading v-if="nodes.isLoading.value" />
       <EmptyState v-if="nodes.data.value && list.length === 0" title="还没有节点" description="点“添加节点”，在你的机器上运行一行安装命令，守护进程会连上来。" />
       <NodeCard v-for="n in list" :key="n.id" :node="n" @token="(data: Enrollment) => (enrollment = { title: `${n.name} 的新令牌`, data })" />

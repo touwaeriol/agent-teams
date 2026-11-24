@@ -254,6 +254,14 @@ const routes = [
   ["GET", /^\/api\/me$/, (req, res) => json(res, 200, state.me)],
   ["GET", /^\/api\/me\/sessions$/, (req, res) => json(res, 200, [{ id: "s1", created_at: F.ago(600), current: true, expires_at: F.ago(-60000), last_seen_at: F.ago(0), user_agent: "Chrome · Linux" }, { id: "s2", created_at: F.ago(6000), current: false, expires_at: F.ago(-6000), last_seen_at: F.ago(3000), user_agent: "Safari · iPhone" }])],
   ["POST", /^\/api\/me\/password$/, (req, res) => json(res, 204)],
+  ["GET", /^\/api\/me\/scheduling$/, (req, res) => json(res, 200, { ...(state.scheduling ?? { five_hour_pct: 85, weekly_pct: 95 }), defaults: { five_hour_pct: 85, weekly_pct: 95 } })],
+  ["PUT", /^\/api\/me\/scheduling$/, async (req, res) => {
+    const b = await body(req);
+    const ok = (v) => Number.isInteger(v) && v >= 1 && v <= 100;
+    if (!ok(b.five_hour_pct) || !ok(b.weekly_pct)) return json(res, 422, { detail: "阈值要在 1～100 之间", code: "validation" });
+    state.scheduling = { five_hour_pct: b.five_hour_pct, weekly_pct: b.weekly_pct };
+    json(res, 200, { ...state.scheduling, defaults: { five_hour_pct: 85, weekly_pct: 95 } });
+  }],
   ["DELETE", /^\/api\/me\/sessions\/[^/]+$/, (req, res) => json(res, 204)],
   ["GET", /^\/api\/events$/, (req, res) => openStream(req, res, "user")],
   ["GET", /^\/api\/projects$/, (req, res) => json(res, 200, state.projects)],
@@ -610,7 +618,7 @@ const routes = [
   ["GET", /^\/api\/git\/connections\/([^/]+)\/branches$/, (req, res) => json(res, 200, ["main", "develop", "release/2.0"])],
   ["GET", /^\/api\/git\/github-app$/, (req, res) => json(res, 200, { configured: true, install_url: "https://github.com/apps/agent-teams-mock/installations/new", app: { slug: "agent-teams-mock", name: "Agent Teams (mock)", owner: "touwaeriol", html_url: "https://github.com/apps/agent-teams-mock", permissions: { contents: "write", pull_requests: "write", checks: "read" }, webhook_active: true } })],
   ["GET", /^\/api\/skills$/, (req, res) => json(res, 200, { skills: state.skills })],
-  ["GET", /^\/api\/roles\/presets$/, (req, res) => json(res, 200, { roles: [] })],
+  ["GET", /^\/api\/roles\/presets$/, (req, res) => json(res, 200, { roles: F.rolePresets })],
   ["GET", /^\/api\/plugins$/, (req, res) => json(res, 200, { plugins: state.plugins })],
   ["PATCH", /^\/api\/plugins\/([^/]+)$/, async (req, res, [id]) => json(res, 200, Object.assign(state.plugins.find((p) => p.id === id), await body(req)))],
   ["DELETE", /^\/api\/plugins\/([^/]+)$/, (req, res, [id]) => ((state.plugins = state.plugins.filter((p) => p.id !== id)), json(res, 204))],
