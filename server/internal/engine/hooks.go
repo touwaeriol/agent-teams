@@ -81,7 +81,7 @@ func (h *Hooks) GitHubEvent(ctx context.Context, event string, payload json.RawM
 // SessionCreated opens the session's thread: its employee gets the first message once it starts.
 func (h *Hooks) SessionCreated(ctx context.Context, p store.Project, s platform.SessionStart) (platform.SessionThread, error) {
 	t, err := h.e.Orch.OpenSession(ctx, orchestrator.SessionRequest{UserID: p.UserID, ProjectID: p.ID, Title: s.Title,
-		Message: s.Message, Role: s.Role, Model: s.Model, NodeID: s.NodeID, Repos: focusOf(s.Repos)})
+		Message: s.Message, Role: s.Role, Model: s.Model, NodeID: s.NodeID, Branch: s.Branch, Repos: focusOf(s.Repos)})
 	return platform.SessionThread{ID: t.ID, No: t.No}, err
 }
 

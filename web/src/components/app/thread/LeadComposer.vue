@@ -13,7 +13,7 @@ import { useAttachments } from "../attachments";
 import Composer from "../Composer.vue";
 import { closedNote, reopenHint } from "./detail";
 
-const props = defineProps<{ pid: string; thread: ThreadView; class?: string }>();
+const props = defineProps<{ pid: string; thread: ThreadView; class?: string; session?: boolean }>();
 const me = useMe();
 // Drafts (text, attachments, @ references) are kept per viewer and thread across remounts.
 const draft = computed(() => draftKey(me.data.value?.id ?? (me.isError.value ? "anon" : undefined), props.pid, props.thread.id));
@@ -23,7 +23,11 @@ const note = computed(() => closedNote(props.thread));
 // While archived the box is hidden; its unsent text and attachments are kept for when it is back.
 const unsent = useDraft(() => draft.value);
 const keptDraft = computed(() => Boolean(unsent.value.trim()) || attachments.items.value.length > 0);
-const hint = computed(() => reopenHint(props.thread));
+const hint = computed(() => {
+  const h = reopenHint(props.thread);
+  return h && props.session ? "发送消息会继续这个会话" : h;
+});
+const who = computed(() => (props.session ? "员工" : "组长"));
 // The message shows in the chat at once (api/pending.ts); the box does not wait for the server.
 const onSend = useSendMessage(() => props.thread.id, {
   invalidate: () => (hint.value ? [keys.threads(props.thread.project_id), keys.thread(props.thread.id)] : []),
@@ -47,8 +51,8 @@ const unarchive = useAction(() => threadActions.unarchive(props.thread.id), {
     <Composer
       v-if="!note"
       :id="`lead-${thread.id}`"
-      label="发给组长"
-      :placeholder="`回复组长 ${lead?.name ?? ''}；/ 命令和技能，@ 引用文件`"
+      :label="`发给${who}`"
+      :placeholder="session ? '回复员工；/ 命令和技能，@ 引用文件' : `回复组长 ${lead?.name ?? ''}；/ 命令和技能，@ 引用文件`"
       :attachments="attachments"
       :on-send="onSend"
       :draft-key="draft"
