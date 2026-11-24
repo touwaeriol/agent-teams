@@ -141,6 +141,10 @@ export type RelPath1 = string;
  */
 export type Timestamp1 = string;
 /**
+ * RFC 3339 timestamp (UTC).
+ */
+export type Timestamp2 = string;
+/**
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "QuestionId".
  */
@@ -1137,6 +1141,7 @@ export interface ContextDetail {
    * summary: estimated from the last turn's usage; full: counted with token-count calls.
    */
   detail: "summary" | "full";
+  sampled_at?: Timestamp1;
   model?: string;
   /**
    * Tokens in the context now (totalTokens).
@@ -1384,7 +1389,7 @@ export interface SessionEvent {
    * compacting / subagent.
    */
   on?: boolean;
-  retry_at?: Timestamp1;
+  retry_at?: Timestamp2;
   /**
    * rate_limited.
    */

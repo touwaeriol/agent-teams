@@ -14,10 +14,13 @@ type SessionContextDetail struct {
 }
 
 // SetSessionContextDetail stores a session's latest context breakdown and its totals (the totals
-// also come with turn_ended; a refresh brings newer ones). Taken for a closed session too.
-func SetSessionContextDetail(ctx context.Context, q DB, sessionID string, detail json.RawMessage, used, max int, at time.Time) error {
-	return q.Gorm(ctx).Table("at_agent_sessions").Where("id = ?", sessionID).Updates(map[string]any{
-		"context_detail": detail, "context_detail_at": at, "context_used": used, "context_max": max}).Error
+// also come with turn_ended; a refresh brings newer ones), unless the session already holds one
+// sampled later (a slow full refresh overtaken by a turn's summary): stored=false, nothing changes.
+// at is when the breakdown was sampled. Taken for a closed session too.
+func SetSessionContextDetail(ctx context.Context, q DB, sessionID string, detail json.RawMessage, used, max int, at time.Time) (bool, error) {
+	res := q.Gorm(ctx).Table("at_agent_sessions").Where("id = ? AND (context_detail_at IS NULL OR context_detail_at <= ?)", sessionID, at).
+		Updates(map[string]any{"context_detail": detail, "context_detail_at": at, "context_used": used, "context_max": max})
+	return res.RowsAffected > 0, res.Error
 }
 
 // ContextDetailOf loads a session's latest context breakdown.

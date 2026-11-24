@@ -226,7 +226,7 @@ export class ClaudeDriver implements Driver {
     const reply = msg.type === "result" ? await this.readContext("summary") : undefined;
     const context = reply ? contextUsageOf(reply) : undefined;
     for (const ev of mapClaudeMessage(msg)) this.emit(this.turnEnded(ev, context));
-    if (reply) this.ctx.sink.context?.(contextDetailOf(reply, "summary"));
+    if (reply) this.ctx.sink.context?.(contextDetailOf(reply, "summary", reply.sampledAt));
     if (msg.type === "result") this.onResult(context);
   }
 
@@ -241,12 +241,13 @@ export class ClaudeDriver implements Driver {
    * estimates from the last turn's usage (no API call); full counts every category with
    * token-count calls (session.context_refresh).
    */
-  private async readContext(detail: ContextDetail["detail"]): Promise<ContextReply | undefined> {
+  private async readContext(detail: ContextDetail["detail"]): Promise<(ContextReply & { sampledAt: Date }) | undefined> {
     const q = this.q;
     if (!q) return undefined;
     try {
       const ms = detail === "full" ? FULL_USAGE_TIMEOUT_MS : USAGE_TIMEOUT_MS;
-      return await withTimeout(q.getContextUsage({ detail }), ms, () => new Error("getContextUsage timed out"));
+      const sampledAt = new Date();
+      return { ...(await withTimeout(q.getContextUsage({ detail }), ms, () => new Error("getContextUsage timed out"))), sampledAt };
     } catch (err) {
       this.ctx.log.debug({ err: (err as Error).message, detail }, "context usage unavailable");
       return undefined;
@@ -255,7 +256,7 @@ export class ClaudeDriver implements Driver {
 
   async contextDetail(detail: ContextDetail["detail"]): Promise<ContextDetail | undefined> {
     const reply = await this.readContext(detail);
-    return reply ? contextDetailOf(reply, detail) : undefined;
+    return reply ? contextDetailOf(reply, detail, reply.sampledAt) : undefined;
   }
 
   private onInit(tools: string[]): void {

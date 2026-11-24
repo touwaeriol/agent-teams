@@ -472,6 +472,7 @@
       "reason": "turn",
       "context": {
         "detail": "summary",
+        "sampled_at": "2026-11-14T12:31:08Z",
         "model": "claude-opus-5-5",
         "total_tokens": 77400,
         "max_tokens": 1000000,

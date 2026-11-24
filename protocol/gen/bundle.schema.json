@@ -1803,6 +1803,10 @@
             "full"
           ]
         },
+        "sampled_at": {
+          "description": "When the daemon read it (getContextUsage was called). The console drops a breakdown older than the one it holds (a slow full refresh overtaken by a turn); absent from an old daemon.",
+          "$ref": "#/$defs/Timestamp"
+        },
         "model": {
           "type": "string",
           "maxLength": 200

@@ -16,10 +16,11 @@ export function contextUsageOf(u: ContextReply): ContextUsage {
   return { used_tokens: tokens(u.totalTokens), max_tokens: tokens(u.maxTokens) };
 }
 
-/** The breakdown session.context carries. */
-export function contextDetailOf(u: ContextReply, detail: ContextDetail["detail"]): ContextDetail {
+/** The breakdown session.context carries; sampledAt = when getContextUsage was called (the console keeps the newest). */
+export function contextDetailOf(u: ContextReply, detail: ContextDetail["detail"], sampledAt?: Date): ContextDetail {
   const out: ContextDetail = {
     detail,
+    ...(sampledAt ? { sampled_at: sampledAt.toISOString() } : {}),
     total_tokens: tokens(u.totalTokens),
     max_tokens: tokens(u.maxTokens),
     categories: (u.categories ?? []).slice(0, 64).map((c) => {
