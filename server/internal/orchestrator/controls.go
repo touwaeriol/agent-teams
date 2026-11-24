@@ -355,6 +355,9 @@ func checkChange(cur SessionControls, in ControlsChange) (ControlsPending, error
 	modes := cur.Modes
 	if ch.Model != "" {
 		modes = modesFor(cur.Runtime, cur.Models, model, slices.ContainsFunc(cur.Modes, func(m ModeOption) bool { return m.ID == "bypassPermissions" }))
+		if cur.NodeOutdated {
+			modes = legacyMenu(cur.Runtime, modes)
+		}
 	}
 	onMenu := func(id string) bool { return slices.ContainsFunc(modes, func(m ModeOption) bool { return m.ID == id }) }
 	if in.PermissionMode != nil && *in.PermissionMode != "" && *in.PermissionMode != cur.PermissionMode {
@@ -363,7 +366,9 @@ func checkChange(cur SessionControls, in ControlsChange) (ControlsPending, error
 		}
 		ch.PermissionMode = *in.PermissionMode
 	}
-	if ch.Model != "" && ch.PermissionMode == "" && cur.PermissionMode != "" && !onMenu(cur.PermissionMode) {
+	// (On an outdated daemon the menu is the legacy one, which may not hold the mode the session
+	// opened in, e.g. a Codex role's bypass: a model switch alone keeps that mode.)
+	if ch.Model != "" && ch.PermissionMode == "" && cur.PermissionMode != "" && !cur.NodeOutdated && !onMenu(cur.PermissionMode) {
 		return ch, &ControlError{"model", fmt.Sprintf("模型 %s 不支持当前的%s模式，请先换一个权限模式", model, modeLabels[cur.PermissionMode])}
 	}
 	if in.Effort != nil && *in.Effort != "" && (*in.Effort != cur.Effort || ch.Model != "") {
@@ -428,11 +433,15 @@ func (o *Orchestrator) sendControls(ctx context.Context, tx *core.Tx, e core.Emp
 	}
 	c := s.Controls
 	c.Error = ""
+	if ch.clearEffort {
+		c.Effort = "" // the new model does not take it
+	}
 	set := map[string]any{}
 	if answers {
 		id := core.NewID("ms")
 		body.RequestID = &id
-		c.Pending = &core.ControlsSwitch{RequestID: id, PermissionMode: ch.PermissionMode, Model: ch.Model, Effort: ch.Effort, At: time.Now().UTC()}
+		c.Pending = &core.ControlsSwitch{RequestID: id, PermissionMode: ch.PermissionMode, Model: ch.Model, Effort: ch.Effort,
+			ClearEffort: ch.clearEffort, At: time.Now().UTC()}
 	} else {
 		applyControls(&c, set, ch.PermissionMode, ch.Model, ch.Effort)
 	}
@@ -511,7 +520,7 @@ func revertChoice(ctx context.Context, tx *core.Tx, employeeID string, sent *cor
 	if v := deref(m.Model); sent.Model != "" && v != "" {
 		set["model"] = v
 	}
-	if sent.Effort != "" {
+	if sent.Effort != "" || sent.ClearEffort {
 		set["session_effort"] = deref(m.Effort)
 	}
 	if len(set) == 0 {
@@ -563,6 +572,9 @@ func controlsView(ctx context.Context, q core.DB, t core.Thread, e core.Employee
 	if !runtimes.Of(out.Runtime).Efforts {
 		out.Efforts = []string{}
 	}
+	if knownModel(out.Models, out.Model) && !slices.Contains(out.Efforts, out.Effort) {
+		out.Effort = "" // the model does not take it: it runs on its default
+	}
 	if out.NodeOutdated, err = nodeOutdated(ctx, q, e, latest); err != nil || !out.NodeOutdated {
 		return out, err
 	}
@@ -572,10 +584,16 @@ func controlsView(ctx context.Context, q core.DB, t core.Thread, e core.Employee
 		out.PermissionMode = legacyMode(e)
 	}
 	out.Efforts = []string{}
-	out.Modes = slices.DeleteFunc(out.Modes, func(m ModeOption) bool {
-		return runtimes.Of(out.Runtime).ID != runtimes.Claude || !slices.Contains(legacyModes, m.ID)
-	})
+	out.Modes = legacyMenu(out.Runtime, out.Modes)
 	return out, nil
+}
+
+// legacyMenu keeps the modes a daemon without session_controls switches to: Claude's old set_mode
+// values; none for Codex and Antigravity.
+func legacyMenu(runtime string, modes []ModeOption) []ModeOption {
+	return slices.DeleteFunc(slices.Clone(modes), func(m ModeOption) bool {
+		return runtimes.Of(runtime).ID != runtimes.Claude || !slices.Contains(legacyModes, m.ID)
+	})
 }
 
 // nodeOutdated reports whether the node of the employee's latest session (else its own node)
@@ -638,6 +656,10 @@ func modesFor(runtime string, models []ModelChoice, model string, bypass bool) [
 		out = append(out, ModeOption{ID: id, Label: modeLabels[id], Hint: hint, Applies: applies})
 	}
 	return out
+}
+
+func knownModel(models []ModelChoice, model string) bool {
+	return slices.ContainsFunc(models, func(m ModelChoice) bool { return m.ID == model })
 }
 
 func effortsOf(models []ModelChoice, model string) []string {

@@ -166,6 +166,7 @@ type ControlsSwitch struct {
 	PermissionMode string    `json:"permission_mode,omitempty"`
 	Model          string    `json:"model,omitempty"`
 	Effort         string    `json:"effort,omitempty"`
+	ClearEffort    bool      `json:"clear_effort,omitempty"` // the new model dropped the effort picked before
 	At             time.Time `json:"at"`
 }
 

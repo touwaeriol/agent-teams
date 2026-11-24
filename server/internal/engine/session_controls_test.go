@@ -140,8 +140,9 @@ func TestSessionControls(t *testing.T) {
 		b.must(200, "GET", base, nil, &c)
 		return c.Pending == nil && c.Error == "model not available" && c.Model == "claude-opus-5-5"
 	})
-	if err := w.db.Pool.Gorm(w.ctx).Table("at_employees").Select("model").Where("project_id = ?", pid).Scan(&pick).Error; err != nil || pick.Model != "claude-opus-5-5" {
-		t.Fatalf("the model pick goes back: %+v %v", pick, err)
+	if err := w.db.Pool.Gorm(w.ctx).Table("at_employees").Select("session_mode, session_effort, model").Where("project_id = ?", pid).Scan(&pick).Error; err != nil ||
+		pick.Model != "claude-opus-5-5" || pick.SessionEffort != "low" || pick.SessionMode != "plan" {
+		t.Fatalf("the picks the failed switch changed go back (model, the dropped effort), the rest stays: %+v %v", pick, err)
 	}
 	b.must(200, "PUT", base, map[string]any{"model": "claude-haiku-4-5"}, &c)
 	set = expectSetModeBody(t, a)
@@ -151,8 +152,12 @@ func TestSessionControls(t *testing.T) {
 		b.must(200, "GET", base, nil, &c)
 		return c.Pending == nil && c.Model == "claude-haiku-4-5" && c.Error == ""
 	})
-	if c.modeIDs() != "default,acceptEdits,plan,bypassPermissions" || len(c.Efforts) != 0 {
-		t.Fatalf("a model without auto hides it: %+v", c)
+	if c.modeIDs() != "default,acceptEdits,plan,bypassPermissions" || len(c.Efforts) != 0 || c.Effort != "" {
+		t.Fatalf("a model without auto hides it, and the effort it does not take: %+v", c)
+	}
+	if err := w.db.Pool.Gorm(w.ctx).Table("at_employees").Select("session_mode, session_effort, model").
+		Where("project_id = ?", pid).Scan(&pick).Error; err != nil || pick.SessionEffort != "" || pick.Model != "claude-haiku-4-5" {
+		t.Fatalf("the effort pick is dropped with a model that lacks it: %+v %v", pick, err)
 	}
 	var events int64
 	if err := w.db.Pool.Gorm(w.ctx).Table("at_events").Where("project_id = ? AND type = 'session_controls'", pid).Count(&events).Error; err != nil || events < 6 {
@@ -239,6 +244,7 @@ func TestSessionControlsOldDaemon(t *testing.T) {
 	}
 	b.must(422, "PUT", base, map[string]any{"effort": "low"}, nil)
 	b.must(422, "PUT", base, map[string]any{"permission_mode": "plan"}, nil)
+	b.must(422, "PUT", base, map[string]any{"permission_mode": "plan", "model": "claude-sonnet-5-5"}, nil)
 	c = controlsView{}
 	b.must(200, "PUT", base, map[string]any{"permission_mode": "default", "model": "claude-sonnet-5-5"}, &c)
 	if c.Pending != nil || c.PermissionMode != "default" || c.Model != "claude-sonnet-5-5" {
