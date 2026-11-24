@@ -118,7 +118,7 @@ describe("router guard", () => {
     expect(guard(to("/projects/p1"), null)).toBe("/login?from=%2Fprojects%2Fp1");
     expect(guard(to("/login", { public: true }), null)).toBe(true);
     expect(guard(to("/login", { public: true }, { from: "/projects/p1" }), me())).toBe("/projects/p1");
-    expect(guard(to("/login", { public: true }), me())).toBe("/projects");
+    expect(guard(to("/login", { public: true }), me())).toBe("/sessions/new");
   });
   it("keeps the query of the page to come back to", () => {
     const target = guard(to("/admin/users", { admin: true }, { x: "1" }, "/admin/users?x=1"), null);
@@ -128,9 +128,9 @@ describe("router guard", () => {
   });
   it("only follows `from` to paths on this site", () => {
     for (const bad of ["https://evil.example/x", "//evil.example", "/\\evil.example", "/\t/evil.example", "javascript:alert(1)", "evil", "", "/login", "/login?from=/x"]) {
-      expect(guard(to("/login", { public: true }, { from: bad }), me())).toBe("/projects");
+      expect(guard(to("/login", { public: true }, { from: bad }), me())).toBe("/sessions/new");
     }
-    expect(guard({ path: "/login", meta: { public: true }, query: { from: ["/a", "/b"] } } as never, me())).toBe("/projects");
+    expect(guard({ path: "/login", meta: { public: true }, query: { from: ["/a", "/b"] } } as never, me())).toBe("/sessions/new");
     expect(safeFrom("/projects/p1?tab=x#y")).toBe("/projects/p1?tab=x#y");
   });
   it("shows non-admins the 404 page at the same address", () => {
@@ -147,7 +147,7 @@ describe("shell and main helpers", () => {
     const v = sidebarGroups([p("a", { pinned: true }), p("b"), p("c", { archived: true })], "");
     expect(v.groups.map((g) => [g.title, g.items.map((x: { id: string }) => x.id)])).toEqual([
       ["已置顶", ["a"]],
-      ["最近", ["b"]],
+      ["最近使用", ["b"]],
     ]);
     expect(v.archived).toHaveLength(1);
     expect(sidebarGroups([p("a"), p("b")], "zz").groups).toEqual([]);

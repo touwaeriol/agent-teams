@@ -37,3 +37,30 @@ export function withBranches(list: RepoRef[], prev: SessionRepo[]): SessionRepo[
 export function sessionText(text: string): string {
   return text.replace(/组长/g, "员工").replace(/讨论串/g, "会话");
 }
+
+/** The repository chip under the new-session box: "选择仓库", "org/web · develop" or "org/web +2". */
+export function reposLabel(list: SessionRepo[]): string {
+  if (list.length === 0) return "选择仓库";
+  const first = list[0].branch ? `${list[0].repo} · ${list[0].branch}` : list[0].repo;
+  return list.length > 1 ? `${first} +${list.length - 1}` : first;
+}
+
+/** What the new-session box remembers between sessions (per browser): repositories, node, role. */
+export interface SessionDefaults {
+  repos: SessionRepo[];
+  node: string;
+  role: string;
+}
+
+export const DEFAULTS_KEY = "at:new-session";
+
+export function parseDefaults(raw: string | null): SessionDefaults | null {
+  try {
+    const v = JSON.parse(raw ?? "null") as Partial<SessionDefaults> | null;
+    if (!v || !Array.isArray(v.repos)) return null;
+    const repos = v.repos.filter((r) => r && typeof r.repo === "string").map((r) => ({ ...r, branch: typeof r.branch === "string" ? r.branch : "" }));
+    return { repos, node: typeof v.node === "string" ? v.node : "", role: typeof v.role === "string" ? v.role : "" };
+  } catch {
+    return null;
+  }
+}

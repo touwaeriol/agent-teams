@@ -7,7 +7,7 @@ import { keys } from "@/api/queries";
 import type { UserView } from "@/api/views";
 
 export const projectRoutes: RouteRecordRaw[] = [
-  { path: "", redirect: "/projects" },
+  { path: "", redirect: "/sessions/new" },
   { path: "/projects", component: () => import("@/pages/ProjectsIndex.vue") },
   { path: "/projects/new", component: () => import("@/pages/NewProject.vue") },
   { path: "/projects/:pid", component: () => import("@/pages/Main.vue") },
@@ -82,7 +82,7 @@ type GuardTarget = Pick<RouteLocationNormalized, "path" | "meta" | "query"> & Pa
 /** Where a request for `to` goes given the signed-in user (null = signed out). Pure, tested. */
 export function guard(to: GuardTarget, me: UserView | null): RouteLocationRaw | true {
   if (!me) return to.meta.public ? true : `/login?from=${encodeURIComponent(to.fullPath ?? to.path)}`;
-  if (to.path === "/login") return safeFrom(to.query.from) ?? "/projects";
+  if (to.path === "/login") return safeFrom(to.query.from) ?? "/sessions/new";
   // Non-admins get the plain 404 page at the same address: no admin shell, no admin requests.
   if (to.meta.admin && me.role !== "admin") return { name: "not-found", params: { rest: to.path.slice(1).split("/").map(decodeSegment) }, query: to.query, hash: to.hash, replace: true };
   return true;

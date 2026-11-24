@@ -1,44 +1,50 @@
 <script setup lang="ts">
-// 新建会话: what to do, the repositories (each from a branch), and who does it (a member role,
-// its model) on which node. The session opens at once and the employee starts on the message.
+// 新建 (a session), like Claude Code's new session: an empty page with one box at the bottom for
+// what to do; under it, chips for where (repositories, each from a branch) and who (role, model)
+// on which node. Enter sends (Shift+Enter: new line). The chips remember the last choice.
+import { Bot, ChevronDown, FolderGit2, Server } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { sessions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import { keys, useNodes, useRoles } from "@/api/queries";
-import Card from "@/components/app/Card.vue";
-import CardTitle from "@/components/app/CardTitle.vue";
 import ModelPicker from "@/components/app/models/ModelPicker.vue";
+import SendButton from "@/components/app/SendButton.vue";
 import SessionRepos from "@/components/app/session/SessionRepos.vue";
-import { sessionReposPayload, type SessionRepo } from "@/components/app/session/session";
+import { DEFAULTS_KEY, parseDefaults, reposLabel, sessionReposPayload, type SessionRepo } from "@/components/app/session/session";
 import Field from "@/components/common/Field.vue";
-import Spinner from "@/components/common/Spinner.vue";
-import NavButton from "@/components/shell/NavButton.vue";
 import { MODEL_FORMAT_HINT, validModel, type Runtime } from "@/lib/models";
+import { readLocal, writeLocal } from "@/lib/persist";
 import { toast } from "@/lib/toast";
 
 const router = useRouter();
 const roles = useRoles();
 const nodes = useNodes();
-const message = ref("");
-const repos = ref<SessionRepo[]>([]);
-const role = ref("");
-const model = ref("");
 /** "auto" = picked by the platform (el-select shows "" as nothing picked). */
 const AUTO = "auto";
-const node = ref(AUTO);
+const saved = parseDefaults(readLocal(DEFAULTS_KEY));
+const message = ref("");
+const repos = ref<SessionRepo[]>(saved?.repos ?? []);
+const role = ref(saved?.role ?? "");
+const model = ref("");
+const node = ref(saved?.node || AUTO);
 const branch = ref("");
+const reposOpen = ref(false);
+const whoOpen = ref(false);
+
 const members = computed(() => (roles.data.value?.roles ?? []).filter((r) => r.tier === "member"));
 watch(
   members,
   (list) => {
-    if (!role.value && list.length) role.value = list[0].role;
+    if (list.length && !list.some((r) => r.role === role.value)) role.value = list[0].role;
   },
   { immediate: true },
 );
 const picked = computed(() => members.value.find((r) => r.role === role.value));
 const runtime = computed<Runtime>(() => (picked.value?.runtime === "codex" ? "codex" : "claude"));
 const nodeList = computed(() => nodes.data.value ?? []);
+const nodeLabel = computed(() => (node.value === AUTO ? "自动分配节点" : (nodeList.value.find((n) => n.id === node.value)?.name ?? "自动分配节点")));
+const whoLabel = computed(() => `${picked.value?.title || picked.value?.role || "岗位"}${model.value.trim() ? ` · ${model.value.trim()}` : ""}`);
 const ready = computed(() => message.value.trim() !== "" && repos.value.length > 0 && role.value !== "");
 
 const create = useAction(
@@ -51,64 +57,103 @@ const create = useAction(
       node_id: node.value === AUTO ? undefined : node.value,
       branch: branch.value.trim() || undefined,
     }),
-  { invalidate: [keys.projects], success: (s) => `会话「${s.project.name}」已开始`, onSuccess: (s) => void router.push(`/sessions/${s.project.id}`) },
+  {
+    invalidate: [keys.projects],
+    onSuccess: (s) => {
+      writeLocal(DEFAULTS_KEY, JSON.stringify({ repos: repos.value, node: node.value, role: role.value }));
+      void router.push(`/sessions/${s.project.id}`);
+    },
+  },
 );
-const submit = () => {
-  if (!ready.value) return;
+function submit() {
+  if (!message.value.trim() || create.isPending.value) return;
+  if (repos.value.length === 0) {
+    reposOpen.value = true;
+    return void toast.error("先选要在哪些仓库里干活");
+  }
+  if (!role.value) return void toast.error("团队里还没有成员岗位，先在 设置 → 团队 里添加一个");
   if (!validModel(model.value)) return void toast.error(MODEL_FORMAT_HINT);
   create.mutate();
-};
+}
+/** Enter sends; Shift+Enter and Enter while an input method is composing (Chinese) do not. */
+function onKey(ev: Event | KeyboardEvent) {
+  const e = ev as KeyboardEvent;
+  if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+  e.preventDefault();
+  submit();
+}
+const chip = "inline-flex h-7 max-w-[260px] items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground";
 </script>
 
 <template>
-  <main class="px-4 pb-14 pt-4 sm:px-8 sm:pt-10">
-    <form class="mx-auto flex max-w-[760px] flex-col gap-6" @submit.prevent="submit">
-      <div class="flex items-start gap-1">
-        <NavButton />
-        <div class="flex flex-col gap-1.5">
-          <h1 class="text-2xl font-semibold">新建会话</h1>
-          <p class="text-[13px] leading-[22px] text-muted-foreground">选几个仓库，它们会被并排拉到同一个文件夹里，一个员工直接在里面干活，你直接和它对话。没有统筹，也不用组队。</p>
-        </div>
+  <div class="flex h-full min-h-0 flex-col">
+    <header class="flex h-12 shrink-0 items-center px-5 text-[13px] text-muted-foreground">新会话</header>
+    <div class="flex flex-1 items-center justify-center px-6 text-center text-[13px] leading-6 text-muted-foreground">
+      <p class="max-w-md">选好仓库，说要做什么。仓库会并排拉到同一个文件夹里，一个员工直接在里面干活，你直接和它对话。</p>
+    </div>
+    <form class="mx-auto w-full max-w-[780px] shrink-0 px-4 pb-5" data-testid="new-session" @submit.prevent="submit">
+      <div class="flex items-end gap-2 rounded-2xl border bg-background px-4 py-3 shadow-sm focus-within:border-foreground/30">
+        <el-input
+          v-model="message"
+          type="textarea"
+          :autosize="{ minRows: 1, maxRows: 10 }"
+          resize="none"
+          autofocus
+          placeholder="描述任务或提出问题"
+          aria-label="要做什么"
+          class="at-bare-textarea flex-1"
+          @keydown="onKey"
+        />
+        <SendButton label="开始会话" :busy="create.isPending.value" :disabled="!ready" />
       </div>
-      <Card class="gap-4">
-        <Field v-slot="{ id }" label="要做什么" hint="会原样作为第一条消息发给员工；第一行就是会话标题。">
-          <el-input :id="id" v-model="message" type="textarea" :rows="5" maxlength="50000" placeholder="例如：修复登录后的跳转，前端在 org/web，接口在 org/api" />
-        </Field>
-      </Card>
-      <Card class="gap-4">
-        <CardTitle>代码仓库</CardTitle>
-        <p class="text-[13px] text-muted-foreground">每个仓库是工作目录下的一个子文件夹；员工会从选的分支切出自己的会话分支（session/…），改完推上去、开 PR。会话里随时可以增删仓库。</p>
-        <SessionRepos v-model="repos" />
-        <Field v-slot="{ id }" label="工作分支名（可选）" hint="会建成 session/<编号>-<名字>；不填就取标题里的英文，标题全是中文时用仓库名。">
-          <el-input :id="id" v-model="branch" maxlength="60" placeholder="例如：fix-login-redirect" class="sm:max-w-[320px]" />
-        </Field>
-      </Card>
-      <Card class="gap-4">
-        <CardTitle>谁来做</CardTitle>
-        <div class="grid gap-3 sm:grid-cols-3">
-          <Field v-slot="{ id }" label="岗位" hint="按这个成员岗位的配置起员工">
-            <el-select :id="id" v-model="role" placeholder="选择岗位" class="at-select-36">
-              <el-option v-for="r in members" :key="r.role" :value="r.role" :label="r.title || r.role" />
-            </el-select>
-          </Field>
-          <Field v-slot="{ id }" label="模型">
-            <ModelPicker :id="id" v-model="model" live :runtime="runtime" label="模型" placeholder="跟随岗位配置" class="at-select-36" />
-          </Field>
-          <Field v-slot="{ id }" label="节点" hint="自动：挑剩余用量最多的在线节点">
-            <el-select :id="id" v-model="node" class="at-select-36">
-              <el-option :value="AUTO" label="自动分配" />
-              <el-option v-for="n in nodeList" :key="n.id" :value="n.id" :label="n.online ? n.name : `${n.name}（离线）`" />
-            </el-select>
-          </Field>
-        </div>
-        <p v-if="roles.data.value && members.length === 0" class="text-[13px] text-muted-foreground">团队里还没有成员岗位，先在 设置 → 团队 里添加一个。</p>
-      </Card>
-      <div class="flex justify-end gap-2">
-        <el-button size="large" @click="router.back()">取消</el-button>
-        <el-button type="primary" size="large" native-type="submit" :disabled="!ready || create.isPending.value">
-          <Spinner v-if="create.isPending.value" /> 开始会话
-        </el-button>
+      <div class="mt-1.5 flex flex-wrap items-center gap-1 px-1">
+        <button type="button" :class="chip" data-testid="repos-chip" @click="reposOpen = true">
+          <FolderGit2 class="size-3.5 shrink-0" />
+          <span class="truncate">{{ reposLabel(repos) }}</span>
+          <ChevronDown class="size-3 shrink-0" />
+        </button>
+        <el-dropdown trigger="click" placement="top-start" @command="(v: string) => (node = v)">
+          <button type="button" :class="chip" data-testid="node-chip">
+            <Server class="size-3.5 shrink-0" />
+            <span class="truncate">{{ nodeLabel }}</span>
+            <ChevronDown class="size-3 shrink-0" />
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item :command="AUTO">自动分配（剩余用量最多的在线节点）</el-dropdown-item>
+              <el-dropdown-item v-for="n in nodeList" :key="n.id" :command="n.id" :disabled="!n.online">{{ n.online ? n.name : `${n.name}（离线）` }}</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <button type="button" :class="chip" data-testid="who-chip" @click="whoOpen = true">
+          <Bot class="size-3.5 shrink-0" />
+          <span class="truncate">{{ whoLabel }}</span>
+          <ChevronDown class="size-3 shrink-0" />
+        </button>
       </div>
     </form>
-  </main>
+    <el-dialog v-model="reposOpen" title="仓库" width="600px" class="at-dialog w-[calc(100%-2rem)] max-w-[600px]" append-to-body>
+      <div class="flex flex-col gap-4">
+        <p class="text-[13px] leading-5 text-muted-foreground">每个仓库是工作目录下的一个子文件夹，员工从选的分支切出自己的会话分支（session/…），改完推上去、开 PR。会话里随时可以增删。</p>
+        <SessionRepos v-model="repos" />
+        <Field v-slot="{ id }" label="工作分支名（可选）" hint="不填就取标题里的英文，标题全是中文时用仓库名">
+          <el-input :id="id" v-model="branch" maxlength="60" placeholder="例如：fix-login-redirect" />
+        </Field>
+      </div>
+      <template #footer><el-button type="primary" @click="reposOpen = false">完成</el-button></template>
+    </el-dialog>
+    <el-dialog v-model="whoOpen" title="谁来做" width="420px" class="at-dialog w-[calc(100%-2rem)] max-w-[420px]" append-to-body>
+      <div class="flex flex-col gap-4">
+        <Field v-slot="{ id }" label="岗位" hint="按这个成员岗位的配置起员工">
+          <el-select :id="id" v-model="role" placeholder="选择岗位">
+            <el-option v-for="r in members" :key="r.role" :value="r.role" :label="r.title || r.role" />
+          </el-select>
+        </Field>
+        <Field v-slot="{ id }" label="模型">
+          <ModelPicker :id="id" v-model="model" live :runtime="runtime" label="模型" placeholder="跟随岗位配置" />
+        </Field>
+      </div>
+      <template #footer><el-button type="primary" @click="whoOpen = false">完成</el-button></template>
+    </el-dialog>
+  </div>
 </template>
