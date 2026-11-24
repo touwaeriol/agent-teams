@@ -154,6 +154,9 @@ func focusText(slug, base string) string {
 // out and which base the thread uses there ("" for projects without repositories).
 func (o *Orchestrator) reposSection(ctx context.Context, q core.DB, e core.Employee, t *core.Thread, p store.Project) string {
 	if !p.HasRepos() {
+		if e.Spec.Solo && t != nil {
+			return "## 工作目录\n你的工作目录是节点上的本地文件夹 " + PathsOf(e, t).Cwd + "（相对节点的数据根目录），没有 git 仓库，文件只在这台机器上。"
+		}
 		return ""
 	}
 	var b strings.Builder

@@ -50,6 +50,9 @@ var movableRuntimes = []string{runtimes.Claude, runtimes.Codex}
 func (o *Orchestrator) MoveOnLimit(ctx context.Context, tx *core.Tx, sc core.SessionContext, resetAt time.Time) (bool, error) {
 	s := sc.Session
 	resume := resumeRef(s)
+	if sc.Employee.Spec.Local {
+		return false, nil // a session's local folder stays on its node (pinLocal)
+	}
 	if s.NodeID == nil || s.State == "closed" || resume == nil || !movable(s.Runtime) {
 		return false, nil
 	}

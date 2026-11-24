@@ -6787,7 +6787,7 @@
             "type": "string"
           },
           "repos": {
-            "description": "Repositories, all checked out side by side in the employee's directory",
+            "description": "Repositories, all checked out side by side in the employee's directory; [] = none: the employee works in a local folder on the node it starts on, pinned there",
             "items": {
               "$ref": "#/components/schemas/SessionRepoRef"
             },
@@ -6909,7 +6909,7 @@
         "additionalProperties": false,
         "properties": {
           "repos": {
-            "description": "The session's repositories after the change (order kept); new ones are checked out, missing ones removed",
+            "description": "The session's repositories after the change (order kept); new ones are checked out, missing ones removed; [] = none (the session goes on in its local folder, pinned to its node)",
             "items": {
               "$ref": "#/components/schemas/SessionRepoRef"
             },

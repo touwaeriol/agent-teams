@@ -94,6 +94,7 @@ func repoWords(repos []RepoFocus) string {
 // limit): the employee then gets the user's first message.
 func (o *Orchestrator) OpenSession(ctx context.Context, req SessionRequest) (core.Thread, error) {
 	role := SessionRole(req.Role, req.Runtime, req.Model, req.NodeID)
+	role.Local = len(req.Repos) == 0 // a local folder on the node it starts on
 	return o.OpenThread(ctx, ThreadRequest{UserID: req.UserID, ProjectID: req.ProjectID, Title: req.Title,
 		Brief: req.Message, OpenedBy: "user", Repos: req.Repos, Solo: &role, SoloMode: req.PermissionMode, SoloEffort: req.Effort, Branch: SessionBranch(req.ProjectID, req.Branch, req.Title, req.Repos)})
 }
@@ -150,6 +151,16 @@ func (o *Orchestrator) SessionReposChanged(ctx context.Context, projectID string
 		}
 		if err := o.dropCheckouts(ctx, tx, lead, t, removed); err != nil {
 			return err
+		}
+		if !p.HasRepos() && !lead.Spec.Local {
+			// Every repository removed: the folder left is a local one, kept on the node it is on.
+			var nodes []string
+			if lead.NodeID != nil && len(lead.Spec.NodeIDs) == 0 {
+				nodes = []string{*lead.NodeID}
+			}
+			if err := core.SetLocal(ctx, tx, lead.ID, nodes); err != nil {
+				return err
+			}
 		}
 		if core.ThreadEnded(t.Status) {
 			return nil // the next message reopens it and its session checks out every repository
