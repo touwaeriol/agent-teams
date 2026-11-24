@@ -1745,6 +1745,11 @@ type ContextDetail struct {
 	// The model's own window (rawMaxTokens).
 	RawMaxTokens *int `json:"raw_max_tokens,omitempty,omitzero"`
 
+	// When the daemon read it (getContextUsage was called). The console drops a
+	// breakdown older than the one it holds (a slow full refresh overtaken by a
+	// turn); absent from an old daemon.
+	SampledAt *time.Time `json:"sampled_at,omitempty,omitzero"`
+
 	// Skills corresponds to the JSON schema field "skills".
 	Skills []ContextSkill `json:"skills,omitempty,omitzero"`
 
