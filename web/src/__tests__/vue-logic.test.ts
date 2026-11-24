@@ -147,7 +147,7 @@ describe("shell and main helpers", () => {
     const v = sidebarGroups([p("a", { pinned: true }), p("b"), p("c", { archived: true })], "");
     expect(v.groups.map((g) => [g.title, g.items.map((x: { id: string }) => x.id)])).toEqual([
       ["已置顶", ["a"]],
-      ["项目", ["b"]],
+      ["最近", ["b"]],
     ]);
     expect(v.archived).toHaveLength(1);
     expect(sidebarGroups([p("a"), p("b")], "zz").groups).toEqual([]);

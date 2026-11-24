@@ -79,15 +79,38 @@ func MemberBranch(threadNo int, name string) string {
 	return fmt.Sprintf("thread/%d/%s", threadNo, name)
 }
 
-// readOnly reports whether the employee gets the lead's read-only policy.
+// readOnly reports whether the employee gets the lead's read-only policy. A session's employee
+// (Spec.Solo) is a lead that writes.
 func readOnly(e core.Employee) bool {
-	return e.Tier == "lead" || (e.Spec.ReadOnly != nil && *e.Spec.ReadOnly)
+	return (e.Tier == "lead" && !e.Spec.Solo) || (e.Spec.ReadOnly != nil && *e.Spec.ReadOnly)
 }
 
+// writer reports whether the employee works like a member: a member, or a session's employee.
+func writer(e core.Employee) bool { return e.Tier == "member" || (e.Tier == "lead" && e.Spec.Solo) }
+
 // Bypass reports whether a member runs without permission prompts (§9): every writing
-// member whose role is not ask (bypass, and the pre-00097 auto), on any node.
+// member (or session employee) whose role is not ask (bypass, and the pre-00097 auto), on any node.
 func Bypass(e core.Employee) bool {
-	return e.Tier == "member" && e.Spec.PermissionMode != store.PermAsk && !readOnly(e)
+	return writer(e) && e.Spec.PermissionMode != store.PermAsk && !readOnly(e)
+}
+
+// soloTools are the platform tools of a session's employee: talking to the user and publishing
+// files. The team tools of a lead (tasks, merge queue, PRs, other threads, memory, schedules) do
+// not exist in a session.
+var soloTools = []string{"ask_user", "close_question", "tell_user", "set_status", "publish_file", "publish_deliverable",
+	"read_deliverable", "list_deliverables"}
+
+// platformTools are the platform tools an employee's session gets.
+func platformTools(e core.Employee) ([]protocol.PlatformToolSpec, error) {
+	flags := []string{}
+	if e.Spec.CanDelegate {
+		flags = append(flags, "can_delegate")
+	}
+	tools, err := protocol.PlatformTools(protocol.Tier(e.Tier), flags...)
+	if err != nil || !e.Spec.Solo {
+		return tools, err
+	}
+	return slices.DeleteFunc(tools, func(t protocol.PlatformToolSpec) bool { return !slices.Contains(soloTools, t.Name) }), nil
 }
 
 // ClaudeMode is the Claude permission mode a writing member opens in: bypassPermissions,
@@ -120,11 +143,7 @@ type sessionInput struct {
 
 // buildOpen renders session.open for an employee.
 func buildOpen(in sessionInput) (protocol.SessionOpen, error) {
-	flags := []string{}
-	if in.emp.Spec.CanDelegate {
-		flags = append(flags, "can_delegate")
-	}
-	tools, err := protocol.PlatformTools(protocol.Tier(in.emp.Tier), flags...)
+	tools, err := platformTools(in.emp)
 	if err != nil {
 		return protocol.SessionOpen{}, err
 	}

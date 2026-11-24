@@ -33,6 +33,7 @@ type ProjectView struct {
 	ThreadCodexModel string    `json:"thread_codex_model" doc:"Codex model of Codex leads and members; '' = each role's model"`
 	ThreadEffort     string    `json:"thread_effort" doc:"'' = each role's effort; low | medium | high | xhigh | max"`
 	AutoResume       bool      `json:"auto_resume" doc:"Continue threads paused by a usage limit once it resets"`
+	Kind             string    `json:"kind" enum:"project,session" doc:"project, or session (多仓库会话: one employee the user talks to directly in thread 1; no coordinator)"`
 	Waiting          int       `json:"waiting"`
 	ThreadsActive    int       `json:"threads_active"`
 	CreatedAt        time.Time `json:"created_at"`
@@ -49,7 +50,7 @@ func ProjectViewOf(p store.Project, d Delivery) ProjectView {
 		Pinned: p.Pinned, Archived: p.Archived,
 		WorkMode: p.WorkMode, AutoApprove: p.AutoApprove, MergePolicy: p.MergePolicy,
 		Delivery: d, OfficeLayout: p.OfficeLayout, Icon: p.Icon, CoordinatorModel: p.CoordinatorModel,
-		ThreadModel: p.ThreadModel, ThreadCodexModel: p.ThreadCodexModel, ThreadEffort: p.ThreadEffort, AutoResume: p.AutoResume, Waiting: p.Waiting,
+		ThreadModel: p.ThreadModel, ThreadCodexModel: p.ThreadCodexModel, ThreadEffort: p.ThreadEffort, AutoResume: p.AutoResume, Kind: p.Kind, Waiting: p.Waiting,
 		ThreadsActive: p.ThreadsActive, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
 }
 

@@ -1703,6 +1703,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a session: one employee working in several repositories, talked to directly */
+        post: operations["create-session"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{pid}/repos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Add or remove a session's repositories while it runs */
+        put: operations["set-session-repos"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{sid}/stream": {
         parameters: {
             query?: never;
@@ -3598,6 +3632,11 @@ export interface components {
             icon: string;
             id: string;
             /**
+             * @description project, or session (多仓库会话: one employee the user talks to directly in thread 1; no coordinator)
+             * @enum {string}
+             */
+            kind: "project" | "session";
+            /**
              * @description How a thread with PRs ends: pr = done once the checks pass, the PRs stay open for a person to merge; auto = merged into the base once the checks pass; manual = the user accepts
              * @enum {string}
              */
@@ -4099,6 +4138,33 @@ export interface components {
         SessionBrief: {
             node: components["schemas"]["NodeRef"];
             state: string;
+        };
+        SessionInput: {
+            /** @description The task: the employee's first message */
+            message: string;
+            /** @description '' = the role's model */
+            model?: string;
+            /** @description Run on this node; '' = picked automatically (most quota left) */
+            node_id?: string;
+            /** @description Repositories, all checked out side by side in the employee's directory */
+            repos: components["schemas"]["SessionRepoRef"][] | null;
+            /** @description Member role template the employee is made from; '' = the first member role */
+            role?: string;
+            /** @description '' = the first line of message */
+            title?: string;
+        };
+        SessionRepoRef: {
+            /** @description Branch the employee's work branch is cut from; '' = the repository's default branch */
+            branch?: string;
+            git_connection_id?: string | null;
+            /** @description A standalone repository (git-repos.md); then repo is its slug and git_connection_id is null */
+            git_repo_id?: string | null;
+            /** @description GitHub URL, git@ URL or owner/repo */
+            repo: string;
+        };
+        SessionReposInputBody: {
+            /** @description The session's repositories after the change (order kept); new ones are checked out, missing ones removed */
+            repos: components["schemas"]["SessionRepoRef"][] | null;
         };
         SessionUsage: {
             /** Format: double */
@@ -4724,6 +4790,12 @@ export interface components {
         Warning: {
             message: string;
             role: string;
+        };
+        WorkSessionView: {
+            project: components["schemas"]["ProjectView"];
+            thread_id: string;
+            /** Format: int64 */
+            thread_no: number;
         };
         Workflow: {
             path: string;
@@ -9256,6 +9328,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ServerTestResult"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "create-session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionInput"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkSessionView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "set-session-repos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionReposInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectView"];
                 };
             };
             /** @description Error */

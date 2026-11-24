@@ -168,6 +168,7 @@ func (s *Server) register(api huma.API, r gin.IRoutes) {
 	s.registerAuth(api)
 	s.registerAdmin(api)
 	s.registerProjects(api)
+	s.registerSessions(api)
 	s.registerMemory(api)
 	s.registerGit(api)
 	s.registerServers(api)

@@ -50,6 +50,16 @@ gh（GitHub CLI）已安装并自动带上本项目仓库的临时令牌：在�
 项目可能绑定多个仓库：你的工作目录下每个仓库一个子目录（见“## 仓库”）。讨论串分支只在真正有改动的仓库里创建，默认从仓库的默认分支切出。
 项目指令或用户要求里写了某个仓库的基准分支时，第一次给这个仓库派任务就在 assign_task 里写上 repo 和 base（之后 enqueue_merge / open_pr 也可以带 repo、base）；没写的仓库不用传 base。`
 
+// soloGuide is the guide of a session's employee (多仓库会话; argument: its branch).
+const soloGuide = `你在一个多仓库会话里工作：用户直接和你对话，把任务交给你完成。没有组长、没有其他成员，也没有任务队列，事情由你自己调研、修改、验证到底。
+- 你的工作目录下每个仓库一个子目录（见“## 仓库”），每个仓库里你的工作分支都叫 %s，从用户给该仓库选的分支（“基准分支”）切出。改了哪个仓库就在哪个子目录里 git commit，勤提交。
+- 要交付时，在有改动的仓库里 git push origin HEAD 推送你的工作分支；GitHub 仓库需要时用 gh pr create 开 PR，目标分支是该仓库的基准分支。基准分支和默认分支受保护，不能直接推送；用户要求合并时才用 gh pr merge，合并前用 gh pr checks 确认检查通过。
+- gh（GitHub CLI）已安装并自动带上这些仓库的临时令牌（不用 gh auth login），在仓库子目录里运行或加 -R owner/repo。
+- 需要用户决定时用 ask_user（让用户选方案时用 questions，选项带说明和推荐，不阻塞）；用户没点卡片、直接在对话里回答了时，用 close_question(question_id, answer) 关掉那张卡片。事情多时用 TodoWrite 列待办，用户在对话里能看到进度；长任务中途的进展可以用 tell_user(text) 先告诉用户。
+- 文档、设计稿、报告这类交付物用 publish_file 发布（截图和单张图片只作为附件）。
+- 用户可能在会话中途添加或移除仓库，平台会用“（平台）”开头的消息告诉你目录的变化。以“（平台）”开头的消息是平台发的，不是用户说的话，不用回复“收到”。
+- 你每个回合最后写的文字会原样作为一条消息显示给用户：写清做了什么、改了哪些仓库和分支、PR 链接、还需要用户做什么。`
+
 // memberIntro opens a thread's own (legacy) member's guide; staffIntro a project member's
 // (arguments: thread no, name, role).
 const (
@@ -174,6 +184,9 @@ func (o *Orchestrator) systemAppend(ctx context.Context, q core.DB, e core.Emplo
 	if repos := o.reposSection(ctx, q, e, t, p); repos != "" {
 		parts = append(parts, repos)
 	}
+	if e.Spec.Solo {
+		return strings.Join(parts, "\n\n"), nil // a session has no project memory and no team
+	}
 	mem, err := store.MemoryPrompt(ctx, q, p.ID)
 	if err != nil {
 		return "", err
@@ -226,6 +239,8 @@ func guide(e core.Employee, t *core.Thread) string {
 	switch {
 	case e.Tier == "coordinator" || t == nil:
 		return coordinatorGuide
+	case e.Spec.Solo:
+		return fmt.Sprintf(soloGuide, t.Branch)
 	case e.Tier == "lead":
 		return fmt.Sprintf(leadGuide, t.No, t.Title)
 	}

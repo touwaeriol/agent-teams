@@ -11,7 +11,7 @@ export function sidebarGroups(list: ProjectView[], q: string) {
   const shown = list.filter((p) => matchesProject(p, q));
   const groups = [
     { title: "已置顶", items: shown.filter((p) => p.pinned && !p.archived) },
-    { title: "项目", items: shown.filter((p) => !p.pinned && !p.archived) },
+    { title: "最近", items: shown.filter((p) => !p.pinned && !p.archived) },
   ].filter((g) => g.items.length > 0);
   return { shown, groups, archived: shown.filter((p) => p.archived) };
 }
