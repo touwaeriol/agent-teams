@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { query as sdkQuery, type HookCallbackMatcher, type HookEvent, type HookInput, type HookJSONOutput, type Options, type PermissionUpdate, type Query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { ClaudeSessionOptions, ContextUsage } from "../../protocol.js";
+import type { ClaudeSessionOptions, ContextDetail, ContextUsage } from "../../protocol.js";
 import { AsyncQueue, deferred, withTimeout, type Deferred } from "../../util/async.js";
 import { approvalId, msgUuid } from "../../util/ids.js";
 import { newId } from "../../util/ids.js";
@@ -16,12 +16,15 @@ import { claudeContent } from "../images.js";
 import { findTranscript, transcriptUserUuids } from "./transcript.js";
 import { ASK_TOOL, askHookOutput, askUserArgs, planEvent, todosEvent } from "./special.js";
 import { qualifySlash, sessionCommands } from "./commands.js";
+import { contextDetailOf, contextUsageOf, type ContextReply } from "./context.js";
 
 /** How long an AskUserQuestion may wait for the user (seconds; the hook's timeout). */
 const ASK_TIMEOUT_S = 7 * 24 * 3600;
 
 /** How long turn_ended waits for getContextUsage before it goes out without context. */
 const USAGE_TIMEOUT_MS = 5000;
+/** How long session.context_refresh waits for getContextUsage({detail:"full"}) (token-count calls). */
+const FULL_USAGE_TIMEOUT_MS = 30_000;
 
 export type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => Query;
 
@@ -186,8 +189,10 @@ export class ClaudeDriver implements Driver {
     if (msg.type === "system" && msg.subtype === "compact_boundary" && msg.compact_metadata.trigger === "manual" && this.compacting) this.compacting.boundary = true;
     if (msg.type === "assistant") this.onAssistant(msg.user_message_uuids, msg.message.content);
     if (msg.type === "assistant" && msg.parent_tool_use_id === null && msg.message.model) this.turnModel = msg.message.model;
-    const context = msg.type === "result" ? await this.contextUsage() : undefined;
+    const reply = msg.type === "result" ? await this.readContext("summary") : undefined;
+    const context = reply ? contextUsageOf(reply) : undefined;
     for (const ev of mapClaudeMessage(msg)) this.emit(this.turnEnded(ev, context));
+    if (reply) this.ctx.sink.context?.(contextDetailOf(reply, "summary"));
     if (msg.type === "result") this.onResult(context);
   }
 
@@ -197,17 +202,26 @@ export class ClaudeDriver implements Driver {
     return { ...ev, ...(this.turnModel ? { model: this.turnModel } : {}), ...(context ? { context } : {}) };
   }
 
-  /** Context use now (getContextUsage summary: no token-count calls); undefined when it cannot tell. */
-  private async contextUsage(): Promise<ContextUsage | undefined> {
+  /**
+   * getContextUsage now; undefined when it cannot tell (no live query, error, timeout). summary
+   * estimates from the last turn's usage (no API call); full counts every category with
+   * token-count calls (session.context_refresh).
+   */
+  private async readContext(detail: ContextDetail["detail"]): Promise<ContextReply | undefined> {
     const q = this.q;
     if (!q) return undefined;
     try {
-      const u = await withTimeout(q.getContextUsage({ detail: "summary" }), USAGE_TIMEOUT_MS, () => new Error("getContextUsage timed out"));
-      return { used_tokens: Math.max(0, Math.round(u.totalTokens)), max_tokens: Math.max(0, Math.round(u.maxTokens)) };
+      const ms = detail === "full" ? FULL_USAGE_TIMEOUT_MS : USAGE_TIMEOUT_MS;
+      return await withTimeout(q.getContextUsage({ detail }), ms, () => new Error("getContextUsage timed out"));
     } catch (err) {
-      this.ctx.log.debug({ err: (err as Error).message }, "context usage unavailable");
+      this.ctx.log.debug({ err: (err as Error).message, detail }, "context usage unavailable");
       return undefined;
     }
+  }
+
+  async contextDetail(detail: ContextDetail["detail"]): Promise<ContextDetail | undefined> {
+    const reply = await this.readContext(detail);
+    return reply ? contextDetailOf(reply, detail) : undefined;
   }
 
   private onInit(tools: string[]): void {
