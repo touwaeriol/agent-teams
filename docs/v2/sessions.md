@@ -62,7 +62,10 @@ team and no task pool.
 - A switch with no answer within 2 minutes (a daemon that restarted meanwhile) ends the same way: the
   picks it changed go back to what the session runs and the view carries the error
   `节点没有回应，切换未生效` (done on the next GET or PUT); an effort a model switch dropped comes
-  back too. If the node answers after all, the session and the employee's picks follow its answer.
+  back too; an effort pick that followed the default (none on the employee) keeps following it. If
+  the node answers after all, the session follows its answer, and so do the employee's picks unless
+  a newer switch is waiting (its own answer settles them). A switch that took also sets the
+  employee's mode and model to what the session reports (the effort only when that switch changed it).
 - Approvals of a session go to its user directly (no lead review) and never time out
   (`approval_timeout_s` does not apply to projects of kind session). The platform allows a request
   without a card only while the session runs in `bypassPermissions` (`SkipsApprovals`).

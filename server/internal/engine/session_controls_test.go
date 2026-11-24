@@ -243,7 +243,51 @@ func TestSessionControls(t *testing.T) {
 		readPick()
 		return c.Model == "claude-haiku-4-5" && c.Error == "" && pick.Model == "claude-haiku-4-5" && pick.SessionEffort == ""
 	})
-
+	// A late answer while a newer switch waits (t40 review): haiku → opus times out, then the user
+	// picks default mode; the node answers the opus switch late, then the new one. The late answer
+	// must not overwrite the newer pick; the matched answer settles the employee on what runs.
+	b.must(200, "PUT", base, map[string]any{"model": "claude-opus-5-5"}, &c)
+	older := expectSetModeBody(t, a)
+	expire()
+	if c.Model != "claude-haiku-4-5" || c.Pending != nil {
+		t.Fatalf("opus switch timed out: %+v", c)
+	}
+	b.must(200, "PUT", base, map[string]any{"permission_mode": "default"}, &c)
+	newer := expectSetModeBody(t, a)
+	modeSet(a, *older.RequestID, true, "plan", "claude-opus-5-5", "medium", "")
+	eventually(t, "late answer applied to the session", func() bool {
+		c = controlsView{}
+		b.must(200, "GET", base, nil, &c)
+		return c.Model == "claude-opus-5-5" && c.Pending != nil
+	})
+	readPick()
+	if pick.SessionMode != "default" || pick.Model != "claude-haiku-4-5" || pick.SessionEffort != "" {
+		t.Fatalf("a late answer leaves the newer pick alone: %+v", pick)
+	}
+	modeSet(a, *newer.RequestID, true, "default", "claude-opus-5-5", "medium", "")
+	eventually(t, "newer switch applied", func() bool {
+		c = controlsView{}
+		b.must(200, "GET", base, nil, &c)
+		readPick()
+		return c.Pending == nil && c.PermissionMode == "default" && c.Model == "claude-opus-5-5" &&
+			pick.SessionMode == "default" && pick.Model == "claude-opus-5-5"
+	})
+	if pick.SessionEffort != "" {
+		t.Fatalf("a mode switch leaves an effort that follows the default alone: %+v", pick)
+	}
+	// The effort follows the default (the session runs medium, the employee has none): a switch to
+	// high that times out leaves it following the default, not pinned to medium.
+	b.must(200, "PUT", base, map[string]any{"effort": "high"}, &c)
+	expectSetModeBody(t, a)
+	readPick()
+	if pick.SessionEffort != "high" {
+		t.Fatalf("pick kept while pending: %+v", pick)
+	}
+	expire()
+	readPick()
+	if c.Pending != nil || c.Effort != "medium" || c.Error != "节点没有回应，切换未生效" || pick.SessionEffort != "" {
+		t.Fatalf("an unanswered effort switch from the default goes back to the default: %+v %+v", c, pick)
+	}
 
 	var events int64
 	if err := w.db.Pool.Gorm(w.ctx).Table("at_events").Where("project_id = ? AND type = 'session_controls'", pid).Count(&events).Error; err != nil || events < 6 {
