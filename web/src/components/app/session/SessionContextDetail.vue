@@ -8,7 +8,7 @@
 import { ChevronRight } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import { cn } from "@/lib/utils";
-import { categoryRows, mcpGroups, segments, type CategoryRow, type ContextDetail } from "./contextDetail";
+import { categoryRows, HATCH, mcpGroups, segments, swatchStyle, type CategoryRow, type ContextDetail } from "./contextDetail";
 
 const props = defineProps<{ detail: ContextDetail }>();
 const rows = computed(() => categoryRows(props.detail));
@@ -18,22 +18,17 @@ const groupsOf = (r: CategoryRow) => mcpGroups(r.tools, props.detail.max_tokens)
 function toggle(r: CategoryRow) {
   open.value = { ...open.value, [r.key]: !open.value[r.key] };
 }
-const swatch = (r: CategoryRow) => {
-  if (r.kind === "buffer") return { background: "repeating-linear-gradient(135deg,#DCD9D2 0 2px,#EFEDE8 2px 4px)" };
-  if (r.kind === "free") return { background: "#EFEDE8", border: "1px solid #DCD9D2" };
-  if (r.kind === "deferred") return { border: "1px dashed #B7B3AA" };
-  return { background: r.color };
-};
+const swatch = (r: CategoryRow) => swatchStyle(r.kind, r.color);
 </script>
 
 <template>
   <div class="flex flex-col gap-2" data-testid="context-detail">
-    <div class="flex h-1.5 overflow-hidden rounded-sm bg-[#EFEDE8] dark:bg-raised" data-testid="context-segments">
+    <div class="flex h-1.5 overflow-hidden rounded-sm bg-raised" data-testid="context-segments">
       <span
         v-for="s in segs"
         :key="s.key"
         class="h-full shrink-0"
-        :style="s.buffer ? { width: s.width, background: 'repeating-linear-gradient(135deg,#DCD9D2 0 2px,#EFEDE8 2px 4px)' } : { width: s.width, background: s.color }"
+        :style="{ width: s.width, background: s.buffer ? HATCH : s.color }"
         :title="s.label"
       />
     </div>

@@ -6,7 +6,7 @@ import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { applyProjectEvent } from "@/api/events";
 import { keys } from "@/api/queries";
-import { categoryRows, mcpGroups, pctText, segments, shortTool, updatedText } from "@/components/app/session/contextDetail";
+import { CATEGORY_COLOR, categoryRows, HATCH, mcpGroups, pctText, refreshErrorText, segments, shortTool, swatchStyle, updatedText } from "@/components/app/session/contextDetail";
 import SessionContextPanel from "@/components/app/session/SessionContextPanel.vue";
 import { toast } from "@/lib/toast";
 import { contextDetail } from "./fixtures";
@@ -60,6 +60,26 @@ describe("context breakdown helpers", () => {
     expect(g[1].tools[0].name).toBe("mcp__plugin_github_github__create_pull_request_review_comment_with_suggestions");
     expect(shortTool("mcp__claude_ai_Claude_Docs__read", "claude_ai_Claude_Docs")).toBe("read");
     expect(shortTool("mcp__other__x__y", "Other Server")).toBe("x__y");
+  });
+
+  it("draws the neutral swatches and ink rows in theme colours (readable in dark mode)", () => {
+    expect(CATEGORY_COLOR.messages).toBe("hsl(var(--foreground))");
+    for (const kind of ["buffer", "free", "deferred"] as const) expect(JSON.stringify(swatchStyle(kind, "#000"))).not.toMatch(/#[0-9A-Fa-f]{6}/);
+    expect(HATCH).toContain("var(--input)");
+    expect(swatchStyle("used", "#C8622A")).toEqual({ background: "#C8622A" });
+    const unknown = categoryRows(contextDetail({ categories: [{ id: "", name: "X", tokens: 1, kind: "used" }] })).used[0];
+    expect(unknown.color).toBe("hsl(var(--ring))");
+  });
+
+  it("says a failed refresh in Chinese", () => {
+    expect(refreshErrorText(undefined)).toBeNull();
+    expect(refreshErrorText("the session has no live process")).toContain("没有在运行");
+    expect(refreshErrorText("no such session on this node")).toContain("找不到这个会话");
+    expect(refreshErrorText("node offline")).toBe("节点不在线，稍后再试");
+    expect(refreshErrorText("getContextUsage timed out")).toBe("节点没能及时统计完，稍后再试");
+    expect(refreshErrorText("the runtime did not report its context")).toBe("节点没能及时统计完，稍后再试");
+    expect(refreshErrorText("the runtime has no context breakdown")).toBe("这个运行时不提供上下文细分");
+    expect(refreshErrorText("boom")).toBe("节点没能统计上下文，稍后再试");
   });
 
   it("formats shares and the update time", () => {
@@ -177,7 +197,10 @@ describe("SessionContextPanel", () => {
     applyProjectEvent(queryClient, "p1", "context", { thread_no: 1, conversation_id: "t1", session_id: "s_1", reason: "refresh", refresh_id: "cr_1", error: "the session has no live process" });
     await flushPromises();
     expect(w.find("[data-testid=context-refresh]").text()).toBe("刷新");
-    expect(err).toHaveBeenCalledWith("刷新失败：the session has no live process");
+    expect(err).toHaveBeenCalledWith("刷新失败：会话现在没有在运行（已停放），发一条消息后再刷新");
+    const line = w.find("[data-testid=context-refresh-error]");
+    expect(line.text()).toBe("刷新失败：会话现在没有在运行（已停放），发一条消息后再刷新");
+    expect(line.attributes("title")).toBe("the session has no live process");
     // stale: no updated_at, no error — just ends
     await w.find("[data-testid=context-refresh]").trigger("click");
     await flushPromises();
@@ -224,7 +247,44 @@ describe("SessionContextPanel", () => {
     vi.advanceTimersByTime(46_000);
     await flushPromises();
     expect(w.find("[data-testid=context-refresh]").text()).toBe("刷新");
-    expect(err).toHaveBeenCalledWith("刷新超时，稍后再试");
+    expect(err).toHaveBeenCalledWith("刷新失败：节点没能及时统计完，稍后再试");
+  });
+
+  it("ends at once when the answer came before the POST returned", async () => {
+    const held: { qc?: QueryClient } = {};
+    api(
+      () => ({ status: 200, body: contextDetail() }),
+      () => {
+        applyProjectEvent(held.qc!, "p1", "context", { thread_no: 1, conversation_id: "t1", session_id: "s_1", reason: "refresh", refresh_id: "cr_1", updated_at: "y" });
+        return { status: 202, body: { refresh_id: "cr_1", session_id: "s_1" } };
+      },
+    );
+    const { w, queryClient } = mountPanel({ id: "t1", session: session() });
+    held.qc = queryClient;
+    await flushPromises();
+    await w.find("[data-testid=context-refresh]").trigger("click");
+    await flushPromises();
+    expect(w.find("[data-testid=context-refresh]").text()).toBe("刷新");
+  });
+
+  it("forgets a pending refresh and its failure when another session opens", async () => {
+    const err = vi.spyOn(toast, "error").mockImplementation(() => undefined as never);
+    api(() => ({ status: 200, body: contextDetail() }));
+    const { w, queryClient } = mountPanel({ id: "t1", session: session() });
+    await flushPromises();
+    await w.find("[data-testid=context-refresh]").trigger("click");
+    await flushPromises();
+    applyProjectEvent(queryClient, "p1", "context", { thread_no: 1, conversation_id: "t1", session_id: "s_1", reason: "refresh", refresh_id: "cr_1", error: "boom" });
+    await flushPromises();
+    expect(w.find("[data-testid=context-refresh-error]").exists()).toBe(true);
+    await w.find("[data-testid=context-refresh]").trigger("click");
+    await flushPromises();
+    expect(w.find("[data-testid=context-refresh]").text()).toBe("刷新中…");
+    await w.setProps({ thread: { id: "t2", session: session() } });
+    await flushPromises();
+    expect(w.find("[data-testid=context-refresh]").text()).toBe("刷新");
+    expect(w.find("[data-testid=context-refresh-error]").exists()).toBe(false);
+    expect(err).toHaveBeenCalledTimes(1);
   });
 
   it("a turn's context event refetches the breakdown (auto update)", async () => {

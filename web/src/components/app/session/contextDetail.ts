@@ -25,18 +25,42 @@ export const CATEGORY_LABEL: Record<string, string> = {
   system_tools_deferred: "延迟加载的系统工具",
 };
 
-/** Colours of the rows that fill the window (the bar's segments). */
+/** Colours of the rows that fill the window (the bar's segments). Ink-like rows use theme variables (dark mode). */
 export const CATEGORY_COLOR: Record<string, string> = {
   mcp_tools: "#C8622A",
   system_tools: "#2F6FDB",
-  messages: "#1F1E1C",
+  messages: "hsl(var(--foreground))",
   skills: "#2E7D4F",
   memory_files: "#7A4FD1",
   system_prompt: "#8A877F",
   mcp_instructions: "#E3A57A",
   custom_agents: "#2F8F9D",
 };
-const OTHER_COLOR = "#B7B3AA";
+const OTHER_COLOR = "hsl(var(--ring))";
+
+/** The swatches of the rows outside what is used, in theme variables so they show in dark mode too. */
+export const HATCH = "repeating-linear-gradient(135deg, hsl(var(--input)) 0 2px, hsl(var(--raised)) 2px 4px)";
+export function swatchStyle(kind: ContextCategory["kind"], color: string): Record<string, string> {
+  if (kind === "buffer") return { background: HATCH };
+  if (kind === "free") return { background: "hsl(var(--raised))", border: "1px solid hsl(var(--input))" };
+  if (kind === "deferred") return { border: "1px dashed hsl(var(--ring))" };
+  return { background: color };
+}
+
+/**
+ * A failed refresh in words the user reads (the node answers in English); null when there is no
+ * error. The original text goes in the tooltip.
+ */
+export function refreshErrorText(error: string | undefined | null): string | null {
+  if (!error) return null;
+  const e = error.toLowerCase();
+  if (e.includes("no live process") || e.includes("not running") || e.includes("parked")) return "会话现在没有在运行（已停放），发一条消息后再刷新";
+  if (e.includes("no such session") || e.includes("unknown session")) return "节点上找不到这个会话（节点可能重启过），发一条消息后再刷新";
+  if (e.includes("offline") || e.includes("not online") || e.includes("disconnected")) return "节点不在线，稍后再试";
+  if (e.includes("timed out") || e.includes("timeout") || e.includes("did not report")) return "节点没能及时统计完，稍后再试";
+  if (e.includes("no context breakdown") || e.includes("unsupported")) return "这个运行时不提供上下文细分";
+  return "节点没能统计上下文，稍后再试";
+}
 
 /** The order rows are listed in (others follow in the runtime's order). */
 const USED_ORDER = ["mcp_tools", "system_tools", "messages", "skills", "memory_files", "system_prompt", "mcp_instructions", "custom_agents"];
