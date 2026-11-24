@@ -56,6 +56,9 @@ export const keys = {
   sessionControls: (pid: string) => ["p", pid, "session-controls"] as const,
   sessionOptions: (role: string, model: string) => ["session-options", role, model] as const,
   conversationCommands: (cid: string) => ["c", cid, "commands"] as const,
+  contextDetail: (cid: string) => ["c", cid, "context-detail"] as const,
+  /** The latest project event context of a conversation (written by events.ts, read by the 刷新 button). */
+  contextEvent: (cid: string) => ["c", cid, "context-event"] as const,
   plugins: ["plugins"] as const,
   adminPlugins: ["admin", "plugins"] as const,
   deliverableFiles: (id: string, version = 0) => ["deliverable", id, "files", version] as const,
@@ -269,6 +272,12 @@ export const useSessionOptions = (role: Arg, model: Arg) =>
     () => unwrap(client.GET("/api/session-options", { params: { query: { role: val(role), ...(val(model) ? { model: val(model) } : {}) } } })),
     { enabled: has(role), staleTime: 60_000 },
   );
+/** A session's context breakdown (Claude only; 404 for other conversations, so no retry). */
+export const useContextDetail = (cid: Arg, enabled: () => boolean = () => true) =>
+  useKeyed(() => keys.contextDetail(val(cid)), () => unwrap(client.GET("/api/conversations/{cid}/context/detail", path({ cid: val(cid) }))), {
+    enabled: () => has(cid)() && enabled(),
+    retry: false,
+  });
 export const useRolePresets = () => useQuery({ queryKey: keys.rolePresets, queryFn: () => unwrap(client.GET("/api/roles/presets")), staleTime: 300_000 });
 
 export const useSkills = () => useQuery({ queryKey: keys.skills, queryFn: () => unwrap(client.GET("/api/skills")) });
