@@ -2,7 +2,8 @@
 // 新建 (a session), like Claude Code's new session: a clean page with one line in the middle and the
 // box at the bottom. In the box: what to do and, folded into a chip, the repositories (each from a
 // branch) and the work branch's name. Under it one row (NewSessionOptions): node (自动选择 or one of
-// the user's nodes), role (a template only) and model, with room for more controls at its end.
+// the user's nodes), role (a template only), agent (one of the role's runtimes) and model, then
+// effort and permission mode. Node, role and agent are fixed once the session starts.
 // Enter sends (Shift+Enter: new line). The choices are remembered for the next session.
 import { ChevronDown, FolderGit2 } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
@@ -16,8 +17,7 @@ import NewSessionControls from "@/components/app/session/controls/NewSessionCont
 import SessionRepos from "@/components/app/session/SessionRepos.vue";
 import { DEFAULTS_KEY, parseDefaults, reposLabel, sessionReposPayload, usableNode, type SessionRepo } from "@/components/app/session/session";
 import Field from "@/components/common/Field.vue";
-import { MODEL_FORMAT_HINT, validModel, type Runtime } from "@/lib/models";
-import { runtimeSpec } from "@/lib/runtimes";
+import { MODEL_FORMAT_HINT, runtimesOf, validModel } from "@/lib/models";
 import { readLocal, writeLocal } from "@/lib/persist";
 import { toast } from "@/lib/toast";
 
@@ -47,7 +47,19 @@ watch(
   { immediate: true },
 );
 const picked = computed(() => members.value.find((r) => r.role === role.value));
-const runtime = computed<Runtime>(() => runtimeSpec(picked.value?.runtime).id);
+/** The agent (CLI): one of the picked role's runtimes, its first by default; fixed once the session starts. */
+const agent = ref(saved?.agent ?? "");
+watch(
+  picked,
+  (r) => {
+    if (!r) return;
+    const list = runtimesOf(r);
+    if (!list.includes(agent.value)) agent.value = list[0];
+  },
+  { immediate: true },
+);
+// A model typed for one agent means nothing to another.
+watch(agent, (now, before) => before && now !== before && (model.value = ""));
 const nodeList = computed(() => nodes.data.value ?? []);
 const ready = computed(() => message.value.trim() !== "" && repos.value.length > 0 && role.value !== "");
 
@@ -57,6 +69,7 @@ const create = useAction(
       message: message.value.trim(),
       repos: sessionReposPayload(repos.value),
       role: role.value,
+      runtime: agent.value || undefined,
       model: model.value.trim() || undefined,
       permission_mode: (mode.value || undefined) as never,
       effort: effort.value || undefined,
@@ -66,7 +79,7 @@ const create = useAction(
   {
     invalidate: [keys.projects],
     onSuccess: (s) => {
-      writeLocal(DEFAULTS_KEY, JSON.stringify({ repos: repos.value, node: node.value, role: role.value }));
+      writeLocal(DEFAULTS_KEY, JSON.stringify({ repos: repos.value, node: node.value, role: role.value, agent: agent.value }));
       void router.push(`/sessions/${s.project.id}`);
     },
   },
@@ -129,11 +142,11 @@ const reposText = computed(() => (branch.value.trim() ? `${reposLabel(repos.valu
             <span class="truncate">{{ reposText }}</span>
             <ChevronDown class="size-3 shrink-0" />
           </button>
-          <SendButton label="开始会话" class="ml-auto" :busy="create.isPending.value" :disabled="!ready" />
+          <SendButton label="发送" class="ml-auto" :busy="create.isPending.value" :disabled="!ready" />
         </div>
       </div>
-      <NewSessionOptions v-model:node="node" v-model:role="role" v-model:model="model" :nodes="nodeList" :roles="members" :runtime="runtime" :auto="AUTO" class="mt-1.5 px-1">
-        <NewSessionControls v-model:mode="mode" v-model:effort="effort" :role="role" :model="model" />
+      <NewSessionOptions v-model:node="node" v-model:role="role" v-model:agent="agent" v-model:model="model" :nodes="nodeList" :roles="members" :auto="AUTO" class="mt-1.5 px-1">
+        <NewSessionControls v-model:mode="mode" v-model:effort="effort" :role="role" :agent="agent" :model="model" />
       </NewSessionOptions>
     </form>
     <el-dialog v-model="reposOpen" title="仓库" width="600px" class="at-dialog w-[calc(100%-2rem)] max-w-[600px]" append-to-body>

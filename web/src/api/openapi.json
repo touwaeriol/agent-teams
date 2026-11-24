@@ -6766,7 +6766,7 @@
             "type": "string"
           },
           "model": {
-            "description": "'' = the role's model",
+            "description": "'' = the role's model for the runtime",
             "maxLength": 100,
             "type": "string"
           },
@@ -6800,6 +6800,11 @@
           "role": {
             "description": "Member role template the employee is made from; '' = the first member role",
             "maxLength": 64,
+            "type": "string"
+          },
+          "runtime": {
+            "description": "The agent (CLI) the session runs on: one of the role's runtimes; '' = the role's (several: spread like any employee). Fixed once the session starts",
+            "maxLength": 32,
             "type": "string"
           },
           "title": {
@@ -15804,12 +15809,23 @@
             }
           },
           {
-            "description": "The model picked on the page ('' = the role's)",
+            "description": "The agent picked on the page, one of the role's runtimes ('' = the role's first)",
+            "explode": false,
+            "in": "query",
+            "name": "runtime",
+            "schema": {
+              "description": "The agent picked on the page, one of the role's runtimes ('' = the role's first)",
+              "maxLength": 32,
+              "type": "string"
+            }
+          },
+          {
+            "description": "The model picked on the page ('' = the role's for the runtime)",
             "explode": false,
             "in": "query",
             "name": "model",
             "schema": {
-              "description": "The model picked on the page ('' = the role's)",
+              "description": "The model picked on the page ('' = the role's for the runtime)",
               "maxLength": 100,
               "type": "string"
             }

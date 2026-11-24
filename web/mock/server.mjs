@@ -689,6 +689,9 @@ routes.push(...serverRoutes(state, { json, fail, body, roles: () => state.roles,
 // 2 minutes) the pending pick is dropped with the old values kept and the error 节点没有回应，切换未生效.
 // MOCK_NODE_OUTDATED=1 serves the old daemon's menus. An old daemon never answers and a parked
 // session has nothing to answer: their switches are in force at once (no pending), as on the server.
+/** A role's runtimes (agents), its first first; the model of one of them (server Role.RuntimeList / ModelFor). */
+const roleRuntimes = (r) => (r.runtimes?.length ? r.runtimes : [r.runtime ?? "claude"]);
+const roleModel = (r, runtime) => (runtime === roleRuntimes(r)[0] ? r.model : (r.models?.[runtime] ?? ""));
 const sessionThread = (pid) => state.sessionThreads.find((t) => t.project_id === pid);
 const sessionPending = {};
 const sessionErrors = {};
@@ -764,9 +767,10 @@ routes.push(
   ["GET", /^\/api\/session-options$/, (req, res, _m, url) => {
     const r = state.roles.find((x) => x.role === url.searchParams.get("role") && x.tier === "member");
     if (!r) return fail(res, 404, "没有这个岗位", "not_found");
-    const runtime = r.runtime ?? "claude";
+    const runtime = url.searchParams.get("runtime") || roleRuntimes(r)[0];
+    if (!roleRuntimes(r).includes(runtime)) return json(res, 422, { detail: `这个岗位没有配置这个 agent：${runtime}`, code: "invalid", field: "runtime" });
     const rt = state.sessionRuntimes[runtime] ?? state.sessionRuntimes.claude;
-    const model = url.searchParams.get("model") || r.model || (rt.models.find((x) => x.default)?.id ?? "");
+    const model = url.searchParams.get("model") || roleModel(r, runtime) || (rt.models.find((x) => x.default)?.id ?? "");
     const menus = controlsMenus(runtime, model);
     const m = rt.models.find((x) => x.id === model);
     const defaultMode = runtime === "claude" ? (m && !m.supports_auto ? "default" : "auto") : r.permission_mode === "ask" ? "default" : "bypassPermissions";
@@ -775,9 +779,11 @@ routes.push(
   ["POST", /^\/api\/sessions$/, async (req, res) => {
     const b = await body(req);
     const r = state.roles.find((x) => x.role === b.role && x.tier === "member") ?? state.roles.find((x) => x.tier === "member");
-    const runtime = r.runtime ?? "claude";
+    // The agent: one of the role's runtimes (its first by default), fixed for the session.
+    const runtime = b.runtime || roleRuntimes(r)[0];
+    if (!roleRuntimes(r).includes(runtime)) return json(res, 422, { detail: `这个岗位没有配置这个 agent：${runtime}`, code: "invalid", field: "runtime" });
     const rt = state.sessionRuntimes[runtime] ?? state.sessionRuntimes.claude;
-    const model = b.model || r.model || (rt.models.find((x) => x.default)?.id ?? "");
+    const model = b.model || roleModel(r, runtime) || (rt.models.find((x) => x.default)?.id ?? "");
     const bad = checkControls(runtime, model, { permission_mode: b.permission_mode, effort: b.effort });
     if (bad) return json(res, 422, { detail: bad[1], code: "invalid", field: bad[0] });
     const pid = `s${Date.now()}`;
@@ -787,7 +793,8 @@ routes.push(
     state.projects.unshift(p);
     const base = state.sessionThreads.find((x) => x.session?.runtime === runtime) ?? state.sessionThreads[0];
     const t = { ...structuredClone(base), id: `t${pid}`, project_id: pid, title, status: "running", branch: b.branch || `session/${pid}`, created_at: now(), updated_at: now() };
-    t.session = { ...t.session, state: "active", context_used: null, context_max: null };
+    t.session = { ...t.session, runtime, state: "active", context_used: null, context_max: null };
+    t.members = t.members.map((m) => (m.tier === "lead" ? { ...m, runtime, title: r.title, role: r.role } : m));
     state.sessionThreads.push(t);
     const m = rt.models.find((x) => x.id === model);
     const mode = b.permission_mode || (runtime === "claude" ? (m && !m.supports_auto ? "default" : "auto") : r.permission_mode === "ask" ? "default" : "bypassPermissions");

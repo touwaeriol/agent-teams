@@ -25,6 +25,7 @@ type SessionRequest struct {
 	Title             string
 	Message           string      // the user's first message, delivered once the thread starts
 	Role              store.Role  // the member role template the employee is made from
+	Runtime           string      // the agent picked among the role's runtimes ('' = the role's; checked by the caller)
 	Model             string      // '' = the role's model
 	PermissionMode    string      // '' = the initial mode (soloMode); kept as the employee's session_mode
 	Effort            string      // '' = project / role effort; kept as the employee's session_effort
@@ -34,19 +35,25 @@ type SessionRequest struct {
 }
 
 // SessionRole turns a member role template into a session employee's role: a writing lead
-// (Solo) on the role's runtimes, pinned to nodeID when given. A model picked for the session
-// applies to the role's first runtime, which the session then keeps to.
+// (Solo), pinned to nodeID when given. With a runtime (the agent the user picked, one of the
+// role's runtimes) the session keeps to it, with the role's model for it unless a model was
+// picked. Without one, a picked model applies to the role's first runtime, which the session then
+// keeps to; with neither it may run on any of the role's runtimes.
 //
 // The role is only a template (prompt, runtimes, model, permissions): the employee is not one of
 // the role's staff (Count, project members) and does not take the nodes the role's members are
 // placed on: the role's own node_ids are dropped, so a session runs on the node the user picked or
 // on any of the user's nodes (nodepick). Only the node's physical cap (max_active_sessions) and
 // quota still apply, as for every live session.
-func SessionRole(r store.Role, model, nodeID string) store.Role {
+func SessionRole(r store.Role, runtime, model, nodeID string) store.Role {
 	r.ID, r.Tier, r.Solo, r.Count = "", "lead", true, 1
 	r.ReadOnly, r.Gate, r.TaskKinds, r.CanDelegate = nil, "", nil, false
 	r.CompactBetweenPct, r.ClearAfterTasks = nil, nil
-	if model = strings.TrimSpace(model); model != "" {
+	model = strings.TrimSpace(model)
+	switch {
+	case runtime != "":
+		r.Runtime, r.Model, r.Runtimes, r.Models = runtime, firstNonEmpty(model, r.ModelFor(runtime)), nil, nil
+	case model != "":
 		r.Model, r.Runtimes, r.Models = model, nil, nil
 	}
 	r.NodeIDs = []string{}
@@ -86,7 +93,7 @@ func repoWords(repos []RepoFocus) string {
 // OpenSession opens the session's thread and starts it (within the user's running-thread
 // limit): the employee then gets the user's first message.
 func (o *Orchestrator) OpenSession(ctx context.Context, req SessionRequest) (core.Thread, error) {
-	role := SessionRole(req.Role, req.Model, req.NodeID)
+	role := SessionRole(req.Role, req.Runtime, req.Model, req.NodeID)
 	return o.OpenThread(ctx, ThreadRequest{UserID: req.UserID, ProjectID: req.ProjectID, Title: req.Title,
 		Brief: req.Message, OpenedBy: "user", Repos: req.Repos, Solo: &role, SoloMode: req.PermissionMode, SoloEffort: req.Effort, Branch: SessionBranch(req.ProjectID, req.Branch, req.Title, req.Repos)})
 }

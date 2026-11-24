@@ -1,6 +1,6 @@
 // 会话 (multi-repository sessions): the helpers behind the sidebar rows, the new-session form and 工作现场.
 import { describe, expect, it } from "vitest";
-import { contextTotal, homeOf, isSession, parseDefaults, repoDir, reposLabel, sessionMark, sessionReposPayload, sessionText, usableNode, withBranches, zhTokens } from "@/components/app/session/session";
+import { contextTotal, homeOf, isSession, parseDefaults, repoDir, reposLabel, sessionMark, sessionReposPayload, sessionText, usableNode, withBranches, zhTokens, fixedParts } from "@/components/app/session/session";
 import { projectGroups } from "@/pages/projects";
 
 describe("sessions", () => {
@@ -52,6 +52,7 @@ describe("new session box and projects page", () => {
       repos: [{ repo: "o/web", git_connection_id: "c", branch: "" }],
       node: "n1",
       role: "",
+      agent: "",
     });
   });
   it("lists projects only on the projects page: pinned, then the others, archived last", () => {
@@ -105,5 +106,27 @@ describe("new session node (#53 t25)", () => {
     expect(usableNode("n2", nodes, "auto")).toBe("auto");
     expect(usableNode("gone", nodes, "auto")).toBe("auto");
     expect(usableNode("auto", nodes, "auto")).toBe("auto");
+  });
+});
+
+describe("agent pick and fixed picks (#53 t46)", () => {
+  it("lists a role's agents (its runtimes, first first) with the model for each", async () => {
+    const { runtimesOf, scopedModel } = await import("@/lib/models");
+    const role = { tier: "member", runtime: "claude", runtimes: ["claude", "codex", "antigravity"], model: "claude-opus-5-5", models: { codex: "gpt-5.5-codex" } };
+    expect(runtimesOf(role)).toEqual(["claude", "codex", "antigravity"]);
+    expect(scopedModel(role, "codex")).toBe("gpt-5.5-codex");
+    expect(scopedModel(role, "claude")).toBe("claude-opus-5-5");
+    expect(runtimesOf({ tier: "member", runtime: "codex" })).toEqual(["codex"]);
+  });
+  it("remembers the agent with the other picks", () => {
+    expect(parseDefaults(JSON.stringify({ repos: [], node: "n1", role: "dev", agent: "codex" }))).toEqual({ repos: [], node: "n1", role: "dev", agent: "codex" });
+    expect(parseDefaults(JSON.stringify({ repos: [], node: "n1", role: "dev" }))?.agent).toBe("");
+  });
+  it("shows a started session's node, role and agent read-only", () => {
+    const label = (id: string) => ({ claude: "Claude Code", codex: "Codex" })[id] ?? id;
+    const lead = { name: "dev-1", title: "开发", role: "dev", runtime: "claude", node: { name: "rc-erio" } };
+    expect(fixedParts(lead, "codex", label)).toEqual({ node: "rc-erio", role: "开发", agent: "Codex" });
+    expect(fixedParts({ ...lead, node: null }, null, label)).toEqual({ node: "", role: "开发", agent: "Claude Code" });
+    expect(fixedParts(undefined, "codex", label)).toEqual({ node: "", role: "", agent: "" });
   });
 });

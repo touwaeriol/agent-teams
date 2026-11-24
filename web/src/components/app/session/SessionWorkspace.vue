@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// 会话信息 of a session: 环境 (the node and whether it is online, the CLI, every repository with the
+// 会话信息 of a session: 环境 (the node and whether it is online, the role and agent (CLI) — the
+// three are fixed once the session starts — every repository with the
 // branch it started from, the work branch, the working directory on the node) and 上下文 (the
 // total and its breakdown, Claude only; hidden for runtimes without a breakdown). Repositories can be added or removed while it runs.
 import { FolderGit2 } from "lucide-vue-next";
@@ -56,8 +57,10 @@ const save = useAction(() => sessions.setRepos(props.project.id, sessionReposPay
           </template>
           <span v-else class="text-muted-foreground">等待分配节点</span>
         </dd>
-        <dt class="text-xs leading-5 text-muted-foreground">CLI</dt>
-        <dd class="leading-5">{{ cli }}</dd>
+        <dt class="text-xs leading-5 text-muted-foreground">岗位</dt>
+        <dd class="truncate leading-5" data-testid="env-role">{{ lead?.title || lead?.role || "—" }}</dd>
+        <dt class="text-xs leading-5 text-muted-foreground">Agent</dt>
+        <dd class="leading-5" data-testid="env-agent">{{ cli }}</dd>
         <dt class="text-xs leading-5 text-muted-foreground">仓库</dt>
         <dd class="flex min-w-0 flex-col gap-1.5">
           <template v-if="!editing">

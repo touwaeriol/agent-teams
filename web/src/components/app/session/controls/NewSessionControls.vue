@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * The new-session page's thinking effort and permission mode (#53), from GET /api/session-options
- * for the picked role and model (the model chip sits before these in NewSessionOptions). The
+ * for the picked role, agent (runtime) and model (the model chip sits before these in NewSessionOptions). The
  * picks go with POST /api/sessions; "" = the session's default (Claude: 自动 when the model
  * supports it, else 手动; Codex/Antigravity: the role's). The digits pick a mode while its menu
  * is open.
@@ -14,11 +14,12 @@ import { MODE_LOOK, TONE_CLASS, appliesNote, effortLabel, isMode, modeRows, noAu
 import ModeIcon from "./ModeIcon.vue";
 import ModeMenuBody from "./ModeMenuBody.vue";
 
-const props = defineProps<{ role: string; model: string }>();
+const props = defineProps<{ role: string; agent: string; model: string }>();
 const mode = defineModel<string>("mode", { required: true });
 const effort = defineModel<string>("effort", { required: true });
 const opts = useSessionOptions(
   () => props.role,
+  () => props.agent,
   () => props.model.trim(),
 );
 const o = computed(() => opts.data.value);
