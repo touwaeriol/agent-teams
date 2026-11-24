@@ -10,8 +10,12 @@ team and no task pool.
 - A session is a row of `at_projects` with `kind = 'session'` (migration 00420). Projects have
   `kind = 'project'`. The sidebar shows both in one list and tells them apart by icon.
 - It has exactly one thread (no. 1). The thread's role snapshot holds one entry: a `lead` with
-  `solo = true`, made from the member role the user picked (`orchestrator.SessionRole`). A chosen
-  model replaces the role's model. A chosen node becomes the employee's only candidate
+  `solo = true`, made from the member role the user picked (`orchestrator.SessionRole`). The role
+  is only a template: the employee is not one of its staff and does not take the role's nodes.
+  The agent (`runtime`) is picked among the role's runtimes (`role.runtimes`, its first by
+  default); the session keeps to it, with the role's model for that runtime unless a model was
+  picked (a chosen model replaces it). Without a runtime pick, a chosen model applies to the
+  role's first runtime; with neither the session may run on any of the role's runtimes. A chosen node becomes the employee's only candidate
   (`spec.node_ids`); without one the employee is scheduled like any other (lowest load
   score: used quota plus 10 points per live session on the node, see shared-members.md §4.3).
 - The branch picked for each repository is the thread's base there (`at_thread_repos.base_branch`).
@@ -30,7 +34,13 @@ team and no task pool.
 - `PUT /api/sessions/{pid}/repos` changes the repositories while the session runs. Added ones are
   checked out at once on the employee's node (from the picked branch). Removed ones are cleaned up
   on that node (unpushed commits are kept). The employee gets a note either way.
-- 结束会话 completes the thread. The conversation stays, and the next message reopens it.
+- 已解决 (the confirm bar under a finished round) completes the thread. The conversation stays,
+  and the next message reopens it.
+- New session (`/sessions/new`, the sidebar's 新建): a clean conversation window with the box at
+  the bottom; under it node (自动选择 or one of the user's nodes), role, agent (a read-only tag when
+  the role has one runtime), model, effort and permission mode. Once the session starts, node,
+  role and agent are fixed: the session page shows them read-only (the box's controls row and
+  会话信息); model, effort and mode can still be switched (session controls below).
 
 ## Permission mode, model and effort (#53, migration 00440)
 
@@ -80,16 +90,17 @@ projects/<pid>/repos/<owner>__<repo>    ← shared clone
 
 ## API
 
-- `POST /api/sessions` `{message, title?, repos: [{repo, git_connection_id | git_repo_id, branch?}], role?, model?, node_id?, branch?, permission_mode?, effort?}`
+- `POST /api/sessions` `{message, title?, repos: [{repo, git_connection_id | git_repo_id, branch?}], role?, runtime?, model?, node_id?, branch?, permission_mode?, effort?}`
   → `201 {project, thread_id, thread_no}`. `permission_mode` (`auto` / `default` / `acceptEdits` /
   `plan` / `bypassPermissions`) and `effort` are the new-session page's picks; left out = the
   session's default (Claude: `auto`, or `default` when the model lacks it; Codex and Antigravity:
   the role's). They are checked against the role's runtime and model like a switch (422 with
   `field` for a value the session cannot take) and kept on the employee (`session_mode`,
-  `session_effort`), so the first turn already runs with them.
-- `GET /api/session-options?role=&model=` → `SessionOptions {runtime, default_mode, model, modes,
-  models, efforts}`: what a new session of that role (and model; empty = the role's) can start
-  with, for the new-session page. Same shapes as `SessionControls`; `models` come from the user's
+  `session_effort`), so the first turn already runs with them. `runtime` is the agent, one of the
+  role's runtimes (422 with `field: "runtime"` otherwise); modes and efforts are checked against it.
+- `GET /api/session-options?role=&runtime=&model=` → `SessionOptions {runtime, default_mode, model, modes,
+  models, efforts}`: what a new session of that role, agent (`runtime`, one of the role's; empty =
+  its first; 422 otherwise) and model (empty = the role's for the runtime) can start with, for the new-session page. Same shapes as `SessionControls`; `models` come from the user's
   latest session of that runtime that reported them (`init.models`), empty before the first one.
 - `PUT /api/sessions/{pid}/repos` `{repos}` → the project view.
 - `GET /api/projects/{pid}/session-controls` → `SessionControls {thread_id, runtime, live,
