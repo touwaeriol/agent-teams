@@ -146,7 +146,7 @@ func TestSessionControls(t *testing.T) {
 	}
 	b.must(200, "PUT", base, map[string]any{"model": "claude-haiku-4-5"}, &c)
 	set = expectSetModeBody(t, a)
-	modeSet(a, *set.RequestID, true, "plan", "claude-haiku-4-5", "low", "")
+	modeSet(a, *set.RequestID, true, "plan", "claude-haiku-4-5", "", "")
 	eventually(t, "haiku in force", func() bool {
 		c = controlsView{}
 		b.must(200, "GET", base, nil, &c)
@@ -159,6 +159,43 @@ func TestSessionControls(t *testing.T) {
 		Where("project_id = ?", pid).Scan(&pick).Error; err != nil || pick.SessionEffort != "" || pick.Model != "claude-haiku-4-5" {
 		t.Fatalf("the effort pick is dropped with a model that lacks it: %+v %v", pick, err)
 	}
+	// A switch the node never answers (t33): from "no effort" to high, then the 2 minutes run out.
+	// The view does not fall back to the unapplied pick; it says so and the employee's pick goes back.
+	b.must(200, "PUT", base, map[string]any{"model": "claude-opus-5-5"}, &c)
+	set = expectSetModeBody(t, a)
+	modeSet(a, *set.RequestID, true, "plan", "claude-opus-5-5", "", "")
+	eventually(t, "opus without effort", func() bool {
+		c = controlsView{}
+		b.must(200, "GET", base, nil, &c)
+		return c.Pending == nil && c.Model == "claude-opus-5-5" && c.Effort == ""
+	})
+	b.must(200, "PUT", base, map[string]any{"effort": "high"}, &c)
+	if c.Pending == nil || c.Pending.Effort != "high" {
+		t.Fatalf("effort switch pending %+v", c)
+	}
+	expectSetModeBody(t, a)
+	if _, err := store.Exec(w.ctx, w.db.Pool, `UPDATE at_agent_sessions SET controls = jsonb_set(controls, '{pending,at}', to_jsonb(now() - interval '3 minutes'))
+		WHERE employee_id = (SELECT id FROM at_employees WHERE project_id = $1)`, pid); err != nil {
+		t.Fatal(err)
+	}
+	c = controlsView{}
+	b.must(200, "GET", base, nil, &c)
+	if c.Pending != nil || c.Effort != "" || c.Error != "节点没有回应，切换未生效" {
+		t.Fatalf("an unanswered switch shows what still runs and says so: %+v", c)
+	}
+	if err := w.db.Pool.Gorm(w.ctx).Table("at_employees").Select("session_mode, session_effort, model").
+		Where("project_id = ?", pid).Scan(&pick).Error; err != nil || pick.SessionEffort != "" || pick.SessionMode != "plan" || pick.Model != "claude-opus-5-5" {
+		t.Fatalf("the unanswered pick goes back on the employee, the rest stays: %+v %v", pick, err)
+	}
+	b.must(200, "PUT", base, map[string]any{"effort": "medium"}, &c) // not switch_pending any more
+	set = expectSetModeBody(t, a)
+	modeSet(a, *set.RequestID, true, "plan", "claude-opus-5-5", "medium", "")
+	eventually(t, "medium in force", func() bool {
+		c = controlsView{}
+		b.must(200, "GET", base, nil, &c)
+		return c.Pending == nil && c.Effort == "medium" && c.Error == ""
+	})
+
 	var events int64
 	if err := w.db.Pool.Gorm(w.ctx).Table("at_events").Where("project_id = ? AND type = 'session_controls'", pid).Count(&events).Error; err != nil || events < 6 {
 		t.Fatalf("session_controls events %d %v", events, err)
