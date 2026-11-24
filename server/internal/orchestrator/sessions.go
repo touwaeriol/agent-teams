@@ -631,13 +631,16 @@ func setPermissionMode(ctx context.Context, tx *core.Tx, sessionID, mode string)
 	return tx.Gorm(ctx).Table("at_agent_sessions").Where("id = ?", sessionID).Update("permission_mode", mode).Error
 }
 
-// protectedRefs are the thread branch and the thread's base and default branch in every repository.
+// protectedRefs are the thread branch (not in a session, where it is the employee's own) and
+// the thread's base and default branch in every repository.
 func (o *Orchestrator) protectedRefs(ctx context.Context, q core.DB, env sessionEnv) []string {
 	refs := []string{}
 	if env.thread == nil {
 		return refs
 	}
-	refs = append(refs, env.thread.Branch)
+	if !env.thread.Solo() {
+		refs = append(refs, env.thread.Branch) // a session's employee pushes its own branch
+	}
 	for _, r := range env.repos {
 		for _, b := range []string{o.BaseFor(ctx, q, *env.thread, r), o.DefaultBranch(ctx, r)} {
 			if b != "" && !slices.Contains(refs, b) {

@@ -4559,6 +4559,14 @@
           "id": {
             "type": "string"
           },
+          "kind": {
+            "description": "project, or session (多仓库会话: one employee the user talks to directly in thread 1; no coordinator)",
+            "enum": [
+              "project",
+              "session"
+            ],
+            "type": "string"
+          },
           "merge_policy": {
             "description": "How a thread with PRs ends: pr = done once the checks pass, the PRs stay open for a person to merge; auto = merged into the base once the checks pass; manual = the user accepts",
             "enum": [
@@ -4638,6 +4646,7 @@
           "thread_codex_model",
           "thread_effort",
           "auto_resume",
+          "kind",
           "waiting",
           "threads_active",
           "created_at",
@@ -6224,6 +6233,105 @@
         "required": [
           "state",
           "node"
+        ],
+        "type": "object"
+      },
+      "SessionInput": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "description": "The task: the employee's first message",
+            "maxLength": 50000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "model": {
+            "description": "'' = the role's model",
+            "maxLength": 100,
+            "type": "string"
+          },
+          "node_id": {
+            "description": "Run on this node; '' = picked automatically (most quota left)",
+            "maxLength": 64,
+            "type": "string"
+          },
+          "repos": {
+            "description": "Repositories, all checked out side by side in the employee's directory",
+            "items": {
+              "$ref": "#/components/schemas/SessionRepoRef"
+            },
+            "maxItems": 20,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "role": {
+            "description": "Member role template the employee is made from; '' = the first member role",
+            "maxLength": 64,
+            "type": "string"
+          },
+          "title": {
+            "description": "'' = the first line of message",
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "repos"
+        ],
+        "type": "object"
+      },
+      "SessionRepoRef": {
+        "additionalProperties": false,
+        "properties": {
+          "branch": {
+            "description": "Branch the employee's work branch is cut from; '' = the repository's default branch",
+            "maxLength": 255,
+            "type": "string"
+          },
+          "git_connection_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "git_repo_id": {
+            "description": "A standalone repository (git-repos.md); then repo is its slug and git_connection_id is null",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "repo": {
+            "description": "GitHub URL, git@ URL or owner/repo",
+            "maxLength": 300,
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo"
+        ],
+        "type": "object"
+      },
+      "SessionReposInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "repos": {
+            "description": "The session's repositories after the change (order kept); new ones are checked out, missing ones removed",
+            "items": {
+              "$ref": "#/components/schemas/SessionRepoRef"
+            },
+            "maxItems": 20,
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "repos"
         ],
         "type": "object"
       },
@@ -8207,6 +8315,27 @@
         "required": [
           "role",
           "message"
+        ],
+        "type": "object"
+      },
+      "WorkSessionView": {
+        "additionalProperties": false,
+        "properties": {
+          "project": {
+            "$ref": "#/components/schemas/ProjectView"
+          },
+          "thread_id": {
+            "type": "string"
+          },
+          "thread_no": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "project",
+          "thread_id",
+          "thread_no"
         ],
         "type": "object"
       },
@@ -14730,6 +14859,99 @@
         "summary": "Log in from the console; the first test pins the host key",
         "tags": [
           "servers"
+        ]
+      }
+    },
+    "/api/sessions": {
+      "post": {
+        "operationId": "create-session",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkSessionView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Start a session: one employee working in several repositories, talked to directly",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/api/sessions/{pid}/repos": {
+      "put": {
+        "operationId": "set-session-repos",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionReposInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Add or remove a session's repositories while it runs",
+        "tags": [
+          "sessions"
         ]
       }
     },

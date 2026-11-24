@@ -41,6 +41,11 @@ export const projects = {
     unwrap(client.POST("/api/projects/{pid}/threads", { params: { path: { pid } }, body, ...idem() })),
 };
 
+export const sessions = {
+  create: (body: S["SessionInput"]) => unwrap(client.POST("/api/sessions", { body, ...idem() })),
+  setRepos: (pid: string, repos: S["SessionRepoRef"][]) => unwrap(client.PUT("/api/sessions/{pid}/repos", { params: { path: { pid } }, body: { repos } })),
+};
+
 export const deliverables = {
   rename: (id: string, title: string) => unwrap(client.PATCH("/api/deliverables/{id}", { params: { path: { id } }, body: { title } })),
   remove: (id: string) => unwrap(client.DELETE("/api/deliverables/{id}", { params: { path: { id } } })),

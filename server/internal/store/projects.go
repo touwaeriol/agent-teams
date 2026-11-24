@@ -31,8 +31,11 @@ type Project struct {
 	ThreadCodexModel string
 	ThreadEffort     string
 	AutoResume       bool
-	Waiting          int `gorm:"->"`
-	ThreadsActive    int `gorm:"->"`
+	// Kind is project (default) or session (多仓库会话: one thread, its employee talks to the user
+	// directly; see migrations/00420_project_kind.sql).
+	Kind          string
+	Waiting       int `gorm:"->"`
+	ThreadsActive int `gorm:"->"`
 }
 
 // TableName maps Project to at_projects.
@@ -49,6 +52,8 @@ type NewProject struct {
 	// Model overrides ('' = each role's model): the coordinator, Claude leads and members, Codex
 	// leads and members (orchestrator.Model).
 	CoordinatorModel, ThreadModel, ThreadCodexModel string
+	// Kind: '' = project; session for a 多仓库会话.
+	Kind string
 }
 
 // mergePolicy is the policy a new project stores: pr unless one was chosen.
@@ -57,6 +62,22 @@ func mergePolicy(p string) string {
 		return "pr"
 	}
 	return p
+}
+
+// Project kinds (at_projects.kind).
+const (
+	KindProject = "project"
+	KindSession = "session"
+)
+
+// Session reports whether the project is a 多仓库会话.
+func (p Project) Session() bool { return p.Kind == KindSession }
+
+func projectKind(k string) string {
+	if k == "" {
+		return KindProject
+	}
+	return k
 }
 
 // ProjectRepo is one repository bound to a project (at_project_repos), in project order.
@@ -75,7 +96,7 @@ const projectCols = `p.id, p.user_id, p.name, p.description, p.context,
 	COALESCE((SELECT json_agg(json_build_object('repo', r.repo, 'git_connection_id', r.git_connection_id, 'git_repo_id', r.git_repo_id)
 	  ORDER BY r.position, r.created_at) FROM at_project_repos r WHERE r.project_id = p.id), '[]'::json) AS repos,
 	p.created_at, p.updated_at, p.pinned, p.archived, p.work_mode, p.auto_approve, p.merge_policy,
-	p.delivery, p.office_layout, p.icon, p.coordinator_model, p.thread_model, p.thread_codex_model, p.thread_effort, p.auto_resume,
+	p.delivery, p.office_layout, p.icon, p.coordinator_model, p.thread_model, p.thread_codex_model, p.thread_effort, p.auto_resume, p.kind,
 	(SELECT count(*) FROM at_questions q WHERE q.project_id = p.id AND q.status = 'open' AND q.audience = 'user')
 	  + (SELECT count(*) FROM at_threads t WHERE t.project_id = p.id AND t.status = 'review'
 	    AND (p.merge_policy = 'manual' OR t.merge_error IS NOT NULL)) AS waiting,
@@ -118,7 +139,8 @@ func (s *Store) CreateProject(ctx context.Context, userID string, n NewProject) 
 		err := tx.g(ctx).Table("at_projects").Create(map[string]any{"id": id, "user_id": userID, "name": n.Name,
 			"description": n.Description, "context": n.Context, "work_mode": n.WorkMode, "auto_approve": n.AutoApprove,
 			"merge_policy": mergePolicy(n.MergePolicy), "delivery": delivery,
-			"coordinator_model": n.CoordinatorModel, "thread_model": n.ThreadModel, "thread_codex_model": n.ThreadCodexModel}).Error
+			"coordinator_model": n.CoordinatorModel, "thread_model": n.ThreadModel, "thread_codex_model": n.ThreadCodexModel,
+			"kind": projectKind(n.Kind)}).Error
 		if err != nil {
 			return err
 		}

@@ -7,6 +7,7 @@ import { useProjects } from "@/api/queries";
 import type { ProjectView } from "@/api/views";
 import ProjectIcon from "@/components/app/ProjectIcon.vue";
 import DropdownMenu from "@/components/common/DropdownMenu.vue";
+import { homeOf } from "@/components/app/session/session";
 import { matchesProject } from "./projects";
 
 const props = defineProps<{ project: ProjectView }>();
@@ -14,7 +15,10 @@ const router = useRouter();
 const projects = useProjects();
 const q = ref("");
 const list = computed(() => (projects.data.value ?? []).filter((p) => !p.archived || p.id === props.project.id).filter((p) => matchesProject(p, q.value)));
-const go = (command: string) => void router.push(command === "new" ? "/projects/new" : `/projects/${command}`);
+const go = (command: string) => {
+  const p = (projects.data.value ?? []).find((x) => x.id === command);
+  void router.push(command === "new" ? "/projects/new" : p ? homeOf(p) : `/projects/${command}`);
+};
 const vFocus = { mounted: (el: HTMLElement) => setTimeout(() => el.focus(), 0) };
 </script>
 

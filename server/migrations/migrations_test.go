@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 410 {
+	if migrations.Latest() != 420 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -1672,7 +1672,7 @@ INSERT INTO at_schedules (id, project_id, name, cron, message) VALUES ('sc1', 'p
 	if _, err := p.Up(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if v, err := p.GetDBVersion(ctx); err != nil || v != migrations.Latest() || v != 410 {
+	if v, err := p.GetDBVersion(ctx); err != nil || v != migrations.Latest() || v != 420 {
 		t.Fatalf("version %d %v", v, err)
 	}
 	var got string
@@ -1770,5 +1770,43 @@ VALUES ('mv_1', 'e1', 'p1', 's1', 'n1', 'n2', 'claude');`
 	}
 	if err := db.QueryRow(`SELECT count(*) FROM at_session_moves`).Scan(&n); err == nil {
 		t.Fatal("at_session_moves after down")
+	}
+}
+
+// TestProjectKindMigration: 00420 gives every project kind 'project', accepts 'session', refuses
+// anything else, and the column goes down again.
+func TestProjectKindMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 410); err != nil {
+		t.Fatal(err)
+	}
+	seed := `INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');`
+	if _, err := db.Exec(seed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 420); err != nil {
+		t.Fatal(err)
+	}
+	var kind string
+	if err := db.QueryRow(`SELECT kind FROM at_projects WHERE id = 'p1'`).Scan(&kind); err != nil || kind != "project" {
+		t.Fatalf("kind %q %v", kind, err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_projects (id, user_id, name, kind) VALUES ('p2', 'u1', 'B', 'session')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE at_projects SET kind = 'chat' WHERE id = 'p1'`); err == nil {
+		t.Fatal("unknown kind accepted")
+	}
+	if _, err := p.DownTo(ctx, 410); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT kind FROM at_projects WHERE id = 'p1'`).Scan(&kind); err == nil {
+		t.Fatal("kind after down")
 	}
 }

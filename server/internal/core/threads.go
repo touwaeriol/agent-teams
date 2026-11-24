@@ -96,6 +96,8 @@ type NewThread struct {
 	ForwardedBrief bool
 	// ParentID is the opening thread of a subthread (nil: top level).
 	ParentID *string
+	// Branch overrides the thread branch thread/<no>-<slug> (a session's session/<id>-<slug>).
+	Branch string
 }
 
 // CreateThread inserts the thread's conversation (kind thread) and the thread row (status queued).
@@ -112,9 +114,13 @@ func CreateThread(ctx context.Context, tx *Tx, n NewThread) (Thread, error) {
 		return Thread{}, err
 	}
 	roles, _ := json.Marshal(n.Roles)
+	branch := n.Branch
+	if branch == "" {
+		branch = fmt.Sprintf("thread/%d-%s", no, Slug(n.Title))
+	}
 	err = tx.Gorm(ctx).Table("at_threads").Create(map[string]any{"id": id, "project_id": n.ProjectID,
 		"user_id": n.UserID, "no": no, "title": n.Title, "brief": n.Brief,
-		"branch": fmt.Sprintf("thread/%d-%s", no, Slug(n.Title)), "base_branch": n.BaseBranch,
+		"branch": branch, "base_branch": n.BaseBranch,
 		"auto_approve": n.AutoApprove, "opened_by": n.OpenedBy, "roles_snapshot": roles,
 		"source_message_id": n.SourceMessageID, "forwarded_brief": n.ForwardedBrief, "parent_id": n.ParentID, "only_roles": onlyRolesValue(n.OnlyRoles)}).Error
 	if err != nil {
@@ -253,9 +259,10 @@ func (s *Store) ThreadViewOf(ctx context.Context, q DB, t Thread) (ThreadView, e
 
 // DispatchOf is the thread's hand-over: who opened it, when, and the user's message it was opened
 // for. Nil when the brief is empty or is the user's forwarded messages (their copies are already
-// in the conversation); Source is nil without a message or when it was deleted.
+// in the conversation) or the first message of a session (recorded as the user's message);
+// Source is nil without a message or when it was deleted.
 func DispatchOf(ctx context.Context, q DB, t Thread) (*ThreadDispatch, error) {
-	if strings.TrimSpace(t.Brief) == "" || t.ForwardedBrief {
+	if strings.TrimSpace(t.Brief) == "" || t.ForwardedBrief || t.Solo() {
 		return nil, nil
 	}
 	d := &ThreadDispatch{OpenedBy: t.OpenedBy, At: t.CreatedAt}
