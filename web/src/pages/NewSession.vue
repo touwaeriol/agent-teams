@@ -17,6 +17,7 @@ import SessionRepos from "@/components/app/session/SessionRepos.vue";
 import { DEFAULTS_KEY, parseDefaults, reposLabel, sessionReposPayload, type SessionRepo } from "@/components/app/session/session";
 import Field from "@/components/common/Field.vue";
 import { MODEL_FORMAT_HINT, validModel, type Runtime } from "@/lib/models";
+import { runtimeSpec } from "@/lib/runtimes";
 import { readLocal, writeLocal } from "@/lib/persist";
 import { toast } from "@/lib/toast";
 
@@ -46,7 +47,7 @@ watch(
   { immediate: true },
 );
 const picked = computed(() => members.value.find((r) => r.role === role.value));
-const runtime = computed<Runtime>(() => (picked.value?.runtime === "codex" ? "codex" : "claude"));
+const runtime = computed<Runtime>(() => runtimeSpec(picked.value?.runtime).id);
 const nodeList = computed(() => nodes.data.value ?? []);
 const ready = computed(() => message.value.trim() !== "" && repos.value.length > 0 && role.value !== "");
 
