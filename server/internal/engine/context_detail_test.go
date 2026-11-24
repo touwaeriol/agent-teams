@@ -3,6 +3,7 @@ package engine_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 
@@ -136,6 +137,69 @@ func TestSessionContextDetail(t *testing.T) {
 		t.Fatalf("a failed refresh keeps the last breakdown %+v", kept)
 	}
 
+	// A slow full refresh sampled before a later turn's summary does not overwrite it.
+	later := time.Now().UTC().Add(time.Second).Truncate(time.Second) // after the first report (stored at arrival)
+	earlier := later.Add(-time.Minute)
+	report := func(reason protocol.SessionContextReason, refreshID *string, sampled time.Time, total int, detail protocol.ContextDetailDetail) {
+		t.Helper()
+		sctx, cancel := w.waitCtx()
+		defer cancel()
+		if err := n.SendUnreliable(sctx, protocol.TypeSessionContext, protocol.SessionContext{SessionID: protocol.SessionID(emp.session), OpenGen: protocol.OpenGen(emp.gen),
+			Reason: reason, RefreshID: refreshID, Context: &protocol.ContextDetail{Detail: detail, SampledAt: &sampled, TotalTokens: total, MaxTokens: 1000000,
+				Categories: []protocol.ContextCategory{}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report(protocol.SessionContextReasonTurn, nil, later, 90000, protocol.ContextDetailDetailSummary)
+	events.wait(t, "context", `"reason":"turn"`, `"updated_at":"`+later.Format(time.RFC3339)+`"`)
+	slow := "cr_slow"
+	report(protocol.SessionContextReasonRefresh, &slow, earlier, 80000, protocol.ContextDetailDetailFull)
+	stale := events.wait(t, "context", `"refresh_id":"cr_slow"`)
+	if strings.Contains(stale.Data, "updated_at") {
+		t.Fatalf("a stale refresh is answered without updated_at: %s", stale.Data)
+	}
+	var newest view
+	b.must(200, "GET", path, nil, &newest)
+	if newest.Detail != "summary" || newest.TotalTokens != 90000 {
+		t.Fatalf("the newer turn breakdown stays %+v", newest)
+	}
+	if err := w.db.Pool.Gorm(w.ctx).Table("at_agent_sessions").Where("id = ?", emp.session).Select("context_used").Row().Scan(&used); err != nil || used != 90000 {
+		t.Fatalf("totals of a stale refresh are not stored: %d %v", used, err)
+	}
+
+	// A Codex session has no breakdown: hidden, and nothing to refresh.
+	if err := w.db.Pool.Gorm(w.ctx).Exec("UPDATE at_agent_sessions SET runtime = 'codex' WHERE id = ?", emp.session).Error; err != nil {
+		t.Fatal(err)
+	}
+	var codex view
+	b.must(200, "GET", path, nil, &codex)
+	if codex.Supported || codex.CanRefresh || codex.Runtime != "codex" || len(codex.Categories) != 0 {
+		t.Fatalf("codex %+v", codex)
+	}
+	if code, body := b.do("POST", "/api/conversations/"+cid+"/context/refresh", nil); code != 409 || !strings.Contains(string(body), "unsupported") {
+		t.Fatalf("codex refresh %d %s", code, body)
+	}
+	if err := w.db.Pool.Gorm(w.ctx).Exec("UPDATE at_agent_sessions SET runtime = 'claude' WHERE id = ?", emp.session).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// A parked session is not started for a refresh.
+	gen := protocol.OpenGen(emp.gen)
+	emp.send(protocol.TypeSessionState, protocol.SessionState{SessionID: protocol.SessionID(emp.session), OpenGen: &gen, State: protocol.SessionStateStateParked})
+	eventually(t, "session parked", func() bool {
+		var st string
+		_ = w.db.Pool.Gorm(w.ctx).Table("at_agent_sessions").Where("id = ?", emp.session).Pluck("state", &st).Error
+		return st == "parked"
+	})
+	var parked view
+	b.must(200, "GET", path, nil, &parked)
+	if !parked.Supported || parked.CanRefresh || parked.TotalTokens != 90000 {
+		t.Fatalf("parked %+v", parked)
+	}
+	if code, body := b.do("POST", "/api/conversations/"+cid+"/context/refresh", nil); code != 409 || !strings.Contains(string(body), "session_not_running") {
+		t.Fatalf("parked refresh %d %s", code, body)
+	}
+
 	b.must(404, "GET", "/api/conversations/nope/context/detail", nil, nil)
 }
 
@@ -166,4 +230,12 @@ func TestSessionContextOldDaemon(t *testing.T) {
 		t.Fatalf("old daemon %+v", v)
 	}
 	b.must(409, "POST", "/api/conversations/"+threads[0].ID+"/context/refresh", nil, nil)
+
+	// A team thread's conversation has no context breakdown (sessions only).
+	var project struct{ ID string }
+	b.must(201, "POST", "/api/projects", map[string]any{"name": "team", "repos": []map[string]any{{"repo": "o/r", "git_connection_id": conn.ID}}}, &project)
+	var thread struct{ ID string }
+	b.must(201, "POST", "/api/projects/"+project.ID+"/threads", map[string]any{"title": "Login", "brief": "登录页"}, &thread)
+	b.must(404, "GET", "/api/conversations/"+thread.ID+"/context/detail", nil, nil)
+	b.must(404, "POST", "/api/conversations/"+thread.ID+"/context/refresh", nil, nil)
 }

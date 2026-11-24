@@ -287,7 +287,7 @@
 `session.context {session_id, open_gen, reason, refresh_id?, context?, error?}`。每轮结束（`turn_ended` 之后）发一次 `reason:"turn"`，`context.detail` 为 summary（用上一轮的 usage 加本地估算，不调 API，约 15 ms）；收到 `session.context_refresh` 后回 `reason:"refresh"`，带同一个 `refresh_id`，`context.detail` 为 full（对每个类别调 token-count API，更准，约 0.5 s，不跑模型回合）；读不到时（会话已停放没有进程、超时）不带 `context`，带 `error`。会话刚关闭也收。
 
 `context`（ContextDetail，对象都是开放的，控制台只保留认识的字段）：
-- detail、model（可选）、total_tokens、max_tokens（自动压缩窗口，分母以它为准）、raw_max_tokens（可选）、auto_compact（可选）、auto_compact_threshold（可选）。
+- detail、sampled_at（可选，守护进程调用 getContextUsage 的时间；控制台丢弃比已存的更旧的细分，比如慢的 full 刷新被后来一轮的 summary 超过，这时也不更新总量；旧守护进程不带，按到达时间算）、model（可选）、total_tokens、max_tokens（自动压缩窗口，分母以它为准）、raw_max_tokens（可选）、auto_compact（可选）、auto_compact_threshold（可选）。
 - categories：每行含 id（可选）、name、tokens、kind，按 SDK 顺序。id 取 SDK 的 system_prompt、system_tools、mcp_tools、mcp_instructions、mcp_tools_deferred、system_tools_deferred、custom_agents、memory_files、skills、messages、autocompact_buffer、compact_buffer、free_space，以后可能新增；kind 取 used、free、buffer、deferred（deferred 不占窗口）。按 id 和 kind 分类，不要按英文 name。
 - mcp_tools：每个 MCP 工具的 name、server、tokens、loaded（loaded 为 false 是延迟加载的）。
 - mcp_servers：按服务器拆的 MCP 指令（server、tokens，按文字长度估算）。

@@ -10,7 +10,7 @@ import (
 )
 
 // ContextEvent is the project event "context" (api.md §1.1): a session's context breakdown was
-// stored (reason turn or refresh) or a refresh could not read it (error). The web refetches
+// stored (reason turn or refresh) or a refresh could not read it (error). A refresh answer older than the stored breakdown still comes, without updated_at. The web refetches
 // GET /api/conversations/{cid}/context/detail. Sent for sessions (多仓库会话) only.
 type ContextEvent struct {
 	ThreadNo       int        `json:"thread_no"`
@@ -27,17 +27,25 @@ type ContextEvent struct {
 func (r *router) sessionContext(ctx context.Context, m *protocol.SessionContext) error {
 	e := r.e
 	sid := string(m.SessionID)
-	ev := ContextEvent{SessionID: sid, Reason: string(m.Reason), RefreshID: strOf(m.RefreshID), Error: strOf(m.Error)}
+	ev := ContextEvent{SessionID: sid, Reason: string(m.Reason), RefreshID: val(m.RefreshID), Error: val(m.Error)}
 	if m.Context != nil {
 		raw, err := json.Marshal(m.Context)
 		if err != nil {
 			return err
 		}
-		now := time.Now().UTC()
-		if err := core.SetSessionContextDetail(ctx, e.Core.Pool, sid, raw, m.Context.TotalTokens, m.Context.MaxTokens, now); err != nil {
+		at := time.Now().UTC() // an old daemon does not say when it sampled: when it arrived
+		if m.Context.SampledAt != nil {
+			at = m.Context.SampledAt.UTC()
+		}
+		stored, err := core.SetSessionContextDetail(ctx, e.Core.Pool, sid, raw, m.Context.TotalTokens, m.Context.MaxTokens, at)
+		if err != nil {
 			return err
 		}
-		ev.UpdatedAt = &now
+		if stored {
+			ev.UpdatedAt = &at
+		} else if m.RefreshID == nil {
+			return nil // a turn's breakdown older than the stored one: nothing to tell
+		}
 	}
 	place, err := core.SessionPlaceOf(ctx, e.Core.Pool, sid)
 	if err != nil || !place.Solo || place.ThreadID == nil || place.ThreadNo == nil {
@@ -48,11 +56,4 @@ func (r *router) sessionContext(ctx context.Context, m *protocol.SessionContext)
 		_, err := tx.Emit(ctx, place.ProjectID, place.ThreadID, core.EvContext, "", ev)
 		return err
 	})
-}
-
-func strOf(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
 }

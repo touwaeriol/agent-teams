@@ -57,7 +57,7 @@ describe("session.context", () => {
     expect(ctx.body).toMatchObject({ session_id: "s_X1", open_gen: 1, reason: "turn" });
     expect(ctx.body.refresh_id).toBeUndefined();
     expect(ctx.body.context).toEqual({
-      detail: "summary", model: "claude-fake", total_tokens: 6000, max_tokens: 200000, raw_max_tokens: 200000, auto_compact: true, auto_compact_threshold: 167000,
+      detail: "summary", sampled_at: expect.stringMatching(/^\d{4}-\d\d-\d\dT/), model: "claude-fake", total_tokens: 6000, max_tokens: 200000, raw_max_tokens: 200000, auto_compact: true, auto_compact_threshold: 167000,
       categories: [
         { id: "system_prompt", name: "System prompt", tokens: 1000, kind: "used" },
         { id: "mcp_tools", name: "MCP tools", tokens: 2000, kind: "used" },
@@ -87,6 +87,9 @@ describe("session.context", () => {
     const r = await h.console.waitType("session.context", (b) => b.reason === "refresh");
     expect(r.body).toMatchObject({ session_id: "s_X2", open_gen: 1, reason: "refresh", refresh_id: "cr_1" });
     expect(r.body.context.detail).toBe("full");
+    // sampled when the refresh read it, after the turn's summary: the console keeps the newer one
+    const turn = h.console.ofType("session.context")[0]!.body.context.sampled_at as string;
+    expect(Date.parse(r.body.context.sampled_at)).toBeGreaterThanOrEqual(Date.parse(turn));
     expect(r.body.context.mcp_tools[0]).toEqual({ name: "mcp__platform__complete_task", server: "platform", tokens: 1300, loaded: true });
     expect(h.log.contextReads).toEqual(["summary", "full"]);
   });
