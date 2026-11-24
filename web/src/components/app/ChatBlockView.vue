@@ -26,6 +26,7 @@ const props = defineProps<{
   block: ChatBlock;
   threads: ThreadView[];
   speakerColor: string;
+  speakerName?: string;
   compact?: boolean;
   pid: string;
   /** The user's bubbles offer "转发到讨论串" (project chat). */
@@ -114,7 +115,7 @@ const remove = () => local.value && dropPending(local.value.key);
   <article v-else class="flex flex-col gap-2.5">
     <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
       <Dot :color="speakerColor" :size="8" />
-      {{ block.message.author || "leader" }} · {{ clock(block.message.created_at) }}
+      {{ speakerName || block.message.author || "leader" }} · {{ clock(block.message.created_at) }}
       <span v-if="block.message.kind === 'interrupt'" class="text-[#B4530B]">· 插话</span>
     </span>
     <Markdown :source="block.message.content" :class="compact ? 'text-sm leading-[26px]' : 'text-[15px] leading-7'" />

@@ -18,6 +18,8 @@ const props = withDefaults(
     cid: string | undefined;
     threads?: ThreadView[];
     speakerColor?: string;
+    /** Name shown over every speaker turn instead of its author (a session's employee). */
+    speakerName?: string;
     compact?: boolean;
     /** Messages to show (default: all). */
     filter?: (m: MessageView) => boolean;
@@ -33,7 +35,7 @@ const props = withDefaults(
     selecting?: boolean;
     selectedIds?: number[];
   }>(),
-  { threads: () => [], speakerColor: "#C8622A", inserts: () => [], pid: "", filter: undefined, select: undefined, selectedIds: () => [] },
+  { threads: () => [], speakerColor: "#C8622A", speakerName: undefined, inserts: () => [], pid: "", filter: undefined, select: undefined, selectedIds: () => [] },
 );
 const emit = defineEmits<{ openThread: [no: number]; forward: [id: number]; toggle: [id: number] }>();
 defineSlots<{ insert(p: { item: I }): unknown; empty(): unknown; before(): unknown; after(): unknown }>();
@@ -70,6 +72,7 @@ useChatScroll(() => props.cid, end, () => messages.value.length + props.inserts.
         :block="it.block"
         :threads="threads"
         :speaker-color="speakerColor"
+        :speaker-name="speakerName"
         :compact="compact"
         :pid="pid"
         :forwardable="forwardable"

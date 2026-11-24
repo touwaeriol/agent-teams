@@ -260,6 +260,7 @@ describe("ThreadList", () => {
     const bottom = mountWith(TypingLine, { thread: t20 });
     expect(bottom.text()).toBe("组长已回复，等你回复");
     expect(bottom.text()).not.toContain("讨论串进行中");
+    expect(mountWith(TypingLine, { thread: t20, session: true }).text()).toBe("员工已回复，等你回复");
     expect(bottom.find(".at-spin").exists()).toBe(false);
     expect(cardLook(t20).label).toBe("等你处理");
   });
