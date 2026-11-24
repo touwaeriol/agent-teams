@@ -441,6 +441,9 @@ func (o *Orchestrator) openSession(ctx context.Context, tx *core.Tx, e core.Empl
 		return core.AgentSession{}, o.hold(ctx, tx, e, first, resume, pick.hold)
 	}
 	node, rt := pick.node, pick.rt
+	if e, err = pinLocal(ctx, tx, e, node.ID); err != nil {
+		return core.AgentSession{}, err
+	}
 	if first, resume, err = o.moveResume(ctx, tx, e, node.ID, rt, first, resume); err != nil {
 		return core.AgentSession{}, err
 	}
@@ -466,6 +469,17 @@ func (o *Orchestrator) openOn(ctx context.Context, tx *core.Tx, env sessionEnv, 
 		return sess, err
 	}
 	return sess, o.queueOpen(ctx, tx, env, node, sess, first, resume, imp)
+}
+
+// pinLocal pins a session's employee working in a local folder (Spec.Local) to the node its first
+// session opens on: from then on it is the employee's only candidate (spec.node_ids), so the
+// folder and the files in it stay usable; the session waits for that node when it is offline.
+func pinLocal(ctx context.Context, tx *core.Tx, e core.Employee, nodeID string) (core.Employee, error) {
+	if !e.Spec.Solo || !e.Spec.Local || len(e.Spec.NodeIDs) > 0 {
+		return e, nil
+	}
+	e.Spec.NodeIDs = []string{nodeID}
+	return e, core.SetSpecNodes(ctx, tx, e.ID, e.Spec.NodeIDs)
 }
 
 // pinThread records the thread a project member opens a session in as its current thread.
@@ -524,6 +538,12 @@ func (env sessionEnv) gitHosts() []protocol.SessionOpenGitHostsElem {
 func (o *Orchestrator) checkoutPaths(ctx context.Context, q core.DB, p Paths, env sessionEnv) []string {
 	slugs := env.slugs()
 	if len(slugs) == 0 {
+		if env.emp.Spec.Solo {
+			// A session's local folder is not a checkout: never cleaned up as one (nor taken for a
+			// legacy single-repository checkout once a repository is added); deleting the session
+			// purges it.
+			return []string{}
+		}
 		return []string{p.Cwd}
 	}
 	out := make([]string, len(slugs))

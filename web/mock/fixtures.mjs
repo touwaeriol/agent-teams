@@ -410,6 +410,8 @@ projects.push(
   sessionProject("s1", "修复登录后的跳转", "finished", 2),
   sessionProject("s2", "补齐 Codex 回归用例", "working", 25),
   sessionProject("s3", "整理 README", "resolved", 120),
+  // A session without repositories: a local folder on rc-erio (pinned there).
+  { ...sessionProject("s4", "整理周会纪要", "finished", 8), repo: null, git_connection_id: null, repos: [] },
 );
 const soloEmp = (id, name, runtime, nodeRef, state = "idle", bubble = "") => emp(id, name, "lead", "dev", "开发", runtime, nodeRef, look("#4C7BD0", "tee", "none"), st(state, bubble));
 const solo = (pid, title, status, runtime, empl, session) => ({
@@ -421,10 +423,12 @@ export const sessionThreads = [
   solo("s1", "修复登录后的跳转", "running", "claude", soloEmp("es1", "dev-1", "claude", RC), { context_used: 77000, context_max: 1000000 }),
   solo("s2", "补齐 Codex 回归用例", "running", "codex", soloEmp("es2", "qa-1", "codex", CVP, "running", "跑 go test ./internal/approvals/..."), { node_id: "n2", context_used: 41000, context_max: 272000 }),
   solo("s3", "整理 README", "done", "antigravity", soloEmp("es3", "rev-1", "antigravity", RC), { state: "parked" }),
+  { ...solo("s4", "整理周会纪要", "running", "claude", soloEmp("es4", "dev-2", "claude", RC), { cwd: "/srv/agent/projects/s4/threads/1/lead", context_used: 23000, context_max: 1000000 }), branch: "", repos: [] },
 ];
 Object.assign(messages, {
   ts1: [msg("s1a", "user", "liu", "登录后应该回到原来的页面，现在总是跳到首页。", 30), msg("s1b", "leader", "dev-1", "找到了：`/login` 没带 `redirect` 参数。我改成登录前记下原地址，登录后跳回去，再补一个测试。", 28)],
   ts2: [msg("s2a", "user", "liu", "把 approvals 包的回归用例补齐。", 26), msg("s2b", "leader", "qa-1", "好，先跑一遍现有用例看哪些分支没覆盖。", 25)],
+  ts4: [msg("s4a", "user", "liu", "把这几次周会的纪要整理成一份 Markdown，放在文件夹里。", 12), msg("s4b", "leader", "dev-2", "整理好了：`周会纪要-11月.md` 在工作目录里，按议题分了五节，待办单独列在最后。", 8)],
   ts3: [msg("s3a", "user", "liu", "README 的安装步骤过时了，整理一下。", 130), msg("s3b", "leader", "rev-1", "改好了：安装、登录、开会话三段，PR 已开。", 121)],
 });
 
@@ -468,6 +472,7 @@ export const sessionPicks = {
   ts1: { permission_mode: "auto", model: "claude-opus-5-5", effort: "high" },
   ts2: { permission_mode: "bypassPermissions", model: "gpt-5.5-codex", effort: "medium" },
   ts3: { permission_mode: "bypassPermissions", model: "gemini-4-neon-high", effort: "" },
+  ts4: { permission_mode: "auto", model: "claude-opus-5-5", effort: "" },
 };
 
 /** GET /api/conversations/{cid}/context/detail of a Claude session (protocol.md §4.10). */

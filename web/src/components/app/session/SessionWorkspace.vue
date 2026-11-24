@@ -3,7 +3,7 @@
 // three are fixed once the session starts — every repository with the
 // branch it started from, the work branch, the working directory on the node) and 上下文 (the
 // total and its breakdown, Claude only; hidden for runtimes without a breakdown). Repositories can be added or removed while it runs.
-import { FolderGit2 } from "lucide-vue-next";
+import { Folder, FolderGit2 } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import { sessions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
@@ -64,23 +64,27 @@ const save = useAction(() => sessions.setRepos(props.project.id, sessionReposPay
         <dt class="text-xs leading-5 text-muted-foreground">仓库</dt>
         <dd class="flex min-w-0 flex-col gap-1.5">
           <template v-if="!editing">
+            <span v-if="current.length === 0" class="flex min-w-0 items-center gap-1.5 leading-5" data-testid="env-local">
+              <Folder class="size-3.5 shrink-0 text-muted-foreground" />
+              <span class="truncate">本地文件夹（固定在节点 {{ node?.name || "开工时的节点" }}）</span>
+            </span>
             <span v-for="r in current" :key="r.repo" class="flex min-w-0 items-center gap-1.5 leading-5">
               <FolderGit2 class="size-3.5 shrink-0 text-muted-foreground" />
               <span class="truncate font-mono text-xs" :title="r.repo">{{ r.repo }}</span>
               <span class="shrink-0 text-xs text-muted-foreground">从 {{ r.branch || "默认分支" }}</span>
             </span>
-            <button type="button" class="self-start text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" @click="edit">增删仓库</button>
+            <button type="button" class="self-start text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" @click="edit">{{ current.length ? "增删仓库" : "添加仓库" }}</button>
           </template>
           <template v-else>
             <SessionRepos v-model="draft" :locked="bases" :current-project="project.id" />
             <div class="flex justify-end gap-2">
               <el-button size="small" @click="editing = false">取消</el-button>
-              <el-button size="small" type="primary" :loading="save.isPending.value" :disabled="draft.length === 0" @click="save.mutate()">保存</el-button>
+              <el-button size="small" type="primary" :loading="save.isPending.value" @click="save.mutate()">保存</el-button>
             </div>
           </template>
         </dd>
-        <dt class="text-xs leading-5 text-muted-foreground">分支</dt>
-        <dd class="flex min-w-0 flex-col gap-1">
+        <dt v-if="current.length" class="text-xs leading-5 text-muted-foreground">分支</dt>
+        <dd v-if="current.length" class="flex min-w-0 flex-col gap-1">
           <span class="truncate rounded-md bg-raised px-1.5 py-0.5 font-mono text-xs leading-5" :title="thread.branch">{{ thread.branch }}</span>
           <a v-if="thread.pr_url" :href="thread.pr_url" target="_blank" rel="noopener" class="text-xs underline underline-offset-2">PR #{{ thread.pr_number }}</a>
         </dd>
@@ -88,7 +92,8 @@ const save = useAction(() => sessions.setRepos(props.project.id, sessionReposPay
         <dd class="flex min-w-0 flex-col gap-1" data-testid="env-cwd">
           <span v-if="cwd" class="at-wrap rounded-md bg-raised px-1.5 py-0.5 font-mono text-xs leading-5" :title="cwd">{{ cwd }}</span>
           <span v-else class="text-xs leading-5 text-muted-foreground">员工开工后显示</span>
-          <span class="truncate font-mono text-[11.5px] text-muted-foreground">{{ dirs }}</span>
+          <span v-if="dirs" class="truncate font-mono text-[11.5px] text-muted-foreground">{{ dirs }}</span>
+          <span v-else-if="cwd" class="text-[11.5px] leading-4 text-muted-foreground">没有 git 仓库，文件只在这台节点上；删除会话时才清理</span>
         </dd>
       </dl>
     </section>

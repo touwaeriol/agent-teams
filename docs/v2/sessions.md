@@ -20,6 +20,21 @@ team and no task pool.
   score: used quota plus 10 points per live session on the node, see shared-members.md §4.3).
 - The branch picked for each repository is the thread's base there (`at_thread_repos.base_branch`).
   The employee works on `session/<project id[:8]>-<slug>` in every repository.
+- Repositories are optional (#53 t48). A session without any is a **local folder**: the
+  employee works in its own directory on the node (`projects/<pid>/threads/1/lead`, `PathsOf`),
+  with no git repository; the files exist only on that machine. Its employee spec carries
+  `local: true`, and the first session that opens pins it to that node (`spec.node_ids =
+  [node]`, `pinLocal`): it is never moved (`MoveOnLimit` refuses, `pickNode` has only that
+  candidate), and while the node is offline the session waits for it (the employee shows
+  offline → 等你处理, t25). 已解决 does not clean the folder up (`ThreadEnded` skips local
+  sessions; the folder is not recorded as a checkout in `at_thread_nodes`), so the next message
+  goes on in the same folder on the same node. Deleting the session purges `projects/<pid>` on
+  its nodes (`ProjectDeleting` → `Delivery.Purge`). Repositories added later are checked out
+  inside the folder (`./owner__repo`); the session stays pinned (the folder may hold files outside
+  git). Removing every repository from a session with repositories makes it local (pinned to the
+  node it is on).
+- Its prompt says so (`soloLocalGuide` and a `## 工作目录` section instead of `## 仓库`): a local
+  folder, no git, files only on this machine; nothing about pushing or PRs.
 
 ## Behaviour
 
@@ -92,7 +107,7 @@ projects/<pid>/repos/<owner>__<repo>    ← shared clone
 
 ## API
 
-- `POST /api/sessions` `{message, title?, repos: [{repo, git_connection_id | git_repo_id, branch?}], role?, runtime?, model?, node_id?, branch?, permission_mode?, effort?}`
+- `POST /api/sessions` `{message, title?, repos: [{repo, git_connection_id | git_repo_id, branch?}] (may be empty: a local folder), role?, runtime?, model?, node_id?, branch?, permission_mode?, effort?}`
   → `201 {project, thread_id, thread_no}`. `permission_mode` (`auto` / `default` / `acceptEdits` /
   `plan` / `bypassPermissions`) and `effort` are the new-session page's picks; left out = the
   session's default (Claude: `auto`, or `default` when the model lacks it; Codex and Antigravity:
@@ -100,11 +115,16 @@ projects/<pid>/repos/<owner>__<repo>    ← shared clone
   `field` for a value the session cannot take) and kept on the employee (`session_mode`,
   `session_effort`), so the first turn already runs with them. `runtime` is the agent, one of the
   role's runtimes (422 with `field: "runtime"` otherwise); modes and efforts are checked against it.
+  A picked `node_id` must be able to run the agent: a runtime that needs isolation on a node
+  without it, or a node whose CLI report (`at_node_runtimes`, runtime_status) lacks the agent's
+  install or login, is refused (422, `field: "node_id"`, the reason in the message). The
+  new-session page greys those nodes out in its node menu with the same reasons.
 - `GET /api/session-options?role=&runtime=&model=` → `SessionOptions {runtime, default_mode, model, modes,
   models, efforts}`: what a new session of that role, agent (`runtime`, one of the role's; empty =
   its first; 422 otherwise) and model (empty = the role's for the runtime) can start with, for the new-session page. Same shapes as `SessionControls`; `models` come from the user's
   latest session of that runtime that reported them (`init.models`), empty before the first one.
-- `PUT /api/sessions/{pid}/repos` `{repos}` → the project view.
+- `PUT /api/sessions/{pid}/repos` `{repos}` → the project view. `repos` may be empty (every
+  repository removed: the session goes on in its local folder, pinned to its node).
 - `GET /api/projects/{pid}/session-controls` → `SessionControls {thread_id, runtime, live,
   permission_mode, model, effort, pending: {permission_mode?, model?, effort?, since} | null,
   error?, modes: [{id, label, hint, applies: now|next_turn}], models: [{id, name?, description?,

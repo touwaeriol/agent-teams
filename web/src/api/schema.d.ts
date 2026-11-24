@@ -4416,7 +4416,7 @@ export interface components {
              * @enum {string}
              */
             permission_mode?: "auto" | "default" | "acceptEdits" | "plan" | "bypassPermissions";
-            /** @description Repositories, all checked out side by side in the employee's directory */
+            /** @description Repositories, all checked out side by side in the employee's directory; [] = none: the employee works in a local folder on the node it starts on, pinned there */
             repos: components["schemas"]["SessionRepoRef"][] | null;
             /** @description Member role template the employee is made from; '' = the first member role */
             role?: string;
@@ -4447,7 +4447,7 @@ export interface components {
             repo: string;
         };
         SessionReposInputBody: {
-            /** @description The session's repositories after the change (order kept); new ones are checked out, missing ones removed */
+            /** @description The session's repositories after the change (order kept); new ones are checked out, missing ones removed; [] = none (the session goes on in its local folder, pinned to its node) */
             repos: components["schemas"]["SessionRepoRef"][] | null;
         };
         SessionUsage: {

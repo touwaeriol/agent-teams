@@ -1,7 +1,10 @@
 package engine_test
 
 import (
+	"strings"
 	"testing"
+
+	protocol "github.com/touwaeriol/agent-teams/protocol"
 
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw/nodetest"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -19,7 +22,7 @@ func TestSessionRuntimePick(t *testing.T) {
 	b.must(200, "GET", "/api/roles", nil, nil)
 	var conn struct{ ID string }
 	b.must(201, "POST", "/api/git/connections", map[string]string{"name": "gh", "token": "ghp_good"}, &conn)
-	w.connect(node.Token, nodetest.Options{Isolation: "agent_user"})
+	n := w.connect(node.Token, nodetest.Options{Isolation: "agent_user", Features: statusFeatures})
 	// The dev role runs on Claude Code and Codex (the model of Codex in models).
 	if _, err := store.Exec(w.ctx, w.db.Pool, `UPDATE at_roles SET runtime = 'claude', runtimes = '{claude,codex}', models = '{"codex":"gpt-5.5-codex"}'::jsonb
 		WHERE role = 'dev' AND tier = 'member'`); err != nil {
@@ -73,4 +76,26 @@ func TestSessionRuntimePick(t *testing.T) {
 	if rt, _, _ := created(map[string]any{"runtime": "claude"}); rt != "claude" {
 		t.Fatalf("picked claude: %q", rt)
 	}
+
+	// A mode the picked agent does not have (Codex has no plan / acceptEdits): 422.
+	b.must(422, "POST", "/api/sessions", map[string]any{"message": "x", "role": "dev", "runtime": "codex", "permission_mode": "plan", "repos": repos}, nil)
+	b.must(422, "POST", "/api/sessions", map[string]any{"message": "x", "role": "dev", "runtime": "codex", "permission_mode": "acceptEdits", "repos": repos}, nil)
+
+	// A picked node that cannot run the picked agent (its report: Codex not logged in): 422 on node_id.
+	ctx, cancel := w.waitCtx()
+	defer cancel()
+	if err := n.SendUnreliable(ctx, protocol.TypeNodeRuntimes, cliReport("hello", map[string]string{"claude": "subscription", "codex": "none"})); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the node's CLI report", func() bool {
+		var c int64
+		w.db.Pool.Gorm(w.ctx).Table("at_node_runtimes").Where("node_id = ? AND runtime = 'codex'", node.Node.ID).Count(&c)
+		return c == 1
+	})
+	code, raw := b.do("POST", "/api/sessions", map[string]any{"message": "x", "role": "dev", "runtime": "codex", "node_id": node.Node.ID, "repos": repos})
+	body := string(raw)
+	if code != 422 || !strings.Contains(body, "node_id") || !strings.Contains(body, "没有登录") {
+		t.Fatalf("node without the agent's login: %d %s", code, body)
+	}
+	created(map[string]any{"runtime": "claude", "node_id": node.Node.ID})
 }

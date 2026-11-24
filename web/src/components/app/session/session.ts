@@ -40,7 +40,7 @@ export function sessionText(text: string): string {
 
 /** The repository chip under the new-session box: "选择仓库", "org/web · develop" or "org/web +2". */
 export function reposLabel(list: SessionRepo[]): string {
-  if (list.length === 0) return "选择仓库";
+  if (list.length === 0) return "仓库（可选）";
   const first = list[0].branch ? `${list[0].repo} · ${list[0].branch}` : list[0].repo;
   return list.length > 1 ? `${first} +${list.length - 1}` : first;
 }
@@ -152,3 +152,33 @@ export function fixedParts(
   if (!lead) return { node: "", role: "", agent: "" };
   return { node: lead.node?.name ?? "", role: lead.title || lead.role || lead.name || "", agent: label(runtime || lead.runtime || "") };
 }
+
+/** A node's CLI report as NodeView.clis has it (#42 runtime_status). */
+interface NodeCliState {
+  runtime: string;
+  installed: boolean;
+  auth: string;
+  expired?: boolean;
+  ready?: boolean;
+}
+
+/**
+ * Why a session of the agent cannot run on the node ("" when it can), for the new-session node
+ * menu: offline, or its reported CLIs (runtime_status) lack the agent or its login. A daemon that
+ * never reported is not judged (the server checks the same: 422 on node_id).
+ */
+export function nodeAgentProblem(n: { online: boolean; clis?: NodeCliState[] | null }, agent: string, label: (id: string) => string): string {
+  if (!n.online) return "离线";
+  const clis = n.clis ?? [];
+  if (!agent || clis.length === 0) return "";
+  const c = clis.find((x) => x.runtime === agent);
+  const name = label(agent);
+  if (!c) return `没有检测到 ${name}`;
+  if (!c.installed) return `没有安装 ${name}`;
+  if (c.expired) return `${name} 登录已过期`;
+  if (c.ready === false || c.auth === "none" || c.auth === "unknown" || !c.auth) return `${name} 没有登录`;
+  return "";
+}
+
+/** A session without repositories works in a local folder pinned to its node. */
+export const isLocalSession = (p: Pick<ProjectView, "repos">) => (p.repos ?? []).length === 0;

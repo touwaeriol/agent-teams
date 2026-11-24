@@ -30,7 +30,6 @@ func TestSessionMultiRepo(t *testing.T) {
 	b.must(201, "POST", "/api/git/connections", map[string]string{"name": "gh", "token": "ghp_good"}, &conn)
 	n := w.connect(node.Token, nodetest.Options{})
 
-	b.must(422, "POST", "/api/sessions", map[string]any{"message": "x", "repos": []map[string]any{}}, nil)
 	b.must(422, "POST", "/api/sessions", map[string]any{"message": "x", "role": "nope",
 		"repos": []map[string]any{{"repo": "o/r", "git_connection_id": conn.ID}}}, nil)
 

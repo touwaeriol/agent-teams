@@ -68,6 +68,12 @@ type Role struct {
 	// talks to the user directly (no members, no task pool). Only in employee specs and thread
 	// role snapshots, never in at_roles nor the API.
 	Solo bool `json:"solo,omitempty" gorm:"-" hidden:"true"`
+	// Local marks a session's employee working in a local folder of its own on one node (#53: a
+	// session started without repositories, or whose repositories were all removed): it is pinned
+	// to the node it first ran on (node_ids), never moved, and its folder is kept until the
+	// session is deleted. Repositories added later are checked out inside the folder. Employee
+	// specs only.
+	Local bool `json:"local,omitempty" gorm:"-" hidden:"true"`
 }
 
 // Custom command modes: prompt expands the template on the server before delivery; passthrough
