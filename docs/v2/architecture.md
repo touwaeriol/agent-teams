@@ -267,7 +267,7 @@ Codex 会话 ──(http://127.0.0.1:<port>/mcp/<sid>/<每次 ─┘            
 
 模型本身就能设计：用普通工具写单文件 HTML 原型、Markdown 文档、SVG。平台只提供两样东西，再把结果记下来、展示出来：
 
-- **技能（skills）**：内置技能随控制台发布（`server/internal/skills/builtin/<name>/SKILL.md`：`design` = HTML 原型与设计稿，`docs` = Markdown 文档与规格说明），用户还可以上传自己的技能（`at_skills.user_id` = 本人，只有本人能看到和勾选），管理员可以发布所有用户都能勾选的内置技能（`user_id` 为空，`POST /api/admin/skills`；用户自己早先上传的同名技能优先，用户新上传不能占用内置名）（zip 或文件夹，只收 UTF-8 文本，单个技能 ≤ 64 个文件、≤ 512 KB，`SKILL.md` 的 front matter 必须有 `name` 和 `description`，不能和内置技能重名；zip 解压时按实际解出的字节和文件数计数，超限立即停止，压缩炸弹不会被整个读进内存）。岗位模板的 `at_roles.skills` 勾选技能（统筹不能有技能）；Team 页的预设“设计师”（`roles.Presets`）默认带 `design` + `docs`。
+- **技能（skills）**：内置技能随控制台发布（`server/internal/skills/builtin/<name>/SKILL.md`：`design` = HTML 原型与设计稿，`docs` = Markdown 文档与规格说明），用户还可以上传自己的技能（`at_skills.user_id` = 本人，只有本人能看到和勾选），管理员可以发布所有用户都能勾选的内置技能（`user_id` 为空，`POST /api/admin/skills`；用户自己早先上传的同名技能优先，用户新上传不能占用内置名）（zip 或文件夹，只收 UTF-8 文本，单个技能 ≤ 64 个文件、≤ 512 KB，`SKILL.md` 的 front matter 必须有 `name` 和 `description`，不能和内置技能重名；zip 解压时按实际解出的字节和文件数计数，超限立即停止，压缩炸弹不会被整个读进内存）。岗位模板的 `at_roles.skills` 勾选技能（统筹不能有技能）；Team 页的预设（`roles.Presets`）有“设计师”（默认带 `design` + `docs`）、“审查员”（`gate: review`、只读、编制 3）和“助手”（编制 3）；新用户的默认团队（`roles.Defaults`）不含后两者。
   - 打开会话时控制台把技能内容放进 `session.open.skills`（每岗位最多 16 个、合计 ≤ 2 MiB），并给 Claude 会话的 `tools`/`allowed_tools` 加上 `Skill`。
   - Claude：守护进程把技能写成一个本地插件 `<root>/agent-skills/<project>/<thread_no>/<employee>/`（`.claude-plugin/plugin.json` + `skills/<name>/…`，每次打开重建），**不在任何 worktree 里**，所以不会被提交；SDK 选项 `plugins: [{type:'local', path, skipMcpDiscovery:true}]` + `skills: ['agent-teams-skills:<name>', …]`（只列本岗位的技能，SDK 自带的技能不出现）。`settingSources` 仍是 `[]`。已在 SDK 0.3.325 上实测（`node/scripts/smoke-skills.ts`：模型列出的技能恰好是岗位的两个，并用 Skill 工具读到了内容）。只读岗位的文件工具可以读这个目录。守护进程写文件时去掉每个 Markdown 文件 front matter 里的 `allowed-tools`（SDK 0.3.325 实测：技能带 `allowed-tools: Bash(mkdir:*)` 时 Bash 不经 canUseTool 直接执行；去掉后照常审批），所以技能不能替岗位预批准工具。
   - Codex 没有技能加载，控制台把每个技能的 `SKILL.md`（及其余文件）追加到 `developer_instructions`。
@@ -347,7 +347,7 @@ queued ──开工──► running ◄──► waiting（有等你处理的�
 任务进**项目级任务队列**，由项目的空闲成员领取（细节见 [shared-members.md](shared-members.md) §4）：
 
 - 触发：任务新建 / 状态变化、成员回合结束且手里没任务、节点上线（节点主人有待领任务的项目）、定时（每 10 s 兜底）。触发写 Valkey 频道 `sched:<project>`，调度循环（advisory lock 选主）按项目消费。
-- 领取：可领取 = `pending`、依赖都 `done`（`ready_at` 非空）、讨论串 `running` / `waiting`、岗位匹配；空闲 = 全项目没有 claimed / running 任务。每一轮取空闲成员和最多 200 个可领取任务，纯函数 `pick`（`scheduler/score.go`）按档位挑最好的一对：点名 > 返工预留（审查打回、CI / 冲突修复留给原成员 10 分钟）> 饿死（可领取超过 5 分钟）> 依赖粘性 > 讨论串粘性 > 同仓库 > 其他；锁住成员和任务再核对一次后改成 `claimed`。
+- 领取：可领取 = `pending`、依赖都 `done`（`ready_at` 非空）、讨论串 `running` / `waiting`、岗位匹配；空闲 = 全项目没有 claimed / running 任务。每一轮取空闲成员和最多 200 个可领取任务，纯函数 `pick`（`scheduler/score.go`）按档位挑最好的一对：点名 > 返工预留（审查打回、CI / 冲突修复留给原成员 10 分钟）> 饿死（可领取超过 5 分钟）> 依赖粘性 > 讨论串粘性 > 同仓库 > 其他；平台开的审查 / 决策任务在同岗位另有可领的同事时不给被审任务的作者，过了饿死时限才放给作者（最低档，见 shared-members.md §4.1）；锁住成员和任务再核对一次后改成 `claimed`。
 - 领取后发事件 `task.claimed`（办公室里那人“走到任务板 → 领取 → 回工位”就由它驱动），再给该成员 `session.send`（必要时先 `git.prepare` + `session.open`）。消息正文 = 任务说明 + 依赖任务的交接内容 + 工作目录同步结果 + 简报（名单、未读留言）。
 - **开工前同步**（shared-members.md §4.2）：员工已有节点、节点支持 `git_sync` 时，领取后先按仓库发 `git.prepare {sync}`（普通任务 `member` 模式同步到讨论串分支；审查 / 决策任务 `review` 模式检出被审的成员分支），任务停在 `claimed`（`sync_pending`），结果都回来才发任务简报；2 分钟没回来照发，并注明没同步。
 - **交接内容**：每个依赖任务给出做的人、总结（≤ 3000 字）、`complete_task` 的 `handoff`（有下游依赖时第一次不写会被提醒一次）、合并进讨论串分支的范围和改动文件（`at_merge_queue.base_sha` 到合并后的 sha，GitHub compare 取文件，记在 `at_tasks.merged`）和审查 / 决策结论。

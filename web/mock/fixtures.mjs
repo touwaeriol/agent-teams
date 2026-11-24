@@ -338,6 +338,13 @@ export const roles = [
   role("r5", "member", "research", "调研", "antigravity", 1, ["n4"], "查资料、读代码，写调研结论。", look("#2F6FB0", "coat", "none", "#3B2A20"), { sort: 4, model: "gemini-4-neon-high" }),
 ];
 
+// GET /api/roles/presets (roles.Presets): 从预设添加.
+export const rolePresets = [
+  role("", "member", "designer", "设计师", "claude", 1, [], "做 HTML 原型、界面稿、示意图和设计文档，发布成交付物", look("#4C7BD0", "tee", "glasses"), { task_kinds: ["design", "doc"], skills: ["design", "docs"], read_only: false }),
+  role("", "member", "reviewer", "审查员", "claude", 3, [], "只读审查每个开发任务的改动，不改代码", look("#4C7BD0", "tee", "headset"), { gate: "review", read_only: true }),
+  role("", "member", "helper", "助手", "claude", 3, [], "做简单、机械的杂活：跑命令收集信息、批量改文案或配置、格式化、更新文档", look("#4C7BD0", "tee", "cap"), { read_only: false }),
+];
+
 export const connections = [
   { id: "g1", name: "touwaeriol", provider: "github", login: "touwaeriol", kind: "app", installation_id: 1234, created_at: ago(60 * 24 * 1), permissions: { contents: "write", pull_requests: "write" }, needs_permission_approval: false, installation_settings_url: "https://github.com/settings/installations/1234" },
 ];

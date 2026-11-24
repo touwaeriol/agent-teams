@@ -644,7 +644,7 @@ const routes = [
   ["GET", /^\/api\/git\/connections\/([^/]+)\/branches$/, (req, res) => json(res, 200, ["main", "develop", "release/2.0"])],
   ["GET", /^\/api\/git\/github-app$/, (req, res) => json(res, 200, { configured: true, install_url: "https://github.com/apps/agent-teams-mock/installations/new", app: { slug: "agent-teams-mock", name: "Agent Teams (mock)", owner: "touwaeriol", html_url: "https://github.com/apps/agent-teams-mock", permissions: { contents: "write", pull_requests: "write", checks: "read" }, webhook_active: true } })],
   ["GET", /^\/api\/skills$/, (req, res) => json(res, 200, { skills: state.skills })],
-  ["GET", /^\/api\/roles\/presets$/, (req, res) => json(res, 200, { roles: [] })],
+  ["GET", /^\/api\/roles\/presets$/, (req, res) => json(res, 200, { roles: F.rolePresets })],
   ["GET", /^\/api\/plugins$/, (req, res) => json(res, 200, { plugins: state.plugins })],
   ["PATCH", /^\/api\/plugins\/([^/]+)$/, async (req, res, [id]) => json(res, 200, Object.assign(state.plugins.find((p) => p.id === id), await body(req)))],
   ["DELETE", /^\/api\/plugins\/([^/]+)$/, (req, res, [id]) => ((state.plugins = state.plugins.filter((p) => p.id !== id)), json(res, 204))],
