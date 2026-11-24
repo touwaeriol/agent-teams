@@ -43,6 +43,8 @@ export const projects = {
 
 export const sessions = {
   create: (body: S["SessionInput"]) => unwrap(client.POST("/api/sessions", { body, ...idem() })),
+  setControls: (pid: string, body: S["SetControlsInputBody"]) =>
+    unwrap(client.PUT("/api/projects/{pid}/session-controls", { params: { path: { pid } }, body })),
   setRepos: (pid: string, repos: S["SessionRepoRef"][]) => unwrap(client.PUT("/api/sessions/{pid}/repos", { params: { path: { pid } }, body: { repos } })),
 };
 

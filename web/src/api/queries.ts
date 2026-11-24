@@ -53,6 +53,8 @@ export const keys = {
   skills: ["skills"] as const,
   builtinCommands: ["commands", "builtin"] as const,
   conversationModel: (cid: string) => ["c", cid, "model"] as const,
+  sessionControls: (pid: string) => ["p", pid, "session-controls"] as const,
+  sessionOptions: (role: string, model: string) => ["session-options", role, model] as const,
   conversationCommands: (cid: string) => ["c", cid, "commands"] as const,
   plugins: ["plugins"] as const,
   adminPlugins: ["admin", "plugins"] as const,
@@ -257,6 +259,16 @@ export const useBuiltinCommands = () => useQuery({ queryKey: keys.builtinCommand
 export const conversationModels = { predicate: (q: { queryKey: readonly unknown[] }) => q.queryKey[0] === "c" && q.queryKey[2] === "model" };
 export const useConversationModel = (cid: Arg) =>
   useKeyed(() => keys.conversationModel(val(cid)), () => unwrap(client.GET("/api/conversations/{cid}/model", path({ cid: val(cid) }))), { enabled: has(cid) });
+/** A session's permission mode, model and effort (refetched on session_controls events). */
+export const useSessionControls = (pid: Arg) =>
+  useKeyed(() => keys.sessionControls(val(pid)), () => unwrap(client.GET("/api/projects/{pid}/session-controls", path({ pid: val(pid) }))), { enabled: has(pid) });
+/** What a new session made from a role (and model) can start with. */
+export const useSessionOptions = (role: Arg, model: Arg) =>
+  useKeyed(
+    () => keys.sessionOptions(val(role), val(model)),
+    () => unwrap(client.GET("/api/session-options", { params: { query: { role: val(role), ...(val(model) ? { model: val(model) } : {}) } } })),
+    { enabled: has(role), staleTime: 60_000 },
+  );
 export const useRolePresets = () => useQuery({ queryKey: keys.rolePresets, queryFn: () => unwrap(client.GET("/api/roles/presets")), staleTime: 300_000 });
 
 export const useSkills = () => useQuery({ queryKey: keys.skills, queryFn: () => unwrap(client.GET("/api/skills")) });

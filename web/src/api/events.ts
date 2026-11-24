@@ -35,6 +35,7 @@ export const PROJECT_EVENTS = [
   "ci",
   "memory",
   "shared_file",
+  "session_controls",
   "node",
   "layout",
   "reset",
@@ -231,6 +232,10 @@ function onSharedFile(qc: QueryClient, pid: string, _d: { op: "write" | "delete"
   qc.invalidateQueries({ queryKey: keys.sharedFiles(pid) });
 }
 
+function onSessionControls(qc: QueryClient, pid: string, _d: { thread_id: string; applied: boolean; error?: string }) {
+  qc.invalidateQueries({ queryKey: keys.sessionControls(pid) });
+}
+
 function onDeliverable(qc: QueryClient, pid: string, _d: { deliverable: DeliverableView }) {
   qc.invalidateQueries({ queryKey: keys.allDeliverables(pid) });
   qc.invalidateQueries({ queryKey: keys.overview(pid) });
@@ -270,6 +275,7 @@ const HANDLERS: Partial<Record<ProjectEventType, Handler>> = {
   ci: onCi,
   memory: onMemory,
   shared_file: onSharedFile,
+  session_controls: onSessionControls,
   node: onNode,
   layout: onLayout,
   reset: onReset,

@@ -12,6 +12,7 @@ import { useAction } from "@/api/mutations";
 import { keys, useNodes, useRoles } from "@/api/queries";
 import SendButton from "@/components/app/SendButton.vue";
 import NewSessionOptions from "@/components/app/session/NewSessionOptions.vue";
+import NewSessionControls from "@/components/app/session/controls/NewSessionControls.vue";
 import SessionRepos from "@/components/app/session/SessionRepos.vue";
 import { DEFAULTS_KEY, parseDefaults, reposLabel, sessionReposPayload, type SessionRepo } from "@/components/app/session/session";
 import Field from "@/components/common/Field.vue";
@@ -31,6 +32,9 @@ const role = ref(saved?.role ?? "");
 const model = ref("");
 const node = ref(saved?.node || AUTO);
 const branch = ref("");
+/** Permission mode and effort ("" = the session's default; NewSessionControls). */
+const mode = ref("");
+const effort = ref("");
 const reposOpen = ref(false);
 
 const members = computed(() => (roles.data.value?.roles ?? []).filter((r) => r.tier === "member"));
@@ -53,6 +57,8 @@ const create = useAction(
       repos: sessionReposPayload(repos.value),
       role: role.value,
       model: model.value.trim() || undefined,
+      permission_mode: (mode.value || undefined) as never,
+      effort: effort.value || undefined,
       node_id: node.value === AUTO ? undefined : node.value,
       branch: branch.value.trim() || undefined,
     }),
@@ -121,7 +127,9 @@ const reposText = computed(() => (branch.value.trim() ? `${reposLabel(repos.valu
           <SendButton label="开始会话" class="ml-auto" :busy="create.isPending.value" :disabled="!ready" />
         </div>
       </div>
-      <NewSessionOptions v-model:node="node" v-model:role="role" v-model:model="model" :nodes="nodeList" :roles="members" :runtime="runtime" :auto="AUTO" class="mt-1.5 px-1" />
+      <NewSessionOptions v-model:node="node" v-model:role="role" v-model:model="model" :nodes="nodeList" :roles="members" :runtime="runtime" :auto="AUTO" class="mt-1.5 px-1">
+        <NewSessionControls v-model:mode="mode" v-model:effort="effort" :role="role" :model="model" />
+      </NewSessionOptions>
     </form>
     <el-dialog v-model="reposOpen" title="仓库" width="600px" class="at-dialog w-[calc(100%-2rem)] max-w-[600px]" append-to-body>
       <div class="flex flex-col gap-4">

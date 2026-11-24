@@ -11,6 +11,7 @@ import { leadOf } from "@/lib/present";
 import { cn } from "@/lib/utils";
 import { useAttachments } from "../attachments";
 import Composer from "../Composer.vue";
+import SessionControlsBar from "../session/controls/SessionControlsBar.vue";
 import { closedNote, reopenHint } from "./detail";
 
 const props = defineProps<{ pid: string; thread: ThreadView; class?: string; session?: boolean }>();
@@ -57,6 +58,8 @@ const unarchive = useAction(() => threadActions.unarchive(props.thread.id), {
       :on-send="onSend"
       :draft-key="draft"
       :assist="{ pid, cid: thread.id, scope: 'lead' }"
-    />
+    >
+      <template v-if="session" #controls><SessionControlsBar :pid="pid" /></template>
+    </Composer>
   </div>
 </template>
