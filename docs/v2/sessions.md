@@ -72,13 +72,22 @@ projects/<pid>/repos/<owner>__<repo>    ← shared clone
 
 ## API
 
-- `POST /api/sessions` `{message, title?, repos: [{repo, git_connection_id | git_repo_id, branch?}], role?, model?, node_id?}`
-  → `201 {project, thread_id, thread_no}`.
+- `POST /api/sessions` `{message, title?, repos: [{repo, git_connection_id | git_repo_id, branch?}], role?, model?, node_id?, branch?, permission_mode?, effort?}`
+  → `201 {project, thread_id, thread_no}`. `permission_mode` (`auto` / `default` / `acceptEdits` /
+  `plan` / `bypassPermissions`) and `effort` are the new-session page's picks; left out = the
+  session's default (Claude: `auto`, or `default` when the model lacks it; Codex and Antigravity:
+  the role's). They are checked against the role's runtime and model like a switch (422 with
+  `field` for a value the session cannot take) and kept on the employee (`session_mode`,
+  `session_effort`), so the first turn already runs with them.
+- `GET /api/session-options?role=&model=` → `SessionOptions {runtime, default_mode, model, modes,
+  models, efforts}`: what a new session of that role (and model; empty = the role's) can start
+  with, for the new-session page. Same shapes as `SessionControls`; `models` come from the user's
+  latest session of that runtime that reported them (`init.models`), empty before the first one.
 - `PUT /api/sessions/{pid}/repos` `{repos}` → the project view.
 - `GET /api/projects/{pid}/session-controls` → `SessionControls {thread_id, runtime, live,
   permission_mode, model, effort, pending: {permission_mode?, model?, effort?, since} | null,
   error?, modes: [{id, label, hint, applies: now|next_turn}], models: [{id, name?, description?,
-  efforts, default_effort?, supports_auto, default?}], efforts}`; 409 `not_session` for a project.
+  efforts, default_effort?, supports_auto, default?}], efforts, node_outdated}`; 409 `not_session` for a project.
 - `PUT /api/projects/{pid}/session-controls` `{permission_mode?, model?, effort?}` → the same view
   with `pending` set (live session on a `session_controls` daemon). 422 for a value the session
   cannot take, 409 `switch_pending` while the previous switch has no answer (at most 2 minutes).

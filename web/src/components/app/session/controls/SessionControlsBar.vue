@@ -75,10 +75,13 @@ const put = useAction((body: { permission_mode?: string; model?: string; effort?
     qc.setQueryData(keys.sessionControls(props.pid), data);
   },
 });
-watch(put.isError, (e) => e && (sent.value = null));
-function send(body: { permission_mode?: string; model?: string; effort?: string }) {
+type Picks = { permission_mode?: string; model?: string; effort?: string };
+/** The switch being waited for (sent from here, or pending when the page loaded): checked when it ends. */
+const asked = ref<Picks | null>(null);
+watch(put.isError, (e) => e && (sent.value = asked.value = null));
+function send(body: Picks) {
   if (busy.value || put.isPending.value) return;
-  sent.value = body;
+  sent.value = asked.value = body;
   put.mutate(body);
 }
 function pickMode(id: string) {
@@ -86,7 +89,10 @@ function pickMode(id: string) {
   send({ permission_mode: id });
 }
 function pickModel(id: string) {
-  const eff = effortFor(modelOf(models.value, id), c.value?.effort ?? "");
+  // No effort picked: the session stays on the model's default, so only the model goes out.
+  const cur = c.value?.effort ?? "";
+  if (!cur) return send({ model: id });
+  const eff = effortFor(modelOf(models.value, id), cur);
   send(eff && eff !== c.value?.effort && !c.value?.node_outdated ? { model: id, effort: eff } : { model: id });
 }
 function pickEffort(e: string) {
@@ -108,11 +114,27 @@ onBeforeUnmount(() => clearInterval(timer));
 watch(busy, (now, before) => {
   if (before && !now) modeOpen.value = modelOpen.value = false;
 });
-// A switch that failed says so once (the menu keeps the reason).
+// A switch already waiting when the page loaded is watched too.
 watch(
-  () => c.value?.error,
-  (err, before) => err && err !== before && toast.error(`切换没有成功：${err}`),
+  () => c.value?.pending,
+  (p) => {
+    if (!p || asked.value) return;
+    const { permission_mode, model, effort } = p;
+    asked.value = Object.fromEntries(Object.entries({ permission_mode, model, effort }).filter(([, v]) => v !== undefined && v !== null));
+  },
+  { immediate: true },
 );
+// When the switch ends it says how once: failed (the menu keeps the reason), or dropped without an
+// answer (the server gives up after 2 minutes and keeps the old values). An error already there when
+// the page loaded is only shown in the menu.
+watch(c, (v) => {
+  const a = asked.value;
+  if (!v || v.pending || sent.value || !a) return;
+  asked.value = null;
+  if (v.error) return void toast.error(`切换没有成功：${v.error}`);
+  const kept = (Object.keys(a) as (keyof Picks)[]).some((k) => a[k] !== undefined && v[k] !== a[k]);
+  if (kept) toast.error("节点没有回应，切换未生效");
+});
 
 /** Digits pick a row while the mode menu is open (not while typing elsewhere). */
 function onKey(e: KeyboardEvent) {
@@ -166,7 +188,7 @@ const toneClass = computed(() => (busy.value && pendingMode.value ? TONE_CLASS.p
             <ChevronDown class="size-3 shrink-0" />
           </button>
         </template>
-        <ModeMenuBody :rows="rows" :current="mode" :pending="pendingMode" :runtime-label="runtimeLabel(runtime)" :notes="modeNotes" @pick="pickMode" />
+        <ModeMenuBody :rows="rows" :current="mode" :pending="pendingMode" :runtime-label="runtimeLabel(runtime)" :notes="modeNotes" :disabled="busy" @pick="pickMode" />
       </el-popover>
     </template>
     <template v-else>
@@ -180,7 +202,7 @@ const toneClass = computed(() => (busy.value && pendingMode.value ? TONE_CLASS.p
         <div class="flex flex-col gap-3 pb-2" data-testid="controls-sheet">
           <ModelMenuBody :models="models" :model="c.model" :effort="c.effort" :efforts="c.node_outdated ? [] : efforts" :runtime="runtime" :disabled="busy" :note="modelNote" touch @model="pickModel" @effort="pickEffort" />
           <div class="border-t pt-2">
-            <ModeMenuBody :rows="rows" :current="mode" :pending="pendingMode" :runtime-label="runtimeLabel(runtime)" :notes="modeNotes" touch @pick="pickMode" />
+            <ModeMenuBody :rows="rows" :current="mode" :pending="pendingMode" :runtime-label="runtimeLabel(runtime)" :notes="modeNotes" :disabled="busy" touch @pick="pickMode" />
           </div>
         </div>
       </el-drawer>
