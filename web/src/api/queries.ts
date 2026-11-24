@@ -54,6 +54,9 @@ export const keys = {
   builtinCommands: ["commands", "builtin"] as const,
   conversationModel: (cid: string) => ["c", cid, "model"] as const,
   conversationCommands: (cid: string) => ["c", cid, "commands"] as const,
+  contextDetail: (cid: string) => ["c", cid, "context-detail"] as const,
+  /** The latest project event context of a conversation (written by events.ts, read by the 刷新 button). */
+  contextEvent: (cid: string) => ["c", cid, "context-event"] as const,
   plugins: ["plugins"] as const,
   adminPlugins: ["admin", "plugins"] as const,
   deliverableFiles: (id: string, version = 0) => ["deliverable", id, "files", version] as const,
@@ -257,6 +260,12 @@ export const useBuiltinCommands = () => useQuery({ queryKey: keys.builtinCommand
 export const conversationModels = { predicate: (q: { queryKey: readonly unknown[] }) => q.queryKey[0] === "c" && q.queryKey[2] === "model" };
 export const useConversationModel = (cid: Arg) =>
   useKeyed(() => keys.conversationModel(val(cid)), () => unwrap(client.GET("/api/conversations/{cid}/model", path({ cid: val(cid) }))), { enabled: has(cid) });
+/** A session's context breakdown (Claude only; 404 for other conversations, so no retry). */
+export const useContextDetail = (cid: Arg, enabled: () => boolean = () => true) =>
+  useKeyed(() => keys.contextDetail(val(cid)), () => unwrap(client.GET("/api/conversations/{cid}/context/detail", path({ cid: val(cid) }))), {
+    enabled: () => has(cid)() && enabled(),
+    retry: false,
+  });
 export const useRolePresets = () => useQuery({ queryKey: keys.rolePresets, queryFn: () => unwrap(client.GET("/api/roles/presets")), staleTime: 300_000 });
 
 export const useSkills = () => useQuery({ queryKey: keys.skills, queryFn: () => unwrap(client.GET("/api/skills")) });

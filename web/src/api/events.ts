@@ -37,6 +37,7 @@ export const PROJECT_EVENTS = [
   "shared_file",
   "node",
   "layout",
+  "context",
   "reset",
 ] as const;
 export type ProjectEventType = (typeof PROJECT_EVENTS)[number];
@@ -253,6 +254,30 @@ function onReset(qc: QueryClient, pid: string) {
   qc.invalidateQueries({ queryKey: ["c"] });
 }
 
+/** Project event context (api.md §1.1): a session's context breakdown was stored, or a refresh failed. */
+export interface ContextEvent {
+  thread_no: number;
+  conversation_id: string;
+  session_id: string;
+  reason: "turn" | "refresh";
+  refresh_id?: string;
+  error?: string;
+  /** Absent when nothing was stored (an error, or a refresh older than the stored breakdown). */
+  updated_at?: string;
+}
+
+function onContext(qc: QueryClient, pid: string, d: ContextEvent) {
+  if (!d?.conversation_id) return;
+  qc.setQueryData<ContextEvent>(keys.contextEvent(d.conversation_id), d);
+  qc.invalidateQueries({ queryKey: keys.contextDetail(d.conversation_id) });
+  // A stored breakdown also rewrote the session's totals (context_used/max): the bar above the
+  // categories reads them from the thread, which a refresh between turns does not otherwise refetch.
+  if (d.updated_at) {
+    qc.invalidateQueries({ queryKey: keys.threads(pid), exact: true });
+    qc.invalidateQueries({ queryKey: keys.thread(d.conversation_id), exact: true });
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Handler = (qc: QueryClient, pid: string, data: any) => void;
 
@@ -272,6 +297,7 @@ const HANDLERS: Partial<Record<ProjectEventType, Handler>> = {
   shared_file: onSharedFile,
   node: onNode,
   layout: onLayout,
+  context: onContext,
   reset: onReset,
 };
 

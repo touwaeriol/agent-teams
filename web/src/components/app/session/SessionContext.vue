@@ -14,7 +14,7 @@ import ProgressBar from "../ProgressBar.vue";
 import SectionLabel from "../SectionLabel.vue";
 import { contextTotal } from "./session";
 
-const props = defineProps<{ session: ThreadSession | null | undefined }>();
+const props = defineProps<{ session: Pick<ThreadSession, "context_used" | "context_max"> | null | undefined }>();
 const total = computed(() => contextTotal(props.session));
 /** Past 80 % the bar turns to the waiting colour: the session is close to compacting. */
 const tone = computed(() => (total.value && total.value.pct >= 80 ? INK.wait : INK.doing));
