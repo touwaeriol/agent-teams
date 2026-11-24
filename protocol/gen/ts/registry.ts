@@ -34,6 +34,8 @@ export interface MessageBodies {
   "session.closed": T.SessionClosed;
   "session.compact": T.SessionCompact;
   "session.compacted": T.SessionCompacted;
+  "session.context": T.SessionContext;
+  "session.context_refresh": T.SessionContextRefresh;
   "session.delivered": T.SessionDelivered;
   "session.digest": T.SessionDigest;
   "session.event": T.SessionEvent;
@@ -102,6 +104,8 @@ export const MESSAGE_META: { readonly [K in MessageType]: MessageMeta } = {
   "session.closed": { direction: "node_to_console", reliable: true, key: ["session_id","open_gen"] },
   "session.compact": { direction: "console_to_node", reliable: true, key: ["compact_id"] },
   "session.compacted": { direction: "node_to_console", reliable: true, key: ["compact_id"] },
+  "session.context": { direction: "node_to_console", reliable: false, key: [] },
+  "session.context_refresh": { direction: "console_to_node", reliable: false, key: [] },
   "session.delivered": { direction: "node_to_console", reliable: true, key: ["msg_id"] },
   "session.digest": { direction: "node_to_console", reliable: false, key: [] },
   "session.event": { direction: "node_to_console", reliable: true, key: ["session_id","event_no"] },

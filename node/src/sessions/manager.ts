@@ -2,7 +2,7 @@ import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { ApprovalBroker } from "../approvals.js";
 import type { Reply } from "../link/inbox.js";
-import type { GitResult, SessionClose, SessionCompact, SessionCompacted, SessionInterrupt, SessionOpen, SessionReportItem, SessionSend, SessionSetMode, SessionWatch } from "../protocol.js";
+import type { GitResult, SessionClose, SessionCompact, SessionCompacted, SessionContext, SessionContextRefresh, SessionInterrupt, SessionOpen, SessionReportItem, SessionSend, SessionSetMode, SessionWatch } from "../protocol.js";
 import type { ToolBroker } from "../toolhost/broker.js";
 import { deferred, sleep, withTimeout, type Deferred } from "../util/async.js";
 import { readJsonFile, writeFileAtomic } from "../util/jsonl.js";
@@ -36,6 +36,8 @@ export interface ManagerDeps {
   onSessionGone?: (sessionId: string) => void;
   /** A session's turn ended (session.digest, move/live.ts). */
   onTurnEnd?: (s: { id: string; gen: number; spec: SessionOpen; absCwd: string }) => void;
+  /** The console takes session.context (welcome.features has context_detail). */
+  contextDetail?: () => boolean;
   /** Called whenever a session's driver stops (closed, parked, crashed): per-driver secrets such as the SSH key are dropped. */
   onDriverGone?: (sessionId: string) => void;
   log: Logger;
@@ -385,6 +387,26 @@ export class SessionManager implements SessionHost {
     s.spec.ssh_servers = servers;
     this.persist(s);
     return true;
+  }
+
+  /**
+   * session.context_refresh (protocol.md §4.10 上下文细分): the precise breakdown now, read from the
+   * live runtime only (a parked session is not started for it: error instead).
+   */
+  async refreshContext(body: SessionContextRefresh): Promise<Reply[]> {
+    const answer = (extra: Pick<SessionContext, "context" | "error">): Reply[] => [
+      { type: "session.context", body: { session_id: body.session_id, open_gen: body.open_gen, reason: "refresh", refresh_id: body.refresh_id, ...extra } satisfies SessionContext },
+    ];
+    const s = this.sessions.get(body.session_id);
+    if (!s || s.gen !== body.open_gen || s.state === "closed") return answer({ error: "no such session on this node" });
+    if (!s.driver) return answer({ error: "the session has no live process" });
+    if (!s.driver.contextDetail) return answer({ error: "the runtime has no context breakdown" });
+    const context = await s.driver.contextDetail("full");
+    return answer(context ? { context } : { error: "the runtime did not report its context" });
+  }
+
+  contextDetailOn(): boolean {
+    return this.d.contextDetail?.() ?? false;
   }
 
   watch(body: SessionWatch): Reply[] {

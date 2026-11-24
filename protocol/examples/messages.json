@@ -463,6 +463,146 @@
   },
   {
     "v": 2,
+    "type": "session.context",
+    "id": "n_01JD3V0000000000000000064",
+    "ts": "2026-11-14T12:31:08Z",
+    "body": {
+      "session_id": "s_01JD",
+      "open_gen": 1,
+      "reason": "turn",
+      "context": {
+        "detail": "summary",
+        "model": "claude-opus-5-5",
+        "total_tokens": 77400,
+        "max_tokens": 1000000,
+        "raw_max_tokens": 1000000,
+        "auto_compact": true,
+        "auto_compact_threshold": 967000,
+        "categories": [
+          {
+            "id": "system_prompt",
+            "name": "System prompt",
+            "tokens": 3200,
+            "kind": "used"
+          },
+          {
+            "id": "system_tools",
+            "name": "System tools",
+            "tokens": 14800,
+            "kind": "used"
+          },
+          {
+            "id": "mcp_tools",
+            "name": "MCP tools",
+            "tokens": 9600,
+            "kind": "used"
+          },
+          {
+            "id": "mcp_instructions",
+            "name": "MCP server instructions",
+            "tokens": 1100,
+            "kind": "used"
+          },
+          {
+            "id": "memory_files",
+            "name": "Memory files",
+            "tokens": 2600,
+            "kind": "used"
+          },
+          {
+            "id": "skills",
+            "name": "Skills",
+            "tokens": 2300,
+            "kind": "used"
+          },
+          {
+            "id": "messages",
+            "name": "Messages",
+            "tokens": 43800,
+            "kind": "used"
+          },
+          {
+            "id": "autocompact_buffer",
+            "name": "Autocompact buffer",
+            "tokens": 33000,
+            "kind": "buffer"
+          },
+          {
+            "id": "free_space",
+            "name": "Free space",
+            "tokens": 889600,
+            "kind": "free"
+          },
+          {
+            "id": "mcp_tools_deferred",
+            "name": "MCP tools (deferred)",
+            "tokens": 12400,
+            "kind": "deferred"
+          }
+        ],
+        "mcp_tools": [
+          {
+            "name": "mcp__platform__publish_file",
+            "server": "platform",
+            "tokens": 1380,
+            "loaded": true
+          },
+          {
+            "name": "mcp__platform__ask_user",
+            "server": "platform",
+            "tokens": 1240,
+            "loaded": true
+          }
+        ],
+        "mcp_servers": [
+          {
+            "server": "platform",
+            "tokens": 1100
+          }
+        ],
+        "memory_files": [
+          {
+            "path": "/work/CLAUDE.md",
+            "type": "Project",
+            "tokens": 2600
+          }
+        ],
+        "skills": [
+          {
+            "name": "review",
+            "source": "plugin",
+            "tokens": 310
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 2,
+    "type": "session.context_refresh",
+    "id": "c_01JD3V0000000000000000064",
+    "ts": "2026-11-14T12:31:20Z",
+    "body": {
+      "session_id": "s_01JD",
+      "open_gen": 1,
+      "refresh_id": "cr_01JD3V00000000000000000001"
+    }
+  },
+  {
+    "v": 2,
+    "type": "session.context",
+    "id": "n_01JD3V0000000000000000065",
+    "ts": "2026-11-14T12:31:21Z",
+    "body": {
+      "session_id": "s_01JD",
+      "open_gen": 1,
+      "reason": "refresh",
+      "refresh_id": "cr_01JD3V00000000000000000001",
+      "error": "the session has no live process"
+    }
+  },
+  {
+    "v": 2,
     "type": "session.send",
     "id": "c_01JD3V0000000000000000006",
     "seq": 984,

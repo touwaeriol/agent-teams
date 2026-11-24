@@ -371,6 +371,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/conversations/{cid}/context/detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What fills the session's context window, by category (sessions on Claude only) */
+        get: operations["conversation-context-detail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{cid}/context/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Count the session's context precisely now; the result arrives as the project event context */
+        post: operations["conversation-context-refresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/conversations/{cid}/forward": {
         parameters: {
             query?: never;
@@ -2592,6 +2626,96 @@ export interface components {
             runtime: string;
             /** @description null before the first session */
             session: components["schemas"]["SessionUsage"];
+        };
+        ContextCategoryView: {
+            /** @description Stable row id: system_prompt, system_tools, mcp_tools, mcp_instructions, mcp_tools_deferred, system_tools_deferred, custom_agents, memory_files, skills, messages, autocompact_buffer, compact_buffer, free_space; more may come, '' from an old CLI. Classify on id and kind, not on name */
+            id: string;
+            /**
+             * @description used: in the window; free: the rest of it; buffer: the autocompact reserve; deferred: tool schemas outside the window
+             * @enum {string}
+             */
+            kind: "used" | "free" | "buffer" | "deferred";
+            /** @description The runtime's English label */
+            name: string;
+            /** Format: int64 */
+            tokens: number;
+        };
+        ContextDetailView: {
+            auto_compact: boolean;
+            /**
+             * Format: int64
+             * @description Tokens at which the runtime compacts by itself; 0 = unknown
+             */
+            auto_compact_threshold: number;
+            /** @description POST …/context/refresh can read it now: the session runs on an online node whose daemon reports breakdowns */
+            can_refresh: boolean;
+            /** @description In the runtime's order; deferred rows are outside the window */
+            categories: components["schemas"]["ContextCategoryView"][] | null;
+            /**
+             * @description summary: estimated after a turn; full: counted on a refresh; '' = no breakdown yet
+             * @enum {string}
+             */
+            detail: "summary" | "full" | "";
+            /**
+             * Format: int64
+             * @description The window measured against: the autocompact window; 0 = unknown
+             */
+            max_tokens: number;
+            mcp_servers: components["schemas"]["ContextMcpServerView"][] | null;
+            /** @description Every MCP tool (the mcp_tools and mcp_tools_deferred rows expanded) */
+            mcp_tools: components["schemas"]["ContextMcpToolView"][] | null;
+            memory_files: components["schemas"]["ContextMemoryFileView"][] | null;
+            model: string;
+            /**
+             * Format: int64
+             * @description The model's own window; 0 = unknown
+             */
+            raw_max_tokens: number;
+            /** @description Runtime of the latest session ('' before the first one) */
+            runtime: string;
+            /** @description The latest session ('' before the first one) */
+            session_id: string;
+            skills: components["schemas"]["ContextSkillView"][] | null;
+            /** @description That session's state (active, turn_running, parked, closed, …) */
+            state: string;
+            /** @description The session's runtime reports a breakdown (Claude only). false: hide the context block */
+            supported: boolean;
+            /** Format: int64 */
+            total_tokens: number;
+            /**
+             * Format: date-time
+             * @description When the breakdown arrived; null = none yet
+             */
+            updated_at: string | null;
+        };
+        ContextMcpServerView: {
+            server: string;
+            /** Format: int64 */
+            tokens: number;
+        };
+        ContextMcpToolView: {
+            /** @description false: deferred (tool search), not in the window yet */
+            loaded: boolean;
+            name: string;
+            server: string;
+            /** Format: int64 */
+            tokens: number;
+        };
+        ContextMemoryFileView: {
+            path: string;
+            /** Format: int64 */
+            tokens: number;
+            type: string;
+        };
+        ContextRefreshStarted: {
+            refresh_id: string;
+            session_id: string;
+        };
+        ContextSkillView: {
+            name: string;
+            source: string;
+            /** Format: int64 */
+            tokens: number;
         };
         ControlsPending: {
             effort?: string;
@@ -5809,6 +5933,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ComposerContext"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "conversation-context-detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContextDetailView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "conversation-context-refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContextRefreshStarted"];
                 };
             };
             /** @description Error */

@@ -20,7 +20,7 @@ import { Outbox } from "./link/outbox.js";
 import { LiveDigest } from "./move/live.js";
 import { Mover } from "./move/mover.js";
 import { consoleTransfer, type MoveTransfer } from "./move/transfer.js";
-import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, FileDownload, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, NodeRuntimesRefresh, NodeUsageRefresh, SessionClose, SshCertResponse, SshServersUpdate, SessionCompact, SessionExport, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
+import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, FileDownload, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, NodeRuntimesRefresh, NodeUsageRefresh, SessionClose, SshCertResponse, SshServersUpdate, SessionCompact, SessionContextRefresh, SessionExport, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
 import { readClaudeAccount } from "./claude-account.js";
 import { readClaudeUsage, UsageReporter, type UsageSources } from "./usage.js";
 import type { QueryFn } from "./sessions/claude/driver.js";
@@ -108,7 +108,7 @@ export interface DaemonOptions {
   updater?: Partial<Pick<UpdaterOptions, "pollMs" | "confirmAfterMs" | "fetchFn" | "npm" | "now">>;
 }
 
-const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "file_download", "shared_files", "context_usage", "session_compact", "usage", "ssh_gateway", "runtime_status", "session_move", "session_controls"];
+const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "file_download", "shared_files", "context_usage", "session_compact", "usage", "ssh_gateway", "runtime_status", "session_move", "context_detail", "session_controls"];
 
 /** Wires the link, command handlers, sessions, tools, git and credentials together. */
 export class Daemon {
@@ -137,6 +137,8 @@ export class Daemon {
   /** The agent runtimes this node runs (sessions/registry.ts). */
   readonly runtimes: RuntimeRegistry;
   private statsTimer: NodeJS.Timeout | null = null;
+  /** welcome.features: what the console takes (session.context needs context_detail). */
+  private welcomeFeatures = new Set<string>();
   private readonly usage: UsageReporter;
   /** Re-detects the runtimes' install/login state and reports changes in node.runtimes (protocol.md §9.2). */
   readonly runtimeMonitor: RuntimeMonitor;
@@ -210,6 +212,7 @@ export class Daemon {
       onSessionGone: (id) => this.forgetSession(id),
       onTurnEnd: (s) => this.live.turnEnded(s),
       onDriverGone: (id) => this.ssh.drop(id),
+      contextDetail: () => this.welcomeFeatures.has("context_detail"),
       fetchImage: consoleImageFetcher(o.url, o.token),
       ...(o.crashDelaysMs ? { crashDelaysMs: o.crashDelaysMs } : {}),
       ...(o.compactWaitMs ? { compactWaitMs: o.compactWaitMs } : {}),
@@ -307,6 +310,7 @@ export class Daemon {
   }
 
   private onWelcome(w: Welcome): void {
+    this.welcomeFeatures = new Set(w.features ?? []);
     this.sessions.configure(w.config ?? {});
     if (w.config?.log_level) this.o.log.level = w.config.log_level;
     this.link.send("sessions.report", this.sessions.report());
@@ -362,6 +366,7 @@ export class Daemon {
       "session.close": { lane: session, run: (b) => s.close(b as unknown as SessionClose) },
       "session.export": { lane: session, run: async (b) => [{ type: "session.exported", body: await this.mover.export(b as unknown as SessionExport) }] },
       "session.watch": { run: async (b) => s.watch(b as unknown as SessionWatch) },
+      "session.context_refresh": { run: (b) => s.refreshContext(b as unknown as SessionContextRefresh) },
       "approval.resolve": { run: async (b) => [{ type: "approval.ack", body: this.approvals.resolve(b as unknown as ApprovalResolve) }] },
       "tool.result": { run: async (b) => (this.toolResult(b as unknown as ToolResult), []) },
       "file.download": { run: async (b) => (this.tools.chunk(b as unknown as FileDownload), []) },

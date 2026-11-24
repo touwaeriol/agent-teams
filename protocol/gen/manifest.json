@@ -264,6 +264,20 @@
       ]
     },
     {
+      "type": "session.context",
+      "name": "SessionContext",
+      "direction": "node_to_console",
+      "reliable": false,
+      "key": []
+    },
+    {
+      "type": "session.context_refresh",
+      "name": "SessionContextRefresh",
+      "direction": "console_to_node",
+      "reliable": false,
+      "key": []
+    },
+    {
       "type": "session.delivered",
       "name": "SessionDelivered",
       "direction": "node_to_console",

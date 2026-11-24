@@ -52,6 +52,8 @@ p, node-token, /nodes/ssh, GET
 p, user, /api/attachments/:id, GET
 p, user, /api/conversations/:cid/commands, GET
 p, user, /api/conversations/:cid/context, GET
+p, user, /api/conversations/:cid/context/detail, GET
+p, user, /api/conversations/:cid/context/refresh, POST
 p, user, /api/conversations/:cid/forward, POST
 p, user, /api/conversations/:cid/interrupt, POST
 p, user, /api/conversations/:cid/model, GET
