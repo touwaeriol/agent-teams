@@ -41,6 +41,8 @@ func (r *router) Handle(ctx context.Context, node store.Node, typ string, body a
 		return core.SetSessionDigest(ctx, e.Core.Pool, string(m.SessionID), strings.ToValidUTF8(m.Digest, ""))
 	case *protocol.SessionEvent:
 		return r.sessionEvent(ctx, m)
+	case *protocol.SessionContext:
+		return r.sessionContext(ctx, m)
 	case *protocol.SessionsReport:
 		return r.report(ctx, node, m)
 	case *protocol.ApprovalRequest:

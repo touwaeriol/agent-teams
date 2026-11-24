@@ -458,6 +458,8 @@ CREATE TABLE at_agent_sessions (
   in_turn         BOOLEAN NOT NULL DEFAULT false,  -- 00270：正在跑回合（turn_started 置位，turn_ended / 离开 active 清掉）；项目成员回合中不领别的讨论串的任务
   context_used    INT,                             -- 00290：最近一个回合结束时的上下文 token 数（turn_ended.context / session.compacted）
   context_max     INT,                             -- 00290：运行时衡量用的窗口（岗位没设上限时按它算比例）
+  context_detail  JSONB,                           -- 00450：最近一次 session.context 的上下文细分（ContextDetail；只有 Claude；NULL = 没报过）
+  context_detail_at TIMESTAMPTZ,                   -- 00450：细分到达的时间
   tasks_done      INT NOT NULL DEFAULT 0           -- 00290：送进这个会话的任务简报数（clear_after_tasks）
 );
 CREATE UNIQUE INDEX at_agent_sessions_live ON at_agent_sessions (employee_id) WHERE state <> 'closed';  -- 一个员工最多一个活会话

@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 420 {
+	if migrations.Latest() != 450 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -1672,7 +1672,7 @@ INSERT INTO at_schedules (id, project_id, name, cron, message) VALUES ('sc1', 'p
 	if _, err := p.Up(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if v, err := p.GetDBVersion(ctx); err != nil || v != migrations.Latest() || v != 420 {
+	if v, err := p.GetDBVersion(ctx); err != nil || v != migrations.Latest() || v != 450 {
 		t.Fatalf("version %d %v", v, err)
 	}
 	var got string
