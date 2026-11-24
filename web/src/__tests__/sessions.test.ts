@@ -1,6 +1,6 @@
 // 会话 (multi-repository sessions): the helpers behind the sidebar rows, the new-session form and 工作现场.
 import { describe, expect, it } from "vitest";
-import { homeOf, isSession, parseDefaults, repoDir, reposLabel, sessionReposPayload, sessionText, withBranches } from "@/components/app/session/session";
+import { contextTotal, homeOf, isSession, parseDefaults, repoDir, reposLabel, sessionMark, sessionReposPayload, sessionText, withBranches, zhTokens } from "@/components/app/session/session";
 import { projectGroups } from "@/pages/projects";
 
 describe("sessions", () => {
@@ -63,5 +63,35 @@ describe("new session box and projects page", () => {
       ["其他项目", ["new", "old", "arch"]],
     ]);
     expect(projectGroups([p("web")], "zz")).toEqual([]);
+  });
+});
+
+describe("会话信息 and the sidebar mark (#53)", () => {
+  it("formats the context total against the runtime's window, hidden without data", () => {
+    expect(zhTokens(8123)).toBe("8,123");
+    expect(zhTokens(77_000)).toBe("7.7万");
+    expect(zhTokens(1_000_000)).toBe("100万");
+    expect(zhTokens(200_000)).toBe("20万");
+    expect(contextTotal({ context_used: 77_000, context_max: 1_000_000 })).toMatchObject({ pct: 7.7, text: "已使用 8% · 7.7万 / 100万" });
+    expect(contextTotal({ context_used: 1_500, context_max: 200_000 })?.text).toBe("已使用 <1% · 1,500 / 20万");
+    expect(contextTotal({ context_used: 300_000, context_max: 200_000 })?.pct).toBe(100);
+    // Antigravity (no use reported), no turn yet, or an older server: no block at all.
+    expect(contextTotal({ context_used: null, context_max: null })).toBeNull();
+    expect(contextTotal({ context_used: 10, context_max: 0 })).toBeNull();
+    expect(contextTotal(null)).toBeNull();
+    expect(contextTotal(undefined)).toBeNull();
+  });
+
+  it("marks sessions in the sidebar: 进行中, 已完成, 已解决; cards show as the count instead", () => {
+    const s = (session_status: string, patch: object = {}) => ({ kind: "session", waiting: 0, archived: false, session_status, ...patch }) as never;
+    expect(sessionMark(s("working"))).toBe("working");
+    expect(sessionMark(s("finished"))).toBe("finished");
+    expect(sessionMark(s("resolved"))).toBe("resolved");
+    expect(sessionMark(s("queued"))).toBe("queued");
+    expect(sessionMark(s("failed"))).toBe("failed");
+    expect(sessionMark(s("finished", { waiting: 1 }))).toBeNull();
+    expect(sessionMark(s("resolved", { archived: true }))).toBeNull();
+    expect(sessionMark(s("", {}))).toBeNull();
+    expect(sessionMark({ kind: "project", waiting: 0, archived: false, session_status: "" } as never)).toBeNull();
   });
 });

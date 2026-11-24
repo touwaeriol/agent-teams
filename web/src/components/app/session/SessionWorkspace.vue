@@ -1,19 +1,25 @@
 <script setup lang="ts">
-// 工作现场 of a session: the employee and its node, the work branch, and the folder with every
-// repository side by side (each from its branch). Repositories can be added or removed while it runs.
-import { FolderGit2, GitBranch, Server } from "lucide-vue-next";
+// 会话信息 of a session: 环境 (the node and whether it is online, the CLI, every repository with the
+// branch it started from, the work branch, the working directory on the node) and 上下文 (the
+// total; hidden when the runtime reports none). Repositories can be added or removed while it runs.
+import { FolderGit2 } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import { sessions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import { keys } from "@/api/queries";
 import type { ProjectView, ThreadView } from "@/api/views";
-import { leadOf } from "@/lib/present";
+import { INK, leadOf } from "@/lib/present";
+import { runtimeLabel } from "@/lib/runtimes";
 import SectionLabel from "../SectionLabel.vue";
+import SessionContext from "./SessionContext.vue";
 import SessionRepos from "./SessionRepos.vue";
 import { repoDir, sessionReposPayload, type SessionRepo } from "./session";
 
 const props = defineProps<{ project: ProjectView; thread: ThreadView }>();
 const lead = computed(() => leadOf(props.thread));
+const node = computed(() => lead.value?.node ?? null);
+const cli = computed(() => runtimeLabel(props.thread.session?.runtime || lead.value?.runtime));
+const cwd = computed(() => props.thread.session?.cwd ?? "");
 /** Base branch per repository (lowercase), as the thread recorded it ("" = default branch). */
 const bases = computed(() => {
   const out: Record<string, string> = {};
@@ -22,6 +28,7 @@ const bases = computed(() => {
   return out;
 });
 const current = computed<SessionRepo[]>(() => (props.project.repos ?? []).map((r) => ({ ...r, git_connection_id: r.git_connection_id ?? null, branch: bases.value[r.repo.toLowerCase()] ?? "" })));
+const dirs = computed(() => current.value.map((r) => `./${repoDir(r.repo)}`).join("　"));
 const editing = ref(false);
 const draft = ref<SessionRepo[]>([]);
 function edit() {
@@ -36,46 +43,52 @@ const save = useAction(() => sessions.setRepos(props.project.id, sessionReposPay
 </script>
 
 <template>
-  <div class="flex flex-col gap-5 p-4 text-[13px]" data-testid="session-workspace">
-    <section class="flex flex-col gap-2">
-      <SectionLabel>员工</SectionLabel>
-      <div v-if="lead" class="flex flex-col gap-1">
-        <span class="font-medium">{{ lead.title || lead.name }}</span>
-        <span class="flex items-center gap-1.5 text-muted-foreground">
-          <Server class="size-3.5" />
-          {{ lead.node ? `${lead.node.name}${lead.node.online ? "" : "（离线）"}` : "等待分配节点" }}
-        </span>
-      </div>
-      <span v-else class="text-muted-foreground">还没有员工</span>
-    </section>
-    <section class="flex flex-col gap-2">
-      <SectionLabel>工作分支</SectionLabel>
-      <span class="flex items-center gap-1.5 font-mono text-xs"><GitBranch class="size-3.5 shrink-0" />{{ thread.branch }}</span>
-      <a v-if="thread.pr_url" :href="thread.pr_url" target="_blank" rel="noopener" class="text-xs underline underline-offset-2">PR #{{ thread.pr_number }}</a>
-    </section>
-    <section class="flex flex-col gap-2">
-      <div class="flex items-center justify-between">
-        <SectionLabel>工作目录</SectionLabel>
-        <button v-if="!editing" type="button" class="text-xs underline-offset-2 hover:underline" @click="edit">增删仓库</button>
-      </div>
-      <template v-if="!editing">
-        <ul class="flex flex-col gap-1.5">
-          <li v-for="r in current" :key="r.repo" class="flex items-start gap-2">
-            <FolderGit2 class="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-            <span class="flex min-w-0 flex-col">
-              <span class="truncate font-mono text-xs">./{{ repoDir(r.repo) }}</span>
-              <span class="truncate text-xs text-muted-foreground">{{ r.repo }} · 从 {{ r.branch || "默认分支" }}</span>
+  <div class="flex flex-col gap-6 p-4 text-[13px]" data-testid="session-workspace">
+    <section class="flex flex-col gap-2.5">
+      <SectionLabel>环境</SectionLabel>
+      <dl class="grid grid-cols-[44px_minmax(0,1fr)] items-start gap-x-3 gap-y-2.5">
+        <dt class="text-xs leading-5 text-muted-foreground">节点</dt>
+        <dd class="flex min-w-0 items-center gap-1.5 leading-5" data-testid="env-node">
+          <template v-if="node">
+            <span class="size-2 shrink-0 rounded-full" :style="{ background: node.online ? INK.done : INK.idle }" />
+            <span class="truncate font-medium">{{ node.name }}</span>
+            <span class="shrink-0 text-xs text-muted-foreground">{{ node.online ? "在线" : "离线" }}</span>
+          </template>
+          <span v-else class="text-muted-foreground">等待分配节点</span>
+        </dd>
+        <dt class="text-xs leading-5 text-muted-foreground">CLI</dt>
+        <dd class="leading-5">{{ cli }}</dd>
+        <dt class="text-xs leading-5 text-muted-foreground">仓库</dt>
+        <dd class="flex min-w-0 flex-col gap-1.5">
+          <template v-if="!editing">
+            <span v-for="r in current" :key="r.repo" class="flex min-w-0 items-center gap-1.5 leading-5">
+              <FolderGit2 class="size-3.5 shrink-0 text-muted-foreground" />
+              <span class="truncate font-mono text-xs" :title="r.repo">{{ r.repo }}</span>
+              <span class="shrink-0 text-xs text-muted-foreground">从 {{ r.branch || "默认分支" }}</span>
             </span>
-          </li>
-        </ul>
-      </template>
-      <template v-else>
-        <SessionRepos v-model="draft" :locked="bases" :current-project="project.id" />
-        <div class="flex justify-end gap-2">
-          <el-button size="small" @click="editing = false">取消</el-button>
-          <el-button size="small" type="primary" :loading="save.isPending.value" :disabled="draft.length === 0" @click="save.mutate()">保存</el-button>
-        </div>
-      </template>
+            <button type="button" class="self-start text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" @click="edit">增删仓库</button>
+          </template>
+          <template v-else>
+            <SessionRepos v-model="draft" :locked="bases" :current-project="project.id" />
+            <div class="flex justify-end gap-2">
+              <el-button size="small" @click="editing = false">取消</el-button>
+              <el-button size="small" type="primary" :loading="save.isPending.value" :disabled="draft.length === 0" @click="save.mutate()">保存</el-button>
+            </div>
+          </template>
+        </dd>
+        <dt class="text-xs leading-5 text-muted-foreground">分支</dt>
+        <dd class="flex min-w-0 flex-col gap-1">
+          <span class="truncate rounded-md bg-raised px-1.5 py-0.5 font-mono text-xs leading-5" :title="thread.branch">{{ thread.branch }}</span>
+          <a v-if="thread.pr_url" :href="thread.pr_url" target="_blank" rel="noopener" class="text-xs underline underline-offset-2">PR #{{ thread.pr_number }}</a>
+        </dd>
+        <dt class="text-xs leading-5 text-muted-foreground">目录</dt>
+        <dd class="flex min-w-0 flex-col gap-1" data-testid="env-cwd">
+          <span v-if="cwd" class="at-wrap rounded-md bg-raised px-1.5 py-0.5 font-mono text-xs leading-5" :title="cwd">{{ cwd }}</span>
+          <span v-else class="text-xs leading-5 text-muted-foreground">员工开工后显示</span>
+          <span class="truncate font-mono text-[11.5px] text-muted-foreground">{{ dirs }}</span>
+        </dd>
+      </dl>
     </section>
+    <SessionContext :session="thread.session" />
   </div>
 </template>

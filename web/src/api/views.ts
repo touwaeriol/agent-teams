@@ -187,7 +187,14 @@ export interface ThreadView {
   reminded_at?: string | null;
   /** Who handed over the brief and the user's words it came from (null: forwarded, or older threads; older servers leave it out). */
   dispatch?: ThreadDispatch | null;
+  /** A session's thread (多仓库会话): its lead is the one employee the user talks to (older servers leave it out). */
+  solo?: boolean;
+  /** A session's employee's latest agent session: working directory on the node and context use (null for other threads). */
+  session?: ThreadSession | null;
 }
+
+/** ThreadView.session: the live side of a session's employee. */
+export type ThreadSession = S["ThreadSession"];
 
 /** How a thread was opened: who handed the brief (ThreadView.brief) to the lead, when, and from which of the user's words (null: none, or deleted). */
 export type ThreadDispatch = Omit<S["ThreadDispatch"], "source"> & { source: DispatchSource | null };

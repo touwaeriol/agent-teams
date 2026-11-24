@@ -64,3 +64,66 @@ export function parseDefaults(raw: string | null): SessionDefaults | null {
     return null;
   }
 }
+
+/** A session's state in the sidebar (ProjectView.session_status), drawn as a small mark; null: nothing to show. */
+export type SessionMark = "working" | "queued" | "finished" | "resolved" | "paused" | "failed";
+
+export const SESSION_MARK_LABEL: Record<SessionMark, string> = {
+  working: "进行中",
+  queued: "排队中",
+  finished: "已完成",
+  resolved: "已解决",
+  paused: "已暂停",
+  failed: "失败",
+};
+
+/**
+ * The mark of a session row: open cards show as the 等你处理 count instead (null here); a session
+ * that replied and stopped is 已完成, one the user confirmed is 已解决. Projects have none.
+ */
+export function sessionMark(p: Pick<ProjectView, "kind" | "waiting" | "archived"> & { session_status?: string }): SessionMark | null {
+  if (!isSession(p) || p.archived || p.waiting > 0) return null;
+  switch (p.session_status) {
+    case "working":
+    case "running":
+    case "review":
+      return "working";
+    case "queued":
+      return "queued";
+    case "finished":
+      return "finished";
+    case "resolved":
+      return "resolved";
+    case "paused":
+      return "paused";
+    case "failed":
+      return "failed";
+  }
+  return null;
+}
+
+/** Tokens in Chinese units: 8,123 / 7.7万 / 100万. */
+export function zhTokens(n: number): string {
+  if (n < 10_000) return n.toLocaleString("en-US");
+  const w = n / 10_000;
+  return `${w >= 100 ? Math.round(w) : Number(w.toFixed(1))}万`;
+}
+
+/** A session's context total (ThreadView.session): null when the runtime reports none (Antigravity) or no turn ended yet. */
+export interface ContextTotal {
+  used: number;
+  max: number;
+  /** Share of the window, 0–100. */
+  pct: number;
+  /** "已使用 8% · 7.7万 / 100万". */
+  text: string;
+}
+
+export function contextTotal(s: { context_used?: number | null; context_max?: number | null } | null | undefined): ContextTotal | null {
+  const used = s?.context_used;
+  const max = s?.context_max;
+  if (used == null || !max || max <= 0) return null;
+  const pct = Math.min(100, (used / max) * 100);
+  const shown = used > 0 && pct < 1 ? "<1%" : `${Math.round(pct)}%`;
+  return { used, max, pct, text: `已使用 ${shown} · ${zhTokens(used)} / ${zhTokens(max)}` };
+}

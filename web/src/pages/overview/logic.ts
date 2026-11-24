@@ -10,7 +10,7 @@ export const FILTERS: [Filter, string, ThreadKind[]][] = [
   ["doing", "进行中", ["doing", "queued", "paused"]],
   ["wait", "等你", ["wait"]],
   ["review", "待验收", ["review"]],
-  ["done", "已完成", ["done", "failed"]],
+  ["done", "已完成", ["done", "failed", "finished", "resolved"]],
 ];
 
 export function filterThreads(threads: ThreadView[], f: Filter): ThreadView[] {
