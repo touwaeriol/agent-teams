@@ -30,7 +30,7 @@ const busy = computed(() => Boolean(props.pending) || Boolean(props.disabled));
         :key="r.id"
         type="button"
         role="menuitemradio"
-        :aria-checked="r.id === current && !busy"
+        :aria-checked="r.id === current && !pending"
         :disabled="busy"
         :data-mode="r.id"
         :class="['flex w-full items-start gap-2.5 rounded-lg px-2.5 py-[7px] text-left', touch ? 'py-2.5' : '', busy ? 'cursor-default opacity-70' : 'hover:bg-accent']"

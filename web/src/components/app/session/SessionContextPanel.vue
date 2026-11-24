@@ -113,7 +113,7 @@ async function refresh() {
   } catch (e) {
     if (asked !== cid.value) return;
     settle();
-    fail(e instanceof ApiError ? e.message : String(e), e instanceof ApiError ? e.message : "刷新失败");
+    fail(e instanceof ApiError ? e.message : String(e), e instanceof ApiError ? e.message : "网络错误，稍后再试");
     void q.refetch(); // 409: the session parked, the node went away…
   }
 }

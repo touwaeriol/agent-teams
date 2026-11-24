@@ -83,6 +83,8 @@ describe("menu components", () => {
     const off = mount(ModeMenuBody, { props: { rows: modeRows(CLAUDE.modes), current: "auto", runtimeLabel: "x", notes: [], disabled: true } });
     expect(off.findAll("[data-mode]").every((b) => b.attributes("disabled") !== undefined)).toBe(true);
     expect(off.find('[data-testid="mode-current"]').exists()).toBe(true);
+    // aria-checked follows the check: still on the current row while a model/effort switch waits
+    expect(off.find('[data-mode="auto"]').attributes("aria-checked")).toBe("true");
     await off.find('[data-mode="plan"]').trigger("click");
     expect(off.emitted("pick")).toBeUndefined();
     const touch = mount(ModeMenuBody, { props: { rows: modeRows(CLAUDE.modes), current: "auto", runtimeLabel: "x", notes: [], touch: true } });

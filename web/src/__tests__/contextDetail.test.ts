@@ -187,6 +187,25 @@ describe("SessionContextPanel", () => {
     expect(calls(spy, "/context/detail").length).toBeGreaterThanOrEqual(3);
   });
 
+  it("says 网络错误 when the refresh request itself fails (not an API error)", async () => {
+    const ok = api(() => ({ status: 200, body: contextDetail() }));
+    ok.mockImplementation(async (input) => {
+      const path = new URL((input as Request).url).pathname;
+      if (path.endsWith("/context/refresh")) throw new TypeError("Failed to fetch");
+      return new Response(JSON.stringify(contextDetail()), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    const err = vi.spyOn(toast, "error").mockImplementation(() => undefined as never);
+    const { w } = mountPanel({ id: "t1", session: session() });
+    await flushPromises();
+    await w.find("[data-testid=context-refresh]").trigger("click");
+    await flushPromises();
+    expect(w.find("[data-testid=context-refresh]").text()).toBe("刷新");
+    expect(err).toHaveBeenCalledWith("刷新失败：网络错误，稍后再试");
+    const line = w.find("[data-testid=context-refresh-error]");
+    expect(line.text()).toBe("刷新失败：网络错误，稍后再试");
+    expect(line.attributes("title")).toContain("Failed to fetch");
+  });
+
   it("ends the spinner on a failed or stale refresh and says why", async () => {
     api(() => ({ status: 200, body: contextDetail() }));
     const err = vi.spyOn(toast, "error").mockImplementation(() => undefined as never);
