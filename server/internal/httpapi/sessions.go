@@ -32,7 +32,8 @@ type SessionInput struct {
 	Title   string           `json:"title,omitempty" maxLength:"200" doc:"'' = the first line of message"`
 	Repos   []SessionRepoRef `json:"repos" maxItems:"20" doc:"Repositories, all checked out side by side in the employee's directory"`
 	Role    string           `json:"role,omitempty" maxLength:"64" doc:"Member role template the employee is made from; '' = the first member role"`
-	Model   string           `json:"model,omitempty" maxLength:"100" doc:"'' = the role's model"`
+	Runtime string           `json:"runtime,omitempty" maxLength:"32" doc:"The agent (CLI) the session runs on: one of the role's runtimes; '' = the role's (several: spread like any employee). Fixed once the session starts"`
+	Model   string           `json:"model,omitempty" maxLength:"100" doc:"'' = the role's model for the runtime"`
 	// Session controls (#53): picked on the new-session page; GET /api/session-options lists them.
 	PermissionMode string `json:"permission_mode,omitempty" enum:"auto,default,acceptEdits,plan,bypassPermissions" doc:"'' = the initial mode (Claude: auto when the model supports it, else default; Codex/Antigravity: the role's)"`
 	Effort         string `json:"effort,omitempty" maxLength:"32" doc:"Thinking effort; '' = project / role setting"`
@@ -120,17 +121,29 @@ func (s *Server) sessionStart(ctx context.Context, userID string, b SessionInput
 	if title == "" {
 		title = titleOf(b.Message)
 	}
-	if err := checkSessionControls(role, b.PermissionMode, b.Effort); err != nil {
+	rt := strings.TrimSpace(b.Runtime)
+	if rt != "" && !slices.Contains(role.RuntimeList(), rt) {
+		msg := "这个岗位没有配置 " + runtimes.Of(rt).Title
+		if runtimes.Of(rt).ID != rt {
+			msg = "没有这个 agent：" + rt
+		}
+		return platform.SessionStart{}, invalid([]FieldError{{"runtime", msg}}, msg)
+	}
+	sessRT := rt
+	if sessRT == "" {
+		sessRT = role.Runtime
+	}
+	if err := checkSessionControls(role, sessRT, b.PermissionMode, b.Effort); err != nil {
 		return platform.SessionStart{}, err
 	}
-	return platform.SessionStart{Title: title, Role: role, Model: strings.TrimSpace(b.Model), PermissionMode: b.PermissionMode,
+	return platform.SessionStart{Title: title, Role: role, Runtime: rt, Model: strings.TrimSpace(b.Model), PermissionMode: b.PermissionMode,
 		Effort: strings.TrimSpace(b.Effort), NodeID: b.NodeID, Branch: strings.TrimSpace(b.Branch)}, nil
 }
 
-// checkSessionControls refuses a mode the role's runtime does not have, bypass on an ask role and
+// checkSessionControls refuses a mode the session's runtime does not have, bypass on an ask role and
 // an effort on a runtime without one (the effort level itself is the model's: the daemon checks).
-func checkSessionControls(role store.Role, mode, effort string) error {
-	rt := runtimes.Of(role.Runtime)
+func checkSessionControls(role store.Role, runtime, mode, effort string) error {
+	rt := runtimes.Of(runtime)
 	if mode != "" && (!slices.Contains(rt.Modes, mode) || (mode == "bypassPermissions" && role.PermissionMode == store.PermAsk)) {
 		return invalid([]FieldError{{"permission_mode", "这个岗位的会话不能用这个权限模式"}}, "这个岗位的会话不能用这个权限模式")
 	}

@@ -201,11 +201,11 @@ func TestSessionMultiRepo(t *testing.T) {
 // role's nodes (node_ids) nor count as one of its staff; auto placement may use any of the user's
 // nodes.
 func TestSessionRoleTemplate(t *testing.T) {
-	r := orchestrator.SessionRole(store.Role{ID: "r1", Tier: "member", Role: "dev", Count: 3, NodeIDs: []string{"n-dev"}}, "", "")
+	r := orchestrator.SessionRole(store.Role{ID: "r1", Tier: "member", Role: "dev", Count: 3, NodeIDs: []string{"n-dev"}}, "", "", "")
 	if r.ID != "" || r.Tier != "lead" || !r.Solo || r.Count != 1 || r.NodeIDs == nil || len(r.NodeIDs) != 0 {
 		t.Fatalf("auto: %+v", r)
 	}
-	if r := orchestrator.SessionRole(store.Role{Role: "dev", NodeIDs: []string{"n-dev"}}, "", "n-2"); !slices.Equal(r.NodeIDs, []string{"n-2"}) {
+	if r := orchestrator.SessionRole(store.Role{Role: "dev", NodeIDs: []string{"n-dev"}}, "", "", "n-2"); !slices.Equal(r.NodeIDs, []string{"n-2"}) {
 		t.Fatalf("picked node: %v", r.NodeIDs)
 	}
 }

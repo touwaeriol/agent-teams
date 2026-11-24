@@ -93,8 +93,9 @@ func (a *API) setControls(ctx context.Context, in *setControlsInput) (*controlsO
 }
 
 type sessionOptionsInput struct {
-	Role  string `query:"role" maxLength:"64" doc:"Member role template ('' = the first member role)"`
-	Model string `query:"model" maxLength:"100" doc:"The model picked on the page ('' = the role's)"`
+	Role    string `query:"role" maxLength:"64" doc:"Member role template ('' = the first member role)"`
+	Runtime string `query:"runtime" maxLength:"32" doc:"The agent picked on the page, one of the role's runtimes ('' = the role's first)"`
+	Model   string `query:"model" maxLength:"100" doc:"The model picked on the page ('' = the role's for the runtime)"`
 }
 
 type sessionOptionsOutput struct{ Body orchestrator.SessionOptions }
@@ -117,7 +118,11 @@ func (a *API) sessionOptions(ctx context.Context, in *sessionOptionsInput) (*ses
 	if i < 0 {
 		return nil, httpapi.Invalid("role", "没有这个岗位："+in.Role)
 	}
-	out, err := a.e.Orch.SessionOptionsFor(ctx, u.ID, roles[i], strings.TrimSpace(in.Model))
+	rt := strings.TrimSpace(in.Runtime)
+	if rt != "" && !slices.Contains(roles[i].RuntimeList(), rt) {
+		return nil, httpapi.Invalid("runtime", "这个岗位没有配置这个 agent："+rt)
+	}
+	out, err := a.e.Orch.SessionOptionsFor(ctx, u.ID, roles[i], rt, strings.TrimSpace(in.Model))
 	if err != nil {
 		return nil, err
 	}

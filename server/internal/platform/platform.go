@@ -161,6 +161,7 @@ type Hooks interface {
 type SessionStart struct {
 	Title, Message string
 	Role           store.Role // the member role template the employee is made from
+	Runtime        string     // the agent picked among the role's runtimes ('' = the role's)
 	Model          string     // '' = the role's
 	PermissionMode string     // '' = the session's initial mode (session controls, #53)
 	Effort         string     // '' = project / role setting

@@ -798,9 +798,13 @@ type SessionOptions struct {
 	Efforts     []string      `json:"efforts" doc:"Effort levels of the model ([] = none to pick or not known yet)"`
 }
 
-// SessionOptionsFor computes SessionOptions for a role template and an optional model pick.
-func (o *Orchestrator) SessionOptionsFor(ctx context.Context, userID string, role store.Role, model string) (SessionOptions, error) {
-	e := core.Employee{Tier: "lead", Runtime: runtimes.Of(role.Runtime).ID, Spec: SessionRole(role, model, "")}
+// SessionOptionsFor computes SessionOptions for a role template, the agent (runtime) picked among
+// its runtimes (empty: its first) and an optional model pick.
+func (o *Orchestrator) SessionOptionsFor(ctx context.Context, userID string, role store.Role, runtime, model string) (SessionOptions, error) {
+	if runtime == "" {
+		runtime = role.RuntimeList()[0]
+	}
+	e := core.Employee{Tier: "lead", Runtime: runtimes.Of(runtime).ID, Spec: SessionRole(role, runtime, model, "")}
 	e.Spec.Solo = true
 	out := SessionOptions{Runtime: e.Runtime, Modes: []ModeOption{}, Models: []ModelChoice{}, Efforts: []string{}}
 	var raw []json.RawMessage

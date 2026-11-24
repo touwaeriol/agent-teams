@@ -4407,7 +4407,7 @@ export interface components {
             effort?: string;
             /** @description The task: the employee's first message */
             message: string;
-            /** @description '' = the role's model */
+            /** @description '' = the role's model for the runtime */
             model?: string;
             /** @description Run on this node; '' = picked automatically (spread over the nodes by load score; nodes whose quota is tight only when all are) */
             node_id?: string;
@@ -4420,6 +4420,8 @@ export interface components {
             repos: components["schemas"]["SessionRepoRef"][] | null;
             /** @description Member role template the employee is made from; '' = the first member role */
             role?: string;
+            /** @description The agent (CLI) the session runs on: one of the role's runtimes; '' = the role's (several: spread like any employee). Fixed once the session starts */
+            runtime?: string;
             /** @description '' = the first line of message */
             title?: string;
         };
@@ -9856,7 +9858,9 @@ export interface operations {
             query?: {
                 /** @description Member role template ('' = the first member role) */
                 role?: string;
-                /** @description The model picked on the page ('' = the role's) */
+                /** @description The agent picked on the page, one of the role's runtimes ('' = the role's first) */
+                runtime?: string;
+                /** @description The model picked on the page ('' = the role's for the runtime) */
                 model?: string;
             };
             header?: never;
