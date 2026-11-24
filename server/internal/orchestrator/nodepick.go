@@ -20,10 +20,17 @@ const QuotaFull = 95.0
 // daemon, an API key): between a fresh account and a busy one.
 const unknownUsage = 50.0
 
+// SessionWeight is how many percent of used quota one live session on a node counts as in the
+// load score (loadScore = used + SessionWeight × active): new sessions spread over the usable
+// nodes, the ones with less quota used getting more of them, instead of all going to the least
+// used node until its quota report (refreshed every minute) catches up.
+const SessionWeight = 10.0
+
 // pickNode chooses the node and the runtime for an employee's new session. An employee is not
 // tied to a node, and a role with several runtimes not to one of them: each new session goes to
-// the (runtime, node) pair with the most quota left (pickRank) over every runtime of the role and
-// its candidate nodes, and the employee stays on its current node and runtime only while it must
+// the (runtime, node) pair with the lowest load score (pickRank: used quota plus SessionWeight per
+// live session on the node, so sessions spread over the nodes and the less used ones get more)
+// over every runtime of the role and its candidate nodes, and the employee stays on its current node and runtime only while it must
 // (stay: it resumes a conversation or has a worktree in its thread) and that node is online,
 // still a candidate and not out of quota. With no usable pair online it is the current node and
 // runtime (the session waits for it), else the first candidate; when that node is online and
@@ -58,7 +65,47 @@ func (o *Orchestrator) pickNode(ctx context.Context, tx *core.Tx, e core.Employe
 	if held(got, states) {
 		pick.hold = holdReason(rts, states)
 	}
+	o.logPick(e, p, stay, nodes, states, pick)
 	return pick, nil
+}
+
+// pickCandidate is one candidate pair in the "pick node" log line.
+type pickCandidate struct {
+	Node   string  `json:"node"`
+	NodeID string  `json:"node_id"`
+	RT     string  `json:"rt"`
+	Usable bool    `json:"usable"`
+	Online bool    `json:"online"`
+	Used   float64 `json:"used"`
+	Active int     `json:"active"`
+	Free   int     `json:"free"`
+	Score  float64 `json:"score"`
+}
+
+// logPick records why pickNode chose the node: every candidate pair with its load score (no
+// account details: no email, no token).
+func (o *Orchestrator) logPick(e core.Employee, p store.Project, stay bool, nodes []store.Node, states []nodeState, pick nodePick) {
+	if o.log == nil {
+		return
+	}
+	names := make(map[string]string, len(nodes))
+	for _, n := range nodes {
+		names[n.ID] = n.Name
+	}
+	cands := make([]pickCandidate, len(states))
+	for i, s := range states {
+		cands[i] = pickCandidate{Node: names[s.id], NodeID: s.id, RT: s.rt, Usable: s.usable, Online: s.online,
+			Used: s.used, Active: s.active, Free: s.free, Score: s.score()}
+	}
+	thread := ""
+	if e.CurrentThreadID != nil {
+		thread = *e.CurrentThreadID
+	} else if e.ThreadID != nil {
+		thread = *e.ThreadID
+	}
+	o.log.Info("pick node", "employee", e.Name, "employee_id", e.ID, "project_id", p.ID, "thread_id", thread,
+		"stay", stay, "candidates", cands, "picked", pick.node.Name, "picked_id", pick.node.ID, "picked_rt", pick.rt,
+		"hold", pick.hold != "", "hold_reason", pick.hold)
 }
 
 // nodePick is pickNode's answer: the node and runtime, or why the session must wait (hold).
@@ -105,8 +152,12 @@ type nodeState struct {
 	unseen bool   // gated, but the node's first node.runtimes has not arrived yet (no rows)
 	rs     *store.NodeRuntime
 	free   int     // freeSlots
+	active int     // live sessions on the node (core.ActiveSessionCount)
 	used   float64 // quotaUsed of the runtime
 }
+
+// score is the pair's load score, lower first: used quota plus SessionWeight per live session.
+func (s nodeState) score() float64 { return s.used + SessionWeight*float64(s.active) }
 
 func (s nodeState) same(o nodeState) bool { return s.id == o.id && s.rt == o.rt }
 
@@ -136,6 +187,7 @@ func (o *Orchestrator) nodeStates(ctx context.Context, tx *core.Tx, cands []stor
 				st.usable = st.rs != nil && st.rs.Ready(now)
 			}
 			st.free = freeSlots(o.gw.Capacity(n), active)
+			st.active = active
 			st.used = quotaUsed(ru, model, now)
 		}
 		out = append(out, st)
@@ -213,15 +265,17 @@ func chooseNode(current nodeState, cands []nodeState, stay bool) nodeState {
 }
 
 // pickRank orders two usable pairs, negative when a goes first: one with quota and a free slot
-// before a full one, then the least used quota (5 h, weekly, the model's weekly window; Codex:
-// every window), then the employee's current node and runtime (it keeps its clones), then the
-// most free slots.
+// before a full one, then the lowest load score (score: the used quota — 5 h, weekly, the model's
+// weekly window; Codex: every window — plus SessionWeight per live session on the node, so a
+// lightly used node gets more new sessions without taking all of them), then the employee's
+// current node and runtime (it keeps its clones), then the most free slots. Equal pairs keep
+// the candidates' order (chooseNode takes the first), so the pick is deterministic.
 func pickRank(a nodeState, aCur bool, b nodeState, bCur bool) int {
 	switch {
 	case a.full() != b.full():
 		return boolRank(!a.full())
-	case a.used != b.used:
-		return boolRank(a.used < b.used)
+	case a.score() != b.score():
+		return boolRank(a.score() < b.score())
 	case aCur != bCur:
 		return boolRank(aCur)
 	case a.free != b.free:

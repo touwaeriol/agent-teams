@@ -224,7 +224,7 @@ Codex 对应：组长和 `read_only` 岗位 `sandbox: read-only, approvalPolicy:
 - 守护进程 `node/src/sessions/registry.ts`：每种运行时一个 `RuntimeAdapter`（安装和登录检测 `detect()` 与要监听的凭证文件 `watchPaths()`、hello 上报、透传/固定环境变量、是否原生加载技能、`createDriver`）。会话管理器只认 `Driver` 接口（start / push / interrupt / setMode / compact / close）。
 - 网页 `web/src/lib/runtimes.ts`：同一张表的展示部分（名称、斜杠命令、内置模型、订阅登录类型）。
 
-岗位可以配多种运行时（`at_roles.runtimes`），每次开新会话在这些运行时的候选节点里按剩余额度挑（shared-members.md §4.3；节点用量的读取在 `orchestrator.usageOf`）。
+岗位可以配多种运行时（`at_roles.runtimes`），每次开新会话在这些运行时的候选节点里按负载分挑（用量 + 每个活跃会话 10 分，低者优先）（shared-members.md §4.3；节点用量的读取在 `orchestrator.usageOf`）。
 
 加一种运行时：写它的 `Driver` 和 adapter（adapter 的 `detect()` 返回统一的 `RuntimeStatus` 字段，注册后 `node/src/runtime-monitor.ts` 的 `RuntimeMonitor` 就会定时、按文件变化检测它并在 `node.runtimes` 里上报，protocol.md §9.2），协议 `Runtime` 枚举加 id 并加它的 `session.open` 选项块（以及 `hello.runtimes` 的信息结构），三张注册表各加一行。用量上报（`node/src/usage.ts`）目前仍按 Claude / Codex 各写一份读取，加运行时时一并补上。
 
@@ -330,7 +330,7 @@ queued ──开工──► running ◄──► waiting（有等你处理的�
 开工（`queued → running`）由 orchestrator 做。同一用户（跨项目）同时处于 `running` 或 `waiting` 的讨论串数（Admin 页“每人最多同时运行的讨论串”）可用 `max_running_threads` 限制（全局在 `at_settings.platform.max_running_threads`，默认 0 = 不限；`at_users.max_running_threads` 可单独覆盖，NULL = 用全局，0 = 不限），设了上限时超出的新串停在 `queued`，有串结束或暂停时按创建顺序开工；Thread 页对排队的串显示“排队中（前面还有 n 个）”。
 
 1. 分配编号与分支名 `thread/<no>-<slug>`；GitHub API 从基准分支建 ref（已存在跳过）。
-2. 按岗位模板实例化员工 `<role>-<n>`（写 `at_employees`），节点在岗位 `nodes` 里挑：每次开新会话按该运行时的订阅用量（5 小时 / 每周 / 模型每周窗口）最低、有空槽的在线节点挑，员工不绑定节点（`shared-members.md` §4.3）。
+2. 按岗位模板实例化员工 `<role>-<n>`（写 `at_employees`），节点在岗位 `nodes` 里挑：每次开新会话在有空槽的在线节点里按负载分挑（该运行时的订阅用量——5 小时 / 每周 / 模型每周窗口——加上每个活跃会话 10 分，低者优先），会话在多个节点间分摊，员工不绑定节点（`shared-members.md` §4.3）。
 3. 给组长发 `git.prepare`（worktree）+ `session.open`，第一条消息 = 统筹的 brief。
 4. 成员**懒启动**：任务池里有该岗位可领的任务时才开会话（省进程、省额度）。
 

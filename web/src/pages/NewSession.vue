@@ -87,7 +87,7 @@ const submit = () => {
           <Field v-slot="{ id }" label="模型">
             <ModelPicker :id="id" v-model="model" live :runtime="runtime" label="模型" placeholder="跟随岗位配置" class="at-select-36" />
           </Field>
-          <Field v-slot="{ id }" label="节点" hint="自动：挑剩余用量最多的在线节点">
+          <Field v-slot="{ id }" label="节点" hint="自动：按用量和会话数在在线节点间分摊">
             <el-select :id="id" v-model="node" class="at-select-36">
               <el-option value="" label="自动分配" />
               <el-option v-for="n in nodeList" :key="n.id" :value="n.id" :label="n.online ? n.name : `${n.name}（离线）`" />

@@ -26,7 +26,7 @@ type SessionRequest struct {
 	Message           string      // the user's first message, delivered once the thread starts
 	Role              store.Role  // the member role template the employee is made from
 	Model             string      // '' = the role's model
-	NodeID            string      // '' = scheduled like any employee (most quota left)
+	NodeID            string      // '' = scheduled like any employee (lowest load score, pickNode)
 	Repos             []RepoFocus // every repository with the branch picked for it ('' = default)
 }
 

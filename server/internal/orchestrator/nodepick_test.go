@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -33,6 +34,54 @@ func TestChooseNode(t *testing.T) {
 		{"runtime not logged in: never picked", "", []nodeState{{id: "a", free: 1 << 20}, roomy("b", 70)}, false, "b"},
 		{"nothing usable: wait for the current node", "a", []nodeState{{id: "a"}, {id: "b"}}, false, "a"},
 		{"nothing usable, no current node: the first candidate", "", []nodeState{{id: "a"}, {id: "b"}}, false, "a"},
+	}
+	for _, c := range cases {
+		if got := chooseNode(nodeState{id: c.current}, c.cands, c.stay).id; got != c.want {
+			t.Errorf("%s: got %s, want %s", c.name, got, c.want)
+		}
+	}
+}
+
+// TestChooseNodeSpreads: the load score (used + SessionWeight × active) spreads new sessions over
+// the usable nodes instead of sending all of them to the least used one.
+func TestChooseNodeSpreads(t *testing.T) {
+	busy := func(id string, used float64, active int) nodeState {
+		s := roomy(id, used)
+		s.active, s.free = active, s.free-active
+		return s
+	}
+	// Two nodes with the same quota: the first session takes a, the second (a now has one live
+	// session) goes to b, the third back to a.
+	cands := []nodeState{busy("a", 20, 0), busy("b", 20, 0)}
+	var got []string
+	for range 3 {
+		pick := chooseNode(nodeState{}, cands, false)
+		got = append(got, pick.id)
+		for i := range cands {
+			if cands[i].id == pick.id {
+				cands[i].active++
+				cands[i].free--
+			}
+		}
+	}
+	if want := []string{"a", "b", "a"}; !slices.Equal(got, want) {
+		t.Errorf("same quota: got %v, want %v", got, want)
+	}
+	cases := []struct {
+		name    string
+		current string
+		cands   []nodeState
+		stay    bool
+		want    string
+	}{
+		{"0% with 3 live sessions (30) loses to 20% with none (20)", "", []nodeState{busy("a", 0, 3), busy("b", 20, 0)}, false, "b"},
+		{"the less used node still gets more: 0% with 1 session beats 20%", "", []nodeState{busy("a", 0, 1), busy("b", 20, 0)}, false, "a"},
+		{"a full node stays last however idle", "", []nodeState{busy("a", 96, 0), busy("b", 60, 5)}, false, "b"},
+		{"a node without free slots stays last", "", []nodeState{{id: "a", usable: true, free: 0, used: 0, active: 2}, busy("b", 80, 4)}, false, "b"},
+		{"stay keeps the employee on a busier node", "a", []nodeState{busy("a", 30, 4), busy("b", 0, 0)}, true, "a"},
+		{"equal scores keep the current node", "b", []nodeState{busy("a", 10, 1), busy("b", 20, 0)}, false, "b"},
+		{"equal scores, no current node: more free slots", "", []nodeState{busy("a", 10, 1), busy("b", 20, 0)}, false, "b"},
+		{"all equal: the first candidate (list order)", "", []nodeState{busy("a", 20, 1), busy("b", 20, 1)}, false, "a"},
 	}
 	for _, c := range cases {
 		if got := chooseNode(nodeState{id: c.current}, c.cands, c.stay).id; got != c.want {
