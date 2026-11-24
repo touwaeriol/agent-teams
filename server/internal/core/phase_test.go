@@ -59,6 +59,14 @@ func TestPhaseOf(t *testing.T) {
 		{"lead waiting", running(func(v *ThreadView) { v.Members = []EmployeeBrief{lead("raising_hand")} }), 0, "进行中：组长在等别人回复"},
 		{"reading", running(func(v *ThreadView) { v.LeadLast = nil }), 0, "进行中：组长正在阅读任务"},
 		{"replied", running(func(*ThreadView) {}), 0, "等你处理：组长已回复，等用户回复"},
+		// Sessions (#53): 已完成 when the employee is not in a turn and nothing waits for the user,
+		// replied or not (the user stopped it); 已解决 once done; the rest as threads.
+		{"session replied", running(func(v *ThreadView) { v.Solo = true }), 0, "已完成：员工这一轮做完了，等用户确认是否解决"},
+		{"session stopped, no reply", running(func(v *ThreadView) { v.Solo, v.LeadLast = true, nil }), 0, "已完成：员工这一轮做完了，等用户确认是否解决"},
+		{"session done", ThreadView{Status: "done", Solo: true}, 0, "已解决：用户确认问题已解决"},
+		{"session card", running(func(v *ThreadView) { v.Solo, v.Counts.Waiting = true, 1 }), 0, "等你处理：有给用户的问题或审批卡片，等用户回答"},
+		{"session working", running(func(v *ThreadView) { v.Solo, v.Members = true, []EmployeeBrief{lead("thinking")} }), 0, "进行中：有人在干活（lead-1）"},
+		{"session offline", running(func(v *ThreadView) { v.Solo, v.Members = true, []EmployeeBrief{lead("offline")} }), 0, "等你处理：组长离线：节点不在线，节点上线后才能继续"},
 	}
 	for _, c := range cases {
 		if got := PhaseOf(c.v, c.merges).Text(); got != c.want {

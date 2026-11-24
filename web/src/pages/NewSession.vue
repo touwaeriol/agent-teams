@@ -13,7 +13,7 @@ import { keys, useNodes, useRoles } from "@/api/queries";
 import SendButton from "@/components/app/SendButton.vue";
 import NewSessionOptions from "@/components/app/session/NewSessionOptions.vue";
 import SessionRepos from "@/components/app/session/SessionRepos.vue";
-import { DEFAULTS_KEY, parseDefaults, reposLabel, sessionReposPayload, type SessionRepo } from "@/components/app/session/session";
+import { DEFAULTS_KEY, parseDefaults, reposLabel, sessionReposPayload, usableNode, type SessionRepo } from "@/components/app/session/session";
 import Field from "@/components/common/Field.vue";
 import { MODEL_FORMAT_HINT, validModel, type Runtime } from "@/lib/models";
 import { readLocal, writeLocal } from "@/lib/persist";
@@ -81,10 +81,14 @@ function onKey(ev: Event | KeyboardEvent) {
   e.preventDefault();
   submit();
 }
-// A remembered node that was deleted falls back to 自动选择.
-watch(nodeList, (list) => {
-  if (node.value !== AUTO && list.length && !list.some((n) => n.id === node.value)) node.value = AUTO;
-});
+// A remembered (or picked) node that was deleted or is offline falls back to 自动选择.
+watch(
+  nodeList,
+  (list) => {
+    if (nodes.data.value) node.value = usableNode(node.value, list, AUTO);
+  },
+  { immediate: true },
+);
 const reposText = computed(() => (branch.value.trim() ? `${reposLabel(repos.value)} · ${branch.value.trim()}` : reposLabel(repos.value)));
 </script>
 

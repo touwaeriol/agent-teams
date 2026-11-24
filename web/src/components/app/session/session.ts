@@ -66,20 +66,23 @@ export function parseDefaults(raw: string | null): SessionDefaults | null {
 }
 
 /** A session's state in the sidebar (ProjectView.session_status), drawn as a small mark; null: nothing to show. */
-export type SessionMark = "working" | "queued" | "finished" | "resolved" | "paused" | "failed";
+export type SessionMark = "working" | "queued" | "finished" | "resolved" | "attention" | "paused" | "failed";
 
 export const SESSION_MARK_LABEL: Record<SessionMark, string> = {
   working: "进行中",
   queued: "排队中",
   finished: "已完成",
   resolved: "已解决",
+  attention: "等你处理",
   paused: "已暂停",
   failed: "失败",
 };
 
 /**
- * The mark of a session row: open cards show as the 等你处理 count instead (null here); a session
- * that replied and stopped is 已完成, one the user confirmed is 已解决. Projects have none.
+ * The mark of a session row (ProjectView.session_status, the same rule as the session page's
+ * threadPhase): open cards show as the 等你处理 count instead (null here); a session whose employee
+ * is not in a turn is 已完成, one the user confirmed is 已解决, one whose node is offline or whose
+ * session crashed 等你处理. Projects have none.
  */
 export function sessionMark(p: Pick<ProjectView, "kind" | "waiting" | "archived"> & { session_status?: string }): SessionMark | null {
   if (!isSession(p) || p.archived || p.waiting > 0) return null;
@@ -94,6 +97,10 @@ export function sessionMark(p: Pick<ProjectView, "kind" | "waiting" | "archived"
       return "finished";
     case "resolved":
       return "resolved";
+    // The employee's node is offline, its session crashed or no node can run it; or the thread waits on the user.
+    case "attention":
+    case "waiting":
+      return "attention";
     case "paused":
       return "paused";
     case "failed":
@@ -126,4 +133,9 @@ export function contextTotal(s: { context_used?: number | null; context_max?: nu
   const pct = Math.min(100, (used / max) * 100);
   const shown = used > 0 && pct < 1 ? "<1%" : `${Math.round(pct)}%`;
   return { used, max, pct, text: `已使用 ${shown} · ${zhTokens(used)} / ${zhTokens(max)}` };
+}
+
+/** The node of the new-session box: the remembered or picked one while it exists and is online, else auto (自动选择). */
+export function usableNode(id: string, nodes: { id: string; online: boolean }[], auto: string): string {
+  return id !== auto && nodes.some((n) => n.id === id && n.online) ? id : auto;
 }

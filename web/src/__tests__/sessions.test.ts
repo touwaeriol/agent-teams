@@ -1,6 +1,6 @@
 // 会话 (multi-repository sessions): the helpers behind the sidebar rows, the new-session form and 工作现场.
 import { describe, expect, it } from "vitest";
-import { contextTotal, homeOf, isSession, parseDefaults, repoDir, reposLabel, sessionMark, sessionReposPayload, sessionText, withBranches, zhTokens } from "@/components/app/session/session";
+import { contextTotal, homeOf, isSession, parseDefaults, repoDir, reposLabel, sessionMark, sessionReposPayload, sessionText, usableNode, withBranches, zhTokens } from "@/components/app/session/session";
 import { projectGroups } from "@/pages/projects";
 
 describe("sessions", () => {
@@ -89,9 +89,21 @@ describe("会话信息 and the sidebar mark (#53)", () => {
     expect(sessionMark(s("resolved"))).toBe("resolved");
     expect(sessionMark(s("queued"))).toBe("queued");
     expect(sessionMark(s("failed"))).toBe("failed");
+    // Node offline, session crashed, no node can run it (server: attention): 等你处理.
+    expect(sessionMark(s("attention"))).toBe("attention");
     expect(sessionMark(s("finished", { waiting: 1 }))).toBeNull();
     expect(sessionMark(s("resolved", { archived: true }))).toBeNull();
     expect(sessionMark(s("", {}))).toBeNull();
     expect(sessionMark({ kind: "project", waiting: 0, archived: false, session_status: "" } as never)).toBeNull();
+  });
+});
+
+describe("new session node (#53 t25)", () => {
+  const nodes = [{ id: "n1", online: true }, { id: "n2", online: false }];
+  it("keeps a remembered node that is online, else falls back to 自动选择", () => {
+    expect(usableNode("n1", nodes, "auto")).toBe("n1");
+    expect(usableNode("n2", nodes, "auto")).toBe("auto");
+    expect(usableNode("gone", nodes, "auto")).toBe("auto");
+    expect(usableNode("auto", nodes, "auto")).toBe("auto");
   });
 });

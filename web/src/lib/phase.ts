@@ -148,9 +148,12 @@ export function threadPhase(t: PhaseInput, waiting?: Map<number, QuestionView>):
     case "raising_hand":
       return phase("lead_waiting", "active", "working", "组长在等别人回复");
   }
-  if (!t.lead_last) return phase("reading", "active", "working", "组长正在阅读任务");
-  // A session's round is over: 已完成 (not 等你处理); the user confirms it solved or goes on.
+  // A session's employee is not in a turn and nothing waits for the user's answer: the round is
+  // over — replied, stopped by the user or ended without a reply — so 已完成 (not 等你处理); the
+  // user confirms it solved or goes on. Same rule as the sidebar (server sessionStatusCol) and
+  // core.PhaseOf.
   if (t.solo) return phase("finished", "done", "finished", "做完了，等你确认是否解决");
+  if (!t.lead_last) return phase("reading", "active", "working", "组长正在阅读任务");
   return phase("replied", "waiting", "wait", "组长已回复，等你回复");
 }
 

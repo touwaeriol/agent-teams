@@ -3821,7 +3821,7 @@ export interface components {
             pinned: boolean;
             /** @description Bound repositories in project order; base branches belong in context (the project instructions) */
             repos: components["schemas"]["RepoRef"][] | null;
-            /** @description A session's state for the sidebar ('' for a project): working, finished (the employee replied and stopped: 已完成), resolved (the user confirmed: 已解决), or the thread's status (queued, waiting, review, paused, failed). Open cards are in waiting */
+            /** @description A session's state for the sidebar ('' for a project), the same rule as the session page: working (in a turn, waking or using a tool), finished (not in a turn and nothing to answer: 已完成), resolved (the user confirmed: 已解决), attention (node offline, session crashed or no node can run it: 等你处理), queued (waiting for a slot), or the thread's status (queued, waiting, review, paused, failed). Open cards are in waiting */
             session_status: string;
             /** @description Codex model of Codex leads and members; '' = each role's model */
             thread_codex_model: string;
