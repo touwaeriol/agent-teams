@@ -15,7 +15,8 @@ import SendButton from "@/components/app/SendButton.vue";
 import NewSessionOptions from "@/components/app/session/NewSessionOptions.vue";
 import NewSessionControls from "@/components/app/session/controls/NewSessionControls.vue";
 import SessionRepos from "@/components/app/session/SessionRepos.vue";
-import { DEFAULTS_KEY, parseDefaults, reposLabel, sessionReposPayload, usableNode, type SessionRepo } from "@/components/app/session/session";
+import { DEFAULTS_KEY, nodeAgentProblem, parseDefaults, reposLabel, sessionReposPayload, usableNode, type SessionRepo } from "@/components/app/session/session";
+import { runtimeLabel } from "@/lib/runtimes";
 import Field from "@/components/common/Field.vue";
 import { MODEL_FORMAT_HINT, runtimesOf, validModel } from "@/lib/models";
 import { readLocal, writeLocal } from "@/lib/persist";
@@ -61,7 +62,8 @@ watch(
 // A model typed for one agent means nothing to another.
 watch(agent, (now, before) => before && now !== before && (model.value = ""));
 const nodeList = computed(() => nodes.data.value ?? []);
-const ready = computed(() => message.value.trim() !== "" && repos.value.length > 0 && role.value !== "");
+// Repositories are optional: without any the employee works in a local folder on its node.
+const ready = computed(() => message.value.trim() !== "" && role.value !== "");
 
 const create = useAction(
   () =>
@@ -86,10 +88,6 @@ const create = useAction(
 );
 function submit() {
   if (!message.value.trim() || create.isPending.value) return;
-  if (repos.value.length === 0) {
-    reposOpen.value = true;
-    return void toast.error("先选要在哪些仓库里干活");
-  }
   if (!role.value) return void toast.error("团队里还没有成员岗位，先在 设置 → 团队 里添加一个");
   if (!validModel(model.value)) return void toast.error(MODEL_FORMAT_HINT);
   create.mutate();
@@ -101,11 +99,14 @@ function onKey(ev: Event | KeyboardEvent) {
   e.preventDefault();
   submit();
 }
-// A remembered (or picked) node that was deleted or is offline falls back to 自动选择.
+// A remembered (or picked) node that was deleted, is offline or cannot run the picked agent falls back to 自动选择.
 watch(
-  nodeList,
-  (list) => {
-    if (nodes.data.value) node.value = usableNode(node.value, list, AUTO);
+  [nodeList, agent],
+  ([list, rt]) => {
+    if (!nodes.data.value) return;
+    node.value = usableNode(node.value, list, AUTO);
+    const n = list.find((x) => x.id === node.value);
+    if (n && nodeAgentProblem(n, rt, runtimeLabel)) node.value = AUTO;
   },
   { immediate: true },
 );
@@ -115,7 +116,7 @@ const reposText = computed(() => (branch.value.trim() ? `${reposLabel(repos.valu
 <template>
   <div class="flex h-full min-h-0 flex-col bg-panel">
     <div class="flex flex-1 items-center justify-center px-6 text-center">
-      <p class="text-[15px] text-muted-foreground" data-testid="new-session-hint">要做点什么？员工会在你选的仓库里直接动手。</p>
+      <p class="text-[15px] text-muted-foreground" data-testid="new-session-hint">要做点什么？可以选仓库，也可以不选，员工直接在节点上的本地文件夹里干。</p>
     </div>
     <form class="mx-auto w-full max-w-[780px] shrink-0 px-4 pb-6" data-testid="new-session" @submit.prevent="submit">
       <div class="flex flex-col rounded-2xl border bg-background px-3 pb-2 pt-3 shadow-sm focus-within:border-foreground/30">
@@ -152,6 +153,7 @@ const reposText = computed(() => (branch.value.trim() ? `${reposLabel(repos.valu
     <el-dialog v-model="reposOpen" title="仓库" width="600px" class="at-dialog w-[calc(100%-2rem)] max-w-[600px]" append-to-body>
       <div class="flex flex-col gap-4">
         <p class="text-[13px] leading-5 text-muted-foreground">每个仓库是工作目录下的一个子文件夹，员工从选的分支切出自己的会话分支（session/…），改完推上去、开 PR。会话里随时可以增删。</p>
+        <p class="text-[13px] leading-5 text-muted-foreground" data-testid="repos-optional">仓库是可选的：一个都不选时，员工在节点上为这个会话建的本地文件夹里干活，文件只在那台机器上，会话固定在那台节点，点“已解决”后文件夹也保留，删除会话时才清理。</p>
         <SessionRepos v-model="repos" />
         <Field v-slot="{ id }" label="工作分支名（可选）" hint="不填就取标题里的英文，标题全是中文时用仓库名">
           <el-input :id="id" v-model="branch" maxlength="60" placeholder="例如：fix-login-redirect" />

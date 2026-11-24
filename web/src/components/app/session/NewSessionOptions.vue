@@ -12,6 +12,7 @@ import type { NodeView, RoleView } from "@/api/views";
 import ModelPicker from "@/components/app/models/ModelPicker.vue";
 import { runtimesOf, scopedModel, type Runtime } from "@/lib/models";
 import { INK } from "@/lib/present";
+import { nodeAgentProblem } from "./session";
 import { runtimeLabel } from "@/lib/runtimes";
 
 const props = defineProps<{ nodes: NodeView[]; roles: RoleView[]; auto: string }>();
@@ -27,6 +28,8 @@ const roleLabel = computed(() => pickedRole.value?.title || pickedRole.value?.ro
 const agents = computed(() => (pickedRole.value ? runtimesOf(pickedRole.value) : []));
 const roleModel = computed(() => (pickedRole.value ? (scopedModel(pickedRole.value, agent.value) ?? "") : ""));
 const modelLabel = computed(() => model.value.trim() || roleModel.value || "跟随岗位模型");
+/** Why the node cannot take a session of the picked agent ("" = it can): offline, CLI missing or not logged in (runtime_status). */
+const problem = (n: NodeView) => nodeAgentProblem(n as never, agent.value, runtimeLabel);
 const roleAgents = (r: RoleView) => runtimesOf(r).map(runtimeLabel).join(" / ");
 const chip = "inline-flex h-7 max-w-[240px] items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground data-[open=true]:bg-accent";
 const item = "flex w-full min-w-[220px] items-start gap-2 py-0.5";
@@ -53,12 +56,12 @@ const item = "flex w-full min-w-[220px] items-start gap-2 py-0.5";
               <Check v-if="node === auto || !pickedNode" class="mt-0.5 size-3.5 shrink-0" />
             </span>
           </el-dropdown-item>
-          <el-dropdown-item v-for="n in nodes" :key="n.id" :command="n.id" :disabled="!n.online" :divided="n === nodes[0]">
-            <span :class="item" :data-node="n.name">
+          <el-dropdown-item v-for="n in nodes" :key="n.id" :command="n.id" :disabled="Boolean(problem(n))" :divided="n === nodes[0]">
+            <span :class="item" :data-node="n.name" :data-problem="problem(n)">
               <span class="mt-[7px] size-2 shrink-0 rounded-full" :style="{ background: n.online ? INK.done : INK.idle }" />
               <span class="flex min-w-0 flex-1 flex-col leading-5">
                 <span class="truncate">{{ n.name }}</span>
-                <span class="text-xs text-muted-foreground">{{ n.online ? "在线" : "离线" }}</span>
+                <span class="text-xs text-muted-foreground">{{ problem(n) || "在线" }}</span>
               </span>
               <Check v-if="node === n.id" class="mt-0.5 size-3.5 shrink-0" />
             </span>

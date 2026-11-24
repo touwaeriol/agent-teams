@@ -1,6 +1,6 @@
 // 会话 (multi-repository sessions): the helpers behind the sidebar rows, the new-session form and 工作现场.
 import { describe, expect, it } from "vitest";
-import { contextTotal, homeOf, isSession, parseDefaults, repoDir, reposLabel, sessionMark, sessionReposPayload, sessionText, usableNode, withBranches, zhTokens, fixedParts } from "@/components/app/session/session";
+import { contextTotal, homeOf, isSession, parseDefaults, repoDir, reposLabel, sessionMark, sessionReposPayload, sessionText, usableNode, withBranches, zhTokens, fixedParts, nodeAgentProblem, isLocalSession } from "@/components/app/session/session";
 import { projectGroups } from "@/pages/projects";
 
 describe("sessions", () => {
@@ -41,7 +41,7 @@ describe("sessions", () => {
 
 describe("new session box and projects page", () => {
   it("labels the repositories chip", () => {
-    expect(reposLabel([])).toBe("选择仓库");
+    expect(reposLabel([])).toBe("仓库（可选）");
     expect(reposLabel([{ repo: "o/web", git_connection_id: "c", branch: "develop" }])).toBe("o/web · develop");
     expect(reposLabel([{ repo: "o/web", git_connection_id: "c", branch: "" }, { repo: "o/api", git_connection_id: "c", branch: "" }])).toBe("o/web +1");
   });
@@ -128,5 +128,26 @@ describe("agent pick and fixed picks (#53 t46)", () => {
     expect(fixedParts(lead, "codex", label)).toEqual({ node: "rc-erio", role: "开发", agent: "Codex" });
     expect(fixedParts({ ...lead, node: null }, null, label)).toEqual({ node: "", role: "开发", agent: "Claude Code" });
     expect(fixedParts(undefined, "codex", label)).toEqual({ node: "", role: "", agent: "" });
+  });
+});
+
+describe("sessions without repositories and the node menu by agent (#53 t48)", () => {
+  const label = (id: string) => ({ claude: "Claude Code", codex: "Codex", antigravity: "Antigravity" })[id] ?? id;
+  const cli = (runtime: string, patch: object = {}) => ({ runtime, installed: true, auth: "subscription", expired: false, ready: true, ...patch });
+  it("greys out nodes that cannot run the picked agent, with the reason", () => {
+    const n = { online: true, clis: [cli("claude"), cli("codex", { auth: "none", ready: false }), cli("antigravity", { installed: false, auth: "unknown", ready: false })] };
+    expect(nodeAgentProblem(n, "claude", label)).toBe("");
+    expect(nodeAgentProblem(n, "codex", label)).toBe("Codex 没有登录");
+    expect(nodeAgentProblem(n, "antigravity", label)).toBe("没有安装 Antigravity");
+    expect(nodeAgentProblem({ online: true, clis: [cli("claude", { expired: true, ready: false })] }, "claude", label)).toBe("Claude Code 登录已过期");
+    expect(nodeAgentProblem({ online: true, clis: [cli("claude")] }, "codex", label)).toBe("没有检测到 Codex");
+    expect(nodeAgentProblem({ online: false, clis: [cli("claude")] }, "claude", label)).toBe("离线");
+    // An old daemon that never reported its CLIs is not judged (the server waits for it as before).
+    expect(nodeAgentProblem({ online: true, clis: [] }, "codex", label)).toBe("");
+  });
+  it("a session without repositories is a local folder; the repositories chip says they are optional", () => {
+    expect(isLocalSession({ repos: [] })).toBe(true);
+    expect(isLocalSession({ repos: [{ repo: "o/r", git_connection_id: "g" }] } as never)).toBe(false);
+    expect(reposLabel([])).toBe("仓库（可选）");
   });
 });
