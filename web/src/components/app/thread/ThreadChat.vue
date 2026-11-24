@@ -19,7 +19,8 @@ import { leadReading } from "./detail";
 import DispatchMessage from "./DispatchMessage.vue";
 import TypingLine from "./TypingLine.vue";
 
-const props = defineProps<{ pid: string; thread: ThreadView; compact: boolean }>();
+const props = defineProps<{ pid: string; thread: ThreadView; compact: boolean; session?: boolean }>();
+const who = computed(() => (props.session ? "员工" : "组长"));
 const questions = useQuestions(() => props.thread.id);
 const lead = computed(() => leadOf(props.thread)?.name);
 const inserts = computed(() => chatQuestions(questions.data.value).map((q: QuestionView) => ({ key: q.id, at: q.created_at, question: q })));
@@ -43,15 +44,15 @@ const dispatched = computed(() => (props.thread.dispatch && props.thread.brief.t
     <template #before><DispatchMessage v-if="dispatched" :brief="thread.brief" :dispatch="dispatched" :pid="pid" :compact="compact" /></template>
     <template #insert="{ item }"><WaitingCard :cid="thread.id" :pid="pid" :question="item.question" variant="soft" :lead-name="lead" /></template>
     <template #empty>
-      <p v-if="!dispatched && !reading" class="py-10 text-center text-[13px] leading-6 text-muted-foreground">还没有对话。组长汇报会出现在这里，你也可以直接给组长发消息。</p>
+      <p v-if="!dispatched && !reading" class="py-10 text-center text-[13px] leading-6 text-muted-foreground">还没有对话。{{ who }}的回复会出现在这里，你也可以直接给{{ who }}发消息。</p>
     </template>
     <template #after>
       <p v-if="reading" role="status" class="flex items-center gap-2 text-[13px] text-muted-foreground" data-lead-reading>
         <Spin v-if="!typing" color="#8A877F" :size="11" />
-        组长正在阅读任务…
+        {{ who }}正在阅读任务…
       </p>
       <ReviewCard v-if="showReviewCard(thread)" :thread="thread" variant="soft" />
-      <TypingLine v-if="typing" :thread="thread" />
+      <TypingLine v-if="typing" :thread="thread" :session="session" />
     </template>
   </Chat>
 </template>

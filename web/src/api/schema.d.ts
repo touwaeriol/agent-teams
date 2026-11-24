@@ -4140,6 +4140,8 @@ export interface components {
             state: string;
         };
         SessionInput: {
+            /** @description Name of the work branch (after session/<id>-); '' = from the title, or the repositories when the title has no Latin letters */
+            branch?: string;
             /** @description The task: the employee's first message */
             message: string;
             /** @description '' = the role's model */

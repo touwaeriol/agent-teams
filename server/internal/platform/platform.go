@@ -163,6 +163,7 @@ type SessionStart struct {
 	Role           store.Role // the member role template the employee is made from
 	Model          string     // '' = the role's
 	NodeID         string     // '' = scheduled
+	Branch         string     // the work branch's name after session/<id>-; '' = from the title or the repositories
 	Repos          []SessionRepo
 }
 

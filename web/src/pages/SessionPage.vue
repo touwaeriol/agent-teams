@@ -63,14 +63,14 @@ const finish = useAction(() => threadActions.complete(thread.value!.id), { inval
       </header>
       <div class="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div class="at-reading flex min-w-0 flex-col px-5 pb-6 pt-5 sm:px-6 sm:pt-8">
-          <ThreadChat :pid="pid" :thread="thread" :compact="false" />
+          <ThreadChat :pid="pid" :thread="thread" :compact="false" session />
         </div>
       </div>
       <ThreadWakeups :pid="pid" :thread-id="thread.id" class="at-reading mx-3 mb-2 shrink-0 sm:mx-6" />
       <div v-if="thread.main_tasks.length" class="at-reading shrink-0 px-3 pb-2 sm:px-6">
         <PlanChecklist :steps="thread.main_tasks" :open="true" list-class="max-h-[min(40vh,280px)]" />
       </div>
-      <LeadComposer :pid="pid" :thread="thread" class="at-reading px-3 pb-3 sm:px-6 sm:pb-5" />
+      <LeadComposer :pid="pid" :thread="thread" session class="at-reading px-3 pb-3 sm:px-6 sm:pb-5" />
     </div>
     <aside v-if="wide" aria-label="工作现场" class="scroll-thin w-[340px] shrink-0 overflow-y-auto border-l bg-sidebar">
       <h2 class="px-4 pt-4 text-[13px] font-semibold">工作现场</h2>
