@@ -77,6 +77,10 @@ export interface ModeChange {
   mode?: string;
   model?: string | null;
   effort?: string | null;
+  /** The new model has no level for the effort in force: back to its default (set by the manager). */
+  dropEffort?: boolean;
+  /** With dropEffort: the new model's default level, when its options name one (Codex). */
+  defaultEffort?: string;
 }
 
 /** What the session runs in after a set_mode (session.mode_set). */

@@ -270,6 +270,13 @@ describe("daemon with a fake console", () => {
     const refused = await h.console.waitType("session.mode_set", (b) => b.request_id === "r2");
     expect(refused.body).toMatchObject({ ok: false, permission_mode: "plan", model: "claude-haiku-x", effort: "low" });
     expect(refused.body.error).toMatch(/allow_dangerously_skip_permissions/);
+    // A model without the effort in force (t45): the old level is dropped, not reported.
+    h.console.command("session.set_mode", { session_id: "s_SC", model: "claude-haiku-4-5-20251001", request_id: "r4" });
+    const dropped = await h.console.waitType("session.mode_set", (b) => b.request_id === "r4");
+    expect(dropped.body).toEqual({ session_id: "s_SC", open_gen: 1, request_id: "r4", ok: true, permission_mode: "plan", model: "claude-haiku-4-5-20251001", applies: "now" });
+    h.console.command("session.set_mode", { session_id: "s_SC", model: "claude-haiku-x", request_id: "r5" });
+    const back = await h.console.waitType("session.mode_set", (b) => b.request_id === "r5");
+    expect(back.body).not.toHaveProperty("effort");
   });
 
   it("opens a prefer_auto session in auto when its model supports it, else stays in default", async () => {

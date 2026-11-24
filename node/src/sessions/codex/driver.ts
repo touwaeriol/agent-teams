@@ -196,6 +196,12 @@ export class CodexDriver implements Driver, ThreadListener {
     if (change.model) {
       this.codex.model = change.model;
       this.turnOverride.model = change.model;
+      if (change.dropEffort) {
+        // The new model has no such level: back to its default (the override would stick).
+        delete this.codex.effort;
+        if (change.defaultEffort) this.turnOverride.effort = change.defaultEffort;
+        else delete this.turnOverride.effort;
+      }
     }
     if (change.effort) {
       this.codex.effort = change.effort;
