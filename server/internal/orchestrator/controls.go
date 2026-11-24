@@ -314,7 +314,7 @@ func expireSwitch(ctx context.Context, tx *core.Tx, e core.Employee) (core.Emplo
 		c.Effort = sent.PrevEffort // the model switch dropped it at once; the old model still runs with it
 	}
 	if sent.Effort != "" || sent.ClearEffort {
-		set["session_effort"] = c.Effort
+		set["session_effort"] = sent.PrevChoiceEffort // explicit only if it was: a default stays the default
 	}
 	c.Pending, c.Error = nil, errNoAnswer
 	if err := tx.Gorm(ctx).Table("at_agent_sessions").Where("id = ?", s.ID).Update("controls", jsonOf(c)).Error; err != nil {
@@ -500,7 +500,7 @@ func (o *Orchestrator) sendControls(ctx context.Context, tx *core.Tx, e core.Emp
 		id := core.NewID("ms")
 		body.RequestID = &id
 		c.Pending = &core.ControlsSwitch{RequestID: id, PermissionMode: ch.PermissionMode, Model: ch.Model, Effort: ch.Effort,
-			ClearEffort: ch.clearEffort, At: time.Now().UTC()}
+			ClearEffort: ch.clearEffort, PrevChoiceEffort: e.SessionEffort, At: time.Now().UTC()}
 		if ch.clearEffort {
 			c.Pending.PrevEffort = prevEffort
 		}
@@ -553,10 +553,18 @@ func (o *Orchestrator) HandleModeSet(ctx context.Context, nodeID string, m *prot
 			if err := revertChoice(ctx, tx, s.EmployeeID, sent, m); err != nil {
 				return err
 			}
-		} else if sent == nil && m.RequestID != nil {
+		} else if sent != nil {
+			// The switch took: the employee's picks follow what the session now runs (also undoing a
+			// late answer to an older switch that came in while this one waited). The effort only
+			// when this switch changed it: a pick that follows the default stays so.
+			if err := syncChoice(ctx, tx, s.EmployeeID, m, sent.Effort != "" || sent.ClearEffort); err != nil {
+				return err
+			}
+		} else if m.RequestID != nil && c.Pending == nil {
 			// The answer to a switch that already timed out (expireSwitch put the picks back): the
-			// session runs what it reports, so the employee's picks follow it again.
-			if err := syncChoice(ctx, tx, s.EmployeeID, m); err != nil {
+			// session runs what it reports, so the employee's picks follow it again. Not while a newer
+			// switch waits: its picks are the user's latest and its own answer settles them.
+			if err := syncChoice(ctx, tx, s.EmployeeID, m, true); err != nil {
 				return err
 			}
 		}
@@ -597,8 +605,9 @@ func revertChoice(ctx context.Context, tx *core.Tx, employeeID string, sent *cor
 	return tx.Gorm(ctx).Table("at_employees").Where("id = ?", employeeID).Updates(set).Error
 }
 
-// syncChoice sets the employee's picks to what a late session.mode_set reports.
-func syncChoice(ctx context.Context, tx *core.Tx, employeeID string, m *protocol.SessionModeSet) error {
+// syncChoice sets the employee's picks to what a session.mode_set that took reports (the effort
+// only with effort: a reported one, or none when the switch dropped it).
+func syncChoice(ctx context.Context, tx *core.Tx, employeeID string, m *protocol.SessionModeSet, effort bool) error {
 	set := map[string]any{}
 	if v := deref(m.PermissionMode); v != "" {
 		set["session_mode"] = v
@@ -606,8 +615,8 @@ func syncChoice(ctx context.Context, tx *core.Tx, employeeID string, m *protocol
 	if v := deref(m.Model); v != "" {
 		set["model"] = v
 	}
-	if m.Effort != nil {
-		set["session_effort"] = *m.Effort
+	if effort {
+		set["session_effort"] = deref(m.Effort)
 	}
 	if len(set) == 0 {
 		return nil

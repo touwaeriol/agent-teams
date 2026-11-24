@@ -162,13 +162,16 @@ type SessionControls struct {
 
 // ControlsSwitch is a session.set_mode sent with a request_id (” fields: unchanged).
 type ControlsSwitch struct {
-	RequestID      string    `json:"request_id"`
-	PermissionMode string    `json:"permission_mode,omitempty"`
-	Model          string    `json:"model,omitempty"`
-	Effort         string    `json:"effort,omitempty"`
-	ClearEffort    bool      `json:"clear_effort,omitempty"` // the new model dropped the effort picked before
-	PrevEffort     string    `json:"prev_effort,omitempty"`  // the session's effort before ClearEffort dropped it (restored when no answer comes)
-	At             time.Time `json:"at"`
+	RequestID      string `json:"request_id"`
+	PermissionMode string `json:"permission_mode,omitempty"`
+	Model          string `json:"model,omitempty"`
+	Effort         string `json:"effort,omitempty"`
+	ClearEffort    bool   `json:"clear_effort,omitempty"` // the new model dropped the effort picked before
+	PrevEffort     string `json:"prev_effort,omitempty"`  // the session's effort before ClearEffort dropped it (restored when no answer comes)
+	// PrevChoiceEffort is the employee's session_effort before the switch ("": it followed the
+	// default), put back as it was when no answer comes.
+	PrevChoiceEffort string    `json:"prev_choice_effort,omitempty"`
+	At               time.Time `json:"at"`
 }
 
 // TableName maps AgentSession to at_agent_sessions.
