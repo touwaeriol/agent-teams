@@ -22,7 +22,7 @@ var terminal = map[string]bool{
 	protocol.TypeSessionClosed: true, protocol.TypeSessionState: true, protocol.TypeApprovalCancel: true,
 	protocol.TypeToolCancel: true, protocol.TypeApprovalAck: true, protocol.TypeSessionInterrupted: true,
 	protocol.TypeSessionDelivered: true, protocol.TypeSessionEvent: true, protocol.TypeStreamDelta: true,
-	protocol.TypeSessionsReport: true,
+	protocol.TypeSessionsReport: true, protocol.TypeSessionModeSet: true,
 }
 
 type refs struct {

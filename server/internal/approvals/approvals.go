@@ -595,13 +595,14 @@ func inputOf(q core.Question) json.RawMessage {
 }
 
 // SweepTimeouts denies user cards shown longer than the project's approval_timeout_s (§9 超时;
-// a card the lead handed over counts from then).
+// a card the lead handed over counts from then). Sessions (projects of kind session) are left
+// out: their user approves in the session itself, as long as it takes (#53).
 func (e *Engine) SweepTimeouts(ctx context.Context) {
 	var keys []core.Question
 	err := e.core.Pool.Gorm(ctx).Table("at_questions q").Select("q.conversation_id, q.id").
 		Joins("JOIN at_projects p ON p.id = q.project_id").
 		Where(`q.kind = 'approval' AND q.status = 'open' AND q.audience = 'user'
-			AND (p.delivery->>'approval_timeout_s') IS NOT NULL
+			AND p.kind <> 'session' AND (p.delivery->>'approval_timeout_s') IS NOT NULL
 			AND COALESCE((q.detail->>'escalated_at')::timestamptz, q.created_at)
 			< now() - make_interval(secs => (p.delivery->>'approval_timeout_s')::int)`).Find(&keys).Error
 	if err != nil {
