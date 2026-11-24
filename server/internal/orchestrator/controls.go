@@ -309,10 +309,13 @@ func expireSwitch(ctx context.Context, tx *core.Tx, e core.Employee) (core.Emplo
 	if sent.Model != "" && s.Controls.Model != "" {
 		set["model"] = s.Controls.Model
 	}
-	if sent.Effort != "" || sent.ClearEffort {
-		set["session_effort"] = s.Controls.Effort
-	}
 	c := s.Controls
+	if sent.ClearEffort {
+		c.Effort = sent.PrevEffort // the model switch dropped it at once; the old model still runs with it
+	}
+	if sent.Effort != "" || sent.ClearEffort {
+		set["session_effort"] = c.Effort
+	}
 	c.Pending, c.Error = nil, errNoAnswer
 	if err := tx.Gorm(ctx).Table("at_agent_sessions").Where("id = ?", s.ID).Update("controls", jsonOf(c)).Error; err != nil {
 		return e, err
@@ -488,6 +491,7 @@ func (o *Orchestrator) sendControls(ctx context.Context, tx *core.Tx, e core.Emp
 	}
 	c := s.Controls
 	c.Error = ""
+	prevEffort := c.Effort
 	if ch.clearEffort {
 		c.Effort = "" // the new model does not take it
 	}
@@ -497,6 +501,9 @@ func (o *Orchestrator) sendControls(ctx context.Context, tx *core.Tx, e core.Emp
 		body.RequestID = &id
 		c.Pending = &core.ControlsSwitch{RequestID: id, PermissionMode: ch.PermissionMode, Model: ch.Model, Effort: ch.Effort,
 			ClearEffort: ch.clearEffort, At: time.Now().UTC()}
+		if ch.clearEffort {
+			c.Pending.PrevEffort = prevEffort
+		}
 	} else {
 		applyControls(&c, set, ch.PermissionMode, ch.Model, ch.Effort)
 	}
@@ -546,6 +553,12 @@ func (o *Orchestrator) HandleModeSet(ctx context.Context, nodeID string, m *prot
 			if err := revertChoice(ctx, tx, s.EmployeeID, sent, m); err != nil {
 				return err
 			}
+		} else if sent == nil && m.RequestID != nil {
+			// The answer to a switch that already timed out (expireSwitch put the picks back): the
+			// session runs what it reports, so the employee's picks follow it again.
+			if err := syncChoice(ctx, tx, s.EmployeeID, m); err != nil {
+				return err
+			}
 		}
 		set["controls"] = jsonOf(c)
 		if err := tx.Gorm(ctx).Table("at_agent_sessions").Where("id = ?", s.ID).Updates(set).Error; err != nil {
@@ -577,6 +590,24 @@ func revertChoice(ctx context.Context, tx *core.Tx, employeeID string, sent *cor
 	}
 	if sent.Effort != "" || sent.ClearEffort {
 		set["session_effort"] = deref(m.Effort)
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	return tx.Gorm(ctx).Table("at_employees").Where("id = ?", employeeID).Updates(set).Error
+}
+
+// syncChoice sets the employee's picks to what a late session.mode_set reports.
+func syncChoice(ctx context.Context, tx *core.Tx, employeeID string, m *protocol.SessionModeSet) error {
+	set := map[string]any{}
+	if v := deref(m.PermissionMode); v != "" {
+		set["session_mode"] = v
+	}
+	if v := deref(m.Model); v != "" {
+		set["model"] = v
+	}
+	if m.Effort != nil {
+		set["session_effort"] = *m.Effort
 	}
 	if len(set) == 0 {
 		return nil

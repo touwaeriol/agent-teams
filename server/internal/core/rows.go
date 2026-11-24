@@ -167,6 +167,7 @@ type ControlsSwitch struct {
 	Model          string    `json:"model,omitempty"`
 	Effort         string    `json:"effort,omitempty"`
 	ClearEffort    bool      `json:"clear_effort,omitempty"` // the new model dropped the effort picked before
+	PrevEffort     string    `json:"prev_effort,omitempty"`  // the session's effort before ClearEffort dropped it (restored when no answer comes)
 	At             time.Time `json:"at"`
 }
 
