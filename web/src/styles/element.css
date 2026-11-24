@@ -377,3 +377,6 @@ html.dark .el-message--warning { --el-message-bg-color: hsl(64 100% 6%); --el-me
   font-variant-numeric: tabular-nums;
   opacity: 1;
 }
+/* A textarea drawn as part of its box (the new-session box): no well, no ring, no padding. */
+.at-bare-textarea .el-textarea__inner,
+.at-bare-textarea .el-textarea__inner:focus { background: transparent; box-shadow: none !important; padding: 4px 0; }
