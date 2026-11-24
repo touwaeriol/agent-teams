@@ -1,6 +1,6 @@
 // 会话 (multi-repository sessions): the helpers behind the sidebar rows, the new-session form and 工作现场.
 import { describe, expect, it } from "vitest";
-import { homeOf, isSession, parseDefaults, repoDir, reposLabel, sessionReposPayload, sessionText, withBranches } from "@/components/app/session/session";
+import { contextTotal, homeOf, isSession, parseDefaults, repoDir, reposLabel, sessionMark, sessionReposPayload, sessionText, usableNode, withBranches, zhTokens, fixedParts, nodeAgentProblem, isLocalSession } from "@/components/app/session/session";
 import { projectGroups } from "@/pages/projects";
 
 describe("sessions", () => {
@@ -41,7 +41,7 @@ describe("sessions", () => {
 
 describe("new session box and projects page", () => {
   it("labels the repositories chip", () => {
-    expect(reposLabel([])).toBe("选择仓库");
+    expect(reposLabel([])).toBe("仓库（可选）");
     expect(reposLabel([{ repo: "o/web", git_connection_id: "c", branch: "develop" }])).toBe("o/web · develop");
     expect(reposLabel([{ repo: "o/web", git_connection_id: "c", branch: "" }, { repo: "o/api", git_connection_id: "c", branch: "" }])).toBe("o/web +1");
   });
@@ -52,6 +52,7 @@ describe("new session box and projects page", () => {
       repos: [{ repo: "o/web", git_connection_id: "c", branch: "" }],
       node: "n1",
       role: "",
+      agent: "",
     });
   });
   it("lists projects only on the projects page: pinned, then the others, archived last", () => {
@@ -63,5 +64,90 @@ describe("new session box and projects page", () => {
       ["其他项目", ["new", "old", "arch"]],
     ]);
     expect(projectGroups([p("web")], "zz")).toEqual([]);
+  });
+});
+
+describe("会话信息 and the sidebar mark (#53)", () => {
+  it("formats the context total against the runtime's window, hidden without data", () => {
+    expect(zhTokens(8123)).toBe("8,123");
+    expect(zhTokens(77_000)).toBe("7.7万");
+    expect(zhTokens(1_000_000)).toBe("100万");
+    expect(zhTokens(200_000)).toBe("20万");
+    expect(contextTotal({ context_used: 77_000, context_max: 1_000_000 })).toMatchObject({ pct: 7.7, text: "已使用 8% · 7.7万 / 100万" });
+    expect(contextTotal({ context_used: 1_500, context_max: 200_000 })?.text).toBe("已使用 <1% · 1,500 / 20万");
+    expect(contextTotal({ context_used: 300_000, context_max: 200_000 })?.pct).toBe(100);
+    // Antigravity (no use reported), no turn yet, or an older server: no block at all.
+    expect(contextTotal({ context_used: null, context_max: null })).toBeNull();
+    expect(contextTotal({ context_used: 10, context_max: 0 })).toBeNull();
+    expect(contextTotal(null)).toBeNull();
+    expect(contextTotal(undefined)).toBeNull();
+  });
+
+  it("marks sessions in the sidebar: 进行中, 已完成, 已解决; cards show as the count instead", () => {
+    const s = (session_status: string, patch: object = {}) => ({ kind: "session", waiting: 0, archived: false, session_status, ...patch }) as never;
+    expect(sessionMark(s("working"))).toBe("working");
+    expect(sessionMark(s("finished"))).toBe("finished");
+    expect(sessionMark(s("resolved"))).toBe("resolved");
+    expect(sessionMark(s("queued"))).toBe("queued");
+    expect(sessionMark(s("failed"))).toBe("failed");
+    // Node offline, session crashed, no node can run it (server: attention): 等你处理.
+    expect(sessionMark(s("attention"))).toBe("attention");
+    expect(sessionMark(s("finished", { waiting: 1 }))).toBeNull();
+    expect(sessionMark(s("resolved", { archived: true }))).toBeNull();
+    expect(sessionMark(s("", {}))).toBeNull();
+    expect(sessionMark({ kind: "project", waiting: 0, archived: false, session_status: "" } as never)).toBeNull();
+  });
+});
+
+describe("new session node (#53 t25)", () => {
+  const nodes = [{ id: "n1", online: true }, { id: "n2", online: false }];
+  it("keeps a remembered node that is online, else falls back to 自动选择", () => {
+    expect(usableNode("n1", nodes, "auto")).toBe("n1");
+    expect(usableNode("n2", nodes, "auto")).toBe("auto");
+    expect(usableNode("gone", nodes, "auto")).toBe("auto");
+    expect(usableNode("auto", nodes, "auto")).toBe("auto");
+  });
+});
+
+describe("agent pick and fixed picks (#53 t46)", () => {
+  it("lists a role's agents (its runtimes, first first) with the model for each", async () => {
+    const { runtimesOf, scopedModel } = await import("@/lib/models");
+    const role = { tier: "member", runtime: "claude", runtimes: ["claude", "codex", "antigravity"], model: "claude-opus-5-5", models: { codex: "gpt-5.5-codex" } };
+    expect(runtimesOf(role)).toEqual(["claude", "codex", "antigravity"]);
+    expect(scopedModel(role, "codex")).toBe("gpt-5.5-codex");
+    expect(scopedModel(role, "claude")).toBe("claude-opus-5-5");
+    expect(runtimesOf({ tier: "member", runtime: "codex" })).toEqual(["codex"]);
+  });
+  it("remembers the agent with the other picks", () => {
+    expect(parseDefaults(JSON.stringify({ repos: [], node: "n1", role: "dev", agent: "codex" }))).toEqual({ repos: [], node: "n1", role: "dev", agent: "codex" });
+    expect(parseDefaults(JSON.stringify({ repos: [], node: "n1", role: "dev" }))?.agent).toBe("");
+  });
+  it("shows a started session's node, role and agent read-only", () => {
+    const label = (id: string) => ({ claude: "Claude Code", codex: "Codex" })[id] ?? id;
+    const lead = { name: "dev-1", title: "开发", role: "dev", runtime: "claude", node: { name: "rc-erio" } };
+    expect(fixedParts(lead, "codex", label)).toEqual({ node: "rc-erio", role: "开发", agent: "Codex" });
+    expect(fixedParts({ ...lead, node: null }, null, label)).toEqual({ node: "", role: "开发", agent: "Claude Code" });
+    expect(fixedParts(undefined, "codex", label)).toEqual({ node: "", role: "", agent: "" });
+  });
+});
+
+describe("sessions without repositories and the node menu by agent (#53 t48)", () => {
+  const label = (id: string) => ({ claude: "Claude Code", codex: "Codex", antigravity: "Antigravity" })[id] ?? id;
+  const cli = (runtime: string, patch: object = {}) => ({ runtime, installed: true, auth: "subscription", expired: false, ready: true, ...patch });
+  it("greys out nodes that cannot run the picked agent, with the reason", () => {
+    const n = { online: true, clis: [cli("claude"), cli("codex", { auth: "none", ready: false }), cli("antigravity", { installed: false, auth: "unknown", ready: false })] };
+    expect(nodeAgentProblem(n, "claude", label)).toBe("");
+    expect(nodeAgentProblem(n, "codex", label)).toBe("Codex 没有登录");
+    expect(nodeAgentProblem(n, "antigravity", label)).toBe("没有安装 Antigravity");
+    expect(nodeAgentProblem({ online: true, clis: [cli("claude", { expired: true, ready: false })] }, "claude", label)).toBe("Claude Code 登录已过期");
+    expect(nodeAgentProblem({ online: true, clis: [cli("claude")] }, "codex", label)).toBe("没有检测到 Codex");
+    expect(nodeAgentProblem({ online: false, clis: [cli("claude")] }, "claude", label)).toBe("离线");
+    // An old daemon that never reported its CLIs is not judged (the server waits for it as before).
+    expect(nodeAgentProblem({ online: true, clis: [] }, "codex", label)).toBe("");
+  });
+  it("a session without repositories is a local folder; the repositories chip says they are optional", () => {
+    expect(isLocalSession({ repos: [] })).toBe(true);
+    expect(isLocalSession({ repos: [{ repo: "o/r", git_connection_id: "g" }] } as never)).toBe(false);
+    expect(reposLabel([])).toBe("仓库（可选）");
   });
 });

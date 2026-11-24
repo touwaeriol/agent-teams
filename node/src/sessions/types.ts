@@ -1,4 +1,4 @@
-import type { ApprovalCancel, ApprovalRequest, ApprovalResolve, ContextUsage, SessionEvent, SessionInit, SessionOpen } from "../protocol.js";
+import type { ApprovalCancel, ApprovalRequest, ApprovalResolve, ContextDetail, ContextUsage, ModelOption, SessionEvent, SessionInit, SessionOpen } from "../protocol.js";
 import type { McpToolResult } from "../toolhost/broker.js";
 import type { Logger } from "../util/log.js";
 import type { LoadedImage } from "./images.js";
@@ -19,6 +19,8 @@ export interface SessionSink {
   exited(err: Error): void;
   /** The current task anchor (session.send anchor; "" = none), re-injected after the runtime compacts. */
   anchor(): string;
+  /** The context breakdown after a turn (session.context reason turn; Claude only). */
+  context?(detail: ContextDetail): void;
 }
 
 export interface DriverContext {
@@ -51,13 +53,16 @@ export interface Driver {
   start(): Promise<StartResult>;
   push(msg: OutgoingMessage): Promise<{ turn_id?: string }>;
   interrupt(): Promise<string[]>;
-  setMode(mode?: string, model?: string | null): Promise<void>;
+  /** session.set_mode: what the session runs in afterwards and when that applies; throws when nothing of it applies. */
+  setMode(change: ModeChange): Promise<ModeApplied>;
   close(): Promise<void>;
   readonly busy: boolean;
   /** msg_ids already present in the runtime's transcript (dedup after a daemon restart). */
   deliveredMsgIds?(msgIds: string[]): Promise<Set<string>>;
   /** Compacts the context now (session.compact); called between turns. */
   compact?(instructions: string): Promise<CompactResult>;
+  /** The context breakdown now (session.context_refresh: full); undefined when it cannot be read. Claude only. */
+  contextDetail?(detail: ContextDetail["detail"]): Promise<ContextDetail | undefined>;
 }
 
 /** The outcome of session.compact. */
@@ -66,5 +71,26 @@ export interface CompactResult {
   context?: ContextUsage;
   error?: string;
 }
+
+/** A session.set_mode change (absent / null fields stay). */
+export interface ModeChange {
+  mode?: string;
+  model?: string | null;
+  effort?: string | null;
+  /** The new model has no level for the effort in force: back to its default (set by the manager). */
+  dropEffort?: boolean;
+  /** With dropEffort: the new model's default level, when its options name one (Codex). */
+  defaultEffort?: string;
+}
+
+/** What the session runs in after a set_mode (session.mode_set). */
+export interface ModeApplied {
+  permission_mode?: string;
+  model?: string;
+  effort?: string;
+  applies: "now" | "next_turn";
+}
+
+export type { ModelOption };
 
 export class ResumeFailed extends Error {}

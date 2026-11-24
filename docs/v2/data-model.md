@@ -54,6 +54,11 @@ ALTER TABLE at_users
   ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT '',
   ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+-- 00430：调度阈值（shared-members.md §4.3）。节点 5 小时窗口 / 任一周窗口用量达到它就不再主动派新会话
+-- （还有别的节点没到时）；NULL = 默认 85 / 95
+ALTER TABLE at_users
+  ADD COLUMN IF NOT EXISTS quota_five_hour_pct SMALLINT CHECK (quota_five_hour_pct BETWEEN 1 AND 100),
+  ADD COLUMN IF NOT EXISTS quota_weekly_pct SMALLINT CHECK (quota_weekly_pct BETWEEN 1 AND 100);
 
 -- v1: token_hash PK, user_id, expires_at
 ALTER TABLE at_sessions
@@ -430,6 +435,8 @@ CREATE TABLE at_employees (
   instance_no INT NOT NULL DEFAULT 1,
   look        JSONB NOT NULL DEFAULT '{}',         -- 解析后的形象（岗位 look + 实例发色）
   spec        JSONB NOT NULL DEFAULT '{}',         -- 开会话用的完整配置快照（model、tools、权限…）
+  session_mode   TEXT NOT NULL DEFAULT '',         -- 00440：普通会话里用户选的权限模式（set_mode 值；'' = 初始模式），重开会话沿用，不改岗位
+  session_effort TEXT NOT NULL DEFAULT '',         -- 00440：普通会话里用户选的思考强度（'' = 项目 / 岗位设置）；选的模型写在 model 列
   active      BOOLEAN NOT NULL DEFAULT TRUE,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -458,7 +465,10 @@ CREATE TABLE at_agent_sessions (
   in_turn         BOOLEAN NOT NULL DEFAULT false,  -- 00270：正在跑回合（turn_started 置位，turn_ended / 离开 active 清掉）；项目成员回合中不领别的讨论串的任务
   context_used    INT,                             -- 00290：最近一个回合结束时的上下文 token 数（turn_ended.context / session.compacted）
   context_max     INT,                             -- 00290：运行时衡量用的窗口（岗位没设上限时按它算比例）
-  tasks_done      INT NOT NULL DEFAULT 0           -- 00290：送进这个会话的任务简报数（clear_after_tasks）
+  context_detail  JSONB,                           -- 00450：最近一次 session.context 的上下文细分（ContextDetail；只有 Claude；NULL = 没报过）
+  context_detail_at TIMESTAMPTZ,                   -- 00450：细分到达的时间
+  tasks_done      INT NOT NULL DEFAULT 0,          -- 00290：送进这个会话的任务简报数（clear_after_tasks）
+  controls        JSONB NOT NULL DEFAULT '{}'      -- 00440：普通会话的运行状态 {model, effort, pending: {request_id, permission_mode, model, effort, at}, error}（sessions.md）
 );
 CREATE UNIQUE INDEX at_agent_sessions_live ON at_agent_sessions (employee_id) WHERE state <> 'closed';  -- 一个员工最多一个活会话
 CREATE INDEX at_agent_sessions_node ON at_agent_sessions (node_id) WHERE state <> 'closed';

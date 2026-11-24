@@ -31,8 +31,8 @@
 
 | 方向 | 可靠（有 `seq`，需 ACK，可重放） | 不可靠（无 `seq`，丢了无所谓） |
 | --- | --- | --- |
-| 控制台 → 守护进程 | 所有命令（`session.*`、`approval.resolve`、`tool.result`、`git.*`、`node.*`（`node.usage_refresh`、`node.runtimes_refresh` 除外）、`run.*`） | `ack`、`pong` 类、`node.usage_refresh`、`node.runtimes_refresh`、`cred.response`（§8：带令牌，不进发件箱，靠 `req_id` 配对，丢了守护进程会重试 `cred.request`） |
-| 守护进程 → 控制台 | 会话事件、命令结果、审批请求/取消、工具调用、git 结果 | `ack`、`stream.delta`（逐字输出，可选）、`session.digest`（§4.11）、`log`、`node.stats`、`node.usage`、`node.runtimes`、`cred.request`（§8） |
+| 控制台 → 守护进程 | 所有命令（`session.*`、`approval.resolve`、`tool.result`、`git.*`、`node.*`（`node.usage_refresh`、`node.runtimes_refresh` 除外）、`run.*`） | `ack`、`pong` 类、`node.usage_refresh`、`node.runtimes_refresh`、`session.context_refresh`（§4.10）、`cred.response`（§8：带令牌，不进发件箱，靠 `req_id` 配对，丢了守护进程会重试 `cred.request`） |
+| 守护进程 → 控制台 | 会话事件、命令结果、审批请求/取消、工具调用、git 结果 | `ack`、`stream.delta`（逐字输出，可选）、`session.digest`（§4.11）、`session.context`（§4.10）、`log`、`node.stats`、`node.usage`、`node.runtimes`、`cred.request`（§8） |
 
 - **ACK**：`{type:"ack", body:{seq: N}}` 表示“seq ≤ N 的可靠消息我已持久处理”。接收方至少每 200 ms 或每 50 条发一次累计 ACK。
 - **守护进程发件箱**：可靠消息先追加写入 `state/outbox/<epoch>.jsonl` 再发送；收到 ACK 后推进游标，游标之前的文件可删除。守护进程重启后 `seq` 从文件里的最大值继续（`epoch` 只在状态目录被清空时变化）。
@@ -204,7 +204,7 @@
           "commands": [{"name": "agent-teams-skills:design", "description": "(agent-teams-skills) Make HTML prototypes…"}]}}
 ```
 
-`init` 来自 `initializationResult()`（Codex 见上）。`init.commands` 是会话自己的斜杠命令（岗位技能、插件的技能和命令；`initializationResult().commands` 去掉 `builtin` 的 Claude Code 自带命令），控制台存在会话的 `init` 里，输入框的 “/” 列表用它（`api.md` §3.2）。用户消息以 `/名字` 开头时守护进程原样作为提示推给会话，CLI 当斜杠命令执行；`名字` 不带插件前缀且恰好对应会话的一个命令（如 `design` → `agent-teams-skills:design`）时先补全，免得落到 CLI 自带的同名命令（CLI 有自己的 `/design`）。带附件时文字块排在最前，CLI 才认得出命令（SDK 0.3.325 实测）。控制台用 `init.tools` 做角色工具核对（`architecture.md` §10.2）：通过 → 发 `session.release`（可靠，键 `session_id + open_gen`）；不符 → `session.close {reason:"policy_violation"}`。之后每个回合的 `system/init`（`turn_started` 事件带 `tools`）再核对一次，不符同样关闭。
+`init` 来自 `initializationResult()`（Codex 见上）。`init.models` 是会话可以切换到的模型（Claude：`initializationResult().models`，`efforts` 来自 `supportedEffortLevels`，`supports_auto` 来自 `supportsAutoMode`；Codex：`model/list` 的 `supportedReasoningEfforts`；Antigravity：会话的 `availableModels`，没有强度），`init.effort` 是会话当前的思考强度。Claude 选项 `prefer_auto: true`（普通会话）时守护进程先按 `permission_mode` 打开，初始化后会话模型支持 auto 就切到 `auto`，`init.permission_mode` 报实际模式。`init.commands` 是会话自己的斜杠命令（岗位技能、插件的技能和命令；`initializationResult().commands` 去掉 `builtin` 的 Claude Code 自带命令），控制台存在会话的 `init` 里，输入框的 “/” 列表用它（`api.md` §3.2）。用户消息以 `/名字` 开头时守护进程原样作为提示推给会话，CLI 当斜杠命令执行；`名字` 不带插件前缀且恰好对应会话的一个命令（如 `design` → `agent-teams-skills:design`）时先补全，免得落到 CLI 自带的同名命令（CLI 有自己的 `/design`）。带附件时文字块排在最前，CLI 才认得出命令（SDK 0.3.325 实测）。控制台用 `init.tools` 做角色工具核对（`architecture.md` §10.2）：通过 → 发 `session.release`（可靠，键 `session_id + open_gen`）；不符 → `session.close {reason:"policy_violation"}`。之后每个回合的 `system/init`（`turn_started` 事件带 `tools`）再核对一次，不符同样关闭。
 
 ### 4.3 `session.send`（控制台 → 守护进程，键：`msg_id`）
 
@@ -228,7 +228,9 @@
 
 ### 4.5 `session.set_mode`（键：`id`）
 
-`{"session_id": "s_…", "permission_mode": "default|acceptEdits|bypassPermissions|auto", "model": null}` → Claude `q.setPermissionMode()` / `q.setModel()`；Codex 在下一次 `turn/start` 带 `approvalPolicy` / `model`。只带 `model` 的命令来自 /model（`PUT /api/conversations/{cid}/model`，只发给成员；统筹和组长不能用 /model 切换，模型在岗位配置或项目设置里改）：运行中的会话从下一轮起换模型，守护进程同时改掉本机记录里的模型，之后 resume 也用新模型。`bypassPermissions` 只有会话以 `allowDangerouslySkipPermissions` 打开时才允许（守护进程否则回错误）。控制台不再发 `auto`（枚举里保留给旧控制台）。`bypassPermissions` 会话不发 `approval.request`：CLI 仍调到 `canUseTool` 时守护进程就地放行；会话打开时 `permission_mode` 是 `bypassPermissions` 的，守护进程总是带上 `allowDangerouslySkipPermissions`。
+`{"session_id": "s_…", "permission_mode": "default|acceptEdits|bypassPermissions|plan|auto", "model": null, "effort": null, "request_id": "ms_…"}` → Claude `q.setPermissionMode()` / `q.setModel()` / `q.applyFlagSettings({effortLevel})`，立即生效；Codex 在下一次 `turn/start` 带 `approvalPolicy` / `sandboxPolicy` / `approvalsReviewer` / `model` / `effort`；Antigravity 改本机审批方式（`default` → ask，`bypassPermissions` → auto），模型走 `session/set_model`，没有单独的思考强度（写在模型 ID 里）。只带 `model` 的命令来自 /model（`PUT /api/conversations/{cid}/model`，只发给成员；统筹和组长不能用 /model 切换）：运行中的会话从下一轮起换模型，守护进程同时改掉本机记录里的模型，之后 resume 也用新模型。`bypassPermissions` 只有会话以 `allowDangerouslySkipPermissions` 打开时才允许（守护进程否则回错误）。`bypassPermissions` 会话不发 `approval.request`：CLI 仍调到 `canUseTool` 时守护进程就地放行；会话打开时 `permission_mode` 是 `bypassPermissions` 的，守护进程总是带上 `allowDangerouslySkipPermissions`。
+
+普通会话（多仓库会话的员工）里用户可以切换权限模式、模型和思考强度（`PUT /api/projects/{pid}/session-controls`，api.md）。`plan`、`auto` 只发给 Claude 会话；`auto` 是 SDK 的分类器模式，只在会话模型的 `supportsAutoMode` 为真时可选。Codex 的 `auto` = `workspace-write` + `on-request` + `approvalsReviewer: auto_review`（Codex 自己的审核子代理判断），`default` = `workspace-write` + `untrusted`，`bypassPermissions` = `danger-full-access` + `never`。`hello.features` 含 `session_controls` 的守护进程对每条带 `request_id` 的 `session.set_mode` 回 `session.mode_set {session_id, open_gen, request_id, ok, permission_mode?, model?, effort?, applies?, error?}`（可靠，键 `session_id + request_id`）：`applies` 为 `now`（已生效）、`next_turn`（下一轮生效）或 `next_open`（会话没在运行，下次打开时用）；`ok: false` 表示切换失败：Codex、Antigravity 一项都不生效；Claude 按“模式 → 模型 → 强度”的顺序应用，失败那项之前的可能已经生效。字段总是会话之后实际在用的值。控制台只给 `features` 含 `session_controls` 的守护进程发 `plan`、`effort`、`request_id`；旧守护进程上的普通会话按岗位模式打开，只能切换模型和 `default`/`acceptEdits`/`bypassPermissions`。守护进程同时改掉本机会话记录，resume 沿用。
 
 ### 4.6 `session.close`（键：`session_id + open_gen`）
 
@@ -277,6 +279,25 @@
 - **任务中自动压缩**：`session.open.context {limit_tokens?, in_task_pct?, window_tokens?, focus?}`，`window_tokens` 是这个员工上一个同运行时会话报的窗口（`turn_ended.context.max_tokens`，没有就不带）。Claude：有 `limit_tokens` 时 `CLAUDE_CODE_AUTO_COMPACT_WINDOW = clamp(limit_tokens, 100K, 1M)`，`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = limit_tokens × in_task_pct / (窗口 − 20K)`（CLI 的阈值是有效窗口 = 窗口 − 20K 的百分比，SDK 0.3.325 实测；CLI 自己再把窗口夹到模型窗口，并且最晚在有效窗口 − 13K 压缩）；没有 `limit_tokens` 时不设窗口，有 `window_tokens` 就把 PCT 换算成 `window_tokens × in_task_pct` 个 token（`in_task_pct × W / (W − 20K)`），都没有就直接用 `in_task_pct`（这时是 CLI 有效窗口 = 窗口 − 20K 的百分比）。Codex：`thread/start` 配置 `model_auto_compact_token_limit = L × in_task_pct / 100`，`L = min(limit_tokens, window_tokens)`（上限超过模型窗口时永远到不了），没有 `limit_tokens` 时 `L = window_tokens`，两者都没有就不设（Codex 自己的默认）。
 - **平台主动压缩** `session.compact {session_id, open_gen, compact_id, instructions?}`（可靠，键 `compact_id`）：守护进程清掉保存的锚点，等当前回合结束后压缩——Claude 往提示队列推 `/compact <instructions>`，以 `compact_boundary` 之后的 `result` 为完成；Codex 调 `thread/compact/start`（没有指令参数），以 `contextCompaction` 条目完成（或 `thread/compacted`）之后的 `turn/completed` 为完成。Codex 只把压缩那个回合（`thread/compact/start` 之后第一个不是我们消息触发的回合）或报过压缩的回合的结束算作完成，期间来的消息自己的回合不算。完成后回 `session.compacted {session_id, open_gen, compact_id, ok, context?, error?}`（可靠，键 `compact_id`）。会话停放时先 resume 再压缩；会话不在本机回 `ok: false`。失败也一定回：等空闲最多 2 分钟，期间一直在跑回合或来了新的 `session.send` 就放弃（`error: "busy: …"`，简报直接发，不压缩）；压缩本身最多 7 分钟（`timed out: …`）；压缩中运行时退出回 `exited: …`；守护进程把进行中的 `compact_id` 记在本机会话记录里，重启后对每个回 `restarted: …`。控制台只认跑这个会话的节点发来的 `session.compacted`。
 - **压缩后补锚点**：运行时自己压缩（不是 `session.compact`）后，守护进程把 `session.send.anchor` 存下的锚点补给模型。Claude：SessionStart 钩子（`source: "compact"`）返回 `additionalContext`；自动压缩的 PreCompact 钩子返回 `systemMessage = focus + 锚点`，CLI 把它拼进压缩指令。Codex：压缩完成后如果回合还在跑，用 `turn/steer` 把锚点插进当前回合；回合已经结束（或 steer 被拒）就丢掉，绝不为锚点单开一个回合（下一条任务消息自带简报）。
+
+#### 上下文细分（`hello.features` 含 `context_detail`）
+
+只有 Claude 会话有：守护进程和控制台都声明 `context_detail` 时（`welcome.features` 含它），Claude 驱动把 SDK `getContextUsage()` 的结果整理成 `ContextDetail` 发给控制台。Codex（app-server 只给总数）和 Antigravity 不发。summary 和 full 的结构完全相同（SDK 0.3.325 实测，summary 也给逐个 MCP 工具），只是 summary 的数字是估算。
+
+#### `session.context`（守护进程 → 控制台，不可靠，最新的为准）
+
+`session.context {session_id, open_gen, reason, refresh_id?, context?, error?}`。每轮结束（`turn_ended` 之后）发一次 `reason:"turn"`，`context.detail` 为 summary（用上一轮的 usage 加本地估算，不调 API，约 15 ms）；收到 `session.context_refresh` 后回 `reason:"refresh"`，带同一个 `refresh_id`，`context.detail` 为 full（对每个类别调 token-count API，更准，约 0.5 s，不跑模型回合）；读不到时（会话已停放没有进程、超时）不带 `context`，带 `error`。会话刚关闭也收。
+
+`context`（ContextDetail，对象都是开放的，控制台只保留认识的字段）：
+- detail、sampled_at（可选，守护进程调用 getContextUsage 的时间；控制台丢弃比已存的更旧的细分，比如慢的 full 刷新被后来一轮的 summary 超过，这时也不更新总量；旧守护进程不带，按到达时间算）、model（可选）、total_tokens、max_tokens（自动压缩窗口，分母以它为准）、raw_max_tokens（可选）、auto_compact（可选）、auto_compact_threshold（可选）。
+- categories：每行含 id（可选）、name、tokens、kind，按 SDK 顺序。id 取 SDK 的 system_prompt、system_tools、mcp_tools、mcp_instructions、mcp_tools_deferred、system_tools_deferred、custom_agents、memory_files、skills、messages、autocompact_buffer、compact_buffer、free_space，以后可能新增；kind 取 used、free、buffer、deferred（deferred 不占窗口）。按 id 和 kind 分类，不要按英文 name。
+- mcp_tools：每个 MCP 工具的 name、server、tokens、loaded（loaded 为 false 是延迟加载的）。
+- mcp_servers：按服务器拆的 MCP 指令（server、tokens，按文字长度估算）。
+- memory_files：path、type（可选）、tokens；skills：name、source（可选）、tokens。
+
+#### `session.context_refresh`（控制台 → 守护进程，不可靠）
+
+`session.context_refresh {session_id, open_gen, refresh_id}`。网页点“刷新”时发；守护进程立即读一次 full 并回 `session.context`。会话停放时不为此拉起进程，直接回 `error`。
 
 ### 4.11 迁移会话（`hello.features` 含 `session_move`）
 

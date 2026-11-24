@@ -979,6 +979,298 @@
         ],
         "type": "object"
       },
+      "ContextCategoryView": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "Stable row id: system_prompt, system_tools, mcp_tools, mcp_instructions, mcp_tools_deferred, system_tools_deferred, custom_agents, memory_files, skills, messages, autocompact_buffer, compact_buffer, free_space; more may come, '' from an old CLI. Classify on id and kind, not on name",
+            "type": "string"
+          },
+          "kind": {
+            "description": "used: in the window; free: the rest of it; buffer: the autocompact reserve; deferred: tool schemas outside the window",
+            "enum": [
+              "used",
+              "free",
+              "buffer",
+              "deferred"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "The runtime's English label",
+            "type": "string"
+          },
+          "tokens": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "tokens",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "ContextDetailView": {
+        "additionalProperties": false,
+        "properties": {
+          "auto_compact": {
+            "type": "boolean"
+          },
+          "auto_compact_threshold": {
+            "description": "Tokens at which the runtime compacts by itself; 0 = unknown",
+            "format": "int64",
+            "type": "integer"
+          },
+          "can_refresh": {
+            "description": "POST …/context/refresh can read it now: the session runs on an online node whose daemon reports breakdowns",
+            "type": "boolean"
+          },
+          "categories": {
+            "description": "In the runtime's order; deferred rows are outside the window",
+            "items": {
+              "$ref": "#/components/schemas/ContextCategoryView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "detail": {
+            "description": "summary: estimated after a turn; full: counted on a refresh; '' = no breakdown yet",
+            "enum": [
+              "summary",
+              "full",
+              ""
+            ],
+            "type": "string"
+          },
+          "max_tokens": {
+            "description": "The window measured against: the autocompact window; 0 = unknown",
+            "format": "int64",
+            "type": "integer"
+          },
+          "mcp_servers": {
+            "items": {
+              "$ref": "#/components/schemas/ContextMcpServerView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "mcp_tools": {
+            "description": "Every MCP tool (the mcp_tools and mcp_tools_deferred rows expanded)",
+            "items": {
+              "$ref": "#/components/schemas/ContextMcpToolView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "memory_files": {
+            "items": {
+              "$ref": "#/components/schemas/ContextMemoryFileView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "raw_max_tokens": {
+            "description": "The model's own window; 0 = unknown",
+            "format": "int64",
+            "type": "integer"
+          },
+          "runtime": {
+            "description": "Runtime of the latest session ('' before the first one)",
+            "type": "string"
+          },
+          "session_id": {
+            "description": "The latest session ('' before the first one)",
+            "type": "string"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/ContextSkillView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "state": {
+            "description": "That session's state (active, turn_running, parked, closed, …)",
+            "type": "string"
+          },
+          "supported": {
+            "description": "The session's runtime reports a breakdown (Claude only). false: hide the context block",
+            "type": "boolean"
+          },
+          "total_tokens": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "updated_at": {
+            "description": "When the breakdown arrived; null = none yet",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "supported",
+          "runtime",
+          "session_id",
+          "state",
+          "can_refresh",
+          "detail",
+          "updated_at",
+          "model",
+          "total_tokens",
+          "max_tokens",
+          "raw_max_tokens",
+          "auto_compact",
+          "auto_compact_threshold",
+          "categories",
+          "mcp_tools",
+          "mcp_servers",
+          "memory_files",
+          "skills"
+        ],
+        "type": "object"
+      },
+      "ContextMcpServerView": {
+        "additionalProperties": false,
+        "properties": {
+          "server": {
+            "type": "string"
+          },
+          "tokens": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "server",
+          "tokens"
+        ],
+        "type": "object"
+      },
+      "ContextMcpToolView": {
+        "additionalProperties": false,
+        "properties": {
+          "loaded": {
+            "description": "false: deferred (tool search), not in the window yet",
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "server": {
+            "type": "string"
+          },
+          "tokens": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "server",
+          "tokens",
+          "loaded"
+        ],
+        "type": "object"
+      },
+      "ContextMemoryFileView": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "tokens": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "type",
+          "tokens"
+        ],
+        "type": "object"
+      },
+      "ContextRefreshStarted": {
+        "additionalProperties": false,
+        "properties": {
+          "refresh_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "refresh_id",
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "ContextSkillView": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "tokens": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "source",
+          "tokens"
+        ],
+        "type": "object"
+      },
+      "ControlsPending": {
+        "additionalProperties": false,
+        "properties": {
+          "effort": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "permission_mode": {
+            "type": "string"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since"
+        ],
+        "type": "object"
+      },
       "ConversationModel": {
         "additionalProperties": false,
         "properties": {
@@ -3034,6 +3326,43 @@
         ],
         "type": "object"
       },
+      "ModeOption": {
+        "additionalProperties": false,
+        "properties": {
+          "applies": {
+            "description": "now: Claude switches at once; next_turn: Codex/Antigravity from the next turn",
+            "enum": [
+              "now",
+              "next_turn"
+            ],
+            "type": "string"
+          },
+          "hint": {
+            "type": "string"
+          },
+          "id": {
+            "description": "session.set_mode value",
+            "enum": [
+              "auto",
+              "default",
+              "acceptEdits",
+              "plan",
+              "bypassPermissions"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "hint",
+          "applies"
+        ],
+        "type": "object"
+      },
       "ModelApplied": {
         "additionalProperties": false,
         "properties": {
@@ -3053,6 +3382,47 @@
           "employee",
           "model",
           "live"
+        ],
+        "type": "object"
+      },
+      "ModelChoice": {
+        "additionalProperties": false,
+        "properties": {
+          "default": {
+            "description": "The runtime's default model",
+            "type": "boolean"
+          },
+          "default_effort": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "efforts": {
+            "description": "Thinking effort levels of the model; [] = none to pick (Antigravity: the effort is part of the model id)",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "supports_auto": {
+            "description": "Claude: the model supports the auto permission mode",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "efforts",
+          "supports_auto"
         ],
         "type": "object"
       },
@@ -4595,6 +4965,10 @@
               "null"
             ]
           },
+          "session_status": {
+            "description": "A session's state for the sidebar ('' for a project), the same rule as the session page: working (in a turn, waking or using a tool), finished (not in a turn and nothing to answer: 已完成), resolved (the user confirmed: 已解决), attention (node offline, session crashed or no node can run it: 等你处理), queued (waiting for a slot), or the thread's status (queued, waiting, review, paused, failed). Open cards are in waiting",
+            "type": "string"
+          },
           "thread_codex_model": {
             "description": "Codex model of Codex leads and members; '' = each role's model",
             "type": "string"
@@ -4649,6 +5023,7 @@
           "kind",
           "waiting",
           "threads_active",
+          "session_status",
           "created_at",
           "updated_at"
         ],
@@ -4801,6 +5176,30 @@
           "assignee",
           "locked",
           "reserved_for"
+        ],
+        "type": "object"
+      },
+      "QuotaLimits": {
+        "additionalProperties": false,
+        "properties": {
+          "five_hour_pct": {
+            "description": "A node whose 5-hour window (Codex: windows up to a day) has used this many percent gets no new session while another candidate node is under the thresholds",
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "weekly_pct": {
+            "description": "The same for any weekly window (Claude weekly and per-model weekly; Codex: windows longer than a day)",
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "five_hour_pct",
+          "weekly_pct"
         ],
         "type": "object"
       },
@@ -5322,7 +5721,7 @@
             "type": "string"
           },
           "runtimes": {
-            "description": "Every runtime the role's employees may run on, in display order; each new session takes the one with the most quota left. Empty: [runtime]",
+            "description": "Every runtime the role's employees may run on, in display order; each new session takes the (runtime, node) pair with the lowest load score (used quota plus live sessions), so sessions spread over them; a runtime whose quota is tight on a node is only used when every pair is. Empty: [runtime]",
             "items": {
               "enum": [
                 "claude",
@@ -5982,6 +6381,35 @@
         },
         "type": "object"
       },
+      "SchedulingSettings": {
+        "additionalProperties": false,
+        "properties": {
+          "defaults": {
+            "$ref": "#/components/schemas/QuotaLimits",
+            "description": "The built-in thresholds (used until the user sets their own)"
+          },
+          "five_hour_pct": {
+            "description": "A node whose 5-hour window (Codex: windows up to a day) has used this many percent gets no new session while another candidate node is under the thresholds",
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "weekly_pct": {
+            "description": "The same for any weekly window (Claude weekly and per-model weekly; Codex: windows longer than a day)",
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "defaults",
+          "five_hour_pct",
+          "weekly_pct"
+        ],
+        "type": "object"
+      },
       "SearchMessage": {
         "additionalProperties": false,
         "properties": {
@@ -6236,12 +6664,99 @@
         ],
         "type": "object"
       },
+      "SessionControls": {
+        "additionalProperties": false,
+        "properties": {
+          "effort": {
+            "description": "'' = the model's default",
+            "type": "string"
+          },
+          "efforts": {
+            "description": "Effort levels of the current model ([] = none to pick)",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "error": {
+            "description": "Why the last switch failed (the fields show what still runs)",
+            "type": "string"
+          },
+          "live": {
+            "description": "A session is open on a node: a switch goes to it now; false: the next session opens with it",
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "models": {
+            "description": "Models reported by the session's runtime ([] until a session opened on a daemon with session_controls)",
+            "items": {
+              "$ref": "#/components/schemas/ModelChoice"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "modes": {
+            "description": "Permission menu in order: auto only when the model supports it, bypassPermissions only when the role allows skipping permission prompts",
+            "items": {
+              "$ref": "#/components/schemas/ModeOption"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "node_outdated": {
+            "description": "The session's node runs a daemon without session_controls: only the model and Claude's default / acceptEdits / bypassPermissions can be switched, no effort (upgrade the node for the rest)",
+            "type": "boolean"
+          },
+          "pending": {
+            "$ref": "#/components/schemas/ControlsPending",
+            "description": "A switch on its way to the node (null: none); a session_controls event follows its answer"
+          },
+          "permission_mode": {
+            "description": "The mode in force (set_mode value), as the node wrote it back; without a live session the one the next session opens in",
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "thread_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id",
+          "runtime",
+          "live",
+          "permission_mode",
+          "model",
+          "effort",
+          "pending",
+          "modes",
+          "models",
+          "efforts",
+          "node_outdated"
+        ],
+        "type": "object"
+      },
       "SessionInput": {
         "additionalProperties": false,
         "properties": {
           "branch": {
             "description": "Name of the work branch (after session/\u003cid\u003e-); '' = from the title, or the repositories when the title has no Latin letters",
             "maxLength": 60,
+            "type": "string"
+          },
+          "effort": {
+            "description": "Thinking effort; '' = project / role setting",
+            "maxLength": 32,
             "type": "string"
           },
           "message": {
@@ -6251,17 +6766,28 @@
             "type": "string"
           },
           "model": {
-            "description": "'' = the role's model",
+            "description": "'' = the role's model for the runtime",
             "maxLength": 100,
             "type": "string"
           },
           "node_id": {
-            "description": "Run on this node; '' = picked automatically (most quota left)",
+            "description": "Run on this node; '' = picked automatically (spread over the nodes by load score; nodes whose quota is tight only when all are)",
             "maxLength": 64,
             "type": "string"
           },
+          "permission_mode": {
+            "description": "'' = the initial mode (Claude: auto when the model supports it, else default; Codex/Antigravity: the role's)",
+            "enum": [
+              "auto",
+              "default",
+              "acceptEdits",
+              "plan",
+              "bypassPermissions"
+            ],
+            "type": "string"
+          },
           "repos": {
-            "description": "Repositories, all checked out side by side in the employee's directory",
+            "description": "Repositories, all checked out side by side in the employee's directory; [] = none: the employee works in a local folder on the node it starts on, pinned there",
             "items": {
               "$ref": "#/components/schemas/SessionRepoRef"
             },
@@ -6276,6 +6802,11 @@
             "maxLength": 64,
             "type": "string"
           },
+          "runtime": {
+            "description": "The agent (CLI) the session runs on: one of the role's runtimes; '' = the role's (several: spread like any employee). Fixed once the session starts",
+            "maxLength": 32,
+            "type": "string"
+          },
           "title": {
             "description": "'' = the first line of message",
             "maxLength": 200,
@@ -6285,6 +6816,60 @@
         "required": [
           "message",
           "repos"
+        ],
+        "type": "object"
+      },
+      "SessionOptions": {
+        "additionalProperties": false,
+        "properties": {
+          "default_mode": {
+            "description": "What the session opens in without a pick: Claude auto (when the model supports it, else default), Codex/Antigravity the role's",
+            "type": "string"
+          },
+          "efforts": {
+            "description": "Effort levels of the model ([] = none to pick or not known yet)",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "model": {
+            "description": "The model the session would run without a pick",
+            "type": "string"
+          },
+          "models": {
+            "description": "From the user's latest session on this runtime ([] = none reported yet: type a model id)",
+            "items": {
+              "$ref": "#/components/schemas/ModelChoice"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "modes": {
+            "items": {
+              "$ref": "#/components/schemas/ModeOption"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "runtime": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runtime",
+          "default_mode",
+          "model",
+          "modes",
+          "models",
+          "efforts"
         ],
         "type": "object"
       },
@@ -6324,7 +6909,7 @@
         "additionalProperties": false,
         "properties": {
           "repos": {
-            "description": "The session's repositories after the change (order kept); new ones are checked out, missing ones removed",
+            "description": "The session's repositories after the change (order kept); new ones are checked out, missing ones removed; [] = none (the session goes on in its local folder, pinned to its node)",
             "items": {
               "$ref": "#/components/schemas/SessionRepoRef"
             },
@@ -6411,6 +6996,33 @@
           "last_seen_at",
           "expires_at"
         ],
+        "type": "object"
+      },
+      "SetControlsInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "effort": {
+            "description": "One of the model's efforts; absent = unchanged",
+            "maxLength": 32,
+            "type": "string"
+          },
+          "model": {
+            "description": "One of the models GET lists (any valid id while it lists none); absent = unchanged",
+            "maxLength": 100,
+            "type": "string"
+          },
+          "permission_mode": {
+            "description": "One of the modes GET lists; absent = unchanged",
+            "enum": [
+              "auto",
+              "default",
+              "acceptEdits",
+              "plan",
+              "bypassPermissions"
+            ],
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "SetModelInputBody": {
@@ -7139,6 +7751,14 @@
               "null"
             ]
           },
+          "session": {
+            "$ref": "#/components/schemas/ThreadSession",
+            "description": "A session's (solo) employee's latest agent session on its node: working directory and context use. Null for other threads and before the employee's first session"
+          },
+          "solo": {
+            "description": "The thread is a session's (多仓库会话): its lead is the one employee the user talks to directly",
+            "type": "boolean"
+          },
           "started_at": {
             "description": "When the thread first ran (null while queued)",
             "format": "date-time",
@@ -7206,7 +7826,9 @@
           "reminded_at",
           "last_activity_at",
           "latest_deliverable",
-          "dispatch"
+          "dispatch",
+          "solo",
+          "session"
         ],
         "type": "object"
       },
@@ -7270,6 +7892,54 @@
           "pr_number",
           "pr_url",
           "pr_state"
+        ],
+        "type": "object"
+      },
+      "ThreadSession": {
+        "additionalProperties": false,
+        "properties": {
+          "context_max": {
+            "description": "The context window ContextUsed is measured against (tokens, as the runtime reports it)",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "context_used": {
+            "description": "Tokens of context the session used at its last turn end (null: the runtime reports none, e.g. Antigravity, or no turn ended yet)",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cwd": {
+            "description": "The employee's working directory on the node (every repository is a subdirectory): absolute when the node reported its root, else relative to the daemon root",
+            "type": "string"
+          },
+          "node_id": {
+            "description": "Node the session runs (ran) on",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "state": {
+            "description": "The agent session's state (opening, idle, busy, parked, closed…)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "runtime",
+          "state",
+          "cwd",
+          "context_used",
+          "context_max"
         ],
         "type": "object"
       },
@@ -7472,6 +8142,14 @@
               "null"
             ]
           },
+          "session": {
+            "$ref": "#/components/schemas/ThreadSession",
+            "description": "A session's (solo) employee's latest agent session on its node: working directory and context use. Null for other threads and before the employee's first session"
+          },
+          "solo": {
+            "description": "The thread is a session's (多仓库会话): its lead is the one employee the user talks to directly",
+            "type": "boolean"
+          },
           "started_at": {
             "description": "When the thread first ran (null while queued)",
             "format": "date-time",
@@ -7539,7 +8217,9 @@
           "reminded_at",
           "last_activity_at",
           "latest_deliverable",
-          "dispatch"
+          "dispatch",
+          "solo",
+          "session"
         ],
         "type": "object"
       },
@@ -9604,6 +10284,90 @@
         ]
       }
     },
+    "/api/conversations/{cid}/context/detail": {
+      "get": {
+        "operationId": "conversation-context-detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextDetailView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "What fills the session's context window, by category (sessions on Claude only)",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/api/conversations/{cid}/context/refresh": {
+      "post": {
+        "operationId": "conversation-context-refresh",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextRefreshStarted"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Count the session's context precisely now; the result arrives as the project event context",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
     "/api/conversations/{cid}/forward": {
       "post": {
         "operationId": "forward-messages",
@@ -11279,6 +12043,76 @@
           }
         },
         "summary": "Change password and sign out other sessions",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/me/scheduling": {
+      "get": {
+        "operationId": "get-my-scheduling",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulingSettings"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "My node scheduling thresholds",
+        "tags": [
+          "auth"
+        ]
+      },
+      "put": {
+        "operationId": "put-my-scheduling",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuotaLimits"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulingSettings"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Set my node scheduling thresholds (percent, 1–100)",
         "tags": [
           "auth"
         ]
@@ -13660,6 +14494,98 @@
         ]
       }
     },
+    "/api/projects/{pid}/session-controls": {
+      "get": {
+        "operationId": "session-controls",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionControls"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "The permission mode, model and thinking effort of a session, and what it may switch to",
+        "tags": [
+          "sessions"
+        ]
+      },
+      "put": {
+        "operationId": "set-session-controls",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetControlsInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionControls"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Switch a session's permission mode, model and/or thinking effort: Claude at once, Codex and Antigravity from the next turn; the answer comes as a session_controls event",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
     "/api/projects/{pid}/shared-files": {
       "delete": {
         "operationId": "delete-shared-file",
@@ -14864,6 +15790,72 @@
         "summary": "Log in from the console; the first test pins the host key",
         "tags": [
           "servers"
+        ]
+      }
+    },
+    "/api/session-options": {
+      "get": {
+        "operationId": "session-options",
+        "parameters": [
+          {
+            "description": "Member role template ('' = the first member role)",
+            "explode": false,
+            "in": "query",
+            "name": "role",
+            "schema": {
+              "description": "Member role template ('' = the first member role)",
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "The agent picked on the page, one of the role's runtimes ('' = the role's first)",
+            "explode": false,
+            "in": "query",
+            "name": "runtime",
+            "schema": {
+              "description": "The agent picked on the page, one of the role's runtimes ('' = the role's first)",
+              "maxLength": 32,
+              "type": "string"
+            }
+          },
+          {
+            "description": "The model picked on the page ('' = the role's for the runtime)",
+            "explode": false,
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "description": "The model picked on the page ('' = the role's for the runtime)",
+              "maxLength": 100,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionOptions"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "The permission modes, models and efforts a new session made from a role can start with",
+        "tags": [
+          "sessions"
         ]
       }
     },

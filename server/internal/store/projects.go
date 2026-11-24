@@ -36,6 +36,8 @@ type Project struct {
 	Kind          string
 	Waiting       int `gorm:"->"`
 	ThreadsActive int `gorm:"->"`
+	// SessionStatus is a session's state for the sidebar ('' for a project): see sessionStatusCol.
+	SessionStatus string `gorm:"->"`
 }
 
 // TableName maps Project to at_projects.
@@ -101,7 +103,36 @@ const projectCols = `p.id, p.user_id, p.name, p.description, p.context,
 	  + (SELECT count(*) FROM at_threads t WHERE t.project_id = p.id AND t.status = 'review'
 	    AND (p.merge_policy = 'manual' OR t.merge_error IS NOT NULL)) AS waiting,
 	(SELECT count(*) FROM at_threads t WHERE t.project_id = p.id
-	  AND t.status IN ('queued','running','waiting','review')) AS threads_active`
+	  AND t.status IN ('queued','running','waiting','review')) AS threads_active,
+	` + sessionStatusCol
+
+// sessionStatusCol is a session's (kind session) state for the sidebar, from its thread and its
+// employee's (the lead's) state in at_employee_status: the same rule as the page (web phase.ts
+// threadPhase with solo, core.PhaseOf). Open cards are counted in waiting (the sidebar shows the
+// count). A running session is
+//   - attention (等你处理) when the employee's node is offline, its session crashed, or no node can
+//     run it (queued, no_runtime): nothing moves until the user looks;
+//   - working (进行中) while the employee works (a turn runs, it is waking for a message, it uses a
+//     tool…) or waits on others;
+//   - queued (排队中) while its session waits for a free slot on a node;
+//   - finished (已完成) otherwise: not in a turn and nothing for the user to answer, whether it
+//     replied, the user stopped it or the round ended without a reply.
+//
+// A done thread is resolved (已解决, the user confirmed); other statuses are the thread's
+// (queued, waiting, review, paused, failed). Empty for a project.
+const sessionStatusCol = `CASE WHEN p.kind <> 'session' THEN '' ELSE COALESCE((SELECT CASE
+	  WHEN t.status = 'done' THEN 'resolved'
+	  WHEN t.status <> 'running' THEN t.status
+	  WHEN st.state IN ('offline', 'broken') OR (st.state = 'queued' AND st.substate = 'no_runtime') THEN 'attention'
+	  WHEN st.state IN ('typing', 'reading', 'running', 'thinking', 'claiming', 'walking_to_board', 'returning',
+	    'waiting', 'raising_hand') THEN 'working'
+	  WHEN EXISTS (SELECT 1 FROM at_agent_sessions s WHERE s.employee_id = e.id AND s.state <> 'closed' AND s.in_turn) THEN 'working'
+	  WHEN st.state = 'queued' THEN 'queued'
+	  ELSE 'finished' END
+	FROM at_threads t
+	LEFT JOIN at_employees e ON e.thread_id = t.id AND e.tier = 'lead'
+	LEFT JOIN at_employee_status st ON st.employee_id = e.id
+	WHERE t.project_id = p.id ORDER BY t.no LIMIT 1), '') END AS session_status`
 
 func (s *Store) projects(ctx context.Context, userID string) *gorm.DB {
 	return s.g(ctx).Table("at_projects p").Select(projectCols).Where("p.user_id = ?", userID)

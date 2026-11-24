@@ -27,7 +27,7 @@ const json = (res, status, body, headers = {}) => {
 const fail = (res, status, detail, code = "") => json(res, status, { detail, code });
 const cookies = (req) => Object.fromEntries((req.headers.cookie ?? "").split(";").map((c) => c.trim().split("=")).filter((p) => p[0]));
 const now = () => new Date().toISOString();
-const threadById = (tid) => state.threads.find((t) => t.id === tid);
+const threadById = (tid) => state.threads.find((t) => t.id === tid) ?? state.sessionThreads.find((t) => t.id === tid);
 /** What the server adds to a thread in lists: its deliverable count, newest deliverable and when anything last happened. */
 const threadOut = (t) => {
   const own = state.deliverables.filter((d) => d.thread_no === t.no);
@@ -199,7 +199,21 @@ const sent = new Map();
 const failedOnce = new Set();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// A session's sidebar status (ProjectView.session_status, server sessionStatusCol): done → resolved,
+// its employee at work → working, else finished (replied and stopped).
+const WORKING = new Set(["typing", "reading", "running", "thinking", "claiming", "walking_to_board", "returning", "waiting", "raising_hand"]);
+function syncSession(t) {
+  const p = state.projects.find((x) => x.id === t.project_id);
+  if (!t.solo || !p) return;
+  p.session_status = t.status === "done" ? "resolved" : WORKING.has(t.members[0]?.status?.state) ? "working" : "finished";
+  p.updated_at = now();
+  emit("thread", { thread: threadOut(t) }, t.project_id);
+}
+const setLead = (t, state, bubble = "") => t.members[0] && (t.members[0].status = { ...t.members[0].status, state, bubble, since: now() });
+
 async function sendMessage(res, cid, req) {
+  const pid = threadById(cid)?.project_id ?? "p1";
+  const solo = threadById(cid)?.solo ? threadById(cid) : null;
   const b = await body(req);
   const key = req.headers["idempotency-key"] ?? "";
   await sleep(Number(process.env.MOCK_SEND_MS ?? 0));
@@ -214,13 +228,24 @@ async function sendMessage(res, cid, req) {
   if (key) sent.set(key, m);
   (state.messages[cid] ??= []).push(m);
   const sseMs = Number(process.env.MOCK_SSE_MS ?? 0);
-  if (sseMs > 0) setTimeout(() => emit("message", { conversation_id: cid, message: m }), sseMs);
-  else emit("message", { conversation_id: cid, message: m });
+  if (sseMs > 0) setTimeout(() => emit("message", { conversation_id: cid, message: m }, pid), sseMs);
+  else emit("message", { conversation_id: cid, message: m }, pid);
+  // A session: a message reopens a resolved one and starts a round (进行中 until the reply).
+  if (solo) {
+    if (solo.status === "done") Object.assign(solo, { status: "running", finished_at: null, summary: "" });
+    setLead(solo, "typing", "回复中");
+    syncSession(solo);
+  }
   setTimeout(() => {
     const said = images.length ? `${images.length} 张图片${b.content ? `和「${b.content}」` : ""}` : `「${b.content}」`;
     const reply = { id: String(Date.now() + 1), role: "leader", author: cid === "c0" ? "leader" : threadById(cid)?.members[0]?.name ?? "lead", kind: "chat", content: `收到 ${said}。我来安排。`, meta: {}, created_at: now() };
     state.messages[cid].push(reply);
-    emit("message", { conversation_id: cid, message: reply });
+    emit("message", { conversation_id: cid, message: reply }, pid);
+    if (solo) {
+      solo.lead_last = { text: reply.content, at: reply.created_at };
+      setLead(solo, "idle");
+      syncSession(solo);
+    }
   }, 1200 + sseMs);
   await sleep(Number(process.env.MOCK_REPLY_MS ?? 0));
   json(res, 202, m);
@@ -254,6 +279,14 @@ const routes = [
   ["GET", /^\/api\/me$/, (req, res) => json(res, 200, state.me)],
   ["GET", /^\/api\/me\/sessions$/, (req, res) => json(res, 200, [{ id: "s1", created_at: F.ago(600), current: true, expires_at: F.ago(-60000), last_seen_at: F.ago(0), user_agent: "Chrome · Linux" }, { id: "s2", created_at: F.ago(6000), current: false, expires_at: F.ago(-6000), last_seen_at: F.ago(3000), user_agent: "Safari · iPhone" }])],
   ["POST", /^\/api\/me\/password$/, (req, res) => json(res, 204)],
+  ["GET", /^\/api\/me\/scheduling$/, (req, res) => json(res, 200, { ...(state.scheduling ?? { five_hour_pct: 85, weekly_pct: 95 }), defaults: { five_hour_pct: 85, weekly_pct: 95 } })],
+  ["PUT", /^\/api\/me\/scheduling$/, async (req, res) => {
+    const b = await body(req);
+    const ok = (v) => Number.isInteger(v) && v >= 1 && v <= 100;
+    if (!ok(b.five_hour_pct) || !ok(b.weekly_pct)) return json(res, 422, { detail: "阈值要在 1～100 之间", code: "validation" });
+    state.scheduling = { five_hour_pct: b.five_hour_pct, weekly_pct: b.weekly_pct };
+    json(res, 200, { ...state.scheduling, defaults: { five_hour_pct: 85, weekly_pct: 95 } });
+  }],
   ["DELETE", /^\/api\/me\/sessions\/[^/]+$/, (req, res) => json(res, 204)],
   ["GET", /^\/api\/events$/, (req, res) => openStream(req, res, "user")],
   ["GET", /^\/api\/projects$/, (req, res) => json(res, 200, state.projects)],
@@ -280,7 +313,7 @@ const routes = [
   }],
   ["GET", /^\/api\/projects\/([^/]+)\/events$/, (req, res, [pid]) => openStream(req, res, pid)],
   ["GET", /^\/api\/projects\/([^/]+)\/coordinator$/, (req, res) => json(res, 200, { conversation_id: "c0", employee: state.coordinator, session_state: "active" })],
-  ["GET", /^\/api\/projects\/([^/]+)\/threads$/, (req, res, [pid]) => json(res, 200, pid === "p1" ? state.threads.map(threadOut) : [])],
+  ["GET", /^\/api\/projects\/([^/]+)\/threads$/, (req, res, [pid]) => json(res, 200, pid === "p1" ? state.threads.map(threadOut) : state.sessionThreads.filter((t) => t.project_id === pid).map(threadOut))],
   ["GET", /^\/api\/projects\/([^/]+)\/waiting$/, (req, res, [pid]) => json(res, 200, pid === "p1" ? waiting() : { questions: [], reviews: [] })],
   ["GET", /^\/api\/projects\/([^/]+)\/overview$/, (req, res, [pid]) => {
     const p = state.projects.find((x) => x.id === pid);
@@ -429,6 +462,15 @@ const routes = [
   ["GET", /^\/api\/conversations\/([^/]+)\/questions$/, (req, res, [cid]) => json(res, 200, state.questions[cid] ?? [])],
   ["POST", /^\/api\/conversations\/([^/]+)\/questions\/([^/]+)\/answer$/, (req, res, [cid, qid]) => answer(res, cid, qid, req)],
   ["GET", /^\/api\/threads\/([^/]+)$/, (req, res, [tid]) => json(res, 200, threadById(tid))],
+  // 已解决 (api.md: POST /api/threads/{tid}/complete); the next message reopens a session.
+  ["POST", /^\/api\/threads\/([^/]+)\/complete$/, (req, res, [tid]) => {
+    const t = threadById(tid);
+    if (!t) return fail(res, 404, "找不到讨论串", "thread_not_found");
+    Object.assign(t, { status: "done", finished_at: now(), updated_at: now() });
+    if (t.solo) syncSession(t);
+    else emit("thread", { thread: threadOut(t) }, t.project_id);
+    json(res, 200, threadOut(t));
+  }],
   ["POST", /^\/api\/threads\/([^/]+)\/(archive|unarchive)$/, (req, res, [tid, op]) => {
     const t = threadById(tid);
     if (op === "archive") Object.assign(t, { archived_from: t.status, status: "archived" });
@@ -610,7 +652,7 @@ const routes = [
   ["GET", /^\/api\/git\/connections\/([^/]+)\/branches$/, (req, res) => json(res, 200, ["main", "develop", "release/2.0"])],
   ["GET", /^\/api\/git\/github-app$/, (req, res) => json(res, 200, { configured: true, install_url: "https://github.com/apps/agent-teams-mock/installations/new", app: { slug: "agent-teams-mock", name: "Agent Teams (mock)", owner: "touwaeriol", html_url: "https://github.com/apps/agent-teams-mock", permissions: { contents: "write", pull_requests: "write", checks: "read" }, webhook_active: true } })],
   ["GET", /^\/api\/skills$/, (req, res) => json(res, 200, { skills: state.skills })],
-  ["GET", /^\/api\/roles\/presets$/, (req, res) => json(res, 200, { roles: [] })],
+  ["GET", /^\/api\/roles\/presets$/, (req, res) => json(res, 200, { roles: F.rolePresets })],
   ["GET", /^\/api\/plugins$/, (req, res) => json(res, 200, { plugins: state.plugins })],
   ["PATCH", /^\/api\/plugins\/([^/]+)$/, async (req, res, [id]) => json(res, 200, Object.assign(state.plugins.find((p) => p.id === id), await body(req)))],
   ["DELETE", /^\/api\/plugins\/([^/]+)$/, (req, res, [id]) => ((state.plugins = state.plugins.filter((p) => p.id !== id)), json(res, 204))],
@@ -639,6 +681,156 @@ const routes = [
 
 // Remote servers (api.md §3.9.1): mock/servers.mjs.
 routes.push(...serverRoutes(state, { json, fail, body, roles: () => state.roles, projects: () => state.projects }));
+
+// Sessions (多仓库会话, #53; sessions.md, api.md): session-controls, session-options, POST
+// /api/sessions and the context breakdown. A switch answers after MOCK_SWITCH_MS (default 1500);
+// MOCK_SWITCH=fail answers with an error (session_controls applied:false + error, as the server),
+// MOCK_SWITCH=timeout never answers and after MOCK_SWITCH_TIMEOUT_MS (default 120000, the server's
+// 2 minutes) the pending pick is dropped with the old values kept and the error 节点没有回应，切换未生效.
+// MOCK_NODE_OUTDATED=1 serves the old daemon's menus. An old daemon never answers and a parked
+// session has nothing to answer: their switches are in force at once (no pending), as on the server.
+/** A role's runtimes (agents), its first first; the model of one of them (server Role.RuntimeList / ModelFor). */
+const roleRuntimes = (r) => (r.runtimes?.length ? r.runtimes : [r.runtime ?? "claude"]);
+const roleModel = (r, runtime) => (runtime === roleRuntimes(r)[0] ? r.model : (r.models?.[runtime] ?? ""));
+const sessionThread = (pid) => state.sessionThreads.find((t) => t.project_id === pid);
+const sessionPending = {};
+const sessionErrors = {};
+function controlsMenus(runtime, model) {
+  const rt = state.sessionRuntimes[runtime] ?? state.sessionRuntimes.claude;
+  const m = rt.models.find((x) => x.id === model);
+  let modes = rt.modes.filter((x) => x.id !== "auto" || runtime !== "claude" || !m || m.supports_auto);
+  const outdated = process.env.MOCK_NODE_OUTDATED === "1";
+  if (outdated) modes = runtime === "claude" ? modes.filter((x) => ["default", "acceptEdits", "bypassPermissions"].includes(x.id)) : [];
+  return { modes, models: rt.models, efforts: outdated ? [] : (m?.efforts ?? []), node_outdated: outdated };
+}
+function controlsView(pid) {
+  const t = sessionThread(pid);
+  const runtime = t.session?.runtime ?? "claude";
+  const picks = state.sessionPicks[t.id];
+  const p = sessionPending[pid];
+  return {
+    thread_id: t.id, runtime, live: t.session?.state === "active", ...picks,
+    pending: p ? { ...p.body, since: p.since } : null, ...(sessionErrors[pid] ? { error: sessionErrors[pid] } : {}),
+    ...controlsMenus(runtime, picks.model),
+  };
+}
+function checkControls(runtime, model, b) {
+  const menus = controlsMenus(runtime, b.model ?? model);
+  if (b.permission_mode !== undefined && !menus.modes.some((x) => x.id === b.permission_mode)) return ["permission_mode", "这个会话不能用这个权限模式"];
+  if (b.model !== undefined && b.model !== "" && !menus.models.some((x) => x.id === b.model)) return ["model", "这个会话没有这个模型"];
+  if (b.effort !== undefined && b.effort !== "" && !menus.efforts.includes(b.effort)) return ["effort", "这个模型没有这个思考强度"];
+  return null;
+}
+routes.push(
+  ["GET", /^\/api\/projects\/([^/]+)\/session-controls$/, (req, res, [pid]) => {
+    if (!sessionThread(pid)) return fail(res, 409, "这个项目不是会话", "not_session");
+    json(res, 200, controlsView(pid));
+  }],
+  ["PUT", /^\/api\/projects\/([^/]+)\/session-controls$/, async (req, res, [pid]) => {
+    const t = sessionThread(pid);
+    if (!t) return fail(res, 409, "这个项目不是会话", "not_session");
+    if (sessionPending[pid]) return fail(res, 409, "上一次切换还在等节点回音", "switch_pending");
+    const b = await body(req);
+    const picks = state.sessionPicks[t.id];
+    const bad = checkControls(t.session?.runtime ?? "claude", picks.model, b);
+    if (bad) return json(res, 422, { detail: bad[1], code: "invalid", field: bad[0] });
+    // Switching to a model without the picked effort drops it (sessions.md).
+    const next = { ...picks, ...b };
+    if (b.model !== undefined && b.effort === undefined) {
+      const m = controlsMenus(t.session?.runtime ?? "claude", next.model);
+      if (next.effort && !m.efforts.includes(next.effort)) next.effort = "";
+    }
+    const how = process.env.MOCK_SWITCH ?? "";
+    delete sessionErrors[pid];
+    if (process.env.MOCK_NODE_OUTDATED === "1" || t.session?.state !== "active") {
+      state.sessionPicks[t.id] = next;
+      emit("session_controls", { thread_id: t.id, applied: true }, pid);
+      return json(res, 200, controlsView(pid));
+    }
+    const answer = (error) => {
+      delete sessionPending[pid];
+      if (error) sessionErrors[pid] = error;
+      else state.sessionPicks[t.id] = next;
+      emit("session_controls", { thread_id: t.id, applied: !error, ...(error ? { error } : {}) }, pid);
+    };
+    const expire = () => {
+      delete sessionPending[pid];
+      sessionErrors[pid] = "节点没有回应，切换未生效";
+    };
+    const timer = how === "timeout"
+      ? setTimeout(expire, Number(process.env.MOCK_SWITCH_TIMEOUT_MS ?? 120000))
+      : setTimeout(() => answer(how === "fail" ? "mock: 节点拒绝了这次切换" : ""), Number(process.env.MOCK_SWITCH_MS ?? 1500));
+    sessionPending[pid] = { body: b, since: now(), timer };
+    emit("session_controls", { thread_id: t.id, applied: false }, pid);
+    json(res, 200, controlsView(pid));
+  }],
+  ["GET", /^\/api\/session-options$/, (req, res, _m, url) => {
+    const r = state.roles.find((x) => x.role === url.searchParams.get("role") && x.tier === "member");
+    if (!r) return fail(res, 404, "没有这个岗位", "not_found");
+    const runtime = url.searchParams.get("runtime") || roleRuntimes(r)[0];
+    if (!roleRuntimes(r).includes(runtime)) return json(res, 422, { detail: `这个岗位没有配置这个 agent：${runtime}`, code: "invalid", field: "runtime" });
+    const rt = state.sessionRuntimes[runtime] ?? state.sessionRuntimes.claude;
+    const model = url.searchParams.get("model") || roleModel(r, runtime) || (rt.models.find((x) => x.default)?.id ?? "");
+    const menus = controlsMenus(runtime, model);
+    const m = rt.models.find((x) => x.id === model);
+    const defaultMode = runtime === "claude" ? (m && !m.supports_auto ? "default" : "auto") : r.permission_mode === "ask" ? "default" : "bypassPermissions";
+    json(res, 200, { runtime, default_mode: defaultMode, model, modes: menus.modes, models: menus.models, efforts: menus.efforts });
+  }],
+  ["POST", /^\/api\/sessions$/, async (req, res) => {
+    const b = await body(req);
+    const r = state.roles.find((x) => x.role === b.role && x.tier === "member") ?? state.roles.find((x) => x.tier === "member");
+    // The agent: one of the role's runtimes (its first by default), fixed for the session.
+    const runtime = b.runtime || roleRuntimes(r)[0];
+    if (!roleRuntimes(r).includes(runtime)) return json(res, 422, { detail: `这个岗位没有配置这个 agent：${runtime}`, code: "invalid", field: "runtime" });
+    const rt = state.sessionRuntimes[runtime] ?? state.sessionRuntimes.claude;
+    const model = b.model || roleModel(r, runtime) || (rt.models.find((x) => x.default)?.id ?? "");
+    const bad = checkControls(runtime, model, { permission_mode: b.permission_mode, effort: b.effort });
+    if (bad) return json(res, 422, { detail: bad[1], code: "invalid", field: bad[0] });
+    const pid = `s${Date.now()}`;
+    const title = (b.title || b.message || "新会话").slice(0, 40);
+    const repos = (b.repos ?? []).map((x) => ({ repo: x.repo, git_connection_id: x.git_connection_id ?? null }));
+    const p = { ...structuredClone(state.projects.find((x) => x.id === "s1")), id: pid, name: title, session_status: "working", repos, repo: repos[0]?.repo ?? null, created_at: now(), updated_at: now() };
+    state.projects.unshift(p);
+    const base = state.sessionThreads.find((x) => x.session?.runtime === runtime) ?? state.sessionThreads[0];
+    const t = { ...structuredClone(base), id: `t${pid}`, project_id: pid, title, status: "running", branch: b.branch || `session/${pid}`, created_at: now(), updated_at: now() };
+    t.session = { ...t.session, runtime, state: "active", context_used: null, context_max: null };
+    t.members = t.members.map((m) => (m.tier === "lead" ? { ...m, runtime, title: r.title, role: r.role } : m));
+    state.sessionThreads.push(t);
+    const m = rt.models.find((x) => x.id === model);
+    const mode = b.permission_mode || (runtime === "claude" ? (m && !m.supports_auto ? "default" : "auto") : r.permission_mode === "ask" ? "default" : "bypassPermissions");
+    state.sessionPicks[t.id] = { permission_mode: mode, model, effort: b.effort ?? "" };
+    state.messages[t.id] = [{ id: String(Date.now()), role: "user", author: "liu", kind: "chat", content: b.message ?? "", meta: {}, created_at: now() }];
+    json(res, 201, { project: p, thread_id: t.id, thread_no: 1 });
+  }],
+  ["GET", /^\/api\/conversations\/([^/]+)\/context\/detail$/, (req, res, [cid]) => {
+    const t = state.sessionThreads.find((x) => x.id === cid);
+    if (!t) return fail(res, 404, "只有会话有上下文细分", "not_found");
+    const runtime = t.session?.runtime ?? "claude";
+    if (runtime !== "claude") return json(res, 200, { ...state.contextDetail, supported: false, runtime, detail: "", updated_at: null, total_tokens: 0, max_tokens: 0, raw_max_tokens: 0, categories: [], mcp_tools: [], mcp_servers: [], memory_files: [], skills: [] });
+    const fresh = state.contextFor?.[cid];
+    const base = cid === "ts1" ? state.contextDetail : { ...state.contextDetail, detail: "", updated_at: null, categories: [], mcp_tools: [], mcp_servers: [], memory_files: [], skills: [] };
+    json(res, 200, { ...base, ...fresh, session_id: `as_${t.project_id}`, state: t.session.state, can_refresh: t.session.state === "active" });
+  }],
+  ["POST", /^\/api\/conversations\/([^/]+)\/context\/refresh$/, (req, res, [cid]) => {
+    const t = state.sessionThreads.find((x) => x.id === cid);
+    if (!t) return fail(res, 404, "只有会话有上下文细分", "not_found");
+    if ((t.session?.runtime ?? "claude") !== "claude") return fail(res, 409, "只有 Claude 会话能刷新上下文", "unsupported");
+    if (t.session.state !== "active") return fail(res, 409, "会话没有在运行", "session_not_running");
+    const refreshId = `rf_${Date.now()}`;
+    const sessionId = `as_${t.project_id}`;
+    setTimeout(() => {
+      const updated = now();
+      // The precise count comes out a little higher (the last turn's messages): total, rows and the session's bar follow.
+      const prev = { ...state.contextDetail, ...state.contextFor?.[cid] };
+      const grow = 5200;
+      const categories = prev.categories.map((c) => (c.id === "messages" ? { ...c, tokens: c.tokens + grow } : c.id === "free_space" ? { ...c, tokens: c.tokens - grow } : c));
+      (state.contextFor ??= {})[cid] = { detail: "full", updated_at: updated, total_tokens: prev.total_tokens + grow, categories };
+      t.session = { ...t.session, context_used: prev.total_tokens + grow, context_max: prev.max_tokens };
+      emit("context", { thread_no: 1, conversation_id: cid, session_id: sessionId, reason: "refresh", refresh_id: refreshId, updated_at: updated }, t.project_id);
+    }, Number(process.env.MOCK_REFRESH_MS ?? 1200));
+    json(res, 202, { refresh_id: refreshId, session_id: sessionId });
+  }],
+);
 
 function waiting() {
   return { questions: [...state.questions.t12, ...state.questions.t13].filter((q) => q.status === "open"), reviews: state.threads.filter((t) => t.status === "review") };

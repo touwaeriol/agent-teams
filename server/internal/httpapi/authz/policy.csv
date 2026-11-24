@@ -52,6 +52,8 @@ p, node-token, /nodes/ssh, GET
 p, user, /api/attachments/:id, GET
 p, user, /api/conversations/:cid/commands, GET
 p, user, /api/conversations/:cid/context, GET
+p, user, /api/conversations/:cid/context/detail, GET
+p, user, /api/conversations/:cid/context/refresh, POST
 p, user, /api/conversations/:cid/forward, POST
 p, user, /api/conversations/:cid/interrupt, POST
 p, user, /api/conversations/:cid/model, GET
@@ -89,6 +91,8 @@ p, user, /api/git/repos/:id/test, POST
 p, user, /api/git/repos/test, POST
 p, user, /api/me, GET
 p, user, /api/me/password, POST
+p, user, /api/me/scheduling, GET
+p, user, /api/me/scheduling, PUT
 p, user, /api/me/sessions, GET
 p, user, /api/me/sessions/:id, DELETE
 p, user, /api/nodes, GET
@@ -169,6 +173,9 @@ p, user, /api/skills, POST
 p, user, /api/skills/:id, DELETE
 p, user, /api/sessions, POST
 p, user, /api/sessions/:pid/repos, PUT
+p, user, /api/projects/:pid/session-controls, GET
+p, user, /api/projects/:pid/session-controls, PUT
+p, user, /api/session-options, GET
 p, user, /api/threads/:tid, DELETE
 p, user, /api/threads/:tid, GET
 p, user, /api/threads/:tid, PATCH

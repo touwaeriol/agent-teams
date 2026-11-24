@@ -37,7 +37,9 @@
 | `memory` | `{op: "write"|"delete", name}` | 记忆文件变了（网页重新拉列表和打开的文件） |
 | `server` | `{server, server_id, employee, session_id, conn_id, duration_ms, commands, bytes_in, bytes_out, reason, last_command?, exit_code?, summary}` | 员工一条到远程服务器的 SSH 连接结束（architecture.md §10.6）；`last_command` 已脱敏、最多 200 字；`summary` 是给讨论串动态的一句话 |
 | `shared_file` | `{op: "write"|"delete", path, by}` | 共享文件写入（新建或覆盖）/ 删除；`by` 是 `user` 或 `dev-1 #31` 这样的员工名加讨论串号（网页重新拉共享文件列表） |
+| `session_controls` | `{thread_id, applied, error?}` | 会话（多仓库会话）的权限模式、模型或思考强度变了：`applied: false` 是切换已发出、等节点回音，`true` 是节点回了（`error` 为失败原因，这次切换一项都没生效）；网页重新拉 `GET /api/projects/{pid}/session-controls`（sessions.md） |
 | `node` | `{node: NodeBrief}` | 该项目用到的节点上下线、槽位变化 |
+| `context` | `{thread_no, conversation_id, session_id, reason: "turn"\|"refresh", refresh_id?, error?, updated_at?}` | 会话（多仓库会话）的上下文细分存好了（每轮结束或刷新），或刷新失败（`error`）；网页重新拉 `GET /api/conversations/{cid}/context/detail` |
 | `layout` | `{layout_id, version}` | 办公室布局更新（前端重新拉布局并重画） |
 | `reset` | `{}` | 补发窗口不够，前端需整体重新拉取 |
 
@@ -62,6 +64,13 @@ RepoRef         = {repo: "owner/name", git_connection_id: string|null}
                    icon: string,            // '' = 名字首字母配稳定底色；一个表情；或 "color:#RRGGBB" = 首字母配该颜色
                    coordinator_model: string, thread_model: string, thread_codex_model: string, thread_effort: string,  // 项目指定模型：coordinator_model 给统筹，thread_model / thread_codex_model 按类型给 Claude / Codex 的组长和成员；'' = 跟随岗位（下次开会话生效）
                    auto_resume: boolean,    // 使用限额重置后自动继续讨论串（data-model.md §2.10）
+                   kind: "project"|"session",  // session = 会话（多仓库会话，一个员工，第 1 号讨论串）
+                   session_status: string,  // 只对会话：侧栏状态，规则和会话页（web phase.ts、core.PhaseOf）相同；项目为 ''。
+                                            //   working = 员工在回合中 / 正被消息唤醒 / 在用工具或在等别人（进行中）；
+                                            //   finished = 员工不在回合中、没有要用户回答的（已完成：回复后、用户停止后、本轮没回复都算）；
+                                            //   resolved = 讨论串 done，用户点了“已解决”（已解决）；
+                                            //   attention = 员工的节点离线、会话出错或没有节点能跑它（等你处理）；queued = 等节点空位；
+                                            //   其余是讨论串状态（queued/waiting/review/paused/failed）。待处理卡片算在 waiting 数字里
                    created_at, updated_at}
 DeliverySettings = {gates: {review, decision, merge_queue}, ci: {mode, required, appear_timeout_s, timeout_s, on_missing},
                    merge_method: "squash"|"merge"|"rebase", approval_timeout_s: number|null,
@@ -81,7 +90,12 @@ ThreadView      = {id, project_id, no, title, brief, status, queue_position: num
                    dispatch: {opened_by, at /*讨论串创建时间*/,  // 派发给组长的交接信息（brief 本身看 thread.brief）；brief 为空或是转发的原话（副本已在对话里）时整个为 null
                               source: {message_id: number, content, attachments: AttachmentRef[] /*同 meta.attachments*/, created_at} | null} | null,
                               // source = 触发 open_thread 的用户原话（见 data-model source_message_id），没有关联或已删除时为 null
-                   latest_deliverable: DeliverableView | null} // 讨论串发布的最新一个交付物
+                   latest_deliverable: DeliverableView | null, // 讨论串发布的最新一个交付物
+                   solo: boolean,             // 会话（多仓库会话）的讨论串：组长就是用户直接对话的那一个员工
+                   session: {node_id: string|null, runtime, state, cwd, context_used: number|null, context_max: number|null} | null}
+                   // session 只对会话：员工最近一个 agent 会话。cwd = 节点上的工作目录（节点上报了 root 时为绝对路径，否则相对守护进程根目录）；
+                   // context_used / context_max = 最近一轮结束时的上下文用量和窗口（token，运行时报的分母，不写死）；不提供用量的运行时（Antigravity）或还没结束过一轮时为 null。
+                   // 员工每轮上报上下文时推一次 thread 事件。别的讨论串、员工还没开过会话时为 null
 MainTaskView    = {id, pos, title, status: "todo"|"doing"|"done", auto_done, tasks_total, tasks_done}
 TaskView        = {id, thread_no, main_task_id, assignee, role, claimed_by, kind, instruction, status, depends_on: string[],
                    parent, priority, attempt, summary, branch, head_sha, created_at, claimed_at, finished_at}
@@ -156,6 +170,8 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | GET | `/api/me` | → `UserView` |
 | POST | `/api/me/password` | `{current, new}` → 204（新：v1 没有改密码），同时注销其他会话 |
 | GET | `/api/me/sessions` / DELETE `/api/me/sessions/{id}` | 查看 / 注销自己的登录会话（新） |
+| GET | `/api/me/scheduling` | → `{five_hour_pct, weekly_pct, defaults: {five_hour_pct, weekly_pct}}`：自己的调度阈值（没设过 = 默认 85 / 95），shared-members.md §4.3 |
+| PUT | `/api/me/scheduling` | `{five_hour_pct, weekly_pct}`（整数 1～100，两项都要）→ 同 GET；越界或缺项 422。存 `at_users.quota_five_hour_pct` / `quota_weekly_pct`（00430），下一次选节点就生效 |
 
 `/auth/*` 路径与 v1 相同（v1 网页兼容）。
 
@@ -175,6 +191,12 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 | GET | `/api/conversations/{cid}/model` | → `{scope: coordinator\|thread, employee, runtime, model, override, inherited, session, live, members: [{name, tier, runtime, model, override}]}`：/model 面板。`model` 是员工现在用（或下次打开会话用）的模型，按 `orchestrator.Model` 的优先级算。统筹：项目 `coordinator_model` → 岗位模型 → 内置兜底；组长：项目指定（`thread_model`，Codex 组长用 `thread_codex_model`）→ 岗位模型 → 内置兜底；两者没有 /model，`override` 恒为 `''`、`inherited` 等于 `model`（前端据此只读显示）。成员（`members` 里 `tier = member` 的）：员工自己的（/model 设的，即 `override`）→ 项目指定（按类型：`thread_model` / `thread_codex_model`）→ 岗位模型 → 内置兜底。内置兜底：Claude 为 `claude-opus-5-5`（Opus 5.5），Codex 为空（交给 Codex CLI 自己的默认）；`session` 是会话上一轮实际用的模型（`at_usage.model`） |
 | PUT | `/api/conversations/{cid}/model` | `{model, scope?: lead\|thread}` → `{applied: [{employee, model, live}], skipped: [名字]}`。统筹和组长不能换模型：统筹对话、讨论串对话的 `scope: lead`（默认值）都回 409 `model_fixed`（“统筹和组长不能用 /model 切换模型，请在岗位配置或项目设置里改”）。讨论串对话 `scope: thread` 写讨论串里和组长同类型的全部成员（`tier = member`）的 `at_employees.model`；组长和其他类型的成员列在 `skipped`。`model` 为空 = 回到设置；只校验模型 ID 格式（`^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,99}$`）。在节点上有会话的员工马上收到 `session.set_mode {model}`（Claude `Query.setModel`，Codex 下一轮 `turn/start` 带 `model`），从下一轮起生效（`live: true`）；否则下次打开会话时生效。审计 `model_change` |
 | GET | `/api/conversations/{cid}/context` | → `{employee, runtime, instructions_chars, memory_index_chars, memory_files, messages, message_chars, session: {state, model, turns, total, last_turn, cost_usd} \| null}`：/context 面板。token 数来自 `at_usage`（每个回合的 SDK result usage），只算最近一个会话 |
+| POST | `/api/sessions` | 会话（多仓库会话，sessions.md）：`{message, title?, repos: [{repo, git_connection_id \| git_repo_id, branch?}], role?, runtime?, model?, node_id?, branch?, permission_mode?, effort?}` → 201 `{project, thread_id, thread_no}`。`repos` 可以为空：员工在节点上的本地文件夹里干，会话钉在开始时的节点上（t48）。`node_id` 指定的节点跑不了所选 agent（要隔离但节点没有、CLI 没装或没登录）时 422（`field: "node_id"`）。`runtime` 是选的 agent，必须是岗位配置的 runtimes 之一（否则 422，`field: "runtime"`），不带 = 岗位的；会话开始后节点、岗位、agent 不能再改。`permission_mode`（`auto`/`default`/`acceptEdits`/`plan`/`bypassPermissions`）和 `effort` 是新会话页选的值，不带 = 会话默认（Claude 自动，模型不支持时手动；Codex、Antigravity 沿用岗位）；按岗位的运行时和模型校验，不合法 422（带 `field`），存进员工的 `session_mode` / `session_effort` |
+| GET | `/api/session-options?role=&runtime=&model=` | → `SessionOptions {runtime, default_mode, model, modes, models, efforts}`：新会话页的强度和模式菜单（字段同 `SessionControls`）。`runtime` 为空 = 岗位的第一个，不在岗位里 422；`model` 为空 = 岗位给这个 runtime 配的模型；`models` 取这个用户最近一次同运行时、报过模型列表的会话 |
+| GET | `/api/projects/{pid}/session-controls` | → `SessionControls {thread_id, runtime, live, permission_mode, model, effort, pending: {permission_mode?, model?, effort?, since} \| null, error?, modes: [{id, label, hint, applies: now\|next_turn}], models: [{id, name?, description?, efforts, default_effort?, supports_auto, default?}], efforts, node_outdated}`：会话页输入框底部的模型·强度和权限模式菜单。`modes` 已按运行时、模型、岗位、节点过滤好，按顺序编号 1..n；`node_outdated` = 节点守护进程较旧，菜单受限。普通项目 409 `not_session` |
+| PUT | `/api/projects/{pid}/session-controls` | `{permission_mode?, model?, effort?}`（只带要改的）→ 同上视图，`pending` 非空 = 切换中，等节点回音（项目事件 `session_controls`）。不合法 422，上一次还没回音 409 `switch_pending`（最多 2 分钟后自动解除，值回到原来的）。只改这个会话，不改岗位 |
+| GET | `/api/conversations/{cid}/context/detail` | → `ContextDetailView {supported, runtime, session_id, state, can_refresh, detail, updated_at, model, total_tokens, max_tokens, raw_max_tokens, auto_compact, auto_compact_threshold, categories: [{id, name, tokens, kind}], mcp_tools: [{name, server, tokens, loaded}], mcp_servers: [{server, tokens}], memory_files: [{path, type, tokens}], skills: [{name, source, tokens}]}`：只对会话（多仓库会话）开放，别的对话 404。最近一个会话的上下文细分（protocol.md §4.10 上下文细分，节点每轮结束上报 summary，刷新时 full），存在 `at_agent_sessions.context_detail`。`supported=false`（Codex / Antigravity）时网页整块隐藏；`detail=''`、`updated_at=null` 表示还没上报过；进度条 = `total_tokens / max_tokens`（自动压缩窗口）；`categories` 按 `id`/`kind` 分类（`kind`：used/free/buffer/deferred，deferred 不占窗口） |
+| POST | `/api/conversations/{cid}/context/refresh` | → 202 `{refresh_id, session_id}`：向节点发 `session.context_refresh` 取精确值（full），结果到达后发项目事件 `context`（带同一个 `refresh_id`；失败时带 `error`，原细分不变；结果的 `sampled_at` 比已存的细分旧时——比如刷新期间又跑完一轮——也不覆盖，事件不带 `updated_at`），网页再 GET 一次 detail。409：`unsupported`（不是 Claude 会话）、`session_not_running`（会话已停放/关闭，不为刷新拉起进程）、`node_offline`、`node_unsupported`（守护进程太旧） |
 | GET | `/api/projects/{pid}/references?q=&kind=` | → `{items: [{kind, label, detail, repo?, path?, no?, id?, name?}], files_note}`：输入框 “@” 弹出列表。文件来自各仓库默认分支的 git trees API（每仓库缓存 5 分钟，最多 20000 个路径），模糊匹配取前 30 个；讨论串、交付物、记忆文件各取前 8 个。读不到仓库时 `files_note` 说明原因，其余照常返回 |
 | GET | `/api/voice/config` | 任何登录用户 → `{enabled, provider?, transport?: "relay" \| "webrtc", languages: [{code, name, zh}]}`。管理员没开语音输入、没存 Key 或控制台解不开 Key 时 `enabled: false`，输入框不显示麦克风。不含 Key 和接口地址 |
 | GET | `/api/voice/stream` | WebSocket（默认的"经服务器中转"）。子协议 `["agent-teams-voice", "csrf.<agent_teams_csrf cookie>"]`（浏览器不能给 WebSocket 加请求头，CSRF 令牌放在子协议里；Origin 必须与 Host 一致），`?language=auto\|<code>`。没登录 401、CSRF 不对或跨站 403、语言不在列表 422（都在升级前）。连上后服务器用密封的 Key 连 `wss://<base>/realtime?intent=transcription` 并发 `session.update`，OpenAI 接受后发 `{"type":"ready","model","client_commits","max_seconds"}`。浏览器发二进制帧（24 kHz 单声道 PCM16 小端，约 100 ms 一帧，单条 ≤ 64 KiB）和 `{"type":"commit"}` / `{"type":"stop"}`；服务器只回 `input_audio_buffer.committed`、`conversation.item.input_audio_transcription.delta/completed/failed`、`error`（只留 `type/item_id/delta/transcript/error{code,message}`，Key 被替换成 `***`）。结束前发 `{"type":"error","fatal":true,"error":{code,message}}`：`voice_disabled`、`rate_limited`（每人每分钟 20 路）、`voice_too_many`（每人同时 2 路，Valkey 计数，跨副本）、`voice_unreachable` / `voice_key_rejected` / `voice_busy` / `voice_upstream` / `voice_timeout`（10 秒内连不上 OpenAI 或会话没被接受）、`voice_idle`（30 秒没收到消息）、`voice_max_duration`（5 分钟）、`voice_too_fast`、`voice_bad_frame`、`voice_upstream_closed`、`voice_protocol`。审计 `voice_stream_start` / `voice_stream_stop`（模型、语言、时长、音频秒数、commit 次数、结束原因；没有声音和文字）。详见 `voice.md` |
@@ -294,7 +316,7 @@ PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平�
 | GET | `/api/roles` | → `{roles: RoleView[], warnings: [{role, message}]}`（例如“候选节点已删除”“Codex 岗位没有 agent_user 或 isolated 节点”） |
 | PUT | `/api/roles` | `{roles: RoleView[]}` 整体保存（按 `id` 匹配，缺失的删除）→ 同 GET。校验：恰好一个 coordinator 和一个 lead（两者都只能是 Claude）；`model` 对所有岗位（含 coordinator 和 lead）都是手填的模型 ID（去掉首尾空格后保存），空 = 跟随项目指定再落到内置默认，非空只校验格式（`^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,99}$`，没有模型列表）；保存后，统筹和组长模板的 `model` 会同步到已有的统筹和未结束讨论串的组长，有活会话的从下一轮起生效；`role` 键唯一且符合 `^[a-z][a-z0-9-]{0,23}$`；`count` 1–8；节点属于本人；`look.outfit`/`look.accessory` 是当前全局布局里存在的键；`permission_mode` 是 `bypass`/`ask`（`auto` 和空值按 `bypass` 保存），任何节点都生效，只读岗位的模式不生效；Codex 岗位的候选节点不能是 `sandbox`/`none` 级别（`architecture.md` §10.3）；`read_only` 省略时按 `gate` 取默认值；`skills` 每项须是内置或自己上传的技能，最多 16 个，统筹不能有技能；`plugins` 每项是 `name` 或 `name@N`，须是自己的或内置的插件（钉住的版本须存在），最多 8 个、不重复，统筹不能有插件；`hidden_commands` 每项须是平台命令名；`context_limit` ≥ 100000，`compact_between_pct` / `compact_in_task_pct` 1–100，`clear_after_tasks` ≥ 0，`compact_focus` 最多 2000 字（YAML 视图里是岗位的 `context: {limit, compact_between_pct, compact_in_task_pct, clear_after_tasks, focus}`，没有这一段按岗位类型取默认值；导出时没有设置的岗位写 `context: {}`，导回去仍然没有设置）；`commands` 最多 30 个，名字 `^[a-z][a-z0-9_-]{0,31}(:[a-z0-9][a-z0-9_-]{0,31})?$`、岗位内不重复、不能是平台命令名，`mode` 是 `prompt`（`prompt` 必填，最多 8000 字，不能以 `/` 开头；`{{args}}` 换成命令后面的文字，原样一次替换，没有 `{{args}}` 时附在后面）或 `passthrough`（原样发给 Claude Code；Codex 岗位和成员不能用）。命令按员工的岗位模板现值生效（改了不用重开讨论串）；成员的命令在组长 `send_message` 和用户直接发给成员的消息以 `/名字` 开头时展开 |
 | GET | `/api/commands` | → `{commands: CustomCommand[], platform: [平台命令名]}`：平台内置的自定义命令 |
-| GET | `/api/roles/presets` | → `{roles: RoleView[]}`：Team 页“从预设添加”的现成岗位（“设计师” = `design` + `docs` 技能） |
+| GET | `/api/roles/presets` | → `{roles: RoleView[]}`：Team 页“从预设添加”的现成岗位（“设计师” = `design` + `docs` 技能；“审查员” = review 门禁、只读、编制 3；“助手” = 编制 3） |
 | GET | `/api/skills` | → `{skills: [{id, name, description, builtin, size}]}`：随平台发布的技能（`id` 为空）+ 管理员发布的内置技能（`builtin`，有 `id`；自己有同名技能时不列出）+ 自己上传的 |
 | POST | `/api/skills` | `{zip?: base64, files?: [{path, content}]}` → 201 `Skill`（`SKILL.md` front matter 给出 name/description；只收文本，≤ 64 个文件、≤ 512 KB） |
 | DELETE | `/api/skills/{id}` | 删除自己上传的技能，并从岗位的 `skills` 里去掉 |

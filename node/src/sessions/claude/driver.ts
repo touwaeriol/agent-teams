@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { query as sdkQuery, type HookCallbackMatcher, type HookEvent, type HookInput, type HookJSONOutput, type Options, type PermissionUpdate, type Query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { ClaudeSessionOptions, ContextUsage } from "../../protocol.js";
+import { query as sdkQuery, type HookCallbackMatcher, type HookEvent, type HookInput, type HookJSONOutput, type ModelInfo, type Options, type PermissionUpdate, type Query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { ClaudeSessionOptions, ContextDetail, ContextUsage } from "../../protocol.js";
 import { AsyncQueue, deferred, withTimeout, type Deferred } from "../../util/async.js";
 import { approvalId, msgUuid } from "../../util/ids.js";
 import { newId } from "../../util/ids.js";
 import { platformSdkServer, PLATFORM_PREFIX } from "../../toolhost/sdk-server.js";
 import { decideTool } from "../policy.js";
-import { ResumeFailed, type CompactResult, type Driver, type DriverContext, type EventFields, type OutgoingMessage, type StartResult } from "../types.js";
+import { ResumeFailed, type CompactResult, type Driver, type DriverContext, type EventFields, type ModeApplied, type ModeChange, type ModelOption, type OutgoingMessage, type StartResult } from "../types.js";
 import { buildClaudeOptions } from "./options.js";
 import type { MaterializedPlugin } from "../plugins.js";
 import { describeTool, mapClaudeMessage } from "./mapper.js";
@@ -16,12 +16,15 @@ import { claudeContent } from "../images.js";
 import { findTranscript, transcriptUserUuids } from "./transcript.js";
 import { ASK_TOOL, askHookOutput, askUserArgs, planEvent, todosEvent } from "./special.js";
 import { qualifySlash, sessionCommands } from "./commands.js";
+import { contextDetailOf, contextUsageOf, type ContextReply } from "./context.js";
 
 /** How long an AskUserQuestion may wait for the user (seconds; the hook's timeout). */
 const ASK_TIMEOUT_S = 7 * 24 * 3600;
 
 /** How long turn_ended waits for getContextUsage before it goes out without context. */
 const USAGE_TIMEOUT_MS = 5000;
+/** How long session.context_refresh waits for getContextUsage({detail:"full"}) (token-count calls). */
+const FULL_USAGE_TIMEOUT_MS = 30_000;
 
 export type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => Query;
 
@@ -105,9 +108,14 @@ export class ClaudeDriver implements Driver {
       this.lastTools ??= tools;
       const commands = sessionCommands(init.commands);
       this.commandNames = commands.map((c) => c.name);
+      const models = claudeModels(init.models ?? []);
+      await this.preferAuto(q);
       return {
         sdk_session_id: this.sdkSessionId,
-        init: { model: this.claude.model, tools, permission_mode: this.claude.permission_mode, ...(init.claude_code_version ? { claude_code_version: init.claude_code_version } : {}), mcp_servers: mcp.map((s) => ({ name: s.name, status: s.status })), commands },
+        init: {
+          model: this.claude.model, tools, permission_mode: this.claude.permission_mode, ...(init.claude_code_version ? { claude_code_version: init.claude_code_version } : {}), mcp_servers: mcp.map((s) => ({ name: s.name, status: s.status })), commands,
+          ...(this.claude.effort ? { effort: this.claude.effort } : {}), ...(models.length ? { models } : {}),
+        },
       };
     } catch (err) {
       await this.close();
@@ -144,13 +152,43 @@ export class ClaudeDriver implements Driver {
     return (receipt?.still_queued ?? []).map((u) => this.uuidToMsg.get(u)).filter((x): x is string => Boolean(x));
   }
 
-  async setMode(mode?: string, model?: string | null): Promise<void> {
+  /**
+   * A session opened for auto (prefer_auto, or auto kept from an earlier set_mode) runs in default
+   * until here: the SDK refuses auto for a model without supportsAutoMode ("auto mode unavailable
+   * for this model", SDK 0.3.325), and then the session stays in default.
+   */
+  private async preferAuto(q: Query): Promise<void> {
+    const want = this.claude.permission_mode === "auto" || (this.claude.prefer_auto === true && this.claude.permission_mode === "default");
+    if (!want) return;
+    try {
+      await q.setPermissionMode("auto");
+      this.claude.permission_mode = "auto";
+    } catch (err) {
+      this.claude.permission_mode = "default";
+      this.ctx.log.info({ err: (err as Error).message, model: this.claude.model }, "auto mode unavailable: the session runs in default");
+    }
+  }
+
+  /** set_mode, in force at once: setPermissionMode, setModel, applyFlagSettings({effortLevel}). */
+  async setMode(change: ModeChange): Promise<ModeApplied> {
     if (!this.q) throw new Error("session is not running");
+    const { mode, model, effort } = change;
     if (mode === "bypassPermissions" && !this.claude.allow_dangerously_skip_permissions) throw new Error("bypassPermissions requires a session opened with allow_dangerously_skip_permissions");
-    if (mode) await this.q.setPermissionMode(mode as Parameters<Query["setPermissionMode"]>[0]);
-    if (model) await this.q.setModel(model);
-    if (mode) this.claude.permission_mode = mode as ClaudeSessionOptions["permission_mode"];
-    if (model) this.claude.model = model;
+    if (mode) {
+      await this.q.setPermissionMode(mode as Parameters<Query["setPermissionMode"]>[0]);
+      this.claude.permission_mode = mode as ClaudeSessionOptions["permission_mode"];
+      this.claude.prefer_auto = false;
+    }
+    if (model) {
+      await this.q.setModel(model);
+      this.claude.model = model;
+      if (change.dropEffort) delete this.claude.effort; // the new model has no such level: its default
+    }
+    if (effort) {
+      await this.q.applyFlagSettings({ effortLevel: effort as "low" });
+      this.claude.effort = effort;
+    }
+    return { permission_mode: this.claude.permission_mode, model: this.claude.model, ...(this.claude.effort ? { effort: this.claude.effort } : {}), applies: "now" };
   }
 
   async close(): Promise<void> {
@@ -186,8 +224,10 @@ export class ClaudeDriver implements Driver {
     if (msg.type === "system" && msg.subtype === "compact_boundary" && msg.compact_metadata.trigger === "manual" && this.compacting) this.compacting.boundary = true;
     if (msg.type === "assistant") this.onAssistant(msg.user_message_uuids, msg.message.content);
     if (msg.type === "assistant" && msg.parent_tool_use_id === null && msg.message.model) this.turnModel = msg.message.model;
-    const context = msg.type === "result" ? await this.contextUsage() : undefined;
+    const reply = msg.type === "result" ? await this.readContext("summary") : undefined;
+    const context = reply ? contextUsageOf(reply) : undefined;
     for (const ev of mapClaudeMessage(msg)) this.emit(this.turnEnded(ev, context));
+    if (reply) this.ctx.sink.context?.(contextDetailOf(reply, "summary", reply.sampledAt));
     if (msg.type === "result") this.onResult(context);
   }
 
@@ -197,17 +237,27 @@ export class ClaudeDriver implements Driver {
     return { ...ev, ...(this.turnModel ? { model: this.turnModel } : {}), ...(context ? { context } : {}) };
   }
 
-  /** Context use now (getContextUsage summary: no token-count calls); undefined when it cannot tell. */
-  private async contextUsage(): Promise<ContextUsage | undefined> {
+  /**
+   * getContextUsage now; undefined when it cannot tell (no live query, error, timeout). summary
+   * estimates from the last turn's usage (no API call); full counts every category with
+   * token-count calls (session.context_refresh).
+   */
+  private async readContext(detail: ContextDetail["detail"]): Promise<(ContextReply & { sampledAt: Date }) | undefined> {
     const q = this.q;
     if (!q) return undefined;
     try {
-      const u = await withTimeout(q.getContextUsage({ detail: "summary" }), USAGE_TIMEOUT_MS, () => new Error("getContextUsage timed out"));
-      return { used_tokens: Math.max(0, Math.round(u.totalTokens)), max_tokens: Math.max(0, Math.round(u.maxTokens)) };
+      const ms = detail === "full" ? FULL_USAGE_TIMEOUT_MS : USAGE_TIMEOUT_MS;
+      const sampledAt = new Date();
+      return { ...(await withTimeout(q.getContextUsage({ detail }), ms, () => new Error("getContextUsage timed out"))), sampledAt };
     } catch (err) {
-      this.ctx.log.debug({ err: (err as Error).message }, "context usage unavailable");
+      this.ctx.log.debug({ err: (err as Error).message, detail }, "context usage unavailable");
       return undefined;
     }
+  }
+
+  async contextDetail(detail: ContextDetail["detail"]): Promise<ContextDetail | undefined> {
+    const reply = await this.readContext(detail);
+    return reply ? contextDetailOf(reply, detail, reply.sampledAt) : undefined;
   }
 
   private onInit(tools: string[]): void {
@@ -363,4 +413,31 @@ export class ClaudeDriver implements Driver {
     if (i.hook_event_name !== "SubagentStart" && i.hook_event_name !== "SubagentStop") return;
     this.emit({ kind: "subagent", on, agent_type: i.agent_type });
   }
+}
+
+/**
+ * initialize's models as session.opened options: aliases (opus, sonnet…) under the wire id they
+ * resolve to, each id once; the "default" row only marks its model as the default.
+ */
+export function claudeModels(list: ModelInfo[]): ModelOption[] {
+  const out: ModelOption[] = [];
+  const byId = new Map<string, ModelOption>();
+  let def: string | undefined;
+  for (const m of list) {
+    const id = (m.resolvedModel || m.value || "").slice(0, 200);
+    if (!id) continue;
+    if (m.value === "default") {
+      def = id;
+      if (byId.has(id) || list.some((x) => x !== m && (x.resolvedModel || x.value) === id)) continue;
+    }
+    if (byId.has(id)) continue;
+    const o: ModelOption = {
+      id, ...(m.displayName && m.value !== "default" ? { name: m.displayName.slice(0, 200) } : {}),
+      ...(m.description ? { description: m.description.slice(0, 1000) } : {}), efforts: [...(m.supportedEffortLevels ?? [])].slice(0, 32), supports_auto: m.supportsAutoMode === true,
+    };
+    byId.set(id, o);
+    out.push(o);
+  }
+  if (def && byId.has(def)) byId.get(def)!.default = true;
+  return out.slice(0, 100);
 }

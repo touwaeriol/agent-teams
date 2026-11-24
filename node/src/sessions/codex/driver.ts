@@ -2,11 +2,12 @@ import type { ApprovalRequest, ApprovalResolve, CodexSessionOptions, ContextUsag
 import type { LoopbackToolHost } from "../../toolhost/http-server.js";
 import { deferred, type Deferred } from "../../util/async.js";
 import { approvalId, newId } from "../../util/ids.js";
-import { ResumeFailed, type CompactResult, type Driver, type DriverContext, type EventFields, type OutgoingMessage, type StartResult } from "../types.js";
+import { ResumeFailed, type CompactResult, type Driver, type DriverContext, type EventFields, type ModeApplied, type ModeChange, type ModelOption, type OutgoingMessage, type StartResult } from "../types.js";
 import type { AppServer } from "./appserver.js";
 import type { CodexHub, ThreadListener } from "./hub.js";
 import { errorNotification, itemCompleted, itemStarted, turnCompleted } from "./mapper.js";
 import { codexFileNote, codexImages } from "../images.js";
+import { askForApproval, codexMode, modeTurnParams } from "./mode.js";
 
 export interface CodexDriverDeps {
   hub: CodexHub;
@@ -35,7 +36,8 @@ export class CodexDriver implements Driver, ThreadListener {
   private readonly itemStarts = new Map<string, number>();
   private readonly diffs = new Map<string, string>();
   private readonly approvalsByRequest = new Map<string, string>();
-  private modeOverride: { approvalPolicy?: string; sandbox?: string; model?: string } = {};
+  /** set_mode changes for the next turn/start (approvalPolicy, sandboxPolicy, approvalsReviewer, model, effort; they stick for later turns). */
+  private turnOverride: Record<string, unknown> = {};
   private closed = false;
   private authReported = false;
   private readonly codex: CodexSessionOptions;
@@ -97,13 +99,15 @@ export class CodexDriver implements Driver, ThreadListener {
     const config = {
       ...(this.codex.config ?? {}),
       ...autoCompactConfig(this.ctx.spec.context),
+      ...(this.codex.effort ? { model_reasoning_effort: this.codex.effort } : {}),
       mcp_servers: { ...(this.deps.pluginServers ?? {}), platform: { url, default_tools_approval_mode: "approve", tool_timeout_sec: 86400 } },
       shell_environment_policy: { inherit: "core", set: this.ctx.env },
     };
     return {
       // An empty model is left out so Codex uses its own default: app-server rejects model "".
       ...(this.codex.model ? { model: this.codex.model } : {}),
-      cwd: this.ctx.absCwd, approvalPolicy: this.codex.approval_policy, sandbox: this.codex.sandbox, config,
+      cwd: this.ctx.absCwd, approvalPolicy: askForApproval(this.codex.approval_policy), sandbox: this.codex.sandbox, config,
+      ...(this.codex.approvals_reviewer ? { approvalsReviewer: this.codex.approvals_reviewer } : {}),
       ...(this.developerInstructions() ? { developerInstructions: this.developerInstructions() } : {}),
     };
   }
@@ -116,7 +120,23 @@ export class CodexDriver implements Driver, ThreadListener {
     const status = await server.request<{ data: Array<{ name: string; tools: Record<string, unknown>; toolsError: string | null }> }>("mcpServerStatus/list", { threadId: this.threadId, serverName: "platform", detail: "toolsAndAuthOnly" }).catch(() => ({ data: [] }));
     const platform = status.data.find((s) => s.name === "platform");
     const tools = Object.keys(platform?.tools ?? {}).map((t) => `mcp__platform__${t}`);
-    return { ...(this.resolvedModel ? { model: this.resolvedModel } : {}), tools, permission_mode: `${this.codex.sandbox}/${this.codex.approval_policy}`, mcp_servers: [{ name: "platform", status: platform && !platform.toolsError ? "connected" : "failed" }] };
+    const models = await this.models(server);
+    return {
+      ...(this.resolvedModel ? { model: this.resolvedModel } : {}), tools, permission_mode: `${this.codex.sandbox}/${this.codex.approval_policy}${this.codex.approvals_reviewer === "auto_review" ? "/auto_review" : ""}`,
+      mcp_servers: [{ name: "platform", status: platform && !platform.toolsError ? "connected" : "failed" }],
+      ...(this.codex.effort ? { effort: this.codex.effort } : {}), ...(models.length ? { models } : {}),
+    };
+  }
+
+  /** The models the session can switch to (model/list, visible ones); [] when app-server does not answer. */
+  private async models(server: AppServer): Promise<ModelOption[]> {
+    try {
+      const r = await server.request<{ data?: CodexModel[] }>("model/list", { includeHidden: false });
+      return (r.data ?? []).filter((m) => !m.hidden).slice(0, 100).map(codexModelOption);
+    } catch (err) {
+      this.ctx.log.debug({ err: (err as Error).message }, "codex model/list failed");
+      return [];
+    }
   }
 
   async push(msg: OutgoingMessage): Promise<{ turn_id?: string }> {
@@ -140,7 +160,7 @@ export class CodexDriver implements Driver, ThreadListener {
 
   private async startTurn(server: AppServer, msg: OutgoingMessage): Promise<{ turn_id?: string }> {
     this.triggers.push(msg.msg_id);
-    const resp = await server.request<{ turn: { id: string } }>("turn/start", { threadId: this.threadId, input: input(msg), clientUserMessageId: msg.msg_id, ...this.modeOverride });
+    const resp = await server.request<{ turn: { id: string } }>("turn/start", { threadId: this.threadId, input: input(msg), clientUserMessageId: msg.msg_id, ...this.turnOverride });
     this.markTurn(resp.turn.id);
     return { turn_id: turnRef(resp.turn.id) };
   }
@@ -162,10 +182,36 @@ export class CodexDriver implements Driver, ThreadListener {
     return this.later.map((m) => m.msg_id);
   }
 
-  async setMode(mode?: string, model?: string | null): Promise<void> {
-    if (mode === "bypassPermissions") this.modeOverride = { ...this.modeOverride, approvalPolicy: "never", sandbox: "danger-full-access" };
-    if (mode === "default" || mode === "acceptEdits") this.modeOverride = { ...(this.modeOverride.model ? { model: this.modeOverride.model } : {}) };
-    if (model) this.modeOverride.model = model;
+  /**
+   * set_mode from the next turn/start: the mode as approvalPolicy + sandboxPolicy + approvalsReviewer
+   * (codexMode; turn/start takes the full sandbox policy, not thread/start's mode name), the model
+   * and the reasoning effort. They stick for later turns of the thread.
+   */
+  async setMode(change: ModeChange): Promise<ModeApplied> {
+    if (change.mode) {
+      const m = codexMode(change.mode, this.codex);
+      Object.assign(this.codex, m);
+      Object.assign(this.turnOverride, modeTurnParams(m, this.codex.config, nodeRoot(this.ctx.absCwd, this.ctx.spec.cwd)));
+    }
+    if (change.model) {
+      this.codex.model = change.model;
+      this.turnOverride.model = change.model;
+      if (change.dropEffort) {
+        // The new model has no such level: back to its default (the override would stick).
+        delete this.codex.effort;
+        if (change.defaultEffort) this.turnOverride.effort = change.defaultEffort;
+        else delete this.turnOverride.effort;
+      }
+    }
+    if (change.effort) {
+      this.codex.effort = change.effort;
+      this.turnOverride.effort = change.effort;
+    }
+    const model = this.codex.model || this.resolvedModel;
+    return {
+      permission_mode: this.codex.sandbox === "danger-full-access" ? "bypassPermissions" : this.codex.approvals_reviewer === "auto_review" ? "auto" : "default",
+      ...(model ? { model } : {}), ...(this.codex.effort ? { effort: this.codex.effort } : {}), applies: "next_turn",
+    };
   }
 
   /** Messages already in the thread history, found by their <!-- m_… --> marker (protocol.md §2.2). */
@@ -244,7 +290,7 @@ export class CodexDriver implements Driver, ThreadListener {
   /** turn_ended carries the model the turn ran with and the latest context use. */
   private turnEnded(ev: EventFields): EventFields {
     if (ev.kind !== "turn_ended") return ev;
-    const model = this.modeOverride.model ?? this.resolvedModel;
+    const model = (this.turnOverride.model as string | undefined) ?? this.resolvedModel;
     return { ...ev, ...(model ? { model } : {}), ...(this.usage ? { context: this.usage } : {}) };
   }
 
@@ -352,6 +398,18 @@ export class CodexDriver implements Driver, ThreadListener {
   }
 }
 
+type CodexModel = { id: string; model?: string; displayName?: string; description?: string; hidden?: boolean; isDefault?: boolean;
+  supportedReasoningEfforts?: Array<{ reasoningEffort: string }>; defaultReasoningEffort?: string };
+
+/** A model/list entry as a session.opened model option. */
+export function codexModelOption(m: CodexModel): ModelOption {
+  const efforts = (m.supportedReasoningEfforts ?? []).map((e) => e.reasoningEffort).filter(Boolean).slice(0, 32);
+  return {
+    id: m.model || m.id, ...(m.displayName ? { name: m.displayName.slice(0, 200) } : {}), ...(m.description ? { description: m.description.slice(0, 1000) } : {}),
+    efforts, ...(m.defaultReasoningEffort ? { default_effort: m.defaultReasoningEffort } : {}), ...(m.isDefault ? { default: true } : {}),
+  };
+}
+
 type Compacting = { done: Deferred<CompactResult>; seen: boolean; turn: string | null };
 type TokenUsage = { last?: { totalTokens: number }; modelContextWindow?: number | null };
 
@@ -366,6 +424,12 @@ export function autoCompactConfig(context: SessionOpen["context"]): Record<strin
 function effectiveLimit(limit?: number, window?: number): number {
   if (limit && window) return Math.min(limit, window);
   return limit ?? window ?? 0;
+}
+
+/** The node root: absCwd is root + the spec's relative cwd. */
+export function nodeRoot(absCwd: string, cwd: string): string {
+  const rel = cwd.replace(/^\.?\/+/, "").replace(/\/+$/, "");
+  return rel && absCwd.endsWith(`/${rel}`) ? absCwd.slice(0, absCwd.length - rel.length - 1) : absCwd;
 }
 
 /** Protocol turn ids start with t_; Codex turn ids are UUIDv7. */

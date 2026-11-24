@@ -1,4 +1,4 @@
-import type { ApprovalCancel, SessionInit, SessionOpen, SessionSend, SessionState } from "../protocol.js";
+import type { ApprovalCancel, ContextDetail, SessionInit, SessionOpen, SessionSend, SessionState } from "../protocol.js";
 import type { ApprovalBroker } from "../approvals.js";
 import type { ToolBroker } from "../toolhost/broker.js";
 import type { ApprovalAsk, Driver, EventFields, SessionSink } from "./types.js";
@@ -27,6 +27,8 @@ export interface SessionHost {
   tools: ToolBroker;
   onTurn(s: Session, running: boolean): void;
   onExit(s: Session, err: Error): void;
+  /** The console takes session.context (welcome.features has context_detail). */
+  contextDetailOn?(): boolean;
 }
 
 /** One logical session: protocol state, event numbering and the SessionSink for its driver. */
@@ -127,5 +129,10 @@ export class Session implements SessionSink {
 
   anchor(): string {
     return this.taskAnchor;
+  }
+
+  context(detail: ContextDetail): void {
+    if (!this.host.contextDetailOn?.()) return;
+    this.host.send("session.context", { session_id: this.id, open_gen: this.gen, reason: "turn", context: detail });
   }
 }

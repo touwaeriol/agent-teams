@@ -3,7 +3,8 @@ import { RouterLink } from "vue-router";
 import type { ProjectView } from "@/api/views";
 import { CodeXml } from "lucide-vue-next";
 import ProjectIcon from "@/components/app/ProjectIcon.vue";
-import { homeOf, isSession } from "@/components/app/session/session";
+import SessionMark from "@/components/app/session/SessionMark.vue";
+import { homeOf, isSession, sessionMark } from "@/components/app/session/session";
 import { cn } from "@/lib/utils";
 import ProjectMenu from "./ProjectMenu.vue";
 
@@ -24,6 +25,7 @@ const emit = defineEmits<{ navigate: [] }>();
       </span>
       <ProjectIcon v-else :project="project" :size="22" />
       <span class="min-w-0 flex-1 truncate">{{ project.name }}</span>
+      <SessionMark v-if="sessionMark(project)" :mark="sessionMark(project)!" class="group-hover:hidden" />
       <span v-if="project.waiting > 0" class="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#C2570C] px-[5px] text-[11px] font-semibold text-white group-hover:hidden">
         {{ project.waiting }}
       </span>

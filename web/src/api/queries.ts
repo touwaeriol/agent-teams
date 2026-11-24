@@ -46,6 +46,7 @@ export const keys = {
   checks: (tid: string) => ["t", tid, "checks"] as const,
   employee: (id: string) => ["employee", id] as const,
   nodes: ["nodes"] as const,
+  scheduling: ["me", "scheduling"] as const,
   nodeSessions: (id: string) => ["nodes", id, "sessions"] as const,
   roles: ["roles"] as const,
   rolesYaml: ["roles", "yaml"] as const,
@@ -53,7 +54,12 @@ export const keys = {
   skills: ["skills"] as const,
   builtinCommands: ["commands", "builtin"] as const,
   conversationModel: (cid: string) => ["c", cid, "model"] as const,
+  sessionControls: (pid: string) => ["p", pid, "session-controls"] as const,
+  sessionOptions: (role: string, runtime: string, model: string) => ["session-options", role, runtime, model] as const,
   conversationCommands: (cid: string) => ["c", cid, "commands"] as const,
+  contextDetail: (cid: string) => ["c", cid, "context-detail"] as const,
+  /** The latest project event context of a conversation (written by events.ts, read by the 刷新 button). */
+  contextEvent: (cid: string) => ["c", cid, "context-event"] as const,
   plugins: ["plugins"] as const,
   adminPlugins: ["admin", "plugins"] as const,
   deliverableFiles: (id: string, version = 0) => ["deliverable", id, "files", version] as const,
@@ -244,6 +250,9 @@ export const useSearch = (pid: Arg, q: Arg) =>
 export const useNodes = (refetchInterval = 15_000) =>
   useQuery({ queryKey: keys.nodes, queryFn: () => list(client.GET("/api/nodes")), refetchInterval });
 
+/** The user's node scheduling thresholds (GET /api/me/scheduling). */
+export const useScheduling = () => useQuery({ queryKey: keys.scheduling, queryFn: () => unwrap(client.GET("/api/me/scheduling")) });
+
 export const useNodeSessions = (id: Arg) =>
   useKeyed(() => keys.nodeSessions(val(id)), () => list(client.GET("/api/nodes/{id}/sessions", path({ id: val(id) }))));
 
@@ -257,6 +266,27 @@ export const useBuiltinCommands = () => useQuery({ queryKey: keys.builtinCommand
 export const conversationModels = { predicate: (q: { queryKey: readonly unknown[] }) => q.queryKey[0] === "c" && q.queryKey[2] === "model" };
 export const useConversationModel = (cid: Arg) =>
   useKeyed(() => keys.conversationModel(val(cid)), () => unwrap(client.GET("/api/conversations/{cid}/model", path({ cid: val(cid) }))), { enabled: has(cid) });
+/** A session's permission mode, model and effort (refetched on session_controls events). */
+export const useSessionControls = (pid: Arg) =>
+  useKeyed(() => keys.sessionControls(val(pid)), () => unwrap(client.GET("/api/projects/{pid}/session-controls", path({ pid: val(pid) }))), { enabled: has(pid) });
+/** What a new session made from a role (and model) can start with. */
+export const useSessionOptions = (role: Arg, runtime: Arg, model: Arg) =>
+  useKeyed(
+    () => keys.sessionOptions(val(role), val(runtime), val(model)),
+    () =>
+      unwrap(
+        client.GET("/api/session-options", {
+          params: { query: { role: val(role), ...(val(runtime) ? { runtime: val(runtime) } : {}), ...(val(model) ? { model: val(model) } : {}) } },
+        }),
+      ),
+    { enabled: has(role), staleTime: 60_000 },
+  );
+/** A session's context breakdown (Claude only; 404 for other conversations, so no retry). */
+export const useContextDetail = (cid: Arg, enabled: () => boolean = () => true) =>
+  useKeyed(() => keys.contextDetail(val(cid)), () => unwrap(client.GET("/api/conversations/{cid}/context/detail", path({ cid: val(cid) }))), {
+    enabled: () => has(cid)() && enabled(),
+    retry: false,
+  });
 export const useRolePresets = () => useQuery({ queryKey: keys.rolePresets, queryFn: () => unwrap(client.GET("/api/roles/presets")), staleTime: 300_000 });
 
 export const useSkills = () => useQuery({ queryKey: keys.skills, queryFn: () => unwrap(client.GET("/api/skills")) });

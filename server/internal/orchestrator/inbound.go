@@ -40,6 +40,9 @@ func (o *Orchestrator) checkOpened(ctx context.Context, tx *core.Tx, e core.Empl
 	if err := core.RecordOpened(ctx, tx, s.ID, m.SDKSessionID, m.CodexThreadID, init); err != nil {
 		return err
 	}
+	if err := recordInitControls(ctx, tx, s, m.Init); err != nil {
+		return err
+	}
 	var tools []string
 	if m.Init != nil {
 		tools = m.Init.Tools

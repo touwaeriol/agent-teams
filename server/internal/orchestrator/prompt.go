@@ -58,7 +58,18 @@ const soloGuide = `你在一个多仓库会话里工作：用户直接和你对�
 - 需要用户决定时用 ask_user（让用户选方案时用 questions，选项带说明和推荐，不阻塞）；用户没点卡片、直接在对话里回答了时，用 close_question(question_id, answer) 关掉那张卡片。事情多时用 TodoWrite 列待办，用户在对话里能看到进度；长任务中途的进展可以用 tell_user(text) 先告诉用户。
 - 文档、设计稿、报告这类交付物用 publish_file 发布（截图和单张图片只作为附件）。
 - 用户可能在会话中途添加或移除仓库，平台会用“（平台）”开头的消息告诉你目录的变化。以“（平台）”开头的消息是平台发的，不是用户说的话，不用回复“收到”。
-- 你每个回合最后写的文字会原样作为一条消息显示给用户：写清做了什么、改了哪些仓库和分支、PR 链接、还需要用户做什么。`
+- 你每个回合最后写的文字会原样作为一条消息显示给用户：写清做了什么、改了哪些仓库和分支、PR 链接、还需要用户做什么。
+- 做完后请用户确认问题是否解决：界面上会在你的回复下面显示“问题解决了吗？[已解决]”，用户点了“已解决”会话才算结束。你不能自己结束会话；用户没确认前继续等用户的消息，不要反复催。`
+
+// soloLocalGuide is the guide of a session's employee with no repository (#53): it works in a
+// folder of its own on one node, kept there (the session never moves to another node).
+const soloLocalGuide = `你在一个会话里工作：用户直接和你对话，把任务交给你完成。没有组长、没有其他成员，也没有任务队列，事情由你自己调研、修改、验证到底。
+- 你在节点上的一个本地文件夹里工作（见“## 工作目录”），没有 git 仓库，文件只在这台机器上。这个会话固定在这台节点上，之后再发消息也还在这个文件夹里接着干；文件夹在会话删除前一直保留。
+- 不需要提交、推送或开 PR；要交给用户的东西写清放在哪个文件里，文档、设计稿、报告这类交付物用 publish_file 发布（截图和单张图片只作为附件）。
+- 需要用户决定时用 ask_user（让用户选方案时用 questions，选项带说明和推荐，不阻塞）；用户没点卡片、直接在对话里回答了时，用 close_question(question_id, answer) 关掉那张卡片。事情多时用 TodoWrite 列待办，用户在对话里能看到进度；长任务中途的进展可以用 tell_user(text) 先告诉用户。
+- 用户可能在会话中途添加仓库，仓库会拉到这个文件夹下的子目录，平台会用“（平台）”开头的消息告诉你。以“（平台）”开头的消息是平台发的，不是用户说的话，不用回复“收到”。
+- 你每个回合最后写的文字会原样作为一条消息显示给用户：写清做了什么、改了或生成了哪些文件、还需要用户做什么。
+- 做完后请用户确认问题是否解决：界面上会在你的回复下面显示“问题解决了吗？[已解决]”，用户点了“已解决”会话才算结束。你不能自己结束会话；用户没确认前继续等用户的消息，不要反复催。`
 
 // memberIntro opens a thread's own (legacy) member's guide; staffIntro a project member's
 // (arguments: thread no, name, role).
@@ -178,6 +189,9 @@ func (c *docsCache) refresh(ctx context.Context, key string, read func(context.C
 // systemAppend builds the prompt appended to the claude_code preset (§6.1).
 func (o *Orchestrator) systemAppend(ctx context.Context, q core.DB, e core.Employee, t *core.Thread, p store.Project) (string, error) {
 	parts := leadingSections(e, t, p.Context)
+	if e.Spec.Solo && t != nil && !p.HasRepos() {
+		parts[0] = soloLocalGuide // a session in a local folder: nothing to push
+	}
 	if doc := o.projectDocs(ctx, q, p); doc != "" {
 		parts = append(parts, "## 仓库 CLAUDE.md（默认分支）\n"+doc)
 	}

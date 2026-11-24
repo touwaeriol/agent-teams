@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 420 {
+	if migrations.Latest() != 450 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -1672,7 +1672,7 @@ INSERT INTO at_schedules (id, project_id, name, cron, message) VALUES ('sc1', 'p
 	if _, err := p.Up(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if v, err := p.GetDBVersion(ctx); err != nil || v != migrations.Latest() || v != 420 {
+	if v, err := p.GetDBVersion(ctx); err != nil || v != migrations.Latest() || v != 450 {
 		t.Fatalf("version %d %v", v, err)
 	}
 	var got string
@@ -1808,5 +1808,43 @@ INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');`
 	}
 	if err := db.QueryRow(`SELECT kind FROM at_projects WHERE id = 'p1'`).Scan(&kind); err == nil {
 		t.Fatal("kind after down")
+	}
+}
+
+// TestUserQuotaLimitsMigration: 00430 adds the per-user scheduling thresholds (NULL = default),
+// accepts 1–100, refuses anything else, and the columns go down again.
+func TestUserQuotaLimitsMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 420); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 430); err != nil {
+		t.Fatal(err)
+	}
+	var five, weekly *int
+	if err := db.QueryRow(`SELECT quota_five_hour_pct, quota_weekly_pct FROM at_users WHERE id = 'u1'`).Scan(&five, &weekly); err != nil || five != nil || weekly != nil {
+		t.Fatalf("defaults %v %v %v", five, weekly, err)
+	}
+	if _, err := db.Exec(`UPDATE at_users SET quota_five_hour_pct = 80, quota_weekly_pct = 100 WHERE id = 'u1'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"quota_five_hour_pct = 0", "quota_weekly_pct = 101"} {
+		if _, err := db.Exec(`UPDATE at_users SET ` + bad + ` WHERE id = 'u1'`); err == nil {
+			t.Fatalf("%s accepted", bad)
+		}
+	}
+	if _, err := p.DownTo(ctx, 420); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT quota_five_hour_pct FROM at_users WHERE id = 'u1'`).Scan(&five); err == nil {
+		t.Fatal("quota_five_hour_pct after down")
 	}
 }

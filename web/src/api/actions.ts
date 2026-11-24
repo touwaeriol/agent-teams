@@ -43,6 +43,8 @@ export const projects = {
 
 export const sessions = {
   create: (body: S["SessionInput"]) => unwrap(client.POST("/api/sessions", { body, ...idem() })),
+  setControls: (pid: string, body: S["SetControlsInputBody"]) =>
+    unwrap(client.PUT("/api/projects/{pid}/session-controls", { params: { path: { pid } }, body })),
   setRepos: (pid: string, repos: S["SessionRepoRef"][]) => unwrap(client.PUT("/api/sessions/{pid}/repos", { params: { path: { pid } }, body: { repos } })),
 };
 
@@ -78,6 +80,8 @@ export const conversations = {
   forward: (cid: string, body: S["ForwardInputBody"]) =>
     unwrap(client.POST("/api/conversations/{cid}/forward", { params: { path: { cid } }, body, ...idem() })),
   interrupt: (cid: string) => unwrap(client.POST("/api/conversations/{cid}/interrupt", { params: { path: { cid } } })),
+  /** 202 {refresh_id}: the result comes as the project event context with the same refresh_id. */
+  refreshContext: (cid: string) => unwrap(client.POST("/api/conversations/{cid}/context/refresh", { params: { path: { cid } } })),
   answer: (cid: string, qid: string, answer: string, reason?: string, answers?: AskChoice[]) =>
     unwrap(client.POST("/api/conversations/{cid}/questions/{qid}/answer", { params: { path: { cid, qid } }, body: { answer, reason, ...(answers ? { answers } : {}) }, ...idem() })),
 };
@@ -120,6 +124,8 @@ export const nodes = {
   /** Asks the node to check its CLIs (and quota) now, up to 15 s; 409 unsupported_daemon / node_offline. */
   recheck: (id: string): Promise<NodeRecheck> => unwrap(client.POST("/api/nodes/{id}/recheck", { params: { path: { id } } })) as Promise<NodeRecheck>,
   refreshUsage: (id: string): Promise<UsageRefresh> => unwrap(client.POST("/api/nodes/{id}/usage/refresh", { params: { path: { id } } })),
+  /** The user's scheduling thresholds (percent, 1–100); 422 out of range. */
+  saveScheduling: (body: S["QuotaLimits"]) => unwrap(client.PUT("/api/me/scheduling", { body })),
 };
 
 /** Remote servers (api.md §3.9.1). A credential is only ever sent, never read back. */

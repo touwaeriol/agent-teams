@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/touwaeriol/agent-teams/server/internal/platform"
+	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -28,11 +31,15 @@ type SessionRepoRef struct {
 type SessionInput struct {
 	Message string           `json:"message" minLength:"1" maxLength:"50000" doc:"The task: the employee's first message"`
 	Title   string           `json:"title,omitempty" maxLength:"200" doc:"'' = the first line of message"`
-	Repos   []SessionRepoRef `json:"repos" maxItems:"20" doc:"Repositories, all checked out side by side in the employee's directory"`
+	Repos   []SessionRepoRef `json:"repos" maxItems:"20" doc:"Repositories, all checked out side by side in the employee's directory; [] = none: the employee works in a local folder on the node it starts on, pinned there"`
 	Role    string           `json:"role,omitempty" maxLength:"64" doc:"Member role template the employee is made from; '' = the first member role"`
-	Model   string           `json:"model,omitempty" maxLength:"100" doc:"'' = the role's model"`
-	NodeID  string           `json:"node_id,omitempty" maxLength:"64" doc:"Run on this node; '' = picked automatically (most quota left)"`
-	Branch  string           `json:"branch,omitempty" maxLength:"60" doc:"Name of the work branch (after session/<id>-); '' = from the title, or the repositories when the title has no Latin letters"`
+	Runtime string           `json:"runtime,omitempty" maxLength:"32" doc:"The agent (CLI) the session runs on: one of the role's runtimes; '' = the role's (several: spread like any employee). Fixed once the session starts"`
+	Model   string           `json:"model,omitempty" maxLength:"100" doc:"'' = the role's model for the runtime"`
+	// Session controls (#53): picked on the new-session page; GET /api/session-options lists them.
+	PermissionMode string `json:"permission_mode,omitempty" enum:"auto,default,acceptEdits,plan,bypassPermissions" doc:"'' = the initial mode (Claude: auto when the model supports it, else default; Codex/Antigravity: the role's)"`
+	Effort         string `json:"effort,omitempty" maxLength:"32" doc:"Thinking effort; '' = project / role setting"`
+	NodeID         string `json:"node_id,omitempty" maxLength:"64" doc:"Run on this node; '' = picked automatically (spread over the nodes by load score; nodes whose quota is tight only when all are)"`
+	Branch         string `json:"branch,omitempty" maxLength:"60" doc:"Name of the work branch (after session/<id>-); '' = from the title, or the repositories when the title has no Latin letters"`
 }
 
 // WorkSessionView is the 多仓库会话 just created (SessionView is the login session).
@@ -49,7 +56,7 @@ type sessionOutput struct{ Body WorkSessionView }
 type sessionReposInput struct {
 	PID  string `path:"pid" maxLength:"64"`
 	Body struct {
-		Repos []SessionRepoRef `json:"repos" maxItems:"20" doc:"The session's repositories after the change (order kept); new ones are checked out, missing ones removed"`
+		Repos []SessionRepoRef `json:"repos" maxItems:"20" doc:"The session's repositories after the change (order kept); new ones are checked out, missing ones removed; [] = none (the session goes on in its local folder, pinned to its node)"`
 	}
 }
 
@@ -71,9 +78,7 @@ func (s *Server) createSession(ctx context.Context, in *createSessionInput) (*se
 	if message == "" {
 		return nil, invalid([]FieldError{{"message", "请写下要做什么"}}, "请写下要做什么")
 	}
-	if len(b.Repos) == 0 {
-		return nil, invalid([]FieldError{{"repos", "至少选一个仓库"}}, "至少选一个仓库")
-	}
+	// No repository: the employee works in a local folder on the node it starts on (#53).
 	start, err := s.sessionStart(ctx, p.User.ID, b)
 	if err != nil {
 		return nil, err
@@ -106,16 +111,86 @@ func (s *Server) sessionStart(ctx context.Context, userID string, b SessionInput
 	if err != nil {
 		return platform.SessionStart{}, err
 	}
+	var node *store.Node
 	if b.NodeID != "" {
-		if _, err := s.store.NodeOf(ctx, userID, b.NodeID); err != nil {
+		n, err := s.store.NodeOf(ctx, userID, b.NodeID)
+		if err != nil {
 			return platform.SessionStart{}, invalid([]FieldError{{"node_id", "没有这个节点"}}, "没有这个节点")
 		}
+		node = &n
 	}
 	title := strings.TrimSpace(b.Title)
 	if title == "" {
 		title = titleOf(b.Message)
 	}
-	return platform.SessionStart{Title: title, Role: role, Model: strings.TrimSpace(b.Model), NodeID: b.NodeID, Branch: strings.TrimSpace(b.Branch)}, nil
+	rt := strings.TrimSpace(b.Runtime)
+	if rt != "" && !slices.Contains(role.RuntimeList(), rt) {
+		msg := "这个岗位没有配置 " + runtimes.Of(rt).Title
+		if runtimes.Of(rt).ID != rt {
+			msg = "没有这个 agent：" + rt
+		}
+		return platform.SessionStart{}, invalid([]FieldError{{"runtime", msg}}, msg)
+	}
+	sessRT := rt
+	if sessRT == "" {
+		sessRT = role.Runtime
+	}
+	if node != nil && (rt != "" || len(role.RuntimeList()) == 1) {
+		if msg, err := s.nodeCannotRun(ctx, *node, sessRT); err != nil || msg != "" {
+			if err != nil {
+				return platform.SessionStart{}, err
+			}
+			return platform.SessionStart{}, invalid([]FieldError{{"node_id", msg}}, msg)
+		}
+	}
+	if err := checkSessionControls(role, sessRT, b.PermissionMode, b.Effort); err != nil {
+		return platform.SessionStart{}, err
+	}
+	return platform.SessionStart{Title: title, Role: role, Runtime: rt, Model: strings.TrimSpace(b.Model), PermissionMode: b.PermissionMode,
+		Effort: strings.TrimSpace(b.Effort), NodeID: b.NodeID, Branch: strings.TrimSpace(b.Branch)}, nil
+}
+
+// nodeCannotRun says why a session of runtime cannot run on the node the user picked ("" when it
+// can): a runtime that needs an isolated node on one that is not, or a daemon that reports its CLIs
+// (at_node_runtimes) without that one installed and logged in. A daemon that never reported is
+// not judged (the session waits for it as before).
+func (s *Server) nodeCannotRun(ctx context.Context, n store.Node, runtime string) (string, error) {
+	rt := runtimes.Of(runtime)
+	if !runtimes.RunsOn(rt.ID, n.Isolated, n.Isolation) {
+		return fmt.Sprintf("节点 %s 没有隔离运行，不能跑 %s", n.Name, rt.Title), nil
+	}
+	rows, err := s.store.NodeRuntimes(ctx, []string{n.ID})
+	if err != nil || len(rows[n.ID]) == 0 {
+		return "", err
+	}
+	for _, r := range rows[n.ID] {
+		if r.Runtime != rt.ID {
+			continue
+		}
+		switch {
+		case !r.Installed:
+			return fmt.Sprintf("节点 %s 上没有安装 %s", n.Name, rt.Title), nil
+		case r.Expired:
+			return fmt.Sprintf("节点 %s 上 %s 的登录已过期", n.Name, rt.Title), nil
+		case !r.Ready(time.Now()):
+			return fmt.Sprintf("节点 %s 上 %s 没有登录", n.Name, rt.Title), nil
+		}
+		return "", nil
+	}
+	return fmt.Sprintf("节点 %s 上没有检测到 %s", n.Name, rt.Title), nil
+}
+
+// checkSessionControls refuses a mode the session's runtime does not have, bypass on an ask role and
+// an effort on a runtime without one (the effort level itself is the model's: the daemon checks).
+func checkSessionControls(role store.Role, runtime, mode, effort string) error {
+	rt := runtimes.Of(runtime)
+	if mode != "" && (!slices.Contains(rt.Modes, mode) || (mode == "bypassPermissions" && role.PermissionMode == store.PermAsk)) {
+		return invalid([]FieldError{{"permission_mode", "这个岗位的会话不能用这个权限模式"}}, "这个岗位的会话不能用这个权限模式")
+	}
+	if strings.TrimSpace(effort) != "" && !rt.Efforts {
+		return invalid([]FieldError{{"effort", "这个运行时的思考强度写在模型里"}}, "这个运行时的思考强度写在模型里")
+	}
+	return nil
 }
 
 // sessionRole is the user's member role template named name (the first member role for ”).
@@ -190,9 +265,7 @@ func (s *Server) setSessionRepos(ctx context.Context, in *sessionReposInput) (*p
 	if err != nil || !cur.Session() {
 		return nil, storeErr(orNotFound(err), "没有这个会话")
 	}
-	if len(in.Body.Repos) == 0 {
-		return nil, invalid([]FieldError{{"repos", "至少留一个仓库"}}, "至少留一个仓库")
-	}
+	// Removing every repository is fine: the session goes on in its local folder.
 	repos, err := s.checkRepos(ctx, p.User.ID, refsOf(in.Body.Repos), cur.Repos)
 	if err != nil {
 		return nil, err

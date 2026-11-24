@@ -27,7 +27,10 @@ const (
 	EvLayout      = "layout"
 	EvSession     = "session"
 	EvSharedFile  = "shared_file"
-	EvServer      = "server" // an SSH connection to a remote server ended (remote-servers.md §9.4)
+	// EvSessionControls: a session's permission mode, model or effort changed or a switch failed (#53).
+	EvSessionControls = "session_controls"
+	EvServer          = "server"  // an SSH connection to a remote server ended (remote-servers.md §9.4)
+	EvContext         = "context" // a session's context breakdown changed or a refresh failed (protocol.md §4.10)
 )
 
 // ProjectChannel is the pub/sub channel of a project's events.

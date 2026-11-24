@@ -181,6 +181,23 @@ func withHair(look store.Look, hair func(i int) *string, i int) store.Look {
 	return look
 }
 
+// SetSpecNodes sets the employee's candidate nodes (spec.node_ids).
+func SetSpecNodes(ctx context.Context, tx *Tx, employeeID string, nodeIDs []string) error {
+	return Changed(tx.Gorm(ctx).Exec(`UPDATE at_employees SET spec = jsonb_set(COALESCE(spec, '{}'::jsonb), '{node_ids}', to_jsonb(?::text[]))
+		WHERE id = ?`, store.TextArray(nodeIDs), employeeID))
+}
+
+// SetLocal marks a session's employee as working in a local folder (spec.local) and pins it to
+// nodeIDs when given.
+func SetLocal(ctx context.Context, tx *Tx, employeeID string, nodeIDs []string) error {
+	set := `jsonb_set(COALESCE(spec, '{}'::jsonb), '{local}', 'true'::jsonb)`
+	if len(nodeIDs) > 0 {
+		return Changed(tx.Gorm(ctx).Exec(`UPDATE at_employees SET spec = jsonb_set(`+set+`, '{node_ids}', to_jsonb(?::text[])) WHERE id = ?`,
+			store.TextArray(nodeIDs), employeeID))
+	}
+	return Changed(tx.Gorm(ctx).Exec(`UPDATE at_employees SET spec = `+set+` WHERE id = ?`, employeeID))
+}
+
 // SetEmployeeNode records the node the employee's sessions run on.
 func SetEmployeeNode(ctx context.Context, tx *Tx, employeeID string, nodeID *string) error {
 	return Changed(tx.Gorm(ctx).Table("at_employees").Where("id = ?", employeeID).Update("node_id", nodeID))

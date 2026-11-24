@@ -28,7 +28,8 @@ var reviewNotes = map[string]string{"pr": "等 PR 检查通过（通过后讨论
 
 var pauseNotes = map[string]string{"user": "用户暂停了", "rate_limit": "Claude 使用限额用完，已暂停"}
 
-// PhaseOf works out a thread's phase in threadPhase's order. mergesActive is the number of active
+// PhaseOf works out a thread's phase in threadPhase's order. A session's thread (Solo) is
+// resolved (已解决) when done and finished (已完成) instead of reading / replied. mergesActive is the number of active
 // merge queue entries (not in the view): a thread whose PRs are merged but that waits for its
 // tasks or its merge queue says so, which the page shows only as 等成员处理任务.
 func PhaseOf(v ThreadView, mergesActive int) ThreadPhase {
@@ -42,6 +43,9 @@ func PhaseOf(v ThreadView, mergesActive int) ThreadPhase {
 	}
 	switch v.Status {
 	case "done":
+		if v.Solo {
+			return ph("resolved", "已解决", "用户确认问题已解决")
+		}
 		return ph("done", "已完成", "")
 	case "failed":
 		return ph("failed", "失败", "")
@@ -117,6 +121,12 @@ func PhaseOf(v ThreadView, mergesActive int) ThreadPhase {
 		case "waiting", "raising_hand":
 			return ph("lead_waiting", "进行中", "组长在等别人回复")
 		}
+	}
+	if v.Solo {
+		// A session's employee is not in a turn and nothing waits for the user's answer: the round
+		// is over (replied, stopped by the user, or ended without a reply) — 已完成, the user
+		// confirms it solved or goes on (web phase.ts, store sessionStatusCol).
+		return ph("finished", "已完成", "员工这一轮做完了，等用户确认是否解决")
 	}
 	if v.LeadLast == nil {
 		return ph("reading", "进行中", "组长正在阅读任务")

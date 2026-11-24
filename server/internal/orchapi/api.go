@@ -65,7 +65,10 @@ func (a *API) Register(api huma.API, r gin.IRoutes) {
 	a.registerMoves(r)
 	a.registerSharedFiles(api)
 	a.registerComposer(api)
+	a.registerContextDetail(api)
 	a.registerModel(api)
+	a.registerControls(api)
+	a.registerSessionOptions(api)
 }
 
 // registerNodeLinks mounts the daemon WebSocket (and its v2 alias). Without an engine
@@ -150,6 +153,8 @@ var errorMap = []struct {
 	{scheduler.ErrDepEnded, 409, "dependency_ended"},
 	{core.ErrTaskDone, 409, "task_state"},
 	{orchestrator.ErrFixedModel, 409, "model_fixed"},
+	{orchestrator.ErrNotSession, 409, "not_session"},
+	{orchestrator.ErrControlsBusy, 409, "switch_pending"},
 }
 
 // fail maps an engine error to the API error format.

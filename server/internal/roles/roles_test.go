@@ -333,3 +333,46 @@ func TestYAMLSeveralRuntimes(t *testing.T) {
 		t.Fatalf("to yaml %v:\n%s", err, out)
 	}
 }
+
+// TestReviewerHelperPresets: the Team page offers a reviewer (review gate, read-only) and a
+// helper, three of each, after the designer; next to the default team they validate cleanly and
+// survive a YAML round trip. The default team itself has neither.
+func TestReviewerHelperPresets(t *testing.T) {
+	p := Presets(looks)
+	byRole := map[string]store.Role{}
+	var order []string
+	for _, r := range p {
+		byRole[r.Role] = r
+		order = append(order, r.Role)
+	}
+	if strings.Join(order, ",") != "designer,reviewer,helper" {
+		t.Fatalf("preset order %v", order)
+	}
+	rev, help := byRole["reviewer"], byRole["helper"]
+	if rev.Title != "审查员" || rev.Tier != Member || rev.Count != 3 || rev.Gate != "review" || rev.ReadOnly == nil || !*rev.ReadOnly ||
+		rev.Look.Accessory != "headset" || !strings.Contains(rev.Instructions, "platform_error") {
+		t.Fatalf("reviewer preset %+v", rev)
+	}
+	if help.Title != "助手" || help.Tier != Member || help.Count != 3 || help.Gate != "" || help.ReadOnly == nil || *help.ReadOnly ||
+		help.Look.Accessory != "cap" || help.Count > MaxCount {
+		t.Fatalf("helper preset %+v", help)
+	}
+	for _, r := range Defaults(looks) {
+		if r.Role == "reviewer" || r.Role == "helper" {
+			t.Fatalf("default team gained %s", r.Role)
+		}
+	}
+	roles := append(Defaults(looks), p...)
+	known := map[string]bool{"design": true, "docs": true}
+	if probs := Validate(roles, Context{Nodes: nodes(), Looks: looks, Skills: known}); len(probs) != 0 {
+		t.Fatalf("presets invalid: %v", probs)
+	}
+	text, err := ToYAML(roles, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := FromYAML(text, nil)
+	if err != nil || len(parsed.Roles) != 6 || parsed.Roles[4].Count != 3 || parsed.Roles[4].Gate != "review" || parsed.Roles[5].Count != 3 {
+		t.Fatalf("yaml round trip %+v %v", parsed.Roles, err)
+	}
+}

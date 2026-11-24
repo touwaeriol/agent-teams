@@ -113,6 +113,11 @@ const handlers = {
   },
   "thread/read": (p) => ({ thread: { id: p.threadId, turns: [{ items: [{ type: "userMessage", content: [{ type: "text", text: "<!-- m_seen -->\nold" }] }] }] } }),
   "turn/interrupt": () => ({}),
+  "model/list": () => ({ data: [
+    { id: "gpt-5.5-codex", model: "gpt-5.5-codex", displayName: "GPT-5.5 Codex", description: "", hidden: false, isDefault: true, defaultReasoningEffort: "medium",
+      supportedReasoningEfforts: [{ reasoningEffort: "low", description: "" }, { reasoningEffort: "medium", description: "" }, { reasoningEffort: "high", description: "" }] },
+    { id: "hidden-x", model: "hidden-x", displayName: "Hidden", description: "", hidden: true, isDefault: false, defaultReasoningEffort: "low", supportedReasoningEfforts: [] },
+  ], nextCursor: null }),
 };
 
 createInterface({ input: process.stdin }).on("line", async (line) => {

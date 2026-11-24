@@ -35,7 +35,7 @@ type Role struct {
 	Role            string            `json:"role"`
 	Title           string            `json:"title"`
 	Runtime         string            `json:"runtime" enum:"claude,codex,antigravity" doc:"The role's first runtime (runtimes[0])"`
-	Runtimes        []string          `json:"runtimes,omitempty" enum:"claude,codex,antigravity" gorm:"serializer:pgtext" doc:"Every runtime the role's employees may run on, in display order; each new session takes the one with the most quota left. Empty: [runtime]"`
+	Runtimes        []string          `json:"runtimes,omitempty" enum:"claude,codex,antigravity" gorm:"serializer:pgtext" doc:"Every runtime the role's employees may run on, in display order; each new session takes the (runtime, node) pair with the lowest load score (used quota plus live sessions), so sessions spread over them; a runtime whose quota is tight on a node is only used when every pair is. Empty: [runtime]"`
 	Models          map[string]string `json:"models,omitempty" nullable:"true" gorm:"serializer:jsonb" doc:"The model of each further runtime (runtimes[1:]), by runtime id; model is the first runtime's"`
 	Count           int               `json:"count"`
 	NodeIDs         []string          `json:"node_ids" gorm:"column:node_ids;serializer:pgtext"`
@@ -68,6 +68,12 @@ type Role struct {
 	// talks to the user directly (no members, no task pool). Only in employee specs and thread
 	// role snapshots, never in at_roles nor the API.
 	Solo bool `json:"solo,omitempty" gorm:"-" hidden:"true"`
+	// Local marks a session's employee working in a local folder of its own on one node (#53: a
+	// session started without repositories, or whose repositories were all removed): it is pinned
+	// to the node it first ran on (node_ids), never moved, and its folder is kept until the
+	// session is deleted. Repositories added later are checked out inside the folder. Employee
+	// specs only.
+	Local bool `json:"local,omitempty" gorm:"-" hidden:"true"`
 }
 
 // Custom command modes: prompt expands the template on the server before delivery; passthrough

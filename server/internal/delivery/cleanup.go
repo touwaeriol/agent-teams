@@ -24,10 +24,22 @@ func (e *Engine) ThreadEnded(ctx context.Context, threadID string) {
 	if err != nil {
 		return
 	}
+	if localSession(ctx, e.core.Pool, t) {
+		return // 已解决 keeps a session's local folder (and what was checked out in it) until it is deleted
+	}
 	if err := e.queueCleanup(ctx, t); err != nil {
 		e.log.Warn("queue cleanup", "thread_id", threadID, "err", err)
 	}
 	e.deleteMemberBranches(ctx, t)
+}
+
+// localSession reports whether t is a session whose employee works in a local folder (Spec.Local).
+func localSession(ctx context.Context, q core.DB, t core.Thread) bool {
+	if !t.Solo() {
+		return false
+	}
+	lead, err := core.Lead(ctx, q, t.ID)
+	return err == nil && lead.Spec.Local
 }
 
 func (e *Engine) queueCleanup(ctx context.Context, t core.Thread) error {

@@ -332,9 +332,17 @@ const role = (id, tier, roleKey, title, runtime, count, node_ids, description, l
 export const roles = [
   role("r0", "coordinator", "coordinator", "项目统筹", "claude", 1, ["n1"], "和你对话，判断要做什么，开讨论串、跟进状态、向你汇报。", look("#7A4FD1", "hoodie", "headset", "#3B2A20"), { model: "claude-fable-5-2" }),
   role("r1", "lead", "lead", "组长", "claude", 1, ["n1", "n2"], "列主要任务、拆小任务、审查成员提交并合并，完成后向统筹交总结。", look("#C8622A", "suit", "none", "#3B2A20"), { model: "claude-opus-5-5" }),
-  role("r2", "member", "dev", "开发", "claude", 2, ["n1", "n2"], "从任务池领开发类小任务，在自己的 worktree 里改代码、跑测试、提交。", look("#4C7BD0", "tee", "none", "#8A5A36"), { model: "claude-sonnet-5-5", sort: 1, task_kinds: ["dev"], skills: ["docs"], plugins: ["release-notes@2", "pr-review"] }),
+  role("r2", "member", "dev", "开发", "claude", 2, ["n1", "n2"], "从任务池领开发类小任务，在自己的 worktree 里改代码、跑测试、提交。", look("#4C7BD0", "tee", "none", "#8A5A36"), { model: "claude-sonnet-5-5", runtimes: ["claude", "codex", "antigravity"], models: { codex: "gpt-5.5-codex", antigravity: "gemini-4-neon-high" }, sort: 1, task_kinds: ["dev"], skills: ["docs"], plugins: ["release-notes@2", "pr-review"] }),
   role("r3", "member", "qa", "测试", "codex", 1, ["n2"], "领测试类小任务：补用例、跑全量测试、复现问题并报告。", look("#3F8F6B", "coat", "glasses", "#6B4A2E"), { sort: 2, permission_mode: "ask", sandbox: "workspace-write", task_kinds: ["test"], plugins: ["playwright-kit"] }),
   role("r4", "member", "review", "审查", "claude", 1, ["n1"], "审查合并前的改动，指出问题，不改代码。", look("#4A4843", "suit", "glasses", "#1F1E1C"), { sort: 3, gate: "review", model: "opus" }),
+  role("r5", "member", "research", "调研", "antigravity", 1, ["n4"], "查资料、读代码，写调研结论。", look("#2F6FB0", "coat", "none", "#3B2A20"), { sort: 4, model: "gemini-4-neon-high" }),
+];
+
+// GET /api/roles/presets (roles.Presets): 从预设添加.
+export const rolePresets = [
+  role("", "member", "designer", "设计师", "claude", 1, [], "做 HTML 原型、界面稿、示意图和设计文档，发布成交付物", look("#4C7BD0", "tee", "glasses"), { task_kinds: ["design", "doc"], skills: ["design", "docs"], read_only: false }),
+  role("", "member", "reviewer", "审查员", "claude", 3, [], "只读审查每个开发任务的改动，不改代码", look("#4C7BD0", "tee", "headset"), { gate: "review", read_only: true }),
+  role("", "member", "helper", "助手", "claude", 3, [], "做简单、机械的杂活：跑命令收集信息、批量改文案或配置、格式化、更新文档", look("#4C7BD0", "tee", "cap"), { read_only: false }),
 ];
 
 export const connections = [
@@ -392,3 +400,106 @@ export const adminPlugins = [
     pversion(4, "0.9.4", "旧的部署脚本封装，已被 CI 取代。", contents([], ["deploy"], [], true, []), 60 * 24 * 30, 9_800),
   ] },
 ];
+
+// ── Sessions (多仓库会话, #53; sessions.md): three sessions, one per CLI, each a project of kind
+// session with its thread 1. session-controls, session-options and the context breakdown
+// (api.md) come from the templates below; server.mjs keeps the live state.
+const sessionProject = (id, name, status, min) =>
+  project(id, name, { kind: "session", session_status: status, repo: "touwaeriol/agent-teams", git_connection_id: "g1", repos: [{ repo: "touwaeriol/agent-teams", git_connection_id: "g1" }], updated_at: ago(min) });
+projects.push(
+  sessionProject("s1", "修复登录后的跳转", "finished", 2),
+  sessionProject("s2", "补齐 Codex 回归用例", "working", 25),
+  sessionProject("s3", "整理 README", "resolved", 120),
+  // A session without repositories: a local folder on rc-erio (pinned there).
+  { ...sessionProject("s4", "整理周会纪要", "finished", 8), repo: null, git_connection_id: null, repos: [] },
+);
+const soloEmp = (id, name, runtime, nodeRef, state = "idle", bubble = "") => emp(id, name, "lead", "dev", "开发", runtime, nodeRef, look("#4C7BD0", "tee", "none"), st(state, bubble));
+const solo = (pid, title, status, runtime, empl, session) => ({
+  ...thread(1, title, status, { members: [empl], opened_by: "user", dispatch: { opened_by: "user", at: ago(30), source: null } }),
+  id: `t${pid}`, project_id: pid, branch: `session/${pid}`, solo: true,
+  session: { node_id: "n1", runtime, state: "active", cwd: `/srv/agent/projects/${pid}/threads/1/lead`, context_used: null, context_max: null, ...session },
+});
+export const sessionThreads = [
+  solo("s1", "修复登录后的跳转", "running", "claude", soloEmp("es1", "dev-1", "claude", RC), { context_used: 77000, context_max: 1000000 }),
+  solo("s2", "补齐 Codex 回归用例", "running", "codex", soloEmp("es2", "qa-1", "codex", CVP, "running", "跑 go test ./internal/approvals/..."), { node_id: "n2", context_used: 41000, context_max: 272000 }),
+  solo("s3", "整理 README", "done", "antigravity", soloEmp("es3", "rev-1", "antigravity", RC), { state: "parked" }),
+  { ...solo("s4", "整理周会纪要", "running", "claude", soloEmp("es4", "dev-2", "claude", RC), { cwd: "/srv/agent/projects/s4/threads/1/lead", context_used: 23000, context_max: 1000000 }), branch: "", repos: [] },
+];
+Object.assign(messages, {
+  ts1: [msg("s1a", "user", "liu", "登录后应该回到原来的页面，现在总是跳到首页。", 30), msg("s1b", "leader", "dev-1", "找到了：`/login` 没带 `redirect` 参数。我改成登录前记下原地址，登录后跳回去，再补一个测试。", 28)],
+  ts2: [msg("s2a", "user", "liu", "把 approvals 包的回归用例补齐。", 26), msg("s2b", "leader", "qa-1", "好，先跑一遍现有用例看哪些分支没覆盖。", 25)],
+  ts4: [msg("s4a", "user", "liu", "把这几次周会的纪要整理成一份 Markdown，放在文件夹里。", 12), msg("s4b", "leader", "dev-2", "整理好了：`周会纪要-11月.md` 在工作目录里，按议题分了五节，待办单独列在最后。", 8)],
+  ts3: [msg("s3a", "user", "liu", "README 的安装步骤过时了，整理一下。", 130), msg("s3b", "leader", "rev-1", "改好了：安装、登录、开会话三段，PR 已开。", 121)],
+});
+
+const modeOpt = (id, label, hint, applies = "now") => ({ id, label, hint, applies });
+const HINT = {
+  auto: "模型自动判断哪些操作可以直接做，有风险的才拦下",
+  default: "需要权限的操作逐条请你确认，不会超时",
+  acceptEdits: "文件编辑直接通过，其他需要权限的操作请你确认",
+  plan: "只读代码、给出计划，不改文件",
+  bypassPermissions: "所有操作直接执行，不再确认",
+};
+const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+/** Per runtime: every mode it has (the server filters by model and role), its models and the session's starting values. */
+export const sessionRuntimes = {
+  claude: {
+    modes: [modeOpt("auto", "自动", HINT.auto), modeOpt("default", "手动", HINT.default), modeOpt("acceptEdits", "接受编辑", HINT.acceptEdits), modeOpt("plan", "计划", HINT.plan), modeOpt("bypassPermissions", "跳过权限确认", HINT.bypassPermissions)],
+    models: [
+      { id: "claude-opus-5-5", name: "Opus 5.5", description: "复杂任务", efforts: CLAUDE_EFFORTS, supports_auto: true, default: true },
+      { id: "claude-fable-5-2", name: "Fable 5.2", efforts: CLAUDE_EFFORTS, supports_auto: true },
+      { id: "claude-sonnet-5-5", name: "Sonnet 5.5", description: "日常任务", efforts: CLAUDE_EFFORTS, supports_auto: true },
+      { id: "claude-haiku-4-5-20251001", name: "Haiku 4.5", description: "最快", efforts: [], supports_auto: false },
+    ],
+  },
+  codex: {
+    modes: [modeOpt("auto", "自动", "Codex 的审核子代理判断哪些请求可以放行", "next_turn"), modeOpt("default", "手动", HINT.default, "next_turn"), modeOpt("bypassPermissions", "跳过权限确认", HINT.bypassPermissions, "next_turn")],
+    models: [
+      { id: "gpt-5.5-codex", name: "GPT-5.5 Codex", efforts: ["low", "medium", "high", "xhigh"], default_effort: "medium", supports_auto: false, default: true },
+      { id: "gpt-5.5-mini", name: "GPT-5.5 mini", efforts: ["low", "medium", "high"], default_effort: "medium", supports_auto: false },
+    ],
+  },
+  antigravity: {
+    modes: [modeOpt("default", "手动", HINT.default, "next_turn"), modeOpt("bypassPermissions", "跳过权限确认", HINT.bypassPermissions, "next_turn")],
+    models: [
+      { id: "gemini-4-neon-high", name: "Gemini 4 Neon (high)", efforts: [], supports_auto: false, default: true },
+      { id: "gemini-4-neon-xhigh", name: "Gemini 4 Neon (xhigh)", efforts: [], supports_auto: false },
+    ],
+  },
+};
+/** What each session runs (thread id → picks); the menus come from sessionRuntimes. */
+export const sessionPicks = {
+  ts1: { permission_mode: "auto", model: "claude-opus-5-5", effort: "high" },
+  ts2: { permission_mode: "bypassPermissions", model: "gpt-5.5-codex", effort: "medium" },
+  ts3: { permission_mode: "bypassPermissions", model: "gemini-4-neon-high", effort: "" },
+  ts4: { permission_mode: "auto", model: "claude-opus-5-5", effort: "" },
+};
+
+/** GET /api/conversations/{cid}/context/detail of a Claude session (protocol.md §4.10). */
+export const contextDetail = {
+  supported: true, runtime: "claude", session_id: "as_s1", state: "active", can_refresh: true, detail: "summary", updated_at: ago(3),
+  model: "claude-opus-5-5", total_tokens: 77000, max_tokens: 1000000, raw_max_tokens: 1000000, auto_compact: true, auto_compact_threshold: 967000,
+  categories: [
+    { id: "system_prompt", name: "System prompt", tokens: 3200, kind: "used" },
+    { id: "system_tools", name: "System tools", tokens: 16800, kind: "used" },
+    { id: "mcp_tools", name: "MCP tools", tokens: 9600, kind: "used" },
+    { id: "mcp_instructions", name: "MCP server instructions", tokens: 1100, kind: "used" },
+    { id: "memory_files", name: "Memory files", tokens: 2400, kind: "used" },
+    { id: "skills", name: "Skills", tokens: 1900, kind: "used" },
+    { id: "messages", name: "Messages", tokens: 42000, kind: "used" },
+    { id: "autocompact_buffer", name: "Autocompact buffer", tokens: 33000, kind: "buffer" },
+    { id: "free_space", name: "Free space", tokens: 890000, kind: "free" },
+    { id: "mcp_tools_deferred", name: "MCP tools (deferred)", tokens: 12400, kind: "deferred" },
+    { id: "system_tools_deferred", name: "System tools (deferred)", tokens: 8700, kind: "deferred" },
+  ],
+  mcp_tools: [
+    { name: "mcp__platform__publish_file", server: "platform", tokens: 1380, loaded: true },
+    { name: "mcp__platform__ask_user", server: "platform", tokens: 1240, loaded: true },
+    { name: "mcp__platform__set_status", server: "platform", tokens: 410, loaded: true },
+    { name: "mcp__plugin_github_github__create_pull_request", server: "plugin_github_github", tokens: 1580, loaded: true },
+    { name: "mcp__plugin_github_github__search_code", server: "plugin_github_github", tokens: 1000, loaded: false },
+  ],
+  mcp_servers: [{ server: "platform", tokens: 1100 }],
+  memory_files: [{ path: "/srv/agent/projects/s1/threads/1/lead/CLAUDE.md", type: "Project", tokens: 2400 }],
+  skills: [{ name: "docs", source: "plugin", tokens: 1900 }],
+};

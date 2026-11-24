@@ -27,9 +27,11 @@ export interface Look {
   label: string;
   /** In progress: drawn as a rotating spinner instead of a static dot. */
   spin?: boolean;
+  /** A session's 已完成 (check) or 已解决 (double check) pill leads with this icon. */
+  icon?: "check" | "resolved";
 }
 
-export type ThreadKind = "wait" | "doing" | "queued" | "review" | "paused" | "done" | "failed" | "archived";
+export type ThreadKind = "wait" | "doing" | "queued" | "review" | "paused" | "done" | "failed" | "archived" | "finished" | "resolved";
 
 const KIND_OF: Record<PhaseId, ThreadKind> = {
   archived: "archived",
@@ -39,6 +41,8 @@ const KIND_OF: Record<PhaseId, ThreadKind> = {
   acceptance: "review",
   asking: "wait",
   replied: "wait",
+  finished: "finished",
+  resolved: "resolved",
   queued: "queued",
   working: "doing",
   tasks: "doing",
@@ -66,6 +70,9 @@ export const THREAD_LOOK: Record<ThreadKind, Look> = {
   done: { tone: INK.done, label: "已完成" },
   failed: { tone: INK.bad, label: "失败" },
   archived: { tone: INK.gray, label: "已归档" },
+  // Sessions only: a round done (the ball is with the user, nothing urgent) vs confirmed solved.
+  finished: { tone: INK.done, label: "已完成", icon: "check" },
+  resolved: { tone: INK.gray, label: "已解决", icon: "resolved" },
 };
 
 export const threadLook = (t: PhaseInput): Look => THREAD_LOOK[threadKind(t)];

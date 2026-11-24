@@ -34,6 +34,8 @@ export interface MessageBodies {
   "session.closed": T.SessionClosed;
   "session.compact": T.SessionCompact;
   "session.compacted": T.SessionCompacted;
+  "session.context": T.SessionContext;
+  "session.context_refresh": T.SessionContextRefresh;
   "session.delivered": T.SessionDelivered;
   "session.digest": T.SessionDigest;
   "session.event": T.SessionEvent;
@@ -41,6 +43,7 @@ export interface MessageBodies {
   "session.exported": T.SessionExported;
   "session.interrupt": T.SessionInterrupt;
   "session.interrupted": T.SessionInterrupted;
+  "session.mode_set": T.SessionModeSet;
   "session.open": T.SessionOpen;
   "session.opened": T.SessionOpened;
   "session.release": T.SessionRelease;
@@ -101,6 +104,8 @@ export const MESSAGE_META: { readonly [K in MessageType]: MessageMeta } = {
   "session.closed": { direction: "node_to_console", reliable: true, key: ["session_id","open_gen"] },
   "session.compact": { direction: "console_to_node", reliable: true, key: ["compact_id"] },
   "session.compacted": { direction: "node_to_console", reliable: true, key: ["compact_id"] },
+  "session.context": { direction: "node_to_console", reliable: false, key: [] },
+  "session.context_refresh": { direction: "console_to_node", reliable: false, key: [] },
   "session.delivered": { direction: "node_to_console", reliable: true, key: ["msg_id"] },
   "session.digest": { direction: "node_to_console", reliable: false, key: [] },
   "session.event": { direction: "node_to_console", reliable: true, key: ["session_id","event_no"] },
@@ -108,6 +113,7 @@ export const MESSAGE_META: { readonly [K in MessageType]: MessageMeta } = {
   "session.exported": { direction: "node_to_console", reliable: true, key: ["export_id"] },
   "session.interrupt": { direction: "console_to_node", reliable: true, key: ["id"] },
   "session.interrupted": { direction: "node_to_console", reliable: true, key: [] },
+  "session.mode_set": { direction: "node_to_console", reliable: true, key: ["session_id","request_id"] },
   "session.open": { direction: "console_to_node", reliable: true, key: ["session_id","open_gen"] },
   "session.opened": { direction: "node_to_console", reliable: true, key: ["session_id","open_gen"] },
   "session.release": { direction: "console_to_node", reliable: true, key: ["session_id","open_gen"] },

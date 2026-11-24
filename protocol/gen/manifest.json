@@ -264,6 +264,20 @@
       ]
     },
     {
+      "type": "session.context",
+      "name": "SessionContext",
+      "direction": "node_to_console",
+      "reliable": false,
+      "key": []
+    },
+    {
+      "type": "session.context_refresh",
+      "name": "SessionContextRefresh",
+      "direction": "console_to_node",
+      "reliable": false,
+      "key": []
+    },
+    {
       "type": "session.delivered",
       "name": "SessionDelivered",
       "direction": "node_to_console",
@@ -322,6 +336,16 @@
       "direction": "node_to_console",
       "reliable": true,
       "key": []
+    },
+    {
+      "type": "session.mode_set",
+      "name": "SessionModeSet",
+      "direction": "node_to_console",
+      "reliable": true,
+      "key": [
+        "session_id",
+        "request_id"
+      ]
     },
     {
       "type": "session.open",

@@ -26,7 +26,7 @@ const editing = ref(false);
 const COMMANDS: Record<string, () => void> = { edit: () => (editing.value = true), remove: () => emit("remove") };
 const member = computed(() => props.role.tier === "member");
 const runtimeList = computed(() => roleRuntimes(props.role));
-/** Members only (the others run on Claude Code): several agents, each new session takes the one with the most quota left; each keeps its own model. */
+/** Members only (the others run on Claude Code): several agents, each new session takes the one with the lowest load (quota used plus live sessions), so they share the work; each keeps its own model. */
 function setRuntimes(list: Runtime[]) {
   if (!member.value) return;
   const patch = runtimesPatch(props.role, list);
@@ -68,7 +68,7 @@ function save(r: RoleView) {
         <el-select :model-value="runtimeList" multiple :disabled="!member" class="at-select-36 at-text-13" aria-label="agent" @update:model-value="setRuntimes">
           <el-option v-for="r in runtimesFor(role.tier)" :key="r.id" :value="r.id" :label="r.label" />
         </el-select>
-        <span v-if="runtimeList.length > 1" class="text-[11px] leading-4 text-muted-foreground">每次开新会话用剩余额度最多的</span>
+        <span v-if="runtimeList.length > 1" class="text-[11px] leading-4 text-muted-foreground">新会话按用量和会话数在几种 agent 间分摊</span>
       </span>
       <span class="flex min-w-0 flex-col gap-1">
         <span class="text-xs text-muted-foreground">模型</span>

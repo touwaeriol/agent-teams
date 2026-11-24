@@ -640,6 +640,52 @@
     {
       "properties": {
         "type": {
+          "const": "session.context"
+        },
+        "body": {
+          "$ref": "session.context.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^n_"
+        }
+      },
+      "required": [
+        "type",
+        "body"
+      ],
+      "not": {
+        "required": [
+          "seq"
+        ]
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "session.context_refresh"
+        },
+        "body": {
+          "$ref": "session.context_refresh.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^c_"
+        }
+      },
+      "required": [
+        "type",
+        "body"
+      ],
+      "not": {
+        "required": [
+          "seq"
+        ]
+      }
+    },
+    {
+      "properties": {
+        "type": {
           "const": "session.delivered"
         },
         "body": {
@@ -762,6 +808,25 @@
         },
         "body": {
           "$ref": "session.interrupted.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^n_"
+        }
+      },
+      "required": [
+        "type",
+        "body",
+        "seq"
+      ]
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "session.mode_set"
+        },
+        "body": {
+          "$ref": "session.mode_set.json"
         },
         "id": {
           "type": "string",

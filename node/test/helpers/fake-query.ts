@@ -11,8 +11,12 @@ export interface FakeQueryLog {
   interrupts: number;
   modes: string[];
   models?: string[];
+  /** applyFlagSettings calls. */
+  flags?: Array<Record<string, unknown>>;
   /** What PreCompact / SessionStart hooks returned (compaction tests). */
   hooks?: Array<{ event: string; output: unknown }>;
+  /** getContextUsage calls by detail (context breakdown tests). */
+  contextReads?: string[];
 }
 
 /**
@@ -28,6 +32,14 @@ export function fakeQueryFactory(log: FakeQueryLog) {
   };
 }
 
+/** initialize's models, shaped like SDK 0.3.325's (an alias row, a default row, a model without auto). */
+export const FAKE_MODELS = [
+  { value: "default", resolvedModel: "claude-opus-5-5", displayName: "Default (recommended)", description: "Opus 5.5", supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"], supportsAutoMode: true },
+  { value: "opus", resolvedModel: "claude-opus-5-5", displayName: "Opus 5.5", description: "For complex work", supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"], supportsAutoMode: true },
+  { value: "claude-haiku-x", resolvedModel: "claude-haiku-x", displayName: "Haiku X", description: "", supportedEffortLevels: ["low", "medium", "high"], supportsAutoMode: true },
+  { value: "claude-haiku-4-5-20251001", resolvedModel: "claude-haiku-4-5-20251001", displayName: "Haiku 4.5", description: "" },
+];
+
 class FakeQuery {
   private out: SDKMessage[] = [];
   private wake: (() => void) | null = null;
@@ -42,7 +54,7 @@ class FakeQuery {
 
   async initializationResult() {
     return {
-      claude_code_version: "2.1.325-fake", account: {}, agents: [], models: [],
+      claude_code_version: "2.1.325-fake", account: {}, agents: [], models: FAKE_MODELS,
       commands: [{ name: "design", description: "Claude Design access", argumentHint: "", builtin: true }, { name: "agent-teams-skills:design", description: "Make HTML prototypes", argumentHint: "" }],
     };
   }
@@ -58,16 +70,46 @@ class FakeQuery {
   }
 
   async setPermissionMode(m: string) {
+    // Like SDK 0.3.325: auto only for a model with supportsAutoMode.
+    const model = this.model ?? this.options.model;
+    if (m === "auto" && !FAKE_MODELS.some((x) => (x.value === model || x.resolvedModel === model) && x.supportsAutoMode)) throw new Error("Cannot set permission mode to auto: auto mode unavailable for this model");
     this.log.modes.push(m);
+  }
+
+  async applyFlagSettings(s: Record<string, unknown>) {
+    (this.log.flags ??= []).push(s);
   }
 
   private model: string | undefined;
   /** Context use: grows 1000 tokens per prompt, a compaction brings it back to 500. */
   private tokens = 5000;
 
-  async getContextUsage() {
+  async getContextUsage(opts?: { detail?: "summary" | "full" }) {
+    (this.log.contextReads ??= []).push(opts?.detail ?? "summary");
     const max = Number(this.options.env?.CLAUDE_CODE_AUTO_COMPACT_WINDOW ?? 200000);
-    return { totalTokens: this.tokens, maxTokens: max, rawMaxTokens: max, percentage: Math.round((this.tokens / max) * 100), categories: [], gridRows: [] };
+    const full = opts?.detail === "full" ? 100 : 0; // full counts a little differently, like the real CLI
+    const messages = Math.max(0, this.tokens - 3000);
+    return {
+      totalTokens: this.tokens, maxTokens: max, rawMaxTokens: max, percentage: Math.round((this.tokens / max) * 100), gridRows: [],
+      model: "claude-fake", isAutoCompactEnabled: true, autoCompactThreshold: max - 33000,
+      categories: [
+        { id: "system_prompt", name: "System prompt", tokens: 1000, color: "promptBorder", kind: "used" },
+        { id: "mcp_tools", name: "MCP tools", tokens: 2000 + full, color: "inactive", kind: "used" },
+        { id: "messages", name: "Messages", tokens: messages, color: "purple", kind: "used" },
+        { id: "autocompact_buffer", name: "Autocompact buffer", tokens: 33000, color: "inactive", kind: "buffer" },
+        { id: "free_space", name: "Free space", tokens: max - this.tokens - 33000, color: "promptBorder", kind: "free" },
+        { id: "mcp_tools_deferred", name: "MCP tools (deferred)", tokens: 500, color: "inactive", isDeferred: true, kind: "deferred" },
+      ],
+      mcpTools: [
+        { name: "mcp__platform__complete_task", serverName: "platform", tokens: 1200 + full, isLoaded: true },
+        { name: "mcp__platform__set_status", serverName: "platform", tokens: 800, isLoaded: true },
+        { name: "mcp__github__search_code", serverName: "github", tokens: 500, isLoaded: false },
+      ],
+      mcpInstructions: [{ serverName: "platform", tokens: 300 }],
+      memoryFiles: [{ path: "/w/CLAUDE.md", type: "Project", tokens: 400 }],
+      agents: [], skills: { totalSkills: 1, includedSkills: 1, tokens: 90, skillFrontmatter: [{ name: "design", source: "plugin", tokens: 90 }] },
+      apiUsage: null,
+    };
   }
 
   async setModel(m?: string) {

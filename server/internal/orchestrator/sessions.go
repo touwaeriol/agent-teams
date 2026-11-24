@@ -433,7 +433,7 @@ func (o *Orchestrator) openSession(ctx context.Context, tx *core.Tx, e core.Empl
 	if err != nil {
 		return core.AgentSession{}, err
 	}
-	pick, err := o.pickNode(ctx, tx, e, env.project, resume != nil || worked)
+	pick, err := o.pickNode(ctx, tx, e, env.project, resume != nil || worked, pickOpen)
 	if err != nil {
 		return core.AgentSession{}, err
 	}
@@ -441,6 +441,9 @@ func (o *Orchestrator) openSession(ctx context.Context, tx *core.Tx, e core.Empl
 		return core.AgentSession{}, o.hold(ctx, tx, e, first, resume, pick.hold)
 	}
 	node, rt := pick.node, pick.rt
+	if e, err = pinLocal(ctx, tx, e, node.ID); err != nil {
+		return core.AgentSession{}, err
+	}
 	if first, resume, err = o.moveResume(ctx, tx, e, node.ID, rt, first, resume); err != nil {
 		return core.AgentSession{}, err
 	}
@@ -466,6 +469,17 @@ func (o *Orchestrator) openOn(ctx context.Context, tx *core.Tx, env sessionEnv, 
 		return sess, err
 	}
 	return sess, o.queueOpen(ctx, tx, env, node, sess, first, resume, imp)
+}
+
+// pinLocal pins a session's employee working in a local folder (Spec.Local) to the node its first
+// session opens on: from then on it is the employee's only candidate (spec.node_ids), so the
+// folder and the files in it stay usable; the session waits for that node when it is offline.
+func pinLocal(ctx context.Context, tx *core.Tx, e core.Employee, nodeID string) (core.Employee, error) {
+	if !e.Spec.Solo || !e.Spec.Local || len(e.Spec.NodeIDs) > 0 {
+		return e, nil
+	}
+	e.Spec.NodeIDs = []string{nodeID}
+	return e, core.SetSpecNodes(ctx, tx, e.ID, e.Spec.NodeIDs)
 }
 
 // pinThread records the thread a project member opens a session in as its current thread.
@@ -524,6 +538,12 @@ func (env sessionEnv) gitHosts() []protocol.SessionOpenGitHostsElem {
 func (o *Orchestrator) checkoutPaths(ctx context.Context, q core.DB, p Paths, env sessionEnv) []string {
 	slugs := env.slugs()
 	if len(slugs) == 0 {
+		if env.emp.Spec.Solo {
+			// A session's local folder is not a checkout: never cleaned up as one (nor taken for a
+			// legacy single-repository checkout once a repository is added); deleting the session
+			// purges it.
+			return []string{}
+		}
 		return []string{p.Cwd}
 	}
 	out := make([]string, len(slugs))
@@ -587,10 +607,16 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 	if err != nil {
 		return err
 	}
+	controls := false
+	if env.emp.Spec.Solo {
+		if controls, err = core.NodeHasFeature(ctx, tx, node.ID, FeatureSessionControls); err != nil {
+			return err
+		}
+	}
 	open, err := buildOpen(sessionInput{emp: env.emp, thread: env.thread, project: env.project, node: node, sess: sess,
 		prepare: prepare, first: first, resume: resume, system: system, rules: rules, hasRepo: len(env.repos) > 0,
 		repos: env.slugs(), protRefs: o.protectedRefs(ctx, tx, env), gitHosts: env.gitHosts(),
-		window: window})
+		window: window, controls: controls})
 	if err != nil {
 		return err
 	}
@@ -618,12 +644,10 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 	return err
 }
 
-// recordMode keeps the Claude mode the session opens in, so SetMode knows what it runs in.
+// recordMode keeps the mode, model and effort the session opens in, so SetMode and the session's
+// controls know what it runs in (Codex and Antigravity: as set_mode values, openMode).
 func recordMode(ctx context.Context, tx *core.Tx, sessionID string, open protocol.SessionOpen) error {
-	if open.Claude == nil {
-		return nil
-	}
-	return setPermissionMode(ctx, tx, sessionID, string(open.Claude.PermissionMode))
+	return recordOpenControls(ctx, tx, sessionID, open)
 }
 
 // setPermissionMode records the permission mode a session runs in.
@@ -758,7 +782,7 @@ func (o *Orchestrator) syncNode(ctx context.Context, tx *core.Tx, env sessionEnv
 	if worked {
 		return *env.emp.NodeID, nil
 	}
-	pick, err := o.pickNode(ctx, tx, env.emp, env.project, false)
+	pick, err := o.pickNode(ctx, tx, env.emp, env.project, false, pickSync)
 	if errors.Is(err, ErrNoNode) || (err == nil && pick.hold != "") {
 		return "", nil
 	}
@@ -1043,9 +1067,10 @@ func (o *Orchestrator) Interrupt(ctx context.Context, tx *core.Tx, e core.Employ
 	return err
 }
 
-// SetMode changes a live session (runtimes with LiveModeSwitch)'s permission mode (thread auto-approve).
+// SetMode changes a live session's permission mode for the thread auto-approve switch: Claude
+// only (runtimes with ModeSwitchNow), as before sessions could switch Codex and Antigravity too.
 func (o *Orchestrator) SetMode(ctx context.Context, tx *core.Tx, s core.AgentSession, mode string) error {
-	if s.NodeID == nil || !runtimes.Of(s.Runtime).LiveModeSwitch || s.PermissionMode == mode {
+	if s.NodeID == nil || !runtimes.Of(s.Runtime).ModeSwitchNow || s.PermissionMode == mode {
 		return nil
 	}
 	m := protocol.SessionSetModePermissionMode(mode)

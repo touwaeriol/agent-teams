@@ -251,6 +251,46 @@ describe("daemon with a fake console", () => {
     expect(h.log.modes).toEqual([]);
   });
 
+  it("reports the session's models and switches mode, model and effort at once with session.mode_set (session_controls)", async () => {
+    h = await startHarness();
+    expect(h.console.ofType("hello")[0]!.body.features).toContain("session_controls");
+    const opened = await openAndRelease("s_SC", { claude: { ...claudeOpen("s_SC").claude, effort: "high" } });
+    expect(opened.body.init.effort).toBe("high");
+    expect(opened.body.init.models).toEqual([
+      { id: "claude-opus-5-5", name: "Opus 5.5", description: "For complex work", efforts: ["low", "medium", "high", "xhigh", "max"], supports_auto: true, default: true },
+      { id: "claude-haiku-x", name: "Haiku X", efforts: ["low", "medium", "high"], supports_auto: true },
+      { id: "claude-haiku-4-5-20251001", name: "Haiku 4.5", efforts: [], supports_auto: false },
+    ]);
+    h.console.command("session.set_mode", { session_id: "s_SC", permission_mode: "plan", model: "claude-haiku-x", effort: "low", request_id: "r1" });
+    const set = await h.console.waitType("session.mode_set", (b) => b.request_id === "r1");
+    expect(set.body).toEqual({ session_id: "s_SC", open_gen: 1, request_id: "r1", ok: true, permission_mode: "plan", model: "claude-haiku-x", effort: "low", applies: "now" });
+    expect(h.log.modes).toEqual(["plan"]);
+    expect(h.log.flags).toEqual([{ effortLevel: "low" }]);
+    h.console.command("session.set_mode", { session_id: "s_SC", permission_mode: "bypassPermissions", request_id: "r2" });
+    const refused = await h.console.waitType("session.mode_set", (b) => b.request_id === "r2");
+    expect(refused.body).toMatchObject({ ok: false, permission_mode: "plan", model: "claude-haiku-x", effort: "low" });
+    expect(refused.body.error).toMatch(/allow_dangerously_skip_permissions/);
+    // A model without the effort in force (t45): the old level is dropped, not reported.
+    h.console.command("session.set_mode", { session_id: "s_SC", model: "claude-haiku-4-5-20251001", request_id: "r4" });
+    const dropped = await h.console.waitType("session.mode_set", (b) => b.request_id === "r4");
+    expect(dropped.body).toEqual({ session_id: "s_SC", open_gen: 1, request_id: "r4", ok: true, permission_mode: "plan", model: "claude-haiku-4-5-20251001", applies: "now" });
+    h.console.command("session.set_mode", { session_id: "s_SC", model: "claude-haiku-x", request_id: "r5" });
+    const back = await h.console.waitType("session.mode_set", (b) => b.request_id === "r5");
+    expect(back.body).not.toHaveProperty("effort");
+  });
+
+  it("opens a prefer_auto session in auto when its model supports it, else stays in default", async () => {
+    h = await startHarness();
+    const auto = await openAndRelease("s_PA", { claude: { ...claudeOpen("s_PA").claude, prefer_auto: true } });
+    expect(auto.body.init.permission_mode).toBe("auto");
+    expect(h.log.options[0]!.permissionMode).toBe("default");
+    const plain = await openAndRelease("s_PD", { claude: { ...claudeOpen("s_PD").claude, model: "claude-haiku-4-5-20251001", prefer_auto: true } });
+    expect(plain.body.init.permission_mode).toBe("default");
+    expect(h.log.modes).toEqual(["auto"]);
+    h.console.command("session.set_mode", { session_id: "s_PD", permission_mode: "auto", request_id: "r3" });
+    expect((await h.console.waitType("session.mode_set", (b) => b.request_id === "r3")).body).toMatchObject({ ok: false, permission_mode: "default", error: expect.stringMatching(/auto mode unavailable/) });
+  });
+
   it("restarts a crashed session by resuming it", async () => {
     h = await startHarness({ crashDelaysMs: [10, 10, 10] });
     await openAndRelease("s_N");

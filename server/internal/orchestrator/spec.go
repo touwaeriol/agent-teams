@@ -139,6 +139,9 @@ type sessionInput struct {
 	protRefs []string
 	gitHosts []protocol.SessionOpenGitHostsElem // standalone repositories' hosts (git-repos.md §5)
 	window   *int                               // the context window the employee's last session of the runtime reported
+	// controls: the node's daemon has session_controls (#53), so a session's employee opens in the
+	// mode picked in the session (Claude: auto). Older daemons get the role's mode as before.
+	controls bool
 }
 
 // buildOpen renders session.open for an employee.
@@ -210,7 +213,8 @@ func employeeRef(e core.Employee, t *core.Thread) protocol.EmployeeRef {
 //	coordinator: project (coordinator_model) → role (Spec.Model) → builtin
 //
 // The coordinator and leads have no /model (fixedModel): their model is set in their role or in
-// the project. A Codex employee never falls through to a Claude id: its built-in last resort is
+// the project. A session's employee (a lead with Spec.Solo) goes the member's way: the model its
+// user switched to in the session (e.Model) comes first. A Codex employee never falls through to a Claude id: its built-in last resort is
 // DefaultCodexModel (""), which leaves the choice to the Codex CLI.
 func Model(e core.Employee, p store.Project) string {
 	return firstNonEmpty(modelSteps(e, p)...)
@@ -222,7 +226,7 @@ func fixedModel(tier string) bool { return tier == "coordinator" || tier == "lea
 
 // modelSteps is Model's fallback order, highest precedence first.
 func modelSteps(e core.Employee, p store.Project) []string {
-	if fixedModel(e.Tier) {
+	if fixedModel(e.Tier) && !e.Spec.Solo {
 		return []string{
 			projectModel(e, p),         // 1. the project override for the coordinator / the lead's runtime
 			e.Spec.ModelFor(e.Runtime), // 2. the role's model for the runtime (the employee's spec)
@@ -230,7 +234,7 @@ func modelSteps(e core.Employee, p store.Project) []string {
 		}
 	}
 	return []string{
-		e.Model,                    // 1. picked for the employee with /model (at_employees.model)
+		e.Model,                    // 1. picked with /model, or in the session (at_employees.model)
 		projectModel(e, p),         // 2. the project override for the employee's runtime
 		e.Spec.ModelFor(e.Runtime), // 3. the role's model for the runtime (the employee's spec)
 		builtinModel(e.Runtime),    // 4. built in: DefaultModel / DefaultCodexModel
@@ -256,10 +260,14 @@ var threadModels = map[string]func(store.Project) string{
 	runtimes.Antigravity: func(store.Project) string { return "" },
 }
 
-// effort is the project's thread effort for leads and members, else the role's.
+// effort is the project's thread effort for leads and members, else the role's; a session's
+// employee runs the effort its user picked in the session first.
 func effort(e core.Employee, p store.Project) string {
 	if e.Tier == "coordinator" {
 		return e.Spec.Effort
+	}
+	if e.Spec.Solo {
+		return firstNonEmpty(e.SessionEffort, p.ThreadEffort, e.Spec.Effort)
 	}
 	return firstNonEmpty(p.ThreadEffort, e.Spec.Effort)
 }
@@ -328,6 +336,9 @@ func memberClaude(c *protocol.ClaudeSessionOptions, in sessionInput) {
 		t := true
 		c.AllowDangerouslySkipPermissions = &t
 	}
+	if e.Spec.Solo && in.controls {
+		soloClaude(c, e)
+	}
 	if in.node.Isolation == "sandbox" {
 		c.Sandbox = &protocol.SandboxPolicy{Enabled: true, WritePaths: []string{"."},
 			ExtraWritePaths: sharedGitDirs(e.ProjectID, in.repos)}
@@ -349,7 +360,18 @@ func codexOptions(in sessionInput) protocol.CodexSessionOptions {
 		raw := json.RawMessage(cfg)
 		c.Config = &raw
 	}
+	if e.Spec.Solo && !readOnly(e) && in.controls {
+		soloCodex(&c, e, writableRoots(e, in.repos))
+	}
 	return c
+}
+
+// writableRoots is the workspace-write config of a Codex employee: the shared clones' .git
+// directories it commits into, with network access.
+func writableRoots(e core.Employee, repos []string) json.RawMessage {
+	cfg, _ := json.Marshal(map[string]any{"sandbox_workspace_write": map[string]any{
+		"writable_roots": sharedGitDirs(e.ProjectID, repos), "network_access": true}})
+	return cfg
 }
 
 // antigravityOptions: read-only roles get read_only (the daemon disables agy's writing tools and
@@ -367,6 +389,9 @@ func antigravityOptions(in sessionInput) protocol.AntigravitySessionOptions {
 		a.BashPolicy = &protocol.BashPolicy{Mode: "argv", Allow: readOnlyBashAllow, DenyFlags: readOnlyDenyFlags, DenyMetachar: &t}
 	case Bypass(e):
 		a.Approval = protocol.AntigravitySessionOptionsApprovalAuto
+	}
+	if e.Spec.Solo && !readOnly(e) && in.controls {
+		soloAntigravity(&a, e)
 	}
 	return a
 }

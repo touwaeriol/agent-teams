@@ -371,6 +371,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/conversations/{cid}/context/detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What fills the session's context window, by category (sessions on Claude only) */
+        get: operations["conversation-context-detail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{cid}/context/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Count the session's context precisely now; the result arrives as the project event context */
+        post: operations["conversation-context-refresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/conversations/{cid}/forward": {
         parameters: {
             query?: never;
@@ -819,6 +853,24 @@ export interface paths {
         put?: never;
         /** Change password and sign out other sessions */
         post: operations["change-password"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/scheduling": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My node scheduling thresholds */
+        get: operations["get-my-scheduling"];
+        /** Set my node scheduling thresholds (percent, 1–100) */
+        put: operations["put-my-scheduling"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1413,6 +1465,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{pid}/session-controls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The permission mode, model and thinking effort of a session, and what it may switch to */
+        get: operations["session-controls"];
+        /** Switch a session's permission mode, model and/or thinking effort: Claude at once, Codex and Antigravity from the next turn; the answer comes as a session_controls event */
+        put: operations["set-session-controls"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{pid}/shared-files": {
         parameters: {
             query?: never;
@@ -1697,6 +1767,23 @@ export interface paths {
         put?: never;
         /** Log in from the console; the first test pins the host key */
         post: operations["test-server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/session-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The permission modes, models and efforts a new session made from a role can start with */
+        get: operations["session-options"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2575,6 +2662,103 @@ export interface components {
             /** @description null before the first session */
             session: components["schemas"]["SessionUsage"];
         };
+        ContextCategoryView: {
+            /** @description Stable row id: system_prompt, system_tools, mcp_tools, mcp_instructions, mcp_tools_deferred, system_tools_deferred, custom_agents, memory_files, skills, messages, autocompact_buffer, compact_buffer, free_space; more may come, '' from an old CLI. Classify on id and kind, not on name */
+            id: string;
+            /**
+             * @description used: in the window; free: the rest of it; buffer: the autocompact reserve; deferred: tool schemas outside the window
+             * @enum {string}
+             */
+            kind: "used" | "free" | "buffer" | "deferred";
+            /** @description The runtime's English label */
+            name: string;
+            /** Format: int64 */
+            tokens: number;
+        };
+        ContextDetailView: {
+            auto_compact: boolean;
+            /**
+             * Format: int64
+             * @description Tokens at which the runtime compacts by itself; 0 = unknown
+             */
+            auto_compact_threshold: number;
+            /** @description POST …/context/refresh can read it now: the session runs on an online node whose daemon reports breakdowns */
+            can_refresh: boolean;
+            /** @description In the runtime's order; deferred rows are outside the window */
+            categories: components["schemas"]["ContextCategoryView"][] | null;
+            /**
+             * @description summary: estimated after a turn; full: counted on a refresh; '' = no breakdown yet
+             * @enum {string}
+             */
+            detail: "summary" | "full" | "";
+            /**
+             * Format: int64
+             * @description The window measured against: the autocompact window; 0 = unknown
+             */
+            max_tokens: number;
+            mcp_servers: components["schemas"]["ContextMcpServerView"][] | null;
+            /** @description Every MCP tool (the mcp_tools and mcp_tools_deferred rows expanded) */
+            mcp_tools: components["schemas"]["ContextMcpToolView"][] | null;
+            memory_files: components["schemas"]["ContextMemoryFileView"][] | null;
+            model: string;
+            /**
+             * Format: int64
+             * @description The model's own window; 0 = unknown
+             */
+            raw_max_tokens: number;
+            /** @description Runtime of the latest session ('' before the first one) */
+            runtime: string;
+            /** @description The latest session ('' before the first one) */
+            session_id: string;
+            skills: components["schemas"]["ContextSkillView"][] | null;
+            /** @description That session's state (active, turn_running, parked, closed, …) */
+            state: string;
+            /** @description The session's runtime reports a breakdown (Claude only). false: hide the context block */
+            supported: boolean;
+            /** Format: int64 */
+            total_tokens: number;
+            /**
+             * Format: date-time
+             * @description When the breakdown arrived; null = none yet
+             */
+            updated_at: string | null;
+        };
+        ContextMcpServerView: {
+            server: string;
+            /** Format: int64 */
+            tokens: number;
+        };
+        ContextMcpToolView: {
+            /** @description false: deferred (tool search), not in the window yet */
+            loaded: boolean;
+            name: string;
+            server: string;
+            /** Format: int64 */
+            tokens: number;
+        };
+        ContextMemoryFileView: {
+            path: string;
+            /** Format: int64 */
+            tokens: number;
+            type: string;
+        };
+        ContextRefreshStarted: {
+            refresh_id: string;
+            session_id: string;
+        };
+        ContextSkillView: {
+            name: string;
+            source: string;
+            /** Format: int64 */
+            tokens: number;
+        };
+        ControlsPending: {
+            effort?: string;
+            model?: string;
+            permission_mode?: string;
+            /** Format: date-time */
+            since: string;
+        };
         ConversationModel: {
             employee: string;
             /** @description What the employee runs without the override (= model) */
@@ -3188,12 +3372,38 @@ export interface components {
             };
             role: string;
         };
+        ModeOption: {
+            /**
+             * @description now: Claude switches at once; next_turn: Codex/Antigravity from the next turn
+             * @enum {string}
+             */
+            applies: "now" | "next_turn";
+            hint: string;
+            /**
+             * @description session.set_mode value
+             * @enum {string}
+             */
+            id: "auto" | "default" | "acceptEdits" | "plan" | "bypassPermissions";
+            label: string;
+        };
         ModelApplied: {
             employee: string;
             /** @description Sent to the employee's running session (from its next turn); false: the next session opens with it */
             live: boolean;
             /** @description What the employee runs from now on */
             model: string;
+        };
+        ModelChoice: {
+            /** @description The runtime's default model */
+            default?: boolean;
+            default_effort?: string;
+            description?: string;
+            /** @description Thinking effort levels of the model; [] = none to pick (Antigravity: the effort is part of the model id) */
+            efforts: string[] | null;
+            id: string;
+            name?: string;
+            /** @description Claude: the model supports the auto permission mode */
+            supports_auto: boolean;
         };
         ModelResult: {
             applied: components["schemas"]["ModelApplied"][] | null;
@@ -3646,6 +3856,8 @@ export interface components {
             pinned: boolean;
             /** @description Bound repositories in project order; base branches belong in context (the project instructions) */
             repos: components["schemas"]["RepoRef"][] | null;
+            /** @description A session's state for the sidebar ('' for a project), the same rule as the session page: working (in a turn, waking or using a tool), finished (not in a turn and nothing to answer: 已完成), resolved (the user confirmed: 已解决), attention (node offline, session crashed or no node can run it: 等你处理), queued (waiting for a slot), or the thread's status (queued, waiting, review, paused, failed). Open cards are in waiting */
+            session_status: string;
             /** @description Codex model of Codex leads and members; '' = each role's model */
             thread_codex_model: string;
             /** @description '' = each role's effort; low | medium | high | xhigh | max */
@@ -3701,6 +3913,18 @@ export interface components {
             role: string;
             /** Format: int64 */
             thread_no: number;
+        };
+        QuotaLimits: {
+            /**
+             * Format: int64
+             * @description A node whose 5-hour window (Codex: windows up to a day) has used this many percent gets no new session while another candidate node is under the thresholds
+             */
+            five_hour_pct: number;
+            /**
+             * Format: int64
+             * @description The same for any weekly window (Claude weekly and per-model weekly; Codex: windows longer than a day)
+             */
+            weekly_pct: number;
         };
         RandomLookInputBody: {
             role?: string;
@@ -3867,7 +4091,7 @@ export interface components {
              * @enum {string}
              */
             runtime: "claude" | "codex" | "antigravity";
-            /** @description Every runtime the role's employees may run on, in display order; each new session takes the one with the most quota left. Empty: [runtime] */
+            /** @description Every runtime the role's employees may run on, in display order; each new session takes the (runtime, node) pair with the lowest load score (used quota plus live sessions), so sessions spread over them; a runtime whose quota is tight on a node is only used when every pair is. Empty: [runtime] */
             runtimes?: ("claude" | "codex" | "antigravity")[] | null;
             sandbox: string;
             /** @description Skill names (built-in or uploaded) the role's sessions load */
@@ -4073,6 +4297,20 @@ export interface components {
             /** @description IANA zone the cron is read in (default UTC) */
             timezone?: string;
         };
+        SchedulingSettings: {
+            /** @description The built-in thresholds (used until the user sets their own) */
+            defaults: components["schemas"]["QuotaLimits"];
+            /**
+             * Format: int64
+             * @description A node whose 5-hour window (Codex: windows up to a day) has used this many percent gets no new session while another candidate node is under the thresholds
+             */
+            five_hour_pct: number;
+            /**
+             * Format: int64
+             * @description The same for any weekly window (Claude weekly and per-model weekly; Codex: windows longer than a day)
+             */
+            weekly_pct: number;
+        };
         SearchMessage: {
             conversation_id: string;
             message: components["schemas"]["MessageView"];
@@ -4139,21 +4377,65 @@ export interface components {
             node: components["schemas"]["NodeRef"];
             state: string;
         };
+        SessionControls: {
+            /** @description '' = the model's default */
+            effort: string;
+            /** @description Effort levels of the current model ([] = none to pick) */
+            efforts: string[] | null;
+            /** @description Why the last switch failed (the fields show what still runs) */
+            error?: string;
+            /** @description A session is open on a node: a switch goes to it now; false: the next session opens with it */
+            live: boolean;
+            model: string;
+            /** @description Models reported by the session's runtime ([] until a session opened on a daemon with session_controls) */
+            models: components["schemas"]["ModelChoice"][] | null;
+            /** @description Permission menu in order: auto only when the model supports it, bypassPermissions only when the role allows skipping permission prompts */
+            modes: components["schemas"]["ModeOption"][] | null;
+            /** @description The session's node runs a daemon without session_controls: only the model and Claude's default / acceptEdits / bypassPermissions can be switched, no effort (upgrade the node for the rest) */
+            node_outdated: boolean;
+            /** @description A switch on its way to the node (null: none); a session_controls event follows its answer */
+            pending: components["schemas"]["ControlsPending"];
+            /** @description The mode in force (set_mode value), as the node wrote it back; without a live session the one the next session opens in */
+            permission_mode: string;
+            runtime: string;
+            thread_id: string;
+        };
         SessionInput: {
             /** @description Name of the work branch (after session/<id>-); '' = from the title, or the repositories when the title has no Latin letters */
             branch?: string;
+            /** @description Thinking effort; '' = project / role setting */
+            effort?: string;
             /** @description The task: the employee's first message */
             message: string;
-            /** @description '' = the role's model */
+            /** @description '' = the role's model for the runtime */
             model?: string;
-            /** @description Run on this node; '' = picked automatically (most quota left) */
+            /** @description Run on this node; '' = picked automatically (spread over the nodes by load score; nodes whose quota is tight only when all are) */
             node_id?: string;
-            /** @description Repositories, all checked out side by side in the employee's directory */
+            /**
+             * @description '' = the initial mode (Claude: auto when the model supports it, else default; Codex/Antigravity: the role's)
+             * @enum {string}
+             */
+            permission_mode?: "auto" | "default" | "acceptEdits" | "plan" | "bypassPermissions";
+            /** @description Repositories, all checked out side by side in the employee's directory; [] = none: the employee works in a local folder on the node it starts on, pinned there */
             repos: components["schemas"]["SessionRepoRef"][] | null;
             /** @description Member role template the employee is made from; '' = the first member role */
             role?: string;
+            /** @description The agent (CLI) the session runs on: one of the role's runtimes; '' = the role's (several: spread like any employee). Fixed once the session starts */
+            runtime?: string;
             /** @description '' = the first line of message */
             title?: string;
+        };
+        SessionOptions: {
+            /** @description What the session opens in without a pick: Claude auto (when the model supports it, else default), Codex/Antigravity the role's */
+            default_mode: string;
+            /** @description Effort levels of the model ([] = none to pick or not known yet) */
+            efforts: string[] | null;
+            /** @description The model the session would run without a pick */
+            model: string;
+            /** @description From the user's latest session on this runtime ([] = none reported yet: type a model id) */
+            models: components["schemas"]["ModelChoice"][] | null;
+            modes: components["schemas"]["ModeOption"][] | null;
+            runtime: string;
         };
         SessionRepoRef: {
             /** @description Branch the employee's work branch is cut from; '' = the repository's default branch */
@@ -4165,7 +4447,7 @@ export interface components {
             repo: string;
         };
         SessionReposInputBody: {
-            /** @description The session's repositories after the change (order kept); new ones are checked out, missing ones removed */
+            /** @description The session's repositories after the change (order kept); new ones are checked out, missing ones removed; [] = none (the session goes on in its local folder, pinned to its node) */
             repos: components["schemas"]["SessionRepoRef"][] | null;
         };
         SessionUsage: {
@@ -4189,6 +4471,17 @@ export interface components {
             /** Format: date-time */
             last_seen_at: string | null;
             user_agent: string;
+        };
+        SetControlsInputBody: {
+            /** @description One of the model's efforts; absent = unchanged */
+            effort?: string;
+            /** @description One of the models GET lists (any valid id while it lists none); absent = unchanged */
+            model?: string;
+            /**
+             * @description One of the modes GET lists; absent = unchanged
+             * @enum {string}
+             */
+            permission_mode?: "auto" | "default" | "acceptEdits" | "plan" | "bypassPermissions";
         };
         SetModelInputBody: {
             /** @description Model id; '' goes back to the project / role setting */
@@ -4420,6 +4713,10 @@ export interface components {
             reminded_at: string | null;
             /** @description Repositories the thread set a base for, branched or opened a PR in */
             repos: components["schemas"]["ThreadRepoView"][] | null;
+            /** @description A session's (solo) employee's latest agent session on its node: working directory and context use. Null for other threads and before the employee's first session */
+            session: components["schemas"]["ThreadSession"];
+            /** @description The thread is a session's (多仓库会话): its lead is the one employee the user talks to directly */
+            solo: boolean;
             /**
              * Format: date-time
              * @description When the thread first ran (null while queued)
@@ -4451,6 +4748,25 @@ export interface components {
             pr_state: string;
             pr_url: string | null;
             repo: string;
+        };
+        ThreadSession: {
+            /**
+             * Format: int64
+             * @description The context window ContextUsed is measured against (tokens, as the runtime reports it)
+             */
+            context_max: number | null;
+            /**
+             * Format: int64
+             * @description Tokens of context the session used at its last turn end (null: the runtime reports none, e.g. Antigravity, or no turn ended yet)
+             */
+            context_used: number | null;
+            /** @description The employee's working directory on the node (every repository is a subdirectory): absolute when the node reported its root, else relative to the daemon root */
+            cwd: string;
+            /** @description Node the session runs (ran) on */
+            node_id: string | null;
+            runtime: string;
+            /** @description The agent session's state (opening, idle, busy, parked, closed…) */
+            state: string;
         };
         ThreadUsage: {
             /** Format: double */
@@ -4530,6 +4846,10 @@ export interface components {
             reminded_at: string | null;
             /** @description Repositories the thread set a base for, branched or opened a PR in */
             repos: components["schemas"]["ThreadRepoView"][] | null;
+            /** @description A session's (solo) employee's latest agent session on its node: working directory and context use. Null for other threads and before the employee's first session */
+            session: components["schemas"]["ThreadSession"];
+            /** @description The thread is a session's (多仓库会话): its lead is the one employee the user talks to directly */
+            solo: boolean;
             /**
              * Format: date-time
              * @description When the thread first ran (null while queued)
@@ -5739,6 +6059,68 @@ export interface operations {
             };
         };
     };
+    "conversation-context-detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContextDetailView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "conversation-context-refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContextRefreshStarted"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     "forward-messages": {
         parameters: {
             query?: never;
@@ -6923,6 +7305,68 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "get-my-scheduling": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulingSettings"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "put-my-scheduling": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuotaLimits"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulingSettings"];
+                };
             };
             /** @description Error */
             default: {
@@ -8491,6 +8935,72 @@ export interface operations {
             };
         };
     };
+    "session-controls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionControls"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "set-session-controls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetControlsInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionControls"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     "list-shared-files": {
         parameters: {
             query?: {
@@ -9330,6 +9840,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ServerTestResult"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "session-options": {
+        parameters: {
+            query?: {
+                /** @description Member role template ('' = the first member role) */
+                role?: string;
+                /** @description The agent picked on the page, one of the role's runtimes ('' = the role's first) */
+                runtime?: string;
+                /** @description The model picked on the page ('' = the role's for the runtime) */
+                model?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionOptions"];
                 };
             };
             /** @description Error */
