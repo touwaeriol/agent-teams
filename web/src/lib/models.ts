@@ -100,14 +100,15 @@ export function roleModelNames(roles: ScopedRole[], field: ProjectField): string
 }
 
 /** A role's runtimes (the old single runtime when it has no list). */
-function runtimesOf(r: ScopedRole): string[] {
+/** Every runtime (agent) a role may run on, its first runtime first (server Role.RuntimeList). */
+export function runtimesOf(r: ScopedRole): string[] {
   const one = r.runtime || "claude";
   const list = r.runtimes ?? [];
   return list.length === 0 || (list.length === 1 && list[0] !== one) ? [one] : list;
 }
 
 /** A role's model for one of its runtimes: model for the first, models[rt] for the others. */
-function scopedModel(r: ScopedRole, runtime: string): string | undefined {
+export function scopedModel(r: ScopedRole, runtime: string): string | undefined {
   return runtime === runtimesOf(r)[0] ? r.model : (r.models?.[runtime] ?? undefined);
 }
 

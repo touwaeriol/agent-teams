@@ -50,6 +50,8 @@ export interface SessionDefaults {
   repos: SessionRepo[];
   node: string;
   role: string;
+  /** The agent (runtime) picked for the role ("" = the role's first). */
+  agent: string;
 }
 
 export const DEFAULTS_KEY = "at:new-session";
@@ -59,7 +61,8 @@ export function parseDefaults(raw: string | null): SessionDefaults | null {
     const v = JSON.parse(raw ?? "null") as Partial<SessionDefaults> | null;
     if (!v || !Array.isArray(v.repos)) return null;
     const repos = v.repos.filter((r) => r && typeof r.repo === "string").map((r) => ({ ...r, branch: typeof r.branch === "string" ? r.branch : "" }));
-    return { repos, node: typeof v.node === "string" ? v.node : "", role: typeof v.role === "string" ? v.role : "" };
+    const str = (x: unknown) => (typeof x === "string" ? x : "");
+    return { repos, node: str(v.node), role: str(v.role), agent: str(v.agent) };
   } catch {
     return null;
   }
@@ -138,4 +141,14 @@ export function contextTotal(s: { context_used?: number | null; context_max?: nu
 /** The node of the new-session box: the remembered or picked one while it exists and is online, else auto (自动选择). */
 export function usableNode(id: string, nodes: { id: string; online: boolean }[], auto: string): string {
   return id !== auto && nodes.some((n) => n.id === id && n.online) ? id : auto;
+}
+
+/** A started session's fixed picks for SessionFixed: node name, role title and agent label ("" when not known). */
+export function fixedParts(
+  lead: { title?: string; role?: string; name?: string; runtime?: string; node?: { name: string } | null } | undefined,
+  runtime: string | null | undefined,
+  label: (id: string) => string,
+): { node: string; role: string; agent: string } {
+  if (!lead) return { node: "", role: "", agent: "" };
+  return { node: lead.node?.name ?? "", role: lead.title || lead.role || lead.name || "", agent: label(runtime || lead.runtime || "") };
 }

@@ -55,7 +55,7 @@ export const keys = {
   builtinCommands: ["commands", "builtin"] as const,
   conversationModel: (cid: string) => ["c", cid, "model"] as const,
   sessionControls: (pid: string) => ["p", pid, "session-controls"] as const,
-  sessionOptions: (role: string, model: string) => ["session-options", role, model] as const,
+  sessionOptions: (role: string, runtime: string, model: string) => ["session-options", role, runtime, model] as const,
   conversationCommands: (cid: string) => ["c", cid, "commands"] as const,
   contextDetail: (cid: string) => ["c", cid, "context-detail"] as const,
   /** The latest project event context of a conversation (written by events.ts, read by the 刷新 button). */
@@ -270,10 +270,15 @@ export const useConversationModel = (cid: Arg) =>
 export const useSessionControls = (pid: Arg) =>
   useKeyed(() => keys.sessionControls(val(pid)), () => unwrap(client.GET("/api/projects/{pid}/session-controls", path({ pid: val(pid) }))), { enabled: has(pid) });
 /** What a new session made from a role (and model) can start with. */
-export const useSessionOptions = (role: Arg, model: Arg) =>
+export const useSessionOptions = (role: Arg, runtime: Arg, model: Arg) =>
   useKeyed(
-    () => keys.sessionOptions(val(role), val(model)),
-    () => unwrap(client.GET("/api/session-options", { params: { query: { role: val(role), ...(val(model) ? { model: val(model) } : {}) } } })),
+    () => keys.sessionOptions(val(role), val(runtime), val(model)),
+    () =>
+      unwrap(
+        client.GET("/api/session-options", {
+          params: { query: { role: val(role), ...(val(runtime) ? { runtime: val(runtime) } : {}), ...(val(model) ? { model: val(model) } : {}) } },
+        }),
+      ),
     { enabled: has(role), staleTime: 60_000 },
   );
 /** A session's context breakdown (Claude only; 404 for other conversations, so no retry). */

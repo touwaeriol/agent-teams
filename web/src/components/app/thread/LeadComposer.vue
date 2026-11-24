@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { useAttachments } from "../attachments";
 import Composer from "../Composer.vue";
 import SessionControlsBar from "../session/controls/SessionControlsBar.vue";
+import SessionFixed from "../session/SessionFixed.vue";
 import { closedNote, reopenHint } from "./detail";
 
 const props = defineProps<{ pid: string; thread: ThreadView; class?: string; session?: boolean }>();
@@ -59,7 +60,7 @@ const unarchive = useAction(() => threadActions.unarchive(props.thread.id), {
       :draft-key="draft"
       :assist="{ pid, cid: thread.id, scope: 'lead' }"
     >
-      <template v-if="session" #controls><SessionControlsBar :pid="pid" /></template>
+      <template v-if="session" #controls><SessionFixed :thread="thread" /><SessionControlsBar :pid="pid" /></template>
     </Composer>
   </div>
 </template>
