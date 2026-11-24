@@ -335,6 +335,7 @@ export const roles = [
   role("r2", "member", "dev", "开发", "claude", 2, ["n1", "n2"], "从任务池领开发类小任务，在自己的 worktree 里改代码、跑测试、提交。", look("#4C7BD0", "tee", "none", "#8A5A36"), { model: "claude-sonnet-5-5", sort: 1, task_kinds: ["dev"], skills: ["docs"], plugins: ["release-notes@2", "pr-review"] }),
   role("r3", "member", "qa", "测试", "codex", 1, ["n2"], "领测试类小任务：补用例、跑全量测试、复现问题并报告。", look("#3F8F6B", "coat", "glasses", "#6B4A2E"), { sort: 2, permission_mode: "ask", sandbox: "workspace-write", task_kinds: ["test"], plugins: ["playwright-kit"] }),
   role("r4", "member", "review", "审查", "claude", 1, ["n1"], "审查合并前的改动，指出问题，不改代码。", look("#4A4843", "suit", "glasses", "#1F1E1C"), { sort: 3, gate: "review", model: "opus" }),
+  role("r5", "member", "research", "调研", "antigravity", 1, ["n4"], "查资料、读代码，写调研结论。", look("#2F6FB0", "coat", "none", "#3B2A20"), { sort: 4, model: "gemini-4-neon-high" }),
 ];
 
 export const connections = [
@@ -399,11 +400,11 @@ export const adminPlugins = [
 const sessionProject = (id, name, status, min) =>
   project(id, name, { kind: "session", session_status: status, repo: "touwaeriol/agent-teams", git_connection_id: "g1", repos: [{ repo: "touwaeriol/agent-teams", git_connection_id: "g1" }], updated_at: ago(min) });
 projects.push(
-  sessionProject("s1", "修复登录后的跳转", "running", 2),
-  sessionProject("s2", "补齐 Codex 回归用例", "running", 25),
-  sessionProject("s3", "整理 README", "done", 120),
+  sessionProject("s1", "修复登录后的跳转", "finished", 2),
+  sessionProject("s2", "补齐 Codex 回归用例", "working", 25),
+  sessionProject("s3", "整理 README", "resolved", 120),
 );
-const soloEmp = (id, name, runtime, nodeRef) => emp(id, name, "lead", "dev", "开发", runtime, nodeRef, look("#4C7BD0", "tee", "none"), st("idle", ""));
+const soloEmp = (id, name, runtime, nodeRef, state = "idle", bubble = "") => emp(id, name, "lead", "dev", "开发", runtime, nodeRef, look("#4C7BD0", "tee", "none"), st(state, bubble));
 const solo = (pid, title, status, runtime, empl, session) => ({
   ...thread(1, title, status, { members: [empl], opened_by: "user", dispatch: { opened_by: "user", at: ago(30), source: null } }),
   id: `t${pid}`, project_id: pid, branch: `session/${pid}`, solo: true,
@@ -411,7 +412,7 @@ const solo = (pid, title, status, runtime, empl, session) => ({
 });
 export const sessionThreads = [
   solo("s1", "修复登录后的跳转", "running", "claude", soloEmp("es1", "dev-1", "claude", RC), { context_used: 77000, context_max: 1000000 }),
-  solo("s2", "补齐 Codex 回归用例", "running", "codex", soloEmp("es2", "qa-1", "codex", CVP), { node_id: "n2", context_used: 41000, context_max: 272000 }),
+  solo("s2", "补齐 Codex 回归用例", "running", "codex", soloEmp("es2", "qa-1", "codex", CVP, "running", "跑 go test ./internal/approvals/..."), { node_id: "n2", context_used: 41000, context_max: 272000 }),
   solo("s3", "整理 README", "done", "antigravity", soloEmp("es3", "rev-1", "antigravity", RC), { state: "parked" }),
 ];
 Object.assign(messages, {
