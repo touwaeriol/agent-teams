@@ -33,9 +33,9 @@ type setControlsInput struct {
 
 func (a *API) registerControls(api huma.API) {
 	t := "sessions"
-	huma.Register(api, op("session-controls", "GET", "/api/sessions/{pid}/controls", t,
+	huma.Register(api, op("session-controls", "GET", "/api/projects/{pid}/session-controls", t,
 		summary("The permission mode, model and thinking effort of a session, and what it may switch to")), a.getControls)
-	huma.Register(api, op("set-session-controls", "PUT", "/api/sessions/{pid}/controls", t,
+	huma.Register(api, op("set-session-controls", "PUT", "/api/projects/{pid}/session-controls", t,
 		summary("Switch a session's permission mode, model and/or thinking effort: Claude at once, Codex and Antigravity from the next turn; the answer comes as a session_controls event")), a.setControls)
 }
 

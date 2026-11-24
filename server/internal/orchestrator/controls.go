@@ -74,7 +74,7 @@ type ControlsPending struct {
 	Since          time.Time `json:"since"`
 }
 
-// SessionControls is GET /api/sessions/{pid}/controls: what the session's employee runs in and
+// SessionControls is GET /api/projects/{pid}/session-controls: what the session's employee runs in and
 // what it may switch to.
 type SessionControls struct {
 	ThreadID       string           `json:"thread_id"`
@@ -118,6 +118,16 @@ func soloMode(e core.Employee) string {
 		return "bypassPermissions"
 	}
 	return "default"
+}
+
+// SkipsApprovals reports whether a session's approval requests are allowed without a card: a
+// bypass member's (Bypass), and a session employee's only while its session runs in
+// bypassPermissions (its user may have switched to a mode that asks, #53).
+func SkipsApprovals(e core.Employee, s core.AgentSession) bool {
+	if e.Spec.Solo {
+		return Bypass(e) && s.PermissionMode == "bypassPermissions"
+	}
+	return Bypass(e)
 }
 
 // soloClaude sets a session employee's Claude mode: auto opens as default with prefer_auto (the
@@ -229,7 +239,7 @@ func recordInitControls(ctx context.Context, tx *core.Tx, s core.AgentSession, i
 	return tx.Gorm(ctx).Table("at_agent_sessions").Where("id = ?", s.ID).Updates(set).Error
 }
 
-// ControlsChange is PUT /api/sessions/{pid}/controls: nil fields stay.
+// ControlsChange is PUT /api/projects/{pid}/session-controls: nil fields stay.
 type ControlsChange struct {
 	ProjectID      string
 	PermissionMode *string
@@ -334,15 +344,19 @@ func checkChange(cur SessionControls, in ControlsChange) (ControlsPending, error
 		}
 		ch.Model, model = *in.Model, *in.Model
 	}
+	modes := cur.Modes
+	if ch.Model != "" {
+		modes = modesFor(cur.Runtime, cur.Models, model, slices.ContainsFunc(cur.Modes, func(m ModeOption) bool { return m.ID == "bypassPermissions" }))
+	}
+	onMenu := func(id string) bool { return slices.ContainsFunc(modes, func(m ModeOption) bool { return m.ID == id }) }
 	if in.PermissionMode != nil && *in.PermissionMode != "" && *in.PermissionMode != cur.PermissionMode {
-		modes := cur.Modes
-		if ch.Model != "" {
-			modes = modesFor(cur.Runtime, cur.Models, model, slices.ContainsFunc(cur.Modes, func(m ModeOption) bool { return m.ID == "bypassPermissions" }))
-		}
-		if !slices.ContainsFunc(modes, func(m ModeOption) bool { return m.ID == *in.PermissionMode }) {
+		if !onMenu(*in.PermissionMode) {
 			return ch, &ControlError{"permission_mode", fmt.Sprintf("这个会话不能用 %s 模式", *in.PermissionMode)}
 		}
 		ch.PermissionMode = *in.PermissionMode
+	}
+	if ch.Model != "" && ch.PermissionMode == "" && cur.PermissionMode != "" && !onMenu(cur.PermissionMode) {
+		return ch, &ControlError{"model", fmt.Sprintf("模型 %s 不支持当前的%s模式，请先换一个权限模式", model, modeLabels[cur.PermissionMode])}
 	}
 	if in.Effort != nil && *in.Effort != "" && (*in.Effort != cur.Effort || ch.Model != "") {
 		if !runtimes.Of(cur.Runtime).Efforts {

@@ -146,7 +146,7 @@ func (e *Engine) decide(ctx context.Context, tx *core.Tx, sc core.SessionContext
 		e.log.Warn("approval hit the fixed deny list", "employee", sc.Employee.Name, "tool", m.ToolName, "reason", reason)
 		return e.resolve(ctx, tx, q, "deny", DecidedDenyList, "平台禁止这个操作："+reason)
 	}
-	if orchestrator.Bypass(sc.Employee) {
+	if orchestrator.SkipsApprovals(sc.Employee, sc.Session) {
 		// bypass sessions do not ask (the daemon allows in canUseTool); an old daemon might.
 		e.log.Warn("approval from a bypass session", "employee", sc.Employee.Name)
 		return e.resolve(ctx, tx, q, "allow", DecidedRoleSkip, "")
