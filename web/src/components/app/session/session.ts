@@ -32,3 +32,8 @@ export function sessionReposPayload(list: SessionRepo[]) {
 export function withBranches(list: RepoRef[], prev: SessionRepo[]): SessionRepo[] {
   return list.map((r) => ({ ...r, branch: prev.find((p) => p.repo.toLowerCase() === r.repo.toLowerCase())?.branch ?? "" }));
 }
+
+/** Thread wording said of a session, where the one employee is talked to directly. */
+export function sessionText(text: string): string {
+  return text.replace(/组长/g, "员工").replace(/讨论串/g, "会话");
+}

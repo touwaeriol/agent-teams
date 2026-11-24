@@ -6239,6 +6239,11 @@
       "SessionInput": {
         "additionalProperties": false,
         "properties": {
+          "branch": {
+            "description": "Name of the work branch (after session/\u003cid\u003e-); '' = from the title, or the repositories when the title has no Latin letters",
+            "maxLength": 60,
+            "type": "string"
+          },
           "message": {
             "description": "The task: the employee's first message",
             "maxLength": 50000,

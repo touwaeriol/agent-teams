@@ -4,10 +4,14 @@ import { computed } from "vue";
 import type { ThreadView } from "@/api/views";
 import Dot from "../Dot.vue";
 import Spin from "../Spin.vue";
+import { sessionText } from "../session/session";
 import { typingLine } from "./detail";
 
-const props = defineProps<{ thread: ThreadView }>();
-const line = computed(() => typingLine(props.thread));
+const props = defineProps<{ thread: ThreadView; session?: boolean }>();
+const line = computed(() => {
+  const l = typingLine(props.thread);
+  return l && props.session ? { ...l, text: sessionText(l.text) } : l;
+});
 </script>
 
 <template>

@@ -24,7 +24,10 @@ const message = ref("");
 const repos = ref<SessionRepo[]>([]);
 const role = ref("");
 const model = ref("");
-const node = ref("");
+/** "auto" = picked by the platform (el-select shows "" as nothing picked). */
+const AUTO = "auto";
+const node = ref(AUTO);
+const branch = ref("");
 const members = computed(() => (roles.data.value?.roles ?? []).filter((r) => r.tier === "member"));
 watch(
   members,
@@ -45,7 +48,8 @@ const create = useAction(
       repos: sessionReposPayload(repos.value),
       role: role.value,
       model: model.value.trim() || undefined,
-      node_id: node.value || undefined,
+      node_id: node.value === AUTO ? undefined : node.value,
+      branch: branch.value.trim() || undefined,
     }),
   { invalidate: [keys.projects], success: (s) => `会话「${s.project.name}」已开始`, onSuccess: (s) => void router.push(`/sessions/${s.project.id}`) },
 );
@@ -75,6 +79,9 @@ const submit = () => {
         <CardTitle>代码仓库</CardTitle>
         <p class="text-[13px] text-muted-foreground">每个仓库是工作目录下的一个子文件夹；员工会从选的分支切出自己的会话分支（session/…），改完推上去、开 PR。会话里随时可以增删仓库。</p>
         <SessionRepos v-model="repos" />
+        <Field v-slot="{ id }" label="工作分支名（可选）" hint="会建成 session/<编号>-<名字>；不填就取标题里的英文，标题全是中文时用仓库名。">
+          <el-input :id="id" v-model="branch" maxlength="60" placeholder="例如：fix-login-redirect" class="sm:max-w-[320px]" />
+        </Field>
       </Card>
       <Card class="gap-4">
         <CardTitle>谁来做</CardTitle>
@@ -89,7 +96,7 @@ const submit = () => {
           </Field>
           <Field v-slot="{ id }" label="节点" hint="自动：按用量和会话数在在线节点间分摊">
             <el-select :id="id" v-model="node" class="at-select-36">
-              <el-option value="" label="自动分配" />
+              <el-option :value="AUTO" label="自动分配" />
               <el-option v-for="n in nodeList" :key="n.id" :value="n.id" :label="n.online ? n.name : `${n.name}（离线）`" />
             </el-select>
           </Field>

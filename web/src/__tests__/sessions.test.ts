@@ -1,6 +1,6 @@
 // 会话 (multi-repository sessions): the helpers behind the sidebar rows, the new-session form and 工作现场.
 import { describe, expect, it } from "vitest";
-import { homeOf, isSession, repoDir, sessionReposPayload, withBranches } from "@/components/app/session/session";
+import { homeOf, isSession, repoDir, sessionReposPayload, sessionText, withBranches } from "@/components/app/session/session";
 
 describe("sessions", () => {
   it("routes a session to its own page and a project to its board", () => {
@@ -31,5 +31,9 @@ describe("sessions", () => {
       { repo: "org/Web", git_connection_id: "c1", branch: "v2" },
       { repo: "org/api", git_connection_id: "c1", branch: "" },
     ]);
+  });
+  it("says 员工 and 会话 instead of the thread words", () => {
+    expect(sessionText("组长正在阅读任务…")).toBe("员工正在阅读任务…");
+    expect(sessionText("发送消息会重新打开讨论串")).toBe("发送消息会重新打开会话");
   });
 });

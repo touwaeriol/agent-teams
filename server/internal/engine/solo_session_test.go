@@ -52,8 +52,8 @@ func TestSessionMultiRepo(t *testing.T) {
 
 	emp, open := expectOpen(t, w, n, "lead-1")
 	preps := prepares(t, w, n, 2)
-	branch := "session/" + p.ID[:8] + "-"
-	if !strings.HasPrefix(preps["o/r"].Branch, branch) || *preps["o/r"].Base != "develop" || *preps["o/web"].Base != "main" ||
+	branch := "session/" + p.ID[:8] + "-r-web" // a Chinese title: named after the repositories
+	if preps["o/r"].Branch != branch || *preps["o/r"].Base != "develop" || *preps["o/web"].Base != "main" ||
 		!strings.HasSuffix(string(preps["o/web"].Cwd), "/threads/1/lead/o__web") {
 		t.Fatalf("checkouts %+v %+v", preps["o/r"], preps["o/web"])
 	}

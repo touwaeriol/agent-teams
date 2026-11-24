@@ -32,6 +32,7 @@ type SessionInput struct {
 	Role    string           `json:"role,omitempty" maxLength:"64" doc:"Member role template the employee is made from; '' = the first member role"`
 	Model   string           `json:"model,omitempty" maxLength:"100" doc:"'' = the role's model"`
 	NodeID  string           `json:"node_id,omitempty" maxLength:"64" doc:"Run on this node; '' = picked automatically (most quota left)"`
+	Branch  string           `json:"branch,omitempty" maxLength:"60" doc:"Name of the work branch (after session/<id>-); '' = from the title, or the repositories when the title has no Latin letters"`
 }
 
 // WorkSessionView is the 多仓库会话 just created (SessionView is the login session).
@@ -114,7 +115,7 @@ func (s *Server) sessionStart(ctx context.Context, userID string, b SessionInput
 	if title == "" {
 		title = titleOf(b.Message)
 	}
-	return platform.SessionStart{Title: title, Role: role, Model: strings.TrimSpace(b.Model), NodeID: b.NodeID}, nil
+	return platform.SessionStart{Title: title, Role: role, Model: strings.TrimSpace(b.Model), NodeID: b.NodeID, Branch: strings.TrimSpace(b.Branch)}, nil
 }
 
 // sessionRole is the user's member role template named name (the first member role for ”).

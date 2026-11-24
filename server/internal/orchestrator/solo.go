@@ -27,6 +27,7 @@ type SessionRequest struct {
 	Role              store.Role  // the member role template the employee is made from
 	Model             string      // '' = the role's model
 	NodeID            string      // '' = scheduled like any employee (lowest load score, pickNode)
+	Branch            string      // the work branch's name the user typed ('' = from the title or the repositories)
 	Repos             []RepoFocus // every repository with the branch picked for it ('' = default)
 }
 
@@ -50,13 +51,30 @@ func SessionRole(r store.Role, model, nodeID string) store.Role {
 }
 
 // SessionBranch is the branch a session's employee works on in every repository. It carries the
-// project id so that sessions on the same repository never share a branch.
-func SessionBranch(projectID, title string) string {
+// project id so that sessions on the same repository never share a branch. Its name is the one the
+// user typed, else the title's; a title with no Latin letters or digits (a Chinese one) names it
+// after the repositories instead, so that it still says what it is about.
+func SessionBranch(projectID, name, title string, repos []RepoFocus) string {
 	id := projectID
 	if len(id) > 8 {
 		id = id[:8]
 	}
-	return fmt.Sprintf("session/%s-%s", id, core.Slug(title))
+	slug := ""
+	for _, s := range []string{name, title, repoWords(repos)} {
+		if slug = core.Slug(s); slug != "work" {
+			break
+		}
+	}
+	return fmt.Sprintf("session/%s-%s", id, slug)
+}
+
+// repoWords is the repositories' own names (no owner), e.g. "web api".
+func repoWords(repos []RepoFocus) string {
+	words := make([]string, 0, len(repos))
+	for _, r := range repos {
+		words = append(words, r.Repo[strings.LastIndex(r.Repo, "/")+1:])
+	}
+	return strings.Join(words, " ")
 }
 
 // OpenSession opens the session's thread and starts it (within the user's running-thread
@@ -64,7 +82,7 @@ func SessionBranch(projectID, title string) string {
 func (o *Orchestrator) OpenSession(ctx context.Context, req SessionRequest) (core.Thread, error) {
 	role := SessionRole(req.Role, req.Model, req.NodeID)
 	return o.OpenThread(ctx, ThreadRequest{UserID: req.UserID, ProjectID: req.ProjectID, Title: req.Title,
-		Brief: req.Message, OpenedBy: "user", Repos: req.Repos, Solo: &role, Branch: SessionBranch(req.ProjectID, req.Title)})
+		Brief: req.Message, OpenedBy: "user", Repos: req.Repos, Solo: &role, Branch: SessionBranch(req.ProjectID, req.Branch, req.Title, req.Repos)})
 }
 
 // startSolo delivers a session's first message: the brief is the user's own words, shown in the
