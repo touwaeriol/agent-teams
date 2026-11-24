@@ -21,7 +21,7 @@ const text = computed(() => (narrow.value ? parts.value.agent : [parts.value.nod
 <template>
   <span
     v-if="parts.agent"
-    class="inline-flex h-7 min-w-0 max-w-[260px] cursor-default items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground"
+    :class="['inline-flex h-7 max-w-[260px] cursor-default items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground', narrow ? 'shrink-0' : 'min-w-0']"
     :title="`节点：${parts.node || '等待分配'}，岗位：${parts.role}，Agent：${parts.agent}（会话开始后不能再改）`"
     data-testid="session-fixed"
   >
