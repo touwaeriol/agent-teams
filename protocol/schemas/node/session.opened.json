@@ -101,6 +101,19 @@
           "items": {
             "$ref": "#/$defs/SlashCommand"
           }
+        },
+        "effort": {
+          "description": "The thinking effort the session runs with ('' or absent: the model's default).",
+          "type": "string",
+          "maxLength": 32
+        },
+        "models": {
+          "description": "Models the session can switch to (Claude: initialize models; Codex: model/list; Antigravity: the session's availableModels). Absent when the runtime did not say.",
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/ModelOption"
+          }
         }
       }
     },
@@ -138,6 +151,55 @@
         },
         "status": {
           "type": "string"
+        }
+      }
+    },
+    "ModelOption": {
+      "title": "ModelOption",
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "description": "The value session.set_mode takes.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "resolved": {
+          "description": "Claude: the wire model id an alias resolves to.",
+          "type": "string",
+          "maxLength": 200
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "efforts": {
+          "description": "Thinking effort levels the model takes; empty: none to choose.",
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 32
+          }
+        },
+        "default_effort": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "supports_auto": {
+          "description": "Claude: the model supports the auto permission mode.",
+          "type": "boolean"
+        },
+        "default": {
+          "description": "The runtime's default model.",
+          "type": "boolean"
         }
       }
     }

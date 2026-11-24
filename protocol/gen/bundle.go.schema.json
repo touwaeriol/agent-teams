@@ -371,7 +371,7 @@
     },
     "PermissionMode": {
       "title": "PermissionMode",
-      "description": "Claude permission mode; always explicit. The console opens writing members in bypassPermissions (with allow_dangerously_skip_permissions) or default (ask roles), and the coordinator, lead and read-only roles in dontAsk. auto is kept for old consoles only.",
+      "description": "Claude permission mode; always explicit. The console opens writing members in bypassPermissions (with allow_dangerously_skip_permissions) or default (ask roles), and the coordinator, lead and read-only roles in dontAsk. A session's employee (多仓库会话) may run in any of default, acceptEdits, plan, auto (the SDK's classifier, when the model supports it) and bypassPermissions.",
       "type": "string",
       "enum": [
         "default",
@@ -2167,6 +2167,58 @@
         }
       }
     },
+    "SessionModeSet": {
+      "title": "SessionModeSet",
+      "description": "Result of session.set_mode (daemons with session_controls): what the session runs in now. ok=false: nothing of the change applied (error says why); the fields then are what it still runs in.",
+      "type": "object",
+      "required": [
+        "session_id",
+        "open_gen",
+        "ok"
+      ],
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "open_gen": {
+          "$ref": "#/$defs/OpenGen"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "permission_mode": {
+          "description": "Claude: the SDK mode; Codex and Antigravity: the set_mode value they map from.",
+          "type": "string",
+          "maxLength": 64
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "effort": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "applies": {
+          "description": "now: in force already; next_turn: from the session's next turn; next_open: the session is not running, it opens with it.",
+          "type": "string",
+          "enum": [
+            "now",
+            "next_turn",
+            "next_open"
+          ]
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      }
+    },
     "EmployeeRef": {
       "title": "EmployeeRef",
       "type": "object",
@@ -2302,6 +2354,10 @@
           "items": {
             "type": "string"
           }
+        },
+        "prefer_auto": {
+          "description": "A session's employee: open in permission_mode, then switch to auto once the session's model reports supportsAutoMode (init.permission_mode says which it runs in).",
+          "type": "boolean"
         }
       }
     },
@@ -2409,6 +2465,19 @@
               "encoding/json"
             ]
           }
+        },
+        "effort": {
+          "description": "Reasoning effort for thread/start; null or absent: the model's default.",
+          "type": "string",
+          "maxLength": 32
+        },
+        "approvals_reviewer": {
+          "description": "Who reviews approval requests: auto_review lets Codex's reviewer subagent decide (a session's 自动 mode); absent: the user.",
+          "type": "string",
+          "enum": [
+            "user",
+            "auto_review"
+          ]
         }
       }
     },
@@ -2895,6 +2964,19 @@
           "items": {
             "$ref": "#/$defs/SlashCommand"
           }
+        },
+        "effort": {
+          "description": "The thinking effort the session runs with ('' or absent: the model's default).",
+          "type": "string",
+          "maxLength": 32
+        },
+        "models": {
+          "description": "Models the session can switch to (Claude: initialize models; Codex: model/list; Antigravity: the session's availableModels). Absent when the runtime did not say.",
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/ModelOption"
+          }
         }
       }
     },
@@ -2932,6 +3014,55 @@
         },
         "status": {
           "type": "string"
+        }
+      }
+    },
+    "ModelOption": {
+      "title": "ModelOption",
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "description": "The value session.set_mode takes.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "resolved": {
+          "description": "Claude: the wire model id an alias resolves to.",
+          "type": "string",
+          "maxLength": 200
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "efforts": {
+          "description": "Thinking effort levels the model takes; empty: none to choose.",
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 32
+          }
+        },
+        "default_effort": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "supports_auto": {
+          "description": "Claude: the model supports the auto permission mode.",
+          "type": "boolean"
+        },
+        "default": {
+          "description": "The runtime's default model.",
+          "type": "boolean"
         }
       }
     },
@@ -3044,7 +3175,7 @@
     },
     "SessionSetMode": {
       "title": "SessionSetMode",
-      "description": "Change permission mode and/or model of a session.",
+      "description": "Change the permission mode, model and/or effort of a session. Claude applies them at once; Codex and Antigravity from the next turn. Daemons with the session_controls feature answer with session.mode_set.",
       "type": "object",
       "required": [
         "session_id"
@@ -3059,11 +3190,24 @@
             "default",
             "acceptEdits",
             "bypassPermissions",
+            "plan",
             "auto"
-          ]
+          ],
+          "description": "Claude: the SDK permission mode. Codex: auto = workspace-write + on-request with approvals reviewed by Codex's auto_review, default = workspace-write + untrusted, bypassPermissions = danger-full-access + never. Antigravity: default = ask, bypassPermissions = auto."
         },
         "model": {
           "type": "string"
+        },
+        "effort": {
+          "description": "Thinking effort (Claude effortLevel, Codex reasoning effort); null leaves it. Antigravity has none (the effort is part of the model id).",
+          "type": "string",
+          "maxLength": 32
+        },
+        "request_id": {
+          "description": "Echoed in session.mode_set.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
         }
       }
     },

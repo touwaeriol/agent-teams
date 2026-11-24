@@ -143,7 +143,7 @@
     },
     "PermissionMode": {
       "title": "PermissionMode",
-      "description": "Claude permission mode; always explicit. The console opens writing members in bypassPermissions (with allow_dangerously_skip_permissions) or default (ask roles), and the coordinator, lead and read-only roles in dontAsk. auto is kept for old consoles only.",
+      "description": "Claude permission mode; always explicit. The console opens writing members in bypassPermissions (with allow_dangerously_skip_permissions) or default (ask roles), and the coordinator, lead and read-only roles in dontAsk. A session's employee (多仓库会话) may run in any of default, acceptEdits, plan, auto (the SDK's classifier, when the model supports it) and bypassPermissions.",
       "type": "string",
       "enum": [
         "default",

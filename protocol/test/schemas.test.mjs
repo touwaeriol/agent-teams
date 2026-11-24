@@ -21,7 +21,7 @@ const EXPECTED_TYPES = {
     "ssh.cert_response", "ssh.servers_update", "session.export",
   ],
   node_to_console: [
-    "hello", "sessions.report", "session.opened", "session.delivered", "session.compacted", "session.interrupted", "session.closed",
+    "hello", "sessions.report", "session.opened", "session.delivered", "session.compacted", "session.interrupted", "session.mode_set", "session.closed",
     "session.event", "session.state", "stream.delta", "approval.request", "approval.ack", "approval.cancel",
     "tool.call", "tool.cancel", "file.chunk", "git.result", "cred.request", "node.stats", "node.usage", "node.runtimes", "node.upgrade_result", "log",
     "ssh.cert_request", "session.exported", "session.digest",

@@ -41,6 +41,7 @@ export interface MessageBodies {
   "session.exported": T.SessionExported;
   "session.interrupt": T.SessionInterrupt;
   "session.interrupted": T.SessionInterrupted;
+  "session.mode_set": T.SessionModeSet;
   "session.open": T.SessionOpen;
   "session.opened": T.SessionOpened;
   "session.release": T.SessionRelease;
@@ -108,6 +109,7 @@ export const MESSAGE_META: { readonly [K in MessageType]: MessageMeta } = {
   "session.exported": { direction: "node_to_console", reliable: true, key: ["export_id"] },
   "session.interrupt": { direction: "console_to_node", reliable: true, key: ["id"] },
   "session.interrupted": { direction: "node_to_console", reliable: true, key: [] },
+  "session.mode_set": { direction: "node_to_console", reliable: true, key: ["session_id","request_id"] },
   "session.open": { direction: "console_to_node", reliable: true, key: ["session_id","open_gen"] },
   "session.opened": { direction: "node_to_console", reliable: true, key: ["session_id","open_gen"] },
   "session.release": { direction: "console_to_node", reliable: true, key: ["session_id","open_gen"] },

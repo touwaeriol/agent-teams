@@ -1171,6 +1171,11 @@ type ClaudeSessionOptions struct {
 	// PermissionMode corresponds to the JSON schema field "permission_mode".
 	PermissionMode PermissionMode `json:"permission_mode"`
 
+	// A session's employee: open in permission_mode, then switch to auto once the
+	// session's model reports supportsAutoMode (init.permission_mode says which it
+	// runs in).
+	PreferAuto *bool `json:"prefer_auto,omitempty,omitzero"`
+
 	// ProtectedRefs corresponds to the JSON schema field "protected_refs".
 	ProtectedRefs []string `json:"protected_refs,omitempty,omitzero"`
 
@@ -1343,6 +1348,10 @@ type CodexSessionOptions struct {
 	// ApprovalPolicy corresponds to the JSON schema field "approval_policy".
 	ApprovalPolicy CodexSessionOptionsApprovalPolicy `json:"approval_policy"`
 
+	// Who reviews approval requests: auto_review lets Codex's reviewer subagent
+	// decide (a session's 自动 mode); absent: the user.
+	ApprovalsReviewer *CodexSessionOptionsApprovalsReviewer `json:"approvals_reviewer,omitempty,omitzero"`
+
 	// Extra thread/start config (e.g. sandbox_workspace_write.writable_roots);
 	// mcp_servers.platform is filled in by the daemon.
 	Config *json.RawMessage `json:"config,omitempty,omitzero"`
@@ -1350,6 +1359,9 @@ type CodexSessionOptions struct {
 	// DeveloperInstructions corresponds to the JSON schema field
 	// "developer_instructions".
 	DeveloperInstructions *string `json:"developer_instructions,omitempty,omitzero"`
+
+	// Reasoning effort for thread/start; null or absent: the model's default.
+	Effort *string `json:"effort,omitempty,omitzero"`
 
 	// Model corresponds to the JSON schema field "model".
 	Model string `json:"model"`
@@ -1389,6 +1401,36 @@ func (j *CodexSessionOptionsApprovalPolicy) UnmarshalJSON(value []byte) error {
 		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_CodexSessionOptionsApprovalPolicy, v)
 	}
 	*j = CodexSessionOptionsApprovalPolicy(v)
+	return nil
+}
+
+type CodexSessionOptionsApprovalsReviewer string
+
+const CodexSessionOptionsApprovalsReviewerAutoReview CodexSessionOptionsApprovalsReviewer = "auto_review"
+const CodexSessionOptionsApprovalsReviewerUser CodexSessionOptionsApprovalsReviewer = "user"
+
+var enumValues_CodexSessionOptionsApprovalsReviewer = []interface{}{
+	"user",
+	"auto_review",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *CodexSessionOptionsApprovalsReviewer) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_CodexSessionOptionsApprovalsReviewer {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_CodexSessionOptionsApprovalsReviewer, v)
+	}
+	*j = CodexSessionOptionsApprovalsReviewer(v)
 	return nil
 }
 
@@ -1443,6 +1485,9 @@ func (j *CodexSessionOptions) UnmarshalJSON(value []byte) error {
 	var plain Plain
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
+	}
+	if plain.Effort != nil && utf8.RuneCountInString(string(*plain.Effort)) > 32 {
+		return fmt.Errorf("field %s length: must be <= %d", "effort", 32)
 	}
 	*j = CodexSessionOptions(plain)
 	return nil
@@ -4533,6 +4578,71 @@ func (j *MessageThreadInput) UnmarshalJSON(value []byte) error {
 		return fmt.Errorf("field %s length: must be >= %d", "text", 1)
 	}
 	*j = MessageThreadInput(plain)
+	return nil
+}
+
+type ModelOption struct {
+	// The runtime's default model.
+	Default *bool `json:"default,omitempty,omitzero"`
+
+	// DefaultEffort corresponds to the JSON schema field "default_effort".
+	DefaultEffort *string `json:"default_effort,omitempty,omitzero"`
+
+	// Description corresponds to the JSON schema field "description".
+	Description *string `json:"description,omitempty,omitzero"`
+
+	// Thinking effort levels the model takes; empty: none to choose.
+	Efforts []string `json:"efforts,omitempty,omitzero"`
+
+	// The value session.set_mode takes.
+	ID string `json:"id"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name *string `json:"name,omitempty,omitzero"`
+
+	// Claude: the wire model id an alias resolves to.
+	Resolved *string `json:"resolved,omitempty,omitzero"`
+
+	// Claude: the model supports the auto permission mode.
+	SupportsAuto *bool `json:"supports_auto,omitempty,omitzero"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ModelOption) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["id"]; raw != nil && !ok {
+		return fmt.Errorf("field id in ModelOption: required")
+	}
+	type Plain ModelOption
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.DefaultEffort != nil && utf8.RuneCountInString(string(*plain.DefaultEffort)) > 32 {
+		return fmt.Errorf("field %s length: must be <= %d", "default_effort", 32)
+	}
+	if plain.Description != nil && utf8.RuneCountInString(string(*plain.Description)) > 1000 {
+		return fmt.Errorf("field %s length: must be <= %d", "description", 1000)
+	}
+	if len(plain.Efforts) > 20 {
+		return fmt.Errorf("field %s length: must be <= %d", "efforts", 20)
+	}
+	if utf8.RuneCountInString(string(plain.ID)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "id", 1)
+	}
+	if utf8.RuneCountInString(string(plain.ID)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "id", 200)
+	}
+	if plain.Name != nil && utf8.RuneCountInString(string(*plain.Name)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "name", 200)
+	}
+	if plain.Resolved != nil && utf8.RuneCountInString(string(*plain.Resolved)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "resolved", 200)
+	}
+	*j = ModelOption(plain)
 	return nil
 }
 
@@ -8037,11 +8147,19 @@ type SessionInit struct {
 	// builtin ones. Absent for Codex.
 	Commands []SlashCommand `json:"commands,omitempty,omitzero"`
 
+	// The thinking effort the session runs with ('' or absent: the model's default).
+	Effort *string `json:"effort,omitempty,omitzero"`
+
 	// McpServers corresponds to the JSON schema field "mcp_servers".
 	McpServers []McpServerStatus `json:"mcp_servers,omitempty,omitzero"`
 
 	// Model corresponds to the JSON schema field "model".
 	Model *string `json:"model,omitempty,omitzero"`
+
+	// Models the session can switch to (Claude: initialize models; Codex: model/list;
+	// Antigravity: the session's availableModels). Absent when the runtime did not
+	// say.
+	Models []ModelOption `json:"models,omitempty,omitzero"`
 
 	// PermissionMode corresponds to the JSON schema field "permission_mode".
 	PermissionMode *string `json:"permission_mode,omitempty,omitzero"`
@@ -8066,6 +8184,12 @@ func (j *SessionInit) UnmarshalJSON(value []byte) error {
 	}
 	if len(plain.Commands) > 200 {
 		return fmt.Errorf("field %s length: must be <= %d", "commands", 200)
+	}
+	if plain.Effort != nil && utf8.RuneCountInString(string(*plain.Effort)) > 32 {
+		return fmt.Errorf("field %s length: must be <= %d", "effort", 32)
+	}
+	if len(plain.Models) > 100 {
+		return fmt.Errorf("field %s length: must be <= %d", "models", 100)
 	}
 	*j = SessionInit(plain)
 	return nil
@@ -8157,6 +8281,113 @@ func (j *SessionInterrupted) UnmarshalJSON(value []byte) error {
 		return err
 	}
 	*j = SessionInterrupted(plain)
+	return nil
+}
+
+// Result of session.set_mode (daemons with session_controls): what the session
+// runs in now. ok=false: nothing of the change applied (error says why); the
+// fields then are what it still runs in.
+type SessionModeSet struct {
+	// now: in force already; next_turn: from the session's next turn; next_open: the
+	// session is not running, it opens with it.
+	Applies *SessionModeSetApplies `json:"applies,omitempty,omitzero"`
+
+	// Effort corresponds to the JSON schema field "effort".
+	Effort *string `json:"effort,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Model corresponds to the JSON schema field "model".
+	Model *string `json:"model,omitempty,omitzero"`
+
+	// Ok corresponds to the JSON schema field "ok".
+	Ok bool `json:"ok"`
+
+	// OpenGen corresponds to the JSON schema field "open_gen".
+	OpenGen OpenGen `json:"open_gen"`
+
+	// Claude: the SDK mode; Codex and Antigravity: the set_mode value they map from.
+	PermissionMode *string `json:"permission_mode,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID SessionID `json:"session_id"`
+}
+
+type SessionModeSetApplies string
+
+const SessionModeSetAppliesNextOpen SessionModeSetApplies = "next_open"
+const SessionModeSetAppliesNextTurn SessionModeSetApplies = "next_turn"
+const SessionModeSetAppliesNow SessionModeSetApplies = "now"
+
+var enumValues_SessionModeSetApplies = []interface{}{
+	"now",
+	"next_turn",
+	"next_open",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SessionModeSetApplies) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_SessionModeSetApplies {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_SessionModeSetApplies, v)
+	}
+	*j = SessionModeSetApplies(v)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SessionModeSet) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["ok"]; raw != nil && !ok {
+		return fmt.Errorf("field ok in SessionModeSet: required")
+	}
+	if _, ok := raw["open_gen"]; raw != nil && !ok {
+		return fmt.Errorf("field open_gen in SessionModeSet: required")
+	}
+	if _, ok := raw["session_id"]; raw != nil && !ok {
+		return fmt.Errorf("field session_id in SessionModeSet: required")
+	}
+	type Plain SessionModeSet
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.Effort != nil && utf8.RuneCountInString(string(*plain.Effort)) > 32 {
+		return fmt.Errorf("field %s length: must be <= %d", "effort", 32)
+	}
+	if plain.Error != nil && utf8.RuneCountInString(string(*plain.Error)) > 1000 {
+		return fmt.Errorf("field %s length: must be <= %d", "error", 1000)
+	}
+	if plain.Model != nil && utf8.RuneCountInString(string(*plain.Model)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "model", 200)
+	}
+	if plain.PermissionMode != nil && utf8.RuneCountInString(string(*plain.PermissionMode)) > 64 {
+		return fmt.Errorf("field %s length: must be <= %d", "permission_mode", 64)
+	}
+	if plain.RequestID != nil && utf8.RuneCountInString(string(*plain.RequestID)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "request_id", 1)
+	}
+	if plain.RequestID != nil && utf8.RuneCountInString(string(*plain.RequestID)) > 64 {
+		return fmt.Errorf("field %s length: must be <= %d", "request_id", 64)
+	}
+	*j = SessionModeSet(plain)
 	return nil
 }
 
@@ -8712,13 +8943,25 @@ func (j *SessionSend) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// Change permission mode and/or model of a session.
+// Change the permission mode, model and/or effort of a session. Claude applies
+// them at once; Codex and Antigravity from the next turn. Daemons with the
+// session_controls feature answer with session.mode_set.
 type SessionSetMode struct {
+	// Thinking effort (Claude effortLevel, Codex reasoning effort); null leaves it.
+	// Antigravity has none (the effort is part of the model id).
+	Effort *string `json:"effort,omitempty,omitzero"`
+
 	// Model corresponds to the JSON schema field "model".
 	Model *string `json:"model,omitempty,omitzero"`
 
-	// PermissionMode corresponds to the JSON schema field "permission_mode".
+	// Claude: the SDK permission mode. Codex: auto = workspace-write + on-request
+	// with approvals reviewed by Codex's auto_review, default = workspace-write +
+	// untrusted, bypassPermissions = danger-full-access + never. Antigravity: default
+	// = ask, bypassPermissions = auto.
 	PermissionMode *SessionSetModePermissionMode `json:"permission_mode,omitempty,omitzero"`
+
+	// Echoed in session.mode_set.
+	RequestID *string `json:"request_id,omitempty,omitzero"`
 
 	// SessionID corresponds to the JSON schema field "session_id".
 	SessionID SessionID `json:"session_id"`
@@ -8730,11 +8973,13 @@ const SessionSetModePermissionModeAcceptEdits SessionSetModePermissionMode = "ac
 const SessionSetModePermissionModeAuto SessionSetModePermissionMode = "auto"
 const SessionSetModePermissionModeBypassPermissions SessionSetModePermissionMode = "bypassPermissions"
 const SessionSetModePermissionModeDefault SessionSetModePermissionMode = "default"
+const SessionSetModePermissionModePlan SessionSetModePermissionMode = "plan"
 
 var enumValues_SessionSetModePermissionMode = []interface{}{
 	"default",
 	"acceptEdits",
 	"bypassPermissions",
+	"plan",
 	"auto",
 }
 
@@ -8771,6 +9016,15 @@ func (j *SessionSetMode) UnmarshalJSON(value []byte) error {
 	var plain Plain
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
+	}
+	if plain.Effort != nil && utf8.RuneCountInString(string(*plain.Effort)) > 32 {
+		return fmt.Errorf("field %s length: must be <= %d", "effort", 32)
+	}
+	if plain.RequestID != nil && utf8.RuneCountInString(string(*plain.RequestID)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "request_id", 1)
+	}
+	if plain.RequestID != nil && utf8.RuneCountInString(string(*plain.RequestID)) > 64 {
+		return fmt.Errorf("field %s length: must be <= %d", "request_id", 64)
 	}
 	*j = SessionSetMode(plain)
 	return nil

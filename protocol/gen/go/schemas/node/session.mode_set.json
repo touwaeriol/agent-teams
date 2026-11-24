@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/session.mode_set.json",
+  "title": "SessionModeSet",
+  "description": "Result of session.set_mode (daemons with session_controls): what the session runs in now. ok=false: nothing of the change applied (error says why); the fields then are what it still runs in.",
+  "x-direction": "node_to_console",
+  "x-key": [
+    "session_id",
+    "request_id"
+  ],
+  "x-reliable": true,
+  "type": "object",
+  "required": [
+    "session_id",
+    "open_gen",
+    "ok"
+  ],
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "open_gen": {
+      "$ref": "common.json#/$defs/OpenGen"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "permission_mode": {
+      "description": "Claude: the SDK mode; Codex and Antigravity: the set_mode value they map from.",
+      "type": "string",
+      "maxLength": 64
+    },
+    "model": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "effort": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "applies": {
+      "description": "now: in force already; next_turn: from the session's next turn; next_open: the session is not running, it opens with it.",
+      "type": "string",
+      "enum": [
+        "now",
+        "next_turn",
+        "next_open"
+      ]
+    },
+    "error": {
+      "type": "string",
+      "maxLength": 1000
+    }
+  }
+}
