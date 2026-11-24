@@ -5346,7 +5346,7 @@
             "type": "string"
           },
           "runtimes": {
-            "description": "Every runtime the role's employees may run on, in display order; each new session takes the one with the most quota left. Empty: [runtime]",
+            "description": "Every runtime the role's employees may run on, in display order; each new session takes the (runtime, node) pair with the lowest load score (used quota plus live sessions), so sessions spread over them; a runtime whose quota is tight on a node is only used when every pair is. Empty: [runtime]",
             "items": {
               "enum": [
                 "claude",
@@ -6309,7 +6309,7 @@
             "type": "string"
           },
           "node_id": {
-            "description": "Run on this node; '' = picked automatically (most quota left)",
+            "description": "Run on this node; '' = picked automatically (spread over the nodes by load score; nodes whose quota is tight only when all are)",
             "maxLength": 64,
             "type": "string"
           },

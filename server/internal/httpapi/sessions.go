@@ -31,7 +31,7 @@ type SessionInput struct {
 	Repos   []SessionRepoRef `json:"repos" maxItems:"20" doc:"Repositories, all checked out side by side in the employee's directory"`
 	Role    string           `json:"role,omitempty" maxLength:"64" doc:"Member role template the employee is made from; '' = the first member role"`
 	Model   string           `json:"model,omitempty" maxLength:"100" doc:"'' = the role's model"`
-	NodeID  string           `json:"node_id,omitempty" maxLength:"64" doc:"Run on this node; '' = picked automatically (most quota left)"`
+	NodeID  string           `json:"node_id,omitempty" maxLength:"64" doc:"Run on this node; '' = picked automatically (spread over the nodes by load score; nodes whose quota is tight only when all are)"`
 	Branch  string           `json:"branch,omitempty" maxLength:"60" doc:"Name of the work branch (after session/<id>-); '' = from the title, or the repositories when the title has no Latin letters"`
 }
 
