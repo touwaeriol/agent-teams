@@ -15,14 +15,14 @@ const maxRejectsPerMinute = 20
 
 // afterClose messages are still taken for a session closed meanwhile (same open_gen): the live
 // digest of its last turn arrives after a close the turn itself caused (a usage limit, a move).
-var afterClose = map[string]bool{protocol.TypeSessionDigest: true}
+var afterClose = map[string]bool{protocol.TypeSessionDigest: true, protocol.TypeSessionContext: true}
 
 // terminal messages about a session that is already closed are dropped quietly.
 var terminal = map[string]bool{
 	protocol.TypeSessionClosed: true, protocol.TypeSessionState: true, protocol.TypeApprovalCancel: true,
 	protocol.TypeToolCancel: true, protocol.TypeApprovalAck: true, protocol.TypeSessionInterrupted: true,
 	protocol.TypeSessionDelivered: true, protocol.TypeSessionEvent: true, protocol.TypeStreamDelta: true,
-	protocol.TypeSessionsReport: true,
+	protocol.TypeSessionsReport: true, protocol.TypeSessionContext: true,
 }
 
 type refs struct {

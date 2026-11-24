@@ -1625,6 +1625,389 @@ func (j *ContentBlock) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+type ContextCategory struct {
+	// Stable row id (SDK categories[].id): system_prompt, system_tools, mcp_tools,
+	// mcp_instructions, mcp_tools_deferred, system_tools_deferred, custom_agents,
+	// memory_files, skills, messages, autocompact_buffer, compact_buffer, free_space;
+	// later runtimes may add more, absent from an old CLI. Classify on id and kind,
+	// never on name.
+	ID *string `json:"id,omitempty,omitzero"`
+
+	// used: occupies the window; free: the rest of it; buffer: the compaction
+	// reserve; deferred: tool schemas outside the window.
+	Kind ContextCategoryKind `json:"kind"`
+
+	// The runtime's English label.
+	Name string `json:"name"`
+
+	// Tokens corresponds to the JSON schema field "tokens".
+	Tokens int `json:"tokens"`
+}
+
+type ContextCategoryKind string
+
+const ContextCategoryKindBuffer ContextCategoryKind = "buffer"
+const ContextCategoryKindDeferred ContextCategoryKind = "deferred"
+const ContextCategoryKindFree ContextCategoryKind = "free"
+const ContextCategoryKindUsed ContextCategoryKind = "used"
+
+var enumValues_ContextCategoryKind = []interface{}{
+	"used",
+	"free",
+	"buffer",
+	"deferred",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ContextCategoryKind) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_ContextCategoryKind {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_ContextCategoryKind, v)
+	}
+	*j = ContextCategoryKind(v)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ContextCategory) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["kind"]; raw != nil && !ok {
+		return fmt.Errorf("field kind in ContextCategory: required")
+	}
+	if _, ok := raw["name"]; raw != nil && !ok {
+		return fmt.Errorf("field name in ContextCategory: required")
+	}
+	if _, ok := raw["tokens"]; raw != nil && !ok {
+		return fmt.Errorf("field tokens in ContextCategory: required")
+	}
+	type Plain ContextCategory
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.ID != nil && utf8.RuneCountInString(string(*plain.ID)) > 64 {
+		return fmt.Errorf("field %s length: must be <= %d", "id", 64)
+	}
+	if utf8.RuneCountInString(string(plain.Name)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "name", 200)
+	}
+	if 0 > plain.Tokens {
+		return fmt.Errorf("field %s: must be >= %v", "tokens", 0)
+	}
+	*j = ContextCategory(plain)
+	return nil
+}
+
+type ContextDetail struct {
+	// Autocompact is on.
+	AutoCompact *bool `json:"auto_compact,omitempty,omitzero"`
+
+	// AutoCompactThreshold corresponds to the JSON schema field
+	// "auto_compact_threshold".
+	AutoCompactThreshold *int `json:"auto_compact_threshold,omitempty,omitzero"`
+
+	// Rows of the window in the runtime's order (free space and the autocompact
+	// buffer included; deferred rows are outside the window).
+	Categories []ContextCategory `json:"categories"`
+
+	// summary: estimated from the last turn's usage; full: counted with token-count
+	// calls.
+	Detail ContextDetailDetail `json:"detail"`
+
+	// The window measured against: the autocompact window (maxTokens).
+	MaxTokens int `json:"max_tokens"`
+
+	// The mcp_instructions row by server (estimated from the text length).
+	McpServers []ContextMcpServer `json:"mcp_servers,omitempty,omitzero"`
+
+	// Every MCP tool and its tokens (the mcp_tools and mcp_tools_deferred rows).
+	McpTools []ContextMcpTool `json:"mcp_tools,omitempty,omitzero"`
+
+	// MemoryFiles corresponds to the JSON schema field "memory_files".
+	MemoryFiles []ContextMemoryFile `json:"memory_files,omitempty,omitzero"`
+
+	// Model corresponds to the JSON schema field "model".
+	Model *string `json:"model,omitempty,omitzero"`
+
+	// The model's own window (rawMaxTokens).
+	RawMaxTokens *int `json:"raw_max_tokens,omitempty,omitzero"`
+
+	// When the daemon read it (getContextUsage was called). The console drops a
+	// breakdown older than the one it holds (a slow full refresh overtaken by a
+	// turn); absent from an old daemon.
+	SampledAt *time.Time `json:"sampled_at,omitempty,omitzero"`
+
+	// Skills corresponds to the JSON schema field "skills".
+	Skills []ContextSkill `json:"skills,omitempty,omitzero"`
+
+	// Tokens in the context now (totalTokens).
+	TotalTokens int `json:"total_tokens"`
+}
+
+type ContextDetailDetail string
+
+const ContextDetailDetailFull ContextDetailDetail = "full"
+const ContextDetailDetailSummary ContextDetailDetail = "summary"
+
+var enumValues_ContextDetailDetail = []interface{}{
+	"summary",
+	"full",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ContextDetailDetail) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_ContextDetailDetail {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_ContextDetailDetail, v)
+	}
+	*j = ContextDetailDetail(v)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ContextDetail) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["categories"]; raw != nil && !ok {
+		return fmt.Errorf("field categories in ContextDetail: required")
+	}
+	if _, ok := raw["detail"]; raw != nil && !ok {
+		return fmt.Errorf("field detail in ContextDetail: required")
+	}
+	if _, ok := raw["max_tokens"]; raw != nil && !ok {
+		return fmt.Errorf("field max_tokens in ContextDetail: required")
+	}
+	if _, ok := raw["total_tokens"]; raw != nil && !ok {
+		return fmt.Errorf("field total_tokens in ContextDetail: required")
+	}
+	type Plain ContextDetail
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.AutoCompactThreshold != nil && 0 > *plain.AutoCompactThreshold {
+		return fmt.Errorf("field %s: must be >= %v", "auto_compact_threshold", 0)
+	}
+	if len(plain.Categories) > 64 {
+		return fmt.Errorf("field %s length: must be <= %d", "categories", 64)
+	}
+	if 0 > plain.MaxTokens {
+		return fmt.Errorf("field %s: must be >= %v", "max_tokens", 0)
+	}
+	if len(plain.McpServers) > 500 {
+		return fmt.Errorf("field %s length: must be <= %d", "mcp_servers", 500)
+	}
+	if len(plain.McpTools) > 2000 {
+		return fmt.Errorf("field %s length: must be <= %d", "mcp_tools", 2000)
+	}
+	if len(plain.MemoryFiles) > 500 {
+		return fmt.Errorf("field %s length: must be <= %d", "memory_files", 500)
+	}
+	if plain.Model != nil && utf8.RuneCountInString(string(*plain.Model)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "model", 200)
+	}
+	if plain.RawMaxTokens != nil && 0 > *plain.RawMaxTokens {
+		return fmt.Errorf("field %s: must be >= %v", "raw_max_tokens", 0)
+	}
+	if len(plain.Skills) > 1000 {
+		return fmt.Errorf("field %s length: must be <= %d", "skills", 1000)
+	}
+	if 0 > plain.TotalTokens {
+		return fmt.Errorf("field %s: must be >= %v", "total_tokens", 0)
+	}
+	*j = ContextDetail(plain)
+	return nil
+}
+
+type ContextMcpServer struct {
+	// Server corresponds to the JSON schema field "server".
+	Server string `json:"server"`
+
+	// Tokens corresponds to the JSON schema field "tokens".
+	Tokens int `json:"tokens"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ContextMcpServer) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["server"]; raw != nil && !ok {
+		return fmt.Errorf("field server in ContextMcpServer: required")
+	}
+	if _, ok := raw["tokens"]; raw != nil && !ok {
+		return fmt.Errorf("field tokens in ContextMcpServer: required")
+	}
+	type Plain ContextMcpServer
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Server)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "server", 200)
+	}
+	if 0 > plain.Tokens {
+		return fmt.Errorf("field %s: must be >= %v", "tokens", 0)
+	}
+	*j = ContextMcpServer(plain)
+	return nil
+}
+
+type ContextMcpTool struct {
+	// false: deferred (tool search), its schema is not in the window yet.
+	Loaded *bool `json:"loaded,omitempty,omitzero"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// Server corresponds to the JSON schema field "server".
+	Server string `json:"server"`
+
+	// Tokens corresponds to the JSON schema field "tokens".
+	Tokens int `json:"tokens"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ContextMcpTool) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["name"]; raw != nil && !ok {
+		return fmt.Errorf("field name in ContextMcpTool: required")
+	}
+	if _, ok := raw["server"]; raw != nil && !ok {
+		return fmt.Errorf("field server in ContextMcpTool: required")
+	}
+	if _, ok := raw["tokens"]; raw != nil && !ok {
+		return fmt.Errorf("field tokens in ContextMcpTool: required")
+	}
+	type Plain ContextMcpTool
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Name)) > 300 {
+		return fmt.Errorf("field %s length: must be <= %d", "name", 300)
+	}
+	if utf8.RuneCountInString(string(plain.Server)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "server", 200)
+	}
+	if 0 > plain.Tokens {
+		return fmt.Errorf("field %s: must be >= %v", "tokens", 0)
+	}
+	*j = ContextMcpTool(plain)
+	return nil
+}
+
+type ContextMemoryFile struct {
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// Tokens corresponds to the JSON schema field "tokens".
+	Tokens int `json:"tokens"`
+
+	// Type corresponds to the JSON schema field "type".
+	Type *string `json:"type,omitempty,omitzero"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ContextMemoryFile) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["path"]; raw != nil && !ok {
+		return fmt.Errorf("field path in ContextMemoryFile: required")
+	}
+	if _, ok := raw["tokens"]; raw != nil && !ok {
+		return fmt.Errorf("field tokens in ContextMemoryFile: required")
+	}
+	type Plain ContextMemoryFile
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Path)) > 1000 {
+		return fmt.Errorf("field %s length: must be <= %d", "path", 1000)
+	}
+	if 0 > plain.Tokens {
+		return fmt.Errorf("field %s: must be >= %v", "tokens", 0)
+	}
+	if plain.Type != nil && utf8.RuneCountInString(string(*plain.Type)) > 100 {
+		return fmt.Errorf("field %s length: must be <= %d", "type", 100)
+	}
+	*j = ContextMemoryFile(plain)
+	return nil
+}
+
+type ContextSkill struct {
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// Source corresponds to the JSON schema field "source".
+	Source *string `json:"source,omitempty,omitzero"`
+
+	// Tokens corresponds to the JSON schema field "tokens".
+	Tokens int `json:"tokens"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ContextSkill) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["name"]; raw != nil && !ok {
+		return fmt.Errorf("field name in ContextSkill: required")
+	}
+	if _, ok := raw["tokens"]; raw != nil && !ok {
+		return fmt.Errorf("field tokens in ContextSkill: required")
+	}
+	type Plain ContextSkill
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Name)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "name", 200)
+	}
+	if plain.Source != nil && utf8.RuneCountInString(string(*plain.Source)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "source", 200)
+	}
+	if 0 > plain.Tokens {
+		return fmt.Errorf("field %s: must be >= %v", "tokens", 0)
+	}
+	*j = ContextSkill(plain)
+	return nil
+}
+
 // How much of the context window a session uses (shared-members.md §5.3).
 type ContextUsage struct {
 	// The window the runtime measures against (Claude: the autocompact window; Codex:
@@ -7489,6 +7872,141 @@ func (j *SessionCompacted) UnmarshalJSON(value []byte) error {
 		return fmt.Errorf("field %s length: must be <= %d", "error", 1000)
 	}
 	*j = SessionCompacted(plain)
+	return nil
+}
+
+// What fills a session's context window, by category (Claude only:
+// getContextUsage). Unreliable, latest wins: sent after every turn (reason turn,
+// detail summary: estimated from the last turn's usage, no API call) and in answer
+// to session.context_refresh (reason refresh, detail full; error instead of
+// context when it could not be read, e.g. the session has no live process). Sent
+// only when welcome.features contains context_detail. Accepted for a session that
+// was closed meanwhile. Objects are open: the console keeps the fields it knows.
+type SessionContext struct {
+	// Context corresponds to the JSON schema field "context".
+	Context *ContextDetail `json:"context,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// OpenGen corresponds to the JSON schema field "open_gen".
+	OpenGen OpenGen `json:"open_gen"`
+
+	// Reason corresponds to the JSON schema field "reason".
+	Reason SessionContextReason `json:"reason"`
+
+	// The session.context_refresh this answers.
+	RefreshID *string `json:"refresh_id,omitempty,omitzero"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID SessionID `json:"session_id"`
+}
+
+type SessionContextReason string
+
+const SessionContextReasonRefresh SessionContextReason = "refresh"
+const SessionContextReasonTurn SessionContextReason = "turn"
+
+var enumValues_SessionContextReason = []interface{}{
+	"turn",
+	"refresh",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SessionContextReason) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_SessionContextReason {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_SessionContextReason, v)
+	}
+	*j = SessionContextReason(v)
+	return nil
+}
+
+// Read the session's context breakdown now, precisely (Claude getContextUsage
+// detail:"full": token-count calls, no model turn), and answer with
+// session.context (reason refresh, the same refresh_id). Unreliable; sent only
+// when hello.features contains context_detail, for a Claude session.
+type SessionContextRefresh struct {
+	// OpenGen corresponds to the JSON schema field "open_gen".
+	OpenGen OpenGen `json:"open_gen"`
+
+	// RefreshID corresponds to the JSON schema field "refresh_id".
+	RefreshID string `json:"refresh_id"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID SessionID `json:"session_id"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SessionContextRefresh) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["open_gen"]; raw != nil && !ok {
+		return fmt.Errorf("field open_gen in SessionContextRefresh: required")
+	}
+	if _, ok := raw["refresh_id"]; raw != nil && !ok {
+		return fmt.Errorf("field refresh_id in SessionContextRefresh: required")
+	}
+	if _, ok := raw["session_id"]; raw != nil && !ok {
+		return fmt.Errorf("field session_id in SessionContextRefresh: required")
+	}
+	type Plain SessionContextRefresh
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.RefreshID)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "refresh_id", 1)
+	}
+	if utf8.RuneCountInString(string(plain.RefreshID)) > 64 {
+		return fmt.Errorf("field %s length: must be <= %d", "refresh_id", 64)
+	}
+	*j = SessionContextRefresh(plain)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SessionContext) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["open_gen"]; raw != nil && !ok {
+		return fmt.Errorf("field open_gen in SessionContext: required")
+	}
+	if _, ok := raw["reason"]; raw != nil && !ok {
+		return fmt.Errorf("field reason in SessionContext: required")
+	}
+	if _, ok := raw["session_id"]; raw != nil && !ok {
+		return fmt.Errorf("field session_id in SessionContext: required")
+	}
+	type Plain SessionContext
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.Error != nil && utf8.RuneCountInString(string(*plain.Error)) > 500 {
+		return fmt.Errorf("field %s length: must be <= %d", "error", 500)
+	}
+	if plain.RefreshID != nil && utf8.RuneCountInString(string(*plain.RefreshID)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "refresh_id", 1)
+	}
+	if plain.RefreshID != nil && utf8.RuneCountInString(string(*plain.RefreshID)) > 64 {
+		return fmt.Errorf("field %s length: must be <= %d", "refresh_id", 64)
+	}
+	*j = SessionContext(plain)
 	return nil
 }
 

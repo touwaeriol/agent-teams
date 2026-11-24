@@ -1,0 +1,59 @@
+package engine
+
+import (
+	"context"
+	"encoding/json"
+	"time"
+
+	protocol "github.com/touwaeriol/agent-teams/protocol"
+	"github.com/touwaeriol/agent-teams/server/internal/core"
+)
+
+// ContextEvent is the project event "context" (api.md §1.1): a session's context breakdown was
+// stored (reason turn or refresh) or a refresh could not read it (error). A refresh answer older than the stored breakdown still comes, without updated_at. The web refetches
+// GET /api/conversations/{cid}/context/detail. Sent for sessions (多仓库会话) only.
+type ContextEvent struct {
+	ThreadNo       int        `json:"thread_no"`
+	ConversationID string     `json:"conversation_id"`
+	SessionID      string     `json:"session_id"`
+	Reason         string     `json:"reason"`
+	RefreshID      string     `json:"refresh_id,omitempty"`
+	Error          string     `json:"error,omitempty"`
+	UpdatedAt      *time.Time `json:"updated_at,omitempty"`
+}
+
+// sessionContext handles session.context: the breakdown (typed, so unknown fields are dropped) is
+// stored on the session; a session's thread hears about it.
+func (r *router) sessionContext(ctx context.Context, m *protocol.SessionContext) error {
+	e := r.e
+	sid := string(m.SessionID)
+	ev := ContextEvent{SessionID: sid, Reason: string(m.Reason), RefreshID: val(m.RefreshID), Error: val(m.Error)}
+	if m.Context != nil {
+		raw, err := json.Marshal(m.Context)
+		if err != nil {
+			return err
+		}
+		at := time.Now().UTC() // an old daemon does not say when it sampled: when it arrived
+		if m.Context.SampledAt != nil {
+			at = m.Context.SampledAt.UTC()
+		}
+		stored, err := core.SetSessionContextDetail(ctx, e.Core.Pool, sid, raw, m.Context.TotalTokens, m.Context.MaxTokens, at)
+		if err != nil {
+			return err
+		}
+		if stored {
+			ev.UpdatedAt = &at
+		} else if m.RefreshID == nil {
+			return nil // a turn's breakdown older than the stored one: nothing to tell
+		}
+	}
+	place, err := core.SessionPlaceOf(ctx, e.Core.Pool, sid)
+	if err != nil || !place.Solo || place.ThreadID == nil || place.ThreadNo == nil {
+		return err
+	}
+	ev.ThreadNo, ev.ConversationID = *place.ThreadNo, *place.ThreadID
+	return e.Core.InTx(ctx, func(tx *core.Tx) error {
+		_, err := tx.Emit(ctx, place.ProjectID, place.ThreadID, core.EvContext, "", ev)
+		return err
+	})
+}

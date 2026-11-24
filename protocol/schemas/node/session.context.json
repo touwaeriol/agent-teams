@@ -1,0 +1,248 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/session.context.json",
+  "title": "SessionContext",
+  "description": "What fills a session's context window, by category (Claude only: getContextUsage). Unreliable, latest wins: sent after every turn (reason turn, detail summary: estimated from the last turn's usage, no API call) and in answer to session.context_refresh (reason refresh, detail full; error instead of context when it could not be read, e.g. the session has no live process). Sent only when welcome.features contains context_detail. Accepted for a session that was closed meanwhile. Objects are open: the console keeps the fields it knows.",
+  "x-direction": "node_to_console",
+  "x-reliable": false,
+  "type": "object",
+  "required": [
+    "session_id",
+    "open_gen",
+    "reason"
+  ],
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "open_gen": {
+      "$ref": "common.json#/$defs/OpenGen"
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "turn",
+        "refresh"
+      ]
+    },
+    "refresh_id": {
+      "description": "The session.context_refresh this answers.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "context": {
+      "$ref": "#/$defs/ContextDetail"
+    },
+    "error": {
+      "type": "string",
+      "maxLength": 500
+    }
+  },
+  "$defs": {
+    "ContextDetail": {
+      "title": "ContextDetail",
+      "type": "object",
+      "required": [
+        "detail",
+        "total_tokens",
+        "max_tokens",
+        "categories"
+      ],
+      "properties": {
+        "detail": {
+          "description": "summary: estimated from the last turn's usage; full: counted with token-count calls.",
+          "type": "string",
+          "enum": [
+            "summary",
+            "full"
+          ]
+        },
+        "sampled_at": {
+          "description": "When the daemon read it (getContextUsage was called). The console drops a breakdown older than the one it holds (a slow full refresh overtaken by a turn); absent from an old daemon.",
+          "$ref": "common.json#/$defs/Timestamp"
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "total_tokens": {
+          "description": "Tokens in the context now (totalTokens).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_tokens": {
+          "description": "The window measured against: the autocompact window (maxTokens).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "raw_max_tokens": {
+          "description": "The model's own window (rawMaxTokens).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "auto_compact": {
+          "description": "Autocompact is on.",
+          "type": "boolean"
+        },
+        "auto_compact_threshold": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "categories": {
+          "description": "Rows of the window in the runtime's order (free space and the autocompact buffer included; deferred rows are outside the window).",
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/ContextCategory"
+          }
+        },
+        "mcp_tools": {
+          "description": "Every MCP tool and its tokens (the mcp_tools and mcp_tools_deferred rows).",
+          "type": "array",
+          "maxItems": 2000,
+          "items": {
+            "$ref": "#/$defs/ContextMcpTool"
+          }
+        },
+        "mcp_servers": {
+          "description": "The mcp_instructions row by server (estimated from the text length).",
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "title": "ContextMcpServer",
+            "type": "object",
+            "required": [
+              "server",
+              "tokens"
+            ],
+            "properties": {
+              "server": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "tokens": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "memory_files": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "title": "ContextMemoryFile",
+            "type": "object",
+            "required": [
+              "path",
+              "tokens"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "maxLength": 1000
+              },
+              "type": {
+                "type": "string",
+                "maxLength": 100
+              },
+              "tokens": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "skills": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "title": "ContextSkill",
+            "type": "object",
+            "required": [
+              "name",
+              "tokens"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "source": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "tokens": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "ContextCategory": {
+      "title": "ContextCategory",
+      "type": "object",
+      "required": [
+        "name",
+        "tokens",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "description": "Stable row id (SDK categories[].id): system_prompt, system_tools, mcp_tools, mcp_instructions, mcp_tools_deferred, system_tools_deferred, custom_agents, memory_files, skills, messages, autocompact_buffer, compact_buffer, free_space; later runtimes may add more, absent from an old CLI. Classify on id and kind, never on name.",
+          "type": "string",
+          "maxLength": 64
+        },
+        "name": {
+          "description": "The runtime's English label.",
+          "type": "string",
+          "maxLength": 200
+        },
+        "tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "description": "used: occupies the window; free: the rest of it; buffer: the compaction reserve; deferred: tool schemas outside the window.",
+          "type": "string",
+          "enum": [
+            "used",
+            "free",
+            "buffer",
+            "deferred"
+          ]
+        }
+      }
+    },
+    "ContextMcpTool": {
+      "title": "ContextMcpTool",
+      "type": "object",
+      "required": [
+        "name",
+        "server",
+        "tokens"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "server": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "loaded": {
+          "description": "false: deferred (tool search), its schema is not in the window yet.",
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

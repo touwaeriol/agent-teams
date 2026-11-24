@@ -24,6 +24,8 @@ export class FakeConsole {
   ackSeq = 0;
   welcomeAckSeq: number | null = null;
   welcomeConfig: Record<string, unknown> = { park_after_s: 900 };
+  /** Features left out of welcome.features (a console without them). */
+  welcomeDrop: string[] = [];
   token = "test-token";
   /** Images served at GET /nodes/attachments/{id} (node token required). */
   readonly images = new Map<string, Buffer>();
@@ -88,7 +90,7 @@ export class FakeConsole {
 
   private welcome(ws: WebSocket, hello: Frame): void {
     const ack = this.welcomeAckSeq ?? this.ackSeq;
-    ws.send(JSON.stringify(this.envelope("welcome", { protocol: 2, node_id: "node-1", ack_seq: ack, server_time: new Date().toISOString(), config: this.welcomeConfig, features: hello.body.features })));
+    ws.send(JSON.stringify(this.envelope("welcome", { protocol: 2, node_id: "node-1", ack_seq: ack, server_time: new Date().toISOString(), config: this.welcomeConfig, features: (hello.body.features as string[]).filter((f) => !this.welcomeDrop.includes(f)) })));
   }
 
   ack(seq: number): void {
