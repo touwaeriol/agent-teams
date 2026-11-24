@@ -1,4 +1,4 @@
-import type { ApprovalCancel, ApprovalRequest, ApprovalResolve, ContextUsage, SessionEvent, SessionInit, SessionOpen } from "../protocol.js";
+import type { ApprovalCancel, ApprovalRequest, ApprovalResolve, ContextDetail, ContextUsage, SessionEvent, SessionInit, SessionOpen } from "../protocol.js";
 import type { McpToolResult } from "../toolhost/broker.js";
 import type { Logger } from "../util/log.js";
 import type { LoadedImage } from "./images.js";
@@ -19,6 +19,8 @@ export interface SessionSink {
   exited(err: Error): void;
   /** The current task anchor (session.send anchor; "" = none), re-injected after the runtime compacts. */
   anchor(): string;
+  /** The context breakdown after a turn (session.context reason turn; Claude only). */
+  context?(detail: ContextDetail): void;
 }
 
 export interface DriverContext {
@@ -58,6 +60,8 @@ export interface Driver {
   deliveredMsgIds?(msgIds: string[]): Promise<Set<string>>;
   /** Compacts the context now (session.compact); called between turns. */
   compact?(instructions: string): Promise<CompactResult>;
+  /** The context breakdown now (session.context_refresh: full); undefined when it cannot be read. Claude only. */
+  contextDetail?(detail: ContextDetail["detail"]): Promise<ContextDetail | undefined>;
 }
 
 /** The outcome of session.compact. */

@@ -13,6 +13,8 @@ export interface FakeQueryLog {
   models?: string[];
   /** What PreCompact / SessionStart hooks returned (compaction tests). */
   hooks?: Array<{ event: string; output: unknown }>;
+  /** getContextUsage calls by detail (context breakdown tests). */
+  contextReads?: string[];
 }
 
 /**
@@ -65,9 +67,32 @@ class FakeQuery {
   /** Context use: grows 1000 tokens per prompt, a compaction brings it back to 500. */
   private tokens = 5000;
 
-  async getContextUsage() {
+  async getContextUsage(opts?: { detail?: "summary" | "full" }) {
+    (this.log.contextReads ??= []).push(opts?.detail ?? "summary");
     const max = Number(this.options.env?.CLAUDE_CODE_AUTO_COMPACT_WINDOW ?? 200000);
-    return { totalTokens: this.tokens, maxTokens: max, rawMaxTokens: max, percentage: Math.round((this.tokens / max) * 100), categories: [], gridRows: [] };
+    const full = opts?.detail === "full" ? 100 : 0; // full counts a little differently, like the real CLI
+    const messages = Math.max(0, this.tokens - 3000);
+    return {
+      totalTokens: this.tokens, maxTokens: max, rawMaxTokens: max, percentage: Math.round((this.tokens / max) * 100), gridRows: [],
+      model: "claude-fake", isAutoCompactEnabled: true, autoCompactThreshold: max - 33000,
+      categories: [
+        { id: "system_prompt", name: "System prompt", tokens: 1000, color: "promptBorder", kind: "used" },
+        { id: "mcp_tools", name: "MCP tools", tokens: 2000 + full, color: "inactive", kind: "used" },
+        { id: "messages", name: "Messages", tokens: messages, color: "purple", kind: "used" },
+        { id: "autocompact_buffer", name: "Autocompact buffer", tokens: 33000, color: "inactive", kind: "buffer" },
+        { id: "free_space", name: "Free space", tokens: max - this.tokens - 33000, color: "promptBorder", kind: "free" },
+        { id: "mcp_tools_deferred", name: "MCP tools (deferred)", tokens: 500, color: "inactive", isDeferred: true, kind: "deferred" },
+      ],
+      mcpTools: [
+        { name: "mcp__platform__complete_task", serverName: "platform", tokens: 1200 + full, isLoaded: true },
+        { name: "mcp__platform__set_status", serverName: "platform", tokens: 800, isLoaded: true },
+        { name: "mcp__github__search_code", serverName: "github", tokens: 500, isLoaded: false },
+      ],
+      mcpInstructions: [{ serverName: "platform", tokens: 300 }],
+      memoryFiles: [{ path: "/w/CLAUDE.md", type: "Project", tokens: 400 }],
+      agents: [], skills: { totalSkills: 1, includedSkills: 1, tokens: 90, skillFrontmatter: [{ name: "design", source: "plugin", tokens: 90 }] },
+      apiUsage: null,
+    };
   }
 
   async setModel(m?: string) {

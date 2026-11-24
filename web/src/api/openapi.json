@@ -979,6 +979,276 @@
         ],
         "type": "object"
       },
+      "ContextCategoryView": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "Stable row id: system_prompt, system_tools, mcp_tools, mcp_instructions, mcp_tools_deferred, system_tools_deferred, custom_agents, memory_files, skills, messages, autocompact_buffer, compact_buffer, free_space; more may come, '' from an old CLI. Classify on id and kind, not on name",
+            "type": "string"
+          },
+          "kind": {
+            "description": "used: in the window; free: the rest of it; buffer: the autocompact reserve; deferred: tool schemas outside the window",
+            "enum": [
+              "used",
+              "free",
+              "buffer",
+              "deferred"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "The runtime's English label",
+            "type": "string"
+          },
+          "tokens": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "tokens",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "ContextDetailView": {
+        "additionalProperties": false,
+        "properties": {
+          "auto_compact": {
+            "type": "boolean"
+          },
+          "auto_compact_threshold": {
+            "description": "Tokens at which the runtime compacts by itself; 0 = unknown",
+            "format": "int64",
+            "type": "integer"
+          },
+          "can_refresh": {
+            "description": "POST …/context/refresh can read it now: the session runs on an online node whose daemon reports breakdowns",
+            "type": "boolean"
+          },
+          "categories": {
+            "description": "In the runtime's order; deferred rows are outside the window",
+            "items": {
+              "$ref": "#/components/schemas/ContextCategoryView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "detail": {
+            "description": "summary: estimated after a turn; full: counted on a refresh; '' = no breakdown yet",
+            "enum": [
+              "summary",
+              "full",
+              ""
+            ],
+            "type": "string"
+          },
+          "max_tokens": {
+            "description": "The window measured against: the autocompact window; 0 = unknown",
+            "format": "int64",
+            "type": "integer"
+          },
+          "mcp_servers": {
+            "items": {
+              "$ref": "#/components/schemas/ContextMcpServerView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "mcp_tools": {
+            "description": "Every MCP tool (the mcp_tools and mcp_tools_deferred rows expanded)",
+            "items": {
+              "$ref": "#/components/schemas/ContextMcpToolView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "memory_files": {
+            "items": {
+              "$ref": "#/components/schemas/ContextMemoryFileView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "raw_max_tokens": {
+            "description": "The model's own window; 0 = unknown",
+            "format": "int64",
+            "type": "integer"
+          },
+          "runtime": {
+            "description": "Runtime of the latest session ('' before the first one)",
+            "type": "string"
+          },
+          "session_id": {
+            "description": "The latest session ('' before the first one)",
+            "type": "string"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/ContextSkillView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "state": {
+            "description": "That session's state (active, turn_running, parked, closed, …)",
+            "type": "string"
+          },
+          "supported": {
+            "description": "The session's runtime reports a breakdown (Claude only). false: hide the context block",
+            "type": "boolean"
+          },
+          "total_tokens": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "updated_at": {
+            "description": "When the breakdown arrived; null = none yet",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "supported",
+          "runtime",
+          "session_id",
+          "state",
+          "can_refresh",
+          "detail",
+          "updated_at",
+          "model",
+          "total_tokens",
+          "max_tokens",
+          "raw_max_tokens",
+          "auto_compact",
+          "auto_compact_threshold",
+          "categories",
+          "mcp_tools",
+          "mcp_servers",
+          "memory_files",
+          "skills"
+        ],
+        "type": "object"
+      },
+      "ContextMcpServerView": {
+        "additionalProperties": false,
+        "properties": {
+          "server": {
+            "type": "string"
+          },
+          "tokens": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "server",
+          "tokens"
+        ],
+        "type": "object"
+      },
+      "ContextMcpToolView": {
+        "additionalProperties": false,
+        "properties": {
+          "loaded": {
+            "description": "false: deferred (tool search), not in the window yet",
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "server": {
+            "type": "string"
+          },
+          "tokens": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "server",
+          "tokens",
+          "loaded"
+        ],
+        "type": "object"
+      },
+      "ContextMemoryFileView": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "tokens": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "type",
+          "tokens"
+        ],
+        "type": "object"
+      },
+      "ContextRefreshStarted": {
+        "additionalProperties": false,
+        "properties": {
+          "refresh_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "refresh_id",
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "ContextSkillView": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "tokens": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "source",
+          "tokens"
+        ],
+        "type": "object"
+      },
       "ConversationModel": {
         "additionalProperties": false,
         "properties": {
@@ -9599,6 +9869,90 @@
           }
         },
         "summary": "What the conversation's employee works from: instructions, memory, conversation and session token use",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/api/conversations/{cid}/context/detail": {
+      "get": {
+        "operationId": "conversation-context-detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextDetailView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "What fills the session's context window, by category (sessions on Claude only)",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/api/conversations/{cid}/context/refresh": {
+      "post": {
+        "operationId": "conversation-context-refresh",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextRefreshStarted"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Count the session's context precisely now; the result arrives as the project event context",
         "tags": [
           "conversations"
         ]

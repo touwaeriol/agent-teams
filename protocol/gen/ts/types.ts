@@ -1129,6 +1129,134 @@ export interface ContextUsage1 {
   max_tokens: number;
 }
 /**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "ContextDetail".
+ */
+export interface ContextDetail {
+  /**
+   * summary: estimated from the last turn's usage; full: counted with token-count calls.
+   */
+  detail: "summary" | "full";
+  model?: string;
+  /**
+   * Tokens in the context now (totalTokens).
+   */
+  total_tokens: number;
+  /**
+   * The window measured against: the autocompact window (maxTokens).
+   */
+  max_tokens: number;
+  /**
+   * The model's own window (rawMaxTokens).
+   */
+  raw_max_tokens?: number;
+  /**
+   * Autocompact is on.
+   */
+  auto_compact?: boolean;
+  auto_compact_threshold?: number;
+  /**
+   * Rows of the window in the runtime's order (free space and the autocompact buffer included; deferred rows are outside the window).
+   *
+   * @maxItems 64
+   */
+  categories: ContextCategory[];
+  /**
+   * Every MCP tool and its tokens (the mcp_tools and mcp_tools_deferred rows).
+   *
+   * @maxItems 2000
+   */
+  mcp_tools?: ContextMcpTool[];
+  /**
+   * The mcp_instructions row by server (estimated from the text length).
+   *
+   * @maxItems 500
+   */
+  mcp_servers?: ContextMcpServer[];
+  /**
+   * @maxItems 500
+   */
+  memory_files?: ContextMemoryFile[];
+  /**
+   * @maxItems 1000
+   */
+  skills?: ContextSkill[];
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "ContextCategory".
+ */
+export interface ContextCategory {
+  /**
+   * Stable row id (SDK categories[].id): system_prompt, system_tools, mcp_tools, mcp_instructions, mcp_tools_deferred, system_tools_deferred, custom_agents, memory_files, skills, messages, autocompact_buffer, compact_buffer, free_space; later runtimes may add more, absent from an old CLI. Classify on id and kind, never on name.
+   */
+  id?: string;
+  /**
+   * The runtime's English label.
+   */
+  name: string;
+  tokens: number;
+  /**
+   * used: occupies the window; free: the rest of it; buffer: the compaction reserve; deferred: tool schemas outside the window.
+   */
+  kind: "used" | "free" | "buffer" | "deferred";
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "ContextMcpTool".
+ */
+export interface ContextMcpTool {
+  name: string;
+  server: string;
+  tokens: number;
+  /**
+   * false: deferred (tool search), its schema is not in the window yet.
+   */
+  loaded?: boolean;
+}
+export interface ContextMcpServer {
+  server: string;
+  tokens: number;
+}
+export interface ContextMemoryFile {
+  path: string;
+  type?: string;
+  tokens: number;
+}
+export interface ContextSkill {
+  name: string;
+  source?: string;
+  tokens: number;
+}
+/**
+ * What fills a session's context window, by category (Claude only: getContextUsage). Unreliable, latest wins: sent after every turn (reason turn, detail summary: estimated from the last turn's usage, no API call) and in answer to session.context_refresh (reason refresh, detail full; error instead of context when it could not be read, e.g. the session has no live process). Sent only when welcome.features contains context_detail. Accepted for a session that was closed meanwhile. Objects are open: the console keeps the fields it knows.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "SessionContext".
+ */
+export interface SessionContext {
+  session_id: SessionId;
+  open_gen: OpenGen;
+  reason: "turn" | "refresh";
+  /**
+   * The session.context_refresh this answers.
+   */
+  refresh_id?: string;
+  context?: ContextDetail;
+  error?: string;
+}
+/**
+ * Read the session's context breakdown now, precisely (Claude getContextUsage detail:"full": token-count calls, no model turn), and answer with session.context (reason refresh, the same refresh_id). Unreliable; sent only when hello.features contains context_detail, for a Claude session.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "SessionContextRefresh".
+ */
+export interface SessionContextRefresh {
+  session_id: SessionId;
+  open_gen: OpenGen;
+  refresh_id: string;
+}
+/**
  * session.send was pushed into the session.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema

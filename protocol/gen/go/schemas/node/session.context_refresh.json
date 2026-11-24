@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/session.context_refresh.json",
+  "title": "SessionContextRefresh",
+  "description": "Read the session's context breakdown now, precisely (Claude getContextUsage detail:\"full\": token-count calls, no model turn), and answer with session.context (reason refresh, the same refresh_id). Unreliable; sent only when hello.features contains context_detail, for a Claude session.",
+  "x-direction": "console_to_node",
+  "x-reliable": false,
+  "type": "object",
+  "required": [
+    "session_id",
+    "open_gen",
+    "refresh_id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "session_id": {
+      "$ref": "common.json#/$defs/SessionId"
+    },
+    "open_gen": {
+      "$ref": "common.json#/$defs/OpenGen"
+    },
+    "refresh_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    }
+  }
+}
