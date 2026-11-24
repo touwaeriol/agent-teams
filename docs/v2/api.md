@@ -64,6 +64,13 @@ RepoRef         = {repo: "owner/name", git_connection_id: string|null}
                    icon: string,            // '' = 名字首字母配稳定底色；一个表情；或 "color:#RRGGBB" = 首字母配该颜色
                    coordinator_model: string, thread_model: string, thread_codex_model: string, thread_effort: string,  // 项目指定模型：coordinator_model 给统筹，thread_model / thread_codex_model 按类型给 Claude / Codex 的组长和成员；'' = 跟随岗位（下次开会话生效）
                    auto_resume: boolean,    // 使用限额重置后自动继续讨论串（data-model.md §2.10）
+                   kind: "project"|"session",  // session = 会话（多仓库会话，一个员工，第 1 号讨论串）
+                   session_status: string,  // 只对会话：侧栏状态，规则和会话页（web phase.ts、core.PhaseOf）相同；项目为 ''。
+                                            //   working = 员工在回合中 / 正被消息唤醒 / 在用工具或在等别人（进行中）；
+                                            //   finished = 员工不在回合中、没有要用户回答的（已完成：回复后、用户停止后、本轮没回复都算）；
+                                            //   resolved = 讨论串 done，用户点了“已解决”（已解决）；
+                                            //   attention = 员工的节点离线、会话出错或没有节点能跑它（等你处理）；queued = 等节点空位；
+                                            //   其余是讨论串状态（queued/waiting/review/paused/failed）。待处理卡片算在 waiting 数字里
                    created_at, updated_at}
 DeliverySettings = {gates: {review, decision, merge_queue}, ci: {mode, required, appear_timeout_s, timeout_s, on_missing},
                    merge_method: "squash"|"merge"|"rebase", approval_timeout_s: number|null,
@@ -83,7 +90,12 @@ ThreadView      = {id, project_id, no, title, brief, status, queue_position: num
                    dispatch: {opened_by, at /*讨论串创建时间*/,  // 派发给组长的交接信息（brief 本身看 thread.brief）；brief 为空或是转发的原话（副本已在对话里）时整个为 null
                               source: {message_id: number, content, attachments: AttachmentRef[] /*同 meta.attachments*/, created_at} | null} | null,
                               // source = 触发 open_thread 的用户原话（见 data-model source_message_id），没有关联或已删除时为 null
-                   latest_deliverable: DeliverableView | null} // 讨论串发布的最新一个交付物
+                   latest_deliverable: DeliverableView | null, // 讨论串发布的最新一个交付物
+                   solo: boolean,             // 会话（多仓库会话）的讨论串：组长就是用户直接对话的那一个员工
+                   session: {node_id: string|null, runtime, state, cwd, context_used: number|null, context_max: number|null} | null}
+                   // session 只对会话：员工最近一个 agent 会话。cwd = 节点上的工作目录（节点上报了 root 时为绝对路径，否则相对守护进程根目录）；
+                   // context_used / context_max = 最近一轮结束时的上下文用量和窗口（token，运行时报的分母，不写死）；不提供用量的运行时（Antigravity）或还没结束过一轮时为 null。
+                   // 员工每轮上报上下文时推一次 thread 事件。别的讨论串、员工还没开过会话时为 null
 MainTaskView    = {id, pos, title, status: "todo"|"doing"|"done", auto_done, tasks_total, tasks_done}
 TaskView        = {id, thread_no, main_task_id, assignee, role, claimed_by, kind, instruction, status, depends_on: string[],
                    parent, priority, attempt, summary, branch, head_sha, created_at, claimed_at, finished_at}

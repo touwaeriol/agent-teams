@@ -84,6 +84,11 @@ const CASES: [string, ThreadView, { phase: string; group: ListGroupId; label: st
   ["session replied and stopped", thread(1, { solo: true, members: [leadIdle], lead_last: replied }), { phase: "finished", group: "done", label: "已完成" }],
   ["session done (the user confirmed)", thread(1, { solo: true, status: "done" }), { phase: "resolved", group: "done", label: "已解决" }],
   ["session with an open card", thread(1, { solo: true, members: [leadIdle], lead_last: replied, counts: counts({ questions_open: 1, waiting: 1 }) }), { phase: "asking", group: "waiting", label: "等你处理" }],
+  // The user stopped the turn before any reply (or it ended without one): not in a turn, nothing to answer — 已完成 too.
+  ["session stopped by the user, no reply", thread(1, { solo: true, members: [leadIdle], lead_last: null }), { phase: "finished", group: "done", label: "已完成" }],
+  ["session node offline", thread(1, { solo: true, members: [person("lead-1", "offline")], lead_last: replied }), { phase: "lead_down", group: "waiting", label: "等你处理" }],
+  ["session crashed", thread(1, { solo: true, members: [person("lead-1", "broken")], lead_last: null }), { phase: "lead_down", group: "waiting", label: "等你处理" }],
+  ["session waking for a message", thread(1, { solo: true, members: [person("lead-1", "thinking", { status: { state: "thinking", substate: "waking", bubble: "", since: "" } as never })], lead_last: replied }), { phase: "working", group: "active", label: "进行中" }],
   ["session still working", thread(1, { solo: true, members: [person("lead-1", "typing")], lead_last: replied }), { phase: "working", group: "active", label: "进行中" }],
 ];
 

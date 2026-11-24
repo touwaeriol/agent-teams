@@ -36,7 +36,7 @@ type ProjectView struct {
 	Kind             string    `json:"kind" enum:"project,session" doc:"project, or session (多仓库会话: one employee the user talks to directly in thread 1; no coordinator)"`
 	Waiting          int       `json:"waiting"`
 	ThreadsActive    int       `json:"threads_active"`
-	SessionStatus    string    `json:"session_status" doc:"A session's state for the sidebar ('' for a project): working, finished (the employee replied and stopped: 已完成), resolved (the user confirmed: 已解决), or the thread's status (queued, waiting, review, paused, failed). Open cards are in waiting"`
+	SessionStatus    string    `json:"session_status" doc:"A session's state for the sidebar ('' for a project), the same rule as the session page: working (in a turn, waking or using a tool), finished (not in a turn and nothing to answer: 已完成), resolved (the user confirmed: 已解决), attention (node offline, session crashed or no node can run it: 等你处理), queued (waiting for a slot), or the thread's status (queued, waiting, review, paused, failed). Open cards are in waiting"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
