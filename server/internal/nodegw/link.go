@@ -32,6 +32,7 @@ type link struct {
 	// reported: a node.runtimes arrived on this link (rows from an earlier link may be stale)
 	reported bool
 	rejects  []time.Time
+	logs     logBucket // log frames (logs.go)
 	sendMu   sync.Mutex
 }
 
@@ -248,7 +249,7 @@ func (l *link) handleUnreliable(ctx context.Context, env *protocol.Envelope, bod
 		}
 		return nil
 	case *protocol.Log:
-		return l.g.storeLog(ctx, l.node.ID, b)
+		return l.storeLog(ctx, b)
 	case *protocol.ProtocolError:
 		l.g.log.Warn("node reported a protocol error", "node_id", l.node.ID, "code", b.Code, "ref", b.RefID, "message", b.Message)
 		return nil
@@ -317,13 +318,4 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n]
-}
-
-func (g *Gateway) storeLog(ctx context.Context, nodeID string, b *protocol.Log) error {
-	fields := json.RawMessage(`{}`)
-	if b.Fields != nil {
-		fields = *b.Fields
-	}
-	return g.core.Pool.Gorm(ctx).Table("at_node_logs").Create(map[string]any{"node_id": nodeID, "level": string(b.Level),
-		"msg": truncate(b.Msg, 4000), "fields": fields}).Error
 }

@@ -17,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -132,7 +131,7 @@ func (tx *Tx) hint(channel, msg string) { tx.hints[channel] = msg }
 
 // NewID returns a type-prefixed lower-case ULID (th_…, em_…, s_…).
 func NewID(prefix string) string {
-	return prefix + "_" + strings.ToLower(ulid.Make().String())
+	return prefix + "_" + strings.ToLower(store.NewULID().String())
 }
 
 // NewHex returns n random bytes as hex (v1-style ids).
