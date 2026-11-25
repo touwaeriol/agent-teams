@@ -160,7 +160,7 @@
 | WebSocket 升级 | 节点令牌有效、所有者 active；请求的会话属于该节点（同 `owner.go` 的规则）；连接数限额（§5.7） |
 | SSH 认证（公钥认证，证书） | 证书由会话 CA 签、在有效期、无 critical option、serial 存在且未吊销、扩展里的会话/gen/节点与上一行一致；请求的服务器名在 principals 里 |
 | 打开每个 session channel（exec / shell / subsystem）| 会话仍活着且 gen 未变；项目仍选用这台服务器、仍授权给会话的岗位（§9.1，`store.SessionServerGrant`）；统筹、组长、只读会话一律拒绝。（首次连接批准是以后的事，§9.2） |
-| 连接存续期间，每 30 秒 | 同上一行的前三项；不再满足就向 channel 写一行原因到 stderr、发 `exit-status 255`、断开 |
+| 连接存续期间，每 30 秒（及每条 `ssh:revoke` 提示） | 建连时用的节点令牌仍是该节点当前的令牌、节点还在、所有者 active（#55 L13）；加上上一行的前三项。不再满足就向 channel 写一行原因到 stderr、发 `exit-status 255`、断开。轮换令牌、删节点、停用用户都走 `nodegw.Disconnect`，它顺带发 `ssh:revoke` 提示，各副本立即复查，不用等 30 秒 |
 | 目标侧 | host key 必须等于已确认的指纹（§5.3），否则拒绝 |
 
 一句话：证书让网关不必相信节点说的“我是谁”，逐次校验决定“现在还让不让”。

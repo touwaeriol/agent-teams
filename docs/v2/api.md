@@ -354,7 +354,7 @@ PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平�
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/git/connections` | v1；`GitConnectionView` 加 `permissions`、`needs_permission_approval: bool`（安装上缺 `checks:read`）、`installation_settings_url`（GitHub 页“在 GitHub 上调整仓库”链接） |
-| POST | `/api/git/connections` | v1（粘贴 PAT）；v2 网页提供表单 |
+| POST | `/api/git/connections` | v1（粘贴 PAT）；网页目前没有新建 PAT 连接的表单（“连接 GitHub”只走 GitHub App 安装），PAT 连接只能经这个接口建。注意：PAT 连接的 PAT 会原样交给项目里的每个 AI 会话（组长和成员）用于 git/gh，请用只授权到项目仓库、设了过期时间的 fine-grained PAT；要更严格的隔离用 GitHub App 连接（会话只拿收窄过的短期令牌）。网页在 PAT 连接卡片和项目选仓库处显示同样的警告（#55 M4） |
 | DELETE | `/api/git/connections/{id}` | v1 |
 | GET | `/api/git/github-app` | v1；加 `permissions`、`webhook_active` |
 | GET | `/api/git/github-app/install` | v1（重定向） |

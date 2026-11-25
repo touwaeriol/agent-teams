@@ -54,6 +54,28 @@ class JobError extends Error {
 
 const LOG_TAIL = 4096;
 
+/**
+ * A standalone repository's remote_url (set by the console) must be https://, ssh:// or the scp
+ * form user@host:path: nothing starting with "-" (an option such as --upload-pack=…), no ext::,
+ * file:// or other transports, no whitespace or control characters.
+ */
+export function isSafeRemoteUrl(url: string): boolean {
+  if (!url || url.length > 2048 || /[\s\x00-\x1f\x7f]/.test(url) || url.startsWith("-")) return false;
+  if (/^(https|ssh):\/\//.test(url)) return upstreamOf(url) !== null;
+  return /^[A-Za-z0-9_][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9.-]*:(?!-)[^:].*$/.test(url) && !url.includes("::");
+}
+
+/** Branch names from the console: refused when git could read them as an option or a bad ref (git check-ref-format --branch). */
+export function isSafeBranch(name: string): boolean {
+  if (!name || name.length > 255 || name.startsWith("-") || name.startsWith("/") || name.endsWith("/") || name.endsWith(".") || name.endsWith(".lock")) return false;
+  if (/[\x00-\x20\x7f~^:?*[\\]/.test(name) || name.includes("..") || name.includes("@{") || name.includes("//") || name === "@") return false;
+  return name.split("/").every((part) => part !== "" && !part.startsWith("."));
+}
+
+function checkBranch(name: string): void {
+  if (!isSafeBranch(name)) throw new JobError("refspec_not_allowed", `bad branch name ${JSON.stringify(name)}`);
+}
+
 type GitSyncRequest = NonNullable<GitPrepare["sync"]>;
 type GitSyncResult = NonNullable<GitResult["sync"]>;
 /** The merge commit a sync makes is the platform's, not the employee's. */
@@ -69,8 +91,14 @@ export class GitJobs {
   constructor(private readonly o: GitJobsOptions) {}
 
   prepare(b: GitPrepare): Promise<GitResult> {
-    this.remember(b.repo, b.remote_url);
-    return this.job(b.job_id, () => (b.mode === "clone" ? this.prepareClone(b) : this.prepareWorktree(b)));
+    return this.job(b.job_id, () => {
+      this.remember(b.repo, b.remote_url);
+      checkBranch(b.branch);
+      if (b.base !== undefined) checkBranch(b.base);
+      if (b.sync?.ref !== undefined) checkBranch(b.sync.ref);
+      if (b.sync?.expect_sha !== undefined && !/^[0-9a-f]{7,64}$/i.test(b.sync.expect_sha)) throw new JobError("refspec_not_allowed", `bad commit ${b.sync.expect_sha}`);
+      return b.mode === "clone" ? this.prepareClone(b) : this.prepareWorktree(b);
+    });
   }
 
   status(b: GitStatus): Promise<GitResult> {
@@ -78,8 +106,11 @@ export class GitJobs {
   }
 
   push(b: GitPush): Promise<GitResult> {
-    this.remember(b.repo, b.remote_url);
-    return this.job(b.job_id, () => this.doPush(b));
+    return this.job(b.job_id, () => {
+      this.remember(b.repo, b.remote_url);
+      for (const branch of b.unchanged_against ?? []) checkBranch(branch);
+      return this.doPush(b);
+    });
   }
 
   cleanup(b: GitCleanup): Promise<GitResult> {
@@ -144,7 +175,7 @@ export class GitJobs {
     if (isGitDir(cwd)) return { created: false, ...(b.sync ? await this.syncWorktree(cwd, b.branch, b.sync, refetch) : { head_sha: await this.head(cwd) }) };
     if (existsSync(cwd) && readdirSync(cwd).length > 0) throw new JobError("dirty_conflict", `${b.cwd} exists and is not a worktree`);
     const start = await this.startPoint(shared, b.branch, b.base);
-    const add = await this.git(shared, ["worktree", "add", "-B", b.branch, cwd, start]);
+    const add = await this.git(shared, ["worktree", "add", "-B", b.branch, "--", cwd, start]);
     if (add.code !== 0) throw new JobError("dirty_conflict", "git worktree add failed", add.stderr);
     const log_tail = tail(add.stdout + add.stderr);
     // A reviewer's first review in a thread: the new worktree goes on to the commit under review.
@@ -211,7 +242,7 @@ export class GitJobs {
   private async onBranch(cwd: string, branch: string, target: string): Promise<void> {
     if ((await this.git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"])).stdout.trim() === branch) return;
     const local = await this.git(cwd, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]);
-    await this.mustGit(cwd, local.code === 0 ? ["checkout", branch] : ["checkout", "-b", branch, target], `cannot switch to ${branch}`);
+    await this.mustGit(cwd, local.code === 0 ? ["checkout", branch, "--"] : ["checkout", "-b", branch, target, "--"], `cannot switch to ${branch}`);
   }
 
   private async syncMember(cwd: string, target: string): Promise<Partial<GitResult>> {
@@ -273,7 +304,7 @@ export class GitJobs {
 
   private async checkoutBranch(cwd: string, branch: string, base?: string): Promise<void> {
     const start = await this.startPoint(cwd, branch, base);
-    const r = await this.git(cwd, ["checkout", "-B", branch, start]);
+    const r = await this.git(cwd, ["checkout", "-B", branch, start, "--"]);
     if (r.code !== 0) throw new JobError("dirty_conflict", `cannot check out ${branch}`, r.stderr);
   }
 
@@ -291,7 +322,7 @@ export class GitJobs {
     const mirror = await this.syncMirror(jobId, repo);
     const r = await run("git", ["clone", "--no-checkout", "--", mirror, dir], { env: gitEnv(), timeoutMs: 30 * 60_000 });
     if (r.code !== 0) throw new JobError("clone_failed", "git clone failed", r.stderr);
-    await this.git(dir, ["remote", "set-url", "origin", this.url(repo)]);
+    await this.git(dir, ["remote", "set-url", "--", "origin", this.url(repo)]);
     await this.fromMirror(dir, mirror);
     return true;
   }
@@ -302,7 +333,7 @@ export class GitJobs {
 
   /** Updates the shared clone's origin/* from the mirror; nothing secret is in this git's environment. */
   private async fromMirror(dir: string, mirror: string): Promise<void> {
-    const r = await this.git(dir, ["fetch", "--prune", "--no-tags", mirror, "+refs/heads/*:refs/remotes/origin/*"], 30 * 60_000);
+    const r = await this.git(dir, ["fetch", "--prune", "--no-tags", "--", mirror, "+refs/heads/*:refs/remotes/origin/*"], 30 * 60_000);
     if (r.code !== 0) throw new JobError("fetch_failed", "git fetch failed", r.stderr);
   }
 
@@ -315,7 +346,7 @@ export class GitJobs {
       if (init.code !== 0) throw new JobError("clone_failed", "cannot create the mirror", init.stderr);
     }
     const env = await this.credEnv(jobId, repo, "read");
-    const r = await run("git", ["-C", mirror, "fetch", "--prune", "--no-tags", this.url(repo), "+refs/heads/*:refs/heads/*"], { env, timeoutMs: 30 * 60_000 });
+    const r = await run("git", ["-C", mirror, "fetch", "--prune", "--no-tags", "--", this.url(repo), "+refs/heads/*:refs/heads/*"], { env, timeoutMs: 30 * 60_000 });
     if (r.code !== 0) throw new JobError("fetch_failed", "git fetch failed", r.stderr);
     return mirror;
   }
@@ -338,13 +369,13 @@ export class GitJobs {
     const mirror = this.mirrorOf(b.repo);
     if (!existsSync(join(mirror, "HEAD"))) await this.syncMirror(b.job_id, b.repo);
     const local = `refs/at-push/${b.thread_no}/${b.employee}`;
-    const copy = await run("git", ["-C", mirror, "fetch", "--no-tags", "--no-write-fetch-head", cwd, `+HEAD:${local}`], { env: gitEnv(), timeoutMs: 15 * 60_000 });
+    const copy = await run("git", ["-C", mirror, "fetch", "--no-tags", "--no-write-fetch-head", "--", cwd, `+HEAD:${local}`], { env: gitEnv(), timeoutMs: 15 * 60_000 });
     if (copy.code !== 0) throw new JobError("not_a_repo", "cannot read the worktree's commits", copy.stderr);
     const sha = (await run("git", ["-C", mirror, "rev-parse", "--verify", `${local}^{commit}`], { env: gitEnv() })).stdout.trim();
     if (b.unchanged_against?.length && (await this.nothingNew(b, mirror, local))) return { head_sha: sha, unchanged: true };
     const env = await this.credEnv(b.job_id, b.repo, "push");
     const lease = b.force_with_lease ? [`--force-with-lease=${target}:${b.force_with_lease}`] : [];
-    const r = await run("git", ["-C", mirror, "push", "--no-verify", "--porcelain", ...lease, this.url(b.repo), `${sha}:${target}`], { env, timeoutMs: 15 * 60_000 });
+    const r = await run("git", ["-C", mirror, "push", "--no-verify", "--porcelain", ...lease, "--", this.url(b.repo), `${sha}:${target}`], { env, timeoutMs: 15 * 60_000 });
     if (r.code !== 0) throw new JobError(pushErrorCode(r), "git push failed", r.stderr + r.stdout);
     await this.git(cwd, ["update-ref", `refs/remotes/origin/thread/${b.thread_no}/${b.employee}`, sha]);
     return { head_sha: sha, log_tail: tail(r.stdout + r.stderr) };
@@ -432,7 +463,9 @@ export class GitJobs {
   }
 
   private remember(repo: string, remote: string | undefined): void {
-    if (remote) this.remotes.set(repo, remote);
+    if (!remote) return;
+    if (!isSafeRemoteUrl(remote)) throw new JobError("not_a_repo", `remote URL not allowed: ${redact(remote)}`);
+    this.remotes.set(repo, remote);
   }
 
   /**

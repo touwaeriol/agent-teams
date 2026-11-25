@@ -39,6 +39,31 @@ const DANGEROUS_SHELL = [
   { re: /\bgh\s+auth\s+token\b|\bgit\s+credential\b|\bgit\s+credential-/, why: "printing GitHub tokens is not allowed (gh and git get them automatically)" },
 ];
 
+/**
+ * Per-process procfs entries that expose another process's environment, memory, arguments,
+ * open files or filesystem view (defence in depth for audit #55 F1; same-uid sessions can still
+ * reach them through Bash or Codex, so this is not a fix). /proc/self and /proc/thread-self are
+ * included: a session's own environment holds AT_CRED_SECRET, and realpath turns self into a pid anyway.
+ */
+const PROC_SENSITIVE = new Set([
+  "environ", "mem", "maps", "smaps", "smaps_rollup", "numa_maps", "pagemap", "cmdline", "auxv",
+  "fd", "fdinfo", "map_files", "root", "cwd", "exe", "stack", "syscall", "task",
+]);
+const PROC_PID = /^(\d+|self|thread-self)$/;
+
+/** True when an absolute path is (or is inside) a sensitive per-process procfs entry. */
+export function isSensitiveProcPath(path: string): boolean {
+  const parts = resolve(path).split("/").filter(Boolean);
+  if (parts[0] !== "proc" || parts.length < 3 || !PROC_PID.test(parts[1]!)) return false;
+  return PROC_SENSITIVE.has(parts[2]!);
+}
+
+/** True when a search rooted at this path would walk per-process procfs directories. */
+function walksProc(path: string): boolean {
+  const parts = resolve(path).split("/").filter(Boolean);
+  return parts[0] === "proc" && (parts.length === 1 || PROC_PID.test(parts[1]!));
+}
+
 export const PLATFORM_TOOL_PREFIX = "mcp__platform__";
 
 /**
@@ -55,12 +80,25 @@ function secretDecision(policy: ToolPolicy, tool: string, input: Record<string, 
   const path = filePathOf(tool, input, cwd);
   const real = path ? realTarget(path) : null;
   if (path && policy.secretPaths.some((s) => isInside(s, path) || isInside(s, real!))) return { deny: "That path holds node secrets and is off limits." };
+  if (path && (isSensitiveProcPath(path) || isSensitiveProcPath(real!))) return { deny: "Reading other processes' environment, memory or files through /proc is not allowed." };
+  if (SEARCH_TOOLS.has(tool) && (walksProc(path ?? cwd) || (real && walksProc(real)) || globWalksProc(tool, input, path ?? cwd))) return { deny: "Searching /proc process directories is not allowed; search a narrower path." };
   if (SEARCH_TOOLS.has(tool) && policy.secretPaths.some((s) => isInside(path ?? cwd, s))) return { deny: "Searching a directory that contains node secrets is not allowed; search a narrower path." };
   if (tool !== "Bash") return null;
   const command = String(input.command ?? "");
   if (policy.secretPaths.some((s) => command.includes(s))) return { deny: "That command touches node secrets and is not allowed." };
   const hit = DANGEROUS_SHELL.find((d) => d.re.test(command));
   return hit ? { deny: `Blocked: ${hit.why}.` } : null;
+}
+
+/**
+ * Glob's pattern may itself be absolute (wildcards under /proc); check its literal prefix.
+ * A prefix of `/` would also walk /proc, so it is refused like a search rooted at `/`.
+ */
+function globWalksProc(tool: string, input: Record<string, unknown>, root: string): boolean {
+  if (tool !== "Glob" || typeof input.pattern !== "string") return false;
+  const literal = input.pattern.split(/[*?[{]/, 1)[0]!;
+  const prefix = isAbsolute(literal) ? literal : join(root, literal);
+  return resolve(prefix) === "/" || walksProc(prefix) || isSensitiveProcPath(prefix);
 }
 
 function readOnlyDecision(policy: ToolPolicy, tool: string, input: Record<string, unknown>, cwd: string): Decision {

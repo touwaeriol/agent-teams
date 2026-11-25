@@ -10,7 +10,8 @@ import { useGitRepos, useRepos } from "@/api/queries";
 import type { GitConnectionView } from "@/api/views";
 import Combobox from "@/components/common/Combobox.vue";
 import Field from "@/components/common/Field.vue";
-import { addRepo, connectionLabel, matchesRepo, repoOptions, STANDALONE, standaloneOptions, type RepoRef } from "./repo";
+import Callout from "@/components/common/Callout.vue";
+import { addRepo, connectionLabel, isPatConnection, matchesRepo, PAT_WARNING, repoOptions, STANDALONE, standaloneOptions, type RepoRef } from "./repo";
 
 const props = defineProps<{ connections: GitConnectionView[]; currentProject?: string }>();
 const value = defineModel<RepoRef[]>({ required: true });
@@ -20,7 +21,8 @@ const source = ref(props.connections[0]?.id ?? STANDALONE);
 const isStandalone = computed(() => source.value === STANDALONE);
 const connectionId = computed(() => (isStandalone.value ? "" : source.value));
 const repos = useRepos(connectionId);
-const owner = computed(() => props.connections.find((c) => c.id === connectionId.value)?.login ?? "");
+const picked = computed(() => props.connections.find((c) => c.id === connectionId.value));
+const owner = computed(() => picked.value?.login ?? "");
 const options = computed(() =>
   isStandalone.value ? standaloneOptions(standalone.value, value.value, props.currentProject) : repoOptions(repos.data.value?.items ?? [], value.value, props.currentProject),
 );
@@ -69,5 +71,6 @@ function add(repo: string) {
       </Combobox>
       <RouterLink v-if="isStandalone" to="/settings/git" class="text-[12px] text-muted-foreground underline underline-offset-2">添加新的 Git 仓库…</RouterLink>
     </Field>
+    <Callout v-if="isPatConnection(picked)" tone="warn" class="sm:col-span-2" data-pat-warning>{{ PAT_WARNING }}</Callout>
   </div>
 </template>

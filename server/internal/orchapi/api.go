@@ -37,11 +37,13 @@ type API struct {
 	files          *artifacts.Server
 	artifactOrigin string
 	publicURL      string
+	// running session-move uploads (moves.go)
+	moveUploads *moveUploads
 }
 
 // New returns the API for an engine.
 func New(e *engine.Engine, reg *office.Registry) *API {
-	a := &API{e: e, office: reg}
+	a := &API{e: e, office: reg, moveUploads: newMoveUploads()}
 	if e != nil {
 		e.Orch.RefContext = a.refContext
 	}
