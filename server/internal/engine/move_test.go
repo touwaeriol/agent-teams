@@ -343,3 +343,83 @@ func openCoordinator(t *testing.T, tm *team, nb *nodetest.Node) *fakeAgent {
 	c.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: open.SessionID, MsgID: open.FirstMessage.MsgID})
 	return c
 }
+
+// slowUpload starts a PUT /nodes/moves/{id} whose body is a pipe declared as size bytes; the
+// returned writer feeds it and the channel delivers the status (audit #55 N5).
+func slowUpload(t *testing.T, tm *team, id, token string, size int64, sha string) (*io.PipeWriter, <-chan int) {
+	t.Helper()
+	pr, pw := io.Pipe()
+	req, _ := http.NewRequest("PUT", tm.w.srv.URL+"/nodes/moves/"+id, pr)
+	req.ContentLength = size
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Content-SHA256", sha)
+	done := make(chan int, 1)
+	go func() {
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			done <- -1
+			return
+		}
+		_, _ = io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		done <- res.StatusCode
+	}()
+	t.Cleanup(func() { _ = pw.Close() })
+	return pw, done
+}
+
+func statusWithin(t *testing.T, done <-chan int, what string) int {
+	t.Helper()
+	select {
+	case code := <-done:
+		return code
+	case <-time.After(10 * time.Second):
+		t.Fatalf("%s: no response (the server waited for the body?)", what)
+		return 0
+	}
+}
+
+// TestSessionMoveUploadLimits: an upload is refused before its body is read when the move is not the
+// node's or the declared size is over the cap, a bad X-Content-SHA256 is refused up front, and one
+// node runs one upload at a time.
+func TestSessionMoveUploadLimits(t *testing.T) {
+	tm, _, tokenB := moveTeam(t)
+	rateLimited(tm.dev, time.Hour)
+	exp := expectExport(t, tm, tm.dev.session)
+	id := string(exp.ExportID)
+	archive := []byte("pretend archive")
+	sum := sha256.Sum256(archive)
+	digest := hex.EncodeToString(sum[:])
+
+	// Another node's upload gets 404 although its body never ends.
+	pw, done := slowUpload(t, tm, id, tokenB, 64<<20, digest)
+	_, _ = pw.Write([]byte("x"))
+	if code := statusWithin(t, done, "other node"); code != 404 {
+		t.Fatalf("upload by the other node = %d", code)
+	}
+	// Over the cap by Content-Length: 413 without reading.
+	_, done = slowUpload(t, tm, id, tm.token, 128<<20+1, digest)
+	if code := statusWithin(t, done, "too large"); code != 413 {
+		t.Fatalf("oversized upload = %d", code)
+	}
+	// Malformed digest header: 400 up front.
+	_, done = slowUpload(t, tm, id, tm.token, 1<<20, "abc")
+	if code := statusWithin(t, done, "bad sha"); code != 400 {
+		t.Fatalf("bad sha upload = %d", code)
+	}
+	// One upload per node: a second one while the first is still sending gets 429.
+	pw, first := slowUpload(t, tm, id, tm.token, int64(len(archive)), digest)
+	_, _ = pw.Write(archive[:4])
+	eventually(t, "second upload refused", func() bool {
+		code, _ := moveRequest(t, tm, "PUT", id, tm.token, archive)
+		return code == 429
+	})
+	_, _ = pw.Write(archive[4:])
+	_ = pw.Close()
+	if code := statusWithin(t, first, "first upload"); code != 204 {
+		t.Fatalf("first upload = %d", code)
+	}
+	if code, raw := moveRequest(t, tm, "PUT", id, tm.token, archive); code != 204 {
+		t.Fatalf("upload after the first finished = %d %s", code, raw)
+	}
+}
