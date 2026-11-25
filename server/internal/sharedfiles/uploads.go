@@ -10,8 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oklog/ulid/v2"
-
 	"github.com/touwaeriol/agent-teams/server/internal/blobgc"
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -59,7 +57,7 @@ type Upload struct {
 func (Upload) TableName() string { return "at_shared_uploads" }
 
 // NewUploadID is the id of a new upload (up_ + ULID).
-func NewUploadID() string { return "up_" + strings.ToLower(ulid.Make().String()) }
+func NewUploadID() string { return store.NewID("up") }
 
 // BeginRequest is what an upload declares up front.
 type BeginRequest struct {
