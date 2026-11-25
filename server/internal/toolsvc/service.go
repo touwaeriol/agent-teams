@@ -14,15 +14,18 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"time"
 
 	"gorm.io/gorm"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
+	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/delivery"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/scheduler"
+	"github.com/touwaeriol/agent-teams/server/internal/sharedfiles"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -207,7 +210,69 @@ func (s *Service) duplicate(ctx context.Context, tx *core.Tx, m *protocol.ToolCa
 	_ = json.Unmarshal(result, &wire)
 	stored = Result{OK: wire.OK, Text: wire.Text, Structured: wire.Structured, AttachmentDownload: wire.AttachmentDownload,
 		SharedDownload: wire.SharedDownload}
+	if err := s.resign(ctx, tx, string(m.SessionID), &stored); err != nil {
+		return true, err
+	}
 	return true, s.sendResult(ctx, tx, string(m.SessionID), string(m.CallID), stored)
+}
+
+// resign gives a replayed result fresh presigned URLs: the stored ones (15 minutes) may have run
+// out by the time the daemon reconnects and repeats the call. The object is signed again only
+// while it is still the one the result describes (same attachment row with its object; the shared
+// file at that path with the same sha256); otherwise the stored URL is sent as is and the daemon
+// reports the failed download.
+func (s *Service) resign(ctx context.Context, tx *core.Tx, sessionID string, res *Result) error {
+	ad, sd := res.AttachmentDownload, res.SharedDownload
+	if (ad == nil || ad.URL == nil) && (sd == nil || len(sd.Files) != 1 || sd.Files[0].URL == nil) {
+		return nil
+	}
+	sc, err := core.SessionContextOf(ctx, tx, sessionID)
+	if err != nil {
+		return ignoreMissing(err)
+	}
+	pid := sc.Employee.ProjectID
+	bs := blobstore.Or(s.core.Blobs)
+	sign := func(key string) (*string, *time.Time, error) {
+		url, err := bs.PresignGet(ctx, key, AttachmentURLTTL, blobstore.GetOptions{ContentType: "application/octet-stream"})
+		if err != nil {
+			return nil, nil, err
+		}
+		exp := time.Now().Add(AttachmentURLTTL).UTC()
+		return &url, &exp, nil
+	}
+	if ad != nil && ad.URL != nil {
+		list, err := core.ProjectAttachments(ctx, tx, pid, []string{ad.Attachment.ID})
+		if err != nil && !errors.Is(err, core.ErrNotFound) {
+			return err
+		}
+		if len(list) == 1 && list[0].StorageKey != nil && list[0].State == "ready" {
+			fresh := *ad
+			if fresh.URL, fresh.ExpiresAt, err = sign(*list[0].StorageKey); err != nil && !errors.Is(err, blobstore.ErrNotConfigured) {
+				return err
+			}
+			if fresh.URL != nil {
+				res.AttachmentDownload = &fresh
+			}
+		}
+	}
+	if sd != nil && len(sd.Files) == 1 && sd.Files[0].URL != nil {
+		f, err := sharedfiles.Stat(ctx, tx, pid, sd.Files[0].Path)
+		if err != nil && !errors.Is(err, sharedfiles.ErrNotFound) {
+			return err
+		}
+		if err == nil && f.StorageKey != nil && f.SHA256 == sd.Files[0].SHA256 {
+			file := sd.Files[0]
+			if file.URL, file.ExpiresAt, err = sign(*f.StorageKey); err != nil && !errors.Is(err, blobstore.ErrNotConfigured) {
+				return err
+			}
+			if file.URL != nil {
+				fresh := *sd
+				fresh.Files = []protocol.DownloadFile{file}
+				res.SharedDownload = &fresh
+			}
+		}
+	}
+	return nil
 }
 
 // prepare loads the session context and checks availability and arguments; nil call = answer res.

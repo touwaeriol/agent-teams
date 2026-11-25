@@ -395,6 +395,71 @@ func TestReadSharedFilePresigned(t *testing.T) {
 	}
 }
 
+// TestRepeatedDownloadCallsResign: a repeated read_shared_file / read_attachment (the daemon
+// reconnected and sent the call again) answers from the stored result, but with freshly signed
+// URLs: the stored ones may have expired. A shared file replaced since keeps the stored URL (the
+// daemon then reports the failed download instead of getting other bytes).
+func TestRepeatedDownloadCallsResign(t *testing.T) {
+	tm := attTeam(t, true)
+	c := tm.w.e.Core
+	if _, _, err := sharedfiles.Put(tm.w.ctx, c.Pool, c.Blobs, tm.projectID, "docs/a.md", []byte("hello"), sharedfiles.Uploader{Name: "user"}); err != nil {
+		t.Fatal(err)
+	}
+	zip := putAttachment(t, tm, tm.projectID, "data.zip", "application/zip", []byte("PK\x03\x04 payload"))
+	stale := "http://stale.invalid/expired"
+	retire := func(callID string) {
+		t.Helper()
+		tm.sql(t, `UPDATE at_node_commands SET status = 'expired' WHERE type = 'tool.result' AND body->>'call_id' = $1`, callID)
+	}
+	gen := protocol.OpenGen(tm.lead.gen)
+	repeat := func(tool, callID string, args any) protocol.ToolResult {
+		t.Helper()
+		raw, _ := json.Marshal(args)
+		tm.lead.send(protocol.TypeToolCall, protocol.ToolCall{CallID: protocol.CallID(callID), SessionID: protocol.SessionID(tm.lead.session),
+			OpenGen: &gen, Tool: tool, Args: raw})
+		return tm.lead.result(callID)
+	}
+	// Ages the stored result (its URL becomes one that no longer works) and retires its result
+	// command, as when the daemon was away until the command expired: a live one is just replayed.
+	age := func(callID, field string) {
+		t.Helper()
+		tm.sql(t, `UPDATE at_tool_calls SET result = jsonb_set(result, $3::text[], to_jsonb($4::text))
+			WHERE session_id = $1 AND call_id = $2`, tm.lead.session, callID, field, stale)
+		retire(callID)
+	}
+
+	first := repeat("read_shared_file", "tc_rs_1", map[string]any{"path": "docs/a.md"})
+	if !first.Ok || first.SharedDownload == nil || first.SharedDownload.Files[0].URL == nil {
+		t.Fatalf("first read %+v", first)
+	}
+	age("tc_rs_1", "{shared_download,files,0,url}")
+	again := repeat("read_shared_file", "tc_rs_1", map[string]any{"path": "docs/a.md"})
+	f := again.SharedDownload.Files[0]
+	if !again.Ok || f.URL == nil || *f.URL == stale || !strings.HasPrefix(*f.URL, "http") || f.ExpiresAt == nil ||
+		f.SHA256 != sharedfiles.Sum([]byte("hello")) || again.SharedDownload.DownloadID != first.SharedDownload.DownloadID {
+		t.Fatalf("repeated read_shared_file not re-signed %+v", again.SharedDownload)
+	}
+
+	// Replaced since: the stored URL goes out as is.
+	if _, _, err := sharedfiles.Put(tm.w.ctx, c.Pool, c.Blobs, tm.projectID, "docs/a.md", []byte("changed"), sharedfiles.Uploader{Name: "user"}); err != nil {
+		t.Fatal(err)
+	}
+	retire("tc_rs_1")
+	if r := repeat("read_shared_file", "tc_rs_1", map[string]any{"path": "docs/a.md"}); *r.SharedDownload.Files[0].URL != stale {
+		t.Fatalf("replaced file re-signed %+v", r.SharedDownload.Files[0])
+	}
+
+	first = repeat("read_attachment", "tc_ra_1", map[string]any{"id": zip.ID})
+	if !first.Ok || first.AttachmentDownload == nil || first.AttachmentDownload.URL == nil {
+		t.Fatalf("first read_attachment %+v", first)
+	}
+	age("tc_ra_1", "{attachment_download,url}")
+	again = repeat("read_attachment", "tc_ra_1", map[string]any{"id": zip.ID})
+	if d := again.AttachmentDownload; d == nil || d.URL == nil || *d.URL == stale || !strings.HasPrefix(*d.URL, "http") || d.Attachment.ID != zip.ID {
+		t.Fatalf("repeated read_attachment not re-signed %+v", d)
+	}
+}
+
 // TestForwardRestartsRetention: forwarding a message is a use of its attachments.
 func TestForwardRestartsRetention(t *testing.T) {
 	tm := attTeam(t, true)
