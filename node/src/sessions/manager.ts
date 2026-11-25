@@ -9,7 +9,7 @@ import { readJsonFile, writeFileAtomic } from "../util/jsonl.js";
 import type { Logger } from "../util/log.js";
 import { isInside, resolveInRoot } from "../util/paths.js";
 import { loadImages, removeImages, type ImageFetcher, type LoadedImage } from "./images.js";
-import { ATTACH_DIR, DEFAULT_ATTACHMENT_OPTIONS, downloadAttachment, planDelivery, sweepAttachments, type AttachmentOptions, type AttachmentOutcome, type AttachmentRuntime, type ConsoleHttp, type ResourceLink } from "./attachments.js";
+import { ATTACH_DIR, AttachmentExpired, DEFAULT_ATTACHMENT_OPTIONS, downloadAttachment, planDelivery, sweepAttachments, type AttachmentOptions, type AttachmentOutcome, type AttachmentRuntime, type ConsoleHttp, type ResourceLink } from "./attachments.js";
 import { Session, type SendFn, type SessionHost, type SessionRecord } from "./session.js";
 import { ResumeFailed, type CompactResult, type Driver, type DriverContext, type ModeApplied, type ModeChange, type ModelOption } from "./types.js";
 import { codexMode } from "./codex/mode.js";
@@ -349,7 +349,7 @@ export class SessionManager implements SessionHost {
         outcomes.push({ ref, saved: await downloadAttachment(s.absCwd, ref, this.d.http, this.attachmentOptions, undefined, s.downloads.signal) });
       } catch (err) {
         this.d.log.warn({ session: s.id, attachment: ref.id, err: (err as Error).message }, "attachment download failed");
-        outcomes.push({ ref, error: (err as Error).message });
+        outcomes.push({ ref, error: (err as Error).message, ...(err instanceof AttachmentExpired ? { expired: true } : {}) });
       }
     }
     return { legacy, outcomes };

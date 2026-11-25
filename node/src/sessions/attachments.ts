@@ -41,6 +41,13 @@ export const DEFAULT_ATTACHMENT_OPTIONS: AttachmentOptions = {
 
 export class AttachmentError extends Error {}
 
+/** The console answered 410: the attachment's retention ran out and its bytes are gone (#58). */
+export class AttachmentExpired extends AttachmentError {
+  constructor() {
+    super("附件已过期（超过保留期没有再使用，文件已删除），请让用户重新上传");
+  }
+}
+
 /** How the daemon reaches the console over HTTP (node token). */
 export interface ConsoleHttp {
   base: string;
@@ -55,17 +62,22 @@ export function consoleHttp(wsUrl: string, token: string, fetchFn: typeof fetch 
 /**
  * GET /nodes/attachments/{id}/url: a presigned download URL, or null when the console has none
  * (a legacy row kept in the database, an old console without the endpoint, any error): the caller
- * then falls back to GET /nodes/attachments/{id}.
+ * then falls back to GET /nodes/attachments/{id}. Throws AttachmentExpired on 410.
  */
 export async function attachmentUrl(http: ConsoleHttp, id: string, timeoutMs = 30_000, cancel?: AbortSignal): Promise<string | null> {
   try {
     const res = await http.fetch(`${http.base}/nodes/attachments/${encodeURIComponent(id)}/url`, {
       headers: { Authorization: `Bearer ${http.token}` }, redirect: "error", signal: withCancel(AbortSignal.timeout(Math.max(1, timeoutMs)), cancel),
     });
+    if (res.status === 410) {
+      await res.body?.cancel().catch(() => undefined);
+      throw new AttachmentExpired();
+    }
     if (!res.ok) return null;
     const body = (await res.json()) as { url?: unknown };
     return typeof body.url === "string" && /^https?:\/\//.test(body.url) ? body.url : null;
-  } catch {
+  } catch (err) {
+    if (err instanceof AttachmentExpired) throw err;
     return null;
   }
 }
@@ -301,6 +313,8 @@ export interface AttachmentOutcome {
   ref: AttachmentRef;
   saved?: SavedAttachment;
   error?: string;
+  /** The console said 410: retrying cannot help (error says so). */
+  expired?: boolean;
 }
 
 export interface Delivery {
@@ -333,7 +347,8 @@ export async function planDelivery(runtime: AttachmentRuntime, outcomes: Attachm
   for (const o of outcomes) {
     const head = `- ${o.ref.id} ${o.ref.name}（${o.ref.content_type}，${formatSize(o.ref.size)}）`;
     if (!o.saved) {
-      lines.push(`${head}：下载失败（${o.error ?? "未知原因"}），可以稍后用 read_attachment("${o.ref.id}") 重试`);
+      if (o.expired) lines.push(`${head}：${o.error}`);
+      else lines.push(`${head}：下载失败（${o.error ?? "未知原因"}），可以稍后用 read_attachment("${o.ref.id}") 重试`);
       continue;
     }
     const t = baseType(o.ref.content_type);

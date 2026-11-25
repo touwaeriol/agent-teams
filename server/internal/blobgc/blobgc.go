@@ -60,6 +60,16 @@ func Reserve(ctx context.Context, q store.DB, key string) error {
 	return err
 }
 
+// RedeleteLater queues key for deletion ReserveDelay from now (an earlier queued time is moved
+// back), in q's transaction. For the key of a node's single presigned PUT that was refused or
+// cancelled: the caller deletes the object at once, but the URL stays valid for its TTL
+// (sharedfiles.UploadTTL < ReserveDelay), and a replayed PUT would leave an object no row points at.
+func RedeleteLater(ctx context.Context, q store.DB, key string) error {
+	_, err := store.Exec(ctx, q, `INSERT INTO at_blob_deletions (key, next_at) VALUES ($1, now() + make_interval(secs => $2))
+		ON CONFLICT (key) DO UPDATE SET next_at = GREATEST(at_blob_deletions.next_at, EXCLUDED.next_at)`, key, ReserveDelay.Seconds())
+	return err
+}
+
 // referencedSQL tells whether a row still points at an object key ($1; $2 = its project id).
 const referencedSQL = `SELECT EXISTS (SELECT 1 FROM at_attachments WHERE project_id = $2 AND storage_key = $1)
 	OR EXISTS (SELECT 1 FROM at_shared_files WHERE project_id = $2 AND storage_key = $1)

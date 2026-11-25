@@ -239,12 +239,10 @@ func (s *Service) storeShared(ctx context.Context, tx *core.Tx, c *call, in prot
 		return Result{}, refuse("%s", err.Error())
 	}
 	if c.upload.Storage == protocol.ToolUploadStorageS3 {
-		f, overwritten, err := finalizeSharedUpload(ctx, tx, s.core.Blobs, c.emp().ProjectID, string(c.upload.UploadID), p, sharedUploader(c))
-		if err != nil {
-			s.dropOwnUpload(ctx, tx, c, string(c.upload.UploadID))
-			return Result{}, refuseUpload(err, p)
-		}
-		return s.storedShared(ctx, tx, c, f, overwritten)
+		// Finishing reads the whole object (copy, sha256): up to 200 MB of network work, done after
+		// the call's transaction (Later) so neither rows nor the node's link wait on it.
+		uploadID := string(c.upload.UploadID)
+		return Result{Later: func(ctx context.Context) Result { return s.finishSharedUpload(ctx, c, uploadID, p) }}, nil
 	}
 	if decl.Size > sharedfiles.MaxInlineFileBytes {
 		return Result{}, refuse("%s", sharedfiles.InlineTooLarge().Error())
@@ -289,6 +287,35 @@ func (s *Service) storedShared(ctx context.Context, tx *core.Tx, c *call, f shar
 		"同名再写会直接覆盖。%s", verb, f.Path, human(f.Size), sum, noSecrets)
 	return okJSON(text, protocol.WriteSharedFileResult{Path: protocol.SharedPath(f.Path), Size: int(f.Size), SHA256: f.SHA256,
 		Overwritten: overwritten}), nil
+}
+
+// finishSharedUpload is write_shared_file's presigned path after the call's transaction: the
+// upload becomes the shared file in a transaction of its own (FinalizeUpload reads the object
+// before it takes the project lock); a refusal cancels the caller's upload so it does not hold
+// the quota.
+func (s *Service) finishSharedUpload(ctx context.Context, c *call, uploadID, p string) Result {
+	var res Result
+	err := s.core.InTx(ctx, func(tx *core.Tx) error {
+		f, overwritten, err := finalizeSharedUpload(ctx, tx, s.core.Blobs, c.emp().ProjectID, uploadID, p, sharedUploader(c))
+		if err != nil {
+			return refuseUpload(err, p)
+		}
+		res, err = s.storedShared(ctx, tx, c, f, overwritten)
+		return err
+	})
+	if err == nil {
+		return res
+	}
+	_ = s.core.InTx(ctx, func(tx *core.Tx) error {
+		s.dropOwnUpload(ctx, tx, c, uploadID)
+		return nil
+	})
+	var ue userError
+	if errors.As(err, &ue) {
+		return failText("%s", ue.msg)
+	}
+	s.log.Warn("write_shared_file finish", "upload", uploadID, "err", err)
+	return failText("写共享文件失败：%v", err)
 }
 
 // finalizeSharedUpload turns a daemon's presigned upload (POST /nodes/uploads, then PUT; tool.call

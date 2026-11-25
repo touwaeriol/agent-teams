@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -550,6 +551,10 @@ func (a *API) nodeUpload(c *gin.Context) {
 			c.Header("Cache-Control", "no-store")
 			c.JSON(http.StatusCreated, NodeUpload{UploadID: up.ID, URL: u, Headers: headers, ExpiresAt: time.Now().Add(sharedfiles.UploadTTL)})
 			return
+		}
+		// No URL: the upload just begun would hold the project's quota until blobgc expires it.
+		if e := sharedfiles.AbortUpload(context.WithoutCancel(ctx), a.e.Core.Pool, a.e.Core.Blobs, emp.ProjectID, up.ID); e != nil {
+			slog.Warn("drop a node upload without a URL", "upload", up.ID, "err", e)
 		}
 	}
 	var apiErr *httpapi.APIError

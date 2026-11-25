@@ -533,7 +533,13 @@ func TestWriteSharedFileS3(t *testing.T) {
 
 	// The file changed between hashing and the PUT: refused, the old file stays.
 	changed := []byte("id,value\n9,9\n")
-	if res := call(st.dev, ask("out/s3.csv", changed, []byte("id,value\n0,0\n")), "out/s3.csv", changed); res.Ok ||
+	changedID := ask("out/s3.csv", changed, []byte("id,value\n0,0\n"))
+	changedUp, err := sharedfiles.GetUpload(w.ctx, w.db.Pool, st.projectID, changedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedKey := changedUp.StorageKey
+	if res := call(st.dev, changedID, "out/s3.csv", changed); res.Ok ||
 		!strings.Contains(text(res), "sha256") {
 		t.Fatalf("checksum mismatch accepted: %s", text(res))
 	}
@@ -554,6 +560,11 @@ func TestWriteSharedFileS3(t *testing.T) {
 	}
 	// Refused for the quota: the upload is cancelled at once (it no longer holds the quota).
 	big := ask("out/big.csv", body, body)
+	up, err := sharedfiles.GetUpload(w.ctx, w.db.Pool, st.projectID, big)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bigKey := up.StorageKey
 	if _, err := store.Exec(w.ctx, w.db.Pool, `INSERT INTO at_shared_uploads (id, project_id, path, object_id, storage_key, size, content_type, uploaded_by)
 		VALUES ('up_huge', $1, 'huge.bin', 'sf_huge', 'k', $2, 'application/octet-stream', 'user')`, st.projectID, int64(5<<30)-10); err != nil {
 		t.Fatal(err)
@@ -564,6 +575,11 @@ func TestWriteSharedFileS3(t *testing.T) {
 	if _, err := sharedfiles.GetUpload(w.ctx, w.db.Pool, st.projectID, big); !errors.Is(err, sharedfiles.ErrUploadNotFound) {
 		t.Fatalf("refused upload still held: %v", err)
 	}
+	// Its object went at once, and its key is queued once more for after the PUT URL expired
+	// (a replayed PUT would otherwise leave an object nothing points at).
+	expectRedelete(t, w, bigKey)
+	// The same for an upload dropped by its checks (the checksum one above).
+	expectRedelete(t, w, changedKey)
 	// A session of another node (or closed): 409, never 404 (the daemon reads 404 as an old console).
 	if code, raw := nodeCall(t, w, "POST", "/nodes/uploads", st.tokB, map[string]any{"session_id": st.dev.session, "name": "a.txt",
 		"size": 1, "sha256": hexSum([]byte("x"))}); code != 409 || !strings.Contains(string(raw), "session_not_on_node") {
@@ -571,5 +587,100 @@ func TestWriteSharedFileS3(t *testing.T) {
 	}
 	if res := call(st.dev, "up_00000000000000000000000000", "out/x.csv", body); res.Ok {
 		t.Fatalf("unknown upload accepted: %s", text(res))
+	}
+}
+
+// expectRedelete: key's object is gone and the key is queued for deletion again after the node's
+// presigned PUT has expired (blobgc.RedeleteLater).
+func expectRedelete(t *testing.T, w *world, key string) {
+	t.Helper()
+	if _, err := w.e.Core.Blobs.Head(w.ctx, key); err == nil {
+		t.Fatalf("object %s still there", key)
+	}
+	var later bool
+	if err := store.QueryRow(w.ctx, w.db.Pool, `SELECT next_at > now() + make_interval(secs => $2) FROM at_blob_deletions WHERE key = $1`,
+		key, sharedfiles.UploadTTL.Seconds()).Scan(&later); err != nil || !later {
+		t.Fatalf("key %s not queued after the URL expires: %v %v", key, later, err)
+	}
+}
+
+// failingPresign is a store whose PresignPut fails (storage misconfigured, say).
+type failingPresign struct{ blobstore.Store }
+
+func (failingPresign) PresignPut(context.Context, string, time.Duration, int64, string) (string, map[string]string, error) {
+	return "", nil, errors.New("presign failed")
+}
+
+// TestNodeUploadPresignFails: POST /nodes/uploads that cannot sign the PUT drops the upload it
+// began, so it does not hold the project's quota.
+func TestNodeUploadPresignFails(t *testing.T) {
+	st := startSFTeam(t)
+	w := st.w
+	real := w.e.Core.Blobs
+	w.e.Core.Blobs = failingPresign{real}
+	t.Cleanup(func() { w.e.Core.Blobs = real })
+	code, raw := nodeCall(t, w, "POST", "/nodes/uploads", st.tokA, map[string]any{"session_id": st.dev.session, "name": "out/a.csv",
+		"size": 3, "sha256": hexSum([]byte("abc"))})
+	if code < 500 {
+		t.Fatalf("presign failure = %d %s", code, raw)
+	}
+	var n int
+	if err := store.QueryRow(w.ctx, w.db.Pool, `SELECT count(*) FROM at_shared_uploads WHERE project_id = $1`, st.projectID).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("uploads left: %d %v", n, err)
+	}
+}
+
+// blockingOpen is a store whose Open waits until release is closed (a slow read of a big object).
+type blockingOpen struct {
+	blobstore.Store
+	release chan struct{}
+}
+
+func (b blockingOpen) Open(ctx context.Context, key string) (io.ReadCloser, error) {
+	<-b.release
+	return b.Store.Open(ctx, key)
+}
+
+// TestWriteSharedFileS3FinishesAfterTheCall: finishing a presigned write_shared_file (copy and
+// sha256 of up to 200 MB) happens after the call's transaction, so the node's other messages are
+// handled meanwhile (a link blocked for long misses its pings and is closed).
+func TestWriteSharedFileS3FinishesAfterTheCall(t *testing.T) {
+	st := startSFTeam(t)
+	w := st.w
+	body := []byte("slow,file\n1,2\n")
+	code, raw := nodeCall(t, w, "POST", "/nodes/uploads", st.tokA, map[string]any{"session_id": st.dev.session, "name": "out/slow.csv",
+		"size": len(body), "sha256": hexSum(body)})
+	var nu orchapi.NodeUpload
+	if code != 201 || json.Unmarshal(raw, &nu) != nil {
+		t.Fatalf("node upload %d %s", code, raw)
+	}
+	req, _ := http.NewRequest("PUT", nu.URL, bytes.NewReader(body))
+	for k, v := range nu.Headers {
+		req.Header.Set(k, v)
+	}
+	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != 200 {
+		t.Fatalf("put %v %v", resp, err)
+	}
+	real := w.e.Core.Blobs
+	slow := blockingOpen{Store: real, release: make(chan struct{})}
+	w.e.Core.Blobs = slow
+	t.Cleanup(func() { w.e.Core.Blobs = real })
+
+	gen := protocol.OpenGen(st.dev.gen)
+	slowID := fmt.Sprintf("tc_slow_%d", time.Now().UnixNano())
+	args, _ := json.Marshal(map[string]any{"file": "out/slow.csv"})
+	st.dev.send(protocol.TypeToolCall, protocol.ToolCall{CallID: protocol.CallID(slowID), SessionID: protocol.SessionID(st.dev.session), OpenGen: &gen,
+		Tool: "write_shared_file", Args: args, Upload: &protocol.ToolUpload{UploadID: protocol.UploadID(nu.UploadID), Storage: protocol.ToolUploadStorageS3,
+			Files: []protocol.UploadFile{{Path: "out/slow.csv", Size: len(body), SHA256: hexSum(body), ContentType: "text/csv"}}}})
+	// While the object is being read, the same node's next call is answered.
+	if res := st.dev.call("list_shared_files", map[string]any{}); !res.Ok {
+		t.Fatalf("list_shared_files while finishing: %s", text(res))
+	}
+	close(slow.release)
+	if res := st.dev.result(slowID); !res.Ok || !strings.Contains(text(res), "out/slow.csv") {
+		t.Fatalf("slow write: %s", text(res))
+	}
+	if _, data, err := sharedfiles.Load(w.ctx, w.db.Pool, real, st.projectID, "out/slow.csv"); err != nil || !bytes.Equal(data, body) {
+		t.Fatalf("stored %q %v", data, err)
 	}
 }
