@@ -1,11 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startHarness, type Harness, claudeOpen } from "./helpers/daemon.js";
 import { driverOf, disableFilters } from "../src/git/safe.js";
 import { gitEnv } from "../src/git/exec.js";
-import { waitIdle } from "../src/git/jobs.js";
+import { GitJobs, isSafeBranch, isSafeRemoteUrl, waitIdle } from "../src/git/jobs.js";
+import { silentLogger } from "../src/util/log.js";
 
 let h: Harness;
 afterEach(async () => {
@@ -364,6 +366,58 @@ describe("git failure reasons", () => {
     const res = await h.console.waitType("git.result", (b) => b.job_id === "g_f1");
     expect(res.body).toMatchObject({ ok: false, error_code: "fetch_failed" });
     expect(res.body.error).toMatch(/^git fetch failed: fatal: /);
+  });
+});
+
+describe("git argument checks (F10)", () => {
+  it("refuses an option-like remote_url and option-like branch names before running git", async () => {
+    h = await startHarness();
+    makeRemote(h.dir);
+    const marker = join(h.dir, "pwned");
+    // the git.prepare schema already refuses such URLs (bad_schema); isSafeRemoteUrl is the daemon's own check behind it
+    h.console.command("git.prepare", { ...prepare("g_a1", "dev-1"), repo: "git/gr_x", remote_url: `--upload-pack=touch ${marker}` });
+    await h.console.waitType("error");
+    h.console.command("git.prepare", { ...prepare("g_a3", "dev-1"), branch: "--orphan" });
+    expect((await h.console.waitType("git.result", (b) => b.job_id === "g_a3")).body).toMatchObject({ ok: false, error_code: "refspec_not_allowed" });
+    h.console.command("git.prepare", { ...prepare("g_a4", "dev-1"), base: "-b" });
+    expect((await h.console.waitType("git.result", (b) => b.job_id === "g_a4")).body).toMatchObject({ ok: false, error_code: "refspec_not_allowed" });
+    expect(existsSync(marker)).toBe(false);
+    expect(existsSync(join(h.opts.root, "projects/p1/threads/12/dev-1"))).toBe(false);
+    // a normal job still works afterwards
+    h.console.command("git.prepare", prepare("g_a5", "dev-1"));
+    expect((await h.console.waitType("git.result", (b) => b.job_id === "g_a5")).body).toMatchObject({ ok: true, created: true });
+  });
+
+  it("fails a job whose remote_url gets past the schema but is not a safe remote", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "at-gitjobs-"));
+    try {
+      const jobs = new GitJobs({ root: join(dir, "root"), platform: { hooksDir: join(dir, "hooks"), askpass: "", binDir: "" }, gitBaseUrl: `file://${dir}`,
+        mirrorDir: join(dir, "mirrors"), credential: async () => null, log: silentLogger });
+      const base = { project_id: "p1", repo: "git/gr_x", mode: "clone", cwd: "projects/p1/threads/1/dev", branch: "thread/1/dev" } as const;
+      expect(await jobs.prepare({ ...base, job_id: "j1", remote_url: "ext::sh -c id" } as never)).toMatchObject({ ok: false, error_code: "not_a_repo" });
+      expect(await jobs.push({ job_id: "j2", project_id: "p1", repo: "git/gr_x", remote_url: "--upload-pack=id", cwd: "projects/p1/threads/1/dev",
+        refspec: "HEAD:refs/heads/thread/1/dev", employee: "dev", thread_no: 1 } as never)).toMatchObject({ ok: false, error_code: "not_a_repo" });
+      expect(existsSync(join(dir, "mirrors"))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts only https://, ssh:// and user@host:path remote URLs", () => {
+    for (const ok of ["https://git.example.com/acme/web.git", "https://host:8443/a/b.git", "ssh://git@host:2222/a/b.git", "git@github.com:acme/web.git", "deploy_1@gitlab.example.com:group/sub/repo.git"]) {
+      expect(isSafeRemoteUrl(ok), ok).toBe(true);
+    }
+    for (const bad of ["", "--upload-pack=touch /tmp/x", "-oProxyCommand=x@h:p", "ext::sh -c id", "ext::foo@h:p", "file:///etc", "/srv/repo.git", "http://host/a.git",
+      "git://host/a.git", "https://host/a b.git", "https://host/a\nb", "git@-host:a.git", "git@host:-a.git", "fd::17", "https://"]) {
+      expect(isSafeRemoteUrl(bad), bad).toBe(false);
+    }
+  });
+
+  it("accepts ordinary branch names and refuses option-like or malformed ones", () => {
+    for (const ok of ["main", "develop", "thread/55/dev-5", "thread/12-comms", "release-1.2", "feat_x"]) expect(isSafeBranch(ok), ok).toBe(true);
+    for (const bad of ["", "-b", "--orphan", "a..b", "a b", "a~1", "a^", "a:b", "a?", "a*", "a[", "a\\b", "/a", "a/", "a.lock", "a.", ".a", "a/.b", "a//b", "a@{1}", "@", "a\u0001"]) {
+      expect(isSafeBranch(bad), JSON.stringify(bad)).toBe(false);
+    }
   });
 });
 
