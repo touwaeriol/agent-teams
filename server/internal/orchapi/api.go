@@ -64,6 +64,7 @@ func (a *API) Register(api huma.API, r gin.IRoutes) {
 	a.registerSchedules(api)
 	a.registerLibrary(api)
 	a.registerAttachments(api, r)
+	a.registerUploads(api, r)
 	a.registerMoves(r)
 	a.registerSharedFiles(api)
 	a.registerComposer(api)
@@ -124,6 +125,9 @@ var errorMap = []struct {
 	{orchestrator.ErrTooManyImages, 422, "validation"},
 	{core.ErrNotImage, 422, "validation"},
 	{core.ErrTooLarge, 422, "validation"},
+	{core.ErrAttachmentTooLarge, 413, "file_too_large"},
+	{core.ErrUploadIncomplete, 409, "upload_incomplete"},
+	{core.ErrUploadSize, 422, "size_mismatch"},
 	{orchestrator.ErrNoNode, 409, "no_node"},
 	{orchestrator.ErrNoEmployee, 404, "employee_not_found"},
 	{orchestrator.ErrRoleNotFound, 422, "unknown_role"},

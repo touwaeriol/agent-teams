@@ -37,10 +37,13 @@ type AttachmentView struct {
 type attachmentOutput struct{ Body AttachmentView }
 
 type attachmentFileInput struct {
-	ID string `path:"id" maxLength:"64"`
+	ID       string `path:"id" maxLength:"64"`
+	Download bool   `query:"download" doc:"Always as an attachment (the page's download button)"`
 }
 
 type attachmentFileOutput struct {
+	Status       int
+	Location     string `header:"Location"`
 	ContentType  string `header:"Content-Type"`
 	CacheControl string `header:"Cache-Control"`
 	NoSniff      string `header:"X-Content-Type-Options"`
@@ -54,9 +57,14 @@ func (a *API) registerAttachments(api huma.API, r gin.IRoutes) {
 		summary("Upload a file to attach to a message: an image or PDF (at most 5 MB) or a text file (at most 1 MB)"),
 		func(o *huma.Operation) { o.MaxBodyBytes = 8 << 20 }), a.uploadAttachment)
 	huma.Register(api, op("get-attachment", "GET", "/api/attachments/{id}", t,
-		summary("The bytes of an attachment"), func(o *huma.Operation) {
-			o.Responses = map[string]*huma.Response{"200": {Description: "The file", Content: map[string]*huma.MediaType{
-				"image/png": {}, "image/jpeg": {}, "image/gif": {}, "image/webp": {}, "application/pdf": {}, "text/plain": {}}}}
+		summary("An attachment: 302 to a presigned URL valid 5 minutes (images and PDF inline, anything else downloaded as application/octet-stream); the bytes themselves for attachments from before #58; 410 once expired"),
+		func(o *huma.Operation) {
+			o.Responses = map[string]*huma.Response{
+				"200": {Description: "The file (attachments still kept in the database)", Content: map[string]*huma.MediaType{
+					"image/png": {}, "image/jpeg": {}, "image/gif": {}, "image/webp": {}, "application/pdf": {}, "text/plain": {}}},
+				"302": {Description: "Redirect to the object store", Headers: map[string]*huma.Param{
+					"Location": {Description: "Presigned URL", Schema: &huma.Schema{Type: "string"}}}},
+			}
 		}), a.attachmentFile)
 	if a.e == nil {
 		r.GET("/nodes/attachments/:id", offline)
@@ -89,19 +97,31 @@ func (a *API) attachmentFile(ctx context.Context, in *attachmentFileInput) (*att
 	if err != nil {
 		return nil, err
 	}
-	att, data, err := core.AttachmentData(ctx, a.e.Core.Pool, a.e.Core.Blobs, u.ID, in.ID)
+	att, err := core.AttachmentOfUser(ctx, a.e.Core.Pool, u.ID, in.ID)
 	if err != nil {
-		return nil, fail(err, "没有这张图片")
+		return nil, fail(err, "没有这个附件")
 	}
 	// A page download or preview is a use: the retention starts again.
 	if err := core.TouchAttachments(ctx, a.e.Core.Pool, att.ProjectID, []string{att.ID}, a.e.Core.AttachmentTTL); err != nil {
 		return nil, err
 	}
+	if att.StorageKey != nil {
+		loc, err := a.presignedGet(ctx, *att.StorageKey, att.Name, att.ContentType, in.Download)
+		if err != nil {
+			return nil, fail(err, "")
+		}
+		// Shorter than the signature, so a cached redirect never points at an expired URL.
+		return &attachmentFileOutput{Status: http.StatusFound, Location: loc, CacheControl: "private, max-age=240"}, nil
+	}
+	att, data, err := core.AttachmentData(ctx, a.e.Core.Pool, a.e.Core.Blobs, u.ID, in.ID)
+	if err != nil {
+		return nil, fail(err, "没有这个附件")
+	}
 	typ := att.ContentType
 	if core.IsInlineText(typ) {
 		typ += "; charset=utf-8"
 	}
-	return &attachmentFileOutput{ContentType: typ, CacheControl: "private, max-age=31536000, immutable",
+	return &attachmentFileOutput{Status: http.StatusOK, ContentType: typ, CacheControl: "private, max-age=31536000, immutable",
 		NoSniff: "nosniff", CSP: "default-src 'none'; sandbox", Body: data}, nil
 }
 

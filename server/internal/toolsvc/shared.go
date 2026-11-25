@@ -245,8 +245,8 @@ func (s *Service) storeShared(ctx context.Context, tx *core.Tx, c *call, in prot
 		}
 		return s.storedShared(ctx, tx, c, f, overwritten)
 	}
-	if decl.Size > sharedfiles.MaxFileBytes {
-		return Result{}, refuse("%s", sharedfiles.Check(sharedfiles.Usage{}, int64(decl.Size), -1).Error())
+	if decl.Size > sharedfiles.MaxInlineFileBytes {
+		return Result{}, refuse("%s", sharedfiles.InlineTooLarge().Error())
 	}
 	data, err := artifacts.LoadChunks(ctx, tx, c.sc.Session.ID, c.upload)
 	if err != nil {
@@ -291,22 +291,22 @@ func (s *Service) storedShared(ctx context.Context, tx *core.Tx, c *call, f shar
 }
 
 // finalizeSharedUpload turns a daemon's presigned upload (POST /nodes/uploads, then PUT; tool.call
-// upload storage s3) into the shared file at path: size checked against the object, limits and
-// path checked, sha256 left to blob_hash. It is D2's sharedfiles.FinalizeUpload (#58); until that
-// lands the s3 upload is refused. Integration: replace this variable with sharedfiles.FinalizeUpload.
-var finalizeSharedUpload = func(ctx context.Context, q core.DB, bs blobstore.Store, projectID, uploadID, path string,
+// upload storage s3) into the shared file at path (sharedfiles.FinalizeUpload: size and the
+// declared sha256 checked against the object, limits and path checked). Only the employee that
+// asked for the upload may finish it.
+func finalizeSharedUpload(ctx context.Context, q core.DB, bs blobstore.Store, projectID, uploadID, path string,
 	by sharedfiles.Uploader) (sharedfiles.SharedFile, bool, error) {
-	return sharedfiles.SharedFile{}, false, errUploadUnsupported
+	return sharedfiles.FinalizeUpload(ctx, q, bs, projectID, uploadID,
+		sharedfiles.FinalizeOptions{Path: path, By: &by, EmployeeID: by.EmployeeID})
 }
-
-var errUploadUnsupported = errors.New("服务端还不支持节点直传共享文件")
 
 // refuseUpload explains a refused presigned upload to the model.
 func refuseUpload(err error, p string) error {
 	switch {
-	case errors.Is(err, sharedfiles.ErrInvalidPath), errors.Is(err, sharedfiles.ErrFileTooLarge), errors.Is(err, sharedfiles.ErrQuota),
-		errors.Is(err, errUploadUnsupported):
+	case errors.Is(err, sharedfiles.ErrInvalidPath), errors.Is(err, sharedfiles.ErrFileTooLarge), errors.Is(err, sharedfiles.ErrQuota):
 		return refuse("%s", err.Error())
+	case errors.Is(err, sharedfiles.ErrSizeMismatch), errors.Is(err, sharedfiles.ErrChecksum), errors.Is(err, sharedfiles.ErrIncomplete):
+		return refuse("%s：%s", p, err.Error())
 	case errors.Is(err, sharedfiles.ErrNotFound), errors.Is(err, core.ErrNotFound):
 		return refuse("没有找到这次上传（可能已过期），请重新调用 write_shared_file 上传 %s", p)
 	case errors.Is(err, blobstore.ErrNotConfigured):
@@ -346,6 +346,8 @@ func (s *Service) deleteSharedFile(ctx context.Context, tx *core.Tx, c *call) (R
 // human prints a byte count as B / KB / MB.
 func human(n int64) string {
 	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
 	case n >= 1<<20:
 		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
 	case n >= 1<<10:

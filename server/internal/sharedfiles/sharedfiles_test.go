@@ -75,8 +75,8 @@ func TestCheck(t *testing.T) {
 		want      error
 	}{
 		{"fits", sharedfiles.Usage{Files: 3, Bytes: 10 * mb}, 5 * mb, -1, nil},
-		{"exactly 20 MB", sharedfiles.Usage{}, sharedfiles.MaxFileBytes, -1, nil},
-		{"one byte over 20 MB", sharedfiles.Usage{}, sharedfiles.MaxFileBytes + 1, -1, sharedfiles.ErrFileTooLarge},
+		{"exactly 200 MB", sharedfiles.Usage{}, sharedfiles.MaxFileBytes, -1, nil},
+		{"one byte over 200 MB", sharedfiles.Usage{}, sharedfiles.MaxFileBytes + 1, -1, sharedfiles.ErrFileTooLarge},
 		{"project bytes", sharedfiles.Usage{Files: 30, Bytes: sharedfiles.MaxProjectBytes - mb}, 2 * mb, -1, sharedfiles.ErrQuota},
 		{"overwrite counts the difference", sharedfiles.Usage{Files: 30, Bytes: sharedfiles.MaxProjectBytes - mb}, 2 * mb, 2 * mb, nil},
 		{"overwrite that grows too much", sharedfiles.Usage{Files: 30, Bytes: sharedfiles.MaxProjectBytes - mb}, 5 * mb, 2 * mb, sharedfiles.ErrQuota},
@@ -89,7 +89,7 @@ func TestCheck(t *testing.T) {
 			t.Errorf("%s: %v, want %v", c.name, err, c.want)
 		}
 	}
-	if artifacts.MaxPending < 2*sharedfiles.MaxFileBytes || artifacts.MaxUploadBytes < sharedfiles.MaxFileBytes {
+	if artifacts.MaxPending < 2*sharedfiles.MaxInlineFileBytes || artifacts.MaxUploadBytes < sharedfiles.MaxInlineFileBytes {
 		t.Fatal("unclaimed chunk limit must hold two full shared-file uploads")
 	}
 }

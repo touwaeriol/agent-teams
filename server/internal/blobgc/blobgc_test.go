@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -173,4 +174,105 @@ func TestWorker(t *testing.T) {
 	if st, err := (&blobgc.Worker{DB: db}).RunOnce(ctx); err != nil || st != (blobgc.Stats{}) {
 		t.Fatalf("unconfigured %+v %v", st, err)
 	}
+}
+
+// TestReserveAndReferences: an object written for a transaction that rolls back is removed once
+// its reservation is due; one whose transaction committed is kept (the queue row is dropped); a
+// key queued while a row points at it again is kept; a passing hash failure is retried later
+// without blocking the rows behind it.
+func TestReserveAndReferences(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, testdb.Migrated(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	db := s.Pool
+	u, _ := s.CreateUser(ctx, "res@example.com", "h")
+	p, err := s.CreateProject(ctx, u.ID, store.NewProject{Name: "r", WorkMode: "worktree"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bs := blobtest.New(t)
+	put := func(key string) {
+		t.Helper()
+		if err := bs.Put(ctx, key, bytes.NewReader([]byte("x")), 1, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exists := func(key string) bool { _, err := bs.Head(ctx, key); return err == nil }
+	kept, lost, back := blobstore.AttachmentKey(p.ID, "img_kept"), blobstore.AttachmentKey(p.ID, "img_lost"), blobstore.SharedKey(p.ID, "sf_back")
+	for _, k := range []string{kept, lost, back} {
+		put(k)
+		if err := blobgc.Reserve(ctx, db, k); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.Exec(ctx, db, `INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, sha256, storage_key)
+		VALUES ('img_kept', $1, $2, 'k', 'text/plain', 1, 'x', $3)`, p.ID, u.ID, kept); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Exec(ctx, db, `INSERT INTO at_shared_files (project_id, path, content_type, size, sha256, uploaded_by, storage_key, object_id)
+		VALUES ($1, 'b.txt', 'text/plain', 1, 'x', 'user', $2, 'sf_back')`, p.ID, back); err != nil {
+		t.Fatal(err)
+	}
+	if err := blobgc.Enqueue(ctx, db, back); err != nil { // queued for real while still referenced
+		t.Fatal(err)
+	}
+	w := &blobgc.Worker{DB: db, Blobs: bs}
+	st, err := w.RunOnce(ctx) // reservations not due yet; back is due but referenced
+	if err != nil || st.Kept != 1 || st.Deleted != 0 || !exists(back) {
+		t.Fatalf("first pass %+v %v", st, err)
+	}
+	w.Now = func() time.Time { return time.Now().Add(blobgc.ReserveDelay + time.Minute) }
+	st, err = w.RunOnce(ctx)
+	if err != nil || st.Kept != 1 || st.Deleted != 1 || !exists(kept) || exists(lost) {
+		t.Fatalf("due pass %+v %v kept=%v lost=%v", st, err, exists(kept), exists(lost))
+	}
+	if ref, err := blobgc.Referenced(ctx, db, kept); err != nil || !ref {
+		t.Fatalf("referenced %v %v", ref, err)
+	}
+
+	// EnqueueUnreferenced skips a key a row points at.
+	if err := blobgc.EnqueueUnreferenced(ctx, db, kept); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	_ = store.QueryRow(ctx, db, `SELECT count(*) FROM at_blob_deletions WHERE key = $1`, kept).Scan(&n)
+	if n != 0 {
+		t.Fatal("referenced key queued")
+	}
+
+	// A store that cannot be read: the first attachment is put aside, the next one is hashed.
+	if _, err := store.Exec(ctx, db, `INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, storage_key, created_at)
+		VALUES ('img_a', $1, $2, 'a', 'text/plain', 1, 'projects/x/a', now() - interval '1 hour'),
+		('img_b', $1, $2, 'b', 'text/plain', 1, $3, now())`, p.ID, u.ID, blobstore.AttachmentKey(p.ID, "img_b")); err != nil {
+		t.Fatal(err)
+	}
+	put(blobstore.AttachmentKey(p.ID, "img_b"))
+	hw := &blobgc.Worker{DB: db, Blobs: &unreadable{Store: bs, key: "projects/x/a"}, Batch: 1}
+	for i := 0; i < 2; i++ {
+		if _, err := hw.RunOnce(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var hashed, state string
+	_ = store.QueryRow(ctx, db, `SELECT COALESCE(sha256, '') FROM at_attachments WHERE id = 'img_b'`).Scan(&hashed)
+	_ = store.QueryRow(ctx, db, `SELECT state FROM at_attachments WHERE id = 'img_a'`).Scan(&state)
+	if hashed != hexsum([]byte("x")) || state != "ready" {
+		t.Fatalf("img_b hash %q, img_a state %s", hashed, state)
+	}
+}
+
+// unreadable fails Open of one key with a passing error.
+type unreadable struct {
+	blobstore.Store
+	key string
+}
+
+func (u *unreadable) Open(ctx context.Context, key string) (io.ReadCloser, error) {
+	if key == u.key {
+		return nil, errors.New("connection reset")
+	}
+	return u.Store.Open(ctx, key)
 }

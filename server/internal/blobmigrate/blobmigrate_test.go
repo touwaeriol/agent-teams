@@ -5,9 +5,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/touwaeriol/agent-teams/server/internal/blobgc"
 	"github.com/touwaeriol/agent-teams/server/internal/blobmigrate"
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore/blobtest"
@@ -190,5 +194,37 @@ func TestNotConfigured(t *testing.T) {
 	}
 	if _, err := (&blobmigrate.Runner{Blobs: blobtest.New(t)}).Migrate(context.Background(), blobmigrate.Options{Table: "x"}); err == nil {
 		t.Fatal("unknown table accepted")
+	}
+}
+
+// TestConcurrentMigrate: two migrate runs at once write the same deterministic keys; the run that
+// loses a row's update must not queue the object the winner recorded, so after blobgc has run
+// every migrated row's object is still there.
+func TestConcurrentMigrate(t *testing.T) {
+	f := setup(t)
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = (&blobmigrate.Runner{DB: f.db, Blobs: f.bs}).Migrate(f.ctx, blobmigrate.Options{Batch: 1})
+		}()
+	}
+	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
+		t.Fatal(err)
+	}
+	// The loser's rows (if any raced) are simulated too: a stale copy of a migrated row.
+	if err := blobgc.EnqueueUnreferenced(f.ctx, f.db, blobstore.AttachmentKey(f.pid, "img_a")); err != nil {
+		t.Fatal(err)
+	}
+	w := &blobgc.Worker{DB: f.db, Blobs: f.bs, Now: func() time.Time { return time.Now().Add(2 * time.Hour) }}
+	if _, err := w.RunOnce(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	v := reports(t)(f.r.Verify(f.ctx, blobmigrate.Options{}))
+	if v["attachments"].Done != 2 || v["attachments"].Failed != 0 || v["shared"].Done != 2 || v["shared"].Failed != 0 {
+		t.Fatalf("after concurrent migrate %+v", v)
 	}
 }

@@ -15,16 +15,23 @@ import (
 
 	"gorm.io/gorm/clause"
 
+	"github.com/touwaeriol/agent-teams/server/internal/blobgc"
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
+	"github.com/touwaeriol/agent-teams/server/internal/sharedfiles"
 )
 
 // Attachment limits (api.md §3.4): what Claude accepts per image or PDF, a text file's size
 // (its text goes into the message), and attachments per message.
 const (
-	MaxAttachmentBytes  = 5 << 20
-	MaxTextBytes        = 1 << 20
-	MaxMessageImages    = 8
-	AttachmentURLPrefix = "/api/attachments/"
+	// MaxAttachmentBytes is the largest attachment (#58: any type, uploaded straight to the
+	// object store with presigned parts).
+	MaxAttachmentBytes = 200 << 20
+	// MaxInlineAttachmentBytes is the largest image or PDF of the paths that carry the bytes in
+	// the request itself (the old base64 upload, publish_file images).
+	MaxInlineAttachmentBytes = 5 << 20
+	MaxTextBytes             = 1 << 20
+	MaxMessageImages         = 8
+	AttachmentURLPrefix      = "/api/attachments/"
 	// MaxToolAttachments is how many attachments one tool call (assign_task, send_message …),
 	// forward or delivery carries (protocol AttachmentIds and session.send attachments maxItems).
 	MaxToolAttachments = 20
@@ -39,7 +46,8 @@ const (
 // ErrNotImage is returned for uploads that are not an image, a PDF or a text file.
 var ErrNotImage = errors.New("只支持图片（PNG、JPG、GIF、WebP）、PDF 和文本文件（md、txt、json、csv、代码等）")
 
-// ErrTooLarge is returned for images and PDFs over MaxAttachmentBytes and text files over MaxTextBytes.
+// ErrTooLarge is returned for images and PDFs over MaxInlineAttachmentBytes and text files over
+// MaxTextBytes on the paths that carry the bytes in the request.
 var ErrTooLarge = errors.New("文件太大：图片和 PDF 最多 5 MB，文本文件最多 1 MB")
 
 // textExts are the file name extensions accepted as text files (the bytes must also be UTF-8).
@@ -78,11 +86,12 @@ func IsInlineText(contentType string) bool { return contentType == TextType }
 
 // Attachment is a row of at_attachments without its bytes.
 type Attachment struct {
-	ID          string `json:"id"`
-	ProjectID   string `json:"-"`
-	UserID      string `json:"-"`
-	Name        string `json:"name"`
-	ContentType string `json:"content_type" enum:"image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain"`
+	ID        string `json:"id"`
+	ProjectID string `json:"-"`
+	UserID    string `json:"-"`
+	Name      string `json:"name"`
+	// ContentType is sniffed or derived from the name (DetectType); any type since #58.
+	ContentType string `json:"content_type" doc:"image/png, image/jpeg, image/gif, image/webp, application/pdf and text/plain (a text file whose content goes into the message) are recognised; any other type is a plain file"`
 	Size        int    `json:"size"`
 	// SHA256 is "" until the blob_hash job has streamed an object uploaded without one (#58).
 	SHA256    string    `json:"sha256" gorm:"column:sha256"`
@@ -209,10 +218,42 @@ func SniffAttachment(name string, data []byte) string {
 	return sniffText(name, data)
 }
 
+// DetectType is the content type of an attachment uploaded to the object store (#58 design §3.3):
+// an image or a PDF sniffed from its first bytes wins; a text file (accepted name, UTF-8 without
+// NUL in head, at most MaxTextBytes) is TextType; otherwise the type of the name's extension or
+// application/octet-stream. What the browser declared is never used.
+func DetectType(name string, head []byte, size int64) string {
+	if typ := SniffImage(head); typ != "" {
+		return typ
+	}
+	if bytes.HasPrefix(head, []byte("%PDF-")) {
+		return PDFType
+	}
+	if size <= MaxTextBytes && IsTextName(name) && bytes.IndexByte(head, 0) < 0 && validPrefix(head, size) {
+		return TextType
+	}
+	// The shared files' extension table (fixed in code, not the host's mime.types).
+	return sharedfiles.ContentType(name)
+}
+
+// validPrefix: head is UTF-8, allowing a rune cut at its end when the file goes on.
+func validPrefix(head []byte, size int64) bool {
+	if int64(len(head)) < size {
+		for i := 0; i < utf8.UTFMax && len(head) > 0 && !utf8.Valid(head); i++ {
+			head = head[:len(head)-1]
+		}
+	}
+	return utf8.Valid(head)
+}
+
+// SafeInline are the types a page may show in place (img, PDF viewer); every other type is
+// downloaded as application/octet-stream (#58 design §10).
+var SafeInline = map[string]bool{"image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true, PDFType: true}
+
 // NewAttachment checks an image, PDF or text file and returns the row to store.
 func NewAttachment(projectID, userID, name string, data []byte) (Attachment, error) {
 	typ := SniffAttachment(name, data)
-	limit := MaxAttachmentBytes
+	limit := MaxInlineAttachmentBytes
 	if typ == TextType {
 		limit = MaxTextBytes
 	}
@@ -231,7 +272,7 @@ func NewAttachment(projectID, userID, name string, data []byte) (Attachment, err
 // again: the bytes go to the object store (key
 // projects/<pid>/attachments/<id>), the row keeps the key. With no store configured it fails
 // with blobstore.ErrNotConfigured. The object is written first; if the insert fails it is
-// deleted again (best effort). Callers pass at most MaxAttachmentBytes; big files use presigned
+// deleted again (best effort). Callers pass at most MaxInlineAttachmentBytes; big files use presigned
 // uploads instead.
 func InsertAttachment(ctx context.Context, q DB, bs blobstore.Store, ttl time.Duration, a Attachment, data []byte) (Attachment, error) {
 	bs = blobstore.Or(bs)
@@ -239,6 +280,10 @@ func InsertAttachment(ctx context.Context, q DB, bs blobstore.Store, ttl time.Du
 		return Attachment{}, blobstore.ErrNotConfigured
 	}
 	key := blobstore.AttachmentKey(a.ProjectID, a.ID)
+	// Reserved outside the caller's transaction: if it rolls back, blobgc removes the object.
+	if err := blobgc.Reserve(ctx, q, key); err != nil {
+		return Attachment{}, err
+	}
 	if err := bs.Put(ctx, key, bytes.NewReader(data), int64(len(data)), a.ContentType); err != nil {
 		return Attachment{}, err
 	}
@@ -330,7 +375,22 @@ func OpenAttachment(ctx context.Context, q DB, bs blobstore.Store, userID, id st
 	return row.Attachment, rc, err
 }
 
-// AttachmentData is OpenAttachment read into memory (attachments up to MaxAttachmentBytes).
+// AttachmentOfUser returns a ready attachment of one of the user's projects without opening it
+// (presigned downloads); expired ones are returned with ErrAttachmentExpired, uploading and failed
+// ones are ErrNotFound.
+func AttachmentOfUser(ctx context.Context, q DB, userID, id string) (Attachment, error) {
+	a, err := take[Attachment](q.Gorm(ctx).Table("at_attachments a").Select("a.id, a.project_id, a.user_id, a.name, a.content_type, "+
+		"a.size, COALESCE(a.sha256, '') AS sha256, a.created_at, a.storage_key, a.state, a.expires_at").
+		Joins("JOIN at_projects p ON p.id = a.project_id").
+		Where("a.id = ? AND p.user_id = ? AND a.state IN ('ready', 'expired')", id, userID))
+	if err == nil && a.State == "expired" {
+		err = ErrAttachmentExpired
+	}
+	return a, err
+}
+
+// AttachmentData is OpenAttachment read into memory (rows kept in the data column, at most
+// MaxInlineAttachmentBytes; objects are served with presigned URLs instead).
 func AttachmentData(ctx context.Context, q DB, bs blobstore.Store, userID, id string) (Attachment, []byte, error) {
 	a, rc, err := OpenAttachment(ctx, q, bs, userID, id)
 	if err != nil {
