@@ -7,6 +7,8 @@
 package orchapi
 
 import (
+	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
+
 	"context"
 	"errors"
 	"net/http"
@@ -113,6 +115,7 @@ var errorMap = []struct {
 	code   string
 }{
 	{core.ErrNotFound, 404, "not_found"},
+	{blobstore.ErrNotConfigured, 503, "storage_unavailable"},
 	{store.ErrNotFound, 404, "not_found"},
 	{orchestrator.ErrNotActive, 409, "thread_not_active"},
 	{orchestrator.ErrArchived, 409, "thread_archived"},
