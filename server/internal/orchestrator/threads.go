@@ -285,6 +285,15 @@ func (o *Orchestrator) start(ctx context.Context, t core.Thread) error {
 		if err != nil {
 			return err
 		}
+		if src != nil {
+			// Text attachments are not in files (briefFiles skips them): inline them into the
+			// quoted message, as a normal post or a forward would, so the lead sees them.
+			quoted := *src
+			if quoted.Content, _, err = o.inlineTexts(ctx, tx, core.Conversation{ProjectID: &cur.ProjectID}, src.Content, core.AttachmentsOf(*src)); err != nil {
+				return err
+			}
+			src = &quoted
+		}
 		_, err = o.Deliver(ctx, tx, lead, Delivery{Text: briefText(cur, p, src), Kind: "user", Priority: "next", Images: files})
 		return err
 	})

@@ -1,7 +1,9 @@
 package engine_test
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -213,5 +215,36 @@ func TestTellUser(t *testing.T) {
 	}
 	if r := tm.lead.call("tell_user", map[string]any{"text": strings.Repeat("长", 2001)}); r.Ok {
 		t.Fatal("over-long tell_user accepted")
+	}
+}
+
+// TestDispatchSourceTextAttachment: a text attachment of the source message reaches the lead
+// inlined into the quoted message (name and content), as a normal post would; images and PDFs
+// still go as files, and the text file is not sent twice.
+func TestDispatchSourceTextAttachment(t *testing.T) {
+	tm := startTeam(t)
+	conv := tm.coordinatorConv(t)
+	img := uploadPNG(t, tm)
+	var note struct{ ID string }
+	tm.b.must(201, "POST", "/api/projects/"+tm.projectID+"/attachments",
+		map[string]string{"name": "需求.md", "data": base64.StdEncoding.EncodeToString([]byte("# 需求\n按钮改成蓝色"))}, &note)
+	msgs, coord := projectChat(t, tm, conv, map[string]any{"content": "你好"},
+		map[string]any{"content": "照附件改", "attachments": []string{note.ID, img}},
+		map[string]any{"content": "", "attachments": []string{note.ID}})
+	for i, m := range msgs[1:] {
+		openThread(t, coord, map[string]any{"title": fmt.Sprintf("改按钮%d", i), "brief": "按需求改按钮", "message_id": m.ID})
+		_, open := expectOpen(t, tm.w, tm.n, fmt.Sprintf("lead-%d", i+2))
+		first := open.FirstMessage
+		for _, want := range []string{"触发这个讨论串的用户原话", "[附件：需求.md]", "按钮改成蓝色"} {
+			if first == nil || !strings.Contains(first.Text, want) {
+				t.Fatalf("brief %d lacks %q: %+v", i, want, first)
+			}
+		}
+		if i == 0 && (!strings.Contains(first.Text, "照附件改") || len(first.Images) != 1 || first.Images[0].ID != img) {
+			t.Fatalf("brief with image %+v", first)
+		}
+		if i == 1 && len(first.Images) != 0 {
+			t.Fatalf("text attachment sent as a file %+v", first.Images)
+		}
 	}
 }
