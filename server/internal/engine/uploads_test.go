@@ -433,8 +433,9 @@ func TestWriteSharedFileS3(t *testing.T) {
 	w := st.w
 	ask := func(path string, declared []byte, sent []byte) string {
 		t.Helper()
-		code, raw := nodeCall(t, w, "POST", "/nodes/uploads", st.tokA, map[string]any{"session_id": st.dev.session, "path": path,
-			"size": len(declared), "sha256": hexSum(declared)})
+		// The daemon's body (node/src/toolhost/transfer.ts UploadRequest): the target path is name.
+		code, raw := nodeCall(t, w, "POST", "/nodes/uploads", st.tokA, map[string]any{"session_id": st.dev.session, "call_id": "tc_x",
+			"name": path, "size": len(declared), "sha256": hexSum(declared), "content_type": "text/csv"})
 		var nu orchapi.NodeUpload
 		if code != 201 || json.Unmarshal(raw, &nu) != nil {
 			t.Fatalf("node upload %d %s", code, raw)
@@ -461,6 +462,10 @@ func TestWriteSharedFileS3(t *testing.T) {
 		return a.result(callID)
 	}
 	body := []byte("id,value\n1,2\n")
+	if code, raw := nodeCall(t, w, "POST", "/nodes/uploads", st.tokA, map[string]any{"session_id": st.dev.session, "size": 1,
+		"sha256": hexSum([]byte("x"))}); code != 422 {
+		t.Fatalf("no target path = %d %s", code, raw)
+	}
 	res := call(st.dev, ask("out/s3.csv", body, body), "out/s3.csv", body)
 	if !res.Ok {
 		t.Fatalf("s3 write refused: %s", text(res))

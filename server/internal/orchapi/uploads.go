@@ -368,11 +368,17 @@ func (a *API) nodeAttachmentURL(c *gin.Context) {
 
 // NodeUploadRequest is POST /nodes/uploads (design §4.3): a daemon asks for a presigned PUT before
 // it calls write_shared_file with upload: {upload_id}.
+// The daemon (node/src/toolhost/transfer.ts UploadRequest) sends the target shared path as name;
+// path is accepted as well and wins when both are given. call_id and content_type are informative
+// (the type comes from the path).
 type NodeUploadRequest struct {
-	SessionID string `json:"session_id"`
-	Path      string `json:"path"`
-	Size      int64  `json:"size"`
-	SHA256    string `json:"sha256"`
+	SessionID   string `json:"session_id"`
+	CallID      string `json:"call_id,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Path        string `json:"path,omitempty"`
+	Size        int64  `json:"size"`
+	SHA256      string `json:"sha256"`
+	ContentType string `json:"content_type,omitempty"`
 }
 
 // NodeUpload is the answer: PUT the file to url with exactly these headers before expires_at.
@@ -405,6 +411,13 @@ func (a *API) nodeUpload(c *gin.Context) {
 	var in NodeUploadRequest
 	if err := json.NewDecoder(io.LimitReader(c.Request.Body, 64<<10)).Decode(&in); err != nil {
 		nodeError(c, http.StatusBadRequest, "bad_request", "请求不是合法的 JSON")
+		return
+	}
+	if in.Path == "" {
+		in.Path = in.Name
+	}
+	if in.Path == "" {
+		nodeError(c, http.StatusUnprocessableEntity, "validation", "缺少目标路径（name）")
 		return
 	}
 	in.SHA256 = strings.ToLower(in.SHA256)
