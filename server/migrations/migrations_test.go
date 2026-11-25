@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 450 {
+	if migrations.Latest() != 460 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -1846,5 +1846,69 @@ func TestUserQuotaLimitsMigration(t *testing.T) {
 	}
 	if err := db.QueryRow(`SELECT quota_five_hour_pct FROM at_users WHERE id = 'u1'`).Scan(&five); err == nil {
 		t.Fatal("quota_five_hour_pct after down")
+	}
+}
+
+// TestBlobStorageMigration: 00460 keeps existing attachments and shared files readable from data
+// (no storage key, claimed, ready), lets new rows live only in the object store, and refuses to go
+// down while such rows exist.
+func TestBlobStorageMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 450); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
+INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, sha256, data)
+	VALUES ('img_old', 'p1', 'u1', 'a.png', 'image/png', 3, 'abc', '\x010203');
+INSERT INTO at_shared_files (project_id, path, content_type, size, sha256, data, uploaded_by)
+	VALUES ('p1', 'a.txt', 'text/plain', 2, 'def', '\x6869', 'user');`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 460); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	var claimed bool
+	var key *string
+	if err := db.QueryRow(`SELECT state, claimed_at IS NOT NULL, storage_key FROM at_attachments WHERE id = 'img_old'`).Scan(&state, &claimed, &key); err != nil ||
+		state != "ready" || !claimed || key != nil {
+		t.Fatalf("old attachment state=%s claimed=%v key=%v err=%v", state, claimed, key, err)
+	}
+	if err := db.QueryRow(`SELECT state FROM at_shared_files WHERE path = 'a.txt'`).Scan(&state); err != nil || state != "ready" {
+		t.Fatalf("old shared file %s %v", state, err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, storage_key, state, upload_id)
+	VALUES ('img_new', 'p1', 'u1', 'big.zip', 'application/zip', 209715200, 'projects/p1/attachments/img_new', 'uploading', 'u-1');
+INSERT INTO at_blob_deletions (key, prefix) VALUES ('projects/p9/', true);`); err != nil {
+		t.Fatal(err)
+	}
+	var unclaimed bool
+	_ = db.QueryRow(`SELECT claimed_at IS NULL FROM at_attachments WHERE id = 'img_new'`).Scan(&unclaimed)
+	if !unclaimed {
+		t.Fatal("a new attachment must start unclaimed")
+	}
+	if _, err := db.Exec(`UPDATE at_attachments SET state = 'bogus' WHERE id = 'img_new'`); err == nil {
+		t.Fatal("state check missing")
+	}
+	if _, err := p.DownTo(ctx, 450); err == nil || !strings.Contains(err.Error(), "atctl storage restore") {
+		t.Fatalf("down with object-only rows: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM at_attachments WHERE id = 'img_new'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.DownTo(ctx, 450); err != nil {
+		t.Fatal(err)
+	}
+	var data []byte
+	if err := db.QueryRow(`SELECT data FROM at_attachments WHERE id = 'img_old'`).Scan(&data); err != nil || len(data) != 3 {
+		t.Fatalf("down lost data: %v %v", data, err)
 	}
 }
