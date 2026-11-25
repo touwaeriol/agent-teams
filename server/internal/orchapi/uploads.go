@@ -33,7 +33,7 @@ const (
 type UploadCreate struct {
 	Kind string `json:"kind" enum:"attachment,shared" doc:"attachment: a file for a message (not counted in the project's quota); shared: a shared file"`
 	Name string `json:"name" minLength:"1" maxLength:"300" doc:"File name (an attachment shows it; a shared file uses it as its path when path is not given)"`
-	Size int64  `json:"size" minimum:"0" maximum:"209715200" doc:"Exact size in bytes (at most 200 MB); the object must have it at completion"`
+	Size int64  `json:"size" minimum:"0" doc:"Exact size in bytes (at most 200 MB: more answers 413 file_too_large); the object must have it at completion"`
 	Path string `json:"path,omitempty" maxLength:"255" doc:"Shared files: the target path (default: name)"`
 	// Overwrite is a pointer so that "not given" keeps the page's old behaviour (overwrite).
 	Overwrite *bool `json:"overwrite,omitempty" doc:"Shared files: replace a file at the path (default true); false answers 409 file_exists"`
@@ -250,6 +250,10 @@ func (a *API) completeUpload(ctx context.Context, in *uploadCompleteInput) (*upl
 		done = UploadedSharedFile{SharedFile: f, Overwritten: overwritten}
 		return tx.EmitSharedFile(ctx, p.ID, sharedfiles.UserName, "write", f.Path)
 	})
+	if errors.Is(err, sharedfiles.ErrExists) || errors.Is(err, sharedfiles.ErrQuota) || errors.Is(err, sharedfiles.ErrInvalidPath) {
+		// Refused for good: cancel it now, so it does not hold the quota for a day.
+		_ = sharedfiles.AbortUpload(ctx, a.e.Core.Pool, a.e.Core.Blobs, p.ID, in.UploadID)
+	}
 	if err != nil {
 		return nil, uploadFail(err)
 	}

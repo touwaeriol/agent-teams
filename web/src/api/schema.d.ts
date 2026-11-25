@@ -5016,7 +5016,7 @@ export interface components {
             path?: string;
             /**
              * Format: int64
-             * @description Exact size in bytes (at most 200 MB); the object must have it at completion
+             * @description Exact size in bytes (at most 200 MB: more answers 413 file_too_large); the object must have it at completion
              */
             size: number;
         };

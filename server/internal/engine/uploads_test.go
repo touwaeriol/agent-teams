@@ -16,6 +16,7 @@ import (
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 
+	"github.com/touwaeriol/agent-teams/server/internal/blobgc"
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/engine"
@@ -260,8 +261,11 @@ func TestPresignedAttachments(t *testing.T) {
 	}
 
 	// Limits and abort.
-	if code, raw := b.do("POST", "/api/projects/"+pid+"/uploads", map[string]any{"kind": "attachment", "name": "big", "size": 200<<20 + 1}); code != 422 {
-		t.Fatalf("over 200 MB = %d %s", code, raw)
+	for _, kind := range []string{"attachment", "shared"} {
+		if code, raw := b.do("POST", "/api/projects/"+pid+"/uploads", map[string]any{"kind": kind, "name": "big", "size": 200<<20 + 1}); code != 413 ||
+			!strings.Contains(string(raw), "file_too_large") || !strings.Contains(string(raw), "200 MB") {
+			t.Fatalf("%s over 200 MB = %d %s", kind, code, raw)
+		}
 	}
 	var ab orchapi.UploadSession
 	b.must(201, "POST", "/api/projects/"+pid+"/uploads", map[string]any{"kind": "attachment", "name": "a.bin", "size": 10}, &ab)
@@ -326,6 +330,22 @@ func TestPresignedSharedFiles(t *testing.T) {
 		"size": 3, "overwrite": false}); code != 409 || !strings.Contains(string(raw), "file_exists") {
 		t.Fatalf("overwrite=false = %d %s", code, raw)
 	}
+	// overwrite=false holds at completion too: the path got a file while this upload was running.
+	var late orchapi.UploadSession
+	b.must(201, "POST", "/api/projects/"+pid+"/uploads", map[string]any{"kind": "shared", "name": "late.txt", "size": 4, "overwrite": false}, &late)
+	latePart := b.putParts(pid, late, []byte("late"))
+	b.upload(pid, map[string]any{"kind": "shared", "name": "late.txt"}, []byte("first"))
+	if code, raw := b.do("POST", "/api/projects/"+pid+"/uploads/"+late.UploadID+"/complete", map[string]any{"parts": latePart}); code != 409 ||
+		!strings.Contains(string(raw), "file_exists") {
+		t.Fatalf("overwrite=false at completion = %d %s", code, raw)
+	}
+	if _, err := sharedfiles.GetUpload(ctx, w.db.Pool, pid, late.UploadID); !errors.Is(err, sharedfiles.ErrUploadNotFound) {
+		t.Fatalf("refused upload kept: %v", err)
+	}
+	if _, got, _ := sharedfiles.Load(ctx, w.db.Pool, w.e.Core.Blobs, pid, "late.txt"); string(got) != "first" {
+		t.Fatalf("late.txt = %q", got)
+	}
+
 	// Overwrite (the default): the old object is queued for deletion.
 	again := b.upload(pid, map[string]any{"kind": "shared", "name": "big.bin", "path": "data/big.bin"}, []byte("v2")).SharedFile
 	if again == nil || !again.Overwritten || again.Size != 2 {
@@ -385,6 +405,31 @@ func TestPresignedSharedFiles(t *testing.T) {
 	if err != nil || f.Path != "out/r.txt" || f.SHA256 != hexSum(out) || f.UploadedBy != "dev-1" {
 		t.Fatalf("finalize %+v %v", f, err)
 	}
+	// Replaying the presigned PUT after registration changes nothing: the file lives at another key.
+	replay, _ := http.NewRequest("PUT", nu.URL, bytes.NewReader([]byte("NODE OUTPUT")))
+	for k, v := range nu.Headers {
+		replay.Header.Set(k, v)
+	}
+	if r, err := http.DefaultClient.Do(replay); err == nil {
+		r.Body.Close()
+	}
+	if _, got, err := sharedfiles.Load(ctx, w.db.Pool, w.e.Core.Blobs, pid, "out/r.txt"); err != nil || !bytes.Equal(got, out) {
+		t.Fatalf("replayed PUT changed the file: %q %v", got, err)
+	}
+	if f.SHA256 != hexSum(out) || strings.Contains(nu.URL, f.Path) {
+		t.Fatalf("file %+v", f)
+	}
+	// The uploaded key goes once its URL has expired.
+	gc := &blobgc.Worker{DB: w.db.Pool, Blobs: w.e.Core.Blobs, Now: func() time.Time { return time.Now().Add(blobgc.ReserveDelay + time.Minute) }}
+	if _, err := gc.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var upKey string
+	_ = store.QueryRow(ctx, w.db.Pool, `SELECT storage_key FROM at_shared_files WHERE project_id = $1 AND path = 'out/r.txt'`, pid).Scan(&upKey)
+	if _, got, err := sharedfiles.Load(ctx, w.db.Pool, w.e.Core.Blobs, pid, "out/r.txt"); err != nil || !bytes.Equal(got, out) || upKey == "" {
+		t.Fatalf("registered object deleted by gc: %v", err)
+	}
+
 	// Changed after hashing: the declared sha256 does not match, the upload is dropped.
 	bad := put(map[string]any{"session_id": tm.dev.session, "path": "out/r.txt", "size": len(out), "sha256": hexSum([]byte("other bytes"))}, out)
 	err = w.e.Core.InTx(ctx, func(tx *core.Tx) error {

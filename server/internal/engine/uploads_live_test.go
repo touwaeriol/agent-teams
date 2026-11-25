@@ -70,6 +70,36 @@ func TestLiveUploads(t *testing.T) {
 		!strings.Contains(obj.Header.Get("Content-Disposition"), "filename*=UTF-8''%E5%AE%9E%E6%B5%8B%20%E5%8C%85.tar") {
 		t.Fatalf("presigned download %d %d bytes %v", obj.StatusCode, len(raw), obj.Header)
 	}
+	// CORS for the page (text previews fetch the object from agent.prophey.ai): the GET answers
+	// with the page's origin; a part PUT exposes ETag.
+	creq, _ := http.NewRequest("GET", resp.Header.Get("Location"), nil)
+	creq.Header.Set("Origin", "https://agent.prophey.ai")
+	cresp, err := http.DefaultClient.Do(creq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cresp.Body.Close()
+	if cresp.Header.Get("Access-Control-Allow-Origin") != "https://agent.prophey.ai" {
+		t.Fatalf("CORS GET headers %v", cresp.Header)
+	}
+	var cup orchapi.UploadSession
+	b.must(201, "POST", "/api/projects/"+pid+"/uploads", map[string]any{"kind": "attachment", "name": "c.bin", "size": 3}, &cup)
+	var curls orchapi.UploadParts
+	b.must(200, "POST", "/api/projects/"+pid+"/uploads/"+cup.UploadID+"/parts", map[string]any{"numbers": []int{1}}, &curls)
+	preq, _ := http.NewRequest("PUT", curls.URLs[0].URL, bytes.NewReader([]byte("abc")))
+	preq.Header.Set("Origin", "https://agent.prophey.ai")
+	presp, err := http.DefaultClient.Do(preq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	presp.Body.Close()
+	if presp.Header.Get("Access-Control-Allow-Origin") != "https://agent.prophey.ai" ||
+		!strings.Contains(strings.ToLower(presp.Header.Get("Access-Control-Expose-Headers")), "etag") {
+		t.Fatalf("CORS PUT headers %v", presp.Header)
+	}
+	b.must(204, "DELETE", "/api/projects/"+pid+"/uploads/"+cup.UploadID, nil, nil)
+	t.Logf("CORS: GET allow-origin %s, PUT expose %s", cresp.Header.Get("Access-Control-Allow-Origin"), presp.Header.Get("Access-Control-Expose-Headers"))
+
 	code, raw := nodeCall(t, w, "GET", "/nodes/attachments/"+att.ID+"/url", tm.token, nil)
 	var nu orchapi.NodeAttachmentURL
 	if code != 200 || json.Unmarshal(raw, &nu) != nil || nu.URL == nil {
