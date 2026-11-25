@@ -2108,8 +2108,16 @@
       "Enrollment": {
         "additionalProperties": false,
         "properties": {
+          "compose": {
+            "description": "compose.yml that starts the node container with this token (docker compose up -d)",
+            "type": "string"
+          },
+          "docker": {
+            "description": "docker run command that starts the node container with this token",
+            "type": "string"
+          },
           "install": {
-            "description": "Shell command for the node",
+            "description": "Shell command for the node (install-node.sh on the host)",
             "type": "string"
           },
           "token": {
@@ -2119,7 +2127,9 @@
         },
         "required": [
           "token",
-          "install"
+          "install",
+          "docker",
+          "compose"
         ],
         "type": "object"
       },
@@ -3543,8 +3553,16 @@
       "NewNodeOutputBody": {
         "additionalProperties": false,
         "properties": {
+          "compose": {
+            "description": "compose.yml that starts the node container with this token (docker compose up -d)",
+            "type": "string"
+          },
+          "docker": {
+            "description": "docker run command that starts the node container with this token",
+            "type": "string"
+          },
           "install": {
-            "description": "Shell command for the node",
+            "description": "Shell command for the node (install-node.sh on the host)",
             "type": "string"
           },
           "node": {
@@ -3558,7 +3576,9 @@
         "required": [
           "node",
           "token",
-          "install"
+          "install",
+          "docker",
+          "compose"
         ],
         "type": "object"
       },

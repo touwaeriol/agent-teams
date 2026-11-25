@@ -55,6 +55,16 @@ func TestInstallScriptAndDist(t *testing.T) {
 	}
 }
 
+func TestNodeDockerGuideIsPublic(t *testing.T) {
+	h := newHarness(t)
+	r := h.client().must(200, "GET", "/node-docker.md", nil, nil)
+	body := string(r.Body)
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "text/markdown") || strings.Contains(body, "__") ||
+		!strings.Contains(body, "AGENT_TEAMS_CONSOLE=http://console.test") || !strings.Contains(body, "image: ghcr.io/example/node:test") {
+		t.Fatalf("guide = %s\n%s", r.Header.Get("Content-Type"), body)
+	}
+}
+
 func TestHealthAndOpenAPI(t *testing.T) {
 	h := newHarness(t)
 	c := h.client()

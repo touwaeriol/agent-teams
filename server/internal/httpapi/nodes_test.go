@@ -13,6 +13,8 @@ type createdNode struct {
 	Node    NodeView `json:"node"`
 	Token   string   `json:"token"`
 	Install string   `json:"install"`
+	Docker  string   `json:"docker"`
+	Compose string   `json:"compose"`
 }
 
 func TestNodesLifecycle(t *testing.T) {
@@ -23,6 +25,18 @@ func TestNodesLifecycle(t *testing.T) {
 	if n.Token == "" || !strings.Contains(n.Install, "AGENT_TEAMS_NODE_TOKEN="+n.Token) ||
 		!strings.Contains(n.Install, "curl -fsSL http://console.test/install-node.sh") || !strings.Contains(n.Install, "--name rc-erio") {
 		t.Fatalf("enrollment %+v", n)
+	}
+	for _, want := range []string{"docker run -d --name agent-teams-node-rc-erio --hostname rc-erio", "AGENT_TEAMS_NODE_TOKEN=" + n.Token,
+		"AGENT_TEAMS_CONSOLE=http://console.test", "-v agent-teams-node-rc-erio-claude:/home/agent/.claude", "-v agent-teams-node-rc-erio-data:/home/agent/.local/share/agent-teams", "ghcr.io/example/node:test"} {
+		if !strings.Contains(n.Docker, want) {
+			t.Fatalf("docker run lacks %q:\n%s", want, n.Docker)
+		}
+	}
+	for _, want := range []string{"name: agent-teams-node-rc-erio\n", "image: ghcr.io/example/node:test", `AGENT_TEAMS_NODE_TOKEN: "` + n.Token + `"`,
+		`AGENT_TEAMS_CONSOLE: "http://console.test"`, "- workspace:/home/agent/.agents_team", "  state: {}"} {
+		if !strings.Contains(n.Compose, want) {
+			t.Fatalf("compose lacks %q:\n%s", want, n.Compose)
+		}
 	}
 	if n.Node.Online || n.Node.Isolation != "none" || n.Node.Labels == nil {
 		t.Fatalf("node view %+v", n.Node)

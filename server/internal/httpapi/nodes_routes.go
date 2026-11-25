@@ -119,12 +119,6 @@ func firstMap(a, b map[string]any) map[string]any {
 	return b
 }
 
-// Enrollment is the one-time token and the command that installs the daemon with it.
-type Enrollment struct {
-	Token   string `json:"token" doc:"Shown once"`
-	Install string `json:"install" doc:"Shell command for the node"`
-}
-
 type nodesOutput struct{ Body []NodeView }
 
 type nodeOutput struct{ Body NodeView }
@@ -282,13 +276,6 @@ func (s *Server) checkNodeQuota(ctx context.Context, u store.User) error {
 		return fail(http.StatusForbidden, "node_quota", fmt.Sprintf("最多可以添加 %d 个节点", limit))
 	}
 	return nil
-}
-
-func (s *Server) enrollment(name, token string) Enrollment {
-	console := s.cfg.PublicURL
-	cmd := fmt.Sprintf("curl -fsSL %s/install-node.sh | AGENT_TEAMS_NODE_TOKEN=%s bash -s -- --console %s --name %s",
-		console, token, shellQuote(console), shellQuote(name))
-	return Enrollment{Token: token, Install: cmd}
 }
 
 // shellQuote is Python's shlex.quote.

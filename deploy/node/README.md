@@ -8,6 +8,11 @@
 `node:22-bookworm`，方便员工构建和测试项目）、tini。守护进程是入口进程，以普通用户 `agent`（uid 1000）运行：
 Claude Code 的 bypassPermissions 模式不能在 root 下运行，入口脚本发现 root 会直接退出。
 
+面向用户的部署说明（公开，不用登录，可以直接把链接发给 AI）：控制面板的 `/node-docker.md`，
+例如 <https://agent.prophey.ai/node-docker.md>，源文件 `server/internal/httpapi/node-docker.md`。
+控制面板“添加节点”弹窗里的“Docker”“Docker Compose”两种方式已经把令牌填进 docker run 命令和 compose.yml；
+镜像标签由控制面板的 `AGENT_TEAMS_NODE_IMAGE` 决定（默认 `ghcr.io/touwaeriol/agent-teams-node:latest`）。
+
 ## 快速开始
 
 ```bash

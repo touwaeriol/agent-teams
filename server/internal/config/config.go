@@ -34,6 +34,9 @@ type Config struct {
 	// GitMirrorDir (GIT_MIRROR_DIR) holds the relay's bare mirrors of standalone Git repositories
 	// (git-repos.md §5); empty disables the relay.
 	GitMirrorDir string
+	// NodeImage (AGENT_TEAMS_NODE_IMAGE) is the node container image the "add node" dialog puts in its
+	// docker run / compose snippets.
+	NodeImage string
 }
 
 // Getenv looks a variable up; os.Getenv in production, a map in tests.
@@ -58,6 +61,7 @@ func Load(getenv Getenv) (Config, error) {
 		GitHubWeb:      strings.TrimRight(getenv("GITHUB_WEB_URL"), "/"),
 		ArtifactOrigin: strings.TrimRight(getenv("AGENT_TEAMS_ARTIFACT_ORIGIN"), "/"),
 		GitMirrorDir:   getenv("GIT_MIRROR_DIR"),
+		NodeImage:      first(getenv("AGENT_TEAMS_NODE_IMAGE"), "ghcr.io/touwaeriol/agent-teams-node:latest"),
 	}
 	return cfg, cfg.check()
 }
