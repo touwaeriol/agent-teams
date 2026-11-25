@@ -52,11 +52,21 @@ watch(
 // The plan card above the message box: folded or not is remembered per thread (open by default).
 const planKey = (tid: string) => `at:plan-open:${tid}`;
 const planOpen = ref(true);
+// Long plans show 7 steps; 查看更多 (show all) is remembered per thread too (off by default).
+const planAllKey = (tid: string) => `at:plan-all:${tid}`;
+const planAll = ref(false);
 watch(
   () => props.thread.id,
-  (tid) => (planOpen.value = readLocal(planKey(tid)) !== "0"),
+  (tid) => {
+    planOpen.value = readLocal(planKey(tid)) !== "0";
+    planAll.value = readLocal(planAllKey(tid)) === "1";
+  },
   { immediate: true },
 );
+function setPlanAll(all: boolean) {
+  planAll.value = all;
+  writeLocal(planAllKey(props.thread.id), all ? "1" : null);
+}
 function setPlanOpen(open: boolean) {
   planOpen.value = open;
   writeLocal(planKey(props.thread.id), open ? null : "0");
@@ -73,7 +83,7 @@ function setPlanOpen(open: boolean) {
   </div>
   <ThreadWakeups :pid="pid" :thread-id="thread.id" :class="cn('at-reading shrink-0 mb-2', layout === 'page' ? 'mx-3 sm:mx-6' : 'mx-4')" />
   <div v-if="thread.main_tasks.length" :class="cn('at-reading shrink-0 pb-2', layout === 'page' ? 'px-3 sm:px-6' : 'px-4')" data-plan-dock>
-    <PlanChecklist :steps="thread.main_tasks" :open="planOpen" list-class="max-h-[min(40vh,280px)]" @update:open="setPlanOpen" />
+    <PlanChecklist :steps="thread.main_tasks" :open="planOpen" :show-all="planAll" list-class="max-h-[min(40vh,280px)]" @update:open="setPlanOpen" @update:show-all="setPlanAll" />
   </div>
   <LeadComposer :pid="pid" :thread="thread" :class="cn('at-reading', layout === 'page' ? 'px-3 pb-3 sm:px-6 sm:pb-5' : 'px-4 pb-4')" />
   <ThreadViewDialog :pid="pid" :thread="thread" :view="view" @view="(v) => emit('view', v)" />

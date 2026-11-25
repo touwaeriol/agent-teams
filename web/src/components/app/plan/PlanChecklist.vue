@@ -9,6 +9,16 @@
  * `defaultOpen` (default true, the starting state when `open` isn't bound); `open` with
  * `update:open` (v-model:open) to own the state; `listClass` for the step list (e.g. a max
  * height with scrolling).
+ *
+ * Step limit (`limit`, default 7): open, a plan with more than `limit` steps shows only `limit`
+ * of them, as one contiguous window in plan order, plus a "查看更多（还有 N 条）" row that shows
+ * all (then "收起（只显示 7 条）"). The window: idx = index of the current step (first doing,
+ * else first todo — `currentStep`); start = clamp(idx - 1, 0, n - limit), i.e. one step before
+ * the current one stays for context, older ones are hidden, and the current step is always
+ * shown. With no current step (all done / ended) the last `limit` steps show. N counts every
+ * hidden step (above and below); when some are above, a grey "前面还有 K 条已折叠" line on top of
+ * the list shows all too. Showing all is `showAll` with `update:showAll` (v-model:showAll,
+ * `defaultShowAll` when unbound); new steps never reset it. Folded (current step only) is unchanged.
  */
 import { CircleSlash } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
@@ -23,10 +33,19 @@ export interface PlanStep {
 }
 
 const props = withDefaults(
-  defineProps<{ steps: readonly PlanStep[]; collapsible?: boolean; defaultOpen?: boolean; open?: boolean; listClass?: string }>(),
-  { collapsible: true, defaultOpen: true, open: undefined, listClass: undefined },
+  defineProps<{
+    steps: readonly PlanStep[];
+    collapsible?: boolean;
+    defaultOpen?: boolean;
+    open?: boolean;
+    listClass?: string;
+    limit?: number;
+    defaultShowAll?: boolean;
+    showAll?: boolean;
+  }>(),
+  { collapsible: true, defaultOpen: true, open: undefined, listClass: undefined, limit: 7, defaultShowAll: false, showAll: undefined },
 );
-const emit = defineEmits<{ "update:open": [open: boolean] }>();
+const emit = defineEmits<{ "update:open": [open: boolean]; "update:showAll": [showAll: boolean] }>();
 
 const local = ref(props.open ?? props.defaultOpen);
 watch(
@@ -40,6 +59,30 @@ function toggle() {
 }
 
 const current = computed(() => currentStep(props.steps));
+
+const allShown = ref(props.showAll ?? props.defaultShowAll);
+watch(
+  () => props.showAll,
+  (v) => v !== undefined && (allShown.value = v),
+);
+function setShowAll(v: boolean) {
+  allShown.value = v;
+  emit("update:showAll", v);
+}
+/** Too many steps to show them all at once (whether or not they are shown now). */
+const overLimit = computed(() => props.limit > 0 && props.steps.length > props.limit);
+/** The window of steps shown when not showing all (see the rule at the top). */
+const window_ = computed(() => {
+  const n = props.steps.length;
+  if (!overLimit.value) return { start: 0, end: n };
+  const cur = current.value;
+  const idx = cur ? props.steps.indexOf(cur) : -1;
+  const start = idx < 0 ? n - props.limit : Math.min(Math.max(idx - 1, 0), n - props.limit);
+  return { start, end: start + props.limit };
+});
+const shown = computed(() => (overLimit.value && !allShown.value ? props.steps.slice(window_.value.start, window_.value.end) : props.steps));
+const hiddenAbove = computed(() => (overLimit.value && !allShown.value ? window_.value.start : 0));
+const hiddenCount = computed(() => (overLimit.value && !allShown.value ? props.steps.length - props.limit : 0));
 /** Nothing left and every step done; otherwise (some failed / skipped) the plan merely ended. */
 const allDone = computed(() => props.steps.every((s) => s.status === "done"));
 const progress = computed(() => stepsProgress(props.steps).label);
@@ -47,13 +90,33 @@ const progress = computed(() => stepsProgress(props.steps).label);
 
 <template>
   <section class="rounded-2xl border border-border bg-panel text-[13.5px] leading-5" data-plan-checklist :data-open="isOpen ? '' : undefined">
-    <ul v-if="isOpen" :class="cn('scroll-thin flex flex-col gap-2 overflow-y-auto px-4 pb-1 pt-3', !collapsible && 'pb-3', listClass)">
-      <li v-for="s in steps" :key="s.id" class="flex items-start gap-2.5" :data-status="stepLook(s.status).status">
+    <button
+      v-if="isOpen && hiddenAbove > 0"
+      type="button"
+      class="block px-4 pt-2 text-left text-[12px] text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      data-plan-hidden-above
+      @click="setShowAll(true)"
+    >
+      前面还有 {{ hiddenAbove }} 条已折叠
+    </button>
+    <ul v-if="isOpen" :class="cn('scroll-thin flex flex-col gap-2 overflow-y-auto px-4 pb-1', hiddenAbove > 0 ? 'pt-1.5' : 'pt-3', !collapsible && !overLimit && 'pb-3', listClass)">
+      <li v-for="s in shown" :key="s.id" class="flex items-start gap-2.5" :data-status="stepLook(s.status).status">
         <component :is="stepLook(s.status).icon" :size="16" :class="cn('mt-0.5 shrink-0', stepLook(s.status).iconClass)" :aria-label="stepLook(s.status).label" role="img" />
         <span :class="cn('min-w-0 break-words', stepLook(s.status).textClass)">{{ s.title }}</span>
       </li>
     </ul>
-    <div v-else class="flex items-start gap-2.5 px-4 pb-1 pt-3" data-current>
+    <div v-if="isOpen && overLimit" :class="cn('px-4 pt-1 text-[12px]', !collapsible && 'pb-2.5')">
+      <button
+        type="button"
+        class="rounded px-1 py-0.5 -ml-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        :aria-expanded="allShown"
+        data-plan-more
+        @click="setShowAll(!allShown)"
+      >
+        {{ allShown ? `收起（只显示 ${limit} 条）` : `查看更多（还有 ${hiddenCount} 条）` }}
+      </button>
+    </div>
+    <div v-if="!isOpen" class="flex items-start gap-2.5 px-4 pb-1 pt-3" data-current>
       <template v-if="current">
         <component :is="stepLook(current.status).icon" :size="16" :class="cn('mt-0.5 shrink-0', stepLook(current.status).iconClass)" :aria-label="stepLook(current.status).label" role="img" />
         <span :class="cn('min-w-0 flex-1 truncate', stepLook(current.status).textClass)" :title="current.title">{{ current.title }}</span>
