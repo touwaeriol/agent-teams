@@ -36,6 +36,10 @@ var nodeVolumes = []struct{ key, path, note string }{
 	{"data", "/home/agent/.local/share/agent-teams", "守护进程版本（网页一键更新）"},
 }
 
+// volume is the named volume of one of nodeVolumes, shared by docker run and compose so a node
+// can switch between them and keep its logins and workspace.
+func (n nodeContainer) volume(key string) string { return n.slug + "-" + key }
+
 func (n nodeContainer) dockerRun() string {
 	lines := []string{
 		fmt.Sprintf("docker run -d --name %s --hostname %s --restart unless-stopped --stop-timeout 60", n.slug, n.host),
@@ -43,7 +47,7 @@ func (n nodeContainer) dockerRun() string {
 		"-e AGENT_TEAMS_NODE_TOKEN=" + shellQuote(n.token),
 	}
 	for _, v := range nodeVolumes {
-		lines = append(lines, fmt.Sprintf("-v %s-%s:%s", n.slug, v.key, v.path))
+		lines = append(lines, fmt.Sprintf("-v %s:%s", n.volume(v.key), v.path))
 	}
 	lines = append(lines, "--log-opt max-size=20m --log-opt max-file=5", shellQuote(n.image))
 	return strings.Join(lines, " \\\n  ")
@@ -57,7 +61,7 @@ func (n nodeContainer) compose() string {
 	w("services:")
 	w("  node:")
 	w("    image: %s", n.image)
-	w("    hostname: %s", n.host)
+	w("    hostname: %q", n.host) // quoted: a name like 123 or true must stay a string
 	w("    restart: unless-stopped")
 	w("    stop_grace_period: 60s   # 留时间让守护进程暂停会话")
 	w("    environment:")
@@ -85,7 +89,7 @@ func (n nodeContainer) compose() string {
 	w("      options: { max-size: \"20m\", max-file: \"5\" }")
 	w("volumes:")
 	for _, v := range nodeVolumes {
-		w("  %s: {}", v.key)
+		w("  %s: { name: %s }", v.key, n.volume(v.key)) // the docker run volumes, not <project>_<key>
 	}
 	return b.String()
 }

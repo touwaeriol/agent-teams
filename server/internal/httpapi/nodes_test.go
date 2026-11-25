@@ -17,6 +17,24 @@ type createdNode struct {
 	Compose string   `json:"compose"`
 }
 
+// TestNodeComposeSnippet: the compose hostname is quoted (a node named 123, true or 1e3 stays a
+// string in YAML) and the volumes carry the docker run names (not <project>_<key>), so switching
+// between docker run and compose keeps the logins and the workspace.
+func TestNodeComposeSnippet(t *testing.T) {
+	n := nodeContainer{name: "123", host: "123", slug: "agent-teams-node-123", console: "http://console.test", token: "tok", image: "img"}
+	run, compose := n.dockerRun(), n.compose()
+	for _, want := range []string{"    hostname: \"123\"", "  claude: { name: agent-teams-node-123-claude }", "  data: { name: agent-teams-node-123-data }"} {
+		if !strings.Contains(compose, want) {
+			t.Fatalf("compose lacks %q:\n%s", want, compose)
+		}
+	}
+	for _, v := range nodeVolumes {
+		if !strings.Contains(run, "-v "+n.volume(v.key)+":"+v.path) || !strings.Contains(compose, "name: "+n.volume(v.key)+" }") {
+			t.Fatalf("volume %s differs between docker run and compose:\n%s\n%s", v.key, run, compose)
+		}
+	}
+}
+
 func TestNodesLifecycle(t *testing.T) {
 	h := newHarness(t)
 	c, u := h.signUp("a@example.com")
@@ -33,7 +51,7 @@ func TestNodesLifecycle(t *testing.T) {
 		}
 	}
 	for _, want := range []string{"name: agent-teams-node-rc-erio\n", "image: ghcr.io/example/node:test", `AGENT_TEAMS_NODE_TOKEN: "` + n.Token + `"`,
-		`AGENT_TEAMS_CONSOLE: "http://console.test"`, "- workspace:/home/agent/.agents_team", "  state: {}"} {
+		`AGENT_TEAMS_CONSOLE: "http://console.test"`, "- workspace:/home/agent/.agents_team", "  state: { name: agent-teams-node-rc-erio-state }"} {
 		if !strings.Contains(n.Compose, want) {
 			t.Fatalf("compose lacks %q:\n%s", want, n.Compose)
 		}

@@ -3,8 +3,10 @@
 // checks the user owns it) become cards; unknown or foreign ids stay plain text.
 import type { DeliverableView } from "@/api/views";
 
-/** A deliverable id as the server makes them: "dl_" + a lowercase ULID (Crockford base32, 26 chars). */
-const ID = /(?<![0-9A-Za-z_])dl_[0-9a-hjkmnp-tv-z]{26}(?![0-9A-Za-z_])/g;
+/** A deliverable id as the server makes them: "dl_" + a lowercase ULID (Crockford base32, 26 chars),
+ * not inside a longer word. The id is group 2: group 1 is the start or the character before it (no
+ * lookbehind, which Safari before 16.4 cannot parse). */
+const ID = /(^|[^0-9A-Za-z_])(dl_[0-9a-hjkmnp-tv-z]{26})(?![0-9A-Za-z_])/g;
 
 /** At most this many ids are looked up per message (the server accepts 50). */
 export const MAX_MENTIONED = 12;
@@ -13,7 +15,7 @@ export const MAX_MENTIONED = 12;
 export function deliverableIdsIn(text: string | null | undefined, max = MAX_MENTIONED): string[] {
   const out: string[] = [];
   for (const m of (text ?? "").matchAll(ID)) {
-    if (!out.includes(m[0])) out.push(m[0]);
+    if (!out.includes(m[2])) out.push(m[2]);
     if (out.length >= max) break;
   }
   return out;

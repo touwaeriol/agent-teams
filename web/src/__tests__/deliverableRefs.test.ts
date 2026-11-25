@@ -69,6 +69,11 @@ describe("deliverableIdsIn", () => {
     expect(deliverableIdsIn(`/deliverables/${MINE}?v=2`)).toEqual([MINE]);
     expect(deliverableIdsIn(undefined)).toEqual([]);
   });
+  it("takes ids at the start, the end and with one separator between them (no lookbehind)", () => {
+    expect(deliverableIdsIn(`${MINE},${MINE2}`)).toEqual([MINE, MINE2]);
+    expect(deliverableIdsIn(`交付物${MINE}和${MINE2}`)).toEqual([MINE, MINE2]);
+    expect(deliverableIdsIn(`_${MINE} 9${MINE2}`)).toEqual([]);
+  });
   it("stops at the limit", () => {
     const many = Array.from({ length: 30 }, (_, i) => `dl_01m88nq9y1jrk26hq5amk1r${String(i).padStart(3, "0")}`).join(" ");
     expect(deliverableIdsIn(many)).toHaveLength(MAX_MENTIONED);

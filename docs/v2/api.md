@@ -358,9 +358,9 @@ PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平�
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/nodes` | → `NodeView[]` |
-| POST | `/api/nodes` | `{name}` → 201 `{node, token, install}`（规则同 v1：名字正则、配额、409；`install` 指向 v2 `install-node.sh`） |
+| POST | `/api/nodes` | `{name}` → 201 `{node, token, install, docker, compose}`（规则同 v1：名字正则、配额、409；`install` 指向 v2 `install-node.sh`；`docker` 是已填好令牌的 `docker run` 命令，`compose` 是已填好令牌的 `compose.yml`，镜像取 `AGENT_TEAMS_NODE_IMAGE`，容器名和卷名是 `agent-teams-node-<名字>[-<卷>]`，两种方式用同名卷，可以互换） |
 | PATCH | `/api/nodes/{id}` | `{max_active_sessions?, park_after_s?, isolated?, labels?}` → `NodeView`（即时下发 `node.config`） |
-| POST | `/api/nodes/{id}/token` | → `{token, install}`；轮换并立即断开 |
+| POST | `/api/nodes/{id}/token` | → `{token, install, docker, compose}`（同 POST `/api/nodes`，填的是新令牌）；轮换并立即断开 |
 | POST | `/api/nodes/{id}/upgrade` | `{mode?: wait_idle\|now\|cancel, deadline_s?}` → 202；发 `node.upgrade`，版本取当前发布（`at_settings.node_release`，没有时取 `NODE_DIST_DIR` 最新的 tgz）。409 `no_release` / `node_offline` / `upgrade_unsupported`（守护进程不在更新启动器下，要先重新运行安装命令）。进度在 `NodeView.upgrade {target, phase, mode, active_turns, error?}`，另有 `latest_version`、`update_available`、`self_update` |
 | POST | `/api/nodes/{id}/drain` | `{deadline_s}` → 202 |
 | POST | `/api/nodes/{id}/recheck` | → `{node: NodeView, stale?: true}`（权限同 `GET /api/nodes`；每个节点每分钟最多 20 次）。给守护进程发 `node.runtimes_refresh`（守护进程支持 `usage` 时同时发 `node.usage_refresh`，余量照 `usage/refresh` 的规则更新），等回复 `in_reply_to` 是这条命令的 `node.runtimes`，最多 15 s；回复存库后返回节点（`clis` 是新状态），超时返回已有状态并带 `stale: true`。不在任何数据库事务里等待。有运行时变为可用时，暂存的会话会自动开出（data-model.md §2.7）。节点不在线 → 409 `node_offline`；守护进程不支持（`hello.features` 没有 `runtime_status`）→ 409 `unsupported_daemon` |
@@ -369,6 +369,7 @@ PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平�
 | GET | `/api/nodes/{id}/sessions` | → `[{session_id, employee, project, thread_no, state, last_active_at}]` |
 | GET | `/api/nodes/{id}/logs?level=&before=` | → 节点回传的 warn/error 日志 |
 | GET | `/install-node.sh` | 公开；v2 安装/升级脚本 |
+| GET | `/node-docker.md` | 公开（不登录），`text/markdown`；用 Docker / Docker Compose 部署节点的说明（控制面板地址和镜像已填好），可以直接交给 AI 助手照做 |
 | GET | `/node/dist/{file}` | 公开；守护进程发布包（tgz + `.sha256`） |
 
 ### 3.9 GitHub（连接）
