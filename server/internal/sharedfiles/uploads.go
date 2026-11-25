@@ -172,6 +172,9 @@ type FinalizeOptions struct {
 	Path string
 	// By, when set, replaces the uploader recorded at BeginUpload.
 	By *Uploader
+	// Overwrite, when set, replaces the overwrite choice recorded at BeginUpload (a caller that
+	// changes Path decides again); else the recorded one holds (ErrExists for an existing path).
+	Overwrite *bool
 	// EmployeeID, when set, must be the employee that asked for the upload (POST /nodes/uploads
 	// records the session's employee); another one gets ErrUploadNotFound.
 	EmployeeID string
@@ -185,7 +188,9 @@ type FinalizeOptions struct {
 // staging row (outside q's transaction, which the caller rolls back on the error) and returns
 // ErrSizeMismatch or ErrChecksum. sha256 stays NULL when nothing was declared; blobgc computes it.
 //
-// The object is read (hashed) before any lock is taken; q may be the caller's transaction.
+// The object is read (hashed) before any lock is taken; q may be the caller's transaction. A
+// refusal under the lock (ErrExists, ErrQuota) leaves the upload in place: the caller cancels it
+// (AbortUpload) after its transaction, so it does not hold the quota.
 func FinalizeUpload(ctx context.Context, q store.DB, bs blobstore.Store, projectID, uploadID string, o FinalizeOptions) (SharedFile, bool, error) {
 	bs = blobstore.Or(bs)
 	if !bs.Configured() {
@@ -221,23 +226,54 @@ func FinalizeUpload(ctx context.Context, q store.DB, bs blobstore.Store, project
 	if err != nil {
 		return SharedFile{}, false, err
 	}
-	var sum *string
-	switch {
-	case obj.Size != up.Size:
+	if obj.Size != up.Size {
 		return SharedFile{}, false, dropUpload(ctx, q, bs, up, ErrSizeMismatch)
-	case up.DeclaredSHA256 != nil && *up.DeclaredSHA256 != "":
-		got, n, err := hashObject(ctx, bs, up.StorageKey)
+	}
+	key, objectID := up.StorageKey, up.ObjectID
+	if up.S3UploadID == nil {
+		// A node's single presigned PUT stays valid for UploadTTL after the file is registered, so
+		// it could be replayed to change the bytes behind the checks. The object is copied to a key
+		// no URL was ever signed for and checked there; the uploaded key is deleted once the URL
+		// has expired (Reserve: ReserveDelay > UploadTTL), so a replay leaves nothing behind.
+		// (Recording the ETag instead would need a column, and every reader would have to compare.)
+		objectID = NewObjectID()
+		key = blobstore.SharedKey(projectID, objectID)
+		for _, k := range []string{up.StorageKey, key} {
+			if err := blobgc.Reserve(ctx, q, k); err != nil {
+				return SharedFile{}, false, err
+			}
+		}
+		if err := bs.Copy(ctx, up.StorageKey, key); err != nil {
+			return SharedFile{}, false, err
+		}
+		if c, err := bs.Head(ctx, key); err != nil || c.Size != up.Size {
+			_ = bs.Delete(context.WithoutCancel(ctx), key)
+			if err != nil {
+				return SharedFile{}, false, err
+			}
+			return SharedFile{}, false, dropUpload(ctx, q, bs, up, ErrSizeMismatch)
+		}
+	}
+	var sum *string
+	if up.DeclaredSHA256 != nil && *up.DeclaredSHA256 != "" {
+		got, n, err := hashObject(ctx, bs, key)
 		if err != nil {
 			return SharedFile{}, false, err
 		}
 		if n != up.Size || got != *up.DeclaredSHA256 {
+			if key != up.StorageKey {
+				_ = bs.Delete(context.WithoutCancel(ctx), key)
+			}
 			return SharedFile{}, false, dropUpload(ctx, q, bs, up, ErrChecksum)
 		}
 		sum = &got
 	}
-	if err := lockProject(ctx, q, projectID); err != nil {
-		_ = blobgc.Enqueue(ctx, store.Detached(q), up.StorageKey)
+	if err := lockProject(ctx, q, projectID); errors.Is(err, ErrNotFound) {
+		// The project went while the file was uploading: nothing will point at the object.
+		_ = blobgc.Enqueue(ctx, store.Detached(q), up.StorageKey, key)
 		return SharedFile{}, false, ErrUploadNotFound
+	} else if err != nil {
+		return SharedFile{}, false, err
 	}
 	// Locked again: a concurrent finalize or abort of the same upload may have won.
 	var still []Upload
@@ -247,7 +283,11 @@ func FinalizeUpload(ctx context.Context, q store.DB, bs blobstore.Store, project
 	if len(still) == 0 {
 		return SharedFile{}, false, ErrUploadNotFound
 	}
-	if err := fits(ctx, q, projectID, p, up.Size, up.ID, true); err != nil {
+	overwrite := up.Overwrite
+	if o.Overwrite != nil {
+		overwrite = *o.Overwrite
+	}
+	if err := fits(ctx, q, projectID, p, up.Size, up.ID, overwrite); err != nil {
 		return SharedFile{}, false, err
 	}
 	by := Uploader{Name: up.UploadedBy, ThreadID: up.UploaderThreadID}
@@ -272,14 +312,14 @@ func FinalizeUpload(ctx context.Context, q store.DB, bs blobstore.Store, project
 		sha256 = EXCLUDED.sha256, data = NULL, uploaded_by = EXCLUDED.uploaded_by, uploader_id = EXCLUDED.uploader_id,
 		uploader_thread_id = EXCLUDED.uploader_thread_id, storage_key = EXCLUDED.storage_key, object_id = EXCLUDED.object_id,
 		declared_sha256 = EXCLUDED.declared_sha256, state = 'ready', updated_at = now()`,
-		projectID, p, ContentType(p), up.Size, sum, by.Name, empID, by.ThreadID, up.StorageKey, up.ObjectID, up.DeclaredSHA256).Error
+		projectID, p, ContentType(p), up.Size, sum, by.Name, empID, by.ThreadID, key, objectID, up.DeclaredSHA256).Error
 	if err != nil {
 		return SharedFile{}, false, err
 	}
 	if _, err := store.Exec(ctx, q, `DELETE FROM at_shared_uploads WHERE id = $1`, up.ID); err != nil {
 		return SharedFile{}, false, err
 	}
-	if len(prev) > 0 && prev[0].StorageKey != nil && *prev[0].StorageKey != up.StorageKey {
+	if len(prev) > 0 && prev[0].StorageKey != nil && *prev[0].StorageKey != key {
 		if err := blobgc.Enqueue(ctx, q, *prev[0].StorageKey); err != nil {
 			return SharedFile{}, false, err
 		}
