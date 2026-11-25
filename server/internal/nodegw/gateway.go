@@ -158,19 +158,26 @@ func (g *Gateway) ServeWS(w http.ResponseWriter, r *http.Request) {
 	g.run(ctx, conn, node, tokenHash, remoteAddr(r))
 }
 
-// WriteAuthError answers a failed Authenticate on a daemon HTTP route: 429 with Retry-After
-// when throttled, 401 for a rejected token, 503 otherwise; the body never says why.
-func WriteAuthError(w http.ResponseWriter, err error) {
+// AuthStatus maps a failed Authenticate to its HTTP answer: 429 (setting Retry-After on w) when
+// throttled, 401 for a rejected token, 503 otherwise. code is a short reason that never says why
+// a token was rejected; every daemon HTTP route answers through it, whatever its body format.
+func AuthStatus(w http.ResponseWriter, err error) (status int, code string) {
 	var t *throttled
-	switch {
-	case errors.As(err, &t):
+	if errors.As(err, &t) {
 		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(t.wait.Seconds()))))
-		http.Error(w, "too many requests", http.StatusTooManyRequests)
-	case errors.Is(err, ErrTokenRejected):
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-	default:
-		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		return http.StatusTooManyRequests, "too_many_requests"
 	}
+	if errors.Is(err, ErrTokenRejected) {
+		return http.StatusUnauthorized, "unauthorized"
+	}
+	return http.StatusServiceUnavailable, "unavailable"
+}
+
+// WriteAuthError answers a failed Authenticate on a daemon HTTP route with a plain-text body
+// (AuthStatus).
+func WriteAuthError(w http.ResponseWriter, err error) {
+	status, code := AuthStatus(w, err)
+	http.Error(w, strings.ReplaceAll(code, "_", " "), status)
 }
 
 type throttled struct{ wait time.Duration }

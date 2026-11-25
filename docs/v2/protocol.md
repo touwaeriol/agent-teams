@@ -5,7 +5,7 @@
 ## 1. 连接
 
 - URL：`wss://<console>/nodes/connect`；`/nodes/v2/connect` 是同一入口的别名（两者都只接受协议 2）。
-- 认证：`Authorization: Bearer <node token>`。控制台 `sha256(token)` 查 `at_nodes.token_hash`，所有者必须存在且 `active`。令牌在 WebSocket 升级**之前**校验：不通过直接回 HTTP **401**（响应体不说明原因，不会拿到 101；守护进程视为“令牌无效”，每 10 分钟重试一次并在日志里提示），数据库故障回 503。被拒的令牌按来源地址计数（地址取法同登录限速：只有来自本机/内网反代的请求才采信 `X-Forwarded-For` 的最后一项），5 分钟内超过 20 次后，该地址在窗口结束前访问所有守护进程接口（`/nodes/connect`、`/nodes/v2/connect`、`/nodes/ssh`、`/nodes/moves/*`、`/nodes/attachments/*`）都回 **429** + `Retry-After`，且不再查令牌。已连上的链路被吊销时仍以 4401 关闭。
+- 认证：`Authorization: Bearer <node token>`。控制台 `sha256(token)` 查 `at_nodes.token_hash`，所有者必须存在且 `active`。令牌在 WebSocket 升级**之前**校验：不通过直接回 HTTP **401**（响应体不说明原因，不会拿到 101；守护进程视为“令牌无效”，每 10 分钟重试一次并在日志里提示），数据库故障回 503。被拒的令牌按来源地址计数（地址取法同登录限速：只有来自本机/内网反代的请求才采信 `X-Forwarded-For` 的最后一项），5 分钟内超过 20 次后，该地址在窗口结束前访问所有守护进程接口（`/nodes/connect`、`/nodes/v2/connect`、`/nodes/ssh`、`/nodes/moves/*`、`/nodes/attachments/*`（含 #58 的 `/nodes/attachments/<id>/url`）、`/nodes/uploads`）都回 **429** + `Retry-After`，且不再查令牌。这些 HTTP 接口令牌校验失败的状态码一致（`nodegw.AuthStatus`：429 / 401 / 503）；`/nodes/attachments/<id>/url` 和 `/nodes/uploads` 是 JSON 接口，响应体是带 `detail`、`code`、`status` 三个字段的 JSON，`code` 取 `too_many_requests` / `unauthorized` / `unavailable`，其余接口是纯文本。已连上的链路被吊销时仍以 4401 关闭。
 - 帧：WebSocket 文本帧，一帧一个 JSON 对象（UTF-8）。单帧上限 4 MiB；更大的内容（例如很长的命令输出）由发送方截断并标 `truncated: true`。启用 permessage-deflate。
 - 心跳：双方每 20 s 发 WebSocket ping；45 s 收不到任何帧则断开重连。
 - 重连：指数退避 1 s → 30 s，带 ±20% 抖动。
