@@ -67,8 +67,9 @@ describe("paste into a message box", () => {
     expect(pastedFiles(clip({ "text/plain": "a.pdf report" }, [pdf]))).toEqual([pdf]);
   });
 
-  it("no clipboard or unsupported files: nothing attached", () => {
+  it("no clipboard: nothing attached; any file type without text is attached (#58)", () => {
     expect(pastedFiles(null)).toEqual([]);
-    expect(pastedFiles(clip({}, [new File(["x"], "a.exe", { type: "application/octet-stream" })]))).toEqual([]);
+    const exe = new File(["x"], "a.exe", { type: "application/octet-stream" });
+    expect(pastedFiles(clip({}, [exe]))).toEqual([exe]);
   });
 });
