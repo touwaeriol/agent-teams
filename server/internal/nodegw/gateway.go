@@ -139,7 +139,7 @@ var (
 // 429, a database failure a 503; only an authenticated daemon gets the 101.
 func (g *Gateway) ServeWS(w http.ResponseWriter, r *http.Request) {
 	ctx := context.WithoutCancel(r.Context())
-	node, err := g.authenticate(ctx, r)
+	node, tokenHash, err := g.authenticateHash(ctx, r)
 	if err != nil {
 		WriteAuthError(w, err)
 		return
@@ -149,7 +149,7 @@ func (g *Gateway) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn.SetReadLimit(MaxFrame)
-	g.run(ctx, conn, node)
+	g.run(ctx, conn, node, tokenHash)
 }
 
 // WriteAuthError answers a failed Authenticate on a daemon HTTP route: 429 with Retry-After
@@ -179,41 +179,70 @@ func (g *Gateway) Authenticate(r *http.Request) (store.Node, error) {
 }
 
 func (g *Gateway) authenticate(ctx context.Context, r *http.Request) (store.Node, error) {
+	node, _, err := g.authenticateHash(ctx, r)
+	return node, err
+}
+
+// authenticateHash also returns the token hash that matched (the WebSocket checks it again at hello).
+func (g *Gateway) authenticateHash(ctx context.Context, r *http.Request) (store.Node, string, error) {
 	addr := remoteAddr(r)
 	if blocked, wait := g.authFails.blocked(addr); blocked {
-		return store.Node{}, &throttled{wait: wait}
+		return store.Node{}, "", &throttled{wait: wait}
 	}
-	node, err := g.checkToken(ctx, r)
+	node, hash, err := g.checkToken(ctx, r)
 	if errors.Is(err, ErrTokenRejected) {
 		g.authFails.fail(addr)
 		g.log.Info("node token rejected", "ip", addr, "path", r.URL.Path)
 	}
-	return node, err
+	return node, hash, err
 }
 
-func (g *Gateway) checkToken(ctx context.Context, r *http.Request) (store.Node, error) {
+func (g *Gateway) checkToken(ctx context.Context, r *http.Request) (store.Node, string, error) {
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || strings.TrimSpace(token) == "" {
-		return store.Node{}, ErrTokenRejected
+		return store.Node{}, "", ErrTokenRejected
 	}
-	node, err := g.store.NodeByToken(ctx, auth.HashToken(strings.TrimSpace(token)))
+	hash := auth.HashToken(strings.TrimSpace(token))
+	node, err := g.store.NodeByToken(ctx, hash)
 	if errors.Is(err, store.ErrNotFound) {
-		return store.Node{}, ErrTokenRejected
+		return store.Node{}, "", ErrTokenRejected
 	}
 	if err != nil {
-		return store.Node{}, err
+		return store.Node{}, "", err
 	}
 	owner, err := g.store.UserByID(ctx, node.UserID)
 	if errors.Is(err, store.ErrNotFound) || (err == nil && !owner.Active) {
-		return store.Node{}, ErrTokenRejected
+		return store.Node{}, "", ErrTokenRejected
 	}
 	if err != nil {
-		return store.Node{}, err
+		return store.Node{}, "", err
 	}
-	return node, nil
+	return node, hash, nil
 }
 
-func (g *Gateway) run(ctx context.Context, conn *websocket.Conn, node store.Node) {
+// errRevoked: between the upgrade and the hello the token was rotated, the node deleted or its
+// owner disabled (#55 N2). The link is closed with 4401 like a revoked live link.
+var errRevoked = errors.New("node token revoked before hello")
+
+// stillValid re-reads the node row (q may be a transaction holding it FOR UPDATE): the node
+// exists, still has tokenHash and its owner is active.
+func stillValid(ctx context.Context, q core.DB, nodeID, tokenHash string) (bool, error) {
+	var row struct {
+		TokenHash string
+		Active    bool
+	}
+	err := core.MapErr(q.Gorm(ctx).Table("at_nodes n").Select("n.token_hash, u.active").
+		Joins("JOIN at_users u ON u.id = n.user_id").Where("n.id = ?", nodeID).Take(&row).Error)
+	if err == core.ErrNotFound {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return row.Active && row.TokenHash == tokenHash, nil
+}
+
+func (g *Gateway) run(ctx context.Context, conn *websocket.Conn, node store.Node, tokenHash string) {
 	hello, err := g.readHello(ctx, conn)
 	if err != nil {
 		g.log.Info("node handshake failed", "node_id", node.ID, "err", err)
@@ -223,7 +252,12 @@ func (g *Gateway) run(ctx context.Context, conn *websocket.Conn, node store.Node
 		_ = conn.Close(CloseUpgrade, "protocol 2 required")
 		return
 	}
-	l, err := g.attach(ctx, conn, node, hello)
+	l, err := g.attach(ctx, conn, node, tokenHash, hello)
+	if errors.Is(err, errRevoked) {
+		g.log.Info("node token revoked before hello", "node_id", node.ID)
+		_ = conn.Close(CloseUnauthorized, "token rejected")
+		return
+	}
 	if err != nil {
 		g.log.Warn("node attach failed", "node_id", node.ID, "err", err)
 		_ = conn.Close(websocket.StatusInternalError, "attach failed")
@@ -263,8 +297,11 @@ func supports(list []int, v int) bool {
 }
 
 // attach records the hello, replaces an older link, sends welcome and replays commands.
-func (g *Gateway) attach(ctx context.Context, conn *websocket.Conn, node store.Node, hello *protocol.Hello) (*link, error) {
-	ackSeq, err := g.recordHello(ctx, node.ID, hello)
+// The token is checked again twice (#55 N2): in recordHello's transaction (the node row is locked)
+// and once the link is registered, so a rotation, node deletion or owner cut-off that commits
+// after the first check either finds this link through Disconnect or is seen by the second one.
+func (g *Gateway) attach(ctx context.Context, conn *websocket.Conn, node store.Node, tokenHash string, hello *protocol.Hello) (*link, error) {
+	ackSeq, err := g.recordHello(ctx, node.ID, tokenHash, hello)
 	if err != nil {
 		return nil, err
 	}
@@ -273,6 +310,13 @@ func (g *Gateway) attach(ctx context.Context, conn *websocket.Conn, node store.N
 	old := g.links[node.ID]
 	g.links[node.ID] = l
 	g.mu.Unlock()
+	if ok, err := stillValid(ctx, g.core.Pool, node.ID, tokenHash); err != nil || !ok {
+		g.unregister(ctx, l, old)
+		if err != nil {
+			return nil, err
+		}
+		return nil, errRevoked
+	}
 	if old != nil {
 		old.close(CloseReplaced, "replaced by a newer link")
 	}
@@ -284,6 +328,26 @@ func (g *Gateway) attach(ctx context.Context, conn *websocket.Conn, node store.N
 	}
 	l.sentSeq = int64(hello.AckedCmdSeq)
 	return l, nil
+}
+
+// unregister takes back a link attach registered but refused: the link it displaced (not yet
+// told it was replaced) goes back unless it ended meanwhile; then the node is offline.
+func (g *Gateway) unregister(ctx context.Context, l, old *link) {
+	l.stop()
+	g.mu.Lock()
+	restored, offline := false, false
+	if g.links[l.node.ID] == l {
+		if old != nil && old.ctx.Err() == nil {
+			g.links[l.node.ID], restored = old, true
+		} else {
+			delete(g.links, l.node.ID)
+			offline = old != nil // old's own detach saw another link and skipped NodeOffline
+		}
+	}
+	g.mu.Unlock()
+	if !restored && offline && g.handler != nil {
+		g.handler.NodeOffline(ctx, l.node)
+	}
 }
 
 func (g *Gateway) detach(ctx context.Context, l *link) {
@@ -307,7 +371,7 @@ func (g *Gateway) link(nodeID string) *link {
 }
 
 // recordHello stores the hello and handles an epoch change; returns the ack seq for welcome.
-func (g *Gateway) recordHello(ctx context.Context, nodeID string, hello *protocol.Hello) (int64, error) {
+func (g *Gateway) recordHello(ctx context.Context, nodeID, tokenHash string, hello *protocol.Hello) (int64, error) {
 	stored, _ := json.Marshal(helloSummary(hello))
 	isolation := "none"
 	if hello.Isolation != nil {
@@ -320,7 +384,16 @@ func (g *Gateway) recordHello(ctx context.Context, nodeID string, hello *protoco
 			AckSeq int64
 		}
 		if err := nodeRow(ctx, tx, nodeID).Select("epoch, ack_seq").Clauses(core.ForUpdate).Take(&cur).Error; err != nil {
+			if core.MapErr(err) == core.ErrNotFound {
+				return errRevoked // deleted since the upgrade
+			}
 			return err
+		}
+		if ok, err := stillValid(ctx, tx, nodeID, tokenHash); err != nil || !ok {
+			if err != nil {
+				return err
+			}
+			return errRevoked
 		}
 		ackSeq = cur.AckSeq
 		if cur.Epoch != hello.Epoch {
