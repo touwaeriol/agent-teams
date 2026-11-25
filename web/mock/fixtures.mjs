@@ -188,7 +188,7 @@ export const messages = {
       attachments: [
         { id: "img_spec", name: "需求说明.pdf", content_type: "application/pdf", size: 18_874_368 },
         { id: "img_data", name: "日志与数据.zip", content_type: "application/zip", size: 157_286_400 },
-        { id: "img_old", name: "上周的导出.csv", content_type: "text/csv", size: 2_411_724 },
+        { id: "img_old", name: "上周的导出.csv", content_type: "text/csv", size: 2_411_724, expired: true },
       ],
     }),
     { ...msg("a45", "system", "lead-12", "[x] 后端通信\n[~] 网页卡片\n[ ] 联调测试", 19, { employee: "lead-12", todos: [
