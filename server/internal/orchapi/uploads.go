@@ -17,7 +17,9 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
+	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/sharedfiles"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // Presigned upload and download lifetimes (#58 design §10).
@@ -445,11 +447,22 @@ func nodeError(c *gin.Context, status int, code, detail string) {
 	c.JSON(status, gin.H{"detail": detail, "code": code, "status": status})
 }
 
+// nodeAuth authenticates the daemon of a raw node route; on failure it has answered with
+// nodegw.AuthStatus in the {detail, code} body.
+func (a *API) nodeAuth(c *gin.Context) (store.Node, bool) {
+	node, err := a.e.Gateway.Authenticate(c.Request)
+	if err == nil {
+		return node, true
+	}
+	status, code := nodegw.AuthStatus(c.Writer, err)
+	nodeError(c, status, code, strings.ReplaceAll(code, "_", " "))
+	return node, false
+}
+
 func (a *API) nodeAttachmentURL(c *gin.Context) {
 	ctx := c.Request.Context()
-	node, err := a.e.Gateway.Authenticate(c.Request)
-	if err != nil {
-		nodeError(c, http.StatusUnauthorized, "unauthorized", "token rejected")
+	node, ok := a.nodeAuth(c)
+	if !ok {
 		return
 	}
 	att, err := core.AttachmentOfUser(ctx, a.e.Core.Pool, node.UserID, c.Param("id"))
@@ -520,9 +533,8 @@ func validSHA256(s string) bool {
 
 func (a *API) nodeUpload(c *gin.Context) {
 	ctx := c.Request.Context()
-	node, err := a.e.Gateway.Authenticate(c.Request)
-	if err != nil {
-		nodeError(c, http.StatusUnauthorized, "unauthorized", "token rejected")
+	node, ok := a.nodeAuth(c)
+	if !ok {
 		return
 	}
 	var in NodeUploadRequest

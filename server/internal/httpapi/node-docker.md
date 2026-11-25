@@ -51,7 +51,7 @@ name: agent-teams-node-mynode
 services:
   node:
     image: __IMAGE__
-    hostname: mynode
+    hostname: "mynode"              # 加引号：节点名是 123、true 这类时也按字符串处理
     restart: unless-stopped
     stop_grace_period: 60s          # 留时间让守护进程暂停会话，下次启动可恢复
     environment:
@@ -76,12 +76,12 @@ services:
     logging:
       driver: json-file
       options: { max-size: "20m", max-file: "5" }
-volumes:
-  claude: {}
-  codex: {}
-  workspace: {}
-  state: {}
-  data: {}
+volumes:                             # 和 docker run 方式同名的卷：两种方式互换时登录和工作区都在
+  claude: { name: agent-teams-node-mynode-claude }
+  codex: { name: agent-teams-node-mynode-codex }
+  workspace: { name: agent-teams-node-mynode-workspace }
+  state: { name: agent-teams-node-mynode-state }
+  data: { name: agent-teams-node-mynode-data }
 ```
 
 也可以把变量放进 `node.env`，在服务里写 `env_file: node.env` 代替 `environment:`。

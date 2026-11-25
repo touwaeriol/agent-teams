@@ -20,8 +20,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/oklog/ulid/v2"
-
 	"github.com/touwaeriol/agent-teams/server/internal/artifacts"
 	"github.com/touwaeriol/agent-teams/server/internal/blobgc"
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
@@ -254,7 +252,7 @@ func readObject(ctx context.Context, bs blobstore.Store, key string, size int64)
 }
 
 // NewObjectID is the id of a new shared-file object (sf_ + ULID).
-func NewObjectID() string { return "sf_" + strings.ToLower(ulid.Make().String()) }
+func NewObjectID() string { return store.NewID("sf") }
 
 // ProjectUsage counts the project's files and bytes.
 func ProjectUsage(ctx context.Context, q store.DB, projectID string) (Usage, error) {

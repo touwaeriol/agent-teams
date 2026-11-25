@@ -20,6 +20,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/engine"
+	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/orchapi"
 	"github.com/touwaeriol/agent-teams/server/internal/sharedfiles"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -701,6 +702,45 @@ func TestUploadsInFlightLimit(t *testing.T) {
 		if code, raw := b.do("POST", "/api/projects/"+p.ID+"/uploads", map[string]any{"kind": kind, "name": "more.bin", "size": 10}); code != 429 ||
 			!strings.Contains(string(raw), "too_many_uploads") {
 			t.Fatalf("%s over the limit = %d %s", kind, code, raw)
+		}
+	}
+}
+
+// TestNodeRoutesAuthStatus: the JSON node routes of #58 answer a failed node token like every
+// daemon route (nodegw.AuthStatus): 401 for a wrong token, 429 with Retry-After once the client
+// address used up its rejections (even with a right token).
+func TestNodeRoutesAuthStatus(t *testing.T) {
+	w := newWorld(t, nil)
+	b := w.signUp("ops@example.com")
+	var node nodeCreated
+	b.must(201, "POST", "/api/nodes", map[string]string{"name": "n1"}, &node)
+	call := func(method, path, token, xff string) (*http.Response, string) {
+		t.Helper()
+		req, _ := http.NewRequest(method, w.srv.URL+path, strings.NewReader(`{}`))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Forwarded-For", xff)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var body struct{ Code string }
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		return resp, body.Code
+	}
+	routes := [][2]string{{"GET", "/nodes/attachments/img_x/url"}, {"POST", "/nodes/uploads"}}
+	for _, r := range routes {
+		if resp, code := call(r[0], r[1], "wrong", "203.0.113.20"); resp.StatusCode != http.StatusUnauthorized || code != "unauthorized" {
+			t.Fatalf("%s wrong token: %d %q", r[1], resp.StatusCode, code)
+		}
+	}
+	for i := 0; i < nodegw.DefaultAuthFailLimit; i++ {
+		call("GET", routes[0][1], "wrong", "203.0.113.21")
+	}
+	for _, r := range routes {
+		resp, code := call(r[0], r[1], node.Token, "203.0.113.21")
+		if resp.StatusCode != http.StatusTooManyRequests || code != "too_many_requests" || resp.Header.Get("Retry-After") == "" {
+			t.Fatalf("%s throttled: %d %q Retry-After %q", r[1], resp.StatusCode, code, resp.Header.Get("Retry-After"))
 		}
 	}
 }
