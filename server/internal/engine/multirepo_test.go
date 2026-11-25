@@ -40,7 +40,8 @@ func prepares(t *testing.T, w *world, n *nodetest.Node, want int) map[string]pro
 
 // pushRepos answers the git.push jobs of one call: a sha pushes that repository (the fake GitHub
 // gets the branch), "" reports it unchanged.
-func pushRepos(t *testing.T, w *world, gh *fakeGitHub, n *nodetest.Node, shas map[string]string) map[string]protocol.GitPush {
+// pushRepos answers the git.push jobs; before runs for each while it is still out (before git.result).
+func pushRepos(t *testing.T, w *world, gh *fakeGitHub, n *nodetest.Node, shas map[string]string, before ...func(protocol.GitPush)) map[string]protocol.GitPush {
 	t.Helper()
 	out := map[string]protocol.GitPush{}
 	for len(out) < len(shas) {
@@ -61,6 +62,9 @@ func pushRepos(t *testing.T, w *world, gh *fakeGitHub, n *nodetest.Node, shas ma
 			unchanged, head := true, "sha-base"
 			res.Unchanged, res.HeadSHA = &unchanged, &head
 		}
+		for _, f := range before {
+			f(p)
+		}
 		_, err = n.Send(ctx, protocol.TypeGitResult, res)
 		cancel()
 		if err != nil {
@@ -70,13 +74,13 @@ func pushRepos(t *testing.T, w *world, gh *fakeGitHub, n *nodetest.Node, shas ma
 	return out
 }
 
-func completeTask(t *testing.T, w *world, gh *fakeGitHub, n *nodetest.Node, dev *fakeAgent, task string, shas map[string]string) (protocol.ToolResult, map[string]protocol.GitPush) {
+func completeTask(t *testing.T, w *world, gh *fakeGitHub, n *nodetest.Node, dev *fakeAgent, task string, shas map[string]string, before ...func(protocol.GitPush)) (protocol.ToolResult, map[string]protocol.GitPush) {
 	t.Helper()
 	callID := "tc_complete_" + task
 	gen := protocol.OpenGen(dev.gen)
 	dev.send(protocol.TypeToolCall, protocol.ToolCall{CallID: protocol.CallID(callID), SessionID: protocol.SessionID(dev.session), OpenGen: &gen,
 		Tool: "complete_task", Args: []byte(`{"task_id":"` + task + `","summary":"done ` + task + `"}`)})
-	pushes := pushRepos(t, w, gh, n, shas)
+	pushes := pushRepos(t, w, gh, n, shas, before...)
 	return dev.result(callID), pushes
 }
 
@@ -137,14 +141,17 @@ func deliveryTwoRepos(t *testing.T, webhook bool) {
 	}
 	dev.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: protocol.SessionID(dev.session), MsgID: devOpen.FirstMessage.MsgID})
 
-	res, pushes := completeTask(t, w, gh, n, dev, "t1", map[string]string{"o/r": "", "o/web": "sha-web-1"})
+	res, pushes := completeTask(t, w, gh, n, dev, "t1", map[string]string{"o/r": "", "o/web": "sha-web-1"}, func(p protocol.GitPush) {
+		if p.Repo == "o/web" {
+			assertJobCredentials(t, w, n, p) // while the job runs: a finished job gets nothing (#55 N8)
+		}
+	})
 	if !res.Ok || !strings.Contains(string(*res.Structured), `"pushed":[{"repo":"o/web","head_sha":"sha-web-1"}]`) {
 		t.Fatalf("complete_task pushed only the changed repository: %+v %s", res, deref(res.Structured))
 	}
 	if pushes["o/web"].UnchangedAgainst[1] != "dev" || pushes["o/r"].UnchangedAgainst[1] != "main" {
 		t.Fatalf("push jobs compare with each repository's base: %+v", pushes)
 	}
-	assertJobCredentials(t, w, n, pushes["o/web"])
 	lead.expectSend("改动的仓库：o/web")
 
 	out := lead.mustCall("enqueue_merge", map[string]any{"task_id": "t1"})

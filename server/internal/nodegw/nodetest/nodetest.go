@@ -62,6 +62,7 @@ type Options struct {
 	Protocols   []int
 	Build       string             // hello.daemon.build ("" = none)
 	Runtimes    *protocol.Runtimes // hello.runtimes (nil = none reported)
+	BeforeHello func()             // runs after the upgrade, before the hello is sent
 }
 
 // Dial connects to ws(s)://…/nodes/connect with the token and completes the handshake.
@@ -74,6 +75,9 @@ func Dial(ctx context.Context, url, token string, o Options) (*Node, error) {
 		_ = resp.Body.Close()
 	}
 	conn.SetReadLimit(4 << 20)
+	if o.BeforeHello != nil {
+		o.BeforeHello()
+	}
 	v, err := protocol.NewValidator()
 	if err != nil {
 		return nil, err

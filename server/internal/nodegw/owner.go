@@ -88,7 +88,7 @@ func (g *Gateway) check(ctx context.Context, node store.Node, typ string, r refs
 		return allowed, "", nil
 	}
 	if r.JobID != nil {
-		return g.checkJob(ctx, node, typ, *r.JobID)
+		return g.checkJob(ctx, node, *r.JobID)
 	}
 	return allowed, "", nil
 }
@@ -163,7 +163,7 @@ func (g *Gateway) checkApproval(ctx context.Context, node store.Node, typ, appro
 		return rejected, "", err
 	}
 	if q.SessionID == nil || (sessionID != nil && *sessionID != *q.SessionID) {
-		return rejected, "unknown_approval", nil
+		return rejected, "unknown_session", nil
 	}
 	return g.checkSession(ctx, node, typ, *q.SessionID, gen)
 }
@@ -190,7 +190,7 @@ func (g *Gateway) checkDelivered(ctx context.Context, node store.Node, s session
 	if c.ProjectID == nil && c.UserID != nil && *c.UserID == node.UserID {
 		return allowed, "", nil
 	}
-	return rejected, "unknown_message", nil
+	return rejected, "unknown_session", nil
 }
 
 // checkCompacted: the task waiting for compact_id must be claimed by the session's employee in
@@ -210,7 +210,7 @@ func (g *Gateway) checkCompacted(ctx context.Context, s sessionInfo, compactID s
 		return rejected, "", err
 	}
 	if t.ClaimedBy != s.Employee || t.ProjectID == nil || *t.ProjectID != s.ProjectID {
-		return rejected, "unknown_task", nil
+		return rejected, "unknown_session", nil
 	}
 	return allowed, "", nil
 }
@@ -250,7 +250,10 @@ func JobLive(ctx context.Context, q core.DB, nodeID, jobID string) (bool, error)
 	return n > 0, err
 }
 
-func (g *Gateway) checkJob(ctx context.Context, node store.Node, typ, jobID string) (verdict, string, error) {
+// checkJob: the job is one the console sent this node. Whether it still runs matters only for
+// credentials (delivery.jobScope answers cred.request with unknown_job, see JobLive); a replayed
+// git.result of a finished job is still this node's.
+func (g *Gateway) checkJob(ctx context.Context, node store.Node, jobID string) (verdict, string, error) {
 	var n int64
 	err := commands(ctx, g.core.Pool, node.ID).Where("type LIKE 'git.%' AND body->>'job_id' = ?", jobID).Count(&n).Error
 	if err != nil {
@@ -258,17 +261,6 @@ func (g *Gateway) checkJob(ctx context.Context, node store.Node, typ, jobID stri
 	}
 	if n == 0 {
 		return rejected, "unknown_job", nil
-	}
-	if typ != protocol.TypeCredRequest {
-		return allowed, "", nil // a replayed git.result of a finished job is still this node's
-	}
-	// A credential only while the job runs (#55 N8/F9): an old job_id is not a standing grant.
-	live, err := JobLive(ctx, g.core.Pool, node.ID, jobID)
-	if err != nil {
-		return rejected, "", err
-	}
-	if !live {
-		return rejected, "job_finished", nil
 	}
 	return allowed, "", nil
 }
