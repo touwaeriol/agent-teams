@@ -336,14 +336,18 @@ func dropUpload(ctx context.Context, q store.DB, bs blobstore.Store, up Upload, 
 	if _, e := store.Exec(ctx, d, `DELETE FROM at_shared_uploads WHERE id = $1`, up.ID); e != nil {
 		return errors.Join(err, e)
 	}
-	if e := bs.Delete(ctx, up.StorageKey); e != nil {
+	e := bs.Delete(ctx, up.StorageKey)
+	if up.S3UploadID == nil {
+		// A node's single PUT: its URL may be replayed until it expires; delete the key again later.
+		_ = blobgc.RedeleteLater(ctx, d, up.StorageKey)
+	} else if e != nil {
 		_ = blobgc.Enqueue(ctx, d, up.StorageKey)
 	}
 	return err
 }
 
 // AbortUpload cancels an upload in flight: the staging row goes, the object (if any) is queued for
-// deletion and the multipart upload is aborted.
+// deletion and the multipart upload is aborted (a node's single PUT: see RedeleteLater).
 func AbortUpload(ctx context.Context, q store.DB, bs blobstore.Store, projectID, id string) error {
 	var rows []struct {
 		StorageKey string
@@ -355,6 +359,22 @@ func AbortUpload(ctx context.Context, q store.DB, bs blobstore.Store, projectID,
 	}
 	if len(rows) == 0 {
 		return ErrUploadNotFound
+	}
+	if rows[0].S3UploadID == nil {
+		// A node's single presigned PUT: the object (if it was sent) goes now, and the key once
+		// more after the URL has expired, so a replayed PUT leaves nothing behind. Inside a
+		// transaction the delete waits for the commit (no network while rows are locked).
+		key := rows[0].StorageKey
+		if err := blobgc.RedeleteLater(ctx, q, key); err != nil {
+			return err
+		}
+		del := func(ctx context.Context) { _ = blobstore.Or(bs).Delete(context.WithoutCancel(ctx), key) }
+		if tx, ok := q.(interface{ AfterCommit(func(context.Context)) }); ok {
+			tx.AfterCommit(del)
+		} else {
+			del(ctx)
+		}
+		return nil
 	}
 	if err := blobgc.Enqueue(ctx, q, rows[0].StorageKey); err != nil {
 		return err
