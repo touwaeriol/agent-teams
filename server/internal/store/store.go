@@ -15,7 +15,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm"
 )
 
@@ -67,7 +66,7 @@ func (s *Store) g(ctx context.Context) *gorm.DB { return s.db.Gorm(ctx) }
 
 // NewID returns a type-prefixed ULID for v2 tables (ro_…, me_…).
 func NewID(prefix string) string {
-	return prefix + "_" + strings.ToLower(ulid.Make().String())
+	return prefix + "_" + strings.ToLower(NewULID().String())
 }
 
 // NewHexID is v1's uuid4().hex style id (32 random hex chars), used for v1 tables.
