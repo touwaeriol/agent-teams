@@ -372,7 +372,7 @@ export class Daemon {
       "session.interrupt": { run: (b) => s.interrupt(b as unknown as SessionInterrupt) },
       "session.set_mode": { lane: session, run: (b) => s.setMode(b as unknown as SessionSetMode) },
       "session.compact": { lane: session, run: async (b) => s.compact(b as unknown as SessionCompact) },
-      "session.close": { lane: session, run: (b) => s.close(b as unknown as SessionClose) },
+      "session.close": { lane: session, onArrival: (b) => s.abortDownloads(b as unknown as SessionClose), run: (b) => s.close(b as unknown as SessionClose) },
       "session.export": { lane: session, run: async (b) => [{ type: "session.exported", body: await this.mover.export(b as unknown as SessionExport) }] },
       "session.watch": { run: async (b) => s.watch(b as unknown as SessionWatch) },
       "session.context_refresh": { run: (b) => s.refreshContext(b as unknown as SessionContextRefresh) },

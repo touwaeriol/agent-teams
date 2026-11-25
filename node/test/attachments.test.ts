@@ -15,6 +15,7 @@ import {
 import { claudeContent, codexImages } from "../src/sessions/images.js";
 import { promptBlocks } from "../src/sessions/antigravity/driver.js";
 import { ToolBroker } from "../src/toolhost/broker.js";
+import { putFile } from "../src/toolhost/transfer.js";
 
 const sha = (b: Buffer | string) => createHash("sha256").update(b).digest("hex");
 const MB = 1024 * 1024;
@@ -210,6 +211,28 @@ describe("downloading attachments", () => {
     await expect(downloadAttachment(cwd, { id: "img_slow", name: "a", content_type: "x/y", size: 100 }, http, { ...opts, timeoutMs: 300 })).rejects.toThrow(/超时|HTTP 404/);
     expect(Date.now() - t0).toBeLessThan(4_000);
     expect(readdirSync(join(cwd, ATTACH_DIR))).toEqual([".gitignore"]);
+  });
+
+  it("bounds the whole download, retries and fallback included, by one timeout", async () => {
+    await setup();
+    store.hang.add("img_total");
+    const cwd = workdir();
+    const t0 = Date.now();
+    await expect(downloadAttachment(cwd, { id: "img_total", name: "a", content_type: "x/y", size: 100 }, http, { ...opts, timeoutMs: 400 })).rejects.toThrow(/下载超时（共 0 秒）|下载超时/);
+    expect(Date.now() - t0).toBeLessThan(2_000);
+    // The presigned GET used up the budget: no second URL and no legacy attempt.
+    expect(store.urlCalls).toEqual(["img_total"]);
+    expect(store.legacyCalls).toEqual([]);
+  });
+
+  it("stops when the session is closed (cancel signal)", async () => {
+    await setup();
+    store.hang.add("img_cancel");
+    const ac = new AbortController();
+    const p = downloadAttachment(workdir(), { id: "img_cancel", name: "a", content_type: "x/y", size: 100 }, http, opts, undefined, ac.signal);
+    setTimeout(() => ac.abort(), 100);
+    await expect(p).rejects.toThrow(/下载已取消/);
+    expect(store.legacyCalls).toEqual([]);
   });
 
   it("checks the free disk space first", async () => {
@@ -442,6 +465,18 @@ describe("toolhost transfers", () => {
     expect(put.headers.authorization).toBeUndefined();
     b.resolve({ session_id: "s_1", call_id: String(call.call_id), ok: true, content: [{ type: "text", text: "saved" }] });
     expect((await pending).isError).toBeUndefined();
+  });
+
+  it("putFile gives up by its deadline when the server never answers", async () => {
+    const silent = createServer((req) => req.resume());
+    await new Promise<void>((r) => silent.listen(0, "127.0.0.1", r));
+    const dir = workdir();
+    writeFileSync(join(dir, "f.bin"), "hello");
+    const t0 = Date.now();
+    await expect(putFile(`http://127.0.0.1:${(silent.address() as AddressInfo).port}/x`, join(dir, "f.bin"), 5, {}, 300)).rejects.toThrow(/timed out/);
+    expect(Date.now() - t0).toBeLessThan(2_000);
+    silent.closeAllConnections();
+    await new Promise<void>((r) => silent.close(() => r()));
   });
 
   it("write_shared_file falls back to file.chunk frames on an older console (≤ 20 MB) and reports refusals", async () => {

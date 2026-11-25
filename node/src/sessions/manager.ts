@@ -275,6 +275,10 @@ export class SessionManager implements SessionHost {
     // Downloads (up to 200 MB each, minutes) come before the runtime is started: the session may be
     // parked meanwhile (idle timeout, max_active_sessions) without losing the message.
     const fetched = await this.fetchAttachments(s, body);
+    // Closed while downloading: nothing to deliver to. Replaced by a newer session.open: deliver to that
+    // one (the downloaded copies are reused).
+    if (s.downloads.signal.aborted || s.state === "closed") return [];
+    if (this.sessions.get(s.id) !== s) return this.send_(body);
     for (let attempt = 0; ; attempt++) {
       try {
         await this.ensureRunning(s);
@@ -317,7 +321,8 @@ export class SessionManager implements SessionHost {
     this.noteAttachmentDir(s.absCwd);
     for (const ref of body.attachments) {
       try {
-        outcomes.push({ ref, saved: await downloadAttachment(s.absCwd, ref, this.d.http, this.attachmentOptions) });
+        if (s.downloads.signal.aborted) throw new Error("下载已取消（会话已关闭）");
+        outcomes.push({ ref, saved: await downloadAttachment(s.absCwd, ref, this.d.http, this.attachmentOptions, undefined, s.downloads.signal) });
       } catch (err) {
         this.d.log.warn({ session: s.id, attachment: ref.id, err: (err as Error).message }, "attachment download failed");
         outcomes.push({ ref, error: (err as Error).message });
@@ -479,10 +484,20 @@ export class SessionManager implements SessionHost {
     return applied ?? { ...currentMode(spec), applies: "next_open" as ModeApplied["applies"] };
   }
 
+  /**
+   * session.close arrived: attachment downloads of messages still being delivered to this session stop
+   * now, not after them (close waits in the session's command lane behind those session.send).
+   */
+  abortDownloads(body: SessionClose): void {
+    const s = this.sessions.get(body.session_id);
+    if (s && (body.open_gen === undefined || body.open_gen === s.gen)) s.downloads.abort();
+  }
+
   async close(body: SessionClose): Promise<Reply[]> {
     const s = this.sessions.get(body.session_id);
     const reply: Reply = { type: "session.closed", body: { session_id: body.session_id, open_gen: body.open_gen ?? s?.gen ?? 0, ...(body.reason ? { reason: body.reason } : {}) } };
     if (!s) return [reply];
+    s.downloads.abort();
     await this.stop(s, "session_closed");
     s.setState("closed", body.reason);
     this.sessions.delete(s.id);

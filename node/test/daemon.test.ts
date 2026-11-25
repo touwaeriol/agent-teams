@@ -145,14 +145,39 @@ describe("daemon with a fake console", () => {
     await h.console.waitType("session.event", (b) => b.kind === "text" && b.final === true);
     h.console.command("session.send", { session_id: "s_PARK", msg_id: "m_slow", text: "慢附件", kind: "user", attachments: [{ id: "img_slow", name: "slow.bin", content_type: "application/octet-stream", size: 9 }] });
     await called;
-    // The idle timeout (or max_active_sessions) parks the session while the file is still downloading.
-    const manager = (h.daemon as unknown as { sessions: { park(s: unknown): Promise<void>; sessions: Map<string, { driver: unknown }> } }).sessions;
+    // The idle sweep (as when the daemon parks everything idle) parks the session while the file is still downloading.
+    const manager = (h.daemon as unknown as { sessions: { parkIdle(all: boolean): Promise<void>; sessions: Map<string, { driver: unknown }> } }).sessions;
     const s = manager.sessions.get("s_PARK")!;
-    await manager.park(s);
+    await manager.parkIdle(true);
     expect(s.driver).toBeNull();
     release();
     await h.console.waitType("session.delivered", (b) => b.msg_id === "m_slow");
     expect(h.log.prompts.find((p) => p.includes("慢附件"))).toContain("img_slow-slow.bin");
+  });
+
+  it("aborts a running attachment download on session.close and delivers nothing", async () => {
+    let calledDownload!: () => void;
+    const called = new Promise<void>((r) => (calledDownload = r));
+    let aborted = false;
+    const transferFetch: typeof fetch = async (input, init) => {
+      if (String(input).endsWith("/url")) return new Response("", { status: 404 });
+      calledDownload();
+      await new Promise<void>((_, reject) => init?.signal?.addEventListener("abort", () => {
+        aborted = true;
+        reject(new Error("aborted"));
+      }));
+      throw new Error("unreachable");
+    };
+    h = await startHarness({ transferFetch });
+    await openAndRelease("s_CLOSE");
+    h.console.command("session.send", { session_id: "s_CLOSE", msg_id: "m_never", text: "不该送达", kind: "user", attachments: [{ id: "img_hang", name: "hang.bin", content_type: "application/octet-stream", size: 9 }] });
+    await called;
+    h.console.command("session.close", { session_id: "s_CLOSE", open_gen: 1, reason: "thread_done" });
+    await h.console.waitType("session.closed", (b) => b.session_id === "s_CLOSE");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(aborted).toBe(true);
+    expect(h.console.ofType("session.delivered").filter((f) => f.body.msg_id === "m_never")).toEqual([]);
+    expect(h.log.prompts.some((p) => p.includes("不该送达"))).toBe(false);
   });
 
   it("counts the PDF base64 given to a Claude conversation, persists it and resets it on a compaction", async () => {

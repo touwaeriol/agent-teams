@@ -84,15 +84,27 @@ export async function putFile(url: string, path: string, size: number, headers: 
     req.on("error", (err) => reject(err instanceof UploadError ? err : new UploadError(`upload failed: ${err.message}`)));
   });
   done.catch(() => undefined);
-  const total = setTimeout(() => req.destroy(new UploadError(`upload timed out (${Math.round(timeoutMs / 1000)} s)`)), timeoutMs);
+  const timedOut = () => new UploadError(`upload timed out (${Math.round(timeoutMs / 1000)} s)`);
+  let total: NodeJS.Timeout | undefined;
+  // Whatever the socket does (no response, no error event after destroy), the call ends by the deadline.
+  const expired = new Promise<never>((_, reject) => {
+    total = setTimeout(() => {
+      req.destroy(timedOut());
+      reject(timedOut());
+    }, timeoutMs);
+  });
+  expired.catch(() => undefined);
   try {
-    await pipeline(createReadStream(path), req).catch(async (err: Error) => {
-      req.destroy();
-      // The answer (403, 400 …) explains more than the broken pipe it caused.
-      await done;
-      throw err instanceof UploadError ? err : new UploadError(`upload failed: ${err.message}`);
-    });
-    await done;
+    await Promise.race([
+      pipeline(createReadStream(path), req).catch(async (err: Error) => {
+        req.destroy();
+        // The answer (403, 400 …) explains more than the broken pipe it caused.
+        await Promise.race([done, expired]);
+        throw err instanceof UploadError ? err : new UploadError(`upload failed: ${err.message}`);
+      }),
+      expired,
+    ]);
+    await Promise.race([done, expired]);
   } finally {
     clearTimeout(total);
   }
