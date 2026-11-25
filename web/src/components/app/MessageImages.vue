@@ -4,8 +4,8 @@
  * other file as a card (icon, name, type, size) with download and "存为共享文件". An attachment whose
  * retention ran out (410) shows "已过期" and offers nothing.
  */
-import { computed, onMounted, reactive, ref, watch } from "vue";
-import { useRoute } from "vue-router";
+import { computed, inject, onMounted, reactive, ref, watch } from "vue";
+import { routeLocationKey } from "vue-router";
 import { Download, FolderInput } from "lucide-vue-next";
 import type { AttachmentRef } from "@/api/views";
 import { attachmentState } from "@/lib/attachmentActions";
@@ -21,7 +21,8 @@ const props = withDefaults(
   defineProps<{ items: Item[] | undefined; align?: "start" | "end"; /** smaller thumbnails (quoted messages) */ small?: boolean; /** offer "存为共享文件" (default: inside a project page) */ canSave?: boolean }>(),
   { align: "end", canSave: undefined },
 );
-const route = useRoute();
+// Not useRoute(): the component also renders outside a router (tests, previews) without warnings.
+const route = inject(routeLocationKey, null);
 const saveable = computed(() => props.canSave ?? typeof route?.params?.pid === "string");
 /** Ids known to be expired: from the message, a probe, a failed thumbnail or a refused save. */
 const expired = reactive(new Set<string>());

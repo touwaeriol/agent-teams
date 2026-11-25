@@ -150,14 +150,16 @@ export async function uploadFile(file: Blob & { name?: string }, api: UploadApi,
     await fetchUrls(Array.from({ length: count }, (_, i) => i + 1));
     const etags = new Map<number, string>();
     const sendPart = async (n: number) => {
-      const slice = file.slice((n - 1) * partSize, Math.min(file.size, n * partSize));
+      const start = (n - 1) * partSize;
+      const end = Math.min(file.size, n * partSize);
+      const slice = file.slice(start, end);
       for (let attempt = 1; ; attempt++) {
         if (inner.signal.aborted) throw new UploadCancelled();
         try {
           const url = urls.get(n);
           if (!url) throw new PartError(0, `没有拿到第 ${n} 片的上传地址`);
-          etags.set(n, await put(url, slice, (l) => ((loaded[n] = l), report()), inner.signal));
-          loaded[n] = slice.size;
+          etags.set(n, await put(url, slice, (l) => ((loaded[n] = Math.min(l, end - start)), report()), inner.signal));
+          loaded[n] = end - start;
           report();
           return;
         } catch (e) {

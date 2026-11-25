@@ -45,6 +45,8 @@ const dir = ref("");
 const files = computed(() => filterShared(list.data.value?.files ?? [], q.value));
 const limits = computed(() => list.data.value?.limits ?? SHARED_LIMITS);
 const total = computed(() => list.data.value?.total_bytes ?? 0);
+/** The quota hint shows from 80 % used. */
+const nearQuota = computed(() => total.value >= limits.value.project_bytes * 0.8);
 const usedPct = computed(() => `${Math.min(100, (total.value / limits.value.project_bytes) * 100).toFixed(1)}%`);
 
 const fileInput = ref<HTMLInputElement | null>(null);
@@ -160,6 +162,10 @@ function confirmDelete() {
           文件存在平台上、不进 git，项目里的统筹、组长和成员都能用工具读写；同名文件会直接覆盖。单个文件不超过 {{ formatSize(limits.file_bytes) }}，项目合计不超过
           {{ formatSize(limits.project_bytes) }}、最多 {{ limits.project_files }} 个。
         </span>
+      </Callout>
+      <Callout v-if="nearQuota" :tone="total >= limits.project_bytes ? 'bad' : 'warn'" data-testid="shared-quota">
+        <strong class="font-semibold">项目共享文件已用 {{ formatSize(total) }} / {{ formatSize(limits.project_bytes) }}（{{ usedPct }}），还剩 {{ formatSize(Math.max(0, limits.project_bytes - total)) }}</strong>
+        <span class="block text-xs opacity-90">超过上限的上传会被拒绝（正在上传的文件也算在内）。先删掉不再需要的文件；对话里的附件不占这个额度。</span>
       </Callout>
 
       <section

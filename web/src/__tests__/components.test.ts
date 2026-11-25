@@ -87,7 +87,7 @@ describe("drafts", () => {
 });
 
 describe("attachments", () => {
-  it("uploads picked images and text files, refuses others, reports ids when done", async () => {
+  it("uploads picked files of any type, reports ids when done", async () => {
     URL.createObjectURL = vi.fn(() => "blob:x");
     URL.revokeObjectURL = vi.fn();
     let a!: ReturnType<typeof useAttachments>;
@@ -97,14 +97,14 @@ describe("attachments", () => {
     const Host = defineComponent({ setup: () => ((a = useAttachments("p1", uploader)), () => h("div")) });
     mountWith(Host);
     a.add([new File(["x"], "a.png", { type: "image/png" }), new File(["x"], "b.txt", { type: "text/plain" }), new File(["x"], "c.exe", { type: "" })]);
-    expect(a.items.value.map((x) => x.kind)).toEqual(["image", "text"]);
+    expect(a.items.value.map((x) => x.kind)).toEqual(["image", "text", "file"]);
     expect(a.items.value[1]!.preview).toBe("");
     expect(a.ids()).toBeNull();
     expect(a.uploading.value).toBe(true);
     finish({ id: "att1" });
     await flushPromises();
-    expect(a.ids()).toEqual(["att1-0", "att1-1"]);
-    expect(uploader).toHaveBeenCalledWith("p1", expect.any(File));
+    expect(a.ids()).toEqual(["att1-0", "att1-1", "att1-2"]);
+    expect(uploader).toHaveBeenCalledWith("p1", expect.any(File), expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 });
 

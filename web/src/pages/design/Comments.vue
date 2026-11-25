@@ -1,6 +1,9 @@
 <script setup lang="ts">
-/** 批注: stored and sent to the employee who published it (or the thread's lead). */
+/** 批注: stored and sent to the employee who published it (or the thread's lead), with files attached like a chat message. */
 import { computed } from "vue";
+import { useAttachments } from "@/components/app/attachments";
+import MessageImages from "@/components/app/MessageImages.vue";
+import type { AttachmentRef } from "@/api/views";
 import { deliverables as deliverableActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import { keys, useDeliverableComments } from "@/api/queries";
@@ -10,12 +13,15 @@ import { clock } from "@/lib/utils";
 
 const props = defineProps<{ item: DeliverableView; thread?: ThreadView; author: string; version?: number }>();
 const comments = useDeliverableComments(() => props.item.id);
-const add = useAction((text: string) => deliverableActions.comment(props.item.id, text, props.version), {
+const files = useAttachments(() => props.item.project_id, undefined, () => `comment:${props.item.id}`);
+const add = useAction((v: { text: string; ids: string[] }) => deliverableActions.comment(props.item.id, v.text, props.version, v.ids), {
   invalidate: () => [keys.deliverableComments(props.item.id)],
 });
 const items = computed(() => comments.data.value?.items ?? []);
 const to = computed(() => props.author || "发布的员工");
-const onSend = (text: string) => add.mutateAsync(text);
+const onSend = (text: string, ids: string[]) => add.mutateAsync({ text, ids });
+/** CommentView.attachments once the server returns them. */
+const attachmentsOf = (c: object) => (c as { attachments?: AttachmentRef[] }).attachments;
 </script>
 
 <template>
@@ -31,9 +37,10 @@ const onSend = (text: string) => add.mutateAsync(text);
         你 · {{ clock(c.created_at) }}{{ c.version ? ` · 第 ${c.version} 版` : "" }}{{ c.sent_to ? ` · 已发给 ${c.sent_to}` : " · 未转发" }}
       </span>
       <span class="whitespace-pre-wrap text-[13px] leading-[21px]">{{ c.text }}</span>
+      <MessageImages :items="attachmentsOf(c)" align="start" small />
     </div>
     <div class="mt-auto flex flex-col gap-1.5">
-      <Composer id="note" variant="inline" label="写批注" placeholder="写批注，发给做这个的员工" :busy="add.isPending.value" :on-send="onSend" />
+      <Composer id="note" variant="inline" label="写批注" placeholder="写批注，发给做这个的员工" :busy="add.isPending.value" :attachments="files" :on-send="onSend" />
       <p v-if="!thread" class="text-xs text-muted-foreground">这个交付物不属于任何讨论串，批注只会保存，不会转发。</p>
     </div>
   </aside>

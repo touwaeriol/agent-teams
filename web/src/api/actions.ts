@@ -51,8 +51,9 @@ export const sessions = {
 export const deliverables = {
   rename: (id: string, title: string) => unwrap(client.PATCH("/api/deliverables/{id}", { params: { path: { id } }, body: { title } })),
   remove: (id: string) => unwrap(client.DELETE("/api/deliverables/{id}", { params: { path: { id } } })),
-  comment: (id: string, text: string, version?: number) =>
-    unwrap(client.POST("/api/deliverables/{id}/comments", { params: { path: { id } }, body: { text, version } })),
+  /** attachments: NewCommentInputBody.attachments (ids uploaded to the project; agreed with the server, q10). */
+  comment: (id: string, text: string, version?: number, attachments: string[] = []) =>
+    unwrap(client.POST("/api/deliverables/{id}/comments", { params: { path: { id } }, body: { text, version, ...(attachments.length ? ({ attachments } as object) : {}) } })),
 };
 
 export const sharedFiles = {

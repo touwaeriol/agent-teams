@@ -57,7 +57,7 @@ export const STORAGE_FALLBACK_NOTE = "文件存储暂时不可用，已改用旧
  * The multipart direct upload through `api` (project uploads, or the project-less one of a new
  * session); when the console has no object storage, the old base64 upload for files up to 5 MB.
  */
-export function directUploader(api: (pid: string) => UploadApi = projectUploads): Uploader {
+export function directUploader(api: (pid: string) => UploadApi = projectUploads, o: { legacy?: boolean } = {}): Uploader {
   return async (pid, file, hooks = {}) => {
     try {
       const done = await uploadFile(file, api(pid), {
@@ -67,6 +67,7 @@ export function directUploader(api: (pid: string) => UploadApi = projectUploads)
       return { id: done.attachment.id };
     } catch (e) {
       if (!storageUnavailable(e)) throw e;
+      if (o.legacy === false) throw new Error("文件存储暂时不可用，现在不能上传附件");
       if (file.size > LEGACY_MAX_BYTES) throw new Error(`文件存储暂时不可用，现在只能上传 5 MB 以内的文件（这个文件 ${formatSize(file.size)}）`);
       toast.warning(STORAGE_FALLBACK_NOTE);
       const r = await projectActions.attach(pid, { name: file.name || "file", data: await fileBase64(file) });
