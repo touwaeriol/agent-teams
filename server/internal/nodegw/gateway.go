@@ -88,13 +88,15 @@ type Gateway struct {
 	takeovers     map[string]*takeoverState             // displacements by another daemon instance (takeover.go)
 	authFails     *authLimiter                          // rejected tokens per client address
 
-	// Now is the clock for the usage cache (tests); nil = time.Now.
+	// Now is the clock shared by the usage cache and the takeover alert window (tests); nil = time.Now.
 	Now func() time.Time
 	// RefreshWait overrides UsageRefreshWait and RuntimesRefreshWait (tests); 0 = default.
 	RefreshWait time.Duration
 	// AfterRegister runs in attach right after a new link is registered, before its second token
 	// check (tests: a revocation landing in that window).
 	AfterRegister func(nodeID string)
+	// StillValid replaces the token re-check (tests: a database error); nil = stillValid.
+	StillValid func(ctx context.Context, q core.DB, nodeID, tokenHash string) (bool, error)
 }
 
 // New builds the gateway. handler may be set later with SetHandler (before serving).
@@ -242,6 +244,13 @@ var errRevoked = errors.New("node token revoked before hello")
 
 // stillValid re-reads the node row (q may be a transaction holding it FOR UPDATE): the node
 // exists, still has tokenHash and its owner is active.
+func (g *Gateway) stillValid(ctx context.Context, q core.DB, nodeID, tokenHash string) (bool, error) {
+	if g.StillValid != nil {
+		return g.StillValid(ctx, q, nodeID, tokenHash)
+	}
+	return stillValid(ctx, q, nodeID, tokenHash)
+}
+
 func stillValid(ctx context.Context, q core.DB, nodeID, tokenHash string) (bool, error) {
 	var row struct {
 		TokenHash string
@@ -330,7 +339,7 @@ func (g *Gateway) attach(ctx context.Context, conn *websocket.Conn, node store.N
 	if g.AfterRegister != nil {
 		g.AfterRegister(node.ID)
 	}
-	if ok, err := stillValid(ctx, g.core.Pool, node.ID, tokenHash); err != nil || !ok {
+	if ok, err := g.stillValid(ctx, g.core.Pool, node.ID, tokenHash); err != nil || !ok {
 		g.unregister(ctx, l, old)
 		if err != nil {
 			return nil, err
@@ -371,8 +380,15 @@ func (g *Gateway) unregister(ctx context.Context, l, old *link) {
 	}
 	g.mu.Unlock()
 	if restored {
-		if ok, err := stillValid(ctx, g.core.Pool, old.node.ID, old.tokenHash); err != nil || !ok {
-			// Registered again, so its detach takes it out and reports the node offline.
+		// Registered again, so its detach takes it out and reports the node offline. A revoked
+		// token gets 4401 (the daemon waits 10 minutes); a failed check only an internal error,
+		// which the daemon treats as a dropped link and reconnects with backoff.
+		ok, err := g.stillValid(ctx, g.core.Pool, old.node.ID, old.tokenHash)
+		switch {
+		case err != nil:
+			g.log.Warn("re-check of a restored node link failed", "node_id", old.node.ID, "err", err)
+			old.close(websocket.StatusInternalError, "try again")
+		case !ok:
 			old.close(CloseUnauthorized, "token rejected")
 		}
 		return
@@ -421,7 +437,7 @@ func (g *Gateway) recordHello(ctx context.Context, nodeID, tokenHash string, hel
 			}
 			return err
 		}
-		if ok, err := stillValid(ctx, tx, nodeID, tokenHash); err != nil || !ok {
+		if ok, err := g.stillValid(ctx, tx, nodeID, tokenHash); err != nil || !ok {
 			if err != nil {
 				return err
 			}

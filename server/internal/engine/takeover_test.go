@@ -1,10 +1,12 @@
 package engine_test
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw/nodetest"
 )
 
@@ -102,5 +104,25 @@ func TestTakeoverAlertDeduplicated(t *testing.T) {
 	w.connect(node.Token, nodetest.Options{Epoch: "e-real"})
 	if a, n := takeoverCounts(t, w, node.Node.ID); a != 2 || n != 2 {
 		t.Fatalf("after the cooldown: audit %d notice %d", a, n)
+	}
+}
+
+// TestTakeoverHitsBoundedAndForgotten (#55 t52): a token holder looping through fresh epochs keeps
+// at most TakeoverThreshold displacements on record; deleting the node drops its entry.
+func TestTakeoverHitsBoundedAndForgotten(t *testing.T) {
+	w := newWorld(t, nil)
+	b := w.signUp("ops@example.com")
+	var node nodeCreated
+	b.must(201, "POST", "/api/nodes", map[string]string{"name": "n1"}, &node)
+	for i := 0; i < 6; i++ {
+		w.connect(node.Token, nodetest.Options{Epoch: fmt.Sprintf("e-%d", i)})
+	}
+	hits, tracked := w.e.Gateway.TakeoverHits(node.Node.ID)
+	if !tracked || hits != nodegw.TakeoverThreshold {
+		t.Fatalf("hits %d tracked %v, want %d", hits, tracked, nodegw.TakeoverThreshold)
+	}
+	b.must(204, "DELETE", "/api/nodes/"+node.Node.ID, nil, nil)
+	if _, tracked := w.e.Gateway.TakeoverHits(node.Node.ID); tracked {
+		t.Fatal("takeover entry kept after the node was deleted")
 	}
 }

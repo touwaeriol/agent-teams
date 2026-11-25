@@ -27,8 +27,9 @@ const (
 )
 
 type takeoverState struct {
-	hits    []time.Time // epoch-changing displacements within the window
+	hits    []time.Time // epoch-changing displacements within the window, at most TakeoverThreshold
 	alerted time.Time   // last alert (zero = never)
+	logged  time.Time   // last Info line (one per window per node)
 }
 
 // noteReplacement records that l displaced old and alerts the owner when the rule above trips.
@@ -49,15 +50,25 @@ func (g *Gateway) noteReplacement(ctx context.Context, old, l *link) {
 			kept = append(kept, t)
 		}
 	}
-	st.hits = append(kept, now)
+	kept = append(kept, now)
+	if len(kept) > TakeoverThreshold { // only the newest matter: a fast epoch-changing loop stays bounded
+		kept = append(kept[:0], kept[len(kept)-TakeoverThreshold:]...)
+	}
+	st.hits = kept
 	hits := len(st.hits)
 	alert := hits >= TakeoverThreshold && (st.alerted.IsZero() || now.Sub(st.alerted) >= TakeoverCooldown)
 	if alert {
 		st.alerted = now
 	}
+	logIt := st.logged.IsZero() || now.Sub(st.logged) >= TakeoverWindow
+	if logIt {
+		st.logged = now
+	}
 	g.mu.Unlock()
-	g.log.Info("node link displaced by another daemon instance", "node_id", l.node.ID,
-		"old_epoch", old.hello.Epoch, "new_epoch", l.hello.Epoch, "old_ip", old.addr, "new_ip", l.addr, "hits", hits)
+	if logIt {
+		g.log.Info("node link displaced by another daemon instance", "node_id", l.node.ID,
+			"old_epoch", old.hello.Epoch, "new_epoch", l.hello.Epoch, "old_ip", old.addr, "new_ip", l.addr, "hits", hits)
+	}
 	if alert {
 		g.alertTakeover(context.WithoutCancel(ctx), old, l, hits)
 	}
@@ -89,6 +100,24 @@ func (g *Gateway) alertTakeover(ctx context.Context, old, l *link, hits int) {
 		g.log.Warn("notify node takeover", "node_id", node.ID, "err", err)
 	}
 	g.log.Warn("node token used by two daemon instances", "node_id", node.ID, "hits", hits)
+}
+
+// forgetTakeovers drops a node's displacement history (its token was revoked or it was deleted).
+func (g *Gateway) forgetTakeovers(nodeID string) {
+	g.mu.Lock()
+	delete(g.takeovers, nodeID)
+	g.mu.Unlock()
+}
+
+// TakeoverHits is how many displacements the node has on record (tests).
+func (g *Gateway) TakeoverHits(nodeID string) (hits int, tracked bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	st := g.takeovers[nodeID]
+	if st == nil {
+		return 0, false
+	}
+	return len(st.hits), true
 }
 
 func orUnknown(s string) string {
