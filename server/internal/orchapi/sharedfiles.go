@@ -1,11 +1,12 @@
 package orchapi
 
 import (
+	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
+
 	"context"
 	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"mime/multipart"
 	"net/http"
 	"path"
@@ -19,7 +20,7 @@ import (
 )
 
 // maxSharedUpload is the body limit of one upload request: five files of the per-file limit.
-const maxSharedUpload = 5*sharedfiles.MaxFileBytes + 1<<20
+const maxSharedUpload = 5*sharedfiles.MaxInlineFileBytes + 1<<20
 
 // SharedFileLimits are the shared-files limits of a project.
 type SharedFileLimits struct {
@@ -68,6 +69,8 @@ type sharedPathInput struct {
 }
 
 type sharedDownloadOutput struct {
+	Status             int
+	Location           string `header:"Location"`
 	ContentType        string `header:"Content-Type"`
 	ContentDisposition string `header:"Content-Disposition"`
 	CacheControl       string `header:"Cache-Control"`
@@ -84,9 +87,13 @@ func (a *API) registerSharedFiles(api huma.API) {
 		summary("Upload files to the project's shared files (multipart: file… parts; optional dir prefix; optional path… per file, in order); a file with the same path is overwritten"),
 		func(o *huma.Operation) { o.MaxBodyBytes = maxSharedUpload }), a.uploadSharedFiles)
 	huma.Register(api, op("download-shared-file", "GET", "/api/projects/{pid}/shared-files/download", t,
-		summary("Download one shared file (always as an attachment, never rendered)"), func(o *huma.Operation) {
-			o.Responses = map[string]*huma.Response{"200": {Description: "The file", Content: map[string]*huma.MediaType{
-				"application/octet-stream": {}}}}
+		summary("Download one shared file (always as an attachment, never rendered): 302 to a presigned URL valid 5 minutes, or the bytes for files from before #58"),
+		func(o *huma.Operation) {
+			o.Responses = map[string]*huma.Response{
+				"200": {Description: "The file", Content: map[string]*huma.MediaType{"application/octet-stream": {}}},
+				"302": {Description: "Redirect to the object store", Headers: map[string]*huma.Param{
+					"Location": {Description: "Presigned URL", Schema: &huma.Schema{Type: "string"}}}},
+			}
 		}), a.downloadSharedFile)
 	huma.Register(api, op("delete-shared-file", "DELETE", "/api/projects/{pid}/shared-files", t, status(204),
 		summary("Delete one shared file")), a.deleteSharedFile)
@@ -148,8 +155,8 @@ func sharedParts(form *multipart.Form) ([]sharedPart, error) {
 		if seen[p] {
 			return nil, httpapi.Invalid("path", fmt.Sprintf("同一次上传里有两个 %s", p))
 		}
-		if h.Size > sharedfiles.MaxFileBytes {
-			return nil, sharedFail(sharedfiles.Check(sharedfiles.Usage{}, h.Size, -1))
+		if h.Size > sharedfiles.MaxInlineFileBytes {
+			return nil, sharedFail(sharedfiles.InlineTooLarge())
 		}
 		seen[p] = true
 		out[i] = sharedPart{path: p, head: h}
@@ -163,9 +170,9 @@ func readPart(h *multipart.FileHeader) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, sharedfiles.MaxFileBytes+1))
-	if err == nil && len(data) > sharedfiles.MaxFileBytes {
-		return nil, sharedFail(sharedfiles.Check(sharedfiles.Usage{}, int64(len(data)), -1))
+	data, err := io.ReadAll(io.LimitReader(f, sharedfiles.MaxInlineFileBytes+1))
+	if err == nil && len(data) > sharedfiles.MaxInlineFileBytes {
+		return nil, sharedFail(sharedfiles.InlineTooLarge())
 	}
 	return data, err
 }
@@ -187,7 +194,7 @@ func (a *API) uploadSharedFiles(ctx context.Context, in *sharedUploadInput) (*sh
 			if err != nil {
 				return err
 			}
-			f, overwritten, err := sharedfiles.Put(ctx, tx, p.ID, part.path, data, sharedfiles.Uploader{Name: sharedfiles.UserName})
+			f, overwritten, err := sharedfiles.Put(ctx, tx, a.e.Core.Blobs, p.ID, part.path, data, sharedfiles.Uploader{Name: sharedfiles.UserName})
 			if err != nil {
 				return err
 			}
@@ -218,6 +225,10 @@ func sharedFail(err error) error {
 		return httpapi.Fail(http.StatusConflict, "quota_exceeded", err.Error())
 	case errors.Is(err, sharedfiles.ErrNotFound):
 		return httpapi.Fail(http.StatusNotFound, "not_found", "没有这个共享文件")
+	case errors.Is(err, sharedfiles.ErrFailed):
+		return httpapi.Fail(http.StatusConflict, "upload_failed", "这个共享文件上传后校验没有通过，请重新上传")
+	case errors.Is(err, blobstore.ErrNotConfigured):
+		return httpapi.Fail(http.StatusServiceUnavailable, "storage_unavailable", "文件存储未配置")
 	}
 	return err
 }
@@ -244,15 +255,26 @@ func (a *API) downloadSharedFile(ctx context.Context, in *sharedPathInput) (*sha
 	if err != nil {
 		return nil, sharedFail(err)
 	}
-	f, data, err := sharedfiles.Load(ctx, a.e.Core.Pool, p.ID, sp)
+	st, err := sharedfiles.Stat(ctx, a.e.Core.Pool, p.ID, sp)
+	if err == nil && st.State == "failed" {
+		err = sharedfiles.ErrFailed
+	}
 	if err != nil {
 		return nil, sharedFail(err)
 	}
-	disp := mime.FormatMediaType("attachment", map[string]string{"filename": path.Base(f.Path)})
-	if disp == "" {
-		disp = "attachment"
+	if st.StorageKey != nil {
+		loc, err := a.presignedGet(ctx, *st.StorageKey, path.Base(st.Path), st.ContentType, true)
+		if err != nil {
+			return nil, sharedFail(err)
+		}
+		return &sharedDownloadOutput{Status: http.StatusFound, Location: loc, CacheControl: "private, no-store"}, nil
 	}
-	return &sharedDownloadOutput{ContentType: downloadType(f.ContentType), ContentDisposition: disp, CacheControl: "private, no-store",
+	f, data, err := sharedfiles.Load(ctx, a.e.Core.Pool, a.e.Core.Blobs, p.ID, sp)
+	if err != nil {
+		return nil, sharedFail(err)
+	}
+	disp := contentDisposition("attachment", path.Base(f.Path))
+	return &sharedDownloadOutput{Status: http.StatusOK, ContentType: downloadType(f.ContentType), ContentDisposition: disp, CacheControl: "private, no-store",
 		NoSniff: "nosniff", CSP: "default-src 'none'; sandbox", Body: data}, nil
 }
 

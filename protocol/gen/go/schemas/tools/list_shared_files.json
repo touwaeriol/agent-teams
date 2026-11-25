@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/tools/list_shared_files.json",
   "title": "ListSharedFilesInput",
-  "description": "List the project's shared files (path, size, type, checksum, who uploaded it and when), sorted by path, with the project's total size and limit. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 20 MB per file, 500 MB per project. Fetch one with read_shared_file, add or replace one with write_shared_file.",
+  "description": "List the project's shared files (path, size, type, checksum, who uploaded it and when), sorted by path, with the project's total size and limit. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 200 MB per file, 5 GB per project. Fetch one with read_shared_file, add or replace one with write_shared_file.",
   "x-tool": {
     "tiers": [
       "coordinator",

@@ -7,8 +7,9 @@ import ElementPlus from "element-plus";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h, nextTick, ref, type Component } from "vue";
 import { createMemoryHistory, createRouter } from "vue-router";
+import AddRepo from "@/components/app/repo/AddRepo.vue";
 import RepoList from "@/components/app/repo/RepoList.vue";
-import type { RepoRef } from "@/components/app/repo/repo";
+import { PAT_WARNING, type RepoRef } from "@/components/app/repo/repo";
 import ScheduleForm from "@/components/app/schedules/ScheduleForm.vue";
 import ScheduleRow from "@/components/app/schedules/ScheduleRow.vue";
 import { emptyDraft } from "@/components/app/schedules/schedule";
@@ -21,6 +22,7 @@ import NumberSetting from "@/pages/admin/NumberSetting.vue";
 import EnvironmentSection from "@/pages/projectSettings/EnvironmentSection.vue";
 import GeneralSection from "@/pages/projectSettings/GeneralSection.vue";
 import MemorySection from "@/pages/projectSettings/MemorySection.vue";
+import ConnectionCard from "@/pages/settings/github/ConnectionCard.vue";
 import Team from "@/pages/settings/Team.vue";
 import ModelFields from "@/pages/projectSettings/ModelFields.vue";
 import NewProject from "@/pages/NewProject.vue";
@@ -89,6 +91,30 @@ describe("RepoList", () => {
     await flushPromises();
     expect(w.get("li").text()).toBe("1gitlab.com/acme/web推送分支交付GitLab · 单独添加");
     expect(w.text()).toContain("再加一个仓库");
+  });
+});
+
+describe("PAT connection warning (#55 M4)", () => {
+  const pat = { ...connection, id: "g2", kind: "token", login: "someone", name: "someone" };
+  const repos: Route = ["GET", /\/repos$/, { items: [], next_cursor: null }];
+  it("shows the warning on a PAT connection card, not on an App one", async () => {
+    api([repos]);
+    const card = mountWith(ConnectionCard, { connection: pat });
+    await flushPromises();
+    expect(card.get("[data-pat-warning]").text()).toBe(PAT_WARNING);
+    expect(card.text()).toContain("个人令牌（PAT）");
+    const app = mountWith(ConnectionCard, { connection });
+    await flushPromises();
+    expect(app.find("[data-pat-warning]").exists()).toBe(false);
+  });
+  it("shows the warning in the repo picker while a PAT connection is the source", async () => {
+    api([["GET", /\/api\/git\/repos$/, []], repos]);
+    const w = mountWith(AddRepo, { modelValue: [], connections: [pat, connection] });
+    await flushPromises();
+    expect(w.get("[data-pat-warning]").text()).toContain("fine-grained PAT");
+    const app = mountWith(AddRepo, { modelValue: [], connections: [connection, pat] });
+    await flushPromises();
+    expect(app.find("[data-pat-warning]").exists()).toBe(false);
   });
 });
 

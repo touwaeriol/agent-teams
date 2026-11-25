@@ -78,15 +78,18 @@ describe("assist logic", () => {
     expect(moveIndex(2, 1, 3)).toBe(0);
   });
 
-  it("accepts images, PDFs and text files by kind", () => {
+  it("accepts any file up to 200 MB, 20 per message, and tells images, PDFs and text apart", () => {
     expect(attachKind({ type: "image/png", name: "a.png" })).toBe("image");
     expect(attachKind({ type: "", name: "spec.PDF" })).toBe("pdf");
     expect(attachKind({ type: "", name: "main.go" })).toBe("text");
     expect(attachKind({ type: "", name: "Makefile" })).toBe("text");
-    expect(attachKind({ type: "", name: "a.exe" })).toBeNull();
-    const { ok, problems } = pickImages([{ type: "", name: "big.md", size: 2 << 20 }, { type: "", name: "ok.md", size: 10 }], 0);
-    expect(ok.map((f) => f.name)).toEqual(["ok.md"]);
-    expect(problems).toEqual(["big.md 超过 1 MB"]);
+    expect(attachKind({ type: "", name: "a.exe" })).toBe("file");
+    const { ok, problems } = pickImages([{ type: "", name: "big.zip", size: (200 << 20) + 1 }, { type: "", name: "ok.zip", size: 200 << 20 }, { type: "", name: "x.md", size: 2 << 20 }], 0);
+    expect(ok.map((f) => f.name)).toEqual(["ok.zip", "x.md"]);
+    expect(problems).toEqual(["big.zip 超过 200 MB"]);
+    const many = pickImages(Array.from({ length: 3 }, (_, i) => ({ type: "", name: `${i}.bin`, size: 1 })), 18);
+    expect(many.ok).toHaveLength(2);
+    expect(many.problems).toEqual(["一条消息最多 20 个附件"]);
   });
 
   it("summarises /status and /context", () => {

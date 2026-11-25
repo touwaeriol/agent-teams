@@ -17,6 +17,7 @@ import WaitingCard from "../cards/WaitingCard.vue";
 import Spin from "../Spin.vue";
 import { leadReading } from "./detail";
 import DispatchMessage from "./DispatchMessage.vue";
+import ThreadDeliverables from "./ThreadDeliverables.vue";
 import TypingLine from "./TypingLine.vue";
 
 const props = defineProps<{ pid: string; thread: ThreadView; compact: boolean; session?: boolean }>();
@@ -38,6 +39,8 @@ const reading = computed(
 );
 // While the lead reads, the reading line stands in for "正在唤醒组长 / 组长正在回复"; a queued thread still says so.
 const typing = computed(() => !reading.value || props.thread.status === "queued");
+/** The thread has reported (in review) or ended: list everything it published under the chat. */
+const ended = computed(() => ["review", "done", "failed", "archived"].includes(props.thread.status));
 const dispatched = computed(() => (props.thread.dispatch && props.thread.brief.trim() ? props.thread.dispatch : null));
 </script>
 
@@ -53,6 +56,7 @@ const dispatched = computed(() => (props.thread.dispatch && props.thread.brief.t
         <Spin v-if="!typing" color="#8A877F" :size="11" />
         {{ who }}正在阅读任务…
       </p>
+      <ThreadDeliverables v-if="ended && !session" :pid="pid" :thread="thread" />
       <ReviewCard v-if="showReviewCard(thread)" :thread="thread" variant="soft" />
       <TypingLine v-if="typing" :thread="thread" :session="session" />
     </template>

@@ -12,6 +12,8 @@ export interface CommandHandler {
   /** Commands with the same lane run one after another (e.g. per session); no lane = run at once. */
   lane?: (body: Record<string, unknown>) => string | undefined;
   run: (body: Record<string, unknown>, frame: Frame) => Promise<Reply[]>;
+  /** Runs as soon as a new command arrives, before it waits for its lane (session.close aborts the downloads of a session.send ahead of it). */
+  onArrival?: (body: Record<string, unknown>) => void;
 }
 
 /** Types whose unfinished commands are re-run after a daemon restart (git jobs are idempotent). */
@@ -71,6 +73,11 @@ export class Dispatcher {
   }
 
   private enqueue(handler: CommandHandler, frame: Frame, key: string): void {
+    try {
+      handler.onArrival?.(frame.body);
+    } catch (err) {
+      this.log.warn({ type: frame.type, err: (err as Error).message }, "command arrival hook failed");
+    }
     const lane = handler.lane?.(frame.body);
     if (!lane) return void this.execute(handler, frame, key);
     const prev = this.lanes.get(lane) ?? Promise.resolve();

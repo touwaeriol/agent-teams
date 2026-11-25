@@ -1,8 +1,10 @@
-import type { ContentBlock, FileDownload, ToolCancel, ToolResult } from "../protocol.js";
+import type { ContentBlock, FileDownload, ToolCancel, ToolResult, ToolUpload } from "../protocol.js";
 import { deferred, type Deferred } from "../util/async.js";
 import { newId } from "../util/ids.js";
-import { DownloadError, writeDownload, writeSharedDownload } from "./download.js";
-import { MAX_BYTES, MAX_FILES, MAX_SHARED_BYTES, prepareSharedUpload, prepareUpload, type PreparedUpload } from "./upload.js";
+import { DownloadError, checkShared, sharedTarget, writeDownload, writeSharedDownload } from "./download.js";
+import { MAX_BYTES, MAX_CHUNKED_SHARED_BYTES, MAX_FILES, SHARED_DIR, UploadError, prepareSharedUpload, prepareUpload, resolveSharedUpload, type PreparedUpload } from "./upload.js";
+import { AttachmentError, DEFAULT_ATTACHMENT_OPTIONS, downloadAttachment, hashFile, streamDownload, type AttachmentOptions, type ConsoleHttp } from "../sessions/attachments.js";
+import { putFile, requestUpload } from "./transfer.js";
 
 export type SendFn = (type: string, body: object) => void;
 
@@ -21,6 +23,14 @@ export const UPLOAD_TOOLS = new Set(["publish_file", "write_shared_file"]);
 
 /** Tools whose result is preceded by file.download frames the daemon writes into the working directory. */
 const DOWNLOAD_TOOLS = new Set(["read_deliverable", "read_shared_file"]);
+
+/** What the broker needs for presigned transfers (attachments_v2); without it every transfer uses frames. */
+export interface BrokerDeps {
+  http?: ConsoleHttp;
+  attachments?: () => AttachmentOptions;
+  /** A .attachments folder was written in this working directory (swept for old copies). */
+  noteAttachmentDir?: (absCwd: string) => void;
+}
 
 export interface McpToolResult {
   [k: string]: unknown;
@@ -43,7 +53,7 @@ interface Pending {
 const MAX_DOWNLOAD_B64 = Math.ceil((MAX_BYTES * 4) / 3) + 4 * MAX_FILES;
 /** Most file.download chunks kept for one call. */
 const MAX_DOWNLOAD_CHUNKS = 64;
-const MAX_SHARED_B64 = Math.ceil((MAX_SHARED_BYTES * 4) / 3) + 4 * MAX_DOWNLOAD_CHUNKS;
+const MAX_SHARED_B64 = Math.ceil((MAX_CHUNKED_SHARED_BYTES * 4) / 3) + 4 * MAX_DOWNLOAD_CHUNKS;
 
 /**
  * Forwards platform tool calls to the console (protocol.md §6): tool.call (reliable,
@@ -53,24 +63,33 @@ const MAX_SHARED_B64 = Math.ceil((MAX_SHARED_BYTES * 4) / 3) + 4 * MAX_DOWNLOAD_
 export class ToolBroker {
   private readonly pending = new Map<string, Pending>();
 
-  constructor(private readonly send: SendFn) {}
+  constructor(
+    private readonly send: SendFn,
+    private readonly deps: BrokerDeps = {},
+  ) {}
+
+  private get attachmentOptions(): AttachmentOptions {
+    return this.deps.attachments?.() ?? DEFAULT_ATTACHMENT_OPTIONS;
+  }
 
   async call(req: ToolCallRequest): Promise<McpToolResult> {
+    const callId = newId("tc_");
     let upload: PreparedUpload | undefined;
+    let direct: ToolUpload | undefined;
     if (UPLOAD_TOOLS.has(req.tool)) {
       try {
-        upload =
-          req.tool === "write_shared_file"
-            ? await prepareSharedUpload(req.cwd ?? "", req.args.file, req.args.path)
-            : await prepareUpload(req.cwd ?? "", req.args.path);
+        if (req.tool === "write_shared_file") {
+          direct = await this.directSharedUpload(req, callId);
+          if (!direct) upload = await prepareSharedUpload(req.cwd ?? "", req.args.file, req.args.path);
+        } else upload = await prepareUpload(req.cwd ?? "", req.args.path);
       } catch (err) {
         return { content: [{ type: "text", text: `${req.tool}: ${(err as Error).message}` }], isError: true };
       }
     }
-    const callId = newId("tc_");
     const wait = deferred<ToolResult>();
     this.pending.set(callId, { sessionId: req.sessionId, tool: req.tool, wait, ...(req.cwd ? { cwd: req.cwd } : {}) });
     if (upload) this.sendChunks(req, upload);
+    const up = direct ?? upload?.upload;
     this.send("tool.call", {
       call_id: callId,
       session_id: req.sessionId,
@@ -78,9 +97,28 @@ export class ToolBroker {
       tool: req.tool,
       args: req.args,
       ...(req.toolUseId ? { tool_use_id: req.toolUseId } : {}),
-      ...(upload ? { upload: upload.upload } : {}),
+      ...(up ? { upload: up } : {}),
     });
     return toMcp(await wait.promise);
+  }
+
+  /**
+   * write_shared_file through storage (attachments_v2): POST /nodes/uploads for a presigned PUT, then
+   * the file is streamed there. Undefined when the console has no such endpoint (it then takes
+   * file.chunk frames, at most 20 MB); throws when the file is refused or the upload fails.
+   */
+  private async directSharedUpload(req: ToolCallRequest, callId: string): Promise<ToolUpload | undefined> {
+    const http = this.deps.http;
+    if (!http) return undefined;
+    const src = await resolveSharedUpload(req.cwd ?? "", req.args.file, req.args.path);
+    const sha256 = await hashFile(src.real);
+    const ticket = await requestUpload(http, { session_id: req.sessionId, call_id: callId, size: src.size, sha256, name: src.target, content_type: src.contentType });
+    if (ticket === "unsupported") {
+      if (src.size > MAX_CHUNKED_SHARED_BYTES) throw new UploadError(`the file is ${(src.size / 1048576).toFixed(1)} MB; this console takes at most ${MAX_CHUNKED_SHARED_BYTES / 1048576} MB per shared file until it is upgraded`);
+      return undefined;
+    }
+    await putFile(ticket.url, src.real, src.size, ticket.headers ?? {}, this.attachmentOptions.timeoutMs);
+    return { upload_id: ticket.upload_id, storage: "s3", chunks: 0, files: [{ path: src.target, size: src.size, sha256, content_type: src.contentType }] } as ToolUpload;
   }
 
   /** file.chunk frames go out (reliable, in order) before the tool.call that claims them. */
@@ -122,6 +160,10 @@ export class ToolBroker {
       else p.wait.resolve(withoutContent(body));
       return true;
     }
+    if (p.tool === "read_attachment" && body.ok && body.attachment_download) {
+      void this.saveAttachment(p, body).then((r) => p.wait.resolve(r));
+      return true;
+    }
     if (body.ok && body.download) {
       void this.saveDownload(p, body).then((r) => p.wait.resolve(r));
       return true;
@@ -151,7 +193,7 @@ export class ToolBroker {
    */
   private async saveShared(p: Pending, body: ToolResult): Promise<ToolResult> {
     try {
-      const out = await writeSharedDownload(p.cwd ?? "", body.shared_download!, p.chunks ?? new Map());
+      const out = body.shared_download!.files?.[0]?.url ? await this.fetchShared(p.cwd ?? "", body.shared_download!) : await writeSharedDownload(p.cwd ?? "", body.shared_download!, p.chunks ?? new Map());
       const path = body.shared_download!.files[0].path;
       const note =
         `Saved shared file ${path} to ${out.abs} (relative: ${out.rel}; git-ignored), ${out.size} bytes, sha256 ${out.sha256}. ` +
@@ -162,6 +204,41 @@ export class ToolBroker {
     } catch (err) {
       const msg = err instanceof DownloadError ? err.message : `could not write the file: ${(err as Error).message}`;
       return { session_id: body.session_id, call_id: body.call_id, ok: false, content: [{ type: "text", text: `read_shared_file: ${msg}` }] };
+    }
+  }
+
+  /** read_shared_file with a presigned URL (chunks 0): streamed straight into .shared/<path>. */
+  private async fetchShared(cwd: string, sd: NonNullable<ToolResult["shared_download"]>): Promise<{ abs: string; rel: string; size: number; sha256: string }> {
+    const f = checkShared(sd);
+    const t = await sharedTarget(cwd, f.path);
+    try {
+      await streamDownload({ url: f.url!, fetchFn: this.deps.http?.fetch ?? fetch, timeoutMs: this.attachmentOptions.timeoutMs, size: f.size, ...(f.sha256 ? { sha256: f.sha256 } : {}), dir: t.dir, tmpName: t.name, target: t.target });
+    } catch (err) {
+      throw new DownloadError((err as Error).message);
+    }
+    return { abs: t.target, rel: `${SHARED_DIR}/${f.path}`, size: f.size, sha256: f.sha256 || (await hashFile(t.target)) };
+  }
+
+  /**
+   * read_attachment: downloads the attachment into <cwd>/.attachments/ (presigned URL, or the legacy
+   * GET /nodes/attachments/{id} when url is null) and returns its absolute local path; the URL and
+   * whatever the console put in content never reach the employee.
+   */
+  private async saveAttachment(p: Pending, body: ToolResult): Promise<ToolResult> {
+    const ad = body.attachment_download!;
+    const fail = (msg: string): ToolResult => ({ session_id: body.session_id, call_id: body.call_id, ok: false, content: [{ type: "text", text: `read_attachment: ${msg}` }] });
+    if (!this.deps.http) return fail("this node cannot download attachments");
+    try {
+      const saved = await downloadAttachment(p.cwd ?? "", ad.attachment, this.deps.http, this.attachmentOptions, ad.url ?? null);
+      if (p.cwd) this.deps.noteAttachmentDir?.(p.cwd);
+      const a = ad.attachment;
+      const note =
+        `Saved attachment ${a.id} (${a.name}, ${a.content_type}, ${a.size} bytes) to ${saved.abs} (relative: ${saved.rel}; git-ignored)` +
+        `${saved.reused ? ", reusing the existing copy" : ""}. Read it with your file or command-line tools.`;
+      const structured = { ...(body.structured ?? {}), id: a.id, name: a.name, content_type: a.content_type, size: a.size, ...(a.sha256 ? { sha256: a.sha256 } : {}), local_path: saved.abs };
+      return { session_id: body.session_id, call_id: body.call_id, ok: true, content: [{ type: "text", text: note }], structured };
+    } catch (err) {
+      return fail(err instanceof AttachmentError ? err.message : `could not write the file: ${(err as Error).message}`);
     }
   }
 

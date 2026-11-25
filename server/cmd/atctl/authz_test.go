@@ -13,13 +13,14 @@ var (
 	publicRoutes = map[string]bool{
 		"GET /healthz": true, "GET /readyz": true, "GET /api/docs": true,
 		"POST /auth/login": true, "POST /auth/register": true, "POST /auth/logout": true,
-		"GET /install-node.sh": true, "GET /node/dist/:file": true, "GET /office/*path": true,
+		"GET /install-node.sh": true, "GET /node-docker.md": true, "GET /node/dist/:file": true, "GET /office/*path": true,
 		"GET /files/*path": true, "HEAD /files/*path": true,
 		"GET /api/git/github-app/install": true, "GET /api/git/github-app/created": true,
 		"GET /api/git/github-app/installed": true, "POST /api/git/github-app/webhook": true,
 	}
 	nodeRoutes = map[string]bool{
 		"GET /nodes/connect": true, "GET /nodes/v2/connect": true, "GET /nodes/attachments/:id": true, "GET /nodes/moves/:id": true, "PUT /nodes/moves/:id": true, "GET /nodes/ssh": true,
+		"GET /nodes/attachments/:id/url": true, "POST /nodes/uploads": true,
 	}
 	subjects = []string{httpapi.SubjectAnonymous, httpapi.SubjectNode, httpapi.SubjectUser, httpapi.SubjectAdmin}
 )

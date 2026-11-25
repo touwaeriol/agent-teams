@@ -9,6 +9,7 @@ import type { GitCredentialView } from "@/api/views";
 import Callout from "@/components/common/Callout.vue";
 import Field from "@/components/common/Field.vue";
 import FormDialog from "@/components/common/FormDialog.vue";
+import { CREDENTIAL_WARNING } from "@/lib/gitRepos";
 
 const open = defineModel<boolean>("open", { required: true });
 const props = defineProps<{ credential: GitCredentialView | null }>();
@@ -94,6 +95,7 @@ function submit() {
         </Field>
       </template>
     </template>
+    <Callout tone="warn" data-cred-warning>{{ CREDENTIAL_WARNING }}</Callout>
     <Callout v-if="problem" tone="warn">{{ problem }}</Callout>
   </FormDialog>
 </template>

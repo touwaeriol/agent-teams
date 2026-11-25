@@ -5,7 +5,7 @@
 ## 1. 连接
 
 - URL：`wss://<console>/nodes/connect`；`/nodes/v2/connect` 是同一入口的别名（两者都只接受协议 2）。
-- 认证：`Authorization: Bearer <node token>`。控制台 `sha256(token)` 查 `at_nodes.token_hash`，所有者必须存在且 `active`，否则以 **4401** 关闭（守护进程视为“令牌无效”，每 10 分钟重试一次并在日志里提示）。
+- 认证：`Authorization: Bearer <node token>`。控制台 `sha256(token)` 查 `at_nodes.token_hash`，所有者必须存在且 `active`。令牌在 WebSocket 升级**之前**校验：不通过直接回 HTTP **401**（响应体不说明原因，不会拿到 101；守护进程视为“令牌无效”，每 10 分钟重试一次并在日志里提示），数据库故障回 503。被拒的令牌按来源地址计数（地址取法同登录限速：只有来自本机/内网反代的请求才采信 `X-Forwarded-For` 的最后一项），5 分钟内超过 20 次后，该地址在窗口结束前访问所有守护进程接口（`/nodes/connect`、`/nodes/v2/connect`、`/nodes/ssh`、`/nodes/moves/*`、`/nodes/attachments/*`）都回 **429** + `Retry-After`，且不再查令牌。已连上的链路被吊销时仍以 4401 关闭。
 - 帧：WebSocket 文本帧，一帧一个 JSON 对象（UTF-8）。单帧上限 4 MiB；更大的内容（例如很长的命令输出）由发送方截断并标 `truncated: true`。启用 permessage-deflate。
 - 心跳：双方每 20 s 发 WebSocket ping；45 s 收不到任何帧则断开重连。
 - 重连：指数退避 1 s → 30 s，带 ±20% 抖动。
@@ -56,9 +56,14 @@
 守护进程上行的每条消息只要提到 `session_id` 或 `job_id`（`session.*`、`tool.call`、`tool.cancel`、`approval.request`、`approval.cancel`、`approval.ack`、`cred.request`、`git.result`、`sessions.report` 里的每一项），控制台都先核对：
 
 - 会话：`at_agent_sessions.node_id = 当前链路认证出的节点`，会话未关闭，消息里的 `open_gen`（有则）等于当前 `open_gen`，且会话所属项目的所有者 = 节点所有者。
-- 作业：`at_node_commands.node_id = 当前节点` 且该作业由控制台发出。
+- 作业：`at_node_commands.node_id = 当前节点` 且该作业由控制台发出。`cred.request {job_id}` 还要求作业仍在进行（尚未收到 `git.result`、未过期或被取代）且下发不超过 2 小时，否则回 `cred.response {ok:false, error:"unknown_job"}`：旧的 job_id 不能反复领令牌（#55 N8）。
+- 按次级 id 找对象的消息，对象也必须属于这条消息的会话（#55 N3）：`approval.cancel`/`approval.ack` 按 `approval_id` 找到的审批卡，其会话要通过上面的会话校验（消息带 `session_id` 时还必须就是它；卡不存在则静默确认）；`session.delivered` 的 `msg_id` 所在对话要属于会话所在项目（无项目的对话属于节点所有者）；`session.compacted` 的 `compact_id` 对应的任务要由该会话的员工认领、在同一项目。
 
 任何一项不符 → 丢弃该消息、回 `error{ref_id, code:'unknown_session'}`（作业为 `unknown_job`）、写 `at_audit_log {actor: node:<id>, action: 'node_message_rejected'}`；同一链路 1 分钟内超过 20 次则以 4401 关闭。这样拿到别的会话 id 的节点（从日志、界面或泄露）也无法以那个员工的身份要令牌、调工具或发审批。
+
+握手（§3）时，升级前校验过的令牌会在处理 hello 的事务里（锁住节点行）和链路登记后各复查一次：升级之后、发 hello 之前令牌被轮换、节点被删除或所有者被停用，这条连接以 4401 关闭，不会成为节点的链路（#55 N2）。
+
+令牌被"顶替"告警（#55 C2）：新链路顶掉已登记的旧链路、且两边 hello 的 `epoch` 不同（epoch 存在守护进程状态目录里，重启和断线重连不变，重装只变一次），算一次"被另一个实例顶替"。同一节点 10 分钟内满 2 次就写审计 `node_token_takeover`（带两边 epoch、来源地址、host），并给所有者推一条用户事件 `notice {kind:"node_takeover", node_id, text}`；之后 1 小时内同一节点不再重复告警。告警不断开任何链路，避免误报导致掉线。计数在进程内存里，每个节点最多保留 2 条；令牌被轮换、节点被删或所有者被停用（Disconnect）时清空。
 
 ## 3. 握手与版本协商
 
@@ -214,6 +219,7 @@
 ```
 
 - `images`（可选，最多 8 张；`first_message` 也可以带）：用户附的图片。帧里只有引用（帧上限 4 MiB，图片单张可到 5 MB）；守护进程投递前用自己的节点令牌 `GET <控制台>/nodes/attachments/<id>`（`Authorization: Bearer <节点令牌>`，只能取同一用户项目的图片）下载到 `<state>/attachments/<session_id>/`，会话关闭时删掉。Claude：用户消息的 `content` 变成 `[{type:"image", source:{type:"base64", media_type, data}}…, {type:"text", text}]`（Agent SDK 0.3.325 的 `SDKUserMessage.message` 就是 Messages API 的 `MessageParam`，支持图片块）。Codex：在 `turn/start` / `turn/steer` 的 `input` 里追加一项 `localImage`（带本机 `path`）。`media_type` 为 `application/pdf` 时 Claude 收到一个 `document` 内容块（`source` 是 base64 的 `application/pdf`），Codex 没有文档输入，文字末尾写明 PDF 存在本机哪个路径。下载失败时照样投递文字，末尾加一行说明图片没取到。
+- `attachments`（可选，最多 20 个；`first_message` 也可以带；#58）：任意类型的附件引用 `AttachmentRef {id, name, content_type, size, sha256?}`，单个 ≤ 200 MB，`content_type` 是开放字符串。只发给 `hello.features` 含 `attachments_v2` 的守护进程，发了 `attachments` 就不再发 `images`；老守护进程照旧只收 `images`（枚举和 5 MB 上限不变，老 ajv 遇到非枚举值会拒掉整帧）。守护进程真正投递时才调 `GET <控制台>/nodes/attachments/<id>/url`（节点令牌）取 15 分钟有效的下载地址（老数据返回空的 url，退回字节接口），流式落盘到 `<cwd>/.attachments/<id>-<名字>`（目录自带 `.gitignore`），正文末尾列出每个附件的 id、名字、类型、大小和本地路径；满足 runtime 门槛的图片和 PDF 同时作为内容块给（Claude：图片 base64 ≤ 5 MB，PDF 原始 ≤ 15 MB，且同一个 SDK 会话里直接给过的 PDF base64 合计 ≤ 20 MB，超过只给路径；实测 CLI 遇到单个 PDF 超过约 18.8 MB，或请求里含历史在内 PDF 合计超过约 25 MB，会静默丢弃文档。Codex：图片走 localImage。Antigravity：图片走 image 块，其他给 resource_link）。下载地址不进 AI 能看到的内容。单个文件下载有超时，下载前检查磁盘余量；下载失败只在 [附件] 块里写原因，不挡消息投递；控制台对取地址回 410（附件已过保留期）时不再重试、不退回旧接口，[附件] 块直接写“附件已过期……请让用户重新上传”。老守护进程收到的降级内容由控制台组装：≤ 5 MB 的图片和 PDF 放 `images`（单条最多 8 张，多出的在正文里写“单条消息最多 8 张图片（旧节点）”），文本附件内联（超过 60000 字节截断），其余在正文的 [附件] 块里给出 id、名字、大小和“节点守护进程版本过旧”的说明。本地副本按保留期清理，节点环境变量：`AGENT_TEAMS_ATTACHMENT_RETENTION_H`（默认 24，0 为不清理）、`AGENT_TEAMS_ATTACHMENT_RETENTION_FROM`（`last_use` 默认，或 `download`）、`AGENT_TEAMS_ATTACHMENT_TIMEOUT_S`（单个附件的总期限，含重新取地址和退回旧接口的重试，默认 600 秒）、`AGENT_TEAMS_ATTACHMENT_MIN_FREE_MB`（默认 512）。
 
 - 会话处于 `parked`：守护进程先用 `resume` 重开进程（不需要控制台再发 open），再投递。
 - 会话还没收到本 `open_gen` 的 `session.release`：消息在守护进程排队，release 后按顺序投递（park 后自动 resume 的同一 gen 不需要再 release，但 init 工具若与上次不同则当作违规上报 `session.event{kind:error, code:'protocol'}`）。
@@ -310,7 +316,7 @@
  "cwd": "projects/7a1c/threads/12/dev-2", "repos": ["projects/7a1c/threads/12/dev-2/owner__name"]}
 ```
 
-旧节点打包一个档案（gzip，内含 `manifest.json`：旧节点的 root、Claude 配置目录、`CODEX_HOME`，会话 id，每个检出的 HEAD 和快照提交）：Claude 是 `<配置目录>/projects/*/<id>.jsonl` 和旁边的 `<id>/` 目录（子代理转录、长工具结果），Codex 是 `$CODEX_HOME/sessions/**/rollout-…-<thread id>.jsonl`；`repos` 里每个是 git 仓库的检出做一个快照：临时索引 = HEAD + `git add -A`（不含忽略的文件），树作为 HEAD 之上的一个提交，`git bundle create … --not --remotes`（只带别的节点 fetch 不到的东西），临时 ref 随即删掉，旧检出不动。档案压缩后 ≤ 128 MB、解开 ≤ 512 MB。守护进程用节点令牌 `PUT <控制台>/nodes/moves/<export_id>` 上传（`X-Content-SHA256` 头 = 档案的 sha256；只有这个迁移的源节点、在导出中时能传），再回 `session.exported`。
+旧节点打包一个档案（gzip，内含 `manifest.json`：旧节点的 root、Claude 配置目录、`CODEX_HOME`，会话 id，每个检出的 HEAD 和快照提交）：Claude 是 `<配置目录>/projects/*/<id>.jsonl` 和旁边的 `<id>/` 目录（子代理转录、长工具结果），Codex 是 `$CODEX_HOME/sessions/**/rollout-…-<thread id>.jsonl`；`repos` 里每个是 git 仓库的检出做一个快照：临时索引 = HEAD + `git add -A`（不含忽略的文件），树作为 HEAD 之上的一个提交，`git bundle create … --not --remotes`（只带别的节点 fetch 不到的东西），临时 ref 随即删掉，旧检出不动。档案压缩后 ≤ 128 MB、解开 ≤ 512 MB。守护进程用节点令牌 `PUT <控制台>/nodes/moves/<export_id>` 上传（`X-Content-SHA256` 头 = 档案的 sha256；只有这个迁移的源节点、在导出中时能传。控制台读 body 之前先核对归属（否则 404）、`Content-Length`（超过 128 MB 回 413）和摘要头格式（400）；同一节点同时只读一个、全局同时最多读 2 个上传的 body，其余在读 body 之前排队等待，不拒绝），再回 `session.exported`。
 
 #### `session.exported`（守护进程 → 控制台，可靠，键：`export_id`）
 
@@ -407,6 +413,8 @@ Antigravity（`source: "antigravity_permission"`）：`tool_name` 是按 ACP 工
 守护进程只为仍在等待、且属于同一会话的 `read_deliverable` 调用保存分段（内存里，合计不超过 5 MB 的 base64），其他分段丢弃。收到 `tool.result` 后写到会话 cwd 下的 `.agent-deliverables/<deliverable_id>/v<version>/`，写之前重新校验 id 和版本、每个路径（相对、各段不以点开头、扩展名在白名单内、不重复）、分段是否到齐、合计 ≤ 5 MB、每个文件的大小和 sha256；`.agent-deliverables` 和其下目录必须是真目录，版本目录先整体删掉再写，文件以 `O_CREAT | O_EXCL | O_NOFOLLOW` 创建，顶层写 `.gitignore`（`*`）。成功时在结果文字前加一行本地绝对路径（`structured.abs_dir` 同样），失败（分段不全、校验不符、路径不合法）时把结果改成 `ok:false` 的工具失败。守护进程重启后未完成的调用按 §6.2 取消，分段随之作废；控制台对重复的 `tool.call` 只重发结果、不重发分段，这时结果按“内容不完整”失败，员工重新调用即可。只有 hello 带 `file_download` 特性的守护进程才会收到 `file.download`，否则工具直接失败并提示升级。
 
 `read_shared_file` 也用 `file.download` 下发，只是 `tool.result` 带的是 `shared_download = {download_id, chunks, files: [{path, size, sha256}]}`（恰好一个文件，`path` 是共享区路径，≤ 20 MB 所以最多 20 段），不带 `download`。守护进程为这次调用收分段（上限按 20 MB 计），校验同上，写到会话 cwd 下的 `.shared/<path>`：`.shared` 和其下目录必须是真目录，顶层写 `.gitignore`（`*`），目标文件已存在时整体替换（不跟随符号链接）。成功时把 `structured.local_path`（`.shared/<path>`）补成绝对路径写进结果文字。只有 `hello.features` 含 `shared_files` 的守护进程才会收到这种下发，否则控制台不发分段、工具直接失败并提示升级；老守护进程调用 `write_shared_file` 时不带 `upload`，同样按“需要升级”失败。
+
+有 `attachments_v2` 的守护进程（#58）：`read_shared_file` 的 `shared_download.files[0]` 带 `url` 和 `expires_at`、`chunks` 为 0、不发分段，守护进程直接 GET 并校验大小和 sha256；`write_shared_file` 先调 `POST <控制台>/nodes/uploads` 拿预签名 PUT 地址上传，`tool.call` 的 `upload` 带 `storage: "s3"`、`chunks: 0` 和那一个文件；`read_attachment` 的 `tool.result` 带 `attachment_download = {attachment, url?, expires_at?}`，守护进程下载到 `.attachments/` 后只把 `local_path` 给 AI。`url` 一律不出现在给 AI 的结果里。同一个 `call_id` 的 `tool.call` 重复到达（守护进程重连后重发）时，控制台回放存下的结果，但先给 `shared_download` / `attachment_download` 重新签名（对象没变时），免得发出已过期的地址。`write_shared_file` 的 `storage: "s3"` 由控制台在调用事务之后完成（复制、校验），所以 `tool.result` 会在 finalize 结束后才到。
 
 ### 6.5 共享文件工具
 
@@ -534,7 +542,7 @@ Antigravity（`source: "antigravity_permission"`）：`tool_name` 是按 ACP 工
 | `node.usage_refresh` | 控制台 → | `runtimes?` | 不可靠；立即采集一次订阅余量并回 `node.usage`（`runtimes` 省略 = 全部）。只在 `hello.features` 含 `usage` 时发；由 `POST /api/nodes/{id}/usage/refresh` 触发（api.md） |
 | `node.runtimes` | 守护进程 → | `runtimes`, `reason`, `in_reply_to?` | 不可靠；各运行时 CLI 的安装和登录状态（§9.2）。`runtimes` 以运行时 id 为键（`claude`、`codex` 和以后新增的运行时，开放字符串），值为 `{installed, version?, path?, auth, auth_expires_at?, expired?, checked_at, error?}`，每次都带守护进程认识的全部运行时；`reason`：`hello`/`periodic`/`fs_event`/`refresh`。只在 `hello.features` 含 `runtime_status` 时发；不带凭证 |
 | `node.runtimes_refresh` | 控制台 → | `runtimes?` | 不可靠；立即重新检测（`runtimes` 省略 = 全部）并回 `node.runtimes`（`reason:"refresh"`，`in_reply_to` = 本命令的信封 id），没有变化也回。只在 `hello.features` 含 `runtime_status` 时发；由节点页的“重新检测”触发 |
-| `log` | 守护进程 → | `level`, `msg`, `fields` | 不可靠；只发 warn 及以上 |
+| `log` | 守护进程 → | `level`, `msg`, `fields` | 不可靠；只发 warn 及以上。控制台每条连接限速（突发 200 条、之后每秒 5 条，超出的直接丢弃），`msg` 保留前 4000 字节，`fields` 超过 16 KiB 换成 `{"truncated":true,"bytes":N}`；`at_node_logs` 每个节点只留最近 2000 条、30 天内 |
 | `error` | 双向 | `ref_id`, `code`, `message` | 对某条消息的协议级错误：`bad_schema`、`unsupported`、`unknown_session`、`busy` |
 
 ### 9.1 订阅余量（`hello.features` 含 `usage`）
@@ -569,7 +577,7 @@ Antigravity（`source: "antigravity_permission"`）：`tool_name` 是按 ACP 工
 | 码 | 含义 | 守护进程行为 |
 | --- | --- | --- |
 | 1000 | 正常（控制台停机） | 重连 |
-| 4401 | 令牌无效 / 所有者停用 | 停止重连，每 10 分钟重试一次并记日志 |
+| 4401 | 令牌被吊销 / 所有者停用（已连上的链路；握手时的无效令牌改为 HTTP 401） | 停止重连，每 10 分钟重试一次并记日志 |
 | 4409 | 被同节点的新链路替换 | 若本进程才是新的则忽略；否则退出（防双开） |
 | 4426 | 需要升级 | 按 `welcome.min_daemon` 提示；若支持 `self_update` 等待 `node.upgrade` |
 | 4429 | 握手过于频繁 | 退避到 60 s |

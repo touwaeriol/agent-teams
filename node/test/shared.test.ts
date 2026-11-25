@@ -9,7 +9,7 @@ import addFormats from "ajv-formats";
 import bundle from "../../protocol/gen/bundle.schema.json" with { type: "json" };
 import { ToolBroker, UPLOAD_TOOLS } from "../src/toolhost/broker.js";
 import { DownloadError, writeSharedDownload } from "../src/toolhost/download.js";
-import { CHUNK_BYTES, defaultSharedPath, MAX_SHARED_BYTES, prepareSharedUpload, SHARED_DIR, UploadError, validSharedPath } from "../src/toolhost/upload.js";
+import { CHUNK_BYTES, defaultSharedPath, MAX_CHUNKED_SHARED_BYTES, MAX_SHARED_BYTES, prepareSharedUpload, resolveSharedUpload, SHARED_DIR, UploadError, validSharedPath } from "../src/toolhost/upload.js";
 import type { ToolSharedDownload } from "../src/protocol.js";
 import { claudeOpen, startHarness, type Harness } from "./helpers/daemon.js";
 
@@ -110,9 +110,15 @@ describe("write_shared_file upload", () => {
     await expect(prepareSharedUpload(dir, "pipe", undefined)).rejects.toThrow(/regular file/);
   });
 
-  it("enforces 20 MB per file and chunks large files", async () => {
+  it("enforces 200 MB per file (20 MB when sent as chunks) and chunks large files", async () => {
     const dir = workdir();
-    writeFileSync(join(dir, "big.bin"), Buffer.alloc(MAX_SHARED_BYTES + 1));
+    expect(MAX_SHARED_BYTES).toBe(200 * 1024 * 1024);
+    // Sparse files: the size is checked before anything is read.
+    execFileSync("truncate", ["-s", String(MAX_SHARED_BYTES + 1), join(dir, "huge.bin")]);
+    await expect(resolveSharedUpload(dir, "huge.bin", undefined)).rejects.toThrow(/limit is 200 MB/);
+    execFileSync("truncate", ["-s", String(MAX_SHARED_BYTES), join(dir, "max.bin")]);
+    expect((await resolveSharedUpload(dir, "max.bin", undefined)).size).toBe(MAX_SHARED_BYTES);
+    execFileSync("truncate", ["-s", String(MAX_CHUNKED_SHARED_BYTES + 1), join(dir, "big.bin")]);
     await expect(prepareSharedUpload(dir, "big.bin", undefined)).rejects.toThrow(/limit is 20 MB/);
     writeFileSync(join(dir, "mid.bin"), Buffer.alloc(CHUNK_BYTES * 6 + 3));
     const up = await prepareSharedUpload(dir, "mid.bin", undefined);
@@ -177,7 +183,7 @@ describe("read_shared_file download", () => {
     const missing = shared("a.txt", "hello world", 4);
     missing.chunks.delete(1);
     await expect(writeSharedDownload(dir, missing.sd, missing.chunks)).rejects.toThrow(/incomplete.*read_shared_file/);
-    const huge = shared("a.bin", Buffer.alloc(MAX_SHARED_BYTES + 1));
+    const huge = shared("a.bin", Buffer.alloc(MAX_CHUNKED_SHARED_BYTES + 1));
     await expect(writeSharedDownload(dir, huge.sd, huge.chunks)).rejects.toThrow(/size|exceed/);
     expect(existsSync(join(dir, "x"))).toBe(false);
     expect(readdirSync(dir).filter((n) => n !== ".shared")).toEqual([]);

@@ -1,8 +1,11 @@
 package store
 
 import (
+	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
+
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"gorm.io/gorm"
@@ -56,6 +59,11 @@ type NewProject struct {
 	CoordinatorModel, ThreadModel, ThreadCodexModel string
 	// Kind: '' = project; session for a 多仓库会话.
 	Kind string
+	// Attachments are ids of the user's attachments uploaded without a project (POST
+	// /api/uploads): they join the new project in its transaction (AdoptAttachments).
+	Attachments []string
+	// AttachmentTTL is their new retention (a use); 0 = 24 hours.
+	AttachmentTTL time.Duration
 }
 
 // mergePolicy is the policy a new project stores: pr unless one was chosen.
@@ -175,12 +183,69 @@ func (s *Store) CreateProject(ctx context.Context, userID string, n NewProject) 
 		if err != nil {
 			return err
 		}
-		return tx.writeRepos(ctx, id, n.Repos)
+		if err := tx.writeRepos(ctx, id, n.Repos); err != nil {
+			return err
+		}
+		return tx.adoptAttachments(ctx, userID, id, n.Attachments, n.AttachmentTTL)
 	})
 	if err != nil {
+		if errors.Is(err, ErrAttachmentExpired) || errors.Is(err, ErrAttachmentUnknown) {
+			return Project{}, err
+		}
 		return Project{}, mapErr(err)
 	}
 	return s.ProjectOf(ctx, userID, id)
+}
+
+var (
+	// ErrAttachmentExpired is an attachment given to a new project whose retention ran out.
+	ErrAttachmentExpired = errors.New("附件已过期（超过保留期没有使用，文件已删除），请重新上传")
+	// ErrAttachmentUnknown is an id given to a new project that is not one of the user's
+	// attachments uploaded without a project, finished (ready) and not yet in a project.
+	ErrAttachmentUnknown = errors.New("附件不存在、还没传完或已经用过了")
+)
+
+// adoptAttachments moves the user's attachments uploaded without a project into project id
+// (their keys stay under users/<uid>/) and restarts their retention (a use). Every id must be
+// ready, unexpired and still without a project.
+func (s *Store) adoptAttachments(ctx context.Context, userID, id string, ids []string, ttl time.Duration) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if ttl <= 0 {
+		ttl = 24 * time.Hour
+	}
+	var moved []string
+	if err := s.g(ctx).Raw(`UPDATE at_attachments SET project_id = ?,
+		expires_at = GREATEST(expires_at, now() + make_interval(secs => ?))
+		WHERE id IN ? AND user_id = ? AND project_id IS NULL AND state = 'ready' AND expires_at > now()
+		RETURNING id`, id, ttl.Seconds(), ids, userID).Scan(&moved).Error; err != nil {
+		return err
+	}
+	if len(moved) == len(dedupe(ids)) {
+		return nil
+	}
+	var expired int64
+	if err := s.g(ctx).Table("at_attachments").Where("id IN ? AND user_id = ? AND project_id IS NULL", ids, userID).
+		Where("state = 'expired' OR (state = 'ready' AND expires_at <= now())").Count(&expired).Error; err != nil {
+		return err
+	}
+	if expired > 0 {
+		return ErrAttachmentExpired
+	}
+	return ErrAttachmentUnknown
+}
+
+func dedupe(ids []string) []string {
+	seen := make(map[string]bool, len(ids))
+	out := ids[:0:0]
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // SetProjectRepos replaces a project's repositories (order = position).
@@ -233,9 +298,36 @@ func (s *Store) UpdateProject(ctx context.Context, userID, id string, changes []
 	return s.ProjectOf(ctx, userID, id)
 }
 
-// DeleteProject removes a project and (by cascade) its conversations, threads and memory.
+// DeleteProject removes a project and (by cascade) its conversations, threads and memory; its
+// objects in the object store (attachments, shared files) are queued for deletion in the same
+// transaction (#58, blobgc).
 func (s *Store) DeleteProject(ctx context.Context, userID, id string) error {
-	return Changed(s.g(ctx).Where("id = ? AND user_id = ?", id, userID).Delete(&Project{}))
+	return s.Tx(ctx, func(tx *Store) error {
+		// Queued first: the attachments under users/ (uploaded before the project existed) are
+		// found through their rows, which the cascade removes.
+		if err := queueProjectObjects(ctx, tx, []string{id}); err != nil {
+			return err
+		}
+		return Changed(tx.g(ctx).Where("id = ? AND user_id = ?", id, userID).Delete(&Project{}))
+	})
+}
+
+// queueProjectObjects queues the object-store prefix of each project for deletion (the
+// at_blob_deletions row blobgc.EnqueuePrefix writes; store cannot import blobgc), and the
+// objects of its attachments kept outside it (users/<uid>/attachments/…, uploaded before the
+// project existed). Call it before the rows go.
+func queueProjectObjects(ctx context.Context, tx *Store, ids []string) error {
+	for _, id := range ids {
+		if _, err := Exec(ctx, tx.db, `INSERT INTO at_blob_deletions (key, prefix) VALUES ($1, true)
+			ON CONFLICT (key) DO UPDATE SET prefix = true`, blobstore.ProjectPrefix(id)); err != nil {
+			return err
+		}
+		if _, err := Exec(ctx, tx.db, `INSERT INTO at_blob_deletions (key) SELECT storage_key FROM at_attachments
+			WHERE project_id = $1 AND storage_key LIKE 'users/%' ON CONFLICT (key) DO NOTHING`, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ProjectIDsUsingLayout lists projects whose office uses layoutID ("" matches the global default).

@@ -35,6 +35,8 @@ type Assignment struct {
 	Priority    int
 	// ReservedFor keeps the task for that member for ReserveFor (rework of its own work).
 	ReservedFor string
+	// Attachments go with every brief of the task (assign_task attachments, checked by the caller).
+	Attachments []core.AttachmentRef
 }
 
 // Assign validates and stores a task, then asks for a scheduling pass.
@@ -52,7 +54,7 @@ func (s *Scheduler) Assign(ctx context.Context, tx *core.Tx, a Assignment) (core
 	}
 	task, err := core.InsertTask(ctx, tx, core.NewTask{Thread: a.Thread, MainTaskID: mainID, Assignee: a.Assignee, Role: role,
 		Kind: a.Kind, Instruction: a.Instruction, DependsOn: a.DependsOn, Parent: a.Parent, Priority: a.Priority,
-		CreatedBy: a.CreatedBy})
+		CreatedBy: a.CreatedBy, Attachments: a.Attachments})
 	if err != nil {
 		return task, false, err
 	}

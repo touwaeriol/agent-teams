@@ -10,6 +10,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -27,9 +28,9 @@ const wsReadLimit = 1 << 20
 // server the session may use now are checked before the upgrade; then the WebSocket carries one
 // SSH connection (binary frames) that the gateway terminates.
 func (g *Gateway) ServeWS(w http.ResponseWriter, r *http.Request) {
-	node, err := g.nodes.Authenticate(r)
+	node, tokenHash, err := g.nodes.AuthenticateHash(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		nodegw.WriteAuthError(w, err)
 		return
 	}
 	if !g.vault.Ready() {
@@ -86,7 +87,7 @@ func (g *Gateway) ServeWS(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	nc := websocket.NetConn(cctx, ws, websocket.MessageBinary)
 	go g.pingWS(cctx, ws)
-	c := newConn(g, nc, node, x, srv.RemoteServer, gen)
+	c := newConn(g, nc, node, tokenHash, x, srv.RemoteServer, gen)
 	c.serve(cctx)
 	_ = ws.Close(websocket.StatusNormalClosure, "")
 }

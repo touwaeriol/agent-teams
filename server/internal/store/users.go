@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+
+	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 )
 
 // User is a row of at_users . Its role (admin | user) is not a
@@ -129,5 +131,19 @@ func (s *Store) TouchLogin(ctx context.Context, id string) error {
 
 // DeleteUser removes an account and (by cascade) everything it owns.
 func (s *Store) DeleteUser(ctx context.Context, id string) error {
-	return Changed(s.g(ctx).Where("id = ?", id).Delete(&User{}))
+	return s.Tx(ctx, func(tx *Store) error {
+		var projects []string
+		if err := tx.g(ctx).Table("at_projects").Where("user_id = ?", id).Pluck("id", &projects).Error; err != nil {
+			return err
+		}
+		if err := queueProjectObjects(ctx, tx, projects); err != nil {
+			return err
+		}
+		// Attachments uploaded without a project (users/<id>/…).
+		if _, err := Exec(ctx, tx.db, `INSERT INTO at_blob_deletions (key, prefix) VALUES ($1, true)
+			ON CONFLICT (key) DO UPDATE SET prefix = true`, blobstore.UserPrefix(id)); err != nil {
+			return err
+		}
+		return Changed(tx.g(ctx).Where("id = ?", id).Delete(&User{}))
+	})
 }

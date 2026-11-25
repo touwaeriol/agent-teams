@@ -1,12 +1,13 @@
 <script setup lang="ts">
 // One GitHub connection: who and when, its repositories (most recently used first, four until
-// expanded) and which project uses each; disconnect, and the CI-permission approval notice.
+// expanded) and which project uses each; disconnect, the CI-permission approval notice, and for a
+// PAT connection the warning that sessions receive the PAT itself.
 import { computed, ref } from "vue";
 import { git } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import { keys, useRepos } from "@/api/queries";
 import type { GitConnectionView } from "@/api/views";
-import { sortRepos } from "@/components/app/repo/repo";
+import { isPatConnection, PAT_WARNING, sortRepos } from "@/components/app/repo/repo";
 import Callout from "@/components/common/Callout.vue";
 import ConfirmAction from "@/components/common/ConfirmAction.vue";
 import Loading from "@/components/common/Loading.vue";
@@ -48,6 +49,7 @@ const settingsUrl = computed(() => props.connection.installation_settings_url ??
         </ConfirmAction>
       </span>
     </div>
+    <Callout v-if="isPatConnection(connection)" tone="warn" data-pat-warning>{{ PAT_WARNING }}</Callout>
     <Callout v-if="connection.needs_permission_approval" tone="warn">
       App 有新的权限（读取 CI 检查）等你在 GitHub 上批准，批准前平台看不到 CI 结果。
       <a v-if="settingsUrl" :href="settingsUrl" target="_blank" rel="noreferrer">去批准</a>

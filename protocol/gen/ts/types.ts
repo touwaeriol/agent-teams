@@ -155,6 +155,238 @@ export type QuestionId = string;
  */
 export type TaskId = string;
 /**
+ * Attachments to hand over with this message or task (ids from a message's attachment block, at most 20; duplicates are dropped). They must belong to this project. The recipient's daemon downloads them into its .attachments/ folder.
+ *
+ * @maxItems 20
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "AttachmentIds".
+ */
+export type AttachmentIds =
+  | []
+  | [AttachmentId]
+  | [AttachmentId, AttachmentId]
+  | [AttachmentId, AttachmentId, AttachmentId]
+  | [AttachmentId, AttachmentId, AttachmentId, AttachmentId]
+  | [AttachmentId, AttachmentId, AttachmentId, AttachmentId, AttachmentId]
+  | [AttachmentId, AttachmentId, AttachmentId, AttachmentId, AttachmentId, AttachmentId]
+  | [AttachmentId, AttachmentId, AttachmentId, AttachmentId, AttachmentId, AttachmentId, AttachmentId]
+  | [
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId
+    ]
+  | [
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId
+    ]
+  | [
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId
+    ]
+  | [
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId
+    ]
+  | [
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId
+    ]
+  | [
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId
+    ]
+  | [
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId
+    ]
+  | [
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId
+    ]
+  | [
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId
+    ]
+  | [
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId
+    ]
+  | [
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId
+    ]
+  | [
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId
+    ]
+  | [
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId,
+      AttachmentId
+    ];
+/**
+ * Attachment id (img_…), as listed in a message's [附件]/[Attachments] block.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "AttachmentId".
+ */
+export type AttachmentId = string;
+/**
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "TaskStatus".
  */
@@ -213,13 +445,17 @@ export type ThreadNo1 = number;
  */
 export type SharedPath1 = string;
 /**
+ * Path of a file in the project's shared files: relative, '/'-separated, 1 to 8 segments, at most 255 bytes in UTF-8 (the schema can only check 255 characters; the server's byte check is authoritative). No segment may be empty, '.', '..', start with '.' (so no hidden files and nothing under .shared or .agent-*) or start or end with a space; no backslash, control characters (C0, DEL, C1), U+2028/U+2029 or leading '/'.
+ */
+export type SharedPath2 = string;
+/**
  * Thread number inside the project (#12).
  */
 export type ThreadNo2 = number;
 /**
  * Path of a file in the project's shared files: relative, '/'-separated, 1 to 8 segments, at most 255 bytes in UTF-8 (the schema can only check 255 characters; the server's byte check is authoritative). No segment may be empty, '.', '..', start with '.' (so no hidden files and nothing under .shared or .agent-*) or start or end with a space; no backslash, control characters (C0, DEL, C1), U+2028/U+2029 or leading '/'.
  */
-export type SharedPath2 = string;
+export type SharedPath3 = string;
 
 /**
  * Every frame is one JSON object with this envelope. Receivers ignore unknown fields.
@@ -354,6 +590,29 @@ export interface ImageRef {
   media_type: "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "application/pdf";
   name?: string;
   size?: number;
+}
+/**
+ * A file attached to a message (at_attachments), any type, up to 200 MB. Sent in session.send/first_message attachments only to daemons with the attachments_v2 feature. When it delivers the message the daemon asks GET <console>/nodes/attachments/<id>/url (node token) for a short-lived download URL ({url: null} for legacy rows: fall back to GET /nodes/attachments/<id>), streams the file to <cwd>/.attachments/<id>-<name> and lists every attachment's path in the text; images and PDFs under the runtime's limits also go in as content blocks. The download URL never reaches the AI.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "AttachmentRef".
+ */
+export interface AttachmentRef {
+  id: string;
+  name: string;
+  /**
+   * MIME type as stored (open string; not an enum, unlike ImageRef.media_type).
+   */
+  content_type: string;
+  size: number;
+  /**
+   * Hex SHA-256 when the console has computed it; the daemon checks the download against it.
+   */
+  sha256?: string;
+  /**
+   * Filled by the daemon: path of the downloaded copy relative to the session's working directory (.attachments/<id>-<name>); only in structured tool results.
+   */
+  local_path?: string;
 }
 /**
  * MCP tool result content block.
@@ -788,7 +1047,7 @@ export interface Hello {
   capacity?: Capacity;
   runtimes?: Runtimes;
   /**
-   * Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), runtime_status (node.runtimes, node.runtimes_refresh), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh), session_move (session.export, session.open.import, /nodes/moves), self_update (runs under the update launcher: node.upgrade with mode, drain, rollback).
+   * Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), runtime_status (node.runtimes, node.runtimes_refresh), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh), session_move (session.export, session.open.import, /nodes/moves), self_update (runs under the update launcher: node.upgrade with mode, drain, rollback), attachments_v2 (session.send/first_message attachments with /nodes/attachments/<id>/url downloads into .attachments/, read_attachment attachment_download, read_shared_file shared_download by url, write_shared_file upload storage s3 via POST /nodes/uploads).
    */
   features?: string[];
   /**
@@ -1689,7 +1948,7 @@ export interface FirstMessage {
   msg_id: MsgId;
   text: string;
   /**
-   * Images to deliver with the text (at most 8).
+   * Images to deliver with the text (at most 8), as session.send images (daemons without attachments_v2).
    *
    * @maxItems 8
    */
@@ -1703,6 +1962,236 @@ export interface FirstMessage {
     | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef]
     | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef]
     | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef];
+  /**
+   * Attachments to deliver with the text, as session.send attachments (daemons with attachments_v2).
+   *
+   * @maxItems 20
+   */
+  attachments?:
+    | []
+    | [AttachmentRef]
+    | [AttachmentRef, AttachmentRef]
+    | [AttachmentRef, AttachmentRef, AttachmentRef]
+    | [AttachmentRef, AttachmentRef, AttachmentRef, AttachmentRef]
+    | [AttachmentRef, AttachmentRef, AttachmentRef, AttachmentRef, AttachmentRef]
+    | [AttachmentRef, AttachmentRef, AttachmentRef, AttachmentRef, AttachmentRef, AttachmentRef]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ];
   /**
    * The task anchor, as session.send anchor.
    */
@@ -2168,7 +2657,7 @@ export interface SessionSend {
   kind?: "user" | "task" | "mail" | "answer" | "system";
   interrupt_first?: boolean;
   /**
-   * Images to deliver with the text (at most 8).
+   * Images to deliver with the text (at most 8): image/png, jpeg, gif, webp or a PDF, at most 5 MB each. Kept for daemons without attachments_v2; see attachments.
    *
    * @maxItems 8
    */
@@ -2182,6 +2671,236 @@ export interface SessionSend {
     | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef]
     | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef]
     | [ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef, ImageRef];
+  /**
+   * Attachments to deliver with the text (at most 20), any type up to 200 MB each. Only sent to daemons with the attachments_v2 feature; a message carries either attachments or images, not both.
+   *
+   * @maxItems 20
+   */
+  attachments?:
+    | []
+    | [AttachmentRef]
+    | [AttachmentRef, AttachmentRef]
+    | [AttachmentRef, AttachmentRef, AttachmentRef]
+    | [AttachmentRef, AttachmentRef, AttachmentRef, AttachmentRef]
+    | [AttachmentRef, AttachmentRef, AttachmentRef, AttachmentRef, AttachmentRef]
+    | [AttachmentRef, AttachmentRef, AttachmentRef, AttachmentRef, AttachmentRef, AttachmentRef]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ]
+    | [
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef,
+        AttachmentRef
+      ];
   /**
    * The task anchor (task id, instruction, branch, hand-off notes, progress). The daemon keeps the latest one and re-injects it after the runtime compacts the session during a task; an empty string clears it.
    */
@@ -2334,6 +3053,10 @@ export interface StreamDelta {
 export interface ToolUpload {
   upload_id: UploadId;
   /**
+   * chunks (default): bytes came as file.chunk frames. s3: the daemon PUT the one file to the presigned URL from POST /nodes/uploads (upload_id is the one it returned), chunks is 0 and files has exactly that file.
+   */
+  storage?: "chunks" | "s3";
+  /**
    * Number of file.chunk frames (0 when every file is empty).
    */
   chunks: number;
@@ -2383,10 +3106,14 @@ export interface ToolCall {
   upload?: ToolUpload1;
 }
 /**
- * Files the daemon read for publish_file or write_shared_file; their bytes arrived before as file.chunk frames.
+ * Files the daemon read for publish_file or write_shared_file; their bytes arrived before as file.chunk frames, or (storage s3, write_shared_file on attachments_v2) were already PUT to the URL from POST /nodes/uploads, whose upload_id this is.
  */
 export interface ToolUpload1 {
   upload_id: UploadId;
+  /**
+   * chunks (default): bytes came as file.chunk frames. s3: the daemon PUT the one file to the presigned URL from POST /nodes/uploads (upload_id is the one it returned), chunks is 0 and files has exactly that file.
+   */
+  storage?: "chunks" | "s3";
   /**
    * Number of file.chunk frames (0 when every file is empty).
    */
@@ -2437,6 +3164,14 @@ export interface DownloadFile {
   path: string;
   size: number;
   sha256: string;
+  /**
+   * attachments_v2 shared_download: presigned GET URL of the file (the daemon downloads it directly and checks size and sha256; chunks is 0). Never shown to the AI.
+   */
+  url?: string;
+  /**
+   * When url stops working.
+   */
+  expires_at?: string;
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -2445,7 +3180,7 @@ export interface DownloadFile {
 export interface ToolSharedDownload {
   download_id: DownloadId;
   /**
-   * Number of file.download frames (0 when the file is empty; at most 20 for the 20 MB limit).
+   * Number of file.download frames (0 when the file is empty or files[0].url is set; at most 20 for the 20 MB chunked limit).
    */
   chunks: number;
   /**
@@ -2455,6 +3190,18 @@ export interface ToolSharedDownload {
    * @maxItems 1
    */
   files: [DownloadFile];
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "ToolAttachmentDownload".
+ */
+export interface ToolAttachmentDownload {
+  attachment: AttachmentRef;
+  /**
+   * Presigned GET URL, valid until expires_at. Null or absent for legacy rows: the daemon fetches GET /nodes/attachments/<id> with its node token instead.
+   */
+  url?: string | null;
+  expires_at?: string;
 }
 /**
  * Result of a tool.call; ok=false becomes an MCP isError result.
@@ -2479,6 +3226,7 @@ export interface ToolResult {
   anchor?: string;
   download?: ToolDownload1;
   shared_download?: ToolSharedDownload1;
+  attachment_download?: ToolAttachmentDownload1;
 }
 /**
  * read_deliverable: files whose bytes arrived before as file.download frames; the daemon writes them under .agent-deliverables/<deliverable_id>/v<version>/ in the session's working directory.
@@ -2498,12 +3246,12 @@ export interface ToolDownload1 {
   files: [DownloadFile, ...DownloadFile[]];
 }
 /**
- * read_shared_file: the one file whose bytes arrived before as file.download frames; the daemon writes it as .shared/<path> in the session's working directory (the folder holds its own .gitignore).
+ * read_shared_file: the one file the daemon writes as .shared/<path> in the session's working directory (the folder holds its own .gitignore). Its bytes arrived before as file.download frames, or (daemons with attachments_v2) the file entry carries a url to GET, chunks is 0 and no frames are sent.
  */
 export interface ToolSharedDownload1 {
   download_id: DownloadId;
   /**
-   * Number of file.download frames (0 when the file is empty; at most 20 for the 20 MB limit).
+   * Number of file.download frames (0 when the file is empty or files[0].url is set; at most 20 for the 20 MB chunked limit).
    */
   chunks: number;
   /**
@@ -2513,6 +3261,17 @@ export interface ToolSharedDownload1 {
    * @maxItems 1
    */
   files: [DownloadFile];
+}
+/**
+ * read_attachment: the attachment the daemon downloads to .attachments/<id>-<name> in the session's working directory (the folder holds its own .gitignore); the daemon replaces this with local_path in what the AI sees and never shows it the url.
+ */
+export interface ToolAttachmentDownload1 {
+  attachment: AttachmentRef;
+  /**
+   * Presigned GET URL, valid until expires_at. Null or absent for legacy rows: the daemon fetches GET /nodes/attachments/<id> with its node token instead.
+   */
+  url?: string | null;
+  expires_at?: string;
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -2700,6 +3459,7 @@ export interface AssignSubtaskResult {
 export interface AssignSubtaskInput {
   assignee: string;
   instruction: string;
+  attachments?: AttachmentIds;
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -2736,6 +3496,7 @@ export interface AssignTaskInput {
    * Base branch the thread uses in repo (only before the thread branch exists there; read the project context for stated bases).
    */
   base?: string;
+  attachments?: AttachmentIds;
 }
 /**
  * Send a message to every member of the thread.
@@ -2898,7 +3659,7 @@ export interface DeleteSharedFileResult {
   deleted: boolean;
 }
 /**
- * Delete one of the project's shared files for everyone (copies already fetched into working directories stay). Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 20 MB per file, 500 MB per project.
+ * Delete one of the project's shared files for everyone (copies already fetched into working directories stay). Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 200 MB per file, 5 GB per project.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "DeleteSharedFileInput".
@@ -3249,7 +4010,7 @@ export interface SharedFileInfo {
   updated_at: string;
 }
 /**
- * List the project's shared files (path, size, type, checksum, who uploaded it and when), sorted by path, with the project's total size and limit. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 20 MB per file, 500 MB per project. Fetch one with read_shared_file, add or replace one with write_shared_file.
+ * List the project's shared files (path, size, type, checksum, who uploaded it and when), sorted by path, with the project's total size and limit. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 200 MB per file, 5 GB per project. Fetch one with read_shared_file, add or replace one with write_shared_file.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "ListSharedFilesInput".
@@ -3413,6 +4174,7 @@ export interface MemoryWriteInput {
  */
 export interface MessageCoordinatorInput {
   text: string;
+  attachments?: AttachmentIds;
 }
 /**
  * Send a message to another thread's lead. As the coordinator: a finished thread is reopened, an archived one refuses. As a lead: any thread of the project except your own; a finished thread is reopened only when it is your subthread; the reply comes back as "[Message from thread #n ...]". Write only what the other lead needs; do not reply just to acknowledge. At most 20 messages an hour between two threads.
@@ -3423,6 +4185,7 @@ export interface MessageCoordinatorInput {
 export interface MessageThreadInput {
   no: ThreadNo;
   text: string;
+  attachments?: AttachmentIds;
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -3695,6 +4458,7 @@ export interface OpenSubthreadInput {
         RepoFocus,
         RepoFocus
       ];
+  attachments?: AttachmentIds;
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -4014,6 +4778,30 @@ export interface PushBranchResult {
 export interface PushBranchInput {}
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "ReadAttachmentResult".
+ */
+export interface ReadAttachmentResult {
+  id: AttachmentId;
+  name: string;
+  content_type: string;
+  size: number;
+  sha256?: string;
+  /**
+   * Where the file was written, relative to your working directory: .attachments/<id>-<name> (the daemon adds the absolute path).
+   */
+  local_path: string;
+}
+/**
+ * Download an attachment (img_… id from a message's attachment block, including ones forwarded to you) to .attachments/<id>-<name> in your working directory (the folder is git-ignored) and return that local path; the result never contains the file's content, so read it with your file tools or command-line tools. Use it when the local copy is missing (the session reopened elsewhere, or the local copy was cleaned up) or for an id someone passed you. The attachment must belong to this project; attachments are kept only for a limited time, after which it is refused as expired. An existing complete copy is reused.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "ReadAttachmentInput".
+ */
+export interface ReadAttachmentInput {
+  id: AttachmentId;
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "ReadDeliverableResult".
  */
 export interface ReadDeliverableResult {
@@ -4111,7 +4899,7 @@ export interface ReadSharedFileResult {
   local_path: string;
 }
 /**
- * Download one of the project's shared files to .shared/<path> in your working directory (the folder is git-ignored) and return that local path; the result never contains the file's content, so read it with your file tools. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. An existing local copy at the same path is overwritten. Limits: 20 MB per file, 500 MB per project. To change the shared file, edit the local copy and call write_shared_file(file=.shared/<path>).
+ * Download one of the project's shared files to .shared/<path> in your working directory (the folder is git-ignored) and return that local path; the result never contains the file's content, so read it with your file tools. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. An existing local copy at the same path is overwritten. Limits: 200 MB per file, 5 GB per project. To change the shared file, edit the local copy and call write_shared_file(file=.shared/<path>).
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "ReadSharedFileInput".
@@ -4137,6 +4925,7 @@ export interface RememberInput {
 export interface ReplyToInput {
   question_id: QuestionId;
   answer: string;
+  attachments?: AttachmentIds;
 }
 /**
  * Report progress on your task (shown in the thread activity).
@@ -4187,6 +4976,37 @@ export interface ReviewPermissionInput {
    * One sentence; shown to the user in the thread's activity and on the card.
    */
   reason: string;
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "SaveAttachmentResult".
+ */
+export interface SaveAttachmentResult {
+  id: AttachmentId;
+  path: SharedPath;
+  size: number;
+  /**
+   * Absent while the platform is still computing it.
+   */
+  sha256?: string;
+  /**
+   * True when a file with this path existed and was replaced.
+   */
+  overwritten: boolean;
+}
+/**
+ * Save an attachment (img_… id from a message's attachment block) as one of the project's shared files at path, so every session and user of the project can find it later with list_shared_files/read_shared_file. The platform copies it without it passing through your working directory. Refused when a shared file already has this path unless overwrite is true. Same rules as write_shared_file: no secrets; limits 200 MB per file, 5 GB per project.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "SaveAttachmentInput".
+ */
+export interface SaveAttachmentInput {
+  id: AttachmentId;
+  path: SharedPath2;
+  /**
+   * Replace an existing shared file with this path.
+   */
+  overwrite?: boolean;
 }
 /**
  * Cancel one of the schedules you set (it no longer fires; the user still sees it as cancelled for a while).
@@ -4301,6 +5121,7 @@ export interface ScheduleUpdateInput {
 export interface SendMessageInput {
   to: string;
   text: string;
+  attachments?: AttachmentIds;
 }
 /**
  * Set your speech-bubble text in the office (one short sentence on what you are doing). Call it when you switch work; it does not change your state or position and expires after 10 minutes.
@@ -4391,7 +5212,7 @@ export interface WriteSharedFileResult {
   overwritten: boolean;
 }
 /**
- * Upload one file from your working directory to the project's shared files (store data, samples, exports other sessions or users need; not deliverables, use publish_file for those). Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 20 MB per file, 500 MB per project.
+ * Upload one file from your working directory to the project's shared files (store data, samples, exports other sessions or users need; not deliverables, use publish_file for those). Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 200 MB per file, 5 GB per project.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "WriteSharedFileInput".
@@ -4401,5 +5222,5 @@ export interface WriteSharedFileInput {
    * A single file inside your working directory, relative to it (directories are refused).
    */
   file: string;
-  path?: SharedPath2;
+  path?: SharedPath3;
 }

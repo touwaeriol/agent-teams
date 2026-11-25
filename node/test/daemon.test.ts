@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Query } from "@anthropic-ai/claude-agent-sdk";
@@ -97,6 +97,185 @@ describe("daemon with a fake console", () => {
     h.console.command("session.send", { session_id: "s_IMG", msg_id: "m_i2", text: "还有这张", kind: "user", images: [{ id: "img_missing", media_type: "image/png" }] });
     await h.console.waitType("session.delivered", (b) => b.msg_id === "m_i2");
     expect(h.log.prompts.find((p) => p.startsWith("还有这张"))).toContain("附带的图片下载失败");
+  });
+
+  it("downloads session.send attachments into .attachments/ and lists them, advertising attachments_v2", async () => {
+    h = await startHarness();
+    expect(h.console.ofType("hello")[0]!.body.features).toContain("attachments_v2");
+    // The fake console has no /url endpoint: the daemon falls back to GET /nodes/attachments/{id}.
+    h.console.images.set("img_v2a", Buffer.from("\x89PNG\r\n\x1a\nfake", "binary"));
+    h.console.images.set("img_v2b", Buffer.from("PK zip"));
+    await openAndRelease("s_ATT");
+    h.console.command("session.send", {
+      session_id: "s_ATT", msg_id: "m_a1", text: "看附件", kind: "user",
+      attachments: [
+        { id: "img_v2a", name: "a.png", content_type: "image/png", size: 12 },
+        { id: "img_v2b", name: "数据.zip", content_type: "application/zip", size: 6 },
+        { id: "img_v2c", name: "gone.pdf", content_type: "application/pdf", size: 10 },
+      ],
+    });
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_a1");
+    const prompt = h.log.prompts.find((p) => p.includes("看附件"))!;
+    expect(prompt.startsWith("[image image/png 12B] 看附件")).toBe(true);
+    const cwd = join(h.opts.root, "projects/p1/threads/12/s_ATT");
+    expect(prompt).toContain(`img_v2a a.png（image/png，12 B） → ${join(cwd, ".attachments", "img_v2a-a.png")}（已作为图片附上）`);
+    expect(prompt).toContain(`${join(cwd, ".attachments", "img_v2b-数据.zip")}（只给路径`);
+    expect(prompt).toMatch(/img_v2c gone\.pdf.*下载失败/);
+    expect(readFileSync(join(cwd, ".attachments", "img_v2b-数据.zip"), "utf8")).toBe("PK zip");
+    expect(JSON.parse(readFileSync(join(h.opts.stateDir, "attachment-dirs.json"), "utf8"))).toEqual([join(cwd, ".attachments")]);
+  });
+
+  it("delivers a message whose attachment download outlasts the session's process (parked meanwhile)", async () => {
+    let calledDownload!: () => void;
+    const called = new Promise<void>((r) => (calledDownload = r));
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const transferFetch: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/url")) return new Response("", { status: 404 });
+      calledDownload();
+      await gate;
+      return fetch(input, init);
+    };
+    h = await startHarness({ transferFetch });
+    h.console.images.set("img_slow", Buffer.from("slow file"));
+    await openAndRelease("s_PARK");
+    h.console.command("session.send", { session_id: "s_PARK", msg_id: "m_first", text: "hi" });
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_first");
+    await h.console.waitType("session.event", (b) => b.kind === "text" && b.final === true);
+    h.console.command("session.send", { session_id: "s_PARK", msg_id: "m_slow", text: "慢附件", kind: "user", attachments: [{ id: "img_slow", name: "slow.bin", content_type: "application/octet-stream", size: 9 }] });
+    await called;
+    // The idle sweep (as when the daemon parks everything idle) parks the session while the file is still downloading.
+    const manager = (h.daemon as unknown as { sessions: { parkIdle(all: boolean): Promise<void>; sessions: Map<string, { driver: unknown }> } }).sessions;
+    const s = manager.sessions.get("s_PARK")!;
+    await manager.parkIdle(true);
+    expect(s.driver).toBeNull();
+    release();
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_slow");
+    expect(h.log.prompts.find((p) => p.includes("慢附件"))).toContain("img_slow-slow.bin");
+  });
+
+  it("aborts a running attachment download on session.close and delivers nothing", async () => {
+    let calledDownload!: () => void;
+    const called = new Promise<void>((r) => (calledDownload = r));
+    let aborted = false;
+    const transferFetch: typeof fetch = async (input, init) => {
+      if (String(input).endsWith("/url")) return new Response("", { status: 404 });
+      calledDownload();
+      await new Promise<void>((_, reject) => init?.signal?.addEventListener("abort", () => {
+        aborted = true;
+        reject(new Error("aborted"));
+      }));
+      throw new Error("unreachable");
+    };
+    h = await startHarness({ transferFetch });
+    await openAndRelease("s_CLOSE");
+    h.console.command("session.send", { session_id: "s_CLOSE", msg_id: "m_never", text: "不该送达", kind: "user", attachments: [{ id: "img_hang", name: "hang.bin", content_type: "application/octet-stream", size: 9 }] });
+    await called;
+    h.console.command("session.close", { session_id: "s_CLOSE", open_gen: 1, reason: "thread_done" });
+    await h.console.waitType("session.closed", (b) => b.session_id === "s_CLOSE");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(aborted).toBe(true);
+    expect(h.console.ofType("session.delivered").filter((f) => f.body.msg_id === "m_never")).toEqual([]);
+    expect(h.log.prompts.some((p) => p.includes("不该送达"))).toBe(false);
+  });
+
+  /** A transfer fetch whose attachment downloads wait for release() ("/url" answers 404: legacy endpoint). */
+  function gatedFetch() {
+    let calledDownload!: () => void;
+    const called = new Promise<void>((r) => (calledDownload = r));
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const transferFetch: typeof fetch = async (input, init) => {
+      if (String(input).endsWith("/url")) return new Response("", { status: 404 });
+      calledDownload();
+      await gate;
+      return fetch(input, init);
+    };
+    return { transferFetch, called, release };
+  }
+
+  it("keeps the order when the first_message's attachment downloads slowly and a session.send follows", async () => {
+    const g = gatedFetch();
+    h = await startHarness({ transferFetch: g.transferFetch });
+    h.console.images.set("img_brief", Buffer.from("brief file"));
+    await openAndRelease("s_ORD", { first_message: { msg_id: "m_brief", text: "简报", attachments: [{ id: "img_brief", name: "brief.bin", content_type: "application/octet-stream", size: 10 }] } });
+    await g.called;
+    h.console.command("session.send", { session_id: "s_ORD", msg_id: "m_after", text: "后一条" });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(h.console.ofType("session.delivered").map((f) => f.body.msg_id)).toEqual([]);
+    g.release();
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_after");
+    expect(h.console.ofType("session.delivered").map((f) => f.body.msg_id)).toEqual(["m_brief", "m_after"]);
+    const order = h.log.prompts.filter((p) => p.includes("简报") || p.includes("后一条"));
+    expect(order[0]).toContain("简报");
+    expect(order[1]).toBe("后一条");
+  });
+
+  it("keeps first_message, held messages and a later session.send in order while the brief downloads", async () => {
+    const g = gatedFetch();
+    h = await startHarness({ transferFetch: g.transferFetch });
+    h.console.images.set("img_b2", Buffer.from("brief file"));
+    h.console.command("session.open", claudeOpen("s_ORD2", 1, { first_message: { msg_id: "m_b", text: "简报二", attachments: [{ id: "img_b2", name: "b.bin", content_type: "application/octet-stream", size: 10 }] } }));
+    await h.console.waitType("session.opened", (b) => b.session_id === "s_ORD2");
+    h.console.command("session.send", { session_id: "s_ORD2", msg_id: "m_h1", text: "积压一" });
+    h.console.command("session.send", { session_id: "s_ORD2", msg_id: "m_h2", text: "积压二" });
+    h.console.command("session.release", { session_id: "s_ORD2", open_gen: 1 });
+    await g.called;
+    h.console.command("session.send", { session_id: "s_ORD2", msg_id: "m_s", text: "后来的" });
+    await new Promise((r) => setTimeout(r, 300));
+    g.release();
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_s");
+    expect(h.console.ofType("session.delivered").map((f) => f.body.msg_id)).toEqual(["m_b", "m_h1", "m_h2", "m_s"]);
+  });
+
+  it("never rejects delivering a release queue, even for a session that is gone", async () => {
+    h = await startHarness();
+    const manager = (h.daemon as unknown as { sessions: { deliverQueued(s: unknown, q: unknown[]): Promise<void> } }).sessions;
+    await expect(manager.deliverQueued({ id: "s_gone" }, [{ session_id: "s_gone", msg_id: "m_x", text: "x" }])).resolves.toBeUndefined();
+  });
+
+  it("does not start a runtime for a session object replaced by a newer open while it downloaded", async () => {
+    const g = gatedFetch();
+    h = await startHarness({ transferFetch: g.transferFetch });
+    h.console.images.set("img_old", Buffer.from("old brief"));
+    await openAndRelease("s_REP", { first_message: { msg_id: "m_old", text: "旧简报", attachments: [{ id: "img_old", name: "old.bin", content_type: "application/octet-stream", size: 9 }] } });
+    await g.called;
+    const startsBefore = h.log.options.length;
+    h.console.command("session.open", claudeOpen("s_REP", 2));
+    await h.console.waitType("session.opened", (b) => b.session_id === "s_REP" && b.open_gen === 2);
+    h.console.command("session.release", { session_id: "s_REP", open_gen: 2 });
+    g.release();
+    await new Promise((r) => setTimeout(r, 500));
+    // Only gen 2 was started after the gen-1 download; the gen-1 brief was not pushed into it.
+    expect(h.log.options.length).toBe(startsBefore + 1);
+    expect(h.log.prompts.some((p) => p.includes("旧简报"))).toBe(false);
+    expect(h.console.ofType("session.delivered").filter((f) => f.body.msg_id === "m_old")).toEqual([]);
+  });
+
+  it("counts the PDF base64 given to a Claude conversation, persists it and resets it on a compaction", async () => {
+    h = await startHarness();
+    const pdf = Buffer.alloc(6 * 1024 * 1024, 1);
+    for (const id of ["img_pa", "img_pb", "img_pc"]) h.console.images.set(id, pdf);
+    await openAndRelease("s_PDF");
+    const att = (id: string) => ({ id, name: `${id}.pdf`, content_type: "application/pdf", size: pdf.length });
+    const record = () => JSON.parse(readFileSync(join(h.opts.stateDir, "sessions", "s_PDF.json"), "utf8")) as { pdf_budget?: { used: number } };
+    h.console.command("session.send", { session_id: "s_PDF", msg_id: "m_p1", text: "two pdfs", kind: "user", attachments: [att("img_pa"), att("img_pb")] });
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_p1");
+    expect(h.log.prompts.find((p) => p.includes("two pdfs"))!.match(/\[document application\/pdf/g)?.length).toBe(2);
+    expect(record().pdf_budget?.used).toBe(2 * Math.ceil(pdf.length / 3) * 4);
+    h.console.command("session.send", { session_id: "s_PDF", msg_id: "m_p2", text: "third pdf", kind: "user", attachments: [att("img_pc")] });
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_p2");
+    const third = h.log.prompts.find((p) => p.includes("third pdf"))!;
+    expect(third).not.toContain("[document");
+    expect(third).toContain("未直接附上（超出 Claude 文档上限）");
+    h.console.command("session.send", { session_id: "s_PDF", msg_id: "m_p3", text: "autocompact" });
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_p3");
+    await h.console.waitType("session.event", (b) => b.kind === "text" && b.final === true && String(b.text).includes("autocompact"));
+    expect(record().pdf_budget?.used).toBe(0);
+    h.console.command("session.send", { session_id: "s_PDF", msg_id: "m_p4", text: "again", kind: "user", attachments: [att("img_pc")] });
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_p4");
+    expect(h.log.prompts.find((p) => p.includes("again"))).toContain("[document application/pdf");
   });
 
   it("forwards platform tool calls as tool.call and returns tool.result", async () => {

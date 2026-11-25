@@ -23,6 +23,9 @@ import (
 //go:embed install-node.sh
 var installScript string
 
+//go:embed node-docker.md
+var nodeDockerGuide string
+
 var (
 	distFile    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
 	distVersion = regexp.MustCompile(`^agent-teams-node-([0-9][0-9A-Za-z.+-]*)\.tgz$`)
@@ -31,12 +34,13 @@ var (
 )
 
 // reservedPrefixes never fall back to the web app.
-var reservedPrefixes = []string{"api", "auth", "nodes", "node", "mcp", "office", "install-node.sh", "healthz", "readyz"}
+var reservedPrefixes = []string{"api", "auth", "nodes", "node", "mcp", "office", "install-node.sh", "node-docker.md", "healthz", "readyz"}
 
 // mountPublic adds the routes that need no session, and the web app for everything else.
 func (s *Server) mountPublic(e *gin.Engine) {
 	r := e.Group("", s.authorize)
 	r.GET("/install-node.sh", gin.WrapF(s.installNode))
+	r.GET("/node-docker.md", gin.WrapF(s.nodeDockerDoc))
 	r.GET("/node/dist/:file", s.nodeDist)
 	r.GET("/office/*path", s.serveOfficeFile)
 	e.NoRoute(s.fallback)
@@ -54,6 +58,15 @@ func (s *Server) installNode(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = io.WriteString(w, script)
+}
+
+// nodeDockerDoc is the public guide to running a node in Docker / Compose, in Markdown so it can be
+// read in a browser or handed to an AI assistant as is.
+func (s *Server) nodeDockerDoc(w http.ResponseWriter, _ *http.Request) {
+	doc := strings.NewReplacer("__CONSOLE__", s.cfg.PublicURL, "__IMAGE__", s.cfg.NodeImage).Replace(nodeDockerGuide)
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = io.WriteString(w, doc)
 }
 
 // renderInstallScript fills in the console URL and the release (validated values only).

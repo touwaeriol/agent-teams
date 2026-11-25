@@ -29,7 +29,12 @@ type team struct {
 
 func startTeam(t *testing.T) *team {
 	t.Helper()
-	w := newWorld(t, nil)
+	return teamIn(t, newWorld(t, nil))
+}
+
+// teamIn is startTeam on a world built by the caller.
+func teamIn(t *testing.T, w *world) *team {
+	t.Helper()
 	tm := &team{w: w, b: w.signUp("team@example.com")}
 	var node nodeCreated
 	tm.b.must(201, "POST", "/api/nodes", map[string]string{"name": "fake"}, &node)

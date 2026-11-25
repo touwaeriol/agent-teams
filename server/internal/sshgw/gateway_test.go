@@ -14,6 +14,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
+	"github.com/touwaeriol/agent-teams/server/internal/auth"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/sshdial"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -660,4 +661,63 @@ func TestGatewayChannelCapAndAuditAtStart(t *testing.T) {
 	} else {
 		_ = sess.Close()
 	}
+}
+
+// TestGatewayCutsConnectionsOfRevokedNodeToken (#55 L13): a connection outlives neither a rotated
+// node token nor a disabled owner. nodegw.Disconnect (what rotation, node deletion and cut-off
+// call) sends the ssh:revoke hint, so it is cut now; without the hint the periodic check, which
+// re-reads the token the connection was opened with, cuts it too.
+func TestGatewayCutsConnectionsOfRevokedNodeToken(t *testing.T) {
+	open := func(f *fixture) *ssh.Client {
+		t.Helper()
+		dev := f.session("dev-1", "member", "dev", `{}`)
+		client, _, err := f.connect(dev, "prod", "prod", f.identity(dev))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return client
+	}
+	t.Run("rotated token, hint from Disconnect", func(t *testing.T) {
+		f := newFixture(t)
+		client := open(f)
+		if err := f.s.SetNodeToken(f.ctx, f.user, f.node.ID, auth.HashToken("rotated-"+store.NewID("x"))); err != nil {
+			t.Fatal(err)
+		}
+		f.nodes.Disconnect(f.ctx, f.node.ID, "token_rotated") // no periodic check runs (Recheck: 1 h)
+		waitClosed(t, client)
+		f.waitAudit(store.SSHAuditDisconnect, "节点令牌已失效")
+		// The old token opens nothing new either.
+		if _, status, _ := f.dialWS(f.session("dev-2", "member", "dev", `{}`), 1, "prod", f.token); status != http.StatusUnauthorized {
+			t.Fatalf("old token after rotation: %d", status)
+		}
+	})
+	t.Run("rotated token, periodic check", func(t *testing.T) {
+		f := newFixture(t)
+		client := open(f)
+		if err := f.s.SetNodeToken(f.ctx, f.user, f.node.ID, auth.HashToken("rotated-"+store.NewID("x"))); err != nil {
+			t.Fatal(err)
+		}
+		f.g.RecheckAll(f.ctx)
+		waitClosed(t, client)
+		f.waitAudit(store.SSHAuditDisconnect, "节点令牌已失效")
+	})
+	t.Run("owner disabled", func(t *testing.T) {
+		f := newFixture(t)
+		client := open(f)
+		f.exec(`UPDATE at_users SET active = false WHERE id = $1`, f.user)
+		f.nodes.Disconnect(f.ctx, f.node.ID, "user_cut_off")
+		waitClosed(t, client)
+		f.waitAudit(store.SSHAuditDisconnect, "节点令牌已失效")
+	})
+	t.Run("unchanged token keeps the connection", func(t *testing.T) {
+		f := newFixture(t)
+		client := open(f)
+		f.g.RecheckAll(f.ctx)
+		time.Sleep(300 * time.Millisecond) // a cut would run in the background
+		sess, err := client.NewSession()
+		if err != nil {
+			t.Fatalf("connection cut with a valid token: %v", err)
+		}
+		_ = sess.Close()
+	})
 }

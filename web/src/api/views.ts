@@ -375,6 +375,8 @@ export interface AttachmentRef {
   name: string;
   content_type: string;
   size: number;
+  /** Set when the attachment's retention ran out (its bytes are gone; the API answers 410). */
+  expired?: boolean;
 }
 
 export type AttachmentView = S["AttachmentView"];
@@ -458,6 +460,8 @@ export interface DeliverableComment {
   text: string;
   sent_to: string;
   created_at: string;
+  /** Files sent with the comment (expired ones carry expired). */
+  attachments?: AttachmentRef[] | null;
 }
 
 export interface MergeEntryView {

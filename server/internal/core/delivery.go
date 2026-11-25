@@ -47,6 +47,8 @@ type DeliverableFilter struct {
 	// NoImages leaves out hosted lone images (render "image"): screenshots are not deliverables
 	// any more, the ones published before stay stored but are not listed to agents.
 	NoImages bool
+	// IDs keeps only these deliverables (still within the project); empty means no id filter.
+	IDs []string
 }
 
 // notImageDeliverable (SQL on alias d) leaves out hosted lone images: screenshots stopped being
@@ -70,6 +72,9 @@ func Deliverables(ctx context.Context, q DB, projectID string, f DeliverableFilt
 	}
 	if f.NoImages {
 		g = g.Where(notImageDeliverable)
+	}
+	if len(f.IDs) > 0 {
+		g = g.Where("d.id IN ?", f.IDs)
 	}
 	return find[Deliverable](g.Order("d.id DESC").Limit(f.Limit))
 }

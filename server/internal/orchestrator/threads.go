@@ -48,6 +48,9 @@ type ThreadRequest struct {
 	SoloMode, SoloEffort string
 	// Branch overrides the thread branch name ("" = thread/<no>-<slug>).
 	Branch string
+	// Attachments are attachment ids of the project going with a session's first message
+	// (Solo only; checked by the caller: ready, of the project).
+	Attachments []string
 }
 
 // OpenThread creates a thread (queued), its employees, then starts queued threads within the limit.
@@ -76,7 +79,17 @@ func (o *Orchestrator) OpenThreadTx(ctx context.Context, tx *core.Tx, req Thread
 	if err != nil {
 		return core.Thread{}, err
 	}
-	t, err := core.CreateThread(ctx, tx, core.NewThread{ProjectID: p.ID, UserID: p.UserID, Title: req.Title,
+	var brief []core.AttachmentRef
+	if req.Solo != nil && len(req.Attachments) > 0 {
+		list, err := core.UseAttachments(ctx, tx, p.ID, req.Attachments, o.core.AttachmentTTL)
+		if err != nil {
+			return core.Thread{}, err
+		}
+		for _, a := range list {
+			brief = append(brief, a.Ref())
+		}
+	}
+	t, err := core.CreateThread(ctx, tx, core.NewThread{BriefAttachments: brief, ProjectID: p.ID, UserID: p.UserID, Title: req.Title,
 		Brief: req.Brief, AutoApprove: p.AutoApprove, OpenedBy: req.OpenedBy, Roles: roles, OnlyRoles: onlyRoles(req),
 		SourceMessageID: req.SourceMessageID, ForwardedBrief: req.ForwardedBrief, ParentID: req.ParentID, Branch: req.Branch})
 	if err != nil {
@@ -285,7 +298,28 @@ func (o *Orchestrator) start(ctx context.Context, t core.Thread) error {
 		if err != nil {
 			return err
 		}
-		_, err = o.Deliver(ctx, tx, lead, Delivery{Text: briefText(cur, p, src), Kind: "user", Priority: "next", Images: files})
+		// Starting the thread is a use of the brief's attachments (retention restarts).
+		if err := core.TouchAttachments(ctx, tx, cur.ProjectID, refIDs(files), o.core.AttachmentTTL); err != nil {
+			return err
+		}
+		// The text files open_subthread gave are inlined now: the stored brief keeps the lead's words.
+		given, err := briefGiven(ctx, tx, cur)
+		if err != nil {
+			return err
+		}
+		if cur.Brief, _, err = o.inlineTexts(ctx, tx, core.Conversation{ProjectID: &cur.ProjectID}, cur.Brief, given); err != nil {
+			return err
+		}
+		if src != nil {
+			// Inline the source message's small text files into the quoted message, as a normal
+			// post or a forward would, so the lead sees them (they also travel as files).
+			quoted := *src
+			if quoted.Content, _, err = o.inlineTexts(ctx, tx, core.Conversation{ProjectID: &cur.ProjectID}, src.Content, core.AttachmentsOf(*src)); err != nil {
+				return err
+			}
+			src = &quoted
+		}
+		_, err = o.Deliver(ctx, tx, lead, Delivery{Text: briefText(cur, p, src), Kind: "user", Priority: "next", Attachments: files})
 		return err
 	})
 }

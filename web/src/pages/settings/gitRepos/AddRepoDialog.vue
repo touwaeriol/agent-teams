@@ -13,7 +13,7 @@ import CopyBlock from "@/components/common/CopyBlock.vue";
 import Field from "@/components/common/Field.vue";
 import FormDialog from "@/components/common/FormDialog.vue";
 import Spinner from "@/components/common/Spinner.vue";
-import { credentialsFor, parseRepoURL, PROVIDER_LABEL, repoTitle } from "@/lib/gitRepos";
+import { CREDENTIAL_WARNING, credentialsFor, parseRepoURL, PROVIDER_LABEL, repoTitle } from "@/lib/gitRepos";
 import TestResult from "./TestResult.vue";
 
 type Auth = "https_token" | "ssh_key" | "public";
@@ -130,7 +130,7 @@ function submit() {
   <FormDialog
     v-model:open="open"
     :title="editing ? `编辑仓库 ${repoTitle(editing)}` : '添加仓库'"
-    description="凭据加密保存在平台上。员工用到时平台把它交给节点，只留在内存里，只有这个项目员工会话里的 git 能用，不写到磁盘或配置文件。保存后凭据不能再查看，只能替换。"
+    description="凭据在控制面加密保存，运行本项目会话时下发给节点上的 git 使用（见下方提示）。保存后凭据不能再查看，只能替换。"
     :submit-label="editing ? '保存' : '添加'"
     :busy="save.isPending.value"
     width="38rem"
@@ -158,6 +158,7 @@ function submit() {
           <el-option value="new" :label="editing ? '新建凭据（请到下方“凭据”里添加后再选）' : '新建凭据…'" :disabled="!!editing" />
         </el-select>
       </Field>
+      <Callout tone="warn" data-cred-warning>{{ CREDENTIAL_WARNING }}</Callout>
       <div v-if="creating && !editing" class="flex flex-col gap-4 rounded-xl border bg-well/40 p-4">
         <Field v-slot="{ id }" label="凭据名称（可选）" hint="不填就用主机名">
           <el-input :id="id" v-model="credName" :placeholder="auth === 'ssh_key' ? 'deploy 部署密钥' : 'GitLab 个人令牌'" />

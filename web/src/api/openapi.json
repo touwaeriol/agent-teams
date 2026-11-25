@@ -432,10 +432,16 @@
           "content_type": {
             "type": "string"
           },
+          "expired": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           },
           "name": {
+            "type": "string"
+          },
+          "sha256": {
             "type": "string"
           },
           "size": {
@@ -455,14 +461,7 @@
         "additionalProperties": false,
         "properties": {
           "content_type": {
-            "enum": [
-              "image/png",
-              "image/jpeg",
-              "image/gif",
-              "image/webp",
-              "application/pdf",
-              "text/plain"
-            ],
+            "description": "image/png, image/jpeg, image/gif, image/webp, application/pdf and text/plain (a text file whose content goes into the message) are recognised; any other type is a plain file",
             "type": "string"
           },
           "created_at": {
@@ -774,6 +773,15 @@
       "CommentView": {
         "additionalProperties": false,
         "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/AttachmentRef"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
@@ -801,7 +809,8 @@
           "version",
           "text",
           "sent_to",
-          "created_at"
+          "created_at",
+          "attachments"
         ],
         "type": "object"
       },
@@ -2108,8 +2117,16 @@
       "Enrollment": {
         "additionalProperties": false,
         "properties": {
+          "compose": {
+            "description": "compose.yml that starts the node container with this token (docker compose up -d)",
+            "type": "string"
+          },
+          "docker": {
+            "description": "docker run command that starts the node container with this token",
+            "type": "string"
+          },
           "install": {
-            "description": "Shell command for the node",
+            "description": "Shell command for the node (install-node.sh on the host)",
             "type": "string"
           },
           "token": {
@@ -2119,7 +2136,9 @@
         },
         "required": [
           "token",
-          "install"
+          "install",
+          "docker",
+          "compose"
         ],
         "type": "object"
       },
@@ -3458,6 +3477,17 @@
       "NewCommentInputBody": {
         "additionalProperties": false,
         "properties": {
+          "attachments": {
+            "description": "Attachment ids of the deliverable's project (POST /api/projects/{pid}/uploads): they go to the employee with the comment",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "text": {
             "maxLength": 10000,
             "minLength": 1,
@@ -3543,8 +3573,16 @@
       "NewNodeOutputBody": {
         "additionalProperties": false,
         "properties": {
+          "compose": {
+            "description": "compose.yml that starts the node container with this token (docker compose up -d)",
+            "type": "string"
+          },
+          "docker": {
+            "description": "docker run command that starts the node container with this token",
+            "type": "string"
+          },
           "install": {
-            "description": "Shell command for the node",
+            "description": "Shell command for the node (install-node.sh on the host)",
             "type": "string"
           },
           "node": {
@@ -3558,7 +3596,9 @@
         "required": [
           "node",
           "token",
-          "install"
+          "install",
+          "docker",
+          "compose"
         ],
         "type": "object"
       },
@@ -4349,6 +4389,40 @@
         ],
         "type": "object"
       },
+      "Part": {
+        "additionalProperties": false,
+        "properties": {
+          "etag": {
+            "type": "string"
+          },
+          "number": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "number",
+          "etag"
+        ],
+        "type": "object"
+      },
+      "PartURL": {
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "url"
+        ],
+        "type": "object"
+      },
       "PasswordInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -4497,11 +4571,11 @@
         "additionalProperties": false,
         "properties": {
           "attachments": {
-            "description": "Attachment ids (images, PDFs, text files) from POST /api/projects/{pid}/attachments, in order",
+            "description": "Attachment ids (any type) from POST /api/projects/{pid}/uploads or /attachments, in order (at most 20)",
             "items": {
               "type": "string"
             },
-            "maxItems": 8,
+            "maxItems": 20,
             "type": [
               "array",
               "null"
@@ -6137,6 +6211,25 @@
         ],
         "type": "object"
       },
+      "SaveSharedBody": {
+        "additionalProperties": false,
+        "properties": {
+          "overwrite": {
+            "description": "Replace a shared file at the path (default false: 409 file_exists)",
+            "type": "boolean"
+          },
+          "path": {
+            "description": "Shared-file path to save it at",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
       "Schedule": {
         "additionalProperties": false,
         "properties": {
@@ -6749,6 +6842,17 @@
       "SessionInput": {
         "additionalProperties": false,
         "properties": {
+          "attachments": {
+            "description": "Attachment ids uploaded with POST /api/uploads (ready, not expired, not yet used): they join the session's project and go with the first message (if the session then fails to start, the project and these attachments are deleted: upload them again)",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "branch": {
             "description": "Name of the work branch (after session/\u003cid\u003e-); '' = from the title, or the repositories when the title has no Latin letters",
             "maxLength": 60,
@@ -8379,6 +8483,179 @@
         "required": [
           "name",
           "data"
+        ],
+        "type": "object"
+      },
+      "UploadComplete": {
+        "additionalProperties": false,
+        "properties": {
+          "parts": {
+            "description": "Every part with the ETag its PUT answered",
+            "items": {
+              "$ref": "#/components/schemas/Part"
+            },
+            "maxItems": 10000,
+            "minItems": 1,
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "parts"
+        ],
+        "type": "object"
+      },
+      "UploadCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "description": "attachment: a file for a message (not counted in the project's quota); shared: a shared file",
+            "enum": [
+              "attachment",
+              "shared"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "File name (an attachment shows it; a shared file uses it as its path when path is not given)",
+            "maxLength": 300,
+            "minLength": 1,
+            "type": "string"
+          },
+          "overwrite": {
+            "description": "Shared files: replace a file at the path (default true); false answers 409 file_exists",
+            "type": "boolean"
+          },
+          "path": {
+            "description": "Shared files: the target path (default: name)",
+            "maxLength": 255,
+            "type": "string"
+          },
+          "size": {
+            "description": "Exact size in bytes (at most 200 MB: more answers 413 file_too_large); the object must have it at completion",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "size"
+        ],
+        "type": "object"
+      },
+      "UploadDone": {
+        "additionalProperties": false,
+        "properties": {
+          "attachment": {
+            "$ref": "#/components/schemas/AttachmentView"
+          },
+          "kind": {
+            "enum": [
+              "attachment",
+              "shared"
+            ],
+            "type": "string"
+          },
+          "shared_file": {
+            "$ref": "#/components/schemas/UploadedSharedFile"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "UploadParts": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "description": "The URLs stop working after this (1 hour); ask again for new ones",
+            "format": "date-time",
+            "type": "string"
+          },
+          "urls": {
+            "items": {
+              "$ref": "#/components/schemas/PartURL"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "urls",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "UploadPartsAsk": {
+        "additionalProperties": false,
+        "properties": {
+          "numbers": {
+            "description": "Part numbers, 1 to parts",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "numbers"
+        ],
+        "type": "object"
+      },
+      "UploadSession": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "description": "Unfinished uploads are dropped after this",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "The attachment id, or the shared file's object id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "attachment",
+              "shared"
+            ],
+            "type": "string"
+          },
+          "part_size": {
+            "description": "Bytes per part (16 MB)",
+            "format": "int64",
+            "type": "integer"
+          },
+          "parts": {
+            "description": "Number of parts",
+            "format": "int32",
+            "type": "integer"
+          },
+          "upload_id": {
+            "description": "img_… for an attachment (also its id), up_… for a shared file",
+            "type": "string"
+          }
+        },
+        "required": [
+          "upload_id",
+          "kind",
+          "id",
+          "part_size",
+          "parts",
+          "expires_at"
         ],
         "type": "object"
       },
@@ -10116,6 +10393,16 @@
               "maxLength": 64,
               "type": "string"
             }
+          },
+          {
+            "description": "Always as an attachment (the page's download button)",
+            "explode": false,
+            "in": "query",
+            "name": "download",
+            "schema": {
+              "description": "Always as an attachment (the page's download button)",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -10128,7 +10415,7 @@
               "image/webp": {},
               "text/plain": {}
             },
-            "description": "The file",
+            "description": "The file (attachments still kept in the database)",
             "headers": {
               "Cache-Control": {
                 "schema": {
@@ -10145,12 +10432,70 @@
                   "type": "string"
                 }
               },
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              },
               "X-Content-Type-Options": {
                 "schema": {
                   "type": "string"
                 }
               }
             }
+          },
+          "302": {
+            "description": "Redirect to the object store",
+            "headers": {
+              "Location": {
+                "description": "Presigned URL",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "An attachment: 302 to a presigned URL valid 5 minutes (images and PDF inline, anything else downloaded as application/octet-stream); the bytes themselves for attachments from before #58; 410 once expired",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/api/attachments/{id}/save-shared": {
+      "post": {
+        "operationId": "save-attachment-shared",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveSharedBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadedSharedFile"
+                }
+              }
+            },
+            "description": "OK"
           },
           "default": {
             "content": {
@@ -10163,7 +10508,7 @@
             "description": "Error"
           }
         },
-        "summary": "The bytes of an attachment",
+        "summary": "Keep an attachment as a shared file of its project (copied inside the store; 409 file_exists unless overwrite, 409 quota_exceeded, 410 attachment_expired; 404 for one still uploading or not yet in a project)",
         "tags": [
           "conversations"
         ]
@@ -13456,6 +13801,23 @@
             }
           },
           {
+            "description": "Only these deliverables (comma-separated ids, at most 50); unknown ids and ids of other projects are left out",
+            "explode": false,
+            "in": "query",
+            "name": "ids",
+            "schema": {
+              "description": "Only these deliverables (comma-separated ids, at most 50); unknown ids and ids of other projects are left out",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 50,
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          {
             "description": "Leave out hosted lone images (render=image), published before screenshots stopped being deliverables",
             "explode": false,
             "in": "query",
@@ -14801,6 +15163,11 @@
                   "type": "string"
                 }
               },
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              },
               "X-Content-Type-Options": {
                 "schema": {
                   "type": "string"
@@ -14808,18 +15175,19 @@
               }
             }
           },
-          "default": {
-            "content": {
-              "application/json": {
+          "302": {
+            "description": "Redirect to the object store",
+            "headers": {
+              "Location": {
+                "description": "Presigned URL",
                 "schema": {
-                  "$ref": "#/components/schemas/APIError"
+                  "type": "string"
                 }
               }
-            },
-            "description": "Error"
+            }
           }
         },
-        "summary": "Download one shared file (always as an attachment, never rendered)",
+        "summary": "Download one shared file (always as an attachment, never rendered): 302 to a presigned URL valid 5 minutes, or the bytes for files from before #58",
         "tags": [
           "shared-files"
         ]
@@ -14951,6 +15319,224 @@
         "summary": "Open a thread directly (skipping the coordinator)",
         "tags": [
           "threads"
+        ]
+      }
+    },
+    "/api/projects/{pid}/uploads": {
+      "post": {
+        "operationId": "create-upload",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadSession"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Start a presigned upload of an attachment (any type, at most 200 MB) or a shared file (at most 200 MB, project quota 5 GB)",
+        "tags": [
+          "uploads"
+        ]
+      }
+    },
+    "/api/projects/{pid}/uploads/{upload_id}": {
+      "delete": {
+        "operationId": "abort-upload",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Cancel an upload in flight",
+        "tags": [
+          "uploads"
+        ]
+      }
+    },
+    "/api/projects/{pid}/uploads/{upload_id}/complete": {
+      "post": {
+        "operationId": "complete-upload",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadComplete"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadDone"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Finish an upload: the object's size is checked, an attachment's type sniffed, a shared file put at its path",
+        "tags": [
+          "uploads"
+        ]
+      }
+    },
+    "/api/projects/{pid}/uploads/{upload_id}/parts": {
+      "post": {
+        "operationId": "upload-part-urls",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadPartsAsk"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadParts"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Presigned PUT URLs for parts of an upload (1 hour)",
+        "tags": [
+          "uploads"
         ]
       }
     },
@@ -17380,6 +17966,186 @@
         },
         "tags": [
           "threads"
+        ]
+      }
+    },
+    "/api/uploads": {
+      "post": {
+        "operationId": "create-user-upload",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadSession"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Start a presigned upload of an attachment without a project (kind attachment only; for POST /api/sessions attachments; dropped 24 hours after the last use if never sent)",
+        "tags": [
+          "uploads"
+        ]
+      }
+    },
+    "/api/uploads/{upload_id}": {
+      "delete": {
+        "operationId": "abort-user-upload",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Cancel an upload without a project",
+        "tags": [
+          "uploads"
+        ]
+      }
+    },
+    "/api/uploads/{upload_id}/complete": {
+      "post": {
+        "operationId": "complete-user-upload",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadComplete"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadDone"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Finish an upload without a project: the object's size is checked and its type sniffed",
+        "tags": [
+          "uploads"
+        ]
+      }
+    },
+    "/api/uploads/{upload_id}/parts": {
+      "post": {
+        "operationId": "user-upload-part-urls",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadPartsAsk"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadParts"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Presigned PUT URLs for parts of an upload without a project (1 hour)",
+        "tags": [
+          "uploads"
         ]
       }
     },

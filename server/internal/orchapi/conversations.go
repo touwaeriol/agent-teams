@@ -50,7 +50,7 @@ type postMessageInput struct {
 	Body           struct {
 		Content     string       `json:"content" maxLength:"100000" doc:"Required unless attachments are given"`
 		Interrupt   bool         `json:"interrupt,omitempty" doc:"Interrupt the current turn first"`
-		Attachments []string     `json:"attachments,omitempty" maxItems:"8" doc:"Attachment ids (images, PDFs, text files) from POST /api/projects/{pid}/attachments, in order"`
+		Attachments []string     `json:"attachments,omitempty" maxItems:"20" doc:"Attachment ids (any type) from POST /api/projects/{pid}/uploads or /attachments, in order (at most 20)"`
 		Refs        []MessageRef `json:"refs,omitempty" maxItems:"10" doc:"@ references: resolved into a context block delivered with the message, shown as chips (meta.refs)"`
 	}
 }
@@ -127,6 +127,9 @@ func (a *API) listMessages(ctx context.Context, in *messagesInput) (*messagesOut
 	page := MessagePage{Items: make([]core.MessageView, 0, len(msgs))}
 	for _, m := range msgs {
 		page.Items = append(page.Items, core.MessageViewOf(m))
+	}
+	if err := core.MarkExpiredMessages(ctx, a.e.Core.Pool, page.Items); err != nil {
+		return nil, err
 	}
 	if len(msgs) > 0 {
 		page.NextCursor = cursorOf(msgs[0].ID, len(msgs) == limit)

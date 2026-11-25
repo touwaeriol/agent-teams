@@ -131,11 +131,84 @@ setInterval(() => {
 }, 4000);
 
 const attachments = new Map();
+/** Design comments by deliverable id. */
+const comments = new Map();
 // The screenshot the user pasted into thread #12 (fixtures: messages.t12).
 attachments.set("img_seed", {
   ref: { id: "img_seed", name: "截图.png", content_type: "image/svg+xml", size: 0 },
   data: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="240" height="180"><rect width="240" height="180" fill="#F7F6F3"/><rect x="16" y="16" width="208" height="56" rx="10" fill="#FFF9F4" stroke="#F0C9A8"/><rect x="30" y="32" width="96" height="9" rx="4" fill="#C8622A"/><rect x="30" y="48" width="160" height="7" rx="3" fill="#E2DFD8"/><rect x="16" y="86" width="64" height="24" rx="7" fill="#1F1E1C"/><rect x="88" y="86" width="64" height="24" rx="7" fill="#fff" stroke="#E2DFD8"/><rect x="16" y="124" width="208" height="40" rx="8" fill="none" stroke="#D93025" stroke-width="2"/></svg>`),
 });
+
+// #58: a PDF and a zip in thread #12, and one whose retention ran out (410).
+attachments.set("img_spec", { ref: { id: "img_spec", name: "需求说明.pdf", content_type: "application/pdf", size: 18_874_368 }, data: Buffer.from("%PDF-1.4\n% mock\n") });
+attachments.set("img_data", { ref: { id: "img_data", name: "日志与数据.zip", content_type: "application/zip", size: 157_286_400 }, data: Buffer.from("PK mock") });
+attachments.set("img_old", { ref: { id: "img_old", name: "上周的导出.csv", content_type: "text/csv", size: 2_411_724 }, data: Buffer.alloc(0), expired: true });
+
+// Direct multipart uploads (#58): the browser PUTs each part to /api/mock-s3/… (standing in for
+// the presigned storage URLs). MOCK_UPLOAD_THROTTLE_MS slows reading each received chunk so the
+// progress bar is visible (default 12 ms per 64 KB ≈ 5 MB/s); MOCK_STORAGE=off answers 503
+// storage_unavailable (the old upload takes over).
+const PART_SIZE = 16 << 20;
+const STORAGE_BASE = process.env.MOCK_STORAGE_URL ?? `http://127.0.0.1:${process.env.MOCK_PORT ?? 3001}`;
+const STORAGE_CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "PUT, GET, HEAD", "Access-Control-Allow-Headers": "*", "Access-Control-Expose-Headers": "ETag", "Access-Control-Max-Age": "3600" };
+const uploads = new Map();
+const THROTTLE_MS = Number(process.env.MOCK_UPLOAD_THROTTLE_MS ?? 12);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function beginUpload(res, pid, b) {
+  if (process.env.MOCK_STORAGE === "off") return fail(res, 503, "没有配置对象存储，暂时不能直传文件", "storage_unavailable");
+  const size = Number(b.size);
+  if (!Number.isInteger(size) || size < 0) return fail(res, 422, "size 不正确", "validation");
+  if (size > 200 << 20) return fail(res, 413, `附件不能超过 200 MB（这个文件 ${(size / 1048576).toFixed(1)} MB）`, "file_too_large");
+  if (b.kind === "shared") {
+    const path = b.path || b.name;
+    const bad = sharedPathProblem(path);
+    if (bad) return fail(res, 422, `参数不正确：路径 ${JSON.stringify(path)} ${bad}`, "validation");
+    const list = sharedOf(pid);
+    const old = list.find((f) => f.path === path);
+    if (old && b.overwrite === false) return fail(res, 409, `共享文件里已经有 ${path}`, "file_exists");
+    const used = list.reduce((n, f) => n + sharedSize(f), 0) - (old ? sharedSize(old) : 0);
+    if (used + size > SHARED_LIMITS.project_bytes) {
+      return fail(res, 409, `项目共享文件已用 ${(used / 1024 ** 3).toFixed(2)} GB / 5 GB，这个文件 ${(size / 1048576).toFixed(1)} MB 放不下；先删掉不再需要的共享文件`, "quota_exceeded");
+    }
+  }
+  const id = b.kind === "shared" ? `up_${Date.now()}${Math.floor(Math.random() * 1000)}` : `img_${Date.now()}${Math.floor(Math.random() * 1000)}`;
+  const parts = Math.max(1, Math.ceil(size / PART_SIZE));
+  uploads.set(id, { id, pid, kind: b.kind, name: b.name, path: b.path || b.name, size, parts, data: new Map() });
+  json(res, 201, { upload_id: id, kind: b.kind, id: b.kind === "shared" ? `sf_${id}` : id, part_size: PART_SIZE, parts, expires_at: new Date(Date.now() + 86_400_000).toISOString() });
+}
+function partUrls(res, uid, b) {
+  const u = uploads.get(uid);
+  if (!u) return fail(res, 404, "没有这个上传", "not_found");
+  // Straight to the mock's own port, like presigned URLs point at the storage (not through the vite proxy).
+  json(res, 200, { urls: (b.numbers ?? []).map((n) => ({ number: n, url: `${STORAGE_BASE}/api/mock-s3/${uid}/${n}?X-Amz-Signature=mock` })), expires_at: new Date(Date.now() + 3_600_000).toISOString() });
+}
+function completeUpload(res, uid, b) {
+  const u = uploads.get(uid);
+  if (!u) return fail(res, 404, "没有这个上传", "not_found");
+  const got = b.parts ?? [];
+  if (got.length !== u.parts || got.some((p) => !u.data.has(p.number))) return fail(res, 409, "还有分片没有传完", "upload_incomplete");
+  const data = Buffer.concat([...u.data].sort((a, c) => a[0] - c[0]).map(([, d]) => d));
+  if (data.length !== u.size) {
+    uploads.delete(uid);
+    return fail(res, 422, `文件大小和声明的不一致（${data.length} / ${u.size}）`, "size_mismatch");
+  }
+  uploads.delete(uid);
+  if (u.kind === "shared") {
+    const list = sharedOf(u.pid);
+    const at = now();
+    const old = list.find((f) => f.path === u.path);
+    const f = { path: u.path, data: data.toString("base64"), uploaded_by: "user", created_at: old?.created_at ?? at, updated_at: at };
+    if (old) list.splice(list.indexOf(old), 1, f);
+    else list.push(f);
+    emit("shared_file", { op: "write", path: f.path, by: "user" }, u.pid);
+    return json(res, 200, { kind: "shared", shared_file: { ...sharedOut(f), overwritten: Boolean(old) } });
+  }
+  const types = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", pdf: "application/pdf", zip: "application/zip", txt: "text/plain", md: "text/markdown" };
+  const ext = u.name.includes(".") ? u.name.split(".").pop().toLowerCase() : "";
+  const ref = { id: uid, name: u.name, content_type: types[ext] ?? "application/octet-stream", size: data.length };
+  attachments.set(uid, { ref, data });
+  json(res, 200, { kind: "attachment", attachment: { ...ref, sha256: "", created_at: now(), url: `/api/attachments/${uid}` } });
+}
 
 // Project members are shared by every thread (shared-members.md): each name once, at the
 // thread of its current task; every live thread has its own lead.
@@ -197,7 +270,6 @@ const storageBytes = () => state.deliverables.reduce((n, d) => n + (d.detail.siz
 // Idempotency-Key) with a 503, so the retry path can be tried; a repeated key gets the first reply.
 const sent = new Map();
 const failedOnce = new Set();
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // A session's sidebar status (ProjectView.session_status, server sessionStatusCol): done → resolved,
 // its employee at work → working, else finished (replied and stopped).
@@ -325,7 +397,11 @@ const routes = [
     // no_images=true: leave out hosted images (render=image), like the real server.
     const noImages = url.searchParams.get("no_images") === "true";
     const shown = (d) => !(noImages && d.detail?.hosted && d.detail?.render === "image");
-    json(res, 200, { ...page(state.deliverables.filter((d) => (!kind || d.kind === kind) && d.title.includes(q) && shown(d)).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))), storage_bytes: storageBytes() });
+    // ids=a,b (deliverable ids mentioned in a message) and thread=<no>, like the real server.
+    const ids = url.searchParams.get("ids")?.split(",").filter(Boolean);
+    const thread = Number(url.searchParams.get("thread") ?? 0);
+    const picked = (d) => (!ids || ids.includes(d.id)) && (!thread || d.thread_no === thread);
+    json(res, 200, { ...page(state.deliverables.filter((d) => (!kind || d.kind === kind) && d.title.includes(q) && shown(d) && picked(d)).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))), storage_bytes: storageBytes() });
   }],
   ["POST", /^\/api\/projects\/([^/]+)\/library$/, async (req, res, [pid]) => {
     const b = await body(req);
@@ -391,12 +467,12 @@ const routes = [
     for (const [i, p] of parts.entries()) {
       const bad = sharedPathProblem(targets[i]);
       if (bad) return fail(res, 422, `参数不正确：路径 ${JSON.stringify(targets[i])} ${bad}`, "validation");
-      if (p.data.length > SHARED_LIMITS.file_bytes) return fail(res, 413, `shared file too large：单个文件不能超过 20 MB（这个文件 ${(p.data.length / 1048576).toFixed(1)} MB）`, "file_too_large");
+      if (p.data.length > SHARED_LEGACY_FILE) return fail(res, 413, `shared file too large：单个文件不能超过 20 MB（这个文件 ${(p.data.length / 1048576).toFixed(1)} MB）`, "file_too_large");
       const old = list.find((f) => f.path === targets[i]);
       total += p.data.length - (old ? sharedSize(old) : 0);
       if (!old) count += 1;
     }
-    if (total > SHARED_LIMITS.project_bytes) return fail(res, 409, "shared files quota exceeded：项目共享文件合计不能超过 500 MB，先删掉不用的", "quota_exceeded");
+    if (total > SHARED_LIMITS.project_bytes) return fail(res, 409, "shared files quota exceeded：项目共享文件合计不能超过 5 GB，先删掉不用的", "quota_exceeded");
     if (count > SHARED_LIMITS.project_files) return fail(res, 409, "shared files quota exceeded：项目最多 1000 个共享文件，先删掉不用的", "quota_exceeded");
     for (const [i, p] of parts.entries()) {
       const at = now();
@@ -495,11 +571,80 @@ const routes = [
     attachments.set(id, { ref, data });
     json(res, 201, { ...ref, sha256: "", created_at: now(), url: `/api/attachments/${id}` });
   }],
-  ["GET", /^\/api\/attachments\/([^/]+)$/, (req, res, [id]) => {
+  ["GET", /^\/api\/attachments\/([^/]+)$/, (req, res, [id], url) => {
     const a = attachments.get(id);
-    if (!a) return fail(res, 404, "没有这张图片");
-    res.writeHead(200, { "Content-Type": a.ref.content_type });
+    if (!a) return fail(res, 404, "没有这个附件");
+    if (a.expired) return fail(res, 410, `附件已过期：${a.ref.name} 超过保留期没有再使用，文件已删除`, "attachment_expired");
+    const inline = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml", "application/pdf"].includes(a.ref.content_type) && !url.searchParams.has("download");
+    res.writeHead(200, {
+      "Content-Type": inline ? a.ref.content_type : "application/octet-stream",
+      "Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(a.ref.name)}`,
+    });
     res.end(a.data);
+  }],
+  ["POST", /^\/api\/attachments\/([^/]+)\/save-shared$/, async (req, res, [id]) => {
+    const b = await body(req);
+    const a = attachments.get(id);
+    if (!a) return fail(res, 404, "没有这个附件", "not_found");
+    if (a.expired) return fail(res, 410, `附件已过期：${a.ref.name}`, "attachment_expired");
+    const bad = sharedPathProblem(b.path ?? "");
+    if (bad) return fail(res, 422, `参数不正确：路径 ${bad}`, "validation");
+    const list = sharedOf("p1");
+    const old = list.find((f) => f.path === b.path);
+    if (old && !b.overwrite) return fail(res, 409, `共享文件里已经有 ${b.path}`, "file_exists");
+    const at = now();
+    const f = { path: b.path, data: a.data.toString("base64"), uploaded_by: "user", created_at: old?.created_at ?? at, updated_at: at };
+    if (old) list.splice(list.indexOf(old), 1, f);
+    else list.push(f);
+    emit("shared_file", { op: "write", path: f.path, by: "user" }, "p1");
+    json(res, 200, { ...sharedOut(f), overwritten: Boolean(old) });
+  }],
+  ["POST", /^\/api\/projects\/([^/]+)\/uploads$/, async (req, res, [pid]) => beginUpload(res, pid, await body(req))],
+  ["POST", /^\/api\/uploads$/, async (req, res) => {
+    const b = await body(req);
+    if (b.kind !== "attachment") return fail(res, 422, "这里只能上传附件", "validation");
+    beginUpload(res, "p1", b);
+  }],
+  ["POST", /^\/api\/(?:projects\/[^/]+\/)?uploads\/([^/]+)\/parts$/, async (req, res, [uid]) => partUrls(res, uid, await body(req))],
+  ["POST", /^\/api\/(?:projects\/[^/]+\/)?uploads\/([^/]+)\/complete$/, async (req, res, [uid]) => completeUpload(res, uid, await body(req))],
+  ["DELETE", /^\/api\/(?:projects\/[^/]+\/)?uploads\/([^/]+)$/, (req, res, [uid]) => {
+    uploads.delete(uid);
+    json(res, 204);
+  }],
+  ["PUT", /^\/api\/mock-s3\/([^/]+)\/(\d+)$/, async (req, res, [uid, n]) => {
+    const u = uploads.get(uid);
+    if (!u) return json(res, 404, { detail: "NoSuchUpload" }, STORAGE_CORS);
+    const chunks = [];
+    try {
+      for await (const c of req) {
+        chunks.push(c);
+        if (THROTTLE_MS) await sleep(THROTTLE_MS);
+      }
+    } catch {
+      return; // the browser went away mid-part (cancelled, page closed)
+    }
+    const data = Buffer.concat(chunks);
+    u.data.set(Number(n), data);
+    res.writeHead(200, { ...STORAGE_CORS, ETag: `"${createHash("md5").update(data).digest("hex")}"` });
+    res.end();
+  }],
+  // Design comments (#58): attachments are refs of uploaded attachments; expired ones carry expired.
+  ["GET", /^\/api\/deliverables\/([^/]+)\/comments$/, (req, res, [id]) => {
+    const items = (comments.get(id) ?? []).map((c) => ({ ...c, attachments: c.attachments.map((r) => (attachments.get(r.id)?.expired ? { ...r, expired: true } : r)) }));
+    json(res, 200, { items });
+  }],
+  ["POST", /^\/api\/deliverables\/([^/]+)\/comments$/, async (req, res, [id]) => {
+    const b = await body(req);
+    const refs = [];
+    for (const aid of b.attachments ?? []) {
+      const a = attachments.get(aid);
+      if (!a) return fail(res, 422, `没有这个附件：${aid}`, "validation");
+      if (a.expired) return fail(res, 410, `附件已过期：${a.ref.name}`, "attachment_expired");
+      refs.push(a.ref);
+    }
+    const c = { id: `cm${Date.now()}`, version: b.version ?? null, text: b.text, sent_to: "dev-2", created_at: now(), attachments: refs };
+    comments.set(id, [...(comments.get(id) ?? []), c]);
+    json(res, 201, c);
   }],
   ["GET", /^\/api\/deliverables\/([^/]+)\/files$/, (req, res, [id]) => {
     const d = state.deliverables.find((x) => x.id === id);
@@ -799,7 +944,8 @@ routes.push(
     const m = rt.models.find((x) => x.id === model);
     const mode = b.permission_mode || (runtime === "claude" ? (m && !m.supports_auto ? "default" : "auto") : r.permission_mode === "ask" ? "default" : "bypassPermissions");
     state.sessionPicks[t.id] = { permission_mode: mode, model, effort: b.effort ?? "" };
-    state.messages[t.id] = [{ id: String(Date.now()), role: "user", author: "liu", kind: "chat", content: b.message ?? "", meta: {}, created_at: now() }];
+    const refs = (b.attachments ?? []).map((aid) => attachments.get(aid)?.ref).filter(Boolean);
+    state.messages[t.id] = [{ id: String(Date.now()), role: "user", author: "liu", kind: "chat", content: b.message ?? "", meta: refs.length ? { attachments: refs } : {}, created_at: now() }];
     json(res, 201, { project: p, thread_id: t.id, thread_no: 1 });
   }],
   ["GET", /^\/api\/conversations\/([^/]+)\/context\/detail$/, (req, res, [cid]) => {
@@ -840,6 +986,9 @@ const PUBLIC = new Set(["/auth/login", "/auth/register"]);
 
 createServer(async (req, res) => {
   const url = new URL(req.url, "http://mock");
+  // The stand-in storage: presigned-style URLs, no cookie or CSRF (CORS like the RustFS bucket).
+  if (url.pathname.startsWith("/api/mock-s3/") && req.method === "OPTIONS") return void res.writeHead(204, STORAGE_CORS).end();
+  if (url.pathname.startsWith("/api/mock-s3/") && req.method === "PUT") return routes.find(([m, re]) => m === "PUT" && re.test(url.pathname))[2](req, res, url.pathname.match(/^\/api\/mock-s3\/([^/]+)\/(\d+)$/).slice(1), url);
   const c = cookies(req);
   if (!PUBLIC.has(url.pathname) && !c.agent_teams_session) return fail(res, 401, "请先登录", "unauthenticated");
   const write = !["GET", "HEAD"].includes(req.method);
@@ -852,7 +1001,9 @@ createServer(async (req, res) => {
 }).listen(PORT, () => console.log(`mock API on http://127.0.0.1:${PORT}`));
 
 // Shared files (api.md §3.5.1): in memory per project, the server's limits and path rule.
-const SHARED_LIMITS = { file_bytes: 20 << 20, project_bytes: 500 << 20, project_files: 1000 };
+const SHARED_LIMITS = { file_bytes: 200 << 20, project_bytes: 5 * 1024 ** 3, project_files: 1000 };
+/** The old form upload still takes at most this per file. */
+const SHARED_LEGACY_FILE = 20 << 20;
 const SHARED_MAX_REQUEST = 5 * (20 << 20) + (1 << 20);
 function sharedOf(pid) {
   return (state.sharedFiles[pid] ??= []);
