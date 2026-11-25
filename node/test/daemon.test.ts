@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Query } from "@anthropic-ai/claude-agent-sdk";
@@ -97,6 +97,32 @@ describe("daemon with a fake console", () => {
     h.console.command("session.send", { session_id: "s_IMG", msg_id: "m_i2", text: "还有这张", kind: "user", images: [{ id: "img_missing", media_type: "image/png" }] });
     await h.console.waitType("session.delivered", (b) => b.msg_id === "m_i2");
     expect(h.log.prompts.find((p) => p.startsWith("还有这张"))).toContain("附带的图片下载失败");
+  });
+
+  it("downloads session.send attachments into .attachments/ and lists them, advertising attachments_v2", async () => {
+    h = await startHarness();
+    expect(h.console.ofType("hello")[0]!.body.features).toContain("attachments_v2");
+    // The fake console has no /url endpoint: the daemon falls back to GET /nodes/attachments/{id}.
+    h.console.images.set("img_v2a", Buffer.from("\x89PNG\r\n\x1a\nfake", "binary"));
+    h.console.images.set("img_v2b", Buffer.from("PK zip"));
+    await openAndRelease("s_ATT");
+    h.console.command("session.send", {
+      session_id: "s_ATT", msg_id: "m_a1", text: "看附件", kind: "user",
+      attachments: [
+        { id: "img_v2a", name: "a.png", content_type: "image/png", size: 12 },
+        { id: "img_v2b", name: "数据.zip", content_type: "application/zip", size: 6 },
+        { id: "img_v2c", name: "gone.pdf", content_type: "application/pdf", size: 10 },
+      ],
+    });
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_a1");
+    const prompt = h.log.prompts.find((p) => p.includes("看附件"))!;
+    expect(prompt.startsWith("[image image/png 12B] 看附件")).toBe(true);
+    const cwd = join(h.opts.root, "projects/p1/threads/12/s_ATT");
+    expect(prompt).toContain(`img_v2a a.png（image/png，12 B） → ${join(cwd, ".attachments", "img_v2a-a.png")}（已作为图片附上）`);
+    expect(prompt).toContain(`${join(cwd, ".attachments", "img_v2b-数据.zip")}（只给路径`);
+    expect(prompt).toMatch(/img_v2c gone\.pdf.*下载失败/);
+    expect(readFileSync(join(cwd, ".attachments", "img_v2b-数据.zip"), "utf8")).toBe("PK zip");
+    expect(JSON.parse(readFileSync(join(h.opts.stateDir, "attachment-dirs.json"), "utf8"))).toEqual([join(cwd, ".attachments")]);
   });
 
   it("forwards platform tool calls as tool.call and returns tool.result", async () => {
