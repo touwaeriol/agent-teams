@@ -140,7 +140,7 @@ func uploadFail(err error) error {
 	case errors.Is(err, core.ErrAttachmentTooLarge):
 		return httpapi.Fail(http.StatusRequestEntityTooLarge, "file_too_large", err.Error())
 	case errors.Is(err, sharedfiles.ErrExists):
-		return httpapi.Fail(http.StatusConflict, "file_exists", err.Error())
+		return httpapi.Fail(http.StatusConflict, "file_exists", "这个路径已经有共享文件了；要覆盖请选择覆盖")
 	case errors.Is(err, sharedfiles.ErrUploadNotFound), errors.Is(err, core.ErrNotFound):
 		return httpapi.Fail(http.StatusNotFound, "not_found", "没有这个上传（已完成、已取消或超过 24 小时已清理），请重新上传")
 	}

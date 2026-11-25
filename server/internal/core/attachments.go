@@ -32,6 +32,9 @@ const (
 	MaxTextBytes             = 1 << 20
 	MaxMessageImages         = 8
 	AttachmentURLPrefix      = "/api/attachments/"
+	// MaxToolAttachments is how many attachments one tool call (assign_task, send_message …),
+	// forward or delivery carries (protocol AttachmentIds and session.send attachments maxItems).
+	MaxToolAttachments = 20
 )
 
 // Attachment content types besides the images.
@@ -170,11 +173,13 @@ type AttachmentRef struct {
 	Name        string `json:"name"`
 	ContentType string `json:"content_type"`
 	Size        int    `json:"size"`
+	// SHA256 is the hex digest when known (the daemon checks its download against it).
+	SHA256 string `json:"sha256,omitempty"`
 }
 
 // Ref is the message-meta form of an attachment.
 func (a Attachment) Ref() AttachmentRef {
-	return AttachmentRef{ID: a.ID, Name: a.Name, ContentType: a.ContentType, Size: a.Size}
+	return AttachmentRef{ID: a.ID, Name: a.Name, ContentType: a.ContentType, Size: a.Size, SHA256: a.SHA256}
 }
 
 // imageMagic are the leading bytes of each accepted format.

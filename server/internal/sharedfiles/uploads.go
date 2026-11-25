@@ -24,15 +24,14 @@ import (
 
 var (
 	// ErrUploadNotFound is an upload id the project does not have (finished, aborted, expired).
-	ErrUploadNotFound = errors.New("没有这个上传（已完成、已取消或超过 24 小时已清理），请重新上传")
+	// It wraps ErrNotFound.
+	ErrUploadNotFound = fmt.Errorf("%w：没有这个上传（已完成、已取消或超过 24 小时已清理），请重新上传", ErrNotFound)
 	// ErrIncomplete is an upload whose bytes are not (all) in the object store yet.
 	ErrIncomplete = errors.New("文件还没有传完：有分片没传上去，传完再完成上传")
 	// ErrSizeMismatch is an upload whose object does not have the declared size: it is dropped.
 	ErrSizeMismatch = errors.New("上传的文件大小和声明的不一致，已丢弃，请重新上传")
 	// ErrChecksum is an upload whose object does not have the declared sha256: it is dropped.
 	ErrChecksum = errors.New("上传的文件 sha256 和声明的不一致（上传时文件可能被改过），已丢弃，请重新上传")
-	// ErrExists is a new upload to a path that has a file when overwrite was not asked for.
-	ErrExists = errors.New("这个路径已经有共享文件了；要覆盖请选择覆盖")
 )
 
 // UploadTTL is how long a node's presigned PUT is valid (design §10).
@@ -97,7 +96,7 @@ func fits(ctx context.Context, q store.DB, projectID, p string, size int64, exce
 	old := int64(-1)
 	if prev, err := Stat(ctx, q, projectID, p); err == nil {
 		if !overwrite {
-			return ErrExists
+			return fmt.Errorf("%w：%s", ErrExists, p)
 		}
 		old = prev.Size
 	} else if !errors.Is(err, ErrNotFound) {
@@ -173,6 +172,9 @@ type FinalizeOptions struct {
 	Path string
 	// By, when set, replaces the uploader recorded at BeginUpload.
 	By *Uploader
+	// EmployeeID, when set, must be the employee that asked for the upload (POST /nodes/uploads
+	// records the session's employee); another one gets ErrUploadNotFound.
+	EmployeeID string
 }
 
 // FinalizeUpload puts a finished upload at its path: it completes the multipart upload, checks the
@@ -192,6 +194,9 @@ func FinalizeUpload(ctx context.Context, q store.DB, bs blobstore.Store, project
 	up, err := GetUpload(ctx, q, projectID, uploadID)
 	if err != nil {
 		return SharedFile{}, false, err
+	}
+	if o.EmployeeID != "" && (up.UploaderID == nil || *up.UploaderID != o.EmployeeID) {
+		return SharedFile{}, false, ErrUploadNotFound
 	}
 	p := up.Path
 	if o.Path != "" {

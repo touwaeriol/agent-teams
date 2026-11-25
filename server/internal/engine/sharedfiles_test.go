@@ -29,6 +29,8 @@ var sharedFeatures = []string{"sessions", "git_worktree", "cred_helper", "file_d
 type sfTeam struct {
 	*team
 	nA, nB *nodetest.Node
+	// tokA, tokB are the nodes' tokens.
+	tokA, tokB string
 }
 
 func startSFTeam(t *testing.T) *sfTeam {
@@ -52,7 +54,7 @@ func startSFTeam(t *testing.T) *sfTeam {
 	var project struct{ ID string }
 	tm.b.must(201, "POST", "/api/projects", map[string]any{"name": "p"}, &project)
 	tm.projectID = project.ID
-	st := &sfTeam{team: tm}
+	st := &sfTeam{team: tm, tokA: a.Token, tokB: b.Token}
 	st.nA = w.connect(a.Token, nodetest.Options{Features: sharedFeatures})
 	st.nB = w.connect(b.Token, nodetest.Options{Features: sharedFeatures})
 	tm.n = st.nB

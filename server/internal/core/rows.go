@@ -236,6 +236,9 @@ type Task struct {
 	CtxStart    *int
 	CtxEnd      *int
 	SplitHinted bool
+	// Attachments the task carries (assign_task attachments): every brief of it, rework
+	// included, delivers them to the member (#58).
+	Attachments []AttachmentRef `gorm:"serializer:jsonb"`
 }
 
 // TaskSync is one repository's pre-task sync result (Error when the job failed).

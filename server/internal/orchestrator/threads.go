@@ -285,20 +285,20 @@ func (o *Orchestrator) start(ctx context.Context, t core.Thread) error {
 		if err != nil {
 			return err
 		}
+		// Starting the thread is a use of the brief's attachments (retention restarts).
+		if err := core.TouchAttachments(ctx, tx, cur.ProjectID, refIDs(files), o.core.AttachmentTTL); err != nil {
+			return err
+		}
 		if src != nil {
-			// Opening a thread on a message is a use of its attachments (retention restarts).
-			if err := core.TouchAttachments(ctx, tx, cur.ProjectID, refIDs(core.AttachmentsOf(*src)), o.core.AttachmentTTL); err != nil {
-				return err
-			}
-			// Text attachments are not in files (briefFiles skips them): inline them into the
-			// quoted message, as a normal post or a forward would, so the lead sees them.
+			// Inline the source message's small text files into the quoted message, as a normal
+			// post or a forward would, so the lead sees them (they also travel as files).
 			quoted := *src
 			if quoted.Content, _, err = o.inlineTexts(ctx, tx, core.Conversation{ProjectID: &cur.ProjectID}, src.Content, core.AttachmentsOf(*src)); err != nil {
 				return err
 			}
 			src = &quoted
 		}
-		_, err = o.Deliver(ctx, tx, lead, Delivery{Text: briefText(cur, p, src), Kind: "user", Priority: "next", Images: files})
+		_, err = o.Deliver(ctx, tx, lead, Delivery{Text: briefText(cur, p, src), Kind: "user", Priority: "next", Attachments: files})
 		return err
 	})
 }

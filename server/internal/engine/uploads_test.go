@@ -7,10 +7,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
+
+	protocol "github.com/touwaeriol/agent-teams/protocol"
 
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
@@ -418,5 +422,78 @@ func TestUploadsWithoutStorage(t *testing.T) {
 			!strings.Contains(string(raw), "storage_unavailable") {
 			t.Fatalf("%s without storage = %d %s", kind, code, raw)
 		}
+	}
+}
+
+// TestWriteSharedFileS3: a daemon with presigned uploads asks POST /nodes/uploads, PUTs the file
+// and calls write_shared_file with upload storage s3: the file is registered (sha256 checked);
+// a PUT of other bytes than declared, another employee's upload id and an unknown one are refused.
+func TestWriteSharedFileS3(t *testing.T) {
+	st := startSFTeam(t)
+	w := st.w
+	ask := func(path string, declared []byte, sent []byte) string {
+		t.Helper()
+		code, raw := nodeCall(t, w, "POST", "/nodes/uploads", st.tokA, map[string]any{"session_id": st.dev.session, "path": path,
+			"size": len(declared), "sha256": hexSum(declared)})
+		var nu orchapi.NodeUpload
+		if code != 201 || json.Unmarshal(raw, &nu) != nil {
+			t.Fatalf("node upload %d %s", code, raw)
+		}
+		req, _ := http.NewRequest("PUT", nu.URL, bytes.NewReader(sent))
+		for k, v := range nu.Headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil || resp.StatusCode != 200 {
+			t.Fatalf("put %v %v", resp, err)
+		}
+		resp.Body.Close()
+		return nu.UploadID
+	}
+	call := func(a *fakeAgent, uploadID, path string, body []byte) protocol.ToolResult {
+		t.Helper()
+		callID := fmt.Sprintf("tc_s3_%d", time.Now().UnixNano())
+		gen := protocol.OpenGen(a.gen)
+		raw, _ := json.Marshal(map[string]any{"file": path})
+		a.send(protocol.TypeToolCall, protocol.ToolCall{CallID: protocol.CallID(callID), SessionID: protocol.SessionID(a.session), OpenGen: &gen,
+			Tool: "write_shared_file", Args: raw, Upload: &protocol.ToolUpload{UploadID: protocol.UploadID(uploadID), Storage: protocol.ToolUploadStorageS3,
+				Files: []protocol.UploadFile{{Path: path, Size: len(body), SHA256: hexSum(body), ContentType: "x/ignored"}}}})
+		return a.result(callID)
+	}
+	body := []byte("id,value\n1,2\n")
+	res := call(st.dev, ask("out/s3.csv", body, body), "out/s3.csv", body)
+	if !res.Ok {
+		t.Fatalf("s3 write refused: %s", text(res))
+	}
+	var wrote protocol.WriteSharedFileResult
+	_ = json.Unmarshal(*res.Structured, &wrote)
+	if wrote.Path != "out/s3.csv" || wrote.Size != len(body) || wrote.SHA256 != hexSum(body) {
+		t.Fatalf("write result %+v", wrote)
+	}
+	f, data, err := sharedfiles.Load(w.ctx, w.db.Pool, w.e.Core.Blobs, st.projectID, "out/s3.csv")
+	if err != nil || !bytes.Equal(data, body) || f.UploadedBy != "dev-1" {
+		t.Fatalf("stored %+v %q %v", f, data, err)
+	}
+
+	// The file changed between hashing and the PUT: refused, the old file stays.
+	changed := []byte("id,value\n9,9\n")
+	if res := call(st.dev, ask("out/s3.csv", changed, []byte("id,value\n0,0\n")), "out/s3.csv", changed); res.Ok ||
+		!strings.Contains(text(res), "sha256") {
+		t.Fatalf("checksum mismatch accepted: %s", text(res))
+	}
+	// Wrong size.
+	if res := call(st.dev, ask("out/short.csv", body, body[:5]), "out/short.csv", body); res.Ok || !strings.Contains(text(res), "大小") {
+		t.Fatalf("size mismatch accepted: %s", text(res))
+	}
+	if _, data, _ = sharedfiles.Load(w.ctx, w.db.Pool, w.e.Core.Blobs, st.projectID, "out/s3.csv"); !bytes.Equal(data, body) {
+		t.Fatalf("old file replaced: %q", data)
+	}
+	// Another employee cannot finish dev-1's upload; an unknown id is refused.
+	other := ask("out/other.csv", body, body)
+	if res := call(st.lead, other, "out/other.csv", body); res.Ok {
+		t.Fatalf("lead finished dev-1's upload: %s", text(res))
+	}
+	if res := call(st.dev, "up_00000000000000000000000000", "out/x.csv", body); res.Ok {
+		t.Fatalf("unknown upload accepted: %s", text(res))
 	}
 }
