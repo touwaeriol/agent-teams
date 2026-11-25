@@ -241,6 +241,7 @@ func (s *Service) storeShared(ctx context.Context, tx *core.Tx, c *call, in prot
 	if c.upload.Storage == protocol.ToolUploadStorageS3 {
 		f, overwritten, err := finalizeSharedUpload(ctx, tx, s.core.Blobs, c.emp().ProjectID, string(c.upload.UploadID), p, sharedUploader(c))
 		if err != nil {
+			s.dropOwnUpload(ctx, tx, c, string(c.upload.UploadID))
 			return Result{}, refuseUpload(err, p)
 		}
 		return s.storedShared(ctx, tx, c, f, overwritten)
@@ -298,6 +299,17 @@ func finalizeSharedUpload(ctx context.Context, q core.DB, bs blobstore.Store, pr
 	by sharedfiles.Uploader) (sharedfiles.SharedFile, bool, error) {
 	return sharedfiles.FinalizeUpload(ctx, q, bs, projectID, uploadID,
 		sharedfiles.FinalizeOptions{Path: path, By: &by, EmployeeID: by.EmployeeID})
+}
+
+// dropOwnUpload cancels the caller's refused presigned upload (over quota, bad path, object
+// missing…) so it does not hold the project's quota until blobgc expires it a day later. Uploads
+// of other employees (or already gone) are left alone; failures only cost that day.
+func (s *Service) dropOwnUpload(ctx context.Context, tx *core.Tx, c *call, uploadID string) {
+	up, err := sharedfiles.GetUpload(ctx, tx, c.emp().ProjectID, uploadID)
+	if err != nil || up.UploaderID == nil || *up.UploaderID != c.emp().ID {
+		return
+	}
+	_ = sharedfiles.AbortUpload(ctx, tx, s.core.Blobs, c.emp().ProjectID, uploadID)
 }
 
 // refuseUpload explains a refused presigned upload to the model.

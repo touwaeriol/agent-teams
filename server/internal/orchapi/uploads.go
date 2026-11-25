@@ -33,7 +33,7 @@ const (
 type UploadCreate struct {
 	Kind string `json:"kind" enum:"attachment,shared" doc:"attachment: a file for a message (not counted in the project's quota); shared: a shared file"`
 	Name string `json:"name" minLength:"1" maxLength:"300" doc:"File name (an attachment shows it; a shared file uses it as its path when path is not given)"`
-	Size int64  `json:"size" minimum:"0" maximum:"209715200" doc:"Exact size in bytes (at most 200 MB); the object must have it at completion"`
+	Size int64  `json:"size" minimum:"0" doc:"Exact size in bytes (at most 200 MB: more answers 413 file_too_large); the object must have it at completion"`
 	Path string `json:"path,omitempty" maxLength:"255" doc:"Shared files: the target path (default: name)"`
 	// Overwrite is a pointer so that "not given" keeps the page's old behaviour (overwrite).
 	Overwrite *bool `json:"overwrite,omitempty" doc:"Shared files: replace a file at the path (default true); false answers 409 file_exists"`
@@ -250,6 +250,10 @@ func (a *API) completeUpload(ctx context.Context, in *uploadCompleteInput) (*upl
 		done = UploadedSharedFile{SharedFile: f, Overwritten: overwritten}
 		return tx.EmitSharedFile(ctx, p.ID, sharedfiles.UserName, "write", f.Path)
 	})
+	if errors.Is(err, sharedfiles.ErrExists) || errors.Is(err, sharedfiles.ErrQuota) || errors.Is(err, sharedfiles.ErrInvalidPath) {
+		// Refused for good: cancel it now, so it does not hold the quota for a day.
+		_ = sharedfiles.AbortUpload(ctx, a.e.Core.Pool, a.e.Core.Blobs, p.ID, in.UploadID)
+	}
 	if err != nil {
 		return nil, uploadFail(err)
 	}
@@ -369,7 +373,7 @@ func (a *API) nodeAttachmentURL(c *gin.Context) {
 // NodeUploadRequest is POST /nodes/uploads (design §4.3): a daemon asks for a presigned PUT before
 // it calls write_shared_file with upload: {upload_id}.
 // The daemon (node/src/toolhost/transfer.ts UploadRequest) sends the target shared path as name;
-// path is accepted as well and wins when both are given. call_id and content_type are informative
+// path is accepted as well (name wins when both are given, design §4.3). call_id and content_type are informative
 // (the type comes from the path).
 type NodeUploadRequest struct {
 	SessionID   string `json:"session_id"`
@@ -413,7 +417,7 @@ func (a *API) nodeUpload(c *gin.Context) {
 		nodeError(c, http.StatusBadRequest, "bad_request", "请求不是合法的 JSON")
 		return
 	}
-	if in.Path == "" {
+	if in.Name != "" {
 		in.Path = in.Name
 	}
 	if in.Path == "" {
@@ -427,7 +431,8 @@ func (a *API) nodeUpload(c *gin.Context) {
 	}
 	sc, err := core.SessionContextOf(ctx, a.e.Core.Pool, in.SessionID)
 	if err != nil || sc.Session.NodeID == nil || *sc.Session.NodeID != node.ID || sc.OwnerID != node.UserID || sc.Session.State == "closed" {
-		nodeError(c, http.StatusNotFound, "not_found", "这个节点上没有这个会话")
+		// Not 404: the daemon reads 404 as "an older console without this route" and falls back.
+		nodeError(c, http.StatusConflict, "session_not_on_node", "这个会话不在这个节点上（可能已经关闭或换了节点），不能申请上传")
 		return
 	}
 	emp := sc.Employee
@@ -449,6 +454,9 @@ func (a *API) nodeUpload(c *gin.Context) {
 	}
 	var apiErr *httpapi.APIError
 	if errors.As(uploadFail(err), &apiErr) {
+		if apiErr.Status == http.StatusNotFound { // see above: never 404 on this route
+			apiErr.Status, apiErr.Code = http.StatusConflict, "project_not_found"
+		}
 		nodeError(c, apiErr.Status, apiErr.Code, apiErr.Detail)
 		return
 	}
