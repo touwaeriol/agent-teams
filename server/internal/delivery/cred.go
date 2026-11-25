@@ -83,11 +83,6 @@ func (e *Engine) credential(ctx context.Context, node store.Node, r *protocol.Cr
 	scope := cs.scope
 	refresh := r.ForceRefresh != nil && *r.ForceRefresh // git rejected the last token (credential erase)
 	tok, exp, err := e.gh.Credential(ctx, repo, scope, refresh)
-	if errors.Is(err, ghops.ErrPATNarrow) && cs.patScope != nil {
-		// A read-only session on a PAT connection: a PAT cannot be narrowed, so it keeps the
-		// employee token it always had (only GitHub App connections get a read-only token).
-		tok, exp, err = e.gh.Credential(ctx, repo, *cs.patScope, refresh)
-	}
 	if errors.Is(err, ghops.ErrPATNarrow) && r.JobID != nil {
 		tok, exp, err = e.gh.Credential(ctx, repo, ghops.ScopeFull, refresh) // platform jobs may use the PAT (§10.4)
 	}
@@ -201,8 +196,7 @@ type callerScope struct {
 	projectID string
 	userID    string // the project's owner (standalone credentials belong to them)
 	scope     ghops.Scope
-	repo      string       // "" = any repository of the project (as git jobs name it: owner/name or git/<id>)
-	patScope  *ghops.Scope // scope to retry with when scope cannot be narrowed for a PAT (read-only sessions)
+	repo      string // "" = any repository of the project (as git jobs name it: owner/name or git/<id>)
 }
 
 // credScope decides the project and permission set for the caller. A session may read every
@@ -210,12 +204,7 @@ type callerScope struct {
 func (e *Engine) credScope(ctx context.Context, node store.Node, r *protocol.CredRequest) (callerScope, error) {
 	if r.SessionID != nil {
 		pid, scope, err := e.sessionScope(ctx, string(*r.SessionID), r.Purpose)
-		cs := callerScope{projectID: pid, scope: scope}
-		if err == nil && scope == ghops.ScopeRead {
-			emp := ghops.ScopeEmployee
-			cs.patScope = &emp
-		}
-		return cs, err
+		return callerScope{projectID: pid, scope: scope}, err
 	}
 	if r.JobID != nil {
 		return e.jobScope(ctx, node, string(*r.JobID))
@@ -227,8 +216,8 @@ func (e *Engine) credScope(ctx context.Context, node store.Node, r *protocol.Cre
 // and open pull requests and issues (architecture.md §10.4; the user asked for gh and git push in
 // every employee session). The purpose is ignored: git's credential helper cannot tell a fetch
 // from a push. Protected branches are refused by the platform pre-push hook; merging stays with
-// the merge queue and user acceptance. The coordinator gets nothing. A read-only member (read_only,
-// or a review/decision gate: the same rule as the SSH gateway) gets a read-only token (#55 F9).
+// the merge queue and user acceptance. The coordinator gets nothing. Read-only roles get the same
+// token (the user's call, 2026-11-17: reviewers comment and review with gh); see #55 F9.
 func (e *Engine) sessionScope(ctx context.Context, sessionID string, _ protocol.CredRequestPurpose) (string, ghops.Scope, error) {
 	sc, err := core.SessionContextOf(ctx, e.core.Pool, sessionID)
 	if err != nil {
@@ -237,22 +226,11 @@ func (e *Engine) sessionScope(ctx context.Context, sessionID string, _ protocol.
 	if sc.Employee.Tier == "coordinator" {
 		return "", 0, errors.New("coordinator_has_no_credentials")
 	}
-	if readOnlySession(sc.Employee) {
-		return sc.Employee.ProjectID, ghops.ScopeRead, nil
-	}
 	scope := ghops.ScopeEmployee
 	if d, err := core.DeliveryOf(ctx, e.core.Pool, sc.Employee.ProjectID); err == nil && d.AllowWorkflowEdits {
 		scope = ghops.ScopeEmployeeFlows
 	}
 	return sc.Employee.ProjectID, scope, nil
-}
-
-// readOnlySession: a member whose role is read-only or gates a review or decision.
-func readOnlySession(emp core.Employee) bool {
-	if emp.Tier != "member" {
-		return false
-	}
-	return (emp.Spec.ReadOnly != nil && *emp.Spec.ReadOnly) || emp.Spec.Gate == "review" || emp.Spec.Gate == "decision"
 }
 
 // jobScope: the repository and scope of a git job of this node that still runs (#55 N8/F9: a
