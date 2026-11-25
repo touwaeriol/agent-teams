@@ -71,12 +71,15 @@ git 走 ssh 的话，在 `compose.yml` 里打开 `~/.ssh:/home/agent/.ssh:ro` �
 
 ```bash
 docker run -d --name agent-teams-node --restart unless-stopped --env-file deploy/node/node.env \
-  -v at-claude:/home/agent/.claude -v at-codex:/home/agent/.codex \
-  -v at-workspace:/home/agent/.agents_team -v at-state:/home/agent/.local/state/agent-teams \
-  -v at-data:/home/agent/.local/share/agent-teams \
+  -v node_claude:/home/agent/.claude -v node_codex:/home/agent/.codex \
+  -v node_workspace:/home/agent/.agents_team -v node_state:/home/agent/.local/state/agent-teams \
+  -v node_data:/home/agent/.local/share/agent-teams \
   ghcr.io/touwaeriol/agent-teams-node:latest
 docker exec -it agent-teams-node claude login
 ```
+
+卷名 `node_<名字>` 就是在 `deploy/node` 目录里 `docker compose up` 建出来的卷（compose 项目名默认取目录名 `node`），
+所以 compose 和 docker run 两种方式可以互换，登录和工作区都还在。
 
 除 `run`（默认）以外的命令会代替守护进程执行，例如 `docker run --rm -it ghcr.io/touwaeriol/agent-teams-node bash`。自己构建：在仓库根目录 `docker build -f deploy/node/Dockerfile -t agent-teams-node .`。
 
