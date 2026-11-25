@@ -24,6 +24,8 @@ export interface NodeConfig {
   logLevel: string;
   /** node.usage period (AGENT_TEAMS_USAGE_INTERVAL_S; 0 disables); unset = default 5 min. */
   usageIntervalMs?: number;
+  /** Startup warnings (insecure console URL allowed, token on the command line); the daemon logs them. */
+  warnings: string[];
 }
 
 export class ConfigError extends Error {}
@@ -70,12 +72,31 @@ export function parseFlags(argv: string[]): Record<string, string> {
   return out;
 }
 
-/** ws(s)://host/nodes/connect from http(s)://host or an explicit ws URL. */
-export function toWsUrl(consoleUrl: string): string {
-  const u = new URL(consoleUrl);
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** True for localhost / 127.0.0.1 / ::1 (development and e2e consoles). */
+export function isLoopbackHost(hostname: string): boolean {
+  return LOOPBACK.has(hostname.toLowerCase());
+}
+
+/**
+ * ws(s)://host/nodes/connect from http(s)://host or an explicit ws URL. Plain http/ws carries the
+ * node token, every command and upgrade packages in clear text, so it is refused unless the host is
+ * loopback or allowInsecure (AGENT_TEAMS_ALLOW_INSECURE=1) is set.
+ */
+export function toWsUrl(consoleUrl: string, allowInsecure = false): string {
+  let u: URL;
+  try {
+    u = new URL(consoleUrl);
+  } catch {
+    throw new ConfigError(`invalid console URL ${consoleUrl}`);
+  }
   if (u.protocol === "http:") u.protocol = "ws:";
   if (u.protocol === "https:") u.protocol = "wss:";
   if (u.protocol !== "ws:" && u.protocol !== "wss:") throw new ConfigError(`unsupported console URL ${consoleUrl}`);
+  if (u.protocol === "ws:" && !allowInsecure && !isLoopbackHost(u.hostname)) {
+    throw new ConfigError(`refusing plain-text console URL ${consoleUrl}: use https:// (or set AGENT_TEAMS_ALLOW_INSECURE=1 for a trusted network)`);
+  }
   if (u.pathname === "/" || u.pathname === "") u.pathname = "/nodes/connect";
   return u.toString();
 }
@@ -92,9 +113,18 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
   const token = get("AGENT_TEAMS_NODE_TOKEN");
   if (!consoleUrl) throw new ConfigError("set --console or AGENT_TEAMS_CONSOLE");
   if (!token) throw new ConfigError("set AGENT_TEAMS_NODE_TOKEN (shown when you add the node in the console)");
+  const allowInsecure = truthy(env.AGENT_TEAMS_ALLOW_INSECURE ?? file.AGENT_TEAMS_ALLOW_INSECURE);
+  const wsUrl = toWsUrl(consoleUrl, allowInsecure);
+  const warnings: string[] = [];
+  if (wsUrl.startsWith("ws:") && !isLoopbackHost(new URL(wsUrl).hostname)) {
+    warnings.push(`AGENT_TEAMS_ALLOW_INSECURE is set: the node token and all commands go to ${consoleUrl} in clear text`);
+  }
+  if (flags.AGENT_TEAMS_NODE_TOKEN !== undefined) {
+    warnings.push("--token is visible to other users in the process list; put AGENT_TEAMS_NODE_TOKEN in the environment or in node.env instead");
+  }
   const dataDir = env.AGENT_TEAMS_DATA ?? join(env.XDG_DATA_HOME ?? join(home, ".local", "share"), "agent-teams");
   return {
-    consoleUrl, wsUrl: toWsUrl(consoleUrl), token,
+    consoleUrl, wsUrl, token, warnings,
     root: resolve(get("AGENT_TEAMS_ROOT") ?? join(home, ".agents_team")),
     stateDir: resolve(get("AGENT_TEAMS_STATE") ?? join(env.XDG_STATE_HOME ?? join(home, ".local", "state"), "agent-teams")),
     configDir, platformDir: join(dataDir, "platform"), installDir: dataDir,
@@ -108,6 +138,10 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
     logLevel: get("AGENT_TEAMS_LOG_LEVEL") ?? "info",
     ...usageInterval(get("AGENT_TEAMS_USAGE_INTERVAL_S")),
   };
+}
+
+function truthy(v: string | undefined): boolean {
+  return v !== undefined && ["1", "true", "yes", "on"].includes(v.trim().toLowerCase());
 }
 
 function positiveInt(v: string | undefined): number | undefined {
