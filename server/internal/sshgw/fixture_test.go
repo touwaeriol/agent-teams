@@ -42,6 +42,7 @@ type fixture struct {
 	cs      *core.Store
 	vault   *credvault.Vault
 	g       *Gateway
+	nodes   *nodegw.Gateway
 	http    *httptest.Server
 	tg      *target
 	user    string
@@ -70,7 +71,7 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fixture{t: t, ctx: ctx, s: s, cs: cs, vault: vault, tg: newTarget(t, targetPassword)}
+	f := &fixture{t: t, ctx: ctx, s: s, cs: cs, vault: vault, tg: newTarget(t, targetPassword), nodes: nodes}
 	f.g = New(Deps{Store: s, Core: cs, Nodes: nodes, Fan: fan, Vault: vault, Log: log,
 		Cfg: Config{Keepalive: time.Second, Recheck: time.Hour}})
 	runCtx, cancel := context.WithCancel(ctx)

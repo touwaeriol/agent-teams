@@ -184,6 +184,18 @@ func (g *Gateway) Authenticate(r *http.Request) (store.Node, error) {
 	return g.authenticate(r.Context(), r)
 }
 
+// AuthenticateHash is Authenticate that also returns the token hash that matched, for a
+// long-lived connection to check again later with TokenStillValid (the SSH gateway, #55 L13).
+func (g *Gateway) AuthenticateHash(r *http.Request) (store.Node, string, error) {
+	return g.authenticateHash(r.Context(), r)
+}
+
+// TokenStillValid reports whether the node still exists, still has the token hash it
+// authenticated with (not rotated) and its owner is still active.
+func (g *Gateway) TokenStillValid(ctx context.Context, nodeID, tokenHash string) (bool, error) {
+	return stillValid(ctx, g.core.Pool, nodeID, tokenHash)
+}
+
 func (g *Gateway) authenticate(ctx context.Context, r *http.Request) (store.Node, error) {
 	node, _, err := g.authenticateHash(ctx, r)
 	return node, err

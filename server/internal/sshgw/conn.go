@@ -30,6 +30,7 @@ type conn struct {
 	id      string
 	nc      net.Conn
 	node    store.Node
+	token   string // hash of the node token /nodes/ssh authenticated with (re-checked, #55 L13)
 	sess    store.SSHSession
 	server  store.RemoteServer // without credential
 	gen     int
@@ -60,8 +61,8 @@ type conn struct {
 	done     chan struct{}
 }
 
-func newConn(g *Gateway, nc net.Conn, node store.Node, x store.SSHSession, srv store.RemoteServer, gen int) *conn {
-	c := &conn{g: g, id: core.NewID("sshc"), nc: nc, node: node, sess: x, server: srv, gen: gen, started: g.now(),
+func newConn(g *Gateway, nc net.Conn, node store.Node, tokenHash string, x store.SSHSession, srv store.RemoteServer, gen int) *conn {
+	c := &conn{g: g, id: core.NewID("sshc"), nc: nc, node: node, token: tokenHash, sess: x, server: srv, gen: gen, started: g.now(),
 		chans: map[*channel]struct{}{}, done: make(chan struct{})}
 	c.last.Store(c.started.UnixNano())
 	return c
@@ -182,6 +183,14 @@ func contains(list []string, v string) bool {
 // ssh:revoke hint): "" when it may go on, else the reason shown to the session. A database error
 // keeps the connection (the next check decides).
 func (c *conn) stillAllowed(ctx context.Context) string {
+	// The node's own access first (#55 L13): a rotated token, a deleted node or a disabled owner
+	// ends the connections opened with the old token, not only new ones.
+	if ok, err := c.g.nodes.TokenStillValid(ctx, c.node.ID, c.token); err != nil {
+		c.g.log.Warn("ssh: recheck node token", "node_id", c.node.ID, "err", err)
+		return ""
+	} else if !ok {
+		return "节点令牌已失效（已轮换、节点已删除或用户已停用）"
+	}
 	row, err := c.g.store.SSHCert(ctx, c.serial)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
