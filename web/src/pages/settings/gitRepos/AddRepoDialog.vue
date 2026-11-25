@@ -13,7 +13,7 @@ import CopyBlock from "@/components/common/CopyBlock.vue";
 import Field from "@/components/common/Field.vue";
 import FormDialog from "@/components/common/FormDialog.vue";
 import Spinner from "@/components/common/Spinner.vue";
-import { credentialsFor, parseRepoURL, PROVIDER_LABEL, repoTitle } from "@/lib/gitRepos";
+import { CREDENTIAL_WARNING, credentialsFor, parseRepoURL, PROVIDER_LABEL, repoTitle } from "@/lib/gitRepos";
 import TestResult from "./TestResult.vue";
 
 type Auth = "https_token" | "ssh_key" | "public";
@@ -158,6 +158,7 @@ function submit() {
           <el-option value="new" :label="editing ? '新建凭据（请到下方“凭据”里添加后再选）' : '新建凭据…'" :disabled="!!editing" />
         </el-select>
       </Field>
+      <Callout tone="warn" data-cred-warning>{{ CREDENTIAL_WARNING }}</Callout>
       <div v-if="creating && !editing" class="flex flex-col gap-4 rounded-xl border bg-well/40 p-4">
         <Field v-slot="{ id }" label="凭据名称（可选）" hint="不填就用主机名">
           <el-input :id="id" v-model="credName" :placeholder="auth === 'ssh_key' ? 'deploy 部署密钥' : 'GitLab 个人令牌'" />

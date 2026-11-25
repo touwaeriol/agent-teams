@@ -50,6 +50,14 @@ export function parseRepoURL(text: string): ParsedURL {
   return { ok: true, transport: parts.transport, host, path: parts.path, provider: known?.provider ?? "generic", username };
 }
 
+/**
+ * The risk of a standalone repository credential (audit #55 M7): the platform decrypts it and hands
+ * it to the node running the project's sessions and to the AI sessions' git (an SSH key loses its
+ * passphrase first). Shown wherever a token or SSH key is entered or picked for a repository.
+ */
+export const CREDENTIAL_WARNING =
+  "这个凭据会解密后交给运行本项目会话的节点和 AI 会话，用于 git 操作（SSH 私钥会去掉口令后下发）。请使用只读部署密钥，或只能访问这一个仓库、设置了过期时间的令牌；需要推送时，只给这一个仓库的部署密钥开写权限。";
+
 /** The repository's display title: its name, else the last path segment. */
 export const repoTitle = (r: Pick<GitRepoView, "name" | "slug">) => r.name || r.slug.split("/").pop() || r.slug;
 

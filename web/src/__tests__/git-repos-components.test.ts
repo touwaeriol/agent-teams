@@ -11,6 +11,8 @@ import { createMemoryHistory, createRouter } from "vue-router";
 import type { GitCredentialView, GitRepoView } from "@/api/views";
 import GitRepos from "@/pages/settings/GitRepos.vue";
 import AddRepoDialog from "@/pages/settings/gitRepos/AddRepoDialog.vue";
+import CredentialDialog from "@/pages/settings/gitRepos/CredentialDialog.vue";
+import { CREDENTIAL_WARNING } from "@/lib/gitRepos";
 
 type Route = [method: string, path: RegExp, body: unknown, status?: number];
 
@@ -121,5 +123,26 @@ describe("AddRepoDialog", () => {
     expect(document.body.textContent).toContain("ssh-ed25519 AAAA agent-teams");
     await submit();
     expect(await bodyOf(calls(spy, "POST", /\/api\/git\/repos$/)[0])).toEqual({ url: "ssh://git@git.example.com:2222/infra/deploy.git", credential_id: "gc_9" });
+  });
+});
+
+describe("standalone credential warning (#55 M7)", () => {
+  it("warns in 添加仓库 while a token or SSH key is used, not for a public repository", async () => {
+    api([]);
+    const w = mountWith(AddRepoDialog, { open: true, repo: null, credentials: [] });
+    await flushPromises();
+    await type("仓库地址", "https://gitlab.example.com/acme/web.git");
+    expect(document.body.querySelector("[data-cred-warning]")?.textContent?.trim()).toBe(CREDENTIAL_WARNING);
+    [...document.body.querySelectorAll<HTMLElement>(".el-radio-button")].find((b) => b.textContent?.trim() === "公开仓库（只读）")!.querySelector("input")!.click();
+    await flushPromises();
+    expect(document.body.querySelector("[data-cred-warning]")).toBeNull();
+    w.unmount();
+  });
+
+  it("warns when replacing a credential", async () => {
+    api([]);
+    mountWith(CredentialDialog, { open: true, credential: cred });
+    await flushPromises();
+    expect(document.body.querySelector("[data-cred-warning]")?.textContent?.trim()).toBe(CREDENTIAL_WARNING);
   });
 });
