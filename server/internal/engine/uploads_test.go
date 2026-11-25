@@ -28,6 +28,12 @@ import (
 // putParts PUTs body to the presigned part URLs of an upload, part_size bytes each, and returns
 // the parts for complete.
 func (b *browser) putParts(pid string, up orchapi.UploadSession, body []byte) []blobstore.Part {
+	b.w.t.Helper()
+	return b.putPartsAt("/api/projects/"+pid+"/uploads", up, body)
+}
+
+// putPartsAt is putParts for the uploads under base (/api/uploads: without a project).
+func (b *browser) putPartsAt(base string, up orchapi.UploadSession, body []byte) []blobstore.Part {
 	t := b.w.t
 	t.Helper()
 	nums := []int32{}
@@ -35,7 +41,7 @@ func (b *browser) putParts(pid string, up orchapi.UploadSession, body []byte) []
 		nums = append(nums, i)
 	}
 	var urls orchapi.UploadParts
-	b.must(200, "POST", "/api/projects/"+pid+"/uploads/"+up.UploadID+"/parts", map[string]any{"numbers": nums}, &urls)
+	b.must(200, "POST", base+"/"+up.UploadID+"/parts", map[string]any{"numbers": nums}, &urls)
 	parts := []blobstore.Part{}
 	for _, u := range urls.URLs {
 		off := int64(u.Number-1) * up.PartSize

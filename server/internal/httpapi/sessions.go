@@ -36,10 +36,10 @@ type SessionInput struct {
 	Runtime string           `json:"runtime,omitempty" maxLength:"32" doc:"The agent (CLI) the session runs on: one of the role's runtimes; '' = the role's (several: spread like any employee). Fixed once the session starts"`
 	Model   string           `json:"model,omitempty" maxLength:"100" doc:"'' = the role's model for the runtime"`
 	// Session controls (#53): picked on the new-session page; GET /api/session-options lists them.
-	PermissionMode string `json:"permission_mode,omitempty" enum:"auto,default,acceptEdits,plan,bypassPermissions" doc:"'' = the initial mode (Claude: auto when the model supports it, else default; Codex/Antigravity: the role's)"`
-	Effort         string `json:"effort,omitempty" maxLength:"32" doc:"Thinking effort; '' = project / role setting"`
-	NodeID         string `json:"node_id,omitempty" maxLength:"64" doc:"Run on this node; '' = picked automatically (spread over the nodes by load score; nodes whose quota is tight only when all are)"`
-	Branch         string `json:"branch,omitempty" maxLength:"60" doc:"Name of the work branch (after session/<id>-); '' = from the title, or the repositories when the title has no Latin letters"`
+	PermissionMode string   `json:"permission_mode,omitempty" enum:"auto,default,acceptEdits,plan,bypassPermissions" doc:"'' = the initial mode (Claude: auto when the model supports it, else default; Codex/Antigravity: the role's)"`
+	Effort         string   `json:"effort,omitempty" maxLength:"32" doc:"Thinking effort; '' = project / role setting"`
+	NodeID         string   `json:"node_id,omitempty" maxLength:"64" doc:"Run on this node; '' = picked automatically (spread over the nodes by load score; nodes whose quota is tight only when all are)"`
+	Branch         string   `json:"branch,omitempty" maxLength:"60" doc:"Name of the work branch (after session/<id>-); '' = from the title, or the repositories when the title has no Latin letters"`
 	Attachments    []string `json:"attachments,omitempty" maxItems:"20" doc:"Attachment ids uploaded with POST /api/uploads (ready, not expired, not yet used): they join the session's project and go with the first message"`
 }
 
