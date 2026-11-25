@@ -147,6 +147,8 @@ attachments.set("img_old", { ref: { id: "img_old", name: "上周的导出.csv", 
 // progress bar is visible (default 12 ms per 64 KB ≈ 5 MB/s); MOCK_STORAGE=off answers 503
 // storage_unavailable (the old upload takes over).
 const PART_SIZE = 16 << 20;
+const STORAGE_BASE = process.env.MOCK_STORAGE_URL ?? `http://127.0.0.1:${process.env.MOCK_PORT ?? 3001}`;
+const STORAGE_CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "PUT, GET, HEAD", "Access-Control-Allow-Headers": "*", "Access-Control-Expose-Headers": "ETag", "Access-Control-Max-Age": "3600" };
 const uploads = new Map();
 const THROTTLE_MS = Number(process.env.MOCK_UPLOAD_THROTTLE_MS ?? 12);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -175,7 +177,8 @@ function beginUpload(res, pid, b) {
 function partUrls(res, uid, b) {
   const u = uploads.get(uid);
   if (!u) return fail(res, 404, "没有这个上传", "not_found");
-  json(res, 200, { urls: (b.numbers ?? []).map((n) => ({ number: n, url: `/api/mock-s3/${uid}/${n}?X-Amz-Signature=mock` })), expires_at: new Date(Date.now() + 3_600_000).toISOString() });
+  // Straight to the mock's own port, like presigned URLs point at the storage (not through the vite proxy).
+  json(res, 200, { urls: (b.numbers ?? []).map((n) => ({ number: n, url: `${STORAGE_BASE}/api/mock-s3/${uid}/${n}?X-Amz-Signature=mock` })), expires_at: new Date(Date.now() + 3_600_000).toISOString() });
 }
 function completeUpload(res, uid, b) {
   const u = uploads.get(uid);
@@ -604,15 +607,19 @@ const routes = [
   }],
   ["PUT", /^\/api\/mock-s3\/([^/]+)\/(\d+)$/, async (req, res, [uid, n]) => {
     const u = uploads.get(uid);
-    if (!u) return fail(res, 404, "NoSuchUpload");
+    if (!u) return json(res, 404, { detail: "NoSuchUpload" }, STORAGE_CORS);
     const chunks = [];
-    for await (const c of req) {
-      chunks.push(c);
-      if (THROTTLE_MS) await sleep(THROTTLE_MS);
+    try {
+      for await (const c of req) {
+        chunks.push(c);
+        if (THROTTLE_MS) await sleep(THROTTLE_MS);
+      }
+    } catch {
+      return; // the browser went away mid-part (cancelled, page closed)
     }
     const data = Buffer.concat(chunks);
     u.data.set(Number(n), data);
-    res.writeHead(200, { ETag: `"${createHash("md5").update(data).digest("hex")}"`, "Access-Control-Expose-Headers": "ETag" });
+    res.writeHead(200, { ...STORAGE_CORS, ETag: `"${createHash("md5").update(data).digest("hex")}"` });
     res.end();
   }],
   ["GET", /^\/api\/deliverables\/([^/]+)\/files$/, (req, res, [id]) => {
@@ -954,11 +961,13 @@ const PUBLIC = new Set(["/auth/login", "/auth/register"]);
 
 createServer(async (req, res) => {
   const url = new URL(req.url, "http://mock");
+  // The stand-in storage: presigned-style URLs, no cookie or CSRF (CORS like the RustFS bucket).
+  if (url.pathname.startsWith("/api/mock-s3/") && req.method === "OPTIONS") return void res.writeHead(204, STORAGE_CORS).end();
+  if (url.pathname.startsWith("/api/mock-s3/") && req.method === "PUT") return routes.find(([m, re]) => m === "PUT" && re.test(url.pathname))[2](req, res, url.pathname.match(/^\/api\/mock-s3\/([^/]+)\/(\d+)$/).slice(1), url);
   const c = cookies(req);
   if (!PUBLIC.has(url.pathname) && !c.agent_teams_session) return fail(res, 401, "请先登录", "unauthenticated");
   const write = !["GET", "HEAD"].includes(req.method);
-  // /api/mock-s3 stands in for presigned storage URLs, which carry no CSRF header.
-  if (write && !PUBLIC.has(url.pathname) && !url.pathname.startsWith("/api/mock-s3/") && req.headers["x-csrf-token"] !== c.agent_teams_csrf) return fail(res, 403, "安全校验失败，请刷新页面后重试", "csrf");
+  if (write && !PUBLIC.has(url.pathname) && req.headers["x-csrf-token"] !== c.agent_teams_csrf) return fail(res, 403, "安全校验失败，请刷新页面后重试", "csrf");
   for (const [method, re, handler] of routes) {
     const m = req.method === method && url.pathname.match(re);
     if (m) return handler(req, res, m.slice(1), url);

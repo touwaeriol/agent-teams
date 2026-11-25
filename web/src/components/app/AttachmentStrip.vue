@@ -30,7 +30,7 @@ const open = (key: string) => {
     <span
       v-for="x in a.items.value"
       :key="x.key"
-      :class="cn('group relative h-14 shrink-0 overflow-hidden rounded-lg border bg-raised', x.kind === 'image' ? 'w-14' : 'w-40', x.error && 'border-destructive')"
+      :class="cn('group relative h-14 shrink-0 overflow-hidden rounded-lg border bg-raised', x.kind === 'image' ? 'w-14' : 'w-52', x.error && 'border-destructive')"
       :title="x.error ?? x.name"
     >
       <button v-if="x.kind === 'image'" type="button" :aria-label="`查看 ${x.name}`" class="block size-full cursor-zoom-in" @click="open(x.key)">
@@ -42,7 +42,7 @@ const open = (key: string) => {
           <span class="truncate font-medium">{{ x.name }}</span>
           <span class="truncate text-[11px] text-muted-foreground">
             {{ x.kind === "pdf" ? "PDF" : x.kind === "text" ? "文本" : typeLabel("", x.name) }}<template v-if="x.size !== undefined"> · {{ formatSize(x.size) }}</template>
-            <template v-if="!x.id && !x.error"> · {{ Math.round((x.progress ?? 0) * 100) }}%</template>
+            <template v-if="!x.id && !x.error"> · {{ (x.progress ?? 0) >= 1 ? "正在完成…" : `${Math.min(99, Math.round((x.progress ?? 0) * 100))}%` }}</template>
           </span>
         </span>
       </span>
@@ -56,7 +56,7 @@ const open = (key: string) => {
         aria-valuemin="0"
         aria-valuemax="100"
       >
-        <span class="block h-full bg-primary transition-[width] duration-200" :style="{ width: `${Math.round((x.progress ?? 0) * 100)}%` }" />
+        <span class="block h-full bg-brand transition-[width] duration-200" :style="{ width: `${Math.round((x.progress ?? 0) * 100)}%` }" />
       </span>
       <span v-if="x.error" class="pointer-events-none absolute inset-x-0 bottom-0 bg-destructive/90 px-1 text-center text-[10px] text-white">失败</span>
       <button
