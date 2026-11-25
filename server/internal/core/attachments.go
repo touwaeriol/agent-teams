@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"path"
 	"strings"
 	"time"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/blobgc"
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
+	"github.com/touwaeriol/agent-teams/server/internal/sharedfiles"
 )
 
 // Attachment limits (api.md §3.4): what Claude accepts per image or PDF, a text file's size
@@ -227,10 +227,8 @@ func DetectType(name string, head []byte, size int64) string {
 	if size <= MaxTextBytes && IsTextName(name) && bytes.IndexByte(head, 0) < 0 && validPrefix(head, size) {
 		return TextType
 	}
-	if typ := mime.TypeByExtension(strings.ToLower(path.Ext(name))); typ != "" {
-		return typ
-	}
-	return "application/octet-stream"
+	// The shared files' extension table (fixed in code, not the host's mime.types).
+	return sharedfiles.ContentType(name)
 }
 
 // validPrefix: head is UTF-8, allowing a rune cut at its end when the file goes on.
