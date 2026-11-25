@@ -86,10 +86,8 @@ func (s *Service) openSubthread(ctx context.Context, tx *core.Tx, c *call) (Resu
 	if err != nil {
 		return Result{}, err
 	}
-	brief, err := s.orch.DeliveryText(ctx, tx, parent.ProjectID, subthreadBrief(parent, in.Brief), files)
-	if err != nil {
-		return Result{}, err
-	}
+	// The brief is stored as written; its text files are inlined when the thread starts (briefFiles).
+	brief := subthreadBrief(parent, in.Brief)
 	t, err := s.orch.OpenThreadTx(ctx, tx, orchestrator.ThreadRequest{UserID: c.sc.OwnerID, ProjectID: parent.ProjectID,
 		Title: strings.TrimSpace(in.Title), Brief: brief, OnlyRoles: in.Roles, Repos: focusOf(in.Repos),
 		OpenedBy: "lead", ParentID: &parent.ID})

@@ -364,6 +364,19 @@ func (o *Orchestrator) forwardNote(ctx context.Context, tx *core.Tx, req Forward
 // with the attachments its brief carries (meta.attachments); briefFiles collects them.
 const BriefAttachmentsKey = "brief_attachments"
 
+// briefGiven are the attachments open_subthread gave the thread (its BriefAttachmentsKey notes).
+func briefGiven(ctx context.Context, tx *core.Tx, t core.Thread) ([]core.AttachmentRef, error) {
+	list, err := core.MessagesWithMeta(ctx, tx, t.ID, BriefAttachmentsKey)
+	if err != nil {
+		return nil, err
+	}
+	var out []core.AttachmentRef
+	for _, m := range list {
+		out = append(out, core.AttachmentsOf(m)...)
+	}
+	return dedupeRefs(out), nil
+}
+
 // briefFiles are the attachments that go to the lead with the brief: those of the user's
 // message the thread was opened for, then those of the messages forwarded into it before it
 // started, then those the parent's lead gave open_subthread (each attachment once; text files
