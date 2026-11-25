@@ -39,6 +39,7 @@ export function attachKind(file: Pick<FileLike, "type" | "name">): AttachKind {
 }
 
 export function attachProblem(file: FileLike): string | null {
+  if (file.size === 0) return `${file.name || "这个文件"} 是空文件（0 字节），不能作为附件`;
   if (file.size > ATTACH_MAX_BYTES) return `${file.name || "这个文件"} 超过 200 MB`;
   return null;
 }
@@ -60,6 +61,12 @@ export function pickImages<T extends FileLike>(files: T[], already: number): { o
 export function imageFiles(list: FileList | File[] | null | undefined): File[] {
   return Array.from(list ?? []);
 }
+
+/**
+ * The `attachments` field of a request body: only present with files, so a request without
+ * attachments is exactly what it was before (servers without the field reject unknown ones).
+ */
+export const attachmentsField = (ids: string[] | null | undefined): { attachments?: string[] } => (ids?.length ? { attachments: ids } : {});
 
 export const attachmentUrl = (id: string) => `/api/attachments/${encodeURIComponent(id)}`;
 /** Always a download (never shown inline). */

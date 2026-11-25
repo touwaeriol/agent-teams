@@ -18,6 +18,8 @@ import IconMenu from "@/components/common/IconMenu.vue";
 import ConfirmAction from "@/components/common/ConfirmAction.vue";
 import Markdown from "@/components/Markdown.vue";
 import { resetDraftMemory, useDraft } from "@/lib/persist";
+import { attachmentsField } from "@/lib/images";
+import { toast } from "@/lib/toast";
 import { threadMark } from "@/lib/threadList";
 import { cardLook } from "@/pages/overview/logic";
 import type { ThreadView } from "@/api/views";
@@ -105,6 +107,39 @@ describe("attachments", () => {
     await flushPromises();
     expect(a.ids()).toEqual(["att1-0", "att1-1", "att1-2"]);
     expect(uploader).toHaveBeenCalledWith("p1", expect.any(File), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  });
+
+  it("refuses empty (0 byte) files with a reason", () => {
+    const err = vi.spyOn(toast, "error").mockImplementation(() => undefined);
+    let a!: ReturnType<typeof useAttachments>;
+    const uploader = vi.fn(async () => ({ id: "x" }));
+    mountWith(defineComponent({ setup: () => ((a = useAttachments("p1", uploader)), () => h("div")) }));
+    a.add([new File([], "empty.txt", { type: "text/plain" })]);
+    expect(a.items.value).toEqual([]);
+    expect(uploader).not.toHaveBeenCalled();
+    expect(err).toHaveBeenCalledWith("empty.txt 是空文件（0 字节），不能作为附件");
+  });
+
+  it("removing an item after the box was remounted still cancels its upload", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:x");
+    URL.revokeObjectURL = vi.fn();
+    const signals: AbortSignal[] = [];
+    const uploader = vi.fn((_p: string, _f: File, h?: { signal?: AbortSignal }) => (signals.push(h!.signal!), new Promise<{ id: string }>(() => undefined)));
+    let a!: ReturnType<typeof useAttachments>;
+    const Host = defineComponent({ setup: () => ((a = useAttachments("p1", uploader, () => "draft:v2:u1:p1:remount")), () => h("div")) });
+    const first = mountWith(Host);
+    a.add([new File(["x"], "big.zip")]);
+    first.unmount();
+    mountWith(Host);
+    expect(a.items.value).toHaveLength(1);
+    a.remove(a.items.value[0]!.key);
+    expect(signals[0]!.aborted).toBe(true);
+  });
+
+  it("puts attachments into a request body only when there are some", () => {
+    expect(attachmentsField([])).toEqual({});
+    expect(attachmentsField(null)).toEqual({});
+    expect(attachmentsField(["img_1"])).toEqual({ attachments: ["img_1"] });
   });
 });
 

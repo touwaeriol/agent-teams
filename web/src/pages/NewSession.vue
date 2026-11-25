@@ -14,6 +14,7 @@ import { keys, useNodes, useRoles } from "@/api/queries";
 import AttachButton from "@/components/app/AttachButton.vue";
 import AttachmentStrip from "@/components/app/AttachmentStrip.vue";
 import { attachmentHandlers, directUploader, useAttachments } from "@/components/app/attachments";
+import { attachmentsField } from "@/lib/images";
 import SendButton from "@/components/app/SendButton.vue";
 import { standaloneUploads } from "@/lib/upload";
 import NewSessionOptions from "@/components/app/session/NewSessionOptions.vue";
@@ -87,8 +88,9 @@ const create = useAction(
       effort: effort.value || undefined,
       node_id: node.value === AUTO ? undefined : node.value,
       branch: branch.value.trim() || undefined,
-      // SessionInput.attachments (agreed with the server, q10); typed once the schema has it.
-      ...({ attachments: files.ids() ?? [] } as object),
+      // SessionInput.attachments (agreed with the server, q10): only sent with files, so a session
+      // without attachments posts exactly what it did before. Typed once the schema has it.
+      ...(attachmentsField(files.ids()) as object),
     }),
   {
     invalidate: [keys.projects],

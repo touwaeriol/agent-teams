@@ -81,6 +81,11 @@ const upload: Uploader = directUploader();
 
 /** Attachments of boxes with a cache key, kept for the page so a remounted box gets them back. */
 const shelf = new Map<string, Ref<PendingImage[]>>();
+/**
+ * Running uploads by item key, for the page like the shelf: removing an item cancels its upload
+ * even when the box was remounted since it started (keys are unique per page).
+ */
+const running = new Map<string, AbortController>();
 
 /**
  * State of the images attached to one message box. With cacheKey (the box's draft key) the list
@@ -91,7 +96,11 @@ export function useAttachments(pid: MaybeRefOrGetter<string>, uploader: Uploader
   const own = ref<PendingImage[]>([]);
   // Preview URLs this component owns (unkeyed items): revoked with it.
   const urls: string[] = [];
-  onBeforeUnmount(() => urls.forEach((u) => URL.revokeObjectURL(u)));
+  onBeforeUnmount(() => {
+    urls.forEach((u) => URL.revokeObjectURL(u));
+    // Unkeyed items go with the component, so do their uploads.
+    for (const x of own.value) running.get(x.key)?.abort();
+  });
   const box = (): Ref<PendingImage[]> => {
     const k = toValue(cacheKey);
     if (!k) return own;
@@ -121,8 +130,6 @@ export function useAttachments(pid: MaybeRefOrGetter<string>, uploader: Uploader
   const patch = (key: string, p: Partial<PendingImage>) => {
     for (const r of [own, ...shelf.values()]) if (r.value.some((x) => x.key === key)) r.value = r.value.map((x) => (x.key === key ? { ...x, ...p } : x));
   };
-  // Running uploads by item key: removing an item cancels its upload.
-  const running = new Map<string, AbortController>();
   const send = async (key: string, file: File) => {
     const ctl = new AbortController();
     running.set(key, ctl);
