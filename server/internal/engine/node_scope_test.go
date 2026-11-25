@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -149,4 +150,37 @@ func TestNodeSecondaryIDsScoped(t *testing.T) {
 			t.Fatalf("owner's daemon got %+v", e)
 		}
 	}
+}
+
+// TestGatewayRevokedWhileReplacing (#55 N2, reviewer-2): a live link O is displaced by a new link
+// L of the same token, and the rotation (new hash + Disconnect) lands right after L is registered:
+// Disconnect closes L, L's second check fails and O is put back, but O's token is checked again
+// there, so O is closed with 4401 too and the node is offline, not left on a revoked token.
+func TestGatewayRevokedWhileReplacing(t *testing.T) {
+	w := newWorld(t, nil)
+	b := w.signUp("ops@example.com")
+	var node nodeCreated
+	b.must(201, "POST", "/api/nodes", map[string]string{"name": "n1"}, &node)
+	old := w.connect(node.Token, nodetest.Options{})
+
+	var once sync.Once
+	w.e.Gateway.AfterRegister = func(id string) {
+		once.Do(func() { // what POST /api/nodes/{id}/token does
+			if _, err := store.Exec(w.ctx, w.e.Core.Pool, `UPDATE at_nodes SET token_hash = 'rotated' WHERE id = $1`, id); err != nil {
+				t.Error(err)
+			}
+			w.e.Gateway.Disconnect(w.ctx, id, "token_rotated")
+		})
+	}
+	t.Cleanup(func() { w.e.Gateway.AfterRegister = nil })
+	replacing := w.dialRaw(node.Token, nodetest.Options{SkipWelcome: true})
+	waitClosed(t, replacing)
+	if replacing.CloseCode() != nodegw.CloseUnauthorized {
+		t.Fatalf("replacing link close %d", replacing.CloseCode())
+	}
+	waitClosed(t, old)
+	if old.CloseCode() != nodegw.CloseUnauthorized {
+		t.Fatalf("displaced link close %d (put back on a revoked token)", old.CloseCode())
+	}
+	eventually(t, "node offline", func() bool { return !w.e.Gateway.Online(node.Node.ID) })
 }

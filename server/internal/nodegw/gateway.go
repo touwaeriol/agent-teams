@@ -91,6 +91,9 @@ type Gateway struct {
 	Now func() time.Time
 	// RefreshWait overrides UsageRefreshWait and RuntimesRefreshWait (tests); 0 = default.
 	RefreshWait time.Duration
+	// AfterRegister runs in attach right after a new link is registered, before its second token
+	// check (tests: a revocation landing in that window).
+	AfterRegister func(nodeID string)
 }
 
 // New builds the gateway. handler may be set later with SetHandler (before serving).
@@ -306,10 +309,14 @@ func (g *Gateway) attach(ctx context.Context, conn *websocket.Conn, node store.N
 		return nil, err
 	}
 	l := newLink(g, conn, node, hello, ackSeq)
+	l.tokenHash = tokenHash
 	g.mu.Lock()
 	old := g.links[node.ID]
 	g.links[node.ID] = l
 	g.mu.Unlock()
+	if g.AfterRegister != nil {
+		g.AfterRegister(node.ID)
+	}
 	if ok, err := stillValid(ctx, g.core.Pool, node.ID, tokenHash); err != nil || !ok {
 		g.unregister(ctx, l, old)
 		if err != nil {
@@ -331,7 +338,9 @@ func (g *Gateway) attach(ctx context.Context, conn *websocket.Conn, node store.N
 }
 
 // unregister takes back a link attach registered but refused: the link it displaced (not yet
-// told it was replaced) goes back unless it ended meanwhile; then the node is offline.
+// told it was replaced) goes back unless it ended meanwhile; then the node is offline. A link put
+// back has its own token checked again once it is registered: the revocation that refused l may
+// have run Disconnect while l, not old, was the registered link (reviewer-2, #55 N2).
 func (g *Gateway) unregister(ctx context.Context, l, old *link) {
 	l.stop()
 	g.mu.Lock()
@@ -345,7 +354,14 @@ func (g *Gateway) unregister(ctx context.Context, l, old *link) {
 		}
 	}
 	g.mu.Unlock()
-	if !restored && offline && g.handler != nil {
+	if restored {
+		if ok, err := stillValid(ctx, g.core.Pool, old.node.ID, old.tokenHash); err != nil || !ok {
+			// Registered again, so its detach takes it out and reports the node offline.
+			old.close(CloseUnauthorized, "token rejected")
+		}
+		return
+	}
+	if offline && g.handler != nil {
 		g.handler.NodeOffline(ctx, l.node)
 	}
 }
