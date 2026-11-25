@@ -27,6 +27,7 @@ type link struct {
 	cancel context.CancelFunc
 	// tokenHash is the token the link authenticated with (checked again when it is put back, see unregister).
 	tokenHash string
+	addr      string // client address at the upgrade (realIP: X-Forwarded-For only from the local proxy)
 
 	mu      sync.Mutex
 	sentSeq int64 // highest command seq written on this link
