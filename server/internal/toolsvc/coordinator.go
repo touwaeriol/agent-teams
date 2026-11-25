@@ -240,20 +240,28 @@ func (s *Service) messageThread(ctx context.Context, tx *core.Tx, c *call) (Resu
 	if err != nil {
 		return Result{}, err
 	}
-	text := "[Message from coordinator]\n" + in.Text
+	files, err := s.useAttachments(ctx, tx, c, in.Attachments)
+	if err != nil {
+		return Result{}, err
+	}
+	text, err := s.orch.DeliveryText(ctx, tx, t.ProjectID, "[Message from coordinator]\n"+in.Text, files)
+	if err != nil {
+		return Result{}, err
+	}
 	rec := &core.NewMessage{ConversationID: t.ID, Role: "system", Author: c.emp().Name, Kind: "relay", Content: in.Text,
-		Meta: relayMeta("in", "message", coordinatorPeer, nil)}
-	if _, err := s.orch.Deliver(ctx, tx, lead, orchestrator.Delivery{Text: text, Kind: "mail", Priority: "next", Record: rec}); err != nil {
+		Meta: withFiles(relayMeta("in", "message", coordinatorPeer, nil), files)}
+	if _, err := s.orch.Deliver(ctx, tx, lead, orchestrator.Delivery{Text: text, Kind: "mail", Priority: "next", Record: rec, Attachments: files}); err != nil {
 		return Result{}, err
 	}
 	conv, err := s.orch.ConversationOf(ctx, tx, c.emp())
 	if err != nil {
 		return Result{}, err
 	}
-	if err := s.recordRelay(ctx, tx, t.ProjectID, conv, nil, c.emp().Name, in.Text, relayMeta("out", "message", threadPeer(t), nil)); err != nil {
+	if err := s.recordRelay(ctx, tx, t.ProjectID, conv, nil, c.emp().Name, in.Text,
+		withFiles(relayMeta("out", "message", threadPeer(t), nil), files)); err != nil {
 		return Result{}, err
 	}
-	return okText(fmt.Sprintf("%s已转给 #%d 的组长", reopened, t.No)), nil
+	return okText(fmt.Sprintf("%s已转给 #%d 的组长%s", reopened, t.No, carried(files))), nil
 }
 
 // forwardToThread passes the user's own project-chat messages, word for word, to a thread's

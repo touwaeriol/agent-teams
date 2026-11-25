@@ -101,7 +101,7 @@ func (o *Orchestrator) PostUserMessageWith(ctx context.Context, in UserMessage) 
 		if err != nil {
 			return err
 		}
-		m, err = o.Deliver(ctx, tx, emp, Delivery{Text: text + in.Context + answered + tag, Kind: "user", Priority: prio, Interrupt: interrupt, Record: rec, Images: files})
+		m, err = o.Deliver(ctx, tx, emp, Delivery{Text: text + in.Context + answered + tag, Kind: "user", Priority: prio, Interrupt: interrupt, Record: rec, Attachments: files})
 		return err
 	})
 	return m, err
@@ -140,15 +140,18 @@ func (o *Orchestrator) messageImages(ctx context.Context, tx *core.Tx, c core.Co
 	return out, nil
 }
 
-// maxInlineText is how much of one attached text file goes into the message.
+// maxInlineText is the largest attached text file whose content goes into the message (design
+// #58 §6.4): bigger ones are not inlined cut (half a file misleads), they travel as files only.
 const maxInlineText = 60000
 
-// inlineTexts puts the attached text files into the delivered text and returns the attachments
-// that travel as files (images, PDFs).
+// inlineTexts puts the attached text files of up to maxInlineText bytes into the delivered text
+// and returns the attachments that travel as files: all of them (#58: a daemon with
+// attachments_v2 also gets the inlined ones as files and lists their paths; fitAttachments
+// drops what an older daemon cannot take).
 func (o *Orchestrator) inlineTexts(ctx context.Context, tx *core.Tx, c core.Conversation, text string, refs []core.AttachmentRef) (string, []core.AttachmentRef, error) {
 	var ids []string
 	for _, r := range refs {
-		if core.IsInlineText(r.ContentType) {
+		if core.IsInlineText(r.ContentType) && r.Size <= maxInlineText {
 			ids = append(ids, r.ID)
 		}
 	}
@@ -161,16 +164,14 @@ func (o *Orchestrator) inlineTexts(ctx context.Context, tx *core.Tx, c core.Conv
 	}
 	var b strings.Builder
 	b.WriteString(text)
-	files := make([]core.AttachmentRef, 0, len(refs))
 	for _, r := range refs {
-		if !core.IsInlineText(r.ContentType) {
-			files = append(files, r)
+		body, ok := data[r.ID]
+		if !ok {
 			continue
 		}
-		body, cut := clipText(string(data[r.ID]), maxInlineText)
-		fmt.Fprintf(&b, "\n\n[附件：%s%s]\n```\n%s\n```", r.Name, cut, body)
+		fmt.Fprintf(&b, "\n\n[附件：%s]\n```\n%s\n```", r.Name, string(body))
 	}
-	return b.String(), files, nil
+	return b.String(), refs, nil
 }
 
 // clipText keeps the first n bytes of s on a rune boundary; the note says it was cut.

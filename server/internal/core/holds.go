@@ -62,6 +62,7 @@ func HoldSession(ctx context.Context, tx *Tx, e Employee, first protocol.FirstMe
 		if len(h.First.Images) > maxHeldImages {
 			h.First.Images = h.First.Images[:maxHeldImages]
 		}
+		h.First.Attachments = appendAttachments(h.First.Attachments, first.Attachments)
 		h.More = append(h.More, string(first.MsgID))
 	}
 	h.Reason, h.UpdatedAt = reason, time.Now().UTC()
@@ -116,4 +117,20 @@ func SaveHold(ctx context.Context, tx *Tx, h SessionHold) error {
 	return tx.Gorm(ctx).Table("at_session_holds").Where("employee_id = ?", h.EmployeeID).Updates(map[string]any{
 		"thread_id": h.ThreadID, "reason": h.Reason, "first": string(first), "more": string(more),
 		"created_at": h.CreatedAt, "updated_at": time.Now().UTC()}).Error
+}
+
+// appendAttachments adds more attachments to a held first message: each id once, at most
+// MaxToolAttachments.
+func appendAttachments(list, more []protocol.AttachmentRef) []protocol.AttachmentRef {
+	seen := map[string]bool{}
+	for _, a := range list {
+		seen[a.ID] = true
+	}
+	for _, a := range more {
+		if !seen[a.ID] && len(list) < MaxToolAttachments {
+			seen[a.ID] = true
+			list = append(list, a)
+		}
+	}
+	return list
 }

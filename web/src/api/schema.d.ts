@@ -2510,6 +2510,7 @@ export interface components {
             content_type: string;
             id: string;
             name: string;
+            sha256?: string;
             /** Format: int64 */
             size: number;
         };

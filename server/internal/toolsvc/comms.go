@@ -142,7 +142,11 @@ func (s *Service) replyTo(ctx context.Context, tx *core.Tx, c *call) (Result, er
 	if q.Status != "open" || q.Audience != "lead" {
 		return Result{}, refuse("问题 %s 不是待你回答的问题", q.ID)
 	}
-	return okText("已回答 " + q.ID), s.answer(ctx, tx, q, in.Answer, "employee:"+c.emp().Name)
+	files, err := s.useAttachments(ctx, tx, c, in.Attachments)
+	if err != nil {
+		return Result{}, err
+	}
+	return okText("已回答 " + q.ID + carried(files)), s.answer(ctx, tx, q, in.Answer, "employee:"+c.emp().Name, files...)
 }
 
 // reviewPermission is the lead deciding a member's permission request (approvals.LeadReview).
@@ -210,7 +214,11 @@ func (s *Service) recordChoices(ctx context.Context, tx *core.Tx, q core.Questio
 
 // answer closes the question and gets the answer to the asker: the waiting call's result
 // when it is still pending, else a session.send "[Answer to qN] …" (non-blocking fallback).
-func (s *Service) answer(ctx context.Context, tx *core.Tx, q core.Question, answer, by string) error {
+// Attachments (reply_to) go with the session.send; a waiting call's result cannot carry files,
+// so it names them (id, name) for read_attachment, as the stored answer does.
+func (s *Service) answer(ctx context.Context, tx *core.Tx, q core.Question, answer, by string, files ...core.AttachmentRef) error {
+	plain := answer
+	answer += orchestrator.AttachmentList(files)
 	closed, err := core.CloseQuestion(ctx, tx, q, "answered", &answer, by)
 	if err != nil {
 		return err
@@ -230,8 +238,18 @@ func (s *Service) answer(ctx context.Context, tx *core.Tx, q core.Question, answ
 		return err
 	}
 	text := fmt.Sprintf("[Answer to %s] %s", closed.ID, answer)
-	_, err = s.orch.Deliver(ctx, tx, asker, orchestrator.Delivery{Text: text, Kind: "answer", Priority: "next",
-		Record: answerRecord(closed, asker, text)})
+	deliver := text
+	if len(files) > 0 {
+		if deliver, err = s.orch.DeliveryText(ctx, tx, asker.ProjectID, fmt.Sprintf("[Answer to %s] %s", closed.ID, plain), files); err != nil {
+			return err
+		}
+	}
+	rec := answerRecord(closed, asker, text)
+	if rec != nil && len(files) > 0 {
+		rec.Meta["attachments"] = files
+	}
+	_, err = s.orch.Deliver(ctx, tx, asker, orchestrator.Delivery{Text: deliver, Kind: "answer", Priority: "next",
+		Record: rec, Attachments: files})
 	return err
 }
 
@@ -287,7 +305,11 @@ func (s *Service) sendMessage(ctx context.Context, tx *core.Tx, c *call) (Result
 	if err != nil {
 		return Result{}, err
 	}
-	if err := s.mail(ctx, tx, t, c.emp().Name, to.Name, in.Text); err != nil {
+	files, err := s.useAttachments(ctx, tx, c, in.Attachments)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := s.mail(ctx, tx, t, c.emp().Name, to.Name, in.Text+orchestrator.AttachmentList(files)); err != nil {
 		return Result{}, err
 	}
 	text := in.Text
@@ -300,7 +322,10 @@ func (s *Service) sendMessage(ctx context.Context, tx *core.Tx, c *call) (Result
 	if err != nil {
 		return Result{}, err
 	}
-	return okText("sent"), s.pushMail(ctx, tx, to, head+"\n"+text)
+	if text, err = s.orch.DeliveryText(ctx, tx, t.ProjectID, text, files); err != nil {
+		return Result{}, err
+	}
+	return okText("sent" + carried(files)), s.pushMail(ctx, tx, to, head+"\n"+text, files)
 }
 
 // mailHeader opens mail pushed to a teammate. A project member working in another thread (or in
@@ -345,13 +370,13 @@ func (s *Service) mail(ctx context.Context, tx *core.Tx, t core.Thread, from, to
 // pushMail sends mail to a recipient that has had a session (the lead always gets it): a
 // parked or closed session wakes up for it. Members that never started read it in their
 // first task brief or with read_messages.
-func (s *Service) pushMail(ctx context.Context, tx *core.Tx, to core.Employee, text string) error {
+func (s *Service) pushMail(ctx context.Context, tx *core.Tx, to core.Employee, text string, files []core.AttachmentRef) error {
 	if to.Tier != "lead" {
 		if _, err := core.LatestSession(ctx, tx, to.ID); err != nil {
 			return ignoreMissing(err)
 		}
 	}
-	_, err := s.orch.Deliver(ctx, tx, to, orchestrator.Delivery{Text: text, Kind: "mail", Priority: "later"})
+	_, err := s.orch.Deliver(ctx, tx, to, orchestrator.Delivery{Text: text, Kind: "mail", Priority: "later", Attachments: files})
 	return err
 }
 
@@ -380,7 +405,7 @@ func (s *Service) broadcast(ctx context.Context, tx *core.Tx, c *call) (Result, 
 		if err != nil {
 			return Result{}, err
 		}
-		if err := s.pushMail(ctx, tx, e, head+"\n"+in.Text); err != nil {
+		if err := s.pushMail(ctx, tx, e, head+"\n"+in.Text, nil); err != nil {
 			return Result{}, err
 		}
 	}
