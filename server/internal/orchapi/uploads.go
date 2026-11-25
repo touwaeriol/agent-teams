@@ -178,18 +178,28 @@ func (a *API) createUpload(ctx context.Context, in *uploadCreateInput) (*uploadC
 		target = name
 	}
 	overwrite := in.Body.Overwrite == nil || *in.Body.Overwrite
-	var up sharedfiles.Upload
-	err = a.e.Core.InTx(ctx, func(tx *core.Tx) error {
-		var err error
-		up, err = sharedfiles.BeginUpload(ctx, tx, a.e.Core.Blobs, p.ID, sharedfiles.BeginRequest{Path: target, Size: in.Body.Size,
-			Overwrite: overwrite, Multipart: true, By: sharedfiles.Uploader{Name: sharedfiles.UserName}})
-		return err
-	})
+	up, err := a.beginShared(ctx, u.ID, p.ID, sharedfiles.BeginRequest{Path: target, Size: in.Body.Size,
+		Overwrite: overwrite, Multipart: true, By: sharedfiles.Uploader{Name: sharedfiles.UserName}})
 	if err != nil {
 		return nil, uploadFail(err)
 	}
 	out.UploadID, out.ID = up.ID, up.ObjectID
 	return &uploadCreateOutput{Body: out}, nil
+}
+
+// beginShared opens a shared-file upload of a project owned by ownerID, within the owner's
+// limit on uploads in flight (core.CheckUploadsInFlight).
+func (a *API) beginShared(ctx context.Context, ownerID, projectID string, r sharedfiles.BeginRequest) (sharedfiles.Upload, error) {
+	var up sharedfiles.Upload
+	err := a.e.Core.InTx(ctx, func(tx *core.Tx) error {
+		if err := core.CheckUploadsInFlight(ctx, tx, ownerID, r.Size); err != nil {
+			return err
+		}
+		var err error
+		up, err = sharedfiles.BeginUpload(ctx, tx, a.e.Core.Blobs, projectID, r)
+		return err
+	})
+	return up, err
 }
 
 func (a *API) beginAttachment(ctx context.Context, pid, uid, name string, size int64, out UploadSession) (*uploadCreateOutput, error) {
@@ -539,13 +549,8 @@ func (a *API) nodeUpload(c *gin.Context) {
 		return
 	}
 	emp := sc.Employee
-	var up sharedfiles.Upload
-	err = a.e.Core.InTx(ctx, func(tx *core.Tx) error {
-		var err error
-		up, err = sharedfiles.BeginUpload(ctx, tx, a.e.Core.Blobs, emp.ProjectID, sharedfiles.BeginRequest{Path: in.Path, Size: in.Size,
-			SHA256: in.SHA256, Overwrite: true, By: sharedfiles.Uploader{Name: emp.Name, EmployeeID: emp.ID, ThreadID: emp.WorkThreadID()}})
-		return err
-	})
+	up, err := a.beginShared(ctx, sc.OwnerID, emp.ProjectID, sharedfiles.BeginRequest{Path: in.Path, Size: in.Size,
+		SHA256: in.SHA256, Overwrite: true, By: sharedfiles.Uploader{Name: emp.Name, EmployeeID: emp.ID, ThreadID: emp.WorkThreadID()}})
 	if err == nil {
 		var u string
 		var headers map[string]string

@@ -358,9 +358,10 @@ func TestPresignedSharedFiles(t *testing.T) {
 		t.Fatalf("overwrite %+v", again)
 	}
 
-	// Quota: an upload in flight of almost 5 GB leaves no room.
-	if _, err := store.Exec(ctx, w.db.Pool, `INSERT INTO at_shared_uploads (id, project_id, path, object_id, storage_key, size, content_type, uploaded_by)
-		VALUES ('up_huge', $1, 'huge.bin', 'sf_huge', 'k', $2, 'application/octet-stream', 'user')`, pid, int64(5<<30)-10); err != nil {
+	// Quota: stored files of almost 5 GB leave no room (uploads in flight count too, but a user
+	// cannot have that much in flight: core.MaxUploadBytesInFlight).
+	if _, err := store.Exec(ctx, w.db.Pool, `INSERT INTO at_shared_files (project_id, path, content_type, size, uploaded_by, storage_key, object_id)
+		VALUES ($1, 'huge.bin', 'application/octet-stream', $2, 'user', 'k', 'sf_huge')`, pid, int64(5<<30)-10); err != nil {
 		t.Fatal(err)
 	}
 	if code, raw := b.do("POST", "/api/projects/"+pid+"/uploads", map[string]any{"kind": "shared", "name": "more.bin", "size": 100}); code != 409 ||
@@ -369,7 +370,7 @@ func TestPresignedSharedFiles(t *testing.T) {
 	}
 	// Attachments do not count.
 	b.must(201, "POST", "/api/projects/"+pid+"/uploads", map[string]any{"kind": "attachment", "name": "a.bin", "size": 100}, nil)
-	_, _ = store.Exec(ctx, w.db.Pool, `DELETE FROM at_shared_uploads WHERE id = 'up_huge'`)
+	_, _ = store.Exec(ctx, w.db.Pool, `DELETE FROM at_shared_files WHERE project_id = $1 AND path = 'huge.bin'`, pid)
 
 	// A node's presigned PUT for write_shared_file.
 	out := []byte("node output")
@@ -682,5 +683,24 @@ func TestWriteSharedFileS3FinishesAfterTheCall(t *testing.T) {
 	}
 	if _, data, err := sharedfiles.Load(w.ctx, w.db.Pool, real, st.projectID, "out/slow.csv"); err != nil || !bytes.Equal(data, body) {
 		t.Fatalf("stored %q %v", data, err)
+	}
+}
+
+// TestUploadsInFlightLimit: a user's uploads in flight (attachments and shared files together)
+// are capped; the next begin gets 429 too_many_uploads (#62 F2).
+func TestUploadsInFlightLimit(t *testing.T) {
+	w := newWorldWith(t, nil, nil)
+	b := w.signUp("busy@example.com")
+	var p struct{ ID string }
+	b.must(201, "POST", "/api/projects", map[string]any{"name": "p"}, &p)
+	for i := 0; i < core.MaxUploadsInFlight; i++ {
+		kind := []string{"attachment", "shared"}[i%2]
+		b.must(201, "POST", "/api/projects/"+p.ID+"/uploads", map[string]any{"kind": kind, "name": fmt.Sprintf("f%d.bin", i), "size": 10}, nil)
+	}
+	for _, kind := range []string{"attachment", "shared"} {
+		if code, raw := b.do("POST", "/api/projects/"+p.ID+"/uploads", map[string]any{"kind": kind, "name": "more.bin", "size": 10}); code != 429 ||
+			!strings.Contains(string(raw), "too_many_uploads") {
+			t.Fatalf("%s over the limit = %d %s", kind, code, raw)
+		}
 	}
 }

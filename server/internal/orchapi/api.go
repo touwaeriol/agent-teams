@@ -130,6 +130,7 @@ var errorMap = []struct {
 	{core.ErrAttachmentTooLarge, 413, "file_too_large"},
 	{core.ErrUploadIncomplete, 409, "upload_incomplete"},
 	{core.ErrUploadSize, 422, "size_mismatch"},
+	{core.ErrTooManyUploads, 429, "too_many_uploads"},
 	{orchestrator.ErrNoNode, 409, "no_node"},
 	{orchestrator.ErrNoEmployee, 404, "employee_not_found"},
 	{orchestrator.ErrRoleNotFound, 422, "unknown_role"},
