@@ -169,10 +169,14 @@ func (o *Orchestrator) inlineTexts(ctx context.Context, tx *core.Tx, c core.Conv
 		if !ok {
 			continue
 		}
-		fmt.Fprintf(&b, "\n\n[附件：%s]\n```\n%s\n```", r.Name, string(body))
+		fmt.Fprintf(&b, "%s\n```\n%s\n```", inlineHeader(r.Name), string(body))
 	}
 	return b.String(), refs, nil
 }
+
+// inlineHeader starts an attachment's inlined content in a delivered text; legacyFit looks for it
+// to tell an old daemon whether a small text file really is in the text.
+func inlineHeader(name string) string { return "\n\n[附件：" + name + "]" }
 
 // clipText keeps the first n bytes of s on a rune boundary; the note says it was cut.
 func clipText(s string, n int) (string, string) {

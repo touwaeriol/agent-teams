@@ -1,5 +1,5 @@
 // File input for message boxes: paste, drop or pick any files (at most 200 MB each, 20 per message);
-// each uploads at once straight to storage in parts (lib/upload.ts) with a progress bar, and shows
+// each uploads straight to storage in parts (UPLOADS_AT_ONCE at a time, the rest queued) (lib/upload.ts) with a progress bar, and shows
 // as a thumbnail (images) or a file card with a remove button that also cancels a running upload.
 // Without object storage (503 storage_unavailable) files up to 5 MB go through the old base64
 // upload. Sending passes the uploaded ids; the strip clears after a successful send.
@@ -88,6 +88,43 @@ const shelf = new Map<string, Ref<PendingImage[]>>();
 const running = new Map<string, AbortController>();
 
 /**
+ * Files the page uploads at once; the others wait their turn. A message takes up to 20 files and
+ * the console caps a user's uploads in flight (429 too_many_uploads, core.MaxUploadsInFlight = 16).
+ */
+export const UPLOADS_AT_ONCE = 4;
+let uploadsActive = 0;
+const uploadQueue: (() => void)[] = [];
+
+/** A free upload slot's release (idempotent), or null when all UPLOADS_AT_ONCE are taken. */
+function takeSlot(): (() => void) | null {
+  if (uploadsActive >= UPLOADS_AT_ONCE) return null;
+  uploadsActive++;
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    uploadsActive--;
+    uploadQueue.shift()?.();
+  };
+}
+
+/** Waits for a slot; aborting while queued rejects with UploadCancelled. */
+function waitSlot(signal: AbortSignal): Promise<() => void> {
+  return new Promise((resolve, reject) => {
+    const grant = () => {
+      signal.removeEventListener("abort", cancel);
+      resolve(takeSlot()!);
+    };
+    const cancel = () => {
+      uploadQueue.splice(uploadQueue.indexOf(grant), 1);
+      reject(new UploadCancelled());
+    };
+    uploadQueue.push(grant);
+    signal.addEventListener("abort", cancel, { once: true });
+  });
+}
+
+/**
  * State of the images attached to one message box. With cacheKey (the box's draft key) the list
  * outlives the component: uploads still finish into it and the preview URLs stay valid until the
  * item is removed or sent; without one it is the component's own and goes with it.
@@ -133,12 +170,16 @@ export function useAttachments(pid: MaybeRefOrGetter<string>, uploader: Uploader
   const send = async (key: string, file: File) => {
     const ctl = new AbortController();
     running.set(key, ctl);
+    let release = () => {};
     try {
+      release = takeSlot() ?? (await waitSlot(ctl.signal));
+      ctl.signal.addEventListener("abort", release, { once: true }); // a cancelled upload frees its slot at once
       const { id } = await uploader(toValue(pid), file, { signal: ctl.signal, onProgress: (f) => patch(key, { progress: f }) });
       patch(key, { id, progress: 1 });
     } catch (e) {
       if (!(e instanceof UploadCancelled)) patch(key, { error: errorText(e) });
     } finally {
+      release();
       running.delete(key);
     }
   };

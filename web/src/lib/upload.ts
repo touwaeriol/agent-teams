@@ -106,50 +106,6 @@ const PART_URL_BATCH = 100;
  * failing, UploadCancelled when signal aborts (the upload is then deleted on the console).
  */
 export async function uploadFile(file: Blob & { name?: string }, api: UploadApi, o: UploadOptions): Promise<UploadDone> {
-  const signal = o.signal ?? new AbortController().signal;
-  if (signal.aborted) throw new UploadCancelled();
-  const release = await fileSlot(signal);
-  try {
-    return await uploadNow(file, api, { ...o, signal });
-  } finally {
-    release();
-  }
-}
-
-/**
- * Files this tab uploads at once; the others wait before create. The console caps a user's uploads
- * in flight (429 too_many_uploads, core.MaxUploadsInFlight = 16), and a message takes up to 20 files.
- */
-export const FILES_AT_ONCE = 4;
-let filesActive = 0;
-const fileQueue: (() => void)[] = [];
-
-/** Waits for one of the FILES_AT_ONCE slots; resolves with its release (idempotent). Aborting while queued rejects with UploadCancelled. */
-function fileSlot(signal: AbortSignal): Promise<() => void> {
-  return new Promise((resolve, reject) => {
-    const grant = () => {
-      signal.removeEventListener("abort", onAbort);
-      filesActive++;
-      let released = false;
-      resolve(() => {
-        if (released) return;
-        released = true;
-        filesActive--;
-        fileQueue.shift()?.();
-      });
-    };
-    const onAbort = () => {
-      const i = fileQueue.indexOf(grant);
-      if (i >= 0) fileQueue.splice(i, 1);
-      reject(new UploadCancelled());
-    };
-    if (filesActive < FILES_AT_ONCE) return grant();
-    fileQueue.push(grant);
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-}
-
-async function uploadNow(file: Blob & { name?: string }, api: UploadApi, o: UploadOptions): Promise<UploadDone> {
   const put = o.put ?? xhrPut;
   const attempts = o.attempts ?? 3;
   const delay = o.retryDelayMs ?? 800;

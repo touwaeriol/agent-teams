@@ -5,7 +5,7 @@ import { directUploader, STORAGE_FALLBACK_NOTE } from "@/components/app/attachme
 import { pickImages } from "@/lib/images";
 import { uploadSharedFiles, UploadBatchError, uploadErrorText } from "@/lib/sharedFiles";
 import { toast } from "@/lib/toast";
-import { FILES_AT_ONCE, PartError, UploadCancelled, uploadFile, type PutPart, type UploadApi } from "@/lib/upload";
+import { PartError, UploadCancelled, uploadFile, type PutPart, type UploadApi } from "@/lib/upload";
 
 const MB = 1 << 20;
 
@@ -153,26 +153,6 @@ describe("multipart direct upload", () => {
     await expect(uploadFile(fake("a.bin", 10 * MB), api, { kind: "attachment", put, signal: ctl.signal })).rejects.toBeInstanceOf(UploadCancelled);
     expect(put).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(calls).toContain("abort"));
-  });
-
-  it(`uploads at most ${FILES_AT_ONCE} files at once; the rest wait before create, and a queued one can be cancelled`, async () => {
-    const { api, calls } = fakeApi();
-    const gates: (() => void)[] = [];
-    const put: PutPart = () => new Promise((r) => gates.push(() => r('"e"')));
-    const total = FILES_AT_ONCE + 2;
-    const ctl = new AbortController();
-    const runs = Array.from({ length: total }, (_, i) =>
-      uploadFile(fake(`f${i}.bin`, MB), api, { kind: "attachment", put, signal: i === total - 1 ? ctl.signal : undefined }),
-    );
-    await vi.waitFor(() => expect(gates.length).toBe(FILES_AT_ONCE));
-    expect(calls.filter((c) => c.startsWith("create"))).toHaveLength(FILES_AT_ONCE);
-    ctl.abort(); // the last one is still queued: it never reaches the console
-    await expect(runs[total - 1]).rejects.toBeInstanceOf(UploadCancelled);
-    gates.splice(0).forEach((g) => g()); // the first ones finish: the queued one starts
-    await vi.waitFor(() => expect(gates.length).toBe(1));
-    gates.splice(0).forEach((g) => g());
-    await Promise.all(runs.slice(0, total - 1));
-    expect(calls.filter((c) => c.startsWith("create"))).toHaveLength(total - 1);
   });
 
   it("refuses files over 200 MB before uploading", () => {
