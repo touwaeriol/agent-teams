@@ -76,6 +76,58 @@ describe("writing sessions (bypass)", () => {
   });
 });
 
+describe("procfs per-process files (defence in depth, #55 F1)", () => {
+  it.each([
+    ["Read", { file_path: "/proc/1/environ" }],
+    ["Read", { file_path: "/proc/1234/mem" }],
+    ["Read", { file_path: "/proc/1234/maps" }],
+    ["Read", { file_path: "/proc/1234/cmdline" }],
+    ["Read", { file_path: "/proc/1234/fd/3" }],
+    ["Read", { file_path: "/proc/1234/root/home/u/x" }],
+    ["Read", { file_path: "/proc/1234/cwd/node.env" }],
+    ["Read", { file_path: "/proc/1/task/1/environ" }],
+    ["Read", { file_path: "/proc/self/environ" }],
+    ["Read", { file_path: "/proc/thread-self/environ" }],
+    ["Read", { file_path: "//proc//1/environ" }],
+    ["Read", { file_path: "/proc/./1/environ" }],
+    ["Read", { file_path: "/tmp/../proc/1/environ" }],
+    ["Read", { file_path: "/proc/self/root/proc/1/environ" }],
+    ["Read", { file_path: "../../../../../../../../proc/1/environ" }],
+    ["Edit", { file_path: "/proc/1/mem" }],
+    ["Write", { file_path: "/proc/1/mem" }],
+    ["NotebookEdit", { notebook_path: "/proc/1/environ" }],
+    ["Grep", { pattern: "TOKEN", path: "/proc" }],
+    ["Grep", { pattern: "TOKEN", path: "/proc/1" }],
+    ["Grep", { pattern: "TOKEN", path: "/proc/1/environ" }],
+    ["Glob", { pattern: "*", path: "/proc/" }],
+    ["Glob", { pattern: "/proc/*/environ" }],
+    ["Glob", { pattern: "/**/environ" }],
+    ["Glob", { pattern: "../../../../../../../../proc/*/environ" }],
+  ])("%s %j is denied", (tool, input) => {
+    expect(decideTool(base, tool, input, "/w/dev")?.deny).toBeTruthy();
+  });
+
+  it("resolves symlinks into procfs", () => {
+    const dir = mkdtempSync(join(tmpdir(), "proc-"));
+    try {
+      symlinkSync("/proc/1", join(dir, "p1"));
+      expect(decideTool(base, "Read", { file_path: "p1/environ" }, dir)?.deny).toBeTruthy();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["/proc/cpuinfo", "/proc/meminfo", "/proc/loadavg", "/proc/1/status", "/proc/self/status", "/w/dev/proc/1/environ"])("Read %s still passes", (file) => {
+    expect(decideTool(base, "Read", { file_path: file }, "/w/dev")).toBeNull();
+  });
+
+  it("does not affect normal searches", () => {
+    expect(decideTool(base, "Glob", { pattern: "**/*.ts" }, "/w/dev")).toBeNull();
+    expect(decideTool(base, "Glob", { pattern: "src/**/environ.ts", path: "/w/dev" }, "/w/dev")).toBeNull();
+    expect(decideTool(base, "Grep", { pattern: "environ", path: "src" }, "/w/dev")).toBeNull();
+  });
+});
+
 describe("read-only bash argv policy", () => {
   it.each([
     ["git log --oneline -20", true],
