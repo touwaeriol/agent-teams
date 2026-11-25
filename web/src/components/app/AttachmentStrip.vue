@@ -1,7 +1,14 @@
 <script setup lang="ts">
-/** Thumbnails of the attached images (file chips for PDFs and text files), each with a remove button; a click on a thumbnail opens the in-page preview. */
+/**
+ * Thumbnails of the attached images (file cards for everything else), each with a remove button
+ * (which also cancels a running upload) and a progress bar while it uploads; a click on a
+ * thumbnail opens the in-page preview.
+ */
 import { computed, ref } from "vue";
-import { FileText, X } from "lucide-vue-next";
+import { X } from "lucide-vue-next";
+import { typeLabel } from "@/lib/images";
+import { formatSize } from "@/lib/sharedFiles";
+import FileIcon from "./FileIcon.vue";
 import Spinner from "@/components/common/Spinner.vue";
 import { cn } from "@/lib/utils";
 import type { Attachments } from "./attachments";
@@ -29,18 +36,33 @@ const open = (key: string) => {
       <button v-if="x.kind === 'image'" type="button" :aria-label="`查看 ${x.name}`" class="block size-full cursor-zoom-in" @click="open(x.key)">
         <img :src="x.preview" :alt="x.name" :class="cn('size-full object-cover', !x.id && 'opacity-60')" />
       </button>
-      <span v-else :class="cn('flex size-full items-center gap-2 py-2 pl-2.5 pr-6 text-xs', !x.id && 'opacity-60')">
-        <FileText class="size-5 shrink-0 text-muted-foreground" :stroke-width="1.6" />
+      <span v-else :class="cn('flex size-full items-center gap-2 py-2 pl-2.5 pr-6 text-xs', !x.id && 'opacity-70')">
+        <FileIcon :kind="x.kind" :name="x.name" class="size-5 shrink-0" />
         <span class="flex min-w-0 flex-col">
           <span class="truncate font-medium">{{ x.name }}</span>
-          <span class="text-[11px] text-muted-foreground">{{ x.kind === "pdf" ? "PDF" : "文本" }}</span>
+          <span class="truncate text-[11px] text-muted-foreground">
+            {{ x.kind === "pdf" ? "PDF" : x.kind === "text" ? "文本" : typeLabel("", x.name) }}<template v-if="x.size !== undefined"> · {{ formatSize(x.size) }}</template>
+            <template v-if="!x.id && !x.error"> · {{ Math.round((x.progress ?? 0) * 100) }}%</template>
+          </span>
         </span>
       </span>
-      <span v-if="!x.id && !x.error" class="pointer-events-none absolute inset-0 flex items-center justify-center"><Spinner class="size-4" /></span>
+      <span v-if="!x.id && !x.error && x.kind === 'image'" class="pointer-events-none absolute inset-0 flex items-center justify-center"><Spinner class="size-4" /></span>
+      <span
+        v-if="!x.id && !x.error"
+        class="pointer-events-none absolute inset-x-0 bottom-0 h-1 bg-black/10"
+        role="progressbar"
+        :aria-label="`${x.name} 上传进度`"
+        :aria-valuenow="Math.round((x.progress ?? 0) * 100)"
+        aria-valuemin="0"
+        aria-valuemax="100"
+      >
+        <span class="block h-full bg-primary transition-[width] duration-200" :style="{ width: `${Math.round((x.progress ?? 0) * 100)}%` }" />
+      </span>
       <span v-if="x.error" class="pointer-events-none absolute inset-x-0 bottom-0 bg-destructive/90 px-1 text-center text-[10px] text-white">失败</span>
       <button
         type="button"
-        :aria-label="`移除 ${x.name}`"
+        :aria-label="!x.id && !x.error ? `取消上传 ${x.name}` : `移除 ${x.name}`"
+        :title="!x.id && !x.error ? '取消上传' : '移除'"
         class="absolute right-0.5 top-0.5 flex size-5 items-center justify-center rounded-full bg-black/60 text-white opacity-90 hover:opacity-100"
         @click.stop="a.remove(x.key)"
       >
