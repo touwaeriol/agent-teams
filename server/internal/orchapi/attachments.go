@@ -11,6 +11,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
+	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 )
 
 // AttachmentBody is POST /api/projects/{pid}/attachments: one image, PDF or text file for a message.
@@ -102,7 +103,7 @@ func (a *API) nodeAttachment(c *gin.Context) {
 	w, r := c.Writer, c.Request
 	node, err := a.e.Gateway.Authenticate(r)
 	if err != nil {
-		http.Error(w, "token rejected", http.StatusUnauthorized)
+		nodegw.WriteAuthError(w, err)
 		return
 	}
 	att, data, err := core.AttachmentData(r.Context(), a.e.Core.Pool, node.UserID, c.Param("id"))

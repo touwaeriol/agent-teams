@@ -11,7 +11,9 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -61,6 +63,10 @@ type Config struct {
 	HelloTimeout time.Duration
 	// Validate checks every inbound frame against the protocol schemas.
 	Validate bool
+	// AuthFailLimit rejected node tokens per client address within AuthFailWindow before that
+	// address gets 429 on every daemon route (0 = DefaultAuthFailLimit, negative = no limit).
+	AuthFailLimit  int
+	AuthFailWindow time.Duration
 }
 
 // Gateway owns the node links.
@@ -79,6 +85,7 @@ type Gateway struct {
 	usageWaits    map[string]*usageWait                 // in-flight node.usage_refresh per node
 	runtimesWaits map[string]*runtimesWait              // in-flight node.runtimes_refresh by command id
 	upgrades      map[string]*platform.NodeUpgradeState // last node.upgrade per node (memory only)
+	authFails     *authLimiter                          // rejected tokens per client address
 
 	// Now is the clock for the usage cache (tests); nil = time.Now.
 	Now func() time.Time
@@ -104,7 +111,13 @@ func New(st *store.Store, cs *core.Store, hub *fanout.Hub, log *slog.Logger, cfg
 	if cfg.HelloTimeout == 0 {
 		cfg.HelloTimeout = 15 * time.Second
 	}
-	return &Gateway{store: st, core: cs, hub: hub, validator: v, log: log, cfg: cfg, links: map[string]*link{},
+	if cfg.AuthFailLimit == 0 {
+		cfg.AuthFailLimit = DefaultAuthFailLimit
+	}
+	if cfg.AuthFailWindow == 0 {
+		cfg.AuthFailWindow = DefaultAuthFailWindow
+	}
+	return &Gateway{authFails: newAuthLimiter(cfg.AuthFailLimit, cfg.AuthFailWindow, nil), store: st, core: cs, hub: hub, validator: v, log: log, cfg: cfg, links: map[string]*link{},
 		usage: map[string]*platform.NodeUsage{}, usageWaits: map[string]*usageWait{},
 		runtimesWaits: map[string]*runtimesWait{},
 		upgrades:      map[string]*platform.NodeUpgradeState{}}, nil
@@ -113,39 +126,89 @@ func New(st *store.Store, cs *core.Store, hub *fanout.Hub, log *slog.Logger, cfg
 // SetHandler installs the message handler.
 func (g *Gateway) SetHandler(h Handler) { g.handler = h }
 
-// ServeWS is GET /nodes/connect (and /nodes/v2/connect).
+// Authentication outcomes besides success.
+var (
+	// ErrTokenRejected: no token, an unknown one, or one of an inactive owner (counted per address).
+	ErrTokenRejected = errors.New("node token rejected")
+	// ErrAuthThrottled: the client address used up its rejections; the token was not looked at.
+	ErrAuthThrottled = errors.New("too many rejected node tokens")
+)
+
+// ServeWS is GET /nodes/connect (and /nodes/v2/connect). The token is checked before the
+// upgrade: a rejected one gets a plain 401 (no reason), an address with too many rejections a
+// 429, a database failure a 503; only an authenticated daemon gets the 101.
 func (g *Gateway) ServeWS(w http.ResponseWriter, r *http.Request) {
+	ctx := context.WithoutCancel(r.Context())
+	node, err := g.authenticate(ctx, r)
+	if err != nil {
+		WriteAuthError(w, err)
+		return
+	}
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{CompressionMode: websocket.CompressionContextTakeover})
 	if err != nil {
 		return
 	}
 	conn.SetReadLimit(MaxFrame)
-	ctx := context.WithoutCancel(r.Context())
-	node, err := g.authenticate(ctx, r)
-	if err != nil {
-		_ = conn.Close(CloseUnauthorized, "token rejected")
-		return
-	}
 	g.run(ctx, conn, node)
 }
 
+// WriteAuthError answers a failed Authenticate on a daemon HTTP route: 429 with Retry-After
+// when throttled, 401 for a rejected token, 503 otherwise; the body never says why.
+func WriteAuthError(w http.ResponseWriter, err error) {
+	var t *throttled
+	switch {
+	case errors.As(err, &t):
+		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(t.wait.Seconds()))))
+		http.Error(w, "too many requests", http.StatusTooManyRequests)
+	case errors.Is(err, ErrTokenRejected):
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	default:
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}
+}
+
+type throttled struct{ wait time.Duration }
+
+func (t *throttled) Error() string { return ErrAuthThrottled.Error() }
+func (t *throttled) Unwrap() error { return ErrAuthThrottled }
+
 // Authenticate identifies a daemon by its Bearer node token (plain HTTP routes for daemons).
+// Errors: ErrAuthThrottled, ErrTokenRejected, or a store error (see WriteAuthError).
 func (g *Gateway) Authenticate(r *http.Request) (store.Node, error) {
 	return g.authenticate(r.Context(), r)
 }
 
 func (g *Gateway) authenticate(ctx context.Context, r *http.Request) (store.Node, error) {
+	addr := remoteAddr(r)
+	if blocked, wait := g.authFails.blocked(addr); blocked {
+		return store.Node{}, &throttled{wait: wait}
+	}
+	node, err := g.checkToken(ctx, r)
+	if errors.Is(err, ErrTokenRejected) {
+		g.authFails.fail(addr)
+		g.log.Info("node token rejected", "ip", addr, "path", r.URL.Path)
+	}
+	return node, err
+}
+
+func (g *Gateway) checkToken(ctx context.Context, r *http.Request) (store.Node, error) {
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || strings.TrimSpace(token) == "" {
-		return store.Node{}, errors.New("no token")
+		return store.Node{}, ErrTokenRejected
 	}
 	node, err := g.store.NodeByToken(ctx, auth.HashToken(strings.TrimSpace(token)))
+	if errors.Is(err, store.ErrNotFound) {
+		return store.Node{}, ErrTokenRejected
+	}
 	if err != nil {
 		return store.Node{}, err
 	}
 	owner, err := g.store.UserByID(ctx, node.UserID)
-	if err != nil || !owner.Active {
-		return store.Node{}, errors.New("owner inactive")
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !owner.Active) {
+		return store.Node{}, ErrTokenRejected
+	}
+	if err != nil {
+		return store.Node{}, err
 	}
 	return node, nil
 }

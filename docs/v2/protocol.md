@@ -5,7 +5,7 @@
 ## 1. 连接
 
 - URL：`wss://<console>/nodes/connect`；`/nodes/v2/connect` 是同一入口的别名（两者都只接受协议 2）。
-- 认证：`Authorization: Bearer <node token>`。控制台 `sha256(token)` 查 `at_nodes.token_hash`，所有者必须存在且 `active`，否则以 **4401** 关闭（守护进程视为“令牌无效”，每 10 分钟重试一次并在日志里提示）。
+- 认证：`Authorization: Bearer <node token>`。控制台 `sha256(token)` 查 `at_nodes.token_hash`，所有者必须存在且 `active`。令牌在 WebSocket 升级**之前**校验：不通过直接回 HTTP **401**（响应体不说明原因，不会拿到 101；守护进程视为“令牌无效”，每 10 分钟重试一次并在日志里提示），数据库故障回 503。被拒的令牌按来源地址计数（地址取法同登录限速：只有来自本机/内网反代的请求才采信 `X-Forwarded-For` 的最后一项），5 分钟内超过 20 次后，该地址在窗口结束前访问所有守护进程接口（`/nodes/connect`、`/nodes/v2/connect`、`/nodes/ssh`、`/nodes/moves/*`、`/nodes/attachments/*`）都回 **429** + `Retry-After`，且不再查令牌。已连上的链路被吊销时仍以 4401 关闭。
 - 帧：WebSocket 文本帧，一帧一个 JSON 对象（UTF-8）。单帧上限 4 MiB；更大的内容（例如很长的命令输出）由发送方截断并标 `truncated: true`。启用 permessage-deflate。
 - 心跳：双方每 20 s 发 WebSocket ping；45 s 收不到任何帧则断开重连。
 - 重连：指数退避 1 s → 30 s，带 ±20% 抖动。
@@ -569,7 +569,7 @@ Antigravity（`source: "antigravity_permission"`）：`tool_name` 是按 ACP 工
 | 码 | 含义 | 守护进程行为 |
 | --- | --- | --- |
 | 1000 | 正常（控制台停机） | 重连 |
-| 4401 | 令牌无效 / 所有者停用 | 停止重连，每 10 分钟重试一次并记日志 |
+| 4401 | 令牌被吊销 / 所有者停用（已连上的链路；握手时的无效令牌改为 HTTP 401） | 停止重连，每 10 分钟重试一次并记日志 |
 | 4409 | 被同节点的新链路替换 | 若本进程才是新的则忽略；否则退出（防双开） |
 | 4426 | 需要升级 | 按 `welcome.min_daemon` 提示；若支持 `self_update` 等待 `node.upgrade` |
 | 4429 | 握手过于频繁 | 退避到 60 s |

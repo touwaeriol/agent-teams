@@ -10,6 +10,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -29,7 +30,7 @@ const wsReadLimit = 1 << 20
 func (g *Gateway) ServeWS(w http.ResponseWriter, r *http.Request) {
 	node, err := g.nodes.Authenticate(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		nodegw.WriteAuthError(w, err)
 		return
 	}
 	if !g.vault.Ready() {
