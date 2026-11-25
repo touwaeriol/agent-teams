@@ -1886,7 +1886,11 @@ INSERT INTO at_shared_files (project_id, path, content_type, size, sha256, data,
 	}
 	if _, err := db.Exec(`
 INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, storage_key, state, upload_id)
-	VALUES ('img_new', 'p1', 'u1', 'big.zip', 'application/zip', 209715200, 'projects/p1/attachments/img_new', 'uploading', 'u-1');
+	VALUES ('img_up', 'p1', 'u1', 'big.zip', 'application/zip', 209715200, 'projects/p1/attachments/img_up', 'uploading', 'u-1');
+INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, storage_key)
+	VALUES ('img_new', 'p1', 'u1', 'big.zip', 'application/zip', 209715200, 'projects/p1/attachments/img_new');
+INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, state)
+	VALUES ('img_exp', 'p1', 'u1', 'gone.zip', 'application/zip', 10, 'expired');
 INSERT INTO at_blob_deletions (key, prefix) VALUES ('projects/p9/', true);`); err != nil {
 		t.Fatal(err)
 	}
@@ -1907,6 +1911,10 @@ INSERT INTO at_blob_deletions (key, prefix) VALUES ('projects/p9/', true);`); er
 	}
 	if _, err := p.DownTo(ctx, 450); err != nil {
 		t.Fatal(err)
+	}
+	var left int
+	if err := db.QueryRow(`SELECT count(*) FROM at_attachments WHERE id IN ('img_up', 'img_exp')`).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("down kept expired or unfinished attachments: %d %v", left, err)
 	}
 	var data []byte
 	if err := db.QueryRow(`SELECT data FROM at_attachments WHERE id = 'img_old'`).Scan(&data); err != nil || len(data) != 3 {
