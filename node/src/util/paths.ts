@@ -18,7 +18,9 @@ export function resolveInRoot(root: string, rel: string): string {
   if (!rel || isAbsolute(rel) || rel.includes("\0")) throw new PathOutsideRoot(rel);
   const abs = resolve(root, rel);
   if (!isInside(root, abs) || abs === resolve(root)) throw new PathOutsideRoot(rel);
-  const realRoot = realpathOr(resolve(root));
+  // Both sides resolved the same way: a root that does not exist yet (skills/plugins directories
+  // on first use) still has its existing ancestors (a symlinked HOME, /tmp on macOS) resolved.
+  const realRoot = realpathLoose(resolve(root)) ?? resolve(root);
   const real = realpathLoose(abs);
   if (real === null || !isInside(realRoot, real) || real === realRoot) throw new PathOutsideRoot(rel);
   return abs;
@@ -27,14 +29,6 @@ export function resolveInRoot(root: string, rel: string): string {
 export function isInside(parent: string, child: string): boolean {
   const r = relative(resolve(parent), resolve(child));
   return r === "" || (!r.startsWith("..") && !isAbsolute(r) && !r.startsWith(`..${sep}`));
-}
-
-function realpathOr(p: string): string {
-  try {
-    return realpathSync(p);
-  } catch {
-    return p;
-  }
 }
 
 /**

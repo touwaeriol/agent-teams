@@ -32,6 +32,17 @@ describe("resolveInRoot", () => {
     expect(() => resolveInRoot(root, "projects/p1/link/new/dir")).toThrow(PathOutsideRoot);
   });
 
+  it("accepts paths under a root that does not exist yet behind a symlinked ancestor", () => {
+    const alias = join(dir, "alias");
+    symlinkSync(root, alias);
+    const fresh = join(alias, "agent-skills", "dev");
+    expect(resolveInRoot(fresh, "SKILL.md")).toBe(join(fresh, "SKILL.md"));
+    expect(resolveInRoot(join(alias, "agent-plugins"), "p@1/x.json")).toBe(join(alias, "agent-plugins", "p@1/x.json"));
+    expect(() => resolveInRoot(fresh, "../../../outside/x")).toThrow(PathOutsideRoot);
+    symlinkSync(outside, join(root, "escape"));
+    expect(() => resolveInRoot(join(alias, "new-root"), "../escape/x")).toThrow(PathOutsideRoot);
+  });
+
   it("refuses a dangling symlink whose target cannot be checked", () => {
     symlinkSync(join(outside, "missing"), join(root, "projects/p1/dangling"));
     expect(() => resolveInRoot(root, "projects/p1/dangling/x")).toThrow(PathOutsideRoot);
