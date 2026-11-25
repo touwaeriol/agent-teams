@@ -40,7 +40,7 @@ type SessionInput struct {
 	Effort         string   `json:"effort,omitempty" maxLength:"32" doc:"Thinking effort; '' = project / role setting"`
 	NodeID         string   `json:"node_id,omitempty" maxLength:"64" doc:"Run on this node; '' = picked automatically (spread over the nodes by load score; nodes whose quota is tight only when all are)"`
 	Branch         string   `json:"branch,omitempty" maxLength:"60" doc:"Name of the work branch (after session/<id>-); '' = from the title, or the repositories when the title has no Latin letters"`
-	Attachments    []string `json:"attachments,omitempty" maxItems:"20" doc:"Attachment ids uploaded with POST /api/uploads (ready, not expired, not yet used): they join the session's project and go with the first message"`
+	Attachments    []string `json:"attachments,omitempty" maxItems:"20" doc:"Attachment ids uploaded with POST /api/uploads (ready, not expired, not yet used): they join the session's project and go with the first message (if the session then fails to start, the project and these attachments are deleted: upload them again)"`
 }
 
 // WorkSessionView is the 多仓库会话 just created (SessionView is the login session).

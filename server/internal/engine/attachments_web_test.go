@@ -232,6 +232,7 @@ func TestCommentAttachments(t *testing.T) {
 	tm := attTeam(t, true)
 	pdf := putAttachment(t, tm, tm.projectID, "批注.pdf", core.PDFType, []byte("%PDF-1.4 x"))
 	zip := putAttachment(t, tm, tm.projectID, "素材.zip", "application/zip", []byte("PK\x03\x04zip"))
+	md := putAttachment(t, tm, tm.projectID, "要点.md", core.TextType, []byte("标题用 24 号字"))
 	_, _ = store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `UPDATE at_attachments SET expires_at = now() + interval '1 minute' WHERE id = $1`, zip.ID)
 	res := tm.lead.publish(map[string]any{"path": "design", "kind": "design", "title": "首页"}, 1<<20, upFile{"index.html", "<!doctype html><title>Home</title>"})
 	var pub protocol.PublishFileResult
@@ -239,25 +240,26 @@ func TestCommentAttachments(t *testing.T) {
 	id := pub.DeliverableID
 
 	var c orchapi.CommentView
-	tm.b.must(201, "POST", "/api/deliverables/"+id+"/comments", map[string]any{"text": "照这个改配色", "attachments": []string{pdf.ID, zip.ID}}, &c)
-	if c.SentTo != "lead-1" || len(c.Attachments) != 2 || c.Attachments[0].ID != pdf.ID || c.Attachments[1].Name != "素材.zip" {
+	tm.b.must(201, "POST", "/api/deliverables/"+id+"/comments", map[string]any{"text": "照这个改配色", "attachments": []string{pdf.ID, zip.ID, md.ID}}, &c)
+	if c.SentTo != "lead-1" || len(c.Attachments) != 3 || c.Attachments[0].ID != pdf.ID || c.Attachments[1].Name != "素材.zip" {
 		t.Fatalf("comment %+v", c)
 	}
 	send := tm.lead.expectSend("照这个改配色")
-	if !sameIDs(refIDs(send.Attachments), pdf.ID, zip.ID) {
-		t.Fatalf("comment delivery attachments %+v", send.Attachments)
+	if !sameIDs(refIDs(send.Attachments), pdf.ID, zip.ID, md.ID) || !strings.Contains(send.Text, "标题用 24 号字") {
+		t.Fatalf("comment delivery %q attachments %+v", send.Text, send.Attachments)
 	}
 	if tm.expiresIn(t, zip.ID).Hours() < 23 {
 		t.Fatal("comment did not push the retention")
 	}
-	if countRows(t, tm.w, `SELECT count(*) FROM at_messages WHERE content LIKE '%照这个改配色%' AND jsonb_array_length(meta->'attachments') = 2`) != 1 {
-		t.Fatal("stored comment message lacks the attachments")
+	if countRows(t, tm.w, `SELECT count(*) FROM at_messages WHERE content LIKE '%照这个改配色%' AND jsonb_array_length(meta->'attachments') = 3
+		AND content NOT LIKE '%24 号字%'`) != 1 {
+		t.Fatal("stored comment message lacks the attachments or has the inlined text")
 	}
 
 	_, _ = store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `UPDATE at_attachments SET state = 'expired', storage_key = NULL WHERE id = $1`, zip.ID)
 	var list struct{ Items []orchapi.CommentView }
 	tm.b.must(200, "GET", "/api/deliverables/"+id+"/comments", nil, &list)
-	if len(list.Items) != 1 || len(list.Items[0].Attachments) != 2 || list.Items[0].Attachments[0].Expired || !list.Items[0].Attachments[1].Expired {
+	if len(list.Items) != 1 || len(list.Items[0].Attachments) != 3 || list.Items[0].Attachments[0].Expired || !list.Items[0].Attachments[1].Expired {
 		t.Fatalf("comment list %+v", list.Items)
 	}
 	if code, raw := tm.b.do("POST", "/api/deliverables/"+id+"/comments", map[string]any{"text": "再看", "attachments": []string{zip.ID}}); code != 410 {
@@ -287,5 +289,27 @@ func TestMessageAttachmentLimit(t *testing.T) {
 	tm.b.must(202, "POST", "/api/conversations/"+tm.thread.ID+"/messages", map[string]any{"content": "二十个文件", "attachments": ids[:20]}, nil)
 	if send := tm.lead.expectSend("二十个文件"); len(send.Attachments) != 20 {
 		t.Fatalf("delivered %d attachments", len(send.Attachments))
+	}
+}
+
+// TestCommentAttachmentsLegacy: to a daemon without attachments_v2 a comment's small text file is
+// in the delivered text and an image goes as an image (legacyFit), as for any message.
+func TestCommentAttachmentsLegacy(t *testing.T) {
+	tm := attTeam(t, false)
+	md := putAttachment(t, tm, tm.projectID, "要点.md", core.TextType, []byte("按钮要圆角 8px"))
+	png := putAttachment(t, tm, tm.projectID, "图.png", "image/png", onePixelPNG)
+	res := tm.lead.publish(map[string]any{"path": "design", "kind": "design", "title": "首页"}, 1<<20, upFile{"index.html", "<!doctype html><title>Home</title>"})
+	var pub protocol.PublishFileResult
+	_ = json.Unmarshal(*res.Structured, &pub)
+	tm.b.must(201, "POST", "/api/deliverables/"+pub.DeliverableID+"/comments", map[string]any{"text": "旧节点批注", "attachments": []string{md.ID, png.ID}}, nil)
+	send := tm.lead.expectSend("旧节点批注")
+	if !strings.Contains(send.Text, "按钮要圆角 8px") || len(send.Attachments) != 0 || len(send.Images) != 1 || send.Images[0].ID != png.ID {
+		t.Fatalf("legacy comment %q images %+v attachments %+v", send.Text, send.Images, send.Attachments)
+	}
+	// Deleting the thread the comment was delivered into keeps the attachments a comment shows.
+	tm.b.must(204, "DELETE", "/api/threads/"+tm.thread.ID, nil, nil)
+	if countRows(t, tm.w, `SELECT count(*) FROM at_deliverable_comments WHERE deliverable_id = $1`, pub.DeliverableID) != 1 ||
+		countRows(t, tm.w, `SELECT count(*) FROM at_attachments WHERE id IN ($1, $2)`, md.ID, png.ID) != 2 {
+		t.Fatal("thread deletion dropped a comment's attachments")
 	}
 }

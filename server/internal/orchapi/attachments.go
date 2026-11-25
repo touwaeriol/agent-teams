@@ -69,7 +69,7 @@ func (a *API) registerAttachments(api huma.API, r gin.IRoutes) {
 			}
 		}), a.attachmentFile)
 	huma.Register(api, op("save-attachment-shared", "POST", "/api/attachments/{id}/save-shared", t,
-		summary("Keep an attachment as a shared file of its project (copied inside the store; 409 file_exists unless overwrite, 409 quota_exceeded, 410 attachment_expired)")),
+		summary("Keep an attachment as a shared file of its project (copied inside the store; 409 file_exists unless overwrite, 409 quota_exceeded, 410 attachment_expired; 404 for one still uploading or not yet in a project)")),
 		a.saveAttachmentShared)
 	if a.e == nil {
 		r.GET("/nodes/attachments/:id", offline)

@@ -425,7 +425,8 @@ func (o *Orchestrator) completeAs(ctx context.Context, tx *core.Tx, t core.Threa
 // deleteThreadImages removes the images attached to a thread's messages, unless a message
 // elsewhere in the project still shows them.
 func deleteThreadImages(ctx context.Context, tx *core.Tx, t core.Thread) error {
-	// References: messages' meta.attachments and tasks' attachments (#58), per conversation.
+	// References: messages' meta.attachments, tasks' attachments, session briefs (per conversation)
+	// and comments on deliverables (#58).
 	var keys []struct{ StorageKey *string }
 	err := store.Raw(ctx, tx, `WITH refs AS (
 		SELECT m.conversation_id, r->>'id' AS id FROM at_messages m
@@ -435,7 +436,16 @@ func deleteThreadImages(ctx context.Context, tx *core.Tx, t core.Thread) error {
 		UNION ALL
 		SELECT k.conversation_id, r->>'id' AS id FROM at_tasks k
 		JOIN at_conversations c ON c.id = k.conversation_id AND c.project_id = $2,
-		LATERAL jsonb_array_elements(k.attachments) r)
+		LATERAL jsonb_array_elements(k.attachments) r
+		UNION ALL
+		SELECT th.id, r->>'id' AS id FROM at_threads th,
+		LATERAL jsonb_array_elements(th.brief_attachments) r WHERE th.project_id = $2
+		UNION ALL
+		-- Comments on deliverables are no conversation's: an attachment one shows is kept (it
+		-- expires on its own).
+		SELECT '', r->>'id' AS id FROM at_deliverable_comments dc
+		JOIN at_deliverables d ON d.id = dc.deliverable_id AND d.project_id = $2,
+		LATERAL jsonb_array_elements(dc.attachments) r)
 		DELETE FROM at_attachments WHERE project_id = $2
 		AND id IN (SELECT id FROM refs WHERE conversation_id = $1)
 		AND id NOT IN (SELECT id FROM refs WHERE conversation_id <> $1 AND id IS NOT NULL)

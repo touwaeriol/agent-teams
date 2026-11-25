@@ -6823,7 +6823,7 @@
         "additionalProperties": false,
         "properties": {
           "attachments": {
-            "description": "Attachment ids uploaded with POST /api/uploads (ready, not expired, not yet used): they join the session's project and go with the first message",
+            "description": "Attachment ids uploaded with POST /api/uploads (ready, not expired, not yet used): they join the session's project and go with the first message (if the session then fails to start, the project and these attachments are deleted: upload them again)",
             "items": {
               "type": "string"
             },
@@ -10488,7 +10488,7 @@
             "description": "Error"
           }
         },
-        "summary": "Keep an attachment as a shared file of its project (copied inside the store; 409 file_exists unless overwrite, 409 quota_exceeded, 410 attachment_expired)",
+        "summary": "Keep an attachment as a shared file of its project (copied inside the store; 409 file_exists unless overwrite, 409 quota_exceeded, 410 attachment_expired; 404 for one still uploading or not yet in a project)",
         "tags": [
           "conversations"
         ]

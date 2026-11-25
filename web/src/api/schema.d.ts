@@ -329,7 +329,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Keep an attachment as a shared file of its project (copied inside the store; 409 file_exists unless overwrite, 409 quota_exceeded, 410 attachment_expired) */
+        /** Keep an attachment as a shared file of its project (copied inside the store; 409 file_exists unless overwrite, 409 quota_exceeded, 410 attachment_expired; 404 for one still uploading or not yet in a project) */
         post: operations["save-attachment-shared"];
         delete?: never;
         options?: never;
@@ -4575,7 +4575,7 @@ export interface components {
             thread_id: string;
         };
         SessionInput: {
-            /** @description Attachment ids uploaded with POST /api/uploads (ready, not expired, not yet used): they join the session's project and go with the first message */
+            /** @description Attachment ids uploaded with POST /api/uploads (ready, not expired, not yet used): they join the session's project and go with the first message (if the session then fails to start, the project and these attachments are deleted: upload them again) */
             attachments?: string[] | null;
             /** @description Name of the work branch (after session/<id>-); '' = from the title, or the repositories when the title has no Latin letters */
             branch?: string;

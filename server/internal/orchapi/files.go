@@ -276,7 +276,13 @@ func (a *API) deliverComment(ctx context.Context, tx *core.Tx, d core.Deliverabl
 		meta["attachments"] = c.Attachments
 	}
 	rec := &core.NewMessage{ConversationID: deref(conv), Role: "user", Author: "user", Kind: "chat", Content: text, Meta: meta}
-	_, err = a.e.Orch.Deliver(ctx, tx, emp, orchestrator.Delivery{Text: text, Kind: "user", Priority: "next", Record: rec,
+	// Small text files go into the delivered text, as in any message (the stored one keeps the
+	// comment as written); an older daemon relies on it (legacyFit says the content is inline).
+	delivered, err := a.e.Orch.DeliveryText(ctx, tx, d.ProjectID, text, c.Attachments)
+	if err != nil {
+		return "", err
+	}
+	_, err = a.e.Orch.Deliver(ctx, tx, emp, orchestrator.Delivery{Text: delivered, Kind: "user", Priority: "next", Record: rec,
 		Attachments: c.Attachments})
 	return emp.Name, err
 }
