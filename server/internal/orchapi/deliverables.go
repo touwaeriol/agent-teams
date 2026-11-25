@@ -18,6 +18,9 @@ type deliverablesInput struct {
 	Q      string `query:"q" maxLength:"200"`
 	Cursor string `query:"cursor" maxLength:"64"`
 	Limit  int    `query:"limit" minimum:"0" maximum:"200"`
+	// IDs looks up the given deliverables of this project (ids mentioned in a message); ids of
+	// other projects or that do not exist are simply not in the page.
+	IDs []string `query:"ids" maxItems:"50" doc:"Only these deliverables (comma-separated ids, at most 50); unknown ids and ids of other projects are left out"`
 	// NoImages leaves out hosted lone images published before screenshots stopped being deliverables.
 	NoImages bool `query:"no_images" doc:"Leave out hosted lone images (render=image), published before screenshots stopped being deliverables"`
 }
@@ -98,7 +101,7 @@ func (a *API) listDeliverables(ctx context.Context, in *deliverablesInput) (*del
 		return nil, err
 	}
 	f := core.DeliverableFilter{Kind: in.Kind, Q: strings.TrimSpace(in.Q), Before: in.Cursor, Limit: pageLimit(in.Limit, 50),
-		NoImages: in.NoImages}
+		NoImages: in.NoImages, IDs: in.IDs}
 	if in.Thread > 0 {
 		t, err := core.ThreadByNo(ctx, a.e.Core.Pool, p.ID, in.Thread)
 		if err != nil {

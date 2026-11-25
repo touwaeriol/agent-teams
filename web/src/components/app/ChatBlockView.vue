@@ -17,6 +17,7 @@ import { backLink, forwardLine, messageAnchor } from "@/lib/forward";
 import { clock, cn } from "@/lib/utils";
 import ChatCard from "./chatcards/ChatCard.vue";
 import Dot from "./Dot.vue";
+import MessageDeliverables from "./MessageDeliverables.vue";
 import MessageImages from "./MessageImages.vue";
 import MessageRefs from "./composer/MessageRefs.vue";
 import ScheduleNoteLine from "./ScheduleNoteLine.vue";
@@ -119,6 +120,7 @@ const remove = () => local.value && dropPending(local.value.key);
       <span v-if="block.message.kind === 'interrupt'" class="text-[#B4530B]">· 插话</span>
     </span>
     <Markdown :source="block.message.content" :class="compact ? 'text-sm leading-[26px]' : 'text-[15px] leading-7'" />
+    <MessageDeliverables :pid="pid" :source="block.message.content" />
     <ThreadChip v-for="no in block.opens" :key="no" :thread="threads.find((t) => t.no === no)" :no="no" @open="(n) => emit('openThread', n)" />
   </article>
 </template>

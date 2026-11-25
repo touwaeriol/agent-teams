@@ -8290,6 +8290,8 @@ export interface operations {
                 q?: string;
                 cursor?: string;
                 limit?: number;
+                /** @description Only these deliverables (comma-separated ids, at most 50); unknown ids and ids of other projects are left out */
+                ids?: string[] | null;
                 /** @description Leave out hosted lone images (render=image), published before screenshots stopped being deliverables */
                 no_images?: boolean;
             };

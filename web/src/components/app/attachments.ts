@@ -4,7 +4,7 @@
 import { computed, onBeforeUnmount, ref, toValue, watch, type ComputedRef, type MaybeRefOrGetter, type Ref } from "vue";
 import { projects as projectActions } from "@/api/actions";
 import { errorText } from "@/api/mutations";
-import { attachKind, imageFiles, pickImages, type AttachKind } from "@/lib/images";
+import { attachKind, pastedFiles, pickImages, type AttachKind } from "@/lib/images";
 import { fileBase64 } from "@/lib/library";
 import { toast } from "@/lib/toast";
 
@@ -127,7 +127,7 @@ export function attachmentHandlers(a: Attachments | undefined, onDragState: (on:
   if (!a) return {};
   return {
     paste: (e) => {
-      const files = imageFiles((e as ClipboardEvent).clipboardData?.files);
+      const files = pastedFiles((e as ClipboardEvent).clipboardData);
       if (files.length === 0) return;
       e.preventDefault();
       a.add(files);
