@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/tools/read_attachment.json",
   "title": "ReadAttachmentInput",
-  "description": "Download an attachment (img_… id from a message's attachment block, including ones forwarded to you) to .attachments/<id>-<name> in your working directory (the folder is git-ignored) and return that local path; the result never contains the file's content, so read it with your file tools or command-line tools. Use it when the local copy is missing (the session reopened elsewhere, old copies are cleaned after 7 days) or for an id someone passed you. The attachment must belong to this project. An existing complete copy is reused.",
+  "description": "Download an attachment (img_… id from a message's attachment block, including ones forwarded to you) to .attachments/<id>-<name> in your working directory (the folder is git-ignored) and return that local path; the result never contains the file's content, so read it with your file tools or command-line tools. Use it when the local copy is missing (the session reopened elsewhere, or the local copy was cleaned up) or for an id someone passed you. The attachment must belong to this project; attachments are kept only for a limited time, after which it is refused as expired. An existing complete copy is reused.",
   "x-tool": {
     "tiers": [
       "coordinator",
