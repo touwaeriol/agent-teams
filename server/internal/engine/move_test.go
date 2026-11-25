@@ -380,8 +380,8 @@ func statusWithin(t *testing.T, done <-chan int, what string) int {
 }
 
 // TestSessionMoveUploadLimits: an upload is refused before its body is read when the move is not the
-// node's or the declared size is over the cap, a bad X-Content-SHA256 is refused up front, and one
-// node runs one upload at a time.
+// node's or the declared size is over the cap, a bad X-Content-SHA256 is refused up front, and a
+// node's second upload queues behind its first.
 func TestSessionMoveUploadLimits(t *testing.T) {
 	tm, _, tokenB := moveTeam(t)
 	rateLimited(tm.dev, time.Hour)
@@ -407,19 +407,23 @@ func TestSessionMoveUploadLimits(t *testing.T) {
 	if code := statusWithin(t, done, "bad sha"); code != 400 {
 		t.Fatalf("bad sha upload = %d", code)
 	}
-	// One upload per node: a second one while the first is still sending gets 429.
+	// One upload per node: a second one waits (unread) while the first is still sending, then runs.
 	pw, first := slowUpload(t, tm, id, tm.token, int64(len(archive)), digest)
 	_, _ = pw.Write(archive[:4])
-	eventually(t, "second upload refused", func() bool {
-		code, _ := moveRequest(t, tm, "PUT", id, tm.token, archive)
-		return code == 429
-	})
+	time.Sleep(200 * time.Millisecond) // the first holds the node's slot
+	second := make(chan int, 1)
+	go func() { code, _ := moveRequest(t, tm, "PUT", id, tm.token, archive); second <- code }()
+	select {
+	case code := <-second:
+		t.Fatalf("second upload finished (%d) while the first held the node's slot", code)
+	case <-time.After(300 * time.Millisecond):
+	}
 	_, _ = pw.Write(archive[4:])
 	_ = pw.Close()
 	if code := statusWithin(t, first, "first upload"); code != 204 {
 		t.Fatalf("first upload = %d", code)
 	}
-	if code, raw := moveRequest(t, tm, "PUT", id, tm.token, archive); code != 204 {
-		t.Fatalf("upload after the first finished = %d %s", code, raw)
+	if code := statusWithin(t, second, "second upload"); code != 204 {
+		t.Fatalf("queued upload = %d", code)
 	}
 }

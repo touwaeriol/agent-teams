@@ -2,6 +2,7 @@ package orchapi
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -29,37 +30,59 @@ func (a *API) registerMoves(r gin.IRoutes) {
 }
 
 // Upload admission (audit #55 N5): the archive lands in a bytea column, so a request holds it in
-// memory until the UPDATE. Each node may run one upload at a time (a second one gets 429), and at
-// most maxMoveUploads read their body at once server-wide (later ones wait, without buffering),
-// which bounds archive memory to about maxMoveUploads × maxMoveArchive.
+// memory until the UPDATE. A node reads one upload body at a time, and at most maxMoveUploads are
+// read at once server-wide; the others wait without reading their body (the daemon treats 4xx as
+// final, so they queue rather than get refused). That bounds archive memory to about
+// maxMoveUploads × maxMoveArchive, and one node cannot take every slot.
 const maxMoveUploads = 2
 
-// moveUploads tracks running uploads (per node and in total).
+// moveUploads hands out upload slots: one per node, maxMoveUploads in total.
 type moveUploads struct {
 	mu    sync.Mutex
-	nodes map[string]bool
+	nodes map[string]*nodeSlot
 	slots chan struct{}
 }
 
+type nodeSlot struct {
+	ch   chan struct{}
+	refs int
+}
+
 func newMoveUploads() *moveUploads {
-	return &moveUploads{nodes: map[string]bool{}, slots: make(chan struct{}, maxMoveUploads)}
+	return &moveUploads{nodes: map[string]*nodeSlot{}, slots: make(chan struct{}, maxMoveUploads)}
 }
 
-// claim marks the node as uploading; false if it already is.
-func (u *moveUploads) claim(nodeID string) bool {
+// acquire waits for the node's slot and a global one; release must be called when ok.
+func (u *moveUploads) acquire(ctx context.Context, nodeID string) (release func(), ok bool) {
 	u.mu.Lock()
-	defer u.mu.Unlock()
-	if u.nodes[nodeID] {
-		return false
+	ns := u.nodes[nodeID]
+	if ns == nil {
+		ns = &nodeSlot{ch: make(chan struct{}, 1)}
+		u.nodes[nodeID] = ns
 	}
-	u.nodes[nodeID] = true
-	return true
-}
-
-func (u *moveUploads) unclaim(nodeID string) {
-	u.mu.Lock()
-	delete(u.nodes, nodeID)
+	ns.refs++
 	u.mu.Unlock()
+	drop := func() {
+		u.mu.Lock()
+		if ns.refs--; ns.refs == 0 {
+			delete(u.nodes, nodeID)
+		}
+		u.mu.Unlock()
+	}
+	select {
+	case ns.ch <- struct{}{}:
+	case <-ctx.Done():
+		drop()
+		return nil, false
+	}
+	select {
+	case u.slots <- struct{}{}:
+	case <-ctx.Done():
+		<-ns.ch
+		drop()
+		return nil, false
+	}
+	return func() { <-u.slots; <-ns.ch; drop() }, true
 }
 
 // uploadMove is PUT /nodes/moves/{id}: only the move's source node, while it is exporting; the body
@@ -91,18 +114,11 @@ func (a *API) uploadMove(c *gin.Context) {
 		http.Error(w, "no such move", http.StatusNotFound)
 		return
 	}
-	if !a.moveUploads.claim(node.ID) {
-		w.Header().Set("Retry-After", "5")
-		http.Error(w, "another upload of this node is running", http.StatusTooManyRequests)
-		return
+	release, ok := a.moveUploads.acquire(r.Context(), node.ID)
+	if !ok {
+		return // the client went away while queued
 	}
-	defer a.moveUploads.unclaim(node.ID)
-	select {
-	case a.moveUploads.slots <- struct{}{}:
-		defer func() { <-a.moveUploads.slots }()
-	case <-r.Context().Done():
-		return
-	}
+	defer release()
 
 	// Stream the body: hash while reading, never past the cap.
 	var buf bytes.Buffer
