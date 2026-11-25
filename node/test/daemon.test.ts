@@ -212,6 +212,29 @@ describe("daemon with a fake console", () => {
     expect(order[1]).toBe("后一条");
   });
 
+  it("keeps first_message, held messages and a later session.send in order while the brief downloads", async () => {
+    const g = gatedFetch();
+    h = await startHarness({ transferFetch: g.transferFetch });
+    h.console.images.set("img_b2", Buffer.from("brief file"));
+    h.console.command("session.open", claudeOpen("s_ORD2", 1, { first_message: { msg_id: "m_b", text: "简报二", attachments: [{ id: "img_b2", name: "b.bin", content_type: "application/octet-stream", size: 10 }] } }));
+    await h.console.waitType("session.opened", (b) => b.session_id === "s_ORD2");
+    h.console.command("session.send", { session_id: "s_ORD2", msg_id: "m_h1", text: "积压一" });
+    h.console.command("session.send", { session_id: "s_ORD2", msg_id: "m_h2", text: "积压二" });
+    h.console.command("session.release", { session_id: "s_ORD2", open_gen: 1 });
+    await g.called;
+    h.console.command("session.send", { session_id: "s_ORD2", msg_id: "m_s", text: "后来的" });
+    await new Promise((r) => setTimeout(r, 300));
+    g.release();
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_s");
+    expect(h.console.ofType("session.delivered").map((f) => f.body.msg_id)).toEqual(["m_b", "m_h1", "m_h2", "m_s"]);
+  });
+
+  it("never rejects delivering a release queue, even for a session that is gone", async () => {
+    h = await startHarness();
+    const manager = (h.daemon as unknown as { sessions: { deliverQueued(s: unknown, q: unknown[]): Promise<void> } }).sessions;
+    await expect(manager.deliverQueued({ id: "s_gone" }, [{ session_id: "s_gone", msg_id: "m_x", text: "x" }])).resolves.toBeUndefined();
+  });
+
   it("does not start a runtime for a session object replaced by a newer open while it downloaded", async () => {
     const g = gatedFetch();
     h = await startHarness({ transferFetch: g.transferFetch });

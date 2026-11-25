@@ -249,14 +249,19 @@ export class SessionManager implements SessionHost {
     return [];
   }
 
+  /**
+   * first_message and held messages after release: all of them join the session's delivery chain
+   * at once, in order, so a session.send arriving while the first one downloads goes after them all.
+   * Never rejects (it runs detached).
+   */
   private async deliverQueued(s: Session, queue: SessionSend[]): Promise<void> {
-    for (const msg of queue) {
-      const replies = await this.send_(msg).catch((err: Error) => {
+    const pending = queue.map((msg) =>
+      this.send_(msg).catch((err: Error) => {
         this.d.log.warn({ session: s.id, err: err.message }, "held message delivery failed");
         return [] as Reply[];
-      });
-      for (const r of replies) this.send(r.type, r.body);
-    }
+      }),
+    );
+    for (const p of pending) for (const r of await p) this.send(r.type, r.body);
   }
 
   async sendMessage(body: SessionSend): Promise<Reply[]> {
@@ -268,7 +273,8 @@ export class SessionManager implements SessionHost {
    * command lane) or from release (first_message and held messages, outside the lane): a message
    * whose attachments take minutes to download is never overtaken by the next one.
    */
-  private send_(body: SessionSend): Promise<Reply[]> {
+  // async: a missing session rejects instead of throwing; the chain is still joined synchronously.
+  private async send_(body: SessionSend): Promise<Reply[]> {
     const s = this.require(body.session_id);
     const run = s.deliveries.then(() => this.deliver(s, body));
     s.deliveries = run.then(() => undefined, () => undefined);
