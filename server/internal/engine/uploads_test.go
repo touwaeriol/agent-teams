@@ -629,3 +629,58 @@ func TestNodeUploadPresignFails(t *testing.T) {
 		t.Fatalf("uploads left: %d %v", n, err)
 	}
 }
+
+// blockingOpen is a store whose Open waits until release is closed (a slow read of a big object).
+type blockingOpen struct {
+	blobstore.Store
+	release chan struct{}
+}
+
+func (b blockingOpen) Open(ctx context.Context, key string) (io.ReadCloser, error) {
+	<-b.release
+	return b.Store.Open(ctx, key)
+}
+
+// TestWriteSharedFileS3FinishesAfterTheCall: finishing a presigned write_shared_file (copy and
+// sha256 of up to 200 MB) happens after the call's transaction, so the node's other messages are
+// handled meanwhile (a link blocked for long misses its pings and is closed).
+func TestWriteSharedFileS3FinishesAfterTheCall(t *testing.T) {
+	st := startSFTeam(t)
+	w := st.w
+	body := []byte("slow,file\n1,2\n")
+	code, raw := nodeCall(t, w, "POST", "/nodes/uploads", st.tokA, map[string]any{"session_id": st.dev.session, "name": "out/slow.csv",
+		"size": len(body), "sha256": hexSum(body)})
+	var nu orchapi.NodeUpload
+	if code != 201 || json.Unmarshal(raw, &nu) != nil {
+		t.Fatalf("node upload %d %s", code, raw)
+	}
+	req, _ := http.NewRequest("PUT", nu.URL, bytes.NewReader(body))
+	for k, v := range nu.Headers {
+		req.Header.Set(k, v)
+	}
+	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != 200 {
+		t.Fatalf("put %v %v", resp, err)
+	}
+	real := w.e.Core.Blobs
+	slow := blockingOpen{Store: real, release: make(chan struct{})}
+	w.e.Core.Blobs = slow
+	t.Cleanup(func() { w.e.Core.Blobs = real })
+
+	gen := protocol.OpenGen(st.dev.gen)
+	slowID := fmt.Sprintf("tc_slow_%d", time.Now().UnixNano())
+	args, _ := json.Marshal(map[string]any{"file": "out/slow.csv"})
+	st.dev.send(protocol.TypeToolCall, protocol.ToolCall{CallID: protocol.CallID(slowID), SessionID: protocol.SessionID(st.dev.session), OpenGen: &gen,
+		Tool: "write_shared_file", Args: args, Upload: &protocol.ToolUpload{UploadID: protocol.UploadID(nu.UploadID), Storage: protocol.ToolUploadStorageS3,
+			Files: []protocol.UploadFile{{Path: "out/slow.csv", Size: len(body), SHA256: hexSum(body), ContentType: "text/csv"}}}})
+	// While the object is being read, the same node's next call is answered.
+	if res := st.dev.call("list_shared_files", map[string]any{}); !res.Ok {
+		t.Fatalf("list_shared_files while finishing: %s", text(res))
+	}
+	close(slow.release)
+	if res := st.dev.result(slowID); !res.Ok || !strings.Contains(text(res), "out/slow.csv") {
+		t.Fatalf("slow write: %s", text(res))
+	}
+	if _, data, err := sharedfiles.Load(w.ctx, w.db.Pool, real, st.projectID, "out/slow.csv"); err != nil || !bytes.Equal(data, body) {
+		t.Fatalf("stored %q %v", data, err)
+	}
+}
