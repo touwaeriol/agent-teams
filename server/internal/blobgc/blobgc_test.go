@@ -276,3 +276,52 @@ func (u *unreadable) Open(ctx context.Context, key string) (io.ReadCloser, error
 	}
 	return u.Store.Open(ctx, key)
 }
+
+// TestUserKeys: an attachment uploaded without a project lives under users/<uid>/; its key stays
+// referenced once the row joins a project, an unreferenced one is deleted, and stale multipart
+// uploads under users/ that no row knows are aborted.
+func TestUserKeys(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, testdb.Migrated(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	db := s.Pool
+	u, _ := s.CreateUser(ctx, "users@example.com", "h")
+	p, err := s.CreateProject(ctx, u.ID, store.NewProject{Name: "u", WorkMode: "worktree"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bs := blobtest.New(t)
+	kept, lost := blobstore.UserAttachmentKey(u.ID, "img_kept"), blobstore.UserAttachmentKey(u.ID, "img_lost")
+	for _, k := range []string{kept, lost} {
+		if err := bs.Put(ctx, k, bytes.NewReader([]byte("x")), 1, ""); err != nil {
+			t.Fatal(err)
+		}
+		if err := blobgc.Enqueue(ctx, db, k); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.Exec(ctx, db, `INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, storage_key, expires_at)
+		VALUES ('img_kept', $1, $2, 'k', 'text/plain', 1, $3, now() + interval '30 days')`, p.ID, u.ID, kept); err != nil {
+		t.Fatal(err)
+	}
+	if ref, err := blobgc.Referenced(ctx, db, kept); err != nil || !ref {
+		t.Fatalf("adopted key referenced=%v %v", ref, err)
+	}
+	if _, err := bs.CreateMultipart(ctx, blobstore.UserAttachmentKey(u.ID, "img_stray"), ""); err != nil {
+		t.Fatal(err)
+	}
+	w := &blobgc.Worker{DB: db, Blobs: bs, Now: func() time.Time { return time.Now().Add(blobgc.Stale + time.Hour) }}
+	st, err := w.RunOnce(ctx)
+	if err != nil || st.Kept != 1 || st.Deleted != 1 || st.Aborted != 1 {
+		t.Fatalf("pass %+v %v", st, err)
+	}
+	if _, err := bs.Head(ctx, kept); err != nil {
+		t.Fatalf("referenced users/ object deleted: %v", err)
+	}
+	if _, err := bs.Head(ctx, lost); !errors.Is(err, blobstore.ErrNotFound) {
+		t.Fatalf("unreferenced users/ object kept: %v", err)
+	}
+}

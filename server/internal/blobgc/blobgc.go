@@ -65,9 +65,19 @@ const referencedSQL = `SELECT EXISTS (SELECT 1 FROM at_attachments WHERE project
 	OR EXISTS (SELECT 1 FROM at_shared_files WHERE project_id = $2 AND storage_key = $1)
 	OR EXISTS (SELECT 1 FROM at_shared_uploads WHERE project_id = $2 AND storage_key = $1)`
 
+// userKeySQL tells whether an attachment row points at a users/<uid>/… key (uploaded without a
+// project; the row may since have joined one).
+const userKeySQL = `SELECT EXISTS (SELECT 1 FROM at_attachments WHERE storage_key = $1 AND storage_key LIKE 'users/%')`
+
 // Referenced reports whether a row of at_attachments, at_shared_files or at_shared_uploads still
-// points at key (keys are projects/<pid>/…).
+// points at key (keys are projects/<pid>/…, or users/<uid>/attachments/… for an attachment
+// uploaded without a project).
 func Referenced(ctx context.Context, q store.DB, key string) (bool, error) {
+	if strings.HasPrefix(key, "users/") {
+		var ref bool
+		err := store.QueryRow(ctx, q, userKeySQL, key).Scan(&ref)
+		return ref, err
+	}
 	var pid string
 	if rest, ok := strings.CutPrefix(key, "projects/"); ok {
 		pid, _, _ = strings.Cut(rest, "/")
@@ -419,9 +429,13 @@ func (w *Worker) sum(ctx context.Context, key string) (string, int64, error) {
 // strayMultipart aborts multipart uploads older than Stale that no row knows (a crash between
 // CreateMultipart and the insert, or rows removed by hand).
 func (w *Worker) strayMultipart(ctx context.Context, st *Stats) error {
-	pending, err := w.Blobs.ListMultipart(ctx, "projects/", w.now().Add(-Stale))
-	if err != nil {
-		return err
+	var pending []blobstore.PendingUpload
+	for _, prefix := range []string{"projects/", "users/"} {
+		list, err := w.Blobs.ListMultipart(ctx, prefix, w.now().Add(-Stale))
+		if err != nil {
+			return err
+		}
+		pending = append(pending, list...)
 	}
 	for _, p := range pending {
 		var known bool

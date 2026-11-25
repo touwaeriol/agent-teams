@@ -30,7 +30,7 @@ const (
 	// the request itself (the old base64 upload, publish_file images).
 	MaxInlineAttachmentBytes = 5 << 20
 	MaxTextBytes             = 1 << 20
-	MaxMessageImages         = 8
+	MaxMessageImages         = 20
 	AttachmentURLPrefix      = "/api/attachments/"
 	// MaxToolAttachments is how many attachments one tool call (assign_task, send_message …),
 	// forward or delivery carries (protocol AttachmentIds and session.send attachments maxItems).
@@ -127,6 +127,10 @@ func TouchAttachments(ctx context.Context, q DB, projectID string, ids []string,
 	if len(ids) == 0 {
 		return nil
 	}
+	if projectID == "" { // attachments uploaded without a project (ids already checked by the caller)
+		return q.Gorm(ctx).Exec(`UPDATE at_attachments SET expires_at = GREATEST(expires_at, now() + make_interval(secs => ?))
+			WHERE project_id IS NULL AND id IN ? AND state IN ('ready', 'failed', 'uploading')`, ttlOr(ttl).Seconds(), ids).Error
+	}
 	return q.Gorm(ctx).Exec(`UPDATE at_attachments SET expires_at = GREATEST(expires_at, now() + make_interval(secs => ?))
 		WHERE project_id = ? AND id IN ? AND state IN ('ready', 'failed', 'uploading')`, ttlOr(ttl).Seconds(), projectID, ids).Error
 }
@@ -175,6 +179,118 @@ type AttachmentRef struct {
 	Size        int    `json:"size"`
 	// SHA256 is the hex digest when known (the daemon checks its download against it).
 	SHA256 string `json:"sha256,omitempty"`
+	// Expired is set on reads (never stored) once the attachment's retention ran out or its row
+	// is gone: the page shows it as expired without asking (MarkExpiredRefs, MarkExpiredMessages).
+	Expired bool `json:"expired,omitempty"`
+}
+
+// goneAttachments returns which of ids are expired or no longer exist.
+func goneAttachments(ctx context.Context, q DB, ids []string) (map[string]bool, error) {
+	gone := map[string]bool{}
+	if len(ids) == 0 {
+		return gone, nil
+	}
+	var live []struct{ ID string }
+	if err := q.Gorm(ctx).Table("at_attachments").Select("id").Where("id IN ? AND state <> 'expired'", ids).
+		Find(&live).Error; err != nil {
+		return nil, err
+	}
+	alive := make(map[string]bool, len(live))
+	for _, r := range live {
+		alive[r.ID] = true
+	}
+	for _, id := range ids {
+		if !alive[id] {
+			gone[id] = true
+		}
+	}
+	return gone, nil
+}
+
+// MarkExpiredRefs sets Expired on the refs (in place) whose attachment expired or was deleted.
+func MarkExpiredRefs(ctx context.Context, q DB, lists ...[]AttachmentRef) error {
+	var ids []string
+	for _, l := range lists {
+		for _, r := range l {
+			ids = append(ids, r.ID)
+		}
+	}
+	gone, err := goneAttachments(ctx, q, ids)
+	if err != nil {
+		return err
+	}
+	for _, l := range lists {
+		for i := range l {
+			l[i].Expired = gone[l[i].ID]
+		}
+	}
+	return nil
+}
+
+// MarkExpiredMessages adds "expired": true to the meta.attachments items (in place: each touched
+// meta is copied first) whose attachment expired or was deleted.
+func MarkExpiredMessages(ctx context.Context, q DB, views []MessageView) error {
+	var ids []string
+	for _, v := range views {
+		for _, it := range metaAttachments(v.Meta) {
+			if id, _ := it["id"].(string); id != "" {
+				ids = append(ids, id)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	gone, err := goneAttachments(ctx, q, ids)
+	if err != nil || len(gone) == 0 {
+		return err
+	}
+	for i, v := range views {
+		items := metaAttachments(v.Meta)
+		hit := false
+		for _, it := range items {
+			if id, _ := it["id"].(string); gone[id] {
+				hit = true
+			}
+		}
+		if !hit {
+			continue
+		}
+		meta := make(map[string]any, len(v.Meta))
+		for k, x := range v.Meta {
+			meta[k] = x
+		}
+		out := make([]any, len(items))
+		for j, it := range items {
+			c := make(map[string]any, len(it)+1)
+			for k, x := range it {
+				c[k] = x
+			}
+			if id, _ := it["id"].(string); gone[id] {
+				c["expired"] = true
+			}
+			out[j] = c
+		}
+		meta["attachments"] = out
+		views[i].Meta = meta
+	}
+	return nil
+}
+
+// metaAttachments are a message meta's attachments as JSON objects (meta read from the
+// database: []any of map[string]any; nil when there are none or they have another form).
+func metaAttachments(meta map[string]any) []map[string]any {
+	list, ok := meta["attachments"].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(list))
+	for _, x := range list {
+		if m, ok := x.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // Ref is the message-meta form of an attachment.
@@ -357,8 +473,10 @@ func OpenAttachment(ctx context.Context, q DB, bs blobstore.Store, userID, id st
 	row, err := take[struct {
 		Attachment
 		Data []byte
-	}](q.Gorm(ctx).Table("at_attachments a").Select("a.*").Joins("JOIN at_projects p ON p.id = a.project_id").
-		Where("a.id = ? AND p.user_id = ? AND a.state IN ('ready', 'expired')", id, userID))
+	}](q.Gorm(ctx).Table("at_attachments a").Select("a.id, COALESCE(a.project_id, '') AS project_id, a.user_id, a.name, "+
+		"a.content_type, a.size, COALESCE(a.sha256, '') AS sha256, a.created_at, a.storage_key, a.state, a.expires_at, a.data").
+		Joins("LEFT JOIN at_projects p ON p.id = a.project_id").
+		Where("a.id = ? AND "+ownedBy+" AND a.state IN ('ready', 'expired')", id, userID, userID))
 	if err != nil {
 		return Attachment{}, nil, err
 	}
@@ -375,14 +493,18 @@ func OpenAttachment(ctx context.Context, q DB, bs blobstore.Store, userID, id st
 	return row.Attachment, rc, err
 }
 
+// ownedBy is the condition (two user id arguments) for an attachment of one of the user's
+// projects, or one the user uploaded without a project (at_attachments a LEFT JOIN at_projects p).
+const ownedBy = "(p.user_id = ? OR (a.project_id IS NULL AND a.user_id = ?))"
+
 // AttachmentOfUser returns a ready attachment of one of the user's projects without opening it
 // (presigned downloads); expired ones are returned with ErrAttachmentExpired, uploading and failed
 // ones are ErrNotFound.
 func AttachmentOfUser(ctx context.Context, q DB, userID, id string) (Attachment, error) {
-	a, err := take[Attachment](q.Gorm(ctx).Table("at_attachments a").Select("a.id, a.project_id, a.user_id, a.name, a.content_type, "+
-		"a.size, COALESCE(a.sha256, '') AS sha256, a.created_at, a.storage_key, a.state, a.expires_at").
-		Joins("JOIN at_projects p ON p.id = a.project_id").
-		Where("a.id = ? AND p.user_id = ? AND a.state IN ('ready', 'expired')", id, userID))
+	a, err := take[Attachment](q.Gorm(ctx).Table("at_attachments a").Select("a.id, COALESCE(a.project_id, '') AS project_id, a.user_id, "+
+		"a.name, a.content_type, a.size, COALESCE(a.sha256, '') AS sha256, a.created_at, a.storage_key, a.state, a.expires_at").
+		Joins("LEFT JOIN at_projects p ON p.id = a.project_id").
+		Where("a.id = ? AND "+ownedBy+" AND a.state IN ('ready', 'expired')", id, userID, userID))
 	if err == nil && a.State == "expired" {
 		err = ErrAttachmentExpired
 	}

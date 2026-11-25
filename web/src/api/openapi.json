@@ -432,6 +432,9 @@
           "content_type": {
             "type": "string"
           },
+          "expired": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           },
@@ -770,6 +773,15 @@
       "CommentView": {
         "additionalProperties": false,
         "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/AttachmentRef"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
@@ -797,7 +809,8 @@
           "version",
           "text",
           "sent_to",
-          "created_at"
+          "created_at",
+          "attachments"
         ],
         "type": "object"
       },
@@ -3454,6 +3467,17 @@
       "NewCommentInputBody": {
         "additionalProperties": false,
         "properties": {
+          "attachments": {
+            "description": "Attachment ids of the deliverable's project (POST /api/projects/{pid}/uploads): they go to the employee with the comment",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "text": {
             "maxLength": 10000,
             "minLength": 1,
@@ -4527,11 +4551,11 @@
         "additionalProperties": false,
         "properties": {
           "attachments": {
-            "description": "Attachment ids (images, PDFs, text files) from POST /api/projects/{pid}/attachments, in order",
+            "description": "Attachment ids (any type) from POST /api/projects/{pid}/uploads or /attachments, in order (at most 20)",
             "items": {
               "type": "string"
             },
-            "maxItems": 8,
+            "maxItems": 20,
             "type": [
               "array",
               "null"
@@ -6167,6 +6191,25 @@
         ],
         "type": "object"
       },
+      "SaveSharedBody": {
+        "additionalProperties": false,
+        "properties": {
+          "overwrite": {
+            "description": "Replace a shared file at the path (default false: 409 file_exists)",
+            "type": "boolean"
+          },
+          "path": {
+            "description": "Shared-file path to save it at",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
       "Schedule": {
         "additionalProperties": false,
         "properties": {
@@ -6779,6 +6822,17 @@
       "SessionInput": {
         "additionalProperties": false,
         "properties": {
+          "attachments": {
+            "description": "Attachment ids uploaded with POST /api/uploads (ready, not expired, not yet used): they join the session's project and go with the first message (if the session then fails to start, the project and these attachments are deleted: upload them again)",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "branch": {
             "description": "Name of the work branch (after session/\u003cid\u003e-); '' = from the title, or the repositories when the title has no Latin letters",
             "maxLength": 60,
@@ -10383,6 +10437,58 @@
           }
         },
         "summary": "An attachment: 302 to a presigned URL valid 5 minutes (images and PDF inline, anything else downloaded as application/octet-stream); the bytes themselves for attachments from before #58; 410 once expired",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/api/attachments/{id}/save-shared": {
+      "post": {
+        "operationId": "save-attachment-shared",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveSharedBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadedSharedFile"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Keep an attachment as a shared file of its project (copied inside the store; 409 file_exists unless overwrite, 409 quota_exceeded, 410 attachment_expired; 404 for one still uploading or not yet in a project)",
         "tags": [
           "conversations"
         ]
@@ -17823,6 +17929,186 @@
         },
         "tags": [
           "threads"
+        ]
+      }
+    },
+    "/api/uploads": {
+      "post": {
+        "operationId": "create-user-upload",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadSession"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Start a presigned upload of an attachment without a project (kind attachment only; for POST /api/sessions attachments; dropped 24 hours after the last use if never sent)",
+        "tags": [
+          "uploads"
+        ]
+      }
+    },
+    "/api/uploads/{upload_id}": {
+      "delete": {
+        "operationId": "abort-user-upload",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Cancel an upload without a project",
+        "tags": [
+          "uploads"
+        ]
+      }
+    },
+    "/api/uploads/{upload_id}/complete": {
+      "post": {
+        "operationId": "complete-user-upload",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadComplete"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadDone"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Finish an upload without a project: the object's size is checked and its type sniffed",
+        "tags": [
+          "uploads"
+        ]
+      }
+    },
+    "/api/uploads/{upload_id}/parts": {
+      "post": {
+        "operationId": "user-upload-part-urls",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadPartsAsk"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadParts"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Presigned PUT URLs for parts of an upload without a project (1 hour)",
+        "tags": [
+          "uploads"
         ]
       }
     },

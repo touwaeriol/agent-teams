@@ -48,6 +48,9 @@ type ThreadRequest struct {
 	SoloMode, SoloEffort string
 	// Branch overrides the thread branch name ("" = thread/<no>-<slug>).
 	Branch string
+	// Attachments are attachment ids of the project going with a session's first message
+	// (Solo only; checked by the caller: ready, of the project).
+	Attachments []string
 }
 
 // OpenThread creates a thread (queued), its employees, then starts queued threads within the limit.
@@ -76,7 +79,17 @@ func (o *Orchestrator) OpenThreadTx(ctx context.Context, tx *core.Tx, req Thread
 	if err != nil {
 		return core.Thread{}, err
 	}
-	t, err := core.CreateThread(ctx, tx, core.NewThread{ProjectID: p.ID, UserID: p.UserID, Title: req.Title,
+	var brief []core.AttachmentRef
+	if req.Solo != nil && len(req.Attachments) > 0 {
+		list, err := core.UseAttachments(ctx, tx, p.ID, req.Attachments, o.core.AttachmentTTL)
+		if err != nil {
+			return core.Thread{}, err
+		}
+		for _, a := range list {
+			brief = append(brief, a.Ref())
+		}
+	}
+	t, err := core.CreateThread(ctx, tx, core.NewThread{BriefAttachments: brief, ProjectID: p.ID, UserID: p.UserID, Title: req.Title,
 		Brief: req.Brief, AutoApprove: p.AutoApprove, OpenedBy: req.OpenedBy, Roles: roles, OnlyRoles: onlyRoles(req),
 		SourceMessageID: req.SourceMessageID, ForwardedBrief: req.ForwardedBrief, ParentID: req.ParentID, Branch: req.Branch})
 	if err != nil {

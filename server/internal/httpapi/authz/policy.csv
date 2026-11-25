@@ -52,6 +52,7 @@ p, node-token, /nodes/uploads, POST
 
 # Signed-in users: their own account, projects, threads, libraries and nodes.
 p, user, /api/attachments/:id, GET
+p, user, /api/attachments/:id/save-shared, POST
 p, user, /api/conversations/:cid/commands, GET
 p, user, /api/conversations/:cid/context, GET
 p, user, /api/conversations/:cid/context/detail, GET
@@ -208,6 +209,10 @@ p, user, /api/threads/:tid/tasks/:task/cancel, POST
 p, user, /api/threads/:tid/tasks/:task/retry, POST
 p, user, /api/threads/:tid/unarchive, POST
 p, user, /api/threads/:tid/usage, GET
+p, user, /api/uploads, POST
+p, user, /api/uploads/:upload_id, DELETE
+p, user, /api/uploads/:upload_id/complete, POST
+p, user, /api/uploads/:upload_id/parts, POST
 p, user, /api/voice/config, GET
 p, user, /api/voice/session, POST
 p, user, /api/voice/stream, GET

@@ -1,11 +1,9 @@
 package toolsvc
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"slices"
 	"strings"
 	"time"
@@ -169,7 +167,7 @@ func (s *Service) saveAttachment(ctx context.Context, tx *core.Tx, c *call) (Res
 		return Result{}, refuseShared(err, p)
 	}
 	by, owner := sharedUploader(c), c.sc.OwnerID
-	return Result{Later: func(ctx context.Context) Result { return s.copyAttachment(ctx, bs, owner, pid, p, a, by, in.Overwrite) }}, nil
+	return Result{Later: func(ctx context.Context) Result { return s.copyAttachment(ctx, owner, p, a, by, in.Overwrite) }}, nil
 }
 
 // refuseShared explains a shared-file refusal to the model.
@@ -183,35 +181,20 @@ func refuseShared(err error, p string) error {
 	return err
 }
 
-func (s *Service) copyAttachment(ctx context.Context, bs blobstore.Store, owner, pid, p string, a core.Attachment,
-	by sharedfiles.Uploader, overwrite bool) Result {
-	obj := sharedfiles.Object{ObjectID: sharedfiles.NewObjectID(), Size: int64(a.Size), SHA256: a.SHA256}
-	obj.Key = blobstore.SharedKey(pid, obj.ObjectID)
-	if err := s.writeCopy(ctx, bs, owner, a, obj.Key); err != nil {
-		s.log.Warn("save_attachment copy", "attachment", a.ID, "err", err)
-		if errors.Is(err, blobstore.ErrNotFound) || errors.Is(err, core.ErrNotFound) {
-			return failText("附件 %s 的文件已经不在存储里了（可能刚过期），存不了", a.ID)
-		}
-		if errors.Is(err, core.ErrAttachmentExpired) {
-			return failText("%s", err.Error())
-		}
-		return failText("复制附件 %s 失败：%v", a.ID, err)
-	}
-	var f sharedfiles.SharedFile
-	var overwritten bool
-	err := s.core.InTx(ctx, func(tx *core.Tx) error {
-		var err error
-		if f, overwritten, err = sharedfiles.Adopt(ctx, tx, pid, p, obj, by, overwrite); err != nil {
-			return err
-		}
-		return tx.EmitSharedFile(ctx, pid, f.Label(), "write", f.Path)
-	})
+func (s *Service) copyAttachment(ctx context.Context, owner, p string, a core.Attachment, by sharedfiles.Uploader, overwrite bool) Result {
+	f, overwritten, err := s.core.SaveAttachmentShared(ctx, owner, a, p, by, overwrite)
 	if err != nil {
-		_ = bs.Delete(context.WithoutCancel(ctx), obj.Key)
 		var ue userError
-		if errors.As(refuseShared(err, p), &ue) {
+		switch {
+		case errors.Is(err, blobstore.ErrNotFound) || errors.Is(err, core.ErrNotFound):
+			s.log.Warn("save_attachment copy", "attachment", a.ID, "err", err)
+			return failText("附件 %s 的文件已经不在存储里了（可能刚过期），存不了", a.ID)
+		case errors.Is(err, core.ErrAttachmentExpired):
+			return failText("%s", err.Error())
+		case errors.As(refuseShared(err, p), &ue):
 			return failText("%s", ue.msg)
 		}
+		s.log.Warn("save_attachment", "attachment", a.ID, "err", err)
 		return failText("存为共享文件失败：%v", err)
 	}
 	out := protocol.SaveAttachmentResult{ID: protocol.AttachmentID(a.ID), Path: protocol.SharedPath(f.Path), Size: int(f.Size),
@@ -226,27 +209,6 @@ func (s *Service) copyAttachment(ctx context.Context, bs blobstore.Store, owner,
 	}
 	return okJSON(fmt.Sprintf("%s共享文件 %s（附件 %s %s，%s）。项目里所有会话和用户都能用 list_shared_files / read_shared_file 取到它，"+
 		"附件过期后它也一直保留。%s", verb, f.Path, a.ID, a.Name, human(f.Size), noSecrets), out)
-}
-
-// writeCopy puts the attachment's bytes at key: a copy inside the store, or (rows from before
-// #58, at most 5 MB) a write from the data column.
-func (s *Service) writeCopy(ctx context.Context, bs blobstore.Store, owner string, a core.Attachment, key string) error {
-	if a.StorageKey != nil {
-		return bs.Copy(ctx, *a.StorageKey, key)
-	}
-	a2, rc, err := core.OpenAttachment(ctx, s.core.Pool, bs, owner, a.ID)
-	if err != nil {
-		return err
-	}
-	defer rc.Close()
-	data, err := io.ReadAll(io.LimitReader(rc, int64(a2.Size)+1))
-	if err != nil {
-		return err
-	}
-	if len(data) != a2.Size {
-		return fmt.Errorf("attachment %s has %d bytes, want %d", a.ID, len(data), a2.Size)
-	}
-	return bs.Put(ctx, key, bytes.NewReader(data), int64(len(data)), a.ContentType)
 }
 
 // carried tells the caller how many attachments went along (appended to a tool's result text).

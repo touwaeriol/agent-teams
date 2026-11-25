@@ -4,7 +4,9 @@
 // checks sizes, reads small ranges and streams.
 //
 // Every key starts with projects/<project_id>/ (see AttachmentKey, SharedKey) so deleting a
-// project is one DeletePrefix.
+// project is one DeletePrefix. The one exception: an attachment uploaded before its project
+// existed (a new plain session's first message, #58 D6) lives at users/<user_id>/attachments/<id>
+// (UserAttachmentKey) and keeps that key once its row joins a project.
 package blobstore
 
 import (
@@ -99,6 +101,14 @@ func AttachmentKey(projectID, attachmentID string) string {
 func SharedKey(projectID, objectID string) string {
 	return ProjectPrefix(projectID) + "shared/" + objectID
 }
+
+// UserAttachmentKey is where an attachment uploaded without a project lives (POST /api/uploads).
+func UserAttachmentKey(userID, attachmentID string) string {
+	return UserPrefix(userID) + "attachments/" + attachmentID
+}
+
+// UserPrefix is the prefix of a user's objects outside any project.
+func UserPrefix(userID string) string { return "users/" + userID + "/" }
 
 // ProjectPrefix is the prefix of every object of a project.
 func ProjectPrefix(projectID string) string { return "projects/" + projectID + "/" }

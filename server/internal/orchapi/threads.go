@@ -265,10 +265,13 @@ func (a *API) getThread(ctx context.Context, in *getThreadInput) (*threadDetailO
 func (a *API) recentMessages(ctx context.Context, convID string) ([]core.MessageView, error) {
 	msgs, err := core.Messages(ctx, a.e.Core.Pool, convID, 0, 30)
 	out := make([]core.MessageView, 0, len(msgs))
+	if err != nil {
+		return out, err
+	}
 	for _, m := range msgs {
 		out = append(out, core.MessageViewOf(m))
 	}
-	return out, err
+	return out, core.MarkExpiredMessages(ctx, a.e.Core.Pool, out)
 }
 
 func (a *API) updateThread(ctx context.Context, in *patchThreadInput) (*threadOutput, error) {
