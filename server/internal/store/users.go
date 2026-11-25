@@ -129,5 +129,14 @@ func (s *Store) TouchLogin(ctx context.Context, id string) error {
 
 // DeleteUser removes an account and (by cascade) everything it owns.
 func (s *Store) DeleteUser(ctx context.Context, id string) error {
-	return Changed(s.g(ctx).Where("id = ?", id).Delete(&User{}))
+	return s.Tx(ctx, func(tx *Store) error {
+		var projects []string
+		if err := tx.g(ctx).Table("at_projects").Where("user_id = ?", id).Pluck("id", &projects).Error; err != nil {
+			return err
+		}
+		if err := Changed(tx.g(ctx).Where("id = ?", id).Delete(&User{})); err != nil {
+			return err
+		}
+		return queueProjectObjects(ctx, tx, projects)
+	})
 }

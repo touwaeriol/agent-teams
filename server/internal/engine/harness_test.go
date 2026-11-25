@@ -1,6 +1,8 @@
 package engine_test
 
 import (
+	"github.com/touwaeriol/agent-teams/server/internal/blobstore/blobtest"
+
 	"bufio"
 	"bytes"
 	"context"
@@ -112,7 +114,7 @@ func newWorldWith(t *testing.T, gh *httptest.Server, tune func(*engine.Engine)) 
 	box := auth.NewSecretBox(secret)
 	tokens := github.NewTokens(client, github.NewApps(db, box), cache, box)
 	e, err := engine.New(engine.Deps{Store: db, KV: cache, GitHub: client, Tokens: tokens, Box: box, Office: reg, Log: log,
-		Gateway: nodegw.Config{Validate: true, PingInterval: time.Hour}, Vault: testVault(t)})
+		Gateway: nodegw.Config{Validate: true, PingInterval: time.Hour}, Vault: testVault(t), Blobs: blobtest.New(t)})
 	if err != nil {
 		t.Fatal(err)
 	}

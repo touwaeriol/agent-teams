@@ -177,6 +177,9 @@ func (o *Orchestrator) prepareForward(ctx context.Context, tx *core.Tx, req Forw
 		if total > MaxForwardAttachments {
 			return nil, ErrForwardFiles
 		}
+		if err := o.useRefs(ctx, tx, req.ProjectID, refs); err != nil {
+			return nil, err
+		}
 		text, files, err := o.inlineTexts(ctx, tx, c, m.Content, refs)
 		if err != nil {
 			return nil, err
@@ -383,4 +386,27 @@ func briefFiles(ctx context.Context, tx *core.Tx, t core.Thread) ([]core.Attachm
 		}
 	}
 	return out, nil
+}
+
+// useRefs refuses expired attachments among refs and restarts the retention of the others (a
+// forward is a use). Refs whose row is gone are left as they were (older messages).
+func (o *Orchestrator) useRefs(ctx context.Context, tx *core.Tx, projectID string, refs []core.AttachmentRef) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	ids := refIDs(refs)
+	if name, err := core.ExpiredAttachment(ctx, tx, projectID, ids); err != nil {
+		return err
+	} else if name != "" {
+		return fmt.Errorf("%w：%s", core.ErrAttachmentExpired, name)
+	}
+	return core.TouchAttachments(ctx, tx, projectID, ids, o.core.AttachmentTTL)
+}
+
+func refIDs(refs []core.AttachmentRef) []string {
+	ids := make([]string, len(refs))
+	for i, r := range refs {
+		ids[i] = r.ID
+	}
+	return ids
 }

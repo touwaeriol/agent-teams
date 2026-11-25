@@ -1,6 +1,8 @@
 package orchestrator
 
 import (
+	"github.com/touwaeriol/agent-teams/server/internal/blobgc"
+
 	"context"
 	"errors"
 	"fmt"
@@ -127,7 +129,7 @@ func (o *Orchestrator) messageImages(ctx context.Context, tx *core.Tx, c core.Co
 	if len(ids) > core.MaxMessageImages {
 		return nil, ErrTooManyImages
 	}
-	list, err := core.ProjectAttachments(ctx, tx, deref(c.ProjectID), ids)
+	list, err := core.UseAttachments(ctx, tx, deref(c.ProjectID), ids, o.core.AttachmentTTL)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +155,7 @@ func (o *Orchestrator) inlineTexts(ctx context.Context, tx *core.Tx, c core.Conv
 	if len(ids) == 0 {
 		return text, refs, nil
 	}
-	data, err := core.AttachmentTexts(ctx, tx, deref(c.ProjectID), ids)
+	data, err := core.AttachmentTexts(ctx, tx, o.core.Blobs, deref(c.ProjectID), ids)
 	if err != nil {
 		return "", nil, err
 	}
@@ -422,15 +424,32 @@ func (o *Orchestrator) completeAs(ctx context.Context, tx *core.Tx, t core.Threa
 // deleteThreadImages removes the images attached to a thread's messages, unless a message
 // elsewhere in the project still shows them.
 func deleteThreadImages(ctx context.Context, tx *core.Tx, t core.Thread) error {
-	_, err := store.Exec(ctx, tx, `WITH refs AS (
+	// References: messages' meta.attachments and tasks' attachments (#58), per conversation.
+	var keys []struct{ StorageKey *string }
+	err := store.Raw(ctx, tx, `WITH refs AS (
 		SELECT m.conversation_id, r->>'id' AS id FROM at_messages m
 		JOIN at_conversations c ON c.id = m.conversation_id AND c.project_id = $2,
 		LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(m.meta->'attachments') = 'array'
-			THEN m.meta->'attachments' ELSE '[]'::jsonb END) r)
+			THEN m.meta->'attachments' ELSE '[]'::jsonb END) r
+		UNION ALL
+		SELECT k.conversation_id, r->>'id' AS id FROM at_tasks k
+		JOIN at_conversations c ON c.id = k.conversation_id AND c.project_id = $2,
+		LATERAL jsonb_array_elements(k.attachments) r)
 		DELETE FROM at_attachments WHERE project_id = $2
 		AND id IN (SELECT id FROM refs WHERE conversation_id = $1)
-		AND id NOT IN (SELECT id FROM refs WHERE conversation_id <> $1 AND id IS NOT NULL)`, t.ID, t.ProjectID)
-	return err
+		AND id NOT IN (SELECT id FROM refs WHERE conversation_id <> $1 AND id IS NOT NULL)
+		RETURNING storage_key`, t.ID, t.ProjectID).Scan(&keys).Error
+	if err != nil {
+		return err
+	}
+	for _, k := range keys {
+		if k.StorageKey != nil {
+			if err := blobgc.Enqueue(ctx, tx, *k.StorageKey); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // UnarchiveStatus is where an archived thread goes back to: a finished thread stays finished,

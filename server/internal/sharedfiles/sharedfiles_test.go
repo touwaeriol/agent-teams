@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/touwaeriol/agent-teams/server/internal/artifacts"
+	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
+	"github.com/touwaeriol/agent-teams/server/internal/blobstore/blobtest"
 	"github.com/touwaeriol/agent-teams/server/internal/sharedfiles"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 	"github.com/touwaeriol/agent-teams/server/internal/testdb"
@@ -114,22 +116,37 @@ func TestPutOverwriteDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	q := s.Pool
-	f, over, err := sharedfiles.Put(ctx, q, p.ID, "data/a.csv", []byte("x,y\n1,2\n"), sharedfiles.Uploader{Name: sharedfiles.UserName})
+	bs := blobtest.New(t)
+	if _, _, err := sharedfiles.Put(ctx, q, blobstore.None{}, p.ID, "a.txt", []byte("x"), sharedfiles.Uploader{Name: "user"}); !errors.Is(err, blobstore.ErrNotConfigured) {
+		t.Fatalf("put without a store: %v", err)
+	}
+	f, over, err := sharedfiles.Put(ctx, q, bs, p.ID, "data/a.csv", []byte("x,y\n1,2\n"), sharedfiles.Uploader{Name: sharedfiles.UserName})
 	if err != nil || over || f.Size != 8 || f.UploadedBy != "user" || f.ContentType != "text/csv; charset=utf-8" ||
 		f.SHA256 != sharedfiles.Sum([]byte("x,y\n1,2\n")) {
 		t.Fatalf("put %+v %v %v", f, over, err)
 	}
-	g, over, err := sharedfiles.Put(ctx, q, p.ID, "./data/a.csv", []byte("x\n"), sharedfiles.Uploader{Name: "dev-1"})
+	if f.StorageKey == nil || !strings.HasPrefix(*f.StorageKey, "projects/"+p.ID+"/shared/sf_") {
+		t.Fatalf("storage key %v", f.StorageKey)
+	}
+	var inDB int
+	_ = q.Gorm(ctx).Raw(`SELECT count(*) FROM at_shared_files WHERE data IS NOT NULL`).Row().Scan(&inDB)
+	if inDB != 0 {
+		t.Fatal("bytes written to the data column")
+	}
+	g, over, err := sharedfiles.Put(ctx, q, bs, p.ID, "./data/a.csv", []byte("x\n"), sharedfiles.Uploader{Name: "dev-1"})
 	if err != nil || !over || g.Size != 2 || g.UploadedBy != "dev-1" || !g.CreatedAt.Equal(f.CreatedAt) || g.UpdatedAt.Before(f.UpdatedAt) {
 		t.Fatalf("overwrite %+v %v %v", g, over, err)
 	}
-	if _, _, err := sharedfiles.Put(ctx, q, p.ID, "../a.csv", []byte("x"), sharedfiles.Uploader{Name: "user"}); !errors.Is(err, sharedfiles.ErrInvalidPath) {
+	if *g.StorageKey == *f.StorageKey || !queued(t, q, *f.StorageKey) {
+		t.Fatalf("overwrite must use a new object and queue the old one (%s → %s)", *f.StorageKey, *g.StorageKey)
+	}
+	if _, _, err := sharedfiles.Put(ctx, q, bs, p.ID, "../a.csv", []byte("x"), sharedfiles.Uploader{Name: "user"}); !errors.Is(err, sharedfiles.ErrInvalidPath) {
 		t.Fatalf("traversal stored: %v", err)
 	}
-	if _, _, err := sharedfiles.Put(ctx, q, p.ID, "big.bin", make([]byte, sharedfiles.MaxFileBytes+1), sharedfiles.Uploader{Name: "user"}); !errors.Is(err, sharedfiles.ErrFileTooLarge) {
+	if _, _, err := sharedfiles.Put(ctx, q, bs, p.ID, "big.bin", make([]byte, sharedfiles.MaxFileBytes+1), sharedfiles.Uploader{Name: "user"}); !errors.Is(err, sharedfiles.ErrFileTooLarge) {
 		t.Fatalf("21 MB stored: %v", err)
 	}
-	if _, _, err := sharedfiles.Put(ctx, q, p.ID, "notes.md", []byte("# n"), sharedfiles.Uploader{Name: "user"}); err != nil {
+	if _, _, err := sharedfiles.Put(ctx, q, bs, p.ID, "notes.md", []byte("# n"), sharedfiles.Uploader{Name: "user"}); err != nil {
 		t.Fatal(err)
 	}
 	usage, _ := sharedfiles.ProjectUsage(ctx, q, p.ID)
@@ -143,10 +160,10 @@ func TestPutOverwriteDelete(t *testing.T) {
 	if list, _ := sharedfiles.List(ctx, q, other.ID, ""); len(list) != 0 {
 		t.Fatalf("other project sees %+v", list)
 	}
-	if _, _, err := sharedfiles.Load(ctx, q, other.ID, "notes.md"); !errors.Is(err, sharedfiles.ErrNotFound) {
+	if _, _, err := sharedfiles.Load(ctx, q, bs, other.ID, "notes.md"); !errors.Is(err, sharedfiles.ErrNotFound) {
 		t.Fatalf("other project loads: %v", err)
 	}
-	_, data, err := sharedfiles.Load(ctx, q, p.ID, "data/a.csv")
+	_, data, err := sharedfiles.Load(ctx, q, bs, p.ID, "data/a.csv")
 	if err != nil || string(data) != "x\n" {
 		t.Fatalf("load %q %v", data, err)
 	}
@@ -155,16 +172,65 @@ func TestPutOverwriteDelete(t *testing.T) {
 		sharedfiles.MaxProjectBytes-10, p.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := sharedfiles.Put(ctx, q, p.ID, "more.txt", []byte("0123456789"), sharedfiles.Uploader{Name: "user"}); !errors.Is(err, sharedfiles.ErrQuota) {
+	if _, _, err := sharedfiles.Put(ctx, q, bs, p.ID, "more.txt", []byte("0123456789"), sharedfiles.Uploader{Name: "user"}); !errors.Is(err, sharedfiles.ErrQuota) {
 		t.Fatalf("over the project total: %v", err)
 	}
-	if _, _, err := sharedfiles.Put(ctx, q, p.ID, "data/a.csv", []byte("0123456789"), sharedfiles.Uploader{Name: "user"}); err != nil {
+	if _, _, err := sharedfiles.Put(ctx, q, bs, p.ID, "data/a.csv", []byte("0123456789"), sharedfiles.Uploader{Name: "user"}); err != nil {
 		t.Fatalf("overwrite within the difference: %v", err)
 	}
-	if ok, err := sharedfiles.Delete(ctx, q, p.ID, "data/a.csv"); !ok || err != nil {
+	last, _ := sharedfiles.Stat(ctx, q, p.ID, "data/a.csv")
+	if ok, err := sharedfiles.Delete(ctx, q, p.ID, "data/a.csv"); !ok || err != nil || !queued(t, q, *last.StorageKey) {
 		t.Fatalf("delete %v %v", ok, err)
 	}
 	if ok, _ := sharedfiles.Delete(ctx, q, p.ID, "data/a.csv"); ok {
 		t.Fatal("deleted twice")
+	}
+}
+
+func queued(t *testing.T, q store.DB, key string) bool {
+	t.Helper()
+	var n int
+	if err := q.Gorm(context.Background()).Raw(`SELECT count(*) FROM at_blob_deletions WHERE key = ?`, key).Row().Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n == 1
+}
+
+// TestLegacyAndFailed: a row from before #58 (bytes in data, no storage key) still loads; a
+// failed row is listed but refused.
+func TestLegacyAndFailed(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(ctx, testdb.Migrated(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	u, _ := s.CreateUser(ctx, "legacy@example.com", "h")
+	p, err := s.CreateProject(ctx, u.ID, store.NewProject{Name: "l", WorkMode: "worktree"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := s.Pool
+	if err := q.Gorm(ctx).Exec(`INSERT INTO at_shared_files (project_id, path, content_type, size, sha256, data, uploaded_by)
+		VALUES (?, 'old.txt', 'text/plain', 3, 'x', ?, 'user'), (?, 'bad.txt', 'text/plain', 3, NULL, NULL, 'user')`,
+		p.ID, []byte("old"), p.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, data, err := sharedfiles.Load(ctx, q, blobstore.None{}, p.ID, "old.txt"); err != nil || string(data) != "old" {
+		t.Fatalf("legacy load %q %v", data, err)
+	}
+	if err := q.Gorm(ctx).Exec(`UPDATE at_shared_files SET state = 'failed', storage_key = 'k' WHERE path = 'bad.txt'`).Error; err != nil {
+		t.Fatal(err)
+	}
+	list, _ := sharedfiles.List(ctx, q, p.ID, "")
+	if len(list) != 2 || list[0].Path != "bad.txt" || list[0].SHA256 != "" || list[0].State != "failed" {
+		t.Fatalf("list %+v", list)
+	}
+	if _, _, err := sharedfiles.Load(ctx, q, blobtest.New(t), p.ID, "bad.txt"); !errors.Is(err, sharedfiles.ErrFailed) {
+		t.Fatalf("failed load: %v", err)
+	}
+	// Deleting a row from before #58 (no storage key) queues nothing.
+	if ok, err := sharedfiles.Delete(ctx, q, p.ID, "old.txt"); !ok || err != nil {
+		t.Fatalf("delete legacy %v %v", ok, err)
 	}
 }

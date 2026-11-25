@@ -1,6 +1,8 @@
 package store
 
 import (
+	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
+
 	"context"
 	"encoding/json"
 	"time"
@@ -233,9 +235,28 @@ func (s *Store) UpdateProject(ctx context.Context, userID, id string, changes []
 	return s.ProjectOf(ctx, userID, id)
 }
 
-// DeleteProject removes a project and (by cascade) its conversations, threads and memory.
+// DeleteProject removes a project and (by cascade) its conversations, threads and memory; its
+// objects in the object store (attachments, shared files) are queued for deletion in the same
+// transaction (#58, blobgc).
 func (s *Store) DeleteProject(ctx context.Context, userID, id string) error {
-	return Changed(s.g(ctx).Where("id = ? AND user_id = ?", id, userID).Delete(&Project{}))
+	return s.Tx(ctx, func(tx *Store) error {
+		if err := Changed(tx.g(ctx).Where("id = ? AND user_id = ?", id, userID).Delete(&Project{})); err != nil {
+			return err
+		}
+		return queueProjectObjects(ctx, tx, []string{id})
+	})
+}
+
+// queueProjectObjects queues the object-store prefix of each project for deletion (the
+// at_blob_deletions row blobgc.EnqueuePrefix writes; store cannot import blobgc).
+func queueProjectObjects(ctx context.Context, tx *Store, ids []string) error {
+	for _, id := range ids {
+		if _, err := Exec(ctx, tx.db, `INSERT INTO at_blob_deletions (key, prefix) VALUES ($1, true)
+			ON CONFLICT (key) DO UPDATE SET prefix = true`, blobstore.ProjectPrefix(id)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ProjectIDsUsingLayout lists projects whose office uses layoutID ("" matches the global default).

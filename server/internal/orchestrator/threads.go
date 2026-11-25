@@ -286,6 +286,10 @@ func (o *Orchestrator) start(ctx context.Context, t core.Thread) error {
 			return err
 		}
 		if src != nil {
+			// Opening a thread on a message is a use of its attachments (retention restarts).
+			if err := core.TouchAttachments(ctx, tx, cur.ProjectID, refIDs(core.AttachmentsOf(*src)), o.core.AttachmentTTL); err != nil {
+				return err
+			}
 			// Text attachments are not in files (briefFiles skips them): inline them into the
 			// quoted message, as a normal post or a forward would, so the lead sees them.
 			quoted := *src

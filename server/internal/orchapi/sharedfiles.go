@@ -1,6 +1,8 @@
 package orchapi
 
 import (
+	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
+
 	"context"
 	"errors"
 	"fmt"
@@ -187,7 +189,7 @@ func (a *API) uploadSharedFiles(ctx context.Context, in *sharedUploadInput) (*sh
 			if err != nil {
 				return err
 			}
-			f, overwritten, err := sharedfiles.Put(ctx, tx, p.ID, part.path, data, sharedfiles.Uploader{Name: sharedfiles.UserName})
+			f, overwritten, err := sharedfiles.Put(ctx, tx, a.e.Core.Blobs, p.ID, part.path, data, sharedfiles.Uploader{Name: sharedfiles.UserName})
 			if err != nil {
 				return err
 			}
@@ -218,6 +220,10 @@ func sharedFail(err error) error {
 		return httpapi.Fail(http.StatusConflict, "quota_exceeded", err.Error())
 	case errors.Is(err, sharedfiles.ErrNotFound):
 		return httpapi.Fail(http.StatusNotFound, "not_found", "没有这个共享文件")
+	case errors.Is(err, sharedfiles.ErrFailed):
+		return httpapi.Fail(http.StatusConflict, "upload_failed", "这个共享文件上传后校验没有通过，请重新上传")
+	case errors.Is(err, blobstore.ErrNotConfigured):
+		return httpapi.Fail(http.StatusServiceUnavailable, "storage_unavailable", "文件存储未配置")
 	}
 	return err
 }
@@ -244,7 +250,7 @@ func (a *API) downloadSharedFile(ctx context.Context, in *sharedPathInput) (*sha
 	if err != nil {
 		return nil, sharedFail(err)
 	}
-	f, data, err := sharedfiles.Load(ctx, a.e.Core.Pool, p.ID, sp)
+	f, data, err := sharedfiles.Load(ctx, a.e.Core.Pool, a.e.Core.Blobs, p.ID, sp)
 	if err != nil {
 		return nil, sharedFail(err)
 	}

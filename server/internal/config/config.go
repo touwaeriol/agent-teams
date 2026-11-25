@@ -2,6 +2,8 @@
 package config
 
 import (
+	"time"
+
 	"errors"
 	"fmt"
 	"io"
@@ -34,6 +36,81 @@ type Config struct {
 	// GitMirrorDir (GIT_MIRROR_DIR) holds the relay's bare mirrors of standalone Git repositories
 	// (git-repos.md §5); empty disables the relay.
 	GitMirrorDir string
+	// S3 is the object store of attachments and shared files (AGENT_TEAMS_S3_*, #58); all empty =
+	// not configured: new uploads answer 503, bytes still in the database stay readable.
+	S3 S3
+	// AttachmentTTL (AGENT_TEAMS_ATTACHMENT_TTL, a Go duration such as 24h) is how long an
+	// attachment is kept after its last use, and how long daemons keep the downloaded copy.
+	AttachmentTTL time.Duration
+}
+
+// S3 is the AGENT_TEAMS_S3_* settings.
+type S3 struct {
+	Endpoint       string // AGENT_TEAMS_S3_ENDPOINT, e.g. https://rustfs.prophey.ai
+	PublicEndpoint string // AGENT_TEAMS_S3_PUBLIC_ENDPOINT: what presigned URLs point at; default Endpoint
+	Bucket         string // AGENT_TEAMS_S3_BUCKET
+	AccessKey      string // AGENT_TEAMS_S3_ACCESS_KEY
+	SecretKey      string // AGENT_TEAMS_S3_SECRET_KEY
+	Region         string // AGENT_TEAMS_S3_REGION, default us-east-1
+	PathStyle      bool   // AGENT_TEAMS_S3_PATH_STYLE, default true
+}
+
+// Configured is true when the four required settings are there.
+func (s S3) Configured() bool {
+	return s.Endpoint != "" && s.Bucket != "" && s.AccessKey != "" && s.SecretKey != ""
+}
+
+func (s S3) check() error {
+	set := 0
+	for _, v := range []string{s.Endpoint, s.Bucket, s.AccessKey, s.SecretKey} {
+		if v != "" {
+			set++
+		}
+	}
+	if set != 0 && set != 4 {
+		return errors.New("set all of AGENT_TEAMS_S3_ENDPOINT, AGENT_TEAMS_S3_BUCKET, AGENT_TEAMS_S3_ACCESS_KEY and AGENT_TEAMS_S3_SECRET_KEY, or none")
+	}
+	for _, e := range []string{s.Endpoint, s.PublicEndpoint} {
+		if e == "" {
+			continue
+		}
+		if u, err := url.Parse(e); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			return errors.New("AGENT_TEAMS_S3_ENDPOINT / AGENT_TEAMS_S3_PUBLIC_ENDPOINT must be http(s)://host")
+		}
+	}
+	return nil
+}
+
+// DefaultAttachmentTTL is AGENT_TEAMS_ATTACHMENT_TTL's default (user decision #58).
+const DefaultAttachmentTTL = 24 * time.Hour
+
+func attachmentTTL(v string) (time.Duration, error) {
+	if strings.TrimSpace(v) == "" {
+		return DefaultAttachmentTTL, nil
+	}
+	d, err := time.ParseDuration(strings.TrimSpace(v))
+	if err != nil || d < time.Minute {
+		return 0, errors.New("AGENT_TEAMS_ATTACHMENT_TTL must be a duration of at least 1m, e.g. 24h")
+	}
+	return d, nil
+}
+
+// LoadS3 reads and checks only the AGENT_TEAMS_S3_* settings (atctl storage).
+func LoadS3(getenv Getenv) (S3, error) {
+	s := s3Config(getenv)
+	return s, s.check()
+}
+
+func s3Config(getenv Getenv) S3 {
+	return S3{
+		Endpoint:       strings.TrimRight(getenv("AGENT_TEAMS_S3_ENDPOINT"), "/"),
+		PublicEndpoint: strings.TrimRight(getenv("AGENT_TEAMS_S3_PUBLIC_ENDPOINT"), "/"),
+		Bucket:         getenv("AGENT_TEAMS_S3_BUCKET"),
+		AccessKey:      getenv("AGENT_TEAMS_S3_ACCESS_KEY"),
+		SecretKey:      getenv("AGENT_TEAMS_S3_SECRET_KEY"),
+		Region:         first(getenv("AGENT_TEAMS_S3_REGION"), "us-east-1"),
+		PathStyle:      !strings.EqualFold(strings.TrimSpace(getenv("AGENT_TEAMS_S3_PATH_STYLE")), "false"),
+	}
 }
 
 // Getenv looks a variable up; os.Getenv in production, a map in tests.
@@ -58,7 +135,13 @@ func Load(getenv Getenv) (Config, error) {
 		GitHubWeb:      strings.TrimRight(getenv("GITHUB_WEB_URL"), "/"),
 		ArtifactOrigin: strings.TrimRight(getenv("AGENT_TEAMS_ARTIFACT_ORIGIN"), "/"),
 		GitMirrorDir:   getenv("GIT_MIRROR_DIR"),
+		S3:             s3Config(getenv),
 	}
+	ttl, err := attachmentTTL(getenv("AGENT_TEAMS_ATTACHMENT_TTL"))
+	if err != nil {
+		return cfg, err
+	}
+	cfg.AttachmentTTL = ttl
 	return cfg, cfg.check()
 }
 
@@ -68,6 +151,9 @@ func (c Config) check() error {
 	}
 	if c.PublicURL == "" {
 		return errors.New("set AGENT_TEAMS_PUBLIC_URL (or PUBLIC_URL), e.g. https://agent.example.com")
+	}
+	if err := c.S3.check(); err != nil {
+		return err
 	}
 	return c.checkArtifactOrigin()
 }

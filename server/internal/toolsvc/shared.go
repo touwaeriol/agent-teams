@@ -9,6 +9,7 @@ import (
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 
 	"github.com/touwaeriol/agent-teams/server/internal/artifacts"
+	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/sharedfiles"
@@ -91,9 +92,15 @@ func (s *Service) readSharedFile(ctx context.Context, tx *core.Tx, c *call) (Res
 	if err != nil {
 		return Result{}, refuse("%s", err.Error())
 	}
-	f, data, err := sharedfiles.Load(ctx, tx, c.emp().ProjectID, p)
+	f, data, err := sharedfiles.Load(ctx, tx, s.core.Blobs, c.emp().ProjectID, p)
 	if errors.Is(err, sharedfiles.ErrNotFound) {
 		return Result{}, refuse("这个项目没有共享文件 %s（用 list_shared_files 查看）", p)
+	}
+	if errors.Is(err, sharedfiles.ErrFailed) {
+		return Result{}, refuse("共享文件 %s 上传后校验没有通过（内容和上传时不一致），读不了；请重新上传", p)
+	}
+	if errors.Is(err, blobstore.ErrNotConfigured) {
+		return Result{}, refuse("平台的文件存储还没有配置，暂时读不了共享文件 %s", p)
 	}
 	if err != nil {
 		return Result{}, err
@@ -191,9 +198,12 @@ func (s *Service) storeShared(ctx context.Context, tx *core.Tx, c *call, in prot
 	if sharedfiles.Sum(data) != decl.SHA256 {
 		return Result{}, refuse("文件校验失败：%s", p)
 	}
-	f, overwritten, err := sharedfiles.Put(ctx, tx, c.emp().ProjectID, p, data, sharedUploader(c))
+	f, overwritten, err := sharedfiles.Put(ctx, tx, s.core.Blobs, c.emp().ProjectID, p, data, sharedUploader(c))
 	if errors.Is(err, sharedfiles.ErrInvalidPath) || errors.Is(err, sharedfiles.ErrFileTooLarge) || errors.Is(err, sharedfiles.ErrQuota) {
 		return Result{}, refuse("%s", err.Error())
+	}
+	if errors.Is(err, blobstore.ErrNotConfigured) {
+		return Result{}, refuse("平台的文件存储还没有配置，暂时写不了共享文件")
 	}
 	if err != nil {
 		return Result{}, err
