@@ -263,8 +263,25 @@ export class SessionManager implements SessionHost {
     return this.send_(body);
   }
 
-  private async send_(body: SessionSend): Promise<Reply[]> {
+  /**
+   * Deliveries of one session run one after another, whether they come from session.send (the
+   * command lane) or from release (first_message and held messages, outside the lane): a message
+   * whose attachments take minutes to download is never overtaken by the next one.
+   */
+  private send_(body: SessionSend): Promise<Reply[]> {
     const s = this.require(body.session_id);
+    const run = s.deliveries.then(() => this.deliver(s, body));
+    s.deliveries = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  /** The session was replaced by a newer session.open: this (old) object must not start a runtime. */
+  private checkCurrent(s: Session): void {
+    if (this.sessions.get(s.id) !== s) throw new CommandError("unknown_session", `session ${s.id} open_gen ${s.gen} was replaced by a newer open`);
+  }
+
+  private async deliver(s: Session, body: SessionSend): Promise<Reply[]> {
+    this.checkCurrent(s);
     if (!s.released) {
       s.held.push(body);
       return [];
@@ -275,11 +292,11 @@ export class SessionManager implements SessionHost {
     // Downloads (up to 200 MB each, minutes) come before the runtime is started: the session may be
     // parked meanwhile (idle timeout, max_active_sessions) without losing the message.
     const fetched = await this.fetchAttachments(s, body);
-    // Closed while downloading: nothing to deliver to. Replaced by a newer session.open: deliver to that
-    // one (the downloaded copies are reused).
+    // Closed while downloading: nothing to deliver to. Replaced by a newer session.open: an error, so
+    // this old object never starts a stray runtime process (as restartAfterCrash).
     if (s.downloads.signal.aborted || s.state === "closed") return [];
-    if (this.sessions.get(s.id) !== s) return this.send_(body);
     for (let attempt = 0; ; attempt++) {
+      this.checkCurrent(s);
       try {
         await this.ensureRunning(s);
       } catch (err) {
@@ -290,6 +307,7 @@ export class SessionManager implements SessionHost {
       const budget = this.pdfBudget(s);
       const trial = { used: budget.used };
       const { text, images, links } = await this.planAttachments(s, body, fetched, trial);
+      this.checkCurrent(s);
       const driver = s.driver;
       // Parked while the files were read: start it again (the budget only counts what was pushed).
       if (!driver) {

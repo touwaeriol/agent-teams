@@ -180,6 +180,56 @@ describe("daemon with a fake console", () => {
     expect(h.log.prompts.some((p) => p.includes("不该送达"))).toBe(false);
   });
 
+  /** A transfer fetch whose attachment downloads wait for release() ("/url" answers 404: legacy endpoint). */
+  function gatedFetch() {
+    let calledDownload!: () => void;
+    const called = new Promise<void>((r) => (calledDownload = r));
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const transferFetch: typeof fetch = async (input, init) => {
+      if (String(input).endsWith("/url")) return new Response("", { status: 404 });
+      calledDownload();
+      await gate;
+      return fetch(input, init);
+    };
+    return { transferFetch, called, release };
+  }
+
+  it("keeps the order when the first_message's attachment downloads slowly and a session.send follows", async () => {
+    const g = gatedFetch();
+    h = await startHarness({ transferFetch: g.transferFetch });
+    h.console.images.set("img_brief", Buffer.from("brief file"));
+    await openAndRelease("s_ORD", { first_message: { msg_id: "m_brief", text: "简报", attachments: [{ id: "img_brief", name: "brief.bin", content_type: "application/octet-stream", size: 10 }] } });
+    await g.called;
+    h.console.command("session.send", { session_id: "s_ORD", msg_id: "m_after", text: "后一条" });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(h.console.ofType("session.delivered").map((f) => f.body.msg_id)).toEqual([]);
+    g.release();
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_after");
+    expect(h.console.ofType("session.delivered").map((f) => f.body.msg_id)).toEqual(["m_brief", "m_after"]);
+    const order = h.log.prompts.filter((p) => p.includes("简报") || p.includes("后一条"));
+    expect(order[0]).toContain("简报");
+    expect(order[1]).toBe("后一条");
+  });
+
+  it("does not start a runtime for a session object replaced by a newer open while it downloaded", async () => {
+    const g = gatedFetch();
+    h = await startHarness({ transferFetch: g.transferFetch });
+    h.console.images.set("img_old", Buffer.from("old brief"));
+    await openAndRelease("s_REP", { first_message: { msg_id: "m_old", text: "旧简报", attachments: [{ id: "img_old", name: "old.bin", content_type: "application/octet-stream", size: 9 }] } });
+    await g.called;
+    const startsBefore = h.log.options.length;
+    h.console.command("session.open", claudeOpen("s_REP", 2));
+    await h.console.waitType("session.opened", (b) => b.session_id === "s_REP" && b.open_gen === 2);
+    h.console.command("session.release", { session_id: "s_REP", open_gen: 2 });
+    g.release();
+    await new Promise((r) => setTimeout(r, 500));
+    // Only gen 2 was started after the gen-1 download; the gen-1 brief was not pushed into it.
+    expect(h.log.options.length).toBe(startsBefore + 1);
+    expect(h.log.prompts.some((p) => p.includes("旧简报"))).toBe(false);
+    expect(h.console.ofType("session.delivered").filter((f) => f.body.msg_id === "m_old")).toEqual([]);
+  });
+
   it("counts the PDF base64 given to a Claude conversation, persists it and resets it on a compaction", async () => {
     h = await startHarness();
     const pdf = Buffer.alloc(6 * 1024 * 1024, 1);
