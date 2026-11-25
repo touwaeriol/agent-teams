@@ -272,48 +272,70 @@ export class SessionManager implements SessionHost {
     s.sends++;
     if (body.anchor !== undefined) this.setAnchor(s, body.anchor);
     if (await this.alreadyDelivered(s, body.msg_id)) return [delivered(s, body.msg_id)];
-    try {
-      await this.ensureRunning(s);
-    } catch (err) {
-      if (err instanceof ResumeFailed) return this.resumeFailed(s, err);
-      throw err;
+    // Downloads (up to 200 MB each, minutes) come before the runtime is started: the session may be
+    // parked meanwhile (idle timeout, max_active_sessions) without losing the message.
+    const fetched = await this.fetchAttachments(s, body);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await this.ensureRunning(s);
+      } catch (err) {
+        if (err instanceof ResumeFailed) return this.resumeFailed(s, err);
+        throw err;
+      }
+      if (attempt === 0 && body.interrupt_first) await s.driver!.interrupt();
+      const budget = this.pdfBudget(s);
+      const trial = { used: budget.used };
+      const { text, images, links } = await this.planAttachments(s, body, fetched, trial);
+      const driver = s.driver;
+      // Parked while the files were read: start it again (the budget only counts what was pushed).
+      if (!driver) {
+        if (attempt < 2) continue;
+        throw new Error("the session stopped before the message could be delivered");
+      }
+      const r = await driver.push({ msg_id: body.msg_id, text, priority: body.priority ?? "next", ...(images.length ? { images } : {}), ...(links.length ? { links } : {}) });
+      if (trial.used !== budget.used) {
+        budget.used = trial.used;
+        this.persist(s);
+      }
+      return [delivered(s, body.msg_id, r.turn_id)];
     }
-    if (body.interrupt_first) await s.driver!.interrupt();
-    const { text, images, links } = await this.withAttachments(s, body);
-    const r = await s.driver!.push({ msg_id: body.msg_id, text, priority: body.priority ?? "next", ...(images.length ? { images } : {}), ...(links.length ? { links } : {}) });
-    return [delivered(s, body.msg_id, r.turn_id)];
   }
 
   /**
-   * The message's legacy images and its attachments (attachments_v2). Attachments are downloaded into
-   * <cwd>/.attachments/ one by one; one that cannot be fetched (error, timeout, no disk space) becomes
+   * The message's legacy images and its attachments (attachments_v2), downloaded: attachments into
+   * <cwd>/.attachments/ one by one. One that cannot be fetched (error, timeout, no disk space) becomes
    * a line in the [附件] block and the message is delivered anyway.
    */
-  private async withAttachments(s: Session, body: SessionSend): Promise<{ text: string; images: LoadedImage[]; links: ResourceLink[] }> {
+  private async fetchAttachments(s: Session, body: SessionSend): Promise<{ legacy: { text: string; images: LoadedImage[] }; outcomes: AttachmentOutcome[] }> {
     const legacy = await this.withImages(s, body);
-    if (!body.attachments?.length) return { ...legacy, links: [] };
     const outcomes: AttachmentOutcome[] = [];
+    if (!body.attachments?.length) return { legacy, outcomes };
     if (!this.d.http || !s.absCwd) {
       for (const ref of body.attachments) outcomes.push({ ref, error: "这个节点无法下载附件" });
-    } else {
-      this.noteAttachmentDir(s.absCwd);
-      for (const ref of body.attachments) {
-        try {
-          outcomes.push({ ref, saved: await downloadAttachment(s.absCwd, ref, this.d.http, this.attachmentOptions) });
-        } catch (err) {
-          this.d.log.warn({ session: s.id, attachment: ref.id, err: (err as Error).message }, "attachment download failed");
-          outcomes.push({ ref, error: (err as Error).message });
-        }
+      return { legacy, outcomes };
+    }
+    this.noteAttachmentDir(s.absCwd);
+    for (const ref of body.attachments) {
+      try {
+        outcomes.push({ ref, saved: await downloadAttachment(s.absCwd, ref, this.d.http, this.attachmentOptions) });
+      } catch (err) {
+        this.d.log.warn({ session: s.id, attachment: ref.id, err: (err as Error).message }, "attachment download failed");
+        outcomes.push({ ref, error: (err as Error).message });
       }
     }
-    const budget = this.pdfBudget(s);
-    const before = budget.used;
-    const plan = await planDelivery(s.spec.runtime as AttachmentRuntime, outcomes, budget).catch((err: Error) => {
+    return { legacy, outcomes };
+  }
+
+  /** What the runtime gets: content blocks within its limits (counted in budget) and the [附件] block. */
+  private async planAttachments(
+    s: Session, body: SessionSend, f: { legacy: { text: string; images: LoadedImage[] }; outcomes: AttachmentOutcome[] }, budget: { used: number },
+  ): Promise<{ text: string; images: LoadedImage[]; links: ResourceLink[] }> {
+    if (!body.attachments?.length) return { ...f.legacy, links: [] };
+    const plan = await planDelivery(s.spec.runtime as AttachmentRuntime, f.outcomes, budget).catch((err: Error) => {
       this.d.log.warn({ session: s.id, err: err.message }, "attachment planning failed");
       return { note: `\n\n[附件无法读取：${err.message}]`, images: [], links: [] };
     });
-    if (budget.used !== before) this.persist(s);
-    return { text: legacy.text + plan.note, images: [...legacy.images, ...plan.images], links: plan.links };
+    return { text: f.legacy.text + plan.note, images: [...f.legacy.images, ...plan.images], links: plan.links };
   }
 
   /** The PDF budget of the session's current SDK conversation (a new conversation starts from zero). */

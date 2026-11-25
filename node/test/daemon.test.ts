@@ -125,6 +125,36 @@ describe("daemon with a fake console", () => {
     expect(JSON.parse(readFileSync(join(h.opts.stateDir, "attachment-dirs.json"), "utf8"))).toEqual([join(cwd, ".attachments")]);
   });
 
+  it("delivers a message whose attachment download outlasts the session's process (parked meanwhile)", async () => {
+    let calledDownload!: () => void;
+    const called = new Promise<void>((r) => (calledDownload = r));
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const transferFetch: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/url")) return new Response("", { status: 404 });
+      calledDownload();
+      await gate;
+      return fetch(input, init);
+    };
+    h = await startHarness({ transferFetch });
+    h.console.images.set("img_slow", Buffer.from("slow file"));
+    await openAndRelease("s_PARK");
+    h.console.command("session.send", { session_id: "s_PARK", msg_id: "m_first", text: "hi" });
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_first");
+    await h.console.waitType("session.event", (b) => b.kind === "text" && b.final === true);
+    h.console.command("session.send", { session_id: "s_PARK", msg_id: "m_slow", text: "慢附件", kind: "user", attachments: [{ id: "img_slow", name: "slow.bin", content_type: "application/octet-stream", size: 9 }] });
+    await called;
+    // The idle timeout (or max_active_sessions) parks the session while the file is still downloading.
+    const manager = (h.daemon as unknown as { sessions: { park(s: unknown): Promise<void>; sessions: Map<string, { driver: unknown }> } }).sessions;
+    const s = manager.sessions.get("s_PARK")!;
+    await manager.park(s);
+    expect(s.driver).toBeNull();
+    release();
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_slow");
+    expect(h.log.prompts.find((p) => p.includes("慢附件"))).toContain("img_slow-slow.bin");
+  });
+
   it("counts the PDF base64 given to a Claude conversation, persists it and resets it on a compaction", async () => {
     h = await startHarness();
     const pdf = Buffer.alloc(6 * 1024 * 1024, 1);
