@@ -289,6 +289,14 @@ func (o *Orchestrator) start(ctx context.Context, t core.Thread) error {
 		if err := core.TouchAttachments(ctx, tx, cur.ProjectID, refIDs(files), o.core.AttachmentTTL); err != nil {
 			return err
 		}
+		// The text files open_subthread gave are inlined now: the stored brief keeps the lead's words.
+		given, err := briefGiven(ctx, tx, cur)
+		if err != nil {
+			return err
+		}
+		if cur.Brief, _, err = o.inlineTexts(ctx, tx, core.Conversation{ProjectID: &cur.ProjectID}, cur.Brief, given); err != nil {
+			return err
+		}
 		if src != nil {
 			// Inline the source message's small text files into the quoted message, as a normal
 			// post or a forward would, so the lead sees them (they also travel as files).

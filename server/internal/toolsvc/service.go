@@ -205,7 +205,8 @@ func (s *Service) duplicate(ctx context.Context, tx *core.Tx, m *protocol.ToolCa
 	var stored Result
 	var wire storedResult
 	_ = json.Unmarshal(result, &wire)
-	stored = Result{OK: wire.OK, Text: wire.Text, Structured: wire.Structured, AttachmentDownload: wire.AttachmentDownload}
+	stored = Result{OK: wire.OK, Text: wire.Text, Structured: wire.Structured, AttachmentDownload: wire.AttachmentDownload,
+		SharedDownload: wire.SharedDownload}
 	return true, s.sendResult(ctx, tx, string(m.SessionID), string(m.CallID), stored)
 }
 
@@ -336,11 +337,23 @@ type storedResult struct {
 	Structured any    `json:"structured,omitempty"`
 	// AttachmentDownload is kept so a repeated call (daemon reconnect) gets the download again.
 	AttachmentDownload *protocol.ToolAttachmentDownload `json:"attachment_download,omitempty"`
+	// SharedDownload is kept only in its presigned form (read_shared_file on attachments_v2):
+	// chunked downloads are not sent again, so their result must not claim them.
+	SharedDownload *protocol.ToolSharedDownload `json:"shared_download,omitempty"`
+}
+
+// presignedOnly is a shared download worth storing for a repeated call (nil for chunked ones).
+func presignedOnly(d *protocol.ToolSharedDownload) *protocol.ToolSharedDownload {
+	if d == nil || d.Chunks != 0 || len(d.Files) == 0 || d.Files[0].URL == nil {
+		return nil
+	}
+	return d
 }
 
 // Complete finishes a call (also a waiting one) and sends tool.result.
 func (s *Service) Complete(ctx context.Context, tx *core.Tx, sessionID, callID string, res Result) error {
-	raw, _ := json.Marshal(storedResult{OK: res.OK, Text: res.Text, Structured: res.Structured, AttachmentDownload: res.AttachmentDownload})
+	raw, _ := json.Marshal(storedResult{OK: res.OK, Text: res.Text, Structured: res.Structured, AttachmentDownload: res.AttachmentDownload,
+		SharedDownload: presignedOnly(res.SharedDownload)})
 	st := "done"
 	if !res.OK {
 		st = "failed"
