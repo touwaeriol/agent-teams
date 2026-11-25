@@ -325,7 +325,11 @@ const routes = [
     // no_images=true: leave out hosted images (render=image), like the real server.
     const noImages = url.searchParams.get("no_images") === "true";
     const shown = (d) => !(noImages && d.detail?.hosted && d.detail?.render === "image");
-    json(res, 200, { ...page(state.deliverables.filter((d) => (!kind || d.kind === kind) && d.title.includes(q) && shown(d)).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))), storage_bytes: storageBytes() });
+    // ids=a,b (deliverable ids mentioned in a message) and thread=<no>, like the real server.
+    const ids = url.searchParams.get("ids")?.split(",").filter(Boolean);
+    const thread = Number(url.searchParams.get("thread") ?? 0);
+    const picked = (d) => (!ids || ids.includes(d.id)) && (!thread || d.thread_no === thread);
+    json(res, 200, { ...page(state.deliverables.filter((d) => (!kind || d.kind === kind) && d.title.includes(q) && shown(d) && picked(d)).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))), storage_bytes: storageBytes() });
   }],
   ["POST", /^\/api\/projects\/([^/]+)\/library$/, async (req, res, [pid]) => {
     const b = await body(req);

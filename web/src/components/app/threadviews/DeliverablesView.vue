@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** 交付物: the thread's PRs (open one when the main tasks are done), merge queue, CI, then published deliverables. */
 import { computed } from "vue";
-import { useDeliverables } from "@/api/queries";
+import { useThreadDeliverables } from "@/api/queries";
 import type { ThreadView } from "@/api/views";
 import Loading from "@/components/common/Loading.vue";
 import { isLibraryDeliverable } from "@/lib/library";
@@ -9,8 +9,9 @@ import DeliverableCard from "./DeliverableCard.vue";
 import Delivery from "./Delivery.vue";
 
 const props = defineProps<{ pid: string; thread: ThreadView }>();
-const deliverables = useDeliverables(() => props.pid, "", "", true);
-const mine = computed(() => (deliverables.data.value?.items ?? []).filter((d) => d.thread_no === props.thread.no && isLibraryDeliverable(d)));
+// By thread on the server: every publisher (lead or member), not just the project's first page.
+const deliverables = useThreadDeliverables(() => props.pid, () => props.thread.no);
+const mine = computed(() => (deliverables.data.value?.items ?? []).filter((d) => d.kind !== "pr" && isLibraryDeliverable(d)));
 </script>
 
 <template>

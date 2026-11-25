@@ -27,6 +27,10 @@ export const keys = {
   overview: (pid: string) => ["p", pid, "overview"] as const,
   deliverables: (pid: string, kind = "", q = "", noImages = false) => ["p", pid, "deliverables", kind, q, noImages] as const,
   allDeliverables: (pid: string) => ["p", pid, "deliverables"] as const,
+  /** Deliverables looked up by id (ids mentioned in a message); under allDeliverables so events refresh them. */
+  deliverablesByIds: (pid: string, ids: string[]) => ["p", pid, "deliverables", "#ids", ids.join(",")] as const,
+  /** All of a thread's deliverables (any publisher), under allDeliverables. */
+  threadDeliverables: (pid: string, no: number) => ["p", pid, "deliverables", "#thread", no] as const,
   memory: (pid: string) => ["p", pid, "memory"] as const,
   sharedFiles: (pid: string) => ["p", pid, "shared-files"] as const,
   memoryFile: (pid: string, name: string) => ["p", pid, "memory", name] as const,
@@ -197,6 +201,36 @@ export const useDeliverables = (pid: Arg, kind: Arg, q: Arg, noImages = false) =
         }),
       ),
     { enabled: has(pid) },
+  );
+
+/**
+ * The given deliverables of a project (ids mentioned in a message). The server only returns the
+ * project's own ones and checks the user owns the project, so a foreign id never yields its title.
+ */
+export const useDeliverablesByIds = (pid: Arg, ids: MaybeRefOrGetter<string[]>) =>
+  useKeyed(
+    () => keys.deliverablesByIds(val(pid), toValue(ids)),
+    () =>
+      unwrap(
+        client.GET("/api/projects/{pid}/deliverables", {
+          params: { path: { pid: val(pid) }, query: { ids: toValue(ids) } },
+          querySerializer: { array: { style: "form", explode: false } },
+        }),
+      ),
+    { enabled: () => Boolean(toValue(pid)) && toValue(ids).length > 0, staleTime: 60_000, retry: false },
+  );
+
+/** Every deliverable a thread published (lead and members), newest first, without lone images. */
+export const useThreadDeliverables = (pid: Arg, no: MaybeRefOrGetter<number>, enabled: Arg<boolean> = true) =>
+  useKeyed(
+    () => keys.threadDeliverables(val(pid), toValue(no)),
+    () =>
+      unwrap(
+        client.GET("/api/projects/{pid}/deliverables", {
+          params: { path: { pid: val(pid) }, query: { thread: toValue(no), no_images: true, limit: 200 } },
+        }),
+      ),
+    { enabled: () => Boolean(toValue(pid)) && toValue(no) > 0 && toValue(enabled) },
   );
 
 export const useSchedules = (pid: Arg, enabled: Arg<boolean> = true) =>
