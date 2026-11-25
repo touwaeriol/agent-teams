@@ -57,6 +57,10 @@ export class Session implements SessionSink {
   sends = 0;
   /** session.compact runs in progress (compact_id). */
   readonly compacts = new Set<string>();
+  /** Tail of this session's deliveries (manager.send_ runs them in order). */
+  deliveries: Promise<void> = Promise.resolve();
+  /** Aborts the attachment downloads of messages being delivered (session.close). */
+  readonly downloads = new AbortController();
   /** Claude: PDF base64 already given to the SDK conversation sdk_session_id (persisted). */
   pdfBudget: { sdk_session_id: string; used: number } | null = null;
   private lastEventNo = 0;

@@ -22,7 +22,7 @@ const ID = /^img_[0-9A-Za-z]{1,60}$/;
 const MAX_NAME_BYTES = 120;
 
 export interface AttachmentOptions {
-  /** Budget of one file's download (request and body). */
+  /** Total time for one attachment: the /url requests, presigned retries and the legacy fallback together (also one write_shared_file upload). */
   timeoutMs: number;
   /** Free space that must remain on the disk after the download. */
   minFreeBytes: number;
@@ -57,10 +57,10 @@ export function consoleHttp(wsUrl: string, token: string, fetchFn: typeof fetch 
  * (a legacy row kept in the database, an old console without the endpoint, any error): the caller
  * then falls back to GET /nodes/attachments/{id}.
  */
-export async function attachmentUrl(http: ConsoleHttp, id: string, timeoutMs = 30_000): Promise<string | null> {
+export async function attachmentUrl(http: ConsoleHttp, id: string, timeoutMs = 30_000, cancel?: AbortSignal): Promise<string | null> {
   try {
     const res = await http.fetch(`${http.base}/nodes/attachments/${encodeURIComponent(id)}/url`, {
-      headers: { Authorization: `Bearer ${http.token}` }, redirect: "error", signal: AbortSignal.timeout(timeoutMs),
+      headers: { Authorization: `Bearer ${http.token}` }, redirect: "error", signal: withCancel(AbortSignal.timeout(Math.max(1, timeoutMs)), cancel),
     });
     if (!res.ok) return null;
     const body = (await res.json()) as { url?: unknown };
@@ -68,6 +68,10 @@ export async function attachmentUrl(http: ConsoleHttp, id: string, timeoutMs = 3
   } catch {
     return null;
   }
+}
+
+function withCancel(timeout: AbortSignal, cancel?: AbortSignal): AbortSignal {
+  return cancel ? AbortSignal.any([timeout, cancel]) : timeout;
 }
 
 /** An attachment on disk in the session's working directory. */
@@ -102,10 +106,15 @@ export function attachmentFileName(ref: Pick<AttachmentRef, "id" | "name">): str
  * fresh URL from the console; once more with a new URL when that fails (expired); then the legacy
  * GET /nodes/attachments/{id} with the node token. The body is streamed to a temporary file
  * (never held in memory), checked against the declared size and sha256, then renamed into place.
+ * opts.timeoutMs bounds the whole download of this attachment, retries included; `cancel` aborts it
+ * (the session was closed).
  */
 export async function downloadAttachment(
-  cwd: string, ref: AttachmentRef, http: ConsoleHttp, opts: AttachmentOptions, presetUrl?: string | null,
+  cwd: string, ref: AttachmentRef, http: ConsoleHttp, opts: AttachmentOptions, presetUrl?: string | null, cancel?: AbortSignal,
 ): Promise<SavedAttachment> {
+  const deadline = Date.now() + opts.timeoutMs;
+  const left = () => deadline - Date.now();
+  const stopped = (): string | null => (cancel?.aborted ? "下载已取消（会话已关闭）" : left() <= 0 ? `下载超时（共 ${Math.round(opts.timeoutMs / 1000)} 秒）` : null);
   if (!ID.test(ref.id)) throw new AttachmentError(`bad attachment id ${JSON.stringify(ref.id)}`);
   if (!Number.isInteger(ref.size) || ref.size < 0 || ref.size > MAX_ATTACHMENT_BYTES) throw new AttachmentError(`bad size ${ref.size}`);
   if (!cwd) throw new AttachmentError("the session has no working directory");
@@ -123,18 +132,27 @@ export async function downloadAttachment(
   await checkFreeSpace(dir, ref.size, opts.minFreeBytes);
   const errors: string[] = [];
   const tryGet = async (url: string, auth: boolean): Promise<boolean> => {
+    const why = stopped();
+    if (why) throw new AttachmentError(why);
     try {
-      await streamTo(dir, name, abs, url, ref, opts.timeoutMs, auth ? http.token : undefined, http.fetch);
+      await streamDownload({ url, ...(auth ? { token: http.token } : {}), fetchFn: http.fetch, timeoutMs: left(), size: ref.size, ...(ref.sha256 ? { sha256: ref.sha256 } : {}), dir, tmpName: name, target: abs, ...(cancel ? { cancel } : {}) });
       return true;
     } catch (err) {
+      const why = stopped();
+      if (why) throw new AttachmentError(why);
       errors.push((err as Error).message);
       return false;
     }
   };
-  let url = presetUrl !== undefined ? presetUrl : await attachmentUrl(http, ref.id);
+  const freshUrl = async (): Promise<string | null> => {
+    const why = stopped();
+    if (why) throw new AttachmentError(why);
+    return attachmentUrl(http, ref.id, Math.min(30_000, left()), cancel);
+  };
+  let url = presetUrl !== undefined ? presetUrl : await freshUrl();
   if (url) {
     if (await tryGet(url, false)) return { ref, abs, rel, reused: false };
-    url = await attachmentUrl(http, ref.id);
+    url = await freshUrl();
     if (url && (await tryGet(url, false))) return { ref, abs, rel, reused: false };
   }
   if (await tryGet(`${http.base}/nodes/attachments/${encodeURIComponent(ref.id)}`, true)) return { ref, abs, rel, reused: false };
@@ -177,10 +195,6 @@ export async function checkFreeSpace(dir: string, size: number, minFree: number)
   if (free - size < minFree) throw new AttachmentError(`磁盘空间不足（剩余 ${formatSize(free)}，需要 ${formatSize(size)}，另需保留 ${formatSize(minFree)}）`);
 }
 
-async function streamTo(dir: string, name: string, abs: string, url: string, ref: AttachmentRef, timeoutMs: number, token: string | undefined, fetchFn: typeof fetch): Promise<void> {
-  await streamDownload({ url, ...(token ? { token } : {}), fetchFn, timeoutMs, size: ref.size, ...(ref.sha256 ? { sha256: ref.sha256 } : {}), dir, tmpName: name, target: abs });
-}
-
 export interface StreamDownload {
   url: string;
   /** Node token: sent as Authorization, redirects refused (never to a presigned URL). */
@@ -195,6 +209,8 @@ export interface StreamDownload {
   dir: string;
   tmpName: string;
   target: string;
+  /** Aborts the download (the session was closed). */
+  cancel?: AbortSignal;
 }
 
 /**
@@ -203,8 +219,8 @@ export interface StreamDownload {
  * name is replaced, not followed; a directory there is refused). Nothing is held in memory.
  */
 export async function streamDownload(d: StreamDownload): Promise<void> {
-  const signal = AbortSignal.timeout(d.timeoutMs);
-  const timeout = () => `下载超时（${Math.round(d.timeoutMs / 1000)} 秒）`;
+  const signal = withCancel(AbortSignal.timeout(Math.max(1, d.timeoutMs)), d.cancel);
+  const timeout = () => (d.cancel?.aborted ? "下载已取消（会话已关闭）" : `下载超时（${Math.round(d.timeoutMs / 1000)} 秒）`);
   const res = await d.fetchFn(d.url, { ...(d.token ? { headers: { Authorization: `Bearer ${d.token}` }, redirect: "error" as const } : {}), signal }).catch((err: Error) => {
     throw new AttachmentError(signal.aborted ? timeout() : `下载失败：${err.message}`);
   });
