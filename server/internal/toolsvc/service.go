@@ -40,8 +40,11 @@ type Result struct {
 	Later func(ctx context.Context) Result
 	// Download lists the files read_deliverable queued as file.download frames before this result.
 	Download *protocol.ToolDownload
-	// SharedDownload is the file read_shared_file queued as file.download frames before this result.
+	// SharedDownload is the file read_shared_file queued as file.download frames before this result
+	// (or, attachments_v2, its presigned URL).
 	SharedDownload *protocol.ToolSharedDownload
+	// AttachmentDownload is read_attachment's file for the daemon to download (#58).
+	AttachmentDownload *protocol.ToolAttachmentDownload
 	// EndsTask: the call ended the caller's task (complete_task); the daemon drops its task anchor
 	// so a compaction later in the turn does not bring the finished task back (shared-members.md §5.2).
 	EndsTask bool
@@ -128,6 +131,7 @@ func (s *Service) table() map[string]handler {
 		protocol.ToolScheduleUpdate: s.scheduleUpdate, protocol.ToolScheduleCancel: s.scheduleCancel,
 		protocol.ToolListSharedFiles: s.listSharedFiles, protocol.ToolReadSharedFile: s.readSharedFile,
 		protocol.ToolWriteSharedFile: s.writeSharedFile, protocol.ToolDeleteSharedFile: s.deleteSharedFile,
+		protocol.ToolReadAttachment: s.readAttachment, protocol.ToolSaveAttachment: s.saveAttachment,
 	}
 }
 
@@ -201,7 +205,7 @@ func (s *Service) duplicate(ctx context.Context, tx *core.Tx, m *protocol.ToolCa
 	var stored Result
 	var wire storedResult
 	_ = json.Unmarshal(result, &wire)
-	stored = Result{OK: wire.OK, Text: wire.Text, Structured: wire.Structured}
+	stored = Result{OK: wire.OK, Text: wire.Text, Structured: wire.Structured, AttachmentDownload: wire.AttachmentDownload}
 	return true, s.sendResult(ctx, tx, string(m.SessionID), string(m.CallID), stored)
 }
 
@@ -330,11 +334,13 @@ type storedResult struct {
 	OK         bool   `json:"ok"`
 	Text       string `json:"text"`
 	Structured any    `json:"structured,omitempty"`
+	// AttachmentDownload is kept so a repeated call (daemon reconnect) gets the download again.
+	AttachmentDownload *protocol.ToolAttachmentDownload `json:"attachment_download,omitempty"`
 }
 
 // Complete finishes a call (also a waiting one) and sends tool.result.
 func (s *Service) Complete(ctx context.Context, tx *core.Tx, sessionID, callID string, res Result) error {
-	raw, _ := json.Marshal(storedResult{OK: res.OK, Text: res.Text, Structured: res.Structured})
+	raw, _ := json.Marshal(storedResult{OK: res.OK, Text: res.Text, Structured: res.Structured, AttachmentDownload: res.AttachmentDownload})
 	st := "done"
 	if !res.OK {
 		st = "failed"
@@ -358,7 +364,7 @@ func (s *Service) sendResult(ctx context.Context, tx *core.Tx, sessionID, callID
 	}
 	body := protocol.ToolResult{SessionID: protocol.SessionID(sessionID), CallID: protocol.CallID(callID), Ok: res.OK,
 		Content: []protocol.ContentBlock{{Type: "text", Text: text}}, Download: res.Download,
-		SharedDownload: res.SharedDownload}
+		SharedDownload: res.SharedDownload, AttachmentDownload: res.AttachmentDownload}
 	if res.EndsTask {
 		none := ""
 		body.Anchor = &none

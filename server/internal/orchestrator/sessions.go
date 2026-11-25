@@ -362,6 +362,9 @@ func (o *Orchestrator) recordDelivery(ctx context.Context, tx *core.Tx, e core.E
 	if rec == nil {
 		rec = &core.NewMessage{ConversationID: conv, Role: "system", Author: "platform", Kind: "note", Content: d.Text,
 			Meta: map[string]any{"to": e.Name}}
+		if len(d.Attachments) > 0 {
+			rec.Meta["attachments"] = d.Attachments // shown on the note; keeps the files while the thread lives
+		}
 	}
 	if rec.Meta == nil {
 		rec.Meta = map[string]any{}

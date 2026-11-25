@@ -58,8 +58,12 @@ func (s *Service) assignTask(ctx context.Context, tx *core.Tx, c *call) (Result,
 	if err != nil {
 		return Result{}, err
 	}
+	files, err := s.useAttachments(ctx, tx, c, in.Attachments)
+	if err != nil {
+		return Result{}, err
+	}
 	task, pooled, err := s.sched.Assign(ctx, tx, scheduler.Assignment{Thread: t, Assignee: in.Assignee, Instruction: instruction,
-		Main: in.Main, DependsOn: deps, Kind: kind, CreatedBy: "lead"})
+		Main: in.Main, DependsOn: deps, Kind: kind, CreatedBy: "lead", Attachments: files})
 	if err != nil {
 		return Result{}, err
 	}
@@ -68,7 +72,7 @@ func (s *Service) assignTask(ctx context.Context, tx *core.Tx, c *call) (Result,
 	if !pooled {
 		where = "指派给 " + in.Assignee
 	}
-	return okJSON(fmt.Sprintf("任务 %s 已创建，%s", task.ID, where), out), nil
+	return okJSON(fmt.Sprintf("任务 %s 已创建，%s%s", task.ID, where, carried(files)), out), nil
 }
 
 // repoInstruction records an explicit base for the task's repository and names the repository
