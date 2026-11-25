@@ -66,8 +66,9 @@ type Store interface {
 
 	// CreateMultipart starts a multipart upload and returns its id.
 	CreateMultipart(ctx context.Context, key, contentType string) (string, error)
-	// PresignPart is a PUT URL for part number part (1-based) of the upload, valid for ttl.
-	PresignPart(ctx context.Context, key, uploadID string, part int32, ttl time.Duration) (string, error)
+	// PresignPart is a PUT URL for part number part (1-based) of the upload, of exactly size bytes
+	// (signed, like PresignPut: a longer or shorter body is refused by the store), valid for ttl.
+	PresignPart(ctx context.Context, key, uploadID string, part int32, size int64, ttl time.Duration) (string, error)
 	// CompleteMultipart assembles the parts (in number order).
 	CompleteMultipart(ctx context.Context, key, uploadID string, parts []Part) error
 	// AbortMultipart drops an unfinished upload and its parts (a missing one is not an error).
@@ -128,7 +129,7 @@ func (None) PresignPut(context.Context, string, time.Duration, int64, string) (s
 func (None) CreateMultipart(context.Context, string, string) (string, error) {
 	return "", ErrNotConfigured
 }
-func (None) PresignPart(context.Context, string, string, int32, time.Duration) (string, error) {
+func (None) PresignPart(context.Context, string, string, int32, int64, time.Duration) (string, error) {
 	return "", ErrNotConfigured
 }
 func (None) CompleteMultipart(context.Context, string, string, []Part) error { return ErrNotConfigured }
@@ -166,4 +167,13 @@ func PartCount(size int64) int32 {
 		return 1
 	}
 	return int32((size + PartSize - 1) / PartSize)
+}
+
+// PartLength is the byte length of part number part (1-based) of an upload of size bytes:
+// PartSize for every part but the last, the rest for the last; 0 outside 1..PartCount(size).
+func PartLength(size int64, part int32) int64 {
+	if part < 1 || part > PartCount(size) {
+		return 0
+	}
+	return min(PartSize, size-int64(part-1)*PartSize)
 }

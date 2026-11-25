@@ -180,18 +180,28 @@ func (a *API) createUpload(ctx context.Context, in *uploadCreateInput) (*uploadC
 		target = name
 	}
 	overwrite := in.Body.Overwrite == nil || *in.Body.Overwrite
-	var up sharedfiles.Upload
-	err = a.e.Core.InTx(ctx, func(tx *core.Tx) error {
-		var err error
-		up, err = sharedfiles.BeginUpload(ctx, tx, a.e.Core.Blobs, p.ID, sharedfiles.BeginRequest{Path: target, Size: in.Body.Size,
-			Overwrite: overwrite, Multipart: true, By: sharedfiles.Uploader{Name: sharedfiles.UserName}})
-		return err
-	})
+	up, err := a.beginShared(ctx, u.ID, p.ID, sharedfiles.BeginRequest{Path: target, Size: in.Body.Size,
+		Overwrite: overwrite, Multipart: true, By: sharedfiles.Uploader{Name: sharedfiles.UserName}})
 	if err != nil {
 		return nil, uploadFail(err)
 	}
 	out.UploadID, out.ID = up.ID, up.ObjectID
 	return &uploadCreateOutput{Body: out}, nil
+}
+
+// beginShared opens a shared-file upload of a project owned by ownerID, within the owner's
+// limit on uploads in flight (core.CheckUploadsInFlight).
+func (a *API) beginShared(ctx context.Context, ownerID, projectID string, r sharedfiles.BeginRequest) (sharedfiles.Upload, error) {
+	var up sharedfiles.Upload
+	err := a.e.Core.InTx(ctx, func(tx *core.Tx) error {
+		if err := core.CheckUploadsInFlight(ctx, tx, ownerID, r.Size); err != nil {
+			return err
+		}
+		var err error
+		up, err = sharedfiles.BeginUpload(ctx, tx, a.e.Core.Blobs, projectID, r)
+		return err
+	})
+	return up, err
 }
 
 func (a *API) beginAttachment(ctx context.Context, pid, uid, name string, size int64, out UploadSession) (*uploadCreateOutput, error) {
@@ -203,15 +213,15 @@ func (a *API) beginAttachment(ctx context.Context, pid, uid, name string, size i
 	return &uploadCreateOutput{Body: out}, nil
 }
 
-// inFlight is an upload's object, its S3 upload id and its part count; owner.ProjectID "" = an
+// inFlight is an upload's object, its S3 upload id and its declared size; owner.ProjectID "" = an
 // attachment without a project (no shared-file uploads there).
-func (a *API) inFlight(ctx context.Context, owner core.AttachmentOwner, id string) (key, uploadID string, parts int32, err error) {
+func (a *API) inFlight(ctx context.Context, owner core.AttachmentOwner, id string) (key, uploadID string, size int64, err error) {
 	if core.IsAttachmentUpload(id) {
 		att, upID, err := core.UploadingAttachment(ctx, a.e.Core.Pool, owner, id)
 		if err != nil {
 			return "", "", 0, err
 		}
-		return *att.StorageKey, upID, blobstore.PartCount(int64(att.Size)), nil
+		return *att.StorageKey, upID, int64(att.Size), nil
 	}
 	if owner.ProjectID == "" {
 		return "", "", 0, core.ErrNotFound
@@ -223,7 +233,7 @@ func (a *API) inFlight(ctx context.Context, owner core.AttachmentOwner, id strin
 	if up.S3UploadID == nil {
 		return "", "", 0, sharedfiles.ErrUploadNotFound // a node's single PUT
 	}
-	return up.StorageKey, *up.S3UploadID, blobstore.PartCount(up.Size), nil
+	return up.StorageKey, *up.S3UploadID, up.Size, nil
 }
 
 func (a *API) uploadParts(ctx context.Context, in *uploadPartsInput) (*uploadPartsOutput, error) {
@@ -235,16 +245,18 @@ func (a *API) uploadParts(ctx context.Context, in *uploadPartsInput) (*uploadPar
 }
 
 func (a *API) partURLs(ctx context.Context, owner core.AttachmentOwner, id string, numbers []int32) (*uploadPartsOutput, error) {
-	key, uploadID, n, err := a.inFlight(ctx, owner, id)
+	key, uploadID, size, err := a.inFlight(ctx, owner, id)
 	if err != nil {
 		return nil, uploadFail(err)
 	}
+	n := blobstore.PartCount(size)
 	out := UploadParts{URLs: make([]PartURL, 0, len(numbers)), ExpiresAt: time.Now().Add(partURLTTL)}
 	for _, num := range numbers {
 		if num < 1 || num > n {
 			return nil, httpapi.Invalid("numbers", fmt.Sprintf("分片号要在 1 到 %d 之间（收到 %d）", n, num))
 		}
-		u, err := a.e.Core.Blobs.PresignPart(ctx, key, uploadID, num, partURLTTL)
+		// The part's exact length is signed: the declared size is what the store accepts (#62 F2).
+		u, err := a.e.Core.Blobs.PresignPart(ctx, key, uploadID, num, blobstore.PartLength(size, num), partURLTTL)
 		if err != nil {
 			return nil, uploadFail(err)
 		}
@@ -549,13 +561,8 @@ func (a *API) nodeUpload(c *gin.Context) {
 		return
 	}
 	emp := sc.Employee
-	var up sharedfiles.Upload
-	err = a.e.Core.InTx(ctx, func(tx *core.Tx) error {
-		var err error
-		up, err = sharedfiles.BeginUpload(ctx, tx, a.e.Core.Blobs, emp.ProjectID, sharedfiles.BeginRequest{Path: in.Path, Size: in.Size,
-			SHA256: in.SHA256, Overwrite: true, By: sharedfiles.Uploader{Name: emp.Name, EmployeeID: emp.ID, ThreadID: emp.WorkThreadID()}})
-		return err
-	})
+	up, err := a.beginShared(ctx, sc.OwnerID, emp.ProjectID, sharedfiles.BeginRequest{Path: in.Path, Size: in.Size,
+		SHA256: in.SHA256, Overwrite: true, By: sharedfiles.Uploader{Name: emp.Name, EmployeeID: emp.ID, ThreadID: emp.WorkThreadID()}})
 	if err == nil {
 		var u string
 		var headers map[string]string

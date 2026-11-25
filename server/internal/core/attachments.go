@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"path"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -436,8 +438,14 @@ func ProjectAttachments(ctx context.Context, q DB, projectID string, ids []strin
 	return out, nil
 }
 
+// textReadTimeout bounds AttachmentTexts' object-store reads as a whole: its callers hold a
+// transaction (often the project lock), so a slow store must not hold it longer (#62 M3).
+var textReadTimeout = 3 * time.Second // a variable for tests
+
 // AttachmentTexts returns the bytes of a project's text attachments among ids, by id: from the
-// object store (a ranged read of at most MaxTextBytes) or from the data column of older rows.
+// data column of older rows, or from the object store (a ranged read of at most MaxTextBytes).
+// The object reads run concurrently within textReadTimeout; one that fails or runs out of time is
+// left out (logged): the caller just does not inline it. Only the database query returns an error.
 func AttachmentTexts(ctx context.Context, q DB, bs blobstore.Store, projectID string, ids []string) (map[string][]byte, error) {
 	out := map[string][]byte{}
 	if len(ids) == 0 {
@@ -452,18 +460,46 @@ func AttachmentTexts(ctx context.Context, q DB, bs blobstore.Store, projectID st
 	if err != nil {
 		return out, err
 	}
+	keys := map[string]string{}
 	for _, r := range rows {
 		if r.StorageKey == nil {
 			out[r.ID] = r.Data
 			continue
 		}
-		data, err := blobstore.Or(bs).ReadRange(ctx, *r.StorageKey, 0, MaxTextBytes)
-		if err != nil {
-			return out, err
-		}
-		out[r.ID] = data
+		keys[r.ID] = *r.StorageKey
+	}
+	for id, data := range readTexts(ctx, blobstore.Or(bs), keys) {
+		out[id] = data
 	}
 	return out, nil
+}
+
+// readTexts reads the objects (id → key) concurrently within textReadTimeout; failures are left out.
+func readTexts(ctx context.Context, bs blobstore.Store, keys map[string]string) map[string][]byte {
+	out := make(map[string][]byte, len(keys))
+	if len(keys) == 0 {
+		return out
+	}
+	ctx, cancel := context.WithTimeout(ctx, textReadTimeout)
+	defer cancel()
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for id, key := range keys {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			data, err := bs.ReadRange(ctx, key, 0, MaxTextBytes)
+			if err != nil {
+				slog.WarnContext(ctx, "read text attachment: not inlined", "attachment", id, "err", err)
+				return
+			}
+			mu.Lock()
+			out[id] = data
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	return out
 }
 
 // OpenAttachment returns a ready attachment and a reader of its bytes if its project belongs to

@@ -24,7 +24,38 @@ var (
 	ErrUploadSize = errors.New("上传的文件大小和声明的不一致，已丢弃，请重新上传")
 	// ErrAttachmentTooLarge is an attachment over MaxAttachmentBytes.
 	ErrAttachmentTooLarge = fmt.Errorf("附件太大：单个附件最多 %d MB", MaxAttachmentBytes>>20)
+	// ErrTooManyUploads is a new upload over the user's limit on uploads in flight.
+	ErrTooManyUploads = errors.New("同时进行中的上传太多")
 )
+
+// Limits on a user's uploads in flight (#62 F2): attachments still uploading plus shared-file
+// uploads of the user's projects (browsers and node sessions), by declared size. They bound
+// what one user can park in the object store before anything is checked; blobgc drops the
+// abandoned ones after a day.
+const (
+	MaxUploadsInFlight     = 16
+	MaxUploadBytesInFlight = 2 << 30
+)
+
+// CheckUploadsInFlight refuses (ErrTooManyUploads) a new upload of size bytes that would take the
+// user past MaxUploadsInFlight or MaxUploadBytesInFlight. It is a soft limit: two concurrent
+// begins may both pass by one.
+func CheckUploadsInFlight(ctx context.Context, q DB, userID string, size int64) error {
+	var n, total int64
+	err := store.QueryRow(ctx, q, `SELECT count(*), COALESCE(sum(size), 0) FROM (
+		SELECT size::bigint FROM at_attachments WHERE user_id = $1 AND state = 'uploading'
+		UNION ALL
+		SELECT u.size FROM at_shared_uploads u JOIN at_projects p ON p.id = u.project_id WHERE p.user_id = $1) x`,
+		userID).Scan(&n, &total)
+	if err != nil {
+		return err
+	}
+	if n+1 > MaxUploadsInFlight || total+size > MaxUploadBytesInFlight {
+		return fmt.Errorf("%w：最多 %d 个、共 %d MB（现在 %d 个、%d MB）；请等已有的上传完成或取消，没传完的上传 24 小时后自动清理",
+			ErrTooManyUploads, MaxUploadsInFlight, MaxUploadBytesInFlight>>20, n, total>>20)
+	}
+	return nil
+}
 
 // AttachmentOwner scopes an attachment: one of a project (ProjectID set), or one a user uploaded
 // before its project existed (ProjectID "", UserID set: POST /api/uploads, #58 D6).
@@ -58,6 +89,9 @@ func BeginAttachmentUpload(ctx context.Context, q DB, bs blobstore.Store, ttl ti
 	bs = blobstore.Or(bs)
 	if !bs.Configured() {
 		return Attachment{}, blobstore.ErrNotConfigured
+	}
+	if err := CheckUploadsInFlight(ctx, q, userID, size); err != nil {
+		return Attachment{}, err
 	}
 	a := Attachment{ID: NewID("img"), ProjectID: projectID, UserID: userID, Name: name,
 		ContentType: DetectType(name, nil, size), Size: int(size), State: "uploading", ExpiresAt: time.Now().Add(ttlOr(ttl))}
