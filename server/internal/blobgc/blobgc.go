@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
@@ -30,17 +32,59 @@ import (
 // Stale is how long an unfinished upload is kept.
 const Stale = 24 * time.Hour
 
-// Enqueue queues object keys for deletion after the transaction commits ("" keys are skipped).
+// Enqueue queues object keys for deletion after the transaction commits ("" keys are skipped). A
+// key still referenced by a row when its turn comes is not deleted (see deletions).
 func Enqueue(ctx context.Context, q store.DB, keys ...string) error {
 	for _, k := range keys {
 		if k == "" {
 			continue
 		}
-		if _, err := store.Exec(ctx, q, `INSERT INTO at_blob_deletions (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`, k); err != nil {
+		if _, err := store.Exec(ctx, q, `INSERT INTO at_blob_deletions (key) VALUES ($1)
+			ON CONFLICT (key) DO UPDATE SET next_at = LEAST(at_blob_deletions.next_at, now())`, k); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// ReserveDelay is how long a reserved key waits before blobgc looks at it: far longer than any
+// transaction that writes an object.
+const ReserveDelay = time.Hour
+
+// Reserve queues key for deletion in ReserveDelay, outside q's transaction (store.Detached), before
+// the object is written: if the transaction that records the key rolls back (or the process dies)
+// the object is removed; if it commits, the key is referenced and blobgc drops the reservation.
+func Reserve(ctx context.Context, q store.DB, key string) error {
+	_, err := store.Exec(ctx, store.Detached(q), `INSERT INTO at_blob_deletions (key, next_at) VALUES ($1, now() + make_interval(secs => $2))
+		ON CONFLICT (key) DO NOTHING`, key, ReserveDelay.Seconds())
+	return err
+}
+
+// referencedSQL tells whether a row still points at an object key ($1; $2 = its project id).
+const referencedSQL = `SELECT EXISTS (SELECT 1 FROM at_attachments WHERE project_id = $2 AND storage_key = $1)
+	OR EXISTS (SELECT 1 FROM at_shared_files WHERE project_id = $2 AND storage_key = $1)
+	OR EXISTS (SELECT 1 FROM at_shared_uploads WHERE project_id = $2 AND storage_key = $1)`
+
+// Referenced reports whether a row of at_attachments, at_shared_files or at_shared_uploads still
+// points at key (keys are projects/<pid>/…).
+func Referenced(ctx context.Context, q store.DB, key string) (bool, error) {
+	var pid string
+	if rest, ok := strings.CutPrefix(key, "projects/"); ok {
+		pid, _, _ = strings.Cut(rest, "/")
+	}
+	var ref bool
+	err := store.QueryRow(ctx, q, referencedSQL, key, pid).Scan(&ref)
+	return ref, err
+}
+
+// EnqueueUnreferenced queues key only when no row points at it (a copy that lost a race: the row
+// may meanwhile have been given the very same key by another writer).
+func EnqueueUnreferenced(ctx context.Context, q store.DB, key string) error {
+	ref, err := Referenced(ctx, q, key)
+	if err != nil || ref {
+		return err
+	}
+	return Enqueue(ctx, q, key)
 }
 
 // EnqueuePrefix queues every object under prefix (a deleted project's projects/<pid>/).
@@ -61,11 +105,56 @@ type Worker struct {
 	Now   func() time.Time
 	// Batch is how many rows one pass handles per kind (default 50).
 	Batch int
+
+	mu sync.Mutex
+	// retry holds rows whose hash failed for a passing reason (store unreachable…): skipped
+	// until the time given, so they do not block the head of the queue.
+	retry map[string]retryAt
+}
+
+type retryAt struct {
+	at       time.Time
+	attempts int
+}
+
+// later puts a row aside after a passing hash failure, with an exponential backoff.
+func (w *Worker) later(id string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.retry == nil {
+		w.retry = map[string]retryAt{}
+	}
+	r := w.retry[id]
+	r.attempts++
+	r.at = w.now().Add(min(time.Duration(1<<min(r.attempts, 10))*time.Minute, 6*time.Hour))
+	w.retry[id] = r
+}
+
+// waiting lists the rows still put aside (and forgets the ones whose time came).
+func (w *Worker) waiting() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := []string{}
+	now := w.now()
+	for id, r := range w.retry {
+		if r.at.After(now) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func (w *Worker) done(id string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.retry, id)
 }
 
 // Stats is what one pass did.
 type Stats struct {
 	Deleted, DeleteFailed, Hashed, HashFailed, Aborted, Expired int
+	// Kept are queued keys a row points at again (not deleted).
+	Kept int
 }
 
 func (w *Worker) now() time.Time {
@@ -125,49 +214,37 @@ func (w *Worker) Run(ctx context.Context, interval time.Duration) {
 }
 
 // expireUploads aborts multipart uploads open for longer than Stale: attachments still
-// uploading (the row goes) and shared-file uploads (the staging row goes).
+// uploading (the row goes) and shared-file uploads (the staging row goes). Each row is deleted and
+// its key queued in one statement (a single PUT or a completed multipart may have landed); the
+// multipart abort comes after, and if it fails strayMultipart catches the upload later.
 func (w *Worker) expireUploads(ctx context.Context, st *Stats) error {
 	cutoff := w.now().Add(-Stale)
-	type row struct {
-		ID, Key  string
-		UploadID *string
-	}
-	var atts []row
-	if err := store.Raw(ctx, w.DB, `SELECT id, storage_key AS key, upload_id FROM at_attachments
-		WHERE state = 'uploading' AND created_at < $1 AND storage_key IS NOT NULL ORDER BY created_at LIMIT $2`, cutoff, w.batch()).
-		Scan(&atts).Error; err != nil {
+	type row struct{ Key, UploadID *string }
+	var gone []row
+	if err := store.Raw(ctx, w.DB, `WITH due AS (
+		SELECT id FROM at_attachments WHERE state = 'uploading' AND created_at < $1 ORDER BY created_at LIMIT $2
+		FOR UPDATE SKIP LOCKED),
+	del AS (DELETE FROM at_attachments a USING due WHERE a.id = due.id AND a.state = 'uploading'
+		RETURNING a.storage_key, a.upload_id),
+	q AS (INSERT INTO at_blob_deletions (key) SELECT storage_key FROM del WHERE storage_key IS NOT NULL
+		ON CONFLICT (key) DO UPDATE SET next_at = LEAST(at_blob_deletions.next_at, now()))
+	SELECT storage_key AS key, upload_id FROM del`, cutoff, w.batch()).Scan(&gone).Error; err != nil {
 		return err
-	}
-	for _, r := range atts {
-		if r.UploadID != nil {
-			if err := w.Blobs.AbortMultipart(ctx, r.Key, *r.UploadID); err != nil {
-				return err
-			}
-		}
-		if _, err := store.Exec(ctx, w.DB, `DELETE FROM at_attachments WHERE id = $1 AND state = 'uploading'`, r.ID); err != nil {
-			return err
-		}
-		if err := Enqueue(ctx, w.DB, r.Key); err != nil { // a single PUT may have landed
-			return err
-		}
-		st.Aborted++
 	}
 	var ups []row
-	if err := store.Raw(ctx, w.DB, `SELECT id, storage_key AS key, s3_upload_id AS upload_id FROM at_shared_uploads
-		WHERE created_at < $1 ORDER BY created_at LIMIT $2`, cutoff, w.batch()).Scan(&ups).Error; err != nil {
+	if err := store.Raw(ctx, w.DB, `WITH due AS (
+		SELECT id FROM at_shared_uploads WHERE created_at < $1 ORDER BY created_at LIMIT $2 FOR UPDATE SKIP LOCKED),
+	del AS (DELETE FROM at_shared_uploads u USING due WHERE u.id = due.id RETURNING u.storage_key, u.s3_upload_id),
+	q AS (INSERT INTO at_blob_deletions (key) SELECT storage_key FROM del
+		ON CONFLICT (key) DO UPDATE SET next_at = LEAST(at_blob_deletions.next_at, now()))
+	SELECT storage_key AS key, s3_upload_id AS upload_id FROM del`, cutoff, w.batch()).Scan(&ups).Error; err != nil {
 		return err
 	}
-	for _, r := range ups {
-		if r.UploadID != nil {
-			if err := w.Blobs.AbortMultipart(ctx, r.Key, *r.UploadID); err != nil {
-				return err
+	for _, r := range append(gone, ups...) {
+		if r.Key != nil && r.UploadID != nil {
+			if err := w.Blobs.AbortMultipart(ctx, *r.Key, *r.UploadID); err != nil {
+				w.log().Warn("abort multipart upload", "key", *r.Key, "err", err)
 			}
-		}
-		if _, err := store.Exec(ctx, w.DB, `DELETE FROM at_shared_uploads WHERE id = $1`, r.ID); err != nil {
-			return err
-		}
-		if err := Enqueue(ctx, w.DB, r.Key); err != nil {
-			return err
 		}
 		st.Aborted++
 	}
@@ -178,25 +255,20 @@ func (w *Worker) expireUploads(ctx context.Context, st *Stats) error {
 // core.TouchAttachments): the row stays as state=expired (messages show it, reads answer 410),
 // its bytes (data column or object) are dropped and the object is queued for deletion.
 func (w *Worker) expireAttachments(ctx context.Context, st *Stats) error {
-	var keys []struct{ StorageKey *string }
+	var n []struct{ ID string }
 	err := store.Raw(ctx, w.DB, `WITH due AS (
 		SELECT id, storage_key FROM at_attachments WHERE state IN ('ready', 'failed') AND expires_at < $1
 		ORDER BY expires_at LIMIT $2 FOR UPDATE SKIP LOCKED),
 	done AS (
 		UPDATE at_attachments a SET state = 'expired', data = NULL, storage_key = NULL, upload_id = NULL
-		FROM due WHERE a.id = due.id RETURNING a.id)
-	SELECT due.storage_key AS storage_key FROM due JOIN done ON done.id = due.id`, w.now(), w.batch()).Scan(&keys).Error
+		FROM due WHERE a.id = due.id RETURNING a.id),
+	q AS (INSERT INTO at_blob_deletions (key) SELECT due.storage_key FROM due JOIN done ON done.id = due.id
+		WHERE due.storage_key IS NOT NULL ON CONFLICT (key) DO UPDATE SET next_at = LEAST(at_blob_deletions.next_at, now()))
+	SELECT id FROM done`, w.now(), w.batch()).Scan(&n).Error
 	if err != nil {
 		return err
 	}
-	for _, k := range keys {
-		if k.StorageKey != nil {
-			if err := Enqueue(ctx, w.DB, *k.StorageKey); err != nil {
-				return err
-			}
-		}
-	}
-	st.Expired += len(keys)
+	st.Expired += len(n)
 	return nil
 }
 
@@ -213,6 +285,21 @@ func (w *Worker) deletions(ctx context.Context, st *Stats) error {
 		return err
 	}
 	for _, r := range rows {
+		if !r.Prefix {
+			// A key a row points at again (a reservation whose transaction committed, a copy
+			// that lost a race to the same key) is not deleted.
+			ref, err := Referenced(ctx, w.DB, r.Key)
+			if err != nil {
+				return err
+			}
+			if ref {
+				if _, err := store.Exec(ctx, w.DB, `DELETE FROM at_blob_deletions WHERE key = $1`, r.Key); err != nil {
+					return err
+				}
+				st.Kept++
+				continue
+			}
+		}
 		var err error
 		if r.Prefix {
 			err = w.Blobs.DeletePrefix(ctx, r.Key)
@@ -246,10 +333,11 @@ func (w *Worker) hashes(ctx context.Context, st *Stats) error {
 		Size     int64
 		Declared *string
 	}
+	waiting := w.waiting()
 	var atts []row
 	if err := store.Raw(ctx, w.DB, `SELECT id, storage_key AS key, size FROM at_attachments
-		WHERE sha256 IS NULL AND state = 'ready' AND storage_key IS NOT NULL ORDER BY created_at LIMIT $1`, w.batch()).
-		Scan(&atts).Error; err != nil {
+		WHERE sha256 IS NULL AND state = 'ready' AND storage_key IS NOT NULL AND NOT (id = ANY($2)) ORDER BY created_at LIMIT $1`,
+		w.batch(), waiting).Scan(&atts).Error; err != nil {
 		return err
 	}
 	for _, r := range atts {
@@ -262,9 +350,13 @@ func (w *Worker) hashes(ctx context.Context, st *Stats) error {
 				if err != nil {
 					return err
 				}
+				w.done(r.ID)
+			} else {
+				w.later(r.ID) // passing: retry later, the next rows go first
 			}
 			continue
 		}
+		w.done(r.ID)
 		if _, err := store.Exec(ctx, w.DB, `UPDATE at_attachments SET sha256 = $2 WHERE id = $1 AND sha256 IS NULL`, r.ID, sum); err != nil {
 			return err
 		}
@@ -277,8 +369,8 @@ func (w *Worker) hashes(ctx context.Context, st *Stats) error {
 	}
 	var files []shared
 	if err := store.Raw(ctx, w.DB, `SELECT project_id, path, storage_key AS key, size, declared_sha256 AS declared FROM at_shared_files
-		WHERE sha256 IS NULL AND state = 'ready' AND storage_key IS NOT NULL ORDER BY updated_at LIMIT $1`, w.batch()).
-		Scan(&files).Error; err != nil {
+		WHERE sha256 IS NULL AND state = 'ready' AND storage_key IS NOT NULL AND NOT (storage_key = ANY($2)) ORDER BY updated_at LIMIT $1`,
+		w.batch(), waiting).Scan(&files).Error; err != nil {
 		return err
 	}
 	for _, f := range files {
@@ -287,8 +379,10 @@ func (w *Worker) hashes(ctx context.Context, st *Stats) error {
 		if err != nil && !errors.Is(err, blobstore.ErrNotFound) {
 			st.HashFailed++
 			w.log().Warn("hash shared file", "path", f.Path, "err", err)
+			w.later(f.Key)
 			continue
 		}
+		w.done(f.Key)
 		if bad || err != nil {
 			st.HashFailed++
 			w.log().Warn("shared file does not match its upload", "project", f.ProjectID, "path", f.Path, "size", n, "want", f.Size)

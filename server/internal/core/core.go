@@ -72,6 +72,9 @@ type Tx struct {
 // Gorm returns the transaction's handle bound to ctx (Tx satisfies DB).
 func (tx *Tx) Gorm(ctx context.Context) *gorm.DB { return tx.g.WithContext(ctx) }
 
+// Detached is the pool outside the transaction (store.Detacher).
+func (tx *Tx) Detached() store.DB { return tx.store.Pool }
+
 // InTx runs fn in a transaction; after a successful commit it publishes the
 // event hints and runs AfterCommit callbacks in order.
 func (s *Store) InTx(ctx context.Context, fn func(tx *Tx) error) error {

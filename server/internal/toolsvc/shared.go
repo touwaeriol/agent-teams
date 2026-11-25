@@ -185,8 +185,8 @@ func (s *Service) storeShared(ctx context.Context, tx *core.Tx, c *call, in prot
 	if err != nil {
 		return Result{}, refuse("%s", err.Error())
 	}
-	if decl.Size > sharedfiles.MaxFileBytes {
-		return Result{}, refuse("%s", sharedfiles.Check(sharedfiles.Usage{}, int64(decl.Size), -1).Error())
+	if decl.Size > sharedfiles.MaxInlineFileBytes {
+		return Result{}, refuse("%s", sharedfiles.InlineTooLarge().Error())
 	}
 	data, err := artifacts.LoadChunks(ctx, tx, c.sc.Session.ID, c.upload)
 	if err != nil {

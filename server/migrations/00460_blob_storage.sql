@@ -85,6 +85,10 @@ CREATE INDEX at_blob_deletions_next ON at_blob_deletions (next_at);
 
 -- +goose Down
 -- Refuses while any bytes live only in the object store (run `atctl storage restore` first).
+-- Expired attachments (their bytes are gone for good, by the retention rule) and uploads that
+-- never finished are deleted first: the schema before #58 has no way to hold them. Messages that
+-- referenced an expired attachment then show it as missing instead of "已过期".
+DELETE FROM at_attachments WHERE state = 'expired' OR (state = 'uploading' AND data IS NULL);
 -- +goose StatementBegin
 DO $$
 BEGIN

@@ -237,7 +237,9 @@ func (r *Runner) Migrate(ctx context.Context, o Options) ([]Report, error) {
 			}
 			if res.RowsAffected() == 0 {
 				rep.Skipped++
-				return blobgc.Enqueue(ctx, r.DB, key) // the row changed: drop the copy
+				// The row changed: drop the copy, unless another migrate run gave the row this
+				// very key (same id or same path: the keys are deterministic).
+				return blobgc.EnqueueUnreferenced(ctx, r.DB, key)
 			}
 			rep.Done++
 			if rep.Done%100 == 0 {

@@ -42,11 +42,13 @@ p, public, /readyz, GET
 
 # Daemons (node token): the node WebSocket and attachment fetches.
 p, node-token, /nodes/attachments/:id, GET
+p, node-token, /nodes/attachments/:id/url, GET
 p, node-token, /nodes/connect, GET
 p, node-token, /nodes/moves/:id, GET
 p, node-token, /nodes/moves/:id, PUT
 p, node-token, /nodes/v2/connect, GET
 p, node-token, /nodes/ssh, GET
+p, node-token, /nodes/uploads, POST
 
 # Signed-in users: their own account, projects, threads, libraries and nodes.
 p, user, /api/attachments/:id, GET
@@ -118,6 +120,10 @@ p, user, /api/projects/:pid, DELETE
 p, user, /api/projects/:pid, GET
 p, user, /api/projects/:pid, PATCH
 p, user, /api/projects/:pid/attachments, POST
+p, user, /api/projects/:pid/uploads, POST
+p, user, /api/projects/:pid/uploads/:upload_id, DELETE
+p, user, /api/projects/:pid/uploads/:upload_id/complete, POST
+p, user, /api/projects/:pid/uploads/:upload_id/parts, POST
 p, user, /api/projects/:pid/ci/detect, GET
 p, user, /api/projects/:pid/ci/setup-pr, POST
 p, user, /api/projects/:pid/coordinator, GET

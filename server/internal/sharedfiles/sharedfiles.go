@@ -30,11 +30,14 @@ import (
 
 // Limits of a project's shared files.
 const (
-	MaxFileBytes    = 20 << 20  // one file
-	MaxProjectBytes = 500 << 20 // all files of a project
-	MaxProjectFiles = 1000      // files of a project
-	MaxDepth        = 8         // path segments
-	MaxPathBytes    = 255       // path length in bytes
+	MaxFileBytes    = 200 << 20 // one file (#58)
+	MaxProjectBytes = 5 << 30   // all files of a project (#58: shared files only, attachments do not count)
+	// MaxInlineFileBytes is the largest file carried in memory (Put, Load: the page's old multipart
+	// form, an old daemon's file.chunk upload); bigger ones go through presigned uploads and URLs.
+	MaxInlineFileBytes = 20 << 20
+	MaxProjectFiles    = 1000 // files of a project
+	MaxDepth           = 8    // path segments
+	MaxPathBytes       = 255  // path length in bytes
 )
 
 // UserName is uploaded_by for files the user uploaded on the web page (the convention of deliverables
@@ -232,8 +235,8 @@ func Load(ctx context.Context, q store.DB, bs blobstore.Store, projectID, p stri
 
 // readObject reads a whole (small) object and checks its size.
 func readObject(ctx context.Context, bs blobstore.Store, key string, size int64) ([]byte, error) {
-	if size > MaxFileBytes {
-		return nil, fmt.Errorf("%w：%d MB 以上的文件要用预签名地址下载", ErrFileTooLarge, MaxFileBytes>>20)
+	if size > MaxInlineFileBytes {
+		return nil, fmt.Errorf("%w：%d MB 以上的文件要用预签名地址下载", ErrFileTooLarge, MaxInlineFileBytes>>20)
 	}
 	rc, err := blobstore.Or(bs).Open(ctx, key)
 	if err != nil {
@@ -277,10 +280,27 @@ func Check(u Usage, size, oldSize int64) error {
 		return fmt.Errorf("%w：项目最多 %d 个共享文件，先删掉不用的", ErrQuota, MaxProjectFiles)
 	}
 	if bytes > MaxProjectBytes {
-		return fmt.Errorf("%w：项目共享文件合计不能超过 %d MB（现在 %.1f MB），先删掉不用的", ErrQuota, MaxProjectBytes>>20,
-			float64(u.Bytes)/(1<<20))
+		return fmt.Errorf("%w：项目共享文件合计不能超过 %s（已用 %s，这个文件 %s），先删掉不用的共享文件再试", ErrQuota,
+			Human(MaxProjectBytes), Human(u.Bytes), Human(size))
 	}
 	return nil
+}
+
+// InlineTooLarge refuses a file over MaxInlineFileBytes on a path that carries the bytes itself.
+func InlineTooLarge() error {
+	return fmt.Errorf("%w：这种上传方式最多 %d MB，更大的文件（最多 %d MB）要用新的分片上传", ErrFileTooLarge,
+		MaxInlineFileBytes>>20, MaxFileBytes>>20)
+}
+
+// Human is a byte count for messages: 1.5 GB, 12.0 MB, 300 KB.
+func Human(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	}
+	return fmt.Sprintf("%d KB", (n+1023)>>10)
 }
 
 // Sum is the hex sha256 of data.
@@ -302,8 +322,8 @@ func Put(ctx context.Context, q store.DB, bs blobstore.Store, projectID, rawPath
 	if err != nil {
 		return SharedFile{}, false, err
 	}
-	if len(data) > MaxFileBytes {
-		return SharedFile{}, false, Check(Usage{}, int64(len(data)), -1)
+	if len(data) > MaxInlineFileBytes {
+		return SharedFile{}, false, InlineTooLarge()
 	}
 	bs = blobstore.Or(bs)
 	if !bs.Configured() {
@@ -330,6 +350,10 @@ func Put(ctx context.Context, q store.DB, bs blobstore.Store, projectID, rawPath
 	}
 	obj := NewObjectID()
 	key := blobstore.SharedKey(projectID, obj)
+	// Reserved outside the transaction: if it rolls back after the write, blobgc removes the object.
+	if err := blobgc.Reserve(ctx, q, key); err != nil {
+		return SharedFile{}, false, err
+	}
 	if err := bs.Put(ctx, key, bytes.NewReader(data), int64(len(data)), ContentType(p)); err != nil {
 		return SharedFile{}, false, err
 	}
@@ -346,7 +370,7 @@ func Put(ctx context.Context, q store.DB, bs blobstore.Store, projectID, rawPath
 		declared_sha256 = EXCLUDED.declared_sha256, state = 'ready', updated_at = now()`,
 		projectID, p, ContentType(p), len(data), sum, by.Name, empID, by.ThreadID, key, obj, sum).Error
 	if err != nil {
-		_ = bs.Delete(context.WithoutCancel(ctx), key) // best effort; blob_gc does not know this key
+		_ = bs.Delete(context.WithoutCancel(ctx), key) // best effort; the reservation catches it otherwise
 		return SharedFile{}, false, err
 	}
 	if err := blobgc.Enqueue(ctx, q, oldKey); err != nil {

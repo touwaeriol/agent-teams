@@ -145,3 +145,15 @@ func Or(s Store) Store {
 	}
 	return s
 }
+
+// PartSize is the size of each part of a browser multipart upload (#58 design §3.1): 200 MB is 13
+// parts; S3 wants every part but the last to be at least 5 MB.
+const PartSize = 16 << 20
+
+// PartCount is how many parts an upload of size bytes has (at least one).
+func PartCount(size int64) int32 {
+	if size <= 0 {
+		return 1
+	}
+	return int32((size + PartSize - 1) / PartSize)
+}
