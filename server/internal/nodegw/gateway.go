@@ -328,9 +328,11 @@ func (g *Gateway) attach(ctx context.Context, conn *websocket.Conn, node store.N
 		old.close(CloseReplaced, "replaced by a newer link")
 	}
 	if err := l.welcome(ctx); err != nil {
+		g.detach(context.WithoutCancel(ctx), l) // registered: take it out (and report the node offline)
 		return nil, err
 	}
 	if err := g.markAckedUpTo(ctx, node.ID, int64(hello.AckedCmdSeq)); err != nil {
+		g.detach(context.WithoutCancel(ctx), l)
 		return nil, err
 	}
 	l.sentSeq = int64(hello.AckedCmdSeq)

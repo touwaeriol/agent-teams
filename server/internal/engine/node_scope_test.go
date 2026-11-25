@@ -184,3 +184,23 @@ func TestGatewayRevokedWhileReplacing(t *testing.T) {
 	}
 	eventually(t, "node offline", func() bool { return !w.e.Gateway.Online(node.Node.ID) })
 }
+
+// TestGatewayRotatedWhileSecondLinkHandshakes (#55 N2, review): with the node's link O online, a
+// second link of the same token rotates it between upgrade and hello: the second one is refused
+// at its hello and O, still the registered link, is cut off by the rotation: both 4401, offline.
+func TestGatewayRotatedWhileSecondLinkHandshakes(t *testing.T) {
+	w := newWorld(t, nil)
+	b := w.signUp("ops@example.com")
+	var node nodeCreated
+	b.must(201, "POST", "/api/nodes", map[string]string{"name": "n1"}, &node)
+	old := w.connect(node.Token, nodetest.Options{})
+	second := w.dialRaw(node.Token, nodetest.Options{SkipWelcome: true, BeforeHello: func() {
+		b.must(200, "POST", "/api/nodes/"+node.Node.ID+"/token", nil, nil)
+	}})
+	waitClosed(t, second)
+	waitClosed(t, old)
+	if second.CloseCode() != nodegw.CloseUnauthorized || old.CloseCode() != nodegw.CloseUnauthorized {
+		t.Fatalf("close codes: second %d, old %d", second.CloseCode(), old.CloseCode())
+	}
+	eventually(t, "node offline", func() bool { return !w.e.Gateway.Online(node.Node.ID) })
+}

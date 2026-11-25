@@ -241,17 +241,8 @@ func deref(p *string) string {
 // a lock wait and a few steps.
 const JobCredentialWindow = 2 * time.Hour
 
-// JobLive reports whether nodeID's git job jobID still runs: queued within JobCredentialWindow,
-// no git.result yet and not expired or superseded.
-func JobLive(ctx context.Context, q core.DB, nodeID, jobID string) (bool, error) {
-	var n int64
-	err := commands(ctx, q, nodeID).Where("type LIKE 'git.%' AND body->>'job_id' = ? AND status IN ('pending','sent','acked') AND created_at > ?",
-		jobID, time.Now().Add(-JobCredentialWindow)).Count(&n).Error
-	return n > 0, err
-}
-
 // checkJob: the job is one the console sent this node. Whether it still runs matters only for
-// credentials (delivery.jobScope answers cred.request with unknown_job, see JobLive); a replayed
+// credentials (delivery.jobScope: unknown_job once finished or older than JobCredentialWindow); a replayed
 // git.result of a finished job is still this node's.
 func (g *Gateway) checkJob(ctx context.Context, node store.Node, jobID string) (verdict, string, error) {
 	var n int64
