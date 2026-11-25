@@ -159,8 +159,11 @@ func (o *Orchestrator) legacyFit(ctx context.Context, tx *core.Tx, projectID, te
 			name, size := r.Name, r.Size
 			out.images = append(out.images, protocol.ImageRef{ID: r.ID, MediaType: protocol.ImageRefMediaType(r.ContentType), Name: &name, Size: &size})
 			fmt.Fprintf(&b, "\n%s：已随消息附上", head)
-		case core.IsInlineText(r.ContentType) && r.Size <= maxInlineText:
+		case core.IsInlineText(r.ContentType) && r.Size <= maxInlineText && strings.Contains(text, inlineHeader(r.Name)):
 			fmt.Fprintf(&b, "\n%s：内容已放在正文里", head)
+		case core.IsInlineText(r.ContentType) && r.Size <= maxInlineText:
+			// inlineTexts could not read it (storage slow or down): an old daemon gets no file either.
+			fmt.Fprintf(&b, "\n%s：没能放进正文（读取文件失败），这个节点版本过旧也收不到文件，请稍后重发或升级节点守护进程", head)
 		case core.IsInlineText(r.ContentType) && texts[r.ID] != nil:
 			body, cut := clipText(string(texts[r.ID]), maxInlineText)
 			fmt.Fprintf(&inline, "\n\n[附件：%s%s]\n```\n%s\n```", r.Name, cut, body)
