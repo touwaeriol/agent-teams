@@ -1,6 +1,8 @@
 package config
 
 import (
+	"time"
+
 	"log/slog"
 	"testing"
 )
@@ -103,6 +105,17 @@ func TestS3(t *testing.T) {
 	}
 	if _, err := Load(get(map[string]string{"AGENT_TEAMS_S3_ENDPOINT": "https://s3.example"})); err == nil {
 		t.Fatal("partial S3 accepted")
+	}
+	if cfg.AttachmentTTL != 24*time.Hour {
+		t.Fatalf("default attachment TTL %v", cfg.AttachmentTTL)
+	}
+	if cfg, err := Load(get(map[string]string{"AGENT_TEAMS_ATTACHMENT_TTL": "36h"})); err != nil || cfg.AttachmentTTL != 36*time.Hour {
+		t.Fatalf("TTL 36h: %v %v", cfg.AttachmentTTL, err)
+	}
+	for _, bad := range []string{"1d", "10s", "-1h"} {
+		if _, err := Load(get(map[string]string{"AGENT_TEAMS_ATTACHMENT_TTL": bad})); err == nil {
+			t.Fatalf("TTL %q accepted", bad)
+		}
 	}
 	full["AGENT_TEAMS_S3_ENDPOINT"] = "s3.example"
 	if _, err := Load(get(full)); err == nil {

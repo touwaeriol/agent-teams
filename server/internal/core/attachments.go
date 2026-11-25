@@ -86,8 +86,70 @@ type Attachment struct {
 	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime:false;default:now()"`
 	// StorageKey is the object holding the bytes; nil = still in the data column (before #58).
 	StorageKey *string `json:"-"`
-	// State is uploading, ready or failed (at_attachments.state).
+	// State is uploading, ready, failed or expired (at_attachments.state).
 	State string `json:"-" gorm:"default:ready"`
+	// ExpiresAt is when the attachment is deleted unless used again (TouchAttachments).
+	ExpiresAt time.Time `json:"-"`
+}
+
+// DefaultAttachmentTTL is how long an attachment is kept after its last use (user decision #58;
+// AGENT_TEAMS_ATTACHMENT_TTL overrides it).
+const DefaultAttachmentTTL = 24 * time.Hour
+
+// ErrAttachmentExpired is an attachment whose retention ran out (state expired): its bytes are
+// gone, messages show it as expired, the API answers 410.
+var ErrAttachmentExpired = errors.New("附件已过期（超过保留期没有再使用，文件已删除）")
+
+func ttlOr(ttl time.Duration) time.Duration {
+	if ttl <= 0 {
+		return DefaultAttachmentTTL
+	}
+	return ttl
+}
+
+// TouchAttachments pushes the retention of a project's attachments to now()+ttl (never earlier
+// than it already is). Every use calls it: sending, forwarding, assigning, opening a thread on a
+// message, node and page downloads. Expired and unknown ids are left alone (callers check with
+// UseAttachments or OpenAttachment first).
+func TouchAttachments(ctx context.Context, q DB, projectID string, ids []string, ttl time.Duration) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return q.Gorm(ctx).Exec(`UPDATE at_attachments SET expires_at = GREATEST(expires_at, now() + make_interval(secs => ?))
+		WHERE project_id = ? AND id IN ? AND state IN ('ready', 'failed', 'uploading')`, ttlOr(ttl).Seconds(), projectID, ids).Error
+}
+
+// ExpiredAttachment returns the name of the first expired attachment among ids ("" = none).
+func ExpiredAttachment(ctx context.Context, q DB, projectID string, ids []string) (string, error) {
+	if len(ids) == 0 {
+		return "", nil
+	}
+	var names []string
+	err := q.Gorm(ctx).Table("at_attachments").Where("project_id = ? AND id IN ? AND state = 'expired'", projectID, ids).
+		Order("name").Limit(1).Pluck("name", &names).Error
+	if err != nil || len(names) == 0 {
+		return "", err
+	}
+	return names[0], nil
+}
+
+// UseAttachments loads a project's attachments for a new use (ProjectAttachments), refuses
+// expired ones (ErrAttachmentExpired) and ones not ready (ErrNotFound), and pushes the retention
+// of the rest.
+func UseAttachments(ctx context.Context, q DB, projectID string, ids []string, ttl time.Duration) ([]Attachment, error) {
+	list, err := ProjectAttachments(ctx, q, projectID, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range list {
+		switch a.State {
+		case "expired":
+			return nil, fmt.Errorf("%w：%s", ErrAttachmentExpired, a.Name)
+		case "uploading", "failed":
+			return nil, ErrNotFound
+		}
+	}
+	return list, TouchAttachments(ctx, q, projectID, ids, ttl)
 }
 
 // TableName maps Attachment to at_attachments.
@@ -160,12 +222,13 @@ func NewAttachment(projectID, userID, name string, data []byte) (Attachment, err
 		Size: len(data), SHA256: hex.EncodeToString(sum[:])}, nil
 }
 
-// InsertAttachment stores an attachment: the bytes go to the object store (key
+// InsertAttachment stores an attachment, kept for ttl (0 = DefaultAttachmentTTL) unless used
+// again: the bytes go to the object store (key
 // projects/<pid>/attachments/<id>), the row keeps the key. With no store configured it fails
 // with blobstore.ErrNotConfigured. The object is written first; if the insert fails it is
 // deleted again (best effort). Callers pass at most MaxAttachmentBytes; big files use presigned
 // uploads instead.
-func InsertAttachment(ctx context.Context, q DB, bs blobstore.Store, a Attachment, data []byte) (Attachment, error) {
+func InsertAttachment(ctx context.Context, q DB, bs blobstore.Store, ttl time.Duration, a Attachment, data []byte) (Attachment, error) {
 	bs = blobstore.Or(bs)
 	if !bs.Configured() {
 		return Attachment{}, blobstore.ErrNotConfigured
@@ -174,7 +237,7 @@ func InsertAttachment(ctx context.Context, q DB, bs blobstore.Store, a Attachmen
 	if err := bs.Put(ctx, key, bytes.NewReader(data), int64(len(data)), a.ContentType); err != nil {
 		return Attachment{}, err
 	}
-	a.StorageKey, a.State = &key, "ready"
+	a.StorageKey, a.State, a.ExpiresAt = &key, "ready", time.Now().Add(ttlOr(ttl))
 	err := q.Gorm(ctx).Table("at_attachments").Clauses(clause.Returning{Columns: []clause.Column{{Name: "created_at"}}}).
 		Create(&a).Error
 	if err != nil {
@@ -238,15 +301,19 @@ func AttachmentTexts(ctx context.Context, q DB, bs blobstore.Store, projectID st
 }
 
 // OpenAttachment returns a ready attachment and a reader of its bytes if its project belongs to
-// the user: the object (streamed) or the data column of older rows. The caller closes it.
+// the user: the object (streamed) or the data column of older rows. The caller closes it (and
+// touches it: a download is a use). Expired attachments are ErrAttachmentExpired.
 func OpenAttachment(ctx context.Context, q DB, bs blobstore.Store, userID, id string) (Attachment, io.ReadCloser, error) {
 	row, err := take[struct {
 		Attachment
 		Data []byte
 	}](q.Gorm(ctx).Table("at_attachments a").Select("a.*").Joins("JOIN at_projects p ON p.id = a.project_id").
-		Where("a.id = ? AND p.user_id = ? AND a.state = 'ready'", id, userID))
+		Where("a.id = ? AND p.user_id = ? AND a.state IN ('ready', 'expired')", id, userID))
 	if err != nil {
 		return Attachment{}, nil, err
+	}
+	if row.State == "expired" {
+		return row.Attachment, nil, ErrAttachmentExpired
 	}
 	if row.StorageKey == nil {
 		return row.Attachment, io.NopCloser(bytes.NewReader(row.Data)), nil

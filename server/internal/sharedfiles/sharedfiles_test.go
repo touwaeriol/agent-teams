@@ -229,4 +229,8 @@ func TestLegacyAndFailed(t *testing.T) {
 	if _, _, err := sharedfiles.Load(ctx, q, blobtest.New(t), p.ID, "bad.txt"); !errors.Is(err, sharedfiles.ErrFailed) {
 		t.Fatalf("failed load: %v", err)
 	}
+	// Deleting a row from before #58 (no storage key) queues nothing.
+	if ok, err := sharedfiles.Delete(ctx, q, p.ID, "old.txt"); !ok || err != nil {
+		t.Fatalf("delete legacy %v %v", ok, err)
+	}
 }

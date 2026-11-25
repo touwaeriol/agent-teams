@@ -358,14 +358,14 @@ func Put(ctx context.Context, q store.DB, bs blobstore.Store, projectID, rawPath
 
 // Delete removes one file (its object is queued for deletion after commit); false when there was none.
 func Delete(ctx context.Context, q store.DB, projectID, p string) (bool, error) {
-	var keys []*string
+	var keys []struct{ StorageKey *string }
 	err := q.Gorm(ctx).Raw(`DELETE FROM at_shared_files WHERE project_id = ? AND path = ? RETURNING storage_key`, projectID, p).
 		Scan(&keys).Error
 	if err != nil || len(keys) == 0 {
 		return false, err
 	}
-	if keys[0] != nil {
-		err = blobgc.Enqueue(ctx, q, *keys[0])
+	if keys[0].StorageKey != nil {
+		err = blobgc.Enqueue(ctx, q, *keys[0].StorageKey)
 	}
 	return true, err
 }

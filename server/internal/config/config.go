@@ -2,6 +2,8 @@
 package config
 
 import (
+	"time"
+
 	"errors"
 	"fmt"
 	"io"
@@ -37,6 +39,9 @@ type Config struct {
 	// S3 is the object store of attachments and shared files (AGENT_TEAMS_S3_*, #58); all empty =
 	// not configured: new uploads answer 503, bytes still in the database stay readable.
 	S3 S3
+	// AttachmentTTL (AGENT_TEAMS_ATTACHMENT_TTL, a Go duration such as 24h) is how long an
+	// attachment is kept after its last use, and how long daemons keep the downloaded copy.
+	AttachmentTTL time.Duration
 }
 
 // S3 is the AGENT_TEAMS_S3_* settings.
@@ -74,6 +79,20 @@ func (s S3) check() error {
 		}
 	}
 	return nil
+}
+
+// DefaultAttachmentTTL is AGENT_TEAMS_ATTACHMENT_TTL's default (user decision #58).
+const DefaultAttachmentTTL = 24 * time.Hour
+
+func attachmentTTL(v string) (time.Duration, error) {
+	if strings.TrimSpace(v) == "" {
+		return DefaultAttachmentTTL, nil
+	}
+	d, err := time.ParseDuration(strings.TrimSpace(v))
+	if err != nil || d < time.Minute {
+		return 0, errors.New("AGENT_TEAMS_ATTACHMENT_TTL must be a duration of at least 1m, e.g. 24h")
+	}
+	return d, nil
 }
 
 // LoadS3 reads and checks only the AGENT_TEAMS_S3_* settings (atctl storage).
@@ -118,6 +137,11 @@ func Load(getenv Getenv) (Config, error) {
 		GitMirrorDir:   getenv("GIT_MIRROR_DIR"),
 		S3:             s3Config(getenv),
 	}
+	ttl, err := attachmentTTL(getenv("AGENT_TEAMS_ATTACHMENT_TTL"))
+	if err != nil {
+		return cfg, err
+	}
+	cfg.AttachmentTTL = ttl
 	return cfg, cfg.check()
 }
 

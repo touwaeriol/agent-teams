@@ -40,7 +40,7 @@ func wire(d httpapi.Deps) (httpapi.Deps, func(context.Context), error) {
 	}
 	e, err := engine.New(engine.Deps{Store: d.Store, KV: d.KV, GitHub: d.GitHub, Tokens: d.Tokens,
 		Box: auth.NewSecretBox(d.Config.SecretKeys...), Office: d.Office, Log: d.Log, Gateway: nodegw.Config{Validate: true},
-		Vault: vault, Relay: d.Relay, Blobs: blobs})
+		Vault: vault, Relay: d.Relay, Blobs: blobs, AttachmentTTL: d.Config.AttachmentTTL})
 	if err != nil {
 		return d, nil, err
 	}

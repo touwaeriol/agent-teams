@@ -82,8 +82,8 @@ func TestWorker(t *testing.T) {
 	put(kAtt, att)
 	put(kGood, good)
 	put(kBad, bad)
-	exec(`INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, storage_key, claimed_at)
-		VALUES ('img_h', $1, $2, 'a', 'text/plain', $3, $4, now())`, p.ID, u.ID, len(att), kAtt)
+	exec(`INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, storage_key, expires_at)
+		VALUES ('img_h', $1, $2, 'a', 'text/plain', $3, $4, now() + interval '3 days')`, p.ID, u.ID, len(att), kAtt)
 	exec(`INSERT INTO at_shared_files (project_id, path, content_type, size, uploaded_by, storage_key, object_id, declared_sha256)
 		VALUES ($1, 'good.txt', 'text/plain', $2, 'user', $3, 'sf_good', $4), ($1, 'bad.txt', 'text/plain', $5, 'user', $6, 'sf_bad', $7)`,
 		p.ID, len(good), kGood, hexsum(good), len(bad), kBad, hexsum([]byte("what was declared")))
@@ -128,8 +128,8 @@ func TestWorker(t *testing.T) {
 		t.Fatal("objects not deleted")
 	}
 
-	// Cleanup: an attachment still uploading, an unclaimed one, a staged shared upload, a stray
-	// multipart upload nobody knows, all older than a day; a claimed attachment stays.
+	// Cleanup: an attachment still uploading, an expired one, a staged shared upload, a stray
+	// multipart upload nobody knows, all older than a day; an attachment used recently stays.
 	upAtt, err := bs.CreateMultipart(ctx, blobstore.AttachmentKey(p.ID, "img_up"), "")
 	if err != nil {
 		t.Fatal(err)
@@ -140,19 +140,23 @@ func TestWorker(t *testing.T) {
 	exec(`INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, storage_key, state, upload_id, created_at)
 		VALUES ('img_up', $1, $2, 'up', 'application/zip', 10, $3, 'uploading', $4, now() - interval '2 days')`,
 		p.ID, u.ID, blobstore.AttachmentKey(p.ID, "img_up"), upAtt)
-	exec(`INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, sha256, storage_key, created_at)
-		VALUES ('img_un', $1, $2, 'un', 'text/plain', 1, 'x', $3, now() - interval '2 days')`, p.ID, u.ID, blobstore.AttachmentKey(p.ID, "img_un"))
-	exec(`UPDATE at_attachments SET created_at = now() - interval '2 days' WHERE id = 'img_h'`)
+	exec(`INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, sha256, storage_key, created_at, expires_at)
+		VALUES ('img_un', $1, $2, 'un', 'text/plain', 1, 'x', $3, now() - interval '2 days', now() - interval '1 day'),
+		('img_legacy', $1, $2, 'old', 'text/plain', 1, 'x', NULL, now() - interval '2 days', now() - interval '1 day')`,
+		p.ID, u.ID, blobstore.AttachmentKey(p.ID, "img_un"))
+	exec(`UPDATE at_attachments SET data = '\x41' WHERE id = 'img_legacy'`)
+	exec(`UPDATE at_attachments SET created_at = now() - interval '2 days', expires_at = now() + interval '30 hours' WHERE id = 'img_h'`)
 	exec(`INSERT INTO at_shared_uploads (id, project_id, path, object_id, storage_key, s3_upload_id, size, content_type, uploaded_by, created_at)
 		VALUES ('up_1', $1, 'big.zip', 'sf_up', $2, $3, 10, 'application/zip', 'user', now() - interval '2 days')`,
 		p.ID, blobstore.SharedKey(p.ID, "sf_up"), upShared)
 	w.Now = func() time.Time { return time.Now().Add(blobgc.Stale + time.Hour) }
 	st, err = w.RunOnce(ctx)
-	if err != nil || st.Aborted != 3 || st.Expired != 1 {
+	if err != nil || st.Aborted != 3 || st.Expired != 2 {
 		t.Fatalf("cleanup pass %+v %v", st, err)
 	}
-	if count(`SELECT count(*) FROM at_attachments WHERE id IN ('img_up', 'img_un')`) != 0 || count(`SELECT count(*) FROM at_shared_uploads`) != 0 ||
-		count(`SELECT count(*) FROM at_attachments WHERE id = 'img_h'`) != 1 {
+	if count(`SELECT count(*) FROM at_attachments WHERE id = 'img_up'`) != 0 || count(`SELECT count(*) FROM at_shared_uploads`) != 0 ||
+		count(`SELECT count(*) FROM at_attachments WHERE id IN ('img_un', 'img_legacy') AND state = 'expired' AND data IS NULL AND storage_key IS NULL`) != 2 ||
+		count(`SELECT count(*) FROM at_attachments WHERE id = 'img_h' AND state = 'ready'`) != 1 {
 		t.Fatal("cleanup rows")
 	}
 	if pending, _ := bs.ListMultipart(ctx, "projects/", time.Now().Add(time.Hour)); len(pending) != 0 {
@@ -162,7 +166,7 @@ func TestWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	if exists(blobstore.AttachmentKey(p.ID, "img_un")) {
-		t.Fatal("unclaimed attachment object not deleted")
+		t.Fatal("expired attachment object not deleted")
 	}
 
 	// No store configured: nothing happens.

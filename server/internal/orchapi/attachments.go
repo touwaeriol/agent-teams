@@ -1,6 +1,8 @@
 package orchapi
 
 import (
+	"errors"
+
 	"io"
 
 	"context"
@@ -76,7 +78,7 @@ func (a *API) uploadAttachment(ctx context.Context, in *attachmentInput) (*attac
 	if err != nil {
 		return nil, fail(err, "")
 	}
-	if att, err = core.InsertAttachment(ctx, a.e.Core.Pool, a.e.Core.Blobs, att, data); err != nil {
+	if att, err = core.InsertAttachment(ctx, a.e.Core.Pool, a.e.Core.Blobs, a.e.Core.AttachmentTTL, att, data); err != nil {
 		return nil, fail(err, "")
 	}
 	return &attachmentOutput{Body: AttachmentView{Attachment: att, URL: core.AttachmentURLPrefix + att.ID}}, nil
@@ -90,6 +92,10 @@ func (a *API) attachmentFile(ctx context.Context, in *attachmentFileInput) (*att
 	att, data, err := core.AttachmentData(ctx, a.e.Core.Pool, a.e.Core.Blobs, u.ID, in.ID)
 	if err != nil {
 		return nil, fail(err, "没有这张图片")
+	}
+	// A page download or preview is a use: the retention starts again.
+	if err := core.TouchAttachments(ctx, a.e.Core.Pool, att.ProjectID, []string{att.ID}, a.e.Core.AttachmentTTL); err != nil {
+		return nil, err
 	}
 	typ := att.ContentType
 	if core.IsInlineText(typ) {
@@ -110,11 +116,19 @@ func (a *API) nodeAttachment(c *gin.Context) {
 	// Streamed: the object never sits in the control plane's memory (old daemons; new ones fetch
 	// a presigned URL instead, #58 D2).
 	att, rc, err := core.OpenAttachment(r.Context(), a.e.Core.Pool, a.e.Core.Blobs, node.UserID, c.Param("id"))
+	if errors.Is(err, core.ErrAttachmentExpired) {
+		http.Error(w, "attachment expired", http.StatusGone)
+		return
+	}
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 	defer rc.Close()
+	if err := core.TouchAttachments(r.Context(), a.e.Core.Pool, att.ProjectID, []string{att.ID}, a.e.Core.AttachmentTTL); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", att.ContentType)
 	w.Header().Set("Content-Length", strconv.Itoa(att.Size))
 	w.Header().Set("X-Content-Type-Options", "nosniff")

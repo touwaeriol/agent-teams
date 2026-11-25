@@ -6,8 +6,9 @@
 //   - hashes: uploads finished after #58 get their sha256 by streaming the object (the control
 //     plane never trusts the client's hash and never holds the object in memory); a shared file
 //     whose hash does not match what its uploader declared becomes state=failed;
-//   - cleanup: multipart uploads left open for a day are aborted, attachments nobody referenced
-//     within a day are removed, and stray multipart uploads the database does not know are aborted.
+//   - cleanup: multipart uploads left open for a day are aborted, attachments past their retention
+//     (expires_at: 24 h after the last use) become state=expired and lose their bytes, and stray
+//     multipart uploads the database does not know are aborted.
 //
 // One replica runs it (advisory lock, like the timers loop).
 package blobgc
@@ -26,7 +27,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// Stale is how long an unfinished upload or an unreferenced attachment is kept.
+// Stale is how long an unfinished upload is kept.
 const Stale = 24 * time.Hour
 
 // Enqueue queues object keys for deletion after the transaction commits ("" keys are skipped).
@@ -94,7 +95,7 @@ func (w *Worker) RunOnce(ctx context.Context) (Stats, error) {
 	if !blobstore.Or(w.Blobs).Configured() {
 		return st, nil
 	}
-	steps := []func(context.Context, *Stats) error{w.expireUploads, w.expireUnclaimed, w.deletions, w.hashes, w.strayMultipart}
+	steps := []func(context.Context, *Stats) error{w.expireUploads, w.expireAttachments, w.deletions, w.hashes, w.strayMultipart}
 	var first error
 	for _, f := range steps {
 		if err := f(ctx, &st); err != nil && first == nil {
@@ -173,18 +174,24 @@ func (w *Worker) expireUploads(ctx context.Context, st *Stats) error {
 	return nil
 }
 
-// expireUnclaimed removes finished attachments no message or task referenced within Stale.
-func (w *Worker) expireUnclaimed(ctx context.Context, st *Stats) error {
-	var keys []*string
-	err := store.Raw(ctx, w.DB, `DELETE FROM at_attachments WHERE id IN (
-		SELECT id FROM at_attachments WHERE claimed_at IS NULL AND state <> 'uploading' AND created_at < $1
-		ORDER BY created_at LIMIT $2) RETURNING storage_key`, w.now().Add(-Stale), w.batch()).Scan(&keys).Error
+// expireAttachments ends the retention of attachments past expires_at (24 h after the last use,
+// core.TouchAttachments): the row stays as state=expired (messages show it, reads answer 410),
+// its bytes (data column or object) are dropped and the object is queued for deletion.
+func (w *Worker) expireAttachments(ctx context.Context, st *Stats) error {
+	var keys []struct{ StorageKey *string }
+	err := store.Raw(ctx, w.DB, `WITH due AS (
+		SELECT id, storage_key FROM at_attachments WHERE state IN ('ready', 'failed') AND expires_at < $1
+		ORDER BY expires_at LIMIT $2 FOR UPDATE SKIP LOCKED),
+	done AS (
+		UPDATE at_attachments a SET state = 'expired', data = NULL, storage_key = NULL, upload_id = NULL
+		FROM due WHERE a.id = due.id RETURNING a.id)
+	SELECT due.storage_key AS storage_key FROM due JOIN done ON done.id = due.id`, w.now(), w.batch()).Scan(&keys).Error
 	if err != nil {
 		return err
 	}
 	for _, k := range keys {
-		if k != nil {
-			if err := Enqueue(ctx, w.DB, *k); err != nil {
+		if k.StorageKey != nil {
+			if err := Enqueue(ctx, w.DB, *k.StorageKey); err != nil {
 				return err
 			}
 		}

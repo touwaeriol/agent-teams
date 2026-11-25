@@ -99,7 +99,7 @@ func (s *Service) publishImage(ctx context.Context, tx *core.Tx, c *call, in pro
 	if err != nil {
 		return failText("截图和图片不是交付物，也没能作为附件保存：%s", err.Error()), nil
 	}
-	if a, err = core.InsertAttachment(ctx, tx, s.core.Blobs, a, f.Data); errors.Is(err, blobstore.ErrNotConfigured) {
+	if a, err = core.InsertAttachment(ctx, tx, s.core.Blobs, s.core.AttachmentTTL, a, f.Data); errors.Is(err, blobstore.ErrNotConfigured) {
 		return failText("截图和图片不是交付物；平台的文件存储还没有配置，这张图片也没能作为附件保存"), nil
 	} else if err != nil {
 		return Result{}, err

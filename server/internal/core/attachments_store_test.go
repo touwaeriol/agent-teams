@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore/blobtest"
@@ -40,10 +41,10 @@ INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, s
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := InsertAttachment(ctx, pool, blobstore.None{}, a, body); !errors.Is(err, blobstore.ErrNotConfigured) {
+	if _, err := InsertAttachment(ctx, pool, blobstore.None{}, 0, a, body); !errors.Is(err, blobstore.ErrNotConfigured) {
 		t.Fatalf("insert without a store: %v", err)
 	}
-	a, err = InsertAttachment(ctx, pool, bs, a, body)
+	a, err = InsertAttachment(ctx, pool, bs, 0, a, body)
 	if err != nil || a.StorageKey == nil || *a.StorageKey != blobstore.AttachmentKey("p1", a.ID) {
 		t.Fatalf("insert %+v %v", a, err)
 	}
@@ -68,6 +69,36 @@ INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, s
 	texts, err := AttachmentTexts(ctx, pool, bs, "p1", []string{a.ID, "img_old", "img_up"})
 	if err != nil || string(texts[a.ID]) != "new text" || string(texts["img_old"]) != "old" || len(texts) != 2 {
 		t.Fatalf("texts %q %v", texts, err)
+	}
+	// Retention: a use pushes expires_at to now+TTL (never earlier); expired ones are refused.
+	exec(`UPDATE at_attachments SET expires_at = now() + interval '1 hour' WHERE id = $1`, a.ID)
+	if _, err := UseAttachments(ctx, pool, "p1", []string{a.ID}, 48*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	var hours float64
+	_ = store.QueryRow(ctx, pool, `SELECT extract(epoch FROM expires_at - now()) / 3600 FROM at_attachments WHERE id = $1`, a.ID).Scan(&hours)
+	if hours < 47 || hours > 49 {
+		t.Fatalf("expires in %.1f h after a use with a 48 h TTL", hours)
+	}
+	if err := TouchAttachments(ctx, pool, "p1", []string{a.ID}, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	_ = store.QueryRow(ctx, pool, `SELECT extract(epoch FROM expires_at - now()) / 3600 FROM at_attachments WHERE id = $1`, a.ID).Scan(&hours)
+	if hours < 47 {
+		t.Fatalf("a shorter touch moved the expiry earlier: %.1f h", hours)
+	}
+	exec(`UPDATE at_attachments SET state = 'expired', data = NULL WHERE id = 'img_old'`)
+	if _, err := UseAttachments(ctx, pool, "p1", []string{a.ID, "img_old"}, 0); !errors.Is(err, ErrAttachmentExpired) {
+		t.Fatalf("use of an expired attachment: %v", err)
+	}
+	if _, _, err := OpenAttachment(ctx, pool, bs, "u1", "img_old"); !errors.Is(err, ErrAttachmentExpired) {
+		t.Fatalf("open expired: %v", err)
+	}
+	if name, err := ExpiredAttachment(ctx, pool, "p1", []string{a.ID, "img_old"}); err != nil || name != "old.txt" {
+		t.Fatalf("expired name %q %v", name, err)
+	}
+	if _, err := UseAttachments(ctx, pool, "p1", []string{"img_up"}, 0); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("use of an upload in progress: %v", err)
 	}
 	_, rc, _ := OpenAttachment(ctx, pool, bs, "u1", a.ID)
 	b, _ := io.ReadAll(rc)

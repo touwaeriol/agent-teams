@@ -11,19 +11,22 @@
 
 -- Attachments.
 --   sha256      NULL until the blob_hash job has streamed the object (uploads finished after #58)
---   state       uploading (multipart upload open, upload_id set) | ready | failed
+--   state       uploading (multipart upload open, upload_id set) | ready | failed | expired
+--               (expired: the retention ran out, bytes and object deleted, the row stays so
+--               messages can show "已过期" and reads answer 410)
 --   upload_id   S3 multipart upload id while uploading
---   claimed_at  first time a message or task referenced it; NULL and older than a day = removed
---               by blob_gc. Existing rows count as claimed (fast default now(), then no default).
+--   expires_at  retention (user decision #58: 24 h after the last use, AGENT_TEAMS_ATTACHMENT_TTL):
+--               set on upload, pushed to now()+TTL by every use (send, forward, assign, node or
+--               page download…, core.TouchAttachments); blobgc expires rows past it. Existing
+--               rows get now()+24h once (a stable default is evaluated once: no table rewrite).
 ALTER TABLE at_attachments
     ALTER COLUMN data DROP NOT NULL,
     ALTER COLUMN sha256 DROP NOT NULL,
     ADD COLUMN storage_key TEXT,
-    ADD COLUMN state TEXT NOT NULL DEFAULT 'ready' CHECK (state IN ('uploading', 'ready', 'failed')),
+    ADD COLUMN state TEXT NOT NULL DEFAULT 'ready' CHECK (state IN ('uploading', 'ready', 'failed', 'expired')),
     ADD COLUMN upload_id TEXT,
-    ADD COLUMN claimed_at TIMESTAMPTZ DEFAULT now();
-ALTER TABLE at_attachments ALTER COLUMN claimed_at DROP DEFAULT;
-CREATE INDEX at_attachments_unclaimed ON at_attachments (created_at) WHERE claimed_at IS NULL;
+    ADD COLUMN expires_at TIMESTAMPTZ NOT NULL DEFAULT now() + interval '24 hours';
+CREATE INDEX at_attachments_expiry ON at_attachments (expires_at) WHERE state IN ('ready', 'failed');
 CREATE INDEX at_attachments_unhashed ON at_attachments (created_at) WHERE sha256 IS NULL AND state = 'ready';
 
 -- Shared files.
@@ -100,9 +103,9 @@ ALTER TABLE at_shared_files
     ALTER COLUMN sha256 SET NOT NULL,
     ALTER COLUMN data SET NOT NULL;
 DROP INDEX at_attachments_unhashed;
-DROP INDEX at_attachments_unclaimed;
+DROP INDEX at_attachments_expiry;
 UPDATE at_attachments SET sha256 = '' WHERE sha256 IS NULL;
 ALTER TABLE at_attachments
-    DROP COLUMN claimed_at, DROP COLUMN upload_id, DROP COLUMN state, DROP COLUMN storage_key,
+    DROP COLUMN expires_at, DROP COLUMN upload_id, DROP COLUMN state, DROP COLUMN storage_key,
     ALTER COLUMN sha256 SET NOT NULL,
     ALTER COLUMN data SET NOT NULL;

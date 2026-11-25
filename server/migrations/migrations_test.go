@@ -1850,7 +1850,7 @@ func TestUserQuotaLimitsMigration(t *testing.T) {
 }
 
 // TestBlobStorageMigration: 00460 keeps existing attachments and shared files readable from data
-// (no storage key, claimed, ready), lets new rows live only in the object store, and refuses to go
+// (no storage key, ready, expiring 24 h after the migration), lets new rows live only in the object store, and refuses to go
 // down while such rows exist.
 func TestBlobStorageMigration(t *testing.T) {
 	db := open(t, testdb.URL(t))
@@ -1875,11 +1875,11 @@ INSERT INTO at_shared_files (project_id, path, content_type, size, sha256, data,
 		t.Fatal(err)
 	}
 	var state string
-	var claimed bool
+	var inADay bool
 	var key *string
-	if err := db.QueryRow(`SELECT state, claimed_at IS NOT NULL, storage_key FROM at_attachments WHERE id = 'img_old'`).Scan(&state, &claimed, &key); err != nil ||
-		state != "ready" || !claimed || key != nil {
-		t.Fatalf("old attachment state=%s claimed=%v key=%v err=%v", state, claimed, key, err)
+	if err := db.QueryRow(`SELECT state, expires_at BETWEEN now() + interval '23 hours' AND now() + interval '25 hours', storage_key
+		FROM at_attachments WHERE id = 'img_old'`).Scan(&state, &inADay, &key); err != nil || state != "ready" || !inADay || key != nil {
+		t.Fatalf("old attachment state=%s expires in a day=%v key=%v err=%v", state, inADay, key, err)
 	}
 	if err := db.QueryRow(`SELECT state FROM at_shared_files WHERE path = 'a.txt'`).Scan(&state); err != nil || state != "ready" {
 		t.Fatalf("old shared file %s %v", state, err)
@@ -1890,10 +1890,11 @@ INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, s
 INSERT INTO at_blob_deletions (key, prefix) VALUES ('projects/p9/', true);`); err != nil {
 		t.Fatal(err)
 	}
-	var unclaimed bool
-	_ = db.QueryRow(`SELECT claimed_at IS NULL FROM at_attachments WHERE id = 'img_new'`).Scan(&unclaimed)
-	if !unclaimed {
-		t.Fatal("a new attachment must start unclaimed")
+	if _, err := db.Exec(`UPDATE at_attachments SET state = 'expired' WHERE id = 'img_old'`); err != nil {
+		t.Fatalf("expired state: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE at_attachments SET state = 'ready' WHERE id = 'img_old'`); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := db.Exec(`UPDATE at_attachments SET state = 'bogus' WHERE id = 'img_new'`); err == nil {
 		t.Fatal("state check missing")

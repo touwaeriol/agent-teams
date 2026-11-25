@@ -7,6 +7,8 @@
 package core
 
 import (
+	"time"
+
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 
 	"context"
@@ -48,6 +50,8 @@ type Store struct {
 	Online func(nodeID string) bool
 	// Blobs holds attachment and shared-file bytes (#58); blobstore.None when not configured.
 	Blobs blobstore.Store
+	// AttachmentTTL is how long an attachment is kept after its last use (0 = DefaultAttachmentTTL).
+	AttachmentTTL time.Duration
 }
 
 // New returns a Store; pub may be nil (no realtime hints).
