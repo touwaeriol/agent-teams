@@ -13,7 +13,7 @@ var (
 	publicRoutes = map[string]bool{
 		"GET /healthz": true, "GET /readyz": true, "GET /api/docs": true,
 		"POST /auth/login": true, "POST /auth/register": true, "POST /auth/logout": true,
-		"GET /install-node.sh": true, "GET /node/dist/:file": true, "GET /office/*path": true,
+		"GET /install-node.sh": true, "GET /node-docker.md": true, "GET /node/dist/:file": true, "GET /office/*path": true,
 		"GET /files/*path": true, "HEAD /files/*path": true,
 		"GET /api/git/github-app/install": true, "GET /api/git/github-app/created": true,
 		"GET /api/git/github-app/installed": true, "POST /api/git/github-app/webhook": true,

@@ -3016,7 +3016,11 @@ export interface components {
             tokens: components["schemas"]["UsageTokens"];
         };
         Enrollment: {
-            /** @description Shell command for the node */
+            /** @description compose.yml that starts the node container with this token (docker compose up -d) */
+            compose: string;
+            /** @description docker run command that starts the node container with this token */
+            docker: string;
+            /** @description Shell command for the node (install-node.sh on the host) */
             install: string;
             /** @description Shown once */
             token: string;
@@ -3432,7 +3436,11 @@ export interface components {
             name: string;
         };
         NewNodeOutputBody: {
-            /** @description Shell command for the node */
+            /** @description compose.yml that starts the node container with this token (docker compose up -d) */
+            compose: string;
+            /** @description docker run command that starts the node container with this token */
+            docker: string;
+            /** @description Shell command for the node (install-node.sh on the host) */
             install: string;
             node: components["schemas"]["NodeView"];
             /** @description Shown once */

@@ -36,6 +36,7 @@ p, public, /files/*path, GET
 p, public, /files/*path, HEAD
 p, public, /healthz, GET
 p, public, /install-node.sh, GET
+p, public, /node-docker.md, GET
 p, public, /node/dist/:file, GET
 p, public, /office/*path, GET
 p, public, /readyz, GET

@@ -164,7 +164,7 @@ func newHarness(t *testing.T) *harness {
 	h := &harness{t: t, db: db, nodes: &fakeNodes{online: map[string]bool{}}, events: &fakeEvents{}, ssh: &fakeSSH{}}
 	h.gh = httptest.NewServer(fakeGitHub(t))
 	t.Cleanup(h.gh.Close)
-	h.cfg = config.Config{PublicURL: "http://console.test", SecretKeys: []string{testSecret}, AdminEmails: map[string]bool{"boss@example.com": true},
+	h.cfg = config.Config{PublicURL: "http://console.test", NodeImage: "ghcr.io/example/node:test", SecretKeys: []string{testSecret}, AdminEmails: map[string]bool{"boss@example.com": true},
 		WebDir: t.TempDir(), NodeDistDir: t.TempDir(), OfficeDir: t.TempDir()}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	validator, err := office.NewValidator()
