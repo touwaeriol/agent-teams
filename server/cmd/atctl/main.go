@@ -21,6 +21,8 @@ commands:
   openapi                       print the OpenAPI 3.1 document (JSON)
   admin reset-password EMAIL [PASSWORD]   set a password (random temporary one if omitted)
   admin set-role EMAIL admin|user         change a user's role (Casbin grouping rule)
+  storage migrate|verify|purge-data|restore [--table attachments|shared|all] [--dry-run]
+                                move attachment and shared-file bytes to the object store (AGENT_TEAMS_S3_*), check, clear, roll back
   admin reseal                  re-encrypt sealed secrets (and re-wrap remote server credentials) with the first AGENT_TEAMS_SECRET_KEYS key
 `
 
@@ -30,6 +32,7 @@ var commands = map[string]func(ctx context.Context, args []string) error{
 	"healthcheck": healthcheck,
 	"openapi":     openapi,
 	"admin":       admin,
+	"storage":     storageCmd,
 }
 
 func main() {

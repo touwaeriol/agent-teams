@@ -290,6 +290,46 @@
         }
       }
     },
+    "AttachmentRef": {
+      "title": "AttachmentRef",
+      "description": "A file attached to a message (at_attachments), any type, up to 200 MB. Sent in session.send/first_message attachments only to daemons with the attachments_v2 feature. When it delivers the message the daemon asks GET <console>/nodes/attachments/<id>/url (node token) for a short-lived download URL ({url: null} for legacy rows: fall back to GET /nodes/attachments/<id>), streams the file to <cwd>/.attachments/<id>-<name> and lists every attachment's path in the text; images and PDFs under the runtime's limits also go in as content blocks. The download URL never reaches the AI.",
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "content_type",
+        "size"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^img_"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "content_type": {
+          "description": "MIME type as stored (open string; not an enum, unlike ImageRef.media_type).",
+          "type": "string",
+          "maxLength": 200
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 209715200
+        },
+        "sha256": {
+          "description": "Hex SHA-256 when the console has computed it; the daemon checks the download against it.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "local_path": {
+          "description": "Filled by the daemon: path of the downloaded copy relative to the session's working directory (.attachments/<id>-<name>); only in structured tool results.",
+          "type": "string"
+        }
+      }
+    },
     "JobId": {
       "title": "JobId",
       "description": "Git job id: g_ + ULID.",
@@ -1241,7 +1281,7 @@
           "$ref": "#/$defs/Runtimes"
         },
         "features": {
-          "description": "Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), runtime_status (node.runtimes, node.runtimes_refresh), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh), session_move (session.export, session.open.import, /nodes/moves), self_update (runs under the update launcher: node.upgrade with mode, drain, rollback).",
+          "description": "Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), shared_files (write_shared_file upload and read_shared_file shared_download into .shared/), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), runtime_status (node.runtimes, node.runtimes_refresh), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh), session_move (session.export, session.open.import, /nodes/moves), self_update (runs under the update launcher: node.upgrade with mode, drain, rollback), attachments_v2 (session.send/first_message attachments with /nodes/attachments/<id>/url downloads into .attachments/, read_attachment attachment_download, read_shared_file shared_download by url, write_shared_file upload storage s3 via POST /nodes/uploads).",
           "type": "array",
           "items": {
             "type": "string"
@@ -2832,11 +2872,19 @@
           "type": "string"
         },
         "images": {
-          "description": "Images to deliver with the text (at most 8).",
+          "description": "Images to deliver with the text (at most 8), as session.send images (daemons without attachments_v2).",
           "type": "array",
           "maxItems": 8,
           "items": {
             "$ref": "#/$defs/ImageRef"
+          }
+        },
+        "attachments": {
+          "description": "Attachments to deliver with the text, as session.send attachments (daemons with attachments_v2).",
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/AttachmentRef"
           }
         },
         "anchor": {
@@ -3426,11 +3474,19 @@
           "default": false
         },
         "images": {
-          "description": "Images to deliver with the text (at most 8).",
+          "description": "Images to deliver with the text (at most 8): image/png, jpeg, gif, webp or a PDF, at most 5 MB each. Kept for daemons without attachments_v2; see attachments.",
           "type": "array",
           "maxItems": 8,
           "items": {
             "$ref": "#/$defs/ImageRef"
+          }
+        },
+        "attachments": {
+          "description": "Attachments to deliver with the text (at most 20), any type up to 200 MB each. Only sent to daemons with the attachments_v2 feature; a message carries either attachments or images, not both.",
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/AttachmentRef"
           }
         },
         "anchor": {
@@ -3719,6 +3775,15 @@
         "upload_id": {
           "$ref": "#/$defs/UploadId"
         },
+        "storage": {
+          "description": "chunks (default): bytes came as file.chunk frames. s3: the daemon PUT the one file to the presigned URL from POST /nodes/uploads (upload_id is the one it returned), chunks is 0 and files has exactly that file.",
+          "type": "string",
+          "enum": [
+            "chunks",
+            "s3"
+          ],
+          "default": "chunks"
+        },
         "chunks": {
           "description": "Number of file.chunk frames (0 when every file is empty).",
           "type": "integer",
@@ -3807,7 +3872,7 @@
           "type": "string"
         },
         "upload": {
-          "description": "Files the daemon read for publish_file or write_shared_file; their bytes arrived before as file.chunk frames.",
+          "description": "Files the daemon read for publish_file or write_shared_file; their bytes arrived before as file.chunk frames, or (storage s3, write_shared_file on attachments_v2) were already PUT to the URL from POST /nodes/uploads, whose upload_id this is.",
           "$ref": "#/$defs/ToolUpload"
         }
       }
@@ -3897,6 +3962,17 @@
         "sha256": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
+        },
+        "url": {
+          "description": "attachments_v2 shared_download: presigned GET URL of the file (the daemon downloads it directly and checks size and sha256; chunks is 0). Never shown to the AI.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "expires_at": {
+          "description": "When url stops working.",
+          "type": "string",
+          "format": "date-time"
         }
       }
     },
@@ -3913,7 +3989,7 @@
           "$ref": "#/$defs/DownloadId"
         },
         "chunks": {
-          "description": "Number of file.download frames (0 when the file is empty; at most 20 for the 20 MB limit).",
+          "description": "Number of file.download frames (0 when the file is empty or files[0].url is set; at most 20 for the 20 MB chunked limit).",
           "type": "integer",
           "minimum": 0,
           "maximum": 64
@@ -3926,6 +4002,27 @@
           "items": {
             "$ref": "#/$defs/DownloadFile"
           }
+        }
+      }
+    },
+    "ToolAttachmentDownload": {
+      "title": "ToolAttachmentDownload",
+      "type": "object",
+      "required": [
+        "attachment"
+      ],
+      "properties": {
+        "attachment": {
+          "$ref": "#/$defs/AttachmentRef"
+        },
+        "url": {
+          "description": "Presigned GET URL, valid until expires_at. Null or absent for legacy rows: the daemon fetches GET /nodes/attachments/<id> with its node token instead.",
+          "type": "string",
+          "maxLength": 8192
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
         }
       }
     },
@@ -3976,8 +4073,12 @@
           "$ref": "#/$defs/ToolDownload"
         },
         "shared_download": {
-          "description": "read_shared_file: the one file whose bytes arrived before as file.download frames; the daemon writes it as .shared/<path> in the session's working directory (the folder holds its own .gitignore).",
+          "description": "read_shared_file: the one file the daemon writes as .shared/<path> in the session's working directory (the folder holds its own .gitignore). Its bytes arrived before as file.download frames, or (daemons with attachments_v2) the file entry carries a url to GET, chunks is 0 and no frames are sent.",
           "$ref": "#/$defs/ToolSharedDownload"
+        },
+        "attachment_download": {
+          "description": "read_attachment: the attachment the daemon downloads to .attachments/<id>-<name> in the session's working directory (the folder holds its own .gitignore); the daemon replaces this with local_path in what the AI sees and never shows it the url.",
+          "$ref": "#/$defs/ToolAttachmentDownload"
         }
       }
     },
@@ -4170,6 +4271,9 @@
         "instruction": {
           "type": "string",
           "minLength": 1
+        },
+        "attachments": {
+          "$ref": "#/$defs/AttachmentIds"
         }
       }
     },
@@ -4238,6 +4342,9 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 255
+        },
+        "attachments": {
+          "$ref": "#/$defs/AttachmentIds"
         }
       }
     },
@@ -4612,6 +4719,21 @@
         "notes.md"
       ]
     },
+    "AttachmentId": {
+      "title": "AttachmentId",
+      "description": "Attachment id (img_…), as listed in a message's [附件]/[Attachments] block.",
+      "type": "string",
+      "pattern": "^img_[0-9A-Za-z]{1,60}$"
+    },
+    "AttachmentIds": {
+      "title": "AttachmentIds",
+      "description": "Attachments to hand over with this message or task (ids from a message's attachment block, at most 20; duplicates are dropped). They must belong to this project. The recipient's daemon downloads them into its .attachments/ folder.",
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/AttachmentId"
+      }
+    },
     "CompleteTaskResult": {
       "title": "CompleteTaskResult",
       "type": "object",
@@ -4698,7 +4820,7 @@
     },
     "DeleteSharedFileInput": {
       "title": "DeleteSharedFileInput",
-      "description": "Delete one of the project's shared files for everyone (copies already fetched into working directories stay). Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 20 MB per file, 500 MB per project.",
+      "description": "Delete one of the project's shared files for everyone (copies already fetched into working directories stay). Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 200 MB per file, 5 GB per project.",
       "type": "object",
       "required": [
         "path"
@@ -5072,7 +5194,7 @@
     },
     "ListSharedFilesInput": {
       "title": "ListSharedFilesInput",
-      "description": "List the project's shared files (path, size, type, checksum, who uploaded it and when), sorted by path, with the project's total size and limit. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 20 MB per file, 500 MB per project. Fetch one with read_shared_file, add or replace one with write_shared_file.",
+      "description": "List the project's shared files (path, size, type, checksum, who uploaded it and when), sorted by path, with the project's total size and limit. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 200 MB per file, 5 GB per project. Fetch one with read_shared_file, add or replace one with write_shared_file.",
       "type": "object",
       "required": [],
       "additionalProperties": false,
@@ -5399,6 +5521,9 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 8000
+        },
+        "attachments": {
+          "$ref": "#/$defs/AttachmentIds"
         }
       }
     },
@@ -5418,6 +5543,9 @@
         "text": {
           "type": "string",
           "minLength": 1
+        },
+        "attachments": {
+          "$ref": "#/$defs/AttachmentIds"
         }
       }
     },
@@ -5558,6 +5686,9 @@
           "items": {
             "$ref": "#/$defs/RepoFocus"
           }
+        },
+        "attachments": {
+          "$ref": "#/$defs/AttachmentIds"
         }
       }
     },
@@ -5796,6 +5927,54 @@
       "additionalProperties": false,
       "properties": {}
     },
+    "ReadAttachmentResult": {
+      "title": "ReadAttachmentResult",
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "content_type",
+        "size",
+        "local_path"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/AttachmentId"
+        },
+        "name": {
+          "type": "string"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "local_path": {
+          "description": "Where the file was written, relative to your working directory: .attachments/<id>-<name> (the daemon adds the absolute path).",
+          "type": "string"
+        }
+      }
+    },
+    "ReadAttachmentInput": {
+      "title": "ReadAttachmentInput",
+      "description": "Download an attachment (img_… id from a message's attachment block, including ones forwarded to you) to .attachments/<id>-<name> in your working directory (the folder is git-ignored) and return that local path; the result never contains the file's content, so read it with your file tools or command-line tools. Use it when the local copy is missing (the session reopened elsewhere, or the local copy was cleaned up) or for an id someone passed you. The attachment must belong to this project; attachments are kept only for a limited time, after which it is refused as expired. An existing complete copy is reused.",
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/AttachmentId"
+        }
+      }
+    },
     "ReadDeliverableResult": {
       "title": "ReadDeliverableResult",
       "type": "object",
@@ -5992,7 +6171,7 @@
     },
     "ReadSharedFileInput": {
       "title": "ReadSharedFileInput",
-      "description": "Download one of the project's shared files to .shared/<path> in your working directory (the folder is git-ignored) and return that local path; the result never contains the file's content, so read it with your file tools. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. An existing local copy at the same path is overwritten. Limits: 20 MB per file, 500 MB per project. To change the shared file, edit the local copy and call write_shared_file(file=.shared/<path>).",
+      "description": "Download one of the project's shared files to .shared/<path> in your working directory (the folder is git-ignored) and return that local path; the result never contains the file's content, so read it with your file tools. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. An existing local copy at the same path is overwritten. Limits: 200 MB per file, 5 GB per project. To change the shared file, edit the local copy and call write_shared_file(file=.shared/<path>).",
       "type": "object",
       "required": [
         "path"
@@ -6036,6 +6215,9 @@
         "answer": {
           "type": "string",
           "minLength": 1
+        },
+        "attachments": {
+          "$ref": "#/$defs/AttachmentIds"
         }
       }
     },
@@ -6124,6 +6306,61 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 500
+        }
+      }
+    },
+    "SaveAttachmentResult": {
+      "title": "SaveAttachmentResult",
+      "type": "object",
+      "required": [
+        "id",
+        "path",
+        "size",
+        "overwritten"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/AttachmentId"
+        },
+        "path": {
+          "$ref": "#/$defs/SharedPath"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "description": "Absent while the platform is still computing it.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "overwritten": {
+          "description": "True when a file with this path existed and was replaced.",
+          "type": "boolean"
+        }
+      }
+    },
+    "SaveAttachmentInput": {
+      "title": "SaveAttachmentInput",
+      "description": "Save an attachment (img_… id from a message's attachment block) as one of the project's shared files at path, so every session and user of the project can find it later with list_shared_files/read_shared_file. The platform copies it without it passing through your working directory. Refused when a shared file already has this path unless overwrite is true. Same rules as write_shared_file: no secrets; limits 200 MB per file, 5 GB per project.",
+      "type": "object",
+      "required": [
+        "id",
+        "path"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/AttachmentId"
+        },
+        "path": {
+          "$ref": "#/$defs/SharedPath",
+          "description": "Target path in the shared files, for example inputs/spec.pdf."
+        },
+        "overwrite": {
+          "description": "Replace an existing shared file with this path.",
+          "type": "boolean",
+          "default": false
         }
       }
     },
@@ -6297,6 +6534,9 @@
         "text": {
           "type": "string",
           "minLength": 1
+        },
+        "attachments": {
+          "$ref": "#/$defs/AttachmentIds"
         }
       }
     },
@@ -6480,7 +6720,7 @@
     },
     "WriteSharedFileInput": {
       "title": "WriteSharedFileInput",
-      "description": "Upload one file from your working directory to the project's shared files (store data, samples, exports other sessions or users need; not deliverables, use publish_file for those). Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 20 MB per file, 500 MB per project.",
+      "description": "Upload one file from your working directory to the project's shared files (store data, samples, exports other sessions or users need; not deliverables, use publish_file for those). Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 200 MB per file, 5 GB per project.",
       "type": "object",
       "required": [
         "file"

@@ -111,7 +111,7 @@ const upgrade = useAction((mode: "wait_idle" | "now" | "cancel") => nodeActions.
             </el-dropdown-menu>
           </template>
         </el-dropdown>
-        <ConfirmAction title="重新生成令牌？" description="旧令牌立即失效，节点会断开，需要用新命令重新安装。" confirm-label="重新生成" variant="default" size="small" @confirm="rotate.mutate()">
+        <ConfirmAction title="重新生成令牌？" description="旧令牌立即失效，节点会断开。宿主机用新命令重新安装；容器改 AGENT_TEAMS_NODE_TOKEN 后重建，卷不用动。" confirm-label="重新生成" variant="default" size="small" @confirm="rotate.mutate()">
           重新生成令牌
         </ConfirmAction>
         <ConfirmAction :title="`移除节点 ${node.name}？`" description="会断开连接；在它上面的员工改派到其他节点继续。" confirm-label="移除" size="small" @confirm="remove.mutate()">移除</ConfirmAction>

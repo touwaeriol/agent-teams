@@ -82,8 +82,14 @@ func (s *Service) openSubthread(ctx context.Context, tx *core.Tx, c *call) (Resu
 	if err := subthreadAllowed(ctx, tx, parent); err != nil {
 		return Result{}, err
 	}
+	files, err := s.useAttachments(ctx, tx, c, in.Attachments)
+	if err != nil {
+		return Result{}, err
+	}
+	// The brief is stored as written; its text files are inlined when the thread starts (briefFiles).
+	brief := subthreadBrief(parent, in.Brief)
 	t, err := s.orch.OpenThreadTx(ctx, tx, orchestrator.ThreadRequest{UserID: c.sc.OwnerID, ProjectID: parent.ProjectID,
-		Title: strings.TrimSpace(in.Title), Brief: subthreadBrief(parent, in.Brief), OnlyRoles: in.Roles, Repos: focusOf(in.Repos),
+		Title: strings.TrimSpace(in.Title), Brief: brief, OnlyRoles: in.Roles, Repos: focusOf(in.Repos),
 		OpenedBy: "lead", ParentID: &parent.ID})
 	if errors.Is(err, orchestrator.ErrUnknownRepo) || errors.Is(err, orchestrator.ErrRoleNotFound) {
 		return Result{}, refuse("%s", err.Error())
@@ -94,11 +100,38 @@ func (s *Service) openSubthread(ctx context.Context, tx *core.Tx, c *call) (Resu
 	if err := s.noteSubthread(ctx, tx, c, parent, t); err != nil {
 		return Result{}, err
 	}
+	if err := s.noteBriefFiles(ctx, tx, c, t, files); err != nil {
+		return Result{}, err
+	}
 	owner := c.sc.OwnerID
 	tx.AfterCommit(func(ctx context.Context) { go s.orch.StartQueued(context.WithoutCancel(ctx), owner) })
 	out := protocol.OpenSubthreadResult{No: protocol.ThreadNo(t.No), ThreadID: t.ID, Branch: t.Branch}
-	return okJSON(fmt.Sprintf("已开子讨论串 #%d（%s），分支 %s。不用等它：继续你的工作，它需要用户、等审阅、结束或失败时你会收到 [Subthread #%d · …]。",
+	return okJSON(fmt.Sprintf("已开子讨论串 #%d（%s），分支 %s"+carried(files)+"。不用等它：继续你的工作，它需要用户、等审阅、结束或失败时你会收到 [Subthread #%d · …]。",
 		t.No, t.Title, t.Branch, t.No), out), nil
+}
+
+// noteBriefFiles records the attachments open_subthread gave in the new thread's conversation
+// (meta.attachments + meta.brief_attachments): its chat shows them, and they go to its lead with
+// the brief when the thread starts (orchestrator briefFiles).
+func (s *Service) noteBriefFiles(ctx context.Context, tx *core.Tx, c *call, t core.Thread, files []core.AttachmentRef) error {
+	if len(files) == 0 {
+		return nil
+	}
+	m, err := core.InsertMessage(ctx, tx, core.NewMessage{ConversationID: t.ID, Role: "system", Author: c.emp().Name, Kind: "note",
+		Content: fmt.Sprintf("%s 随任务说明附带了 %d 个附件", c.emp().Name, len(files)),
+		Meta:    map[string]any{"attachments": files, orchestrator.BriefAttachmentsKey: true, "thread_no": t.No}})
+	if err != nil {
+		return err
+	}
+	return tx.EmitMessage(ctx, t.ProjectID, &t.ID, m)
+}
+
+// withFiles adds meta.attachments to a relay card's meta (none: unchanged).
+func withFiles(meta map[string]any, files []core.AttachmentRef) map[string]any {
+	if len(files) > 0 {
+		meta["attachments"] = files
+	}
+	return meta
 }
 
 // subthreadAllowed: one level only, at most MaxOpenSubthreads unfinished ones.
@@ -223,15 +256,23 @@ func (s *Service) leadMessageThread(ctx context.Context, tx *core.Tx, c *call, i
 	}
 	text := fmt.Sprintf("[Message from thread #%d · %s · %s]\n%s\n（回复用 message_thread(no: %d)；不需要回复就不回。）",
 		from.No, from.Title, c.emp().Name, in.Text, from.No)
+	files, err := s.useAttachments(ctx, tx, c, in.Attachments)
+	if err != nil {
+		return Result{}, err
+	}
+	if text, err = s.orch.DeliveryText(ctx, tx, t.ProjectID, text, files); err != nil {
+		return Result{}, err
+	}
 	rec := &core.NewMessage{ConversationID: t.ID, Role: "system", Author: c.emp().Name, Kind: "relay", Content: in.Text,
-		Meta: relayMeta("in", "message", threadPeer(from), nil)}
-	if _, err := s.orch.Deliver(ctx, tx, lead, orchestrator.Delivery{Text: text, Kind: "mail", Priority: "next", Record: rec}); err != nil {
+		Meta: withFiles(relayMeta("in", "message", threadPeer(from), nil), files)}
+	if _, err := s.orch.Deliver(ctx, tx, lead, orchestrator.Delivery{Text: text, Kind: "mail", Priority: "next", Record: rec, Attachments: files}); err != nil {
 		return Result{}, err
 	}
-	if err := s.recordRelay(ctx, tx, from.ProjectID, from.ID, &from.ID, c.emp().Name, in.Text, relayMeta("out", "message", threadPeer(t), nil)); err != nil {
+	if err := s.recordRelay(ctx, tx, from.ProjectID, from.ID, &from.ID, c.emp().Name, in.Text,
+		withFiles(relayMeta("out", "message", threadPeer(t), nil), files)); err != nil {
 		return Result{}, err
 	}
-	return okText(fmt.Sprintf("%s已发给 #%d 的组长", reopened, t.No)), nil
+	return okText(fmt.Sprintf("%s已发给 #%d 的组长%s", reopened, t.No, carried(files))), nil
 }
 
 // relayBudget: two threads exchange at most MaxRelaysPerHour messages an hour (both directions).
@@ -298,15 +339,23 @@ func (s *Service) messageCoordinator(ctx context.Context, tx *core.Tx, c *call) 
 	}
 	text := fmt.Sprintf("[Message from thread #%d · %s · %s]\n%s\n（回复用 message_thread(no: %d)；不需要回复就不回。）",
 		from.No, from.Title, c.emp().Name, in.Text, from.No)
+	files, err := s.useAttachments(ctx, tx, c, in.Attachments)
+	if err != nil {
+		return Result{}, err
+	}
+	if text, err = s.orch.DeliveryText(ctx, tx, from.ProjectID, text, files); err != nil {
+		return Result{}, err
+	}
 	rec := &core.NewMessage{ConversationID: conv, Role: "system", Author: c.emp().Name, Kind: "relay", Content: in.Text,
-		Meta: relayMeta("in", "message", threadPeer(from), nil)}
-	if _, err := s.orch.Deliver(ctx, tx, coord, orchestrator.Delivery{Text: text, Kind: "mail", Priority: "next", Record: rec}); err != nil {
+		Meta: withFiles(relayMeta("in", "message", threadPeer(from), nil), files)}
+	if _, err := s.orch.Deliver(ctx, tx, coord, orchestrator.Delivery{Text: text, Kind: "mail", Priority: "next", Record: rec, Attachments: files}); err != nil {
 		return Result{}, err
 	}
-	if err := s.recordRelay(ctx, tx, from.ProjectID, from.ID, &from.ID, c.emp().Name, in.Text, relayMeta("out", "message", coordinatorPeer, nil)); err != nil {
+	if err := s.recordRelay(ctx, tx, from.ProjectID, from.ID, &from.ID, c.emp().Name, in.Text,
+		withFiles(relayMeta("out", "message", coordinatorPeer, nil), files)); err != nil {
 		return Result{}, err
 	}
-	return okText("已发给统筹"), nil
+	return okText("已发给统筹" + carried(files)), nil
 }
 
 // parentNo is the parent thread's number of a subthread (nil: top level or the parent is gone).

@@ -1,12 +1,16 @@
-// File input for message boxes: paste, drop or pick images, PDFs or text files; each uploads at
-// once to /api/projects/{pid}/attachments and shows as a thumbnail (images) or a file chip with a
-// remove button. Sending passes the uploaded ids; the strip clears after a successful send.
+// File input for message boxes: paste, drop or pick any files (at most 200 MB each, 20 per message);
+// each uploads straight to storage in parts (UPLOADS_AT_ONCE at a time, the rest queued) (lib/upload.ts) with a progress bar, and shows
+// as a thumbnail (images) or a file card with a remove button that also cancels a running upload.
+// Without object storage (503 storage_unavailable) files up to 5 MB go through the old base64
+// upload. Sending passes the uploaded ids; the strip clears after a successful send.
 import { computed, onBeforeUnmount, ref, toValue, watch, type ComputedRef, type MaybeRefOrGetter, type Ref } from "vue";
 import { projects as projectActions } from "@/api/actions";
 import { errorText } from "@/api/mutations";
-import { attachKind, imageFiles, pickImages, type AttachKind } from "@/lib/images";
+import { attachKind, LEGACY_MAX_BYTES, pastedFiles, pickImages, type AttachKind } from "@/lib/images";
 import { fileBase64 } from "@/lib/library";
+import { formatSize } from "@/lib/sharedFiles";
 import { toast } from "@/lib/toast";
+import { projectUploads, storageUnavailable, UploadCancelled, uploadFile, type UploadApi } from "@/lib/upload";
 
 export interface PendingImage {
   key: string;
@@ -14,6 +18,9 @@ export interface PendingImage {
   /** Object URL of an image ("" for PDFs and text files). */
   preview: string;
   kind: AttachKind;
+  size?: number;
+  /** 0..1 while uploading. */
+  progress?: number;
   id?: string;
   error?: string;
 }
@@ -36,13 +43,86 @@ export interface Attachments {
 
 let counter = 0;
 
-/** Uploads one image; injectable for tests. */
-export type Uploader = (pid: string, file: File) => Promise<{ id: string }>;
+export interface UploadHooks {
+  onProgress?: (fraction: number) => void;
+  signal?: AbortSignal;
+}
 
-const upload: Uploader = async (pid, file) => projectActions.attach(pid, { name: file.name || "image", data: await fileBase64(file) });
+/** Uploads one file; injectable for tests. */
+export type Uploader = (pid: string, file: File, hooks?: UploadHooks) => Promise<{ id: string }>;
+
+export const STORAGE_FALLBACK_NOTE = "文件存储暂时不可用，已改用旧方式上传（只支持 5 MB 以内的文件）";
+
+/**
+ * The multipart direct upload through `api` (project uploads, or the project-less one of a new
+ * session); when the console has no object storage, the old base64 upload for files up to 5 MB.
+ */
+export function directUploader(api: (pid: string) => UploadApi = projectUploads, o: { legacy?: boolean } = {}): Uploader {
+  return async (pid, file, hooks = {}) => {
+    try {
+      const done = await uploadFile(file, api(pid), {
+        kind: "attachment", ...(hooks.signal ? { signal: hooks.signal } : {}), onProgress: (sent, total) => hooks.onProgress?.(total ? sent / total : 1),
+      });
+      if (!done.attachment) throw new Error("服务器没有返回附件");
+      return { id: done.attachment.id };
+    } catch (e) {
+      if (!storageUnavailable(e)) throw e;
+      if (o.legacy === false) throw new Error("文件存储暂时不可用，现在不能上传附件");
+      if (file.size > LEGACY_MAX_BYTES) throw new Error(`文件存储暂时不可用，现在只能上传 5 MB 以内的文件（这个文件 ${formatSize(file.size)}）`);
+      toast.warning(STORAGE_FALLBACK_NOTE);
+      const r = await projectActions.attach(pid, { name: file.name || "file", data: await fileBase64(file) });
+      hooks.onProgress?.(1);
+      return r;
+    }
+  };
+}
+
+const upload: Uploader = directUploader();
 
 /** Attachments of boxes with a cache key, kept for the page so a remounted box gets them back. */
 const shelf = new Map<string, Ref<PendingImage[]>>();
+/**
+ * Running uploads by item key, for the page like the shelf: removing an item cancels its upload
+ * even when the box was remounted since it started (keys are unique per page).
+ */
+const running = new Map<string, AbortController>();
+
+/**
+ * Files the page uploads at once; the others wait their turn. A message takes up to 20 files and
+ * the console caps a user's uploads in flight (429 too_many_uploads, core.MaxUploadsInFlight = 16).
+ */
+export const UPLOADS_AT_ONCE = 4;
+let uploadsActive = 0;
+const uploadQueue: (() => void)[] = [];
+
+/** A free upload slot's release (idempotent), or null when all UPLOADS_AT_ONCE are taken. */
+function takeSlot(): (() => void) | null {
+  if (uploadsActive >= UPLOADS_AT_ONCE) return null;
+  uploadsActive++;
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    uploadsActive--;
+    uploadQueue.shift()?.();
+  };
+}
+
+/** Waits for a slot; aborting while queued rejects with UploadCancelled. */
+function waitSlot(signal: AbortSignal): Promise<() => void> {
+  return new Promise((resolve, reject) => {
+    const grant = () => {
+      signal.removeEventListener("abort", cancel);
+      resolve(takeSlot()!);
+    };
+    const cancel = () => {
+      uploadQueue.splice(uploadQueue.indexOf(grant), 1);
+      reject(new UploadCancelled());
+    };
+    uploadQueue.push(grant);
+    signal.addEventListener("abort", cancel, { once: true });
+  });
+}
 
 /**
  * State of the images attached to one message box. With cacheKey (the box's draft key) the list
@@ -53,7 +133,11 @@ export function useAttachments(pid: MaybeRefOrGetter<string>, uploader: Uploader
   const own = ref<PendingImage[]>([]);
   // Preview URLs this component owns (unkeyed items): revoked with it.
   const urls: string[] = [];
-  onBeforeUnmount(() => urls.forEach((u) => URL.revokeObjectURL(u)));
+  onBeforeUnmount(() => {
+    urls.forEach((u) => URL.revokeObjectURL(u));
+    // Unkeyed items go with the component, so do their uploads.
+    for (const x of own.value) running.get(x.key)?.abort();
+  });
   const box = (): Ref<PendingImage[]> => {
     const k = toValue(cacheKey);
     if (!k) return own;
@@ -84,28 +168,39 @@ export function useAttachments(pid: MaybeRefOrGetter<string>, uploader: Uploader
     for (const r of [own, ...shelf.values()]) if (r.value.some((x) => x.key === key)) r.value = r.value.map((x) => (x.key === key ? { ...x, ...p } : x));
   };
   const send = async (key: string, file: File) => {
+    const ctl = new AbortController();
+    running.set(key, ctl);
+    let release = () => {};
     try {
-      patch(key, { id: (await uploader(toValue(pid), file)).id });
+      release = takeSlot() ?? (await waitSlot(ctl.signal));
+      ctl.signal.addEventListener("abort", release, { once: true }); // a cancelled upload frees its slot at once
+      const { id } = await uploader(toValue(pid), file, { signal: ctl.signal, onProgress: (f) => patch(key, { progress: f }) });
+      patch(key, { id, progress: 1 });
     } catch (e) {
-      patch(key, { error: errorText(e) });
+      if (!(e instanceof UploadCancelled)) patch(key, { error: errorText(e) });
+    } finally {
+      release();
+      running.delete(key);
     }
   };
   const add = (files: File[]) => {
     const { ok, problems } = pickImages(files, items.value.length);
     problems.forEach((p) => toast.error(p));
     const fresh = ok.map((f) => {
-      const kind = attachKind(f) ?? "text";
-      return { key: `img-${++counter}`, name: f.name || "图片", kind, preview: kind === "image" ? URL.createObjectURL(f) : "", file: f };
+      const kind = attachKind(f);
+      return { key: `img-${++counter}`, name: f.name || "文件", kind, size: f.size, progress: 0, preview: kind === "image" ? URL.createObjectURL(f) : "", file: f };
     });
     if (!toValue(cacheKey)) urls.push(...fresh.map((f) => f.preview).filter(Boolean));
     items.value = [...items.value, ...fresh.map(({ file: _file, ...x }) => x)];
     fresh.forEach((f) => void send(f.key, f.file));
   };
   const remove = (key: string) => {
+    running.get(key)?.abort();
     revoke(items.value.filter((x) => x.key === key));
     items.value = items.value.filter((x) => x.key !== key);
   };
   const clear = () => {
+    for (const x of items.value) running.get(x.key)?.abort();
     revoke(items.value);
     items.value = [];
   };
@@ -127,7 +222,7 @@ export function attachmentHandlers(a: Attachments | undefined, onDragState: (on:
   if (!a) return {};
   return {
     paste: (e) => {
-      const files = imageFiles((e as ClipboardEvent).clipboardData?.files);
+      const files = pastedFiles((e as ClipboardEvent).clipboardData);
       if (files.length === 0) return;
       e.preventDefault();
       a.add(files);

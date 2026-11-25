@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ImageRef } from "../protocol.js";
 
@@ -9,12 +9,17 @@ const EXT: Record<ImageRef["media_type"], string> = { "image/png": ".png", "imag
 
 const PDF = "application/pdf";
 
-/** An attached image downloaded for one message: bytes for Claude, a file path for Codex. */
+/** An attached image downloaded for one message: bytes for Claude and agy, a file path for Codex (data is not read for Codex). */
 export interface LoadedImage {
   id: string;
   media_type: ImageRef["media_type"];
-  data: Buffer;
+  data?: Buffer;
   path: string;
+}
+
+/** The image's bytes (read from its file when they were not loaded). */
+export function imageData(i: LoadedImage): Buffer {
+  return i.data ?? readFileSync(i.path);
 }
 
 export type ImageFetcher = (id: string) => Promise<Buffer>;
@@ -63,7 +68,7 @@ type TextBlock = { type: "text"; text: string };
 type Block = ImageBlock | DocumentBlock | TextBlock;
 
 function attachmentBlock(i: LoadedImage): ImageBlock | DocumentBlock {
-  const data = i.data.toString("base64");
+  const data = imageData(i).toString("base64");
   if (i.media_type === PDF) return { type: "document", source: { type: "base64", media_type: PDF, data } };
   return { type: "image", source: { type: "base64", media_type: i.media_type, data } };
 }

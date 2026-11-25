@@ -44,6 +44,8 @@ function stubApi(server: MessageView[] = []) {
     const req = input instanceof Request ? input : new Request(String(input));
     const path = new URL(req.url, "http://x").pathname;
     if (path === "/api/me") return json({ id: "u1", email: "u1@x", name: "u1" });
+    // No object storage in these tests: the direct upload answers 503 and the box falls back to the base64 upload.
+    if (req.method === "POST" && path.endsWith("/uploads")) return json({ detail: "no storage", code: "storage_unavailable" }, 503);
     if (req.method === "POST" && path.endsWith("/attachments")) return json({ id: `att${++uploads}` });
     if (req.method === "POST" && path.endsWith("/messages")) {
       const body = (await req.clone().json()) as { content: string };
@@ -182,6 +184,9 @@ describe("sendMessage", () => {
     void sendMessage(client, { cid: "c1", content: "新的" }).catch(() => undefined);
     await client.refetchQueries({ queryKey: keys.messages("c1") }).catch(() => undefined);
     expect(shown("c1").map((m) => m.content)).toEqual(["旧的", "新的"]);
+    // The POST reads its body before it is recorded: wait for it instead of racing the refetch.
+    await vi.waitFor(() => expect(api.posts).toHaveLength(1));
+    await flushPromises();
     expect(api.posts).toHaveLength(1);
   });
 });

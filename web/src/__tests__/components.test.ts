@@ -6,7 +6,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h, nextTick, type Component } from "vue";
 import { createMemoryHistory, createRouter } from "vue-router";
-import { useAttachments } from "@/components/app/attachments";
+import { UPLOADS_AT_ONCE, useAttachments } from "@/components/app/attachments";
 import AskCard from "@/components/app/chatcards/AskCard.vue";
 import Composer from "@/components/app/Composer.vue";
 import ThreadList from "@/components/app/ThreadList.vue";
@@ -18,6 +18,8 @@ import IconMenu from "@/components/common/IconMenu.vue";
 import ConfirmAction from "@/components/common/ConfirmAction.vue";
 import Markdown from "@/components/Markdown.vue";
 import { resetDraftMemory, useDraft } from "@/lib/persist";
+import { attachmentsField } from "@/lib/images";
+import { toast } from "@/lib/toast";
 import { threadMark } from "@/lib/threadList";
 import { cardLook } from "@/pages/overview/logic";
 import type { ThreadView } from "@/api/views";
@@ -87,7 +89,7 @@ describe("drafts", () => {
 });
 
 describe("attachments", () => {
-  it("uploads picked images and text files, refuses others, reports ids when done", async () => {
+  it("uploads picked files of any type, reports ids when done", async () => {
     URL.createObjectURL = vi.fn(() => "blob:x");
     URL.revokeObjectURL = vi.fn();
     let a!: ReturnType<typeof useAttachments>;
@@ -97,14 +99,69 @@ describe("attachments", () => {
     const Host = defineComponent({ setup: () => ((a = useAttachments("p1", uploader)), () => h("div")) });
     mountWith(Host);
     a.add([new File(["x"], "a.png", { type: "image/png" }), new File(["x"], "b.txt", { type: "text/plain" }), new File(["x"], "c.exe", { type: "" })]);
-    expect(a.items.value.map((x) => x.kind)).toEqual(["image", "text"]);
+    expect(a.items.value.map((x) => x.kind)).toEqual(["image", "text", "file"]);
     expect(a.items.value[1]!.preview).toBe("");
     expect(a.ids()).toBeNull();
     expect(a.uploading.value).toBe(true);
     finish({ id: "att1" });
     await flushPromises();
-    expect(a.ids()).toEqual(["att1-0", "att1-1"]);
-    expect(uploader).toHaveBeenCalledWith("p1", expect.any(File));
+    expect(a.ids()).toEqual(["att1-0", "att1-1", "att1-2"]);
+    expect(uploader).toHaveBeenCalledWith("p1", expect.any(File), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  });
+
+  it(`uploads 20 files at most ${UPLOADS_AT_ONCE} at a time and finishes them all`, async () => {
+    URL.createObjectURL = vi.fn(() => "blob:x");
+    URL.revokeObjectURL = vi.fn();
+    let a!: ReturnType<typeof useAttachments>;
+    let active = 0;
+    let peak = 0;
+    let n = 0;
+    const uploader = vi.fn(async () => {
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((r) => setTimeout(r, 1));
+      active--;
+      return { id: `att${++n}` };
+    });
+    mountWith(defineComponent({ setup: () => ((a = useAttachments("p1", uploader)), () => h("div")) }));
+    a.add(Array.from({ length: 20 }, (_, i) => new File(["x"], `f${i}.txt`, { type: "text/plain" })));
+    expect(uploader).toHaveBeenCalledTimes(UPLOADS_AT_ONCE);
+    await vi.waitFor(() => expect(a.ids()).toHaveLength(20));
+    expect(peak).toBe(UPLOADS_AT_ONCE);
+    expect(uploader).toHaveBeenCalledTimes(20);
+  });
+
+  it("refuses empty (0 byte) files with a reason", () => {
+    const err = vi.spyOn(toast, "error").mockImplementation(() => undefined);
+    let a!: ReturnType<typeof useAttachments>;
+    const uploader = vi.fn(async () => ({ id: "x" }));
+    mountWith(defineComponent({ setup: () => ((a = useAttachments("p1", uploader)), () => h("div")) }));
+    a.add([new File([], "empty.txt", { type: "text/plain" })]);
+    expect(a.items.value).toEqual([]);
+    expect(uploader).not.toHaveBeenCalled();
+    expect(err).toHaveBeenCalledWith("empty.txt 是空文件（0 字节），不能作为附件");
+  });
+
+  it("removing an item after the box was remounted still cancels its upload", async () => {
+    URL.createObjectURL = vi.fn(() => "blob:x");
+    URL.revokeObjectURL = vi.fn();
+    const signals: AbortSignal[] = [];
+    const uploader = vi.fn((_p: string, _f: File, h?: { signal?: AbortSignal }) => (signals.push(h!.signal!), new Promise<{ id: string }>(() => undefined)));
+    let a!: ReturnType<typeof useAttachments>;
+    const Host = defineComponent({ setup: () => ((a = useAttachments("p1", uploader, () => "draft:v2:u1:p1:remount")), () => h("div")) });
+    const first = mountWith(Host);
+    a.add([new File(["x"], "big.zip")]);
+    first.unmount();
+    mountWith(Host);
+    expect(a.items.value).toHaveLength(1);
+    a.remove(a.items.value[0]!.key);
+    expect(signals[0]!.aborted).toBe(true);
+  });
+
+  it("puts attachments into a request body only when there are some", () => {
+    expect(attachmentsField([])).toEqual({});
+    expect(attachmentsField(null)).toEqual({});
+    expect(attachmentsField(["img_1"])).toEqual({ attachments: ["img_1"] });
   });
 });
 

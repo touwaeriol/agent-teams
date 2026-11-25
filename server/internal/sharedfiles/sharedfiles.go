@@ -1,32 +1,41 @@
 // Package sharedfiles stores a project's shared files (讨论串 #33, architecture.md §6.3, protocol.md §6.5):
 // files every session (coordinator, leads, members of all threads) and every user of the project can
-// list, fetch, overwrite and delete. The bytes live in PG (at_shared_files), never in git; a path is
-// overwritten in place (no versions). Paths and limits are checked here, whoever sent the file
+// list, fetch, overwrite and delete. The rows live in PG (at_shared_files), never in git; since #58
+// the bytes live in the object store (blobstore, key projects/<pid>/shared/<object_id>) and rows
+// from before keep them in the data column until `atctl storage migrate`. A path is overwritten in
+// place (no versions): a new upload gets a new object id and the old object is queued for deletion. Paths and limits are checked here, whoever sent the file
 // (daemon or browser) — callers must not trust their own checks.
 package sharedfiles
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"path"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/touwaeriol/agent-teams/server/internal/artifacts"
+	"github.com/touwaeriol/agent-teams/server/internal/blobgc"
+	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // Limits of a project's shared files.
 const (
-	MaxFileBytes    = 20 << 20  // one file
-	MaxProjectBytes = 500 << 20 // all files of a project
-	MaxProjectFiles = 1000      // files of a project
-	MaxDepth        = 8         // path segments
-	MaxPathBytes    = 255       // path length in bytes
+	MaxFileBytes    = 200 << 20 // one file (#58)
+	MaxProjectBytes = 5 << 30   // all files of a project (#58: shared files only, attachments do not count)
+	// MaxInlineFileBytes is the largest file carried in memory (Put, Load: the page's old multipart
+	// form, an old daemon's file.chunk upload); bigger ones go through presigned uploads and URLs.
+	MaxInlineFileBytes = 20 << 20
+	MaxProjectFiles    = 1000 // files of a project
+	MaxDepth           = 8    // path segments
+	MaxPathBytes       = 255  // path length in bytes
 )
 
 // UserName is uploaded_by for files the user uploaded on the web page (the convention of deliverables
@@ -42,6 +51,9 @@ var (
 	ErrQuota = errors.New("shared files quota exceeded")
 	// ErrNotFound is a path the project has no file at.
 	ErrNotFound = errors.New("shared file not found")
+	// ErrFailed is a file whose stored bytes did not match its upload (state=failed): it is listed
+	// but cannot be read; upload it again.
+	ErrFailed = errors.New("shared file upload failed verification")
 )
 
 // CleanPath checks a shared-files path and returns it normalised (a leading "./" removed). It
@@ -128,15 +140,21 @@ func ContentType(p string) string {
 
 // SharedFile is one shared file without its bytes.
 type SharedFile struct {
-	Path             string    `json:"path"`
-	ContentType      string    `json:"content_type"`
-	Size             int64     `json:"size"`
+	Path        string `json:"path"`
+	ContentType string `json:"content_type"`
+	Size        int64  `json:"size"`
+	// SHA256 is "" until the blob_hash job has streamed an object uploaded without one (#58):
+	// readers then check the size only.
 	SHA256           string    `json:"sha256" gorm:"column:sha256"`
 	UploadedBy       string    `json:"uploaded_by" doc:"Employee name (dev-1) or user"`
 	UploaderID       *string   `json:"-"`
 	UploaderThreadNo *int      `json:"uploaded_by_thread_no,omitempty" doc:"Thread the employee uploaded it from (shown as dev-1 #31)"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
+	// StorageKey is the object holding the bytes; nil = still in the data column (before #58).
+	StorageKey *string `json:"-"`
+	// State is ready or failed (see ErrFailed).
+	State string `json:"-"`
 }
 
 // Label is how the uploader is shown: "dev-1 #31", "dev-1" or "user".
@@ -160,8 +178,8 @@ type Usage struct {
 	Bytes int64 `json:"total_bytes"`
 }
 
-const listColumns = `f.path, f.content_type, f.size, f.sha256, f.uploaded_by, f.uploader_id, t.no AS uploader_thread_no,
-	f.created_at, f.updated_at`
+const listColumns = `f.path, f.content_type, f.size, COALESCE(f.sha256, '') AS sha256, f.uploaded_by, f.uploader_id,
+	t.no AS uploader_thread_no, f.created_at, f.updated_at, f.storage_key, f.state`
 
 // List returns the project's files by path; prefix (optional) keeps paths starting with it.
 func List(ctx context.Context, q store.DB, projectID, prefix string) ([]SharedFile, error) {
@@ -190,11 +208,20 @@ func Stat(ctx context.Context, q store.DB, projectID, p string) (SharedFile, err
 	return out[0], nil
 }
 
-// Load returns one file with its bytes.
-func Load(ctx context.Context, q store.DB, projectID, p string) (SharedFile, []byte, error) {
+// Load returns one file with its bytes: from the object store, or from the data column for rows
+// from before #58. It is for files up to MaxFileBytes (the tools and pages that still carry bytes);
+// big files are fetched with presigned URLs instead.
+func Load(ctx context.Context, q store.DB, bs blobstore.Store, projectID, p string) (SharedFile, []byte, error) {
 	f, err := Stat(ctx, q, projectID, p)
 	if err != nil {
 		return f, nil, err
+	}
+	if f.State == "failed" {
+		return f, nil, ErrFailed
+	}
+	if f.StorageKey != nil {
+		data, err := readObject(ctx, bs, *f.StorageKey, f.Size)
+		return f, data, err
 	}
 	var data []byte
 	err = q.Gorm(ctx).Raw(`SELECT data FROM at_shared_files WHERE project_id = ? AND path = ?`, projectID, p).Row().Scan(&data)
@@ -203,6 +230,29 @@ func Load(ctx context.Context, q store.DB, projectID, p string) (SharedFile, []b
 	}
 	return f, data, err
 }
+
+// readObject reads a whole (small) object and checks its size.
+func readObject(ctx context.Context, bs blobstore.Store, key string, size int64) ([]byte, error) {
+	if size > MaxInlineFileBytes {
+		return nil, fmt.Errorf("%w：%d MB 以上的文件要用预签名地址下载", ErrFileTooLarge, MaxInlineFileBytes>>20)
+	}
+	rc, err := blobstore.Or(bs).Open(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(io.LimitReader(rc, size+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) != size {
+		return nil, fmt.Errorf("shared file object %s has %d bytes, want %d", key, len(data), size)
+	}
+	return data, nil
+}
+
+// NewObjectID is the id of a new shared-file object (sf_ + ULID).
+func NewObjectID() string { return store.NewID("sf") }
 
 // ProjectUsage counts the project's files and bytes.
 func ProjectUsage(ctx context.Context, q store.DB, projectID string) (Usage, error) {
@@ -228,10 +278,27 @@ func Check(u Usage, size, oldSize int64) error {
 		return fmt.Errorf("%w：项目最多 %d 个共享文件，先删掉不用的", ErrQuota, MaxProjectFiles)
 	}
 	if bytes > MaxProjectBytes {
-		return fmt.Errorf("%w：项目共享文件合计不能超过 %d MB（现在 %.1f MB），先删掉不用的", ErrQuota, MaxProjectBytes>>20,
-			float64(u.Bytes)/(1<<20))
+		return fmt.Errorf("%w：项目共享文件合计不能超过 %s（已用 %s，这个文件 %s），先删掉不用的共享文件再试", ErrQuota,
+			Human(MaxProjectBytes), Human(u.Bytes), Human(size))
 	}
 	return nil
+}
+
+// InlineTooLarge refuses a file over MaxInlineFileBytes on a path that carries the bytes itself.
+func InlineTooLarge() error {
+	return fmt.Errorf("%w：这种上传方式最多 %d MB，更大的文件（最多 %d MB）要用新的分片上传", ErrFileTooLarge,
+		MaxInlineFileBytes>>20, MaxFileBytes>>20)
+}
+
+// Human is a byte count for messages: 1.5 GB, 12.0 MB, 300 KB.
+func Human(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	}
+	return fmt.Sprintf("%d KB", (n+1023)>>10)
 }
 
 // Sum is the hex sha256 of data.
@@ -241,15 +308,24 @@ func Sum(data []byte) string {
 }
 
 // Put stores data at path (inserted, or overwritten with the new uploader and time) after checking
-// the path and the limits. It takes the project row lock first so concurrent uploads of a project
-// see each other's totals. It returns the stored file and whether it replaced one.
-func Put(ctx context.Context, q store.DB, projectID, rawPath string, data []byte, by Uploader) (SharedFile, bool, error) {
+// the path and the limits. The bytes go to the object store under a new object id (an overwritten
+// file's old object is queued for deletion after commit); with no store configured it fails with
+// blobstore.ErrNotConfigured. It takes the project row lock first so concurrent uploads of a
+// project see each other's totals. It returns the stored file and whether it replaced one.
+//
+// The object is written inside the caller's transaction: Put carries at most MaxFileBytes (the
+// daemon's file.chunk upload and the page's multipart form); big files use presigned uploads.
+func Put(ctx context.Context, q store.DB, bs blobstore.Store, projectID, rawPath string, data []byte, by Uploader) (SharedFile, bool, error) {
 	p, err := CleanPath(rawPath)
 	if err != nil {
 		return SharedFile{}, false, err
 	}
-	if len(data) > MaxFileBytes {
-		return SharedFile{}, false, Check(Usage{}, int64(len(data)), -1)
+	if len(data) > MaxInlineFileBytes {
+		return SharedFile{}, false, InlineTooLarge()
+	}
+	bs = blobstore.Or(bs)
+	if !bs.Configured() {
+		return SharedFile{}, false, blobstore.ErrNotConfigured
 	}
 	if err := lockProject(ctx, q, projectID); err != nil {
 		return SharedFile{}, false, err
@@ -258,36 +334,62 @@ func Put(ctx context.Context, q store.DB, projectID, rawPath string, data []byte
 	if err != nil {
 		return SharedFile{}, false, err
 	}
-	old := int64(-1)
+	old, oldKey := int64(-1), ""
 	if prev, err := Stat(ctx, q, projectID, p); err == nil {
 		old = prev.Size
+		if prev.StorageKey != nil {
+			oldKey = *prev.StorageKey
+		}
 	} else if !errors.Is(err, ErrNotFound) {
 		return SharedFile{}, false, err
 	}
 	if err := Check(u, int64(len(data)), old); err != nil {
 		return SharedFile{}, false, err
 	}
+	obj := NewObjectID()
+	key := blobstore.SharedKey(projectID, obj)
+	// Reserved outside the transaction: if it rolls back after the write, blobgc removes the object.
+	if err := blobgc.Reserve(ctx, q, key); err != nil {
+		return SharedFile{}, false, err
+	}
+	if err := bs.Put(ctx, key, bytes.NewReader(data), int64(len(data)), ContentType(p)); err != nil {
+		return SharedFile{}, false, err
+	}
 	var empID *string
 	if by.EmployeeID != "" {
 		empID = &by.EmployeeID
 	}
+	sum := Sum(data)
 	err = q.Gorm(ctx).Exec(`INSERT INTO at_shared_files (project_id, path, content_type, size, sha256, data, uploaded_by,
-		uploader_id, uploader_thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		uploader_id, uploader_thread_id, storage_key, object_id, declared_sha256, state) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 'ready')
 		ON CONFLICT (project_id, path) DO UPDATE SET content_type = EXCLUDED.content_type, size = EXCLUDED.size,
-		sha256 = EXCLUDED.sha256, data = EXCLUDED.data, uploaded_by = EXCLUDED.uploaded_by, uploader_id = EXCLUDED.uploader_id,
-		uploader_thread_id = EXCLUDED.uploader_thread_id, updated_at = now()`,
-		projectID, p, ContentType(p), len(data), Sum(data), data, by.Name, empID, by.ThreadID).Error
+		sha256 = EXCLUDED.sha256, data = NULL, uploaded_by = EXCLUDED.uploaded_by, uploader_id = EXCLUDED.uploader_id,
+		uploader_thread_id = EXCLUDED.uploader_thread_id, storage_key = EXCLUDED.storage_key, object_id = EXCLUDED.object_id,
+		declared_sha256 = EXCLUDED.declared_sha256, state = 'ready', updated_at = now()`,
+		projectID, p, ContentType(p), len(data), sum, by.Name, empID, by.ThreadID, key, obj, sum).Error
 	if err != nil {
+		_ = bs.Delete(context.WithoutCancel(ctx), key) // best effort; the reservation catches it otherwise
+		return SharedFile{}, false, err
+	}
+	if err := blobgc.Enqueue(ctx, q, oldKey); err != nil {
 		return SharedFile{}, false, err
 	}
 	f, err := Stat(ctx, q, projectID, p)
 	return f, old >= 0, err
 }
 
-// Delete removes one file; false when there was none.
+// Delete removes one file (its object is queued for deletion after commit); false when there was none.
 func Delete(ctx context.Context, q store.DB, projectID, p string) (bool, error) {
-	res := q.Gorm(ctx).Exec(`DELETE FROM at_shared_files WHERE project_id = ? AND path = ?`, projectID, p)
-	return res.RowsAffected > 0, res.Error
+	var keys []struct{ StorageKey *string }
+	err := q.Gorm(ctx).Raw(`DELETE FROM at_shared_files WHERE project_id = ? AND path = ? RETURNING storage_key`, projectID, p).
+		Scan(&keys).Error
+	if err != nil || len(keys) == 0 {
+		return false, err
+	}
+	if keys[0].StorageKey != nil {
+		err = blobgc.Enqueue(ctx, q, *keys[0].StorageKey)
+	}
+	return true, err
 }
 
 func lockProject(ctx context.Context, q store.DB, projectID string) error {

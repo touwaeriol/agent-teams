@@ -134,6 +134,89 @@ describe("PlanChecklist", () => {
   });
 });
 
+describe("PlanChecklist step limit", () => {
+  const rows = (w: ReturnType<typeof mount>) => w.findAll("li");
+  const titles = (w: ReturnType<typeof mount>) => rows(w).map((r) => r.text());
+  /** n steps: the first `done` done, then one doing (if any left), then todo. */
+  const planOf = (n: number, done: number) =>
+    Array.from({ length: n }, (_, i) => step(i + 1, i < done ? "done" : i === done ? "doing" : "todo"));
+
+  it("shows every step and no button up to 7 steps", () => {
+    for (const n of [3, 7]) {
+      const w = mount(PlanChecklist, { props: { steps: planOf(n, 1) } });
+      expect(rows(w)).toHaveLength(n);
+      expect(w.find("[data-plan-more]").exists()).toBe(false);
+      expect(w.find("[data-plan-hidden-above]").exists()).toBe(false);
+    }
+  });
+
+  it("shows 7 of 10 with 查看更多（还有 3 条）, all on click, then folds back", async () => {
+    const w = mount(PlanChecklist, { props: { steps: planOf(10, 1) } });
+    expect(titles(w)).toEqual([1, 2, 3, 4, 5, 6, 7].map((i) => `第 ${i} 步`));
+    const more = w.get("[data-plan-more]");
+    expect(more.text()).toBe("查看更多（还有 3 条）");
+    expect(more.attributes("aria-expanded")).toBe("false");
+    expect(w.find("[data-plan-hidden-above]").exists()).toBe(false);
+    await more.trigger("click");
+    expect(w.emitted("update:showAll")).toEqual([[true]]);
+    expect(rows(w)).toHaveLength(10);
+    expect(w.get("[data-plan-more]").text()).toBe("收起（只显示 7 条）");
+    // the card's own fold button is separate
+    expect(w.findAll("button").at(-1)!.text()).toBe("收起");
+    await w.get("[data-plan-more]").trigger("click");
+    expect(rows(w)).toHaveLength(7);
+    expect(w.emitted("update:showAll")).toEqual([[true], [false]]);
+  });
+
+  it("keeps the current step in view with one step before it, and says how many are above", async () => {
+    const w = mount(PlanChecklist, { props: { steps: planOf(12, 8) } }); // step 9 doing
+    expect(rows(w)).toHaveLength(7);
+    expect(titles(w)).toEqual([6, 7, 8, 9, 10, 11, 12].map((i) => `第 ${i} 步`));
+    const n10 = mount(PlanChecklist, { props: { steps: planOf(10, 8) } });
+    expect(titles(n10)).toEqual([4, 5, 6, 7, 8, 9, 10].map((i) => `第 ${i} 步`));
+    expect(n10.get("[data-plan-hidden-above]").text()).toBe("前面还有 3 条已折叠");
+    expect(n10.get("[data-plan-more]").text()).toBe("查看更多（还有 3 条）");
+    const mid = mount(PlanChecklist, { props: { steps: planOf(20, 8) } });
+    expect(titles(mid)).toEqual([8, 9, 10, 11, 12, 13, 14].map((i) => `第 ${i} 步`));
+    expect(mid.get("[data-plan-hidden-above]").text()).toBe("前面还有 7 条已折叠");
+    expect(mid.get("[data-plan-more]").text()).toBe("查看更多（还有 13 条）");
+    await mid.get("[data-plan-hidden-above]").trigger("click");
+    expect(rows(mid)).toHaveLength(20);
+    expect(mid.find("[data-plan-hidden-above]").exists()).toBe(false);
+  });
+
+  it("shows the last 7 when nothing is left", () => {
+    const w = mount(PlanChecklist, { props: { steps: planOf(10, 10) } });
+    expect(titles(w)).toEqual([4, 5, 6, 7, 8, 9, 10].map((i) => `第 ${i} 步`));
+    expect(w.get("[data-plan-hidden-above]").text()).toBe("前面还有 3 条已折叠");
+  });
+
+  it("keeps show-all and the card's open state when the steps change", async () => {
+    const w = mount(PlanChecklist, { props: { steps: planOf(10, 1) } });
+    await w.get("[data-plan-more]").trigger("click");
+    await w.setProps({ steps: planOf(11, 2) });
+    expect(rows(w)).toHaveLength(11);
+    expect(w.get("[data-plan-more]").text()).toBe("收起（只显示 7 条）");
+    await w.findAll("button").at(-1)!.trigger("click"); // fold the card
+    await w.setProps({ steps: planOf(12, 3) });
+    expect(rows(w)).toHaveLength(0);
+    expect(w.get("[data-current]").text()).toBe("第 4 步");
+    expect(w.find("[data-plan-more]").exists()).toBe(false);
+  });
+
+  it("follows a bound showAll; not collapsible (rows in the thread list) limits too", async () => {
+    const w = mount(PlanChecklist, { props: { steps: planOf(9, 0), showAll: true } });
+    expect(rows(w)).toHaveLength(9);
+    await w.setProps({ showAll: false });
+    expect(rows(w)).toHaveLength(7);
+    const fixed = mount(PlanChecklist, { props: { steps: planOf(9, 0), collapsible: false } });
+    expect(fixed.findAll("li")).toHaveLength(7);
+    expect(fixed.findAll("button").map((b) => b.text())).toEqual(["查看更多（还有 2 条）"]);
+    const wide = mount(PlanChecklist, { props: { steps: planOf(9, 0), limit: 10 } });
+    expect(wide.findAll("li")).toHaveLength(9);
+  });
+});
+
 describe("ThreadDetail plan card", { timeout: 15_000 }, () => {
   function mountDetail(t: ReturnType<typeof thread>) {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -173,5 +256,25 @@ describe("ThreadDetail plan card", { timeout: 15_000 }, () => {
     expect(w.find("[data-plan-dock] li").exists()).toBe(false);
     await w.get("[data-plan-dock] button").trigger("click");
     expect(window.localStorage.getItem("at:plan-open:th_a")).toBeNull();
+  });
+
+  it("remembers show-all per thread, and keeps it when the plan updates", async () => {
+    const long = (doing: number, n = 10) => Array.from({ length: n }, (_, i) => step(i + 1, i < doing ? "done" : i === doing ? "doing" : "todo"));
+    const w = mountDetail(thread(12, { id: "th_a", main_tasks: long(1) }));
+    await flushPromises();
+    const dock = () => w.get("[data-plan-dock]");
+    expect(dock().findAll("li")).toHaveLength(7);
+    await dock().get("[data-plan-more]").trigger("click");
+    expect(window.localStorage.getItem("at:plan-all:th_a")).toBe("1");
+    expect(dock().findAll("li")).toHaveLength(10);
+    await w.setProps({ thread: thread(12, { id: "th_a", main_tasks: long(2, 11) }) });
+    expect(dock().findAll("li")).toHaveLength(11);
+    await w.setProps({ thread: thread(13, { id: "th_b", main_tasks: long(1) }) });
+    expect(dock().findAll("li")).toHaveLength(7);
+    await w.setProps({ thread: thread(12, { id: "th_a", main_tasks: long(2, 11) }) });
+    expect(dock().findAll("li")).toHaveLength(11);
+    await dock().get("[data-plan-more]").trigger("click");
+    expect(window.localStorage.getItem("at:plan-all:th_a")).toBeNull();
+    expect(dock().findAll("li")).toHaveLength(7);
   });
 });

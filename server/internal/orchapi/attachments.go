@@ -1,6 +1,10 @@
 package orchapi
 
 import (
+	"errors"
+
+	"io"
+
 	"context"
 	"encoding/base64"
 	"net/http"
@@ -9,8 +13,11 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/gin-gonic/gin"
 
+	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
+	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
+	"github.com/touwaeriol/agent-teams/server/internal/sharedfiles"
 )
 
 // AttachmentBody is POST /api/projects/{pid}/attachments: one image, PDF or text file for a message.
@@ -33,10 +40,13 @@ type AttachmentView struct {
 type attachmentOutput struct{ Body AttachmentView }
 
 type attachmentFileInput struct {
-	ID string `path:"id" maxLength:"64"`
+	ID       string `path:"id" maxLength:"64"`
+	Download bool   `query:"download" doc:"Always as an attachment (the page's download button)"`
 }
 
 type attachmentFileOutput struct {
+	Status       int
+	Location     string `header:"Location"`
 	ContentType  string `header:"Content-Type"`
 	CacheControl string `header:"Cache-Control"`
 	NoSniff      string `header:"X-Content-Type-Options"`
@@ -50,10 +60,18 @@ func (a *API) registerAttachments(api huma.API, r gin.IRoutes) {
 		summary("Upload a file to attach to a message: an image or PDF (at most 5 MB) or a text file (at most 1 MB)"),
 		func(o *huma.Operation) { o.MaxBodyBytes = 8 << 20 }), a.uploadAttachment)
 	huma.Register(api, op("get-attachment", "GET", "/api/attachments/{id}", t,
-		summary("The bytes of an attachment"), func(o *huma.Operation) {
-			o.Responses = map[string]*huma.Response{"200": {Description: "The file", Content: map[string]*huma.MediaType{
-				"image/png": {}, "image/jpeg": {}, "image/gif": {}, "image/webp": {}, "application/pdf": {}, "text/plain": {}}}}
+		summary("An attachment: 302 to a presigned URL valid 5 minutes (images and PDF inline, anything else downloaded as application/octet-stream); the bytes themselves for attachments from before #58; 410 once expired"),
+		func(o *huma.Operation) {
+			o.Responses = map[string]*huma.Response{
+				"200": {Description: "The file (attachments still kept in the database)", Content: map[string]*huma.MediaType{
+					"image/png": {}, "image/jpeg": {}, "image/gif": {}, "image/webp": {}, "application/pdf": {}, "text/plain": {}}},
+				"302": {Description: "Redirect to the object store", Headers: map[string]*huma.Param{
+					"Location": {Description: "Presigned URL", Schema: &huma.Schema{Type: "string"}}}},
+			}
 		}), a.attachmentFile)
+	huma.Register(api, op("save-attachment-shared", "POST", "/api/attachments/{id}/save-shared", t,
+		summary("Keep an attachment as a shared file of its project (copied inside the store; 409 file_exists unless overwrite, 409 quota_exceeded, 410 attachment_expired; 404 for one still uploading or not yet in a project)")),
+		a.saveAttachmentShared)
 	if a.e == nil {
 		r.GET("/nodes/attachments/:id", offline)
 		return
@@ -74,8 +92,8 @@ func (a *API) uploadAttachment(ctx context.Context, in *attachmentInput) (*attac
 	if err != nil {
 		return nil, fail(err, "")
 	}
-	if att, err = core.InsertAttachment(ctx, a.e.Core.Pool, att, data); err != nil {
-		return nil, err
+	if att, err = core.InsertAttachment(ctx, a.e.Core.Pool, a.e.Core.Blobs, a.e.Core.AttachmentTTL, att, data); err != nil {
+		return nil, fail(err, "")
 	}
 	return &attachmentOutput{Body: AttachmentView{Attachment: att, URL: core.AttachmentURLPrefix + att.ID}}, nil
 }
@@ -85,15 +103,31 @@ func (a *API) attachmentFile(ctx context.Context, in *attachmentFileInput) (*att
 	if err != nil {
 		return nil, err
 	}
-	att, data, err := core.AttachmentData(ctx, a.e.Core.Pool, u.ID, in.ID)
+	att, err := core.AttachmentOfUser(ctx, a.e.Core.Pool, u.ID, in.ID)
 	if err != nil {
-		return nil, fail(err, "没有这张图片")
+		return nil, fail(err, "没有这个附件")
+	}
+	// A page download or preview is a use: the retention starts again.
+	if err := core.TouchAttachments(ctx, a.e.Core.Pool, att.ProjectID, []string{att.ID}, a.e.Core.AttachmentTTL); err != nil {
+		return nil, err
+	}
+	if att.StorageKey != nil {
+		loc, err := a.presignedGet(ctx, *att.StorageKey, att.Name, att.ContentType, in.Download)
+		if err != nil {
+			return nil, fail(err, "")
+		}
+		// Shorter than the signature, so a cached redirect never points at an expired URL.
+		return &attachmentFileOutput{Status: http.StatusFound, Location: loc, CacheControl: "private, max-age=240"}, nil
+	}
+	att, data, err := core.AttachmentData(ctx, a.e.Core.Pool, a.e.Core.Blobs, u.ID, in.ID)
+	if err != nil {
+		return nil, fail(err, "没有这个附件")
 	}
 	typ := att.ContentType
 	if core.IsInlineText(typ) {
 		typ += "; charset=utf-8"
 	}
-	return &attachmentFileOutput{ContentType: typ, CacheControl: "private, max-age=31536000, immutable",
+	return &attachmentFileOutput{Status: http.StatusOK, ContentType: typ, CacheControl: "private, max-age=31536000, immutable",
 		NoSniff: "nosniff", CSP: "default-src 'none'; sandbox", Body: data}, nil
 }
 
@@ -102,17 +136,80 @@ func (a *API) nodeAttachment(c *gin.Context) {
 	w, r := c.Writer, c.Request
 	node, err := a.e.Gateway.Authenticate(r)
 	if err != nil {
-		http.Error(w, "token rejected", http.StatusUnauthorized)
+		nodegw.WriteAuthError(w, err)
 		return
 	}
-	att, data, err := core.AttachmentData(r.Context(), a.e.Core.Pool, node.UserID, c.Param("id"))
+	// Streamed: the object never sits in the control plane's memory (old daemons; new ones fetch
+	// a presigned URL instead, #58 D2).
+	att, rc, err := core.OpenAttachment(r.Context(), a.e.Core.Pool, a.e.Core.Blobs, node.UserID, c.Param("id"))
+	if errors.Is(err, core.ErrAttachmentExpired) {
+		http.Error(w, "attachment expired", http.StatusGone)
+		return
+	}
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	defer rc.Close()
+	if err := core.TouchAttachments(r.Context(), a.e.Core.Pool, att.ProjectID, []string{att.ID}, a.e.Core.AttachmentTTL); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", att.ContentType)
-	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.Header().Set("Content-Length", strconv.Itoa(att.Size))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(data)
+	_, _ = io.Copy(w, rc)
+}
+
+// SaveSharedBody is POST /api/attachments/{id}/save-shared.
+type SaveSharedBody struct {
+	Path      string `json:"path" minLength:"1" maxLength:"255" doc:"Shared-file path to save it at"`
+	Overwrite bool   `json:"overwrite,omitempty" doc:"Replace a shared file at the path (default false: 409 file_exists)"`
+}
+
+type saveSharedInput struct {
+	ID   string `path:"id" maxLength:"64"`
+	Body SaveSharedBody
+}
+
+type saveSharedOutput struct{ Body UploadedSharedFile }
+
+// saveAttachmentShared copies an attachment of one of the caller's projects into that project's
+// shared files (the page's "存为共享文件"); like save_attachment, it is a use of the attachment.
+func (a *API) saveAttachmentShared(ctx context.Context, in *saveSharedInput) (*saveSharedOutput, error) {
+	u, err := a.user(ctx)
+	if err != nil {
+		return nil, err
+	}
+	p, err := sharedfiles.CleanPath(in.Body.Path)
+	if err != nil {
+		return nil, sharedFail(err)
+	}
+	att, err := core.AttachmentOfUser(ctx, a.e.Core.Pool, u.ID, in.ID)
+	if err == nil && att.ProjectID == "" {
+		err = core.ErrNotFound // not sent yet: no project to keep it in
+	}
+	if err != nil {
+		return nil, fail(err, "没有这个附件")
+	}
+	// Refused early without copying when the answer is already known; Adopt checks again.
+	if err := sharedfiles.CheckSpace(ctx, a.e.Core.Pool, att.ProjectID, p, int64(att.Size), in.Body.Overwrite); err != nil {
+		return nil, uploadFail(err)
+	}
+	if err := core.TouchAttachments(ctx, a.e.Core.Pool, att.ProjectID, []string{att.ID}, a.e.Core.AttachmentTTL); err != nil {
+		return nil, err
+	}
+	f, overwritten, err := a.e.Core.SaveAttachmentShared(ctx, u.ID, att, p, sharedfiles.Uploader{Name: sharedfiles.UserName}, in.Body.Overwrite)
+	if errors.Is(err, blobstore.ErrNotFound) {
+		// The object went between the check and the copy: the retention just ran out.
+		err = core.ErrAttachmentExpired
+	}
+	if errors.Is(err, core.ErrNotFound) || errors.Is(err, core.ErrAttachmentExpired) {
+		return nil, fail(err, "没有这个附件")
+	}
+	if err != nil {
+		return nil, uploadFail(err)
+	}
+	return &saveSharedOutput{Body: UploadedSharedFile{SharedFile: f, Overwritten: overwritten}}, nil
 }

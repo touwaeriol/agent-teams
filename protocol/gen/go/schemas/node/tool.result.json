@@ -48,8 +48,12 @@
       "$ref": "#/$defs/ToolDownload"
     },
     "shared_download": {
-      "description": "read_shared_file: the one file whose bytes arrived before as file.download frames; the daemon writes it as .shared/<path> in the session's working directory (the folder holds its own .gitignore).",
+      "description": "read_shared_file: the one file the daemon writes as .shared/<path> in the session's working directory (the folder holds its own .gitignore). Its bytes arrived before as file.download frames, or (daemons with attachments_v2) the file entry carries a url to GET, chunks is 0 and no frames are sent.",
       "$ref": "#/$defs/ToolSharedDownload"
+    },
+    "attachment_download": {
+      "description": "read_attachment: the attachment the daemon downloads to .attachments/<id>-<name> in the session's working directory (the folder holds its own .gitignore); the daemon replaces this with local_path in what the AI sees and never shows it the url.",
+      "$ref": "#/$defs/ToolAttachmentDownload"
     }
   },
   "$defs": {
@@ -113,6 +117,17 @@
         "sha256": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
+        },
+        "url": {
+          "description": "attachments_v2 shared_download: presigned GET URL of the file (the daemon downloads it directly and checks size and sha256; chunks is 0). Never shown to the AI.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "expires_at": {
+          "description": "When url stops working.",
+          "type": "string",
+          "format": "date-time"
         }
       }
     },
@@ -129,7 +144,7 @@
           "$ref": "common.json#/$defs/DownloadId"
         },
         "chunks": {
-          "description": "Number of file.download frames (0 when the file is empty; at most 20 for the 20 MB limit).",
+          "description": "Number of file.download frames (0 when the file is empty or files[0].url is set; at most 20 for the 20 MB chunked limit).",
           "type": "integer",
           "minimum": 0,
           "maximum": 64
@@ -142,6 +157,30 @@
           "items": {
             "$ref": "#/$defs/DownloadFile"
           }
+        }
+      }
+    },
+    "ToolAttachmentDownload": {
+      "title": "ToolAttachmentDownload",
+      "type": "object",
+      "required": [
+        "attachment"
+      ],
+      "properties": {
+        "attachment": {
+          "$ref": "common.json#/$defs/AttachmentRef"
+        },
+        "url": {
+          "description": "Presigned GET URL, valid until expires_at. Null or absent for legacy rows: the daemon fetches GET /nodes/attachments/<id> with its node token instead.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 8192
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
         }
       }
     }

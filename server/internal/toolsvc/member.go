@@ -446,12 +446,16 @@ func (s *Service) assignSubtask(ctx context.Context, tx *core.Tx, c *call) (Resu
 			mainID = *cur.MainTaskID
 		}
 	}
-	task, _, err := s.sched.Assign(ctx, tx, scheduler.Assignment{Thread: t, Assignee: in.Assignee, Instruction: in.Instruction,
-		Main: mainID, Parent: parent, CreatedBy: c.emp().Name})
+	files, err := s.useAttachments(ctx, tx, c, in.Attachments)
 	if err != nil {
 		return Result{}, err
 	}
-	return okJSON("子任务 "+task.ID+" 已创建", protocol.AssignSubtaskResult{TaskID: protocol.TaskID(task.ID)}), nil
+	task, _, err := s.sched.Assign(ctx, tx, scheduler.Assignment{Thread: t, Assignee: in.Assignee, Instruction: in.Instruction,
+		Main: mainID, Parent: parent, CreatedBy: c.emp().Name, Attachments: files})
+	if err != nil {
+		return Result{}, err
+	}
+	return okJSON("子任务 "+task.ID+" 已创建"+carried(files), protocol.AssignSubtaskResult{TaskID: protocol.TaskID(task.ID)}), nil
 }
 
 // waitTask blocks until a task finishes.

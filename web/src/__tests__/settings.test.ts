@@ -324,7 +324,7 @@ describe("GitHub and admin", () => {
   it("connection kind and repo usage", () => {
     expect(connectionKind({ kind: "app", installation_settings_url: "https://github.com/organizations/x/settings/installations/1" })).toBe("组织");
     expect(connectionKind({ kind: "app", installation_settings_url: "https://github.com/settings/installations/1" })).toBe("个人账号");
-    expect(connectionKind({ kind: "token", installation_settings_url: null })).toBe("个人账号");
+    expect(connectionKind({ kind: "token", installation_settings_url: null })).toBe("个人令牌（PAT）");
     expect(usedText({ used_by_projects: [{ id: "a", name: "A" }, { id: "b", name: "B" }] })).toBe("项目 A、B");
     expect(usedText({ used_by_projects: [] })).toBe("未使用");
   });

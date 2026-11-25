@@ -3,10 +3,13 @@
 // overwritten, what does not fit) and the multipart upload with progress live here; the page is
 // pages/SharedFiles.vue.
 import { ApiError, csrfToken, CSRF_HEADER, toApiError } from "@/api/client";
+import { projectUploads, storageUnavailable, uploadFile, type PutPart, type UploadApi } from "./upload";
 import type { SharedFile, SharedFileList, SharedFileUpload } from "@/api/views";
 
 /** The server's limits (sharedfiles.Max*), used until the list arrives with its own `limits`. */
-export const SHARED_LIMITS = { file_bytes: 20 << 20, project_bytes: 500 << 20, project_files: 1000 };
+export const SHARED_LIMITS = { file_bytes: 200 << 20, project_bytes: 5 * 1024 ** 3, project_files: 1000 };
+/** What the old multipart form upload (no object storage) still takes per file. */
+export const LEGACY_SHARED_FILE_BYTES = 20 << 20;
 export const SHARED_MAX_DEPTH = 8;
 export const SHARED_MAX_PATH_BYTES = 255;
 
@@ -279,11 +282,51 @@ export function uploadErrorText(e: unknown): string {
 }
 
 /**
- * Uploads the files in batches of at most SHARED_BATCH_BYTES (one request each, sent one after
- * another; see uploadBatches). onProgress gets 0..1 over all bytes. When a batch fails, the
- * promise rejects with UploadBatchError naming what was stored and what was not.
+ * Uploads the files one after another straight to storage (multipart, lib/upload.ts; at most 200 MB
+ * each). When the console has no object storage (503 storage_unavailable) the rest go through the
+ * old form upload in batches (at most 20 MB per file). onProgress gets 0..1 over all bytes. When a
+ * file fails, the promise rejects with UploadBatchError naming what was stored and what was not.
  */
-export async function uploadSharedFiles(pid: string, files: PickedFile[], onProgress?: (fraction: number) => void): Promise<SharedFileUpload> {
+export async function uploadSharedFiles(
+  pid: string, files: PickedFile[], onProgress?: (fraction: number) => void, o: { api?: UploadApi; legacy?: typeof legacyUploadSharedFiles; signal?: AbortSignal; put?: PutPart } = {},
+): Promise<SharedFileUpload> {
+  const api = o.api ?? projectUploads(pid);
+  const all = files.reduce((n, f) => n + f.file.size, 0) || 1;
+  const done: NonNullable<SharedFileUpload["files"]> = [];
+  let sent = 0;
+  for (const [i, f] of files.entries()) {
+    try {
+      const res = await uploadFile(f.file, api, {
+        kind: "shared", path: f.path, overwrite: true, ...(o.signal ? { signal: o.signal } : {}), ...(o.put ? { put: o.put } : {}),
+        onProgress: (s) => onProgress?.(Math.min(1, (sent + s) / all)),
+      });
+      if (res.shared_file) done.push(res.shared_file);
+    } catch (e) {
+      if (storageUnavailable(e)) {
+        const rest = files.slice(i);
+        const big = rest.filter((x) => x.file.size > LEGACY_SHARED_FILE_BYTES);
+        if (big.length) throw new UploadBatchError(new Error(`文件存储暂时不可用，现在每个文件最多 ${formatSize(LEGACY_SHARED_FILE_BYTES)}（${big.map((x) => x.path).join("、")} 超了）`), done, rest);
+        try {
+          const res = await (o.legacy ?? legacyUploadSharedFiles)(pid, rest, (fr) => onProgress?.(Math.min(1, (sent + fr * rest.reduce((n, x) => n + x.file.size, 0)) / all)));
+          return { files: [...done, ...(res.files ?? [])], total_bytes: res.total_bytes };
+        } catch (e2) {
+          if (e2 instanceof UploadBatchError) throw new UploadBatchError(e2.cause, [...done, ...(e2.done ?? [])], e2.failed);
+          throw new UploadBatchError(e2, done, rest);
+        }
+      }
+      throw new UploadBatchError(e, done, files.slice(i));
+    }
+    sent += f.file.size;
+    onProgress?.(Math.min(1, sent / all));
+  }
+  return { files: done, total_bytes: 0 };
+}
+
+/**
+ * The old form upload: batches of at most SHARED_BATCH_BYTES (one request each, sent one after
+ * another; see uploadBatches). Used when the console has no object storage.
+ */
+export async function legacyUploadSharedFiles(pid: string, files: PickedFile[], onProgress?: (fraction: number) => void): Promise<SharedFileUpload> {
   const all = files.reduce((n, f) => n + f.file.size, 0) || 1;
   const done: NonNullable<SharedFileUpload["files"]> = [];
   let sent = 0;

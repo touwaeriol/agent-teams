@@ -7,6 +7,10 @@
 package core
 
 import (
+	"time"
+
+	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
+
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -17,7 +21,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/oklog/ulid/v2"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -44,11 +47,15 @@ type Store struct {
 	Pub  Publisher
 	// Online reports whether a node has a live link (views show it).
 	Online func(nodeID string) bool
+	// Blobs holds attachment and shared-file bytes (#58); blobstore.None when not configured.
+	Blobs blobstore.Store
+	// AttachmentTTL is how long an attachment is kept after its last use (0 = DefaultAttachmentTTL).
+	AttachmentTTL time.Duration
 }
 
 // New returns a Store; pub may be nil (no realtime hints).
 func New(pool *store.Pool, pub Publisher) *Store {
-	return &Store{Pool: pool, Pub: pub, Online: func(string) bool { return false }}
+	return &Store{Pool: pool, Pub: pub, Online: func(string) bool { return false }, Blobs: blobstore.None{}}
 }
 
 // Tx is one transaction plus what to do after it commits.
@@ -63,6 +70,9 @@ type Tx struct {
 
 // Gorm returns the transaction's handle bound to ctx (Tx satisfies DB).
 func (tx *Tx) Gorm(ctx context.Context) *gorm.DB { return tx.g.WithContext(ctx) }
+
+// Detached is the pool outside the transaction (store.Detacher).
+func (tx *Tx) Detached() store.DB { return tx.store.Pool }
 
 // InTx runs fn in a transaction; after a successful commit it publishes the
 // event hints and runs AfterCommit callbacks in order.
@@ -132,7 +142,7 @@ func (tx *Tx) hint(channel, msg string) { tx.hints[channel] = msg }
 
 // NewID returns a type-prefixed lower-case ULID (th_…, em_…, s_…).
 func NewID(prefix string) string {
-	return prefix + "_" + strings.ToLower(ulid.Make().String())
+	return prefix + "_" + strings.ToLower(store.NewULID().String())
 }
 
 // NewHex returns n random bytes as hex (v1-style ids).

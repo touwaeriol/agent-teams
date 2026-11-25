@@ -29,6 +29,8 @@ var sharedFeatures = []string{"sessions", "git_worktree", "cred_helper", "file_d
 type sfTeam struct {
 	*team
 	nA, nB *nodetest.Node
+	// tokA, tokB are the nodes' tokens.
+	tokA, tokB string
 }
 
 func startSFTeam(t *testing.T) *sfTeam {
@@ -52,7 +54,7 @@ func startSFTeam(t *testing.T) *sfTeam {
 	var project struct{ ID string }
 	tm.b.must(201, "POST", "/api/projects", map[string]any{"name": "p"}, &project)
 	tm.projectID = project.ID
-	st := &sfTeam{team: tm}
+	st := &sfTeam{team: tm, tokA: a.Token, tokB: b.Token}
 	st.nA = w.connect(a.Token, nodetest.Options{Features: sharedFeatures})
 	st.nB = w.connect(b.Token, nodetest.Options{Features: sharedFeatures})
 	tm.n = st.nB
@@ -163,7 +165,7 @@ func TestSharedFilesAcrossNodes(t *testing.T) {
 	_ = json.Unmarshal(*list.Structured, &listed)
 	if len(listed.Files) != 1 || listed.Files[0].UploadedBy != "dev-1" || listed.Files[0].UploadedByThreadNo == nil ||
 		*listed.Files[0].UploadedByThreadNo != 1 || listed.Files[0].ContentType != "text/csv; charset=utf-8" ||
-		listed.TotalBytes != len(body) || listed.LimitBytes != 500<<20 || !strings.Contains(text(list), "dev-1 #1") {
+		listed.TotalBytes != len(body) || listed.LimitBytes != 5<<30 || !strings.Contains(text(list), "dev-1 #1") {
 		t.Fatalf("list %+v\n%s", listed, text(list))
 	}
 
@@ -200,7 +202,7 @@ func TestSharedFilesAcrossNodes(t *testing.T) {
 	var page orchapi.SharedFileList
 	st.b.must(200, "GET", "/api/projects/"+st.projectID+"/shared-files", nil, &page)
 	if len(page.Files) != 1 || page.Files[0].UploadedBy != "lead-1" || page.TotalBytes != 4 || page.FileCount != 1 ||
-		page.Limits.FileBytes != 20<<20 || page.Limits.ProjectFiles != 1000 {
+		page.Limits.FileBytes != 200<<20 || page.Limits.ProjectFiles != 1000 {
 		t.Fatalf("api list %+v", page)
 	}
 
@@ -324,7 +326,7 @@ func TestSharedFilesAPI(t *testing.T) {
 	var page orchapi.SharedFileList
 	b.must(200, "GET", "/api/projects/"+pid+"/shared-files", nil, &page)
 	if len(page.Files) != 3 || page.Files[0].Path != "data/a.csv" || page.Files[2].Path != "reports/2026/sum.bin" ||
-		page.Files[2].ContentType != "application/octet-stream" || page.Limits.ProjectBytes != 500<<20 {
+		page.Files[2].ContentType != "application/octet-stream" || page.Limits.ProjectBytes != 5<<30 {
 		t.Fatalf("list %+v", page)
 	}
 	b.must(200, "GET", "/api/projects/"+pid+"/shared-files?prefix=reports/", nil, &page)
@@ -332,22 +334,40 @@ func TestSharedFilesAPI(t *testing.T) {
 		t.Fatalf("prefix list %+v", page)
 	}
 
+	// Downloads are a 302 to the object store, which serves the bytes as an octet-stream attachment.
+	if r, _ := b.redirect("/api/projects/" + pid + "/shared-files/download?path=data/page.html"); r.StatusCode != 302 ||
+		r.Header.Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("download redirect %d %v", r.StatusCode, r.Header)
+	}
 	resp := b.get("/api/projects/" + pid + "/shared-files/download?path=data/page.html")
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != 200 || string(body) != "<script>alert(1)</script>" ||
-		resp.Header.Get("Content-Disposition") != `attachment; filename=page.html` ||
-		resp.Header.Get("X-Content-Type-Options") != "nosniff" || resp.Header.Get("Content-Type") != "application/octet-stream" ||
-		!strings.Contains(resp.Header.Get("Content-Security-Policy"), "sandbox") {
+		resp.Header.Get("Content-Disposition") != `attachment; filename="page.html"; filename*=UTF-8''page.html` ||
+		resp.Header.Get("Content-Type") != "application/octet-stream" {
 		t.Fatalf("download %d %q %v", resp.StatusCode, body, resp.Header)
 	}
 	resp = b.get("/api/projects/" + pid + "/shared-files/download?path=data/a.csv")
 	body, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if string(body) != "1,2\n" || resp.Header.Get("Content-Type") != "text/csv; charset=utf-8" ||
+	if string(body) != "1,2\n" || resp.Header.Get("Content-Type") != "application/octet-stream" ||
 		!strings.HasPrefix(resp.Header.Get("Content-Disposition"), "attachment") {
 		t.Fatalf("csv download %q %v", body, resp.Header)
 	}
+	// Rows from before #58 are still served by the control plane, with its safety headers.
+	if _, err := store.Exec(w.ctx, w.db.Pool, `INSERT INTO at_shared_files (project_id, path, content_type, size, sha256, data, uploaded_by)
+		VALUES ($1, 'old.html', 'text/html; charset=utf-8', 3, 'x', 'abc', 'user')`, pid); err != nil {
+		t.Fatal(err)
+	}
+	resp = b.get("/api/projects/" + pid + "/shared-files/download?path=old.html")
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || string(body) != "abc" || resp.Header.Get("Content-Type") != "application/octet-stream" ||
+		resp.Header.Get("X-Content-Type-Options") != "nosniff" || !strings.Contains(resp.Header.Get("Content-Security-Policy"), "sandbox") ||
+		resp.Header.Get("Content-Disposition") != `attachment; filename="old.html"; filename*=UTF-8''old.html` {
+		t.Fatalf("legacy download %d %q %v", resp.StatusCode, body, resp.Header)
+	}
+	b.must(204, "DELETE", "/api/projects/"+pid+"/shared-files?path=old.html", nil, nil)
 
 	for _, bad := range [][3]string{{"../x", "x", "x"}, {"/etc/x", "x", "x"}, {".git/config", "x", "x"}, {`a\b`, "x", "x"}} {
 		if code, raw := b.multipartUpload(pid, "", [][3]string{bad}); code != 422 {

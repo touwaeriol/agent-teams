@@ -91,6 +91,8 @@ type NewTask struct {
 	Parent      string
 	Priority    int
 	CreatedBy   string
+	// Attachments go with the task's brief (at_tasks.attachments).
+	Attachments []AttachmentRef
 }
 
 // InsertTask allocates t<n> in the thread conversation and inserts the task as pending.
@@ -100,6 +102,10 @@ func InsertTask(ctx context.Context, tx *Tx, n NewTask) (Task, error) {
 		return Task{}, err
 	}
 	deps, _ := json.Marshal(nonNilStrings(n.DependsOn))
+	if n.Attachments == nil {
+		n.Attachments = []AttachmentRef{}
+	}
+	atts, _ := json.Marshal(n.Attachments)
 	if n.Kind == "" {
 		n.Kind = "work"
 	}
@@ -109,7 +115,7 @@ func InsertTask(ctx context.Context, tx *Tx, n NewTask) (Task, error) {
 	err = tx.Gorm(ctx).Table("at_tasks").Create(map[string]any{"conversation_id": n.Thread.ID, "id": id,
 		"thread_id": n.Thread.ID, "main_task_id": n.MainTaskID, "assignee": n.Assignee, "role": n.Role,
 		"claimed_by": n.ClaimedBy, "kind": n.Kind, "instruction": n.Instruction, "depends_on": deps, "status": "pending",
-		"parent": n.Parent, "priority": n.Priority, "created_by": n.CreatedBy}).Error
+		"parent": n.Parent, "priority": n.Priority, "created_by": n.CreatedBy, "attachments": atts}).Error
 	if err != nil {
 		return Task{}, err
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/credvault"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
+	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -215,7 +216,8 @@ func (e *Engine) credScope(ctx context.Context, node store.Node, r *protocol.Cre
 // and open pull requests and issues (architecture.md §10.4; the user asked for gh and git push in
 // every employee session). The purpose is ignored: git's credential helper cannot tell a fetch
 // from a push. Protected branches are refused by the platform pre-push hook; merging stays with
-// the merge queue and user acceptance. The coordinator gets nothing.
+// the merge queue and user acceptance. The coordinator gets nothing. Read-only roles get the same
+// token (the user's call, 2026-11-17: reviewers comment and review with gh); see #55 F9.
 func (e *Engine) sessionScope(ctx context.Context, sessionID string, _ protocol.CredRequestPurpose) (string, ghops.Scope, error) {
 	sc, err := core.SessionContextOf(ctx, e.core.Pool, sessionID)
 	if err != nil {
@@ -231,11 +233,16 @@ func (e *Engine) sessionScope(ctx context.Context, sessionID string, _ protocol.
 	return sc.Employee.ProjectID, scope, nil
 }
 
+// jobScope: the repository and scope of a git job of this node that still runs (#55 N8/F9: a
+// finished or old job_id is not a standing grant).
 func (e *Engine) jobScope(ctx context.Context, node store.Node, jobID string) (callerScope, error) {
 	var typ string
 	cs := callerScope{}
+	// Still running: no git.result yet (done/failed), not expired or superseded, queued recently.
 	err := store.QueryRow(ctx, e.core.Pool, `SELECT type, COALESCE(body->>'project_id', ''), COALESCE(body->>'repo', '') FROM at_node_commands
-		WHERE node_id = $1 AND type LIKE 'git.%' AND body->>'job_id' = $2`, node.ID, jobID).Scan(&typ, &cs.projectID, &cs.repo)
+		WHERE node_id = $1 AND type LIKE 'git.%' AND body->>'job_id' = $2
+		AND status IN ('pending', 'sent', 'acked') AND created_at > $3`,
+		node.ID, jobID, e.now().Add(-nodegw.JobCredentialWindow)).Scan(&typ, &cs.projectID, &cs.repo)
 	if err != nil || cs.projectID == "" {
 		return cs, errors.New("unknown_job")
 	}

@@ -11,7 +11,8 @@ import type { LoopbackToolHost } from "../../toolhost/http-server.js";
 import { approvalId, newId } from "../../util/ids.js";
 import { DAEMON_VERSION } from "../../version.js";
 import { textEvent } from "../claude/mapper.js";
-import type { LoadedImage } from "../images.js";
+import { imageData, type LoadedImage } from "../images.js";
+import type { ResourceLink } from "../attachments.js";
 import { ResumeFailed, type CompactResult, type Driver, type DriverContext, type ModeApplied, type ModeChange, type ModelOption, type EventFields, type OutgoingMessage, type StartResult } from "../types.js";
 import { AcpClient, AcpFailure, ACP_AUTH_REQUIRED } from "./acp.js";
 import { isPlatformTool, planEvent, promptError, READ_ONLY_KINDS, toolEnded, toolStarted, turnEnded, WRITE_KINDS, type AcpToolCall } from "./mapper.js";
@@ -239,7 +240,7 @@ export class AntigravityDriver implements Driver {
       this.emit({ kind: "turn_started", trigger_msg_ids: [msg.msg_id], tools: this.ctx.spec.platform_tools.map((t) => `mcp__platform__${t.name}`) });
     }
     const client = this.client!;
-    client.request<{ stopReason?: string } | null>("session/prompt", { sessionId: this.sessionId, prompt: promptBlocks(msg.text, msg.images) }).then(
+    client.request<{ stopReason?: string } | null>("session/prompt", { sessionId: this.sessionId, prompt: promptBlocks(msg.text, msg.images, msg.links) }).then(
       (r) => this.onTurnDone(client, turnId, String(r?.stopReason ?? "end_turn")),
       (err: Error) => this.onTurnFailed(client, turnId, err),
     );
@@ -494,11 +495,11 @@ function toolNameOf(t: AcpToolCall): string {
 }
 
 /** ACP prompt content: the text, then images as base64 image blocks; PDFs are noted by path. */
-export function promptBlocks(text: string, images: LoadedImage[] | undefined): Array<Record<string, unknown>> {
+export function promptBlocks(text: string, images: LoadedImage[] | undefined, links?: ResourceLink[]): Array<Record<string, unknown>> {
   const pdfs = (images ?? []).filter((i) => i.media_type === PDF);
   const note = pdfs.length ? `\n\n[附件 PDF 已保存在本机，可以直接读取：${pdfs.map((p) => p.path).join("、")}]` : "";
-  const imgs = (images ?? []).filter((i) => i.media_type !== PDF).map((i) => ({ type: "image", mimeType: i.media_type, data: i.data.toString("base64") }));
-  return [{ type: "text", text: text + note }, ...imgs];
+  const imgs = (images ?? []).filter((i) => i.media_type !== PDF).map((i) => ({ type: "image", mimeType: i.media_type, data: imageData(i).toString("base64") }));
+  return [{ type: "text", text: text + note }, ...imgs, ...(links ?? []).map((l) => ({ ...l }))];
 }
 
 /** ACP availableModels as session.opened model options (no efforts: agy writes the effort into the model id). */

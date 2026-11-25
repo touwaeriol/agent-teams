@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 450 {
+	if migrations.Latest() != 470 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -1672,7 +1672,7 @@ INSERT INTO at_schedules (id, project_id, name, cron, message) VALUES ('sc1', 'p
 	if _, err := p.Up(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if v, err := p.GetDBVersion(ctx); err != nil || v != migrations.Latest() || v != 450 {
+	if v, err := p.GetDBVersion(ctx); err != nil || v != migrations.Latest() || v != 470 {
 		t.Fatalf("version %d %v", v, err)
 	}
 	var got string
@@ -1846,5 +1846,119 @@ func TestUserQuotaLimitsMigration(t *testing.T) {
 	}
 	if err := db.QueryRow(`SELECT quota_five_hour_pct FROM at_users WHERE id = 'u1'`).Scan(&five); err == nil {
 		t.Fatal("quota_five_hour_pct after down")
+	}
+}
+
+// TestBlobStorageMigration: 00460 keeps existing attachments and shared files readable from data
+// (no storage key, ready, expiring 24 h after the migration), lets new rows live only in the object store, and refuses to go
+// down while such rows exist.
+func TestBlobStorageMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 450); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
+INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, sha256, data)
+	VALUES ('img_old', 'p1', 'u1', 'a.png', 'image/png', 3, 'abc', '\x010203');
+INSERT INTO at_shared_files (project_id, path, content_type, size, sha256, data, uploaded_by)
+	VALUES ('p1', 'a.txt', 'text/plain', 2, 'def', '\x6869', 'user');`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 460); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	var inADay bool
+	var key *string
+	if err := db.QueryRow(`SELECT state, expires_at BETWEEN now() + interval '23 hours' AND now() + interval '25 hours', storage_key
+		FROM at_attachments WHERE id = 'img_old'`).Scan(&state, &inADay, &key); err != nil || state != "ready" || !inADay || key != nil {
+		t.Fatalf("old attachment state=%s expires in a day=%v key=%v err=%v", state, inADay, key, err)
+	}
+	if err := db.QueryRow(`SELECT state FROM at_shared_files WHERE path = 'a.txt'`).Scan(&state); err != nil || state != "ready" {
+		t.Fatalf("old shared file %s %v", state, err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, storage_key, state, upload_id)
+	VALUES ('img_up', 'p1', 'u1', 'big.zip', 'application/zip', 209715200, 'projects/p1/attachments/img_up', 'uploading', 'u-1');
+INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, storage_key)
+	VALUES ('img_new', 'p1', 'u1', 'big.zip', 'application/zip', 209715200, 'projects/p1/attachments/img_new');
+INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, state)
+	VALUES ('img_exp', 'p1', 'u1', 'gone.zip', 'application/zip', 10, 'expired');
+INSERT INTO at_blob_deletions (key, prefix) VALUES ('projects/p9/', true);`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE at_attachments SET state = 'expired' WHERE id = 'img_old'`); err != nil {
+		t.Fatalf("expired state: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE at_attachments SET state = 'ready' WHERE id = 'img_old'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE at_attachments SET state = 'bogus' WHERE id = 'img_new'`); err == nil {
+		t.Fatal("state check missing")
+	}
+	if _, err := p.DownTo(ctx, 450); err == nil || !strings.Contains(err.Error(), "atctl storage restore") {
+		t.Fatalf("down with object-only rows: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM at_attachments WHERE id = 'img_new'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.DownTo(ctx, 450); err != nil {
+		t.Fatal(err)
+	}
+	var left int
+	if err := db.QueryRow(`SELECT count(*) FROM at_attachments WHERE id IN ('img_up', 'img_exp')`).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("down kept expired or unfinished attachments: %d %v", left, err)
+	}
+	var data []byte
+	if err := db.QueryRow(`SELECT data FROM at_attachments WHERE id = 'img_old'`).Scan(&data); err != nil || len(data) != 3 {
+		t.Fatalf("down lost data: %v %v", data, err)
+	}
+}
+
+// TestUnownedAttachmentsMigration: 00470 lets an attachment have no project (POST /api/uploads),
+// gives threads brief_attachments and comments attachments ([] for existing rows); down drops the
+// unowned attachments and queues their objects.
+func TestUnownedAttachmentsMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 470); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
+INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, storage_key)
+	VALUES ('img_p', 'p1', 'u1', 'a.png', 'image/png', 3, 'projects/p1/attachments/img_p'),
+	       ('img_u', NULL, 'u1', 'b.png', 'image/png', 3, 'users/u1/attachments/img_u');`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.DownTo(ctx, 460); err != nil {
+		t.Fatal(err)
+	}
+	var ids string
+	if err := db.QueryRow(`SELECT string_agg(id, ',' ORDER BY id) FROM at_attachments`).Scan(&ids); err != nil || ids != "img_p" {
+		t.Fatalf("after down: %q %v", ids, err)
+	}
+	var queued int
+	if err := db.QueryRow(`SELECT count(*) FROM at_blob_deletions WHERE key = 'users/u1/attachments/img_u'`).Scan(&queued); err != nil || queued != 1 {
+		t.Fatalf("unowned object not queued: %d %v", queued, err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, storage_key)
+		VALUES ('img_x', NULL, 'u1', 'c.png', 'image/png', 3, 'k')`); err == nil {
+		t.Fatal("project_id still nullable after down")
+	}
+	if _, err := p.UpTo(ctx, 470); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -8,6 +8,11 @@
 `node:22-bookworm`，方便员工构建和测试项目）、tini。守护进程是入口进程，以普通用户 `agent`（uid 1000）运行：
 Claude Code 的 bypassPermissions 模式不能在 root 下运行，入口脚本发现 root 会直接退出。
 
+面向用户的部署说明（公开，不用登录，可以直接把链接发给 AI）：控制面板的 `/node-docker.md`，
+例如 <https://agent.prophey.ai/node-docker.md>，源文件 `server/internal/httpapi/node-docker.md`。
+控制面板“添加节点”弹窗里的“Docker”“Docker Compose”两种方式已经把令牌填进 docker run 命令和 compose.yml；
+镜像标签由控制面板的 `AGENT_TEAMS_NODE_IMAGE` 决定（默认 `ghcr.io/touwaeriol/agent-teams-node:latest`）。
+
 ## 快速开始
 
 ```bash
@@ -29,6 +34,7 @@ docker compose up -d                # 拉取 ghcr.io/touwaeriol/agent-teams-node
 | `AGENT_TEAMS_NODE_TOKEN` | 节点令牌（必填）。一个令牌只能有一个容器在用，同令牌的第二个连接会把前一个顶掉 |
 | `AGENT_TEAMS_MAX_SESSIONS` | 可选，同时运行的员工会话上限，留空 = 不限 |
 | `AGENT_TEAMS_LOG_LEVEL` | 可选，默认 `info` |
+| `AGENT_TEAMS_ALLOW_INSECURE` | 可选，默认关。控制面板地址必须是 `https://`；只有在可信内网里确实要用 `http://` 时才设成 `1`（localhost/127.0.0.1 不需要），启动时会打警告 |
 | `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` | Claude 授权方式一，见下 |
 | `OPENAI_API_KEY` | 可选，Codex 用 API key；也可以 `codex login` |
 
@@ -65,12 +71,15 @@ git 走 ssh 的话，在 `compose.yml` 里打开 `~/.ssh:/home/agent/.ssh:ro` �
 
 ```bash
 docker run -d --name agent-teams-node --restart unless-stopped --env-file deploy/node/node.env \
-  -v at-claude:/home/agent/.claude -v at-codex:/home/agent/.codex \
-  -v at-workspace:/home/agent/.agents_team -v at-state:/home/agent/.local/state/agent-teams \
-  -v at-data:/home/agent/.local/share/agent-teams \
+  -v node_claude:/home/agent/.claude -v node_codex:/home/agent/.codex \
+  -v node_workspace:/home/agent/.agents_team -v node_state:/home/agent/.local/state/agent-teams \
+  -v node_data:/home/agent/.local/share/agent-teams \
   ghcr.io/touwaeriol/agent-teams-node:latest
 docker exec -it agent-teams-node claude login
 ```
+
+卷名 `node_<名字>` 就是在 `deploy/node` 目录里 `docker compose up` 建出来的卷（compose 项目名默认取目录名 `node`），
+所以 compose 和 docker run 两种方式可以互换，登录和工作区都还在。
 
 除 `run`（默认）以外的命令会代替守护进程执行，例如 `docker run --rm -it ghcr.io/touwaeriol/agent-teams-node bash`。自己构建：在仓库根目录 `docker build -f deploy/node/Dockerfile -t agent-teams-node .`。
 

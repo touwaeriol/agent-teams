@@ -15,7 +15,9 @@ usage:
   agent-teams-node version
 
 Defaults come from ~/.config/agent-teams/node.env (AGENT_TEAMS_CONSOLE, AGENT_TEAMS_NODE_TOKEN,
-AGENT_TEAMS_ROOT, AGENT_TEAMS_MAX_SESSIONS, AGENT_TEAMS_PASS_ENV). Internal helpers: git-credential, git-ssh, gh, ssh-proxy.
+AGENT_TEAMS_ROOT, AGENT_TEAMS_MAX_SESSIONS, AGENT_TEAMS_PASS_ENV). Prefer AGENT_TEAMS_NODE_TOKEN over --token
+(visible in the process list). The console URL must be https:// unless it is localhost or
+AGENT_TEAMS_ALLOW_INSECURE=1 is set. Internal helpers: git-credential, git-ssh, gh, ssh-proxy.
 `;
 
 async function main(argv: string[]): Promise<number> {
@@ -44,6 +46,7 @@ async function main(argv: string[]): Promise<number> {
 async function runDaemon(argv: string[]): Promise<number> {
   const config = loadConfig(argv);
   const log = createLogger(config.logLevel);
+  for (const w of config.warnings) log.warn(w);
   return new Promise<number>((resolve) => {
     let daemon: Daemon;
     const exit = (code: number) => void daemon.stop().finally(() => resolve(code));

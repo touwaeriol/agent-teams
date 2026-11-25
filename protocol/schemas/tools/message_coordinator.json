@@ -19,6 +19,9 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 8000
+    },
+    "attachments": {
+      "$ref": "common.json#/$defs/AttachmentIds"
     }
   }
 }

@@ -12,7 +12,11 @@ export const MAX_BYTES = 5 * 1024 * 1024;
 export const MAX_FILES = 64;
 export const CHUNK_BYTES = 1024 * 1024;
 /** Per-file limit of write_shared_file / read_shared_file (the console checks it again). */
-export const MAX_SHARED_BYTES = 20 * 1024 * 1024;
+export const MAX_SHARED_BYTES = 200 * 1024 * 1024;
+/** …when the bytes travel as file.chunk / file.download frames (consoles without presigned transfers). */
+export const MAX_CHUNKED_SHARED_BYTES = 20 * 1024 * 1024;
+/** UploadFile.content_type is at most 100 characters (tool.call.json). */
+export const MAX_CONTENT_TYPE = 100;
 /** Folder (relative to the session's working directory) shared files are fetched into; write_shared_file strips it from a default path. */
 export const SHARED_DIR = ".shared";
 /** SharedPath of the tool contract (tools/common.json), taken from the generated bundle so it never drifts. */
@@ -74,13 +78,23 @@ export async function prepareUpload(cwd: string, rawPath: unknown): Promise<Prep
   return buildUpload(picked.map((p, i) => ({ path: p.path, body: bodies[i]!, contentType: contentType(p.path)! })));
 }
 
+/** The file write_shared_file points at, checked but not read. */
+export interface SharedSource {
+  /** Real path of the file. */
+  real: string;
+  /** Target shared path. */
+  target: string;
+  size: number;
+  contentType: string;
+}
+
 /**
- * Reads the single file write_shared_file points at (args.file): a regular file inside the working
- * directory after resolving symlinks (directories are refused), any type, at most MAX_SHARED_BYTES.
+ * Resolves the single file write_shared_file points at (args.file): a regular file inside the working
+ * directory after resolving symlinks (directories are refused), any type, at most `max` bytes.
  * The target path is args.path, or args.file normalised to a path relative to the working directory
  * with a leading .shared/ removed (a file fetched with read_shared_file goes back to the same path).
  */
-export async function prepareSharedUpload(cwd: string, rawFile: unknown, rawTarget: unknown): Promise<PreparedUpload> {
+export async function resolveSharedUpload(cwd: string, rawFile: unknown, rawTarget: unknown, max = MAX_SHARED_BYTES): Promise<SharedSource> {
   if (rawTarget !== undefined && rawTarget !== null && (typeof rawTarget !== "string" || !validSharedPath(rawTarget))) {
     throw new UploadError(`path ${JSON.stringify(rawTarget)} is not a valid shared path (${SHARED_PATH_RULES})`);
   }
@@ -88,13 +102,19 @@ export async function prepareSharedUpload(cwd: string, rawFile: unknown, rawTarg
   const st = await lstat(real);
   if (st.isDirectory()) throw new UploadError(`${String(rawFile)} is a directory; write_shared_file uploads one file`);
   if (!st.isFile()) throw new UploadError(`${String(rawFile)}: not a regular file`);
-  checkSize(st.size, MAX_SHARED_BYTES);
+  checkSize(st.size, max);
   const target = typeof rawTarget === "string" ? rawTarget : defaultSharedPath(rel);
   if (!validSharedPath(target)) {
     throw new UploadError(`the default shared path ${JSON.stringify(target)} (derived from file) is not valid (${SHARED_PATH_RULES}); pass path to choose a target`);
   }
-  const [body] = await readAll([{ path: String(rawFile), abs: real }], MAX_SHARED_BYTES);
-  return buildUpload([{ path: target, body: body!, contentType: contentType(target) ?? "application/octet-stream" }]);
+  return { real, target, size: st.size, contentType: (contentType(target) ?? "application/octet-stream").slice(0, MAX_CONTENT_TYPE) };
+}
+
+/** write_shared_file as file.chunk frames (consoles without POST /nodes/uploads): the file read into memory, at most `max` bytes. */
+export async function prepareSharedUpload(cwd: string, rawFile: unknown, rawTarget: unknown, max = MAX_CHUNKED_SHARED_BYTES): Promise<PreparedUpload> {
+  const src = await resolveSharedUpload(cwd, rawFile, rawTarget, max);
+  const [body] = await readAll([{ path: String(rawFile), abs: src.real }], max);
+  return buildUpload([{ path: src.target, body: body!, contentType: src.contentType }]);
 }
 
 /** The default target of write_shared_file: the file's path relative to cwd, without a leading .shared/. */

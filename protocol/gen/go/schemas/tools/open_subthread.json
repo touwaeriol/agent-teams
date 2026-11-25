@@ -40,6 +40,9 @@
       "items": {
         "$ref": "open_thread.json#/$defs/RepoFocus"
       }
+    },
+    "attachments": {
+      "$ref": "common.json#/$defs/AttachmentIds"
     }
   },
   "$defs": {

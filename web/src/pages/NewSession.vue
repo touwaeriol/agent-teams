@@ -11,7 +11,12 @@ import { useRouter } from "vue-router";
 import { sessions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import { keys, useNodes, useRoles } from "@/api/queries";
+import AttachButton from "@/components/app/AttachButton.vue";
+import AttachmentStrip from "@/components/app/AttachmentStrip.vue";
+import { attachmentHandlers, directUploader, useAttachments } from "@/components/app/attachments";
+import { attachmentsField } from "@/lib/images";
 import SendButton from "@/components/app/SendButton.vue";
+import { standaloneUploads } from "@/lib/upload";
 import NewSessionOptions from "@/components/app/session/NewSessionOptions.vue";
 import NewSessionControls from "@/components/app/session/controls/NewSessionControls.vue";
 import SessionRepos from "@/components/app/session/SessionRepos.vue";
@@ -38,6 +43,12 @@ const branch = ref("");
 const mode = ref("");
 const effort = ref("");
 const reposOpen = ref(false);
+// Files for the first message: uploaded before the session (and its project) exists through the
+// project-less POST /api/uploads; sessions.create moves them into the new project. No base64
+// fallback here (that one needs a project).
+const files = useAttachments("", directUploader(() => standaloneUploads(), { legacy: false }));
+const dragging = ref(false);
+const dropHandlers = attachmentHandlers(files, (on) => (dragging.value = on));
 
 const members = computed(() => (roles.data.value?.roles ?? []).filter((r) => r.tier === "member"));
 watch(
@@ -63,7 +74,7 @@ watch(
 watch(agent, (now, before) => before && now !== before && (model.value = ""));
 const nodeList = computed(() => nodes.data.value ?? []);
 // Repositories are optional: without any the employee works in a local folder on its node.
-const ready = computed(() => message.value.trim() !== "" && role.value !== "");
+const ready = computed(() => message.value.trim() !== "" && role.value !== "" && !files.uploading.value);
 
 const create = useAction(
   () =>
@@ -77,10 +88,14 @@ const create = useAction(
       effort: effort.value || undefined,
       node_id: node.value === AUTO ? undefined : node.value,
       branch: branch.value.trim() || undefined,
+      // SessionInput.attachments (agreed with the server, q10): only sent with files, so a session
+      // without attachments posts exactly what it did before. Typed once the schema has it.
+      ...attachmentsField(files.ids()),
     }),
   {
     invalidate: [keys.projects],
     onSuccess: (s) => {
+      files.discard(files.take());
       writeLocal(DEFAULTS_KEY, JSON.stringify({ repos: repos.value, node: node.value, role: role.value, agent: agent.value }));
       void router.push(`/sessions/${s.project.id}`);
     },
@@ -88,6 +103,8 @@ const create = useAction(
 );
 function submit() {
   if (!message.value.trim() || create.isPending.value) return;
+  if (files.uploading.value) return void toast.warning("附件还在上传，传完再发送");
+  if (files.items.value.some((x) => x.error)) return void toast.error("有附件没有传上去，先移除它再发送");
   if (!role.value) return void toast.error("团队里还没有成员岗位，先在 设置 → 团队 里添加一个");
   if (!validModel(model.value)) return void toast.error(MODEL_FORMAT_HINT);
   create.mutate();
@@ -119,7 +136,11 @@ const reposText = computed(() => (branch.value.trim() ? `${reposLabel(repos.valu
       <p class="text-[15px] text-muted-foreground" data-testid="new-session-hint">要做点什么？可以选仓库，也可以不选，员工直接在节点上的本地文件夹里干。</p>
     </div>
     <form class="mx-auto w-full max-w-[780px] shrink-0 px-4 pb-6" data-testid="new-session" @submit.prevent="submit">
-      <div class="flex flex-col rounded-2xl border bg-background px-3 pb-2 pt-3 shadow-sm focus-within:border-foreground/30">
+      <div
+        :class="['flex flex-col rounded-2xl border bg-background px-3 pb-2 pt-3 shadow-sm focus-within:border-foreground/30', dragging && 'border-primary']"
+        v-on="dropHandlers"
+      >
+        <AttachmentStrip :a="files" class="px-1 pb-2" />
         <el-input
           v-model="message"
           type="textarea"
@@ -132,6 +153,7 @@ const reposText = computed(() => (branch.value.trim() ? `${reposLabel(repos.valu
           @keydown="onKey"
         />
         <div class="mt-1 flex items-center gap-2">
+          <AttachButton :a="files" :size="28" />
           <button
             type="button"
             class="inline-flex h-7 min-w-0 max-w-[60%] items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"

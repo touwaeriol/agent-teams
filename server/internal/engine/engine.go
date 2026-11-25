@@ -6,6 +6,9 @@
 package engine
 
 import (
+	"github.com/touwaeriol/agent-teams/server/internal/blobgc"
+	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
+
 	"context"
 	"log/slog"
 	"time"
@@ -49,6 +52,11 @@ type Deps struct {
 	Relay *gitrelay.Relay
 	// SSH tunes the SSH gateway (zero values: the defaults of remote-servers.md §5.7).
 	SSH sshgw.Config
+	// Blobs is the object store of attachments and shared files (nil: not configured, new
+	// uploads answer 503).
+	Blobs blobstore.Store
+	// AttachmentTTL is how long an attachment is kept after its last use (0 = 24 h).
+	AttachmentTTL time.Duration
 }
 
 // Engine holds every orchestration component.
@@ -75,6 +83,8 @@ type Engine struct {
 func New(d Deps) (*Engine, error) {
 	fan := fanout.New(d.KV, d.Log)
 	cs := core.New(d.Store.Pool, fan)
+	cs.Blobs = blobstore.Or(d.Blobs)
+	cs.AttachmentTTL = d.AttachmentTTL
 	gw, err := nodegw.New(d.Store, cs, fan, d.Log, d.Gateway)
 	if err != nil {
 		return nil, err
@@ -120,6 +130,9 @@ func (e *Engine) Start(ctx context.Context) {
 	go e.Approvals.RunSweeper(ctx, 15*time.Second)
 	go e.Timers.Run(ctx)
 	go e.SSH.Run(ctx)
+	go scheduler.RunAsLeader(ctx, e.Core.Pool, "agent-teams:blobs", 30*time.Second, func(ctx context.Context) {
+		(&blobgc.Worker{DB: e.Core.Pool, Blobs: e.Core.Blobs, Log: e.log}).Run(ctx, time.Minute)
+	})
 	go func() {
 		e.Orch.WarmAll(ctx)
 		e.Orch.StartAllQueued(ctx)

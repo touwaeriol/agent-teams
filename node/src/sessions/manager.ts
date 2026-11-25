@@ -9,6 +9,7 @@ import { readJsonFile, writeFileAtomic } from "../util/jsonl.js";
 import type { Logger } from "../util/log.js";
 import { isInside, resolveInRoot } from "../util/paths.js";
 import { loadImages, removeImages, type ImageFetcher, type LoadedImage } from "./images.js";
+import { ATTACH_DIR, AttachmentExpired, DEFAULT_ATTACHMENT_OPTIONS, downloadAttachment, planDelivery, sweepAttachments, type AttachmentOptions, type AttachmentOutcome, type AttachmentRuntime, type ConsoleHttp, type ResourceLink } from "./attachments.js";
 import { Session, type SendFn, type SessionHost, type SessionRecord } from "./session.js";
 import { ResumeFailed, type CompactResult, type Driver, type DriverContext, type ModeApplied, type ModeChange, type ModelOption } from "./types.js";
 import { codexMode } from "./codex/mode.js";
@@ -32,6 +33,12 @@ export interface ManagerDeps {
   createDriver: (spec: SessionOpen, absCwd: string, sink: Session) => { driver: Driver; ctx: DriverContext };
   /** Downloads an attached image from the console (session.send images). */
   fetchImage?: ImageFetcher;
+  /** The console over HTTP (session.send attachments: /nodes/attachments/{id}/url and the legacy download). */
+  http?: ConsoleHttp;
+  /** Download budget, free-space reserve and retention of .attachments/ copies. */
+  attachments?: Partial<AttachmentOptions>;
+  /** How often old .attachments/ copies are removed (default 1 h). */
+  attachmentSweepMs?: number;
   /** Called when a session stops for good (unregister cred secrets, loopback routes). */
   onSessionGone?: (sessionId: string) => void;
   /** A session's turn ended (session.digest, move/live.ts). */
@@ -73,7 +80,11 @@ export class SessionManager implements SessionHost {
   private maxActive: number;
   private draining = false;
   private timer: NodeJS.Timeout | null = null;
+  private sweepTimer: NodeJS.Timeout | null = null;
   private readonly dir: string;
+  readonly attachmentOptions: AttachmentOptions;
+  /** .attachments folders this daemon wrote into (swept for old copies), persisted in <state>/attachment-dirs.json. */
+  private readonly attachmentDirs: Set<string>;
 
   constructor(private readonly d: ManagerDeps) {
     this.send = d.send;
@@ -83,11 +94,45 @@ export class SessionManager implements SessionHost {
     this.maxActive = d.maxActive ?? Infinity;
     this.dir = join(d.stateDir, "sessions");
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
+    this.attachmentOptions = { ...DEFAULT_ATTACHMENT_OPTIONS, ...d.attachments };
+    this.attachmentDirs = new Set(readJsonFile<string[]>(this.attachmentDirsPath(), []).filter((x) => typeof x === "string"));
     this.loadRecords();
   }
 
   startTimers(intervalMs = 30_000): void {
     this.timer ??= setInterval(() => void this.parkIdle(), intervalMs);
+    if (!this.sweepTimer && this.attachmentOptions.retentionMs > 0) {
+      void this.sweepAttachments();
+      this.sweepTimer = setInterval(() => void this.sweepAttachments(), this.d.attachmentSweepMs ?? 3600_000);
+      this.sweepTimer.unref?.();
+    }
+  }
+
+  /** Removes .attachments/ copies older than the retention (by mtime); forgets folders that are gone. */
+  async sweepAttachments(now = Date.now()): Promise<number> {
+    const { removed, gone } = await sweepAttachments([...this.attachmentDirs], this.attachmentOptions.retentionMs, now);
+    if (gone.length) {
+      for (const g of gone) this.attachmentDirs.delete(g);
+      this.saveAttachmentDirs();
+    }
+    if (removed) this.d.log.info({ removed }, "old attachment copies removed");
+    return removed;
+  }
+
+  /** Remembers a working directory's .attachments folder for the sweep. */
+  noteAttachmentDir(absCwd: string): void {
+    const dir = join(absCwd, ATTACH_DIR);
+    if (this.attachmentDirs.has(dir)) return;
+    this.attachmentDirs.add(dir);
+    this.saveAttachmentDirs();
+  }
+
+  private attachmentDirsPath(): string {
+    return join(this.d.stateDir, "attachment-dirs.json");
+  }
+
+  private saveAttachmentDirs(): void {
+    writeFileAtomic(this.attachmentDirsPath(), JSON.stringify([...this.attachmentDirs]));
   }
 
   configure(c: { park_after_s?: number; max_active_sessions?: number }): void {
@@ -199,27 +244,50 @@ export class SessionManager implements SessionHost {
     s.released = true;
     this.persist(s);
     const first = s.spec.first_message;
-    const queue = [...(first ? [{ session_id: s.id, msg_id: first.msg_id, text: first.text, kind: "system" as const, ...(first.images ? { images: first.images } : {}), ...(first.anchor !== undefined ? { anchor: first.anchor } : {}) }] : []), ...s.held.splice(0)];
+    const queue = [...(first ? [{ session_id: s.id, msg_id: first.msg_id, text: first.text, kind: "system" as const, ...(first.images ? { images: first.images } : {}), ...(first.attachments ? { attachments: first.attachments } : {}), ...(first.anchor !== undefined ? { anchor: first.anchor } : {}) }] : []), ...s.held.splice(0)];
     void this.deliverQueued(s, queue);
     return [];
   }
 
+  /**
+   * first_message and held messages after release: all of them join the session's delivery chain
+   * at once, in order, so a session.send arriving while the first one downloads goes after them all.
+   * Never rejects (it runs detached).
+   */
   private async deliverQueued(s: Session, queue: SessionSend[]): Promise<void> {
-    for (const msg of queue) {
-      const replies = await this.send_(msg).catch((err: Error) => {
+    const pending = queue.map((msg) =>
+      this.send_(msg).catch((err: Error) => {
         this.d.log.warn({ session: s.id, err: err.message }, "held message delivery failed");
         return [] as Reply[];
-      });
-      for (const r of replies) this.send(r.type, r.body);
-    }
+      }),
+    );
+    for (const p of pending) for (const r of await p) this.send(r.type, r.body);
   }
 
   async sendMessage(body: SessionSend): Promise<Reply[]> {
     return this.send_(body);
   }
 
+  /**
+   * Deliveries of one session run one after another, whether they come from session.send (the
+   * command lane) or from release (first_message and held messages, outside the lane): a message
+   * whose attachments take minutes to download is never overtaken by the next one.
+   */
+  // async: a missing session rejects instead of throwing; the chain is still joined synchronously.
   private async send_(body: SessionSend): Promise<Reply[]> {
     const s = this.require(body.session_id);
+    const run = s.deliveries.then(() => this.deliver(s, body));
+    s.deliveries = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  /** The session was replaced by a newer session.open: this (old) object must not start a runtime. */
+  private checkCurrent(s: Session): void {
+    if (this.sessions.get(s.id) !== s) throw new CommandError("unknown_session", `session ${s.id} open_gen ${s.gen} was replaced by a newer open`);
+  }
+
+  private async deliver(s: Session, body: SessionSend): Promise<Reply[]> {
+    this.checkCurrent(s);
     if (!s.released) {
       s.held.push(body);
       return [];
@@ -227,16 +295,90 @@ export class SessionManager implements SessionHost {
     s.sends++;
     if (body.anchor !== undefined) this.setAnchor(s, body.anchor);
     if (await this.alreadyDelivered(s, body.msg_id)) return [delivered(s, body.msg_id)];
-    try {
-      await this.ensureRunning(s);
-    } catch (err) {
-      if (err instanceof ResumeFailed) return this.resumeFailed(s, err);
-      throw err;
+    // Downloads (up to 200 MB each, minutes) come before the runtime is started: the session may be
+    // parked meanwhile (idle timeout, max_active_sessions) without losing the message.
+    const fetched = await this.fetchAttachments(s, body);
+    // Closed while downloading: nothing to deliver to. Replaced by a newer session.open: an error, so
+    // this old object never starts a stray runtime process (as restartAfterCrash).
+    if (s.downloads.signal.aborted || s.state === "closed") return [];
+    for (let attempt = 0; ; attempt++) {
+      this.checkCurrent(s);
+      try {
+        await this.ensureRunning(s);
+      } catch (err) {
+        if (err instanceof ResumeFailed) return this.resumeFailed(s, err);
+        throw err;
+      }
+      if (attempt === 0 && body.interrupt_first) await s.driver!.interrupt();
+      const budget = this.pdfBudget(s);
+      const trial = { used: budget.used };
+      const { text, images, links } = await this.planAttachments(s, body, fetched, trial);
+      this.checkCurrent(s);
+      const driver = s.driver;
+      // Parked while the files were read: start it again (the budget only counts what was pushed).
+      if (!driver) {
+        if (attempt < 2) continue;
+        throw new Error("the session stopped before the message could be delivered");
+      }
+      const r = await driver.push({ msg_id: body.msg_id, text, priority: body.priority ?? "next", ...(images.length ? { images } : {}), ...(links.length ? { links } : {}) });
+      if (trial.used !== budget.used) {
+        budget.used = trial.used;
+        this.persist(s);
+      }
+      return [delivered(s, body.msg_id, r.turn_id)];
     }
-    if (body.interrupt_first) await s.driver!.interrupt();
-    const { text, images } = await this.withImages(s, body);
-    const r = await s.driver!.push({ msg_id: body.msg_id, text, priority: body.priority ?? "next", ...(images.length ? { images } : {}) });
-    return [delivered(s, body.msg_id, r.turn_id)];
+  }
+
+  /**
+   * The message's legacy images and its attachments (attachments_v2), downloaded: attachments into
+   * <cwd>/.attachments/ one by one. One that cannot be fetched (error, timeout, no disk space) becomes
+   * a line in the [附件] block and the message is delivered anyway.
+   */
+  private async fetchAttachments(s: Session, body: SessionSend): Promise<{ legacy: { text: string; images: LoadedImage[] }; outcomes: AttachmentOutcome[] }> {
+    const legacy = await this.withImages(s, body);
+    const outcomes: AttachmentOutcome[] = [];
+    if (!body.attachments?.length) return { legacy, outcomes };
+    if (!this.d.http || !s.absCwd) {
+      for (const ref of body.attachments) outcomes.push({ ref, error: "这个节点无法下载附件" });
+      return { legacy, outcomes };
+    }
+    this.noteAttachmentDir(s.absCwd);
+    for (const ref of body.attachments) {
+      try {
+        if (s.downloads.signal.aborted) throw new Error("下载已取消（会话已关闭）");
+        outcomes.push({ ref, saved: await downloadAttachment(s.absCwd, ref, this.d.http, this.attachmentOptions, undefined, s.downloads.signal) });
+      } catch (err) {
+        this.d.log.warn({ session: s.id, attachment: ref.id, err: (err as Error).message }, "attachment download failed");
+        outcomes.push({ ref, error: (err as Error).message, ...(err instanceof AttachmentExpired ? { expired: true } : {}) });
+      }
+    }
+    return { legacy, outcomes };
+  }
+
+  /** What the runtime gets: content blocks within its limits (counted in budget) and the [附件] block. */
+  private async planAttachments(
+    s: Session, body: SessionSend, f: { legacy: { text: string; images: LoadedImage[] }; outcomes: AttachmentOutcome[] }, budget: { used: number },
+  ): Promise<{ text: string; images: LoadedImage[]; links: ResourceLink[] }> {
+    if (!body.attachments?.length) return { ...f.legacy, links: [] };
+    const plan = await planDelivery(s.spec.runtime as AttachmentRuntime, f.outcomes, budget).catch((err: Error) => {
+      this.d.log.warn({ session: s.id, err: err.message }, "attachment planning failed");
+      return { note: `\n\n[附件无法读取：${err.message}]`, images: [], links: [] };
+    });
+    return { text: f.legacy.text + plan.note, images: [...f.legacy.images, ...plan.images], links: plan.links };
+  }
+
+  /** The PDF budget of the session's current SDK conversation (a new conversation starts from zero). */
+  private pdfBudget(s: Session): { used: number } {
+    const sdk = s.spec.resume?.sdk_session_id ?? "";
+    if (!s.pdfBudget || s.pdfBudget.sdk_session_id !== sdk) s.pdfBudget = { sdk_session_id: sdk, used: 0 };
+    return s.pdfBudget;
+  }
+
+  /** A compaction summarized the old turns away: their documents no longer count. */
+  onCompacted(s: Session): void {
+    if (!s.pdfBudget?.used) return;
+    s.pdfBudget.used = 0;
+    this.persist(s);
   }
 
   /** Downloads the message's images; one that cannot be fetched becomes a note in the text. */
@@ -366,10 +508,20 @@ export class SessionManager implements SessionHost {
     return applied ?? { ...currentMode(spec), applies: "next_open" as ModeApplied["applies"] };
   }
 
+  /**
+   * session.close arrived: attachment downloads of messages still being delivered to this session stop
+   * now, not after them (close waits in the session's command lane behind those session.send).
+   */
+  abortDownloads(body: SessionClose): void {
+    const s = this.sessions.get(body.session_id);
+    if (s && (body.open_gen === undefined || body.open_gen === s.gen)) s.downloads.abort();
+  }
+
   async close(body: SessionClose): Promise<Reply[]> {
     const s = this.sessions.get(body.session_id);
     const reply: Reply = { type: "session.closed", body: { session_id: body.session_id, open_gen: body.open_gen ?? s?.gen ?? 0, ...(body.reason ? { reason: body.reason } : {}) } };
     if (!s) return [reply];
+    s.downloads.abort();
     await this.stop(s, "session_closed");
     s.setState("closed", body.reason);
     this.sessions.delete(s.id);
@@ -439,6 +591,7 @@ export class SessionManager implements SessionHost {
 
   async shutdown(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
     this.timer = null;
     for (const s of this.sessions.values()) if (s.driver) await this.park(s);
   }
@@ -594,6 +747,7 @@ export class SessionManager implements SessionHost {
       s.released = rec.released;
       s.checkTranscript = true;
       s.taskAnchor = rec.anchor ?? "";
+      s.pdfBudget = rec.pdf_budget ?? null;
       s.absCwd = resolveInRoot(this.d.root, rec.spec.cwd);
       this.sessions.set(s.id, s);
       this.failCompactions(s, rec.compacting ?? []);
