@@ -2,7 +2,7 @@
 
 本文是讨论串 #58（附件和共享文件改存 RustFS、附件放开到 200 MB、全程可引用）上生产的操作手册。
 设计见交付物 `dl_01m89bx7jg5wdj464tkyhqp7ja`（共享文件 `design/58-attachments-design.md`），
-接口见 `api.md` §3.4、§3.5.1、§3.5.2，表结构见 `data-model.md` §2.11、§2.13、§2.15，
+接口见 `api.md` §3.2（消息和附件）、§3.5.1、§3.5.2，表结构见 `data-model.md` §2.11、§2.13、§2.15，
 节点协议见 `protocol.md` §4.3、§6.4。
 
 生产环境：控制面在 dmit（`/root/agent-teams`，compose 项目 `agent-teams`），对象存储是 ovh 上的
