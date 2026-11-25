@@ -15,7 +15,7 @@ Spec: `docs/v2/architecture.md` §3.2, §5.2, §6, §8, §10.3, §10.4 and `docs
 ```sh
 npm ci
 npm run build                      # dist/node.mjs (SDK, codex, MCP SDK external)
-node dist/node.mjs run --console https://console.example --token … --root ~/.agents_team --state ~/.local/state/agent-teams
+AGENT_TEAMS_NODE_TOKEN=… node dist/node.mjs run --console https://console.example --root ~/.agents_team --state ~/.local/state/agent-teams
 ```
 
 Defaults come from `~/.config/agent-teams/node.env` (written by `install-node.sh`):
@@ -23,6 +23,14 @@ Defaults come from `~/.config/agent-teams/node.env` (written by `install-node.sh
 (→ `max_active_sessions`; empty = no limit), optional `AGENT_TEAMS_STATE`, `AGENT_TEAMS_PASS_ENV`. Flags beat the
 process environment, which beats `node.env`. Exit code 75 after a successful `node.upgrade`
 (systemd restarts into the new `current` symlink).
+
+Security defaults:
+- The console URL must be `https://` / `wss://`. Plain `http://` / `ws://` would carry the node token, every
+  command and upgrade packages in clear text, so the daemon refuses to start with it, except for
+  `localhost`, `127.0.0.1` and `[::1]` (development, e2e). On a trusted network only, `AGENT_TEAMS_ALLOW_INSECURE=1`
+  (environment or `node.env`) allows a plain-text URL; the daemon logs a warning at every start.
+- Give the token through `AGENT_TEAMS_NODE_TOKEN` (environment or `node.env`, as `install-node.sh` does).
+  `--token` still works but is visible to other users in the process list; the daemon warns when it is used.
 
 In a container: `deploy/node/` (Dockerfile, compose example, README) builds an image with this daemon as
 the entry process, Claude Code, Codex, git and gh, running as a non-root user.

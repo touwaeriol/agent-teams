@@ -96,7 +96,7 @@ func New(d Deps) *Server {
 		s.tokens = github.NewTokens(d.GitHub, s.apps, d.KV, box)
 	}
 	s.router = newEngine()
-	s.router.Use(realIP, requestID, s.logRequests, s.recoverer, artifactHostOnly(d.Config.ArtifactOrigin))
+	s.router.Use(realIP, requestID, securityHeaders(d.Config.SecureCookies()), s.logRequests, s.recoverer, artifactHostOnly(d.Config.ArtifactOrigin))
 	routes := s.router.Group("", s.session, s.authorize)
 	s.api = humagin.NewWithGroup(s.router, routes, apiConfig())
 	s.register(s.api, routes)

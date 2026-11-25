@@ -313,7 +313,7 @@
  "cwd": "projects/7a1c/threads/12/dev-2", "repos": ["projects/7a1c/threads/12/dev-2/owner__name"]}
 ```
 
-旧节点打包一个档案（gzip，内含 `manifest.json`：旧节点的 root、Claude 配置目录、`CODEX_HOME`，会话 id，每个检出的 HEAD 和快照提交）：Claude 是 `<配置目录>/projects/*/<id>.jsonl` 和旁边的 `<id>/` 目录（子代理转录、长工具结果），Codex 是 `$CODEX_HOME/sessions/**/rollout-…-<thread id>.jsonl`；`repos` 里每个是 git 仓库的检出做一个快照：临时索引 = HEAD + `git add -A`（不含忽略的文件），树作为 HEAD 之上的一个提交，`git bundle create … --not --remotes`（只带别的节点 fetch 不到的东西），临时 ref 随即删掉，旧检出不动。档案压缩后 ≤ 128 MB、解开 ≤ 512 MB。守护进程用节点令牌 `PUT <控制台>/nodes/moves/<export_id>` 上传（`X-Content-SHA256` 头 = 档案的 sha256；只有这个迁移的源节点、在导出中时能传），再回 `session.exported`。
+旧节点打包一个档案（gzip，内含 `manifest.json`：旧节点的 root、Claude 配置目录、`CODEX_HOME`，会话 id，每个检出的 HEAD 和快照提交）：Claude 是 `<配置目录>/projects/*/<id>.jsonl` 和旁边的 `<id>/` 目录（子代理转录、长工具结果），Codex 是 `$CODEX_HOME/sessions/**/rollout-…-<thread id>.jsonl`；`repos` 里每个是 git 仓库的检出做一个快照：临时索引 = HEAD + `git add -A`（不含忽略的文件），树作为 HEAD 之上的一个提交，`git bundle create … --not --remotes`（只带别的节点 fetch 不到的东西），临时 ref 随即删掉，旧检出不动。档案压缩后 ≤ 128 MB、解开 ≤ 512 MB。守护进程用节点令牌 `PUT <控制台>/nodes/moves/<export_id>` 上传（`X-Content-SHA256` 头 = 档案的 sha256；只有这个迁移的源节点、在导出中时能传。控制台读 body 之前先核对归属（否则 404）、`Content-Length`（超过 128 MB 回 413）和摘要头格式（400）；同一节点同时只读一个、全局同时最多读 2 个上传的 body，其余在读 body 之前排队等待，不拒绝），再回 `session.exported`。
 
 #### `session.exported`（守护进程 → 控制台，可靠，键：`export_id`）
 
@@ -537,7 +537,7 @@ Antigravity（`source: "antigravity_permission"`）：`tool_name` 是按 ACP 工
 | `node.usage_refresh` | 控制台 → | `runtimes?` | 不可靠；立即采集一次订阅余量并回 `node.usage`（`runtimes` 省略 = 全部）。只在 `hello.features` 含 `usage` 时发；由 `POST /api/nodes/{id}/usage/refresh` 触发（api.md） |
 | `node.runtimes` | 守护进程 → | `runtimes`, `reason`, `in_reply_to?` | 不可靠；各运行时 CLI 的安装和登录状态（§9.2）。`runtimes` 以运行时 id 为键（`claude`、`codex` 和以后新增的运行时，开放字符串），值为 `{installed, version?, path?, auth, auth_expires_at?, expired?, checked_at, error?}`，每次都带守护进程认识的全部运行时；`reason`：`hello`/`periodic`/`fs_event`/`refresh`。只在 `hello.features` 含 `runtime_status` 时发；不带凭证 |
 | `node.runtimes_refresh` | 控制台 → | `runtimes?` | 不可靠；立即重新检测（`runtimes` 省略 = 全部）并回 `node.runtimes`（`reason:"refresh"`，`in_reply_to` = 本命令的信封 id），没有变化也回。只在 `hello.features` 含 `runtime_status` 时发；由节点页的“重新检测”触发 |
-| `log` | 守护进程 → | `level`, `msg`, `fields` | 不可靠；只发 warn 及以上 |
+| `log` | 守护进程 → | `level`, `msg`, `fields` | 不可靠；只发 warn 及以上。控制台每条连接限速（突发 200 条、之后每秒 5 条，超出的直接丢弃），`msg` 保留前 4000 字节，`fields` 超过 16 KiB 换成 `{"truncated":true,"bytes":N}`；`at_node_logs` 每个节点只留最近 2000 条、30 天内 |
 | `error` | 双向 | `ref_id`, `code`, `message` | 对某条消息的协议级错误：`bad_schema`、`unsupported`、`unknown_session`、`busy` |
 
 ### 9.1 订阅余量（`hello.features` 含 `usage`）
