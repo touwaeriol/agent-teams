@@ -25,8 +25,9 @@ type Delivery struct {
 	Kind      string // user | task | mail | answer | system
 	Priority  string // now | next | later
 	Interrupt bool
-	// Images the user attached (delivered as image content blocks).
-	Images []core.AttachmentRef
+	// Attachments go with the message (#58): to a daemon with attachments_v2 as attachments
+	// (any type), to an older one as images where they fit (fitAttachments).
+	Attachments []core.AttachmentRef
 	// Record is the conversation message to store with the msg_id; nil stores a note
 	// in the employee's conversation addressed to it (meta.to).
 	Record *core.NewMessage
@@ -38,7 +39,7 @@ type Delivery struct {
 
 // firstMessage is a delivery that opens (or reopens) a session.
 func firstMessage(msgID, text string, d Delivery) *protocol.FirstMessage {
-	return &protocol.FirstMessage{MsgID: protocol.MsgID(msgID), Text: text, Images: imageRefs(d.Images), Anchor: d.Anchor}
+	return &protocol.FirstMessage{MsgID: protocol.MsgID(msgID), Text: text, Attachments: attachmentRefs(dedupeRefs(d.Attachments)), Anchor: d.Anchor}
 }
 
 // Deliver records the message and sends it to the employee's session, opening one when needed.
@@ -84,7 +85,7 @@ func (o *Orchestrator) Deliver(ctx context.Context, tx *core.Tx, e core.Employee
 	if d.Anchor, err = sendAnchor(ctx, tx, e, d); err != nil {
 		return m, err
 	}
-	return m, o.send(ctx, tx, sess, msgID, d)
+	return m, o.send(ctx, tx, sess, e.ProjectID, msgID, d)
 }
 
 // target is where a delivery goes.
@@ -393,19 +394,23 @@ func ownerOf(ctx context.Context, q core.DB, projectID string) (string, error) {
 	return core.ProjectOwner(ctx, q, projectID)
 }
 
-func (o *Orchestrator) send(ctx context.Context, tx *core.Tx, s core.AgentSession, msgID string, d Delivery) error {
+func (o *Orchestrator) send(ctx context.Context, tx *core.Tx, s core.AgentSession, projectID, msgID string, d Delivery) error {
 	if s.NodeID == nil {
 		return ErrNoNode
+	}
+	f, err := o.fitAttachments(ctx, tx, *s.NodeID, projectID, d.Text, dedupeRefs(d.Attachments))
+	if err != nil {
+		return err
 	}
 	prio := d.Priority
 	if prio == "" {
 		prio = "next"
 	}
 	kind := protocol.SessionSendKind(orDefault(d.Kind, "system"))
-	body := protocol.SessionSend{SessionID: protocol.SessionID(s.ID), MsgID: protocol.MsgID(msgID), Text: d.Text,
-		Priority: protocol.SessionSendPriority(prio), Kind: &kind, InterruptFirst: d.Interrupt, Images: imageRefs(d.Images),
-		Anchor: d.Anchor}
-	_, err := o.gw.Enqueue(ctx, tx, *s.NodeID, nodegw.Command{Type: protocol.TypeSessionSend, Body: body,
+	body := protocol.SessionSend{SessionID: protocol.SessionID(s.ID), MsgID: protocol.MsgID(msgID), Text: f.text,
+		Priority: protocol.SessionSendPriority(prio), Kind: &kind, InterruptFirst: d.Interrupt, Images: f.images,
+		Attachments: f.atts, Anchor: d.Anchor}
+	_, err = o.gw.Enqueue(ctx, tx, *s.NodeID, nodegw.Command{Type: protocol.TypeSessionSend, Body: body,
 		SessionID: s.ID, OpenGen: s.OpenGen})
 	return err
 }
@@ -593,6 +598,9 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 	first *protocol.FirstMessage, resume *protocol.ResumeRef, imp *protocol.SessionImport) error {
 	prepare, err := o.queuePrepare(ctx, tx, env, node.ID, false)
 	if err != nil {
+		return err
+	}
+	if first, err = o.fitFirst(ctx, tx, node.ID, env.emp.ProjectID, first); err != nil {
 		return err
 	}
 	system, err := o.systemAppend(ctx, tx, env.emp, env.thread, env.project)
@@ -942,12 +950,9 @@ func (o *Orchestrator) handoff(ctx context.Context, tx *core.Tx, e core.Employee
 		var texts []string
 		for _, q := range queued {
 			texts = append(texts, q.Text)
-			first.Images = append(first.Images, q.Images...)
+			joinRefs(&first, q)
 		}
 		first.Text += "\n\n---\n" + strings.Join(texts, "\n\n---\n")
-		if len(first.Images) > 8 {
-			first.Images = first.Images[:8]
-		}
 		if err := markForwarded(ctx, tx, queued[1:]); err != nil {
 			return err
 		}
@@ -1019,18 +1024,6 @@ func (o *Orchestrator) resumedNote(ctx context.Context, tx *core.Tx, e core.Empl
 }
 
 // imageRefs turns message attachments into session.send images.
-func imageRefs(list []core.AttachmentRef) []protocol.ImageRef {
-	if len(list) == 0 {
-		return nil
-	}
-	out := make([]protocol.ImageRef, len(list))
-	for i, a := range list {
-		name, size := a.Name, a.Size
-		out[i] = protocol.ImageRef{ID: a.ID, MediaType: protocol.ImageRefMediaType(a.ContentType), Name: &name, Size: &size}
-	}
-	return out
-}
-
 // closeSession marks the session closed and tells its node.
 func (o *Orchestrator) closeSession(ctx context.Context, tx *core.Tx, s core.AgentSession, reason string) error {
 	if err := core.CloseSession(ctx, tx, s.ID, reason); err != nil {

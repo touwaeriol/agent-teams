@@ -17,7 +17,7 @@ import (
 // repeated forward of the same messages to the same place counts as a double click.
 const (
 	MaxForwardMessages    = 20
-	MaxForwardAttachments = core.MaxMessageImages
+	MaxForwardAttachments = core.MaxToolAttachments
 	forwardDedupeSeconds  = 30
 )
 
@@ -222,7 +222,7 @@ func (o *Orchestrator) forwardTo(ctx context.Context, tx *core.Tx, req ForwardRe
 	}
 	last := recs[len(recs)-1]
 	m, err := o.Deliver(ctx, tx, lead, Delivery{Text: forwardText(req, items), Kind: "user", Priority: "next", Record: &last,
-		Images: forwardFiles(items)})
+		Attachments: forwardFiles(items)})
 	if err != nil {
 		return res, err
 	}

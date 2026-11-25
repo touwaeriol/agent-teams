@@ -220,10 +220,7 @@ func (o *Orchestrator) movedFirst(ctx context.Context, tx *core.Tx, s core.Agent
 	first.MsgID = queued[0].MsgID
 	for _, q := range queued {
 		first.Text += "\n\n---\n" + q.Text
-		first.Images = append(first.Images, q.Images...)
-	}
-	if len(first.Images) > 8 {
-		first.Images = first.Images[:8]
+		joinRefs(&first, q)
 	}
 	return first, markForwarded(ctx, tx, queued[1:])
 }
