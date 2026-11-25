@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { attachmentOptions } from "../src/config.js";
 import type { AttachmentRef } from "../src/protocol.js";
 import {
-  ATTACH_DIR, base64Length, DEFAULT_ATTACHMENT_OPTIONS, DIRECT_LIMITS, downloadAttachment, planDelivery, sanitizeName, sweepAttachments,
+  ATTACH_DIR, AttachmentExpired, base64Length, DEFAULT_ATTACHMENT_OPTIONS, DIRECT_LIMITS, downloadAttachment, planDelivery, sanitizeName, sweepAttachments,
   type AttachmentOptions, type ConsoleHttp, type SavedAttachment,
 } from "../src/sessions/attachments.js";
 import { claudeContent, codexImages } from "../src/sessions/images.js";
@@ -189,6 +189,20 @@ describe("downloading attachments", () => {
     store.presignedFailures.set("img_bad", [403, 403]);
     await downloadAttachment(cwd, ref("img_bad", body), http, opts);
     expect(store.legacyCalls.map((c) => c.id)).toEqual(["img_bad"]);
+  });
+
+  it("an expired attachment (410 from the console) fails at once with 已过期, no legacy fallback", async () => {
+    await setup();
+    const body = Buffer.from("gone");
+    store.urlMode.set("img_gone", 410);
+    const err = await downloadAttachment(workdir(), ref("img_gone", body), http, opts).catch((e: Error) => e);
+    expect(err).toBeInstanceOf(AttachmentExpired);
+    expect((err as Error).message).toMatch(/附件已过期/);
+    expect(store.urlCalls).toEqual(["img_gone"]);
+    expect(store.legacyCalls).toEqual([]);
+    const d = await planDelivery("claude", [{ ref: ref("img_gone", body), error: (err as Error).message, expired: true }]);
+    expect(d.note).toMatch(/img_gone .*：附件已过期（超过保留期没有再使用，文件已删除），请让用户重新上传/);
+    expect(d.note).not.toMatch(/img_gone.*重试/);
   });
 
   it("refuses a body with the wrong checksum or size and leaves nothing behind", async () => {
