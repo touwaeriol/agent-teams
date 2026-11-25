@@ -122,7 +122,7 @@ func (None) PresignPart(context.Context, string, string, int32, time.Duration) (
 	return "", ErrNotConfigured
 }
 func (None) CompleteMultipart(context.Context, string, string, []Part) error { return ErrNotConfigured }
-func (None) AbortMultipart(context.Context, string, string) error           { return ErrNotConfigured }
+func (None) AbortMultipart(context.Context, string, string) error            { return ErrNotConfigured }
 func (None) ListMultipart(context.Context, string, time.Time) ([]PendingUpload, error) {
 	return nil, ErrNotConfigured
 }
@@ -134,9 +134,9 @@ func (None) Open(context.Context, string) (io.ReadCloser, error) { return nil, E
 func (None) Put(context.Context, string, io.Reader, int64, string) error {
 	return ErrNotConfigured
 }
-func (None) Copy(context.Context, string, string) error      { return ErrNotConfigured }
-func (None) Delete(context.Context, ...string) error         { return ErrNotConfigured }
-func (None) DeletePrefix(context.Context, string) error      { return ErrNotConfigured }
+func (None) Copy(context.Context, string, string) error { return ErrNotConfigured }
+func (None) Delete(context.Context, ...string) error    { return ErrNotConfigured }
+func (None) DeletePrefix(context.Context, string) error { return ErrNotConfigured }
 
 // Or returns s, or None when s is nil.
 func Or(s Store) Store {
