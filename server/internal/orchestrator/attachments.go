@@ -165,6 +165,9 @@ func (o *Orchestrator) legacyFit(ctx context.Context, tx *core.Tx, projectID, te
 			body, cut := clipText(string(texts[r.ID]), maxInlineText)
 			fmt.Fprintf(&inline, "\n\n[附件：%s%s]\n```\n%s\n```", r.Name, cut, body)
 			fmt.Fprintf(&b, "\n%s：内容已放在正文里（节点版本过旧，只放了开头部分；升级节点守护进程后可以拿到完整文件）", head)
+		case legacyImageTypes[r.ContentType] && r.Size <= legacyImageBytes:
+			// Fits an old daemon, only not in this message: its schema allows 8 images per message.
+			fmt.Fprintf(&b, "\n%s：没有附上：单条消息最多 %d 张图片（旧节点）", head, maxLegacyImages)
 		default:
 			fmt.Fprintf(&b, "\n%s：无法交给这个节点：节点守护进程版本过旧，请升级后再发", head)
 		}

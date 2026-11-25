@@ -186,6 +186,19 @@ func TestAssignTaskAttachmentsLegacy(t *testing.T) {
 		!strings.Contains(send.Text, "已随消息附上") || strings.Contains(send.Text, "请升级") {
 		t.Fatalf("legacy image message %q images %+v", send.Text, send.Images)
 	}
+
+	// More small images than an old daemon takes in one message: 8 go, the rest are named with
+	// the reason (a per-message limit, not something an upgrade is needed for).
+	var pngs []string
+	for range 10 {
+		pngs = append(pngs, uploadPNG(t, tm))
+	}
+	tm.b.must(202, "POST", "/api/conversations/"+tm.thread.ID+"/messages", map[string]any{"content": "十张图", "attachments": pngs}, nil)
+	send = tm.lead.expectSend("十张图")
+	if len(send.Images) != 8 || strings.Count(send.Text, "单条消息最多 8 张图片（旧节点）") != 2 || strings.Contains(send.Text, "请升级") ||
+		!strings.Contains(send.Text, pngs[9]) {
+		t.Fatalf("legacy 10 images %q images %d", send.Text, len(send.Images))
+	}
 }
 
 // TestLegacyHandoffToV2: a message fitted for an old daemon that never got it is handed to a
