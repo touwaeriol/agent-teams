@@ -178,6 +178,48 @@ func TestAssignTaskAttachmentsLegacy(t *testing.T) {
 	if len(fm.Text) > 70000 {
 		t.Fatalf("legacy text not cut: %d bytes", len(fm.Text))
 	}
+
+	// Everything delivered (one image): the ids are still listed, so the AI can pass them on.
+	tm.b.must(202, "POST", "/api/conversations/"+tm.thread.ID+"/messages", map[string]any{"content": "看图", "attachments": []string{png}}, nil)
+	send := tm.lead.expectSend("看图")
+	if len(send.Images) != 1 || !strings.Contains(send.Text, "[附件]") || !strings.Contains(send.Text, png+" a.png") ||
+		!strings.Contains(send.Text, "已随消息附上") || strings.Contains(send.Text, "请升级") {
+		t.Fatalf("legacy image message %q images %+v", send.Text, send.Images)
+	}
+}
+
+// TestLegacyHandoffToV2: a message fitted for an old daemon that never got it is handed to a
+// fresh session on a daemon that now has attachments_v2 (resume_failed): it arrives as it was
+// before the rewrite, with every attachment and without the upgrade line.
+func TestLegacyHandoffToV2(t *testing.T) {
+	tm := attTeam(t, false)
+	conv := tm.coordinatorConv(t)
+	_, coord := projectChat(t, tm, conv, map[string]any{"content": "你好"})
+	zip := putAttachment(t, tm, tm.projectID, "data.zip", "application/zip", []byte("PK\x03\x04"))
+	coord.mustCall("message_thread", map[string]any{"no": tm.thread.No, "text": "数据包给你", "attachments": []string{zip.ID}})
+	ctx, cancel := tm.w.waitCtx()
+	defer cancel()
+	f, err := tm.n.Wait(ctx, protocol.TypeSessionSend, func(f nodetest.Frame) bool {
+		return tm.lead.mine(f) && strings.Contains(string(f.Body), "数据包给你")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacy protocol.SessionSend
+	_ = f.Decode(&legacy)
+	if len(legacy.Attachments) != 0 || !strings.Contains(legacy.Text, "请升级") {
+		t.Fatalf("old daemon send %q %+v", legacy.Text, legacy.Attachments)
+	}
+	tm.sql(t, `UPDATE at_nodes SET last_hello = jsonb_set(last_hello, '{features}', (last_hello->'features') || '["attachments_v2"]'::jsonb)`)
+	failed, reason := true, "transcript not found"
+	tm.lead.send(protocol.TypeSessionOpened, protocol.SessionOpened{SessionID: protocol.SessionID(tm.lead.session), OpenGen: protocol.OpenGen(tm.lead.gen),
+		ResumeFailed: &failed, Error: &reason})
+	_, open := expectOpen(t, tm.w, tm.n, "lead-1")
+	fm := open.FirstMessage
+	if fm == nil || !sameIDs(refIDs(fm.Attachments), zip.ID) || len(fm.Images) != 0 || !strings.Contains(fm.Text, "数据包给你") ||
+		strings.Contains(fm.Text, "请升级") || strings.Contains(fm.Text, "版本过旧") {
+		t.Fatalf("handed-off first message %+v", fm)
+	}
 }
 
 // TestAttachmentToolRefusals: attachments of another project and expired ones are refused with
@@ -214,13 +256,22 @@ func TestAttachmentToolRefusals(t *testing.T) {
 func TestSubthreadAndRelayAttachments(t *testing.T) {
 	tm := attTeam(t, true)
 	pdf := putAttachment(t, tm, tm.projectID, "spec.pdf", core.PDFType, []byte("%PDF-1.4 fake"))
-	r := tm.lead.mustCall("open_subthread", map[string]any{"title": "调研", "brief": "看规格书", "attachments": []string{pdf.ID}})
-	if !strings.Contains(text(r), "附带 1 个附件") {
+	md := putAttachment(t, tm, tm.projectID, "todo.md", core.TextType, []byte("暗号 osprey-9"))
+	r := tm.lead.mustCall("open_subthread", map[string]any{"title": "调研", "brief": "看规格书", "attachments": []string{pdf.ID, md.ID}})
+	if !strings.Contains(text(r), "附带 2 个附件") {
 		t.Fatalf("open_subthread %q", text(r))
 	}
 	_, open := expectOpen(t, tm.w, tm.n, "lead-2")
-	if open.FirstMessage == nil || !sameIDs(refIDs(open.FirstMessage.Attachments), pdf.ID) || !strings.Contains(open.FirstMessage.Text, "看规格书") {
+	if open.FirstMessage == nil || !sameIDs(refIDs(open.FirstMessage.Attachments), pdf.ID, md.ID) || !strings.Contains(open.FirstMessage.Text, "看规格书") ||
+		!strings.Contains(open.FirstMessage.Text, "osprey-9") {
 		t.Fatalf("subthread brief %+v", open.FirstMessage)
+	}
+	var brief string
+	if err := store.QueryRow(tm.w.ctx, tm.w.e.Core.Pool, `SELECT brief FROM at_threads WHERE project_id = $1 AND no = 2`, tm.projectID).Scan(&brief); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(brief, "看规格书") || strings.Contains(brief, "osprey-9") {
+		t.Fatalf("stored subthread brief %q", brief)
 	}
 
 	conv := tm.coordinatorConv(t)
@@ -322,6 +373,21 @@ func TestReadSharedFilePresigned(t *testing.T) {
 		t.Fatalf("shared download %+v", sd)
 	}
 	expectNone(t, tm.n, protocol.TypeFileDownload, 200*time.Millisecond, func(nodetest.Frame) bool { return true })
+
+	// The finished call keeps the presigned download, so a repeated call (its result command
+	// retired) gets the same one back.
+	var stored []byte
+	if err := store.QueryRow(tm.w.ctx, tm.w.e.Core.Pool, `SELECT result FROM at_tool_calls WHERE session_id = $1 AND tool = 'read_shared_file'
+		ORDER BY created_at DESC LIMIT 1`, tm.lead.session).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	var kept struct {
+		SharedDownload *protocol.ToolSharedDownload `json:"shared_download"`
+	}
+	_ = json.Unmarshal(stored, &kept)
+	if kept.SharedDownload == nil || kept.SharedDownload.Files[0].URL == nil || *kept.SharedDownload.Files[0].URL != *sd.Files[0].URL {
+		t.Fatalf("stored result %s", stored)
+	}
 	tm.sql(t, `UPDATE at_shared_files SET sha256 = NULL WHERE project_id = $1 AND path = 'docs/a.md'`, tm.projectID)
 	r = tm.lead.call("read_shared_file", map[string]any{"path": "docs/a.md"})
 	if r.Ok || !strings.Contains(text(r), "请稍后再试") {

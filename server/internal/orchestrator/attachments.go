@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -27,6 +28,9 @@ var legacyImageTypes = map[string]bool{"image/png": true, "image/jpeg": true, "i
 	core.PDFType: true}
 
 var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// trailingTag is the coordinator's "[message_id: N]" at the end of a user message (messageTag).
+var trailingTag = regexp.MustCompile(`\n\n\[message_id: \d+\]$`)
 
 // attachmentRefs is the wire form of a delivery's attachments (session.send/first_message
 // attachments; the daemon asks for the download URL when it delivers).
@@ -89,6 +93,27 @@ type fitted struct {
 	text   string
 	images []protocol.ImageRef
 	atts   []protocol.AttachmentRef
+	// pre is the delivery before legacyFit rewrote it (nil when nothing was rewritten): kept in
+	// the command's meta (PreFitKey) so a handoff or move to a newer daemon gets the original
+	// text and every attachment back (inFlight).
+	pre *preFit
+}
+
+// PreFitKey is the node command meta holding a legacy-fitted message's original text and
+// attachments (stored, never sent).
+const PreFitKey = "pre_fit"
+
+type preFit struct {
+	Text        string                   `json:"text"`
+	Attachments []protocol.AttachmentRef `json:"attachments"`
+}
+
+// meta is the node command meta keeping the original delivery (nil when not rewritten).
+func (f fitted) meta() map[string]any {
+	if f.pre == nil {
+		return nil
+	}
+	return map[string]any{PreFitKey: f.pre}
 }
 
 // fitAttachments decides how the attachments reach the node: a daemon with attachments_v2
@@ -109,10 +134,10 @@ func (o *Orchestrator) fitAttachments(ctx context.Context, tx *core.Tx, nodeID, 
 	return o.legacyFit(ctx, tx, projectID, text, refs)
 }
 
-// legacyFit is fitAttachments for a daemon without attachments_v2. When an attachment does not
-// get through whole (cut text, other types), the text ends with an [附件] block naming every
-// attachment (id, name, type, size) and what became of it, as the new daemons' block does; when
-// all do (images and PDFs up to 5 MB, small text files) the message is what it was before #58.
+// legacyFit is fitAttachments for a daemon without attachments_v2. The text gets an [附件] block
+// naming every attachment (id, name, type, size) and what became of it, as the new daemons'
+// block does, so the AI can pass the ids on (attachments=[id]); it goes before a trailing
+// "[message_id: N]" tag, which stays last.
 func (o *Orchestrator) legacyFit(ctx context.Context, tx *core.Tx, projectID, text string, refs []core.AttachmentRef) (fitted, error) {
 	var long []string
 	for _, r := range refs {
@@ -125,9 +150,8 @@ func (o *Orchestrator) legacyFit(ctx context.Context, tx *core.Tx, projectID, te
 		o.log.Warn("read text attachments for an old daemon", "err", err)
 		texts = map[string][]byte{}
 	}
-	out := fitted{}
+	out := fitted{pre: &preFit{Text: text, Attachments: attachmentRefs(refs)}}
 	var b, inline strings.Builder
-	lost := false
 	for _, r := range refs {
 		head := fmt.Sprintf("- %s %s（%s，%s）", r.ID, r.Name, r.ContentType, sizeText(int64(r.Size)))
 		switch {
@@ -141,32 +165,47 @@ func (o *Orchestrator) legacyFit(ctx context.Context, tx *core.Tx, projectID, te
 			body, cut := clipText(string(texts[r.ID]), maxInlineText)
 			fmt.Fprintf(&inline, "\n\n[附件：%s%s]\n```\n%s\n```", r.Name, cut, body)
 			fmt.Fprintf(&b, "\n%s：内容已放在正文里（节点版本过旧，只放了开头部分；升级节点守护进程后可以拿到完整文件）", head)
-			lost = true
 		default:
-			lost = true
 			fmt.Fprintf(&b, "\n%s：无法交给这个节点：节点守护进程版本过旧，请升级后再发", head)
 		}
 	}
-	out.text = text + inline.String()
-	if lost {
-		// Only when something did not get through as before #58: then the AI learns every id.
-		out.text += "\n\n[附件]" + b.String()
+	body, tag := text, ""
+	if m := trailingTag.FindStringIndex(text); m != nil {
+		body, tag = text[:m[0]], text[m[0]:]
 	}
+	out.text = body + inline.String() + "\n\n[附件]" + b.String() + "\n可以用 assign_task、send_message 等工具带 attachments=[id] 把附件转给别人。" + tag
 	return out, nil
 }
 
-// fitFirst rewrites a first message for the node it opens on (fitAttachments).
-func (o *Orchestrator) fitFirst(ctx context.Context, tx *core.Tx, nodeID, projectID string, first *protocol.FirstMessage) (*protocol.FirstMessage, error) {
+// fitFirst rewrites a first message for the node it opens on (fitAttachments); meta is for the
+// session.open command (fitted.meta).
+func (o *Orchestrator) fitFirst(ctx context.Context, tx *core.Tx, nodeID, projectID string, first *protocol.FirstMessage) (*protocol.FirstMessage, map[string]any, error) {
 	if first == nil || (len(first.Images) == 0 && len(first.Attachments) == 0) {
-		return first, nil
+		return first, nil, nil
 	}
 	f, err := o.fitAttachments(ctx, tx, nodeID, projectID, first.Text, mergeRefs(first.Images, first.Attachments))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := *first
 	out.Text, out.Images, out.Attachments = f.text, f.images, f.atts
-	return &out, nil
+	return &out, f.meta(), nil
+}
+
+// unfit is a queued message as it was before legacyFit (the command's PreFitKey meta), so it can
+// be fitted again for another node; messages without it are returned as they are.
+func unfit(m protocol.FirstMessage, rawMeta []byte) protocol.FirstMessage {
+	if len(rawMeta) == 0 {
+		return m
+	}
+	var meta struct {
+		Pre *preFit `json:"pre_fit"`
+	}
+	if json.Unmarshal(rawMeta, &meta) != nil || meta.Pre == nil {
+		return m
+	}
+	m.Text, m.Images, m.Attachments = meta.Pre.Text, nil, meta.Pre.Attachments
+	return m
 }
 
 // joinRefs appends more attachments to a first message folded from several (holds, handoffs,

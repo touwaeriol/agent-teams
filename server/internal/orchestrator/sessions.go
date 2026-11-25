@@ -414,7 +414,7 @@ func (o *Orchestrator) send(ctx context.Context, tx *core.Tx, s core.AgentSessio
 		Priority: protocol.SessionSendPriority(prio), Kind: &kind, InterruptFirst: d.Interrupt, Images: f.images,
 		Attachments: f.atts, Anchor: d.Anchor}
 	_, err = o.gw.Enqueue(ctx, tx, *s.NodeID, nodegw.Command{Type: protocol.TypeSessionSend, Body: body,
-		SessionID: s.ID, OpenGen: s.OpenGen})
+		SessionID: s.ID, OpenGen: s.OpenGen, Meta: f.meta()})
 	return err
 }
 
@@ -603,7 +603,8 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 	if err != nil {
 		return err
 	}
-	if first, err = o.fitFirst(ctx, tx, node.ID, env.emp.ProjectID, first); err != nil {
+	first, fitMeta, err := o.fitFirst(ctx, tx, node.ID, env.emp.ProjectID, first)
+	if err != nil {
 		return err
 	}
 	system, err := o.systemAppend(ctx, tx, env.emp, env.thread, env.project)
@@ -650,7 +651,7 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 		return err
 	}
 	_, err = o.gw.Enqueue(ctx, tx, node.ID, nodegw.Command{Type: protocol.TypeSessionOpen, Body: open,
-		SessionID: sess.ID, OpenGen: sess.OpenGen})
+		SessionID: sess.ID, OpenGen: sess.OpenGen, Meta: fitMeta})
 	o.touch(tx, env.emp.ID, "session.open")
 	return err
 }
@@ -973,7 +974,7 @@ func (o *Orchestrator) handoff(ctx context.Context, tx *core.Tx, e core.Employee
 // inFlight lists the messages the old session never got: the pending first message (or the
 // first message of its last session.open) and its undelivered session.send commands, in order.
 func (o *Orchestrator) inFlight(ctx context.Context, tx *core.Tx, s core.AgentSession, pending *protocol.FirstMessage) ([]protocol.FirstMessage, error) {
-	rows, err := store.Query(ctx, tx, `SELECT CASE WHEN c.type = 'session.open' THEN c.body->'first_message' ELSE c.body END
+	rows, err := store.Query(ctx, tx, `SELECT CASE WHEN c.type = 'session.open' THEN c.body->'first_message' ELSE c.body END, c.meta
 		FROM at_node_commands c
 		WHERE c.session_id = $1 AND (c.type = 'session.send' OR (c.type = 'session.open' AND jsonb_exists(c.body, 'first_message')
 			AND c.body->'first_message' <> 'null'::jsonb))
@@ -990,14 +991,15 @@ func (o *Orchestrator) inFlight(ctx context.Context, tx *core.Tx, s core.AgentSe
 		out, seen[pending.MsgID] = append(out, *pending), true
 	}
 	for rows.Next() {
-		var raw []byte
-		if err := rows.Scan(&raw); err != nil {
+		var raw, meta []byte
+		if err := rows.Scan(&raw, &meta); err != nil {
 			return nil, err
 		}
 		var m protocol.FirstMessage
 		if json.Unmarshal(raw, &m) != nil || m.MsgID == "" || seen[m.MsgID] {
 			continue
 		}
+		m = unfit(m, meta) // as it was before an old daemon's rewrite: the new node gets it whole
 		seen[m.MsgID] = true
 		out = append(out, m)
 	}
