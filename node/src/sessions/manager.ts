@@ -306,11 +306,28 @@ export class SessionManager implements SessionHost {
         }
       }
     }
-    const plan = await planDelivery(s.spec.runtime as AttachmentRuntime, outcomes).catch((err: Error) => {
+    const budget = this.pdfBudget(s);
+    const before = budget.used;
+    const plan = await planDelivery(s.spec.runtime as AttachmentRuntime, outcomes, budget).catch((err: Error) => {
       this.d.log.warn({ session: s.id, err: err.message }, "attachment planning failed");
       return { note: `\n\n[附件无法读取：${err.message}]`, images: [], links: [] };
     });
+    if (budget.used !== before) this.persist(s);
     return { text: legacy.text + plan.note, images: [...legacy.images, ...plan.images], links: plan.links };
+  }
+
+  /** The PDF budget of the session's current SDK conversation (a new conversation starts from zero). */
+  private pdfBudget(s: Session): { used: number } {
+    const sdk = s.spec.resume?.sdk_session_id ?? "";
+    if (!s.pdfBudget || s.pdfBudget.sdk_session_id !== sdk) s.pdfBudget = { sdk_session_id: sdk, used: 0 };
+    return s.pdfBudget;
+  }
+
+  /** A compaction summarized the old turns away: their documents no longer count. */
+  onCompacted(s: Session): void {
+    if (!s.pdfBudget?.used) return;
+    s.pdfBudget.used = 0;
+    this.persist(s);
   }
 
   /** Downloads the message's images; one that cannot be fetched becomes a note in the text. */
@@ -669,6 +686,7 @@ export class SessionManager implements SessionHost {
       s.released = rec.released;
       s.checkTranscript = true;
       s.taskAnchor = rec.anchor ?? "";
+      s.pdfBudget = rec.pdf_budget ?? null;
       s.absCwd = resolveInRoot(this.d.root, rec.spec.cwd);
       this.sessions.set(s.id, s);
       this.failCompactions(s, rec.compacting ?? []);

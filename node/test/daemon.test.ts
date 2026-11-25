@@ -125,6 +125,31 @@ describe("daemon with a fake console", () => {
     expect(JSON.parse(readFileSync(join(h.opts.stateDir, "attachment-dirs.json"), "utf8"))).toEqual([join(cwd, ".attachments")]);
   });
 
+  it("counts the PDF base64 given to a Claude conversation, persists it and resets it on a compaction", async () => {
+    h = await startHarness();
+    const pdf = Buffer.alloc(6 * 1024 * 1024, 1);
+    for (const id of ["img_pa", "img_pb", "img_pc"]) h.console.images.set(id, pdf);
+    await openAndRelease("s_PDF");
+    const att = (id: string) => ({ id, name: `${id}.pdf`, content_type: "application/pdf", size: pdf.length });
+    const record = () => JSON.parse(readFileSync(join(h.opts.stateDir, "sessions", "s_PDF.json"), "utf8")) as { pdf_budget?: { used: number } };
+    h.console.command("session.send", { session_id: "s_PDF", msg_id: "m_p1", text: "two pdfs", kind: "user", attachments: [att("img_pa"), att("img_pb")] });
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_p1");
+    expect(h.log.prompts.find((p) => p.includes("two pdfs"))!.match(/\[document application\/pdf/g)?.length).toBe(2);
+    expect(record().pdf_budget?.used).toBe(2 * Math.ceil(pdf.length / 3) * 4);
+    h.console.command("session.send", { session_id: "s_PDF", msg_id: "m_p2", text: "third pdf", kind: "user", attachments: [att("img_pc")] });
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_p2");
+    const third = h.log.prompts.find((p) => p.includes("third pdf"))!;
+    expect(third).not.toContain("[document");
+    expect(third).toContain("未直接附上（超出 Claude 文档上限）");
+    h.console.command("session.send", { session_id: "s_PDF", msg_id: "m_p3", text: "autocompact" });
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_p3");
+    await h.console.waitType("session.event", (b) => b.kind === "text" && b.final === true && String(b.text).includes("autocompact"));
+    expect(record().pdf_budget?.used).toBe(0);
+    h.console.command("session.send", { session_id: "s_PDF", msg_id: "m_p4", text: "again", kind: "user", attachments: [att("img_pc")] });
+    await h.console.waitType("session.delivered", (b) => b.msg_id === "m_p4");
+    expect(h.log.prompts.find((p) => p.includes("again"))).toContain("[document application/pdf");
+  });
+
   it("forwards platform tool calls as tool.call and returns tool.result", async () => {
     h = await startHarness();
     await openAndRelease("s_C");

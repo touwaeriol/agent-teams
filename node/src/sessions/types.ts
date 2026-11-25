@@ -22,6 +22,8 @@ export interface SessionSink {
   anchor(): string;
   /** The context breakdown after a turn (session.context reason turn; Claude only). */
   context?(detail: ContextDetail): void;
+  /** The runtime compacted the conversation (Claude compact_boundary, auto or manual). */
+  compacted?(): void;
 }
 
 export interface DriverContext {

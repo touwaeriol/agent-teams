@@ -249,10 +249,25 @@ const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp
 const PDF = "application/pdf";
 const MB = 1024 * 1024;
 
-/** Per-file limits for handing an attachment to the runtime as a content block (#58 t5; no per-message budget). */
+/**
+ * Limits for handing an attachment to the runtime as a content block (#58).
+ *
+ * Claude, measured with Agent SDK 0.3.325 and its CLI (#58 t15, haiku):
+ *   - images: PNGs of 6 MB, 15 MB base64 and 3000×1500 px were all read (the CLI scales them down);
+ *     5 MB of base64 is kept as the conservative limit.
+ *   - one PDF: 18.67 MB raw was read; from 18.88 MB raw (≈ 25,000,000 bytes of base64) the CLI drops
+ *     the document silently (no error, the model says nothing is attached).
+ *   - several PDFs: once the PDFs of the request — including those still in the conversation history
+ *     — exceed ≈ 25 MB of base64, documents are dropped silently: 4 × 8 MB in one message left 2,
+ *     2 × 12 MB left none, and one 12 MB PDF per turn for 4 turns left the model seeing no document
+ *     (not even the new one) in turns 2 and 4. No error ever comes back, so a retry cannot be keyed
+ *     on one; instead the daemon counts the PDF base64 it handed to the session (persisted with the
+ *     session, reset on a compaction or a new SDK session) and gives only the path beyond 20 MB.
+ *   An image next to a 16.8 MB-base64 PDF did not count against that budget.
+ */
 export const DIRECT_LIMITS = {
-  /** Claude Code CLI: an image's base64 at most 5 MB; a PDF document block at most 20 MB raw. */
-  claude: { imageBase64: 5 * MB, pdf: 20 * MB },
+  /** Claude Code CLI: an image's base64 at most 5 MB; a PDF at most 15 MB raw (20 MB base64), and 20 MB of PDF base64 per conversation. */
+  claude: { imageBase64: 5 * MB, pdf: 15 * MB, sessionPdfBase64: 20 * MB },
   /** agy: images as image blocks, same conservative limit as Claude; everything else a resource_link. */
   antigravity: { imageBase64: 5 * MB },
 } as const;
@@ -289,8 +304,13 @@ function baseType(t: string): string {
   return t.split(";")[0]!.trim().toLowerCase();
 }
 
+/** PDF base64 already handed to a Claude conversation (DIRECT_LIMITS.claude.sessionPdfBase64); planDelivery adds to used. */
+export interface PdfBudget {
+  used: number;
+}
+
 /** Decides per attachment what the runtime gets directly and writes the [附件] block. */
-export async function planDelivery(runtime: AttachmentRuntime, outcomes: AttachmentOutcome[]): Promise<Delivery> {
+export async function planDelivery(runtime: AttachmentRuntime, outcomes: AttachmentOutcome[], pdfBudget: PdfBudget = { used: 0 }): Promise<Delivery> {
   const images: LoadedImage[] = [];
   const links: ResourceLink[] = [];
   const lines: string[] = [];
@@ -301,7 +321,7 @@ export async function planDelivery(runtime: AttachmentRuntime, outcomes: Attachm
       continue;
     }
     const t = baseType(o.ref.content_type);
-    const how = await directOf(runtime, t, o.saved, images, links);
+    const how = await directOf(runtime, t, o.saved, images, links, pdfBudget);
     lines.push(`${head} → ${o.saved.abs}（${how}）`);
   }
   if (!lines.length) return { note: "", images, links };
@@ -311,7 +331,9 @@ export async function planDelivery(runtime: AttachmentRuntime, outcomes: Attachm
   return { note, images, links };
 }
 
-async function directOf(runtime: AttachmentRuntime, t: string, s: SavedAttachment, images: LoadedImage[], links: ResourceLink[]): Promise<string> {
+const PATH_ONLY = "只给路径，请用文件或命令行工具读取";
+
+async function directOf(runtime: AttachmentRuntime, t: string, s: SavedAttachment, images: LoadedImage[], links: ResourceLink[], pdfBudget: PdfBudget): Promise<string> {
   const isImage = IMAGE_TYPES.has(t);
   const size = s.ref.size;
   if (runtime === "codex") {
@@ -319,21 +341,34 @@ async function directOf(runtime: AttachmentRuntime, t: string, s: SavedAttachmen
       images.push({ id: s.ref.id, media_type: t as LoadedImage["media_type"], path: s.abs });
       return "已作为图片附上";
     }
-    return "只给路径，用文件或命令行工具读取";
+    return PATH_ONLY;
   }
-  if (isImage && size > 0 && base64Length(size) <= DIRECT_LIMITS[runtime].imageBase64) {
-    images.push({ id: s.ref.id, media_type: t as LoadedImage["media_type"], path: s.abs, data: await readFile(s.abs) });
-    return "已作为图片附上";
+  if (isImage) {
+    if (size > 0 && base64Length(size) <= DIRECT_LIMITS[runtime].imageBase64) {
+      images.push({ id: s.ref.id, media_type: t as LoadedImage["media_type"], path: s.abs, data: await readFile(s.abs) });
+      return "已作为图片附上";
+    }
+    if (runtime === "antigravity") links.push(resourceLink(s, t));
+    return "未直接附上（超出图片大小上限），请用工具读取路径";
   }
-  if (runtime === "claude" && t === PDF && size > 0 && size <= DIRECT_LIMITS.claude.pdf) {
-    images.push({ id: s.ref.id, media_type: PDF, path: s.abs, data: await readFile(s.abs) });
-    return "已作为文档附上";
+  if (runtime === "claude" && t === PDF) {
+    const b64 = base64Length(size);
+    if (size > 0 && size <= DIRECT_LIMITS.claude.pdf && pdfBudget.used + b64 <= DIRECT_LIMITS.claude.sessionPdfBase64) {
+      images.push({ id: s.ref.id, media_type: PDF, path: s.abs, data: await readFile(s.abs) });
+      pdfBudget.used += b64;
+      return "已作为文档附上";
+    }
+    return "未直接附上（超出 Claude 文档上限），请用工具读取路径";
   }
   if (runtime === "antigravity") {
-    links.push({ type: "resource_link", uri: pathToFileURL(s.abs).href, name: s.ref.name, mimeType: t, size });
+    links.push(resourceLink(s, t));
+    return `${PATH_ONLY}（另附 resource_link）`;
   }
-  if (isImage || (runtime === "claude" && t === PDF)) return "超过直接附上的大小上限，只给路径，用文件或命令行工具读取";
-  return "只给路径，用文件或命令行工具读取";
+  return PATH_ONLY;
+}
+
+function resourceLink(s: SavedAttachment, t: string): ResourceLink {
+  return { type: "resource_link", uri: pathToFileURL(s.abs).href, name: s.ref.name, mimeType: t, size: s.ref.size };
 }
 
 export function formatSize(n: number): string {

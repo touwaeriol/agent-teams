@@ -243,32 +243,57 @@ function savedFile(dir: string, id: string, contentType: string, size: number): 
 describe("what the runtime gets directly", () => {
   const maxImage = (DIRECT_LIMITS.claude.imageBase64 / 4) * 3;
 
-  it("Claude: images up to 5 MB of base64, PDFs up to 20 MB, the rest by path", async () => {
+  it("Claude: images up to 5 MB of base64, PDFs up to 15 MB, the rest by path", async () => {
     const dir = workdir();
     expect(base64Length(maxImage)).toBe(5 * MB);
+    const one = (id: string, type: string, size: number) => {
+      const saved = savedFile(dir, id, type, size);
+      return { ref: saved.ref, saved };
+    };
     const outcomes = [
-      { ref: savedFile(dir, "img_p1", "image/png", maxImage).ref, saved: savedFile(dir, "img_p1", "image/png", maxImage) },
-      { ref: savedFile(dir, "img_p2", "image/jpeg", maxImage + 1).ref, saved: savedFile(dir, "img_p2", "image/jpeg", maxImage + 1) },
-      { ref: savedFile(dir, "img_d1", "application/pdf", 20 * MB).ref, saved: savedFile(dir, "img_d1", "application/pdf", 20 * MB) },
-      { ref: savedFile(dir, "img_d2", "application/pdf", 20 * MB + 1).ref, saved: savedFile(dir, "img_d2", "application/pdf", 20 * MB + 1) },
-      { ref: savedFile(dir, "img_z", "application/zip", 150 * MB).ref, saved: savedFile(dir, "img_z", "application/zip", 150 * MB) },
-      { ref: savedFile(dir, "img_t", "text/plain; charset=utf-8", 10).ref, saved: savedFile(dir, "img_t", "text/plain; charset=utf-8", 10) },
+      one("img_p1", "image/png", maxImage),
+      one("img_p2", "image/jpeg", maxImage + 1),
+      one("img_d1", "application/pdf", 15 * MB),
+      one("img_d2", "application/pdf", 15 * MB + 1),
+      one("img_z", "application/zip", 150 * MB),
+      one("img_t", "text/plain; charset=utf-8", 10),
       { ref: { id: "img_f", name: "lost.bin", content_type: "application/octet-stream", size: 5 }, error: "下载失败：HTTP 500" },
     ];
-    const d = await planDelivery("claude", outcomes);
-    expect(d.images.map((i) => [i.id, i.media_type, i.data?.length])).toEqual([["img_p1", "image/png", maxImage], ["img_d1", "application/pdf", 20 * MB]]);
+    const budget = { used: 0 };
+    const d = await planDelivery("claude", outcomes, budget);
+    expect(d.images.map((i) => [i.id, i.media_type, i.data?.length])).toEqual([["img_p1", "image/png", maxImage], ["img_d1", "application/pdf", 15 * MB]]);
+    expect(budget.used).toBe(base64Length(15 * MB));
     expect(d.links).toEqual([]);
     expect(d.note).toContain("[附件]");
     expect(d.note).toMatch(/img_p1 .*→ .*img_p1\.bin（已作为图片附上）/);
-    expect(d.note).toMatch(/img_p2 .*超过直接附上的大小上限，只给路径/);
+    expect(d.note).toMatch(/img_p2 .*未直接附上（超出图片大小上限），请用工具读取路径/);
     expect(d.note).toMatch(/img_d1 .*已作为文档附上/);
-    expect(d.note).toMatch(/img_d2 .*超过直接附上的大小上限/);
+    expect(d.note).toMatch(/img_d2 .*未直接附上（超出 Claude 文档上限），请用工具读取路径/);
     expect(d.note).toMatch(/img_z .*application\/zip，150\.0 MB.*只给路径/);
     expect(d.note).toMatch(/img_t .*只给路径/);
     expect(d.note).toMatch(/img_f lost\.bin.*下载失败（下载失败：HTTP 500）/);
     expect(d.note).toContain("read_attachment");
     const content = claudeContent("看附件", d.images) as Array<{ type: string }>;
     expect(content.map((b) => b.type)).toEqual(["image", "document", "text"]);
+  });
+
+  it("Claude: PDFs stop going in directly once the conversation holds 20 MB of PDF base64", async () => {
+    const dir = workdir();
+    const pdf = (id: string, size: number) => {
+      const saved = savedFile(dir, id, "application/pdf", size);
+      return { ref: saved.ref, saved };
+    };
+    const budget = { used: 0 };
+    // Two 6 MB PDFs (8 MB base64 each) fit, the third does not; a small one after it still does.
+    const d = await planDelivery("claude", [pdf("img_a", 6 * MB), pdf("img_b", 6 * MB), pdf("img_c", 6 * MB), pdf("img_s", MB)], budget);
+    expect(d.images.map((i) => i.id)).toEqual(["img_a", "img_b", "img_s"]);
+    expect(d.note).toMatch(/img_c .*超出 Claude 文档上限/);
+    // The next message of the same conversation keeps counting.
+    const next = await planDelivery("claude", [pdf("img_n", 3 * MB)], budget);
+    expect(next.images).toEqual([]);
+    expect(budget.used).toBe(base64Length(6 * MB) * 2 + base64Length(MB));
+    // Images never count against it.
+    expect((await planDelivery("claude", [{ ref: savedFile(dir, "img_i", "image/png", 1000).ref, saved: savedFile(dir, "img_i", "image/png", 1000) }], budget)).images.length).toBe(1);
   });
 
   it("Codex: every image as localImage (no size limit, not read), everything else by path", async () => {

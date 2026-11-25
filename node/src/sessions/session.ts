@@ -19,6 +19,8 @@ export interface SessionRecord {
   anchor?: string;
   /** compact_ids of session.compact still running (answered ok=false after a daemon restart). */
   compacting?: string[];
+  /** Claude: PDF base64 handed to this SDK conversation as document blocks (attachments.ts DIRECT_LIMITS). */
+  pdf_budget?: { sdk_session_id: string; used: number };
 }
 
 export interface SessionHost {
@@ -29,6 +31,8 @@ export interface SessionHost {
   onExit(s: Session, err: Error): void;
   /** The console takes session.context (welcome.features has context_detail). */
   contextDetailOn?(): boolean;
+  /** The runtime compacted the conversation (auto or session.compact). */
+  onCompacted?(s: Session): void;
 }
 
 /** One logical session: protocol state, event numbering and the SessionSink for its driver. */
@@ -53,6 +57,8 @@ export class Session implements SessionSink {
   sends = 0;
   /** session.compact runs in progress (compact_id). */
   readonly compacts = new Set<string>();
+  /** Claude: PDF base64 already given to the SDK conversation sdk_session_id (persisted). */
+  pdfBudget: { sdk_session_id: string; used: number } | null = null;
   private lastEventNo = 0;
 
   constructor(public spec: SessionOpen, private readonly host: SessionHost) {}
@@ -87,6 +93,7 @@ export class Session implements SessionSink {
       sdk_session_id: this.spec.resume?.sdk_session_id ?? null, codex_thread_id: this.spec.resume?.codex_thread_id ?? null, spec: this.spec,
       ...(this.taskAnchor ? { anchor: this.taskAnchor } : {}),
       ...(this.compacts.size ? { compacting: [...this.compacts] } : {}),
+      ...(this.pdfBudget ? { pdf_budget: this.pdfBudget } : {}),
     };
   }
 
@@ -129,6 +136,10 @@ export class Session implements SessionSink {
 
   anchor(): string {
     return this.taskAnchor;
+  }
+
+  compacted(): void {
+    this.host.onCompacted?.(this);
   }
 
   context(detail: ContextDetail): void {
