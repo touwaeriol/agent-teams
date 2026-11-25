@@ -61,6 +61,35 @@ export function imageFiles(list: FileList | File[] | null | undefined): File[] {
   return Array.from(list ?? []).filter((f) => attachKind(f) !== null);
 }
 
+/** The parts of a clipboard a paste decision needs (DataTransfer satisfies it). */
+export interface ClipboardLike {
+  files?: FileList | File[] | null;
+  getData?: (type: string) => string;
+}
+
+/**
+ * Files a paste should attach; [] lets the browser insert the text. Many sources put a picture of
+ * the copied selection next to its text (Office/WPS, macOS apps, chat apps, some browsers and
+ * clipboard tools): text/plain plus an image file but no <img> in the HTML. That is a text paste.
+ * The files win when there is no text, when one is not an image (a copied file or PDF), when the
+ * HTML holds an <img> (a copied picture), or when the text is only the files' names (a file copied
+ * in Finder or Explorer).
+ */
+export function pastedFiles(cd: ClipboardLike | null | undefined): File[] {
+  if (!cd) return [];
+  const files = imageFiles(cd.files);
+  if (files.length === 0) return [];
+  const get = (t: string) => (typeof cd.getData === "function" ? cd.getData(t) : "") || "";
+  const text = get("text/plain").trim();
+  if (!text) return files;
+  if (!files.every((f) => attachKind(f) === "image")) return files;
+  if (/<img[\s>/]/i.test(get("text/html"))) return files;
+  const names = new Set(files.map((f) => f.name));
+  const lines = text.split(/\r?\n/).map((l) => l.trim().split(/[\\/]/).pop() ?? "").filter(Boolean);
+  if (lines.length > 0 && lines.every((l) => names.has(l))) return files;
+  return [];
+}
+
 export const attachmentUrl = (id: string) => `/api/attachments/${encodeURIComponent(id)}`;
 
 export const isImageType = (contentType: string) => contentType.startsWith("image/");
