@@ -3,10 +3,14 @@ package engine_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
@@ -203,4 +207,37 @@ func TestGatewayRotatedWhileSecondLinkHandshakes(t *testing.T) {
 		t.Fatalf("close codes: second %d, old %d", second.CloseCode(), old.CloseCode())
 	}
 	eventually(t, "node offline", func() bool { return !w.e.Gateway.Online(node.Node.ID) })
+}
+
+// TestGatewayRestoreRecheckError (#55 t52): when the link put back after a refused attach cannot
+// be re-checked (a database error), it is closed as an internal error, which the daemon retries
+// soon, not with 4401 (which would park it for 10 minutes); the refused link still gets 4401.
+func TestGatewayRestoreRecheckError(t *testing.T) {
+	w := newWorld(t, nil)
+	b := w.signUp("ops@example.com")
+	var node nodeCreated
+	b.must(201, "POST", "/api/nodes", map[string]string{"name": "n1"}, &node)
+	old := w.connect(node.Token, nodetest.Options{})
+
+	var calls atomic.Int32
+	w.e.Gateway.StillValid = func(context.Context, core.DB, string, string) (bool, error) {
+		switch calls.Add(1) {
+		case 1: // recordHello of the new link
+			return true, nil
+		case 2: // the new link once registered: revoked meanwhile
+			return false, nil
+		default: // the old link put back: the database is down
+			return false, errors.New("connection refused")
+		}
+	}
+	t.Cleanup(func() { w.e.Gateway.StillValid = nil })
+	refused := w.dialRaw(node.Token, nodetest.Options{SkipWelcome: true})
+	waitClosed(t, refused)
+	if refused.CloseCode() != nodegw.CloseUnauthorized {
+		t.Fatalf("refused link close %d", refused.CloseCode())
+	}
+	waitClosed(t, old)
+	if code := old.CloseCode(); code == nodegw.CloseUnauthorized || code != websocket.StatusInternalError {
+		t.Fatalf("restored link close %d, want %d", code, websocket.StatusInternalError)
+	}
 }

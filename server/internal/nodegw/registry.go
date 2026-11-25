@@ -88,7 +88,10 @@ func toMap(v any) map[string]any {
 }
 
 // Disconnect implements platform.NodeRegistry (token rotated, node or owner removed).
+// The node's takeover history is dropped too: the token it was about is no longer valid, and a
+// deleted node must not leave its entry behind.
 func (g *Gateway) Disconnect(_ context.Context, nodeID, reason string) {
+	g.forgetTakeovers(nodeID)
 	if l := g.link(nodeID); l != nil {
 		l.close(CloseUnauthorized, truncate(reason, 100))
 	}
