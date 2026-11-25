@@ -3,7 +3,6 @@
 import { computed } from "vue";
 import { useAttachments } from "@/components/app/attachments";
 import MessageImages from "@/components/app/MessageImages.vue";
-import type { AttachmentRef } from "@/api/views";
 import { deliverables as deliverableActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import { keys, useDeliverableComments } from "@/api/queries";
@@ -20,8 +19,6 @@ const add = useAction((v: { text: string; ids: string[] }) => deliverableActions
 const items = computed(() => comments.data.value?.items ?? []);
 const to = computed(() => props.author || "发布的员工");
 const onSend = (text: string, ids: string[]) => add.mutateAsync({ text, ids });
-/** CommentView.attachments once the server returns them. */
-const attachmentsOf = (c: object) => (c as { attachments?: AttachmentRef[] }).attachments;
 </script>
 
 <template>
@@ -37,7 +34,7 @@ const attachmentsOf = (c: object) => (c as { attachments?: AttachmentRef[] }).at
         你 · {{ clock(c.created_at) }}{{ c.version ? ` · 第 ${c.version} 版` : "" }}{{ c.sent_to ? ` · 已发给 ${c.sent_to}` : " · 未转发" }}
       </span>
       <span class="whitespace-pre-wrap text-[13px] leading-[21px]">{{ c.text }}</span>
-      <MessageImages :items="attachmentsOf(c)" align="start" small />
+      <MessageImages :items="c.attachments ?? undefined" align="start" small />
     </div>
     <div class="mt-auto flex flex-col gap-1.5">
       <Composer id="note" variant="inline" label="写批注" placeholder="写批注，发给做这个的员工" :busy="add.isPending.value" :attachments="files" :on-send="onSend" />

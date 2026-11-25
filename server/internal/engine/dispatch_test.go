@@ -119,6 +119,19 @@ func TestDispatchSource(t *testing.T) {
 		d.Source.Attachments[0].ID != img || d.Source.Attachments[0].ContentType != "image/png" || d.Source.CreatedAt.IsZero() {
 		t.Fatalf("dispatch %+v", d)
 	}
+	// Once the attachment's retention runs out the dispatch says so (the page shows 已过期 without probing).
+	if d.Source.Attachments[0].Expired {
+		t.Fatalf("fresh attachment marked expired %+v", d.Source.Attachments)
+	}
+	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `UPDATE at_attachments SET state = 'expired' WHERE id = $1`, img); err != nil {
+		t.Fatal(err)
+	}
+	if a := getDispatch(t, tm, out.ThreadID).Dispatch.Source.Attachments; len(a) != 1 || !a[0].Expired {
+		t.Fatalf("expired attachment %+v", a)
+	}
+	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `UPDATE at_attachments SET state = 'ready' WHERE id = $1`, img); err != nil {
+		t.Fatal(err)
+	}
 
 	// A scheduled-task post (role user, written by the platform) is never the source.
 	confirm(t, tm, coord, "还没送达的消息", pending.ID)

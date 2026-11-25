@@ -184,6 +184,9 @@ describe("sendMessage", () => {
     void sendMessage(client, { cid: "c1", content: "新的" }).catch(() => undefined);
     await client.refetchQueries({ queryKey: keys.messages("c1") }).catch(() => undefined);
     expect(shown("c1").map((m) => m.content)).toEqual(["旧的", "新的"]);
+    // The POST reads its body before it is recorded: wait for it instead of racing the refetch.
+    await vi.waitFor(() => expect(api.posts).toHaveLength(1));
+    await flushPromises();
     expect(api.posts).toHaveLength(1);
   });
 });

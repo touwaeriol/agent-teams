@@ -311,7 +311,7 @@ func nodePath(ctx context.Context, q DB, nodeID *string, rel string) (string, er
 }
 
 // DispatchOf is the thread's hand-over: who opened it, when, and the user's message it was opened
-// for. Nil when the brief is empty or is the user's forwarded messages (their copies are already
+// for (its attachments carry expired). Nil when the brief is empty or is the user's forwarded messages (their copies are already
 // in the conversation) or the first message of a session (recorded as the user's message);
 // Source is nil without a message or when it was deleted.
 func DispatchOf(ctx context.Context, q DB, t Thread) (*ThreadDispatch, error) {
@@ -326,6 +326,12 @@ func DispatchOf(ctx context.Context, q DB, t Thread) (*ThreadDispatch, error) {
 	atts := AttachmentsOf(*m)
 	if atts == nil {
 		atts = []AttachmentRef{}
+	}
+	// The page shows expired ones without probing each card (#58).
+	if len(atts) > 0 {
+		if err := MarkExpiredRefs(ctx, q, atts); err != nil {
+			return nil, err
+		}
 	}
 	d.Source = &DispatchSource{MessageID: m.ID, Content: m.Content, Attachments: atts, CreatedAt: m.CreatedAt}
 	return d, nil

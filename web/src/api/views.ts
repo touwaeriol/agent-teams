@@ -460,6 +460,8 @@ export interface DeliverableComment {
   text: string;
   sent_to: string;
   created_at: string;
+  /** Files sent with the comment (expired ones carry expired). */
+  attachments?: AttachmentRef[] | null;
 }
 
 export interface MergeEntryView {

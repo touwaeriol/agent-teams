@@ -90,7 +90,7 @@ const create = useAction(
       branch: branch.value.trim() || undefined,
       // SessionInput.attachments (agreed with the server, q10): only sent with files, so a session
       // without attachments posts exactly what it did before. Typed once the schema has it.
-      ...(attachmentsField(files.ids()) as object),
+      ...attachmentsField(files.ids()),
     }),
   {
     invalidate: [keys.projects],

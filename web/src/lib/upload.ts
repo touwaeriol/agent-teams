@@ -2,7 +2,7 @@
 // straight to storage. create → parts (presigned URLs, 1 hour) → PUT each slice of part_size bytes
 // (3 at a time, each retried; the ETag response header is kept) → complete. Cancelling aborts the
 // running PUTs and DELETEs the upload. The bytes never pass through the console.
-import { client, csrfToken, CSRF_HEADER, toApiError, unwrap } from "@/api/client";
+import { client, unwrap } from "@/api/client";
 import type { components } from "@/api/schema";
 
 type S = components["schemas"];
@@ -34,24 +34,12 @@ export function projectUploads(pid: string): UploadApi {
  * yet; the console moves them into the session's project). Same bodies and answers as projectUploads.
  */
 export function standaloneUploads(): UploadApi {
-  const call = async <T>(method: string, url: string, body?: unknown): Promise<T> => {
-    const token = csrfToken();
-    const res = await globalThis.fetch(url, {
-      method, credentials: "same-origin",
-      headers: { ...(body !== undefined ? { "Content-Type": "application/json" } : {}), ...(token ? { [CSRF_HEADER]: token } : {}) },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    });
-    const text = await res.text();
-    const data: unknown = text ? JSON.parse(text) : undefined;
-    if (!res.ok) throw toApiError(res.status, data, res.statusText);
-    return data as T;
-  };
-  const u = (id: string) => `/api/uploads/${encodeURIComponent(id)}`;
+  const p = (upload_id: string) => ({ params: { path: { upload_id } } });
   return {
-    create: (body) => call("POST", "/api/uploads", body),
-    parts: (id, numbers) => call("POST", `${u(id)}/parts`, { numbers }),
-    complete: (id, parts) => call("POST", `${u(id)}/complete`, { parts }),
-    abort: (id) => call("DELETE", u(id)),
+    create: (body) => unwrap(client.POST("/api/uploads", { body })),
+    parts: (upload_id, numbers) => unwrap(client.POST("/api/uploads/{upload_id}/parts", { ...p(upload_id), body: { numbers } })),
+    complete: (upload_id, parts) => unwrap(client.POST("/api/uploads/{upload_id}/complete", { ...p(upload_id), body: { parts } })),
+    abort: (upload_id) => unwrap(client.DELETE("/api/uploads/{upload_id}", p(upload_id))),
   };
 }
 
@@ -133,8 +121,11 @@ export async function uploadFile(file: Blob & { name?: string }, api: UploadApi,
   const inner = new AbortController();
   const onCancel = () => inner.abort();
   signal.addEventListener("abort", onCancel, { once: true });
+  // Cancelled while create was in flight: the listener above never fires, so stop now.
+  if (signal.aborted) inner.abort();
   const abortUpload = () => void api.abort(id).catch(() => undefined);
   try {
+    if (inner.signal.aborted) throw new UploadCancelled();
     const partSize = session.part_size;
     const count = Math.max(1, session.parts || Math.ceil(file.size / partSize));
     const loaded = new Array<number>(count + 1).fill(0);
@@ -148,6 +139,7 @@ export async function uploadFile(file: Blob & { name?: string }, api: UploadApi,
       }
     };
     await fetchUrls(Array.from({ length: count }, (_, i) => i + 1));
+    if (inner.signal.aborted) throw new UploadCancelled();
     const etags = new Map<number, string>();
     const sendPart = async (n: number) => {
       const start = (n - 1) * partSize;

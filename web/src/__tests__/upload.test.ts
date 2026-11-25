@@ -123,6 +123,38 @@ describe("multipart direct upload", () => {
     await vi.waitFor(() => expect(calls).toContain("abort"));
   });
 
+  it("cancelling while create is in flight stops at once: no part URLs, no PUT, the upload is deleted", async () => {
+    const { api, calls, partAsks } = fakeApi();
+    const ctl = new AbortController();
+    const create = api.create;
+    api.create = async (body) => {
+      const s = await create(body);
+      ctl.abort(); // the user clicked cancel before create answered
+      return s;
+    };
+    const put = vi.fn<PutPart>();
+    await expect(uploadFile(fake("a.bin", 10 * MB), api, { kind: "attachment", put, signal: ctl.signal })).rejects.toBeInstanceOf(UploadCancelled);
+    expect(partAsks).toEqual([]);
+    expect(put).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(calls).toContain("abort"));
+    expect(calls).not.toContain("complete");
+  });
+
+  it("cancelling while the part URLs are being fetched sends no PUT", async () => {
+    const { api, calls } = fakeApi();
+    const ctl = new AbortController();
+    const parts = api.parts;
+    api.parts = async (id, numbers) => {
+      const r = await parts(id, numbers);
+      ctl.abort();
+      return r;
+    };
+    const put = vi.fn<PutPart>();
+    await expect(uploadFile(fake("a.bin", 10 * MB), api, { kind: "attachment", put, signal: ctl.signal })).rejects.toBeInstanceOf(UploadCancelled);
+    expect(put).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(calls).toContain("abort"));
+  });
+
   it("refuses files over 200 MB before uploading", () => {
     const { ok, problems } = pickImages([fake("huge.iso", 200 * MB + 1)], 0);
     expect(ok).toEqual([]);
