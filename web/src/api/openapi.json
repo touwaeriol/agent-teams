@@ -13456,6 +13456,23 @@
             }
           },
           {
+            "description": "Only these deliverables (comma-separated ids, at most 50); unknown ids and ids of other projects are left out",
+            "explode": false,
+            "in": "query",
+            "name": "ids",
+            "schema": {
+              "description": "Only these deliverables (comma-separated ids, at most 50); unknown ids and ids of other projects are left out",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 50,
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          {
             "description": "Leave out hosted lone images (render=image), published before screenshots stopped being deliverables",
             "explode": false,
             "in": "query",
