@@ -3,9 +3,10 @@ import type { GitConnectionView, RepoItem } from "@/api/views";
 
 export const REPOS_SHOWN = 4;
 
-/** 组织 / 个人账号: an App installed on an organization links to its org settings. */
+/** 组织 / 个人账号 / 个人令牌（PAT）: an App installed on an organization links to its org settings. */
 export function connectionKind(c: Pick<GitConnectionView, "kind" | "installation_settings_url">): string {
-  return c.kind === "app" && c.installation_settings_url?.includes("/organizations/") ? "组织" : "个人账号";
+  if (c.kind === "token") return "个人令牌（PAT）";
+  return c.installation_settings_url?.includes("/organizations/") ? "组织" : "个人账号";
 }
 
 export function shortDate(iso: string): string {

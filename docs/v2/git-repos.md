@@ -194,7 +194,7 @@ credvault.GitCredAAD = "at-git-cred:v1 | <user_id> | <credential_id> | <kind> | 
 
 PAT 连接本来就是“长期令牌下发到员工会话”（`remote-servers.md` §10.3 第 1 条，Q8 没定）。有了单独仓库，它的合理归宿是：**变成 `github.com` 主机上的一条 HTTPS 令牌凭据，项目里用到的每个仓库变成一个单独仓库**，令牌从此只在主节点。
 
-- 第一期：PAT 连接照常工作，GitHub 页（新“Git 仓库”页的 GitHub 分区）在 PAT 卡片上加提示“个人令牌会下发到员工会话，建议转成单独仓库（令牌只留在平台）或改用 GitHub App”，并给“转成单独仓库”按钮。
+- 第一期：PAT 连接照常工作，GitHub 页（新“Git 仓库”页的 GitHub 分区）在 PAT 卡片上加提示（#55 M4 已加风险警告，文案见 `web/src/components/app/repo/repo.ts` 的 `PAT_WARNING`，项目选仓库选中 PAT 连接时也显示；“转成单独仓库”按钮未做）“个人令牌会下发到员工会话，建议转成单独仓库（令牌只留在平台）或改用 GitHub App”，并给“转成单独仓库”按钮。
 - 转换由 `atctl admin convert-pat <connection_id>` 或按钮触发（Go 代码，不放 SQL 迁移，因为要解开 Fernet 再按信封加密重新密封）：建凭据、为每个用到的 `owner/name` 建 `at_git_repos`（slug 写 `github.com/owner/name`）、改 `at_project_repos` 指向它。**slug 变了**，所以只在没有进行中讨论串的项目上转，有的话按钮提示先结束讨论串。
 - 用 PAT 的单独 GitHub 仓库会失去 PR / CI（第一期通用仓库不调 API）。所以按钮旁边写清楚：“要保留 PR 和 CI，请改用 GitHub App”。以后 §8.4 的 GitHub 令牌 API 适配做了，这个差别就没了。
 

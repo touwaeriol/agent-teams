@@ -82,6 +82,18 @@ export function connectionLabel(c: Pick<GitConnectionView, "login" | "name">): s
   return `GitHub · ${c.login || c.name}`;
 }
 
+/** A GitHub connection made with a pasted personal access token rather than the platform App. */
+export function isPatConnection(c: Pick<GitConnectionView, "kind"> | undefined): boolean {
+  return c?.kind === "token";
+}
+
+/**
+ * The risk of a PAT connection (audit #55 M4): sessions get the PAT itself, not a narrowed
+ * short-lived token. Shown on the PAT connection card and when a project picks a PAT connection.
+ */
+export const PAT_WARNING =
+  "使用 PAT 连接时，这个 PAT 会原样交给项目里的每个 AI 会话（组长和成员）用于 git/gh 操作。请使用只授权到本项目仓库、设置了过期时间的 fine-grained PAT；需要更严格的隔离请改用 GitHub App 连接（会话只拿到收窄过的短期令牌）。";
+
 export interface RepoOption {
   value: string;
   /** Right-hand note: other projects using it, or "private" (drawn as a lock). */
