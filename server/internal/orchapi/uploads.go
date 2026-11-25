@@ -201,15 +201,15 @@ func (a *API) beginAttachment(ctx context.Context, pid, uid, name string, size i
 	return &uploadCreateOutput{Body: out}, nil
 }
 
-// inFlight is an upload's object, its S3 upload id and its part count; owner.ProjectID "" = an
+// inFlight is an upload's object, its S3 upload id and its declared size; owner.ProjectID "" = an
 // attachment without a project (no shared-file uploads there).
-func (a *API) inFlight(ctx context.Context, owner core.AttachmentOwner, id string) (key, uploadID string, parts int32, err error) {
+func (a *API) inFlight(ctx context.Context, owner core.AttachmentOwner, id string) (key, uploadID string, size int64, err error) {
 	if core.IsAttachmentUpload(id) {
 		att, upID, err := core.UploadingAttachment(ctx, a.e.Core.Pool, owner, id)
 		if err != nil {
 			return "", "", 0, err
 		}
-		return *att.StorageKey, upID, blobstore.PartCount(int64(att.Size)), nil
+		return *att.StorageKey, upID, int64(att.Size), nil
 	}
 	if owner.ProjectID == "" {
 		return "", "", 0, core.ErrNotFound
@@ -221,7 +221,7 @@ func (a *API) inFlight(ctx context.Context, owner core.AttachmentOwner, id strin
 	if up.S3UploadID == nil {
 		return "", "", 0, sharedfiles.ErrUploadNotFound // a node's single PUT
 	}
-	return up.StorageKey, *up.S3UploadID, blobstore.PartCount(up.Size), nil
+	return up.StorageKey, *up.S3UploadID, up.Size, nil
 }
 
 func (a *API) uploadParts(ctx context.Context, in *uploadPartsInput) (*uploadPartsOutput, error) {
@@ -233,16 +233,18 @@ func (a *API) uploadParts(ctx context.Context, in *uploadPartsInput) (*uploadPar
 }
 
 func (a *API) partURLs(ctx context.Context, owner core.AttachmentOwner, id string, numbers []int32) (*uploadPartsOutput, error) {
-	key, uploadID, n, err := a.inFlight(ctx, owner, id)
+	key, uploadID, size, err := a.inFlight(ctx, owner, id)
 	if err != nil {
 		return nil, uploadFail(err)
 	}
+	n := blobstore.PartCount(size)
 	out := UploadParts{URLs: make([]PartURL, 0, len(numbers)), ExpiresAt: time.Now().Add(partURLTTL)}
 	for _, num := range numbers {
 		if num < 1 || num > n {
 			return nil, httpapi.Invalid("numbers", fmt.Sprintf("分片号要在 1 到 %d 之间（收到 %d）", n, num))
 		}
-		u, err := a.e.Core.Blobs.PresignPart(ctx, key, uploadID, num, partURLTTL)
+		// The part's exact length is signed: the declared size is what the store accepts (#62 F2).
+		u, err := a.e.Core.Blobs.PresignPart(ctx, key, uploadID, num, blobstore.PartLength(size, num), partURLTTL)
 		if err != nil {
 			return nil, uploadFail(err)
 		}

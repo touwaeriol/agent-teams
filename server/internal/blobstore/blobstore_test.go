@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -123,9 +124,17 @@ func contract(t *testing.T, s blobstore.Store, prefix string, live bool) {
 	}
 	var parts []blobstore.Part
 	for i, p := range [][]byte{part1, part2} {
-		u, err := s.PresignPart(ctx, mp, id, int32(i+1), 5*time.Minute)
+		u, err := s.PresignPart(ctx, mp, id, int32(i+1), int64(len(p)), 5*time.Minute)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if !signsContentLength(t, u) {
+			t.Fatalf("part URL does not sign Content-Length: %s", u)
+		}
+		if live { // a body of another length than the signed one is refused (the fake does not check signatures)
+			if res := do(t, http.MethodPut, u, nil, append(p, 0)); res.StatusCode == http.StatusOK {
+				t.Fatalf("part %d with one byte too many = %d, want refused", i+1, res.StatusCode)
+			}
 		}
 		res := do(t, http.MethodPut, u, nil, p)
 		if res.StatusCode != http.StatusOK || res.Header.Get("ETag") == "" {
@@ -215,5 +224,36 @@ func TestNone(t *testing.T) {
 	}
 	if blobstore.AttachmentKey("p1", "img_1") != "projects/p1/attachments/img_1" || blobstore.SharedKey("p1", "sf_1") != "projects/p1/shared/sf_1" {
 		t.Fatal("keys")
+	}
+}
+
+// signsContentLength reports whether a presigned URL's SigV4 signature covers Content-Length.
+func signsContentLength(t *testing.T, raw string) bool {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range strings.Split(u.Query().Get("X-Amz-SignedHeaders"), ";") {
+		if h == "content-length" {
+			return true
+		}
+	}
+	return false
+}
+
+// TestPartLength: every part but the last is PartSize, the last the rest; out of range is 0.
+func TestPartLength(t *testing.T) {
+	size := int64(2*blobstore.PartSize + 7)
+	for _, c := range []struct {
+		part int32
+		want int64
+	}{{0, 0}, {1, blobstore.PartSize}, {2, blobstore.PartSize}, {3, 7}, {4, 0}} {
+		if got := blobstore.PartLength(size, c.part); got != c.want {
+			t.Errorf("PartLength(%d, %d) = %d, want %d", size, c.part, got, c.want)
+		}
+	}
+	if got := blobstore.PartLength(5, 1); got != 5 {
+		t.Errorf("single part = %d", got)
 	}
 }

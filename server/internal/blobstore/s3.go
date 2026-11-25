@@ -142,9 +142,9 @@ func (s *S3) CreateMultipart(ctx context.Context, key, contentType string) (stri
 	return aws.ToString(out.UploadId), nil
 }
 
-func (s *S3) PresignPart(ctx context.Context, key, uploadID string, part int32, ttl time.Duration) (string, error) {
+func (s *S3) PresignPart(ctx context.Context, key, uploadID string, part int32, size int64, ttl time.Duration) (string, error) {
 	r, err := s.presign.PresignUploadPart(ctx, &s3.UploadPartInput{Bucket: &s.bucket, Key: &key, UploadId: &uploadID,
-		PartNumber: aws.Int32(part)}, expires(ttl))
+		PartNumber: aws.Int32(part), ContentLength: aws.Int64(size)}, expires(ttl))
 	if err != nil {
 		return "", err
 	}
