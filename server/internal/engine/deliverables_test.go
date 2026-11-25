@@ -253,3 +253,40 @@ func TestDeliverableReferenceInline(t *testing.T) {
 		t.Fatalf("image bytes inlined")
 	}
 }
+
+// TestDeliverableLookupByIDs: the list's ids filter (deliverable ids mentioned in a message) only
+// returns the ids that belong to that project of the caller: not another project of the same user,
+// not another user's, not unknown ones; another user cannot look them up through their own project.
+func TestDeliverableLookupByIDs(t *testing.T) {
+	tm := startTeam(t)
+	pid := tm.projectID
+	var mine, mine2 core.DeliverableView
+	tm.b.must(201, "POST", "/api/projects/"+pid+"/deliverables", map[string]any{"kind": "doc", "title": "汇报", "url": "https://docs/a"}, &mine)
+	tm.b.must(201, "POST", "/api/projects/"+pid+"/deliverables", map[string]any{"kind": "design", "title": "落地页", "url": "https://docs/b"}, &mine2)
+	var p2 struct{ ID string }
+	tm.b.must(201, "POST", "/api/projects", map[string]any{"name": "second"}, &p2)
+	var sibling core.DeliverableView
+	tm.b.must(201, "POST", "/api/projects/"+p2.ID+"/deliverables", map[string]any{"kind": "doc", "title": "另一个项目的", "url": "https://docs/c"}, &sibling)
+	other := tm.w.signUp("someone@example.com")
+	var theirs struct{ ID string }
+	other.must(201, "POST", "/api/projects", map[string]any{"name": "x"}, &theirs)
+	var foreign core.DeliverableView
+	other.must(201, "POST", "/api/projects/"+theirs.ID+"/deliverables", map[string]any{"kind": "doc", "title": "别人的", "url": "https://x/y"}, &foreign)
+
+	ids := strings.Join([]string{mine.ID, sibling.ID, foreign.ID, "dl_00000000000000000000000000", mine2.ID}, ",")
+	var page orchapi.DeliverablePage
+	tm.b.must(200, "GET", "/api/projects/"+pid+"/deliverables?ids="+ids, nil, &page)
+	got := map[string]string{}
+	for _, d := range page.Items {
+		got[d.ID] = d.Title
+	}
+	if len(got) != 2 || got[mine.ID] != "汇报" || got[mine2.ID] != "落地页" {
+		t.Fatalf("lookup returned %v", got)
+	}
+	other.must(200, "GET", "/api/projects/"+theirs.ID+"/deliverables?ids="+mine.ID+","+mine2.ID, nil, &page)
+	if len(page.Items) != 0 {
+		t.Fatalf("another user's project lists %+v", page.Items)
+	}
+	other.must(404, "GET", "/api/projects/"+pid+"/deliverables?ids="+mine.ID, nil, nil)
+	tm.b.must(422, "GET", "/api/projects/"+pid+"/deliverables?ids="+strings.TrimSuffix(strings.Repeat(mine.ID+",", 51), ","), nil, nil)
+}
