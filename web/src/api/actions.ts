@@ -54,7 +54,7 @@ export const deliverables = {
   remove: (id: string) => unwrap(client.DELETE("/api/deliverables/{id}", { params: { path: { id } } })),
   /** attachments: NewCommentInputBody.attachments (ids uploaded to the project; agreed with the server, q10). */
   comment: (id: string, text: string, version?: number, attachments: string[] = []) =>
-    unwrap(client.POST("/api/deliverables/{id}/comments", { params: { path: { id } }, body: { text, version, ...(attachmentsField(attachments) as object) } })),
+    unwrap(client.POST("/api/deliverables/{id}/comments", { params: { path: { id } }, body: { text, version, ...attachmentsField(attachments) } })),
 };
 
 export const sharedFiles = {

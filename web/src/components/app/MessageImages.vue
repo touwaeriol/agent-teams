@@ -4,7 +4,7 @@
  * other file as a card (icon, name, type, size) with download and "存为共享文件". An attachment whose
  * retention ran out (410) shows "已过期" and offers nothing.
  */
-import { computed, inject, onMounted, reactive, ref, watch } from "vue";
+import { computed, inject, reactive, ref } from "vue";
 import { routeLocationKey } from "vue-router";
 import { Download, FolderInput } from "lucide-vue-next";
 import type { AttachmentRef } from "@/api/views";
@@ -24,7 +24,7 @@ const props = withDefaults(
 // Not useRoute(): the component also renders outside a router (tests, previews) without warnings.
 const route = inject(routeLocationKey, null);
 const saveable = computed(() => props.canSave ?? typeof route?.params?.pid === "string");
-/** Ids known to be expired: from the message, a probe, a failed thumbnail or a refused save. */
+/** Ids found expired on the page (the list itself marks the rest): a failed thumbnail or a refused save. */
 const expired = reactive(new Set<string>());
 const isExpired = (x: Item) => x.expired === true || expired.has(x.id);
 const images = computed(() => (props.items ?? []).filter((x) => isImageType(x.content_type) && !isExpired(x)));
@@ -34,16 +34,7 @@ const viewing = ref<number | null>(null);
 const saving = ref<Item | null>(null);
 const savingOpen = ref(false);
 
-/** File cards check once whether their attachment is still there (images find out when they load). */
-function probe() {
-  for (const x of props.items ?? []) {
-    if (isImageType(x.content_type) || isExpired(x)) continue;
-    void attachmentState(x.id).then((s) => s === "expired" && expired.add(x.id));
-  }
-}
-onMounted(probe);
-watch(() => props.items, probe);
-
+/** A thumbnail that does not load: ask once whether its attachment expired (it then becomes a card). */
 function imageFailed(x: Item) {
   void attachmentState(x.id).then((s) => s === "expired" && expired.add(x.id));
 }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // Attachment cards (#58): any file type as a card with size and download, "已过期" for attachments
-// whose retention ran out (410), "存为共享文件", and the composer strip's progress bar and cancel.
+// whose retention ran out (the list marks them; a failed thumbnail asks, 410), "存为共享文件", and the composer strip's progress bar and cancel.
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h, ref } from "vue";
@@ -21,7 +21,8 @@ function stubFetch(expired: string[] = [], save?: (body: { path: string; overwri
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input instanceof Request ? input.url : input);
     if (url.endsWith("/save-shared")) {
-      const body = JSON.parse(String(init?.body)) as { path: string; overwrite: boolean };
+      const raw = input instanceof Request ? await input.clone().text() : String(init?.body);
+      const body = JSON.parse(raw) as { path: string; overwrite: boolean };
       saves.push(body);
       return save?.(body) ?? new Response(JSON.stringify({ path: body.path, size: 1, overwritten: false }), { status: 200, headers: { "Content-Type": "application/json" } });
     }
@@ -54,16 +55,27 @@ describe("attachment cards", () => {
     expect(w.find("[data-expired]").exists()).toBe(false);
   });
 
-  it("marks an expired attachment (410) as 已过期 without download or save", async () => {
-    stubFetch(["img_zip"]);
-    const w = mountCards([pdf, zip], true);
+  it("shows an attachment the list marks expired as 已过期 without download or save, and probes nothing", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch");
+    const w = mountCards([pdf, { ...zip, expired: true }], true);
     await flushPromises();
+    expect(fetch).not.toHaveBeenCalled();
     const gone = w.get("[data-expired]");
     expect(gone.text()).toContain("数据.zip");
     expect(gone.text()).toContain("已过期");
     expect(gone.find("a").exists()).toBe(false);
     expect(gone.find("button").exists()).toBe(false);
     expect(w.findAll("[data-attachment-card]")[0]!.find("a").exists()).toBe(true);
+  });
+
+  it("a thumbnail that fails to load asks once whether it expired (410) and then becomes a card", async () => {
+    stubFetch(["img_png"]);
+    const w = mountCards([{ id: "img_png", name: "截图.png", content_type: "image/png", size: 10 }]);
+    await flushPromises();
+    await w.get("img").trigger("error");
+    await flushPromises();
+    expect(w.find("img").exists()).toBe(false);
+    expect(w.get("[data-expired]").text()).toContain("截图.png");
   });
 
   it("an attachment the message already knows is expired needs no probe; an expired image becomes a card", async () => {

@@ -131,6 +131,8 @@ setInterval(() => {
 }, 4000);
 
 const attachments = new Map();
+/** Design comments by deliverable id. */
+const comments = new Map();
 // The screenshot the user pasted into thread #12 (fixtures: messages.t12).
 attachments.set("img_seed", {
   ref: { id: "img_seed", name: "截图.png", content_type: "image/svg+xml", size: 0 },
@@ -622,6 +624,24 @@ const routes = [
     res.writeHead(200, { ...STORAGE_CORS, ETag: `"${createHash("md5").update(data).digest("hex")}"` });
     res.end();
   }],
+  // Design comments (#58): attachments are refs of uploaded attachments; expired ones carry expired.
+  ["GET", /^\/api\/deliverables\/([^/]+)\/comments$/, (req, res, [id]) => {
+    const items = (comments.get(id) ?? []).map((c) => ({ ...c, attachments: c.attachments.map((r) => (attachments.get(r.id)?.expired ? { ...r, expired: true } : r)) }));
+    json(res, 200, { items });
+  }],
+  ["POST", /^\/api\/deliverables\/([^/]+)\/comments$/, async (req, res, [id]) => {
+    const b = await body(req);
+    const refs = [];
+    for (const aid of b.attachments ?? []) {
+      const a = attachments.get(aid);
+      if (!a) return fail(res, 422, `没有这个附件：${aid}`, "validation");
+      if (a.expired) return fail(res, 410, `附件已过期：${a.ref.name}`, "attachment_expired");
+      refs.push(a.ref);
+    }
+    const c = { id: `cm${Date.now()}`, version: b.version ?? null, text: b.text, sent_to: "dev-2", created_at: now(), attachments: refs };
+    comments.set(id, [...(comments.get(id) ?? []), c]);
+    json(res, 201, c);
+  }],
   ["GET", /^\/api\/deliverables\/([^/]+)\/files$/, (req, res, [id]) => {
     const d = state.deliverables.find((x) => x.id === id);
     if (!d?.detail.hosted) return fail(res, 404, "没有文件");
@@ -920,7 +940,8 @@ routes.push(
     const m = rt.models.find((x) => x.id === model);
     const mode = b.permission_mode || (runtime === "claude" ? (m && !m.supports_auto ? "default" : "auto") : r.permission_mode === "ask" ? "default" : "bypassPermissions");
     state.sessionPicks[t.id] = { permission_mode: mode, model, effort: b.effort ?? "" };
-    state.messages[t.id] = [{ id: String(Date.now()), role: "user", author: "liu", kind: "chat", content: b.message ?? "", meta: {}, created_at: now() }];
+    const refs = (b.attachments ?? []).map((aid) => attachments.get(aid)?.ref).filter(Boolean);
+    state.messages[t.id] = [{ id: String(Date.now()), role: "user", author: "liu", kind: "chat", content: b.message ?? "", meta: refs.length ? { attachments: refs } : {}, created_at: now() }];
     json(res, 201, { project: p, thread_id: t.id, thread_no: 1 });
   }],
   ["GET", /^\/api\/conversations\/([^/]+)\/context\/detail$/, (req, res, [cid]) => {
