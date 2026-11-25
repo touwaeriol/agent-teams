@@ -258,10 +258,10 @@ class FakeQuery {
   }
 }
 
-/** The prompt as text; image blocks become "[image <type> <bytes>B]". */
+/** The prompt as text; image and document blocks become "[image <type> <bytes>B]" / "[document …]". */
 function promptText(content: unknown): string {
   if (typeof content === "string") return content;
   return (content as Array<{ type: string; text?: string; source?: { media_type: string; data: string } }>)
-    .map((b) => (b.type === "image" ? `[image ${b.source!.media_type} ${Buffer.from(b.source!.data, "base64").length}B]` : b.text ?? ""))
+    .map((b) => (b.type === "image" || b.type === "document" ? `[${b.type} ${b.source!.media_type} ${Buffer.from(b.source!.data, "base64").length}B]` : b.text ?? ""))
     .join(" ");
 }

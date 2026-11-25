@@ -2,6 +2,7 @@ import type { ApprovalCancel, ApprovalRequest, ApprovalResolve, ContextDetail, C
 import type { McpToolResult } from "../toolhost/broker.js";
 import type { Logger } from "../util/log.js";
 import type { LoadedImage } from "./images.js";
+import type { ResourceLink } from "./attachments.js";
 import type { ToolPolicy } from "./policy.js";
 
 export type EventFields = Omit<SessionEvent, "session_id" | "event_no" | "at" | "open_gen">;
@@ -21,6 +22,8 @@ export interface SessionSink {
   anchor(): string;
   /** The context breakdown after a turn (session.context reason turn; Claude only). */
   context?(detail: ContextDetail): void;
+  /** The runtime compacted the conversation (Claude compact_boundary, auto or manual). */
+  compacted?(): void;
 }
 
 export interface DriverContext {
@@ -46,6 +49,8 @@ export interface OutgoingMessage {
   priority: "now" | "next" | "later";
   /** Images the user attached, already downloaded. */
   images?: LoadedImage[];
+  /** agy: resource_link blocks for attachments it does not get as content (attachments_v2). */
+  links?: ResourceLink[];
 }
 
 /** A runtime (Claude Agent SDK query or Codex thread) behind one logical session. */
