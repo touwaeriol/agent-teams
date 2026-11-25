@@ -3,9 +3,13 @@ package engine_test
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
@@ -28,10 +32,8 @@ func TestGatewayHandshakeRules(t *testing.T) {
 	var node nodeCreated
 	b.must(201, "POST", "/api/nodes", map[string]string{"name": "n1"}, &node)
 
-	bad := w.dialRaw("not-the-token", nodetest.Options{SkipWelcome: true})
-	waitClosed(t, bad)
-	if bad.CloseCode() != nodegw.CloseUnauthorized {
-		t.Fatalf("bad token close %d", bad.CloseCode())
+	if status := w.dialStatus("/nodes/connect", "not-the-token", ""); status != http.StatusUnauthorized {
+		t.Fatalf("bad token status %d", status)
 	}
 	old := w.dialRaw(node.Token, nodetest.Options{SkipWelcome: true, Protocols: []int{1}})
 	waitClosed(t, old)
@@ -55,6 +57,76 @@ func TestGatewayHandshakeRules(t *testing.T) {
 		t.Fatalf("replaced close %d", first.CloseCode())
 	}
 	_ = second
+}
+
+// dialStatus tries a WebSocket upgrade with the given token (and X-Forwarded-For when set) and
+// returns the HTTP status of a refused upgrade (101 when it was accepted).
+func (w *world) dialStatus(path, token, xff string) int {
+	w.t.Helper()
+	ctx, cancel := context.WithTimeout(w.ctx, 10*time.Second)
+	defer cancel()
+	h := http.Header{"Authorization": {"Bearer " + token}}
+	if xff != "" {
+		h.Set("X-Forwarded-For", xff)
+	}
+	conn, resp, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(w.srv.URL, "http")+path, &websocket.DialOptions{HTTPHeader: h})
+	if err == nil {
+		_ = conn.CloseNow()
+		return http.StatusSwitchingProtocols
+	}
+	if resp == nil {
+		w.t.Fatalf("dial %s: %v", path, err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if strings.Contains(string(body), "not found") || strings.Contains(string(body), "inactive") {
+		w.t.Fatalf("refusal body leaks the reason: %q", body)
+	}
+	return resp.StatusCode
+}
+
+// TestGatewayAuthBeforeUpgrade: both daemon WebSocket routes check the token before the upgrade
+// (a wrong one gets a plain 401, never a 101), a right one still connects, and an address that
+// keeps sending wrong tokens gets 429 (even with a right token) while other addresses do not.
+// X-Forwarded-For from a non-proxy peer is ignored, so it cannot dodge the limit.
+func TestGatewayAuthBeforeUpgrade(t *testing.T) {
+	w := newWorld(t, nil)
+	b := w.signUp("ops@example.com")
+	var node nodeCreated
+	b.must(201, "POST", "/api/nodes", map[string]string{"name": "n1"}, &node)
+
+	for _, path := range []string{"/nodes/connect", "/nodes/v2/connect"} {
+		if status := w.dialStatus(path, "wrong", ""); status != http.StatusUnauthorized {
+			t.Fatalf("%s wrong token status %d", path, status)
+		}
+		if status := w.dialStatus(path, "", ""); status != http.StatusUnauthorized {
+			t.Fatalf("%s empty token status %d", path, status)
+		}
+	}
+	n := w.connect(node.Token, nodetest.Options{})
+	n.Close()
+
+	// The test server's peer is loopback (the proxy case), so the last X-Forwarded-For entry is
+	// the client address: flood from a fresh one.
+	for i := 0; i < nodegw.DefaultAuthFailLimit; i++ {
+		if status := w.dialStatus("/nodes/connect", "wrong", "203.0.113.7"); status != http.StatusUnauthorized {
+			t.Fatalf("rejection %d status %d", i, status)
+		}
+	}
+	if status := w.dialStatus("/nodes/v2/connect", "wrong", "203.0.113.7"); status != http.StatusTooManyRequests {
+		t.Fatalf("over the limit status %d", status)
+	}
+	if status := w.dialStatus("/nodes/connect", node.Token, "203.0.113.7"); status != http.StatusTooManyRequests {
+		t.Fatalf("throttled address with a right token status %d", status)
+	}
+	// A spoofed leading entry does not change the address (only the last one counts).
+	if status := w.dialStatus("/nodes/connect", "wrong", "198.51.100.1, 203.0.113.7"); status != http.StatusTooManyRequests {
+		t.Fatalf("spoofed X-Forwarded-For status %d", status)
+	}
+	// Other addresses are unaffected.
+	if status := w.dialStatus("/nodes/connect", node.Token, "203.0.113.8"); status != http.StatusSwitchingProtocols {
+		t.Fatalf("other address status %d", status)
+	}
 }
 
 func (w *world) dialRaw(token string, o nodetest.Options) *nodetest.Node {

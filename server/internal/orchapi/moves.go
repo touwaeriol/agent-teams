@@ -9,6 +9,8 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 )
 
 // maxMoveArchive caps a session-move archive (the daemon's MAX_ARCHIVE_BYTES).
@@ -32,7 +34,7 @@ func (a *API) uploadMove(c *gin.Context) {
 	w, r := c.Writer, c.Request
 	node, err := a.e.Gateway.Authenticate(r)
 	if err != nil {
-		http.Error(w, "token rejected", http.StatusUnauthorized)
+		nodegw.WriteAuthError(w, err)
 		return
 	}
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxMoveArchive))
@@ -69,7 +71,7 @@ func (a *API) downloadMove(c *gin.Context) {
 	w, r := c.Writer, c.Request
 	node, err := a.e.Gateway.Authenticate(r)
 	if err != nil {
-		http.Error(w, "token rejected", http.StatusUnauthorized)
+		nodegw.WriteAuthError(w, err)
 		return
 	}
 	var data []byte
