@@ -16,8 +16,9 @@ import (
 // Bucket is the fake's bucket name.
 const Bucket = "agent-teams"
 
-// New starts a fake S3 server for the test and returns a store on it.
-func New(t testing.TB) *blobstore.S3 {
+// Server starts a fake S3 server with the bucket for the test and returns its URL (for code that
+// builds its own store from AGENT_TEAMS_S3_*; any access key works).
+func Server(t testing.TB) string {
 	t.Helper()
 	backend := s3mem.New()
 	if err := backend.CreateBucket(Bucket); err != nil {
@@ -25,7 +26,13 @@ func New(t testing.TB) *blobstore.S3 {
 	}
 	srv := httptest.NewServer(gofakes3.New(backend).Server())
 	t.Cleanup(srv.Close)
-	s, err := blobstore.New(blobstore.Config{Endpoint: srv.URL, Bucket: Bucket, AccessKey: "test", SecretKey: "test-secret", PathStyle: true})
+	return srv.URL
+}
+
+// New starts a fake S3 server for the test and returns a store on it.
+func New(t testing.TB) *blobstore.S3 {
+	t.Helper()
+	s, err := blobstore.New(blobstore.Config{Endpoint: Server(t), Bucket: Bucket, AccessKey: "test", SecretKey: "test-secret", PathStyle: true})
 	if err != nil {
 		t.Fatal(err)
 	}

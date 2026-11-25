@@ -176,6 +176,9 @@ func (s *S3) ListMultipart(ctx context.Context, prefix string, olderThan time.Ti
 	in := &s3.ListMultipartUploadsInput{Bucket: &s.bucket, Prefix: aws.String(prefix)}
 	for {
 		page, err := s.client.ListMultipartUploads(ctx, in)
+		if errors.Is(mapErr(err), ErrNotFound) {
+			return out, nil // some stores (the test fake) answer NoSuchUpload when there are none
+		}
 		if err != nil {
 			return nil, err
 		}

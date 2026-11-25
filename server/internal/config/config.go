@@ -76,6 +76,12 @@ func (s S3) check() error {
 	return nil
 }
 
+// LoadS3 reads and checks only the AGENT_TEAMS_S3_* settings (atctl storage).
+func LoadS3(getenv Getenv) (S3, error) {
+	s := s3Config(getenv)
+	return s, s.check()
+}
+
 func s3Config(getenv Getenv) S3 {
 	return S3{
 		Endpoint:       strings.TrimRight(getenv("AGENT_TEAMS_S3_ENDPOINT"), "/"),
