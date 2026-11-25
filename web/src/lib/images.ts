@@ -85,7 +85,7 @@ export function pastedFiles(cd: ClipboardLike | null | undefined): File[] {
   if (!files.every((f) => attachKind(f) === "image")) return files;
   if (/<img[\s>/]/i.test(get("text/html"))) return files;
   const names = new Set(files.map((f) => f.name));
-  const lines = text.split(/\r?\n/).map((l) => l.trim().split(/[\\/]/).pop() ?? "").filter(Boolean);
+  const lines = text.split(/[\r\n]+/).map((l) => l.trim().split(/[\\/]/).pop() ?? "").filter(Boolean);
   if (lines.length > 0 && lines.every((l) => names.has(l))) return files;
   return [];
 }

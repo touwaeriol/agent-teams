@@ -58,6 +58,10 @@ describe("paste into a message box", () => {
     expect(pastedFiles(clip({ "text/plain": "C:\\Users\\me\\shot.png" }, [png("shot.png")]))).toHaveLength(1);
   });
 
+  it("several files copied in Finder (names separated by a lone \\r): attached", () => {
+    expect(pastedFiles(clip({ "text/plain": "a.png\rb.png" }, [png("a.png"), png("b.png")]))).toHaveLength(2);
+  });
+
   it("text next to a non-image file (PDF): the file is attached", () => {
     const pdf = new File(["%PDF"], "a.pdf", { type: "application/pdf" });
     expect(pastedFiles(clip({ "text/plain": "a.pdf report" }, [pdf]))).toEqual([pdf]);
