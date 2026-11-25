@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { DEFAULT_PASS_ENV } from "./sessions/env.js";
+import type { AttachmentOptions } from "./sessions/attachments.js";
 
 export interface NodeConfig {
   consoleUrl: string;
@@ -26,6 +27,12 @@ export interface NodeConfig {
   usageIntervalMs?: number;
   /** Startup warnings (insecure console URL allowed, token on the command line); the daemon logs them. */
   warnings: string[];
+  /**
+   * .attachments/ downloads (#58): AGENT_TEAMS_ATTACHMENT_RETENTION_H (hours a local copy is kept, default 24, 0 = forever),
+   * AGENT_TEAMS_ATTACHMENT_RETENTION_FROM (last_use | download, default last_use), AGENT_TEAMS_ATTACHMENT_TIMEOUT_S
+   * (total time for one attachment, all retries and fallbacks included, and for one write_shared_file upload; default 600), AGENT_TEAMS_ATTACHMENT_MIN_FREE_MB (disk space left after a download, default 512).
+   */
+  attachments?: Partial<AttachmentOptions>;
 }
 
 export class ConfigError extends Error {}
@@ -137,11 +144,31 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
     agyHome: resolve(get("AGENT_TEAMS_AGY_HOME") ?? join(dataDir, "agy-home")),
     logLevel: get("AGENT_TEAMS_LOG_LEVEL") ?? "info",
     ...usageInterval(get("AGENT_TEAMS_USAGE_INTERVAL_S")),
+    attachments: attachmentOptions(get),
   };
 }
 
 function truthy(v: string | undefined): boolean {
   return v !== undefined && ["1", "true", "yes", "on"].includes(v.trim().toLowerCase());
+}
+
+/** The AGENT_TEAMS_ATTACHMENT_* settings that are set and valid. */
+export function attachmentOptions(get: (k: string) => string | undefined): Partial<AttachmentOptions> {
+  const out: Partial<AttachmentOptions> = {};
+  const num = (k: string): number | undefined => {
+    const v = get(k);
+    const n = Number(v);
+    return v !== undefined && v !== "" && Number.isFinite(n) && n >= 0 ? n : undefined;
+  };
+  const h = num("AGENT_TEAMS_ATTACHMENT_RETENTION_H");
+  if (h !== undefined) out.retentionMs = Math.round(h * 3600_000);
+  const from = get("AGENT_TEAMS_ATTACHMENT_RETENTION_FROM");
+  if (from === "download" || from === "last_use") out.retentionFrom = from;
+  const t = num("AGENT_TEAMS_ATTACHMENT_TIMEOUT_S");
+  if (t) out.timeoutMs = Math.round(t * 1000);
+  const f = num("AGENT_TEAMS_ATTACHMENT_MIN_FREE_MB");
+  if (f !== undefined) out.minFreeBytes = Math.round(f * 1024 * 1024);
+  return out;
 }
 
 function positiveInt(v: string | undefined): number | undefined {

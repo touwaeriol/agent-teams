@@ -56,6 +56,46 @@
         }
       }
     },
+    "AttachmentRef": {
+      "title": "AttachmentRef",
+      "description": "A file attached to a message (at_attachments), any type, up to 200 MB. Sent in session.send/first_message attachments only to daemons with the attachments_v2 feature. When it delivers the message the daemon asks GET <console>/nodes/attachments/<id>/url (node token) for a short-lived download URL ({url: null} for legacy rows: fall back to GET /nodes/attachments/<id>), streams the file to <cwd>/.attachments/<id>-<name> and lists every attachment's path in the text; images and PDFs under the runtime's limits also go in as content blocks. The download URL never reaches the AI.",
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "content_type",
+        "size"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^img_"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "content_type": {
+          "description": "MIME type as stored (open string; not an enum, unlike ImageRef.media_type).",
+          "type": "string",
+          "maxLength": 200
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 209715200
+        },
+        "sha256": {
+          "description": "Hex SHA-256 when the console has computed it; the daemon checks the download against it.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "local_path": {
+          "description": "Filled by the daemon: path of the downloaded copy relative to the session's working directory (.attachments/<id>-<name>); only in structured tool results.",
+          "type": "string"
+        }
+      }
+    },
     "JobId": {
       "title": "JobId",
       "description": "Git job id: g_ + ULID.",

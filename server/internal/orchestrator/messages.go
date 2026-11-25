@@ -1,6 +1,8 @@
 package orchestrator
 
 import (
+	"github.com/touwaeriol/agent-teams/server/internal/blobgc"
+
 	"context"
 	"errors"
 	"fmt"
@@ -99,7 +101,7 @@ func (o *Orchestrator) PostUserMessageWith(ctx context.Context, in UserMessage) 
 		if err != nil {
 			return err
 		}
-		m, err = o.Deliver(ctx, tx, emp, Delivery{Text: text + in.Context + answered + tag, Kind: "user", Priority: prio, Interrupt: interrupt, Record: rec, Images: files})
+		m, err = o.Deliver(ctx, tx, emp, Delivery{Text: text + in.Context + answered + tag, Kind: "user", Priority: prio, Interrupt: interrupt, Record: rec, Attachments: files})
 		return err
 	})
 	return m, err
@@ -127,7 +129,7 @@ func (o *Orchestrator) messageImages(ctx context.Context, tx *core.Tx, c core.Co
 	if len(ids) > core.MaxMessageImages {
 		return nil, ErrTooManyImages
 	}
-	list, err := core.ProjectAttachments(ctx, tx, deref(c.ProjectID), ids)
+	list, err := core.UseAttachments(ctx, tx, deref(c.ProjectID), ids, o.core.AttachmentTTL)
 	if err != nil {
 		return nil, err
 	}
@@ -138,37 +140,38 @@ func (o *Orchestrator) messageImages(ctx context.Context, tx *core.Tx, c core.Co
 	return out, nil
 }
 
-// maxInlineText is how much of one attached text file goes into the message.
+// maxInlineText is the largest attached text file whose content goes into the message (design
+// #58 §6.4): bigger ones are not inlined cut (half a file misleads), they travel as files only.
 const maxInlineText = 60000
 
-// inlineTexts puts the attached text files into the delivered text and returns the attachments
-// that travel as files (images, PDFs).
+// inlineTexts puts the attached text files of up to maxInlineText bytes into the delivered text
+// and returns the attachments that travel as files: all of them (#58: a daemon with
+// attachments_v2 also gets the inlined ones as files and lists their paths; fitAttachments
+// drops what an older daemon cannot take).
 func (o *Orchestrator) inlineTexts(ctx context.Context, tx *core.Tx, c core.Conversation, text string, refs []core.AttachmentRef) (string, []core.AttachmentRef, error) {
 	var ids []string
 	for _, r := range refs {
-		if core.IsInlineText(r.ContentType) {
+		if core.IsInlineText(r.ContentType) && r.Size <= maxInlineText {
 			ids = append(ids, r.ID)
 		}
 	}
 	if len(ids) == 0 {
 		return text, refs, nil
 	}
-	data, err := core.AttachmentTexts(ctx, tx, deref(c.ProjectID), ids)
+	data, err := core.AttachmentTexts(ctx, tx, o.core.Blobs, deref(c.ProjectID), ids)
 	if err != nil {
 		return "", nil, err
 	}
 	var b strings.Builder
 	b.WriteString(text)
-	files := make([]core.AttachmentRef, 0, len(refs))
 	for _, r := range refs {
-		if !core.IsInlineText(r.ContentType) {
-			files = append(files, r)
+		body, ok := data[r.ID]
+		if !ok {
 			continue
 		}
-		body, cut := clipText(string(data[r.ID]), maxInlineText)
-		fmt.Fprintf(&b, "\n\n[附件：%s%s]\n```\n%s\n```", r.Name, cut, body)
+		fmt.Fprintf(&b, "\n\n[附件：%s]\n```\n%s\n```", r.Name, string(body))
 	}
-	return b.String(), files, nil
+	return b.String(), refs, nil
 }
 
 // clipText keeps the first n bytes of s on a rune boundary; the note says it was cut.
@@ -422,15 +425,42 @@ func (o *Orchestrator) completeAs(ctx context.Context, tx *core.Tx, t core.Threa
 // deleteThreadImages removes the images attached to a thread's messages, unless a message
 // elsewhere in the project still shows them.
 func deleteThreadImages(ctx context.Context, tx *core.Tx, t core.Thread) error {
-	_, err := store.Exec(ctx, tx, `WITH refs AS (
+	// References: messages' meta.attachments, tasks' attachments, session briefs (per conversation)
+	// and comments on deliverables (#58).
+	var keys []struct{ StorageKey *string }
+	err := store.Raw(ctx, tx, `WITH refs AS (
 		SELECT m.conversation_id, r->>'id' AS id FROM at_messages m
 		JOIN at_conversations c ON c.id = m.conversation_id AND c.project_id = $2,
 		LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(m.meta->'attachments') = 'array'
-			THEN m.meta->'attachments' ELSE '[]'::jsonb END) r)
+			THEN m.meta->'attachments' ELSE '[]'::jsonb END) r
+		UNION ALL
+		SELECT k.conversation_id, r->>'id' AS id FROM at_tasks k
+		JOIN at_conversations c ON c.id = k.conversation_id AND c.project_id = $2,
+		LATERAL jsonb_array_elements(k.attachments) r
+		UNION ALL
+		SELECT th.id, r->>'id' AS id FROM at_threads th,
+		LATERAL jsonb_array_elements(th.brief_attachments) r WHERE th.project_id = $2
+		UNION ALL
+		-- Comments on deliverables are no conversation's: an attachment one shows is kept (it
+		-- expires on its own).
+		SELECT '', r->>'id' AS id FROM at_deliverable_comments dc
+		JOIN at_deliverables d ON d.id = dc.deliverable_id AND d.project_id = $2,
+		LATERAL jsonb_array_elements(dc.attachments) r)
 		DELETE FROM at_attachments WHERE project_id = $2
 		AND id IN (SELECT id FROM refs WHERE conversation_id = $1)
-		AND id NOT IN (SELECT id FROM refs WHERE conversation_id <> $1 AND id IS NOT NULL)`, t.ID, t.ProjectID)
-	return err
+		AND id NOT IN (SELECT id FROM refs WHERE conversation_id <> $1 AND id IS NOT NULL)
+		RETURNING storage_key`, t.ID, t.ProjectID).Scan(&keys).Error
+	if err != nil {
+		return err
+	}
+	for _, k := range keys {
+		if k.StorageKey != nil {
+			if err := blobgc.Enqueue(ctx, tx, *k.StorageKey); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // UnarchiveStatus is where an archived thread goes back to: a finished thread stays finished,

@@ -100,13 +100,17 @@ func TestImageMessage(t *testing.T) {
 		map[string]string{"name": "x.png", "data": base64.StdEncoding.EncodeToString(onePixelPNG)}); code != 404 {
 		t.Fatalf("upload into another user's project = %d", code)
 	}
+	// A 302 to the object store, which shows the image inline under its Chinese name.
+	if r, _ := tm.b.redirect(att.URL); r.StatusCode != 302 {
+		t.Fatalf("image download %d", r.StatusCode)
+	}
 	resp, err := tm.b.http.Get(tm.w.srv.URL + att.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if headers := resp.Header; headers.Get("Content-Type") != "image/png" || headers.Get("X-Content-Type-Options") != "nosniff" ||
-		!strings.Contains(headers.Get("Content-Security-Policy"), "sandbox") {
+	if headers := resp.Header; headers.Get("Content-Type") != "image/png" ||
+		headers.Get("Content-Disposition") != `inline; filename="__.png"; filename*=UTF-8''%E6%88%AA%E5%9B%BE.png` {
 		t.Fatalf("image headers: %v", headers)
 	}
 

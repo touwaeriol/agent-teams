@@ -811,6 +811,8 @@ CREATE TABLE at_attachments (   -- 用户附在消息上的图片，以及员工
 );
 ```
 
+#58（00460、00470，§2.15）之后这张表只放元数据：字节在对象存储（`storage_key`），`data` 只有 #58 之前、还没 `atctl storage purge-data` 的行才有；`content_type` 任意（按文件头 / 扩展名判断），`size` ≤ 200 MB，`sha256` 后台补算前为空；`state`、`expires_at` 管上传状态和保留期；`project_id` 可空（新建普通会话前上传、还没归到项目的附件）。
+
 员工用 `publish_file` 发布的单张位图（截图）也存成这里的一行（`user_id` = 项目所有者），不进 `at_deliverables`，并在员工所在对话里写一条 `kind = image` 的消息卡。消息只在 `at_messages.meta.attachments` 里记 `{id, name, content_type, size}`；图片跟着项目删除。删除讨论串 = 删它的 `at_conversations` 行，`at_threads`、员工、会话、任务、提问、消息、合并队列等级联删除；`at_deliverables.thread_id` 置空（交付物留在资料库）；`at_events` / `at_status_events` 没有外键，历史事件保留。
 
 资料库“添加”的文件（`POST /api/projects/{pid}/library`）就是一条 `at_deliverables`（`published_by = 'user'`）加一条 `at_deliverable_files` 第 1 版，只收 html、md、pdf、txt、json、csv（截图、图片和 SVG 不是交付物，拒绝），5 MB 限制、同样的签名 URL 沙箱访问。项目用量（`GET /api/projects/{pid}/usage`）直接汇总 `at_usage`，不另建表。
@@ -854,7 +856,7 @@ CREATE TABLE at_shared_files (          -- 项目共享文件：项目里所有�
 );
 ```
 
-同一路径直接覆盖（`INSERT … ON CONFLICT DO UPDATE`，更新内容、上传者和 `updated_at`，`created_at` 保留），不做版本。上限在 `server/internal/sharedfiles`：单文件 20 MB（`MaxFileBytes`）、项目合计 500 MB（`MaxProjectBytes`）、项目文件数 1000（`MaxProjectFiles`）；覆盖时总量按差值算。写入前锁 `at_projects` 行（`SELECT … FOR UPDATE`），同项目的并发上传互相看得到总量。项目删除时级联删除。
+同一路径直接覆盖（`INSERT … ON CONFLICT DO UPDATE`，更新内容、上传者和 `updated_at`，`created_at` 保留），不做版本。#58 起字节在对象存储（`storage_key` = `projects/<pid>/shared/<object_id>`，覆盖时换新的 `object_id`，旧对象进删除队列；`data` 只有 #58 之前、还没 purge 的行才有），`sha256` 后台补算前为空，`declared_sha256` 是上传者声明的值，`state = failed` 表示补算出的哈希和声明不符（行保留、拒绝读取），见 §2.15。上限在 `server/internal/sharedfiles`：单文件 200 MB（`MaxFileBytes`，#58；表单上传和老守护进程的分块仍限 20 MB，`MaxInlineFileBytes`）、项目合计 5 GB（`MaxProjectBytes`，只算共享文件）、项目文件数 1000（`MaxProjectFiles`）；覆盖时总量按差值算。写入前锁 `at_projects` 行（`SELECT … FOR UPDATE`），同项目的并发上传互相看得到总量。项目删除时级联删除。
 
 ### 2.14 远程服务器（00330，讨论串 #38，remote-servers.md）
 
@@ -930,6 +932,55 @@ CREATE TABLE at_ssh_audit (                 -- 网关审计，一行一个事件
 - **吊销**：服务器删除或改名、从项目移除、岗位授权取消时，store 在同一事务里把相关证书标 `revoked_at` 并返回序列号（网关据此断开连接）；会话关闭、`open_gen` 前进由会话生命周期调 `RevokeSessionCerts` / `RevokeOldGenCerts`。
 - **清理**：每日清理（`atctl serve` 的 `maintain` → `store.PruneSSH`）删 365 天前的审计行和过期超过 30 天的证书。审计不分区（量小）；删除用户时级联删除。
 
+### 2.15 对象存储（00460、00470，#58）
+
+附件和共享文件的字节放在 S3 兼容的对象存储（生产是 RustFS，`AGENT_TEAMS_S3_*`），库里只留元数据。对象 key：
+附件 `projects/<pid>/attachments/<id>`（没有项目时 `users/<uid>/attachments/<id>`，归到项目后 key 不变），
+共享文件 `projects/<pid>/shared/<object_id>`；文件名不进 key。
+
+```sql
+-- 00460
+ALTER TABLE at_attachments
+    ALTER COLUMN data DROP NOT NULL, ALTER COLUMN sha256 DROP NOT NULL,
+    ADD COLUMN storage_key TEXT,                 -- NULL = 字节还在 data（#58 之前的行）
+    ADD COLUMN state TEXT NOT NULL DEFAULT 'ready' CHECK (state IN ('uploading','ready','failed','expired')),
+    ADD COLUMN upload_id TEXT,                   -- 分片上传进行中的 S3 upload id
+    ADD COLUMN expires_at TIMESTAMPTZ NOT NULL DEFAULT now() + interval '24 hours';  -- 保留期，每次使用顺延
+ALTER TABLE at_shared_files
+    ALTER COLUMN data DROP NOT NULL, ALTER COLUMN sha256 DROP NOT NULL,
+    ADD COLUMN storage_key TEXT, ADD COLUMN object_id TEXT, ADD COLUMN declared_sha256 TEXT,
+    ADD COLUMN state TEXT NOT NULL DEFAULT 'ready' CHECK (state IN ('ready','failed'));
+CREATE TABLE at_shared_uploads (            -- 进行中的共享文件上传（浏览器分片，或节点的单个预签名 PUT）：完成前读者看到的还是旧文件
+    id TEXT PRIMARY KEY,                    -- up_…
+    project_id TEXT NOT NULL REFERENCES at_projects(id) ON DELETE CASCADE,
+    path TEXT NOT NULL, object_id TEXT NOT NULL, storage_key TEXT NOT NULL,
+    s3_upload_id TEXT,                      -- NULL = 节点的单个 PUT
+    size BIGINT NOT NULL, content_type TEXT NOT NULL, declared_sha256 TEXT,
+    overwrite BOOLEAN NOT NULL DEFAULT false, uploaded_by TEXT NOT NULL,
+    uploader_id TEXT REFERENCES at_employees(id) ON DELETE SET NULL,
+    uploader_thread_id TEXT REFERENCES at_threads(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+ALTER TABLE at_tasks ADD COLUMN attachments JSONB NOT NULL DEFAULT '[]';   -- assign_task 带的附件
+CREATE TABLE at_blob_deletions (            -- 待删对象：删行的事务提交后由 blobgc 删，失败退避重试
+    key TEXT PRIMARY KEY, prefix BOOLEAN NOT NULL DEFAULT false,            -- prefix = 删整个前缀（删项目）
+    attempts INT NOT NULL DEFAULT 0, last_error TEXT,
+    next_at TIMESTAMPTZ NOT NULL DEFAULT now(), created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+-- 00470
+ALTER TABLE at_attachments ALTER COLUMN project_id DROP NOT NULL;          -- 新建普通会话前上传的附件
+ALTER TABLE at_threads ADD COLUMN brief_attachments JSONB NOT NULL DEFAULT '[]';           -- 会话第一条消息带的附件
+ALTER TABLE at_deliverable_comments ADD COLUMN attachments JSONB NOT NULL DEFAULT '[]';    -- 批注带的附件
+```
+
+- **blobgc**（`server/internal/blobgc`，`scheduler.RunAsLeader` 每分钟一轮，多副本只有一个在跑）：处理删除队列（还被某行引用的 key 不删）；
+  流式补算 sha256（附件；共享文件和 `declared_sha256` 不符时标 `failed`）；abort 超过 24 小时没完成的分片上传和库里没有记录的孤儿分片；
+  把过了 `expires_at` 的附件标成 `expired`、清掉 `data` 和 `storage_key`、对象进删除队列（行保留，消息显示“已过期”）。
+- **预留**：写对象之前先在独立连接里插一行 `next_at = now() + 1h` 的删除记录（`blobgc.Reserve`），写对象的事务回滚时对象也会被清掉；提交了就因为有引用而保留。
+  节点单个 PUT 的上传被拒或取消时对象立即删除，并用 `blobgc.RedeleteLater` 在 1 小时后（PUT 地址 30 分钟有效）再删一次，防止重放 PUT 留下孤儿对象。
+- **删项目**：同一事务里 `EnqueuePrefix('projects/<pid>/')`（必须在删行之前），没有项目的附件按 `users/` key 单独清理。
+- **存量迁移**：`atctl storage migrate | verify | purge-data | restore`（`server/internal/blobmigrate`），见 `attachments-rollout.md` §6。
+  存量附件在迁移时 `expires_at` = 部署时刻 + 24h（用户确认一视同仁），没被再次使用的会过期删除。
+- **Down**：00470 删掉还没归属项目的附件；00460 先删 `expired` 的附件行和没传完的上传，还有 `data` 为空的行就报错（先 `atctl storage restore`）。
+
 ## 3. 从 v1 表的映射（历史）
 
 切换时 v1 的表原地扩展成 v2 的表；下表是当时的处理。`00120_drop_v1` 之后，v1 独有的表和列、v1 的旧对话都已删除。
@@ -966,6 +1017,8 @@ CREATE TABLE at_ssh_audit (                 -- 网关审计，一行一个事件
 `00095_thread_lifecycle_images.sql`：`at_threads.archived_from`、`at_attachments`（§2.11）。
 
 `00312_shared_files.sql`：`at_shared_files`（§2.13，项目共享文件）；Down 删表。
+
+`00460_blob_storage.sql`、`00470_attachments_unowned.sql`（#58）：附件和共享文件改存对象存储、附件保留期、进行中的共享文件上传、删除队列、任务 / 会话首条消息 / 批注带附件（§2.15）。两个一起上线，上线前 pg_dump（存量附件 24 小时未用即删除，见 `attachments-rollout.md`）。
 
 `00360_node_runtimes.sql`：`at_node_runtimes`（§2.2，节点 CLI 状态）和 `at_session_holds`（§2.7，暂存的会话）；Down 删两张表。
 

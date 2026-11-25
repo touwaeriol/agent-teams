@@ -192,7 +192,15 @@
       "git_credentials": true,
       "first_message": {
         "msg_id": "m_01",
-        "text": "t8: implement the plan list"
+        "text": "t8: implement the plan list",
+        "attachments": [
+          {
+            "id": "img_01jd3v0000000000000000att3",
+            "name": "log.txt",
+            "content_type": "text/plain; charset=utf-8",
+            "size": 1200
+          }
+        ]
       },
       "skills": [
         {
@@ -635,6 +643,34 @@
           "media_type": "image/png",
           "name": "screenshot.png",
           "size": 48213
+        }
+      ]
+    }
+  },
+  {
+    "v": 2,
+    "type": "session.send",
+    "id": "c_01JD3V00000000000000000ATT",
+    "seq": 985,
+    "ts": "2026-11-14T12:00:05Z",
+    "body": {
+      "session_id": "s_01JD",
+      "msg_id": "m_79",
+      "text": "按附件里的需求做",
+      "kind": "user",
+      "attachments": [
+        {
+          "id": "img_01jd3v0000000000000000att1",
+          "name": "需求.pdf",
+          "content_type": "application/pdf",
+          "size": 18200000,
+          "sha256": "9f0b1e5c0b3c2c0e7d1fa1b7bc7f0b4b8f8a5e3e1c4d1f0e2a3b4c5d6e7f8a9b"
+        },
+        {
+          "id": "img_01jd3v0000000000000000att2",
+          "name": "data.zip",
+          "content_type": "application/zip",
+          "size": 157286400
         }
       ]
     }
@@ -1230,6 +1266,36 @@
   },
   {
     "v": 2,
+    "type": "tool.call",
+    "id": "n_01JD3V00000000000000000SH9",
+    "seq": 2006,
+    "ts": "2026-11-14T12:02:05Z",
+    "body": {
+      "call_id": "tc_01JS",
+      "session_id": "s_01JD",
+      "open_gen": 1,
+      "tool": "write_shared_file",
+      "args": {
+        "file": "out/big.zip",
+        "path": "data/big.zip"
+      },
+      "upload": {
+        "upload_id": "up_01JD3V00000000000000S3",
+        "storage": "s3",
+        "chunks": 0,
+        "files": [
+          {
+            "path": "data/big.zip",
+            "size": 157286400,
+            "sha256": "9f0b1e5c0b3c2c0e7d1fa1b7bc7f0b4b8f8a5e3e1c4d1f0e2a3b4c5d6e7f8a9b",
+            "content_type": "application/zip"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 2,
     "type": "file.download",
     "id": "c_01JD3V00000000000000000SH2",
     "seq": 996,
@@ -1274,6 +1340,80 @@
             "sha256": "9f0b1e5c0b3c2c0e7d1fa1b7bc7f0b4b8f8a5e3e1c4d1f0e2a3b4c5d6e7f8a9b"
           }
         ]
+      }
+    }
+  },
+  {
+    "v": 2,
+    "type": "tool.result",
+    "id": "c_01JD3V00000000000000000SH8",
+    "seq": 997,
+    "ts": "2026-11-14T12:02:06Z",
+    "body": {
+      "session_id": "s_01JD",
+      "call_id": "tc_01JT",
+      "ok": true,
+      "content": [
+        {
+          "type": "text",
+          "text": "fetched data/sample.csv"
+        }
+      ],
+      "structured": {
+        "path": "data/sample.csv",
+        "size": 8,
+        "sha256": "9f0b1e5c0b3c2c0e7d1fa1b7bc7f0b4b8f8a5e3e1c4d1f0e2a3b4c5d6e7f8a9b",
+        "local_path": ".shared/data/sample.csv"
+      },
+      "shared_download": {
+        "download_id": "dn_01jd3v000000000000000000sh",
+        "chunks": 0,
+        "files": [
+          {
+            "path": "data/sample.csv",
+            "size": 8,
+            "sha256": "9f0b1e5c0b3c2c0e7d1fa1b7bc7f0b4b8f8a5e3e1c4d1f0e2a3b4c5d6e7f8a9b",
+            "url": "https://rustfs.example/agent-teams/projects/7a1c/shared/x?X-Amz-Signature=abc",
+            "expires_at": "2026-11-14T12:17:06Z"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "v": 2,
+    "type": "tool.result",
+    "id": "c_01JD3V00000000000000000AT2",
+    "seq": 997,
+    "ts": "2026-11-14T12:02:06Z",
+    "body": {
+      "session_id": "s_01JD",
+      "call_id": "tc_01JU",
+      "ok": true,
+      "content": [
+        {
+          "type": "text",
+          "text": "downloaded 需求.pdf"
+        }
+      ],
+      "structured": {
+        "id": "img_01jd3v0000000000000000att1",
+        "name": "需求.pdf",
+        "content_type": "application/pdf",
+        "size": 18200000,
+        "sha256": "9f0b1e5c0b3c2c0e7d1fa1b7bc7f0b4b8f8a5e3e1c4d1f0e2a3b4c5d6e7f8a9b",
+        "local_path": ".attachments/img_01jd3v0000000000000000att1-需求.pdf"
+      },
+      "attachment_download": {
+        "attachment": {
+          "id": "img_01jd3v0000000000000000att1",
+          "name": "需求.pdf",
+          "content_type": "application/pdf",
+          "size": 18200000,
+          "sha256": "9f0b1e5c0b3c2c0e7d1fa1b7bc7f0b4b8f8a5e3e1c4d1f0e2a3b4c5d6e7f8a9b"
+        },
+        "url": "https://rustfs.example/agent-teams/projects/7a1c/attachments/x?X-Amz-Signature=abc",
+        "expires_at": "2026-11-14T12:17:06Z"
       }
     }
   },

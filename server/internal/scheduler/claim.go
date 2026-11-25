@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -238,10 +239,78 @@ func (s *Scheduler) sendBrief(ctx context.Context, tx *core.Tx, t core.Thread, t
 	if err != nil {
 		return err
 	}
-	_, err = s.orch.Deliver(ctx, tx, m, orchestrator.Delivery{Text: text, Kind: "task", Priority: "next", Anchor: &anchor,
-		Record: &core.NewMessage{ConversationID: t.ID, Role: "system", Author: "platform", Kind: "note", Content: text,
-			Meta: map[string]any{"to": m.Name, "task_id": task.ID}}})
+	meta := map[string]any{"to": m.Name, "task_id": task.ID}
+	files, deliver, err := s.briefAttachments(ctx, tx, t, task, text)
+	if err != nil {
+		return err
+	}
+	if len(files) > 0 {
+		meta["attachments"] = files
+	}
+	_, err = s.orch.Deliver(ctx, tx, m, orchestrator.Delivery{Text: deliver, Kind: "task", Priority: "next", Anchor: &anchor,
+		Attachments: files, Record: &core.NewMessage{ConversationID: t.ID, Role: "system", Author: "platform", Kind: "note",
+			Content: text, Meta: meta}})
 	return err
+}
+
+// briefAttachments are the task's attachments that still exist, for its brief (the first one
+// and every rework): their retention restarts; expired ones are named in the text instead. The
+// delivered text gets the small text files inlined (orchestrator.DeliveryText).
+func (s *Scheduler) briefAttachments(ctx context.Context, tx *core.Tx, t core.Thread, task core.Task, text string) ([]core.AttachmentRef, string, error) {
+	if len(task.Attachments) == 0 {
+		return nil, text, nil
+	}
+	ids := make([]string, len(task.Attachments))
+	for i, r := range task.Attachments {
+		ids[i] = r.ID
+	}
+	rows, err := core.ProjectAttachments(ctx, tx, t.ProjectID, ids)
+	if errors.Is(err, core.ErrNotFound) {
+		rows, err = s.someAttachments(ctx, tx, t.ProjectID, ids)
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	var files []core.AttachmentRef
+	var gone []string
+	for _, a := range rows {
+		if a.State == "ready" {
+			files = append(files, a.Ref())
+		} else {
+			gone = append(gone, a.Name)
+		}
+	}
+	live := make([]string, len(files))
+	for i, f := range files {
+		live[i] = f.ID
+	}
+	if err := core.TouchAttachments(ctx, tx, t.ProjectID, live, s.core.AttachmentTTL); err != nil {
+		return nil, "", err
+	}
+	deliver, err := s.orch.DeliveryText(ctx, tx, t.ProjectID, text, files)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(gone) > 0 {
+		deliver += fmt.Sprintf("\n\n（任务附带的附件 %s 已过期或已删除，拿不到了；需要的话问组长）", strings.Join(gone, "、"))
+	}
+	return files, deliver, nil
+}
+
+// someAttachments loads those of ids that still have a row (a deleted thread may have taken some).
+func (s *Scheduler) someAttachments(ctx context.Context, tx *core.Tx, projectID string, ids []string) ([]core.Attachment, error) {
+	var out []core.Attachment
+	for _, id := range ids {
+		list, err := core.ProjectAttachments(ctx, tx, projectID, []string{id})
+		if errors.Is(err, core.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, list...)
+	}
+	return out, nil
 }
 
 // SyncDone records one repository's pre-task sync result; the last one sends the brief. Results

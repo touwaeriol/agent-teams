@@ -7,6 +7,8 @@
 package orchapi
 
 import (
+	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
+
 	"context"
 	"errors"
 	"net/http"
@@ -64,6 +66,7 @@ func (a *API) Register(api huma.API, r gin.IRoutes) {
 	a.registerSchedules(api)
 	a.registerLibrary(api)
 	a.registerAttachments(api, r)
+	a.registerUploads(api, r)
 	a.registerMoves(r)
 	a.registerSharedFiles(api)
 	a.registerComposer(api)
@@ -115,6 +118,8 @@ var errorMap = []struct {
 	code   string
 }{
 	{core.ErrNotFound, 404, "not_found"},
+	{blobstore.ErrNotConfigured, 503, "storage_unavailable"},
+	{core.ErrAttachmentExpired, 410, "attachment_expired"},
 	{store.ErrNotFound, 404, "not_found"},
 	{orchestrator.ErrNotActive, 409, "thread_not_active"},
 	{orchestrator.ErrArchived, 409, "thread_archived"},
@@ -122,6 +127,9 @@ var errorMap = []struct {
 	{orchestrator.ErrTooManyImages, 422, "validation"},
 	{core.ErrNotImage, 422, "validation"},
 	{core.ErrTooLarge, 422, "validation"},
+	{core.ErrAttachmentTooLarge, 413, "file_too_large"},
+	{core.ErrUploadIncomplete, 409, "upload_incomplete"},
+	{core.ErrUploadSize, 422, "size_mismatch"},
 	{orchestrator.ErrNoNode, 409, "no_node"},
 	{orchestrator.ErrNoEmployee, 404, "employee_not_found"},
 	{orchestrator.ErrRoleNotFound, 422, "unknown_role"},

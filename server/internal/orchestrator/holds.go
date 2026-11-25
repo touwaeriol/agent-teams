@@ -147,8 +147,8 @@ func (o *Orchestrator) releaseElsewhere(ctx context.Context, tx *core.Tx, e core
 	if err != nil {
 		return true, err
 	}
-	d := Delivery{Text: h.First.Text, Images: imagesOf(h.First.Images), Anchor: h.First.Anchor, Kind: "system"}
-	if err := o.send(ctx, tx, sess, string(h.First.MsgID), d); err != nil {
+	d := Delivery{Text: h.First.Text, Attachments: mergeRefs(h.First.Images, h.First.Attachments), Anchor: h.First.Anchor, Kind: "system"}
+	if err := o.send(ctx, tx, sess, e.ProjectID, string(h.First.MsgID), d); err != nil {
 		return true, err
 	}
 	return true, markHeldDelivered(ctx, tx, h.More)

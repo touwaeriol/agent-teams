@@ -73,10 +73,11 @@ describe("MessageImages", () => {
     await closed();
   });
 
-  it("keeps PDF and text files as chips", () => {
+  it("shows PDFs and other files as cards with a download link", () => {
     const w = mountImages([img("a1"), { id: "f1", name: "r.pdf", content_type: "application/pdf", size: 1 }]);
     expect(w.findAll("button")).toHaveLength(1);
-    expect(w.get("a").attributes("href")).toBe(attachmentUrl("f1"));
+    expect(w.findAll("[data-attachment-card]")).toHaveLength(1);
+    expect(w.get("a").attributes("href")).toBe(`${attachmentUrl("f1")}?download=1`);
   });
 });
 

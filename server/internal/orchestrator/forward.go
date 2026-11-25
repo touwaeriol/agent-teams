@@ -17,7 +17,7 @@ import (
 // repeated forward of the same messages to the same place counts as a double click.
 const (
 	MaxForwardMessages    = 20
-	MaxForwardAttachments = core.MaxMessageImages
+	MaxForwardAttachments = core.MaxToolAttachments
 	forwardDedupeSeconds  = 30
 )
 
@@ -177,6 +177,9 @@ func (o *Orchestrator) prepareForward(ctx context.Context, tx *core.Tx, req Forw
 		if total > MaxForwardAttachments {
 			return nil, ErrForwardFiles
 		}
+		if err := o.useRefs(ctx, tx, req.ProjectID, refs); err != nil {
+			return nil, err
+		}
 		text, files, err := o.inlineTexts(ctx, tx, c, m.Content, refs)
 		if err != nil {
 			return nil, err
@@ -219,7 +222,7 @@ func (o *Orchestrator) forwardTo(ctx context.Context, tx *core.Tx, req ForwardRe
 	}
 	last := recs[len(recs)-1]
 	m, err := o.Deliver(ctx, tx, lead, Delivery{Text: forwardText(req, items), Kind: "user", Priority: "next", Record: &last,
-		Images: forwardFiles(items)})
+		Attachments: forwardFiles(items)})
 	if err != nil {
 		return res, err
 	}
@@ -357,14 +360,37 @@ func (o *Orchestrator) forwardNote(ctx context.Context, tx *core.Tx, req Forward
 	return tx.EmitMessage(ctx, req.ProjectID, nil, m)
 }
 
-// briefFiles are the images and PDFs that go to the lead with the brief: those of the user's
+// BriefAttachmentsKey marks the note open_subthread records in the new thread's conversation
+// with the attachments its brief carries (meta.attachments); briefFiles collects them.
+const BriefAttachmentsKey = "brief_attachments"
+
+// briefGiven are the attachments open_subthread gave the thread (its BriefAttachmentsKey notes).
+func briefGiven(ctx context.Context, tx *core.Tx, t core.Thread) ([]core.AttachmentRef, error) {
+	list, err := core.MessagesWithMeta(ctx, tx, t.ID, BriefAttachmentsKey)
+	if err != nil {
+		return nil, err
+	}
+	var out []core.AttachmentRef
+	for _, m := range list {
+		out = append(out, core.AttachmentsOf(m)...)
+	}
+	return dedupeRefs(out), nil
+}
+
+// briefFiles are the attachments that go to the lead with the brief: those of the user's
 // message the thread was opened for, then those of the messages forwarded into it before it
-// started (each attachment once).
+// started, then those the parent's lead gave open_subthread (each attachment once; text files
+// too: their content is inlined, and new daemons also get the file).
 func briefFiles(ctx context.Context, tx *core.Tx, t core.Thread) ([]core.AttachmentRef, error) {
 	list, err := core.MessagesWithMeta(ctx, tx, t.ID, "forwarded_from")
 	if err != nil {
 		return nil, err
 	}
+	given, err := core.MessagesWithMeta(ctx, tx, t.ID, BriefAttachmentsKey)
+	if err != nil {
+		return nil, err
+	}
+	list = append(list, given...)
 	src, err := core.SourceMessage(ctx, tx, t)
 	if err != nil {
 		return nil, err
@@ -376,11 +402,34 @@ func briefFiles(ctx context.Context, tx *core.Tx, t core.Thread) ([]core.Attachm
 	seen := map[string]bool{}
 	for _, m := range list {
 		for _, r := range core.AttachmentsOf(m) {
-			if !core.IsInlineText(r.ContentType) && !seen[r.ID] {
+			if !seen[r.ID] {
 				seen[r.ID] = true
 				out = append(out, r)
 			}
 		}
 	}
 	return out, nil
+}
+
+// useRefs refuses expired attachments among refs and restarts the retention of the others (a
+// forward is a use). Refs whose row is gone are left as they were (older messages).
+func (o *Orchestrator) useRefs(ctx context.Context, tx *core.Tx, projectID string, refs []core.AttachmentRef) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	ids := refIDs(refs)
+	if name, err := core.ExpiredAttachment(ctx, tx, projectID, ids); err != nil {
+		return err
+	} else if name != "" {
+		return fmt.Errorf("%w：%s", core.ErrAttachmentExpired, name)
+	}
+	return core.TouchAttachments(ctx, tx, projectID, ids, o.core.AttachmentTTL)
+}
+
+func refIDs(refs []core.AttachmentRef) []string {
+	ids := make([]string, len(refs))
+	for i, r := range refs {
+		ids[i] = r.ID
+	}
+	return ids
 }

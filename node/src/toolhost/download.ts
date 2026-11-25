@@ -4,7 +4,7 @@ import { lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { isInside } from "../util/paths.js";
 import type { ToolDownload, ToolSharedDownload } from "../protocol.js";
-import { MAX_BYTES, MAX_FILES, MAX_SHARED_BYTES, SHARED_DIR, validFilePath, validSharedPath } from "./upload.js";
+import { MAX_BYTES, MAX_CHUNKED_SHARED_BYTES, MAX_FILES, MAX_SHARED_BYTES, SHARED_DIR, validFilePath, validSharedPath } from "./upload.js";
 
 /** Folder (relative to the session's working directory) read_deliverable writes into; git-ignored by its own .gitignore. */
 export const DOWNLOAD_DIR = ".agent-deliverables";
@@ -69,34 +69,49 @@ export interface WrittenSharedFile {
  * replaced through a temporary file and rename, so a symlink at the name is replaced, not followed.
  */
 export async function writeSharedDownload(cwd: string, sd: ToolSharedDownload, chunks: ReadonlyMap<number, string>): Promise<WrittenSharedFile> {
+  const f = checkShared(sd);
+  const [body] = splitFiles(sd, joinChunks(sd.chunks, chunks, MAX_CHUNKED_SHARED_BYTES, "read_shared_file"));
+  const t = await sharedTarget(cwd, f.path);
+  const tmp = join(t.dir, `.${t.name.slice(0, 40)}.${randomBytes(6).toString("hex")}.part`);
+  await writeNew(tmp, body!, false);
+  try {
+    const st = await lstat(t.target).catch(() => null);
+    if (st?.isDirectory()) throw new DownloadError(`${SHARED_DIR}/${f.path} exists and is a directory`);
+    await rename(tmp, t.target);
+  } catch (err) {
+    await rm(tmp, { force: true });
+    if (err instanceof DownloadError) throw err;
+    throw new DownloadError(`cannot write ${t.target}: ${(err as NodeJS.ErrnoException).code ?? (err as Error).message}`);
+  }
+  return { abs: t.target, rel: `${SHARED_DIR}/${f.path}`, size: f.size, sha256: f.sha256 };
+}
+
+/** The one file of a shared_download, checked (path rules, size limit). */
+export function checkShared(sd: ToolSharedDownload): ToolSharedDownload["files"][0] {
   if (!Array.isArray(sd.files) || sd.files.length !== 1) throw new DownloadError("a shared download has exactly one file");
   const f = sd.files[0];
   if (typeof f.path !== "string" || !validSharedPath(f.path)) throw new DownloadError(`refusing shared path ${JSON.stringify(f.path)}`);
   if (!Number.isInteger(f.size) || f.size < 0 || f.size > MAX_SHARED_BYTES) throw new DownloadError(`bad size of ${f.path}`);
-  const [body] = splitFiles(sd, joinChunks(sd.chunks, chunks, MAX_SHARED_BYTES, "read_shared_file"));
+  return f;
+}
+
+/**
+ * Where a shared file goes: <cwd>/.shared/<path>, the folders created as real directories (never
+ * symlinks) and .shared holding a .gitignore ("*").
+ */
+export async function sharedTarget(cwd: string, path: string): Promise<{ dir: string; name: string; target: string }> {
   if (!cwd) throw new DownloadError("the session has no working directory");
   const root = await realpath(cwd).catch(() => {
     throw new DownloadError("the working directory is missing");
   });
   const top = await ensureDir(join(root, SHARED_DIR));
   await writeNew(join(top, ".gitignore"), Buffer.from(SHARED_GITIGNORE), true);
-  const parts = f.path.split("/");
+  const parts = path.split("/");
   const target = join(top, ...parts);
-  if (!isInside(top, target) || target === top) throw new DownloadError(`refusing shared path ${JSON.stringify(f.path)}`);
+  if (!isInside(top, target) || target === top) throw new DownloadError(`refusing shared path ${JSON.stringify(path)}`);
   let dir = top;
   for (const part of parts.slice(0, -1)) dir = await ensureDir(join(dir, part));
-  const tmp = join(dir, `.${parts.at(-1)!.slice(0, 40)}.${randomBytes(6).toString("hex")}.part`);
-  await writeNew(tmp, body!, false);
-  try {
-    const st = await lstat(target).catch(() => null);
-    if (st?.isDirectory()) throw new DownloadError(`${SHARED_DIR}/${f.path} exists and is a directory`);
-    await rename(tmp, target);
-  } catch (err) {
-    await rm(tmp, { force: true });
-    if (err instanceof DownloadError) throw err;
-    throw new DownloadError(`cannot write ${target}: ${(err as NodeJS.ErrnoException).code ?? (err as Error).message}`);
-  }
-  return { abs: target, rel: `${SHARED_DIR}/${f.path}`, size: f.size, sha256: f.sha256 };
+  return { dir, name: parts.at(-1)!, target };
 }
 
 function checkMeta(dl: ToolDownload): void {
@@ -132,13 +147,13 @@ function splitFiles(dl: { files: { path: string; size: number; sha256: string }[
   return dl.files.map((f) => {
     const body = all.subarray(off, off + f.size);
     off += f.size;
-    if (createHash("sha256").update(body).digest("hex") !== f.sha256) throw new DownloadError(`checksum mismatch: ${f.path}`);
+    if (f.sha256 && createHash("sha256").update(body).digest("hex") !== f.sha256) throw new DownloadError(`checksum mismatch: ${f.path}`);
     return body;
   });
 }
 
 /** Creates the directory if needed; an existing entry must be a real directory, not a symlink or file. */
-async function ensureDir(path: string): Promise<string> {
+export async function ensureDir(path: string): Promise<string> {
   const st = await lstat(path).catch(() => null);
   if (!st) {
     await mkdir(path, { mode: 0o755 });
@@ -149,7 +164,7 @@ async function ensureDir(path: string): Promise<string> {
 }
 
 /** Writes a file without following a symlink at its name (replace: truncate an existing regular file). */
-async function writeNew(path: string, body: Buffer, replace: boolean): Promise<void> {
+export async function writeNew(path: string, body: Buffer, replace: boolean): Promise<void> {
   const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW | (replace ? constants.O_TRUNC : constants.O_EXCL);
   const fh = await open(path, flags, 0o644).catch((err: NodeJS.ErrnoException) => {
     throw new DownloadError(`cannot write ${path}: ${err.code ?? err.message}`);

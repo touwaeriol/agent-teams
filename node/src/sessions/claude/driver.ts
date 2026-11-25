@@ -222,6 +222,7 @@ export class ClaudeDriver implements Driver {
     if (msg.type === "system" && msg.subtype === "init") return this.onInit(msg.tools);
     if (msg.type === "system" && msg.subtype === "commands_changed") this.commandNames = sessionCommands(msg.commands).map((c) => c.name);
     if (msg.type === "system" && msg.subtype === "compact_boundary" && msg.compact_metadata.trigger === "manual" && this.compacting) this.compacting.boundary = true;
+    if (msg.type === "system" && msg.subtype === "compact_boundary") this.ctx.sink.compacted?.();
     if (msg.type === "assistant") this.onAssistant(msg.user_message_uuids, msg.message.content);
     if (msg.type === "assistant" && msg.parent_tool_use_id === null && msg.message.model) this.turnModel = msg.message.model;
     const reply = msg.type === "result" ? await this.readContext("summary") : undefined;

@@ -3,6 +3,7 @@ package orchapi
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -153,6 +154,9 @@ type CommentView struct {
 	Text      string    `json:"text"`
 	SentTo    string    `json:"sent_to" doc:"Employee the comment was delivered to; empty when nobody could receive it"`
 	CreatedAt time.Time `json:"created_at"`
+	// Attachments went with the comment (refs as in a message's meta.attachments; expired: true
+	// once their retention ran out).
+	Attachments []core.AttachmentRef `json:"attachments" gorm:"serializer:json"`
 }
 
 type commentsOutput struct {
@@ -166,8 +170,9 @@ type commentOutput struct{ Body CommentView }
 type newCommentInput struct {
 	ID   string `path:"id" maxLength:"64"`
 	Body struct {
-		Text    string `json:"text" minLength:"1" maxLength:"10000"`
-		Version *int   `json:"version,omitempty" minimum:"1"`
+		Text        string   `json:"text" minLength:"1" maxLength:"10000"`
+		Version     *int     `json:"version,omitempty" minimum:"1"`
+		Attachments []string `json:"attachments,omitempty" maxItems:"20" doc:"Attachment ids of the deliverable's project (POST /api/projects/{pid}/uploads): they go to the employee with the comment"`
 	}
 }
 
@@ -178,9 +183,16 @@ func (a *API) listComments(ctx context.Context, in *deliverableIDInput) (*commen
 	}
 	out := &commentsOutput{}
 	out.Body.Items = []CommentView{}
-	err = a.e.Core.Pool.Gorm(ctx).Table("at_deliverable_comments").Select("id, version, text, sent_to, created_at").
+	err = a.e.Core.Pool.Gorm(ctx).Table("at_deliverable_comments").Select("id, version, text, sent_to, created_at, attachments").
 		Where("deliverable_id = ?", d.ID).Order("created_at, id").Find(&out.Body.Items).Error
 	if err != nil {
+		return nil, err
+	}
+	lists := make([][]core.AttachmentRef, len(out.Body.Items))
+	for i := range out.Body.Items {
+		lists[i] = out.Body.Items[i].Attachments
+	}
+	if err := core.MarkExpiredRefs(ctx, a.e.Core.Pool, lists...); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -195,15 +207,48 @@ func (a *API) addComment(ctx context.Context, in *newCommentInput) (*commentOutp
 	if err != nil {
 		return nil, err
 	}
-	c := CommentView{ID: core.NewID("dc"), Version: in.Body.Version, Text: strings.TrimSpace(in.Body.Text)}
+	c := CommentView{ID: core.NewID("dc"), Version: in.Body.Version, Text: strings.TrimSpace(in.Body.Text), Attachments: []core.AttachmentRef{}}
+	if len(in.Body.Attachments) > 0 {
+		a.e.Orch.WarmProject(ctx, d.ProjectID)
+	}
 	err = a.e.Core.InTx(ctx, func(tx *core.Tx) error {
+		// The comment's attachments: of the deliverable's project, ready; sending them is a use.
+		list, err := core.UseAttachments(ctx, tx, d.ProjectID, dedupe(in.Body.Attachments), a.e.Core.AttachmentTTL)
+		if err != nil {
+			return err
+		}
+		for _, att := range list {
+			c.Attachments = append(c.Attachments, att.Ref())
+		}
 		if c.SentTo, err = a.deliverComment(ctx, tx, d, c); err != nil {
 			return err
 		}
-		return store.QueryRow(ctx, tx, `INSERT INTO at_deliverable_comments (id, deliverable_id, version, author, text, sent_to)
-			VALUES ($1,$2,$3,$4,$5,$6) RETURNING created_at`, c.ID, d.ID, c.Version, u.ID, c.Text, c.SentTo).Scan(&c.CreatedAt)
+		return store.QueryRow(ctx, tx, `INSERT INTO at_deliverable_comments (id, deliverable_id, version, author, text, sent_to, attachments)
+			VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING created_at`, c.ID, d.ID, c.Version, u.ID, c.Text, c.SentTo, jsonText(c.Attachments)).Scan(&c.CreatedAt)
 	})
-	return &commentOutput{Body: c}, err
+	if err != nil {
+		return nil, fail(err, "附件不存在、还没传完，或者不是这个项目的")
+	}
+	return &commentOutput{Body: c}, nil
+}
+
+// dedupe drops repeated ids, keeping the order.
+func dedupe(ids []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// jsonText is v as JSON text (a jsonb parameter).
+func jsonText(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
 }
 
 // deliverComment sends the comment to the employee who published the commented version (the latest
@@ -226,9 +271,19 @@ func (a *API) deliverComment(ctx context.Context, tx *core.Tx, d core.Deliverabl
 	if conv == nil {
 		conv = d.ThreadID
 	}
-	rec := &core.NewMessage{ConversationID: deref(conv), Role: "user", Author: "user", Kind: "chat", Content: text,
-		Meta: map[string]any{"to": emp.Name, "deliverable_id": d.ID}}
-	_, err = a.e.Orch.Deliver(ctx, tx, emp, orchestrator.Delivery{Text: text, Kind: "user", Priority: "next", Record: rec})
+	meta := map[string]any{"to": emp.Name, "deliverable_id": d.ID}
+	if len(c.Attachments) > 0 {
+		meta["attachments"] = c.Attachments
+	}
+	rec := &core.NewMessage{ConversationID: deref(conv), Role: "user", Author: "user", Kind: "chat", Content: text, Meta: meta}
+	// Small text files go into the delivered text, as in any message (the stored one keeps the
+	// comment as written); an older daemon relies on it (legacyFit says the content is inline).
+	delivered, err := a.e.Orch.DeliveryText(ctx, tx, d.ProjectID, text, c.Attachments)
+	if err != nil {
+		return "", err
+	}
+	_, err = a.e.Orch.Deliver(ctx, tx, emp, orchestrator.Delivery{Text: delivered, Kind: "user", Priority: "next", Record: rec,
+		Attachments: c.Attachments})
 	return emp.Name, err
 }
 

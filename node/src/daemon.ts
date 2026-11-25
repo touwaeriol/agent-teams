@@ -41,6 +41,7 @@ import { Updater, type UpdaterOptions } from "./upgrade.js";
 import type { Logger } from "./util/log.js";
 import { absPath } from "./sessions/claude/options.js";
 import { consoleImageFetcher } from "./sessions/images.js";
+import { consoleHttp, type AttachmentOptions, type ConsoleHttp } from "./sessions/attachments.js";
 import { DAEMON_BUILD, DAEMON_RELEASE, DAEMON_VERSION, PROTOCOLS } from "./version.js";
 
 export interface DaemonOptions {
@@ -104,11 +105,15 @@ export interface DaemonOptions {
   moveTransfer?: MoveTransfer;
   /** Tests: wait after a turn before the session.digest read (default 3 s). */
   liveDigestDelayMs?: number;
+  /** .attachments/ download budget, disk reserve and retention (AGENT_TEAMS_ATTACHMENT_*; config.ts). */
+  attachments?: Partial<AttachmentOptions>;
+  /** Tests: fetch used for attachment and shared-file transfers (default global fetch). */
+  transferFetch?: typeof fetch;
   /** Updater overrides (tests): poll and confirm delays, fetch, npm. */
   updater?: Partial<Pick<UpdaterOptions, "pollMs" | "confirmAfterMs" | "fetchFn" | "npm" | "now">>;
 }
 
-const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "file_download", "shared_files", "context_usage", "session_compact", "usage", "ssh_gateway", "runtime_status", "session_move", "context_detail", "session_controls"];
+const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "file_download", "shared_files", "context_usage", "session_compact", "usage", "ssh_gateway", "runtime_status", "session_move", "context_detail", "session_controls", "attachments_v2"];
 
 /** Wires the link, command handlers, sessions, tools, git and credentials together. */
 export class Daemon {
@@ -120,6 +125,7 @@ export class Daemon {
   private readonly dispatcher: Dispatcher;
   private readonly approvals: ApprovalBroker;
   private readonly tools: ToolBroker;
+  private readonly http: ConsoleHttp;
   private readonly creds: CredBroker;
   private readonly credServer: CredServer;
   private readonly toolhost: LoopbackToolHost;
@@ -165,7 +171,8 @@ export class Daemon {
     this.link = new Link({ url: o.url, token: o.token, outbox: this.outbox, hello: () => this.hello(), log: o.log, ...o.link });
     const send = (type: string, body: object) => this.link.send(type, body);
     this.approvals = new ApprovalBroker(send);
-    this.tools = new ToolBroker(send);
+    this.http = consoleHttp(o.url, o.token, o.transferFetch);
+    this.tools = new ToolBroker(send, { http: this.http, attachments: () => this.sessions.attachmentOptions, noteAttachmentDir: (cwd) => this.sessions.noteAttachmentDir(cwd) });
     this.creds = new CredBroker(send);
     this.platform = installPlatformFiles(o.platformDir, o.nodeCmd);
     const dataDir = dirname(o.platformDir);
@@ -214,6 +221,8 @@ export class Daemon {
       onDriverGone: (id) => this.ssh.drop(id),
       contextDetail: () => this.welcomeFeatures.has("context_detail"),
       fetchImage: consoleImageFetcher(o.url, o.token),
+      http: this.http,
+      ...(o.attachments ? { attachments: o.attachments } : {}),
       ...(o.crashDelaysMs ? { crashDelaysMs: o.crashDelaysMs } : {}),
       ...(o.compactWaitMs ? { compactWaitMs: o.compactWaitMs } : {}),
       ...(o.compactRunMs ? { compactRunMs: o.compactRunMs } : {}),
@@ -363,7 +372,7 @@ export class Daemon {
       "session.interrupt": { run: (b) => s.interrupt(b as unknown as SessionInterrupt) },
       "session.set_mode": { lane: session, run: (b) => s.setMode(b as unknown as SessionSetMode) },
       "session.compact": { lane: session, run: async (b) => s.compact(b as unknown as SessionCompact) },
-      "session.close": { lane: session, run: (b) => s.close(b as unknown as SessionClose) },
+      "session.close": { lane: session, onArrival: (b) => s.abortDownloads(b as unknown as SessionClose), run: (b) => s.close(b as unknown as SessionClose) },
       "session.export": { lane: session, run: async (b) => [{ type: "session.exported", body: await this.mover.export(b as unknown as SessionExport) }] },
       "session.watch": { run: async (b) => s.watch(b as unknown as SessionWatch) },
       "session.context_refresh": { run: (b) => s.refreshContext(b as unknown as SessionContextRefresh) },

@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 
 	"github.com/touwaeriol/agent-teams/server/internal/artifacts"
+	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
+	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/sharedfiles"
 )
 
@@ -91,9 +94,22 @@ func (s *Service) readSharedFile(ctx context.Context, tx *core.Tx, c *call) (Res
 	if err != nil {
 		return Result{}, refuse("%s", err.Error())
 	}
-	f, data, err := sharedfiles.Load(ctx, tx, c.emp().ProjectID, p)
+	if res, ok, err := s.readSharedURL(ctx, tx, c, p); ok || err != nil {
+		return res, err
+	}
+	f, data, err := sharedfiles.Load(ctx, tx, s.core.Blobs, c.emp().ProjectID, p)
 	if errors.Is(err, sharedfiles.ErrNotFound) {
 		return Result{}, refuse("这个项目没有共享文件 %s（用 list_shared_files 查看）", p)
+	}
+	if errors.Is(err, sharedfiles.ErrFailed) {
+		return Result{}, refuse("共享文件 %s 上传后校验没有通过（内容和上传时不一致），读不了；请重新上传", p)
+	}
+	if errors.Is(err, blobstore.ErrNotConfigured) {
+		return Result{}, refuse("平台的文件存储还没有配置，暂时读不了共享文件 %s", p)
+	}
+	if errors.Is(err, sharedfiles.ErrFileTooLarge) {
+		return Result{}, refuse("共享文件 %s 有 %s，这个节点只能分块取 %d MB 以内的文件：请升级节点守护进程", p, human(f.Size),
+			sharedfiles.MaxFileBytes>>20)
 	}
 	if err != nil {
 		return Result{}, err
@@ -107,6 +123,50 @@ func (s *Service) readSharedFile(ctx context.Context, tx *core.Tx, c *call) (Res
 		"改完后用 write_shared_file(file=%q) 写回同一路径。%s", f.Path, human(int64(len(data))), f.SHA256, f.Label(), out.LocalPath,
 		out.LocalPath, noSecrets)
 	return Result{OK: true, Text: text, Structured: out, SharedDownload: dl}, nil
+}
+
+// readSharedURL answers read_shared_file with a presigned GET of the file's object (#58 design
+// §4.3) for a daemon with attachments_v2: no file.download frames, the daemon downloads it into
+// .shared/<path> and checks size and sha256. ok=false leaves the call to the chunked path (older
+// daemons, rows from before #58 whose bytes are in the database, sessions without a node).
+func (s *Service) readSharedURL(ctx context.Context, tx *core.Tx, c *call, p string) (Result, bool, error) {
+	sess, err := core.SessionByID(ctx, tx, c.sc.Session.ID)
+	if err != nil || sess.NodeID == nil {
+		return Result{}, false, err
+	}
+	v2, err := core.NodeHasFeature(ctx, tx, *sess.NodeID, orchestrator.FeatureAttachmentsV2)
+	if err != nil || !v2 {
+		return Result{}, false, err
+	}
+	f, err := sharedfiles.Stat(ctx, tx, c.emp().ProjectID, p)
+	if errors.Is(err, sharedfiles.ErrNotFound) {
+		return Result{}, true, refuse("这个项目没有共享文件 %s（用 list_shared_files 查看）", p)
+	}
+	if err != nil || f.StorageKey == nil {
+		return Result{}, false, err
+	}
+	if f.State == "failed" {
+		return Result{}, true, refuse("共享文件 %s 上传后校验没有通过（内容和上传时不一致），读不了；请重新上传", p)
+	}
+	if f.SHA256 == "" {
+		// The daemon checks the download against sha256 and its schema needs one: wait for blob_hash.
+		return Result{}, true, refuse("共享文件 %s 刚上传，平台还在处理（计算校验值），请稍后再试", p)
+	}
+	url, err := blobstore.Or(s.core.Blobs).PresignGet(ctx, *f.StorageKey, AttachmentURLTTL, blobstore.GetOptions{ContentType: "application/octet-stream"})
+	if errors.Is(err, blobstore.ErrNotConfigured) {
+		return Result{}, true, refuse("平台的文件存储还没有配置，暂时读不了共享文件 %s", p)
+	}
+	if err != nil {
+		return Result{}, true, err
+	}
+	exp := time.Now().Add(AttachmentURLTTL).UTC()
+	dl := &protocol.ToolSharedDownload{DownloadID: protocol.DownloadID(core.NewID("dn")),
+		Files: []protocol.DownloadFile{{Path: f.Path, Size: int(f.Size), SHA256: f.SHA256, URL: &url, ExpiresAt: &exp}}}
+	out := sharedReadResult{Path: f.Path, Size: int(f.Size), SHA256: f.SHA256, LocalPath: SharedDir + "/" + f.Path}
+	text := fmt.Sprintf("已把共享文件 %s（%s，sha256 %s，%s 上传）取到工作目录的 %s（不会被 git 提交）。用文件工具读取它；"+
+		"改完后用 write_shared_file(file=%q) 写回同一路径。%s", f.Path, human(f.Size), f.SHA256, f.Label(), out.LocalPath,
+		out.LocalPath, noSecrets)
+	return Result{OK: true, Text: text, Structured: out, SharedDownload: dl}, true, nil
 }
 
 // sendSharedDownload queues the file as file.download chunks for the session's node. Every session
@@ -178,8 +238,14 @@ func (s *Service) storeShared(ctx context.Context, tx *core.Tx, c *call, in prot
 	if err != nil {
 		return Result{}, refuse("%s", err.Error())
 	}
-	if decl.Size > sharedfiles.MaxFileBytes {
-		return Result{}, refuse("%s", sharedfiles.Check(sharedfiles.Usage{}, int64(decl.Size), -1).Error())
+	if c.upload.Storage == protocol.ToolUploadStorageS3 {
+		// Finishing reads the whole object (copy, sha256): up to 200 MB of network work, done after
+		// the call's transaction (Later) so neither rows nor the node's link wait on it.
+		uploadID := string(c.upload.UploadID)
+		return Result{Later: func(ctx context.Context) Result { return s.finishSharedUpload(ctx, c, uploadID, p) }}, nil
+	}
+	if decl.Size > sharedfiles.MaxInlineFileBytes {
+		return Result{}, refuse("%s", sharedfiles.InlineTooLarge().Error())
 	}
 	data, err := artifacts.LoadChunks(ctx, tx, c.sc.Session.ID, c.upload)
 	if err != nil {
@@ -191,13 +257,21 @@ func (s *Service) storeShared(ctx context.Context, tx *core.Tx, c *call, in prot
 	if sharedfiles.Sum(data) != decl.SHA256 {
 		return Result{}, refuse("文件校验失败：%s", p)
 	}
-	f, overwritten, err := sharedfiles.Put(ctx, tx, c.emp().ProjectID, p, data, sharedUploader(c))
+	f, overwritten, err := sharedfiles.Put(ctx, tx, s.core.Blobs, c.emp().ProjectID, p, data, sharedUploader(c))
 	if errors.Is(err, sharedfiles.ErrInvalidPath) || errors.Is(err, sharedfiles.ErrFileTooLarge) || errors.Is(err, sharedfiles.ErrQuota) {
 		return Result{}, refuse("%s", err.Error())
+	}
+	if errors.Is(err, blobstore.ErrNotConfigured) {
+		return Result{}, refuse("平台的文件存储还没有配置，暂时写不了共享文件")
 	}
 	if err != nil {
 		return Result{}, err
 	}
+	return s.storedShared(ctx, tx, c, f, overwritten)
+}
+
+// storedShared announces a written shared file and answers write_shared_file.
+func (s *Service) storedShared(ctx context.Context, tx *core.Tx, c *call, f sharedfiles.SharedFile, overwritten bool) (Result, error) {
 	if err := tx.EmitSharedFile(ctx, c.emp().ProjectID, f.Label(), "write", f.Path); err != nil {
 		return Result{}, err
 	}
@@ -205,10 +279,79 @@ func (s *Service) storeShared(ctx context.Context, tx *core.Tx, c *call, in prot
 	if overwritten {
 		verb = "已覆盖"
 	}
+	sum := f.SHA256
+	if sum == "" {
+		sum = "平台计算中"
+	}
 	text := fmt.Sprintf("%s共享文件 %s（%s，sha256 %s）。项目里所有会话和用户都能用 list_shared_files / read_shared_file 取到它；"+
-		"同名再写会直接覆盖。%s", verb, f.Path, human(f.Size), f.SHA256, noSecrets)
+		"同名再写会直接覆盖。%s", verb, f.Path, human(f.Size), sum, noSecrets)
 	return okJSON(text, protocol.WriteSharedFileResult{Path: protocol.SharedPath(f.Path), Size: int(f.Size), SHA256: f.SHA256,
 		Overwritten: overwritten}), nil
+}
+
+// finishSharedUpload is write_shared_file's presigned path after the call's transaction: the
+// upload becomes the shared file in a transaction of its own (FinalizeUpload reads the object
+// before it takes the project lock); a refusal cancels the caller's upload so it does not hold
+// the quota.
+func (s *Service) finishSharedUpload(ctx context.Context, c *call, uploadID, p string) Result {
+	var res Result
+	err := s.core.InTx(ctx, func(tx *core.Tx) error {
+		f, overwritten, err := finalizeSharedUpload(ctx, tx, s.core.Blobs, c.emp().ProjectID, uploadID, p, sharedUploader(c))
+		if err != nil {
+			return refuseUpload(err, p)
+		}
+		res, err = s.storedShared(ctx, tx, c, f, overwritten)
+		return err
+	})
+	if err == nil {
+		return res
+	}
+	_ = s.core.InTx(ctx, func(tx *core.Tx) error {
+		s.dropOwnUpload(ctx, tx, c, uploadID)
+		return nil
+	})
+	var ue userError
+	if errors.As(err, &ue) {
+		return failText("%s", ue.msg)
+	}
+	s.log.Warn("write_shared_file finish", "upload", uploadID, "err", err)
+	return failText("写共享文件失败：%v", err)
+}
+
+// finalizeSharedUpload turns a daemon's presigned upload (POST /nodes/uploads, then PUT; tool.call
+// upload storage s3) into the shared file at path (sharedfiles.FinalizeUpload: size and the
+// declared sha256 checked against the object, limits and path checked). Only the employee that
+// asked for the upload may finish it.
+func finalizeSharedUpload(ctx context.Context, q core.DB, bs blobstore.Store, projectID, uploadID, path string,
+	by sharedfiles.Uploader) (sharedfiles.SharedFile, bool, error) {
+	return sharedfiles.FinalizeUpload(ctx, q, bs, projectID, uploadID,
+		sharedfiles.FinalizeOptions{Path: path, By: &by, EmployeeID: by.EmployeeID})
+}
+
+// dropOwnUpload cancels the caller's refused presigned upload (over quota, bad path, object
+// missing…) so it does not hold the project's quota until blobgc expires it a day later. Uploads
+// of other employees (or already gone) are left alone; failures only cost that day.
+func (s *Service) dropOwnUpload(ctx context.Context, tx *core.Tx, c *call, uploadID string) {
+	up, err := sharedfiles.GetUpload(ctx, tx, c.emp().ProjectID, uploadID)
+	if err != nil || up.UploaderID == nil || *up.UploaderID != c.emp().ID {
+		return
+	}
+	_ = sharedfiles.AbortUpload(ctx, tx, s.core.Blobs, c.emp().ProjectID, uploadID)
+}
+
+// refuseUpload explains a refused presigned upload to the model.
+func refuseUpload(err error, p string) error {
+	switch {
+	case errors.Is(err, sharedfiles.ErrInvalidPath), errors.Is(err, sharedfiles.ErrFileTooLarge), errors.Is(err, sharedfiles.ErrQuota):
+		return refuse("%s", err.Error())
+	case errors.Is(err, sharedfiles.ErrSizeMismatch), errors.Is(err, sharedfiles.ErrChecksum), errors.Is(err, sharedfiles.ErrIncomplete):
+		return refuse("%s：%s", p, err.Error())
+	case errors.Is(err, sharedfiles.ErrNotFound), errors.Is(err, core.ErrNotFound):
+		return refuse("没有找到这次上传（可能已过期），请重新调用 write_shared_file 上传 %s", p)
+	case errors.Is(err, blobstore.ErrNotConfigured):
+		return refuse("平台的文件存储还没有配置，暂时写不了共享文件")
+	}
+	return err
 }
 
 // deleteSharedFile removes one shared file (copies already fetched into working directories stay).
@@ -242,6 +385,8 @@ func (s *Service) deleteSharedFile(ctx context.Context, tx *core.Tx, c *call) (R
 // human prints a byte count as B / KB / MB.
 func human(n int64) string {
 	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
 	case n >= 1<<20:
 		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
 	case n >= 1<<10:

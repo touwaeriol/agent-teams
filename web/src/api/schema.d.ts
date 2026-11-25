@@ -310,10 +310,27 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The bytes of an attachment */
+        /** An attachment: 302 to a presigned URL valid 5 minutes (images and PDF inline, anything else downloaded as application/octet-stream); the bytes themselves for attachments from before #58; 410 once expired */
         get: operations["get-attachment"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/attachments/{id}/save-shared": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Keep an attachment as a shared file of its project (copied inside the store; 409 file_exists unless overwrite, 409 quota_exceeded, 410 attachment_expired; 404 for one still uploading or not yet in a project) */
+        post: operations["save-attachment-shared"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1509,7 +1526,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Download one shared file (always as an attachment, never rendered) */
+        /** Download one shared file (always as an attachment, never rendered): 302 to a presigned URL valid 5 minutes, or the bytes for files from before #58 */
         get: operations["download-shared-file"];
         put?: never;
         post?: never;
@@ -1530,6 +1547,74 @@ export interface paths {
         put?: never;
         /** Open a thread directly (skipping the coordinator) */
         post: operations["create-thread"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a presigned upload of an attachment (any type, at most 200 MB) or a shared file (at most 200 MB, project quota 5 GB) */
+        post: operations["create-upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/uploads/{upload_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Cancel an upload in flight */
+        delete: operations["abort-upload"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/uploads/{upload_id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Finish an upload: the object's size is checked, an attachment's type sniffed, a shared file put at its path */
+        post: operations["complete-upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/uploads/{upload_id}/parts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Presigned PUT URLs for parts of an upload (1 hour) */
+        post: operations["upload-part-urls"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2254,6 +2339,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a presigned upload of an attachment without a project (kind attachment only; for POST /api/sessions attachments; dropped 24 hours after the last use if never sent) */
+        post: operations["create-user-upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/uploads/{upload_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Cancel an upload without a project */
+        delete: operations["abort-user-upload"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/uploads/{upload_id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Finish an upload without a project: the object's size is checked and its type sniffed */
+        post: operations["complete-user-upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/uploads/{upload_id}/parts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Presigned PUT URLs for parts of an upload without a project (1 hour) */
+        post: operations["user-upload-part-urls"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/voice/config": {
         parameters: {
             query?: never;
@@ -2508,14 +2661,16 @@ export interface components {
         };
         AttachmentRef: {
             content_type: string;
+            expired?: boolean;
             id: string;
             name: string;
+            sha256?: string;
             /** Format: int64 */
             size: number;
         };
         AttachmentView: {
-            /** @enum {string} */
-            content_type: "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "application/pdf" | "text/plain";
+            /** @description image/png, image/jpeg, image/gif, image/webp, application/pdf and text/plain (a text file whose content goes into the message) are recognised; any other type is a plain file */
+            content_type: string;
             /** Format: date-time */
             created_at: string;
             id: string;
@@ -2593,6 +2748,7 @@ export interface components {
             commands: components["schemas"]["CustomCommand"][] | null;
         };
         CommentView: {
+            attachments: components["schemas"]["AttachmentRef"][] | null;
             /** Format: date-time */
             created_at: string;
             id: string;
@@ -3415,6 +3571,8 @@ export interface components {
             skipped: string[] | null;
         };
         NewCommentInputBody: {
+            /** @description Attachment ids of the deliverable's project (POST /api/projects/{pid}/uploads): they go to the employee with the comment */
+            attachments?: string[] | null;
             text: string;
             /** Format: int64 */
             version?: number;
@@ -3691,6 +3849,16 @@ export interface components {
             usage_7d: components["schemas"]["Usage7d"];
             waiting: components["schemas"]["Waiting"];
         };
+        Part: {
+            etag: string;
+            /** Format: int32 */
+            number: number;
+        };
+        PartURL: {
+            /** Format: int32 */
+            number: number;
+            url: string;
+        };
         PasswordInputBody: {
             current: string;
             new: string;
@@ -3729,7 +3897,7 @@ export interface components {
             plugins: components["schemas"]["Plugin"][] | null;
         };
         PostMessageInputBody: {
-            /** @description Attachment ids (images, PDFs, text files) from POST /api/projects/{pid}/attachments, in order */
+            /** @description Attachment ids (any type) from POST /api/projects/{pid}/uploads or /attachments, in order (at most 20) */
             attachments?: string[] | null;
             /** @description Required unless attachments are given */
             content: string;
@@ -4213,6 +4381,12 @@ export interface components {
             session_id: string;
             thread_id: string;
         };
+        SaveSharedBody: {
+            /** @description Replace a shared file at the path (default false: 409 file_exists) */
+            overwrite?: boolean;
+            /** @description Shared-file path to save it at */
+            path: string;
+        };
         Schedule: {
             /** Format: date-time */
             created_at: string;
@@ -4409,6 +4583,8 @@ export interface components {
             thread_id: string;
         };
         SessionInput: {
+            /** @description Attachment ids uploaded with POST /api/uploads (ready, not expired, not yet used): they join the session's project and go with the first message (if the session then fails to start, the project and these attachments are deleted: upload them again) */
+            attachments?: string[] | null;
             /** @description Name of the work branch (after session/<id>-); '' = from the title, or the repositories when the title has no Latin letters */
             branch?: string;
             /** @description Thinking effort; '' = project / role setting */
@@ -4926,6 +5102,69 @@ export interface components {
             name: string;
             /** @description Shown name; default the file name */
             title?: string;
+        };
+        UploadComplete: {
+            /** @description Every part with the ETag its PUT answered */
+            parts: components["schemas"]["Part"][] | null;
+        };
+        UploadCreate: {
+            /**
+             * @description attachment: a file for a message (not counted in the project's quota); shared: a shared file
+             * @enum {string}
+             */
+            kind: "attachment" | "shared";
+            /** @description File name (an attachment shows it; a shared file uses it as its path when path is not given) */
+            name: string;
+            /** @description Shared files: replace a file at the path (default true); false answers 409 file_exists */
+            overwrite?: boolean;
+            /** @description Shared files: the target path (default: name) */
+            path?: string;
+            /**
+             * Format: int64
+             * @description Exact size in bytes (at most 200 MB: more answers 413 file_too_large); the object must have it at completion
+             */
+            size: number;
+        };
+        UploadDone: {
+            attachment?: components["schemas"]["AttachmentView"];
+            /** @enum {string} */
+            kind: "attachment" | "shared";
+            shared_file?: components["schemas"]["UploadedSharedFile"];
+        };
+        UploadParts: {
+            /**
+             * Format: date-time
+             * @description The URLs stop working after this (1 hour); ask again for new ones
+             */
+            expires_at: string;
+            urls: components["schemas"]["PartURL"][] | null;
+        };
+        UploadPartsAsk: {
+            /** @description Part numbers, 1 to parts */
+            numbers: number[] | null;
+        };
+        UploadSession: {
+            /**
+             * Format: date-time
+             * @description Unfinished uploads are dropped after this
+             */
+            expires_at: string;
+            /** @description The attachment id, or the shared file's object id */
+            id: string;
+            /** @enum {string} */
+            kind: "attachment" | "shared";
+            /**
+             * Format: int64
+             * @description Bytes per part (16 MB)
+             */
+            part_size: number;
+            /**
+             * Format: int32
+             * @description Number of parts
+             */
+            parts: number;
+            /** @description img_… for an attachment (also its id), up_… for a shared file */
+            upload_id: string;
         };
         UploadedSharedFile: {
             content_type: string;
@@ -5938,7 +6177,10 @@ export interface operations {
     };
     "get-attachment": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Always as an attachment (the page's download button) */
+                download?: boolean;
+            };
             header?: never;
             path: {
                 id: string;
@@ -5947,12 +6189,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The file */
+            /** @description The file (attachments still kept in the database) */
             200: {
                 headers: {
                     "Cache-Control"?: string;
                     "Content-Security-Policy"?: string;
                     "Content-Type"?: string;
+                    Location?: string;
                     "X-Content-Type-Options"?: string;
                     [name: string]: unknown;
                 };
@@ -5963,6 +6206,41 @@ export interface operations {
                     "image/png": unknown;
                     "image/webp": unknown;
                     "text/plain": unknown;
+                };
+            };
+            /** @description Redirect to the object store */
+            302: {
+                headers: {
+                    /** @description Presigned URL */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    "save-attachment-shared": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveSharedBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadedSharedFile"];
                 };
             };
             /** @description Error */
@@ -9141,6 +9419,7 @@ export interface operations {
                     "Content-Disposition"?: string;
                     "Content-Security-Policy"?: string;
                     "Content-Type"?: string;
+                    Location?: string;
                     "X-Content-Type-Options"?: string;
                     [name: string]: unknown;
                 };
@@ -9148,14 +9427,14 @@ export interface operations {
                     "application/octet-stream": unknown;
                 };
             };
-            /** @description Error */
-            default: {
+            /** @description Redirect to the object store */
+            302: {
                 headers: {
+                    /** @description Presigned URL */
+                    Location?: string;
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
+                content?: never;
             };
         };
     };
@@ -9218,6 +9497,143 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ThreadView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "create-upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadCreate"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadSession"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "abort-upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "complete-upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadComplete"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadDone"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "upload-part-urls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadPartsAsk"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadParts"];
                 };
             };
             /** @description Error */
@@ -10929,6 +11345,138 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Usage"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "create-user-upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadCreate"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadSession"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "abort-user-upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "complete-user-upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadComplete"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadDone"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "user-upload-part-urls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadPartsAsk"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadParts"];
                 };
             };
             /** @description Error */

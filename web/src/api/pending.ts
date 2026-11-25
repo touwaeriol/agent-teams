@@ -254,14 +254,15 @@ export async function retryMessage(qc: QueryClient, key: string): Promise<Messag
 export interface SentAttachment {
   id?: string;
   name: string;
-  kind: "image" | "pdf" | "text";
+  kind: "image" | "pdf" | "text" | "file";
+  size?: number;
 }
 
-const CONTENT_TYPE = { image: "image/png", pdf: "application/pdf", text: "text/plain" } as const;
+const CONTENT_TYPE = { image: "image/png", pdf: "application/pdf", text: "text/plain", file: "application/octet-stream" } as const;
 
 /** Attachments as the chat draws them while the message is pending (by id: the files are uploaded). */
 export function attachmentRefs(items: SentAttachment[]): AttachmentRef[] {
-  return items.filter((x) => x.id).map((x) => ({ id: x.id!, name: x.name, content_type: CONTENT_TYPE[x.kind], size: 0 }));
+  return items.filter((x) => x.id).map((x) => ({ id: x.id!, name: x.name, content_type: CONTENT_TYPE[x.kind], size: x.size ?? 0 }));
 }
 
 /** What useSendMessage clears from the box when a retry from the chat delivers a message it put back. */

@@ -99,6 +99,8 @@ type NewThread struct {
 	ParentID *string
 	// Branch overrides the thread branch thread/<no>-<slug> (a session's session/<id>-<slug>).
 	Branch string
+	// BriefAttachments go with a session's first message (Thread.BriefAttachments).
+	BriefAttachments []AttachmentRef
 }
 
 // CreateThread inserts the thread's conversation (kind thread) and the thread row (status queued).
@@ -123,11 +125,19 @@ func CreateThread(ctx context.Context, tx *Tx, n NewThread) (Thread, error) {
 		"user_id": n.UserID, "no": no, "title": n.Title, "brief": n.Brief,
 		"branch": branch, "base_branch": n.BaseBranch,
 		"auto_approve": n.AutoApprove, "opened_by": n.OpenedBy, "roles_snapshot": roles,
-		"source_message_id": n.SourceMessageID, "forwarded_brief": n.ForwardedBrief, "parent_id": n.ParentID, "only_roles": onlyRolesValue(n.OnlyRoles)}).Error
+		"source_message_id": n.SourceMessageID, "forwarded_brief": n.ForwardedBrief, "parent_id": n.ParentID, "only_roles": onlyRolesValue(n.OnlyRoles),
+		"brief_attachments": briefAttachmentsValue(n.BriefAttachments)}).Error
 	if err != nil {
 		return Thread{}, err
 	}
 	return ThreadByID(ctx, tx, id)
+}
+
+func briefAttachmentsValue(refs []AttachmentRef) any {
+	if len(refs) == 0 {
+		return jsonOf([]AttachmentRef{})
+	}
+	return jsonOf(refs)
 }
 
 func onlyRolesValue(roles []string) any {
@@ -301,7 +311,7 @@ func nodePath(ctx context.Context, q DB, nodeID *string, rel string) (string, er
 }
 
 // DispatchOf is the thread's hand-over: who opened it, when, and the user's message it was opened
-// for. Nil when the brief is empty or is the user's forwarded messages (their copies are already
+// for (its attachments carry expired). Nil when the brief is empty or is the user's forwarded messages (their copies are already
 // in the conversation) or the first message of a session (recorded as the user's message);
 // Source is nil without a message or when it was deleted.
 func DispatchOf(ctx context.Context, q DB, t Thread) (*ThreadDispatch, error) {
@@ -316,6 +326,12 @@ func DispatchOf(ctx context.Context, q DB, t Thread) (*ThreadDispatch, error) {
 	atts := AttachmentsOf(*m)
 	if atts == nil {
 		atts = []AttachmentRef{}
+	}
+	// The page shows expired ones without probing each card (#58).
+	if len(atts) > 0 {
+		if err := MarkExpiredRefs(ctx, q, atts); err != nil {
+			return nil, err
+		}
 	}
 	d.Source = &DispatchSource{MessageID: m.ID, Content: m.Content, Attachments: atts, CreatedAt: m.CreatedAt}
 	return d, nil
