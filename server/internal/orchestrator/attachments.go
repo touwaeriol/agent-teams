@@ -109,9 +109,10 @@ func (o *Orchestrator) fitAttachments(ctx context.Context, tx *core.Tx, nodeID, 
 	return o.legacyFit(ctx, tx, projectID, text, refs)
 }
 
-// legacyFit is fitAttachments for a daemon without attachments_v2. The text ends with an
-// [附件] block naming every attachment (id, name, type, size) and what became of it, as the
-// new daemons' block does, so the AI can still pass the ids on.
+// legacyFit is fitAttachments for a daemon without attachments_v2. When an attachment does not
+// get through whole (cut text, other types), the text ends with an [附件] block naming every
+// attachment (id, name, type, size) and what became of it, as the new daemons' block does; when
+// all do (images and PDFs up to 5 MB, small text files) the message is what it was before #58.
 func (o *Orchestrator) legacyFit(ctx context.Context, tx *core.Tx, projectID, text string, refs []core.AttachmentRef) (fitted, error) {
 	var long []string
 	for _, r := range refs {
@@ -126,6 +127,7 @@ func (o *Orchestrator) legacyFit(ctx context.Context, tx *core.Tx, projectID, te
 	}
 	out := fitted{}
 	var b, inline strings.Builder
+	lost := false
 	for _, r := range refs {
 		head := fmt.Sprintf("- %s %s（%s，%s）", r.ID, r.Name, r.ContentType, sizeText(int64(r.Size)))
 		switch {
@@ -139,11 +141,17 @@ func (o *Orchestrator) legacyFit(ctx context.Context, tx *core.Tx, projectID, te
 			body, cut := clipText(string(texts[r.ID]), maxInlineText)
 			fmt.Fprintf(&inline, "\n\n[附件：%s%s]\n```\n%s\n```", r.Name, cut, body)
 			fmt.Fprintf(&b, "\n%s：内容已放在正文里（节点版本过旧，只放了开头部分；升级节点守护进程后可以拿到完整文件）", head)
+			lost = true
 		default:
+			lost = true
 			fmt.Fprintf(&b, "\n%s：无法交给这个节点：节点守护进程版本过旧，请升级后再发", head)
 		}
 	}
-	out.text = text + inline.String() + "\n\n[附件]" + b.String()
+	out.text = text + inline.String()
+	if lost {
+		// Only when something did not get through as before #58: then the AI learns every id.
+		out.text += "\n\n[附件]" + b.String()
+	}
 	return out, nil
 }
 
