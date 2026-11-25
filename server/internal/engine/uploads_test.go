@@ -354,7 +354,7 @@ func TestPresignedSharedFiles(t *testing.T) {
 	intruder := w.signUp("intruder@example.com")
 	var other nodeCreated
 	intruder.must(201, "POST", "/api/nodes", map[string]string{"name": "theirs"}, &other)
-	if code, _ := nodeCall(t, w, "POST", "/nodes/uploads", other.Token, ask); code != 404 {
+	if code, _ := nodeCall(t, w, "POST", "/nodes/uploads", other.Token, ask); code != 409 {
 		t.Fatalf("session of another node = %d", code)
 	}
 	put := func(ask map[string]any, data []byte) orchapi.NodeUpload {
@@ -497,6 +497,26 @@ func TestWriteSharedFileS3(t *testing.T) {
 	other := ask("out/other.csv", body, body)
 	if res := call(st.lead, other, "out/other.csv", body); res.Ok {
 		t.Fatalf("lead finished dev-1's upload: %s", text(res))
+	}
+	if _, err := sharedfiles.GetUpload(w.ctx, w.db.Pool, st.projectID, other); err != nil {
+		t.Fatalf("another employee's refusal dropped dev-1's upload: %v", err)
+	}
+	// Refused for the quota: the upload is cancelled at once (it no longer holds the quota).
+	big := ask("out/big.csv", body, body)
+	if _, err := store.Exec(w.ctx, w.db.Pool, `INSERT INTO at_shared_uploads (id, project_id, path, object_id, storage_key, size, content_type, uploaded_by)
+		VALUES ('up_huge', $1, 'huge.bin', 'sf_huge', 'k', $2, 'application/octet-stream', 'user')`, st.projectID, int64(5<<30)-10); err != nil {
+		t.Fatal(err)
+	}
+	if res := call(st.dev, big, "out/big.csv", body); res.Ok || !strings.Contains(text(res), "5.0 GB") {
+		t.Fatalf("over quota accepted: %s", text(res))
+	}
+	if _, err := sharedfiles.GetUpload(w.ctx, w.db.Pool, st.projectID, big); !errors.Is(err, sharedfiles.ErrUploadNotFound) {
+		t.Fatalf("refused upload still held: %v", err)
+	}
+	// A session of another node (or closed): 409, never 404 (the daemon reads 404 as an old console).
+	if code, raw := nodeCall(t, w, "POST", "/nodes/uploads", st.tokB, map[string]any{"session_id": st.dev.session, "name": "a.txt",
+		"size": 1, "sha256": hexSum([]byte("x"))}); code != 409 || !strings.Contains(string(raw), "session_not_on_node") {
+		t.Fatalf("session on another node = %d %s", code, raw)
 	}
 	if res := call(st.dev, "up_00000000000000000000000000", "out/x.csv", body); res.Ok {
 		t.Fatalf("unknown upload accepted: %s", text(res))

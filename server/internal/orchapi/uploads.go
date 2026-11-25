@@ -369,7 +369,7 @@ func (a *API) nodeAttachmentURL(c *gin.Context) {
 // NodeUploadRequest is POST /nodes/uploads (design §4.3): a daemon asks for a presigned PUT before
 // it calls write_shared_file with upload: {upload_id}.
 // The daemon (node/src/toolhost/transfer.ts UploadRequest) sends the target shared path as name;
-// path is accepted as well and wins when both are given. call_id and content_type are informative
+// path is accepted as well (name wins when both are given, design §4.3). call_id and content_type are informative
 // (the type comes from the path).
 type NodeUploadRequest struct {
 	SessionID   string `json:"session_id"`
@@ -413,7 +413,7 @@ func (a *API) nodeUpload(c *gin.Context) {
 		nodeError(c, http.StatusBadRequest, "bad_request", "请求不是合法的 JSON")
 		return
 	}
-	if in.Path == "" {
+	if in.Name != "" {
 		in.Path = in.Name
 	}
 	if in.Path == "" {
@@ -427,7 +427,8 @@ func (a *API) nodeUpload(c *gin.Context) {
 	}
 	sc, err := core.SessionContextOf(ctx, a.e.Core.Pool, in.SessionID)
 	if err != nil || sc.Session.NodeID == nil || *sc.Session.NodeID != node.ID || sc.OwnerID != node.UserID || sc.Session.State == "closed" {
-		nodeError(c, http.StatusNotFound, "not_found", "这个节点上没有这个会话")
+		// Not 404: the daemon reads 404 as "an older console without this route" and falls back.
+		nodeError(c, http.StatusConflict, "session_not_on_node", "这个会话不在这个节点上（可能已经关闭或换了节点），不能申请上传")
 		return
 	}
 	emp := sc.Employee
@@ -449,6 +450,9 @@ func (a *API) nodeUpload(c *gin.Context) {
 	}
 	var apiErr *httpapi.APIError
 	if errors.As(uploadFail(err), &apiErr) {
+		if apiErr.Status == http.StatusNotFound { // see above: never 404 on this route
+			apiErr.Status, apiErr.Code = http.StatusConflict, "project_not_found"
+		}
 		nodeError(c, apiErr.Status, apiErr.Code, apiErr.Detail)
 		return
 	}
