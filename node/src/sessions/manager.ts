@@ -9,6 +9,7 @@ import { readJsonFile, writeFileAtomic } from "../util/jsonl.js";
 import type { Logger } from "../util/log.js";
 import { isInside, resolveInRoot } from "../util/paths.js";
 import { loadImages, removeImages, type ImageFetcher, type LoadedImage } from "./images.js";
+import { ATTACH_DIR, DEFAULT_ATTACHMENT_OPTIONS, downloadAttachment, planDelivery, sweepAttachments, type AttachmentOptions, type AttachmentOutcome, type AttachmentRuntime, type ConsoleHttp, type ResourceLink } from "./attachments.js";
 import { Session, type SendFn, type SessionHost, type SessionRecord } from "./session.js";
 import { ResumeFailed, type CompactResult, type Driver, type DriverContext, type ModeApplied, type ModeChange, type ModelOption } from "./types.js";
 import { codexMode } from "./codex/mode.js";
@@ -32,6 +33,12 @@ export interface ManagerDeps {
   createDriver: (spec: SessionOpen, absCwd: string, sink: Session) => { driver: Driver; ctx: DriverContext };
   /** Downloads an attached image from the console (session.send images). */
   fetchImage?: ImageFetcher;
+  /** The console over HTTP (session.send attachments: /nodes/attachments/{id}/url and the legacy download). */
+  http?: ConsoleHttp;
+  /** Download budget, free-space reserve and retention of .attachments/ copies. */
+  attachments?: Partial<AttachmentOptions>;
+  /** How often old .attachments/ copies are removed (default 1 h). */
+  attachmentSweepMs?: number;
   /** Called when a session stops for good (unregister cred secrets, loopback routes). */
   onSessionGone?: (sessionId: string) => void;
   /** A session's turn ended (session.digest, move/live.ts). */
@@ -73,7 +80,11 @@ export class SessionManager implements SessionHost {
   private maxActive: number;
   private draining = false;
   private timer: NodeJS.Timeout | null = null;
+  private sweepTimer: NodeJS.Timeout | null = null;
   private readonly dir: string;
+  readonly attachmentOptions: AttachmentOptions;
+  /** .attachments folders this daemon wrote into (swept for old copies), persisted in <state>/attachment-dirs.json. */
+  private readonly attachmentDirs: Set<string>;
 
   constructor(private readonly d: ManagerDeps) {
     this.send = d.send;
@@ -83,11 +94,45 @@ export class SessionManager implements SessionHost {
     this.maxActive = d.maxActive ?? Infinity;
     this.dir = join(d.stateDir, "sessions");
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
+    this.attachmentOptions = { ...DEFAULT_ATTACHMENT_OPTIONS, ...d.attachments };
+    this.attachmentDirs = new Set(readJsonFile<string[]>(this.attachmentDirsPath(), []).filter((x) => typeof x === "string"));
     this.loadRecords();
   }
 
   startTimers(intervalMs = 30_000): void {
     this.timer ??= setInterval(() => void this.parkIdle(), intervalMs);
+    if (!this.sweepTimer && this.attachmentOptions.retentionMs > 0) {
+      void this.sweepAttachments();
+      this.sweepTimer = setInterval(() => void this.sweepAttachments(), this.d.attachmentSweepMs ?? 3600_000);
+      this.sweepTimer.unref?.();
+    }
+  }
+
+  /** Removes .attachments/ copies older than the retention (by mtime); forgets folders that are gone. */
+  async sweepAttachments(now = Date.now()): Promise<number> {
+    const { removed, gone } = await sweepAttachments([...this.attachmentDirs], this.attachmentOptions.retentionMs, now);
+    if (gone.length) {
+      for (const g of gone) this.attachmentDirs.delete(g);
+      this.saveAttachmentDirs();
+    }
+    if (removed) this.d.log.info({ removed }, "old attachment copies removed");
+    return removed;
+  }
+
+  /** Remembers a working directory's .attachments folder for the sweep. */
+  noteAttachmentDir(absCwd: string): void {
+    const dir = join(absCwd, ATTACH_DIR);
+    if (this.attachmentDirs.has(dir)) return;
+    this.attachmentDirs.add(dir);
+    this.saveAttachmentDirs();
+  }
+
+  private attachmentDirsPath(): string {
+    return join(this.d.stateDir, "attachment-dirs.json");
+  }
+
+  private saveAttachmentDirs(): void {
+    writeFileAtomic(this.attachmentDirsPath(), JSON.stringify([...this.attachmentDirs]));
   }
 
   configure(c: { park_after_s?: number; max_active_sessions?: number }): void {
@@ -199,7 +244,7 @@ export class SessionManager implements SessionHost {
     s.released = true;
     this.persist(s);
     const first = s.spec.first_message;
-    const queue = [...(first ? [{ session_id: s.id, msg_id: first.msg_id, text: first.text, kind: "system" as const, ...(first.images ? { images: first.images } : {}), ...(first.anchor !== undefined ? { anchor: first.anchor } : {}) }] : []), ...s.held.splice(0)];
+    const queue = [...(first ? [{ session_id: s.id, msg_id: first.msg_id, text: first.text, kind: "system" as const, ...(first.images ? { images: first.images } : {}), ...(first.attachments ? { attachments: first.attachments } : {}), ...(first.anchor !== undefined ? { anchor: first.anchor } : {}) }] : []), ...s.held.splice(0)];
     void this.deliverQueued(s, queue);
     return [];
   }
@@ -234,9 +279,38 @@ export class SessionManager implements SessionHost {
       throw err;
     }
     if (body.interrupt_first) await s.driver!.interrupt();
-    const { text, images } = await this.withImages(s, body);
-    const r = await s.driver!.push({ msg_id: body.msg_id, text, priority: body.priority ?? "next", ...(images.length ? { images } : {}) });
+    const { text, images, links } = await this.withAttachments(s, body);
+    const r = await s.driver!.push({ msg_id: body.msg_id, text, priority: body.priority ?? "next", ...(images.length ? { images } : {}), ...(links.length ? { links } : {}) });
     return [delivered(s, body.msg_id, r.turn_id)];
+  }
+
+  /**
+   * The message's legacy images and its attachments (attachments_v2). Attachments are downloaded into
+   * <cwd>/.attachments/ one by one; one that cannot be fetched (error, timeout, no disk space) becomes
+   * a line in the [附件] block and the message is delivered anyway.
+   */
+  private async withAttachments(s: Session, body: SessionSend): Promise<{ text: string; images: LoadedImage[]; links: ResourceLink[] }> {
+    const legacy = await this.withImages(s, body);
+    if (!body.attachments?.length) return { ...legacy, links: [] };
+    const outcomes: AttachmentOutcome[] = [];
+    if (!this.d.http || !s.absCwd) {
+      for (const ref of body.attachments) outcomes.push({ ref, error: "这个节点无法下载附件" });
+    } else {
+      this.noteAttachmentDir(s.absCwd);
+      for (const ref of body.attachments) {
+        try {
+          outcomes.push({ ref, saved: await downloadAttachment(s.absCwd, ref, this.d.http, this.attachmentOptions) });
+        } catch (err) {
+          this.d.log.warn({ session: s.id, attachment: ref.id, err: (err as Error).message }, "attachment download failed");
+          outcomes.push({ ref, error: (err as Error).message });
+        }
+      }
+    }
+    const plan = await planDelivery(s.spec.runtime as AttachmentRuntime, outcomes).catch((err: Error) => {
+      this.d.log.warn({ session: s.id, err: err.message }, "attachment planning failed");
+      return { note: `\n\n[附件无法读取：${err.message}]`, images: [], links: [] };
+    });
+    return { text: legacy.text + plan.note, images: [...legacy.images, ...plan.images], links: plan.links };
   }
 
   /** Downloads the message's images; one that cannot be fetched becomes a note in the text. */
@@ -439,6 +513,7 @@ export class SessionManager implements SessionHost {
 
   async shutdown(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
     this.timer = null;
     for (const s of this.sessions.values()) if (s.driver) await this.park(s);
   }
