@@ -25,6 +25,8 @@ type link struct {
 	ackSeq int64 // highest daemon seq durably handled
 	ctx    context.Context
 	cancel context.CancelFunc
+	// tokenHash is the token the link authenticated with (checked again when it is put back, see unregister).
+	tokenHash string
 
 	mu      sync.Mutex
 	sentSeq int64 // highest command seq written on this link

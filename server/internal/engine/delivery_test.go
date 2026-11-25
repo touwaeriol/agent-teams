@@ -39,7 +39,8 @@ func takeNow(n *nodetest.Node, typ string) (nodetest.Frame, bool) {
 }
 
 // push answers the git.push of a member: the fake GitHub gets the branch, the console gets git.result.
-func push(t *testing.T, w *world, gh *fakeGitHub, n *nodetest.Node, branch, sha string) protocol.GitPush {
+// before runs while the job is still out (before git.result).
+func push(t *testing.T, w *world, gh *fakeGitHub, n *nodetest.Node, branch, sha string, before ...func(protocol.GitPush)) protocol.GitPush {
 	t.Helper()
 	ctx, cancel := w.waitCtx()
 	defer cancel()
@@ -54,6 +55,9 @@ func push(t *testing.T, w *world, gh *fakeGitHub, n *nodetest.Node, branch, sha 
 		t.Fatalf("push %+v", p)
 	}
 	gh.setRef(branch, sha)
+	for _, f := range before {
+		f(p)
+	}
 	if _, err := n.Send(ctx, protocol.TypeGitResult, protocol.GitResult{JobID: p.JobID, Ok: true, HeadSHA: &sha}); err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +119,7 @@ func TestDeliveryEndToEnd(t *testing.T) {
 	gen := protocol.OpenGen(dev.gen)
 	dev.send(protocol.TypeToolCall, protocol.ToolCall{CallID: protocol.CallID(callID), SessionID: protocol.SessionID(dev.session), OpenGen: &gen,
 		Tool: "complete_task", Args: []byte(`{"task_id":"t1","summary":"表单写好了"}`)})
-	pushed := push(t, w, gh, n, "thread/1/dev-1", "sha-dev-1")
+	pushed := push(t, w, gh, n, "thread/1/dev-1", "sha-dev-1", func(p protocol.GitPush) { assertJobCredential(t, w, n, p) })
 	if res := dev.result(callID); !res.Ok || !strings.Contains(string(*res.Structured), `"status":"review"`) {
 		t.Fatalf("complete_task after push: %+v", res)
 	}
@@ -222,14 +226,29 @@ func reopenAfterMerge(t *testing.T, w *world, gh *fakeGitHub, n *nodetest.Node, 
 	events.wait(t, "thread", `"status":"review"`, `"pr_number":8`)
 }
 
-// assertCredentials: push jobs get a write token; employee sessions get the connection's token
-// too (a PAT cannot be narrowed; the user's own nodes, architecture.md §10.4), only for project repositories.
-func assertCredentials(t *testing.T, w *world, n *nodetest.Node, dev *fakeAgent, pushed protocol.GitPush) {
+// assertJobCredential: a running push job gets a write token, only for its repository.
+func assertJobCredential(t *testing.T, w *world, n *nodetest.Node, pushed protocol.GitPush) {
 	t.Helper()
 	job := pushed.JobID
 	ok := credential(t, w, n, protocol.CredRequest{ReqID: "r1", JobID: &job, Host: "github.com", Path: "o/r.git", Purpose: "push"})
 	if !ok.Ok || ok.Password == nil || *ok.Password != "ghp_good" {
 		t.Fatalf("push job credential %+v", ok)
+	}
+	other := credential(t, w, n, protocol.CredRequest{ReqID: "r3", JobID: &job, Host: "github.com", Path: "evil/repo.git", Purpose: "push"})
+	if other.Ok {
+		t.Fatal("token for a foreign repository")
+	}
+}
+
+// assertCredentials: once its git.result is in, the push job gets nothing more (#55 N8: an old
+// job_id is not a standing grant); employee sessions get the connection's token (a PAT cannot be
+// narrowed; the user's own nodes, architecture.md §10.4), only for project repositories.
+func assertCredentials(t *testing.T, w *world, n *nodetest.Node, dev *fakeAgent, pushed protocol.GitPush) {
+	t.Helper()
+	job := pushed.JobID
+	done := credential(t, w, n, protocol.CredRequest{ReqID: "r1b", JobID: &job, Host: "github.com", Path: "o/r.git", Purpose: "push"})
+	if done.Ok || done.Error == nil || *done.Error != "unknown_job" {
+		t.Fatalf("finished push job credential %+v", done)
 	}
 	sid := protocol.SessionID(dev.session)
 	sess := credential(t, w, n, protocol.CredRequest{ReqID: "r2", SessionID: &sid, Host: "github.com", Path: "o/r.git", Purpose: "read"})
@@ -243,10 +262,6 @@ func assertCredentials(t *testing.T, w *world, n *nodetest.Node, dev *fakeAgent,
 	foreign := credential(t, w, n, protocol.CredRequest{ReqID: "r4", SessionID: &sid, Host: "github.com", Path: "evil/repo.git", Purpose: "push"})
 	if foreign.Ok || foreign.Error == nil || *foreign.Error != "repo_not_in_project" {
 		t.Fatalf("session credential for a foreign repository %+v", foreign)
-	}
-	other := credential(t, w, n, protocol.CredRequest{ReqID: "r3", JobID: &job, Host: "github.com", Path: "evil/repo.git", Purpose: "push"})
-	if other.Ok {
-		t.Fatal("token for a foreign repository")
 	}
 }
 

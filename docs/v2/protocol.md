@@ -56,9 +56,12 @@
 守护进程上行的每条消息只要提到 `session_id` 或 `job_id`（`session.*`、`tool.call`、`tool.cancel`、`approval.request`、`approval.cancel`、`approval.ack`、`cred.request`、`git.result`、`sessions.report` 里的每一项），控制台都先核对：
 
 - 会话：`at_agent_sessions.node_id = 当前链路认证出的节点`，会话未关闭，消息里的 `open_gen`（有则）等于当前 `open_gen`，且会话所属项目的所有者 = 节点所有者。
-- 作业：`at_node_commands.node_id = 当前节点` 且该作业由控制台发出。
+- 作业：`at_node_commands.node_id = 当前节点` 且该作业由控制台发出。`cred.request {job_id}` 还要求作业仍在进行（尚未收到 `git.result`、未过期或被取代）且下发不超过 2 小时，否则回 `cred.response {ok:false, error:"unknown_job"}`：旧的 job_id 不能反复领令牌（#55 N8）。
+- 按次级 id 找对象的消息，对象也必须属于这条消息的会话（#55 N3）：`approval.cancel`/`approval.ack` 按 `approval_id` 找到的审批卡，其会话要通过上面的会话校验（消息带 `session_id` 时还必须就是它；卡不存在则静默确认）；`session.delivered` 的 `msg_id` 所在对话要属于会话所在项目（无项目的对话属于节点所有者）；`session.compacted` 的 `compact_id` 对应的任务要由该会话的员工认领、在同一项目。
 
 任何一项不符 → 丢弃该消息、回 `error{ref_id, code:'unknown_session'}`（作业为 `unknown_job`）、写 `at_audit_log {actor: node:<id>, action: 'node_message_rejected'}`；同一链路 1 分钟内超过 20 次则以 4401 关闭。这样拿到别的会话 id 的节点（从日志、界面或泄露）也无法以那个员工的身份要令牌、调工具或发审批。
+
+握手（§3）时，升级前校验过的令牌会在处理 hello 的事务里（锁住节点行）和链路登记后各复查一次：升级之后、发 hello 之前令牌被轮换、节点被删除或所有者被停用，这条连接以 4401 关闭，不会成为节点的链路（#55 N2）。
 
 ## 3. 握手与版本协商
 

@@ -26,10 +26,13 @@ var terminal = map[string]bool{
 }
 
 type refs struct {
-	SessionID *string `json:"session_id"`
-	JobID     *string `json:"job_id"`
-	OpenGen   *int    `json:"open_gen"`
-	ExportID  *string `json:"export_id"`
+	SessionID  *string `json:"session_id"`
+	JobID      *string `json:"job_id"`
+	OpenGen    *int    `json:"open_gen"`
+	ExportID   *string `json:"export_id"`
+	ApprovalID *string `json:"approval_id"`
+	MsgID      *string `json:"msg_id"`
+	CompactID  *string `json:"compact_id"`
 }
 
 type verdict int
@@ -66,8 +69,23 @@ func (g *Gateway) check(ctx context.Context, node store.Node, typ string, r refs
 		// About a session the console already closed (it is being moved): the export must be this node's.
 		return g.checkExport(ctx, node, deref(r.ExportID), deref(r.SessionID))
 	}
+	if typ == protocol.TypeApprovalCancel || typ == protocol.TypeApprovalAck {
+		// session_id is optional here: the card's own session decides (#55 N3).
+		return g.checkApproval(ctx, node, typ, deref(r.ApprovalID), r.SessionID, r.OpenGen)
+	}
 	if r.SessionID != nil {
-		return g.checkSession(ctx, node, typ, *r.SessionID, r.OpenGen)
+		v, code, s, err := g.checkSessionRow(ctx, node, typ, *r.SessionID, r.OpenGen)
+		if err != nil || v != allowed {
+			return v, code, err
+		}
+		// Secondary ids must belong to that session too, not just exist somewhere (#55 N3).
+		switch typ {
+		case protocol.TypeSessionDelivered:
+			return g.checkDelivered(ctx, node, s, deref(r.MsgID))
+		case protocol.TypeSessionCompacted:
+			return g.checkCompacted(ctx, s, deref(r.CompactID))
+		}
+		return allowed, "", nil
 	}
 	if r.JobID != nil {
 		return g.checkJob(ctx, node, *r.JobID)
@@ -75,36 +93,123 @@ func (g *Gateway) check(ctx context.Context, node store.Node, typ string, r refs
 	return allowed, "", nil
 }
 
+// sessionInfo is what the secondary-id checks need of an authorized session.
+type sessionInfo struct {
+	ID        string
+	ProjectID string
+	Employee  string // the employee's name (tasks are claimed by name)
+}
+
 func (g *Gateway) checkSession(ctx context.Context, node store.Node, typ, sessionID string, gen *int) (verdict, string, error) {
+	v, code, _, err := g.checkSessionRow(ctx, node, typ, sessionID, gen)
+	return v, code, err
+}
+
+func (g *Gateway) checkSessionRow(ctx context.Context, node store.Node, typ, sessionID string, gen *int) (verdict, string, sessionInfo, error) {
 	var s struct {
-		NodeID  *string
-		State   string
-		OpenGen int
-		UserID  string
+		NodeID    *string
+		State     string
+		OpenGen   int
+		UserID    string
+		ProjectID string
+		Name      string
 	}
-	err := core.MapErr(g.core.Pool.Gorm(ctx).Table("at_agent_sessions a").Select("a.node_id, a.state, a.open_gen, p.user_id").
+	err := core.MapErr(g.core.Pool.Gorm(ctx).Table("at_agent_sessions a").
+		Select("a.node_id, a.state, a.open_gen, p.user_id, p.id AS project_id, e.name").
 		Joins("JOIN at_employees e ON e.id = a.employee_id").Joins("JOIN at_projects p ON p.id = e.project_id").
 		Where("a.id = ?", sessionID).Take(&s).Error)
+	info := sessionInfo{ID: sessionID, ProjectID: s.ProjectID, Employee: s.Name}
 	nodeID, state, openGen, owner := s.NodeID, s.State, s.OpenGen, s.UserID
 	if err == core.ErrNotFound {
-		return rejected, "unknown_session", nil
+		return rejected, "unknown_session", info, nil
+	}
+	if err != nil {
+		return rejected, "", info, err
+	}
+	if nodeID == nil || *nodeID != node.ID || owner != node.UserID {
+		return rejected, "unknown_session", info, nil
+	}
+	if state == "closed" && afterClose[typ] && (gen == nil || *gen == openGen) {
+		return allowed, "", info, nil
+	}
+	if state == "closed" || (gen != nil && *gen < openGen) {
+		if terminal[typ] {
+			return dropped, "", info, nil
+		}
+		return rejected, "unknown_session", info, nil
+	}
+	if gen != nil && *gen > openGen {
+		return rejected, "unknown_session", info, nil
+	}
+	return allowed, "", info, nil
+}
+
+// checkApproval: approval.cancel / approval.ack act on a card found by approval_id, so the card's
+// session must be one of this node's (and the one the message names, if it names one). An
+// approval the console does not know is dropped (the handler would ignore it anyway).
+func (g *Gateway) checkApproval(ctx context.Context, node store.Node, typ, approvalID string, sessionID *string, gen *int) (verdict, string, error) {
+	var q struct{ SessionID *string }
+	err := core.MapErr(g.core.Pool.Gorm(ctx).Table("at_questions").Select("session_id").
+		Where("approval_id = ?", approvalID).Take(&q).Error)
+	if err == core.ErrNotFound {
+		if sessionID != nil {
+			if v, code, err := g.checkSession(ctx, node, typ, *sessionID, gen); err != nil || v == rejected {
+				return v, code, err
+			}
+		}
+		return dropped, "", nil
 	}
 	if err != nil {
 		return rejected, "", err
 	}
-	if nodeID == nil || *nodeID != node.ID || owner != node.UserID {
+	if q.SessionID == nil || (sessionID != nil && *sessionID != *q.SessionID) {
 		return rejected, "unknown_session", nil
 	}
-	if state == "closed" && afterClose[typ] && (gen == nil || *gen == openGen) {
+	return g.checkSession(ctx, node, typ, *q.SessionID, gen)
+}
+
+// checkDelivered: the delivered message must be in a conversation of the session's project (or,
+// for a conversation without a project, of the node's owner). An unknown msg_id is dropped.
+func (g *Gateway) checkDelivered(ctx context.Context, node store.Node, s sessionInfo, msgID string) (verdict, string, error) {
+	var c struct {
+		ProjectID *string
+		UserID    *string
+	}
+	err := core.MapErr(g.core.Pool.Gorm(ctx).Table("at_messages m").Select("c.project_id, c.user_id").
+		Joins("JOIN at_conversations c ON c.id = m.conversation_id").
+		Where("m.meta->>'msg_id' = ?", msgID).Take(&c).Error)
+	if err == core.ErrNotFound {
+		return dropped, "", nil
+	}
+	if err != nil {
+		return rejected, "", err
+	}
+	if c.ProjectID != nil && *c.ProjectID == s.ProjectID {
 		return allowed, "", nil
 	}
-	if state == "closed" || (gen != nil && *gen < openGen) {
-		if terminal[typ] {
-			return dropped, "", nil
-		}
-		return rejected, "unknown_session", nil
+	if c.ProjectID == nil && c.UserID != nil && *c.UserID == node.UserID {
+		return allowed, "", nil
 	}
-	if gen != nil && *gen > openGen {
+	return rejected, "unknown_session", nil
+}
+
+// checkCompacted: the task waiting for compact_id must be claimed by the session's employee in
+// its project. No such task is fine (the context is still recorded; the handler skips the task).
+func (g *Gateway) checkCompacted(ctx context.Context, s sessionInfo, compactID string) (verdict, string, error) {
+	var t struct {
+		ClaimedBy string
+		ProjectID *string
+	}
+	err := core.MapErr(g.core.Pool.Gorm(ctx).Table("at_tasks t").Select("t.claimed_by, c.project_id").
+		Joins("JOIN at_conversations c ON c.id = t.conversation_id").
+		Where("t.compact_id = ? AND t.status = 'claimed'", compactID).Take(&t).Error)
+	if err == core.ErrNotFound {
+		return allowed, "", nil
+	}
+	if err != nil {
+		return rejected, "", err
+	}
+	if t.ClaimedBy != s.Employee || t.ProjectID == nil || *t.ProjectID != s.ProjectID {
 		return rejected, "unknown_session", nil
 	}
 	return allowed, "", nil
@@ -131,6 +236,14 @@ func deref(p *string) string {
 	return *p
 }
 
+// JobCredentialWindow is how long after it was queued a git job may still ask for credentials.
+// Git steps time out after at most 30 minutes each (node/src/git/jobs.ts); this leaves room for
+// a lock wait and a few steps.
+const JobCredentialWindow = 2 * time.Hour
+
+// checkJob: the job is one the console sent this node. Whether it still runs matters only for
+// credentials (delivery.jobScope: unknown_job once finished or older than JobCredentialWindow); a replayed
+// git.result of a finished job is still this node's.
 func (g *Gateway) checkJob(ctx context.Context, node store.Node, jobID string) (verdict, string, error) {
 	var n int64
 	err := commands(ctx, g.core.Pool, node.ID).Where("type LIKE 'git.%' AND body->>'job_id' = ?", jobID).Count(&n).Error
