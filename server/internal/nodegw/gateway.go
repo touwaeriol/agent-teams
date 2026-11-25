@@ -85,6 +85,7 @@ type Gateway struct {
 	usageWaits    map[string]*usageWait                 // in-flight node.usage_refresh per node
 	runtimesWaits map[string]*runtimesWait              // in-flight node.runtimes_refresh by command id
 	upgrades      map[string]*platform.NodeUpgradeState // last node.upgrade per node (memory only)
+	takeovers     map[string]*takeoverState             // displacements by another daemon instance (takeover.go)
 	authFails     *authLimiter                          // rejected tokens per client address
 
 	// Now is the clock for the usage cache (tests); nil = time.Now.
@@ -123,7 +124,7 @@ func New(st *store.Store, cs *core.Store, hub *fanout.Hub, log *slog.Logger, cfg
 	return &Gateway{authFails: newAuthLimiter(cfg.AuthFailLimit, cfg.AuthFailWindow, nil), store: st, core: cs, hub: hub, validator: v, log: log, cfg: cfg, links: map[string]*link{},
 		usage: map[string]*platform.NodeUsage{}, usageWaits: map[string]*usageWait{},
 		runtimesWaits: map[string]*runtimesWait{},
-		upgrades:      map[string]*platform.NodeUpgradeState{}}, nil
+		upgrades:      map[string]*platform.NodeUpgradeState{}, takeovers: map[string]*takeoverState{}}, nil
 }
 
 // SetHandler installs the message handler.
@@ -152,7 +153,7 @@ func (g *Gateway) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn.SetReadLimit(MaxFrame)
-	g.run(ctx, conn, node, tokenHash)
+	g.run(ctx, conn, node, tokenHash, remoteAddr(r))
 }
 
 // WriteAuthError answers a failed Authenticate on a daemon HTTP route: 429 with Retry-After
@@ -245,7 +246,7 @@ func stillValid(ctx context.Context, q core.DB, nodeID, tokenHash string) (bool,
 	return row.Active && row.TokenHash == tokenHash, nil
 }
 
-func (g *Gateway) run(ctx context.Context, conn *websocket.Conn, node store.Node, tokenHash string) {
+func (g *Gateway) run(ctx context.Context, conn *websocket.Conn, node store.Node, tokenHash, addr string) {
 	hello, err := g.readHello(ctx, conn)
 	if err != nil {
 		g.log.Info("node handshake failed", "node_id", node.ID, "err", err)
@@ -255,7 +256,7 @@ func (g *Gateway) run(ctx context.Context, conn *websocket.Conn, node store.Node
 		_ = conn.Close(CloseUpgrade, "protocol 2 required")
 		return
 	}
-	l, err := g.attach(ctx, conn, node, tokenHash, hello)
+	l, err := g.attach(ctx, conn, node, tokenHash, addr, hello)
 	if errors.Is(err, errRevoked) {
 		g.log.Info("node token revoked before hello", "node_id", node.ID)
 		_ = conn.Close(CloseUnauthorized, "token rejected")
@@ -303,13 +304,13 @@ func supports(list []int, v int) bool {
 // The token is checked again twice (#55 N2): in recordHello's transaction (the node row is locked)
 // and once the link is registered, so a rotation, node deletion or owner cut-off that commits
 // after the first check either finds this link through Disconnect or is seen by the second one.
-func (g *Gateway) attach(ctx context.Context, conn *websocket.Conn, node store.Node, tokenHash string, hello *protocol.Hello) (*link, error) {
+func (g *Gateway) attach(ctx context.Context, conn *websocket.Conn, node store.Node, tokenHash, addr string, hello *protocol.Hello) (*link, error) {
 	ackSeq, err := g.recordHello(ctx, node.ID, tokenHash, hello)
 	if err != nil {
 		return nil, err
 	}
 	l := newLink(g, conn, node, hello, ackSeq)
-	l.tokenHash = tokenHash
+	l.tokenHash, l.addr = tokenHash, addr
 	g.mu.Lock()
 	old := g.links[node.ID]
 	g.links[node.ID] = l
@@ -326,6 +327,7 @@ func (g *Gateway) attach(ctx context.Context, conn *websocket.Conn, node store.N
 	}
 	if old != nil {
 		old.close(CloseReplaced, "replaced by a newer link")
+		g.noteReplacement(ctx, old, l)
 	}
 	if err := l.welcome(ctx); err != nil {
 		g.detach(context.WithoutCancel(ctx), l) // registered: take it out (and report the node offline)
