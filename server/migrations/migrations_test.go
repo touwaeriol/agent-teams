@@ -1921,3 +1921,44 @@ INSERT INTO at_blob_deletions (key, prefix) VALUES ('projects/p9/', true);`); er
 		t.Fatalf("down lost data: %v %v", data, err)
 	}
 }
+
+// TestUnownedAttachmentsMigration: 00470 lets an attachment have no project (POST /api/uploads),
+// gives threads brief_attachments and comments attachments ([] for existing rows); down drops the
+// unowned attachments and queues their objects.
+func TestUnownedAttachmentsMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 470); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
+INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, storage_key)
+	VALUES ('img_p', 'p1', 'u1', 'a.png', 'image/png', 3, 'projects/p1/attachments/img_p'),
+	       ('img_u', NULL, 'u1', 'b.png', 'image/png', 3, 'users/u1/attachments/img_u');`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.DownTo(ctx, 460); err != nil {
+		t.Fatal(err)
+	}
+	var ids string
+	if err := db.QueryRow(`SELECT string_agg(id, ',' ORDER BY id) FROM at_attachments`).Scan(&ids); err != nil || ids != "img_p" {
+		t.Fatalf("after down: %q %v", ids, err)
+	}
+	var queued int
+	if err := db.QueryRow(`SELECT count(*) FROM at_blob_deletions WHERE key = 'users/u1/attachments/img_u'`).Scan(&queued); err != nil || queued != 1 {
+		t.Fatalf("unowned object not queued: %d %v", queued, err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, storage_key)
+		VALUES ('img_x', NULL, 'u1', 'c.png', 'image/png', 3, 'k')`); err == nil {
+		t.Fatal("project_id still nullable after down")
+	}
+	if _, err := p.UpTo(ctx, 470); err != nil {
+		t.Fatal(err)
+	}
+}
